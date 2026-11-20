@@ -231,6 +231,110 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   ECALL re-runs in the next step. Lab: `native Double(21) on impact 50331651 … site 0x7e570001` then `kiln.Log: … Out::value
   = 42` and `kiln.Signal tag 7 value 42`. A handler that throws completes the call with error 0x11 (the instance
   stops). `Abilities.Natives.Declare(fullName, argc)` lets a program that calls it pass the verifier first.
+- **Synchronous natives** (since 0.2.0-dev.29, capability `abilities.natives.sync`, server only):
+  `Abilities.Natives.RegisterSync(name, argc, handler)` → `NativeResult { Ok, Reason, Hash }`. The handler
+  (`NativeSyncHandler`: `byte (ref NativeCall call)`) runs inside the program's ECALL, in the same simulation step, on
+  the thread that runs `impact_simulation` (the server world's thread on a dedicated server, also in the lab's
+  forced-parallel window); its return value is what the ECALL pushes. It reads and writes the arguments through the
+  call (`GetU32/SetU32`, `GetFloat/SetFloat`, `VariableType`; `Bytes` for advanced mods); `CallOriginal()` throws
+  (there is none). No tick-thread API in it, and it must not block: the whole server step waits for it. A sync native
+  call over 0.2 ms is logged after it returns, for the first five such calls of the process (a handler's first call
+  often is, while .NET compiles it); a handler still inside after a second is named by a watchdog thread while it is
+  inside (`the handler of native <name> (owner <n>) has been inside for 1.0 s`), once per call. An exception answers
+  0x11 (that instance stops with Error). When the mod unloads, its natives and attachments take no new call from the
+  start of the unload, before its `OnUnload` runs, and the unload waits up to 2 ms for a call inside to leave. A call
+  still inside after that holds the mod's `OnUnload` and the disposal of its resources back (kiln.log: `mod <id>: its
+  unload waits: 1 call(s) still inside its native handlers (kiln.abilities)`); they run in the first Pre after the call
+  left, never forced, and a reload's new load waits with them. A mod it depends on waits with it (`its dependent <id>
+  still waits`): the deferred unloads keep the order of ordinary ones, dependents first. At shutdown the host waits 5 s,
+  then skips the `OnUnload` and disposal of what still waits, dependents first, each named with what it waits for,
+  rather than run them under the call. A waiting unload is not a pause: ticks, events and scheduled work still reach
+  the mod while it waits; a shutdown that skips `OnUnload` also skips the disposal, so data a mod writes only in
+  `OnUnload` may not be written; an `UnloadStarting` step (a service's) that never returns blocks the unload. What the native side retires (bindings, attachment
+  sets) also stays until the calls leave. On a server none of this waits in practice: the unload runs in Pre or Post,
+  when no `impact_simulation` slice runs. From then on its hash answers 0x1F. A game-state limit is `Ok = false`
+  (registry full, Kiln's native slots used up, the name taken or a vanilla native's), a bad name or argc
+  `ArgumentException`, the capability off `KilnUnavailableException`. Registered before the server world exists (a
+  mod's `OnLoad` at boot), a native is accepted and waits (`Abilities.Natives.StateOf(hash)`: `Waiting`); the world's
+  setup puts it into the registry (`Live`) or, with no room left, refuses it (`Refused`: a warning in its mod's log, and a
+  `NativeRegistrationRefusedEvent` with `Name`, `Hash`, `Reason` is posted in the next tick); programs that call a
+  refused native stop with Error. A taken-off native is `Dead`. Lab (`natives-only`): `PASS pass 1: sync native:
+  a program's signal arrives in its start step (0 steps; the suspending native: 1)`, `PASS ... a loop over 5 targets
+  with a sync native finishes in 1 step: 5 call(s), sum 10`, `PASS ... unload during a running cast: 0 calls after the
+  Pre that removed it`, `PASS registry full is Ok=false after N more sync native(s)`. `Register` (one step later, on
+  the tick thread) stays the tool for slow work and tick-thread API.
+- **`[ImpactNative]` methods** (since 0.2.0-dev.29): a static C# method with typed parameters is a synchronous native;
+  the build (Kiln.ImpactNatives) generates its thunk, its `RegisterSync` registration in the mod's first tick, its typed
+  entry in the output's `impact/natives.json` and a `NativeRef` (`Natives.<Name>`). Types, diagnostics and the lab rows:
+  docs/kiln/modding/impact.md. Its natives are listed with `Kind = Sync`; a generated registration waiting for its mod's
+  first tick holds nothing of a mod whose load context has unloaded.
+- **Attachments to the game's programs** (since 0.2.0-dev.29, capability `abilities.natives.attach`, server only):
+  `Abilities.Natives.Attach(program, "getTransform", NativeStage.Before | Instead | After, handler, site, priority)` →
+  `AttachResult { Ok, Reason, Handle }` (`NativeAttachment`: `State`, `Dispose()`) hooks one vanilla native's calls in one program (at one call site) without
+  cloning the program: the registry keeps the game's own (`Programs.Info(id).FromKiln` stays false). The filter
+  (program, site; 0 = any) is compared in native code, so other programs' calls never enter managed code. Every
+  matching Before runs (highest priority first) and may change arguments, `CallOriginal()` or `Return`; then, if none
+  answered, the one Instead for that native, program and site; then, if still undecided, the game's native, once; then
+  every After (lowest first; `CallOriginal()` does nothing there). The stages share one call record. Dispose the
+  handle to detach (from that Pre on the handler gets no call); a mod's attachments end when it unloads. `Ok = false`:
+  program not loaded, site not found, a second Instead, no free Kiln slot. The rows `abilities.natives.sync` and
+  `abilities.natives.attach` are decided before the mods' `OnLoad` (Kiln starts Kiln.Abilities right before it loads
+  them), so the pattern is the contract's: `if (Capabilities.Is("abilities.natives.attach")) Abilities.Natives.Attach(...)`
+  in `OnLoad` (mods/samples/FrostMark). Attached before the world has loaded its
+  programs, the program and site are checked then (`State`: `Pending` until then); one that is not there is logged and
+  stays off (`Off`). Attachments are checked again in the Pre after any program is registered (kiln.assets or
+  `Programs.Register`), so one naming a mod's program that goes in later turns `Active` then (`attachment N on native
+  0x… is on: program 0x… is in now`). Detached or unloaded: `Gone`. `Abilities.Status` counts them
+  (`AttachmentsPending`, `AttachmentsActive`, `AttachmentsOff`). A game update that
+  rebuilds a program changes its sites ("site not found"). `Natives.Wrap` and `OnDamage` are Before attachments on
+  every call now (same order and behaviour; with an older kiln-abilities.dll they keep the global dispatcher). Only
+  calls of a native are reachable: a point between two natives, or a program rewritten in memory, are not (they need
+  registration of vanilla program ids, which `program_register` refuses). Lab: `PASS pass 1: Attach(0x7a120ee8,
+  "getTransform", site 0xfcce4e0a): 1 call per cast, 0 for other programs ..., FromKiln False`, `PASS ... the thunk
+  counter shows 0 managed transitions for non-matching calls`, `PASS ... stage order: Before x2, Instead, After, in
+  recorded order`, `PASS ... a second Instead is refused`, `PASS ... site not found is Ok=false`, `PASS ... detach during
+  a running cast: 0 calls after the Pre that removed it`; in `mods/tests/natives-gen-test`: `PASS an attachment made before
+  the world to the cooked program: Pending at load, Active once the world's programs are in, 1 call when it ran`, `PASS
+  an attachment to a program registered after the readiness check: Pending at load, Off at readiness, Active once the
+  program went in, 1 call when it ran`.
+- **The ECS bridge** (since 0.2.0-dev.29, capability `abilities.natives.ecs`, server only): inside a sync native's or an
+  `[ImpactNative]` method's call, `NativeContext` reads and writes other entities through impact_simulation's own
+  accessors, with its job's storage and tracker, so the save and replication see a write as the game's own:
+  `TryRead<T>(entity, out value)` for the 21 types of its other_read list and the 72 of other_write (`Actor`, `Faction`,
+  `Health`, `Mana`, `Stamina`, `Inventory`, `CurrentTransform`, ...), `TryWrite<T>(entity, in value)` for other_write;
+  an attribute (`Health`, `Mana`, ...) then runs the game's formulas (read it, change its values, write it back). Any
+  other type, an entity without it, or the bridge off: `false`, with no access. `Root` is the instance's
+  `ImpactHierarchy` root, the entity `ImpactOptions.Root` or the game's cast gave it (none for an instance without a
+  hierarchy, such as `Abilities.RunProgram` without a root); `Post(action)` queues work to the tick thread as the native's mod. A change raises one
+  `ComponentWrittenEvent` per entity and component per step in the next Pre (first before, last after), `Writer`
+  `"<modid>/native:<name>"`. The first Kiln native call of each server world checks its iterator against kiln.world's
+  view of impact_simulation: kiln.log `impact_simulation's view (kiln.world, session N): ctx + tpl 1, read 6, write 1,
+  singletons 21, other_tpl 4, other 93, events 2/14 (...); impact::ImpactSystem at qword 34 (+0x110)`, then the job's
+  counts and the registry at that qword; a mismatch turns the bridge off for that world (the natives still run).
+  **Its condition: impact_simulation runs serially on the server world's thread.** The game pins CHUNKED programs to the
+  world's thread while a byte of the world's storage is set (copied from the world's config; it is set on every
+  observed dedicated server, host and client); kiln.abilities reads that byte through sigdb (feature
+  `abilities.ecs_pin`: the scheduler's compare at `storage + abilities/impact.pin`, 0x3d17f8 on both shipped
+  executables) at the self-check and at every access, together with the calling thread. A cleared pin (the lab's
+  `kiln/control/impact.unpin`, or a game update that unpins it) or a call off the world's thread switches the bridge off
+  for that world (`impact_simulation does not run serially on the world's thread`, said once), and a build where sigdb
+  does not resolve the pin has it off (`symbol-missing`); same-step natives go on either way. With the slices one after
+  another on one thread, no two calls touch one entity at once; two workers on one entity are not handled, and need
+  this condition. Limits that stay: a write that faults can already have changed state (the guard contains the fault, it
+  does not roll it back; the bridge is then off for the world); the write-event queue holds 65,536 and an overflow means
+  later writes raise no event (the writes stand); entity ids carry no generation (a reused id names its current
+  occupant); a hand-written projection is checked only for its size (use the generated `Ecs.*` types); an attribute's
+  eight-byte header cannot be changed (`TryWrite` answers false). The calls' data expires when the call returns. Lab (`mods/tests/natives-gen-test`): `PASS the self-check of the first
+  native call`, `PASS TryWrite<Health> inside the native's call is seen by World.TryRead`, `PASS TryRead of a type
+  impact_simulation does not declare for other entities returns false with no access`, `PASS one ComponentWrittenEvent
+  per entity and component per step, on the tick thread`, `PASS NativeContext.Root is the instance's hierarchy root, as
+  ImpactRef.Root reads it`, `PASS NativeContext.Post runs on the owning mod's tick`, `PASS TryWrite of an attribute keeps
+  its header ... and the game's formulas run: Health set to <max + 100> reads <max>`, `PASS with the world's pin set (the
+  game's default) every bridged call ran on the world's thread`; in abilities-test with `impact.unpin`: `PASS with the
+  pin cleared, the ECS bridge is off for this world: 0 of 12 TryRead(s) answered ..., 1 kiln.log line(s) saying so`; and across a restart (a wall torch of the base, CurrentTransform 1/16 m up through a native; the
+  first start writes it, a second start of the same lab checks it) `PASS after a restart, the CurrentTransform a native wrote through impact_simulation is in the save`. What the save
+  keeps is the game's choice per component (`World.WriteInfo<T>().SaveTracked`: `CurrentTransform`, `Level`, `Fuel` yes;
+  `Health`, `Comfort` no on a dedicated server): a write of an untracked component lasts until the world reloads.
 - **Built-ins**: `kiln.Log(value)` (one kiln.log line) and `kiln.Signal(value, tag)` → `ImpactSignalEvent`
   (`Tag`, `Value`, `AsInt/AsFloat/AsEntity`, `Impact`, `Site`). Neither suspends.
 - **Programs**: ship them as kiln.assets resources (`assets/assets.json`, kind `resource`, type
@@ -271,8 +375,30 @@ runtime verdict of each rule, and the C++ verifier matches all of them).
      `args[1]` in "tag": a raw u32 or a handle to a uint32/sint32 variable. Posts `ImpactSignalEvent` to managed mods
      in the next Pre and pushes 1 at once.
 
-   Managed (C#) natives run on the tick thread: their ECALL suspends (result byte 1) and re-runs the next step, which
-   then pushes the handler's value (`"suspends": true` in natives.json; the result is only valid after the resume).
+   Managed natives registered with `Natives.Register` run on the tick thread: their ECALL suspends (result byte 1) and
+   re-runs the next step, which then pushes the handler's value (`"suspends": true` in natives.json; the result is only
+   valid after the resume). `Natives.RegisterSync` and `[ImpactNative]` natives answer inside the call (`"sync": true`).
+
+   **Typed declarations** (since 0.2.0-dev.29). kiln.abilities reads every loading mod's `impact/natives.json` when it
+   starts (the profile's enabled Kiln mods and the drop-ins of kiln/mods without `.disabled`; kiln.log: `impact/
+   natives.json of N mod(s): T typed and A argc-only declaration(s)`), before any program is verified. An entry with
+   `"sync": true` is a typed declaration: each argument's `"type"` (one impact type name, or `"any"`) and `"size"`
+   (bytes; omitted = the type's known size) bind, with `"optional"` (may be 0, not connected) and `"raw"` (takes a raw
+   integer). Any other entry declares the argc only, as before (its argument types stay notes for the cook). The same
+   from C#: `Abilities.Natives.DeclareTyped(fullName, params NativeArg[])`; natively `native_declare_typed`. With a typed
+   declaration:
+   - the verifier refuses a program whose ECALL pushes (ICONST/ICONST0/ICONST1 right before it) a variable of another
+     type or size, a raw value for a variable argument, or nothing for a required one: `E_ARGTYPE: code pc 4: native
+     0x0d6eb872 args[1] is variable 2 (type 0xe89f7410, 4 bytes); it takes type 0x9859f31e (4 bytes)`. A call of a
+     native declared by argc only and not registered yet passes with a `W_ARGTYPE` warning in kiln.log;
+   - every call (sync or managed) is checked before its handler runs: another type or size, a raw value, a handle
+     out of the layout or the data: 0x2C; a required argument not connected: 0x18 (the instance stops with Error; the
+     handler is not called). This also covers programs registered before the declaration.
+   - the cook (`tools/impact`) reports the same type mismatch as an error (`E_ARGTYPE`) instead of `W_ARGTYPE`.
+   Lab: `PASS a program passing float32 to an int parameter is refused at registration (E_ARGTYPE)`, `PASS an
+   argc-only declaration still warns`, `PASS ... and answers 0x2C at run time once the native is typed: 1 call refused
+   0x2C (float32 for int), 1 refused 0x18 (not connected), 0 handler call(s)`, `PASS types
+   sint32/float32/bool/Time/EntityId/WorldTransform round trip`.
 3. **Arguments.** ECALL pops `argc` (≤ 31) values; `args[0]` = the top of the stack (the last value pushed), which is
    the game's own convention (applyDamage `args[0]` = wasBlocked output, `args[1]` = root attacker, `args[2]` =
    target). A value is a variable handle `0xFFFF0000 | index` (resolved through the native context's
@@ -294,7 +420,7 @@ runtime verdict of each rule, and the C++ verifier matches all of them).
      sint32 `0x9859f31e`, float32 `0xe89f7410`, bool `0xc894953d`, Time `0xdfe4e404`; COPY operands are variable name
      hashes of two present variables of the same type; variable `offsetInBytes + size` inside `data`;
    - every ECALL hash is a vanilla native, a live Kiln native or one declared in a loaded mod's `impact/natives.json`,
-     with the matching argc (the blob carries no argc);
+     with the matching argc (the blob carries no argc); a typed declaration's argument types and sizes (above);
    - every ECALL site that calls a query native (forEachEntityWithFactionInRange `0x19143416`, destroyFactionQuery
      `0x93e40aa9`, forEachPlayerInRange `0xa8787e70`, destroyPlayerQuery `0x22a62ea4`, entityInRangeWithFaction
      `0x61946152`) is listed in `queryCallIds` (createImpactInstance preallocates query state only for those sites);
@@ -323,7 +449,18 @@ Kiln.Abilities; it gets every event of the previous step in Pre as an array of 6
 its interest mask, `KILN_ABILITY_INTEREST_HOLD` for holds), `hold_filter`, `instance_vars/read/write/info`,
 `entity_overrides` (config overrides for the next instance on an entity: by config id, name hash or index),
 `program_count/info/vars/register/refresh`, `native_count/at/find/declare/register/unregister/complete/wrap/observe`,
-`set_wrap_dispatcher`, `call_original`, `release_owner`, `attr_get/attr_add`, `sequence_state`, `sequence_play`.
+`set_wrap_dispatcher`, `call_original`, `release_owner`, `attr_get/attr_add`, `sequence_state`, `sequence_play`;
+appended in 0.2.0-dev.29 (check `header.size`): `native_register_sync` (a native answered inside the call by its own
+`fn`, refusals as `KILN_NATIVE_REFUSED_*`), `native_counters` (`KilnNativeCounters`: calls in flight, sync calls,
+faults, calls over budget, calls of a removed native, attachment callbacks entered and filters that skipped a call,
+calls a typed declaration refused, retirements finished late, watchdog reports, attachments by state), `native_attach` / `native_detach`
+(one callback per attachment, `KilnNativeFilter`, stages `KILN_NATIVE_BEFORE / INSTEAD / AFTER`),
+`native_declare_typed` (`KilnNativeArg`), `native_state` (`KILN_NATIVE_STATE_*`), `native_attach_state`
+(`KILN_NATIVE_ATTACH_*`), `native_ecs_read` / `native_ecs_write` (the ECS bridge inside a call; state in
+`KilnNativeCounters.ecs_state`, `KILN_NATIVE_ECS_*`). `release_owner` must be called on the tick thread (else `KILN_ERR_WRONG_THREAD`): it closes
+the owner's natives and attachments to new calls first, waits at most 2 ms for calls inside, and finishes the rest in
+a later Pre (`owner N retired K step(s) late: its last native call left`). At the server world's stop it waits up to
+the same bound for calls inside (`the server world stops with no Kiln native call inside`).
 
 How it hooks (all fail soft; `kiln.abilities: natives on, programs on, instances on, attributes on, sequences on`):
 - `registerNative` (0x996b80) is detoured at boot to capture the game's 107 natives per registry; at the server
@@ -336,11 +473,56 @@ How it hooks (all fail soft; `kiln.abilities: natives on, programs on, instances
 - The ImpactRegistry map (`*(ImpactSystem+8)`, identity hash, linear probing) for program lookups and inserts; the
   instance pool lookup (0x9932f0); `TriggerSequence` (0x369d0); kiln.combat's AttrFind/AttrAdd.
 
+## Impact memory watch
+Since 0.2.0-dev.29.19 (inbox 116: a 2 h session ended in slow motion, teleporting and a crash after the game's impact
+memory filled up). Each world's `impact::ImpactSystem` takes every impact's stack, hit memory and collision arrays
+from one 16 MiB pool. When it is full, every new hit or attack fails (the game logs "[impact] Impact System could not
+allocate impact (collisions)" once per lost hit), the world crawls and the game can crash. kiln.abilities watches the
+pool read-only (it changes nothing in the game); on a hosting client the server world and the client world are watched
+apart and named in each line. Layout and evidence: [docs/re/impact.md](../../re/impact.md) section 10.
+
+What `kiln.log` says:
+- Once per world session: `kiln.abilities: impact pool watch on for the server world: 16 MiB, 0.4% used (peak 0.4%),
+  3 live impact instances (peak 9); kiln.log warns at 50/75/90%`. A layout check that fails says so in one line and the
+  watch stays off for that world; a read that faults switches it off for the process in one line.
+- A warning the first time the pool reaches **50 %**, **75 %** and **90 %** in a session: `WARNING: the server world's
+  impact memory is 75% full (...; 900 live impact instances, peak 901) ...`, followed by the **top 5 programs** by live
+  instances: `top programs by live instances: 734 x 0c3a7176-9336-47a3-ae98-d9433ac5ffbb (the game's generic melee
+  hit: weapons, tools, most enemies); ...`. A program that is not in the game's own list is marked "a mod's program".
+- At the first 75 % (or 90 %) warning of a session, once: **the 20 oldest live instances of the top program**, one line
+  each: the impact id, its age (Kiln notes when each instance was created), the hit entity (on the server world: whether
+  it still exists and its template), its `LifeTime` (length, time left, and the enforce/prevent/triggered destroy flags)
+  and the attacker/owner (the impact's hierarchy root) with its template. A hit should live about 0.15 s; instances
+  hundreds of seconds old with a LifeTime long past its end are the leak.
+- `the server world's impact memory is back under 40%` (info) when it falls under 40 % after a 75 % warning.
+
+`kiln/logs/tick-stats.jsonl`: each world's minute line ends with
+`"impact":{"used_pct":6.69,"peak_pct":9.37,"capacity_mib":16,"live":23,"live_peak":140}` (bytes in use and their peak
+as % of the pool, its size, live impact instances and their peak), absent when the pool could not be read.
+
+`<game>/kiln/control/impacts` (a text file): `dump` logs the top programs and the oldest instances once, while the
+game runs (Kiln deletes the file after reading it; checked every 2 s); `off` switches the watch off (no warnings, no
+creation times, no `impact` in tick-stats) until the file is removed or says something else.
+
+Costs: createImpactInstance's detour adds one clock read and one lock-free table write (a fixed 256 KiB table, keyed by
+the instance's slot so it never grows); each world reads five numbers every 0.5 s; the instance walk runs only at a
+warning or a dump.
+
 ## Costs and limits
 - Without subscribers the hot paths are one atomic load each (createImpactInstance, runImpact, the three wrapped
-  natives).
+  natives); since 0.2.0-dev.29 every native thunk also counts itself in and out (two atomic adds).
+- The game's native registry takes 128 natives (half its capacity of 256; measured in the lab on server 26430253),
+  107 of them its own: Kiln's built-ins and every mod's `Register`/`RegisterSync` natives share the other 21 (wraps of
+  vanilla natives need none). A refused registration says so (`Ok = false`, "native registry full"). A native that was
+  taken off keeps its entry for the rest of the process (its hash answers 0x1F); registering the same name again
+  reuses it.
 - A hold delays the first run of the held programs' new instances by one step; a managed native delays its ECALL by
-  one step per call (a loop over 5 targets takes 5 steps); fire-and-forget work belongs in `kiln.Signal`.
+  one step per call (a loop over 5 targets takes 5 steps; a synchronous native: all in one step); fire-and-forget work
+  belongs in `kiln.Signal`.
+- A synchronous native's handler holds up `impact_simulation`, and with it the server's step, for as long as it runs.
+  Kiln's `createImpactInstance` and `runImpact` hooks wait at most about a millisecond for Kiln's lock: when another
+  thread holds it longer, the new instance goes on without Kiln's per-instance work (no hold, no moved entity
+  overrides, no Started event), and that instance's run waits one step.
 - Programs are verified, never trusted: see the contract. A program is copied into memory that is never freed
   (running instances read their code live).
 - Vanilla clients: tooltips and local prediction stay vanilla (a tweaked mana cost or damage shows vanilla numbers in
@@ -355,7 +537,38 @@ mkdir -p ~/srv/enshrouded/labs/<lab>/kiln/data/kiln.abilities && touch ~/srv/ens
 tools/lab/lab.sh start <lab>
 grep -a abilities-test ~/srv/enshrouded/labs/<lab>/kiln/logs/kiln.log    # ... summary: 73 PASS, 0 FAIL
 ```
-It spawns Vukahs and explosions 40+ m from the copied world's flame altar and removes them.
+It spawns Vukahs and explosions 40+ m from the copied world's flame altar and removes them. The natives v2 rows
+(`NativesV2*.cs`, package 06c) run at the end, or alone with `kiln/data/abilities-test/natives-only`; with
+`kiln/control/systems.parallel` they run a second time inside a forced-parallel window, and the unload, revive and
+retirement rows need `mods/tests/natives-helper` deployed (built like abilities-test). Lab-only
+`kiln/control/impact.unpin` (present at start, server build f0d824be only) clears the world's pin byte each Pre, so in
+the parallel path `impact_simulation` runs on the game's workers (`LAB (kiln/control/impact.unpin)` in kiln.log); on
+every observed dedicated server, host and client the byte is 1 and it runs on the world thread. The unpin rows need a
+world of their own (a lab start of their own): a cleared pin, or a call off the world's thread, switches
+`abilities.natives.ecs` off for the rest of that world (the serial condition), so the ECS bridge rows
+(`mods/tests/natives-gen-test`, `blocks-abilities-test`'s Run rows, FrostMark) run in another start, with the pin as
+the game sets it. The full player-free pass is two starts: natives-only with `systems.parallel`, `impact.unpin`,
+`impact.lockhold` and `world-stop-row` (abilities-test, natives-helper, and blocks-abilities-test running beside them:
+the probe row's count of calls on the game's workers is the game's split of impact_simulation's slice, which depends on
+how much Impact work the world holds; blocks-abilities-test's scenarios spawn characters, enemies and hits, and without
+them two starts put all 12 probe calls on the world thread; the row's line names the mods loaded), then the rest. With
+`kiln/data/abilities-test/world-stop-row` the last row holds a handler and writes
+`kiln/data/natives-helper/stop-request`: the shell running the lab then stops the server and reads the order of
+`Hold let go` and `the server world stops with no Kiln native call inside` in kiln.log.
+
+The review rows of dev.29 (natives-only with `systems.parallel`, `impact.unpin` and `world-stop-row`): `PASS with
+impact_simulation unpinned in the forced window, sync native handlers run on the game's workers: 12 of 12 call(s) off
+the tick thread`; `PASS unload asked for while natives-helper's handler is inside (thread: tick): the retirement waits
+(nothing retired 1.5 s after the request), the handler finishes with its mod's own state (...), then the mod unloads
+(63 ms later)`, the same for a reload with the handler on a worker, each with `the watchdog named the handler while it
+was inside` and no call reaching the retired load afterwards; at the world's stop `Hold let go after 3.0 s`, then
+`mods stopped 1391 ms after SIGINT`, then `the server world stops with no Kiln native call inside`. On a server the
+host cannot take an unload, reload or stop while a handler is inside: the step waits for `impact_simulation`, wherever
+it runs, and the host takes requests in Pre and Post. The gate's bounded wait and its deferral are covered by the host
+tests (`natives_test` gates, `Kiln.Blocks.Tests` `NativesRetireTests`). The world's setup refusing a native accepted
+earlier cannot happen on a dedicated server either (the world's natives are set up before mods load: such a
+registration is refused at once, `Ok = false`); it is a client host's case (mods load in the main menu), covered by
+`registration_test` and `NativesStateTests`.
 
 The key path without a client: with `"labPort"` in the lab's `kiln/config/network.json`, a fake Kiln client
 (tools/nettest's `Client`) that sends `CastRequest("firenova:fire-nova")` on `kiln:abilities` gets
@@ -427,4 +640,6 @@ events, as dev.27's buff work set them).
   dispatched waits for the next step, and an impact change that waited goes out only while the instance is the one
   written ([contract](../modding/contract.md#3-change-events)).
 - **Not done in dev.27:** `PlaySequence` keeps its `bool`.
-- Tested offline: `managed/tests/Kiln.Contract.Tests/Group8ContractTests.cs` and the conformance rules.
+- Tested offline: `managed/tests/Kiln.Contract.Tests/Group8ContractTests.cs` and the conformance rules; the natives
+  (sync natives, `[ImpactNative]`, attachments, typed declarations, the ECS bridge) on Kiln.TestKit's fake kiln.abilities
+  in `managed/tests/Kiln.TestKit.Tests/ImpactNativesFakeTests.cs` (docs/kiln/modding/unit-tests.md#impact-natives).

@@ -88,7 +88,11 @@ public enum BuildFlags
     Unloaded = 1 << 3,
     /// <summary>Compute and report; change nothing.</summary>
     DryRun = 1 << 4,
-    /// <summary>Do not keep the edit across restarts (the game's own rule for terrain outside bases).</summary>
+    /// <summary>Gone after the next restart: no save region of Kiln's, and where the game's save writes the cells anyway
+    /// (inside a base, or in a chunk another edit keeps) Kiln puts back the earlier cells at the next start; a cell changed
+    /// since keeps that change. Not with <see cref="Unloaded"/> (<see cref="ArgumentException"/>); refused
+    /// (<see cref="BuildException"/>) when the transient journal is full or cannot be written (a full disk), or
+    /// the world's identity is unknown (no kiln.saves).</summary>
     Transient = 1 << 5,
 }
 
@@ -127,6 +131,10 @@ public enum BuildRefusal
     DryRun,
     /// <summary>A <see cref="BuildEditingEvent"/> handler canceled it.</summary>
     Canceled,
+    /// <summary><see cref="Build.WriteIfUnchanged"/>: when the edit was about to commit, the world no longer held the
+    /// expected cells (a <see cref="BuildEditingEvent"/> handler, or another edit since the caller read them, changed
+    /// them). Nothing was written. Since 0.2.0-dev.28.</summary>
+    Changed,
 }
 
 /// <summary>What an edit did.</summary>
@@ -155,6 +163,7 @@ public sealed record BuildResult(long CellsChanged, int BlocksWritten, bool Veri
         BuildRefusal.Base => $"the box touches a player base (altar {Zone})",
         BuildRefusal.NotLoaded => "the voxel tiles did not stream in in time",
         BuildRefusal.Canceled => "a BuildEditingEvent handler canceled the edit",
+        BuildRefusal.Changed => "the cells changed after they were read (a BuildEditingEvent handler or another edit); nothing was written",
         _ => Refusal.ToString(),
     };
 }

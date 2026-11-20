@@ -413,8 +413,7 @@ internal static partial class Compiler
         if (place.Position is { } position) node["position"] = new JsonArray(position[0], position[1]);
         if (t.Icon is { } icon)
         {
-            var dir = BlocksBridge.ModDirectory(mod);
-            node["iconFile"] = dir.Length > 0 ? Path.Combine(dir, icon) : icon;
+            if (BlockIcons.ItemIcon(ctx, icon, "icon") is { } file) node["iconFile"] = file;
         }
         var perLevel = t.MaxLevel > 1 && t.Modifies.Count > 0 ? StatsText(t.Modifies) : null;
         var texts = new JsonObject { ["*"] = NodeText(t.Name, TalentDescription(t), perLevel) };
@@ -433,6 +432,7 @@ internal static partial class Compiler
         var block = ctx.Block;
         low.AfterCommit(() =>
         {
+            if (BootLowering.Activating) return;  // a boot generation's node: kiln.skills prepared it before the game read its tree
             if (Kept(mod, guid, node)) return;
             foreach (var r in GameTree.DefineJson(document.ToJsonString()))
                 if (r.Error is { Length: > 0 } error) lock (ctx.Mod.Errors) ctx.Mod.Errors.Add($"block {block}: {error}");

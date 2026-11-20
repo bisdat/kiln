@@ -1,0 +1,19 @@
+.kimp 1
+; natives-gen-test: the cooked program calling the generated synchronous native natives-gen-test.Twice (an [ImpactNative]
+; method), then kiln.Signal with the answer. Assembled into ../assets/twice.bin (see NativesGenTest.csproj).
+program 06c0a5e0-0000-4000-8000-000000000001
+stack 256
+streams none
+
+var $out sint32
+var $in  sint32 = 21
+var $self ecs.EntityId
+
+code:
+        ecall getSelf($self)
+        pop
+        ecall natives-gen-test.Twice($out, $in)
+        pop
+        ecall kiln.Signal($out, 0x6E)
+        pop
+        halt

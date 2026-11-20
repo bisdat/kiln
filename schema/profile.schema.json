@@ -12,6 +12,9 @@
     "name": { "type": "string", "maxLength": 128 },
     "generation": { "type": "integer", "minimum": 1, "maximum": 9223372036854775807, "description": "Bumped by every write; kiln-core echoes it in state/boot.json." },
     "written": { "$ref": "common.schema.json#/$defs/time" },
+    "emlRuntime": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Enabled EML packages requiring ShroudForge runtime; adapter hosting reason. Older readers ignore this field." },
+    "emlRuntimeBlocked": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Reasons runtime-dependent EML entries were disabled for this start; shown as skipped." },
+    "emlPartial": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Enabled EML mods of which only part runs under Kiln (a modified EML loader in the mod's package carries the rest), by Library id and manifest id: what does not run. kiln-eml logs it with the mod. Older readers ignore this field." },
     "writer": { "type": "string", "description": "e.g. kiln-launcher 0.2.0-dev" },
     "pathMode": { "enum": ["z", "native", "copy"], "default": "native", "description": "z: Z:\\ paths into the launcher library (Proton); native: Windows paths; copy: mods copied under <game>/kiln/profiles/<id>/, relative paths." },
     "configDir": { "$ref": "common.schema.json#/$defs/gamePath", "description": "Mod configs (KILN_PATH_CONFIG). Default <game>/kiln/config." },
@@ -46,7 +49,8 @@
         "shroudtopia": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/folderMod" }, "description": "Shroudtopia mods (a folder with the mod DLL), read by kiln-shroudtopia." },
         "enshwick": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/folderMod" }, "description": "Enshwick mods (a DLL exporting enshwick_mod_*, or a pack.toml data pack / Luau mod). kiln-enshwick copies each enabled entry into <game>/mods/<id>/ (the only folder Enshwick's loader reads) and starts Enshwick's own loader. path: the library folder." },
         "shroudlink": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/folderMod" }, "description": "shroudlink server mod DLLs, read by kiln-shroudlink (shroudlink's own server core). path: the library folder of mod DLLs, or one mod DLL." },
-        "ember": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/folderMod" }, "description": "Ember server SDK mods (a folder with one library), found and reported by kiln-ember. They don't run yet: Ember has published no mod ABI. path: the mod folder or its library." }
+        "ember": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/folderMod" }, "description": "Ember server SDK mods (a folder with one library), found and reported by kiln-ember. They don't run yet: Ember has published no mod ABI. path: the mod folder or its library." },
+        "dllmod": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/placedDllmodMod" }, "description": "Packages for AndyPimms' Enshrouded ModLoader (a DLL with its <file>.dll.mod manifest, ABI 1), run by kiln-dllmod at a local world's start. The launcher places the enabled ones in <game>/Mods/EnshroudedModLoader/<id>/, the folder that loader reads too, and path names that copy (copy mode: ../Mods/EnshroudedModLoader/<id>, for a runtime that declares profileReader 4). Never named in dropins: a core before profileReader 4 calls such a profile invalid." }
       },
       "additionalProperties": false,
       "description": "One list per mod kind. kiln-core counts kiln, native, plugin and emf (kiln.profile count/get); XHL is placement metadata only, ignored by the native core; each engine plugin reads its own list from the profile's text (kiln.profile json()). Kilns older than these lists warn about and ignore an engine list they do not know (mods.xhl is skipped without a warning); an entry of a list they know must follow their rules, so the launcher writes a newer path form only for a runtime that declares it (kiln-runtime.json profileReader)."
@@ -81,6 +85,18 @@
             { "type": "string", "maxLength": 140, "pattern": "^\\.\\.[\\\\/]greeneye[\\\\/](?!\\.)(?!(?:[Cc][Oo][Nn]|[Pp][Rr][Nn]|[Aa][Uu][Xx]|[Nn][Uu][Ll]|[Cc][Oo][Mm][0-9]|[Ll][Pp][Tt][0-9]|[Ee][Nn][Ss][Hh][Ww][Ii][Cc][Kk])(?:\\.|$))[^\\\\/:*?\"<>|\\u0000-\\u001f\\u007f-\\u009f]+(?<![ .])$" }
           ],
           "description": "The mod folder. In copy mode an enabled Greeneye mod Kiln placed in <game>/greeneye/<library id>/ may be named as ../greeneye/<id> (the same folder name rule as ../mods/<folder>: schema/fixtures/profile/game-folder-names.json); other parent traversal is refused. The launcher writes that form only for a runtime whose kiln-runtime.json declares profileReader 2 or more."
+        } } }
+      ]
+    },
+    "placedDllmodMod": {
+      "allOf": [
+        { "$ref": "#/$defs/folderModFields" },
+        { "properties": { "path": {
+          "anyOf": [
+            { "$ref": "common.schema.json#/$defs/gamePath" },
+            { "type": "string", "maxLength": 156, "pattern": "^\\.\\.[\\\\/]Mods[\\\\/]EnshroudedModLoader[\\\\/](?!\\.)(?!(?:[Cc][Oo][Nn]|[Pp][Rr][Nn]|[Aa][Uu][Xx]|[Nn][Uu][Ll]|[Cc][Oo][Mm][0-9]|[Ll][Pp][Tt][0-9]|[Ee][Nn][Ss][Hh][Ww][Ii][Cc][Kk])(?:\\.|$))[^\\\\/:*?\"<>|\\u0000-\\u001f\\u007f-\\u009f]+(?<![ .])$" }
+          ],
+          "description": "The package folder. In copy mode an enabled package Kiln placed in <game>/Mods/EnshroudedModLoader/<library id>/ may be named as ../Mods/EnshroudedModLoader/<id> (the same folder name rule as ../mods/<folder>: schema/fixtures/profile/game-folder-names.json); other parent traversal is refused. The launcher writes that form only for a runtime whose kiln-runtime.json declares profileReader 4 or more."
         } } }
       ]
     },

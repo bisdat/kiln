@@ -48,13 +48,13 @@ fn save_engine_copies(server: &Path, copies: &EngineCopies) -> Result<()> {
     std::fs::rename(&tmp, &file).map_err(crate::util::io_at(&file, "saving receipt"))
 }
 
-fn server_library_lock(server: &Path) -> Result<std::fs::File> {
+fn server_library_lock(server: &Path) -> Result<crate::util::LockedFile> {
     let path = server.join("kiln/state/server-library.lock");
     crate::engine_mods::refuse_symlink_path(server, &path)?;
     std::fs::create_dir_all(path.parent().expect("lock parent"))?;
     let file = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(path)?;
     file.lock()?;
-    Ok(file)
+    Ok(crate::util::LockedFile(file))
 }
 
 // Include hidden files and empty directories too. SF's mutable setting values and enabled switch are omitted.
@@ -173,7 +173,10 @@ fn loader_folder(server: &Path, path: &Path) -> bool {
 /// The kinds a server takes: Kiln's managed and native mods, then every engine kind with a server folder.
 fn server_kinds() -> impl Iterator<Item = ModKind> {
     // External-host companions are placed by profile activation, not this legacy plugin-root sync path.
-    ModKind::ALL.into_iter().filter(|k| matches!(k, ModKind::Kiln | ModKind::Native) || (k.is_engine() && k.engine().is_some()))
+    // Packages for Enshrouded ModLoader are made for the game client only (kiln-dllmod starts none on a server): no
+    // server folder, not synced.
+    ModKind::ALL.into_iter().filter(|k| matches!(k, ModKind::Kiln | ModKind::Native)
+        || (k.is_engine() && k.engine().is_some() && crate::engine_mods::server_root(*k, Path::new("")).is_some()))
 }
 
 /// The folders of `kind` in `dir` (a root several engines may share: each folder is checked for the kind).
@@ -382,7 +385,9 @@ pub fn sync(dirs: &DataDirs, instance: &ServerInstance, mods: &[LibraryRef], pro
         }
         let src = crate::library::path_of(dirs, r)?;
         crate::engine_mods::refuse_symlink_path(&dirs.root, &src)?;
-        if crate::hash::of_mod(r.kind, &src)? != r.hash {
+        let rec = crate::library::record(dirs, r)?;
+        let output = crate::library::own_output(&src, &rec)?.unwrap_or_default();
+        if !crate::library::matches_import(&src, &rec, &output)? {
             return Err(Error::new(ErrorCode::HashMismatch, format!("library entry {} {} changed on disk", r.id, r.version)));
         }
         let staging = crate::library::TempDir::new(&dst_root, "kiln-sync")?;
@@ -390,7 +395,7 @@ pub fn sync(dirs: &DataDirs, instance: &ServerInstance, mods: &[LibraryRef], pro
         // a Kiln mod without its cook outputs: the server's are made by a cook on the server (kiln cook --game <server>),
         // and kiln.assets there loads only what such a cook made (docs/kiln/modding/cooking.md)
         if r.kind == ModKind::Kiln { crate::library::copy_kiln_mod_tree(&src, &tmp)?; } else { crate::library::copy_mod_tree(&src, &tmp)?; }
-        if crate::hash::of_mod(r.kind, &tmp)? != r.hash {
+        if !crate::library::matches_import(&tmp, &rec, &output)? {
             let _ = std::fs::remove_dir_all(&tmp);
             return Err(Error::new(ErrorCode::HashMismatch, "library mod changed while copying"));
         }
@@ -427,7 +432,12 @@ pub fn sync(dirs: &DataDirs, instance: &ServerInstance, mods: &[LibraryRef], pro
         }
         let m = SourceMarker { format: 1, library: r.clone(), synced: crate::util::now_rfc3339(), by: format!("kiln-launcher {}", crate::VERSION) };
         crate::util::write_json_atomic(&tmp.join(MARKER), &m)?;
-        let signature = if r.kind.is_engine() { Some(payload_files(&tmp, r.kind)?) } else { None };
+        let signature = if r.kind.is_engine() {
+            let mut files = payload_files(&tmp, r.kind)?;
+            // Output copied from the Library stays the mod's output when it grows in this copy.
+            files.retain(|rel, _| !output.contains(rel));
+            Some(files)
+        } else { None };
         // what the mod wrote into its old copy (or what was kept when it was removed) goes into the new one
         let kept_at = crate::engine_mods::kept_dir(&server, r.kind, &r.id);
         let carry = match player {

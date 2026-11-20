@@ -1,0 +1,2015 @@
+{
+ "comment": "Writes tools/sigport/tests/fingerprint-vectors.json: the cases both fingerprint passes are tested against (the core's, native/core/tests/hooks_fingerprint_test.cpp; the Python twin, test_abifp.py). The expected values are the core's answers, never the twin's:",
+ "structs": {
+  "OptS32": {
+   "size": 8,
+   "align": 4,
+   "fields": [
+    {
+     "name": "value",
+     "type": "s32",
+     "offset": 0
+    },
+    {
+     "name": "has",
+     "type": "u8",
+     "offset": 4
+    }
+   ]
+  }
+ },
+ "snippets": [
+  {
+   "name": "time",
+   "asm": [
+    "movss dword ptr [rcx+0x10], xmm1",
+    "mov qword ptr [rcx+0x18], r8",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "f30f1149104c894118c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "xmm1",
+     "r8"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "none",
+    "insns": 3
+   }
+  },
+  {
+   "name": "thunk",
+   "asm": [
+    ".byte 0xE9",
+    ".long 1f - . - 4",
+    "int3",
+    "1:",
+    "mov eax, edx",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "e901000000cc89d0c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rdx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 2,
+    "thunk": true
+   }
+  },
+  {
+   "name": "through",
+   "asm": [
+    "mov rax, qword ptr [rcx+8]",
+    "mov rcx, rax",
+    ".byte 0xE9",
+    ".long -0x2000"
+   ],
+   "base": "0x140010000",
+   "hex": "488b41084889c1e900e0ffff",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [
+     "xmm0",
+     "rdx",
+     "xmm1",
+     "r8",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "callee",
+    "insns": 3,
+    "tail": true
+   }
+  },
+  {
+   "name": "indirect",
+   "asm": [
+    "mov rax, qword ptr [rcx]",
+    "jmp qword ptr [rax+0x18]"
+   ],
+   "base": "0x140010000",
+   "hex": "488b01ff6018",
+   "expect": {
+    "result": "unknown",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [
+     "xmm0",
+     "rdx",
+     "xmm1",
+     "r8",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [
+     "xmm0",
+     "rdx",
+     "xmm1",
+     "r8",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "stack": [],
+    "ret": "callee",
+    "insns": 2,
+    "tail": true
+   }
+  },
+  {
+   "name": "msvc_frame",
+   "asm": [
+    "mov rax, rsp",
+    "mov qword ptr [rax+8], rbx",
+    "push rbp",
+    "lea rbp, [rax-0x58]",
+    "sub rsp, 0x140",
+    "test rdx, rdx",
+    "mov rbx, rcx",
+    "add r8, r9",
+    "mov eax, dword ptr [rbp+0x80]",
+    "movzx ecx, byte ptr [rsp+0x178]",
+    "add eax, ecx",
+    "add rsp, 0x140",
+    "pop rbp",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "4889e04889580855488d68a84881ec400100004885d24889cb4d01c88b85800000000fb68c247801000001c84881c4400100005dc3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx",
+     "r8",
+     "r9"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [
+     "0x28",
+     "0x30"
+    ],
+    "ret": "rax",
+    "insns": 14
+   }
+  },
+  {
+   "name": "idioms",
+   "asm": [
+    "xor ecx, ecx",
+    "xorps xmm1, xmm1",
+    "cvtsi2ss xmm2, edx",
+    "movss xmm3, xmm0",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "31c90f57c9f30f2ad2f30f10d8c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "xmm0",
+     "rdx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "none",
+    "insns": 5
+   }
+  },
+  {
+   "name": "vex_zero",
+   "asm": [
+    "vxorps xmm0, xmm2, xmm2",
+    "vpxor xmm1, xmm1, xmm1",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "c5e857c2c5f1efc9c3",
+   "expect": {
+    "result": "ok",
+    "reads": [],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "xmm0",
+    "insns": 3
+   }
+  },
+  {
+   "name": "merge",
+   "asm": [
+    "movsd xmm1, xmm2",
+    "movaps xmm0, xmm1",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "f20f10ca0f28c1c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "xmm2"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "xmm0",
+    "insns": 3
+   }
+  },
+  {
+   "name": "call",
+   "asm": [
+    "sub rsp, 0x28",
+    "mov r8, rcx",
+    ".byte 0xE8",
+    ".long -0x3000",
+    "mov rcx, rdx",
+    "movaps xmm1, xmm0",
+    "add rsp, 0x28",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "4883ec284989c8e800d0ffff4889d10f28c84883c428c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [
+     "xmm0",
+     "rdx",
+     "xmm1",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "callee",
+    "insns": 7
+   }
+  },
+  {
+   "name": "branches",
+   "asm": [
+    "test ecx, ecx",
+    "jz 1f",
+    "mov eax, edx",
+    "ret",
+    "1:",
+    "movd eax, xmm2",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "85c9740389d0c3660f7ed0c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx",
+     "xmm2"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 6
+   }
+  },
+  {
+   "name": "cmov",
+   "asm": [
+    "cmovz rcx, rdx",
+    "mov rax, rcx",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "480f44ca4889c8c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 3
+   }
+  },
+  {
+   "name": "leave",
+   "asm": [
+    "push rbp",
+    "mov rbp, rsp",
+    "mov eax, dword ptr [rbp+0x30]",
+    "leave",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "554889e58b4530c9c3",
+   "expect": {
+    "result": "ok",
+    "reads": [],
+    "passes": [],
+    "indirect": [],
+    "stack": [
+     "0x28"
+    ],
+    "ret": "rax",
+    "insns": 5
+   }
+  },
+  {
+   "name": "pushfq",
+   "asm": [
+    "pushfq",
+    "mov eax, dword ptr [rsp+0x30]",
+    "popfq",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "9c8b4424309dc3",
+   "expect": {
+    "result": "ok",
+    "reads": [],
+    "passes": [],
+    "indirect": [],
+    "stack": [
+     "0x28"
+    ],
+    "ret": "rax",
+    "insns": 4
+   }
+  },
+  {
+   "name": "blind_lea",
+   "asm": [
+    "lea rax, [rsp+0x28]",
+    "mov ecx, dword ptr [rax]",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "488d4424288b08c3",
+   "expect": {
+    "result": "ok",
+    "reads": [],
+    "passes": [],
+    "indirect": [],
+    "stack": [
+     "0x28"
+    ],
+    "ret": "rax",
+    "insns": 3,
+    "stack_blind": true
+   }
+  },
+  {
+   "name": "blind_index",
+   "asm": [
+    "mov eax, dword ptr [rsp+rcx*8+0x28]",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "8b44cc28c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 2,
+    "stack_blind": true
+   }
+  },
+  {
+   "name": "narrow",
+   "asm": [
+    "mov al, cl",
+    "movzx eax, dx",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "88c80fb7c2c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 3
+   }
+  },
+  {
+   "name": "ymm",
+   "asm": [
+    "vmovups ymm1, ymmword ptr [rdx]",
+    "vaddps ymm0, ymm1, ymm2",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "c5fc100ac5f458c2c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rdx",
+     "xmm2"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "xmm0",
+    "insns": 3
+   }
+  },
+  {
+   "name": "truncated",
+   "asm": [
+    "test ecx, ecx",
+    "jz 1f",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "nop",
+    "1:",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "85c90f843601000090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "none",
+    "insns": 300,
+    "truncated": true
+   }
+  },
+  {
+   "name": "hlt",
+   "asm": [
+    "mov eax, ecx",
+    "hlt"
+   ],
+   "base": "0x140010000",
+   "hex": "89c8f4",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "none",
+    "insns": 2
+   }
+  },
+  {
+   "name": "vzeroupper",
+   "asm": [
+    "vmovups ymm0, ymmword ptr [rcx]",
+    "vzeroupper",
+    ".byte 0xE9",
+    ".long -0x2000"
+   ],
+   "base": "0x140010000",
+   "hex": "c5fc1001c5f877e900e0ffff",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [
+     "rdx",
+     "xmm1",
+     "r8",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "callee",
+    "insns": 3,
+    "tail": true
+   }
+  },
+  {
+   "name": "test_mem",
+   "asm": [
+    "push rbp",
+    "mov rbp, rsp",
+    "test byte ptr [rbp+0x30], al",
+    "pop rbp",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "554889e58445305dc3",
+   "expect": {
+    "result": "ok",
+    "reads": [],
+    "passes": [],
+    "indirect": [],
+    "stack": [
+     "0x28"
+    ],
+    "ret": "none",
+    "insns": 5
+   }
+  },
+  {
+   "name": "test_imm",
+   "asm": [
+    "test ecx, 0x7fffffff",
+    "jz 1f",
+    "mov rax, rdx",
+    "1:",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "f7c1ffffff7f74034889d0c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "none|rax",
+    "insns": 5
+   }
+  },
+  {
+   "name": "test_imm_rax",
+   "asm": [
+    "test eax, 0x7fffffff",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "a9ffffff7fc3",
+   "expect": {
+    "result": "ok",
+    "reads": [],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "none",
+    "insns": 2
+   }
+  },
+  {
+   "name": "cdq",
+   "asm": [
+    "mov eax, ecx",
+    "cdq",
+    "idiv r8d",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "89c89941f7f8c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "r8"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 4
+   }
+  },
+  {
+   "name": "cqo",
+   "asm": [
+    "mov rax, rcx",
+    "cqo",
+    "mov rcx, rdx",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "4889c848994889d1c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 4
+   }
+  },
+  {
+   "name": "rep_stos",
+   "asm": [
+    "mov rdi, rcx",
+    "rep stosb",
+    "mov rax, rdx",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "4889cff3aa4889d0c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 4
+   }
+  },
+  {
+   "name": "stos_rdi",
+   "asm": [
+    "mov rdi, rsp",
+    "stosd",
+    "mov eax, dword ptr [rdi+0x24]",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "4889e7ab8b4724c3",
+   "expect": {
+    "result": "ok",
+    "reads": [],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 4
+   }
+  },
+  {
+   "name": "movs_sse",
+   "asm": [
+    "movsd xmm0, xmm1",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "f20f10c1c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "xmm1"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "xmm0",
+    "insns": 2
+   }
+  },
+  {
+   "name": "store_arg",
+   "asm": [
+    "movups xmmword ptr [rsp+0x28], xmm0",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "0f11442428c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "xmm0"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "none",
+    "insns": 2
+   }
+  },
+  {
+   "name": "setcc_arg",
+   "asm": [
+    "test ecx, ecx",
+    "setz byte ptr [rsp+0x28]",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "85c90f94442428c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "none",
+    "insns": 3
+   }
+  },
+  {
+   "name": "cmpxchg",
+   "asm": [
+    "lock cmpxchg qword ptr [rcx], rdx",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "f0480fb111c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "none",
+    "insns": 2
+   }
+  },
+  {
+   "name": "movhlps",
+   "asm": [
+    "movhlps xmm1, xmm0",
+    "movaps xmm0, xmm1",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "0f12c80f28c1c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "xmm0"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "xmm0",
+    "insns": 3
+   }
+  },
+  {
+   "name": "movhpd",
+   "asm": [
+    "movhpd xmm0, qword ptr [rcx]",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "660f1601c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "xmm0",
+    "insns": 2
+   }
+  },
+  {
+   "name": "pcmpestri",
+   "asm": [
+    "mov eax, 16",
+    "mov edx, 16",
+    "pcmpestri xmm1, xmmword ptr [r8], 0xc",
+    "mov eax, ecx",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "b810000000ba1000000066410f3a61080c89c8c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "xmm1",
+     "r8"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 5
+   }
+  },
+  {
+   "name": "broadcast",
+   "asm": [
+    "push rbp",
+    "mov rbp, rsp",
+    "vbroadcasti128 ymm2, xmmword ptr [rbp+0x30]",
+    "vmovups ymmword ptr [rcx], ymm2",
+    "pop rbp",
+    "vzeroupper",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "554889e5c4e27d5a5530c5fc11115dc5f877c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [
+     "0x28"
+    ],
+    "ret": "none",
+    "insns": 7
+   }
+  },
+  {
+   "name": "gather",
+   "asm": [
+    "vpgatherdd xmm5, dword ptr [rdx + xmm2*4], xmm3",
+    "movaps xmm0, xmm3",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "c4e261902c920f28c3c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rdx",
+     "xmm2",
+     "xmm3"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "xmm0",
+    "insns": 3
+   }
+  },
+  {
+   "name": "masked",
+   "asm": [
+    "vpsubq zmm3 {k1}, zmm0, zmm3",
+    "vmovaps xmm0, xmm3",
+    "ret"
+   ],
+   "base": "0x140010000",
+   "hex": "62f1fd49fbdbc5f828c3c3",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "xmm0",
+     "xmm3"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "xmm0",
+    "insns": 3
+   }
+  }
+ ],
+ "sigs": [
+  {
+   "name": "time_ok",
+   "snippet": "time",
+   "sig": {
+    "ret": "void",
+    "args": [
+     {
+      "name": "daytime",
+      "type": "ptr"
+     },
+     {
+      "name": "scale",
+      "type": "f32"
+     },
+     {
+      "name": "ecsNow",
+      "type": "s64"
+     }
+    ],
+    "abi": {
+     "reads": [
+      "rcx",
+      "xmm1",
+      "r8"
+     ],
+     "stack": []
+    }
+   },
+   "expect": {
+    "verdict": "match",
+    "text": "3 arguments (rcx, xmm1, r8), the function reads [rcx, xmm1, r8]"
+   }
+  },
+  {
+   "name": "time_names_ecsnow",
+   "snippet": "time",
+   "sig": {
+    "args": [
+     {
+      "name": "daytime",
+      "type": "ptr"
+     },
+     {
+      "name": "ecsNow",
+      "type": "s64"
+     }
+    ]
+   },
+   "expect": {
+    "verdict": "mismatch",
+    "text": "descriptor arg 2 'ecsNow' is rdx, the function reads [rcx, xmm1, r8]"
+   }
+  },
+  {
+   "name": "time_two_args",
+   "snippet": "time",
+   "sig": {
+    "args": [
+     {
+      "name": "daytime",
+      "type": "ptr"
+     },
+     {
+      "name": "scale",
+      "type": "f32"
+     }
+    ]
+   },
+   "expect": {
+    "verdict": "mismatch",
+    "text": "the function reads r8, the descriptor has 2 arguments; it reads [rcx, xmm1, r8]"
+   }
+  },
+  {
+   "name": "time_four_args",
+   "snippet": "time",
+   "sig": {
+    "args": [
+     {
+      "name": "daytime",
+      "type": "ptr"
+     },
+     {
+      "name": "scale",
+      "type": "f32"
+     },
+     {
+      "name": "ecsNow",
+      "type": "s64"
+     },
+     {
+      "name": "extra",
+      "type": "u32"
+     }
+    ]
+   },
+   "expect": {
+    "verdict": "mismatch",
+    "text": "descriptor arg 4 'extra' is r9, the function reads [rcx, xmm1, r8]"
+   }
+  },
+  {
+   "name": "time_abi_changed",
+   "snippet": "time",
+   "sig": {
+    "args": [
+     {
+      "name": "daytime",
+      "type": "ptr"
+     },
+     {
+      "name": "scale",
+      "type": "f32"
+     },
+     {
+      "name": "ecsNow",
+      "type": "s64"
+     }
+    ],
+    "abi": {
+     "reads": [
+      "rcx",
+      "xmm1"
+     ],
+     "stack": []
+    }
+   },
+   "expect": {
+    "verdict": "mismatch",
+    "text": "the function reads [rcx, xmm1, r8], the descriptor's fingerprint says [rcx, xmm1] (the function changed: review the descriptor)"
+   }
+  },
+  {
+   "name": "through_passes",
+   "snippet": "through",
+   "sig": {
+    "args": [
+     {
+      "name": "self",
+      "type": "ptr"
+     },
+     {
+      "name": "a",
+      "type": "ptr"
+     },
+     {
+      "name": "b",
+      "type": "ptr"
+     },
+     {
+      "name": "c",
+      "type": "ptr"
+     }
+    ],
+    "abi": {
+     "reads": [
+      "rcx"
+     ],
+     "passes": [
+      "rdx",
+      "r8",
+      "r9"
+     ],
+     "stack": []
+    }
+   },
+   "expect": {
+    "verdict": "match",
+    "text": "4 arguments (rcx, rdx, r8, r9), the function reads [rcx]"
+   }
+  },
+  {
+   "name": "indirect_unknown",
+   "snippet": "indirect",
+   "sig": {
+    "args": [
+     {
+      "name": "self",
+      "type": "ptr"
+     },
+     {
+      "name": "a",
+      "type": "u32"
+     }
+    ]
+   },
+   "expect": {
+    "verdict": "unknown",
+    "text": "descriptor arg 2 'a' is rdx: the function's use of it could not be followed (it reads [rcx])"
+   }
+  },
+  {
+   "name": "indirect_trusted",
+   "snippet": "indirect",
+   "sig": {
+    "args": [
+     {
+      "name": "self",
+      "type": "ptr"
+     },
+     {
+      "name": "a",
+      "type": "u32"
+     }
+    ],
+    "abi": "trust"
+   },
+   "expect": {
+    "verdict": "match",
+    "text": "descriptor arg 2 'a' is rdx: the function's use of it could not be followed (it reads [rcx]) (trusted by the fragment)"
+   },
+   "trust_allowed": true
+  },
+  {
+   "name": "trust_refused",
+   "snippet": "indirect",
+   "sig": {
+    "args": [
+     {
+      "name": "self",
+      "type": "ptr"
+     }
+    ],
+    "abi": "trust"
+   },
+   "expect": {
+    "verdict": "bad",
+    "text": "\"abi\": \"trust\" is allowed only in a mod's own fragment"
+   }
+  },
+  {
+   "name": "msvc_stack",
+   "snippet": "msvc_frame",
+   "sig": {
+    "args": [
+     {
+      "name": "a",
+      "type": "ptr"
+     },
+     {
+      "name": "b",
+      "type": "ptr"
+     },
+     {
+      "name": "c",
+      "type": "u64"
+     },
+     {
+      "name": "d",
+      "type": "u64"
+     },
+     {
+      "name": "e",
+      "type": "u32"
+     },
+     {
+      "name": "f",
+      "type": "u8"
+     }
+    ]
+   },
+   "expect": {
+    "verdict": "match",
+    "text": "6 arguments (rcx, rdx, r8, r9, stack+0x28, stack+0x30), the function reads [rcx, rdx, r8, r9, stack+0x28, stack+0x30]"
+   }
+  },
+  {
+   "name": "msvc_one_stack_short",
+   "snippet": "msvc_frame",
+   "sig": {
+    "args": [
+     {
+      "name": "a",
+      "type": "ptr"
+     },
+     {
+      "name": "b",
+      "type": "ptr"
+     },
+     {
+      "name": "c",
+      "type": "u64"
+     },
+     {
+      "name": "d",
+      "type": "u64"
+     },
+     {
+      "name": "e",
+      "type": "u32"
+     }
+    ]
+   },
+   "expect": {
+    "verdict": "mismatch",
+    "text": "the function reads stack+0x30, the descriptor has 5 arguments; it reads [rcx, rdx, r8, r9, stack+0x28, stack+0x30]"
+   }
+  },
+  {
+   "name": "sret_volume",
+   "snippet": "leave",
+   "sig": {
+    "sret": "OptS32",
+    "args": [
+     {
+      "name": "item",
+      "type": "ptr"
+     }
+    ]
+   },
+   "expect": {
+    "verdict": "mismatch",
+    "text": "the function reads stack+0x28, the descriptor has 1 argument and a return buffer; it reads [stack+0x28]"
+   }
+  },
+  {
+   "name": "bad_type",
+   "snippet": "time",
+   "sig": {
+    "args": [
+     {
+      "name": "x",
+      "type": "nosuch"
+     }
+    ]
+   },
+   "expect": {
+    "verdict": "bad",
+    "text": "arg 'x': type 'nosuch' is neither a scalar (s8..u64, f32, f64, bool, ptr), a pointer (T*) nor a struct declared under \"structs\""
+   }
+  }
+ ],
+ "exes": [
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "GetComponent",
+   "rva": "0x64ed50",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx",
+     "r8",
+     "r9"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 23
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "abilities/RegisterNative",
+   "rva": "0x996b70",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx",
+     "r8",
+     "r9"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm2",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [
+     "0x28"
+    ],
+    "ret": "rax",
+    "insns": 284
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "items/AttrChanged",
+   "rva": "0x52700",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax|callee",
+    "insns": 121
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "items/AttrFind",
+   "rva": "0x991810",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx",
+     "r8"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 23
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "items/GetItemVolume",
+   "rva": "0x1bb380",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 74
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "rules/QuatRotate",
+   "rva": "0x3ba80",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx",
+     "r8"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "xmm0",
+    "insns": 75
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "time/GetGameTime",
+   "rva": "0x937a20",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax|xmm0",
+    "insns": 69
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "time/SetTimeScale",
+   "rva": "0x95b640",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "xmm1",
+     "r8"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "callee",
+    "insns": 18
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "weather/SampleAt",
+   "rva": "0xa21940",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx",
+     "r8",
+     "r9"
+    ],
+    "passes": [
+     "xmm1",
+     "xmm2",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "none",
+    "insns": 300,
+    "truncated": true
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "world/ReadOther",
+   "rva": "0x64e9e0",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [
+     "xmm0",
+     "rdx",
+     "xmm1",
+     "r8",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 8
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "GetComponent",
+   "rva": "0x9b2ec0",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx",
+     "r8",
+     "r9"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 23
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "abilities/RegisterNative",
+   "rva": "0x123fc90",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx",
+     "r8",
+     "r9"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm2",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [
+     "0x28"
+    ],
+    "ret": "rax",
+    "insns": 284
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "items/AttrChanged",
+   "rva": "0x2358c0",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax|callee",
+    "insns": 121
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "items/AttrFind",
+   "rva": "0x123a930",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx",
+     "r8"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 23
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "items/GetItemVolume",
+   "rva": "0x41af40",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 74
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "rules/QuatRotate",
+   "rva": "0x21e760",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx",
+     "r8"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "xmm0",
+    "insns": 75
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "time/GetGameTime",
+   "rva": "0xe908e0",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax|xmm0",
+    "insns": 69
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "time/SetTimeScale",
+   "rva": "0xeb39d0",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "xmm1",
+     "r8"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "callee",
+    "insns": 18
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "weather/SampleAt",
+   "rva": "0xaaa4d0",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx",
+     "r8",
+     "r9"
+    ],
+    "passes": [
+     "xmm1",
+     "xmm2",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "none",
+    "insns": 300,
+    "truncated": true
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "world/ReadOther",
+   "rva": "0x9b2b50",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [
+     "xmm0",
+     "rdx",
+     "xmm1",
+     "r8",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 8
+   }
+  }
+ ]
+}

@@ -201,10 +201,12 @@ public sealed record WorldWriteInfo(string Component, WorldWriteState State, str
     public bool FactsKnown { get; init; } = true;
 }
 
-/// <summary>A tracked write changed a component: posted on the tick thread when the write's answer arrives, one step
-/// after the call (two when the game writes the type too), for every write a mod made through <see cref="World"/> that
-/// changed bytes. Only built while the event has subscribers. Not cancelable (it already happened). A write the game
-/// makes itself raises nothing. Since 0.2.0-dev.27.</summary>
+/// <summary>A mod changed a component: posted on the tick thread when a tracked write's answer arrives, one step after
+/// the call (two when the game writes the type too), for every write a mod made through <see cref="World"/> that changed
+/// bytes; and since 0.2.0-dev.29, once per step per entity and component that a program wrap's stages (Kiln.Systems)
+/// changed through an entity view, in the next step's start (<see cref="Writer"/> <c>"&lt;modid&gt;/wrap:&lt;program&gt;"</c>).
+/// Only built while the event has subscribers. Not cancelable (it already happened). A write the game makes itself
+/// raises nothing. Since 0.2.0-dev.27.</summary>
 [ServerOnly]
 public sealed class ComponentWrittenEvent : KilnEvent, IEntityEvent
 {
@@ -212,7 +214,30 @@ public sealed class ComponentWrittenEvent : KilnEvent, IEntityEvent
     {
         Result = result;
         ModId = modId;
+        Writer = modId;
+        Writers = modId is null ? [] : [modId];
     }
+
+    private ComponentWrittenEvent(WorldWriteResult result, string? modId, IReadOnlyList<string> writers)
+    {
+        Result = result;
+        ModId = modId;
+        Writer = writers.Count > 0 ? writers[0] : modId;
+        Writers = writers;
+    }
+
+    // A program wrap's writes of one step (Kiln.Systems): the bytes before its first stage wrote and after its last.
+    internal static ComponentWrittenEvent FromWrap(EntityId entity, string component, byte[] before, byte[] after,
+        IReadOnlyList<string> writers, string? modId) =>
+        new(new WorldWriteResult
+        {
+            Status = WorldWriteStatus.Written,
+            Entity = entity,
+            Component = component,
+            Before = before,
+            After = after,
+            ComponentSize = after.Length,
+        }, modId, writers);
 
     /// <summary>The entity whose component changed.</summary>
     public EntityId Entity => Result.Entity;
@@ -220,8 +245,17 @@ public sealed class ComponentWrittenEvent : KilnEvent, IEntityEvent
     /// <summary>The component's short name.</summary>
     public string Component => Result.Component;
 
-    /// <summary>The id of the mod that wrote; null for Kiln's own tools.</summary>
+    /// <summary>The id of the mod that wrote; null for Kiln's own tools. For a program wrap, the first writer's mod.</summary>
     public string? ModId { get; }
+
+    /// <summary>Who wrote: the mod's id for a tracked write through <see cref="World"/> (null for Kiln's own tools), or
+    /// <c>"&lt;modid&gt;/wrap:&lt;program&gt;"</c> for a program wrap's stage (<c>"my-mod/wrap:fuel_setup"</c>); when several
+    /// wraps wrote the component in that step, the first of them. Since 0.2.0-dev.29.</summary>
+    public string? Writer { get; }
+
+    /// <summary>Every writer of the component in that step, <see cref="Writer"/> first, each once (one entry for a tracked
+    /// write; empty for Kiln's own tools). Since 0.2.0-dev.29.</summary>
+    public IReadOnlyList<string> Writers { get; }
 
     /// <summary>The write's answer: the bytes before and after, who else writes the type, whether the save tracks it.</summary>
     public WorldWriteResult Result { get; }

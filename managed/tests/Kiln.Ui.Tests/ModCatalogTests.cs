@@ -82,6 +82,38 @@ public sealed class ModCatalogTests : IDisposable
             rows);
     }
 
+    [Fact]
+    public void Inactive_shroudtopia_names_its_settings_and_reported_name()
+    {
+        Write("shroudtopia.json", new
+        {
+            updatedUnixMs = StartMs + 60_000,
+            mods = new[] { new { id = "library-id", name = "Reported Name.With Dot", status = "inactive", reason = "" } },
+        });
+        var row = Assert.Single(Read().Mods.Where(m => m.Engine == "shroudtopia"));
+        Assert.Equal(ModRunState.Disabled, row.State);
+        Assert.Equal("Switched off in Shroudtopia's settings.", row.Reason);
+        Assert.Equal("In shroudtopia/shroudtopia.json in the profile's config folder, set active to true in the mods entry named \"Reported Name.With Dot\" (the name in kiln.log's Registered mod line). Save the file; Shroudtopia reads it again while the game runs.", row.Help);
+    }
+
+    // x-01 task 9b: a Shroudtopia mod that is switched on and never sets its own `active` flag read "inactive",
+    // "Switched off in Shroudtopia's settings.", which sent the player to a setting that was already on.
+    [Fact]
+    public void A_shroudtopia_mod_that_does_not_report_itself_active_is_waiting_with_the_plugins_reason()
+    {
+        Write("shroudtopia.json", new
+        {
+            updatedUnixMs = StartMs + 60_000,
+            mods = new[] { new { id = "item-skill-text", name = "item-skill-text", status = "activating",
+                reason = "switched on, but the mod does not report itself active: it leaves its own 'active' flag off after Activate" } },
+        });
+        var row = Assert.Single(Read().Mods.Where(m => m.Engine == "shroudtopia"));
+        Assert.Equal(ModRunState.Waiting, row.State);
+        Assert.Equal("Switched on, but the mod does not report itself active: it leaves its own 'active' flag off after Activate.", row.Reason);
+        Assert.Contains("[shroudtopia:item-skill-text]", row.Help);
+        Assert.DoesNotContain("set active to true", row.Help);
+    }
+
     // ---- the launcher's normalisation (EngineStatus.tsx; the cases of launcher/tests/engine-kinds.spec.ts) ----
 
     private static JsonElement J(string json) => JsonDocument.Parse(json).RootElement;
@@ -148,6 +180,7 @@ public sealed class ModCatalogTests : IDisposable
     [InlineData("pending", ModRunState.Waiting)]
     [InlineData("waiting-for-abi", ModRunState.Waiting)]
     [InlineData("candidate", ModRunState.Waiting)]
+    [InlineData("activating", ModRunState.Waiting)]
     [InlineData("skipped", ModRunState.NotLoaded)]
     [InlineData("duplicate", ModRunState.NotLoaded)]
     [InlineData("something new", ModRunState.NotLoaded)]
@@ -254,6 +287,77 @@ public sealed class ModCatalogTests : IDisposable
         Assert.False(m.NeedsAttention);
     }
 
+    /// <summary>kiln-dllmod (packages for Enshrouded ModLoader, docs/kiln/engines/dllmod.md): its mods are listed with the
+    /// state of kiln/state/dllmod.json. Before a world of your own starts they wait for it; started, refused with the
+    /// plugin's reason, switched off; a profile entry it has not reported yet is still a row.</summary>
+    [Fact]
+    public void Enshrouded_modloader_packages_show_their_state_from_dllmod_json()
+    {
+        var carry = Dir("Mods", "EnshroudedModLoader", "carryon");
+        var unseen = Dir("Mods", "EnshroudedModLoader", "unseen");
+        Profile(new() { ["dllmod"] = [new { id = "carryon", version = "0.1.50-dev", path = carry }, new { id = "unseen", version = "1", path = unseen }] });
+        Write("dllmod.json", new
+        {
+            format = 1, pid = Pid, status = "waiting", reason = "the mods start when a world of your own starts", steppedAside = false,
+            mods = new object[]
+            {
+                new { id = "carryon", package = "carryon/carryon.dll", name = "carryon", version = "0.1.50-dev", status = "waiting", reason = "", folder = carry },
+                new { id = "lantern", package = "lantern/lantern.dll", name = "lantern", version = "0.1.29-dev", status = "started", reason = "" },
+                new { id = "broken", package = "broken/broken.dll", name = "broken", version = "1", status = "rejected", reason = "broken.dll.mod: abi must be given once" },
+                new { id = "off", package = "off/off.dll", name = "off", version = "1", status = "disabled", reason = "switched off in the profile" },
+            },
+        });
+        var s = Read();
+        var w = Mod(s, "dllmod", "carryon");
+        Assert.Equal(ModRunState.Waiting, w.State);
+        Assert.Contains("world of your own", w.Reason);
+        Assert.False(w.NeedsAttention);
+        Assert.Equal(ModRunState.Loaded, Mod(s, "dllmod", "lantern").State);
+        var b = Mod(s, "dllmod", "broken");
+        Assert.Equal(ModRunState.Failed, b.State);
+        Assert.Equal("broken.dll.mod: abi must be given once", b.Reason);
+        Assert.NotNull(b.Help);
+        Assert.Equal(ModRunState.Disabled, Mod(s, "dllmod", "off").State);
+        Assert.Equal(ModRunState.NotLoaded, Mod(s, "dllmod", "unseen").State);  // in the profile, not in the report
+        var e = s.Engines.Single(e => e.Kind == "dllmod");
+        Assert.Equal("Enshrouded ModLoader", e.Name);
+        Assert.Contains("Enshrouded ModLoader", ModCatalog.EngineAbout("dllmod"));
+        Assert.Equal(ModCatalog.EngineOrder.Length - 1, Array.IndexOf(ModCatalog.EngineOrder, "dllmod"));  // the launcher's order: last
+    }
+
+    [Fact]
+    public void Enshrouded_modloader_steps_aside_and_refuses_another_build()
+    {
+        Profile([]);
+        Write("dllmod.json", new
+        {
+            format = 1, pid = Pid, status = "stepped aside", steppedAside = true, steppedAsideReason = "Enshrouded ModLoader runs in this game: it is loaded (dinput8.dll)",
+            mods = new object[]
+            {
+                new { id = "carryon", status = "own-loader", reason = "runs under Enshrouded ModLoader's own loader; switch it on in the world's Edit > MODS page" },
+                new { id = "lib-copy", status = "not-loaded", reason = "Enshrouded ModLoader's own loader runs this start" },
+            },
+        });
+        var s = Read();
+        Assert.Equal(ModRunState.Loaded, Mod(s, "dllmod", "carryon").State);
+        var nl = Mod(s, "dllmod", "lib-copy");
+        Assert.Equal(ModRunState.Failed, nl.State);
+        Assert.NotNull(nl.Help);
+        Assert.StartsWith("Stepped aside", s.Engines.Single(e => e.Kind == "dllmod").Note);
+
+        Write("dllmod.json", new
+        {
+            format = 1, pid = Pid, status = "unsupported", steppedAside = false,
+            reason = "mods for Enshrouded ModLoader are made for client build 26430625 (enshrouded.exe 5d9ef2f1), and this game is 0123abcd",
+            mods = new object[] { new { id = "carryon", status = "skipped", reason = "mods for Enshrouded ModLoader are made for client build 26430625" } },
+        });
+        s = Read();
+        Assert.Equal(ModRunState.NotLoaded, Mod(s, "dllmod", "carryon").State);
+        var e = s.Engines.Single(e => e.Kind == "dllmod");
+        Assert.Equal(EngineHealth.Problem, e.Health);
+        Assert.Contains("26430625", e.Note);
+    }
+
     [Fact]
     public void Stepped_aside_engines_say_so_and_their_mods_are_not_loaded()
     {
@@ -310,6 +414,185 @@ public sealed class ModCatalogTests : IDisposable
         Assert.Equal(ModRunState.Failed, Mod(s, "shroudforge", "pack").State);
         Assert.Equal(EngineHealth.Problem, s.Engines.Single(e => e.Kind == "shroudforge").Health);
     }
+
+    // ---- inbox 84: in Copy path mode a ShroudForge profile entry names Kiln's second copy under kiln/profiles/, which
+    // ShroudForge never reads; the row is the copy ShroudForge runs (in <game>/mods), and a setting written there sticks ----
+
+    private const string UtHash = "kdh1:a516c609cfc5672f9ac9484f92f28b0280024635510c7c0630ec9f6b33fc2668";
+
+    /// <summary>A ShroudForge package shaped like Unified EML Tweaks 2.1.1: mod.json, extended.mod.json with one setting,
+    /// native-plugin.ini naming bin/ut_native.dll (ShroudForge's own DLL loader loads it), and Kiln's marker when placed.</summary>
+    private string SfPackage(string folder, bool on = true, string? marker = null)
+    {
+        Directory.CreateDirectory(Path.Combine(folder, "bin"));
+        File.WriteAllText(Path.Combine(folder, "mod.json"), """{"id":"unifiedemltweaks","name":"Unified EML Tweaks","version":"2.1.1","capabilities":["patch","export"]}""");
+        File.WriteAllText(Path.Combine(folder, "extended.mod.json"), "{\n  \"schemaVersion\": 1,\n  \"enabled\": " + (on ? "true" : "false") +
+            ",\n  \"settings\": {\n    \"stackSize\": { \"value\": false, \"label\": \"Bigger stacks\", \"control\": \"toggle\" }\n  }\n}\n");
+        File.WriteAllText(Path.Combine(folder, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=bin/ut_native.dll\n");
+        File.WriteAllBytes(Path.Combine(folder, "bin", "ut_native.dll"), [0x4d, 0x5a]);
+        if (marker is not null)
+            File.WriteAllText(Path.Combine(folder, ".kiln-library.json"), JsonSerializer.Serialize(new { format = 1, kind = marker, id = "unifiedemltweaks", version = "2.1.1", hash = UtHash }));
+        return folder;
+    }
+
+    /// <summary>The player's kiln/profile.json (pathMode copy, a ShroudForge entry with a path relative to kiln/, no
+    /// "enabled" key), ShroudForge hosted with its mods folder in the game's mods folder.</summary>
+    private void CopyModeProfile(string path)
+    {
+        var file = Path.Combine(Kiln, "profile.json");
+        File.WriteAllText(file, $$"""
+            {"configDir":"profiles/my-mods/config","dataDir":null,"dropins":true,"format":1,"generation":14,"id":"my-mods",
+             "mods":{"emf":[],"kiln":[],"native":[],"plugin":[],
+               "shroudforge":[{"hash":"{{UtHash}}","id":"unifiedemltweaks","path":{{JsonSerializer.Serialize(path)}},"version":"2.1.1"}]},
+             "name":"My mods","pathMode":"copy","writer":"kiln-manage 0.2.0-dev"}
+            """);
+        Write("boot.json", new { format = 1, pid = Pid, side = "client", profile = new { mode = "active", id = "my-mods", name = "My mods", file, missing = Array.Empty<object>() }, plugins = Array.Empty<object>(), chain = Array.Empty<object>() });
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = Path.Combine(_root, "mods"), startupPrepared = true });
+    }
+
+    private static string ExtendedOf(string folder) => File.ReadAllText(Path.Combine(folder, "extended.mod.json"));
+
+    [Fact]
+    public void In_copy_mode_a_shroudforge_profile_row_is_the_copy_shroudforge_runs_and_a_setting_lands_there()
+    {
+        var copy = SfPackage(Path.Combine(Kiln, "profiles", "my-mods", "shroudforge", "unifiedemltweaks"));
+        var placed = SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"), marker: "shroudforge");
+        CopyModeProfile("profiles/my-mods/shroudforge/unifiedemltweaks");
+        var s = Read();
+        var row = Mod(s, "shroudforge", "unifiedemltweaks");
+        Assert.Equal(("profile", placed), (row.Source, row.Folder));  // the details' FOLDER line names the folder ShroudForge runs
+        Assert.False(row.Missing);
+        // listed once: ShroudForge's own DLL loader loads its native-plugin.ini, it is no XHL-Core plugin of its own
+        Assert.DoesNotContain(s.Mods, m => m.Engine == "xhl");
+        Assert.Single(s.Mods, m => m.Folder is { } f && ModCatalog.SamePath(f, placed));
+
+        // the page writes the row's folder (ShroudForgeUi.Edit -> ShroudForgePackages.SetSetting)
+        var before = ExtendedOf(copy);
+        ShroudForgePackages.SetSetting(row.Folder!, "stackSize", System.Text.Json.Nodes.JsonValue.Create(true));
+        Assert.True(ShroudForgePackages.Read(placed).Values["stackSize"]!.GetValue<bool>());
+        Assert.Equal(before, ExtendedOf(copy));  // Kiln's second copy under kiln/profiles/ is not touched
+        // read again (the page reads the row's folder once a second): the value it shows is the one ShroudForge reads
+        Assert.True(ShroudForgePackages.Read(Mod(Read(), "shroudforge", "unifiedemltweaks").Folder!).Values["stackSize"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void In_copy_mode_without_kilns_copy_in_the_mods_folder_the_row_keeps_the_profile_path()
+    {
+        var copy = SfPackage(Path.Combine(Kiln, "profiles", "my-mods", "shroudforge", "unifiedemltweaks"));
+        // another kind's copy of that name (Kiln's marker says xhl): not this entry's
+        SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"), marker: "xhl");
+        CopyModeProfile("profiles/my-mods/shroudforge/unifiedemltweaks");
+        Assert.Equal(copy, Mod(Read(), "shroudforge", "unifiedemltweaks").Folder);
+        // no folder of that name at all
+        Directory.Delete(Path.Combine(_root, "mods", "unifiedemltweaks"), true);
+        Assert.Equal(copy, Mod(Read(), "shroudforge", "unifiedemltweaks").Folder);
+        // the player's own folder of the same package (no marker), as the launcher's settings editor finds it
+        var own = SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"));
+        Assert.Equal(own, Mod(Read(), "shroudforge", "unifiedemltweaks").Folder);
+    }
+
+    [Fact]
+    public void In_normal_path_mode_a_shroudforge_profile_row_is_unchanged()
+    {
+        var placed = SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"), marker: "shroudforge");
+        Profile(new() { ["shroudforge"] = [new { id = "unifiedemltweaks", version = "2.1.1", hash = UtHash, path = placed }] });
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = Path.Combine(_root, "mods"), startupPrepared = true });
+        var s = Read();
+        var row = Mod(s, "shroudforge", "unifiedemltweaks");
+        Assert.Equal(("profile", placed), (row.Source, row.Folder));
+        Assert.DoesNotContain(s.Mods, m => m.Engine == "xhl");
+        ShroudForgePackages.SetSetting(row.Folder!, "stackSize", System.Text.Json.Nodes.JsonValue.Create(true));
+        Assert.True(ShroudForgePackages.Read(placed).Values["stackSize"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void A_shroudforge_package_with_a_native_plugin_ini_is_listed_once_and_a_real_xhl_plugin_still_shows()
+    {
+        Profile([]);
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = Path.Combine(_root, "mods"), startupPrepared = true });
+        // a ShroudForge package the player put there (no marker), with its own DLL loader file
+        var sf = SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"));
+        // an XHL-Core plugin: an EML mod with native-plugin.ini, no ShroudForge file of its own
+        var xhl = Dir("mods", "XHL-Auto-Loot");
+        File.WriteAllText(Path.Combine(xhl, "mod.json"), """{"id":"XHL-Auto-Loot","name":"XHL Auto Loot","version":"1.0.0"}""");
+        File.WriteAllText(Path.Combine(xhl, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=auto-loot.dll\n");
+        // an XHL-Core plugin that ShroudForge runs as an EML package (its switch: launcher EML): still an XHL-Core plugin
+        var switched = Dir("mods", "XHL-Stacks");
+        File.WriteAllText(Path.Combine(switched, "mod.json"), """{"id":"XHL-Stacks","name":"XHL Stacks","version":"1.0.0"}""");
+        File.WriteAllText(Path.Combine(switched, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=stacks.dll\n");
+        File.WriteAllText(Path.Combine(switched, "extended.mod.json"), """{"schemaVersion":1,"enabled":true,"launcher":"EML"}""");
+        var s = Read();
+        Assert.Equal("shroudforge", Assert.Single(s.Mods, m => m.Folder is { } f && ModCatalog.SamePath(f, sf)).Engine);
+        Assert.Contains(s.Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, xhl));
+        Assert.Contains(s.Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, switched));
+        // ShroudForge configured to another mods folder: the game's mods folder is XHL-Core's alone again, and its plugins
+        // still show; this package is no XHL-Core plugin all the same (XHL-Core refuses Dll=bin/ut_native.dll, a path)
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = Dir("elsewhere") });
+        Directory.CreateDirectory(Path.Combine(_root, "shroudforge", "config"));
+        File.WriteAllText(Path.Combine(_root, "shroudforge", "config", "modloader-config.json"), JsonSerializer.Serialize(new { paths = new { mods = Dir("elsewhere") } }));
+        s = Read();
+        Assert.Contains(s.Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, xhl));
+        Assert.DoesNotContain(s.Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, sf));
+    }
+
+    /// <summary>A minimal PE32+ DLL file with these exports (the shape of kiln-manage's <c>pe::build_test_dll</c>).</summary>
+    private static byte[] TestDll(params string[] exports)
+    {
+        var b = new byte[0x200];
+        void U16(byte[] a, int at, ushort v) => System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(a.AsSpan(at), v);
+        void U32(byte[] a, int at, uint v) => System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(a.AsSpan(at), v);
+        b[0] = (byte)'M'; b[1] = (byte)'Z'; U32(b, 0x3c, 0x80); U32(b, 0x80, 0x4550);
+        const int coff = 0x84, opt = coff + 20;
+        U16(b, coff, 0x8664); U16(b, coff + 2, 1); U16(b, coff + 16, 240); U16(b, coff + 18, 0x2022);
+        U16(b, opt, 0x20b); U32(b, opt + 108, 16);
+        const uint va = 0x1000;
+        var n = (uint)exports.Length;
+        uint funcs = va + 40, names = funcs + 4 * n, ords = names + 4 * n, strings = ords + 2 * n;
+        var str = new List<byte>(System.Text.Encoding.ASCII.GetBytes("plugin.dll\0"));
+        var dllName = strings; strings += (uint)str.Count;
+        var nameRvas = new List<uint>();
+        foreach (var e in exports) { nameRvas.Add(strings); str.AddRange(System.Text.Encoding.ASCII.GetBytes(e + "\0")); strings += (uint)e.Length + 1; }
+        var head = new byte[40]; U32(head, 12, dllName); U32(head, 16, 1); U32(head, 20, n); U32(head, 24, n); U32(head, 28, funcs); U32(head, 32, names); U32(head, 36, ords);
+        var data = new List<byte>(head);
+        for (var i = 0; i < n; i++) data.AddRange(BitConverter.GetBytes(0x2000u));
+        foreach (var r in nameRvas) data.AddRange(BitConverter.GetBytes(r));
+        for (var i = 0; i < n; i++) data.AddRange(BitConverter.GetBytes((ushort)i));
+        data.AddRange(str);
+        var size = (uint)data.Count; var raw = (size + 0x1ff) / 0x200 * 0x200;
+        while (data.Count < raw) data.Add(0);
+        var sec = opt + 240;
+        System.Text.Encoding.ASCII.GetBytes(".edata").CopyTo(b, sec); U32(b, sec + 8, size); U32(b, sec + 12, va); U32(b, sec + 16, raw); U32(b, sec + 20, 0x200); U32(b, sec + 36, 0x40000040);
+        U32(b, opt + 112, va); U32(b, opt + 116, size);
+        return [.. b, .. data];
+    }
+
+    /// <summary>inbox 92 and Smart Quick Stack: <c>native-plugin.ini</c> is ShroudForge's file too. A folder XHL-Core would not
+    /// run (a Dll value with a path, a DLL without XHL-Core's exports) is no XHL row; XHL's own plugins still are.</summary>
+    [Fact]
+    public void Only_a_folder_xhl_core_would_run_is_listed_as_an_xhl_plugin()
+    {
+        Profile([]);
+        var path = Dir("mods", "smart-quick-stack");
+        File.WriteAllText(Path.Combine(path, "mod.json"), """{"id":"smart-quick-stack","name":"Smart Quick Stack","version":"0.16.1-beta"}""");
+        File.WriteAllText(Path.Combine(path, "native-plugin.ini"), "[Plugin]\r\nEnabled=1\r\nDll=bin\\sqs.dll\r\n");
+        Directory.CreateDirectory(Path.Combine(path, "bin"));
+        File.WriteAllBytes(Path.Combine(path, "bin", "sqs.dll"), TestDll("DllMain"));
+        var plain = Dir("mods", "plain-dll-mod");
+        File.WriteAllText(Path.Combine(plain, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=PlainMod.dll\n");
+        File.WriteAllBytes(Path.Combine(plain, "PlainMod.dll"), TestDll("DllMain", "Init"));
+        var json = Dir("mods", "XHL-Remote-Chest");
+        File.WriteAllText(Path.Combine(json, "native-plugin.ini"), "[Plugin]\nDll=XHL-Remote-Chest.dll\n");
+        File.WriteAllText(Path.Combine(json, "xhl-plugin.json"), "{}");
+        File.WriteAllBytes(Path.Combine(json, "XHL-Remote-Chest.dll"), TestDll("DllMain"));
+        var abi = Dir("mods", "XHL-Free-Climb");
+        File.WriteAllText(Path.Combine(abi, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=XHL-Free-Climb.dll\n[Climbing]\nspeed=2\n");
+        File.WriteAllBytes(Path.Combine(abi, "XHL-Free-Climb.dll"), TestDll("XhlNativePluginQuery", "XhlNativePluginStart", "XhlNativePluginRequestStop"));
+        Assert.Equal(["XhlNativePluginQuery", "XhlNativePluginStart", "XhlNativePluginRequestStop"], ModCatalog.PeExports(Path.Combine(abi, "XHL-Free-Climb.dll")));
+        var xhlRows = Read().Mods.Where(m => m.Engine == "xhl").Select(m => LeafName(m.Folder!)).Order().ToArray();
+        Assert.Equal(["XHL-Free-Climb", "XHL-Remote-Chest"], xhlRows);
+    }
+
+    private static string LeafName(string p) => Path.GetFileName(p.TrimEnd('/', '\\'));
 
     [Fact]
     public void Shroudforge_reports_real_activation_errors_side_and_switches_not_just_the_host()
@@ -508,8 +791,8 @@ public sealed class ModCatalogTests : IDisposable
         Assert.DoesNotContain(s.Mods, m => m.Engine == "shroudforge" && ids.Contains(m.Id));
         var hand = Mod(s, "shroudforge", "hand-made");
         Assert.Equal((ModRunState.Disabled, "folder"), (hand.State, hand.Source));
-        Assert.Contains("no extended.mod.json", hand.Reason);
-        Assert.Contains("Switch it on below", hand.Help);
+        Assert.Equal("You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off.", hand.Reason);
+        Assert.StartsWith("Switch it on below, or remove the folder and add the mod with Add mods in the Kiln launcher.", hand.Help);
 
         // with ShroudForge's report of this start gone, kiln-eml's own word still says it does not run
         File.Delete(Path.Combine(State, "shroudforge.json"));
@@ -521,6 +804,122 @@ public sealed class ModCatalogTests : IDisposable
         var off = Mod(Read(), "eml", "more-gliders");
         Assert.Equal(ModRunState.Disabled, off.State);
         Assert.DoesNotContain("Turn it on in the Kiln launcher (Profiles)", off.Help ?? "");
+    }
+
+    /// <summary>Player report (Nexus, 14 Nov 2026): an EML mod copied by hand into ShroudForge's mods folder, while Kiln
+    /// hosts ShroudForge, stays off (no extended.mod.json), and the page's words read as "Kiln wants a ShroudForge file
+    /// from an EML mod". Its row says the promised words, on the ShroudForge row (with the switch) and on the EML row of a
+    /// profile mod that folder serves, and nothing about ShroudForge's files.</summary>
+    [Fact]
+    public void A_hand_copied_eml_mod_shroudforge_keeps_off_says_the_promised_words()
+    {
+        var mods = Dir("mods");
+        foreach (var id in new[] { "hand-copied", "hand-profile" })
+        {
+            File.WriteAllText(Path.Combine(Dir("mods", id), "mod.json"), $$"""{"id":"{{id}}","name":"Name {{id}}","version":"1.0.0","capabilities":["patch"]}""");
+            File.WriteAllText(Path.Combine(Dir("mods", id, "src"), "mod.lua"), "return {}");
+        }
+        Profile(new() { ["eml"] = [new { id = "hand-profile", version = "1.0.0", path = Path.Combine(_root, "library", "eml", "hand-profile") }] });
+        Write("eml.json", new
+        {
+            format = 1, pid = Pid, phase = "aside", aside = "ShroudForge owns startup asset patching and runs EML packages in its mods folder",
+            mods = new[] { new { id = "hand-profile", source = "profile", path = Path.Combine(mods, "hand-profile"), state = "off-in-shroudforge", reason = "ShroudForge (hosted by Kiln) runs this start." } },
+        });
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = mods, startupPrepared = true });
+        var s = Read();
+
+        const string Promised = "You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off.";
+        var copied = Mod(s, "shroudforge", "hand-copied");
+        Assert.Equal((ModRunState.Disabled, Promised), (copied.State, copied.Reason));
+        Assert.StartsWith("Switch it on below, or remove the folder and add the mod with Add mods in the Kiln launcher.", copied.Help);
+        var row = Mod(s, "eml", "hand-profile");
+        Assert.Equal((ModRunState.Disabled, Promised), (row.State, row.Reason));
+        Assert.Equal("Switch it on in Mods > ShroudForge (its own row there), or remove the folder and press Play in the Kiln launcher: the mod is in your profile, so Kiln then places its own copy, switched on.", row.Help);
+        // its own row in Mods > ShroudForge carries the switch
+        Assert.Equal(Promised, Mod(s, "shroudforge", "hand-profile").Reason);
+        foreach (var m in new[] { copied, row })
+            Assert.DoesNotContain("extended.mod.json", (m.Reason ?? "") + (m.Help ?? ""));
+    }
+
+    /// <summary>On Windows ShroudForge rewrites its mods folder at every start from a canonical path, <c>\\?\C:\…\mods</c>,
+    /// and Kiln's game folder has no <c>\\?\</c> (Nexus, 14 Nov 2026: Auto Loot Plus and Endless Chests stayed off). The
+    /// same folder in another spelling is the same folder, as Windows compares them: no verbatim prefix, one separator,
+    /// no trailing one, case ignored (the callers compare without regard to case).</summary>
+    [Theory]
+    [InlineData(@"\\?\C:\Game\mods", @"C:\Game\mods")]
+    [InlineData(@"c:\game\MODS\", @"C:\Game\mods")]
+    [InlineData(@"\\?\c:\game\MODS\", @"C:/Game/mods")]
+    [InlineData(@"//?/C:/Game/mods/", @"C:\Game\mods")]
+    [InlineData(@"\\?\UNC\server\share\Game\mods", @"\\server\share\Game\mods")]
+    [InlineData(@"\\?\unc\SERVER\share\game\mods\", @"//server/share/Game/mods")]
+    [InlineData(@"\\?\C:\", @"C:\")]
+    public void Folders_compare_as_windows_compares_them(string a, string b)
+    {
+        Assert.Equal(ModCatalog.NormPath(b), ModCatalog.NormPath(a), ignoreCase: true);
+        Assert.True(ModCatalog.SamePath(a, b));
+        Assert.True(ModCatalog.SamePath(b, a));
+    }
+
+    [Theory]
+    [InlineData(@"\\?\C:\Game\mods", @"C:\Game\mods2")]
+    [InlineData(@"\\?\C:\Game", @"C:\Game\mods")]
+    [InlineData(@"\\?\UNC\server\share\mods", @"C:\server\share\mods")]
+    [InlineData(@"\\?\UNC\server\share\mods", @"\\?\server\share\mods")]
+    public void Other_folders_stay_other_folders(string a, string b)
+    {
+        Assert.NotEqual(ModCatalog.NormPath(b), ModCatalog.NormPath(a), StringComparer.OrdinalIgnoreCase);
+        Assert.False(ModCatalog.SamePath(a, b));
+    }
+
+    /// <summary>The same report from Kiln's menu: ShroudForge's folder is <c>\\?\</c> and upper case with a trailing
+    /// separator, Kiln's copy of a profile EML mod is in it without: the row still says ShroudForge has Kiln's copy off
+    /// (no extended.mod.json), not that it runs, and the copy is no hand-installed ShroudForge row.</summary>
+    [Fact]
+    public void An_eml_copy_is_in_shroudforges_folder_whatever_its_spelling()
+    {
+        var mods = Dir("mods");
+        var copy = Dir("mods", "auto-loot-plus");
+        File.WriteAllText(Path.Combine(copy, "mod.json"), """{"id":"auto-loot-plus","name":"Auto Loot Plus","version":"1.0.0","capabilities":["patch"]}""");
+        File.WriteAllText(Path.Combine(Dir("mods", "auto-loot-plus", "src"), "mod.lua"), "return {}");
+        File.WriteAllText(Path.Combine(copy, ".kiln-library.json"), """{"format":1,"kind":"eml","id":"auto-loot-plus","version":"1.0.0","hash":"h"}""");
+        Profile(new() { ["eml"] = [new { id = "auto-loot-plus", version = "1.0.0", path = Path.Combine(_root, "library", "eml", "auto-loot-plus") }] });
+        Write("eml.json", new
+        {
+            format = 1, pid = Pid, phase = "aside", aside = "ShroudForge owns startup asset patching and runs EML packages in its mods folder",
+            mods = new[] { new { id = "auto-loot-plus", source = "profile", path = copy, state = "own-loader", reason = $"runs under ShroudForge (hosted by Kiln) (Kiln's copy at {copy})" } },
+        });
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = @"\\?\" + mods.ToUpperInvariant() + @"\", startupPrepared = true });
+        var s = Read();
+        var m = Mod(s, "eml", "auto-loot-plus");
+        Assert.Equal((ModRunState.Disabled, ModCatalog.OffInShroudForge), (m.State, m.Word));
+        Assert.Contains("no extended.mod.json", m.Reason);
+        Assert.Contains("Kiln launcher", m.Help);
+        Assert.DoesNotContain(s.Mods, x => x.Engine == "shroudforge");
+    }
+
+    /// <summary>A copy Kiln's launcher placed in ShroudForge's folder (its marker says eml) that no EML row of this
+    /// start names (kiln-eml did not report, or the profile no longer lists the mod) is listed under ShroudForge with
+    /// its switch, but not as a folder the player put there: that is only the player's own folder.</summary>
+    [Fact]
+    public void A_copy_kiln_placed_in_shroudforges_folder_is_not_called_the_players_own()
+    {
+        var mods = Dir("mods");
+        foreach (var (folder, kilns) in new[] { ("kiln-copy", true), ("own-folder", false) })
+        {
+            var dir = Dir("mods", folder);
+            File.WriteAllText(Path.Combine(dir, "mod.json"), $$"""{"id":"{{folder}}","name":"Name {{folder}}","version":"1.0.0","capabilities":["patch"]}""");
+            File.WriteAllText(Path.Combine(Dir("mods", folder, "src"), "mod.lua"), "return {}");
+            if (kilns) File.WriteAllText(Path.Combine(dir, ".kiln-library.json"), $$"""{"format":1,"kind":"eml","id":"{{folder}}","version":"1.0.0","hash":"h"}""");
+        }
+        Profile(new() { ["eml"] = [new { id = "kiln-copy", version = "1.0.0", path = Path.Combine(_root, "library", "eml", "kiln-copy") }] });
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = mods, startupPrepared = true });
+        var s = Read();
+        var copy = Mod(s, "shroudforge", "kiln-copy");
+        Assert.Equal((ModRunState.Disabled, "folder"), (copy.State, copy.Source));
+        Assert.DoesNotContain("yourself", copy.Reason);
+        Assert.Contains("has not switched it on", copy.Reason);
+        Assert.StartsWith("Switch it on below", copy.Help);
+        Assert.Equal(ModCatalog.HandEmlOff, Mod(s, "shroudforge", "own-folder").Reason);  // the player's own folder: the promised words
     }
 
     [Fact]
@@ -587,6 +986,65 @@ public sealed class ModCatalogTests : IDisposable
         Assert.Equal(("XHL", EngineHealth.Problem), (engine.Name, engine.Health));  // the missing entry
         Assert.Contains("Kiln never loads", engine.Note);
         Assert.Equal(ModCatalog.EngineOrder.ToList().IndexOf("eml") + 1, ModCatalog.EngineOrder.ToList().IndexOf("xhl"));
+    }
+
+    /// <summary>XHL-Core started with the game (Kiln's native loader or the chain loaded it): an XHL companion's page says
+    /// so in plain words and carries no "Requires XHL-Core" warning (inbox 39, PepegaJedi's XHL Remote Chest, chest.png).
+    /// Kiln still cannot tell whether XHL-Core ran the plugin, so the row stays Not loaded. A failed XHL-Core keeps the
+    /// warning.</summary>
+    [Fact]
+    public void Xhl_companions_say_xhl_core_started_when_it_did()
+    {
+        var chest = Dir("mods", "XHL-Remote-Chest");
+        File.WriteAllText(Path.Combine(chest, "native-plugin.ini"), "[Plugin]\nDll=XHL-Remote-Chest.dll\n");
+        File.WriteAllText(Path.Combine(chest, "XHL-Remote-Chest.dll"), "MZ");
+        var hand = Dir("mods", "Hand-XHL");
+        File.WriteAllText(Path.Combine(hand, "native-plugin.ini"), "[Plugin]\nDll=Hand-XHL.dll\n");
+        var core = Dir("kiln", "chain", "xhl-core");
+        object Core(string state) => new
+        {
+            format = 1, pid = Pid,
+            mods = new[] { new { id = "xhl-core", version = "0.0.0", state, folder = core, source = "profile", phase = "dllmain",
+                                 dlls = new[] { new { file = "xhl-core.dll", status = state, error = 0 } } } },
+        };
+        void Setup(object native)
+        {
+            Profile(new()
+            {
+                ["native"] = [new { id = "xhl-core", version = "0.0.0", path = core }],
+                ["xhl"] = [new { id = "xhl-remote-chest", version = "0.0.0", path = chest }],
+            });
+            Write("native.json", native);
+        }
+
+        Setup(Core("loaded"));
+        var s = Read();
+        foreach (var m in new[] { Mod(s, "xhl", "xhl-remote-chest"), Mod(s, "xhl", "Hand-XHL") })
+        {
+            Assert.Equal(ModRunState.NotLoaded, m.State);
+            Assert.Null(m.Help);
+            Assert.DoesNotContain("Requires XHL-Core", m.Reason);
+            Assert.Contains("XHL-Core started with the game", m.Reason);
+            Assert.Contains("XHL-Native-Plugin-Host.log", m.Reason);
+        }
+        Assert.Contains("XHL-Core started with the game", s.Engines.Single(e => e.Kind == "xhl").Note);
+
+        // only the chain names it (an XHL-Core chain-loaded from kiln/chain, no native report): the same
+        Setup(new { format = 1, pid = Pid, mods = Array.Empty<object>() });
+        var file = Path.Combine(Kiln, "profile.json");
+        Write("boot.json", new
+        {
+            format = 1, pid = Pid, side = "client", profile = new { mode = "active", id = "p", name = "Test", file, missing = Array.Empty<object>() },
+            plugins = Array.Empty<object>(),
+            chain = new[] { new { path = Path.Combine(core, "xhl-core.dll"), source = "profile", status = "loaded", error = (string?)null } },
+        });
+        Assert.Null(Mod(Read(), "xhl", "xhl-remote-chest").Help);
+
+        // XHL-Core failed to load: the warning stays
+        Setup(Core("failed"));
+        var failed = Mod(Read(), "xhl", "xhl-remote-chest");
+        Assert.Contains("Requires XHL-Core", failed.Help);
+        Assert.DoesNotContain("XHL-Core started with the game", failed.Reason);
     }
 
     // a profile with a switched-on runtime package and one switched off in ShroudForge, hosted by Kiln
@@ -741,6 +1199,114 @@ public sealed class ModCatalogTests : IDisposable
         var g = s.Engines.Single(e => e.Kind == "greeneye");  // listed although it has no mod: its plugin failed
         Assert.Equal(EngineHealth.Problem, g.Health);
         Assert.Contains("bad image", g.Note);
+    }
+
+    /// <summary>Every proxy DLL mod is a dinput8.dll: with two of them chained (Spawn the World and Auto Loot Plus) both
+    /// rows had the ImGui id "##mod.chain/dinput8.dll", and ImGui's "conflicting ID" popup stood under each (Nexus,
+    /// 2026-11-14); a click on the second chose the first. A DLL chained twice (chain.ini and the profile) is the
+    /// proxy's duplicate of the same path. Plugins that failed before they named themselves are named by their file.</summary>
+    [Fact]
+    public void Chain_dlls_and_plugins_with_one_file_name_get_their_own_row_ids_and_keys()
+    {
+        var file = Path.Combine(Kiln, "profile.json");
+        File.WriteAllText(file, """{"format":1,"id":"p","generation":1,"mods":{}}""");
+        Write("boot.json", new
+        {
+            format = 1, pid = Pid, profile = new { mode = "active", id = "p", file },
+            chain = new[]
+            {
+                new { path = @"C:\g\mods\spawn-the-world\dinput8.dll", source = "profile", status = "loaded" },
+                new { path = @"C:\g\mods\auto-loot-plus\dinput8.dll", source = "profile", status = "loaded" },
+                new { path = @"C:\g\mods\auto-loot-plus\dinput8.dll", source = "chain", status = "duplicate" },
+            },
+            plugins = new[]
+            {
+                new { file = "helper.dll", path = @"C:\g\kiln\plugins\helper.dll", status = "failed", error = "bad image" },
+                new { file = "helper.dll", path = @"C:\lib\plugin\helper\1.0.0+aaaaaaaa\helper.dll", status = "failed", error = "bad image" },
+            },
+        });
+        var s = Read();
+        var chain = s.Mods.Where(m => m.Engine == "chain").ToArray();
+        Assert.Equal(3, chain.Length);
+        Assert.All(chain, m => Assert.Equal(("dinput8.dll", "dinput8.dll"), (m.Id, m.Name)));  // what a player sees stays
+        Assert.Equal(2, s.Mods.Count(m => m.Engine == "plugin" && m.Id == "helper.dll"));
+        var rows = ModManagerLogic.Rows(s, EngineFilter.All, "");
+        Assert.Equal(5, rows.Count);
+        Assert.Equal(5, rows.Select(r => r.Id).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(5, rows.Select(r => r.Key).Distinct(StringComparer.Ordinal).Count());
+        // the same keys under the engine's own filter and at the next read: a refresh keeps the selection
+        Assert.Equal(rows.Where(r => r.Mod.Engine == "chain").Select(r => r.Key), ModManagerLogic.Rows(Read(), new EngineFilter("chain"), "").Select(r => r.Key));
+        // the second one stays chosen, and the details show that one
+        var second = rows.Where(r => r.Mod.Engine == "chain").ElementAt(1);
+        var page = new ModManagerPage { Filter = new EngineFilter("chain"), Selected = second.Key };
+        page.Update(s, false);
+        Assert.Equal(second.Key, page.Selected);
+        Assert.Equal((@"C:\g\mods\auto-loot-plus\dinput8.dll", "loaded"), (page.Rows.Single(r => r.Key == page.Selected).Mod.Folder, page.Rows.Single(r => r.Key == page.Selected).Mod.Word));
+    }
+
+    /// <summary>Two rows of one engine with one id and nothing else to tell them apart (two native mods of one id: the
+    /// second is the duplicate that does not load; an engine that reports a mod twice) still get their own keys, the
+    /// first keeps the plain one.</summary>
+    [Fact]
+    public void Rows_that_share_an_id_still_get_their_own_keys()
+    {
+        Write("native.json", new
+        {
+            format = 1, pid = Pid,
+            mods = new object[]
+            {
+                new { id = "creative", folder = @"C:\g\kiln\mods\creative", state = "loaded" },
+                new { id = "creative", folder = @"C:\g\kiln\mods\creative-copy", state = "failed", reason = "duplicate native mod id 'creative'; only the first loads" },
+            },
+        });
+        Write("emf.json", new { format = 1, updatedUnixMs = StartMs + 1, mods = new[] { new { id = "a", status = "loaded" }, new { id = "a", status = "duplicate" } } });
+        var s = Read();
+        var rows = ModManagerLogic.Rows(s, EngineFilter.All, "");
+        Assert.Equal(4, rows.Count);
+        Assert.Equal(4, rows.Select(r => r.Id).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(4, rows.Select(r => r.Key).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(["creative", "a"], rows.Where(r => r.Mod.State == ModRunState.Loaded).Select(r => r.Mod.Id));
+        Assert.Equal(@"C:\g\kiln\mods\creative", rows.Single(r => r.Mod.Engine == "native" && r.Mod.State == ModRunState.Loaded).Mod.Folder);
+        Assert.Equal("emf/a", rows.Single(r => r.Mod.Engine == "emf" && r.Mod.State == ModRunState.Loaded).Key);
+        Assert.Equal(rows.Select(r => r.Key), ModManagerLogic.Rows(Read(), EngineFilter.All, "").Select(r => r.Key));  // the same at every read
+    }
+
+    [Fact]
+    public void Duplicate_row_keys_follow_the_folder_and_source_across_refreshes()
+    {
+        var a = new CatalogMod { Engine = "shroudforge", Id = "same", Name = "A", Folder = @"C:\mods\a", Source = "folder" };
+        var b = a with { Name = "B", Folder = @"C:\mods\b" };
+        List<CatalogMod> first = [a, b];
+        ModCatalog.UniqueKeys(first);
+        var selected = ModManagerLogic.KeyOf(first[1]);
+        List<CatalogMod> reversed = [b with { State = ModRunState.Disabled }, a];
+        ModCatalog.UniqueKeys(reversed);
+        Assert.Equal(selected, ModManagerLogic.KeyOf(reversed[0]));
+        List<CatalogMod> remaining = [b];
+        ModCatalog.UniqueKeys(remaining);
+        Assert.Equal(selected, ModManagerLogic.KeyOf(remaining[0]));
+        var chain = a with { Engine = "chain", Key = a.Folder, Source = "profile" };
+        Assert.NotEqual(ModManagerLogic.KeyOf(chain), ModManagerLogic.KeyOf(chain with { Source = "chain" }));
+    }
+
+    [Fact]
+    public void Generated_suffixes_do_not_take_a_real_rows_key()
+    {
+        var a = new CatalogMod { Engine = "emf", Id = "a", Name = "A" };
+        List<CatalogMod> rows = [a, a, a with { Id = "a#2" }];
+        ModCatalog.UniqueKeys(rows);
+        Assert.Equal(ModManagerLogic.KeyOf(a with { Id = "a#2" }), ModManagerLogic.KeyOf(rows[2]));
+        Assert.Equal(3, rows.Select(ModManagerLogic.KeyOf).Distinct().Count());
+    }
+
+    [Fact]
+    public void Path_keys_cannot_reset_imguis_hash_with_three_hash_characters()
+    {
+        var a = new CatalogMod { Engine = "chain", Id = "dinput8.dll", Name = "DLL", Key = @"C:\a###same\dinput8.dll" };
+        var b = a with { Key = @"C:\b###same\dinput8.dll" };
+        var rows = ModManagerLogic.Rows(new CatalogSnapshot { Mods = [a, b] }, EngineFilter.All, "");
+        Assert.All(rows, row => Assert.DoesNotContain("###", row.Id));
+        Assert.NotEqual(rows[0].Id, rows[1].Id);
     }
 
     // ---- engine mods whose manifest id is no Kiln id: the profile has the Library's id, the plugin reports the manifest's ----
@@ -1027,8 +1593,9 @@ public sealed class ModCatalogTests : IDisposable
     public void Sections_wrap_both_ways()
     {
         Assert.Equal(ModManagerSection.Network, ModManagerLogic.Step(ModManagerSection.Mods, 1));
-        Assert.Equal(ModManagerSection.Overlay, ModManagerLogic.Step(ModManagerSection.Mods, -1));
-        Assert.Equal(ModManagerSection.Mods, ModManagerLogic.Step(ModManagerSection.Overlay, 1));
+        Assert.Equal(ModManagerSection.Graphics, ModManagerLogic.Step(ModManagerSection.Mods, -1));
+        Assert.Equal(ModManagerSection.Graphics, ModManagerLogic.Step(ModManagerSection.Overlay, 1));
+        Assert.Equal(ModManagerSection.Mods, ModManagerLogic.Step(ModManagerSection.Graphics, 1));
     }
 
     [Fact]

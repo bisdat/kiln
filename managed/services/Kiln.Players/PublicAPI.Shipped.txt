@@ -213,6 +213,7 @@ Kiln.PlayerCharactersStatus.Simulated.init -> void
 Kiln.PlayerClientActionEvent
 Kiln.PlayerClientActionEvent.Action.get -> Kiln.PlayerClientActionInfo!
 Kiln.PlayerClientActionEvent.CanCancel.get -> bool
+Kiln.PlayerClientActionEvent.DecisionId.get -> Kiln.DecisionId
 Kiln.PlayerClientActionEvent.Name.get -> string!
 Kiln.PlayerClientActionEvent.Payload.get -> byte[]!
 Kiln.PlayerClientActionEvent.Player.get -> Kiln.Player!

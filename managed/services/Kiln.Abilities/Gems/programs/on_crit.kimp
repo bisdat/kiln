@@ -1,0 +1,65 @@
+.kimp 1
+; Kiln gem trampoline: every critical hit its wearer lands. One program per trigger kind, shared by every gem a mod registers with
+; Gems.Register and that trigger (docs/kiln/services/gems-new.md). The game runs it like any gem program: a
+; persistent impact on the wearer (equipment_impacts), configs copied from the gem's ItemInfo. Like the game's gem
+; programs it walks this step's hit events and keeps the ones of its wearer; for each, kiln.Signal sends the hit
+; (the $hit block below, 48 bytes) with the trigger's tag to Kiln.Abilities, which finds the gem by the impact
+; entity and calls the mod's C# handler in the next Pre. Its GUID is fixed forever: saved gem items name it.
+; Assemble (no game files needed): python3 tools/impact/impact.py asm on_crit.kimp -o on_crit.bin
+program 6b696c6e-6765-6d73-8000-000000000002
+stack 256
+streams none
+
+; the game writes the used item's power into a program's first impact.DamageSetup variable (docs/re/abilities.md,
+; "Facts for programs Kiln generates"): this one is there to take it, so nothing else is overwritten
+var $power      impact.DamageSetup
+var $root       ecs.EntityId
+var $index      uint32
+var $tick       uint32
+var $weaponCat  WeaponCategoryReference
+var $skip       WeaponCategoryTypeMask = [Skill, Gem]
+var $enemies    FactionMask = [Fogger, Vukah, Scavenger, Wildlife, WildBeast, HitOthers, Skeleton, Cyclops, Drak, Ancients]
+
+; the payload kiln.Signal sends (Kiln.Abilities GemHit.Parse reads these offsets)
+var $hit        uint32 size 48
+var $hAttacker  ecs.EntityId @$hit+0
+var $hTarget    ecs.EntityId @$hit+4
+var $hPart      ecs.EntityId @$hit+8
+var $hHealth    sint32 @$hit+12
+var $hPos       float3 @$hit+16
+var $hWeapon    ecs.EntityId @$hit+28
+var $hSource    ecs.EntityId @$hit+32
+var $hCrit      bool @$hit+36
+var $hKill      bool @$hit+37
+var $hBackstab  bool @$hit+38
+var $hBlocked   bool @$hit+39
+var $hEnemy     bool @$hit+40
+
+code:
+step:   ecall getRoot($root)
+        pop
+        iconst0
+        gstore $index
+next:   ecall forEachHitEvent(_, $hBlocked, _, $hBackstab, $hCrit, _, $hKill, _, _, _, _, _, $weaponCat, _, $hAttacker, $hSource, $hTarget, $hPart, $hWeapon, $hPos, _, $hHealth, _, $index, $tick)
+        brt hit
+        rvm
+        br step
+hit:    ecall isSameEntity($hAttacker, $root)
+        brf next
+        ecall hasWeaponCategoryType($skip, $weaponCat)
+        brt next
+        gload $hCrit
+        brf next
+        iconst0
+        gstore $hEnemy
+        ecall hasFaction($enemies, $hTarget, _)
+        brf send
+        iconst1
+        gstore $hEnemy
+send:   ecall kiln.Signal($hit, 0x6b470002)
+        pop
+        br next
+        halt
+
+shutdown:
+        halt

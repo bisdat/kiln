@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "content-pack.schema.json",
   "title": "Kiln data pack (content/*.json), format 1",
-  "description": "kiln.content's and kiln.gamedata's data packs: rules over the game's registries (items, recipes, loot, drops, templates, arsenals, sequences, buffs, perks, skills, itemdata), new items / recipes and gamedata clones (\"add\" lists), and sections of other services (creatures). Read by native/services/content (nlohmann::json with comments allowed; trailing commas are NOT allowed). Field paths come from the game's reflection at run time, so this schema checks the document's shape; `kiln lint` checks names and paths against the game-data catalog. Docs: docs/kiln/services/content.md, gamedata.md, creatures.md.",
+  "description": "kiln.content's and kiln.gamedata's data packs: rules over the game's registries (items, recipes, loot, drops, templates, arsenals, sequences, buffs, perks, skills, itemdata), typed gear values (gear, gearRules), new items / recipes and gamedata clones (\"add\" lists), and sections of other services (creatures). Read by native/services/content (nlohmann::json with comments allowed; trailing commas are NOT allowed). Field paths come from the game's reflection at run time, so this schema checks the document's shape; `kiln lint` checks names and paths against the game-data catalog. Docs: docs/kiln/services/content.md, gamedata.md, creatures.md.",
   "type": "object",
   "x-kiln-docs": "docs/kiln/services/content.md#data-packs",
   "properties": {
@@ -21,6 +21,8 @@
     "skills": { "$ref": "#/$defs/skillsSection" },
     "itemdata": { "$ref": "#/$defs/itemdataSection" },
     "creatures": { "$ref": "#/$defs/creaturesSection" },
+    "gear": { "$ref": "#/$defs/gearSection" },
+    "gearRules": { "$ref": "#/$defs/gearRules" },
     "abilities": { "description": "Reserved for Kiln.Abilities (a known section name; no service reads it yet).", "x-kiln-docs": "docs/kiln/services/gamedata.md#pack-sections-of-other-services" }
   },
   "patternProperties": { "^@": { "description": "Keys starting with @ are skipped (the content sync's @fields, @definitions)." } },
@@ -28,6 +30,158 @@
   "x-kiln-unknownKeys": "warning",
   "x-kiln-unknownKeysMessage": "unknown section (kiln.content ignores it unless a service registers it with Content.RegisterSection)",
   "$defs": {
+    "gearNumber": {
+      "description": "A number in the tooltip's own units, or an op relative to the game's value of the item: {\"mul\": 1.2}, {\"add\": 5}, {\"set\": 30}, \"min\", \"max\", \"raiseOnly\", \"lowerOnly\".",
+      "anyOf": [
+        { "type": "number" },
+        {
+          "type": "object",
+          "properties": {
+            "set": { "type": "number" },
+            "mul": { "type": "number" },
+            "add": { "type": "number" },
+            "min": { "type": "number" },
+            "max": { "type": "number" },
+            "raiseOnly": { "type": "boolean" },
+            "lowerOnly": { "type": "boolean" }
+          },
+          "additionalProperties": false,
+          "minProperties": 1
+        }
+      ]
+    },
+    "gearSection": {
+      "type": "object",
+      "description": "Typed values of item types in the numbers the game's tooltip shows (\"<selector>\": {gear rule}): kiln.content solves them into item fields per matched item, as layers of the pack's mod, after the items section. Docs: docs/kiln/services/content.md#gear-values.",
+      "x-kiln-docs": "docs/kiln/services/content.md#gear-values",
+      "properties": {
+        "add": { "not": {}, "x-kiln-message": "new items go in the items section's \"add\" list; gear rules change items" }
+      },
+      "propertyNames": { "$ref": "#/$defs/itemSelector" },
+      "additionalProperties": { "$ref": "#/$defs/gearRule" }
+    },
+    "gearRule": {
+      "type": "object",
+      "description": "The gear values of every item the selector matches. Other keys are item field paths, as in the items section (the typed keys win where both name one field).",
+      "x-kiln-docs": "docs/kiln/services/content.md#gear-values",
+      "properties": {
+        "@where": {
+          "$ref": "#/$defs/where",
+          "x-kiln-fields": "items",
+          "description": "Conditions on the game's original values of the item, as in the items section.",
+          "properties": {
+            "output": { "not": {}, "x-kiln-message": "output / input conditions are for recipes" },
+            "input": { "not": {}, "x-kiln-message": "output / input conditions are for recipes" }
+          }
+        },
+        "@refs": { "type": "boolean", "description": "Opt in to changing the perk slots of game items (perks), as in the items section." },
+        "power": { "$ref": "#/$defs/gearNumber", "description": "The damage the tooltip shows at the item's lowest level (levels, else the game's), solved into damageSetup.dmgMod with the item's speed. 0..100000." },
+        "speed": { "$ref": "#/$defs/gearNumber", "description": "damageSetup.speedMod: the damage factor of the weapon's speed class (it multiplies the damage; the attack speed is the animation). More than 0, at most 100. Alone it changes the tooltip's damage: give power too to keep it." },
+        "damage": {
+          "type": "object",
+          "description": "Shares of the damage per kind (0.5 = half; the game's weapons add up to 1), and for wood, stone, metal and explosion the whole numbers the game keeps for what a tool harvests and breaks. Kinds not named keep their value.",
+          "properties": {
+            "cut": { "$ref": "#/$defs/gearNumber" }, "pierce": { "$ref": "#/$defs/gearNumber" }, "blunt": { "$ref": "#/$defs/gearNumber" },
+            "fire": { "$ref": "#/$defs/gearNumber" }, "ice": { "$ref": "#/$defs/gearNumber" }, "shroud": { "$ref": "#/$defs/gearNumber" },
+            "fog": { "$ref": "#/$defs/gearNumber", "description": "The game's name of shroud." },
+            "lightning": { "$ref": "#/$defs/gearNumber" }, "poison": { "$ref": "#/$defs/gearNumber" }, "healing": { "$ref": "#/$defs/gearNumber" },
+            "wood": { "$ref": "#/$defs/gearNumber" }, "stone": { "$ref": "#/$defs/gearNumber" }, "metal": { "$ref": "#/$defs/gearNumber" },
+            "explosion": { "$ref": "#/$defs/gearNumber" }
+          },
+          "additionalProperties": false
+        },
+        "armor": {
+          "type": "object",
+          "description": "The armour the tooltip shows per kind at the item's lowest level, solved into armorSetup.distribution. 0..100000.",
+          "properties": {
+            "physical": { "$ref": "#/$defs/gearNumber" }, "magical": { "$ref": "#/$defs/gearNumber" }, "cut": { "$ref": "#/$defs/gearNumber" },
+            "pierce": { "$ref": "#/$defs/gearNumber" }, "blunt": { "$ref": "#/$defs/gearNumber" }, "fire": { "$ref": "#/$defs/gearNumber" },
+            "ice": { "$ref": "#/$defs/gearNumber" }, "shroud": { "$ref": "#/$defs/gearNumber" },
+            "fog": { "$ref": "#/$defs/gearNumber", "description": "The game's name of shroud." },
+            "lightning": { "$ref": "#/$defs/gearNumber" }
+          },
+          "additionalProperties": false
+        },
+        "block": { "$ref": "#/$defs/gearNumber", "description": "blockSetup.quality, 0..1." },
+        "staminaCost": { "$ref": "#/$defs/gearNumber", "description": "The item's StaminaCost value (impactValues.StaminaCost), as weapon blocks write it; for items that have one." },
+        "rarity": {
+          "description": "The type's rarity: what the recipe tooltip shows and a copy is made with when the game does not roll it. The game has no rarity above legendary.",
+          "anyOf": [
+            { "type": "string", "pattern": "^(common|uncommon|rare|epic|legendary|Common|Uncommon|Rare|Epic|Legendary)$" },
+            { "type": "integer", "minimum": 0, "maximum": 4 }
+          ]
+        },
+        "levels": {
+          "description": "The levels a copy is made at: a level (both ends) or [lowest, highest], 1..55.",
+          "anyOf": [
+            { "type": "integer", "minimum": 1, "maximum": 55 },
+            { "type": "array", "items": { "type": "integer", "minimum": 1, "maximum": 55 }, "minItems": 1, "maxItems": 2 }
+          ]
+        },
+        "rolled": { "type": "boolean", "description": "generateRarity: the game rolls the rarity of each new copy (true, as for loot weapons), or every copy is the type's rarity (false)." },
+        "perks": { "$ref": "#/$defs/kitbash/properties/perks" },
+        "socket": { "type": "boolean", "description": "gemSlotOverride: new copies get a gem socket (gear other than weapons needs Kiln's sockets: docs/kiln/services/gems-sockets.md)." },
+        "maxStack": { "$ref": "#/$defs/gearNumber", "description": "maxStackSize, 1..65535." },
+        "recipe": {
+          "type": "object",
+          "description": "Every recipe that makes the item: its ingredients and crafting time (other recipe fields: the recipes section).",
+          "properties": {
+            "inputs": { "description": "The whole new ingredient list (1-32 {\"item\", \"count\"} or {\"category\", \"count\"}), or {\"mul\": x, \"min\": 1} to scale the original amounts." },
+            "duration": { "$ref": "#/$defs/gearNumber", "description": "craftingDuration in seconds." }
+          },
+          "additionalProperties": false
+        }
+      },
+      "x-kiln-fields": "items",
+      "additionalProperties": { "$ref": "#/$defs/value" }
+    },
+    "gearRarityValues": {
+      "description": "One value per rarity: a list of up to five, common to legendary (null keeps the game's), or {\"common\": ..., \"legendary\": ...}.",
+      "anyOf": [
+        { "type": "array", "maxItems": 5, "items": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/gearNumber" }] } },
+        {
+          "type": "object",
+          "propertyNames": { "pattern": "^(common|uncommon|rare|epic|legendary|Common|Uncommon|Rare|Epic|Legendary)$" },
+          "additionalProperties": { "$ref": "#/$defs/gearNumber" }
+        }
+      ]
+    },
+    "gearRules": {
+      "type": "object",
+      "description": "The game's balancing values for gear (keen::BalancingTable): boot values, read before the game starts, so the mod needs \"boot\": true; they act where the mod runs (the server's values act; a player's game shows them when it has the mod too). Applied whole or not at all. Docs: docs/kiln/services/content.md#gear-rules-boot-values.",
+      "x-kiln-docs": "docs/kiln/services/content.md#gear-rules-boot-values",
+      "properties": {
+        "comment": { "description": "Free text, ignored." },
+        "rarityDurability": { "$ref": "#/$defs/gearRarityValues", "description": "rarityDurabilityMod: the factor of each rarity on a copy's max durability (the game's: 0.9, 0.95, 1, 1.05, 1.1). 0.01..100." },
+        "socketChance": { "$ref": "#/$defs/gearRarityValues", "description": "gemSlotProbability: the chance of each rarity that a new weapon gets a gem socket (the game's: 0, 0.05, 0.25, 0.5, 1). 0..1." },
+        "durability": {
+          "type": "object",
+          "description": "Max durability: (start + growth x (level - 1)) x the rarity's factor x the item's own factor.",
+          "properties": {
+            "start": { "$ref": "#/$defs/gearNumber", "description": "durabilityStart (the game's: 145)." },
+            "growth": { "$ref": "#/$defs/gearNumber", "description": "durabilityGrowth per level (the game's: 2)." }
+          },
+          "additionalProperties": false
+        },
+        "unlockCost": {
+          "type": "object",
+          "description": "What unlocking an enhancement at the workbench costs (the game's perk unlock cost).",
+          "properties": {
+            "seed": { "$ref": "#/$defs/gearNumber", "description": "perkUpgradeCostSeed, a whole number (the game's: 8)." },
+            "creep": { "$ref": "#/$defs/gearNumber", "description": "perkCostCreep: the growth with the level (the game's: 0.15)." },
+            "weapons": { "$ref": "#/$defs/gearNumber", "description": "perkCostFactorWeaponsShield: the factor for weapons and shields." },
+            "armor": { "$ref": "#/$defs/gearNumber", "description": "perkCostFactorArmor: the factor for armour." },
+            "rings": { "$ref": "#/$defs/gearNumber", "description": "perkCostFactorRings: the factor for rings." },
+            "advanced": { "$ref": "#/$defs/gearNumber", "description": "advancedPerkCostNominator: the extra cost of a legendary item's later unlocks (the game's: 8)." },
+            "advancedFrom": { "$ref": "#/$defs/gearNumber", "description": "advancedPerkCostStartLevel: from which unlock the extra cost applies, 0..5 (the game's: 4)." }
+          },
+          "additionalProperties": false
+        },
+        "lootRarityRates": { "not": {}, "x-kiln-message": "not supported yet: Kiln has not mapped the game resource that holds the loot rarity rates" }
+      },
+      "patternProperties": { "^@": {} },
+      "additionalProperties": false
+    },
     "guid": {
       "type": "string",
       "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",

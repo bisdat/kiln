@@ -1,0 +1,9 @@
+{
+  "id": "upgrades-test",
+  "name": "rarity upgrades: lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "UpgradesTest.dll",
+  "side": "server",
+  "clients": "none"
+}

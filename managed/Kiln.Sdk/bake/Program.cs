@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Kiln.Sdk.Bake <mod folder> [--steps N] [--timeout S] [--list FILE] [--temp DIR] [--dry-run]
+// Kiln.Sdk.Bake <mod folder> [--steps N] [--timeout S] [--list FILE] [--temp DIR] [--dry-run] [--world-tables]
 // Writes into the mod folder what its code defines and the game reads only at start (Baker.cs, docs/kiln/modding/baked.md).
 // Lines for MSBuild: "<folder>/kiln.mod.json: warning KILN030: ..." and "... error KILN032: ...", which Exec turns into a
 // build warning or error. Exit codes: 0 done (baked, or a mod that does not load without the game: a note); 1 the bake
@@ -11,6 +11,7 @@ string? folder = null, temp = null, list = null;
 var steps = 10;
 var timeout = 120;
 var dry = false;
+var worldTables = false;
 for (var i = 0; i < args.Length; i++)
 {
     switch (args[i])
@@ -32,11 +33,14 @@ for (var i = 0; i < args.Length; i++)
         case "--dry-run":
             dry = true;
             break;
+        case "--world-tables":
+            worldTables = true;
+            break;
         default:
             if (folder is null && !args[i].StartsWith("--", StringComparison.Ordinal)) folder = args[i];
             else
             {
-                Console.Error.WriteLine($"Kiln.Sdk.Bake: unknown argument {args[i]}; usage: Kiln.Sdk.Bake <mod folder> [--steps N] [--timeout S] [--list FILE] [--temp DIR] [--dry-run]");
+                Console.Error.WriteLine($"Kiln.Sdk.Bake: unknown argument {args[i]}; usage: Kiln.Sdk.Bake <mod folder> [--steps N] [--timeout S] [--list FILE] [--temp DIR] [--dry-run] [--world-tables]");
                 Environment.Exit(2);
             }
             break;
@@ -48,7 +52,7 @@ if (folder is null || !File.Exists(Path.Combine(folder, "kiln.mod.json")))
     Environment.Exit(2);
 }
 var origin = Path.Combine(Path.GetFullPath(folder), "kiln.mod.json");
-Environment.Exit(Bake.Run(folder, origin, new BakeOptions { Steps = steps, TempDirectory = temp, DryRun = dry }, TimeSpan.FromSeconds(timeout), list));
+Environment.Exit(Bake.Run(folder, origin, new BakeOptions { Steps = steps, TempDirectory = temp, DryRun = dry, WorldTables = worldTables }, TimeSpan.FromSeconds(timeout), list));
 
 namespace Kiln.Sdk.Bake
 {

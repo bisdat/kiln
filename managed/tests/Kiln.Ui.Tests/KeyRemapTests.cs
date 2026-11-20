@@ -95,4 +95,24 @@ public sealed class KeyRemapTests : IDisposable
         Assert.False(Press(0x09));  // Tab, to change section: not taken as the binding
         Assert.Equal("F2", _binding.Key.ToString());
     }
+
+    /// <summary>Inbox 40: the Keys page had no way to unbind a key (only "None" in keybinds.json). A binding's row has an
+    /// Unbind button that sets it to None; the menu's own key has none (it would lock the menu away).</summary>
+    [Fact]
+    public void Unbind_sets_a_binding_to_None_and_the_menu_key_cannot_be_unbound()
+    {
+        var ui = new UiDraw();
+        FakeUiTable.Click = "Unbind";
+        UiEngine.KeyLine(ui, _binding.Id, "test", _binding.Key, _binding.Default);
+        Assert.True(_binding.Key.IsNone);
+        Assert.Equal("None", _binding.Key.ToString());
+        lock (FakeUiTable.Texts) FakeUiTable.Texts.Clear();
+        FakeUiTable.Click = "Unbind";
+        UiEngine.KeyLine(ui, KeyBindings.MenuId, "menu", KeyBindings.MenuKey, KeyBindings.MenuDefault);
+        FakeUiTable.Click = null;
+        lock (FakeUiTable.Texts) Assert.DoesNotContain("Unbind", FakeUiTable.Texts);
+        Assert.False(KeyBindings.MenuKey.IsNone);
+        KeyBindings.Reset(_binding.Id);
+        Assert.Equal("F2", _binding.Key.ToString());
+    }
 }

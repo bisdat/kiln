@@ -12,8 +12,9 @@ namespace ClientPass;
 // menu; part 3 reads that exit and takes the verdict. The part reached is kept in the mod's data folder.
 public sealed partial class ClientPassMod
 {
-    /// <summary>The kiln.json switch that turns the exit link on for a native Windows game: top-level
-    /// <c>"unloadAtExit": "auto" | "on" | "off"</c> (default auto: on under Wine, off on native Windows).</summary>
+    /// <summary>The kiln.json switch that turns the plugins' exit handlers on for a native Windows game: top-level
+    /// <c>"unloadAtExit": "auto" | "on" | "off"</c> (default auto: every handler under Wine; on native Windows only
+    /// Kiln's own exit steps).</summary>
     private const string WindowsUnloadKey = "unloadAtExit";
 
     [ClientCheck("core.unload-quit", "Kiln unloads cleanly when the game quits", Area = "Core", Since = Dev26,
@@ -23,8 +24,8 @@ public sealed partial class ClientPassMod
     [ClientCheck("core.unload-windows", "Kiln unloads cleanly when the game quits, on Windows", Area = "Core", Since = Dev26,
         Tags = [Windows], Needs = ClientCheckNeeds.Hosted, Order = 915)]
     public Task CoreUnloadWindows(CheckContext c) => UnloadCheck(c, "unload-windows",
-        $"On a native Windows PC the exit link is off by default in this release: before part 1, set \"{WindowsUnloadKey}\" " +
-        "to \"on\" in kiln/kiln.json and start the game again. ");
+        $"On a native Windows PC the plugins' exit handlers are off by default in this release (only Kiln's own exit " +
+        $"steps run): before part 1, set \"{WindowsUnloadKey}\" to \"on\" in kiln/kiln.json and start the game again. ");
 
     private static async Task UnloadCheck(CheckContext c, string name, string? first)
     {
@@ -121,11 +122,14 @@ public sealed partial class ClientPassMod
         var exiting = Line("unload: the process is exiting");
         var order = Line("unload: called in this order:");
         var done = Line("unload: done in");
+        var parked = Line("kiln.tasks: parked at exit");
         var abnormal = Line("not a normal exit");
 
         c.Expect(exiting?.Contains("exit code 0", StringComparison.Ordinal) == true,
             $"{exit}: \"unload: the process is exiting (..., exit code 0, ...)\"", exiting);
         c.Expect(order is not null, $"{exit}: \"unload: called in this order: ...\"", order);
+        c.Expect(parked is not null && !parked.Contains("still running", StringComparison.Ordinal),
+            $"{exit}: \"kiln.tasks: parked at exit; ...\" with no task left running", parked);
         c.Expect(done?.Contains("(0 faulted, 0 given up, 0 not called)", StringComparison.Ordinal) == true,
             $"{exit}: \"unload: done in N ms (0 faulted, 0 given up, 0 not called)\"", done);
         if (abnormal is not null)

@@ -258,6 +258,11 @@ typedef struct KilnGameplayRecipe {
     KilnGameplayItem outputs[KILN_GAMEPLAY_MAX_OUTPUTS];
 } KilnGameplayRecipe;
 
+enum { KILN_GAMEPLAY_HOOK_HOST_READY=0u, KILN_GAMEPLAY_HOOK_BUILD=1u, KILN_GAMEPLAY_HOOK_CRAFT=2u, KILN_GAMEPLAY_HOOK_TERRAFORM=4u,
+       KILN_GAMEPLAY_HOOK_SPAWN=8u, KILN_GAMEPLAY_HOOK_ENTITIES=16u, KILN_GAMEPLAY_HOOK_ALL=31u };
+/* A group state: 0 resolved/unused, 1 installed, 2 waiting for safe Pre, 3 refused. */
+typedef struct KilnGameplayHookStatus { uint32_t state, installed_targets; char reason[512]; } KilnGameplayHookStatus;
+
 typedef struct KilnGameplayStatus {
     uint32_t size;          /* set to sizeof(KilnGameplayStatus) before calling */
     uint8_t intercept;      /* 1: pending events are read in Pre */
@@ -285,6 +290,11 @@ typedef struct KilnGameplayStatus {
     uint8_t discard;        /* 1: discard actions are read from PlayerInput */
     uint8_t reserved9[7];
     uint64_t discards_seen, discards_canceled;
+    /* Appended: build_hooks remains boolean. Bits 0..4: blueprint, prop, dismantle, dismantle2, pickup.
+     * State 0: idle/resolved, 1: installed, 2: waiting for safe Pre, 3: refused (reason includes partial mask). */
+    uint32_t build_hook_state, build_hook_mask;
+    char build_hook_reason[512];
+    KilnGameplayHookStatus hook_groups[4]; /* craft, terraform, natural spawn, entities (appended) */
 } KilnGameplayStatus;
 
 /* component_change ops */
@@ -349,7 +359,25 @@ typedef struct KilnGameplayApi {
      * world goes away. */
     KilnResult(KILN_CALL* component_change)(KilnOwner owner, KilnEntity entity, uint32_t hash, const void* data,
                                             uint32_t size, uint32_t op);
+    /* First-use build interest, AnyThread. OK includes waiting for checked safe Pre (see gameplay.build_hooks).
+     * UNAVAILABLE: refused for this process. Appended in dev.29: check header.size. */
+    KilnResult(KILN_CALL* request_build)(KilnOwner owner);
+    /* AnyThread. Records demand; live worlds install at a checked safe Pre. OK includes pending; read group row.
+     * Bit mask of KILN_GAMEPLAY_HOOK_*. request_build is equivalent to mask BUILD.
+     * groups==0 announces a demand-aware host (no installation). Call during the pre-world pass even with no mods.
+     * Without this announcement by the first world (or a legacy status probe), all groups are requested for
+     * legacy-host/native-only compatibility. The first-world fallback batches once; ordinary late demand is paced. */
+    KilnResult(KILN_CALL* request_hooks)(KilnOwner owner, uint32_t groups);
 } KilnGameplayApi;
+#ifdef __cplusplus
+static_assert(KILN_GAMEPLAY_HOOK_HOST_READY==0u);
+static_assert(offsetof(KilnGameplayApi, request_build)==128);
+static_assert(offsetof(KilnGameplayApi, request_hooks)==136);
+static_assert(sizeof(KilnGameplayApi)==144);
+static_assert(sizeof(KilnGameplayHookStatus)==520);
+static_assert(offsetof(KilnGameplayStatus, hook_groups)==648);
+static_assert(sizeof(KilnGameplayStatus)==2728);
+#endif
 
 #ifdef __cplusplus
 }

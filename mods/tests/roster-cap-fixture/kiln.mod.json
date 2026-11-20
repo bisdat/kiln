@@ -1,0 +1,9 @@
+{
+  "id": "roster-cap-fixture",
+  "name": "a roster of 128 NPCs (guided check fixture)",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "side": "both",
+  "clients": "mod",
+  "description": "Fixture of the guided check 17-roster-client (docs/kiln/client-pass.md): 93 new roster NPCs, so the roster holds 128 with the game's 35 and Kiln's second unlock page is installed at the start. Entries 63 and 65 have a summon tool. Data only: quests/roster.json, written by mods/tests/roster-cap-test/gen_roster.py fixture. Install on the host's game (and on every player's game that joins)."
+}

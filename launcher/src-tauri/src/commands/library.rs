@@ -2,7 +2,7 @@
 //! The content-addressed mod library on kiln_manage::library; imports run as tasks.
 
 use super::TaskId;
-use super::app::{spawn_task, to_value};
+use super::app::{launcher_log, spawn_task, to_value};
 use crate::state::{blocking, dirs};
 use kiln_manage::Error;
 use kiln_manage::library::{self, Detected, LibraryEntry, LibraryRef, RemoveReport, TakenOver};
@@ -38,8 +38,28 @@ pub async fn library_import(app: AppHandle, paths: Vec<String>) -> Result<TaskId
     let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
     Ok(spawn_task(&app, "library_import", title, move |p| {
         for path in &paths { kiln_manage::quick::validate_import_path(path)?; }
-        to_value(library::import(&dirs()?, &paths, p)?)
+        let r = library::import(&dirs()?, &paths, p)?;
+        log_import("library_import", &r);
+        to_value(r)
     }))
+}
+
+/// What an import took, left out (with the reason) and did not need, one line each in launcher.log: the toast goes, a
+/// support report keeps these (inbox 42). The task's own line says only that it ended.
+fn log_import(task: &str, r: &library::ImportReport) {
+    let name = |x: &LibraryRef| r.names.get(&format!("{}/{}", x.kind.as_str(), x.id)).cloned().unwrap_or_else(|| x.id.clone());
+    for x in &r.imported {
+        launcher_log("import", &format!("{task}: added {} ({}/{} {})", name(x), x.kind.as_str(), x.id, x.version));
+    }
+    for x in &r.existing {
+        launcher_log("import", &format!("{task}: already there {} ({}/{} {})", name(x), x.kind.as_str(), x.id, x.version));
+    }
+    for s in &r.skipped {
+        launcher_log("import", &format!("{task}: left out {}: {}", s.path, s.reason));
+    }
+    for n in &r.notes {
+        launcher_log("import", &format!("{task}: not needed {}: {}", n.path, n.text));
+    }
 }
 
 /// The simple flow (kiln_manage::quick::add): imports `paths`, adds what they hold to the game's active profile
@@ -62,6 +82,7 @@ pub async fn library_add(app: AppHandle, game_id: String, paths: Vec<String>) ->
     let a = app.clone();
     Ok(spawn_task(&app, "library_add", title, move |p| {
         let r = kiln_manage::quick::add(&dirs()?, &g, &paths, p)?;
+        log_import("library_add", &r.import);
         if r.applied {
             super::profile::emit_status_later(a, game_id);
         }
@@ -118,6 +139,25 @@ pub async fn library_take_over(app: AppHandle, entry: LibraryRef) -> Result<Take
     Ok(done)
 }
 
+/// "Roll back to <version>" (kiln_manage::kept::rollback): in the profile `profile_id` (the game's active one), the mod
+/// `kind`/`id` uses its kept version `to` (null: the newest kept one) instead of its current entry. An ordinary profile
+/// change: like profile_save, the game's profile.json is written again where the profile is active and the game is not
+/// running (that placement puts the kept settings back into the mod's game-folder copy), and its Undo is profile_revert
+/// with the result's `changes`. The version rolled away from becomes the kept one.
+#[tauri::command]
+pub async fn library_rollback(app: AppHandle, game_id: Option<String>, profile_id: String, kind: ModKind, id: String,
+                              to: Option<kiln_manage::kept::VersionRef>) -> Result<kiln_manage::kept::RollbackReport, Error> {
+    let (r, applied) = blocking(move || {
+        let d = dirs()?;
+        let g = game_id.as_deref().and_then(|g| crate::state::game(g).ok());
+        let r = kiln_manage::kept::rollback(&d, g.as_ref(), &profile_id, kind, &id, to.as_ref())?;
+        let applied = super::profile::reapply_where_active(&d, &r.profile_id);
+        Ok((r, applied))
+    }).await?;
+    super::profile::announce_applied(&app, applied);
+    Ok(r)
+}
+
 /// "Clean up": removes the versions with one look at the running processes and what lists them. Refuses (game_running)
 /// the whole batch while a game runs, or a server may read one of them; otherwise reports each version not removed.
 #[tauri::command]
@@ -155,4 +195,16 @@ pub async fn library_lint(entry: Option<LibraryRef>, profile_id: Option<String>)
         }
     })
     .await
+}
+
+/// Local native DLL replacement: ordinary profile retention, then the update placement path.
+#[tauri::command]
+pub async fn library_replace_dll(app: AppHandle, profile_id: String, entry: LibraryRef, path: String, confirmed: bool) -> Result<library::ReplacedDll, Error> {
+    let (r, applied) = blocking(move || {
+        let d = dirs()?;
+        let r = library::replace_dll(&d, &profile_id, &entry, std::path::Path::new(&path), confirmed)?;
+        Ok((r, super::profile::reapply_where_active(&d, &profile_id)))
+    }).await?;
+    super::profile::announce_applied(&app, applied);
+    Ok(r)
 }

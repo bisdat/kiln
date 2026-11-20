@@ -80,6 +80,64 @@ public sealed class ServicesTests
     }
 
     [Fact]
+    public async Task Stations_names_the_stations_part_of_Kiln_Blocks()
+    {
+        // KilnServices "Stations" (0.2.0-dev.29.15): Stations and Bases without Blocks' defaults (side both, clients kiln)
+        const string stations = """
+            public sealed class M : Mod
+            {
+                public override void OnLoad()
+                {
+                    if (!Stations.Available || !Bases.Available) return;
+                    var plan = new FillOptions { Crafts = 2, Mode = FillMode.Add };
+                    Events.On<StationCraftedEvent>(e => { });
+                    BaseId none = BaseId.None;
+                }
+            }
+            """;
+        Ids(await Run(A, stations, Props(("KilnServicesList", "Stations"))));
+        Ids(await Run(A, stations, Props(("KilnServicesList", "Blocks"))));                  // Blocks covers them too, as before
+        var d = await Run(A, stations, Props(("KilnServicesList", "Items")));
+        Ids(d, "KILN108");
+        Assert.Contains("Stations", d[0].GetMessage());
+        // Blocks content under Stations alone: Blocks is asked for (its side and clients defaults matter there)
+        d = await Run(A, "public sealed class M : Mod { public override void OnLoad() { Blocks.Define(\"chilled\", new StatusBlock { Name = \"Chilled\", Seconds = 8 }); } }",
+            Props(("KilnServicesList", "Stations")));
+        Ids(d, "KILN108");
+        Assert.Contains("Blocks", d[0].GetMessage());
+    }
+
+    [Fact]
+    public async Task Every_public_stations_type_is_covered_by_Stations()
+    {
+        // Each public type declared in managed/services/Kiln.Blocks/World/Stations (0.2.0-dev.29.16: BaseIdChange was
+        // missing, so BasesChangedEvent.Changed under "Stations" alone raised KILN108 on BaseIdChange.Old)
+        const string all = """
+            public sealed class M : Mod
+            {
+                public override void OnLoad()
+                {
+                    Events.On<BasesChangedEvent>(e => { foreach (BaseIdChange c in e.Changed) { BaseId o = c.Old, n = c.New; } });
+                    BaseInfo? bi = null; BaseAltar ba = default; CategoryChoice cc = default; IngredientOption io = default;
+                    IngredientCategory? ic = null; StationStack ss = default; StationInput si = default; StationRecipe? sr = null;
+                    StationInfo? sf = null; FillMode fm = FillMode.Add; FillOptions? fo = null; FillLimit fl = default;
+                    FillInput fi = default; FillPlan? fp = null; StopWhen sw = default; StationActionStatus st = default;
+                    CollectWhat cw = CollectWhat.All; StationAction sa = default; StationResult? res = null;
+                    StationPlayerAction pa = default;
+                    Events.On<StationStateChangedEvent>(e => { });
+                    Events.On<StationPlacedEvent>(e => { });
+                    Events.On<StationRemovedEvent>(e => { });
+                    Events.On<StationCraftedEvent>(e => { });
+                    Events.On<StationPlayerActionEvent>(e => { });
+                    Events.On<StationChangedEvent>(e => { });
+                    _ = Stations.Available && Bases.Available;
+                }
+            }
+            """;
+        Ids(await Run(A, all, Props(("KilnServicesList", "Stations"))));
+    }
+
+    [Fact]
     public async Task No_property_no_diagnostics()
     {
         Ids(await Run(A, "public sealed class M : Mod { public override void OnLoad() => Players.Joined += p => { }; }"));

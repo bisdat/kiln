@@ -23,7 +23,31 @@
     "foreign": { "type": "array", "items": { "$ref": "#/$defs/foreignSymbol" }, "description": "Every sigdb symbol whose live code differed from the exe file's before Kiln hooked anything (someone else patched it), Kiln-hooked or not." },
     "overlaps": { "type": "array", "items": { "$ref": "#/$defs/overlap" }, "description": "Closed-DLL report. Absent in a core without it (dev.20)." },
     "rules": { "type": "array", "items": { "$ref": "#/$defs/ruleResult" }, "description": "The compat rules that fired this session. Absent in a core without it." },
-    "ruleFiles": { "type": "array", "items": { "$ref": "#/$defs/ruleFile" }, "description": "The rule files that exist (shipped defaults, then the player's); a missing file is not listed." }
+    "ruleFiles": { "type": "array", "items": { "$ref": "#/$defs/ruleFile" }, "description": "The rule files that exist (shipped defaults, then the player's); a missing file is not listed." },
+    "codePatches": {
+      "type": "object",
+      "description": "Every place the live code differs from the exe file's when the map is written, Kiln's own hooks included (sigdb code_patch_map, since 0.2.0-dev.29.8). Absent in an older core.",
+      "required": ["available"],
+      "properties": {
+        "available": { "type": "boolean", "description": "False when Kiln has no file view of the code (then `reason`)." },
+        "reason": { "type": "string" },
+        "total": { "type": "integer", "minimum": 0, "description": "All places, also those past the row limit." },
+        "rows": {
+          "type": "array", "maxItems": 1024,
+          "items": {
+            "type": "object", "required": ["rva", "size", "by"],
+            "properties": {
+              "rva": { "type": "string", "description": "RVA of the place; a redirected call: its E8." },
+              "size": { "type": "integer", "minimum": 1 },
+              "by": { "type": "string", "description": "`call redirected to <module>+<offset>`, `jmp to <module>+<offset>` or `bytes changed in place`." },
+              "called": { "type": "string", "description": "A redirected call: RVA of the function it called in the file." },
+              "calledSymbol": { "type": "string" },
+              "symbol": { "type": "string", "description": "The sigdb symbol at the place, when there is one." }
+            }
+          }
+        }
+      }
+    }
   },
   "additionalProperties": true,
   "$defs": {
@@ -36,7 +60,8 @@
         "offset": { "$ref": "#/$defs/hex", "description": "Destination minus the module's base." },
         "address": { "$ref": "#/$defs/hex", "description": "The destination itself in this session (absent when no jump could be followed)." },
         "inPlace": { "const": true, "description": "Bytes were changed in place, no jump was found." },
-        "own": { "type": "boolean", "description": "The module is one of Kiln's (`kiln-*.dll`): not an overlap." }
+        "own": { "type": "boolean", "description": "The module is one of Kiln's (`kiln-*.dll`): not an overlap." },
+        "path": { "type": "string", "description": "Since 0.2.0-dev.29.19: the module's file, relative to the game folder with `/` (`kiln/chain/xhl-core/xhl-core.dll`, `dinput8.dll` for one in the game folder itself), else its full path (a Library DLL). Absent when the module is not known. Two DLLs can share a file name; this tells them apart." }
       },
       "additionalProperties": true
     },
@@ -81,7 +106,8 @@
         "module": { "type": ["string", "null"], "description": "The other side's DLL file name. For `refused`: the only module that patched game code (probably the culprit), or null when Kiln cannot tell, and `suspects` then lists the modules that patched game code." },
         "offset": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hex" }] },
         "address": { "$ref": "#/$defs/hex" },
-        "inPlace": { "const": true }
+        "inPlace": { "const": true },
+        "path": { "type": "string", "description": "Since 0.2.0-dev.29.19: the module's file, as `foreignDest.path`." }
       },
       "additionalProperties": true
     },
@@ -146,13 +172,14 @@
       "required": ["id", "action", "applied", "message"],
       "properties": {
         "id": { "type": "string" },
-        "action": { "enum": ["warn", "late", "disable"] },
+        "action": { "enum": ["warn", "late", "disable", "before"], "description": "before (dev.29): the subject's chain entries load before the target's." },
         "applied": {
           "type": "boolean",
           "description": "warn: true (it was logged). late: the subject is already a chain.ini [late] entry in this session (false for EMF's own loader, which is never deferred, and for a DLL another loader started first). disable: the subject did not load (a hosted mod the core switched off before its DLL ran, or a chain entry that is off); false for a dllmain native mod whose DLL the proxy loaded before kiln-core started. false: nothing was changed this session; `note` says what to do (`apply it in the launcher`, activate the profile again)."
         },
         "message": { "type": "string", "description": "The rule's message." },
         "subject": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/matcher" }] },
+        "target": { "$ref": "#/$defs/matcher", "description": "before only (dev.29): the DLL that loads after the subject. applied: every chain entry of the subject loaded before every entry of the target this session (a late entry after all early ones, list order within a phase); false: `note` says which did not, or that the core found no chain entry for a side." },
         "source": { "enum": ["shipped", "user"], "description": "Which file the rule came from." },
         "note": { "type": "string", "description": "Why `applied` is false, or what was done." }
       },

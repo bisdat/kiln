@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// The fake kiln.items (native/core/abi/services/kiln_items.h, the v1 table) under the real Kiln.Items.
+// The fake kiln.items (native/core/abi/services/kiln_items.h: the v1 table and v8's gear functions; v2-v7 answer
+// unavailable) under the real Kiln.Items.
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -7,18 +8,22 @@ using System.Text;
 
 namespace Kiln.TestKit;
 
-/// <summary>Mirror of <c>kiln_items.h</c>'s v1 table and the structs it uses. The sizes are pinned by tests to
-/// Kiln.Items' private mirrors (ItemsNative).</summary>
+/// <summary>Mirror of <c>kiln_items.h</c>'s v1 table, the v8 gear functions and the structs they use. The sizes are pinned
+/// by tests to Kiln.Items' private mirrors (ItemsNative).</summary>
 internal static unsafe class ItemsAbi
 {
     public const string Service = "kiln.items";
-    public const uint Version = 1;  // the v1 table only: water (v2), moves (v3), instances (v4) and equip (v5) are not there
+    // the whole v8 table: v1 and the gear functions (v8) are modelled; water (v2), instances (v4), equip (v5), equipment sets
+    // (v6) and socket rolls (v7) answer unavailable; v3 (moves, names, transfers, the result peek) is left null
+    public const uint Version = 8;
     public const int MaxChanges = 16, MaxInventories = 32, MessageMax = 160;
 
     // KilnItemsRequest.flags
     public const uint Level = 0x01, Rarity = 0x02, ExactSlot = 0x04, AllOrNothing = 0x08, Notify = 0x10, NoMerge = 0x20,
         DryRun = 0x40, Recipe = 0x80, Unlock = 0x100, GemSlot = 0x200;
-    public const uint KnownFlags = 0x3FF;
+    // v7 (the gem wave): sockets on any gear and the re-creation of gear; the kit models none of them (Unavailable)
+    public const uint GemSlotAny = 0x400, Replace = 0x800, Dye = 0x1000, Durability = 0x2000;
+    public const uint KnownFlags = 0x3FFF;
     public const int ProgramNone = 0, ProgramPending = 1, ProgramActive = 2, ProgramRunning = 3, ProgramBroken = 4;
 
     // KilnItemsResult.status
@@ -120,6 +125,172 @@ internal static unsafe class ItemsAbi
         public delegate* unmanaged[Cdecl]<Status*, int> GetStatus;
     }
 
+    // ---- v8: gear (kiln_items.h "gear") ----
+    public const uint GearAvailable = 0x01, GearUnlocked = 0x02, GearLevel = 0x04, GearForceSlot = 0x08, GearDurabilityRefresh = 0x10,
+        GearDurabilityRepair = 0x20, GearDryRun = 0x40, GearNotEquipped = 0x80;
+    public const uint GearAnyLevel = 0x200, GearDurabilityMax = 0x400;  // package P7
+    public const int GearMaxDurability = 1000000;
+    public const uint GearOps = GearAvailable | GearUnlocked | GearLevel | GearDurabilityRefresh | GearDurabilityRepair | GearDurabilityMax;
+    public const uint GearFlags = GearOps | GearForceSlot | GearDryRun | GearNotEquipped | GearAnyLevel;
+    public const int GearDone = 0, GearStale = 1, GearNotGear = 2, GearNoSlot = 3, GearOutOfRange = 4, GearEquipped = 5, GearUnavailable = 6,
+        GearDropped = 7, GearRefused = 8;
+    public const uint GearChangedPerks = 0x01, GearChangedLevel = 0x02, GearChangedDurability = 0x04, GearChangedState = 0x08,
+        GearChangedDurabilityMax = 0x10;
+    public const uint GearHasPerks = 0x01, GearHasLevel = 0x02, GearHasDurability = 0x04, GearEquippedNow = 0x08, GearDurabilityInit = 0x10;
+    public const ushort StateDurabilityInitialized = 0x02, StateHasLevel = 0x10, StateHasGemSlot = 0x100;  // ItemStateFlag masks
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearRequest
+    {
+        public uint Size, Flags, Entity, Stamp, Item;
+        public byte Available, Unlocked;
+        public ushort Reserved0;
+        public uint Level;
+        public int DurabilityMax;  // package P7 (was reserved)
+        public uint R0, R1;
+    }
+
+    // ---- v8 (package P7): power and armour scales (kiln_items.h "power and armour scales") ----
+    public const uint ScalePower = 0x01, ScaleArmor = 0x02;
+    public const int ScaleCapacity = 8192;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearScale
+    {
+        public uint Size, Flags, Entity, Stamp;
+        public float Power, Armor;
+        public uint R0, R1;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ScaleStatus
+    {
+        public uint Size;
+        public byte Power, Armor, PowerHooked, ArmorHooked;
+        public uint Entries, Capacity, Reserved;
+        public ulong Powered, Armored, Faults;
+        public fixed byte Detail[MessageMax];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearState
+    {
+        public uint Flags, Item;
+        public byte Available, Unlocked, Rarity, TypeRarity, MaxAvailable, RarityUi, LevelUi, Reserved0;
+        public uint Level, LevelMax, TypeLevelMin, TypeLevelMax;
+        public int Durability, DurabilityMax;
+        public ushort State, Reserved1;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearResult
+    {
+        public uint Size;
+        public int Status;
+        public ulong Ticket;
+        public uint Entity, Stamp, Flags, Changed, Steps, Reserved;
+        public ulong Step;
+        public GearState Before, After;
+        public fixed byte Message[MessageMax];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearStatus
+    {
+        public uint Size;
+        public byte Available, Program, Replicated, Saved;
+        public uint Pending;
+        public ulong Writes, Refused;
+        public fixed byte Detail[MessageMax];
+    }
+
+    // ---- v8 (package P3): upgrades (kiln_items.h "upgrades") ----
+    public const uint UpgradeWrite = 0x01, UpgradeDryRun = 0x02;
+    public const int UpgradeCantPay = 9, UpgradeBadPayer = 10, UpgradeChanged = 11, UpgradeMaxCosts = 8, UpgradeMaxPayers = 8, UpgradeMaxCount = 100000;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct UpgradeRequest
+    {
+        public uint Size, Flags, Player, CostCount, PayerCount, ExpectAvailable;
+        public GearRequest Gear;
+        public fixed uint Costs[16];  // (item, count) pairs
+        public fixed uint Payers[8];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct UpgradeResult
+    {
+        public uint Size;
+        public int Status;
+        public ulong Ticket;
+        public uint Flags, CostCount, PaidFromPlayer, Reserved;
+        public fixed uint Paid[8];
+        public fixed uint Have[8];
+        public GearResult Gear;
+    }
+
+    /// <summary><c>KilnItemsInstancesStatus</c> (v4), filled by the stub with flags 0 and why.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct InstancesStatus
+    {
+        public uint Size, Flags;
+        public ulong StampsIssued, Reads;
+        public uint TableSize, Resets, NextEntityId, Mismatches, HolderRebuilds, Reserved;
+        public fixed byte Detail[MessageMax];
+    }
+
+    /// <summary>The whole v8 table: v1, then v2 to v7 (stubs that answer unavailable; v3 is null, which Kiln.Items reads as
+    /// no v3, so moves, names, transfers and <c>items.result_peek</c> stay off as before), then the gear functions. Struct pointers are <c>void*</c> and
+    /// callbacks <c>nint</c> where the kit does not model them (the same calls).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct FullTable
+    {
+        public Table V1;
+        // v2: water
+        public delegate* unmanaged[Cdecl]<ulong, void*, nint, void*, ulong*, int> Fuel;
+        public delegate* unmanaged[Cdecl]<uint, int*, int*, int> FuelRead;
+        public delegate* unmanaged[Cdecl]<ulong, void*, nint, void*, ulong*, int> FuelKeep;
+        public delegate* unmanaged[Cdecl]<ulong, int> FuelKeepEnd;
+        // v3: moves, names, transfers, status2, the result peek
+        public delegate* unmanaged[Cdecl]<ulong, void*, nint, void*, ulong*, int> Move;
+        public delegate* unmanaged[Cdecl]<uint, byte*, uint, uint*, int> ContainerName;
+        public delegate* unmanaged[Cdecl]<ulong, void*, ulong*, int> TransferRuleAdd;
+        public delegate* unmanaged[Cdecl]<ulong, void*, void*, ulong*, int> TransferListen;
+        public delegate* unmanaged[Cdecl]<ulong, nint, void*, ulong*, int> TransferReportAdd;
+        public delegate* unmanaged[Cdecl]<ulong, int> TransferEnd;
+        public delegate* unmanaged[Cdecl]<void*, int> GetStatus2;
+        public nint PeekResult;
+        // v4: item instances
+        public delegate* unmanaged[Cdecl]<void*, uint, uint, uint, int> ReadInstances;
+        public delegate* unmanaged[Cdecl]<uint, void*, uint, uint, uint*, byte*, int> ReadHolder;
+        public delegate* unmanaged[Cdecl]<InstancesStatus*, int> GetInstancesStatus;
+        // v5: equip
+        public delegate* unmanaged[Cdecl]<ulong, void*, nint, void*, ulong*, int> Equip;
+        public delegate* unmanaged[Cdecl]<void*, int> GetEquipStatus;
+        // v6: equipment sets
+        public delegate* unmanaged[Cdecl]<ulong, uint, void*, int> SetCapture;
+        public delegate* unmanaged[Cdecl]<ulong, ulong, int> SetRelease;
+        public delegate* unmanaged[Cdecl]<void*, int> GetSetStatus;
+        public delegate* unmanaged[Cdecl]<ulong, ulong, void*, uint, void*, int> SetPlanOf;
+        public delegate* unmanaged[Cdecl]<ulong, void*, nint, void*, ulong*, int> EquipSet;
+        public delegate* unmanaged[Cdecl]<ulong, int> SetCancel;
+        // v7: socket rolls
+        public delegate* unmanaged[Cdecl]<ulong, void*, int> SocketRoll;
+        // v8: gear
+        public delegate* unmanaged[Cdecl]<ulong, GearRequest*, delegate* unmanaged[Cdecl]<GearResult*, void*, void>, void*, ulong*, int> GearWrite;
+        public delegate* unmanaged[Cdecl]<uint, uint, GearState*, int> GearRead;
+        public delegate* unmanaged[Cdecl]<GearStatus*, int> GetGearStatus;
+        // v8 (package P5): rarity_rolls, roll_status. Not modelled by the kit: null, so the rolls read as unavailable.
+        public void* RarityRolls;
+        public void* RollStatus;
+        // v8 (package P3): gear_upgrade
+        public delegate* unmanaged[Cdecl]<ulong, UpgradeRequest*, delegate* unmanaged[Cdecl]<UpgradeResult*, void*, void>, void*, ulong*, int> GearUpgrade;
+        // v8 (package P7): gear_scale, gear_scale_read, scale_status (the table without the game's hooks)
+        public delegate* unmanaged[Cdecl]<GearScale*, int> GearScaleSet;
+        public delegate* unmanaged[Cdecl]<uint, uint, GearScale*, int> GearScaleRead;
+        public delegate* unmanaged[Cdecl]<ScaleStatus*, int> ScaleStatusOf;
+    }
+
     /// <summary>The game's ItemId: FNV-1a-32 over the item GUID's 16 bytes.</summary>
     public static uint IdOf(ReadOnlySpan<byte> guid)
     {
@@ -129,8 +300,8 @@ internal static unsafe class ItemsAbi
     }
 }
 
-/// <summary>The C# functions behind the fake <c>kiln.items</c> table (v1): give, take, cancel, read, find_inventories,
-/// the item catalog and status.</summary>
+/// <summary>The C# functions behind the fake <c>kiln.items</c> table: give, take, cancel, read, find_inventories, the item
+/// catalog and status (v1), gear_write, gear_read and gear_status (v8), and stubs for v2 to v7 that answer unavailable.</summary>
 internal static unsafe class ItemsTable
 {
     private static ItemsAbi.Table* _table;
@@ -138,8 +309,9 @@ internal static unsafe class ItemsTable
     public static nint Create()
     {
         if (_table != null) return (nint)_table;
-        var t = (ItemsAbi.Table*)NativeMemory.AllocZeroed((nuint)sizeof(ItemsAbi.Table));  // process lifetime, never freed
-        t->Header = new ServiceHeader { Size = (uint)sizeof(ItemsAbi.Table), Version = ItemsAbi.Version };
+        var full = (ItemsAbi.FullTable*)NativeMemory.AllocZeroed((nuint)sizeof(ItemsAbi.FullTable));  // process lifetime, never freed
+        var t = &full->V1;
+        t->Header = new ServiceHeader { Size = (uint)sizeof(ItemsAbi.FullTable), Version = ItemsAbi.Version };
         t->Give = &Give;
         t->Take = &Take;
         t->Cancel = &Cancel;
@@ -152,8 +324,208 @@ internal static unsafe class ItemsTable
         t->FindItem = &FindItem;
         t->IdOfGuid = &IdOfGuid;
         t->GetStatus = &GetStatus;
+        // v2 to v7: not modelled, every call answers unavailable (a status call too: Kiln.Items then reads them as off)
+        full->Fuel = &Off5;
+        full->FuelRead = &OffFuelRead;
+        full->FuelKeep = &Off5;
+        full->FuelKeepEnd = &OffHandle;
+        // v3 (moves, names, transfers, status2, the result peek) stays null: Kiln.Items reads a null move function as no v3,
+        // so its move, name and transfer calls throw as they did on the v1 table
+        full->ReadInstances = &OffReadInstances;
+        full->ReadHolder = &OffReadHolder;
+        full->GetInstancesStatus = &InstancesOff;
+        full->Equip = &Off5;
+        full->GetEquipStatus = &OffStatus;
+        full->SetCapture = &OffCapture;
+        full->SetRelease = &OffRelease;
+        full->GetSetStatus = &OffStatus;
+        full->SetPlanOf = &OffPlan;
+        full->EquipSet = &Off5;
+        full->SetCancel = &OffHandle;
+        full->SocketRoll = &OffSocketRoll;
+        // v8: gear
+        full->GearWrite = &GearWrite;
+        full->GearRead = &GearRead;
+        full->GetGearStatus = &GearStatusOf;
+        full->GearUpgrade = &GearUpgrade;  // package P3
+        full->GearScaleSet = &GearScaleSet;  // package P7
+        full->GearScaleRead = &GearScaleRead;
+        full->ScaleStatusOf = &ScaleStatusOf;
         _table = t;
         return (nint)t;
+    }
+
+    // ---- v2 to v7: unavailable ----
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int Off5(ulong owner, void* request, nint done, void* user, ulong* ticket)
+    {
+        if (ticket != null) *ticket = 0;
+        return FakeTables.Unavailable;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int OffFuelRead(uint entity, int* units, int* max) => FakeTables.Unavailable;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int OffHandle(ulong handle) => FakeTables.NotFound;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int OffStatus(void* out_) => FakeTables.Unavailable;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int OffReadInstances(void* items, uint count, uint itemSize, uint flags) => FakeTables.Unavailable;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int OffReadHolder(uint holder, void* out_, uint capacity, uint itemSize, uint* count, byte* initialized)
+    {
+        if (count != null) *count = 0;
+        return FakeTables.Unavailable;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int InstancesOff(ItemsAbi.InstancesStatus* out_)
+    {
+        try
+        {
+            if (out_ == null || out_->Size < (uint)sizeof(ItemsAbi.InstancesStatus)) return FakeTables.InvalidArgument;
+            var size = out_->Size;
+            *out_ = default;
+            out_->Size = size;
+            SpawnAbi.CopyText("item instances (stamps, locations, save-record fields) are not modelled by the test kit", out_->Detail, ItemsAbi.MessageMax);
+            return FakeTables.Ok;
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int OffCapture(ulong owner, uint player, void* out_) => FakeTables.Unavailable;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int OffRelease(ulong owner, ulong token) => FakeTables.Unavailable;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int OffPlan(ulong owner, ulong token, void* entries, uint count, void* out_) => FakeTables.Unavailable;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int OffSocketRoll(ulong owner, void* roll) => FakeTables.Unavailable;
+
+    // ---- v8: gear ----
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int GearWrite(ulong owner, ItemsAbi.GearRequest* request, delegate* unmanaged[Cdecl]<ItemsAbi.GearResult*, void*, void> done, void* user, ulong* ticket)
+    {
+        try
+        {
+            if (ticket != null) *ticket = 0;
+            if (request == null || !ItemsFake.GearRequestValid(*request)) return FakeTables.InvalidArgument;
+            if (Fake is not { } f) return FakeTables.Unavailable;
+            return f.SubmitGear(owner, *request, (nint)done, (nint)user, ticket);
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int GearRead(uint entity, uint stamp, ItemsAbi.GearState* out_)
+    {
+        try
+        {
+            if (out_ == null || entity == 0) return FakeTables.InvalidArgument;
+            *out_ = default;
+            if (Fake is not { } f || FakeTables.Off(ItemsFake.GearFeature) || f.Program != ItemsAbi.ProgramRunning) return FakeTables.Unavailable;
+            if (!FakeTables.OnTickThread) return FakeTables.WrongThread;
+            return f.ReadGear(entity, stamp, out_);
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int GearUpgrade(ulong owner, ItemsAbi.UpgradeRequest* request, delegate* unmanaged[Cdecl]<ItemsAbi.UpgradeResult*, void*, void> done, void* user, ulong* ticket)
+    {
+        try
+        {
+            if (ticket != null) *ticket = 0;
+            if (request == null || !ItemsFake.UpgradeRequestValid(*request)) return FakeTables.InvalidArgument;
+            if (Fake is not { } f) return FakeTables.Unavailable;
+            return f.SubmitUpgrade(owner, *request, (nint)done, (nint)user, ticket);
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int GearStatusOf(ItemsAbi.GearStatus* out_)
+    {
+        try
+        {
+            if (out_ == null || out_->Size < (uint)sizeof(ItemsAbi.GearStatus)) return FakeTables.InvalidArgument;
+            var size = out_->Size;
+            var s = new ItemsAbi.GearStatus { Size = size };
+            if (Fake is { } f) f.FillGear(ref s);
+            else SpawnAbi.CopyText("no server runs in this process now (the test kit's harness is gone)", s.Detail, ItemsAbi.MessageMax);
+            *out_ = s;
+            return FakeTables.Ok;
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
+    // ---- v8 (package P7): the scales ----
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int GearScaleSet(ItemsAbi.GearScale* s)
+    {
+        try
+        {
+            if (s == null || !ItemsFake.ScaleRequestValid(*s)) return FakeTables.InvalidArgument;
+            return Fake is { } f ? f.SetScale(*s) : FakeTables.Unavailable;
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int GearScaleRead(uint entity, uint stamp, ItemsAbi.GearScale* out_)
+    {
+        try
+        {
+            if (out_ == null || entity == 0) return FakeTables.InvalidArgument;
+            *out_ = new ItemsAbi.GearScale { Size = (uint)sizeof(ItemsAbi.GearScale) };
+            return Fake is { } f ? f.ReadScale(entity, stamp, out_) : FakeTables.Unavailable;
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int ScaleStatusOf(ItemsAbi.ScaleStatus* out_)
+    {
+        try
+        {
+            if (out_ == null || out_->Size < (uint)sizeof(ItemsAbi.ScaleStatus)) return FakeTables.InvalidArgument;
+            var s = new ItemsAbi.ScaleStatus { Size = out_->Size, Capacity = ItemsAbi.ScaleCapacity };
+            if (Fake is { } f) f.FillScale(ref s);
+            *out_ = s;
+            return FakeTables.Ok;
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
     }
 
     private static ItemsFake? Fake => FakeTables.Active(ItemsAbi.Service)?.ItemsFake;
@@ -332,7 +704,15 @@ internal static unsafe class ItemsTable
 
 /// <summary>An item the fake <c>kiln.items</c> registry has (the test added it: the kit does not know the game's).</summary>
 internal sealed record FakeItem(uint Id, Guid Guid, string Name, int MaxStack, ItemCategory Category, ItemRarity Rarity, bool Gear, int LevelMin,
-    int LevelMax, nint NameUtf8, int NameLength);
+    int LevelMax, nint NameUtf8, int NameLength)
+{
+    /// <summary>Gear: how many of the type's five perk slots are filled (its last filled one + 1): the highest rarity + 1
+    /// a gear write gives without FORCE_SLOT. Every slot unless the test says (HarnessItems.SetPerkSlots).</summary>
+    public int PerkSlots { get; set; } = 5;
+
+    /// <summary>Gear: the max durability a new item gets (0: no Durability).</summary>
+    public int Durability { get; set; } = 100;
+}
 
 /// <summary>Item names as UTF-8 for <c>KilnItemInfo.name</c>, which the header promises stay valid for the process: each
 /// distinct name is allocated once per process and never freed (a test run keeps a few dozen bytes per name it used).</summary>
@@ -365,15 +745,15 @@ internal static unsafe class ItemNames
 
 /// <summary>One harness's kiln.items: the item registry the test made, an inventory per fake player and per container,
 /// and the give and take requests mods made, run at the start of the next step.</summary>
-internal sealed unsafe class ItemsFake
+internal sealed unsafe partial class ItemsFake
 {
     // The sigdb features of the v1 table the kit models, and those of the later tables it does not.
     public const string TransactionFeature = "items.transaction", ReadFeature = "items.read", ProgramFeature = "items.program";
 
-    public static readonly string[] Features = [TransactionFeature, ReadFeature, ProgramFeature];
+    public static readonly string[] Features = [TransactionFeature, ReadFeature, ProgramFeature, GearFeature, PowerFeature, ArmorFeature];
 
     public static readonly string[] OfflineRows = ["items.fuel", "items.move", "items.names", "items.transfer", "items.moves", "items.instances",
-        "items.equip", "items.pide_options", "items.result_peek", "items.recipe"];
+        "items.equip", "items.equip_sets", "items.pide_options", "items.result_peek", "items.recipe"];
 
     internal sealed class Stack
     {
@@ -426,6 +806,7 @@ internal sealed unsafe class ItemsFake
     {
         _harness = harness;
         ResetCatalogCache();
+        ItemUpgrades.Roller = null;  // the server's random numbers until the test names rolls (HarnessItems.SetUpgradeRolls)
     }
 
     /// <summary>The 8-slot inventories a fake player's inventory gets when it is first used.</summary>
@@ -460,6 +841,9 @@ internal sealed unsafe class ItemsFake
         {
             _items.Clear();  // the names stay: KilnItemInfo.name is valid for the process (ItemNames)
             _catalog = [];
+            _gear.Clear();
+            _gearPending.Clear();
+            _scales.Clear();
         }
     }
 
@@ -524,6 +908,8 @@ internal sealed unsafe class ItemsFake
 
     private EntitiesFake World => _harness.EntitiesFake ?? throw new InvalidOperationException("the harness has no world yet");
 
+    private const int InventorySize = 96;  // keen::ecs::Inventory on both exact builds (sigdb/types)
+
     public Inv AddContainer(uint entity, int inventories)
     {
         if (!World.Exists(entity)) throw new ArgumentException($"entity {entity} is not in the fake world (make it with kiln.Entities.Create)", nameof(entity));
@@ -534,6 +920,10 @@ internal sealed unsafe class ItemsFake
             for (var i = 1; i < inventories; i++) links.Add(World.Create(null));  // each further 8-slot inventory is an entity of its own
             var inv = new Inv { Owner = entity, IsPlayer = false, Links = links, Slots = NewSlots(inventories) };
             _inventories[entity] = inv;
+            // the game's container carries keen::ecs::Inventory (sigdb types: 96 bytes, slots: StaticArray<ItemStack, 8>),
+            // which World.Has, World.Find and the task-thread queries see; its bytes stay zero here (the contents are the
+            // items fake's: Items.Read)
+            World.Set(entity, "Inventory", new byte[TypesFake.Find(WorldAbi.Hash("Inventory"))?.Size ?? InventorySize], false);
             return inv;
         }
     }
@@ -634,6 +1024,7 @@ internal sealed unsafe class ItemsFake
                     Flags = s.Pide != 0 ? ItemsAbi.SlotGear : (byte)0,
                     Link = (byte)(i / 8),
                     Category = ItemsAbi.CategoryGeneric,
+                    Reserved = s.Pide != 0 ? StampOf(s.Pide) : 0,  // gear: its stamp (kiln.items v4's, here the kit's)
                 };
             }
             *count = n;
@@ -649,12 +1040,17 @@ internal sealed unsafe class ItemsFake
         if (request.Entity == 0 || request.Item == 0 || request.Count is 0 or > 100000) return FakeTables.InvalidArgument;
         var allowed = take ? ItemsAbi.ExactSlot | ItemsAbi.DryRun
             : ItemsAbi.Level | ItemsAbi.Rarity | ItemsAbi.AllOrNothing | ItemsAbi.Notify | ItemsAbi.NoMerge | ItemsAbi.DryRun | ItemsAbi.Recipe |
-              ItemsAbi.Unlock | ItemsAbi.GemSlot;
+              ItemsAbi.Unlock | ItemsAbi.GemSlot | ItemsAbi.GemSlotAny | ItemsAbi.Replace | ItemsAbi.Dye | ItemsAbi.Durability;
+        const uint gearOptions = ItemsAbi.Unlock | ItemsAbi.GemSlot | ItemsAbi.GemSlotAny | ItemsAbi.Dye | ItemsAbi.Durability;
         if ((request.Flags & ~allowed) != 0) return FakeTables.InvalidArgument;
-        if ((request.Flags & (ItemsAbi.Unlock | ItemsAbi.GemSlot)) != 0 && (request.Flags & ItemsAbi.Recipe) != 0) return FakeTables.InvalidArgument;
+        if ((request.Flags & gearOptions) != 0 && (request.Flags & ItemsAbi.Recipe) != 0) return FakeTables.InvalidArgument;
+        if ((request.Flags & ItemsAbi.GemSlotAny) != 0 && (request.Flags & ItemsAbi.GemSlot) == 0) return FakeTables.InvalidArgument;
         if ((request.Flags & ItemsAbi.Unlock) != 0 ? request.Unlock is not (>= 1 and <= 5 or 255) : request.Unlock != 0) return FakeTables.InvalidArgument;
-        // upgrades and gem slots need feature items.pide_options, which the kit does not model
-        if ((request.Flags & (ItemsAbi.Unlock | ItemsAbi.GemSlot)) != 0) return FakeTables.Unavailable;
+        if ((request.Flags & ItemsAbi.Replace) != 0 &&
+            (request.Count != 1 || request.Slot == 0 || request.Pide == 0 || (request.Flags & (ItemsAbi.Recipe | ItemsAbi.NoMerge)) != 0))
+            return FakeTables.InvalidArgument;
+        // upgrades, gem slots (items.pide_options / gems.sockets) and the re-creation of gear are not modelled by the kit
+        if ((request.Flags & (gearOptions | ItemsAbi.Replace)) != 0) return FakeTables.Unavailable;
         if ((request.Flags & ItemsAbi.Recipe) != 0 && ((request.Flags & (ItemsAbi.Level | ItemsAbi.Rarity)) != 0 || request.Slot != 0)) return FakeTables.InvalidArgument;
         if ((request.Flags & ItemsAbi.Rarity) != 0 && request.Rarity > 4) return FakeTables.InvalidArgument;
         if ((request.Flags & ItemsAbi.Level) != 0 && request.Level is 0 or > 255) return FakeTables.InvalidArgument;
@@ -682,7 +1078,7 @@ internal sealed unsafe class ItemsFake
         lock (_lock)
         {
             var job = _pending.FirstOrDefault(j => j.Ticket == ticket && j.Done != 0);
-            if (job is null) return false;
+            if (job is null) return CancelGear(ticket) || CancelUpgrade(ticket);
             job.Done = 0;
             return true;
         }
@@ -692,6 +1088,8 @@ internal sealed unsafe class ItemsFake
     {
         lock (_lock)
             foreach (var job in _pending.Where(j => j.Owner == owner)) job.Done = 0;
+        CancelGearOwner(owner);
+        CancelUpgradeOwner(owner);
     }
 
     private const int MaxPending = 1024;  // items.cpp kMaxPending
@@ -731,10 +1129,10 @@ internal sealed unsafe class ItemsFake
     public void BeforeStep(ulong step)
     {
         List<Job> jobs;
+        DeriveGear();
         lock (_lock)
         {
             _updates++;
-            if (_pending.Count == 0) return;
             jobs = [.. _pending];
             _pending.Clear();
         }
@@ -772,6 +1170,8 @@ internal sealed unsafe class ItemsFake
             SpawnAbi.CopyText(message, r.Message, ItemsAbi.MessageMax);
             if (job.Done != 0) ((delegate* unmanaged[Cdecl]<ItemsAbi.Result*, void*, void>)job.Done)(&r, (void*)job.User);
         }
+        RunGear(step);
+        RunUpgrades(step);
     }
 
     private const uint ErrorNoItem = 0x15, ErrorNoSetup = 0x16;
@@ -817,7 +1217,8 @@ internal sealed unsafe class ItemsFake
             foreach (var (i, amount) in plan)
             {
                 var pide = item.Gear && !dry ? World.Create(null) : 0u;  // gear: an item entity of its own, created at the commit
-                changes.Add(new ItemsAbi.Change { Slot = inv.SlotId(i), Item = item.Id, Amount = (uint)amount, Pide = pide });
+                if (pide != 0) NewGear(pide, item, level, rarity);
+                changes.Add(new ItemsAbi.Change { Slot = inv.SlotId(i), Item = item.Id, Amount = (uint)amount, Pide = pide, Reserved = pide != 0 ? StampOf(pide) : 0 });
                 if (dry) continue;
                 var s = inv.Slots[i];
                 s.Item = item.Id;
@@ -868,12 +1269,12 @@ internal sealed unsafe class ItemsFake
                 if (left == 0) break;
                 if (s.Count == 0 || s.Item != q.Item) continue;
                 var took = Math.Min(left, s.Count);
-                changes.Add(new ItemsAbi.Change { Slot = inv.SlotId(i), Item = s.Item, Amount = (uint)took, Pide = s.Pide });
+                changes.Add(new ItemsAbi.Change { Slot = inv.SlotId(i), Item = s.Item, Amount = (uint)took, Pide = s.Pide, Reserved = s.Pide != 0 ? StampOf(s.Pide) : 0 });
                 left -= took;
                 if (dry) continue;
                 s.Count -= took;
                 if (s.Count > 0) continue;
-                if (s.Pide != 0) World.Destroy(s.Pide);  // gear taken out is destroyed by the game
+                if (s.Pide != 0) DestroyGear(s.Pide);  // gear taken out is destroyed by the game
                 s.Item = 0;
                 s.Pide = 0;
                 s.Level = 0;
@@ -904,6 +1305,7 @@ internal sealed unsafe class ItemsFake
                         s.Pide = World.Create(null);
                         s.Level = (ushort)Math.Max(item.LevelMin, 0);
                         s.Rarity = (byte)item.Rarity;
+                        NewGear(s.Pide, item, s.Level, s.Rarity);
                     }
                     left -= put;
                 }
@@ -916,7 +1318,7 @@ internal sealed unsafe class ItemsFake
         lock (_lock)
             foreach (var s in inv.Slots)
             {
-                if (s.Pide != 0) World.Destroy(s.Pide);
+                if (s.Pide != 0) DestroyGear(s.Pide);
                 s.Item = 0;
                 s.Count = 0;
                 s.Pide = 0;

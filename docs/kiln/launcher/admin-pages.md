@@ -9,7 +9,8 @@ KAP/1 ([admin-protocol.md](admin-protocol.md)). Code: `launcher/src/admin/**`,
 admin session (`<AdminProvider>`) and renders the pages. App.tsx mounts it at `servers/:id/admin/*` inside the server
 layout, whose grouped list links the pages and whose live sentence shows the connection (reconnect and the transport
 are in its `···` menu, or in the banner pages show while disconnected). Configs, Mods and the console are merged into
-the server's own pages (`/servers/:id/configs`, `mods`, `overview`; the old admin routes redirect there). Each page's
+the server's own pages (`/servers/:id/configs`, `mods`, `overview`; the old admin routes redirect there, in the router
+itself: `ADMIN_MERGED` in `shell/serverNav.ts`, so an old link does not wait for the admin pages' bundle). Each page's
 default export also works on its own route (`withAdmin` adds a provider from `useParams().id`).
 
 | Route | Page | Ops (Kiln.Admin) |

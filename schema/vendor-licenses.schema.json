@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vendor-licenses.schema.json",
+  "title": "The vendor licences the player agreed to in the launcher (<data>/state/vendor-licenses.json), format 1",
+  "description": "Written by the launcher (kiln_manage::vendor::agreements) when the player clicks \"I agree, download\" in the licence dialog of a vendor component. Per vendor, every licence text agreed to, by the SHA-256 of the text: a component whose licence hash is not listed shows the dialog again (a changed text asks again). The launcher's own state, not the game's: the player agrees once on this PC, nothing in the game needs it, and a game folder (or its kiln.json, which the game and other tools write) is no place for a record of the player's consent. Losing the file only means the dialog comes again. docs/kiln/launcher/contracts.md, \"Vendor files\".",
+  "type": "object",
+  "required": ["format", "vendors"],
+  "properties": {
+    "format": { "const": 1 },
+    "vendors": {
+      "type": "object",
+      "propertyNames": { "enum": ["amd", "intel", "nvidia"] },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["license", "sha256", "agreed"],
+          "properties": {
+            "license": { "type": "string", "description": "The licence's name as the dialog showed it." },
+            "sha256": { "$ref": "common.schema.json#/$defs/sha256", "description": "The text the dialog showed." },
+            "component": { "type": "string", "description": "The component whose dialog it was." },
+            "version": { "type": "string" },
+            "agreed": { "$ref": "common.schema.json#/$defs/time" }
+          }
+        }
+      }
+    }
+  }
+}

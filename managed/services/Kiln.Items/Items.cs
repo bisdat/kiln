@@ -101,6 +101,33 @@ public static unsafe partial class Items
     /// <summary>Items whose debug or display name contains <paramref name="text"/> (ignoring case).</summary>
     public static IReadOnlyList<ItemInfo> Search(string text, int max = 25) => ItemCatalog.Search(T, text, max);
 
+    /// <summary>
+    /// The item's name for players (since 0.2.0-dev.29.15). On a game client it is in the game's text language
+    /// (<c>GameLanguage.Current</c>), read from the game's own texts at run time; that works in the main menu and on a
+    /// client that joined another's world too, where <see cref="Get"/> has no catalog. A new item (kiln.content) gets its
+    /// definition's text for that language, else its <c>DisplayName</c>. On a dedicated server (whose data has no texts),
+    /// and on a client until the game's texts are read (the first call starts that in the background; it takes a fraction
+    /// of a second), it is the English name Kiln ships for the game's items. Null for an id Kiln knows no name of.
+    /// </summary>
+    /// <remarks>Any thread, also a draw callback: it never waits for a read. Keep the answer per frame, not per call site,
+    /// if you draw many names.</remarks>
+    [AnyThread]
+    public static string? DisplayName(ItemId item)
+    {
+        if (item.Value == 0) return null;
+        try
+        {
+            // a game item never asks kiln.content (its listing is read again on a miss); a new item is no game item
+            if (GameNames.ItemGuid(item) is not null) return GameNames.ItemName(item) ?? ItemCatalog.ShippedName(item.Value);
+            if (DefinedNames.Of(item.Value, GameNames.Language) is { Length: > 0 } defined) return defined;
+        }
+        catch (Exception e) when (e is InvalidOperationException or ArgumentException or NotSupportedException or KilnUnavailableException)
+        {
+            // fall back to the English name below
+        }
+        return ItemCatalog.ShippedName(item.Value);
+    }
+
     // ------------------------------------------------------------------------------------------- reading -------
 
     /// <summary>The inventory of <paramref name="entity"/>, or null when it has none (or it does not exist).</summary>
@@ -193,7 +220,12 @@ public static unsafe partial class Items
                     r.Unlock = un >= 5 ? (byte)255 : (byte)un;
                 }
             }
-            if (g.GemSlot) r.Flags |= ItemsNative.GemSlot;
+            if (g.GemSlot)
+            {
+                r.Flags |= ItemsNative.GemSlot;
+                // v7: gear other than weapons gets the slot when a mod allowed its kind (Gems.AllowSockets)
+                if (ItemSockets.AllowsGive(item)) r.Flags |= ItemsNative.GemSlotAny;
+            }
         }
         if (options.HasFlag(GiveOptions.Notify)) r.Flags |= ItemsNative.Notify;
         if (options.HasFlag(GiveOptions.AllOrNothing)) r.Flags |= ItemsNative.AllOrNothing;
@@ -316,8 +348,13 @@ public static unsafe partial class Items
     private static readonly HashSet<ModContext> Watched = new();
     private static long _nextKey;
 
-    private static Task<ItemsResult> Submit(bool take, ItemsNative.Request r, string api)
+    private static Task<ItemsResult> Submit(bool take, ItemsNative.Request r, string api) =>
+        SubmitEx(take, new ItemsNative.RequestEx { Base = r }, api);
+
+    // v7: the request with its extension (Base.Size says which: the v1 size, or sizeof(RequestEx) for a dye / durability)
+    internal static Task<ItemsResult> SubmitEx(bool take, ItemsNative.RequestEx rx, string api)
     {
+        var r = rx.Base;
         var t = Require(api);
         if (r.Count == 0) return Invalid(new EntityId(r.Entity), new ItemId(r.Item), 0, "count must be 1-100000");
         if (r.Entity == 0) return Invalid(default, new ItemId(r.Item), (int)r.Count, "no entity");
@@ -336,8 +373,8 @@ public static unsafe partial class Items
         ulong ticket = 0;
         var owner = Services.CallerOwner;
         var rc = take
-            ? t->Take(owner, &r, &OnDone, (void*)key, &ticket)
-            : t->Give(owner, &r, &OnDone, (void*)key, &ticket);
+            ? t->Take(owner, &rx.Base, &OnDone, (void*)key, &ticket)
+            : t->Give(owner, &rx.Base, &OnDone, (void*)key, &ticket);
         if (rc != ItemsNative.Ok)
         {
             lock (Gate) InFlight.Remove(key);

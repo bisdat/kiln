@@ -231,7 +231,8 @@ def joined(lab, port):
     check(s is not None and s["Kind"] == "started", f"joined: cct.assertions started ({s and s['Message']})")
     c.state_until({"changed"}, 5)
     r = lab.cmd("pass")  # the control folder is not the joined client: it must not answer the client's check
-    check(r is not None and not r["ok"] and "someone else" in r["message"], f"joined: only the joined client answers its check ({r and r['message']})")
+    check(r is not None and not r["ok"] and ("not started from the control folder" in r["message"] or "someone else" in r["message"]),
+          f"joined: only the joined client answers its check ({r and r['message']})")
     c.send_json(M_ANSWER, {"Kind": "pass", "Note": None, "Guard": None})
     s = c.state_until({"finished"})
     e = c.take_json(M_ENTRY, 10)
@@ -311,6 +312,13 @@ def main():
         check(e is not None and len(e["assertions"]) == 2 and all(x["ok"] for x in e["assertions"]), "cct.flag-unset: no cheats body ran")
         e = run_and_answer(lab, "cct.cleanup", "pass")
         check("cct.cleanup: the clean-up ran" in lab.kiln_log(), "cct.cleanup: the clean-up ran")
+        e = run_and_answer(lab, "cct.failed-expect", "pass")
+        check(e is not None and e["verdict"] == "fail" and e.get("playerAnswer") == "pass" and e.get("assertionFailureCount") == 1
+              and "this check cannot pass: 1 assertion(s) failed: the requirement this check fails on purpose" in e["note"],
+              f"cct.failed-expect: a pass after a failed assertion is recorded as fail, with the answer and the reason ({e and (e['verdict'], e['note'])})")
+        listed = lab.cmd("list")
+        row = next((x for x in (listed["data"]["checks"] if listed and listed["ok"] else []) if x["id"] == "cct.failed-expect"), None)
+        check(row is not None and row.get("verdict") == "fail", f"cct.failed-expect: the list shows it failed ({row and row.get('verdict')})")
 
         joined(lab, a.lab_port)
 

@@ -276,6 +276,440 @@ internal static unsafe class UiNative
         public delegate* unmanaged[Cdecl]<ulong, delegate* unmanaged[Cdecl]<Key*, void*, byte>, void*, uint, ulong*, int> SubscribeKeyEx;
     }
 
+    // Additive tail after v7; the window-position/size helpers remain internal to Kiln.Ui.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableConstraints
+    {
+        public Table7 Base;
+        public delegate* unmanaged[Cdecl]<float, float, float, float, void> SetNextWindowSizeConstraints;
+    }
+
+    /// <summary>The tail after the size constraints (0.2.0-dev.29.11): menu_footer, Kiln's line in the main menu's footer
+    /// (<see cref="MainMenuFooter"/>).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableFooter
+    {
+        public TableConstraints Base;
+        public delegate* unmanaged[Cdecl]<int, uint, void> MenuFooter;
+    }
+
+    /// <summary>The tail after menu_footer (0.2.0-dev.29.15): image_load_rgba, an overlay image from pixels (the game's item
+    /// icons, <see cref="ItemIcons"/>).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableImageRgba
+    {
+        public TableFooter Base;
+        public delegate* unmanaged[Cdecl]<ulong, byte*, uint, uint, ulong> ImageLoadRgba;
+    }
+
+    /// <summary>kiln.ui's image_load_rgba, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.29.15).</summary>
+    public static delegate* unmanaged[Cdecl]<ulong, byte*, uint, uint, ulong> ImageLoadRgbaSlot
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableImageRgba)) return null;
+            return ((TableImageRgba*)t)->ImageLoadRgba;
+        }
+    }
+
+    /// <summary>The tail after image_load_rgba (0.2.0-dev.29.15): screen_target, a factory screen's station entity.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableScreenTarget
+    {
+        public TableImageRgba Base;
+        public delegate* unmanaged[Cdecl]<uint> ScreenTargetFn;
+    }
+
+    /// <summary>kiln.ui's screen_target (a factory screen's station entity of the last UI frame, else 0); 0 on an older kiln.ui.
+    /// Tests: <see cref="ScreenTargetOverride"/>.</summary>
+    public static uint ScreenTarget()
+    {
+        if (ScreenTargetOverride is { } o) return o();
+        var t = T;
+        if (t == null || t->Header.Size < (uint)sizeof(TableScreenTarget)) return 0;
+        var f = ((TableScreenTarget*)t)->ScreenTargetFn;
+        return f == null ? 0 : f();
+    }
+
+    internal static Func<uint>? ScreenTargetOverride;
+
+    /// <summary>The tail after screen_target (0.2.0-dev.29.15): image_state, whether an overlay image is drawn yet.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableImageState
+    {
+        public TableScreenTarget Base;
+        public delegate* unmanaged[Cdecl]<ulong, int> ImageStateFn;
+    }
+
+    /// <summary>KilnUiThemeDef (kiln_ui.h, 0.2.0-dev.29.16): a theme's definition, copied by theme_create.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ThemeDef
+    {
+        public uint Size, Base, RoleMask, VarMask;
+        public ulong ColorMask;
+        public fixed uint Roles[16];
+        public fixed uint Colors[32];
+        public fixed float Vars[32];  // [16][2]
+        public float Background, Rounding;
+        public ulong Font;
+    }
+
+    /// <summary>KilnUiLook (kiln_ui.h, 0.2.0-dev.29.16): the player's look.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Look
+    {
+        public uint Size, Kind;
+        public ulong Theme;
+        public float Background, Opacity, Scale;
+        public uint Reserved;
+    }
+
+    /// <summary>KilnUiLookInfo (kiln_ui.h, 0.2.0-dev.29.16): the player's look and a palette.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LookInfo
+    {
+        public uint Size, Kind;
+        public ulong Theme;
+        public float Background, Opacity, Scale;
+        public byte GameColors, GameFont, Glyphs, GlyphLanguage;
+        public fixed uint Roles[16];
+        public uint RoleCount, Reserved2;
+    }
+
+    /// <summary>The tail after image_state (0.2.0-dev.29.16): looks, themes and fonts.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableLooks
+    {
+        public TableImageState Base;
+        public delegate* unmanaged[Cdecl]<ulong, ThemeDef*, ulong*, int> ThemeCreate;
+        public delegate* unmanaged[Cdecl]<ulong, int> ThemeFree;
+        public delegate* unmanaged[Cdecl]<ulong, byte> PushTheme;
+        public delegate* unmanaged[Cdecl]<Look*, int> SetLook;
+        public delegate* unmanaged[Cdecl]<LookInfo*, int> GetLookInfo;
+        public delegate* unmanaged[Cdecl]<ulong, void*, nuint, ulong> FontLoad;
+        public delegate* unmanaged[Cdecl]<ulong, void> FontFree;
+        public delegate* unmanaged[Cdecl]<ulong, byte> PushFontHandle;
+    }
+
+    /// <summary>kiln.ui's looks tail (0.2.0-dev.29.16), or null on a table without all of it (an older kiln-ui.dll). Each
+    /// slot is still checked for null by its caller.</summary>
+    public static TableLooks* Looks
+    {
+        get
+        {
+            if (LooksOverride != null) return LooksOverride;
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableLooks)) return null;
+            return (TableLooks*)t;
+        }
+    }
+
+    /// <summary>Tests: a table of the looks tail in place of kiln.ui's.</summary>
+    internal static TableLooks* LooksOverride;
+
+    /// <summary>KILN_UI_IMAGE_DRAW_TRIM / FIT (kiln_ui.h image_ex, 0.2.0-dev.29.16).</summary>
+    public const uint ImageDrawTrim = 1, ImageDrawFit = 2;
+
+    /// <summary>KilnUiImageDraw (kiln_ui.h, 0.2.0-dev.29.16): how image_ex draws an image.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ImageDraw
+    {
+        public uint Size, Flags;
+        public float Width, Height, U0, V0, U1, V1;
+    }
+
+    /// <summary>The tail after the looks (0.2.0-dev.29.16): image_ex (part of an image, trimmed images) and
+    /// image_opaque_rect.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableImageEx
+    {
+        public TableLooks Base;
+        public delegate* unmanaged[Cdecl]<NativeStr, ulong, ImageDraw*, byte> ImageEx;
+        public delegate* unmanaged[Cdecl]<ulong, uint*, uint*, uint*, uint*, byte> ImageOpaqueRect;
+    }
+
+    /// <summary>kiln.ui's image_ex tail (0.2.0-dev.29.16), or null on a table without it (an older kiln-ui.dll). Each slot
+    /// is still checked for null by its caller.</summary>
+    public static TableImageEx* ImageEx
+    {
+        get
+        {
+            if (ImageExOverride != null) return ImageExOverride;
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableImageEx)) return null;
+            return (TableImageEx*)t;
+        }
+    }
+
+    /// <summary>Tests: a table of the image_ex tail in place of kiln.ui's.</summary>
+    internal static TableImageEx* ImageExOverride;
+
+    /// <summary>Draws through image_ex; false when this kiln.ui has no image_ex (the caller draws the old way).</summary>
+    public static bool DrawImageEx(string? id, ulong image, uint flags, float width, float height, float u0, float v0, float u1,
+        float v1, out bool clicked)
+    {
+        clicked = false;
+        var t = ImageEx;
+        if (t == null || t->ImageEx == null) return false;
+        var d = new ImageDraw
+        {
+            Size = (uint)sizeof(ImageDraw), Flags = flags, Width = width, Height = height, U0 = u0, V0 = v0, U1 = u1, V1 = v1,
+        };
+        clicked = t->ImageEx(id is null ? default : Utf8.Of(id), image, &d) != 0;
+        return true;
+    }
+
+    /// <summary>kiln.ui's image_opaque_rect: the image's opaque bounds in pixels (the whole image when nothing is opaque).
+    /// False: no such image, or a kiln.ui without it.</summary>
+    public static bool ImageOpaqueRect(ulong image, out uint x, out uint y, out uint width, out uint height)
+    {
+        x = y = width = height = 0;
+        var t = ImageEx;
+        if (t == null || t->ImageOpaqueRect == null) return false;
+        uint a, b, c, d;
+        if (t->ImageOpaqueRect(image, &a, &b, &c, &d) == 0) return false;
+        (x, y, width, height) = (a, b, c, d);
+        return true;
+    }
+
+    /// <summary>KilnUiTexts (kiln_ui.h, 0.2.0-dev.29.16): Kiln's own texts kiln.ui draws, and the language.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Texts
+    {
+        public uint Size, Count;
+        public NativeStr Language;
+        public NativeStr* Keys;
+        public NativeStr* Values;
+    }
+
+    /// <summary>The tail after image_opaque_rect (0.2.0-dev.29.16): set_texts.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableTexts
+    {
+        public TableImageEx Base;
+        public delegate* unmanaged[Cdecl]<Texts*, int> SetTexts;
+    }
+
+    /// <summary>kiln.ui's set_texts, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.29.16). Tests:
+    /// <see cref="SetTextsOverride"/>.</summary>
+    public static delegate* unmanaged[Cdecl]<Texts*, int> SetTextsSlot
+    {
+        get
+        {
+            if (SetTextsOverride != null) return SetTextsOverride;
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableTexts)) return null;
+            return ((TableTexts*)t)->SetTexts;
+        }
+    }
+
+    internal static delegate* unmanaged[Cdecl]<Texts*, int> SetTextsOverride;
+
+    /// <summary>KilnUiGraphics (kiln_ui.h, 0.2.0-dev.29.18): the player's graphics settings (graphics_set).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Graphics
+    {
+        public uint Size, FpsCap, DlssPreset, DlssScale;
+        public float CustomScale;
+        public fixed float ModeScale[4];
+        public uint Readout;
+        /// <summary>(phase B) KILN_UI_UPSCALER_* and KILN_UI_AMD_UPSCALER_* (were reserved; 0: the game's own, AMD's auto).</summary>
+        public uint Upscaler, AmdUpscaler;
+    }
+
+    /// <summary>KilnUiGraphicsStatus (kiln_ui.h, 0.2.0-dev.29.18): what Kiln's graphics tools do now (graphics_status). 248
+    /// bytes with phase B's upscaler fields from offset 72; kiln.ui fills them when the size says they are there.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphicsStatus
+    {
+        public uint Size, Flags, AsideCap, AsideDlss, FpsCap;
+        public float RenderedFps, OutputFps, FrameMs;
+        public uint OutputWidth, OutputHeight;
+        public int DlssQuality;
+        public uint DlssPreset, RenderWidth, RenderHeight, DlssOutputWidth, DlssOutputHeight;
+        public fixed uint Reserved[2];
+        // ---- phase B (KILN_UI_GRAPHICS_STATUS_SIZE_V2): the upscaler behind the game's FSR 3 option ----
+        public uint Upscaler, AmdUpscaler, UpscaleRunning, UpscaleReason, UpscaleFlags, AsideUpscale, UpscaleVersion;
+        public uint UpscaleRenderWidth, UpscaleRenderHeight, UpscaleOutputWidth, UpscaleOutputHeight;
+        public uint Reserved2;
+        /// <summary>The reason in English words, UTF-8, NUL-terminated (for logs and tooltips).</summary>
+        public fixed byte UpscaleDetail[UpscaleDetailBytes];
+    }
+
+    /// <summary>KILN_UI_GRAPHICS_STATUS_SIZE_V1 / _V2: phase A's status, and with phase B's fields.</summary>
+    public const uint GraphicsStatusSizeV1 = 72, GraphicsStatusSizeV2 = 248;
+
+    /// <summary>KilnUiGraphicsStatus.upscale_detail's size.</summary>
+    public const int UpscaleDetailBytes = 128;
+
+    /// <summary>The tail after set_texts (0.2.0-dev.29.18): graphics_set, graphics_status.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableGraphics
+    {
+        public TableTexts Base;
+        public delegate* unmanaged[Cdecl]<Graphics*, int> GraphicsSet;
+        public delegate* unmanaged[Cdecl]<GraphicsStatus*, int> GraphicsStatusFn;
+    }
+
+    /// <summary>The tail after chat_completion (<see cref="TableChat"/>, bisdat's PR #73, Kiln.Ui's own):
+    /// subscribe_pointer_press (0.2.0-dev.30: presses on the game's own UI, used by the core's kiln.ui.inventory). Pinned
+    /// here so the offsets cannot drift; Kiln.Ui does not call it.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TablePointer
+    {
+        public TableChat Base;
+        public delegate* unmanaged[Cdecl]<ulong, void*, void*, ulong*, int> SubscribePointerPress;
+    }
+
+    /// <summary>kiln.ui's graphics tail, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.29.18). Tests:
+    /// <see cref="GraphicsOverride"/>.</summary>
+    public static TableGraphics* GraphicsTable
+    {
+        get
+        {
+            if (GraphicsOverride != null) return GraphicsOverride;
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableGraphics)) return null;
+            return (TableGraphics*)t;
+        }
+    }
+
+    /// <summary>Tests: a table of the graphics tail in place of kiln.ui's.</summary>
+    internal static TableGraphics* GraphicsOverride;
+
+    /// <summary>Issue #44: internal completion handoff at kiln.ui offset 1032, after the graphics tail.</summary>
+    /// <remarks>Native writes text and the native-chat rectangle on its UI
+    /// thread. Only managed Kiln.Ui may use this slot. No game pointers cross
+    /// threads. Layout: 44-byte header, 16-byte rect, two 257-byte buffers;
+    /// total 576 bytes after 2-byte padding.</remarks>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ChatCompletion
+    {
+        public uint Size, Operation;
+        public uint Focused, Action, Cursor, TextLen, ReplacementLen;
+        public uint Suggestions, ListOpen, Field, Revision;
+        public float X, Y, Width, Height;
+        public fixed byte Text[257];
+        public fixed byte Replacement[257];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TableChat
+    {
+        public TableGraphics Base;
+        public delegate* unmanaged[Cdecl]<ChatCompletion*, int> ChatCompletion;
+    }
+
+    private static delegate* unmanaged[Cdecl]<ChatCompletion*, int> ChatCompletionSlot
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableChat)) return null;
+            return ((TableChat*)t)->ChatCompletion;
+        }
+    }
+
+    /// <summary>Native read: 1 (snapshot). Null when chat is not focused,
+    /// disabled, unsupported or the input rectangle could not be validated.</summary>
+    internal static ChatCompletion? ChatInput()
+    {
+        var slot = ChatCompletionSlot;
+        if (slot == null) return null;
+        var result = new ChatCompletion { Size = (uint)sizeof(ChatCompletion), Operation = 1 };
+        return slot(&result) == Ok && result.Focused != 0 ? result : null;
+    }
+
+    // One stable native call site: kiln.ui's hover capture is per caller.
+    // Always clear it when suggestions disappear or focus changes.
+    internal static void ChatHover(bool hovering)
+    {
+        var t = T;
+        if (t != null) t->SetHoverCapture(hovering ? 1u : 0u);
+    }
+
+    // Turning suggestions on names the snapshot (field, revision) they belong to: native refuses a stale one, so a
+    // focus loss on the game's UI thread is never undone by this render frame. Turning them off needs no snapshot.
+    internal static bool ChatCandidates(bool hasSuggestions, bool active, uint field = 0, uint revision = 0)
+    {
+        var slot = ChatCompletionSlot;
+        if (slot == null) return false;
+        var request = new ChatCompletion {
+            Size = (uint)sizeof(ChatCompletion), Operation = 2,
+            Suggestions = hasSuggestions ? 1u : 0u, ListOpen = active ? 1u : 0u,
+            Field = field, Revision = revision,
+        };
+        return slot(&request) == Ok;
+    }
+
+    internal static bool ChatReplace(in ChatCompletion snapshot, string expected, string replacement)
+    {
+        var slot = ChatCompletionSlot;
+        if (slot == null || System.Text.Encoding.UTF8.GetByteCount(expected) > 256 ||
+            System.Text.Encoding.UTF8.GetByteCount(replacement) > 256) return false;
+        var request = new ChatCompletion {
+            Size = (uint)sizeof(ChatCompletion), Operation = 3,
+            Field = snapshot.Field, Revision = snapshot.Revision,
+        };
+        var left = System.Text.Encoding.UTF8.GetBytes(expected);
+        var right = System.Text.Encoding.UTF8.GetBytes(replacement);
+        request.TextLen = (uint)left.Length;
+        request.ReplacementLen = (uint)right.Length;
+        for (var i = 0; i < left.Length; ++i) request.Text[i] = left[i];
+        for (var i = 0; i < right.Length; ++i) request.Replacement[i] = right[i];
+        return slot(&request) == Ok;
+    }
+
+    internal static string ChatText(in ChatCompletion snapshot)
+    {
+        if (snapshot.TextLen > 256) return "";
+        // A fixed buffer cannot be used from an unfixed in parameter: copy
+        // the blittable value to a local before pinning.
+        var copy = snapshot;
+        return System.Text.Encoding.UTF8.GetString(copy.Text, (int)copy.TextLen);
+    }
+
+    /// <summary>KILN_UI_GLYPHS_* (kiln_ui.h look_info): the overlay's glyphs of a Chinese, Japanese, Korean or Cyrillic language.</summary>
+    public const byte GlyphsLatin = 0, GlyphsLoading = 1, GlyphsReady = 2, GlyphsFailed = 3;
+
+    /// <summary>KILN_UI_IMAGE_WAITING / READY / FAILED (kiln_ui.h image_state).</summary>
+    public const int ImageUnknown = 0, ImageWaiting = 1, ImageReady = 2, ImageFailed = 3;
+
+    /// <summary>kiln.ui's image_state of an image (<see cref="ImageUnknown"/>, waiting, ready, failed); ready on a kiln.ui
+    /// without it (it draws what it has).</summary>
+    public static int ImageState(ulong image)
+    {
+        var t = T;
+        if (t == null || t->Header.Size < (uint)sizeof(TableImageState)) return ImageReady;
+        var f = ((TableImageState*)t)->ImageStateFn;
+        return f == null ? ImageReady : f(image);
+    }
+
+    /// <summary>KILN_UI_FOOTER_SHOWN.</summary>
+    public const uint FooterShown = 1;
+
+    /// <summary>kiln.ui's menu_footer, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.29.11).</summary>
+    public static delegate* unmanaged[Cdecl]<int, uint, void> MenuFooterSlot
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableFooter)) return null;
+            return ((TableFooter*)t)->MenuFooter;
+        }
+    }
+
+    public static delegate* unmanaged[Cdecl]<float, float, float, float, void> WindowConstraintsSlot
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < (uint)(sizeof(Table7) + sizeof(void*))) return null;
+            return ((TableConstraints*)t)->SetNextWindowSizeConstraints;
+        }
+    }
+
     /// <summary>KILN_UI_KEYS_MOUSE (kiln_ui.h v7).</summary>
     public const uint KeysMouse = 1;
 
@@ -361,6 +795,11 @@ internal static unsafe class UiNative
         _table3 = null;
         _table4 = null;
         _table6 = null;
+        LooksOverride = null;
+        ImageExOverride = null;
+
+        SetTextsOverride = null;
+        GraphicsOverride = null;
         MouseKeysAvailable = false;
     }
 
@@ -422,6 +861,18 @@ internal static unsafe class UiNative
         Status s = default;
         s.Size = (uint)sizeof(Status);
         return T->Status(&s) == Ok ? s : null;
+    }
+
+    // status.error is also the native service's degraded-state surface. An absent
+    // device during ordinary startup must never be mistaken for drawing switched off.
+    internal static string? DrawingOffReason
+    {
+        get
+        {
+            if (ReadStatus() is not { } status) return null;
+            var text = ErrorText(status);
+            return text.StartsWith("the overlay's drawing is off:", StringComparison.Ordinal) ? text : null;
+        }
     }
 
     public static string KeyName(uint vk)

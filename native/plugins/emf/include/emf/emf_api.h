@@ -1,5 +1,5 @@
 /* This file is EMF's public C API header, copied unchanged (below the line) from EMF (Enshrouded Modding Framework)
- * 0.6.8, sdk/include/emf/emf_api.h, for kiln-emf.dll (native/plugins/emf), which builds an EmfApi v40 table on Kiln's
+ * 0.6.14, sdk/include/emf/emf_api.h, for kiln-emf.dll (native/plugins/emf), which builds an EmfApi v46 table on Kiln's
  * services so unmodified EMF mods load on Kiln. Also in licenses/EMF-LICENSE.txt.
  *
  * MIT License
@@ -24,7 +24,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * ------------------------------------------------------------------------------------------------------------------ */
-/* EMF (Enshrouded Modding Framework) C API, version 40 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 46 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -52,7 +52,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 40
+#define EMF_API_VERSION 46
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -196,7 +196,8 @@ typedef struct EmfCommandSender {
     uint64_t account;   /* the player's account hash as the game knows it (chat), else 0 */
     uint8_t from_chat;  /* 1: a player typed it in the game's chat; 0: the console, emf/commands.txt, the overlay */
     uint8_t admin;      /* v17: 1 = the sender may run every command (the console, commands.txt, the host's own chat, an
-                           account in [chat] admins or everyone=1); 0 = a player who may run only commands for players.
+                           account in [chat] admins, everyone=1, or a game admin with [chat] game_admins=1); 0 = a player
+                           who may run only commands for players.
                            A core older than v17 leaves it 0: read it only when emf::has_v17() */
     uint8_t pad[6];
 } EmfCommandSender;
@@ -430,7 +431,7 @@ typedef struct EmfNetFrom {
     uint64_t account;       /* server: the sender's account from the server's own records (never from the message);
                                0 in process */
     uint32_t peer_version;  /* the channel version the other side has */
-    uint8_t admin;          /* server: 1 = the host's own game (or a [chat] admin) */
+    uint8_t admin;          /* server: 1 = the host's own game (or a [chat] admin; a game admin with game_admins=1) */
     uint8_t local;          /* 1 = the same process (the host's own game, an offline game) */
     uint8_t pad[2];
 } EmfNetFrom;
@@ -622,7 +623,8 @@ typedef void (*EmfMapClickCallback)(const EmfMapClick* click, void* user);
 typedef struct EmfMapDone {
     uint32_t size;      /* sizeof(EmfMapDone) of the core */
     uint32_t player;    /* their entity in the server world */
-    uint8_t admin;      /* 1 = the host's own game, or an account in [chat] admins (everyone=1 too) */
+    uint8_t admin;      /* 1 = the host's own game, or an account in [chat] admins (everyone=1 too; a game admin with
+                           game_admins=1) */
     uint8_t pad[7];
     double x, z;        /* the spot, world metres, inside the world */
     const char* action; /* the action's id; valid during the callback */
@@ -740,11 +742,11 @@ typedef struct EmfRemoveBuilding {
 #define EMF_PATH_OPEN_DOOR 0x0020u
 #define EMF_PATH_SWIM 0x0040u
 #define EMF_PATH_FOUND 1u     /* a path: see `reaches` (with `closest` it may end at the nearest reachable point) */
-#define EMF_PATH_NO_PATH 2u
-#define EMF_PATH_TOO_LONG 3u  /* the search ran out of nodes (raise max_nodes, or ask for a nearer point) */
+#define EMF_PATH_NO_PATH 2u   /* it searched all the ground it could reach: the target is shut off for these moves */
+#define EMF_PATH_TOO_LONG 3u  /* spent max_nodes: ran out, not blocked (raise max_nodes, or ask on from nearer) */
 #define EMF_PATH_NO_START 4u  /* no path grid at `from` (not loaded: too far from players, or inside something) */
 #define EMF_PATH_NO_TARGET 5u
-#define EMF_PATH_NO_MEMORY 6u
+#define EMF_PATH_NO_MEMORY 6u  /* filled the game's fixed search memory first: ran out, not blocked */
 #define EMF_PATH_CANCELLED 7u /* path_cancel, the owner went, or the session ended */
 #define EMF_PATH_OTHER 8u     /* the game gave another answer, or none in time */
 /* v38 doors: door_state's answer, with flags */
@@ -793,6 +795,10 @@ typedef struct EmfPathResult {
     uint8_t pad[3];
     uint32_t count;   /* points (at most 512) */
     float length;     /* metres from `from` along the points */
+    /* API v42 (0.6.11; read it only when `size` covers it): per point, the door entity the path goes through there (a
+       point with move 5), else 0; `count` entries. NULL when no point is a door (or the game gave no usable list).
+       Valid during the callback only. */
+    const uint32_t* doors;
 } EmfPathResult;
 typedef void (*EmfPathCallback)(EmfWorld* world, uint32_t id, const EmfPathResult* result, const EmfPathPoint* points,
                                 void* user);
@@ -803,14 +809,20 @@ typedef void (*EmfPathCallback)(EmfWorld* world, uint32_t id, const EmfPathResul
  * Nothing is saved. */
 #define EMF_MOVE_ALLIES 0x1u   /* the creature may be a player's ally (a tamed beast, faction PlayerAlly) */
 #define EMF_MOVE_PEACEFUL 0x2u /* its fights against players are cleared on the way */
+#define EMF_MOVE_PEACEFUL_ALL 0x4u /* API v41 (0.6.10): every fight is cleared on the way (animals, monsters,
+                                      players' beasts too): it only walks. A v40 core refuses it (unknown flags) */
+#define EMF_MOVE_HOLD 0x8u     /* API v46, villager_move only: after it arrives it holds at the last point until
+                                  villager_move_cancel (see hold_seconds) */
 #define EMF_MOVE_ARRIVED 0u    /* EmfMoveCallback status: at the last point */
-#define EMF_MOVE_STUCK 1u      /* no metre of progress for 15 s while not fighting (a wall, no path, the game gave up) */
+#define EMF_MOVE_STUCK 1u      /* no metre of progress for 15 s (or stuck_seconds) while not fighting (a wall, no path,
+                                  the game gave up) */
 #define EMF_MOVE_TIMEOUT 2u    /* its seconds ran out */
 #define EMF_MOVE_GONE 3u       /* the creature died or went (or became a player's ally without EMF_MOVE_ALLIES) */
 #define EMF_MOVE_CANCELLED 4u  /* enemy_move_cancel, a new move or enemy order on it, the world closing (world NULL) */
 typedef struct EmfMoveOrder {
     uint32_t size;               /* sizeof(EmfMoveOrder) */
-    uint32_t enemy;              /* the creature (it has DynamicEnemy01BehaviorState); never a player or a boss */
+    uint32_t enemy;              /* enemy_move: the creature (it has DynamicEnemy01BehaviorState); never a player or a
+                                    boss. villager_move (v46): the villager */
     uint32_t flags;              /* EMF_MOVE_* */
     uint32_t count;              /* points: 1..16 */
     const EmfPathPoint* points;  /* walked in order; x, y, z are read (move is ignored); path_find's points fit
@@ -820,8 +832,64 @@ typedef struct EmfMoveOrder {
                                     about 3 m short); 0 = 2; 0.5..50 */
     float seconds;               /* 0 = no time limit (it still ends stuck); at most 3600 */
     char why[96];                /* refused: why (NUL-terminated) */
+    float stuck_seconds;         /* API v41 (0.6.10; read when size covers it, a v40 core ignores it): no metre closer
+                                    for this long while not fighting ends it stuck; 0 = 15; 2..120 */
+    float hold_seconds;          /* API v46, villager_move only (pad2 before v46, never read): after it
+                                    arrives it holds at the last point this long, 0..3600; 0 = no hold (see
+                                    EMF_MOVE_HOLD) */
 } EmfMoveOrder;
 typedef void (*EmfMoveCallback)(EmfWorld* world, uint32_t id, uint32_t status, void* user);
+/* v44 blocks: player-built blocks (voxels with a building material) damaged or broken from a mod, on the server. EMF
+ * calls the game's own building-mining code with its own table, so it never touches terrain: the ground under a hole
+ * stays. A hole is a normal building change: saved with the world and sent to every player, like mining. Damage mode
+ * works like a pickaxe hit (the game's per-block health, cracks that heal 20 s after the last hit, the world's mining
+ * damage setting); the game's Unbreakable materials never break. */
+#define EMF_BLOCK_EMPTY 0u
+#define EMF_BLOCK_TERRAIN 1u
+#define EMF_BLOCK_BUILDING 2u
+#define EMF_BREAK_INSTANT 0x1u /* break at once: no health, no cracks */
+#define EMF_BREAK_DROPS 0x2u   /* removed blocks drop what a pickaxe would give (each material's item, so many blocks
+                                  per item), at the hole */
+#define EMF_BREAK_WORLD 0x4u   /* API v45: break the world's own blocks too (its ruins, as the game shipped them). Without
+                                  it every sphere stops just short of the nearest such block (and of any block whose
+                                  origin is not known), so a hole next to a ruin is smaller. A v44 core refuses the flag */
+#define EMF_BREAK_DONE 0u
+#define EMF_BREAK_CANCELLED 1u /* the world ended first */
+#define EMF_BREAK_FAILED 2u    /* a game call faulted: breaking is off until a restart */
+/* EmfBreakBlocks.damage when all five are 0: the game's T4 pickaxe (Soft, SlightlyHard, ModeratelyHard, Hard, VeryHard) */
+#define EMF_BREAK_DEFAULT_DAMAGE {100, 100, 95, 60, 50}
+typedef struct EmfBreakBlocks {
+    uint32_t size;            /* sizeof(EmfBreakBlocks) */
+    uint32_t flags;           /* EMF_BREAK_INSTANT, EMF_BREAK_DROPS, EMF_BREAK_WORLD (v45) */
+    float x, y, z;            /* metres: the centre of the (lowest) sphere */
+    float radius;             /* metres, 0.25..3.5; 0 = 1 */
+    float height;             /* metres, 0..4: more spheres up to this far above the centre (a column; at most 8) */
+    int32_t damage[5];        /* damage mode: per hardness class Soft..VeryHard, 0..100000; all 0 = the default */
+    uint32_t material_count;  /* 0 = every building material that can break */
+    const uint8_t* materials; /* building material ids 0..127 (EmfBlockInfo.material), material_count of them */
+    char why[96];             /* out: why it was refused (NUL-terminated) */
+} EmfBreakBlocks;
+typedef struct EmfBreakResult {
+    uint32_t size;    /* sizeof(EmfBreakResult) */
+    uint32_t status;  /* EMF_BREAK_* */
+    uint32_t damaged; /* blocks that took damage (a block inside two spheres of a column counts twice) */
+    uint32_t removed; /* blocks that went */
+    uint32_t dropped; /* items dropped (EMF_BREAK_DROPS) */
+} EmfBreakResult;
+typedef void (*EmfBreakCallback)(EmfWorld* world, uint32_t id, const EmfBreakResult* result, void* user);
+typedef struct EmfBlockInfo {
+    uint32_t size;     /* sizeof(EmfBlockInfo) */
+    uint32_t kind;     /* EMF_BLOCK_* */
+    uint32_t material; /* building 0..127, terrain 1..127 */
+    uint32_t fill;     /* 0..255 */
+    uint32_t hardness; /* building: 0 Soft .. 4 VeryHard, 5 Unbreakable; terrain: 0 */
+    int32_t health;    /* building: the material's health points; 0 unknown */
+    int32_t damage;    /* building: the damage so far, 0..255 (it heals 20 s after the last hit); -1 unknown */
+    float x, y, z;     /* the block's centre, metres */
+    int32_t world;     /* API v45 (written when size covers it): building: 1 = the world's own block (a ruin as the
+                          game shipped it), 0 = a player's (placed, or another material than the shipped one), -1 = not
+                          known (its place is not loaded); terrain and empty: 0 */
+} EmfBlockInfo;
 
 typedef struct EmfHitRule {
     uint32_t size;             /* sizeof(EmfHitRule) */
@@ -1124,8 +1192,9 @@ typedef struct EmfApi {
     /* Keeps a line of text on screen until it is changed or removed: `id` names it (1-48 of A-Z a-z 0-9 _ . -; prefix it
      * with your mod, e.g. "clock.time"), `text` replaces it (up to 160 characters; NULL or "" removes the line), `place`
      * is EMF_HUD_TOP_RIGHT / _BOTTOM_RIGHT / _BOTTOM_LEFT (lines of one place are listed by id), rgba = 0xRRGGBBAA (0 =
-     * the default colour). At most 32 lines across all mods. Not shown while the console is open, while no world runs (main
-     * menu, loading) or when the overlay is off (the lines are kept). Text longer than 160 bytes is cut. False (logged) for a bad id or place, or when 32 other lines exist. Any thread. */
+     * the default colour). At most 32 lines across all mods. Not shown while the console is open (except behind the HUD
+     * editor's page, where the player places them), while no world runs (main menu, loading) or when the overlay is off
+     * (the lines are kept). Text longer than 160 bytes is cut. False (logged) for a bad id or place, or when 32 other lines exist. Any thread. */
     bool (*hud_set)(const char* id, const char* text, uint32_t place, uint32_t rgba);
 
     /* ---- v13: settings and mod info ---- */
@@ -1189,7 +1258,8 @@ typedef struct EmfApi {
 
     /* ---- v17: commands any player may run ---- */
     /* register_command with options (EmfCommandDef). With EMF_COMMAND_PLAYERS every player may run the command from the
-     * game's chat; without it, only the accounts in [chat] admins (or everyone with [chat] everyone=1), as for
+     * game's chat; without it, only the accounts in [chat] admins (or everyone with [chat] everyone=1, and the game's
+     * admins with [chat] game_admins=1), as for
      * register_command. The console, emf/commands.txt and the host's own chat run every command. Registering a name that
      * exists again with the same cb and user updates its help and flags (a script host re-declaring a command after a
      * reload); any other duplicate is refused. False (logged) for a bad definition, unknown flags or a taken name. */
@@ -1235,10 +1305,11 @@ typedef struct EmfApi {
      * and a notify for the host). Same line rules and limit (a broadcast counts its lines once). Any thread. True when
      * queued (or, in a game you host without [chat] players=1, shown to the host only); false (logged) when refused. */
     bool (*chat_broadcast)(const char* text);
-    /* The player's name, UTF-8, cut to size-1 bytes and NUL-terminated: the name their connection carries, which the
-     * game's chat shows as the speaker (their platform name, e.g. their Steam name; not the character's name). Read from
-     * the server's connection records, so players' chat must be on (as chat_tell). False (buf = "") when it is not known:
-     * not a player entity of this server world, no connection record for them, or players' chat is off. Server world;
+    /* The player's name, UTF-8 (at most 64 bytes), cut to size-1 bytes between characters and NUL-terminated: the name
+     * their connection carries, which the game's chat shows as the speaker (their platform name, e.g. their Steam name;
+     * not the character's name). Read from the server's connection records, so players' chat must be on (as chat_tell).
+     * False (buf = "") when it is not known: not a player entity of this server world, no connection record for them,
+     * players' chat is off, or a name with control characters or bidi controls (U+202E and the like). Server world;
      * same thread rules as get_component. */
     bool (*player_name)(EmfWorld* world, uint32_t player, char* buf, uint32_t size);
     /* cb(world, account, entity, text, user) for every chat line a player sends to the server that is not an EMF command
@@ -1400,7 +1471,8 @@ typedef struct EmfApi {
     uint32_t (*game_language)(char* code_out, uint32_t size);
 
     /* ---- v30: character names and chat lines without a speaker ---- */
-    /* The player's character name (the one the game's Social tab shows), UTF-8, cut to size-1 bytes and NUL-terminated.
+    /* The player's character name (the one the game's Social tab shows), UTF-8, cut to size-1 bytes between characters
+     * and NUL-terminated. A name with control characters or bidi controls (U+202E and the like) is not known.
      * It may already be there at the join (from the character's last visit to this world) or come when the player's game
      * sends it, a few seconds later, and it can change during a session: read it when you need it, never cache it. It is
      * display text a player's game set, not an identity: key data by the account. A player's grave carries the name too.
@@ -1591,9 +1663,62 @@ typedef struct EmfApi {
     bool (*enemy_move_cancel)(uint32_t id);
     /* The id of `enemy`'s move, 0 = it is not moving. */
     uint32_t (*enemy_moving)(EmfWorld* world, uint32_t enemy);
+
+    /* ---- v43: the game's own permissions of a player ---- */
+    /* *perms = the player's permissions as the game keeps them (EMF_PERM_*: what the server's user groups, or the host,
+     * gave them; EMF_PERM_KICK_BAN is the game's admin). Read it when you need it: it changes when a host changes a
+     * player's group, and a player who reconnects is a new entity. False (*perms = 0) for an entity that is no player
+     * here, or on a client world. Server world (a game you host or the dedicated server); same thread rules as
+     * get_component. EMF's own chat admins ([chat] admins) are another list: EmfNetFrom.admin and command senders. */
+    bool (*player_permissions)(EmfWorld* world, uint32_t player, uint32_t* perms);
+
+    /* ---- v44: breaking player-built blocks (EmfBreakBlocks, EmfBlockInfo); never terrain ---- */
+    /* Queues a break of the building blocks in a sphere (or a column of spheres) for the next server step. Returns its
+     * id (from 1), or 0 with req->why: not the server world (a joined game cannot break blocks), not available on this
+     * game version (or off after a fault), bad numbers, 64 breaks waiting. cb (may be NULL) gets the result once: after
+     * the step that ran it, on the server world's thread, or EMF_BREAK_CANCELLED when the world ends first. Any thread.
+     * At most 8 spheres run per step (all mods together); the rest wait their turn. */
+    uint32_t (*break_blocks)(EmfWorld* world, EmfBreakBlocks* req, EmfBreakCallback cb, void* user);
+    /* What is at a point (metres): *out (out->size = sizeof(EmfBlockInfo)). False: not inside a world callback on the
+     * server world, not available on this game version, or the place is not loaded. */
+    bool (*block_at)(EmfWorld* world, float x, float y, float z, EmfBlockInfo* out);
+    /* The first building block on the line from `from` to `to` (metres; at most 64 m of it), with its centre. False
+     * when the line is clear, or for the reasons block_at gives. */
+    bool (*find_wall)(EmfWorld* world, const float from[3], const float to[3], EmfBlockInfo* out);
+
+    /* ---- v46: villager moves (EmfMoveOrder) ---- */
+    /* Walks villager order->enemy to its points inside its own walk area, by sending the game's own GoToPosition
+     * command again whenever the villager dropped it (it arrived somewhere, a player came close, its path failed).
+     * Nothing is written to the game's components and nothing is saved. Returns the move's id (from 1), or 0 with
+     * order->why: not a server world or not inside a world callback on it, no villager (DynamicActiveNpcState and its
+     * ActiveNpcState template), a player, a villager the player told to stay, a point outside its walk area (the
+     * player's roaming range when set, else its template's roaming radius around its home: 30 m for the game's
+     * villagers) or beyond the game's leash (it would be teleported home), the enemy-only flags (EMF_MOVE_ALLIES,
+     * _PEACEFUL, _PEACEFUL_ALL), bad points or numbers, more than 256 villager moves. It waits (and its stuck clock
+     * with it) while the game does not run the villager: no player within 150 m, night and sleep, water, a player
+     * talking to it; `seconds` runs on. Statuses as enemy_move: ARRIVED, STUCK (no metre closer for stuck_seconds, the
+     * game teleported it, or its path not found twice), TIMEOUT, GONE, CANCELLED. With hold_seconds or EMF_MOVE_HOLD
+     * the callback still comes once, at ARRIVED; the hold then runs on the same id (villager_moving is the id) and
+     * ends quietly: its time over, villager_move_cancel, a new move on it, the world closing, the player telling it
+     * to stay, its home moving, a teleport, or no way back for stuck_seconds. It waits while a player is close by.
+     * cb as enemy_move. Cancel, stuck and timeout tell the villager to stop where it stands. */
+    uint32_t (*villager_move)(EmfWorld* world, EmfMoveOrder* order, EmfMoveCallback cb, void* user);
+    /* Ends a villager move (its callback gets EMF_MOVE_CANCELLED) or its hold (quietly): at once inside a world
+     * callback on the server world, else at the next step. False: no such move. */
+    bool (*villager_move_cancel)(uint32_t id);
+    /* The id of `villager`'s move or hold, 0 = none. */
+    uint32_t (*villager_moving)(EmfWorld* world, uint32_t villager);
 } EmfApi;
 
 #define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */
+/* v43 player_permissions: the game's own permissions of a player (its PlayerPermissions) */
+#define EMF_PERM_KICK_BAN          0x01u /* the game's admin: on a dedicated server the Admin user group (its password);
+                                            in a game someone hosts, the host and the players the host made admins */
+#define EMF_PERM_ACCESS_INVENTORIES 0x02u
+#define EMF_PERM_EDIT_BASE          0x04u
+#define EMF_PERM_EDIT_WORLD         0x08u
+#define EMF_PERM_EXTEND_BASE        0x10u
+#define EMF_PERM_RECEIVE_EXP        0x20u
 #define EMF_CHAT_SYSTEM 1u         /* v30 chat_tell_ex / chat_broadcast_ex: a line without a speaker's name */
 
 typedef bool (*EmfModLoadFn)(const EmfApi* api);

@@ -7,6 +7,9 @@
 //    players with the game's admin bit (kiln.players); EMF_COMMAND_PLAYERS commands are for everyone. Lines that are
 //    no command go to on_chat after the step.
 //  - <game>/emf/commands.txt: one command per line, run as the console (admin); replies go to kiln.log.
+// Since 0.2.0-dev.29.17 the tick never touches the disk here: kiln-emf's disk thread (io.cpp) looks for commands.txt
+// every 500 ms while the server world steps (as the Pre did), and re-reads emf_core.ini when its time stamp changes; the
+// tick only takes the queued commands and the parsed [chat] configuration.
 // Kiln's own /help stays Kiln.Chat's: EMF's built-ins answer to "emf.help", "emf.mods", "emf.settings", "emf.set" in
 // the chat (and also without the prefix in commands.txt).
 #include <intrin.h>
@@ -49,7 +52,7 @@ std::vector<std::unique_ptr<ChatReg>> g_chat_regs;
 bool g_chat_on = false;
 KilnHandle g_chat_sub = 0;
 
-// [chat] configuration
+// [chat] configuration: parsed by read_config (on_ready, then the disk thread); the tick reads copies under g_cfg_mutex
 struct ChatConfig {
     std::vector<uint64_t> admins;
     std::vector<std::string> deny;
@@ -57,8 +60,15 @@ struct ChatConfig {
     std::filesystem::path file;
     std::filesystem::file_time_type mtime{};
 } g_cfg;
+std::mutex g_cfg_mutex;       // g_cfg (held only to copy or swap, never across a disk call)
+std::mutex g_cfg_read_mutex;  // one read_config at a time
 std::map<uint64_t, std::deque<uint64_t>> g_rate;  // account -> times of its last commands (non-admins)
-uint64_t g_last_file_check = 0;
+std::atomic<uint64_t> g_server_pre_ms{0};  // the server world's last Pre (now_ms): the disk thread polls while it steps
+
+ChatConfig cfg() {
+    std::lock_guard lock(g_cfg_mutex);
+    return g_cfg;
+}
 
 bool valid_name(std::string_view n) {
     if (n.empty() || n.size() > 32) return false;
@@ -146,15 +156,27 @@ bool api_on_chat(EmfChatCallback cb, void* user) {
 }
 
 // ---------------------------------------------------------------------------------------------- config --------
+// Disk calls: on_ready and the disk thread only (never the tick).
 void read_config() {
+    std::lock_guard read_lock(g_cfg_read_mutex);
     std::filesystem::path f = P.config / L"emf" / L"emf_core.ini";
     std::error_code ec;
     if (!std::filesystem::exists(f, ec)) f = P.emf / L"emf_core.ini";
     const auto mt = std::filesystem::last_write_time(f, ec);
-    if (f == g_cfg.file && !ec && mt == g_cfg.mtime) return;
-    g_cfg = ChatConfig{};
-    g_cfg.file = f;
-    g_cfg.mtime = ec ? std::filesystem::file_time_type{} : mt;
+    {
+        std::lock_guard lock(g_cfg_mutex);
+        if (f == g_cfg.file && !ec && mt == g_cfg.mtime) return;
+    }
+    ChatConfig n;
+    n.file = f;
+    n.mtime = ec ? std::filesystem::file_time_type{} : mt;
+    struct Swap {  // the parsed configuration replaces the old one however this returns
+        ChatConfig& n;
+        ~Swap() {
+            std::lock_guard lock(g_cfg_mutex);
+            g_cfg = std::move(n);
+        }
+    } swap{n};
     std::string text;
     if (!read_file(f, &text)) return;
     bool in_chat = false;
@@ -193,16 +215,16 @@ void read_config() {
                     logf(KILN_LOG_WARN, "[chat] admins: %s is a Steam64 id, not an account hash: skipped", w.c_str());
                     continue;
                 }
-                g_cfg.admins.push_back(std::strtoull(w.c_str(), nullptr, 0));
+                n.admins.push_back(std::strtoull(w.c_str(), nullptr, 0));
             }
         } else if (k == "everyone") {
-            g_cfg.everyone = !words.empty() && words[0] == "1";
+            n.everyone = !words.empty() && words[0] == "1";
         } else if (k == "deny") {
-            for (const auto& w : words) g_cfg.deny.push_back(lower(w));
+            for (const auto& w : words) n.deny.push_back(lower(w));
         }
     }
-    logf(KILN_LOG_INFO, "chat commands: %zu admin account(s), everyone=%d, %zu denied (%s)", g_cfg.admins.size(),
-         g_cfg.everyone ? 1 : 0, g_cfg.deny.size(), path_utf8(f).c_str());
+    logf(KILN_LOG_INFO, "chat commands: %zu admin account(s), everyone=%d, %zu denied (%s)", n.admins.size(),
+         n.everyone ? 1 : 0, n.deny.size(), path_utf8(f).c_str());
 }
 
 bool game_admin(uint32_t entity) {
@@ -237,6 +259,7 @@ void reply(const std::shared_ptr<CommandRun>& run, const std::string& t) { comma
 bool may_run(const CommandRun& run, const Command* c) {
     if (run.sender.admin) return true;
     if (!c || !(c->flags & EMF_COMMAND_PLAYERS)) return false;
+    std::lock_guard lock(g_cfg_mutex);
     return std::find(g_cfg.deny.begin(), g_cfg.deny.end(), c->lname) == g_cfg.deny.end();
 }
 
@@ -368,15 +391,15 @@ bool KILN_CALL on_chat_line(const KilnChatMessage* msg, void*) {
                 ours = ours || find_cmd(args[0]) != nullptr;
             }
             if (ours) {
-                read_config();
+                const ChatConfig c = cfg();  // kept current by the disk thread (no disk call here)
                 auto run = std::make_shared<CommandRun>();
                 run->line = std::string(text.substr(1));
                 run->sender.size = sizeof(EmfCommandSender);
                 run->sender.entity = msg->sender.entity;
                 run->sender.account = msg->sender.account;
                 run->sender.from_chat = 1;
-                const bool listed = std::find(g_cfg.admins.begin(), g_cfg.admins.end(), msg->sender.account) != g_cfg.admins.end();
-                run->sender.admin = (g_cfg.everyone || listed || game_admin(msg->sender.entity)) ? 1 : 0;
+                const bool listed = std::find(c.admins.begin(), c.admins.end(), msg->sender.account) != c.admins.end();
+                run->sender.admin = (c.everyone || listed || game_admin(msg->sender.entity)) ? 1 : 0;
                 run->to_chat = true;
                 if (!run->sender.admin) {  // at most 5 commands in 10 s for players who are no admins
                     auto& q = g_rate[msg->sender.account];
@@ -437,9 +460,16 @@ void commands_on_ready() {
 }
 
 void commands_server_pre() {
-    const uint64_t now = now_ms();
-    if (now - g_last_file_check < 500) return;
-    g_last_file_check = now;
+    g_server_pre_ms.store(now_ms(), std::memory_order_relaxed);  // the disk thread looks for commands.txt meanwhile
+}
+
+// The disk thread (io.cpp), every 500 ms: while the server world steps (its Pre ran in the last 1.5 s), re-read a changed
+// emf_core.ini and take emf/commands.txt (renamed to commands.txt.running, read, removed); its lines run after the next
+// server step, as before.
+void commands_poll_files() {
+    const uint64_t seen = g_server_pre_ms.load(std::memory_order_relaxed);
+    if (!seen || now_ms() - seen > 1500) return;
+    read_config();
     const auto file = P.emf / L"commands.txt";
     std::error_code ec;
     if (!std::filesystem::exists(file, ec) || std::filesystem::file_size(file, ec) == 0) return;
@@ -506,9 +536,11 @@ void commands_after_step(EmfWorld* w, uint8_t kind) {
 }
 
 bool commands_is_admin(uint32_t entity, uint64_t account) {
-    read_config();
-    return game_admin(entity) || g_cfg.everyone ||
-           std::find(g_cfg.admins.begin(), g_cfg.admins.end(), account) != g_cfg.admins.end();
+    {
+        std::lock_guard lock(g_cfg_mutex);  // kept current by the disk thread (no disk call here)
+        if (g_cfg.everyone || std::find(g_cfg.admins.begin(), g_cfg.admins.end(), account) != g_cfg.admins.end()) return true;
+    }
+    return game_admin(entity);
 }
 
 void fill_commands(EmfApi* t) {

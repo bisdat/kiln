@@ -45,6 +45,8 @@ internal sealed class PlayerAnimLookup(Func<bool> available, Func<bool> capabili
         catch (KilnUnavailableException e) { throw new PlayerStatesNotAnswering(e.Message); }
     }
 
+    public IReadOnlyList<AnimationReferenceAnswer> FindById(Guid guid) => AnimationGraphReferences.Find(guid);
+
     internal static PlayerStateKind Map(PlayerAnimStateKind k) => k switch
     {
         PlayerAnimStateKind.State => PlayerStateKind.State,

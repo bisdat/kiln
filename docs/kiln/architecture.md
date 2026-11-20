@@ -1,5 +1,8 @@
 # Kiln architecture
 
+The client gate list is empty in 0.2.0-dev.29: every capability held in dev.28 is open, subject to its normal dependencies and side restrictions. The remaining 20 have not been confirmed in a real game; the [client pass](client-pass.md) records that confirmation work.
+
+
 ```
 enshrouded_server.exe / enshrouded.exe
  └─ imports DINPUT8 ──► <game>/dinput8.dll              native/proxy  (forwards to system dinput8)
@@ -36,6 +39,18 @@ enshrouded_server.exe / enshrouded.exe
    ([native-mods.md](native-mods.md)), sigdb (12 ms for all symbols), policy decision, hooks (SimStep, log listener),
    in-core services, service DLLs and plugins, native mods `boot` (and `world` armed), .NET (40 ms) and `Kiln.Host`
    (10 ms), then `kiln/state/boot.json`.
+   **The boot phase** (since 0.2.0-dev.28; [modding/onboot.md](modding/onboot.md), [services/boot.md](services/boot.md))
+   sits inside this step. kiln.boot decides once, before the service DLLs load, whether this process has a boot
+   generation (hooks and .NET on, an enabled mod of this side with `"boot"`, `mods.boot` available; on a game client
+   also `mods.boot.client`). If it does, the seven collectors (assets, worldtables, content,
+   skills, knowledge, vfx, patches) register in `kiln_plugin_main` or `on_ready` and keep their definitions back
+   instead of loading them there; registration closes once every `on_ready` ran. Inside the .NET start, `Kiln.Host`
+   runs each boot mod's `OnBoot` on a throwaway copy, lowers what it staged, and commits: kiln.boot prepares every
+   collector in that order, leaves out a failed mod and the mods that require it, and publishes one generation. Then,
+   before chain.ini `[late]` DLLs and before the game's entry point, the core checks it: anything but a published
+   generation writes `progress.json` ("failed") and `boot.json` (section `boot`) and ends the process with exit code
+   0x4B01; the game is never entered. Without a boot generation nothing of this runs and every collector loads in
+   `on_ready` as before.
 4. Managed mods load at the first server-world step, on the tick thread (on a client: client/both mods in the menu,
    side "server" mods with each hosted server world; docs/kiln/client.md "Mods and sides").
 
@@ -58,7 +73,14 @@ per step. Per step:
 - **Post** (only while someone subscribed): `WaitWorldJobs(world)`, then Post subscribers. The server's SimStep
   returns with grid and range-query jobs still running; touching entities before the wait races them (EMF notes).
 
-Kiln writes `kiln/logs/tick-stats.jsonl` every 60 s: step time, Kiln's own Pre/Post time, interval, subscribers.
+Kiln writes `kiln/logs/tick-stats.jsonl` every 60 s: step time, Kiln's own Pre/Post time, interval, subscribers. Since
+0.2.0-dev.29 each line also carries `post_parts` (the game's job wait, the window services' end and each Post
+subscriber by owner), `pre_parts` (the eight slowest Pre subscribers) and `worst` (the window's slowest step taken
+apart). Since 0.2.0-dev.29.19 a server-world gap of a second or more that the world's clock did not cover (a
+single-player world stands still while the game's menu is open) goes into `paused_ms` (count, total, max), written only
+when there was one, and not into `interval_ms`: a stall shows as a long interval with `clock_rate` staying at 60 (the
+clock catches up), a pause as `paused_ms`. Since 0.2.0-dev.29.19 each server and client world line ends with `impact` (the game's impact memory pool: `used_pct`, `peak_pct`, `capacity_mib`, `live`, `live_peak`; [services/abilities.md](services/abilities.md#impact-memory-watch)). A support report keeps the last 1 MiB of the file. `kilnctl tick-compare` compares two such files
+(before/after a change; `kiln_manage::tick_compare`, the method in [kilnctl.md](kilnctl.md#measuring-a-task-change-tick-compare-t12)).
 
 ## C ABI (`native/core/abi/kiln_api.h`, ABI 1)
 One append-only table: log, build info, features, paths, owners, tick subscribe/post, game-log mirror, and an unstable

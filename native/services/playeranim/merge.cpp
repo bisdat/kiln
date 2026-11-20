@@ -1009,6 +1009,15 @@ GameStates::GameStates(const TypeDb& types, const Bytes& raw) {
 }
 
 std::vector<const GameState*> GameStates::find(std::string_view name) const {
+    if (name.size() == 10 && (name.starts_with("0x") || name.starts_with("0X"))) {
+        uint32_t id = 0;
+        const auto parsed = std::from_chars(name.data() + 2, name.data() + name.size(), id, 16);
+        std::vector<const GameState*> out;
+        if (parsed.ec != std::errc{} || parsed.ptr != name.data() + name.size()) return out;
+        for (const auto& state : all_)
+            if (std::find(state.ids.begin(), state.ids.end(), id) != state.ids.end()) out.push_back(&state);
+        return out;
+    }
     std::string_view machine, state = name;
     const size_t slash = name.find('/');
     if (slash != std::string_view::npos) machine = name.substr(0, slash), state = name.substr(slash + 1);

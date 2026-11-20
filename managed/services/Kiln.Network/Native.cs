@@ -13,9 +13,10 @@ internal static unsafe class NetNative
     public const int Ok = 0, NotFound = 2, Unavailable = 3, WrongThread = 4, TooBig = 5;
     public const uint TransportGame = 1, TransportLab = 2;
     public const uint RoleServer = 1, RoleClient = 2;
-    public const uint PeerHasPlayer = 1, PeerProved = 4, PeerHeld = 8;
-    public const uint GateOff = 0, GateHold = 1, GateCanHold = 1, GateCanWithhold = 2, GateCanGuard = 4;
-    public const uint SelftestCreate = 1, SelftestSlot = 2, SelftestMask = 3, SelftestQueue = 4, SelftestBind = 5, SelftestHeap = 6, SelftestBindMachine = 7;
+    public const uint PeerHasPlayer = 1, PeerProved = 4, PeerHeld = 8, PeerRefused = 0x20, PeerEnding = 0x40, PeerBlocked = 0x80;
+    public const uint GateOff = 0, GateHold = 1, GateHoldAll = 2, GateCanHold = 1, GateCanWithhold = 2, GateCanGuard = 4, GateCanHoldAll = 8, GateCanDisconnect = 16;
+    public const uint SelftestCreate = 1, SelftestSlot = 2, SelftestMask = 3, SelftestQueue = 4, SelftestBind = 5, SelftestHeap = 6, SelftestBindMachine = 7,
+        SelftestKickFail = 8, SelftestSessionKick = 9;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct PeerInfo
@@ -125,6 +126,42 @@ internal static unsafe class NetNative
         catch (Exception e)
         {
             NetEngine.LogError($"peer event 0x{peer:x}/{ev}: {e}");
+        }
+    }
+
+    /// <summary>kiln.ui.tick v1 (native/core/abi/services/kiln_ui.h, KilnUiTickApi): the game's UI frame as a tick.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct UiTickTable
+    {
+        public ServiceHeader Header;
+        public delegate* unmanaged[Cdecl]<ulong, delegate* unmanaged[Cdecl]<ulong, void*, void>, void*, ulong*, int> Subscribe;
+        public delegate* unmanaged[Cdecl]<ulong, int> Unsubscribe;
+        public delegate* unmanaged[Cdecl]<byte> InMenu;
+    }
+
+    private static int _uiFrameFaults;
+
+    /// <summary>Client: <see cref="NetEngine.ClientUiFrame"/> after each of the game's UI frames, on its UI thread. False
+    /// without kiln.ui.tick (an older kiln-ui, KILN_UI_DISABLE): then nothing changes.</summary>
+    public static bool SubscribeUiFrame()
+    {
+        if (TestTransport != null) return false;
+        var t = Services.Get<UiTickTable>("kiln.ui.tick", 1);
+        if (t == null || t->Subscribe == null) return false;
+        ulong h = 0;
+        return t->Subscribe(0, &OnUiFrame, null, &h) == Ok;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void OnUiFrame(ulong frame, void* user)
+    {
+        try
+        {
+            NetEngine.ClientUiFrame();
+        }
+        catch (Exception e)
+        {
+            if (Interlocked.Increment(ref _uiFrameFaults) <= 5) NetEngine.LogError($"UI frame: {e}");
         }
     }
 

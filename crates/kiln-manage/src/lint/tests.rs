@@ -37,6 +37,19 @@ fn program_access_names_match_native_120_byte_limit() {
 }
 
 #[test]
+fn program_world_is_one_of_the_four_kiln_world_reads() {
+    // "world" (0.2.0-dev.29, native/services/world/boot_programs.h): absent means "server", as before
+    for (world, valid) in [(None, true), (Some("server"), true), (Some("client"), true), (Some("both"), true),
+                           (Some("prediction"), true), (Some("Client"), false), (Some("mars"), false)] {
+        let mut entry = serde_json::json!({"otherRead":["Health"]});
+        if let Some(w) = world { entry["world"] = serde_json::json!(w); }
+        let text = serde_json::json!({"format":1,"programs":{"pulse":entry}}).to_string();
+        let root = json::parse("kiln.programs.json", &text, 0, json::Dialect::STRICT).root.unwrap();
+        assert_eq!(embedded().schemas.validate("kiln-programs.schema.json", &root).issues.is_empty(), valid, "{world:?}");
+    }
+}
+
+#[test]
 fn block_png_paths_refuse_links_and_windows_aliases_before_opening() {
     let dir = std::env::temp_dir().join(format!("kiln-lint-icon-{}", std::process::id()));
     let root = dir.join("mod");

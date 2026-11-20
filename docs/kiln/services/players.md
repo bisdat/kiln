@@ -170,6 +170,13 @@ static void KILN_CALL on_ready(void* user) {
 KilnPlayer list[16]; uint32_t n = 0;
 players->list(KILN_PLAYERS_LIST_IN_GAME, list, 16, &n);
 ```
+There is no native `Permissions.Has`. That check is the `permissions.json` node check, not the `KILN_PLAYER_CAN_*`
+bits on `KilnPlayer` (those are the game's user-group rights). The decision is the managed store: a node's default
+level, including a node a mod registered in this process, the rules last read from `permissions.json` (and edits made
+in memory), and the subject's groups and admin facts. There is no call from a native service into that store. A
+native reader of the file would miss an in-memory grant or a node registered as everyone, and could allow a node
+`Permissions.Has` denies.
+
 `list`, `get`, `find_name`, `find_steam_id`, `events`, `status` read the last step's snapshot from any thread;
 `position` reads live on the tick thread; `raw_slot` and `probe_position` are tick-thread diagnostics; `events(after,
 ...)` replays the ring of the last 64 events (for pollers). `KilnPlayer` is frozen in v1 (arrays are packed at

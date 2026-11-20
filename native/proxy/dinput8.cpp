@@ -25,6 +25,8 @@
 //      Each DLL: resolved, deduplicated by canonical path (GetFinalPathNameByHandleW), checked through a read-only file
 //      mapping (never loaded for that) and refused when it is this proxy, the system dinput8, another Kiln proxy or
 //      ShroudForge's dinput8 (EMF's loader, which also exports ShroudForge's chain-host name, is accepted), then LoadLibraryExW(LOAD_WITH_ALTERED_SEARCH_PATH) under an SEH guard. Never FreeLibrary.
+//      A loaded module whose headers are not the file's (Wine's builtin of the same name mapped in its place, which
+//      still reports the asked path; image_match.h) gets a warning with the WINEDLLOVERRIDES to set in proxy.log.
 //      The results go to the core in KilnBootInfo.chain (and kiln/logs/proxy.log). Before the first DLL loads, the length
 //      of <game>\shroudlink_client.log goes to KilnBootInfo.addon_log_size (v3): where that addon's lines of this start begin.
 //      kiln/chain.ini [late] (dev.21): an entry of the lists above whose DLL is also named in [late] passes the same
@@ -57,6 +59,7 @@
 #include <cstring>
 
 #include "../core/abi/kiln_api.h"
+#include "image_match.h"
 #include "kiln_version.h"
 
 // KilnProxyInfo (kiln_api.h): the installer's classify_proxy finds the marker text "KilnProxy/<abi> <version>" in the
@@ -393,15 +396,15 @@ bool resolve(const wchar_t* base, const wchar_t* rel, wchar_t* out) {
     return n > 0 && n < kPath;
 }
 
-// The file's final path (symlinks, 8.3 names, case and drive mappings resolved); nullptr when it cannot be opened.
-const wchar_t* canonical(const wchar_t* path) {
+// The file's final path (symlinks, 8.3 names, case and drive mappings resolved).
+// The buffer overload lets post-load checks avoid retaining another process-lifetime allocation.
+bool canonical(const wchar_t* path, wchar_t (&buf)[kPath]) {
     HANDLE h = CreateFileW(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
                            FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return nullptr;
-    wchar_t buf[kPath];
+    if (h == INVALID_HANDLE_VALUE) return false;
     const DWORD n = GetFinalPathNameByHandleW(h, buf, kPath, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
     CloseHandle(h);
-    if (n == 0 || n >= kPath) return nullptr;
+    if (n == 0 || n >= kPath) return false;
     const wchar_t* p = buf;
     if (wcsncmp(buf, L"\\\\?\\UNC\\", 8) == 0) {
         buf[6] = L'\\';  // \\?\UNC\server\share -> \\server\share
@@ -409,7 +412,19 @@ const wchar_t* canonical(const wchar_t* path) {
     } else if (wcsncmp(buf, L"\\\\?\\", 4) == 0) {
         p = buf + 4;
     }
-    return wdup(p);
+    if (p != buf) {
+        for (size_t i = 0;; ++i) {
+            buf[i] = p[i];
+            if (!buf[i]) break;
+        }
+    }
+    return true;
+}
+
+// nullptr when opening or canonicalisation fails.
+const wchar_t* canonical(const wchar_t* path) {
+    wchar_t buf[kPath];
+    return canonical(path, buf) ? wdup(buf) : nullptr;
 }
 
 // ---- refusals: read-only file mapping, never LoadLibrary ----
@@ -542,40 +557,62 @@ bool marker(const unsigned char* b, size_t n, const char (&text)[N]) {
     return false;
 }
 
+// A whole file as read-only bytes, never LoadLibrary: the checks below, and after a load the check that Wine mapped
+// this file (swap_signs).
+struct FileView {
+    HANDLE file = INVALID_HANDLE_VALUE;
+    HANDLE map = nullptr;
+    const unsigned char* bytes = nullptr;  // nullptr: under 0x200 bytes, 2 GiB or more, or not mappable
+    size_t size = 0;
+};
+
+// false when the file cannot be opened.
+bool view_open(const wchar_t* path, FileView* v) {
+    v->file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                          FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (v->file == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size{};
+    GetFileSizeEx(v->file, &size);
+    if (size.QuadPart >= 0x200 && size.QuadPart < (1ll << 31)) {
+        v->map = CreateFileMappingW(v->file, nullptr, PAGE_READONLY, 0, 0, nullptr);
+        v->bytes = v->map ? static_cast<const unsigned char*>(MapViewOfFile(v->map, FILE_MAP_READ, 0, 0, 0)) : nullptr;
+        if (v->bytes) v->size = static_cast<size_t>(size.QuadPart);
+    }
+    return true;
+}
+
+void view_close(FileView* v) {
+    if (v->bytes) UnmapViewOfFile(v->bytes);
+    if (v->map) CloseHandle(v->map);
+    if (v->file != INVALID_HANDLE_VALUE) CloseHandle(v->file);
+    *v = FileView{};
+}
+
 // `emf_loader` (optional): set when the DLL is EMF's own loader (its exports or marker text).
 // `gated_addon`: same two-export identity as kiln-manage's is_gated_addon; never defer its live-code scans.
 uint32_t classify(const wchar_t* path, bool* emf_loader = nullptr, bool* gated_addon = nullptr) {
-    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-                           FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (f == INVALID_HANDLE_VALUE) return kAccept;  // LoadLibrary reports the real error
-    LARGE_INTEGER size{};
-    GetFileSizeEx(f, &size);
+    FileView v;
+    if (!view_open(path, &v)) return kAccept;  // LoadLibrary reports the real error
     uint32_t result = kNotDll;
-    if (size.QuadPart >= 0x200 && size.QuadPart < (1ll << 31)) {
-        HANDLE m = CreateFileMappingW(f, nullptr, PAGE_READONLY, 0, 0, nullptr);
-        const auto* b = m ? static_cast<const unsigned char*>(MapViewOfFile(m, FILE_MAP_READ, 0, 0, 0)) : nullptr;
-        if (b) {
-            const size_t n = static_cast<size_t>(size.QuadPart);
-            unsigned flags = 0;
-            if (export_flags(b, n, &flags)) {
-                if (gated_addon) *gated_addon = (flags & (8 | 16)) == (8 | 16);
-                static const wchar_t kCore[] = L"\\kiln\\kiln-core.dll";
-                static const char kWine[] = "Wine builtin DLL";
-                if (memcmp(b + 0x40, kWine, sizeof kWine - 1) == 0) result = kSystem;
-                else if ((flags & 1) || contains(b, n, kCore, sizeof kCore - sizeof(wchar_t)) || marker(b, n, "KilnProxy/"))
-                    result = kKiln;
-                else if ((flags & 2) || marker(b, n, "EMF-LOADER-7d3c9f")) {
-                    result = kAccept;
-                    if (emf_loader) *emf_loader = true;
-                }
-                else if ((flags & 4) || marker(b, n, "shroudforge")) result = kShroudForge;
-                else result = kAccept;
+    if (const unsigned char* b = v.bytes) {
+        const size_t n = v.size;
+        unsigned flags = 0;
+        if (export_flags(b, n, &flags)) {
+            if (gated_addon) *gated_addon = (flags & (8 | 16)) == (8 | 16);
+            static const wchar_t kCore[] = L"\\kiln\\kiln-core.dll";
+            static const char kWine[] = "Wine builtin DLL";
+            if (memcmp(b + 0x40, kWine, sizeof kWine - 1) == 0) result = kSystem;
+            else if ((flags & 1) || contains(b, n, kCore, sizeof kCore - sizeof(wchar_t)) || marker(b, n, "KilnProxy/"))
+                result = kKiln;
+            else if ((flags & 2) || marker(b, n, "EMF-LOADER-7d3c9f")) {
+                result = kAccept;
+                if (emf_loader) *emf_loader = true;
             }
-            UnmapViewOfFile(b);
+            else if ((flags & 4) || marker(b, n, "shroudforge")) result = kShroudForge;
+            else result = kAccept;
         }
-        if (m) CloseHandle(m);
     }
-    CloseHandle(f);
+    view_close(&v);
     return result;
 }
 
@@ -628,6 +665,63 @@ KilnChainEntry* add(uint32_t source, const wchar_t* path, uint32_t status) {
     e->status = status;
     e->source = source;
     return e;
+}
+
+// ---- after a load: did Wine map the file that was asked for? (image_match.h) ----
+
+// image_match's signs that module `h` is not the file at `path`: 0 when they match, and when the module's headers or
+// the file cannot be read (no proof). `loaded` receives the module's header identity.
+unsigned swap_signs(const wchar_t* path, HMODULE h, kiln::image_match::Id* loaded) {
+    *loaded = kiln::image_match::module_headers(h);
+    if (!loaded->ok) return 0;
+    FileView v;
+    if (!view_open(path, &v)) return 0;
+    const kiln::image_match::Id file = kiln::image_match::read(v.bytes, v.size);
+    view_close(&v);
+    return kiln::image_match::mismatch(*loaded, file);
+}
+
+// proxy.log and the debugger for a line longer than plog's 1024 characters, converted to UTF-8 in pieces (a surrogate
+// pair stays in one piece).
+void plog_long(const wchar_t* msg) {
+    OutputDebugStringW(msg);
+    if (g_log == INVALID_HANDLE_VALUE) return;
+    char out[3 * 1024];
+    DWORD written = 0;
+    for (size_t at = 0, n = wlen(msg); at < n;) {
+        size_t take = n - at < 1024 ? n - at : 1024;
+        if (take < n - at && msg[at + take - 1] >= 0xD800 && msg[at + take - 1] <= 0xDBFF) --take;
+        const int k = WideCharToMultiByte(CP_UTF8, 0, msg + at, static_cast<int>(take), out, sizeof out, nullptr, nullptr);
+        if (k <= 0) break;
+        WriteFile(g_log, out, static_cast<DWORD>(k), &written, nullptr);
+        at += take;
+    }
+    WriteFile(g_log, "\r\n", 2, &written, nullptr);
+}
+
+// After a load: when the module is not the file that was asked for (Wine's builtin of the same name in its place),
+// proxy.log says so in place of the "loaded at" line and gives the override that loads the file. Only a proven
+// mismatch counts (swap_signs); the entry stays LOADED with the module Wine returned. True when it warned.
+bool log_chain_swap(uint32_t source, const wchar_t* asked, const wchar_t* asked_canon, HMODULE h) {
+    kiln::image_match::Id loaded;
+    if (!swap_signs(asked, h, &loaded)) return false;
+    // Wine reports the asked path for its builtin; a module that reports another file is named by that path.
+    wchar_t reported[kPath], reported_canon[kPath];
+    reported[0] = 0;
+    const DWORD n = GetModuleFileNameW(h, reported, kPath);
+    bool another = false;
+    if (n && n < kPath)
+        another = asked_canon && canonical(reported, reported_canon) ? !wieq(asked_canon, reported_canon)
+                                                                     : !wieq(asked, reported);
+    wchar_t prefix[64];
+    lstrcpyW(prefix, L"chain: ");
+    lstrcatW(prefix, source_name(source));
+    lstrcatW(prefix, L": ");
+    wchar_t msg[3 * kPath + 256];  // two paths and a base name, each shorter than kPath, and the fixed text
+    kiln::image_match::warning(msg, sizeof msg / sizeof *msg, static_cast<const wchar_t*>(prefix), asked,
+                               kiln::image_match::instead(another, loaded), static_cast<const wchar_t*>(reported));
+    plog_long(msg);
+    return true;
 }
 
 // One DLL of a list. `base` resolves relative paths; `skip`: list it, load nothing (play-once no-mods).
@@ -718,7 +812,8 @@ void chain_one(uint32_t source, const wchar_t* base, const wchar_t* raw, uint32_
         return;
     }
     e->module = h;
-    plog(L"chain: %s: %s loaded at %p", source_name(source), shown, h);
+    if (!log_chain_swap(source, shown, canon, h))
+        plog(L"chain: %s: %s loaded at %p", source_name(source), shown, h);
 }
 
 // A list of DLL lines (pointers into a file's text), growable.
@@ -779,6 +874,9 @@ void read_dll_list(const wchar_t* file, List* first, Section* sections, size_t n
     }
     List* current = first;
     wchar_t section[128];
+    uint32_t skipped = 0;
+    wchar_t shown_file[512];
+    if (shared) lstrcpynW(shown_file, file, 512);
     each_line(text, [&](wchar_t* line) {
         if (!*line || is_comment(line)) return;
         if (section_of(line, section, 128)) {
@@ -788,9 +886,21 @@ void read_dll_list(const wchar_t* file, List* first, Section* sections, size_t n
             return;
         }
         if (!current) return;  // other sections belong to other tools
+        // Keep the line as written: shared_chain_value removes comments and quotes in place.
+        wchar_t shown[257];
+        if (shared && skipped < kMaxPerList) lstrcpynW(shown, line, 257);
         wchar_t* v = shared ? shared_chain_value(line) : value_of(line);
-        if (*v && ends_with_i(v, L".dll")) current->push(v);
+        if (*v && ends_with_i(v, L".dll")) {
+            current->push(v);
+        } else if (shared && *v && value_of(line) == line) {
+            // The shared spec: a line naming anything but a .dll "is skipped and reported". A "key = value" line whose
+            // value is no .dll is a setting of the tool that wrote it and is ignored, as it always was.
+            if (skipped++ < kMaxPerList)
+                plog(L"chain: %s: %s skipped: does not name a .dll", shown_file, shown);
+        }
     });
+    if (skipped > kMaxPerList)
+        plog(L"chain: %s: and %u more lines skipped (do not name a .dll)", shown_file, skipped - kMaxPerList);
 }
 
 void load_list(uint32_t source, const wchar_t* base, const List& list, bool emf_rules, bool skip) {

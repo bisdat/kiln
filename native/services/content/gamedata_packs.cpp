@@ -786,7 +786,7 @@ const External* find_ext(const std::string& name) {
 
 KilnResult register_external(const External& x) {
     if (x.name.empty() || !x.apply || section_of(x.name) || x.name == "items" || x.name == "recipes" || x.name == "loot" ||
-        x.name == "drops" || x.name == "options" || x.name == "format")
+        x.name == "drops" || x.name == "options" || x.name == "format" || x.name == "gear" || x.name == "gearRules")
         return KILN_ERR_INVALID_ARGUMENT;
     std::vector<Applied> replay;
     {
@@ -989,7 +989,7 @@ void gd_pack_sections(KilnOwner owner, uint64_t seq_base, const gjson& doc, cons
     // other services' sections ("creatures", ...)
     for (auto& [k, body] : doc.items()) {
         if (section_of(k) || k == "items" || k == "recipes" || k == "loot" || k == "drops" || k == "options" || k == "format" ||
-            k.empty() || k[0] == '@' || k == "comment")
+            k == "gear" || k == "gearRules" || k.empty() || k[0] == '@' || k == "comment")
             continue;
         Applied a{k, owner_text(owner), source, owner, body.dump()};
         const External* x = nullptr;

@@ -9,9 +9,12 @@
   -->
   <PropertyGroup>
     <KilnAnalyzers Condition="'$(KilnAnalyzers)' == ''">true</KilnAnalyzers>
-    <!-- .editorconfig (how the compiler sees build properties) cuts a value at ';' (a comment): pass a comma list. -->
-    <KilnServicesList>$(KilnServices.Replace(';', ',').Replace(' ', ''))</KilnServicesList>
-    <KilnFeaturesList>$(KilnFeatures.Replace(';', ',').Replace(' ', ''))</KilnFeaturesList>
+    <!-- .editorconfig (how the compiler sees build properties) cuts a value at ';' (a comment) and at a line break: pass one
+         comma list (the names may be separated by ';', ',', spaces or line breaks). -->
+    <KilnServicesList>$([System.Text.RegularExpressions.Regex]::Replace('$(KilnServices)', '[\s,;]+', ','))</KilnServicesList>
+    <KilnServicesList>$([System.Text.RegularExpressions.Regex]::Replace('$(KilnServicesList)', '^,+|,+$', ''))</KilnServicesList>
+    <KilnFeaturesList>$([System.Text.RegularExpressions.Regex]::Replace('$(KilnFeatures)', '[\s,;]+', ','))</KilnFeaturesList>
+    <KilnFeaturesList>$([System.Text.RegularExpressions.Regex]::Replace('$(KilnFeaturesList)', '^,+|,+$', ''))</KilnFeaturesList>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(KilnAnalyzers)' == 'true' and '$(KilnRepoMode)' != 'true'">
@@ -24,11 +27,15 @@
                       OutputItemType="Analyzer" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
-  <!-- What the rules read: build_property.KilnServicesList (KILN108), KilnAdvanced (KILN107), and the project's own
-       kiln.mod.json, which wins over KilnAdvanced as it does in the manifest task. -->
+  <!-- What the rules read: build_property.KilnServicesList (KILN108), KilnAdvanced (KILN107), KilnBoot (KILN034), and the
+       project's own kiln.mod.json, which wins over KilnAdvanced and KilnBoot as it does in the manifest task. Every
+       build_property a rule reads is listed here (Kiln.Analyzers.Tests' CompilerVisibleTests checks it): a property the
+       compiler cannot see reads as unset. -->
   <ItemGroup Condition="'$(KilnAnalyzers)' == 'true'">
     <CompilerVisibleProperty Include="KilnServicesList" />
     <CompilerVisibleProperty Include="KilnAdvanced" />
+    <!-- true | required: the generated kiln.mod.json has "boot", so an OnBoot override runs (KILN034) -->
+    <CompilerVisibleProperty Include="KilnBoot" />
     <CompilerVisibleProperty Include="KilnSide" />
     <CompilerVisibleProperty Include="KilnClients" />
     <!-- the rows the mod requires, comma-separated as KilnServicesList (KILN121: Kiln does not load the mod when one is off) -->

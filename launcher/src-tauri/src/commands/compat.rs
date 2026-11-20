@@ -43,3 +43,8 @@ pub(crate) fn set_late(profile_id: &str, game_id: &str, path: &str, late: bool) 
     crate::commands::app::launcher_log("chain", &format!("{} loads {} ({})", entry.path, if late { "late" } else { "in the proxy" }, g.path.display()));
     Ok((compat::view(&d, &p, &g)?, applied))
 }
+
+#[tauri::command]
+pub async fn shroudlink_notice(profile: profile::Profile, game_id: String) -> Result<Option<compat::ShroudlinkNotice>, Error> {
+    blocking(move || compat::shroudlink_notice(&dirs()?, &profile, &crate::state::game(&game_id)?)).await
+}

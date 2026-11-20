@@ -1,0 +1,109 @@
+/* The Community page and its dialogs (docs/kiln/launcher/discord.md), in the Hearth look (no cards: rules and
+   wells; glaze words carry state; one ember fill per view). */
+
+.kc-p { margin: 0; font-size: 16.5px; line-height: 1.4; color: var(--k-text-1); text-wrap: pretty; }
+.kc-p b { color: var(--k-text-0); font-weight: 600; }
+.kc-two { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 24px 30px; }
+@media (max-width: 1180px) { .kc-two { grid-template-columns: minmax(0, 1fr); } }
+.kc-links-row { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 15.5px; }
+.kc-link-list { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; font-size: 16px; }
+.kc-tick { display: flex; align-items: flex-start; gap: 10px; font-size: 16px; color: var(--k-text-0); cursor: pointer; }
+.kc-tick .k-check { margin-top: 3px; }
+.kc-prose { font-family: var(--k-font-ui) !important; font-stretch: normal !important; font-size: 16px !important; line-height: 1.4 !important; }
+.kc-waiting { font-size: 19px; color: var(--k-ember-400); }
+
+/* the account */
+.kc-acct { display: flex; align-items: center; gap: 12px; }
+.kc-acct-lines { display: flex; flex-direction: column; min-width: 0; }
+.kc-acct-lines b { font-size: 18px; font-weight: 600; color: var(--k-text-0); }
+.kc-avatar { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; font-weight: 700; font-size: 15px;
+  color: var(--k-text-on-ember); background: radial-gradient(circle at 35% 30%, #ffc38f, #ff8f45 55%, #b83f05); }
+.kc-avatar.big { width: 42px; height: 42px; font-size: 19px; }
+
+/* nav: the reply count after "Community" (a numeral, not a chip) */
+.kc-nav-count { display: inline-block; margin-left: 5px; min-width: 9px; font-family: var(--k-font-mono); font-size: 14px; font-weight: 700; line-height: 1;
+  color: var(--k-ember-400); text-shadow: 0 0 8px rgba(255, 106, 26, .75); vertical-align: super; }
+
+/* support posts */
+.kc-posts { display: flex; flex-direction: column; }
+.kc-post { display: flex; align-items: center; gap: 14px; min-height: 58px; padding: 8px 8px; box-shadow: inset 0 -1px 0 var(--k-line); transition: background .12s; }
+.kc-post:hover { background: var(--k-warm-1); }
+.kc-post.hot { background: linear-gradient(90deg, rgba(255, 106, 26, .09), transparent 60%); }
+.kc-post-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.kc-post-title { font-size: 17.5px; font-weight: 600; color: var(--k-text-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kc-post-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* news and events */
+.kc-feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.kc-feed li { padding: 7px 0 8px; box-shadow: inset 0 -1px 0 var(--k-line); font-size: 15.5px; }
+.kc-feed-title { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; font-size: 16.5px; color: var(--k-text-0); cursor: pointer; text-align: left; }
+.kc-feed-title:hover { color: var(--k-bright); text-decoration: underline; text-decoration-color: var(--k-ember-400); text-underline-offset: 4px; }
+.kc-feed-line { color: var(--k-text-1); line-height: 1.35; }
+
+/* the presence preview: drawn by the launcher, neutral greys so it reads as "on Discord" without Discord's marks */
+.kc-preview-label { margin-top: 2px; }
+.kc-presence { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 14px; border-radius: 10px; background: #1e1f22; box-shadow: 0 6px 22px rgba(0, 0, 0, .45);
+  color: #dbdee1; font-family: var(--k-font-ui); transition: opacity .2s, filter .2s; }
+.kc-presence.dim { opacity: .55; filter: saturate(.4); }
+.kc-presence-user { display: flex; align-items: center; gap: 9px; }
+.kc-presence-name { font-weight: 700; font-size: 16px; color: #f2f3f5; }
+.kc-presence-head { font-size: 12.5px; font-weight: 700; letter-spacing: .04em; color: #b5bac1; }
+.kc-presence-act { display: flex; gap: 11px; align-items: center; }
+.kc-presence-art { flex: none; display: grid; place-items: center; width: 60px; height: 60px; border-radius: 8px;
+  background: radial-gradient(circle at 50% 80%, #ff8f45, #b83f05 45%, #170803 85%); }
+.kc-presence-lines { display: flex; flex-direction: column; min-width: 0; font-size: 14px; line-height: 1.3; }
+.kc-presence-lines b { font-size: 15px; color: #f2f3f5; }
+.kc-presence-time { color: #b5bac1; }
+.kc-presence-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.kc-presence-btns span { display: grid; place-items: center; height: 30px; border-radius: 6px; background: #2b2d31; font-size: 14px; font-weight: 600; color: #f2f3f5; }
+
+/* the send dialog */
+.kc-known { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: var(--k-radius-s); background: var(--k-bg-3); box-shadow: inset 0 0 0 1px rgba(249, 199, 79, .28); }
+.kc-known-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-size: 17px; color: var(--k-text-0); }
+.kc-copy { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 10px; border-radius: var(--k-radius-s); background: var(--k-well); }
+.kc-copy code { flex: 1; min-width: 0; color: var(--k-gold-300); overflow-wrap: anywhere; }
+.kc-kinds { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.kc-kind, .kc-result { height: 34px; padding: 0 12px; border: 0; border-radius: var(--k-radius-s); background: none; cursor: pointer; font-family: var(--k-font-ui); font-size: 16px;
+  color: var(--k-text-1); box-shadow: inset 0 0 0 1px var(--k-line-strong); transition: box-shadow .12s, color .12s, background .12s; }
+.kc-kind:hover, .kc-result:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--k-line-hot); color: var(--k-text-0); }
+.kc-kind.on { color: var(--k-text-0); background: rgba(255, 106, 26, .12); box-shadow: inset 0 0 0 1px var(--k-ember-400); }
+.kc-kind:focus-visible, .kc-result:focus-visible { outline: 2px solid var(--k-gold-400); outline-offset: 2px; }
+.kc-result:disabled { opacity: .55; cursor: default; }
+.kc-result.on.ok { color: var(--k-ok); box-shadow: inset 0 0 0 1px var(--k-ok); background: rgba(143, 214, 180, .08); }
+.kc-result.on.err { color: var(--k-err); box-shadow: inset 0 0 0 1px var(--k-err); background: rgba(255, 125, 102, .08); }
+.kc-result.on.warn { color: var(--k-warn); box-shadow: inset 0 0 0 1px var(--k-warn); background: rgba(249, 199, 79, .08); }
+
+.kc-block { display: flex; flex-direction: column; gap: 8px; }
+.kc-block-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.kc-files-toggle { margin-left: auto; font-size: 15.5px; }
+.kc-postmock { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: var(--k-radius-s); background: var(--k-well); box-shadow: inset 0 0 0 1px var(--k-line); }
+.kc-postmock-title { font-size: 18px; font-weight: 700; color: var(--k-text-0); }
+.kc-postmock-tags { display: flex; flex-wrap: wrap; gap: 4px 12px; font-family: var(--k-font-label); font-size: 15px; color: var(--k-info); }
+.kc-postmock-text { margin: 0; color: var(--k-text-1); font-size: 16px; white-space: pre-wrap; }
+.kc-found { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.kc-found li { line-height: 1.35; }
+.kc-versions { color: var(--k-text-1); }
+.kc-files { margin: 0; padding: 6px 10px; list-style: none; max-height: 150px; overflow: auto; border-radius: var(--k-radius-s); background: var(--k-well); }
+.kc-files li { display: flex; justify-content: space-between; gap: 12px; font-size: 14.5px; line-height: 1.6; }
+.kc-who { display: flex; flex-direction: column; gap: 6px; }
+.kc-radio { display: flex; align-items: flex-start; gap: 10px; padding: 7px 10px; border-radius: var(--k-radius-s); cursor: pointer; box-shadow: inset 0 0 0 1px var(--k-line); }
+.kc-radio.on { box-shadow: inset 0 0 0 1px var(--k-ember-400); background: rgba(255, 106, 26, .07); }
+.kc-radio input { margin-top: 4px; accent-color: var(--k-ember-500); }
+.kc-radio > span { display: flex; flex-direction: column; }
+.kc-radio-title { font-size: 16.5px; color: var(--k-text-0); }
+.kc-privacy section { display: flex; flex-direction: column; gap: 4px; }
+
+/* the tester checklist */
+.kc-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.kc-step { box-shadow: inset 0 -1px 0 var(--k-line); }
+.kc-step-head { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 4px 8px; border: 0; background: none; cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.kc-step-head:hover { background: var(--k-warm-1); }
+.kc-step-head:focus-visible { outline: 2px solid var(--k-gold-400); outline-offset: -2px; }
+.kc-step-n { flex: none; width: 22px; font-family: var(--k-font-mono); font-size: 16px; color: var(--k-ember-400); }
+.kc-step-title { flex: 1; min-width: 0; font-size: 16.5px; color: var(--k-text-0); }
+.kc-step-body { display: flex; flex-direction: column; gap: 10px; padding: 2px 8px 14px 42px; }
+.kc-how { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 2px; color: var(--k-text-1); font-size: 16px; }
+.kc-results { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* the QR picture (both UIs) */
+.kc-qr { display: block; border-radius: 6px; box-shadow: 0 0 0 6px #f5e9db; }

@@ -298,9 +298,9 @@ test.describe("the save editor in Deck mode", () => {
     await typeNumber(page, "7");
     await pad(page, "b");
     expect(await focused(page)).toBe("slot-main:0");
-    // leave the tab and come back: the change is still there
+    // leave the tab and come back: the change is still there (the next tab is Community)
     await pad(page, "rb");
-    await expect(page.locator('[data-deck-screen="help"]')).toBeVisible();
+    await expect(page.locator('[data-deck-screen="community"]')).toBeVisible();
     await pad(page, "lb");
     await expect(page.locator(".dke-name")).toHaveText("Aldric");
     await expect(say(page)).toContainText("Not saved");
@@ -313,7 +313,7 @@ test.describe("the save editor in Deck mode", () => {
     await pad(page, "b");
     await expect(page.locator('[data-deck-dialog="quit"]')).toHaveCount(0);
     // another character while changed: asked first; Cancel keeps Aldric
-    await walk(page, "up", /^ed-/, 8);
+    await walk(page, "up", /^ed-(characters|backups|discard|save)$/, 8);
     await walk(page, "left", "ed-characters", 4);
     await pad(page, "a");
     const chars = page.locator('[data-deck-dialog="editor-characters"]');

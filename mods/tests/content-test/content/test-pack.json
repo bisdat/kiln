@@ -15,5 +15,10 @@
   },
   "drops": {
     "*": { "count": { "mul": 2 } }
+  },
+  "gear": {
+    "Weapon_T1_1H_Sword_Craft": { "power": 30, "damage": { "cut": 0.75, "fire": 0.25 } },
+    "Armor_T2_Warrior_Tank_Chest": { "armor": { "physical": 45, "magical": { "mul": 2 } } },
+    "Weapon_T1_1H_Sword_Nonexistent": { "power": 10 }
   }
 }

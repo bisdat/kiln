@@ -1,0 +1,41 @@
+{
+  "$schema": "../../../../schema/kiln-blocks.schema.json",
+  "format": 1,
+  "rarityUpgrades": {
+    "standard-upgrades-json": {
+      "items": [ "Weapon_*", "Armor_*", "Ring_*", "anvil-blade-json" ],
+      "steps": {
+        "uncommon":  { "cost": { "Material_T1_Metal_Scraps": 10 } },
+        "rare":      { "cost": { "Material_T1_Metal_Sheets": 5 }, "chance": 0.9 },
+        "epic":      { "cost": { "Material_T3_Bronze_Bar": 5 }, "chance": 0.75, "levelScale": 0.05 },
+        "legendary": { "cost": { "Material_T4_Iron_Bar": 8, "Material_T1_KryptCrystal": 1 }, "chance": 0.5, "levelScale": 0.05 }
+      }
+    }
+  },
+  "props": {
+    "rarity-anvil-json": {
+      "name": "Rarity Anvil", "description": "Hold the item you want to improve and strike.",
+      "visual": { "like": "Prop_Decoration_Comfort1_T0_Table_Medium" },
+      "recipe": { "station": "0x4da88f73", "needs": { "Material_T1_Metal_Sheets": 10, "Material_T1_Wood_Logs": 4 } },
+      "onInteract": { "prompt": "Upgrade held item", "upgrade": { "rule": "standard-upgrades-json" } }
+    },
+    "rarity-forge-json": {
+      "name": "Rarity Forge", "description": "Lay out your gear and choose what to improve.",
+      "visual": { "like": "Prop_Decoration_Comfort1_T0_Table_Medium" },
+      "recipe": { "station": "0x4da88f73", "needs": { "Material_T1_Metal_Sheets": 20 } },
+      "onInteract": { "prompt": "Upgrade gear", "upgrade": { "rule": "standard-upgrades-json", "target": "choose" } }
+    }
+  },
+  "weapons": {
+    "anvil-blade-json": {
+      "name": "Anvil Blade", "class": "sword", "stats": { "level": 5, "power": 25 },
+      "recipe": { "station": "0x4da88f73", "needs": { "Material_T1_Metal_Scraps": 3 } }
+    }
+  },
+  "rarityRolls": {
+    "anvil-blade-rolls-json": {
+      "items": [ "anvil-blade-json" ],
+      "weights": { "common": 50, "uncommon": 30, "rare": 15, "epic": 4, "legendary": 1 }
+    }
+  }
+}

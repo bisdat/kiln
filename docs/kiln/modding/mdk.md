@@ -13,7 +13,7 @@ matching the mod API `Kiln.Mods.ApiVersion`); `pack.sh` adds the rest:
 
 | Built by | Version | Example |
 |---|---|---|
-| `tools/release/release.sh` (sets `KILN_SDK_VERSION`) | the release's | `0.2.0-dev.24` |
+| `tools/release/release.sh` (sets `KILN_SDK_VERSION`) | the release's | `0.2.0-dev.29.18` |
 | `pack.sh` in a working tree | `<base>-dev.local.<yyyymmdd>.<hhmmss>` (UTC) | `0.2.0-dev.local.20261106.185929` |
 
 NuGet keeps a package by id and version and never fetches that version again, so a package re-packed under the same
@@ -23,7 +23,7 @@ project made with `dotnet new` restores exactly the packages of that pack.
 
 ## A mod project
 ```xml
-<Project Sdk="Kiln.Sdk/0.2.0-dev.24">
+<Project Sdk="Kiln.Sdk/0.2.0-dev.29.18">
   <PropertyGroup>
     <KilnModId>my-mod</KilnModId>
     <Version>1.0.0</Version>
@@ -34,7 +34,7 @@ project made with `dotnet new` restores exactly the packages of that pack.
   </ItemGroup>
 </Project>
 ```
-Use the full version of the MDK pack you installed (`0.2.0-dev.24` for this release), not the API base `0.2.0`.
+Use the full version of the MDK pack you installed (for example `0.2.0-dev.29.18`), not the API base `0.2.0`.
 The SDK sets `net10.0`, nullable, implicit usings, `EnableDynamicLoading`, no runtimeconfig/deps files; references
 Kiln.Api and the listed services with `ExcludeAssets=runtime` (they come from `kiln/host` at run time and are never
 copied); copies NuGet dependencies next to the mod (they load into the mod's own context).
@@ -46,14 +46,15 @@ copied); copies NuGet dependencies next to the mod (they load into the mod's own
 | `KilnModName` | `AssemblyName` | `name` |
 | `Version` | 1.0.0 | `version` |
 | `Authors`, `Description`, `PackageLicenseExpression`, `PackageProjectUrl` | | `authors`, `description`, `license`, `url` |
-| `KilnApiVersion` | the SDK's (0.2.3) | `apiVersion` |
+| `KilnApiVersion` | the SDK's (0.2.12) | `apiVersion` |
 | `KilnSide` | server; `both` when `KilnServices` has `Blocks` | `side` |
 | `KilnClients` | from the side: server `none`, otherwise `mod`; with `Blocks` in `KilnServices`, what the blocks need ([blocks.md](blocks.md)) | `clients`: what joining players need (`none`, `kiln`, `mod`; manifest.md) |
 | `KilnEntryType` | | `entryType` |
+| `KilnBoot` | | `boot`: `true` (the mod has boot content: its `Mod.OnBoot` runs before the game's first tick) or `required` (a failure of its boot content stops the start); empty or `false`: none |
 | `KilnAdvanced` | false | `advanced` |
 | `KilnFeatures`, `KilnExports` | | `features`, `exports` (`;` lists) |
 | `KilnTestsAutoRun`, `KilnTestTimeoutSeconds` | | `tests` |
-| `KilnServices` | | (references) Players, Chat, World, Items, Spawn, Time, Settings, … and `Testing` |
+| `KilnServices` | | (references) Players, Chat, World, Items, Spawn, Time, Settings, … and `Testing`; `Stations` (since 0.2.0-dev.29.15) references Kiln.Blocks for `Stations` and `Bases` alone, without `Blocks`' side and clients defaults ([stations.md](../services/stations.md)). Names may be separated by `;`, `,`, spaces or line breaks; `Stations`, `Testing`, `Game` and `Blocks` are recognised in any case (since 0.2.0-dev.29.15) |
 | `KilnServer` / `KilnModsDir` | | deploy target: a server folder / its `kiln/mods` |
 | `KilnReload` | false | KilnDeploy also writes `kiln/control/deploy-<id>.cmd` = `reload <id>` |
 | `KilnPackageOutputPath` | next to the output folder | where KilnPack writes the zip |
@@ -61,7 +62,7 @@ copied); copies NuGet dependencies next to the mod (they load into the mod's own
 | `KilnIncludeModFolders` | true | false: copy none of them automatically |
 | `KilnPackExclude` | `assets/cooked/**` | globs KilnPack leaves out, relative to the mod folder. Cooked files are made from the player's own game, so they never ship |
 | `KilnAnalyzers` | true | false: no KILN1xx analyzers ([analyzers.md](analyzers.md)) |
-| `KilnGameIds` | `Items;Perks;Buffs;Skills;Workshops` | game-id constants generated from the local catalog; `All`, `None` ([catalogs.md](catalogs.md)) |
+| `KilnGameIds` | `Items;Perks;Buffs;Skills;Workshops;Materials` | game-id constants generated from the local catalog; `All`, `None` ([catalogs.md](catalogs.md)) |
 | `KilnBake`, `KilnBakeSteps` | true when `KilnServices` names Quests, Skills, Blocks or Vfx; 10 | bake what the code defines (quests, game-tree nodes, VFX, materials) into the mod, so the first start has it ([baked.md](baked.md)); false: no bake |
 | `KilnCatalog`, `KilnCatalogSide` | `$KILN_CATALOG`, else `<data>/catalog`; server for `KilnSide` server, otherwise client | which catalog file `KilnGameIds` reads |
 
@@ -122,7 +123,7 @@ like `kiln.example`: `native/services/weather/`, `native/core/abi/services/kiln_
 | `kiln-ability` | An ability; `--impact` adds an Impact program | both, none | `ability tpl-ability:blast registered` |
 | `kiln-quest` | A quest chain with its giver and conversation from building blocks, in C# and `blocks/*.json` | both, mod | `quest tpl-quest:road-work defined (Player, 1 steps, journal Native, owner tpl-quest)`, `quest tpl-quest:lost-crates defined (Player, 2 steps, …)` |
 | `kiln-ui` | A game UI overlay (`--blocks true`: as blocks in `blocks/ui.json`, [ui-blocks.md](ui-blocks.md)) | client, mod | Correctly skipped by a server (`side` client). A client check is manual |
-| `kiln-native` | A C++ mod, `CMakeLists.txt` + `native.json` | both | `native mod tpl-native 0.1.0 loaded (boot, … kiln_native_init ok)` |
+| `kiln-native` | A C++ mod, `CMakeLists.txt` + `native.json` ([native-mods.md](../native-mods.md); with kiln.world and kiln.abilities' headers, write `KilnWorldProgramInfo` / `KilnImpactProgramInfo`) | both | `native mod tpl-native 0.1.0 loaded (boot, … kiln_native_init ok)` |
 | `kiln-model` | A glTF model with `assets/cook.json` | both, mod | `PASS TplModel_Blade.iconModel = …`, 3 references |
 | `kiln-sound` | Sounds and cues, `audio/`, `assets/cook.json` | both, mod | `sound chime: … (new)`, `cue chime: … (new)` |
 | `kiln-talents` | A talent tree, `skills/`, `icons/` | both, mod | `tree tpl-talents:talents registered (2 nodes…)` |
@@ -143,6 +144,7 @@ like `kiln.example`: `native/services/weather/`, `native/core/abi/services/kiln_
 | `kiln-screen-effect` | Screen effects as blocks: a tint while a status lasts, a flash where a spell lands | both, kiln | Created from the packed SDK and built; what the screen shows needs a client |
 | `kiln-hooks` | Advanced: a detour on a function of the game itself with Kiln.Hooks, which counts calls and runs the original (`KilnAdvanced`) | server, none | Created from the packed SDK and built; not run in a lab (the sample `HookSample` is) |
 | `kiln-shader` | Advanced: a particle effect moved by the mod's own shader hooks (`shaders/swirl.hlsl`, the built `shaders/build/swirl.spv`, `blocks/vfx.json`) | both, mod | Created from the packed SDK and built, the built module arrives in the mod folder unchanged; what it draws needs a client |
+| `kiln-system-wrap` | Your code around one of the game's own ECS programs: a typed wrap of `fuel_setup` (`Systems.Wrap<Ecs.Programs.FuelSetup>`, `AroundEach`) that makes wells refill faster, on the game's worker threads ([services/systems.md](../services/systems.md)) | server, none | Not yet created from the packed SDK; the same wrap is the sample `WaterWorks` (built in the tree) and the lab row "AroundEach fuel_setup scale x4" of `mods/tests/systems-test` |
 | `kiln-world-program` | Advanced: a program of the mod's own in the game's scheduler (`kiln.programs.json` declares it, `EcsPrograms.Bind` gives it its code on the game's worker threads, the tick thread reads what it counted; `/census`) | server, none | Created from the packed SDK and built, `kiln.programs.json` arrives in the mod folder; run on a test server, where `/census` counted the world's entities with health |
 
 ### Block templates
@@ -177,7 +179,7 @@ is a game item's` at every start. Your new items still register. Use a fresh wor
 |---|---|
 | `native/cmake/KilnPlugin.cmake` | `kiln_plugin(<name> <sources…> [NATIVE_JSON <file>] [OUTPUT_NAME <dll>])` and the `deploy` target |
 | `native/cmake/clang-cl-xwin.cmake` | The Linux toolchain: clang-cl, lld-link and llvm-rc, with the MSVC CRT and Windows SDK from cargo-xwin |
-| `native/include/` | `kiln_api.h`, `kiln_native.h`, `services/kiln_<name>.h` |
+| `native/include/` | `kiln_api.h`, `kiln_native.h`, `services/kiln_<name>.h`, and the C++ headers `kiln_hook.hpp` (`kiln::RawHook`, `kiln::MidHook2`; since 0.2.0-dev.29.17) and the other `.hpp` helpers (`kiln_blocks_json.hpp` and `kiln_boot_collector.hpp` also need nlohmann/json, which the package does not carry) |
 
 ```sh
 kiln new native MyNative --server <server>

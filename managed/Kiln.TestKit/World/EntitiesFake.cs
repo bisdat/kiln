@@ -55,6 +55,8 @@ internal sealed unsafe class EntitiesFake : IDisposable
     {
         public readonly Dictionary<uint, Slot> Components = [];
         public FakePlayer? Player;  // a fake player's entity: its record lives as long as that player holds the slot
+        public uint Generation;     // the id's generation (a new record under a used id is a new entity)
+        public ulong Layout;        // its component layout stamp: new when a component is added or removed
     }
 
     private sealed class Job
@@ -105,14 +107,20 @@ internal sealed unsafe class EntitiesFake : IDisposable
     private int _open;  // accepted requests whose answer has not been handed over (write_queue.h open_)
     private Meta _meta;
     private uint _nextEntity = 2000;
+    private readonly Dictionary<uint, uint> _generations = [];
+    private ulong _layouts = 0x1000;
     private ulong _lastTicket, _steps, _submitted, _written, _unchanged, _failed;
 
     public EntitiesFake(KilnHarness harness)
     {
         _harness = harness;
+        Reads = new EcsReadsFake.Model(this, harness);
         _meta = new Meta(new Dictionary<uint, string[]>(), new Dictionary<uint, (bool, bool)>(), new HashSet<uint>(),
             new Dictionary<uint, int>(), new Dictionary<uint, string>(), null);
     }
+
+    /// <summary>The world the ECS reads from task threads answer from (World/EcsReadsFake.cs).</summary>
+    public readonly EcsReadsFake.Model Reads;
 
     /// <summary>The first step ran: the server world exists and the lists are fixed.</summary>
     public bool Started => Volatile.Read(ref _meta).Lists is not null;
@@ -143,7 +151,7 @@ internal sealed unsafe class EntitiesFake : IDisposable
     public uint Create(WorldPosition? position)
     {
         var id = _nextEntity++;
-        _entities[id] = new Entity();
+        _entities[id] = Fresh(id, null);
         if (position is { } p) SetPosition(id, p);
         return id;
     }
@@ -194,11 +202,60 @@ internal sealed unsafe class EntitiesFake : IDisposable
         RetireDeparted();
         if (Live(entity) is { } e) return e;
         if (Player(entity) is not { } player) throw new ArgumentException($"entity {entity} is not in the fake world (make it with Create, or join a fake player)");
-        return _entities[entity] = new Entity { Player = player };
+        return _entities[entity] = Fresh(entity, player);
     }
+
+    // A new record under an id: the id's next generation and a layout of its own (ecs_reads.cpp's entity facts).
+    private Entity Fresh(uint id, FakePlayer? player)
+    {
+        var generation = _generations[id] = _generations.GetValueOrDefault(id) + 1;
+        return new Entity { Player = player, Generation = generation, Layout = ++_layouts };
+    }
+
+    /// <summary>The live entity's generation and layout stamp (the ECS reads' facts); false when it is not in the world.</summary>
+    public bool Facts(uint entity, out uint generation, out ulong layout)
+    {
+        if (Live(entity) is { } e)
+        {
+            (generation, layout) = (e.Generation, e.Layout);
+            return true;
+        }
+        (generation, layout) = (0, 0);
+        return false;
+    }
+
+    /// <summary>The component hashes the live entity has now (sorted), or null when it is not in the world: what the fake
+    /// of the game's programs (Fakes/Systems) matches a program's lists against and keys an archetype by.</summary>
+    public uint[]? ComponentsOf(uint entity) => Live(entity) is { } e ? [.. e.Components.Keys.Order()] : null;
+
+    /// <summary>Whether <paramref name="hash"/> is an attribute component (the test set it so, or Kiln.Game's types say).</summary>
+    public bool IsAttributeComponent(uint hash) => _attributes.Contains(hash) || TypesFake.IsAttribute(hash);
+
+    /// <summary>Whether this world knows a component type of <paramref name="hash"/> (Kiln.Game's types, or one the test set).</summary>
+    public bool KnowsComponent(uint hash) => TypesFake.IsComponent(hash) || _names.ContainsKey(hash);
 
     public Slot? Block(uint entity, uint hash) =>
         Live(entity) is { } e && e.Components.TryGetValue(hash, out var slot) ? slot : null;
+
+    /// <summary>What the compare-exchange policy reads of a component type: its size (Kiln.Game's types, or the bytes a
+    /// test set) and its tracking, known only when a test gave it (<see cref="Track"/>: the kit reads no engine, and
+    /// kiln.world never guesses the bits). Any thread.</summary>
+    public (int? Size, bool TrackingKnown, bool Save, bool Replication) WriteFactsOf(uint hash)
+    {
+        var meta = Volatile.Read(ref _meta);
+        var known = meta.Tracking.TryGetValue(hash, out var t);
+        int? size = TypesFake.Find(hash) is { Component: true } row ? row.Size : meta.Sizes.TryGetValue(hash, out var s) ? s : null;
+        return (size, known, t.Save, t.Replication);
+    }
+
+    /// <summary>A task's compare-exchange: the bytes replaced in place (the same length). Between the tick thread's work
+    /// items (TickThread.WorldGate), as every task-thread read of this world.</summary>
+    public bool Overwrite(uint entity, uint hash, ReadOnlySpan<byte> bytes)
+    {
+        if (Block(entity, hash) is not { } slot || slot.Size != bytes.Length) return false;
+        bytes.CopyTo(new Span<byte>((void*)slot.Data, slot.Size));
+        return true;
+    }
 
     // A fake player's CurrentTransform is where the test says the player stands, written as the game's movement writes it:
     // when the world steps, never on a read.
@@ -260,6 +317,7 @@ internal sealed unsafe class EntitiesFake : IDisposable
             return;
         }
         if (old.Data != 0) NativeMemory.Free((void*)old.Data);
+        else e.Layout = ++_layouts;  // a component added: another archetype
         var data = NativeMemory.AllocZeroed((nuint)bytes.Length);
         bytes.CopyTo(new Span<byte>(data, bytes.Length));
         e.Components[hash] = new Slot((nint)data, bytes.Length);
@@ -269,6 +327,7 @@ internal sealed unsafe class EntitiesFake : IDisposable
     {
         if (Live(entity) is not { } e || !e.Components.Remove(WorldAbi.Hash(name), out var slot)) return false;
         NativeMemory.Free((void*)slot.Data);
+        e.Layout = ++_layouts;
         return true;
     }
 
@@ -522,6 +581,7 @@ internal sealed unsafe class EntitiesFake : IDisposable
         if (_meta.Lists is null) Boot();
         _steps = step;
         RetireDeparted();
+        EcsReadsFake.Drain(this);  // kiln.world's Pre: the committed-write events since the last step
         foreach (var p in _harness.PlayersFake?.Present ?? []) FollowPlayer(p.Entity.Value);
         foreach (var writer in _writers.ToArray())
             if (writer.Each is { } each)
@@ -653,9 +713,11 @@ internal sealed unsafe class EntitiesFake : IDisposable
                 return Fail(WorldAbi.Refused, $"{name} is an attribute: its first {WorldAbi.AttributeHeader} bytes (group, values offset, flags, count) are the " +
                                               "game's and cannot change; change the values of a copy read from the entity (World.Update)");
         }
+        var whole = now.ToArray();  // the whole component before, for a component watch (07 S7)
         next.CopyTo(range);  // the game's attribute formulas (a clamp to the maximum) do not run offline
         job.After = range.ToArray();
         job.Status = WorldAbi.Done;
+        ComponentChangesFake.NoteWrite(_harness, job.Entity, name, whole, now.ToArray(), job.Mod);  // kiln.world's token
         return (job.Flags & WorldAbi.Verify) != 0 && job.Writers > 0;
     }
 

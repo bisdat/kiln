@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: MIT
 // Kiln.Terrain lab test, player free. Prints "terrain-overlay-test: PASS|FAIL|INFO ..." lines, "READY stop" when the
-// driver (run.py) should stop the server, and "DONE" at the end. Three boots (kiln/data/terrain-overlay-test/state.json):
+// driver (run.py) should stop the server, and "DONE" at the end. Four boots (kiln/data/terrain-overlay-test/state.json):
 //   1  world A, fresh: inspect, apply a vein (three blocks, one a tick), a transient cube of one full default batch (its
-//      timing is the INFO line the docs' "cells per tick" comes from), a patch inside the base (refused), a save.
-//   2  world A after a restart: the vein is back and recorded, the same version is a no-op, and version 2 over one cell
-//      someone dug leaves that block alone. A save.
-//   3  world B (the driver moved world A's save away): no record, no overlay cells, and the vein applies there afresh.
+//      timing is the INFO line the docs' "cells per tick" comes from), a patch inside the base (refused), a two-block
+//      plan whose one block a BuildEditingEvent handler edits while the overlay writes it (that block is left), two
+//      transient blocks the game's save writes anyway (one in a chunk a kept edit keeps, one in the base), a save.
+//   2  world A after a restart: the two transient blocks are gone, the vein is back and recorded, the same version is a
+//      no-op, and version 2 over one cell someone dug leaves that block alone. A save.
+//   3  world B (the driver moved world A's save away): no record, no overlay cells, and the vein applies there afresh; a
+//      plan over ground that already holds its result (built by hand) is a first install. A save.
+//   4  world A again, its Kiln data removed by the driver (a lost ledger): the vein is refused, nothing written.
 // The test area is the plateau kiln.build's own lab test uses (x 3024, z 1548), 790 m from the lab save's only base.
 using System.Diagnostics;
 using System.Text.Json;
@@ -21,6 +25,11 @@ public sealed class State
     public byte Ground { get; set; }
     public byte One { get; set; }
     public byte Two { get; set; }
+    public int[] StayChunk { get; set; } = [];
+    public int[] StayBase { get; set; } = [];
+    public int[] KeptCell { get; set; } = [];
+    public string StayChunkBefore { get; set; } = "";
+    public string StayBaseBefore { get; set; } = "";
 }
 
 public sealed class TerrainOverlayTestMod : Mod
@@ -61,6 +70,7 @@ public sealed class TerrainOverlayTestMod : Mod
                 case 1: await Fresh(); break;
                 case 2: await AfterRestart(); break;
                 case 3: await OtherWorld(); break;
+                case 4: await LostLedger(); break;
                 default: Info($"phase {phase}: nothing to do (delete {Context.DataDirectory} to start over)"); break;
             }
         }
@@ -69,7 +79,7 @@ public sealed class TerrainOverlayTestMod : Mod
             Check(false, $"phase-{phase}-threw", e.ToString());
         }
         File.WriteAllText(StatePath, JsonSerializer.Serialize(_s));
-        Context.Log.Info(phase >= 3 ? $"{Tag}: DONE fail={_fail}" : $"{Tag}: READY stop fail={_fail}");
+        Context.Log.Info(phase >= 4 ? $"{Tag}: DONE fail={_fail}" : $"{Tag}: READY stop fail={_fail}");
     }
 
     private CellBox Region => new(_s.Region[0], _s.Region[1], _s.Region[2], _s.Region[3], _s.Region[4], _s.Region[5]);
@@ -118,8 +128,9 @@ public sealed class TerrainOverlayTestMod : Mod
         Check(r is { Ok: true, State: TerrainState.Completed, Batches: 3 } && all && events.Count == 3 && events[^1].Last,
             "overlay.applied", $"{r.ChangedCells} {r.Batches} (state {r.State}, events {events.Count}, cells read back {(all ? "equal" : "DIFFERENT")}) {r.Reason}");
 
-        // the default budget: a transient cube of 32 x 32 x 32 cells above the ground next to it, on the 32-cell grid, so
-        // it is exactly one batch of 32,768 cells; then the same cube as air again (two batches timed, nothing kept)
+        // the host's budget: a transient cube of 32 x 32 x 32 cells above the ground next to it, on the 32-cell grid: 64
+        // units of 8 x 8 x 8 cells, at most 4,096 cells a step (0.2.0-dev.28 wrote it as one batch in one tick); then the
+        // same cube as air again (both timed, nothing kept)
         var cube = new CellBox((region.X + 64) / 32 * 32, (y0 + 48) / 32 * 32, region.Z / 32 * 32, 32, 32, 32);
         var full = new byte[cube.Count];
         Array.Fill(full, (byte)1);
@@ -129,8 +140,8 @@ public sealed class TerrainOverlayTestMod : Mod
         clock.Restart();
         var d = await Terrain.Apply(new TerrainPatch("cube", 1, cube, new TerrainVoxelVolume(full), [new TerrainPaletteEntry(0)], TerrainPersistence.Transient));
         Info($"overlay.budget transient cube {cube}: fill {m.State} {m.ChangedCells} cells in {m.Batches} batch(es), {up} ms; clear {d.State} {d.ChangedCells} cells in {d.Batches} batch(es), {clock.ElapsedMilliseconds} ms {m.Reason}{d.Reason}");
-        Check(m is { State: TerrainState.Completed, Batches: 1, ChangedCells: 32768 } && d is { State: TerrainState.Completed, ChangedCells: 32768 }
-              && Terrain.Applied.All(p => p.Plan != "cube"), "overlay.transient-not-recorded", $"{m.State} {m.ChangedCells}, {d.State} {d.ChangedCells}");
+        Check(m is { State: TerrainState.Completed, Batches: 64, ChangedCells: 32768 } && d is { State: TerrainState.Completed, Batches: 64, ChangedCells: 32768 }
+              && Terrain.Applied.All(p => p.Plan != "cube"), "overlay.transient-not-recorded", $"{m.State} {m.ChangedCells} in {m.Batches}, {d.State} {d.ChangedCells} in {d.Batches}");
 
         // a patch inside the save's base
         var bases = Build.Bases;
@@ -151,13 +162,143 @@ public sealed class TerrainOverlayTestMod : Mod
                   && same && would.Would == TerrainState.Conflict,
                 "overlay.base-refused", $"state {b.State}, {b.ChangedCells} cells, conflicts {string.Join(",", b.Conflicts.Select(x => x.Kind))}, inspect {would.Would}, cells {(same ? "unchanged" : "CHANGED")}");
         }
+        await EditingHandlerEditKept(region, y0);
+        await TransientsTheSaveKeeps(region, y0, bases);
         var save = await Saves.Request();
         Info($"save: {save}");
         _s.Phase = 2;
     }
 
+    // Another mod's BuildEditingEvent handler writes one cell of a block while the overlay writes that block: kiln.build's
+    // guard (Build.WriteIfUnchanged) refuses it after the handler and before the commit, the overlay gives that block up,
+    // and the batch's other block is written.
+    private async Task EditingHandlerEditKept(CellBox vein, int y0)
+    {
+        // two blocks, one default batch (both inside one 32-cell cube), next to the vein and not sharing a block with it
+        var box = new CellBox(vein.X / 32 * 32, y0, vein.Z / 32 * 32 + 32, 16, 8, 8);
+        var chosen = box with { SizeX = 8 };
+        var at = new CellPos(box.X + 3, box.Y + 2, box.Z + 3);
+        var before = await Build.ReadAsync(box);
+        var mark = before[box.Index(3, 2, 3)] == Voxel.Of(_s.Two) ? Voxel.Air : Voxel.Of(_s.Two);   // a value the cell does not hold
+        var label = "terrain guarded v1";
+        var cells = new byte[box.Count];
+        Array.Fill(cells, (byte)1);
+        BuildResult? foreign = null;
+        string? origin = null;
+        var inside = false;
+        TerrainResult r;
+        using (Events.On<BuildEditingEvent>(e =>
+        {
+            // the overlay's own edit of the chosen block, once; the handler's own write posts the event again (re-entry)
+            if (inside || foreign is not null || e.Label != label || Apart(e.Box, chosen)) return;
+            inside = true;
+            origin = e.Origin;
+            try { foreign = Build.Write(new CellBox(at.X, at.Y, at.Z, 1, 1, 1), [mark], new BuildOptions { Journal = false, Label = "an editing handler's edit" }); }
+            finally { inside = false; }
+        }))
+        {
+            r = await Terrain.Apply(new TerrainPatch("guarded", 1, box, new TerrainVoxelVolume(cells), [new TerrainPaletteEntry(_s.One)]));
+        }
+        var now = await Build.ReadAsync(box);
+        var left = true;
+        var written = true;
+        for (var z = 0; z < 8; z++)
+        for (var y = 0; y < 8; y++)
+        for (var x = 0; x < 16; x++)
+        {
+            var i = box.Index(x, y, z);
+            if (x >= 8) written &= now[i] == Voxel.Of(_s.One);
+            else if ((x, y, z) != (3, 2, 3)) left &= now[i] == before[i];
+        }
+        var kept = now[box.Index(3, 2, 3)] == mark;
+        var plan = Terrain.Applied.FirstOrDefault(p => p.Plan == "guarded");
+        Check(foreign is { Changed: true } && r is { Ok: false, State: TerrainState.Conflict, Batches: 1 } && r.Conflicts.Count == 1
+              && r.Conflicts[0] == new TerrainConflict(TerrainConflictKind.PlayerEdit, chosen) && kept && left && written
+              && plan is { Complete: true, Blocks: 1, GivenUp: 1 },
+            "overlay.editing-handler-edit-kept",
+            $"handler wrote {mark} at {at} ({foreign?.CellsChanged} cell), apply {r.State} {r.ChangedCells} cells in {r.Batches} batch(es), conflicts " +
+            $"{string.Join(";", r.Conflicts.Select(x => $"{x.Kind} {x.Block}"))}, the handler's cell {(kept ? "kept" : $"OVERWRITTEN ({now[box.Index(3, 2, 3)]})")}, " +
+            $"the rest of its block {(left ? "as it was" : "TOUCHED")}, the other block {(written ? "written" : "NOT written")}, record {plan}, event origin {origin} {r.Reason}");
+    }
+
+    private static CellBox BoxOf(int[] r) => new(r[0], r[1], r[2], r[3], r[4], r[5]);
+    private static int[] Arr(CellBox b) => [b.X, b.Y, b.Z, b.SizeX, b.SizeY, b.SizeZ];
+    private static string Pack(Voxel[] v) => Convert.ToBase64String(System.Runtime.InteropServices.MemoryMarshal.AsBytes(v.AsSpan()));
+    private static Voxel[] Unpack(string s) => System.Runtime.InteropServices.MemoryMarshal.Cast<byte, Voxel>(Convert.FromBase64String(s)).ToArray();
+
+    private static TerrainPatch Block(string id, CellBox box, byte material) =>
+        new(id, 1, box, new TerrainVoxelVolume([.. Enumerable.Repeat((byte)1, (int)box.Count)]), [new TerrainPaletteEntry(material)], TerrainPersistence.Transient);
+
+    // Two transient blocks that the game's own save writes, because they lie in a chunk it saves anyway: one in a 32-cell
+    // chunk a kept edit (one cell) makes Kiln keep, one inside the base. They stay in place over the save; boot 2 finds
+    // them gone (kiln.build puts back what was there at the next start).
+    private async Task TransientsTheSaveKeeps(CellBox vein, int y0, IReadOnlyList<PlayerBase> bases)
+    {
+        var chunk = new CellBox((vein.X + 128) / 32 * 32, y0 / 32 * 32, vein.Z / 32 * 32, 32, 32, 32);
+        var kept = new CellPos(chunk.X + 1, chunk.Y + 1, chunk.Z + 1);
+        var keptCell = await Build.ReadAsync(new CellBox(kept.X, kept.Y, kept.Z, 1, 1, 1));
+        var mark = keptCell[0] == Voxel.Of(_s.Two) ? Voxel.Of(_s.One) : Voxel.Of(_s.Two);
+        var k = Build.Write(new CellBox(kept.X, kept.Y, kept.Z, 1, 1, 1), [mark], new BuildOptions { Journal = false, Label = "a kept edit" });
+        _s.KeptCell = [kept.X, kept.Y, kept.Z, mark.Raw];
+        var stay = new CellBox(chunk.X + 16, chunk.Y + 8, chunk.Z + 16, 8, 8, 8);
+        var stayBefore = await Build.ReadAsync(stay);
+        var t = await Terrain.Apply(Block("stay-chunk", stay, stayBefore.All(c => c == Voxel.Of(_s.One)) ? _s.Two : _s.One));
+        _s.StayChunk = Arr(stay);
+        _s.StayChunkBefore = Pack(stayBefore);
+        var ok = k is { Changed: true, Kept: true } && t is { State: TerrainState.Completed, ChangedCells: > 0 };
+        var detail = $"kept edit {k.Changed}/{k.Kept} at {kept}, transient {stay}: {t.State} {t.ChangedCells} cells {t.Reason}";
+        if (bases.Count > 0)
+        {
+            var c = Build.CellOf(bases[0].Center);
+            var inBase = new CellBox(c.X / 8 * 8 + 8, c.Y / 8 * 8 + 8, c.Z / 8 * 8, 8, 8, 8);
+            var baseBefore = await Build.ReadAsync(inBase);
+            var b = await Terrain.Apply(Block("stay-base", inBase, baseBefore.All(v => v == Voxel.Of(_s.One)) ? _s.Two : _s.One),
+                new TerrainApplyOptions { InBases = true });
+            _s.StayBase = Arr(inBase);
+            _s.StayBaseBefore = Pack(baseBefore);
+            ok &= b is { State: TerrainState.Completed, ChangedCells: > 0 };
+            detail += $"; in the base {inBase}: {b.State} {b.ChangedCells} cells {b.Reason}";
+        }
+        Check(ok && bases.Count > 0, "overlay.transient-staged", detail);
+    }
+
+    private async Task TransientsGone()
+    {
+        // kiln.build puts them back block by block once the world runs; give it a few seconds
+        string Look(CellBox box, string before, out bool same)
+        {
+            same = false;
+            if (!Build.TryRead(box, out var now)) return "not loaded";
+            var want = Unpack(before);
+            var diff = now.Where((v, i) => v != want[i]).Count();
+            same = diff == 0;
+            return same ? "as before" : $"{diff} cell(s) still differ";
+        }
+        var chunk = BoxOf(_s.StayChunk);
+        var inBase = _s.StayBase.Length == 6 ? BoxOf(_s.StayBase) : default;
+        await Build.ReadAsync(chunk);
+        if (!inBase.IsEmpty) await Build.ReadAsync(inBase);
+        string a = "", b = "";
+        bool sa = false, sb = inBase.IsEmpty;
+        for (var i = 0; i < 24 * 30; i++)
+        {
+            a = Look(chunk, _s.StayChunkBefore, out sa);
+            if (!inBase.IsEmpty) b = Look(inBase, _s.StayBaseBefore, out sb);
+            if (sa && sb) break;
+            await Context.Scheduler.NextTick();
+        }
+        var kept = (await Build.ReadAsync(new CellBox(_s.KeptCell[0], _s.KeptCell[1], _s.KeptCell[2], 1, 1, 1)))[0];
+        var keptOk = kept.Raw == _s.KeptCell[3];
+        Check(sa && sb && keptOk && !inBase.IsEmpty, "overlay.transient-gone-after-restart",
+            $"block in the kept chunk {chunk}: {a}; the chunk's kept cell {(keptOk ? "saved" : $"NOT saved ({kept})")}; block in the base {inBase}: {b}");
+    }
+
+    private static bool Apart(CellBox a, CellBox b) =>
+        a.X >= b.X + b.SizeX || b.X >= a.X + a.SizeX || a.Y >= b.Y + b.SizeY || b.Y >= a.Y + a.SizeY || a.Z >= b.Z + b.SizeZ || b.Z >= a.Z + a.SizeZ;
+
     private async Task AfterRestart()
     {
+        await TransientsGone();
         var region = Region;
         var back = await Build.ReadAsync(region);
         var plan = Terrain.Applied.FirstOrDefault(p => p.Plan == "vein");
@@ -207,6 +348,43 @@ public sealed class TerrainOverlayTestMod : Mod
         var r = await Terrain.Apply(Vein(1, _s.One), Slow);
         Check(world.Length > 0 && world != _s.WorldA && none && overlay < cells.Length / 2 && r is { State: TerrainState.Completed, Batches: 3 },
             "overlay.world-b-clean", $"world {world} (a was {_s.WorldA}), records {(none ? "none" : "SOME")}, {overlay} of {cells.Length} cells look like the overlay, apply there: {r.State} {r.Reason}");
+
+        // ground that already holds a plan's result, built by hand (an ordinary kept edit): this world never had the plan,
+        // so it is not a lost ledger. In a world that is provably new the plan is a first install that finds nothing to
+        // change (Completed); in one that is not (0.2.0-dev.29: the game had given this world its id before the first
+        // save, so Kiln cannot prove it new) the plan is found fully present and is recorded without a write (Adopted,
+        // share 1). Either way no cell is written and the plan is recorded.
+        var echo = region with { Z = region.Z + 64 };
+        var built = Build.Write(echo, [.. Enumerable.Repeat(Voxel.Of(_s.One), (int)echo.Count)], new BuildOptions { Journal = false, Label = "built by hand" });
+        var patch = new TerrainPatch("echo", 1, echo, new TerrainVoxelVolume([.. Enumerable.Repeat((byte)1, (int)echo.Count)]), [new TerrainPaletteEntry(_s.One)]);
+        var seen = await Terrain.Inspect(patch, Slow);
+        var e = await Terrain.Apply(patch, Slow);
+        var fresh = seen.Would == TerrainState.Completed && e.State == TerrainState.Completed;
+        var present = seen.Would == TerrainState.Adopted && e is { State: TerrainState.Adopted, PresenceShare: 1.0 };
+        Check(built.Changed && (fresh || present) && e is { Ok: true, ChangedCells: 0 }
+              && Terrain.Applied.Any(p => p.Plan == "echo"),
+            "overlay.first-install-over-matching-ground", $"built {built.CellsChanged} cells, inspect {seen.Would} {seen.Reason}, apply {e.State} {e.ChangedCells} cells, share {e.PresenceShare}, {e.Reason}");
+        var save = await Saves.Request();
+        Info($"save: {save}");
         _s.Phase = 4;
+    }
+
+    // World A again; the driver removed its Kiln data (kiln/data/worlds/<id>), so the vein's ledger is gone while its ground
+    // (and Kiln's witness of it) stays.
+    private async Task LostLedger()
+    {
+        var region = Region;
+        var before = await Build.ReadAsync(region);
+        var writes = Build.Status?.Writes ?? 0;
+        var none = Terrain.Applied.Count == 0;
+        var seen = await Terrain.Inspect(Vein(2, _s.Two), Slow);
+        var r = await Terrain.Apply(Vein(2, _s.Two), Slow);
+        var same = (await Build.ReadAsync(region)).AsSpan().SequenceEqual(before);
+        Check(Saves.WorldId == _s.WorldA && none && WorldData.Loaded == DataMatch.None && seen.Would == TerrainState.Refused
+              && r is { Ok: false, State: TerrainState.Refused, ChangedCells: 0 } && (r.Reason ?? "").StartsWith("ownership lost:", StringComparison.Ordinal)
+              && same && (Build.Status?.Writes ?? 0) == writes,
+            "overlay.lost-ledger-refused", $"world {Saves.WorldId}, data {WorldData.Loaded}, records {(none ? "none" : "SOME")}, inspect {seen.Would}, " +
+                                           $"apply {r.State} {r.ChangedCells} cells, cells {(same ? "unchanged" : "CHANGED")}: {r.Reason}");
+        _s.Phase = 5;
     }
 }

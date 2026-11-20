@@ -140,5 +140,24 @@ int main() {
             assert(kcompat::power_proxy_owner(real) == kcompat::PowerProxy::set);
         fs::remove_all(dir);
     }
+    {  // SET calls kiln.hooks' first block only (read, scan, mid; raw_detour is checked where a rule needs it): a core
+       // whose table covers that block binds, a dev.28 core's 256 bytes too, not only one as long as this header's
+        hk::unsubscribeAll();
+        uintptr_t at = 0x5000;  // a new address each time: a known target needs no table
+        for (uint32_t size : {uint32_t(offsetof(KilnHooksApi, mid) + sizeof(void*)), uint32_t(offsetof(KilnHooksApi, raw_detour)),
+                              uint32_t(offsetof(KilnHooksApi, mid2_checked))}) {
+            hooks.header.size = size;
+            kset::bindHooks(&api, 7);
+            const size_t before = callbacks.size();
+            assert(hk::subscribe(at, "mod/older-core", {{hk::U32, {}}}, 1, err) > 0 && callbacks.size() == before + 1);
+            hk::unsubscribeAll();
+            at += 0x100;
+        }
+        hooks.header.size = uint32_t(offsetof(KilnHooksApi, mid));  // shorter than what SET calls: not bound
+        kset::bindHooks(&api, 7);
+        assert(hk::subscribe(at, "mod/too-old", {{hk::U32, {}}}, 1, err) < 0);
+        hooks.header.size = sizeof hooks;
+        kset::bindHooks(&api, 7);
+    }
     std::puts("hooks/coexist review: PASS");
 }

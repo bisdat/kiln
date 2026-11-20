@@ -1,6 +1,6 @@
 //! The status files Kiln writes into `<game>/kiln/state/` for the launcher (schema/state-*.schema.json):
 //! boot.json (kiln-core, end of boot), mods.json (Kiln.Host), native.json (native loader), last-server.json
-//! (Kiln.Network on a client). All are written atomically (tmp + rename); a file whose pid is not alive is stale.
+//! (Kiln.Network on a client), graphics.json (Kiln.Ui on a client, 0.2.0-dev.29.18). All are written atomically (tmp + rename); a file whose pid is not alive is stale.
 
 use crate::manifest::{Clients, RunSide, Side};
 use crate::profile::{BoundServer, ModpackRef};
@@ -509,6 +509,73 @@ impl LastServer {
     }
 }
 
+/// `kiln/state/graphics.json` (Kiln.Ui, 0.2.0-dev.29.18; schema/state-graphics.schema.json): what Kiln's graphics tools
+/// do in the client, above all the upscaler behind the game's FSR 3 option. Codes stay strings: a newer runtime may add
+/// some, and the launcher shows a code it does not know as "unknown".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphicsState {
+    pub format: u32,
+    pub pid: u32,
+    pub written: String,
+    #[serde(default)]
+    pub kiln: Option<String>,
+    pub upscaler: UpscalerState,
+    /// Per vendor folder (`amd`, `intel`): the runtime's version of the files and what of them is in `kiln/vendor/`.
+    #[serde(default)]
+    pub files: std::collections::BTreeMap<String, VendorFilesSeen>,
+    /// The frame cap and DLSS parts, as written (the launcher does not show them yet).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_cap: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dlss: Option<serde_json::Value>,
+}
+
+/// `GraphicsState.upscaler`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpscalerState {
+    /// `game`, `amd` or `xess` (kiln.json `graphics.upscaler` in use).
+    pub chosen: String,
+    /// `auto`, `fsr3` or `fsr4`.
+    #[serde(default)]
+    pub amd_upscaler: String,
+    /// `off`, `notFsr`, `gameFsr3`, `amdFsr4`, `amdFsr31`, `xess` or `unknown`.
+    pub running: String,
+    /// Why the chosen upscaler does not run (None: it runs, or the game's own is chosen); docs/kiln/graphics.md.
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_number: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub hooked: bool,
+    #[serde(default)]
+    pub fsr_seen: bool,
+    #[serde(default)]
+    pub files_ok: bool,
+    #[serde(default)]
+    pub device_ok: bool,
+    #[serde(default)]
+    pub fell_back: bool,
+    #[serde(default)]
+    pub amd_pinned: bool,
+    #[serde(default)]
+    pub aside: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// `GraphicsState.files.<vendor>`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VendorFilesSeen {
+    pub version: String,
+    /// `present`, `missing` or `changed`.
+    pub state: String,
+}
+
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     match std::fs::read(path) {
         Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
@@ -533,10 +600,16 @@ pub fn read_last_server(game_dir: &Path) -> Result<Option<LastServer>> {
     read_json(&game_dir.join(crate::paths::game::LAST_SERVER_JSON))
 }
 
+/// `kiln/state/graphics.json`; None when there is none, or it is not one of format 1 (a half-written file cannot be
+/// read: it is written atomically, so that means another writer).
+pub fn read_graphics(game_dir: &Path) -> Option<GraphicsState> {
+    read_json::<GraphicsState>(&game_dir.join(crate::paths::game::GRAPHICS_JSON)).ok().flatten().filter(|g| g.format == 1)
+}
+
 /// Holds a lock file ([`lock_file`]) until dropped.
 #[derive(Debug)]
 pub struct HeldLock {
-    _file: std::fs::File,
+    _file: crate::util::LockedFile,
 }
 
 /// Takes the lock of `path` (an exclusive lock on the file, made when missing), across threads and processes: polled every
@@ -550,7 +623,7 @@ pub fn lock_file(path: &Path, wait: std::time::Duration, canceled: &dyn Fn() -> 
     let start = std::time::Instant::now();
     loop {
         match file.try_lock() {
-            Ok(()) => return Ok(HeldLock { _file: file }),
+            Ok(()) => return Ok(HeldLock { _file: crate::util::LockedFile(file) }),
             Err(std::fs::TryLockError::WouldBlock) => {}
             Err(std::fs::TryLockError::Error(e)) => return Err(crate::util::io_at(path, "locking")(e)),
         }

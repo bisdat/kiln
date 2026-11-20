@@ -1,0 +1,9 @@
+{
+  "id": "station-outputs-test",
+  "name": "kiln.stations station outputs lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "StationOutputsTest.dll",
+  "side": "server",
+  "description": "PASS/FAIL lines: station outputs as crafting stock (GitHub #68) on a dedicated server with no player: a station's fill takes charcoal from an opted-in charcoal kiln's outputs while the kiln's queued logs stay; outputs last; not enough moves nothing; another base's station, leftovers and an output that is also an input are never used; opted out is the game's fill. A second run checks the opt-in came back after a restart."
+}

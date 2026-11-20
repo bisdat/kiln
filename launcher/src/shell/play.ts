@@ -5,15 +5,27 @@
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { stopForProcess, stopKey } from "./stoppedStart";
+
+const useStops = create(persist<{ notices: Record<string, api.StoppedStart>; dismissed: Record<string, string> }>(() => ({ notices: {}, dismissed: {} }), { name: "kiln-stopped-starts" }));
+function clearStop(id: string) {
+  const s = useStops.getState().notices[id];
+  useStops.setState((m) => ({ notices: Object.fromEntries(Object.entries(m.notices).filter(([g]) => g !== id)), dismissed: s ? { ...m.dismissed, [id]: stopKey(s) } : m.dismissed }));
+}
 import * as api from "../api/commands";
 import type { GameInstall, LaunchMode, StartTimeline } from "../api/commands";
-import { invalidateGame, useActiveProfile, useGame, useGameStatus, useLaunchState, useProfiles, useRuntimeChanges, useStartTimeline } from "../api/hooks";
-import { toast } from "../ui";
-import { cookBeforePlay } from "./cook";
+import { invalidateGame, qk, useActiveProfile, useGame, useGameStatus, useLaunchState, useProfiles, useRuntimeChanges, useStartTimeline } from "../api/hooks";
+import { runTask, toast } from "../ui";
+import { bootSnapshotBeforeOnce, cookBeforePlay, cookingNotice } from "./cook";
 import { notifyLibraryChanged } from "./libraryChanged";
+import { activationBusy } from "../api/oneActivation";
+import { useApplying, type Applying } from "./applying";
 import { gameState, playState, runStarted, type GameStateView } from "./gameState";
-import { notifyActivation, notifyActivationOf } from "./notices";
-import { quietText, showsProgress, STEAM_WAIT_MS } from "./startProgress";
+import { notifyActivation, notifyActivationOf, notifyInstall } from "./notices";
+import { blockedLine } from "./RuntimeFailure";
+import { quietIsKiln, quietText, showsProgress, STEAM_WAIT_MS } from "./startProgress";
+import { t } from "../i18n";
 
 // A shared monotonic clock: changing the system clock while a start is pending cannot restart its grace period.
 const epoch = Date.now(), tick = performance.now();
@@ -28,13 +40,29 @@ interface LaunchMemo {
 }
 export const useLaunchMemo = create<LaunchMemo>(() => ({ at: {}, mode: {}, since: {}, process: {} }));
 
+/** A start this launcher asked Steam for (Play, a modpack offer's Launch): the window follows it until the game runs. */
+export function rememberLaunch(gameId: string, mode: LaunchMode) {
+  useLaunchMemo.setState((m) => ({ at: { ...m.at, [gameId]: playNow() }, mode: { ...m.mode, [gameId]: mode } }));
+}
+
+/** The window stops following the start it asked Steam for (its time and mode go): Play again. */
+function forgetLaunch(gameId: string) {
+  useLaunchMemo.setState((m) => {
+    const drop = <T,>(r: Record<string, T>) => { const n = { ...r }; delete n[gameId]; return n; };
+    return { at: drop(m.at), mode: drop(m.mode) };
+  });
+}
+
 export interface PlayControl {
   game: GameInstall | null;
   view: GameStateView;
   installed: boolean;
   running: boolean;
-  /** Play can start now (a game, stopped, not updating). */
+  /** Play can start now (a game, stopped, not updating, no profile being applied). */
   canPlay: boolean;
+  /** (29.18) A profile is being applied to the game now (a Load in Settings, an add, a modpack, Kiln's install with its
+   *  profile, whatever started it; shell/applying.ts): Play says so and waits. Null otherwise. */
+  applying: Applying | null;
   busy: boolean;
   /** Waiting for Kiln to boot: a start this launcher made (or a play-once start) with no fresh boot.json yet. */
   starting: boolean;
@@ -51,6 +79,16 @@ export interface PlayControl {
   timeline: StartTimeline | null;
   /** The last timeline whatever its phase (idle, failed, ended, legacy: said as what they are). */
   lastTimeline: StartTimeline | null;
+  stoppedStart: api.StoppedStart | null;
+  dismissStop: () => void;
+  /** (29.18) Steam was asked for the game and its process does not exist yet: Play waits for it (up to STEAM_WAIT_MS).
+   *  The Play page and the Deck's Home offer "Stop waiting" (stopWaiting) meanwhile, for a launch cancelled in Steam
+   *  (its "Processing Vulkan shaders" dialog, say). Never while the game runs, nor before Steam was asked. */
+  waitingForGame: boolean;
+  /** Ends that wait at once: Play is back, and the backend's start is dropped too (launch_end), so the next
+   *  launch_progress does not bring the wait back. It touches no process: a game that runs by then is left as it is
+   *  (its running views take over), and a game Steam still starts later is shown as running. */
+  stopWaiting: () => void;
   profileName: string | null;
   play: (mode: LaunchMode, profileId?: string) => void;
 }
@@ -63,8 +101,21 @@ export function usePlayControl(): PlayControl {
   const active = useActiveProfile(game?.id);
   const profiles = useProfiles();
   const changingRuntime = useRuntimeChanges((m) => !!game && m.last[game.id]?.state === "running");
+  const applying = useApplying(game?.id);
   const memo = useLaunchMemo();
   const id = game?.id ?? "";
+  const stops = useStops();
+  const evidence = launchState.data?.stoppedStart;
+  useEffect(() => {
+    if (evidence && stops.dismissed[id] !== stopKey(evidence)
+      && (!stops.notices[id] || stopKey(stops.notices[id]) !== stopKey(evidence)))
+      useStops.setState((m) => ({ notices: { ...m.notices, [id]: evidence } }));
+  }, [id, evidence, stops.dismissed, stops.notices]);
+  const savedStop = stops.notices[id] ?? null;
+  const stoppedStart = stopForProcess(savedStop, status.data);
+  useEffect(() => {
+    if (savedStop && !stoppedStart) clearStop(id);
+  }, [id, savedStop, stoppedStart]);
   const s = status.data;
   const running = !!s?.running;
   const at = memo.at[id];
@@ -89,32 +140,37 @@ export function usePlayControl(): PlayControl {
   // the states that are not a start going well win over the timeline, as before it: Steam updating, vanilla, No Kiln
   // (the proxy did not load: play-once still there, or no boot and no word from Kiln a minute in)
   const exception = !!s?.steamUpdating || (running && (state.view.phase === "vanilla" || kilnMissing));
-  const progress = !exception && showsProgress(tl) ? tl : null;
+  const progress = !stoppedStart && !exception && showsProgress(tl) ? tl : null;
   const running_ = !!progress && running;
   const quiet = !exception && running && tl?.phase === "quiet" ? tl : null;
-  const view: GameStateView = exception ? state.view
-    : running_ ? { phase: "starting", label: "Starting", tone: "ember", pulse: true, detail: progress!.running != null ? progress!.steps[progress!.running].label : "Waiting for Kiln" }
-    : quiet ? { phase: "running", label: "No word from Kiln", tone: "warn", pulse: true, detail: quietText(quiet) }
-    : tl?.phase === "idle" && running && state.view.label !== "Safe idle" ? { phase: "running", label: "Safe idle", tone: "warn", pulse: true, detail: tl.why ?? "Kiln hooked nothing" }
-    : tl?.phase === "failed" && running ? { phase: "running", label: "Kiln stopped", tone: "warn", pulse: true, detail: tl.why ?? "Kiln could not go on" }
+  const view: GameStateView = stoppedStart ? { phase: running ? "running" : "stopped", label: t("shell.play.stoppedStart"), word: "stoppedStart", tone: "warn", pulse: false, detail: stoppedStart.reason } : exception ? state.view
+    : running_ ? { phase: "starting", label: t("shell.gameState.starting"), word: "starting", tone: "ember", pulse: true, detail: progress!.running != null ? progress!.steps[progress!.running].label : t("shell.play.waitingForKiln") }
+    : quiet ? { phase: "running", label: t("shell.play.noWord"), word: "noWord", tone: "warn", pulse: true, detail: quietText(quiet), detailKiln: quietIsKiln(quiet) }
+    : tl?.phase === "idle" && running && state.view.word !== "safeIdle" ? { phase: "running", label: t("shell.gameState.safeIdle"), word: "safeIdle", tone: "warn", pulse: true, detail: tl.why ?? t("shell.play.hookedNothing"), detailKiln: tl.why == null ? true : undefined }
+    : tl?.phase === "failed" && running ? { phase: "running", label: t("shell.play.kilnStopped"), word: "kilnStopped", tone: "warn", pulse: true, detail: tl.why ?? t("shell.play.couldNotGoOn"), detailKiln: tl.why == null ? true : undefined }
     : state.kilnMissing && spoke ? gameState(game ? s : null, launchState.data, false, now) : state.view;
   const launch = useMutation({
     mutationKey: ["launch_play"],
-    // Mods with a cook recipe are cooked first when they need it (a start with mods only). A cook never stops the
-    // start: what could not be cooked is said in a notice, and the game starts all the same.
+    // Mods with a cook recipe are cooked first when they need it (a start with the profile only), then the boot
+    // game-data step runs (also for a single start with another profile). Neither stops the start: what could not be
+    // done is said in a notice, and the game starts all the same.
     // the game travels with the request: TanStack gives a pending mutation the options of the latest render, so a
     // closure's game id may be another game's by the time the request ends (another one selected meanwhile)
     mutationFn: async ({ gameId, req }: { gameId: string; req: api.LaunchRequest }) => {
       // the start is timed from here: its own steps (cook, profile, Steam), then what the game's Kiln says
+      clearStop(gameId);
+      qc.setQueryData(["launch_state", gameId], (old: api.BootState | undefined) => old ? { ...old, stoppedStart: null } : old);
       await api.launchBegin(gameId, req.mode).catch(() => {});
       void qc.invalidateQueries({ queryKey: ["launch_progress", gameId] });
-      if (req.mode === "profile") await cookBeforePlay(gameId, (jobs) => toast.info(jobs.length === 1 ? `Cooking ${jobs[0].name}` : `Cooking ${jobs.length} mods`, "Making their models, animations and sounds from your game, then the game starts."));
+      if (await switchBackFirst(gameId, req)) invalidateGame(qc, gameId);
+      await beforeStart(gameId, req);
       return api.launchPlay(gameId, req);
     },
     onSuccess: (r, { gameId }) => {
-      useLaunchMemo.setState((m) => ({ at: { ...m.at, [gameId]: playNow() }, mode: { ...m.mode, [gameId]: r.mode } }));
+      rememberLaunch(gameId, r.mode);
       invalidateGame(qc, gameId);
-      toast.ok(r.mode === "vanilla" ? "Starting vanilla" : r.mode === "no-mods" ? "Starting without mods" : "Starting", r.backup ? "Saves backed up first." : "Through Steam.");
+      toast.ok(r.mode === "vanilla" ? t("shell.play.startingVanilla") : r.mode === "no-mods" ? t("shell.play.startingNoMods") : t("shell.gameState.starting"),
+        r.backup ? t("shell.play.savesBackedUp") : r.via === "direct" ? t("shell.play.directly") : t("shell.play.throughSteam"));
       notifyActivation(r.activation);
     },
     // the re-apply before the start may have kept copies even when the start then failed; a mod changed in its Library
@@ -138,10 +194,7 @@ export function usePlayControl(): PlayControl {
       }));
     } else if (!running && !since && memo.at[id] !== undefined && !pending && launching === 0) {
       // Steam was asked and no game came within the wait (the backend gave the start up too): Play again
-      useLaunchMemo.setState((m) => {
-        const drop = <T,>(r: Record<string, T>) => { const n = { ...r }; delete n[id]; return n; };
-        return { at: drop(m.at), mode: drop(m.mode) };
-      });
+      forgetLaunch(id);
     } else if (!running && since) {
       // the run this launcher saw has ended: its launch (time, mode) is over too, so a later start from Steam is not
       // taken for it
@@ -152,15 +205,28 @@ export function usePlayControl(): PlayControl {
     }
   }, [id, running, process, sameRun, pending, launching, memo.at]);
   const since = runStarted(s, now, memo.since[id]);
-  const starting = exception ? state.starting && !s?.steamUpdating
+  const starting = stoppedStart ? false : exception ? state.starting && !s?.steamUpdating
     : (state.starting && !(spoke && !progress)) || running_ || (!running && !s?.steamUpdating && (launching > 0 || (!!progress && pending) || (at !== undefined && now - at < 120_000)));
   const activeProfile = profiles.data?.find((p) => p.id === active.data?.profileId) ?? null;
+  // Steam took the start (launch_play answered) and no game process exists yet
+  const waitingForGame = !!game && starting && pending && launching === 0;
+  const stopWaiting = async (gameId: string) => {
+    // the game may have come since the last status: then it is left alone, and its running views take over
+    const fresh = await api.gameStatus(gameId).catch(() => null);
+    if (fresh) qc.setQueryData(qk.gameStatus(gameId), fresh);
+    if (fresh?.running) return;
+    forgetLaunch(gameId);
+    qc.setQueryData(["launch_progress", gameId], null);
+    // the backend forgets the start too (its Steam step, its timings): no later launch_progress brings the wait back
+    await api.launchEnd(gameId).catch(() => {});
+  };
   return {
     game,
     view,
     installed: !!s?.runtime.installed,
     running,
-    canPlay: !!s && !running && !s.steamUpdating && launching === 0 && !starting && !changingRuntime,
+    canPlay: !!s && !running && !s.steamUpdating && launching === 0 && !starting && !changingRuntime && !applying,
+    applying,
     busy: launching > 0 || starting,
     starting,
     elapsed: running && since ? Math.max(0, Math.round((now - since) / 1000)) : null,
@@ -168,9 +234,48 @@ export function usePlayControl(): PlayControl {
     kilnMissing,
     timeline: progress,
     lastTimeline: tl,
+    stoppedStart,
+    dismissStop: () => clearStop(id),
+    waitingForGame,
+    stopWaiting: () => void stopWaiting(id),
     profileName: activeProfile?.name ?? null,
-    play: (mode, profileId) => launch.mutate({ gameId: id, req: { mode, profileId: profileId ?? null } }),
+    play: (mode, profileId) => {
+      // a dialog opened before an activation began (Vanilla once, the Deck's Play once) waits for it too (29.18)
+      if (applying) { toast.info(activationBusy()); return; }
+      launch.mutate({ gameId: id, req: { mode, profileId: profileId ?? null } });
+    },
   };
+}
+
+/** (dev.29) After a switch back from a test build, the game's Kiln is the beta's and this launcher ships an older one
+ *  (InstallState.switchBack): a start with Kiln (not vanilla) installs the launcher's own first, through the ordinary
+ *  install (its receipt, its backup, its refusals: a running game, Steam updating, a folder that is not Kiln's). When it
+ *  cannot, the start goes on with the Kiln the game has and says why. Resolves true when it installed. */
+export async function switchBackFirst(gameId: string, req: api.LaunchRequest): Promise<boolean> {
+  if (req.mode === "vanilla") return false;
+  const back = await api.gameStatus(gameId).then((s) => s.runtime.switchBack ?? null).catch(() => null);
+  if (!back) return false;
+  try {
+    const r = await runTask<api.InstallResult>(() => api.runtimeInstall(gameId, back.to, {}), {
+      done: t("shell.play.kilnInstalled", { version: back.to }), detail: () => t("shell.play.switchBackDetail", { from: back.from }), quiet: true,
+    });
+    notifyInstall(r);
+    return true;
+  } catch (e) {
+    // a DLL Windows refused (an antivirus, inbox 92): its plain words before the raw error
+    const err = api.toKilnError(e), blocked = blockedLine(err, undefined);
+    toast.error(blocked ? { ...err, message: `${blocked} ${err.message}` } : e, t("shell.play.switchBackFailed", { to: back.to, from: back.from }));
+    return false;
+  }
+}
+
+/** What a start does before launch_play, by its mode: with the profile, its cook and then the boot game-data step
+ *  (cook_run); a single start with another profile (`once`), only the boot game-data step for that profile's mods
+ *  (boot_snapshot_run: it cooks nothing); vanilla and without mods, nothing. Resolves whatever happened: neither step
+ *  stops a start. */
+export async function beforeStart(gameId: string, req: api.LaunchRequest): Promise<void> {
+  if (req.mode === "profile") await cookBeforePlay(gameId, cookingNotice);
+  else if (req.mode === "once" && req.profileId) await bootSnapshotBeforeOnce(gameId, req.profileId);
 }
 
 /** "03:12", "1:04:09". */
@@ -186,8 +291,8 @@ export function useNow(ms: number): number {
   useEffect(() => {
     if (!ms) return;
     setNow(playNow());
-    const t = setInterval(() => setNow(playNow()), ms);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setNow(playNow()), ms);
+    return () => clearInterval(timer);
   }, [ms]);
   return now;
 }

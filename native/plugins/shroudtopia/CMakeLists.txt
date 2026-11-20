@@ -6,6 +6,7 @@
 # CRT, every CRT copy in a process allocates from the process heap, so a string freed on either side is safe.
 kiln_plugin(shroudtopia
     src/plugin.cpp
-    src/context.cpp)
+    src/context.cpp
+    src/original_memcmp.cpp)
 target_include_directories(kiln-shroudtopia PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_definitions(kiln-shroudtopia PRIVATE _ITERATOR_DEBUG_LEVEL=0)

@@ -7,7 +7,9 @@
 Without --publish it is a dry run: it reads the page and its files (GET only) and prints what it would upload, create
 and post. With --publish it uploads, creates the files or their new versions, and posts the changelog. The page itself
 (its publishing status) is never changed; --sync-description --publish replaces the page's description with
-docs/kiln/launcher/nexus-description.bbcode (without --publish it prints the difference).
+docs/kiln/launcher/nexus-description.bbcode (without --publish it prints the difference). The file is read from the
+checkout nexus.py runs in (or --description FILE), not from the release folder: a text that does not name the
+release's version is refused before anything is asked of the API.
 
 Files (each a zip: Nexus takes archives; the zip keeps the AppImage's executable bit):
   launcher-windows  main      "Kiln Launcher (Windows)"   the NSIS setup of the Nexus build (nexus/windows/)
@@ -144,6 +146,23 @@ def post_presigned(url, data, headers):
 def release_version(folder):
     with open(os.path.join(folder, "updates", "github", "latest.json"), encoding="utf-8") as f:
         return json.load(f)["version"]
+
+
+def built_from_commit(folder):
+    """The commit README.txt names ("Built ... from commit <sha>"), as github-draft.sh reads it; None for a test build
+    of a working tree (release.sh --worktree: "from the working tree at <sha> (a test build, not a release)")."""
+    try:
+        with open(os.path.join(folder, "README.txt"), encoding="utf-8") as f:
+            m = re.search(r"from commit ([0-9a-f]{7,40})", f.read())
+    except OSError:
+        return None
+    return m.group(1) if m else None
+
+
+def names_version(text, version):
+    """Whether the page text names this release's version as a whole version: 0.2.0-dev.29.1 is not named by
+    0.2.0-dev.29.17, nor 0.2.0 by 0.2.0-dev.29 (a sentence's full stop after it is fine)."""
+    return re.search(r"(?<![0-9A-Za-z.+-])" + re.escape(version) + r"(?![0-9A-Za-z+-]|\.[0-9A-Za-z])", text) is not None
 
 
 def one(folder, pattern):
@@ -363,8 +382,10 @@ def run(argv=None):
     a = ap.parse_args(argv)
     try:
         check_api_url(a.api)
-        key = read_key(a.env)
         folder = os.path.abspath(a.folder)
+        if a.publish and not built_from_commit(folder):
+            raise Fail(f"{folder} was not built from a commit (a test build of a working tree?): never published")
+        key = read_key(a.env)
         version = release_version(folder)
         app_version = open(os.path.join(repo, "VERSION"), encoding="utf-8").read().strip()
         api = Api(a.api, key, app_version, dry=not a.publish)
@@ -382,6 +403,14 @@ def run(argv=None):
             if a.only:
                 raise Fail(f"{folder} has no server pack (runtime/kiln-server-{version}.zip)")
             kinds = [k for k in kinds if k != "server"]  # a release from before the server pack
+        if a.sync_description:
+            # the page text comes from the checkout nexus.py runs in, not from the release folder: 0.2.0-dev.29.2's
+            # first sync, run from a checkout behind the release commit, put 0.2.0-dev.29.1's text up
+            with open(a.description, encoding="utf-8") as f:
+                if not names_version(f.read(), version):
+                    raise Fail(f"{a.description} does not name {version}: --sync-description would put another "
+                               "release's page text up. Run nexus.py from a checkout at the release commit (its "
+                               "nexus-description.bbcode names the version), or pass --description FILE")
 
         mode = "PUBLISH" if a.publish else "dry run (GET only)"
         log(f"Nexus Mods: Kiln {version} from {folder} [{mode}]")

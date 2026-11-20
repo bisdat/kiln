@@ -13,6 +13,9 @@ start = source.index('struct PerCaller {')
 end = source.index('void KILN_CALL t_set_menu(', start)
 code = r'''
 #include <algorithm>
+#include <cassert>
+#include "overlay_mode.h"
+using namespace kui;
 #include <atomic>
 #include <barrier>
 #include <cstdint>
@@ -34,6 +37,10 @@ std::atomic<uint32_t> g_demand{0}, g_interactive{0};
 code += source[start:end]
 code += r'''
 int main() {
+    g_overlay_mode = OverlayMode::drawing_off;
+    t_set_demand(10); t_set_capture(10);
+    assert(g_demand == 0 && g_interactive == 0);
+    g_overlay_mode = OverlayMode::on;
     std::barrier sync(3);
     constexpr int rounds = 100000;
     auto run = [&](uintptr_t id) {
@@ -62,5 +69,5 @@ int main() {
 cpp = out / 'per_caller_test.cpp'
 cpp.write_text(code)
 exe = out / 'per_caller_test'
-subprocess.run(['g++', '-std=c++20', '-O1', '-g', '-Wall', '-Wextra', '-pthread', '-fsanitize=address,undefined', str(cpp), '-o', str(exe)], check=True)
+subprocess.run(['g++', '-std=c++20', '-O1', '-g', '-Wall', '-Wextra', '-pthread', '-I' + str(here.parent), '-fsanitize=address,undefined', str(cpp), '-o', str(exe)], check=True)
 subprocess.run([str(exe)], check=True)

@@ -105,6 +105,7 @@ Kiln.GlideSteerRule.MaxClimbAngle.init -> void
 Kiln.NoClip
 Kiln.NoClipEnd
 Kiln.NoClipEnd.Death = 1 -> Kiln.NoClipEnd
+Kiln.NoClipEnd.Left = 3 -> Kiln.NoClipEnd
 Kiln.NoClipEnd.RuleEnded = 0 -> Kiln.NoClipEnd
 Kiln.NoClipEnd.Teleport = 2 -> Kiln.NoClipEnd
 Kiln.NoClipResult

@@ -327,6 +327,18 @@ fn modpacks_carry_engine_mods_players_need_with_their_kdh1() {
     assert_eq!(req[0].hash, hash::dirhash(&server.join("kiln/eml/mods/stacks")).unwrap());
     let built = modpack::build(&server, &t.0.join("out"), "Isles", "1", &mut NoProgress).unwrap();
     assert_eq!(built.manifest.mods.iter().map(|m| m.path.as_str()).collect::<Vec<_>>(), ["eml/stacks", "flame/creative"]);
+    modpack::check_against(&modpack::verify(&built.file, Some(&built.sha256)).unwrap(), &req).unwrap();
+    // the owner's settings file (EML's config.txt) is packed as the server has it; what the server advertises leaves it
+    // out, so the pack names that as the mod's identity, which a launcher of 0.2.0-dev.29.18 or later accepts
+    put(&server, "kiln/eml/mods/stacks/config.txt", b"stack=500\n");
+    let req2 = modpack::required(&server).unwrap();
+    assert_eq!(req2[0].hash, req[0].hash, "a settings file is not part of the advertised hash");
+    let with_settings = modpack::build(&server, &t.0.join("out2"), "Isles", "1", &mut NoProgress).unwrap();
+    let eml = with_settings.manifest.mods.iter().find(|m| m.id == "stacks").unwrap();
+    assert_eq!(eml.identity.as_deref(), Some(req2[0].hash.as_str()));
+    assert_ne!(eml.hash, req2[0].hash);
+    modpack::check_against(&modpack::verify(&with_settings.file, Some(&with_settings.sha256)).unwrap(), &req2).unwrap();
+    std::fs::remove_file(server.join("kiln/eml/mods/stacks/config.txt")).unwrap();
     // a player installs it: the library takes both kinds with the same kdh1, the profile lists them
     let dirs = DataDirs::at(t.0.join("data"));
     let game = game_with_z(&t.0);

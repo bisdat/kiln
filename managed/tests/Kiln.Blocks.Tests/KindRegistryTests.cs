@@ -181,6 +181,48 @@ public sealed class KindRegistryTests
         Assert.Null(entry.Compile);
     }
 
+    public sealed class CollectibleKind<T> : IBlockKind<T> where T : class, IBlock
+    {
+        public BlockPlan Compile(BlockCompileContext context, T block) => context.Plan("p", [context.Effect("p", new EffectBlock { Heal = 1 })]);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference CompileAndRetireCollectibleRecord()
+    {
+        var assembly = System.Reflection.Emit.AssemblyBuilder.DefineDynamicAssembly(
+            new System.Reflection.AssemblyName("CollectibleBlockKind"), System.Reflection.Emit.AssemblyBuilderAccess.RunAndCollect);
+        var builder = assembly.DefineDynamicModule("main").DefineType("CollectibleBlock", System.Reflection.TypeAttributes.Public | System.Reflection.TypeAttributes.Sealed);
+        builder.AddInterfaceImplementation(typeof(IBlock));
+        builder.DefineDefaultConstructor(System.Reflection.MethodAttributes.Public);
+        var record = builder.CreateType()!;
+        var compiler = Activator.CreateInstance(typeof(CollectibleKind<>).MakeGenericType(record))!;
+        var provider = KindKit.Owner("provider");
+        var register = typeof(KindRegistry).GetMethod("Register", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.MakeGenericMethod(record);
+        Assert.True(((BlockKindResult)register.Invoke(null, [provider, KindKit.Descriptor(), compiler])!).Ok);
+        var entry = KindRegistry.Find(record)!;
+        KindCompiler.Compile(KindKit.Owner("consumer"), entry, "collectible", (IBlock)Activator.CreateInstance(record)!);
+        KindRegistry.Dispose(entry, provider);
+        return new WeakReference(record);
+    }
+
+    [Fact]
+    public async Task Retiring_a_kind_releases_its_record_type_even_after_the_shared_serializer_was_used()
+    {
+        KindKit.Fresh();
+        BlockJson.Parse<StatusBlock>("""{"name":"Warm","seconds":1}""");
+        var record = CompileAndRetireCollectibleRecord();
+        // The runtime's accessor cache expires after one second and sweeps on the next new metadata request.
+        // Let that temporary cache go before testing whether BlockJson's permanent options still root the provider.
+        await Task.Delay(TimeSpan.FromMilliseconds(1200), TestContext.Current.CancellationToken);
+        JsonSerializer.Serialize(new { KindCacheSweep = true }, KindJson.NewOptions());
+        for (var i = 0; i < 10 && record.IsAlive; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+        Assert.False(record.IsAlive);
+    }
+
     // ---- JSON ---------------------------------------------------------------------------------------------------
 
     private static JsonElement J(string json) => JsonDocument.Parse(json).RootElement;
@@ -274,5 +316,52 @@ public sealed class KindCapabilityTests
             (KindCapabilities.BlocksAvailable, BlockCapabilities.Report) = (was, report);
             KindCapabilities.Rearm();
         }
+    }
+    // ---- the external-kind section of schema/kiln-blocks.schema.json against the runtime (16d review R4) -------------------
+
+    private static string Repo([CallerFilePath] string self = "")
+    {
+        foreach (var start in new[] { AppContext.BaseDirectory, Path.GetDirectoryName(self) ?? "" })
+            for (var d = new DirectoryInfo(start); d != null; d = d.Parent)
+                if (File.Exists(Path.Combine(d.FullName, "schema/kiln-blocks.schema.json"))) return d.FullName;
+        throw new DirectoryNotFoundException("schema/kiln-blocks.schema.json not found");
+    }
+
+    [Fact]
+    public void The_schema_of_external_kind_sections_says_what_the_runtime_checks()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(Repo(), "schema/kiln-blocks.schema.json")));
+        var (sectionPattern, section) = doc.RootElement.GetProperty("patternProperties").EnumerateObject().Select(p => (p.Name, p.Value)).Single();
+        // the section: "provider-mod:plural", as RegisterKind takes it
+        bool SectionOk(string s) => System.Text.RegularExpressions.Regex.IsMatch(s, sectionPattern);
+        Assert.True(SectionOk("lanterns:lanterns"));
+        Assert.True(SectionOk("my.mod_2:Camp-Lights"));
+        Assert.False(SectionOk("lanterns:lan_terns"));      // the plural takes letters, digits and '-'
+        Assert.False(SectionOk("lanterns:" + new string('a', 65)));
+        Assert.False(SectionOk("Lanterns:lanterns"));        // a mod id is lower case
+
+        // a block's name: the schema takes exactly the names a compile takes
+        var names = section.GetProperty("propertyNames");
+        var pattern = names.GetProperty("pattern").GetString()!;
+        var events = KindKit.Fresh();
+        var (entry, _, _) = KindKit.Lantern();
+        var consumer = KindKit.Owner("schema-names");
+        foreach (var name in new[] { "camp", "a.b_c-1", new string('n', 64), new string('n', 65), "", "two words", "ümlaut", "semi;colon" })
+        {
+            var schemaOk = System.Text.RegularExpressions.Regex.IsMatch(name, pattern);
+            bool runtimeOk;
+            try { KindCompiler.Compile(consumer, entry, name, new LanternBlock { Name = "Camp" }); runtimeOk = true; }
+            catch (BlockError) { runtimeOk = false; }
+            Assert.True(schemaOk == runtimeOk, $"\"{name}\": schema {schemaOk}, runtime {runtimeOk}");
+        }
+
+        // a block: an object that says "format": 1; the rest is read strictly into the kind's record, not checked against SchemaJson
+        var block = section.GetProperty("additionalProperties");
+        Assert.Equal("object", block.GetProperty("type").GetString());
+        Assert.Equal(1, block.GetProperty("properties").GetProperty("format").GetProperty("const").GetInt32());
+        var says = section.GetProperty("description").GetString()!;
+        Assert.DoesNotContain("checked by the provider's schema", says);
+        Assert.Contains("SchemaJson", says);
+        Assert.Contains("not checked", says);
     }
 }

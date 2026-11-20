@@ -9,6 +9,8 @@
  *      game's save and its replication to players see them (write_submit; docs/re/world.md "Tracked writes").
  *   5. Game programs (v4): the game's own ECS programs of every world, by name, and the threads they run on
  *      (game_program_*, below).
+ *   6. Kiln programs in a game client's client world and prediction storage (since 0.2.0-dev.29: register_program_world,
+ *      program_world_state, bind_program_world, unbind_program_world at the end of the table).
  * Only kiln.world hooks the game's program registration; everyone else registers programs through this table.
  * Evidence and engine notes: docs/re/world.md. Usage: docs/kiln/services/world.md.
  *
@@ -122,7 +124,7 @@ enum {
     KILN_SLOT_EVENT_OUT = 8,   /* iter[slot] = event sender */
 };
 
-/* KilnProgramInfo.state */
+/* KilnWorldProgramInfo.state */
 enum {
     KILN_PROGRAM_PENDING = 0,  /* accepted; waits for the server world's program registration */
     KILN_PROGRAM_ACTIVE = 1,   /* registered into the server world (runs once the world ticks) */
@@ -131,14 +133,24 @@ enum {
     KILN_PROGRAM_SKIPPED = 4,  /* registered, but the engine skips it (a required singleton is missing) */
 };
 
-typedef struct KilnProgramInfo {
-    uint32_t size;        /* set to sizeof(KilnProgramInfo) before calling */
+/* A Kiln ECS program's state (program_info). Named KilnWorldProgramInfo since 0.2.0-dev.29: kiln_abilities.h had a
+ * struct of the same name (an Impact program, KilnImpactProgramInfo), so no plugin could include both headers. The old
+ * name stays as an alias of the struct of the header included first (KILN_PROGRAM_INFO_ALIAS): write the new names
+ * in code that includes both. Layout unchanged. */
+typedef struct KilnWorldProgramInfo {
+    uint32_t size;        /* set to sizeof(KilnWorldProgramInfo) before calling */
     uint32_t state;       /* KILN_PROGRAM_* state */
     uint32_t engine_id;   /* the program's id in the world (1-based; 0 before registration) */
     uint32_t iter_size;   /* bytes of the iterator (kiln.world passes one at least this big to `each`) */
     uint64_t updates;     /* update calls so far (slices; one per step for SYSTEM programs) */
     uint64_t entities;    /* entities iterated so far (each-mode only) */
-} KilnProgramInfo;
+} KilnWorldProgramInfo;
+#ifndef KILN_PROGRAM_INFO_ALIAS
+#define KILN_PROGRAM_INFO_ALIAS 1 /* 1: KilnProgramInfo is kiln_world.h's, 2: kiln_abilities.h's */
+typedef KilnWorldProgramInfo KilnProgramInfo;
+/* Preserve both the old typedef spelling and `struct KilnProgramInfo` source compatibility. */
+#define KilnProgramInfo KilnWorldProgramInfo
+#endif
 
 /* ======================================================================================= entities ============== */
 
@@ -228,6 +240,12 @@ typedef struct KilnWorldStatus {
  * engine fixes a program's access when the world starts, so only components listed at boot can be written; a new
  * entry needs a restart. The program is appended after the game's own programs and conflicts with every program
  * that reads or writes one of its components, so its write is the last of the step for that component. */
+
+/* game_slice_archetype's transient refusal (since 0.2.0-dev.29; a KilnResult value of this service, the generic codes keep
+ * their meaning): the entity map changed under the read (an insert, erase or grow), or the first entity's record did not
+ * name it. Read again, or leave that slice to the game; it does not mean the build cannot read archetypes. An older
+ * kiln.world answers KILN_ERR_UNAVAILABLE in these cases. */
+#define KILN_WORLD_ERR_CHANGED 100
 
 /* KilnWorldWriteResult.status */
 enum {
@@ -370,6 +388,17 @@ enum {
     KILN_GAME_PROGRAM_GAME = 0x01u,      /* the game's own program (its descriptor is in the game's image); clear: a
                                             program Kiln or another mod registered */
     KILN_GAME_PROGRAM_NO_UPDATE = 0x02u, /* it has no update in this world (a client program in a server world) */
+    KILN_GAME_PROGRAM_NO_VIEW = 0x04u,   /* its descriptor uses other_write_unser, all_read or all_write: wraps and
+                                            game_slice_iterate work, game_slice_slot / _mark do not (chapter 06a 9.3) */
+};
+
+/* A program descriptor's access lists (game_program_list, game_slice_slot, game_slice_mark), in descriptor order. */
+enum {
+    KILN_GAME_LIST_TPL = 0, KILN_GAME_LIST_TPL_OPT = 1, KILN_GAME_LIST_READ = 2, KILN_GAME_LIST_READ_OPT = 3,
+    KILN_GAME_LIST_WRITE = 4, KILN_GAME_LIST_WRITE_OPT = 5, KILN_GAME_LIST_SYS_READ = 6, KILN_GAME_LIST_SYS_WRITE = 7,
+    KILN_GAME_LIST_OTHER_TPL = 8, KILN_GAME_LIST_OTHER_READ = 9, KILN_GAME_LIST_OTHER_WRITE = 10,
+    KILN_GAME_LIST_WITH = 11, KILN_GAME_LIST_WITHOUT = 12, KILN_GAME_LIST_ANY_OF = 13, KILN_GAME_LIST_EVENTS_IN = 14,
+    KILN_GAME_LIST_EVENTS_OUT = 15, KILN_GAME_LISTS = 16,
 };
 
 typedef struct KilnGameProgramInfo {
@@ -434,8 +463,15 @@ typedef struct KilnGameProgramsStatus {
  * Lifetime: install is queued and done in the target world's next Pre (state PENDING -> ACTIVE); an unwrap stops new
  * calls at once and takes the stage out of the chain in the next Pre (-> REMOVED). When the world stops, its wraps go back to PENDING and are applied again, by program name, in the next
  * world of that kind. A server world runs its own wraps; a CLIENT-world wrap needs capability systems.wraps.client;
- * prediction slices that pass a client-world trampoline go to the game's update untouched. While native SET is loaded
- * (kiln.types' external_runner), every wrap is refused and the live ones are removed in the next Pre. */
+ * prediction slices that pass a client-world trampoline go to the game's update untouched, unless a PREDICTION wrap is
+ * on that program. A PREDICTION wrap (since 0.2.0-dev.29.18, capability systems.wraps.prediction, on where
+ * systems.wraps.client is) is a BEFORE or AFTER stage in the client world's table, which the prediction storage runs:
+ * `index` is the program's index in the CLIENT directory, the program's descriptor has none of the flags 0x1 (client),
+ * 0x10 (HOST_ONLY) and 0x40 (the engine bit the prediction step skips), it is applied in the client world's Pre and
+ * runs on the prediction storage's slices only (slice.world_kind KILN_WORLD_PREDICTION, on the main thread; step and
+ * thread_is_world are the client world's), while CLIENT stages on the same program run on the client world's slices
+ * only. While native SET is loaded (kiln.types' external_runner), every wrap is refused and the live ones are removed
+ * in the next Pre. */
 enum {
     KILN_WRAP_BEFORE = 0,
     KILN_WRAP_REPLACE = 1,
@@ -486,6 +522,10 @@ typedef struct KilnGameSlice {
 /* A stage; runs under kiln.world's structured-exception guard. */
 typedef void(KILN_CALL* KilnWrapStageFn)(KilnGameSlice* slice, void* user);
 
+/* game_slice_iterate's callback: one entity of the slice (row from 0; iter = the engine's iterator, positioned on it).
+ * Return 0 to go on, anything else to stop. */
+typedef uint32_t(KILN_CALL* KilnSliceEntityFn)(uint64_t* iter, uint32_t row, KilnEntity entity, void* user);
+
 typedef struct KilnGameWrapInfo {
     uint32_t size;          /* set to sizeof(KilnGameWrapInfo) before calling */
     uint32_t state;         /* KILN_WRAP_PENDING / _ACTIVE / _REMOVED / _REFUSED */
@@ -506,12 +546,265 @@ typedef struct KilnGameWrapInfo {
     uint8_t gone;           /* 1: no call of the stage starts any more (unwrapped, released, owner revoked) */
     uint16_t reserved;
     uint32_t running;       /* calls of the stage running now (with gone: the last ones finishing) */
-    char detail[128];       /* in words, NUL-terminated: why it was refused, removed or disabled */
+    char detail[128];       /* in words, NUL-terminated: why it was refused, removed or disabled; while PENDING after a
+                               world stop (since dev.29): what the stop's drain found ("world stop: ...") */
 } KilnGameWrapInfo;
 
 /* ======================================================================================= the table ============= */
 
 typedef void(KILN_CALL* KilnProgramEventFn)(const void* data, uint32_t size, void* user);
+
+/* Since 0.2.0-dev.29 (foreign_layout): kiln.world's view of one of the game's programs for code that runs inside that
+ * program's update with the program's own iterator (kiln.abilities' natives inside impact_simulation; chapter 06c 9.1). */
+typedef struct KilnForeignLayout {
+    uint32_t size;        /* the caller's sizeof */
+    uint32_t world_kind;  /* KILN_WORLD_* */
+    uint64_t session;     /* game_world_session(world_kind) it was computed in: it is void once that changes */
+    int32_t program;      /* the program's index in that world's directory */
+    uint32_t iter_size;   /* bytes of the iterator the view computed */
+    uint32_t counts[8];   /* the view's group counts: tpl, read, write, singletons, other_tpl, other, events_in, events_out */
+    uint64_t handle;      /* kiln.world's: the view */
+    char why[128];        /* when foreign_layout said KILN_ERR_UNAVAILABLE */
+} KilnForeignLayout;
+
+/* ============================================================================================ ECS reads ====== */
+/* Appended in v4 (the version stays 4): check header.size. Verified-copy world reads for task threads: every member
+ * works from any thread, the tick included, none posts work to a tick or waits on one, and none returns partial data
+ * (docs/kiln/services/world.md, "World reads from task threads"). A read copies the bytes through the engine gate's
+ * guarded copy (kiln.engine), re-validates the entity, its generation, the component layout and the world session,
+ * and returns a complete result or a precise refusal. On a game build without an exact engine profile (or whose
+ * profile does not check out against the running exe) every entity read returns unavailable, and the capability row
+ * `world.ecs_read` says why.
+ *
+ * Two read modes for component bytes:
+ * - Stable copy (the default, every member). The engine keeps no version per component, so Kiln copies the bytes
+ *   twice between identity checks, compares them and also hashes them before and after each copy: a value that
+ *   changes during the read is refused unreadable. The limit: a game writer that is descheduled half way through
+ *   storing a value leaves a half-written value that stays put, and a stable copy cannot tell it from a whole one.
+ * - Frame-quiet (opt-in: KILN_ECS_READ_FRAME_QUIET on a snapshot_many spec, KILN_ECS_QUERY_FRAME_QUIET on a query;
+ *   server world only). The copy runs only while no server frame runs: the engine's Scene word (the word the
+ *   GameServer frame holds for its whole update, and the write gate takes) must be free before and after the copy,
+ *   and the server step must not move across it. Kiln only observes the word: it takes no gate and writes nothing.
+ *   KILN_ECS_BUSY: a frame ran during the read; nothing was copied; retry after the step (NextGateWindow in C#,
+ *   KILN_TASK_AFTER_STEP for a native task). KILN_ECS_UNSUPPORTED: the world is a client or prediction world, which
+ *   has no such word; Kiln never falls back to a stable copy for a frame-quiet request.
+ * ecs_snapshot is always a stable copy (a frame-quiet single read is ecs_snapshot_many with one spec).
+ * ecs_template_uuid has no mode: its 16 bytes are the template definition's, game data no frame writes, reached
+ * through one aligned pointer of the entity record.
+ *
+ * Distinct refusals (KilnObjectInfo.status, a query's `state` and snapshot_many's `presence` carry the same codes):
+ * absent (the entity or component does not exist), stale (the id names a new entity now: same id, new generation;
+ * also a changed session, reload epoch or layout), unreadable (the copy faulted, or the world changed during the
+ * read), unavailable (no exact profile, no such world, or the reads are off on this build), busy and unsupported
+ * (frame-quiet only, above). The KilnResult mirrors it: KILN_OK, KILN_ERR_NOT_FOUND (absent), KILN_ECS_ERR_STALE,
+ * KILN_ECS_ERR_UNREADABLE (or KILN_WORLD_ERR_CHANGED for a query the membership changed under), KILN_ERR_UNAVAILABLE,
+ * KILN_ECS_ERR_BUSY, KILN_ECS_ERR_UNSUPPORTED. Only a caller that asked for a frame-quiet read can get busy or
+ * unsupported. Buffers are the caller's: a result that does not fit reports *required and copies nothing. */
+enum {
+    KILN_ECS_OK = 0,
+    KILN_ECS_ABSENT = 1,
+    KILN_ECS_STALE = 2,
+    KILN_ECS_UNREADABLE = 3,
+    KILN_ECS_UNAVAILABLE = 4,
+    KILN_ECS_BUSY = 5,        /* frame-quiet only: a server frame ran during the read; nothing copied */
+    KILN_ECS_UNSUPPORTED = 6, /* frame-quiet only: not a server world */
+    /* appended with the compare-exchange writes below (ecs_compare_exchange's KilnMutationReply.status) */
+    KILN_ECS_CONFLICT = 7,     /* the current bytes are not the expected ones; nothing written */
+    KILN_ECS_NOT_WRITABLE = 8, /* the component may not be written from a task (KilnEcsWritePolicy says why) */
+    KILN_ECS_UNCERTAIN = 9     /* a write was attempted and could not be proven; the target is latched for the session */
+};
+#define KILN_ECS_ERR_STALE 101
+#define KILN_ECS_ERR_UNREADABLE 102
+#define KILN_ECS_ERR_BUSY 103
+#define KILN_ECS_ERR_UNSUPPORTED 104
+#define KILN_ECS_ERR_CONFLICT 105
+#define KILN_ECS_ERR_NOT_WRITABLE 106
+#define KILN_ECS_ERR_UNCERTAIN 107
+
+/* A self-validating entity value (entity_open): id, generation, world session and layout stamp. Not a retained
+ * handle: nothing is pinned, and every use re-validates. Copy it freely; do not edit it. */
+typedef struct KilnObjectRef {
+    uint32_t size;         /* sizeof(KilnObjectRef) */
+    KilnEntity entity;
+    uint32_t generation;   /* the entity id's generation when opened */
+    uint32_t world_kind;   /* KILN_WORLD_* */
+    uint64_t session;      /* game_world_session(world_kind) when opened */
+    uint64_t layout_stamp; /* the entity's component-layout stamp when opened */
+    uint64_t reload_epoch; /* the caller's reload epoch the ref was opened under */
+} KilnObjectRef;
+
+/* KilnObjectInfo.flags */
+enum {
+    KILN_OBJECT_ALIVE = 1u << 0,       /* the entity exists with the ref's generation */
+    KILN_OBJECT_HAS_TEMPLATE = 1u << 1 /* the entity names a template it was spawned from */
+};
+
+typedef struct KilnObjectInfo {
+    uint32_t size;   /* set to sizeof(KilnObjectInfo) before calling */
+    uint32_t status; /* KILN_ECS_* */
+    KilnEntity entity;
+    uint32_t generation; /* current generation (the ref's when alive) */
+    uint32_t world_kind;
+    uint32_t flags;        /* KILN_OBJECT_* */
+    uint64_t session;      /* current session of world_kind */
+    uint64_t layout_stamp; /* current layout stamp of the entity */
+    uint64_t reload_epoch; /* the ref's epoch */
+} KilnObjectInfo;
+
+typedef struct KilnEcsContextInfo {
+    uint32_t size;          /* set to sizeof(KilnEcsContextInfo) before calling */
+    uint32_t status;        /* KILN_ECS_*: OK when at least the context could be read */
+    uint32_t present_mask;  /* bit (1 << KILN_WORLD_*): a world of that kind exists now */
+    uint32_t exact_profile; /* 1: Kiln has an exact engine profile for this build */
+    uint64_t sessions[KILN_WORLD_KINDS]; /* game_world_session of each kind (0: none) */
+    uint64_t layout_stamp;               /* the running world's component-layout stamp (0: none) */
+} KilnEcsContextInfo;
+
+/* ecs_query's request. Components are component hashes (component_hash); the AND of them must all be present. */
+enum {
+    KILN_ECS_QUERY_BOUNDS = 1u << 0,      /* centre/radius bound the result (needs the world's positions) */
+    KILN_ECS_QUERY_FRAME_QUIET = 1u << 1  /* both walks of the query run frame-quiet (server world only; see above) */
+};
+typedef struct KilnEcsQueryRequest {
+    uint32_t size; /* sizeof(KilnEcsQueryRequest) */
+    uint32_t world_kind;
+    uint32_t flags; /* KILN_ECS_QUERY_* */
+    uint32_t component_count;
+    const uint32_t* components; /* component_count hashes */
+    KilnVec3 center;            /* with KILN_ECS_QUERY_BOUNDS: metres */
+    double radius;              /* with KILN_ECS_QUERY_BOUNDS: metres, above 0 */
+} KilnEcsQueryRequest;
+
+/* KilnEcsSnapshotSpec.flags */
+enum {
+    KILN_ECS_READ_FRAME_QUIET = 1u << 0 /* frame-quiet copy (server world only; see above) */
+};
+
+/* One component of an ecs_snapshot_many: its bytes are packed into `out` in spec order (a component that is
+ * absent takes no room; its presence says so). Not claimed atomic across components: each is validated before
+ * and after its own copy, so one entity or layout change marks every remaining spec stale and nothing is copied.
+ * When any spec asks for KILN_ECS_READ_FRAME_QUIET, every copy of the call runs inside one frame-quiet window. */
+typedef struct KilnEcsSnapshotSpec {
+    uint32_t component; /* component hash */
+    uint32_t flags;     /* KILN_ECS_READ_*; other bits are refused */
+} KilnEcsSnapshotSpec;
+
+/* ======================================================================== Compare-exchange writes ====== */
+/* Appended in v4 after the ECS reads (the version stays 4): check header.size and KILN_WORLD_CAP_ECS_WRITE. A whole
+ * component of an entity of the SERVER world, compared and swapped from a task thread under the engine's own write gate
+ * (kiln.internal.engine), between frames only. Only an untracked component of plain bytes is writable
+ * (KilnEcsWritePolicy); everything tracked, replicated or saved stays on the tick. docs/kiln/services/world.md, "World
+ * writes from task threads".
+ *
+ * The protocol (ecs_compare_exchange): before the gate, the arguments, the policy, the ref (session, generation, layout,
+ * reload epoch), the staging buffers and an event slot; then the gate, taken without waiting; inside it, with no wait,
+ * allocation, lock, log or call into the engine's code: the entity found again from the ref, the component's two
+ * tracking bits read again, the current bytes copied and compared in full with `expected`, `desired` merged under
+ * `mask`, written, read back and the entity checked again; a write that does not read back is rolled back in the same
+ * hold and that rollback is read back too. After the release: `confirmed`, the uncertain latch and the event.
+ *
+ * Outcomes (KilnMutationReply.status; the KilnResult mirrors it):
+ *   OK            written and read back (KILN_MUTATION_WRITTEN), or nothing to change (KILN_MUTATION_NO_OP)  KILN_OK
+ *   CONFLICT      the current bytes are not `expected`; `confirmed` holds them; nothing written         KILN_ECS_ERR_CONFLICT
+ *   BUSY          the engine holds a gate word (every frame), another Kiln writer holds the gate, this owner's busy
+ *                 latch for the step, a call on the server tick, or the event queue is full this step    KILN_ECS_ERR_BUSY
+ *   STALE         the ref's generation, session, layout or epoch changed, the ref is another owner's, or
+ *                 the calling owner retired                                                             KILN_ECS_ERR_STALE
+ *   NOT_WRITABLE  the policy refuses the component, `bytes` is not its size, or its tracking bits are set KILN_ECS_ERR_NOT_WRITABLE
+ *   UNCERTAIN     a write could not be proven, now or earlier for this target (KILN_MUTATION_TARGET_LATCHED) KILN_ECS_ERR_UNCERTAIN
+ *   UNAVAILABLE   no exact profile, no write gate, not the server world, no server world, the gate closed  KILN_ERR_UNAVAILABLE
+ *   ABSENT        the entity is gone or lacks the component                                             KILN_ERR_NOT_FOUND
+ *   UNREADABLE    a read faulted before any write, or a write was rolled back and proven (KILN_MUTATION_ROLLED_BACK):
+ *                 the bytes are as they were                                                            KILN_ECS_ERR_UNREADABLE
+ * Only a BUSY refusal from the gate itself latches the owner for the rest of the server step (kiln.internal.engine's
+ * busy latch); no other outcome does.
+ * Owner scoping: a ref is the caller's when its reload_epoch is the caller's KilnOwner id (Kiln's managed host opens
+ * every ref so; a native caller that writes opens its refs with entity_open(owner, owner, ...)). A ref of another
+ * owner, of an earlier epoch, or a call from an owner that is unloading or unloaded answers STALE and never writes. */
+
+/* KilnEcsWritePolicy.flags */
+enum {
+    KILN_ECS_WRITE_POLICY_WRITABLE = 1u << 0,        /* ecs_compare_exchange may write this component */
+    KILN_ECS_WRITE_POLICY_TRACKING_KNOWN = 1u << 1,  /* the two tracking bits below were read from the engine */
+    KILN_ECS_WRITE_POLICY_TRACKED_A = 1u << 2,       /* the engine's first change-tracking category is set */
+    KILN_ECS_WRITE_POLICY_TRACKED_B = 1u << 3,       /* ... its second */
+    KILN_ECS_WRITE_POLICY_PLAIN = 1u << 4,           /* the reflected type holds plain values only */
+    KILN_ECS_WRITE_POLICY_OVER_BUDGET = 1u << 5      /* larger than the engine's per-component write budget */
+};
+/* KilnEcsWritePolicy.why_code and KilnMutationReply.why_code: the first rule that decided */
+enum {
+    KILN_ECS_WRITE_WHY_NONE = 0,
+    KILN_ECS_WRITE_WHY_NOT_SERVER_WORLD = 1,  /* the gate is the server world's (the local authority's) */
+    KILN_ECS_WRITE_WHY_NO_PROFILE = 2,        /* no exact engine profile, its write gate is disabled, or kiln.types
+                                                 (the policy's reflection) is not here */
+    KILN_ECS_WRITE_WHY_NO_WORLD = 3,          /* no server world now */
+    KILN_ECS_WRITE_WHY_UNREGISTERED = 4,      /* no component is registered under this hash */
+    KILN_ECS_WRITE_WHY_TRACKED = 5,           /* a change-tracking bit is set (read from the engine) */
+    KILN_ECS_WRITE_WHY_TRACKING_UNKNOWN = 6,  /* the tracking bits could not be read */
+    KILN_ECS_WRITE_WHY_NOT_PLAIN = 7,         /* the type owns memory or points somewhere (arrays, strings, variants,
+                                                 blobs, references), or kiln.types cannot resolve it */
+    KILN_ECS_WRITE_WHY_SIZE = 8,              /* the reflected size is not the registered one, or `bytes` is not it */
+    KILN_ECS_WRITE_WHY_OVER_BUDGET = 9,       /* larger than the write budget */
+    KILN_ECS_WRITE_WHY_IN_FRAME = 10,         /* called on the server tick, inside the frame */
+    KILN_ECS_WRITE_WHY_GATE = 11,             /* the engine's gate refused (KilnMutationReply.engine_reason) */
+    KILN_ECS_WRITE_WHY_EVENTS_FULL = 12,      /* the event queue is full this step */
+    KILN_ECS_WRITE_WHY_TARGET_LATCHED = 13,   /* an earlier write to this target was uncertain this session */
+    KILN_ECS_WRITE_WHY_OWNER_RETIRED = 14,    /* the calling owner is unloading or unloaded */
+    KILN_ECS_WRITE_WHY_REF = 15,              /* the ref no longer names the entity (stale or absent) */
+    KILN_ECS_WRITE_WHY_COMPARE = 16,          /* the current bytes are not the expected ones */
+    KILN_ECS_WRITE_WHY_FAULT = 17,            /* a guarded read or write faulted */
+    KILN_ECS_WRITE_WHY_READBACK = 18,         /* the bytes read back were not the bytes written */
+    KILN_ECS_WRITE_WHY_NOT_OWNERS_REF = 19,   /* the ref was not opened by the calling owner (its reload_epoch is not
+                                                 the owner's id, as Kiln's managed host opens every ref) */
+    KILN_ECS_WRITE_WHY_RETIRE_RACE = 20       /* an owner retired during the call; nothing written, try again */
+};
+typedef struct KilnEcsWritePolicy {
+    uint32_t size;           /* set to sizeof(KilnEcsWritePolicy) before calling */
+    uint32_t status;         /* KILN_ECS_OK (writable), KILN_ECS_NOT_WRITABLE or KILN_ECS_UNAVAILABLE */
+    uint32_t world_kind;
+    uint32_t component;      /* the component hash asked about */
+    uint32_t component_size; /* its registered size: the only `bytes` ecs_compare_exchange accepts (0 when unknown) */
+    uint32_t budget;         /* the engine's per-component write budget in bytes (0 without a gate) */
+    uint32_t flags;          /* KILN_ECS_WRITE_POLICY_* */
+    uint32_t why_code;       /* KILN_ECS_WRITE_WHY_*: why not (NONE when writable) */
+    char why[96];            /* the same in words, NUL-terminated */
+} KilnEcsWritePolicy;
+
+/* KilnMutationReply.flags */
+enum {
+    KILN_MUTATION_WRITTEN = 1u << 0,       /* the bytes were written and read back */
+    KILN_MUTATION_NO_OP = 1u << 1,         /* the merged value equals the current one: nothing written, no event */
+    KILN_MUTATION_CONFIRMED = 1u << 2,     /* `confirmed` holds the component's bytes as the hold saw them */
+    KILN_MUTATION_ROLLED_BACK = 1u << 3,   /* a write that did not read back was undone and the undo read back */
+    KILN_MUTATION_TARGET_LATCHED = 1u << 4,/* the target is latched uncertain for the session (now or earlier) */
+    KILN_MUTATION_EVENT_QUEUED = 1u << 5   /* a KilnEcsWriteEvent will be delivered after this write */
+};
+typedef struct KilnMutationReply {
+    uint32_t size;          /* set to sizeof(KilnMutationReply) before calling */
+    uint32_t status;        /* KILN_ECS_*: the outcome */
+    uint32_t flags;         /* KILN_MUTATION_* */
+    uint32_t why_code;      /* KILN_ECS_WRITE_WHY_* */
+    uint32_t engine_reason; /* the gate's refusal (kiln.internal.engine's reason) for BUSY and UNAVAILABLE, else 0 */
+    uint32_t generation;    /* the entity's generation the call saw */
+    uint64_t session;       /* the server world session of the attempt */
+    uint64_t step;          /* the server step of the attempt (0 when unknown) */
+    uint64_t hold_ns;       /* how long Kiln held the engine's gate (0: never taken) */
+} KilnMutationReply;
+
+/* One committed write, delivered on the server tick (kiln.world's Pre) after its gate was released, exactly once per
+ * write; a world's STOPPING delivers what is left of its session on the stopping thread. */
+typedef struct KilnEcsWriteEvent {
+    uint32_t size;          /* sizeof(KilnEcsWriteEvent) */
+    uint32_t world_kind;
+    KilnEntity entity;
+    uint32_t generation;
+    uint32_t component;     /* component hash */
+    uint32_t reserved;
+    KilnOwner owner;        /* who wrote */
+    uint64_t session;
+    uint64_t step;          /* the server step the write was made after */
+} KilnEcsWriteEvent;
+typedef void(KILN_CALL* KilnEcsWriteEventFn)(const KilnEcsWriteEvent* event, void* user);
 
 typedef struct KilnWorldApi {
     KilnServiceHeader header; /* { sizeof(KilnWorldApi), KILN_WORLD_VERSION } */
@@ -525,7 +818,7 @@ typedef struct KilnWorldApi {
     /* Qword index into the iterator of `name` in list `kind` (KILN_SLOT_*), or -1 when it is not declared there. The
      * layout is computed from the descriptor at registration and is the same for every update. Any thread. */
     int32_t(KILN_CALL* program_slot)(KilnHandle program, int32_t kind, KilnStr name);
-    KilnResult(KILN_CALL* program_info)(KilnHandle program, KilnProgramInfo* out);
+    KilnResult(KILN_CALL* program_info)(KilnHandle program, KilnWorldProgramInfo* out);
 
     /* ---- inside a program update (ctx = the argument your update got) ---- */
     /* Raw mode only: fills `iter` (size bytes; see program_info.iter_size). KILN_ERR_BUFFER_TOO_SMALL if size is less. */
@@ -548,7 +841,8 @@ typedef struct KilnWorldApi {
     /* Kind-4 record: removes component `hash` from `entity` at the end of the step. */
     KilnResult(KILN_CALL* queue_remove)(KilnProgramCtx* ctx, KilnEntity entity, uint32_t hash);
     /* Marks the component behind a write slot changed (replication to clients, saving) before you write through it:
-     * write_record = &iter[program_slot(..., KILN_SLOT_WRITE, name)]. */
+     * write_record = &iter[program_slot(..., KILN_SLOT_WRITE, name)]. A no-op inside a client or prediction program
+     * (since 0.2.0-dev.29: nothing such a program writes is marked). */
     void(KILN_CALL* mark_written)(KilnProgramCtx* ctx, const uint64_t* write_record);
     /* Another entity's component through a declared other-read accessor: iter[slot] with slot from
      * program_slot(KILN_SLOT_OTHER_READ, name). NULL if the entity has none. Read only; valid during the update. */
@@ -585,7 +879,9 @@ typedef struct KilnWorldApi {
     KilnResult(KILN_CALL* status)(KilnWorldStatus* out);
     /* Appended in v1: tracked other-entity writes. The accessor MUST come from this program's OTHER_WRITE slot.
      * Calls the engine's WriteOther with the job tracker and write flag, so replication/save dirtiness is recorded
-     * before returning the mutable component. NULL: absent, undeclared, wrong callback, or unavailable build. */
+     * (the engine marks a server-world block) before returning the mutable component. NULL: absent, undeclared, wrong
+     * callback, unavailable build, or inside a client or prediction program (since 0.2.0-dev.29: see the client-world
+     * members below). */
     void*(KILN_CALL* write_other)(KilnProgramCtx* ctx, uint64_t accessor, KilnEntity entity, uint32_t* out_size);
     /* Disable the callback permanently; engine descriptors remain allocated. Tick thread (or before world setup).
      * After success no callback is in flight. Required before freeing callback/user memory or unloading code. */
@@ -656,12 +952,17 @@ typedef struct KilnWorldApi {
      * existed when Kiln started (KILN_ERR_UNAVAILABLE), and only on a dedicated server. A bit 15 that a real player 16
      * set is left alone. Any thread outside a program update; it takes effect in the next Pre. */
     KilnResult(KILN_CALL* lab_parallel)(uint32_t on, uint32_t steps);
-    /* Wraps program `index` of the live world of `world_kind` (SERVER or CLIENT) with a `stage` (KILN_WRAP_*) that
-     * calls fn(slice, user). *out = its handle. It is PENDING until the target world's next Pre, where kiln.world
+    /* Wraps program `index` of the live world of `world_kind` (SERVER or CLIENT; PREDICTION since 0.2.0-dev.29.18:
+     * `index` of the CLIENT directory, BEFORE or AFTER, see "wraps" above) with a `stage` (KILN_WRAP_*) that
+     * calls fn(slice, user). Lifetime: call game_wraps_release and wait for it before freeing anything a stage uses.
+     * Owner retirement closes admission but does not wait for an already-running stage. Poll release until
+     * out_pending is zero, outside every stage. *out = its handle. It is PENDING until the target world's next Pre, where kiln.world
      * applies it (or refuses it: game_wrap_info says why); later worlds of that kind get it again by program name.
      * Any thread outside a stage or program update. A second Replace of a program is not an error: *out is a handle
      * that is REFUSED at once (reason KILN_WRAP_REPLACE_TAKEN, detail names the owner and wrap that replace it).
-     * KILN_ERR_INVALID_ARGUMENT: no owner, fn or out, a bad stage or kind, a program with no update in that world;
+     * KILN_ERR_INVALID_ARGUMENT: no owner, fn or out, a bad stage or kind, a program with no update in that world,
+     * PREDICTION while systems.wraps.prediction is not available (as before 0.2.0-dev.29.18), a PREDICTION Replace or a
+     * program the prediction storage never steps;
      * KILN_ERR_NOT_FOUND: no such index in the live directory; KILN_ERR_UNAVAILABLE: wraps are off on this build,
      * native SET is loaded, or (CLIENT) capability systems.wraps.client is not available; KILN_ERR_WRONG_THREAD:
      * from inside a stage or program update. */
@@ -686,6 +987,276 @@ typedef struct KilnWorldApi {
      * program runner gets it at slice+0x10), or 0 when the entry holds no kiln.world trampoline. Any thread; lock-free.
      * For code that names programs by their update pointer. */
     uint64_t(KILN_CALL* wrap_original)(uintptr_t entry);
+
+    /* ---- appended since 0.2.0-dev.28 (version stays 4). Check header.size ---- */
+    /* 1 when the calling thread is inside a Kiln world program's update (register_program, bind_program), inside a
+     * wrap stage on a game program's slice (game_program_wrap), or inside a kiln.types system_hook callback (kiln.types'
+     * in_system_callback; 0 for that part with a kiln.types that lacks it), else 0. The world is in the middle of its
+     * step there (maybe on a worker): a service whose calls must not run mid-step refuses them with
+     * KILN_ERR_WRONG_THREAD when this answers 1. Any thread; lock-free, no game call. */
+    uint32_t(KILN_CALL* in_program)(void);
+
+    /* ---- per entity inside a stage (since 0.2.0-dev.29, still v4: check header.size) ----
+     * The names of list `list` (KILN_GAME_LIST_*) of program `index`'s descriptor in that world's directory, in
+     * descriptor order: returns how many (-1: no such program or list) and copies up to `capacity` into `names`
+     * (valid for the life of the process). Any thread. */
+    int32_t(KILN_CALL* game_program_list)(uint32_t world_kind, int32_t index, int32_t list, KilnStr* names,
+                                          uint32_t capacity);
+    /* Inside a stage: runs the program's own iterator over the slice and calls each(iter, row, entity, user) per
+     * entity (the update's own view of it; the iterator buffer is kiln.world's, sized from the job's counts). The
+     * slice's iteration state is as it was afterwards (a Before leaves the update to start from the first entity).
+     * KILN_ERR_WRONG_THREAD: not inside this slice's stage; KILN_ERR_BUFFER_TOO_SMALL: an iterator over 4096 bytes. */
+    KilnResult(KILN_CALL* game_slice_iterate)(KilnGameSlice* slice, KilnSliceEntityFn each, void* user);
+    /* Inside game_slice_iterate's callback: what the iterator holds for name `i` of descriptor list `list` for the
+     * current entity: a component (TPL, READ, WRITE: NULL when an optional one is absent), a singleton, an other-entity
+     * accessor or an event queue. *size = the component's reflected size (0 when not known), *writable = 1 for the
+     * WRITE lists. NULL when the slot is not known: a NO_VIEW program, a name past the list, a view that disagreed
+     * with the engine's counts on the first slice (kiln.log says so once). */
+    void*(KILN_CALL* game_slice_slot)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i,
+                                      uint32_t* size, uint8_t* writable);
+    /* Inside game_slice_iterate's callback, before writing through a WRITE / WRITE_OPT slot: marks the current entity's
+     * component changed for the save and replication (the engine's MarkWritten), once per entity and component.
+     * KILN_ERR_INVALID_ARGUMENT: not a write list or name; KILN_ERR_UNAVAILABLE: no tracker on this slot or build. */
+    KilnResult(KILN_CALL* game_slice_mark)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
+    /* Inside a stage: the slice's archetype key (all its entities share one archetype). Since dev.29 it is the layout in
+     * the engine's own slice record, the one ProgramRunner set the slice's columns up from (world.slice_record: a
+     * scoped checked typed link on the runner, installed lazily in Pre; checked against the trampoline entry and row
+     * count). The capture lasts only for that runner continuation and is consumed once; nested calls restore it.
+     * Server slices can fall back to the first entity's record in the entity map, at rest during the server step.
+     * Its count/id rechecks narrow races but do not prove lifetime against arbitrary external mutation. Client slices
+     * never use that unproven map fallback: a missing/mismatched capture is CHANGED, an unavailable/exhausted install
+     * is UNAVAILABLE. CHANGED is transient: read again or leave only that slice to the game (the original still runs).
+     * KILN_ERR_NOT_FOUND for an empty slice; KILN_ERR_UNAVAILABLE when this build cannot safely read this kind. */
+    KilnResult(KILN_CALL* game_slice_archetype)(KilnGameSlice* slice, uintptr_t* out_layout);
+    /* Whether archetype `layout` (game_slice_archetype) has component `component_hash`: 1 yes, 0 no, -1 not known
+     * (no such component in that world, no world). Any thread, while the world lives. */
+    int32_t(KILN_CALL* game_archetype_has)(uint32_t world_kind, uintptr_t layout, uint32_t component_hash);
+    /* Inside game_slice_iterate's callback, after writing an attribute component (Fuel, Health, ...) through WRITE /
+     * WRITE_OPT slot `i` of `list`: runs the game's attribute formulas on it (AttrChanged: maxima, clamps, derived
+     * values), with the program's own impact::AttributeRegistry singleton. KILN_ERR_INVALID_ARGUMENT: not a write
+     * slot, not an attribute block with values, or the program does not declare impact::AttributeRegistry;
+     * KILN_ERR_UNAVAILABLE: not on this build; KILN_ERR_INTERNAL: the formulas faulted. */
+    KilnResult(KILN_CALL* game_slice_attr_changed)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
+    /* Since dev.29: inside iteration, validates reflected AttributeComponent ancestry and the block's bounds.
+     * No formula or write. INVALID_ARGUMENT for a non-attribute or malformed block. Check header.size. */
+    KilnResult(KILN_CALL* game_slice_attr_validate)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
+    /* Since dev.29: monotonically changing lifecycle generation for this world kind, advanced at STARTED/STOPPING.
+     * Any thread, lock-free; key per-world caches with it before reading their entries. Check header.size. */
+    uint64_t(KILN_CALL* game_world_session)(uint32_t world_kind);
+    /* Since dev.29: the contract of program `index`'s descriptor in that world's directory (chapter 06a 9.7; the
+     * program catalog sigdb/programs/ and Kiln.Game's typed program views carry the same): FNV-1a-32 of its contract
+     * text, which is, for each of the descriptor's 21 lists in descriptor order (tpl, tpl_opt, read, read_opt, write,
+     * write_opt, add, remove, sys_read, sys_write, other_tpl, other_read, other_write, other_write_unser, with,
+     * without, any_of, all_write, all_read, events_in, events_out), "<list>=" + its names as stored joined by "," +
+     * "\n", then "sys_read_opt=%016x\n", "sys_write_opt=%016x\n", "sys_write_parallel=%016x\n", "flags=%08x\n" and
+     * "interval=%u\n". *out_contract = the hash. `text` (NULL for none) gets the text, NUL-terminated, cut to fit
+     * `capacity`; *out_size (optional) = the whole text's length without the NUL. KILN_ERR_INVALID_ARGUMENT:
+     * out_contract is NULL; KILN_ERR_NOT_FOUND: no such index or no directory of that kind now; KILN_ERR_UNAVAILABLE:
+     * the descriptor cannot be read. Any thread, also inside a stage (it reads the descriptor; no game call). Check
+     * header.size. */
+    KilnResult(KILN_CALL* game_program_contract)(uint32_t world_kind, int32_t index, uint32_t* out_contract, char* text,
+                                                 uint32_t capacity, uint32_t* out_size);
+
+    /* ---- foreign views: since 0.2.0-dev.29 (chapter 06c 9.1), still v4: check header.size ----
+     * Code that runs inside one of the game's programs and holds that program's iterator reads and writes other
+     * entities through the program's own other_read / other_write accessors, with its job's storage, tracker and
+     * write flag (the tracked-write path): any thread inside the update; attribute formulas follow that thread's last write.
+     * The view of program `name` in the live world of `world_kind` (the wraps' view algorithm, from its descriptor):
+     * *out (out->size set) gets the session, the index, the counts, the iterator size and the handle the calls below
+     * take. KILN_ERR_NOT_FOUND: no such program or no directory now; KILN_ERR_UNAVAILABLE: the layout cannot be
+     * computed (out->why). The view lasts for the process; a new session needs a new one. Tick thread. */
+    KilnResult(KILN_CALL* foreign_layout)(uint32_t world_kind, KilnStr name, KilnForeignLayout* out);
+    /* The iterator qword of name `name` of list `list` (KILN_GAME_LIST_*) in the view, or -1. Any thread. */
+    int32_t(KILN_CALL* foreign_slot)(const KilnForeignLayout* layout, int32_t list, KilnStr name);
+    /* Inside the program's update, `iter` its iterator: KILN_OK when the job's group counts and storage registry are the view's;
+     * KILN_ERR_UNAVAILABLE when they differ, the session ended or the job cannot be read (the view's slots must then not
+     * be used on that iterator). out_counts (optional, 8) gets the job's counts. */
+    KilnResult(KILN_CALL* foreign_check)(const KilnForeignLayout* layout, const uint64_t* iter, uint32_t* out_counts);
+    /* Inside the update: component `component` (short name: "Health") of entity `entity` through the program's
+     * other_read or other_write accessor (ReadOther); *size its bytes. NULL when the entity has none (*rc KILN_OK) or
+     * on a refusal (*rc): KILN_ERR_NOT_FOUND not in those lists, KILN_ERR_UNAVAILABLE a session that ended, an accessor
+     * that is not the component map's type, KILN_ERR_INTERNAL a fault (rc optional). */
+    const void*(KILN_CALL* foreign_read)(const KilnForeignLayout* layout, const uint64_t* iter, KilnStr component,
+                                         uint32_t entity, uint32_t* size, KilnResult* rc);
+    /* The same through the program's other_write accessor with the job's tracker (WriteOther): the component, marked
+     * written for the save and replication; write it before the update returns. KILN_ERR_NOT_FOUND: not in
+     * other_write; KILN_ERR_UNAVAILABLE also when the tracked write is not known on this build. */
+    void*(KILN_CALL* foreign_write)(const KilnForeignLayout* layout, const uint64_t* iter, KilnStr component, uint32_t entity,
+                                    uint32_t* size, KilnResult* rc);
+    /* Immediately after foreign_write on the same thread, for its returned pointer and a reflected attribute type: the game's formulas (AttrChanged) with the program's
+     * impact::AttributeRegistry singleton. KILN_ERR_INVALID_ARGUMENT: the block holds no values (component[6] bit 0),
+     * or the program does not declare the registry; KILN_ERR_UNAVAILABLE: not on this build; KILN_ERR_INTERNAL: they
+     * faulted. */
+    KilnResult(KILN_CALL* foreign_attr_changed)(const KilnForeignLayout* layout, const uint64_t* iter, void* component);
+
+    /* ---- Kiln programs in a client's worlds: appended since 0.2.0-dev.29 (version stays 4) after the foreign
+     * views, at offsets 496, 504, 512 and 520 (the table is 528 bytes with them). Check header.size for each member you
+     * use.
+     *
+     * A game client has a client world (KILN_WORLD_CLIENT, the local player, camera and presentation; it steps on the
+     * game's main thread and runs its program slices as tasks on the game's workers, SYSTEM, CHUNKED and PINNED ones
+     * on the main thread) and, inside it, the prediction storage (KILN_WORLD_PREDICTION, which runs the client world's
+     * table: the programs without the client flag 0x1, without HOST_ONLY and without the engine's bit 0x40, every
+     * prediction step on the main thread). A Kiln program can run in either: kiln.world registers it into the client
+     * world's table at the client world's RegisterAllPrograms, every client world (hosted or joined) anew, after the
+     * game's own programs, so it runs after every client program it conflicts with. It runs in this player's process
+     * only: no other player and no vanilla client sees what it does, unless the server does the same.
+     *
+     * Its names are checked against THAT world's maps when that world registers its programs: a name the client
+     * world lacks refuses the program for that world (program_world_state says why), never for the others. While
+     * capability world.programs.client is not available (a dedicated server, a build without the symbols, the world's
+     * lifecycle, or the client world's tick), nothing is registered into a client world and these members answer
+     * KILN_ERR_UNAVAILABLE for the client and prediction kinds.
+     *
+     * A slice runs a client-table program only when it belongs to the registration that runs now: the side's session
+     * and the slice's own storage (the job's) are checked against it, so a job of an earlier client world that enters
+     * late is refused (and counted). A world stop (KILN_WORLD_STOPPING of the client world) closes every client-table
+     * program: no call starts, a slice already inside stops before its next entity (no more iteration, CurrentEntity or
+     * callback; the slice is finished on paper), and inside a call that runs then every helper refuses (iter_begin and
+     * iter_next, current_entity, command_buffer and the queue calls, read_other, program_events, program_emit); the
+     * running callbacks are waited for (2 s at most) and each registration goes back to PENDING for the next client world.
+     * Bindings stay: a bound callback runs again in the next client world that accepts the program. Since 0.2.0-dev.29
+     * the core runs the game's WaitWorldJobs on the client world before that event (capability world.stop_drain.client),
+     * and the game lets no slice outlive the step that ran it, so no call is inside then; the checks above, the wait and
+     * the latch are the safety net for a core without that row and for a drain that did not hold. A call inside at the
+     * stop although the engine drained is an error and latches; so does one still running after the wait. The latch:
+     * every client-table program is refused with the latch's reason (that late call can no longer change any state), no
+     * client-world program registers again until the game restarts, and
+     * world.programs.client goes unavailable (reason faulted) saying why. The same latch follows a fault in the engine's
+     * RegisterProgram (or in Kiln's reads of the client world's maps and table around it) or a table that does not add up
+     * after it; what the engine registered before stays in its table (it is never undone) but no longer runs: every side,
+     * also one registered earlier in that world, says REFUSED with the latch's reason.
+     *
+     * Writes there are this player's local state; nothing a client or prediction program writes is marked for the save
+     * or replication. mark_written is a no-op inside such a program (MarkWritten runs the same two tests as the
+     * other-entity mark and nothing says it skips a client storage). write_other answers NULL there: per the notes the
+     * engine's WriteOther marks only a server-world block (storage+8 == 0), but the other-entity path of a client job (its
+     * tracker and write flag) has not been read in a client run, so a client program writes its own declared write
+     * slots only. The foreign views' foreign_write and foreign_attr_changed answer KILN_ERR_UNAVAILABLE when called
+     * from such a program for the same reasons (what AttrChanged marks is not decoded).
+     *
+     * Handles: register_program_world gives a program handle (as register_program: program_slot and program_info
+     * take it; program_info answers for the server world). bind_program_world gives a binding handle for
+     * unbind_program_world; for KILN_WORLD_SERVER it is bind_program's handle. program_world_state takes either. */
+
+    /* Accepts a program for the world of `world_kind`. KILN_WORLD_SERVER: register_program. KILN_WORLD_CLIENT:
+     * kiln.world ORs the client flag 0x1 into desc->flags (never set engine bits yourself); KILN_PROGRAM_HOST_ONLY is
+     * refused. KILN_WORLD_PREDICTION: registered into the client world's table without 0x1, so the client world skips
+     * it and the prediction storage runs it; KILN_PROGRAM_HOST_ONLY is refused. A client or prediction program may be
+     * accepted at any time outside a program update or wrap stage: it registers into the next client world (one that
+     * runs already does not get it; program_world_state says "registered from the next client world").
+     * desc->each or desc->update is its callback (owner = `owner`); unbind_program_world with its handle stops it.
+     * KILN_ERR_UNAVAILABLE: world.programs.client is not available (client and prediction kinds), or programs are off
+     * on this build; KILN_ERR_INVALID_ARGUMENT: a bad kind, descriptor, flag or name (logged); KILN_ERR_WRONG_THREAD:
+     * from inside a program update or wrap stage. */
+    KilnResult(KILN_CALL* register_program_world)(KilnOwner owner, uint32_t world_kind, const KilnProgramDesc* desc,
+                                                  KilnHandle* out);
+    /* The program's state in the world of `world_kind` now (KILN_PROGRAM_*), and why in words (`reason`, optional,
+     * valid for the life of the process; "" when there is nothing to say). KILN_PROGRAM_PENDING with "waiting for a
+     * client world" in the menu, "registered from the next client world" for a program accepted while one runs;
+     * KILN_PROGRAM_REFUSED with the name that world lacks, a full table, ...; KILN_PROGRAM_FAULTED after a fault of its
+     * callback in that world. A new client world starts every program over (FAULTED stays until a new bind). Handle 0
+     * with KILN_WORLD_CLIENT or KILN_WORLD_PREDICTION: the client table's own state: KILN_PROGRAM_REFUSED with the
+     * process latch's reason once latched (a bind that got KILN_ERR_UNAVAILABLE tells the latch from "the last binding's
+     * calls are still finishing" by it), else ACTIVE while a client world runs and PENDING without one.
+     * KILN_ERR_NOT_FOUND: no such handle, or the program is not for that world; KILN_ERR_INVALID_ARGUMENT: no state
+     * pointer or a bad kind. Any thread; takes a short registry lock to resolve the handle. */
+    KilnResult(KILN_CALL* program_world_state)(KilnHandle program, uint32_t world_kind, int32_t* state, KilnStr* reason);
+    /* bind_program for the world of `world_kind`: binds the declaration `key` of mod `mod_id` that kiln.world reserved
+     * from <mod>/kiln.programs.json at boot with "world": "client", "both" (client side) or "prediction". Exactly one of
+     * each / update (KILN_WORLD_SERVER: each only, and it is bind_program). The callback runs on the client world's
+     * workers or the main thread (prediction: the main thread), from the client world that runs now (when it
+     * registered the program) and in every later one, until unbind_program_world or the owner's revocation.
+     * Thread: the world's own thread outside its step (the client and prediction kinds: the game's main thread, also
+     * in the main menu and in kiln_plugin_main / on_ready; KILN_WORLD_SERVER: the tick thread).
+     * KILN_ERR_NOT_FOUND: no such reservation for that world; KILN_ERR_INVALID_ARGUMENT: another binding holds it, or
+     * a bad argument; KILN_ERR_UNAVAILABLE: world.programs.client is not available, or the last binding's calls are
+     * still finishing (try again after the client world's next step); KILN_ERR_WRONG_THREAD; KILN_ERR_REVOKED. */
+    KilnResult(KILN_CALL* bind_program_world)(KilnOwner owner, KilnStr mod_id, KilnStr key, uint32_t world_kind,
+                                              KilnProgramEachFn each, KilnProgramUpdateFn update, void* user,
+                                              KilnHandle* out);
+    /* Stops a callback: register_program_world's program handle (its client or prediction side) or a binding handle
+     * of bind_program_world (for KILN_WORLD_SERVER: unregister_program). No call starts after this returns.
+     * KILN_OK: no call of it runs any more: its code and user data may go. KILN_ERR_WRONG_THREAD: a call was still
+     * running after a bounded wait (2 ms, e.g. a host's server thread unbinding while a client worker runs it): it finishes on its own and kiln.world forgets the binding at the client world's
+     * next Pre or stop; keep the code and user data alive (call again later: KILN_OK once it has finished).
+     * KILN_ERR_NOT_FOUND: no such handle. Any thread outside a program update or wrap stage. */
+    KilnResult(KILN_CALL* unbind_program_world)(KilnHandle binding);
+
+    /* ---- ECS reads from task threads: appended in v4 (the version stays 4), at offsets 528..576 (the
+     * table is 584 bytes with them). Check header.size for each member you use. All any-thread; see the records
+     * above. `owner` is the caller's own live owner (owner 0 is refused KILN_ERR_INVALID_ARGUMENT before any
+     * engine memory is read; Kiln trusts a plugin's owner as everywhere else). ---- */
+    /* Turns an entity id into a self-validating KilnObjectRef. `reload_epoch` is the caller's own epoch: Kiln keeps
+     * each owner at the newest epoch it opened a ref with (0 until then). Opening under a newer epoch is the owner's
+     * reload, after which its refs of every other epoch validate stale; opening under an older one is stale.
+     * `expected_session` 0 accepts the live session; a nonzero one that differs is stale. Absent: no such entity. */
+    KilnResult(KILN_CALL* entity_open)(KilnOwner owner, uint64_t reload_epoch, uint32_t world_kind,
+                                       uint64_t expected_session, KilnEntity entity, KilnObjectRef* out);
+    /* Re-checks a ref: alive, same generation, same session, same layout, same epoch. *out (size set) always gets
+     * the current facts and the KILN_ECS_* status. */
+    KilnResult(KILN_CALL* entity_validate)(KilnOwner owner, const KilnObjectRef* ref, KilnObjectInfo* out);
+    /* Which worlds and sessions exist right now, and whether Kiln has an exact engine profile for them. */
+    KilnResult(KILN_CALL* ecs_context_snapshot)(KilnEcsContextInfo* out);
+    /* Verified query: the entities of request->world_kind that have every listed component (and, with
+     * KILN_ECS_QUERY_BOUNDS, a position within radius of center), as KilnObjectRefs, in ascending entity id.
+     * Complete results only: a membership change during the walk is KILN_WORLD_ERR_CHANGED and copies nothing.
+     * A position read that fails fails the query; an entity with no position is not a match. *required (when
+     * non-NULL) is the match count, also when capacity is short (KILN_ERR_BUFFER_TOO_SMALL, nothing copied).
+     * *state (when non-NULL) is the KILN_ECS_* status. An invalid argument leaves *state untouched. The refs carry
+     * the caller's current reload epoch. KILN_ECS_QUERY_FRAME_QUIET runs both walks frame-quiet (busy, unsupported). */
+    KilnResult(KILN_CALL* ecs_query)(KilnOwner owner, const KilnEcsQueryRequest* request, KilnObjectRef* out,
+                                     uint32_t capacity, uint32_t* required, uint32_t* state);
+    /* One component's bytes of the ref's entity, validated before and after the copy (always a stable copy; the
+     * frame-quiet form is ecs_snapshot_many with one spec). *required is the component size, also when capacity is
+     * short (nothing copied). Absent: the entity has no such component. */
+    KilnResult(KILN_CALL* ecs_snapshot)(KilnOwner owner, const KilnObjectRef* ref, uint32_t component, void* out,
+                                        uint32_t capacity, uint32_t* required);
+    /* Several components, packed in spec order (see KilnEcsSnapshotSpec). presence[i] (when non-NULL) is the
+     * KILN_ECS_* status of spec i, written only after the arguments are accepted. When the call fails, every
+     * presence[i] is that failure (an absent spec too: its absence is confirmed only by a later validation). *required
+     * is the total packed size on success and on a short buffer, and 0 when the call fails. Not atomic across
+     * components. The size is worked out before any copy. A spec flag other than KILN_ECS_READ_FRAME_QUIET is an
+     * invalid argument; with that flag on any spec every copy runs frame-quiet (busy, unsupported: every presence[i]
+     * says so and nothing is copied). An invalid argument leaves presence untouched. */
+    KilnResult(KILN_CALL* ecs_snapshot_many)(KilnOwner owner, const KilnObjectRef* ref,
+                                             const KilnEcsSnapshotSpec* specs, uint32_t count, void* out,
+                                             uint32_t capacity, uint32_t* required, uint32_t* presence);
+    /* The template an entity was spawned from (its definition uuid), validated directly before and after the
+     * read. Absent: the entity names no template. guid is 16 bytes. No frame-quiet mode: the bytes are the
+     * template definition's, which no frame writes. */
+    KilnResult(KILN_CALL* ecs_template_uuid)(KilnOwner owner, const KilnObjectRef* ref, uint8_t guid[16]);
+
+    /* ---- compare-exchange writes from task threads: appended in v4 (the version stays 4) after the ECS reads, at
+     * offsets 584..608 (the table is 616 bytes with them). Check header.size for each member you use, and
+     * KILN_WORLD_CAP_ECS_WRITE. See the section above the table. ---- */
+    /* Whether `component` of `world_kind` may be written from a task, and why not. Any thread. KILN_OK (out->status
+     * says writable or not), KILN_ERR_UNAVAILABLE (out->status UNAVAILABLE), KILN_ERR_INVALID_ARGUMENT. */
+    KilnResult(KILN_CALL* ecs_write_policy)(uint32_t world_kind, uint32_t component, KilnEcsWritePolicy* out);
+    /* Compare `expected` (the whole component, `bytes` long) with the entity's component and, when equal, write
+     * `desired` under `mask` (byte by byte: nonzero takes the byte from `desired`; NULL = every byte). `bytes` must be
+     * the registered size. `confirmed` (optional, `bytes` long) gets the current bytes on CONFLICT and the written
+     * bytes on OK. `reply` (size set) gets the outcome. Any thread but a world's own; on the server tick it answers
+     * BUSY at once. Never waits. Invalid arguments: KILN_ERR_INVALID_ARGUMENT, reply untouched. */
+    KilnResult(KILN_CALL* ecs_compare_exchange)(KilnOwner owner, const KilnObjectRef* ref, uint32_t component,
+                                                const void* expected, const void* mask, const void* desired,
+                                                uint32_t bytes, void* confirmed, KilnMutationReply* reply);
+    /* `fn` is called once per committed write, on the server tick (kiln.world's Pre) or at the server world's
+     * STOPPING, under kiln.world's fault containment (a faulting callback is logged and the drain goes on). The
+     * owner's subscriptions end when it retires (unload, reload, a failed start); a callback already under way then
+     * may still finish.
+     * Any thread, from kiln_plugin_main on: a subscription made before kiln.world is ready carries over and gets every
+     * event. */
+    KilnResult(KILN_CALL* ecs_write_subscribe)(KilnOwner owner, KilnEcsWriteEventFn fn, void* user, KilnHandle* out);
+    /* No later event reaches the subscription once this returns. Safe during a drain.
+     *   - From another thread it WAITS for a callback of this subscription that is running on the draining thread to
+     *     return. So a callback must never wait on a thread that may unsubscribe it (a lock that thread holds, a task
+     *     it joins): that is a deadlock.
+     *   - From inside a callback (its own or another subscription's, on the draining thread) it returns at once.
+     *   - On the server tick outside a drain it never waits: the drains run only on the server world's thread (its Pre
+     *     and its STOPPING), so no callback can be running then.
+     * KILN_ERR_NOT_FOUND: no such subscription. Any thread. */
+    KilnResult(KILN_CALL* ecs_write_unsubscribe)(KilnHandle subscription);
 } KilnWorldApi;
 
 enum {
@@ -693,9 +1264,52 @@ enum {
     KILN_WORLD_CAP_MULTI_EVENTS = 1u << 1,
     KILN_WORLD_CAP_BIND_PROGRAM = 1u << 2,
     KILN_WORLD_CAP_TRACKED_WRITES = 1u << 3, /* since 0.2.0-dev.27: write_submit works on this build */
+    KILN_WORLD_CAP_ECS_READ = 1u << 4,        /* appended in v4: the ECS-read members above work on this build */
+    KILN_WORLD_CAP_ECS_WRITE = 1u << 5,       /* appended in v4: ecs_compare_exchange can write on this build */
 };
 
 #ifdef __cplusplus
 }
+static_assert(sizeof(KilnObjectRef) == 40 && offsetof(KilnObjectRef, entity) == 4 &&
+                  offsetof(KilnObjectRef, generation) == 8 && offsetof(KilnObjectRef, world_kind) == 12 &&
+                  offsetof(KilnObjectRef, session) == 16 && offsetof(KilnObjectRef, layout_stamp) == 24 &&
+                  offsetof(KilnObjectRef, reload_epoch) == 32,
+              "KilnObjectRef layout");
+static_assert(sizeof(KilnObjectInfo) == 48 && offsetof(KilnObjectInfo, status) == 4 &&
+                  offsetof(KilnObjectInfo, session) == 24 && offsetof(KilnObjectInfo, reload_epoch) == 40,
+              "KilnObjectInfo layout");
+static_assert(sizeof(KilnEcsContextInfo) == 48 && offsetof(KilnEcsContextInfo, sessions) == 16 &&
+                  offsetof(KilnEcsContextInfo, layout_stamp) == 40,
+              "KilnEcsContextInfo layout");
+static_assert(sizeof(KilnEcsQueryRequest) == 56 && offsetof(KilnEcsQueryRequest, components) == 16 &&
+                  offsetof(KilnEcsQueryRequest, center) == 24 && offsetof(KilnEcsQueryRequest, radius) == 48,
+              "KilnEcsQueryRequest layout");
+static_assert(sizeof(KilnEcsSnapshotSpec) == 8 && offsetof(KilnEcsSnapshotSpec, flags) == 4, "KilnEcsSnapshotSpec layout");
+static_assert(KILN_ECS_ERR_STALE == 101 && KILN_ECS_ERR_UNREADABLE == 102 && KILN_ECS_ERR_BUSY == 103 &&
+                  KILN_ECS_ERR_UNSUPPORTED == 104 && KILN_WORLD_ERR_CHANGED == 100 && KILN_ERR_INTERNAL < 100,
+              "kiln.world's result codes are distinct from each other and from the core's");
+static_assert(KILN_ECS_BUSY == 5 && KILN_ECS_UNSUPPORTED == 6 && KILN_ECS_CONFLICT == 7 && KILN_ECS_NOT_WRITABLE == 8 &&
+                  KILN_ECS_UNCERTAIN == 9,
+              "KILN_ECS_* statuses append");
+static_assert(KILN_ECS_ERR_CONFLICT == 105 && KILN_ECS_ERR_NOT_WRITABLE == 106 && KILN_ECS_ERR_UNCERTAIN == 107,
+              "the compare-exchange result codes append after the reads'");
+static_assert(sizeof(KilnEcsWritePolicy) == 128 && offsetof(KilnEcsWritePolicy, flags) == 24 &&
+                  offsetof(KilnEcsWritePolicy, why) == 32,
+              "KilnEcsWritePolicy layout");
+static_assert(sizeof(KilnMutationReply) == 48 && offsetof(KilnMutationReply, session) == 24 &&
+                  offsetof(KilnMutationReply, step) == 32 && offsetof(KilnMutationReply, hold_ns) == 40,
+              "KilnMutationReply layout");
+static_assert(sizeof(KilnEcsWriteEvent) == 48 && offsetof(KilnEcsWriteEvent, owner) == 24 &&
+                  offsetof(KilnEcsWriteEvent, session) == 32 && offsetof(KilnEcsWriteEvent, step) == 40,
+              "KilnEcsWriteEvent layout");
+static_assert(offsetof(KilnWorldApi, entity_open) == 528 && offsetof(KilnWorldApi, entity_validate) == 536 &&
+                  offsetof(KilnWorldApi, ecs_context_snapshot) == 544 && offsetof(KilnWorldApi, ecs_query) == 552 &&
+                  offsetof(KilnWorldApi, ecs_snapshot) == 560 && offsetof(KilnWorldApi, ecs_snapshot_many) == 568 &&
+                  offsetof(KilnWorldApi, ecs_template_uuid) == 576,
+              "kiln.world ECS-read members append at 528 (x64)");
+static_assert(offsetof(KilnWorldApi, ecs_write_policy) == 584 && offsetof(KilnWorldApi, ecs_compare_exchange) == 592 &&
+                  offsetof(KilnWorldApi, ecs_write_subscribe) == 600 && offsetof(KilnWorldApi, ecs_write_unsubscribe) == 608 &&
+                  sizeof(KilnWorldApi) == 616,
+              "kiln.world compare-exchange members append at 584 (table 616 bytes, x64)");
 #endif
 #endif

@@ -9,11 +9,11 @@ it comes off when the mod unloads or reloads, and it is applied again at the nex
 | Layer | Where |
 |---|---|
 | Symbols | `sigdb/symbols/server.d/content.json` (features `content.reflection`, `content.items`, `content.recipes`, `content.loot`, `content.drops`, `content.stack_guard`, `content.new`); client overlay `client.d/content.json` (`content.loca`, `content.ui_texture`, `content.recipe_ui`, `content.recipe_ui_refresh`) |
-| C table | `native/core/abi/services/kiln_content.h` (`kiln.content` v4: v2 `export_changes`, v3 `define` / `definitions`, v4 `set_ref` / `undefine_owner` / `info`) |
+| C table | `native/core/abi/services/kiln_content.h` (`kiln.content` v4: v2 `export_changes`, v3 `define` / `definitions`, v4 `set_ref` / `undefine_owner` / `info`; appended to v4: `icon_alias`, `txn_begin` / `txn_end` (0.2.0-dev.28), `text` / `text_info` (0.2.0-dev.29.18, [the game's own texts](#the-games-own-texts))) |
 | Native | `native/services/content/` → `kiln/services/kiln-content.dll` |
 | Managed | `managed/services/Kiln.Content/` → `kiln/host/Kiln.Content.dll` (namespace `Kiln`, class `Content`) |
-| Test | `mods/tests/content-test/` (PASS / FAIL lines) + `Observer/` (logs value changes); `mods/tests/newcontent-test/` (new items / recipes); `mods/tests/kitbash-test/` (references, texts, distribution; `syncdefs.py`: definitions in the content sync); `mods/tests/placeholder-test/` (+ `Items/`: missing content over four restarts); `mods/tests/craftmatch-test/` (a made item is what its recipe tooltip promises); `native/services/content/tests/run.sh` (near memory: the allocation policy on simulated address spaces and, under Wine, on a real fragmented one) |
-| Sample | `mods/samples/BigStacks/` (bigger stacks, a C# port of EMF's big_stacks idea); `mods/samples/NewItems/` (new items and recipes, side both) |
+| Test | `mods/tests/content-test/` (PASS / FAIL lines) + `Observer/` (logs value changes); `mods/tests/newcontent-test/` (new items / recipes); `mods/tests/kitbash-test/` (references, texts, distribution; `syncdefs.py`: definitions in the content sync); `mods/tests/placeholder-test/` (+ `Items/`: missing content over four restarts); `mods/tests/craftmatch-test/` (a made item is what its recipe tooltip promises); `native/services/content/tests/run.sh` (`text_test.cpp`: the game's own texts over a fake lookup; near memory: the allocation policy on simulated address spaces and, under Wine, on a real fragmented one) |
+| Sample | `mods/samples/BigStacks/` (bigger stacks, a C# port of EMF's big_stacks idea); `mods/samples/NewItems/` (new items and recipes, side both); `mods/samples/GearValues/` (gear values in the tooltip's numbers, data only) |
 
 ## Data packs
 A mod folder may hold `content/*.json`. kiln.content applies every loaded mod's files when the world's registries
@@ -44,7 +44,8 @@ in mod load order and file-name order inside a mod. A pack follows its mod: unlo
 ```
 
 - **Sections**: `items`, `recipes`, `loot` (random loot of containers and world pickups, per item), `drops`
-  (default-inventory tables: enemy loot, fixed chests; key = table GUID or a glob), `options`.
+  (default-inventory tables: enemy loot, fixed chests; key = table GUID or a glob), `gear` and `gearRules` ([gear
+  values](#gear-values): typed item values in the tooltip's numbers), `options`.
 - **Selectors** (keys): a debug name (`Material_T1_Wood_Logs`), an id (`0x2b0cf1d5`, decimal), or a
   case-insensitive glob (`Material_*`, `*`). Recipe names are the recipes' debug names (`Content.Dump()` lists them).
 - **`@where`**: conditions on the game's original values: a number / bool / enum name for equality, `">1"`, `">="`,
@@ -70,6 +71,116 @@ in mod load order and file-name order inside a mod. A pack follows its mod: unlo
   and listed in `Content.PackReport()`. A clone's definition and its own mod's later changes to it are not: the definition is
   the clone's starting value (a block writes `none` until a game VFX's name is known, then a rule writes that VFX). Problems (unknown field, value out of range, selector matching nothing) are
   logged per file and never stop the other entries.
+
+## Gear values
+A typed face over the item fields of gear, in the numbers the game's own tooltip shows: a server owner writes "power 30" or
+"physical armour 45" instead of solving `damageSetup.dmgMod` or `armorSetup.distribution.physical` by hand. The `gear`
+section of a data pack and `Content.Gear(item)` in C# set the same values; Kiln solves them per item with the game's
+formulas, and writes them as ordinary item fields: layers of the pack's (or the calling mod's) owner, reverted with it,
+listed as conflicts, synced to Kiln clients like every items rule. Sample: `mods/samples/GearValues/` (data only).
+Capability `content.gear` (Kiln.Content's row; off only without kiln.content).
+
+```json
+{ "format": 1,
+  "gear": {
+    "Weapon_T1_1H_Sword_Craft": { "power": 30, "damage": { "cut": 0.75, "fire": 0.25 }, "levels": [5, 5] },
+    "Armor_T2_*":               { "@where": { "rarity": "Rare" }, "armor": { "physical": { "mul": 1.2 } } },
+    "Ring_T3_Ring_of_Light":    { "socket": true, "rolled": false } },
+  "gearRules": { "rarityDurability": [0.9, 0.95, 1, 1.1, 1.25], "socketChance": { "epic": 0.75 } } }
+```
+
+| Key | Means | Writes |
+|---|---|---|
+| `power` | the damage the tooltip shows at the item's lowest level (`levels` of the same rule, else the game's), 0..100000 | `damageSetup.dmgMod`, solved with the item's speed: tooltip = int(int(10 × 0.15 × level + 10) × dmgMod × speedMod) |
+| `speed` | the damage factor of the weapon's speed class (it multiplies the damage; the attack speed itself is the animation), more than 0, at most 100 | `damageSetup.speedMod`. Alone it changes the tooltip's damage: give `power` too to keep it |
+| `damage` | shares per kind: `cut`, `pierce`, `blunt`, `fire`, `ice`, `shroud` (the game's fog), `lightning`, `poison`, `healing` (0..10; 0.5 = half); `wood`, `stone`, `metal`, `explosion`: the whole numbers the game keeps for what a tool harvests and breaks. Kinds not named keep their value | `damageSetup.distribution.*`. Shares of the hit kinds that do not add up to 1 are a warning (Kiln's weapon blocks write shares that add up to 1) |
+| `armor` | the armour the tooltip shows per kind at the item's lowest level: `physical`, `magical`, `cut`, `pierce`, `blunt`, `fire`, `ice`, `shroud`, `lightning`, 0..100000 | `armorSetup.distribution.*`: tooltip = round((15 × level + 23) × share) |
+| `block` | how well the item blocks, 0..1 | `blockSetup.quality` |
+| `staminaCost` | the item's StaminaCost value, for items that have one (as weapon blocks write it) | `impactValues.StaminaCost` |
+| `rarity` | `common` … `legendary` (any case, or 0..4): what the recipe tooltip shows and a copy is made with when the game does not roll it. The game has no rarity above legendary | `rarity` |
+| `levels` | a level (both ends) or `[lowest, highest]`, 1..55 | `itemLevelRange.minLevel` / `maxLevel` |
+| `rolled` | the game rolls the rarity of each new copy (as for loot weapons) or not | `generateRarity` |
+| `perks` | the five perk slots, as the items section's `perks` (a perk GUID or name, `item:<name>`, `none`, null = keep); a game item needs `"@refs": true` (or `"options": {"refs": true}`), as there | `perkReferences[i]`, `perkIds[i]` |
+| `socket` | new copies get a gem socket (gear other than weapons needs Kiln's sockets: [gems-sockets.md](gems-sockets.md)) | `gemSlotOverride` |
+| `maxStack` | 1..65535 | `maxStackSize` |
+| `recipe` | `{"inputs": [...] or {"mul": x}, "duration": seconds}` for every recipe that makes the item (other recipe fields: the recipes section). No recipe making it is a warning | the recipes' `inputs`, `craftingDuration` |
+
+- **Numbers or ops.** Every number takes an op relative to the game's value of that item, in the same units: `"power":
+  {"mul": 1.2}` is a fifth more than the game's tooltip damage, `"armor": {"magical": {"add": 5}}` five more armour; also
+  `set`, `min`, `max`, `raiseOnly`, `lowerOnly`. Values are solved for each item a selector matches, at its own level.
+- **Selectors, `@where`, order** as in the items section. The `gear` section applies after `items` in the same document,
+  so a typed key wins over a raw path that names the same field; other keys of a gear rule are item field paths and pass
+  through as in `items`.
+- **Levels.** `power` and `armor` are the numbers at the item's lowest level (the recipe tooltip's). A rolled loot
+  weapon's copies at higher levels get more, by the game's curve. `levels` alone keeps `dmgMod` and the armour shares,
+  so the tooltip's numbers follow the game's curve to the new level: give `power` and `armor` in the same rule to keep them.
+  The game brings an existing copy's level into the item's range when the save loads ("Rarity, level and perks of new
+  gear" below): narrowing a released item's range lowers the level of copies players have.
+- **Rarity.** A copy has rarity + 1 enhancement slots, filled from the type's perk slots: a slot left empty makes the copy
+  one rarity lower, so raise `rarity` together with `perks` where the type has fewer slots. Copies already made keep theirs.
+- **Validation.** Each problem is one line of the pack's report and kiln.log, naming the item and the key
+  (`gear Weapon_X.power: this item deals no damage of its own (damageSetup.isSet is off)`, `gear Y.levels: [0, 60] is not
+  within the game's item levels 1..55, lowest first`, `gear Z.damage.frost: not a kind of damage; there are cut, pierce,
+  ...`); the rest of the rule and the file still apply. `kiln lint` checks names, kinds, ranges and op keys before you start.
+- **Who sees it.** The server's values act for everyone. Kiln clients get them through the content sync (the tooltip shows
+  the new numbers without the mod); a player without Kiln plays with them and sees the game's numbers in the tooltip.
+- **Formulas.** The tooltip's damage and armour follow from the game's balancing table (`genericWeaponSeed` 10,
+  `powerCreepWeapon` 0.15, armour offset 23 and gradient 15 on the builds Kiln measures). Kiln.Blocks checks them against
+  the running game when a mod uses item blocks, and logs a warning if a game update changed them (gear values and item
+  blocks are then off by that much until Kiln follows).
+  Native: `native/services/content/gear.cpp`, managed: `Kiln.Content/GearMath.cs`, the same numbers in both.
+
+### In C#
+```csharp
+Content.OnReady(_ =>
+{
+    var sword = Content.Gear("Weapon_T1_1H_Sword_Craft")!;   // null: no such item
+    sword.Power = 30;                                         // the tooltip's damage at sword.Level
+    sword.SetDamage(GearDamageKind.Fire, 0.25);
+    sword.SetDamage(GearDamageKind.Cut, 0.75);
+    var chest = Content.Gear("Armor_T2_Warrior_Tank_Chest")!;
+    chest.SetArmor(GearArmorKind.Physical, chest.Armor(GearArmorKind.Physical) + 10);
+    chest.Rarity = ItemRarity.Epic;                           // the type's: copies made from now on
+});
+```
+- `Content.Gear(string | ItemId | ContentEntry)` → `GearStats`: `Power`, `PowerAt(level)`, `Speed`, `Damage(kind)` /
+  `SetDamage`, `Armor(kind)` / `SetArmor`, `Block`, `Rarity`, `Rolled`, `Socket`, `MaxStack`, `Level`, `MaxLevel`,
+  `SetLevels(lowest, highest?)`, `HasDamage`, `HasArmor`, `Reset()` (takes this mod's layers off these fields). Perks:
+  `Content.Items.Get(item).SetPerks(...)`. Reads give the values now (every layer applied).
+- Writes are `ContentEntry` writes of the calling mod (reverted with it, `ContentChangedEvent`, conflicts with packs and
+  other mods). A value out of range throws `ArgumentOutOfRangeException`; `Power` or `SetDamage` on an item without damage
+  of its own, `SetArmor` on one without armour, throw `InvalidOperationException`. Tick thread.
+- Test: `managed/tests/Kiln.Blocks.Tests/GearValuesTests.cs` (offline), `native/services/content/tests/gear_test.sh`
+  (the pack section's expansion), `mods/tests/content-test` (lab: its pack's `gear` rules and `Content.Gear`).
+
+### Gear rules (boot values)
+`gearRules` changes the game's balancing values for gear (`keen::BalancingTable`). The game reads them once, when it
+starts, so they are [resource patches](../modding/resource-patches.md) made before that: the mod needs `"boot": true`
+in its kiln.mod.json, and the capability `mods.boot.resource_patches`. Kiln reads every loaded mod's `content/*.json` at
+the boot (files by name) and turns each file's `gearRules` into one patch of the table (`gearRules@<file>` in
+`state/boot.json` and kiln.log).
+
+| Key | Means | Member (the game's values) |
+|---|---|---|
+| `rarityDurability` | the factor of each rarity on a copy's max durability, 0.01..100 | `rarityDurabilityMod` (0.9, 0.95, 1, 1.05, 1.1) |
+| `socketChance` | the chance of each rarity that a new weapon gets a gem socket, 0..1 | `gemSlotProbability` (0, 0.05, 0.25, 0.5, 1) |
+| `durability.start`, `.growth` | max durability = (start + growth × (level − 1)) × the rarity's factor × the item's own factor | `durabilityStart` (145), `durabilityGrowth` (2) |
+| `unlockCost.seed`, `.creep` | what unlocking an enhancement at the workbench costs, and how it grows with the level | `perkUpgradeCostSeed` (8), `perkCostCreep` (0.15) |
+| `unlockCost.weapons`, `.armor`, `.rings` | the cost's factor per kind of gear | `perkCostFactorWeaponsShield`, `perkCostFactorArmor`, `perkCostFactorRings` |
+| `unlockCost.advanced`, `.advancedFrom` | the extra cost of a legendary item's later unlocks, and from which unlock (0..5) | `advancedPerkCostNominator` (8), `advancedPerkCostStartLevel` (4) |
+
+- A rarity's five values: a list, common to legendary (`null` keeps the game's), or `{"epic": 0.75}`. Numbers or ops
+  (`{"mul": 2}`) as in resource patches.
+- **Whole or not at all**: one wrong value (out of range, an unknown key) leaves the file's `gearRules` out, with the reason
+  in kiln.log (`mod my-mod: content/gear.json: its gearRules are not applied: gearRules.socketChance[4]: 1.5 is outside 0..1`);
+  a mod with `"boot": "required"` stops the start instead. Without `"boot"` in its kiln.mod.json, kiln.log says the rules
+  are not applied. At a world's load kiln.content skips `gearRules` (they are not item rules).
+- `lootRarityRates` (the game's loot rarity rates) is refused: Kiln has not mapped the resource that holds them yet.
+- **Server values act; a Kiln client with the mod shows them.** Each process applies the mod it has: a player without the
+  mod (or without Kiln) predicts with the game's numbers (a durability bar, a socket on a weapon the server made). Put
+  such a mod on both sides (`"clients": "mod"`).
+- Two mods setting the same member are a conflict of resource patches: the later mod in the load order is refused
+  ([resource-patches.md](../modding/resource-patches.md#two-mods-on-one-resource)).
 
 ## C#
 Reference the assembly like any Kiln service:
@@ -140,6 +251,18 @@ c->subscribe_ready(owner, on_content_ready, NULL, &handle);   /* tick thread, af
 `reset`, `stacks` / `set_stacks`, `apply_json`, `revert_owner`, `dump`, `reload_packs`, `report`, `subscribe_ready` /
 `unsubscribe_ready`, `stack_guard`, `label_owner`, `pack_mods`. Every field: the header.
 
+**Content transactions** (appended to the table in 0.2.0-dev.28; check `header.size`): `txn_begin(owner, &txn)` sets
+every layer of one owner aside; what the owner then applies (`apply_json`, `set`, `reset`) can be kept with
+`txn_end(txn, 0, ...)` or taken back whole with `txn_end(txn, 1, ...)`. A rollback puts the owner's layers back exactly
+as they were (layers written since come off, layers taken off come back in their order, with the sequence and program
+ids that follow a reference), writes them, and reads every touched field back from memory. When one does not read
+back, every layer of the owner is taken off (as `revert_owner`, fail closed) and the result is `KILN_ERR_REVOKED`. The
+report is `{"outcome": "committed" | "restored" | "revoked" | "cancelled", "fields": n, "error"?}`; `cancelled`
+(`KILN_ERR_NOT_FOUND`) means the owner's layers were taken off while it was open (revert, the owner going, the world's
+reset), so nothing is put back. One open transaction per owner, at most 64 open, tick thread. Field rules only: a
+document's `add` lists, drop rules, options and other services' sections are not covered. Kiln.Blocks' routed weapons
+use it (item-blocks.md, "Follow-ups"); mods do not call it. Host test: `native/services/content/tests/txn_test.sh`.
+
 ## How it runs
 - At boot: symbols, the DefaultInventoryAcquire hook (drop tables). In Pre, every 4 steps until ready: the world's
   `g38_items::ItemRegistry` is done loading (`+0x320` = 0, count stable), the recipe resource is in; then layouts from
@@ -185,7 +308,7 @@ export KILN_OUT=<build dir>
 dotnet build mods/tests/content-test/ContentTest.csproj -c Release -o $KILN_OUT/mods/content-test --artifacts-path $KILN_OUT/dotnet
 dotnet build mods/tests/content-test/Observer/ContentObserver.csproj -c Release -o $KILN_OUT/mods/content-observer --artifacts-path $KILN_OUT/dotnet
 tools/deploy-server.sh ~/srv/enshrouded/labs/content --policy any --samples
-tools/lab/lab.sh start content        # fresh: 34 PASS (registries, pack, code changes, 1500 logs in one slot, drops, dump)
+tools/lab/lab.sh start content        # fresh: 34 PASS (registries, pack, code changes, 1500 logs in one slot, drops, dump), and since 0.2.0-dev.29.19 six gear checks (written, not run in a lab yet)
 echo "reload content-test" > ~/srv/enshrouded/labs/content/kiln/control/r.cmd   # 5 PASS: code layers came off, pack stayed
 echo "unload content-test" > …/u.cmd; echo "load content-test" > …/l.cmd        # OBSERVE lines: everything back / again
 tools/lab/lab.sh stop content; tools/lab/lab.sh start content   # 2 PASS: pack at world load, code re-applied
@@ -366,6 +489,19 @@ c->definitions(buf, cap, &len);   /* JSON array: kind, guid, id, name, base, own
 ```
 `define` / `definitions` work from any thread.
 
+### Boot generations (since 0.2.0-dev.28)
+With a boot mod on a dedicated server ([../modding/onboot.md](../modding/onboot.md)) kiln.content runs two of kiln.boot's
+collectors; both prepare before the game's entry point:
+- **`content`** takes the documents Kiln.Blocks lowered from the boot mods' staged definitions: `define` (a new item
+  or recipe, the JSON of `NewContent`) and `clone` (a template, sequence, perk or buff clone). Each is defined under
+  the mod's process owner (`boot:<mod>`) with the GUIDs a runtime `Define` gives, and reaches the game as any
+  definition does (below). A definition it refuses leaves the whole mod out; if the
+  generation is not published, every definition of it is taken out again. kiln.content reads no definition files of
+  its own at boot, so this collector has nothing to prepare without such documents; data packs and pack documents are
+  applied at world load as before.
+- **`patches`**, the last collector, checks the boot mods' resource patches (from `blocks/*.json` and from `OnBoot`)
+  and writes them when the game's resource service comes up ([../modding/resource-patches.md](../modding/resource-patches.md)).
+
 ### Lifecycle
 - **Registration time**: a definition made before the world loads waits; when a world's item and recipe registries
   have loaded (0.3 s after the server world's first step, ~11 s before the save is read) the service inserts every
@@ -413,14 +549,38 @@ registering in the client world's Pre is too late: `apply_armor` faulted on a he
   the ones a mod serves) and checks it when it turns the answers on: `new content: 55 of the game's 4268 keen::ItemInfo resources are not
   in this registry; they stay NULL as in the game (self-check with 0x...: ok)`.
   `Kiln_Unknown_Item` is in no definition list and not in the content sync; it does appear in `Content.Items` of a joined client.
+- **The lookup hook, on first need** (dev.29, GitHub issue 39): those answers need a hook on the game's ItemRegistryFind, one of its
+  hottest functions (478 call sites, job threads) and one that other loaders' mods hook too (Quick Deposit). Kiln defines
+  `Kiln_Unknown_Item` at boot but hooks the lookup only when a client world's item registry finishes loading (the loading screen, where the
+  install's short stop of the other threads is not seen), and only if this game joined someone else's server (no server world in the
+  process) or mods here define items. A single-player or hosted world without item mods never has the hook; its unknown ids stay NULL, as
+  without Kiln. Once in, the hook stays until the game closes. The install follows the gameplay hooks' rule (no live world of any kind):
+  - **No world runs** (a join's loading screen: no server world, the client world still loading, the prediction world only steps inside
+    the client world's frame): the plain installer, as dev.28 installed this hook at boot. The checked one refuses on PCs where Kiln cannot
+    open every thread, and the join is where the placeholder is needed.
+  - **A world runs** (a host: the server world's job threads call the lookup; or a join whose client world already steps because the
+    early registration is off): the checked installer. kiln.hooks' `mid2_checked` places the detour only when every other thread could be
+    stopped and none is inside the bytes it replaces; the raw link then joins that target without writing (the pattern of
+    `quests/roster.cpp`). Refused: no hook and no placeholder in this world, and the next world's registry load tries again.
+
+  kiln.log, once per client world: `new content: client world: the game's item lookup is hooked now (this game joined a server, which may
+  send items of mods this game does not have: they show as [Unknown item]; no world runs yet)`, `... is hooked now (mods here define 3
+  item(s): one this world's registry does not have yet shows as [Unknown item]; checked install: a world runs)`, `... is not hooked (this
+  game hosts its world and no mod defines items, so no unknown item id can reach it)`, `... is hooked (since an earlier world of this
+  game)`, or (warning) `the [Unknown item] placeholder is off for this world: the game's item lookup could not be hooked because the
+  install could not be checked while a world runs (...); the next world's registry load tries again`. An item a mod defines while a
+  client world without the hook runs: `new content: client world: an item was defined while this world runs and the game's item lookup
+  is not hooked: its [Unknown item] placeholder starts with the next world`. The boot line says `unknown item ids answered by a
+  placeholder when needed`.
 - **Definitions made later** cannot be there earlier: data packs' `add` lists and `OnReady` handlers run when kiln.content's registries are ready
   (hosted: long before the client world; a first joined world: ~300 ms after its first step; later worlds keep them from the first). In that
   window such an item answers "[Unknown item]", then its definition takes over.
 - **Perks and buffs** keep their later registration (hosted: the client world's step 11 mod 25; joined: registries ready, ~300 ms after the first
   step). Every game lookup of both tests for a miss (docs/re/content.md section 9), so a Kiln perk on an item is skipped until then. Skill trees are
   served as the game's resource to each new world before it steps (`skills: the new world's skill tree loaded`).
-- Switches, in `<kiln>/data/content/`: `no-early-registration`, `no-unknown-items` turn the parts off; `early-test` runs the same path on a server
-  world and answers unknown ids there too (lab check only).
+- Switches, in `<kiln>/data/content/`: `no-early-registration`, `no-unknown-items` turn the parts off (`no-unknown-items`: no placeholder
+  and never a hook on the lookup); `early-test` runs the same path on a server world, hooks the lookup at boot as before dev.29 and
+  answers unknown ids there too (lab check only).
 
 ### Client side (the mod is `side: both`)
 The client needs the definitions to show and craft new content: install the same mod on the server and the clients.
@@ -510,7 +670,9 @@ section 8.
 - **Validation**: a GUID is accepted for a field when a loaded item uses it in a field of the same reflected
   reference type (27 reference types, pools built from every ItemInfo of the world), when the engine's template list
   holds it (template references, through kiln.spawn), or when kiln.assets serves a resource of that type under it
-  (`keen::Model` references: `keen::RenderModel`; templates: `keen::ecs::TemplateResource`), or, for a template, when it
+  (`keen::Model` references: `keen::RenderModel`; templates: `keen::ecs::TemplateResource`; an item's `program`
+  (`equipment.program`, an `ImpactProgramReference`): `keen::ImpactProgram`, since the gem wave: before it a served program was
+  refused there, the base's stayed), or, for a template, when it
   is a template clone defined in this game (a world registers its clones at its load, after its items and before anything
   can place one, so a placeable item names its own template from the start). `item:<name>.<path>`
   must name a field of the same type. Anything else is skipped with a warning (the base's value stays; the item still
@@ -551,6 +713,102 @@ section 8.
 - C#: `ItemDefinition.Texts = new Dictionary<string, ItemTexts> { ["de"] = new() { Name = "...", Description = "..." } }`.
   `NewContent.Definitions()` / `definitions()` list the language keys of each item (`languages`).
 - A language change in the game's settings takes effect at the next lookup (the hooks read the language every time).
+
+## The game's own texts
+Since 0.2.0-dev.29.18 (mod API 0.2.10). On a game client, `Content.Text` gives the game's own text for a loca tag, in the
+language the player's game shows now: a tooltip row's label ("Mana Cost" / "Manakosten"), an item's name, any text the
+game has. It is what the game's UI gets: the texts of Kiln's new content (above) answer in the same language too.
+
+```csharp
+if (Content.TextAvailable)                                   // false on a dedicated server; Capabilities.Why("content.text")
+{
+    string? label = Content.Text(0xbe5b2600);                // a loca tag id: "Mana Cost" (English), "Manakosten" (German)
+    string? name  = Content.Text("c0ffee00-0000-4000-8000-000000000001");  // a LocaTag GUID: hashed as the game does
+    string? lang  = Content.TextLanguage;                    // "en-us", "de-de", ...
+}
+```
+
+| Member | Thread | What |
+|---|---|---|
+| `string? Content.Text(uint locaId)` | the game client's main thread | the text of a loca tag id; null when the game has none for it or when this is not available here |
+| `string? Content.Text(Guid locaTag)`, `Content.Text(string locaTag)` | same | a LocaTag GUID (the id is FNV-1a-32 over its 16 bytes, `Texts.TagOf`), or a string: a GUID, `0x1234abcd` or a decimal id; null for anything else |
+| `bool Content.TextAvailable` | any | the row `content.text` is available: a game client whose game has looked up a text |
+| `string? Content.TextLanguage` | any | the language the game shows its texts in now, as the game's key (`en-us`, `de-de`, `pt-br`); null while not available |
+| `const string Content.TextCapability` | | `"content.text"` |
+
+- **Client only.** A dedicated server has no texts and no text lookup (`LocaPool_lookup` is client code,
+  docs/re/content.md section 7): there `Text` returns null and the row says `wrong-side`. `Texts.Get` is the
+  server-side alternative: English only, from a Kiln catalog.
+- **The row** `content.text` (kiln.content reports it before the mods load): pending until the game looks up its first
+  text (its title screen does, right after boot), then available for the process. Unavailable: `wrong-side` on a server,
+  `symbol-missing` on a game build without the lookup, `faulted` when the hook could not go in, `service-older` with a
+  kiln.content from before 0.2.0-dev.29.18. `Text` never throws for any of these: it returns null.
+- **Thread: the game client's main thread only**: the thread that runs the game's UI frame and steps the client world
+  (a `Ui.Screens` UI tick, `Client.Tick`, `Client.Post`, a Kiln menu entry's callback). The game changes its text
+  language on that thread and reloads the language's table there; another thread could read the table while it is
+  replaced. On another thread `Text` throws `InvalidOperationException`: the overlay's render thread (an ImGui window's
+  draw callback) and the server tick of a hosted game are other threads. A window drawn in the overlay looks its texts
+  up in a UI tick and keeps them.
+- **Copied, not cached.** The text is a .NET string (a copy, never game memory), with the game's markup (`<b>`, ...;
+  `Texts.GetPlain` shows how to strip it). Kiln caches nothing: every call reads the game's language and asks the
+  game, so a language change in the game's settings applies at the next call. Right after a change the game may answer
+  from English until its new table has loaded, as its own UI does. Calls are cheap (a binary search and a copy), but
+  for a window drawn every frame keep the texts and look them up again when `Content.TextLanguage` changes.
+- C: `text(loca_id, buffer, cap, out_len)` and `text_info(KilnContentTextInfo*)` in `kiln_content.h` (check
+  `header.size`); `text` answers `KILN_ERR_WRONG_THREAD` off the main thread and `KILN_ERR_UNAVAILABLE` where the row is not
+  available.
+
+### Tooltip rows with their labels
+`Content.TooltipValues(ItemId)` gives the rows of an item's tooltip (its `uiValues`: the numbers a spell or a tool
+shows) as `TooltipValue(LocaId, Label, Raw, Value, Display, Format, IsSigned, IsScaled)`; `GameDataEntry.TooltipValues(list
+= "uiValues")` does the same for a perk, a buff or a skill node (`Content.Perks.Get(...)`), or an item's `uiBuffValues`.
+
+| `Format` | `Raw` | `Value` (what a player reads) | `Display` |
+|---|---|---|---|
+| `Normal` | 53 | 53 | `53` |
+| `Percentage` | 5 | 5 (percent) | `5%` (`+5%` when `IsSigned`) |
+| `Duration` | 2500 (ms) | 2.5 (seconds) | `2.5s` |
+| `DurationMilliseconds` | 250 | 250 (ms) | `250ms` (not seen in a game tooltip yet) |
+| `Float` | 260 | 2.6 | `2.6` |
+| `Numberless` | | 0 | `` (the label alone) |
+| `Unknown` (a format a later game adds) | raw | raw | raw |
+
+- **Per item type, not per item.** The rows are the game's data for every item of that type; a stack's level or rarity,
+  the player's attributes and scaling are not applied. `IsScaled` says the game scales that number when it shows it
+  (by the weapon's power or an attribute: `scaleData`); `Raw` and `Value` are the base. Data-pack changes are in (the
+  rows follow their configs, see kiln.gamedata "Tooltips").
+- **Damage and its element are not rows**: the game computes them from `damageSetup` (read it with
+  `Content.ItemData.Get(...).Get("damageSetup.dmgMod")` and the element fields).
+- `Display` is Kiln's rendering in the invariant culture; the game's own (decimal separator, spacing) may differ: format
+  `Value` yourself to match it.
+- **Thread**: kiln.content's world thread, as every `GameDataEntry` read (`[TickThreadOnly]`). A game client joined to a
+  server runs its tick on the main thread, so the labels come with the rows. In a hosted game the tick is the server's
+  thread: the rows come with `Label` null; look the labels up on the main thread with `Content.Text(row.LocaId)`. Not
+  cached either: keep the result.
+
+```csharp
+// A spellbook's tooltip: Fire Bolt I's rows with their labels, in the player's language.
+// A client joined to a server: in a tick (main thread). Hosting: rows on the tick, labels via Client.Post.
+var item = Content.Items.Get("Ammo_T0_Spell_Fire_Bolt_lvl3")?.Id ?? 0;   // Fire Bolt I, or any ItemId from a bag
+var rows = Content.TooltipValues(new ItemId(item));
+Client.Post(() =>
+{
+    foreach (var r in rows)
+        Log.Info($"{r.Label ?? Content.Text(r.LocaId) ?? $"0x{r.LocaId:x8}"}: {r.Display}");  // "Charge Time: 2.5s"
+});
+```
+
+### Real-client checklist (not run in a real game yet)
+1. Start the game in English with a client-side test mod; in the main menu `Content.TextAvailable` is true and
+   `Content.TextLanguage` is `en-us`; `kiln/state/capabilities.json` says `content.text` is available.
+2. In a world, `Content.TooltipValues` of Fire Bolt I (`Ammo_T0_Spell_Fire_Bolt_lvl3`) and Fireball I (`Ammo_T1_Spell_Fire_Ball_lvl10`) gives the rows the game's own tooltip shows, with
+   the same labels and numbers (mana cost, charge time, ...).
+3. Switch the game's language to German in the settings without restarting: the next `Content.Text` of the same ids
+   gives the German labels ("Manakosten"); `Content.TextLanguage` is `de-de`; the game's own tooltip agrees.
+4. A Kiln item (NewItems' Frost Edge): `Content.Text` of its name tag gives the name the backpack shows, in both
+   languages.
+5. `Content.Text` from the overlay's draw callback throws the main-thread `InvalidOperationException` (and nothing
+   crashes); from a `Ui.Screens` UI tick it answers.
 
 ## Distribution: random loot, drop tables, vendors, knowledge (v4)
 ```json
@@ -604,8 +862,19 @@ world file on disk (also after `kill -9`, Kiln.Saves' generations).
   `content_status`, see the requested change), `NewContent.Placeholders()`, `info()` `placeholders`, and
   `definitions()` (`"placeholder": true`, `mod`). A placeholder's references to its mod's own templates and models stay
   unresolved while the mod is away: one Info line per item, `new content: placeholder item-blocks.ember-bench: 1
-  reference(s) to its mod's resources stay unresolved while the mod is not loaded (the base's values stay):
-  equipment.placedEntity`. The same unresolved reference on an item of a loaded mod is a warning.
+  reference(s) to its mod's resources stay unresolved while the mod is not loaded (the base's values stay; a program:
+  none): equipment.placedEntity`. The same unresolved reference on an item of a loaded mod is a warning.
+- **A program it cannot resolve is none** (since 0.2.0-dev.29.11): an `equipment.program` (any `ImpactProgramReference`
+  or `ObjectReference<keen::ImpactProgram>`) that nothing serves now is not kept as the base's program, so a missing
+  mod's gem with a program of its own (a `Gems.Register` trigger gem, a gem with a cooked program) does nothing when
+  socketed instead of acting as its base gem; the game runs nothing for a gem without a program (it logs "Gem has no
+  valid Impcat Program assigned" in its own log every step while such a gem sits in an impact slot). kiln.log: `new
+  content: placeholder Gem_mymod_frostbite: 1 program reference(s) nothing serves now: it runs no program (not its
+  base's)`. A program that still resolves (a game program, a trigger program another loaded mod's gem serves) is kept.
+  Kiln's own gem trigger programs resolve too: Kiln.Abilities serves the one a placeholder names when no registered gem
+  does (kiln.log `gems: placeholders of a removed mod's gems name the trigger program on_kill (...): Kiln serves it, so
+  they run it and do nothing`), and the reference retry (~2 s) points the placeholder at it ([gems-new.md](gems-new.md),
+  "Unload").
 - **The mod comes back**: at the next start its definition is there before the placeholders are made (none is
   made). Loaded while the world runs (`load <mod>`), its definition takes the GUID over: `state` `restored`, kiln.log
   `Kiln_PH_Sword ... is back (mod placeholder-items): it takes its id 0x3f56132f back from the placeholder`.

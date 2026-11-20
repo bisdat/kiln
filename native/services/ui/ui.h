@@ -9,6 +9,7 @@
 #include <mutex>
 
 #include "kiln_api.h"
+#include "overlay_mode.h"
 #include "services/kiln_ui.h"
 
 namespace kui {
@@ -63,14 +64,40 @@ extern std::atomic<bool> g_want_mouse;       // ImGui wants the mouse (last fram
 extern std::atomic<bool> g_wheel_active;     // a radial wheel is open (wheel.cpp)
 extern std::atomic<bool> g_page_capture;     // the Kiln page in the game's main menu is opening or shown (menu_page.cpp)
 inline bool wheel_active() { return g_wheel_active.load(std::memory_order_relaxed); }
+// The overlay's drawing turned off during this session (vk.cpp: a failed Vulkan submit, a fault, a present queue Kiln
+// cannot draw with; ui.cpp overlay_turned_off). Set once, never cleared: from then on nothing of Kiln's captures the
+// game's input or asks to draw, and the Mods entry shows the reason as with the drawing off from the start.
+extern std::atomic<bool> g_overlay_failed;
+inline bool overlay_failed() { return g_overlay_failed.load(std::memory_order_acquire); }
+// The overlay draws in this session: its drawing was on at the start and has not turned off since.
+inline bool overlay_draws() { return overlay_drawing_on() && !overlay_failed(); }
+// vk.cpp, once, on the present call after the overlay's drawing turned off, outside the overlay's locks: the one log
+// line (at `level`: an error for a failure, a warning for a present Kiln cannot draw in), kiln.ui's status, the Mods
+// caption, the capability rows and the crash guard (ui.cpp). `reason` is short (the Mods caption and Ui.Status.Error
+// carry it), `detail` goes into kiln.log only.
+void overlay_turned_off(int level, const char* reason, const char* detail);
+const std::string& overlay_off_reason();  // the reason (after overlay_failed() said true), else ""
+// overlay_turned_off, with g_overlay_failed set: what the last drawn frame left set lets go of the game's input. ImGui's
+// text field flag is not built again (key bindings would take every press for typing: KilnUiKey.text_input), and
+// Kiln's menu, no longer shown, is closed (Escape would close it instead of reaching the game; a Keys page that was
+// waiting for a key would take the next press). The menu key opens the Mods entry's caption, as with drawing off.
+inline void release_input_after_turn_off() {
+    g_text_input.store(false);
+    g_menu_open.store(false);
+}
 inline bool capturing() {
-    return g_menu_open.load(std::memory_order_relaxed) || g_page_capture.load(std::memory_order_relaxed) ||
-           g_interactive.load(std::memory_order_relaxed) > 0 || wheel_active();
+    return overlay_draws() && (g_menu_open.load(std::memory_order_relaxed) || g_page_capture.load(std::memory_order_relaxed) ||
+           g_interactive.load(std::memory_order_relaxed) > 0 || wheel_active());
 }
 // Something to draw this frame. The native fallback menu counts too.
 extern std::atomic<uint32_t> g_render_demand;  // kiln.render acquire_frames handles (render.cpp)
+extern std::atomic<uint32_t> g_footer_demand;  // Kiln's mark next to its line in the main menu's footer (menu_footer.cpp)
+extern std::atomic<uint32_t> g_graphics_demand;  // the graphics readout (graphics.cpp)
+extern std::atomic<uint32_t> g_chat_completion_demand; // focused native slash-command suggestions (issue #44)
 inline bool want_draw() {
-    return capturing() || g_demand.load(std::memory_order_relaxed) > 0 || g_render_demand.load(std::memory_order_relaxed) > 0;
+    return overlay_draws() && (capturing() || g_demand.load(std::memory_order_relaxed) > 0 || g_render_demand.load(std::memory_order_relaxed) > 0 ||
+                                    g_footer_demand.load(std::memory_order_relaxed) > 0 || g_graphics_demand.load(std::memory_order_relaxed) > 0 ||
+                                    g_chat_completion_demand.load(std::memory_order_relaxed) > 0);
 }
 bool in_frame();  // the calling thread is inside the overlay frame's callbacks (drawing calls work)
 
@@ -78,9 +105,27 @@ void set_error(const char* fmt, ...);
 KilnHandle next_handle();                    // one handle space for every kiln.ui subscription (any thread)
 extern std::atomic<uint32_t> g_hover_panels; // Kiln panels that take the mouse only while it is over them
 
+// ---- chat_input_probe.cpp (GitHub issue 44: Up/Down history in the game's chat field) ----
+bool chat_input_probe_install();  // game_install: hooks the chat field when chat history (or a diagnostic) is on
+void chat_input_frame_end(uintptr_t sys10);  // game's UI thread, focus and native rectangle conversion
+void chat_input_exit();           // on_unload: writes the history file still pending, stops its writer thread
+KilnResult chat_completion_io(KilnUiChatCompletion* io);  // internal managed snapshot/selection/replacement, NOT game call
+
+// The window procedure's one hook point for the game's chat field (input.cpp calls it on the window thread, before
+// Kiln's own key handling). Set by chat_input_probe_install while chat history or its diagnostic runs; null otherwise,
+// and in the input.cpp host harnesses, which do not link chat_input_probe.cpp.
+struct ChatInputSink {
+    bool (*key)(uint32_t vk, uint32_t mods, bool down, bool captured);  // a key transition; true keeps a press from the game
+    bool (*text)(uint32_t ch);                                           // WM_CHAR / WM_UNICHAR; true drops a consumed Tab's character
+    void (*ime)(bool composing);                                         // an IME composition started (true) or ended
+    void (*blur)();                                                      // the window lost focus / the game was deactivated
+};
+void input_set_chat_sink(const ChatInputSink* sink);  // input.cpp; the sink must live for the process
+
 // ---- input.cpp ----
 void input_install_iat();       // SetCursorPos / ClipCursor slots of the game exe (plugin main)
 void input_hook_xinput();      // after XInput loads: idle pad for the game while Kiln has the input
+void input_poll_window();       // drawing off: discover this process's game window without Vulkan
 void input_attach(HWND hwnd);   // subclasses the window (idempotent; re-subclasses when the game replaced its WndProc)
 bool input_attached();
 void input_replay();            // render thread, before ImGui::NewFrame: feeds queued window messages to ImGui
@@ -94,6 +139,9 @@ bool input_key_held(uint32_t vk);         // the key is down now, as far as the 
 // subscribe_window_input (kiln_ui.h v5): the window's input records for native subscribers. Any thread.
 KilnResult input_feed_subscribe(KilnOwner owner, KilnUiWindowInputFn fn, void* user, KilnHandle* out);
 KilnResult input_feed_unsubscribe(KilnHandle h);  // KILN_ERR_NOT_FOUND: not a window-input subscription
+// subscribe_pointer_press (0.2.0-dev.30): left/right presses over the game's UI for native subscribers. Any thread.
+KilnResult input_pointer_subscribe(KilnOwner owner, KilnUiPointerFn fn, void* user, KilnHandle* out);
+KilnResult input_pointer_unsubscribe(KilnHandle h);  // KILN_ERR_NOT_FOUND: not a pointer subscription
 
 // ---- keys.cpp (the key subscribers: subscribe_key, v7 subscribe_key_ex) ----
 KilnResult keys_subscribe(KilnOwner owner, KilnUiKeyFn fn, void* user, uint32_t flags, KilnHandle* out);  // KILN_UI_KEYS_*
@@ -123,6 +171,7 @@ bool game_screens_on();
 bool game_menu_on(uint32_t menu);
 bool game_in_menu();   // no world steps (boot, main menu, loading)
 KilnResult game_screen(KilnUiScreen* out);
+uint32_t game_screen_target();  // a factory screen's station entity of the last UI frame, else 0
 KilnResult game_subscribe_screen(KilnOwner owner, KilnUiScreenFn fn, void* user, KilnHandle* out);
 KilnResult game_subscribe_tick(KilnOwner owner, KilnUiTickFn fn, void* user, KilnHandle* out);
 KilnResult game_subscribe_frame_tick(KilnOwner owner, KilnUiFrameTickFn fn, void* user, KilnHandle* out);
@@ -138,10 +187,26 @@ size_t game_pause_mods_rows();                                             // vi
 bool scroll_install(bool system_menu_hooked);  // game_install, after the SystemMenuEntry hook
 uint32_t scroll_status();                      // KILN_UI_SCROLL_*
 bool scroll_on();                              // the pause menu can scroll in this process now
-bool scroll_wrapped_now();                     // UI thread: this pause-menu builder call is wrapped (open site to close site)
-void scroll_after_frame(uint64_t frame);       // UI thread, after each UI frame: the crash guard's trial
+void scroll_entry_next();                      // UI thread, before each call of the game's entry renderer: the top probe
+void scroll_entry_drawn(bool chosen);          // UI thread, after each call of the game's entry renderer (`chosen`: it
+                                               // returned true): the end probe, Quit chosen
+void scroll_rows_drawn(uint32_t n);            // UI thread: Kiln drew n rows of its own in the pause menu (Settings' call)
+void scroll_after_frame(uint64_t frame);       // UI thread, after each UI frame: the frame count, the crash guard
+void scroll_exit();                            // on_unload (the process exits with code 0): the crash guard's marker goes
 bool game_unsubscribe(KilnHandle h);
 void game_status_line(char* out, size_t cap);
+uint64_t game_frames();                        // UI frames finished so far (any thread)
+
+// ---- menu_footer.cpp (Kiln's line in the main menu's footer: feature ui.menu_footer, menu_footer.h) ----
+bool footer_install();                        // game_install: resolve, copy the footer function, hook it
+void footer_set(int32_t mods, uint32_t flags);  // any thread: the mods' count (< 0 unknown) and KILN_UI_FOOTER_* (Kiln.Ui)
+void footer_after_frame(uintptr_t sys10);     // UI thread, after each UI frame: the canvas metrics for the mark
+void footer_overlay();                        // render thread, inside the ImGui frame: the mark
+void footer_texts_changed();                  // any thread: Kiln's texts changed (ui_text.h): the line in the new language
+
+// ---- Kiln's own texts (ui_text.h; set_texts) ----
+void game_texts_changed();                    // any thread: the Mods entry and the drawing-off caption in the new language
+void game_overlay_turned_off();               // any thread, once: the Mods entry shows why the overlay's drawing went off
 
 // ---- menu_page.cpp (the Kiln menu as a page of the game's main menu: feature ui.menu_page) ----
 bool page_install(bool main_menu_hooked);  // game_install, after the MainMenuEntry hook: resolve, hook Credits
@@ -159,17 +224,32 @@ KilnResult page_state(KilnUiMenuPage* out);
 void page_status_line(char* out, size_t cap);
 bool style_push_font(uint32_t font);       // style.cpp: KILN_UI_FONT_*; false = not loaded (nothing pushed)
 
-// ---- style.cpp (Kiln's and the game's look, the game font, images) ----
-void style_apply_base(float scale);          // the default (Kiln ember) style, scaled
-void style_push(uint32_t style);             // inside a frame
+// ---- style.cpp (the looks: Kiln's, the game's, the player's, mods' themes; the game's font and colours, mod fonts, images) ----
+void style_apply_base(float scale);          // the looks at this scale; windows that push nothing get the player's
+void style_push(uint32_t style);             // inside a frame: KILN_UI_STYLE_*
+bool theme_push(KilnHandle theme);           // inside a frame; false: no such theme (nothing pushed); style_pop pops it
 void style_pop();
-void style_frame_begin();                    // render thread, before NewFrame: fonts and textures to add
+size_t style_depth();                        // looks pushed now (render thread)
+void style_frame_begin();                    // render thread, before NewFrame: fonts, colours, looks and textures
 void style_frame_end();                      // render thread, after the frame: unbalanced pushes
 float style_scale();
+float user_scale();                          // the player's scale (set_look), any thread
+bool style_push_font_handle(KilnHandle font);  // inside a frame: a mod font; false = not in the atlas (nothing pushed)
+KilnResult theme_create(KilnOwner owner, const KilnUiThemeDef* def, KilnHandle* out);  // any thread
+KilnResult theme_free(KilnHandle theme);                                              // any thread
+KilnResult look_set(const KilnUiLook* look);                                           // any thread (the caller is checked in ui.cpp)
+KilnResult look_info(KilnUiLookInfo* out);                                             // any thread
+KilnHandle font_load(KilnOwner owner, const void* data, size_t len);                   // any thread; 0 refused
+void font_free(KilnHandle font);                                                       // any thread
 KilnHandle image_load(KilnOwner owner, const void* png, size_t len);
+KilnHandle image_load_rgba(KilnOwner owner, const uint8_t* rgba, uint32_t w, uint32_t h);  // w*h*4 bytes, copied
+int32_t image_state(KilnHandle h);  // image_budget.h: unknown, waiting, ready, failed
 bool image_size(KilnHandle h, uint32_t* w, uint32_t* hgt);
 void image_draw(KilnHandle h, float w, float hgt);
 bool image_button(const char* id, KilnHandle h, float w, float hgt);
+// image_ex: KILN_UI_IMAGE_DRAW_* flags, uv all 0 = whole; id null = an image (false), else a button. Inside a frame.
+bool image_draw_ex(const char* id, KilnHandle h, uint32_t flags, float w, float hgt, float u0, float v0, float u1, float v1);
+bool image_opaque_rect(KilnHandle h, uint32_t* x, uint32_t* y, uint32_t* w, uint32_t* hgt);  // any thread
 void image_free(KilnHandle h);
 }  // namespace kui
 struct ImTextureRef;
@@ -180,9 +260,29 @@ bool image_texture(KilnHandle h, ImTextureRef* out);  // render thread
 bool render_install();                 // plugin main: the camera hook (feature render.camera)
 const void* render_table();            // the KilnRenderApi
 
+// ---- graphics.cpp (Kiln's own graphics tools: the frame cap, DLSS settings, the readout; docs/kiln/graphics.md) ----
+void graphics_start(bool optiscaler, bool streamline);  // plugin main, after overlay_guard_start: kiln.json, what steps aside
+bool graphics_wants_load_hook();  // DLSS is to be hooked when NVIDIA's DLSS core loads (the LoadLibraryExW hook must be in)
+void graphics_after_load();       // after every library load (load_hook.h; may hold the loader lock): NVIDIA's DLSS core
+void graphics_present();          // render thread, right after the game's frame went to vkQueuePresentKHR (no lock held):
+                                  // the frame counts, and the frame cap's wait for the game's next slot
+extern std::atomic<bool> g_graphics_present;  // graphics_present has work: the cap or the readout is on, or was just
+                                              // turned off (its counts are cleared once)
+// vk.cpp's present hook, after the game's present: one relaxed load while the frame cap and the readout are off.
+inline void graphics_after_present() {
+    if (g_graphics_present.load(std::memory_order_relaxed)) graphics_present();
+}
+void graphics_overlay();          // render thread, inside the ImGui frame: the readout
+KilnResult graphics_set(const KilnUiGraphics* settings);  // any thread (Kiln.Ui; ui.cpp refuses native plugins)
+KilnResult graphics_status(KilnUiGraphicsStatus* out);     // any thread
+
+// ---- upscale.cpp (phase B): declared in upscale.h, which needs the Vulkan headers ----
+
 // ---- vk.cpp ----
 bool vk_install();  // called once vulkan-1.dll is loaded (from the LoadLibraryExW hook)
+void vk_extent(uint32_t* width, uint32_t* height);  // the game window's swapchain (any thread; 0 before one exists)
 void vk_status(KilnUiStatus* out);
+uint64_t vk_presents();  // frames the game presented through Kiln's present hook (the overlay crash guard)
 KilnResult vk_subscribe_pre_overlay(KilnUiPreOverlayFn fn, KilnUiSwapchainGoneFn gone, void* user, KilnHandle* out);
 bool vk_unsubscribe(KilnHandle handle);
 void vk_set_pre_overlay_demand(uint32_t count);

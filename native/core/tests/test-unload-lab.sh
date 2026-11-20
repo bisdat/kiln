@@ -13,8 +13,9 @@
 # Checks (PASS/FAIL lines; exit 1 when one fails):
 #   1 marker  no marker file before the stop; after it 1-marker and 2-marker wrote theirs, 0-nohandler did not
 #   2 order   unload-order.txt: 2-marker before 1-marker (faults: 5, 4, 3, 2, 1); kiln.log's "called in this order" is
-#             the reverse of the load order; the handlers ran after the world stopped, not on the main thread, with
-#             the loader lock free
+#             Kiln's own services first, then the plugins, each last loaded first, and kiln.log says the task pool
+#             parked in between; the handlers ran after the world stopped, not on the main thread, with the loader
+#             lock free
 #   3 fault   3-fault was called, kiln.log names it as faulted, a crash report names unload-test-3-fault.dll, and the
 #             markers called after it still wrote theirs
 #   4 block   4-block was called, kiln.log names it as given up, the markers after it still wrote theirs, and the
@@ -209,16 +210,19 @@ else
 fi
 # 2 order (and the moment and thread)
 mo=$(order_of "$M/unload-order.txt") fo=$(order_of "$F/unload-order.txt")
-loaded=$(grep -o -E '\] \[kiln\] (service|plugin) [^ ]+ loaded:' "$M/kiln.log" | awk '{print $4}' | tac | tr '\n' ' ')
+# Kiln's own services first, then the task pool's park, then the plugins: each group last loaded first
+loaded=$( { grep -o -E '\] \[kiln\] service [^ ]+ loaded:' "$M/kiln.log" | awk '{print $4}' | tac
+            grep -o -E '\] \[kiln\] plugin [^ ]+ loaded:' "$M/kiln.log" | awk '{print $4}' | tac; } | tr '\n' ' ')
+parked=$(grep -c 'kiln.tasks: parked at exit' "$M/kiln.log")
 called=$(grep -o 'unload: called in this order: .*' "$M/kiln.log" | sed 's/unload: called in this order: //' | tr ',' '\n' | awk '{print $1}' | tr '\n' ' ')
 subseq=$(python3 -c "import sys; a=sys.argv[1].split(); b=iter(sys.argv[2].split()); print(int(bool(a) and all(x in b for x in a)))" "$called" "$loaded")
 world_line=$(grep -n 'tick: server world .* stopping' "$M/kiln.log" | head -1 | cut -d: -f1)
 unload_line=$(grep -n 'unload: the process is exiting' "$M/kiln.log" | head -1 | cut -d: -f1)
-if [[ $mo == "2-marker 1-marker" && $fo == "5-reexit 4-block 3-fault 2-marker 1-marker" && $subseq == 1 && -n $world_line &&
+if [[ $mo == "2-marker 1-marker" && $fo == "5-reexit 4-block 3-fault 2-marker 1-marker" && $subseq == 1 && $parked == 1 && -n $world_line &&
       -n $unload_line && $unload_line -gt $world_line ]] && ! grep -q -E 'main=yes|loaderlock=held' "$M/unload-order.txt"; then
-  pass "2 order: markers $mo; faults $fo; kiln.log's order is the reverse load order ($(echo "$called" | wc -w) modules); after the world stopped, off the main thread, loader lock free"
+  pass "2 order: markers $mo; faults $fo; kiln.log's order is Kiln's services, then the plugins, each last loaded first ($(echo "$called" | wc -w) modules), the pool parked between; after the world stopped, off the main thread, loader lock free"
 else
-  fail "2 order: markers '$mo', faults '$fo', kiln.log '$called' (reverse load order: $subseq), world stop line $world_line, unload line $unload_line, threads: $(awk '{print $4, $5}' "$M/unload-order.txt" | tr '\n' ';')"
+  fail "2 order: markers '$mo', faults '$fo', kiln.log '$called' (services then plugins, each last loaded first: $subseq; park lines: $parked), world stop line $world_line, unload line $unload_line, threads: $(awk '{print $4, $5}' "$M/unload-order.txt" | tr '\n' ';')"
 fi
 # 3 fault
 if [[ $fo == *"3-fault 2-marker 1-marker"* ]] && has_line "$F/kiln.log" 'unload: unload-test-3-fault.dll: on_unload faulted' &&

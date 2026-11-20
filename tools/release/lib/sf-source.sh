@@ -61,6 +61,8 @@ mkdir -p "$(dirname "$tarball")"
 archive_tmp=$(mktemp "${tarball}.XXXXXX")
 trap 'rm -rf -- "$tmp"; rm -f -- "$archive_tmp"' EXIT
 tar --sort=name --owner=0 --group=0 --numeric-owner --mode='u=rwX,go=rX' --mtime="@$epoch" -C "$tmp" -cf - "$name" | gzip -n > "$archive_tmp"
+# mktemp makes the file 0600, and mv keeps that: the release's other downloads are world-readable (a web server serves them)
+chmod 644 -- "$archive_tmp"
 mv -- "$archive_tmp" "$tarball"
 if [[ -n $extract ]]; then
   mkdir -p "$extract"

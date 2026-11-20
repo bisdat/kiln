@@ -275,6 +275,111 @@ fn records_status_and_launch_options_info() {
     let _ = fs::remove_dir_all(&f.home);
 }
 
+/// The per-app Steam compatibility tool determines routine advice, not what is installed.
+/// An actual "No Kiln" failure retains the explicit override as a fallback.
+#[cfg(unix)]
+#[test]
+fn native_dinput8_advice_uses_selected_steam_runner() {
+    let f = fake_steam("native-dinput8-advice");
+    let roots = [root_of(&f)];
+    let install = game::inspect_with(&f.client, &roots, &f.home.join("data")).unwrap();
+    let mapping = f.root.join("config/config.vdf");
+    fs::remove_file(f.root.join("userdata/111/config/localconfig.vdf")).unwrap();
+
+    for (tool, expect_warning) in [
+        ("GE-Proton11-10-x86_64", true),
+        ("GE-Proton11-11-x86_64", false),
+        ("GE-Proton11-12-x86_64", false),
+        ("GE-Proton12-1-x86_64", false),
+        ("GE-Proton11-0.2", true),
+        ("proton_experimental", true),
+    ] {
+        write(&mapping, format!(
+            "\"InstallConfigStore\" {{ \"Software\" {{ \"Valve\" {{ \"Steam\" {{ \"CompatToolMapping\" {{ \"1203620\" {{ \"name\" \"{tool}\" }} }} }} }} }} }}"
+        ));
+        let info = game::launch_options_info(&install, &roots).unwrap();
+        assert!(!info.has_dll_override, "{tool}");
+        assert_eq!(info.advice.is_some(), expect_warning, "{tool}: {info:?}");
+        assert_eq!(info.dinput8_native_by_runner, !expect_warning, "{tool}");
+        assert_eq!(info.fallback_advice.as_deref(), Some(game::DLL_OVERRIDE_ADVICE), "{tool}");
+    }
+    fs::remove_file(&mapping).unwrap();
+    let unknown = game::launch_options_info(&install, &roots).unwrap();
+    assert!(unknown.advice.is_some() && !unknown.dinput8_native_by_runner);
+
+    // Steam's global runner (CompatToolMapping/0) applies without a per-app mapping.
+    write(&mapping, "\"InstallConfigStore\" { \"Software\" { \"Valve\" { \"Steam\" { \"CompatToolMapping\" { \"0\" { \"name\" \"GE-Proton11-12-x86_64\" } } } } } }");
+    let global = game::launch_options_info(&install, &roots).unwrap();
+    assert!(!global.has_dll_override && global.dinput8_native_by_runner);
+    assert!(global.advice.is_none());
+    assert_eq!(global.fallback_advice.as_deref(), Some(game::DLL_OVERRIDE_ADVICE));
+
+    // An older app-specific Proton overrides the newer global default.
+    write(&mapping, "\"InstallConfigStore\" { \"Software\" { \"Valve\" { \"Steam\" { \"CompatToolMapping\" { \"0\" { \"name\" \"GE-Proton11-12-x86_64\" } \"1203620\" { \"name\" \"GE-Proton11-10-x86_64\" } } } } } }");
+    let app_older = game::launch_options_info(&install, &roots).unwrap();
+    assert!(!app_older.dinput8_native_by_runner && app_older.advice.is_some());
+
+    // A newer app-specific Proton also takes priority over the older global default.
+    write(&mapping, "\"InstallConfigStore\" { \"Software\" { \"Valve\" { \"Steam\" { \"CompatToolMapping\" { \"0\" { \"name\" \"GE-Proton11-10-x86_64\" } \"1203620\" { \"name\" \"GE-Proton11-12-x86_64\" } } } } } }");
+    let app_newer = game::launch_options_info(&install, &roots).unwrap();
+    assert!(app_newer.dinput8_native_by_runner && app_newer.advice.is_none());
+
+    // The Steam mapping cannot be inferred for an install detached from its library.
+    write(&mapping, "\"InstallConfigStore\" { \"Software\" { \"Valve\" { \"Steam\" { \"CompatToolMapping\" { \"1203620\" { \"name\" \"GE-Proton11-12-x86_64\" } } } } } }");
+    let mut detached = install.clone();
+    detached.library = None;
+    assert!(game::launch_options_info(&detached, &roots).unwrap().advice.is_some());
+
+    // Chained xinput9_1_0 remains an independent concern even on GE-Proton11-12.
+    write(&install.path.join("xinput9_1_0.dll"), b"fixture");
+    write(&install.path.join("kiln/chain.ini"), "[chain]\n..\\XINPUT9_1_0.DLL\n");
+    let chained = game::launch_options_info(&install, &roots).unwrap();
+    assert!(chained.dinput8_native_by_runner && chained.chained_override_missing);
+    assert_eq!(chained.advice.as_deref(), Some(game::CHAINED_DLL_OVERRIDE_ADVICE));
+    assert_eq!(chained.fallback_advice.as_deref(), Some(game::CHAINED_DLL_OVERRIDE_ADVICE));
+    fs::remove_dir_all(f.home).unwrap();
+}
+
+#[test]
+fn chained_loader_launch_advice() {
+    let f = fake_steam("chained-advice");
+    let roots = [root_of(&f)];
+    let install = game::inspect_with(&f.client, &roots, &f.home.join("data")).unwrap();
+    let info = game::launch_options_info(&install, &roots).unwrap();
+    assert!(info.has_dll_override && info.advice.is_none());
+    write(&f.client.join("xinput9_1_0.dll"), b"fixture");
+    assert!(game::launch_options_info(&install, &roots).unwrap().advice.is_none());
+    // A file alone isn't chained; neither is a profile entry for a file that is not Ultimate ASI Loader.
+    write(&f.client.join("kiln/chain.ini"), "[profile]\n..\\xinput9_1_0.dll\n");
+    assert!(game::launch_options_info(&install, &roots).unwrap().advice.is_none());
+    // dev.30: activation writes that [profile] line for the profile's .asi packages (game_files); with UAL there it counts
+    write(&f.client.join("xinput9_1_0.dll"), kiln_manage::pe::build_test_dll(&["DirectInput8Create", "IsUltimateASILoader"], b""));
+    assert!(game::launch_options_info(&install, &roots).unwrap().advice.as_deref().is_some_and(|a| a.contains("xinput9_1_0")));
+    write(&f.client.join("xinput9_1_0.dll"), b"fixture");
+    write(&f.client.join("kiln/chain.ini"), "[chain]\n..\\XINPUT9_1_0.DLL\n");
+    let info = game::launch_options_info(&install, &roots).unwrap();
+    assert!(info.has_dll_override);
+    assert_eq!(info.advice.as_deref(), Some("WINEDLLOVERRIDES=\"dinput8,xinput9_1_0=n,b\" %command%"));
+    let config = f.root.join("userdata/111/config/localconfig.vdf");
+    write(&config, fixture("localconfig-override.vdf").replace("dinput8=n,b", "dinput8=n,b;xinput9_1_0=b"));
+    assert!(game::launch_options_info(&install, &roots).unwrap().chained_override_missing);
+    let json = serde_json::to_value(&info).unwrap();
+    assert_eq!(json["chainedOverrideMissing"], true);
+    write(&config, fixture("localconfig-override.vdf").replace("dinput8=n,b", "dinput8,xinput9_1_0=n,b"));
+    let info = game::launch_options_info(&install, &roots).unwrap();
+    assert!(info.has_dll_override && info.advice.is_none());
+    assert_eq!(serde_json::to_value(info).unwrap()["chainedOverrideMissing"], false);
+    write(&config, fixture("localconfig-override.vdf"));
+    let prefix = install.prefix.as_ref().unwrap();
+    write(&prefix.join("user.reg"), "[Software\\\\Wine\\\\DllOverrides]\n\"xinput9_1_0\"=\"native,builtin\"\n");
+    assert!(game::launch_options_info(&install, &roots).unwrap().advice.is_none());
+    fs::remove_file(prefix.join("user.reg")).unwrap();
+    fs::remove_file(f.client.join("xinput9_1_0.dll")).unwrap();
+    write(&config, fixture("localconfig-override.vdf"));
+    assert!(game::launch_options_info(&install, &roots).unwrap().advice.is_none());
+    fs::remove_dir_all(f.home).unwrap();
+}
+
 fn install_at(dir: &Path, prefix: Option<PathBuf>, mode: PathMode) -> GameInstall {
     GameInstall {
         id: "g-000000000000".into(),

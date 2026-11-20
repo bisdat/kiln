@@ -28,12 +28,19 @@ public sealed class TablesTests
     public void Advanced_members(string id) => Assert.Contains(id, KilnApis.Advanced);
 
     [Fact]
+    public void Material_pool_result_define_is_in_the_generated_tick_thread_table()
+    {
+        Assert.Contains("M:Kiln.Blocks.Define(System.String,Kiln.BuildingMaterialPoolBlock,Kiln.DefinitionRegistrationOptions)",KilnApis.TickThread);
+    }
+
+    [Fact]
     public void Advanced_members_are_behind_a_gate()
     {
         // The services with an advanced gate: Kiln.Hooks (HooksGate), Kiln.Abilities (AbilitiesGate), Kiln.Creatures
         // (CreaturesGate). A new type here means a new gated entry point: check that it is meant to be advanced.
+        // TypedHooks (dev.29): the runtime of typed hooks and calls under the generated Kiln.Sigs classes.
         Assert.All(KilnApis.Advanced, id => Assert.Matches(
-            @"^M:Kiln\.(Hooks|Symbols|Memory|Constants|OriginalCode|Keep|Abilities\.Programs|NativeCall|Is|Act|Arsenals)\.", id));
+            @"^M:Kiln\.(Hooks|TypedHooks|Symbols|Memory|Constants|OriginalCode|Keep|Abilities\.Programs|NativeCall|Is|Act|Arsenals)\.", id));
     }
 
     [Theory]
@@ -60,6 +67,19 @@ public sealed class TablesTests
     [InlineData("P:Kiln.Attributes.Available")] // Ids(...) is not null: read from a table, not the table
     public void Not_capability_guards(string property) =>
         Assert.DoesNotContain(KilnApis.CapabilityGuards, g => g.StartsWith(property + "=", StringComparison.Ordinal));
+
+    [Fact]
+    public void Boot_members()
+    {
+        // KILN035: Config.Register has its own boot path (reads without writing); writes and Changed throw in OnBoot
+        const string register = "M:Kiln.Config.Register``1(Kiln.ConfigKind,System.String)";
+        Assert.Contains(register, KilnApis.BootWorks);
+        Assert.Contains(register, KilnApis.TickThread);  // still KILN101 outside boot code
+        Assert.DoesNotContain(register, KilnApis.BootRefused);
+        Assert.Contains("M:Kiln.ConfigFile.add_Changed(System.Action{Kiln.ConfigChangedEvent})", KilnApis.BootRefused);
+        Assert.Contains("M:Kiln.ConfigFile.Set(System.String,System.Object)", KilnApis.BootRefused);  // via TrySet
+        Assert.DoesNotContain("M:Kiln.Config.RegisterWorld``1(System.String)", KilnApis.BootWorks);
+    }
 
     [Fact]
     public void Services_are_the_managed_service_folders()

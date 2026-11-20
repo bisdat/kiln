@@ -13,7 +13,9 @@ use std::time::{Duration, Instant, SystemTime};
 use chestsort_common::log;
 use serde_json::{json, Value};
 use shroudlink_sdk::{HostApi, InventoryEvent, ModDecl, ModDeclV1, ModDeclV2, ABI_VERSION};
-use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+use windows_sys::Win32::System::LibraryLoader::GetProcAddress;
+#[cfg(not(feature = "kiln"))] // kiln: the Kiln build loads through kiln_sl_load
+use windows_sys::Win32::System::LibraryLoader::LoadLibraryW;
 
 use crate::game_api;
 use crate::link_host::Host;

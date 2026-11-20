@@ -472,6 +472,219 @@ pub struct TickStat {
     pub interval_ms: Percentiles,
     #[serde(default)]
     pub subs: serde_json::Value,
+    /// Since 0.2.0-dev.29: the parts of Post (the game's job wait, the window services' end, each subscriber by owner).
+    /// None on older lines, and when the field does not read (the rest of the line still does).
+    #[serde(default, rename = "post_parts", deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    pub post_parts: Option<PostParts>,
+    /// Since 0.2.0-dev.29: the Pre subscribers with the longest call (8 at most).
+    #[serde(default, rename = "pre_parts", deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    pub pre_parts: Option<PreParts>,
+    /// Since 0.2.0-dev.29: the window's worst step (Pre + step + Post) broken down.
+    #[serde(default, deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    pub worst: Option<WorstStep>,
+    /// Issue #49 (T4): the kiln.tasks window (per-owner task counters, tick-hop apply, refused hops). Absent when the
+    /// pool does not exist, and None here when the section does not read; the rest of the line still does.
+    #[serde(default, deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    pub tasks: Option<TasksSection>,
+}
+
+/// `tasks.window` (T4): which diagnostics window a line carries, so a reader can avoid counting one window twice
+/// when several worlds write a line for it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TasksWindow {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub age_ms: Option<f64>,
+}
+
+/// `tasks.pool` (T4).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TasksPool {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workers: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub long_running: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_max: Option<u64>,
+}
+
+/// A `current`/`max` gauge of a task owner (T4).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TaskGauge {
+    #[serde(default)]
+    pub current: u64,
+    #[serde(default)]
+    pub max: u64,
+}
+
+/// One owner's task numbers in a window (T4): `cpu_ms` is executing-thread time of its segments (awaiting IO is
+/// excluded), `wall_ms` the sum of segment wall times, `longest_ms` its longest segment.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TaskOwner {
+    #[serde(default)]
+    pub owner: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued: Option<TaskGauge>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub running: Option<TaskGauge>,
+    #[serde(default)]
+    pub completed: u64,
+    #[serde(default)]
+    pub faulted: u64,
+    #[serde(default)]
+    pub cancelled: u64,
+    #[serde(default)]
+    pub cpu_ms: f64,
+    #[serde(default)]
+    pub wall_ms: f64,
+    #[serde(default)]
+    pub longest_ms: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub longest_name: Option<String>,
+    #[serde(default)]
+    pub queued_too_long: u64,
+    #[serde(default)]
+    pub running_too_long: u64,
+    #[serde(default)]
+    pub queue_full: u64,
+    #[serde(default)]
+    pub unload_blocked: u64,
+}
+
+/// `tasks.apply` (T4): the tick hops dispatched in the window; `deferred` waited for a later step, `ms` is the time
+/// spent dispatching them.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TaskApply {
+    #[serde(default)]
+    pub applied: u64,
+    #[serde(default)]
+    pub deferred: u64,
+    #[serde(default)]
+    pub cancelled: u64,
+    #[serde(default)]
+    pub ms: f64,
+    #[serde(default)]
+    pub owner_budget_stops: u64,
+    #[serde(default)]
+    pub step_budget_stops: u64,
+    #[serde(default)]
+    pub owners_served: u64,
+    #[serde(default)]
+    pub backlog: u64,
+}
+
+/// `tasks.hops` (T4).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TaskHops {
+    #[serde(default)]
+    pub refused: u64,
+}
+
+/// The `tasks` section of a tick-stats line (T4, issue #49), as the before/after report (`tick_compare`) reads it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TasksSection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<TasksWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<TasksPool>,
+    #[serde(default)]
+    pub owners: Vec<TaskOwner>,
+    /// The native writer emits `"owners_truncated":true` only when owner rows were capped (`tasks_stats.cpp`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owners_truncated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apply: Option<TaskApply>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hops: Option<TaskHops>,
+}
+
+/// A timed part of a tick-stats window: its longest call, the sum, the calls over 50 ms (and p50/p99 for the job wait).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PartMs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p50: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p99: Option<f64>,
+    #[serde(default)]
+    pub max: f64,
+    #[serde(default)]
+    pub total: f64,
+    #[serde(default)]
+    pub over50: u64,
+}
+
+/// One owner's subscribers in a tick-stats window (`service:kiln-saves.dll`, `kiln`, `plugin:kiln-emf.dll`, ...).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SubPart {
+    #[serde(default)]
+    pub owner: String,
+    #[serde(default)]
+    pub max: f64,
+    #[serde(default)]
+    pub total: f64,
+    #[serde(default)]
+    pub over50: u64,
+}
+
+/// `post_parts`: the server world has `wait_ms` and `windows_ms`; a client-side world only `subs`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PostParts {
+    #[serde(default, rename = "wait_ms", skip_serializing_if = "Option::is_none")]
+    pub wait_ms: Option<PartMs>,
+    #[serde(default, rename = "windows_ms", skip_serializing_if = "Option::is_none")]
+    pub windows_ms: Option<PartMs>,
+    #[serde(default)]
+    pub subs: Vec<SubPart>,
+}
+
+/// `pre_parts`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PreParts {
+    #[serde(default)]
+    pub subs: Vec<SubPart>,
+}
+
+/// One owner's time in the worst step.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct OwnerMs {
+    #[serde(default)]
+    pub owner: String,
+    #[serde(default)]
+    pub ms: f64,
+}
+
+/// `worst`: the window's worst step, `at` its local time (`hh:mm:ss.mmm`, as kiln.log's lines).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct WorstStep {
+    #[serde(default)]
+    pub at: String,
+    #[serde(default)]
+    pub pre: f64,
+    #[serde(default)]
+    pub step: f64,
+    #[serde(default)]
+    pub post: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub windows: Option<f64>,
+    #[serde(default, rename = "post_subs")]
+    pub post_subs: Vec<OwnerMs>,
+    #[serde(default, rename = "pre_subs")]
+    pub pre_subs: Vec<OwnerMs>,
+}
+
+/// A newer field that does not read is None; it never costs the line its other fields.
+fn lenient<'de, D, T>(d: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(v).ok())
 }
 
 /// Parses tick-stats.jsonl text (bad lines skipped).
@@ -495,7 +708,8 @@ pub fn read_tick_stats(game_dir: &Path, last: Option<usize>) -> Result<Vec<TickS
     Ok(v)
 }
 
-/// Kiln.Host's per-mod cost line: `[host] stats: <mod>: pre X ms/step, post Y ms/step, max Z ms, W ms/s, faults N`.
+/// Kiln.Host's per-mod cost line: `[host] stats: <mod>: pre X ms/step, post Y ms/step, max Z ms, W ms/s, faults N`; since
+/// 0.2.0-dev.29 `max Z ms (pre A / post B)`, the longest Pre and the longest Post apart.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModStat {
@@ -505,6 +719,12 @@ pub struct ModStat {
     pub pre_ms: f64,
     pub post_ms: f64,
     pub max_ms: f64,
+    /// Since 0.2.0-dev.29.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_max_ms: Option<f64>,
+    /// Since 0.2.0-dev.29.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_max_ms: Option<f64>,
     pub ms_per_s: f64,
     pub faults: u64,
 }
@@ -523,7 +743,17 @@ pub fn mod_stats(text: &str) -> Vec<ModStat> {
             if id.contains(' ') {
                 return None;
             }
-            let mut st = ModStat { time: p.time.clone(), mod_id: id.to_string(), pre_ms: 0.0, post_ms: 0.0, max_ms: 0.0, ms_per_s: 0.0, faults: 0 };
+            let mut st = ModStat {
+                time: p.time.clone(),
+                mod_id: id.to_string(),
+                pre_ms: 0.0,
+                post_ms: 0.0,
+                max_ms: 0.0,
+                pre_max_ms: None,
+                post_max_ms: None,
+                ms_per_s: 0.0,
+                faults: 0,
+            };
             let mut any = false;
             for f in fields.split(", ") {
                 if let Some(x) = f.strip_prefix("pre ") {
@@ -533,6 +763,13 @@ pub fn mod_stats(text: &str) -> Vec<ModStat> {
                     st.post_ms = num(x)?;
                 } else if let Some(x) = f.strip_prefix("max ") {
                     st.max_ms = num(x)?;
+                    // "max Z ms (pre A / post B)"
+                    if let Some((_, apart)) = x.split_once("(pre ")
+                        && let Some((a, b)) = apart.trim_end_matches(')').split_once(" / post ")
+                    {
+                        st.pre_max_ms = num(a);
+                        st.post_max_ms = num(b);
+                    }
                 } else if let Some(x) = f.strip_prefix("faults ") {
                     st.faults = num(x)? as u64;
                 } else if f.ends_with(" ms/s") {
@@ -604,6 +841,75 @@ mod tests {
         assert!(!idle.hooks);
     }
 
+    /// The server line native/core/tests/tick_stats_test.cpp formats (its "sample:" output), read back field for field, and
+    /// written and read again unchanged; a client-side world's line without the wait; a part that does not read.
+    #[test]
+    fn tick_stats_reads_the_parts_of_post_and_pre() {
+        let line = r#"{"time":"2026-11-15T13:25:09","steps":2621,"rate":43.68,"clock_rate":60.02,"step_ms":{"p50":9.812,"p99":11.004,"max":11.000},"pre_ms":{"p50":0.9375,"p99":9.6250,"max":127.250},"post_ms":{"p50":0.3125,"p99":0.8438,"max":10249.500},"interval_ms":{"p50":16.75,"p99":21.50,"max":10271.25},"subs":{"pre":30,"post":5},"post_parts":{"wait_ms":{"p50":0.2500,"p99":0.6875,"max":1.500,"total":1.750,"over50":0},"windows_ms":{"max":0.062,"total":0.062,"over50":0},"subs":[{"owner":"service:kiln-gameplay.dll","max":0.500,"total":0.500,"over50":0},{"owner":"kiln","max":60.000,"total":60.250,"over50":1},{"owner":"service:kiln-saves.dll","max":10240.000,"total":10240.000,"over50":1},{"owner":"plugin:kiln-emf.dll","max":4.000,"total":4.000,"over50":0}]},"pre_parts":{"subs":[{"owner":"native:mod-19","max":9.000,"total":9.000,"over50":0},{"owner":"native:mod-18","max":8.000,"total":8.000,"over50":0},{"owner":"native:mod-17","max":7.000,"total":7.000,"over50":0},{"owner":"native:mod-16","max":6.000,"total":6.000,"over50":0},{"owner":"native:mod-15","max":5.000,"total":5.000,"over50":0},{"owner":"native:mod-14","max":4.000,"total":4.000,"over50":0},{"owner":"native:mod-13","max":3.000,"total":3.000,"over50":0},{"owner":"native:mod-12","max":2.000,"total":2.000,"over50":0}]},"worst":{"at":"13:24:58.512","pre":6.000,"step":9.500,"post":10249.500,"wait":1.500,"windows":0.062,"post_subs":[{"owner":"service:kiln-gameplay.dll","ms":0.500},{"owner":"kiln","ms":1.250},{"owner":"service:kiln-saves.dll","ms":10240.000},{"owner":"plugin:kiln-emf.dll","ms":4.000}],"pre_subs":[{"owner":"native:mod-11","ms":5.000},{"owner":"native:mod-10","ms":1.000}]}}"#;
+        let v = tick_stats(&format!("{line}\n"));
+        assert_eq!(v.len(), 1);
+        let t = &v[0];
+        // the old fields, as before
+        assert_eq!((t.steps, t.rate, t.post_ms.max, t.interval_ms.max), (2621, 43.68, 10249.5, 10271.25));
+        assert_eq!(t.subs, serde_json::json!({"pre": 30, "post": 5}));
+        assert_eq!(t.world, None);
+        // the new ones
+        let post = t.post_parts.as_ref().expect("post_parts");
+        let wait = post.wait_ms.as_ref().expect("wait_ms");
+        assert_eq!((wait.p50, wait.p99, wait.max, wait.total, wait.over50), (Some(0.25), Some(0.6875), 1.5, 1.75, 0));
+        assert_eq!(post.windows_ms.as_ref().map(|w| (w.p50, w.max)), Some((None, 0.062)));
+        let owners: Vec<_> = post.subs.iter().map(|s| (s.owner.as_str(), s.max, s.over50)).collect();
+        assert_eq!(owners[2], ("service:kiln-saves.dll", 10240.0, 1));
+        assert_eq!(owners.len(), 4);
+        let pre = t.pre_parts.as_ref().expect("pre_parts");
+        assert_eq!((pre.subs.len(), pre.subs[0].owner.as_str(), pre.subs[0].max), (8, "native:mod-19", 9.0));
+        let worst = t.worst.as_ref().expect("worst");
+        assert_eq!((worst.at.as_str(), worst.post, worst.wait, worst.windows), ("13:24:58.512", 10249.5, Some(1.5), Some(0.062)));
+        assert_eq!((worst.post_subs[2].owner.as_str(), worst.post_subs[2].ms), ("service:kiln-saves.dll", 10240.0));
+        assert_eq!(worst.pre_subs.len(), 2);
+        // written and read again: the same
+        let again: TickStat = serde_json::from_str(&serde_json::to_string(t).unwrap()).unwrap();
+        assert_eq!(&again, t);
+
+        // a client-side world: no wait, no windows
+        let client = r#"{"time":"2026-11-15T13:25:09","world":"client","steps":1600,"rate":26.67,"clock_rate":26.67,"step_ms":{"p50":30.000,"p99":40.000,"max":41.000},"pre_ms":{"p50":0.0100,"p99":0.0200,"max":15.000},"post_ms":{"p50":0.0100,"p99":0.0200,"max":1.600},"interval_ms":{"p50":37.00,"p99":335.00,"max":340.00},"subs":{"pre":11,"post":1},"post_parts":{"subs":[{"owner":"plugin:kiln-emf.dll","max":1.600,"total":12.000,"over50":0}]},"pre_parts":{"subs":[]},"worst":{"at":"13:24:01.002","pre":0.020,"step":41.000,"post":0.010,"post_subs":[{"owner":"plugin:kiln-emf.dll","ms":0.010}],"pre_subs":[]}}"#;
+        let c = &tick_stats(client)[0];
+        assert_eq!(c.world.as_deref(), Some("client"));
+        let cp = c.post_parts.as_ref().unwrap();
+        assert!(cp.wait_ms.is_none() && cp.windows_ms.is_none() && cp.subs.len() == 1);
+        assert_eq!(c.worst.as_ref().map(|w| (w.wait, w.step)), Some((None, 41.0)));
+
+        // a line from before dev.29 has none of them; a part that does not read costs only itself
+        let old = &tick_stats(r#"{"time":"t","steps":3,"subs":{"pre":1,"post":0}}"#)[0];
+        assert!(old.post_parts.is_none() && old.pre_parts.is_none() && old.worst.is_none());
+        let odd = &tick_stats(r#"{"time":"t","steps":3,"post_parts":"later","worst":{"post_subs":7},"pre_parts":{"subs":[{"owner":"x","max":2}]}}"#)[0];
+        assert_eq!(odd.steps, 3);
+        assert!(odd.post_parts.is_none() && odd.worst.is_none());
+        assert_eq!(odd.pre_parts.as_ref().map(|p| p.subs[0].max), Some(2.0));
+
+        // issue #49: the tasks object, when the pool wrote one; the old line above has none
+        assert!(old.tasks.is_none());
+        let with_tasks = &tick_stats(r#"{"time":"t","steps":3,"tasks":{"window":{"id":7,"span_ms":60000.0,"age_ms":3.0},"pool":{"workers":3,"long_running":1,"queue_max":12},"owners":[{"owner":"kiln-auto-loot","queued":{"current":0,"max":4},"running":{"current":1,"max":2},"completed":120,"faulted":0,"cancelled":2,"cpu_ms":830.5,"wall_ms":910.2,"longest_ms":44.1,"longest_name":"loot-scan","queued_too_long":0,"running_too_long":0,"queue_full":0,"unload_blocked":0}],"apply":{"applied":96,"deferred":3,"cancelled":0,"ms":4.2,"owner_budget_stops":1,"step_budget_stops":0,"owners_served":1,"backlog":0},"hops":{"refused":0}}}"#)[0];
+        let tasks = with_tasks.tasks.as_ref().expect("tasks");
+        let (window, pool) = (tasks.window.as_ref().expect("window"), tasks.pool.as_ref().expect("pool"));
+        assert_eq!((window.id, window.span_ms, pool.queue_max), (Some(7), Some(60000.0), Some(12)));
+        assert_eq!((tasks.owners[0].owner.as_str(), tasks.owners[0].completed, tasks.owners[0].cpu_ms, tasks.owners[0].longest_name.as_deref()),
+            ("kiln-auto-loot", 120, 830.5, Some("loot-scan")));
+        let (apply, hops) = (tasks.apply.as_ref().expect("apply"), tasks.hops.as_ref().expect("hops"));
+        assert_eq!((apply.applied, apply.ms, hops.refused), (96, 4.2, 0));
+        assert_eq!(tasks.owners_truncated, None);
+        let again: TickStat = serde_json::from_str(&serde_json::to_string(with_tasks).unwrap()).unwrap();
+        assert_eq!(&again, with_tasks);
+        // a hosting client's client-world line (#82): only that world's hop account, still a tasks section
+        let client = &tick_stats(r#"{"time":"t","world":"client","steps":3,"tasks":{"apply":{"applied":5,"deferred":1,"cancelled":0,"ms":0.4,"owner_budget_stops":0,"step_budget_stops":1,"owners_served":1,"backlog":1},"hops":{"refused":2}}}"#)[0];
+        let ct = client.tasks.as_ref().expect("an apply-only tasks section reads");
+        assert!(ct.window.is_none() && ct.pool.is_none() && ct.owners.is_empty());
+        assert_eq!((ct.apply.as_ref().map(|a| a.applied), ct.hops.as_ref().map(|h| h.refused)), (Some(5), Some(2)));
+        // the native writer marks capped owner rows with a bool; the section must still read
+        let capped = &tick_stats(r#"{"time":"t","steps":1,"tasks":{"owners":[],"owners_truncated":true}}"#)[0];
+        assert_eq!(capped.tasks.as_ref().and_then(|t| t.owners_truncated), Some(true));
+    }
+
     #[test]
     fn stats() {
         let t = "{\"time\":\"2026-11-04T10:57:26\",\"steps\":1416,\"rate\":23.59,\"clock_rate\":60.24,\"step_ms\":{\"p50\":1.0,\"p99\":7.474,\"max\":24.311},\"subs\":{\"pre\":18,\"post\":1}}\nnot json\n";
@@ -615,6 +921,11 @@ mod tests {
                            [I 2] [host] stats: gc +0/+0/+0 pause +0.00 ms, heap 4.2 MB, game lines dropped 0\n");
         assert_eq!(m.len(), 1);
         assert_eq!((m[0].mod_id.as_str(), m[0].faults, m[0].ms_per_s), ("chat-test", 3, 0.002));
+        assert_eq!((m[0].pre_max_ms, m[0].post_max_ms), (None, None));
+        // since dev.29 the longest Pre and Post apart, inside the max field
+        let m = mod_stats("[I 1] [host] stats: auto-loot: pre 1.0312 ms/step, post 0.0000 ms/step, max 30.125 ms (pre 30.125 / post 0.000), 61.875 ms/s, faults 0\n");
+        assert_eq!(m.len(), 1);
+        assert_eq!((m[0].max_ms, m[0].pre_max_ms, m[0].post_max_ms, m[0].ms_per_s), (30.125, Some(30.125), Some(0.0), 61.875));
     }
 
     #[test]

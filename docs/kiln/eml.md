@@ -25,7 +25,11 @@ GPL-3.0-or-later plugin built from EML's own source (`kiln/plugins/kiln-eml.dll`
 - On Linux it needs `WINEDLLOVERRIDES="dbghelp=native,builtin"`, otherwise Wine's builtin dbghelp loads and EML never
   runs.
 - The runtime step (`loader.runtime.register_dll`, capability `runtime`) is a stub in 0.2.0: it is declared and logged,
-  and nothing is loaded.
+  and nothing is loaded. Kiln therefore requires ShroudForge for any enabled package declaring `runtime` or
+  `runtime-register-dll`: the launcher hosts ShroudForge even when no ShroudForge mods are selected, places the
+  EML package in its mods folder, and enables its switch. If that runtime is unavailable, kiln-eml skips the whole
+  package (`skipped`, with the cause and installation advice); it never applies just its data. Patch/export-only
+  packages keep running. This does not undo unowned patches or repair items already lost from a save.
 
 ### KFC patching
 The game data is `<exe>.kfc` (header and tables), `<exe>.kfc_resources` (resident resources) and
@@ -51,6 +55,7 @@ The game data is `<exe>.kfc` (header and tables), `<exe>.kfc_resources` (residen
 mods/<folder or .zip>/
   mod.json        { "id", "name", "version" (semver), "capabilities": ["patch"|"export"|"runtime"|"runtime-register-dll"],
                     "dependencies": [{ "id", "version" (semver req), "optional" }], "authors", "description", "license", "icon" }
+  // runtime and runtime-register-dll require ShroudForge; no data-only fallback
   src/mod.lua     the main module (require "mods.<id>" = src/mod.lua)
   src/**.lua      more modules: require("a.b") = src/a/b.lua; another mod's: require("mods.<id>.a.b")
   ...             data files the mod reads with io.read (inside its own folder only)
@@ -120,6 +125,7 @@ Each candidate is classified. Only EML mods run; everything else is logged and l
 |---|---|---|
 | `mod.json` (valid EML manifest) + `src/mod.lua`, or such a `.zip` | run | |
 | no `mod.json` | skipped | not an EML mod (logged quietly) |
+| no `mod.json` but a `kiln.mod.json` (a Kiln mod, folder or zip), or a subfolder of a Kiln mod unzipped loose (a `kiln.mod.json` next to it) | skipped | a Kiln mod: add its zip in the launcher's Library, or on a server unzip it into `kiln/mods/<mod>/` (logged as a warning) |
 | `flame.json` | skipped | a Flame mod |
 | `mod.json` with `dll`/`main`/`emf`/`emfMin`/`emf_api` | skipped | an EMF mod |
 | `extended.mod.json` whose `launcher` is not `"EML"` | skipped | a ShroudForge package (ShroudForge's runtime runs it) |
@@ -230,7 +236,7 @@ It fails soft:
   journals survive next-start cleanup; receipt, cleanup-record and journal temps there are removed. These SF journals
   are historical evidence, not instructions for rolling archives back; current recovery proof is in the stem receipt.
 - **ShroudForge asset mods and EML mods together.** In a start where Kiln hosts ShroudForge (the active profile lists
-  an enabled SF mod), only ShroudForge writes the game data: its early step reserves the writer before it prepares
+  an enabled SF mod or an EML package requiring runtime), only ShroudForge writes the game data: its early step reserves the writer before it prepares
   (`kiln.eml` `stand_aside`, section 6), and kiln-eml publishes `aside` and patches nothing. SF builds
   its startup asset mods and the EML packages in its mods folder that it has switched on in one pass, so the game has
   both. SF runs a package there only while its `extended.mod.json` says `enabled: true` (a legacy EML package has no
@@ -486,7 +492,48 @@ mods, which is the Linux case EML can't handle by itself. The profile's entries 
 launcher's copies in `mods/` are skipped as drop-ins. The installer (agent `detect`) may chain EML's `dinput8.dll`
 in `kiln/chain/`. It then loads, and kiln-eml stands aside, as verified on a lab server (section 5).
 
+### Modified EML loaders (a dbghelp.dll with code of its own)
+Some mods ship EML's `dbghelp.dll` rebuilt with code of their own. The first known one is "Put Away Your Weapon"
+(Nexus 371, EML mod `holster-toggle`, player report 2026-11-17; Kiln's analysis of its loader binary): EML's
+`mod-loader-runtime` crate, a stub in EML 0.2.0, grew a `native` layer. With `m182_native.json` next to the game
+(`enabled`, `holster`, `holster_key`, `pvp`, `pvp_friend_checks`) it starts a thread that, on the holster key (default
+F9, the shipped file sets 20 = Caps Lock), finds the weapon poses the mod's Lua part marked in the game data in the
+game's memory and rewrites them from `export/holster/map.json` (written by that Lua part through `io.export`, so EML's
+`eml.json` needs `use_export_flag: true`); and it replaces four of the game's functions (isEnemy/isFriend, found by
+exact byte patterns) with its own, for its PvP switch. That code runs only while the file is the process's EML loader.
+
+What Kiln does with one:
+- The Library recognises it (`engines::eml_loader_extras`: an EML loader whose panic and log locations name
+  `mod-loader-runtime` files other than `lib.rs`/`log.rs`, or known texts of such code) and leaves it out with what it is
+  and what does not run, never as "not needed". The EML mods of the package are imported as usual, and their Library
+  record carries `loaderPart`: the launcher's row says "Only partly runs", the game's `profile.json` hands it to
+  kiln-eml as `emlPartial`, and kiln-eml adds it to the mod's line in `state/eml.json` and warns in kiln.log
+  (`kiln-eml: EML mod holster-toggle: only its Lua part runs: ...`). Kiln runs the mods' Lua part (kiln-eml, or
+  ShroudForge when Kiln hosts it); the loader's own code does not run.
+- `m182_native.json` next to the game while no modified loader runs: kiln-eml warns that its code does nothing this
+  start. A modified loader next to the game that Wine did not load (no override) is named as one in kiln.log and in the
+  support report's `loader-in-folder` finding.
+- Kiln never loads a modified loader by itself: it is a whole EML loader, which patches the game data in its
+  `DllMain` (a second writer next to kiln-eml or ShroudForge), and the PvP part patches game code.
+
+Using one anyway is the player's choice, with the consequences of EML's own loader (section above; not checked in a real
+game with this mod): on Windows it runs from the game folder as `dbghelp.dll`; under Proton it needs
+`WINEDLLOVERRIDES="dbghelp=n,b"`, or, without an override, the name `dbghelp_<name>.dll` and a line in
+`dinput8-chain.ini` (Kiln's proxy loads it by path, kiln-eml stands aside for that name). kiln-eml then stands aside,
+the launcher copies the profile's EML mods into `mods/` for it, EML mods that need ShroudForge's runtime cannot be on
+(activation refuses), and ShroudForge mods do not run (hosted ShroudForge refuses to be a second writer). Its PvP
+part detours isEnemy/isFriend whenever `enabled` is true, also with `pvp: false` (all four patterns match build
+26430625 exactly once): those are the functions Kiln's NPC faction service hooks (`npcai/FactionHostileValue`,
+`npcai/FactionFriendValue`, `npcai/FactionFriendOpt`), so Kiln mods that set NPC relations may not work beside it. Under
+ShroudForge the Lua part's `io.export` files land in ShroudForge's exports folder (`shroudforge/exports`), not in
+`export/`, so the hotkey would not find its map there.
+
 ### Logs and state
+
+`could not prepare the game data: <step>: <cause>` names the refused preparation step and the file or underlying
+error in the log and state reasons. A backup seal mismatch means the vanilla pair cannot be trusted: verify the game
+files in Steam, then start through Kiln again. The same recovery applies when another tool changed the game data.
+A ShroudForge writer refusal carries its own lock or handoff explanation; let that writer finish before retrying.
 - `kiln.log`, owner `early:kiln-eml.dll`: EML's info, warning and error lines as `[eml] ...`, one line per failed or
   skipped mod, and a summary such as
   `kiln-eml: 2 EML mod(s) loaded, 3 resource(s) patched in enshrouded_server (1263 ms; hashed 12.0 KiB, reused 23 file(s))`.
@@ -675,7 +722,7 @@ focused test commands are in `gpl/kiln-eml/README.md`; the existing 89-function 
   prints the state JSON.
 
 ### Offline content check (2026-11-07, server build 1287369)
-Test mods (in `/mnt/Dongus/kiln-wave/eml/testmods/`, not in the repo):
+Test mods (kept outside the repository):
 - `kiln_eml_slice` sets `keen::BalancingTable.playerBaseStamina` = 777;
 - `kiln_eml_verify` (export) reads it back;
 - `kiln_eml_probe` calls the whole API;

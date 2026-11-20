@@ -177,6 +177,7 @@ public sealed class TkFakesMod : Mod
     private void OnChat(ChatMessageEvent e)
     {
         if (e.Text == "shout") e.Text = "SHOUT";
+        if (e.Text == "/tkf-redirect") e.Text = "/elsewhere now";  // a command line rewritten to another loader's command
     }
 
     [Subscribe]

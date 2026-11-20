@@ -2,6 +2,8 @@
 // VfxBlock -> kiln.vfx's builder. The block serialises to the same JSON a data file has, and the builder is the one that runs at boot. The game lists VFX
 // once at start, so a definition from code it has not seen is kept for the next start (status "pending"); from a data file it was already read at boot.
 // A dedicated server has no builder and no VFX: the block still has its id and its length, which is all the data that names it needs there.
+// Blocks.Define(name, VfxBlock, options) (since 0.2.0-dev.29, package 17a S2) lowers the same way and asks kiln.vfx's define_vfx_result
+// instead of define_json: an answer (registered, accepted for the next start, refused with a code) in place of a status.
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -43,8 +45,90 @@ internal static partial class Compiler
         return handle;
     }
 
+    /// <summary>One Blocks.Define(name, VfxBlock, options) call on this thread: its timing, and kiln.vfx's answer once
+    /// <see cref="Build"/> asked for it.</summary>
+    internal sealed class VfxAnswerScope(uint timing)
+    {
+        public uint Timing { get; } = timing;
+        public DefinitionRegistrationResult? Result;
+    }
+
+    [ThreadStatic] private static VfxAnswerScope? _answer;
+
+    /// <summary>Blocks.Define(name, VfxBlock, options): the lowering of <see cref="Define{T}"/> with kiln.vfx's answer. The block is
+    /// the mod's (its handle, its lowered JSON, a name other blocks can use) only when the answer is Registered or
+    /// AcceptedNextStart; a refusal leaves nothing behind.</summary>
+    internal static DefinitionRegistrationResult DefineVfxWithAnswer(ModBlocks mod, string name, VfxBlock block, uint timing)
+    {
+        if (KindTransaction.Current is not null)
+            throw new InvalidOperationException($"vfx {name}: a VFX defined with an answer is not part of a block kind's plan: define it in the mod's own code");
+        if (KindApply.NameReserved(mod, name)) throw new BlockError(name, null, "the name belongs to a block kind's pending or applied plan");
+        var scope = new VfxAnswerScope(timing);
+        var outer = _answer;
+        _answer = scope;
+        BlockHandle handle;
+        Lowered low;
+        string label;
+        try
+        {
+            (handle, low, label) = Lower(mod, name, block);
+        }
+        finally
+        {
+            _answer = outer;
+        }
+        var result = scope.Result ?? throw new InvalidOperationException($"vfx {name}: kiln.vfx gave no answer");
+        if (result.Ok)
+        {
+            low.Commit();
+            mod.Handles[name] = handle;
+            mod.Lowered[name] = low.Json;
+            mod.ReportDirty = true;
+            BlocksBridge.Log(LogLevel.Info, $"blocks: {mod.Id}: {label} -> {low.Summary()} ({result.State})");
+        }
+        else
+        {
+            BlocksBridge.Log(LogLevel.Info, $"blocks: {mod.Id}: {label}: {result.State} ({result.Code}): {result.Reason}");
+        }
+        VfxBudgetWatch.Defined(mod.Id, result);
+        return result;
+    }
+
+    // kiln.vfx's define_vfx_result for the block: a bad block throws by field as define_json's errors do; every other answer is the result.
+    private static VfxBlockStatus BuildWithAnswer(BlockContext ctx, Lowered low, string name, string blockJson, Guid guid, VfxAnswerScope scope)
+    {
+        var mod = ctx.Mod;
+        var document = $"{{\"format\":1,\"mod\":{JsonSerializer.Serialize(mod.Id)},\"dir\":{JsonSerializer.Serialize(BlocksBridge.ModDirectory(mod.Id))},\"block\":{blockJson}}}";
+        var a = VfxDefinitions.Define(mod.Owner, name, document, scope.Timing);
+        if (a.Rc == VfxNative.InvalidArgument)
+        {
+            var (field, text) = Field(a.Reason ?? "kiln.vfx refused the definition and did not say why", name);
+            throw new BlockError(ctx.Block, field, text);
+        }
+        if (a.Rc == VfxNative.Unavailable) throw VfxCaps.Off(VfxCaps.RegistrationRow, a.Reason ?? "kiln.vfx's result-bearing definitions are off");
+        if (a.Rc != VfxNative.Ok) throw new InvalidOperationException($"vfx {name}: kiln.vfx answered {a.Rc}{(a.Reason is { } why ? ": " + why : "")}");
+        var result = DefinitionRegistration.ToResult(a.Reply, a.Report);
+        if (result.Definition != guid)
+            throw new InvalidOperationException($"vfx {name}: kiln.vfx answered for {result.Definition}, and Kiln.Blocks has {guid}: this is a bug");
+        scope.Result = result;
+        if (result.Ok) Reskins.Registered(mod.Id);  // a block of the mod's is with kiln.vfx: its next unload is told again
+        low.Json["status"] = result.State switch
+        {
+            DefinitionRegistrationState.Registered => "registered",
+            DefinitionRegistrationState.AcceptedNextStart => "pending",
+            _ => "refused",
+        };
+        return result.State switch
+        {
+            DefinitionRegistrationState.Registered => VfxBlockStatus.Registered,
+            DefinitionRegistrationState.AcceptedNextStart => VfxBlockStatus.Pending,
+            _ => VfxBlockStatus.NotHere,
+        };
+    }
+
     private static VfxBlockStatus Build(BlockContext ctx, Lowered low, string name, string blockJson, Guid guid)
     {
+        if (_answer is { } answer) return BuildWithAnswer(ctx, low, name, blockJson, guid, answer);
         var mod = ctx.Mod;
         var status = VfxNative.BuildStatusJson();
         if (status == null)
@@ -62,6 +146,8 @@ internal static partial class Compiler
         var (result, problem, warnings) = ReadVfxReport(report, name, guid);
         foreach (var w in warnings) low.AfterCommit(() => BlocksBridge.Log(LogLevel.Warn, $"blocks: {mod.Id}: vfx {name}: {w}"));
         if (problem != null) throw new BlockError(ctx.Block, problem.Value.Field, problem.Value.Text);
+        // a block of the mod's is with kiln.vfx (the budget counts its VFX as the mod's again): its next unload is told again
+        Reskins.Registered(mod.Id);
         low.Json["status"] = result.ToString().ToLowerInvariant();
         if (result == VfxBlockStatus.Pending)
             low.AfterCommit(() =>

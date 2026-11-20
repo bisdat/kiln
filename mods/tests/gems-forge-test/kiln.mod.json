@@ -1,0 +1,8 @@
+{
+  "id": "gems-forge-test",
+  "name": "Gem wave G3 lab test: forge actions from code and players' forge actions",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "GemsForgeTest.dll",
+  "side": "server"
+}

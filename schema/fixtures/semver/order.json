@@ -1,5 +1,5 @@
 {
-  "description": "semver.org §11 precedence: each is lower than the next; build metadata is ignored",
+  "description": "semver.org §11 precedence: each is lower than the next; build metadata is ignored. Numeric pre-release identifiers compare by value at any length (no int limit), and below every alphanumeric one ('-1' is alphanumeric)",
   "ordered": [
     "1.0.0-alpha",
     "1.0.0-alpha.1",
@@ -7,6 +7,14 @@
     "1.0.0-beta",
     "1.0.0-beta.2",
     "1.0.0-beta.11",
+    "1.0.0-dev.9",
+    "1.0.0-dev.10",
+    "1.0.0-dev.2147483647",
+    "1.0.0-dev.2147483648",
+    "1.0.0-dev.9999999999",
+    "1.0.0-dev.10000000000",
+    "1.0.0-dev.18446744073709551616",
+    "1.0.0-dev.-1",
     "1.0.0-rc.1",
     "1.0.0",
     "1.0.1",
@@ -21,6 +29,10 @@
     [
       "1.2",
       "1.2.0"
+    ],
+    [
+      "1.0.0-dev.10000000000+linux",
+      "1.0.0-dev.10000000000+windows"
     ]
   ]
 }

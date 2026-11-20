@@ -1,4 +1,5 @@
-// Validates the contract examples (schema/examples) and every kiln.mod.json in mods/ against schema/*.schema.json.
+// Validates the contract examples (schema/examples), every kiln.mod.json in mods/ and the launcher's vendor manifest
+// (src/data/vendor-components.json) against schema/*.schema.json.
 //   bun run check:schemas
 import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
@@ -27,6 +28,7 @@ const exampleSchema = (name: string): string => {
   if (name === "native-state.json") return "native-state.schema.json";
   if (name.startsWith("native")) return "native.schema.json";
   if (name === "install-receipt.json") return "install-receipt.schema.json";
+  if (name === "kiln.publish.json") return "kiln-publish.schema.json"; // the project file kiln.publish.json, schema $id kiln-publish
   return name.replace(/\.json$/, ".schema.json");
 };
 
@@ -53,6 +55,8 @@ const walk = (dir: string): string[] =>
     return statSync(p).isDirectory() ? walk(p) : basename(p) === "kiln.mod.json" ? [p] : [];
   });
 for (const m of walk(join(repo, "mods")).filter((p) => !p.includes("sample-bad-manifest"))) check(m, "kiln.mod.schema.json");
+// the launcher's built-in vendor manifest (kiln_manage::vendor::manifest checks the rules a schema cannot)
+check(join(repo, "launcher", "src", "data", "vendor-components.json"), "vendor-components.schema.json");
 
 console.log(failed ? `${failed} of ${checked} files failed` : `ok: ${checked} files valid`);
 process.exit(failed ? 1 : 0);

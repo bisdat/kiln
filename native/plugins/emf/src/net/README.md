@@ -1,7 +1,9 @@
 # EMF v27 protocol implementation and the mod check on join
 
 These C++ files come from `src/core/net` and `src/core` in
-[matenm/emf-enshrouded v0.6.8](https://github.com/matenm/emf-enshrouded/tree/v0.6.8/src/core), under the MIT license
+[matenm/emf-enshrouded v0.6.8](https://github.com/matenm/emf-enshrouded/tree/v0.6.8/src/core) (the wire format and the mod
+check are unchanged through v0.6.14; EMF's changes to its own handling since v0.6.12, some like Kiln's below, are not
+merged here), under the MIT license
 in `licenses/EMF-LICENSE.txt`. The public C header is in `../../include/emf/emf_api.h`.
 
 - `net_line`, `net_link`, `net_peers`, `net_service` (`src/core/net`): mod messages over the game's chat. Kiln's changes

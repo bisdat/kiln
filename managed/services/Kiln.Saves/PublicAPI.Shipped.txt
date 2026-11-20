@@ -493,6 +493,7 @@ static Kiln.EntityData.Entities.get -> System.Collections.Generic.IReadOnlyList<
 static Kiln.EntityData.Get<T>(Kiln.EntityId entity, string! key) -> T!
 static Kiln.EntityData.Has(Kiln.EntityId entity, string! key) -> bool
 static Kiln.EntityData.IsPersistent(Kiln.EntityId entity) -> bool
+static Kiln.EntityData.Matched.get -> int
 static Kiln.EntityData.Remove(Kiln.EntityId entity, string! key) -> bool
 static Kiln.EntityData.Set<T>(Kiln.EntityId entity, string! key, T! value) -> void
 static Kiln.EntityData.TryGet<T>(Kiln.EntityId entity, string! key, out T? value) -> bool

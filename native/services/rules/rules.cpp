@@ -804,6 +804,10 @@ bool upgrade_free_guarded(void* tx, uint32_t owner, uintptr_t ret, unsigned long
     }
 }
 
+// kiln-items.dll's craft payment (kiln.stations, GitHub #68): set once at the first world, read by every payment.
+using CraftPayFn = int (*)(void*, void*, uint32_t, uint32_t, void*, uintptr_t, uint32_t*);
+std::atomic<CraftPayFn> g_craft_pay{nullptr};
+
 uint32_t __fastcall hk_pay(void* tx, int64_t* costs, uint32_t owner, uint32_t multiplier, void* extra) {
     if (kiln_rules_creative::idle()) return h_pay.call<uint32_t>(tx, costs, owner, multiplier, extra);
     const uintptr_t ret = h_pay.caller();  // the game's call site, read before the original
@@ -817,6 +821,13 @@ uint32_t __fastcall hk_pay(void* tx, int64_t* costs, uint32_t owner, uint32_t mu
     }
     // creative.cpp: the recipe function's payment for an operator with FREE_CRAFTING (its own return-address test)
     if (kiln_rules_creative::pay_free(ret, tx, owner)) return 0;
+    // kiln.stations: opted-in station outputs, last, on the recipe function's payment only (GitHub #68). Absent when
+    // kiln-items.dll is not loaded (looked up once, at the first world: arm_payments). A handled call does not run the
+    // game's payment again: a detour another loader put on InventoryPay before Kiln's does not run for that call.
+    uint32_t crafted = 0;
+    if (const CraftPayFn craft_pay = g_craft_pay.load(std::memory_order_acquire);
+        craft_pay && craft_pay(tx, costs, owner, multiplier, extra, ret, &crafted))
+        return crafted;
     return h_pay.call<uint32_t>(tx, costs, owner, multiplier, extra);
 }
 
@@ -1509,6 +1520,18 @@ void arm_payments() {
         else {
             g_upgrade_ret = 0;
             note("storage upgrade (rules.storage)");
+        }
+        // kiln.stations' craft sources (GitHub #68) answer through the same hook: installed for them alone when neither
+        // free crafting nor the storage upgrade needed it. kiln-items.dll reads HOOK_PAYMENT and lowers its row without it.
+        const HMODULE items = GetModuleHandleW(L"kiln-items.dll");
+        const auto craft_pay = items ? reinterpret_cast<CraftPayFn>(GetProcAddress(items, "kiln_stations_craft_pay")) : nullptr;
+        if (craft_pay && feat("stations.craft_sources") && !h_pay &&
+            !(sym("rules/InventoryPay", &pay) &&
+              inline_hook(h_pay, reinterpret_cast<void*>(pay), reinterpret_cast<void*>(&hk_pay), "the inventory payment", "rules/InventoryPay")))
+            note("station outputs in a craft (stations.craft_sources: payment hook failed)");
+        if (h_pay) {
+            g_craft_pay.store(craft_pay, std::memory_order_release);
+            g_hooks |= KILN_RULES_HOOK_PAYMENT;
         }
     }();
     g_hooks |= kiln_rules_flight::install(g_api, g_owner, off);  // character flight yields to Creative Mode too

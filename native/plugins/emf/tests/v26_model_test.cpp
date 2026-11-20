@@ -64,12 +64,25 @@ static void test_table() {
     // v28-v40 (EMF 0.6.3 to 0.6.8): EMF's own sizes, each a whole number of slots after the one before
     const uint32_t sizes[] = {736, 752, 776, 808, 864, 920, 952, 992, 1000, 1016, 1040, 1064, 1088};
     for (uint32_t v = 28; v <= 40; ++v) CHECK(api_size_for(v) == sizes[v - 28]);
-    CHECK(api_size_for(40) == sizeof(EmfApi));
-    CHECK(api_size_for(41) == 0);
-    CHECK(EMF_API_VERSION == 40);
-    // the "emf" gate of mod.json (mods.cpp refuses a requirement above the table's version)
-    CHECK(api_requirement(40) <= EMF_API_VERSION && api_requirement(41) > EMF_API_VERSION);
+    // v41 (EMF 0.6.10) and v42 (0.6.11): the version only, the table stays v40's
+    CHECK(api_size_for(41) == 1088 && api_size_for(42) == 1088);
+    // v43 (EMF 0.6.13) to v46 (0.6.14): player_permissions, then three block functions, v45 the version only, then
+    // three villager move functions (EMF's api_sizes.h at 0.6.14)
+    CHECK(api_size_for(43) == 1096 && api_size_for(44) == 1120 && api_size_for(45) == 1120 && api_size_for(46) == 1144);
+    CHECK(api_size_for(46) == sizeof(EmfApi));
+    CHECK(api_size_for(47) == 0);
+    CHECK(EMF_API_VERSION == 46);
+    // the "emf" gate of mod.json (mods.cpp refuses a requirement above the table's version): a mod of EMF 0.6.14 loads
+    for (uint64_t v = 41; v <= 46; ++v) CHECK(api_requirement(v) <= EMF_API_VERSION);
+    CHECK(api_requirement(47) > EMF_API_VERSION);
     CHECK(kRemoveBuildingV36Size == 144 && kPathQueryV37Size == 52 && kEnemyOrderV39Size == 120 && kMoveOrderV40Size == 128);
+    // the fields v41 and v42 appended (read by EMF only when a request's or result's `size` covers them)
+    CHECK(sizeof(EmfMoveOrder) == 136 && offsetof(EmfMoveOrder, stuck_seconds) == 128 && EMF_MOVE_PEACEFUL_ALL == 0x4u);
+    CHECK(kPathResultV37Size == 20 && sizeof(EmfPathResult) == 32 && offsetof(EmfPathResult, doors) == 24);
+    // v44's and v45's structs, and v46's hold_seconds in pad2's place
+    CHECK(kBreakBlocksV44Size == 160 && sizeof(EmfBreakBlocks) == 160 && kBreakResultV44Size == 20);
+    CHECK(kBlockInfoV44Size == 40 && kBlockInfoV45Size == 44 && sizeof(EmfBlockInfo) == 44);
+    CHECK(offsetof(EmfMoveOrder, hold_seconds) == 132 && EMF_MOVE_HOLD == 0x8u && EMF_BREAK_WORLD == 0x4u);
     // the hashes are kiln.world's component_hash: FNV-1a of "keen::ecs::<Name>"
     CHECK(fnv("keen::ecs::ScaleComponent") == kScaleComponent);
     CHECK(fnv("keen::ecs::InteractionPause") == kInteractionPause);
@@ -166,6 +179,64 @@ static void test_windows() {
     d.widgets=w;d.widget_size=61;w[0].height=1.00001f;
     CHECK(copy_window_def(&d,true,&r,&why) && r.widgets[0].height==0);
     CHECK(widget_takes_clicks(EMF_UI_IMAGE) && !widget_takes_clicks(EMF_UI_TEXT));
+}
+
+// The kiln.log line for a window (support reports): clickable widgets with their keys and texts, then texts; bounded.
+static void test_window_log() {
+    CHECK(log_text("Hunter\n(4 m)\t", 64) == "Hunter (4 m)");
+    CHECK(log_text(std::string(100, 'a'), 10) == std::string(10, 'a') + "...");
+    // never cut inside a UTF-8 sequence: "\xC3\xA9" is one character
+    CHECK(log_text("ab\xC3\xA9", 3) == "ab...");
+    WindowRequest r;
+    r.id = "expeditions";
+    r.title = "Expeditions";
+    WindowWidget h;
+    h.type = EMF_UI_HEADING;
+    h.text = "Survivors";
+    WindowWidget row;
+    row.type = EMF_UI_ROW;
+    row.key = "pick.7";
+    row.text = "Hunter (4 m)";
+    row.flags = EMF_UI_SELECTED;
+    WindowWidget send;
+    send.type = EMF_UI_BUTTON;
+    send.key = "send";
+    send.text = "Send";
+    send.flags = EMF_UI_DISABLED;
+    WindowWidget nokey;  // a button without a key sends nothing: not clickable
+    nokey.type = EMF_UI_BUTTON;
+    nokey.text = "Inert";
+    WindowWidget pic;
+    pic.type = EMF_UI_IMAGE;
+    pic.key = "portrait";
+    WindowWidget bar;
+    bar.type = EMF_UI_BAR;
+    bar.text = "50%";
+    r.widgets = {h, row, send, nokey, pic, bar};
+    const std::string s = window_log_summary(r);
+    CHECK(s == "\"Expeditions\", 6 widgets, events on the server world; clickable: pick.7 \"Hunter (4 m)\" (selected), "
+               "send \"Send\" (off), portrait (picture); text: \"Survivors\", \"Inert\"");
+    // nothing clickable, the client world
+    r.world_kind = EMF_WORLD_CLIENT;
+    r.widgets = {h};
+    CHECK(window_log_summary(r) == "\"Expeditions\", 1 widgets, events on the client world; clickable: none; text: \"Survivors\"");
+    // caps: rows, texts and the whole line
+    r.widgets.clear();
+    for (int i = 0; i < 40; ++i) {
+        WindowWidget x;
+        x.type = EMF_UI_ROW;
+        x.key = "r" + std::to_string(i);
+        x.text = std::string(200, 'x');
+        r.widgets.push_back(x);
+        WindowWidget t;
+        t.text = "t" + std::to_string(i);
+        r.widgets.push_back(t);
+    }
+    const std::string big = window_log_summary(r);
+    CHECK(big.size() <= kLogLineLen);
+    CHECK(big.find("r15 ") != std::string::npos && big.find("r16 ") == std::string::npos);
+    CHECK(big.find("+24 more") != std::string::npos);
+    CHECK(big.find("\"t5\"") != std::string::npos && big.find("\"t6\"") == std::string::npos && big.find("+34 more") != std::string::npos);
 }
 
 static void test_images() {
@@ -543,6 +614,7 @@ int main() {
     test_note_rows();
     test_level();
     test_windows();
+    test_window_log();
     test_images();
     test_components();
     test_offers();

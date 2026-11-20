@@ -1,1 +1,369 @@
 #nullable enable
+Kiln.DurabilityRule
+Kiln.DurabilityRule.Keep = 1 -> Kiln.DurabilityRule
+Kiln.DurabilityRule.KeepRatio = 0 -> Kiln.DurabilityRule
+Kiln.DurabilityRule.Repair = 2 -> Kiln.DurabilityRule
+Kiln.GearChangeSource
+Kiln.GearChangeSource.Code = 0 -> Kiln.GearChangeSource
+Kiln.GearChangeSource.Game = 2 -> Kiln.GearChangeSource
+Kiln.GearChangeSource.Upgrade = 1 -> Kiln.GearChangeSource
+Kiln.GearChangedEvent
+Kiln.GearChangedEvent.Changed.get -> Kiln.GearChanges
+Kiln.GearChanges
+Kiln.GearChanges.Durability = 4 -> Kiln.GearChanges
+Kiln.GearChanges.DurabilityRefresh = 8 -> Kiln.GearChanges
+Kiln.GearChanges.Enhancements = 1 -> Kiln.GearChanges
+Kiln.GearChanges.Level = 2 -> Kiln.GearChanges
+Kiln.GearChanges.None = 0 -> Kiln.GearChanges
+Kiln.GearEnhancedEvent
+Kiln.GearEnhancedEvent.From.get -> int
+Kiln.GearEnhancedEvent.To.get -> int
+Kiln.GearEvent
+Kiln.GearEvent.After.get -> Kiln.GearState!
+Kiln.GearEvent.Before.get -> Kiln.GearState!
+Kiln.GearEvent.Item.get -> Kiln.ItemInstanceRef
+Kiln.GearEvent.Origin.get -> string!
+Kiln.GearEvent.Source.get -> Kiln.GearChangeSource
+Kiln.GearRarityChangedEvent
+Kiln.GearRarityChangedEvent.From.get -> Kiln.ItemRarity
+Kiln.GearRarityChangedEvent.To.get -> Kiln.ItemRarity
+Kiln.GearResult
+Kiln.GearResult.<Clone>$() -> Kiln.GearResult!
+Kiln.GearResult.After.get -> Kiln.GearState?
+Kiln.GearResult.After.init -> void
+Kiln.GearResult.Before.get -> Kiln.GearState?
+Kiln.GearResult.Before.init -> void
+Kiln.GearResult.Changed.get -> Kiln.GearChanges
+Kiln.GearResult.Changed.init -> void
+Kiln.GearResult.Deconstruct(out Kiln.GearStatus Status, out Kiln.ItemInstanceRef Item, out Kiln.GearState? Before, out Kiln.GearState? After, out Kiln.GearChanges Changed, out string! Message, out int Steps, out bool DryRun) -> void
+Kiln.GearResult.DryRun.get -> bool
+Kiln.GearResult.DryRun.init -> void
+Kiln.GearResult.Equals(Kiln.GearResult? other) -> bool
+Kiln.GearResult.GearResult(Kiln.GearStatus Status, Kiln.ItemInstanceRef Item, Kiln.GearState? Before, Kiln.GearState? After, Kiln.GearChanges Changed, string! Message, int Steps, bool DryRun) -> void
+Kiln.GearResult.Item.get -> Kiln.ItemInstanceRef
+Kiln.GearResult.Item.init -> void
+Kiln.GearResult.Message.get -> string!
+Kiln.GearResult.Message.init -> void
+Kiln.GearResult.Ok.get -> bool
+Kiln.GearResult.Reason.get -> string?
+Kiln.GearResult.Status.get -> Kiln.GearStatus
+Kiln.GearResult.Status.init -> void
+Kiln.GearResult.Steps.get -> int
+Kiln.GearResult.Steps.init -> void
+Kiln.GearState
+Kiln.GearState.<Clone>$() -> Kiln.GearState!
+Kiln.GearState.BaseLevel.get -> int
+Kiln.GearState.BaseLevel.init -> void
+Kiln.GearState.Deconstruct(out Kiln.ItemInstanceRef Item, out Kiln.ItemId Type, out Kiln.ItemRarity Rarity, out Kiln.ItemRarity TypeRarity, out Kiln.ItemRarity MaxRarity, out int Level, out int BaseLevel, out int Enhancements, out int Unlocked, out int MaxLevel, out bool HasSocket, out int? Durability, out int? DurabilityMax, out System.Collections.Generic.IReadOnlyList<Kiln.PerkSlot!>! Perks) -> void
+Kiln.GearState.Durability.get -> int?
+Kiln.GearState.Durability.init -> void
+Kiln.GearState.DurabilityMax.get -> int?
+Kiln.GearState.DurabilityMax.init -> void
+Kiln.GearState.Enhancements.get -> int
+Kiln.GearState.Enhancements.init -> void
+Kiln.GearState.Equals(Kiln.GearState? other) -> bool
+Kiln.GearState.GearState(Kiln.ItemInstanceRef Item, Kiln.ItemId Type, Kiln.ItemRarity Rarity, Kiln.ItemRarity TypeRarity, Kiln.ItemRarity MaxRarity, int Level, int BaseLevel, int Enhancements, int Unlocked, int MaxLevel, bool HasSocket, int? Durability, int? DurabilityMax, System.Collections.Generic.IReadOnlyList<Kiln.PerkSlot!>! Perks) -> void
+Kiln.GearState.HasEnhancementSlots.get -> bool
+Kiln.GearState.HasEnhancementSlots.init -> void
+Kiln.GearState.HasSocket.get -> bool
+Kiln.GearState.HasSocket.init -> void
+Kiln.GearState.IsEquipped.get -> bool
+Kiln.GearState.IsEquipped.init -> void
+Kiln.GearState.Item.get -> Kiln.ItemInstanceRef
+Kiln.GearState.Item.init -> void
+Kiln.GearState.Level.get -> int
+Kiln.GearState.Level.init -> void
+Kiln.GearState.MaxLevel.get -> int
+Kiln.GearState.MaxLevel.init -> void
+Kiln.GearState.MaxRarity.get -> Kiln.ItemRarity
+Kiln.GearState.MaxRarity.init -> void
+Kiln.GearState.Perks.get -> System.Collections.Generic.IReadOnlyList<Kiln.PerkSlot!>!
+Kiln.GearState.Perks.init -> void
+Kiln.GearState.Rarity.get -> Kiln.ItemRarity
+Kiln.GearState.Rarity.init -> void
+Kiln.GearState.ShownLevel.get -> int
+Kiln.GearState.ShownLevel.init -> void
+Kiln.GearState.ShownRarity.get -> Kiln.ItemRarity
+Kiln.GearState.ShownRarity.init -> void
+Kiln.GearState.Type.get -> Kiln.ItemId
+Kiln.GearState.Type.init -> void
+Kiln.GearState.TypeLevelMax.get -> int
+Kiln.GearState.TypeLevelMax.init -> void
+Kiln.GearState.TypeLevelMin.get -> int
+Kiln.GearState.TypeLevelMin.init -> void
+Kiln.GearState.TypeRarity.get -> Kiln.ItemRarity
+Kiln.GearState.TypeRarity.init -> void
+Kiln.GearState.Unlocked.get -> int
+Kiln.GearState.Unlocked.init -> void
+Kiln.GearStatus
+Kiln.GearStatus.Done = 0 -> Kiln.GearStatus
+Kiln.GearStatus.Dropped = 7 -> Kiln.GearStatus
+Kiln.GearStatus.Equipped = 5 -> Kiln.GearStatus
+Kiln.GearStatus.NoSlot = 3 -> Kiln.GearStatus
+Kiln.GearStatus.NotGear = 2 -> Kiln.GearStatus
+Kiln.GearStatus.OutOfRange = 4 -> Kiln.GearStatus
+Kiln.GearStatus.Refused = 8 -> Kiln.GearStatus
+Kiln.GearStatus.Stale = 1 -> Kiln.GearStatus
+Kiln.GearStatus.Unavailable = 6 -> Kiln.GearStatus
+Kiln.GearWriteOptions
+Kiln.GearWriteOptions.<Clone>$() -> Kiln.GearWriteOptions!
+Kiln.GearWriteOptions.AllowEmptySlot.get -> bool
+Kiln.GearWriteOptions.AllowEmptySlot.init -> void
+Kiln.GearWriteOptions.DryRun.get -> bool
+Kiln.GearWriteOptions.DryRun.init -> void
+Kiln.GearWriteOptions.Durability.get -> Kiln.DurabilityRule
+Kiln.GearWriteOptions.Durability.init -> void
+Kiln.GearWriteOptions.Equals(Kiln.GearWriteOptions? other) -> bool
+Kiln.GearWriteOptions.GearWriteOptions() -> void
+Kiln.GearWriteOptions.RefuseEquipped.get -> bool
+Kiln.GearWriteOptions.RefuseEquipped.init -> void
+Kiln.PerkSlot
+Kiln.PerkSlot.<Clone>$() -> Kiln.PerkSlot!
+Kiln.PerkSlot.Available.get -> bool
+Kiln.PerkSlot.Available.init -> void
+Kiln.PerkSlot.Deconstruct(out int Index, out bool Available, out bool Unlocked, out bool TypeHasSlot) -> void
+Kiln.PerkSlot.Equals(Kiln.PerkSlot? other) -> bool
+Kiln.PerkSlot.Index.get -> int
+Kiln.PerkSlot.Index.init -> void
+Kiln.PerkSlot.PerkSlot(int Index, bool Available, bool Unlocked, bool TypeHasSlot) -> void
+Kiln.PerkSlot.TypeHasSlot.get -> bool
+Kiln.PerkSlot.TypeHasSlot.init -> void
+Kiln.PerkSlot.Unlocked.get -> bool
+Kiln.PerkSlot.Unlocked.init -> void
+override Kiln.GearChangedEvent.ToString() -> string!
+override Kiln.GearEnhancedEvent.ToString() -> string!
+override Kiln.GearRarityChangedEvent.ToString() -> string!
+override Kiln.GearResult.Equals(object? obj) -> bool
+override Kiln.GearResult.GetHashCode() -> int
+override Kiln.GearResult.ToString() -> string!
+override Kiln.GearState.Equals(object? obj) -> bool
+override Kiln.GearState.GetHashCode() -> int
+override Kiln.GearState.ToString() -> string!
+override Kiln.GearWriteOptions.Equals(object? obj) -> bool
+override Kiln.GearWriteOptions.GetHashCode() -> int
+override Kiln.GearWriteOptions.ToString() -> string!
+override Kiln.PerkSlot.Equals(object? obj) -> bool
+override Kiln.PerkSlot.GetHashCode() -> int
+override Kiln.PerkSlot.ToString() -> string!
+static Kiln.GearResult.operator !=(Kiln.GearResult? left, Kiln.GearResult? right) -> bool
+static Kiln.GearResult.operator ==(Kiln.GearResult? left, Kiln.GearResult? right) -> bool
+static Kiln.GearState.operator !=(Kiln.GearState? left, Kiln.GearState? right) -> bool
+static Kiln.GearState.operator ==(Kiln.GearState? left, Kiln.GearState? right) -> bool
+static Kiln.GearWriteOptions.Default.get -> Kiln.GearWriteOptions!
+static Kiln.GearWriteOptions.operator !=(Kiln.GearWriteOptions? left, Kiln.GearWriteOptions? right) -> bool
+static Kiln.GearWriteOptions.operator ==(Kiln.GearWriteOptions? left, Kiln.GearWriteOptions? right) -> bool
+static Kiln.Items.GearOf(Kiln.ItemInstanceRef item) -> Kiln.GearState?
+static Kiln.Items.GearReadAvailable.get -> bool
+static Kiln.Items.GearWriteAvailable.get -> bool
+static Kiln.Items.RarityOf(Kiln.ItemInstanceRef item) -> Kiln.ItemRarity?
+static Kiln.Items.SetEnhancements(Kiln.ItemInstanceRef item, int unlocked, Kiln.GearWriteOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GearResult!>!
+static Kiln.Items.SetLevel(Kiln.ItemInstanceRef item, int level, Kiln.GearWriteOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GearResult!>!
+static Kiln.Items.SetRarity(Kiln.ItemInstanceRef item, Kiln.ItemRarity rarity, Kiln.GearWriteOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GearResult!>!
+static Kiln.PerkSlot.operator !=(Kiln.PerkSlot? left, Kiln.PerkSlot? right) -> bool
+static Kiln.PerkSlot.operator ==(Kiln.PerkSlot? left, Kiln.PerkSlot? right) -> bool
+Kiln.GearUpgradedEvent
+Kiln.GearUpgradedEvent.Item.get -> Kiln.ItemInstanceRef
+Kiln.GearUpgradedEvent.Origin.get -> string!
+Kiln.GearUpgradedEvent.Player.get -> Kiln.EntityId
+Kiln.GearUpgradedEvent.Result.get -> Kiln.UpgradeResult!
+Kiln.GearUpgradedEvent.Succeeded.get -> bool
+Kiln.GearUpgradingEvent
+Kiln.GearUpgradingEvent.Chance.get -> double
+Kiln.GearUpgradingEvent.Chance.set -> void
+Kiln.GearUpgradingEvent.Cost.get -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, int>!
+Kiln.GearUpgradingEvent.Cost.set -> void
+Kiln.GearUpgradingEvent.From.get -> Kiln.ItemRarity
+Kiln.GearUpgradingEvent.Gear.get -> Kiln.GearState!
+Kiln.GearUpgradingEvent.Item.get -> Kiln.ItemInstanceRef
+Kiln.GearUpgradingEvent.Origin.get -> string!
+Kiln.GearUpgradingEvent.Player.get -> Kiln.EntityId
+Kiln.GearUpgradingEvent.Rule.get -> string?
+Kiln.GearUpgradingEvent.To.get -> Kiln.ItemRarity
+Kiln.RarityUpgradeRule
+Kiln.RarityUpgradeRule.<Clone>$() -> Kiln.RarityUpgradeRule!
+Kiln.RarityUpgradeRule.AllowEmptySlot.get -> bool
+Kiln.RarityUpgradeRule.AllowEmptySlot.init -> void
+Kiln.RarityUpgradeRule.Durability.get -> Kiln.DurabilityRule
+Kiln.RarityUpgradeRule.Durability.init -> void
+Kiln.RarityUpgradeRule.Equals(Kiln.RarityUpgradeRule? other) -> bool
+Kiln.RarityUpgradeRule.Items.get -> System.Collections.Generic.IReadOnlyList<string!>?
+Kiln.RarityUpgradeRule.Items.init -> void
+Kiln.RarityUpgradeRule.Max.get -> Kiln.ItemRarity
+Kiln.RarityUpgradeRule.Max.init -> void
+Kiln.RarityUpgradeRule.RarityUpgradeRule() -> void
+Kiln.RarityUpgradeRule.Socket.get -> Kiln.SocketRule
+Kiln.RarityUpgradeRule.Socket.init -> void
+Kiln.RarityUpgradeRule.Steps.get -> System.Collections.Generic.IDictionary<Kiln.ItemRarity, Kiln.UpgradeStep!>!
+Kiln.RarityUpgradeRule.Steps.init -> void
+Kiln.SocketRule
+Kiln.SocketRule.GameChance = 1 -> Kiln.SocketRule
+Kiln.SocketRule.Keep = 0 -> Kiln.SocketRule
+Kiln.UpgradeFail
+Kiln.UpgradeFail.Downgrade = 2 -> Kiln.UpgradeFail
+Kiln.UpgradeFail.KeepItemKeepCost = 1 -> Kiln.UpgradeFail
+Kiln.UpgradeFail.KeepItemLoseCost = 0 -> Kiln.UpgradeFail
+Kiln.UpgradeOptions
+Kiln.UpgradeOptions.<Clone>$() -> Kiln.UpgradeOptions!
+Kiln.UpgradeOptions.DryRun.get -> bool
+Kiln.UpgradeOptions.DryRun.init -> void
+Kiln.UpgradeOptions.Equals(Kiln.UpgradeOptions? other) -> bool
+Kiln.UpgradeOptions.Free.get -> bool
+Kiln.UpgradeOptions.Free.init -> void
+Kiln.UpgradeOptions.Guaranteed.get -> bool
+Kiln.UpgradeOptions.Guaranteed.init -> void
+Kiln.UpgradeOptions.PayFrom.get -> Kiln.EntityId
+Kiln.UpgradeOptions.PayFrom.init -> void
+Kiln.UpgradeOptions.UpgradeOptions() -> void
+Kiln.UpgradeResult
+Kiln.UpgradeResult.<Clone>$() -> Kiln.UpgradeResult!
+Kiln.UpgradeResult.After.get -> Kiln.GearState?
+Kiln.UpgradeResult.After.init -> void
+Kiln.UpgradeResult.Before.get -> Kiln.GearState?
+Kiln.UpgradeResult.Before.init -> void
+Kiln.UpgradeResult.Chance.get -> double
+Kiln.UpgradeResult.Chance.init -> void
+Kiln.UpgradeResult.Deconstruct(out Kiln.UpgradeStatus Status, out Kiln.EntityId Player, out Kiln.ItemInstanceRef Item, out Kiln.ItemRarity From, out Kiln.ItemRarity To, out Kiln.GearState? Before, out Kiln.GearState? After, out System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, int>! Paid, out double Chance, out double? Rolled, out string! Message) -> void
+Kiln.UpgradeResult.DryRun.get -> bool
+Kiln.UpgradeResult.DryRun.init -> void
+Kiln.UpgradeResult.Equals(Kiln.UpgradeResult? other) -> bool
+Kiln.UpgradeResult.From.get -> Kiln.ItemRarity
+Kiln.UpgradeResult.From.init -> void
+Kiln.UpgradeResult.Item.get -> Kiln.ItemInstanceRef
+Kiln.UpgradeResult.Item.init -> void
+Kiln.UpgradeResult.Message.get -> string!
+Kiln.UpgradeResult.Message.init -> void
+Kiln.UpgradeResult.Ok.get -> bool
+Kiln.UpgradeResult.Paid.get -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, int>!
+Kiln.UpgradeResult.Paid.init -> void
+Kiln.UpgradeResult.Player.get -> Kiln.EntityId
+Kiln.UpgradeResult.Player.init -> void
+Kiln.UpgradeResult.Reason.get -> string?
+Kiln.UpgradeResult.Rolled.get -> double?
+Kiln.UpgradeResult.Rolled.init -> void
+Kiln.UpgradeResult.Rule.get -> string?
+Kiln.UpgradeResult.Rule.init -> void
+Kiln.UpgradeResult.SocketAdded.get -> bool
+Kiln.UpgradeResult.SocketAdded.init -> void
+Kiln.UpgradeResult.Status.get -> Kiln.UpgradeStatus
+Kiln.UpgradeResult.Status.init -> void
+Kiln.UpgradeResult.To.get -> Kiln.ItemRarity
+Kiln.UpgradeResult.To.init -> void
+Kiln.UpgradeResult.UpgradeResult(Kiln.UpgradeStatus Status, Kiln.EntityId Player, Kiln.ItemInstanceRef Item, Kiln.ItemRarity From, Kiln.ItemRarity To, Kiln.GearState? Before, Kiln.GearState? After, System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, int>! Paid, double Chance, double? Rolled, string! Message) -> void
+Kiln.UpgradeStatus
+Kiln.UpgradeStatus.AtMax = 3 -> Kiln.UpgradeStatus
+Kiln.UpgradeStatus.Canceled = 6 -> Kiln.UpgradeStatus
+Kiln.UpgradeStatus.CantPay = 5 -> Kiln.UpgradeStatus
+Kiln.UpgradeStatus.Done = 0 -> Kiln.UpgradeStatus
+Kiln.UpgradeStatus.Dropped = 11 -> Kiln.UpgradeStatus
+Kiln.UpgradeStatus.Failed = 1 -> Kiln.UpgradeStatus
+Kiln.UpgradeStatus.NoSlot = 2 -> Kiln.UpgradeStatus
+Kiln.UpgradeStatus.NotAllowed = 4 -> Kiln.UpgradeStatus
+Kiln.UpgradeStatus.NotGear = 10 -> Kiln.UpgradeStatus
+Kiln.UpgradeStatus.Refused = 7 -> Kiln.UpgradeStatus
+Kiln.UpgradeStatus.Stale = 9 -> Kiln.UpgradeStatus
+Kiln.UpgradeStatus.Unavailable = 8 -> Kiln.UpgradeStatus
+Kiln.UpgradeStep
+Kiln.UpgradeStep.<Clone>$() -> Kiln.UpgradeStep!
+Kiln.UpgradeStep.Chance.get -> double
+Kiln.UpgradeStep.Chance.init -> void
+Kiln.UpgradeStep.Cost.get -> System.Collections.Generic.IDictionary<string!, int>!
+Kiln.UpgradeStep.Cost.init -> void
+Kiln.UpgradeStep.Equals(Kiln.UpgradeStep? other) -> bool
+Kiln.UpgradeStep.LevelScale.get -> double
+Kiln.UpgradeStep.LevelScale.init -> void
+Kiln.UpgradeStep.OnFail.get -> Kiln.UpgradeFail
+Kiln.UpgradeStep.OnFail.init -> void
+Kiln.UpgradeStep.Unlock.get -> bool
+Kiln.UpgradeStep.Unlock.init -> void
+Kiln.UpgradeStep.UpgradeStep() -> void
+const Kiln.UpgradeStep.DefaultChance = 1 -> double
+const Kiln.UpgradeStep.DefaultOnFail = Kiln.UpgradeFail.KeepItemLoseCost -> Kiln.UpgradeFail
+override Kiln.GearUpgradedEvent.ToString() -> string!
+override Kiln.GearUpgradingEvent.ToString() -> string!
+override Kiln.RarityUpgradeRule.Equals(object? obj) -> bool
+override Kiln.RarityUpgradeRule.GetHashCode() -> int
+override Kiln.RarityUpgradeRule.ToString() -> string!
+override Kiln.UpgradeOptions.Equals(object? obj) -> bool
+override Kiln.UpgradeOptions.GetHashCode() -> int
+override Kiln.UpgradeOptions.ToString() -> string!
+override Kiln.UpgradeResult.Equals(object? obj) -> bool
+override Kiln.UpgradeResult.GetHashCode() -> int
+override Kiln.UpgradeResult.ToString() -> string!
+override Kiln.UpgradeStep.Equals(object? obj) -> bool
+override Kiln.UpgradeStep.GetHashCode() -> int
+override Kiln.UpgradeStep.ToString() -> string!
+static Kiln.Items.UpgradeAvailable.get -> bool
+static Kiln.Items.UpgradeRarity(Kiln.EntityId player, Kiln.ItemInstanceRef item, Kiln.RarityUpgradeRule! rule, Kiln.UpgradeOptions? options = null) -> System.Threading.Tasks.Task<Kiln.UpgradeResult!>!
+static Kiln.Items.UpgradeRarity(Kiln.EntityId player, Kiln.ItemInstanceRef item, string! rule, Kiln.UpgradeOptions? options = null) -> System.Threading.Tasks.Task<Kiln.UpgradeResult!>!
+static Kiln.RarityUpgradeRule.operator !=(Kiln.RarityUpgradeRule? left, Kiln.RarityUpgradeRule? right) -> bool
+static Kiln.RarityUpgradeRule.operator ==(Kiln.RarityUpgradeRule? left, Kiln.RarityUpgradeRule? right) -> bool
+static Kiln.UpgradeOptions.Default.get -> Kiln.UpgradeOptions!
+static Kiln.UpgradeOptions.operator !=(Kiln.UpgradeOptions? left, Kiln.UpgradeOptions? right) -> bool
+static Kiln.UpgradeOptions.operator ==(Kiln.UpgradeOptions? left, Kiln.UpgradeOptions? right) -> bool
+static Kiln.UpgradeResult.operator !=(Kiln.UpgradeResult? left, Kiln.UpgradeResult? right) -> bool
+static Kiln.UpgradeResult.operator ==(Kiln.UpgradeResult? left, Kiln.UpgradeResult? right) -> bool
+static Kiln.UpgradeStep.operator !=(Kiln.UpgradeStep? left, Kiln.UpgradeStep? right) -> bool
+static Kiln.UpgradeStep.operator ==(Kiln.UpgradeStep? left, Kiln.UpgradeStep? right) -> bool
+Kiln.GearChanges.DurabilityMax = 16 -> Kiln.GearChanges
+Kiln.GearResult.Kept.get -> bool
+Kiln.GearResult.Kept.init -> void
+Kiln.GearValues
+Kiln.GearValues.<Clone>$() -> Kiln.GearValues!
+Kiln.GearValues.Armor.get -> double
+Kiln.GearValues.Armor.init -> void
+Kiln.GearValues.Deconstruct(out Kiln.ItemInstanceRef Item, out double Power, out double Armor, out int? KeptBaseLevel, out int? KeptDurabilityMax, out bool Kept) -> void
+Kiln.GearValues.Equals(Kiln.GearValues? other) -> bool
+Kiln.GearValues.GearValues(Kiln.ItemInstanceRef Item, double Power, double Armor, int? KeptBaseLevel, int? KeptDurabilityMax, bool Kept) -> void
+Kiln.GearValues.Item.get -> Kiln.ItemInstanceRef
+Kiln.GearValues.Item.init -> void
+Kiln.GearValues.Kept.get -> bool
+Kiln.GearValues.Kept.init -> void
+Kiln.GearValues.KeptBaseLevel.get -> int?
+Kiln.GearValues.KeptBaseLevel.init -> void
+Kiln.GearValues.KeptDurabilityMax.get -> int?
+Kiln.GearValues.KeptDurabilityMax.init -> void
+Kiln.GearValues.Power.get -> double
+Kiln.GearValues.Power.init -> void
+Kiln.GearValuesResult
+Kiln.GearValuesResult.<Clone>$() -> Kiln.GearValuesResult!
+Kiln.GearValuesResult.Armor.get -> double
+Kiln.GearValuesResult.Armor.init -> void
+Kiln.GearValuesResult.Deconstruct(out Kiln.GearValuesStatus Status, out Kiln.ItemInstanceRef Item, out double Power, out double Armor, out bool Kept, out string! Message) -> void
+Kiln.GearValuesResult.Equals(Kiln.GearValuesResult? other) -> bool
+Kiln.GearValuesResult.GearValuesResult(Kiln.GearValuesStatus Status, Kiln.ItemInstanceRef Item, double Power, double Armor, bool Kept, string! Message) -> void
+Kiln.GearValuesResult.Item.get -> Kiln.ItemInstanceRef
+Kiln.GearValuesResult.Item.init -> void
+Kiln.GearValuesResult.Kept.get -> bool
+Kiln.GearValuesResult.Kept.init -> void
+Kiln.GearValuesResult.Message.get -> string!
+Kiln.GearValuesResult.Message.init -> void
+Kiln.GearValuesResult.Ok.get -> bool
+Kiln.GearValuesResult.Power.get -> double
+Kiln.GearValuesResult.Power.init -> void
+Kiln.GearValuesResult.Reason.get -> string?
+Kiln.GearValuesResult.Status.get -> Kiln.GearValuesStatus
+Kiln.GearValuesResult.Status.init -> void
+Kiln.GearValuesStatus
+Kiln.GearValuesStatus.Done = 0 -> Kiln.GearValuesStatus
+Kiln.GearValuesStatus.Full = 2 -> Kiln.GearValuesStatus
+Kiln.GearValuesStatus.Stale = 1 -> Kiln.GearValuesStatus
+Kiln.GearWriteOptions.AnyLevel.get -> bool
+Kiln.GearWriteOptions.AnyLevel.init -> void
+const Kiln.Items.MaxScale = 100 -> double
+const Kiln.Items.MinScale = 0.01 -> double
+override Kiln.GearValues.Equals(object? obj) -> bool
+override Kiln.GearValues.GetHashCode() -> int
+override Kiln.GearValues.ToString() -> string!
+override Kiln.GearValuesResult.Equals(object? obj) -> bool
+override Kiln.GearValuesResult.GetHashCode() -> int
+override Kiln.GearValuesResult.ToString() -> string!
+static Kiln.GearValues.operator !=(Kiln.GearValues? left, Kiln.GearValues? right) -> bool
+static Kiln.GearValues.operator ==(Kiln.GearValues? left, Kiln.GearValues? right) -> bool
+static Kiln.GearValuesResult.operator !=(Kiln.GearValuesResult? left, Kiln.GearValuesResult? right) -> bool
+static Kiln.GearValuesResult.operator ==(Kiln.GearValuesResult? left, Kiln.GearValuesResult? right) -> bool
+static Kiln.Items.ArmorAvailable.get -> bool
+static Kiln.Items.PowerAvailable.get -> bool
+static Kiln.Items.SetArmor(Kiln.ItemInstanceRef item, double scale) -> Kiln.GearValuesResult!
+static Kiln.Items.SetDurabilityMax(Kiln.ItemInstanceRef item, int? max, Kiln.GearWriteOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GearResult!>!
+static Kiln.Items.SetPower(Kiln.ItemInstanceRef item, double scale) -> Kiln.GearValuesResult!
+static Kiln.Items.ValuesOf(Kiln.ItemInstanceRef item) -> Kiln.GearValues?

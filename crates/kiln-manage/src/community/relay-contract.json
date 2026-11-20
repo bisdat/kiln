@@ -1,0 +1,280 @@
+{
+  "about": "Examples of every relay endpoint: request and answer, as test/relay-contract.test.mjs checks them against the real relay. docs/relay-api.md is the contract in words. A string in angle brackets is a placeholder (see placeholders); any other value must match exactly. Objects have exactly the keys shown.",
+  "base": "https://frostdev.io/kiln/relay",
+  "pages": "https://frostdev.io/kiln/signin/<id>, https://frostdev.io/link[/<code8>], https://frostdev.io/kiln/auth/callback, https://frostdev.io/kiln/signin/done",
+  "auth": "Endpoints marked auth take the header Authorization: Bearer <token> (the session key from /signin/exchange or /signin/poll).",
+  "placeholders": {
+    "<id>": "43 base64url characters (a sign-in id)",
+    "<token>": "43 base64url characters (a session key)",
+    "<snowflake>": "a Discord id: 17 to 20 digits",
+    "<time>": "an ISO 8601 time in UTC, like 2026-11-18T12:00:00.000Z",
+    "<code>": "a sign-in code as shown: XXXX-XXXX from ABCDEFGHJKMNPQRSTUVWXYZ23456789",
+    "<code8>": "the same code without the dash",
+    "<report>": "a report id: KR- and 4 symbols of the same alphabet",
+    "<text>": "a sentence for people (may change; do not parse)",
+    "<url>": "an https address",
+    "<number>": "a number",
+    "<any>": "any value"
+  },
+  "types": {
+    "Account": { "id": "<snowflake>", "name": "display name, else user name", "username": "string or null", "avatar": "avatar hash or null", "avatarUrl": "<url> or null", "member": "boolean: in the Kiln Discord", "tester": "boolean" },
+    "Post": { "id": "<snowflake> (the thread)", "title": "string", "url": "https://discord.com/channels/<guild>/<thread>", "created": "<time>", "status": "waiting | replied | solved | closed", "replies": "number of replies (not the app's own messages)", "unread": "replies by others since the player last opened it", "lastReply": "{ name, team (boolean: of the Kiln team), at: <time> } or null", "zip": "team | public | none" },
+    "Result": { "build": "the test build (a Kiln version)", "sentAt": "<time>", "url": "the result message on Discord", "read": "{ by: team member's name, at: <time> } or null", "replied": "boolean: a team member replied to it or mentioned the tester" },
+    "Error": { "error": "a stable code", "message": "<text>", "...": "more fields for some codes (below)" }
+  },
+  "errors": {
+    "bad-request": [400, "the request is malformed; message says what"],
+    "signed-out": [401, "no session, or it ended; sign in again"],
+    "refused": [403, "the verifier, secret or code does not match this sign-in"],
+    "not-member": [403, "not in the Kiln Discord; has invite"],
+    "too-new": [403, "the Discord account is under 3 days old; has retryAt"],
+    "not-tester": [403, "results need Volunteer first"],
+    "not-found": [404, "no such endpoint, or not your post"],
+    "bad-method": [405, "method not allowed"],
+    "waiting": [409, "the sign-in is not finished yet"],
+    "no-test-post": [409, "the test build has no #testing post yet"],
+    "expired": [410, "the sign-in expired or was used"],
+    "too-big": [413, "has limit (bytes) and, for a zip part, size"],
+    "bad-zip": [422, "not one of our report zips; has problem"],
+    "rate-limited": [429, "has retryAt and limit (hour, day or network); reports also lastPost"],
+    "slow-down": [429, "has retryAfter (seconds); also the Retry-After header"],
+    "internal": [500, "a bug on the relay"],
+    "discord-refused": [502, "Discord refused the relay's request (a 4xx but 429); has discordStatus, discordCode (or null) and discordMessage (Discord's reason in one line, or null). On our side, not the player's connection"],
+    "unavailable": [503, "Discord is not answering (or the account is blocked: deliberately the same answer)"],
+    "discord-rate-limited": [503, "Discord's rate limit is longer than the relay waits; has retryAfter (seconds); also the Retry-After header"],
+    "busy": [503, "too many uploads at once; nothing was used up"]
+  },
+  "endpoints": [
+    {
+      "name": "start a desktop sign-in",
+      "method": "POST", "path": "/signin",
+      "request": { "mode": "browser", "join": true, "challenge": "<base64url SHA-256 of a random 32-byte secret>", "port": 51234, "device": "desktop", "version": "0.2.0-dev.30" },
+      "answer": { "status": 201, "body": { "id": "<id>", "code": "<code>", "url": "https://frostdev.io/kiln/signin/<id>", "expiresAt": "<time>", "pollEvery": 2 } },
+      "notes": "port: the launcher's loopback listener (1024-65535); leave it out when it can't listen, then poll (the player then presses Approve on the page first). device defaults to desktop for browser and deck for qr; version is optional. The launcher opens url in the browser."
+    },
+    {
+      "name": "start a Deck sign-in (QR pairing)",
+      "method": "POST", "path": "/signin",
+      "request": { "mode": "qr", "join": true, "challenge": "<base64url SHA-256 of a random 32-byte secret>", "version": "0.2.0-dev.30" },
+      "answer": { "status": 201, "body": { "id": "<id>", "code": "<code>", "url": "https://frostdev.io/link/<code8>", "expiresAt": "<time>", "pollEvery": 2 } },
+      "notes": "The Deck shows url as a QR code and code as text; frostdev.io/link takes a typed code."
+    },
+    {
+      "name": "too many sign-ins from one network",
+      "method": "POST", "path": "/signin",
+      "request": { "mode": "qr", "challenge": "<...>" },
+      "answer": { "status": 429, "body": { "error": "rate-limited", "message": "<text>", "retryAt": "<time>", "limit": "network" } }
+    },
+    {
+      "name": "finish a desktop sign-in with the loopback's one-time code",
+      "method": "POST", "path": "/signin/exchange",
+      "request": { "id": "<id>", "code": "<the c parameter of http://127.0.0.1:<port>/done?c=...>", "verifier": "<the secret>" },
+      "answer": { "status": 200, "body": { "token": "<token>", "account": { "id": "<snowflake>", "name": "Emberfox", "username": "emberfox", "avatar": "<any>", "avatarUrl": "<any>", "member": true, "tester": false } } },
+      "notes": "Works once. The loopback handler can then send the browser to https://frostdev.io/kiln/signin/done."
+    },
+    {
+      "name": "exchange with the wrong verifier",
+      "method": "POST", "path": "/signin/exchange",
+      "request": { "id": "<id>", "code": "<code>", "verifier": "<another secret>" },
+      "answer": { "status": 403, "body": { "error": "refused", "message": "<text>" } }
+    },
+    {
+      "name": "poll while waiting",
+      "method": "POST", "path": "/signin/poll",
+      "request": { "id": "<id>", "secret": "<the secret>" },
+      "answer": { "status": 200, "body": { "state": "waiting", "expiresAt": "<time>" } },
+      "notes": "At most every 2 seconds. A desktop sign-in without a port is collected by the poll (after Approve on the page); with a port only by the exchange, and the poll stays waiting."
+    },
+    {
+      "name": "poll after Approve",
+      "method": "POST", "path": "/signin/poll",
+      "request": { "id": "<id>", "secret": "<the secret>" },
+      "answer": { "status": 200, "body": { "state": "approved", "token": "<token>", "account": { "id": "<snowflake>", "name": "Emberfox", "username": "emberfox", "avatar": "<any>", "avatarUrl": "<any>", "member": true, "tester": false } } },
+      "notes": "Once: the sign-in is deleted with this answer."
+    },
+    {
+      "name": "poll after Decline on the phone",
+      "method": "POST", "path": "/signin/poll",
+      "request": { "id": "<id>", "secret": "<the secret>" },
+      "answer": { "status": 200, "body": { "state": "denied" } }
+    },
+    {
+      "name": "poll after Cancel on Discord's page",
+      "method": "POST", "path": "/signin/poll",
+      "request": { "id": "<id>", "secret": "<the secret>" },
+      "answer": { "status": 200, "body": { "state": "canceled" } }
+    },
+    {
+      "name": "poll an expired or unknown sign-in",
+      "method": "POST", "path": "/signin/poll",
+      "request": { "id": "<id>", "secret": "<the secret>" },
+      "answer": { "status": 200, "body": { "state": "expired" } }
+    },
+    {
+      "name": "poll too often",
+      "method": "POST", "path": "/signin/poll",
+      "request": { "id": "<id>", "secret": "<the secret>" },
+      "answer": { "status": 429, "body": { "error": "slow-down", "message": "<text>", "retryAfter": 2 } }
+    },
+    {
+      "name": "the account",
+      "method": "GET", "path": "/me", "auth": true,
+      "answer": { "status": 200, "body": { "account": { "id": "<snowflake>", "name": "Emberfox", "username": "emberfox", "avatar": "<any>", "avatarUrl": "<any>", "member": true, "tester": false } } },
+      "notes": "Membership is read from Discord (at most once a minute). When Discord is down the answer adds \"stale\": true and member is the last known."
+    },
+    {
+      "name": "the account, signed out",
+      "method": "GET", "path": "/me",
+      "answer": { "status": 401, "body": { "error": "signed-out", "message": "<text>" } }
+    },
+    {
+      "name": "send a report (zip to the team)",
+      "method": "POST", "path": "/reports", "auth": true,
+      "request": "multipart/form-data: draft (JSON) {\"title\":\"Mods don't load since the game update\",\"kind\":\"noload\",\"text\":\"It worked yesterday.\",\"zip\":\"team\"}, zip (file, the report zip)",
+      "answer": { "status": 201, "body": { "post": { "id": "<snowflake>", "title": "Mods don't load since the game update", "url": "<url>", "created": "<time>", "status": "waiting", "replies": 0, "unread": 0, "lastReply": null, "zip": "team" }, "tags": ["Mods", "Linux"], "reportId": "<report>", "known": null } },
+      "notes": "draft: title 3-90 characters (one line); kind noload|mod|crash|launcher|server|other; when (optional) start|menu|load|play|join|other; text up to 1500 characters; zip team|public|none (default team); known (optional) the id of the known problem the player saw. With zip none, send report.json alone as the part report (a file) instead of zip. The request is at most 9 MiB, the zip at most 8 MiB."
+    },
+    {
+      "name": "send a report, not in the server",
+      "method": "POST", "path": "/reports", "auth": true,
+      "request": "multipart/form-data: draft, zip",
+      "answer": { "status": 403, "body": { "error": "not-member", "message": "<text>", "invite": "https://discord.gg/7pjr8SMTfU" } }
+    },
+    {
+      "name": "send a report, account under 3 days old",
+      "method": "POST", "path": "/reports", "auth": true,
+      "request": "multipart/form-data: draft, zip",
+      "answer": { "status": 403, "body": { "error": "too-new", "message": "<text>", "retryAt": "<time>" } }
+    },
+    {
+      "name": "send a report, not one of our zips",
+      "method": "POST", "path": "/reports", "auth": true,
+      "request": "multipart/form-data: draft, zip (not a report)",
+      "answer": { "status": 422, "body": { "error": "bad-zip", "message": "<text>", "problem": "<text>" } }
+    },
+    {
+      "name": "send a report, zip too big",
+      "method": "POST", "path": "/reports", "auth": true,
+      "request": "multipart/form-data: draft, zip (over 8 MiB)",
+      "answer": { "status": 413, "body": { "error": "too-big", "message": "<text>", "size": "<number>", "limit": 8388608 } }
+    },
+    {
+      "name": "send a report, too many this hour",
+      "method": "POST", "path": "/reports", "auth": true,
+      "request": "multipart/form-data: draft, zip",
+      "answer": { "status": 429, "body": { "error": "rate-limited", "message": "<text>", "retryAt": "<time>", "limit": "hour", "lastPost": "<url>" } }
+    },
+    {
+      "name": "send a report, Discord not answering",
+      "method": "POST", "path": "/reports", "auth": true,
+      "request": "multipart/form-data: draft, zip",
+      "answer": { "status": 503, "body": { "error": "unavailable", "message": "<text>" } }
+    },
+    {
+      "name": "send a report, Discord refused it",
+      "method": "POST", "path": "/reports", "auth": true,
+      "request": "multipart/form-data: draft, zip",
+      "answer": { "status": 502, "body": { "error": "discord-refused", "message": "<text>", "discordStatus": 403, "discordCode": 50013, "discordMessage": "Missing Permissions" } }
+    },
+    {
+      "name": "send a report, Discord rate-limits the relay",
+      "method": "POST", "path": "/reports", "auth": true,
+      "request": "multipart/form-data: draft, zip",
+      "answer": { "status": 503, "body": { "error": "discord-rate-limited", "message": "<text>", "retryAfter": 38 } }
+    },
+    {
+      "name": "your posts",
+      "method": "GET", "path": "/posts", "auth": true,
+      "answer": { "status": 200, "body": { "posts": [{ "id": "<snowflake>", "title": "Mods don't load since the game update", "url": "<url>", "created": "<time>", "status": "replied", "replies": 1, "unread": 1, "lastReply": { "name": "Rowan", "team": true, "at": "<time>" }, "zip": "team" }], "unread": 1 } },
+      "notes": "Newest first, at most 200. Ask when the page opens and every 5 minutes."
+    },
+    {
+      "name": "opened a post",
+      "method": "POST", "path": "/posts/<snowflake>/seen", "auth": true,
+      "answer": { "status": 200, "body": { "post": { "id": "<snowflake>", "title": "Mods don't load since the game update", "url": "<url>", "created": "<time>", "status": "replied", "replies": 1, "unread": 0, "lastReply": { "name": "Rowan", "team": true, "at": "<time>" }, "zip": "team" } } },
+      "notes": "No body."
+    },
+    {
+      "name": "It's fixed",
+      "method": "POST", "path": "/posts/<snowflake>/solved", "auth": true,
+      "answer": { "status": 200, "body": { "post": { "id": "<snowflake>", "title": "Mods don't load since the game update", "url": "<url>", "created": "<time>", "status": "solved", "replies": 1, "unread": 0, "lastReply": { "name": "Rowan", "team": true, "at": "<time>" }, "zip": "team" } } },
+      "notes": "Adds the Solved tag on Discord. No body."
+    },
+    {
+      "name": "Delete my post",
+      "method": "DELETE", "path": "/posts/<snowflake>", "auth": true,
+      "answer": { "status": 200, "body": { "ok": true } },
+      "notes": "Deletes the post on Discord and the team's copy of its zip. If Discord is down, the post leaves the list at once and is deleted on Discord as soon as it answers."
+    },
+    {
+      "name": "not your post",
+      "method": "POST", "path": "/posts/<snowflake>/seen", "auth": true,
+      "answer": { "status": 404, "body": { "error": "not-found", "message": "<text>" } }
+    },
+    {
+      "name": "news and events (public)",
+      "method": "GET", "path": "/feed",
+      "answer": { "status": 200, "body": { "releases": [{ "title": "Kiln 0.2.0-dev.29.18", "version": "0.2.0-dev.29.18", "date": "<time>", "line": "<text>", "url": "https://frostdev.io/kiln/downloads/0.2.0-dev.29.18/RELEASE-NOTES.md" }], "events": [{ "title": "Kiln test night", "when": "<time>", "where": "Kiln Discord, voice", "url": "<url>" }], "updated": "<time>" } },
+      "notes": "The last three releases and the server's scheduled and running events. Cached 10 minutes (Cache-Control: public, max-age=300). No sign-in."
+    },
+    {
+      "name": "known problems (public)",
+      "method": "GET", "path": "/known-issues",
+      "answer": { "status": 200, "body": { "issues": [{ "id": "night-sky-weather-plus", "title": "Night Sky and Weather Plus crash together", "fix": "<text>", "match": { "findings": ["mod-failed"], "text": "Night Sky" }, "added": "2026-11-18" }], "updated": "<time>" } },
+      "notes": "From the support session's known-issues.json, entries checked (docs/relay-api.md, Known problems). An entry: id, title, fix, optional copy or action {label, to}, match {findings, text, os, kiln {min, max}}, notice, added, until. Entries past until are left out."
+    },
+    {
+      "name": "tester state",
+      "method": "GET", "path": "/tester", "auth": true,
+      "answer": { "status": 200, "body": { "tester": false, "hardware": null, "results": [] } }
+    },
+    {
+      "name": "volunteer as a tester",
+      "method": "POST", "path": "/tester", "auth": true,
+      "request": { "hardware": { "gpu": "AMD Radeon RX 7800 XT", "driver": "Mesa 26.2.1 (RADV)", "vram": "16 GB", "os": "Arch Linux", "runner": "GE-Proton10-3", "covers": ["FSR 4"] }, "beta": true },
+      "answer": { "status": 200, "body": { "tester": true, "hardware": { "gpu": "AMD Radeon RX 7800 XT", "driver": "Mesa 26.2.1 (RADV)", "vram": "16 GB", "os": "Arch Linux", "runner": "GE-Proton10-3", "covers": ["FSR 4"] }, "results": [] } },
+      "notes": "Gives the Tester role at once. Each hardware field is one line of at most 120 characters (gpu required); covers at most 8 items. beta (optional) is accepted and not kept. Calling it again replaces the hardware."
+    },
+    {
+      "name": "send test results",
+      "method": "POST", "path": "/tester/results", "auth": true,
+      "request": "multipart/form-data: results (JSON) {\"build\":\"0.2.0-dev.30\",\"steps\":[{\"id\":\"fsr4\",\"title\":\"Turn on FSR 4\",\"result\":\"failed\",\"note\":\"Water smears\"}]}, zip (optional file: a report zip for the team)",
+      "answer": { "status": 201, "body": { "result": { "build": "0.2.0-dev.30", "sentAt": "<time>", "url": "<url>", "read": null, "replied": false } } },
+      "notes": "steps: 1 to 40, each id (lower case), title (up to 100), result worked|failed|skipped, note (optional, up to 200). Sending again for the same build replaces the earlier message (and its read mark)."
+    },
+    {
+      "name": "test results for a build without a #testing post",
+      "method": "POST", "path": "/tester/results", "auth": true,
+      "request": "multipart/form-data: results",
+      "answer": { "status": 409, "body": { "error": "no-test-post", "message": "<text>" } }
+    },
+    {
+      "name": "tester state with a read mark",
+      "method": "GET", "path": "/tester", "auth": true,
+      "answer": { "status": 200, "body": { "tester": true, "hardware": { "gpu": "AMD Radeon RX 7800 XT", "driver": "Mesa 26.2.1 (RADV)", "vram": "16 GB", "os": "Arch Linux", "runner": "GE-Proton10-3", "covers": ["FSR 4"] }, "results": [{ "build": "0.2.0-dev.30", "sentAt": "<time>", "url": "<url>", "read": { "by": "Rowan", "at": "<time>" }, "replied": true }] } }
+    },
+    {
+      "name": "stop testing",
+      "method": "DELETE", "path": "/tester", "auth": true,
+      "answer": { "status": 200, "body": { "tester": false, "hardware": null, "results": [] } },
+      "notes": "Removes the Tester role, the hardware and the results list (the messages in #testing stay)."
+    },
+    {
+      "name": "sign out",
+      "method": "DELETE", "path": "/session", "auth": true,
+      "answer": { "status": 200, "body": { "ok": true } }
+    },
+    {
+      "name": "sign out and forget me (and delete my posts)",
+      "method": "DELETE", "path": "/me?posts=1", "auth": true,
+      "answer": { "status": 200, "body": { "ok": true, "forgotten": { "posts": 1, "results": 0 } } },
+      "notes": "Without posts=1 the posts stay on Discord (their zips are still deleted at once). Ends every session of the player."
+    },
+    {
+      "name": "health",
+      "method": "GET", "path": "/health",
+      "answer": { "status": 200, "body": { "ok": true, "gateway": "off", "version": null } },
+      "notes": "gateway: ready | connecting | off. version: the deployed commit."
+    }
+  ]
+}

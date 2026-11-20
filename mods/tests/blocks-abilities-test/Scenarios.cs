@@ -91,6 +91,67 @@ public sealed partial class BlocksAbilitiesTestMod
         Spawn.Destroy(target);
     }
 
+    // ---- 06c S6: a perk's hit effect that runs a native first ------------------------------------------------------
+    // A sword with the perk in the bag of a fresh character, its enhancement unlocked and the sword equipped, one swing at a
+    // fresh Vukah: the damage events of the perk's own effect program on it. Null when the sword did not arrive.
+    private async Task<(EntityId Wearer, EntityId Target, uint Index, List<ImpactDamageEvent> Mine)?> SwingPerkSword(string swordBlock, string perk, double z)
+    {
+        var wearer = await Character(-8, z);
+        var target = await Enemy(-6, z);
+        var sword = Blocks.Find(swordBlock, Me)!;
+        var program = ProgramOf(perk, ".perk");
+        var give = await Items.Give(wearer, sword.GameName, 1);
+        Info($"give {swordBlock}: {give}");
+        await Steps(20);
+        var slot = Items.Read(wearer)?.Slots.FirstOrDefault(x => !x.IsEmpty && x.Item.Value == sword.Id);
+        if (!Check(slot is { ItemEntity.IsNone: false }, $"{swordBlock} is in the bag with an item entity: slot {slot?.Slot}")) return null;
+        var index = (uint)slot!.Slot.Index;
+        Check(GameTree.GameRequest(slot.ItemEntity, 4, 1), $"{swordBlock}'s enhancement unlocked");
+        GameTree.GameRequest(wearer, 5, index);
+        await Steps(24);
+        _hits.Clear();
+        RunNatives.Calls.Clear();
+        RunNatives.Lifts.Clear();
+        await Swing(wearer, target);
+        return (wearer, target, index, _hits.Where(h => h.Impact.ProgramId == program && h.Target == target).ToList());
+    }
+
+    private async Task RunPerk()
+    {
+        if (await SwingPerkSword("run-sword", "perk-run", -4) is not { } swung) return;
+        var (wearer, target, index, mine) = swung;
+        var calls = RunNatives.Calls.ToArray();
+        var same = mine.Count == 1 && calls.Length == 1 && calls[0].Impact == mine[0].Impact.ImpactId && calls[0].Target == target;
+        Check(same && Math.Abs(mine[0].AttackMod - 1.5f) < 1e-4 && Math.Abs(mine[0].Damage.Ice - 13) < 1e-3 && Math.Abs(calls[0].AttackModSeen - 1f) < 1e-4,
+            $"Run on a weapon perk: the native ran once per hit in the hit's step and its attackMod change is in the damage event: " +
+            $"{calls.Length} call(s), {mine.Count} hit(s) of the perk's program, same instance {same}, attackMod {calls.FirstOrDefault().AttackModSeen} -> " +
+            $"{mine.FirstOrDefault()?.AttackMod}, ice {mine.FirstOrDefault()?.Damage.Ice}");
+        GameTree.GameRequest(wearer, 5, index == 0 ? 1u : 0u);
+        await Steps(10);
+        Spawn.Destroy(target);
+    }
+
+    // 06c last read: a ref position the native changes is where the effect's own hit is dealt (it used to be overwritten
+    // with the target's transform between the Run call and applyDamage)
+    private async Task RunLift()
+    {
+        if (await SwingPerkSword("lift-sword", "perk-lift", -10) is not { } swung) return;
+        var (wearer, target, index, mine) = swung;
+        var lifts = RunNatives.Lifts.ToArray();
+        var at = World.Position(target);
+        var same = mine.Count == 1 && lifts.Length == 1 && lifts[0].Impact == mine[0].Impact.ImpactId;
+        var seen = lifts.Length == 1 ? WorldPosition.From(lifts[0].Seen) : default;
+        var hit = mine.Count == 1 ? mine[0].Position : default;
+        var lifted = new WorldPosition(seen.X, seen.Y + 2, seen.Z);
+        Check(same && at is { } p && seen.DistanceTo(p) < 0.5 && hit.DistanceTo(lifted) < 1e-3 && Math.Abs(mine[0].Damage.Ice - 7) < 1e-3,
+            $"Run changes the ref position: the native saw the target's position and moved it 2 m up, and the effect's damage event is at the " +
+            $"moved position: {lifts.Length} call(s), {mine.Count} hit(s), same instance {same}, seen {seen}, target at {at}, hit at {hit}, ice " +
+            $"{mine.FirstOrDefault()?.Damage.Ice}");
+        GameTree.GameRequest(wearer, 5, index == 0 ? 1u : 0u);
+        await Steps(10);
+        Spawn.Destroy(target);
+    }
+
     // ---- what an ability costs ----------------------------------------------------------------------------------
 
     private async Task AbilityCosts()

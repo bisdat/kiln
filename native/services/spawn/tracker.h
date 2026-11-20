@@ -49,4 +49,11 @@ bool at(size_t i, Record* out);
 void replace(std::vector<Record>&& list, bool dirty);
 void save_now();
 
+// The sidecar goes to disk on the tracker's own thread (0.2.0-dev.29.17): every call above returns without waiting for
+// the disk. flush waits (at most timeout_ms) until every queued write is on disk; false on timeout.
+bool flush(uint64_t timeout_ms);
+// Told (on the disk thread) when one write or removal took over 1 s.
+using SlowDiskFn = void (*)(const char* what, double ms);
+void on_slow_disk(SlowDiskFn fn);
+
 }  // namespace kspawn::tracker

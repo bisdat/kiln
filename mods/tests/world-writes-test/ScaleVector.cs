@@ -3,8 +3,10 @@
 // Every CurrentTransform byte recorded, Scale3(1.25, 0.75, 1.5) written and awaited, read again one tick later: the 12
 // scale bytes are the requested vector and every other byte is unchanged; exactly one EntityScaleChangedEvent; the same
 // scale again is Unchanged with no event; the original restored through the same method. Refusals change nothing.
-// PASS world.scale-vector only when all of that holds. Then the scale is set again and left for the save: boot 2 records
-// whether it came back (persistence is reported, not required) and restores it.
+// PASS world.scale-vector only when all of that holds. Then the scale is set again and left for the save. The game's save
+// does not keep a transform scale; Kiln keeps it beside the save and sets it again when the loaded prop is matched
+// (0.2.0-dev.28 fix round): boot 2 requires it back (PASS world.scale-persist) and restores the original, boot 3 requires
+// the original (the record was forgotten).
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 using Kiln;
@@ -83,23 +85,32 @@ public sealed partial class WorldWritesTestMod
         Check(ok, ok ? "world.scale-vector" : "world.scale-vector: see the FAIL lines above");
         // left set for the save: boot 2 says whether it came back
         var keep = await World.SetTransformScale(prop, Asked);
-        Info($"transform scale left at {Asked} on {Describe(prop)} for the restart: {keep.WorldWriteStatus}");
+        Check(keep is { Ok: true, Persisted: true }, $"transform scale left at {Asked} on {Describe(prop)} for the restart: {keep.WorldWriteStatus}, persisted {keep.Persisted}");
         return keep.Ok;
     }
 
-    /// <summary>Boot 2: whether the scale written in boot 1 came back after the save and restart; restores the original.</summary>
+    /// <summary>Boot 2: the scale written in boot 1 is back after the save and restart (Kiln set it again when the
+    /// prop was matched); the original is restored, which forgets the kept scale.</summary>
     private async Task ScaleAfterRestart(EntityId prop, JsonObject st)
     {
         if (st["scaleLeft"]?.GetValue<bool>() != true) return;
         var offset = ScaleOffset();
+        var original = Original(st);
         var now = ScaleOf(prop, offset);
-        var original = new Scale3(st["scaleX"]!.GetValue<float>(), st["scaleY"]!.GetValue<float>(), st["scaleZ"]!.GetValue<float>());
-        Info($"transform scale after the save and restart: {Describe(prop)} has {now} ({(now == Asked ? "the written scale persisted" : now == original ? "back at the original: the scale did NOT persist" : "another value")}) " +
-             "(reported, not required: chapter 13 §13b.6)");
-        if (original.IsValid && now != original)
-        {
-            var back = await World.SetTransformScale(prop, original);
-            Info($"transform scale restored to {original}: {back.WorldWriteStatus}");
-        }
+        Check(now == Asked, $"world.scale-persist: after the save and restart {Describe(prop)} has {now} (written {Asked}, the game's own {original})");
+        if (!original.IsValid || now == original) return;
+        var back = await World.SetTransformScale(prop, original);
+        st["scaleRestored"] = Check(back is { Ok: true, Persisted: true }, $"transform scale restored to {original}: {back.WorldWriteStatus}, persisted {back.Persisted}");
     }
+
+    /// <summary>Boot 3: the restored (game) scale stayed: nothing kept set the old one again.</summary>
+    private async Task ScaleAfterForget(EntityId prop, JsonObject st)
+    {
+        if (st["scaleRestored"]?.GetValue<bool>() != true) return;
+        await Steps(25);  // a kept scale would be set again in the first second; this waits longer
+        var now = ScaleOf(prop, ScaleOffset());
+        Check(now == Original(st), $"world.scale-forgotten: after the restore, a save and a restart {Describe(prop)} has {now} (the game's own {Original(st)})");
+    }
+
+    private static Scale3 Original(JsonObject st) => new(st["scaleX"]!.GetValue<float>(), st["scaleY"]!.GetValue<float>(), st["scaleZ"]!.GetValue<float>());
 }

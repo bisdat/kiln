@@ -6,6 +6,7 @@ Kiln.Sdk runs Roslyn analyzers over every mod. They catch the mistakes that the 
 - a blocked game thread;
 - an API the mod has not opted into;
 - a refusal nobody reads, and a capability nobody asked for ([contract.md](contract.md)).
+- an `OnBoot` that never runs, or that calls what does not exist before the game is entered.
 
 The warnings appear in `dotnet build` output and live in the editor (C# Dev Kit, Rider, Visual Studio). Ten rules
 come with code fixes.
@@ -20,6 +21,7 @@ come with code fixes.
 | [KILN106](#kiln106) | warning | thread, timer, watcher, socket or subscription never released | lifecycle.md "What a mod must still release itself" |
 | [KILN107](#kiln107) | **error** | advanced API (hooks, symbols, memory) without `KilnAdvanced` | `HooksGate.RequireAdvanced` (generated table) |
 | [KILN108](#kiln108) | warning | Kiln service used but not listed in `KilnServices` | mdk.md |
+| [KILN109](#kiln109) | warning | client-world `EcsPrograms.TryBind` called off the game's main thread (since 0.2.0-dev.29) | services/world.md |
 | [KILN120](#kiln120) | warning | a Kiln result (`IKilnResult`) thrown away | contract.md, "The error rule" |
 | [KILN121](#kiln121) | warning | a `[RequiresCapability]` member used with nothing that asks for its row | contract.md; the attributes and the guard table (generated) |
 | [KILN194](#kiln194) | **error** | a path string the game doesn't have | the local catalog |
@@ -29,10 +31,20 @@ come with code fixes.
 | [KILN110](#kiln110) | **error** | bad or duplicate block name | blocks.md |
 | [KILN111](#kiln111) | warning (info for a game-style name the local catalog lacks) | a name that is no block, or the wrong kind of block | blocks.md |
 | [KILN112](#kiln112) | **error** | `clients` too low for the mod's blocks | blocks.md |
+| [KILN034](#kiln034) | **error** | an `OnBoot` that never runs (no `"boot"` in kiln.mod.json), or the run-time `Blocks.Define` in boot code | manifest.md, chapter 08 |
+| [KILN035](#kiln035) | warning | a tick, world or service API in boot code (`OnBoot`, `[BootThreadOnly]`) | the tick, service and boot tables (generated) |
 
 Other KILN codes:
-- **KILN0xx** come from the SDK's MSBuild task (manifest checks, mdk.md).
+- **KILN0xx** come from the SDK's MSBuild task (manifest checks, mdk.md), except KILN034 and KILN035 above: Roslyn rules
+  of Mod.OnBoot, numbered as the design of the boot phase names them (the MSBuild codes are KILN001 to KILN032, and
+  KILN036 since 0.2.0-dev.29: a `[Query]` struct kiln.world cannot reserve, from the `KilnPrograms` step,
+  [services/systems.md](../services/systems.md#programs-of-your-own-systemsdefine)).
 - **KILN190** to **KILN193**, **KILN198** are the game-id generator's notes (catalogs.md).
+- **KILN170** to **KILN174** are the `[ImpactNative]` generator's (Kiln.ImpactNatives, [impact.md](impact.md), since
+  0.2.0-dev.29): see [below](#kiln170). **KILN036** (error) and **KILN037** (warning) come from its build task, which
+  writes the generated typed entries into the output's `impact/natives.json`: KILN036 when the assembly, kiln.mod.json or
+  natives.json cannot be read or written, KILN037 when a hand-written entry of the same name is replaced.
+- **KILN180** to **KILN182** are the typed-hook generator's warnings (Kiln.Sigs, [../services/hooks.md](../services/hooks.md#typed-hooks-and-calls-detour_typed-kilnsigs-since-020-dev29)): a descriptor of the mod's sigdb fragment it cannot use (KILN180, with the reason: an unknown type, a struct return over 8 bytes without `sret`, more than 20 positions, two descriptions of one symbol that differ, two symbols with one class name), descriptors in a project without Kiln.Hooks (KILN181), a sigdb file that is not JSON (KILN182). A descriptor it reports is not generated.
 - **KL** codes are the data-file linter's (`kiln lint`).
 
 ## How it ships
@@ -45,7 +57,10 @@ Other KILN codes:
   `OutputItemType="Analyzer"` references.
 - The analyzers read these build properties: `KilnServicesList` and `KilnFeaturesList` (the SDK writes `KilnServices`
   and `KilnFeatures` comma-separated there, because `.editorconfig` cuts values at `;`), `KilnAdvanced`, `KilnSide`,
-  `KilnModId`, `KilnApiVersion`.
+  `KilnClients`, `KilnModId`, `KilnApiVersion` and `KilnBoot` (KILN034: `true` or `required` writes `"boot"` into the
+  generated kiln.mod.json). `Sdk/Kiln.Analyzers.targets` passes each of them to the compiler
+  (`CompilerVisibleProperty`); a property it does not pass reads as unset, and a test of Kiln.Analyzers checks that
+  every property a rule reads is passed.
 - They also read the project's own `kiln.mod.json`, which the SDK passes as an AdditionalFile.
 - Projects that do not use Kiln.Sdk get no analyzers and no diagnostics.
 - Turn them off with `<KilnAnalyzers>false</KilnAnalyzers>`.
@@ -66,6 +81,7 @@ Categories:
 - `Kiln.HotReload`: 103, 104, 106;
 - `Kiln.Manifest`: 107, 108;
 - `Kiln.Contract`: 120, 121;
+- `Kiln.Boot`: 034, 035;
 - `Kiln.GameData`: 194 to 197. These ship with the game-id generator, so `<KilnGameIds>None</KilnGameIds>` turns them off.
 
 ## Where the API facts come from
@@ -85,12 +101,17 @@ Kiln.Testing and every service, then reads their sources with Roslyn (`tools/Api
 - **Services:** the folders under `managed/services/` (22).
 - **Capability guards** (KILN121): the public static bool properties that answer what `Capabilities.Is("row")`
   answers, with their rows. See [KILN121](#kiln121), "Properties that ask the same question". 54 properties.
+- **Boot** (KILN035): `BootWorks`, the public members with a boot path of their own (`if (Game.InBoot) return …`:
+  `Config.Register`), which KILN035 leaves alone; `BootRefused`, the public members that reach
+  `if (Game.InBoot) throw …` (directly or through calls inside the same assembly, not through a member with a boot
+  path: a `ConfigFile.Changed` handler), which KILN035 reports.
 
 Run the script after changing Kiln.Api, Kiln.Testing or a service:
 `KILN_OUT=… managed/Kiln.Analyzers/tools/gen-apis.sh`.
 
-The analyzers also honour two attributes, matched by name in namespace `Kiln`: `TickThreadOnlyAttribute` and
-`AdvancedApiAttribute`, on a member or its type. Kiln.Api does not define them yet; they are proposed.
+The analyzers also honour attributes, matched by name in namespace `Kiln`, on a member or its type:
+`TickThreadOnlyAttribute` (KILN101, KILN035), `AdvancedApiAttribute` (KILN107) and `BootThreadOnlyAttribute`
+(KILN034, KILN035). Kiln.Api defines them in `ThreadingAttributes.cs`.
 
 ## Where code runs (KILN101, KILN105)
 The analyzers decide which thread runs a piece of code.
@@ -101,9 +122,22 @@ The analyzers decide which thread runs a piece of code.
 - `Context.Tick.Pre` and `Post` handlers;
 - `Context.GameLog.Line` handlers;
 - `Scheduler.Post` work;
-- `Events.On` and `Context.Messages.On` handlers.
+- `Events.On` and `Context.Messages.On` handlers;
+- command and chat handlers: `[Command]` methods, handlers given to `Commands.Register` and to
+  `LiteralNode.Executes` / `ArgumentNode.Executes`, and `Chat.Received` handlers (Kiln.Chat runs every command,
+  from chat, the console folder or a remote tool, on the tick);
+- the delegate handed to a task's `ctx.OnTick(...)` or `ctx.PostToTick(...)`, and task code after a tick hop (below);
+- the `onTick` delegate of `WorldConcurrent.OrOnTick(ctx, offTick, onTick)`. Its `offTick` delegate runs at once,
+  where `OrOnTick` is called, so it takes the thread of the code around it.
 
 Method groups count too: `Context.Tick.Pre += OnPre` makes `OnPre` tick-thread code.
+
+**The game's main thread** (a client's: it steps the client world and builds the game's UI):
+- `Client.Tick` handlers and `Client.Post` work, and code after `await Client.NextTick()`;
+- callbacks handed to a parameter or an event marked `[ClientMainThread]` (`Ui.Values.SubscribeSlots`, ...);
+- a Kiln task's client-world hops (below).
+
+**The render thread:** callbacks marked `[RenderThread]`, and a draw callback that takes a `UiDraw`.
 
 **A game thread:**
 - any other callback handed to a Kiln API or a Kiln event: on a server, the tick thread;
@@ -120,10 +154,33 @@ known.
 | own thread | `new Thread(…)` |
 | timer thread | `System.Threading.Timer`, `System.Timers.Timer.Elapsed` |
 | BCL events | `FileSystemWatcher`; `Process` output and exit; `AppDomain.ProcessExit` and `UnhandledException`; `TaskScheduler.UnobservedTaskException`; `Console.CancelKeyPress`; `SocketAsyncEventArgs.Completed`; `BackgroundWorker.DoWork` |
-| after `ConfigureAwait(false)` | everything after `await x.ConfigureAwait(false)`, up to the next `await Context.Scheduler.NextTick()`. A plain `await` off the tick thread does not come back: there is no Kiln synchronization context there. |
+| after `ConfigureAwait(false)` | everything after `await x.ConfigureAwait(false)`, up to the next `await Context.Scheduler.NextTick()`. The same for the body of `await foreach (… in xs.ConfigureAwait(false))` and the code after it, and for the code after `await using (x.ConfigureAwait(false))` (or `await using var`). A plain `await` off the tick thread does not come back: there is no Kiln synchronization context there. |
+| Kiln task worker | the delegate handed to `Context.Tasks.Run(...)` (a lambda, a method group, or a local function handed out that way), until a tick hop takes it to the tick |
+
+**Inside a Kiln task** the thread is followed through the function's own control flow (branches and joins, loops,
+early returns, `try`/`catch`/`finally`, `using`):
+- `await ctx.ToTick()` lands where the task belongs: where its `Context.Tasks.Run` was called. Called from tick code, on
+  the tick; from main-thread code (`Client.Tick`, `Client.Post`, a `[ClientMainThread]` callback), on the game's main
+  thread; inside a task, in its parent's world (inside a hop, that hop's world); from anywhere else, on the tick, as Kiln
+  does. `ctx.ToTick(WorldKind.Client)` and `ctx.ToTick(WorldKind.Server)` land where their constant says; a world that
+  is not a constant is some game thread. The delegates of `ctx.OnTick(...)` and `ctx.PostToTick(...)` follow the same
+  rule.
+- `await ctx.ToTick()` and `await Context.Scheduler.NextTick()` land on every path that reaches the call after them. From there the code stays on the tick: its later plain `await`s come back to the tick too. It
+  leaves the tick at `await ctx.NextGateWindow()` (back to a worker) or at an `await …ConfigureAwait(false)`
+  (the thread pool), until it hops again. A call after an `if` where only one branch hopped is still off the tick.
+- The delegate of `ctx.OnTick(...)` / `ctx.PostToTick(...)` runs on the tick. Awaiting the `OnTick` result does not
+  hop the caller: the code after it resumes in the task, where it was.
+- Hops are recognised by the type of what is awaited, the real `Kiln.KilnTaskContext` / `Kiln.Scheduler` awaitables:
+  a user method that happens to be named `ToTick` or `NextGateWindow` hops nothing, `Scheduler.NextTick` still
+  counts, and a hop kept in a variable (`var hop = ctx.ToTick(); await hop;`) counts too.
+- Awaiting your own async helper does not move the caller, even when the helper hops inside: the caller's `await`
+  resumes in the task where it was.
+- A local function called from a task body runs where its call has got to, so it is judged by its calls. An
+  ordinary helper method called from the body is not followed: when the rule cannot tell, it stays quiet.
 
 **Not reported (unknown):**
 - lambdas the mod stores or hands to its own helpers;
+- calls through ordinary helper methods (above), and code whose thread no path settles;
 - code under `if (Game.IsTickThread)` or `Client.IsClientThread`.
 
 Lambdas passed to library calls that run them at once (LINQ, `List.ForEach`) take the thread of the code around
@@ -162,6 +219,22 @@ await Context.Scheduler.NextTick();
 ```
 The fix uses `Context.Scheduler` in a `Mod`; otherwise it uses a `ModContext` or `Scheduler` field or property of
 the type. No fix without one.
+
+Inside a Kiln task the same rule reads the task's hops ([Where code runs](#where-code-runs-kiln101-kiln105)):
+```csharp
+Context.Tasks.Run("loot-scan", async ctx =>
+{
+    var found = ScanNearbyContainers(area);            // a worker: compute and IO are fine here
+    Chat.Broadcast("scan done");                       // KILN101: runs on a Kiln task worker (Context.Tasks.Run)
+    await ctx.ToTick();
+    foreach (var c in found) Inventory.Transfer(c, player);   // on the tick after the hop
+    await ctx.NextGateWindow();
+    Chat.Broadcast("applied");                         // KILN101: NextGateWindow took the work back to a worker
+});
+```
+**Fix in a task.** Hop first (`await ctx.ToTick()`), or hand the call to the tick (`ctx.PostToTick(() => ...)`,
+`await ctx.OnTick(() => ...)`). Those keep the work tracked by the task; the `Scheduler.Post` code fix above
+also works, as ordinary tick work that the task does not wait for.
 
 <a id="kiln102"></a>
 ## KILN102: async void
@@ -294,6 +367,128 @@ Not reported:
 In a synchronous handler, start the work and react when it completes:
 `Context.Scheduler.Post` or `ContinueWith(…, TaskScheduler.FromCurrentSynchronizationContext())`.
 
+### Around Kiln tasks
+The same id covers the ways of waiting on, or escaping, a Kiln task (`Context.Tasks`). The thread
+classifier ([Where code runs](#where-code-runs-kiln101-kiln105)) also follows a task's scope: a task segment
+and its tick hops run with the task's execution scope installed; code after
+`await …ConfigureAwait(false)` still belongs to the task body, but its scope is gone until a hop
+(`await ctx.ToTick()`, `await ctx.NextGateWindow()`) brings the work back into the task.
+
+**Blocking on a task.** `KilnTask.Wait()` on the tick, on a game thread or inside a task body (a lambda,
+method group or local function handed to `Context.Tasks.Run`, on a worker or on one of its tick hops,
+also after `await …ConfigureAwait(true)`), and blocking on the plain `Task` that `AsTask()` hands out — `job.AsTask().Result`,
+`job.AsTask().Wait()`, `job.AsTask().GetAwaiter().GetResult()`, also through a local whose only value is
+that call (`var t = job.AsTask(); … t.Result`, until the local is written again). At run time
+`KilnTask.Wait()` refuses on the tick and on a task worker; `AsTask()` escapes that refusal, so blocking on
+its `Task` can deadlock the tick or starve the pool and only this rule sees it. **Fix:** `await` the
+`KilnTask` (in an async function the code fix rewrites the `Wait` and `Result` forms as above).
+
+Not reported:
+- `KilnTask<T>.Result` and `job.GetAwaiter().GetResult()` themselves: they never block, they throw until
+  the task has ended;
+- a plain `Task` that is not from `AsTask()` inside a task (`Task.FromResult(…)` above, `Task.Run` work a
+  task waits on), a look-alike `Wait()` or `AsTask()` on one of the mod's own types, and `KilnTask.Wait()`
+  on a thread of the mod's own (`Task.Run`, a thread it started), where `Wait` is allowed;
+- the same calls in a task after `await …ConfigureAwait(false)` on every path or only some, until a hop:
+  the code usually runs on a .NET pool thread there, where `Wait` is allowed too, and the analyzer cannot
+  tell when the await finished at once and stayed on the worker.
+
+**A hop that never happens.** `ctx.ToTick()` whose result runs nothing: the call as a statement, under
+`_ =`, as the body of a void task lambda, or in a local nobody reads again. A `TickHop` does nothing until
+it is awaited — its awaiter is what hands the continuation to the tick — so the code after such a call
+still runs where it ran before. This is reported anywhere, in a task or in a helper that takes a
+`KilnTaskContext`. Not reported: a hop that is awaited, kept in a local and awaited later
+(`var hop = ctx.ToTick(); await hop;`), returned, passed on, or driven by hand through `GetAwaiter()`; and
+a look-alike `ToTick()` on one of the mod's own types.
+
+```csharp
+Context.Tasks.Run("loot-scan", async ctx =>
+{
+    var found = ScanNearbyContainers(area);
+    ctx.ToTick();                                   // KILN105: never awaited, the hop never happens
+    job.Wait();                                     // KILN105: refused in a task
+    var path = other.AsTask().Result;               // KILN105: AsTask() escapes the refusal
+    await ctx.ToTick();
+    ApplyResults(found);                            // tick-only work, on the tick after the hop
+});
+```
+
+**`await Client.NextTick()` in a task.** Kiln.Client's way to the main thread is a plain `Client.Post` of the
+continuation: inside a Kiln task the rest of the method leaves the task (not tracked by it, not cancelled with it, and
+left waiting for good if the mod unloads before that step). Reported at the await, where the task's scope is proven;
+outside a task it is Kiln.Client's own way and fine. **Fix:** `await ctx.ToTick(WorldKind.Client)`, the task's own hop
+to the client world's step.
+
+```csharp
+Client.Tick += (in TickInfo t) => Context.Tasks.Run("overlay", async ctx =>
+{
+    var marks = ComputeMarks();
+    await Client.NextTick();                        // KILN105: leaves the task
+    await ctx.ToTick();                             // the task's own hop: back to the client world it was started in
+    Thread.Sleep(5);                                // KILN105: blocks the game's main thread
+});
+```
+
+**A task-thread world call outside a task.** A `WorldConcurrent` read (`Open`, `Validate`, `Read`,
+`ReadBytes`, `ReadMany`, `Query`, `Template`) or compare-exchange write (`TryCompareExchange`,
+`TryCompareExchangeBytes`) where no task's scope is installed:
+- in a task body after `await …ConfigureAwait(false)` (also `await foreach` and `await using` over
+  `ConfigureAwait(false)`), on every path or only some, round a loop, or in a `catch` or `finally` whose `try`
+  had one, until a hop (`await ctx.NextGateWindow()`, `await ctx.ToTick()`) brings the work back into the task;
+- in work the mod starts itself: `Task.Run`, a `new Thread`, a timer or a thread-pool callback, also inside a
+  task body;
+- in the `offTick` delegate of `WorldConcurrent.OrOnTick` in such places: it runs at once, where `OrOnTick` is
+  called;
+- in an async helper of the mod's own after its own `await …ConfigureAwait(false)`.
+
+Kiln checks the scope on every call and refuses one without it with `InvalidOperationException`, so the call
+never works there. **Fix:** keep the awaits in the task or the helper (drop `ConfigureAwait(false)`), or call
+`await ctx.NextGateWindow()` first; for work started with `Task.Run` or a thread, run it in a Kiln task
+(`Context.Tasks.Run`) instead.
+
+Not reported: the reads inside a task body (also after `ConfigureAwait(true)`, a hop, or in `ctx.OnTick` and
+`OrOnTick`'s `onTick`), on the tick and on game threads; `WorldConcurrent.IsAvailable`, `IsPresent`, `CanWrite`,
+`WritePolicy` and `OrOnTick` itself, which work on any thread; the values the reads return (`ConcurrentSnapshot.TryGet`,
+`ConcurrentRead<T>.Value`); a look-alike `WorldConcurrent` of the mod's own; code whose thread the analyzer cannot
+tell (a stored delegate, a method nothing in the mod calls); and an awaitable configured in one place and awaited
+in another (`var a = x.ConfigureAwait(false); … await a;`), whose `false` the analyzer does not follow.
+
+```csharp
+Context.Tasks.Run("chest-scan", async ctx =>
+{
+    var data = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
+    var chest = WorldConcurrent.Open(id);          // KILN105: the task's scope is gone after ConfigureAwait(false)
+    await ctx.NextGateWindow();
+    var again = WorldConcurrent.Open(id);          // back in the task: fine
+});
+```
+
+**A compare-exchange write in tick code.** `WorldConcurrent.TryCompareExchange` or `TryCompareExchangeBytes` in
+code the analyzer places on the tick (the list in [Where code runs](#where-code-runs-kiln101-kiln105): `OnLoad`, tick,
+event, command and chat handlers, `Scheduler.Post` work, a task after `await ctx.ToTick()`, `ctx.OnTick` and
+`ctx.PostToTick` delegates). The write takes the engine's write gate, which the server frame holds for its whole
+update, so from tick code it answers `Busy` (`WriteReason.InFrame`) every time and never writes (a client mod's tick
+gets `Unavailable`: the writes are for the server world only). **Fix:** call it from a Kiln task's worker (retry a
+busy one after `await ctx.NextGateWindow()`), or write on the tick with `World.Write`. Not reported: the writes on a task's worker, and a look-alike `TryCompareExchange` of the mod's own.
+
+```csharp
+[Command("charge")]
+private string Charge(CommandContext c)
+{
+    WorldConcurrent.TryCompareExchange(e, "Charge", now, next);   // KILN105: always Busy from a command handler
+    Context.Tasks.Run("charge", async ctx =>
+    {
+        var r = WorldConcurrent.TryCompareExchange(e, "Charge", now, next);   // on a worker: fine
+        while (r.Status == ExchangeStatus.Busy)
+        {
+            await ctx.NextGateWindow();
+            r = WorldConcurrent.TryCompareExchange(e, "Charge", now, next);
+        }
+    });
+    return "charging";
+}
+```
+
 <a id="kiln106"></a>
 ## KILN106: thread, timer or subscription never released
 **What.** Something the mod creates is never released. The tracked types and calls:
@@ -350,6 +545,18 @@ Kiln only gates kiln.hooks, and mods never see game pointers without it.
 
 **Fix.** Add the property, or the manifest key. No code fix: the project file is not a source file.
 
+<a id="kiln109"></a>
+## KILN109: client-world API called off the game's main thread
+`EcsPrograms.TryBind(key, callback, WorldKind.Client)` (and `WorldKind.Prediction`) binds a program of this player's client
+world, which kiln.world takes only on the game's main thread: in `OnLoad` (a client mod loads in the main menu, on that
+thread) or in `Client.Post` work. Elsewhere it throws `InvalidOperationException`. The rule reports the call in code that
+runs off the game's threads (`Task.Run`, threads, timers, thread-pool callbacks, after `await ...ConfigureAwait(false)`),
+when the world is a constant. Not reported: the tick thread (in `OnLoad` it is the main thread), though on a host the
+server's tick thread (`Scheduler.Post`, a reload's `OnLoad`) is not the main thread: there, too, post it with
+`Client.Post`. A world argument that is not a constant (a variable, a field, a parameter) is not seen: the rule cannot
+tell a client bind from a server one there and does not report it; off the game's threads KILN101 reports such a call
+as it does a server bind (whose thread is the tick thread), and at run time the call throws off its world's thread. [services/world.md](../services/world.md#client-world-programs-since-020-dev29).
+
 <a id="kiln108"></a>
 ## KILN108: Kiln service not listed in KilnServices
 **What.** The code uses a type or member of a Kiln service assembly, but the project's `KilnServices` does not
@@ -364,6 +571,15 @@ once per service per file.
 - Tools such as `kiln lint` and the launcher read the list as the mod's declared service use.
 
 **Fix.** Add the service: `<KilnServices>Chat;Players</KilnServices>`.
+
+**Stations** (since 0.2.0-dev.29.15). The production stations and bases live in Kiln.Blocks' assembly, but `Stations`
+in `KilnServices` covers them on their own: `Stations`, `Bases`, `BaseId`, `BaseIdChange`, `BaseInfo`, `BaseAltar`, the
+`Station*` types, `IngredientCategory`, `IngredientOption`, `CategoryChoice`, `FillOptions`, `FillMode`, `FillPlan`,
+`FillInput`, `FillLimit`, `StopWhen`, `CollectWhat` and `BasesChangedEvent`. A project that lists `Stations` (and not
+`Blocks`) gets no KILN108 for them; the rest of Kiln.Blocks still asks for `Blocks`, and a project that lists `Blocks`
+covers the stations types too ([mdk.md](mdk.md)). Before 0.2.0-dev.29.16 `BaseIdChange` was missing from that list, so
+reading `BasesChangedEvent.Changed` (`c.Old`, `c.New`) with `Stations` alone raised a false KILN108; 0.2.0-dev.29.16
+fixes it.
 
 <a id="kiln120"></a>
 ## KILN120: Kiln result thrown away
@@ -499,6 +715,9 @@ you compile.
 
 In a mod players install, use the documented API instead; `limits.md` lists what has none yet.
 
+The task-thread world reads and writes (`WorldConcurrent`) are not lab members: they have their own id,
+[KILNX003](#kilnx003), and `KILNX001` does not opt in to them.
+
 <a id="kilnx002"></a>
 ## KILNX002: not yet proven in the game client
 **What.** The member works in Kiln's labs, but no player has confirmed it in the real game client yet (the guided client
@@ -506,9 +725,37 @@ pass settles it). `[Experimental("KILNX002")]`; today the achievement guard (`St
 
 **Fix.** Opt in the same way with `KILNX002` when you accept that; the mark goes once the client pass confirms it.
 
+<a id="kilnx003"></a>
+## KILNX003: task-thread world reads and writes
+**What.** The code uses `WorldConcurrent` or one of its types (Kiln.World): the reads from a Kiln task (`Open`, `Read`,
+`ReadMany`, `Query`, `ConcurrentEntity`, `ReadStatus` and the rest) or the compare-exchange writes
+(`TryCompareExchange`, `WritePolicy`, `ExchangeResult<T>`, `ComponentExchangedEvent` and the rest). They are
+`[Experimental("KILNX003")]`: documented API for mods that shows in completion, but new. The compiler reports the use as
+an error. In unit tests, `FakeWorld.BusyReads` and `BusyWrites` (Kiln.TestKit) carry the same id.
+
+**Since when.** 0.2.0-dev.29.18, the first release with `WorldConcurrent`. Pre-release builds of the task branch marked it
+`KILNX001`, the lab members' id: a project that opted in with `KILNX001` for it now opts in with `KILNX003` (and keeps
+`KILNX001` only if it also calls lab members).
+
+**Fix.** Opt in once in the mod's project file, and in its test project when the tests use them:
+
+```xml
+<PropertyGroup>
+  <NoWarn>$(NoWarn);KILNX003</NoWarn>
+</PropertyGroup>
+```
+
+They leave experimental once their in-game checks (services/world.md, "World reads from task threads" and "World writes
+from task threads") pass on both exact game builds; until then their shape can still change. The guide:
+[tasks.md](tasks.md#project-setup).
+
 ---
 
 <a id="kiln194"></a>
+## KILN180, KILN181, KILN182: Typed-hook descriptors
+<a id="kiln180"></a><a id="kiln181"></a><a id="kiln182"></a>
+The Kiln.Sigs generator turns each `sig` descriptor of a mod's `sigdb/server.json` and `sigdb/client.json` into a class (services/hooks.md). It warns and leaves a descriptor out when kiln.hooks would refuse it as malformed (KILN180), when the project describes functions but does not reference Kiln.Hooks (KILN181: add `Hooks` to `KilnServices`), and when a sigdb file does not parse (KILN182). Fix the descriptor; `tools/sigport/sigdb_check.py --fptool` checks it against the exe.
+
 ## KILN194: No such field in the game
 **What.** A constant path string given to `GameDataEntry` or `ContentEntry` (`Get`, `Original`, `GetNumber`, `GetJson`, `GetRef`, `Set`,
 `SetJson`, `Reset`, `Fields`), or a key of a definition's `Fields`, that the game doesn't have:
@@ -558,8 +805,9 @@ runs.
   - `CodeFixes/` (+ Workspaces);
   - `tools/ApiScan` and `managed/Kiln.Analyzers/tools/gen-apis.sh`.
 - Limits:
-  - The thread analysis follows syntax and one level of method groups inside a type. A method that becomes
-    off-thread code through another type or a stored delegate is not seen.
+  - The thread analysis follows a function's control-flow graph and one level of method groups inside a type,
+    plus local functions at their call sites inside a function. A method that becomes off-thread code through
+    another type, an ordinary helper call or a stored delegate is not seen.
   - KILN106 checks that a release exists somewhere in the type, not that it runs in `OnUnload`.
   - KILN120 and KILN121: their own sections above.
 
@@ -606,3 +854,100 @@ names the mod's own file, cue or VFX, needs `mod`. A game VFX by name asks for n
 **Why.** Kiln refuses the block when the mod loads, because players' games could not show it.
 
 **Fix.** Raise it, or remove the setting: the build then works out the lowest level that works (blocks.md).
+
+<a id="kiln034"></a>
+## KILN034: OnBoot that never runs, or Blocks.Define in boot code
+**What.** Two mistakes of the boot phase ([manifest.md](manifest.md), `"boot"`):
+- A `Mod` subclass overrides `OnBoot` while the project's `kiln.mod.json` has no `"boot": true` (or `"required"`).
+  Reported at the override. A Kiln.Sdk project without its own kiln.mod.json gets one written from its properties: with
+  `<KilnBoot>true</KilnBoot>` (or `required`) it says `"boot"` and is not reported; without it, it is. A project's own
+  kiln.mod.json wins over `KilnBoot`, as in the manifest task. A project that says nothing at all (no kiln.mod.json,
+  not built with Kiln.Sdk) is not reported.
+- The run-time `Blocks.Define` (any overload) called from boot code. Boot code is the body of an `OnBoot` override or of
+  a method, accessor or type marked `[BootThreadOnly]`, with its local functions and the lambdas that run at once
+  (LINQ, `List.ForEach`). A lambda handed to Kiln (`Context.Scheduler.Post`), to another thread, or kept by the mod is
+  not boot code, and neither is a helper method that is not marked.
+
+```csharp
+public override void OnBoot(BootContext boot)            // KILN034 when kiln.mod.json has no "boot"
+{
+    Blocks.Define("cold", new StatusBlock { Name = "Cold", Seconds = 4 });   // KILN034: refused in OnBoot (PhaseClosed)
+}
+```
+
+**Why.** Kiln calls `OnBoot` only for a mod that opts in: without the key the override is never called, and its
+definitions are missing from every start, with no error. Inside `OnBoot`, `Blocks.Define` throws
+`InvalidOperationException` ("PhaseClosed: Blocks.Define is refused inside …'s OnBoot"): it would register a block
+before the boot generation is checked. The mod's `OnBoot` then fails, its boot content is dropped, and with
+`"boot": "required"` the start stops.
+
+**Fix.**
+- Add `"boot": true` to kiln.mod.json (`"required"`: a failure of its boot content stops the start), or, in a Kiln.Sdk
+  project that has no kiln.mod.json of its own, `<KilnBoot>true</KilnBoot>`; or move the code to `OnLoad`.
+- Stage the block instead: `BootDefinitions.For(boot).Define("cold", new StatusBlock { ... })`. A block that names it
+  uses its `Reference` (or the name).
+
+No code fix: the manifest is not a source file, and a staged definition returns a result, not a handle.
+
+<a id="kiln035"></a>
+## KILN035: tick, world or service API in boot code
+**What.** Boot code (as in [KILN034](#kiln034)) uses:
+- a member that needs the tick thread: `[TickThreadOnly]`, or the generated tick table of [KILN101](#kiln101);
+- a member of a service's own static class, or of a type nested in it: `World`, `Players`, `Content`, `Items`,
+  `Chat`, `Spawn`, ... (the classes named after the services of the generated service table, in their own
+  assemblies).
+
+- a member Kiln refuses on the boot thread although it allows any thread otherwise: the generated `BootRefused` table
+  (`if (Game.InBoot) throw`, directly or through a call: adding a `ConfigFile.Changed` handler).
+
+Not reported:
+- members marked `[BootThreadOnly]` (`BootDefinitions`, `boot.GameData.Read`);
+- members with a boot path of their own, the generated `BootWorks` table (`if (Game.InBoot) return ...`):
+  `Config.Register<T>()` reads the file and its defaults without writing in `OnBoot`, and reading its `Value` is a plain
+  property ([config.md](../config.md#in-modonboot)). Writing the config (`Set`, `TrySet`, `Save`, `Reload`), a `Changed`
+  handler and `Config.RegisterWorld` are still reported. KILN101 still counts `Config.Register` as a tick-thread member
+  outside boot code;
+- the capability guard properties (`Players.Available`, ...) and `Capabilities.Is`;
+- data helpers outside a service's own class (`Damage.Ice`, `Bodies`, block records);
+- Kiln.Api's `[AnyThread]` members such as `Mods.BootState`.
+
+`[AnyThread]` on a service's member is not enough: it says which threads may call it, not that a world exists.
+`Players.All` answers an empty snapshot before the game is entered.
+
+```csharp
+public override void OnBoot(BootContext boot)
+{
+    Chat.Broadcast("booting");                     // KILN035: must be called on the tick thread
+    var n = Players.All.Count;                     // KILN035: a Kiln.Players service API
+    var wood = boot.GameData.Read("item:Material_T1_Wood_Logs");   // fine: the offline view
+    var settings = Config.Register<Settings>();    // fine: reads the file, writes nothing
+    if (settings.Value.Enabled) settings.Save();   // KILN035: must be called on the tick thread
+}
+```
+
+**Why.** `OnBoot` runs once per process, on the boot thread, before the game's entry point. The game has loaded none
+of its data, and no world, player or live registry exists. A tick-thread API throws there. A service's live API has
+nothing to act on.
+
+**Fix.**
+- Read the game's data with `boot.GameData.Read` ([boot-gamedata.md](boot-gamedata.md)).
+- Stage blocks with `BootDefinitions.For(boot)`.
+- Do the rest in `OnLoad`.
+
+KILN121 knows `OnBoot`: `Mod.OnBoot` is marked `[RequiresCapability("mods.boot")]`, and an override has the rows of what
+it overrides, so `BootDefinitions.For(boot)` in `OnBoot` needs no check. `boot.GameData.Read` still asks for
+`mods.boot.game_data`, which is off where no snapshot of this game build was made.
+
+<a id="kiln170"></a><a id="kiln171"></a><a id="kiln172"></a><a id="kiln173"></a><a id="kiln174"></a>
+## KILN170 to KILN174: an `[ImpactNative]` method the generator cannot make
+**What.** Errors with the method's location: KILN170 for the method itself (not static, generic, async, private or in a
+private or generic type, or a name that is not `[A-Za-z0-9_]` of 1 to 60 characters), KILN171 for a parameter of a type
+no native takes (or a `NativeContext` by `ref`/`out`, or `[Raw]` on anything but `uint`), KILN172 for a return type other
+than `bool`, `byte` or `void`, KILN173 for one name on two methods. KILN174 (warning): the project has `[ImpactNative]`
+methods but no Kiln.Abilities with `ImpactNativeAccess` (0.2.0-dev.29 or newer, `Abilities` in `KilnServices`).
+
+**Why.** The generator writes the native's thunk, registration and typed declaration from the method's signature. A
+shape it cannot turn into the impact types of the call is not generated at all, so nothing half-works at run time.
+
+**Fix.** Make the method `static` and at least `internal`, use the types of [impact.md](impact.md) ("`[ImpactNative]`
+methods"), give other results back through `ref` or `out` parameters, and give each native its own name.

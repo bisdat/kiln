@@ -112,7 +112,8 @@ public sealed unsafe class BakeReviewTests
 
     [Theory]
     [InlineData("Throws", "this mod's OnLoad throws")]
-    [InlineData("NeedsTheGame", "kiln.assets is unavailable")]
+    // the bake's harness has the kit's kiln.assets (content blobs only): the icon call fails on the row that is off
+    [InlineData("NeedsTheGame", "assets.ui_icons is not available")]
     public void AModThatDoesNotLoadLeavesNothingOfAnEarlierBake(string type, string why)
     {
         var dir = FixtureMod(type, "gone-test");
@@ -335,21 +336,7 @@ public sealed class BakeTargetsTests
                 """);
         }
 
-        public (int Code, string Output) MsBuild(params string[] args)
-        {
-            var psi = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-            psi.ArgumentList.Add("msbuild");
-            psi.ArgumentList.Add(Path.Combine(Dir, "stub.proj"));
-            psi.ArgumentList.Add("-nologo");
-            psi.ArgumentList.Add("-v:m");
-            foreach (var a in args) psi.ArgumentList.Add(a);
-            foreach (var k in psi.Environment.Keys.Where(k => k.StartsWith("MSBuild", StringComparison.OrdinalIgnoreCase)).ToList()) psi.Environment.Remove(k);
-            using var p = Process.Start(psi)!;
-            var o = p.StandardOutput.ReadToEndAsync();
-            var e = p.StandardError.ReadToEndAsync();
-            p.WaitForExit(120_000);
-            return (p.ExitCode, o.Result + e.Result);
-        }
+        public (int Code, string Output) MsBuild(params string[] args) => StubMsBuild.Run(Path.Combine(Dir, "stub.proj"), args);
 
         public void Dispose() => Directory.Delete(Dir, true);
     }
@@ -375,7 +362,7 @@ public sealed class BakeTargetsTests
     {
         using var s = new Stub();
         var mods = Path.Combine(s.Dir, "server-mods");
-        foreach (var f in new[] { "quests/generated/stub.json", "skills/stub.generated.json", "blocks/generated/stub.json", "quests/generated/authors.json" })
+        foreach (var f in new[] { "quests/generated/stub.json", "skills/stub.generated.json", "blocks/generated/stub.json", "blocks.tables.json", "quests/generated/authors.json" })
         {
             var p = Path.Combine(mods, "stub", f);
             Directory.CreateDirectory(Path.GetDirectoryName(p)!);
@@ -386,6 +373,7 @@ public sealed class BakeTargetsTests
         Assert.Equal(["authors.json"], Directory.GetFiles(Path.Combine(mods, "stub", "quests", "generated")).Select(Path.GetFileName));
         Assert.False(File.Exists(Path.Combine(mods, "stub", "skills", "stub.generated.json")));
         Assert.False(File.Exists(Path.Combine(mods, "stub", "blocks", "generated", "stub.json")));
+        Assert.False(File.Exists(Path.Combine(mods, "stub", "blocks.tables.json")));
     }
 
     [Fact]
@@ -402,11 +390,15 @@ public sealed class BakeTargetsTests
         var config = Path.Combine(s.Obj, "kiln.bake.config");
         Assert.Equal(0, s.MsBuild("-t:_KilnBakeConfig", "-p:KilnBakeSteps=10").Code);
         var first = File.ReadAllText(config);
+        Assert.Contains("worldtables=false",first);
         var at = File.GetLastWriteTimeUtc(config);
         Assert.Equal(0, s.MsBuild("-t:_KilnBakeConfig", "-p:KilnBakeSteps=10").Code);
         Assert.Equal(at, File.GetLastWriteTimeUtc(config));  // the same settings: untouched, so not a reason to bake
         Assert.Equal(0, s.MsBuild("-t:_KilnBakeConfig", "-p:KilnBakeSteps=30").Code);
         Assert.NotEqual(first, File.ReadAllText(config));  // a KilnBake input: changed settings bake again
+        Assert.Equal(0,s.MsBuild("-t:_KilnBakeConfig","-p:KilnBakeSteps=10","-p:KilnBakeWorldTables=true").Code);
+        Assert.Contains("worldtables=true",File.ReadAllText(config));
+        Assert.NotEqual(first,File.ReadAllText(config));
     }
 
     [Fact]

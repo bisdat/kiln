@@ -79,11 +79,11 @@ test("a mod that is not in the profile switches on, and then is in it", async ({
 test("the list filters by name and by kind", async ({ page }) => {
   await desktop(page);
   await expect(row(page, "New Items")).toBeVisible({ timeout: 10_000 });
-  await page.locator(".k-hero").getByLabel("Filter").fill("chest");
+  await page.locator(".k-hero").getByLabel("Filter", { exact: true }).fill("chest");
   await expect(row(page, "Better Chests")).toBeVisible();
   await expect(row(page, "chestsort.dll")).toBeVisible();
   await expect(row(page, "New Items")).toHaveCount(0);
-  await page.getByLabel("Filter").fill("");
+  await page.getByLabel("Filter", { exact: true }).fill("");
   await page.getByRole("combobox", { name: "Kind" }).selectOption({ label: "Native" });
   await expect(list(page).getByRole("listitem")).toHaveCount(4);
   await expect(row(page, "FPS Unlock")).toBeVisible();
@@ -106,7 +106,7 @@ test("All on and All off act on the rows shown, save the profile once, say what 
   await expect(off).toHaveAttribute("title", new RegExp(`^Switches off ${on} mods of the 4 the filter shows`));
   await off.click();
   const done = page.locator(".k-toast").filter({ hasText: `Switched ${on} mods off` });
-  await expect(done).toBeVisible({ timeout: 5000 });
+  await expect(done).toBeVisible({ timeout: 10_000 });
   await expect.poll(async () => (await profileMods(page)).native.filter((m) => m.enabled).length).toBe(0);
   // one save for all of them, and nothing of another kind changed
   expect((await api<{ generation: number }>(page, "profileGet", "ember-run")).generation).toBe(gen + 1);
@@ -134,7 +134,7 @@ test("Undo of All on leaves a mod the player switched since, even back to the sa
   expect((await profileMods(page)).enshwick).toEqual([]);
   await bar.getByRole("button", { name: "Shown on (1)" }).click();
   const done = page.locator(".k-toast").filter({ hasText: "Switched 1 mod on" });
-  await expect(done).toBeVisible({ timeout: 5000 });
+  await expect(done).toBeVisible({ timeout: 10_000 });
   const sw = row(page, "Lanterns").getByRole("switch", { name: "Lanterns" });
   await expect(sw).toHaveAttribute("aria-checked", "true");
   // off and on again by hand: the entry is as the action left it, but the player chose it
@@ -155,14 +155,14 @@ test("Undo of All off says it cannot when another profile was loaded since, and 
   await page.getByRole("combobox", { name: "Kind" }).selectOption({ label: "Native" });
   await page.locator(".k-hero .k-mods-bar").getByRole("button", { name: /^Shown off \(\d+\)$/ }).click();
   const done = page.locator(".k-toast").filter({ hasText: /^Switched \d+ mods off/ });
-  await expect(done).toBeVisible({ timeout: 5000 });
+  await expect(done).toBeVisible({ timeout: 10_000 });
   await expect.poll(async () => (await profileMods(page)).native.filter((m) => m.enabled).length).toBe(0);
   const ember = await api<{ generation: number; mods: Mods }>(page, "profileGet", "ember-run");
   const vanilla = await api<{ generation: number }>(page, "profileGet", "vanilla-plus");
   await page.evaluate(() => { location.hash = "#/settings"; });
   const sec = page.getByRole("region", { name: "Profiles" });
   await sec.getByRole("listitem").filter({ hasText: "Vanilla plus" }).getByRole("button", { name: "Load" }).click();
-  await expect(sec.getByRole("listitem").filter({ hasText: "Vanilla plus" })).toContainText("Loaded", { timeout: 5000 });
+  await expect(sec.getByRole("listitem").filter({ hasText: "Vanilla plus" })).toContainText("Loaded", { timeout: 10_000 });
   await page.evaluate(() => { location.hash = "#/"; });
   await expect(say(page)).toHaveText(/^4 mods on/, { timeout: 10_000 });
   await done.getByRole("button", { name: "Undo" }).click();
@@ -177,7 +177,7 @@ test("Undo of All off says it cannot when the profile changed elsewhere since", 
   await page.getByRole("combobox", { name: "Kind" }).selectOption({ label: "Native" });
   await page.locator(".k-hero .k-mods-bar").getByRole("button", { name: /^Shown off \(\d+\)$/ }).click();
   const done = page.locator(".k-toast").filter({ hasText: /^Switched \d+ mods off/ });
-  await expect(done).toBeVisible({ timeout: 5000 });
+  await expect(done).toBeVisible({ timeout: 10_000 });
   await expect.poll(async () => (await profileMods(page)).native.filter((m) => m.enabled).length).toBe(0);
   // another window saves Ember run (its notes)
   const p = await api<{ generation: number; notes: string }>(page, "profileGet", "ember-run");
@@ -215,7 +215,7 @@ test("Undo of All off leaves a mod switched on another page while the save ran",
   await page.evaluate(() => (window as unknown as Mock).__kilnMock.planCommand("profile_save", { gate: "bulk-save" }));
   await page.locator(".k-hero .k-mods-bar").getByRole("button", { name: /^Shown off \(\d+\)$/ }).click();
   const done = page.locator(".k-toast").filter({ hasText: /^Switched \d+ mods off/ });
-  await expect(done).toBeVisible({ timeout: 5000 });
+  await expect(done).toBeVisible({ timeout: 10_000 });
   expect((await queue()).idle).toBe(false); // the action's save is held
   // on Native and DLLs, FPS Unlock on and off again by hand, both while that save is held
   await page.evaluate(() => { location.hash = "#/mods/native"; });
@@ -271,7 +271,7 @@ test("Settings > Profiles saves the current set under a new name, loads another,
   // every kind counts: Ember run holds 5 Kiln, 4 native, 1 EMF, 1 EML, 1 ShroudForge, 1 Greeneye, 1 Shroudtopia
   await expect(sec.getByRole("listitem").filter({ hasText: "Ember run" })).toContainText("14 mods");
   await sec.getByRole("listitem").filter({ hasText: "Vanilla plus" }).getByRole("button", { name: "Load" }).click();
-  await expect(sec.getByRole("listitem").filter({ hasText: "Vanilla plus" })).toContainText("Loaded", { timeout: 5000 });
+  await expect(sec.getByRole("listitem").filter({ hasText: "Vanilla plus" })).toContainText("Loaded", { timeout: 10_000 });
   await page.getByRole("link", { name: "Kiln: Play" }).click();
   // Vanilla plus: Weather Plus, and the game folder's Greeneye and SET mods its older drop-in rules load (4); off: the
   // 21 other Library mods and 3 game-folder mods
@@ -398,7 +398,7 @@ test("a right click on a row opens its menu where the pointer is", async ({ page
   // a field keeps the webview's own menu (copy, paste): nothing of Kiln's opens
   await page.keyboard.press("Escape");
   await desktop(page);
-  await page.locator(".k-hero").getByLabel("Filter").click({ button: "right" });
+  await page.locator(".k-hero").getByLabel("Filter", { exact: true }).click({ button: "right" });
   await expect(page.getByRole("menu")).toHaveCount(0);
 });
 

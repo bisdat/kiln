@@ -497,7 +497,7 @@ public sealed unsafe class GlideSteerTests
         });
     }
 
-    // As a Windows game or server writes a preset: the header's comment lines end in "\n", the JSON's lines in CRLF.
+    // As a Windows game or server wrote a preset up to dev.29.18: the header's comment lines end in "\n", the JSON's lines in CRLF.
     private static string Windows(string text)
     {
         var json = text.IndexOf("\n{\n", StringComparison.Ordinal) + 1;
@@ -585,6 +585,28 @@ public sealed unsafe class GlideSteerTests
             File.WriteAllText(file, dev14.Replace("\"minHealth\": 1", "\"minHealth\": 0.5"));
             Assert.False(RulesPresets.IsEarlierDefault("creative", file));  // edited: left alone, as with LF
             Assert.True(Encoding.UTF8.GetBytes(Dev23Windows).Length > Encoding.UTF8.GetBytes(Dev23).Length);
+        });
+    }
+
+    [Fact]
+    public void ThePresetTextHasLfLinesWhateverLineEndsTheJsonHas()
+    {
+        // System.Text.Json's indented lines end in Environment.NewLine: CRLF on Windows
+        var json = PlayerRules.Creative.ToJson().Replace("\r\n", "\n");
+        var lf = RulesPresets.DefaultText("creative", json);
+        Assert.DoesNotContain('\r', lf);
+        Assert.Equal(lf, RulesPresets.DefaultText("creative", json.Replace("\n", "\r\n")));
+    }
+
+    [Fact]
+    public void ThePresetFileIsWrittenWithLfOnEveryOs()
+    {
+        InFolder(file =>
+        {
+            RulesPresets.WriteDefaults();
+            var bytes = File.ReadAllBytes(file);
+            Assert.DoesNotContain((byte)'\r', bytes);
+            Assert.Equal(PlayerRules.Creative, PlayerRules.FromJson(Encoding.UTF8.GetString(bytes)));
         });
     }
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // kiln.build internals. Engine facts come from sigdb/symbols/server.d/build.json; docs/re/build.md has the evidence.
 #pragma once
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -97,6 +98,7 @@ struct VoxelWorld {
     uint32_t tile[2] = {0, 0}, tiles[2] = {0, 0};
     bool ok = false;
 };
+void vox_world_closed();  // world teardown: invalidate pointers even when an ECS address is reused
 const VoxelWorld* vox();  // resolves (once per server world); nullptr when unavailable
 KilnResult vox_grid(KilnBuildGrid* out);
 // true when every streaming tile under the box is loaded; with `request`, touches the missing ones (loads them)
@@ -133,11 +135,34 @@ KilnResult item_template(uint32_t item, KilnGuid* out);
 
 // ---- Kiln save regions (regions.cpp) ----
 bool regions_install();  // kiln_plugin_main: hook the game's save-region builder
+void terrain_budget_reset();
+bool terrain_budget_reserve(uint32_t read, uint32_t write);
+void terrain_budget_charge(double ms);
+bool regions_save_running(); // a confirmed load of the current world, never a count of process steps
+bool regions_lifecycle_safe(); // installed world-stop observer AND a functioning core destroy hook
 void regions_ready();    // on_ready
 void regions_keep(const int32_t origin[3], const uint32_t dims[3]);      // tick: chunks of a committed write
 size_t regions_release(const int32_t origin[3], const uint32_t dims[3]);  // chunks inside the box, forgotten
 void regions_flush();    // Pre: write regions.json when it changed
 void regions_status(uint64_t* chunks, uint64_t* saves, uint64_t* boxes);
+std::string regions_world();        // the running world's GUID text from kiln.saves ("" while unknown); any thread
+bool regions_saves_written(uint64_t* written);  // kiln.saves' count of world files written this session
+
+// ---- transient edits (transient.cpp, transient_journal.cpp): KILN_BUILD_F_TRANSIENT cells are put back at the next start ----
+// A transient write of the block-aligned box wo/wd, BEFORE it commits: `old`/`cur` are its cells before and after,
+// `addressed` the cells it sets. KILN_OK when the change is on disk; otherwise the write must not commit (detail set).
+KilnResult transient_note_before(const int32_t wo[3], const uint32_t wd[3], const KilnVoxel* old, const KilnVoxel* cur,
+                                 const uint8_t* addressed);
+// A kept write (any write without the flag) of the box, BEFORE it commits: the journaled cells it sets leave the journal,
+// on disk first. KILN_OK when done (or nothing journaled is touched); otherwise the write must not commit (detail set).
+KilnResult transient_kept_before(const int32_t wo[3], const uint32_t wd[3], const uint8_t* addressed);
+// That kept write's commit faulted: these block origins (dirty, not committed) get their journal records back.
+void transient_kept_failed(const std::vector<std::array<int32_t, 3>>& uncommitted);
+void transient_world_closed();  // unbind even without a server tick between hosted sessions
+void transient_pre(uint64_t step);  // Pre: bind to the world, put back an earlier session's cells, compact
+void transient_before_save();       // the game builds its save-region list: compact the journal
+// Commits one 8x8x8 block (cells x fastest) through the engine's store commit; false when the writer faulted.
+bool vox_commit_block(const VoxelWorld& v, const int32_t borg[3], KilnVoxel* cells);
 
 // ---- self-test (selftest.cpp; labs: <kiln>/data/kiln.build/selftest) ----
 void selftest_init();

@@ -79,7 +79,9 @@ rules! {
     MATERIAL_BUDGET = "KL330", "material-budget", Error, "more new building materials than the game has ids for";
     MATERIAL_COUNT = "KL331", "material-count", Warning, "a mod with many building materials, which every mod shares room for";
     MATERIAL_REF = "KL332", "material-reference", Warning, "a game material the catalog does not have";
+    MATERIAL_POOL = "KL334", "material-pool", Error, "a building material pool, or a blueprint's materialPool, that kiln.worldtables refuses";
     SURFACE_TEXTURE = "KL333", "surface-texture", Error, "a building surface's PNG that kiln.surfaces refuses, or reads otherwise than it looks";
+    RUN_BINDING = "KL340", "run-binding", Error, "an effect's run native with a parameter Blocks cannot bind, or a required one with nothing to bind in that effect";
 
     // KL4xx: references to the game's data (needs the game-data catalog)
     UNKNOWN_REF = "KL401", "unknown-reference", Warning, "a name, id or GUID the game (and the mods) do not have";

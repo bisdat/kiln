@@ -478,7 +478,8 @@
    "packages": [
     "06b-typed-hooks"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "optional diagnostic that opens nothing: it needs a mod that links rules/TerrainDamage with a pass-through typed hook, and the check pack has no such fixture; 06b-typed-hooks.client covers a typed hook running in a real game"
   },
   {
    "id": "06c-impact-thread",
@@ -488,6 +489,16 @@
     "06c-impact-natives"
    ],
    "state": "settled"
+  },
+  {
+   "id": "06c-natives.joined",
+   "title": "Same-step natives and an attachment with a player in the world",
+   "chapter": "06c",
+   "packages": [
+    "06c-impact-natives"
+   ],
+   "state": "open",
+   "added": "06c-impact-natives"
   },
   {
    "id": "06c-impact-damage",
@@ -526,8 +537,37 @@
    "state": "open"
   },
   {
+   "id": "07-watch.hosted",
+   "title": "Component watches follow a real player",
+   "chapter": "07",
+   "packages": [
+    "07-cancelable-events"
+   ],
+   "state": "open",
+   "added": "07-cancelable-events S7 (dev.29)"
+  },
+  {
+   "id": "07-watch.joined",
+   "title": "A joined client and the main menu cannot watch",
+   "chapter": "07",
+   "packages": [
+    "07-cancelable-events"
+   ],
+   "state": "open",
+   "added": "07-cancelable-events S7 (dev.29 review)"
+  },
+  {
    "id": "08-boot.first-start-definitions",
    "title": "First-start content and rehosting",
+   "chapter": "08",
+   "packages": [
+    "08-onboot"
+   ],
+   "state": "open"
+  },
+  {
+   "id": "08-boot.required-client",
+   "title": "A required boot mod's client-only content stops the start",
    "chapter": "08",
    "packages": [
     "08-onboot"
@@ -560,6 +600,36 @@
     "10-equipment-sets"
    ],
    "state": "open"
+  },
+  {
+   "id": "10-items.equip-set.observer",
+   "title": "A second player sees the atomic set swap",
+   "chapter": "10",
+   "packages": [
+    "10-equipment-sets"
+   ],
+   "state": "open",
+   "added": "10-equipment-sets (dev.29 review: the second observer split out of 10-items.equip-set)"
+  },
+  {
+   "id": "10-items.equip-set.persist",
+   "title": "A set's result is saved with the character (part 1: apply)",
+   "chapter": "10",
+   "packages": [
+    "10-equipment-sets"
+   ],
+   "state": "open",
+   "added": "10-equipment-sets (dev.29: a save and reload the lab cannot show)"
+  },
+  {
+   "id": "10-items.equip-set.persist.after",
+   "title": "A set's result is saved with the character (part 2: after a reload)",
+   "chapter": "10",
+   "packages": [
+    "10-equipment-sets"
+   ],
+   "state": "open",
+   "added": "10-equipment-sets (dev.29: a save and reload the lab cannot show)"
   },
   {
    "id": "11-h1",
@@ -972,6 +1042,86 @@
    "state": "open"
   },
   {
+   "id": "programs.client-baseline",
+   "title": "No client declaration: the client worlds get nothing of Kiln's programs",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
+   "id": "programs.client-joined",
+   "title": "A joined client: the client programs and the prediction storage's",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
+   "id": "programs.client-emf",
+   "title": "EMF programs and on_event in the client world",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
+   "id": "programs.client-visual",
+   "title": "A client program draws a barrel 1 m higher in this game only",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
+   "id": "programs.client-persistence",
+   "title": "A client program's write is not saved: the barrel after a save and a reload",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
+   "id": "programs.client-rejoin",
+   "title": "Client programs through leaving, joining again, an unload and a load",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
+   "id": "programs.client-delayed-stop",
+   "title": "A client world stops while a delayed callback is inside",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
+   "id": "programs.client-exit",
+   "title": "The last start's exit with client programs running",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
    "id": "15-m5",
    "title": "Sidecars, vanilla filtering and receive rewrite",
    "chapter": "15",
@@ -1115,6 +1265,32 @@
    "state": "open"
   },
   {
+   "id": "17-vfx-budget.before",
+   "title": "VFX restart proof (1 of 2): record accepted definitions, then restart",
+   "chapter": "17",
+   "packages": [
+    "17b-kiln-quotas",
+    "17a-vfx-cap",
+    "17c-roster-cap",
+    "17d-material-pools"
+   ],
+   "state": "open",
+   "added": "17a-vfx-cap S2 (dev.29): Vfx.ResourceBudget, Blocks.Define(name, VfxBlock, options)"
+  },
+  {
+   "id": "17-vfx-budget.after",
+   "title": "VFX restart proof (2 of 2): exact registrations and visible bursts",
+   "chapter": "17",
+   "packages": [
+    "17b-kiln-quotas",
+    "17a-vfx-cap",
+    "17c-roster-cap",
+    "17d-material-pools"
+   ],
+   "state": "open",
+   "added": "17a-vfx-cap S2 (dev.29): Vfx.ResourceBudget, Blocks.Define(name, VfxBlock, options)"
+  },
+  {
    "id": "17-buffs-client",
    "title": "Large buff pack UI and sync",
    "chapter": "17",
@@ -1135,6 +1311,15 @@
     "17a-vfx-cap",
     "17c-roster-cap",
     "17d-material-pools"
+   ],
+   "state": "open"
+  },
+  {
+   "id": "17-roster.refused-start",
+   "title": "A roster the client cannot hold stops its start before any world",
+   "chapter": "17",
+   "packages": [
+    "17c-roster-cap"
    ],
    "state": "open"
   },
@@ -1172,7 +1357,8 @@
     "17c-roster-cap",
     "17d-material-pools"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "belongs to the optional world-local material allocation, which is not built in this release: a mod's material pools are added once at boot and stay for the whole run; 17-material-pools covers them"
   },
   {
    "id": "18-c18.1",
@@ -1402,6 +1588,16 @@
    "state": "open"
   },
   {
+   "id": "19d-brain-walks",
+   "title": "A creature with a Kiln.Blocks brain walks to you and stops",
+   "chapter": "19d",
+   "packages": [
+    "19d-creature-control"
+   ],
+   "state": "open",
+   "added": "19d-creature-control"
+  },
+  {
    "id": "19e-t1",
    "title": "Selected food/tool and replay-safe cost",
    "chapter": "19e",
@@ -1512,6 +1708,146 @@
    ],
    "state": "open",
    "added": "06a-program-wraps"
+  },
+  {
+   "id": "06a-define.hosted",
+   "title": "A program of a mod's own (Systems.Define) on a hosted world's workers",
+   "chapter": "06a",
+   "packages": [
+    "06a-program-wraps"
+   ],
+   "state": "open",
+   "added": "06a-program-wraps (dev.29 S8)"
+  },
+  {
+   "id": "06a-wraps.client-stop",
+   "title": "Client-world wraps registered through leave and rejoin: the stop lines in order",
+   "chapter": "06a",
+   "packages": [
+    "06a-program-wraps"
+   ],
+   "state": "open",
+   "added": "06a-program-wraps"
+  },
+  {
+   "id": "06a-wraps.client-exit",
+   "title": "Client-world wraps registered at the game's exit: the exit's stop lines in order",
+   "chapter": "06a",
+   "packages": [
+    "06a-program-wraps"
+   ],
+   "state": "open",
+   "added": "06a-program-wraps"
+  },
+  {
+   "id": "00-sigdb.in-place-patches",
+   "title": "Kiln's functions are found next to a loader that patched the game first",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "coordinator (sigdb fix, 14 Nov)"
+  },
+  {
+   "id": "00-keys.physical-backquote",
+   "title": "Backquote is the key left of 1 on a UK keyboard layout",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "fix round 00-integration.keys (GitHub issue 33, 14 Nov)"
+  },
+  {
+   "id": "rules.noclip-descent",
+   "title": "NoClip: sneak sinks every time, also in the game's sneak mode",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "fix round 00-integration.noclip (GitHub issue 25, 14 Nov)"
+  },
+  {
+   "id": "rules.noclip-death",
+   "title": "NoClip: a death inside the ground ends it",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "fix round 00-integration.noclip (GitHub issue 25, 14 Nov)"
+  },
+  {
+   "id": "rules.noclip-world",
+   "title": "NoClip: closing the world inside the ground",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "fix round 00-integration.noclip (GitHub issue 25, 14 Nov)"
+  },
+  {
+   "id": "rules.noclip-disconnect",
+   "title": "NoClip: leaving a server inside the ground",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "fix round 00-integration.noclip (GitHub issue 25, 14 Nov)"
+  },
+  {
+   "id": "06b-typed-hooks.client",
+   "title": "Typed hooks: a mod's typed hook runs in the game",
+   "chapter": "06b",
+   "packages": [
+    "06b-typed-hooks"
+   ],
+   "state": "open",
+   "added": "06b-typed-hooks"
+  },
+  {
+   "id": "ui-hooks.c1",
+   "title": "Marks sit on the game's slots (backpack, chest, hotbar; two resolutions)",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks"
+  },
+  {
+   "id": "ui-hooks.c2",
+   "title": "Ctrl+click on a backpack slot: the mod gets the item, the game does not pick it up",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks"
+  },
+  {
+   "id": "ui-hooks.c3",
+   "title": "Clicks in a chest: the chest's items, a watched click still reaches the game",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks"
+  },
+  {
+   "id": "ui-hooks.c4",
+   "title": "No slot clicks in the play view; the cursor's slot (Hovered) and the game's hover byte",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks"
   }
  ]
 }
