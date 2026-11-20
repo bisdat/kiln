@@ -52,3 +52,4 @@ Kiln.TestKit.HarnessUiInventory.OpenBackpack(params Kiln.TestKit.FakeInventorySl
 Kiln.TestKit.HarnessUiInventory.OpenChest(Kiln.EntityId chest, params Kiln.TestKit.FakeInventorySlot[]! slots) -> void
 Kiln.TestKit.HarnessUiInventory.PanelsShown.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Kiln.TestKit.HarnessUiInventory.Screen.get -> Kiln.InventoryScreen?
+Kiln.TestKit.KilnHarness.MenuFrame() -> int
