@@ -33,6 +33,34 @@ public sealed class ChatCompletionDisplayTests
         Assert.True(ChatCompletionDisplayRules.AlreadyComplete("/time set night", "/time set ", ["night"]));
     }
 
+    [Fact]
+    public void TabAndArrowsCycleMultipleCandidatesWithoutForgettingOriginalPrefix()
+    {
+        var candidates = new[] { "help", "heal", "hello" };
+        const string prefix = "/";
+        Assert.False(ChatCompletionDisplayRules.AlreadyComplete("/he", prefix, candidates));
+        var first = ChatCompletionDisplayRules.Next(candidates.Length, 0, false, false);
+        Assert.Equal("/help", prefix + candidates[first]);
+        var second = ChatCompletionDisplayRules.Next(candidates.Length, first, true, false);
+        Assert.Equal("/heal", prefix + candidates[second]);
+        var third = ChatCompletionDisplayRules.Next(candidates.Length, second, true, false);
+        Assert.Equal("/hello", prefix + candidates[third]);
+        Assert.Equal(first, ChatCompletionDisplayRules.Next(candidates.Length, third, true, false));
+        Assert.Equal(third, ChatCompletionDisplayRules.Next(candidates.Length, first, true, true));
+        // A history-recalled /help, in contrast, is a fresh reply and must
+        // never open its own popup even when other candidates are present.
+        Assert.True(ChatCompletionDisplayRules.AlreadyComplete("/help", prefix, candidates));
+        Assert.True(ChatCompletionDisplayRules.AlreadyComplete("/HELP", prefix, candidates));
+    }
+
+    [Fact]
+    public void SingleOrEmptyCandidateDoesNotCycle()
+    {
+        Assert.Equal(0, ChatCompletionDisplayRules.Next(1, 0, false, false));
+        Assert.Equal(0, ChatCompletionDisplayRules.Next(1, 0, true, false));
+        Assert.Equal(-1, ChatCompletionDisplayRules.Next(0, 0, false, false));
+    }
+
     [Theory]
     [InlineData(0, 66f)]
     [InlineData(1, 106f)]

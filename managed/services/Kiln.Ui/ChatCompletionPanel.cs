@@ -12,7 +12,17 @@ namespace Kiln;
 internal static class ChatCompletionDisplayRules
 {
     internal static bool AlreadyComplete(string text, string prefix, string[] suggestions) =>
-        suggestions.Any(choice => string.Equals(prefix + choice, text, StringComparison.Ordinal));
+        suggestions.Any(choice => string.Equals(prefix + choice, text, StringComparison.OrdinalIgnoreCase));
+
+    // First Tab selects the first result; subsequent Tab/Down or Shift+Tab/Up
+    // cycle while the candidate list stays active. Count is bounded by the
+    // completion protocol, so modulo is safe after the explicit guard.
+    internal static int Next(int count, int selected, bool active, bool backwards)
+    {
+        if (count <= 0) return -1;
+        if (!active) return backwards ? count - 1 : 0;
+        return (selected + count + (backwards ? -1 : 1)) % count;
+    }
 
     internal static float PopupHeight(float scale, int visible) =>
         (42f + 24f + 40f * Math.Clamp(visible, 0, 10)) * scale;
@@ -78,7 +88,7 @@ internal static unsafe class ChatCompletionPanel
         return true;
     }
 
-    private static bool Accept(in UiNative.ChatCompletion input, string text, int index)
+    private static bool Accept(in UiNative.ChatCompletion input, string text, int index, bool keyboard)
     {
         if (index < 0 || index >= _suggestions.Length) return false;
         var replacement = _prefix + _suggestions[index];
@@ -86,11 +96,12 @@ internal static unsafe class ChatCompletionPanel
         if (!UiNative.ChatReplace(input, text, replacement)) return false;
         _expectedEdit = replacement;
         _selected = index;
-        _active = false;
-        // A selected candidate is a complete token; the popup must not
-        // survive on /help, nor reappear when Up recalls /help from history.
-        _dismissed = true;
-        UiNative.ChatCandidates(false, false);
+        // An unambiguous result or a mouse click finishes completion. With
+        // several keyboard candidates keep the list active, retaining its
+        // *original prefix* for subsequent Tab/Up/Down cycling.
+        _active = keyboard && _suggestions.Length > 1;
+        _dismissed = !_active;
+        if (_dismissed) UiNative.ChatCandidates(false, false);
         return true;
     }
 
@@ -121,12 +132,15 @@ internal static unsafe class ChatCompletionPanel
             {
                 _line = text;
                 _expectedEdit = null;
-                // A completion was applied: keep the popup dismissed until
-                // the player actually edits the line again.
-                _suggestions = [];
-                _active = false;
-                _dismissed = true;
-                UiNative.ChatCandidates(false, false);
+                // We generated this edit, so retain the candidates only for
+                // multi-match keyboard cycling. A complete command recalled
+                // by history takes the Changed path below, not this path.
+                if (!_active || _dismissed)
+                {
+                    _suggestions = [];
+                    _dismissed = true;
+                    UiNative.ChatCandidates(false, false);
+                }
             }
             else Changed(text, input.Field, now);
         }
@@ -170,29 +184,16 @@ internal static unsafe class ChatCompletionPanel
         {
             switch (input.Action)
             {
-                case 3: // Tab: first suggestion, then cycle forwards
-                    _selected = _active ? (_selected + 1) % _suggestions.Length : 0;
-                    _active = true;
-                    Accept(input, text, _selected);
-                    break;
-                case 4: // Shift+Tab: same, but backwards
-                    _selected = _active ? (_selected + _suggestions.Length - 1) % _suggestions.Length
-                        : _suggestions.Length - 1;
-                    _active = true;
-                    Accept(input, text, _selected);
-                    break;
-                case 5: // Up: previous suggestion, not command history
-                    if (_active)
+                case 3: // Tab: accept first, then cycle to next match
+                case 4: // Shift+Tab: reverse (unless Steam captures it)
+                case 5: // Up: previous match when list is active
+                case 6: // Down: next match when list is active
+                    if (_expectedEdit == null && (input.Action is 3 or 4 || _active))
                     {
-                        _selected = (_selected + _suggestions.Length - 1) % _suggestions.Length;
-                        Accept(input, text, _selected);
-                    }
-                    break;
-                case 6: // Down: next suggestion
-                    if (_active)
-                    {
-                        _selected = (_selected + 1) % _suggestions.Length;
-                        Accept(input, text, _selected);
+                        var backwards = input.Action is 4 or 5;
+                        var next = ChatCompletionDisplayRules.Next(
+                            _suggestions.Length, _selected, _active, backwards);
+                        if (next >= 0) Accept(input, text, next, keyboard: true);
                     }
                     break;
             }
@@ -249,7 +250,7 @@ internal static unsafe class ChatCompletionPanel
                                               _active && i == _selected, 0, rowHeight))
                             {
                                 _active = true;
-                                Accept(input, text, i);
+                                Accept(input, text, i, keyboard: false);
                             }
                             if (ui.ItemHovered) hovered = true;
                         }

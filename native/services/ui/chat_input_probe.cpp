@@ -126,10 +126,8 @@ std::string g_last_applied;
 bool g_set_text_pending = false;
 
 constexpr uint64_t kMaxEditBytes = 1024;
-// Captured on the verified client 26430625 and gated by chat.ui.input's
-// signature-backed layout. The editor is UTF-32; cursor index is at +0x1938.
-constexpr uintptr_t kEditorCursor = 0x1938;
-
+// Completion-specific offsets are captured by chat.ui.completion in sigdb.
+// History's existing chat.ui.input layout remains independent.
 
 // The game's layout, from sigdb (chatui.json, feature chat.ui.input; docs/re/chat-input.md), read once at install.
 struct Layout {
@@ -137,6 +135,8 @@ struct Layout {
     uintptr_t edit = 0;       // state + edit: the field's editor (EditSetText's second argument)
     uintptr_t editing = 0;    // state + editing: a byte, set while the field has typing focus
     uintptr_t buffer = 0;     // widget + buffer: pointer to the caller's chat string (StringHead)
+    uintptr_t node = 0;       // widget + node: layout for UiNodeRect, captured from TextInputState
+    uintptr_t cursor = 0;     // editor + cursor: UTF-32 cursor, captured twice from EditSetText
 } L;
 
 struct GameText { const char* data; uint64_t length; uint64_t hash; };
@@ -244,14 +244,14 @@ void completion_capture(void* widget, void* state, bool hud) {
         return;
     }
     uint32_t cursor = 0;
-    if (!game_read(reinterpret_cast<const uint8_t*>(state) + L.edit + kEditorCursor, &cursor) ||
+    if (!game_read(reinterpret_cast<const uint8_t*>(state) + L.edit + L.cursor, &cursor) ||
         cursor > codepoints(line)) {
         invalidate_completion_snapshot();
         return;
     }
     uintptr_t node = 0;
     float rect[4]{};
-    const bool valid = g_rect_fn && game_read(reinterpret_cast<const uint8_t*>(widget) + 8, &node) &&
+    const bool valid = g_rect_fn && game_read(reinterpret_cast<const uint8_t*>(widget) + L.node, &node) &&
         node && game_node_rect(node, rect);
     if (!valid || !std::isfinite(rect[0]) || !std::isfinite(rect[1]) ||
         !std::isfinite(rect[2]) || !std::isfinite(rect[3]) ||
@@ -611,6 +611,21 @@ bool read_layout() {
     L.buffer = static_cast<uintptr_t>(buffer);
     return true;
 }
+
+// Completion's editor and geometry offsets are optional. A game version that
+// fails either capture disables completion; history keeps its verified layout.
+bool read_completion_layout() {
+    if (!g_api->feature(KilnStr{"chat.ui.completion", sizeof("chat.ui.completion") - 1}))
+        return false;
+    int64_t node = 0, cursor = 0;
+    if (!cst("chatui/widget.node", &node) || !cst("chatui/edit.cursor", &cursor))
+        return false;
+    if (node <= 0 || node >= 0x200 || cursor <= 0 || cursor >= 0x2000)
+        return false;
+    L.node = static_cast<uintptr_t>(node);
+    L.cursor = static_cast<uintptr_t>(cursor);
+    return true;
+}
 } // namespace
 
 namespace {
@@ -852,7 +867,8 @@ bool chat_input_probe_install() {
     // Exact same verified chat UI hook, plus a safe rectangle translation.
     // Refuse only completion if the optional geometry signatures are missing.
     if (completion) {
-        completion = symbol("ui/UiNodeRect", &g_rect_fn) &&
+        completion = read_completion_layout() &&
+            symbol("ui/UiNodeRect", &g_rect_fn) &&
             cst("ui/sys.frame_arg", &g_frame_arg) &&
             cst("ui/sys.viewport", &g_viewport) &&
             cst("ui/sys.px_per_unit", &g_ppu) &&
@@ -860,8 +876,9 @@ bool chat_input_probe_install() {
             g_frame_arg < 0x10000 && g_viewport < 0x10000 && g_ppu < 0x10000;
         g_rect_metrics = completion;
         if (!completion) logf(KILN_LOG_WARN,
-            "ui: chat completion unavailable: native chat rect/viewport was not verified; history unaffected");
+            "ui: chat completion unavailable: sigdb cursor/node or native rect/viewport unverified; history unaffected");
     }
+    if (!history && !completion && !diag && !probe) return false;
     if (!g_input.install(g_api, g_owner, input, reinterpret_cast<void*>(&hk_input), "chatui/TextInputProcess")) {
         logf(KILN_LOG_WARN, "ui: chat input hook unavailable: %s", g_input.error());
         return false;
