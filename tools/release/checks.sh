@@ -313,6 +313,8 @@ run_checks() {
   if [[ -n $setup ]]; then
     check "NSIS setup installs silently under Wine and passes --selftest (distribution direct)" check_nsis
     check "kilnctl.exe and kiln.exe --version under Wine" check_wine_cli
+    check "sdk/kiln finds its debug-inspect helper (tools/debug-inspect next to it, the manifest's SHA-256)" \
+      "$out/sdk/kiln" debug-inspect --verify-bundle
   fi
   if [[ -n $nexus_setup ]]; then
     check "Nexus NSIS setup installs silently under Wine and passes --selftest (distribution nexus)" \

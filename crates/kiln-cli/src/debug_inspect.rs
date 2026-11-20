@@ -34,9 +34,23 @@ const ANSWER: Duration = Duration::from_secs(5);
 const FIRST_ANSWER: Duration = Duration::from_secs(15);
 
 #[derive(clap::Args)]
-pub struct InspectArgs {}
+pub struct InspectArgs {
+    /// Check the helper this kiln would start (tools/debug-inspect next to it, else in the Kiln data folder) against its
+    /// manifest and print where it is: the release check of an SDK folder.
+    #[arg(long)]
+    verify_bundle: bool,
+}
 
-pub fn run(_a: InspectArgs, _json: bool) -> Result<i32> {
+pub fn run(a: InspectArgs, json: bool) -> Result<i32> {
+    if a.verify_bundle {
+        let helper = find_helper().map_err(crate::debug::cli_error)?;
+        if json {
+            println!("{}", json!({ "ok": true, "helper": helper }));
+        } else {
+            println!("{}", helper.display());
+        }
+        return Ok(0);
+    }
     #[cfg(windows)]
     {
         let mut src = kiln_manage::debug::windows::NativeSource::default();
@@ -188,10 +202,31 @@ struct Manifest {
 /// The helper of this kiln's bundle (the folder this kiln runs from): `tools/debug-inspect/win-x64/kiln.exe`, started
 /// only when its SHA-256 is the one `tools/debug-inspect/manifest.json` names. Missing or mismatched: tool_missing,
 /// never another program (chapter 12a §4 step 4).
+/// The helper next to this kiln (`<kiln dir>/tools/debug-inspect`, how the SDK folder ships it), else in the Kiln data
+/// folder (`<data>/tools/debug-inspect`, where the release's kiln-debug-inspect zip unpacks for a kiln downloaded on its
+/// own). A helper next to kiln whose hash does not match is refused, never passed over for another.
 pub fn find_helper() -> std::result::Result<std::path::PathBuf, DebugError> {
     let exe = std::env::current_exe().map_err(|e| DebugError::new(DebugCode::ToolMissing, format!("cannot tell where this kiln runs from: {e}")).because("helper_missing"))?;
     let root = exe.canonicalize().unwrap_or(exe);
-    find_helper_in(root.parent().unwrap_or(std::path::Path::new(".")))
+    let data = kiln_manage::paths::DataDirs::locate().ok().map(|d| d.root);
+    find_helper_from(root.parent().unwrap_or(std::path::Path::new(".")), data.as_deref())
+}
+
+pub fn find_helper_from(beside: &std::path::Path, data: Option<&std::path::Path>) -> std::result::Result<std::path::PathBuf, DebugError> {
+    let first = match find_helper_in(beside) {
+        Ok(h) => return Ok(h),
+        Err(e) if !beside.join("tools/debug-inspect/manifest.json").exists() => e,
+        Err(e) => return Err(e),
+    };
+    match data {
+        Some(d) if d.join("tools/debug-inspect/manifest.json").exists() => find_helper_in(d),
+        Some(d) => Err(DebugError::new(
+            DebugCode::ToolMissing,
+            format!("{} (nor in the Kiln data folder, {}): use the kiln of Kiln's SDK folder, or unpack the release's kiln-debug-inspect zip into the data folder", first.message, d.join("tools/debug-inspect").display()),
+        )
+        .because("helper_missing")),
+        None => Err(first),
+    }
 }
 
 pub fn find_helper_in(root: &std::path::Path) -> std::result::Result<std::path::PathBuf, DebugError> {
@@ -201,7 +236,7 @@ pub fn find_helper_in(root: &std::path::Path) -> std::result::Result<std::path::
     let text = match std::fs::metadata(&mpath) {
         Ok(m) if m.len() <= MAX_LINE as u64 => std::fs::read(&mpath).map_err(|e| missing(format!("cannot read {}: {e}", mpath.display())))?,
         Ok(_) => return Err(missing(format!("{} is too large to be the helper's manifest", mpath.display()))),
-        Err(_) => return Err(missing(format!("this kiln has no debug-inspect helper ({} is missing); it ships with Kiln's SDK and the VS Code extension", mpath.display()))),
+        Err(_) => return Err(missing(format!("this kiln has no debug-inspect helper ({} is missing); it ships next to kiln in the SDK folder of a Kiln release", mpath.display()))),
     };
     let m: Manifest = serde_json::from_slice(&text).map_err(|e| missing(format!("{} is not the helper's manifest: {e}", mpath.display())))?;
     if m.format != 1 || m.helper != "win-x64/kiln.exe" || m.sha256.len() != 64 || !m.sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -538,6 +573,35 @@ mod tests {
         assert_eq!(find_helper_in(&t).unwrap_err().code, DebugCode::ToolMissing);
         std::fs::write(dir.join("manifest.json"), "{}").unwrap();
         assert_eq!(find_helper_in(&t).unwrap_err().code, DebugCode::ToolMissing);
+        std::fs::remove_dir_all(&t).unwrap();
+    }
+
+    #[test]
+    fn the_helper_is_found_next_to_kiln_else_in_the_data_folder_never_past_a_bad_one() {
+        let t = std::env::temp_dir().join(format!("kiln-cli-helper-from-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        let (beside, data) = (t.join("sdk"), t.join("data"));
+        let stage = |root: &std::path::Path, bytes: &[u8], sha: &str| {
+            let dir = root.join("tools/debug-inspect");
+            std::fs::create_dir_all(dir.join("win-x64")).unwrap();
+            std::fs::write(dir.join("win-x64/kiln.exe"), bytes).unwrap();
+            std::fs::write(dir.join("manifest.json"), json!({ "format": 1, "helper": "win-x64/kiln.exe", "sha256": sha, "kiln": "0.2.0-dev" }).to_string()).unwrap();
+            dir.join("win-x64/kiln.exe")
+        };
+        std::fs::create_dir_all(&beside).unwrap();
+        // nothing anywhere: missing, and the message names both places
+        let e = find_helper_from(&beside, Some(&data)).unwrap_err();
+        assert_eq!(e.reason.as_deref(), Some("helper_missing"));
+        assert!(e.message.contains("data folder"), "{}", e.message);
+        // only in the data folder (a kiln downloaded on its own, the zip unpacked there)
+        let in_data = stage(&data, b"MZ data", &kiln_manage::hash::sha256_hex(b"MZ data"));
+        assert_eq!(find_helper_from(&beside, Some(&data)).unwrap(), in_data);
+        // next to kiln wins
+        let next = stage(&beside, b"MZ sdk", &kiln_manage::hash::sha256_hex(b"MZ sdk"));
+        assert_eq!(find_helper_from(&beside, Some(&data)).unwrap(), next);
+        // a changed helper next to kiln is refused, not passed over for the data folder's
+        std::fs::write(&next, b"MZ changed").unwrap();
+        assert_eq!(find_helper_from(&beside, Some(&data)).unwrap_err().reason.as_deref(), Some("helper_hash"));
         std::fs::remove_dir_all(&t).unwrap();
     }
 
