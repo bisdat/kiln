@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdarg>
 #include <cstdint>
@@ -60,6 +61,27 @@ std::atomic<DWORD> g_pause_installer{0};   // the installing thread: it runs g_p
 std::atomic<DWORD> g_pause_reader{0};      // a code_state caller: its read of the file's bytes is noted
 std::atomic<bool> g_pause_reader_read{false};
 std::function<void()> g_pause_fn;
+// A thread watched at kiln.hooks' code lock: services/hooks_code.h calls test_lock_probe() before lock() takes the
+// mutex (KILN_HOOKS_TEST_LOCK_PROBE, this test's build only). A test that holds the lock then knows the caller is at it.
+std::atomic<DWORD> g_lock_watch{0};
+std::atomic<bool> g_lock_reached{false};
+// Texts written to state/hooks.json: the map timer may write the file at any time after boot, also while the process
+// exits, so the list and its lock are never destroyed.
+std::mutex& g_map_writes_mutex = *new std::mutex;
+std::vector<std::string>& g_map_writes = *new std::vector<std::string>;
+// The bound of a wait that must end. Generous: the shared build machine can be loaded far beyond its cores, and a
+// passing wait returns as soon as its condition holds. test-hooks-v2.sh's own limit per run ends a run sooner.
+constexpr std::chrono::seconds kMustEnd{300};
+constexpr DWORD kMustEndMs = 300000;
+template <class F>
+bool until(F done) {
+    const auto give_up = std::chrono::steady_clock::now() + kMustEnd;
+    while (!done()) {
+        if (std::chrono::steady_clock::now() > give_up) return false;
+        Sleep(0);
+    }
+    return true;
+}
 void file_read_noted() {
     const DWORD me = GetCurrentThreadId();
     if (me == g_pause_reader.load()) g_pause_reader_read = true;  // its next step is the lock
@@ -120,6 +142,10 @@ bool write_file_atomic(const std::filesystem::path& file, std::string_view text)
     std::filesystem::create_directories(file.parent_path(), ec);
     std::ofstream out(file, std::ios::binary | std::ios::trunc);
     out << text;
+    if (file.filename() == L"hooks.json") {
+        std::lock_guard lock(g_map_writes_mutex);
+        g_map_writes.emplace_back(text);
+    }
     return static_cast<bool>(out);
 }
 namespace log {
@@ -184,6 +210,11 @@ bool fingerprint(uintptr_t, hooks::fp::Fingerprint*) { return false; }
 namespace svc {
 Registrar::Registrar(Service* s) { g_service = s; }
 }  // namespace svc
+namespace hooks::code {
+void test_lock_probe() {
+    if (GetCurrentThreadId() == g_lock_watch.load()) g_lock_reached = true;
+}
+}  // namespace hooks::code
 }  // namespace kiln
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -753,20 +784,23 @@ void test_code_lock_order() {
             // always be stopped, and that is another test's failure (test_many_threads_stopped counts those lines).
             while (phase.load() < 3) Sleep(1);
         });
-        while (phase.load() < 1) Sleep(0);
+        const bool holding = until([&] { return phase.load() >= 1; });
         std::atomic<bool> returned{false};
         KilnResult rc = KILN_ERR_INTERNAL;
+        g_lock_reached = false;
         std::thread writer([&] {
+            g_lock_watch = GetCurrentThreadId();
             rc = call();
             returned = true;
         });
-        bool waited = true;
-        for (int i = 0; i < 20 && waited; ++i) {  // about 200 ms
-            Sleep(10);
-            waited = !returned.load() && live_is(before);
-        }
+        // The writer is at the lock the holder has: from here on it can only wait, so it has not returned and has
+        // written nothing. A writer that wrote before taking the lock, or never takes it, fails here (the second at
+        // the time limit).
+        const bool reached = until([] { return g_lock_reached.load(); });
+        const bool waited = holding && reached && !returned.load() && live_is(before);
         phase = 2;
         writer.join();
+        g_lock_watch = 0;
         phase = 3;
         holder.join();
         check(waited, (std::string(what) + " waits for a thread that holds code_state's lock: nothing written meanwhile").c_str());
@@ -818,18 +852,21 @@ void test_code_lock_order() {
                 ++polls;
             }
         });
-    while (polls.load() < 1000) Sleep(0);
+    const bool polling = until([&] { return polls.load() >= 1000; });
     const unsigned first = polls.load();
     unsigned refused = 0;
     static auto many = +[](int x) { return x + 1; };  // the functions' own result; it never calls on
     for (int i = 0; i < kTargets; ++i) {
+        const unsigned at_start = polls.load();
         KilnHandle link = 0;
         if (A->raw_detour(6, targets[i], nullptr, reinterpret_cast<void*>(many), nullptr, &link) != KILN_OK ||
             A->revoke(link) != KILN_OK)
             ++refused;
+        // the pollers ran again before the next install (a loaded machine may not schedule them otherwise)
+        if (!until([&] { return polls.load() > at_start; })) ++refused;
     }
     const unsigned during = polls.load() - first;
-    while (polls.load() < first + during + 1000) Sleep(0);
+    const bool polled = until([&] { return polls.load() >= first + during + 1000; });
     done = true;
     for (auto& t : pollers) t.join();
     bool all_managed = true;
@@ -838,6 +875,7 @@ void test_code_lock_order() {
         uint64_t g = 0;
         all_managed = all_managed && A->code_state(targets[i], 16, &s, &g) == KILN_OK && s == KILN_CODE_MANAGED;
     }
+    check(polling && polled, "the 4 pollers ran before and after the installs");
     check(refused == 0 && all_managed, "16 first installs while 4 threads poll code_state: each placed, each MANAGED after");
     check(bad == 0 && during > 0, "the polls during them see only ORIGINAL or MANAGED", std::to_string(bad.load()) + " bad of " +
           std::to_string(polls.load()) + ", " + std::to_string(during) + " during the installs");
@@ -873,21 +911,23 @@ void test_code_wait_during_stop() {
     g_pause_reader_read = false;
     g_pause_fn = [&] {  // on the installing thread, inside the install
         paused = true;
+        g_lock_reached = false;
         reader = std::thread([&] {
+            g_lock_watch = GetCurrentThreadId();
             g_pause_reader = GetCurrentThreadId();
             uint64_t g = 0;
             reader_rc = A->code_state(at, 16, &reader_state, &g);
             reader_done = true;
         });
-        for (int i = 0; i < 5000 && !g_pause_reader_read.load(); ++i) Sleep(1);
-        reached = g_pause_reader_read.load();
-        Sleep(20);  // its next step is the lock: let it get there and wait
+        reached = until([] { return g_pause_reader_read.load(); });
+        // its next step is the lock, which this install holds: once it is there, it can only wait
+        reached = until([] { return g_lock_reached.load(); }) && reached;
         done_in_pause = reader_done.load();
         std::thread reading([original, at] {
             original->rc = A->read_original(at, original->bytes, sizeof original->bytes);
             original->done = true;
         });
-        for (int i = 0; i < 5000 && !original->done.load(); ++i) Sleep(1);
+        until([&] { return original->done.load(); });
         original_in_pause = original->done.load() && original->rc == KILN_OK &&
                             !std::memcmp(original->bytes, file, sizeof file);
         // Joined, it has ended before the install lists the threads (a thread still ending then cannot always be
@@ -906,9 +946,10 @@ void test_code_wait_during_stop() {
     g_pause_at = 0;
     g_pause_installer = 0;
     g_pause_reader = 0;
+    g_lock_watch = 0;
     g_pause_fn = nullptr;
     check(installed == KILN_OK && paused && reached,
-          "the install paused after taking the lock; the caller read the file's bytes meanwhile");
+          "the install paused after taking the lock; the caller read the file's bytes meanwhile and reached the lock");
     check(!done_in_pause, "...and could not finish while the install held the lock");
     check(reader_done && reader_rc == KILN_OK && reader_state == KILN_CODE_MANAGED,
           "...it finished after the install and saw the detour (MANAGED)", "state " + std::to_string(reader_state));
@@ -1526,6 +1567,22 @@ void test_map_file_and_extension() {
     check(log_has("map state/hooks.json"), "boot_complete logs its summary");
 }
 
+// Threads that call a function in a loop count their calls apiece. made(n): each of them made n more calls from now (at
+// most kMustEnd), so all but the first of those began after whatever the test changed just before. Used instead of
+// sleeping and hoping the callers ran meanwhile.
+struct Callers {
+    std::atomic<uint64_t> calls[4] = {};
+    bool made(uint64_t n) {
+        uint64_t from[4];
+        for (int k = 0; k < 4; ++k) from[k] = calls[k].load();
+        return until([&] {
+            for (int k = 0; k < 4; ++k)
+                if (calls[k].load() < from[k] + n) return false;
+            return true;
+        });
+    }
+};
+
 void test_threads() {
     std::puts("-- 4 threads call in a loop while links are added and revoked");
     const uintptr_t t = reinterpret_cast<uintptr_t>(&game_stress);
@@ -1549,6 +1606,7 @@ void test_threads() {
     g_real = 0;
     std::atomic<bool> stop{false};
     std::atomic<uint64_t> calls{0}, bad{0};
+    Callers each;
     std::vector<std::thread> th;
     for (int k = 0; k < 4; ++k)
         th.emplace_back([&, k] {
@@ -1557,10 +1615,12 @@ void test_threads() {
                 const uint64_t r = game_stress(i);
                 if (r != i * 3 + 1) ++bad;
                 ++calls;
+                ++each.calls[k];
                 ++i;
             }
         });
-    auto nap = [] { std::this_thread::sleep_for(std::chrono::milliseconds(60)); };
+    bool kept_up = true;
+    auto nap = [&] { kept_up = each.made(100) && kept_up; };  // every caller goes through the chain as it is now
     static std::atomic<uint64_t> s_hits{0}, m_hits{0};
     static auto s_fn = +[](KilnHookCall2* c, void*) -> uintptr_t { s_hits++; return A->call_original2(c); };
     static auto m_fn = +[](KilnRegisters*, void*) { m_hits++; };
@@ -1585,7 +1645,7 @@ void test_threads() {
     A->revoke(hd[2]);
     A->revoke(hd[5]);
     nap();
-    check(m_hits > 0 && s_hits > 0, "structured and mid links in the churn were reached", "s=" + std::to_string(s_hits.load()) + " m=" + std::to_string(m_hits.load()));
+    check(kept_up && m_hits > 0 && s_hits > 0, "structured and mid links in the churn were reached", "s=" + std::to_string(s_hits.load()) + " m=" + std::to_string(m_hits.load()));
     A->revoke_owner(6);  // everything, at once
     nap();
     stop = true;
@@ -1645,9 +1705,17 @@ void test_chaos() {
     const char* tokens[] = {"kiln.chat", "kiln.emf", "coolmod", "native:alpha", "nobody"};
     std::vector<Rec> live;
     unsigned used = 0;  // bit i: CL<i> belongs to a live link
-    const auto t0 = std::chrono::steady_clock::now();
     int adds = 0, revokes = 0;
-    while (std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(2500)) {
+    // A fixed number of steps of the seeded churn (no clock), and on until the churn has really run. The bound of a
+    // wait that must end stops a churn that never gets there.
+    constexpr int kSteps = 3000;
+    const auto give_up = std::chrono::steady_clock::now() + kMustEnd;
+    bool kept_up = true;
+    for (int step = 0; step < kSteps || adds <= 100 || revokes <= 20 || calls.load() <= 1000; ++step) {
+        if (std::chrono::steady_clock::now() > give_up) {
+            kept_up = false;
+            break;
+        }
         const uint32_t act = rnd(10);
         if (act < 6 || live.size() < 3) {
             const KilnOwner owner = 1 + rnd(4);
@@ -1691,13 +1759,16 @@ void test_chaos() {
                 }
             ++revokes;
         }
-        if (rnd(3) == 0) std::this_thread::sleep_for(std::chrono::microseconds(200));
+        if (rnd(3) == 0) {  // the callers go through the chain as it is now
+            const uint64_t c = calls.load();
+            kept_up = until([&] { return calls.load() > c + 4; }) && kept_up;
+        }
     }
     stop = true;
     for (auto& x : th) x.join();
     check(bad == 0, "every call returned the right value through every chain state", "bad=" + std::to_string(bad.load()));
     check(g_real == calls, "no lost calls: the real function ran once per call", std::to_string(g_real.load()) + " vs " + std::to_string(calls.load()));
-    check(adds > 100 && revokes > 20 && calls > 1000, "the churn really ran", "adds=" + std::to_string(adds) + " revokes=" + std::to_string(revokes) + " calls=" + std::to_string(calls.load()));
+    check(kept_up && adds > 100 && revokes > 20 && calls > 1000, "the churn really ran", "adds=" + std::to_string(adds) + " revokes=" + std::to_string(revokes) + " calls=" + std::to_string(calls.load()));
     // quiescent: priority order with no constraints, via the raw links that are left
     for (KilnOwner o = 1; o <= 4; ++o) A->revoke_owner(o);
     check(chain::chain_of(t).empty() && game_chaos(5) == 22, "revoke_owner of everything empties the chain");
@@ -1756,7 +1827,7 @@ void test_reinstall_shares_original() {
     auto wait_for = [](const std::atomic<int>& v, int n) {
         const auto t0 = std::chrono::steady_clock::now();
         while (v.load() < n) {
-            if (std::chrono::steady_clock::now() - t0 > std::chrono::seconds(20)) return false;
+            if (std::chrono::steady_clock::now() - t0 > kMustEnd) return false;
             _mm_pause();
         }
         return true;
@@ -1791,6 +1862,7 @@ void test_first_install_under_load() {
     std::puts("-- the first link on a target goes in while 4 threads call it");
     std::atomic<bool> stop{false};
     std::atomic<uint64_t> calls{0}, bad{0};
+    Callers each;
     std::vector<std::thread> th;
     for (int k = 0; k < 4; ++k)
         th.emplace_back([&, k] {
@@ -1800,10 +1872,13 @@ void test_first_install_under_load() {
                 if (game_late2(i) != i * 3 + 2) ++bad;
                 if (game_late3(i) != i * 3 + 3) ++bad;
                 calls += 3;
+                ++each.calls[k];
                 ++i;
             }
         });
-    auto nap = [] { std::this_thread::sleep_for(std::chrono::milliseconds(80)); };
+    bool kept_up = true;
+    // the 4 threads are calling (before the installs) and went through each new link (after it)
+    auto nap = [&] { kept_up = each.made(100) && kept_up; };
     static std::atomic<uint64_t> hit1{0}, hit3{0};
     static uint64_t (*o1)(uint64_t) = nullptr;
     static auto f1 = +[](uint64_t x) -> uint64_t { hit1++; return o1(x); };
@@ -1820,7 +1895,7 @@ void test_first_install_under_load() {
     stop = true;
     for (auto& t : th) t.join();
     check(ok && bad == 0, "three first installs under load: every call still returned the right value", "bad=" + std::to_string(bad.load()));
-    check(hit1 > 0 && hit3 > 0 && calls > 1000, "the new links were reached afterwards", "calls=" + std::to_string(calls.load()));
+    check(kept_up && hit1 > 0 && hit3 > 0 && calls > 1000, "the new links were reached afterwards", "calls=" + std::to_string(calls.load()));
     A->revoke_owner(6);
 }
 
@@ -1911,7 +1986,7 @@ void test_parked_threads() {
     for (P& p : ps) ResumeThread(p.h);
     for (P& p : ps) {
         DWORD code = 0xDEAD;
-        const bool done = WaitForSingleObject(p.h, 10000) == WAIT_OBJECT_0 && GetExitCodeThread(p.h, &code);
+        const bool done = WaitForSingleObject(p.h, kMustEndMs) == WAIT_OBJECT_0 && GetExitCodeThread(p.h, &code);
         check(done && code == p.want, (std::string("it runs on from the trampoline to the right result: ") + p.what).c_str(),
               "exit code " + std::to_string(code) + ", wanted " + std::to_string(p.want));
         if (!done) TerminateThread(p.h, 1);
@@ -1931,12 +2006,18 @@ void test_many_threads_stopped() {
     std::puts("-- a first install with 64 other threads alive stops them, writes the jump and resumes every one");
     HANDLE go = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     std::vector<HANDLE> th;
+    static std::atomic<int> started{0};
+    started = 0;
     for (int i = 0; i < 64; ++i)
         th.push_back(CreateThread(
             nullptr, 0,
-            [](LPVOID ev) -> DWORD { return WaitForSingleObject(static_cast<HANDLE>(ev), 30000) == WAIT_OBJECT_0 ? 7 : 1; },
+            [](LPVOID ev) -> DWORD {
+                ++started;
+                return WaitForSingleObject(static_cast<HANDLE>(ev), kMustEndMs) == WAIT_OBJECT_0 ? 7 : 1;
+            },
             go, 0, nullptr));
-    Sleep(150);  // let them block in the wait
+    // every thread runs its own code (it is past its start), its next step the wait
+    check(until([] { return started.load() == 64; }), "64 threads started and are at their wait");
     static int (*io)(int) = nullptr;
     static int (*io2)(int) = nullptr;
     static auto ih = +[](int x) -> int { return io(x); };
@@ -1952,7 +2033,7 @@ void test_many_threads_stopped() {
     bool all = true;
     for (HANDLE h : th) {
         DWORD code = 0;
-        all = all && WaitForSingleObject(h, 10000) == WAIT_OBJECT_0 && GetExitCodeThread(h, &code) && code == 7;
+        all = all && WaitForSingleObject(h, kMustEndMs) == WAIT_OBJECT_0 && GetExitCodeThread(h, &code) && code == 7;
         CloseHandle(h);
     }
     CloseHandle(go);
@@ -2213,7 +2294,10 @@ void test_reinstall_live(int mode) {
         } else {
             ok = g_rr.install(&api, 6, t, reinterpret_cast<void*>(&rr_fn), "t/rr", prio);
         }
-        if (i % 50 == 0) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        if (i % 50 == 0) {  // the callers go through the chain as it is now
+            const uint64_t c = calls.load();
+            ok = until([&] { return calls.load() > c + 4; }) && ok;
+        }
     }
     stop = true;
     for (auto& x : th) x.join();
@@ -2279,7 +2363,7 @@ void test_revival() {
     hold = true;
     uint64_t got = 0;
     std::thread th([&] { got = game_rv(2); });
-    while (inside.load() == 0) _mm_pause();
+    if (!until([] { return inside.load() != 0; })) hold = false;  // the check below fails
     A->revoke(r1);
     A->raw_detour(6, t, &orw, reinterpret_cast<void*>(rfn), reinterpret_cast<void**>(&ro), &r2);
     hold = false;
@@ -2341,11 +2425,23 @@ void test_map_robust() {
     }
     check(all, "map_json works twice: the label is replaced, the other extensions' sections stay, linkSlots is there");
     check(log_count("hook-map extension failed") == 1, "the failing extension is logged once");
+    // The map timer (armed by every change since boot) may write the file too, at any moment: look at what this call
+    // wrote, not at what the file holds when it is read.
+    size_t writes_before = 0;
+    {
+        std::lock_guard lock(g_map_writes_mutex);
+        writes_before = g_map_writes.size();
+    }
     kiln::hooks::write_map("test");
-    std::ifstream in(g_state_dir / "hooks.json");
-    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    const json written = json::parse(text, nullptr, false);
-    check(written.is_object() && written.value("phase", "") == "test", "hooks.json is still written");
+    bool written = false;
+    {
+        std::lock_guard lock(g_map_writes_mutex);
+        for (size_t i = writes_before; i < g_map_writes.size(); ++i) {
+            const json w = json::parse(g_map_writes[i], nullptr, false);
+            written = written || (w.is_object() && w.value("phase", "") == "test");
+        }
+    }
+    check(written, "hooks.json is still written");
     A->revoke_owner(6);
 }
 

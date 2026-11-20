@@ -213,6 +213,9 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
 .k-remove-list { max-height: 240px; overflow-y: auto; margin: 8px 0 0; padding: 0 0 0 18px; text-align: left; }
 .k-remove-list li { margin: 2px 0; }
 .k-remove-list .k-muted { font-size: 14.5px; }
+.k-remove-settings { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0 0; text-align: left; cursor: pointer; }
+.k-remove-settings input { margin: 4px 0 0; flex: none; }
+.k-remove-settings small { display: block; margin-top: 2px; font-size: 14.5px; color: var(--k-text-2); }
 /* Settings > Library: the earlier versions kept for a roll back (components/LibrarySettings.tsx) */
 .k-kept-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 240px; overflow-y: auto; }
 .k-kept-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }

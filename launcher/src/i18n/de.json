@@ -3976,7 +3976,12 @@
       "leavesListed.other": "Ihre Dateien verlassen die Bibliothek. {others} führen sie auch und werden sie als fehlend zeigen.",
       "leaves": "Ihre Dateien verlassen die Bibliothek.",
       "notSaved": "Deine Modliste ließ sich nicht speichern; nichts wurde entfernt.",
-      "notRemovable": "im Spielordner, Kiln hat sie nicht dort abgelegt: Entferne sie dort"
+      "notRemovable": "im Spielordner, Kiln hat sie nicht dort abgelegt: Entferne sie dort",
+      "settingsToo": "Auch ihre Einstellungen entfernen",
+      "settingsTooHint": "Ihre Einstellungen in diesem Spiel und in deinen Profilen gehen mit. Kiln behält eine Kopie in den Backups.",
+      "settingsTooMany": "Auch ihre Einstellungen entfernen",
+      "settingsTooManyHint": "Ihre Einstellungen in diesem Spiel und in deinen Profilen gehen mit. Kiln behält eine Kopie in den Backups.",
+      "settingsLeft": "Einige Einstellungen sind geblieben"
     },
     "rollback": {
       "settingsBack.one": "Ihre Einstellungen von vor dem Update kommen mit zurück ({count} Datei).",
@@ -5536,6 +5541,358 @@
       "go": "Auf den Server",
       "done": "{version} ist auf dem Server",
       "failed": "Das Server-Pack wurde nicht erstellt"
+    }
+  },
+  "editor": {
+    "page": {
+      "title": "Editor",
+      "lookingForSaves": "Suche nach Spielständen…",
+      "pickCharacter": "Wähle einen Charakter.",
+      "noSaves": "Keine Charakter-Spielstände gefunden.",
+      "cannotParse": "Dieser Spielstand konnte nicht zum Bearbeiten gelesen werden.",
+      "readOnlyNoSave": "Dieser Spielstand kann nur gelesen werden: Speichern ist aus.",
+      "gameOpen": "Das Spiel ist offen: Schließe es, um zu speichern.",
+      "unsaved": "Änderungen noch nicht gespeichert. Kiln sichert den Spielstand, bevor es schreibt.",
+      "levelBackup": "Stufe {n}. Kiln sichert den Spielstand, bevor es schreibt.",
+      "notSaved": "Nicht gespeichert",
+      "discard": "Verwerfen",
+      "backups": "Sicherungen",
+      "save": "Speichern",
+      "saving": "Wird gespeichert…",
+      "saved": "Gespeichert",
+      "savedHint": "Der vorherige Spielstand liegt in den Sicherungen.",
+      "gameOpenShort": "Spiel läuft: Zum Speichern schließen",
+      "error": "Fehler",
+      "note": "Achtung",
+      "readAgain": "Neu einlesen",
+      "close": "Schließen",
+      "parts": "Teile des Spielstands",
+      "characters": "Charaktere",
+      "openFile": "Datei öffnen…",
+      "pickCharacterButton": "Charakter wählen",
+      "open": "Öffnen",
+      "opened": "Offen",
+      "discardTitle": "Änderungen verwerfen?",
+      "discardAndOpen": "Verwerfen und öffnen",
+      "discardBody": "Die Änderungen an {nome} sind noch nicht gespeichert.",
+      "cancel": "Abbrechen",
+      "back": "Zurück",
+      "readOnlyError": "Nur lesbar: {erro}",
+      "pointsRaised": "Du hast die verwendeten Punkte erhöht ({antes} → {depois}). Gib deine Gesamtpunkte im Tab Talente ein, damit der Editor sie prüfen kann; liegt der Wert darüber, setzt das Spiel den ganzen Baum zurück.",
+      "notWritten": "Nicht gespeichert. {problemas}",
+      "gameWroteSince": "Das Spiel hat diesen Spielstand geschrieben, nachdem der Editor ihn gelesen hat. Lies ihn neu ein, um den aktuellen Stand zu bearbeiten (die Änderungen hier gehen verloren)."
+    },
+    "tabs": {
+      "equipment": "Ausrüstung",
+      "inventory": "Rucksack",
+      "skills": "Talente",
+      "knowledge": "Wissen"
+    },
+    "backups": {
+      "title": "Sicherungen von {nome}",
+      "openFolder": "Ordner öffnen",
+      "hint": "Das Spiel behält die letzten 10 Spielstände automatisch; der Editor kopiert den Spielstand zusätzlich vor jedem Schreiben.",
+      "dropsChanges": "Beim Wiederherstellen gehen die nicht gespeicherten Änderungen verloren.",
+      "looking": "Suche nach Sicherungen…",
+      "none": "Keine Sicherung für diesen Spielstand gefunden.",
+      "restore": "Wiederherstellen",
+      "restored": "Wiederhergestellt",
+      "restoredBody": "{arquivo} ({quando}). Der vorherige Spielstand wurde als Sicherung behalten.",
+      "restoreTitle": "Diese Sicherung wiederherstellen?",
+      "restoreBody": "Der aktuelle Spielstand wird als Sicherung behalten.",
+      "kindGame": "Kopie des Spiels",
+      "kindKiln": "Kiln-Sicherung",
+      "beforeSave": "vor dem Speichern"
+    },
+    "common": {
+      "level": "Stufe",
+      "empty": "Leer",
+      "change": "Ändern",
+      "add": "Hinzufügen",
+      "tierN": "Rang {n}",
+      "rarity": "Seltenheit",
+      "amount": "Menge",
+      "aboveStack": "mehr als der Stapel des Spiels von {n}: für Welten mit einer Mod, die Stapelgrößen erhöht",
+      "gameStack": "Stapel des Spiels ({n})",
+      "maxAmount": "Höchstens pro Platz ({n})",
+      "upgrades": "Verbesserungen",
+      "remove": "Entfernen",
+      "levelN": "Stufe {n}",
+      "pick": "Wählen",
+      "noMatch": "Nichts passt zu diesen Filtern.",
+      "all": "Alle"
+    },
+    "equipment": {
+      "xp": "EP in der Stufe",
+      "attrsHint": "Attribute kommen von den Knoten des Talentbaums (bearbeite sie im Tab Talente).",
+      "attrsFlameHint": "Das Spiel rechnet außerdem die Knoten hinzu, die mit deiner Flammenstufe wachsen, und die Boni deiner Ausrüstung; beides steht nicht im Charakter-Spielstand.",
+      "emptyHint": "Leerer Platz. Lege das Teil im Spiel an; hier kannst du bearbeiten oder ablegen, was bereits getragen wird.",
+      "backpackFull": {
+        "one": "{item} wird nicht abgelegt: Das würde seinen Behälter und den {count} Platz darin löschen. Leere ihn zuerst im Spiel.",
+        "other": "{item} wird nicht abgelegt: Das würde seinen Behälter und die {count} Plätze darin löschen. Leere ihn zuerst im Spiel."
+      },
+      "groups": {
+        "armour": "Rüstung",
+        "appearance": "Aussehen",
+        "accessories": "Accessoires"
+      },
+      "slots": {
+        "headVanity": "Kopf (Aussehen)",
+        "chestVanity": "Brust (Aussehen)",
+        "armsVanity": "Arme (Aussehen)",
+        "legsVanity": "Beine (Aussehen)",
+        "feetVanity": "Füße (Aussehen)",
+        "head": "Kopf",
+        "chest": "Brust",
+        "arms": "Arme",
+        "legs": "Beine",
+        "feet": "Füße",
+        "ring": "Ring",
+        "shield": "Schild",
+        "hook": "Enterhaken",
+        "glider": "Gleiter",
+        "backpack": "Rucksack",
+        "slot": "Platz {n}"
+      }
+    },
+    "inventory": {
+      "move": "Verschieben",
+      "slotEmpty": "Platz {n} leer",
+      "putHere": "Hier ablegen",
+      "slotsUsed": {
+        "one": "{n} von {total} Platz",
+        "other": "{n} von {total} Plätzen"
+      },
+      "addItem": "Gegenstand hinzufügen",
+      "swapBar": "Leiste tauschen",
+      "swapBarHint": "Alt tauscht sie mit der Aktionsleiste",
+      "actionBar": "Aktionsleiste",
+      "deckHint": "A ändert den Gegenstand · Y verschiebt ihn · A auf einem leeren Platz fügt einen hinzu",
+      "hint": "Ziehen zum Verschieben · Doppelklick auf einen leeren Platz fügt hinzu · Delete entfernt · Ctrl+D dupliziert",
+      "noneSelected": "Kein Gegenstand ausgewählt.",
+      "noneSelectedHint": "Wähle einen Platz, um seinen Gegenstand zu sehen und zu ändern.",
+      "emptyHint": "Wähle einen Gegenstand aus dem Katalog, um ihn hier abzulegen.",
+      "pickItem": "Gegenstand wählen",
+      "notFound": "In diesem Inventar wurden keine Gegenstände gefunden, und der Editor kann nicht sicher sagen, wo es in diesem Spielstand liegt. Zeigt das Spiel hier Gegenstände, konnten sie nicht gelesen werden: Es lässt sich nichts hinzufügen. Eine Kopie dieses Spielstands an uns hilft, das zu beheben.",
+      "modItem": "Mod-Gegenstand, bleibt unverändert",
+      "hiddenModItem": "{place} enthält einen versteckten Gegenstand einer anderen Mod (ID {id}); Kiln lässt ihn unverändert.",
+      "place": {
+        "backpack": "Rucksackplatz {n}",
+        "swap": "Wechselleiste, Platz {n}",
+        "action": "Aktionsleiste, Platz {n}"
+      }
+    },
+    "inspector": {
+      "item": "Gegenstand",
+      "stacksTo": "stapelt bis {n}",
+      "max": "Max.",
+      "levelSplit": {
+        "one": "= Basis {base} + {count} Verbesserung",
+        "other": "= Basis {base} + {count} Verbesserungen"
+      },
+      "aboveItemMax": "über dem Maximum dieses Gegenstands ({max}): Der Server begrenzt es beim Laden, außer eine Mod hat den Bereich erweitert",
+      "upgradesHint": "Die Seltenheit legt fest, wie viele Verbesserungen der Gegenstand annimmt: Höchststufe = Basisstufe + Seltenheit.",
+      "gem": "Eingesetzter Edelstein",
+      "gemUnknown": "id {id} ist nicht im Katalog",
+      "noGem": "— kein Edelstein —",
+      "gemLevel": "Edelsteinstufe",
+      "aboveGemMax": "über dem Maximum dieses Edelsteins ({max}): Der Server begrenzt es beim Laden, außer eine Mod hat den Bereich erweitert",
+      "durability": "Haltbarkeit",
+      "repair": "Reparieren",
+      "water": "Wasser",
+      "fill": "Füllen",
+      "duplicateHint": "Kopiert den Gegenstand in den ersten freien Platz",
+      "duplicate": "Duplizieren",
+      "attributes": "Attribute",
+      "physicalArmour": "Physische Rüstung",
+      "magicalArmour": "Magische Rüstung",
+      "raisesSkill": "erhöht die Talentstufe von {no}",
+      "unknownLines": "Die Zeilen ohne Zahl wachsen mit der Gegenstandsstufe nach einer Formel, die noch nicht gemessen wurde; der Editor zeigt keinen Wert, für den er nicht geradestehen kann."
+    },
+    "parts": {
+      "full": "Voll",
+      "clickToSet": "Zum Setzen klicken"
+    },
+    "catalog": {
+      "items": "Gegenstände",
+      "countLimited": {
+        "one": "{count} Gegenstand ({limite} angezeigt; grenze die Suche ein)",
+        "other": "{count} Gegenstände ({limite} angezeigt; grenze die Suche ein)"
+      },
+      "count": {
+        "one": "{count} Gegenstand",
+        "other": "{count} Gegenstände"
+      },
+      "categories": "Kategorien",
+      "searchDeck": "Nach Namen suchen (Steam + X: Tastatur)",
+      "search": "Nach Namen suchen…",
+      "searchLabel": "Suchen",
+      "type": "Tippen",
+      "allRarities": "Alle",
+      "tier": "Rang",
+      "targetFull": "Ziel: Inventar voll",
+      "target": "Ziel: Platz {n}",
+      "pickHint": "Wähle einen Gegenstand.",
+      "deckHint": "A wählt ihn, erneut A fügt ihn hinzu.",
+      "hint": "Doppelklick fügt ihn sofort hinzu.",
+      "cat": {
+        "weapons": "Waffen",
+        "armour": "Rüstung",
+        "ammo": "Munition",
+        "magic": "Zauber und Edelsteine",
+        "consumables": "Verbrauchsgüter",
+        "materials": "Materialien",
+        "tools": "Werkzeuge",
+        "building": "Bauen",
+        "cosmetics": "Kosmetik und Sammelobjekte"
+      }
+    },
+    "knowledge": {
+      "noBlock": "Dieser Spielstand hat keinen Wissensblock.",
+      "search": "Nach Name oder id suchen",
+      "above": "Ab Stufe",
+      "allLevels": "alle",
+      "show": "Zeigen",
+      "filter": {
+        "itemsRecipes": "Gegenstände und Rezepte",
+        "items": "Nur Gegenstände",
+        "recipes": "Nur Rezepte",
+        "everything": "Alles"
+      },
+      "removeN": "{n} entfernen",
+      "kind": "Art",
+      "name": "Name",
+      "state": "Status",
+      "id": "id {id}",
+      "kinds": {
+        "item": "Gegenstand",
+        "recipe": "Rezept",
+        "misc": "Sonstiges"
+      },
+      "count": {
+        "one": "{n} von {total} Eintrag",
+        "other": "{n} von {total} Einträgen"
+      },
+      "unnamed": {
+        "one": "{count} ohne bekannten Namen",
+        "other": "{count} ohne bekannten Namen"
+      },
+      "shownLimit": "Die ersten 400 werden angezeigt; nutze die Suche oder die Stufengrenze, um den Rest zu sehen.",
+      "hint": "Wer ein Material hoher Stufe entfernt, sperrt die Rezepte, die davon abhängen. Rezepte stehen nicht im Spielstand: Das Spiel berechnet sie aus dem Wissen neu, hier wie in der Serverwelt."
+    },
+    "skills": {
+      "total": "Gesamtpunkte",
+      "minusLevel": "−1 Stufe",
+      "plusLevel": "+1 Stufe",
+      "tree": "Talentbaum",
+      "used": "Verwendet",
+      "available": "Verfügbar",
+      "enterTotal": "Gesamt eingeben…",
+      "changeTotal": "Klicken, um die Gesamtpunkte zu ändern",
+      "totalFromGame": "Gesamt {total}, berechnet wie im Spiel: 2 Punkte pro Stufe über 1, dazu die Schleierwurzeln und Elixierbrunnen, die diese Figur zerstört hat. Das Spiel speichert den Wert nicht, daher wird er hier nicht bearbeitet.",
+      "totalHint": "Gesamtpunkte (verwendet + verfügbar, wie das Spiel sie zeigt):",
+      "zoomIn": "Vergrößern",
+      "zoomOut": "Verkleinern",
+      "centre": "Zentrieren",
+      "cost": "kostet {n}",
+      "maxN": "max. {n}",
+      "deckHint": "A: +1 Stufe · Y: −1",
+      "hint": "Klick: +1 Stufe · Rechtsklick: −1",
+      "class": {
+        "warrior": "Krieger",
+        "ranger": "Waldläufer",
+        "mage": "Magier",
+        "neutral": "Neutral"
+      }
+    },
+    "deck": {
+      "delete": "Löschen",
+      "range": "Von {min} bis {max}",
+      "min": "Min.",
+      "use": "Verwenden",
+      "current": "Jetzt"
+    },
+    "art": {
+      "preparing": "Spielgrafiken werden vorbereitet…",
+      "needsClient": "Spielgrafiken brauchen den Enshrouded-Client (Einstellungen → Spiele).",
+      "notFound": "Spielgrafiken nicht gefunden. Führe {script} aus."
+    },
+    "game": {
+      "tree": {
+        "aboveMax": "{no}: Stufe {nivel} über dem Maximum von {max}",
+        "orphans": "Knoten ohne Verbindung zum Rest des Baums: {nos}",
+        "overTotal": "Verwendete Punkte ({usados}) übersteigen die Gesamtpunkte des Charakters ({total})"
+      },
+      "unknownItem": "Unbekannter Gegenstand (0x{h})",
+      "errors": {
+        "unknownItems": "Unbekannte Gegenstände in diesem Spielstand (eine Mod, die fehlt?): nur lesbar",
+        "levelXp": "Ungültige Stufe oder EP",
+        "skill": "Ungültiges Talent",
+        "item": "Unbekannter Gegenstand: {id}",
+        "slotAmount": "Ungültiger Platz oder ungültige Menge",
+        "sameSlot": "Zwei Gegenstände im selben Inventarplatz",
+        "knowledge": "Ungültiger Wissenseintrag",
+        "knowledgeRepeated": "Wissen mit doppelter id",
+        "closeGame": "Schließe Enshrouded vor dem Speichern: Das Spiel würde die Änderung überschreiben.",
+        "notOpen": "Spielstand nicht zum Bearbeiten geöffnet",
+        "noEquipment": "Der Editor findet Ausrüstung und Inventar in diesem Spielstand nicht",
+        "skillList": "Der Editor kennt die Talentliste dieses Spielstands nicht",
+        "notSave": "Kein Enshrouded-Spielstand",
+        "inventoryUnsure": "Der Editor hat das Inventar dieses Spielstands nicht sicher gefunden: Es können keine Gegenstände hineingeschrieben werden.",
+        "modData": "Dieser Spielstand enthält Daten einer Mod, die der Editor nicht schreiben kann ({mods}): nur lesbar, damit die Daten der Mod bleiben, wie sie sind.",
+        "inventoryUnread": "Der Editor konnte das Inventar dieser Figur (Rucksack, Wechselleiste und Aktionsleiste) nicht sicher lesen: nur lesbar, damit nichts darüber geschrieben wird."
+      },
+      "saveFileFilter": "Enshrouded-Spielstand",
+      "rarity": {
+        "none": "Keine Seltenheit",
+        "common": "Gewöhnlich",
+        "uncommon": "Ungewöhnlich",
+        "rare": "Selten",
+        "epic": "Episch",
+        "legendary": "Legendär"
+      },
+      "category": {
+        "weapon": "Waffe",
+        "equipment": "Ausrüstung",
+        "material": "Material",
+        "consumable": "Verbrauchsgut",
+        "ammunition": "Munition",
+        "tool": "Werkzeug",
+        "building": "Bauen",
+        "blueprint": "Bauplan",
+        "collectible": "Sammelobjekt",
+        "cosmetic": "Kosmetik",
+        "gem": "Edelstein"
+      },
+      "attribute": {
+        "constitution": "Konstitution",
+        "spirit": "Geist",
+        "endurance": "Ausdauer",
+        "strength": "Stärke",
+        "dexterity": "Geschicklichkeit",
+        "intelligence": "Intelligenz"
+      },
+      "classes": {
+        "survivor": "Überlebender",
+        "beastmaster": "Bestienmeister",
+        "ranger": "Waldläufer",
+        "assassin": "Assassine",
+        "trickster": "Trickser",
+        "wizard": "Zauberer",
+        "healer": "Heiler",
+        "battlemage": "Kampfmagier",
+        "tank": "Tank",
+        "warrior": "Krieger",
+        "barbarian": "Barbar",
+        "athlete": "Athlet"
+      },
+      "knowledge": {
+        "pickedUp": "aufgehoben",
+        "used": "benutzt",
+        "inspected": "untersucht",
+        "seen": "gesehen",
+        "crafted": "hergestellt"
+      }
     }
   }
 }

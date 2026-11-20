@@ -3890,7 +3890,12 @@
       "leavesListed.other": "파일이 라이브러리에서 삭제됩니다. {others}에도 있으며, 없는 모드로 표시됩니다.",
       "leaves": "파일이 라이브러리에서 삭제됩니다.",
       "notSaved": "모드 목록을 저장하지 못해 아무것도 제거하지 않았습니다.",
-      "notRemovable": "게임 폴더에 있고 Kiln이 넣은 것이 아닙니다. 그곳에서 직접 지우세요"
+      "notRemovable": "게임 폴더에 있고 Kiln이 넣은 것이 아닙니다. 그곳에서 직접 지우세요",
+      "settingsToo": "설정도 함께 삭제",
+      "settingsTooHint": "이 게임과 프로필에 있는 이 모드의 설정도 삭제됩니다. Kiln은 백업에 사본을 남깁니다.",
+      "settingsTooMany": "설정도 함께 삭제",
+      "settingsTooManyHint": "이 게임과 프로필에 있는 이 모드들의 설정도 삭제됩니다. Kiln은 백업에 사본을 남깁니다.",
+      "settingsLeft": "일부 설정이 남았습니다"
     },
     "rollback": {
       "settingsBack.other": "업데이트 이전의 설정도 함께 돌아옵니다 (파일 {count}개).",
@@ -5406,6 +5411,351 @@
       "go": "서버에 넣기",
       "done": "{version}이(가) 서버에 들어갔습니다",
       "failed": "서버 팩을 만들지 못했습니다"
+    }
+  },
+  "editor": {
+    "page": {
+      "title": "편집기",
+      "lookingForSaves": "세이브를 찾는 중…",
+      "pickCharacter": "캐릭터를 고르세요.",
+      "noSaves": "캐릭터 세이브를 찾지 못했습니다.",
+      "cannotParse": "이 세이브는 편집용으로 읽을 수 없습니다.",
+      "readOnlyNoSave": "이 세이브는 읽기만 할 수 있습니다: 저장이 꺼져 있습니다.",
+      "gameOpen": "게임이 열려 있습니다. 저장하려면 게임을 닫으세요.",
+      "unsaved": "변경 사항이 아직 저장되지 않았습니다. Kiln은 쓰기 전에 세이브를 백업합니다.",
+      "levelBackup": "레벨 {n}. Kiln은 쓰기 전에 세이브를 백업합니다.",
+      "notSaved": "저장 안 됨",
+      "discard": "버리기",
+      "backups": "백업",
+      "save": "저장",
+      "saving": "저장 중…",
+      "saved": "저장함",
+      "savedHint": "이전 세이브는 백업에 있습니다.",
+      "gameOpenShort": "게임 실행 중: 저장하려면 닫으세요",
+      "error": "오류",
+      "note": "주의",
+      "readAgain": "다시 읽기",
+      "close": "닫기",
+      "parts": "세이브 구성",
+      "characters": "캐릭터",
+      "openFile": "파일 열기…",
+      "pickCharacterButton": "캐릭터 고르기",
+      "open": "열기",
+      "opened": "열림",
+      "discardTitle": "변경 사항을 버릴까요?",
+      "discardAndOpen": "버리고 열기",
+      "discardBody": "{nome}의 변경 사항이 아직 저장되지 않았습니다.",
+      "cancel": "취소",
+      "back": "뒤로",
+      "readOnlyError": "읽기 전용: {erro}",
+      "pointsRaised": "사용 중인 포인트를 올렸습니다 ({antes} → {depois}). 편집기가 확인할 수 있도록 스킬 탭에 포인트 총합을 입력하세요. 총합을 넘으면 게임이 트리 전체를 초기화합니다.",
+      "notWritten": "저장되지 않았습니다. {problemas}",
+      "gameWroteSince": "편집기가 읽은 뒤에 게임이 이 세이브를 썼습니다. 지금 상태의 세이브를 편집하려면 다시 읽으세요 (여기서 한 변경 사항은 사라집니다)."
+    },
+    "tabs": {
+      "equipment": "장비",
+      "inventory": "배낭",
+      "skills": "스킬",
+      "knowledge": "지식"
+    },
+    "backups": {
+      "title": "{nome}의 백업",
+      "openFolder": "폴더 열기",
+      "hint": "게임은 최근 세이브 10개를 자동으로 보관하고, 편집기도 쓸 때마다 먼저 세이브를 복사합니다.",
+      "dropsChanges": "복원하면 저장하지 않은 변경 사항이 사라집니다.",
+      "looking": "백업을 찾는 중…",
+      "none": "이 세이브의 백업이 없습니다.",
+      "restore": "복원",
+      "restored": "복원함",
+      "restoredBody": "{arquivo} ({quando}). 이전 세이브는 백업으로 보관했습니다.",
+      "restoreTitle": "이 백업을 복원할까요?",
+      "restoreBody": "현재 상태의 세이브는 백업으로 보관합니다.",
+      "kindGame": "게임 사본",
+      "kindKiln": "Kiln 백업",
+      "beforeSave": "저장 전"
+    },
+    "common": {
+      "level": "레벨",
+      "empty": "비어 있음",
+      "change": "변경",
+      "add": "추가",
+      "tierN": "티어 {n}",
+      "rarity": "희귀도",
+      "amount": "수량",
+      "aboveStack": "게임의 최대 스택 {n}개 초과: 스택 크기를 늘리는 모드가 있는 월드용",
+      "gameStack": "게임 스택 ({n})",
+      "maxAmount": "슬롯 최대 수량 ({n})",
+      "upgrades": "강화",
+      "remove": "제거",
+      "levelN": "레벨 {n}",
+      "pick": "선택",
+      "noMatch": "이 필터에 맞는 것이 없습니다.",
+      "all": "전체"
+    },
+    "equipment": {
+      "xp": "레벨 내 XP",
+      "attrsHint": "능력치는 스킬 트리 노드에서 옵니다 (스킬 탭에서 편집하세요).",
+      "attrsFlameHint": "게임은 불꽃 레벨에 따라 오르는 노드와 장비 보너스도 더합니다. 둘 다 캐릭터 세이브에 저장되지 않습니다.",
+      "emptyHint": "빈 슬롯입니다. 장비는 게임에서 착용하세요. 여기서는 이미 착용한 것을 편집하거나 벗을 수 있습니다.",
+      "backpackFull": {
+        "other": "{item}은(는) 벗기지 않습니다. 벗기면 그 보관함과 안에 든 슬롯 {count}개가 삭제됩니다. 먼저 게임에서 비우세요."
+      },
+      "groups": {
+        "armour": "방어구",
+        "appearance": "외형",
+        "accessories": "장신구"
+      },
+      "slots": {
+        "headVanity": "머리 (외형)",
+        "chestVanity": "가슴 (외형)",
+        "armsVanity": "팔 (외형)",
+        "legsVanity": "다리 (외형)",
+        "feetVanity": "발 (외형)",
+        "head": "머리",
+        "chest": "가슴",
+        "arms": "팔",
+        "legs": "다리",
+        "feet": "발",
+        "ring": "반지",
+        "shield": "방패",
+        "hook": "갈고리",
+        "glider": "글라이더",
+        "backpack": "배낭",
+        "slot": "슬롯 {n}"
+      }
+    },
+    "inventory": {
+      "move": "이동",
+      "slotEmpty": "슬롯 {n} 비어 있음",
+      "putHere": "여기에 놓기",
+      "slotsUsed": {
+        "other": "슬롯 {total}개 중 {n}개"
+      },
+      "addItem": "아이템 추가",
+      "swapBar": "바 교체",
+      "swapBarHint": "Alt로 액션 바와 교체합니다",
+      "actionBar": "액션 바",
+      "deckHint": "A 아이템 변경 · Y 이동 · 빈 슬롯에서 A 추가",
+      "hint": "드래그로 이동 · 빈 슬롯 더블클릭으로 추가 · Delete 제거 · Ctrl+D 복제",
+      "noneSelected": "선택한 아이템이 없습니다.",
+      "noneSelectedHint": "슬롯을 고르면 아이템을 보고 바꿀 수 있습니다.",
+      "emptyHint": "카탈로그에서 여기에 놓을 아이템을 고르세요.",
+      "pickItem": "아이템 고르기",
+      "notFound": "이 인벤토리에서 아이템을 찾지 못했고, 편집기가 이 세이브에서 인벤토리의 위치를 확실히 알 수 없습니다. 게임에서 여기에 아이템이 보인다면 읽지 못한 것입니다. 아무것도 추가할 수 없습니다. 이 세이브의 사본을 보내 주시면 수정에 도움이 됩니다.",
+      "modItem": "모드 아이템, 그대로 유지",
+      "hiddenModItem": "{place}에 다른 모드의 숨겨진 아이템(ID {id})이 있습니다. Kiln은 그대로 둡니다.",
+      "place": {
+        "backpack": "배낭 칸 {n}",
+        "swap": "교체 바 칸 {n}",
+        "action": "액션 바 칸 {n}"
+      }
+    },
+    "inspector": {
+      "item": "아이템",
+      "stacksTo": "최대 {n}개까지 쌓임",
+      "max": "최대",
+      "levelSplit": {
+        "other": "= 기본 {base} + 강화 {count}"
+      },
+      "aboveItemMax": "이 아이템의 최대값({max}) 초과: 모드가 범위를 넓히지 않았다면 서버가 불러올 때 값을 깎습니다",
+      "upgradesHint": "희귀도에 따라 아이템의 강화 횟수가 정해집니다: 최대 레벨 = 기본 레벨 + 희귀도.",
+      "gem": "장착한 보석",
+      "gemUnknown": "id {id}은(는) 카탈로그에 없습니다",
+      "noGem": "— 보석 없음 —",
+      "gemLevel": "보석 레벨",
+      "aboveGemMax": "이 보석의 최대값({max}) 초과: 모드가 범위를 넓히지 않았다면 서버가 불러올 때 값을 깎습니다",
+      "durability": "내구도",
+      "repair": "수리",
+      "water": "물",
+      "fill": "채우기",
+      "duplicateHint": "아이템을 첫 번째 빈 슬롯에 복사합니다",
+      "duplicate": "복제",
+      "attributes": "능력치",
+      "physicalArmour": "물리 방어력",
+      "magicalArmour": "마법 방어력",
+      "raisesSkill": "{no}의 스킬 레벨을 올립니다",
+      "unknownLines": "숫자가 없는 줄은 아직 측정하지 못한 공식에 따라 아이템 레벨과 함께 변합니다. 편집기는 확신할 수 없는 값은 보여 주지 않습니다."
+    },
+    "parts": {
+      "full": "가득 참",
+      "clickToSet": "클릭해서 설정"
+    },
+    "catalog": {
+      "items": "아이템",
+      "countLimited": {
+        "other": "아이템 {count}개 ({limite}개 표시 중, 검색 범위를 좁히세요)"
+      },
+      "count": {
+        "other": "아이템 {count}개"
+      },
+      "categories": "분류",
+      "searchDeck": "이름으로 검색 (Steam + X: 키보드)",
+      "search": "이름으로 검색…",
+      "searchLabel": "검색",
+      "type": "입력",
+      "allRarities": "전체",
+      "tier": "티어",
+      "targetFull": "대상: 인벤토리 가득 참",
+      "target": "대상: 슬롯 {n}",
+      "pickHint": "아이템을 고르세요.",
+      "deckHint": "A로 고르고, A를 한 번 더 누르면 추가합니다.",
+      "hint": "더블클릭하면 바로 추가합니다.",
+      "cat": {
+        "weapons": "무기",
+        "armour": "방어구",
+        "ammo": "탄약",
+        "magic": "주문과 보석",
+        "consumables": "소모품",
+        "materials": "재료",
+        "tools": "도구",
+        "building": "건축",
+        "cosmetics": "치장품과 수집품"
+      }
+    },
+    "knowledge": {
+      "noBlock": "이 세이브에는 지식 블록이 없습니다.",
+      "search": "이름이나 id로 검색",
+      "above": "레벨 이상",
+      "allLevels": "전체",
+      "show": "표시",
+      "filter": {
+        "itemsRecipes": "아이템과 레시피",
+        "items": "아이템만",
+        "recipes": "레시피만",
+        "everything": "전체"
+      },
+      "removeN": "{n}개 제거",
+      "kind": "종류",
+      "name": "이름",
+      "state": "상태",
+      "id": "id {id}",
+      "kinds": {
+        "item": "아이템",
+        "recipe": "레시피",
+        "misc": "기타"
+      },
+      "count": {
+        "other": "항목 {total}개 중 {n}개"
+      },
+      "unnamed": {
+        "other": "알려진 이름 없음 {count}개"
+      },
+      "shownLimit": "처음 400개만 표시합니다. 나머지를 보려면 검색이나 레벨 기준을 쓰세요.",
+      "hint": "높은 레벨의 재료를 제거하면 그 재료에 의존하는 레시피가 닫힙니다. 레시피는 세이브에 저장되지 않습니다. 게임이 여기서도 서버 월드에서도 지식을 바탕으로 다시 계산합니다."
+    },
+    "skills": {
+      "total": "총 포인트",
+      "minusLevel": "−1 레벨",
+      "plusLevel": "+1 레벨",
+      "tree": "스킬 트리",
+      "used": "사용 중",
+      "available": "사용 가능",
+      "enterTotal": "총합 입력…",
+      "changeTotal": "클릭해서 총합 변경",
+      "totalFromGame": "합계 {total}, 게임과 같은 방식으로 계산했습니다: 1레벨을 넘는 레벨마다 2포인트, 그리고 이 캐릭터가 파괴한 장막의 뿌리와 엘릭서 우물만큼. 게임은 이 값을 저장하지 않으므로 여기서 편집하지 않습니다.",
+      "totalHint": "포인트 총합 (게임에 표시되는 대로 사용 중 + 사용 가능):",
+      "zoomIn": "확대",
+      "zoomOut": "축소",
+      "centre": "가운데로",
+      "cost": "비용 {n}",
+      "maxN": "최대 {n}",
+      "deckHint": "A: +1 레벨 · Y: −1",
+      "hint": "클릭: +1 레벨 · 오른쪽 클릭: −1",
+      "class": {
+        "warrior": "전사",
+        "ranger": "레인저",
+        "mage": "마법사",
+        "neutral": "중립"
+      }
+    },
+    "deck": {
+      "delete": "지우기",
+      "range": "{min}~{max}",
+      "min": "최소",
+      "use": "사용",
+      "current": "현재"
+    },
+    "art": {
+      "preparing": "게임 아트를 준비하는 중…",
+      "needsClient": "게임 아트에는 Enshrouded 클라이언트가 필요합니다 (설정 → 게임).",
+      "notFound": "게임 아트를 찾지 못했습니다. {script}을(를) 실행하세요."
+    },
+    "game": {
+      "tree": {
+        "aboveMax": "{no}: 레벨 {nivel}이(가) 최대 {max}을(를) 넘습니다",
+        "orphans": "트리의 나머지와 연결되지 않은 노드: {nos}",
+        "overTotal": "사용 중인 포인트({usados})가 캐릭터 총합({total})을 넘습니다"
+      },
+      "unknownItem": "알 수 없는 아이템 (0x{h})",
+      "errors": {
+        "unknownItems": "이 세이브에 알 수 없는 아이템이 있습니다 (없어진 모드?): 읽기 전용",
+        "levelXp": "잘못된 레벨 또는 XP",
+        "skill": "잘못된 스킬",
+        "item": "알 수 없는 아이템: {id}",
+        "slotAmount": "잘못된 슬롯 또는 수량",
+        "sameSlot": "같은 인벤토리 슬롯에 아이템이 두 개 있습니다",
+        "knowledge": "잘못된 지식 항목",
+        "knowledgeRepeated": "id가 중복된 지식",
+        "closeGame": "저장하기 전에 Enshrouded를 닫으세요. 게임이 편집을 덮어씁니다.",
+        "notOpen": "편집용으로 연 세이브가 없습니다",
+        "noEquipment": "편집기가 이 세이브에서 장비와 인벤토리를 찾지 못합니다",
+        "skillList": "편집기가 이 세이브의 스킬 목록을 모릅니다",
+        "notSave": "Enshrouded 세이브가 아닙니다",
+        "inventoryUnsure": "편집기가 이 세이브의 인벤토리를 확실히 찾지 못했습니다. 아이템을 기록할 수 없습니다.",
+        "modData": "이 세이브에는 편집기가 기록할 수 없는 모드의 데이터({mods})가 들어 있습니다. 모드 데이터를 그대로 두기 위해 읽기 전용입니다.",
+        "inventoryUnread": "편집기가 이 캐릭터의 인벤토리(배낭, 교체 바, 액션 바)를 확실히 읽지 못했습니다. 그 위에 아무것도 기록하지 않도록 읽기 전용입니다."
+      },
+      "saveFileFilter": "Enshrouded 세이브",
+      "rarity": {
+        "none": "희귀도 없음",
+        "common": "일반",
+        "uncommon": "고급",
+        "rare": "희귀",
+        "epic": "영웅",
+        "legendary": "전설"
+      },
+      "category": {
+        "weapon": "무기",
+        "equipment": "장비",
+        "material": "재료",
+        "consumable": "소모품",
+        "ammunition": "탄약",
+        "tool": "도구",
+        "building": "건축",
+        "blueprint": "설계도",
+        "collectible": "수집품",
+        "cosmetic": "치장품",
+        "gem": "보석"
+      },
+      "attribute": {
+        "constitution": "체질",
+        "spirit": "정신력",
+        "endurance": "지구력",
+        "strength": "힘",
+        "dexterity": "민첩",
+        "intelligence": "지능"
+      },
+      "classes": {
+        "survivor": "생존자",
+        "beastmaster": "야수 조련사",
+        "ranger": "레인저",
+        "assassin": "암살자",
+        "trickster": "트릭스터",
+        "wizard": "위저드",
+        "healer": "치유사",
+        "battlemage": "전투 마법사",
+        "tank": "탱커",
+        "warrior": "전사",
+        "barbarian": "바바리안",
+        "athlete": "운동선수"
+      },
+      "knowledge": {
+        "pickedUp": "주움",
+        "used": "사용함",
+        "inspected": "살펴봄",
+        "seen": "봄",
+        "crafted": "제작함"
+      }
     }
   }
 }

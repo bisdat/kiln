@@ -3890,7 +3890,12 @@
       "leavesListed.other": "ファイルはライブラリから削除されます。{others} にも含まれていて、不足として表示されます。",
       "leaves": "ファイルはライブラリから削除されます。",
       "notSaved": "モッドリストを保存できなかったため、何も削除していません。",
-      "notRemovable": "ゲームフォルダーにあり、Kiln が置いたものではありません。そこで削除してください"
+      "notRemovable": "ゲームフォルダーにあり、Kiln が置いたものではありません。そこで削除してください",
+      "settingsToo": "設定も削除する",
+      "settingsTooHint": "このゲームとプロファイルにあるこの MOD の設定も削除されます。Kiln はバックアップにコピーを残します。",
+      "settingsTooMany": "設定も削除する",
+      "settingsTooManyHint": "このゲームとプロファイルにあるこれらの MOD の設定も削除されます。Kiln はバックアップにコピーを残します。",
+      "settingsLeft": "一部の設定は残りました"
     },
     "rollback": {
       "settingsBack.other": "アップデート前の設定も一緒に戻ります（{count} 個のファイル）。",
@@ -5406,6 +5411,351 @@
       "go": "サーバーに入れる",
       "done": "{version} をサーバーに入れました",
       "failed": "サーバー用パックを作れませんでした"
+    }
+  },
+  "editor": {
+    "page": {
+      "title": "エディター",
+      "lookingForSaves": "セーブデータを探しています…",
+      "pickCharacter": "キャラクターを選んでください。",
+      "noSaves": "キャラクターのセーブデータが見つかりません。",
+      "cannotParse": "このセーブデータは編集用に読み取れませんでした。",
+      "readOnlyNoSave": "このセーブデータは読み取り専用です: 保存はオフです。",
+      "gameOpen": "ゲームが起動中です。保存するにはゲームを閉じてください。",
+      "unsaved": "変更はまだ保存されていません。Kiln は書き込む前にセーブデータをバックアップします。",
+      "levelBackup": "レベル {n}。Kiln は書き込む前にセーブデータをバックアップします。",
+      "notSaved": "未保存",
+      "discard": "破棄",
+      "backups": "バックアップ",
+      "save": "保存",
+      "saving": "保存中…",
+      "saved": "保存しました",
+      "savedHint": "保存前のセーブデータは「バックアップ」にあります。",
+      "gameOpenShort": "ゲーム起動中: 保存するには閉じてください",
+      "error": "エラー",
+      "note": "注意",
+      "readAgain": "再読み込み",
+      "close": "閉じる",
+      "parts": "セーブデータの構成",
+      "characters": "キャラクター",
+      "openFile": "ファイルを開く…",
+      "pickCharacterButton": "キャラクターを選ぶ",
+      "open": "開く",
+      "opened": "開いています",
+      "discardTitle": "変更を破棄しますか？",
+      "discardAndOpen": "破棄して開く",
+      "discardBody": "{nome} への変更はまだ保存されていません。",
+      "cancel": "キャンセル",
+      "back": "戻る",
+      "readOnlyError": "読み取り専用: {erro}",
+      "pointsRaised": "使用中のポイントを増やしました（{antes} → {depois}）。エディターが確認できるよう、「スキル」タブでポイントの合計を入力してください。合計を超えると、ゲームがツリー全体をリセットします。",
+      "notWritten": "保存されていません。{problemas}",
+      "gameWroteSince": "エディターが読み込んだ後に、ゲームがこのセーブデータに書き込みました。現在の状態を編集するには再読み込みしてください（ここで行った変更は失われます）。"
+    },
+    "tabs": {
+      "equipment": "装備",
+      "inventory": "バックパック",
+      "skills": "スキル",
+      "knowledge": "知識"
+    },
+    "backups": {
+      "title": "{nome} のバックアップ",
+      "openFolder": "フォルダーを開く",
+      "hint": "ゲームは直近 10 個のセーブを自動で保持します。エディターも書き込みのたびにセーブデータをコピーします。",
+      "dropsChanges": "復元すると、保存していない変更は失われます。",
+      "looking": "バックアップを探しています…",
+      "none": "このセーブデータのバックアップは見つかりません。",
+      "restore": "復元",
+      "restored": "復元しました",
+      "restoredBody": "{arquivo}（{quando}）。復元前のセーブデータはバックアップとして保管しました。",
+      "restoreTitle": "このバックアップを復元しますか？",
+      "restoreBody": "現在のセーブデータはバックアップとして保管されます。",
+      "kindGame": "ゲームのコピー",
+      "kindKiln": "Kiln のバックアップ",
+      "beforeSave": "保存前"
+    },
+    "common": {
+      "level": "レベル",
+      "empty": "空",
+      "change": "変更",
+      "add": "追加",
+      "tierN": "ティア {n}",
+      "rarity": "レア度",
+      "amount": "数量",
+      "aboveStack": "ゲームのスタック数 {n} を超えています: スタック数を増やすモッドのあるワールド向けです",
+      "gameStack": "ゲームのスタック数（{n}）",
+      "maxAmount": "1 枠の上限（{n}）",
+      "upgrades": "強化",
+      "remove": "削除",
+      "levelN": "レベル {n}",
+      "pick": "選択",
+      "noMatch": "この条件に一致するものはありません。",
+      "all": "すべて"
+    },
+    "equipment": {
+      "xp": "レベル内の XP",
+      "attrsHint": "能力値はスキルツリーのノードから決まります（「スキル」タブで編集できます）。",
+      "attrsFlameHint": "ゲームは炎のレベルに応じて伸びるノードと装備のボーナスも加算しますが、どちらもキャラクターのセーブデータには保存されません。",
+      "emptyHint": "空の枠です。装備はゲーム内で行ってください。ここでは装備中のものを編集したり外したりできます。",
+      "backpackFull": {
+        "other": "{item} は外しません。外すと、その中の {count} 枠ごと収納が削除されます。先にゲーム内で空にしてください。"
+      },
+      "groups": {
+        "armour": "防具",
+        "appearance": "外見",
+        "accessories": "アクセサリー"
+      },
+      "slots": {
+        "headVanity": "頭（外見）",
+        "chestVanity": "胴（外見）",
+        "armsVanity": "腕（外見）",
+        "legsVanity": "脚（外見）",
+        "feetVanity": "足（外見）",
+        "head": "頭",
+        "chest": "胴",
+        "arms": "腕",
+        "legs": "脚",
+        "feet": "足",
+        "ring": "指輪",
+        "shield": "盾",
+        "hook": "グラップリングフック",
+        "glider": "グライダー",
+        "backpack": "バックパック",
+        "slot": "枠 {n}"
+      }
+    },
+    "inventory": {
+      "move": "移動",
+      "slotEmpty": "枠 {n} は空",
+      "putHere": "ここに置く",
+      "slotsUsed": {
+        "other": "{n} / {total} 枠"
+      },
+      "addItem": "アイテムを追加",
+      "swapBar": "バーを入れ替え",
+      "swapBarHint": "Alt でアクションバーと入れ替えます",
+      "actionBar": "アクションバー",
+      "deckHint": "A でアイテムを変更 · Y で移動 · 空の枠で A を押すと追加",
+      "hint": "ドラッグで移動 · 空の枠をダブルクリックで追加 · Delete で削除 · Ctrl+D で複製",
+      "noneSelected": "アイテムが選択されていません。",
+      "noneSelectedHint": "枠を選ぶと、そのアイテムを確認・変更できます。",
+      "emptyHint": "カタログからアイテムを選んでここに置きます。",
+      "pickItem": "アイテムを選ぶ",
+      "notFound": "このインベントリにアイテムが見つからず、セーブデータ内のどこにあるかエディターが確実に判断できません。ゲームでここにアイテムが表示されている場合、それらは読み込めていません。アイテムは追加できません。このセーブデータのコピーを送っていただけると修正に役立ちます。",
+      "modItem": "MOD のアイテム (変更しません)",
+      "hiddenModItem": "{place} に別の MOD の隠しアイテム (ID {id}) があります。Kiln はそのまま保持します。",
+      "place": {
+        "backpack": "バックパックのスロット {n}",
+        "swap": "切り替えバーのスロット {n}",
+        "action": "アクションバーのスロット {n}"
+      }
+    },
+    "inspector": {
+      "item": "アイテム",
+      "stacksTo": "最大 {n} までスタック",
+      "max": "最大",
+      "levelSplit": {
+        "other": "= 基本 {base} + 強化 {count}"
+      },
+      "aboveItemMax": "このアイテムの上限（{max}）を超えています: モッドで範囲が広げられていない限り、サーバーが読み込み時に切り詰めます",
+      "upgradesHint": "レア度でアイテムの強化回数が決まります: 最大レベル = 基本レベル + レア度。",
+      "gem": "はめ込んだジェム",
+      "gemUnknown": "id {id} はカタログにありません",
+      "noGem": "— ジェムなし —",
+      "gemLevel": "ジェムのレベル",
+      "aboveGemMax": "このジェムの上限（{max}）を超えています: モッドで範囲が広げられていない限り、サーバーが読み込み時に切り詰めます",
+      "durability": "耐久度",
+      "repair": "修理",
+      "water": "水",
+      "fill": "満タンにする",
+      "duplicateHint": "最初の空き枠にアイテムをコピーします",
+      "duplicate": "複製",
+      "attributes": "能力値",
+      "physicalArmour": "物理防御",
+      "magicalArmour": "魔法防御",
+      "raisesSkill": "{no} のスキルレベルを上げる",
+      "unknownLines": "数値のない行は、まだ測定されていない式でアイテムレベルに応じて変化します。エディターは確かでない値を表示しません。"
+    },
+    "parts": {
+      "full": "満タン",
+      "clickToSet": "クリックで設定"
+    },
+    "catalog": {
+      "items": "アイテム",
+      "countLimited": {
+        "other": "{count} 個のアイテム（{limite} 個を表示中。検索を絞り込んでください）"
+      },
+      "count": {
+        "other": "{count} 個のアイテム"
+      },
+      "categories": "カテゴリー",
+      "searchDeck": "名前で検索（Steam + X: キーボード）",
+      "search": "名前で検索…",
+      "searchLabel": "検索",
+      "type": "入力",
+      "allRarities": "すべて",
+      "tier": "ティア",
+      "targetFull": "配置先: インベントリが満杯",
+      "target": "配置先: 枠 {n}",
+      "pickHint": "アイテムを選んでください。",
+      "deckHint": "A で選択、もう一度 A で追加します。",
+      "hint": "ダブルクリックですぐに追加します。",
+      "cat": {
+        "weapons": "武器",
+        "armour": "防具",
+        "ammo": "弾薬",
+        "magic": "呪文とジェム",
+        "consumables": "消耗品",
+        "materials": "素材",
+        "tools": "道具",
+        "building": "建築",
+        "cosmetics": "コスメティックとコレクション"
+      }
+    },
+    "knowledge": {
+      "noBlock": "このセーブデータには知識のブロックがありません。",
+      "search": "名前または id で検索",
+      "above": "レベル以上",
+      "allLevels": "すべて",
+      "show": "表示",
+      "filter": {
+        "itemsRecipes": "アイテムとレシピ",
+        "items": "アイテムのみ",
+        "recipes": "レシピのみ",
+        "everything": "すべて"
+      },
+      "removeN": "{n} 件を削除",
+      "kind": "種類",
+      "name": "名前",
+      "state": "状態",
+      "id": "id {id}",
+      "kinds": {
+        "item": "アイテム",
+        "recipe": "レシピ",
+        "misc": "その他"
+      },
+      "count": {
+        "other": "{n} / {total} 件"
+      },
+      "unnamed": {
+        "other": "名前不明 {count} 件"
+      },
+      "shownLimit": "最初の 400 件を表示しています。残りを見るには検索かレベルの絞り込みを使ってください。",
+      "hint": "高レベルの素材を削除すると、それに依存するレシピも閉じられます。レシピはセーブデータに保存されません。ゲームは知識からレシピを計算し直します（ここでもサーバーのワールドでも）。"
+    },
+    "skills": {
+      "total": "合計ポイント",
+      "minusLevel": "−1 レベル",
+      "plusLevel": "+1 レベル",
+      "tree": "スキルツリー",
+      "used": "使用中",
+      "available": "使用可能",
+      "enterTotal": "合計を入力…",
+      "changeTotal": "クリックで合計を変更",
+      "totalFromGame": "合計 {total}。ゲームと同じ方法で計算しています: レベル 1 を超える 1 レベルごとに 2 ポイント、さらにこのキャラクターが破壊したシュラウドの根とエリクサーの泉の分。ゲームはこの値を保存しないため、ここでは編集しません。",
+      "totalHint": "ポイントの合計（ゲームの表示どおり、使用中 + 使用可能）:",
+      "zoomIn": "拡大",
+      "zoomOut": "縮小",
+      "centre": "中央に戻す",
+      "cost": "コスト {n}",
+      "maxN": "最大 {n}",
+      "deckHint": "A: +1 レベル · Y: −1",
+      "hint": "クリック: +1 レベル · 右クリック: −1",
+      "class": {
+        "warrior": "ウォリアー",
+        "ranger": "レンジャー",
+        "mage": "メイジ",
+        "neutral": "ニュートラル"
+      }
+    },
+    "deck": {
+      "delete": "削除",
+      "range": "{min}～{max}",
+      "min": "最小",
+      "use": "使用",
+      "current": "現在"
+    },
+    "art": {
+      "preparing": "ゲームの画像を準備しています…",
+      "needsClient": "ゲームの画像には Enshrouded のクライアントが必要です（「設定」→「ゲーム」）。",
+      "notFound": "ゲームの画像が見つかりません。{script} を実行してください。"
+    },
+    "game": {
+      "tree": {
+        "aboveMax": "{no}: レベル {nivel} が上限 {max} を超えています",
+        "orphans": "ツリーの他の部分とつながっていないノード: {nos}",
+        "overTotal": "使用中のポイント（{usados}）がキャラクターの合計（{total}）を超えています"
+      },
+      "unknownItem": "不明なアイテム（0x{h}）",
+      "errors": {
+        "unknownItems": "このセーブデータに不明なアイテムがあります（削除されたモッドのもの？）: 読み取り専用",
+        "levelXp": "レベルまたは XP が無効です",
+        "skill": "無効なスキル",
+        "item": "不明なアイテム: {id}",
+        "slotAmount": "枠または数量が無効です",
+        "sameSlot": "インベントリの同じ枠にアイテムが 2 つあります",
+        "knowledge": "無効な知識エントリー",
+        "knowledgeRepeated": "id が重複した知識",
+        "closeGame": "保存する前に Enshrouded を閉じてください。ゲームが編集内容を上書きしてしまいます。",
+        "notOpen": "セーブデータが編集用に開かれていません",
+        "noEquipment": "エディターはこのセーブデータで装備とインベントリを見つけられません",
+        "skillList": "エディターはこのセーブデータのスキル一覧を認識できません",
+        "notSave": "Enshrouded のセーブデータではありません",
+        "inventoryUnsure": "このセーブデータのインベントリを確実に見つけられませんでした。アイテムを書き込むことはできません。",
+        "modData": "このセーブデータには、エディターが書き込めない MOD のデータ ({mods}) が含まれています。MOD のデータをそのまま保つため、読み取り専用です。",
+        "inventoryUnread": "このキャラクターのインベントリ (バックパック、切り替えバー、アクションバー) を確実に読み込めませんでした。上書きしないよう、読み取り専用です。"
+      },
+      "saveFileFilter": "Enshrouded のセーブデータ",
+      "rarity": {
+        "none": "レア度なし",
+        "common": "コモン",
+        "uncommon": "アンコモン",
+        "rare": "レア",
+        "epic": "エピック",
+        "legendary": "レジェンダリー"
+      },
+      "category": {
+        "weapon": "武器",
+        "equipment": "装備",
+        "material": "素材",
+        "consumable": "消耗品",
+        "ammunition": "弾薬",
+        "tool": "道具",
+        "building": "建築",
+        "blueprint": "設計図",
+        "collectible": "コレクション",
+        "cosmetic": "コスメティック",
+        "gem": "ジェム"
+      },
+      "attribute": {
+        "constitution": "体質",
+        "spirit": "精神",
+        "endurance": "持久力",
+        "strength": "筋力",
+        "dexterity": "器用さ",
+        "intelligence": "知力"
+      },
+      "classes": {
+        "survivor": "サバイバー",
+        "beastmaster": "ビーストマスター",
+        "ranger": "レンジャー",
+        "assassin": "アサシン",
+        "trickster": "トリックスター",
+        "wizard": "ウィザード",
+        "healer": "ヒーラー",
+        "battlemage": "バトルメイジ",
+        "tank": "タンク",
+        "warrior": "ウォリアー",
+        "barbarian": "バーバリアン",
+        "athlete": "アスリート"
+      },
+      "knowledge": {
+        "pickedUp": "入手済み",
+        "used": "使用済み",
+        "inspected": "調査済み",
+        "seen": "確認済み",
+        "crafted": "クラフト済み"
+      }
     }
   }
 }
