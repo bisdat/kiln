@@ -111,9 +111,11 @@ delete; capture against .schema defaults, personal and secret keys, set_capture 
 the chosen keys; choices, layer files and path safety, Set in the pack keeping comments, credits (https only, only
 complete rows in the index), deterministic builds, keep_version and the publish record; the order with the layer
 last and picks of what mods add; the test instance replaced by the next and removed at the end, the game log's last
-boot read back; the analysis' credits). cargo test -p kiln-manage --lib crucible (publish against the in-process fake
-service: signed out, the precheck sending nothing, link-only, the same version refused, public with credits and the
-PATCH, only new files sent). The ignored launcher test commands::studio::tests::studio_publish_end_to_end_against_a_local_crucible
+boot read back; a test instance loaded in a game replaced and ended with the pack's profile loaded again; credits of
+mods that left, build_as, the revision, no profile left behind by a refused create; the analysis' credits).
+cargo test -p kiln-manage --lib crucible (publish against the in-process fake service: signed out, the precheck sending
+nothing, link-only, the same version refused, public with credits and the PATCH, only new files sent; a publish whose
+credits call fails resumes the same pack and version; Make public; a gone pack refused until fresh, history kept). The ignored launcher test commands::studio::tests::studio_publish_end_to_end_against_a_local_crucible
 runs in launcher/scripts/crucible-e2e.mjs against the real service, MinIO and the fake relay: link-only, then public
 with credits, then a friend installs it by its code (layer and captured key included). Playwright (mock mode):
 tests/studio.spec.ts (every tab's flow, Crucible off, the Deck without Studio) and tests/studio-data.spec.ts (the
