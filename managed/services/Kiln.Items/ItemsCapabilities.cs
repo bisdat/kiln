@@ -77,6 +77,15 @@ public static unsafe partial class Items
         /// gear rows.</summary>
         public const string GearUpgrade = "items.gear.upgrade";
 
+        /// <summary>sigdb: per-instance power (kiln.items v8, package P7): the detour of the game's item power. kiln-items.dll
+        /// lowers it without item instances, when this build's layouts differ, or when the detour cannot be installed or
+        /// faults. <see cref="Items.SetPower"/>.</summary>
+        public const string GearPower = "items.gear.power";
+
+        /// <summary>sigdb: per-instance armour (package P7): the two mid hooks around one worn piece's armour.
+        /// <see cref="Items.SetArmor"/>.</summary>
+        public const string GearArmor = "items.gear.armor";
+
         // sigdb rows the ones above need
         public const string Transaction = "items.transaction";
         public const string Read = "items.read";
@@ -105,7 +114,8 @@ public static unsafe partial class Items
         {
             var (reason, text) = Cause(CapabilityReason.ServiceMissing, "kiln.items is not loaded", Caps.Service);
             Capabilities.Report(Caps.ResultPeek, CapabilityState.Unavailable, reason, text);
-            foreach (var name in (string[])[Caps.Fuel, Caps.Move, Caps.Names, Caps.Transfer, Caps.Moves, Caps.Instances, Caps.Equip, Caps.EquipSets, Caps.GearOptions, Caps.ToolWear]) Lower(name, reason, text);
+            foreach (var name in (string[])[Caps.Fuel, Caps.Move, Caps.Names, Caps.Transfer, Caps.Moves, Caps.Instances, Caps.Equip, Caps.EquipSets, Caps.GearOptions, Caps.ToolWear,
+                         Caps.GearPower, Caps.GearArmor]) Lower(name, reason, text);
             foreach (var name in (string[])[Caps.GearRead, Caps.GearWrite, Caps.GearDurability, Caps.GearUpgrade]) Capabilities.Report(name, CapabilityState.Unavailable, reason, text);
             return;
         }
@@ -175,6 +185,9 @@ public static unsafe partial class Items
         // gear (v8): the rows are Kiln.Items' own, followed every 25 steps on a tick of their own (the kit's table has no v3)
         RefreshGear();
         if (V8 != null) _gearTick ??= ServiceTickAccess.Add("kiln.items gear capabilities", step => { if (step % 25 == 0) RefreshGear(); });
+        // per-instance values (v8, package P7): sigdb rows of their own, lowered here only by a table without the scales
+        if (t->Header.Size < ItemsNative.V8ScaleEnd)
+            foreach (var name in (string[])[Caps.GearPower, Caps.GearArmor]) Lower(name, CapabilityReason.ServiceOlder, string.Format(older, "per-instance values"));
         // tool wear (dev.28): its own table, published by the same DLL
         if (ToolWear.Current == null) Lower(Caps.ToolWear, CapabilityReason.ServiceOlder, "kiln.items here has no kiln.toolwear table (update Kiln)");
         // give, take, moves and water all run through the game's inventory transaction

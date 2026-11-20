@@ -26,7 +26,7 @@ public sealed unsafe class UpgradeTests
         Assert.Equal(392, sizeof(ItemsNative.UpgradeResult));
         Assert.Equal(24, (int)System.Runtime.InteropServices.Marshal.OffsetOf<ItemsNative.UpgradeRequest>(nameof(ItemsNative.UpgradeRequest.Gear)));
         Assert.Equal(96, (int)System.Runtime.InteropServices.Marshal.OffsetOf<ItemsNative.UpgradeResult>(nameof(ItemsNative.UpgradeResult.Gear)));
-        Assert.Equal(344, sizeof(ItemsNative.TableV8));  // native items.cpp: sizeof(KilnItemsApi) == 344
+        Assert.Equal(368, sizeof(ItemsNative.TableV8));  // native items.cpp: sizeof(KilnItemsApi) == 368 (P7's scales after gear_upgrade at 336)
         Assert.Equal((int)ItemsNative.V8RollsEnd, (int)System.Runtime.InteropServices.Marshal.OffsetOf<ItemsNative.TableV8>(nameof(ItemsNative.TableV8.GearUpgrade)));
     }
 

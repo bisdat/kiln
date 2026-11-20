@@ -132,8 +132,9 @@ public static unsafe partial class Items
 
     /// <summary>
     /// Sets an item's level, the unlocked enhancements included (the level the game shows). The level without them (the
-    /// base) must be inside the item type's level range: the game sets a level outside it back when the world loads, so
-    /// such a write ends <see cref="GearStatus.OutOfRange"/>.
+    /// base) must be inside the item type's level range, unless <see cref="GearWriteOptions.AnyLevel"/> is set: the game
+    /// sets a level outside the range back when the world loads, so Kiln keeps such a level with the item (item data) and
+    /// writes it again after every load. Without the option such a write ends <see cref="GearStatus.OutOfRange"/>.
     /// </summary>
     /// <param name="item">The item.</param>
     /// <param name="level">1 to 255.</param>
@@ -150,14 +151,56 @@ public static unsafe partial class Items
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(level, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(level, MaxGearLevel);
-        return WriteGear(item, GearChange.ToLevel(level), options, GearChangeSource.Code, "Items.SetLevel");
+        // a base level a load would not give back is kept by Kiln (GearKeep) when the write is done; a level inside the
+        // range ends a kept one (the game keeps it itself)
+        return WriteGear(item, GearChange.ToLevel(level), options, GearChangeSource.Code, "Items.SetLevel", GearKeepIntent.Level);
+    }
+
+    /// <summary>
+    /// Sets one item's max durability in place, keeping its current durability at the same share (a half-worn item stays
+    /// half worn; <see cref="DurabilityRule.Repair"/>: full at the new max). The game computes max durability again when the
+    /// world loads (and after a rarity change with <see cref="DurabilityRule.KeepRatio"/>), so Kiln keeps the value with
+    /// the item (item data) and writes it again after every load and such a change. <c>null</c> gives the item back its
+    /// game-computed max (the game computes it in its next step, the share kept) and ends the kept value.
+    /// </summary>
+    /// <param name="item">The item.</param>
+    /// <param name="max">1 to 1,000,000, or null for the game's own value.</param>
+    /// <param name="options"><see cref="GearWriteOptions.Durability"/>: <see cref="DurabilityRule.Repair"/> fills it;
+    /// any other rule keeps the share. Equipped items and dry runs as <see cref="SetRarity"/>.</param>
+    /// <returns>Completes on the tick thread one step after the write. A refusal is a result: <see cref="GearStatus.NotGear"/>
+    /// (no durability), <see cref="GearStatus.Refused"/> (the game has not computed this item's durability yet: a new item,
+    /// in its first step).</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="max"/> is outside 1..1,000,000.</exception>
+    /// <exception cref="ArgumentException"><paramref name="item"/> is none or not an item entity's ref.</exception>
+    /// <exception cref="InvalidOperationException">Not on the tick thread, or the calling mod is unloading.</exception>
+    /// <exception cref="KilnUnavailableException">The capability <c>items.gear.write</c> is off (and
+    /// <c>items.gear.durability</c> for <c>null</c>).</exception>
+    /// <example><code>
+    /// await Items.SetDurabilityMax(Items.Held(player), 900);                 // this sword lasts longer, wherever it goes
+    /// </code></example>
+    [ServerOnly]
+    [TickThreadOnly]
+    [RequiresCapability(Caps.GearWrite)]
+    public static Task<GearResult> SetDurabilityMax(ItemInstanceRef item, int? max, GearWriteOptions? options = null)
+    {
+        if (max is { } m)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(m, 1, nameof(max));
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(m, ItemsNative.GearMaxDurability, nameof(max));
+            return WriteGear(item, new GearChange(null, null, null, m), options, GearChangeSource.Code, "Items.SetDurabilityMax",
+                GearKeepIntent.DurabilityMax);
+        }
+        // back to the game's own max: a refresh (the game computes it again, the share kept), the kept value ended
+        var o = options ?? GearWriteOptions.Default;
+        if (o.Durability == DurabilityRule.Keep) o = o with { Durability = DurabilityRule.KeepRatio };
+        return WriteGear(item, default, o, GearChangeSource.Code, "Items.SetDurabilityMax", GearKeepIntent.DurabilityMaxClear);
     }
 
     // ------------------------------------------------------------------------------------------- plumbing ------
 
     /// <summary>What one gear write asks for: any of the slots (so the rarity), the unlocked count and the level, in one
     /// native request (the upgrade action asks for slots and unlocked together).</summary>
-    internal readonly record struct GearChange(int? Enhancements, int? Unlocked, int? Level)
+    internal readonly record struct GearChange(int? Enhancements, int? Unlocked, int? Level, int? DurabilityMax = null)
     {
         public static GearChange ToRarity(ItemRarity rarity) => new((int)rarity + 1, null, null);
         public static GearChange ToUnlocked(int unlocked) => new(null, unlocked, null);
@@ -188,13 +231,30 @@ public static unsafe partial class Items
             r.Flags |= ItemsNative.GearLevel;
             r.Level = (uint)l;
         }
-        r.Flags |= options.Durability switch
+        if (options.AnyLevel)
         {
-            DurabilityRule.KeepRatio => ItemsNative.GearDurabilityRefresh,
-            DurabilityRule.Keep => 0u,
-            DurabilityRule.Repair => ItemsNative.GearDurabilityRepair,
-            _ => throw new ArgumentOutOfRangeException(nameof(options), options.Durability, "not a durability rule"),
-        };
+            if (change.Level is null) throw new ArgumentException("GearWriteOptions.AnyLevel applies to Items.SetLevel only", nameof(options));
+            r.Flags |= ItemsNative.GearAnyLevel;
+        }
+        if (change.DurabilityMax is { } dm)
+        {
+            if (dm is < 1 or > ItemsNative.GearMaxDurability) throw new ArgumentOutOfRangeException(nameof(change), dm, "a max durability is 1 to 1,000,000");
+            r.Flags |= ItemsNative.GearDurabilityMax;
+            r.DurabilityMax = dm;
+            // the game's recompute (KeepRatio's refresh) would replace the max: the share is kept by the write itself
+            if (!Enum.IsDefined(options.Durability)) throw new ArgumentOutOfRangeException(nameof(options), options.Durability, "not a durability rule");
+            if (options.Durability == DurabilityRule.Repair) r.Flags |= ItemsNative.GearDurabilityRepair;
+        }
+        else
+        {
+            r.Flags |= options.Durability switch
+            {
+                DurabilityRule.KeepRatio => ItemsNative.GearDurabilityRefresh,
+                DurabilityRule.Keep => 0u,
+                DurabilityRule.Repair => ItemsNative.GearDurabilityRepair,
+                _ => throw new ArgumentOutOfRangeException(nameof(options), options.Durability, "not a durability rule"),
+            };
+        }
         if (options.AllowEmptySlot) r.Flags |= ItemsNative.GearForceSlot;
         if (options.RefuseEquipped) r.Flags |= ItemsNative.GearNotEquipped;
         if (options.DryRun) r.Flags |= ItemsNative.GearDryRun;
@@ -281,6 +341,7 @@ public static unsafe partial class Items
         if ((n.Changed & ItemsNative.GearChangedLevel) != 0) changed |= GearChanges.Level;
         if ((n.Changed & ItemsNative.GearChangedDurability) != 0) changed |= GearChanges.Durability;
         if ((n.Changed & ItemsNative.GearChangedState) != 0) changed |= GearChanges.DurabilityRefresh;
+        if ((n.Changed & ItemsNative.GearChangedDurabilityMax) != 0) changed |= GearChanges.DurabilityMax;
         return new GearResult(status, item, ran ? StateOf(item, in n.Before) : null, ran ? StateOf(item, in n.After) : null,
             status == GearStatus.Done ? changed : GearChanges.None, message, (int)n.Steps, (n.Flags & ItemsNative.GearDryRun) != 0);
     }
@@ -326,8 +387,10 @@ public static unsafe partial class Items
     // A write in flight, held by Kiln.Items itself (owner 0): it completes and is reported (the gear events, the gear
     // watch) even when the mod that asked unloads first; only that mod's task is dropped then (its continuations are the
     // unloaded mod's code).
-    private sealed class PendingGear(TaskCompletionSource<GearResult> tcs, ModContext? mod, ItemInstanceRef item, GearChangeSource source, string origin)
+    private sealed class PendingGear(TaskCompletionSource<GearResult> tcs, ModContext? mod, ItemInstanceRef item, GearChangeSource source, string origin,
+        GearKeepIntent keep = GearKeepIntent.None)
     {
+        public readonly GearKeepIntent Keep = keep;
         public readonly TaskCompletionSource<GearResult> Tcs = tcs;
         public readonly ModContext? Mod = mod;
         public readonly ItemInstanceRef Item = item;
@@ -342,7 +405,8 @@ public static unsafe partial class Items
     private static long _nextGear;
 
     /// <summary>One gear write for a mod (the Set* calls) or an upgrade (<paramref name="source"/>).</summary>
-    internal static Task<GearResult> WriteGear(ItemInstanceRef item, GearChange change, GearWriteOptions? options, GearChangeSource source, string api)
+    internal static Task<GearResult> WriteGear(ItemInstanceRef item, GearChange change, GearWriteOptions? options, GearChangeSource source, string api,
+        GearKeepIntent keep = GearKeepIntent.None)
     {
         Services.RequireTickThread(api);
         options ??= GearWriteOptions.Default;
@@ -356,7 +420,7 @@ public static unsafe partial class Items
         lock (GearGate)
         {
             key = ++_nextGear;
-            GearsInFlight[key] = new PendingGear(tcs, mod, item, source, mod?.Info.Id ?? "kiln");
+            GearsInFlight[key] = new PendingGear(tcs, mod, item, source, mod?.Info.Id ?? "kiln", keep);
             if (mod != null && GearsWatched.Add(mod)) mod.Retiring += () => RetireGears(mod);
         }
         GearWatch.Begin(item);
@@ -395,6 +459,8 @@ public static unsafe partial class Items
         GearWatch.End(p.Item, result is { Ok: true, DryRun: false } ? result.After : null);
         if (result is { Ok: true, DryRun: false, Before: { } before, After: { } after })
             GearEvents.Changed(p.Item, before, after, p.Source, p.Origin);
+        if (p.Keep != GearKeepIntent.None && result is { Ok: true, DryRun: false, After: { } kept })
+            result = result with { Kept = GearKeep.AfterWrite(p.Item, p.Keep, kept) };
         if (!p.Retired) p.Tcs.TrySetResult(result);
     }
 

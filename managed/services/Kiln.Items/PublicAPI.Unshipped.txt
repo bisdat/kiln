@@ -304,3 +304,66 @@ static Kiln.UpgradeResult.operator !=(Kiln.UpgradeResult? left, Kiln.UpgradeResu
 static Kiln.UpgradeResult.operator ==(Kiln.UpgradeResult? left, Kiln.UpgradeResult? right) -> bool
 static Kiln.UpgradeStep.operator !=(Kiln.UpgradeStep? left, Kiln.UpgradeStep? right) -> bool
 static Kiln.UpgradeStep.operator ==(Kiln.UpgradeStep? left, Kiln.UpgradeStep? right) -> bool
+Kiln.GearChanges.DurabilityMax = 16 -> Kiln.GearChanges
+Kiln.GearResult.Kept.get -> bool
+Kiln.GearResult.Kept.init -> void
+Kiln.GearValues
+Kiln.GearValues.<Clone>$() -> Kiln.GearValues!
+Kiln.GearValues.Armor.get -> double
+Kiln.GearValues.Armor.init -> void
+Kiln.GearValues.Deconstruct(out Kiln.ItemInstanceRef Item, out double Power, out double Armor, out int? KeptBaseLevel, out int? KeptDurabilityMax, out bool Kept) -> void
+Kiln.GearValues.Equals(Kiln.GearValues? other) -> bool
+Kiln.GearValues.GearValues(Kiln.ItemInstanceRef Item, double Power, double Armor, int? KeptBaseLevel, int? KeptDurabilityMax, bool Kept) -> void
+Kiln.GearValues.Item.get -> Kiln.ItemInstanceRef
+Kiln.GearValues.Item.init -> void
+Kiln.GearValues.Kept.get -> bool
+Kiln.GearValues.Kept.init -> void
+Kiln.GearValues.KeptBaseLevel.get -> int?
+Kiln.GearValues.KeptBaseLevel.init -> void
+Kiln.GearValues.KeptDurabilityMax.get -> int?
+Kiln.GearValues.KeptDurabilityMax.init -> void
+Kiln.GearValues.Power.get -> double
+Kiln.GearValues.Power.init -> void
+Kiln.GearValuesResult
+Kiln.GearValuesResult.<Clone>$() -> Kiln.GearValuesResult!
+Kiln.GearValuesResult.Armor.get -> double
+Kiln.GearValuesResult.Armor.init -> void
+Kiln.GearValuesResult.Deconstruct(out Kiln.GearValuesStatus Status, out Kiln.ItemInstanceRef Item, out double Power, out double Armor, out bool Kept, out string! Message) -> void
+Kiln.GearValuesResult.Equals(Kiln.GearValuesResult? other) -> bool
+Kiln.GearValuesResult.GearValuesResult(Kiln.GearValuesStatus Status, Kiln.ItemInstanceRef Item, double Power, double Armor, bool Kept, string! Message) -> void
+Kiln.GearValuesResult.Item.get -> Kiln.ItemInstanceRef
+Kiln.GearValuesResult.Item.init -> void
+Kiln.GearValuesResult.Kept.get -> bool
+Kiln.GearValuesResult.Kept.init -> void
+Kiln.GearValuesResult.Message.get -> string!
+Kiln.GearValuesResult.Message.init -> void
+Kiln.GearValuesResult.Ok.get -> bool
+Kiln.GearValuesResult.Power.get -> double
+Kiln.GearValuesResult.Power.init -> void
+Kiln.GearValuesResult.Reason.get -> string?
+Kiln.GearValuesResult.Status.get -> Kiln.GearValuesStatus
+Kiln.GearValuesResult.Status.init -> void
+Kiln.GearValuesStatus
+Kiln.GearValuesStatus.Done = 0 -> Kiln.GearValuesStatus
+Kiln.GearValuesStatus.Full = 2 -> Kiln.GearValuesStatus
+Kiln.GearValuesStatus.Stale = 1 -> Kiln.GearValuesStatus
+Kiln.GearWriteOptions.AnyLevel.get -> bool
+Kiln.GearWriteOptions.AnyLevel.init -> void
+const Kiln.Items.MaxScale = 100 -> double
+const Kiln.Items.MinScale = 0.01 -> double
+override Kiln.GearValues.Equals(object? obj) -> bool
+override Kiln.GearValues.GetHashCode() -> int
+override Kiln.GearValues.ToString() -> string!
+override Kiln.GearValuesResult.Equals(object? obj) -> bool
+override Kiln.GearValuesResult.GetHashCode() -> int
+override Kiln.GearValuesResult.ToString() -> string!
+static Kiln.GearValues.operator !=(Kiln.GearValues? left, Kiln.GearValues? right) -> bool
+static Kiln.GearValues.operator ==(Kiln.GearValues? left, Kiln.GearValues? right) -> bool
+static Kiln.GearValuesResult.operator !=(Kiln.GearValuesResult? left, Kiln.GearValuesResult? right) -> bool
+static Kiln.GearValuesResult.operator ==(Kiln.GearValuesResult? left, Kiln.GearValuesResult? right) -> bool
+static Kiln.Items.ArmorAvailable.get -> bool
+static Kiln.Items.PowerAvailable.get -> bool
+static Kiln.Items.SetArmor(Kiln.ItemInstanceRef item, double scale) -> Kiln.GearValuesResult!
+static Kiln.Items.SetDurabilityMax(Kiln.ItemInstanceRef item, int? max, Kiln.GearWriteOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GearResult!>!
+static Kiln.Items.SetPower(Kiln.ItemInstanceRef item, double scale) -> Kiln.GearValuesResult!
+static Kiln.Items.ValuesOf(Kiln.ItemInstanceRef item) -> Kiln.GearValues?

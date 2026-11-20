@@ -633,8 +633,8 @@ Events.On<GearEnhancedEvent>(e => Log.Info($"{e.Item}: unlocked {e.From} -> {e.T
   options)` → `Task<GearResult>` (server, tick thread; capability `items.gear.write`). A higher rarity adds slots,
   locked; a lower one takes slots away, unlocked ones among them, and the level comes down by as many (as the game's own
   -1 does). `SetLevel` sets the level the game shows, unlocked slots included; the base (level - unlocked) must be in the
-  type's level range, since the game sets anything else back when the world loads (`OutOfRange`; levels outside the range
-  per item are a later package of this wave). The task completes on the tick thread one step after the write.
+  type's level range, since the game sets anything else back when the world loads (`OutOfRange`), unless
+  `GearWriteOptions.AnyLevel`: Kiln then keeps the level and writes it again after each load (see "Per-instance values"). The task completes on the tick thread one step after the write.
 - `GearWriteOptions`: `Durability` (`KeepRatio`, the default: the game computes max durability again at the new rarity
   and level in its next step and the item keeps its share; `Keep`: max stays; `Repair`: as `KeepRatio`, and full; both
   need `items.gear.durability`), `AllowEmptySlot` (default false: a rarity whose slot the type has no perk for is refused
@@ -737,6 +737,61 @@ await Items.UpgradeRarity(player, item, rule, new UpgradeOptions { PayFrom = che
   show it like any server change; not seen in a real game yet (the equipment wave's client checks).
 - Test kit: the fake kiln.items runs upgrades with kiln.items' rules (pay and write together, payers, refusals);
   `HarnessItems.SetUpgradeRolls(0.9, 0.1)` names the rolls of the upgrades that follow.
+
+## Per-instance values: power, armour, max durability, levels outside the range (v8, since 0.2.0-dev.29.19)
+
+One item can be stronger or weaker than others of its type, and keep it wherever it goes: its power (the damage it deals),
+its armour, its max durability and a level outside its type's range. The game stores none of these per item, so Kiln does
+it: multipliers in kiln.items' table, applied where the game computes the item's power and armour on the server, and the
+values the game sets back at a load (the level, max durability) kept with the item as Kiln's own item data and written
+again after each load (docs/re/items.md section 20).
+
+```csharp
+var sword = Items.Held(player);
+GearValuesResult p = Items.SetPower(sword, 1.25);             // this sword deals a quarter more, wherever it goes
+Items.SetArmor(Items.Equipped(player, EquipmentSlot.ArmourUpperBody), 1.5);
+await Items.SetDurabilityMax(sword, 900);                     // lasts longer; a half-worn sword stays half worn
+await Items.SetLevel(sword, 60, new GearWriteOptions { AnyLevel = true });   // past its type's levels
+GearValues? v = Items.ValuesOf(sword);                        // Power, Armor, KeptBaseLevel, KeptDurabilityMax, Kept
+Items.SetPower(sword, 1);                                     // its own power again
+await Items.SetDurabilityMax(sword, null);                    // the game's own max again
+```
+
+- `SetPower(item, scale)` / `SetArmor(item, scale)` → `GearValuesResult` at once (server, tick thread; capabilities
+  `items.gear.power`, `items.gear.armor`). Scale 0.01 to 100; 1 removes it. **Power:** the game computes a used item's power
+  when an impact of it starts (a swing, a shot, a cast; `items/ItemPower`) and multiplies the impact's damage distribution by
+  the weapon's power plus its ammunition's; Kiln multiplies that one item's power, so armour, block, crit and the attacker's
+  attributes still act after, as for the game's numbers. An arrow's or a spell's own power is that item's. **Armour:** the
+  game sums each worn piece's armour (its type's armour at its level plus each unlocked enhancement's) into the wearer's
+  armour values; Kiln multiplies what that one piece adds. Both act on the server world only; the first scale of a kind
+  installs its hooks (a server that never uses them hooks nothing). `Status` `Done`, `Stale`, `Full` (8,192 items with a
+  multiplier in this world).
+- `SetDurabilityMax(item, max, options)` → `Task<GearResult>` (capability `items.gear.write`): the max in place, current
+  at the same share (`DurabilityRule.Repair`: full). `null` hands the item back to the game's own max (computed again in its
+  next step, the share kept). `Refused` while the game has not computed the item's durability yet (its first step);
+  `NotGear` without durability.
+- `SetLevel(item, level, new GearWriteOptions { AnyLevel = true })`: a level whose base (the level without the unlocked
+  enhancements) lies outside the type's range; the base must still be 1 or more. Without `AnyLevel` such a level is
+  `OutOfRange`, as before. A level inside the range ends a kept one.
+- **Kept through saves and restarts.** `GearValuesResult.Kept` / `GearResult.Kept` say Kiln keeps the value: item data of
+  Kiln's own (owner `kiln-gear`, key `values`), so it follows the item through moves, saves, restarts and a restored backup
+  by item data's rules ([../modding/inventory.md](../modding/inventory.md)). After a load the game sets the level back into the
+  range and computes max durability again, and kiln.items' multipliers start empty; a pass of Kiln.Blocks about once a second
+  writes every kept value again wherever the item differs (also after a rarity change that made the game compute max
+  durability again). Item data recognises the item by the level as a load gives it back, so the record still finds it. The
+  pass starts only once a value was kept on this install (`<kiln>/data/kiln-gear/used`), so a server that never uses this
+  does not start item data for it. `Kept` false: item data is off, and the value lasts until the server world closes.
+- **What players see.** Every value acts on the server for everyone. The game's tooltip computes damage and armour from the
+  item type on each player's own game, so a vanilla client shows the type's numbers; on Kiln clients with the tooltip values
+  on (`ui.tooltip.values`, [ui.md](ui.md)) Kiln shows the item's main number times its multiplier (the value synced to
+  players near the item). The level and the durability bar come from the game's own replicated components: every client
+  should show them; not yet seen in a real game.
+- Test kit: the fake kiln.items keeps the multipliers (no damage or armour is computed) and writes levels and max
+  durability with kiln.items' rules; the keeping is Kiln.Blocks' (a mod's test registers no keeper unless Kiln.Blocks
+  started).
+- Not confirmed in a real game (guided checks `equip-p7.power`, `equip-p7.armor`, `equip-p7.tooltip`, `equip-p7.reload`): the damage a player deals with a multiplied
+  weapon, the damage a player takes in multiplied armour, a Kiln client's scaled tooltip number and a vanilla client's
+  unchanged one, the level and durability bar after a load on both.
 
 ## Tool wear per debit (since 0.2.0-dev.28)
 `Items.SetToolWearPerDebit(tool, n)` (or `ToolBlock.WearPerDebit` in a block) sets what one of the game's wear debits

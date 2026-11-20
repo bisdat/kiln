@@ -133,6 +133,9 @@ public enum GearChanges
     /// <summary>The game was told to compute max durability again (<see cref="DurabilityRule.KeepRatio"/>,
     /// <see cref="DurabilityRule.Repair"/>); it does so in the next step.</summary>
     DurabilityRefresh = 8,
+
+    /// <summary>The max durability (<see cref="Items.SetDurabilityMax"/>).</summary>
+    DurabilityMax = 16,
 }
 
 /// <summary>What happens to an item's durability when its rarity, enhancements or level change.</summary>
@@ -168,6 +171,13 @@ public sealed record GearWriteOptions
 
     /// <summary>Say what would change, change nothing.</summary>
     public bool DryRun { get; init; }
+
+    /// <summary><see cref="Items.SetLevel"/> only: allow a level whose base (the level without the unlocked enhancements)
+    /// is outside the item type's level range. The game sets such a level back into the range when the world loads; Kiln
+    /// keeps it with the item and writes it again after each load (<see cref="GearResult.Kept"/>), as long as Kiln's item
+    /// data is on (<c>saves.instance_data</c>). The base must still be 1 or more. Default false: such a write ends
+    /// <see cref="GearStatus.OutOfRange"/>.</summary>
+    public bool AnyLevel { get; init; }
 }
 
 /// <summary>What wrote a gear change (<see cref="GearEvent.Source"/>).</summary>
@@ -209,6 +219,12 @@ public sealed record GearResult(
 {
     /// <summary>True when the write was made (a dry run: would be).</summary>
     public bool Ok => Status == GearStatus.Done;
+
+    /// <summary>A value the game does not keep through a load (a level outside the type's range with
+    /// <see cref="GearWriteOptions.AnyLevel"/>, a max durability from <see cref="Items.SetDurabilityMax"/>) is kept with the
+    /// item by Kiln, which writes it again after each load. False when nothing needed keeping, and when Kiln could not keep
+    /// it (item data off): the value then lasts until the world loads again.</summary>
+    public bool Kept { get; init; }
 
     /// <summary>Why it did not happen; null when <see cref="Ok"/>.</summary>
     public string? Reason => Ok ? null : Message.Length > 0 ? Message : Status.ToString();

@@ -30,7 +30,7 @@ public sealed unsafe class GearTests
         Assert.Equal(44, sizeof(ItemsNative.GearState));
         Assert.Equal(296, sizeof(ItemsNative.GearResult));
         Assert.Equal(192, sizeof(ItemsNative.GearStatus));
-        Assert.Equal(344, sizeof(ItemsNative.TableV8));  // native items.cpp: sizeof(KilnItemsApi) == 344 (gear, P5's rarity_rolls/roll_status, then P3's gear_upgrade)
+        Assert.Equal(368, sizeof(ItemsNative.TableV8));  // native items.cpp: sizeof(KilnItemsApi) == 368 (gear, P5's rarity_rolls/roll_status, P3's gear_upgrade, then P7's scales)
         Assert.Equal((int)ItemsNative.V8GearEnd, (int)System.Runtime.InteropServices.Marshal.OffsetOf<ItemsNative.TableV8>(nameof(ItemsNative.TableV8.RarityRolls)));  // the gear functions end at 320
         Assert.Equal(296, (int)System.Runtime.InteropServices.Marshal.OffsetOf<ItemsNative.TableV8>(nameof(ItemsNative.TableV8.GearWrite)));  // offsetof(KilnItemsApi, gear_write) == 296
     }

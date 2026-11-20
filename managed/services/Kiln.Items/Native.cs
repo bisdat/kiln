@@ -627,9 +627,13 @@ internal static unsafe class ItemsNative
     // KilnItemsGearStatus; kiln_items.h "gear") ----
     public const uint GearAvailable = 0x01, GearUnlocked = 0x02, GearLevel = 0x04, GearForceSlot = 0x08, GearDurabilityRefresh = 0x10,
         GearDurabilityRepair = 0x20, GearDryRun = 0x40, GearNotEquipped = 0x80;
+    // package P7: a level outside the type's range, max durability (kiln_items.h)
+    public const uint GearAnyLevel = 0x200, GearDurabilityMax = 0x400;
+    public const int GearMaxDurability = 1000000;
     public const int GearDone = 0, GearStale = 1, GearNotGear = 2, GearNoSlot = 3, GearOutOfRange = 4, GearEquipped = 5, GearUnavailableStatus = 6,
         GearDropped = 7, GearRefused = 8;
-    public const uint GearChangedPerks = 0x01, GearChangedLevel = 0x02, GearChangedDurability = 0x04, GearChangedState = 0x08;
+    public const uint GearChangedPerks = 0x01, GearChangedLevel = 0x02, GearChangedDurability = 0x04, GearChangedState = 0x08,
+        GearChangedDurabilityMax = 0x10;
     public const uint GearHasPerks = 0x01, GearHasLevel = 0x02, GearHasDurability = 0x04, GearEquippedNow = 0x08, GearDurabilityInit = 0x10;
 
     /// <summary><c>KilnItemsGearRequest</c>, 40 bytes.</summary>
@@ -645,7 +649,8 @@ internal static unsafe class ItemsNative
         public byte Unlocked;
         public ushort Reserved0;
         public uint Level;
-        public uint R0, R1, R2;
+        public int DurabilityMax;  // package P7 (was reserved)
+        public uint R0, R1;
     }
 
     /// <summary><c>KilnItemsGearState</c>, 44 bytes.</summary>
@@ -754,6 +759,38 @@ internal static unsafe class ItemsNative
     /// <summary>Where gear_upgrade ends: a table this long has upgrades (package P3).</summary>
     public const uint V8UpgradeEnd = 344;
 
+    /// <summary>Where the scales end (package P7): a table this long has gear_scale, gear_scale_read and scale_status.</summary>
+    public const uint V8ScaleEnd = 368;
+
+    // ---- v8 (package P7): power and armour scales (KilnItemsGearScale, KilnItemsScaleStatus) ----
+    public const uint ScalePower = 0x01, ScaleArmor = 0x02;
+    public const float ScaleMin = 0.01f, ScaleMax = 100f;
+    public const int ScaleCapacity = 8192;
+
+    /// <summary><c>KilnItemsGearScale</c>, 32 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearScale
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Entity;
+        public uint Stamp;
+        public float Power;
+        public float Armor;
+        public uint R0, R1;
+    }
+
+    /// <summary><c>KilnItemsScaleStatus</c>, 208 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ScaleStatus
+    {
+        public uint Size;
+        public byte Power, Armor, PowerHooked, ArmorHooked;
+        public uint Entries, Capacity, Reserved;
+        public ulong Powered, Armored, Faults;
+        public fixed byte Detail[160];
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct TableV8
     {
@@ -764,6 +801,10 @@ internal static unsafe class ItemsNative
         public delegate* unmanaged[Cdecl]<ulong, RarityRoll*, uint, uint, int> RarityRolls;
         public delegate* unmanaged[Cdecl]<RollStatus*, int> RollStatusOf;
         public delegate* unmanaged[Cdecl]<ulong, UpgradeRequest*, delegate* unmanaged[Cdecl]<UpgradeResult*, void*, void>, void*, ulong*, int> GearUpgrade;
+        // package P7 (368 bytes)
+        public delegate* unmanaged[Cdecl]<GearScale*, int> GearScaleSet;
+        public delegate* unmanaged[Cdecl]<uint, uint, GearScale*, int> GearScaleRead;
+        public delegate* unmanaged[Cdecl]<ScaleStatus*, int> ScaleStatusOf;
     }
 
     /// <summary>True when a table of <paramref name="size"/> bytes has the v6 member that ends at <paramref name="end"/>.</summary>

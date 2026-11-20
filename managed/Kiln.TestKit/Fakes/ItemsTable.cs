@@ -128,11 +128,14 @@ internal static unsafe class ItemsAbi
     // ---- v8: gear (kiln_items.h "gear") ----
     public const uint GearAvailable = 0x01, GearUnlocked = 0x02, GearLevel = 0x04, GearForceSlot = 0x08, GearDurabilityRefresh = 0x10,
         GearDurabilityRepair = 0x20, GearDryRun = 0x40, GearNotEquipped = 0x80;
-    public const uint GearOps = GearAvailable | GearUnlocked | GearLevel | GearDurabilityRefresh | GearDurabilityRepair;
-    public const uint GearFlags = GearOps | GearForceSlot | GearDryRun | GearNotEquipped;
+    public const uint GearAnyLevel = 0x200, GearDurabilityMax = 0x400;  // package P7
+    public const int GearMaxDurability = 1000000;
+    public const uint GearOps = GearAvailable | GearUnlocked | GearLevel | GearDurabilityRefresh | GearDurabilityRepair | GearDurabilityMax;
+    public const uint GearFlags = GearOps | GearForceSlot | GearDryRun | GearNotEquipped | GearAnyLevel;
     public const int GearDone = 0, GearStale = 1, GearNotGear = 2, GearNoSlot = 3, GearOutOfRange = 4, GearEquipped = 5, GearUnavailable = 6,
         GearDropped = 7, GearRefused = 8;
-    public const uint GearChangedPerks = 0x01, GearChangedLevel = 0x02, GearChangedDurability = 0x04, GearChangedState = 0x08;
+    public const uint GearChangedPerks = 0x01, GearChangedLevel = 0x02, GearChangedDurability = 0x04, GearChangedState = 0x08,
+        GearChangedDurabilityMax = 0x10;
     public const uint GearHasPerks = 0x01, GearHasLevel = 0x02, GearHasDurability = 0x04, GearEquippedNow = 0x08, GearDurabilityInit = 0x10;
     public const ushort StateDurabilityInitialized = 0x02, StateHasLevel = 0x10, StateHasGemSlot = 0x100;  // ItemStateFlag masks
 
@@ -142,7 +145,31 @@ internal static unsafe class ItemsAbi
         public uint Size, Flags, Entity, Stamp, Item;
         public byte Available, Unlocked;
         public ushort Reserved0;
-        public uint Level, R0, R1, R2;
+        public uint Level;
+        public int DurabilityMax;  // package P7 (was reserved)
+        public uint R0, R1;
+    }
+
+    // ---- v8 (package P7): power and armour scales (kiln_items.h "power and armour scales") ----
+    public const uint ScalePower = 0x01, ScaleArmor = 0x02;
+    public const int ScaleCapacity = 8192;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearScale
+    {
+        public uint Size, Flags, Entity, Stamp;
+        public float Power, Armor;
+        public uint R0, R1;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ScaleStatus
+    {
+        public uint Size;
+        public byte Power, Armor, PowerHooked, ArmorHooked;
+        public uint Entries, Capacity, Reserved;
+        public ulong Powered, Armored, Faults;
+        public fixed byte Detail[MessageMax];
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -258,6 +285,10 @@ internal static unsafe class ItemsAbi
         public void* RollStatus;
         // v8 (package P3): gear_upgrade
         public delegate* unmanaged[Cdecl]<ulong, UpgradeRequest*, delegate* unmanaged[Cdecl]<UpgradeResult*, void*, void>, void*, ulong*, int> GearUpgrade;
+        // v8 (package P7): gear_scale, gear_scale_read, scale_status (the table without the game's hooks)
+        public delegate* unmanaged[Cdecl]<GearScale*, int> GearScaleSet;
+        public delegate* unmanaged[Cdecl]<uint, uint, GearScale*, int> GearScaleRead;
+        public delegate* unmanaged[Cdecl]<ScaleStatus*, int> ScaleStatusOf;
     }
 
     /// <summary>The game's ItemId: FNV-1a-32 over the item GUID's 16 bytes.</summary>
@@ -317,6 +348,9 @@ internal static unsafe class ItemsTable
         full->GearRead = &GearRead;
         full->GetGearStatus = &GearStatusOf;
         full->GearUpgrade = &GearUpgrade;  // package P3
+        full->GearScaleSet = &GearScaleSet;  // package P7
+        full->GearScaleRead = &GearScaleRead;
+        full->ScaleStatusOf = &ScaleStatusOf;
         _table = t;
         return (nint)t;
     }
@@ -438,6 +472,53 @@ internal static unsafe class ItemsTable
             var s = new ItemsAbi.GearStatus { Size = size };
             if (Fake is { } f) f.FillGear(ref s);
             else SpawnAbi.CopyText("no server runs in this process now (the test kit's harness is gone)", s.Detail, ItemsAbi.MessageMax);
+            *out_ = s;
+            return FakeTables.Ok;
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
+    // ---- v8 (package P7): the scales ----
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int GearScaleSet(ItemsAbi.GearScale* s)
+    {
+        try
+        {
+            if (s == null || !ItemsFake.ScaleRequestValid(*s)) return FakeTables.InvalidArgument;
+            return Fake is { } f ? f.SetScale(*s) : FakeTables.Unavailable;
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int GearScaleRead(uint entity, uint stamp, ItemsAbi.GearScale* out_)
+    {
+        try
+        {
+            if (out_ == null || entity == 0) return FakeTables.InvalidArgument;
+            *out_ = new ItemsAbi.GearScale { Size = (uint)sizeof(ItemsAbi.GearScale) };
+            return Fake is { } f ? f.ReadScale(entity, stamp, out_) : FakeTables.Unavailable;
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int ScaleStatusOf(ItemsAbi.ScaleStatus* out_)
+    {
+        try
+        {
+            if (out_ == null || out_->Size < (uint)sizeof(ItemsAbi.ScaleStatus)) return FakeTables.InvalidArgument;
+            var s = new ItemsAbi.ScaleStatus { Size = out_->Size, Capacity = ItemsAbi.ScaleCapacity };
+            if (Fake is { } f) f.FillScale(ref s);
             *out_ = s;
             return FakeTables.Ok;
         }
@@ -669,7 +750,7 @@ internal sealed unsafe partial class ItemsFake
     // The sigdb features of the v1 table the kit models, and those of the later tables it does not.
     public const string TransactionFeature = "items.transaction", ReadFeature = "items.read", ProgramFeature = "items.program";
 
-    public static readonly string[] Features = [TransactionFeature, ReadFeature, ProgramFeature, GearFeature];
+    public static readonly string[] Features = [TransactionFeature, ReadFeature, ProgramFeature, GearFeature, PowerFeature, ArmorFeature];
 
     public static readonly string[] OfflineRows = ["items.fuel", "items.move", "items.names", "items.transfer", "items.moves", "items.instances",
         "items.equip", "items.equip_sets", "items.pide_options", "items.result_peek", "items.recipe"];
@@ -762,6 +843,7 @@ internal sealed unsafe partial class ItemsFake
             _catalog = [];
             _gear.Clear();
             _gearPending.Clear();
+            _scales.Clear();
         }
     }
 
