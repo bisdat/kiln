@@ -3787,15 +3787,22 @@
     },
     "uiAction": {
       "type": "object",
-      "description": "What a button or a key does: exactly one of command, toggle, set, castAbility, applyEffect, openWindow, closeWindow, toast. Runs on the player's game, never on a dedicated server.",
+      "description": "What a button or a key does: exactly one of command, toggle, set, castAbility, applyEffect, openWindow, closeWindow, toast (a command may add commandTarget). Runs on the player's game, never on a dedicated server.",
       "minProperties": 1,
-      "maxProperties": 1,
+      "dependentRequired": { "commandTarget": ["command"] },
+      "if": { "required": ["commandTarget"] },
+      "then": { "maxProperties": 2 },
+      "else": { "maxProperties": 1 },
       "properties": {
         "command": {
           "type": "string",
           "minLength": 1,
           "maxLength": 256,
-          "description": "A command line of this game's command registry, as the console runs it: as the host's own character when this game hosts the world, else as the console. It does not reach a server this game joined."
+          "description": "A command line of this game's command registry, as the console runs it: as the host's own character when this game hosts the world, else as the console. It does not reach a server this game joined, unless commandTarget is server."
+        },
+        "commandTarget": {
+          "enum": ["local", "server"],
+          "description": "Where the command runs: local (the default) as above, or server: on the server this game joined (or hosts), as this game's player there, with that player's rights. Only with command. A server without Kiln's kiln:ui-command runs nothing (a toast says so)."
         },
         "toggle": {
           "$ref": "#/$defs/uiBind",

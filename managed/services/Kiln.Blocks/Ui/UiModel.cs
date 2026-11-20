@@ -177,8 +177,11 @@ public sealed record ButtonRow : UiRow
 public sealed record UiAction
 {
     /// <summary>A command line of this game's command registry, as the console runs it ("reload", "/mymod-reset 5"): as the host's own character when this game hosts the world, else
-    /// as the console. It does not reach a server this game joined: use <see cref="CastAbility"/> for what the server must do.</summary>
+    /// as the console. It does not reach a server this game joined, unless <see cref="CommandTarget"/> is <see cref="UiCommandTarget.Server"/>.</summary>
     public string? Command { get; init; }
+    /// <summary>Where <see cref="Command"/> runs: <see cref="UiCommandTarget.Local"/> (null, the default) as above, or <see cref="UiCommandTarget.Server"/>: on the server this
+    /// game joined (or hosts), as this game's player there, with that player's rights (<see cref="BlockUi.ExecuteOnServer"/>; the outcome is a toast). Only with a command.</summary>
+    public UiCommandTarget? CommandTarget { get; init; }
     /// <summary>Flips a true/false config entry: <c>"config.clock.show"</c>.</summary>
     public string? Toggle { get; init; }
     /// <summary>Sets a config entry to a value.</summary>

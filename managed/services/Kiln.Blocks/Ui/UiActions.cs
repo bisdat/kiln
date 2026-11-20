@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // What a button or a key does, and how a toggle or a slider writes a config. A button is clicked on the render thread and a key pressed on the window thread; neither may touch
 // the game's world or write a config file, so what needs the tick thread is queued for UiRuntime.Pump (the service tick: the world's step in a world, the UI frame in a menu).
-//   command       Commands.Execute on the tick thread, as the console folder runs a line (the host's own character on a hosting game, else the console)
+//   command       Commands.Execute on the tick thread, as the console folder runs a line (the host's own character on a hosting game, else the console);
+//                 commandTarget server: a request on kiln:ui-command to the joined server, from any thread (UiCommandClient), its outcome a toast
 //   toggle, set   an edit: shown at once, written to the config on the tick thread (a slider waits until it rests)
 //   castAbility   the request a key of an ability makes: a message to the server, from any thread
 //   open, close   the window's surface, from any thread
@@ -30,6 +31,10 @@ internal static class UiActions
         {
             switch (plan)
             {
+                case CommandPlan { Target: UiCommandTarget.Server } c:
+                    // the joined server, as this game's player: never this game's console (no hello = nothing sent, a toast)
+                    UiCommandClient.RunFromAction(c.Line, mod, lifetime);
+                    break;
                 case CommandPlan c:
                     Enqueue(() => RunCommand(c.Line, mod), lifetime);
                     break;
