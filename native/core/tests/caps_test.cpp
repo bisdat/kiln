@@ -136,6 +136,7 @@ bool init_no() { return false; }
 }  // namespace
 KILN_SERVICE(fakeok, "kiln.fakeok", 3, &kFakeTable, &init_yes);
 KILN_SERVICE(fakeno, "kiln.fakeno", 2, &kFakeTable, &init_no);
+KILN_SERVICE(fakehooks, "kiln.hooks", 2, &kFakeTable, &init_yes);
 
 namespace {
 namespace caps = kiln::caps;
@@ -563,6 +564,34 @@ void core_rows(const std::filesystem::path& dir) {
     for (const char* f : {"items.fuel", "net.kick", "tick", "tick.wait_jobs", "world.lifecycle"})
         all = all && is(f, A, KILN_CAP_REASON_NONE) && get(f).source == "sigdb";
     CHECK(all, "features: a resolver run with every symbol found gives every feature available, source sigdb");
+    CHECK(is("hooks.read_original", A, 0) && is("hooks.code_state", A, 0),
+          "hooks inspection: verified file and running service publish both static rows");
+    const bool from_disk = sigdb::code().disk;
+    sigdb::g_code.view.disk = false;
+    caps::core_rows(true, true, "");
+    CHECK(is("hooks.read_original", U, KILN_CAP_REASON_SYMBOL_MISSING) && is("hooks.code_state", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
+              get("hooks.code_state").text == "verified executable file code unavailable; live fallback is not original code",
+          "hooks inspection: on sigdb's live-code fallback both rows are unavailable, symbol-missing (never faulted)");
+    sigdb::g_code.view.disk = from_disk;
+    kiln_service_fakehooks.available = false;
+    caps::core_rows(true, true, "");
+    CHECK(is("hooks.read_original", U, KILN_CAP_REASON_SERVICE_MISSING), "hooks inspection: missing service refuses");
+    kiln_service_fakehooks.available = true;
+    caps::core_rows(false, false, "test idle");
+    CHECK(is("hooks.code_state", U, KILN_CAP_REASON_POLICY), "hooks inspection: safe idle policy refuses");
+    static const kiln::gates::Gate inspection_gate[] = {
+        {"hooks.code_state", "hooks-code", kiln::gates::kBoth}, {nullptr, nullptr, 0}};
+    kiln::gates::use_list_for_tests(inspection_gate);
+    kiln::gates::configure(KILN_SIDE_SERVER, false, {});
+    reset();
+    caps::core_rows(true, true, "");
+    CHECK(is("hooks.code_state", U, KILN_CAP_REASON_POLICY) && is("hooks.read_original", A, 0),
+          "hooks inspection: central hold overrides support without holding the other member");
+    static const kiln::gates::Gate no_inspection_gate[] = {{nullptr, nullptr, 0}};
+    kiln::gates::use_list_for_tests(no_inspection_gate);
+    kiln::gates::configure(KILN_SIDE_SERVER, false, {});
+    reset();
+    caps::core_rows(true, true, "");
     // kiln.tasks' pool: tasks.pool follows the pool's health (read at every registry call, outside the pool's locks)
     {
         static std::atomic<int> health{0};
