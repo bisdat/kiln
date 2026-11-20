@@ -829,6 +829,7 @@ What happens when a player uses a placed thing. A field left out is what its sta
 | `prompt` | string |  | A prompt of your own instead of verb: the same text in every language. min length 1 |
 | `requires` | [requires](#requires) |  |  |
 | `toggle` | object |  | Two states, and each use flips it, as a door's: the guest's sequence flips it. A prompt left out is its starter's. |
+| `upgrade` | [upgradeAction](#upgradeaction) |  | The use raises an item's rarity by one step of a rarity upgrade (rarityUpgrades), on the server once the game has accepted it: the item in the player's hand, or the one they pick in a window on a Kiln player's game. Without plays the player plays the hand on it (toggle), which replaces what the starter's own use did. |
 | `verb` | `"open"` \| `"close"` \| `"use"` \| `"activate"` \| `"deactivate"` \| `"flip"` \| `"read"` \| `"sit"` \| `"sleep"` \| `"search"` \| `"inspect"` \| `"talk"` \| `"craft"` \| `"collect"` \| `"harvest"` \| `"drink"` |  | The prompt's word: one of the game's, so every language has it. |
 
 ## interactionRef
@@ -1884,6 +1885,16 @@ Type: string or object
 Shown only while this is true: a name (game.inGame, config.clock.show: true, not 0, not empty), !name, or name == value with == != < <= > >=, joined with &&. Examples: "game.inGame", "!game.inGame", "game.screen == InGame", "game.fps < 30 && config.hud.on". min length 1
 
 Type: string
+
+## upgradeAction
+
+A rarity upgrade as what a use does (UpgradeAction): one step of a rarity upgrade rule, paid by the player, on the server.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `range` | number |  | How far from it, in metres, a player may stand when they pick an item in the choose window (default 6). min 1 max 64 |
+| `rule` | string | yes | The rarity upgrade it runs: a rarityUpgrades block of this mod by name, or "other-mod:name". min length 1 Pattern `\S`. |
+| `target` | `"held"` \| `"choose"` |  | held (default): the item in the player's hand, for every player; choose: a window lists the player's gear with each next step's cost and chance (Kiln players; others get held). |
 
 ## upgradeStep
 

@@ -720,6 +720,8 @@ internal static partial class KilnApis
         "M:Kiln.Time.get_WeatherPhenomena", // Time.WeatherPhenomena.get: Services.RequireTickThread
         "M:Kiln.Time.set_OfDay(System.Double)", // Time.OfDay.set: via Time.Set(double, TimeSetMode)
         "M:Kiln.ToolWearRule.Dispose", // ToolWearRule.Dispose(): via Items.ToolWear.Remove(ToolWearRule, bool)
+        "M:Kiln.UpgradeStation.Offer(Kiln.EntityId,Kiln.UpgradeAction,System.String@,Kiln.OfferOptions)", // UpgradeStation.Offer(EntityId, UpgradeAction, out string, OfferOptions?): Services.RequireTickThread
+        "M:Kiln.UpgradeStation.Use(Kiln.EntityId,Kiln.EntityId,Kiln.UpgradeAction)", // UpgradeStation.Use(EntityId, EntityId, UpgradeAction): Services.RequireTickThread
         "M:Kiln.Vfx.PlayAt(Kiln.VfxId,Kiln.WorldPosition,System.Nullable{System.Numerics.Quaternion},System.Single,Kiln.VfxParams,System.Nullable{System.TimeSpan},System.Single)", // Vfx.PlayAt(VfxId, WorldPosition, Quaternion?, float, VfxParams?, TimeSpan?, float): via VfxRelay.Play(byte, Guid, WorldPosition, Quaternion?, float, EntityId, Slot, Offset, long, VfxParams?, float, EntityId)
         "M:Kiln.Vfx.PlayFor(Kiln.EntityId,Kiln.VfxId,Kiln.WorldPosition,Kiln.VfxParams,System.Nullable{System.TimeSpan})", // Vfx.PlayFor(EntityId, VfxId, WorldPosition, VfxParams?, TimeSpan?): via VfxRelay.Play(byte, Guid, WorldPosition, Quaternion?, float, EntityId, Slot, Offset, long, VfxParams?, float, EntityId)
         "M:Kiln.Vfx.PlayOn(Kiln.VfxId,Kiln.EntityId,Kiln.Slot,Kiln.Offset,Kiln.VfxParams,System.Nullable{System.TimeSpan},System.Single)", // Vfx.PlayOn(VfxId, EntityId, Slot, Offset, VfxParams?, TimeSpan?, float): Services.RequireTickThread
@@ -888,6 +890,7 @@ internal static partial class KilnApis
         "P:Kiln.Ui.ItemIconsAvailable=kiln.assets", // via Kiln.ResourceStore.HasTextureRgba
         "P:Kiln.UiWheel.Available=kiln.ui", // UiNative.T2 != null: Services.Get("kiln.ui")
         "P:Kiln.UiWheel.IsAnyOpen=kiln.ui", // t != null: Services.Get("kiln.ui")
+        "P:Kiln.UpgradeStation.Available=blocks.upgrade_station", // Is("blocks.upgrade_station")
         "P:Kiln.Villagers.Available=kiln.creatures", // t != null: Services.Get("kiln.creatures")
         "P:Kiln.World.Available=kiln.world", // WorldNative.T != null: Services.Get("kiln.world")
         "P:Kiln.World.SupportsTrackedWrites=world.tracked_writes", // Is("world.tracked_writes")

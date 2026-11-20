@@ -148,12 +148,17 @@ internal sealed record CraftStockFillAnswers(FillAnswer[] Rows)
     }
 }
 
-/// <summary>Started at the first service tick (ServiceTick.AutoStart), so the channel is there before anyone joins. It
+/// <summary>Started at the first service tick (ServiceTick.AutoStart), so the channels are there before anyone joins. It
 /// registers the channel and, on a client, watches the screen; nothing else runs until a Kiln client opens a crafting
-/// menu (Kiln.Blocks' data tick does not start here).</summary>
+/// menu (Kiln.Blocks' data tick does not start here). Since 0.2.0-dev.29.19 also the channel kiln:upgrades (an upgrade
+/// station's window, UpgradeStations), which does nothing until a station sends one.</summary>
 internal static class CraftStockStartup
 {
-    static CraftStockStartup() => CraftStock.Start();
+    static CraftStockStartup()
+    {
+        CraftStock.Start();
+        UpgradeNet.Start();
+    }
 }
 
 internal static class CraftStock

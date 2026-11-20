@@ -42,3 +42,29 @@ override Kiln.RarityUpgradeBlock.ToString() -> string!
 static Kiln.Blocks.Define(string! name, Kiln.RarityUpgradeBlock! block) -> Kiln.BlockHandle<Kiln.RarityUpgradeBlock!>!
 static Kiln.RarityUpgradeBlock.operator !=(Kiln.RarityUpgradeBlock? left, Kiln.RarityUpgradeBlock? right) -> bool
 static Kiln.RarityUpgradeBlock.operator ==(Kiln.RarityUpgradeBlock? left, Kiln.RarityUpgradeBlock? right) -> bool
+Kiln.InteractBlock.Upgrade.get -> Kiln.UpgradeAction?
+Kiln.InteractBlock.Upgrade.init -> void
+Kiln.UpgradeAction
+Kiln.UpgradeAction.<Clone>$() -> Kiln.UpgradeAction!
+Kiln.UpgradeAction.Equals(Kiln.UpgradeAction? other) -> bool
+Kiln.UpgradeAction.Range.get -> double
+Kiln.UpgradeAction.Range.init -> void
+Kiln.UpgradeAction.Rule.get -> string!
+Kiln.UpgradeAction.Rule.init -> void
+Kiln.UpgradeAction.Target.get -> Kiln.UpgradeTarget
+Kiln.UpgradeAction.Target.init -> void
+Kiln.UpgradeAction.UpgradeAction() -> void
+Kiln.UpgradeStation
+Kiln.UpgradeTarget
+Kiln.UpgradeTarget.Choose = 1 -> Kiln.UpgradeTarget
+Kiln.UpgradeTarget.Held = 0 -> Kiln.UpgradeTarget
+const Kiln.UpgradeAction.DefaultRange = 6 -> double
+const Kiln.UpgradeStation.Capability = "blocks.upgrade_station" -> string!
+override Kiln.UpgradeAction.Equals(object? obj) -> bool
+override Kiln.UpgradeAction.GetHashCode() -> int
+override Kiln.UpgradeAction.ToString() -> string!
+static Kiln.UpgradeAction.operator !=(Kiln.UpgradeAction? left, Kiln.UpgradeAction? right) -> bool
+static Kiln.UpgradeAction.operator ==(Kiln.UpgradeAction? left, Kiln.UpgradeAction? right) -> bool
+static Kiln.UpgradeStation.Available.get -> bool
+static Kiln.UpgradeStation.Offer(Kiln.EntityId entity, Kiln.UpgradeAction! action, out string! reason, Kiln.OfferOptions? options = null) -> bool
+static Kiln.UpgradeStation.Use(Kiln.EntityId player, Kiln.EntityId station, Kiln.UpgradeAction! action) -> System.Threading.Tasks.Task<Kiln.UpgradeResult?>!

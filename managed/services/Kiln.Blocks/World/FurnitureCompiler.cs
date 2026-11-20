@@ -246,8 +246,15 @@ internal static partial class Compiler
         if (i.OnRefused is { Count: > 0 } && i.Requires is not { When: { Count: > 0 } } and not { Unless: { Count: > 0 } } and not { If: not null })
             throw new BlockError(ctx.Block, $"{path}onRefused", "only Kiln's checks (requires.when, unless, if) can refuse with effects: the game's own lock refuses in the player's game, where nothing runs");
         if (i.Verb != null && i.Prompt != null) throw new BlockError(ctx.Block, $"{path}prompt", "a prompt of your own or the game's verb: not both");
-        if (i.Verb == null && i.Prompt == null && i.Plays == null && i.Toggle == null && i.Requires == null && i.Effects is not { Count: > 0 })
-            throw new BlockError(ctx.Block, path.TrimEnd('.'), "an interaction that changes nothing: give it verb, prompt, plays, toggle, requires or effects");
+        if (i.Upgrade is { } up)
+        {
+            if (string.IsNullOrWhiteSpace(up.Rule)) throw new BlockError(ctx.Block, $"{path}upgrade.rule", "names a rarity upgrade (rarityUpgrades): a block of this mod or \"other-mod:name\"");
+            if (!Enum.IsDefined(up.Target)) throw new BlockError(ctx.Block, $"{path}upgrade.target", $"{(int)up.Target} is not held or choose");
+            if (!double.IsFinite(up.Range) || up.Range is < 1 or > 64) throw new BlockError(ctx.Block, $"{path}upgrade.range", $"{up.Range} is outside 1 to 64 metres");
+            if (i.Toggle != null) throw new BlockError(ctx.Block, $"{path}upgrade", "an upgrade and a toggle: each use would flip it too; use one interaction for each");
+        }
+        if (i.Verb == null && i.Prompt == null && i.Plays == null && i.Toggle == null && i.Requires == null && i.Effects is not { Count: > 0 } && i.Upgrade == null)
+            throw new BlockError(ctx.Block, path.TrimEnd('.'), "an interaction that changes nothing: give it verb, prompt, plays, toggle, requires, effects or upgrade");
     }
 
     /// <summary>What a placed thing does when used, on its template; and what Kiln does on the server.</summary>
@@ -271,6 +278,11 @@ internal static partial class Compiler
         {
             p.Fields["InteractionOfferRuntime.defaultSequence"] = plays.Id;
             json["plays"] = plays.Sequence.ToString();
+        }
+        else if (i.Upgrade != null)
+        {
+            // the hand on it: an upgrade's use opens nothing of the game's (a station's menu would open over the toast or the window)
+            p.Fields["InteractionOfferRuntime.defaultSequence"] = InteractPlay.Toggle.Id;
         }
         if (i.Toggle is { } t)
         {
@@ -350,15 +362,28 @@ internal static partial class Compiler
             low.Program(program, $"{key}.refused", blob, listing);
             refused = program;
         }
+        UpgradeStations.Station? upgrade = null;
+        if (i.Upgrade is { } up)
+        {
+            upgrade = UpgradeStations.StationOf(up, ctx.Mod.Id, ctx.Block, i.Prompt ?? "Rarity upgrade", ModContext.CurrentMod);
+            json["upgrade"] = new JsonObject { ["rule"] = upgrade.Rule, ["target"] = up.Target == UpgradeTarget.Choose ? "choose" : "held", ["range"] = up.Range };
+            // the rule is a block too, maybe of another mod or of a data file compiled later: looked up once the mods' pass is over
+            var (rule, block, mod) = (upgrade.Rule, ctx.Block, ctx.Mod);
+            low.AfterCommit(() => BlockRuntime.AddReady(mod, problem =>
+            {
+                if (ItemUpgrades.Find(rule, null) == null)
+                    problem($"block {block}, {path}upgrade.rule: no loaded mod defines the rarity upgrade \"{rule}\" (rarityUpgrades)");
+            }));
+        }
         low.Json["interact"] = json;
-        if (effects != null || refused != null || when != null || unless != null || i.Requires?.If != null)
+        if (effects != null || refused != null || when != null || unless != null || i.Requires?.If != null || upgrade != null)
         {
             var guid = p.Guid;
-            var entry = new InteractRuntime.Entry(ctx.Mod.Id, ctx.Block, effects, refused, when, unless, i.Requires?.If);
+            var entry = new InteractRuntime.Entry(ctx.Mod.Id, ctx.Block, effects, refused, when, unless, i.Requires?.If, upgrade);
             low.AfterCommit(() => InteractRuntime.Add(ctx.Mod, guid, entry));
         }
         // a look with no interaction of its own says what the player plays, or there is nothing to start
-        if (i.Plays == null && i.Toggle == null)
+        if (i.Plays == null && i.Toggle == null && i.Upgrade == null)
         {
             var (template, block, mod) = (p.Template, ctx.Block, ctx.Mod);
             low.AfterCommit(() => BlockRuntime.AddReady(mod, problem =>
@@ -370,7 +395,7 @@ internal static partial class Compiler
                     problem($"block {block}, {path.TrimEnd('.')}: {template} starts from a look with no interaction of its own: say what the player plays (plays), or start from a game item that has one");
             }));
         }
-        if (i.Toggle != null || i.Verb != null || i.Prompt != null || i.Plays != null || i.Requires is { Item: not null } or { Time: not null })
+        if (i.Toggle != null || i.Verb != null || i.Prompt != null || i.Plays != null || i.Upgrade != null || i.Requires is { Item: not null } or { Time: not null })
             Components(p, "InteractionOfferRuntime", "ClientInteractionOffer", "CheckPlayerInRange");
     }
 }

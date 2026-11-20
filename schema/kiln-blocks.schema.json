@@ -1965,6 +1965,10 @@
         "onRefused": {
           "$ref": "#/$defs/effects",
           "description": "What happens to the player when requires' when or unless refuses them."
+        },
+        "upgrade": {
+          "$ref": "#/$defs/upgradeAction",
+          "description": "The use raises an item's rarity by one step of a rarity upgrade (rarityUpgrades), on the server once the game has accepted it: the item in the player's hand, or the one they pick in a window on a Kiln player's game. Without plays the player plays the hand on it (toggle), which replaces what the starter's own use did."
         }
       },
       "additionalProperties": false
@@ -4343,6 +4347,17 @@
         "durability": { "enum": ["keepRatio", "keep", "repair"], "description": "What happens to durability (default keepRatio: the game computes max durability again at the new rarity, the share kept)." },
         "socket": { "enum": ["keep", "gameChance"], "description": "A gem socket: keep (default: as it is), or gameChance (a weapon without one rolls the game's chance at the new rarity; a won socket re-creates the item in its slot)." },
         "allowEmptySlot": { "type": "boolean", "description": "Upgrade into an enhancement slot the item's type has no perk for (default false: refused)." }
+      },
+      "additionalProperties": false
+    },
+    "upgradeAction": {
+      "type": "object",
+      "required": ["rule"],
+      "description": "A rarity upgrade as what a use does (UpgradeAction): one step of a rarity upgrade rule, paid by the player, on the server.",
+      "properties": {
+        "rule": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "The rarity upgrade it runs: a rarityUpgrades block of this mod by name, or \"other-mod:name\"." },
+        "target": { "enum": ["held", "choose"], "description": "held (default): the item in the player's hand, for every player; choose: a window lists the player's gear with each next step's cost and chance (Kiln players; others get held)." },
+        "range": { "type": "number", "minimum": 1, "maximum": 64, "description": "How far from it, in metres, a player may stand when they pick an item in the choose window (default 6)." }
       },
       "additionalProperties": false
     },
