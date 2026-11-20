@@ -2795,6 +2795,16 @@
       "summary": "Mods' own character values and richer UI, map markers, station tabs, cloth on models and a debugger for the game client; control over what the server sends each player, survivors and bases, and friendly NPCs with bodies and routines of their own.",
       "features": [
         {
+          "title": "Kiln registries: mods that outlast game updates",
+          "area": "api",
+          "text": "Mods and data packs add to, change and remove entries in Kiln's own registries (items, recipes, loot, creatures, abilities and more) instead of touching the game's internals. Kiln translates them to the game, so after an Enshrouded update only Kiln needs an update, not every mod."
+        },
+        {
+          "title": "One data stage for all mods",
+          "area": "api",
+          "text": "Kiln reads the game's data once at start, every mod's changes apply on top in one ordered pass with conflicts shown in one place, and the result is ready before the game reads it: no per-start limits, and registries are complete from a mod's first line."
+        },
+        {
           "title": "Mods' own character values",
           "text": "Mods can give characters their own counters, currencies and experience with levels, saved with the character.",
           "area": "content"
