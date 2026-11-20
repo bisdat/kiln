@@ -202,6 +202,23 @@ check `header.size` through the member and that its pointer is non-null). Player
 - `graphics_set(&KilnUiGraphics)` (48 bytes): the player's settings. Kiln.Ui's call only, from kiln.json "graphics" and
   the Kiln menu's Graphics tab; a native plugin's is refused (`KILN_ERR_UNAVAILABLE`): mods never choose them.
 
+## Chat completion's slot (internal, GitHub issue 44)
+
+One slot after `graphics_status`: `chat_completion` at byte offset 1032 (the table is 1040 bytes). It is Kiln.Ui's
+transport for Tab completion in the game's chat ([chat-history.md](../chat-history.md#tab-completion)), **not** an API:
+a call from a native plugin is refused (`KILN_ERR_UNAVAILABLE`), and `KilnUiChatCompletion`'s layout (576 bytes) may
+change with Kiln.Ui. It answers only while `ui.chatCompletion` is on and the sigdb feature `chat.ui.completion`
+resolved. The game's UI thread owns every game read and the replace; the render thread only gets copies:
+- operation 1: a snapshot of the focused HUD or Social chat field (the line, the cursor, the field and a revision that
+  changes with every edit, its rectangle in screen pixels) and one queued key action (3 Tab, 4 Shift+Tab, 5 Up, 6 Down,
+  7 Escape);
+- operation 2: whether there are suggestions and whether the list is active, which decides what the window procedure
+  takes (Tab only with suggestions; Up, Down and Escape only with the list active). Turning them on names the
+  snapshot's field and revision and is refused for a stale one;
+- operation 3: one replace of the whole line, applied by the UI thread with `EditSetText` only when the field, the
+  revision and the expected text still match.
+Game evidence: [docs/re/chat-input.md](../../re/chat-input.md#tab-completion-cursor-node-and-rectangle).
+
 ## The overlay's drawing off: kiln.json and a session that turned it off (0.2.0-dev.29.18)
 
 No table change. Player side: [ui.md](../ui.md#frame-generation-mods-and-drawing-off).

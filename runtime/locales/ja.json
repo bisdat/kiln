@@ -1,4 +1,10 @@
 {
+  "chat": {
+    "completion": {
+      "title": "コマンド候補",
+      "hint": "Tab: 補完 · Esc: 閉じる"
+    }
+  },
   "language": {
     "name": "日本語"
   },

@@ -94,6 +94,9 @@ loads it with one warning per mod, `"local"` does not load it, `"any"` loads it 
 kiln.assets itself, with the same side sections.
 `"ui": {"chatHistory": true}`: Up/Down history in the game's chat field ([chat-history.md](chat-history.md)); off by
 default, read by kiln.ui at start (top level only), shown in the launcher's Settings.
+`"ui": {"chatCompletion": true}`: Tab completion of Kiln commands in the game's chat
+([chat-history.md](chat-history.md#tab-completion)); off by default, needs Kiln on the server, read by kiln.ui at start
+(top level only), shown in the launcher's Settings.
 `"ui": {"overlay": "off"}` (0.2.0-dev.29.18): Kiln's overlay drawing off, as `KILN_UI_OVERLAY=0` (which wins where it
 is set); `"auto"` by default; read by kiln.ui at start (top level only), shown in the launcher's Settings
 ([ui.md](ui.md#frame-generation-mods-and-drawing-off)).

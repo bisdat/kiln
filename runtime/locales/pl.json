@@ -1,4 +1,10 @@
 {
+  "chat": {
+    "completion": {
+      "title": "Podpowiedzi poleceń",
+      "hint": "Tab: uzupełnij · Esc: zamknij"
+    }
+  },
   "language": {
     "name": "Polski"
   },

@@ -57,5 +57,29 @@ Environment variables, for testers; they win over the setting:
 | `KILN_CHAT_HISTORY_DIAG=1` | watches keys and sent lines without taking any key or keeping anything |
 | `KILN_CHAT_INPUT_PROBE=1` | only logs that the HUD and Social chat calls were seen |
 
+## Tab completion
+Tab in the same two chat fields completes Kiln commands: `/he` and Tab gives `/help`. First built by bisdat (GitHub
+issue 44, pull request 73). Off by default, and separate from the history: launcher **Settings**, Kiln's settings, **In
+the game**, "Chat completion", or `{ "ui": { "chatCompletion": true } }` in `kiln/kiln.json`; restart the game after a
+change (`KILN_CHAT_COMPLETION=1` / `=0` wins over the setting, for testers).
+- Start a line with `/`: a list of matches shows above the chat field (command names, subcommands, choices, player
+  names, the same as the server's own `/help` knows).
+- **Tab** puts the first match in. With one match that's it; with several, the list stays and Tab again puts the next
+  one in (it keeps what you typed, so it goes round all of them). Once Tab has put one in, **Up** or **Shift+Tab** puts
+  the one before in and **Down** the next (Shift+Tab may be Steam's overlay key; Up does the same), and **Esc** closes
+  the list; a second Esc closes the chat as usual. Clicking a match puts it in too. Typing anything starts over.
+- Only commands **you** may use are offered: the server answers with your own permissions, so an admin command never
+  shows for a guest, and console-only commands never show in chat.
+- Only Kiln's commands (Kiln's own and those of Kiln mods). Other loaders' chat commands are not known to Kiln and are
+  not offered; they still work as before.
+- It needs Kiln on the server (or your own hosted world). On a server without Kiln, or with a Kiln from before
+  completion, Tab and the chat field stay the game's own and nothing is asked again until you join another server.
+- Tab with no matches showing stays the game's, and so do Up and Down until Tab has put a match in (then the history
+  waits until the list closes). Kiln never logs what you type: a `/` line goes to the server only to ask for matches,
+  and the server neither runs it nor writes it anywhere.
+- On a game build Kiln has no definitions for yet, completion stays off on its own (kiln.log: `ui: chat completion
+  unavailable: ...; history unaffected`).
+
 How it works and what to check after a game update: [docs/re/chat-input.md](../re/chat-input.md). Definitions:
-`sigdb/symbols/client.d/chatui.json` (feature `chat.ui.input`).
+`sigdb/symbols/client.d/chatui.json` (feature `chat.ui.input`; completion also `chat.ui.completion`). The server side of
+completion: [services/chat.md](services/chat.md#tab-completion-in-the-games-chat-kilnchat).

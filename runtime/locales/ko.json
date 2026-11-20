@@ -1,4 +1,10 @@
 {
+  "chat": {
+    "completion": {
+      "title": "명령어 추천",
+      "hint": "Tab: 자동 완성 · Esc: 닫기"
+    }
+  },
   "language": {
     "name": "한국어"
   },
