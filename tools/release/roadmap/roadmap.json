@@ -2791,8 +2791,8 @@
     {
       "version": "0.2.0-dev.31",
       "status": "planned",
-      "title": "Values, UI, network and NPCs",
-      "summary": "Mods' own character values and richer UI, map markers, station tabs, cloth on models and a debugger for the game client; control over what the server sends each player, survivors and bases, and friendly NPCs with bodies and routines of their own.",
+      "title": "Registries, values, UI, network and NPCs",
+      "summary": "Kiln's own registries, so mods outlast game updates, and one data stage for all mods; mods' own character values and richer UI, map markers, station tabs, cloth on models and a debugger for the game client; control over what the server sends each player, survivors and bases, and friendly NPCs with bodies and routines of their own.",
       "features": [
         {
           "title": "Kiln registries: mods that outlast game updates",
