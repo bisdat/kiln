@@ -89,7 +89,10 @@ internal static class StationMenuSync
 
     /// <summary>The channel is open in this process: a server always (it serves and reads acks), a game client only while
     /// it can draw what it receives (stationmenus.render), so it never claims a protocol it cannot follow.</summary>
-    internal static bool ChannelOpen => _channel != null;
+    internal static bool ChannelOpen => _channel != null || TestChannelOpen;
+
+    /// <summary>Tests: behave as if the channel were open.</summary>
+    internal static bool TestChannelOpen;
 
     private static bool WantChannel()
     {
@@ -210,13 +213,13 @@ internal static class StationMenuSync
         if (!ServerRole) return null;
         if (!SyncSettings.Current.SendContent)
             return $"{StationMenuStore.ContentSyncDisabled}: this server does not send its content (sendContent is off in kiln/config/sync.json), so clients would not have the recipes a menu lists";
-        if (_channel is null)
-            return $"{StationMenuStore.Refused}: this game cannot serve station menus (channel {ChannelName} is closed: stationmenus.render is off)";
         if (NetNative.Available && !NetAdmission.CanHoldKilnPeers)
             return $"{StationMenuStore.NoHoldGate}: kiln.net cannot hold joining Kiln clients on this build (net.gate.hold_all), so a client without the menu protocol could not be stopped";
         var lacking = LackingPeers();
         if (lacking.Count > 0)
             return $"{StationMenuStore.PeersLack}: connected Kiln clients without the station-menu protocol: {string.Join(", ", lacking.Take(8).Select(p => $"{p.Name} (0x{p.Id:x})"))}";
+        if (!ChannelOpen)
+            return $"{StationMenuStore.Refused}: this game cannot serve station menus (channel {ChannelName} is closed: stationmenus.render is off)";
         return null;
     }
 
@@ -785,5 +788,6 @@ internal static class StationMenuSync
         TestDeclared = null;
         TestPublishCheck = null;
         TestContentReady = null;
+        TestChannelOpen = false;
     }
 }
