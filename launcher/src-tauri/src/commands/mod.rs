@@ -39,6 +39,7 @@ pub const NAMES: &[&str] = &[
     "app_settings_set",
     "app_open_path",
     "app_open_url",
+    "app_open_discord",
     "task_list",
     "task_get",
     "task_cancel",

@@ -2204,7 +2204,7 @@ export const dataFolderRestart = () => call<null>("data_folder_restart");
 /** Every command name (the Rust side registers the same list; mock.ts answers or rejects each). */
 export const COMMANDS = [
   "snapshot_status", "snapshot_continue",
-  "app_info", "app_settings_get", "app_settings_set", "app_open_path", "app_open_url", "task_list", "task_get", "task_cancel",
+  "app_info", "app_settings_get", "app_settings_set", "app_open_path", "app_open_url", "app_open_discord", "task_list", "task_get", "task_cancel",
   "game_list", "game_detect", "game_add", "game_remove", "game_status", "game_start_get", "game_start_set",
   "runtime_list", "runtime_import", "runtime_status", "runtime_install", "runtime_uninstall", "runtime_rollback", "runtime_classify",
   "profile_list", "profile_get", "profile_create", "profile_save", "profile_delete", "profile_resolve", "profile_activate",
