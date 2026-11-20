@@ -24,6 +24,9 @@ struct State {
     tamper: Option<String>,
     foreign_url: bool,
     seq: u64,
+    public: std::collections::BTreeSet<String>,
+    credits: BTreeMap<String, Value>, // version -> the credits PUT
+    patches: Vec<Value>,
 }
 
 struct Fake {
@@ -76,7 +79,7 @@ impl Fake {
     fn pack_view(s: &State, id: &str) -> Value {
         let (code, slug, title, latest) = &s.packs[id];
         serde_json::json!({ "id": id, "slug": slug, "code": show_code(code), "url": format!("https://frostdev.io/kiln/crucible/p/{}", show_code(code)),
-            "title": title, "summary": "", "icon": null, "owner": { "id": OWNER, "name": "Emberfox" }, "visibility": "link",
+            "title": title, "summary": "", "icon": null, "owner": { "id": OWNER, "name": "Emberfox" }, "visibility": if s.public.contains(id) { "public" } else { "link" },
             "upvotes": 0, "comments": 0, "installs": s.installs, "mods": 0, "builds": [], "latest": latest })
     }
 
@@ -183,12 +186,13 @@ impl Fake {
         assert_eq!(host, "api.crucible.test", "a host outside the fake");
         let p = path.strip_prefix("/kiln/crucible/api/v1").unwrap().to_string();
         let parts: Vec<&str> = p.trim_start_matches('/').split('/').collect();
-        let need_auth = matches!((req.method, parts.as_slice()), (Method::Post, ["quickshare"]) | (Method::Post, ["packs", _, "versions"]) | (Method::Post, ["uploads", ..]));
+        let need_auth = matches!((req.method, parts.as_slice()), (Method::Post, ["quickshare"]) | (Method::Post, ["packs"]) | (Method::Post, ["packs", _, "versions"]) | (Method::Post, ["uploads", ..])
+            | (Method::Put, _) | (Method::Patch, _));
         if need_auth && !authed {
             return json(401, serde_json::json!({ "error": "signed-out", "message": "Sign in with Discord first." }));
         }
         match (req.method, parts.as_slice()) {
-            (Method::Post, ["quickshare"]) => {
+            (Method::Post, ["quickshare"]) | (Method::Post, ["packs"]) => {
                 s.seq += 1;
                 let id = format!("pck_{}", s.seq);
                 let code = format!("H7QK3MZ{}", &CODE_ALPHABET[s.packs.len()..s.packs.len() + 1]);
@@ -228,6 +232,25 @@ impl Fake {
             (Method::Get, ["packs", id, "head"]) => {
                 let latest = s.packs[*id].3.clone();
                 json(200, serde_json::json!({ "pack": id, "title": "x", "version": latest.map(|v| Self::version_view(&s, &v)) }))
+            }
+            (Method::Put, ["versions", vid, "credits"]) => {
+                s.credits.insert(vid.to_string(), jbody["credits"].clone());
+                json(200, serde_json::json!({ "version": Self::version_view(&s, vid), "complete": true }))
+            }
+            (Method::Patch, ["packs", id]) => {
+                s.patches.push(jbody.clone());
+                if jbody["visibility"] == "public" {
+                    let latest = s.packs[*id].3.clone();
+                    let credited = latest.as_ref().and_then(|v| s.credits.get(v)).and_then(Value::as_array).map(|a| a.len()).unwrap_or(0);
+                    let mods = latest.as_ref().map(|v| s.versions[v].2["mods"].as_array().map(|a| a.len()).unwrap_or(0)).unwrap_or(usize::MAX);
+                    if credited < mods || jbody["summary"].as_str().unwrap_or("").len() < 10 {
+                        return json(409, serde_json::json!({ "error": "not-ready", "message": "Before going public: every mod needs a credit.", "needs": ["every mod needs a credit (author and an https link to where it comes from)"] }));
+                    }
+                    s.public.insert(id.to_string());
+                } else if jbody["visibility"] == "link" {
+                    s.public.remove(*id);
+                }
+                json(200, serde_json::json!({ "pack": Self::pack_view(&s, id) }))
             }
             (Method::Post, ["versions", _, "installed"]) => {
                 s.installs += 1;
@@ -463,4 +486,63 @@ fn dev_rewrites_and_upload_hosts() {
     ep.rewrites = vec![("http://127.0.0.1:9000/b".into(), "https://cdn.crucible.test".into())];
     assert_eq!(ep.rewrite("http://127.0.0.1:9000/b/f/x.zip"), "https://cdn.crucible.test/f/x.zip");
     assert_eq!(ep.rewrite("https://cdn.frostdev.io/f/x.zip"), "https://cdn.frostdev.io/f/x.zip");
+}
+
+#[test]
+fn a_studio_pack_is_published_link_only_then_public_with_its_credits() {
+    use crate::modpack::studio::{self, NewPack, Visibility};
+    use publish::{PublishRequest, publish};
+    let t = tmp("publish");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (a, pid) = creator(&t);
+    let st = studio::create(&a, &NewPack { name: "Ember run".into(), from: Some(pid.clone()), id: None }).unwrap();
+    let anon = Crucible::new(&ep, &fake, "0.2.0-dev");
+    let req = PublishRequest { version: "1.0.0".into(), changes: Some("first".into()), ..Default::default() };
+    assert_eq!(publish(&a, &anon, &st.dir, &req, None, &mut NoProgress).unwrap_err().code, ErrorCode::AuthFailed);
+    let c = Crucible::new(&ep, &fake, "0.2.0-dev").with_session(Some(KEY.into()));
+
+    // public needs credits, the attestation and a summary: refused before anything is sent
+    let before = fake.sent().len();
+    let e = publish(&a, &c, &st.dir, &PublishRequest { visibility: Visibility::Public, ..req.clone() }, None, &mut NoProgress).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused);
+    assert!(e.message.contains("credits for") && e.message.contains("summary") && e.message.contains("confirm"), "{}", e.message);
+    assert_eq!(fake.sent().len(), before);
+
+    // link-only: no credits needed
+    let r1 = publish(&a, &c, &st.dir, &req, None, &mut NoProgress).unwrap();
+    assert!(!r1.public && r1.needs.is_empty());
+    assert_eq!(r1.version.status, "ready");
+    assert_eq!(r1.files, 2);
+    assert_eq!(r1.file, "ember-run-1.0.0.kilnpack");
+    let s = studio::read_source(&st.dir).unwrap();
+    assert_eq!(s.version, "1.0.1", "the next version is proposed");
+    let p = s.published.clone().unwrap();
+    assert_eq!((p.pack.as_str(), p.versions.len()), (r1.pack.id.as_str(), 1));
+    assert!(st.dir.join("versions/ember-run-1.0.0.kilnpack").exists());
+    // the same version again is refused
+    assert_eq!(publish(&a, &c, &st.dir, &req, None, &mut NoProgress).unwrap_err().code, ErrorCode::Refused);
+
+    // credits for both mods, a summary, the attestation: version 2 goes up and the pack goes public
+    let mut credits = BTreeMap::new();
+    for id in ["alpha", "beta"] {
+        credits.insert(id.to_string(), pack::Credit { author: "frostdev".into(), source: format!("https://github.com/frostdev-ops/{id}"), match_kind: Some("kiln".into()) });
+    }
+    let st = studio::set_credits(&a, &st.dir, &credits).unwrap();
+    let mut s = st.source.clone();
+    s.summary = Some("A loot run with friends".into());
+    studio::save(&a, &st.dir, s).unwrap();
+    let puts = fake.s.lock().unwrap().puts.len();
+    let r2 = publish(&a, &c, &st.dir, &PublishRequest { version: "1.0.1".into(), visibility: Visibility::Public, attest: true, ..Default::default() }, None, &mut NoProgress).unwrap();
+    assert!(r2.public, "{:?}", r2.needs);
+    assert_eq!(r2.pack.id, r1.pack.id, "the same pack");
+    assert_eq!(r2.version.number, 2);
+    assert_eq!(fake.s.lock().unwrap().puts.len(), puts, "nothing new to send");
+    let sent = fake.s.lock().unwrap().credits.get(&r2.version.id).cloned().unwrap();
+    assert_eq!(sent.as_array().unwrap().len(), 2);
+    assert_eq!(sent[0]["author"], "frostdev");
+    let s = studio::read_source(&st.dir).unwrap();
+    assert_eq!(s.published.as_ref().unwrap().visibility, Visibility::Public);
+    assert_eq!(s.published.as_ref().unwrap().versions.len(), 2);
+    assert!(fake.sent().iter().any(|r| r.starts_with("PATCH ")));
 }

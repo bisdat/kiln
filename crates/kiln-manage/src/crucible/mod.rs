@@ -18,6 +18,8 @@
 
 pub mod dev;
 pub mod links;
+/// Pack Studio's publish: a version of a pack source, its credits, link-only or public.
+pub mod publish;
 pub mod sign;
 
 use crate::game::GameInstall;
@@ -289,6 +291,8 @@ fn refusal(status: u16, body: &[u8]) -> Error {
         (401, _) => ErrorCode::AuthFailed,
         (404, _) => ErrorCode::NotFound,
         (409, "uploading") => ErrorCode::Busy,
+        // not ready to go public (credits, summary, checks) or hidden while reports are looked at: the message says why
+        (409, "not-ready" | "under-review") => ErrorCode::Refused,
         (410, _) | (451, _) | (403, _) => ErrorCode::Refused,
         (413, _) => ErrorCode::Refused,
         (422, _) | (400, _) => ErrorCode::InvalidArgument,
@@ -1128,10 +1132,10 @@ pub struct ShareResult {
 }
 
 /// A local file for each (role, sha256) of an upload index.
-struct ShareFiles {
-    index: PackIndex,
-    paths: BTreeMap<String, PathBuf>,
-    total: u64,
+pub(crate) struct ShareFiles {
+    pub(crate) index: PackIndex,
+    pub(crate) paths: BTreeMap<String, PathBuf>,
+    pub(crate) total: u64,
 }
 
 fn next_version(prev: Option<&str>) -> String {
@@ -1161,7 +1165,16 @@ fn prepare(dirs: &DataDirs, req: &ShareRequest, rec: Option<&SharedPack>, game: 
         &out,
         &mut Scaled { inner: progress, from: 0.0, to: 0.2 },
     )?;
-    let result = (|| -> Result<ShareFiles> {
+    let result = archives(dirs, &built, progress);
+    let _ = std::fs::remove_file(&built.file);
+    result
+}
+
+/// The archives Crucible stores for a built pack (one per mod, the layer, each override), cached by sha256, and the
+/// upload index naming them.
+pub(crate) fn archives(dirs: &DataDirs, built: &pack::BuiltPack, progress: &mut dyn Progress) -> Result<ShareFiles> {
+    let out = root(dirs).join("out");
+    (|| -> Result<ShareFiles> {
         let mut ix = built.index.clone();
         let mut paths = BTreeMap::new();
         let mut total = 0u64;
@@ -1209,9 +1222,22 @@ fn prepare(dirs: &DataDirs, req: &ShareRequest, rec: Option<&SharedPack>, game: 
             paths.insert(format!("blob:{}", o.sha256), dest);
         }
         Ok(ShareFiles { index: ix, paths, total })
-    })();
-    let _ = std::fs::remove_file(&built.file);
-    result
+    })()
+}
+
+/// Sends what Crucible asked for (progress 0.35..0.95); the bytes it asked for.
+pub(crate) fn send(c: &Crucible, uploads: &[Upload], files: &ShareFiles, canceled: &str, progress: &mut dyn Progress) -> Result<u64> {
+    let to_send: u64 = uploads.iter().map(|u| u.size).sum();
+    let mut sent = 0u64;
+    for u in uploads {
+        if progress.canceled() {
+            return Err(err(ErrorCode::Canceled, canceled));
+        }
+        let path = files.paths.get(&format!("{}:{}", u.role, u.sha256)).ok_or_else(|| err(ErrorCode::Internal, format!("Crucible asked for a file this pack does not have ({})", u.sha256)))?;
+        progress.report(Some(0.35 + sent as f32 / to_send.max(1) as f32 * 0.6), &format!("uploading {} of {}", crate::util::human_size(sent), crate::util::human_size(to_send)));
+        c.upload(u, path, &mut |n| sent += n)?;
+    }
+    Ok(to_send)
 }
 
 /// Every file of an upload index for `POST /uploads`.
@@ -1270,16 +1296,7 @@ pub fn share(dirs: &DataDirs, c: &Crucible, req: &ShareRequest, game: Option<&Ga
     // remember it at once: the link works when the upload finishes, and a stopped upload resumes from here
     all.profiles.insert(req.profile.clone(), SharedPack { pack: pack_view.clone(), version: answer.version.clone(), index: files.index.clone(), shared: crate::util::now_rfc3339(), pending: !answer.uploads.is_empty() });
     shared_save(dirs, &all)?;
-    let to_send: u64 = answer.uploads.iter().map(|u| u.size).sum();
-    let mut sent = 0u64;
-    for u in &answer.uploads {
-        if progress.canceled() {
-            return Err(err(ErrorCode::Canceled, "canceled: the share continues the next time you press Share"));
-        }
-        let path = files.paths.get(&format!("{}:{}", u.role, u.sha256)).ok_or_else(|| err(ErrorCode::Internal, format!("Crucible asked for a file this pack does not have ({})", u.sha256)))?;
-        progress.report(Some(0.35 + sent as f32 / to_send.max(1) as f32 * 0.6), &format!("uploading {} of {}", crate::util::human_size(sent), crate::util::human_size(to_send)));
-        c.upload(u, path, &mut |n| sent += n)?;
-    }
+    let to_send = send(c, &answer.uploads, &files, "canceled: the share continues the next time you press Share", progress)?;
     let version = c.call(Method::Get, &format!("/versions/{}", answer.version.id), None, true)
         .ok()
         .and_then(|v| v.get("version").cloned())
