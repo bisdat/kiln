@@ -182,6 +182,7 @@ cleanup_release() {
   # the kiln-win1 sample build (KILN_BUILD_REMOTE), when the release stops before it is collected
   if [[ -n $remote_pid ]]; then kill "$remote_pid" 2>/dev/null || true; fi
   if [[ -n ${win_pid:-} ]]; then kill "$win_pid" 2>/dev/null || true; fi
+  if [[ -n ${sdk_pid:-} ]]; then kill "$sdk_pid" 2>/dev/null || true; fi
 }
 trap cleanup_release EXIT
 trap 'exit 130' INT
@@ -567,6 +568,22 @@ unsquashfs -q -n -o "$(python3 "$lib/release.py" offset "$appimage")" -d "$work/
 (cd "$src" && linux python3 "$lib/notices.py" --src "$src" --out "$notices" \
   --append-appimage --appimage-root "$work/appimage-root/r") | tee -a "$log"
 rm -rf "$work/appimage-root"
+# The SDK packages and the VS Code extension (dotnet, node; nothing the launchers build or read) are made beside the
+# launcher builds, into their own log, and collected before the sample mods (which share the dotnet artifacts folder).
+# KILN_RELEASE_SERIAL_LAUNCHERS=1: in their place below, as before.
+sdk_pid=""
+sdk_and_vsix() {
+  local log=$work/sdk.log
+  [[ ${1:-} == bg ]] && : >"$log"
+  step "SDK packages"
+  quiet low "$src/managed/Kiln.Sdk/pack.sh"
+  step "VS Code extension"
+  (cd "$src/tools/vscode" && KILN_OUT="$KILN_OUT/vscode" quiet low node scripts/package.mjs)
+}
+if ((!launcher_only)) && [[ ${KILN_RELEASE_SERIAL_LAUNCHERS:-} != 1 ]]; then
+  sdk_and_vsix bg & sdk_pid=$!
+  note "SDK packages and the VS Code extension: made beside the launcher builds (log: $work/sdk.log)"
+fi
 # The Windows launcher builds (direct, then Nexus) run beside the Linux ones from here on: their Cargo target and bundle
 # folders are their own (the Linux files build in the container, in $lin_target), and their frontend goes to its own
 # folder, launcher/dist-windows, so the two Vite runs never write the same files. They have the notices complete.
@@ -635,11 +652,15 @@ skipped_samples=() not_mods=()
 if ((launcher_only)); then
   note "--launcher-only: no SDK packages, VS Code extension, sample mods, modding site or feed (mod authors keep the previous release's SDK)"
 else
-step "SDK packages"
-quiet low "$src/managed/Kiln.Sdk/pack.sh"
+if [[ -n $sdk_pid ]]; then
+  sdk_rc=0; wait "$sdk_pid" || sdk_rc=$?
+  sdk_pid=""
+  cat "$work/sdk.log" >>"$log"
+  ((sdk_rc == 0)) || { tail -40 "$work/sdk.log" >&2; die "the SDK packages or the VS Code extension failed (log: $work/sdk.log)"; }
+else
+  sdk_and_vsix
+fi
 sdk_version=$KILN_SDK_VERSION
-step "VS Code extension"
-(cd "$src/tools/vscode" && KILN_OUT="$KILN_OUT/vscode" quiet low node scripts/package.mjs)
 vsix=$(ls -t "$KILN_OUT"/vscode/kiln-vscode-*.vsix | head -1)
 step "sample mods"
 rm -rf "$work/samples" && mkdir -p "$work/samples"
