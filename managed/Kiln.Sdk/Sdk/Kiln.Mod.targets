@@ -30,7 +30,8 @@
       KilnUpdatesNexusModId, KilnUpdatesNexusFileChainId  the same for one file of a Nexus Mods page
       KilnUpdatesProvider    github | nexus (default: from which of the two is set)
       KilnServer         a server folder (with enshrouded_server.exe) for KilnDeploy, or KilnModsDir (its kiln/mods)
-      KilnReload         true: KilnDeploy also asks the running server to hot-reload the mod (kiln/control)
+      KilnReload         true: KilnDeploy also asks the running server to hot-reload the mod (kiln/control); refused (KILN012)
+                         while kiln/state/debug/session.json says a debugger is attached (kiln debug writes it)
       KilnPackageOutputPath  where KilnPack writes <id>-<version>.zip (default: next to the output folder)
       KilnModFolders     ;-list of data folders copied into the mod folder (default content;assets;skills;quests;blocks;icons;impact;audio)
       KilnIncludeModFolders  false: copy none of them automatically
@@ -213,8 +214,29 @@
     </ItemGroup>
   </Target>
 
+  <!-- KilnReload while a debugger is attached: refused before anything is copied (a reload under a debugger keeps the old
+       mod's code alive and can stop at a dead copy). kiln debug writes kiln/state/debug/session.json while it runs and
+       removes it at the end; a file left by a crashed kiln debug is named in the message so it can be deleted. -->
+  <Target Name="_KilnReloadDebugGuard" Condition="'$(KilnReload)' == 'true'">
+    <PropertyGroup>
+      <_KilnDebugInstall Condition="'$(KilnServer)' != ''">$(KilnServer)</_KilnDebugInstall>
+      <_KilnDebugInstall Condition="'$(KilnServer)' == '' and '$(KilnModsDir)' != ''">$(KilnModsDir)/../..</_KilnDebugInstall>
+      <_KilnDebugSession Condition="'$(_KilnDebugInstall)' != ''">$(_KilnDebugInstall)/kiln/state/debug/session.json</_KilnDebugSession>
+    </PropertyGroup>
+    <ReadLinesFromFile Condition="'$(_KilnDebugSession)' != '' and Exists('$(_KilnDebugSession)')" File="$(_KilnDebugSession)">
+      <Output TaskParameter="Lines" ItemName="_KilnDebugSessionLine" />
+    </ReadLinesFromFile>
+    <!-- quotes, spaces and commas out first: a property function would read the file's quotes and commas as its own -->
+    <PropertyGroup>
+      <_KilnDebugSessionText>@(_KilnDebugSessionLine)</_KilnDebugSessionText>
+      <_KilnDebugSessionText>$(_KilnDebugSessionText.Replace('&quot;', '').Replace(' ', '').Replace(',', ';'))</_KilnDebugSessionText>
+    </PropertyGroup>
+    <Error Condition="$(_KilnDebugSessionText.Contains('state:attaching')) or $(_KilnDebugSessionText.Contains('state:running')) or $(_KilnDebugSessionText.Contains('state:paused')) or $(_KilnDebugSessionText.Contains('state:detaching'))" Code="KILN012"
+           Text="a debugger is attached to this server ($(_KilnDebugSession)): detach it, then deploy with KilnReload again (deploy without KilnReload copies the files only). If no kiln debug runs any more, delete that file." />
+  </Target>
+
   <!-- dotnet build -t:KilnDeploy -p:KilnServer=<server folder> [-p:KilnReload=true] -->
-  <Target Name="KilnDeploy" DependsOnTargets="Build;_KilnModFiles">
+  <Target Name="KilnDeploy" DependsOnTargets="_KilnReloadDebugGuard;Build;_KilnModFiles">
     <PropertyGroup>
       <_KilnModsDir Condition="'$(KilnModsDir)' != ''">$(KilnModsDir)</_KilnModsDir>
       <_KilnModsDir Condition="'$(KilnModsDir)' == '' and '$(KilnServer)' != ''">$(KilnServer)/kiln/mods</_KilnModsDir>
