@@ -28,6 +28,9 @@ import { ArchText, Banner, Button, Cones, Field, KeyValue, Modal, PathPicker, Ta
 import { StartModal, UnknownBuild, useStartSetup, useStartWord } from "../components/GameStart";
 import { SendToSupport } from "../community/parts";
 import { crashLine, useCrash, useCrashNotice } from "../community/crash";
+import { ShareDock } from "../crucible/Share";
+import { CrucibleUpdateBanner } from "../crucible/Update";
+import { useCrucibleOn } from "../crucible/state";
 
 /** Windows (WebView2): path examples in Windows form. */
 const WIN = /Windows/i.test(navigator.userAgent);
@@ -192,6 +195,8 @@ function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; 
   // only a profile other than the default is named on the main screen
   const other = rt?.installed && cur && !isDefaultProfile(cur) ? cur : null;
   const showList = !!rt?.installed && (!!mods.profileId || list.length > 0);
+  // (dev.30) Crucible: share the loaded profile, open a code, the pack update banner
+  const crucible = useCrucibleOn() && !!rt?.installed && !!mods.profileId;
 
   return (
     <>
@@ -213,6 +218,7 @@ function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; 
         </div>
         <StoppedStartNotice ctl={ctl} />
         <Banners game={game} ctl={ctl} pending={pending.data ?? null} onOffer={() => setOfferOpen(true)} boot={fresh ? boot : null} />
+        {crucible && <CrucibleUpdateBanner game={game} profileId={mods.profileId} />}
         <h1 className="k-hero-name"><span className="k-title static">Enshrouded</span></h1>
         {ctl.timeline ? (
           <div className="k-hero-state k-hero-start" key="progress">
@@ -270,6 +276,7 @@ function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; 
           ) : <span title={lastBoot}>{lastBoot}</span>}</dd></div>
         </dl>
       </section>
+      {crucible && mods.profileId && <ShareDock game={game} profileId={mods.profileId} profileName={cur?.name ?? mods.profileId} />}
 
       <div className="k-foot">
         <span className="k-mono" title={game.path}>{shortPath(game.path)}</span>
