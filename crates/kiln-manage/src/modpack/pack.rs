@@ -421,8 +421,13 @@ pub fn check_index(ix: &PackIndex) -> Result<()> {
             problems.push(format!("override {}: mode {:?} does not fit the file", o.path, o.mode));
         }
     }
-    if let Some(s) = ix.server.as_ref().and_then(|s| s.settings.as_ref()) && !s.is_object() {
-        problems.push("server.settings must be an object".into());
+    if let Some(s) = ix.server.as_ref().and_then(|s| s.settings.as_ref()) {
+        // only the game's rules travel: a server's name, ports, user groups (their passwords: admin rights) and bans
+        // are the server owner's, and a pack would set them on every server it is put on
+        let only_game = s.as_object().is_some_and(|o| o.keys().all(|k| k == "gameSettings") && o.get("gameSettings").is_none_or(Value::is_object));
+        if !only_game {
+            problems.push("server.settings holds gameSettings only (an object; no name, ports, user groups, passwords or bans)".into());
+        }
     }
     if problems.is_empty() {
         Ok(())
@@ -1858,6 +1863,10 @@ pub fn install_server(dirs: &DataDirs, server: &crate::server::instance::ServerI
         return Err(err(ErrorCode::ConsentRequired, "a pack runs code from other people on this server: agree first"));
     }
     let dir = server.local_dir()?.to_path_buf();
+    // the game settings cannot be written while the server runs: refused before any mod moves, not half way
+    if req.settings && crate::server::run::status(server)?.pid.is_some() {
+        return Err(err(ErrorCode::Conflict, "the server is running and rewrites its settings file: stop it first (or leave the game settings out)"));
+    }
     let (zip_file, sha, _) = fetch(dirs, &req.source, req.allow_http, progress)?;
     let takes = |k: ModKind| matches!(k, ModKind::Kiln | ModKind::Native)
         || (k.is_engine() && k != ModKind::Xhl && crate::engine_mods::server_root(k, Path::new("")).is_some());

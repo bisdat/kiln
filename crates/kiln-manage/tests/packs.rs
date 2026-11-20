@@ -338,3 +338,22 @@ fn overrides_carry_their_size() {
     rezip(&built.file, &bad, Some(("kiln-modpack.json", &serde_json::to_vec_pretty(&ix).unwrap())), None);
     assert_eq!(pack::verify(&bad, None).unwrap_err().code, ErrorCode::HashMismatch);
 }
+
+#[test]
+fn server_settings_carry_game_settings_only() {
+    let t = tmp("srvset");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let pid = creator(&dirs, &t.0);
+    // a server's admin password, its name and bans never travel in a pack: an install would set them on someone's server
+    let mut req = request(&pid, &t.0, "1.0.0");
+    req.server_settings = Some(serde_json::json!({ "gameSettings": { "playerHealthFactor": 1.5 },
+        "userGroups": [{ "name": "Admin", "password": "hunter2", "canKickBan": true }] }));
+    let e = pack::build(&dirs, &req, &t.0.join("out"), &mut NoProgress).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Schema, "{}", e.message);
+    assert!(e.message.contains("gameSettings"), "{}", e.message);
+    let mut ix = pack::build(&dirs, &request(&pid, &t.0, "1.0.0"), &t.0.join("out"), &mut NoProgress).unwrap().index;
+    ix.server = Some(pack::PackServer { settings: Some(serde_json::json!({ "gameSettings": {}, "name": "Mine now" })), notes: None });
+    assert_eq!(pack::check_index(&ix).unwrap_err().code, ErrorCode::Schema);
+    ix.server = Some(pack::PackServer { settings: Some(serde_json::json!({ "gameSettings": 3 })), notes: None });
+    assert_eq!(pack::check_index(&ix).unwrap_err().code, ErrorCode::Schema);
+}
