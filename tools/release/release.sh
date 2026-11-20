@@ -554,9 +554,15 @@ skipped_samples=() not_mods=()
 # is zipped the way KilnPack does: <id>-<version>.zip holding <id>/, without the shared Kiln.* assemblies, *.deps.json
 # and cooked game files
 pack_folder() { # project
-  local proj=$1 o=$work/samples-build/$(basename "$1" .csproj)
+  local proj=$1 o
+  # The project's own output folder, not `-o`: -o is a global property, so every project the build references writes
+  # there too (in repository mode a Blocks sample references the bake, Kiln.Sdk.Bake with Kiln.TestKit, and xunit's
+  # assemblies ended up in 21 sample zips of the 0.2.0-dev.30 trial). Emptied first: the work folder is reused.
+  o=$(dotnet msbuild "$proj" -getProperty:OutDir -p:Configuration=Release -p:ArtifactsPath="$KILN_OUT/dotnet" 2>>"$log") || return 1
+  o=${o%/}
+  [[ -n $o && $o == "$KILN_OUT/dotnet/"* ]] || { echo "release: $proj: unexpected output folder '$o'" >>"$log"; return 1; }
   rm -rf "$o"
-  low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo -o "$o" >>"$log" 2>&1 || return 1
+  low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo >>"$log" 2>&1 || return 1
   [ -f "$o/kiln.mod.json" ] || return 2   # a library or test project of a sample (SampleLib.Api): no mod to zip
   python3 - "$o" "$work/samples" <<'PY'
 import json, os, re, sys, zipfile
@@ -564,6 +570,12 @@ o, dest = sys.argv[1:]
 text = re.sub(r"^\s*//.*$", "", open(os.path.join(o, "kiln.mod.json"), encoding="utf-8").read(), flags=re.M)
 m = json.loads(re.sub(r",(\s*[}\]])", r"\1", text))
 mid, ver = m["id"], m.get("version", "0.0.0")
+# test frameworks never ship in a mod: a sample whose output has them is a build mistake (see the -o note above)
+test_files = sorted(n for _, _, files in os.walk(o) for n in files
+                    if re.match(r"(xunit|Microsoft\.TestPlatform|Microsoft\.VisualStudio\.TestPlatform|Kiln\.TestKit|testhost)", n, re.I))
+if test_files:
+    print(f"release: sample {mid}: test assemblies in its output: {' '.join(test_files)}", file=sys.stderr)
+    sys.exit(3)
 with zipfile.ZipFile(os.path.join(dest, f"{mid}-{ver}.zip"), "w", zipfile.ZIP_DEFLATED) as z:
     for d, _, files in os.walk(o):
         for n in sorted(files):
@@ -580,9 +592,10 @@ for proj in "$src"/mods/samples/*/*.csproj; do
     low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo -t:KilnPack \
       -p:KilnPackageOutputPath="$work/samples/" >>"$log" 2>&1 || skipped_samples+=("$sample")
   else
-    rc=0; pack_folder "$proj" || rc=$?
+    rc=0; pack_folder "$proj" 2>>"$log" || rc=$?
     ((rc == 2)) && not_mods+=("$sample")
     ((rc == 1)) && skipped_samples+=("$sample")
+    ((rc == 3)) && die "sample $sample: test assemblies in its zip's files (log: $log)"
   fi
 done
 note "sample mods: $(ls "$work"/samples/*.zip 2>/dev/null | wc -l) zips"
