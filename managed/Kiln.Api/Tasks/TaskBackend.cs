@@ -14,6 +14,10 @@ internal enum LeaseWork : uint
     /// <summary>One client-world hop (<c>KILN_LEASE_CLIENT_HOP</c>), on the client world's step on the game's main thread
     /// (or, with <c>cancelled</c> set, wherever the client world's end flushes it).</summary>
     ClientHop = 3,
+
+    /// <summary>One menu hop (<c>KILN_LEASE_MENU_HOP</c>, #83), on the game's UI frame while no world runs (or, with
+    /// <c>cancelled</c> set, on the thread whose world start ends the menu session).</summary>
+    MenuHop = 4,
 }
 
 /// <summary>Where a world kind's newest session stands (the lease table's <c>world_session</c>).</summary>
@@ -61,7 +65,8 @@ internal enum TaskRefusal : uint
 
 /// <summary>The host's one dispatcher, bound once: <paramref name="hostState"/> is what the host gave
 /// <see cref="TaskBackend.Admit"/>. Runs on pool workers (Segment), on the server tick (TickHop), on the client world's
-/// step (ClientHop) and on the thread that ends a world (its cancelled hops), possibly on several at once. It never
+/// step (ClientHop), on the menu's UI frame (MenuHop) and on the thread that ends a world or the menu (its cancelled
+/// hops), possibly on several at once. It never
 /// throws back into the backend.</summary>
 internal delegate void LeaseDispatch(ulong lease, LeaseWork what, bool cancelled, object hostState);
 
@@ -153,11 +158,11 @@ internal abstract class TaskBackend
     public virtual bool OnClientMainThread => false;
 
     /// <summary>True on the thread that steps worlds of <paramref name="world"/> (the server world's tick; the client
-    /// world's main thread).</summary>
+    /// world's main thread; for <see cref="WorldKind.Menu"/>, the game's UI thread, which is the client's main thread).</summary>
     public virtual bool OnWorldThread(WorldKind world) => world == WorldKind.Server && OnServerTick;
 
     /// <summary>The table's <c>world_session</c>: the newest session of <paramref name="world"/> and where it stands; 0
-    /// with none.</summary>
+    /// with none. <see cref="WorldKind.Menu"/>: the main menu's sessions (#83), one per stretch between two worlds.</summary>
     public virtual ulong WorldSession(WorldKind world, out WorldSessionState state)
     {
         var session = world == WorldKind.Server ? ServerSession : 0;

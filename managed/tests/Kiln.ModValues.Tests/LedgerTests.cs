@@ -349,8 +349,8 @@ public sealed class LedgerTests
         r.Ledger.ProjectAll();
         Assert.Equal(world, r.Store.Read(Partition.World, a, "fish"));
         Assert.Equal(500, r.Ledger.Read("fish", a, K("fish:cx")).Value!.Value);
-        // the copy is the player's: its higher carried value stays in it (never in the authority), the World id is gone
-        Assert.Contains("\"99999\"", r.Store.Read(Partition.Projection, a, "fish")!);
+        // the forged entry has no carry epoch of this definition: the authority's value replaces it; the World id is gone
+        Assert.DoesNotContain("\"99999\"", r.Store.Read(Partition.Projection, a, "fish")!);
         Assert.DoesNotContain("coins", r.Store.Read(Partition.Projection, a, "fish")!);
         r.Ledger.Import(a, [new OfferEntry("fish:cx", 800, ModValueKind.Experience, 0, 1, 1)]);
         r.Store.Write(Partition.Projection, a, "fish", "{}");  // and a replace after the merge

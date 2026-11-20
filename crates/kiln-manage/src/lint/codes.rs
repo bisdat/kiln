@@ -119,6 +119,9 @@ rules! {
     GAME_DATA = "KL604", "game-data", Error, "game files inside a mod (mods ship sources and a recipe)";
     COOKED_COMMITTED = "KL605", "cooked-committed", Warning, "cooked game-derived files not ignored by git";
 
+    // KL7xx: mods together
+    DATA_CONFLICT = "KL701", "data-conflict", Warning, "two mods' data packs give one field of one game entry different values (the later mod wins)";
+
     // KL9xx: the linter itself
     NO_CATALOG = "KL901", "no-catalog", Info, "no game-data catalog: references to the game are not checked";
     CATALOG_BAD = "KL902", "catalog-unreadable", Warning, "the game-data catalog cannot be read";

@@ -10,6 +10,8 @@ internal static class ModValuesService
     private static ulong _ticks;
     private static readonly HashSet<CharacterKey> Touched = [];
     private static readonly HashSet<ModContext> Hooked = new(ReferenceEqualityComparer.Instance);
+    private static readonly List<(Def Def, object? Token)> PendingDefines = [];
+    private static bool _wasServer;
 
     /// <summary>Definitions of every owner (both sides).</summary>
     internal static readonly Registry Registry = new();
@@ -39,6 +41,8 @@ internal static class ModValuesService
             Events.On<WorldLoadedEvent>(_ => Safe("at the world load", () =>
             {
                 Touched.Clear();
+                ServerRoleStep();
+                ModValuesAuthoring.Poll();
                 if (ModValuesCaps.ServerRole) _ledger.ProjectAll();
             }));
             Events.On<CharacterImportedEvent>(_ => Safe("after a carried import", () => _ledger.ProjectAll()));
@@ -84,9 +88,53 @@ internal static class ModValuesService
 
     internal static IReadOnlyList<CharacterKey> LiveKeys() => CharacterSync.Live().Select(l => l.Key).Distinct().ToList();
 
+    /// <summary>A post from any thread: on the tick thread now, elsewhere at the next step (Events.Post is tick-only).</summary>
+    internal static void Post<T>(T ev) where T : KilnEvent
+    {
+        if (!Events.HasSubscribers<T>()) return;
+        if (Backend.Current.IsTickThread) Events.Post(ev);
+        else Events.Enqueue(ev);
+    }
+
+    /// <summary>A game client that is not running a world: a Define (a both-side mod's OnLoad in the main menu) is
+    /// described now and activated when this client hosts a world.</summary>
+    internal static ModValueDefinitionResult DeferDefine(Def d, object? token)
+    {
+        var r = Describe(d, token);
+        if (!r.Ok) return r;
+        lock (Gate)
+        {
+            PendingDefines.RemoveAll(p => p.Def.Key == d.Key);
+            PendingDefines.Add((d, token));
+        }
+        return r;
+    }
+
+    /// <summary>The server role turned on (a hosted world started): deferred Defines and the mods' JSON values become active.</summary>
+    private static void ServerRoleStep()
+    {
+        var server = ModValuesCaps.ServerRole;
+        var turnedOn = server && !_wasServer;
+        _wasServer = server;
+        if (!server) return;
+        (Def Def, object? Token)[] pending;
+        lock (Gate)
+        {
+            pending = PendingDefines.Where(p => p.Token is not ModContext { Alive: false }).ToArray();
+            PendingDefines.Clear();
+        }
+        foreach (var (d, token) in pending)
+        {
+            var r = Define(d, token);
+            if (!r.Ok) Log(LogLevel.Error, $"mod-values: {d.Qualified}: {r.Reason}");
+        }
+        if (turnedOn) ModValuesAuthoring.Poll();
+    }
+
     private static void Tick(in TickInfo tick)
     {
         _ticks++;
+        Safe("the server role", ServerRoleStep);
         if (_ticks % 25 == 0) Safe("reading mod-values/*.json", ModValuesAuthoring.Poll);
         if (!ModValuesCaps.ServerRole)
         {
@@ -127,8 +175,8 @@ internal static class ModValuesService
 
     internal static void Retire(string owner, object? token)
     {
-        foreach (var d in Registry.Retire(owner, token))
-            if (Events.HasSubscribers<ModValueDefinitionChangedEvent>()) Events.Post(new ModValueDefinitionChangedEvent(d.Key, null, "retired"));
+        foreach (var d in Registry.Retire(owner, token)) Post(new ModValueDefinitionChangedEvent(d.Key, null, "retired"));
+        lock (Gate) PendingDefines.RemoveAll(p => p.Def.Owner == owner && (token is null || Equals(p.Token, token)));
         ModValuesStream.DefinitionsChanged();
     }
 
@@ -136,7 +184,7 @@ internal static class ModValuesService
     {
         var why = Registry.Describe(d, token, out var added);
         if (why is not null) return new(false, why, d.Key);
-        if (added && Events.HasSubscribers<ModValueDefinitionChangedEvent>()) Events.Post(new ModValueDefinitionChangedEvent(d.Key, d.ToPublic(false), "described"));
+        if (added) Post(new ModValueDefinitionChangedEvent(d.Key, d.ToPublic(false), "described"));
         return new(true, null, d.Key);
     }
 
@@ -146,8 +194,8 @@ internal static class ModValuesService
         if (why is not null) return new(false, why, d.Key);
         if (activated)
         {
-            if (Events.HasSubscribers<ModValueDefinitionChangedEvent>()) Events.Post(new ModValueDefinitionChangedEvent(d.Key, d.ToPublic(true), "activated"));
-            _ledger?.Activated(d, LiveKeys());
+            Post(new ModValueDefinitionChangedEvent(d.Key, d.ToPublic(true), "activated"));
+            if (Backend.Current.IsTickThread) _ledger?.Activated(d, LiveKeys());  // off the tick: the next character pass initializes
             ModValuesStream.DefinitionsChanged();
         }
         return new(true, null, d.Key);
@@ -160,6 +208,7 @@ internal static class ModValuesService
         lock (Gate) _started = true;
         Registry.Clear();
         Touched.Clear();
+        lock (Gate) PendingDefines.Clear();
         _ledger = new Ledger(Registry, store, isLive, new BusValueEvents());
         ModValuesCaps.Rows.Ensure();
     }

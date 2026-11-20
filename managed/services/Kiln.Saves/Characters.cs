@@ -334,7 +334,7 @@ internal static class CharacterStore
     internal static T Get<T>(string prefix, CharacterKey c, string key, string api) where T : class, new()
     {
         var (store, mod, b) = Bundle(prefix, c, api);
-        WorldStore.CheckKey(key);
+        CheckModKey(key);
         if (!b.Keys.TryGetValue(key, out var s)) b.Keys[key] = s = new WorldStore.Slot();
         return store.GetOrCreate<T>(s, mod, b.Scope, key, create: true);
     }
@@ -343,7 +343,7 @@ internal static class CharacterStore
     {
         var (store, mod, b) = Bundle(prefix, c, api);
         value = null;
-        if (!b.Keys.TryGetValue(WorldStore.CheckKey(key), out var s) || (s.Value == null && s.Json is null or "null")) return false;
+        if (!b.Keys.TryGetValue(CheckModKey(key), out var s) || (s.Value == null && s.Json is null or "null")) return false;
         value = store.GetOrCreate<T>(s, mod, b.Scope, key, create: false);
         return true;
     }
@@ -352,14 +352,15 @@ internal static class CharacterStore
     {
         ArgumentNullException.ThrowIfNull(value);
         var (_, _, b) = Bundle(prefix, c, api);
-        b.Keys[WorldStore.CheckKey(key)] = new WorldStore.Slot { Value = value, Type = typeof(T) };
+        b.Keys[CheckModKey(key)] = new WorldStore.Slot { Value = value, Type = typeof(T) };
     }
 
-    internal static bool Remove(string prefix, CharacterKey c, string key, string api) => Bundle(prefix, c, api).b.Keys.Remove(WorldStore.CheckKey(key));
+    internal static bool Remove(string prefix, CharacterKey c, string key, string api) => Bundle(prefix, c, api).b.Keys.Remove(CheckModKey(key));
 
-    internal static bool Contains(string prefix, CharacterKey c, string key, string api) => Bundle(prefix, c, api).b.Keys.ContainsKey(WorldStore.CheckKey(key));
+    internal static bool Contains(string prefix, CharacterKey c, string key, string api) => Bundle(prefix, c, api).b.Keys.ContainsKey(CheckModKey(key));
 
-    internal static IReadOnlyList<string> KeysOf(string prefix, CharacterKey c, string api) => Bundle(prefix, c, api).b.Keys.Keys.ToList();
+    internal static IReadOnlyList<string> KeysOf(string prefix, CharacterKey c, string api) =>
+        Bundle(prefix, c, api).b.Keys.Keys.Where(k => Array.IndexOf(ReservedKeys, k) < 0).ToList();
 
     internal static IReadOnlyList<CharacterKey> Characters(string prefix, string api)
     {
@@ -369,14 +370,14 @@ internal static class CharacterStore
         var suffix = "/" + mod.Info.Id;
         var list = new List<CharacterKey>();
         foreach (var b in store.BundlesWithPrefix(prefix))
-            if (b.Scope.EndsWith(suffix, StringComparison.Ordinal) && b.Keys.Count > 0 && CharacterKey.TryParse(b.Scope.Split('/')[1], out var k)) list.Add(k);
+            if (b.Scope.EndsWith(suffix, StringComparison.Ordinal) && b.Keys.Keys.Any(k => Array.IndexOf(ReservedKeys, k) < 0) && CharacterKey.TryParse(b.Scope.Split('/')[1], out var k)) list.Add(k);
         return list;
     }
 
     internal static bool Migrate(string prefix, CharacterKey c, string key, IReadOnlyList<ulong> ids, string api)
     {
         var (store, mod, b) = Bundle(prefix, c, api);
-        WorldStore.CheckKey(key);
+        CheckModKey(key);
         if (b.Keys.TryGetValue(key, out var have) && (have.Value != null || have.Json != null)) return false;
         foreach (var id in ids)
         {
@@ -469,9 +470,30 @@ internal static class CharacterStore
     // receiver must never put every ledger under one mod, nor take a mod id from a client). These take the validated
     // owner namespace instead of the calling ModContext, and keep values as JSON (no live object a Replace detaches).
 
-    /// <summary>The open world's id for owned records; empty while no world's mod data is read.</summary>
-    internal static Guid OwnedWorld =>
-        SavesRuntime.Ensure() && !SavesRuntime.Store.LoadDeferred && Guid.TryParse(SavesRuntime.Store.WorldId, out var g) ? g : Guid.Empty;
+    /// <summary>The open world's id for owned records; empty while no world's mod data is read. A new world that has not
+    /// been saved yet has a provisional id for the session (its records are in memory and go to disk with the first save,
+    /// which gives the real id: revisions then name the real world, and a compare-and-set made against the provisional
+    /// one is refused once as stale).</summary>
+    internal static Guid OwnedWorld
+    {
+        get
+        {
+            if (!SavesRuntime.Ensure() || SavesRuntime.Store.LoadDeferred) return Guid.Empty;
+            return Guid.TryParse(SavesRuntime.Store.WorldId, out var g) ? g : SavesRuntime.Store.ProvisionalWorld;
+        }
+    }
+
+    /// <summary>Keys of CharacterData that belong to Kiln.ModValues' records: mods' own CharacterData calls neither see
+    /// nor touch them.</summary>
+    internal static readonly string[] ReservedKeys = ["mod-values.world.v1", "mod-values.carried-authority.v1", "mod-values.carried.v1"];
+
+    /// <summary>A key a mod passes to CharacterData: <see cref="WorldStore.CheckKey"/>, and not one of the reserved keys.</summary>
+    internal static string CheckModKey(string key)
+    {
+        WorldStore.CheckKey(key);
+        if (Array.IndexOf(ReservedKeys, key) >= 0) throw new ArgumentException($"\"{key}\" is reserved for Kiln.ModValues (use ModValues)", nameof(key));
+        return key;
+    }
 
     internal static string? ReadOwned(string prefix, CharacterKey c, string owner, string key)
     {
