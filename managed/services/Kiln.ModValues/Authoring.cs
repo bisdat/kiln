@@ -20,8 +20,6 @@ internal static class ModValuesAuthoring
         "carryEpoch", "readPolicy", "readMods", "sync", "allowPartitionMove", "resetOnKindChange",
     };
 
-    // owner -> the mod directory its JSON came from (a mod seen unloaded retires its JSON values)
-    private static readonly Dictionary<string, string> Loaded = new(StringComparer.Ordinal);
 
     /// <summary>Reads one file into definitions of <paramref name="owner"/>. Throws <see cref="ArgumentException"/> with
     /// the file's error.</summary>
