@@ -490,8 +490,8 @@ pub async fn community_presence_facts(mods: Option<u32>, texts: Option<kiln_mana
 }
 
 #[tauri::command]
-pub async fn community_report_prepare(app: AppHandle, target: Option<super::logs::LogTarget>, from: kiln_manage::community::SendFrom) -> Result<crate::community::report::ReportPreview, Error> {
-    crate::community::report::prepare(app, target, from).await
+pub async fn community_report_prepare(app: AppHandle, target: Option<super::logs::LogTarget>, from: kiln_manage::community::SendFrom, exclude: Option<Vec<String>>) -> Result<crate::community::report::ReportPreview, Error> {
+    crate::community::report::prepare(app, target, from, exclude.unwrap_or_default()).await
 }
 
 #[tauri::command]

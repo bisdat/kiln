@@ -67,7 +67,7 @@ test.describe("desktop", () => {
     await expect(page.getByTestId("kc-send-results")).toBeEnabled();
     // the report attached for the team is shown before Send results: its size and files, prepared once and sent as shown
     const attached = page.getByTestId("kc-attached");
-    await expect(attached).toContainText("10 files: Kiln's logs and state files, the profile, the launcher's log and lists of the game folder.");
+    await expect(attached).toContainText("13 files: Kiln's logs and state files, the profile, the launcher's log and lists of the game folder.");
     await attached.getByRole("button", { name: "Show the files" }).click();
     await expect(page.getByTestId("kc-attached-files")).toContainText("game/kiln/logs/kiln.log");
     await expect(attached).toContainText("Saves and mod settings are never in it.");
@@ -87,7 +87,7 @@ test.describe("desktop", () => {
       if (id !== "start") await step(id).locator(".kc-step-head").click();
       await step(id).getByRole("radio", { name: "Worked" }).click();
     }
-    await expect(page.getByTestId("kc-attached")).toContainText("10 files");
+    await expect(page.getByTestId("kc-attached")).toContainText("13 files");
     await page.getByTestId("kc-send-results").click();
     const toast = page.locator(".k-toast").filter({ hasText: "Discord didn't accept the results" });
     await expect(toast).toContainText("Discord said: Missing Permissions. This is on Kiln's side, not your connection. Your results are kept: try again later.");
@@ -154,7 +154,7 @@ test.describe("Steam Deck", () => {
     await expect(plan.locator('[data-deck-id="step-deck-battery"]')).toContainText("It was slow or stuttered");
     await expect(plan.locator('[data-deck-id="step-deck-battery"]')).toContainText("Didn't work");
     // the report attached for the team: its size and files before Send results
-    await expect(plan.locator('[data-deck-id="attached"]')).toContainText("10 files");
+    await expect(plan.locator('[data-deck-id="attached"]')).toContainText("13 files");
     await plan.locator('[data-deck-id="attached"]').click();
     await expect(page.getByTestId("deck-attached-files")).toContainText("game/kiln/logs/kiln.log");
   });

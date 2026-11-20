@@ -96,6 +96,8 @@ pub(crate) fn report_input(app: &tauri::AppHandle, target: Option<LogTarget>) ->
     if let Some(d) = crate::render::dmabuf_report() {
         input.facts.push(("Launcher DMA-BUF".into(), d));
     }
+    // Linux: whether WebKit composites (its hardware acceleration as applied; what the page measured: inbox 94)
+    input.facts.extend(crate::render::compositing_report());
     // Linux: WebKit's sandbox in this start and the probe of bwrap; a finding when bwrap cannot start (crate::sandbox)
     if let Some(s) = crate::sandbox::state() {
         input.facts.push(("WebKit sandbox".into(), s.says()));
@@ -121,13 +123,25 @@ fn report_channel(version: &str) -> kiln_manage::report::ReportChannel {
     kiln_manage::report::ReportChannel { build: build.into(), beta: crate::distribution::beta(), follows }
 }
 
-/// Writes the support report zip to `path` (".zip" added when missing).
+/// "What's in this report" before Save or Send: the report built as `report_save` would write it (nothing is written),
+/// each file with its group, size and how often each replacement stands in it, the files `exclude` leaves out, and what
+/// a report never holds (kiln_manage::report::contents).
 #[tauri::command]
-pub async fn report_save(app: tauri::AppHandle, target: Option<LogTarget>, path: String) -> Result<ReportSaved, Error> {
+pub async fn report_preview(app: tauri::AppHandle, target: Option<LogTarget>, exclude: Option<Vec<String>>) -> Result<kiln_manage::report::Contents, Error> {
+    let mut input = report_input(&app, target)?;
+    input.exclude = exclude.unwrap_or_default();
+    blocking(move || Ok(kiln_manage::report::contents(&kiln_manage::report::build(&input)))).await
+}
+
+/// Writes the support report zip to `path` (".zip" added when missing). `exclude`: other mods' files the player left
+/// out ("What's in this report"; Kiln's own files cannot be left out).
+#[tauri::command]
+pub async fn report_save(app: tauri::AppHandle, target: Option<LogTarget>, path: String, exclude: Option<Vec<String>>) -> Result<ReportSaved, Error> {
     if path.trim().is_empty() {
         return Err(Error::invalid("Choose where to save the report."));
     }
-    let input = report_input(&app, target)?;
+    let mut input = report_input(&app, target)?;
+    input.exclude = exclude.unwrap_or_default();
     blocking(move || {
         let mut out = PathBuf::from(&path);
         if !out.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
@@ -135,7 +149,7 @@ pub async fn report_save(app: tauri::AppHandle, target: Option<LogTarget>, path:
         }
         let r = kiln_manage::report::build(&input);
         let size = kiln_manage::report::write_zip(&r, &out)?;
-        crate::commands::app::launcher_log("report", &format!("support report written ({size} bytes, {} findings)", r.findings.len()));
+        crate::commands::app::launcher_log("report", &format!("support report written ({size} bytes, {} findings, {} files left out)", r.findings.len(), r.left_out.len()));
         Ok(ReportSaved { path: out.display().to_string(), size, findings: r.findings, errors: r.errors })
     })
     .await

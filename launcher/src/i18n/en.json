@@ -3295,6 +3295,99 @@
     "title": "Shroudlink client addon",
     "switchOn": "Switch addon on"
   },
+  "reportContents": {
+    "title": "What's in this report",
+    "intro": "Every file in the report, and what Kiln replaced in it before anything leaves your PC. Kiln's own logs always stay in: support needs them to see what went wrong. Other mods' logs you can leave out.",
+    "total": {
+      "one": "{count} file, {size} before compression",
+      "other": "{count} files, {size} before compression"
+    },
+    "leftOutCount": {
+      "one": "{count} file left out",
+      "other": "{count} files left out"
+    },
+    "failed": "The report could not be read",
+    "view": "View summary.txt",
+    "hideSummary": "Hide summary.txt",
+    "viewTitle": "summary.txt",
+    "save": "Save",
+    "leaveOut": "Leave out",
+    "leaveOutAll": "Leave out all other mods' logs",
+    "leftOut": "Left out",
+    "leftOutHint": "Left out: not in the zip.",
+    "included": "In",
+    "include": "Put back",
+    "replaced": "Replaced: {list}",
+    "item": "{what} ({times})",
+    "times": {
+      "one": "{count} time",
+      "other": "{count} times"
+    },
+    "sep": ", ",
+    "nothing": "Nothing personal found in it.",
+    "group": {
+      "kiln": "Kiln's logs",
+      "mods": "Other mods' logs",
+      "settings": "Settings",
+      "listings": "Folder listings"
+    },
+    "groupHint": {
+      "kiln": "Support needs these to see what went wrong, so they always stay in.",
+      "mods": "Written by other mods and tools. Kiln cleans them the same way, but it can't know everything another mod writes, so you can leave them out.",
+      "settings": "Kiln's own state and your profile: which mods are on and what the last start did. Passwords and tokens in them are replaced.",
+      "listings": "Only the names, sizes and dates of files and folders. Nothing inside them."
+    },
+    "token": {
+      "home": "your home folder",
+      "user": "your user name",
+      "host": "your PC's name",
+      "steam-name": "Steam names",
+      "steamid": "Steam IDs",
+      "player": "player names",
+      "ip": "IP addresses",
+      "mac": "network card addresses",
+      "email": "email addresses",
+      "redacted": "passwords, tokens and keys"
+    },
+    "about": {
+      "summary": "The summary: what Kiln found, your system, the game and your profile",
+      "findings": "What Kiln found, for the support tools",
+      "kiln-log": "Kiln's main log from the last game start",
+      "proxy-log": "How Kiln was loaded into the game",
+      "eml-log": "Kiln's log for EML mods",
+      "tick-stats": "How long each world step took, minute by minute",
+      "greeneye-bridge": "Kiln's log for Greeneye mods",
+      "crash": "The newest crash report Kiln wrote",
+      "launcher-log": "The launcher's own log",
+      "game-start": "What the game printed when the launcher started it",
+      "kiln-other": "One of Kiln's logs",
+      "state": "What Kiln saw at the last start",
+      "profile": "Your profile: which mods are on",
+      "chain": "Which other loaders start with the game",
+      "kiln-json": "Kiln's settings in the game folder",
+      "receipt": "Which Kiln files are installed, with their checksums",
+      "game-folder": "The names in the game folder",
+      "kiln-folder": "The names in Kiln's folder",
+      "mod-folders": "The names in each mods folder",
+      "listing": "A list of file names",
+      "xhl-core": "XHL-Core's own log",
+      "greeneye": "Greeneye Loader's or a Greeneye mod's own log",
+      "building-tools": "Building Tools' own log",
+      "shroudlink": "ShroudLink's own log",
+      "auto-loot": "Auto Loot Plus' own log",
+      "optiscaler-settings": "OptiScaler's settings",
+      "optiscaler-log": "OptiScaler's own log",
+      "mod-log": "Another mod's own log"
+    },
+    "never": {
+      "title": "Never in a report",
+      "saves": "Your saves and worlds",
+      "settings": "Mod settings and Kiln's config folder (they can hold server passwords)",
+      "admin": "Kiln.Admin's token and address",
+      "mods": "What's inside your mods (only file names, sizes and dates)",
+      "steam": "Steam's own files"
+    }
+  },
   "supportReport": {
     "dialogTitle": "Save a support report",
     "saved": "Report saved",

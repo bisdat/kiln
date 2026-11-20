@@ -3231,6 +3231,96 @@
     "title": "Shroudlink クライアントアドオン",
     "switchOn": "アドオンをオン"
   },
+  "reportContents": {
+    "title": "このレポートの中身",
+    "intro": "レポートに入るすべてのファイルと、PC から何かが出る前に Kiln が置き換えた内容です。Kiln 自身のログは常に含まれます。何が起きたかをサポートが確かめるのに必要だからです。ほかのモッドのログは外せます。",
+    "total": {
+      "other": "{count} 個のファイル、圧縮前 {size}"
+    },
+    "leftOutCount": {
+      "other": "{count} 個を除外"
+    },
+    "failed": "レポートを読み込めませんでした",
+    "view": "summary.txt を見る",
+    "hideSummary": "summary.txt を閉じる",
+    "viewTitle": "summary.txt",
+    "save": "保存",
+    "leaveOut": "除外",
+    "leaveOutAll": "ほかのモッドのログをすべて除外",
+    "leftOut": "除外",
+    "leftOutHint": "除外済み: zip に入りません。",
+    "included": "含む",
+    "include": "戻す",
+    "replaced": "置き換え: {list}",
+    "item": "{what}（{times}）",
+    "times": {
+      "other": "{count} 回"
+    },
+    "sep": "、",
+    "nothing": "個人的な情報は見つかりませんでした。",
+    "group": {
+      "kiln": "Kiln のログ",
+      "mods": "ほかのモッドのログ",
+      "settings": "設定",
+      "listings": "フォルダーの一覧"
+    },
+    "groupHint": {
+      "kiln": "何が起きたかをサポートが確かめるのに必要なので、常に含まれます。",
+      "mods": "ほかのモッドやツールが書いたログです。Kiln は同じように情報を置き換えますが、ほかのモッドが書く内容をすべて把握することはできないため、外すこともできます。",
+      "settings": "Kiln の状態とプロファイルです。どのモッドがオンか、前回の起動で何が起きたかがわかります。パスワードやトークンは置き換えられます。",
+      "listings": "ファイルとフォルダーの名前、サイズ、日付だけです。中身は入りません。"
+    },
+    "token": {
+      "home": "ホームフォルダー",
+      "user": "ユーザー名",
+      "host": "PC 名",
+      "steam-name": "Steam の名前",
+      "steamid": "Steam ID",
+      "player": "プレイヤー名",
+      "ip": "IP アドレス",
+      "mac": "ネットワークカードのアドレス",
+      "email": "メールアドレス",
+      "redacted": "パスワード、トークン、キー"
+    },
+    "about": {
+      "summary": "概要: Kiln が見つけたこと、システム、ゲーム、プロファイル",
+      "findings": "Kiln が見つけたこと（サポートのツール向け）",
+      "kiln-log": "前回のゲーム起動時の Kiln のメインログ",
+      "proxy-log": "Kiln がゲームに読み込まれた方法",
+      "eml-log": "EML モッド用の Kiln のログ",
+      "tick-stats": "ワールドの各ステップにかかった時間（1 分ごと）",
+      "greeneye-bridge": "Greeneye モッド用の Kiln のログ",
+      "crash": "Kiln が書いた最新のクラッシュレポート",
+      "launcher-log": "ランチャー自身のログ",
+      "game-start": "ランチャーがゲームを起動したときのゲームの出力",
+      "kiln-other": "Kiln のログのひとつ",
+      "state": "前回の起動時に Kiln が確認した内容",
+      "profile": "プロファイル: どのモッドがオンか",
+      "chain": "ゲームと一緒に起動するほかのローダー",
+      "kiln-json": "ゲームフォルダー内の Kiln の設定",
+      "receipt": "インストール済みの Kiln のファイルとチェックサム",
+      "game-folder": "ゲームフォルダー内の名前",
+      "kiln-folder": "Kiln のフォルダー内の名前",
+      "mod-folders": "各モッドフォルダー内の名前",
+      "listing": "ファイル名の一覧",
+      "xhl-core": "XHL-Core 自身のログ",
+      "greeneye": "Greeneye Loader または Greeneye モッド自身のログ",
+      "building-tools": "Building Tools 自身のログ",
+      "shroudlink": "ShroudLink 自身のログ",
+      "auto-loot": "Auto Loot Plus 自身のログ",
+      "optiscaler-settings": "OptiScaler の設定",
+      "optiscaler-log": "OptiScaler 自身のログ",
+      "mod-log": "ほかのモッド自身のログ"
+    },
+    "never": {
+      "title": "レポートに絶対入らないもの",
+      "saves": "セーブデータとワールド",
+      "settings": "モッドの設定と Kiln の設定フォルダー（サーバーのパスワードが入っていることがあります）",
+      "admin": "Kiln.Admin のトークンとアドレス",
+      "mods": "モッドの中身（ファイル名、サイズ、日付のみ）",
+      "steam": "Steam 自身のファイル"
+    }
+  },
   "supportReport": {
     "dialogTitle": "サポートレポートを保存",
     "saved": "レポートを保存しました",

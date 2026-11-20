@@ -3423,6 +3423,105 @@
     "title": "Dodatek klienta Shroudlink",
     "switchOn": "Włącz dodatek"
   },
+  "reportContents": {
+    "title": "Co jest w tym raporcie",
+    "intro": "Każdy plik raportu i to, co Kiln w nim zastąpił, zanim cokolwiek opuści twój komputer. Własne logi Kiln zawsze zostają: wsparcie potrzebuje ich, żeby zobaczyć, co poszło nie tak. Logi innych modów możesz pominąć.",
+    "total": {
+      "one": "{count} plik, {size} przed kompresją",
+      "few": "{count} pliki, {size} przed kompresją",
+      "many": "{count} plików, {size} przed kompresją",
+      "other": "{count} pliku, {size} przed kompresją"
+    },
+    "leftOutCount": {
+      "one": "Pominięto {count} plik",
+      "few": "Pominięto {count} pliki",
+      "many": "Pominięto {count} plików",
+      "other": "Pominięto {count} pliku"
+    },
+    "failed": "Nie udało się odczytać raportu",
+    "view": "Pokaż summary.txt",
+    "hideSummary": "Ukryj summary.txt",
+    "viewTitle": "summary.txt",
+    "save": "Zapisz",
+    "leaveOut": "Pomiń",
+    "leaveOutAll": "Pomiń logi wszystkich innych modów",
+    "leftOut": "Pominięty",
+    "leftOutHint": "Pominięty: nie trafi do zipa.",
+    "included": "W raporcie",
+    "include": "Przywróć",
+    "replaced": "Zastąpiono: {list}",
+    "item": "{what} ({times})",
+    "times": {
+      "one": "{count} raz",
+      "few": "{count} razy",
+      "many": "{count} razy",
+      "other": "{count} razy"
+    },
+    "sep": ", ",
+    "nothing": "Nie znaleziono nic osobistego.",
+    "group": {
+      "kiln": "Logi Kiln",
+      "mods": "Logi innych modów",
+      "settings": "Ustawienia",
+      "listings": "Listy folderów"
+    },
+    "groupHint": {
+      "kiln": "Wsparcie potrzebuje ich, żeby zobaczyć, co poszło nie tak, więc zawsze zostają.",
+      "mods": "Zapisane przez inne mody i narzędzia. Kiln czyści je tak samo, ale nie może wiedzieć wszystkiego, co zapisuje inny mod, więc możesz je pominąć.",
+      "settings": "Stan Kiln i twój profil: które mody są włączone i co się działo przy ostatnim uruchomieniu. Hasła i tokeny są w nich zastąpione.",
+      "listings": "Tylko nazwy, rozmiary i daty plików i folderów. Bez ich zawartości."
+    },
+    "token": {
+      "home": "twój folder domowy",
+      "user": "twoja nazwa użytkownika",
+      "host": "nazwa twojego komputera",
+      "steam-name": "nazwy na Steamie",
+      "steamid": "identyfikatory Steam",
+      "player": "nazwy graczy",
+      "ip": "adresy IP",
+      "mac": "adresy karty sieciowej",
+      "email": "adresy e-mail",
+      "redacted": "hasła, tokeny i klucze"
+    },
+    "about": {
+      "summary": "Podsumowanie: co znalazł Kiln, twój system, gra i profil",
+      "findings": "Co znalazł Kiln, dla narzędzi wsparcia",
+      "kiln-log": "Główny log Kiln z ostatniego uruchomienia gry",
+      "proxy-log": "Jak Kiln został wczytany do gry",
+      "eml-log": "Log Kiln dla modów EML",
+      "tick-stats": "Ile trwał każdy krok świata, minuta po minucie",
+      "greeneye-bridge": "Log Kiln dla modów Greeneye",
+      "crash": "Najnowszy raport o awarii zapisany przez Kiln",
+      "launcher-log": "Własny log launchera",
+      "game-start": "Co wypisała gra, gdy launcher ją uruchomił",
+      "kiln-other": "Jeden z logów Kiln",
+      "state": "Co Kiln zobaczył przy ostatnim uruchomieniu",
+      "profile": "Twój profil: które mody są włączone",
+      "chain": "Jakie inne loadery uruchamiają się z grą",
+      "kiln-json": "Ustawienia Kiln w folderze gry",
+      "receipt": "Które pliki Kiln są zainstalowane, z ich sumami kontrolnymi",
+      "game-folder": "Nazwy w folderze gry",
+      "kiln-folder": "Nazwy w folderze Kiln",
+      "mod-folders": "Nazwy w każdym folderze modów",
+      "listing": "Lista nazw plików",
+      "xhl-core": "Własny log XHL-Core",
+      "greeneye": "Własny log Greeneye Loadera albo moda Greeneye",
+      "building-tools": "Własny log Building Tools",
+      "shroudlink": "Własny log ShroudLink",
+      "auto-loot": "Własny log Auto Loot Plus",
+      "optiscaler-settings": "Ustawienia OptiScalera",
+      "optiscaler-log": "Własny log OptiScalera",
+      "mod-log": "Własny log innego moda"
+    },
+    "never": {
+      "title": "Nigdy w raporcie",
+      "saves": "Twoje zapisy gry i światy",
+      "settings": "Ustawienia modów i folder konfiguracji Kiln (mogą zawierać hasła do serwerów)",
+      "admin": "Token i adres Kiln.Admin",
+      "mods": "Zawartość twoich modów (tylko nazwy, rozmiary i daty plików)",
+      "steam": "Własne pliki Steama"
+    }
+  },
   "supportReport": {
     "dialogTitle": "Zapisz raport dla wsparcia",
     "saved": "Zapisano raport",

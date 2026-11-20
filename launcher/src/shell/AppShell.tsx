@@ -25,6 +25,7 @@ import { InstallKilnModal, detectGames, useAutoDetect, useDetect, useInstallProm
 import { clock, usePlayControl, type PlayControl } from "./play";
 import { applyingWord } from "./applying";
 import { Stage, flatDrawing, stageInput, wakeStage, type Heat } from "./Stage";
+import { reportFacts, reportFrames } from "./renderReport";
 import { startWords } from "./startProgress";
 import { useT } from "../i18n";
 import { CommunityDesktopHost } from "../community/Host";
@@ -226,6 +227,28 @@ export function AppShell() {
   // the CPU, about 24 ms a move in a 2560 x 1440 window; it stands still there, as without the GPU
   const [flat] = useState(flatDrawing);
   const torchOn = lit && !still && !flat;
+  // what the page sees of WebKit's drawing, into launcher.log (renderReport.ts): the facts once the splash is gone (the
+  // fire decided by then), a frame sample on Play while the window is visible (tried again when it comes back)
+  const litNow = useRef(lit);
+  litNow.current = lit;
+  const onPlay = useRef(isPlay);
+  onPlay.current = isPlay;
+  useEffect(() => {
+    if (!ready) return;
+    const timer = setTimeout(() => reportFacts(litNow.current), 1000);
+    return () => clearTimeout(timer);
+  }, [ready]);
+  useEffect(() => {
+    if (!ready || !isPlay) return;
+    let cancel = reportFrames(() => onPlay.current);
+    const shown = () => {
+      if (document.visibilityState !== "visible") return;
+      cancel();
+      cancel = reportFrames(() => onPlay.current);
+    };
+    document.addEventListener("visibilitychange", shown);
+    return () => { document.removeEventListener("visibilitychange", shown); cancel(); };
+  }, [ready, isPlay]);
   useEffect(() => {
     const app = root.current, l = light.current;
     if (!torchOn || !app || !l) return;

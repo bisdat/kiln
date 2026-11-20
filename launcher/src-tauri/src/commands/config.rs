@@ -283,12 +283,15 @@ mod kiln_graphics_tests {
         assert_eq!(doc.values["graphics"]["upscaler"], "amd");
         let doc = kiln_set(&path, "graphics.amdUpscaler", Some(&json!("fsr3"))).unwrap();
         assert_eq!(doc.values["graphics"]["amdUpscaler"], "fsr3");
+        // (0.2.0-dev.29.20) "fsr4": FSR 4 as an explicit, experimental choice; "auto" runs FSR 3.1
+        let doc = kiln_set(&path, "graphics.amdUpscaler", Some(&json!("fsr4"))).unwrap();
+        assert_eq!(doc.values["graphics"]["amdUpscaler"], "fsr4");
         let doc = kiln_set(&path, "graphics.readout", Some(&json!(true))).unwrap();
         assert!(doc.errors.is_empty(), "{:?}", doc.errors);
         assert!(doc.text.contains("// keep me"));
         for (key, bad) in [("graphics.fpsCap", json!(501)), ("graphics.fpsCap", json!(1.5)), ("graphics.dlssPreset", json!("N")),
             ("graphics.dlssRenderScale", json!(0.2)), ("graphics.dlssRenderScale", json!(1.1)), ("graphics.readout", json!(1)),
-            ("graphics.upscaler", json!("dlss")), ("graphics.upscaler", json!(7)), ("graphics.amdUpscaler", json!("fsr4"))] {
+            ("graphics.upscaler", json!("dlss")), ("graphics.upscaler", json!(7)), ("graphics.amdUpscaler", json!("fsr5"))] {
             assert!(kiln_set(&path, key, Some(&bad)).is_err(), "{key} = {bad}");
         }
         let doc = kiln_set(&path, "graphics.fpsCap", None).unwrap();

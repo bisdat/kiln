@@ -51,10 +51,11 @@ already offer (Kiln is not loading, Kiln did not start, Kiln update failed, No m
 startup pass on Engines, the crash notice (a banner on Play after the game closed while Kiln wrote a crash report in
 that run; a line on Deck Home), the Community page and the Deck's tab and Home. Each preselects a kind. Desktop: write
 (one line of up to 90 characters, the kind, up to 1500 more), check what is sent (the public post as it will look, the
-zip's size and files, who sees the zip: the Kiln team only, everyone in #support, or nobody; what is never in it), sent
+zip's size and what was replaced in it, "What's in this report" with a box to leave out each other mod's log
+(support-report.md, "What's in this report"), who sees the zip: the Kiln team only, everyone in #support, or nobody; what is never in it), sent
 (Open in Discord). Deck: pick what went wrong and when, check and send (Type asks Steam for its keyboard), sent with a
-QR code. The report is the existing support report (`kiln_manage::report`), built once when the dialog opens and sent
-as built. Its public post (`kiln_manage::community::post`) holds the player's words, the kind, the report's findings
+QR code. The report is the existing support report (`kiln_manage::report`), built once when the dialog opens (again
+when the player leaves a log out or puts it back) and sent as built. Its public post (`kiln_manage::community::post`) holds the player's words, the kind, the report's findings
 and the versions: Kiln, the launcher, the system and the Proton or Wine build, the game's build, how many mods are on.
 Never the mod list: a mod is named only when a finding names it. Every error keeps the draft (not signed in: the
 sign-in comes back to the check step; not in the server: Join and "I've joined"; offline: Save report; frostdev.io down:

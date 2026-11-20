@@ -267,6 +267,13 @@ enum Cmd {
         /// Print summary.txt instead of writing the zip
         #[arg(long, conflicts_with = "out")]
         print: bool,
+        /// Leave out another mod's own file (its path in the zip, e.g. game/BuildingTools.log; repeatable), or
+        /// `other-mods` for all of them. Kiln's own logs, its settings and the listings always stay in
+        #[arg(long, value_name = "PATH")]
+        exclude: Vec<String>,
+        /// Print what the report holds (each file, its size and what was replaced in it) instead of writing the zip
+        #[arg(long, conflicts_with_all = ["out", "print"])]
+        contents: bool,
     },
     /// Runtime bundles: create, verify, install into a game folder, uninstall (docs/kiln/launcher/bundle.md)
     Bundle {
@@ -492,7 +499,7 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
             ops::backup(&load(&name)?)?;
         }
         Cmd::List => ops::list()?,
-        Cmd::Report { name, dir, out, print } => return report::run(report::ReportArgs { name, dir, out, print }),
+        Cmd::Report { name, dir, out, print, exclude, contents } => return report::run(report::ReportArgs { name, dir, out, print, exclude, contents }),
         Cmd::Bundle { cmd } => {
             return match cmd {
                 BundleCmd::Create { stage, out, git, epoch } => bundle::create(&stage, &out, git, epoch),

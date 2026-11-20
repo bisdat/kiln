@@ -17,6 +17,7 @@ import { updateMockHandlers } from "./mockUpdate";
 import { deckMockHandlers } from "../deck/mockDeck";
 import { nexusMockHandlers, NEXUS_MOCK_ENABLED } from "./mockNexus";
 import { communityMockHandlers, communityMockHooks } from "./mockCommunity";
+import { mockReportContents } from "./mockReport";
 import { updatesMockHandlers } from "./mockUpdates";
 import { MOCK_PREVIEW, vendorMockHandlers } from "./mockVendor";
 import { chainMockHandlers } from "./mockChain";
@@ -75,6 +76,8 @@ const gateOf = (name: string) => { let g = gates.get(name); if (!g) { g = { open
 const commandPlans: Record<string, CommandPlan[]> = typeof window === "undefined" ? {} :
   (window as unknown as { __kilnMockPlans?: Record<string, CommandPlan[]> }).__kilnMockPlans ?? {};
 const commandCalls: string[] = [];
+/** report_save's `exclude` each time ("What's in this report"; tests: `__kilnMock.reportSaves()`). */
+const reportSaves: string[][] = [];
 
 // ---------------------------------------------------------------- games
 
@@ -957,6 +960,7 @@ const handlers: Record<string, Handler> = {
     noWebgl: render.mode === "software", distribution: MOCK_DISTRIBUTION, nexusEnabled: NEXUS_MOCK_ENABLED, render: { ...render }, desktop: { ...desktop }, sandbox: { ...sandbox },
     ...(MOCK_PREVIEW.length ? { preview: [...MOCK_PREVIEW] } : {}), ...(OWN_FILES.length ? { ownFilesMissing: [...OWN_FILES] } : {}) }),
   app_started: () => null,
+  app_render_report: () => null,
   app_render_set: (a) => {
     render = { ...render, marker: !!a.software, markerWhy: a.software ? `Turned on in Settings (${new Date().toISOString()})` : undefined };
     return { ...render };
@@ -1490,9 +1494,11 @@ const handlers: Record<string, Handler> = {
   logs_crash_reports: () => crashes,
   report_save: (a) => {
     if (!S(a.path).trim()) reject("invalid_argument", "Choose where to save the report.");
+    reportSaves.push(Array.isArray(a.exclude) ? a.exclude.map(String) : []);
     const path = /\.zip$/i.test(S(a.path)) ? S(a.path) : `${S(a.path)}.zip`;
     return { path, size: 48_213, findings: mockReportFindings, errors: [] } satisfies ReportSaved;
   },
+  report_preview: (a) => mockReportContents(a.exclude),
   report_summary: () => [
     "Kiln support report, 2026-11-10T12:00:00Z",
     "kiln-launcher 0.2.0-dev (mock); Kiln in the game: 0.2.0-dev",
@@ -1920,6 +1926,8 @@ export function mockEmit(name: string, payload: unknown): void {
 // Playwright and the dev console reach the fake game through this (mock mode only).
 if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { community: communityMockHooks(mockEmit), crash: mockCrash, scriptStoppedStart, externalStart: mockExternalStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
   calls: () => [...commandCalls],
+  /** Each report_save's `exclude`, in order. */
+  reportSaves: () => reportSaves.map((x) => [...x]),
   planCommand: (cmd: string, plan: CommandPlan) => { (commandPlans[cmd] ??= []).push(plan); },
   openGate: (name: string) => { const g = gateOf(name); g.open = true; g.waiters.splice(0).forEach((w) => w()); },
   planActivation: (report: Pick<Activation, "retained" | "keptFiles" | "warnings">) => { activationPlan = report; },

@@ -5,13 +5,14 @@
 // with the draft.
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "../api/commands";
 import type { KnownAction, ReportDraft, ReportPreview } from "../api/commands";
 import { useT } from "../i18n";
 import { Banner, Button, Cones, Field, KeyValue, Modal, Skeleton, StatusPill, TextArea, TextInput, fmtBytes, toast } from "../ui";
 import { INVITE, errKind, openInDiscord, refreshCommunity, useCommunity, useCommunityUi, useSendOpen } from "./state";
 import { KINDS, discordWords, kindKey, rateText, versionsLine } from "./parts";
+import { ReportContentsView, SummaryText, leftOutText, replacedInAll, replacedText } from "../components/ReportContents";
 
 const MAX = 90;
 const WORDS_MAX = 1500;
@@ -34,8 +35,14 @@ export function SendDialog() {
   const d = s.draft;
   const st = useCommunity();
   const acct = st.data?.account ?? null;
-  const prep = useQuery({ queryKey: ["community", "prepare", s.session], queryFn: () => api.communityReportPrepare(s.target, s.from), staleTime: Infinity, gcTime: 30 * 60_000, retry: false });
+  // other mods' logs the player left out ("What's in this report"): each change prepares the report again
+  const [exclude, setExclude] = useState<string[]>([]);
+  const prep = useQuery({ queryKey: ["community", "prepare", s.session, exclude], queryFn: () => api.communityReportPrepare(s.target, s.from, exclude), staleTime: Infinity, gcTime: 30 * 60_000,
+    retry: false, placeholderData: keepPreviousData });
   const p = prep.data;
+  // Send sends the report prepared for the boxes as they are now, never the one before a change
+  const stale = prep.isPlaceholderData;
+  const [summary, setSummary] = useState(false);
   const [err, setErr] = useState<SendErr>(null);
   const [busy, setBusy] = useState(false);
   const [files, setFiles] = useState(false);
@@ -117,7 +124,7 @@ export function SendDialog() {
       footer={<>
         <Button onClick={() => { setErr(null); ui.setSend({ step: "write" }); }} disabled={busy}>{t("common.back")}</Button>
         {canSend
-          ? <Button variant="primary" loading={busy} disabled={!st.data?.online || !p} data-testid="kc-send-now" onClick={() => send()}>{t("community.send.check.send")}</Button>
+          ? <Button variant="primary" loading={busy} disabled={!st.data?.online || !p || stale} data-testid="kc-send-now" onClick={() => send()}>{t("community.send.check.send")}</Button>
           : <Button variant="primary" data-testid="kc-send-signin" onClick={() => { useSendOpen.setState({ open: false }); ui.openSignIn(true); }}>{t("community.send.check.signInToSend")}</Button>}
       </>}>
       {prep.error ? <Banner tone="err" title={t("community.send.err.prepareTitle")}>{(prep.error as { message?: string }).message ?? ""}</Banner> : !p ? <Skeleton lines={5} /> : (
@@ -140,9 +147,19 @@ export function SendDialog() {
             <div className="kc-block-head">
               <span className="k-label">{t("community.send.check.zip")}</span>
               <span className="k-hint">{zipLabel}</span>
-              <button type="button" className="k-link kc-files-toggle" data-testid="kc-files-toggle" onClick={() => setFiles(!files)}>{files ? t("community.send.check.hideFiles") : t("community.send.check.showFiles")}</button>
+              <button type="button" className="k-link kc-files-toggle" data-testid="kc-files-toggle" onClick={() => setFiles(!files)}>{files ? t("community.send.check.hideFiles") : t("reportContents.title")}</button>
             </div>
-            {files && <ul className="kc-files" data-testid="kc-files">{p.files.map((f) => <li key={f.path}><span className="k-mono">{f.path}</span><span className="k-muted">{fmtBytes(f.size)}</span></li>)}</ul>}
+            {p.contents && <span className="k-hint" data-testid="kc-replaced">{[leftOutText(p.contents), replacedText(replacedInAll(p.contents))].filter(Boolean).join(". ")}</span>}
+            {files && p.contents && (
+              <div className="k-stack kc-files-contents" style={{ gap: 10 }} data-testid="kc-files">
+                <div className="krc-total">
+                  <span className="k-label">{t("reportContents.title")}</span>
+                  <Button size="s" variant="ghost" data-testid="krc-view" onClick={() => setSummary(!summary)}>{summary ? t("reportContents.hideSummary") : t("reportContents.view")}</Button>
+                </div>
+                {summary && <SummaryText text={p.contents.summary} />}
+                <ReportContentsView contents={p.contents} exclude={exclude} onExclude={setExclude} disabled={busy} />
+              </div>
+            )}
             <div className="kc-who" role="radiogroup" aria-label={t("community.send.check.who")}>
               <div className="k-label">{t("community.send.check.who")}</div>
               {(["team", "public", "none"] as const).map((z) => (

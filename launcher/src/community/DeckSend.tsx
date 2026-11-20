@@ -3,7 +3,7 @@
 // first on the check step. Sent: a QR code opens the post on the phone. The draft lives in the shared store, so it
 // survives a sign-in and every error.
 import { useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "../api/commands";
 import type { ProblemKind } from "../api/commands";
 import { t as tt, useT } from "../i18n";
@@ -13,6 +13,8 @@ import { errKind, refreshCommunity, useCommunity, useCommunityUi, useSendOpen } 
 import { KINDS, QrCode, discordWords, kindKey, rateText, versionsLine, whenKey } from "./parts";
 import { Pick } from "./DeckCommunity";
 import { DeckSignIn } from "./SignIn";
+import { GROUPS, aboutText, neverText, replacedInAll, replacedText, toggled, totalText } from "../components/ReportContents";
+import "../components/report-contents.css";
 
 const WHENS = ["start", "menu", "load", "play", "join", "other"] as const;
 /** The title the two picks make: "The game crashes when I load a world". */
@@ -23,7 +25,7 @@ export function DeckSendHost() {
   return open ? <DeckSend /> : null;
 }
 
-type Step = "what" | "when" | "check" | "type" | "sent" | "known" | "files" | "signin";
+type Step = "what" | "when" | "check" | "type" | "sent" | "known" | "files" | "summary" | "signin";
 
 function DeckSend() {
   const t = useT();
@@ -33,8 +35,12 @@ function DeckSend() {
   const d = s.draft;
   const st = useCommunity();
   const acct = st.data?.account ?? null;
-  const prep = useQuery({ queryKey: ["community", "prepare", s.session], queryFn: () => api.communityReportPrepare(s.target, s.from), staleTime: Infinity, gcTime: 30 * 60_000, retry: false });
+  // other mods' logs left out on "What's in this report": each change prepares the report again
+  const [exclude, setExclude] = useState<string[]>([]);
+  const prep = useQuery({ queryKey: ["community", "prepare", s.session, exclude], queryFn: () => api.communityReportPrepare(s.target, s.from, exclude), staleTime: Infinity, gcTime: 30 * 60_000,
+    retry: false, placeholderData: keepPreviousData });
   const p = prep.data;
+  const stale = prep.isPlaceholderData;
   const [step, setStep] = useState<Step>(s.step === "sent" ? "sent" : s.step === "check" ? "check" : "what");
   const [err, setErr] = useState<{ kind: string; detail: Record<string, unknown> } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -90,16 +96,52 @@ function DeckSend() {
       </Dialog>
     );
   }
-  if (step === "files" && p) {
+  if (step === "summary" && p) {
     return (
-      <Dialog key="files" name="send-files" title={t("community.deck.whatIsSent")} wide onClose={() => setStep("check")} backLabel={t("common.back")}
+      <Dialog key="summary" name="send-summary" title={t("reportContents.viewTitle")} wide onClose={() => setStep("files")} backLabel={t("common.back")}
+        buttons={<DeckButton primary onClick={() => setStep("files")}>{t("common.ok")}</DeckButton>}>
+        <pre className="deck-scroll krc-summary deck-mono" tabIndex={0} data-deck-a="-" data-deck-id="summary-text" data-testid="deck-summary">{p.contents.summary}</pre>
+      </Dialog>
+    );
+  }
+  if (step === "files" && p) {
+    // "What's in this report" with the pad: the post, then each file as a row (other mods' logs: A leaves one out)
+    const c = p.contents;
+    const mods = c.files.filter((f) => f.excludable);
+    const allOut = mods.length > 0 && mods.every((f) => exclude.includes(f.path));
+    const replaced = replacedText(replacedInAll(c));
+    return (
+      <Dialog key="files" name="send-files" title={t("reportContents.title")} wide onClose={() => setStep("check")} backLabel={t("common.back")}
         buttons={<DeckButton primary onClick={() => setStep("check")}>{t("common.ok")}</DeckButton>}>
-        <div className="deck-scroll kdc-sent-list" tabIndex={0} data-deck-a="-" data-deck-id="sent-list" data-testid="deck-what-is-sent">
+        <div className="deck-scroll kdc-sent-list" data-testid="deck-what-is-sent">
           <p className="deck-label">{t("community.send.check.public")}</p>
           <p>{d.title || pickedTitle(d.kind, d.when)}. {t(`community.kind.${kindKey(d.kind)}`)}. {p.findings.map((f) => f.text).join(" ")}</p>
           <p className="deck-dim">{versionsLine(p.versions)}</p>
           <p className="deck-label">{t("community.send.check.zip")} · {fmtBytes(p.size)}</p>
-          <ul>{p.files.map((f) => <li key={f.path} className="deck-mono">{f.path}</li>)}</ul>
+          <p className="deck-dim" data-testid="deck-contents-total">{totalText(c)}{replaced ? `. ${replaced}` : ""}</p>
+          <div className="deck-list">
+            <Pick id="view-summary" title={t("reportContents.view")} a={tt("deck.shared.read")} onClick={() => setStep("summary")} />
+            {mods.length > 1 && <Pick id="leave-all" title={t("reportContents.leaveOutAll")} a={t("community.deck.toggle")} on={allOut}
+              end={<Word tone={allOut ? "warn" : "idle"}>{allOut ? t("reportContents.leftOut") : t("reportContents.included")}</Word>} onClick={() => setExclude(toggled(exclude, c, null))} />}
+            {GROUPS.map((g) => {
+              const files = c.files.filter((f) => f.group === g);
+              if (!files.length) return null;
+              return [
+                <p key={`h-${g}`} className="deck-label krc-deck-head" data-testid={`deck-group-${g}`}>{t(`reportContents.group.${g}`)}</p>,
+                <p key={`n-${g}`} className="deck-note">{t(`reportContents.groupHint.${g}`)}</p>,
+                ...files.map((f) => {
+                  const out = exclude.includes(f.path);
+                  const sub = [`${f.path} · ${fmtBytes(f.size)}`, out ? t("reportContents.leftOutHint") : replacedText(f.replaced) ?? t("reportContents.nothing")].join(" · ");
+                  return <Pick key={f.path} id={`file-${f.path}`} title={aboutText(f)} sub={sub}
+                    a={f.excludable ? (out ? t("reportContents.include") : t("reportContents.leaveOut")) : tt("deck.shared.read")}
+                    end={f.excludable ? <Word tone={out ? "warn" : "ember"}>{out ? t("reportContents.leftOut") : t("reportContents.included")}</Word> : undefined}
+                    onClick={() => { if (f.excludable) setExclude(toggled(exclude, c, f.path)); }} />;
+                }),
+              ];
+            })}
+          </div>
+          <p className="deck-label">{t("reportContents.never.title")}</p>
+          <ul>{c.never.map((n) => <li key={n.id}>{neverText(n)}</li>)}</ul>
           <p className="deck-dim">{t("community.send.check.redacted")}</p>
         </div>
       </Dialog>
@@ -132,14 +174,14 @@ function DeckSend() {
   return (
     <Dialog key="check" name="send-check" title={t("community.deck.check")} wide onClose={() => setStep("when")} backLabel={t("common.back")}
       buttons={acct
-        ? <DeckButton primary disabled={busy || !st.data?.online || !p} onClick={() => void send()}>{busy ? t("community.send.check.sending") : t("community.send.check.send")}</DeckButton>
+        ? <DeckButton primary disabled={busy || !st.data?.online || !p || stale} onClick={() => void send()}>{busy ? t("community.send.check.sending") : t("community.send.check.send")}</DeckButton>
         : <DeckButton primary onClick={() => setStep("signin")}>{t("community.send.check.signInToSend")}</DeckButton>}>
       <div className="deck-list" data-testid="deck-send-check">
         {p?.known && <Pick id="known" title={p.known.title} sub={t("community.send.known.fixes")} end={<Word tone="warn">{t("community.send.known.word")}</Word>} a={tt("deck.shared.read")} onClick={() => setStep("known")} />}
         <Pick id="title" title={d.title || pickedTitle(d.kind, d.when)} sub={t("community.send.check.postTitle")} a={t("community.deck.edit")} onClick={() => setStep("what")} end={<span className="deck-dim">{t("community.deck.edit")}</span>} />
         <Pick id="words" title={d.text || t("community.deck.wordsNone")} sub={t("community.send.check.words")} a={t("community.deck.type")} onClick={() => setStep("type")} end={<span className="deck-dim">{t("community.deck.type")}</span>} />
         <Pick id="zip" title={zipWord} sub={`${t("community.deck.zipRow")}${p ? `, ${fmtBytes(p.size)}` : ""}`} a={t("community.deck.toggle")} onClick={() => ui.setDraft({ zip: nextZip })} end={<span className="deck-dim">{t("community.deck.toggle")}</span>} />
-        <Pick id="files" title={t("community.deck.whatIsSent")} sub={p ? p.findings.map((f) => f.text).join(" ") : t("community.send.checking")} a={tt("deck.shared.read")} onClick={() => setStep("files")} />
+        <Pick id="files" title={t("reportContents.title")} sub={p ? totalText(p.contents) : t("community.send.checking")} a={tt("deck.shared.read")} onClick={() => setStep("files")} />
       </div>
       {!acct && <p className="deck-note">{t("community.send.check.signInHint")}</p>}
       {acct && !err && <p className="deck-note">{t("community.send.check.as", { name: acct.name })}. {t("community.send.check.publicHint")}</p>}

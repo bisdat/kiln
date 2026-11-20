@@ -383,6 +383,14 @@ pub async fn app_started() -> Result<(), Error> {
     Ok(())
 }
 
+/// What the page measured about its drawing (launcher/src/shell/renderReport.ts): whether WebKit composites, WebGL, the
+/// window, a frame sample on Play. One line in launcher.log each, at most two a start (crate::render::page_report).
+#[tauri::command]
+pub async fn app_render_report(report: crate::render::PageRender) -> Result<(), Error> {
+    crate::render::page_report(&report);
+    Ok(())
+}
+
 /// Settings, "Draw the launcher without the GPU": sets (`software`) or clears the marker; applies at the next start.
 /// Linux only (else `unsupported`).
 #[tauri::command]

@@ -539,6 +539,187 @@ pub fn leaving() {
     }
 }
 
+// ---------------------------------------------------------------- does WebKit composite (inbox 94)
+
+/// Where WebKitGTK composites nothing although the launcher draws with the GPU (inbox 94, an RTX 5080 on KDE Wayland:
+/// "WebKit's DMA-BUF renderer on" in launcher.log, yet the page answered (-webkit-transform-3d) with false, scrolling and
+/// page changes lagged and the torch stood still). WebKitGTK 2.50 turns hardware acceleration off for the whole process
+/// by itself, before any page, when one of its checks fails (HardwareAccelerationManager, AcceleratedBackingStore::
+/// checkRequirements): then the webview's policy reads Never and every change is painted again on the CPU. Its only
+/// trace is a GLib warning on stderr, so launcher.log names the checks here, the same ones WebKit makes, in its order:
+/// - `WEBKIT_DISABLE_COMPOSITING_MODE` set (not "0");
+/// - `WEBKIT_DISABLE_DMABUF_RENDERER` set (not "0"): no way to hand frames over, so no compositing at all;
+/// - EGL's client extensions without `EGL_KHR_platform_gbm` and `EGL_MESA_platform_surfaceless` (on an NVIDIA-only
+///   system the egl-gbm library provides the first);
+/// - GTK 3 cannot make a GL context for a window (`gdk_window_create_gl_context`: GTK's own EGL on Wayland, GLX on X11).
+///
+/// `gtk_gl` is None when it was not tried. Empty: none of them failed here.
+pub fn webkit_off_reasons(no_compositing: Option<&str>, no_dmabuf: Option<&str>, egl_client: Option<&str>, gtk_gl: Option<Result<(), String>>) -> Vec<String> {
+    let set = |v: Option<&str>| v.filter(|v| *v != "0").map(str::to_string);
+    let mut out = Vec::new();
+    if let Some(v) = set(no_compositing) {
+        out.push(format!("WEBKIT_DISABLE_COMPOSITING_MODE={v}"));
+    }
+    if let Some(v) = set(no_dmabuf) {
+        out.push(format!("{DMABUF_VAR}={v} (WebKitGTK then has no way to hand composited frames over)"));
+    }
+    match egl_client {
+        None => out.push("EGL answers no client extensions (libEGL.so.1 missing, or it predates EGL_EXT_client_extensions)".into()),
+        Some(ext) => {
+            let has = |e: &str| ext.split_ascii_whitespace().any(|x| x == e);
+            if !has("EGL_KHR_platform_gbm") && !has("EGL_MESA_platform_surfaceless") {
+                out.push("EGL offers neither EGL_KHR_platform_gbm nor EGL_MESA_platform_surfaceless (NVIDIA: is egl-gbm installed? Mesa's EGL gives the second)".into());
+            }
+        }
+    }
+    if let Some(Err(e)) = gtk_gl {
+        out.push(format!("GTK could not make a GL context: {}", e.trim()));
+    }
+    out
+}
+
+/// What the page measured about its drawing (`app_render_report`, launcher/src/shell/renderReport.ts): the facts once
+/// after its start, the frame sample once on Play. Every field is optional: each call sends what it has.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageRender {
+    /// `(-webkit-transform-3d)`: WebKit composites (the frontend's flatDrawing is its negation).
+    #[serde(default)]
+    pub composited: Option<bool>,
+    /// WebGL's version and renderer, or "none".
+    #[serde(default)]
+    pub webgl: Option<String>,
+    #[serde(default)]
+    pub dpr: Option<f64>,
+    /// The window's CSS size.
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(default)]
+    pub reduced_motion: Option<bool>,
+    /// The fire burns (WebGL, Animated fire on).
+    #[serde(default)]
+    pub fire: Option<bool>,
+    #[serde(default)]
+    pub frames: Option<FrameSample>,
+}
+
+/// requestAnimationFrame over a stretch of Play: how often the page got a frame.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrameSample {
+    pub ms: f64,
+    pub frames: u32,
+    pub p50: f64,
+    pub p95: f64,
+    pub max: f64,
+    /// Frames that came more than 50 ms after the one before.
+    pub slow: u32,
+}
+
+/// The page's line in launcher.log ("the page: ..."); a short, plain text whatever the page sent.
+pub fn says_page(r: &PageRender) -> String {
+    let yn = |b: bool| if b { "yes" } else { "no" };
+    let mut parts = Vec::new();
+    if let Some(c) = r.composited {
+        parts.push(if c { "WebKit composites: yes".to_string() } else {
+            "WebKit composites: no ((-webkit-transform-3d) is false: every change is painted again on the CPU; the page's flat mode)".to_string()
+        });
+    }
+    if let Some(w) = &r.webgl {
+        let w: String = w.chars().filter(|c| !c.is_control()).take(160).collect();
+        parts.push(format!("WebGL: {w}"));
+    }
+    if let (Some(w), Some(h)) = (r.width, r.height) {
+        parts.push(format!("window {w} x {h} CSS px"));
+    }
+    if let Some(d) = r.dpr.filter(|d| d.is_finite()) {
+        parts.push(format!("devicePixelRatio {d}"));
+    }
+    if let Some(m) = r.reduced_motion {
+        parts.push(format!("prefers-reduced-motion: {}", yn(m)));
+    }
+    if let Some(f) = r.fire {
+        parts.push(format!("the fire: {}", if f { "on" } else { "off" }));
+    }
+    if let Some(s) = &r.frames {
+        let rate = if s.ms > 0.0 { s.frames as f64 * 1000.0 / s.ms } else { 0.0 };
+        parts.push(format!("frames on Play over {:.0} ms: {} ({rate:.1} a second), p50 {:.1} ms, p95 {:.1} ms, max {:.1} ms, {} over 50 ms",
+            s.ms, s.frames, s.p50, s.p95, s.max, s.slow));
+    }
+    format!("the page: {}", if parts.is_empty() { "nothing".to_string() } else { parts.join("; ") })
+}
+
+/// How many `app_render_report` lines a start writes at most (the facts and the frame sample).
+const PAGE_LINES: usize = 2;
+static PAGE_SAID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// WebKit's hardware acceleration in this start (Linux, [`window_created`]), and the page's facts: the support report.
+static ACCEL: OnceLock<String> = OnceLock::new();
+static PAGE: Mutex<Option<String>> = Mutex::new(None);
+
+/// `app_render_report`: one line into launcher.log, at most [`PAGE_LINES`] a start.
+pub fn page_report(r: &PageRender) {
+    if PAGE_SAID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= PAGE_LINES {
+        return;
+    }
+    let line = says_page(r);
+    if r.composited.is_some() {
+        *PAGE.lock().unwrap_or_else(|e| e.into_inner()) = Some(line.trim_start_matches("the page: ").to_string());
+    }
+    log(&line);
+}
+
+/// The support report's lines: WebKit's hardware acceleration as applied, and what the page said about its drawing.
+pub fn compositing_report() -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if let Some(a) = ACCEL.get() {
+        out.push(("Launcher compositing".into(), a.clone()));
+    }
+    if let Some(p) = PAGE.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+        out.push(("Launcher page".into(), p));
+    }
+    out
+}
+
+/// EGL's client extensions (`eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS)`), from the libEGL WebKit loaded.
+#[cfg(target_os = "linux")]
+fn egl_client_extensions() -> Option<String> {
+    use std::ffi::{CStr, c_char, c_void};
+    const EGL_EXTENSIONS: i32 = 0x3055;
+    // SAFETY: dlopen/dlsym of a system library by name; eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS) is defined by
+    // EGL_EXT_client_extensions (NULL where unsupported) and returns a static string. The handle is kept (WebKit has the
+    // library loaded anyway).
+    unsafe {
+        let lib = libc::dlopen(c"libEGL.so.1".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
+        if lib.is_null() {
+            return None;
+        }
+        let f = libc::dlsym(lib, c"eglQueryString".as_ptr());
+        if f.is_null() {
+            return None;
+        }
+        let query: extern "C" fn(*mut c_void, i32) -> *const c_char = std::mem::transmute(f);
+        let p = query(std::ptr::null_mut(), EGL_EXTENSIONS);
+        (!p.is_null()).then(|| CStr::from_ptr(p).to_string_lossy().into_owned())
+    }
+}
+
+/// GTK 3's GL check, as WebKitGTK makes it: a GL context for a realized popup window. Main thread only.
+#[cfg(target_os = "linux")]
+fn gtk_gl_check() -> Result<(), String> {
+    use gtk::prelude::*;
+    let w = gtk::Window::new(gtk::WindowType::Popup);
+    w.realize();
+    let r = match w.window() {
+        Some(gw) => gw.create_gl_context().map(|_| ()).map_err(|e| e.to_string()),
+        None => Err("the test window has no GdkWindow".into()),
+    };
+    // SAFETY: our own toplevel, never shown, referenced nowhere else.
+    unsafe { w.destroy() };
+    r
+}
+
 // ---------------------------------------------------------------- what the UI sees
 
 /// `app_info.render` (Linux only).
@@ -914,13 +1095,28 @@ pub fn window_created(app: &tauri::AppHandle) {
     let _ = w.with_webview(move |pw| {
         use webkit2gtk::{HardwareAccelerationPolicy, SettingsExt, WebViewExt};
         let wv = pw.inner();
-        if software && let Some(s) = WebViewExt::settings(&wv) {
-            s.set_hardware_acceleration_policy(HardwareAccelerationPolicy::Never);
-            // WebKitGTK 2.54 still offers WebGL without compositing (through EGL: the GPU's driver); the page then
-            // draws its CSS mouth (app_info.noWebgl), the admin map says WebGL2 is missing
-            s.set_enable_webgl(false);
-            log(&format!("the webview's hardware acceleration policy: {:?}, WebGL: {}", s.hardware_acceleration_policy(),
-                if s.enables_webgl() { "on" } else { "off" }));
+        if let Some(s) = WebViewExt::settings(&wv) {
+            if software {
+                s.set_hardware_acceleration_policy(HardwareAccelerationPolicy::Never);
+                // WebKitGTK 2.54 still offers WebGL without compositing (through EGL: the GPU's driver); the page then
+                // draws its CSS mouth (app_info.noWebgl), the admin map says WebGL2 is missing
+                s.set_enable_webgl(false);
+            }
+            let policy = s.hardware_acceleration_policy();
+            log(&format!("the webview's hardware acceleration policy: {policy:?}, WebGL: {}", if s.enables_webgl() { "on" } else { "off" }));
+            // with the GPU, Never is WebKit's own answer: it composites nothing (inbox 94); say which check failed
+            let accel = if !software && policy == HardwareAccelerationPolicy::Never {
+                let env = |k: &str| std::env::var(k).ok();
+                let reasons = webkit_off_reasons(env("WEBKIT_DISABLE_COMPOSITING_MODE").as_deref(), env(DMABUF_VAR).as_deref(),
+                    egl_client_extensions().as_deref(), Some(gtk_gl_check()));
+                let why = if reasons.is_empty() { "none of the checks the launcher knows failed here".to_string() } else { reasons.join("; ") };
+                log(&format!("PROBLEM: WebKit turned hardware acceleration off by itself: it composites nothing, every change of the \
+                    page is painted again on the CPU (slow in a large window). Why: {why}. With GDK_BACKEND=x11 GTK uses X11's GL instead"));
+                format!("off (WebKit's own choice): {why}")
+            } else {
+                format!("{policy:?}")
+            };
+            let _ = ACCEL.set(accel);
         }
         // what the web context itself says about its sandbox: crate::sandbox read the variables, this is WebKit's own
         // answer (a WebKitGTK that ran the sandbox by default would show here)
@@ -949,6 +1145,52 @@ pub fn nvidia_line(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const EGL_NVIDIA: &str = "EGL_EXT_client_extensions EGL_EXT_platform_base EGL_KHR_platform_gbm EGL_KHR_platform_wayland";
+
+    #[test]
+    fn webkit_off_reasons_follow_webkits_own_checks() {
+        // all passed: nothing to say
+        assert!(webkit_off_reasons(None, None, Some(EGL_NVIDIA), Some(Ok(()))).is_empty());
+        assert!(webkit_off_reasons(Some("0"), Some("0"), Some("EGL_MESA_platform_surfaceless"), None).is_empty(), "0 is unset, as WebKit reads it");
+        // GTK's GL failing (the likely inbox 94 case) is named with GTK's message
+        let r = webkit_off_reasons(None, None, Some(EGL_NVIDIA), Some(Err("Unable to create a GL context ".into())));
+        assert_eq!(r, vec!["GTK could not make a GL context: Unable to create a GL context".to_string()]);
+        // EGL without either platform, or without client extensions at all
+        let r = webkit_off_reasons(None, None, Some("EGL_EXT_client_extensions EGL_KHR_platform_wayland"), Some(Ok(())));
+        assert!(r.len() == 1 && r[0].contains("neither EGL_KHR_platform_gbm nor EGL_MESA_platform_surfaceless"), "{r:?}");
+        assert!(webkit_off_reasons(None, None, None, None)[0].contains("no client extensions"));
+        // a token is a whole word: EGL_KHR_platform_gbm_x is not EGL_KHR_platform_gbm
+        assert_eq!(webkit_off_reasons(None, None, Some("EGL_KHR_platform_gbm_x"), None).len(), 1);
+        // the variables, in WebKit's order
+        let r = webkit_off_reasons(Some("1"), Some("1"), Some(EGL_NVIDIA), None);
+        assert!(r[0].starts_with("WEBKIT_DISABLE_COMPOSITING_MODE=1") && r[1].starts_with("WEBKIT_DISABLE_DMABUF_RENDERER=1"), "{r:?}");
+    }
+
+    #[test]
+    fn the_pages_line_says_what_it_measured() {
+        let facts = PageRender { composited: Some(false), webgl: Some("WebGL 1.0 / Apple GPU\n".into()), dpr: Some(1.25), width: Some(2048),
+            height: Some(1152), reduced_motion: Some(false), fire: Some(true), frames: None };
+        let s = says_page(&facts);
+        assert!(s.starts_with("the page: WebKit composites: no ("), "{s}");
+        assert!(s.contains("WebGL: WebGL 1.0 / Apple GPU;") && s.contains("window 2048 x 1152 CSS px") && s.contains("devicePixelRatio 1.25")
+            && s.contains("prefers-reduced-motion: no") && s.contains("the fire: on"), "{s}");
+        let frames = PageRender { frames: Some(FrameSample { ms: 2000.0, frames: 30, p50: 66.4, p95: 81.0, max: 120.0, slow: 20 }), ..Default::default() };
+        assert_eq!(says_page(&frames), "the page: frames on Play over 2000 ms: 30 (15.0 a second), p50 66.4 ms, p95 81.0 ms, max 120.0 ms, 20 over 50 ms");
+        assert_eq!(says_page(&PageRender::default()), "the page: nothing");
+        // a long or odd renderer string stays one short line
+        let long = PageRender { webgl: Some("x".repeat(500)), ..Default::default() };
+        assert_eq!(says_page(&long).len(), "the page: WebGL: ".len() + 160);
+    }
+
+    #[test]
+    fn the_pages_report_parses_from_the_frontends_json() {
+        let r: PageRender = serde_json::from_value(serde_json::json!({ "composited": true, "reducedMotion": true,
+            "frames": { "ms": 2000, "frames": 120, "p50": 16.7, "p95": 17.5, "max": 20, "slow": 0 } })).unwrap();
+        assert_eq!(r.composited, Some(true));
+        assert_eq!(r.reduced_motion, Some(true));
+        assert_eq!(r.frames.unwrap().frames, 120);
+    }
 
     fn args(tail: &[&str]) -> Vec<String> {
         std::iter::once("kiln-launcher").chain(tail.iter().copied()).map(str::to_string).collect()

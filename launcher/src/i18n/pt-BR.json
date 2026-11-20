@@ -3295,6 +3295,99 @@
     "title": "Addon de cliente Shroudlink",
     "switchOn": "Ativar addon"
   },
+  "reportContents": {
+    "title": "O que tem neste relatório",
+    "intro": "Cada arquivo do relatório e o que o Kiln substituiu nele antes de qualquer coisa sair do seu PC. Os logs do próprio Kiln sempre vão junto: o suporte precisa deles para ver o que deu errado. Os logs de outros mods você pode deixar de fora.",
+    "total": {
+      "one": "{count} arquivo, {size} antes da compressão",
+      "other": "{count} arquivos, {size} antes da compressão"
+    },
+    "leftOutCount": {
+      "one": "{count} arquivo deixado de fora",
+      "other": "{count} arquivos deixados de fora"
+    },
+    "failed": "Não foi possível ler o relatório",
+    "view": "Ver summary.txt",
+    "hideSummary": "Ocultar summary.txt",
+    "viewTitle": "summary.txt",
+    "save": "Salvar",
+    "leaveOut": "Deixar de fora",
+    "leaveOutAll": "Deixar de fora os logs de outros mods",
+    "leftOut": "De fora",
+    "leftOutHint": "De fora: não vai no zip.",
+    "included": "Incluído",
+    "include": "Incluir de novo",
+    "replaced": "Substituído: {list}",
+    "item": "{what} ({times})",
+    "times": {
+      "one": "{count} vez",
+      "other": "{count} vezes"
+    },
+    "sep": ", ",
+    "nothing": "Nada pessoal encontrado.",
+    "group": {
+      "kiln": "Logs do Kiln",
+      "mods": "Logs de outros mods",
+      "settings": "Configurações",
+      "listings": "Listas de pastas"
+    },
+    "groupHint": {
+      "kiln": "O suporte precisa deles para ver o que deu errado, então eles sempre vão junto.",
+      "mods": "Escritos por outros mods e ferramentas. O Kiln limpa eles do mesmo jeito, mas não tem como saber tudo o que outro mod escreve, então você pode deixá-los de fora.",
+      "settings": "O estado do Kiln e o seu perfil: quais mods estão ativados e o que aconteceu na última inicialização. Senhas e tokens são substituídos.",
+      "listings": "Só nomes, tamanhos e datas de arquivos e pastas. Nada do conteúdo deles."
+    },
+    "token": {
+      "home": "sua pasta pessoal",
+      "user": "seu nome de usuário",
+      "host": "o nome do seu PC",
+      "steam-name": "nomes da Steam",
+      "steamid": "IDs da Steam",
+      "player": "nomes de jogadores",
+      "ip": "endereços IP",
+      "mac": "endereços da placa de rede",
+      "email": "endereços de e-mail",
+      "redacted": "senhas, tokens e chaves"
+    },
+    "about": {
+      "summary": "O resumo: o que o Kiln encontrou, seu sistema, o jogo e seu perfil",
+      "findings": "O que o Kiln encontrou, para as ferramentas do suporte",
+      "kiln-log": "O log principal do Kiln da última vez que o jogo abriu",
+      "proxy-log": "Como o Kiln foi carregado no jogo",
+      "eml-log": "O log do Kiln para mods EML",
+      "tick-stats": "Quanto tempo cada passo do mundo levou, minuto a minuto",
+      "greeneye-bridge": "O log do Kiln para mods do Greeneye",
+      "crash": "O relatório de crash mais recente do Kiln",
+      "launcher-log": "O log do próprio launcher",
+      "game-start": "O que o jogo mostrou quando o launcher o iniciou",
+      "kiln-other": "Um dos logs do Kiln",
+      "state": "O que o Kiln viu na última inicialização",
+      "profile": "Seu perfil: quais mods estão ativados",
+      "chain": "Quais outros loaders iniciam com o jogo",
+      "kiln-json": "As configurações do Kiln na pasta do jogo",
+      "receipt": "Quais arquivos do Kiln estão instalados, com seus checksums",
+      "game-folder": "Os nomes na pasta do jogo",
+      "kiln-folder": "Os nomes na pasta do Kiln",
+      "mod-folders": "Os nomes em cada pasta de mods",
+      "listing": "Uma lista de nomes de arquivos",
+      "xhl-core": "O log do XHL-Core",
+      "greeneye": "O log do Greeneye Loader ou de um mod do Greeneye",
+      "building-tools": "O log do Building Tools",
+      "shroudlink": "O log do ShroudLink",
+      "auto-loot": "O log do Auto Loot Plus",
+      "optiscaler-settings": "As configurações do OptiScaler",
+      "optiscaler-log": "O log do OptiScaler",
+      "mod-log": "O log de outro mod"
+    },
+    "never": {
+      "title": "Nunca vai num relatório",
+      "saves": "Seus saves e mundos",
+      "settings": "Configurações de mods e a pasta de configuração do Kiln (podem ter senhas de servidores)",
+      "admin": "O token e o endereço do Kiln.Admin",
+      "mods": "O conteúdo dos seus mods (só nomes, tamanhos e datas dos arquivos)",
+      "steam": "Os arquivos da própria Steam"
+    }
+  },
   "supportReport": {
     "dialogTitle": "Salvar um relatório de suporte",
     "saved": "Relatório salvo",

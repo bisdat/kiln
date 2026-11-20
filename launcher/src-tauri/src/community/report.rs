@@ -65,6 +65,8 @@ pub struct ReportPreview {
     pub limit: u64,
     pub files: Vec<FileLine>,
     pub known: Option<KnownView>,
+    /// "What's in this report": every file with its group, size and replacements, those left out, what is never in it.
+    pub contents: kiln_manage::report::Contents,
 }
 
 fn known_path() -> Result<std::path::PathBuf, Error> {
@@ -81,8 +83,10 @@ pub fn load_known() -> Option<KnownList> {
     KnownList::parse(&bytes).ok()
 }
 
-pub async fn prepare(app: tauri::AppHandle, target: Option<crate::commands::logs::LogTarget>, from: SendFrom) -> Result<ReportPreview, Error> {
-    let input = crate::commands::logs::report_input(&app, target)?;
+/// `exclude`: other mods' files the player left out on the check step (a new report is prepared for each change).
+pub async fn prepare(app: tauri::AppHandle, target: Option<crate::commands::logs::LogTarget>, from: SendFrom, exclude: Vec<String>) -> Result<ReportPreview, Error> {
+    let mut input = crate::commands::logs::report_input(&app, target)?;
+    input.exclude = exclude;
     blocking(move || {
         let r = kiln_manage::report::build(&input);
         // in memory: the zip is never written to a temp folder other users of this PC could read
@@ -99,6 +103,7 @@ pub async fn prepare(app: tauri::AppHandle, target: Option<crate::commands::logs
             size: zip.len() as u64,
             limit: ZIP_MAX,
             files: r.files.iter().map(|(n, b)| FileLine { path: n.clone(), size: b.len() as u64 }).collect(),
+            contents: kiln_manage::report::contents(&r),
             known: known.as_ref().map(|k| KnownView { id: k.id.clone(), title: k.title.clone(), fix: k.fix.clone(), copy: k.copy.clone(), action: k.action, label: k.label.clone() }),
         };
         let mut map = PREPARED.lock().unwrap();

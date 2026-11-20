@@ -4,16 +4,50 @@ When mods don't load, one file answers the questions a maintainer would otherwis
 which OS and Proton, which game build, what is in the game folder, what the profile loads and what the last start did.
 
 - **Kiln Launcher:** Logs, "Support report" (above the tabs; also with no game found yet, and on a server's Logs page).
-  "Save report..." asks where to save `kiln-report-<date>.zip`; "Copy summary" copies a few lines for a forum post.
-- **kilnctl** (servers, manual installs): `kilnctl report [NAME] [--dir D] [--out FILE] [--print]`. `NAME` is an
-  instance; `--dir` a server or client folder; neither: the client Steam knows. `--print` writes `summary.txt` to the
-  terminal instead of the zip.
+  "Save report..." first shows "What's in this report" (below), then asks where to save `kiln-report-<date>.zip`;
+  "Copy summary" copies a few lines for a forum post.
+- **kilnctl** (servers, manual installs): `kilnctl report [NAME] [--dir D] [--out FILE] [--print] [--contents]
+  [--exclude PATH|other-mods ...]`. `NAME` is an instance; `--dir` a server or client folder; neither: the client
+  Steam knows. `--print` writes `summary.txt` to the terminal instead of the zip; `--contents` prints what the report
+  holds (each file by group, its size and what was replaced in it, as "What's in this report"); `--exclude` leaves
+  out another mod's file by its path in the zip (`game/BuildingTools.log`, repeatable) or `other-mods` for all of them,
+  and refuses Kiln's own files with why.
 
 Both only read. Nothing is written to the game folder, Steam's files are only read, the game may be running.
 
-Code: `crates/kiln-manage/src/report.rs` (`build`, `redact`, `write_zip`), the Tauri commands `report_save` and
-`report_summary` (`launcher/src-tauri/src/commands/logs.rs`), `launcher/src/components/SupportReport.tsx`,
-`runner/kilnctl/src/report.rs`.
+Code: `crates/kiln-manage/src/report.rs` (`build`, `redact`, `write_zip`, `contents`), the Tauri commands `report_save`,
+`report_preview` and `report_summary` (`launcher/src-tauri/src/commands/logs.rs`),
+`launcher/src/components/SupportReport.tsx` and `ReportContents.tsx`, `runner/kilnctl/src/report.rs`.
+
+## What's in this report
+
+(dev.29.22) A player declined to send a report because it held "a little too much personal information". Before a
+report is saved or sent the launcher now shows what it holds, built exactly as it will be written (`report_preview`,
+`report::contents`; nothing is written):
+
+- the files, grouped as **Kiln's logs** (summary.txt, report.json, Kiln's logs, the crash report, the launcher's logs),
+  **other mods' logs** (every file `report::excludable` says is another mod's or tool's: Building Tools, ShroudLink,
+  Auto Loot Plus, XHL-Core, Greeneye, OptiScaler's log and settings, and any file `report::file_kind` does not know),
+  **settings** (Kiln's state files, the profile, chain.ini, kiln.json, the receipt) and **folder listings**;
+- each with one plain line on what it holds (`file_kind`'s name, the launcher's `reportContents.about.<name>`), its
+  size, and how often each replacement stands in it ("Replaced: your home folder (169 times), player names (3
+  times)"; summary.txt's own "Left out" section, which names every token once, is not counted);
+- **View summary.txt**, and the "Never in a report" list (`report::NEVER_COLLECTED`, the items of summary.txt's "Left out");
+- a **Leave out** box on each other mod's log, and one for all of them. Kiln's own files, the settings and the listings
+  have none: support needs them to see what went wrong (the group says so). Redaction cleans every file the same
+  way, but it cannot know everything another mod writes, which is why those are the ones a player may leave out.
+
+`ReportInput::exclude` takes zip paths or `other-mods`; names of files that cannot be left out are ignored. A file
+left out is still read and redacted (for the preview, `Report::left_out`) but is never in the zip and takes none of the
+6 MiB budget; summary.txt lists it under "Left out by the player (other mods' own files)" and report.json as
+`leftOut`.
+
+- **Save report...** opens "What's in this report" as a dialog: Save (then the file dialog), Cancel (nothing written).
+- **Send to Kiln support**: the check step says what the zip holds ("1 file left out. Replaced: ...") and "What's in
+  this report" opens the same view inline; a change prepares the report again (`community_report_prepare` with
+  `exclude`), and Send waits for it, so it always sends the report as the boxes are.
+- **Steam Deck**: the check step's "What's in this report" row opens the list with the pad: each file a row, A leaves
+  another mod's log out or puts it back, "View summary.txt" opens it in a scrollable dialog.
 
 ## What is in the zip
 
@@ -103,12 +137,25 @@ Every text goes through one function, `report::redact`:
   also inside other words (`me-pc`, Wine's `C:\users\me`); a name of 3 characters or fewer only as a whole word, a
   common word (`user`, `steam`, `kiln` ...) only inside the home folder; Steam display names become `<steam-name>`
   (whole words);
-- SteamID64s, `userdata/<n>` and `[U:1:<n>]` become `<steamid>`; IPv4 addresses other than `127.x` and `0.0.0.0`
-  become `<ip>`.
+- other players: the names Kiln's and ShroudLink's own log lines give the players of a session (Kiln's players
+  service `players: joined slot 1 entity 7 'Name' (steam ...)`, Kiln.Network `net: Name (0x81) joined with Kiln`, `peer
+  Name ...`, `kick`/`kicking`/`banned`/`refusing Name`, `... sent to Name`, Kiln.Saves `Name has no character id`,
+  ShroudLink's `client <id> is Name` and `is player 2 (Name)`) become `<player>` in those lines (`report::player_names`),
+  and a name of 3 characters or more, read from kiln.log and shroudlink.log before anything is written, also as a whole
+  word in every other line and file (`Redactor::add_players_from`: a mod's own `welcome back, Name`). The player whose
+  Steam name is in `loginusers.vdf` stays `<steam-name>`;
+- SteamID64s, `userdata/<n>` and `[U:1:<n>]` become `<steamid>`; IPv4 addresses other than `127.x` and `0.x`
+  (a version such as `Kiln.Host 0.2.0.0`) become `<ip>`; IPv6 addresses other than `::1` and `::` become
+  `<ip>`, MAC addresses `<mac>`, mail addresses `<email>`;
+- in every text (logs, INI files such as `OptiScaler.ini`, `chain.ini`), the value after a word that names a
+  secret (`token`, `password`, `passwd`, `passphrase`, `secret`, `apikey`/`api_key`/`api-key`, `cookie`, `credential`)
+  and `=` or `:` becomes `<redacted>` (`password=hunter2`, `ApiKey = abc`, `?token=abc&`, `token: abc`), and so does the
+  argument of such a command-line flag (`-password hunter2`, `--apikey x`).
 
 JSON files also go through `report::redact_json`: string and number values of fields named like a secret or an address
 (`token`, `password`, `secret`, `apiKey`, `cookie`, `credential`, `private`, `auth`, `key`, `ip`, `host`, `endpoint`,
-`nonce`, `*address`, `*url`, `*steamId`) become `<redacted>`. A JSON file that does not parse or was cut loses the
+`nonce`, `*address`, `*url`, `*steamId`; also `api-key` and the names of people, `*userName`, `*accountName`,
+`*personaName`, `*playerName`, `*characterName`, `*email`, `_` and `-` ignored) become `<redacted>`. A JSON file that does not parse or was cut loses the
 values of such fields line by line.
 
 Never read into the report: saves and world data (`kiln/data/`), `kiln/config/` and the profile's config folder (mod
@@ -116,11 +163,13 @@ settings, `network.json`), `kiln/data/kiln-admin/`, the contents of any mod (onl
 listings), Steam's files other than `config.vdf`'s compat tool, the launch options and `loginusers.vdf` (for the
 names to replace). `summary.txt` ends with this list.
 
-What redaction cannot catch: a character or server name the player chose that appears in a log line, and 8.3 short
-names that cut the user name (`FROSTL~1`). `game/shroudlink_client.log` is written by the third-party shroudlink
+What redaction cannot catch: a character or server name the player chose that appears in a log line other than the
+ones above (`kiln/state/last-server.json` keeps the server's name on purpose), a player's name of 1 or 2 characters
+outside the lines that name players, and 8.3 short names that cut the user name (`FROSTL~1`). `game/shroudlink_client.log` is written by the third-party shroudlink
 client addon, not by Kiln (as `game/BuildingTools*.log`, `game/shroudlink.log` and `game/auto-loot-plus.log` are written by
 those mods): its text gets only the redaction above, so whatever else the addon logs stays as it is
-(IPv6 addresses, server DNS or UNC host names, other players' names, anything like `password=...`).
+(server DNS or UNC host names, other players' names in lines other than ShroudLink's `client <id> is Name` ones,
+secrets under names other than those above).
 
 ## When things are broken
 

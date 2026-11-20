@@ -341,7 +341,7 @@ test.describe("Steam Deck", () => {
     await page.locator('[data-deck-dialog="send-known"]').getByRole("button", { name: "OK" }).click();
     await check.locator('[data-deck-id="files"]').click();
     await expect(page.getByTestId("deck-what-is-sent")).toContainText("game/kiln/logs/kiln.log");
-    await page.locator('[data-deck-dialog="send-files"]').getByRole("button", { name: "OK" }).click();
+    await page.locator('[data-deck-dialog="send-files"]').getByRole("button", { name: "OK", exact: true }).click();
     await mock(page, (h) => h.community.setOnline(false));
     await expect(page.getByTestId("deck-send-offline")).toContainText("You're offline");
     await expect(page.locator('[data-deck-dialog="send-check"]').getByRole("button", { name: "Send to Kiln support" })).toBeDisabled();

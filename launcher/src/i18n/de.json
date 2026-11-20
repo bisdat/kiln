@@ -3295,6 +3295,99 @@
     "title": "Shroudlink-Client-Addon",
     "switchOn": "Addon einschalten"
   },
+  "reportContents": {
+    "title": "Was in diesem Bericht steckt",
+    "intro": "Jede Datei im Bericht und was Kiln darin ersetzt hat, bevor irgendetwas deinen PC verlässt. Kilns eigene Logs bleiben immer drin: Der Support braucht sie, um zu sehen, was schiefgelaufen ist. Die Logs anderer Mods kannst du weglassen.",
+    "total": {
+      "one": "{count} Datei, {size} vor dem Komprimieren",
+      "other": "{count} Dateien, {size} vor dem Komprimieren"
+    },
+    "leftOutCount": {
+      "one": "{count} Datei weggelassen",
+      "other": "{count} Dateien weggelassen"
+    },
+    "failed": "Der Bericht konnte nicht gelesen werden",
+    "view": "summary.txt ansehen",
+    "hideSummary": "summary.txt ausblenden",
+    "viewTitle": "summary.txt",
+    "save": "Speichern",
+    "leaveOut": "Weglassen",
+    "leaveOutAll": "Alle Logs anderer Mods weglassen",
+    "leftOut": "Weggelassen",
+    "leftOutHint": "Weggelassen: nicht im Zip.",
+    "included": "Drin",
+    "include": "Wieder rein",
+    "replaced": "Ersetzt: {list}",
+    "item": "{what} ({times})",
+    "times": {
+      "one": "einmal",
+      "other": "{count}-mal"
+    },
+    "sep": ", ",
+    "nothing": "Nichts Persönliches darin gefunden.",
+    "group": {
+      "kiln": "Kilns Logs",
+      "mods": "Logs anderer Mods",
+      "settings": "Einstellungen",
+      "listings": "Ordnerlisten"
+    },
+    "groupHint": {
+      "kiln": "Der Support braucht sie, um zu sehen, was schiefgelaufen ist. Deshalb bleiben sie immer drin.",
+      "mods": "Von anderen Mods und Tools geschrieben. Kiln bereinigt sie genauso, kann aber nicht alles kennen, was eine andere Mod schreibt. Deshalb kannst du sie weglassen.",
+      "settings": "Kilns eigener Zustand und dein Profil: welche Mods an sind und was beim letzten Start passiert ist. Passwörter und Tokens darin werden ersetzt.",
+      "listings": "Nur Namen, Größen und Datum von Dateien und Ordnern. Nichts aus ihrem Inhalt."
+    },
+    "token": {
+      "home": "dein Benutzerordner",
+      "user": "dein Benutzername",
+      "host": "der Name deines PCs",
+      "steam-name": "Steam-Namen",
+      "steamid": "Steam-IDs",
+      "player": "Spielernamen",
+      "ip": "IP-Adressen",
+      "mac": "Netzwerkkarten-Adressen",
+      "email": "E-Mail-Adressen",
+      "redacted": "Passwörter, Tokens und Schlüssel"
+    },
+    "about": {
+      "summary": "Die Zusammenfassung: was Kiln gefunden hat, dein System, das Spiel und dein Profil",
+      "findings": "Was Kiln gefunden hat, für die Support-Tools",
+      "kiln-log": "Kilns Hauptlog vom letzten Spielstart",
+      "proxy-log": "Wie Kiln ins Spiel geladen wurde",
+      "eml-log": "Kilns Log für EML-Mods",
+      "tick-stats": "Wie lange jeder Weltschritt gedauert hat, Minute für Minute",
+      "greeneye-bridge": "Kilns Log für Greeneye-Mods",
+      "crash": "Der neueste Absturzbericht von Kiln",
+      "launcher-log": "Das eigene Log des Launchers",
+      "game-start": "Was das Spiel ausgegeben hat, als der Launcher es gestartet hat",
+      "kiln-other": "Eins von Kilns Logs",
+      "state": "Was Kiln beim letzten Start gesehen hat",
+      "profile": "Dein Profil: welche Mods an sind",
+      "chain": "Welche anderen Loader mit dem Spiel starten",
+      "kiln-json": "Kilns Einstellungen im Spielordner",
+      "receipt": "Welche Kiln-Dateien installiert sind, mit Prüfsummen",
+      "game-folder": "Die Namen im Spielordner",
+      "kiln-folder": "Die Namen in Kilns Ordner",
+      "mod-folders": "Die Namen in jedem Mod-Ordner",
+      "listing": "Eine Liste von Dateinamen",
+      "xhl-core": "Das eigene Log von XHL-Core",
+      "greeneye": "Das eigene Log von Greeneye Loader oder einer Greeneye-Mod",
+      "building-tools": "Das eigene Log von Building Tools",
+      "shroudlink": "Das eigene Log von ShroudLink",
+      "auto-loot": "Das eigene Log von Auto Loot Plus",
+      "optiscaler-settings": "Die Einstellungen von OptiScaler",
+      "optiscaler-log": "Das eigene Log von OptiScaler",
+      "mod-log": "Das eigene Log einer anderen Mod"
+    },
+    "never": {
+      "title": "Nie in einem Bericht",
+      "saves": "Deine Spielstände und Welten",
+      "settings": "Mod-Einstellungen und Kilns Konfigurationsordner (dort können Serverpasswörter stehen)",
+      "admin": "Token und Adresse von Kiln.Admin",
+      "mods": "Der Inhalt deiner Mods (nur Dateinamen, Größen und Datum)",
+      "steam": "Steams eigene Dateien"
+    }
+  },
   "supportReport": {
     "dialogTitle": "Supportbericht speichern",
     "saved": "Bericht gespeichert",

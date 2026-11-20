@@ -78,6 +78,96 @@ fn redacts_secret_json_fields() {
 }
 
 #[test]
+fn redacts_other_players_names_in_kiln_and_shroudlink_lines() {
+    let r = Redactor::new(Some(HOME), Some("frostling"), Some("frost-desk"));
+    let cases = [
+        ("[I 22:31:42.935] [service:kiln-players.dll] players: joined slot 1 entity 7 'Brim Wyn' (steam 76561198000000002, admin 0, perms 0x1) [event 2]",
+         "[I 22:31:42.935] [service:kiln-players.dll] players: joined slot 1 entity 7 '<player>' (steam <steamid>, admin 0, perms 0x1) [event 2]"),
+        ("[I 22:31:36.187] [kiln] net: Brim (0x81) joined with Kiln 0.2.0-dev.29.19: 6 mod(s), 13 shared channel(s)",
+         "[I 22:31:36.187] [kiln] net: <player> (0x81) joined with Kiln 0.2.0-dev.29.19: 6 mod(s), 13 shared channel(s)"),
+        ("[I 1] [kiln] net: peer Al (0x82) left (in game)", "[I 1] [kiln] net: peer <player> (0x82) left (in game)"),
+        ("[W 1] [kiln] net: kicking Mia (0x83) by admin: spam", "[W 1] [kiln] net: kicking <player> (0x83) by admin: spam"),
+        ("[W 1] [kiln] net: refusing Mia (Kiln 0.2.0-dev.20): too old", "[W 1] [kiln] net: refusing <player> (Kiln 0.2.0-dev.20): too old"),
+        ("[I 1] [kiln] net: peer Mia said bye", "[I 1] [kiln] net: peer <player> said bye"),
+        ("[W 1] [kiln] net: peer Mia: dropped frame (late); 1 dropped so far", "[W 1] [kiln] net: peer <player>: dropped frame (late); 1 dropped so far"),
+        ("[I 1] [kiln] net: config state 0a0b0c0d (3 config(s)) sent to Mia", "[I 1] [kiln] net: config state 0a0b0c0d (3 config(s)) sent to <player>"),
+        ("[W 1] [kiln] Kiln.Saves: Mia has no character id on this build: x", "[W 1] [kiln] Kiln.Saves: <player> has no character id on this build: x"),
+        ("[1794424596] shroudlink: client 2eaa65d2d4c437f9 is Ember Fox", "[1794424596] shroudlink: client 2eaa65d2d4c437f9 is <player>"),
+        ("[1] world: client 2eaa65d2d4c437f9 is player 1 (the only unmatched one) (Ember Fox)",
+         "[1] world: client 2eaa65d2d4c437f9 is player 1 (the only unmatched one) (<player>)"),
+        ("[1] world: client 2eaa65d2d4c437f9 is player 2 (Mia)", "[1] world: client 2eaa65d2d4c437f9 is player 2 (<player>)"),
+    ];
+    for (raw, want) in cases {
+        assert_eq!(redact(raw, &r), want);
+    }
+    // lines that name no player stay as they are
+    for keep in [
+        "[1] shroudlink: client 2eaa65d2d4c437f9 is addon 0.8.0, UI protocol 3",
+        "[1] shroudlink: client 2eaa65d2d4c437f9 is an addon older than 0.6 (no hello)",
+        "[1] world: client 2eaa65d2d4c437f9 is player 1 (the only unmatched one)",
+        "[I 1] [kiln] net: last-server.json: welcome from srv-76bd0efb99c3",
+        "[I 1] [kiln] net: lab peer 0x80 kicked (reason 2)",
+        "[I 1] [service:kiln-players.dll] players: server world session ended (quit): 2 player(s) left with it",
+    ] {
+        assert_eq!(redact(keep, &r), keep);
+    }
+    // the names a log shows also go where a line does not say it is a player
+    let log = "players: joined slot 1 entity 7 'Brimwyn' (steam 0, admin 0, perms 0x1)\nnet: Al (0x9) joined with Kiln x\n";
+    assert_eq!(player_names(log), vec!["Brimwyn".to_string(), "Al".to_string()]);
+    let mut r2 = r.clone();
+    r2.add_players_from(log);
+    assert_eq!(redact("chat-plus: welcome back, Brimwyn! Also Al.", &r2), "chat-plus: welcome back, <player>! Also Al.",
+        "a name of 2 characters only where a line says it is a player");
+    assert_eq!(redact("Brimwynne", &r2), "Brimwynne", "whole words only");
+    // the local player keeps the Steam name token
+    let mut me = r.clone();
+    me.add_whole_word("Frosty", "<steam-name>");
+    assert_eq!(redact("players: joined slot 0 entity 1 'Frosty' (steam 0, admin 1, perms 0x3f)", &me),
+        "players: joined slot 0 entity 1 '<steam-name>' (steam 0, admin 1, perms 0x3f)");
+}
+
+#[test]
+fn redacts_ipv6_macs_mails_and_plain_text_secrets() {
+    let r = Redactor::new(Some(HOME), Some("frostling"), Some("frost-desk"));
+    assert_eq!(redact("join [2001:db8:85a3::8a2e:370:7334]:15636 or fe80::1c2d:3e4f%eth0", &r), "join [<ip>]:15636 or <ip>%eth0");
+    assert_eq!(redact("2001:0db8:0000:0000:0000:ff00:0042:8329 then", &r), "<ip> then");
+    assert_eq!(redact("pad 00:1a:2b:3c:4d:5e connected", &r), "pad <mac> connected");
+    assert_eq!(redact("mail frost.ling+kiln@example.co.uk.", &r), "mail <email>.");
+    for keep in [
+        "[I 22:30:56.603] at 12:30:45", "loopback ::1 and ::", "keen::ItemCategory abc::def", "kdh1:8f21dcb1097232d5",
+        "kiln.world@4 period@resolved", "Kiln.Host 0.2.0.0 (mod API 0.2.10)", "@types/node", "deadbeef:cafe",
+    ] {
+        assert_eq!(redact(keep, &r), keep);
+    }
+    assert_eq!(redact("join 0.2.0.0 and 10.0.0.2", &r), "join 0.2.0.0 and <ip>", "0.x.x.x is a version, never a host");
+    // plain text and INI: the value after a secret's name
+    assert_eq!(redact("[Server]\nPassword=hunter2\nApiKey = abc123\nShortcutKey=0x2D\n", &r),
+        "[Server]\nPassword=<redacted>\nApiKey = <redacted>\nShortcutKey=0x2D\n");
+    assert_eq!(redact("GET /x?token=abc&page=2 token: abc, server_password: 'p w'", &r),
+        "GET /x?token=<redacted>&page=2 token: <redacted>, server_password: '<redacted>'");
+    assert_eq!(redact("%command% -password hunter2 --apikey x -log", &r), "%command% -password <redacted> --apikey <redacted> -log");
+    for keep in [
+        "the admin token and endpoint", "\"token\": \"<redacted>\",", "\"tokens\": [", "password=", "credential::Store",
+        "client-checks pass: pre", "fields named like passwords, tokens, keys",
+    ] {
+        assert_eq!(redact(keep, &r), keep);
+    }
+    // a report redacted twice does not change
+    let once = redact("token=abc fe80::1 a@b.org players: joined slot 1 entity 7 'Mia' (steam 0)", &r);
+    assert_eq!(redact(&once, &r), once);
+}
+
+#[test]
+fn json_fields_that_name_people_are_redacted() {
+    for k in ["userName", "user_name", "accountName", "personaName", "playerName", "character_name", "email", "contactEmail", "api-key"] {
+        assert!(is_secret_key(k), "{k}");
+    }
+    for k in ["name", "displayName", "modName", "keybind", "players", "emailVerifiedAt"] {
+        assert!(!is_secret_key(k), "{k}");
+    }
+}
+
+#[test]
 fn os_release_names() {
     assert_eq!(os_release("NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\nID=arch\n"), (Some("Arch Linux".into()), Some("arch".into())));
     assert_eq!(os_release("NAME=SteamOS\nID=steamos\n"), (Some("SteamOS".into()), Some("steamos".into())));
@@ -416,6 +506,36 @@ fn other_mods_logs_in_the_game_folder_are_optional_bounded_and_redacted() {
 /// inbox 86: XHL-Core loaded a mod the profile had off, and the report had nothing of XHL-Core's own. Its log,
 /// XHL-Native-Plugin-Host.log, written next to the DLL it runs as (the game's dinput8.dll, or Kiln's copy in
 /// kiln/chain/<id>/), is in the zip now when it is there: bounded and redacted as Kiln's logs, never through a link.
+#[test]
+fn other_players_names_never_reach_any_file_of_the_report() {
+    let f = Fx::healthy("players");
+    f.w("kiln/logs/kiln.log", concat!(
+        "[I 11:00:00.000] [kiln] Kiln 0.2.0-dev.22 starting (pid 412)\n",
+        "[I 11:00:00.100] [kiln] boot complete; handing control to the game\n",
+        "[I 11:01:00.000] [kiln] net: Brimwyn (0x81) joined with Kiln 0.2.0-dev.22: 1 mod(s), 2 shared channel(s)\n",
+        "[I 11:01:00.500] [service:kiln-players.dll] players: joined slot 1 entity 7 'Brimwyn' (steam 76561198000000002, admin 0, perms 0x1) [event 2]\n",
+        "[I 11:02:00.000] [mod:chat-plus] welcome back, Brimwyn! mail brim@example.org, rcon password=hunter2, peer fe80::1c2d:3e4f\n",
+        "[E 11:03:00.000] [kiln] net: peer Brimwyn: 12 drops in 10 s: kicking\n",
+    ));
+    f.w("shroudlink.log", "[1] shroudlink: client 2eaa65d2d4c437f9 is Ember Fox\n[2] world: client 2eaa65d2d4c437f9 is player 2 (Ember Fox)\n");
+    f.w("kiln/state/last-server.json", br#"{"format":1,"server":{"id":"srv-1","name":"Ember Isles","address":"203.0.113.7:15636"},"players":[{"playerName":"Brimwyn","email":"brim@example.org"}]}"#);
+    let r = build(&f.input());
+    let mut all = r.summary.clone() + &r.short;
+    for (n, b) in &r.files {
+        let t = String::from_utf8_lossy(b);
+        for secret in ["Brimwyn", "Ember Fox", "brim@example.org", "hunter2", "fe80::1c2d", "76561198000000002", "203.0.113.7"] {
+            assert!(!t.contains(secret), "{n} holds {secret}: {t}");
+        }
+        all.push_str(&t);
+    }
+    let log = file(&r, "game/kiln/logs/kiln.log").unwrap();
+    assert!(log.contains("net: <player> (0x81) joined") && log.contains("welcome back, <player>!") && log.contains("password=<redacted>")
+        && log.contains("<email>") && log.contains("peer <ip>"), "{log}");
+    assert!(file(&r, "game/shroudlink.log").unwrap().contains("is player 2 (<player>)"));
+    assert!(file(&r, "game/kiln/state/last-server.json").unwrap().contains("Ember Isles"), "the server keeps its name");
+    assert!(r.summary.contains("(<player>)") && r.summary.contains("<email>"), "summary.txt says what was replaced");
+}
+
 #[test]
 fn xhl_cores_own_log_is_collected_where_it_runs_from() {
     let f = Fx::healthy("xhl-core-log");
@@ -1439,4 +1559,118 @@ fn a_custom_folder_started_directly() {
     let r = build(&i);
     assert!(r.summary.contains("Start:         through Steam"), "{}", r.summary);
     assert!(finding(&r, "proton-override").text.contains(crate::game::DLL_OVERRIDE_ADVICE));
+}
+
+
+// ---------------------------------------------------------------- what is in a report (dev.29.22)
+
+/// A player declined to send a report: "a little too much personal information". The launcher's "What's in this report"
+/// groups the files; only other mods' and tools' files can be left out (support needs Kiln's own logs, the settings and
+/// the listings).
+#[test]
+fn file_kinds_group_the_zip_and_only_other_mods_files_can_be_left_out() {
+    for (p, g, about) in [
+        ("summary.txt", FileGroup::Kiln, "summary"),
+        ("report.json", FileGroup::Kiln, "findings"),
+        ("game/kiln/logs/kiln.log", FileGroup::Kiln, "kiln-log"),
+        ("game/kiln/logs/proxy.log", FileGroup::Kiln, "proxy-log"),
+        ("game/kiln/logs/eml.log", FileGroup::Kiln, "eml-log"),
+        ("game/kiln/logs/tick-stats.jsonl", FileGroup::Kiln, "tick-stats"),
+        ("game/kiln/logs/greeneye-loader.log", FileGroup::Kiln, "greeneye-bridge"),
+        ("game/kiln/crash-reports/crash-2026-11-10.txt", FileGroup::Kiln, "crash"),
+        ("launcher/launcher.log", FileGroup::Kiln, "launcher-log"),
+        ("launcher/game-start.log", FileGroup::Kiln, "game-start"),
+        ("game/kiln/state/boot.json", FileGroup::Settings, "state"),
+        ("game/kiln/profile.json", FileGroup::Settings, "profile"),
+        ("game/kiln/chain.ini", FileGroup::Settings, "chain"),
+        ("game/dinput8-chain.ini", FileGroup::Settings, "chain"),
+        ("game/kiln/kiln.json", FileGroup::Settings, "kiln-json"),
+        ("game/kiln/.install.json", FileGroup::Settings, "receipt"),
+        ("listings/game-folder.txt", FileGroup::Listings, "game-folder"),
+        ("listings/mod-folders.txt", FileGroup::Listings, "mod-folders"),
+        ("game/BuildingTools.log", FileGroup::Mods, "building-tools"),
+        ("game/BuildingTools.prev.log", FileGroup::Mods, "building-tools"),
+        ("game/shroudlink.log", FileGroup::Mods, "shroudlink"),
+        ("game/shroudlink_client.log", FileGroup::Mods, "shroudlink"),
+        ("game/auto-loot-plus.log", FileGroup::Mods, "auto-loot"),
+        ("game/XHL-Native-Plugin-Host.log", FileGroup::Mods, "xhl-core"),
+        ("game/kiln/chain/xhl-core/XHL-Native-Plugin-Host.log", FileGroup::Mods, "xhl-core"),
+        ("game/greeneye/loader.log", FileGroup::Mods, "greeneye"),
+        ("greeneye-mods/unlock-map/game/unlock_map_markers.log", FileGroup::Mods, "greeneye"),
+        ("game/OptiScaler.ini", FileGroup::Mods, "optiscaler-settings"),
+        ("game/optiscaler.log", FileGroup::Mods, "optiscaler-log"),
+        ("game/SomeNewMod.log", FileGroup::Mods, "mod-log"),
+    ] {
+        assert_eq!(file_kind(p), (g, about), "{p}");
+        assert_eq!(excludable(p), g == FileGroup::Mods, "{p}");
+    }
+}
+
+#[cfg(feature = "zip")]
+#[test]
+fn a_left_out_file_is_described_but_not_in_the_zip_and_kilns_own_cannot_be_left_out() {
+    let f = Fx::healthy("left-out");
+    f.w("BuildingTools.log", "[BT] loaded from Z:\\var\\home\\frostling\\Enshrouded\n");
+    f.w("auto-loot-plus.log", "[ALP] patterns found\n");
+    let mut input = f.input();
+    input.exclude = vec!["game/BuildingTools.log".into(), "game/kiln/logs/kiln.log".into(), "listings/game-folder.txt".into()];
+    let r = build(&input);
+    assert!(file(&r, "game/BuildingTools.log").is_none(), "left out");
+    assert!(file(&r, "game/auto-loot-plus.log").is_some(), "not asked for");
+    assert!(file(&r, "game/kiln/logs/kiln.log").is_some() && file(&r, "listings/game-folder.txt").is_some(), "Kiln's own files and the listings stay");
+    assert_eq!(r.left_out.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["game/BuildingTools.log"]);
+    let summary = file(&r, "summary.txt").unwrap();
+    assert!(summary.contains("Left out by the player (other mods' own files):\n  game/BuildingTools.log"), "{summary}");
+    let json: serde_json::Value = serde_json::from_str(file(&r, "report.json").unwrap()).unwrap();
+    assert_eq!(json["leftOut"], serde_json::json!(["game/BuildingTools.log"]));
+    // the zip has no trace of it
+    let zip = zip_bytes(&r).unwrap();
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(zip)).unwrap();
+    let names: Vec<String> = (0..z.len()).map(|i| z.by_index(i).unwrap().name().unwrap().into_owned()).collect();
+    assert!(!names.iter().any(|n| n.contains("BuildingTools")), "{names:?}");
+
+    // every other mod's file at once
+    input.exclude = vec![EXCLUDE_OTHER_MODS.into()];
+    let all = build(&input);
+    assert!(all.files.iter().all(|(n, _)| !excludable(n)), "{:?}", all.files.iter().map(|(n, _)| n).collect::<Vec<_>>());
+    assert_eq!(all.left_out.len(), 2);
+
+    // nothing asked: as before, nothing left out and no line about it
+    let none = build(&f.input());
+    assert!(none.left_out.is_empty() && !file(&none, "summary.txt").unwrap().contains("Left out by the player"));
+}
+
+#[test]
+fn contents_counts_each_replacement_per_file() {
+    let f = Fx::healthy("contents");
+    f.w("kiln/logs/kiln.log", "[I] [kiln] Kiln 0.2.0-dev.22 starting (pid 412)\n[I] [kiln] path /var/home/frostling/a and /var/home/frostling/b\n\
+        [I] [net] net: Wintermoth (0x81) joined with Kiln\n[I] [kiln] boot complete; handing control to the game\n");
+    f.w("BuildingTools.log", "[BT] Wintermoth placed a wall at 192.168.1.20\n");
+    let mut input = f.input();
+    input.exclude = vec!["game/BuildingTools.log".into()];
+    let r = build(&input);
+    let c = contents(&r);
+    let get = |p: &str| c.files.iter().find(|x| x.path == p).unwrap_or_else(|| panic!("no {p}: {:?}", c.files.iter().map(|x| &x.path).collect::<Vec<_>>()));
+    let log = get("game/kiln/logs/kiln.log");
+    assert_eq!((log.group, log.about.as_str(), log.excludable, log.excluded), (FileGroup::Kiln, "kiln-log", false, false));
+    assert_eq!(log.replaced.get("home"), Some(&2), "{:?}", log.replaced);
+    assert_eq!(log.replaced.get("player"), Some(&1), "{:?}", log.replaced);
+    assert_eq!(log.size, file(&r, "game/kiln/logs/kiln.log").unwrap().len() as u64);
+    let bt = get("game/BuildingTools.log");
+    assert!(bt.excluded && bt.excludable && bt.group == FileGroup::Mods);
+    assert_eq!((bt.replaced.get("player"), bt.replaced.get("ip")), (Some(&1), Some(&1)), "{:?}", bt.replaced);
+    // summary.txt's "Left out" names every token once: that is not a replacement
+    let s = get("summary.txt");
+    assert!(!s.replaced.contains_key("mac") && !s.replaced.contains_key("email"), "{:?}", s.replaced);
+    assert_eq!(c.size, r.files.iter().map(|(_, b)| b.len() as u64).sum::<u64>());
+    assert_eq!(c.summary, r.summary);
+    // the never-collected list is the summary's, item by item
+    assert_eq!(c.never.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["saves", "settings", "admin", "mods", "steam"]);
+    for n in &c.never {
+        assert!(LEFT_OUT.contains(&format!("- {}", n.text)), "{}", n.text);
+    }
+    // a report's JSON for the launcher
+    let j = serde_json::to_value(&c).unwrap();
+    assert_eq!(j["files"][0]["path"], "summary.txt");
+    assert!(j["files"].as_array().unwrap().iter().any(|x| x["path"] == "game/kiln/logs/kiln.log" && x["replaced"]["home"] == 2 && x["group"] == "kiln"));
 }

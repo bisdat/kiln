@@ -5,7 +5,9 @@
 //! - [`build`] reads everything (each section on its own: one that fails says why and the rest is still written) and
 //!   returns the summary, the findings and the files, already redacted. Nothing is written to the game folder.
 //! - [`redact`] is the one redaction function every text goes through: the home folder in Linux, Windows and Wine `Z:\`
-//!   form (also with doubled backslashes inside JSON), the user name and the machine name alone, Steam ids, IP addresses.
+//!   form (also with doubled backslashes inside JSON), the user name and the machine name alone, Steam ids, IP (v4 and v6)
+//!   and MAC addresses, mail addresses, other players' names in Kiln's and ShroudLink's log lines ([`player_names`]), and
+//!   the value after a secret's name in plain text (`password=...`).
 //!   [`redact_json`] also blanks fields whose names say they hold a secret or an address.
 //! - [`write_zip`] (feature `zip`) writes the zip.
 //!
@@ -88,7 +90,7 @@ const COMMON: &[&str] = &[
     // default account names that name nobody: every Steam Deck's user is `deck`, Proton's prefix user is `steamuser`
     "deck", "steamuser", "desktop", "windows", "linux",
     // the tokens themselves: a report redacted twice must not change
-    "redacted", "steamid", "name", "steam-name", "ip",
+    "redacted", "steamid", "name", "steam-name", "ip", "mac", "email",
 ];
 
 fn lower(c: char) -> char {
@@ -195,6 +197,14 @@ impl Redactor {
         }
     }
 
+    /// Adds the players a log names ([`player_names`]) as whole words (`<player>`): the lines that name a player without
+    /// saying so (`peer Name: dropped frame`, a mod's own line) lose the name too.
+    pub fn add_players_from(&mut self, log: &str) {
+        for n in player_names(log) {
+            self.add_whole_word(&n, "<player>");
+        }
+    }
+
     fn push_word(&mut self, w: &str, token: &'static str, whole: bool) {
         let text: Vec<char> = w.chars().map(lower).collect();
         if !self.words.iter().any(|x| x.text == text) {
@@ -229,7 +239,317 @@ pub fn redact(text: &str, r: &Redactor) -> String {
     }
     chars = redact_steam_ids(&chars);
     chars = redact_ips(&chars);
-    chars.into_iter().collect()
+    chars = redact_ipv6_and_macs(&chars);
+    chars = redact_emails(&chars);
+    let text: String = chars.into_iter().collect();
+    redact_secret_values(&redact_player_lines(&text))
+}
+
+// ---------------------------------------------------------------- player names
+
+/// Where one log line names a player (byte ranges of the name), in the lines Kiln and ShroudLink write about the
+/// players of a session: other people's names, which [`Redactor::current`] cannot know. Kiln's players service
+/// (`players: joined slot 0 entity 1 'Name' (steam ...)`), Kiln.Network (`net: Name (0x80) joined with Kiln ...`,
+/// `net: peer Name (0x80) left`, `kick`/`kicking`/`banned`/`refusing`, `peer Name said bye`, `peer Name: ...`,
+/// `... sent to Name`), Kiln.Saves (`Kiln.Saves: Name has no character id`), ShroudLink's host (`shroudlink: client
+/// <id> is Name`, `world: client <id> is player 1 (Name)`).
+fn player_spans(line: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut push = |s: usize, e: usize| {
+        let name = line[s..e].trim();
+        if !name.is_empty() && !(name.starts_with('<') && name.ends_with('>')) {
+            let lead = line[s..e].len() - line[s..e].trim_start().len();
+            out.push((s + lead, s + lead + name.len()));
+        }
+    };
+    // Kiln's players service
+    if let Some(p) = line.find("players: ")
+        && let Some(e) = line[p..].find(" entity ")
+    {
+        let at = p + e + " entity ".len();
+        let digits = line[at..].bytes().take_while(u8::is_ascii_digit).count();
+        if digits > 0 && line[at + digits..].starts_with(" '") {
+            let s = at + digits + 2;
+            if let Some(q) = line[s..].rfind("' (steam ") {
+                push(s, s + q);
+            }
+        }
+    }
+    // Kiln.Network
+    if let Some(p) = line.find("net: ") {
+        let mut s = p + "net: ".len();
+        let mut verb = "";
+        for w in ["admission: ", "peer ", "kicking ", "kick ", "banned ", "refusing "] {
+            if line[s..].starts_with(w) {
+                s += w.len();
+                verb = w;
+                break;
+            }
+        }
+        let rest = &line[s..];
+        if let Some(e) = hex_paren(rest) {
+            push(s, s + e);
+        } else if verb == "refusing " && let Some(e) = rest.find(" (Kiln ") {
+            push(s, s + e);
+        } else if verb == "peer " {
+            if let Some(e) = rest.find(" said bye").or_else(|| rest.find(": ")) {
+                push(s, s + e);
+            }
+        } else if rest.starts_with("config state ") && let Some(e) = rest.rfind(" sent to ") {
+            push(s + e + " sent to ".len(), line.len());
+        }
+    }
+    // Kiln.Saves
+    if let Some(p) = line.find("Kiln.Saves: ")
+        && let Some(e) = line[p..].find(" has no character id")
+    {
+        push(p + "Kiln.Saves: ".len(), p + e);
+    }
+    // ShroudLink's host (native/plugins/shroudlink: mods.rs, world.rs)
+    for lead in ["shroudlink: client ", "world: client "] {
+        let Some(p) = line.find(lead) else { continue };
+        let at = p + lead.len();
+        let hex = line[at..].bytes().take_while(u8::is_ascii_hexdigit).count();
+        if hex == 0 || !line[at + hex..].starts_with(" is ") {
+            continue;
+        }
+        let s = at + hex + " is ".len();
+        let rest = line[s..].trim_end();
+        if rest.starts_with("player ") {
+            // `is player 1 (Name)`, `is player 1 (the only unmatched one) (Name)`
+            if rest.ends_with(')') && let Some(o) = rest.rfind(" (") {
+                let name = &rest[o + 2..rest.len() - 1];
+                if name != "the only unmatched one" {
+                    push(s + o + 2, s + rest.len() - 1);
+                }
+            }
+        } else if lead == "shroudlink: client " && !rest.starts_with("addon ") && !rest.starts_with("an addon") {
+            push(s, s + rest.len());
+        }
+    }
+    out
+}
+
+/// The length of the name before ` (0x<hex>)` at the start of `s` (Kiln.Network's `Name (0x80)`).
+fn hex_paren(s: &str) -> Option<usize> {
+    let mut from = 0;
+    while let Some(i) = s[from..].find(" (0x") {
+        let at = from + i;
+        let hex = s[at + 4..].bytes().take_while(u8::is_ascii_hexdigit).count();
+        if hex > 0 && s[at + 4 + hex..].starts_with(')') {
+            return (at > 0).then_some(at);
+        }
+        from = at + 4;
+    }
+    None
+}
+
+/// Every name [`player_spans`] finds becomes `<player>` in its line.
+fn redact_player_lines(text: &str) -> String {
+    if !text.contains("players: ") && !text.contains("net: ") && !text.contains("Kiln.Saves: ") && !text.contains(" client ") {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let spans = player_spans(line);
+        if spans.is_empty() {
+            out.push_str(line);
+            continue;
+        }
+        let mut at = 0;
+        let mut spans = spans;
+        spans.sort();
+        for (s, e) in spans {
+            if s < at {
+                continue;
+            }
+            out.push_str(&line[at..s]);
+            out.push_str("<player>");
+            at = e;
+        }
+        out.push_str(&line[at..]);
+    }
+    out
+}
+
+/// The names of the players a log shows ([`player_spans`]), each once.
+pub fn player_names(text: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for line in text.lines() {
+        for (s, e) in player_spans(line) {
+            let n = line[s..e].to_string();
+            if n.chars().count() <= 64 && !names.contains(&n) {
+                names.push(n);
+            }
+        }
+    }
+    names
+}
+
+// ---------------------------------------------------------------- addresses, mail, secrets in plain text
+
+/// IPv6 addresses (`<ip>`, not `::1` and `::`) and MAC addresses (`<mac>`).
+fn redact_ipv6_and_macs(text: &[char]) -> Vec<char> {
+    let hexc = |c: char| c.is_ascii_hexdigit() || c == ':';
+    let mut out = Vec::with_capacity(text.len());
+    let mut i = 0;
+    while i < text.len() {
+        let c = text[i];
+        let start_ok = hexc(c) && (i == 0 || !(text[i - 1].is_alphanumeric() || matches!(text[i - 1], ':' | '.' | '_')));
+        if start_ok {
+            let mut j = i;
+            while j < text.len() && hexc(text[j]) {
+                j += 1;
+            }
+            let word_goes_on = j < text.len() && (text[j].is_alphanumeric() || text[j] == '_');
+            // a sentence's colon after the address is no part of it
+            let mut end = j;
+            if end >= i + 2 && text[end - 1] == ':' && text[end - 2] != ':' {
+                end -= 1;
+            }
+            let tok: String = text[i..end].iter().collect();
+            let kind = if word_goes_on { None } else { address_kind(&tok) };
+            if let Some(token) = kind {
+                out.extend(token.chars());
+                out.extend(&text[end..j]);
+                i = j;
+                continue;
+            }
+            out.extend(&text[i..j]);
+            i = j;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// `<ip>` for an IPv6 address other than `::1`/`::`, `<mac>` for a MAC address, else None.
+fn address_kind(tok: &str) -> Option<&'static str> {
+    if tok.matches(':').count() < 2 || tok.contains(":::") || tok == "::1" || tok == "::" {
+        return None;
+    }
+    let groups: Vec<&str> = tok.split(':').collect();
+    let hex = |g: &str| !g.is_empty() && g.len() <= 4 && g.bytes().all(|b| b.is_ascii_hexdigit());
+    match tok.matches("::").count() {
+        0 if groups.len() == 6 && groups.iter().all(|g| g.len() == 2 && hex(g)) => Some("<mac>"),
+        0 if groups.len() == 8 && groups.iter().all(|g| hex(g)) => Some("<ip>"),
+        1 => {
+            let full: Vec<&&str> = groups.iter().filter(|g| !g.is_empty()).collect();
+            // `fe80::1`, `2001:db8::7`; not C++'s `abc::def` (an address has a digit)
+            (full.len() >= 2 && full.len() <= 7 && full.iter().all(|g| hex(g)) && tok.bytes().any(|b| b.is_ascii_digit())).then_some("<ip>")
+        }
+        _ => None,
+    }
+}
+
+/// Mail addresses (`name@example.org`) become `<email>`.
+fn redact_emails(text: &[char]) -> Vec<char> {
+    if !text.contains(&'@') {
+        return text.to_vec();
+    }
+    let local = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '%' | '+' | '-');
+    let domain = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-');
+    let mut out: Vec<char> = Vec::with_capacity(text.len());
+    let mut i = 0;
+    while i < text.len() {
+        if text[i] == '@' {
+            let mut l = 0;
+            while l < out.len() && local(out[out.len() - 1 - l]) {
+                l += 1;
+            }
+            let mut r = i + 1;
+            while r < text.len() && domain(text[r]) {
+                r += 1;
+            }
+            while r > i + 1 && text[r - 1] == '.' {
+                r -= 1;
+            }
+            let dom: String = text[i + 1..r].iter().collect();
+            let tld = dom.rsplit('.').next().unwrap_or("");
+            if l > 0 && dom.contains('.') && !dom.starts_with('.') && tld.len() >= 2 && tld.chars().all(|c| c.is_ascii_alphabetic()) {
+                out.truncate(out.len() - l);
+                out.extend("<email>".chars());
+                i = r;
+                continue;
+            }
+        }
+        out.push(text[i]);
+        i += 1;
+    }
+    out
+}
+
+/// A word that names a secret in plain text (`password=...`, `ApiKey = ...`, `token: ...`, `--password ...`).
+fn is_secret_word(k: &str) -> bool {
+    let k = k.trim_start_matches('-').to_ascii_lowercase();
+    ["token", "password", "passwd", "passphrase", "secret", "apikey", "api_key", "api-key", "cookie", "credential"].iter().any(|p| k.contains(p))
+}
+
+/// Logs and INI files: the value after a secret's name (`password=hunter2`, `ApiKey = abc`, `token: abc`,
+/// `?token=abc&`, `--password abc`) becomes `<redacted>`, as [`redact_json`] does for JSON fields.
+fn redact_secret_values(text: &str) -> String {
+    let b = text.as_bytes();
+    let ident = |c: u8| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.' | b'-');
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0; // copied up to here
+    let mut i = 0;
+    while i < b.len() {
+        if !ident(b[i]) || (i > 0 && ident(b[i - 1])) {
+            i += 1;
+            continue;
+        }
+        let mut j = i;
+        while j < b.len() && ident(b[j]) {
+            j += 1;
+        }
+        if !is_secret_word(&text[i..j]) {
+            i = j;
+            continue;
+        }
+        let mut k = j;
+        if k < b.len() && matches!(b[k], b'"' | b'\'') {
+            k += 1;
+        }
+        while k < b.len() && matches!(b[k], b' ' | b'\t') {
+            k += 1;
+        }
+        let sep = k < b.len() && (b[k] == b'=' || (b[k] == b':' && b.get(k + 1) != Some(&b':')));
+        let flag = !sep && text[i..j].starts_with('-') && k == j + 1 && b[j] == b' ' && k < b.len() && b[k] != b'-';
+        if !sep && !flag {
+            i = j;
+            continue;
+        }
+        if sep {
+            k += 1;
+            while k < b.len() && matches!(b[k], b' ' | b'\t') {
+                k += 1;
+            }
+        }
+        let (v, e) = match b.get(k) {
+            Some(&q @ (b'"' | b'\'')) => {
+                let e = text[k + 1..].find(q as char).map(|e| k + 1 + e).unwrap_or(k + 1);
+                (k + 1, e)
+            }
+            Some(b'[' | b'{') | None => (k, k),
+            Some(_) => {
+                let mut e = k;
+                while e < b.len() && !b[e].is_ascii_whitespace() && !matches!(b[e], b',' | b';' | b'&' | b')' | b']' | b'}' | b'"' | b'\'') {
+                    e += 1;
+                }
+                (k, e)
+            }
+        };
+        if e > v && &text[v..e] != "<redacted>" && text.is_char_boundary(v) && text.is_char_boundary(e) {
+            out.push_str(&text[at..v]);
+            out.push_str("<redacted>");
+            at = e;
+        }
+        i = e.max(j);
+    }
+    out.push_str(&text[at..]);
+    out
 }
 
 fn redact_paths(text: &[char], needles: &[PathNeedle]) -> Vec<char> {
@@ -338,14 +658,15 @@ fn redact_steam_ids(text: &[char]) -> Vec<char> {
     out
 }
 
-/// Dotted IPv4 addresses (each part 0-255) except 127.x.x.x and 0.0.0.0.
+/// Dotted IPv4 addresses (each part 0-255) except 127.x.x.x and 0.x.x.x.
 fn redact_ips(text: &[char]) -> Vec<char> {
     let mut out = Vec::with_capacity(text.len());
     let mut i = 0;
     while i < text.len() {
         let start_ok = text[i].is_ascii_digit() && (i == 0 || !(text[i - 1].is_alphanumeric() || text[i - 1] == '.'));
         if start_ok && let Some((end, parts)) = ipv4_at(text, i) {
-            if parts[0] == 127 || parts == [0, 0, 0, 0] {
+            // 0.x.x.x is no host's address (and is a version number: `Kiln.Host 0.2.0.0`)
+            if parts[0] == 127 || parts[0] == 0 {
                 out.extend(&text[i..end]);
             } else {
                 out.extend("<ip>".chars());
@@ -392,7 +713,12 @@ pub fn is_secret_key(key: &str) -> bool {
     let k = key.to_ascii_lowercase();
     const PART: &[&str] = &["token", "password", "passwd", "passphrase", "secret", "apikey", "api_key", "cookie", "credential", "private"];
     const EXACT: &[&str] = &["auth", "key", "ip", "host", "hostname", "endpoint", "sid", "steamid", "steam_id", "steamid64", "nonce"];
+    // names of people: an account, a player, a character, a mail address
+    let bare: String = k.chars().filter(|c| !matches!(c, '_' | '-')).collect();
+    const PERSON: &[&str] = &["username", "accountname", "personaname", "playername", "charactername", "email"];
     PART.iter().any(|p| k.contains(p))
+        || bare.contains("apikey")
+        || PERSON.iter().any(|p| bare.ends_with(p))
         || EXACT.contains(&k.as_str())
         || k.ends_with("address")
         || k.ends_with("url")
@@ -482,6 +808,12 @@ pub struct ReportInput {
     pub channel: Option<ReportChannel>,
     /// Default [`Redactor::current`].
     pub redactor: Option<Redactor>,
+    /// (dev.29.22) Files the player leaves out of the zip (the launcher's "What's in this report", `kilnctl report
+    /// --exclude`): zip paths, or [`EXCLUDE_OTHER_MODS`] for all of them. Only [`excludable`] files (other mods' and
+    /// tools' own files) can be left out; any other name here is ignored, since support needs Kiln's own logs, the
+    /// settings and the listings to diagnose anything. A file left out is still read and redacted ([`Report::left_out`],
+    /// for [`contents`]) but is not in the zip; summary.txt names it.
+    pub exclude: Vec<String>,
 }
 
 /// The launcher's channel for a report: the channel its build belongs to, its beta number (a test build), and the
@@ -617,6 +949,166 @@ pub struct Report {
     /// (path in the zip, bytes), summary.txt and report.json included.
     #[serde(skip)]
     pub files: Vec<(String, Vec<u8>)>,
+    /// (dev.29.22) The files [`ReportInput::exclude`] left out, as they would have been in the zip (redacted): not
+    /// written, only described by [`contents`].
+    #[serde(skip)]
+    pub left_out: Vec<(String, Vec<u8>)>,
+}
+
+// ---------------------------------------------------------------- what is in a report (the launcher's preview)
+
+/// [`ReportInput::exclude`]: every other mod's and tool's file ([`excludable`]).
+pub const EXCLUDE_OTHER_MODS: &str = "other-mods";
+
+/// The groups "What's in this report" shows a report's files in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FileGroup {
+    /// Kiln's and the launcher's own logs, summary.txt, report.json, the crash report.
+    Kiln,
+    /// Other mods' and tools' own files (their logs; OptiScaler's settings): the player may leave these out.
+    Mods,
+    /// Kiln's state files, the profile, the chain, the install receipt.
+    Settings,
+    /// The listings of folders (names, sizes, times; no contents).
+    Listings,
+}
+
+/// What one file in a report is: its group and a stable name for what it holds (the launcher's words for it are
+/// `report.about.<name>`). A file this does not know is another mod's (it can be left out).
+pub fn file_kind(path: &str) -> (FileGroup, &'static str) {
+    use FileGroup::*;
+    let low = path.to_ascii_lowercase();
+    let name = low.rsplit('/').next().unwrap_or("");
+    match path {
+        "summary.txt" => return (Kiln, "summary"),
+        "report.json" => return (Kiln, "findings"),
+        "launcher/launcher.log" => return (Kiln, "launcher-log"),
+        "launcher/game-start.log" => return (Kiln, "game-start"),
+        "game/kiln/logs/kiln.log" => return (Kiln, "kiln-log"),
+        "game/kiln/logs/proxy.log" => return (Kiln, "proxy-log"),
+        "game/kiln/logs/eml.log" => return (Kiln, "eml-log"),
+        "game/kiln/logs/tick-stats.jsonl" => return (Kiln, "tick-stats"),
+        "game/kiln/logs/greeneye-loader.log" => return (Kiln, "greeneye-bridge"),
+        "game/kiln/profile.json" => return (Settings, "profile"),
+        "game/kiln/chain.ini" | "game/dinput8-chain.ini" => return (Settings, "chain"),
+        "game/kiln/kiln.json" => return (Settings, "kiln-json"),
+        "game/kiln/.install.json" => return (Settings, "receipt"),
+        "listings/game-folder.txt" => return (Listings, "game-folder"),
+        "listings/kiln-folder.txt" => return (Listings, "kiln-folder"),
+        "listings/mod-folders.txt" => return (Listings, "mod-folders"),
+        _ => {}
+    }
+    if path.starts_with("game/kiln/crash-reports/") {
+        (Kiln, "crash")
+    } else if path.starts_with("game/kiln/state/") {
+        (Settings, "state")
+    } else if path.starts_with("listings/") {
+        (Listings, "listing")
+    } else if name == engine_mods::XHL_CORE_LOG.to_ascii_lowercase() {
+        (Mods, "xhl-core")
+    } else if path.starts_with("game/kiln/logs/") {
+        (Kiln, "kiln-other")
+    } else if path.starts_with("greeneye-mods/") || low.starts_with("game/greeneye/") {
+        (Mods, "greeneye")
+    } else if name.starts_with("buildingtools") {
+        (Mods, "building-tools")
+    } else if name.starts_with("shroudlink") {
+        (Mods, "shroudlink")
+    } else if name == "auto-loot-plus.log" {
+        (Mods, "auto-loot")
+    } else if name == "optiscaler.ini" {
+        (Mods, "optiscaler-settings")
+    } else if name == "optiscaler.log" {
+        (Mods, "optiscaler-log")
+    } else {
+        (Mods, "mod-log")
+    }
+}
+
+/// Whether the player may leave a file out ([`ReportInput::exclude`]): other mods' and tools' files only.
+pub fn excludable(path: &str) -> bool {
+    file_kind(path).0 == FileGroup::Mods
+}
+
+/// What [`redact`] and [`redact_json`] put in place of what they take out, by the name [`contents`] counts them
+/// under (`home` for `<home>`).
+pub const TOKENS: [&str; 10] = ["<home>", "<user>", "<host>", "<steam-name>", "<steamid>", "<player>", "<ip>", "<mac>", "<email>", "<redacted>"];
+
+/// How often each replacement token stands in a text (only those that do), by name without the brackets.
+pub fn replacements(text: &str) -> std::collections::BTreeMap<String, usize> {
+    TOKENS.iter()
+        .map(|t| (t.trim_matches(|c| c == '<' || c == '>').to_string(), text.matches(t).count()))
+        .filter(|(_, n)| *n > 0)
+        .collect()
+}
+
+/// One file of [`Contents`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentsFile {
+    /// The path in the zip.
+    pub path: String,
+    pub group: FileGroup,
+    /// What it holds ([`file_kind`]).
+    pub about: String,
+    /// Bytes before compression.
+    pub size: u64,
+    /// The player may leave it out ([`excludable`]).
+    pub excludable: bool,
+    /// Left out by [`ReportInput::exclude`]: not in the zip.
+    pub excluded: bool,
+    /// How often each replacement stands in it (`{"home": 169, "player": 3}`); summary.txt's own "Left out"
+    /// section, which names every token once, is not counted.
+    pub replaced: std::collections::BTreeMap<String, usize>,
+}
+
+/// One thing a report never holds ([`NEVER_COLLECTED`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NeverItem {
+    pub id: String,
+    pub text: String,
+}
+
+/// "What's in this report" (the launcher's `report_preview`, `kilnctl report --contents`): each file with its size and
+/// replacements, those left out, and what a report never holds. Built from a [`Report`], so it describes exactly the
+/// zip that report writes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Contents {
+    pub files: Vec<ContentsFile>,
+    /// All files in the zip together (before compression).
+    pub size: u64,
+    /// summary.txt (the launcher's "View").
+    pub summary: String,
+    pub never: Vec<NeverItem>,
+}
+
+/// What a report holds ([`Contents`]).
+pub fn contents(r: &Report) -> Contents {
+    let own = replacements(LEFT_OUT);
+    let line = |path: &str, bytes: &[u8], excluded: bool| {
+        let (group, about) = file_kind(path);
+        let text = String::from_utf8_lossy(bytes);
+        let mut replaced = replacements(&text);
+        if path == "summary.txt" && text.contains(LEFT_OUT) {
+            for (k, n) in &own {
+                if let Some(v) = replaced.get_mut(k) {
+                    *v = v.saturating_sub(*n);
+                }
+            }
+            replaced.retain(|_, n| *n > 0);
+        }
+        ContentsFile { path: path.to_string(), group, about: about.to_string(), size: bytes.len() as u64, excludable: group == FileGroup::Mods, excluded, replaced }
+    };
+    let mut files: Vec<ContentsFile> = r.files.iter().map(|(n, b)| line(n, b, false)).collect();
+    files.extend(r.left_out.iter().map(|(n, b)| line(n, b, true)));
+    Contents {
+        size: r.files.iter().map(|(_, b)| b.len() as u64).sum(),
+        summary: r.summary.clone(),
+        never: NEVER_COLLECTED.iter().map(|(id, text)| NeverItem { id: id.to_string(), text: text.to_string() }).collect(),
+        files,
+    }
 }
 
 /// `kiln-report-2026-11-10.zip`
@@ -939,7 +1431,9 @@ pub fn profile_view(file: &ProfileFile) -> crate::profile::Profile {
 struct Ctx<'a> {
     game: Option<&'a Path>,
     red: &'a Redactor,
+    exclude: &'a [String],
     files: Vec<(String, Vec<u8>)>,
+    left_out: Vec<(String, Vec<u8>)>,
     total: usize,
     errors: Vec<String>,
     findings: Vec<Finding>,
@@ -959,6 +1453,11 @@ impl Ctx<'_> {
         let mut t = redact(text, self.red);
         if let Some(n) = note {
             t = format!("{n}\n{t}");
+        }
+        // left out by the player: described, never in the zip, and takes nothing of TOTAL_MAX
+        if excludable(name) && self.exclude.iter().any(|e| e == name || e == EXCLUDE_OTHER_MODS) {
+            self.left_out.push((name.to_string(), t.into_bytes()));
+            return;
         }
         let left = TOTAL_MAX.saturating_sub(self.total);
         if t.len() > left {
@@ -1037,7 +1536,7 @@ impl Ctx<'_> {
 pub fn build(input: &ReportInput) -> Report {
     let now = SystemTime::now();
     let roots = input.roots.clone().unwrap_or_else(|| crate::steam::roots().unwrap_or_default());
-    let red = input.redactor.clone().unwrap_or_else(|| Redactor::current(&roots));
+    let mut red = input.redactor.clone().unwrap_or_else(|| Redactor::current(&roots));
     let dirs = input.dirs.clone().or_else(|| DataDirs::locate().ok());
     let install: Option<GameInstall> = input.install.clone().or_else(|| {
         let d = input.game_dir.as_ref()?;
@@ -1045,7 +1544,16 @@ pub fn build(input: &ReportInput) -> Report {
         crate::game::inspect_with(d, &roots, &data_root).ok()
     });
     let game_dir: Option<PathBuf> = install.as_ref().map(|i| i.path.clone()).or_else(|| input.game_dir.clone());
-    let mut cx = Ctx { game: game_dir.as_deref(), red: &red, files: Vec::new(), total: 0, errors: Vec::new(), findings: Vec::new() };
+    // other people's names: the players the logs in the report name (a co-op host's friends, a server's players)
+    if let Some(g) = game_dir.as_deref() {
+        for (r, max) in [("kiln/logs/kiln.log", KILN_LOG_MAX), ("shroudlink.log", SMALL_LOG_MAX)] {
+            if let Ok(Some((t, _))) = tail(&rel(g, r), max) {
+                red.add_players_from(&t);
+            }
+        }
+    }
+    let mut cx = Ctx { game: game_dir.as_deref(), red: &red, exclude: &input.exclude, files: Vec::new(), left_out: Vec::new(), total: 0, errors: Vec::new(),
+        findings: Vec::new() };
     let mut s = String::new();
     let tool = if input.tool.is_empty() { format!("kiln-manage {}", crate::VERSION) } else { input.tool.clone() };
 
@@ -2033,6 +2541,12 @@ fn finish(mut cx: Ctx, mut s: String, sys: String, body: String, input: &ReportI
     for (n, b) in &cx.files {
         let _ = writeln!(s, "  {n} ({})", crate::util::human_size(b.len() as u64));
     }
+    if !cx.left_out.is_empty() {
+        let _ = writeln!(s, "Left out by the player (other mods' own files):");
+        for (n, _) in &cx.left_out {
+            let _ = writeln!(s, "  {n}");
+        }
+    }
     let _ = writeln!(s, "\n== Left out ==\n{LEFT_OUT}");
     let s: String = s.lines().map(str::trim_end).collect::<Vec<_>>().join("\n") + "\n";
     let summary = redact(&s, cx.red);
@@ -2083,17 +2597,28 @@ fn finish(mut cx: Ctx, mut s: String, sys: String, body: String, input: &ReportI
         game_build: facts.build.clone(),
         mods_on: facts.mods_on,
     };
-    let mut report = Report { written: rfc(now), summary, short, findings: cx.findings, errors: cx.errors, facts: public, files: Vec::new() };
+    let mut report = Report { written: rfc(now), summary, short, findings: cx.findings, errors: cx.errors, facts: public, files: Vec::new(),
+        left_out: Vec::new() };
     let json = serde_json::to_vec_pretty(&serde_json::json!({
         "format": 1, "written": report.written, "tool": redact(tool, cx.red), "channel": input.channel, "findings": report.findings, "errors": report.errors,
-        "versions": report.facts.versions(),
+        "versions": report.facts.versions(), "leftOut": cx.left_out.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
     }))
     .unwrap_or_default();
     let mut files = vec![("summary.txt".to_string(), report.summary.clone().into_bytes()), ("report.json".to_string(), json)];
     files.append(&mut cx.files);
     report.files = files;
+    report.left_out = cx.left_out;
     report
 }
+
+/// What a report never holds, one by one (id, the words in [`LEFT_OUT`]): "What's in this report" lists them.
+pub const NEVER_COLLECTED: [(&str, &str); 5] = [
+    ("saves", "your saves and world data (the game's savegame folder, kiln/data/)"),
+    ("settings", "mod settings and Kiln's config folder (kiln/config/, the profile's config folder): they may hold server passwords and tokens"),
+    ("admin", "Kiln.Admin's files (kiln/data/kiln-admin/: the admin token and endpoint)"),
+    ("mods", "the contents of your mods (only folder and file names, sizes and times are listed)"),
+    ("steam", "Steam's own files, besides the compat tool and launch options shown above"),
+];
 
 /// What a report never holds (summary.txt's last section).
 pub const LEFT_OUT: &str = "Never collected:
@@ -2103,8 +2628,9 @@ pub const LEFT_OUT: &str = "Never collected:
 - the contents of your mods (only folder and file names, sizes and times are listed);
 - Steam's own files, besides the compat tool and launch options shown above.
 Replaced in every file: your home folder (<home>), user name (<user>), computer name (<host>), Steam names and ids
-(<steam-name>, <steamid>), IP addresses (<ip>), and the values of fields named like passwords, tokens, keys, addresses,
-hosts or URLs (<redacted>; the server you joined last keeps its name, not its address).";
+(<steam-name>, <steamid>), the names of other players in Kiln's and ShroudLink's logs (<player>), IP and MAC addresses
+(<ip>, <mac>), mail addresses (<email>), and the values of fields named like passwords, tokens, keys, addresses, hosts,
+URLs or account names (<redacted>; the server you joined last keeps its name, not its address).";
 
 /// Writes the report as a zip (atomically). Returns its size in bytes.
 #[cfg(feature = "zip")]
