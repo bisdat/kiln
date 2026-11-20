@@ -22,7 +22,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -51,6 +53,18 @@ namespace {
 std::mutex g_log_mutex;
 std::vector<std::string> g_lines;
 std::map<uintptr_t, std::vector<uint8_t>> g_file;  // "the exe file's" first bytes of functions a foreign hooker patched
+// test_code_wait_during_stop: a one-shot pause inside a first install, at its read of the file's bytes (target_for does
+// that after the install took code_state's lock and before it stops the other threads).
+std::atomic<uintptr_t> g_pause_at{0};      // the target whose file read is watched
+std::atomic<DWORD> g_pause_installer{0};   // the installing thread: it runs g_pause_fn once, at that read
+std::atomic<DWORD> g_pause_reader{0};      // a code_state caller: its read of the file's bytes is noted
+std::atomic<bool> g_pause_reader_read{false};
+std::function<void()> g_pause_fn;
+void file_read_noted() {
+    const DWORD me = GetCurrentThreadId();
+    if (me == g_pause_reader.load()) g_pause_reader_read = true;  // its next step is the lock
+    else if (DWORD installer = me; g_pause_installer.compare_exchange_strong(installer, 0) && g_pause_fn) g_pause_fn();
+}
 std::vector<kiln::sigdb::LiveDiff> g_live_diffs;
 std::filesystem::path g_state_dir;
 kiln::svc::Service* g_service = nullptr;
@@ -138,12 +152,16 @@ bool load_fragment(std::string_view, const std::filesystem::path&, const std::fi
 }
 bool unload_fragment(std::string_view) { return false; }
 bool file_bytes(uintptr_t a, uint8_t* out, size_t n) {
+    bool found = false;
     for (auto& [at, bytes] : g_file)
         if (a >= at && a + n <= at + bytes.size()) {
             std::memcpy(out, bytes.data() + (a - at), n);
-            return true;
+            found = true;
+            break;
         }
-    std::memcpy(out, reinterpret_cast<const void*>(a), n);  // "the file" equals the live code unless a hooker patched it
+    // "the file" equals the live code unless a hooker patched it
+    if (!found) std::memcpy(out, reinterpret_cast<const void*>(a), n);
+    if (a == g_pause_at.load()) file_read_noted();
     return true;
 }
 std::atomic<int> g_sym_calls{0};
@@ -310,6 +328,7 @@ extern char game_asm_regs_hook[];
 int game_asm_fb(int);
 int game_asm_code(int);
 int game_asm_code_hold(int);
+int game_asm_code_stop(int);
 extern char game_code_many[];
 int game_asm_fo(int);
 int game_asm_mid(int);
@@ -349,7 +368,8 @@ __asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n" GAME_ASM(game_asm_er1)
         "  mov rsp, rbx\n  mov eax, 0xBADBAD\n"
         "1:\n  add rsp, 0x20\n  pop rbx\n  ret\n.seh_endproc\n");
 __asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n" GAME_ASM(game_asm_fb) GAME_ASM(game_asm_fo)
-            GAME_ASM(game_asm_mid) GAME_ASM(game_asm_mid2) GAME_ASM(game_asm_mid3) GAME_ASM(game_asm_mix) GAME_ASM(game_asm_code) GAME_ASM(game_asm_code_hold) ".text\n");
+            GAME_ASM(game_asm_mid) GAME_ASM(game_asm_mid2) GAME_ASM(game_asm_mid3) GAME_ASM(game_asm_mix)
+                GAME_ASM(game_asm_code) GAME_ASM(game_asm_code_hold) GAME_ASM(game_asm_code_stop) ".text\n");
 
 // 16 more of them for test_code_lock_order: first installs while other threads poll code_state.
 __asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n.balign 32, 0xCC\n"
@@ -776,6 +796,80 @@ void test_code_lock_order() {
     check(bad == 0 && during > 0, "the polls during them see only ORIGINAL or MANAGED", std::to_string(bad.load()) + " bad of " +
           std::to_string(polls.load()) + ", " + std::to_string(during) + " during the installs");
     check(log_count("could not be opened or stopped") == unstoppable, "these installs stopped every other thread they listed");
+}
+
+// A code_state call that waits for the lock while a first install stops every thread. The install holds the lock from
+// before it reads the target until it has written the jump and let the threads run again, so a caller waiting for it
+// holds nothing when it is stopped, and it finishes after the install, with the new bytes. The pause inside the
+// install (at its read of the file's bytes, after it took the lock and before it stops the threads) makes this
+// deterministic: the caller has read the file's bytes, its next step is the lock, and it cannot finish before the
+// install does. read_original takes no lock: a call made during the pause returns at once. A lock taken only after the
+// threads are stopped would deadlock in test_code_lock_order; an install without the lock fails the checks here.
+void test_code_wait_during_stop() {
+    std::puts("-- original code: a code_state call waits for the lock while a first install stops every thread");
+    const uintptr_t at = reinterpret_cast<uintptr_t>(&game_asm_code_stop);
+    snapshot_file(reinterpret_cast<void*>(at));
+    uint8_t file[16];
+    std::memcpy(file, reinterpret_cast<const void*>(at), sizeof file);
+    const size_t unstoppable = log_count("could not be opened or stopped");
+    const size_t stops = log_count("hooks: detour on rva");
+    struct Original {  // a read_original call made during the pause; it outlives the pause if it ever waits
+        std::atomic<bool> done{false};
+        KilnResult rc = KILN_ERR_INTERNAL;
+        uint8_t bytes[16] = {};
+    };
+    auto original = std::make_shared<Original>();
+    std::atomic<bool> reader_done{false};
+    KilnResult reader_rc = KILN_ERR_INTERNAL;
+    uint32_t reader_state = 99;
+    bool paused = false, reached = false, done_in_pause = true, original_in_pause = false;
+    std::thread reader;
+    g_pause_reader_read = false;
+    g_pause_fn = [&] {  // on the installing thread, inside the install
+        paused = true;
+        reader = std::thread([&] {
+            g_pause_reader = GetCurrentThreadId();
+            uint64_t g = 0;
+            reader_rc = A->code_state(at, 16, &reader_state, &g);
+            reader_done = true;
+        });
+        for (int i = 0; i < 5000 && !g_pause_reader_read.load(); ++i) Sleep(1);
+        reached = g_pause_reader_read.load();
+        Sleep(20);  // its next step is the lock: let it get there and wait
+        done_in_pause = reader_done.load();
+        std::thread reading([original, at] {
+            original->rc = A->read_original(at, original->bytes, sizeof original->bytes);
+            original->done = true;
+        });
+        for (int i = 0; i < 5000 && !original->done.load(); ++i) Sleep(1);
+        original_in_pause = original->done.load() && original->rc == KILN_OK &&
+                            !std::memcmp(original->bytes, file, sizeof file);
+        // Joined, it has ended before the install lists the threads (a thread still ending then cannot always be
+        // stopped). One that waits for this install's lock is let go instead.
+        if (original->done.load()) reading.join();
+        else reading.detach();
+    };
+    g_pause_at = at;
+    g_pause_installer = GetCurrentThreadId();
+    static int (*continuation)(int) = nullptr;
+    static auto handler = +[](int x) { return continuation(x); };
+    KilnHandle h = 0;
+    const KilnResult installed =
+        A->raw_detour(6, at, nullptr, reinterpret_cast<void*>(handler), reinterpret_cast<void**>(&continuation), &h);
+    if (reader.joinable()) reader.join();
+    g_pause_at = 0;
+    g_pause_installer = 0;
+    g_pause_reader = 0;
+    g_pause_fn = nullptr;
+    check(installed == KILN_OK && paused && reached,
+          "the install paused after taking the lock; the caller read the file's bytes meanwhile");
+    check(!done_in_pause, "...and could not finish while the install held the lock");
+    check(reader_done && reader_rc == KILN_OK && reader_state == KILN_CODE_MANAGED,
+          "...it finished after the install and saw the detour (MANAGED)", "state " + std::to_string(reader_state));
+    check(log_count("hooks: detour on rva") == stops + 1 && log_count("could not be opened or stopped") == unstoppable,
+          "the install stopped every other thread it listed, the waiting caller among them");
+    check(original_in_pause, "read_original returned the file's bytes while the install held the lock");
+    check(reinterpret_cast<int (*)(int)>(at)(41) == 42 && A->revoke(h) == KILN_OK, "the detour works");
 }
 
 void test_raw_chain_9args() {
@@ -2407,6 +2501,7 @@ int main(int argc, char** argv) {
 
     test_code_inspection();
     test_code_lock_order();
+    test_code_wait_during_stop();
     test_raw_chain_9args();
     test_floats();
     test_structured();

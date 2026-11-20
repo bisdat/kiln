@@ -225,6 +225,8 @@ write the code right after the call returns, and nothing tells you when it does.
 `code_state` takes only this lock, never the chain or patch mutex, and holds it for two guarded copies and the
 comparison. So it never sees a half-written Kiln detour, and a thread that a Kiln install stops is never inside
 `code_state` holding the lock (a caller that waits for the lock may be stopped while it waits, which is harmless).
+Don't call `code_state`, `patch`, `unpatch` or `write` under the loader lock (from `DllMain` or a TLS callback): an
+install holds this lock while it looks up modules, which can wait for the loader lock. `read_original` takes no lock.
 
 **Capability rows.** The core reports both: available when kiln.hooks runs and the core reads the exe file's code
 (sigdb's verified file view, the usual case). Unavailable: `policy` in safe idle, `service-missing` when kiln.hooks did
@@ -505,12 +507,15 @@ are not counted per call. Structured and mid dispatches are counted by each thre
   code: `read_original` and `code_state` on the real service (a detour and its revoke, a patch, `write`, an unreadable
   page, polls while patches and detours come and go); a first install, `patch`, `unpatch` and `write` that each wait
   for a thread holding the `code_state` lock and write nothing meanwhile; four threads polling `code_state` through
-  sixteen first installs (each stops every other thread), seeing only ORIGINAL or MANAGED.
+  sixteen first installs (each stops every other thread), seeing only ORIGINAL or MANAGED; a `code_state` call that
+  waits for the lock while a first install stops every thread (a pause inside the install makes it deterministic): it
+  finishes after the install and reads MANAGED, and a `read_original` call made meanwhile returns at once. Each run
+  has a time limit (300 s), so a lock-order deadlock fails the run instead of hanging it.
 - `native/core/tests/test-hooks-typed.sh` (Wine, no game): the typed link kind (the T3 set of sret, f64, eight stack
   arguments, narrow integers, mixed positions; the call state machine, faults before and after `CallOriginal`, a
   24- and a 128-byte struct return restored whole after a faulting handler, eight callers while a ninth installs and
   revokes) and `detour_typed_checked` (a thread parked inside the bytes: refused with `KILN_HOOKS_ERR_UNCHECKED`,
-  nothing written; with the thread gone it installs; a second link writes no patch).
+  nothing written; with the thread gone it installs; a second link writes no patch). The same time limit applies.
 - `native/core/tests/test-hooks-code.sh asan` and `... tsan` (host): the registry behind `code_state` with fake file and live
   readers: ranges and refusals, relocated bytes, patches over patches and over another module's bytes, unreadable and
   changing pages, two ranges taking turns, a query in flight while a writer waits for the lock, and polls racing

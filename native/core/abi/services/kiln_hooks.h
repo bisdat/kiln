@@ -433,7 +433,9 @@ typedef struct KilnHooksApi {
      * Locking: Kiln's writers of game code (patch, unpatch, write, revoke and revoke_owner of patches, every detour
      * install, revoke and sweep) take the lock code_state reads under; an install takes it before it stops the game's
      * threads. A code_state call therefore never sees a half-written Kiln detour, and a Kiln install never stops it
-     * while it holds that lock. */
+     * while it holds that lock. Not under the loader lock (DllMain, a TLS callback): an install holds this lock while
+     * it looks up modules, which can wait for the loader lock, so code_state, patch, unpatch and write could wait there
+     * for good. */
     KilnResult(KILN_CALL* read_original)(uintptr_t address, void* out, size_t size);
     KilnResult(KILN_CALL* code_state)(uintptr_t address, size_t size, uint32_t* state, uint64_t* generation);
 } KilnHooksApi;
