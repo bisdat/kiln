@@ -174,9 +174,28 @@ impl Target {
     }
 }
 
-/// Inherited variables that would point a Wine call at another runner, prefix or display.
+/// Inherited variables that would point a Wine call at another runner, prefix, wineserver, sync mode, loader or display.
+/// netcoredbg and the helper get these only from the target's own runner environment ([`Target::env`],
+/// [`RunnerLaunch`]), never from the environment kiln was started in.
 fn scrub(c: &mut Command) {
-    for k in ["WINEPREFIX", "WINESERVER", "WINELOADER", "WINEDLLPATH", "WINEARCH", "WINEDLLOVERRIDES", "WINEDEBUG", "STEAM_COMPAT_DATA_PATH", "STEAM_COMPAT_CLIENT_INSTALL_PATH"] {
+    for k in [
+        "WINEPREFIX",
+        "WINESERVER",
+        "WINESERVERSOCKET",
+        "WINELOADER",
+        "WINELOADERNOEXEC",
+        "WINEDLLPATH",
+        "WINEARCH",
+        "WINEDLLOVERRIDES",
+        "WINEDEBUG",
+        "WINEESYNC",
+        "WINEFSYNC",
+        "WINENTSYNC",
+        "LD_LIBRARY_PATH",
+        "LD_PRELOAD",
+        "STEAM_COMPAT_DATA_PATH",
+        "STEAM_COMPAT_CLIENT_INSTALL_PATH",
+    ] {
         c.env_remove(k);
     }
     kiln_manage::server::run::headless(c);
@@ -314,6 +333,32 @@ pub(crate) fn open_source(runner: Option<&RunnerLaunch>) -> std::result::Result<
     Ok(Box::new(crate::debug_inspect::HelperSource::spawn(runner.helper_command(&helper))?))
 }
 
+/// Refuses an install without a debug descriptor before anything starts, with resolve's own refusal (refused,
+/// developer_debugging_off): without it, `wine kiln.exe debug-inspect` would be started under the target's runner only
+/// for resolve to find nothing to prove.
+fn descriptor_gate(spec: &HostSpec) -> std::result::Result<(), DebugError> {
+    if !kiln_manage::debug::identity::read_descriptors(&spec.state_dir).is_empty() {
+        return Ok(());
+    }
+    let what = match spec.kind {
+        TargetKind::Server => "server",
+        TargetKind::Client => "game",
+    };
+    Err(DebugError::refused(
+        format!(
+            "no debug descriptor in {}: start the {what} with developer debugging on (kiln.json \"developer_debugging\": true, or the launcher's Developer debugging switch)",
+            spec.state_dir.join(kiln_manage::debug::identity::DESCRIPTOR_DIR).display()
+        ),
+        "developer_debugging_off",
+    ))
+}
+
+/// The Windows side of an install that has a debug descriptor ([`descriptor_gate`] first, then [`open_source`]).
+fn open_checked(spec: &HostSpec, runner: Option<&RunnerLaunch>) -> std::result::Result<Box<dyn ProcessSource + Send>, DebugError> {
+    descriptor_gate(spec)?;
+    open_source(runner)
+}
+
 /// A resolved target with its host and Windows sides, ready for the proxy or for `--json`.
 struct Planned {
     target: Target,
@@ -421,7 +466,7 @@ fn plan_server(a: &DebugArgs) -> Result<Planned> {
         _ => None,
     };
     let mut host = ServerHost { spec, dir: s.dir.clone(), wine: wine.clone() };
-    let mut source = open_source(runner.as_ref()).map_err(cli_error)?;
+    let mut source = open_checked(&host.spec, runner.as_ref()).map_err(cli_error)?;
     let mut resolved = match prepare(kind, false, &mut host, source.as_mut(), &mut resolver::new_challenge) {
         Ok(r) => r,
         Err(e) => {
@@ -516,7 +561,7 @@ fn plan_client(a: &DebugArgs, sel: &str) -> Result<Planned> {
     let g = find_client(sel)?;
     let (netcoredbg, netcoredbg_note) = netcoredbg()?;
     let (mut host, launch) = client_sides(&g, Path::new("/proc")).map_err(cli_error)?;
-    let mut source = open_source(launch.as_ref()).map_err(cli_error)?;
+    let mut source = open_checked(&host.spec, launch.as_ref()).map_err(cli_error)?;
     let mut resolved = match prepare(kind, a.allow_client_pause, &mut host, source.as_mut(), &mut resolver::new_challenge) {
         Ok(r) => r,
         Err(e) => {
@@ -1202,10 +1247,12 @@ fn proxy(p: Planned) -> Result<i32> {
                     }
                     Policy::Disconnect => {
                         *client_disconnect_seq.lock().unwrap() = m["seq"].as_i64();
+                        // the session learns of it before netcoredbg does: its answer (from the other thread, on the
+                        // same channel) then always comes after, and is never missed as an unawaited response
+                        let _ = tx.send(Ev::ClientDisconnect);
                         if let Some(w) = adapter_in.lock().unwrap().as_mut() {
                             let _ = write_json(w, &m);
                         }
-                        let _ = tx.send(Ev::ClientDisconnect);
                     }
                 }
             }
@@ -1236,6 +1283,7 @@ fn proxy(p: Planned) -> Result<i32> {
     let mut deadline = None;
     let mut own = OWN_SEQ + 1;
     let mut code = 0;
+    let mut attached = false;
     let mut end: (SessionState, Option<String>) = (SessionState::Detached, None);
     let send_disconnect = |adapter_in: &Mutex<Option<std::process::ChildStdin>>| {
         let m = json!({ "seq": OWN_SEQ, "type": "request", "command": "disconnect", "arguments": { "terminateDebuggee": false, "suspendDebuggee": false } });
@@ -1244,12 +1292,14 @@ fn proxy(p: Planned) -> Result<i32> {
         }
     };
     loop {
-        let wake = [deadline, pause.deadline()].into_iter().flatten().min();
+        // once a disconnect is out the watchdog is silent: the detach is under way, and a continue now would race it
+        let pause_deadline = if disconnect_sent { None } else { pause.deadline() };
+        let wake = [deadline, pause_deadline].into_iter().flatten().min();
         let ev = match wake {
             Some(d) => match rx.recv_timeout(d.saturating_duration_since(Instant::now())) {
                 Ok(e) => e,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if let Some(thread) = pause.due(Instant::now()) {
+                    if let Some(thread) = (!disconnect_sent).then(|| pause.due(Instant::now())).flatten() {
                         own += 1;
                         let c = json!({ "seq": own, "type": "request", "command": "continue", "arguments": { "threadId": thread } });
                         if let Some(w) = adapter_in.lock().unwrap().as_mut() {
@@ -1268,6 +1318,13 @@ fn proxy(p: Planned) -> Result<i32> {
                     }
                     if deadline.is_some_and(|d| Instant::now() >= d) {
                         eprintln!("kiln debug: netcoredbg has not finished after a disconnect; leaving it to detach (its stdin is closed)");
+                        if awaiting.is_some() {
+                            // the detach was never confirmed: not a clean detach
+                            code = 1;
+                            if end.0 != SessionState::Ended {
+                                end = (SessionState::Ended, Some("detach_unanswered".into()));
+                            }
+                        }
                         break;
                     }
                     continue;
@@ -1303,17 +1360,33 @@ fn proxy(p: Planned) -> Result<i32> {
                     states.set(SessionState::Running, None, None);
                 }
             }
-            Ev::Attached(ok) => {
-                if ok {
-                    states.set(SessionState::Running, None, None);
-                } else {
-                    end = (SessionState::Ended, Some("attach_failed".into()));
-                    states.set(SessionState::Ended, Some("attach_failed"), None);
-                }
+            Ev::Attached(true) => {
+                attached = true;
+                states.set(SessionState::Running, None, None);
             }
-            Ev::AttachRefused(reason) => {
+            ev @ (Ev::Attached(false) | Ev::AttachRefused(_)) => {
+                // the editor would wait on a session that cannot attach: it is told, and the session ends
+                let reason = match ev {
+                    Ev::AttachRefused(r) => r,
+                    _ => "attach_failed".to_string(),
+                };
+                code = 1;
                 end = (SessionState::Ended, Some(reason.clone()));
-                states.set(SessionState::Ended, Some(&reason), None);
+                eprintln!("kiln debug: the attach failed ({reason}); the session ends");
+                let _ = write_json(&mut *client_out.lock().unwrap(), &json!({ "seq": OWN_SEQ + 1, "type": "event", "event": "terminated", "body": {} }));
+                if !attached {
+                    // nothing is attached: close netcoredbg's input and go
+                    states.set(SessionState::Ended, Some(&reason), None);
+                    break;
+                }
+                // an earlier attach still holds: detach it safely first, as when the debuggee changes
+                if !disconnect_sent {
+                    disconnect_sent = true;
+                    awaiting = Some(OWN_SEQ);
+                    send_disconnect(&adapter_in);
+                    deadline = Some(Instant::now() + DISCONNECT_WAIT);
+                }
+                states.set(SessionState::Detaching, Some(&reason), None);
             }
             Ev::Pause(m) => match pause.adapter(&m, Instant::now()) {
                 Some(PauseChange::Paused) => {
@@ -1361,6 +1434,9 @@ fn proxy(p: Planned) -> Result<i32> {
                     // nothing more to say to it, and netcoredbg can sit on a read until its stdin closes
                     adapter_in.lock().unwrap().take();
                     deadline = Some(Instant::now() + EXIT_WAIT);
+                    // Windows: a console close or logoff handler holding the process for the detach may let it end
+                    // now (the call at the end is harmless after this one)
+                    detach_finished();
                 }
             }
             Ev::AdapterEof => {
@@ -1368,6 +1444,13 @@ fn proxy(p: Planned) -> Result<i32> {
                     code = 1;
                     let gone = tell_client_adapter_died(&t, source.lock().unwrap().as_mut(), &client_out);
                     end = (SessionState::Ended, Some(if gone { "debuggee_exited" } else { "adapter_exited" }.into()));
+                } else if awaiting.is_some() {
+                    // netcoredbg ended before it answered the disconnect: the detach was never confirmed
+                    eprintln!("kiln debug: netcoredbg exited without answering the disconnect");
+                    code = 1;
+                    if end.0 != SessionState::Ended {
+                        end = (SessionState::Ended, Some("detach_unanswered".into()));
+                    }
                 }
                 break;
             }
@@ -1899,5 +1982,69 @@ mod tests {
         assert_eq!((code.as_str(), reason.as_deref(), msg.as_str()), ("identity_changed", Some("creation_time"), "gone"));
         let c = e.downcast_ref::<CliError>().unwrap();
         assert_eq!(c.detail.as_ref().unwrap()["reason"], "creation_time");
+    }
+
+    /// netcoredbg and the helper get Wine's sync switches and the loader's variables only from the target's runner
+    /// environment (the allowlist), never from whatever environment kiln itself was started in.
+    #[test]
+    fn inherited_runner_variables_are_not_passed_on() {
+        const INHERITED: [&str; 7] = ["WINEESYNC", "WINEFSYNC", "WINENTSYNC", "LD_LIBRARY_PATH", "LD_PRELOAD", "WINESERVERSOCKET", "WINELOADERNOEXEC"];
+        let envs = |c: &Command| -> BTreeMap<String, Option<String>> {
+            c.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect()
+        };
+        let mut c = Command::new("x");
+        scrub(&mut c);
+        let e = envs(&c);
+        for k in INHERITED.iter().chain(&["WINEPREFIX", "WINESERVER", "WINELOADER", "WINEDLLOVERRIDES", "STEAM_COMPAT_DATA_PATH"]) {
+            assert_eq!(e.get(*k), Some(&None), "{k} is passed on from kiln's own environment");
+        }
+        // the helper: what the runner's allowlist holds, nothing else
+        let runner = RunnerLaunch { wine: "/w/bin/wine".into(), env: vec![("WINEFSYNC".into(), "1".into()), ("LD_LIBRARY_PATH".into(), "/runner/lib".into())], cwd: "/".into() };
+        let e = envs(&runner.helper_command(Path::new("/h/kiln.exe")));
+        assert_eq!(e.get("WINEFSYNC"), Some(&Some("1".to_string())));
+        assert_eq!(e.get("LD_LIBRARY_PATH"), Some(&Some("/runner/lib".to_string())));
+        for k in ["WINEESYNC", "WINENTSYNC", "LD_PRELOAD", "WINESERVERSOCKET", "WINELOADERNOEXEC"] {
+            assert_eq!(e.get(k), Some(&None), "helper: {k}");
+        }
+        // netcoredbg for a client: the runner environment's allowlisted names only (LD_PRELOAD is not one)
+        let w = World::new("scrub");
+        let (p, d) = w.kiln("a", 32, 100, N1, TargetKind::Client);
+        w.put("a", &d);
+        let resolved = prepare(TargetKind::Client, true, &mut w.host("a", TargetKind::Client), &mut FakeSource::new(vec![p]), &mut counter()).unwrap();
+        let t = Target {
+            kind: TargetKind::Client,
+            install: w.root.join("a"),
+            via: "install",
+            lab: None,
+            wine: Some("/w/bin/wine".into()),
+            prefix: Some("/pfx".into()),
+            netcoredbg: "/n/netcoredbg.exe".into(),
+            resolved,
+            max_pause_ms: None,
+            allow_client_pause: true,
+            runner_env: Some(vec![("WINEFSYNC".into(), "1".into()), ("LD_PRELOAD".into(), "/evil.so".into())]),
+        };
+        let e = envs(&t.command());
+        assert_eq!(e.get("WINEFSYNC"), Some(&Some("1".to_string())));
+        for k in ["WINEESYNC", "WINENTSYNC", "LD_LIBRARY_PATH", "LD_PRELOAD", "WINESERVERSOCKET", "WINELOADERNOEXEC"] {
+            assert_eq!(e.get(k), Some(&None), "netcoredbg: {k}");
+        }
+    }
+
+    /// No descriptor: refused as resolve refuses it, before the helper could be started. With a descriptor the same
+    /// call goes on to start the helper (here it cannot: no helper next to this test binary, no such wine).
+    #[test]
+    fn no_descriptor_starts_no_helper() {
+        let w = World::new("gate");
+        let host = w.host("a", TargetKind::Server);
+        let runner = RunnerLaunch { wine: w.root.join("no-such-wine"), env: Vec::new(), cwd: w.root.clone() };
+        let e = open_checked(&host.spec, Some(&runner)).err().expect("refused");
+        assert_eq!((e.code, e.reason.as_deref()), (DebugCode::Refused, Some("developer_debugging_off")));
+        let r = resolver::resolve(&mut w.host("a", TargetKind::Server), &mut FakeSource::default(), &mut counter()).unwrap_err();
+        assert_eq!((e.message.as_str(), e.reason.as_deref()), (r.message.as_str(), r.reason.as_deref()), "the same refusal as resolve's");
+        let (_, d) = w.kiln("a", 32, 100, N1, TargetKind::Server);
+        w.put("a", &d);
+        let e = open_checked(&host.spec, Some(&runner)).err().expect("no helper here");
+        assert_eq!(e.code, DebugCode::ToolMissing, "past the gate, the helper is what is missing: {}", e.message);
     }
 }
