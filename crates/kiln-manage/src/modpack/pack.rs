@@ -2777,7 +2777,7 @@ mod tests {
             ("bot.json", r#"{ "owner": 76561198000000001 }"#),
             ("bot.json", r#"{ "admins": ["76561198000000001"] }"#),
             ("bot.json", r#"{ "x": "MTA4NjQ3NzQ0NjMwNjQ3NjA5Mg.GhK2aB.TOKENTAIL" }"#),
-            ("bot.json", r#"{ "gh": "ghp_abcdefghijklmnopqrstuvwxyz0123456789" }"#),
+            ("bot.json", r#"{ "gh": "ghp_GHTAIL" }"#),
             ("bot.json", r#"{ "rcon": { "pass": "hunter2" } }"#),
             ("bot.json", r#"{ "db": { "pwd": "hunter2" } }"#),
             ("bot.json", r#"{ "apiKey": "k-123" }"#),
@@ -2788,7 +2788,8 @@ mod tests {
             ("bot.txt", "STEAM_0:1:12345678\n"),
         ] {
             // a bot token's last part, made here: written out, it would be a secret to scanners
-            let t = &t.replace("TOKENTAIL", &"x".repeat(27));
+            // the same for a GitHub token's 36 characters: written out, the release's own secret scan stops on it
+            let t = &t.replace("TOKENTAIL", &"x".repeat(27)).replace("GHTAIL", &"a1".repeat(18));
             assert!(!secret_findings(f, t).is_empty(), "{f}: {t}");
         }
     }
