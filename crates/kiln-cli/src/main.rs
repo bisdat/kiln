@@ -65,7 +65,7 @@ enum Cmd {
     Reload(control::ReloadArgs),
     /// Run a mod's [KilnTest] methods in the running server and print the report.
     Test(control::TestArgs),
-    /// Attach a debugger to a running local server's mods (--dap: a debug adapter for editors; never ends the server).
+    /// Attach a debugger to the mods of a running local server or game client (--dap: a debug adapter for editors; never ends the game).
     Debug(debug::DebugArgs),
     /// The Windows side of `kiln debug` (helper protocol on stdin/stdout; run by kiln debug under a target's runner).
     #[command(hide = true)]
