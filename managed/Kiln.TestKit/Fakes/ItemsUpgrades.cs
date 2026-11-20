@@ -28,7 +28,7 @@ internal sealed unsafe partial class ItemsFake
         {
             if (!GearRequestValid(g) || (g.Flags & ItemsAbi.GearDryRun) != 0) return false;
         }
-        else if (g.Flags != 0 || g.Available != 0 || g.Unlocked != 0 || g.Level != 0 || g.Reserved0 != 0 || g.R0 != 0 || g.R1 != 0 || g.R2 != 0)
+        else if (g.Flags != 0 || g.Available != 0 || g.Unlocked != 0 || g.Level != 0 || g.Reserved0 != 0 || g.DurabilityMax != 0 || g.R0 != 0 || g.R1 != 0)
         {
             return false;
         }

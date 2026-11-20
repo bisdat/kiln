@@ -1,0 +1,9 @@
+{
+  "id": "gear-values-test",
+  "name": "per-instance gear values: lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "GearValuesTest.dll",
+  "side": "server",
+  "clients": "none"
+}

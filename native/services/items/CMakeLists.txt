@@ -1,5 +1,5 @@
 kiln_service(items items.cpp engine.cpp pide.cpp moves.cpp xfer.cpp names.cpp stamps.cpp instances.cpp equip.cpp wear.cpp toolwear.cpp toolwear_table.cpp
-             setsnap.cpp sets.cpp setexec.cpp gems.cpp stations.cpp gear.cpp)
+             setsnap.cpp sets.cpp setexec.cpp gems.cpp stations.cpp gear.cpp scale.cpp)
 # gems.cpp: the offered gems' tokens come from the system's random generator
 target_link_libraries(kiln-items PRIVATE bcrypt)
 

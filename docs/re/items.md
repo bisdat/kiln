@@ -631,6 +631,57 @@ client in brackets. Scratch listings: `/mnt/Dongus/kiln-wave/dev29/out/equip-res
 - **Not verified here:** that a client shows the change without re-joining (vanilla and Kiln clients), the workbench's
   unlock offer and cost after an upgrade, an equipped item's perk programs after a change.
 
+## 20. Per-instance power, armour, max durability and levels outside the type's range (server 26430253 `f0d824be…`; client 26430625 `5d9ef2f1…`) **[dis] [rt]**
+What kiln.items v8's package P7 rests on (`native/services/items/scale.cpp`, `gear_logic.h` `ANY_LEVEL` / `DURABILITY_MAX`).
+Server RVAs, client in brackets. Listings: `/mnt/Dongus/kiln-wave/dev29/out/eq-p7/scratch/` (`srv_1933b0.asm`, `srv_191c10.asm`,
+`srv_192250.asm`, `srv_197900.asm`, `srv_1428f0.asm`, `srv_146cce.asm`, `cli_e6e1a0.asm`, `cli_e6dfe0.asm`; `twin.py` finds a
+function's twin in the other exe and checks a pattern's uniqueness).
+
+- **Where an item's damage comes from.** `impact_initialize`'s `0x197599` fills two used-item entries (weapon, ammunition) on the
+  stack, each with `0x1933b0` [`0x3f2110`] `(entry*, const ItemInstanceInfo*, ctx, job*)`: it copies the 20-byte
+  `ItemInstanceInfo` (`slotId`, `itemId` +8, `pide` +0x0c, `stateMask`: reflection), looks the item up (+0x18), reads the
+  item entity's level through `0x162be0` (+0x20) and computes `power(dmgMod, speedMod, level)` (`0x162b80` → `0x91e9d0`) into
+  +0x24. `0x191c10` then writes the block and stamina configs and calls `0x192250`, which writes the config `Damage` as
+  (entry0.power + entry1.power) × the summed distributions (docs/re/abilities.md). The fourth argument points at the job:
+  `JobStorage(job)` (`0x65ba10`) is the storage the program runs on. A path without an item entity (`0x197a3d`) sets the power
+  to 0, so `0x192250` writes nothing. **So one entry's +0x24 after `0x1933b0` is exactly one item instance's power in that
+  impact**: multiplying it scales that item's damage and nothing else (attributes, armour, crit and block act later in
+  ApplyDamage). `items/ItemPower` is the function; `items/ItemPower.power` the captured +0x24.
+- **`baseDamageUi`.** `item_state_init` (`0x1a8fcb`) is the other caller of `0x91e9d0`; it writes `ItemState.baseDamageUi`,
+  which a game client's item detail does not read (it computes damage from its own registry, docs/re/game-ui.md and the
+  equipment wave's TOOLTIPS.md). P7 does not hook it.
+- **Armour.** `apply_armor`'s `0x146cce` zeroes nine int32 on its stack and calls `0x1428f0` [`0x383350`] once per equipment
+  slot (nine calls, `rcx` = the nine values). Per piece: its `ItemInstanceInfo` (`[rsp+0x60]`, pide `[rsp+0x6c]`), its level
+  (`0x162be0`), its `ItemInfo`, then the base armour `0x9151d0` [`0xe6e1a0`] (`armorSetup` +0x6bc, `isSet` +0x24: nine values),
+  then for each unlocked perk `0x915010` [`0xe6dfe0`] with the perk's `perkArmorSetup` at `base + i + 1`; each adds
+  `int(round(level × creep + seed) × value)` to the nine values. Kiln's `items/ArmorSlotBase` (`0x1429de` [`0x38343e`], before the
+  base part; `r15` the values, `r14` the job pointer) and `items/ArmorSlotEnd` (`0x142a84` [`0x3834e4`], where the perk loop and
+  the no-perk branch join) bracket one piece's part; both paths that skip it (`jb`/`jne 0x142a94`) skip both.
+- **Server world only.** Both hooks compare `JobStorage(job)` with the server world's storage (as kiln.toolwear does), so a
+  hosting player's own client world is never scaled.
+- **Max durability after a load.** `ItemState` is not saved (section 19), so `DurabilityInitialized` is clear after a load and
+  `item_durability_init` computes max again from balancing, level and rarity, keeping the ratio: a max written by Kiln lasts
+  until the next load (or a refresh). Durability current and max are saved (the item's save record keeps them as values).
+- **Levels outside the type's range.** A load re-clamps `Level - unlocked` into `itemLevelRange` (section 10 **[rt]**); within a
+  session nothing sets it back (`rebalance_perks_and_level` runs once per item entity). So such a level must be written again
+  after every load; item data's fingerprint uses the level as a load gives it back (Kiln.Saves, `StableFingerprint`), so the
+  record still finds its item.
+- **Lab** (2026-11-19, server 26430253, lab `dev29-eq-p7` on a read-only copy of a real world, no player;
+  `mods/tests/gear-values-test`, logs `dev29/out/eq-p7/lab-boot*-kiln.log`): boot 1, 11 PASS 0 FAIL: an armour piece
+  (`Armor_T2_Warrior_Tank_Chest`, levels 10..10) to level 40 with `ANY_LEVEL` (`itemLevelUi` 40 a step later; refused
+  `OUT_OF_RANGE` without it); armour pieces have no `Durability` (`NOT_GEAR`); a sword's max durability 252 → 900 with
+  current 252 → 900 (the share), still 900 five steps later; the first power scale installed `items/ItemPower`'s detour, the
+  first armour scale both mid hooks, and the server ran on; then a save. Boot 2 (the keeper on), 5 PASS 0 FAIL: the level
+  40, the max durability 900 and both multipliers were back within about three seconds of the load. Boot 3, the control
+  (the keeper's marker removed, so its pass did not run): the first read after the load showed **level 10 and durability
+  252/252**, the game's load clamp and its new max computation, and the multipliers at 1; the item data was still on both
+  items (`base level 40`, `max durability 900` read back), so the fingerprint by the level as loaded found them. Not
+  exercised: a hit or an armour pass with a scale (no player: no impact with a used item starts, `apply_armor` runs for
+  players).
+- **Not verified in a real game:** the damage of a player's swing, shot or cast with a scaled item, the armour of a scaled
+  piece in the wearer's damage taken, and what any client shows (the tooltip shows the type's numbers; the level and
+  durability bar come from replicated components).
+
 ## 9. Open questions
 - Players (no client in the lab): popup and PickupEvent with `0x01`, knowledge unlocks through the queue, the
   backpack-priority setting (the game's own handlers add `0x20` when `PlayerInput+0x5b0` bit 11 is set; kiln.items does

@@ -437,15 +437,19 @@ internal static partial class KilnApis
         "M:Kiln.Items.QuickStack(Kiln.EntityId,Kiln.EntityId,Kiln.MoveOptions)", // Items.QuickStack(EntityId, EntityId, MoveOptions): via Items.SubmitMove(ItemsNative.MoveRequest, string, bool)
         "M:Kiln.Items.RarityOf(Kiln.ItemInstanceRef)", // Items.RarityOf(ItemInstanceRef): via Items.GearOf(ItemInstanceRef)
         "M:Kiln.Items.Read(Kiln.EntityId)", // Items.Read(EntityId): via Items.Require(string)
-        "M:Kiln.Items.SetEnhancements(Kiln.ItemInstanceRef,System.Int32,Kiln.GearWriteOptions)", // Items.SetEnhancements(ItemInstanceRef, int, GearWriteOptions?): via Items.WriteGear(ItemInstanceRef, Items.GearChange, GearWriteOptions?, GearChangeSource, string)
-        "M:Kiln.Items.SetLevel(Kiln.ItemInstanceRef,System.Int32,Kiln.GearWriteOptions)", // Items.SetLevel(ItemInstanceRef, int, GearWriteOptions?): via Items.WriteGear(ItemInstanceRef, Items.GearChange, GearWriteOptions?, GearChangeSource, string)
-        "M:Kiln.Items.SetRarity(Kiln.ItemInstanceRef,Kiln.ItemRarity,Kiln.GearWriteOptions)", // Items.SetRarity(ItemInstanceRef, ItemRarity, GearWriteOptions?): via Items.WriteGear(ItemInstanceRef, Items.GearChange, GearWriteOptions?, GearChangeSource, string)
+        "M:Kiln.Items.SetArmor(Kiln.ItemInstanceRef,System.Double)", // Items.SetArmor(ItemInstanceRef, double): via Items.SetScale(ItemInstanceRef, uint, double, string, string)
+        "M:Kiln.Items.SetDurabilityMax(Kiln.ItemInstanceRef,System.Nullable{System.Int32},Kiln.GearWriteOptions)", // Items.SetDurabilityMax(ItemInstanceRef, int?, GearWriteOptions?): via Items.WriteGear(ItemInstanceRef, Items.GearChange, GearWriteOptions?, GearChangeSource, string, GearKeepIntent)
+        "M:Kiln.Items.SetEnhancements(Kiln.ItemInstanceRef,System.Int32,Kiln.GearWriteOptions)", // Items.SetEnhancements(ItemInstanceRef, int, GearWriteOptions?): via Items.WriteGear(ItemInstanceRef, Items.GearChange, GearWriteOptions?, GearChangeSource, string, GearKeepIntent)
+        "M:Kiln.Items.SetLevel(Kiln.ItemInstanceRef,System.Int32,Kiln.GearWriteOptions)", // Items.SetLevel(ItemInstanceRef, int, GearWriteOptions?): via Items.WriteGear(ItemInstanceRef, Items.GearChange, GearWriteOptions?, GearChangeSource, string, GearKeepIntent)
+        "M:Kiln.Items.SetPower(Kiln.ItemInstanceRef,System.Double)", // Items.SetPower(ItemInstanceRef, double): via Items.SetScale(ItemInstanceRef, uint, double, string, string)
+        "M:Kiln.Items.SetRarity(Kiln.ItemInstanceRef,Kiln.ItemRarity,Kiln.GearWriteOptions)", // Items.SetRarity(ItemInstanceRef, ItemRarity, GearWriteOptions?): via Items.WriteGear(ItemInstanceRef, Items.GearChange, GearWriteOptions?, GearChangeSource, string, GearKeepIntent)
         "M:Kiln.Items.SetToolWearPerDebit(Kiln.ItemId,System.Int32)", // Items.SetToolWearPerDebit(ItemId, int): Services.RequireTickThread
         "M:Kiln.Items.Take(Kiln.EntityId,Kiln.ItemId,System.Int32,System.Nullable{Kiln.SlotId},System.Boolean,System.Nullable{Kiln.EntityId},System.Boolean)", // Items.Take(EntityId, ItemId, int, SlotId?, bool, EntityId?, bool): via Items.Submit(bool, ItemsNative.Request, string)
         "M:Kiln.Items.TakeSlot(Kiln.EntityId,Kiln.InventorySlot,System.Boolean)", // Items.TakeSlot(EntityId, InventorySlot, bool): via Items.Take(EntityId, ItemId, int, SlotId?, bool, EntityId?, bool)
         "M:Kiln.Items.Unequip(Kiln.EntityId,Kiln.EquipmentSlot,Kiln.EquipOptions)", // Items.Unequip(EntityId, EquipmentSlot, EquipOptions): Services.RequireTickThread
         "M:Kiln.Items.UpgradeRarity(Kiln.EntityId,Kiln.ItemInstanceRef,Kiln.RarityUpgradeRule,Kiln.UpgradeOptions)", // Items.UpgradeRarity(EntityId, ItemInstanceRef, RarityUpgradeRule, UpgradeOptions?): via ItemUpgrades.Run(EntityId, ItemInstanceRef, RarityUpgradeRule, UpgradeOptions?, string)
         "M:Kiln.Items.UpgradeRarity(Kiln.EntityId,Kiln.ItemInstanceRef,System.String,Kiln.UpgradeOptions)", // Items.UpgradeRarity(EntityId, ItemInstanceRef, string, UpgradeOptions?): via ItemUpgrades.Run(EntityId, ItemInstanceRef, RarityUpgradeRule, UpgradeOptions?, string)
+        "M:Kiln.Items.ValuesOf(Kiln.ItemInstanceRef)", // Items.ValuesOf(ItemInstanceRef): Services.RequireTickThread
         "M:Kiln.Journal.Find(System.String)", // Journal.Find(string): via Journal.Find(uint)
         "M:Kiln.Journal.Find(System.UInt32)", // Journal.Find(uint): via Journal.Quests()
         "M:Kiln.Journal.Quests", // Journal.Quests(): Services.RequireTickThread
@@ -856,6 +860,7 @@ internal static partial class KilnApis
         "P:Kiln.GameTypes.Available=kiln.types", // table != null: Services.Get("kiln.types")
         "P:Kiln.Gameplay.Available=kiln.gameplay", // GameplayNative.T != null: Services.Get("kiln.gameplay")
         "P:Kiln.Hooks.Available=kiln.hooks", // HooksNative.T != null: Services.Get("kiln.hooks")
+        "P:Kiln.Items.ArmorAvailable=items.gear.armor,kiln.items", // Can("items.gear.armor"); V8Scales != null: Services.Get("kiln.items")
         "P:Kiln.Items.Available=kiln.items", // Can("kiln.items")
         "P:Kiln.Items.ContainerNamesAvailable=items.names", // Can("items.names")
         "P:Kiln.Items.Fuel.Available=items.fuel", // Can("items.fuel")
@@ -863,6 +868,7 @@ internal static partial class KilnApis
         "P:Kiln.Items.GearReadAvailable=items.gear.read", // Can("items.gear.read")
         "P:Kiln.Items.GearWriteAvailable=items.gear.write", // Can("items.gear.write")
         "P:Kiln.Items.MovesAvailable=items.move", // Can("items.move")
+        "P:Kiln.Items.PowerAvailable=items.gear.power,kiln.items", // Can("items.gear.power"); V8Scales != null: Services.Get("kiln.items")
         "P:Kiln.Items.ResultPeekAvailable=kiln.items", // ResultTable != null: Services.Get("kiln.items")
         "P:Kiln.Items.Transfers.Available=items.transfer", // Can("items.transfer")
         "P:Kiln.Items.UpgradeAvailable=items.gear.upgrade", // Can("items.gear.upgrade")

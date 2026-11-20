@@ -5,7 +5,10 @@
 #include <cstdio>
 #include <cstring>
 
+#include <cmath>
+
 #include "../gear_logic.h"
+#include "../scale_logic.h"
 #include "../upgrade_logic.h"
 
 namespace {
@@ -89,8 +92,8 @@ void requests() {
     x.reserved0 = 1;
     check(!request_valid(x), "request: reserved0 is refused");
     x = r;
-    x.reserved[2] = 1;
-    check(!request_valid(x), "request: reserved[2] is refused");
+    x.reserved[1] = 1;  // package P7: the third reserved word became durability_max (checked in per_instance)
+    check(!request_valid(x), "request: reserved[1] is refused");
     x = req(KILN_ITEMS_GEAR_DURABILITY_REFRESH);
     x.available = 3;
     check(!request_valid(x), "request: available without AVAILABLE is refused (no silent field)");
@@ -388,6 +391,141 @@ void upgrades() {
     check(!plain_take(1, 1, 2613), "op: a take that empties a stack with an item entity (gear) is refused");
     check(!plain_take(0, 0, 0), "op: a put (kind 0) is never part of a payment");
 }
+
+// ---- package P7: levels outside the type's range, max durability, power and armour scales ----
+void per_instance() {
+    const KilnItemsGearState s = rare_sword();  // levels 5..55, durability 120 / 160
+    KilnItemsGearRequest r = req(KILN_ITEMS_GEAR_LEVEL);
+    r.level = 60;
+    Plan p = plan(r, s, kInit, kEquipped);
+    check(p.status == KILN_ITEMS_GEAR_OUT_OF_RANGE && !p.write_level, "LEVEL 60 on a 5..55 type without ANY_LEVEL: OUT_OF_RANGE");
+    r.flags |= KILN_ITEMS_GEAR_ANY_LEVEL;
+    check(request_valid(r), "request: LEVEL with ANY_LEVEL");
+    p = plan(r, s, kInit, kEquipped);
+    check(p.status == KILN_ITEMS_GEAR_DONE && p.write_level && p.after.level == 60 && p.after.level_max == 60 &&
+              p.changed == KILN_ITEMS_GEAR_CHANGED_LEVEL,
+          "LEVEL 60 with ANY_LEVEL: written, Level's max raised with it");
+    r.level = 2;
+    p = plan(r, s, kInit, kEquipped);
+    check(p.status == KILN_ITEMS_GEAR_DONE && p.after.level == 2 && p.after.level_max == 10, "LEVEL 2 (below the range) with ANY_LEVEL");
+    KilnItemsGearState up = s;
+    up.unlocked = 3;
+    up.level = 13;
+    up.level_max = 13;
+    r.level = 3;
+    p = plan(r, up, kInit, kEquipped);
+    check(p.status == KILN_ITEMS_GEAR_OUT_OF_RANGE, "ANY_LEVEL still needs a base of 1 or more (level 3 with 3 unlocked)");
+    KilnItemsGearRequest x = req(KILN_ITEMS_GEAR_UNLOCKED | KILN_ITEMS_GEAR_ANY_LEVEL);
+    x.unlocked = 1;
+    check(!request_valid(x), "request: ANY_LEVEL without LEVEL is refused (it only modifies LEVEL)");
+
+    r = req(KILN_ITEMS_GEAR_DURABILITY_MAX);
+    r.durability_max = 320;
+    check(request_valid(r), "request: DURABILITY_MAX alone is a request");
+    p = plan(r, s, kInit, kEquipped);
+    check(p.status == KILN_ITEMS_GEAR_DONE && p.write_durability_max && p.write_durability && p.after.durability_max == 320 &&
+              p.after.durability == 240 && !p.clear_init &&
+              p.changed == (KILN_ITEMS_GEAR_CHANGED_DURABILITY_MAX | KILN_ITEMS_GEAR_CHANGED_DURABILITY),
+          "DURABILITY_MAX 160 -> 320: current 120 -> 240 (the same share), the init bit kept");
+    r.flags |= KILN_ITEMS_GEAR_DURABILITY_REPAIR;
+    p = plan(r, s, kInit, kEquipped);
+    check(p.status == KILN_ITEMS_GEAR_DONE && p.after.durability == 320 && !p.clear_init, "DURABILITY_MAX with REPAIR: full at the new max");
+    x = req(KILN_ITEMS_GEAR_DURABILITY_MAX | KILN_ITEMS_GEAR_DURABILITY_REFRESH);
+    x.durability_max = 320;
+    check(!request_valid(x), "request: DURABILITY_MAX with REFRESH is refused (the recompute would replace it)");
+    x = req(KILN_ITEMS_GEAR_DURABILITY_MAX);
+    x.durability_max = 0;
+    check(!request_valid(x), "request: durability_max 0 is refused");
+    x.durability_max = KILN_ITEMS_GEAR_MAX_DURABILITY + 1;
+    check(!request_valid(x), "request: durability_max above the limit is refused");
+    x = req(KILN_ITEMS_GEAR_LEVEL);
+    x.level = 10;
+    x.durability_max = 5;
+    check(!request_valid(x), "request: durability_max without DURABILITY_MAX is refused");
+    KilnItemsGearState fresh = s;
+    fresh.state = 0;
+    fresh.flags &= ~KILN_ITEMS_GEAR_DURABILITY_INIT;
+    p = plan(r, fresh, kInit, kEquipped);
+    check(p.status == KILN_ITEMS_GEAR_REFUSED && !p.write_durability_max, "DURABILITY_MAX before the game computed durability: REFUSED");
+    KilnItemsGearState nodur = s;
+    nodur.flags &= ~KILN_ITEMS_GEAR_HAS_DURABILITY;
+    p = plan(r, nodur, kInit, kEquipped);
+    check(p.status == KILN_ITEMS_GEAR_NOT_GEAR, "DURABILITY_MAX on an item without Durability: NOT_GEAR");
+    KilnItemsGearState worn = s;
+    worn.durability = 1;
+    worn.durability_max = 1000;
+    r = req(KILN_ITEMS_GEAR_DURABILITY_MAX);
+    r.durability_max = 100;
+    p = plan(r, worn, kInit, kEquipped);
+    check(p.status == KILN_ITEMS_GEAR_DONE && p.after.durability == 1, "a worn item stays usable: 1/1000 -> 1/100, not 0");
+    worn.durability = 0;
+    p = plan(r, worn, kInit, kEquipped);
+    check(p.status == KILN_ITEMS_GEAR_DONE && p.after.durability == 0 && !p.write_durability, "a broken item stays broken");
+    r.durability_max = 160;
+    r.flags |= KILN_ITEMS_GEAR_DRY_RUN;
+    p = plan(r, s, kInit, kEquipped);
+    check(p.status == KILN_ITEMS_GEAR_DONE && p.changed == 0 && !p.write_durability_max, "DURABILITY_MAX to the same max: nothing changes");
+
+    // the scales' request checks and arithmetic
+    KilnItemsGearScale g{};
+    g.size = sizeof g;
+    g.flags = KILN_ITEMS_SCALE_POWER;
+    g.entity = 5000;
+    g.stamp = 7;
+    g.power = 1.5f;
+    check(kitems::scale::request_valid(g), "scale: POWER 1.5");
+    KilnItemsGearScale y = g;
+    y.power = 0.0f;
+    check(!kitems::scale::request_valid(y), "scale: power 0 is refused");
+    y.power = 101.0f;
+    check(!kitems::scale::request_valid(y), "scale: power above 100 is refused");
+    y = g;
+    y.flags = 0;
+    check(!kitems::scale::request_valid(y), "scale: no flag is refused");
+    y.flags = 4;
+    check(!kitems::scale::request_valid(y), "scale: an unknown flag is refused");
+    y = g;
+    y.stamp = 0;
+    check(!kitems::scale::request_valid(y), "scale: stamp 0 is refused");
+    y = g;
+    y.flags = KILN_ITEMS_SCALE_ARMOR;
+    y.armor = std::nanf("");
+    check(!kitems::scale::request_valid(y), "scale: an armour scale that is no number is refused");
+    check(kitems::scale::apply(41, 1.5f) == 62 && kitems::scale::apply(41, 0.5f) == 21 && kitems::scale::apply(0, 3.0f) == 0,
+          "scale: power 41 x 1.5 = 62 (61.5 rounded), x 0.5 = 21, 0 stays 0");
+    int32_t values[9] = {10, 20, 30, 0, 0, 0, 0, 0, -4};
+    const int32_t before[9] = {4, 20, 10, 0, 0, 0, 0, 0, -4};
+    kitems::scale::apply_armor(values, before, 9, 2.0f);
+    check(values[0] == 16 && values[1] == 20 && values[2] == 50 && values[8] == -4,
+          "scale: armour x 2 doubles only what the piece added (6 -> 12 over 4, 20 -> 40 over 10)");
+
+    // the table (one writer, lock-free readers)
+    static kitems::scale::Table t;  // static: two 16384-slot arrays
+    check(t.live() == 0 && t.power(5000) == 1.0f, "table: empty reads 1");
+    check(t.set(5000, KILN_ITEMS_SCALE_POWER, 1.5f, 0.0f) && t.power(5000) == 1.5f && t.armor(5000) == 1.0f && t.live() == 1,
+          "table: a power scale; the armour stays 1");
+    check(t.set(5000, KILN_ITEMS_SCALE_ARMOR, 0.0f, 2.0f) && t.power(5000) == 1.5f && t.armor(5000) == 2.0f && t.live() == 1,
+          "table: the armour of the same item; its power kept");
+    check(t.set(5000, KILN_ITEMS_SCALE_POWER | KILN_ITEMS_SCALE_ARMOR, 1.0f, 1.0f) && t.power(5000) == 1.0f && t.live() == 0,
+          "table: both back to 1 removes the item");
+    check(t.set(5001, KILN_ITEMS_SCALE_POWER, 1.0f, 0.0f) && t.live() == 0 && t.used() == 1, "table: setting 1 on a new item adds nothing");
+    bool all = true;
+    for (uint32_t e = 10000; e < 10000 + kitems::scale::kCapacity; ++e) all = all && t.set(e, KILN_ITEMS_SCALE_POWER, 2.0f, 0.0f);
+    check(all && t.live() == kitems::scale::kCapacity, "table: 8192 items fit");
+    check(!t.set(9999, KILN_ITEMS_SCALE_POWER, 2.0f, 0.0f) && t.power(9999) == 1.0f, "table: the 8193rd item is refused, nothing changed");
+    check(t.set(10000, KILN_ITEMS_SCALE_POWER, 3.0f, 0.0f) && t.power(10000) == 3.0f, "table: a full table still changes an item it has");
+    for (uint32_t e = 10000; e < 10000 + 6000; ++e) t.set(e, KILN_ITEMS_SCALE_POWER, 1.0f, 0.0f);
+    all = true;
+    for (uint32_t e = 30000; e < 30000 + 6000; ++e) all = all && t.set(e, KILN_ITEMS_SCALE_POWER, 0.5f, 0.0f);
+    bool kept = true;
+    for (uint32_t e = 16000; e < 10000 + kitems::scale::kCapacity; ++e) kept = kept && t.power(e) == 2.0f;
+    check(all && kept && t.live() == kitems::scale::kCapacity - 6000 + 6000 && t.power(30000) == 0.5f && t.power(10001) == 1.0f &&
+              t.used() <= kitems::scale::kRebuildAt,
+          "table: removing 6000 and adding 6000 more rebuilds past the dead slots; every live entry is kept");
+    t.clear();
+    check(t.live() == 0 && t.used() == 0 && t.power(30000) == 1.0f && t.power(16000) == 1.0f, "table: clear forgets every entry");
+}
+
 }  // namespace
 
 int main() {
@@ -395,6 +533,7 @@ int main() {
     rarity();
     plans();
     upgrades();
+    per_instance();
     std::printf("%s (%d failure(s))\n", failures ? "FAILED" : "all passed", failures);
     return failures ? 1 : 0;
 }

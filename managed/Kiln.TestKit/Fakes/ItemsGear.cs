@@ -14,6 +14,9 @@ internal sealed unsafe partial class ItemsFake
     /// <summary>The sigdb feature of the gear functions: a test can switch it off.</summary>
     public const string GearFeature = "items.gear";
 
+    /// <summary>The sigdb features of the power and armour scales (package P7): a test can switch them off.</summary>
+    public const string PowerFeature = "items.gear.power", ArmorFeature = "items.gear.armor";
+
     private const int GearSlots = 5, GearMaxLevel = 255, GearMaxPending = 1024;
 
     /// <summary>One item entity's gear components.</summary>
@@ -37,6 +40,7 @@ internal sealed unsafe partial class ItemsFake
     private static uint _stamps;  // per process, as kiln.items' counter: a stamp names one item entity once
 
     private readonly Dictionary<uint, GearRec> _gear = [];
+    private readonly Dictionary<uint, (float Power, float Armor)> _scales = [];  // package P7: by item entity
     private readonly List<GearJob> _gearPending = [];
     private ulong _gearWrites, _gearRefused;
 
@@ -73,7 +77,11 @@ internal sealed unsafe partial class ItemsFake
 
     private void DestroyGear(uint pide)
     {
-        lock (_lock) _gear.Remove(pide);
+        lock (_lock)
+        {
+            _gear.Remove(pide);
+            _scales.Remove(pide);
+        }
         World.Destroy(pide);
     }
 
@@ -109,11 +117,82 @@ internal sealed unsafe partial class ItemsFake
     {
         if (r.Size < (uint)sizeof(ItemsAbi.GearRequest) || r.Entity == 0 || r.Stamp == 0) return false;
         if ((r.Flags & ~ItemsAbi.GearFlags) != 0 || (r.Flags & ItemsAbi.GearOps) == 0) return false;
-        if (r.Reserved0 != 0 || r.R0 != 0 || r.R1 != 0 || r.R2 != 0) return false;
+        if (r.Reserved0 != 0 || r.R0 != 0 || r.R1 != 0) return false;
         if ((r.Flags & ItemsAbi.GearAvailable) != 0 ? r.Available is < 1 or > GearSlots : r.Available != 0) return false;
         if ((r.Flags & ItemsAbi.GearUnlocked) != 0 ? r.Unlocked > GearSlots : r.Unlocked != 0) return false;
-        if ((r.Flags & ItemsAbi.GearLevel) != 0 ? r.Level is < 1 or > GearMaxLevel : r.Level != 0) return false;
+        if ((r.Flags & ItemsAbi.GearLevel) != 0 ? r.Level is < 1 or > GearMaxLevel : r.Level != 0 || (r.Flags & ItemsAbi.GearAnyLevel) != 0) return false;
+        if ((r.Flags & ItemsAbi.GearDurabilityMax) != 0)
+        {
+            if (r.DurabilityMax is < 1 or > ItemsAbi.GearMaxDurability || (r.Flags & ItemsAbi.GearDurabilityRefresh) != 0) return false;
+        }
+        else if (r.DurabilityMax != 0)
+        {
+            return false;
+        }
         return true;
+    }
+
+    // ---- package P7: the scales (scale_logic.h request_valid; the table without the game's hooks) ----
+
+    public static bool ScaleRequestValid(in ItemsAbi.GearScale s)
+    {
+        const uint all = ItemsAbi.ScalePower | ItemsAbi.ScaleArmor;
+        static bool Valid(float f) => float.IsFinite(f) && f >= 0.01f && f <= 100f;
+        if (s.Size < (uint)sizeof(ItemsAbi.GearScale) || s.Entity == 0 || s.Stamp == 0) return false;
+        if ((s.Flags & ~all) != 0 || (s.Flags & all) == 0 || s.R0 != 0 || s.R1 != 0) return false;
+        if ((s.Flags & ItemsAbi.ScalePower) != 0 && !Valid(s.Power)) return false;
+        if ((s.Flags & ItemsAbi.ScaleArmor) != 0 && !Valid(s.Armor)) return false;
+        return true;
+    }
+
+    public int SetScale(in ItemsAbi.GearScale s)
+    {
+        if (((s.Flags & ItemsAbi.ScalePower) != 0 && FakeTables.Off(PowerFeature)) || ((s.Flags & ItemsAbi.ScaleArmor) != 0 && FakeTables.Off(ArmorFeature)))
+            return FakeTables.Unavailable;
+        lock (_lock)
+        {
+            if (!_gear.TryGetValue(s.Entity, out var g) || g.Stamp != s.Stamp) return FakeTables.NotFound;
+            var have = _scales.TryGetValue(s.Entity, out var h) ? h : (1f, 1f);
+            var next = ((s.Flags & ItemsAbi.ScalePower) != 0 ? s.Power : have.Item1, (s.Flags & ItemsAbi.ScaleArmor) != 0 ? s.Armor : have.Item2);
+            var want = next.Item1 != 1f || next.Item2 != 1f;
+            if (!want) _scales.Remove(s.Entity);
+            else if (!_scales.ContainsKey(s.Entity) && _scales.Count >= ItemsAbi.ScaleCapacity) return FakeTables.BufferTooSmall;
+            else _scales[s.Entity] = next;
+            return FakeTables.Ok;
+        }
+    }
+
+    public int ReadScale(uint entity, uint stamp, ItemsAbi.GearScale* out_)
+    {
+        lock (_lock)
+        {
+            if (!_gear.TryGetValue(entity, out var g) || (stamp != 0 && g.Stamp != stamp)) return FakeTables.NotFound;
+            var (p, a) = _scales.TryGetValue(entity, out var h) ? h : (1f, 1f);
+            out_->Entity = entity;
+            out_->Stamp = g.Stamp;
+            out_->Power = p;
+            out_->Armor = a;
+            out_->Flags = (p != 1f ? ItemsAbi.ScalePower : 0) | (a != 1f ? ItemsAbi.ScaleArmor : 0);
+            return FakeTables.Ok;
+        }
+    }
+
+    public void FillScale(ref ItemsAbi.ScaleStatus s)
+    {
+        lock (_lock)
+        {
+            s.Power = FakeTables.Off(PowerFeature) ? (byte)0 : (byte)1;
+            s.Armor = FakeTables.Off(ArmorFeature) ? (byte)0 : (byte)1;
+            s.Entries = (uint)_scales.Count;
+            var detail = s.Power == 0 || s.Armor == 0 ? "the sigdb feature is off on this build" : "";
+            fixed (byte* d = s.Detail) SpawnAbi.CopyText(detail, d, ItemsAbi.MessageMax);
+        }
+    }
+
+    /// <summary>The power and armour multipliers the kit holds for an item entity (1, 1: none).</summary>
+    public (float Power, float Armor) ScaleOf(uint pide)
+    {
+        lock (_lock) return _scales.TryGetValue(pide, out var h) ? h : (1f, 1f);
     }
 
     private bool GearUsable => !FakeTables.Off(GearFeature) && Program is ItemsAbi.ProgramPending or ItemsAbi.ProgramRunning;
@@ -253,7 +332,11 @@ internal sealed unsafe partial class ItemsFake
                             g.Level = p.After.Level;
                             g.LevelMax = p.After.LevelMax;
                         }
-                        if (g.HasDurability) g.Durability = p.After.Durability;
+                        if (g.HasDurability)
+                        {
+                            g.DurabilityMax = p.After.DurabilityMax;
+                            g.Durability = p.After.Durability;
+                        }
                         g.State = p.After.State;
                         _gearWrites++;
                     }
@@ -297,7 +380,8 @@ internal sealed unsafe partial class ItemsFake
         {
             if (!level) return Refuse(ItemsAbi.GearNotGear, "the item has no Level");
             var b = (long)r.Level - unl;
-            if (b < 1 || b < before.TypeLevelMin || b > before.TypeLevelMax)
+            if (b < 1) return Refuse(ItemsAbi.GearOutOfRange, "the level is below the unlocked enhancements + 1");
+            if ((r.Flags & ItemsAbi.GearAnyLevel) == 0 && (b < before.TypeLevelMin || b > before.TypeLevelMax))
                 return Refuse(ItemsAbi.GearOutOfRange, "the level's base is outside the type's level range");
             newLevel = r.Level;
         }
@@ -318,7 +402,24 @@ internal sealed unsafe partial class ItemsFake
             after.LevelMax = after.Level > before.LevelMax ? after.Level : before.LevelMax;
             if (after.Level != before.Level || after.LevelMax != before.LevelMax) changed |= ItemsAbi.GearChangedLevel;
         }
-        if (durability && (r.Flags & (ItemsAbi.GearDurabilityRefresh | ItemsAbi.GearDurabilityRepair)) != 0)
+        if ((r.Flags & ItemsAbi.GearDurabilityMax) != 0)
+        {
+            if (!durability) return Refuse(ItemsAbi.GearNotGear, "the item has no durability");
+            if ((before.State & ItemsAbi.StateDurabilityInitialized) == 0) return Refuse(ItemsAbi.GearRefused, "the game has not computed the item's durability yet");
+            var max = r.DurabilityMax;
+            long cur = max;
+            if ((r.Flags & ItemsAbi.GearDurabilityRepair) == 0 && before.DurabilityMax > 0)
+            {
+                cur = ((long)before.Durability * max * 2 + before.DurabilityMax) / (2L * before.DurabilityMax);
+                if (before.Durability > 0 && cur < 1) cur = 1;
+            }
+            cur = Math.Clamp(cur, 0, max);
+            after.DurabilityMax = max;
+            after.Durability = (int)cur;
+            if (max != before.DurabilityMax) changed |= ItemsAbi.GearChangedDurabilityMax;
+            if (after.Durability != before.Durability) changed |= ItemsAbi.GearChangedDurability;
+        }
+        else if (durability && (r.Flags & (ItemsAbi.GearDurabilityRefresh | ItemsAbi.GearDurabilityRepair)) != 0)
         {
             if ((r.Flags & ItemsAbi.GearDurabilityRepair) != 0 && before.Durability != before.DurabilityMax)
             {

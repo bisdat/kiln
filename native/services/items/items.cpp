@@ -29,6 +29,7 @@
 #include "completed_results.h"
 #include "equip.h"
 #include "gear.h"
+#include "scale.h"
 #include "gems.h"
 #include "stations.h"
 #include "instances.h"
@@ -85,7 +86,14 @@ static_assert(offsetof(KilnItemsApi, gear_write) == 296 && offsetof(KilnItemsApi
 // v8 (package P5) then appends rarity_rolls and roll_status: a reader built before them sees a table ending at 320.
 static_assert(offsetof(KilnItemsApi, rarity_rolls) == 320 && offsetof(KilnItemsApi, roll_status) == 328);
 // v8 (package P3) then appends gear_upgrade: a reader built before it sees a table ending at 336.
-static_assert(offsetof(KilnItemsApi, gear_upgrade) == 336 && sizeof(KilnItemsApi) == 344);
+static_assert(offsetof(KilnItemsApi, gear_upgrade) == 336);
+// v8 (package P7) then appends gear_scale, gear_scale_read and scale_status: a reader built before them sees 344.
+static_assert(offsetof(KilnItemsApi, gear_scale) == 344 && offsetof(KilnItemsApi, gear_scale_read) == 352 &&
+              offsetof(KilnItemsApi, scale_status) == 360 && sizeof(KilnItemsApi) == 368);
+static_assert(sizeof(KilnItemsGearScale) == 32 && offsetof(KilnItemsGearScale, power) == 16 &&
+              sizeof(KilnItemsScaleStatus) == 208 && offsetof(KilnItemsScaleStatus, powered) == 24 &&
+              offsetof(KilnItemsScaleStatus, detail) == 48);
+static_assert(offsetof(KilnItemsGearRequest, durability_max) == 28 && offsetof(KilnItemsGearRequest, reserved) == 32);
 static_assert(sizeof(KilnItemsUpgradeCost) == 8 && sizeof(KilnItemsUpgradeRequest) == 160 && offsetof(KilnItemsUpgradeRequest, gear) == 24 &&
               offsetof(KilnItemsUpgradeRequest, costs) == 64 && offsetof(KilnItemsUpgradeRequest, payers) == 128 &&
               sizeof(KilnItemsUpgradeResult) == 392 && offsetof(KilnItemsUpgradeResult, paid) == 32 &&
@@ -1122,6 +1130,7 @@ void drop_world(const char* why) {
     gems_world_closed();      // gem wave G3: waiting forge actions end as dropped
     stations_world_closed();  // kiln.stations: waiting station actions end as dropped, watches restart
     gear_world_closed();      // v8: waiting gear writes end as dropped
+    scale_world_reset();      // v8 (P7): power and armour scales named entities of the world that went
     sets_world_closed();      // v6: every set snapshot named this world
     int expected = KILN_ITEMS_PROGRAM_RUNNING;
     if (g_program.compare_exchange_strong(expected, KILN_ITEMS_PROGRAM_ACTIVE))
@@ -1163,6 +1172,7 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     gems_pre(tick->step);  // gem wave G3: forge actions' layout check, results, held players' actions
     stations_pre(tick->step);  // kiln.stations: unlock checks, results, the watch
     gear_pre(tick->step);      // v8: the gear program's state, timeouts, results
+    scale_pre();               // v8 (P7): the stamps were forgotten (the id counter went down): so are the scales
     xfer_deliver();
     selftest_pre(tick->step);
     if (!g_catalog.load(std::memory_order_relaxed) && (tick->step & 7) == 0) build_catalog();
@@ -1685,6 +1695,16 @@ KilnResult KILN_CALL t_gear_upgrade(KilnOwner owner, const KilnItemsUpgradeReque
     return gear_upgrade(owner, r, done, user, out_ticket);
 }
 
+// ---- v8 (P7): per-instance power and armour scales (scale.cpp) ----
+KilnResult KILN_CALL t_gear_scale(const KilnItemsGearScale* s) {
+    if (!g_api->on_tick_thread()) return KILN_ERR_WRONG_THREAD;
+    return scale_set(s);
+}
+KilnResult KILN_CALL t_gear_scale_read(KilnEntity entity, uint32_t stamp, KilnItemsGearScale* out) {
+    return scale_read(entity, stamp, out);
+}
+KilnResult KILN_CALL t_scale_status(KilnItemsScaleStatus* out) { return scale_status(out); }
+
 const KilnItemsApi kTable = {
     {sizeof(KilnItemsApi), KILN_ITEMS_VERSION},
     &t_give, &t_take, &t_cancel, &t_cancel_owner, &t_read, &t_find,
@@ -1699,6 +1719,7 @@ const KilnItemsApi kTable = {
     &t_gear_write, &t_gear_read, &t_gear_status,
     &t_rarity_rolls, &t_roll_status,
     &t_gear_upgrade,
+    &t_gear_scale, &t_gear_scale_read, &t_scale_status,
 };
 
 // ============================================================================================= self-test =======
@@ -2132,6 +2153,7 @@ void resolve() {
     gems_resolve();  // gem wave G3: the forge actions (kiln.gemcraft), after the transaction symbols
     stations_resolve();  // kiln.stations: bases, stations, the game's fill (after the transaction symbols)
     gear_resolve();      // v8: gear writes (after the tracked writes and the item instances)
+    scale_resolve(g_api, g_owner);  // v8 (P7): power and armour scales (hooks only at the first scale)
 }
 
 void register_main();

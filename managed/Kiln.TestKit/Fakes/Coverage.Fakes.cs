@@ -55,7 +55,9 @@ public static partial class Coverage
             "next step, the shown rarity and level a step later, the gear events are Kiln.Items' (the game's own change: " +
             "KilnHarness.Items.SetGear; perk slots of a type: SetPerkSlots). Rarity upgrades: Items.UpgradeRarity runs Kiln.Items' own " +
             "code and the fake takes the cost from the payers' plain stacks and makes the write in the same step, all or nothing " +
-            "(CantPay, payers, refusals as kiln.items); KilnHarness.Items.SetUpgradeRolls names the rolls. Offline: water, moves, container names, transfer " +
+            "(CantPay, payers, refusals as kiln.items); KilnHarness.Items.SetUpgradeRolls names the rolls. Per-instance values (package P7): " +
+            "Items.SetPower, SetArmor and ValuesOf on the kit's scale table (no damage or armour is computed), SetDurabilityMax and " +
+            "SetLevel with AnyLevel with kiln.items' rules. Offline: water, moves, container names, transfer " +
             "hooks, item instances, equip, recipe results, unlocked upgrades and gem slots at creation, the game's player inventory layout, max " +
             "durability computed again after a gear change",
             [ItemsAbi.Service, .. ItemsFake.Features, "items.gear.read", "items.gear.write", "items.gear.durability", "items.gear.upgrade", .. ItemsFake.OfflineRows]);
