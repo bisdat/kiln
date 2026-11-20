@@ -63,18 +63,40 @@ public sealed partial class ClientPassMod
             sub.Dispose();
             Ui.Inventory.ClearMarks();
         });
-        c.Instruct("Open the inventory (I). Hold Ctrl and left-click a weapon or tool in your backpack.");
-        c.Expect(await c.Until(() => Volatile.Read(ref got) is not null, TimeSpan.FromMinutes(2), "a Ctrl+click on a slot"),
-            "the click reached the mod");
-        if (Volatile.Read(ref got) is { } k)
+        c.Instruct("Open the inventory (I). Hold Ctrl and left-click a weapon or tool in your backpack (not a stack of " +
+                   "materials: a stack has no item entity of its own).");
+        // a plain stack is a right answer with no entity (SlotIdentityProof): log it and wait for gear, which has one
+        SlotClick? gear = null;
+        var judged = SlotIdentity.NotHeld;
+        bool any = false;
+        var until = DateTime.UtcNow + TimeSpan.FromMinutes(2);
+        while (gear is null && DateTime.UtcNow < until)
         {
+            if (!await c.Until(() => Volatile.Read(ref got) is not null, until - DateTime.UtcNow, "a Ctrl+click on a weapon or tool")) break;
+            var k = Interlocked.Exchange(ref got, null)!;
+            any = true;
             c.Log.Info($"ui-hooks.c2: {k}");
-            c.Expect(k.ItemEntity.Value != 0 && k.Item.Value != 0 && k.Taken, "the click carries the item, its entity, and was taken",
-                $"item {k.Item}, entity {k.ItemEntity}, page {k.Slot.InventoryPage} slot {k.Slot.SlotIndex}, holder {k.Holder}, screen {k.Screen.Hud}");
-            c.Expect(k.Holder == Client.LocalPlayer, "the slot's holder is you", $"{k.Holder} vs {Client.LocalPlayer}");
+            var v = SlotIdentityProof.Judge(k.Item, k.ItemEntity, ServerSlots(Items.Read(c.Player)));
+            if (v == SlotIdentity.PlainStack)
+            {
+                c.Log.Info($"ui-hooks.c2: {k.Item} x{k.Slot.Count} is a plain stack (no item entity in the game; ItemEntity 0 " +
+                           "as documented): waiting for a weapon or tool");
+                c.Instruct($"That was a stack ({k.Slot.Count}): stacks have no item entity. Hold Ctrl and left-click a WEAPON or " +
+                           "TOOL in your backpack.");
+                continue;
+            }
+            gear = k;
+            judged = v;
+        }
+        c.Expect(any, "the click reached the mod");
+        if (gear is { } g)
+        {
+            c.Expect(g.ItemEntity.Value != 0 && g.Item.Value != 0 && g.Taken, "the click on a weapon or tool carries the item, its entity, and was taken",
+                $"item {g.Item} x{g.Slot.Count}, entity {g.ItemEntity}, page {g.Slot.InventoryPage} slot {g.Slot.SlotIndex}, holder {g.Holder}, screen {g.Screen.Hud}");
+            c.Expect(g.Holder == Client.LocalPlayer, "the slot's holder is you", $"{g.Holder} vs {Client.LocalPlayer}");
             // the identity claim: the client's pide is the server's entity of that item (hosted: the server world is here)
-            c.Expect((Items.Read(c.Player)?.Slots ?? []).Any(s => s.ItemEntity == k.ItemEntity && s.Item == k.Item),
-                "the clicked entity is that item's entity in your inventory as the server world holds it");
+            c.Expect(judged == SlotIdentity.Match, "the clicked entity is that item's entity in your inventory as the server world holds it",
+                judged.ToString());
         }
         c.Instruct("Did the item stay where it was (not picked up onto the cursor), and does it now have a red frame?");
         await c.Verdict();
@@ -98,14 +120,19 @@ public sealed partial class ClientPassMod
             a.Dispose();
             b.Dispose();
         });
-        c.Instruct("Open a storage chest that holds items. Hold Ctrl and left-click an item IN THE CHEST.");
+        c.Instruct("Open a storage chest that holds items (a weapon or tool among them if you can). Hold Ctrl and left-click " +
+                   "an item IN THE CHEST.");
         c.Expect(await c.Until(() => Volatile.Read(ref taken) is not null, TimeSpan.FromMinutes(2), "a Ctrl+click in the chest"),
             "the chest click reached the mod");
         if (Volatile.Read(ref taken) is { } k)
         {
             c.Log.Info($"ui-hooks.c3 chest: {k}");
-            c.Expect(k.ItemEntity.Value != 0 && k.Holder != Client.LocalPlayer && k.Screen.Hud == HudScreen.StorageChest,
-                "a chest item: its entity, a holder that is not you, the chest screen", $"holder {k.Holder}, screen {k.Screen.Hud}");
+            c.Expect(k.Item.Value != 0 && k.Taken && k.Holder.Value != 0 && k.Holder != Client.LocalPlayer && k.Screen.Hud == HudScreen.StorageChest,
+                "a chest item: the item, taken, a holder that is not you, the chest screen", $"item {k.Item}, holder {k.Holder}, screen {k.Screen.Hud}");
+            // gear: its entity is the server's; a plain stack: none (SlotIdentityProof)
+            var v = SlotIdentityProof.Judge(k.Item, k.ItemEntity, ServerSlots(k.Holder.Value != 0 ? Items.Read(k.Holder) : null));
+            c.Expect(SlotIdentityProof.Consistent(v), "the item's entity is the chest's as the server world holds it (none for a plain stack)",
+                $"{v}: item {k.Item} x{k.Slot.Count}, entity {k.ItemEntity}");
         }
         c.Instruct("Did the chest item stay where it was? Now hold Alt and right-click any item in the chest or backpack.");
         c.Expect(await c.Until(() => Volatile.Read(ref watched) is not null, TimeSpan.FromMinutes(2), "an Alt+right click"),
@@ -126,10 +153,12 @@ public sealed partial class ClientPassMod
                    "hotbar). Your character should act as usual. Press continue.");
         await c.Verdict();
         c.Expect(Volatile.Read(ref clicks) == 0, "no slot click in the play view", $"{clicks} click(s)");
-        c.Instruct("Open the inventory and rest the mouse cursor on an item in the backpack (do not click). Press continue.");
-        await c.Verdict();
-        var h = Ui.Inventory.Hovered;
-        c.Expect(h is { Item.Value: not 0 }, "Hovered names the slot under the cursor", h?.ToString());
+        // read while the cursor rests on the game's slot: at a verdict Kiln has the input (ui: input capture on) and the
+        // cursor is on its check window, so a read after Verdict() never named the slot (the owner's dev.30 pass)
+        c.Instruct("Open the inventory and rest the mouse cursor on an item in the backpack (do not click) until this line changes.");
+        VisibleSlot? h = null;
+        c.Expect(await c.Until(() => (h = Ui.Inventory.Hovered) is { Item.Value: not 0 }, TimeSpan.FromMinutes(1), "the cursor on a backpack item"),
+            "Hovered names the slot under the cursor", h?.ToString() ?? HoverWhy());
         if (h is not null)
             c.Log.Info($"ui-hooks.c4: hovered {h.Item} page {h.InventoryPage} slot {h.SlotIndex}, native state byte 0 = " +
                        $"{h.NativeState[0]} (the candidate hover byte of 05a-c5)");
@@ -232,6 +261,15 @@ public sealed partial class ClientPassMod
         await c.Verdict();
         string[] seen;
         lock (events) seen = [.. events];
+        if (!seen.Any(e => e.StartsWith("none -> Backpack")))
+        {
+            // the screen log shows whether the inventory was opened at all (game screen Play/1 -> Play/9 or Play/4)
+            c.Log.Info("ui-hooks.c7: no backpack opening yet: " + string.Join(" | ", seen));
+            c.Instruct("The inventory's opening was not seen. Open the inventory (I) now, then close it.");
+            await c.Until(() => { lock (events) return events.Any(e => e.StartsWith("none -> Backpack")); }, TimeSpan.FromMinutes(1),
+                "the inventory (I) opened");
+            lock (events) seen = [.. events];
+        }
         c.Log.Info("ui-hooks.c7: " + string.Join(" | ", seen));
         c.Expect(seen.Count(e => e.StartsWith("none -> Chest")) >= 2 && seen.Count(e => e.StartsWith("Chest -> none")) >= 2,
             "two chest openings and closings were reported", string.Join(" | ", seen));
@@ -239,6 +277,17 @@ public sealed partial class ClientPassMod
         c.Instruct("Did the panel disappear each time the chest closed, and did it NOT show on the inventory screen (this " +
                    "panel asked for chests only)?");
         await c.Verdict();
+    }
+
+    private static IEnumerable<(ItemId, EntityId)> ServerSlots(InventoryContents? inv) =>
+        inv?.Slots.Where(s => !s.IsEmpty).Select(s => (s.Item, s.ItemEntity)) ?? [];
+
+    // why Hovered is null: the slot frame (age, count) the lookup had
+    private static string HoverWhy()
+    {
+        var s = Ui.Values.Slots();
+        return s.Ok ? $"none under the cursor; latest frame {s.Snapshot!.Slots.Count} slot(s), screen {Ui.Screens.Current.Hud}"
+                    : $"no slot frame ({s})";
     }
 
     [ClientCheck("ui-hooks.c8", "A client mod's own symbol fragment: its typed hook installs and runs in the game client",
