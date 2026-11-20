@@ -47,7 +47,6 @@ internal static class BlockJson
     private static readonly (string Section, Func<ModBlocks, string, JsonElement, BlockHandle> Make)[] Kinds =
     [
         ("statuses", Make<StatusBlock>), ("effects", Make<EffectBlock>), ("spells", Make<SpellBlock>), ("weapons", Make<WeaponBlock>), ("vfx", MakeVfx), ("materials", MakeMaterial), ("screenEffects", Make<ScreenEffectBlock>), ("sounds", Make<SoundBlock>), .. WorldJson.Kinds, .. ItemJson.Kinds, .. AbilityJson.Kinds, .. FurnitureJson.Kinds, .. NpcJson.Kinds, .. QuestBlockJson.Kinds, .. UiJson.Kinds,
-        ("affixes", Make<AffixBlock>), ("affixPools", Make<AffixPoolBlock>),
         .. RoutineJson.Kinds,
         ("affixes", Make<AffixBlock>), ("affixPools", Make<AffixPoolBlock>), ("rarityRolls", Make<RarityRollBlock>), ("rarityUpgrades", Make<RarityUpgradeBlock>),
     ];
@@ -369,6 +368,7 @@ internal static class BlocksStartup
         AbilityRuntime.Subscribe();
         PlayerTriggers.Subscribe();
         RoutineRuntime.Start(fromTick: true);
+        RoutineSaves.Tick();
         // An unloaded mod's data files compile again when it is loaded again (a reload clears it through ModReloadedEvent), and its material
         // replacements go (Vfx/Reskins.cs).
         foreach (var m in Mods.All)

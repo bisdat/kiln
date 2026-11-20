@@ -6,9 +6,11 @@ internal static class RoutineNpc
 {
     /// <summary>An NPC block's <c>Routine</c>: an inline plan becomes the block <c>&lt;npc-block-name&gt;.routine</c>, a name
     /// is a routine of this mod, none takes the NPC's earlier link away. All of it with the NPC's commit. Returns the plan's key.</summary>
-    public static string? ForNpc(BlockContext ctx, Lowered low, string npcName, string npcKey, PartRef<RoutineBlock>? part)
+    public static string? ForNpc(BlockContext ctx, Lowered low, string npcName, string npcKey, PartRef<RoutineBlock>? part, Guid npcTemplate = default)
     {
         var mod = ctx.Mod;
+        // the villager the NPC block makes: the game's roster id of its template
+        var npcId = npcTemplate == Guid.Empty ? 0u : Villagers.NpcIdOf(npcTemplate);
         if (part == null)
         {
             low.AfterCommit(() => Bind(mod, npcKey, null, null));
@@ -28,20 +30,20 @@ internal static class RoutineNpc
             // a routine handle's game name is its identity, <mod>:<Was-or-name>
             var key = handle.GameName;
             low.Json["npcRoutine"] = key;
-            low.AfterCommit(() => Bind(mod, npcKey, null, key));
+            low.AfterCommit(() => Bind(mod, npcKey, null, key, npcId));
             return key;
         }
         var inlineName = $"{npcName}.routine";
         var made = RoutineCompiler.Define(ctx, low, inlineName, part.Inline!, $"{npcKey}.routine", "routine");
-        low.AfterCommit(() => Bind(mod, npcKey, made, made.GameName));
+        low.AfterCommit(() => Bind(mod, npcKey, made, made.GameName, npcId));
         return made.GameName;
     }
 
     /// <summary>What the NPC's commit does for its routine: an inline plan's handle becomes a block of the mod, and the NPC's
     /// link is set (or, without a routine, taken away).</summary>
-    internal static void Bind(ModBlocks mod, string npcKey, BlockHandle<RoutineBlock>? inline, string? key)
+    internal static void Bind(ModBlocks mod, string npcKey, BlockHandle<RoutineBlock>? inline, string? key, uint npcId = 0)
     {
         if (inline != null) mod.Handles[inline.Name] = inline;
-        RoutineRegistry.BindNpc(mod.Id, npcKey, key);
+        RoutineRegistry.BindNpc(mod.Id, npcKey, key, npcId);
     }
 }

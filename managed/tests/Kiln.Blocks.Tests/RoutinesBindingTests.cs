@@ -49,7 +49,29 @@ public sealed unsafe class RoutinesBindingTests : IDisposable
         t->RevokeOwner = &RevokeOwner;
         t->SubscribeEvents = &Subscribe;
         t->UnsubscribeEvents = &Unsubscribe;
+        t->Restore = &Restore;
+        t->SetRevisionFloor = &SetFloor;
         return t;
+    }
+
+    private sealed record Restored(ulong Owner, uint NpcId, string Plan, ulong Revision, uint Flags, string Reason);
+    private static readonly List<Restored> Restores = [];
+    private static readonly List<ulong> Floors = [];
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int Restore(ulong owner, uint npc, NativeStr plan, ulong revision, uint flags, NativeStr reason,
+        delegate* unmanaged[Cdecl]<RoutineNative.Result*, void*, void> done, void* user, ulong* ticket)
+    {
+        Restores.Add(new Restored(owner, npc, plan.ToString(), revision, flags, reason.ToString()));
+        *ticket = ++_tickets;
+        return RoutineNative.Ok;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int SetFloor(ulong floor)
+    {
+        Floors.Add(floor);
+        return RoutineNative.Ok;
     }
 
     private static int Queue(string function, ulong owner, uint npc, string? plan, void* done, void* user, ulong* ticket)
@@ -141,6 +163,8 @@ public sealed unsafe class RoutinesBindingTests : IDisposable
         RoutineRegistry.Forget(ModId);
         Calls.Clear();
         Revoked.Clear();
+        Restores.Clear();
+        Floors.Clear();
         (_answer, _snapshot, _eventFn, _eventUser) = (RoutineNative.Ok, null, 0, 0);
         Backend.Current = _backend;
         Capabilities.Reset();
@@ -349,5 +373,70 @@ public sealed unsafe class RoutinesBindingTests : IDisposable
         Send("""{"type":"task","npcId":7}""");
         Assert.Single(_events);
         Assert.Equal(2, _backend.Logged.Count(l => l.Contains("an event was not posted", StringComparison.Ordinal)));
+    }
+
+    // ---- across a restart (S5): the saved book follows the events, and a world start binds it again ---------------
+
+    private RoutineBook UseBook(string world = "world-1")
+    {
+        var book = new RoutineBook();
+        RoutineSaves.TestBook = book;
+        RoutineSaves.TestWorld = world;
+        RoutineSaves.OwnerLoaded = id => id == ModId;
+        RoutineSaves.OwnerOf = id => id == ModId ? ModOwner : 0;
+        return book;
+    }
+
+    private static string Event(string after, string reason, bool teardown = false) =>
+        $$"""{"type":"assignment","before":null,"after":{{after}},"reason":"{{reason}}","teardown":{{(teardown ? "true" : "false")}}}""";
+
+    [Fact]
+    public void The_saved_book_follows_every_assignment_event_and_a_teardown_leaves_it_alone()
+    {
+        var book = UseBook();
+        Routines.Assign(_villager, _day);                                       // subscribes the events
+        Send(Event(Snapshot, "Assigned"));
+        var row = Assert.Single(book.Assignments);
+        var plan = RoutineRegistry.Find(_day)!.Plan;
+        Assert.Equal((7u, ModId, "routine-test:day", 2u, plan.ContentHash, false, 1ul),
+            (row.NpcId, row.Owner, row.Key, row.PlanVersion, row.ContentHash, row.ManualSuspended, row.Revision));
+        Send(Event(Snapshot.Replace("\"revision\":1", "\"revision\":2").Replace("\"Assigned\"", "\"ManualSuspended\""), "ManualSuspended"));
+        Assert.True(Assert.Single(book.Assignments).ManualSuspended);
+        // the world stops: the book is what the next start binds again
+        Send(Event(Snapshot.Replace("\"revision\":1", "\"revision\":2").Replace("\"Assigned\"", "\"PendingSpawn\""), "WorldStopped", teardown: true));
+        Assert.True(Assert.Single(book.Assignments).ManualSuspended);
+        Send(Event(Snapshot.Replace("\"revision\":1", "\"revision\":3").Replace("\"Assigned\"", "\"Removed\""), "Removed"));
+        Assert.Empty(book.Assignments);
+        Assert.Equal(3ul, book.LastRevision);
+    }
+
+    [Fact]
+    public void A_world_start_binds_the_saved_rows_again_at_their_revisions_and_says_what_it_removed()
+    {
+        var book = UseBook();
+        var plan = RoutineRegistry.Find(_day)!.Plan;
+        book.World = "world-1";
+        book.LastRevision = 9;
+        book.Assignments.Add(new SavedRoutine { NpcId = 7, Owner = ModId, Key = plan.Key, PlanVersion = plan.Version, ContentHash = plan.ContentHash, ManualSuspended = true, Revision = 5 });
+        book.Assignments.Add(new SavedRoutine { NpcId = 8, Owner = ModId, Key = "routine-test:gone", PlanVersion = 1, ContentHash = "x", Revision = 6 });
+        book.Assignments.Add(new SavedRoutine { NpcId = 9, Owner = "routine-other", Key = "routine-other:day", PlanVersion = 1, ContentHash = "y", Revision = 7 });
+        RoutineSaves.Tick();
+        var r = Assert.Single(Restores);
+        Assert.Equal(new Restored(ModOwner, 7, RoutineTests.GoldenWire, 5, RoutineNative.RestoreSuspended, ""), r);
+        Assert.Equal([11ul], Floors);                                             // two removals took the next two revisions
+        Assert.Equal([7u], book.Assignments.Select(a => a.NpcId));
+        var removed = _events.OfType<RoutineAssignmentChangedEvent>().ToList();
+        Assert.Equal([(8u, "DefinitionMissing"), (9u, "OwnerMissing")], removed.Select(e => (e.After.NpcId, e.Reason)));
+        Assert.All(removed, e => Assert.Equal(RoutineAssignmentState.Removed, e.After.Assignment));
+        // once per world: the next tick binds nothing again
+        RoutineSaves.Tick();
+        Assert.Single(Restores);
+        // a raised version migrates: a new revision, and the service says Migrated
+        Restores.Clear();
+        var next = UseBook("world-2");
+        next.Assignments.Add(new SavedRoutine { NpcId = 7, Owner = ModId, Key = plan.Key, PlanVersion = plan.Version - 1, ContentHash = "old", Revision = 4 });
+        next.LastRevision = 4;
+        RoutineSaves.Tick();
+        Assert.Equal(new Restored(ModOwner, 7, RoutineTests.GoldenWire, 5, 0, "Migrated"), Assert.Single(Restores));
     }
 }

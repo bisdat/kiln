@@ -46,7 +46,7 @@ internal static class RoutineRegistry
     private static readonly Dictionary<Guid, RoutineDefinition> ByGuid = new();
     private static readonly Dictionary<string, RoutineDefinition> ByKey = new(StringComparer.Ordinal);
     // (mod, npc key) -> the routine an NPC block names: bound when that NPC is in the world
-    private static readonly Dictionary<(string Mod, string Npc), string> NpcRoutines = new();
+    private static readonly Dictionary<(string Mod, string Npc), (string Key, uint NpcId)> NpcRoutines = new();
 
     /// <summary>The block name that holds <paramref name="key"/> for another block of the same mod, or null: an alias
     /// collision. Asks the committed definitions and the blocks staged in the kind plan that is open on this thread (they
@@ -92,18 +92,24 @@ internal static class RoutineRegistry
     }
 
     /// <summary>An NPC block's routine: the plan bound to that NPC when it is in the world.</summary>
-    public static void BindNpc(string mod, string npcKey, string? routineKey)
+    public static void BindNpc(string mod, string npcKey, string? routineKey, uint npcId = 0)
     {
         lock (Gate)
         {
             if (routineKey == null) NpcRoutines.Remove((mod, npcKey));
-            else NpcRoutines[(mod, npcKey)] = routineKey;
+            else NpcRoutines[(mod, npcKey)] = (routineKey, npcId);
         }
     }
 
     public static string? OfNpc(string mod, string npcKey)
     {
-        lock (Gate) return NpcRoutines.GetValueOrDefault((mod, npcKey));
+        lock (Gate) return NpcRoutines.TryGetValue((mod, npcKey), out var r) ? r.Key : null;
+    }
+
+    /// <summary>Every NPC block's routine: the mod, the plan's key and the NPC's NpcId (0: not known).</summary>
+    public static IReadOnlyList<(string Mod, string Key, uint NpcId)> NpcBindings
+    {
+        get { lock (Gate) return [.. NpcRoutines.Select(x => (x.Key.Mod, x.Value.Key, x.Value.NpcId))]; }
     }
 
     /// <summary>Forgets what a mod defined: it is reloading or gone.</summary>

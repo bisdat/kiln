@@ -32,7 +32,18 @@ internal static unsafe class RoutineNative
         public delegate* unmanaged[Cdecl]<ulong, void> RevokeOwner;
         public delegate* unmanaged[Cdecl]<ulong, delegate* unmanaged[Cdecl]<NativeStr, void*, void>, void*, ulong*, int> SubscribeEvents;
         public delegate* unmanaged[Cdecl]<ulong, int> UnsubscribeEvents;
+        // since 0.2.0-dev.31 (check HasRestore)
+        public delegate* unmanaged[Cdecl]<ulong, uint, NativeStr, ulong, uint, NativeStr, delegate* unmanaged[Cdecl]<Result*, void*, void>, void*, ulong*, int> Restore;
+        public delegate* unmanaged[Cdecl]<ulong, int> SetRevisionFloor;
     }
+
+    /// <summary>The size of v1's table (the members up to UnsubscribeEvents).</summary>
+    public static readonly uint V1Size = (uint)(sizeof(ServiceHeader) + 7 * sizeof(nint));
+
+    /// <summary>The table has restore and set_revision_floor (0.2.0-dev.31).</summary>
+    public static bool HasRestore(Table* t) => t != null && t->Header.Size >= (uint)sizeof(Table) && t->Restore != null && t->SetRevisionFloor != null;
+
+    public const uint RestoreSuspended = 1;
 
     private static Table* _table;
 
@@ -44,7 +55,7 @@ internal static unsafe class RoutineNative
         {
             if (_table != null) return _table;
             var t = Services.Get<Table>(Service, Version);
-            return t != null && t->Header.Size >= (uint)sizeof(Table) ? _table = t : null;
+            return t != null && t->Header.Size >= V1Size ? _table = t : null;
         }
     }
 

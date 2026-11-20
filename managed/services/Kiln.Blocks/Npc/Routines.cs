@@ -20,7 +20,7 @@ namespace Kiln;
 /// <para>The answer says the assignment changed, not that a task ran: it is <c>Ok</c> also when the villager is paused,
 /// not in the world, or its first task cannot start. What tasks do comes as <see cref="RoutineTaskChangedEvent"/>.</para>
 /// <para>Capability <c>routines.decisions</c>. The calls throw <see cref="KilnUnavailableException"/> naming it when it is
-/// off (kiln.routines is not loaded, the game build is not known, or the capability is held until its game test);
+/// off (kiln.routines is not loaded, or the game build is not known);
 /// decided from what is true at the call, not from a row read earlier.</para>
 /// </summary>
 [ServerOnly]
@@ -74,7 +74,7 @@ public static unsafe class Routines
     }
 
     /// <summary>Ends the suspension a manual command put on <paramref name="npc"/>'s routine: it decides again at the
-    /// villager's next decision, without a teleport.</summary>
+    /// villager's next decision, without a teleport. A <see cref="Villager.Follow"/> on it ends with the resume.</summary>
     /// <returns><c>Ok</c> (also when it was not suspended: then nothing changed and no event follows); or
     /// <c>Ok = false</c> with <c>NotAssigned</c>, <c>OwnedBy:&lt;mod&gt;</c>, <c>WorldStopped</c>, <c>Revoked</c> or <c>QueueFull</c>.</returns>
     /// <exception cref="KilnUnavailableException"><c>routines.decisions</c> is off.</exception>
@@ -86,6 +86,7 @@ public static unsafe class Routines
         var t = Table("Routines.Resume");
         var mod = Mod("Routines.Resume");
         var pending = Begin(mod, npc.NpcId, out var id);
+        pending.StopsFollow = npc;
         ulong ticket = 0;
         return Finish(t->Resume(mod.Owner, npc.NpcId, &Done, (void*)id, &ticket), id, pending, "Routines.Resume");
     }
@@ -127,7 +128,7 @@ public static unsafe class Routines
     // ---- what is true now -------------------------------------------------------------------------------------------
 
     /// <summary>The table, when routines work at this moment: kiln.routines is here and its row reads available now (the
-    /// symbols resolved, the client gate does not hold it, no hook failed). Else the exception that names the capability.</summary>
+    /// symbols resolved, no hook failed). Else the exception that names the capability.</summary>
     private static RoutineNative.Table* Table(string api)
     {
         var t = RoutineNative.T;
@@ -166,6 +167,8 @@ public static unsafe class Routines
     {
         public readonly ModContext Mod = mod;
         public readonly uint NpcId = npcId;
+        // Resume: the villager whose Follow ends when the resume is made (chapter 16g §4.3: the owner's resume stops a Follow)
+        public Villager? StopsFollow;
         public readonly TaskCompletionSource<RoutineResult> Source = new();
     }
 
@@ -214,6 +217,8 @@ public static unsafe class Routines
         {
             if (r == null || !Waiting.TryRemove((nint)user, out var pending)) return;
             var ok = r->Ok != 0;
+            // a Follow would send the next command within a second and suspend the routine again
+            if (ok && pending.StopsFollow is { } v) v.StopFollowing();
             pending.Source.TrySetResult(new RoutineResult(ok, ok ? null : r->Reason.ToString() is { Length: > 0 } why ? why : "Refused", r->NpcId, r->Revision));
         }
         catch (Exception e)
@@ -241,6 +246,7 @@ public static unsafe class Routines
                 pending.Source.TrySetCanceled();
         RoutineNative.Forget();
         RoutineRuntime.Forget();
+        RoutineSaves.Forget();
     }
 }
 
@@ -313,6 +319,7 @@ internal static unsafe class RoutineRuntime
         {
             // on Post, on the tick thread; a world that stops off the tick thread: at the start of the next step
             var e = RoutineNative.Event(json.ToString());
+            if (e is RoutineAssignmentChangedEvent a) RoutineSaves.Observe(a);
             if (Backend.Current.IsTickThread) Events.Post(e);
             else Events.Enqueue(e);
         }

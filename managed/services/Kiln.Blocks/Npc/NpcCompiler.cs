@@ -903,7 +903,7 @@ internal static class NpcCompiler
             Id = key, Template = body.Block.Template, Clone = true, CloneGuid = cloneGuid, CloneName = cloneName, Dialogue = dialogue,
             Name = new UiText(names), Place = place,
         };
-        RoutineNpc.ForNpc(ctx, low, name, key, n.Routine);
+        RoutineNpc.ForNpc(ctx, low, name, key, n.Routine, cloneGuid);
         var file = NpcFile(ctx, key, n, body.Block, cloneGuid, cloneName, names, dialogue);
         low.Json["npc"] = file.DeepClone();
         low.AfterCommit(() =>
