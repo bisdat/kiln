@@ -444,8 +444,12 @@ Error. The real manifest reader refuses the file for a reason the schema cannot 
 schema found no error in the file.
 ```text
 kiln.mod.json:6:3: error KL209: Kiln.Host refuses this manifest: kiln.mod.json: 'other' is in both loadBefore and loadAfter
+kiln.mod.json:2:3: error KL209: Kiln.Host refuses this manifest: kiln.mod.json: id 'native.tools' is reserved: an id that starts with "native." is a native owner's mod-values namespace
 ```
-Fix: follow the reader's message.
+Among the refusals: an `id` that starts with `native.` (since dev.31). [Mod values](../services/mod-values.md) give every
+native owner the namespace `native.` plus a hash of its name, and a mod's id is its own namespace, so the two must never
+meet.
+Fix: follow the reader's message (for an id: pick one that does not start with `native.`).
 
 ## KL3xx: ids, GUIDs and names
 
@@ -689,7 +693,8 @@ binds; declare the native through `[ImpactNative]` (the build writes `"sync": tr
 
 ## KL35x: mod values (mod-values/*.json)
 What [Kiln.ModValues](schemas/kiln-mod-values.md) refuses when it loads a mod's value definitions, beyond what the schema says.
-A refused definition is not made: code that reads or changes that value gets a definition error.
+A refused definition is not made: code that reads or changes that value gets a definition error. KL356 is a warning about
+a definition Kiln accepts.
 
 ### KL350 mod-value-number
 Error. `min`, `max`, `initial` or a threshold that has the right form (a base-10 string, the schema's [KL106](#kl106-pattern))
@@ -742,6 +747,17 @@ One file with more than 128 is the schema's [KL108](#kl108-size).
 mod-values/more.json:32:5: error KL355: value extra-29 is this mod's value number 129 of 130: Kiln takes at most 128 per mod, across all its mod-values files
 ```
 Fix: drop values the mod does not use, or fold related ones into one counter.
+
+### KL356 mod-value-carried-max
+Warning. A carried value (`"persistence": "carried"` with `"trustClientImports": true`, a counter or an experience value)
+with no `max`. Carried progress merges by maximum: when a player joins, Kiln keeps the higher of the world's value and the
+copy their client brings, so a carried value is only as safe as its bound. Without a `max` of its own the bound is the
+default, 9223372036854775807, and an edited client can raise the value that far. Kiln accepts the definition.
+```text
+mod-values/a.json:12:5: warning KL356: value open-carried: a carried value without "max" can be raised as far as 9223372036854775807 by a player's own copy (Kiln keeps the higher of the world's value and the copy a client brings); give it a real max
+```
+Fix: give `max` the highest value the mod can really reach (for an experience value, its last threshold or a little
+above: past it no level is gained). An explicit `max`, also the default written out, ends the warning.
 
 ## KL4xx: references to the game's data
 
