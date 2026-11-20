@@ -14,6 +14,10 @@ use crate::names;
 
 /// Component type index of `keen::ecs::CustomPlayerString`, learned on first match.
 static NAME_COMPONENT: AtomicU32 = AtomicU32::new(u32::MAX);
+/// kiln: `qualifiedHash` of `keen::ecs::CustomPlayerString` (sdk component_types.rs): its index is found by the hash,
+/// so the name index needs no sweep to learn it
+const CUSTOM_PLAYER_STRING: u32 = 0x0e69_9564;
+static BY_HASH_TRIED: AtomicBool = AtomicBool::new(false); // kiln
 static LAYOUT_CHECKED: AtomicBool = AtomicBool::new(false);
 static LAYOUT_OK: AtomicBool = AtomicBool::new(false);
 
@@ -150,6 +154,7 @@ pub(crate) unsafe fn name_of(game: &Game, ctx: *mut Ctx, entity: u32) -> Option<
 
 /// Like [`name_of`], but never rescans the heap for an unknown key (a rescan takes about
 /// half a second on the game thread); the background scan finds new names within 15 s.
+/// kiln: an unknown key is handed to the background thread (`names::lookup_known`), which looks for it then.
 pub(crate) unsafe fn name_known(game: &Game, ctx: *mut Ctx, entity: u32) -> Option<String> {
     name_with(game, ctx, entity, false)
 }
@@ -167,12 +172,34 @@ unsafe fn name_with(game: &Game, ctx: *mut Ctx, entity: u32, fresh: bool) -> Opt
         return None;
     }
     let record = game.entity_record(ctx, entity)?;
-    let known = NAME_COMPONENT.load(Ordering::Relaxed);
+    let mut known = NAME_COMPONENT.load(Ordering::Relaxed);
+    // kiln: the component's index by its type hash, once; without it the index sweeps periodically to learn it
+    if known == u32::MAX && !BY_HASH_TRIED.swap(true, Ordering::Relaxed) {
+        match crate::components::index_of(ctx, CUSTOM_PLAYER_STRING) {
+            Some(index) => {
+                NAME_COMPONENT.store(index as u32, Ordering::Relaxed);
+                log!("chest name component is type #{index} (by its type hash)");
+                known = index as u32;
+            }
+            None => {
+                log!("chest name component: not found by its type hash; learning it from the name index");
+                names::learning();
+            }
+        }
+    }
     if known != u32::MAX {
         let (addr, size) = record.component(known as u16)?;
         let key = *(addr as *const u64);
         // no name given: nothing to look up (an unknown key rescans the heap)
-        return (size == 8 && key != 0).then(|| if fresh { names::lookup_fresh(key) } else { names::lookup(key) }).flatten();
+        if size != 8 || key == 0 {
+            return None;
+        }
+        // kiln: Kiln reads the game's string table itself; the heap index answers only when it cannot
+        #[cfg(feature = "kiln")]
+        if let Some(name) = crate::kiln::container_name(entity, key) {
+            return Some(name);
+        }
+        return if fresh { names::lookup_fresh(key) } else { names::lookup_known(key) };
     }
     // not learned yet: the name component is the 8-byte component whose value is a name key
     for (index, addr) in record.components_of_size(8) {
