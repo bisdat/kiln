@@ -13,6 +13,7 @@
   <ItemGroup>
     <Compile Include="../../../mods/Kiln.Admin/GameplayHookRows.cs" Link="GameplayHookRows.cs" />
     <Compile Include="../../../mods/tests/client-pass/VfxBudgetProof.cs" Link="VfxBudgetProof.cs" />
+    <Compile Include="../../../mods/tests/client-pass/SlotIdentityProof.cs" Link="SlotIdentityProof.cs" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit.v3" Version="3.1.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />

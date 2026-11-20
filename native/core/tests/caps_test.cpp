@@ -187,6 +187,7 @@ void reset() {
     caps::g_session.clear();
     caps::g_owner_reports.clear();
     caps::g_dll_failed.clear();
+    caps::g_fragment_rows.clear();
     for (auto& s : caps::g_subs) s->live = false;
     caps::g_subs.clear();
     caps::g_generation = 1;
@@ -1349,6 +1350,60 @@ void client_gate_threads() {
     gates::configure(KILN_SIDE_SERVER, false, {});
 }
 
+// A mod's own symbol fragment (kiln.hooks load_symbols: Symbols.LoadShipped) gives "sig/<modid>/<Name>" rows like Kiln's
+// own described symbols, for as long as it is loaded (the owner's dev.30 client pass, ui-hooks.c8: the row of
+// ClientHookSample's own descriptor was never registered, so the sample's Capabilities.Is check kept its hook off).
+void fragment_rows(const std::filesystem::path& dir) {
+    Loaded x;
+    sigdb::init_code();  // a second test image in this process; code()'s once_flag has already run
+    reset();
+    t_tick = t_lifecycle = true;
+    resolve_with(dir, "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E8 {helper:rel32}");
+    caps::core_rows(true, true, "");
+    const auto file = dir / "m-client.json";
+    const char* const full = R"({"format":1,"side":"client","symbols":{
+      "m/Tail":{"find":[{"pattern":"8B 81 ?? ?? ?? ?? C3"}],
+                "sig":{"ret":"u32","args":[{"name":"self","type":"ptr"}],"abi":{"reads":["rcx"],"stack":[],"ret":"rax"}}},
+      "m/Wrong":{"find":[{"pattern":"8B 81 ?? ?? ?? ?? C3"}],"sig":{"args":[{"name":"scale","type":"f32"}]}},
+      "m/Gone":{"find":[{"pattern":"DE AD BE EF 01 02 03 04 05"}],"sig":{"args":[]}}
+    }})";
+    write(file, full);
+    CHECK(get("sig/m/Tail").rc == KILN_ERR_NOT_FOUND, "fragment: no row before the fragment loads");
+    sigdb::FragmentSummary fs;
+    std::string err;
+    CHECK(sigdb::load_fragment("m", file, {}, &fs, &err), "fragment: loads (%s)", err.c_str());
+    const uint64_t before = T->generation();
+    caps::fragment_rows("m");
+    CHECK(is("sig/m/Tail", A, KILN_CAP_REASON_NONE) && get("sig/m/Tail").source == "sigdb" && T->generation() > before,
+          "fragment: a described symbol that resolved and fits is an available row, source sigdb (got %u %u '%s')",
+          get("sig/m/Tail").state, get("sig/m/Tail").reason, get("sig/m/Tail").text.c_str());
+    CHECK(is("sig/m/Wrong", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
+              get("sig/m/Wrong").text == "symbol m/Wrong: descriptor arg 1 'scale' is xmm0, the function reads [rcx]",
+          "fragment: a descriptor that does not fit the code is off with sigdb's reason (got '%s')", get("sig/m/Wrong").text.c_str());
+    CHECK(is("sig/m/Gone", U, KILN_CAP_REASON_SYMBOL_MISSING) && get("sig/m/Gone").text.rfind("symbol m/Gone: ", 0) == 0,
+          "fragment: a pattern that matches nowhere is off, naming the symbol (got '%s')", get("sig/m/Gone").text.c_str());
+    CHECK(is("items.fuel", A, 0) && get("items.fuel").source == "sigdb", "fragment: Kiln's own feature rows stay");
+
+    // a reload (hot reload, a new version of the mod) replaces the rows: a name it no longer has goes
+    write(file, R"({"format":1,"symbols":{
+      "m/Tail":{"find":[{"pattern":"8B 81 ?? ?? ?? ?? C3"}],
+                "sig":{"ret":"u32","args":[{"name":"self","type":"ptr"}],"abi":{"reads":["rcx"],"stack":[],"ret":"rax"}}}
+    }})");
+    CHECK(sigdb::load_fragment("m", file, {}, &fs, &err), "fragment: reloads");
+    caps::fragment_rows("m");
+    CHECK(is("sig/m/Tail", A, 0) && get("sig/m/Wrong").rc == KILN_ERR_NOT_FOUND && get("sig/m/Gone").rc == KILN_ERR_NOT_FOUND,
+          "fragment: a reload keeps the rows it still has and drops the others");
+
+    // the mod unloads: its rows go, Kiln's stay
+    caps::fragment_gone("m");
+    sigdb::unload_fragment("m");
+    CHECK(get("sig/m/Tail").rc == KILN_ERR_NOT_FOUND && is("items.fuel", A, 0), "fragment: unloaded, its rows are gone");
+    caps::fragment_gone("m");  // twice, or for a fragment never loaded: nothing
+    caps::fragment_rows("nothing");
+    CHECK(get("sig/nothing").rc == KILN_ERR_NOT_FOUND && is("items.fuel", A, 0), "fragment: an unknown id changes nothing");
+    std::filesystem::remove(file);
+}
+
 int main(int argc, char** argv) {
     if (argc != 2) return 2;
     const std::filesystem::path dir = argv[1];
@@ -1358,6 +1413,7 @@ int main(int argc, char** argv) {
     subscribers();
     reentrant_read_strings();
     core_rows(dir);
+    fragment_rows(dir);
     client_gate(dir);
     client_gate_threads();
     client_preview(dir);

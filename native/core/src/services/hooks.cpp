@@ -40,6 +40,12 @@
 #include "service.h"
 #include "services/kiln_hooks.h"
 
+// kiln.caps (caps.cpp): a mod fragment's features are capability rows while it is loaded
+namespace kiln::caps {
+void fragment_rows(std::string_view id);
+void fragment_gone(std::string_view id);
+}  // namespace kiln::caps
+
 namespace kiln::hooks {
 namespace seh {
 bool copy(void* dst, const void* src, size_t n);
@@ -143,6 +149,7 @@ KilnResult KILN_CALL h_load_symbols(KilnOwner owner, KilnStr modid, KilnStr json
            fs.symbols_ok, fs.symbols, fs.constants_ok, fs.constants, fs.features_ok, fs.features, fs.ms);
     for (const std::string& problem : fs.problems) KLOG_W("hooks: mod %s symbol %s", id.c_str(), problem.c_str());
     chain::refresh_symbols();  // hooked addresses may have a name now
+    caps::fragment_rows(id);   // "sig/<id>/<Name>" rows, as Kiln's own described symbols have (Capabilities.Is)
     if (summary && summary->size >= sizeof(KilnHooksSigSummary)) {
         summary->symbols = static_cast<uint32_t>(fs.symbols);
         summary->symbols_ok = static_cast<uint32_t>(fs.symbols_ok);
@@ -156,6 +163,7 @@ KilnResult KILN_CALL h_load_symbols(KilnOwner owner, KilnStr modid, KilnStr json
 }
 
 KilnResult KILN_CALL h_unload_symbols(KilnStr modid) {
+    caps::fragment_gone(sv(modid));
     if (!sigdb::unload_fragment(sv(modid))) return KILN_ERR_NOT_FOUND;
     chain::refresh_symbols();
     return KILN_OK;
