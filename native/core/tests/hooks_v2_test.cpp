@@ -381,6 +381,7 @@ int game_asm_park(int);
 int game_asm_idle(int);
 int game_asm_idle2(int);
 extern char game_many[];
+extern char game_start_many[];
 int game_asm_park_jcc(int);
 void game_asm_park_done(void);
 int game_asm_er1(int);
@@ -417,6 +418,12 @@ __asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n" GAME_ASM(game_asm_fb) 
 __asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n.balign 32, 0xCC\n"
         ".globl game_code_many\n.def game_code_many; .scl 2; .type 32; .endef\ngame_code_many:\n"
         ".rept 16\n  push rbx\n  sub rsp, 0x20\n  mov eax, ecx\n  add eax, 1\n  add rsp, 0x20\n  pop rbx\n  ret\n  .balign 32, 0xCC\n.endr\n"
+        ".text\n");
+
+// 48 more for test_installs_while_threads_start: first installs while other threads keep creating threads.
+__asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n.balign 32, 0xCC\n"
+        ".globl game_start_many\n.def game_start_many; .scl 2; .type 32; .endef\ngame_start_many:\n"
+        ".rept 48\n  push rbx\n  sub rsp, 0x20\n  mov eax, ecx\n  add eax, 1\n  add rsp, 0x20\n  pop rbx\n  ret\n  .balign 32, 0xCC\n.endr\n"
         ".text\n");
 
 // Filler that makes the test's code section longer than KILN_HOOKS_CODE_RANGE_MAX (test_code_range_limit); never run.
@@ -2001,6 +2008,57 @@ void test_parked_threads() {
     A->revoke_owner(6);
 }
 
+// Under Wine a new thread is listed (NtGetNextThread, Toolhelp) as soon as the wineserver has made it, before its creator
+// has started it at the Unix level. A first install that stopped the creator in that window and then asked the new
+// thread for its context waited for an answer only the started thread can give: forever (4 hangs in ~1300 runs of this
+// test under Wine 11.20 with ntsync, 2026-11-20; a thread pool thread was inside NtCreateThreadEx each time). Here two
+// threads create threads nonstop while 48 first installs go in: each must finish, and nothing may break.
+void test_installs_while_threads_start() {
+    std::puts("-- 48 first installs while 2 other threads keep creating threads (some listed before they have started)");
+    std::atomic<bool> stop{false};
+    std::atomic<uint64_t> made{0};
+    std::vector<std::thread> churn;
+    for (int k = 0; k < 2; ++k)
+        churn.emplace_back([&] {
+            while (!stop.load()) {
+                HANDLE h = CreateThread(nullptr, 0, [](LPVOID) -> DWORD { return 0; }, nullptr, 0, nullptr);
+                if (!h) continue;
+                WaitForSingleObject(h, INFINITE);
+                CloseHandle(h);
+                ++made;
+            }
+        });
+    while (made.load() < 20) Sleep(1);
+    static std::atomic<int> hits{0};
+    static auto m = +[](KilnRegisters*, void*) { hits++; };
+    const auto o = ord(0, "t/start");
+    const auto first = reinterpret_cast<uintptr_t>(game_start_many);
+    const size_t lines_before = log_count("hooks: detour on rva");
+    int placed = 0;
+    for (int i = 0; i < 48; ++i)
+        placed += A->mid2(6, first + 32 * static_cast<uintptr_t>(i), &o, m, nullptr, nullptr) == KILN_OK;
+    stop = true;
+    for (auto& t : churn) t.join();
+    check(placed == 48, "48 first installs while threads were being created: each finished and was placed",
+          "placed " + std::to_string(placed) + ", threads created meanwhile " + std::to_string(made.load()));
+    bool right = true;
+    for (int i = 0; i < 48; ++i)
+        right = right && reinterpret_cast<int (*)(int)>(first + 32 * static_cast<uintptr_t>(i))(i) == i + 1;
+    check(right && hits == 48, "every function still returns x + 1 and runs its mid link once",
+          "hits " + std::to_string(hits.load()));
+    check(log_count("hooks: detour on rva") >= lines_before + 48, "each install logged its stop");
+    size_t with_unstarted = 0;  // Wine only (Windows makes a thread and its TEB at once): not asserted
+    {
+        std::lock_guard lock(g_log_mutex);
+        for (const auto& l : g_lines)
+            if (l.find("hooks: detour on rva") != std::string::npos && l.find(" 0 not started yet") == std::string::npos &&
+                l.find("not started yet") != std::string::npos)
+                ++with_unstarted;
+    }
+    std::printf("  info: %zu of the installs stopped a thread that had not started yet\n", with_unstarted);
+    A->revoke_owner(6);
+}
+
 // The first install stops every other thread of the process. Many of them (the game has dozens): all must come back.
 void test_many_threads_stopped() {
     std::puts("-- a first install with 64 other threads alive stops them, writes the jump and resumes every one");
@@ -2787,6 +2845,14 @@ int main(int argc, char** argv) {
         std::puts(g_fail ? "FAILED" : "all passed");
         return g_fail ? 1 : 0;
     }
+    if (argc > 1 && !std::strcmp(argv[1], "starts")) {  // test_installs_while_threads_start alone (hunting the Wine hang)
+        g_service->init();
+        A = static_cast<const KilnHooksApi*>(g_service->table);
+        test_installs_while_threads_start();
+        std::printf("%d passed, %d failed\n", g_pass, g_fail);
+        std::puts(g_fail ? "FAILED" : "all passed");
+        return g_fail ? 1 : 0;
+    }
     if (argc > 1 && !std::strcmp(argv[1], "module")) {  // the foreign-module test alone (a quick run on real Windows)
         g_service->init();
         A = static_cast<const KilnHooksApi*>(g_service->table);
@@ -2839,6 +2905,7 @@ int main(int argc, char** argv) {
     test_first_install_under_load();
     test_parked_threads();
     test_many_threads_stopped();
+    test_installs_while_threads_start();
     test_client_header();
     test_thread_tables();
     test_mid_entry_semantics();

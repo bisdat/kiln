@@ -8,8 +8,8 @@ python3 - "$here/../src/services/hooks_chain.cpp" "$out/hooks_stop_loop.g.h" <<'
 import pathlib, sys
 s = pathlib.Path(sys.argv[1]).read_text()
 stopped = s[s.index('struct Stopped {'):s.index('constexpr DWORD kThreadAccess')]
-report = s[s.index('struct FreezeReport {'):s.index('// Nothing in here may allocate')]
-loop = s[s.index('    for (Stopped& s : th) {', s.index('void write_with_threads_stopped')):s.index('    alignas(16) CONTEXT ctx;', s.index('void write_with_threads_stopped'))]
+report = s[s.index('struct FreezeReport {'):s.index('// Nothing in here may allocate, log, lock or throw: other threads are stopped.\nvoid write_with_threads_stopped')]
+loop = s[s.index('    for (Stopped& s : th) {', s.index('void write_with_threads_stopped')):s.index('    read_stopped_positions(th, rep, query);', s.index('void write_with_threads_stopped'))]
 pathlib.Path(sys.argv[2]).write_text(stopped + report + '\nvoid stop_loop(std::vector<Stopped>& th, FreezeReport& rep, uint32_t* unchecked) {\n' + loop + '}\n')
 PY
 cxx=${CXX:-$(command -v clang++ || command -v g++)}
