@@ -36,6 +36,7 @@ import { CommunityDeckHost } from "../community/Host";
 import { NavCount } from "../community/parts";
 import { useShown } from "../community/state";
 import { watchCrashes } from "../community/crash";
+import { DeckCrucibleHost } from "../crucible/DeckCrucible";
 import "./deck.css";
 
 // the save editor carries its item data (about 2 MB): loaded on the first visit to its tab, as on the desktop
@@ -273,6 +274,7 @@ export default function DeckApp() {
       <div className="deck-overlays" />
       <CommunityDeckHost />
       <DeckNxm />
+      <DeckCrucibleHost />
       <DeckToaster />
       <DeckDataFolderNotice />
     </div>

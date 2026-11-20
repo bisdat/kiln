@@ -195,6 +195,8 @@ export interface LauncherSettings {
   modFolderNotes?: boolean;
   /** "Check for mod updates once a day" (default off; api/updates.ts). */
   modUpdatesDaily?: boolean;
+  /** (dev.30) "Count my installs (anonymous)": Crucible's anonymous daily install counts (default on; absent: on). */
+  crucibleStats?: boolean;
   /** (dev.29) "Earlier versions to keep": how many earlier versions of a mod an update keeps for a roll back, with
    *  their settings (0 to KEEP_MAX; default 1; absent from an older backend). */
   keepVersions?: number;
@@ -2296,9 +2298,7 @@ export const COMMANDS = [
   "community_settings_get", "community_settings_set", "community_status", "community_feed", "community_check_member", "community_signout", "community_signin_start", "community_signin_poll", "community_signin_cancel",
   "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",
   "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
-  "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared",
-  "crucible_trust", "crucible_trust_set", "crucible_links",
-  "pack_instance", "pack_instances", "pack_undo", "pack_uninstall", "pack_build", "pack_inspect", "pack_install",
+  "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -2582,7 +2582,8 @@ export interface PackPreview {
   index: PackIndex; sha256: string; size: number; missing: LibraryRef[]; present: LibraryRef[]; code: string[];
   optional: Record<string, boolean>; instance?: string | null;
 }
-export type PackSource = { path: string; sha256?: string } | { url: string; sha256: string };
+/** Local paths only. */
+export type PackSource = { path: string; sha256?: string };
 export interface PackInstallRequest { source: PackSource; consent: boolean; name?: string; optional?: Record<string, boolean>; activate?: boolean }
 export interface PackInstallResult {
   profile: Profile; instance: PackInstance; imported: LibraryRef[]; overrides: string[];
@@ -2635,9 +2636,10 @@ export interface CruciblePreview {
   kiln: { needs: string | null; ok: boolean };
   /** The player ticked "Always trust packs from <owner>" before. */
   trusted: boolean;
-  /** The creator's upload is not finished: "still uploading (62%)" + Wait. */
-  uploading: { progress: number } | null;
 }
+/** crucible_open's `busy` error detail while the creator's upload is not finished (no preview yet): "still uploading"
+ *  + Wait (crucible_open again every ~10 s). */
+export interface CrucibleUploading { uploading: { version: string; progress: number }; pack: CruciblePack }
 export interface CrucibleInstallRequest {
   /** The version id (pv_...) from the preview. */
   target: string;
@@ -2653,6 +2655,10 @@ export interface CrucibleInstallResult {
 export interface CrucibleUpdate {
   profile: string; pack: string; name: string; from: { version: string; number: number | null };
   to: { versionId: string; version: string; number: number };
+  /** (UI ask, FROM-UI.md) The pack's owner, and the counts of the signed indexes' diff: the Play banner's
+   *  "3 -> 4 by Emberfox: 1 added, 2 updated, 1 removed" without a download. Absent: the banner says less. */
+  by?: string | null;
+  counts?: { added: number; updated: number; removed: number };
 }
 export interface CrucibleUpdatePlan { versionId: string; download: number; plan: PackUpdatePlan }
 export type PackChoice = "pack" | "mine";
@@ -2682,15 +2688,15 @@ export interface CrucibleTrust { id: string; name: string; since: string }
 
 export const crucibleStatus = () => call<CrucibleStatus>("crucible_status");
 /** A code ("H7QK-3MZP", any case, with or without the dash), a share link, a kiln:// link or a version id (pv_...). */
-export const crucibleOpen = (target: string) => call<CruciblePreview>("crucible_open", { target });
+export const crucibleOpen = (target: string, gameId?: GameId | null) => call<CruciblePreview>("crucible_open", { target, gameId: gameId ?? null });
 export const crucibleInstall = (gameId: GameId, request: CrucibleInstallRequest) => call<TaskId>("crucible_install", { gameId, request });
-export const crucibleUpdates = (gameId: GameId) => call<CrucibleUpdate[]>("crucible_updates", { gameId });
+export const crucibleUpdates = (gameId: GameId, force = false) => call<CrucibleUpdate[]>("crucible_updates", { gameId, force });
 /** Downloads what it needs: may take seconds. */
 export const crucibleUpdatePlan = (profileId: ProfileId) => call<CrucibleUpdatePlan>("crucible_update_plan", { profileId });
 /** Error `conflict` with the PackUpdatePlan in `detail` while a conflict has no choice. */
 export const crucibleUpdate = (gameId: GameId, request: CrucibleUpdateRequest) => call<TaskId>("crucible_update", { gameId, request });
 /** Error `auth_failed` when not signed in. */
-export const crucibleShare = (request: CrucibleShareRequest) => call<TaskId>("crucible_share", { request });
+export const crucibleShare = (request: CrucibleShareRequest, gameId?: GameId | null) => call<TaskId>("crucible_share", { request, gameId: gameId ?? null });
 export const crucibleShared = (profileId: ProfileId) => call<CrucibleShared | null>("crucible_shared", { profileId });
 export const crucibleTrust = () => call<CrucibleTrust[]>("crucible_trust");
 export const crucibleTrustSet = (id: string, name: string, trusted: boolean) => call<null>("crucible_trust_set", { id, name, trusted });
@@ -2703,4 +2709,6 @@ export const packUninstall = (profileId: ProfileId) => call<{ profile: Profile; 
 /** "Save as file": a .kilnpack of a profile into a folder. */
 export const packBuild = (request: PackBuildRequest, outDir: string) => call<TaskId>("pack_build", { request, outDir });
 export const packInspect = (source: PackSource) => call<PackPreview>("pack_inspect", { source });
+/** 1: a server modpack (the consent flow), 2: a Crucible pack (the pack preview). */
+export const packPeekFormat = (path: string) => call<1 | 2>("pack_peek_format", { path });
 export const packInstall = (gameId: GameId, request: PackInstallRequest) => call<TaskId>("pack_install", { gameId, request });

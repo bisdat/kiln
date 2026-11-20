@@ -190,7 +190,14 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
   };
 
   const preview = (p: MockPack, v: MockVersion): CruciblePreview => {
-    if (v.status === "uploading" && (v.progress ?? 0) >= 100) v.status = "ready";
+    if (v.status === "uploading") {
+      const progress = v.progress ?? 0;
+      // the creator's upload goes on while a friend waits
+      v.progress = Math.min(100, progress + 19);
+      if (progress < 100) err("busy", (p.pack.owner?.name ?? p.pack.title) + "'s pack is still uploading (" + progress + "%). Kiln will install it when it's ready.",
+        { uploading: { version: v.id, progress: progress / 100 }, pack: clone(p.pack) });
+      v.status = "ready";
+    }
     const index = indexOf(p, v);
     const missing = v.mods.filter((x) => !inLibrary(x.kind, x.id, x.version)).map(refOf);
     const present = v.mods.filter((x) => inLibrary(x.kind, x.id, x.version)).map(refOf);
@@ -206,10 +213,7 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       game: { builds: p.builds, current: cur, fits: !p.builds.length || cur === null || p.builds.includes(cur) },
       kiln: { needs: p.kiln ?? null, ok: p.kilnOk !== false },
       trusted: !!p.pack.owner && trust.some((x) => x.id === p.pack.owner!.id),
-      uploading: v.status === "uploading" ? { progress: v.progress ?? 0 } : null,
     };
-    // the creator's upload goes on while a friend waits
-    if (v.status === "uploading") v.progress = Math.min(100, (v.progress ?? 0) + 19);
     return r;
   };
 
@@ -361,7 +365,9 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       const v = latest(p);
       if (v.version === i.version) return [];
       const from = p.versions.find((x) => x.version === i.version);
-      return [{ profile: pid, pack: p.pack.slug, name: p.pack.title, from: { version: i.version, number: from?.number ?? null }, to: { versionId: v.id, version: v.version, number: v.number } }];
+      const { plan } = planFor(pid);
+      return [{ profile: pid, pack: p.pack.slug, name: p.pack.title, from: { version: i.version, number: from?.number ?? null }, to: { versionId: v.id, version: v.version, number: v.number },
+        by: p.pack.owner?.name ?? null, counts: { added: plan.mods.added.length, updated: plan.mods.updated.length, removed: plan.mods.removed.length } }];
     }),
     crucible_update_plan: (a): CrucibleUpdatePlan => {
       const { v, plan } = planFor(String(a.profileId));
@@ -451,6 +457,7 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       const unused = MOD_KINDS.flatMap((k) => (prof.mods[k] ?? []).filter((x) => !used.has(k + "/" + x.id + "@" + x.version)).map((x) => ({ kind: k, id: x.id, version: x.version, hash: x.hash })));
       return { profile: clone(prof), unused };
     },
+    pack_peek_format: (a) => (/modpack/i.test(String(a.path)) && !/\.kilnpack$/i.test(String(a.path)) ? 1 : 2),
     pack_build: (a) => {
       const req = a.request as { profile: string; version: string; name?: string };
       const prof = d.profiles.get(req.profile) ?? err("not_found", "No profile '" + req.profile + "'.");
@@ -472,7 +479,7 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       const req = a.request as PackInstallRequest;
       if (!req?.consent) err("consent_required", "Tick \"I trust this pack\" first.");
       if (d.isRunning(gameId)) err("game_running", "Close Enshrouded first.");
-      const p = fromFile("path" in req.source ? req.source.path : "");
+      const p = fromFile(req.source.path);
       const v = latest(p);
       return d.startTask("pack_install", "Install " + p.pack.title, ["Checking the file", "Adding to your Library", "Making the profile", "Backing up your saves"], (): PackInstallResult => {
         const opt = { ...Object.fromEntries(v.mods.filter((x) => x.optional).map((x) => [x.id, !!x.on])), ...(req.optional ?? {}) };
