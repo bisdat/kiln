@@ -228,10 +228,11 @@ test("Raw JSON: make a file, break it (an error), fix it, rename it, delete it",
   await page.getByTestId("data-raw-delete").click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
-  // a typed confirmation only when the player turned it on (Settings); a hidden input is not one
-  const word = dialog.getByRole("textbox");
-  if (await word.count()) await word.first().fill("twigs.json");
-  await dialog.getByRole("button", { name: "Delete" }).click();
+  // a typed confirmation only when the player turned it on (Settings: off by default); the dialog settles on its mode
+  // after its first render, so wait for Delete to come on, and type the word only if it does not
+  const del = dialog.getByRole("button", { name: "Delete" });
+  try { await expect(del).toBeEnabled({ timeout: 5_000 }); } catch { await dialog.getByRole("textbox").first().fill("twigs.json"); }
+  await del.click();
   await expect(page.getByTestId("data-raw-file-content/twigs.json")).toHaveCount(0);
   files = Object.keys(await layer(page)).sort();
   expect(files).toEqual(["content/items.json"]);
