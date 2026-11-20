@@ -1,5 +1,6 @@
 // "Support report": one zip with what a maintainer needs when mods don't load (report_save), and a few lines to paste
-// into a post (report_summary). Both are redacted by kiln_manage::report: names and paths never leave the machine.
+// into a post (report_summary). "Save report..." shows what is in it first ("What's in this report", report_preview),
+// where other mods' logs can be left out. Both are redacted by kiln_manage::report: names and paths never leave the machine.
 // Used by the Logs page (a game or a local server; at the top of every tab), where Play's problem banners point.
 // docs/kiln/launcher/support-report.md
 import { useState } from "react";
@@ -9,6 +10,7 @@ import { isTauri } from "../api/commands";
 import { t, useT } from "../i18n";
 import { Button, fmtBytes, toast } from "../ui";
 import { SendToSupport } from "../community/parts";
+import { ReportContentsDialog } from "./ReportContents";
 
 /** `kiln-report-2026-11-10.zip` (the crate's report::file_name, in local time). */
 export function reportFileName(d = new Date()): string {
@@ -26,12 +28,14 @@ async function choosePath(): Promise<string | null> {
 export function SupportReport({ target, compact }: { target: LogTarget | null; compact?: boolean }) {
   const t = useT();
   const [busy, setBusy] = useState<"save" | "copy" | null>(null);
-  const save = async () => {
+  const [contents, setContents] = useState(false);
+  const save = async (exclude: string[]) => {
+    setContents(false);
     try {
       const path = await choosePath();
       if (!path) return;
       setBusy("save");
-      const r = await api.reportSave(target, path);
+      const r = await api.reportSave(target, path, exclude);
       const problems = r.findings.filter((f) => f.level === "problem").length;
       const folder = r.path.replace(/[\\/][^\\/]*$/, "");
       toast.ok(t("supportReport.saved"), [
@@ -66,8 +70,9 @@ export function SupportReport({ target, compact }: { target: LogTarget | null; c
         {t("supportReport.hint")}
       </span>
       <SendToSupport from="logs" target={target} variant="primary" />
-      <Button size="s" loading={busy === "save"} disabled={!!busy} onClick={save}>{t("supportReport.save")}</Button>
+      <Button size="s" loading={busy === "save"} disabled={!!busy} onClick={() => setContents(true)}>{t("supportReport.save")}</Button>
       <Button size="s" variant="ghost" loading={busy === "copy"} disabled={!!busy} onClick={copy}>{t("supportReport.copy")}</Button>
+      {contents && <ReportContentsDialog target={target} onSave={(x) => void save(x)} onClose={() => setContents(false)} />}
     </div>
   );
 }

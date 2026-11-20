@@ -3295,6 +3295,99 @@
     "title": "Addon client shroudlink",
     "switchOn": "Activer l'addon"
   },
+  "reportContents": {
+    "title": "Ce que contient ce rapport",
+    "intro": "Chaque fichier du rapport, et ce que Kiln y a remplacé avant que quoi que ce soit ne quitte votre PC. Les journaux de Kiln restent toujours dedans : l'assistance en a besoin pour voir ce qui n'a pas marché. Ceux des autres mods, vous pouvez les retirer.",
+    "total": {
+      "one": "{count} fichier, {size} avant compression",
+      "other": "{count} fichiers, {size} avant compression"
+    },
+    "leftOutCount": {
+      "one": "{count} fichier retiré",
+      "other": "{count} fichiers retirés"
+    },
+    "failed": "Impossible de lire le rapport",
+    "view": "Voir summary.txt",
+    "hideSummary": "Masquer summary.txt",
+    "viewTitle": "summary.txt",
+    "save": "Enregistrer",
+    "leaveOut": "Retirer",
+    "leaveOutAll": "Retirer les journaux des autres mods",
+    "leftOut": "Retiré",
+    "leftOutHint": "Retiré : pas dans le zip.",
+    "included": "Inclus",
+    "include": "Remettre",
+    "replaced": "Remplacé : {list}",
+    "item": "{what} ({times})",
+    "times": {
+      "one": "{count} fois",
+      "other": "{count} fois"
+    },
+    "sep": ", ",
+    "nothing": "Rien de personnel trouvé dedans.",
+    "group": {
+      "kiln": "Journaux de Kiln",
+      "mods": "Journaux des autres mods",
+      "settings": "Réglages",
+      "listings": "Listes de dossiers"
+    },
+    "groupHint": {
+      "kiln": "L'assistance en a besoin pour voir ce qui n'a pas marché, ils restent donc toujours dedans.",
+      "mods": "Écrits par d'autres mods et outils. Kiln les nettoie de la même façon, mais il ne peut pas connaître tout ce qu'un autre mod écrit : vous pouvez donc les retirer.",
+      "settings": "L'état de Kiln et votre profil : quels mods sont activés et ce qu'a fait le dernier lancement. Les mots de passe et jetons y sont remplacés.",
+      "listings": "Seulement les noms, tailles et dates des fichiers et dossiers. Rien de leur contenu."
+    },
+    "token": {
+      "home": "votre dossier personnel",
+      "user": "votre nom d'utilisateur",
+      "host": "le nom de votre PC",
+      "steam-name": "les noms Steam",
+      "steamid": "les identifiants Steam",
+      "player": "les noms de joueurs",
+      "ip": "les adresses IP",
+      "mac": "les adresses de carte réseau",
+      "email": "les adresses e-mail",
+      "redacted": "les mots de passe, jetons et clés"
+    },
+    "about": {
+      "summary": "Le résumé : ce que Kiln a trouvé, votre système, le jeu et votre profil",
+      "findings": "Ce que Kiln a trouvé, pour les outils de l'assistance",
+      "kiln-log": "Le journal principal de Kiln au dernier lancement du jeu",
+      "proxy-log": "Comment Kiln a été chargé dans le jeu",
+      "eml-log": "Le journal de Kiln pour les mods EML",
+      "tick-stats": "La durée de chaque étape du monde, minute par minute",
+      "greeneye-bridge": "Le journal de Kiln pour les mods Greeneye",
+      "crash": "Le dernier rapport de plantage écrit par Kiln",
+      "launcher-log": "Le journal du launcher lui-même",
+      "game-start": "Ce que le jeu a affiché quand le launcher l'a lancé",
+      "kiln-other": "Un des journaux de Kiln",
+      "state": "Ce que Kiln a vu au dernier lancement",
+      "profile": "Votre profil : quels mods sont activés",
+      "chain": "Quels autres chargeurs démarrent avec le jeu",
+      "kiln-json": "Les réglages de Kiln dans le dossier du jeu",
+      "receipt": "Quels fichiers de Kiln sont installés, avec leurs sommes de contrôle",
+      "game-folder": "Les noms dans le dossier du jeu",
+      "kiln-folder": "Les noms dans le dossier de Kiln",
+      "mod-folders": "Les noms dans chaque dossier de mods",
+      "listing": "Une liste de noms de fichiers",
+      "xhl-core": "Le journal de XHL-Core",
+      "greeneye": "Le journal de Greeneye Loader ou d'un mod Greeneye",
+      "building-tools": "Le journal de Building Tools",
+      "shroudlink": "Le journal de ShroudLink",
+      "auto-loot": "Le journal d'Auto Loot Plus",
+      "optiscaler-settings": "Les réglages d'OptiScaler",
+      "optiscaler-log": "Le journal d'OptiScaler",
+      "mod-log": "Le journal d'un autre mod"
+    },
+    "never": {
+      "title": "Jamais dans un rapport",
+      "saves": "Vos sauvegardes et vos mondes",
+      "settings": "Les réglages des mods et le dossier de configuration de Kiln (ils peuvent contenir des mots de passe de serveur)",
+      "admin": "Le jeton et l'adresse de Kiln.Admin",
+      "mods": "Le contenu de vos mods (seulement les noms, tailles et dates des fichiers)",
+      "steam": "Les fichiers de Steam lui-même"
+    }
+  },
   "supportReport": {
     "dialogTitle": "Enregistrer un rapport d'assistance",
     "saved": "Rapport enregistré",

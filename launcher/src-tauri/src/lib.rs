@@ -243,6 +243,7 @@ pub fn run() {
             commands::cook::boot_snapshot_run,
             commands::logs::report_save,
             commands::logs::report_summary,
+            commands::logs::report_preview,
             commands::data_folder::data_folder_get,
             commands::data_folder::data_folder_size,
             commands::data_folder::data_folder_check,

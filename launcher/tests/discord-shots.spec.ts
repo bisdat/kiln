@@ -93,7 +93,7 @@ test("desktop: send from the Logs page, signed in", async ({ page }) => {
   await modal(page).getByRole("button", { name: "Next: check what is sent" }).click();
   await page.waitForTimeout(500);
   await shot(page, "desktop-16-send-check-what-is-sent");
-  await modal(page).getByRole("button", { name: "Show the files" }).click();
+  await modal(page).getByRole("button", { name: "What's in this report" }).click();
   await page.locator(".k-modal-body").evaluate((el) => el.scrollTo(0, el.scrollHeight));
   await page.waitForTimeout(200);
   await shot(page, "desktop-17-send-check-files-and-who-sees-the-zip");

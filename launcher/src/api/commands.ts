@@ -1966,9 +1966,39 @@ export interface ReportSaved {
   /** Sections that could not be read; the rest is in the zip. */
   errors: string[];
 }
+/** kiln_manage::report::FileGroup: how "What's in this report" groups the zip's files. */
+export type ReportFileGroup = "kiln" | "mods" | "settings" | "listings";
+/** kiln_manage::report::ContentsFile: one file of a support report. */
+export interface ReportContentsFile {
+  /** The path in the zip. */
+  path: string;
+  group: ReportFileGroup;
+  /** What it holds (reportContents.about.<about>). */
+  about: string;
+  /** Bytes before compression. */
+  size: number;
+  /** Other mods' and tools' files only: the player may leave it out. */
+  excludable: boolean;
+  /** Left out: not in the zip. */
+  excluded: boolean;
+  /** How often each replacement stands in it: `{ home: 169, player: 3 }`. */
+  replaced: Record<string, number>;
+}
+/** kiln_manage::report::Contents: "What's in this report". */
+export interface ReportContents {
+  files: ReportContentsFile[];
+  /** All files in the zip together, before compression. */
+  size: number;
+  /** summary.txt ("View"). */
+  summary: string;
+  /** What a report never holds (reportContents.never.<id>; `text` is English). */
+  never: { id: string; text: string }[];
+}
+/** What the report would hold, built as report_save builds it; nothing is written. `exclude`: other mods' files left out. */
+export const reportPreview = (target: LogTarget | null, exclude: string[] = []) => call<ReportContents>("report_preview", { target, exclude });
 /** Writes the support report zip (logs, state files, profile, listings, summary.txt; names and paths replaced) to
- *  `path`. `target` null: the system and the launcher only. */
-export const reportSave = (target: LogTarget | null, path: string) => call<ReportSaved>("report_save", { target, path });
+ *  `path`. `target` null: the system and the launcher only. `exclude`: other mods' files the player left out. */
+export const reportSave = (target: LogTarget | null, path: string, exclude: string[] = []) => call<ReportSaved>("report_save", { target, path, exclude });
 /** A few lines for a forum post, redacted like the zip. */
 export const reportSummary = (target: LogTarget | null) => call<string>("report_summary", { target });
 
@@ -2254,7 +2284,7 @@ export const COMMANDS = [
   "chain_view", "chain_set_late", "shroudlink_notice",
   "found_scan", "found_add",
   "cook_plan", "cook_run", "boot_snapshot_run",
-  "report_save", "report_summary",
+  "report_save", "report_summary", "report_preview",
   "data_folder_get", "data_folder_size", "data_folder_check", "data_folder_move", "data_folder_use", "data_folder_reset",
   "data_folder_notice_ack", "data_folder_restart",
   "app_started", "app_render_set", "app_render_report",
@@ -2418,6 +2448,8 @@ export interface ReportPreview {
   limit: number;
   files: { path: string; size: number }[];
   known: KnownProblem | null;
+  /** "What's in this report": every file with its group and replacements, those left out, what is never in it. */
+  contents: ReportContents;
 }
 /** Rich Presence's words in the launcher's language (en.json community.presence.*). */
 export interface PresenceTexts { details: string; stateOne: string; stateOther: string; getKiln: string; joinDiscord: string }
@@ -2487,7 +2519,8 @@ export interface NotifyTexts { title: string; detail: string; open: string }
 /** What only the window knows: the mods on (the Play page's count; null when Rich Presence is off) and the words of
  *  Rich Presence and of the reply notification. */
 export const communityPresenceFacts = (mods: number | null, texts: PresenceTexts, notify?: NotifyTexts) => call<null>("community_presence_facts", { mods, texts, notify });
-export const communityReportPrepare = (target: LogTarget | null, from: SendFrom) => call<ReportPreview>("community_report_prepare", { target, from });
+/** `exclude`: other mods' files the player left out ("What's in this report"); each change prepares a new report. */
+export const communityReportPrepare = (target: LogTarget | null, from: SendFrom, exclude: string[] = []) => call<ReportPreview>("community_report_prepare", { target, from, exclude });
 export const communityReportSend = (prepared: string, draft: ReportDraft) => call<SupportPost>("community_report_send", { prepared, draft });
 export const testerStatus = () => call<TesterStatus>("tester_status");
 /** Sends the hardware tester_status showed and asks for the Tester role. */

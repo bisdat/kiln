@@ -3295,6 +3295,99 @@
     "title": "Addon client di shroudlink",
     "switchOn": "Attiva l'addon"
   },
+  "reportContents": {
+    "title": "Cosa c'è in questo report",
+    "intro": "Ogni file del report e cosa Kiln ci ha sostituito prima che qualcosa lasci il tuo PC. I log di Kiln restano sempre dentro: al supporto servono per capire cosa non ha funzionato. I log delle altre mod puoi escluderli.",
+    "total": {
+      "one": "{count} file, {size} prima della compressione",
+      "other": "{count} file, {size} prima della compressione"
+    },
+    "leftOutCount": {
+      "one": "{count} file escluso",
+      "other": "{count} file esclusi"
+    },
+    "failed": "Impossibile leggere il report",
+    "view": "Vedi summary.txt",
+    "hideSummary": "Nascondi summary.txt",
+    "viewTitle": "summary.txt",
+    "save": "Salva",
+    "leaveOut": "Escludi",
+    "leaveOutAll": "Escludi i log delle altre mod",
+    "leftOut": "Escluso",
+    "leftOutHint": "Escluso: non è nello zip.",
+    "included": "Incluso",
+    "include": "Rimetti",
+    "replaced": "Sostituito: {list}",
+    "item": "{what} ({times})",
+    "times": {
+      "one": "{count} volta",
+      "other": "{count} volte"
+    },
+    "sep": ", ",
+    "nothing": "Niente di personale trovato.",
+    "group": {
+      "kiln": "Log di Kiln",
+      "mods": "Log delle altre mod",
+      "settings": "Impostazioni",
+      "listings": "Elenchi delle cartelle"
+    },
+    "groupHint": {
+      "kiln": "Al supporto servono per capire cosa non ha funzionato, quindi restano sempre dentro.",
+      "mods": "Scritti da altre mod e strumenti. Kiln li ripulisce allo stesso modo, ma non può sapere tutto quello che scrive un'altra mod, quindi puoi escluderli.",
+      "settings": "Lo stato di Kiln e il tuo profilo: quali mod sono attive e cosa è successo all'ultimo avvio. Password e token vengono sostituiti.",
+      "listings": "Solo nomi, dimensioni e date di file e cartelle. Niente del loro contenuto."
+    },
+    "token": {
+      "home": "la tua cartella home",
+      "user": "il tuo nome utente",
+      "host": "il nome del tuo PC",
+      "steam-name": "nomi Steam",
+      "steamid": "ID Steam",
+      "player": "nomi dei giocatori",
+      "ip": "indirizzi IP",
+      "mac": "indirizzi della scheda di rete",
+      "email": "indirizzi email",
+      "redacted": "password, token e chiavi"
+    },
+    "about": {
+      "summary": "Il riepilogo: cosa ha trovato Kiln, il tuo sistema, il gioco e il tuo profilo",
+      "findings": "Cosa ha trovato Kiln, per gli strumenti del supporto",
+      "kiln-log": "Il log principale di Kiln dall'ultimo avvio del gioco",
+      "proxy-log": "Come Kiln è stato caricato nel gioco",
+      "eml-log": "Il log di Kiln per le mod EML",
+      "tick-stats": "Quanto è durato ogni passo del mondo, minuto per minuto",
+      "greeneye-bridge": "Il log di Kiln per le mod Greeneye",
+      "crash": "L'ultimo report di crash scritto da Kiln",
+      "launcher-log": "Il log del launcher stesso",
+      "game-start": "Cosa ha scritto il gioco quando il launcher l'ha avviato",
+      "kiln-other": "Uno dei log di Kiln",
+      "state": "Cosa ha visto Kiln all'ultimo avvio",
+      "profile": "Il tuo profilo: quali mod sono attive",
+      "chain": "Quali altri loader partono con il gioco",
+      "kiln-json": "Le impostazioni di Kiln nella cartella del gioco",
+      "receipt": "Quali file di Kiln sono installati, con i loro checksum",
+      "game-folder": "I nomi nella cartella del gioco",
+      "kiln-folder": "I nomi nella cartella di Kiln",
+      "mod-folders": "I nomi in ogni cartella delle mod",
+      "listing": "Un elenco di nomi di file",
+      "xhl-core": "Il log di XHL-Core",
+      "greeneye": "Il log di Greeneye Loader o di una mod Greeneye",
+      "building-tools": "Il log di Building Tools",
+      "shroudlink": "Il log di ShroudLink",
+      "auto-loot": "Il log di Auto Loot Plus",
+      "optiscaler-settings": "Le impostazioni di OptiScaler",
+      "optiscaler-log": "Il log di OptiScaler",
+      "mod-log": "Il log di un'altra mod"
+    },
+    "never": {
+      "title": "Mai in un report",
+      "saves": "I tuoi salvataggi e i tuoi mondi",
+      "settings": "Le impostazioni delle mod e la cartella di configurazione di Kiln (possono contenere password dei server)",
+      "admin": "Token e indirizzo di Kiln.Admin",
+      "mods": "Il contenuto delle tue mod (solo nomi, dimensioni e date dei file)",
+      "steam": "I file di Steam stesso"
+    }
+  },
   "supportReport": {
     "dialogTitle": "Salva un report di supporto",
     "saved": "Report salvato",

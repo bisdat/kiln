@@ -26,6 +26,8 @@ import type {
   SignInState, StepResult, SupportPost, TesterStatus, TestPlan, TestStep,
 } from "./commands";
 
+import { mockReportContents } from "./mockReport";
+
 type Handler = (args: Record<string, unknown>) => unknown;
 type Emit = (name: string, payload: unknown) => void;
 export interface CommunityMockDeps {
@@ -119,7 +121,8 @@ const KNOWN_CRASH: KnownProblem = {
 let preparedSeq = 0;
 const prepared = new Map<string, { from: SendFrom; tags: string[] }>();
 
-function preview(from: SendFrom): ReportPreview {
+function preview(from: SendFrom, exclude?: unknown): ReportPreview {
+  const contents = mockReportContents(exclude);
   const crash = from === "crash" || PROBLEM === "crash" || has("crash");
   const noKiln = from === "banner" || PROBLEM === "nokiln" || has("nokiln");
   const kindTags = { noload: "Mods", mod: "Mods", crash: "Crash", launcher: "Launcher", server: "Server", other: null };
@@ -142,14 +145,10 @@ function preview(from: SendFrom): ReportPreview {
     ],
     tags,
     kindTags,
-    size: has("toobig") ? 21_400_000 : 48_213,
+    size: has("toobig") ? 21_400_000 : Math.round(contents.size / 2.2),
     limit: 8 * 1024 * 1024,
-    files: [
-      { path: "summary.txt", size: 6_210 }, { path: "report.json", size: 1_904 }, { path: "game/kiln/logs/kiln.log", size: 22_408 },
-      { path: "game/kiln/logs/proxy.log", size: 3_115 }, { path: "game/kiln/state/boot.json", size: 2_877 }, { path: "game/kiln/profile.json", size: 1_442 },
-      { path: "game/kiln/crash-reports/2026-11-18T22-10-04Z-night-sky.txt", size: 4_211 }, { path: "launcher/launcher.log", size: 18_090 },
-      { path: "listings/game-folder.txt", size: 2_204 }, { path: "listings/mod-folders.txt", size: 3_980 },
-    ],
+    files: contents.files.filter((f) => !f.excluded).map((f) => ({ path: f.path, size: f.size })),
+    contents,
     known: noKiln ? KNOWN_NOKILN : crash || has("known") ? KNOWN_CRASH : null,
   };
 }
@@ -280,7 +279,7 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
     },
     community_steam_keyboard: () => null,
     community_presence_facts: (a) => { mods = typeof a.mods === "number" ? a.mods : null; return null; },
-    community_report_prepare: (a) => preview((a.from as SendFrom) ?? "community"),
+    community_report_prepare: (a) => preview((a.from as SendFrom) ?? "community", a.exclude),
     community_report_send: (a) => {
       const d = a.draft as ReportDraft;
       const p = prepared.get(String(a.prepared));
