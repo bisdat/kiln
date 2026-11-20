@@ -47,18 +47,12 @@ public readonly record struct RegistryId
     /// <inheritdoc/>
     public override string ToString() => Value ?? "";
 
-    internal static bool IsValid(string? s)
-    {
-        if (string.IsNullOrEmpty(s) || s.Length > 256)
-            return false;
-        int colon = s.IndexOf(':');
-        if (colon <= 0 || colon == s.Length - 1 || s.IndexOf(':', colon + 1) >= 0)
-            return false;
-        foreach (char c in s)
-            if (!(c is >= 'a' and <= 'z' || c is >= '0' and <= '9' || c is '_' or '-' or '.' or ':' or '~'))
-                return false;
-        return true;
-    }
+    // The one id grammar (tools/registrygen KILN_ID, native regmap.cpp is_kiln_id, the data section's schema):
+    // <namespace>:<name>; namespace [a-z0-9][a-z0-9_.-]*, name [a-z0-9_.-]+, then optionally a clash suffix ~<8 to 32 hex>.
+    private static readonly System.Text.RegularExpressions.Regex s_grammar =
+        new("^[a-z0-9][a-z0-9_.-]*:[a-z0-9_.-]+(~[0-9a-f]{8,32})?$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    internal static bool IsValid(string? s) => !string.IsNullOrEmpty(s) && s.Length <= 256 && s_grammar.IsMatch(s);
 }
 
 /// <summary>An entry of a registry (ItemEntry, RecipeEntry, ...).</summary>
@@ -127,6 +121,8 @@ public enum RegistryOps
     Number,
     /// <summary>List operations: clear, append, remove, replace.</summary>
     List,
+    /// <summary>A list of fixed length: one element at a time (<c>xpPerLevel[2]</c>) with a value or a number operation.</summary>
+    Indexed,
 }
 
 /// <summary>One field of a registry schema (Kiln names only): what <see cref="RegistrySchema"/> lists.</summary>
@@ -135,8 +131,12 @@ public sealed class RegistryFieldSpec
 {
     internal RegistryFieldSpec(int id, string field, RegistryFieldType type, RegistryFieldType? element, RegistryApplies applies,
         RegistryOps ops, double? min, double? max, int maxItems, string[]? values, string? reference, string? unit, string? formula,
-        bool readOnly, string since)
+        bool readOnly, bool optional, int fixedLength, string? lengthField, int lengthOffset, string since)
     {
+        Optional = optional;
+        FixedLength = fixedLength;
+        LengthField = lengthField;
+        LengthOffset = lengthOffset;
         Id = id;
         Field = field;
         Type = type;
@@ -188,6 +188,14 @@ public sealed class RegistryFieldSpec
     public bool ReadOnly { get; }
     /// <summary>The schema version that published it.</summary>
     public string Since { get; }
+    /// <summary>A ref that may be absent (null clears it).</summary>
+    public bool Optional { get; }
+    /// <summary>A list of exactly this many elements (0: not fixed, or see <see cref="LengthField"/>).</summary>
+    public int FixedLength { get; }
+    /// <summary>A list as long as this field's value plus <see cref="LengthOffset"/> (null: none).</summary>
+    public string? LengthField { get; }
+    /// <summary>See <see cref="LengthField"/>.</summary>
+    public int LengthOffset { get; }
 
     /// <inheritdoc/>
     public override string ToString() => $"{Field} ({Type}, {Applies})";

@@ -3,7 +3,7 @@
   "registrySchema": 1,
   "registry": "loot",
   "typeName": "ItemLoot",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "stability": "experimental",
   "experimentalId": "KILNX031",
   "doc": "How an item drops as random loot: its stack size and its rarities. One entry per item that can drop.",

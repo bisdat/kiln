@@ -1,443 +1,1076 @@
 {
   "format": 1,
-  "doc": "Every registry and field name Kiln's registry schemas have published, with the version that published it and its numeric id (schema.g.h's field ids). Names and ids are never reused: a field that leaves its schema moves to \"retired\" (registrygen.py retire). Written by tools/registrygen/registrygen.py lock; never edit an id by hand.",
+  "doc": "Every registry and field name Kiln's registry schemas have published, with its numeric id (schema.g.h's field ids), the version that published it and its contract (kind, applies, ops, read-only, range, values), and each registry's version history. Names and ids are never reused: a field that leaves its schema moves to \"retired\" (registrygen.py retire, only in a breaking step). Within one breaking line (0.<minor> while experimental, <major> from 1.0.0) a field may only be added, widen its range, append enum values or apply earlier; anything else needs the next breaking version and schema/registry/migrations/<registry>-<from>-<to>.json. Written by tools/registrygen/registrygen.py lock; never edit it by hand.",
   "registries": {
     "items": {
       "id": 1,
-      "version": "1.0.0",
-      "since": "1.0.0",
+      "version": "0.1.0",
+      "since": "0.1.0",
+      "history": [
+        {
+          "version": "0.1.0"
+        }
+      ],
       "fields": {
         "maxStack": {
           "id": 1,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "worldLoad",
+          "ops": "number",
+          "readOnly": false,
+          "min": 1,
+          "max": 65535
         },
         "rarity": {
           "id": 2,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "enum",
+          "applies": "now",
+          "ops": "set",
+          "readOnly": false,
+          "values": [
+            "common",
+            "uncommon",
+            "rare",
+            "epic",
+            "legendary"
+          ]
         },
         "rolled": {
           "id": 3,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "bool",
+          "applies": "now",
+          "ops": "set",
+          "readOnly": false
         },
         "levels.min": {
           "id": 4,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 1,
+          "max": 105
         },
         "levels.max": {
           "id": 5,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 1,
+          "max": 105
         },
         "socket": {
           "id": 6,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "bool",
+          "applies": "now",
+          "ops": "set",
+          "readOnly": false
         },
         "perks": {
           "id": 7,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "list",
+          "applies": "now",
+          "ops": "list",
+          "readOnly": false,
+          "element": "ref",
+          "maxItems": 5
         },
         "power": {
           "id": 8,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "speed": {
           "id": 9,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0.01,
+          "max": 100
         },
         "hasDamage": {
           "id": 10,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "bool",
+          "applies": "now",
+          "ops": "none",
+          "readOnly": true
         },
         "damage.cut": {
           "id": 11,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 10
         },
         "damage.pierce": {
           "id": 12,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 10
         },
         "damage.blunt": {
           "id": 13,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 10
         },
         "damage.fire": {
           "id": 14,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 10
         },
         "damage.ice": {
           "id": 15,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 10
         },
         "damage.shroud": {
           "id": 16,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 10
         },
         "damage.lightning": {
           "id": 17,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 10
         },
         "damage.poison": {
           "id": 18,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 10
         },
         "damage.healing": {
           "id": 19,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 10
         },
         "damage.wood": {
           "id": 20,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1000000
         },
         "damage.stone": {
           "id": 21,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1000000
         },
         "damage.metal": {
           "id": 22,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1000000
         },
         "damage.explosion": {
           "id": 23,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1000000
         },
         "hasArmor": {
           "id": 24,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "bool",
+          "applies": "now",
+          "ops": "none",
+          "readOnly": true
         },
         "armor.physical": {
           "id": 25,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "armor.magical": {
           "id": 26,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "armor.cut": {
           "id": 27,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "armor.pierce": {
           "id": 28,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "armor.blunt": {
           "id": 29,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "armor.fire": {
           "id": 30,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "armor.ice": {
           "id": 31,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "armor.shroud": {
           "id": 32,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "armor.lightning": {
           "id": 33,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "block": {
           "id": 34,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "worldLoad",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1
         },
         "staminaCost": {
           "id": 35,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "manaCost": {
           "id": 36,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "fuel.burnTime": {
           "id": 37,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "time",
+          "applies": "worldLoad",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 86400
         },
         "comfort": {
           "id": 38,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "worldLoad",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1000
         }
       },
       "retired": {}
     },
     "recipes": {
       "id": 2,
-      "version": "1.0.0",
-      "since": "1.0.0",
+      "version": "0.1.0",
+      "since": "0.1.0",
+      "history": [
+        {
+          "version": "0.1.0"
+        }
+      ],
       "fields": {
         "inputs": {
           "id": 1,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "list",
+          "applies": "now",
+          "ops": "list",
+          "readOnly": false,
+          "element": "struct",
+          "maxItems": 32
         },
         "inputs[].item": {
           "id": 2,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "ref",
+          "applies": "now",
+          "ops": "set",
+          "readOnly": false,
+          "optional": true
         },
         "inputs[].category": {
           "id": 3,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "ref",
+          "applies": "now",
+          "ops": "set",
+          "readOnly": false,
+          "optional": true
         },
         "inputs[].count": {
           "id": 4,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 1,
+          "max": 65535
         },
         "outputs": {
           "id": 5,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "list",
+          "applies": "now",
+          "ops": "list",
+          "readOnly": false,
+          "element": "struct",
+          "maxItems": 32
         },
         "outputs[].item": {
           "id": 6,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "ref",
+          "applies": "now",
+          "ops": "set",
+          "readOnly": false
         },
         "outputs[].count": {
           "id": 7,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 1,
+          "max": 65535
         },
         "duration": {
           "id": 8,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "time",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 86400
         },
         "unlock": {
           "id": 9,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "enum",
+          "applies": "now",
+          "ops": "set",
+          "readOnly": false,
+          "values": [
+            "game",
+            "always"
+          ]
         },
         "station": {
           "id": 10,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "ref",
+          "applies": "restart",
+          "ops": "none",
+          "readOnly": true
         }
       },
       "retired": {}
     },
     "loot": {
       "id": 3,
-      "version": "1.0.0",
-      "since": "1.0.0",
+      "version": "0.1.0",
+      "since": "0.1.0",
+      "history": [
+        {
+          "version": "0.1.0"
+        }
+      ],
       "fields": {
         "stack.min": {
           "id": 1,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 65535
         },
         "stack.max": {
           "id": 2,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 65535
         },
         "stack.scalable": {
           "id": 3,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "bool",
+          "applies": "now",
+          "ops": "set",
+          "readOnly": false
         },
         "stack.maxScaled": {
           "id": 4,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 65535
         },
         "rarities": {
           "id": 5,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "flags",
+          "applies": "now",
+          "ops": "set",
+          "readOnly": false,
+          "values": [
+            "common",
+            "uncommon",
+            "rare",
+            "epic",
+            "legendary"
+          ]
         },
         "fixedRarity": {
           "id": 6,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "enum",
+          "applies": "now",
+          "ops": "set",
+          "readOnly": false,
+          "values": [
+            "none",
+            "common",
+            "uncommon",
+            "rare",
+            "epic",
+            "legendary"
+          ]
         }
       },
       "retired": {}
     },
     "drops": {
       "id": 4,
-      "version": "1.0.0",
-      "since": "1.0.0",
+      "version": "0.1.0",
+      "since": "0.1.0",
+      "history": [
+        {
+          "version": "0.1.0"
+        }
+      ],
       "fields": {
         "entries": {
           "id": 1,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "list",
+          "applies": "now",
+          "ops": "list",
+          "readOnly": false,
+          "element": "struct",
+          "maxItems": 4096
         },
         "entries[].item": {
           "id": 2,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "ref",
+          "applies": "now",
+          "ops": "none",
+          "readOnly": true
         },
         "entries[].count.min": {
           "id": 3,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1000000
         },
         "entries[].count.max": {
           "id": 4,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1000000
         },
         "entries[].chance": {
           "id": 5,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1
         },
         "entries[].weight": {
           "id": 6,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "now",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1000000
         }
       },
       "retired": {}
     },
     "balance": {
       "id": 5,
-      "version": "1.0.0",
-      "since": "1.0.0",
+      "version": "0.1.0",
+      "since": "0.1.0",
+      "history": [
+        {
+          "version": "0.1.0"
+        }
+      ],
       "fields": {
         "xpPerLevel": {
           "id": 1,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "list",
+          "applies": "restart",
+          "ops": "indexed",
+          "readOnly": false,
+          "element": "int",
+          "min": 0,
+          "max": 100000000,
+          "fixedLength": 5
         },
         "xpCurve.start": {
           "id": 2,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000000
         },
         "xpCurve.end": {
           "id": 3,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000000
         },
         "xpCurve.levelMax": {
           "id": 4,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 1,
+          "max": 100000
         },
         "xpCurve.seed": {
           "id": 5,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000000
         },
         "xpCurve.fromKnowledge": {
           "id": 6,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000000
         },
         "levelCap": {
           "id": 7,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 1,
+          "max": 1000
         },
         "skillPointsPerLevel": {
           "id": 8,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1000
         },
         "flameLevelMax": {
           "id": 9,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "restart",
+          "ops": "none",
+          "readOnly": true,
+          "min": 0,
+          "max": 1000
         },
         "altarsPerFlameLevel": {
           "id": 10,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "list",
+          "applies": "restart",
+          "ops": "indexed",
+          "readOnly": false,
+          "element": "int",
+          "min": 0,
+          "max": 16,
+          "lengthField": "flameLevelMax",
+          "lengthOffset": 1
         },
         "waterSourcesPerFlameLevel": {
           "id": 11,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "list",
+          "applies": "restart",
+          "ops": "indexed",
+          "readOnly": false,
+          "element": "int",
+          "min": 0,
+          "max": 255,
+          "lengthField": "flameLevelMax",
+          "lengthOffset": 1
         },
         "buildzoneSizesPerAltarLevel": {
           "id": 12,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "list",
+          "applies": "restart",
+          "ops": "list",
+          "readOnly": false,
+          "element": "struct",
+          "maxItems": 1001
         },
         "buildzoneSizesPerAltarLevel[].x": {
           "id": 13,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "buildzoneSizesPerAltarLevel[].y": {
           "id": 14,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "buildzoneSizesPerAltarLevel[].z": {
           "id": 15,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "fogResistance.base": {
           "id": 16,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "fogResistance.perFlameLevel": {
           "id": 17,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "durability.start": {
           "id": 18,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1000000
         },
         "durability.growth": {
           "id": 19,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1000000
         },
         "rarityDurability.common": {
           "id": 20,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100
         },
         "rarityDurability.uncommon": {
           "id": 21,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100
         },
         "rarityDurability.rare": {
           "id": 22,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100
         },
         "rarityDurability.epic": {
           "id": 23,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100
         },
         "rarityDurability.legendary": {
           "id": 24,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100
         },
         "socketChance.common": {
           "id": 25,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1
         },
         "socketChance.uncommon": {
           "id": 26,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1
         },
         "socketChance.rare": {
           "id": 27,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1
         },
         "socketChance.epic": {
           "id": 28,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1
         },
         "socketChance.legendary": {
           "id": 29,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 1
         },
         "unlockCost.seed": {
           "id": 30,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "unlockCost.creep": {
           "id": 31,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100
         },
         "unlockCost.weapons": {
           "id": 32,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100
         },
         "unlockCost.armor": {
           "id": 33,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100
         },
         "unlockCost.rings": {
           "id": 34,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100
         },
         "unlockCost.advanced": {
           "id": 35,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 100000
         },
         "unlockCost.advancedFrom": {
           "id": 36,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "int",
+          "applies": "restart",
+          "ops": "number",
+          "readOnly": false,
+          "min": 0,
+          "max": 5
         },
         "gear.seed": {
           "id": 37,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "none",
+          "readOnly": true,
+          "min": 0,
+          "max": 100000
         },
         "gear.creep": {
           "id": 38,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "none",
+          "readOnly": true,
+          "min": 0,
+          "max": 100
         },
         "gear.armorOffset": {
           "id": 39,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "none",
+          "readOnly": true,
+          "min": 0,
+          "max": 100000
         },
         "gear.armorGradient": {
           "id": 40,
-          "since": "1.0.0"
+          "since": "0.1.0",
+          "kind": "float",
+          "applies": "restart",
+          "ops": "none",
+          "readOnly": true,
+          "min": 0,
+          "max": 100000
         }
       },
       "retired": {}

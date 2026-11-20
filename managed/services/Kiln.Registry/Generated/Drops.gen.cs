@@ -19,7 +19,7 @@ public sealed partial class DropTableEntry : IRegistryEntry
 
     /// <summary>The table's stacks in walk order (root group first, then its groups). Index i in a field path (entries[3].chance) is that order.</summary>
     [RegistryField("drops.entries", RegistryApplies.Now)]
-    public RegistryList<DropEntry> Entries => new(_c, DropTableFields.Entries, static (c, i) => new DropEntry(c, i));
+    public RegistryEntryList<DropEntry> Entries => new(_c, DropTableFields.Entries, static (c, i) => new DropEntry(c, i), static (c, i) => RegistryCells.Snapshot(c, i, DropTableFields.EntriesElement));
 }
 
 [global::System.Diagnostics.CodeAnalysis.Experimental("KILNX031", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/registries/drops.md")]
@@ -70,4 +70,5 @@ internal static class DropTableFields
     internal const int EntriesCountMax = 0x00040004;
     internal const int EntriesChance = 0x00040005;
     internal const int EntriesWeight = 0x00040006;
+    internal static readonly (string Field, int Id)[] EntriesElement = { ("item", EntriesItem), ("count.min", EntriesCountMin), ("count.max", EntriesCountMax), ("chance", EntriesChance), ("weight", EntriesWeight) };
 }

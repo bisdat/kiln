@@ -35,7 +35,7 @@ internal sealed class FakeCells : IRegistryCells
         {
             RegistryListOp.Clear => 0,
             RegistryListOp.Append => n + values.Count,
-            RegistryListOp.RemoveAt => n - 1,
+            RegistryListOp.Remove => n - values.Count,
             _ => values.Count,
         };
     }
@@ -43,6 +43,7 @@ internal sealed class FakeCells : IRegistryCells
     private static string Show(object? v) => v switch
     {
         null => "null",
+        IReadOnlyDictionary<string, object?> d => "{" + string.Join(", ", d.Select(kv => kv.Key + ": " + Show(kv.Value))) + "}",
         string[] a => "{" + string.Join("|", a) + "}",
         double d => d.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
         _ => v.ToString() ?? "",
@@ -73,6 +74,15 @@ public class RegistryTests
             Assert.Single(props!);
             Assert.Equal(f.Applies, props![0].Attr.Applies);
             Assert.Equal(f.ReadOnly || f.Type == RegistryFieldType.List, props[0].Prop.SetMethod is null);
+            if (f.Type == RegistryFieldType.List)
+            {
+                var gen = props[0].Prop.PropertyType.GetGenericTypeDefinition();
+                var want = f.Ops == RegistryOps.Indexed ? typeof(RegistryFixedList<>)
+                    : f.Element == RegistryFieldType.Struct ? typeof(RegistryEntryList<>) : typeof(RegistryValueList<>);
+                Assert.True(f.ReadOnly || gen == want, $"{f.Field} is a {gen.Name}, not a {want.Name}");
+            }
+            if (f.Type == RegistryFieldType.Ref)
+                Assert.Equal(f.Optional, props[0].Prop.PropertyType == typeof(RegistryId?));
         }
         Assert.Equal(RegistrySchema.Fields.Count, byField.Count);
     }
@@ -169,7 +179,7 @@ public class RegistryTests
     }
 
     [Fact]
-    public void ListsRecordListEdits()
+    public void ListsRecordEditsByValue()
     {
         var c = new FakeCells();
         var recipe = new RecipeEntry(RegistryId.Game("ammo_arrow_t1_flint"), c);
@@ -178,18 +188,64 @@ public class RegistryTests
         input.Count = 2;
         Assert.Equal(0, input.Index);
         Assert.Equal(1, recipe.Inputs.Count);
+        Assert.Equal(1, recipe.Inputs.RemoveWhere(x => x.Item == RegistryId.Game("material_t1_wood_logs")));
         var item = new ItemEntry(RegistryId.Game("weapon_x"), c);
         item.Perks.Append(new RegistryId("game:perk_fire"));
+        item.Perks.Remove(new RegistryId("game:perk_fire"));
         item.Perks.Clear();
         Assert.Equal(new[]
         {
             $"Append {RecipeFields.Inputs:x8} [null]",
             $"set {RecipeFields.InputsItem:x8}[0] = game:material_t1_wood_logs",
             $"set {RecipeFields.InputsCount:x8}[0] = 2",
+            $"Remove {RecipeFields.Inputs:x8} [{{category: null, count: 2, item: game:material_t1_wood_logs}}]",
             $"Append {ItemFields.Perks:x8} [game:perk_fire]",
+            $"Remove {ItemFields.Perks:x8} [game:perk_fire]",
             $"Clear {ItemFields.Perks:x8} []",
         }, c.Edits);
         Assert.Throws<ArgumentOutOfRangeException>(() => recipe.Inputs[5]);
+    }
+
+    [Fact]
+    public void OnlyComposableListEditsExist()
+    {
+        // no edit by index; values are appended to value lists, blank entries to entry lists
+        foreach (var t in new[] { typeof(RegistryValueList<>), typeof(RegistryEntryList<>), typeof(RegistryFixedList<>) })
+            Assert.DoesNotContain(t.GetMethods(), m => m.Name is "RemoveAt" or "Insert");
+        Assert.DoesNotContain(typeof(RegistryValueList<>).GetMethods(), m => m.Name == "AppendNew");
+        Assert.DoesNotContain(typeof(RegistryEntryList<>).GetMethods(), m => m.Name is "Append" or "Replace");
+        Assert.DoesNotContain(typeof(RegistryFixedList<>).GetMethods(), m => m.Name is "Append" or "AppendNew" or "Clear" or "Remove" or "Replace");
+    }
+
+    [Fact]
+    public void OptionalRefsClear()
+    {
+        var c = new FakeCells();
+        var recipe = new RecipeEntry(RegistryId.Game("x"), c);
+        var input = recipe.Inputs.AppendNew();
+        input.Category = RegistryId.Game("wood");
+        input.Item = null;
+        Assert.Null(input.Item);
+        Assert.Equal(RegistryId.Game("wood"), input.Category);
+        Assert.Equal($"set {RecipeFields.InputsItem:x8}[0] = null", c.Edits.Last());
+        Assert.False(RegistrySchema.Find("recipes.outputs[].item")!.Optional);
+        Assert.True(RegistrySchema.Find("recipes.inputs[].category")!.Optional);
+    }
+
+    [Fact]
+    public void FixedListsAreSetPerElement()
+    {
+        var c = new FakeCells();
+        c.Counts[BalanceFields.XpPerLevel] = 5;
+        var b = new BalanceEntry(RegistryId.Game("balance"), c);
+        b.XpPerLevel[2] = 1500;
+        Assert.Equal(1500, b.XpPerLevel[2]);
+        Assert.Equal($"set {BalanceFields.XpPerLevel:x8}[2] = 1500", c.Edits.Single());
+        Assert.Throws<ArgumentOutOfRangeException>(() => b.XpPerLevel[5] = 1);
+        Assert.Equal(5, RegistrySchema.Find("balance.xpPerLevel")!.FixedLength);
+        Assert.Equal("flameLevelMax", RegistrySchema.Find("balance.altarsPerFlameLevel")!.LengthField);
+        Assert.Equal(RegistryOps.Indexed, RegistrySchema.Find("balance.altarsPerFlameLevel")!.Ops);
+        Assert.True(RegistrySchema.Find("balance.flameLevelMax")!.ReadOnly);
     }
 
     [Fact]
@@ -217,6 +273,7 @@ public class RegistryTests
     [InlineData("game:material_t1_wood_logs", true, "game", "material_t1_wood_logs")]
     [InlineData("bigstacks:crate", false, "bigstacks", "crate")]
     [InlineData("game:template_x~1a2b3c4d", true, "game", "template_x~1a2b3c4d")]
+    [InlineData("game:_hidden_thing", true, "game", "_hidden_thing")]
     public void Ids(string text, bool game, string mod, string name)
     {
         Assert.True(RegistryId.TryParse(text, out var id));
@@ -233,6 +290,11 @@ public class RegistryTests
     [InlineData("game:")]
     [InlineData(":x")]
     [InlineData("a:b:c")]
+    [InlineData("game:x~zz")]
+    [InlineData("game:x~1a2b")]
+    [InlineData("game:a b")]
+    [InlineData("game:x~1a2b3c4d~1a2b3c4d")]
+    [InlineData("_mod:x")]
     public void BadIds(string text)
     {
         Assert.False(RegistryId.TryParse(text, out _));

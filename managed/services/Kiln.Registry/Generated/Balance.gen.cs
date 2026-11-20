@@ -17,11 +17,11 @@ public sealed partial class BalanceEntry : IRegistryEntry
     /// <summary>The registry's name.</summary>
     public string Registry => "balance";
 
-    /// <summary>The experience levels 1 to 5 need (later levels follow xpCurve). Exactly 5 values; set one with xpPerLevel[i].</summary>
+    /// <summary>The experience levels 1 to 5 need (later levels follow xpCurve). Exactly 5 values, edited one at a time (xpPerLevel[i]).</summary>
     [RegistryField("balance.xpPerLevel", RegistryApplies.Restart)]
-    public RegistryList<int> XpPerLevel => new(_c, BalanceFields.XpPerLevel, static (c, i) => RegistryCells.Int(c, BalanceFields.XpPerLevel, i));
+    public RegistryFixedList<int> XpPerLevel => new(_c, BalanceFields.XpPerLevel, static (c, i) => RegistryCells.Int(c, BalanceFields.XpPerLevel, i), static (c, i, v) => RegistryCells.Set(c, BalanceFields.XpPerLevel, i, v));
 
-    /// <summary>The experience curve from level 6: need = round((start + (end - start) * level / levelMax) * seed * 1.5 + fromKnowledge).</summary>
+    /// <summary>The experience a level from 6 needs: base = min(start, end) + |end - start| * level / levelMax; need = round(base * seed * 1.5 + fromKnowledge).</summary>
     public BalanceXpCurve XpCurve => new(_c, _i);
 
     /// <summary>The highest player level.</summary>
@@ -32,21 +32,21 @@ public sealed partial class BalanceEntry : IRegistryEntry
     [RegistryField("balance.skillPointsPerLevel", RegistryApplies.Restart)]
     public int SkillPointsPerLevel { get => RegistryCells.Int(_c, BalanceFields.SkillPointsPerLevel, _i); set => RegistryCells.Set(_c, BalanceFields.SkillPointsPerLevel, _i, value); }
 
-    /// <summary>The highest flame level. The per-flame-level lists need flameLevelMax + 1 values.</summary>
+    /// <summary>The highest flame level. Read-only in this version: the per-flame-level lists are exactly flameLevelMax + 1 long.</summary>
     [RegistryField("balance.flameLevelMax", RegistryApplies.Restart)]
-    public int FlameLevelMax { get => RegistryCells.Int(_c, BalanceFields.FlameLevelMax, _i); set => RegistryCells.Set(_c, BalanceFields.FlameLevelMax, _i, value); }
+    public int FlameLevelMax => RegistryCells.Int(_c, BalanceFields.FlameLevelMax, _i);
 
-    /// <summary>Flame altars allowed at each flame level (the game's code stops at 16).</summary>
+    /// <summary>Flame altars allowed at each flame level, one value per level from 0 to flameLevelMax (the game's code stops at 16). Edited one level at a time (altarsPerFlameLevel[i]).</summary>
     [RegistryField("balance.altarsPerFlameLevel", RegistryApplies.Restart)]
-    public RegistryList<int> AltarsPerFlameLevel => new(_c, BalanceFields.AltarsPerFlameLevel, static (c, i) => RegistryCells.Int(c, BalanceFields.AltarsPerFlameLevel, i));
+    public RegistryFixedList<int> AltarsPerFlameLevel => new(_c, BalanceFields.AltarsPerFlameLevel, static (c, i) => RegistryCells.Int(c, BalanceFields.AltarsPerFlameLevel, i), static (c, i, v) => RegistryCells.Set(c, BalanceFields.AltarsPerFlameLevel, i, v));
 
-    /// <summary>Water sources allowed at each flame level.</summary>
+    /// <summary>Water sources allowed at each flame level, one value per level from 0 to flameLevelMax. Edited one level at a time.</summary>
     [RegistryField("balance.waterSourcesPerFlameLevel", RegistryApplies.Restart)]
-    public RegistryList<int> WaterSourcesPerFlameLevel => new(_c, BalanceFields.WaterSourcesPerFlameLevel, static (c, i) => RegistryCells.Int(c, BalanceFields.WaterSourcesPerFlameLevel, i));
+    public RegistryFixedList<int> WaterSourcesPerFlameLevel => new(_c, BalanceFields.WaterSourcesPerFlameLevel, static (c, i) => RegistryCells.Int(c, BalanceFields.WaterSourcesPerFlameLevel, i), static (c, i, v) => RegistryCells.Set(c, BalanceFields.WaterSourcesPerFlameLevel, i, v));
 
     /// <summary>The size of an altar's build zone at each altar level, in metres.</summary>
     [RegistryField("balance.buildzoneSizesPerAltarLevel", RegistryApplies.Restart)]
-    public RegistryList<BalanceZoneSize> BuildzoneSizesPerAltarLevel => new(_c, BalanceFields.BuildzoneSizesPerAltarLevel, static (c, i) => new BalanceZoneSize(c, i));
+    public RegistryEntryList<BalanceZoneSize> BuildzoneSizesPerAltarLevel => new(_c, BalanceFields.BuildzoneSizesPerAltarLevel, static (c, i) => new BalanceZoneSize(c, i), static (c, i) => RegistryCells.Snapshot(c, i, BalanceFields.BuildzoneSizesPerAltarLevelElement));
 
     /// <summary>A player's shroud time.</summary>
     public BalanceFogResistance FogResistance => new(_c, _i);
@@ -88,7 +88,7 @@ public sealed partial class BalanceZoneSize
     public double Z { get => RegistryCells.Double(_c, BalanceFields.BuildzoneSizesPerAltarLevelZ, _i); set => RegistryCells.Set(_c, BalanceFields.BuildzoneSizesPerAltarLevelZ, _i, value); }
 }
 
-/// <summary>The experience curve from level 6: need = round((start + (end - start) * level / levelMax) * seed * 1.5 + fromKnowledge).</summary>
+/// <summary>The experience a level from 6 needs: base = min(start, end) + |end - start| * level / levelMax; need = round(base * seed * 1.5 + fromKnowledge).</summary>
 [global::System.Diagnostics.CodeAnalysis.Experimental("KILNX031", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/registries/balance.md")]
 public sealed partial class BalanceXpCurve
 {
@@ -283,4 +283,5 @@ internal static class BalanceFields
     internal const int GearCreep = 0x00050026;
     internal const int GearArmorOffset = 0x00050027;
     internal const int GearArmorGradient = 0x00050028;
+    internal static readonly (string Field, int Id)[] BuildzoneSizesPerAltarLevelElement = { ("x", BuildzoneSizesPerAltarLevelX), ("y", BuildzoneSizesPerAltarLevelY), ("z", BuildzoneSizesPerAltarLevelZ) };
 }

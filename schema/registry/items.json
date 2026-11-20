@@ -3,7 +3,7 @@
   "registrySchema": 1,
   "registry": "items",
   "typeName": "Item",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "stability": "experimental",
   "experimentalId": "KILNX031",
   "doc": "Every item the game or a mod defines: stack sizes, rarity, levels, the gear numbers a tooltip shows (power, speed, damage, armour), costs, perks and sockets.",
@@ -267,9 +267,9 @@
       "type": "float",
       "min": 0,
       "max": 1,
-      "applies": "now",
+      "applies": "worldLoad",
       "ops": "number",
-      "doc": "How well the item blocks (0 to 1)."
+      "doc": "How well the item blocks (0 to 1). When the game reads it is not traced yet: unproven until a Kiln update maps it."
     },
     "staminaCost": {
       "type": "float",

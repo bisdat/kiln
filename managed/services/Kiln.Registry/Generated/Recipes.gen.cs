@@ -19,11 +19,11 @@ public sealed partial class RecipeEntry : IRegistryEntry
 
     /// <summary>What one craft takes: an item or an input category, and a count.</summary>
     [RegistryField("recipes.inputs", RegistryApplies.Now)]
-    public RegistryList<RecipeInput> Inputs => new(_c, RecipeFields.Inputs, static (c, i) => new RecipeInput(c, i));
+    public RegistryEntryList<RecipeInput> Inputs => new(_c, RecipeFields.Inputs, static (c, i) => new RecipeInput(c, i), static (c, i) => RegistryCells.Snapshot(c, i, RecipeFields.InputsElement));
 
     /// <summary>What one craft makes.</summary>
     [RegistryField("recipes.outputs", RegistryApplies.Now)]
-    public RegistryList<RecipeOutput> Outputs => new(_c, RecipeFields.Outputs, static (c, i) => new RecipeOutput(c, i));
+    public RegistryEntryList<RecipeOutput> Outputs => new(_c, RecipeFields.Outputs, static (c, i) => new RecipeOutput(c, i), static (c, i) => RegistryCells.Snapshot(c, i, RecipeFields.OutputsElement));
 
     /// <summary>How long a station takes for one craft.</summary>
     [RegistryField("recipes.duration", RegistryApplies.Now)]
@@ -49,13 +49,13 @@ public sealed partial class RecipeInput
     /// <summary>The element's index in its list.</summary>
     public int Index => _i;
 
-    /// <summary>The item (or category).</summary>
+    /// <summary>The item; absent when the input is a category.</summary>
     [RegistryField("recipes.inputs[].item", RegistryApplies.Now)]
-    public RegistryId Item { get => RegistryCells.Id(_c, RecipeFields.InputsItem, _i); set => RegistryCells.Set(_c, RecipeFields.InputsItem, _i, value); }
+    public RegistryId? Item { get => RegistryCells.OptionalId(_c, RecipeFields.InputsItem, _i); set => RegistryCells.SetOptional(_c, RecipeFields.InputsItem, _i, value); }
 
-    /// <summary>An input category (any item of it); instead of item.</summary>
+    /// <summary>An input category (any item of it); absent when the input is an item.</summary>
     [RegistryField("recipes.inputs[].category", RegistryApplies.Now)]
-    public RegistryId Category { get => RegistryCells.Id(_c, RecipeFields.InputsCategory, _i); set => RegistryCells.Set(_c, RecipeFields.InputsCategory, _i, value); }
+    public RegistryId? Category { get => RegistryCells.OptionalId(_c, RecipeFields.InputsCategory, _i); set => RegistryCells.SetOptional(_c, RecipeFields.InputsCategory, _i, value); }
 
     [RegistryField("recipes.inputs[].count", RegistryApplies.Now)]
     public int Count { get => RegistryCells.Int(_c, RecipeFields.InputsCount, _i); set => RegistryCells.Set(_c, RecipeFields.InputsCount, _i, value); }
@@ -106,4 +106,6 @@ internal static class RecipeFields
     internal const int Duration = 0x00020008;
     internal const int Unlock = 0x00020009;
     internal const int Station = 0x0002000a;
+    internal static readonly (string Field, int Id)[] InputsElement = { ("item", InputsItem), ("category", InputsCategory), ("count", InputsCount) };
+    internal static readonly (string Field, int Id)[] OutputsElement = { ("item", OutputsItem), ("count", OutputsCount) };
 }

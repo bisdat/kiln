@@ -3,7 +3,7 @@
   "registrySchema": 1,
   "registry": "recipes",
   "typeName": "Recipe",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "stability": "experimental",
   "experimentalId": "KILNX031",
   "doc": "Every crafting recipe: what it takes, what it makes and how long it takes.",
@@ -29,14 +29,16 @@
           "item": {
             "type": "ref",
             "registry": "items",
-            "doc": "The item (or category).",
-            "ops": "set"
+            "doc": "The item; absent when the input is a category.",
+            "ops": "set",
+            "optional": true
           },
           "category": {
             "type": "ref",
             "registry": "inputCategories",
-            "doc": "An input category (any item of it); instead of item.",
-            "ops": "set"
+            "doc": "An input category (any item of it); absent when the input is an item.",
+            "ops": "set",
+            "optional": true
           },
           "count": {
             "type": "int",

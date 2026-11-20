@@ -6,6 +6,7 @@
 """
 import copy
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -19,7 +20,7 @@ sys.path.insert(0, str(HERE.parent))
 import registrygen as rg  # noqa: E402
 
 MINI = {
-    "registrySchema": 1, "registry": "things", "typeName": "Thing", "version": "1.0.0",
+    "registrySchema": 1, "registry": "things", "typeName": "Thing", "version": "0.1.0",
     "stability": "experimental", "experimentalId": "KILNX031", "doc": "Test things.",
     "ids": {"game": "game:<stable name>", "mod": "<mod id>:<name>", "rule": "Lower-case debug names."},
     "traits": {},
@@ -36,6 +37,12 @@ MINI = {
     "entry": {"add": True, "remove": "hidden"},
     "raw": "allowed",
 }
+
+
+def migration(tree, frm, to, ids=None, fields=None, name="things"):
+    mig = tree.root / "schema" / "registry" / "migrations"
+    mig.mkdir(exist_ok=True)
+    (mig / f"{name}-{frm}-{to}.json").write_text(json.dumps({"registry": name, "from": frm, "to": to, "ids": ids or {}, "fields": fields or {}}))
 
 
 class Tree:
@@ -144,6 +151,63 @@ class SchemaChecks(unittest.TestCase):
         s["fields"]["deep"] = {"type": "list", "applies": "now", "ops": "list", "of": {"type": "list", "of": {"type": "int", "min": 0, "max": 1}}}
         self.assertTrue(any("things.deep" in e for e in self.errors_of(s)))
 
+    def test_optional_refs(self):
+        s = copy.deepcopy(MINI)
+        s["fields"]["other"] = {"type": "ref", "registry": "things", "optional": True, "applies": "now", "ops": "set"}
+        self.assertEqual(self.errors_of(s), [])
+        s["fields"]["size"]["optional"] = True
+        self.assertTrue(any("things.size" in e and "optional" in e for e in self.errors_of(s)))
+
+    def test_fixed_length_lists(self):
+        s = copy.deepcopy(MINI)
+        s["fields"]["three"] = {"type": "list", "of": {"type": "int", "min": 0, "max": 9}, "fixedLength": 3, "applies": "restart", "ops": "indexed"}
+        self.assertEqual(self.errors_of(s), [])
+        s["fields"]["three"]["ops"] = "list"
+        self.assertTrue(any("things.three" in e and "indexed" in e for e in self.errors_of(s)))
+        s["fields"]["three"] = {"type": "list", "of": {"type": "int", "min": 0, "max": 9}, "lengthField": "size", "lengthOffset": 1, "applies": "restart", "ops": "indexed"}
+        self.assertTrue(any("things.three" in e and "read-only" in e for e in self.errors_of(s)))   # size is writable
+        s["fields"]["three"]["lengthField"] = "fixed"
+        self.assertEqual(self.errors_of(s), [])
+        s["fields"]["three"]["lengthField"] = "nowhere"
+        self.assertTrue(any("nowhere" in e for e in self.errors_of(s)))
+        s["fields"]["tags"]["ops"] = "indexed"
+        self.assertTrue(any("things.tags" in e for e in self.errors_of(s)))   # indexed needs a fixed length
+
+    def test_duplicate_type_names(self):
+        s = copy.deepcopy(MINI)
+        s["fields"]["parts"]["typeName"] = "ThingRow"
+        self.assertTrue(any("ThingRow" in e and "twice" in e for e in self.errors_of(s)))
+        s = copy.deepcopy(MINI)
+        s["fields"]["parts"]["typeName"] = "RegistryId"
+        self.assertTrue(any("RegistryId" in e for e in self.errors_of(s)))
+
+    def test_game_member_names_are_refused(self):
+        t = Tree(MINI)
+        try:
+            (t.root / "regmap" / "common").mkdir(parents=True)
+            (t.root / "regmap" / "common" / "things.json").write_text(json.dumps({"regmap": 1, "registry": "things",
+                "entries": {"kind": "resource", "resourceType": "keen::ThingInfo"}, "rows": {"size": {"paths": ["maxStackSize"]}}}))
+            for where in ("doc", "rule", "trait", "removeDoc"):
+                s = copy.deepcopy(MINI)
+                text = "uses maxStackSize"
+                if where == "doc":
+                    s["fields"]["size"]["doc"] = text
+                elif where == "rule":
+                    s["ids"]["rule"] = text
+                elif where == "trait":
+                    s["traits"] = {"big": text}
+                else:
+                    s["entry"]["removeDoc"] = text
+                t.write(s)
+                errs = rg.load(t.root).errors
+                self.assertTrue(any("maxStackSize" in e for e in errs), (where, errs))
+            s = copy.deepcopy(MINI)
+            s["ids"]["rule"] = "named after keen::ThingInfo"
+            t.write(s)
+            self.assertTrue(any("ThingInfo" in e for e in rg.load(t.root).errors))
+        finally:
+            t.close()
+
     def test_flattened_paths(self):
         m = rg.load(Tree(MINI).root)
         paths = [f.path for f in m.registries["things"].rows]
@@ -169,7 +233,7 @@ class Lock(unittest.TestCase):
         self.assertEqual(reg["id"], 1)
         self.assertEqual(reg["fields"]["size"]["id"], 1)
         self.assertEqual(reg["fields"]["fixed"]["id"], 9)
-        self.assertEqual(reg["fields"]["size"]["since"], "1.0.0")
+        self.assertEqual(reg["fields"]["size"]["since"], "0.1.0")
         self.assertEqual(rg.lock_errors(rg.load(self.t.root), rg.read_lock(self.t.root)), [])
 
     def test_lock_is_stable(self):
@@ -178,22 +242,38 @@ class Lock(unittest.TestCase):
         rg.update_lock(self.t.root)
         self.assertEqual(first, self.t.lock())
 
+    def errs(self):
+        return rg.lock_errors(rg.load(self.t.root), rg.read_lock(self.t.root))
+
     def test_removed_field_needs_retire(self):
         rg.update_lock(self.t.root)
         s = copy.deepcopy(MINI)
         del s["fields"]["color"]
+        s["version"] = "0.2.0"
         self.t.write(s)
-        errs = rg.lock_errors(rg.load(self.t.root), rg.read_lock(self.t.root))
-        self.assertTrue(any("things.color" in e and "retire" in e for e in errs), errs)
-        rg.retire(self.t.root, "things.color", "1.1.0")
-        self.assertEqual(rg.lock_errors(rg.load(self.t.root), rg.read_lock(self.t.root)), [])
-        self.assertEqual(self.t.lock()["registries"]["things"]["retired"]["color"]["retiredIn"], "1.1.0")
+        migration(self.t, "0.1.0", "0.2.0")
+        self.assertTrue(any("things.color" in e and "retire" in e for e in self.errs()), self.errs())
+        rg.retire(self.t.root, "things.color", "0.2.0")
+        rg.update_lock(self.t.root)
+        self.assertEqual(self.errs(), [])
+        self.assertEqual(self.t.lock()["registries"]["things"]["retired"]["color"]["retiredIn"], "0.2.0")
+
+    def test_retire_needs_a_breaking_step(self):
+        rg.update_lock(self.t.root)
+        with self.assertRaises(rg.LockError) as e:
+            rg.retire(self.t.root, "things.color", "0.1.1")   # in 0.x the minor acts as the major
+        self.assertIn("0.2.0", str(e.exception))
+        with self.assertRaises(rg.LockError):
+            rg.retire(self.t.root, "things.color", "0.1.0")
 
     def test_retired_name_is_never_reused(self):
         rg.update_lock(self.t.root)
-        rg.retire(self.t.root, "things.color", "1.1.0")
-        errs = rg.lock_errors(rg.load(self.t.root), rg.read_lock(self.t.root))  # color is back in the schema
-        self.assertTrue(any("things.color" in e and "retired" in e for e in errs), errs)
+        rg.retire(self.t.root, "things.color", "0.2.0")
+        s = copy.deepcopy(MINI)
+        s["version"] = "0.2.0"
+        self.t.write(s)
+        migration(self.t, "0.1.0", "0.2.0")
+        self.assertTrue(any("things.color" in e and "retired" in e for e in self.errs()), self.errs())  # color is back
         with self.assertRaises(rg.LockError):
             rg.update_lock(self.t.root)
 
@@ -201,36 +281,125 @@ class Lock(unittest.TestCase):
         rg.update_lock(self.t.root)
         s = copy.deepcopy(MINI)
         del s["fields"]["fixed"]
-        self.t.write(s)
-        rg.retire(self.t.root, "things.fixed", "1.1.0")
         s["fields"]["weight"] = {"type": "int", "min": 0, "max": 9, "applies": "now", "ops": "number"}
-        s["version"] = "1.1.0"
+        s["version"] = "0.2.0"
         self.t.write(s)
+        migration(self.t, "0.1.0", "0.2.0")
+        rg.retire(self.t.root, "things.fixed", "0.2.0")
         rg.update_lock(self.t.root)
         reg = self.t.lock()["registries"]["things"]
         self.assertEqual(reg["retired"]["fixed"]["id"], 9)
         self.assertEqual(reg["fields"]["weight"]["id"], 10)
-        self.assertEqual(reg["fields"]["weight"]["since"], "1.1.0")
+        self.assertEqual(reg["fields"]["weight"]["since"], "0.2.0")
 
-    def test_major_bump_needs_a_migration(self):
+    def test_breaking_step_needs_a_migration(self):
         rg.update_lock(self.t.root)
         s = copy.deepcopy(MINI)
+        s["version"] = "0.2.0"
+        s["fields"]["size"]["max"] = 5          # narrower: breaking
+        self.t.write(s)
+        self.assertTrue(any("migrations/things-0.1.0-0.2.0.json" in e for e in self.errs()), self.errs())
+        with self.assertRaises(rg.LockError) as e:
+            rg.update_lock(self.t.root)          # the reviewer's case: lock may not raise the version without it
+        self.assertIn("migrations/things-0.1.0-0.2.0.json", str(e.exception))
+        migration(self.t, "0.1.0", "0.2.0")
+        rg.update_lock(self.t.root)
+        self.assertEqual(self.errs(), [])
+        lock = self.t.lock()["registries"]["things"]
+        self.assertEqual([h["version"] for h in lock["history"]], ["0.1.0", "0.2.0"])
+        self.assertEqual(lock["fields"]["size"]["max"], 5)
+        # the migration file removed afterwards: --check finds the step without it
+        (self.t.root / "schema" / "registry" / "migrations" / "things-0.1.0-0.2.0.json").unlink()
+        self.assertTrue(any("migrations/things-0.1.0-0.2.0.json" in e for e in self.errs()), self.errs())
+
+    def test_stable_major(self):
+        s = copy.deepcopy(MINI)
+        s["version"] = "1.0.0"
+        self.t.write(s)
+        rg.update_lock(self.t.root)
+        s["version"] = "1.1.0"
+        s["fields"]["size"]["min"] = 2            # narrower within 1.x
+        self.t.write(s)
+        self.assertTrue(any("things.size" in e and "2.0.0" in e for e in self.errs()), self.errs())
         s["version"] = "2.0.0"
         self.t.write(s)
-        errs = rg.lock_errors(rg.load(self.t.root), rg.read_lock(self.t.root))
-        self.assertTrue(any("migrations/things-1.0.0-2.0.0.json" in e for e in errs), errs)
-        mig = self.t.root / "schema" / "registry" / "migrations"
-        mig.mkdir()
-        (mig / "things-1.0.0-2.0.0.json").write_text(json.dumps({"registry": "things", "from": "1.0.0", "to": "2.0.0", "ids": {}, "fields": {}}))
-        self.assertEqual(rg.lock_errors(rg.load(self.t.root), rg.read_lock(self.t.root)), [])
+        self.assertTrue(any("migrations/things-1.0.0-2.0.0.json" in e for e in self.errs()))
+        migration(self.t, "1.0.0", "2.0.0")
+        rg.update_lock(self.t.root)
+        self.assertEqual(self.errs(), [])
+
+    def test_migration_shape(self):
+        rg.update_lock(self.t.root)
+        s = copy.deepcopy(MINI)
+        s["version"] = "0.2.0"
+        self.t.write(s)
+        migration(self.t, "0.1.0", "0.2.0", fields={"size": "nowhere"})
+        self.assertTrue(any("nowhere" in e for e in self.errs()), self.errs())
+        migration(self.t, "0.1.0", "0.2.0", ids={"game:a": "Game:B"})
+        self.assertTrue(any("Game:B" in e for e in self.errs()), self.errs())
+        (self.t.root / "schema" / "registry" / "migrations" / "things-0.1.0-0.2.0.json").write_text(json.dumps({"ids": []}))
+        self.assertTrue(any("things-0.1.0-0.2.0.json" in e for e in self.errs()), self.errs())
+
+    def test_additive_changes_within_a_minor(self):
+        rg.update_lock(self.t.root)
+        s = copy.deepcopy(MINI)
+        s["version"] = "0.1.1"
+        s["fields"]["size"]["max"] = 20                     # wider
+        s["fields"]["color"]["values"] = ["red", "blue", "green"]   # appended
+        s["fields"]["size"]["applies"] = "now"              # earlier
+        s["fields"]["weight"] = {"type": "int", "min": 0, "max": 9, "applies": "now", "ops": "number"}  # new
+        self.t.write(s)
+        rg.update_lock(self.t.root)
+        self.assertEqual(self.errs(), [])
+        f = self.t.lock()["registries"]["things"]["fields"]
+        self.assertEqual(f["size"]["max"], 20)
+        self.assertEqual(f["color"]["values"], ["red", "blue", "green"])
+
+    def test_breaking_changes_within_a_minor(self):
+        cases = {
+            "narrower": lambda s: s["fields"]["size"].__setitem__("max", 5),
+            "reordered": lambda s: s["fields"]["color"].__setitem__("values", ["blue", "red"]),
+            "value gone": lambda s: s["fields"]["color"].__setitem__("values", ["red"]),
+            "kind": lambda s: s["fields"]["size"].__setitem__("type", "float"),
+            "ops": lambda s: s["fields"]["size"].__setitem__("ops", "set"),
+            "later": lambda s: s["fields"]["color"].__setitem__("applies", "restart"),
+            "read-only": lambda s: s["fields"]["parts"]["fields"]["a"].__setitem__("readOnly", True) or s["fields"]["parts"]["fields"]["a"].pop("ops"),
+        }
+        for name, change in cases.items():
+            t = Tree()
+            try:
+                rg.update_lock(t.root)
+                s = copy.deepcopy(MINI)
+                s["version"] = "0.1.1"
+                change(s)
+                t.write(s)
+                errs = rg.lock_errors(rg.load(t.root), rg.read_lock(t.root))
+                self.assertTrue(any("0.2.0" in e for e in errs), (name, errs))
+                with self.assertRaises(rg.LockError, msg=name):
+                    rg.update_lock(t.root)
+            finally:
+                t.close()
+
+    def test_a_change_needs_a_version_bump(self):
+        rg.update_lock(self.t.root)
+        s = copy.deepcopy(MINI)
+        s["fields"]["size"]["max"] = 20
+        self.t.write(s)
+        self.assertTrue(any("things.size" in e and "version" in e for e in self.errs()), self.errs())
+
+    def test_lock_records_each_fields_contract(self):
+        rg.update_lock(self.t.root)
+        f = self.t.lock()["registries"]["things"]["fields"]
+        self.assertEqual(f["size"], {"id": 1, "since": "0.1.0", "kind": "int", "applies": "worldLoad", "ops": "number", "readOnly": False, "min": 1, "max": 10})
+        self.assertEqual(f["color"]["values"], ["red", "blue"])
+        self.assertEqual(f["tags"]["element"], "ref")
 
     def test_version_may_not_go_down(self):
         rg.update_lock(self.t.root)
         s = copy.deepcopy(MINI)
-        s["version"] = "0.9.0"
+        s["version"] = "0.0.9"
         self.t.write(s)
-        errs = rg.lock_errors(rg.load(self.t.root), rg.read_lock(self.t.root))
-        self.assertTrue(any("0.9.0" in e for e in errs), errs)
+        self.assertTrue(any("0.0.9" in e for e in self.errs()), self.errs())
 
 
 class Outputs(unittest.TestCase):
@@ -271,6 +440,8 @@ class Outputs(unittest.TestCase):
         self.assertIn("public sealed partial class ThingEntry", cs)
         self.assertIn("public sealed partial class ThingRow", cs)
         self.assertIn("public int Fixed => ", cs)  # read-only: no setter
+        self.assertIn("public RegistryValueList<RegistryId> Tags =>", cs)
+        self.assertIn("public RegistryEntryList<ThingRow> Rows =>", cs)
 
     def test_section_schema_names_the_fields(self):
         s = json.loads(self.out["schema/registry-section.schema.json"])
@@ -283,6 +454,34 @@ class Outputs(unittest.TestCase):
         self.assertIn("Do not edit", md)
         self.assertIn("are reserved", md)
         self.assertIn("\x60game\x60 and \x60kiln\x60", md)
+
+    def test_section_add_ids(self):
+        s = json.loads(self.out["schema/registry-section.schema.json"])
+        pat = re.compile(s["$defs"]["things"]["$defs"]["edit"]["properties"]["id"]["pattern"])
+        self.assertTrue(pat.match("mymod:crate"))
+        for bad in ("game:crate", "kiln:crate", "MyMod:crate", "mymod:Crate", "mymod:", "mymod:a b"):
+            self.assertFalse(pat.match(bad), bad)
+
+    def test_docs_struct_doc_and_mapping(self):
+        t = Tree(MINI)
+        try:
+            s = copy.deepcopy(MINI)
+            s["fields"]["parts"]["doc"] = "The parts of a thing."
+            t.write(s)
+            rg.update_lock(t.root)
+            (t.root / "regmap" / "common").mkdir(parents=True)
+            (t.root / "regmap" / "common" / "things.json").write_text(json.dumps({"regmap": 1, "registry": "things",
+                "entries": {"kind": "resource", "resourceType": "keen::Thing"},
+                "rows": {"size": {"paths": ["a"], "conv": "int", "read": "worldLoad", "backend": "live"},
+                         "color": {"paths": ["b"], "conv": "enum", "read": "unknown", "backend": "live", "state": "unproven", "reason": "when the game reads the color is not traced"}}}))
+            md = rg.render(rg.load(t.root), rg.read_lock(t.root))["docs/kiln/modding/registries/things.md"]
+            self.assertIn("The parts of a thing.", md)
+            self.assertIn("| Mapping |", md)
+            self.assertIn("unproven: when the game reads the color is not traced", md)
+            self.assertIn("| \x60size\x60 | int 1..10 | worldLoad | number | 0.1.0 | mapped |", md)
+            self.assertIn("not mapped yet", md)       # fields without a row
+        finally:
+            t.close()
 
     def test_check_finds_stale_files(self):
         rg.write_outputs(self.t.root, self.out)
@@ -304,6 +503,7 @@ class Repository(unittest.TestCase):
         for r in m.registries.values():
             for f in r.rows:
                 self.assertIn(f.applies, ("now", "worldLoad", "restart"), f.qualified)
+            self.assertEqual(r.version, "0.1.0")
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@
   "registrySchema": 1,
   "registry": "drops",
   "typeName": "DropTable",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "stability": "experimental",
   "experimentalId": "KILNX031",
   "doc": "The game's drop tables (default inventories): what a container, an enemy or a plant gives, with counts and chances.",

@@ -4,7 +4,7 @@
 
 Every crafting recipe: what it takes, what it makes and how long it takes.
 
-Schema version 1.0.0, experimental (KILNX031: may change in any release until it is marked stable). C# entry type `Kiln.Registry.RecipeEntry`. What registries are, the stages, the conflict rules and how ids are made: [README](README.md).
+Schema version 0.1.0, experimental (KILNX031: may change in any release until it is marked stable). C# entry type `Kiln.Registry.RecipeEntry`. What registries are, the stages, the conflict rules and how ids are made: [README](README.md).
 
 ## Ids
 
@@ -13,20 +13,20 @@ Schema version 1.0.0, experimental (KILNX031: may change in any release until it
 
 ## Fields
 
-Applies: `now` = takes effect at the next use; `worldLoad` = takes effect when a world loads; `restart` = takes effect after a game restart. Ops: `number` = a value or the relative operations (mul, add, min, max, raiseOnly, lowerOnly); `set` = a value; `list` = clear, append, remove, replace. A field of a list's elements is named with [] in this table and with the element's index in an edit (`entries[3].chance`, or [*] for every element).
+Applies: `now` = takes effect at the next use; `worldLoad` = takes effect when a world loads; `restart` = takes effect after a game restart. Ops: `number` = a value or the relative operations (mul, add, min, max, raiseOnly, lowerOnly); `set` = a value; `list` = clear, append, remove, replace; `indexed` = a list of fixed length, edited one element at a time (`xpPerLevel[2]`) with a value or a number operation. A field of a list's elements is named with [] in this table and with the element's index in an edit (`entries[3].chance`, or [*] for every element). Mapping: whether this Kiln maps the field onto the game; an unproven or unmapped field is refused per entry, with the reason, until a Kiln update maps it.
 
-| Field | Type | Applies | Ops | Since | About |
-|---|---|---|---|---|---|
-| `inputs` | list of entries, at most 32 | now | list | 1.0.0 | What one craft takes: an item or an input category, and a count. |
-| `inputs[].item` | ref items | now | set | 1.0.0 | The item (or category). |
-| `inputs[].category` | ref inputCategories | now | set | 1.0.0 | An input category (any item of it); instead of item. |
-| `inputs[].count` | int 1..65535 | now | number | 1.0.0 |  |
-| `outputs` | list of entries, at most 32 | now | list | 1.0.0 | What one craft makes. |
-| `outputs[].item` | ref items | now | set | 1.0.0 |  |
-| `outputs[].count` | int 1..65535 | now | number | 1.0.0 |  |
-| `duration` | time s 0..86400 | now | number | 1.0.0 | How long a station takes for one craft. |
-| `unlock` | enum (game, always) | now | set | 1.0.0 | When players see the recipe: game = the game's own knowledge requirement, always = from the start. Only the crafting menu reads it (a client without Kiln keeps the game's). Read by game clients only. |
-| `station` | ref stations | restart | read-only | 1.0.0 | The workshop the recipe belongs to. Read-only for game recipes: the game sorts recipes into stations once at start. |
+| Field | Type | Applies | Ops | Since | Mapping | About |
+|---|---|---|---|---|---|---|
+| `inputs` | list of entries, at most 32 | now | list | 0.1.0 | mapped | What one craft takes: an item or an input category, and a count. |
+| `inputs[].item` | ref items, optional | now | set | 0.1.0 | mapped | The item; absent when the input is a category. |
+| `inputs[].category` | ref inputCategories, optional | now | set | 0.1.0 | mapped | An input category (any item of it); absent when the input is an item. |
+| `inputs[].count` | int 1..65535 | now | number | 0.1.0 | mapped |  |
+| `outputs` | list of entries, at most 32 | now | list | 0.1.0 | mapped | What one craft makes. |
+| `outputs[].item` | ref items | now | set | 0.1.0 | mapped |  |
+| `outputs[].count` | int 1..65535 | now | number | 0.1.0 | mapped |  |
+| `duration` | time s 0..86400 | now | number | 0.1.0 | mapped | How long a station takes for one craft. |
+| `unlock` | enum (game, always) | now | set | 0.1.0 | mapped | When players see the recipe: game = the game's own knowledge requirement, always = from the start. Only the crafting menu reads it (a client without Kiln keeps the game's). Read by game clients only. |
+| `station` | ref stations | restart | read-only | 0.1.0 | mapped | The workshop the recipe belongs to. Read-only for game recipes: the game sorts recipes into stations once at start. |
 
 ## Traits
 

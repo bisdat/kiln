@@ -8,7 +8,8 @@ using System.Collections.Generic;
 
 namespace Kiln.Registry;
 
-internal enum RegistryListOp { Clear, Append, RemoveAt, Replace }
+// Remove names values (a list of values: the values; a list of entries: each entry's fields), never an index.
+internal enum RegistryListOp { Clear, Append, Remove, Replace }
 
 internal interface IRegistryCells
 {
@@ -71,6 +72,30 @@ internal static class RegistryCells
         var o => throw Mismatch(field, o, "an id"),
     };
 
+    internal static RegistryId? OptionalId(IRegistryCells c, int field, int index) => Get(c, field, index) switch
+    {
+        null => null,
+        RegistryId id => id,
+        string s => new RegistryId(s),
+        var o => throw Mismatch(field, o, "an id or nothing"),
+    };
+
+    internal static void SetOptional(IRegistryCells c, int field, int index, RegistryId? value)
+    {
+        if (value is { Value: null })
+            throw new ArgumentException("an empty registry id (set null to clear the reference)", nameof(value));
+        c.Set(field, index, value);
+    }
+
+    /// <summary>An entry of a list as {field: value}: what a removal names.</summary>
+    internal static IReadOnlyDictionary<string, object?> Snapshot(IRegistryCells c, int index, (string Field, int Id)[] leaves)
+    {
+        var d = new SortedDictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var (name, id) in leaves)
+            d[name] = c.TryGet(id, index, out var v) ? v : null;
+        return d;
+    }
+
     internal static string Text(IRegistryCells c, int field, int index) => Get(c, field, index) switch
     {
         null => "",
@@ -125,6 +150,12 @@ internal static class RegistryCells
     {
         if (value.Value is null)
             throw new ArgumentException("an empty registry id", nameof(value));
+        c.Set(field, index, value);
+    }
+
+    internal static void Set(IRegistryCells c, int field, int index, string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
         c.Set(field, index, value);
     }
 

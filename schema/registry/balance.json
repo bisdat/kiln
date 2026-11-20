@@ -3,7 +3,7 @@
   "registrySchema": 1,
   "registry": "balance",
   "typeName": "Balance",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "stability": "experimental",
   "experimentalId": "KILNX031",
   "doc": "The game's balance table: experience and levels, the flame's altars and water sources, base fog resistance, durability, sockets and perk unlock costs. The game reads it once at start.",
@@ -21,15 +21,15 @@
         "min": 0,
         "max": 100000000
       },
-      "maxItems": 5,
       "applies": "restart",
-      "ops": "list",
-      "doc": "The experience levels 1 to 5 need (later levels follow xpCurve). Exactly 5 values; set one with xpPerLevel[i]."
+      "ops": "indexed",
+      "doc": "The experience levels 1 to 5 need (later levels follow xpCurve). Exactly 5 values, edited one at a time (xpPerLevel[i]).",
+      "fixedLength": 5
     },
     "xpCurve": {
       "type": "struct",
       "applies": "restart",
-      "doc": "The experience curve from level 6: need = round((start + (end - start) * level / levelMax) * seed * 1.5 + fromKnowledge).",
+      "doc": "The experience a level from 6 needs: base = min(start, end) + |end - start| * level / levelMax; need = round(base * seed * 1.5 + fromKnowledge).",
       "fields": {
         "start": {
           "type": "int",
@@ -85,8 +85,8 @@
       "min": 0,
       "max": 1000,
       "applies": "restart",
-      "ops": "number",
-      "doc": "The highest flame level. The per-flame-level lists need flameLevelMax + 1 values."
+      "doc": "The highest flame level. Read-only in this version: the per-flame-level lists are exactly flameLevelMax + 1 long.",
+      "readOnly": true
     },
     "altarsPerFlameLevel": {
       "type": "list",
@@ -95,10 +95,11 @@
         "min": 0,
         "max": 16
       },
-      "maxItems": 1001,
       "applies": "restart",
-      "ops": "list",
-      "doc": "Flame altars allowed at each flame level (the game's code stops at 16)."
+      "ops": "indexed",
+      "doc": "Flame altars allowed at each flame level, one value per level from 0 to flameLevelMax (the game's code stops at 16). Edited one level at a time (altarsPerFlameLevel[i]).",
+      "lengthField": "flameLevelMax",
+      "lengthOffset": 1
     },
     "waterSourcesPerFlameLevel": {
       "type": "list",
@@ -107,10 +108,11 @@
         "min": 0,
         "max": 255
       },
-      "maxItems": 1001,
       "applies": "restart",
-      "ops": "list",
-      "doc": "Water sources allowed at each flame level."
+      "ops": "indexed",
+      "doc": "Water sources allowed at each flame level, one value per level from 0 to flameLevelMax. Edited one level at a time.",
+      "lengthField": "flameLevelMax",
+      "lengthOffset": 1
     },
     "buildzoneSizesPerAltarLevel": {
       "type": "list",

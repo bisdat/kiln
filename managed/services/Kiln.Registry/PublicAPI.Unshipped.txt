@@ -6,11 +6,10 @@
 [KILNX031]Kiln.Registry.BalanceDurability.Start.get -> double
 [KILNX031]Kiln.Registry.BalanceDurability.Start.set -> void
 [KILNX031]Kiln.Registry.BalanceEntry
-[KILNX031]Kiln.Registry.BalanceEntry.AltarsPerFlameLevel.get -> Kiln.Registry.RegistryList<int>!
-[KILNX031]Kiln.Registry.BalanceEntry.BuildzoneSizesPerAltarLevel.get -> Kiln.Registry.RegistryList<Kiln.Registry.BalanceZoneSize!>!
+[KILNX031]Kiln.Registry.BalanceEntry.AltarsPerFlameLevel.get -> Kiln.Registry.RegistryFixedList<int>!
+[KILNX031]Kiln.Registry.BalanceEntry.BuildzoneSizesPerAltarLevel.get -> Kiln.Registry.RegistryEntryList<Kiln.Registry.BalanceZoneSize!>!
 [KILNX031]Kiln.Registry.BalanceEntry.Durability.get -> Kiln.Registry.BalanceDurability!
 [KILNX031]Kiln.Registry.BalanceEntry.FlameLevelMax.get -> int
-[KILNX031]Kiln.Registry.BalanceEntry.FlameLevelMax.set -> void
 [KILNX031]Kiln.Registry.BalanceEntry.FogResistance.get -> Kiln.Registry.BalanceFogResistance!
 [KILNX031]Kiln.Registry.BalanceEntry.Gear.get -> Kiln.Registry.BalanceGear!
 [KILNX031]Kiln.Registry.BalanceEntry.Id.get -> Kiln.Registry.RegistryId
@@ -22,9 +21,9 @@
 [KILNX031]Kiln.Registry.BalanceEntry.SkillPointsPerLevel.set -> void
 [KILNX031]Kiln.Registry.BalanceEntry.SocketChance.get -> Kiln.Registry.BalanceSocketChance!
 [KILNX031]Kiln.Registry.BalanceEntry.UnlockCost.get -> Kiln.Registry.BalanceUnlockCost!
-[KILNX031]Kiln.Registry.BalanceEntry.WaterSourcesPerFlameLevel.get -> Kiln.Registry.RegistryList<int>!
+[KILNX031]Kiln.Registry.BalanceEntry.WaterSourcesPerFlameLevel.get -> Kiln.Registry.RegistryFixedList<int>!
 [KILNX031]Kiln.Registry.BalanceEntry.XpCurve.get -> Kiln.Registry.BalanceXpCurve!
-[KILNX031]Kiln.Registry.BalanceEntry.XpPerLevel.get -> Kiln.Registry.RegistryList<int>!
+[KILNX031]Kiln.Registry.BalanceEntry.XpPerLevel.get -> Kiln.Registry.RegistryFixedList<int>!
 [KILNX031]Kiln.Registry.BalanceFogResistance
 [KILNX031]Kiln.Registry.BalanceFogResistance.Base.get -> int
 [KILNX031]Kiln.Registry.BalanceFogResistance.Base.set -> void
@@ -105,7 +104,7 @@
 [KILNX031]Kiln.Registry.DropEntryCount.Min.get -> int
 [KILNX031]Kiln.Registry.DropEntryCount.Min.set -> void
 [KILNX031]Kiln.Registry.DropTableEntry
-[KILNX031]Kiln.Registry.DropTableEntry.Entries.get -> Kiln.Registry.RegistryList<Kiln.Registry.DropEntry!>!
+[KILNX031]Kiln.Registry.DropTableEntry.Entries.get -> Kiln.Registry.RegistryEntryList<Kiln.Registry.DropEntry!>!
 [KILNX031]Kiln.Registry.DropTableEntry.Id.get -> Kiln.Registry.RegistryId
 [KILNX031]Kiln.Registry.DropTableEntry.Registry.get -> string!
 [KILNX031]Kiln.Registry.IRegistryEntry
@@ -173,7 +172,7 @@
 [KILNX031]Kiln.Registry.ItemEntry.ManaCost.set -> void
 [KILNX031]Kiln.Registry.ItemEntry.MaxStack.get -> int
 [KILNX031]Kiln.Registry.ItemEntry.MaxStack.set -> void
-[KILNX031]Kiln.Registry.ItemEntry.Perks.get -> Kiln.Registry.RegistryList<Kiln.Registry.RegistryId>!
+[KILNX031]Kiln.Registry.ItemEntry.Perks.get -> Kiln.Registry.RegistryValueList<Kiln.Registry.RegistryId>!
 [KILNX031]Kiln.Registry.ItemEntry.Power.get -> int
 [KILNX031]Kiln.Registry.ItemEntry.Power.set -> void
 [KILNX031]Kiln.Registry.ItemEntry.Rarity.get -> Kiln.Registry.RegistryRarity
@@ -223,19 +222,19 @@
 [KILNX031]Kiln.Registry.RecipeEntry.Duration.get -> System.TimeSpan
 [KILNX031]Kiln.Registry.RecipeEntry.Duration.set -> void
 [KILNX031]Kiln.Registry.RecipeEntry.Id.get -> Kiln.Registry.RegistryId
-[KILNX031]Kiln.Registry.RecipeEntry.Inputs.get -> Kiln.Registry.RegistryList<Kiln.Registry.RecipeInput!>!
-[KILNX031]Kiln.Registry.RecipeEntry.Outputs.get -> Kiln.Registry.RegistryList<Kiln.Registry.RecipeOutput!>!
+[KILNX031]Kiln.Registry.RecipeEntry.Inputs.get -> Kiln.Registry.RegistryEntryList<Kiln.Registry.RecipeInput!>!
+[KILNX031]Kiln.Registry.RecipeEntry.Outputs.get -> Kiln.Registry.RegistryEntryList<Kiln.Registry.RecipeOutput!>!
 [KILNX031]Kiln.Registry.RecipeEntry.Registry.get -> string!
 [KILNX031]Kiln.Registry.RecipeEntry.Station.get -> Kiln.Registry.RegistryId
 [KILNX031]Kiln.Registry.RecipeEntry.Unlock.get -> Kiln.Registry.RecipeUnlockMode
 [KILNX031]Kiln.Registry.RecipeEntry.Unlock.set -> void
 [KILNX031]Kiln.Registry.RecipeInput
-[KILNX031]Kiln.Registry.RecipeInput.Category.get -> Kiln.Registry.RegistryId
+[KILNX031]Kiln.Registry.RecipeInput.Category.get -> Kiln.Registry.RegistryId?
 [KILNX031]Kiln.Registry.RecipeInput.Category.set -> void
 [KILNX031]Kiln.Registry.RecipeInput.Count.get -> int
 [KILNX031]Kiln.Registry.RecipeInput.Count.set -> void
 [KILNX031]Kiln.Registry.RecipeInput.Index.get -> int
-[KILNX031]Kiln.Registry.RecipeInput.Item.get -> Kiln.Registry.RegistryId
+[KILNX031]Kiln.Registry.RecipeInput.Item.get -> Kiln.Registry.RegistryId?
 [KILNX031]Kiln.Registry.RecipeInput.Item.set -> void
 [KILNX031]Kiln.Registry.RecipeOutput
 [KILNX031]Kiln.Registry.RecipeOutput.Count.get -> int
@@ -246,6 +245,13 @@
 [KILNX031]Kiln.Registry.RecipeUnlockMode
 [KILNX031]Kiln.Registry.RecipeUnlockMode.Always = 1 -> Kiln.Registry.RecipeUnlockMode
 [KILNX031]Kiln.Registry.RecipeUnlockMode.Game = 0 -> Kiln.Registry.RecipeUnlockMode
+[KILNX031]Kiln.Registry.RegistryEntryList<T>
+[KILNX031]Kiln.Registry.RegistryEntryList<T>.AppendNew() -> T
+[KILNX031]Kiln.Registry.RegistryEntryList<T>.Clear() -> void
+[KILNX031]Kiln.Registry.RegistryEntryList<T>.Count.get -> int
+[KILNX031]Kiln.Registry.RegistryEntryList<T>.GetEnumerator() -> System.Collections.Generic.IEnumerator<T>!
+[KILNX031]Kiln.Registry.RegistryEntryList<T>.RemoveWhere(System.Func<T, bool>! where) -> int
+[KILNX031]Kiln.Registry.RegistryEntryList<T>.this[int index].get -> T
 [KILNX031]Kiln.Registry.RegistryFieldAttribute
 [KILNX031]Kiln.Registry.RegistryFieldAttribute.Applies.get -> Kiln.RegistryApplies
 [KILNX031]Kiln.Registry.RegistryFieldAttribute.Field.get -> string!
@@ -254,12 +260,16 @@
 [KILNX031]Kiln.Registry.RegistryFieldSpec.Applies.get -> Kiln.RegistryApplies
 [KILNX031]Kiln.Registry.RegistryFieldSpec.Element.get -> Kiln.Registry.RegistryFieldType?
 [KILNX031]Kiln.Registry.RegistryFieldSpec.Field.get -> string!
+[KILNX031]Kiln.Registry.RegistryFieldSpec.FixedLength.get -> int
 [KILNX031]Kiln.Registry.RegistryFieldSpec.Formula.get -> string?
 [KILNX031]Kiln.Registry.RegistryFieldSpec.Id.get -> int
+[KILNX031]Kiln.Registry.RegistryFieldSpec.LengthField.get -> string?
+[KILNX031]Kiln.Registry.RegistryFieldSpec.LengthOffset.get -> int
 [KILNX031]Kiln.Registry.RegistryFieldSpec.Max.get -> double?
 [KILNX031]Kiln.Registry.RegistryFieldSpec.MaxItems.get -> int
 [KILNX031]Kiln.Registry.RegistryFieldSpec.Min.get -> double?
 [KILNX031]Kiln.Registry.RegistryFieldSpec.Ops.get -> Kiln.Registry.RegistryOps
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Optional.get -> bool
 [KILNX031]Kiln.Registry.RegistryFieldSpec.Path.get -> string!
 [KILNX031]Kiln.Registry.RegistryFieldSpec.ReadOnly.get -> bool
 [KILNX031]Kiln.Registry.RegistryFieldSpec.Reference.get -> string?
@@ -278,6 +288,11 @@
 [KILNX031]Kiln.Registry.RegistryFieldType.Ref = 5 -> Kiln.Registry.RegistryFieldType
 [KILNX031]Kiln.Registry.RegistryFieldType.Struct = 8 -> Kiln.Registry.RegistryFieldType
 [KILNX031]Kiln.Registry.RegistryFieldType.Time = 6 -> Kiln.Registry.RegistryFieldType
+[KILNX031]Kiln.Registry.RegistryFixedList<T>
+[KILNX031]Kiln.Registry.RegistryFixedList<T>.Count.get -> int
+[KILNX031]Kiln.Registry.RegistryFixedList<T>.GetEnumerator() -> System.Collections.Generic.IEnumerator<T>!
+[KILNX031]Kiln.Registry.RegistryFixedList<T>.this[int index].get -> T
+[KILNX031]Kiln.Registry.RegistryFixedList<T>.this[int index].set -> void
 [KILNX031]Kiln.Registry.RegistryId
 [KILNX031]Kiln.Registry.RegistryId.Equals(Kiln.Registry.RegistryId other) -> bool
 [KILNX031]Kiln.Registry.RegistryId.IsGame.get -> bool
@@ -286,16 +301,8 @@
 [KILNX031]Kiln.Registry.RegistryId.RegistryId() -> void
 [KILNX031]Kiln.Registry.RegistryId.RegistryId(string! value) -> void
 [KILNX031]Kiln.Registry.RegistryId.Value.get -> string!
-[KILNX031]Kiln.Registry.RegistryList<T>
-[KILNX031]Kiln.Registry.RegistryList<T>.Append(params T[]! values) -> void
-[KILNX031]Kiln.Registry.RegistryList<T>.AppendNew() -> T
-[KILNX031]Kiln.Registry.RegistryList<T>.Clear() -> void
-[KILNX031]Kiln.Registry.RegistryList<T>.Count.get -> int
-[KILNX031]Kiln.Registry.RegistryList<T>.GetEnumerator() -> System.Collections.Generic.IEnumerator<T>!
-[KILNX031]Kiln.Registry.RegistryList<T>.RemoveAt(int index) -> void
-[KILNX031]Kiln.Registry.RegistryList<T>.Replace(System.Collections.Generic.IEnumerable<T>! values) -> void
-[KILNX031]Kiln.Registry.RegistryList<T>.this[int index].get -> T
 [KILNX031]Kiln.Registry.RegistryOps
+[KILNX031]Kiln.Registry.RegistryOps.Indexed = 4 -> Kiln.Registry.RegistryOps
 [KILNX031]Kiln.Registry.RegistryOps.List = 3 -> Kiln.Registry.RegistryOps
 [KILNX031]Kiln.Registry.RegistryOps.None = 0 -> Kiln.Registry.RegistryOps
 [KILNX031]Kiln.Registry.RegistryOps.Number = 2 -> Kiln.Registry.RegistryOps
@@ -314,6 +321,14 @@
 [KILNX031]Kiln.Registry.RegistryRarity.Rare = 2 -> Kiln.Registry.RegistryRarity
 [KILNX031]Kiln.Registry.RegistryRarity.Uncommon = 1 -> Kiln.Registry.RegistryRarity
 [KILNX031]Kiln.Registry.RegistrySchema
+[KILNX031]Kiln.Registry.RegistryValueList<T>
+[KILNX031]Kiln.Registry.RegistryValueList<T>.Append(params T[]! values) -> void
+[KILNX031]Kiln.Registry.RegistryValueList<T>.Clear() -> void
+[KILNX031]Kiln.Registry.RegistryValueList<T>.Count.get -> int
+[KILNX031]Kiln.Registry.RegistryValueList<T>.GetEnumerator() -> System.Collections.Generic.IEnumerator<T>!
+[KILNX031]Kiln.Registry.RegistryValueList<T>.Remove(params T[]! values) -> void
+[KILNX031]Kiln.Registry.RegistryValueList<T>.Replace(System.Collections.Generic.IEnumerable<T>! values) -> void
+[KILNX031]Kiln.Registry.RegistryValueList<T>.this[int index].get -> T
 [KILNX031]Kiln.RegistryApplies
 [KILNX031]Kiln.RegistryApplies.Now = 1 -> Kiln.RegistryApplies
 [KILNX031]Kiln.RegistryApplies.Restart = 3 -> Kiln.RegistryApplies
