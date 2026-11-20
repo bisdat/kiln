@@ -59,6 +59,8 @@ pub enum ProxyKind {
     Shroudlink,
     /// Ember's server loader (powrprof.dll, iphlpapi.dll, dbghelp.dll).
     Ember,
+    /// AndyPimms' Enshrouded ModLoader (dinput8.dll): runs packages with a .dll.mod manifest.
+    Dllmod,
     /// ModLoader Proxy (chainloader.ini).
     ModLoaderProxy,
     /// Ultimate ASI Loader (.asi plugins; runs only under its own proxy names).
@@ -73,6 +75,10 @@ pub enum ProxyKind {
     ReShade,
     /// A loader that reads dinput8-chain.ini (XHL-Core, Auto Loot Plus and others).
     ChainLoader,
+    /// CharosDX's dinput8.dll loader: loads every `mods\<mod>\native\*.dll` (Sparkworks Enhanced, Cross-Base Storage).
+    NativeFolders,
+    /// OptiScaler, the upscaler and frame generation tool (dxgi.dll, winmm.dll, version.dll, dbghelp.dll ...).
+    OptiScaler,
     /// Some other DLL mod or proxy.
     Unknown,
     /// Not a 64-bit PE DLL.
@@ -91,6 +97,9 @@ pub struct ProxyClass {
     pub size: Option<u64>,
     /// Which marker matched, or why it is Unknown / NotDll.
     pub detail: Option<String>,
+    /// EML: a modified EML loader, with what its own code does (`engines::EmlExtras::what`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<String>,
 }
 
 /// Facts from a PE header.
@@ -245,6 +254,7 @@ pub fn classify_bytes(b: &[u8]) -> ProxyClass {
         sha256: Some(crate::hash::sha256_hex(b)),
         size: Some(b.len() as u64),
         detail: None,
+        modified: None,
     };
     let info = match parse(b) {
         Ok(i) => i,
@@ -292,6 +302,9 @@ pub fn classify_bytes(b: &[u8]) -> ProxyClass {
     {
         c.kind = engine.proxy_kind();
         c.detail = Some(marker);
+        if engine == crate::engines::Engine::Eml {
+            c.modified = crate::engines::eml_loader_extras(b).map(|x| x.what());
+        }
         return c;
     }
     c.kind = ProxyKind::Unknown;
@@ -299,11 +312,19 @@ pub fn classify_bytes(b: &[u8]) -> ProxyClass {
         "Wine builtin DLL".into()
     } else if has(DINPUT8_EXPORT) {
         "another dinput8 proxy (exports DirectInput8Create)".into()
+    } else if has("SteamAPI_Init") && has("SteamAPI_RunCallbacks") {
+        // the game's own steam_api64.dll (Valve's Steamworks API), which every install has next to the game: not a mod
+        // (two support reports, 2026-11-16, read "an unknown DLL, 311.6 KB" for it)
+        STEAMWORKS_DETAIL.into()
     } else {
         "a 64-bit DLL without known markers".into()
     });
     c
 }
+
+/// The detail of an Unknown proxy that is the game's own steam_api64.dll (exports SteamAPI_Init and
+/// SteamAPI_RunCallbacks): Valve's Steamworks API, which every install has next to the game; the report names it so.
+pub const STEAMWORKS_DETAIL: &str = "Steam's Steamworks API (exports SteamAPI_Init), as the game ships it";
 
 /// What the file at `path` is (ProxyKind::None when it does not exist).
 pub fn classify_proxy(path: &Path) -> Result<ProxyClass> {
@@ -317,7 +338,7 @@ fn classify_proxy_uncached(path: &Path) -> Result<ProxyClass> {
     match std::fs::read(path) {
         Ok(b) => Ok(classify_bytes(&b)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            Ok(ProxyClass { kind: ProxyKind::None, version: None, abi: None, sha256: None, size: None, detail: None })
+            Ok(ProxyClass { kind: ProxyKind::None, version: None, abi: None, sha256: None, size: None, detail: None, modified: None })
         }
         Err(e) => Err(crate::util::io_at(path, "reading")(e)),
     }
@@ -416,6 +437,16 @@ mod tests {
         assert_eq!(parse(&d).unwrap().exports, ["DirectInput8Create", "emf_loader_identity"]);
         assert!(!is_pe64_dll(b"MZ not really"));
         assert!(!is_pe64_dll(b""));
+    }
+
+    #[test]
+    fn the_games_own_steam_api64_is_named_and_shroudlinks_proxy_still_is_shroudlink() {
+        let steam = classify_bytes(&build_test_dll(&["SteamAPI_Init", "SteamAPI_RunCallbacks", "SteamAPI_Shutdown"], b"valve"));
+        assert_eq!((steam.kind, steam.detail.as_deref()), (ProxyKind::Unknown, Some(STEAMWORKS_DETAIL)));
+        let shroudlink = classify_bytes(&build_test_dll(&["SteamAPI_Init", "SteamAPI_RunCallbacks"], b"LoadLibraryW steam_api64_o.dll"));
+        assert_eq!(shroudlink.kind, ProxyKind::Shroudlink);
+        let other = classify_bytes(&build_test_dll(&["SteamAPI_Init"], b""));
+        assert_eq!(other.detail.as_deref(), Some("a 64-bit DLL without known markers"), "one Steam export alone is not enough");
     }
 
     #[test]

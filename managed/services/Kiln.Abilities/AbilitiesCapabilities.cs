@@ -25,6 +25,25 @@ internal static class AbilitiesCaps
     /// reflection reads (<c>players.reflection</c>).</summary>
     public const string BuffList = "abilities.buff_list";
 
+    /// <summary>Managed, static (since 0.2.0-dev.29): synchronous natives (<see cref="Abilities.Natives.RegisterSync"/>).
+    /// Needs a dev.29 kiln.abilities whose RegisterNative hook is in (sigdb feature <c>abilities.natives</c>: the
+    /// dedicated server's; a game client has no signatures for it).</summary>
+    public const string NativesSync = "abilities.natives.sync";
+
+    /// <summary>Managed, static (since 0.2.0-dev.29): handlers attached to a vanilla native's calls in one program at one
+    /// call site, filtered before managed code runs (<see cref="Abilities.Natives.Attach"/>). Needs what
+    /// <see cref="NativesSync"/> needs.</summary>
+    public const string NativesAttach = "abilities.natives.attach";
+
+    /// <summary>Managed, session (since 0.2.0-dev.29): a native's call reads and writes other entities through
+    /// impact_simulation's own accessors (<see cref="NativeContext.TryRead{T}"/>, <see cref="NativeContext.TryWrite{T}"/>,
+    /// <see cref="NativeContext.Root"/>). Its condition: impact_simulation runs serially on the server world's thread (the
+    /// world's pin byte, read through sigdb feature <c>abilities.ecs_pin</c>, is set, and every call comes on that thread),
+    /// so no two calls touch one entity at once. Pending until the first Kiln native call of a server world checked its
+    /// iterator against kiln.world's view and that condition; off for the rest of a world where either fails (the natives
+    /// still run).</summary>
+    public const string NativesEcs = "abilities.natives.ecs";
+
     // Reported at the service's start, again under a new registry binding (the test kit's), and every 25 steps (about
     // once a second): abilities.buffs follows the server world (its registries come with it; a client hosts after its
     // mods loaded). ServiceCaps writes a row only when it changed.
@@ -45,6 +64,19 @@ internal static class AbilitiesCaps
             ModLog.Warn($"kiln.abilities: its sigdb features were not lowered: {e.Message}");
         }
         RefreshBuffs();
+        ReportNatives();
+        try
+        {
+            // gems.sockets (sigdb, both sides): served by kiln.items v7 on a server, by kiln.ui.values on a client
+            if (!ItemSockets.HasV7 && !GemForgeSockets.TableHere)
+                ServiceCaps.Lower(Gems.SocketsCapability, CapabilityReason.ServiceMissing,
+                    "neither kiln.items with gem sockets (v7) nor kiln.ui.values with gemforge_sockets is here");
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or TypeInitializationException
+                                      or FileNotFoundException or FileLoadException)
+        {
+            ModLog.Warn($"kiln.abilities: {Gems.SocketsCapability} was not lowered: {e.Message}");
+        }
         try
         {
             var (state, reason, text) = DecideList(PlayerStates.Status is { } st ? st.Reflection : null, Row("kiln.playerstate"), Row("players.reflection"));
@@ -70,6 +102,81 @@ internal static class AbilitiesCaps
         {
             ModLog.Warn($"kiln.abilities: {Buffs} was not reported: {e.Message}");
         }
+    }
+
+    private static unsafe void ReportNatives()
+    {
+        try
+        {
+            var t = AbilitiesNative.T;
+            var counters = AbilitiesNative.Counters();
+            var sync = DecideNatives(t != null, counters is { } c ? (c.Flags & AbilitiesNative.CountersNatives) != 0 : null,
+                AbilitiesNative.Has(t, nameof(AbilitiesNative.TableV2.NativeRegisterSync)), Row("abilities.natives"), "synchronous natives");
+            ServiceCaps.Report(NativesSync, sync.State, sync.Reason, sync.Text);
+            var attach = DecideNatives(t != null, counters is { } k ? (k.Flags & AbilitiesNative.CountersNatives) != 0 : null,
+                AbilitiesNative.Has(t, nameof(AbilitiesNative.TableV2.NativeDetach)), Row("abilities.natives"), "attachments");
+            ServiceCaps.Report(NativesAttach, attach.State, attach.Reason, attach.Text);
+            var ecs = DecideEcs(t != null, AbilitiesNative.Has(t, nameof(AbilitiesNative.TableV2.NativeEcsWrite)), counters is { } e ? e.EcsState : null,
+                counters is { } r ? r.EcsReason : 0, sync.State);
+            ServiceCaps.Report(NativesEcs, ecs.State, ecs.Reason, ecs.Text);
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or TypeInitializationException
+                                      or FileNotFoundException or FileLoadException)
+        {
+            ModLog.Warn($"kiln.abilities: {NativesSync} / {NativesAttach} were not reported: {e.Message}");
+        }
+    }
+
+    /// <summary>A native-thunk row (<c>abilities.natives.sync</c>, later <c>.attach</c>): kiln.abilities is here
+    /// (<paramref name="table"/>), its RegisterNative hook is in (<paramref name="hookIn"/>; null: the table has no
+    /// counters), the table has the member (<paramref name="member"/>), and the sigdb row <c>abilities.natives</c> is
+    /// not off. Static: none of it changes in a process. Pure.</summary>
+    internal static (CapabilityState State, CapabilityReason Reason, string Text) DecideNatives(bool table, bool? hookIn,
+        bool member, Capability? natives, string what)
+    {
+        if (!table) return (CapabilityState.Unavailable, CapabilityReason.ServiceMissing, "kiln.abilities is not loaded");
+        if (natives is { State: CapabilityState.Unavailable } row)
+            return (CapabilityState.Unavailable, row.Reason, $"needs abilities.natives: {row.ReasonText}");
+        if (!member || hookIn is null)
+            return (CapabilityState.Unavailable, CapabilityReason.ServiceOlder, $"kiln.abilities has no {what} (older than 0.2.0-dev.29)");
+        if (hookIn == false)
+            return (CapabilityState.Unavailable, CapabilityReason.Faulted, "kiln.abilities' RegisterNative hook is not in (see kiln.log)");
+        return (CapabilityState.Available, CapabilityReason.None, "");
+    }
+
+    /// <summary>The ECS bridge's row (<c>abilities.natives.ecs</c>): it needs synchronous natives, a table with the
+    /// bridge, and the live world's self-check (<paramref name="state"/>, <paramref name="reason"/>: KILN_NATIVE_ECS_*).
+    /// Pure.</summary>
+    internal static (CapabilityState State, CapabilityReason Reason, string Text) DecideEcs(bool table, bool member, uint? state,
+        uint reason, CapabilityState sync)
+    {
+        if (!table) return (CapabilityState.Unavailable, CapabilityReason.ServiceMissing, "kiln.abilities is not loaded");
+        if (sync != CapabilityState.Available) return (CapabilityState.Unavailable, CapabilityReason.ServiceMissing, "needs abilities.natives.sync");
+        if (!member || state is null)
+            return (CapabilityState.Unavailable, CapabilityReason.ServiceOlder, "kiln.abilities has no ECS bridge (older than 0.2.0-dev.29)");
+        return state switch
+        {
+            AbilitiesNative.EcsOn => (CapabilityState.Available, CapabilityReason.None, ""),
+            AbilitiesNative.EcsOff => reason switch
+            {
+                AbilitiesNative.EcsReasonNoWorldApi => (CapabilityState.Unavailable, CapabilityReason.ServiceOlder,
+                    "needs a kiln.world with foreign views (0.2.0-dev.29)"),
+                AbilitiesNative.EcsReasonLayout => (CapabilityState.Unavailable, CapabilityReason.Faulted,
+                    "kiln.world could not compute impact_simulation's view in this world (see kiln.log)"),
+                AbilitiesNative.EcsReasonFault => (CapabilityState.Unavailable, CapabilityReason.Faulted,
+                    "a foreign ECS access failed; the bridge is off for this world (a write may have begun)"),
+                AbilitiesNative.EcsReasonNotSerial => (CapabilityState.Unavailable, CapabilityReason.Faulted,
+                    "impact_simulation does not run serially on the world's thread in this world (its pin is clear, or a call came on " +
+                    "another thread): two calls could touch one entity at once"),
+                AbilitiesNative.EcsReasonPinUnknown => (CapabilityState.Unavailable, CapabilityReason.SymbolMissing,
+                    "the world's pin of impact_simulation to its thread cannot be read on this build (sigdb abilities.ecs_pin)"),
+                AbilitiesNative.EcsReasonCounts => (CapabilityState.Unavailable, CapabilityReason.Faulted,
+                    "the first native call's job counts are not kiln.world's view of impact_simulation in this world"),
+                _ => (CapabilityState.Unavailable, CapabilityReason.Faulted,
+                    "the first native call's iterator does not hold the native registry at impact::ImpactSystem's slot in this world"),
+            },
+            _ => (CapabilityState.Pending, CapabilityReason.Session, "waits for the first Kiln native call of a server world"),
+        };
     }
 
     /// <summary>Throws <see cref="KilnUnavailableException"/> naming <paramref name="name"/> when its row is not available
@@ -142,5 +249,12 @@ internal static class AbilitiesCaps
 /// are there before a mod asks for them, not from Kiln.Abilities' first use.</summary>
 internal static class AbilitiesStartup
 {
-    static AbilitiesStartup() => AbilitiesCaps.Ensure();
+    static AbilitiesStartup()
+    {
+        AbilitiesCaps.Ensure();
+        GemsCaps.Ensure();  // gem wave G1: gems.read, gems.triggers
+        GemCrafting.EnsureCaps();  // gem wave G3: gems.craft
+        GemSources.Start();        // 0.2.0-dev.29.15 (issue 61): the channel kiln:gemsources; a client's forge screen watch
+        GemPlaceholders.Start();   // gem wave: a removed mod's trigger gems run Kiln's trigger program, not none
+    }
 }

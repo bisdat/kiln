@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Runs one mod folder under KilnHarness with the services' recorders on and writes what its code defined into the folder:
-// docs/kiln/modding/baked.md. Route: the mod's own OnLoad, not attributes read by a generator, because a mod computes its
+// docs/kiln/modding/baked.md. A boot mod's OnBoot runs first through the kit's boot phase (KilnHarness.BootPhase), as at a start: a failure
+// there fails the bake; what it staged is not baked (the boot generation has it at every start). Route: the mod's own OnLoad, not attributes read by a generator, because a mod computes its
 // definitions (loops over its data, names built from strings, a helper library's builders, blocks compiled from JSON); only
 // running the code gives what the game gets at run time.
 using System.Text.Json;
@@ -31,6 +32,10 @@ internal sealed class BakeOptions
 
     /// <summary>Make no files, say what would be written (tests and --check).</summary>
     public bool DryRun { get; init; }
+
+    /// <summary>Opt into freezing this build's C# world-table declarations as boot data. Off for existing mods whose
+    /// declarations may depend on the running game's configuration, world or available services.</summary>
+    public bool WorldTables { get; init; }
 }
 
 internal static class Baker
@@ -74,9 +79,11 @@ internal static class Baker
         NativeExport.Baking = true;
         GameTree.Baking = true;
         VfxNative.Baking = true;
+        WorldTablesNative.Baking = true;
+        WorldTablesNative.ForgetBaked(id);
         GameTree.ForgetBaked(id);
         VfxNative.ForgetBaked(id);
-        JsonObject? quests, skills, vfx;
+        JsonObject? quests, skills, vfx, tables;
         try
         {
             using var harness = new KilnHarness(new KilnHarnessOptions
@@ -86,6 +93,19 @@ internal static class Baker
                 TempDirectory = options.TempDirectory,
                 WaitForOtherHarness = TimeSpan.FromMinutes(5),
             });
+            // a boot mod: its OnBoot runs first, as at a start (the kit's boot phase); what it stages is in the boot generation of every
+            // start, the first included, so nothing of it is baked. A failure there fails the bake with its reason.
+            if (manifest["boot"] is { } bootKey && !(bootKey is JsonValue off && off.TryGetValue<bool>(out var on) && !on))
+            {
+                var run = harness.BootPhase.Run(folder);
+                if (!run.Ok)
+                    throw new InvalidOperationException($"the OnBoot of {id} fails as it would at a start: {run.Reason}");
+                result.Notes.Add(run.Staged.Count == 0
+                    ? "a boot mod: its OnBoot staged nothing"
+                    : $"a boot mod: its OnBoot staged {string.Join(", ", run.Staged.Select(d => $"{d.Kind}/{d.Key}"))}; they are in the boot generation of every " +
+                      "start, the first included, so they are not baked (docs/kiln/modding/baked.md)");
+                foreach (var issue in run.Issues) result.Warnings.Add($"OnBoot: {issue.Code} {issue.Kind}/{issue.Key}: {issue.Reason}");
+            }
             var handle = harness.LoadFolder(folder);
             try
             {
@@ -112,14 +132,19 @@ internal static class Baker
             quests = QuestsDocument(id);
             skills = SkillsDocument(id, result);
             vfx = VfxDocument(id, folder);
+            tables = options.WorldTables ? TablesDocument(id) : null;
+            if (!options.WorldTables && WorldTablesNative.BakedDocument(id) is not null)
+                result.Notes.Add("C# world-table blocks keep their runtime next-start behavior; set KilnBakeWorldTables=true only for definitions independent of runtime conditions");
         }
         finally
         {
             NativeExport.Baking = false;
             GameTree.Baking = false;
             VfxNative.Baking = false;
+            WorldTablesNative.Baking = false;
         }
         Write(folder, id, quests, skills, vfx, result, options);
+        Put(folder, "blocks.tables.json", tables, "world tables", result, options);
         RemoveOtherIds(folder, id, result, options);
         return result;
     }
@@ -129,6 +154,7 @@ internal static class Baker
     internal static void Clean(string folder, string id, BakeResult result, BakeOptions options)
     {
         Write(folder, id, null, null, null, result, options);
+        Put(folder, "blocks.tables.json", null, "world tables", result, options);
         RemoveOtherIds(folder, id, result, options);
     }
 
@@ -217,6 +243,13 @@ internal static class Baker
                     foreach (var (name, _) in s) names.Add($"{section}/{name}");
         }
         return names;
+    }
+
+    internal static JsonObject? TablesDocument(string mod)
+    {
+        var doc=WorldTablesNative.BakedDocument(mod);
+        if(doc is not null) doc["comment"]=Comment;
+        return doc;
     }
 
     private static void Write(string folder, string mod, JsonObject? quests, JsonObject? skills, JsonObject? vfx, BakeResult result, BakeOptions options)

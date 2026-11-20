@@ -299,7 +299,8 @@ fn wait_ready(inst: &Instance, mut watch: LogWatch, timeout: Duration, mut launc
             }
             Launch::Systemd(unit) => {
                 if t0.elapsed() > Duration::from_secs(3) && !unit_running(unit) {
-                    bail!("{unit} is {} (journalctl --user -u {unit})", unit_state(unit).unwrap_or_else(|| "unknown".into()));
+                    let reason = crate::run::last_stop(inst).map(|s| format!("; Kiln stopped the start: {} {}", s.reason, s.advice)).unwrap_or_default();
+                    bail!("{unit} is {}{reason} (journalctl --user -u {unit})", unit_state(unit).unwrap_or_else(|| "unknown".into()));
                 }
             }
         }
@@ -412,6 +413,9 @@ pub fn stop(inst: &Instance, timeout: Option<Duration>) -> Result<()> {
 
 pub fn status(inst: &Instance) -> Result<i32> {
     let pid = procs::find_server(&inst.prefix);
+    if pid.is_none() && let Some(stop) = crate::run::last_stop(inst) {
+        println!("Last start stopped by Kiln: {}\n{}", stop.reason, stop.advice);
+    }
     println!("instance  {} ({})", inst.name, inst.file.display());
     let build = steam::buildid(&inst.dir).map(|b| format!(", build {b}")).unwrap_or_default();
     let installed = if inst.exe().exists() { "installed" } else { "NOT INSTALLED" };
@@ -737,6 +741,7 @@ pub fn port_flow(inst: &Instance, old: Option<PathBuf>, new: &Path, f: &FlowArgs
         next.push(format!("the port is incomplete: low confidence {:?}, lost {:?} (see {})", rep.low, rep.lost,
             rep.out.join("report.txt").display()));
     }
+    next.extend(next_for_sigs(&rep));
     if !rep.defs_unchanged {
         next.push(format!("the definitions need changes: review and apply {} to the Kiln tree (git apply), redeploy \
                            (kilnctl deploy {}), then run kilnctl port {} --mark", rep.patch().display(), inst.name, inst.name));
@@ -779,6 +784,14 @@ pub fn port_flow(inst: &Instance, old: Option<PathBuf>, new: &Path, f: &FlowArgs
         if next.is_empty() { "nothing left to do".to_string() } else { next.iter().map(|n| format!("- {n}")).collect::<Vec<_>>().join("\n") });
     std::fs::write(rep.out.join("NEXT.txt"), text)?;
     Ok(FlowOutcome { marked, summary })
+}
+
+/// NEXT.txt lines for the port's descriptor reviews. They do not stop a mark. A review can also flag changed code
+/// whose descriptor still matches; only a refused descriptor's sig/<symbol> row is turned off by the core.
+pub fn next_for_sigs(rep: &sigport::PortReport) -> Vec<String> {
+    rep.sig_review.iter()
+        .map(|l| format!("{l}; review the descriptor before using typed hooks or calls; only refused descriptors are disabled automatically (docs/kiln/sigport.md)"))
+        .collect()
 }
 
 pub fn port_cmd(inst: &Instance, old: Option<PathBuf>, new: Option<PathBuf>, f: &FlowArgs) -> Result<i32> {

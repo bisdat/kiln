@@ -14,8 +14,51 @@ public sealed class QueriesTests
     private static KilnHarness Started()
     {
         var kiln = new KilnHarness();
+        kiln.Queries.Voxels = _ => FakeVoxelAnswer.Clear;
         kiln.Step(2);
         return kiln;
+    }
+
+    [Fact]
+    public void An_unscripted_ray_is_unavailable_and_costs_no_allowance()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Step(2);
+        Assert.Equal("queries.voxel_ray", Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Queries.RaycastVoxels(A, B))).Capability);
+        Assert.Equal("queries.ground", Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Queries.GroundBelow(A))).Capability);
+        Assert.Empty(kiln.Queries.Rays);
+        kiln.Queries.MaxRaysPerStep = 1;
+        kiln.Queries.Voxels = _ => FakeVoxelAnswer.Clear;
+        Assert.True(kiln.Run(() => Queries.GroundBelow(A)).Ok);
+        Assert.Single(kiln.Queries.Rays);
+        kiln.Queries.Voxels = null;
+        Assert.Equal("queries.ground", Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Queries.GroundBelow(A))).Capability);
+        Assert.True(kiln.Run(() => Queries.EntitiesInSphere(A, 1)).Ok);
+    }
+
+    [Theory]
+    [InlineData("kiln.world")]
+    [InlineData("world.entities")]
+    [InlineData("world.find")]
+    public void A_dependency_lost_between_refreshes_refuses_by_the_queries_members_row(string dependency)
+    {
+        using var kiln = Started();
+        var a = kiln.Entities.Create(new WorldPosition(0, 10, 0));
+        var b = kiln.Entities.Create(new WorldPosition(20, 10, 0));
+        Assert.True(kiln.Run(() => Queries.VoxelLineOfSight(a, b)).Ok);
+        Assert.True(kiln.Run(() => Queries.EntitiesInSphere(A, 1)).Ok);
+        kiln.Run(() => Capabilities.Report(dependency, CapabilityState.Unavailable, CapabilityReason.Faulted, "dependency lost between refreshes"));
+        try
+        {
+            if (dependency != "world.find")
+                Assert.Equal("queries.line_of_sight", Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Queries.VoxelLineOfSight(a, b))).Capability);
+            Assert.Equal("queries.overlap_origins", Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Queries.EntitiesInSphere(A, 1))).Capability);
+            // The ray itself does not use kiln.world's entity functions.
+            Assert.True(kiln.Run(() => Queries.GroundBelow(A)).Ok);
+        }
+        finally { kiln.Run(() => Capabilities.Report(dependency, CapabilityState.Available)); }
+        Assert.True(kiln.Run(() => Queries.VoxelLineOfSight(a, b)).Ok);
+        Assert.True(kiln.Run(() => Queries.EntitiesInSphere(A, 1)).Ok);
     }
 
     [Fact]
@@ -168,12 +211,10 @@ public sealed class QueriesTests
         using var kiln = Started();
         var a = kiln.Entities.Create(new WorldPosition(0, 10, 0));
         var b = kiln.Entities.Create(new WorldPosition(20, 10, 0));
-        // the composed rows are decided when a member needs them or at the service's refresh (every 25 steps): right after
-        // a new harness the row alone may still read as the report before the kit's ray row left it
-        for (var i = 0; i < 30 && !kiln.Run(() => Capabilities.Is("queries.ground")); i++) kiln.Step(1);
+        // the test kit decides the composed rows again whenever one of its rows changes (here: the voxel script)
         Assert.True(kiln.Run(() => Capabilities.Is("queries.ground")));
         kiln.Capabilities.Override("queries.voxel_ray", false, "switched off by the test");
-        kiln.Step(30);   // the rows built on the ray follow at the service's refresh
+        Assert.False(kiln.Run(() => Capabilities.Is("queries.ground")));   // the rows built on the ray follow at once
         Assert.Equal("queries.voxel_ray", Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Queries.RaycastVoxels(A, B))).Capability);
         Assert.Equal("queries.ground", Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Queries.GroundBelow(A))).Capability);
         Assert.Equal("queries.line_of_sight", Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Queries.VoxelLineOfSight(a, b))).Capability);
@@ -211,6 +252,53 @@ public sealed class QueriesTests
         // and a row that is really off still refuses: the ray's row switched off by the test
         kiln.Capabilities.Override("queries.voxel_ray", false, "switched off by the test");
         Assert.Equal("queries.ground", Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Queries.GroundBelow(A))).Capability);
+    }
+
+    [Fact]
+    public void A_test_switch_of_a_composed_row_wins_over_the_services_own_row()
+    {
+        // 01-world-queries SOL: Override("queries.ground", false) changed only the kit's table; Kiln.Capabilities read the
+        // managed row (available) and GroundBelow still answered Ok.
+        using var kiln = Started();
+        Assert.True(kiln.Run(() => Queries.GroundBelow(A)).Ok);   // the row is reported and available
+        Assert.True(kiln.Run(() => Capabilities.Is("queries.ground")));
+        kiln.Capabilities.Override("queries.ground", false, "switched off by the test");
+        Assert.False(kiln.Run(() => Capabilities.Is("queries.ground")));
+        var row = kiln.Run(() => Capabilities.Get("queries.ground"));
+        Assert.Equal((CapabilityState.Unavailable, CapabilityReason.Policy, "switched off by the test"), (row.State, row.Reason, row.ReasonText));
+        Assert.Contains(kiln.Run(() => Capabilities.All), r => r.Name == "queries.ground" && !r.IsAvailable);
+        Assert.Equal("queries.ground", Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Queries.GroundBelow(A))).Capability);
+        Assert.Single(kiln.Queries.Rays);   // the refused call cast no ray
+        kiln.Capabilities.ClearOverride("queries.ground");
+        Assert.True(kiln.Run(() => Capabilities.Is("queries.ground")));
+        Assert.True(kiln.Run(() => Queries.GroundBelow(A)).Ok);
+    }
+
+    [Fact]
+    public void A_test_switch_cannot_lift_a_composed_row_the_service_holds_off()
+    {
+        using var kiln = Started();
+        kiln.Capabilities.Override("queries.voxel_ray", false, "switched off by the test");
+        kiln.Capabilities.Override("queries.ground", true, "switched on by the test");
+        Assert.False(kiln.Run(() => Capabilities.Is("queries.ground")));   // the worse row is shown
+        Assert.Equal("queries.voxel_ray", Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Queries.RaycastVoxels(A, B))).Capability);
+        Assert.Equal("queries.ground", Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Queries.GroundBelow(A))).Capability);
+    }
+
+    [Fact]
+    public void A_composed_row_follows_a_switch_of_its_input_at_once_without_a_step()
+    {
+        // the raw read lagged: a composed row was decided again only by a member's call or the refresh every 25 steps
+        using var kiln = new KilnHarness();
+        kiln.Step(2);
+        Assert.False(kiln.Run(() => Capabilities.Is("queries.ground")));    // no voxel script: no ray
+        kiln.Queries.Voxels = _ => FakeVoxelAnswer.Clear;                     // the kit's ray row turns on
+        Assert.True(kiln.Run(() => Capabilities.Is("queries.ground")));     // and the row built on it, before any step
+        kiln.Capabilities.Override("queries.voxel_ray", false, "switched off by the test");
+        Assert.False(kiln.Run(() => Capabilities.Is("queries.ground")));
+        Assert.False(kiln.Run(() => Capabilities.Is("queries.line_of_sight")));
+        kiln.Capabilities.ClearOverride("queries.voxel_ray");
+        Assert.True(kiln.Run(() => Capabilities.Is("queries.ground")));
     }
 
     [Fact]

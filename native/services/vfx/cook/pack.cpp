@@ -66,7 +66,7 @@ void add_resource(CookResult& r, Shared& sh, const Guid& g, uint32_t type, Bytes
     // A second replacement of the same game material is kept on standby (kiln.vfx serves it if the first one's mod unloads); anything else
     // under a GUID that is taken is dropped.
     if (!fresh && !override) return;
-    r.resources.push_back({g, type, std::move(data), what, override, override ? mod : std::string(), !fresh});
+    r.resources.push_back({g, type, std::move(data), what, override, mod, !fresh});
 }
 
 }  // namespace
@@ -128,6 +128,10 @@ CookResult cook_mods(const std::vector<ModInput>& mods, const CookOptions& opt) 
     out.capacity = opt.capacity;
     const ReadFile read = opt.read_file ? opt.read_file : ReadFile(host_read);
     Budget budget(opt.game, opt.capacity);
+    auto refuse_mod = [&out](const std::string& id, const std::string& why) {
+        out.refused_mods.push_back(why);
+        out.mod_errors[id].push_back(why);
+    };
 
     // A bad module is a fatal compile in the game: refuse everything before it can get there.
     for (Module m : {Module::Emitter, Module::Sprite, Module::Light}) {
@@ -255,6 +259,7 @@ CookResult cook_mods(const std::vector<ModInput>& mods, const CookOptions& opt) 
         }
 
         auto finish = [&] {
+            for (const std::string& e : diag.errors) out.mod_errors[mod.id].push_back(e);
             for (const std::string& e : diag.errors) out.errors.push_back(e);
             for (const std::string& w : diag.warnings) out.warnings.push_back(w);
             for (const std::string& n : diag.notes) out.notes.push_back(n);
@@ -270,7 +275,7 @@ CookResult cook_mods(const std::vector<ModInput>& mods, const CookOptions& opt) 
             continue;
         }
         if (mod.side != "client" && mod.clients != "mod") {
-            out.refused_mods.push_back(mod.id + ": a new VFX or material needs \"clients\": \"mod\" (it has \"" + mod.clients + "\"): players without the mod could be sent an effect their game aborts on");
+            refuse_mod(mod.id, mod.id + ": a new VFX or material needs \"clients\": \"mod\" (it has \"" + mod.clients + "\"): players without the mod could be sent an effect their game aborts on");
             finish();
             continue;
         }
@@ -627,7 +632,7 @@ CookResult cook_mods(const std::vector<ModInput>& mods, const CookOptions& opt) 
         }
         std::string over;
         if (!budget.try_add(need, &over)) {
-            out.refused_mods.push_back(mod.id + ": over the game's limits, none of its " + std::to_string(built_vfx.size()) + " VFX and " + std::to_string(built_materials.size()) +
+            refuse_mod(mod.id, mod.id + ": over the game's limits, none of its " + std::to_string(built_vfx.size()) + " VFX and " + std::to_string(built_materials.size()) +
                                        " material(s) are registered (" + over + ")");
             finish();
             continue;
@@ -674,7 +679,8 @@ CookResult cook_mods(const std::vector<ModInput>& mods, const CookOptions& opt) 
             add_blob(out, shared, t.hash, t.blob.data(), t.blob.size(), mod.id + " texture " + key);
             add_resource(out, shared, t.guid, kTypeTexture, std::move(t.resource), mod.id + " texture " + key);
         }
-        for (size_t i = 0; i < built_vfx.size(); ++i) add_resource(out, shared, built_vfx[i].first, kTypeVfx, std::move(built_vfx[i].second), vfx_names[i]);
+        for (size_t i = 0; i < built_vfx.size(); ++i)
+            add_resource(out, shared, built_vfx[i].first, kTypeVfx, std::move(built_vfx[i].second), vfx_names[i], false, mod.id);
         for (BuiltBlock& b : built_blocks) out.blocks.push_back(std::move(b));
         finish();
     }

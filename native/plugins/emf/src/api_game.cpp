@@ -11,6 +11,7 @@
 #include <map>
 
 #include "emf_internal.h"
+#include "slow_parts.h"
 #include "v26_model.h"
 
 namespace kemf {
@@ -700,6 +701,7 @@ std::vector<WsChange> g_ws_queue;
 std::vector<std::unique_ptr<WsWatch>> g_ws_watches;
 std::map<std::string, double> g_ws_persist;  // kept for the current slot: key -> EMF value
 uint16_t g_ws_persist_slot = 0;
+uint64_t g_ws_persist_gen = 0;  // bumped at each world load: a slot's file read that arrives late is for an older load
 
 const std::pair<const char*, const char*> kAliases[] = {
     {"durability", "enableDurability"}, {"starving", "enableStarvingDebuff"}, {"food_buff", "foodBuffDurationFactor"},
@@ -857,11 +859,22 @@ bool api_ws_info(uint32_t index, EmfWorldSettingInfo* out) {
     return true;
 }
 
+// The slot's file is written on the disk thread (never on the tick), from the values as they are when it runs: after a
+// world load's read of the same file (same thread, in order), so a value kept before that read finished is not lost.
 void save_persist_locked() {
     if (!g_ws_persist_slot) return;
-    std::string text = "; EMF world settings kept for this world slot (kiln-emf); durations in minutes\n";
-    for (const auto& [k, v] : g_ws_persist) text += k + "=" + format("%.10g", v) + "\n";
-    write_file_atomic(P.config / L"emf" / L"world_settings" / to_wide(ws_file(g_ws_persist_slot)), text);
+    io_post("writing the kept EMF world settings", [] {
+        std::string text = "; EMF world settings kept for this world slot (kiln-emf); durations in minutes\n";
+        uint16_t slot = 0;
+        {
+            std::lock_guard lock(g_ws_mutex);
+            slot = g_ws_persist_slot;
+            for (const auto& [k, v] : g_ws_persist) text += k + "=" + format("%.10g", v) + "\n";
+        }
+        if (!slot) return;
+        const auto file = P.config / L"emf" / L"world_settings" / to_wide(ws_file(slot));
+        if (!write_file_atomic(file, text)) logf(KILN_LOG_WARN, "cannot write %s", path_utf8(file).c_str());
+    });
 }
 
 void fire_ws(const std::vector<std::pair<std::string, double>>& changed) {
@@ -945,43 +958,56 @@ void apply_ws_queue() {
 
 }  // namespace
 
+// On the tick (poll_saves): the slot changes at once; its file is read on the disk thread, which queues the kept values
+// for the next Pre's apply_ws_queue. A value a mod keeps before the read is done wins over the file's.
 void persisted_settings_after_load(uint16_t slot) {
-    std::map<std::string, double> kept;
+    uint64_t gen = 0;
     {
         std::lock_guard lock(g_ws_mutex);
         g_ws_persist_slot = slot;
         g_ws_persist.clear();
+        gen = ++g_ws_persist_gen;
+    }
+    if (!slot) return;
+    io_post("reading the kept EMF world settings", [slot, gen] {
         std::string text;
-        if (!slot || !read_file(P.config / L"emf" / L"world_settings" / to_wide(ws_file(slot)), &text)) return;
-        size_t i = 0;
-        while (i < text.size()) {
-            size_t j = text.find('\n', i);
-            if (j == std::string::npos) j = text.size();
-            std::string line = text.substr(i, j - i);
-            i = j + 1;
-            if (line.empty() || line[0] == ';') continue;
-            const size_t eq = line.find('=');
-            if (eq == std::string::npos) continue;
-            char* end = nullptr;
-            const double v = std::strtod(line.c_str() + eq + 1, &end);
-            g_ws_persist[line.substr(0, eq)] = v;
+        if (!read_file(P.config / L"emf" / L"world_settings" / to_wide(ws_file(slot)), &text)) return;
+        std::map<std::string, double> kept;
+        {
+            std::lock_guard lock(g_ws_mutex);
+            if (gen != g_ws_persist_gen) return;  // another world loaded meanwhile
+            size_t i = 0;
+            while (i < text.size()) {
+                size_t j = text.find('\n', i);
+                if (j == std::string::npos) j = text.size();
+                std::string line = text.substr(i, j - i);
+                i = j + 1;
+                if (line.empty() || line[0] == ';') continue;
+                const size_t eq = line.find('=');
+                if (eq == std::string::npos) continue;
+                char* end = nullptr;
+                const double v = std::strtod(line.c_str() + eq + 1, &end);
+                if (g_ws_persist.try_emplace(line.substr(0, eq), v).second) kept[line.substr(0, eq)] = v;
+            }
         }
-        kept = g_ws_persist;
-    }
-    for (const auto& [k, v] : kept) {
-        logf(KILN_LOG_INFO, "world setting %s = %g kept for slot 0x%04x: applying it", k.c_str(), v, slot);
-        std::lock_guard lock(g_ws_mutex);
-        if (const WsEntry* e = ws_find_locked(k)) g_ws_queue.push_back({e->index, false, v, false, nullptr});
-        else logf(KILN_LOG_WARN, "kept world setting %s: unknown setting, skipped", k.c_str());
-    }
+        for (const auto& [k, v] : kept) {
+            logf(KILN_LOG_INFO, "world setting %s = %g kept for slot 0x%04x: applying it", k.c_str(), v, slot);
+            std::lock_guard lock(g_ws_mutex);
+            if (const WsEntry* e = ws_find_locked(k)) g_ws_queue.push_back({e->index, false, v, false, nullptr});
+            else logf(KILN_LOG_WARN, "kept world setting %s: unknown setting, skipped", k.c_str());
+        }
+    });
 }
 
-void game_server_pre() {
+void game_server_pre(SlowParts* parts) {
     poll_saves();
+    parts->part("saves", qpc_ns());
     ws_refresh();
     apply_ws_queue();
     fire_ws(ws_refresh());
+    parts->part("world settings", qpc_ns());
     poll_ready();
+    parts->part("teleports", qpc_ns());
 }
 
 void game_on_ready() {

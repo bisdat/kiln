@@ -31,7 +31,7 @@ is an error.
 ### Components (what stage.sh writes)
 | Component | Sides | Default | Files |
 |---|---|---|---|
-| `core` | server, client | yes | `dinput8.dll`, `kiln/kiln-core.{dll,pdb}`, `kiln/services/*.{dll,pdb}`, `kiln/host/Kiln.*`, `kiln/dotnet/**` (pinned .NET 10.0.14 win-x64), `kiln/kiln.json` (config), Kiln's plugins other than kiln-emf |
+| `core` | server, client | yes | `dinput8.dll`, `kiln/kiln-core.{dll,pdb}`, `kiln/services/*.{dll,pdb}`, `kiln/host/Kiln.*`, `kiln/dotnet/**` (pinned .NET 10.0.14 win-x64), `kiln/kiln.json` (config), `kiln/compat-rules.json` (Kiln's shipped compat rules, `native/core/compat-rules.json`; not config: every update replaces it, the player's own rules live in `<configDir>`), Kiln's plugins other than kiln-emf |
 | `sigdb-server` | server | yes | `kiln/sigdb/server.json`, `server.d/*.json`, `builds/server/*.json` |
 | `sigdb-client` | client | yes | `kiln/sigdb/client.json`, `client.d/*.json` (`tools/sigport/sides.py compose client`), `builds/client/*.json` |
 | `admin` | server | yes | `kiln/mods/kiln-admin/{Kiln.Admin.dll,.pdb,kiln.mod.json}` |
@@ -119,7 +119,9 @@ as it is; otherwise it downloads from `builds.dotnet.microsoft.com` and checks t
     `<data>/installs/<installId>.json` (`game::write_record`).
 
 `status` reports the receipt, the current proxy class, the files changed since (size mismatch, else sha256 cached by
-size+mtime per process) and a newer bundle in `<data>/runtime/` for the side.
+size+mtime per process; a missing file counts), `missingFiles` (since 0.2.0-dev.29.18: the changed files that are not
+in the folder at all, such as a DLL an antivirus removed; Runtime offers Repair, the same bundle again, for them) and
+a newer bundle in `<data>/runtime/` for the side.
 
 ## Uninstall and rollback
 `uninstall` (refused while running/updating): checks first that every original (the oldest `replaced[]` record per

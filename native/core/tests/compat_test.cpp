@@ -12,6 +12,8 @@
 #include "chain_status.h"
 #include "compat.h"
 #include "compat_rules.h"
+#include "hook_owner.h"
+#include "module_place.h"
 #include "nlohmann/json.hpp"
 
 namespace {
@@ -117,9 +119,10 @@ ChainRow row(const char* file, const char* status, bool late = false, const char
     return r;
 }
 
+// Each link is labelled like the target's symbol (a service hooks a symbol under its own name).
 json target(const char* rva, const char* symbol, std::vector<const char*> owners, json before = nullptr, json over = nullptr) {
     json links = json::array();
-    for (const char* o : owners) links.push_back({{"owner", o}, {"kind", "raw"}, {"priority", 0}, {"label", "x"}});
+    for (const char* o : owners) links.push_back({{"owner", o}, {"kind", "raw"}, {"priority", 0}, {"label", symbol ? symbol : "x"}});
     return {{"rva", rva}, {"symbol", symbol ? json(symbol) : json(nullptr)}, {"label", symbol ? symbol : "rva"}, {"links", links},
             {"foreignBefore", before}, {"foreignOver", over}};
 }
@@ -149,8 +152,10 @@ void overlap_cases() {
         check(strings(o[0]["owners"]) == std::vector<std::string>({"chat", "emf"}), "foreign-before: owners are short and unique");
         check(o[0]["fix"] == "late" && o[0]["chainEntry"]["status"] == "loaded" && o[0]["chainEntry"]["late"] == false, "foreign-before: fix late, chain entry");
         const std::string msg = o[0]["message"].get<std::string>();
-        check(msg.find("xhl-core.dll+0x2a0") != std::string::npos && msg.find("chat, emf") != std::string::npos &&
-              msg.find("[late]") != std::string::npos, "foreign-before: the message names both sides and the fix: " + msg);
+        check(msg.find("xhl-core.dll+0x2a0 hooked the function before Kiln did; Kiln's chat/ChatLogAdd (kiln-chat), "
+                       "chat/ChatLogAdd (kiln-emf) chained over it.") != std::string::npos &&
+                  msg.find("[late]") != std::string::npos,
+              "foreign-before: the message names both sides (each hook with its owner, once) and the fix: " + msg);
     }
     // the same module already late: nothing to move
     o = compute_overlaps(map, {row("XHL-Core.dll", "loaded", true)}, {});
@@ -169,6 +174,10 @@ void overlap_cases() {
     if (o.size() == 1) {
         check(o[0]["kind"] == "foreign-over" && o[0]["fix"] == "none", "foreign-over: kind, fix none");
         check(strings(o[0]["owners"]) == std::vector<std::string>({"items", "emf:coolmod"}), "foreign-over: owners");
+        const std::string msg = o[0]["message"].get<std::string>();
+        check(msg.rfind("xhl-core.dll+0x4410 hooked over Kiln's gameplay/InventoryTransfer (kiln-items), "
+                        "gameplay/InventoryTransfer (emf:coolmod). Kiln's detour stays armed", 0) == 0,
+              "foreign-over: the message names each hook with its owner: " + msg);
     }
     map["targets"].push_back(target("0x5000", "a/B", {"service:kiln-a.dll"}, dest("one.dll", "0x1"), dest("two.dll", "0x2")));
     o = compute_overlaps(map, chain, {});
@@ -214,6 +223,31 @@ void overlap_cases() {
     check(o.size() == 1 && o[0]["fix"] == "none", "refused for another reason: fix none");
     // deterministic: same input, same output
     check(compute_overlaps(map, chain, refused) == compute_overlaps(map, chain, refused), "compute_overlaps is deterministic");
+
+    // GitHub issue 39: three sigdb symbols name ItemRegistryFind, and the map's label is the alphabetically first
+    // (build/ItemFind), while the only hook on it is kiln-content's content/ItemRegistryFind. The line names that hook.
+    map = {{"targets", json::array({{{"rva", "0xe94470"}, {"symbol", "build/ItemFind"}, {"label", "build/ItemFind"},
+                                     {"links", json::array({{{"owner", "service:kiln-content.dll"}, {"kind", "raw"}, {"priority", 0},
+                                                             {"label", "content/ItemRegistryFind"}}})},
+                                     {"foreignBefore", dest("quick-deposit.dll", "0x16100")}, {"foreignOver", nullptr}}})},
+           {"foreign", json::array()}};
+    o = compute_overlaps(map, {}, {});
+    check(o.size() == 1 && o[0]["symbol"] == "build/ItemFind" && strings(o[0]["owners"]) == std::vector<std::string>({"content"}),
+          "issue 39: the row keeps the sigdb symbol and the short owners (rules and the launcher match on them)");
+    if (o.size() == 1) {
+        const std::string msg = o[0]["message"].get<std::string>();
+        check(msg.rfind("quick-deposit.dll+0x16100 hooked the function before Kiln did; Kiln's content/ItemRegistryFind "
+                        "(kiln-content) chained over it.", 0) == 0 && msg.find("build/ItemFind") == std::string::npos,
+              "issue 39: the line names the hook and its owner, not the first sigdb symbol: " + msg);
+    }
+    // the owner as the lines show it (hook_owner.h)
+    check(hook_owner_text("service:kiln-content.dll") == "kiln-content" && hook_owner_text("plugin:kiln-emf.DLL") == "kiln-emf" &&
+              hook_owner_text("emf:coolmod") == "emf:coolmod" && hook_owner_text("native:fps-unlock") == "native:fps-unlock" &&
+              hook_owner_text("kiln") == "kiln" && hook_owner_text("") == "",
+          "hook_owner_text: service and plugin DLLs by name, other owners as they are");
+    check(hook_link_text("content/ItemRegistryFind", "service:kiln-content.dll") == "content/ItemRegistryFind (kiln-content)" &&
+              hook_link_text("a/B", "") == "a/B",
+          "hook_link_text: <label> (<owner>), the label alone without an owner");
 }
 
 // The reports are built from rows the core wrote itself: `refused` has null symbol, rva, module and offset. Nothing in
@@ -371,6 +405,131 @@ void late_limit_cases() {
           "disable of a mod whose DLL the proxy had loaded: not applied, no \"switched off\": " + oc.note);
 }
 
+// dev.29 `before` (a DLL that must load before another): read like every rule, and reported on the rows' order. The case
+// of a player's report: Auto Loot Plus (a dllmain native, [profile]) must patch the game's imports before Ultimate ASI
+// Loader ([chain], `..\xinput9_1_0.dll`) redirects them; the launcher loads UAL late and keeps ALP early.
+void before_cases() {
+    const json alp = {{"mod", "native:auto-loot-plus"}}, ual = {{"engine", "ultimate-asi-loader"}};
+    const json doc = {{"format", 1}, {"rules", json::array({{{"id", "alp-first"}, {"when", json::array({alp, ual})}, {"action", "before"},
+                                                            {"subject", alp}, {"target", ual}, {"message", "UAL loads after Kiln."}}})}};
+    const ParseResult pr = parse_rules(doc.dump(), "shipped");
+    check(pr.ok && pr.rules.size() == 1 && pr.problems.empty() && pr.dropped == 0, "before: read without a problem");
+    if (pr.rules.size() != 1) return;
+    const Rule& r = pr.rules[0];
+    check(r.action == "before" && r.has_subject && r.has_target && r.target.kind == Matcher::Kind::Engine &&
+              r.target.value == "ultimate-asi-loader" && r.subject.kind == Matcher::Kind::Mod, "before: its subject and target");
+    Facts facts;
+    facts.mods = {"kiln:auto-loot-plus"};
+    facts.engines = {"kiln", "ultimate-asi-loader"};
+    check(evaluate(pr.rules, facts).size() == 1, "before: fires on its when");
+
+    ChainRow ual_row = row("xinput9_1_0.dll", "loaded");
+    ual_row.path = "Z:\\game\\xinput9_1_0.dll";
+    ual_row.engine = "ultimate-asi-loader";
+    ChainRow alp_row = row("dinput8.dll", "loaded", false, "profile");
+    alp_row.mod = "kiln:auto-loot-plus";
+    ChainRow ual_late = ual_row, alp_late = alp_row;
+    ual_late.late = alp_late.late = true;
+    RuleContext ctx;
+    // the launcher's plan: UAL late, ALP early
+    Outcome oc = outcome_of(r, {ual_late, alp_row}, facts, ctx);
+    check(oc.applied && oc.note == "dinput8.dll loaded before xinput9_1_0.dll", "before: UAL late, ALP early: applied: " + oc.note);
+    // dev.28's starts: both early ([chain] first), both late (the same order), ALP late
+    for (const auto& [rows, what] : {std::make_pair(std::vector<ChainRow>{ual_row, alp_row}, "both early"),
+                                     std::make_pair(std::vector<ChainRow>{ual_late, alp_late}, "both late"),
+                                     std::make_pair(std::vector<ChainRow>{ual_row, alp_late}, "ALP late")}) {
+        oc = outcome_of(r, rows, facts, ctx);
+        check(!oc.applied && oc.note.find("asks dinput8.dll to load before xinput9_1_0.dll") != std::string::npos &&
+                  oc.note.find("activate the profile again") != std::string::npos, std::string("before: ") + what + ": not applied: " + oc.note);
+    }
+    // a late UAL that another loader had started first loaded early after all
+    ChainRow ual_ignored = ual_late;
+    ual_ignored.late_ignored = true;
+    oc = outcome_of(r, {ual_ignored, alp_row}, facts, ctx);
+    check(!oc.applied, "before: a [late] that had no effect does not count as late");
+    // UAL is not a chain entry (Windows loaded it next to the game): nothing to check, said so
+    oc = outcome_of(r, {alp_row}, facts, ctx);
+    check(!oc.applied && oc.note.find("no chain entry of this start is engine ultimate-asi-loader") != std::string::npos,
+          "before: no target row: " + oc.note);
+    // a failed row is not loaded at all
+    ChainRow alp_failed = alp_row;
+    alp_failed.status = "failed";
+    oc = outcome_of(r, {ual_late, alp_failed}, facts, ctx);
+    check(!oc.applied && oc.note.find("mod native:auto-loot-plus") != std::string::npos, "before: a failed subject is no row: " + oc.note);
+    // module matchers, within one phase: list order
+    const Rule by_name = one_rule({{"id", "b2"}, {"action", "before"}, {"subject", {{"module", "first.dll"}}}, {"target", {{"module", "second*.dll"}}}});
+    check(by_name.has_target, "before with module matchers: read");
+    oc = outcome_of(by_name, {row("first.dll", "loaded"), row("second-a.dll", "loaded")}, facts, ctx);
+    check(oc.applied && oc.note == "first.dll loaded before second-a.dll", "before: list order in one phase: " + oc.note);
+    oc = outcome_of(by_name, {row("second-a.dll", "loaded"), row("first.dll", "loaded")}, facts, ctx);
+    check(!oc.applied, "before: the wrong list order in one phase");
+    // A requested late load is not evidence it happened; every matched DLL must have loaded.
+    oc = outcome_of(by_name, {row("first.dll", "loaded"), row("second-a.dll", "late", true)}, facts, ctx);
+    check(!oc.applied, "before: pending target is not loaded");
+    oc = outcome_of(by_name, {row("first.dll", "loaded"), row("second-a.dll", "loaded"),
+                              row("second-b.dll", "failed")}, facts, ctx);
+    check(!oc.applied, "before: a failed wildcard target must not disappear");
+    ChainRow duplicate = row("second-a.dll", "duplicate");
+    oc = outcome_of(by_name, {row("first.dll", "loaded"), duplicate}, facts, ctx);
+    check(!oc.applied, "before: a duplicate row does not establish its original load order");
+    // the same rule's report line in hooks.json would carry its target: an older core drops the whole rule instead
+    const Rule late_with_target = one_rule({{"id", "x"}, {"action", "late"}, {"subject", {{"module", "a.dll"}}}, {"target", ual}});
+    check(late_with_target.id.empty(), "a target belongs to before only");
+}
+
+// netjunk's report (2026-11-20): two Library DLLs named dinput8.dll (a ShroudLink player addon and Building Tools). The
+// lines name each module's file too, and the chain entry is the one at that path, not the first of that name.
+void module_place_cases() {
+    const std::string game = "D:\\SteamLibrary\\steamapps\\common\\Enshrouded";
+    const std::string lib = "C:\\Users\\p\\AppData\\Local\\Kiln\\library\\native\\building-tools\\0.0.0+26bc47c7\\dinput8.dll";
+    check(module_path_text(game + "\\kiln\\chain\\xhl-core\\xhl-core.dll", game) == "kiln/chain/xhl-core/xhl-core.dll",
+          "path text: a module under the game folder is relative, with '/'");
+    check(module_path_text("\\\\?\\d:\\steamlibrary\\STEAMAPPS\\common\\enshrouded\\mods\\creative\\creative.dll", game + "\\") ==
+              "mods/creative/creative.dll",
+          "path text: case, a \\\\?\\ prefix and a trailing separator do not matter");
+    check(module_path_text(game + "\\dinput8.dll", game) == "dinput8.dll", "path text: a module in the game folder itself");
+    check(module_path_text(lib, game) == lib, "path text: a Library DLL keeps its full path (its folder names the mod)");
+    check(module_path_text(game + "x\\a.dll", game) == game + "x\\a.dll", "path text: a sibling folder with a longer name is not inside");
+    check(module_path_text("", game).empty() && module_path_text(lib, "") == lib, "path text: empty path, unknown game folder");
+    check(module_place_suffix("kiln/chain/xhl-core/xhl-core.dll") == " [kiln/chain/xhl-core/xhl-core.dll]" &&
+              module_place_suffix("dinput8.dll") == " [game folder]" && module_place_suffix(lib) == " [" + lib + "]" &&
+              module_place_suffix("").empty(),
+          "place suffix: relative path, game folder, full path, nothing");
+    check(module_path_matches(game + "\\kiln\\chain\\xhl-core\\xhl-core.dll", "kiln/chain/xhl-core/xhl-core.dll") &&
+              module_path_matches("\\\\?\\" + lib, lib) &&
+              !module_path_matches(game + "\\kiln\\chain\\myxhl-core\\xhl-core.dll", "xhl-core/xhl-core.dll") && !module_path_matches(lib, ""),
+          "path match: a full path, a game-relative tail on a separator, never a partial folder name");
+
+    const std::string addon = "C:\\Users\\p\\AppData\\Local\\Kiln\\library\\native\\player-addon\\0.0.0+9b0759ea\\dinput8.dll";
+    ChainRow a = row("dinput8.dll", "loaded", false, "profile");
+    a.path = addon;
+    ChainRow b = row("dinput8.dll", "late", true, "profile");
+    b.path = lib;
+    json before = dest("dinput8.dll", "0x54230");
+    before["path"] = addon;
+    json over = dest("dinput8.dll", "0x3e080");
+    over["path"] = lib;
+    json map = {{"targets", json::array({target("0x1000", "ui/ItemSlot", {"service:kiln-ui-values.dll"}, before),
+                                         target("0x2000", "gameplay/PlaceBlueprint", {"service:kiln-gameplay.dll"}, nullptr, over)})},
+                {"foreign", json::array()}};
+    // Building Tools listed first: a file-name match alone would take its late row for the addon's hook
+    json o = compute_overlaps(map, {b, a}, {});
+    check(o.size() == 2, "two dinput8.dll overlaps (" + std::to_string(o.size()) + ")");
+    if (o.size() == 2) {
+        const std::string m0 = o[0]["message"].get<std::string>(), m1 = o[1]["message"].get<std::string>();
+        check(m0.rfind("dinput8.dll+0x54230 [" + addon + "] hooked the function before Kiln did", 0) == 0, "foreign-before names the file: " + m0);
+        check(m1.rfind("dinput8.dll+0x3e080 [" + lib + "] hooked over Kiln's gameplay/PlaceBlueprint", 0) == 0, "foreign-over names the file: " + m1);
+        check(o[0]["foreign"]["path"] == addon && o[1]["foreign"]["path"] == lib, "the overlap's foreign side carries the path");
+        check(o[0]["chainEntry"].is_object() && o[0]["chainEntry"]["path"] == addon && o[0]["fix"] == "late",
+              "the chain entry is the one at that path: " + o[0]["chainEntry"].dump());
+    }
+    // without a path (an older hooks map) nothing changes: the file name alone, the first row of that name that is on
+    o = compute_overlaps({{"targets", json::array({target("0x1000", "ui/ItemSlot", {"service:kiln-ui-values.dll"}, dest("dinput8.dll", "0x54230"))})}},
+                         {b, a}, {});
+    check(o.size() == 1 && o[0]["message"].get<std::string>().rfind("dinput8.dll+0x54230 hooked the function", 0) == 0 && !o[0]["foreign"].contains("path"),
+          "no path: the line as before");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -380,6 +539,8 @@ int main(int argc, char** argv) {
     null_tolerance_cases();
     chain_status_cases();
     late_limit_cases();
+    before_cases();
+    module_place_cases();
     std::printf("compat_test: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
 }

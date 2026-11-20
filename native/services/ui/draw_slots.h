@@ -20,6 +20,8 @@ bool in_frame();
 void style_push(uint32_t style);
 void style_pop();
 bool style_push_font(uint32_t font);  // KILN_UI_FONT_*: pushes it at the current size; false = not loaded, nothing pushed
+bool theme_push(KilnHandle theme);    // a mod's theme (0.2.0-dev.29.16); false = no such theme, nothing pushed
+bool style_push_font_handle(KilnHandle font);  // a mod font (0.2.0-dev.29.16); false = not in the atlas, nothing pushed
 void image_draw(KilnHandle h, float w, float hgt);
 bool image_button(const char* id, KilnHandle h, float w, float hgt);
 }  // namespace kui
@@ -72,8 +74,11 @@ const char* z(KilnStr s) {
     return b.c_str();
 }
 
+// Immediate drawing (draw_rect, draw_text and their layered forms) follows the look's global alpha, the player's opacity
+// (0.2.0-dev.29.16), as ImGui's own widgets do.
 ImU32 col(uint32_t rgba) {
-    return IM_COL32((rgba >> 24) & 0xFF, (rgba >> 16) & 0xFF, (rgba >> 8) & 0xFF, rgba & 0xFF);
+    const float a = static_cast<float>(rgba & 0xFF) * std::clamp(ImGui::GetStyle().Alpha, 0.0f, 1.0f);
+    return IM_COL32((rgba >> 24) & 0xFF, (rgba >> 16) & 0xFF, (rgba >> 8) & 0xFF, static_cast<int>(a + 0.5f));
 }
 ImVec4 col4(uint32_t rgba) {
     return ImVec4(((rgba >> 24) & 0xFF) / 255.f, ((rgba >> 16) & 0xFF) / 255.f, ((rgba >> 8) & 0xFF) / 255.f, (rgba & 0xFF) / 255.f);
@@ -129,6 +134,10 @@ void KILN_CALL t_set_next_window_pos(float x, float y, uint32_t cond, float px, 
     ImGui::SetNextWindowPos(ImVec2(x, y), static_cast<ImGuiCond>(cond), ImVec2(px, py));
 }
 void KILN_CALL t_set_next_window_size(float w, float h, uint32_t cond) { IN_FRAME(); ImGui::SetNextWindowSize(ImVec2(w, h), static_cast<ImGuiCond>(cond)); }
+void KILN_CALL t_set_next_window_size_constraints(float min_w, float min_h, float max_w, float max_h) {
+    IN_FRAME();
+    ImGui::SetNextWindowSizeConstraints(ImVec2(min_w, min_h), ImVec2(max_w, max_h));
+}
 void KILN_CALL t_set_next_window_bg_alpha(float a) { IN_FRAME(); ImGui::SetNextWindowBgAlpha(a); }
 void KILN_CALL t_progress_bar(float f, float w, float h, KilnStr overlay) {
     IN_FRAME();
@@ -158,7 +167,7 @@ void KILN_CALL t_draw_text(float x, float y, uint32_t rgba, float size, KilnStr 
     IN_FRAME();
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     const float fs = size > 0 ? size : ImGui::GetFontSize();
-    dl->AddText(ImGui::GetFont(), fs, ImVec2(x + 1, y + 1), IM_COL32(0, 0, 0, (rgba & 0xFF) * 3 / 4), s.ptr, s.ptr + s.len);
+    dl->AddText(ImGui::GetFont(), fs, ImVec2(x + 1, y + 1), col((rgba & 0xFF) * 3 / 4), s.ptr, s.ptr + s.len);  // the shadow
     dl->AddText(ImGui::GetFont(), fs, ImVec2(x, y), col(rgba), s.ptr, s.ptr + s.len);
 }
 void KILN_CALL t_draw_rect(float x0, float y0, float x1, float y1, uint32_t rgba, float rounding, int32_t filled) {
@@ -211,6 +220,7 @@ bool KILN_CALL t_is_item_clicked(uint32_t button) {
 
 #include "draw_slots_v3.inl"
 #include "draw_slots_v4.inl"
+#include "draw_slots_looks.inl"
 
 }  // namespace
 }  // namespace kui_draw

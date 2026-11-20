@@ -87,14 +87,25 @@ internal static unsafe class Services
         return text[..n];
     }
 
-    /// <summary>Throws if the calling code is not on the tick thread (game state is single-threaded).</summary>
+    /// <summary>Throws if the calling code is not on the tick thread (game state is single-threaded), and inside a
+    /// program wrap's handler (Kiln.Systems), which runs in the middle of a world's step even on the world's thread. In
+    /// <see cref="Mod.OnBoot"/> (before the game's first tick) the message says to call <paramref name="api"/> in OnLoad.</summary>
     public static void RequireTickThread(string api)
     {
-        if (!Backend.Current.IsTickThread) throw new InvalidOperationException($"{api} must be called on the tick thread (use Scheduler.Post)");
+        if (SliceGuard.Depth > 0)
+            throw new InvalidOperationException($"{api} cannot be called from a program wrap's handler (it runs inside the world's step, maybe on a worker); use slice.Post");
+        if (Backend.Current.IsTickThread) return;
+        throw new InvalidOperationException(Game.InBoot ? Game.NotInBoot(api) : $"{api} must be called on the tick thread (use Scheduler.Post)");
     }
 
     /// <summary>Owner id of the mod calling right now (0 outside mod code).</summary>
     public static ulong CallerOwner => ModContext.CurrentMod?.Owner ?? 0;
+}
+
+/// <summary>Set (per thread) while a program wrap's handler runs (Kiln.Systems): tick-thread APIs refuse inside it.</summary>
+internal static class SliceGuard
+{
+    [ThreadStatic] internal static int Depth;
 }
 
 [StructLayout(LayoutKind.Sequential)]

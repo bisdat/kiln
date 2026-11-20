@@ -127,6 +127,25 @@ struct Reader {
     }
 };
 
+bool pool_fields(Reader& r,Layouts* L,uint32_t* item_pool) {
+    L->pool_id=L->pool_slot=UINT32_MAX;*item_pool=UINT32_MAX;
+    const auto* pool=r.type("keen::VoxelBlueprintMaterialPool");
+    const auto* registry=r.type("keen::VoxelBlueprintMaterialPoolRegistryResource");
+    const uint32_t array=r.off(registry,"materialPools");
+    const uint32_t stride=r.size_of(pool), id=r.off(pool,"poolId"), slot=r.off(pool,"equipmentSlot");
+    const uint32_t materials=r.off(pool,"materials"), name=r.off(pool,"debugName");
+    const auto* item=r.type("keen::ItemInfo"); uint32_t equipment=0; const uint8_t* eq=nullptr;
+    r.field_rec(item,"equipment",&equipment,&eq); eq=r.resolved(eq);
+    uint32_t ref=0;const uint8_t* reference=nullptr;
+    r.field_rec(eq,"voxelBlueprintMaterialPool",&ref,&reference);reference=r.resolved(reference);
+    if(r.ok && (r.size_of(reference)!=16 || stride!=24 || id!=4 || slot!=0 || materials!=8 || name!=16 || uint64_t(equipment)+ref+16>r.size_of(item)))
+        r.fail("this executable's material-pool layout is unsupported");
+    if(!r.ok) return false;
+    L->pools=array; L->pool_stride=stride; L->pool_materials=materials; L->pool_name=name;
+    L->pool_id=id; L->pool_slot=slot; *item_pool=equipment+ref;
+    return true;
+}
+
 }  // namespace
 
 bool read_layouts(const uint8_t* image_base, size_t image_size, const std::string& test_missing, Layouts* L, ItemLayout* I, std::string* why) {
@@ -217,7 +236,15 @@ bool read_layouts(const uint8_t* image_base, size_t image_size, const std::strin
     I->voxel_guid = equipment + voxel + r.off(vox_type, "placeVoxelMaterial");
     I->voxel_id = equipment + voxel + r.off(vox_type, "placeVoxelMaterialId");
     I->is_building = equipment + voxel + r.off(vox_type, "isBuildingVoxel");
+    // Reuse this executable's existing reflection scan. Missing custom fields do not turn base materials off.
+    Reader custom{img,test_missing,&L->pool_reason};
+    pool_fields(custom,L,&L->item_pool_ref);
     return r.ok;
+}
+
+bool read_pool_layout(const uint8_t* base,size_t size,const std::string& missing,Layouts* L,uint32_t* item_pool,std::string* why) {
+    Image img{base,size,{},{}};if(!img.open()){*why="this executable has no reflection data";return false;}
+    Reader r{img,missing,why};return pool_fields(r,L,item_pool);
 }
 
 bool read_model_layout(const uint8_t* image_base, size_t image_size, ModelLayout* M, std::string* why) {

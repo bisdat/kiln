@@ -13,14 +13,25 @@ Players' guide: the frostdev.io wiki page "Mods for other frameworks" (`/kiln/wi
 | Greeneye Loader 1.2.2 (API 2) | `kiln-greeneye.dll` | `greeneye/<id>/` with `mod.json` and a DLL exporting `GreeneyeModStart` | [greeneye.md](greeneye.md) |
 | Flame (Creative Mode's loader) | `kiln-flame.dll` | `mods/<id>/` with `flame.json` and a DLL exporting `FlameStartRuntime` | [flame.md](flame.md) |
 | Shroudtopia 0.1.1 / 1.0 r1 | `kiln-shroudtopia.dll` | `mods/*.dll` and `mods/<name>/` exporting `CreateModInstance` | [shroudtopia.md](shroudtopia.md) |
-| EMF 0.3.3 through 0.6.0 (EmfApi v27: 77 full, 13 partial, 0 missing C slots out of 90; client checks remain) | `kiln-emf.dll` (component `emf`, default on) | `emf/mods/<id>/`, `emf/mods/<name>.dll`; Lua mods through EMF's `lua` mod. API coverage does not guarantee every mod pairing | [../emf.md](../emf.md), [../emf-parity.md](../emf-parity.md) |
+| EMF 0.3.3 through 0.6.14 (EmfApi v46: 76 full, 17 partial, 49 not yet of 142 C slots; client checks remain) | `kiln-emf.dll` (component `emf`, default on) | `emf/mods/<id>/`, `emf/mods/<name>.dll`; Lua mods through EMF's `lua` mod. API coverage does not guarantee every mod pairing | [../emf.md](../emf.md), [../emf-parity.md](../emf-parity.md) |
 | Enshwick 1.0.0-alpha.14 | `kiln-enshwick.dll`, hosting Enshwick's own loader: the game's `mods/enshwick/enshwick.dll` when present, else the copy Kiln ships in `kiln/plugins/enshwick/` (built from Enshwick's MIT source; `"loader": "auto"`), so Enshwick need not be installed | `mods/<author.name>/`: DLL mods, `main.luau`, `pack.toml` data packs | [enshwick.md](enshwick.md) |
 | shroudlink 0.8.0 (SDK ABI 8), server | `kiln-shroudlink.dll` (shroudlink's own server core, built from source) | `shroudlink_mods/*.dll`; EML data mods go to kiln-eml | [shroudlink.md](shroudlink.md) |
+| Enshrouded ModLoader 0.6.12 (AndyPimms', ABI 1; CarryOn, Belt Lantern), client build 26430625 only | `kiln-dllmod.dll` | packages (a DLL with its `<file>.dll.mod` manifest) of the profile's `dllmod` list, run from Kiln's copy in `Mods/EnshroudedModLoader/<id>/` at a local world's start | [dllmod.md](dllmod.md) |
 | Ember (server SDK, no ABI published yet) | `kiln-ember.dll` (finds and reports; starts nothing yet) | `ember/mods/<mod>/` with one library | [ember.md](ember.md) |
 
 Stand-alone `dinput8.dll` mods (and other loaders' `dinput8.dll`) are chained from `kiln/chain/` by Kiln's proxy, which
 also reads `dinput8-chain.ini` `[Chain]` and `[EMF]` ([../engines.md](../engines.md)). Kiln's own DLL mods
 (`native.json`) are not another engine.
+
+**Enshrouded ModLoader** (AndyPimms' loader, [aebischer/Enshrouded-ModLoader](https://github.com/aebischer/Enshrouded-ModLoader),
+SDK ABI 1; CarryOn and Belt Lantern use it): since 0.2.0-dev.29.19 Kiln runs its packages itself (kiln-dllmod, row above,
+[dllmod.md](dllmod.md)), so its `dinput8.dll` is not needed. When that `dinput8.dll` is in the game anyway (Kiln's installer
+moved it into `kiln/chain/`, or it was added to the Library as a DLL mod), kiln-dllmod steps aside and hooks nothing:
+the loader refuses to start when another tool already patched one of the eight game functions it hooks. It then runs
+the packages in `Mods/EnshroudedModLoader/`, Kiln's copies of the profile's packages included, from its MODS page in a
+world's Edit menu. None of Kiln's other client hooks is among those eight on game build 26430625 (client exe
+`5d9ef2f1`). A package's DLL is never imported as a plain DLL mod (loaded early, the loader would refuse every world
+with it).
 
 The launcher's Library imports every kind above, Enshwick, shroudlink and Ember included; Ember mods are listed but not
 run until Ember publishes its loader ABI.
@@ -59,6 +70,7 @@ loaded), the plugin says so and loads the mods itself.
 | Enshwick | its `powrprof.dll` stub (texts `enshwick-loader-stub`) is loaded, its claim `Local\enshwick-stub-<pid>` exists, or a module exporting `enshwick_start` is loaded | Kiln takes the same claim when it starts the loader, so a stub that starts later stays idle (the stub's own rule); when the stub is first, it runs Enshwick and Kiln starts nothing. |
 | shroudlink | a loaded module exports both `CrashHandlerFactory` and `DirectInput8Create` (its core as `steam_api64.dll`, `crashhandler64.dll`, `dinput8.dll`, chained or not) or is named `shroudlink_core.dll`; backstop: its claim `chestsort_server_<pid>` | That core loads `shroudlink_mods/` itself; both copies honor the same claim, so only one hooks. |
 | Ember | a DLL from the server folder or `kiln/chain/` carries `ember-loader` / `ember_loader` | Ember's loader runs its mods; kiln-ember starts none anyway until Ember publishes its ABI. |
+| Enshrouded ModLoader | a loaded module (not Kiln's, not a mod) exporting `DirectInput8Create` whose file names the loader's world profile header or its log file, or an active line of `kiln/chain.ini` / `dinput8-chain.ini` naming such a file | The loader refuses to start when one of its functions was patched first, so kiln-dllmod hooks nothing; the loader runs the packages from `Mods/EnshroudedModLoader/` itself. |
 
 Flame and Shroudtopia are checked again before mod dispatch, including after Shroudtopia's boot delay. Renamed
 proxies in `kiln/chain/` are recognized. These engines have no cooperative process claim or shutdown contract:
@@ -103,6 +115,17 @@ launcher puts them there:
   run a package and what helps (activation notes; for Kiln's copies `ownLoaders[].off`: switched off, the next
   activation switches it on; `otherSide`: its `targets` name the other side only, nothing to do; `unreadable`:
   ShroudForge refuses its files, no switch helps). Without ShroudForge nothing is written.
+- **An EML mod copied into ShroudForge's folder by hand** (dev.28). ShroudForge keeps it switched off (a legacy EML
+  package has no `extended.mod.json` until its switch is first turned on), and Kiln never writes into a folder it did
+  not place. Every place that explains it uses the words promised to a player on Nexus (2026-11-14): "You put this
+  mod into ShroudForge's folder yourself, and ShroudForge has it switched off. Switch it on in Kiln's in-game menu
+  (Mods > ShroudForge), or remove the folder and add the mod with Add mods." The launcher's list of mods in the game
+  folder (`found::scan`: Off, no "Add it" fix, since activation never places a copy beside the player's folder), the
+  activation notes (`ownLoaders[].ownOff` and the per-mod note, which say "press Play" instead of "Add mods" because
+  the mod is in the profile), kiln-eml's `off-in-shroudforge` reason and kiln.log line, and the in-game Mods page (on
+  the folder's own row in Mods > ShroudForge: "Switch it on below"). On a dedicated server, which has no in-game menu,
+  the second way out is the only one named. Text: `kiln_manage::shroudforge::hand_eml_off`; kiln-eml and `Kiln.Ui`
+  keep their own copy of the words.
 - **No double load.** When the loader does not start after all (Wine/Proton without the override), the plugin runs
   the profile's mods from the Library as usual (EML's: unless Kiln hosts ShroudForge for the profile, which then runs
   Kiln's copies in its folder). A folder in the engine's drop-in folder whose marker names this
@@ -217,12 +240,14 @@ Kiln notices when it hooks a function that already starts with someone else's ju
 file's) and says so, in kiln.log and in `state/hooks.json`:
 
 ```
-[kiln] hooks: chat/ChatLogAdd chained over enshwick.dll+0x11ea80
+[kiln] hooks: chat/ChatLogAdd (kiln-chat) chained over enshwick.dll+0x11ea80
 ```
+
+The line names Kiln's hooks on that function with their owners (`<label> (<owner>)`).
 
 Mid hooks behave the same way. When another engine hooks **over** Kiln's detour, its jump now starts the call and Kiln's
 detour is reached through it. After boot and at the first world (never per frame) Kiln checks every target and logs
-`hooks: <module> hooked over Kiln's <label>`; `hooks.json` records it as `foreignOver`. Kiln never removes the other
+`hooks: <module> hooked over Kiln's <label> (<owner>)`; `hooks.json` records it as `foreignOver`. Kiln never removes the other
 module's jump and never unhooks its own detours (an empty chain calls the real function), so the order in which engines
 start does not make Kiln undo another engine's hook. Enshwick's decoder relocates Kiln's `jmp` when Kiln hooks first.
 `native/spikes/hookchain/run.sh` and `native/core/tests/test-hooks-v2.sh` (Wine, no game) check these cases with a
@@ -277,7 +302,7 @@ foreign module's hook and a Kiln-hosted link (Kiln, ShroudForge, an EMF mod) mee
 `state/hooks.json` lists them under `overlaps` and kiln.log warns once for each, naming both sides and the fix:
 
 ```
-[W] [kiln] compat: overlap: xhl-core.dll+0x11ea80 hooked chat/ChatLogAdd before chat, emf; Kiln chained over it. Load xhl-core.dll late (kiln/chain.ini [late], or the launcher's "Load after Kiln and ShroudForge"): Kiln then hooks first and xhl-core.dll hooks over it.
+[W] [kiln] compat: overlap: xhl-core.dll+0x11ea80 hooked the function before Kiln did; Kiln's chat/ChatLogAdd (kiln-chat), emf/ChatLogAdd (kiln-emf) chained over it. Load xhl-core.dll late (kiln/chain.ini [late], or the launcher's "Load after Kiln and ShroudForge"): Kiln then hooks first and xhl-core.dll hooks over it.
 ```
 
 The launcher shows the last session's overlaps on the profile's native page with a one-click "load late". ShroudForge's
@@ -285,7 +310,7 @@ refusal is read from `state/shroudforge.json` (`game_thread=unavailable(<hook>:<
 `hooks.json` a few seconds after boot, once ShroudForge has reported.
 
 **Compat rules.** `compat-rules.json` tells Kiln about known clashes. Two files are read, Kiln's own (`kiln/compat-rules.json`,
-may be missing) and yours (`<configDir>/compat-rules.json`, in the launcher `profiles/<profile>/config/`). A rule of
+shipped in the runtime's core component since dev.29 and replaced by every update; may be missing on an older install) and yours (`<configDir>/compat-rules.json`, in the launcher `profiles/<profile>/config/`). A rule of
 yours with the same `id` replaces Kiln's. Plain JSON, no comments.
 
 ```json
@@ -301,7 +326,11 @@ yours with the same `id` replaces Kiln's. Plain JSON, no comments.
   `{"symbol": "chat/ChatLogAdd"}` (an overlap on that function). No `when`: always. At most 8 matchers; a module
   pattern with wildcards has at most 64 characters and 4 `*`.
 - `action`: `warn` (log the message), `late` (the `subject` module loads late), `disable` (the `subject` module, mod or
-  engine does not load). `late` and `disable` need a `subject`.
+  engine does not load), `before` (dev.29: the `subject` loads before the `target`, below), `defer` (since
+  0.2.0-dev.29.4: the `subject` native mod waits for the Shroudtopia host's first pass, below) and `original-code`
+  (since 0.2.0-dev.29.6: the `subject` Shroudtopia mod compares against the game's original code, below). Every action
+  but `warn` needs a `subject`; `before` and `defer` also need a `target`, and only they take one; only `defer` takes
+  `max_wait_ms` (required for it).
 - Who applies what: the launcher writes `chain.ini` and the profile, so it applies `late` and `disable` of chain entries
   (a line `; kiln rule <id>` marks what a rule wrote). kiln-core logs `warn` rules, switches off a **mod the profile lists**
   (`disable` on `{"mod": "emf:coolmod"}`, before the plugins read the profile; the rule's message is the reason in the
@@ -313,8 +342,85 @@ yours with the same `id` replaces Kiln's. Plain JSON, no comments.
 - A rule that does not validate (bad id, no `subject` for `late`/`disable`, an unknown key) is dropped with a warning in
   kiln.log; the other rules stay. To switch a shipped rule off, give your own rule its `id` and a `when` that never holds.
 
-Limits: the core knows an engine from the profile's lists, ShroudForge's state and a few DLL names (`shroudforge-runtime.dll`,
-`emf_core.dll`, `enshwick.dll`); a mod folder placed by hand (not in a profile list) cannot be switched off by a rule in
+**Wait for Shroudtopia (`defer`, since 0.2.0-dev.29.4).** Some native mods must start only after a Shroudtopia mod has
+placed its hooks. A `defer` rule keeps its `subject` (a native mod id such as `{"mod": "native:my-mod"}`, a DLL file
+name the mod declares, or an exact path of a companion file in its package, with forward slashes) back until the
+Shroudtopia host's first pass, while its `target` (a `{"mod": "shroudtopia:<id>"}` that is on in the profile) runs, and
+for at most `max_wait_ms` (1 to 30000 ms after the host starts its worker, Shroudtopia's `bootDelay` included). kiln-core
+applies it: the native mod's note and kiln.log say `waits for Shroudtopia's first pass (<id> is on)`, and a native mod
+that loads after it in its declared order waits with it. A native mod with an `init` is never deferred (its `init` stays
+on its documented phase thread; kiln.log says so and the normal phases are used), nor is one when the Shroudtopia host
+is not there or Shroudtopia's own loader runs. Kiln ships no `defer` rule (since 0.2.0-dev.29.5); the action is there
+for your own file.
+
+```json
+{ "id": "my-mod-after-shroudtopia", "action": "defer",
+  "subject": { "mod": "native:my-mod" }, "target": { "mod": "shroudtopia:some-mod" }, "max_wait_ms": 5000,
+  "message": "My Mod hooks the game after Some Mod has placed its hooks." }
+```
+
+**The game's original code for a Shroudtopia mod (`original-code`, since 0.2.0-dev.29.6).** Some Shroudtopia mods check
+the game's code with `memcmp` before they patch it, and refuse when another mod's entry hook changed those bytes. An
+`original-code` rule names exactly one such mod as its `subject` (`{"mod": "shroudtopia:<id>"}`, no `target`): Kiln
+points that mod's imported `memcmp` at a version that compares against the game exe's original bytes where the live
+bytes differ only by another mod's entry hook. It changes nothing in the chain. Kiln ships one:
+
+```json
+{ "id": "shroudtopia-item-skill-text-original-code", "action": "original-code",
+  "subject": { "mod": "shroudtopia:item-skill-text" },
+  "message": "Item Skill Descriptions can check the game's original code while Auto Doors keeps its hooks." }
+```
+
+**One DLL before another (`before`, dev.29).** Some DLL mods must hook the game before another one does, not only before
+or after Kiln. Kiln ships one such rule in `kiln/compat-rules.json`:
+
+```json
+{ "id": "auto-loot-plus-before-ultimate-asi-loader",
+  "when": [ { "mod": "native:auto-loot-plus" }, { "engine": "ultimate-asi-loader" } ],
+  "action": "before", "subject": { "mod": "native:auto-loot-plus" }, "target": { "engine": "ultimate-asi-loader" },
+  "message": "Ultimate ASI Loader loads after Kiln so that Auto Loot Plus can hook the game first; Auto Loot Plus's F8 menu needs that." }
+```
+
+Auto Loot Plus redirects the game's `GetProcAddress` import in its `DllMain` (for its F8 menu), but only while that slot
+still holds kernel32's own function. Ultimate ASI Loader redirects the same import when it loads and puts it back only
+when the game first calls it, after Kiln's entry gate. So whichever loads second finds the slot taken, and Auto Loot Plus
+must load first. Kiln's proxy always loads `[chain]` (where the installer put Ultimate ASI Loader) before `[profile]`
+(where Auto Loot Plus is, a Library native), and its late phase keeps that order, so the switches alone order them right
+only as "Ultimate ASI Loader late, Auto Loot Plus not". The rule writes exactly that:
+
+- The launcher loads every chain entry the `target` names late (a `; kiln rule <id>` line in `[late]`) and keeps every
+  entry the `subject` names early, whatever their "Load after Kiln and ShroudForge" switches say: the profile's late
+  switch for a `[profile]` entry is not written while the rule applies, and the player's own `[late]` line for a
+  `[chain]` entry becomes `; kiln rule <id> off: <line>` (back at the next activation without the rule). It pins both
+  even when the order is already right, so a switch flipped later cannot undo it. The player's own `[late]` line for the
+  target stays the player's.
+- Matching: `module` by file name, `engine` by what the launcher reads in a chain DLL (Ultimate ASI Loader by its
+  `IsUltimateASILoader` export, whatever it is called: `xinput9_1_0.dll`, `dinput8.dll`, `version.dll` or another name), `mod`
+  by the Library id of a native mod of the profile. Auto Loot Plus's id `auto-loot-plus` comes from its package's
+  `mods/auto-loot-plus` folder, under any proxy name of its DLL. Imported without that folder (only its `dinput8.dll`), or
+  with its DLL renamed to a name that is no proxy name, it gets another id and the shipped rule does not fire: the switches
+  decide as before. Write your own rule with that id (`{"mod": "native:<id>"}`) in that case. Installed as the game's
+  `dinput8.dll` before Kiln, the installer chains it as `kiln\chain\chain-loader-dinput8.dll` (a `[chain]` entry without
+  a Library id): a rule of yours with `{"module": "chain-loader-dinput8.dll"}` as the subject orders that one.
+- On the profile page both switches show the rule ("Loads late: rule <id>", "Loads first: rule <id>"), the rule's
+  message stands under both entries, and neither switch can be moved against the rule. The activation's notes and the
+  launcher's log (`profile: note: <message>`) say the same sentence; without a `message` Kiln writes one from the file
+  names.
+- An order that cannot be made moves nothing and is a warning on the profile page and in the activation's notes: the
+  target is EMF's own loader or shroudlink's client addon (neither ever loads late), it starts outside Kiln's chain (next to
+  the game under a proxy name Windows loads, or from another loader), the subject and the target name the same DLL, two
+  `before` rules ask opposite orders, or a `late` rule loads the subject late (the `late` rule stays). A side a `disable`
+  rule switches off leaves nothing to order (a note, no warning).
+- kiln-core reads the rule and reports it in `hooks.json` `rules` (with its `target`): `applied: true` when every subject
+  entry loaded before every target entry (a late entry after all early ones, list order within a phase), otherwise
+  `applied: false` and a kiln.log warning naming both (`activate the profile again`). The core knows Ultimate ASI Loader's
+  chain entry by the same export, and a `[profile]` entry's native mod by its Library folder.
+- Older readers: a Kiln launcher or core from before dev.29 drops a `before` rule as one that does not validate (the
+  launcher shows "A rule file did not read: ... unknown variant `before`"; the core logs `rule #1: unknown key "target";
+  dropped`) and keeps the file's other rules. Nothing moves there.
+
+Limits: the core knows an engine from the profile's lists, ShroudForge's state, a few DLL names (`shroudforge-runtime.dll`,
+`emf_core.dll`, `enshwick.dll`) and, since dev.29, Ultimate ASI Loader's chain entry by its `IsUltimateASILoader` export; a mod folder placed by hand (not in a profile list) cannot be switched off by a rule in
 the core, and the report says so. A `disable` on a native mod whose DLLs load in phase dllmain does not stop the proxy
 from loading them (it ran before the core): the rule is reported as not applied (`its DLL was loaded by the proxy before
 kiln-core started`) and the mod shows as loaded. Activate the profile again so the launcher's chain.ini keeps them out.

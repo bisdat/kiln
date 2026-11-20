@@ -1185,7 +1185,7 @@ fn refuse(code: RefusalCode, reason: impl Into<String>) -> Error {
     df::Refusal::new(code, reason).into_error()
 }
 
-fn take_locks<'a>(root: &Path, own: Option<&'a mut DataLock>) -> Result<(Held<'a>, std::fs::File)> {
+fn take_locks<'a>(root: &Path, own: Option<&'a mut DataLock>) -> Result<(Held<'a>, crate::util::LockedFile)> {
     let held = match own {
         Some(l) => {
             if !l.upgrade()? {
@@ -1201,7 +1201,7 @@ fn take_locks<'a>(root: &Path, own: Option<&'a mut DataLock>) -> Result<(Held<'a
     let q = root.join("quick.lock");
     let quick = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(&q).map_err(io_at(&q, "opening"))?;
     match quick.try_lock() {
-        Ok(()) => Ok((held, quick)),
+        Ok(()) => Ok((held, crate::util::LockedFile(quick))),
         Err(std::fs::TryLockError::WouldBlock) => {
             Err(refuse(RefusalCode::Busy, "The launcher is busy with the data folder (an import or a profile change): wait for it to finish."))
         }
@@ -2006,6 +2006,8 @@ pub fn move_to(
             Ok(_) => {
                 activated.push(g.id.clone());
                 note(format!("installs/{}.active.json", g.id));
+                // copy mode: the record of the game's config copy (profile::config_sync_record)
+                note(format!("profiles/{pid}/config-sync/{}.json", g.id));
                 let mut cfg = Vec::new();
                 walk_files(&new_dirs.profile(pid).join("config"), &format!("profiles/{pid}/config"), &mut cfg);
                 for rel in cfg {

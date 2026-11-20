@@ -1,0 +1,11 @@
+{
+  "id": "upgrade-station-test",
+  "name": "upgrade station: lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "UpgradeStationTest.dll",
+  "side": "server",
+  "clients": "kiln",
+  "advanced": true,
+  "description": "PASS/FAIL lines: an upgrade station's template and interaction, its use with a chest standing in for the player, the window's prices and its pick checks, on a server with no player."
+}

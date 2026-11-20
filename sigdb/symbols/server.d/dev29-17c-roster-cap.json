@@ -1,0 +1,96 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "The roster's unlock pages (kiln.knowledge in kiln-quests.dll; package 17c, chapter 17.3, audit docs/re/npc-roster.md). NpcEvalUnlocks is the evaluator both npc_unlock_state programs call (ResultU64* (out, knowledge context, u16* seen version, {NpcResource*, u64 count})): it sets one bit per entry with a register BTS, so entry 64 lands on bit 0. NpcIsUnlocked (ResultBool* (out, NpcRegistry*, u32 NpcId)) reads that bit with a register SHR (the same wrap). NpcFind (NpcResource* (NpcRegistry*, u32 NpcId)) is the id map lookup. quests/NpcRegistrySetUnlocks, quests/npcreg.state, quests/npcreg.version and quests/npcreg.npcs are production entries of quests.json, used here, not declared again. npcquery.state and npcfind.npcs are this file's own captures of npcreg.state and npcreg.npcs: kiln.knowledge requires them to be equal (and mask = state + 8) before it hooks anything. All four functions and every constant must resolve together (feature quests.npc_pages), or the roster keeps 64 entries.",
+  "symbols": {
+    "quests/NpcEvalUnlocks": {
+      "find": [
+        {
+          "pattern": "4C 89 44 24 18 48 89 4C 24 08 55 57 41 56 41 57 48 81 EC 88 00 00 00 48 8B 42 08 45 33 F6 4C 8B 7A 10 48 8B F9 49 8B 49 08 49 8B 29 48 89 84 24 B8 00 00 00"
+        }
+      ]
+    },
+    "quests/NpcIsUnlocked": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 44 89 44 24 18 57 48 83 EC 20 80 BA {quests/npcquery.state:d32} 00 48 8B FA 48 8B D9 74 ?? C6 41 08 00 48 8B C1 C7 41 04 00 00 00 00 C6 01 {quests/npcquery.invalid:d8} 48 8B 5C 24 30"
+        }
+      ]
+    },
+    "quests/NpcFind": {
+      "find": [
+        {
+          "pattern": "89 54 24 10 53 48 83 EC 20 48 8B 59 {quests/npcfind.npcs:d8} 48 85 DB 74 ?? 48 83 C1 {quests/npcreg.map:d8} 48 8D 54 24 38 E8 ?? ?? ?? ?? 48 85 C0 74 ?? 48 63 0B 85 C9 75 ?? 48 69 00 {quests/npc.stride:d32}"
+        }
+      ]
+    },
+    "@quests/NpcPages.fields": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "quests/NpcIsUnlocked",
+            "size": 144
+          },
+          "pattern": "48 8D 4A {quests/npcreg.map:d8} 48 8D 54 24 40 E8"
+        },
+        {
+          "scope": {
+            "symbol": "quests/NpcIsUnlocked",
+            "size": 144
+          },
+          "pattern": "48 8B 87 {quests/npcreg.mask:d32} 8B 09 48 D3 E8 24 01"
+        },
+        {
+          "scope": {
+            "symbol": "quests/NpcEvalUnlocks",
+            "size": 512
+          },
+          "pattern": "48 0F AB F3 48 FF C6 48 81 C5 {quests/npc.stride:d32} 49 83 EC 01"
+        },
+        {
+          "scope": {
+            "symbol": "quests/NpcEvalUnlocks",
+            "size": 512
+          },
+          "pattern": "C6 07 {quests/npceval.error:d8} 4C 89 77 08 EB"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "quests/npcreg.mask": {},
+    "quests/npcreg.map": {
+      "min_votes": 2
+    },
+    "quests/npc.stride": {
+      "min_votes": 2
+    },
+    "quests/npceval.error": {},
+    "quests/npcquery.invalid": {},
+    "quests/npcquery.state": {},
+    "quests/npcfind.npcs": {}
+  },
+  "features": {
+    "quests.npc_pages": {
+      "symbols": [
+        "quests/NpcEvalUnlocks",
+        "quests/NpcIsUnlocked",
+        "quests/NpcFind",
+        "quests/NpcRegistrySetUnlocks",
+        "@quests/NpcPages.fields"
+      ],
+      "constants": [
+        "quests/npcreg.state",
+        "quests/npcreg.version",
+        "quests/npcreg.npcs",
+        "quests/npcreg.mask",
+        "quests/npcreg.map",
+        "quests/npc.stride",
+        "quests/npceval.error",
+        "quests/npcquery.invalid",
+        "quests/npcquery.state",
+        "quests/npcfind.npcs"
+      ]
+    }
+  }
+}

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Kiln.Terrain overlays on a lab server, player free: three server starts (fresh world, the same world after a restart,
-another world), driven by the mod's READY and DONE lines.
+"""Kiln.Terrain overlays on a lab server, player free: four server starts (fresh world, the same world after a restart,
+another world, the first world again with its Kiln data removed), driven by the mod's READY and DONE lines.
 
     KILN_OUT=<build dir> mods/tests/terrain-overlay-test/run.py --lab <lab> [--out DIR] [--start "<command>"]
 
@@ -11,6 +11,7 @@ Before it: build the mod into $KILN_OUT/mods/terrain-overlay-test, make the lab 
 each start's kiln.log to --out, and exits non-zero on a FAIL or a missing line.
 """
 import argparse
+import json
 import os
 import re
 import shlex
@@ -25,9 +26,11 @@ REPO = HERE.parents[2]
 MOD = "terrain-overlay-test"
 LEAN = shutil.ignore_patterns("Kiln.*", "*.deps.json", "*.runtimeconfig.json")  # kiln/host has them
 WANT = {
-    1: ["overlay.inspect", "overlay.applied", "overlay.transient-not-recorded", "overlay.base-refused"],
-    2: ["overlay.kept-after-restart", "overlay.rerun-noop", "overlay.upgrade-conflict"],
-    3: ["overlay.world-b-clean"],
+    1: ["overlay.inspect", "overlay.applied", "overlay.transient-not-recorded", "overlay.base-refused",
+        "overlay.editing-handler-edit-kept", "overlay.transient-staged"],
+    2: ["overlay.transient-gone-after-restart", "overlay.kept-after-restart", "overlay.rerun-noop", "overlay.upgrade-conflict"],
+    3: ["overlay.world-b-clean", "overlay.first-install-over-matching-ground"],
+    4: ["overlay.lost-ledger-refused"],
 }
 
 
@@ -50,15 +53,30 @@ def main():
     shutil.rmtree(kiln / "mods" / MOD, ignore_errors=True)
     shutil.copytree(build / "mods" / MOD, kiln / "mods" / MOD, ignore=LEAN)
     shutil.rmtree(kiln / "data" / MOD, ignore_errors=True)
+    # Kiln's terrain witness of this mod (kiln/data/kiln.terrain/<world>/<mod>.json): an earlier run's boot 4 removed world
+    # A's Kiln data, so its entries would make boot 1 a lost ledger
+    for w in (kiln / "data" / "kiln.terrain").glob(f"*/{MOD}.json"):
+        w.unlink()
     save, aside = lab / "savegame", lab / "savegame-world-a"
     if aside.exists():
         sys.exit(f"{aside} exists: an earlier run stopped half way; put the save back by hand first")
 
     failed = 0
     try:
-        for boot in (1, 2, 3):
+        for boot in (1, 2, 3, 4):
             if boot == 3:
                 save.rename(aside)          # the server makes a new world
+            if boot == 4:
+                # world A again, without its Kiln data (the ledger is lost; the world save and Kiln's witness stay)
+                shutil.rmtree(lab / "savegame-world-b", ignore_errors=True)
+                save.rename(lab / "savegame-world-b")
+                aside.rename(save)
+                state = json.loads((kiln / "data" / MOD / "state.json").read_text())
+                world_a = state["WorldA"]
+                if not re.fullmatch(r"[0-9a-f-]{36}", world_a):
+                    sys.exit(f"world A's id {world_a!r} is not a GUID")
+                shutil.rmtree(kiln / "data" / "worlds" / world_a, ignore_errors=True)
+                print(f"== removed world A's Kiln data (kiln/data/worlds/{world_a})", flush=True)
             log = kiln / "logs/kiln.log"
             log.unlink(missing_ok=True)
             print(f"== boot {boot}: {subprocess.run(start, capture_output=True, text=True, cwd=REPO).stdout.strip()}", flush=True)

@@ -1,0 +1,9 @@
+{
+  "id": "rarityrolls-test",
+  "name": "rarity rolls at creation: lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "RarityRollsTest.dll",
+  "side": "server",
+  "clients": "kiln"
+}

@@ -9,8 +9,12 @@
 //    game hash. Resources reference blobs; the client streams a blob when it needs the resource's pixels / mesh.
 // An icon is a blob (RGBA8 pixels) + a new UiTextureResource that references it, plus a tracked UI state for the GUID.
 #include <algorithm>
+#include <string_view>
+#include <thread>
+#include <unordered_set>
 
 #include "assets.h"
+#include "vfx_preflight.h"
 
 namespace ka {
 
@@ -23,6 +27,9 @@ std::atomic<uint64_t> g_content_gen{0};
 std::atomic<const IconSnap*> g_icons{nullptr};
 std::atomic<uint64_t> g_icon_want{0};
 std::atomic<uint64_t> g_icon_served{0};
+#ifdef KILN_ASSETS_CATALOG_TEST
+void cleanup_worker_started();  // the host test can hold the cleanup thread before it takes g_mu
+#endif
 
 // ---- readers and reclamation ----------------------------------------------------------------------------------
 namespace {
@@ -95,6 +102,10 @@ struct ResItem {
     bool bound = false;
     bool is_new = false;
     uint32_t handle = 0;  // synthetic (new) or the game's (override)
+    bool vfx_refused = false;
+    std::string mod{};
+    uint64_t registration = 0;
+    std::vector<std::string> omissions{};  // deduplicated per put; removed/replaced registrations retain no reports
 };
 struct BlobItem {
     KilnOwner owner;
@@ -113,6 +124,10 @@ struct IconItem {
 };
 
 std::vector<ResItem> g_items;
+std::atomic<uint32_t> g_vfx_capacity{2048};
+bool g_vfx_known = false, g_vfx_ready_started = false;
+std::string g_vfx_why = "original VFX census not initialized";
+VfxKeys g_vfx_stock, g_vfx_lifetime;  // bound additions hold room for the rest of the game process
 // Keys put with KILN_ASSET_PUT_PIN, and the owner that pinned each: process-lived. A pinned key's item is the only item of that key (a
 // pin is refused while another owner has one) and stays: no put, no removal and no revert_owner takes it, the pinning owner's included.
 std::unordered_map<Key, KilnOwner, KeyHash> g_pinned;
@@ -120,12 +135,63 @@ std::unordered_map<Key, std::vector<size_t>, KeyHash> g_item_at;  // g_items ind
 std::vector<BlobItem> g_blobs;
 std::vector<IconItem> g_iconv;
 uint32_t g_next_synth = 0;
+uint64_t g_next_resource_registration = 0;
 uint64_t g_next_sequence = 0;  // blob registrations, under g_mu
 
 // The catalog generation and the last change (catalog_changed): atomics, so the content hook can say "ready" lock-free.
 std::atomic<uint64_t> g_catalog_gen{1};
 std::atomic<uint32_t> g_catalog_why{kChangeNone};
 thread_local uint32_t t_origin = 0;  // OriginScope
+
+// Owners the core revoked (kiln.hooks' owner-retiring observer), whether or not anyone calls revert_owner for them. The
+// observer must not wait, and taking their registrations off rebuilds snapshots, which waits for readers: so the observer
+// only marks the owner here, and the revert runs later under g_mu, from the next store operation or from a cleanup thread
+// the mark starts, whichever comes first. A marked owner's registrations are refused from the mark on (a call racing the
+// mark either lands before the revert, which takes it off, or is refused).
+std::mutex g_retire_mu;                  // the marks only: held for bookkeeping, never while waiting; taken after g_mu, never before
+std::unordered_set<KilnOwner> g_retired; // every owner marked (native owner ids are never reused)
+std::vector<KilnOwner> g_retire_queue;   // marked, not reverted yet
+std::atomic<bool> g_retire_due{false};   // g_retire_queue is not empty (read without the lock)
+std::atomic<bool> g_retire_worker{false};  // a cleanup thread is started or running
+
+VfxKeys vfx_reserved_locked() {
+    VfxKeys held = g_vfx_lifetime;
+    for (const ResItem& it : g_items)
+        if (it.key.type == kVfxType && !it.bound && !(it.flags & KILN_ASSET_PUT_OVERRIDE) && !g_vfx_stock.count(it.key))
+            held.insert(it.key);
+    return held;
+}
+
+bool vfx_room_locked(const Key& k, uintptr_t S, std::string* why) {
+    if (!g_vfx_known) { *why = g_vfx_why; return false; }
+    VfxKeys all = g_vfx_stock;
+    if (S) {
+        std::vector<Key> original;
+        if (!game_vfx_keys(S, &original)) { *why = "original VFX type enumeration unreadable"; return false; }
+        all.insert(original.begin(), original.end());
+    }
+    const VfxKeys held = vfx_reserved_locked();
+    all.insert(held.begin(), held.end());
+    all.insert(k);
+    if (all.size() <= g_vfx_capacity.load()) return true;
+    *why = "VFX capacity exhausted (stock, other loaders and reserved additions)";
+    return false;
+}
+
+void vfx_refusal(KilnOwner owner, const Key& k, const std::string& why) {
+    LOGW("assets: owner %llu resource %s refused: %s; VFX capacity %u", static_cast<unsigned long long>(owner),
+         key_str(k).c_str(), why.c_str(), g_vfx_capacity.load());
+}
+
+void queue_omission_locked(ResItem& it, const std::string& why, std::vector<ResourceOmission>* reports) {
+    if (std::find(it.omissions.begin(), it.omissions.end(), why) != it.omissions.end()) return;
+    reports->push_back({it.owner, it.key, it.mod, why});
+    it.omissions.push_back(why);
+}
+
+void publish_omissions(const std::vector<ResourceOmission>& reports) {
+    for (const ResourceOmission& r : reports) report_resource_omission(r);
+}
 
 // ---- snapshot builders (under g_mu) -----------------------------------------------------------------------------
 void rebuild_content_locked() {
@@ -150,8 +216,9 @@ void rebuild_content_locked() {
     }
 }
 
-void bind_item_locked(ResItem& it, uintptr_t S) {
+void bind_item_locked(ResItem& it, uintptr_t S, std::vector<ResourceOmission>* reports) {
     if (it.bound || !S) return;
+    if (it.key.type == kVfxType) it.handle = 0, it.is_new = false, it.vfx_refused = false;
     const uint32_t gh = game_handle(S, it.key);
     const bool want_new = it.flags & KILN_ASSET_PUT_NEW;
     const bool want_over = it.flags & KILN_ASSET_PUT_OVERRIDE;
@@ -172,14 +239,31 @@ void bind_item_locked(ResItem& it, uintptr_t S) {
             it.bound = true;
             return;
         }
+        if (it.key.type == kVfxType) {
+            std::string why;
+            std::vector<Key> original;
+            // A failed key lookup must never turn an original resource into a synthetic alias.
+            if (g_vfx_stock.count(it.key)) why = "stock VFX key could not bind to its original handle";
+            else if (!game_vfx_keys(S, &original)) why = "original VFX type enumeration unreadable";
+            else if (std::find(original.begin(), original.end(), it.key) != original.end())
+                why = "other-loader VFX key could not bind to its original handle";
+            else vfx_room_locked(it.key, S, &why);
+            if (!why.empty()) {
+                queue_omission_locked(it, why, reports);
+                it.bound = true;
+                it.vfx_refused = true;
+                return;
+            }
+            g_vfx_lifetime.insert(it.key);
+        }
         it.is_new = true;
         it.handle = kSynthBase + g_next_synth++;
     }
     it.bound = true;
 }
 
-void bind_resources_locked(uintptr_t S) {
-    for (auto& it : g_items) bind_item_locked(it, S);
+void bind_resources_locked(uintptr_t S, std::vector<ResourceOmission>* reports) {
+    for (auto& it : g_items) bind_item_locked(it, S, reports);
 }
 
 void reindex_locked() {
@@ -189,12 +273,14 @@ void reindex_locked() {
 
 // One bound item into a level of the index; `known` (the base, for a delta): what the level adds to.
 void add_served(ResSnap* s, const ResItem& it, const ResSnap* known) {
-    const Served sv{it.bytes, it.size, it.handle, it.is_new};
+    if (it.key.type == kVfxType && !it.handle) return;  // skipped/refused VFX must not leak through resource_read/data
+    const Served sv{it.bytes, it.size, it.handle, it.is_new, it.registration};
     s->keys[it.key] = sv;
     if (it.handle) s->handles[it.handle] = sv;
     if (it.is_new) {
         if (!(known && known->ever_new.count(it.key)) && s->ever_new.emplace(it.key, true).second) ++s->ever_new_by_type[it.key.type];
-        s->new_by_type[it.key.type].push_back(it.key);
+        auto& keys = s->new_by_type[it.key.type];
+        if (it.key.type != kVfxType || std::find(keys.begin(), keys.end(), it.key) == keys.end()) keys.push_back(it.key);
         s->synth_keys[it.handle] = it.key;
     }
 }
@@ -253,20 +339,28 @@ void rebuild_icons_locked() {
 }
 
 // resource_put core (under g_mu). Replaces this owner's earlier resource for the same key.
-KilnResult put_resource_locked(KilnOwner owner, const Key& k, const void* data, size_t len, uint32_t flags) {
+KilnResult put_resource_locked(KilnOwner owner, const Key& k, const void* data, size_t len, uint32_t flags,
+                               std::string_view mod = {}) {
     const uint8_t* copy = keep_copy(data, len);
     if (!copy && len) return KILN_ERR_INTERNAL;
+    std::string origin(mod);
     std::vector<size_t>& at = g_item_at[k];
     for (size_t i : at)
         if (ResItem& it = g_items[i]; it.owner == owner) {
             it.bytes = copy;
             it.size = len;
             it.flags = flags;
+            it.mod = std::move(origin);
+            it.registration = ++g_next_resource_registration;
+            it.omissions.clear();
             it.bound = false;  // rebind (bytes changed; a new override keeps its handle after bind)
             return KILN_OK;
         }
     at.push_back(g_items.size());
-    g_items.push_back({owner, k, copy, len, flags});
+    ResItem it{owner, k, copy, len, flags};
+    it.mod = std::move(origin);
+    it.registration = ++g_next_resource_registration;
+    g_items.push_back(std::move(it));
     return KILN_OK;
 }
 
@@ -294,7 +388,171 @@ KilnResult add_blob_locked(KilnOwner owner, const void* data, size_t len, const 
     return KILN_OK;
 }
 
+// Takes the owners' registrations off (pinned keys stay), with one rebuild of each snapshot it touched and one catalog
+// generation step when blobs went (under g_mu).
+struct Reverted {
+    size_t resources = 0, blobs = 0, icons = 0;
+};
+Reverted revert_owners_locked(const std::vector<KilnOwner>& owners) {
+    const auto of = [&](KilnOwner o) { return std::find(owners.begin(), owners.end(), o) != owners.end(); };
+    const auto re = [](auto& v, auto pred) {
+        const size_t n = v.size();
+        v.erase(std::remove_if(v.begin(), v.end(), pred), v.end());
+        return n - v.size();
+    };
+    Reverted r;
+    r.resources = re(g_items, [&](const ResItem& it) { return of(it.owner) && !g_pinned.count(it.key); });
+    r.blobs = re(g_blobs, [&](const BlobItem& b) { return of(b.owner); });
+    for (auto& i : g_iconv)
+        if (of(i.owner)) i.state->store(KILN_ICON_NONE);
+    r.icons = re(g_iconv, [&](const IconItem& i) { return of(i.owner); });
+    if (r.resources) reindex_locked(), rebuild_resources_locked();
+    if (r.blobs || r.icons) rebuild_content_locked();
+    if (r.blobs) catalog_changed(kChangeRevoke);
+    if (r.icons) rebuild_icons_locked();
+    return r;
+}
+
+// The deferred half of a revocation (under g_mu): reverts every owner marked since the last time. One atomic load when
+// nothing is due, so every store operation can afford it.
+void drain_retired_locked() {
+    if (!g_retire_due.load()) return;
+    std::vector<KilnOwner> owners;
+    {
+        std::lock_guard lock(g_retire_mu);
+        owners.swap(g_retire_queue);
+        g_retire_due.store(false);
+    }
+    if (owners.empty()) return;
+    const Reverted r = revert_owners_locked(owners);
+    for (const KilnOwner o : owners)
+        LOGD("assets: owner %llu was revoked: its registrations are taken off", static_cast<unsigned long long>(o));
+    if (r.resources || r.blobs || r.icons)
+        LOGI("assets: %zu revoked owner(s) without revert_owner: %zu resource(s), %zu blob(s), %zu icon(s) taken off",
+             owners.size(), r.resources, r.blobs, r.icons);
+}
+
+// Admission (under g_mu, after drain_retired_locked): a revoked owner registers nothing more.
+bool retired_locked(KilnOwner owner, const char* what, const Key* k = nullptr) {
+    {
+        std::lock_guard lock(g_retire_mu);
+        if (!g_retired.count(owner)) return false;
+    }
+    LOGW("assets: owner %llu %s%s%s refused: the owner was revoked", static_cast<unsigned long long>(owner), what, k ? " " : "",
+         k ? key_str(*k).c_str() : "");
+    return true;
+}
+
+// The cleanup thread: runs the deferred revert as soon as g_mu and the readers allow, then ends (a mark that comes in
+// while it finishes is seen by the check after it clears its flag, or starts a new thread).
+void cleanup_worker() {
+#ifdef KILN_ASSETS_CATALOG_TEST
+    cleanup_worker_started();
+#endif
+    for (;;) {
+        {
+            std::lock_guard lock(g_mu);
+            drain_retired_locked();
+        }
+        g_retire_worker.store(false);
+        if (!g_retire_due.load() || g_retire_worker.exchange(true)) return;
+    }
+}
+
 }  // namespace
+
+void report_vfx_omissions(const std::vector<ResourceRegistration>& omitted, const char* why) {
+    if (omitted.empty()) return;
+    std::vector<ResourceOmission> reports;
+    {
+        std::lock_guard lock(g_mu);
+        drain_retired_locked();
+        for (const ResourceRegistration& r : omitted) {
+            const auto at = g_item_at.find(r.key);
+            if (at == g_item_at.end()) continue;
+            for (size_t i : at->second) {
+                ResItem& it = g_items[i];
+                if (it.registration == r.registration && it.bound && it.is_new && it.handle)
+                    queue_omission_locked(it, why, &reports);
+            }
+        }
+    }
+    publish_omissions(reports);
+}
+
+void store_owner_retired(KilnOwner owner) {
+    {
+        std::lock_guard lock(g_retire_mu);
+        if (!g_retired.insert(owner).second) return;  // marked before
+        g_retire_queue.push_back(owner);
+        g_retire_due.store(true);
+    }
+    if (g_retire_worker.exchange(true)) return;  // the running thread sees the mark before it ends
+    try {
+        std::thread(cleanup_worker).detach();  // starting a thread does not wait for it
+    } catch (...) {
+        g_retire_worker.store(false);
+        LOGW("assets: no cleanup thread for revoked owner %llu: its registrations go with the next store call",
+             static_cast<unsigned long long>(owner));
+    }
+}
+
+void store_drain_retired() {
+    if (!g_retire_due.load()) return;
+    std::lock_guard lock(g_mu);
+    drain_retired_locked();
+}
+
+bool store_cleanup_idle() { return !g_retire_due.load() && !g_retire_worker.load(); }
+
+void vfx_preflight_start(const std::wstring& path, uint32_t capacity) {
+    std::lock_guard lock(g_mu);
+    if (g_vfx_ready_started || g_S.load()) return;
+    g_vfx_capacity.store(capacity ? capacity : 2048);
+    try {
+        g_vfx_known = read_vfx_census(std::filesystem::path(path), &g_vfx_stock, &g_vfx_why);
+    } catch (...) {
+        g_vfx_known = false;
+        g_vfx_stock.clear();
+        g_vfx_why = "original VFX census could not be read";
+    }
+    if (g_vfx_known) LOGI("assets: original VFX census %zu distinct key(s), capacity %u", g_vfx_stock.size(), capacity);
+    else LOGW("assets: new VFX resources unavailable: %s", g_vfx_why.c_str());
+}
+
+uint32_t vfx_capacity() { return g_vfx_capacity.load(); }
+
+KilnResult KILN_CALL op_vfx_budget(KilnAssetsVfxBudget* out) {
+    if (!out || out->size < sizeof(KilnAssetsVfxBudget)) return KILN_ERR_INVALID_ARGUMENT;
+    std::lock_guard lock(g_mu);
+    drain_retired_locked();
+    if (!g_vfx_known) return KILN_ERR_UNAVAILABLE;
+    VfxKeys held = vfx_reserved_locked();
+    if (const uintptr_t S = g_S.load()) {
+        std::vector<Key> original;
+        if (!game_vfx_keys(S, &original)) return KILN_ERR_UNAVAILABLE;
+        for (const Key& k : original)
+            if (!g_vfx_stock.count(k)) held.insert(k);
+    }
+    out->capacity = g_vfx_capacity.load();
+    out->game = static_cast<uint32_t>(g_vfx_stock.size());
+    out->reserved = static_cast<uint32_t>(held.size());
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL op_vfx_set_capacity(KilnOwner owner, uint32_t capacity) {
+    if (!owner || (capacity != 2048 && capacity != 4096)) return KILN_ERR_INVALID_ARGUMENT;
+    std::lock_guard lock(g_mu);
+    drain_retired_locked();
+    if (retired_locked(owner, "VFX capacity")) return KILN_ERR_REVOKED;
+    if (g_S.load() || g_vfx_ready_started) {
+        LOGW("assets: owner %llu VFX capacity %u refused: resources-ready has started", static_cast<unsigned long long>(owner), capacity);
+        return KILN_ERR_UNAVAILABLE;
+    }
+    g_vfx_capacity.store(capacity);
+    LOGI("assets: owner %llu recorded installed VFX capacity %u", static_cast<unsigned long long>(owner), capacity);
+    return KILN_OK;
+}
 
 OriginScope::OriginScope(uint32_t origin) : prev_(t_origin) { t_origin = origin; }
 OriginScope::~OriginScope() { t_origin = prev_; }
@@ -316,6 +574,7 @@ std::string catalog_status_json() {
 
 std::vector<LedgerEntry> blob_ledger(uint64_t* generation) {
     std::lock_guard lock(g_mu);  // the generation moves only under g_mu for ledger changes: the copy and it agree
+    drain_retired_locked();      // a revoked owner's registrations are not listed once it is marked
     if (generation) *generation = catalog_generation();
     std::vector<LedgerEntry> out;
     out.reserve(g_blobs.size());
@@ -358,13 +617,26 @@ void run_ready_callbacks() {
 }
 }  // namespace
 
+bool store_note_resource_system(uintptr_t S) {
+    if (!S) return false;
+    std::lock_guard lock(g_mu);
+    if (g_S.load()) return false;
+    g_vfx_ready_started = true;
+    g_S.store(S);
+    return true;
+}
+
 void on_resource_system_ready(uintptr_t S) {
+    std::vector<ResourceOmission> reports;
     {
         std::lock_guard lock(g_mu);
-        bind_resources_locked(S);
+        g_vfx_ready_started = true;
+        drain_retired_locked();
+        bind_resources_locked(S, &reports);
         rebuild_resources_locked();
         if (!g_items.empty()) LOGI("assets: bound %zu resource(s) to the game", g_items.size());
     }
+    publish_omissions(reports);
     // Outside g_mu: both read vanilla resources (needs S) and take g_mu themselves.
     run_ready_callbacks();
     flush_pending_textures();
@@ -395,14 +667,18 @@ void icons_after_populate(uint64_t gen_used) {
 }
 
 // ---- public operations (called by the service table and the manifest loader) -----------------------------------
-KilnResult op_resource_put(KilnOwner owner, const KilnAssetKey* key, const void* data, size_t len, uint32_t flags) {
+static KilnResult resource_put(KilnOwner owner, const KilnAssetKey* key, const void* data, size_t len, uint32_t flags,
+                               std::string_view mod) {
     if (!key || (!data && len)) return KILN_ERR_INVALID_ARGUMENT;
     if (!resources_on()) return KILN_ERR_UNAVAILABLE;
     Key k;
     std::memcpy(k.g, key->guid, 16);
     k.type = key->type;
     k.part = key->part;
-    std::lock_guard lock(g_mu);
+    std::vector<ResourceOmission> reports;
+    std::unique_lock lock(g_mu);
+    drain_retired_locked();
+    if (retired_locked(owner, "resource", &k)) return KILN_ERR_REVOKED;
     // Refusals come before anything is added: a pinned key, or the reserved player graph, never gets a second item.
     if (const auto p = g_pinned.find(k); p != g_pinned.end()) {
         LOGW("assets: owner %llu resource %s refused: key pinned for this process by owner %llu",
@@ -423,19 +699,42 @@ KilnResult op_resource_put(KilnOwner owner, const KilnAssetKey* key, const void*
                      static_cast<unsigned long long>(owner), key_str(k).c_str(), static_cast<unsigned long long>(g_items[i].owner));
                 return KILN_ERR_UNAVAILABLE;
             }
-    KilnResult r = put_resource_locked(owner, k, data, len, flags);
+    if (k.type == kVfxType && !(flags & KILN_ASSET_PUT_OVERRIDE) && !g_vfx_stock.count(k) && !game_handle(g_S.load(), k)) {
+        std::string why;
+        if (!vfx_room_locked(k, g_S.load(), &why)) {
+            vfx_refusal(owner, k, why);
+            return KILN_ERR_UNAVAILABLE;
+        }
+    }
+    KilnResult r = put_resource_locked(owner, k, data, len, flags, mod);
     if (r != KILN_OK) return r;
     if (flags & KILN_ASSET_PUT_PIN) g_pinned.emplace(k, owner);
     const uintptr_t S = g_S.load();
     if (fresh) {
         ResItem& it = g_items.back();
-        bind_item_locked(it, S);
+        bind_item_locked(it, S, &reports);
         if (it.bound) add_resource_locked(it);
+        if (it.vfx_refused) r = KILN_ERR_UNAVAILABLE;
     } else {  // a replaced resource, or another owner's under the same key: everything again, as the order of items decides
-        bind_resources_locked(S);
+        bind_resources_locked(S, &reports);
         rebuild_resources_locked();
+        if (k.type == kVfxType)
+            for (size_t i : g_item_at[k])
+                if (g_items[i].owner == owner && g_items[i].vfx_refused) r = KILN_ERR_UNAVAILABLE;
     }
+    lock.unlock();
+    publish_omissions(reports);
     return r;
+}
+
+KilnResult op_resource_put(KilnOwner owner, const KilnAssetKey* key, const void* data, size_t len, uint32_t flags) {
+    return resource_put(owner, key, data, len, flags, {});
+}
+
+KilnResult KILN_CALL op_vfx_resource_put(KilnOwner owner, KilnStr mod, const KilnAssetKey* key,
+                                      const void* data, size_t len, uint32_t flags) {
+    if (!mod.ptr && mod.len) return KILN_ERR_INVALID_ARGUMENT;
+    return resource_put(owner, key, data, len, flags, mod.len ? std::string_view(mod.ptr, mod.len) : std::string_view{});
 }
 
 KilnResult op_resource_remove(KilnOwner owner, const KilnAssetKey* key) {
@@ -445,6 +744,7 @@ KilnResult op_resource_remove(KilnOwner owner, const KilnAssetKey* key) {
     k.type = key->type;
     k.part = key->part;
     std::lock_guard lock(g_mu);
+    drain_retired_locked();
     if (const auto p = g_pinned.find(k); p != g_pinned.end()) {
         LOGW("assets: owner %llu resource %s removal refused: key pinned for this process by owner %llu",
              static_cast<unsigned long long>(owner), key_str(k).c_str(), static_cast<unsigned long long>(p->second));
@@ -478,7 +778,8 @@ KilnResult op_resource_read(const KilnAssetKey* key, void* buffer, size_t cap, s
                 return KILN_OK;
             }
     }
-    // else the game's own
+    // else the game's own: resident, but read off the game's threads too (the item icon worker, the names task), so the copy
+    // cannot fault: a resource the game moved or dropped meanwhile is not found
     const uintptr_t S = g_S.load();
     const uint32_t h = game_handle(S, k);
     if (!h) return KILN_ERR_NOT_FOUND;
@@ -486,7 +787,7 @@ KilnResult op_resource_read(const KilnAssetKey* key, void* buffer, size_t cap, s
     if (!game_data(S, h, &sp) || !sp.data) return KILN_ERR_NOT_FOUND;
     if (out_len) *out_len = sp.size;
     if (cap < sp.size) return KILN_ERR_BUFFER_TOO_SMALL;
-    std::memcpy(buffer, sp.data, sp.size);
+    if (!game_copy(buffer, sp.data, sp.size)) return KILN_ERR_NOT_FOUND;
     return KILN_OK;
 }
 
@@ -535,6 +836,29 @@ size_t op_resource_new_count(uint32_t type) {
 
 KilnResult op_resource_list(uint32_t type, KilnAssetKey* out, size_t cap, size_t* out_count) {
     const uintptr_t S = g_S.load();
+    if (type == kVfxType) {
+        std::vector<Key> original, extra, merged;
+        const bool readable = game_vfx_keys(S, &original);
+        std::vector<ResourceRegistration> omitted;
+        {
+            ReadGuard g;
+            if (const ResView* v = g_res.load(std::memory_order_acquire)) {
+                v->new_keys(type, &extra);
+                vfx_omitted(*v, extra, original, &omitted);
+            }
+        }
+        if (!readable) {
+            report_vfx_omissions(omitted, "original VFX type enumeration unreadable or unsupported");
+            return KILN_ERR_UNAVAILABLE;
+        }
+        if (!vfx_merge(original, extra, vfx_capacity(), &merged))
+            report_vfx_omissions(omitted, "actual merged VFX enumeration exceeds capacity");
+        if (out_count) *out_count = merged.size();
+        if (cap < merged.size()) return KILN_ERR_BUFFER_TOO_SMALL;
+        if (!out && !merged.empty()) return KILN_ERR_INVALID_ARGUMENT;
+        for (size_t i = 0; i < merged.size(); ++i) std::memcpy(&out[i], &merged[i], sizeof(Key));
+        return KILN_OK;
+    }
     const uint8_t* keys = nullptr;
     uint64_t gc = 0;
     game_type_list(S, type, &keys, &gc);
@@ -563,6 +887,8 @@ KilnResult op_blob_add(KilnOwner owner, const void* data, size_t len, KilnConten
     if (!data && len) return KILN_ERR_INVALID_ARGUMENT;
     if (!content_hooks_on()) return KILN_ERR_UNAVAILABLE;
     std::lock_guard lock(g_mu);
+    drain_retired_locked();
+    if (retired_locked(owner, "blob")) return KILN_ERR_REVOKED;
     HashK h;
     KilnResult r = add_blob_locked(owner, data, len, nullptr, false, &h);
     if (r == KILN_OK) {
@@ -579,6 +905,8 @@ KilnResult op_blob_override(KilnOwner owner, const KilnContentHash* hash, const 
     HashK h;
     std::memcpy(&h, hash, 16);
     std::lock_guard lock(g_mu);
+    drain_retired_locked();
+    if (retired_locked(owner, "blob override")) return KILN_ERR_REVOKED;
     KilnResult r = add_blob_locked(owner, data, len, &h, true, nullptr);
     if (r == KILN_OK) {
         rebuild_content_locked();
@@ -605,6 +933,7 @@ KilnResult op_blob_remove(KilnOwner owner, const KilnContentHash* hash) {
     HashK h;
     std::memcpy(&h, hash, 16);
     std::lock_guard lock(g_mu);
+    drain_retired_locked();
     const size_t n = g_blobs.size();
     g_blobs.erase(std::remove_if(g_blobs.begin(), g_blobs.end(),
                                  [&](const BlobItem& b) { return b.owner == owner && b.hash == h; }),
@@ -616,7 +945,7 @@ KilnResult op_blob_remove(KilnOwner owner, const KilnContentHash* hash) {
     return KILN_OK;
 }
 
-KilnResult op_blob_read(const KilnContentHash* hash, void* buffer, size_t cap, size_t* out_len) {
+KilnResult op_blob_read(const KilnContentHash* hash, void* buffer, size_t cap, size_t* out_len, bool resident) {
     if (!hash) return KILN_ERR_INVALID_ARGUMENT;
     HashK h;
     std::memcpy(&h, hash, 16);
@@ -634,19 +963,23 @@ KilnResult op_blob_read(const KilnContentHash* hash, void* buffer, size_t cap, s
                     }
         }
     }
-    // the game's own blob: find it in the content map and read the container (from memory if it is Kiln's)
+    // the game's own blob: find it in the content map and read its bytes from the container. Only those bytes: a container
+    // (enshrouded_NNN.dat) is about 1 GB, and reading all of it for kiln.ui's 85 KB font took 24.6 s on a player's hard
+    // disk, with the game falling out of borderless fullscreen meanwhile (GitHub #39). A size query reads nothing.
     GameBlob gb;
-    if (!game_blob_find(h, &gb)) return KILN_ERR_NOT_FOUND;
+    if (!game_blob_find(h, &gb, !resident)) return KILN_ERR_NOT_FOUND;
     const std::string path = game_container_path(gb.container);
     if (path.empty()) return KILN_ERR_NOT_FOUND;
-    std::vector<uint8_t> buf;
+    const std::wstring wpath = widen(path);
     std::string why;
-    if (!read_file(widen(path), &buf, &why)) return KILN_ERR_INTERNAL;
-    if (gb.offset + h.size > buf.size()) return KILN_ERR_NOT_FOUND;
+    const bool fits = cap >= h.size && (buffer || h.size == 0);
+    switch (read_file_range(wpath, gb.offset, h.size, fits ? buffer : nullptr, &why)) {
+        case RangeRead::ok: break;
+        case RangeRead::short_file: return KILN_ERR_NOT_FOUND;
+        case RangeRead::failed: return KILN_ERR_INTERNAL;
+    }
     if (out_len) *out_len = h.size;
-    if (cap < h.size) return KILN_ERR_BUFFER_TOO_SMALL;
-    std::memcpy(buffer, buf.data() + gb.offset, h.size);
-    return KILN_OK;
+    return fits ? KILN_OK : KILN_ERR_BUFFER_TOO_SMALL;
 }
 
 // ---- icons ------------------------------------------------------------------------------------------------------
@@ -671,7 +1004,10 @@ KilnResult op_icon_register(KilnOwner owner, const uint8_t guid[16], const Rgba&
     std::memcpy(k.g, guid, 16);
     k.type = KILN_ASSET_TYPE_UI_TEXTURE;
     k.part = 0;
-    std::lock_guard lock(g_mu);
+    std::vector<ResourceOmission> reports;
+    std::unique_lock lock(g_mu);
+    drain_retired_locked();
+    if (retired_locked(owner, "icon", &k)) return KILN_ERR_REVOKED;
     if (g_pinned.count(k)) {
         LOGW("assets: owner %llu icon %s refused: key pinned for this process", static_cast<unsigned long long>(owner), key_str(k).c_str());
         return KILN_ERR_UNAVAILABLE;
@@ -691,11 +1027,13 @@ KilnResult op_icon_register(KilnOwner owner, const uint8_t guid[16], const Rgba&
         found->state->store(KILN_ICON_PENDING);
         found->ok = true;
     }
-    bind_resources_locked(g_S.load());
+    bind_resources_locked(g_S.load(), &reports);
     rebuild_resources_locked();
     rebuild_content_locked();
     catalog_changed(kChangeRegistration);
     rebuild_icons_locked();
+    lock.unlock();
+    publish_omissions(reports);
     return KILN_OK;
 }
 
@@ -707,6 +1045,7 @@ KilnResult op_icon_remove(KilnOwner owner, const uint8_t guid[16]) {
     k.type = KILN_ASSET_TYPE_UI_TEXTURE;
     k.part = 0;
     std::lock_guard lock(g_mu);
+    drain_retired_locked();
     for (auto& i : g_iconv)
         if (i.owner == owner && i.guid == g) i.state->store(KILN_ICON_NONE);
     g_iconv.erase(std::remove_if(g_iconv.begin(), g_iconv.end(),
@@ -731,24 +1070,12 @@ int32_t op_icon_state(const uint8_t guid[16]) {
     return it == s->state.end() ? KILN_ICON_NONE : it->second->load(std::memory_order_relaxed);
 }
 
+// Also for an owner the core revoked: whichever of this and the deferred revert comes second finds nothing left.
 void op_revert_owner(KilnOwner owner) {
     catalog_release_owner(owner);  // its catalog handles (the catalog's own lock, not g_mu)
     std::lock_guard lock(g_mu);
-    bool res = false, blob = false, icon = false;
-    auto re = [&](auto& v, auto pred, bool& flag) {
-        const size_t n = v.size();
-        v.erase(std::remove_if(v.begin(), v.end(), pred), v.end());
-        flag = v.size() != n;
-    };
-    re(g_items, [&](const ResItem& it) { return it.owner == owner && !g_pinned.count(it.key); }, res);
-    re(g_blobs, [&](const BlobItem& b) { return b.owner == owner; }, blob);
-    for (auto& i : g_iconv)
-        if (i.owner == owner) i.state->store(KILN_ICON_NONE);
-    re(g_iconv, [&](const IconItem& i) { return i.owner == owner; }, icon);
-    if (res) reindex_locked(), rebuild_resources_locked();
-    if (blob || icon) rebuild_content_locked();
-    if (blob) catalog_changed(kChangeRevoke);
-    if (icon) rebuild_icons_locked();
+    drain_retired_locked();
+    revert_owners_locked({owner});
 }
 
 std::string store_status_json() {

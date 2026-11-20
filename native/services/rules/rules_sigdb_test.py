@@ -365,7 +365,8 @@ def check_character_flight(side, image, doc, symbols):
     _, _, baseline = Resolver(image, subset).run()
     check(all(baseline.values()), side + " isolated flight, consume and building patterns resolve")
     for name in ["rules/LocoStateWrite", "rules/FlightGravity", "rules/FlightMover", "@rules/FlightGravity.actor",
-                 "@rules/FlightMover.dynloco", "@rules/FlightMover.actor"]:
+                 "@rules/FlightMover.dynloco", "@rules/FlightMover.actor", "@rules/FlightMover.locomotion",
+                 "@rules/FlightMover.rows"]:
         spec = subset["symbols"][name]["find"][0]
         at, _ = matches(image, symbols, spec)
         size = parse(spec["pattern"])[2]
@@ -377,6 +378,39 @@ def check_character_flight(side, image, doc, symbols):
             _, _, features = Resolver(changed(image, edits), subset).run()
             check(not features["rules.flight"] and features["rules.consume_buff"] and features["rules.costs"],
                   side + " " + reason + " " + name + " disables flight while keeping consumption and building")
+
+
+def check_flight_rows(side, image, symbols, constants):
+    """flight.cpp hands the BuildingFlying mover a private copy of the Locomotion rows for the length of the call: the
+    mover must read the iterator's Locomotion slot once, use it for the spring-acceleration row only, and pick the row
+    as slot + spring_rows + 16 x (InSneakMode + 2 x Strafing)."""
+    check(constants["rules/flight.locomotion"]["value"] == 0x10 and constants["rules/flight.spring_rows"]["value"] == 4,
+          side + " the mover's Locomotion slot is +0x10 and its rows start at +4 (velocityDefault)")
+    mover = symbols["rules/FlightMover"]["rva"]
+    decoder = Cs(CS_ARCH_X86, CS_MODE_64)
+    decoder.detail = True
+    body = []
+    for ins in decoder.disasm(image.img[mover:mover + 0x400], mover):
+        body.append(ins)
+        if ins.mnemonic == "ret":
+            break
+    check(body and body[-1].mnemonic == "ret", side + " the mover's body ends in one ret")
+    slot = constants["rules/flight.locomotion"]["value"]
+    reads = [i for i in body if i.op_str.endswith("[rsi + %#x]" % slot)]
+    check(len(reads) == 1 and reads[0].mnemonic == "mov" and reads[0].op_str.startswith("rbp,"),
+          side + " the mover reads the Locomotion slot once, into rbp")
+    uses = [i for i in body if "rbp" in i.op_str and i.address > reads[0].address]
+    restores = [i for i in uses if i.op_str.startswith("rbp, qword ptr [r11")]
+    check([i.mnemonic + " " + i.op_str for i in uses if i not in restores] == ["add r8, rbp"] and len(restores) == 1,
+          side + " rbp (the Locomotion slot) is used for the row only, then restored")
+    text = [i.mnemonic + " " + i.op_str for i in body]
+    rows = text.index("add r8, rbp")
+    before = text[rows - 6:rows]
+    check(all(x in before for x in ("lea r8, [rcx + rbx*2]", "shl r8, 4", "add r8, %s" % (lambda v: str(v) if v < 10 else hex(v))(constants["rules/flight.spring_rows"]["value"]))),
+          side + " the row is Locomotion + 4 + 16 x (InSneakMode + 2 x Strafing)")
+    hands = [i for i in body if i.mnemonic in ("mov", "lea") and
+             i.op_str.split(",")[0] in ("rcx", "rdx", "r8", "r9") and i.op_str.split(",", 1)[1].strip() in ("rsi", "[rsi]")]
+    check(not hands, side + " the mover hands the iterator itself to no callee")
 
 
 def check_noclip(side, image, doc, symbols, constants):
@@ -478,6 +512,7 @@ def run(side, path):
     check_time_scale(side, image, tree.doc, symbols)
     check_creative(side, image, tree.doc, symbols)
     check_character_flight(side, image, tree.doc, symbols)
+    check_flight_rows(side, image, symbols, constants)
     check_noclip(side, image, tree.doc, symbols, constants)
     check_boundaries(side, image, tree.doc, symbols)
     check_glide_stick(side, image, tree.doc, symbols, constants, features)

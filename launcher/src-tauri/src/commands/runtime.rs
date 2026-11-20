@@ -15,8 +15,16 @@ use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Manager};
 
 /// The Kiln runtime this launcher ships (tools/launcher/shipped-runtime.sh), as a resource of the app.
-const SHIPPED_RUNTIME: &str = "runtime/kiln-runtime.zip";
+pub(crate) const SHIPPED_RUNTIME: &str = "runtime/kiln-runtime.zip";
 static SHIPPED_DONE: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
+/// The version of the runtime this launcher ships, once [`import_shipped`] read it (None: none shipped, not read yet).
+static SHIPPED_VERSION: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// (dev.29) The runtime this launcher ships: the game's Kiln follows it after a switch back from a test build
+/// (state::install_state, InstallState.switch_back).
+pub fn shipped_version() -> Option<String> {
+    SHIPPED_VERSION.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
 
 /// Copies the shipped runtime into `<data>/runtime/`, once per run. A build without one has nothing to copy, and
 /// Runtime still takes a dropped zip. Callers wait on the lock, so the list never shows before the copy is done.
@@ -28,6 +36,9 @@ pub fn import_shipped(app: &AppHandle) {
     let Ok(zip) = app.path().resolve(SHIPPED_RUNTIME, BaseDirectory::Resource) else { return };
     if !zip.is_file() {
         return;
+    }
+    if let Ok(m) = bundle::read(&zip) {
+        *SHIPPED_VERSION.lock().unwrap_or_else(|e| e.into_inner()) = Some(m.version);
     }
     // it writes `runtime/` (also from setup's own thread): a writer a move waits for
     let _writing = crate::state::writing();
@@ -58,8 +69,22 @@ pub async fn runtime_status(game_id: String) -> Result<InstallState, Error> {
     blocking(move || crate::state::install_state(&crate::state::game(&game_id)?, true)).await
 }
 
-fn installer() -> Option<String> {
-    Some(format!("kiln-launcher {}", env!("CARGO_PKG_VERSION")))
+/// The receipt's `installer`: `kiln-launcher <version>`, and (dev.29) ` beta <n>` from a test build, so a release
+/// launcher knows the game's Kiln came with one (kiln_manage::install::installed_by_test_build).
+/// A manually selected different runtime gets the ordinary installer name.
+fn installer(version: &str) -> Option<String> {
+    Some(installer_for_runtime(env!("CARGO_PKG_VERSION"), crate::distribution::beta(), shipped_version().as_deref(), version))
+}
+
+fn installer_for_runtime(version: &str, beta: Option<u32>, shipped: Option<&str>, runtime: &str) -> String {
+    installer_name(version, beta.filter(|_| shipped == Some(runtime)))
+}
+
+fn installer_name(version: &str, beta: Option<u32>) -> String {
+    match beta {
+        Some(n) => format!("kiln-launcher {version} beta {n}"),
+        None => format!("kiln-launcher {version}"),
+    }
 }
 
 /// The fresh status goes out from its own thread: computing it (hashes, the bundle list, the process list) must not
@@ -172,7 +197,7 @@ pub async fn runtime_install(app: AppHandle, game_id: String, version: String, o
         crate::state::refuse_running(&g)?;
         let d = dirs()?;
         let mut options = options;
-        options.installer = options.installer.or_else(installer);
+        options.installer = options.installer.or_else(|| installer(&b.version));
         let r = install::install_report(&d, &g, &b.file, &options, p);
         after_change(&a, &game_id);
         let (r, report) = r?;
@@ -220,7 +245,7 @@ pub async fn runtime_rollback(app: AppHandle, game_id: String, version: String) 
         let b = bundle::find(&d, &version)?;
         // the player's parts carry over by install::resolve_components (an older bundle without some of them leaves
         // them out instead of failing; their opt-outs stay recorded)
-        let options = InstallOptions { components: None, switch_from_shroudforge: false, installer: installer() };
+        let options = InstallOptions { components: None, switch_from_shroudforge: false, installer: installer(&version) };
         let r = install::install_report(&d, &g, &b.file, &options, p);
         after_change(&a, &game_id);
         let (r, report) = r?;
@@ -235,4 +260,32 @@ pub async fn runtime_rollback(app: AppHandle, game_id: String, version: String) 
 #[tauri::command]
 pub async fn runtime_classify(path: String) -> Result<ProxyClass, Error> {
     blocking(move || pe::classify_proxy(std::path::Path::new(&path))).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manually_selected_runtime_is_not_marked_as_the_betas_runtime() {
+        let tag = |shipped, runtime| installer_for_runtime("0.2.0-dev.29", Some(1), shipped, runtime);
+        assert_eq!(tag(Some("beta-runtime"), "beta-runtime"), "kiln-launcher 0.2.0-dev.29 beta 1");
+        assert_eq!(tag(Some("beta-runtime"), "newer-release"), "kiln-launcher 0.2.0-dev.29");
+        assert_eq!(tag(None, "manual-runtime"), "kiln-launcher 0.2.0-dev.29");
+    }
+
+    #[test]
+    fn a_test_build_names_itself_in_the_receipt() {
+        let r = |installer: String| InstallReceipt {
+            format: 1, install_id: "x".into(), installed: "2026-11-15T00:00:00Z".into(), updated: None, installer: Some(installer),
+            runtime: kiln_manage::install::ReceiptRuntime { version: "0.2.0-dev+1".into(), sha256: None, components: vec![], deselected: None },
+            side: RunSide::Client, platform: None, game: None, files: vec![], replaced: vec![],
+        };
+        assert_eq!(installer_name("0.2.0-dev", Some(3)), "kiln-launcher 0.2.0-dev beta 3");
+        assert_eq!(installer_name("0.2.0-dev", None), "kiln-launcher 0.2.0-dev");
+        assert!(install::installed_by_test_build(&r(installer_name("0.2.0-dev", Some(3)))));
+        assert!(!install::installed_by_test_build(&r(installer_name("0.2.0-dev", None))));
+        // this test binary is no test build
+        assert_eq!(installer("any-runtime").as_deref(), Some(concat!("kiln-launcher ", env!("CARGO_PKG_VERSION"))));
+    }
 }

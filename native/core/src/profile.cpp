@@ -77,10 +77,13 @@ constexpr std::string_view kPlacedOnlyKind = "xhl";
 // The one folder of the game a kind's Copy-mode entry may name with "..": EML/native companions have exactly one
 // physical game/mods copy shared with the native DLL (../mods/<folder>), Kiln places enabled Greeneye mods in
 // game/greeneye/<id> (../greeneye/<id>) and enabled Flame mods in game/mods/<id>, where a Flame mod reads its own files
-// (../mods/<id>, from KILN_PROFILE_READER 3). Nothing else may leave kiln/.
+// (../mods/<id>, from KILN_PROFILE_READER 3), and enabled packages for Enshrouded ModLoader (mods.dllmod) in
+// game/Mods/EnshroudedModLoader/<id>, where that loader and kiln-dllmod read them (../Mods/EnshroudedModLoader/<id>; a
+// core that does not know mods.dllmod skips the whole list). Nothing else may leave kiln/.
 const char* placed_root(std::string_view kind) {
     if (kind == "eml" || kind == "flame") return "mods";
     if (kind == "greeneye") return "greeneye";
+    if (kind == "dllmod") return "Mods/EnshroudedModLoader";
     return nullptr;
 }
 
@@ -228,6 +231,9 @@ void parse(const std::string& text) {
             const bool present = k == KILN_PROFILE_KIND_PLUGIN ? fs::is_regular_file(p, ec)
                                  : fs::is_directory(p, ec) || (std::string_view(kind_name(k)) == "shroudtopia" && fs::is_regular_file(p, ec));
             if (!present) {
+                // A mod that is off needs no folder, and its game-folder copy is gone by design (the launcher removes a
+                // switched-off mod's copy, so its own loader cannot run it): nothing to warn about, nothing missing.
+                if (!e.enabled) continue;
                 KLOG_W("profile: %s mod %s: %s %s is missing; skipped", kind_name(k), e.id.empty() ? "(plugin)" : e.id.c_str(),
                        k == KILN_PROFILE_KIND_PLUGIN ? "DLL" : "folder", e.path.c_str());
                 g_state.missing.push_back({k, e.id, e.path});

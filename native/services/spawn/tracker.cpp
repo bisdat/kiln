@@ -3,8 +3,13 @@
 
 #include <windows.h>
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
 #include <fstream>
 #include <sstream>
+#include <thread>
 
 #include "nlohmann/json.hpp"
 
@@ -19,6 +24,113 @@ std::filesystem::path g_file;
 std::string g_key, g_save;
 uint64_t g_next = 1;
 bool g_open = false;
+
+// ---- the sidecar's own thread (0.2.0-dev.29.17) ----
+// The tracker changes on the server world's tick (a spawn, a destroy, a refresh, the world's first save), and each
+// change used to write the sidecar there: create a .tmp, write, MoveFileEx with write-through. On a busy hard disk
+// that took 2.3 s once (a player's world, the first save's rekey: the whole world stood still). The tick now only
+// renders the JSON; this thread puts it on disk. A file's newer text replaces one still waiting (the last one wins);
+// a removal (rekey: the old sidecar) runs after the writes queued before it.
+struct DiskJob {
+    std::filesystem::path file;
+    std::string text;
+    bool remove = false;
+};
+// Never destroyed: the thread may still wait on them when the process ends (destroying a condition variable a thread
+// waits on blocks, or worse).
+struct DiskState {
+    std::mutex mu;
+    std::condition_variable cv, idle;
+    std::deque<DiskJob> q;
+    bool busy = false, thread = false;
+};
+DiskState& disk() {
+    static DiskState* d = new DiskState;
+    return *d;
+}
+std::atomic<SlowDiskFn> g_slow_disk{nullptr};
+
+bool write_atomic(const std::filesystem::path& file, const std::string& text) {
+    std::error_code ec;
+    std::filesystem::create_directories(file.parent_path(), ec);
+    std::filesystem::path tmp = file;
+    tmp += L".tmp";
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        if (!f) return false;
+        f << text;
+        if (!f) return false;
+    }
+    return MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+}
+
+void run_disk_job(const DiskJob& j) {
+    const auto t0 = std::chrono::steady_clock::now();
+    if (j.remove) {
+        std::error_code ec;
+        std::filesystem::remove(j.file, ec);
+    } else {
+        write_atomic(j.file, j.text);
+    }
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    if (SlowDiskFn fn = g_slow_disk.load(); ms > 1000.0 && fn) fn(j.remove ? "removing the old sidecar" : "writing the sidecar", ms);
+}
+
+void disk_loop() {
+    for (;;) {
+        DiskJob j;
+        {
+            std::unique_lock lock(disk().mu);
+            disk().cv.wait(lock, [] { return !disk().q.empty(); });
+            j = std::move(disk().q.front());
+            disk().q.pop_front();
+            disk().busy = true;
+        }
+        try {
+            run_disk_job(j);
+        } catch (...) {
+        }
+        std::lock_guard lock(disk().mu);
+        disk().busy = false;
+        if (disk().q.empty()) disk().idle.notify_all();
+    }
+}
+
+void queue_disk(DiskJob j) {
+    {
+        std::lock_guard lock(disk().mu);
+        if (!j.remove)  // the newest waiting write of this file, unless its removal waits behind it
+            for (auto it = disk().q.rbegin(); it != disk().q.rend(); ++it) {
+                if (it->file != j.file) continue;
+                if (it->remove) break;
+                it->text = std::move(j.text);
+                return;
+            }
+        disk().q.push_back(std::move(j));
+        if (!disk().thread) {
+            try {
+                std::thread(disk_loop).detach();  // lives as long as the process (never joined)
+                disk().thread = true;
+            } catch (...) {
+            }
+        }
+    }
+    if (disk().thread) {
+        disk().cv.notify_one();
+        return;
+    }
+    // no thread (it could not start): as before 0.2.0-dev.29.17, on the caller
+    for (;;) {
+        DiskJob k;
+        {
+            std::lock_guard lock(disk().mu);
+            if (disk().q.empty()) return;
+            k = std::move(disk().q.front());
+            disk().q.pop_front();
+        }
+        run_disk_job(k);
+    }
+}
 
 json to_json(const Record& r) {
     json j;
@@ -74,22 +186,13 @@ void write_locked() {
     json list = json::array();
     for (const Record& r : g_records) list.push_back(to_json(r));
     doc["entities"] = std::move(list);
-    std::error_code ec;
-    std::filesystem::create_directories(g_file.parent_path(), ec);
-    std::filesystem::path tmp = g_file;
-    tmp += L".tmp";
-    {
-        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-        if (!f) return;
-        f << doc.dump(1, '\t', false, json::error_handler_t::replace) << '\n';
-        if (!f) return;
-    }
-    MoveFileExW(tmp.c_str(), g_file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+    queue_disk({g_file, doc.dump(1, '\t', false, json::error_handler_t::replace) + "\n", false});
 }
 
 }  // namespace
 
 void open(const std::filesystem::path& file, const std::string& world_key, const std::string& save_file) {
+    flush(5000);  // the last world's sidecar first (a world opened again reads what was written)
     std::lock_guard lock(g_mu);
     g_file = file;
     g_key = world_key;
@@ -128,8 +231,7 @@ void rekey(const std::filesystem::path& file, const std::string& world_key, cons
     g_key = world_key;
     g_save = save_file;
     write_locked();
-    std::error_code ec;
-    if (!old.empty() && old != file) std::filesystem::remove(old, ec);
+    if (!old.empty() && old != file) queue_disk({old, {}, true});  // after the new sidecar is written
 }
 
 bool opened() {
@@ -210,5 +312,12 @@ void save_now() {
     std::lock_guard lock(g_mu);
     write_locked();
 }
+
+bool flush(uint64_t timeout_ms) {
+    std::unique_lock lock(disk().mu);
+    return disk().idle.wait_for(lock, std::chrono::milliseconds(timeout_ms), [] { return disk().q.empty() && !disk().busy; });
+}
+
+void on_slow_disk(SlowDiskFn fn) { g_slow_disk = fn; }
 
 }  // namespace kspawn::tracker

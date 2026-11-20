@@ -108,3 +108,55 @@ fn evaluate_cases() {
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
+
+#[test]
+fn native_first_pass_rule_is_validated_without_changing_chain_entries() {
+    let good = serde_json::json!({"format":1,"rules":[{
+        "id":"doors", "action":"defer", "subject":{"mod":"native:auto-doors"},
+        "when":[{"mod":"shroudtopia:item-skill-text"}],
+        "target":{"mod":"shroudtopia:item-skill-text"}, "max_wait_ms":30000
+    }]});
+    let (rules, errors) = parse_rules(good.to_string().as_bytes(), RuleSource::Kiln);
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(rules.len(), 1);
+    let facts = Facts { mods: vec!["shroudtopia:item-skill-text".into()], ..Facts::default() };
+    let entries = vec![PlanEntry { path:"powrprof.dll".into(), file:"powrprof.dll".into(), section:Section::Profile, engine:None, mod_id:Some("auto-doors".into()) }];
+    let results = evaluate(&rules, &facts, &entries);
+    assert!(results.is_empty(), "core wait rules add no launcher rows or chain changes");
+    for value in [serde_json::json!(0), serde_json::json!(-1), serde_json::json!(30001), serde_json::json!(1.5), serde_json::json!("30000"), serde_json::Value::Null] {
+        let mut bad=good.clone(); bad["rules"][0]["max_wait_ms"]=value;
+        let (rules, errors)=parse_rules(bad.to_string().as_bytes(), RuleSource::Kiln);
+        assert!(rules.is_empty() && errors.len()==1, "{bad}: {errors:?}");
+    }
+    for key in ["target", "max_wait_ms"] {
+        let mut bad=good.clone();bad["rules"][0].as_object_mut().unwrap().remove(key);
+        assert!(parse_rules(bad.to_string().as_bytes(),RuleSource::Kiln).0.is_empty());
+    }
+    let mut bad=good.clone();bad["rules"][0]["target"]=serde_json::json!({"mod":"emf:item-skill-text"});
+    assert!(parse_rules(bad.to_string().as_bytes(),RuleSource::Kiln).0.is_empty());
+    let mut bad=good.clone();bad["rules"][0]["action"]=serde_json::json!("warn");bad["rules"][0].as_object_mut().unwrap().remove("target");
+    assert!(parse_rules(bad.to_string().as_bytes(),RuleSource::Kiln).0.is_empty());
+}
+
+#[test]
+fn no_shipped_rule_defers_auto_doors() {
+    // 0.2.0-dev.29.5 (inbox 33): started after Shroudtopia's first pass, Auto Doors 1.1.0 did nothing, so the shipped
+    // defer rule is gone; the action itself stays for a player's own rules.
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../native/core/compat-rules.json");
+    let (rules, errors) = parse_rules(&std::fs::read(path).unwrap(), RuleSource::Kiln);
+    assert!(errors.is_empty(), "{errors:?}");
+    assert!(rules.iter().all(|r| !matches!(r.rule.action, RuleAction::Defer)), "a shipped defer rule is back");
+}
+
+#[test]
+fn original_code_is_host_only_and_never_changes_the_chain() {
+    let doc = serde_json::json!({"format":1,"rules":[{
+        "id":"original", "action":"original-code", "subject":{"mod":"shroudtopia:item-skill-text"}
+    }]});
+    let (rules, errors) = parse_rules(doc.to_string().as_bytes(), RuleSource::Kiln);
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(rules.len(), 1);
+    assert!(evaluate(&rules, &Facts::default(), &[]).is_empty());
+    let bytes = serde_json::to_value(&rules[0].rule).unwrap();
+    assert_eq!(bytes["action"], "original-code");
+}

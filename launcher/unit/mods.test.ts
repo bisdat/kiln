@@ -72,6 +72,38 @@ test("Ember mods do not run yet; an XHL companion needs XHL-Core only when the g
   expect(countLine(buildRows(inputs({ library, profile: p, xhlHost: true }))).text).toBe("2 mods on. Private Chests does not run yet: Ember has published no mod ABI yet.");
 });
 
+// GitHub #41: AutolootCoop's powrprof.dll package, which Kiln places in the game folder at activation, ran but its row
+// said "Will not run" (the preview's entry is on, with a reason that says how it runs)
+const gameFolder = () => {
+  const library = [lib("native", "autolootcoop", "AutolootCoop"), lib("native", "broken", "Broken")];
+  const preview: ResolvePreview = {
+    side: "client", kiln: { order: [], rejected: [] }, warnings: [], withWorld: [], native: [
+      { id: "autolootcoop", version: "1.0.0", phase: "early", enabled: true, reason: "placed in the game folder at activation: the game loads powrprof.dll itself, not Kiln" },
+      { id: "broken", version: "1.0.0", phase: "early", enabled: false, reason: "not placed in the game folder: a.dll and A.dll would both be a.dll in the game folder" },
+    ],
+  };
+  return { preview, rows: buildRows(inputs({ library, preview, profile: profile({ native: [pm("autolootcoop"), pm("broken")] }) })) };
+};
+
+test("a package Kiln places in the game folder runs, the game loads it; a native mod that cannot load still will not run", () => {
+  const { rows } = gameFolder();
+  const loot = rows.find((r) => r.id === "autolootcoop")!;
+  expect(loot.wontRun).toBeNull();
+  expect(loot.note).toMatchObject({ text: "Runs from the game folder", tone: "info" });
+  expect(loot.note!.title).toBe("Placed in the game folder at activation: the game loads powrprof.dll itself, not Kiln.");
+  expect(rows.find((r) => r.id === "broken")!.note).toMatchObject({ text: "Will not run", tone: "warn" });
+  expect(countLine(rows).text).toBe("2 mods on. Broken will not run: not placed in the game folder: a.dll and A.dll would both be a.dll in the game folder.");
+});
+
+test("the load order lists a package Kiln places in the game folder with the game folder's mods, not as not loading", async () => {
+  const { steps } = await import("../src/pages/mods/LoadOrder");
+  const { preview, rows } = gameFolder();
+  const s = steps(rows, preview, "client");
+  expect(s.notLoading.map((r) => r.id)).toEqual(["broken"]);
+  expect(s.steps.find((x) => x.id === "folder")?.rows.map((x) => [x.row.id, x.note])).toEqual([["autolootcoop", "Placed by Kiln"]]);
+  expect(s.steps.flatMap((x) => x.rows).filter((x) => x.row.id === "autolootcoop")).toHaveLength(1);
+});
+
 test("a failure of the last start is the row's note, when the same run wrote it", () => {
   const boot = { pid: 7, written: "2026-11-11T10:00:00Z" } as BootState["boot"];
   const launch = { boot, stale: false, native: null, mods: { format: 1, pid: 7, written: "2026-11-11T10:00:01Z", generation: 1, mods: [{ id: "k", state: "failed", reason: "threw in OnLoad" }] } } as BootState;
@@ -110,4 +142,19 @@ test("a mod changed in its Library folder says so, on or off, with the version t
   expect(rows.find((r) => r.id === "other")).toMatchObject({ changed: null });
   // not in the profile: the newest version is the one the row shows, unchanged here
   expect(buildRows(inputs({ library: [changed] }))[0]).toMatchObject({ changed: null, note: null });
+});
+
+test("an EML mod whose package carried a modified EML loader says it only partly runs, with what does not", () => {
+  const part = "part of this mod is in dbghelp.dll, a modified EML loader with code of its own (a weapon holster hotkey)";
+  const holster = lib("eml", "holster-toggle", "Holster Toggle");
+  holster.versions[0].loaderPart = part;
+  const rows = buildRows(inputs({ library: [holster, lib("eml", "stacks")], profile: profile({ eml: [pm("holster-toggle"), pm("stacks")] }) }));
+  const row = rows.find((r) => r.id === "holster-toggle")!;
+  expect(row.note).toEqual({ text: "Only partly runs", tone: "warn", title: `${part[0].toUpperCase()}${part.slice(1)}.` });
+  expect(row.wontRun).toBeNull(); // its EML part runs: it counts on, and the sentence does not call it a mod that will not run
+  expect(rows.find((r) => r.id === "stacks")!.note).toBeNull();
+  expect(countLine(rows).text).toBe("2 mods on.");
+  // switched off, nothing to say
+  const off = buildRows(inputs({ library: [holster], profile: profile({ eml: [pm("holster-toggle", false)] }) }));
+  expect(off[0].note).toBeNull();
 });

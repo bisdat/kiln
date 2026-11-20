@@ -83,6 +83,9 @@ pub struct PortReport {
     pub features_lost: Vec<String>,
     pub changed: usize,
     pub unverified_fixed: Vec<String>,
+    /// "sig needs review: <symbol>: was [...], is [...]": described functions whose code changed, or whose descriptor
+    /// the core would refuse on the new build (port.py's summary.sig_review; matching descriptors can remain on)
+    pub sig_review: Vec<String>,
 }
 
 impl PortReport {
@@ -110,6 +113,9 @@ impl PortReport {
         }
         if !self.unverified_fixed.is_empty() {
             println!("          fixed constants nothing checks (the gate's tests do): {}", self.unverified_fixed.len());
+        }
+        for l in &self.sig_review {
+            println!("          {l}");
         }
         println!("          report {}", self.out.join("report.txt").display());
     }
@@ -139,6 +145,7 @@ pub fn parse_report(text: &str, out: PathBuf) -> Result<PortReport> {
         features_lost: strings(s, &["features", "lost"]),
         changed: s["strategies_changed"].as_array().map(|a| a.len()).unwrap_or(0),
         unverified_fixed: strings(s, &["unverified_fixed"]),
+        sig_review: strings(s, &["sig_review"]),
     })
 }
 
@@ -215,5 +222,27 @@ mod tests {
         assert!(!r.complete && !r.defs_unchanged);
         assert_eq!(r.record(), PathBuf::from("/o/builds/server/ab.json"));
         assert!(parse_report("{", PathBuf::new()).is_err());
+        assert!(r.sig_review.is_empty()); // a report of a port.py without descriptors
+    }
+
+    #[test]
+    fn a_review_line_does_not_claim_a_matching_descriptor_is_disabled() {
+        let j = r#"{"new": {"sha256": "ab"}, "summary": {"sig_review": ["sig needs review: m/F: return changed"]}}"#;
+        let r = parse_report(j, PathBuf::from("/o")).unwrap();
+        let lines = crate::ops::next_for_sigs(&r);
+        assert!(!lines[0].contains("stay off on this build until"));
+        assert!(lines[0].contains("only refused descriptors are disabled automatically"));
+    }
+
+    #[test]
+    fn sig_review_lines() {
+        let j = r#"{"new": {"sha256": "ab"}, "summary": {"complete": true, "defs_unchanged": true,
+            "sig_review": ["sig needs review: time/SetTimeScale: was [rcx, xmm1, r8], is [rcx, xmm1, r8, stack+0x28] (mismatch: x)"]}}"#;
+        let r = parse_report(j, PathBuf::from("/o")).unwrap();
+        assert_eq!(r.sig_review.len(), 1);
+        assert!(r.sig_review[0].starts_with("sig needs review: time/SetTimeScale: was [rcx, xmm1, r8], is "));
+        assert_eq!(crate::ops::next_for_sigs(&r), vec![
+            "sig needs review: time/SetTimeScale: was [rcx, xmm1, r8], is [rcx, xmm1, r8, stack+0x28] (mismatch: x); \
+             review the descriptor before using typed hooks or calls; only refused descriptors are disabled automatically (docs/kiln/sigport.md)".to_string()]);
     }
 }

@@ -225,6 +225,100 @@ blocks/house.json: block container cache, defaultLoot.entries: a loot table with
 The save-boundary test stages the real WorldData bundle from the first of two item callbacks, while both container tasks are still pending, and checks the blob before requesting a game save and restarting. It calls the existing staging method through test-only reflection because `Saves.Request` queues its work for a later step; that call alone would not exercise this interval.
 Another fixture queues a grant from the request-time save event: the initial stage sees an empty inventory, and the final Post stage must journal the subsequent simulation's commit before its callback. The committed manifest and a restart must preserve exactly one grant.
 
+## Upgrade stations
+Since 0.2.0-dev.29.19 (the equipment wave). A placed thing whose use raises an item's rarity: `Upgrade` on its interaction runs one
+step of a rarity upgrade rule (`RarityUpgradeBlock`, [item-blocks.md](item-blocks.md#rarity-upgrades-rarityupgradeblock)) on the
+server, paid by the player. Sample: `mods/samples/RarityAnvil` (C#, and `blocks/twins.json` as data).
+
+```csharp
+Blocks.Define("standard-upgrades", new RarityUpgradeBlock
+{
+    Items = ["Weapon_*", "Armor_*"],
+    Steps =
+    {
+        [Rarity.Uncommon] = new UpgradeStep { Cost = { [GameItems.Material_T1_Metal_Scraps] = 10 } },
+        [Rarity.Rare]     = new UpgradeStep { Cost = { [GameItems.Material_T1_Metal_Sheets] = 5 }, Chance = 0.9 },
+    },
+});
+
+// the item in the player's hand: every player
+Blocks.Define("rarity-anvil", new PropBlock
+{
+    Name = "Rarity Anvil", Visual = new VisualBlock { Like = GameItems.Prop_Decoration_Comfort1_T0_Table_Medium },
+    Recipe = new RecipeBlock { Needs = { [GameItems.Material_T1_Metal_Sheets] = 10 } },
+    OnInteract = new InteractBlock { Prompt = "Upgrade held item", Upgrade = new UpgradeAction { Rule = "standard-upgrades" } },
+});
+
+// a window that lists the player's gear: Kiln players (others get the held item)
+Blocks.Define("rarity-forge", new PropBlock
+{
+    Name = "Rarity Forge", Visual = new VisualBlock { Like = GameItems.Prop_Decoration_Comfort1_T0_Table_Medium },
+    OnInteract = new InteractBlock { Prompt = "Upgrade gear", Upgrade = new UpgradeAction { Rule = "standard-upgrades", Target = UpgradeTarget.Choose } },
+});
+```
+```jsonc
+{ "format": 1,
+  "props": {
+    "rarity-anvil": { "name": "Rarity Anvil", "visual": { "like": "Prop_Decoration_Comfort1_T0_Table_Medium" },
+      "onInteract": { "prompt": "Upgrade held item", "upgrade": { "rule": "standard-upgrades" } } },
+    "rarity-forge": { "name": "Rarity Forge", "visual": { "like": "Prop_Decoration_Comfort1_T0_Table_Medium" },
+      "onInteract": { "prompt": "Upgrade gear", "upgrade": { "rule": "standard-upgrades", "target": "choose", "range": 6 } } } } }
+```
+
+- **`rule`**: a `rarityUpgrades` block of this mod by name, or `"other-mod:name"`. A name no loaded mod defines is an error once
+  the mods have loaded (`block rarity-anvil, onInteract.upgrade.rule: no loaded mod defines the rarity upgrade ...`).
+- **`target`**: `held` (the default) upgrades the item in the player's hand: a weapon, shield or tool on the action bar (armour and
+  rings are worn, not held: use `choose` or code for them). `choose` opens a window on the player's game that lists every piece of
+  gear they carry with its next step, cost and chance, and an Upgrade button for each one the rule takes and they can pay for; the
+  window comes again after each upgrade with the new prices. A player whose game cannot show it (no Kiln, or a Kiln older than
+  0.2.0-dev.29.19) gets `held` instead.
+- **`range`** (1 to 64 metres, default 6): with `choose`, how far from the station the player may stand when the pick arrives.
+- **What the player plays**: without `plays` the hand on it (`toggle`), which replaces what the look's own use did: a station
+  kind's crafting menu does not open. `plays` says otherwise. An upgrade and a `toggle` together are refused.
+- **What the server checks**: everything. The rule, the cost and the chance are `Items.UpgradeRarity`'s
+  ([../services/items.md](../services/items.md#upgrading-rarity-v8-since-020-dev2919)): `GearUpgradingEvent` handlers can change the
+  price or cancel, and the server rolls the chance. A window's pick is taken only for an item the server listed in that window
+  (a token per player, for 2 minutes), from a player still within `range` of that station, for an item still in their inventory.
+  Nothing a player's game sends can name another item, another price or another rule.
+- **What the player is told**: a toast on a Kiln player's game, a server chat line for others (`Kiln.Chat`): the new rarity and
+  that the new enhancement waits at a workbench (or is unlocked, with a step's `unlock`), what was paid, a failed roll and its
+  chance, or why nothing happened (not enough, at the rule's top, no enhancement slot, the station does not take the item).
+- **Requirements** (`requires`) and `effects` work as on any interaction: a refused player is not upgraded.
+
+### From code
+```csharp
+var action = new UpgradeAction { Rule = "standard-upgrades" };
+UpgradeStation.Offer(blacksmithTable, action, out var why);          // an "E" prompt (the game's word Use) on any entity of the world
+UpgradeResult? r = await UpgradeStation.Use(player, station, action); // as if the player used a station: a chat command, an NPC
+```
+`UpgradeStation.Offer` puts the use on an entity that has no offer of its own, through `Offers` ([offers.md](offers.md)): no new
+template, so it works with players without Kiln. `Items.UpgradeRarity` is the call for any other trigger. Capability
+`blocks.upgrade_station` (follows `items.gear.upgrade`).
+
+### What players' games need
+A prop or station of your own is a new template: `clients: kiln` (Kiln on the player's game, not your mod). The upgrade, its cost
+and what the item becomes are the server's and the game's own state: the item's colour, its "LEVEL x/y" and its enhancement
+slots are what every player's game shows of it. The window is drawn by Kiln on the player's game (no mod needed there).
+An offer on an existing entity (`UpgradeStation.Offer`) needs nothing on the player's game.
+
+Not proven with a client: the whole player loop (the prompt, the hand on it, the toast or chat line, the window and its button,
+the item's new colour and enhancement slot without re-joining, the workbench's unlock after an upgrade, the durability bar). The
+guided client checks `equip.c1` to `equip.c4` cover them (`mods/tests/client-pass/EquipStation.cs`).
+
+### Mistakes
+```
+blocks/anvil.json: block prop rarity-anvil, onInteract.upgrade.rule: names a rarity upgrade (rarityUpgrades): a block of this mod or "other-mod:name"
+blocks/anvil.json: block prop rarity-anvil, onInteract.upgrade.range: 0 is outside 1 to 64 metres
+blocks/anvil.json: block prop rarity-anvil, onInteract.upgrade: an upgrade and a toggle: each use would flip it too; use one interaction for each
+```
+
+### Test
+Offline: `managed/tests/Kiln.Blocks.Tests/UpgradeStationBlockTests.cs` (the lowering, the mistakes, the JSON, the messages) and
+`managed/tests/Kiln.Stations.Tests/UpgradeStationTests.cs` (the use on the test kit: held, the window and its picks, what a player is
+told). Lab: `mods/tests/upgrade-station-test` (a dedicated server with no player: the template's fields, the use run with a chest
+standing in for the player, the window's checks); it logs `upgrade-station-test: PASS` / `FAIL` lines and
+`upgrade-station-test done: N PASS, M FAIL`.
+
 ## Materials
 Sample: `mods/samples/MaterialTweaks` (C#, and `blocks/twins.json` as data). The service under these blocks: [services/worldtables.md](../services/worldtables.md).
 
@@ -266,7 +360,7 @@ A strength field left out stays what it was: the game material's own, or for a n
 - **Unbreakable** takes no damage from anything, tools, explosions or enemies, and can't be dismantled. The game's TNT removes 504 of 729 cells of Rough Stone; with `Unbreakable`, none.
 - **Bases aren't a shelter.** A player's own digging is held to their base permissions, but an explosion or an enemy with no player behind it digs a base as far as its numbers reach. Hardness is what protects walls.
 - **When.** The game reads these tables once at start. A block in `blocks/*.json` is in them from the first start. One defined in C# is kept and is there from the next start: its handle's `Status` says `Pending`, then `Registered`. A C# block taken out of the code still applies for one more start.
-- **How many.** A material is a byte in a cell, so the game has room for 49 new building materials, for every mod together. The build menu is tighter: a player's game lists at most 64 materials for the game's walls and has 61 of its own, so **3 new wall materials** fit across all mods (roofs: 50; placeable terrain: 8). A 65th stops the player's game, so Kiln refuses the material past the room by name, in sorted GUID order, before it takes an id; one a world already has walls of is kept as an absent mod's is, so they stay. Ids are refused past 49 the same way (KL330 says so before you ship; KL331 warns at 5 in one mod). An id may change between sessions: worlds follow the material's GUID, which comes from your mod id and the block's name. Rename with `Was`.
+- **How many.** Custom pools below provide an alternative selector only for opt-in new shapes. A material is a byte in a cell, so the game has room for 49 new building materials, for every mod together. The build menu is tighter: a player's game lists at most 64 materials for the game's walls and has 61 of its own, so **3 new wall materials** fit across all mods (roofs: 50; placeable terrain: 8). A 65th stops the player's game, so Kiln refuses the material past the room by name, in sorted GUID order, before it takes an id; one a world already has walls of is kept as an absent mod's is, so they stay. Ids are refused past 49 the same way (KL330 says so before you ship; KL331 warns at 5 in one mod). An id may change between sessions: worlds follow the material's GUID, which comes from your mod id and the block's name. Rename with `Was`.
 - **A mod taken away.** Each world remembers the materials it ran with. When their mod is absent, Kiln keeps them in the tables, so the walls stay, dig as before and draw the shader's fallback; enable the mod again and they're as they were. `WorldTables.Forget(guid)` lets one go. A world opened in a game without Kiln loses them: the game turns cells it doesn't know into air.
 - **What digging gives back.** As the game's own blocks: the first of its recipe's `Needs`, at the recipe's ratio (Rough Stone is made 100 from 2 stone, and 50 dug give a stone back). `Drops` and `ItemsPerBlocks` say otherwise; `Drops = StrengthBlock.OwnBlock` (`"drops": "block"`) gives its own block item back, one per block. Without a recipe it gives what its starting material gives.
 - **Its look.** `Surface`, below. Without one a new material looks like the game's Rough Stone.
@@ -329,7 +423,7 @@ PNGs are in your mod's folder, a power of two on both sides, 4 to 4096; maps of 
 A mistake names the block and the field, on every side: `block buildingMaterial moss-brick (mod x), surface.side.tint: "#12345" is not a colour: "#rrggbb"`. A wrong surface refuses its block. A PNG that is missing or the wrong size is a client's to find: the material then looks like Rough Stone, and kiln.log says why. `kiln lint` says so first ([KL333](lint.md#kl333-surface-texture), KL501, KL503), and also when a map's channels or colour space aren't what it's read as.
 
 ### Shapes
-A shape of your own for every building material: it is listed beside the game's walls and floors and takes every material they take.
+A shape of your own: by default it uses the same wall/roof pool as the game's shapes. Set `MaterialPool` to opt only the new shape into a custom building-material pool.
 ```csharp
 string[] Row(string cells) => [cells];
 Blocks.Define("arched-window", new BlueprintBlock
@@ -348,6 +442,31 @@ Blocks.Define("arched-window", new BlueprintBlock
 **In a bag.** The game shows every shape item in an inventory as its Construction Hammer (name, text and the "Blueprints" line), whoever made it: its own shapes never sit in one. A shape a `Recipe` makes shows its own name in build mode.
 
 A shape is an entry in a table every shape shares, merged at each game's start like the materials' tables, so every player needs the mod (`clients: mod`). Kiln makes its blueprint item, the table entry with its cells, and the model the client draws under the cursor (one of the item's own, so the ghost is the shape, not the wall it starts from). The game reads the table once at start: a shape from a data file is there from the first start; one defined in C# is kept and is there from the next start (`Status` says `Pending`, then `Registered`). The item's id comes from the mod and the block's name, so a placed shape's item stays the same across restarts.
+
+### Custom pools for new shapes (dev.29)
+
+A `BuildingMaterialPoolBlock` groups 1..64 distinct building-material block items. `BlueprintBlock.MaterialPool` names it; a wall/roof shape and every member must agree on `Roof`. Use named material references or handles, and stable `GameMaterials` names for game entries. A cross-mod reference requires an enabled declared dependency. The pool and shape spend no additional material IDs. Both sides require `clients: mod`.
+
+```json
+{
+  "format": 1,
+  "buildingMaterials": {"ice": {"name": "Ice Block"}, "frost_stone": {"name": "Frost Stone Block"}},
+  "buildingMaterialPools": {
+    "cold_walls": {"name": "Cold Walls", "materials": [{"material": "ice"}, {"material": "frost_stone"}]}
+  },
+  "blueprints": {"cold_wall": {"name": "Cold Wall", "cells": [["########"]], "materialPool": "cold_walls"}}
+}
+```
+
+Only the opted-in shape uses that group. Existing walls still have room for three extra items, roofs 50, terrain eight. An accepted pool's own mod materials (and a declared dependency's) are not appended to the game's lists as well; a refused pool leaves every material in them. Invalid groups refuse dependent shapes; they do not redirect them to a vanilla pool. A material may remain registered for scripted Build. Game materials remain in their original pool, and one mod material shared across groups uses one material ID.
+
+Pool GUIDs use `BlockIds.Derive(mod, "materialpool", Was ?? key)`. Use Was to preserve identity on a rename. Entries retain declared order; a `gameMaterial` entry is the block item the game's build menu lists for that material. Duplicate resolved item IDs, roof mismatch, malformed entries and 65 entries are rejected before serving; the error names the entries (`materials[1] (gameMaterial WoodRough) and materials[2] (gameMaterial WoodRough) are the same building item ...`). Missing mods, dependencies, game names or block items are named refusals. Terrain selector groups are not supported.
+
+Read budgets with `WorldTables.GetMaterialBudget(WorldMaterialCategory.Building)` and `GetPoolBudget("mod:key")`. The explicit-options `Blocks.Define(name, pool, options)` returns Registered, AcceptedNextStart or Refused. RequireRegistered never writes pending storage. Registered means the identical definition is in the immutable boot table; AcceptedNextStart has zero live slots and is rechecked on the next process start. Query the receipt with `GetMaterialPoolRegistration`. A successful result also makes the named block available for a blueprint reference. See [worldtables.md](../services/worldtables.md#custom-building-material-pools-dev29) for accounting, errors, events and storage.
+
+With `<KilnBakeWorldTables>true</KilnBakeWorldTables>`, the SDK bakes these declarations to `blocks.tables.json` (off by default to preserve runtime-dependent C# declarations) without writing a game profile or pretending the game registered them. No-pool profiles retain their old hash. Pool membership order and shape bindings are hashed so peers must agree before custom data streams.
+
+**Not run in a game or lab for this package:** appended registry ingestion, exact selector contents/order, first/last selection, preview, count/cost, placed surface, mined loot, restart/rejoin and a second hosted world. These paths ship enabled; `17-material-pools` records those outstanding checks. Use disposable worlds: as with other custom materials, opening their cells without Kiln can turn them into air.
 
 ### Terrain materials
 Ground, rock and ore of your own. Sample: `mods/samples/TerrainSample` (C#, and `blocks/twins.json` as data; the admin commands `/glacier-vein` and `/snow-mound` put some on the ground 6 m east of you, or at `x y z` from a server console, and fail when no cell changed).

@@ -91,7 +91,7 @@ typedef struct KilnPlayerAnimApi {
 
     /* ---- the lookup (fixed for weapon-moves, inbox note player-anim-04) ---- */
 
-    /* name: "State" or "Machine/State". KILN_OK and *out_matches = how many machines have it (out = the first, in the
+    /* name: "State", "Machine/State", or "0x" plus eight hex digits (entry id). KILN_OK and *out_matches = how many machines have it (out = the first, in the
      * graph's order); KILN_ERR_NOT_FOUND: none; KILN_ERR_UNAVAILABLE: the game's graph cannot be read on this build. */
     KilnResult(KILN_CALL* game_state)(KilnStr name, KilnPaGameState* out, uint32_t* out_matches);
     /* Every id that enters that state (out_count is set even when capacity is too small). */

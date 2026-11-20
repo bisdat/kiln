@@ -11,8 +11,12 @@
 //    the game call that entered it, from caller(): other links on the same function (kiln-emf's, an EMF mod's)
 //    cannot disturb it. While someone subscribed, such a line is held back (the hook reports success without adding
 //    it) and delivered in the next Pre, which runs in the same server frame before the send step. Unless a subscriber
-//    consumes it, Kiln then adds it with the original arguments (through the rest of the chain and then the game's
-//    function), so it reaches everyone exactly as it would have.
+//    consumes it, Kiln then adds it with the original arguments, the time included (through the rest of the chain and
+//    then the game's function), so it reaches everyone exactly as it would have. This is also how a slash line naming no
+//    Kiln command goes on (Kiln.Chat's default since 0.2.0-dev.29.17): Kiln.Chat does not consume it, so the game and
+//    the links after this one get it unchanged, in the same frame's send step. Whether a line is a Kiln command is
+//    managed state (registered names, handlers' cancels and rewrites), so the line is held and decided in Pre rather
+//    than in the game's receive loop.
 //  - Server lines: ChatLogAdd with the recipient's connection handle and account (a line with no speaker is sent
 //    but not shown by clients), then the line is marked as already sent (the game's own MarkSent) for every other
 //    reader, so only the recipient gets it. They are notices (type 4, no loca tag): the client's chat shows such a
@@ -84,6 +88,8 @@ struct Pending {
     uint32_t tag1, tag2, handle;
     uint64_t account;
     std::string text;
+    OptTime time{};         // the receive loop's time argument, copied: the line is added back with it
+    bool has_time = true;   // false: the receive loop passed no time pointer (added back with none either)
 };
 std::mutex g_queue_mutex;
 std::vector<Pending> g_queue;
@@ -273,10 +279,14 @@ bool add_line(uint8_t* sys, uint8_t type, uint32_t handle, uint64_t account, con
 
 // ---- hooks ----
 bool enqueue(uint8_t type, const char* text, size_t len, uint32_t tag1, uint32_t tag2, uint32_t handle,
-             uint64_t account, bool injected) {
+             uint64_t account, bool injected, const OptTime* time) {
     Pending p{type, injected, tag1, tag2, handle, account, std::string()};
     p.text.resize(len);
     if (len && !guarded_copy(p.text.data(), text, len)) return false;
+    if (!injected) {
+        p.has_time = time != nullptr;
+        if (time && !guarded_copy(&p.time, time, sizeof p.time)) return false;
+    }
     std::lock_guard lock(g_queue_mutex);
     if (g_queue.size() >= kMaxQueue) return false;
     g_queue.push_back(std::move(p));
@@ -289,7 +299,7 @@ ChatResult* __fastcall hk_chat_log_add(ChatResult* out, uint8_t* sys, uint8_t ty
                                        uint32_t tag2, uint32_t handle, uint64_t account, const OptTime* time) {
     if (g_receive_ret && type == 0 && g_sub_count.load(std::memory_order_relaxed) > 0 && text && text->data &&
         text->size > 0 && text->size <= static_cast<uint64_t>(C.max_text) && g_add_hook.caller() == g_receive_ret) {
-        if (enqueue(type, text->data, static_cast<size_t>(text->size), tag1, tag2, handle, account, false)) {
+        if (enqueue(type, text->data, static_cast<size_t>(text->size), tag1, tag2, handle, account, false, time)) {
             out->code = 0;  // what ChatLogAdd returns on success; the caller does not look at it anyway
             out->value = 0;
             return out;
@@ -354,8 +364,8 @@ void deliver(Pending& p) {
     }
     ChatResult r{};
     StrView v{p.text.data(), p.text.size()};
-    OptTime none{};
-    const bool ok = guarded_add(&r, sys, p.type, &v, p.tag1, p.tag2, p.handle, p.account, &none) && r.code == 0;
+    const bool ok =
+        guarded_add(&r, sys, p.type, &v, p.tag1, p.tag2, p.handle, p.account, p.has_time ? &p.time : nullptr) && r.code == 0;
     logf(KILN_LOG_DEBUG, "chat: line #%llu from %s (entity %u) %s: %.*s", static_cast<unsigned long long>(m.id), who,
          m.sender.entity, ok ? "passed on" : "REFUSED by the game", static_cast<int>(p.text.size()), p.text.data());
 }
@@ -513,7 +523,7 @@ KilnResult KILN_CALL inject(uint32_t connection, KilnStr text) {
     if (!text.ptr || !text.len) return KILN_ERR_INVALID_ARGUMENT;
     if (!g_can_send) return KILN_ERR_UNAVAILABLE;
     const size_t len = clip_utf8(text.ptr, text.len, static_cast<size_t>(C.max_text));
-    return enqueue(0, text.ptr, len, 0, 0, connection, 0, true) ? KILN_OK : KILN_ERR_BUFFER_TOO_SMALL;
+    return enqueue(0, text.ptr, len, 0, 0, connection, 0, true, nullptr) ? KILN_OK : KILN_ERR_BUFFER_TOO_SMALL;
 }
 
 KilnResult KILN_CALL last_line(KilnChatLineInfo* info, char* text, size_t capacity) {

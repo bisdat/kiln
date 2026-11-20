@@ -6,19 +6,25 @@
 //    makes them return false without running, i.e. the game's own "could not build" path.
 //  - TerraformImpact: the impact function of impact_nodes::Terraforming; a zone makes it return the impact error result
 //    it returns itself when an argument is missing (code 0x18), before any voxel or inventory work.
-//  - CraftRecipe: observed only (result code and recipe).
+//  - CraftRecipe: observed only (result code and recipe); an automated station's cycle once, at its end (craft_phase.h).
 //  - QueueSpawn: called by random_spawner (identified by the call site, kiln.hooks caller()); a zone makes it report "no entity"
 //    (*out = 0), which the spawner handles as it does the engine refusing a template.
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include "internal.h"
+#include "services/kiln_caps.h"
 #include "kiln_hook.hpp"
+#include "demand_hooks.h"
 #include "services/kiln_spawn.h"
 
 namespace kg {
 namespace {
 
-kiln::RawHook h_craft, h_block, h_prop, h_dis, h_dis2, h_pick, h_terra, h_spawn;
+FrameLink h_block{KILN_GAMEPLAY_HOOK_BUILD}, h_prop{KILN_GAMEPLAY_HOOK_BUILD}, h_dis{KILN_GAMEPLAY_HOOK_BUILD},
+          h_dis2{KILN_GAMEPLAY_HOOK_BUILD}, h_pick{KILN_GAMEPLAY_HOOK_BUILD};
+FrameLink h_craft{KILN_GAMEPLAY_HOOK_CRAFT}, h_terra{KILN_GAMEPLAY_HOOK_TERRAFORM}, h_spawn{KILN_GAMEPLAY_HOOK_SPAWN};
 const KilnSpawnApi* g_spawn = nullptr;
 
 struct Record {
@@ -62,14 +68,16 @@ inline KilnEntity op_player(const uint8_t* op) {
     return e;
 }
 
+
 inline bool want_build() {
-    return has_subscribers(KILN_GAMEPLAY_BUILD);
+    return build_installed() && has_subscribers(KILN_GAMEPLAY_BUILD);
 }
 
 // ---- building ----
 // All five return the success flag (al) that the caller passes on to BuildFinish.
-uint8_t build_common(kiln::RawHook& h, uint32_t op_kind, uint32_t action, uint8_t* op, void* arg, uint32_t item,
+uint8_t build_common(FrameLink& h, uint32_t op_kind, uint32_t action, uint8_t* op, void* arg, uint32_t item,
                      double x, double y, double z, KilnEntity target) {
+    if (!build_installed()) return h.call<uint8_t>(op, arg, item);
     const KilnEntity player = op_player(op);
     const uint32_t zone = zone_check(player, x, y, z, action);
     if (zone) {
@@ -96,11 +104,13 @@ uint8_t build_common(kiln::RawHook& h, uint32_t op_kind, uint32_t action, uint8_
 }
 
 uint8_t __fastcall hk_place_block(uint8_t* op, const float* xf, uint32_t item) {
+    if (!build_installed()) return h_block.call<uint8_t>(op, const_cast<float*>(xf), item);
     return build_common(h_block, KILN_GAMEPLAY_BUILD_PLACE_BLOCK, KILN_GAMEPLAY_DENY_BUILD, op, const_cast<float*>(xf),
                         item, xf[0], xf[1], xf[2], 0);
 }
 
 uint8_t __fastcall hk_place_prop(uint8_t* op, const uint8_t* desc, uint32_t item) {
+    if (!build_installed()) return h_prop.call<uint8_t>(op, const_cast<uint8_t*>(desc), item);
     float p[3];
     std::memcpy(p, desc + 0x10, sizeof p);  // desc: +0 template GUID, +0x10 position (float metres), +0x1c rotation
     return build_common(h_prop, KILN_GAMEPLAY_BUILD_PLACE_PROP, KILN_GAMEPLAY_DENY_BUILD, op, const_cast<uint8_t*>(desc),
@@ -108,16 +118,19 @@ uint8_t __fastcall hk_place_prop(uint8_t* op, const uint8_t* desc, uint32_t item
 }
 
 uint8_t __fastcall hk_dismantle(uint8_t* op, const float* xf, uint32_t item) {
+    if (!build_installed()) return h_dis.call<uint8_t>(op, const_cast<float*>(xf), item);
     return build_common(h_dis, KILN_GAMEPLAY_BUILD_DISMANTLE, KILN_GAMEPLAY_DENY_BREAK, op, const_cast<float*>(xf),
                         item, xf[0], xf[1], xf[2], 0);
 }
 
 uint8_t __fastcall hk_dismantle2(uint8_t* op, const float* xf, uint32_t item) {
+    if (!build_installed()) return h_dis2.call<uint8_t>(op, const_cast<float*>(xf), item);
     return build_common(h_dis2, KILN_GAMEPLAY_BUILD_DISMANTLE, KILN_GAMEPLAY_DENY_BREAK, op, const_cast<float*>(xf),
                         item, xf[0], xf[1], xf[2], 0);
 }
 
 uint8_t __fastcall hk_pick_up(uint8_t* op, const uint32_t* what, uint32_t item) {
+    if (!build_installed()) return h_pick.call<uint8_t>(op, const_cast<uint32_t*>(what), item);
     const KilnEntity prop = what[0];
     KilnVec3 p{};
     entity_position(prop, &p);  // a placed prop: static; read-only from a worker (guarded)
@@ -180,7 +193,7 @@ uint8_t* __fastcall hk_terraform(uint8_t* out, void** args, int64_t* ctx) {
         return out;
     }
     uint8_t* res = h_terra.call<uint8_t*>(out, args, ctx);
-    if (want_build()) {
+    if (has_subscribers(KILN_GAMEPLAY_BUILD)) {
         Record r = make(KILN_GAMEPLAY_BUILD, KILN_GAMEPLAY_BUILD_TERRAFORM, t.player);
         r.id2 = t.type;
         r.result = res && res[0] == 0 ? 1 : 0;
@@ -215,12 +228,29 @@ void read_recipe(void* p) {
     }
 }
 
+// kiln.stations excludes this station from a craft's output sources. No-op when kiln-items.dll has no such export. Looked
+// up once, at the first craft: every service DLL is loaded before a world runs.
+void note_craft_station(uint32_t station, int active) {
+    using SetFn = void (*)(uint32_t, int);
+    static const SetFn set = [] {
+#ifdef _WIN32
+        const HMODULE m = GetModuleHandleW(L"kiln-items.dll");
+        return m ? reinterpret_cast<SetFn>(GetProcAddress(m, "kiln_stations_set_craft_context")) : nullptr;
+#else
+        return SetFn{};  // the host test has no kiln-items.dll
+#endif
+    }();
+    if (set) set(station, active);
+}
+
 int32_t __fastcall hk_craft(uint32_t* ctx, const uint8_t* recipe) {
+    if (ctx) note_craft_station(ctx[1], 1);
     const int32_t rc = h_craft.call<int32_t>(ctx, recipe);
-    // Automated stations (factory_station: operator == station, not a player) retry every step; report their
-    // successes only. Craft requests (handle_crafting_events) and players report every outcome.
-    const bool factory = ctx && ctx[0] == ctx[1] && !(ctx[0] >= 1 && ctx[0] <= 1023);
-    if (has_subscribers(KILN_GAMEPLAY_CRAFTED) && ctx && recipe && (rc == 0 || !factory)) {
+    if (ctx) note_craft_station(0, 0);
+    // Automated stations (factory_station: operator == station, not a player) retry every step and call the core twice
+    // per cycle (inputs at the start, outputs at the end): report the end of a successful cycle only. Craft requests
+    // (handle_crafting_events) and players report every outcome (craft_phase.h).
+    if (has_subscribers(KILN_GAMEPLAY_CRAFTED) && ctx && recipe && craft_reported(ctx, rc, L.craft_phase)) {
         Record r = make(KILN_GAMEPLAY_CRAFTED, 0, ctx[0]);
         r.target = ctx[1];
         r.id2 = ctx[2];
@@ -300,15 +330,6 @@ uint32_t* __fastcall hk_spawn(void* a, uint32_t* out, void* c, uint32_t d, const
     return res;
 }
 
-bool hook(kiln::RawHook& h, uintptr_t target, void* detour, const char* what) {
-    const std::string label = std::string("gameplay/") + what;  // the sigdb symbol name
-    if (!h.install(g_api, g_owner, target, detour, label.c_str())) {
-        KG_E("hooking %s at %p failed", what, reinterpret_cast<void*>(target));
-        return false;
-    }
-    return true;
-}
-
 }  // namespace
 
 void hooks_set_spawn_service(const void* p) { g_spawn = static_cast<const KilnSpawnApi*>(p); }
@@ -316,6 +337,8 @@ void hooks_set_spawn_service(const void* p) { g_spawn = static_cast<const KilnSp
 KilnResult hooks_spawn_replace(KilnOwner owner, const uint8_t* from, const uint8_t* to, float chance) {
     if (!F.spawn) return KILN_ERR_UNAVAILABLE;
     if (!from || !to || !(chance >= 0.f && chance <= 1.f)) return KILN_ERR_INVALID_ARGUMENT;
+    if (chance>0 && !hooks_request(KILN_GAMEPLAY_HOOK_SPAWN,owner))
+        return KILN_ERR_UNAVAILABLE;
     std::lock_guard lock(g_replace_mu);
     std::erase_if(g_replace, [&](const Replace& r) {
         return r.owner == owner && !std::memcmp(r.from, from, 16) && !std::memcmp(r.to, to, 16);
@@ -338,20 +361,23 @@ uint32_t hooks_spawn_replace_clear(KilnOwner owner) {
 }
 
 bool hooks_install() {
-    if (F.craft) F.craft = hook(h_craft, fn.craft, reinterpret_cast<void*>(&hk_craft), "CraftRecipe");
-    if (F.build) {
-        const bool ok = hook(h_block, fn.place_block, reinterpret_cast<void*>(&hk_place_block), "PlaceBlueprint") &&
-                        hook(h_prop, fn.place_prop, reinterpret_cast<void*>(&hk_place_prop), "PlaceProp") &&
-                        hook(h_dis, fn.dismantle, reinterpret_cast<void*>(&hk_dismantle), "DismantleBlock") &&
-                        hook(h_dis2, fn.dismantle2, reinterpret_cast<void*>(&hk_dismantle2), "DismantleBlock2") &&
-                        hook(h_pick, fn.pick_up, reinterpret_cast<void*>(&hk_pick_up), "PickUpProp");
-        if (!ok) {
-            h_block = {}, h_prop = {}, h_dis = {}, h_dis2 = {}, h_pick = {};
-            F.build = false;
-        }
-    }
-    if (F.terraform) F.terraform = hook(h_terra, fn.terraform, reinterpret_cast<void*>(&hk_terraform), "TerraformImpact");
-    if (F.spawn) F.spawn = hook(h_spawn, fn.queue_spawn, reinterpret_cast<void*>(&hk_spawn), "QueueSpawn");
+    hooks_init_control();
+    hook_register(KILN_GAMEPLAY_HOOK_BUILD,&h_block,F.build ? fn.place_block : 0,"gameplay/PlaceBlueprint",&FrameLink::dispatch<&hk_place_block>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_U32},KILN_SIG_U8);
+    hook_register(KILN_GAMEPLAY_HOOK_BUILD,&h_prop,F.build ? fn.place_prop : 0,"gameplay/PlaceProp",&FrameLink::dispatch<&hk_place_prop>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_U32},KILN_SIG_U8);
+    hook_register(KILN_GAMEPLAY_HOOK_BUILD,&h_dis,F.build ? fn.dismantle : 0,"gameplay/DismantleBlock",&FrameLink::dispatch<&hk_dismantle>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_U32},KILN_SIG_U8);
+    hook_register(KILN_GAMEPLAY_HOOK_BUILD,&h_dis2,F.build ? fn.dismantle2 : 0,"gameplay/DismantleBlock2",&FrameLink::dispatch<&hk_dismantle2>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_U32},KILN_SIG_U8);
+    hook_register(KILN_GAMEPLAY_HOOK_BUILD,&h_pick,F.build ? fn.pick_up : 0,"gameplay/PickUpProp",&FrameLink::dispatch<&hk_pick_up>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_U32},KILN_SIG_U8);
+    hook_register(KILN_GAMEPLAY_HOOK_CRAFT,&h_craft,F.craft ? fn.craft : 0,"gameplay/CraftRecipe",&FrameLink::dispatch<&hk_craft>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR},KILN_SIG_S32);
+    hook_register(KILN_GAMEPLAY_HOOK_TERRAFORM,&h_terra,F.terraform ? fn.terraform : 0,"gameplay/TerraformImpact",&FrameLink::dispatch<&hk_terraform>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_PTR},KILN_SIG_PTR);
+    hook_register(KILN_GAMEPLAY_HOOK_SPAWN,&h_spawn,F.spawn ? fn.queue_spawn : 0,"gameplay/QueueSpawn",&FrameLink::dispatch<&hk_spawn>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_U32,KILN_SIG_PTR,KILN_SIG_PTR},KILN_SIG_PTR);
     return F.craft || F.build || F.terraform || F.spawn;
 }
 
@@ -365,6 +391,7 @@ void hooks_post() {
     if (recs.empty()) return;
     S.hook_records += recs.size();
     for (auto& r : recs) {
+        if (r.kind == KILN_GAMEPLAY_BUILD && r.op != KILN_GAMEPLAY_BUILD_TERRAFORM && !build_installed()) continue;
         KilnGameplayEvent ev;
         std::memset(&ev, 0, sizeof ev);
         ev.size = sizeof ev;

@@ -1,0 +1,11 @@
+{
+  "id": "systems-test-peer",
+  "name": "game program wraps lab test (peer)",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "SystemsTestPeer.dll",
+  "side": "server",
+  "advanced": true,
+  "systems": { "replaces": ["fuel_setup"] },
+  "description": "Holds the Replace of fuel_setup while systems-test asks for a second one. Lab only."
+}

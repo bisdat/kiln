@@ -1,0 +1,10 @@
+{
+  "id": "client-programs-fixture",
+  "name": "Client programs fixture",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "ClientProgramsFixture.dll",
+  "side": "both",
+  "clients": "none",
+  "description": "The guided checks' fixture for Kiln programs in a client's client world and prediction storage (package 14, mods/tests/client-pass Dev28ClientWorldPrograms.cs): it binds its own client, both and prediction declarations in the main menu, counts their calls per client world, writes a summary line to kiln.log every 600 client steps, and draws a target the pass names 1 m higher in this player's game only. Add it to the profile for the checks that ask for it; the baseline check asks for it to be off."
+}

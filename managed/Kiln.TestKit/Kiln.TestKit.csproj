@@ -9,9 +9,13 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsPackable>false</IsPackable>
+    <!-- its capacity fake uses 17b's groundwork types ([Experimental("KILNX028")]); its kiln.world fakes the task-thread
+         world reads and writes and names their types (KILNX003) -->
+    <NoWarn>$(NoWarn);KILNX028;KILNX003</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Kiln.Api/Kiln.Api.csproj" />
+    <ProjectReference Include="../services/Kiln.Blocks/Kiln.Blocks.csproj" />
     <!-- The real mod loader (ModManager, Manifest, Resolver): Kiln.Host gives the kit friend access. -->
     <ProjectReference Include="../Kiln.Host/Kiln.Host.csproj" />
     <!-- RunCommand: Commands.Execute, CommandSource and CommandResult. -->
@@ -25,6 +29,8 @@
     <ProjectReference Include="../services/Kiln.Client/Kiln.Client.csproj" />
     <!-- The fake world (FakeWorld.cs, World/): the kit names Kiln.World's result types and resets its caches. -->
     <ProjectReference Include="../services/Kiln.World/Kiln.World.csproj" />
+    <!-- dev.29: the fake of kiln.world v4's game programs (Fakes/Systems) runs Kiln.Systems' wraps offline -->
+    <ProjectReference Include="../services/Kiln.Systems/Kiln.Systems.csproj" />
     <!-- The fakes of kiln.players and kiln.saves (Fakes/): the world and players surface names Kiln.Saves' types. -->
     <ProjectReference Include="../services/Kiln.Saves/Kiln.Saves.csproj" />
     <!-- The fake world behind Kiln.Terrain (Fakes/Terrain/): its cells are Kiln.Build's Voxel and CellBox. -->
@@ -32,6 +38,8 @@
     <ProjectReference Include="../services/Kiln.Terrain/Kiln.Terrain.csproj" />
     <!-- Kiln.Saves needs it at run time (CharacterSync's channel); it references it without copying it. -->
     <ProjectReference Include="../services/Kiln.Network/Kiln.Network.csproj" />
+    <!-- The fake of kiln.ui.inventory (Fakes/UiInventory/): Ui.Inventory's records, and its marks (MarkOf). -->
+    <ProjectReference Include="../services/Kiln.Ui/Kiln.Ui.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- Kiln.TestKit.Xunit: [KilnTest] methods as xunit tests (the extensibility package, not a runner). -->

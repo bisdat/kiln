@@ -203,6 +203,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
     // equal a world's step.
     private const ulong MenuStepBase = 1UL << 40;
     private ulong _uiTickHandle, _menuStep;
+    private int _uiThread;  // the managed id of the game's UI thread (the main thread), from its first UI frame; 0 before
     private long _lastMenuServiceTick;
     private readonly DateTime _startedAt = DateTime.UtcNow;
     private int _queuedLines;
@@ -262,7 +263,8 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
             Capability = Service(Kiln.Capabilities.ServiceName, Kiln.Capabilities.ServiceVersion) != 0 ? Kiln.Capabilities.Get : null,
             Faults = new FaultPolicy { Limit = _config.FaultLimit, WindowSeconds = _config.FaultWindowSeconds },
             CrashReports = _config.CrashReports
-                ? _crash = new CrashReports(Path.Combine(kiln, "crash-reports"), Path.Combine(logs, "kiln.log"), SystemReport, () => _mods!.Describe(), Log)
+                ? _crash = new CrashReports(Path.Combine(kiln, "crash-reports"), Path.Combine(logs, "kiln.log"), SystemReport, () => _mods!.Describe(), Log,
+                    () => HostTasks.Bound?.CrashTasksSection() ?? "(task snapshot unavailable)\n")
                 : null,
             StateFile = Path.Combine(logs, "mods.txt"),
             TestResultsDirectory = Path.Combine(logs, "tests"),
@@ -296,6 +298,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         ModsBackend.Current = host._mods;
         Kiln.Testing.Tests.Starter = host.RequestTests;
         ServiceTick.HostDriven = true;  // Kiln's service tick runs from the host's Pre, not from a mod's
+        host.StartTasks();  // C# tasks on the core's task pool, through the private view's lease table (Tasks.cs)
         try
         {
             Kiln.Capabilities.Start();  // the registry's snapshot, and the identity rows that follow their sources
@@ -314,7 +317,11 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         }
         // Mod.OnBoot's generation (kiln.boot, chapter 08): in a boot profile Kiln.Host commits it here, on the boot thread, before the tick
         // subscriptions and the game's entry point (BootPhase.cs)
-        BootPhase.Run(host.Service, host._owner, host.Log);
+        host._mods.PrepareGameplayHooks();
+        BootPhase.Run(host.Service, host._owner, host._mods, host.Log);
+        // the files the first mod load and the first service tick read on the game's thread, read now on another one (a
+        // hard disk the game loads from made them slow there: ModPrefetch.cs)
+        ModPrefetch.Start(host._mods.PrefetchFiles, host.Log);
         AppDomain.CurrentDomain.UnhandledException += (_, e) => host.Unhandled(e.ExceptionObject as Exception, e.IsTerminating);
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
@@ -376,7 +383,98 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
     public void Log(LogLevel level, string text) => Log(_owner, level, text);
     public nint Service(string name, uint minVersion) => NativeCalls.WithUtf8(name, s => (nint)_api->Service(s, minVersion));
     public ulong OwnerCreate(string id) => NativeCalls.WithUtf8(id, s => _api->OwnerCreate(s));
-    public void OwnerRevoke(ulong owner) => _api->OwnerRevoke(owner);
+    public void OwnerRevoke(ulong owner)
+    {
+        HostTasks.Bound?.RetireOwner(owner);  // its tasks' cancellation is signalled before the core retires it; never waits
+        _api->OwnerRevoke(owner);
+    }
+
+    public bool CanRevokeOwners => true;
+
+    // ---- tasks (Tasks.cs) ----
+
+    /// <summary>Binds the core's task pool for C# tasks. The lease table comes from the private API view the core hands
+    /// to <see cref="Entry.Init"/>; a core without it (or of another build) leaves tasks.pool unavailable with the
+    /// reason.</summary>
+    private void StartTasks()
+    {
+        try
+        {
+            HostTasks.Start(new HostTasksEnvironment
+            {
+                Service = Service,
+                OnServerTick = () => _api->OnWorldThread != null && _api->OnWorldThread(KilnAbi.WorldServer) != 0,
+                OnWorldThread = kind => _api->OnWorldThread != null && _api->OnWorldThread(kind) != 0,
+                WorldExists = kind => _api->World != null && _api->World(kind) != 0,
+                OnClientMainThread = _client ? OnClientMainThread : null,
+                Log = Log,
+                BuildStamp = KilnBuild.Of(typeof(Kiln.Mod).Assembly)?.Version,
+                TickHop = TaskHop,
+                ClientHop = _client ? ClientTaskHop : null,
+            });
+            ComponentTask.Owners = ComponentOwner;
+        }
+        catch (Exception e)
+        {
+            Log(LogLevel.Warn, $"tasks: C# tasks are off: {e.Message}");
+        }
+    }
+
+    private readonly Dictionary<string, ulong> _componentOwners = new(StringComparer.Ordinal);
+
+    /// <summary>One Kiln-internal owner per component, created on first use and kept for the process: never a mod's.</summary>
+    private ulong ComponentOwner(string component)
+    {
+        lock (_componentOwners)
+        {
+            if (!_componentOwners.TryGetValue(component, out var owner))
+                _componentOwners[component] = owner = OwnerCreate(component);
+            return owner;
+        }
+    }
+
+    /// <summary>One tick hop of a task, on the server world's tick before its Pre subscribers. On a client the hosted
+    /// server world drives the mods under <c>_drive</c>, and the hop is tick work like theirs.</summary>
+    private void TaskHop(ulong owner, Action hop)
+    {
+        if (!_client)
+        {
+            _mods.TaskTick.Run(owner, hop);
+            return;
+        }
+        lock (_drive)
+        {
+            var previous = Volatile.Read(ref _driver);
+            Volatile.Write(ref _driver, Environment.CurrentManagedThreadId);
+            try
+            {
+                _mods.TaskTick.Run(owner, hop);
+            }
+            finally
+            {
+                Volatile.Write(ref _driver, previous);
+            }
+        }
+    }
+
+    /// <summary>Client: the game's main thread. It steps the client and prediction worlds and runs the UI frame, also in
+    /// the main menu before any world (where only the UI frame tells which thread it is).</summary>
+    private bool OnClientMainThread()
+    {
+        if (_api->OnWorldThread != null &&
+            (_api->OnWorldThread(KilnAbi.WorldClient) != 0 || _api->OnWorldThread(KilnAbi.WorldPrediction) != 0))
+            return true;
+        var ui = Volatile.Read(ref _uiThread);
+        return ui != 0 && ui == Environment.CurrentManagedThreadId;
+    }
+
+    /// <summary>One client-world hop of a task, on the client world's step before its Pre subscribers (#82). With no
+    /// hosted server world the client world drives the mods: the hop is their tick work, under the drive lock, as their
+    /// Context.Tick is on a joined client. While hosting the server world drives them on its own thread: the hop is
+    /// main-thread work like a Client.Tick handler and never takes the drive lock (that would make the main thread wait
+    /// for the server thread's whole step).</summary>
+    private void ClientTaskHop(ulong owner, Action hop) =>
+        ClientHopFrame.Run(ServerWorldLive(), _drive, ref _driver, () => _mods.TaskTick.Run(owner, hop), () => _mods.TaskTick.RunClient(owner, hop));
 
     // ---- game log mirror (core log thread) ----
     public void EnqueueGameLine(int level, string text)
@@ -628,6 +726,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
     /// about 30 times a second run mod requests and Kiln's service tick. A world's step (Drive) takes over as before.</summary>
     public void UiTick(ulong frame)
     {
+        if (_uiThread == 0) Volatile.Write(ref _uiThread, Environment.CurrentManagedThreadId);
         if (_stopping || InWorld()) return;
         var now = Environment.TickCount64;
         if (_modsLoaded && now - _lastMenuServiceTick < 33) return;
@@ -702,6 +801,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         _lastAllocated = GC.GetTotalAllocatedBytes();
         (_gc0, _gc1, _gc2, _gcPause) = (GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2), GC.GetTotalPauseDuration());
         Lifecycle.Phase = ServerPhase.Booting;
+        ServiceTick.StartEarlyServices();  // rows a mod reads in OnLoad (world.transform_scale), decided before it does
         _mods.LoadAll();
         Lifecycle.ModsLoaded = true;
         var all = Kiln.Mods.All;

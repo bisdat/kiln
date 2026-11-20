@@ -42,6 +42,10 @@ strings in the file. Unrelated proxies exporting the same names do not make Kiln
 `kiln-shroudlink steps aside: shroudlink's own core runs in this process (...)`, and that core loads
 `shroudlink_mods/` as usual. Profile entries are not passed to the real core: `shroudlink.json` lists them as
 `not-loaded` (a warning in kiln.log), except an entry that is a DLL directly in `shroudlink_mods/` (`own-loader`).
+The `not-loaded` reason names the core file found in the process (since 0.2.0-dev.29.4). For `shroudlink_core.dll`, which the client
+addon loads from the game folder in singleplayer, it says to remove that file and that the addon stays (it draws the
+MODS tab): a core an earlier hand installation left next to the game is the usual cause (player report 2026-11-16). The
+launcher names the same file before the start (engines.md, "Shroudlink client addon").
 As a backstop, both copies use shroudlink's per-process claim (`chestsort_server_<pid>`): whichever claims first runs
 and the other stays idle.
 

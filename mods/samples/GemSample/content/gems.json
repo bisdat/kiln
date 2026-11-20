@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "comment": "GemSample: a new gem and a tweak of a game gem, data only. The Gem of Deep Cuts is a clone of the Gem of Bleeding (T1_Gem_GemOfBleeding) with a fixed GUID of its own (saves keep its id), its own name, texts, PNG icon and rarity, the game's level range (1 to 105, so the forge can upgrade it) and its own numbers: 14 cut damage per tick instead of 8 (0x5e34f09b, Scaled_Damage_Cut, still scaled by the gem's level) for 9 s instead of 6 (0x3ff81f2b, DebuffDuration). Its program is the Bleeding program (b199646f-...), named here to show the key: any loaded Impact program works, another gem's, a perk's or one a mod cooked. The rule on T1_Gem_GemOfBleeding makes the game's own gem bleed 1.5 times as long; a running gem keeps its numbers until its impact starts again (switch the hotbar away and back).",
+  "items": {
+    "add": [
+      {
+        "guid": "580482cb-9771-4d5e-bdc2-24a268f33407",
+        "name": "GemSample_Gem_DeepCuts",
+        "base": "T1_Gem_GemOfBleeding",
+        "program": "b199646f-31a1-495e-b3d1-d5fef2fcaab3",
+        "icon": "icons/deep-cut.png",
+        "displayName": "Gem of Deep Cuts",
+        "description": "Critical hits with cutting damage open deep wounds that bleed for a long time.",
+        "texts": {
+          "de": { "name": "Edelstein der tiefen Schnitte", "description": "Kritische Schnitttreffer reißen tiefe Wunden, die lange bluten." }
+        },
+        "fields": { "rarity": "Rare", "itemLevelRange.minLevel": 1, "itemLevelRange.maxLevel": 105 }
+      }
+    ],
+    "GemSample_Gem_DeepCuts": { "impactValues.0x5e34f09b": 14, "impactValues.0x3ff81f2b": 9 },
+    "T1_Gem_GemOfBleeding": { "impactValues.0x3ff81f2b": { "mul": 1.5 } }
+  }
+}

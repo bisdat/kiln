@@ -115,6 +115,14 @@ static void test_map_rules() {
     wrong = v;
     wrong.capacity = 17;
     check(!map_valid(wrong), "map: a capacity that is no power of two is not valid");
+    wrong = v;
+    wrong.count = 17;
+    check(map_find(wrong, a) == -1 && map_slot(wrong, a) == -1,
+          "map: lookup rejects count beyond capacity before reading keys");
+    wrong = v;
+    wrong.capacity = (1ull << 32) + 16;
+    check(map_find(wrong, a) == -1 && map_slot(wrong, a) == -1,
+          "map: lookup rejects corrupt huge capacity before reading keys");
     // a full map must end
     std::vector<uint64_t> fb(1, 0xffffull), fk(32, 0);
     MapView full;
@@ -218,6 +226,14 @@ int main(int argc, char** argv) {
     KilnVfxStatus s1 = status();
     check((s1.flags & KILN_VFX_SIM) && (s1.flags & KILN_VFX_HAS_GUARD) && (s1.flags & KILN_VFX_HAS_PLAY) && s1.registered == kSimKnown, "sim: status");
     check(core_is_registered(known) == 1 && core_is_registered(unknown) == 0, "is_registered: known and unknown");
+    {
+        // the resource budget's reading (package 17a S2): the limit is half the slots, as the game's reserve makes 2 x the request
+        Registry reg;
+        check(sim_game()->registry(nullptr, &reg) && reg.count == kSimKnown && reg.slots == s1.map_capacity && reg.limit * 2ull == reg.slots &&
+                  reg.init_state == 2,
+              "sim: the registry reads count, slots, limit and state 2");
+        check(!sim_game()->registry_missing() && !sim_game()->bytes_missing(), "sim: the budget's reads are there");
+    }
 
     // ---- how long a one-shot runs ----
     VfxLengths len;
@@ -593,6 +609,26 @@ int main(int argc, char** argv) {
     check(core_status_json(nullptr, 0, &n) == KILN_ERR_BUFFER_TOO_SMALL && n > 0, "status_json: says what it needs");
     check(core_status_json(json, sizeof json, &n) == KILN_OK && std::strstr(json, "\"sim\":true") != nullptr, "status_json");
 
+    {
+        uint8_t bytes[16];
+        std::memset(bytes, 0xab, sizeof bytes);
+        sim_resource_table(1);
+        check(!sim_game()->read_resource(nullptr, known2, bytes, sizeof bytes) && bytes[0] == 0xab,
+              "resource walk refuses an index at table capacity before copying");
+        sim_resource_table(2, true);
+        check(!sim_game()->read_resource(nullptr, known2, bytes, sizeof bytes) && bytes[0] == 0xab,
+              "resource walk refuses a table which shrinks between descriptor reads");
+        sim_resource_table(kSimKnown);
+        const MapView view = sim_game()->map(nullptr);
+        const auto slot = map_slot(view, known2);
+        const uint32_t prior = view.values[slot];
+        const_cast<uint32_t*>(view.values)[slot] = UINT32_MAX;
+        check(!sim_game()->read_resource(nullptr, known2, bytes, sizeof bytes) && bytes[0] == 0xab,
+              "resource walk refuses a corrupt slot value without touching the record array");
+        const_cast<uint32_t*>(view.values)[slot] = prior;
+        check(!sim_game()->read_resource(nullptr, known2, bytes, (1u << 20)+1) && bytes[0] == 0xab,
+              "resource walk refuses an oversized served size before copying");
+    }
     // ---- preload ----
     check(core_preload(known) == KILN_OK && core_preload(known) == KILN_OK && core_preload(zero) == KILN_ERR_INVALID_ARGUMENT, "preload: queued, twice is no harm, empty refused");
     ticks(1);
@@ -603,7 +639,7 @@ int main(int argc, char** argv) {
 
     // ---- a registered VFX the builder turned off, and its update hook ----
     static int build_updates = 0;
-    core_set_build_hooks([] { ++build_updates; }, [](const uint8_t*) { return true; }, nullptr);
+    core_set_build_hooks([](void*) { ++build_updates; }, [](const uint8_t*) { return true; }, nullptr);
     check(core_is_registered(known) == 0, "build hook: a refused VFX reads as unknown");
     auto p_off = at(known);
     const KilnVfx h_off = core_play(1, &p_off);

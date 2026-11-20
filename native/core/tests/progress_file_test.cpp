@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -41,6 +42,7 @@ struct Bench {
     std::vector<std::string> written;
     int fail_next = 0;  // this many writes fail
     int fails_told = 0;
+    std::vector<std::string> notes;  // what kiln.log is told
     Writer w;
     explicit Bench(std::vector<std::string> plan = kClientPlan, const char* side = "client")
         : w(Model(who(side), std::move(plan)),
@@ -52,7 +54,7 @@ struct Bench {
                 written.push_back(t);
                 return true;
             },
-            [this] { return now; }, false, [this] { ++fails_told; }) {}
+            [this] { return now; }, false, [this] { ++fails_told; }, [this](const std::string& n) { notes.push_back(n); }) {}
     json last() const { return json::parse(written.back()); }
     void at(uint64_t t) {
         now = t;
@@ -143,28 +145,38 @@ int main() {
         CHECK(b.written.size() == 4);
     }
     // ---- the thread: the last change is written when its time comes, with no further call ----
+    // The writer's own thread against the test's clock (the clock seam the game fills with its real one): the time it
+    // reads moves only when the test moves it, so a loaded machine cannot change what is due; the waits below only
+    // give the thread time to act and end as soon as it has.
     {
-        std::atomic<int> writes{0};
+        std::atomic<uint64_t> clock{0};
         std::string last;
         std::mutex m;
-        const auto t0 = std::chrono::steady_clock::now();
         Writer w(
             Model(who(), kClientPlan),
             [&](const std::string& t) {
                 std::lock_guard lk(m);
                 last = t;
-                ++writes;
                 return true;
             },
-            [t0] { return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count()); },
-            true);
+            [&clock] { return clock.load(); }, true);
+        const auto until = [&w](uint64_t n) {
+            for (int i = 0; i < 60000 && w.writes() < n; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return w.writes() >= n;
+        };
         w.first("start", 0);
+        CHECK(until(1) && w.writes() == 1);  // the first step: written at once
         for (int i = 0; i < 200; ++i) w.step("start", {}, "item " + std::to_string(i), static_cast<uint64_t>(i + 1), 200);
-        std::this_thread::sleep_for(std::chrono::milliseconds(600));
+        clock = 249;  // 200 changes within 250 ms of the last write: they wait (the thread re-reads the clock each pass)
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        CHECK(w.writes() == 1);
+        clock = 250;  // their time comes: the thread writes the last of them, with no further call
+        CHECK(until(2));
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        CHECK(w.writes() == 2);  // once: nothing is pending after it
         std::lock_guard lk(m);
-        CHECK(writes.load() >= 2 && writes.load() <= 4);
         auto d = json::parse(last);
-        CHECK(d["steps"][0]["detail"] == "item 199" && d["steps"][0]["done"] == 200);
+        CHECK(d["steps"][0]["detail"] == "item 199" && d["steps"][0]["done"] == 200 && d["atMs"] == 250);
     }
     // ---- atomic replacement: a reader never sees half a file (the sink's rule: <file>.tmp, then a rename) ----
     {
@@ -371,6 +383,84 @@ int main() {
         nb.w.mark(Mark::world_started);
         nb.at(10);
         CHECK(nb.last()["state"] == "ready");
+    }
+    // ---- a client whose main menu mark never comes (another mod's hook over kiln-ui's menu detection; a Nexus report,
+    // 2026-11-14: "Kiln has said nothing for 5,183 s" while the player played): the first world ends the start ----
+    {
+        Bench b;
+        walk_boot(b);
+        b.w.step("mods");
+        b.w.loading();
+        b.w.step("content");
+        b.w.step("game", "The game is loading its main menu");
+        const uint64_t game_at = b.now;
+        b.at(b.now + 5);
+        CHECK(b.last()["state"] == "loading" && !b.last().contains("worldMs"));
+        b.now = game_at + 95000;  // the menu drew, its mark did not come; the player chose a world
+        CHECK(b.w.mark(Mark::world_started) == Result::ok);
+        b.at(b.now);
+        auto d = b.last();
+        CHECK(d["state"] == "ready" && d["worldMs"] == d["atMs"] && d["steps"].back()["id"] == "game" && d["steps"].back()["tookMs"] == 95000);
+        // kiln.log names the mark that never came
+        CHECK(b.notes.size() == 1 && b.notes[0].find("the main menu's mark had not come") != std::string::npos);
+        CHECK(b.w.mark(Mark::menu) == Result::over && b.w.mark(Mark::world_started) == Result::over);
+    }
+    {
+        // the world while a step of Kiln's has not ended (content stuck): written at once with worldMs, not ready, and
+        // kiln.log says where the start stands; the step ending later still ends the start (the world is remembered)
+        Bench b;
+        walk_boot(b);
+        b.w.step("mods");
+        b.w.loading();
+        b.w.step("content", {}, "block", 3, 198);
+        b.at(b.now + 1);
+        const size_t n = b.written.size();
+        b.now += 30000;
+        const uint64_t world_at = b.now;
+        b.w.mark(Mark::world_started);
+        b.at(b.now);
+        CHECK(b.written.size() == n + 1);
+        auto d = b.last();
+        CHECK(d["state"] == "loading" && d["worldMs"] == d["atMs"] && d["steps"].back()["id"] == "content" && !d["steps"].back().contains("tookMs"));
+        CHECK(b.notes.size() == 1 && b.notes[0].find("step content (Applying the mods' content)") != std::string::npos);
+        b.w.mark(Mark::world_started);  // a second world kind (the client world after the hosted server world): nothing new
+        b.at(b.now + 1);
+        CHECK(b.written.size() == n + 1 && b.notes.size() == 1);
+        b.now = world_at + 2000;
+        b.w.step("content", {}, {}, 198, 198);
+        b.w.step("game");
+        b.at(b.now);
+        CHECK(b.last()["state"] == "ready" && b.last()["worldMs"] == world_at && b.last()["atMs"] == world_at + 2000);
+        CHECK(b.notes.size() == 2 && b.notes[1].find("first world") != std::string::npos);
+    }
+    {
+        // the usual start: the menu's mark ends it; a world later changes nothing and says nothing
+        Bench b;
+        walk_boot(b);
+        b.w.step("mods");
+        b.w.loading();
+        b.w.step("content");
+        b.w.step("game");
+        b.w.mark(Mark::menu);
+        b.at(b.now + 1);
+        CHECK(b.last()["state"] == "ready" && !b.last().contains("worldMs"));
+        CHECK(b.w.mark(Mark::world_started) == Result::over && b.notes.empty());
+    }
+    {
+        // a server with .NET: its first world is written (worldMs) but is not its signal, and kiln.log hears nothing
+        Bench b(kClientPlan, "server");
+        walk_boot(b);
+        b.w.step("mods");
+        b.w.loading();
+        b.w.step("content");
+        b.w.step("game");
+        b.at(b.now);
+        b.w.mark(Mark::world_started);
+        b.at(b.now + 1);
+        CHECK(b.last()["state"] == "loading" && b.last().contains("worldMs") && b.notes.empty());
+        b.w.mark(Mark::server_started);
+        b.at(b.now + 2);
+        CHECK(b.last()["state"] == "ready" && b.notes.empty());
     }
     // ---- a plan with steps the start does not have (kiln.json's side section switched .NET off after the plan): the core's
     // skip_to takes them out, and the start ends in ready rather than loading for ever ----

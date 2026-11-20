@@ -491,6 +491,8 @@ void core_after_step(EmfWorld* w, uint8_t kind) {
         account(r.mod, qpc_ns() - t0);
     }
     for (TickReg* t : ticks) {
+        // compat_ticks.h: a mod whose on_tick is only for the server world, and races on the others
+        if (kind != EMF_WORLD_SERVER && t->mod && t->mod->server_ticks_only) continue;
         WorldCall c{t->cb, w, t->user};
         ContextScope scope(t->mod, w, true);
         const uint64_t t0 = qpc_ns();
@@ -526,7 +528,7 @@ const EmfApi* api_table() {
         fill_components(&g_table);  // v23, v25
         fill_windows(&g_table);     // v24, v26
         fill_net(&g_table);         // v27
-        fill_v40(&g_table);         // v28-v40
+        fill_v40(&g_table);         // v28-v46
         // every slot must be filled: a NULL would crash a mod that checks only api->size
         const auto* slots = reinterpret_cast<void* const*>(reinterpret_cast<const uint8_t*>(&g_table) + 8);
         const size_t n = (sizeof(EmfApi) - 8) / sizeof(void*);

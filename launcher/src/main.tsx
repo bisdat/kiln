@@ -6,8 +6,12 @@ import { HashRouter } from "react-router-dom";
 import App from "./App";
 import { isTauri, loadMock } from "./api/commands";
 import { UiModeGate } from "./deck/mode";
+import { SnapshotGate } from "./shell/SnapshotGate";
 import { DataFolderGate } from "./shell/DataFolderGate";
 import { Started } from "./shell/started";
+import { setLanguage } from "./i18n";
+import "./i18n/locales";
+import { LanguageSync, storedLanguage } from "./i18n/LanguageSync";
 import "./theme/base.css";
 
 const queryClient = new QueryClient();
@@ -15,6 +19,9 @@ const queryClient = new QueryClient();
 // a plain browser (development, the Playwright tests): the mock answers every command, so it is there before the first
 // render, as when it was part of the bundle (the desktop app never loads it)
 if (!isTauri()) await loadMock();
+
+// the language the last start chose, before the first render (settings load later: i18n/LanguageSync.tsx)
+setLanguage(storedLanguage());
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -24,9 +31,9 @@ createRoot(document.getElementById("root")!).render(
       <HashRouter>
         {/* a data folder that cannot be used: only its dialog, before either UI (shell/DataFolderGate.tsx) */}
         <DataFolderGate>
-          <UiModeGate>
+          <SnapshotGate><LanguageSync /><UiModeGate>
             <App />
-          </UiModeGate>
+          </UiModeGate></SnapshotGate>
         </DataFolderGate>
       </HashRouter>
     </QueryClientProvider>

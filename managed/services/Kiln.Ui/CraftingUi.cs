@@ -26,11 +26,21 @@ public sealed record CraftingPanelOptions
     public CraftingPanelAnchor Anchor { get; init; } = CraftingPanelAnchor.Right;
     /// <summary>Width in pixels at scale 1 (height fits the contents).</summary>
     public float Width { get; init; } = 340;
-    public UiStyle Style { get; init; } = UiStyle.Game;
+    /// <summary>The panel's look; <see cref="UiStyle.Player"/> by default (the game's look unless the player chose another;
+    /// before 0.2.0-dev.29.16 the default was <see cref="UiStyle.Game"/>).</summary>
+    public UiStyle Style { get; init; } = UiStyle.Player;
+
+    /// <summary>Your own theme for the panel (<see cref="Ui.Themes.Define"/>), over <see cref="Style"/>. Since 0.2.0-dev.29.16.</summary>
+    public UiTheme? Theme { get; init; }
     /// <summary>Show only when this returns true (e.g. one workshop); null = every crafting menu.</summary>
     public Func<CraftingScreen, bool>? When { get; init; }
     /// <summary>Buttons in the panel take the mouse while it is over the panel.</summary>
     public bool Interactive { get; init; } = true;
+    /// <summary>Also show at a production station's screen (a kiln, smelter, loom, seed bed: <see cref="CraftingScreen.IsFactory"/>),
+    /// with its <see cref="CraftingScreen.Station"/> entity. Off by default: a panel written for crafting menus (a recipe, the
+    /// menu's tabs) has nothing to show there. <see cref="CraftingScreen.Workshop"/> may be 0 or another station's there.
+    /// Since 0.2.0-dev.29.15.</summary>
+    public bool AtFactories { get; init; }
 }
 
 /// <summary>A tab or subcategory Kiln added to the game's crafting menu.</summary>
@@ -72,6 +82,7 @@ public static unsafe partial class Ui
         private static Panel[] _panels = [];
         private static readonly List<CraftingMenuAddition> Additions = new();
         private static volatile bool _visible;
+        private static volatile bool _factory;  // the open screen is a production station's (only AtFactories panels show)
         private static StrongBox<CraftingScreen> _current = new(default);
 
         /// <summary>The crafting menu open now (station or own, workshop, selected recipe), or null.</summary>
@@ -81,8 +92,9 @@ public static unsafe partial class Ui
         public static bool MenuAvailable => UiNative.Craft != null;
 
         /// <summary>A panel drawn next to every open crafting menu (or those <see cref="CraftingPanelOptions.When"/>
-        /// picks), with the menu's <see cref="CraftingScreen"/>. Render thread, every frame while shown. Owned by the
-        /// calling mod; Dispose removes it.</summary>
+        /// picks), with the menu's <see cref="CraftingScreen"/>; at production stations' screens too with
+        /// <see cref="CraftingPanelOptions.AtFactories"/>. Render thread, every frame while shown. Owned by the calling mod;
+        /// Dispose removes it.</summary>
         public static IDisposable AddPanel(UiText title, Action<UiDraw, CraftingScreen> draw, CraftingPanelOptions? options = null)
         {
             ArgumentNullException.ThrowIfNull(draw);
@@ -166,9 +178,28 @@ public static unsafe partial class Ui
         internal static void ScreenChanged(GameScreen prev, GameScreen cur)
         {
             Volatile.Write(ref _current, new StrongBox<CraftingScreen>(cur.Crafting ?? default));
-            var was = _visible;
+            bool was = _visible, wasFactory = _factory;
+            _factory = cur.Crafting is { IsFactory: true };
             _visible = cur.Crafting is not null;
-            if (was != _visible) Recount();
+            if (was != _visible || wasFactory != _factory) Recount();
+        }
+
+        /// <summary>A crafting screen is open (a menu or a factory screen; tests).</summary>
+        internal static bool Visible => _visible;
+
+        /// <summary>Whether a panel shows on the open screen: every one at a crafting menu, those with
+        /// <see cref="CraftingPanelOptions.AtFactories"/> at a factory screen.</summary>
+        private static bool Shows(Panel p) => !_factory || p.Options.AtFactories;
+
+        /// <summary>The screen the panels draw with: the open one, a factory's station entity read now (the game may set it a
+        /// frame after the screen opens, or name another station without closing the screen).</summary>
+        internal static CraftingScreen PanelScreen
+        {
+            get
+            {
+                var c = Volatile.Read(ref _current).Value;
+                return c.IsFactory ? c with { Station = new EntityId(UiNative.ScreenTarget()) } : c;
+            }
         }
 
         internal static int VisiblePanels
@@ -178,7 +209,7 @@ public static unsafe partial class Ui
                 if (!_visible) return 0;
                 Panel[] ps;
                 lock (Lock) ps = _panels;
-                return ps.Length;
+                return ps.Count(Shows);
             }
         }
 
@@ -189,7 +220,7 @@ public static unsafe partial class Ui
                 if (!_visible) return 0;
                 Panel[] ps;
                 lock (Lock) ps = _panels;
-                return ps.Count(p => p.Options.Interactive);
+                return ps.Count(p => p.Options.Interactive && Shows(p));
             }
         }
 
@@ -202,12 +233,13 @@ public static unsafe partial class Ui
             Panel[] ps;
             lock (Lock) ps = _panels;
             if (ps.Length == 0) return;
-            var c = Volatile.Read(ref _current).Value;
+            if (_factory && !ps.Any(p => p.Options.AtFactories)) return;  // no panel for factory screens: nothing at all
+            var c = PanelScreen;
             var s = ui.Scale;
             var y = new Dictionary<CraftingPanelAnchor, float>();
             foreach (var p in ps)
             {
-                if (p.Disposed) continue;
+                if (p.Disposed || !Shows(p)) continue;
                 var o = p.Options;
                 if (o.When is { } when)
                 {
@@ -229,16 +261,19 @@ public static unsafe partial class Ui
                 ui.NextWindowSize(w, 0, 1);
                 uint flags = (1u << 1) | (1u << 5) | (1u << 6) | (1u << 12); // no resize/collapse, auto-size, no focus on appearing
                 if (!o.Interactive) flags |= (1u << 9) | (1u << 18) | (1u << 19);
-                ui.PushStyleRaw(o.Style);
+                var looks = ui.LookDepth;
+                ui.PushLookRaw(o.Theme, o.Style);
                 var open = true;
                 if (ui.BeginWindowNoClose($"{p.Title}{p.Id}", flags))
                 {
+                    var inner = ui.LookDepth;
                     if (!UiModCalls.Invoke(p.Owner, x2 => p.Draw(x2, c), ui, $"crafting panel '{p.Title}'")) p.Disposed = true;
+                    ui.RestoreLooks(inner);  // a look the panel left on goes before its window ends
                     var (_, _, _, hh) = ui.WindowRect;
                     y[o.Anchor] = used + hh + 10 * s;
                 }
                 ui.EndWindow();
-                ui.PopStyleRaw();
+                ui.RestoreLooks(looks);
                 _ = open;
             }
         }

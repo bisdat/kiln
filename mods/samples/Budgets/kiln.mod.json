@@ -1,0 +1,9 @@
+{
+  "id": "budgets",
+  "name": "Budgets sample: Kiln's buff room and world program slots",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "Budgets.dll",
+  "side": "server",
+  "clients": "kiln"
+}

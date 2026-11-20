@@ -18,5 +18,18 @@ inline size_t VirtualQuery(const void*, MEMORY_BASIC_INFORMATION* out, size_t n)
     *out = test_mbi;
     return n;
 }
-inline bool GetModuleHandleExW(unsigned, LPCWSTR, HMODULE*) { return false; }
-inline DWORD GetModuleFileNameW(HMODULE, wchar_t*, DWORD) { return 0; }
+// One loaded module a test can place: [test_module_lo, test_module_hi), named relay-mod.dll. None by default.
+inline uintptr_t test_module_lo = 0, test_module_hi = 0;
+inline bool GetModuleHandleExW(unsigned, LPCWSTR a, HMODULE* out) {
+    const auto p = reinterpret_cast<uintptr_t>(a);
+    if (p < test_module_lo || p >= test_module_hi) return false;
+    *out = reinterpret_cast<HMODULE>(test_module_lo);
+    return true;
+}
+inline DWORD GetModuleFileNameW(HMODULE mod, wchar_t* path, DWORD n) {
+    static constexpr wchar_t name[] = L"relay-mod.dll";
+    if (!mod || reinterpret_cast<uintptr_t>(mod) != test_module_lo) return 0;
+    DWORD i = 0;
+    for (; i + 1 < n && name[i]; ++i) path[i] = name[i];
+    return i;
+}

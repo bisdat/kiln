@@ -1,11 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Unit tests of Kiln.Hooks' pure parts with no game: byte patterns, the exe-file view of code (PeCode), Keep. -->
+  <!-- Unit tests of Kiln.Hooks' pure parts with no game: byte patterns, the exe-file view of code (PeCode), Keep; the
+       managed half of typed hooks and the generated Kiln.Sigs classes on a fake kiln.hooks table. -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <OutputType>Exe</OutputType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <NoWarn>$(NoWarn);CS1591;KILNX001</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
@@ -15,5 +16,14 @@
   <ItemGroup>
     <!-- the alias names the type Kiln.Hooks, which this project's namespace Kiln.Hooks.Tests hides -->
     <ProjectReference Include="../../services/Kiln.Hooks/Kiln.Hooks.csproj" Aliases="global,khooks" />
+    <!-- the generated classes of the core's descriptors, driven on the fake typed table (GeneratedSigsTests) -->
+    <ProjectReference Include="../../services/Kiln.Sigs/Kiln.Sigs.csproj" />
+    <ProjectReference Include="../../Kiln.Analyzers/src/Kiln.Sigs.Generator/Kiln.Sigs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="KilnSigdb" />
+    <AdditionalFiles Include="AlignedArgs.json" KilnSigdb="true" />
+    <AdditionalFiles Include="../../../mods/tests/hooks-typed-test/sigdb/server.json" KilnSigdb="true" />
+    <Compile Include="../../../mods/samples/TypedHookVolume/TypedHookVolumeMod.cs" Link="Fixtures/TypedHookVolumeMod.cs" />
+    <Compile Include="../../../mods/tests/hooks-typed-test/HooksTypedTestMod.cs" Link="Fixtures/HooksTypedTestMod.cs" />
+    <ProjectReference Include="../../Kiln.Testing/Kiln.Testing.csproj" />
   </ItemGroup>
 </Project>

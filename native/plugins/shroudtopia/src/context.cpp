@@ -97,9 +97,11 @@ bool read_locked() {
     return true;
 }
 
-void write_locked() {
+bool write_locked() {
     const auto text = g_doc.dump(4);
-    if (kcompat::write_file_atomic(g_file, text)) g_text = text;
+    if (!kcompat::write_file_atomic(g_file, text)) return false;
+    g_text = text;
+    return true;
 }
 }  // namespace
 
@@ -164,6 +166,29 @@ void apply_manifest_defaults(const std::string& id, const json& manifest) {
     if (g_doc["mods"][id].is_object() && !g_doc["mods"][id].contains("active")) g_doc["mods"][id]["active"] = true;
     write_locked();
     H.logf(KILN_LOG_INFO, "settings: first start of %s: wrote its defaults to %s", id.c_str(), kcompat::path_utf8(g_file).c_str());
+}
+
+void ensure_profile_entry(const std::string& name, bool profile_enabled) {
+    if (!profile_enabled) return;
+    std::lock_guard lock(g_mu);
+    // Merge the latest disk contents, not the snapshot from before discovery. Never replace an
+    // unreadable/invalid file or a malformed mods value with defaults during this first-start write.
+    std::string text;
+    if (!kcompat::read_file(g_file, &text)) return;
+    json latest;
+    try { latest = json::parse(text); } catch (...) { return; }
+    if (!latest.is_object() || (latest.contains("mods") && !latest["mods"].is_object())) return;
+    if (!latest.contains("mods")) latest["mods"] = json::object();
+    if (latest["mods"].contains(name)) return;  // even false, null, or an entry without active is the player's
+    const auto previous = g_doc;
+    g_doc = std::move(latest);
+    g_doc["mods"][name] = {{"active", true}};
+    if (!write_locked()) {
+        g_doc = previous;
+        H.logf(KILN_LOG_WARN, "settings: could not save first-start activation for %s", name.c_str());
+        return;
+    }
+    H.logf(KILN_LOG_INFO, "settings: first start of profile mod %s: wrote active: true to shroudtopia.json", name.c_str());
 }
 
 fs::path file() {

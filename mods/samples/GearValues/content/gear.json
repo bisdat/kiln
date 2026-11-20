@@ -1,0 +1,15 @@
+{
+  // Gear values in the numbers the game's tooltip shows: docs/kiln/services/content.md "Gear values".
+  "format": 1,
+  "gear": {
+    // power: the damage the tooltip shows at the sword's level; damage: the shares of the kinds (they add up to 1)
+    "Weapon_T1_1H_Sword_Craft": { "power": 30, "damage": { "cut": 0.75, "fire": 0.25 } },
+    // every tier 2 armour piece the game made Rare: a fifth more physical armour than the game's, at each piece's level
+    "Armor_T2_*": { "@where": { "rarity": "Rare" }, "armor": { "physical": { "mul": 1.2 } } }
+  },
+  // boot values (the mod says "boot": true): read before the game starts, applied where the mod runs
+  "gearRules": {
+    "rarityDurability": [0.9, 0.95, 1, 1.1, 1.25],
+    "socketChance": { "epic": 0.75 }
+  }
+}

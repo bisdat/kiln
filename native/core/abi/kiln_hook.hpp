@@ -57,7 +57,7 @@ inline const KilnHooksApi* hooks_v2(const KilnApi* api) {
     if (!api || api->size < offsetof(KilnApi, service) + sizeof(api->service) || !api->service) return nullptr;
     const auto* t = static_cast<const KilnHooksApi*>(
         api->service(KilnStr{KILN_HOOKS_SERVICE, sizeof(KILN_HOOKS_SERVICE) - 1}, 2));
-    return t && t->header.version >= 2 && t->header.size >= sizeof(KilnHooksApi) ? t : nullptr;
+    return t && t->header.version >= 2 && t->header.size >= offsetof(KilnHooksApi, mid2_checked) ? t : nullptr;
 }
 
 // True when kiln.hooks has no free target slot left (stats().targets reached targets_cap, 512). Then a raw_detour /
@@ -225,6 +225,33 @@ public:
             h->mid2(owner, target, &o, &thunk<Ctx>, reinterpret_cast<void*>(fn), &handle);
         if (rc != KILN_OK)
             return error_ = rc == KILN_ERR_UNAVAILABLE ? "kiln.hooks could not hook the target (see kiln.log)"
+                                                        : "kiln.hooks refused the hook (bad target or arguments)",
+                   false;
+        revoke();  // install() on a live hook replaces it (the new link is already in)
+        api_ = h;
+        handle_ = handle;
+        return true;
+    }
+
+    template <class Ctx>
+    bool install_checked(const KilnApi* api, KilnOwner owner, uintptr_t target, void (*fn)(Ctx&), const char* label,
+                 int32_t priority = 0, const char* before = nullptr, const char* after = nullptr) {
+        static_assert(sizeof(Ctx) == sizeof(KilnRegisters), "the context must have KilnRegisters' layout");
+        static_assert(std::is_standard_layout_v<Ctx> && std::is_trivially_copyable_v<Ctx>,
+                      "the context must be a plain struct with KilnRegisters' field order (safetyhook::Context64 is)");
+        error_ = nullptr;
+        const KilnHooksApi* h = hooks_v2(api);
+        if (!h) return error_ = "kiln.hooks v2 is not available", false;
+        if (h->header.size < offsetof(KilnHooksApi, mid2_checked) + sizeof(void*) || !h->mid2_checked)
+            return error_ = "kiln.hooks has no checked installation member", false;
+        uint32_t unchecked = 0;
+        const KilnHookOrder o = hook_detail::make_order(priority, label, before, after);
+        KilnHandle handle = 0;
+        const KilnResult rc =
+            h->mid2_checked(owner, target, &o, &thunk<Ctx>, reinterpret_cast<void*>(fn), &handle, &unchecked);
+        if (rc != KILN_OK)
+            return error_ = unchecked ? "kiln.hooks could not check every thread before patching"
+                                     : rc == KILN_ERR_UNAVAILABLE ? "kiln.hooks could not hook the target (see kiln.log)"
                                                         : "kiln.hooks refused the hook (bad target or arguments)",
                    false;
         revoke();  // install() on a live hook replaces it (the new link is already in)

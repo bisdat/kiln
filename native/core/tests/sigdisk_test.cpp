@@ -370,12 +370,52 @@ static void real_exe(const std::string& exe, const std::string& side, const std:
     CHECK(pe::only_hook_differences(text.data(), sf.data(), text.size(), l_text, live_base, ft.size_of_image),
           "client: with both Settings calls sent to a relay outside the image, the disk scan stays");
     sf[sf.size() / 2] ^= 1;
-    CHECK(!pe::only_hook_differences(text.data(), sf.data(), text.size(), l_text, live_base, ft.size_of_image),
-          "client: another changed byte beside the redirected calls still selects the live scan");
+    const auto beside = pe::other_differences(text.data(), sf.data(), text.size(), l_text, live_base, ft.size_of_image);
+    CHECK(!pe::only_hook_differences(text.data(), sf.data(), text.size(), l_text, live_base, ft.size_of_image) &&
+              beside.sites == 1 && beside.first == std::vector<uint32_t>{static_cast<uint32_t>(sf.size() / 2)},
+          "client: another changed byte beside the redirected calls is one in-place patch, the calls are not");
+    // The Worst Map Mod 1.3.49 patches four places of the client in place before Kiln's scan (its status file in a
+    // player's report of 14 Nov 2026, client build 26430625; on another build these are four other bytes, which is
+    // the same to the check). Up to 0.2.0-dev.27 that sent the whole scan to the live code.
+    std::vector<uint8_t> wm = text;
+    const uint32_t patched[] = {0x31629d, 0x3168c9, 0xd33058, 0xd331ee};
+    std::vector<uint32_t> offsets;
+    for (uint32_t rva : patched)
+        if (rva >= ft.text_rva && rva - ft.text_rva < wm.size()) wm[rva - ft.text_rva] ^= 0x01, offsets.push_back(rva - ft.text_rva);
+    const auto in_place = pe::other_differences(text.data(), wm.data(), text.size(), l_text, live_base, ft.size_of_image);
+    CHECK(offsets.size() == 4 && in_place.sites == 4 && in_place.bytes == 4 && in_place.first == offsets,
+          "client: four bytes patched in place are four in-place patches at their offsets (%zu found)", in_place.sites);
+    // The same four places in the shapes such patches usually have (the mod's own bytes are not known here): a
+    // conditional jump made unconditional, a short conditional jump turned into `jmp`, and instructions filled with
+    // NOPs. A jump that stays inside the image and NOPs behind no jump are no hook. Only on the build whose bytes
+    // these are (client 26430625).
+    std::vector<uint8_t> shaped = text;
+    const size_t skip = 0x31629d - ft.text_rva, vis = 0x3168c9 - ft.text_rva, quest = 0xd33058 - ft.text_rva,
+                 lore = 0xd331ee - ft.text_rva;
+    if (lore + 3 <= shaped.size() && shaped[skip] == 0x0F && shaped[skip + 1] == 0x84 && shaped[quest] == 0x75 &&
+        shaped[lore] == 0x0F && shaped[lore + 1] == 0x44 && shaped[vis] == 0x48 && shaped[vis + 1] == 0x8B) {
+        int32_t rel = 0;
+        std::memcpy(&rel, &shaped[skip + 2], 4);
+        ++rel;  // jz rel32 (6 bytes) -> jmp rel32 (5 bytes) to the same place, and a NOP
+        shaped[skip] = 0xE9;
+        std::memcpy(&shaped[skip + 1], &rel, 4);
+        shaped[skip + 5] = 0x90;
+        std::fill(shaped.begin() + vis, shaped.begin() + vis + 5, 0x90);    // mov rax, [rsp+58h]
+        shaped[quest] = 0xEB;                                               // jnz short -> jmp short
+        std::fill(shaped.begin() + lore, shaped.begin() + lore + 3, 0x90);  // cmovz ebx, ebp
+        const auto s4 = pe::other_differences(text.data(), shaped.data(), text.size(), l_text, live_base, ft.size_of_image);
+        CHECK(s4.sites == 4 && s4.first == offsets &&
+                  !pe::only_hook_differences(text.data(), shaped.data(), text.size(), l_text, live_base, ft.size_of_image),
+              "client: a jump inside the image, a flipped short jump and NOP fills are four in-place patches (%zu sites, %zu bytes)",
+              s4.sites, s4.bytes);
+    } else {
+        std::printf("INFO client: not build 26430625 at the four places; the shaped patches are skipped\n");
+    }
+    // The production view selection on this exe, hooked and patched: sigdb_runtime_test (real_client_in_place).
 }
 
 // A hook is a jump out of the image and the NOPs behind it. Greeneye Loader's is the longest: a 12-byte jump and up
-// to 20 NOPs (Find hooks 12 to 18 bytes). One NOP more than that is a change nobody explains: the live scan.
+// to 20 NOPs (Find hooks 12 to 18 bytes). One NOP more than that is not part of the hook: an in-place patch.
 static void padded_hooks() {
     const uintptr_t base = 0x140000000, l_text = base + 0x1000, out = 0x7ff600000000;
     std::vector<uint8_t> file(96);
@@ -387,15 +427,75 @@ static void padded_hooks() {
         std::fill(live.begin() + 20, live.begin() + 20 + nops, 0x90);
         return pe::only_hook_differences(file.data(), live.data(), file.size(), l_text, base, 0x10000);
     };
+    auto r11 = file;
+    r11[8] = 0x49; r11[9] = 0xBB; std::memcpy(r11.data() + 10, &out, 8);
+    r11[18] = 0x41; r11[19] = 0xFF; r11[20] = 0xE3;
+    CHECK(pe::only_hook_differences(file.data(), r11.data(), file.size(), l_text, base, 0x10000),
+          "the shared recognizer accepts an r11 entry jump for sigdb");
+    uintptr_t destination = 123;
+    CHECK(pe::entry_jump(r11.data() + 8, 13, l_text + 8, base, 0x10000, &destination) == 13 && destination == out,
+          "the shared recognizer reports the complete r11 width and destination");
+    const uintptr_t zero = 0;
+    std::memcpy(r11.data() + 10, &zero, 8);
+    CHECK(!pe::entry_jump(r11.data() + 8, 13, l_text + 8, base, 0x10000, &destination),
+          "the shared recognizer rejects a null destination");
     CHECK(hooked(0) && hooked(6) && hooked(13), "a 12-byte jump with up to 13 NOPs is a hook");
     CHECK(hooked(20), "a 12-byte jump with 20 NOPs (Greeneye Loader's longest hook) is a hook");
-    CHECK(!hooked(21), "21 NOPs behind a jump are more than any hook writes: the live scan");
+    CHECK(!hooked(21), "21 NOPs behind a jump are more than any hook writes: the last one is an in-place patch");
+}
+
+// The patch map (hooks.json "codePatches", inbox 39): every live/file difference as a row, a redirected call as its own
+// row with the function it called in the file, so a report says which module rewrote the CALL a closed mod needed.
+static void patch_map() {
+    constexpr size_t kSize = 0x400;
+    std::vector<uint8_t> file(kSize, 0x90), live;
+    const uintptr_t image = 0x140000000, text_rva = 0x1000, text = image + text_rva, image_size = 0x2000;
+    // a call at 0x40 to 0x200 in the file (inside .text), redirected live to a thunk outside the image
+    file[0x40] = 0xE8;
+    put<int32_t>(file, 0x41, static_cast<int32_t>(0x200 - 0x45));
+    live = file;
+    put<int32_t>(live, 0x41, static_cast<int32_t>(0x7000000));  // text + 0x45 + 0x7000000: far outside the image
+    // a 5-byte jmp hook at 0x100, one byte changed in place at 0x180, two differences 10 bytes apart at 0x300 / 0x30a
+    live[0x100] = 0xE9;
+    put<int32_t>(live, 0x101, 0x1234);
+    live[0x180] = 0xCC;
+    live[0x300] = 0xCC;
+    live[0x30a] = 0xCC;
+    // a difference at 0x3a0 right before a redirected call at 0x3a4: two rows, the run stops before the call
+    live[0x3a0] = 0xCC;
+    file[0x3a4] = 0xE8;
+    put<int32_t>(file, 0x3a5, static_cast<int32_t>(0x10 - 0x3a9));
+    live[0x3a4] = 0xE8;
+    put<int32_t>(live, 0x3a5, static_cast<int32_t>(0x7000000));
+
+    size_t total = 0;
+    const auto rows = pe::patch_rows(file.data(), live.data(), kSize, text_rva, text, image, image_size, 64, &total);
+    CHECK(total == 6 && rows.size() == 6, "patch map: 6 rows (got %zu of %zu)", rows.size(), total);
+    if (rows.size() == 6) {
+        CHECK(rows[0].call && rows[0].rva == 0x1040 && rows[0].len == 5 && rows[0].called_rva == 0x1200 &&
+                  rows[0].now == text + 0x45 + 0x7000000,
+              "patch map: the redirected call is its own row, with the function it called in the file (rva 0x%x, called "
+              "0x%x)", rows[0].rva, rows[0].called_rva);
+        CHECK(!rows[1].call && rows[1].rva == 0x1100 && rows[1].len == 5, "patch map: the jmp hook is a 5-byte run");
+        CHECK(!rows[2].call && rows[2].rva == 0x1180 && rows[2].len == 1, "patch map: an in-place byte is a run of its own");
+        CHECK(!rows[3].call && rows[3].rva == 0x1300 && rows[3].len == 0xb, "patch map: differences 10 bytes apart join");
+        CHECK(!rows[4].call && rows[4].rva == 0x13a0 && rows[4].len == 1 && rows[5].call && rows[5].rva == 0x13a4 &&
+                  rows[5].called_rva == 0x1010,
+              "patch map: a run stops before a redirected call, which keeps its own row");
+    }
+    size_t capped_total = 0;
+    const auto capped = pe::patch_rows(file.data(), live.data(), kSize, text_rva, text, image, image_size, 2, &capped_total);
+    CHECK(capped.size() == 2 && capped_total == 6, "patch map: the row limit keeps the total (%zu of %zu)", capped.size(),
+          capped_total);
+    CHECK(pe::patch_rows(file.data(), file.data(), kSize, text_rva, text, image, image_size, 64, &total).empty() && total == 0,
+          "patch map: unpatched code has no rows");
 }
 
 int main(int argc, char** argv) {
     synthetic();
     padded_hooks();
     hostile_pe();
+    patch_map();
     std::filesystem::path sigdb_dir = std::filesystem::path(__FILE__).parent_path() / "../../../sigdb/symbols";
     for (int i = 1; i + 1 < argc; i += 2) {
         const std::string opt = argv[i];

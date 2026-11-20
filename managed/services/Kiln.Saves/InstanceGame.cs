@@ -83,8 +83,38 @@ internal sealed class InstanceGame : IInstanceWorld
     internal static InstancePlace PlaceOf(in ItemLocation location) =>
         location.IsPlaced ? new InstancePlace(location.Holder, location.FlatSlot) : new InstancePlace(EntityId.None, -1);
 
-    internal static InstanceFields FieldsOf(in ItemRecord r) =>
-        new(r.Item, r.Count, r.Level, r.Durability, r.DurabilityMax, r.Fuel, r.FuelMax, r.Dye, r.PerksAvailable, r.PerksUnlocked, r.Gem, r.GemLevel);
+    internal static InstanceFields FieldsOf(in ItemRecord r) => FieldsOf(r, TypeLevels);
+
+    /// <summary>The fields as a load gives them back: the level with its base (the level without the unlocked enhancements)
+    /// clamped into the item type's level range, as the game does when it loads a world (docs/re/items.md sections 10 and
+    /// 20). A level outside the range (Items.SetLevel with AnyLevel) is then fingerprinted as the level the item has right
+    /// after the load, before Kiln writes it again, so its record still finds it. Inside the range nothing changes.</summary>
+    internal static InstanceFields FieldsOf(in ItemRecord r, Func<ItemId, (int Min, int Max)?>? levels) =>
+        new(r.Item, r.Count, LevelAsLoaded(r.Level, r.PerksUnlocked, levels?.Invoke(r.Item)), r.Durability, r.DurabilityMax, r.Fuel, r.FuelMax, r.Dye,
+            r.PerksAvailable, r.PerksUnlocked, r.Gem, r.GemLevel);
+
+    /// <summary>The level a save load gives back for <paramref name="level"/> (pure): its base clamped into
+    /// <paramref name="range"/>, the unlocked enhancements added again. Unchanged without a level, without a range, or for
+    /// a range the game does not use (min 0, max below min).</summary>
+    internal static int LevelAsLoaded(int level, int unlocked, (int Min, int Max)? range)
+    {
+        if (level <= 0 || range is not { } rg || rg.Min <= 0 || rg.Max < rg.Min) return level;
+        var u = Math.Max(unlocked, 0);
+        return Math.Clamp(level - u, rg.Min, rg.Max) + u;
+    }
+
+    /// <summary>The item type's level range from the server world's catalog; null when it cannot be read now.</summary>
+    internal static (int Min, int Max)? TypeLevels(ItemId id)
+    {
+        try
+        {
+            return Items.Get(id) is { } i ? (i.LevelMin, i.LevelMax) : null;
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>Who a holder is: a player by its character; a world entity by kiln.spawn's template and position, when that
     /// template is known, saved and has a position (else none: data there is for the session only).</summary>

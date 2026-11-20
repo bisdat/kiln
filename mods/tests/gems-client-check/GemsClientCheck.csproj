@@ -1,0 +1,16 @@
+<Project>
+  <!-- The gem system's real-client check (docs/kiln/services/gems.md, "Real-client checks"): sockets on rings and
+       armour, the four gem events in kiln.log ("gemcheck:"), and /gemcheck commands for the steps a player can't do
+       by hand. Side both: deploy on the server (or the hosting client) and on the Kiln client.
+       Build: dotnet build mods/tests/gems-client-check/GemsClientCheck.csproj -t:KilnDeploy -p:KilnModsDir=<folder> -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>gems-client-check</KilnModId>
+    <KilnModName>Gem system client check</KilnModName>
+    <Version>0.1.0</Version>
+    <KilnServices>Abilities;Items;Chat;Players;Spawn;World;Client</KilnServices>
+    <KilnSide>both</KilnSide>
+    <KilnClients>mod</KilnClients>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

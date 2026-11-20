@@ -1,0 +1,28 @@
+<Project>
+  <!-- Lab test of Kiln tasks and their world reads and writes (WorldConcurrent) on a dedicated server, player-free but for
+       a spawned player character: tasks, hops, faults, cancellation, the queue cap, verified reads against the tick's,
+       compare-exchange writes on a padding byte of that character (one bit, put back), four writers racing on one
+       byte, load (resident readers and writers, bursts of tasks) with the step time measured, and resident tasks left
+       running for tasks-lab-driver's reload and the server's exit. PASS / FAIL lines in kiln.log.
+       Run: mods/tests/tasks-lab-test/run.sh <lab> (docs/kiln/services/tasks.md, "Lab"). -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <AssemblyName>TasksLabTest</AssemblyName>
+    <KilnModId>tasks-lab-test</KilnModId>
+    <KilnModName>Kiln tasks lab test</KilnModName>
+    <Version>0.1.0</Version>
+    <Description>PASS/FAIL lines: Kiln tasks and their world reads and writes on a dedicated server.</Description>
+    <KilnSide>server</KilnSide>
+    <KilnServices>World;Items;Spawn;Client</KilnServices>
+    <KilnFeatures>tasks.pool</KilnFeatures>
+    <KilnGameIds>None</KilnGameIds>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);KILNX003</NoWarn>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+  <Target Name="_TasksLabSharedOut" AfterTargets="_KilnModFiles">
+    <ItemGroup>
+      <_KilnModFile Remove="$(OutDir)Kiln.*" />
+    </ItemGroup>
+  </Target>
+</Project>

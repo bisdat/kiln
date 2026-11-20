@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Header-only helpers for services that answer with kiln_capacity.h (since 0.2.0-dev.28): filling a reply (checked
 // accounting, the not-ready form), a revision counter, the stable registration id, and the pending-definition files
-// (atomic write, deterministic replay order). No Windows dependency; C++20.
+// (atomic write, deterministic replay order). C++20; pending I/O uses the platform's guarded file APIs.
 #pragma once
 #include <algorithm>
 #include <array>
@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "kiln_capacity.h"
+#include "kiln_pending_io.hpp"
 
 namespace kiln::capacity {
 
@@ -128,11 +129,55 @@ inline std::array<uint8_t, 20> sha1(const uint8_t* data, size_t len) {
         for (int k = 0; k < 4; ++k) out[static_cast<size_t>(4 * i + k)] = static_cast<uint8_t>(h[i] >> (24 - 8 * k));
     return out;
 }
+inline std::array<uint8_t, 32> sha256(const uint8_t* data, size_t len) {
+    static constexpr uint32_t k[64] = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01,
+        0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+        0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+        0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08,
+        0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+    uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    std::vector<uint8_t> msg(data, data + len);
+    msg.push_back(0x80);
+    while (msg.size() % 64 != 56) msg.push_back(0);
+    const uint64_t bits = static_cast<uint64_t>(len) * 8;
+    for (int i = 7; i >= 0; --i) msg.push_back(static_cast<uint8_t>(bits >> (8 * i)));
+    auto ror = [](uint32_t x, int n) { return (x >> n) | (x << (32 - n)); };
+    for (size_t at = 0; at < msg.size(); at += 64) {
+        uint32_t w[64];
+        for (int i = 0; i < 16; ++i)
+            w[i] = (uint32_t{msg[at + 4 * i]} << 24) | (uint32_t{msg[at + 4 * i + 1]} << 16) |
+                   (uint32_t{msg[at + 4 * i + 2]} << 8) | uint32_t{msg[at + 4 * i + 3]};
+        for (int i = 16; i < 64; ++i) {
+            const uint32_t s0 = ror(w[i - 15], 7) ^ ror(w[i - 15], 18) ^ (w[i - 15] >> 3);
+            const uint32_t s1 = ror(w[i - 2], 17) ^ ror(w[i - 2], 19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        }
+        uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
+        for (int i = 0; i < 64; ++i) {
+            const uint32_t t1 = hh + (ror(e, 6) ^ ror(e, 11) ^ ror(e, 25)) + ((e & f) ^ (~e & g)) + k[i] + w[i];
+            const uint32_t t2 = (ror(a, 2) ^ ror(a, 13) ^ ror(a, 22)) + ((a & b) ^ (a & c) ^ (b & c));
+            hh = g, g = f, f = e, e = d + t1, d = c, c = b, b = a, a = t1 + t2;
+        }
+        h[0] += a, h[1] += b, h[2] += c, h[3] += d, h[4] += e, h[5] += f, h[6] += g, h[7] += hh;
+    }
+    std::array<uint8_t, 32> out{};
+    for (int i = 0; i < 8; ++i)
+        for (int j = 0; j < 4; ++j) out[static_cast<size_t>(4 * i + j)] = static_cast<uint8_t>(h[i] >> (24 - 8 * j));
+    return out;
+}
 inline void hex(std::string& to, const uint8_t* bytes, size_t n) {
     static const char* const digits = "0123456789abcdef";
     for (size_t i = 0; i < n; ++i) to += digits[bytes[i] >> 4], to += digits[bytes[i] & 15];
 }
 }  // namespace detail
+
+// SHA-256 of `bytes`: the hash registration_id takes over a definition's canonical text (since 0.2.0-dev.29).
+inline std::array<uint8_t, 32> sha256(std::string_view bytes) {
+    return detail::sha256(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
+}
 
 inline const char* kind_name(uint32_t kind) {
     switch (kind) {
@@ -194,29 +239,9 @@ inline void reply_refused(KilnDefinitionReply* r, uint32_t reason_code, uint64_t
 
 // ---- pending definitions: <dir>/<mod>/<file> ----
 // Writes `bytes` to `file` through a temporary file in the same folder and a rename, so a reader sees the old file or
-// the new one, never a part. False when anything failed (the temporary file is removed).
+// the new one, never a part. Refused links stay in place; a newly created temporary is cleaned up on I/O failure.
 inline bool write_atomic(const std::filesystem::path& file, std::string_view bytes) {
-    std::error_code ec;
-    std::filesystem::create_directories(file.parent_path(), ec);
-    std::filesystem::path tmp = file;
-    tmp += ".tmp";
-    {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out) return false;
-        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-        out.flush();
-        if (!out) {
-            out.close();
-            std::filesystem::remove(tmp, ec);
-            return false;
-        }
-    }
-    std::filesystem::rename(tmp, file, ec);
-    if (ec) {
-        std::filesystem::remove(tmp, ec);
-        return false;
-    }
-    return true;
+    return pending_io::write_atomic(file, bytes);
 }
 
 struct PendingFile {
@@ -227,21 +252,86 @@ struct PendingFile {
 
 // The pending files of every mod in replay order: by mod folder name, then file name, both compared as bytes.
 // Temporary files (".tmp") and folders inside a mod's folder are skipped. A missing `dir` gives an empty list.
-inline std::vector<PendingFile> pending_files(const std::filesystem::path& dir) {
+inline constexpr uint64_t pending_max_files = 4096, pending_max_file_bytes = 65536;
+inline constexpr uint64_t pending_max_bytes = pending_max_files * pending_max_file_bytes;
+struct PendingScan { uint64_t files=0, bytes=0, unread=0; bool complete=true; };
+inline std::vector<PendingFile> pending_files_bounded(const pending_io::TrustedBase& base,const std::filesystem::path& dir, PendingScan* stats) {
     std::vector<PendingFile> out;
-    std::error_code ec;
-    for (std::filesystem::directory_iterator mods(dir, ec), end; !ec && mods != end; mods.increment(ec)) {
-        if (!mods->is_directory(ec)) continue;
-        std::error_code ec2;
-        for (std::filesystem::directory_iterator files(mods->path(), ec2), fend; !ec2 && files != fend; files.increment(ec2)) {
-            if (!files->is_regular_file(ec2) || files->path().extension() == ".tmp") continue;
-            out.push_back({mods->path().filename().string(), files->path().filename().string(), files->path()});
-        }
-    }
+    bool stopped=false;
+    uint64_t fuel=4*pending_max_files;  // includes mod directories, both passes, invalid entries and crash temporaries
+    pending_io::Directory root;
+    if (!root.open(base,dir)) { if (!root.missing) stats->complete=false; return out; }  // no folder: an empty store
+    if (!root.visit([&](const auto& mod) {
+        if (root.regular(mod)==1) return;
+        if (!pending_io::component(mod.string())) { pending_io::refused(dir/mod,"invalid mod component"); return; }
+        pending_io::Directory folder;
+        if (!folder.open(base,dir/mod)) { if (folder.missing) return; stats->complete=false; stopped=true; return; }
+        // Discard regular crash leftovers in a separate streaming pass. Refused reparse/link entries remain.
+        if (!folder.visit([&](const auto& name) {
+            if (name.extension()!=".tmp") return;
+            if (folder.regular(name)!=1 || !folder.remove(name)) {
+                pending_io::refused(dir/mod/name,"unsafe or unremovable pending temporary file");
+                stats->complete=false; stopped=true;
+            }
+        }, &stopped, &fuel)) {stats->complete=false;stopped=true;return;}
+        if (!folder.visit([&](const auto& name) {
+            if (name.extension()==".tmp") return;
+            if (!pending_io::file_component(name.string())) {
+                pending_io::refused(dir/mod/name,"invalid pending filename"); return;
+            }
+            const int kind=folder.regular(name);
+            if (kind!=1) {
+                pending_io::refused(dir/mod/name,"pending entry is unsafe or unreadable");
+                if(kind==-2) {stats->complete=false;stopped=true;}
+                return;
+            }
+            const uint64_t bytes=folder.size(name);
+            ++stats->files;
+            if (bytes==UINT64_MAX || bytes>pending_max_bytes-stats->bytes) stats->complete=false;
+            else stats->bytes+=bytes;
+            if (!stats->complete || out.size()>=pending_max_files) { ++stats->unread; stopped=true; return; }
+            out.push_back({mod.string(),name.string(),dir/mod/name});
+        }, &stopped, &fuel)) {stats->complete=false;stopped=true;return;}
+    }, &stopped, &fuel)) stats->complete=false;
+    if (stopped) { stats->complete=false; if(!stats->unread)stats->unread=1; }
     std::sort(out.begin(), out.end(), [](const PendingFile& a, const PendingFile& b) {
         return a.mod != b.mod ? a.mod < b.mod : a.name < b.name;
     });
     return out;
 }
+inline std::vector<PendingFile> pending_files_bounded(const std::filesystem::path& dir, PendingScan* stats) {
+    return pending_files_bounded(pending_io::TrustedBase{dir.parent_path()},dir,stats);
+}
+inline std::vector<PendingFile> pending_files(const pending_io::TrustedBase& base,const std::filesystem::path& dir) {
+    PendingScan stats;return pending_files_bounded(base,dir,&stats);
+}
+inline std::vector<PendingFile> pending_files(const std::filesystem::path& dir) {
+    return pending_files(pending_io::TrustedBase{dir.parent_path()},dir);
+}
+// Serialized by the service's admission lock. Generic write_atomic keeps its original API and regular-file policy.
+inline bool pending_store_write(const pending_io::TrustedBase& base,const std::filesystem::path& root,const std::filesystem::path& file,
+                                std::string_view bytes,std::string* reason) {
+    if (file.parent_path().parent_path().lexically_normal()!=root.lexically_normal() ||
+        !pending_io::component(file.parent_path().filename().string())) { *reason="invalid pending mod/file components";return false; }
+    if (bytes.size()>pending_max_file_bytes) { *reason="pending definition exceeds 65536 bytes";return false; }
+    pending_io::Directory directory;
+    if (!directory.open(base,root,true)) { *reason="pending root unavailable or unsafe (see the named component in kiln.log)";return false; }
+    PendingScan stats;pending_files_bounded(base,root,&stats);
+    pending_io::Directory mod;
+    uint64_t old=UINT64_MAX;
+    if (mod.open(base,file.parent_path())) old=mod.size(file.filename());
+    const bool exists=old!=UINT64_MAX;
+    if ((exists && old>stats.bytes) || !stats.complete || stats.files+(exists?0:1)>pending_max_files ||
+        stats.bytes-(exists?old:0)+bytes.size()>pending_max_bytes) {
+        *reason="pending store is full or could not be safely counted (4096 files / 268435456 bytes); check permissions, remove unused pending files or enable their mods";
+        return false;
+    }
+    if(!pending_io::write_atomic(base,file,bytes)) { *reason="pending write, flush or durable rename failed";return false; }
+    return true;
+}
 
+inline bool pending_store_write(const std::filesystem::path& root,const std::filesystem::path& file,
+                                std::string_view bytes,std::string* reason) {
+    return pending_store_write(pending_io::TrustedBase{root.parent_path()},root,file,bytes,reason);
+}
 }  // namespace kiln::capacity

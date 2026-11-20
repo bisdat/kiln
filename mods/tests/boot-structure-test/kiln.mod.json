@@ -1,0 +1,12 @@
+{
+  "id": "boot-structure-test",
+  "name": "resource patch structure lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "BootStructureTest.dll",
+  "side": "server",
+  "clients": "none",
+  "boot": true,
+  "advanced": true,
+  "description": "PASS/FAIL lines: boot resource patches that remove and add a template's components, set an added component's field, append to a list (keen::BalancingTable.altarsPerFlameLevel), copy a component from another template, clear lists, replace a list's values; names:templates, names:resources and resource:<GUID>/<type name>/<part> in OnBoot."
+}

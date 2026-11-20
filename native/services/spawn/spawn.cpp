@@ -14,12 +14,14 @@
 #include <ctime>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <set>
 #include <sstream>
 
 #include "catalog.h"
 #include "game.h"
 #include "kiln_api.h"
+#include "midstep.h"
 #include "nlohmann/json.hpp"
 #include "services/kiln_saves.h"
 #include "services/kiln_spawn.h"
@@ -88,6 +90,53 @@ void copy_c(char* dst, size_t cap, const std::string& s) {
 }
 
 bool on_tick() { return g_api->on_tick_thread(); }
+
+// kiln.world's table, for its in_program (midstep.h). Looked up on the first create or destroy: kiln.world may register
+// after kiln.spawn.
+const KilnWorldApi* world_api() {
+    static std::atomic<const KilnWorldApi*> w{nullptr};
+    const KilnWorldApi* p = w.load(std::memory_order_acquire);
+    if (!p) {
+        p = static_cast<const KilnWorldApi*>(
+            g_api->service(KilnStr{KILN_WORLD_SERVICE, sizeof(KILN_WORLD_SERVICE) - 1}, KILN_WORLD_VERSION));
+        if (p) w.store(p, std::memory_order_release);
+    }
+    return p;
+}
+
+// kiln.types' table, for its in_system_callback (midstep.h), looked up like kiln.world's.
+const KilnTypesApi* types_api() {
+    static std::atomic<const KilnTypesApi*> t{nullptr};
+    const KilnTypesApi* p = t.load(std::memory_order_acquire);
+    if (!p) {
+        p = static_cast<const KilnTypesApi*>(
+            g_api->service(KilnStr{KILN_TYPES_SERVICE, sizeof(KILN_TYPES_SERVICE) - 1}, KILN_TYPES_VERSION));
+        if (p) t.store(p, std::memory_order_release);
+    }
+    return p;
+}
+
+// Create and destroy (midstep.h): the tick thread in Pre or Post. Inside a wrap stage or a Kiln program refused; a
+// refusal is logged the first time and each time the count doubles. Inside a kiln.types system-hook callback allowed as
+// on dev.28, with one warning per call kind.
+OncePerKind g_hook_warned;
+KilnResult structural_call(const char* what, uint32_t kind) {
+    if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    switch (structural_gate(true, world_api(), types_api())) {
+        case Gate::Ok:
+            return KILN_OK;
+        case Gate::InSystemHook:
+            if (g_hook_warned.first(kind)) logw("kiln.spawn: %s: %s", what, kSystemHookText);
+            return KILN_OK;
+        default:
+            break;
+    }
+    static std::atomic<uint64_t> refused{0};
+    const uint64_t n = refused.fetch_add(1) + 1;
+    if ((n & (n - 1)) == 0)
+        logw("kiln.spawn: %s refused (%llu so far): %s", what, static_cast<unsigned long long>(n), kMidStepText);
+    return KILN_ERR_WRONG_THREAD;
+}
 
 // The server steps its world while it is still loading the save ("[game_server] Switching state from Load to
 // LoadEcsScene", then "... to Run"); entities from the save exist only after that, and the loader creates entities
@@ -286,7 +335,7 @@ KilnResult do_spawn(const Resolved& t, const KilnVec3& p, float yaw_deg, int32_t
                     const KilnSpawnComponent* extra = nullptr, uint32_t extra_count = 0) {
     if (out) *out = 0;
     if (!g_ok) return KILN_ERR_UNAVAILABLE;
-    if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    if (const KilnResult gate = structural_call(pickup ? "spawn_item" : "spawn", pickup ? kKindSpawnItem : kKindSpawn); gate != KILN_OK) return gate;
     if (world_state() != KILN_SPAWN_WORLD_RUNNING) return KILN_ERR_UNAVAILABLE;
     if (!finite_pos(p) || !std::isfinite(yaw_deg) || level < 0 || level > 1000) return KILN_ERR_INVALID_ARGUMENT;
     if (extra_count > KILN_SPAWN_MAX_COMPONENTS || (extra_count && !extra)) return KILN_ERR_INVALID_ARGUMENT;
@@ -544,6 +593,68 @@ void KILN_CALL on_game_log(int32_t, KilnStr text, void*) {
     }
 }
 
+// ---- slow ticks (0.2.0-dev.29.17) ----
+// tick-stats.jsonl names service:kiln-spawn.dll when its Pre holds the world up (2.3 s once, a player's world at its first
+// save), not the part. pre_impl marks its parts; a Pre over 100 ms gives one line naming those over 1 ms, at most one
+// line a minute (the ones in between are counted).
+struct PrePart {
+    const char* name;
+    double ms;
+};
+PrePart g_parts[12];
+int g_nparts = 0;
+double g_part_at = 0, g_pre_at = 0, g_slow_told = -1e9;
+uint64_t g_slow_skipped = 0;
+
+void part(const char* name) {
+    const double t = now_s();
+    if (g_nparts < 12) g_parts[g_nparts++] = {name, (t - g_part_at) * 1000.0};
+    g_part_at = t;
+}
+
+void report_slow_pre() {
+    const double t = now_s();
+    const double total = (t - g_pre_at) * 1000.0;
+    if (total < 100.0) return;
+    if (t - g_slow_told < 60) {
+        ++g_slow_skipped;
+        return;
+    }
+    g_slow_told = t;
+    std::string list;
+    double sum = 0;
+    char b[96];
+    for (int i = 0; i < g_nparts; ++i) {
+        sum += g_parts[i].ms;
+        if (g_parts[i].ms < 1.0) continue;
+        std::snprintf(b, sizeof b, "%s%s %.0f ms", list.empty() ? "" : ", ", g_parts[i].name, g_parts[i].ms);
+        list += b;
+    }
+    if (total - sum >= 1.0) {
+        std::snprintf(b, sizeof b, "%sother %.0f ms", list.empty() ? "" : ", ", total - sum);
+        list += b;
+    }
+    std::string more;
+    if (g_slow_skipped) {
+        std::snprintf(b, sizeof b, "; %llu more slow step(s) since the last line", static_cast<unsigned long long>(g_slow_skipped));
+        more = b;
+    }
+    g_slow_skipped = 0;
+    logw("slow tick: kiln.spawn's Pre took %.0f ms (%s)%s", total, list.empty() ? "no single part over 1 ms" : list.c_str(), more.c_str());
+}
+
+void on_slow_disk(const char* what, double ms) {
+    static std::mutex mu;
+    static double last = -1e9;
+    {
+        std::lock_guard lock(mu);
+        const double t = now_s();
+        if (t - last < 60) return;
+        last = t;
+    }
+    logi("kiln.spawn: disk: %s took %.0f ms on the tracker's own thread (the disk is slow; the game did not wait)", what, ms);
+}
+
 uint64_t g_steps = 0;
 bool g_started = false;
 double g_next_templates = 0;
@@ -558,12 +669,14 @@ void pre_impl() {
         g_started = true;
         g_session_start = t;
         open_tracker();
+        part("opening the sidecar");
         std::vector<EntityRow> rows;
         const bool ent = game::entities(rows);
         size_t with_tmpl = 0;
         for (const EntityRow& e : rows) with_tmpl += e.has_tmpl ? 1 : 0;
         logi("kiln.spawn: entity map %s (%zu entities, %zu with a template; %s)", ent ? "readable" : "UNREADABLE",
              rows.size(), with_tmpl, game::entity_map_stats().c_str());
+        part("the first entity scan");
     }
     if (g_steps == 250 || g_steps == 2500) {
         const double t0 = now_s();
@@ -571,6 +684,7 @@ void pre_impl() {
         game::entities(rows);
         logi("kiln.spawn: entity map at step %llu: %s; full scan %.2f ms", static_cast<unsigned long long>(g_steps),
              game::entity_map_stats().c_str(), (now_s() - t0) * 1000.0);
+        part("an entity scan");
     }
     if (g_template_tries < 30 && t >= g_next_templates && !catalog::engine_loaded()) {
         ++g_template_tries;
@@ -578,6 +692,7 @@ void pre_impl() {
         const size_t n = load_templates();
         if (n) logi("kiln.spawn: %zu engine templates loaded; catalog %zu entries", n, catalog::count());
         else if (g_template_tries == 30) logw("kiln.spawn: the engine's template list stayed unreadable; names come from the shipped catalog only");
+        part("the engine's templates");
     }
     if (g_run_pending.exchange(false)) {
         const uint32_t live = refresh_impl(true);
@@ -585,6 +700,7 @@ void pre_impl() {
              tracker::count());
         g_last_refresh = t;
         g_session_start = t;  // re-find early and often from here on
+        part("re-finding tracked entities");
     }
     if (!g_world_running.load() && world_state() == KILN_SPAWN_WORLD_RUNNING) {
         g_world_running.store(true);
@@ -595,20 +711,25 @@ void pre_impl() {
         std::string key, save;
         if (world_identity(key, save)) {
             const std::filesystem::path file = u8p(path_of(KILN_PATH_DATA)) / "spawn" / (key + ".json");
-            tracker::rekey(file, key, save);
+            tracker::rekey(file, key, save);  // the file work is on the tracker's own thread (0.2.0-dev.29.17)
             logi("kiln.spawn: world saved for the first time: sidecar is now %s", u8s(file).c_str());
         }
+        part("the world's first save (sidecar key)");
     }
     if (t - g_last_refresh >= 5) {
         g_last_refresh = t;
         const bool early = t - g_session_start < 600;
         const bool scan = early ? t - g_last_full_scan >= 10 : t - g_last_full_scan >= 120;
         refresh_impl(scan);
+        part(scan ? "the tracked entities' refresh (full scan)" : "the tracked entities' refresh");
     }
 }
 
 void KILN_CALL on_pre(const KilnTickInfo*, void*) {
+    g_pre_at = g_part_at = now_s();
+    g_nparts = 0;
     guarded("tick", [] { return pre_impl(), KILN_OK; });
+    report_slow_pre();
 }
 
 // ---- world sessions ----
@@ -624,6 +745,9 @@ void drop_world(const char* why) {
 }
 
 bool g_closed = false;  // tick thread
+
+// At the process's exit: the sidecar's last write (the world's close queued it) reaches the disk (on_unload's limit is 3 s).
+void KILN_CALL on_unload(void*) { tracker::flush(2000); }
 
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_SERVER) return;
@@ -689,7 +813,7 @@ KilnResult i_spawn_item(uint32_t item_id, uint32_t amount, KilnVec3 position, in
 
 KilnResult i_destroy(KilnEntity entity) {
     if (!g_ok) return KILN_ERR_UNAVAILABLE;
-    if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    if (const KilnResult gate = structural_call("destroy", kKindDestroy); gate != KILN_OK) return gate;
     if (entity >= 1 && entity <= 1023) return KILN_ERR_INVALID_ARGUMENT;
     if (!game::can_destroy()) return KILN_ERR_UNAVAILABLE;
     unsigned long fault = 0;
@@ -851,7 +975,7 @@ KilnResult KILN_CALL t_tracked_at(size_t index, KilnTrackedEntity* out) {
 KilnResult i_cleanup(KilnStr tag, KilnStr origin, KilnSpawnCleanup* out) {
     if (out && out->size < sizeof(KilnSpawnCleanup)) return KILN_ERR_INVALID_ARGUMENT;
     if (!g_ok) return KILN_ERR_UNAVAILABLE;
-    if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    if (const KilnResult gate = structural_call("cleanup", kKindCleanup); gate != KILN_OK) return gate;
     if (!game::world_ready()) return KILN_ERR_UNAVAILABLE;
     if (!tracker::opened()) open_tracker();
     refresh_impl(true);
@@ -992,6 +1116,8 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     if (api->subscribe_log(owner, &on_game_log, nullptr, &h) == KILN_OK) g_have_log.store(true);
     else
         logw("kiln.spawn: no game-log mirror; tracked records are re-found by the periodic scan only");
+    tracker::on_slow_disk(&on_slow_disk);
+    info->on_unload = &on_unload;
     g_ok = true;
     logi("kiln.spawn: ready (world from %s; destroy %s, engine templates %s, entity scan %s; %zu shipped catalog entries)",
          game::world_from_core() ? "the core" : "own SimStep hook", game::can_destroy() ? "on" : "off",

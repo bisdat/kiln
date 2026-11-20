@@ -1,0 +1,8 @@
+{
+  "format": 1,
+  "comment": "kiln.hooks (0.2.0-dev.29.19). hooks.foreign_modules: kiln.hooks has open_module / module_scan, so a hook may go inside another loaded module (another mod's or a loader's DLL) once it is opened (a feature without symbols: it says what this core can do).",
+  "symbols": {},
+  "features": {
+    "hooks.foreign_modules": {"symbols": []}
+  }
+}

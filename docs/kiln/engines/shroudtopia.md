@@ -24,6 +24,10 @@ first start copies `<game>/shroudtopia.json` there when it exists. The format is
 A mod's key in `mods` is the name it reports (`GetMetaData().name`). `active` switches it on and off while the game
 runs: the file is read again when it changes. A folder mod's `mod.json` block `"shroudtopia": {"default": {...}}` is
 written as `mods.<id>` the first time that id is seen.
+When an enabled Kiln profile mod registers without a `mods` entry under its reported name, Kiln adds
+`{"active": true}` there, including for DLL-only mods and folders without manifest defaults.
+Existing entries are never changed by this step: to enable a mod with `"active": false`, set that value to `true`
+in the profile config folder's `shroudtopia/shroudtopia.json` and save; the plugin reloads it while the game runs.
 
 `kiln/logs/kiln.log` shows `[shroudtopia] Registered mod: ...`, `Loading mod: ...`, `Activating: ...`, and each mod's
 own lines as `[shroudtopia:<mod name>] ...` (also in `kiln/logs/shroudtopia.log`). `kiln/state/shroudtopia.json`
@@ -33,8 +37,18 @@ lists the mods, their status, update counts, and the DLLs it refused.
 
 As under Shroudtopia's loader: one loader thread waits `bootDelay` ms, then every `updateDelay` ms reloads the
 settings when they changed and, while `active`, looks for new mod DLLs (a DLL dropped in while the game runs is
-picked up), calls `Load` once for each mod that supports this side (`hasClientSupport` / `hasServerSupport`), then
-`Activate` / `Update` / `Deactivate` by the mod's `active` setting.
+picked up; a candidate DLL's export table is read once per version of the file, not on every look), calls `Load` once
+for each mod that supports this side (`hasClientSupport` / `hasServerSupport`), then `Activate` / `Update` /
+`Deactivate` by the mod's `active` setting.
+
+Shroudtopia's loader never writes a mod's own `active` field: it calls `Activate` whenever the setting is on and that
+field is off, so a mod that does not set the field in `Activate` is activated again on every update. Kiln does the
+same. It logs `Activating: <name>` once and one warning that says so, and `kiln/state/shroudtopia.json` and Kiln's
+in-game mod list show such a mod as `activating` (switched on, not reporting itself active) with that reason, not as
+switched off. A mod can stay like this when its activation fails on this game version; the warning also says when the
+mod's `targetShroudtopiaVersion` is not upstream Shroudtopia's 0.0.x, 0.1.x or 1.0 (Kiln provides 0.1.1's interface,
+unchanged since 0.0.3): a mod made for another build of Shroudtopia, such as the Shroudweave fork's 0.2.x, may need
+something Kiln does not provide yet.
 
 Differences, all on the safe side:
 - A DLL is loaded only when its export table (read from the file) has `CreateModInstance`. Shroudtopia 1.0 loads any

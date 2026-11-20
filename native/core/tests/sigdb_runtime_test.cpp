@@ -14,7 +14,10 @@
 namespace kiln {
 ImageInfo test_image;
 bool test_log_throw = false;
+bool test_verified = true;  // what config.cpp's build_verified answers for the mapped file's sha256
 const ImageInfo& image() { return test_image; }
+const Paths& paths() { static Paths p; return p; }  // sigdb names a foreign module's file relative to paths().game
+bool build_verified(uint32_t, const std::string&, std::string*) { return test_verified; }
 double now_ms() { return 0; }
 std::string to_utf8(std::wstring_view w) { return std::string(w.begin(), w.end()); }
 namespace log {
@@ -28,7 +31,8 @@ struct Loaded {
     TestPe pe;
     std::vector<uint8_t> live;
     pe::FileText ft;
-    Loaded(bool tail = false) : live(0x3040, 0) {
+    // `live_size` past SizeOfImage (0x3000) is room for relays and a module next to the image.
+    Loaded(bool tail = false, size_t live_size = 0x3040) : live(live_size, 0) {
         if (tail) put<uint32_t>(pe.file, 0x148 + 8, TestPe::kTextSize + 32);
         std::string err;
         if (!pe::parse_file_text(pe.file.data(), pe.file.size(), ft, err)) std::abort();
@@ -46,6 +50,7 @@ struct Loaded {
         img.file = pe.file.data();
         img.file_size = pe.file.size();
         sigdb::g_code = {};
+        kiln::test_verified = true;
     }
 };
 
@@ -93,10 +98,35 @@ static void views_and_holes() {
     }
     {
         Loaded x;
-        // One byte differs, far below 1%, and layout/metadata are unchanged: this is not a hook.
+        // One byte differs, far below 1%, and layout/metadata are unchanged: no hook, another mod's in-place patch.
+        // The file is still the loaded build, so the scan stays on it and the place is counted.
         x.live[0x1050] ^= 1;
         sigdb::init_code();
-        CHECK(!sigdb::g_code.view.disk, "runtime: sparse non-hook exe difference selects live scan");
+        CHECK(sigdb::g_code.view.disk, "runtime: a byte patched in place keeps the disk scan");
+        CHECK(sigdb::g_code.in_place.sites == 1 && sigdb::g_code.in_place.bytes == 1 &&
+                  sigdb::g_code.in_place.first == std::vector<uint32_t>{0x1050 - x.ft.text_rva},
+              "runtime: the in-place patch is counted, with its offset in .text");
+    }
+    {
+        Loaded x;
+        // The same byte, but the file's hash is no verified build record: the file itself may be the changed one
+        // (an exe replaced on disk after the game started), so the live code is scanned as before.
+        x.live[0x1050] ^= 1;
+        kiln::test_verified = false;
+        sigdb::init_code();
+        CHECK(!sigdb::g_code.view.disk && sigdb::g_code.in_place.sites == 0 && sigdb::g_code.runs.empty(),
+              "runtime: a byte patched in place with no verified build record selects the live scan");
+    }
+    {
+        Loaded x;
+        auto* at = x.live.data() + TestPe::kFunc;
+        at[0] = 0xE9;
+        const int32_t rel = 0x7FFF0000;
+        std::memcpy(at + 1, &rel, 4);
+        kiln::test_verified = false;
+        sigdb::init_code();
+        CHECK(sigdb::g_code.view.disk && sigdb::g_code.in_place.sites == 0,
+              "runtime: a hook is not counted as an in-place patch, and needs no build record to keep the disk scan");
     }
     {
         Loaded x;
@@ -353,8 +383,162 @@ static void sig_blocks(const char* dir) {
     frag2.resolve();
     CHECK(frag2.sig("mod/scoped", &info) && info.status == sigdb::SigStatus::Match && info.json.find("Pair") != std::string::npos,
           "sig: a fragment's descriptor uses a struct the core declared; its sret buffer is the rcx the function reads");
+    uintptr_t status_address = 0;
+    sigdb::SigStatus status = sigdb::SigStatus::Unresolved;
+    std::string status_text = "old";
+    CHECK(frag2.sig_status("mod/scoped", &status_address, &status, &status_text) &&
+              status_address == info.address && status == info.status && status_text.empty(),
+          "status-only read returns address and Match without diagnostic payloads");
+    CHECK(!frag2.sig_status("mod/absent", &status_address, &status, &status_text),
+          "status-only read does not invent an absent descriptor");
+    const auto stale_report = std::filesystem::path(dir) / "typed-stale-report.json";
+    frag2.write_report(stale_report);
+    {
+        std::ofstream out(file);
+        out << R"({"format":1,"symbols":{"mod/scoped":{"find":[{"pattern":"8B 81 34 12 00 00 C3"}],
+                 "sig":{"args":[{"name":"scale","type":"f32"}]}}}})";
+    }
+    sigdb::Resolver mismatch(&r);
+    CHECK(mismatch.load(file, "mod/"), "sig query: replacement descriptor loads");
+    mismatch.resolve();
+    mismatch.write_report(std::filesystem::path(dir)); // opening a directory as a report fails
+    CHECK(mismatch.sig("mod/scoped", &info) && info.status == sigdb::SigStatus::Mismatch,
+          "sig query: failed report replacement cannot turn a mismatching resolver on");
+    CHECK(mismatch.sig_status("mod/scoped", &status_address, &status, &status_text) &&
+              status == info.status && status_address == info.address && status_text == info.text,
+          "status-only read sees replacement mismatch and its reason");
+    {
+        std::ifstream in(stale_report);
+        nlohmann::json old; in >> old;
+        CHECK(old["sigs"]["mod/scoped"]["status"] == "match", "sig query: stale matching report remains readable");
+    }
+    frag2.write_report(std::filesystem::path(dir));
+    CHECK(frag2.sig("mod/scoped", &info) && info.status == sigdb::SigStatus::Match && info.descriptor.sret,
+          "sig query: failed report write cannot turn a matching resolver off; parsed descriptor is returned");
+    std::filesystem::remove(stale_report);
     test_query = false;
     std::filesystem::remove(file);
+}
+
+// Another mod changed a byte of the function in place before Kiln's scan (a player's report of 14 Nov 2026: The Worst
+// Map Mod's map marker patches). A scan of the live code no longer finds the function; the file's code does, and the
+// symbol is listed as patched in place.
+static void in_place_patch(const char* dir) {
+    Loaded x;
+    uint8_t* fn = x.live.data() + TestPe::kFunc;
+    fn[0] = 0x49;  // was 48: mov rax, imm64 became mov r8, imm64
+    test_query = true;
+    test_mbi = {x.live.data(), x.live.size(), MEM_COMMIT, 4};
+    sigdb::init_code();
+    sigdb::Pattern p;
+    std::string err;
+    sigdb::parse_pattern("48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E8 {helper:rel32}", p, err);
+    const uint8_t* live_text = x.live.data() + x.ft.text_rva;
+    CHECK(sigdb::scan(p, live_text, live_text + x.ft.text_vsize, 2).empty(),
+          "in place: the patched live code hides the function from a live scan");
+    const auto file = std::filesystem::path(dir) / "inplace.json";
+    {
+        std::ofstream out(file);
+        out << R"({"format":1,"symbols":{"root":{"find":[{"pattern":"48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E8 {helper:rel32}"}]}}})";
+    }
+    sigdb::Resolver r;
+    r.load(file, "");
+    r.resolve();
+    uintptr_t a = 0;
+    CHECK(sigdb::g_code.view.disk && r.symbol("root", &a) && a == kiln::test_image.base + TestPe::kFunc,
+          "in place: the symbol resolves on the file's code");
+    std::vector<sigdb::LiveDiff> d;
+    r.collect_live_diffs(d);
+    CHECK(d.size() == 1 && d[0].symbol == "root" && d[0].at == a && d[0].bytes_ok && d[0].bytes[0] == 0x49 &&
+              d[0].by == "bytes changed in place",
+          "in place: the symbol is listed with its live bytes, as changed in place");
+    test_query = false;
+    std::filesystem::remove(file);
+}
+
+// The real client exe through the production view selection (a player's report of 14 Nov 2026): every function Kiln
+// resolves is hooked by another engine, and The Worst Map Mod's four places (client build 26430625; on another build
+// four other bytes) are patched in place, all before Kiln's scan.
+static void real_client_in_place(const std::string& exe, const std::filesystem::path& sigdb_dir) {
+    std::ifstream in(exe, std::ios::binary);
+    if (!in) {
+        std::printf("SKIP client view selection: cannot read %s\n", exe.c_str());
+        return;
+    }
+    std::vector<uint8_t> file((std::istreambuf_iterator<char>(in)), {});
+    pe::FileText ft;
+    std::string err;
+    if (!pe::parse_file_text(file.data(), file.size(), ft, err) || ft.file_bytes() < ft.text_vsize ||
+        !ft.relocs64.empty() || !ft.relocs32.empty()) {
+        std::printf("SKIP client view selection: %s\n", err.empty() ? "the exe needs a private copy of .text" : err.c_str());
+        return;
+    }
+    std::vector<uint8_t> live(ft.size_of_image, 0);
+    uint8_t* l_text = live.data() + ft.text_rva;
+    const uint8_t* f_text = file.data() + ft.text_raw;
+    std::memcpy(l_text, f_text, ft.text_vsize);
+    auto& img = kiln::test_image;
+    img = {};
+    img.base = reinterpret_cast<uintptr_t>(live.data());
+    img.size = ft.size_of_image;
+    img.text = l_text;
+    img.text_size = ft.text_vsize;
+    img.timestamp = ft.timestamp;
+    img.side = KILN_SIDE_CLIENT;
+    img.file = file.data();
+    img.file_size = file.size();
+
+    const auto defs = unscoped_defs(sigdb_dir, "client");
+    const pe::CodeView on_file{f_text, ft.text_vsize, reinterpret_cast<uintptr_t>(l_text), true};
+    std::map<std::string, uintptr_t> want;
+    for (const Def& d : defs) {
+        const auto h = sigdb::scan(d.p, on_file.scan, on_file.end(), 2);
+        if (h.size() == 1) want[d.name] = on_file.to_live(h[0]) + d.offset;
+    }
+    for (auto& [name, addr] : want) {
+        auto* at = reinterpret_cast<uint8_t*>(addr);
+        if (at < l_text || at + 5 > l_text + ft.text_vsize) continue;
+        at[0] = 0xE9;
+        const int32_t rel = 0x7FFF0000;
+        std::memcpy(at + 1, &rel, 4);
+    }
+    // Hooks closer than five bytes overwrite each other and read as no hook; count those before the patches.
+    const size_t before = pe::other_differences(f_text, l_text, ft.text_vsize, reinterpret_cast<uintptr_t>(l_text), img.base,
+                                                img.size).sites;
+    size_t patched = 0;
+    for (uint32_t rva : {0x31629du, 0x3168c9u, 0xd33058u, 0xd331eeu})
+        if (rva >= ft.text_rva && rva - ft.text_rva < ft.text_vsize) live[rva] ^= 0x01, ++patched;
+    auto resolved = [&](const pe::CodeView& cv) {
+        size_t n = 0;
+        for (const Def& d : defs) {
+            const auto it = want.find(d.name);
+            if (it == want.end()) continue;
+            const auto h = sigdb::scan(d.p, cv.scan, cv.end(), 2);
+            if (h.size() == 1 && cv.to_live(h[0]) + d.offset == it->second) ++n;
+        }
+        return n;
+    };
+
+    sigdb::g_code = {};
+    kiln::test_verified = true;
+    sigdb::init_code();
+    CHECK(patched == 4 && sigdb::g_code.view.disk && sigdb::g_code.in_place.sites == before + 4,
+          "client: %zu hooked functions and four in-place patches on a verified build keep the disk scan (%zu in-place "
+          "places, %zu of them hooks that overwrite each other)",
+          want.size(), sigdb::g_code.in_place.sites, before);
+    const size_t on_disk = resolved(sigdb::g_code.view);
+    CHECK(!want.empty() && on_disk == want.size(), "client: the selected view resolves all %zu symbols (%zu)", want.size(), on_disk);
+
+    sigdb::g_code = {};
+    kiln::test_verified = false;
+    sigdb::init_code();
+    const size_t on_live = resolved(sigdb::g_code.view);
+    CHECK(!sigdb::g_code.view.disk && on_live < want.size(),
+          "client: the same code with no verified build record is scanned live, where the hooks hide %zu of %zu symbols",
+          want.size() - on_live, want.size());
+    kiln::test_verified = true;
+    sigdb::g_code = {};
+    img = {};
 }
 
 static void hook_guard() {
@@ -395,6 +579,13 @@ static void diff_budget() {
     live[200] ^= 1;
     CHECK(!pe::only_hook_differences(file.data(), live.data(), live.size(), text, base, 0x2000),
           "runtime: an unrelated code byte is not hidden by recognised hooks");
+    live[200] ^= 1;
+    // The first difference no form covers is reported, so the fallback can name the patch that tripped it.
+    live[200] ^= 1;
+    size_t first = 9999;
+    CHECK(!pe::only_hook_differences(file.data(), live.data(), live.size(), text, base, 0x2000, nullptr, &first) &&
+              first == 200,
+          "runtime: the first uncovered difference is reported, past the recognised hooks");
     live[200] ^= 1;
     // A redirected call (ShroudForge's native runtime and the main menu's two Settings calls): the opcode stays, the
     // operand goes from a place in the image to one outside it.
@@ -488,13 +679,178 @@ static void diff_budget() {
           static_cast<uintptr_t>(target) == text - 7, "runtime: negative rel32 at the section edge uses live address");
 }
 
+// A rel32 capture through a redirected call is skipped: the vote would name the hook's relay, not the function,
+// so a symbol another engine hooked still resolves from its own pattern. The live scan (fallback) is forced with
+// an unrelated changed byte; the file view is retained for the capture check on both paths.
+static void redirected_captures_skipped(const char* dir) {
+    Loaded x;
+    const uintptr_t base = kiln::test_image.base;
+    // A relay past the image (SizeOfImage 0x3000) but inside the same allocation: FF25 disp32==0 through a slot
+    // naming a landing pad of int3s, so the jump chain ends and the relay shape accepts it.
+    uint8_t* relay = x.live.data() + 0x3010;
+    relay[0] = 0xFF; relay[1] = 0x25;
+    std::memset(relay + 2, 0, 4);
+    const uintptr_t landing = base + 0x3020;
+    std::memcpy(relay + 6, &landing, 8);
+    std::memset(x.live.data() + 0x3020, 0xCC, 16);
+    // Redirect the live call in root's pattern (E8 at .text offset 0x1a) at the relay.
+    const size_t e8 = x.ft.text_rva + 0x1a;
+    const int32_t rel = static_cast<int32_t>(static_cast<int64_t>(base + 0x3010) -
+                                             static_cast<int64_t>(base + e8 + 5));
+    std::memcpy(x.live.data() + e8 + 1, &rel, 4);
+    // An unrelated changed byte forces the live-code fallback; the redirect alone would be recognised. Since the
+    // in-place fix (dev.28) such a byte keeps the file scan on a verified build, so the build is no verified one here.
+    x.live[x.ft.text_rva + 200] ^= 1;
+    kiln::test_verified = false;
+    test_query = true;
+    test_mbi = {x.live.data(), 0x4000, MEM_COMMIT, 4};  // readable() needs the queried range inside one region
+    sigdb::init_code();
+    CHECK(!sigdb::g_code.view.disk && sigdb::g_code.file_text != nullptr,
+          "runtime: the fallback keeps the file view for the capture check");
+    const auto file = std::filesystem::path(dir) / "redirected.json";
+    {
+        std::ofstream out(file);
+        out << R"({"format":1,"symbols":{
+          "root":{"find":[{"pattern":"48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E8 {helper:rel32}"}]},
+          "helper":{"find":[{"pattern":"8B 81 34 12 00 00 C3"}]}
+        }})";
+    }
+    sigdb::Resolver r;
+    CHECK(r.load(file, ""), "runtime: a cross-checked definition loads for the redirected capture");
+    r.resolve();
+    uintptr_t a = 0;
+    CHECK(r.symbol("helper", &a) && a == base + TestPe::kFunc + 15,
+          "runtime: a capture through a redirected call is skipped, the pattern value stands");
+    std::filesystem::remove(file);
+    test_query = false;    kiln::test_verified = true;
+}
+
+// The relay layouts of PR 31's stack, as hooks that land in a loaded module: greeneye's indirect jump through a
+// pointer 16 bytes in (FF 25 0A000000), XHL's through a slot of a pointer table elsewhere on the page, and a jump to
+// such a relay. A relay whose chain lands in no module and has no relay shape stays refused.
+static void relay_layouts() {
+    Loaded x(false, 0x4000);
+    const uintptr_t base = kiln::test_image.base;
+    uint8_t* m = x.live.data();
+    test_module_lo = base + 0x3800;  // relay-mod.dll, as module_at sees it
+    test_module_hi = base + 0x3900;
+    auto ff25 = [&](size_t at, size_t slot, uintptr_t to) {
+        const int32_t disp = static_cast<int32_t>(slot - (at + 6));
+        m[at] = 0xFF, m[at + 1] = 0x25;
+        std::memcpy(m + at + 2, &disp, 4);
+        std::memcpy(m + slot, &to, 8);
+    };
+    ff25(0x3100, 0x3110, base + 0x3800);  // greeneye: jmp [rip+0xA], 10 bytes padding, the pointer
+    ff25(0x3200, 0x3318, base + 0x3840);  // XHL: jmp [rip+disp32] into the page's table of 8-byte slots
+    m[0x3400] = 0xE9;                     // a near jump to greeneye's relay
+    const int32_t jmp_rel = 0x3100 - 0x3405;
+    std::memcpy(m + 0x3401, &jmp_rel, 4);
+    ff25(0x3500, 0x3510, base + 0x3600);  // greeneye's form, but the pointer names memory no module holds
+    std::memset(m + 0x3600, 0xCC, 16);
+    test_query = true;
+    test_mbi = {m, x.live.size(), MEM_COMMIT, 4};
+    CHECK(sigdb::call_lands(base + 0x3100), "relays: greeneye's relay (pointer 16 bytes in) lands in a module");
+    CHECK(sigdb::call_lands(base + 0x3200), "relays: XHL's relay (a pointer table slot) lands in a module");
+    CHECK(sigdb::call_lands(base + 0x3400), "relays: a jump to a relay lands in a module");
+    CHECK(!sigdb::call_lands(base + 0x3500), "relays: a relay that lands in no module is no hook");
+
+    // The call in root's pattern (E8 at RVA kFunc + 10), sent to a relay in the live code only.
+    const size_t e8 = TestPe::kFunc + 10;
+    const std::array<uint8_t, 4> was{m[e8 + 1], m[e8 + 2], m[e8 + 3], m[e8 + 4]};
+    auto redirect = [&](size_t relay) {
+        const int32_t rel = static_cast<int32_t>(relay - (e8 + 5));
+        std::memcpy(m + e8 + 1, &rel, 4);
+    };
+    auto start = [&](bool verified) {
+        sigdb::g_code = {};
+        kiln::test_verified = verified;
+        sigdb::init_code();
+        return sigdb::g_code.view.disk;
+    };
+    const std::string first = "first unrecognised difference at RVA ";
+    redirect(0x3100);
+    CHECK(start(false) && sigdb::g_code.in_place.sites == 0,
+          "relays: a call sent to greeneye's relay is a hook, the file scan stands without a verified build");
+    redirect(0x3200);
+    CHECK(start(false) && sigdb::g_code.in_place.sites == 0,
+          "relays: a call sent to XHL's relay is a hook, the file scan stands without a verified build");
+    // dev.28's rule beside them: an in-place byte keeps the file scan only on a verified build. A recognised relay
+    // counts as a hook, never as a pass for the byte.
+    m[0x1000 + 200] ^= 1;
+    CHECK(!start(false) && sigdb::g_code.note.find(first + "0x10c8") != std::string::npos,
+          "relays: a relay beside an in-place byte on an unverified build: the live scan, the byte named");
+    CHECK(start(true) && sigdb::g_code.in_place.sites == 1,
+          "relays: a relay beside an in-place byte on a verified build: the file scan, one in-place place");
+    m[0x1000 + 200] ^= 1;
+    // A call sent to a relay that lands nowhere is no hook: an in-place difference like any other.
+    redirect(0x3500);
+    CHECK(!start(false) && sigdb::g_code.note.find(first + "0x101b") != std::string::npos,
+          "relays: a call to a relay that lands in no module is refused on an unverified build, the call named");
+    CHECK(start(true) && sigdb::g_code.in_place.sites == 1,
+          "relays: the same call on a verified build keeps the file scan as an in-place place");
+    std::memcpy(m + e8 + 1, was.data(), 4);
+    test_module_lo = test_module_hi = 0;
+    test_query = false;
+    kiln::test_verified = true;
+}
+
+// On the file scan a rel32 capture reads the file's operand: the function the game's code calls. A call another
+// engine sent to a relay in the live code is no reason to drop that vote; a symbol named only by captures (no
+// pattern of its own) would go unresolved on every hooked stack.
+static void redirected_capture_on_file_scan(const char* dir) {
+    Loaded x(false, 0x4000);
+    const uintptr_t base = kiln::test_image.base;
+    uint8_t* m = x.live.data();
+    test_module_lo = base + 0x3800;
+    test_module_hi = base + 0x3900;
+    m[0x3100] = 0xFF, m[0x3101] = 0x25, m[0x3102] = 0x0A;  // greeneye's relay into relay-mod.dll
+    const uintptr_t to = base + 0x3800;
+    std::memcpy(m + 0x3110, &to, 8);
+    const size_t e8 = TestPe::kFunc + 10;
+    const int32_t rel = static_cast<int32_t>(0x3100 - (e8 + 5));
+    std::memcpy(m + e8 + 1, &rel, 4);
+    test_query = true;
+    test_mbi = {m, x.live.size(), MEM_COMMIT, 4};
+    kiln::test_verified = false;
+    sigdb::init_code();
+    CHECK(sigdb::g_code.view.disk, "capture on file: the call sent to a relay is a hook, the file scan stands");
+    const auto file = std::filesystem::path(dir) / "redirected-file.json";
+    {
+        std::ofstream out(file);
+        out << R"({"format":1,"symbols":{
+          "root":{"find":[{"pattern":"48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E8 {helper:rel32}"}]}
+        }})";
+    }
+    sigdb::Resolver r;
+    CHECK(r.load(file, ""), "capture on file: a capture-only definition loads");
+    r.resolve();
+    uintptr_t a = 0;
+    CHECK(r.symbol("helper", &a) && a == base + TestPe::kHelper,
+          "capture on file: a capture through a call hooked in the live code reads the file's callee");
+    std::filesystem::remove(file);
+    test_module_lo = test_module_hi = 0;
+    test_query = false;
+    kiln::test_verified = true;
+}
+
+// sigdb_runtime_test <scratch folder> [--client <enshrouded.exe>] [--sigdb <sigdb/symbols>]
 int main(int argc, char** argv) {
-    if (argc != 2) return 2;
+    if (argc < 2) return 2;
     views_and_holes();
     pool_and_resolver(argv[1]);
     live_diff_accessors(argv[1]);
     sig_blocks(argv[1]);
+    in_place_patch(argv[1]);
     hook_guard();
     diff_budget();
+    redirected_captures_skipped(argv[1]);
+    relay_layouts();
+    redirected_capture_on_file_scan(argv[1]);
+    std::filesystem::path sigdb_dir = std::filesystem::path(__FILE__).parent_path() / "../../../sigdb/symbols";
+    for (int i = 2; i + 1 < argc; i += 2) {
+        const std::string opt = argv[i];
+        if (opt == "--sigdb") sigdb_dir = argv[i + 1];
+        else if (opt == "--client") real_client_in_place(argv[i + 1], sigdb_dir);
+    }
     return g_fail ? 1 : 0;
 }

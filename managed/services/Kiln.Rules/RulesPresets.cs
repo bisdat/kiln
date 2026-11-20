@@ -202,10 +202,13 @@ internal static class RulesPresets
                        "\"allowGlideSteer\": false in rules.json.\n",
     };
 
-    private static string DefaultText(string name, string json, string note = "") =>
+    // LF on every OS: System.Text.Json ends indented lines with Environment.NewLine (CRLF on Windows), and a raw literal
+    // takes the line ends of the checkout. One byte form everywhere keeps the file the same on a Linux and a Windows
+    // server, and its unedited-default check exact (files earlier Windows versions wrote are matched by WindowsText).
+    internal static string DefaultText(string name, string json, string note = "") =>
         $"// Kiln's \"{name}\" rules (Kiln.Rules: docs/kiln/services/rules.md). Edit to change what /{name} and Rules.Preset(\"{name}\") give;\n" +
         "// delete the file to get Kiln's defaults back. The server's limits (rules.json next to this folder) still apply.\n" +
-        note + json + "\n";
+        note + json.Replace("\r\n", "\n") + "\n";
 
     // Recheck an existing file while holding the same stream used to write it, without sharing write access.
     // Return the text actually observed/applied so Get does not return new defaults after a raced-in owner edit.
@@ -255,8 +258,9 @@ internal static class RulesPresets
 
     internal static bool IsEarlierDefault(string name, string file) => IsEarlierText(name, File.ReadAllBytes(file));
 
-    // Each snapshot as written on Linux (LF) and as a Windows game or server wrote it: System.Text.Json ends indented
-    // lines with Environment.NewLine (CRLF there), while the header lines and the final newline are "\n" on both.
+    // Each snapshot as written on Linux (LF) and as a Windows game or server up to 0.2.0-dev.29.18 wrote it: System.Text.Json
+    // ends indented lines with Environment.NewLine (CRLF there), while the header lines and the final newline are "\n" on
+    // both. Since dev.29.19 DefaultText writes LF on Windows too; snapshots of earlier versions keep both forms.
     private static bool IsEarlierText(string name, ReadOnlySpan<byte> bytes)
     {
         if (!Earlier.TryGetValue(name, out var earlier)) return false;

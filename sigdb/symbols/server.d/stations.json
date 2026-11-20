@@ -1,0 +1,482 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "kiln.stations (in kiln-items.dll): the production stations of a base (FactoryStation entities) and the game's own station actions. player_crafting's PlayerCraftingAction dispatch (types 2 select recipe / resume, 4 stop: plain FactoryStation writes after ServerFactoryInfo invalidation; type 1 AutomaticTransfer = the 'fill from chests' button), the fill core AutoTransferRecipe (tx, base stock, resolved inputs, station, u16 crafts, waterCharges, player), recipe-input resolution with category selections (ResolveRecipeInputs / ResolveInput / FindInputCategory over RecipeRegistry+0xA0), PlayerBasesSystem's base lookup by position and per-base stock lists (InventoryCraftingStock containers +0x30, water sources +0x58, stride 0x130), factory_station's start and completion, the factory speed getter. Identical code on server 26430253 and client 26430625 (one file for both). Evidence: docs/re/stations.md. Since 0.2.0-dev.29.17 (GitHub #68): @stations/AutoTransferRecipe.take pins the per-item take Kiln's station outputs rely on: the fill reads each 24-byte resolved input stack's item at stations/stack.item (its count the next dword), steps by stations/stack.size, and takes every missing unit from each list-A entity in order through gems/PayMaterial (removeItems of that item with no preferred slot), so an entity in the list gives only stacks of the asked item (feature stations.output_sources; docs/re/stations.md section 8).",
+  "symbols": {
+    "stations/PlayerCraftingUpdate": {
+      "find": [
+        {
+          "pattern": "40 55 41 57 48 8D 6C 24 D8 48 81 EC 28 01 00 00 41 B8 E0 00 00 00"
+        }
+      ]
+    },
+    "@stations/PlayerCrafting.dispatch": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "stations/PlayerCraftingUpdate",
+            "size": 512
+          },
+          "pattern": "49 8D BE {stations/input.crafting_action:d32} 48 85 C9 74 ?? 0F B6 44 24 ?? 4C 8B 4C 24 ?? 4C 8B 44 24 ?? 48 8B 54 24 ?? 88 44 24 28 0F B7 44 24 ?? 66 89 44 24 20 E8 ?? ?? ?? ?? 48 8B 44 24 ?? 8B 48 {stations/consumed.crafting_action:d8} 39 4F {stations/action.version:d8} 0F 84 ?? ?? ?? ?? 8B 17 48 8B 4D ?? E8 {stations/FactoryInfoInvalidate:rel32} 0F B6 47 {stations/action.type:d8} 83 F8 05"
+        },
+        {
+          "scope": {
+            "symbol": "stations/PlayerCraftingUpdate",
+            "size": 512
+          },
+          "pattern": "48 8D 54 24 30 48 8B CF E8 {stations/AutoTransferAction:rel32} EB ?? 44 8B 07 48 8B 55 ?? 48 8B 4C 24 30 E8 {stations/StationWrite:rel32} 48 85 C0 74 ?? 8B 4F 04 89 48 {stations/factory.next_recipe:d8} 0F 10 47 18 0F 11 40 {stations/factory.next_selections:d8} 0F 10 4F 28 C6 40 {stations/factory.stopped_by_player:d8} 00"
+        },
+        {
+          "scope": {
+            "symbol": "stations/PlayerCraftingUpdate",
+            "size": 512
+          },
+          "pattern": "0F B6 4F 38 88 48 {stations/factory.use_all:d8} EB ?? 44 8B 07 48 8B 55 ?? 48 8B 4C 24 30 E8 ?? ?? ?? ?? 48 85 C0 74 ?? C6 40 61 01"
+        }
+      ]
+    },
+    "@stations/AutoTransferAction.calls": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "stations/AutoTransferAction",
+            "size": 1088
+          },
+          "pattern": "4C 89 64 24 70 4C 89 64 24 78 4C 89 65 80 4C 89 65 88 F2 0F 11 44 24 40 E8 {stations/BaseStockForPlayer:rel32}"
+        },
+        {
+          "scope": {
+            "symbol": "stations/AutoTransferAction",
+            "size": 1088
+          },
+          "pattern": "48 8B CF 4C 89 A5 ?? ?? ?? ?? 48 C7 85 ?? ?? ?? ?? 20 00 00 00 0F 29 44 24 40 0F 29 4C 24 50 E8 {stations/ResolveRecipeInputs:rel32}"
+        },
+        {
+          "scope": {
+            "symbol": "stations/AutoTransferAction",
+            "size": 1088
+          },
+          "pattern": "8B 87 {stations/recipe.water_charges:d32} 48 89 4C 24 40 48 8B 8D ?? ?? ?? ?? 89 44 24 28 0F B7 46 {stations/action.amount:d8} 48 89 4C 24 48 48 8D 8D ?? ?? ?? ?? 66 89 44 24 20 E8 {stations/AutoTransferRecipe:rel32}"
+        }
+      ]
+    },
+    "@stations/ResolveInput.calls": {
+      "find": [
+        {
+          "pattern": "40 55 53 57 41 54 41 56 48 8B EC 48 83 EC 50 83 7A 10 00 4D 8B E1 4D 8B F0 48 8B DA 48 8B F9 74 ?? 0F 10 02"
+        },
+        {
+          "pattern": "8B 4A 28 48 89 B4 24 ?? ?? ?? ?? 4C 89 AC 24 ?? ?? ?? ?? 4C 89 BC 24 ?? ?? ?? ?? 4C 8D 7A 28 49 8B D4 E8 {stations/FindInputCategory:rel32}"
+        }
+      ]
+    },
+    "@stations/FindInputCategory.fields": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "stations/FindInputCategory",
+            "size": 160
+          },
+          "pattern": "83 BA {stations/categories.count:d32} 00 4C 8B D2 48 8B 9A {stations/categories.cap:d32} 8B C1 74 ?? 48 8B BA {stations/categories.bits:d32}"
+        },
+        {
+          "scope": {
+            "symbol": "stations/FindInputCategory",
+            "size": 160
+          },
+          "pattern": "4D 8B 9A {stations/categories.keys:d32} 0F 1F 44 00 00 43 39 04 83"
+        },
+        {
+          "scope": {
+            "symbol": "stations/FindInputCategory",
+            "size": 160
+          },
+          "pattern": "49 8B 82 {stations/categories.values:d32} 4A 8D 04 C0"
+        }
+      ]
+    },
+    "stations/BaseAtPosition": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 57 48 83 EC 10 8B 7A {stations/bases.count:d8} 45 33 DB 48 8B DA 4C 8B D1 48 85 FF 0F 84"
+        }
+      ]
+    },
+    "@stations/BaseAtPosition.fields": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "stations/BaseAtPosition",
+            "size": 288
+          },
+          "pattern": "4C 8D 82 {stations/bases.aabb_y:d32} F2 0F 11 04 24"
+        },
+        {
+          "scope": {
+            "symbol": "stations/BaseAtPosition",
+            "size": 288
+          },
+          "pattern": "45 8B 48 {stations/bases.zone_mask_rel:d8} F3 41 0F B8 C1"
+        },
+        {
+          "scope": {
+            "symbol": "stations/BaseAtPosition",
+            "size": 288
+          },
+          "pattern": "48 8B 83 {stations/bases.zones:d32} 0F 2F 1C 02"
+        },
+        {
+          "scope": {
+            "symbol": "stations/BaseAtPosition",
+            "size": 288
+          },
+          "pattern": "49 FF C3 49 81 C0 {stations/bases.stride:d32} 4C 3B DF"
+        }
+      ]
+    },
+    "@stations/BaseStockForPlayer.fields": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "stations/BaseStockForPlayer",
+            "size": 384
+          },
+          "pattern": "48 69 C8 {stations/bases.stride:d32} 48 8B 44 29 {stations/stock.items:d8} 48 89 06 48 8B 44 29 {stations/stock.items_count:d8} 48 89 46 08 48 8B 44 29 {stations/stock.water:d8} 48 89 46 10 48 8B 44 29 {stations/stock.water_count:d8}"
+        },
+        {
+          "scope": {
+            "symbol": "stations/BaseStockForPlayer",
+            "size": 384
+          },
+          "pattern": "4D 8B 40 10 48 8D 4C 24 60 8B 54 24 78 E8 {stations/PlayerPermissions:rel32} F6 44 24 60 {stations/permission.stock:d8}"
+        }
+      ]
+    },
+    "stations/RebuildBaseStock": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 10 48 89 6C 24 18 56 57 41 56 B8 60 20 00 00"
+        }
+      ]
+    },
+    "stations/FactoryStationUpdate": {
+      "find": [
+        {
+          "pattern": "40 55 41 56 48 8D 6C 24 D8 48 81 EC 28 01 00 00 41 B8 E0 00 00 00"
+        }
+      ]
+    },
+    "stations/FactoryStart": {
+      "find": [
+        {
+          "pattern": "40 53 41 57 48 83 EC 58 48 8B 41 20 4C 8B F9 48 85 C0"
+        }
+      ]
+    },
+    "stations/FactoryComplete": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 48 89 74 24 10 57 48 81 EC 00 02 00 00 48 8D 59 28"
+        }
+      ]
+    },
+    "@stations/FactoryComplete.craft": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "stations/FactoryComplete",
+            "size": 128
+          },
+          "pattern": "80 8C 24 ?? ?? ?? ?? {stations/craft.outputs_only:d8} 48 8D 8C 24 ?? ?? ?? ?? 48 8B D6 E8 ?? ?? ?? ?? 85 C0 74 ?? 48 8B 03 80 38 05"
+        }
+      ]
+    },
+    "stations/AutoTransferRecipe": {
+      "find": [
+        {
+          "pattern": "44 89 4C 24 20 4C 89 44 24 18 48 89 54 24 10 48 89 4C 24 08 55 56 57 41 56 41 57 48 8D AC 24 60 FF FF FF"
+        }
+      ]
+    },
+    "stations/BaseStockForPlayer": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 20 57 48 83 EC 40 49 8B F9"
+        }
+      ]
+    },
+    "stations/ResolveRecipeInputs": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 18 48 89 6C 24 20 56 57 41 57 48 83 EC 70 33 F6 49 8B E9 4D 8B F8 48 8B DA 48 8B F9 39 71 2C"
+        }
+      ]
+    },
+    "stations/AutoTransferAction": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 18 48 89 74 24 20 55 57 41 54 41 56 41 57 48 8D AC 24 A0 8A FF FF"
+        }
+      ]
+    },
+    "@stations/FactoryStationUpdate.timing": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "stations/FactoryStationUpdate",
+            "size": 896
+          },
+          "pattern": "48 8B F0 48 85 C0 74 ?? 48 8B 4D ?? E8 {stations/FactorySpeed:rel32} 48 8B 4B {stations/factory.recipe_start:d8} 0F 57 C9 F2 48 0F 2A 4E {stations/recipe.duration:d8} F2 0F 59 0D ?? ?? ?? ??"
+        }
+      ]
+    },
+    "@stations/FactorySpeed.fields": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "stations/FactorySpeed",
+            "size": 48
+          },
+          "pattern": "48 8B 81 {stations/balancing.settings:d32} F3 0F 10 48 {stations/settings.factory_speed:d8} 0F 28 C1"
+        }
+      ]
+    },
+    "@stations/AutoTransferRecipe.take": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "stations/AutoTransferRecipe",
+            "size": 1792
+          },
+          "pattern": "F2 0F 10 4A {stations/stack.item:d8} 0F 10 02 F2 0F 11 4D ?? 8B 5D ?? 0F 11 45 ?? 85 DB 0F 84 ?? ?? ?? ?? 48 8B 45 ?? 48 C1 E8 20"
+        },
+        {
+          "scope": {
+            "symbol": "stations/AutoTransferRecipe",
+            "size": 1792
+          },
+          "pattern": "48 8B 7D ?? 45 33 E4 48 8B B5 ?? ?? ?? ?? B1 0E 84 C9 44 0F 44 F8 45 85 FF 74 ?? 4D 3B E5 73 ?? 46 8B 04 A7 48 8D 4D ?? 44 8B CB 44 89 7C 24 20 48 8B D6 E8 {gems/PayMaterial:rel32}"
+        },
+        {
+          "scope": {
+            "symbol": "stations/AutoTransferRecipe",
+            "size": 1792
+          },
+          "pattern": "49 FF C4 48 83 C2 {stations/stack.size:d8} 4C 89 65 ?? 48 89 54 24 ?? 4D 3B E6 0F 82"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "stations/factory.size": {
+      "value": 104
+    },
+    "stations/factory.state": {
+      "value": 0
+    },
+    "stations/factory.running_recipe": {
+      "value": 4
+    },
+    "stations/factory.running_selections": {
+      "value": 8
+    },
+    "stations/factory.recipe_start": {
+      "value": 80
+    },
+    "stations/factory.pause_duration": {
+      "value": 88
+    },
+    "stations/factory.missing": {
+      "value": 98
+    },
+    "stations/basesys.record0": {
+      "value": 48
+    },
+    "stations/input.crafting_action": {
+      "min_votes": 1
+    },
+    "stations/consumed.crafting_action": {
+      "min_votes": 1
+    },
+    "stations/action.version": {
+      "min_votes": 1
+    },
+    "stations/action.type": {
+      "min_votes": 1
+    },
+    "stations/factory.next_recipe": {
+      "min_votes": 1
+    },
+    "stations/factory.next_selections": {
+      "min_votes": 1
+    },
+    "stations/factory.stopped_by_player": {
+      "min_votes": 1
+    },
+    "stations/factory.use_all": {
+      "min_votes": 1
+    },
+    "stations/recipe.water_charges": {
+      "min_votes": 1
+    },
+    "stations/action.amount": {
+      "min_votes": 1
+    },
+    "stations/categories.count": {
+      "min_votes": 1
+    },
+    "stations/categories.cap": {
+      "min_votes": 1
+    },
+    "stations/categories.bits": {
+      "min_votes": 1
+    },
+    "stations/categories.keys": {
+      "min_votes": 1
+    },
+    "stations/categories.values": {
+      "min_votes": 1
+    },
+    "stations/bases.count": {
+      "min_votes": 1
+    },
+    "stations/bases.aabb_y": {
+      "min_votes": 1
+    },
+    "stations/bases.zone_mask_rel": {
+      "min_votes": 1
+    },
+    "stations/bases.zones": {
+      "min_votes": 1
+    },
+    "stations/bases.stride": {
+      "min_votes": 2
+    },
+    "stations/stock.items": {
+      "min_votes": 1
+    },
+    "stations/stock.items_count": {
+      "min_votes": 1
+    },
+    "stations/stock.water": {
+      "min_votes": 1
+    },
+    "stations/stock.water_count": {
+      "min_votes": 1
+    },
+    "stations/permission.stock": {
+      "min_votes": 1
+    },
+    "stations/craft.outputs_only": {
+      "min_votes": 1
+    },
+    "stations/balancing.settings": {
+      "min_votes": 1
+    },
+    "stations/settings.factory_speed": {
+      "min_votes": 1
+    },
+    "stations/recipe.duration": {
+      "min_votes": 1
+    },
+    "stations/stack.item": {
+      "min_votes": 1
+    },
+    "stations/stack.size": {
+      "min_votes": 1
+    }
+  },
+  "features": {
+    "stations.read": {
+      "symbols": [
+        "stations/BaseAtPosition",
+        "@stations/BaseAtPosition.fields",
+        "@stations/BaseStockForPlayer.fields",
+        "stations/ResolveRecipeInputs",
+        "stations/FindInputCategory",
+        "@stations/FindInputCategory.fields",
+        "stations/FactoryStationUpdate",
+        "@stations/FactoryStationUpdate.timing",
+        "stations/FactorySpeed",
+        "@stations/FactorySpeed.fields"
+      ],
+      "constants": [
+        "stations/bases.count",
+        "stations/bases.stride",
+        "stations/bases.aabb_y",
+        "stations/bases.zone_mask_rel",
+        "stations/bases.zones",
+        "stations/stock.items",
+        "stations/stock.items_count",
+        "stations/stock.water",
+        "stations/stock.water_count",
+        "stations/categories.count",
+        "stations/categories.cap",
+        "stations/categories.bits",
+        "stations/categories.keys",
+        "stations/categories.values",
+        "stations/recipe.duration",
+        "stations/factory.recipe_start",
+        "stations/balancing.settings",
+        "stations/settings.factory_speed"
+      ]
+    },
+    "stations.fill": {
+      "symbols": [
+        "stations/AutoTransferRecipe",
+        "@stations/AutoTransferAction.calls",
+        "stations/ResolveRecipeInputs",
+        "stations/FactoryInfoInvalidate",
+        "@stations/PlayerCrafting.dispatch"
+      ],
+      "constants": [
+        "stations/recipe.water_charges"
+      ]
+    },
+    "stations.control": {
+      "symbols": [
+        "@stations/PlayerCrafting.dispatch",
+        "stations/FactoryInfoInvalidate"
+      ],
+      "constants": [
+        "stations/factory.next_recipe",
+        "stations/factory.next_selections",
+        "stations/factory.stopped_by_player",
+        "stations/factory.use_all"
+      ]
+    },
+    "stations.events": {
+      "symbols": [
+        "stations/FactoryStationUpdate",
+        "stations/FactoryComplete",
+        "@stations/FactoryComplete.craft"
+      ],
+      "constants": [
+        "stations/craft.outputs_only"
+      ]
+    },
+    "stations.output_sources": {
+      "symbols": [
+        "stations/AutoTransferRecipe",
+        "@stations/AutoTransferRecipe.take",
+        "stations/ResolveRecipeInputs",
+        "stations/BaseAtPosition",
+        "@stations/FindInputCategory.fields"
+      ],
+      "constants": [
+        "stations/stack.item",
+        "stations/stack.size",
+        "stations/recipe.water_charges"
+      ]
+    },
+    "stations.craft_sources": {
+      "comment": "GitHub #68 step 2: opted-in station outputs are the last source of the recipe function's payment (InventoryPay called from RecipeApply). The take is gems/PayMaterial, per item, after the owner and the base's Magic chests. docs/re/stations.md section 10.",
+      "symbols": [
+        "rules/InventoryPay",
+        "rules/RecipePaid",
+        "gems/PayMaterial",
+        "stations/BaseStockForPlayer"
+      ]
+    }
+  }
+}

@@ -15,15 +15,26 @@ namespace Kiln;
 /// changed. <c>manifests/&lt;revision&gt;.pending.json</c>: the generation staged for the world save with that
 /// revision (written when the game accepts the save, before its snapshot). <c>manifests/&lt;revision&gt;-&lt;world
 /// file time&gt;.json</c>: the same generation, confirmed after the world file was written. Every file is written to a
-/// temp name, flushed and renamed, so a crash leaves the old or the new file, never a torn one.</para>
+/// temp name, forced to disk and renamed, so a crash leaves the old or the new file, never a torn one. One exception
+/// (since 0.2.0-dev.29, issue #39): a generation whose bundles are those of the previous one, confirmed by this process
+/// and on disk, with no new blob, renames its pending manifest and its confirmation into place without forcing them to
+/// disk. A game crash or kill -9 cannot tell the difference (the system still writes the files); a power loss or a system
+/// crash before the system wrote them can leave them missing or torn, and loading then skips them (an unusable manifest is
+/// logged) and takes an older generation with the same bundles, at worst the newest one forced to disk, which pruning
+/// keeps: what a lost rename could already give.</para>
 /// <para>Loading picks the manifest of the world file on disk (its header revision + time), so restoring an older world
 /// file (from the game's backup folder or a Kiln backup) brings back the mod data that belongs to it. Manifests are
 /// kept for the newest 30 generations and for every world file in the save folder and its <c>backup/</c>.</para>
+/// <para>Who writes (since 0.2.0-dev.29.3, issue #39): the tick thread only serializes the bundles (in memory); every file
+/// operation of a save (blobs, manifests, the pending manifest's delete, pruning) runs on <see cref="SaveWriter"/>'s
+/// thread, in order, and kiln.saves holds the game's world write until the writer has the generation's pending manifest
+/// on disk (bounded: <c>docs/kiln/services/saves.md</c> says where the order does not hold). A world load and a backup
+/// read the folder only while the writer is idle; a world close and the shutdown save wait for it, bounded.</para>
 /// </remarks>
 internal sealed unsafe class WorldStore
 {
-    private const int KeepGenerations = 30;
-    private static readonly TimeSpan OrphanAge = TimeSpan.FromMinutes(10);
+    internal const int KeepGenerations = 30;
+    internal static readonly TimeSpan OrphanAge = TimeSpan.FromMinutes(10);
     private static long _tmpCounter;
 
     private readonly Dictionary<string, Bundle> _bundles = new(StringComparer.Ordinal);
@@ -33,6 +44,56 @@ internal sealed unsafe class WorldStore
     private bool _closed;  // a hosted world closed and the next one has not loaded: nothing here belongs to any world yet
     private uint _loadedRevision, _loadedUnix;
     private int _commits;
+
+    /// <summary>The world session the writer's jobs belong to: a load and a world close start a new one, so what the writer
+    /// knows of one session (the generation it confirmed last, the newest one forced to disk) never counts in another.
+    /// Unique in the process (tests make stores of their own; they share the one writer).</summary>
+    private int _epoch = Interlocked.Increment(ref _epochs);
+    private static int _epochs;
+
+    /// <summary>Generations this session staged (tick thread). A confirmation of a generation not among them stages it
+    /// first, late: the save began before Kiln.Saves was started.</summary>
+    private readonly HashSet<uint> _stagedGens = [];
+
+    /// <summary>Writes every file of the save path, off the tick thread (one writer for the process).</summary>
+    internal SaveWriter Writer => SaveWriter.Shared;
+
+    /// <summary>The load of the open world could not read its folder (the writer was still busy with it after
+    /// <see cref="SaveWriter.DrainLimit"/>): its revision and file time, to read it later (<see cref="RetryLoad"/>).</summary>
+    private (uint Revision, uint Unix)? _deferred;
+
+    /// <summary>The game has loaded this world (its matching starts when the data is read).</summary>
+    private bool _matching;
+
+    /// <summary>The world's mod data is not read yet (review 2): it is unavailable, and nothing is saved over it.</summary>
+    internal bool LoadDeferred => _deferred != null;
+
+    /// <summary>Reads a deferred load once the writer is idle (the pump, about once a second, and the game's load). True
+    /// when it was read now; the caller then tells mods (WorldLoadedEvent).</summary>
+    internal bool RetryLoad()
+    {
+        if (_deferred is not { } d || !Writer.Idle) return false;
+        Load(d.Revision, d.Unix);
+        if (_deferred != null) return false;
+        if (_matching)
+        {
+            Entities.StartMatching();
+            Instances.StartMatching();
+        }
+        SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: world {WorldId}: mod data read now that the writer is done: generation {Generation} ({Match})");
+        return true;
+    }
+
+    /// <summary>Files <see cref="WriteAtomic(string, byte[])"/> wrote in this process, and of them the ones forced to disk
+    /// (tests count the writes and the forced writes of a save).</summary>
+    internal static long FilesWritten, FilesForced;
+
+    /// <summary>Test seam: called before every file operation of the save path and of a load (<c>check</c>, <c>create</c>,
+    /// <c>flush</c>, <c>rename</c>, <c>read</c>, <c>delete</c>, <c>list</c>, <c>folder</c>) with its name, on the thread that does it. Tests slow the
+    /// disk with it (issue #39: on a busy hard drive each of these can take seconds).</summary>
+    internal static Action<string>? IoHook;
+
+    internal static void Io(string op) => IoHook?.Invoke(op);
 
     internal readonly EntityTable Entities;
 
@@ -97,6 +158,7 @@ internal sealed unsafe class WorldStore
         if (id == null)
         {
             SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: new world (no file yet); mod data is kept in memory until the first save");
+            _deferred = null;
             Entities.StartMatching();
             Instances.StartMatching();
             return;
@@ -113,10 +175,14 @@ internal sealed unsafe class WorldStore
             DetachAll();
             Open(id, revision, unix);
         }
+        _matching = true;
+        if (_deferred != null && RetryLoad()) return;  // the writer may have finished since: read it now (it starts the matching)
         Entities.StartMatching();
         Instances.StartMatching();
         SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: world {WorldId} revision {revision} loaded by the game; mod data " +
-                                        $"generation {Generation} ({Match}), {_bundles.Count} bundles, {Entities.Summary}, {Instances.Summary}");
+                                        (_deferred != null
+                                            ? "not read yet (Kiln.Saves' writer is still busy with this folder): unavailable until it is"
+                                            : $"generation {Generation} ({Match}), {_bundles.Count} bundles, {Entities.Summary}, {Instances.Summary}"));
     }
 
     /// <summary>A new world got its id with its first save.</summary>
@@ -140,12 +206,18 @@ internal sealed unsafe class WorldStore
     /// late write still reports stays staged, and the load finds it.</summary>
     public void CloseWorld()
     {
+        // The closed world's last files (its shutdown save's confirmation) are written before anything else can open a
+        // world, the same one included, and before a process that quits after the close ends (bounded, logged).
+        Writer.Drain("closing the world");
         DetachAll();
         WorldId = null;
         Root = null;
         Generation = 0;
         Match = DataMatch.None;
         _loadedRevision = _loadedUnix = 0;
+        _deferred = null;
+        _matching = false;
+        NewSession();
         _opened = false;
         _closed = true;
         WorldConfigs.Announce(null);
@@ -156,6 +228,7 @@ internal sealed unsafe class WorldStore
         _bundles.Clear();
         Entities.Clear();
         Instances.Clear();
+        ServiceEntityData.RaiseWorldChanged();  // services drop what they keep per entity id (Kiln.World's waiting scales)
     }
 
     /// <summary>Test kit (SavesRuntime.EndSession): after <see cref="CloseWorld"/>, the next world opens as in a fresh process.</summary>
@@ -166,40 +239,77 @@ internal sealed unsafe class WorldStore
         Instances.EndSession();
     }
 
+    /// <summary>What this session knew about its stagings and confirmations goes: the writer starts its next job in a new
+    /// session (it reads <see cref="_epoch"/> from the job).</summary>
+    private void NewSession()
+    {
+        _epoch = Interlocked.Increment(ref _epochs);
+        _stagedGens.Clear();
+    }
+
     private void Load(uint revision, uint unix)
     {
         _loadedRevision = revision;
         _loadedUnix = unix;
+        NewSession();
         DetachAll();
         var dir = Path.Combine(Root!, "manifests");
-        var all = ListManifests(dir);
-        var order = new List<(ManifestName m, DataMatch match)>();
-        foreach (var m in all.Where(m => !m.Pending && m.Revision == revision && (unix == 0 || m.Unix == unix)).OrderByDescending(m => m.Unix))
-            order.Add((m, DataMatch.Exact));
-        foreach (var m in all.Where(m => m.Pending && m.Revision == revision)) order.Add((m, DataMatch.Staged));
-        foreach (var m in all.Where(m => !m.Pending && m.Revision < revision).OrderByDescending(m => m.Revision).ThenByDescending(m => m.Unix))
-            order.Add((m, DataMatch.Older));
-        foreach (var (m, match) in order)
+        // One stable read (review 1): only once the writer has every file it was handed on disk, and with nothing written
+        // while it reads, so a confirmation that is still being written cannot make it take an older generation.
+        if (!Writer.TryExclusive("loading mod data", SaveWriter.DrainLimit, () =>
         {
-            if (!TryLoadManifest(m.Path, out var bundles, out var error))
+            Io("list");
+            var all = ListManifests(dir);
+            var order = new List<(ManifestName m, DataMatch match)>();
+            foreach (var m in all.Where(m => !m.Pending && m.Revision == revision && (unix == 0 || m.Unix == unix)).OrderByDescending(m => m.Unix))
+                order.Add((m, DataMatch.Exact));
+            foreach (var m in all.Where(m => m.Pending && m.Revision == revision)) order.Add((m, DataMatch.Staged));
+            foreach (var m in all.Where(m => !m.Pending && m.Revision < revision).OrderByDescending(m => m.Revision).ThenByDescending(m => m.Unix))
+                order.Add((m, DataMatch.Older));
+            var unusable = new List<string>();
+            foreach (var (m, match) in order)
             {
-                SavesRuntime.Log(LogLevel.Error, $"Kiln.Saves: manifest {Path.GetFileName(m.Path)} is unusable ({error}); trying an older one");
-                continue;
+                if (!TryLoadManifest(m.Path, out var bundles, out var error))
+                {
+                    unusable.Add($"Kiln.Saves: manifest {Path.GetFileName(m.Path)} is unusable ({error}); trying an older one");
+                    continue;
+                }
+                return (Manifest: (ManifestName?)m, Match: match, Bundles: bundles, Newer: all.Any(x => x.Revision > m.Revision), Count: all.Count, Unusable: unusable);
             }
-            foreach (var (scope, doc) in bundles) Absorb(scope, doc);
-            Generation = m.Revision;
-            Match = match;
-            Instances.OnLoaded(m.Revision, match);
-            var level = match == DataMatch.Older ? LogLevel.Warn : LogLevel.Info;
-            SavesRuntime.Log(level, $"Kiln.Saves: world {WorldId} file revision {revision}: mod data generation {m.Revision} " +
-                                    $"({match}{(match == DataMatch.Older ? ": the world file is newer than Kiln's data" : "")}, " +
-                                    $"{Path.GetFileName(m.Path)}, {bundles.Count} bundles)");
+            return (Manifest: null, Match: DataMatch.None, Bundles: new List<(string, JsonObject)>(), Newer: all.Count > 0, Count: all.Count, Unusable: unusable);
+        }, out var found))
+        {
+            // Review 2: the writer is still busy with this folder (a disk that does not answer). Reading it now could take an
+            // older generation; waiting longer would hold the tick thread. So the load is deferred: no mod data until it can
+            // be read (Saves.WorldDataReady is false, as for a hosted world before its load), nothing staged or confirmed
+            // over it, and the pump reads it as soon as the writer is idle (RetryLoad), then WorldLoadedEvent goes.
+            _deferred = (revision, unix);
+            Generation = 0;
+            Match = DataMatch.None;
+            Instances.OnLoaded(0, DataMatch.None, true);
+            SavesRuntime.Log(LogLevel.Warn, $"Kiln.Saves: world {WorldId} file revision {revision}: mod data not read yet: Kiln.Saves' writer " +
+                                            "has not finished this folder's files; until it has, the world's mod data is unavailable " +
+                                            "(Saves.WorldDataReady is false), nothing is saved over it, and it is read as soon as the writer is done");
+            return;
+        }
+        _deferred = null;
+        foreach (var line in found.Unusable) SavesRuntime.Log(LogLevel.Error, line);
+        if (found.Manifest is { } chosen)
+        {
+            foreach (var (scope, doc) in found.Bundles) Absorb(scope, doc);
+            Generation = chosen.Revision;
+            Match = found.Match;
+            Instances.OnLoaded(chosen.Revision, found.Match, found.Newer);
+            var level = found.Match == DataMatch.Older ? LogLevel.Warn : LogLevel.Info;
+            SavesRuntime.Log(level, $"Kiln.Saves: world {WorldId} file revision {revision}: mod data generation {chosen.Revision} " +
+                                    $"({found.Match}{(found.Match == DataMatch.Older ? ": the world file is newer than Kiln's data" : "")}, " +
+                                    $"{Path.GetFileName(chosen.Path)}, {found.Bundles.Count} bundles)");
             return;
         }
         Generation = 0;
         Match = DataMatch.None;
-        Instances.OnLoaded(0, DataMatch.None);
-        SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: world {WorldId} file revision {revision}: no mod data yet ({all.Count} manifests, none usable)");
+        Instances.OnLoaded(0, DataMatch.None, found.Newer);
+        SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: world {WorldId} file revision {revision}: no mod data yet ({found.Count} manifests, none usable)");
     }
 
     private bool TryLoadManifest(string path, out List<(string scope, JsonObject doc)> bundles, out string error)
@@ -208,11 +318,13 @@ internal sealed unsafe class WorldStore
         error = "";
         try
         {
+            Io("read");
             var man = JsonNode.Parse(File.ReadAllBytes(path))?.AsObject() ?? throw new InvalidDataException("empty");
             if (man["bundles"] is not JsonObject list) return true;
             foreach (var (scope, entry) in list)
             {
                 var sha = entry?["sha256"]?.GetValue<string>() ?? throw new InvalidDataException($"{scope}: no sha256");
+                Io("read");
                 var bytes = File.ReadAllBytes(BlobPath(sha));
                 var actual = Convert.ToHexStringLower(SHA256.HashData(bytes));
                 if (actual != sha) throw new InvalidDataException($"{scope}: blob {sha[..12]} has sha256 {actual[..12]}");
@@ -378,9 +490,11 @@ internal sealed unsafe class WorldStore
 
     // ---- staging / commit ----
 
-    /// <summary>Writes every bundle (new blobs only) and the pending manifest of generation <paramref name="gen"/>.
-    /// Tick thread, right after the WorldSaving handlers (<paramref name="snapshot"/> false), and again at the snapshot
-    /// staging (<paramref name="snapshot"/> true).</summary>
+    /// <summary>Captures generation <paramref name="gen"/>: every bundle serialized, in memory, and hands it to the
+    /// <see cref="Writer"/>, which writes its new blobs and its pending manifest off this thread (since 0.2.0-dev.29.3;
+    /// before, the tick thread wrote them here). Tick thread, right after the WorldSaving handlers (<paramref name="snapshot"/>
+    /// false), and again at the snapshot staging (<paramref name="snapshot"/> true). The game's world write waits until
+    /// the writer has it on disk (kiln.saves' stage barrier); without the barrier this thread writes it, as before.</summary>
     public void Stage(uint gen, SaveReason reason, bool late, bool snapshot = false)
     {
         EnsureOpen();
@@ -394,55 +508,57 @@ internal sealed unsafe class WorldStore
             SavesRuntime.Log(LogLevel.Warn, "Kiln.Saves: the save's revision is unknown; mod data not written");
             return;
         }
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        var entries = new SortedDictionary<string, (string sha, int size)>(StringComparer.Ordinal);
-        int fresh = 0;
-        long bytes = 0;
+        if (_deferred != null)
+        {
+            // Not read yet (review 2): an empty store must never be staged over the data on disk. The world file of this
+            // save gets no generation of its own; loading it takes the newest one on disk, which is the data this world had.
+            SavesRuntime.Log(LogLevel.Warn, $"Kiln.Saves: generation {gen} not staged: this world's mod data is not read yet (the writer is still busy)");
+            return;
+        }
+        var t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        var bundles = new List<(string Scope, byte[] Data)>();
         foreach (var b in _bundles.Values)
         {
             if (b.Keys.Count == 0) continue;
-            var opts = _json.GetValueOrDefault(b.Mod);
-            var data = Serialize(b, opts);
-            Put(b.Scope, data, entries, ref fresh, ref bytes);
+            bundles.Add((b.Scope, Serialize(b, _json.GetValueOrDefault(b.Mod))));
         }
-        foreach (var (mod, data) in Entities.Stage(_json))
-            Put("entity/" + mod, data, entries, ref fresh, ref bytes);
+        ServiceEntityData.RaiseStaging();  // Kiln services refresh their values on entities (Kiln.World's transform scale)
+        foreach (var (mod, data) in Entities.Stage(_json)) bundles.Add(("entity/" + mod, data));
         // Settled: nothing simulates between this read and the game's snapshot (the snapshot staging, a shutdown save).
-        foreach (var (scope, data) in Instances.Stage(gen, _json, settled: !late && (snapshot || reason == SaveReason.Shutdown)))
-            Put(scope, data, entries, ref fresh, ref bytes);
-        var man = new JsonObject
+        bundles.AddRange(Instances.Stage(gen, _json, settled: !late && (snapshot || reason == SaveReason.Shutdown)));
+        var job = new SaveWriter.StageJob
         {
-            ["format"] = 1,
-            ["world"] = WorldId,
-            ["revision"] = gen,
-            ["state"] = "pending",
-            ["reason"] = Saves.Text(reason),
-            ["late"] = late,
-            ["createdUnixMs"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            ["kiln"] = Game.KilnVersion,
+            Epoch = _epoch, Root = Root, WorldId = WorldId, Gen = gen, Reason = reason, Late = late, Snapshot = snapshot,
+            Bundles = bundles, CreatedUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Kiln = Game.KilnVersion,
         };
-        var list = new JsonObject();
-        foreach (var (scope, (sha, size)) in entries) list[scope] = new JsonObject { ["sha256"] = sha, ["size"] = size };
-        man["bundles"] = list;
-        WriteAtomic(PendingPath(gen), Encoding.UTF8.GetBytes(man.ToJsonString()));
+        job.TickMs = System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
+        _stagedGens.Add(gen);
         Generation = gen;
-        SavesRuntime.Log(late ? LogLevel.Warn : LogLevel.Debug,
-            $"Kiln.Saves: staged mod data generation {gen} ({Saves.Text(reason)}{(late ? ", late: after the world write" : "")}): " +
-            $"{entries.Count} bundles, {fresh} new blobs ({bytes} bytes) in {sw.Elapsed.TotalMilliseconds:F1} ms");
+        Writer.Stage(job);
     }
 
-    private void Put(string scope, byte[] data, SortedDictionary<string, (string, int)> entries, ref int fresh, ref long bytes)
+    /// <summary>A manifest's bundle list in one fixed form (scope, sha256, size; ordinal by scope), to compare two manifests.</summary>
+    internal static string BundlesKey(JsonObject? list)
     {
-        var sha = Convert.ToHexStringLower(SHA256.HashData(data));
-        var path = BlobPath(sha);
-        if (!File.Exists(path))
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            WriteAtomic(path, data);
-            fresh++;
-            bytes += data.Length;
-        }
-        entries[scope] = (sha, data.Length);
+        if (list == null) return "";
+        var sb = new StringBuilder();
+        foreach (var (scope, e) in list.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+            sb.Append(scope).Append('\n').Append(e?["sha256"]?.GetValue<string>()).Append('\n').Append(e?["size"]?.ToJsonString()).Append('\n');
+        return sb.ToString();
+    }
+
+    /// <summary>A staging or a commit that takes longer than this logs at Info, not Debug (issue #39: on a hard drive a
+    /// forced write held the server for seconds at each autosave, and only a debug log said so).</summary>
+    internal static double SlowMs = 250;
+
+    internal static LogLevel TimingLevel(double ms) => ms > SlowMs ? LogLevel.Info : LogLevel.Debug;
+
+    /// <summary>What a pending manifest says apart from its creation time.</summary>
+    internal static string ManifestContent(JsonObject man)
+    {
+        var copy = (JsonObject)man.DeepClone();
+        copy.Remove("createdUnixMs");
+        return copy.ToJsonString();
     }
 
     private static byte[] Serialize(Bundle b, JsonSerializerOptions? opts)
@@ -477,72 +593,118 @@ internal sealed unsafe class WorldStore
         return ms.ToArray();
     }
 
-    /// <summary>The world file of generation <paramref name="rev"/> is complete: confirm the staged manifest.</summary>
+    /// <summary>The world file of generation <paramref name="rev"/> is complete: the <see cref="Writer"/> confirms the
+    /// staged manifest (and prunes, at the 1st, 11th, 21st... confirmation of the process) off this thread. Tick thread.
+    /// The shutdown save's confirmation waits for the writer (bounded): the process ends soon after it.</summary>
     public void Commit(uint rev, uint unix, SaveReason reason)
     {
         EnsureOpen();
-        if (Root == null || rev == 0) return;
-        if (unix == 0 && ReadHeader(SavesRuntime.WorldFile) is { } h && h.Revision == rev) unix = h.Unix;
-        var pending = PendingPath(rev);
-        if (!File.Exists(pending)) Stage(rev, reason, late: true);  // the save began before Kiln.Saves was started
-        if (!File.Exists(pending)) return;
-        try
+        if (Root == null || rev == 0 || _deferred != null) return;
+        var t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (!_stagedGens.Contains(rev)) Stage(rev, reason, late: true);  // the save began before Kiln.Saves was started
+        if (Root == null || !_stagedGens.Contains(rev)) return;
+        _stagedGens.RemoveWhere(g => g <= rev);
+        var job = new SaveWriter.CommitJob
         {
-            var man = JsonNode.Parse(File.ReadAllBytes(pending))!.AsObject();
-            man["state"] = "committed";
-            man["worldUnix"] = unix;
-            man["committedUnixMs"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            WriteAtomic(CommittedPath(rev, unix), Encoding.UTF8.GetBytes(man.ToJsonString()));
-            File.Delete(pending);
-        }
-        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
-        {
-            SavesRuntime.Log(LogLevel.Error, $"Kiln.Saves: confirming generation {rev} failed: {e.Message} (it stays staged; loading still finds it)");
-            return;
-        }
+            Epoch = _epoch, Root = Root, WorldId = WorldId, Rev = rev, Unix = unix, Reason = reason, Prune = ++_commits % 10 == 1,
+            WorldFile = unix == 0 ? SavesRuntime.WorldFile : null,
+        };
+        // Every confirmation carries the save folder: a pruning that stopped for a staging runs again at the next one, and
+        // it keeps the generations of the game's backups only when it can see them (review 1). A native path, no disk.
+        job.SaveDir = Saves.SaveDirectory;
         Generation = rev;
         Match = DataMatch.Exact;
         _loadedRevision = rev;
-        _loadedUnix = unix;
-        if (++_commits % 10 == 1) Prune();
+        if (unix != 0) _loadedUnix = unix;
+        job.TickMs = System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
+        Writer.Commit(job);
+        if (reason == SaveReason.Shutdown) Writer.Drain("the shutdown save");
     }
 
     // ---- files ----
     internal readonly record struct ManifestName(string Path, uint Revision, uint Unix, bool Pending);
 
-    internal static List<ManifestName> ListManifests(string dir)
+    internal static List<ManifestName> ListManifests(string dir) => ListManifestFiles(dir).Select(m => m.Name).ToList();
+
+    /// <summary>The manifests with each file's size and last write time, from the one listing (pruning keeps what it read of a
+    /// manifest per version of the file).</summary>
+    internal static List<(ManifestName Name, long Size, DateTime Written)> ListManifestFiles(string dir)
     {
-        var list = new List<ManifestName>();
-        if (!Directory.Exists(dir)) return list;
-        foreach (var f in Directory.EnumerateFiles(dir, "*.json"))
+        var list = new List<(ManifestName, long, DateTime)>();
+        var folder = new DirectoryInfo(dir);
+        if (!folder.Exists) return list;
+        foreach (var info in folder.EnumerateFiles("*.json"))
         {
+            var f = System.IO.Path.Combine(dir, info.Name);
             var n = System.IO.Path.GetFileNameWithoutExtension(f);
             if (n.EndsWith(".pending", StringComparison.Ordinal))
             {
-                if (uint.TryParse(n[..^8], out var r)) list.Add(new ManifestName(f, r, 0, true));
+                if (uint.TryParse(n[..^8], out var r)) list.Add((new ManifestName(f, r, 0, true), info.Length, info.LastWriteTimeUtc));
                 continue;
             }
             var dash = n.IndexOf('-');
             if (dash > 0 && uint.TryParse(n[..dash], out var rev) && uint.TryParse(n[(dash + 1)..], out var unix))
-                list.Add(new ManifestName(f, rev, unix, false));
+                list.Add((new ManifestName(f, rev, unix, false), info.Length, info.LastWriteTimeUtc));
         }
         return list;
     }
 
-    private string PendingPath(uint rev) => Path.Combine(Root!, "manifests", $"{rev:D10}.pending.json");
-    private string CommittedPath(uint rev, uint unix) => Path.Combine(Root!, "manifests", $"{rev:D10}-{unix}.json");
-    internal string BlobPath(string sha) => Path.Combine(Root!, "blobs", sha[..2], sha + ".json");
+    internal static string PendingPath(string root, uint rev) => Path.Combine(root, "manifests", $"{rev:D10}.pending.json");
+    internal static string CommittedPath(string root, uint rev, uint unix) => Path.Combine(root, "manifests", $"{rev:D10}-{unix}.json");
+    internal static string BlobPath(string root, string sha) => Path.Combine(root, "blobs", sha[..2], sha + ".json");
+    private string CommittedPath(uint rev, uint unix) => CommittedPath(Root!, rev, unix);
+    internal string BlobPath(string sha) => BlobPath(Root!, sha);
 
     internal static void WriteAtomic(string path, byte[] data)
     {
-        var tmp = $"{path}.tmp-{Environment.ProcessId}-{Interlocked.Increment(ref _tmpCounter)}";
-        using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16))
-        {
-            fs.Write(data);
-            fs.Flush(flushToDisk: true);
-        }
-        File.Move(tmp, path, overwrite: true);
+        var disk = new DiskTime();
+        WriteAtomic(path, data, ref disk);
     }
+
+    /// <summary>Writes <paramref name="data"/> to a temp name, forces it to disk (unless <paramref name="force"/> is false:
+    /// only an unchanged generation's pending manifest and confirmation, see the class remarks) and renames it into place;
+    /// each step's time goes into <paramref name="disk"/>.</summary>
+    internal static void WriteAtomic(string path, byte[] data, ref DiskTime disk, bool force = true)
+    {
+        var tmp = $"{path}.tmp-{Environment.ProcessId}-{Interlocked.Increment(ref _tmpCounter)}";
+        var t = System.Diagnostics.Stopwatch.GetTimestamp();
+        Io("create");
+        var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16);
+        disk.CreateMs += Since(t);
+        try
+        {
+            t = System.Diagnostics.Stopwatch.GetTimestamp();
+            fs.Write(data);
+            fs.Flush(flushToDisk: false);  // to the system
+            disk.WriteMs += Since(t);
+            if (force)
+            {
+                t = System.Diagnostics.Stopwatch.GetTimestamp();
+                Io("flush");
+                fs.Flush(flushToDisk: true);
+                disk.FlushMs += Since(t);
+                Interlocked.Increment(ref FilesForced);
+            }
+            else
+            {
+                disk.Unforced++;
+            }
+        }
+        finally
+        {
+            t = System.Diagnostics.Stopwatch.GetTimestamp();
+            fs.Dispose();
+            disk.CloseMs += Since(t);
+        }
+        t = System.Diagnostics.Stopwatch.GetTimestamp();
+        Io("rename");
+        File.Move(tmp, path, overwrite: true);
+        disk.RenameMs += Since(t);
+        disk.Files++;
+        Interlocked.Increment(ref FilesWritten);
+    }
+
+    private static double Since(long t) => System.Diagnostics.Stopwatch.GetElapsedTime(t).TotalMilliseconds;
 
     internal readonly record struct Header(Guid Guid, uint Revision, uint Unix);
 
@@ -551,6 +713,7 @@ internal sealed unsafe class WorldStore
         if (file == null) return null;
         try
         {
+            Io("read");
             using var f = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             Span<byte> b = stackalloc byte[0x24];
             if (f.Read(b) != b.Length || b[0] != (byte)'S' || b[1] != (byte)'V' || b[2] != (byte)'2' || b[3] != (byte)'C') return null;
@@ -562,77 +725,30 @@ internal sealed unsafe class WorldStore
         }
     }
 
-    /// <summary>Drops manifests no world file needs any more, then blobs no kept manifest names.</summary>
-    internal void Prune()
-    {
-        if (Root == null) return;
-        try
-        {
-            var dir = Path.Combine(Root, "manifests");
-            var all = ListManifests(dir);
-            var keep = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var m in all.Where(m => !m.Pending).OrderByDescending(m => m.Revision).Take(KeepGenerations)) keep.Add(m.Path);
-            var wanted = new HashSet<(uint, uint)>();
-            if (Saves.SaveDirectory is { } sd && Directory.Exists(sd))
-            {
-                foreach (var f in Directory.EnumerateFiles(sd, "world*.ksd").Concat(
-                             Directory.Exists(Path.Combine(sd, "backup")) ? Directory.EnumerateFiles(Path.Combine(sd, "backup")) : []))
-                    if (ReadHeader(f) is { } h && h.Guid.ToString() == WorldId) wanted.Add((h.Revision, h.Unix));
-            }
-            foreach (var m in all.Where(m => !m.Pending && wanted.Contains((m.Revision, m.Unix)))) keep.Add(m.Path);
-            var newest = all.Where(m => !m.Pending).Select(m => m.Revision).DefaultIfEmpty(0u).Max();
-            foreach (var m in all.Where(m => m.Pending && m.Revision > newest)) keep.Add(m.Path);
-            int dropped = 0, blobsDropped = 0;
-            foreach (var m in all.Where(m => !keep.Contains(m.Path)))
-            {
-                File.Delete(m.Path);
-                dropped++;
-            }
-            var referenced = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var p in keep)
-            {
-                try
-                {
-                    if (JsonNode.Parse(File.ReadAllBytes(p))?["bundles"] is JsonObject list)
-                        foreach (var (_, e) in list)
-                            if (e?["sha256"]?.GetValue<string>() is { } sha) referenced.Add(sha);
-                }
-                catch (Exception e) when (e is IOException or JsonException)
-                {
-                    return;  // unsure what is referenced: keep every blob
-                }
-            }
-            var cutoff = DateTime.UtcNow - OrphanAge;
-            foreach (var f in Directory.EnumerateFiles(Path.Combine(Root, "blobs"), "*", SearchOption.AllDirectories))
-            {
-                var name = Path.GetFileName(f);
-                var tmp = name.Contains(".tmp-", StringComparison.Ordinal);
-                var sha = tmp ? "" : Path.GetFileNameWithoutExtension(name);
-                if ((tmp || !referenced.Contains(sha)) && File.GetLastWriteTimeUtc(f) < cutoff)
-                {
-                    File.Delete(f);
-                    blobsDropped++;
-                }
-            }
-            foreach (var f in Directory.EnumerateFiles(dir, "*.tmp-*"))
-                if (File.GetLastWriteTimeUtc(f) < cutoff) File.Delete(f);
-            if (dropped + blobsDropped > 0)
-                SavesRuntime.Log(LogLevel.Debug, $"Kiln.Saves: pruned {dropped} manifests and {blobsDropped} blobs; {keep.Count} manifests kept");
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            SavesRuntime.Log(LogLevel.Warn, $"Kiln.Saves: pruning the sidecar failed: {e.Message}");
-        }
-    }
-
-    /// <summary>The committed manifest of (revision, world time), for backups.</summary>
-    internal string? CommittedManifest(uint rev, uint unix)
+    /// <summary>The manifest of generation <paramref name="rev"/> a backup carries: its confirmation of that world file time,
+    /// else another confirmation of the revision, else its pending manifest (the same generation, when its confirmation
+    /// could not be written; a restore loads it as staged). Only one that reads and names blobs that are all there.</summary>
+    internal string? UsableManifest(uint rev, uint unix)
     {
         if (Root == null) return null;
-        var p = CommittedPath(rev, unix);
-        if (File.Exists(p)) return p;
-        return ListManifests(Path.Combine(Root, "manifests")).Where(m => !m.Pending && m.Revision == rev)
-            .OrderByDescending(m => m.Unix).Select(m => m.Path).FirstOrDefault();
+        var exact = CommittedPath(rev, unix);
+        var candidates = new List<string> { exact };
+        candidates.AddRange(ListManifests(Path.Combine(Root, "manifests")).Where(m => !m.Pending && m.Revision == rev && m.Path != exact)
+            .OrderByDescending(m => m.Unix).Select(m => m.Path));
+        candidates.Add(PendingPath(Root, rev));
+        foreach (var p in candidates)
+        {
+            try
+            {
+                if (!File.Exists(p) || JsonNode.Parse(File.ReadAllBytes(p))?["bundles"] is not JsonObject list) continue;
+                if (list.All(kv => kv.Value?["sha256"]?.GetValue<string>() is { } sha && File.Exists(BlobPath(sha)))) return p;
+            }
+            catch (Exception e) when (e is IOException or JsonException or InvalidOperationException or UnauthorizedAccessException)
+            {
+                // not usable: the next one
+            }
+        }
+        return null;
     }
 
     internal IEnumerable<string> BlobsOf(string manifest)

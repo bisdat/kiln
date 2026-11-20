@@ -1,7 +1,7 @@
-# EMF API parity (EmfApi v40)
+# EMF API parity (EmfApi v46)
 
 kiln-emf (`native/plugins/emf`) hands every EMF mod an `EmfApi` table built on Kiln's services. This page lists
-every function of EMF 0.6.8's C API (v40, 135 functions, `sdk/include/emf/emf_api.h`) and every function of its Lua
+every function of EMF 0.6.14's C API (v46, 142 functions, `sdk/include/emf/emf_api.h`; v41, v42 and v45 added none) and every function of its Lua
 API (`docs/modding/lua.md`), with the Kiln service behind it, the nearest Kiln C# API, and the status.
 
 - **full**: behaves as EMF documents. **partial**: the difference is in the row. **not yet**: Kiln does not carry
@@ -11,9 +11,10 @@ API (`docs/modding/lua.md`), with the Kiln service behind it, the nearest Kiln C
 - **tested**: `probe` = the conformance probe (`mods/tests/emf-test/probe`, lab server), `host` = host test
   (`native/plugins/emf/tests/run.sh`), `client` = only a joined player can show it (client checklist in
   [emf.md](emf.md)), `lab-mod` = a shipped EMF mod uses it in the lab check (`tools/emf/lab-check.py`).
-- Counts: **76 full, 17 partial, 42 not yet out of 135.** The v27 prefix has 90 slots (75 full, 15 partial). v28 to
+- Counts: **76 full, 17 partial, 49 not yet out of 142.** The v27 prefix has 90 slots (75 full, 15 partial). v28 to
   v40 append 45: one full (`world_to_screen`), two partial (`chat_tell_ex`, `chat_broadcast_ex`) and 42 not yet
-  ([the table below](#v28-to-v40-emf-063-to-068)). Counts are C table slots, not grouped rows or attribute constants.
+  ([the table below](#v28-to-v40-emf-063-to-068)). v43 to v46 append 7, all not yet
+  ([their table](#v43-to-v46-emf-0613-to-0614)). Counts are C table slots, not grouped rows or attribute constants.
   The two attribute slots remain partial because the XP/level ids use the queued progression path below. The four
   chat line slots are partial because a plain line (no `EMF_CHAT_SYSTEM`) shows without a speaker's name on Kiln and
   under the player's own name on EMF (counted as full until 0.2.0-dev.26; the behaviour did not change). Full means
@@ -27,18 +28,27 @@ a joined player's handshake, hidden chat, taming, portraits, UI or multiplayer b
 
 ## Version negotiation
 
-One table, `version = 40`, `size = sizeof(EmfApi) = 1088`. Slots are only appended (v22 at
+One table, `version = 46`, `size = sizeof(EmfApi) = 1144`. Slots are only appended (v22 at
 byte 592, v23 616, v24 624, v25 648, v26 672, v27 688, v28 728, v29 736, v30 752, v31 776, v32 808, v33 864, v34 920,
-v35 952, v36 992, v37 1000, v38 1016, v39 1040, v40 1064). Every earlier prefix is unchanged. A mod's `mod.json`
-`"emf": N` above 40 is refused ("needs EMF API vN"). Mods built with EMF's C++ SDK also check
+v35 952, v36 992, v37 1000, v38 1016, v39 1040, v40 1064; v41 and v42 appended nothing; v43 1088, v44 1096; v45
+appended nothing; v46 1120). Every earlier prefix is unchanged. A mod's `mod.json` `"emf": N` above 46 is refused
+("needs EMF API vN"). Mods built with EMF's C++ SDK also check
 `api->size >= sizeof(EmfApi)` of their own header and do not start on a smaller table, whatever they then call: this
-is why Kiln serves the whole v40 table although it does not carry every function yet. A mod built for EMF 0.6.3 or
-later, EMF's Lua host among them, did not start on Kiln's earlier 728-byte table. The table is a shared, immutable
-prefix-compatible view; it is not shrunk for an older mod.
+is why Kiln serves the whole table although it does not carry every function yet. A mod built for EMF 0.6.3 or
+later, EMF's Lua host among them, did not start on Kiln's earlier 728-byte table; one built for EMF 0.6.13 or 0.6.14
+(EMF 0.6.14's Lua host 1.39, Night Raids 1.2 and Villager Jobs 1.5.2 among them) did not start on the 1088-byte v42
+table ("this mod was built for EMF API v46; the core is v42"). `emf::has_v45()` goes by the version (v45 did not grow
+the table), so the table says 46. The table is a shared, immutable prefix-compatible view; it is not shrunk for an
+older mod.
 Structs passed in are read up to their `size` field (EMF's `api_sizes.h` rules): an `EmfUiWidget` array is walked by
 `widget_size` (44..4096 bytes, at most 256 widgets), and a v24/v25 mod's 56-byte widgets read `icon`, `fps` and
-`height` as 0. A v36 to v40 request (`EmfRemoveBuilding`, `EmfEnemyOrder`, `EmfMoveOrder`) whose `size` is smaller
-than EMF's minimum is refused untouched, as in EMF.
+`height` as 0. A v36 to v46 request (`EmfRemoveBuilding`, `EmfEnemyOrder`, `EmfMoveOrder` for `enemy_move` and
+`villager_move`, `EmfBreakBlocks`) whose `size` is smaller than EMF's minimum (144, 120, 128 and 160 bytes) is refused
+untouched, as in EMF. v41's `EmfMoveOrder.stuck_seconds` (136 bytes) and v42's
+`EmfPathResult.doors` (32 bytes) change nothing on Kiln: `enemy_move` refuses every order and `path_find` never answers
+(both not yet). Nor do v45's `EmfBlockInfo.world` (40 to 44 bytes) and `EMF_BREAK_WORLD`, or v46's
+`EmfMoveOrder.hold_seconds` (in `pad2`'s place, still 136 bytes) and `EMF_MOVE_HOLD`: `break_blocks` and
+`villager_move` refuse every request, `block_at` and `find_wall` answer false (all not yet).
 
 ## C API
 
@@ -54,13 +64,13 @@ than EMF's minimum is refused untouched, as in EMF.
 | `on_tick`, `run_on_world` (1) | Post of each world's step | `TickEvents` / `Scheduler` | full | probe |
 | `resolve`, `hook` (1) | EMF signature name → Kiln sigdb (`sigdb/symbols/*.d/emf.json`) | `Kiln.Hooks` | full | probe |
 | `hook_program` (1) | `kiln.types` runner pre/post callbacks | `GameSystems.Hook(name, before, after)` | full | host; server probe |
-| `register_program`, `register_program_def` (2/16) | `kiln.world` programs, server world | `Kiln.Api` ECS programs | partial: server world only | probe |
+| `register_program`, `register_program_def` (2/16) | `kiln.world` programs: server world; `EMF_WORLD_CLIENT` through `register_program_world` (since 0.2.0-dev.29, host tests only) | `Kiln.Api` ECS programs | partial: the client world is built and not yet run in a real game (guided check `programs.client-emf`); refused at the call on a dedicated server, as before | probe |
 | `spawn`, `destroy` (2) | `kiln.spawn` | `Kiln.Spawn` | full | probe |
 | `spawn_ex` (12) | `kiln.spawn` components copied into the spawn request | `SpawnOptions.Components`, `SpawnComponent.Of` | full | host; server probe |
 | `on_save`, `on_load` (2) | `kiln.saves` events | `Kiln.Saves` events | full | probe |
 | `emit_event` (3) | the game's emitter (as `kiln.gameplay`) | `Kiln.Gameplay` | full | probe |
 | `read_events` (3) | `kiln.world` programs v2, multiple event inputs | `Kiln.Api` ECS programs with multiple event inputs | full | host; server probe |
-| `on_event` (4) | one `kiln.world` program per event type | `Events.On<T>` (service events) | partial: server world only | probe |
+| `on_event` (4) | one `kiln.world` program per event type and world kind (`emf_ev_<Event>`, client world `emf_evc_<Event>`, delivered after that world's step on its thread) | `Events.On<T>` (service events) | partial: the client world is built and not yet run in a real game (guided check `programs.client-emf`) | probe |
 | `for_each_item`, `find_item`, `item_info` (5) | `kiln.items` catalog | `Kiln.Items` | full | probe |
 | `give_item` (5) | `kiln.spawn` pickup | `Kiln.Items` | full | probe |
 | `register_command`, `command_reply` (6) | players' chat (`kiln.chat`) + `emf/commands.txt` | `Kiln.Chat` commands | full | probe, lab-mod |
@@ -90,7 +100,7 @@ than EMF's minimum is refused untouched, as in EMF.
 | `player_level_set` (22) | `kiln.progression` SET_LEVEL + SET_EXPERIENCE | `PlayerProgression` | partial: level queued for the next server step, even in a world callback (EMF: at once there); nonzero XP is a second request after the level result (several steps later), suppressed if superseded or the session/level changed | probe (refusals), host |
 | `EMF_ATTR_XP_PENDING` / `_XP` / `_XP_REQUIRED` / `_LEVEL` (22) | `kiln.progression` get / ADD_EXPERIENCE | `PlayerProgression` | partial: pending XP is queued, at most 100,000,000 per call (`kiln.progression`); reads require the server thread | probe (refusals), host |
 | `change_component` (23) | kiln-emf's `emf_components` program on `kiln.world` (`queue_add` / `queue_remove`), EMF's list and queue | `Kiln.Api` ECS program `QueueAdd` / `QueueRemove` (low level) | full | probe, host |
-| `window_open`, `window_update`, `window_close` (24) | `kiln.ui` ImGui window, capture, keys | `UiWindow` | partial: plain ImGui look; left/right clicks implemented; refused on a dedicated server (as EMF) | probe (server refusal), host, client |
+| `window_open`, `window_update`, `window_close` (24) | `kiln.ui` ImGui window, capture, keys | `UiWindow` | partial: plain ImGui look; fixed width, content-following height capped at 85% of the frame (scrolls past it) on size-constraint-capable kiln.ui; older UI keeps appearing-only sizing; movable, appearing-only Kiln placement/settings retained rather than upstream pinning; left/right clicks implemented; refused on a dedicated server (as EMF) | probe (server refusal), host, client |
 | `spawn_offer` (25) | `kiln.spawn` + the offer below | `Offers.SpawnWithOffer` | partial: the prompt appears a step or two after the spawn | probe |
 | `offer`, `offer_remove` (25) | the three offer components through `emf_components`; `InteractionAcceptedEvent` listener | `Offers.Add/TryAdd/Remove` | full | probe (components), host, client (the prompt, the accept) |
 | `image_load` (26) | `kiln.ui` `image_load` (PNG frames), EMF's limits and paths; encoded files also limited to 64 MB | `UiImage` | partial: encoded-file limit in addition to EMF's decoded-pixel limit | host, client |
@@ -128,12 +138,29 @@ dedicated server.
 A mod that registers a callback through a function that is not carried and ignores the `false` runs without that
 feature and without an error of its own: the one log line and `state/emf.json` `unsupported` are where it shows.
 
+## v43 to v46 (EMF 0.6.13 to 0.6.14)
+
+EMF 0.6.13 (API v43) and 0.6.14 (v44 to v46) appended seven functions; v45 added none (`EmfBlockInfo.world` and the
+flag `EMF_BREAK_WORLD`: a break spares the world's own ruins). Kiln carries none of them yet: each gives the answer
+below as EMF documents it for a feature that is off, and logs once per mod and function as above. Host tests check
+every answer (`tests/glue_test.cpp`, `test_v46`); the probe has the same checks for a dedicated server, not run in a
+lab yet.
+
+| EMF function (since) | On Kiln | Status | Tested |
+|---|---|---|---|
+| `player_permissions` (43) | Answer: `false` and `*perms` 0, as for an entity that is no player. The game's own permissions (`EMF_PERM_*`) are not read; EMF's own admins (`EmfNetFrom.admin`, command senders) are not affected. | not yet | host; probe (not run yet) |
+| `break_blocks` (44) | Answer: 0 with `why` "not available on Kiln yet"; no callback, nothing is broken. `EMF_BREAK_WORLD` (45) gets the same answer. A request smaller than 160 bytes, or none, is refused untouched. | not yet | host; probe (not run yet) |
+| `block_at`, `find_wall` (44) | Answer: `false`; `*out` is not written (a v44 mod's 40-byte `EmfBlockInfo` and a v45 mod's 44-byte one alike). | not yet | host; probe (not run yet) |
+| `villager_move` (46) | Answer: 0 with `why` "not available on Kiln yet"; no callback. The same with `hold_seconds` or `EMF_MOVE_HOLD`. An order smaller than 128 bytes, or none, is refused untouched. | not yet | host; probe (not run yet) |
+| `villager_move_cancel`, `villager_moving` (46) | Answer: `false` / 0. | not yet | host; probe (not run yet) |
+
 ## Lua API (`emf.*`, run by EMF's `lua` mod on the C API)
 
 EMF's `lua` mod is an EMF DLL mod built on the public C API only, so every Lua function works on Kiln exactly as far
 as the C function under it does. Lua mods need EMF's `lua` mod in `emf/mods/lua/`. Unmodified Lua 1.19 (EMF 0.6.0,
 EMF's own DLL, dev.20) and Lua 1.33 (EMF 0.6.8, built from EMF's unchanged source for a lab) load on the v40 table and
-run EMF's Lua mods; their actual player-facing features still need the client checklist.
+run EMF's Lua mods; their actual player-facing features still need the client checklist. Lua 1.39 (EMF 0.6.14) is
+built against the v46 header and starts only on a 1144-byte table; it has not been run on Kiln yet.
 Lua 1.33 looks at the table's version and size before it uses a newer function, then at the function's answer: on
 Kiln the functions of the last rows below return what EMF's Lua guide documents for a feature that is off (`nil`,
 `false`, or `nil` and a reason).
@@ -144,7 +171,7 @@ Kiln the functions of the last rows below return what EMF's Lua guide documents 
 | `emf.notify`, `emf.hud` | `notify`, `hud_set` | partial (as C) |
 | `emf.on_tick` | `on_tick` | full |
 | `emf.bus.subscribe/publish/unsubscribe` | the Lua host itself (`run_on_world`) | full |
-| `emf.on_event`, `emf.emits`, `emf.emit` | `on_event`, `register_program_def`, `emit_event` | partial: server world only |
+| `emf.on_event`, `emf.emits`, `emf.emit` | `on_event`, `register_program_def`, `emit_event` | partial: the client world is built and not yet run in a real game |
 | `emf.command`, `emf.reply`, `emf.sender` | `register_command_ex`, `command_reply`, `command_sender` | full |
 | `emf.local_player`, `emf.session`, `emf.session_token`, `emf.time_of_day` | worlds, session, singleton | full |
 | `emf.on_world_data`, `emf.save_world_data` | `on_save` / `on_load` | full |
@@ -177,6 +204,9 @@ Kiln the functions of the last rows below return what EMF's Lua guide documents 
 | `emf.path_find`, `emf.path_cancel` | v37 | not yet |
 | `emf.door`, `emf.door_open`, `emf.door_close`, `emf.door_lock` | v38 | not yet |
 | `emf.enemy_order`, `emf.enemy_order_cancel`, `emf.enemy_target`, `emf.enemy_move`, `emf.enemy_move_cancel`, `emf.enemy_moving` | v39, v40 | not yet |
+| `world:permissions` (1.36) | v43 `player_permissions` | not yet |
+| `emf.break_blocks`, `emf.block_at`, `emf.find_wall` (1.37; a block's `world` and the break option `world`, 1.38) | v44, v45 | not yet |
+| `emf.villager_move`, `emf.villager_move_cancel`, `emf.villager_moving` (1.39) | v46 | not yet |
 
 ## Lifetime and host checks
 

@@ -27,12 +27,16 @@
 #include "../common.h"
 #include "../image.h"
 #include "../log.h"
+#include "../module_place.h"
 #include "../registry.h"
 #include "../sigdb.h"
 #include "../tick.h"
 #include "hooks_chain.h"
+#include "hooks_code.h"
+#include "hooks_patch_policy.h"
 #include "hooks_fingerprint.h"
 #include "hooks_internal.h"
+#include "hooks_modules.h"
 #include "service.h"
 #include "services/kiln_hooks.h"
 
@@ -47,6 +51,7 @@ struct Patch {
     KilnOwner owner = 0;
     uintptr_t addr = 0;
     std::vector<uint8_t> original;
+    uint64_t code_token = 0;
 };
 
 // Process lifetime, just like the installed detours.
@@ -163,27 +168,58 @@ KilnResult KILN_CALL h_read(uintptr_t addr, void* dst, size_t n) {
 
 KilnResult KILN_CALL h_write(uintptr_t addr, const void* src, size_t n) {
     if (!src || n == 0) return KILN_ERR_INVALID_ARGUMENT;
-    return poke(addr, src, n) ? KILN_OK : KILN_ERR_NOT_FOUND;
+    KILN_GUARD("write", KILN_ERR_INTERNAL, {
+        auto code_guard = code::registry().lock();
+        const bool ok = poke(addr, src, n);
+        code::registry().touch_locked();  // not a patch: its bytes stay unowned (FOREIGN); a failed copy may have changed some
+        return ok ? KILN_OK : KILN_ERR_NOT_FOUND;
+    });
+}
+
+code::Image code_image() {
+    const auto& i = image();
+    return {i.base, i.size, reinterpret_cast<uintptr_t>(i.text), i.text_size, &sigdb::file_bytes,
+        +[](uintptr_t a, uint8_t* out, size_t n) { return seh::copy(out, reinterpret_cast<const void*>(a), n); }};
+}
+KilnResult KILN_CALL h_read_original(uintptr_t address, void* out, size_t size) {
+    KILN_GUARD("read_original", KILN_ERR_INTERNAL, return code::read_original(code_image(), address, out, size););
+}
+KilnResult KILN_CALL h_code_state(uintptr_t address, size_t size, uint32_t* state, uint64_t* generation) {
+    KILN_GUARD("code_state", KILN_ERR_INTERNAL,
+               return code::registry().code_state(code_image(), address, size, state, generation););
 }
 
 KilnResult KILN_CALL h_patch(KilnOwner owner, uintptr_t addr, const void* bytes, size_t n, KilnHandle* out) {
     if (!bytes || n == 0 || n > 4096) return KILN_ERR_INVALID_ARGUMENT;
-    std::vector<uint8_t> original(n);
-    if (!seh::copy(original.data(), reinterpret_cast<const void*>(addr), n)) return KILN_ERR_NOT_FOUND;
-    if (!poke(addr, bytes, n)) return KILN_ERR_INTERNAL;
-    std::lock_guard lock(g_mutex);
-    const KilnHandle handle = g_next_handle.fetch_add(1);
-    patches().push_back(Patch{handle, owner, addr, std::move(original)});
-    if (out) *out = handle;
-    KLOG_I("hooks: patch %zu bytes at rva 0x%llx (handle %llu, owner %llu)", n,
-           static_cast<unsigned long long>(addr - image().base), static_cast<unsigned long long>(handle),
-           static_cast<unsigned long long>(owner));
-    return KILN_OK;
+    KILN_GUARD("patch", KILN_ERR_INTERNAL, {
+        std::vector<uint8_t> original(n), installed(n);
+        std::lock_guard lock(g_mutex);
+        auto code_guard = code::registry().lock();
+        if (!seh::copy(original.data(), reinterpret_cast<const void*>(addr), n)) return KILN_ERR_NOT_FOUND;
+        if (!seh::copy(installed.data(), bytes, n)) return KILN_ERR_INTERNAL;
+        // Everything that can fail to allocate is done before the bytes change.
+        if (patches().size() == patches().capacity())
+            patches().reserve(std::max<size_t>(1, patches().capacity() * 2));
+        const auto token = code::registry().add_locked(addr, original, installed, true);
+        if (!poke(addr, installed.data(), n)) {
+            code::registry().remove_locked(token);
+            return KILN_ERR_INTERNAL;
+        }
+        const KilnHandle handle = g_next_handle.fetch_add(1);
+        patches().push_back(Patch{handle, owner, addr, std::move(original), token});
+        if (out) *out = handle;
+        KLOG_I("hooks: patch %zu bytes at rva 0x%llx (handle %llu, owner %llu)", n,
+               static_cast<unsigned long long>(addr - image().base), static_cast<unsigned long long>(handle),
+               static_cast<unsigned long long>(owner));
+        return KILN_OK;
+    });
 }
 
 // restore + drop a patch; g_mutex held
 void restore_patch_locked(std::vector<Patch>::iterator it) {
+    auto code_guard = code::registry().lock();
     poke(it->addr, it->original.data(), it->original.size());
+    code::registry().remove_locked(it->code_token);
     patches().erase(it);
 }
 
@@ -195,8 +231,159 @@ KilnResult KILN_CALL h_unpatch(KilnHandle h) {
     return KILN_OK;
 }
 
+// ---- modules opened for hooks (open_module, since 0.2.0-dev.29.19) ----
+// A hook may go into the game's image, or into the executable sections of a module a caller opened: another mod's DLL
+// or a loader's DLL (Creative Mode's creative.dll under kiln-flame). An opened module is pinned (GetModuleHandleEx PIN):
+// the registry never removes a physical detour, so the code a detour was written into must outlive the process's
+// hooks. Process lifetime, like the detours.
+struct OpenModule {
+    std::string name;  // file name as loaded
+    uintptr_t base = 0;
+    modules::ModuleCode code;
+};
+std::mutex g_modules_mutex;  // opened(); never held across a loader call
+std::vector<OpenModule>& opened() {
+    static auto& v = *new std::vector<OpenModule>;
+    return v;
+}
+
+bool in_image(uintptr_t a) { return a >= image().base && a < image().base + image().size; }
+
+bool in_opened_code(uintptr_t a) {
+    std::lock_guard lock(g_modules_mutex);
+    for (const OpenModule& m : opened())
+        if (a >= m.base && modules::in_code(m.code, a - m.base)) return true;
+    return false;
+}
+
+// The module's file name, and in *path_text its file as the overlap lines name it (module_place.h).
+std::string module_file_name(HMODULE h, std::string* path_text = nullptr) {
+    wchar_t path[MAX_PATH];
+    const DWORD n = GetModuleFileNameW(h, path, MAX_PATH);
+    if (!n || n >= MAX_PATH) return {};
+    std::wstring w(path, n);
+    if (path_text) *path_text = module_path_text(to_utf8(w), u8(paths().game));
+    const size_t slash = w.find_last_of(L"\\/");
+    if (slash != std::wstring::npos) w.erase(0, slash + 1);
+    return to_utf8(w);
+}
+
+void fill_module(KilnHooksModule* out, uintptr_t base, const modules::ModuleCode& code, uint32_t flags) {
+    out->flags = flags;
+    out->base = base;
+    out->image_size = code.size_of_image;
+    out->code_lo = base + code.code.front().rva;
+    out->code_hi = out->code_lo;
+    for (const modules::CodeRange& r : code.code) {
+        out->code_lo = std::min<uintptr_t>(out->code_lo, base + r.rva);
+        out->code_hi = std::max<uintptr_t>(out->code_hi, base + r.rva + r.size);
+    }
+    out->code_sections = static_cast<uint32_t>(code.code.size());
+    out->reserved = 0;
+}
+
+KilnResult open_module(KilnOwner owner, const std::string& name, KilnHooksModule* out) {
+    // Our own reference while we look (given back below), so the module cannot unload under the checks. Never loads it.
+    HMODULE h = nullptr;
+    if (!GetModuleHandleExW(0, to_wide(name).c_str(), &h) || !h) return KILN_ERR_NOT_FOUND;
+    struct Ref {
+        HMODULE h;
+        ~Ref() { FreeLibrary(h); }
+    } ref{h};
+    const uintptr_t base = reinterpret_cast<uintptr_t>(h);
+    {
+        std::lock_guard lock(g_modules_mutex);
+        for (const OpenModule& m : opened())
+            if (m.base == base) return fill_module(out, base, m.code, KILN_HOOKS_MODULE_PINNED), KILN_OK;
+    }
+    uint8_t headers[4096];
+    modules::ModuleCode code;
+    std::string err;
+    if (!seh::copy(headers, reinterpret_cast<const void*>(base), sizeof headers) ||
+        !modules::parse_code(headers, sizeof headers, code, err)) {
+        KLOG_W("hooks: %s cannot be opened for hooks: %s", name.c_str(), err.empty() ? "its headers cannot be read" : err.c_str());
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    if (h == GetModuleHandleW(nullptr)) return fill_module(out, base, code, KILN_HOOKS_MODULE_GAME), KILN_OK;
+    std::string path_text;
+    const std::string file = module_file_name(h, &path_text);
+    HMODULE self = nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       reinterpret_cast<LPCWSTR>(&in_opened_code), &self);
+    if (h == self || modules::kiln_own_name(file)) {
+        KLOG_W("hooks: %s asked to open %s for hooks: Kiln's own modules are no hook targets (use their APIs)",
+               reg::owner_name(owner).c_str(), file.c_str());
+        return KILN_ERR_UNAVAILABLE;
+    }
+    HMODULE pinned = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                            reinterpret_cast<LPCWSTR>(base), &pinned) ||
+        pinned != h) {
+        KLOG_W("hooks: %s cannot be opened for hooks: pinning it failed (error %lu)", file.c_str(),
+               static_cast<unsigned long>(GetLastError()));
+        return KILN_ERR_UNAVAILABLE;
+    }
+    bool first = true;
+    {
+        std::lock_guard lock(g_modules_mutex);
+        for (const OpenModule& m : opened()) first = first && m.base != base;  // another thread opened it meanwhile
+        if (first) opened().push_back(OpenModule{file, base, code});
+    }
+    fill_module(out, base, code, KILN_HOOKS_MODULE_PINNED);
+    if (first)
+        KLOG_I("hooks: %s%s opened for hooks by %s: base 0x%llx, %u bytes, %u code section(s) at 0x%llx..0x%llx; pinned, it "
+               "stays loaded until the game exits",
+               file.c_str(), module_place_suffix(path_text).c_str(), reg::owner_name(owner).c_str(),
+               static_cast<unsigned long long>(base), code.size_of_image,
+               out->code_sections, static_cast<unsigned long long>(out->code_lo - base),
+               static_cast<unsigned long long>(out->code_hi - base));
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL h_open_module(KilnOwner owner, KilnStr name, KilnHooksModule* out) {
+    if (!out || out->size < sizeof(KilnHooksModule) || !name.ptr || name.len == 0 || name.len > 1024)
+        return KILN_ERR_INVALID_ARGUMENT;
+    KILN_GUARD("open_module", KILN_ERR_INTERNAL, return open_module(owner, std::string(sv(name)), out););
+}
+
+KilnResult KILN_CALL h_module_scan(uintptr_t module_base, KilnStr pattern, uintptr_t* out, uint32_t cap, uint32_t* count) {
+    if (count) *count = 0;
+    sigdb::Pattern p;
+    std::string err;
+    if (!sigdb::parse_pattern(sv(pattern), p, err)) return KILN_ERR_INVALID_ARGUMENT;
+    modules::ModuleCode code;
+    {
+        std::lock_guard lock(g_modules_mutex);
+        bool found = false;
+        for (const OpenModule& m : opened())
+            if (m.base == module_base) code = m.code, found = true;
+        if (!found) return KILN_ERR_INVALID_ARGUMENT;
+    }
+    KILN_GUARD("module_scan", KILN_ERR_INTERNAL, {
+        const size_t limit = cap ? size_t{cap} + 1 : 64u;
+        std::vector<uintptr_t> hits;
+        std::vector<uint8_t> bytes;
+        for (const modules::CodeRange& r : code.code) {
+            // The live bytes, a page at a time: a page that cannot be read stays zero (it matches no literal byte run).
+            bytes.assign(r.size, 0);
+            const uintptr_t at = module_base + r.rva;
+            for (size_t off = 0; off < r.size; off += 4096)
+                seh::copy(bytes.data() + off, reinterpret_cast<const void*>(at + off), std::min<size_t>(4096, r.size - off));
+            for (const uint8_t* m : sigdb::scan(p, bytes.data(), bytes.data() + bytes.size(), limit - hits.size()))
+                hits.push_back(at + static_cast<uintptr_t>(m - bytes.data()));
+            if (hits.size() >= limit) break;
+        }
+        if (hits.empty()) return KILN_ERR_NOT_FOUND;
+        const uint32_t writable = out ? std::min<uint32_t>(cap, static_cast<uint32_t>(hits.size())) : 0;
+        for (uint32_t i = 0; i < writable; ++i) out[i] = hits[i];
+        if (count) *count = writable;
+        return hits.size() > cap ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+    });
+}
+
 // ---- hooks (the registry engine does the work) ----
-bool valid_target(uintptr_t target) { return target >= image().base && target < image().base + image().size; }
+// The game's image, or the code of a module opened with open_module; everything else stays refused.
+bool valid_target(uintptr_t target) { return in_image(target) || in_opened_code(target); }
 
 chain::Order order_of(const KilnHookOrder* o) {
     chain::Order r;
@@ -250,6 +437,13 @@ KilnResult KILN_CALL h_mid2(KilnOwner owner, uintptr_t target, const KilnHookOrd
     KILN_GUARD("mid2", KILN_ERR_INTERNAL, return chain::install_mid(owner, target, order_of(order), fn, user, out););
 }
 
+KilnResult KILN_CALL h_mid2_checked(KilnOwner owner, uintptr_t target, const KilnHookOrder* order, KilnMidFn fn, void* user,
+                                  KilnHandle* out, uint32_t* unchecked) {
+    if (!fn || !unchecked || !valid_target(target)) return KILN_ERR_INVALID_ARGUMENT;
+    *unchecked = 0;
+    KILN_GUARD("mid2_checked", KILN_ERR_INTERNAL, return chain::install_mid(owner, target, order_of(order), fn, user, out, unchecked););
+}
+
 // ---- typed links (dev.28) ----
 // The positions a KilnSig describes (the sret buffer included), or -1 when it is malformed.
 int sig_positions(const KilnSig* sig) {
@@ -289,6 +483,15 @@ KilnResult copy_text(const std::string& text, char* buf, size_t cap, size_t* len
 KilnResult typed_check(uintptr_t target, const KilnSig* sig, const KilnHookOrder* order) {
     std::string& why = typed_refusal_text();
     why.clear();
+    if (!in_image(target)) {  // a module opened with open_module: no exe code to check the descriptor against
+        why = "typed hooks check their descriptor against the game exe's code, and this target is in another module (use a "
+              "mid hook or a detour there)";
+        char b[40];
+        std::snprintf(b, sizeof b, "0x%llx", static_cast<unsigned long long>(target));
+        const std::string label = order_of(order).label;
+        KLOG_W("hooks: typed hook on %s refused: %s", label.empty() ? b : label.c_str(), why.c_str());
+        return KILN_HOOKS_ERR_SIG_UNKNOWN;
+    }
     sigdb::SigInfo info;
     const bool described = sigdb::sig_at(target, &info);
     std::string name = described ? info.symbol : order_of(order).label;
@@ -310,23 +513,83 @@ KilnResult typed_check(uintptr_t target, const KilnSig* sig, const KilnHookOrder
     }
     std::string text;
     const fp::Verdict v = fp::check(fp::shape_of(*sig), f, &text);
-    if (v == fp::Verdict::Match) return KILN_OK;
-    // Unknown is accepted only for a symbol whose own descriptor passed (a fragment's "abi": "trust").
-    if (v == fp::Verdict::Unknown && described) return KILN_OK;
+    // Preserve the named fingerprint refusal first; even a matching shape must equal the loaded descriptor.
+    if (v == fp::Verdict::Match || (v == fp::Verdict::Unknown && described)) {
+        if (described && !fp::compiled_matches(*sig, info.descriptor, &why)) return KILN_HOOKS_ERR_SIG_MISMATCH;
+        return KILN_OK;
+    }
     why = text;
     KLOG_W("hooks: typed hook on %s refused: %s", name.c_str(), why.c_str());
     return v == fp::Verdict::Mismatch ? KILN_HOOKS_ERR_SIG_MISMATCH : KILN_HOOKS_ERR_SIG_UNKNOWN;
 }
 
-KilnResult KILN_CALL h_detour_typed(KilnOwner owner, uintptr_t target, const KilnHookOrder* order, const KilnSig* sig,
-                                    KilnTypedFn fn, void* user, KilnHandle* out) {
+KilnResult KILN_CALL h_sig_status(KilnStr symbol, uintptr_t* address, uint64_t* revision) {
+    if (!address || !revision || !symbol.ptr || !symbol.len) return KILN_ERR_INVALID_ARGUMENT;
+    *address = 0;
+    KILN_GUARD("sig_status", KILN_ERR_INTERNAL, {
+        sigdb::SigStatus status;
+        std::string text;
+        // A replacement racing this copy must invalidate any cached verdict.
+        const auto before = sigdb::sig_revision();
+        const bool found = sigdb::sig_status(sv(symbol), address, &status, &text);
+        *revision = sigdb::sig_revision();
+        if (before != *revision) return KILN_ERR_UNAVAILABLE;
+        if (!found) { typed_refusal_text() = "no descriptor in the current resolver load"; return KILN_ERR_NOT_FOUND; }
+        typed_refusal_text() = text;
+        if (status == sigdb::SigStatus::Match && *address) return KILN_OK;
+        return status == sigdb::SigStatus::Mismatch ? KILN_HOOKS_ERR_SIG_MISMATCH : KILN_HOOKS_ERR_SIG_UNKNOWN;
+    });
+}
+
+KilnResult KILN_CALL h_validate_typed(KilnStr symbol, uintptr_t expected_address, uint64_t expected_revision, const KilnSig* sig) {
+    if (sig_positions(sig) < 0) return KILN_ERR_INVALID_ARGUMENT;
+    uintptr_t address = 0; uint64_t revision = 0;
+    const auto status = h_sig_status(symbol, &address, &revision);
+    if (status != KILN_OK) return status;
+    if (address != expected_address || revision != expected_revision) return KILN_ERR_UNAVAILABLE;
+    KILN_GUARD("validate_typed", KILN_ERR_INTERNAL, {
+        const auto checked = typed_check(address, sig, nullptr);
+        if (sigdb::sig_revision() != revision) return KILN_ERR_UNAVAILABLE;
+        return checked;
+    });
+}
+
+// 0: not now. 1: on the authoritative (or joined client's) Pre thread: a world runs, and a first detour on a target
+// stops the player's game for its check, so the caller paces its installations. 2: no live world: nobody is playing.
+uint32_t KILN_CALL h_typed_install_ready() {
+    if (tick::typed_install_pre()) return 1;
+    KilnSessionInfo s{}; s.size = sizeof s;
+    if (tick::session(&s) != KILN_OK) return 0;
+    for (auto w : s.worlds) if (w) return 0;
+    return 2;
+}
+
+// detour_typed and detour_typed_checked: the same descriptor check and link; `unchecked` (the checked member) gives the
+// first patch of a target mid2_checked's policy (hooks_chain.cpp, write_with_threads_stopped). Runs under the caller's
+// guard.
+KilnResult detour_typed_impl(KilnOwner owner, uintptr_t target, const KilnHookOrder* order, const KilnSig* sig,
+                             KilnTypedFn fn, void* user, KilnHandle* out, uint32_t* unchecked) {
     const int positions = sig_positions(sig);
     if (!fn || positions < 0 || !valid_target(target)) return KILN_ERR_INVALID_ARGUMENT;
     const uint32_t nstack = positions > 4 ? static_cast<uint32_t>(positions - 4) : 0;
-    KILN_GUARD("detour_typed", KILN_ERR_INTERNAL, {
-        const KilnResult checked = typed_check(target, sig, order);
-        if (checked != KILN_OK) return checked;
-        return chain::install_typed(owner, target, order_of(order), nstack, fn, user, out);
+    const KilnResult checked = typed_check(target, sig, order);
+    if (checked != KILN_OK) return checked;
+    return chain::install_typed(owner, target, order_of(order), nstack, fn, user, out, sig->sret ? sig->ret_size : 0,
+                                unchecked);
+}
+
+KilnResult KILN_CALL h_detour_typed(KilnOwner owner, uintptr_t target, const KilnHookOrder* order, const KilnSig* sig,
+                                    KilnTypedFn fn, void* user, KilnHandle* out) {
+    KILN_GUARD("detour_typed", KILN_ERR_INTERNAL,
+               return detour_typed_impl(owner, target, order, sig, fn, user, out, nullptr););
+}
+
+KilnResult KILN_CALL h_detour_typed_checked(KilnOwner owner, uintptr_t target, const KilnHookOrder* order,
+                                            const KilnSig* sig, KilnTypedFn fn, void* user, KilnHandle* out) {
+    KILN_GUARD("detour_typed_checked", KILN_ERR_INTERNAL, {
+        uint32_t unchecked = 0;
+        const KilnResult rc = detour_typed_impl(owner, target, order, sig, fn, user, out, &unchecked);
+        return chain::checked_install_result(rc, unchecked);  // `unchecked` read after the installation ran
     });
 }
 
@@ -343,7 +606,7 @@ KilnResult KILN_CALL h_call_with_frame(uintptr_t fn, KilnCallFrame* frame, uint3
 }
 
 KilnResult KILN_CALL h_fingerprint(uintptr_t target, char* json, size_t cap, size_t* len) {
-    if (!valid_target(target)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!in_image(target)) return KILN_ERR_INVALID_ARGUMENT;  // the exe file's code only
     KILN_GUARD("fingerprint", KILN_ERR_INTERNAL, {
         fp::Fingerprint f;
         if (!sigdb::fingerprint(target, &f)) return KILN_ERR_INVALID_ARGUMENT;
@@ -372,7 +635,9 @@ KilnResult KILN_CALL h_revoke_owner(KilnOwner owner) {
         auto& ps = patches();
         for (auto it = ps.begin(); it != ps.end();) {
             if (it->owner == owner) {
+                auto code_guard = code::registry().lock();
                 poke(it->addr, it->original.data(), it->original.size());
+                code::registry().remove_locked(it->code_token);
                 it = ps.erase(it);
                 ++removed;
             } else {
@@ -530,6 +795,20 @@ const KilnHooksApi kTable = {
     // owner cleanup (dev.28)
     &h_subscribe_owner_retiring,
     &h_unsubscribe_owner_retiring,
+    // checked mid installation (dev.29, package 07)
+    &h_mid2_checked,
+    // typed safety extension (dev.29)
+    &h_validate_typed,
+    &h_sig_status,
+    &h_typed_install_ready,
+    // checked typed installation (dev.29)
+    &h_detour_typed_checked,
+    // original code (0.2.0-dev.29.19)
+    &h_read_original,
+    &h_code_state,
+    // hooks inside other modules (dev.29.19)
+    &h_open_module,
+    &h_module_scan,
 };
 
 std::mutex g_ready_mutex;
@@ -559,6 +838,7 @@ bool ensure_ready() {
     env.owner_name = &env_owner_name;
     env.image_lo = image().base;
     env.image_hi = image().base + image().size;
+    env.game_dir = u8(paths().game);
     env.changed = &map_changed;
     return chain::init(env);
 }

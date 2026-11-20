@@ -46,6 +46,7 @@
 
 #include "nlohmann/json.hpp"
 #include "services/kiln_profile.h"
+#include "log_level.h"
 #include "sf_internal.h"
 #include "contract.h"
 #include "kfc_host.h"
@@ -126,6 +127,23 @@ bool safe_path(const std::filesystem::path& p, const std::filesystem::path& root
     if (ec) return false;
     const auto resolved = std::filesystem::canonical(full, ec);
     return !ec && inside_root(resolved, resolved_root);
+}
+
+// The game folder is the player's layout, not mod content: a Steam library reached through a junction or a link is
+// common, so the folder itself may be a link (links are judged below it, by safe_path's roots). It must be an absolute,
+// existing folder that resolves. Inbox 45 (Windows 11, a Steam library under "C:\Games\# Steam"): safe_path(game, game)
+// refused it, ShroudForge's plugin stopped with "invalid game path" and the launcher's Engines page showed it, with
+// no ShroudForge mod in use. Empty when the folder is fine, else why not.
+std::string game_dir_problem(const std::filesystem::path& p) {
+    if (p.empty()) return "Kiln gave no game folder";
+    if (!p.is_absolute()) return "the game folder is not an absolute path";
+    const DWORD a = GetFileAttributesW(p.c_str());
+    if (a == INVALID_FILE_ATTRIBUTES) return "the game folder cannot be read (error " + std::to_string(GetLastError()) + ")";
+    if (!(a & FILE_ATTRIBUTE_DIRECTORY)) return "the game path is not a folder";
+    std::error_code ec;
+    const auto resolved = std::filesystem::canonical(p, ec);
+    if (ec || resolved.empty()) return "the game folder does not resolve (" + ec.message() + ")";
+    return {};
 }
 
 HMODULE load_runtime_dll(const std::filesystem::path& p) {
@@ -252,14 +270,15 @@ bool wanted(std::string* reason) {
     wchar_t env[8] = L"";
     const DWORD n = GetEnvironmentVariableW(L"KILN_SHROUDFORGE", env, 8);
     if (n == 1 && env[0] == L'0') return *reason = "KILN_SHROUDFORGE=0", false;
-    if (n == 1 && env[0] == L'1') return true;
+    const bool forced = n == 1 && env[0] == L'1';
     const auto* profile = static_cast<const KilnProfileApi*>(g_api->service(KilnStr{KILN_PROFILE_SERVICE, sizeof(KILN_PROFILE_SERVICE) - 1}, 1));
     if (profile && (profile->header.version < 1 || profile->header.size < offsetof(KilnProfileApi, json) + sizeof profile->json ||
                     !profile->mode || !profile->json)) { *reason = "incompatible profile service"; return false; }
-    if (!profile) return legacy_wanted(reason);  // no profile service: the legacy layout
+    if (!profile) return forced || legacy_wanted(reason);  // no profile service: the legacy layout
     const uint32_t mode = profile->mode();
     if (mode == KILN_PROFILE_NO_MODS) return *reason = "play-once without mods", false;
     if (mode == KILN_PROFILE_INVALID) return *reason = "the profile is invalid (kiln.log says why): no mods load", false;
+    if (forced) return true;
     if (mode == KILN_PROFILE_LEGACY) return legacy_wanted(reason);
     // an active profile: on when its "mods.shroudforge" list has an enabled entry (the launcher writes each mod's
     // switch into ShroudForge's own extended.mod.json; this list says that the profile uses ShroudForge at all)
@@ -269,6 +288,13 @@ bool wanted(std::string* reason) {
     bool dropins = false;
     try {
         const auto doc = nlohmann::json::parse(std::string(js.ptr, js.len));
+        const auto requirements = doc.value("emlRuntime", nlohmann::json::array());
+        if (requirements.is_array()) for (const auto& id : requirements) {
+            if (id.is_string()) {
+                *reason = "the EML package " + id.get<std::string>() + " needs ShroudForge's runtime";
+                return true;
+            }
+        }
         const auto mods = doc.value("mods", nlohmann::json::object());
         const auto it = mods.find("shroudforge");
         if (it != mods.end() && it->is_array())
@@ -321,12 +347,7 @@ struct LogTail {
             start = nl + 1;
             while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
             if (line.empty()) continue;
-            const int32_t level = line.find("[E]") != std::string::npos || line.find(" ERROR ") != std::string::npos
-                                      ? KILN_LOG_ERROR
-                                  : line.find("[W]") != std::string::npos || line.find(" WARN ") != std::string::npos
-                                      ? KILN_LOG_WARN
-                                      : KILN_LOG_INFO;
-            logf(level, "[sf] %s", line.c_str());
+            logf(sf_line_level(line), "[sf] %s", line.c_str());
         }
         partial.erase(0, start);
         if (partial.size() > 65536) partial.erase(0, partial.size() - 65536);
@@ -682,7 +703,7 @@ void KILN_CALL on_ready(void*) {
     }
     g_game = api_path(KILN_PATH_GAME);
     g_state = api_path(KILN_PATH_STATE);
-    if (g_game.empty() || !safe_path(g_game, g_game)) return finish("failed", "invalid game path");
+    if (const std::string why = game_dir_problem(g_game); !why.empty()) return finish("failed", "invalid game path: " + why);
     g_server = !(g_api->size >= offsetof(KilnApi, side) + sizeof(void*) && g_api->side() == KILN_SIDE_CLIENT);
     set_status("format", 1);
     set_status("side", g_server ? "server" : "client");
@@ -710,11 +731,12 @@ void KILN_CALL on_ready(void*) {
     const bool use_installed = prefer_installed(kiln_dir);
     set_status("useInstalled", use_installed);
     if (const std::string other = sf_in_process(); !other.empty()) {
-        logf(KILN_LOG_INFO, "ShroudForge already runs in this process (%s, started by its own dbghelp.dll): it hosts "
-                            "its mods itself next to Kiln; kiln-shroudforge stays out of the way",
+        static std::atomic<bool> reported{false};
+        if (!reported.exchange(true)) logf(KILN_LOG_INFO, "shroudforge: its own loader (%s) runs it. Kiln's adapter steps aside. Managed package switches still apply.",
              other.c_str());
+        set_status("loaderFile", other);
         set_status("source", "installed");
-        return finish("self-hosted", "ShroudForge's own bootstrap runs (" + other + ")");
+        return finish("self-hosted", "ShroudForge's own loader (" + other + ") runs it. Kiln's adapter steps aside. Managed package switches still apply.");
     }
     if (!bundled.present && !installed.present) {
         logf(KILN_LOG_INFO, "no ShroudForge runtime: neither Kiln's bundled one (kiln/plugins/shroudforge/) nor an "
@@ -725,6 +747,10 @@ void KILN_CALL on_ready(void*) {
     if (!wanted(&reason)) {
         logf(KILN_LOG_INFO, "ShroudForge mods are off for this start: %s", reason.c_str());
         return finish("off", reason);
+    }
+    if (!reason.empty()) {
+        set_status("hostingReason", reason);
+        logf(KILN_LOG_INFO, "Hosting ShroudForge: %s", reason.c_str());
     }
     // order of attempts: the chosen one, then the other as a fallback
     std::vector<Candidate*> order;

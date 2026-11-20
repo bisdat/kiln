@@ -1,4 +1,7 @@
-kiln_service(items items.cpp engine.cpp pide.cpp moves.cpp xfer.cpp names.cpp stamps.cpp instances.cpp equip.cpp wear.cpp)
+kiln_service(items items.cpp engine.cpp pide.cpp moves.cpp xfer.cpp names.cpp stamps.cpp instances.cpp equip.cpp wear.cpp toolwear.cpp toolwear_table.cpp
+             setsnap.cpp sets.cpp setexec.cpp gems.cpp stations.cpp gear.cpp scale.cpp)
+# gems.cpp: the offered gems' tokens come from the system's random generator
+target_link_libraries(kiln-items PRIVATE bcrypt)
 
 # Host tests (no game): the move / ledger / rule / name logic, and the transfer hooks against a fake inventory world.
 # Run under Wine: native/services/items/tests/run.sh
@@ -22,5 +25,32 @@ add_executable(items-equip-test tests/equip_test.cpp)
 target_include_directories(items-equip-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party"
                                                     "${KILN_GENERATED_DIR}")
 set_target_properties(items-equip-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
-add_executable(items-wear-test tests/wear_test.cpp)
+add_executable(items-wear-test tests/wear_test.cpp wear.cpp)
+target_include_directories(items-wear-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
 set_target_properties(items-wear-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+add_executable(items-toolwear-test tests/toolwear_test.cpp stamps.cpp)
+set_target_properties(items-toolwear-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+add_executable(items-toolwear-table-test tests/toolwear_table_test.cpp toolwear_table.cpp)
+target_include_directories(items-toolwear-table-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party"
+                                                             "${KILN_GENERATED_DIR}")
+set_target_properties(items-toolwear-table-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+add_executable(items-setsnap-test tests/setsnap_test.cpp setsnap.cpp)
+target_include_directories(items-setsnap-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
+set_target_properties(items-setsnap-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+add_executable(items-setplan-test tests/setplan_test.cpp setsnap.cpp)
+target_include_directories(items-setplan-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
+set_target_properties(items-setplan-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+add_executable(items-setexec-test tests/setexec_test.cpp setsnap.cpp)
+target_include_directories(items-setexec-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
+set_target_properties(items-setexec-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+add_executable(items-setorder-test tests/setorder_test.cpp)
+set_target_properties(items-setorder-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+add_executable(items-gems-test tests/gems_test.cpp)
+target_include_directories(items-gems-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
+set_target_properties(items-gems-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+add_executable(items-gear-test tests/gear_test.cpp)
+target_include_directories(items-gear-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
+set_target_properties(items-gear-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+add_executable(items-stations-test tests/stations_test.cpp)
+target_include_directories(items-stations-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
+set_target_properties(items-stations-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")

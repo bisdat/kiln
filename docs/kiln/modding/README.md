@@ -12,11 +12,13 @@ generated [../status.generated.md](../status.generated.md); what has no API yet 
 | [lifecycle.md](lifecycle.md) | Mod and server lifecycle events, the `Mods` API, inter-mod messages, hot reload |
 | [testing.md](testing.md) | Kiln.Testing: `[KilnTest]` methods that run inside the server |
 | [unit-tests.md](unit-tests.md) | Kiln.TestKit: a mod under dotnet test with no game, dotnet new kiln-unit-test, [KilnTest] methods as xunit tests, what is real offline |
+| [tasks.md](tasks.md) | Heavy work off the server's tick: `Context.Tasks`, the ways back to the tick and their budget, reading the world from a task (`WorldConcurrent`), unload and exit, diagnostics, common mistakes; the `FetchNearby` example and its TestKit tests |
 | [faults.md](faults.md) | Fault policy, crash reports, `kiln.json` `mods` settings |
 | [contract.md](contract.md) | The API contract: the one error rule, identity types (`EntityRef`, `PlayerRef`, `ItemId`), thread attributes |
 | [../services/caps.md](../services/caps.md) | Asking what works: `Capabilities.Is/Get/Why/All`, why a capability is off; the manifest's `features` rules (manifest.md, "Asking what works") |
 | [limits.md](limits.md) | What a mod cannot do yet: each gap, what stands in the way, the release it is planned for |
 | [blocks.md](blocks.md) | Building blocks: effects, statuses, spells, abilities, perks, talents, bodies, loot, affixes and UI; what they compile to, client requirements and errors. Start here to make something |
+| [block-kinds.md](block-kinds.md) | A kind of block a mod adds: the provider's record and pure compiler, the consumer's blocks in C# and JSON, plans, application states, limits |
 | [affixes.md](affixes.md) | Affixes: rolled modifiers on one item ("+5 Strength", "+10% Move Speed"), as affix kinds and pools, which are blocks (`Blocks.Define`, `affixes` and `affixPools` in `blocks/*.json`, or `Affixes.Define`); kept with the item, applied while it is worn or in hand, shown in players' games (dev.27) |
 | [inventory.md](inventory.md) | Moving items between inventories keeping their state (a stack, quick stack, move all), container names, transfer rules and events (ported from shroudlink), and why gear data lasts only a session |
 | [item-blocks.md](item-blocks.md) | Items, weapons, wands, armor, stations, loot tables and recipes as blocks: no base items, no GUIDs; a weapon's own moves and held models with moving parts |
@@ -37,19 +39,25 @@ generated [../status.generated.md](../status.generated.md); what has no API yet 
 | [materials.md](materials.md) | New surfaces for models from PNGs and numbers, on the game's own shaders: no base to name, or made from a glTF's materials |
 | [animations.md](animations.md) | Clips, skeletons and state-machine graphs from glTF: tools/animcook, cook.json animation steps, clips reworked from other clips (`from`); states of a mod's own in the player's animation graph (`assets/player-states.json`) |
 | [quests.md](quests.md) | Quest chains, conversations and NPCs: QuestBlock/DialogueBlock, quests/*.json, Quests.Define, rewards and client requirements |
-| [texts.md](texts.md) | The game's English texts by loca tag (`Texts.Get`, `GetPlain`), also on a dedicated server from a local catalog |
+| [texts.md](texts.md) | The game's English texts by loca tag (`Texts.Get`, `GetPlain`), also on a dedicated server from a local catalog; on a game client, the game's own texts in the player's language and an item's tooltip rows (`Content.Text`, `Content.TooltipValues`, since 0.2.0-dev.29.18) |
 | [lint.md](lint.md) | `kiln lint`: usage, output, JSON dialects, every rule with an example and the fix; [schemas/](schemas/) is the field reference of each format |
 | [vscode.md](vscode.md) | The VS Code extension (tools/vscode): schemas, lint, game ids, build/deploy/reload, Testing view, kiln.log, KAP/1 console, Impact assembly |
 | [cli.md](cli.md) | The `kiln` command: new, build, cook, deploy, run, reload, test, debug, lint, pack, publish, logs, blocks, catalog, vfx, skeleton |
+| [updates.md](updates.md) | Update checks: making a mod checkable (`updates` in the manifest), how the newest release is chosen, the states and reasons of a check, what a check sends |
 | [publishing.md](publishing.md) | `kiln publish`: releasing a packed mod at GitHub (plan, apply, publish), the token, what a published zip may hold |
+| [onboot.md](onboot.md) | `Mod.OnBoot`: statuses, effects, items, spells, talents and resource patches staged before the game starts, so the first start has them; `"boot"` in kiln.mod.json, what fails how, `Mods.BootState` |
+| [boot-snapshot.md](boot-snapshot.md) | The boot snapshot: the game data Kiln reads from the game's files before a start, for mods that change data in `OnBoot`; `kiln boot-snapshot` |
 | [analyzers.md](analyzers.md) | KILN1xx: compiler warnings about threads, hot reload and the manifest, with code fixes |
 | [catalogs.md](catalogs.md) | The local game-data catalog and the game-id constants |
 | [../services/queries.md](../services/queries.md) | `Kiln.Queries`: what is on a line through the terrain, the ground below a point, voxel line of sight, the entities in a sphere or a box; the ray budget all mods share |
 | [../typegen.md](../typegen.md) | Typed reads of the game's ECS components: `Kiln.Ecs` (`TryGet`, `Get`, `Has`, `All`, `Supports`), generated per game build; example in §4.3 |
 | [typed-fields.md](typed-fields.md) | The game's data as typed C# structures, for what blocks don't cover: `GameFields`, `GameEnums`, checked string paths |
+| [resource-patches.md](resource-patches.md) | Change a field of the game's data before the game reads it (the balancing table and the like): `resourcePatches` in a boot mod |
 | [player-states.md](player-states.md) | Every state and action a player can be in: `player.Is(...)`, `PlayerStateChangedEvent`, `PlayerActionEvent`, and what is left out |
 | [../services/steamguard.md](../services/steamguard.md) | The achievement guard (experimental, game client only): keep tests and admin commands from unlocking Steam achievements |
 | [debugging.md](debugging.md) | Breakpoints in a running server: `kiln debug` and netcoredbg |
+| [../native-mods.md](../native-mods.md) | Native mods (DLL mods): `native.json`, load phases, `kiln_native_init` and the Kiln API from C or C++ |
+| [native-asi.md](native-asi.md) | One DLL that runs as a Kiln native mod and as an `.asi` under Ultimate ASI Loader, and starts once |
 
 ## Five-minute start
 ```sh
@@ -75,8 +83,10 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `SampleConsumer` | a required dependency (`^1.0`), an optional absent one, shared types, an IMC round trip |
 | `SampleTests` | Kiln.Testing: sync/async tests, `await t.Ticks()`, IMC and Mods API checks, a skipped test, auto-run |
 | `SampleFaulty` | the fault policy: throws every 25 steps while `kiln/data/sample-faulty/fault` exists; a `missing-member` file makes it fail at load like a mod built for a newer Kiln |
+| `SampleTasks` | Kiln tasks (`Context.Tasks`): a task that waits for its cancellation and unwinds at unload, one that throws (only that task faults), one that computes on a worker and applies on the tick with `await ctx.ToTick()` |
 | `resolver/*` | manifest-only fixtures: missing dependency, cycle, a dependent of a cycle, version mismatch, incompatible, client-only, feature, API, bad manifest |
 | `HookSample` | `advanced` mods (kiln.hooks): a detour that counts calls of the game's `GetComponent`, a mid hook reading a register, a reversible byte patch, a mod-shipped symbol fragment |
+| `TypedHookVolume` | typed hooks (`Kiln.Sigs`, since 0.2.0-dev.29): a hook of the game's `GetItemVolume` that lets the game answer and doubles the volume it gave (a watering can takes twice the water); built, not run in a game (guided check `06b-typed-hooks.client`) |
 | `EngineRoom` | The advanced tier's managed side in one admin command: `/engine systems` and `/engine profile` list and measure the game's systems (`GameSystems`), `/engine watch <system>` counts one system's runs through `GameSystems.Hook` (callbacks on the game's worker threads), `/engine stack <item> <count>` changes one field of an item's resource as a claim (`ReflectedResources.FindByField`, `Set`), `/engine claims` and `/engine undo` show and give back claims (`Overrides.Active`, `Claim`, `RestoreAll`); what to do when a game update renames something |
 | `WorldPrograms` | an ECS program declared in `kiln.programs.json` and bound with `EcsPrograms.Bind`, emitting and reading a game event |
 | `LightsOut` | tracked world writes: `/lights off` puts out every lantern, torch and candle with `World.Update<Ecs.ServerToggleState>`, and a restart keeps them out; the build fills `"writes"` |
@@ -102,8 +112,11 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `CreatureAi` | npc-ai: who fights whom (Vukahs and Scavengers feud, a warden that hunts Scavengers, a ranger that fights for players) and rules beyond the game's kinds |
 | `FireNova` | kiln.abilities: a key ability (G or `/nova`) with mana and cooldown, a ring of the game's Fireball explosions; Fireball damage doubled at night |
 | `ImpactSample` | Impact programs: a heal-over-time buff written from scratch, a Fireball that chains to a second enemy, a managed Kiln native |
+| `FrostMark` | a same-step native from a plain static method (`[ImpactNative]`, since 0.2.0-dev.29): a sword with an additional hit effect (Ice 10, besides the weapon's own strike) that runs `Frost.OnHit` first (`EffectBlock.Run`), which reads the target's Health and makes that additional hit 1.5 times as hard below a quarter of it; an attachment that counts the Fireball explosion's `applyDamage` calls (`/frostmark`); guided check `06c-impact-damage` |
+| `GemSample` | a new gem from a data pack alone (the Gem of Deep Cuts: a Gem of Bleeding clone with its own GUID, texts, PNG icon, rarity and numbers) and a tweak of the game's Gem of Bleeding (bleeds 1.5 times as long); the Gems guide, docs/kiln/services/gems.md ("New gems", gems-new.md) |
+| `GemEffects` | `Gems.Register` with C# effects through Kiln's trigger programs: the Gem of Frostbite (a critical hit chills the target) and the Gem of Renewal (a kill heals the wearer), `/gemeffects [level]` for admins; docs/kiln/services/gems-new.md |
 | `SkillTreeSample` | kiln.skills: two nodes in the game's own skill tree and a Kiln talent tree, "Ember Arts", from `skills/sample.json` |
-| `NpcSample` | a friendly NPC (Tobin, a fisher clone with its own name, dialogue and roster entry), a voiced quest in the game's journal, a trade |
+| `NpcSample` | a friendly NPC (Tobin, a fisher clone with its own name, dialogue and roster entry), a voiced quest in the game's journal, a trade; a creature whose brain walks a route from `Queries.FindPath` (`PathWalker.cs`) |
 | `quests-sample` | a quest chain in the game's own UI from one file, `quests/sample.json`: the Warden, his topics and voice, journal, HUD and map markers; one more quest in C# |
 | `FrostboltBlock` | the first blocks: a staff spell, a sword and a status sharing one Frost Burst effect, with VFX of its own; Frostlance as data |
 | `AbilityBlocks` | shared effects, perks, abilities, talent trees and triggers in C# and JSON |
@@ -111,6 +124,7 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `WeaponMoves` | a sword with moves of its own (a chain of two swings, a heavy and a block, each with its own clip and timing) and a held model with moving parts; each clip is the game's clip of the state it is placed like, retimed to the move, with the sword arm from the sample's own rig (retargeted, the second swing's mirrored) |
 | `LootBlocks` | loot tables, a creature that drops one, and recipes at the game's workbench |
 | `CreatureBlocks` | reusable bodies, animation, AI, behaviour and NPCs: a creature made of its own files, a Vukah that rallies, a sentinel driven by C#, a trader |
+| `CreatureControlSample` | kiln.creature_control: `/hold` takes a lease on a game Vukah by itself (Acquire, WaitActive, Inspect, Release: its AI off and its steering removed while held, both given back), `/pacer` a creature whose brain walks it to you under the lease Kiln.Blocks takes |
 | `StationBlocks` | a drying rack and a forge with workshops and recipes of their own, a bench, props on the game's art |
 | `MenuBlocks` | menu blocks: a forge that opens the drying rack's menu, a menu part two stations share |
 | `FurnitureBlocks` | a chest that wants a key, a door that opens only at night, a camp bed, seats, a wall shape with an arched window, a haircut |
@@ -129,13 +143,17 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `SoundSample` | tools/soundcook + Kiln.Audio: test tones as UI, positional, looped and streamed sounds, music, a replaced game cue, a voiced line and a narration |
 | `UiSample` | Kiln.Ui from code: an FPS line on the HUD, a window (F8) with widgets, toasts |
 | `MenuButtons` | Kiln.Ui game UI: entries in the main and pause menus opening a screen, a crafting info panel, a subcategory and tab in the crafting menu |
+| `SlotMarks` | `Ui.Inventory` (0.2.0-dev.30), client + server: Ctrl+click asks the server to mark an item (the game does not pick it up; the server half checks the item is in the sender's inventory with `Items.Read` first), Alt+right-click lists it, a tint on big stacks |
+| `ValueBars` | `Ui.Values` (dev.28): a water container's detail number in charges with a label, its slot bar, the health pair as a percentage, tooltip lines in Kiln's Item details window (F8) |
 | `RenderSample` | render events: an FPS counter, a compass and waypoint markers in the world |
 | `BlobCatalog` | `Assets.OpenBlobCatalog`: `/blobs` counts the content blobs the game serves by where they come from, lists the ones mods registered, and writes the first entries as JSON |
 | `TransformScale` | `World.SetTransformScale`: `/tscale <entity> <x> <y> <z>` draws an entity larger or smaller on each axis (the drawn size only, not collision) |
 
-Templates: `kiln new --list` shows all 31 with their options. Block templates: `kiln-spell`, `kiln-item-blocks`,
+Templates: `kiln new --list` shows all 34 with their options. Block templates: `kiln-spell`, `kiln-item-blocks`,
 `kiln-ability-blocks`, `kiln-creature-blocks`, `kiln-world-blocks`, `kiln-npc`, `kiln-quest`, `kiln-body`, `kiln-vfx`,
 `kiln-cosmetic`, `kiln-building-material` and `kiln-screen-effect`. Code templates for one topic each: `kiln-events`,
-`kiln-saved-data`, `kiln-rules`, `kiln-network`, and for the advanced tier `kiln-hooks`, `kiln-shader` and `kiln-world-program`. The others: `kiln-mod`, `kiln-test`, `kiln-unit-test`,
+`kiln-saved-data`, `kiln-rules`, `kiln-network`, `kiln-system-wrap` (a typed wrap of one of the game's own programs), and for
+the advanced tier `kiln-hooks`, `kiln-shader`, `kiln-world-program` and `kiln-client-program` (a program in this player's
+client world, since 0.2.0-dev.29). The others: `kiln-mod`, `kiln-test`, `kiln-unit-test`,
 `kiln-datapack`, `kiln-items`, `kiln-ability`, `kiln-creature`, `kiln-talents`, `kiln-ui`, `kiln-model`, `kiln-sound`,
 `kiln-native` and `kiln-service` (a service inside the Kiln repository). See [mdk.md](mdk.md).

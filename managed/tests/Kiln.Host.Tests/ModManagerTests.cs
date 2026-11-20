@@ -24,6 +24,37 @@ public sealed class ModManagerTests : ModsFixture
         Assert.Empty(mods.Mods);
     }
 
+    /// <summary>Issue #39: the stats line says which phase a mod's longest call was in (pre and post maxima apart), inside
+    /// the "max" field so a reader that knows only "max Z ms" still reads it.</summary>
+    [Fact]
+    public void The_stats_line_keeps_the_longest_pre_and_the_longest_post_apart()
+    {
+        InstallHello();
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        var mod = mods.Find("hello")!;
+        mod.ModContext.Tick.Pre += (in TickInfo t) => { if (t.Step == 2) Thread.Sleep(40); };
+        mod.ModContext.Tick.Post += (in TickInfo _) => { };
+        for (ulong s = 1; s <= 4; s++)
+        {
+            mods.Pre(Tick(s), []);
+            mods.Post(Tick(s));
+        }
+        var line = Assert.Single(mods.TakeStats(1), l => l.StartsWith("hello: ", StringComparison.Ordinal));
+        var m = System.Text.RegularExpressions.Regex.Match(line, @", max (\d+\.\d{3}) ms \(pre (\d+\.\d{3}) / post (\d+\.\d{3})\), ");
+        Assert.True(m.Success, line);
+        double max = double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture),
+            pre = double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture),
+            post = double.Parse(m.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(pre >= 35 && pre == max && post < 35, line);
+        mods.Pre(Tick(5), []);
+        mods.Post(Tick(5));
+        var next = Assert.Single(mods.TakeStats(1), l => l.StartsWith("hello: ", StringComparison.Ordinal));  // counters reset
+        Assert.Contains("(pre ", next);
+        Assert.DoesNotContain($"(pre {m.Groups[2].Value}", next);
+    }
+
     [Fact]
     public void Hundred_reloads_leak_no_load_context()
     {

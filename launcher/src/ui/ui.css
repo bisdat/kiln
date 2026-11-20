@@ -228,6 +228,11 @@
 .k-well > .k-label { flex: none; font-size: 15px; }
 .k-well input { flex: 1; min-width: 0; width: 100%; border: 0; background: none; outline: 0; color: var(--k-text-0); font-family: var(--k-font-mono); font-stretch: 90%; font-size: 15px; }
 .k-well-note { flex: none; font-size: 15px; color: var(--k-text-2); }
+/* a filter box's clear button (WellInput onClear): the toast's round ghost X, at the well's end */
+.k-well-clear { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-right: -4px; padding: 0; border: 0;
+  border-radius: 50%; background: none; color: var(--k-text-2); cursor: pointer; transition: color .15s, background .15s; }
+.k-well-clear:hover { color: var(--k-text-0); background: var(--k-warm-2); }
+.k-well-clear svg { width: 15px; height: 15px; }
 .k-slider-row { display: flex; gap: 12px; align-items: center; }
 .k-slider-row .k-input { width: 92px; flex: none; }
 .k-range { flex: 1; appearance: none; height: 4px; border-radius: 2px; min-width: 80px; background-color: var(--k-bg-3);
@@ -270,6 +275,11 @@
 .k-flame.on svg { fill: var(--k-ember-500); stroke: var(--k-gold-400); transform: scale(1.08); filter: drop-shadow(0 0 5px rgba(255, 106, 26, .75));
   animation: k-lick 1.9s ease-in-out infinite; }
 @keyframes k-lick { 0%, 100% { transform: scale(1.08) rotate(-1deg); } 35% { transform: scale(1.02, 1.14) rotate(2deg); } 70% { transform: scale(1.1, 1.03) rotate(-2deg); } }
+/* drawing without the GPU, or WebKit without compositing ("flat": shell/Stage.tsx flatDrawing; shell/AppShell.tsx
+   data-render): a lit flame stands still. Every frame of the flicker repainted each flame and its glow on the CPU, most
+   of the launcher's time on a page full of lit mods (inbox 94); with more than ten flames WebKit repaints the box round
+   all of them, and with the fire's frames the whole window */
+.k-app[data-render="software"] .k-flame.on svg, .k-app[data-render="flat"] .k-flame.on svg { animation: none; }
 
 /* ---------------------------------------------------------------- tables: small-caps heads, rules, one line per row */
 .k-table { display: flex; flex-direction: column; min-width: 0; min-height: 0; font-size: 16.5px; }
@@ -387,6 +397,7 @@
 .k-tray-pop { position: absolute; right: 0; top: calc(100% + 10px); width: 360px; z-index: 40; padding: 8px; display: flex; flex-direction: column; gap: 6px;
   max-height: 60vh; overflow: auto; background: var(--k-bg-2); border-radius: var(--k-radius-m);
   box-shadow: inset 0 0 0 1px var(--k-line-strong), 0 24px 60px rgba(0, 0, 0, .65); animation: k-pop .32s var(--k-spring) backwards; }
+.k-app[data-render] .k-tray-pop { box-shadow: inset 0 0 0 1px var(--k-line-strong); } /* as .k-upd-pop (update.css) */
 .k-tray-head { display: flex; align-items: baseline; justify-content: space-between; padding: 2px 4px 4px; }
 /* kept for pages that show a determinate bar outside the cone pack */
 .k-progress { height: 4px; border-radius: 2px; background: var(--k-bg-3); overflow: hidden; position: relative; }

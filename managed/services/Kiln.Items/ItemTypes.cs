@@ -93,8 +93,9 @@ public readonly record struct Gear(int? Level = null, ItemRarity? Rarity = null)
     [RequiresCapability(Items.Caps.GearOptions)]
     public int? Unlocked { get; init; }
 
-    /// <summary>A weapon gets an empty gem slot when the game's own roll at creation gave none (other items are
-    /// unchanged). Needs <see cref="Items.GearOptionsAvailable"/>.</summary>
+    /// <summary>A weapon gets an empty gem slot when the game's own roll at creation gave none. Other gear (rings,
+    /// armour, shields, tools...) gets one only when a mod allowed its kind with Kiln.Abilities' <c>Gems.AllowSockets</c>
+    /// (capability <c>gems.sockets</c>); otherwise it is unchanged. Needs <see cref="Items.GearOptionsAvailable"/>.</summary>
     [RequiresCapability(Items.Caps.GearOptions)]
     public bool GemSlot { get; init; }
 }

@@ -1,0 +1,17 @@
+<Project>
+  <!-- GemSample (docs/kiln/services/gems-new.md, "New gems: data"): a new gem from a data pack alone, and a tweak of a
+       game gem. content/gems.json clones the Gem of Bleeding as the Gem of Deep Cuts (its own GUID, name, texts, icon,
+       rarity and numbers, the Bleeding program named explicitly) and makes the game's Gem of Bleeding last longer. The
+       code only reads the values back into the log. Side both: a client needs the new gem to show it.
+       Build: dotnet build mods/samples/GemSample/GemSample.csproj -t:KilnDeploy -p:KilnModsDir=<folder> -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>gemsample</KilnModId>
+    <KilnModName>Gem Sample</KilnModName>
+    <Version>0.1.0</Version>
+    <KilnServices>Content</KilnServices>
+    <KilnSide>both</KilnSide>
+    <KilnClients>mod</KilnClients>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

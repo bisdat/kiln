@@ -23,6 +23,20 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${KILN_VERSION_F
 set(KILN_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 configure_file(cmake/kiln_version.h.in "${KILN_GENERATED_DIR}/kiln_version.h" @ONLY)
 
+# This build's metadata, generated/kiln_build.h (cmake/kiln_build_stamp.sh: "+<yyyymmdd>.<git>", or "+nogit.<nonce>"
+# without git). Written now, so the first build has it, and refreshed before every build of a target that includes it
+# (kiln-core, every kiln_service/kiln_plugin DLL): written only when it changes, so an unchanged stamp rebuilds nothing.
+# The core grants Kiln-internal access only to DLLs of its own build, and none without this metadata.
+find_program(KILN_BASH NAMES bash REQUIRED NO_CMAKE_FIND_ROOT_PATH)
+set(KILN_STAMP_COMMAND "${KILN_BASH}" "${CMAKE_SOURCE_DIR}/cmake/kiln_build_stamp.sh" "${CMAKE_SOURCE_DIR}/.."
+                       "${KILN_GENERATED_DIR}")
+execute_process(COMMAND ${KILN_STAMP_COMMAND} RESULT_VARIABLE KILN_STAMP_RESULT)
+if(NOT KILN_STAMP_RESULT EQUAL 0)
+    message(FATAL_ERROR "cmake/kiln_build_stamp.sh failed (${KILN_STAMP_RESULT})")
+endif()
+add_custom_target(kiln-build-stamp COMMAND ${KILN_STAMP_COMMAND} BYPRODUCTS "${KILN_GENERATED_DIR}/kiln_build.h"
+                  COMMENT "Kiln build stamp" VERBATIM)
+
 # The client gate's list: core/gates/*.json -> generated/kiln_gates.g.h (core/gates/README.md), compiled into the
 # core so an install cannot lose it. A bad file stops the build.
 find_program(KILN_PYTHON NAMES python3 python REQUIRED NO_CMAKE_FIND_ROOT_PATH)
@@ -91,18 +105,21 @@ target_sources(kiln-core PRIVATE ${KILN_SERVICE_SOURCES})
 # Native mod loader and profiles.
 target_sources(kiln-core PRIVATE core/src/native_mods.cpp core/src/profile.cpp)
 target_sources(kiln-core PRIVATE core/src/early_plugins.cpp)  # plugins exporting kiln_plugin_early
+target_sources(kiln-core PRIVATE core/src/tasks_model.cpp core/src/tasks.cpp core/src/tasks_stats.cpp core/src/tasks_win.cpp core/src/tasks_seh.cpp)  # kiln.tasks' pool
 target_sources(kiln-core PRIVATE core/src/compat.cpp core/src/compat_overlaps.cpp core/src/compat_rules.cpp)  # closed-DLL report and rules
 target_include_directories(kiln-core PRIVATE core/abi core/src third_party "${KILN_GENERATED_DIR}")
 target_link_libraries(kiln-core PRIVATE kiln-safetyhook bcrypt)
+add_dependencies(kiln-core kiln-build-stamp)
 
 # Service modules: native/services/<name>/CMakeLists.txt, each calling kiln_service(<name> <sources...>) to build
 # bin/services/kiln-<name>.dll. One directory per service, so services build and fail independently.
 function(kiln_service name)
-    add_library(kiln-${name} SHARED ${ARGN})
+    add_library(kiln-${name} SHARED ${ARGN} "${CMAKE_SOURCE_DIR}/cmake/kiln_build_stamp.cpp")
     target_include_directories(kiln-${name} PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party"
                                                     "${KILN_GENERATED_DIR}")
     target_link_libraries(kiln-${name} PRIVATE kiln-safetyhook)
     set_target_properties(kiln-${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/services")
+    add_dependencies(kiln-${name} kiln-build-stamp)
 endfunction()
 file(GLOB KILN_SERVICE_DIRS LIST_DIRECTORIES true CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/services/*")
 foreach(dir ${KILN_SERVICE_DIRS})
@@ -114,11 +131,12 @@ endforeach()
 # Plugin modules shipped with Kiln: native/plugins/<name>/CMakeLists.txt, each calling kiln_plugin(<name> <sources...>)
 # to build bin/plugins/kiln-<name>.dll (deployed to <game>/kiln/plugins/; they export kiln_plugin_main).
 function(kiln_plugin name)
-    add_library(kiln-${name} SHARED ${ARGN})
+    add_library(kiln-${name} SHARED ${ARGN} "${CMAKE_SOURCE_DIR}/cmake/kiln_build_stamp.cpp")
     target_include_directories(kiln-${name} PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party"
                                                     "${KILN_GENERATED_DIR}")
     target_link_libraries(kiln-${name} PRIVATE kiln-safetyhook)
     set_target_properties(kiln-${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/plugins")
+    add_dependencies(kiln-${name} kiln-build-stamp)
 endfunction()
 file(GLOB KILN_PLUGIN_DIRS LIST_DIRECTORIES true CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/plugins/*")
 foreach(dir ${KILN_PLUGIN_DIRS})
@@ -126,6 +144,11 @@ foreach(dir ${KILN_PLUGIN_DIRS})
         add_subdirectory("${dir}")
     endif()
 endforeach()
+
+# Compile-only: kiln_world.h and kiln_abilities.h in one translation unit, both orders (core/tests/test-abi-headers.sh).
+add_library(kiln-abi-headers OBJECT core/tests/abi_headers/world_first.c core/tests/abi_headers/abilities_first.c
+            core/tests/abi_headers/both.cpp)
+target_include_directories(kiln-abi-headers PRIVATE core/abi)
 
 add_library(kiln-native-hello SHARED samples/native-hello/plugin.cpp)
 target_include_directories(kiln-native-hello PRIVATE core/abi)
@@ -135,6 +158,13 @@ target_link_libraries(kiln-tickprobe PRIVATE kiln-safetyhook)
 
 # Samples and spikes with their own CMakeLists.txt (native/samples/<name>/, native/spikes/<name>/): test harnesses,
 # test DLLs and sample native mods. native-hello and tickprobe have none and stay listed above.
+if(EXISTS "${CMAKE_SOURCE_DIR}/../mods/tests/station-native-test/CMakeLists.txt")
+    add_subdirectory("${CMAKE_SOURCE_DIR}/../mods/tests/station-native-test" "${CMAKE_BINARY_DIR}/station-native-test")
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/../mods/tests/gate-priority-test/CMakeLists.txt")
+    add_subdirectory("${CMAKE_SOURCE_DIR}/../mods/tests/gate-priority-test" "${CMAKE_BINARY_DIR}/gate-priority-test")
+endif()
+
 file(GLOB KILN_EXTRA_DIRS LIST_DIRECTORIES true CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/samples/*" "${CMAKE_SOURCE_DIR}/spikes/*")
 foreach(dir ${KILN_EXTRA_DIRS})
     if(EXISTS "${dir}/CMakeLists.txt")

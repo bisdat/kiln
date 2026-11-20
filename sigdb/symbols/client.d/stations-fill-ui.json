@@ -1,0 +1,64 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "GitHub #68, Kiln clients: the station screen's fill buttons. The game's UI action query UiActionStatus(gameUi, u32 station, u32 recipe, u32 item, u16 amount, u32 type, const RecipeInputCategorySelections*) -> u32 is a cached status (0 not run yet, 1 ok, else the dry run's code: 2 no room, 4 missing materials, 5 no inventory); the client program player_ui runs the dry runs (type 3: AutoTransferRecipe on the bag and the Magic chests). A production station's screen enables its '+1' and '+10' fill when the type-3 query answers 1. kiln-items raises a 4 to 1 only when the server said its fill with opted-in station outputs covers that many crafts. Not authority: the press is the game's own action, which the server's Kiln.Blocks runs as Kiln's fill. Found on client 26430625 (5d9ef2f1...) only. docs/re/stations.md section 10.3. Since 0.2.0-dev.29.19 (second step): the ingredient rows' 'available' count of the crafting menu and the station screen (one widget, C 0xbb1850) is UiAvailableCount(u32 item, const PlayerInventoryView*, const HashMap* stock) = the bag's stacks of the item plus, while the player stands in a base (G38UiPlayData+0x828), the u16 count of the base's Magic-chest cache that player_ui copies to G38UiPlayData+0x2000 from PlayerBasesSystemClient+0x1610 (built by the client program cache_crafting_stock). Feature stations.stock_ui: at those two call sites only, a Kiln client shows the greater of the game's count and the server's snapshot (bag, Magic chests and opted-in outputs).",
+  "symbols": {
+    "stations/client.UiActionStatus": {
+      "comment": "the key: +0 type ([rbp+0x38]), +4 station (edx), +0x1c recipe (r8d), +0x20 item (r9d), +0x24 u16 amount ([rbp+0x30]), +0x2c the 32-byte selections ([rbp+0x40]); the cache at gameUi+0x14f70 (its offset is not used). Client 26430625 0xb2dbe0",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 48 89 7C 24 10 55 48 8B EC 48 83 EC 70 33 C0 89 55 B4 48 89 45 E6 48 8D B9 ?? ?? ?? ?? 48 89 45 D6 48 8D 55 B0 48 89 45 B8 48 8B CF 48 89 45 C0 89 45 C8 8B 45 38 89 45 B0 0F B7 45 30 66 89 45 D4 48 8B 45 40 44 89 45 CC 44 89 4D D0 0F 10 00 0F 10 48 10 0F 11 45 DC 0F 11 4D EC E8"
+        }
+      ]
+    },
+    "@stations/client.UiActionStatus.fill": {
+      "comment": "the station screen's '+1' fill: type 3 at [rsp+0x28], amount 1 at [rsp+0x20], then the call; its result compared with 1 is the button's enabled byte (client 26430625 0xc7451a; the '+10' at 0xc746f3 is the same with amount 10)",
+      "find": [
+        {
+          "pattern": "C7 44 24 28 03 00 00 00 0F 29 4D F0 48 8B 49 38 C7 44 24 64 02 02 01 00 40 88 7C 24 68 89 7C 24 6A 40 88 7C 24 78 0F 11 44 24 7C 48 89 7D 90 40 88 7D A8 C7 45 AC 00 00 20 41 C7 45 B0 00 00 A0 40 C7 45 B4 00 00 80 3F 40 88 7D D0 66 C7 44 24 20 01 00 E8 {stations/client.UiActionStatus:rel32} 83 F8 01"
+        }
+      ]
+    },
+    "stations/client.UiAvailableCount": {
+      "comment": "u32 UiAvailableCount(u32 item, inventory view*, stock map*): the bag's count of the item (the view's stacks, 72-byte entries at +0x2d8, item +8, count +0x10) plus the base stock map's u16 when the player is in a base. Client 26430625 0xd397d0",
+      "find": [
+        {
+          "pattern": "48 83 EC 28 4D 8B D8 48 85 D2 75 07 33 C0 48 83 C4 28 C3 4C 8B 4A 10 48 89 5C 24 30 48 89 7C 24 20 33 FF 8B DF 4D 85 C9 74 33 4C 8B 92 D8 02 00 00 4C 8B 42 08"
+        }
+      ]
+    },
+    "stations/client.AvailableRowRet1": {
+      "comment": "the ingredient row's first call of UiAvailableCount (G38UiPlayData+0x2000 as the stock): the return address. Client 26430625 0xbb19b8",
+      "find": [
+        {
+          "pattern": "4C 8D 88 00 20 00 00 8B 40 18 4C 8B 82 68 30 00 00 49 8B CC 4D 85 C0 74 1A 48 8B 92 60 30 00 00 39 02 74 12 48 FF C1 48 81 C2 70 8F 00 00 49 3B C8 72 ED 49 8B D4 8B 0E 4D 8B C1 E8 {stations/client.UiAvailableCount:rel32} 8B F8 48 8B 0D",
+          "offset": 64
+        }
+      ]
+    },
+    "stations/client.AvailableRowRet2": {
+      "comment": "the ingredient row's second call (the stock map +0x2000 added to G38UiPlayData): the return address. Client 26430625 0xbb280a",
+      "find": [
+        {
+          "pattern": "4C 8B 41 38 49 8B 55 00 49 81 C0 00 20 00 00 8B 0B E8 {stations/client.UiAvailableCount:rel32} 8B F8 EB",
+          "offset": 22
+        }
+      ]
+    }
+  },
+  "features": {
+    "stations.fill_ui": {
+      "symbols": [
+        "stations/client.UiActionStatus",
+        "@stations/client.UiActionStatus.fill"
+      ]
+    },
+    "stations.stock_ui": {
+      "symbols": [
+        "stations/client.UiAvailableCount",
+        "stations/client.AvailableRowRet1",
+        "stations/client.AvailableRowRet2"
+      ]
+    }
+  }
+}

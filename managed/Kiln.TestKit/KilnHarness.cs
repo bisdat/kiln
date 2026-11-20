@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Text.RegularExpressions;
 using Kiln.Host;
 
@@ -107,10 +108,14 @@ public sealed partial class KilnHarness : IDisposable
             };
             TaskScheduler.UnobservedTaskException += _unobserved;
             _tick = new TickThread($"kiln-testkit tick {_serial}", _options.CallTimeout);
+            StartTasks();  // KilnHarness.Tasks.cs: the mods' Kiln tasks run on the kit's pool
             StartServicesOnce();  // KilnHarness.Fakes.cs: the process's first service tick, at a budget of its own
             _tick.Invoke(() =>
             {
                 BootServiceTick();
+                // The registry binding outlives a harness: rows Kiln's services composed under the last one (a test's
+                // switch, its fakes' state) are decided again now, before this harness's first read, not at a refresh.
+                ServiceCapRows.RefreshStarted();
                 return 0;
             });
             _host.Log(LogLevel.Info, $"testkit: server folder {ServerDirectory}; Kiln {KitBackend.KilnVersion} (mod API {Mods.RuntimeApiVersion}), " +
@@ -162,6 +167,8 @@ public sealed partial class KilnHarness : IDisposable
 
     /// <summary>The harness's tick thread (the watchdog's handle on it).</summary>
     internal TickThread TickThread => _tick;
+
+    internal KilnHarnessOptions Options => _options;
 
     /// <summary>The real loader the harness drives.</summary>
     internal ModManager Manager => _mods;
@@ -306,8 +313,9 @@ public sealed partial class KilnHarness : IDisposable
     /// <summary>The fake native tables' state for this harness (KilnHarness.World.cs), after the statics are reset.</summary>
     partial void StartFakes();
 
-    /// <summary>The fakes end with the harness: players gone, the world closed.</summary>
-    partial void EndFakes();
+    /// <summary>The fakes end with the harness: players gone, the world closed. A fake whose end throws does not stop the
+    /// others: what was thrown goes into <paramref name="failures"/>.</summary>
+    partial void EndFakes(List<Exception> failures);
 
     private static bool _configUsed;
 
@@ -375,11 +383,14 @@ public sealed partial class KilnHarness : IDisposable
     /// logs any mod whose load context outlived the stop, ends the tick thread, and removes the temp folder (unless
     /// <see cref="KilnHarnessOptions.KeepFolder"/> or <c>KILN_TESTKIT_KEEP=1</c>). Leaves Kiln's static state ready for
     /// the next harness. A stop blocked past <see cref="KilnHarnessOptions.StopTimeout"/> is stopped by the watchdog,
-    /// the remaining mods are retired without callbacks, and an exception reports where it blocked.</summary>
+    /// the remaining mods are retired without callbacks, and an exception reports where it blocked. A fake of the kit
+    /// whose end throws does not stop the rest: every fake ends, the harness lets go of Kiln's state, and then the
+    /// exception is thrown (an <see cref="AggregateException"/> when there are several).</summary>
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         Exception? failure = null;
+        var faults = new List<Exception>();
         try
         {
             if (_tick.AbandonReason is null)
@@ -407,7 +418,8 @@ public sealed partial class KilnHarness : IDisposable
             if (_tick.AbandonReason is not null) RetireAbandoned();  // the watchdog stopped the tick thread: retire the mods without it (KilnHarness.Tests.cs)
             TaskScheduler.UnobservedTaskException -= _unobserved;
             _mods.Dispose();
-            EndFakes();
+            EndTasks();  // after the mods: an unloading mod's cancelled tasks still finish on the pool
+            EndFakes(faults);  // every fake ends; what one threw waits until the harness has let go
             RemoveTestSubscriptions();
             if (ReferenceEquals(ModsBackend.Current, _mods)) ModsBackend.Current = null;
             Lifecycle.Phase = ServerPhase.Booting;
@@ -437,7 +449,9 @@ public sealed partial class KilnHarness : IDisposable
         {
             Gate.Release();
         }
-        if (failure is not null) throw new InvalidOperationException($"the harness did not stop cleanly: {failure.Message}", failure);
+        if (failure is not null) faults.Insert(0, new InvalidOperationException($"the harness did not stop cleanly: {failure.Message}", failure));
+        if (faults.Count == 1) ExceptionDispatchInfo.Capture(faults[0]).Throw();
+        if (faults.Count > 1) throw new AggregateException($"the harness did not end cleanly ({faults.Count} failures)", faults);
     }
 
     // Test code's own subscriptions (no mod) made while the harness lived: they would run in the next harness. Kiln's
@@ -463,6 +477,7 @@ public sealed partial class KilnHarness : IDisposable
         public void OwnerRevoke(ulong owner)
         {
             lock (Revoked) Revoked.Add(owner);
+            if (harness.EntitiesFake is { } world) EcsWritesLogic.Retire(world.Reads, owner);  // kiln.world's owner-retiring observer
         }
 
         public void Log(LogLevel level, string text)

@@ -1,0 +1,16 @@
+<Project>
+  <!-- Sample: a rarity upgrade station (docs/kiln/modding/world-blocks.md "Upgrade stations"). A rarity upgrade rule, an anvil that
+       upgrades the item in the player's hand (every player), a forge whose window lists the player's gear (Kiln players), and a
+       sword whose rarity is rolled when it is crafted, so there is something to upgrade. blocks/twins.json is the same in data.
+       The side and the clients follow from using Blocks (both, kiln). -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>rarity-anvil</KilnModId>
+    <KilnModName>Rarity Anvil (sample)</KilnModName>
+    <Version>0.1.0</Version>
+    <Description>A rarity upgrade station: an anvil that upgrades the item in your hand, a forge whose window lists your gear with each step's cost and chance, and a sword whose rarity is rolled when it is crafted. blocks/twins.json is the same in data.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <KilnServices>Blocks;Items</KilnServices>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

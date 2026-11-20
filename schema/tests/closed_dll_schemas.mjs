@@ -34,6 +34,7 @@ const matcherOnly = ajv.compile({ $ref: "compat-rules.schema.json#/$defs/matcher
 
 const must = (validate, doc, what) => assert(validate(doc), `${what}: ${JSON.stringify(validate.errors)}`);
 must(rulesFile, read("../examples/compat-rules.json"), "examples/compat-rules.json");
+must(rulesFile, read("../../native/core/compat-rules.json"), "native/core/compat-rules.json (Kiln's shipped rules)");
 must(hooksFile, read("../examples/hooks-state.json"), "examples/hooks-state.json");
 for (const dir of ["hooks-state", "compat-rules"]) {  // every file of the two fixture folders except cases.json
   for (const name of readdirSync(new URL(`../fixtures/${dir}/`, here)).filter((n) => n.endsWith(".json") && n !== "cases.json")) {
@@ -51,6 +52,8 @@ for (const [what, mutate] of [
   ["bad rule action", (d) => { d.rules[0].action = "explode"; }],
   ["rva without 0x", (d) => { d.targets[0].rva = "9151f0"; }],
   ["unknown link kind", (d) => { d.targets[0].links[0].kind = "weird"; }],
+  ["code patch row without by", (d) => { d.codePatches = { available: true, total: 1, rows: [{ rva: "0xbd111d", size: 5 }] }; }],
+  ["code patches without available", (d) => { d.codePatches = { total: 0, rows: [] }; }],
 ]) {
   const d = structuredClone(good);
   mutate(d);

@@ -220,6 +220,18 @@
         { "scope": { "symbol": "rules/FlightMover", "size": 512 }, "pattern": "48 8B 7E {rules/flight.actor:d8} B2 35 48 8B CF E8 {rules/ActorStateTest:rel32} B2 15 0F B6 D8 48 8B CF E8" }
       ]
     },
+    "@rules/FlightMover.locomotion": {
+      "comment": "the mover's Locomotion slot: the movement config whose springAccelerationConfig rows the mover steers with (the slot is read once, for the row only; rules_sigdb_test.py checks it)",
+      "find": [
+        { "scope": { "symbol": "rules/FlightMover", "size": 512 }, "pattern": "48 8B 8E ?? ?? ?? ?? 48 8B 6E {rules/flight.locomotion:d8} 48 85 C9 74" }
+      ]
+    },
+    "@rules/FlightMover.rows": {
+      "comment": "the mover's spring-acceleration row: Locomotion + flight.spring_rows + 16 x (InSneakMode + 2 x Strafing), i.e. velocityDefault, velocityCrouched, strafingDefault, strafingCrouched. The crouched and strafing rows of a player's body hold -1 (no steering) for sprint and braking, so Kiln's flight steers with velocityDefault in every slot (flight.cpp)",
+      "find": [
+        { "scope": { "symbol": "rules/FlightMover", "size": 640 }, "pattern": "48 8B 7E ?? B2 35 48 8B CF E8 ?? ?? ?? ?? B2 15 0F B6 D8 48 8B CF E8 ?? ?? ?? ?? 48 8B 56 ?? 0F 28 DF 0F B6 C8 48 8B 86 ?? ?? ?? ?? 48 89 44 24 28 F3 0F 11 74 24 20 4C 8D 04 59 49 C1 E0 04 48 8D 4C 24 40 49 83 C0 {rules/flight.spring_rows:d8} 4C 03 C5 E8" }
+      ]
+    },
     "rules/ResolveActorCollider": {
       "comment": "NoClip: resolve_actor_collider's per-entity step, void(ctx, iterator*, InertialFrame* own, InertialFrame* platform, then four pointers into the iterator and a null). The 6th argument (rsi) is the iterator's Actor slot; from it the MovementCollider write record is at +resolve.collider. The step's first test is MovementCollider.isEnabled (+collider.enabled): 0 branches to rules/ResolveActorColliderOff (captured here from the branch itself, checked below), which clears the collision results and returns, so the position stays where the velocity program put it. The frame bytes are kept exact: they are what makes rsi the 6th argument (server 0x95890, client 0x283ba0)",
       "find": [
@@ -270,6 +282,8 @@
     "rules/flight.grav_actor": { "min_votes": 1 },
     "rules/flight.dynloco": { "min_votes": 1 },
     "rules/flight.actor": { "min_votes": 1 },
+    "rules/flight.locomotion": { "min_votes": 1 },
+    "rules/flight.spring_rows": { "min_votes": 1 },
     "rules/resolve.collider": { "min_votes": 1 },
     "rules/resolve.dynloco": { "min_votes": 1 },
     "rules/collider.enabled": { "min_votes": 1 },
@@ -339,10 +353,11 @@
     },
     "rules.flight": {
       "symbols": ["rules/LocoNextState", "rules/LocoStateWrite", "rules/FlightGravity", "@rules/FlightGravity.actor", "rules/FlightMover",
-                  "@rules/FlightMover.dynloco", "@rules/FlightMover.actor", "@rules/Loco.input", "@rules/Input.mask", "rules/ActorStateTest",
-                  "rules/CurrentEntityId"],
+                  "@rules/FlightMover.dynloco", "@rules/FlightMover.actor", "@rules/FlightMover.locomotion", "@rules/FlightMover.rows",
+                  "@rules/Loco.input", "@rules/Input.mask", "rules/ActorStateTest", "rules/CurrentEntityId"],
       "constants": ["rules/loco.actor", "rules/loco.dynloco", "rules/loco.state", "rules/flight.grav_actor", "rules/flight.dynloco",
-                    "rules/flight.actor", "rules/loco.player_input", "rules/input.mask"]
+                    "rules/flight.actor", "rules/flight.locomotion", "rules/flight.spring_rows", "rules/loco.player_input",
+                    "rules/input.mask"]
     },
     "rules.noclip": {
       "symbols": ["rules/ResolveActorCollider", "rules/ResolveActorColliderOff", "@rules/ResolveActorCollider.off",

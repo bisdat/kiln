@@ -61,13 +61,21 @@ second hook placed in front of `kiln.chat`'s, such as `kiln-emf`'s, made it see 
 longer recognised players' lines.) `kiln-emf`'s client hook is ordered after `kiln.chat`'s. An EMF mod's `hook("ChatLogAdd", ...)` or a Shroudtopia mod's
 `CreateDetour` is a link of its own and runs before both.
 
-A line that nobody consumes is added back with the original arguments through the rest of the chain, so the links after
-`kiln.chat`'s on `ChatLogAdd` see it then; links in front of it saw it when the game called. A link that reads `caller()` in that call gets the
+A line that nobody consumes (an ordinary line, or a slash line naming no Kiln command) is added back in the same Pre,
+before the frame's send step, with every original argument (text, type, tags, connection, account and the game's time)
+through the rest of the chain, so the game gets exactly what it would have got without Kiln (since 0.2.0-dev.29.17 the
+time too; before, an empty one). The line is held rather than passed at once because whether it is a Kiln command, and
+whether a handler cancels or rewrites it, is decided by managed code, which runs in Pre and not inside the game's
+receive loop. The links after `kiln.chat`'s on `ChatLogAdd` see it then, once; links in front of it saw it when the
+game called, and not again. A link that reads `caller()` in that call gets the
 record of the earlier game call on the same thread, not a new one. `state/hooks.json` lists the links: labels `chat/ChatLogAdd` and `chat/ChatReceive`.
 
 Evidence: `native/services/chat/tests/run.sh` (Wine, no game) builds the real `kiln.chat` and `kiln-emf` hook code on one
 function in the real chain, in four install orders (including an EMF mod's hook in front, added first or last): a typed line is held back and
-delivered, other call sites are not, and 4 threads x 50 lines are told apart per thread.
+delivered, other call sites are not, 4 threads x 50 lines are told apart per thread, and an unknown slash line that
+the subscriber leaves alone reaches the game in the same Pre with the same arguments as the same line with nobody
+subscribed (a link in front sees it once). Managed: `Kiln.Api.Tests` `CommandsTests` (pass-through, the setting, known
+commands and usage errors) and `Kiln.TestKit.Tests` `ChatFakeTests` (end to end with fake players).
 
 ## Commands
 ```csharp
@@ -80,8 +88,15 @@ Commands.Register("time", ctx =>
 }, CommandPermission.Admin, usage: "[time]", description: "shows or sets the time of day", "t");
 ```
 - Chat: "/time 7:30" runs the handler as the player; the line itself is not shown (set `ctx.KeepLine = true` to let it
-  through). Replies go to the player. Unknown "/x" gets "Unknown command" and is dropped
-  (`Commands.UnknownCommands = UnknownCommandPolicy.PassThrough` lets it through instead). `/help [command]` is built in.
+  through). Replies go to the player. A known command (name or alias) with wrong arguments gets its usage error, and
+  the line is not shown. `/help [command]` is built in.
+- A slash line naming **no Kiln command** passes through untouched (default since 0.2.0-dev.29.17): the game's chat and
+  whatever else reads chat (EMF Lua mods, Shroudtopia, Flame, a native mod) get it exactly as if Kiln weren't there, with
+  no reply from Kiln. Kiln never swallows other loaders' commands. Kiln's "Unknown command '/x'. Type /help for a
+  list." reply, which eats the line, is a server setting: `"unknownCommands": "reply"` in `kiln/config/chat.json`
+  ([Server settings](#server-settings)). `Commands.UnknownCommands` (`UnknownCommandPolicy.PassThrough` /
+  `Reply`) reads the value in effect; a mod may set it in code, but the server's chat.json, when it sets the key, wins.
+  Commands run from the console, the control folder or code (`Commands.Execute`) still report unknown names as errors.
 - Code: `CommandResult r = Commands.Execute(CommandSource.Console, "time 7:30");` (tick thread). `r.Found`, `r.Denied`,
   `r.Ok`, `r.Error`, `r.Output`, `r.Text`. Sources: `CommandSource.Console` (admin), `CommandSource.Remote("dashboard",
   admin: true)`, `CommandSource.ForPlayer(entity)`.
@@ -99,6 +114,43 @@ Commands.Register("time", ctx =>
   many mods ask, stays while one of their registrations is held, and goes when the last one is disposed or its mod
   unloads. Its handlers run as Kiln.
 - Handlers run on the tick thread in their mod's context (Scheduler, `await`, services attribute work to that mod).
+
+## Tab completion in the game's chat (kiln:chat)
+The client's Tab completion ([chat-history.md](../chat-history.md#tab-completion), GitHub issue 44, pull request 73)
+asks the server for matches over Kiln's own network channel `kiln:chat` (version 1, `required: false`: vanilla
+clients and servers, and Kilns without it, join as before). Code: `managed/services/Kiln.Chat/ChatCompletionNetwork.cs`.
+- **Messages.** Request (1, to the server): an id and the line, at most 256 UTF-8 bytes, starting with `/`, no control
+  characters. Reply (2, to that client): the same id and line, the UTF-8 byte offset where the completed word starts,
+  and at most 20 suggestions of at most 128 bytes each. The client drops a reply whose id or line is not the one it
+  is waiting for, or whose offset falls inside a character.
+- **Permissions.** The server answers with `Commands.Complete(CommandSource.ForPlayer(player), line)`, where the player
+  is the connection's own (`NetContext.Player`), never anything in the message. So a player is offered only the
+  commands, subcommands and arguments they may run; `Console` commands never. Nothing is executed: completion only
+  reads the command tree. Mods' commands registered with `Commands.Register`/`RegisterAll` take part with no extra
+  code; their argument completions are offered too.
+- **Limits.** 10 requests a second per connection (more are dropped without a reply); the handler runs on the tick
+  thread, without disk I/O, and logs only an exception's type (never the line).
+- **Hosted worlds.** The hosting player's own requests go through a local queue to the same handler on the server
+  tick, with the host's player and its own rate bucket.
+- **A server without the channel.** The client stops asking on that connection after the first refused send and asks
+  again on the next one.
+- Tests: `Kiln.Api.Tests` `ChatCompletionProtocolTests` (bounds, UTF-8, stale replies) and `ChatCompletionServerTests`
+  (a guest is not offered an admin command, console commands are never offered, the rate limit, the hosted path).
+
+## Server settings
+`kiln/config/chat.json` (the config folder: `kiln/config`, or the active profile's configDir). Optional; unknown keys
+are ignored; read when first needed and again whenever the file changes, so an edit applies without a restart.
+
+```json
+{ "unknownCommands": "reply" }
+```
+
+| Key | Values | Default | What it does |
+|---|---|---|---|
+| `unknownCommands` | `"passThrough"`, `"reply"` | `"passThrough"` | What a chat line naming no Kiln command does. `passThrough`: it reaches the game and other mods untouched, no reply. `reply`: Kiln eats it and tells the player "Unknown command" (the behaviour before 0.2.0-dev.29.17); other loaders' slash commands then never reach them. |
+
+A bad value is logged (`kiln.chat: .../chat.json: unknownCommands must be "reply" or "passThrough" ...; ignored`) and
+the default applies.
 
 ## C (native plugins)
 ```c

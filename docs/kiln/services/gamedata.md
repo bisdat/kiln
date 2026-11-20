@@ -15,7 +15,8 @@ per language). Evidence and layouts: `docs/re/gamedata.md`; research:
 | C table | `native/core/abi/services/kiln_gamedata.h` (`kiln.gamedata` v1, published by kiln-content.dll) |
 | Native | `native/services/content/gamedata*.cpp` (in `kiln/services/kiln-content.dll`, sharing kiln.content's store) |
 | Managed | `managed/services/Kiln.Content/GameData.cs` (`Content.Templates`, `Arsenals`, `Sequences`, `Buffs`, `Perks`, `Skills`, `ItemData`, `item.Config(...)`, `Content.RegisterSection`) |
-| Test | `mods/tests/gamedata-test/` (PASS / FAIL lines) + `Observer/` (logs value changes) + `Clones/` (mod `gamedata-clones`: perk and buff clones; disable it for the placeholders) |
+| Capabilities | `kiln.gamedata` (the table), `gamedata.template_clones`, `gamedata.buff_lookup` (sigdb); since 0.2.0-dev.29 `gamedata.buff_budget`, `gamedata.buff_registration` (with the table) and `gamedata.expanded_buff_room` (the 4,096 room is reserved; a session row) |
+| Test | `mods/tests/gamedata-test/` (PASS / FAIL lines) + `Observer/` (logs value changes) + `Clones/` (mod `gamedata-clones`: perk and buff clones; disable it for the placeholders) + `Caps/` (mod `gamedata-caps`: 4,097 buff clones, the budget and result-bearing definitions); host: `native/services/content/tests/buffroom_test.cpp` |
 | Samples | `mods/samples/SpellTweaks/` (Fireball I and the double jump), `mods/samples/CreatureTweaks/` (every Vukah, an Elite Vukah clone), `mods/samples/NewItems/` (`content/frostbite.json`: a perk and a buff clone with texts, on Glacier) |
 
 ## Data packs
@@ -222,9 +223,57 @@ that needs its own permanent numbers and its own name is a **clone**.
   no runtime map to add to. With the first buff clone Kiln serves the collection from its own copy: the game's records
   at the same indices, then the clones, and a rebuilt map; each world's BuffRegistry is pointed at it. The game's
   records stay where every layer writes (buff tweaks, config adds, tooltips work as before); Kiln's copy follows them
-  after each change. Room: 1,024 buff clones per process. kiln.log "the server world's BuffRegistry (… +0x20) reads
-  Kiln's buff collection: 276 buffs (2 clones)", and the game's own lookup as a self-check: "the game's
-  getBuffType(0x26317bd2) in the server world = … (the clone's record); a game buff 0xcdbe9c80 = … (Kiln's copy)".
+  after each change. kiln.log "the server world's BuffRegistry (… +0x20) reads Kiln's buff collection: 276 buffs
+  (2 clones)", and the game's own lookup as a self-check for the first clone of a world, the last of each batch and
+  every clone it does not find: "the game's getBuffType(0x26317bd2) in the server world = … (the clone's record, 1 of 2);
+  a game buff 0xcdbe9c80 = … (Kiln's copy)".
+- **Room** (since 0.2.0-dev.29): 4,096 buff clones per process, all mods together. It is Kiln's own quota, not the
+  game's: the game finds a buff by its 32-bit id, and a buff on an entity, on the wire (`BuffNetworkData`) or in a save
+  carries that id, never a record number, so the room changes nothing the game sends or saves. The records are
+  reserved in one block next to the game's collection when the first world loads (804,080 bytes for 4,096 clones and
+  the game's 274 buffs, plus a header of about 100 KB with the map once a clone exists); the registries keep reading
+  the game's own collection until there is a clone. When the address space next to the collection cannot give that
+  block (kiln.log "no memory near the buff collection for 4096 clones … trying the 1024-clone room"), the room is
+  1,024 for the process. Capability `gamedata.expanded_buff_room` says which: pending until the first world, then
+  available with 4,096 or unavailable with the reason. Sizes are computed in 64 bits and checked before memory is asked
+  for. A clone is refused, with its reason, when the room is full ("Kiln's buff collection is full (4096 clones)"),
+  when its GUID's id is 0, a game buff's or another clone's (FNV-1a of two GUIDs can be equal: the second is refused
+  and the message names the first), and when near memory has no room for a header. The room is fixed until a restart.
+- **Headers** (since 0.2.0-dev.29): the map the game reads is rebuilt and published as a new header when clones are
+  added, and an old header is never freed (a game thread may still be reading it). So clones are published in
+  batches: a world's load publishes one header for every clone defined before it, one data pack's `"add"` list one
+  header for the whole list (also when the pack is applied while the world runs, and for the content sync's
+  definitions on a client, and the placeholders of a world's load). kiln.log "buff batch: 2096 clone(s) in the server world, one new header (4370 records); Kiln
+  keeps 2 header(s), … bytes, and 804080 bytes of records". A clone defined from code while a world runs is
+  published at once, with a header of its own (about 100 KB at 4,096 clones): define many clones in a data pack or
+  before the world loads. `status` JSON `clones.buffCopy` counts `headers`, `headerBytes`, `recordBytes` and
+  `attaches`.
+- **Budget and answers** (since 0.2.0-dev.29; `Content.Buffs` only, any other registry throws `ArgumentException`):
+  - `Content.Buffs.GetBudget()` (any thread): a `CapacityQueryResult` for the room, process-wide: `Capacity` 4,096
+    (1,024 on the fallback, `Expanded` false), `GameUsed` 0 (the game's own buffs take no clone room), `KilnUsed` the
+    clones of loaded mods and of Kiln, `Reserved` the records nothing active uses (a mod that is gone, placeholders,
+    orphans, a record whose registration failed after it was taken). `Ok` is false with `Reason` `NotReady` until the
+    first world reserved the room. A change posts `CapacityChangedEvent` (`Quota` `gamedata.buff_budget`) at the next
+    step; it is measured every 25 steps while something listens, and after each `Define` below.
+  - `Content.Buffs.Define(clone, new DefinitionRegistrationOptions(timing))` (and the `JsonObject` overload; tick
+    thread): a `DefinitionRegistrationResult`. `RequireRegistered`: registered now (the record in Kiln's copy, the
+    world's BuffRegistry reading it, and the game's own getBuffType asked to find it where `gamedata.buff_lookup`
+    resolves; otherwise a warning says it was not checked), or refused with a `Code` and a `Reason` (a post-allocation failure retains its occupied record): `NoWorld`, `NotReady` (game data or the world's BuffRegistry not loaded yet), `CapacityExceeded`,
+    `IdCollision` (the GUID's id is 0, a game buff's or another clone's), `NameTaken`, `UnknownBase`, `OwnerInactive`.
+    `AllowNextStart`: the same when it can register now; when only the moment is wrong it writes
+    `kiln/data/gamedata/pending/<mod>/<guid>.json` and answers `AcceptedNextStart` (no room taken; the definition is not
+    registered in this process); the next start waits for the reliable loaded-mod list, admits only loaded owners,
+    the world's load registers it ("... at this start: Registered") and the file goes. A known refusal (full, a taken
+    id or name) is never stored. A failure after the record was taken answers `Retained` with `SlotsConsumed` 1. The
+    same definition again answers the same, `SlotsConsumed` 1 once, and posts nothing; a change posts
+    `DefinitionRegistrationChangedEvent` at the next step. A malformed definition (also one with `"placeholder"`)
+    throws `ArgumentException` before anything changes.
+  - `Content.Buffs.GetRegistration(id)` (any thread): what became of a definition since, by its `RegistrationId`
+    (UUIDv5 of the mod, "buff", the GUID and the SHA-256 of the definition's text with sorted keys): `Registered`,
+    `Superseded` (a later definition of the GUID), `Retained` / `OwnerInactive` (the mod unloaded: its record stays,
+    reserved, until a loaded mod defines the GUID again), `NotFound` for an id this process does not know (receipts
+    live as long as the process; the ones stored for the next start come back with their file).
+  - Stored definitions are handed to the loaded mod's owner. Inactive-mod and refused files stay on disk; delete unused files from the pending folder to reclaim its 4,096-file / 256 MiB allowance. Writes are flushed before acknowledgement. Startup settlement is available through its receipt; it does not currently post a managed definition event.
 - **Referencing them**:
   - an item's perk slot: code `Content.ItemData.Get(item).Set("perkReferences[2]", "Kiln_Sample_FrostbiteEdge")`
     (`perkIds[2]` follows: FNV-1a of the GUID); new items: kitbash `"perks": [null, null, "<perk clone GUID>"]`
@@ -246,7 +295,8 @@ that needs its own permanent numbers and its own name is a **clone**.
   recorded in the world's WorldData (Kiln's bundle `kiln.gamedata`, key `missing-gamedata`, written with every world
   save). At world load (before mods' `OnReady` and the save), a recorded clone that no loaded mod defines gets a
   placeholder: same GUID and id, the recorded base made inert (no program, no configs, no tooltip values, no VFX, no
-  follow-up), named `[Missing: <mod>:<name>]`. kiln.log "missing gamedata: 2 perk / buff clone(s) of mods that are not
+  follow-up), named `[Missing: <mod>:<name>]`; all of a world's placeholders are defined as one batch (one buff header
+  for them; since 0.2.0-dev.29), and each holds a record of the buff room, counted as reserved until its mod takes it back. kiln.log "missing gamedata: 2 perk / buff clone(s) of mods that are not
   loaded are kept as placeholders (saved references stay): buffs gamedata-clones:Kiln_Test_Frostbite (0x9887fff3), …".
   When the mod comes back its definition takes the GUID over ("… is back (pack gamedata-clones): it takes its GUID …
   back from the placeholder"; at the next start no placeholder is made).

@@ -14,6 +14,7 @@
 
 #include "kiln_api.h"
 #include "services/kiln_assets.h"
+#include "services/kiln_assets_vfx.h"
 
 namespace ka {
 
@@ -118,6 +119,7 @@ extern std::atomic<uintptr_t> g_S;
 uint32_t game_handle(uintptr_t S, const Key& k);                     // 0 = not in the game
 bool game_data(uintptr_t S, uint32_t handle, DataSpan* out);
 bool game_type_list(uintptr_t S, uint32_t type, const uint8_t** keys, uint64_t* count);
+bool game_vfx_keys(uintptr_t S, std::vector<Key>* out);  // guarded, bounded copy of the original type list
 bool game_key_of(uintptr_t S, uint32_t handle, Key* out);
 
 // Hooks (hooks.cpp)
@@ -136,7 +138,12 @@ struct GameBlob {
     uint64_t offset;
     uint16_t container;
 };
-bool game_blob_find(const HashK& h, GameBlob* out);  // the game's content map (needs the resource system)
+// The game's content map (needs the resource system). lazy: when the game has not asked for its content index yet, ask its
+// accessor here (only from the game's own threads, while loading cannot own the reader: blob_read's existing callers);
+// false: answer not found until the game has opened its index (any thread: the item icon worker, the names task).
+bool game_blob_find(const HashK& h, GameBlob* out, bool lazy = true);
+// A copy of the game's resident memory that cannot fault (SEH): false when the bytes cannot be read (any thread).
+bool game_copy(void* out, const void* game, size_t n);
 std::string game_container_path(uint16_t index);   // UTF-8 path of enshrouded_NNN.dat, "" if unknown
 // The keys of the game's own content index, copied (the catalog, catalog.cpp): the whole key array in one guarded copy,
 // checked against its bucket layout on the copy, the header read again after it. Fetches the index when the game has not
@@ -152,7 +159,22 @@ struct Served {
     size_t size = 0;
     uint32_t handle = 0;  // synthetic (new) or the game's (override); 0 until known
     bool is_new = false;
+    uint64_t registration = 0;  // identifies this put, including replacements by the same owner/key
 };
+struct ResourceRegistration {
+    Key key;
+    uint64_t registration;
+};
+struct ResourceOmission {
+    KilnOwner owner;
+    Key key;
+    std::string mod, why;
+};
+// Collector/test seam. Called with no store lock, ReadGuard, merged mutex or pending lock held.
+void report_resource_omission(const ResourceOmission& omission);
+// Hook/list candidates copied inside a ReadGuard. Resolves only still-live matching puts under the store
+// mutex, then reports outside it; an old enumeration cannot fault a replacement's mod.
+void report_vfx_omissions(const std::vector<ResourceRegistration>& omitted, const char* why);
 // One level of the resource index (immutable once published).
 struct ResSnap {
     std::unordered_map<Key, Served, KeyHash> keys;
@@ -173,6 +195,8 @@ struct ResView {
     // vanilla + new key lists per type, built on first use. The game keeps the list it was given: never freed.
     mutable std::mutex merged_mu;
     mutable std::unordered_map<uint32_t, const std::vector<uint8_t>*> merged;
+    mutable std::vector<Key> vfx_original;  // VFX cache also follows other loaders' original enumeration
+    mutable uint32_t vfx_capacity = 0;
     const Served* key(const Key& k) const;
     const Served* handle(uint32_t h) const;
     const Key* synth(uint32_t h) const;
@@ -228,6 +252,7 @@ extern std::atomic<uint64_t> g_icon_want;    // generation of the newest icon ke
 extern std::atomic<uint64_t> g_icon_served;  // generation the UI cache has taken in
 void icons_after_populate(uint64_t gen_used);  // hooks.cpp -> assets.cpp
 void on_resource_system_ready(uintptr_t S);    // hooks.cpp -> store.cpp
+bool store_note_resource_system(uintptr_t S);  // publish S under the store mutex; serializes the boot-only capacity gate
 void flush_pending_textures();                 // store.cpp -> assets.cpp: apply boot-time textures once S is up
 
 // Images (image.cpp)
@@ -278,7 +303,7 @@ uint64_t catalog_generation();
 void catalog_changed(CatalogChange why);  // any thread (hooks.cpp: the game's content index became readable)
 std::string catalog_status_json();        // "catalog":{...} for status (the generation and the last change)
 void catalog_release_owner(KilnOwner owner, bool revoked = false);  // closes handles and pending opens; a native revoke is terminal
-bool catalog_start();  // subscribes to native owner revocation before the service table is published
+bool catalog_start();  // subscribes to native owner revocation (catalog handles, store_owner_retired) before the table is published
 KilnResult op_catalog_open(KilnOwner owner, uint32_t mode, KilnHandle* handle, KilnBlobCatalogInfo* info);
 KilnResult op_catalog_read(KilnHandle handle, uint64_t first, KilnBlobCatalogEntry* out, uint32_t entry_size, size_t cap,
                            size_t* written);
@@ -298,16 +323,36 @@ KilnResult op_blob_override(KilnOwner owner, const KilnContentHash* hash, const 
 KilnResult op_blob_add_ex(KilnOwner owner, const void* data, size_t len, KilnContentHash* out, uint32_t origin);
 KilnResult op_blob_override_ex(KilnOwner owner, const KilnContentHash* hash, const void* data, size_t len, uint32_t origin);
 KilnResult op_blob_remove(KilnOwner owner, const KilnContentHash* hash);
-KilnResult op_blob_read(const KilnContentHash* hash, void* buffer, size_t cap, size_t* out_len);
+// resident: never asks the game for its content index itself (game_blob_find lazy false): blob_read_resident, texture_rgba.
+KilnResult op_blob_read(const KilnContentHash* hash, void* buffer, size_t cap, size_t* out_len, bool resident = false);
 KilnResult op_icon_register(KilnOwner owner, const uint8_t guid[16], const Rgba& img);
 KilnResult op_icon_remove(KilnOwner owner, const uint8_t guid[16]);
 int32_t op_icon_state(const uint8_t guid[16]);
 void op_revert_owner(KilnOwner owner);
 std::string store_status_json();
+// An owner the core revoked (the owner-retiring observer, which must not wait): marks it without waiting. From the mark on
+// its registrations are refused (KILN_ERR_REVOKED); what it had registered is reverted, as revert_owner does, by the next
+// store operation or by a cleanup thread the mark starts, whichever takes g_mu first. Until then its bytes may still be
+// served (a few milliseconds: the thread waits for g_mu and for the hooks' readers to leave the old snapshots).
+void store_owner_retired(KilnOwner owner);
+void store_drain_retired();  // runs that revert now if one is due (may wait: not from a reader or the observer)
+bool store_cleanup_idle();   // no revert due and no cleanup thread running (the host test)
+
+// Called before installing the resource hooks; path is the original KFC metadata (a .bak when present).
+void vfx_preflight_start(const std::wstring& path, uint32_t capacity);
+KilnResult KILN_CALL op_vfx_budget(KilnAssetsVfxBudget* out);
+KilnResult KILN_CALL op_vfx_set_capacity(KilnOwner owner, uint32_t capacity);
+KilnResult KILN_CALL op_vfx_resource_put(KilnOwner owner, KilnStr mod, const KilnAssetKey* key,
+                                      const void* data, size_t len, uint32_t flags);
+uint32_t vfx_capacity();  // lock-free for the type-list hook
 
 std::string api_path(int kind);
 std::wstring widen(const std::string& s);
 std::string narrow(const std::wstring& s);
 bool read_file(const std::wstring& path, std::vector<uint8_t>* out, std::string* why);
+// `size` bytes of a file at `offset`, and no other: a game container is about 1 GB (read_file would read all of it).
+// `out` null: only whether the file holds the range. short_file: the file ends before offset + size.
+enum class RangeRead { ok, short_file, failed };
+RangeRead read_file_range(const std::wstring& path, uint64_t offset, size_t size, void* out, std::string* why);
 
 }  // namespace ka

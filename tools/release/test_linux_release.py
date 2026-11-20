@@ -157,6 +157,15 @@ class LinuxReleaseTests(unittest.TestCase):
         self.assertTrue(self.updater_check(marker + "frostdev.io/kiln/updates".encode("utf-16le")))
         self.assertTrue(self.updater_check(b"\x7fELF" + release.BUILD_MARKERS["direct"], absent=False))
 
+    def test_updater_scan_knows_the_beta_feed(self):
+        # dev.29: the beta channel's GitHub feed is one of the self-update's strings: never in the Nexus build, and a
+        # direct build without it is missing part of its self-update
+        marker = b"\x7fELF" + bytes(60) + release.BUILD_MARKERS["nexus"]
+        problems = self.updater_check(marker + b"/releases/download/updates-beta/latest.json")
+        self.assertTrue(any("the GitHub beta update feed" in p for p in problems), problems)
+        problems = self.updater_check(b"\x7fELF" + release.BUILD_MARKERS["direct"], absent=False)
+        self.assertTrue(any("lacks the GitHub beta update feed" in p for p in problems), problems)
+
     def test_nexus_upload_gate_rejects_a_direct_build_even_in_nexus_folder(self):
         spec = importlib.util.spec_from_file_location("nexus_gate", HERE / "nexus.py")
         nexus = importlib.util.module_from_spec(spec)
@@ -484,7 +493,7 @@ if sys.argv[1] == "run":
         # Exercise release.sh's actual Linux wrapper through run.sh and a fake Docker client.
         # No release, signing environment, image build or provider request is involved.
         env = self.mock_docker()
-        env.update(KILN_NEXUS_ENABLED="0", KILN_NEXUS_OAUTH_CLIENT_ID="unit-test-registration",
+        env.update(KILN_LAUNCHER_BASE_RELEASE="0.2.0-dev.28", KILN_NEXUS_ENABLED="0", KILN_NEXUS_OAUTH_CLIENT_ID="unit-test-registration",
                    KILN_NEXUS_OAUTH_REDIRECT_URI="http://127.0.0.1:8089/callback",
                    KILN_LINUX_IMAGE="sha256:" + "a" * 64)
         wrapper = re.search(r"^  linux\(\) \{\n.*?^  \}", (HERE / "release.sh").read_text(), re.M | re.S)
@@ -499,6 +508,7 @@ if sys.argv[1] == "run":
         self.assertEqual(r.returncode, 0, r.stderr)
         run = next(json.loads(line) for line in self.calls.read_text().splitlines() if json.loads(line)[0] == "run")
         forwarded = [run[i + 1] for i, arg in enumerate(run[:-1]) if arg == "-e"]
+        self.assertIn("KILN_LAUNCHER_BASE_RELEASE", forwarded)
         self.assertIn("KILN_NEXUS_ENABLED", forwarded)
         self.assertIn("KILN_NEXUS_OAUTH_CLIENT_ID", forwarded)
         self.assertIn("KILN_NEXUS_OAUTH_REDIRECT_URI", forwarded)
@@ -654,6 +664,115 @@ runuser() { echo 'kilnctl 1.0'; return 19; }
                             "test", str(HERE / "checks.sh"), str(out)], capture_output=True)
         self.assertNotEqual(r.returncode, 0)
 
+
+
+# A stand-in for dotnet in check_template's tests: `new install`, `new kiln-mod -n NAME` (the template's files: a csproj
+# naming Kiln.Sdk/$FAKE_SDK_VERSION, NAMEMod.cs with OnLoad) and `build` (kiln.mod.json with "boot": true when the csproj
+# has <KilnBoot>true</KilnBoot> and the source an OnBoot). FAKE_BOOT_BUILD=fail: a KilnBoot build fails (KILN034);
+# FAKE_BOOT_BUILD=drop: it leaves "boot" out. Every call logs NUGET_PACKAGES.
+FAKE_DOTNET = r"""#!/usr/bin/env python3
+import os, pathlib, sys
+a = sys.argv[1:]
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write(" ".join(a[:2]) + " NUGET_PACKAGES=" + os.environ.get("NUGET_PACKAGES", "") + "\n")
+if a[:2] == ["new", "install"]:
+    sys.exit(0)
+if a[:2] == ["new", "kiln-mod"]:
+    name = a[a.index("-n") + 1]
+    d = pathlib.Path(name)
+    d.mkdir()
+    (d / f"{name}.csproj").write_text(f'<Project Sdk="Kiln.Sdk/{os.environ["FAKE_SDK_VERSION"]}">\n  <PropertyGroup>\n'
+                                      f'    <KilnModId>{name.lower()}</KilnModId>\n  </PropertyGroup>\n</Project>\n')
+    (d / f"{name}Mod.cs").write_text("public sealed class M : Mod\n{\n    public override void OnLoad()\n    {\n    }\n}\n")
+    sys.exit(0)
+if a[:1] == ["build"]:
+    proj = next(pathlib.Path(".").glob("*.csproj")).read_text()
+    src = "".join(p.read_text() for p in pathlib.Path(".").glob("*.cs"))
+    boot = "<KilnBoot>true</KilnBoot>" in proj and "override void OnBoot(BootContext boot)" in src
+    mode = os.environ.get("FAKE_BOOT_BUILD", "")
+    if boot and mode == "fail":
+        print("error KILN034: 'M.OnBoot' never runs")
+        sys.exit(1)
+    out = pathlib.Path("bin/Release/net10.0")
+    out.mkdir(parents=True)
+    (out / "kiln.mod.json").write_text('{"id": "m"' + (', "boot": true' if boot and mode != "drop" else "") + "}")
+    sys.exit(0)
+sys.exit("fake dotnet: unexpected " + " ".join(a))
+"""
+
+
+class TemplateCheckTests(unittest.TestCase):
+    """check_template (checks.sh): the packed templates' mod and a KilnBoot mod with an OnBoot build; its package cache stays
+    its own."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="kiln-template-check-")
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        (self.dir / "bin").mkdir()
+        fake = self.dir / "bin" / "dotnet"
+        fake.write_text(FAKE_DOTNET)
+        fake.chmod(0o755)
+        (self.dir / "out" / "sdk").mkdir(parents=True)
+
+    def run_check(self, mode=""):
+        env = dict(os.environ, PATH=f"{self.dir / 'bin'}:{os.environ['PATH']}", FAKE_LOG=str(self.dir / "dotnet.log"),
+                   FAKE_SDK_VERSION="9.9.9-test", FAKE_BOOT_BUILD=mode, NUGET_PACKAGES="/caller/packages")
+        script = ('set -euo pipefail; source "$1"; ck=$2; out=$3; sdk_version=9.9.9-test; '
+                  'if check_template; then rc=0; else rc=1; fi; echo "after NUGET_PACKAGES=$NUGET_PACKAGES DOTNET_CLI_HOME=${DOTNET_CLI_HOME:-}"; exit $rc')
+        r = subprocess.run(["bash", "-c", script, "test", str(HERE / "checks.sh"), str(self.dir / "ck"), str(self.dir / "out")],
+                           env=env, capture_output=True, text=True)
+        log = (self.dir / "dotnet.log").read_text() if (self.dir / "dotnet.log").exists() else ""
+        return r, log
+
+    def test_the_boot_mod_is_built_with_KilnBoot_and_an_OnBoot(self):
+        r, log = self.run_check()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("built (KilnBoot): BootCheck/bin/Release/net10.0/kiln.mod.json", r.stdout)
+        proj = (self.dir / "ck" / "template" / "BootCheck" / "BootCheck.csproj").read_text()
+        self.assertIn("<KilnBoot>true</KilnBoot>", proj)
+        self.assertIn("<WarningsAsErrors>$(WarningsAsErrors);KILN035</WarningsAsErrors>", proj)
+        src = (self.dir / "ck" / "template" / "BootCheck" / "BootCheckMod.cs").read_text()
+        self.assertIn("override void OnBoot(BootContext boot)", src)
+        self.assertIn("Config.Register<BootCheckSettings>().Value", src)
+        # every dotnet call used the check's own cache; the caller's shell keeps its own
+        self.assertEqual(log.count("NUGET_PACKAGES="), 5, log)
+        self.assertNotIn("NUGET_PACKAGES=/caller/packages", log)
+        self.assertEqual(log.count(f"NUGET_PACKAGES={self.dir / 'ck' / 'template' / 'packages'}"), 5, log)
+        self.assertIn("after NUGET_PACKAGES=/caller/packages DOTNET_CLI_HOME=\n", r.stdout)
+
+    def test_a_KilnBoot_build_that_fails_fails_the_check_and_leaks_no_cache(self):
+        r, _ = self.run_check("fail")
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("the boot mod (KilnBoot, OnBoot) did not build against the packed SDK", r.stdout)
+        self.assertIn("after NUGET_PACKAGES=/caller/packages DOTNET_CLI_HOME=\n", r.stdout)
+
+    def test_a_manifest_without_boot_fails_the_check(self):
+        r, _ = self.run_check("drop")
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn('kiln.mod.json of the KilnBoot mod has no "boot": true', r.stdout + r.stderr)
+
+
+class SourceArchiveTests(unittest.TestCase):
+    """lib/sf-source.sh: the ShroudForge source archive is world-readable (0644) like the release's other downloads."""
+
+    def test_the_archive_is_0644_whatever_the_umask(self):
+        with tempfile.TemporaryDirectory(prefix="kiln-sf-source-") as tmp:
+            repo = Path(tmp) / "fork"
+            repo.mkdir()
+            git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
+            subprocess.run(git + ["init", "-q"], check=True)
+            (repo / "a.txt").write_text("a\n")
+            subprocess.run(git + ["add", "a.txt"], check=True)
+            subprocess.run(git + ["commit", "-qm", "a"], check=True)
+            commit = subprocess.run(git + ["rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+            out = Path(tmp) / "source" / f"shroudforge-kiln-{commit[:12]}-src.tar.gz"
+            r = subprocess.run(["bash", "-c", 'umask 077; exec "$@"', "sf", str(HERE / "lib" / "sf-source.sh"), str(repo), commit, str(out)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual(out.stat().st_mode & 0o777, 0o644)
+            with tarfile.open(out) as t:
+                self.assertIn(f"shroudforge-kiln-{commit[:12]}/a.txt", t.getnames())
 
 if __name__ == "__main__":
     unittest.main()

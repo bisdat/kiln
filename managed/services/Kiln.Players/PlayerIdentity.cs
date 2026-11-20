@@ -216,6 +216,8 @@ internal static class PlayersStartup
         {
             PlayerIdentity.Install();
             PlayersCaps.Rows.Ensure();  // with players.aim  // Kiln.Players' rows from the first tick (docs/kiln/services/caps.md)
+            // the intake of held client actions for Kiln.Items' typed equipment decisions (07, since 0.2.0-dev.29)
+            PlayerStateWatch.TypedIntake.Register();
             Backend.Current.Log(0, LogLevel.Info,
                 $"kiln.players: identity.players and the players' entity source supplied (kiln.players {(SafeAvailable() ? "available" : "unavailable")})");
         }

@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <map>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -16,9 +17,35 @@
 #include "assets.h"
 #include "services/kiln_hooks.h"
 
+#ifdef KILN_ASSETS_OMISSION_REPORT_TEST
+// Core-side seam for the extracted production assets collector reporter.
+namespace kiln::boot {
+struct OmissionFault { std::string mod, kind, key, why; };
+std::vector<OmissionFault> g_faults;
+std::function<void()> g_fault_reported;
+bool activation_fault(const KilnApi*, KilnOwner, const std::string& mod, const std::string& kind,
+                      const std::string& key, const std::string& why) {
+    g_faults.push_back({mod, kind, key, why});
+    if (g_fault_reported) g_fault_reported();
+    return true;
+}
+}  // namespace kiln::boot
+#endif
+
 // ---- the game side, faked at the narrowest seam: the calls of the game's own functions and the feature switches --------------------
 namespace ka {
 std::atomic<uintptr_t> g_S{0};
+#ifdef KILN_ASSETS_OMISSION_REPORT_TEST
+std::mutex g_pending_mu;
+std::map<KilnOwner, std::string> g_boot_required_owner;
+#include "resource_omission.inc"
+#else
+// assets.cpp is not part of the host store target. Preserve its diagnostic at this reporter seam.
+void report_resource_omission(const ResourceOmission& r) {
+    LOGW("assets: mod %s owner %llu resource %s refused: %s", r.mod.empty() ? "<unknown>" : r.mod.c_str(),
+         static_cast<unsigned long long>(r.owner), key_str(r.key).c_str(), r.why.c_str());
+}
+#endif
 namespace {
 struct GameRes {
     uint32_t handle;
@@ -30,11 +57,21 @@ bool g_fake_ui = false;
 bool g_fake_content = true;
 // the game's content index as game_index_keys (hooks.cpp) answers for it
 GameIndex g_fake_index = GameIndex::not_ready;
+bool g_fake_index_bad_alloc = false;
 std::vector<HashK> g_fake_keys;
 uint64_t g_fake_total = 0;  // > 0: the index's count when it is "too_many"
 std::function<void()> g_index_copy;
 std::function<void()> g_catalog_read_copy;
 void catalog_read_acquired() { if (g_catalog_read_copy) g_catalog_read_copy(); }
+// store.cpp's cleanup thread for revoked owners: held here while g_hold_cleanup is set (to see a store call do the revert)
+std::atomic<bool> g_hold_cleanup{false};
+std::atomic<int> g_cleanup_held{0};
+void cleanup_worker_started() {
+    if (!g_hold_cleanup.load()) return;
+    ++g_cleanup_held;
+    while (g_hold_cleanup.load()) std::this_thread::yield();
+    --g_cleanup_held;
+}
 KilnOwnerRetiringFn g_owner_retiring = nullptr;
 void* g_owner_retiring_user = nullptr;
 KilnResult KILN_CALL observe_owner(KilnOwner, KilnOwnerRetiringFn fn, void* user, KilnHandle* handle) {
@@ -55,6 +92,7 @@ const void* KILN_CALL fake_service(KilnStr name, uint32_t) {
 bool resources_on() { return true; }
 bool content_hooks_on() { return g_fake_content; }
 GameIndex game_index_keys(std::vector<HashK>* out, size_t max_keys, uint64_t* total, std::string* why) {
+    if (g_fake_index_bad_alloc) throw std::bad_alloc();
     if (g_index_copy) g_index_copy();
     out->clear();
     *total = g_fake_total ? g_fake_total : g_fake_keys.size();
@@ -66,8 +104,9 @@ GameIndex game_index_keys(std::vector<HashK>* out, size_t max_keys, uint64_t* to
 }
 bool content_on() { return false; }
 bool ui_on() { return g_fake_ui; }
+bool g_fake_vfx_readable = true, g_fake_lookup_missing = false;
 uint32_t game_handle(uintptr_t S, const Key& k) {  // as hooks.cpp: nothing before the resource system is up
-    if (!S) return 0;
+    if (!S || g_fake_lookup_missing) return 0;
     const auto it = g_game.find(k);
     return it == g_game.end() ? 0 : it->second.handle;
 }
@@ -80,13 +119,48 @@ bool game_data(uintptr_t S, uint32_t handle, DataSpan* out) {
         }
     return false;
 }
-bool game_type_list(uintptr_t, uint32_t, const uint8_t** keys, uint64_t* count) {
-    *keys = nullptr;
-    *count = 0;
-    return false;
+bool game_type_list(uintptr_t S, uint32_t type, const uint8_t** keys, uint64_t* count) {
+    thread_local std::vector<uint8_t> raw;
+    raw.clear();
+    if (S)
+        for (const auto& [k, r] : g_game) {
+            (void)r;
+            if (k.type != type) continue;
+            const size_t at = raw.size();
+            raw.resize(at + 32, 0);
+            std::memcpy(raw.data() + at, &k, sizeof k);
+        }
+    *keys = raw.data();
+    *count = raw.size() / 32;
+    return S != 0;
 }
-bool game_blob_find(const HashK&, GameBlob*) { return false; }
-std::string game_container_path(uint16_t) { return {}; }
+bool game_vfx_keys(uintptr_t S, std::vector<Key>* out) {
+    out->clear();
+    if (!S || !g_fake_vfx_readable) return false;
+    for (const auto& [k, r] : g_game) {
+        (void)r;
+        if (k.type == 0xe64ee036u) out->push_back(k);
+    }
+    return true;
+}
+// The game's own blobs: the content map knows these (offset, container) and the containers are kiln_test_fs files.
+std::map<std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>, GameBlob> g_fake_game_blobs;
+std::vector<std::string> g_fake_containers;
+int g_fake_lazy_asks = 0, g_fake_resident_asks = 0;  // game_blob_find calls that may / may not ask the game's accessor
+bool g_fake_copy_faults = false;                      // the game's resident bytes cannot be read (moved, unmapped)
+bool game_copy(void* out, const void* game, size_t n) {
+    if (g_fake_copy_faults) return false;
+    std::memcpy(out, game, n);
+    return true;
+}
+bool game_blob_find(const HashK& h, GameBlob* out, bool lazy) {
+    ++(lazy ? g_fake_lazy_asks : g_fake_resident_asks);
+    const auto it = g_fake_game_blobs.find({h.size, h.h0, h.h1, h.h2});
+    if (it == g_fake_game_blobs.end()) return false;
+    *out = it->second;
+    return true;
+}
+std::string game_container_path(uint16_t i) { return i < g_fake_containers.size() ? g_fake_containers[i] : std::string(); }
 void flush_pending_textures() {}
 Rgba resize(const Rgba& s, uint32_t, uint32_t) { return s; }
 }  // namespace ka
@@ -95,7 +169,8 @@ namespace {
 using namespace ka;
 
 std::vector<std::string> g_log;
-void KILN_CALL log_line(KilnOwner, int32_t, KilnStr s) { g_log.emplace_back(s.ptr, s.len); }
+std::mutex g_log_mu;
+void KILN_CALL log_line(KilnOwner, int32_t, KilnStr s) { std::lock_guard lock(g_log_mu); g_log.emplace_back(s.ptr, s.len); }
 
 int g_pass = 0, g_fail = 0;
 void check(bool ok, const std::string& what) {
@@ -303,6 +378,15 @@ void blob_catalog(KilnOwner manifest, KilnOwner mod, KilnOwner native) {
     info.size = 31;
     check(op_catalog_open(mod, 0, &h, &info) == KILN_ERR_INVALID_ARGUMENT && info.size == 31 && info.status == 0, "info.size 31 refused, info untouched");
     // before the game's index is readable: the default open is NOT_READY with no handle; registrations-only works, incomplete
+    g_fake_index_bad_alloc = true;
+    bool allocation_refused = false;
+    try {
+        info = cat_info();
+        allocation_refused = op_catalog_open(mod, 0, &h, &info) == KILN_ERR_BUFFER_TOO_SMALL && h == 0 &&
+            info.status == KILN_BLOB_CATALOG_LIMIT_EXCEEDED && info.reason == KILN_BLOB_CATALOG_REASON_MEMORY_BUDGET;
+    } catch (const std::bad_alloc&) { }
+    g_fake_index_bad_alloc = false;
+    check(allocation_refused, "catalog allocation failure refuses without escaping the native API");
     const HashK g_over{64, 0xa0, 1, 1}, g_only{32, 0xa1, 2, 2};
     const KilnContentHash over = kch(g_over);
     {
@@ -521,10 +605,269 @@ void blob_catalog(KilnOwner manifest, KilnOwner mod, KilnOwner native) {
     if (g_fail == failed_before) std::puts("PASS assets.catalog-snapshot");
 }
 
+// ---- a native owner the core revokes without revert_owner (kiln.hooks' owner-retiring observer) ----------------------------
+bool wait_for(const std::function<bool()>& done, int ms = 10000) {
+    for (int i = 0; i < ms; ++i) {
+        if (done()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return done();
+}
+bool settle() { return wait_for([] { return store_cleanup_idle(); }); }  // the deferred revert done, no cleanup thread left
+void revoke(KilnOwner o) { g_owner_retiring(o, g_owner_retiring_user); }  // what the core's owner_revoke calls
+bool in_content(const HashK& h) {  // the content snapshot the hooks serve from lists the hash
+    ReadGuard g;
+    const ContentSnap* cs = g_content.load();
+    return cs && cs->entries.count(h);
+}
+size_t ledger_count(KilnOwner o) {
+    size_t n = 0;
+    for (const LedgerEntry& e : blob_ledger(nullptr)) n += e.owner == o;
+    return n;
+}
+HashK hk(const KilnContentHash& c) { return HashK{c.size, c.hash0, c.hash1, c.hash2}; }
+// The registrations-only catalog `reader` opens now: every entry.
+std::vector<KilnBlobCatalogEntry> catalog_now(KilnOwner reader) {
+    KilnHandle h = 0;
+    KilnBlobCatalogInfo info = cat_info();
+    if (op_catalog_open(reader, KILN_BLOB_CATALOG_REGISTRATIONS_ONLY, &h, &info) != KILN_OK) return {};
+    auto v = cat_all(h, info.total);
+    op_catalog_close(h);
+    return v;
+}
+bool catalog_names(const std::vector<KilnBlobCatalogEntry>& v, KilnOwner o) {
+    return std::any_of(v.begin(), v.end(), [&](const KilnBlobCatalogEntry& e) { return e.selected_owner == o; });
+}
+
+void owner_revoked_without_revert(KilnOwner other, const Key& game_key, uint32_t game_key_handle, const std::string& game_bytes,
+                                  const Key& icon_key) {
+    const int failed_before = g_fail;
+    catalog_start();  // kiln_plugin_main subscribes the observer
+    check(g_owner_retiring != nullptr && settle(), "the store's cleanup observes native owner revocation");
+    g_fake_index = GameIndex::not_ready;
+
+    // A native owner overrides a game blob another owner overrode first (the later registration is served), adds a blob, overrides a
+    // game resource and registers an icon; the other owner keeps a blob of its own.
+    const KilnOwner gone = 41;
+    const HashK game{8, 0x77, 0x88, 0x99};
+    const KilnContentHash gc = kch(game);
+    KilnContentHash other_own{}, gone_new{};
+    check(op_blob_override(other, &gc, "OTHER!!!", 8) == KILN_OK && op_blob_add(other, "OTHER-OWN-BLOB", 14, &other_own) == KILN_OK,
+          "another owner overrides the game blob and adds one");
+    check(op_blob_override(gone, &gc, "GONE!!!!", 8) == KILN_OK && blob(game) == "GONE!!!!", "the native owner's later override is served");
+    check(op_blob_add(gone, "GONE-NEW-BLOB", 13, &gone_new) == KILN_OK && blob(hk(gone_new)) == "GONE-NEW-BLOB", "it adds a blob");
+    check(put(gone, game_key, "GONE-RES", KILN_ASSET_PUT_OVERRIDE) == KILN_OK && by_handle(game_key_handle) == "GONE-RES",
+          "it overrides a game resource");
+    Rgba img;
+    img.w = img.h = 1;
+    img.px = {9, 8, 7, 6};
+    check(op_icon_register(gone, icon_key.g, img) == KILN_OK && op_icon_state(icon_key.g) == KILN_ICON_PENDING, "it registers an icon");
+    check(ledger_count(gone) == 3 && catalog_names(catalog_now(other), gone), "the ledger and a catalog snapshot list it (3 blobs)");
+    const size_t items_before = items();
+    const uint64_t gen = catalog_generation();
+
+    // The core revokes it while a hook's reader is inside the snapshots: the callback returns at once, the revert waits.
+    std::atomic<bool> holding{false}, release{false}, returned{false};
+    std::thread reader([&] {
+        ReadGuard g;
+        holding = true;
+        while (!release.load()) std::this_thread::yield();
+    });
+    wait_for([&] { return holding.load(); });
+    std::thread revoker([&] {
+        revoke(gone);
+        returned = true;
+    });
+    const bool quick = wait_for([&] { return returned.load(); }, 5000);
+    const bool pending = !store_cleanup_idle();
+    release = true;  // (only now: a store call from here would wait for the cleanup thread, which waits for the reader)
+    reader.join();
+    revoker.join();
+    check(quick, "the owner-retiring callback returns while a reader holds a snapshot (it does not wait)");
+    check(pending, "the revert is still pending while the reader is inside (it runs on the cleanup thread, not in the callback)");
+    check(settle(), "the deferred revert runs with no further store call (the cleanup thread)");
+
+    // After the deferred step.
+    check(blob(game) == "OTHER!!!" && in_content(game), "the other owner's override of the game blob is served again");
+    check(!in_content(hk(gone_new)) && blob(hk(gone_new)) == "<result 2>", "the revoked owner's own blob is not served");
+    check(by_handle(game_key_handle) == "<not served>" && read(game_key) == game_bytes, "the game's own resource bytes are served again");
+    check(op_icon_state(icon_key.g) == KILN_ICON_NONE, "its icon is gone");
+    check(ledger_count(gone) == 0 && items() == items_before - 2, "the ledger lists none of its blobs; its resource and icon texture are gone");
+    check(blob(hk(other_own)) == "OTHER-OWN-BLOB" && ledger_count(other) == 2, "the other owner's blobs are untouched");
+    check(catalog_generation() == gen + 1, "the catalog generation moved once (" + std::to_string(catalog_generation() - gen) + ")");
+    {
+        const auto v = catalog_now(other);
+        const auto* e = cat_find(v, game);
+        check(!catalog_names(v, gone) && !cat_find(v, hk(gone_new)) && e && e->selected_owner == other,
+              "a new catalog snapshot does not list it; the game blob's winner is the other owner");
+    }
+
+    // Admission: nothing it calls registers anything any more.
+    std::puts("-- 13b: registrations of the revoked owner");
+    size_t mark = g_log.size();
+    KilnContentHash x{};
+    check(op_blob_add(gone, "LATE", 4, &x) == KILN_ERR_REVOKED && op_blob_add_ex(gone, "LATE", 4, &x, KILN_BLOB_ORIGIN_MANAGED) == KILN_ERR_REVOKED,
+          "blob_add and blob_add_ex refused with KILN_ERR_REVOKED");
+    check(op_blob_override(gone, &gc, "LATE!!!!", 8) == KILN_ERR_REVOKED &&
+              op_blob_override_ex(gone, &gc, "LATE!!!!", 8, KILN_BLOB_ORIGIN_NATIVE_API) == KILN_ERR_REVOKED,
+          "blob_override and blob_override_ex refused");
+    check(put(gone, game_key, "LATE-RES", KILN_ASSET_PUT_OVERRIDE) == KILN_ERR_REVOKED && op_icon_register(gone, icon_key.g, img) == KILN_ERR_REVOKED,
+          "resource_put and icon_register refused");
+    check(logged(mark, "owner 41 blob", "revoked"), "the refusal is logged with the owner");
+    check(ledger_count(gone) == 0 && items() == items_before - 2 && blob(game) == "OTHER!!!" && catalog_generation() == gen + 1,
+          "nothing added, nothing served, the generation unchanged");
+
+    // revert_owner after the deferred revert, and before a revocation: harmless either way.
+    op_revert_owner(gone);
+    check(catalog_generation() == gen + 1 && blob(game) == "OTHER!!!", "an explicit revert_owner after it is a no-op");
+    revoke(gone);
+    check(settle() && catalog_generation() == gen + 1, "a second revocation notice of the same owner is a no-op");
+    const KilnOwner early = 42;
+    check(op_blob_override(early, &gc, "EARLY!!!", 8) == KILN_OK && blob(game) == "EARLY!!!", "another native owner overrides the game blob");
+    op_revert_owner(early);
+    const uint64_t gen2 = catalog_generation();
+    revoke(early);
+    check(settle() && catalog_generation() == gen2 && blob(game) == "OTHER!!!", "a revert_owner before its revocation: the deferred step finds nothing");
+
+    // With the cleanup thread held: the next store call, and a catalog open, take the revert on themselves.
+    std::puts("-- 13c: the next store call does the revert");
+    const KilnOwner late = 43;
+    KilnContentHash late_new{};
+    KilnHandle kept = 0;  // held open: the next open at the same generation would share its snapshot
+    KilnBlobCatalogInfo kept_info = cat_info();
+    check(op_blob_add(late, "LATE-OWNER-BLOB", 15, &late_new) == KILN_OK &&
+              op_catalog_open(other, KILN_BLOB_CATALOG_REGISTRATIONS_ONLY, &kept, &kept_info) == KILN_OK &&
+              catalog_names(cat_all(kept, kept_info.total), late),
+          "a native owner adds a blob; an open snapshot at this generation lists it");
+    g_hold_cleanup = true;
+    revoke(late);
+    const bool held = wait_for([] { return g_cleanup_held.load() == 1; });
+    check(held && !store_cleanup_idle() && in_content(hk(late_new)), "revoked; the cleanup thread is held; its bytes are still served meanwhile");
+    check(!catalog_names(catalog_now(other), late), "a catalog open after the mark does the revert first: the shared snapshot is not reused");
+    check(!in_content(hk(late_new)) && ledger_count(late) == 0, "and its blob is no longer served");
+    op_catalog_close(kept);
+    g_hold_cleanup = false;
+    check(settle(), "the released cleanup thread finds nothing left");
+    const KilnOwner later = 44;
+    KilnContentHash later_new{};
+    check(op_blob_add(later, "LATER-OWNER-BLOB", 16, &later_new) == KILN_OK, "another native owner adds a blob");
+    g_hold_cleanup = true;
+    revoke(later);
+    wait_for([] { return g_cleanup_held.load() == 1; });
+    const uint64_t gen3 = catalog_generation();
+    check(op_blob_remove(other, &other_own) == KILN_OK && !in_content(hk(later_new)) && catalog_generation() == gen3 + 2,
+          "another owner's store call reverts it first (one generation step for the revert, one for the removal)");
+    g_hold_cleanup = false;
+    check(settle(), "the released cleanup thread finds nothing left");
+
+    // A registration racing the mark: never survives the cleanup.
+    std::puts("-- 13d: registrations racing the revocation");
+    int survivors = 0, raced = 0, accepted_total = 0;
+    for (int round = 0; round < 200; ++round) {
+        const KilnOwner o = 1000 + round;
+        std::vector<HashK> blobs;
+        std::vector<Key> keys;
+        std::atomic<bool> go{false};
+        std::thread writer([&] {
+            while (!go.load()) std::this_thread::yield();
+            for (int i = 0; i < 400; ++i) {  // until refused (bounded: a store that never refuses fails below instead of hanging)
+                const std::string bytes = "RACE-" + std::to_string(round) + "-" + std::to_string(i);
+                if (i % 3 == 2) {
+                    char guid[40];
+                    std::snprintf(guid, sizeof guid, "77777777-0000-0000-%04d-%012d", round, i);
+                    const Key k = key(guid, 0x12345678u);
+                    if (put(o, k, bytes, KILN_ASSET_PUT_NEW) != KILN_OK) return;
+                    keys.push_back(k);
+                } else {
+                    KilnContentHash h{};
+                    if (op_blob_add(o, bytes.data(), bytes.size(), &h) != KILN_OK) return;
+                    blobs.push_back(hk(h));
+                }
+            }
+        });
+        go = true;
+        std::this_thread::sleep_for(std::chrono::microseconds(37 * (round % 11)));
+        revoke(o);
+        writer.join();
+        if (!settle()) {
+            ++survivors;
+            continue;
+        }
+        accepted_total += static_cast<int>(blobs.size() + keys.size());
+        raced += !blobs.empty() || !keys.empty();
+        for (const HashK& h : blobs) survivors += in_content(h) || blob(h) != "<result 2>";
+        for (const Key& k : keys) survivors += read(k) != "<result 2>";
+        survivors += static_cast<int>(ledger_count(o));
+    }
+    check(survivors == 0 && raced > 0, "200 rounds of registrations racing the mark: none survives (" + std::to_string(accepted_total) +
+                                           " accepted before the mark in " + std::to_string(raced) + " rounds, all reverted)");
+    check(blob(game) == "OTHER!!!" && ledger_count(other) == 1, "the other owner's registrations untouched by all of it");
+    op_revert_owner(other);
+    if (g_fail == failed_before) std::puts("PASS assets.revoked-owner-cleanup");
+}
+
 const char* kGraphGuid = "21319e83-5087-4fff-8795-22997843649e";
 const char* kGraphKeyText = "21319e83-5087-4fff-8795-22997843649e:keen::anim_graph::runtime_graph::AnimationGraphResource2_0:0";
 constexpr uint32_t kGraphHandle = 100, kOtherGraphHandle = 101, kItemHandle = 102, kIconHandle = 103;
 }  // namespace
+
+// kiln.ui reads the game's UI font through blob_read, the first time a Kiln page in the game's look opens (the mod
+// manager): two blobs of about 85 KB, each in one of the game's ~1 GB enshrouded_NNN.dat containers. blob_read read the
+// whole container into memory to copy one blob out: about 2 GB from a hard disk, 24.6 s in a player's log between the
+// page opening and "the game's UI font loaded" (GitHub #39, Nexus 179900169: the game fell out of borderless fullscreen
+// on the first open). The made-up container is 64 MiB; the blob is 85 000 bytes near its end.
+void game_blob_range() {
+    using kiln_test_fs::bytes_read;
+    constexpr uint64_t kContainer = 64ull << 20, kOffset = (40ull << 20) + 123;
+    constexpr uint32_t kSize = 85000;
+    kiln_test_fs::files.push_back({L"C:\\Game\\enshrouded_000.dat", kContainer});
+    kiln_test_fs::files.push_back({L"C:\\Game\\enshrouded_001.dat", kOffset + 10});  // shorter than the blob's end
+    g_fake_containers = {"C:\\Game\\enshrouded_000.dat", "C:\\Game\\enshrouded_001.dat", "C:\\Game\\enshrouded_002.dat"};
+    const KilnContentHash font{kSize, 0xF0F0F0F0u, 0x12345678u, 0x9ABCDEF0u};
+    const KilnContentHash cut{kSize, 0x0BADF00Du, 1, 2}, gone{kSize, 0xDEADBEEFu, 3, 4};
+    g_fake_game_blobs[{font.size, font.hash0, font.hash1, font.hash2}] = GameBlob{kOffset, 0};
+    g_fake_game_blobs[{cut.size, cut.hash0, cut.hash1, cut.hash2}] = GameBlob{kOffset, 1};
+    g_fake_game_blobs[{gone.size, gone.hash0, gone.hash1, gone.hash2}] = GameBlob{kOffset, 2};  // no such file
+
+    std::vector<uint8_t> buf(kSize);
+    size_t n = 0;
+    bytes_read = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    const KilnResult r = op_blob_read(&font, buf.data(), buf.size(), &n);
+    const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    bool same = r == KILN_OK && n == kSize;
+    for (uint32_t i = 0; same && i < kSize; ++i) same = buf[i] == kiln_test_fs::byte_at(kOffset + i);
+    check(same, "a game blob's bytes are the container's at its offset (result " + std::to_string(r) + ", " + std::to_string(n) + " bytes)");
+    const uint64_t read_once = bytes_read;
+    check(read_once == kSize, "a game blob reads its own " + std::to_string(kSize) + " bytes of a " + std::to_string(kContainer) +
+                                  "-byte container, not the container (" + std::to_string(read_once) + " bytes read, " +
+                                  std::to_string(static_cast<int>(ms)) + " ms here; a whole container of the game is ~1 GB, "
+                                  "about 10 s from a hard disk at 100 MB/s)");
+
+    // the size query (no buffer) answers the size and reads nothing
+    bytes_read = 0;
+    n = 0;
+    const KilnResult query = op_blob_read(&font, nullptr, 0, &n);
+    check(query == KILN_ERR_BUFFER_TOO_SMALL && n == kSize && bytes_read == 0,
+          "a size query answers the blob's size and reads nothing (" + std::to_string(bytes_read) + " bytes read)");
+    // as before: a blob past its container's end is not found, a container that cannot be opened is an internal error
+    bytes_read = 0;
+    const KilnResult past = op_blob_read(&cut, buf.data(), buf.size(), &n);
+    check(past == KILN_ERR_NOT_FOUND && bytes_read == 0,
+          "a blob past its container's end is not found, and nothing is read for it (" + std::to_string(bytes_read) + " bytes read)");
+    check(op_blob_read(&gone, buf.data(), buf.size(), &n) == KILN_ERR_INTERNAL, "a container that cannot be opened: internal error");
+    // off the game's threads (the item icon worker, the names task): the resident read never asks the game for its content
+    // index itself; blob_read as before may (the game's own threads)
+    g_fake_lazy_asks = g_fake_resident_asks = 0;
+    const KilnResult resident = op_blob_read(&font, buf.data(), buf.size(), &n, true);
+    check(resident == KILN_OK && g_fake_resident_asks == 1 && g_fake_lazy_asks == 0,
+          "blob_read_resident finds a game blob without the content map's lazy accessor");
+    (void)op_blob_read(&font, buf.data(), buf.size(), &n);
+    check(g_fake_lazy_asks == 1, "blob_read may still ask the accessor (its callers run on the game's threads)");
+    bool closed = true;
+    for (const auto& o : kiln_test_fs::opens) closed = closed && o.closed;
+    check(closed, "every container opened is closed again");
+}
 
 int main() {
     KilnApi api{};
@@ -565,6 +908,12 @@ int main() {
     check(items() == 0, "up: nothing added");
     check(read(graph) == "GAME-GRAPH" && by_handle(kGraphHandle) == "<not served>", "up: the game's own graph is what is read and served");
     check(logged(mark, kGraphKeyText, "reserved for kiln.playeranim"), "up: the log line names the key");
+    // resource_read copies the game's resident bytes off the game's threads too (the item icon worker, the names task): a
+    // copy that would fault (the game moved or dropped the resource) is "not found", never a crash
+    g_fake_copy_faults = true;
+    check(read(item) == "<result " + std::to_string(KILN_ERR_NOT_FOUND) + ">", "a game resource whose bytes cannot be read is not found");
+    g_fake_copy_faults = false;
+    check(read(item) == "GAME-ITEM", "and read again once they can");
 
     // 2. The pin: kiln.playeranim's put.
     std::puts("-- 2: the pinning put");
@@ -716,6 +1065,17 @@ int main() {
     // 12. The content blob catalog (0.2.0-dev.28).
     std::puts("-- 12: the content blob catalog");
     blob_catalog(manifest, mod, playeranim);
+
+    // 13. A native owner the core revokes without revert_owner (0.2.0-dev.28): its registrations and served bytes go, deferred.
+    std::puts("-- 13: an owner revoked without revert_owner");
+    const Key spare = key("66666666-7777-8888-9999-aaaaaaaaaaaa", other_type);
+    g_game[spare] = {104, "GAME-SPARE"};
+    owner_revoked_without_revert(40, spare, 104, "GAME-SPARE", key("88888888-9999-aaaa-bbbb-cccccccccccc", KILN_ASSET_TYPE_UI_TEXTURE));
+    settle();
+
+    // 14. The game's own blob is read from its container alone (inbox 18e, 0.2.0-dev.29.2).
+    std::puts("-- 14: a game blob reads its own bytes, not its container");
+    game_blob_range();
 
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

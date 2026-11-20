@@ -29,7 +29,7 @@ std::mutex t_mutex;  // the stubs' state below
 std::map<KilnOwner, std::string> t_owners;
 KilnOwner t_next_owner = 1;
 std::atomic<uint64_t> t_version{1};
-std::atomic<bool> t_tick{true}, t_lifecycle{true};
+std::atomic<bool> t_tick{true}, t_lifecycle{true}, t_wait{true};
 std::vector<std::string> t_errors;  // KLOG_E lines
 std::vector<std::string> t_writes;  // texts write_file_atomic wrote (successful writes only)
 std::vector<double> t_attempts;     // the fake clock at every call of write_file_atomic, failed ones too
@@ -119,6 +119,8 @@ uint64_t version() { return t_version.load(); }
 namespace tick {
 bool installed() { return t_tick; }
 bool lifecycle() { return t_lifecycle; }
+bool waits_jobs() { return t_wait; }
+StopDrain stop_drain(uint32_t kind) { return stop_drain_of(kind, image().side, t_tick, t_lifecycle, t_wait); }
 }  // namespace tick
 namespace crash {
 int filter(EXCEPTION_POINTERS*, Capture*, unsigned long*) { return 1; }
@@ -134,6 +136,7 @@ bool init_no() { return false; }
 }  // namespace
 KILN_SERVICE(fakeok, "kiln.fakeok", 3, &kFakeTable, &init_yes);
 KILN_SERVICE(fakeno, "kiln.fakeno", 2, &kFakeTable, &init_no);
+KILN_SERVICE(fakehooks, "kiln.hooks", 2, &kFakeTable, &init_yes);
 
 namespace {
 namespace caps = kiln::caps;
@@ -217,6 +220,12 @@ struct Seen {
         std::lock_guard l(m);
         return events.size();
     }
+    std::set<std::string> names() {
+        std::lock_guard l(m);
+        std::set<std::string> out;
+        for (const auto& e : events) out.insert(std::get<0>(e));
+        return out;
+    }
 };
 void KILN_CALL record_change(const KilnCapRow* row, uint32_t change, void* user) {
     auto* s = static_cast<Seen*>(user);
@@ -275,6 +284,14 @@ void rules() {
     CHECK(rep(d, "kiln.yy", P, KILN_CAP_REASON_SESSION) == KILN_ERR_INVALID_ARGUMENT &&
               rep(d, "kiln.yy", U, KILN_CAP_REASON_FAULTED) == KILN_OK && get("kiln.yy").flags == 0,
           "core names are static: pending refused (and no session flag), unavailable allowed");
+    caps::op([&](std::vector<caps::Event>& ev) {
+        caps::set_core_locked("events.death", caps::kFeature, A, KILN_CAP_REASON_NONE, "resolved", "sigdb", 0, ev);
+        return KILN_OK;
+    });
+    CHECK(rep(d, "events.death", P, KILN_CAP_REASON_SESSION, "wait for Pre") == KILN_OK &&
+          is("events.death", P, KILN_CAP_REASON_SESSION), "decision hook row can wait for safe installation");
+    CHECK(rep(d, "events.death", A, KILN_CAP_REASON_NONE) == KILN_OK && is("events.death", A, KILN_CAP_REASON_NONE),
+          "decision hook row becomes available after installation");
     rep(d, "t.pend", P, KILN_CAP_REASON_SESSION);
     rep(e, "t.pend", A, KILN_CAP_REASON_NONE);
     CHECK(is("t.pend", P, KILN_CAP_REASON_SESSION), "worst wins: pending over available");
@@ -541,10 +558,56 @@ void core_rows(const std::filesystem::path& dir) {
     reset();
     resolve_with(dir, "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E8 {helper:rel32}");
     caps::core_rows(true, true, "");
+    CHECK(get("kiln.internal.original-code").rc == KILN_OK && get("kiln.internal.original-code").state == KILN_CAP_AVAILABLE,
+          "private service lookup has an honest capability row");
     bool all = true;
     for (const char* f : {"items.fuel", "net.kick", "tick", "tick.wait_jobs", "world.lifecycle"})
         all = all && is(f, A, KILN_CAP_REASON_NONE) && get(f).source == "sigdb";
     CHECK(all, "features: a resolver run with every symbol found gives every feature available, source sigdb");
+    CHECK(is("hooks.read_original", A, 0) && is("hooks.code_state", A, 0),
+          "hooks inspection: verified file and running service publish both static rows");
+    const bool from_disk = sigdb::code().disk;
+    sigdb::g_code.view.disk = false;
+    caps::core_rows(true, true, "");
+    CHECK(is("hooks.read_original", U, KILN_CAP_REASON_SYMBOL_MISSING) && is("hooks.code_state", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
+              get("hooks.code_state").text == "verified executable file code unavailable; live fallback is not original code",
+          "hooks inspection: on sigdb's live-code fallback both rows are unavailable, symbol-missing (never faulted)");
+    sigdb::g_code.view.disk = from_disk;
+    kiln_service_fakehooks.available = false;
+    caps::core_rows(true, true, "");
+    CHECK(is("hooks.read_original", U, KILN_CAP_REASON_SERVICE_MISSING), "hooks inspection: missing service refuses");
+    kiln_service_fakehooks.available = true;
+    caps::core_rows(false, false, "test idle");
+    CHECK(is("hooks.code_state", U, KILN_CAP_REASON_POLICY), "hooks inspection: safe idle policy refuses");
+    static const kiln::gates::Gate inspection_gate[] = {
+        {"hooks.code_state", "hooks-code", kiln::gates::kBoth}, {nullptr, nullptr, 0}};
+    kiln::gates::use_list_for_tests(inspection_gate);
+    kiln::gates::configure(KILN_SIDE_SERVER, false, {});
+    reset();
+    caps::core_rows(true, true, "");
+    CHECK(is("hooks.code_state", U, KILN_CAP_REASON_POLICY) && is("hooks.read_original", A, 0),
+          "hooks inspection: central hold overrides support without holding the other member");
+    static const kiln::gates::Gate no_inspection_gate[] = {{nullptr, nullptr, 0}};
+    kiln::gates::use_list_for_tests(no_inspection_gate);
+    kiln::gates::configure(KILN_SIDE_SERVER, false, {});
+    reset();
+    caps::core_rows(true, true, "");
+    // kiln.tasks' pool: tasks.pool follows the pool's health (read at every registry call, outside the pool's locks)
+    {
+        static std::atomic<int> health{0};
+        CHECK(is("tasks.pool", U, KILN_CAP_REASON_SERVICE_MISSING) && get("tasks.pool").source == "core",
+              "tasks.pool: no pool source (kiln.tasks did not start): unavailable, service-missing, source core");
+        caps::tasks_pool_source(+[] { return health.load(); });
+        CHECK(is("tasks.pool", U, KILN_CAP_REASON_FAULTED), "tasks.pool: every worker start failed: unavailable, faulted");
+        health = 1;
+        CHECK(is("tasks.pool", A, 0), "tasks.pool: a retried start succeeded: the row becomes available on its own");
+        health = 0;
+        CHECK(is("tasks.pool", U, KILN_CAP_REASON_FAULTED), "tasks.pool: every worker lost again: unavailable");
+        health = 1;
+        caps::core_rows(false, false, "test idle");
+        CHECK(is("tasks.pool", U, KILN_CAP_REASON_POLICY), "tasks.pool: safe idle: policy");
+        caps::tasks_pool_source(nullptr);
+    }
     reset();
     resolve_with(dir, "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E9");  // E8 -> E9: no match on this build
     caps::core_rows(true, true, "");
@@ -571,14 +634,59 @@ void core_rows(const std::filesystem::path& dir) {
     KilnHandle h = 0;
     T->subscribe(owner("host"), &record_change, &seen, &h);
     t_tick = false;  // the hook faults at run time
-    CHECK(is("tick", U, KILN_CAP_REASON_FAULTED) && is("tick.wait_jobs", U, KILN_CAP_REASON_FAULTED) && seen.size() == 2,
-          "features: a tick hook that faults later shows at the next read, with a change each");
+    CHECK(is("tick", U, KILN_CAP_REASON_FAULTED) && is("tick.wait_jobs", U, KILN_CAP_REASON_FAULTED) && seen.size() == 3 &&
+              (seen.names() == std::set<std::string>{"tick", "tick.wait_jobs", "world.stop_drain.server"}),
+          "features: a tick hook that faults later shows at the next read, with a change each (the server's stop_drain row "
+          "follows)");
     t_lifecycle = false;
     caps::feature_off("world.lifecycle");  // KilnApi.feature answered false
     CHECK(caps::g_names.find("world.lifecycle")->second.last.reason == KILN_CAP_REASON_FAULTED,
           "features: KilnApi.feature() answering false corrects the row");
     T->unsubscribe(h);
     t_tick = t_lifecycle = true;
+
+    // world.stop_drain.<kind> (since 0.2.0-dev.29): what the core guarantees about a world kind's jobs when it dispatches
+    // the world's STOPPING (tick_drain.h): drained by the engine, a bounded wait only, no stop at all, or no such world.
+    {
+        const uint32_t side = test_image.side;
+        test_image.side = KILN_SIDE_SERVER;
+        reset();
+        resolve_with(dir, "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E8 {helper:rel32}");
+        t_tick = t_lifecycle = t_wait = true;
+        caps::core_rows(true, true, "");
+        CHECK(is("world.stop_drain.server", A, 0) && get("world.stop_drain.server").text.find("WaitWorldJobs") != std::string::npos &&
+                  is("world.stop_drain.client", U, KILN_CAP_REASON_WRONG_SIDE) &&
+                  is("world.stop_drain.prediction", U, KILN_CAP_REASON_WRONG_SIDE),
+              "stop_drain: a dedicated server's world is drained by the engine; no client or prediction world there");
+        test_image.side = KILN_SIDE_CLIENT;
+        reset();
+        caps::core_rows(true, true, "");
+        CHECK(is("world.stop_drain.server", A, 0) && is("world.stop_drain.client", A, 0) &&
+                  is("world.stop_drain.prediction", A, 0) &&
+                  get("world.stop_drain.client").text.find("WaitWorldJobs") != std::string::npos &&
+                  get("world.stop_drain.prediction").text.find("stops with the client world") != std::string::npos,
+              "stop_drain: in a client every kind is drained by the engine (the prediction world with the client world)");
+        t_wait = false;
+        reset();
+        caps::core_rows(true, true, "");
+        CHECK(is("world.stop_drain.server", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
+                  is("world.stop_drain.client", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
+                  get("world.stop_drain.client").text.rfind("bounded wait only", 0) == 0,
+              "stop_drain: without WaitWorldJobs every kind has a bounded wait only, and says so");
+        t_wait = true;
+        reset();
+        caps::core_rows(true, true, "");
+        t_lifecycle = false;  // the destroy hook faults at run time: no STOPPING at all from now on
+        CHECK(is("world.stop_drain.client", U, KILN_CAP_REASON_FAULTED) &&
+                  get("world.stop_drain.client").text.rfind("no world stop is seen", 0) == 0 &&
+                  is("world.stop_drain.server", U, KILN_CAP_REASON_FAULTED),
+              "stop_drain: a hook that faults later turns every kind's row to faulted at the next read");
+        t_lifecycle = true;
+        reset();
+        caps::core_rows(false, false, "idle for the test");
+        CHECK(is("world.stop_drain.server", U, KILN_CAP_REASON_POLICY), "stop_drain: in safe idle the row says policy");
+        test_image.side = side;
+    }
 
     // safe idle: every feature says policy, with boot's sentence
     reset();
@@ -880,25 +988,27 @@ void idle_tick_fault(const std::filesystem::path& dir) {
     }
     t_tick = t_lifecycle = false;
     const auto deadline = start + std::chrono::milliseconds(1250);
-    while ((seen.size() < 3 || writes() == before) && std::chrono::steady_clock::now() < deadline)
+    // the three tick rows and, derived from the same hooks, the server world's stop_drain row (dev.29)
+    while ((seen.size() < 4 || writes() == before) && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     bool rows = true;
     {
         std::lock_guard l(caps::g_mutex);
-        for (const char* name : {"tick", "tick.wait_jobs", "world.lifecycle"}) {
+        for (const char* name : {"tick", "tick.wait_jobs", "world.lifecycle", "world.stop_drain.server"}) {
             const auto& row = caps::g_names.at(name).last;
             rows = rows && row.state == U && row.reason == KILN_CAP_REASON_FAULTED;
         }
     }
-    CHECK(rows && seen.size() == 3 && writes() > before,
+    CHECK(rows && seen.size() == 4 && writes() > before,
           "idle fault: rows, subscriber snapshot and file follow within 1250 ms without a registry call (rows %d, events %zu, writes %zu -> %zu)",
           rows, seen.size(), before, writes());
     const auto doc = nlohmann::json::parse(last_write());
     unsigned faulted = 0;
     for (const auto& row : doc["capabilities"])
-        if ((row["name"] == "tick" || row["name"] == "tick.wait_jobs" || row["name"] == "world.lifecycle") &&
+        if ((row["name"] == "tick" || row["name"] == "tick.wait_jobs" || row["name"] == "world.lifecycle" ||
+             row["name"] == "world.stop_drain.server") &&
             row["state"] == "unavailable" && row["reason"] == "faulted") ++faulted;
-    CHECK(faulted == 3, "idle fault: capabilities.json holds all three faulted rows");
+    CHECK(faulted == 4, "idle fault: capabilities.json holds all four faulted rows");
     T->unsubscribe(h);
     reset();
     sigdb::g_core = sigdb::Resolver();
@@ -1050,6 +1160,60 @@ void client_gate(const std::filesystem::path& dir) {
     reset();
 }
 
+// kiln.json "tasks": the four global knobs, their defaults, bounds, wrong types and side overrides (config.cpp).
+void tasks_config(const std::filesystem::path& dir) {
+    const auto old = t_paths.kiln;
+    t_paths.kiln = dir / "tasks-config";
+    std::filesystem::create_directories(t_paths.kiln);
+    const auto read = [&](const char* text) {
+        kiln::g_config = kiln::Config{};
+        kiln::g_doc = nlohmann::json{};
+        {
+            std::lock_guard l(t_mutex);
+            t_infos.clear();
+        }
+        write(t_paths.kiln / "kiln.json", text);
+        kiln::load_config();
+        kiln::apply_side(KILN_SIDE_SERVER);
+        return kiln::config().tasks;
+    };
+    const auto warned = [&](const char* key, const char* bound) {
+        std::lock_guard l(t_mutex);
+        int n = 0;
+        for (const auto& line : t_infos)
+            n += line.find(std::string("tasks.") + key) != std::string::npos && line.find(bound) != std::string::npos;
+        return n;
+    };
+    auto c = read(R"({})");
+    CHECK(c.workers == 0 && c.long_running_global == 8 && c.watchdog_running_s == 30 && c.watchdog_queued_s == 30,
+          "tasks config: absent: the defaults (workers 0 = clamp(cores/4, 1, 4), 8, 30 s, 30 s)");
+    c = read(R"({"tasks":{"workers":3,"long_running_global":12,"watchdog_running_s":5,"watchdog_queued_s":600}})");
+    CHECK(c.workers == 3 && c.long_running_global == 12 && c.watchdog_running_s == 5 && c.watchdog_queued_s == 600,
+          "tasks config: values inside their bounds are taken (bounds inclusive)");
+    c = read(R"({"tasks":{"workers":9,"long_running_global":0,"watchdog_running_s":4,"watchdog_queued_s":601}})");
+    CHECK(c.workers == 0 && c.long_running_global == 8 && c.watchdog_running_s == 30 && c.watchdog_queued_s == 30 &&
+              warned("workers", "1..8") == 1 && warned("long_running_global", "1..16") == 1 &&
+              warned("watchdog_running_s", "5..600") == 1 && warned("watchdog_queued_s", "5..600") == 1,
+          "tasks config: out of bounds: the default and one warning naming the key and its bound");
+    c = read(R"({"tasks":{"workers":"4","long_running_global":2.5,"watchdog_running_s":true,"watchdog_queued_s":null}})");
+    CHECK(c.workers == 0 && c.long_running_global == 8 && c.watchdog_running_s == 30 && c.watchdog_queued_s == 30 &&
+              warned("workers", "1..8") == 1 && warned("long_running_global", "1..16") == 1 &&
+              warned("watchdog_running_s", "5..600") == 1 && warned("watchdog_queued_s", "5..600") == 1,
+          "tasks config: a wrong type: the default and one warning each");
+    c = read(R"({"tasks":7})");
+    {
+        std::lock_guard l(t_mutex);
+        int n = 0;
+        for (const auto& line : t_infos) n += line.find("\"tasks\"") != std::string::npos;
+        CHECK(c.workers == 0 && c.long_running_global == 8 && n == 1, "tasks config: \"tasks\" not an object: defaults, one warning");
+    }
+    c = read(R"({"tasks":{"workers":2,"watchdog_running_s":60},"server":{"tasks":{"workers":4}},"client":{"tasks":{"workers":1}}})");
+    CHECK(c.workers == 4 && c.watchdog_running_s == 60, "tasks config: the side section overrides key by key; the rest stays");
+    c = read(R"({"tasks":{"workers":2},"server":{"tasks":{"workers":99}}})");
+    CHECK(c.workers == 0 && warned("workers", "1..8") == 1, "tasks config: an invalid side value gives the default, warned");
+    t_paths.kiln = old;
+}
+
 void client_preview(const std::filesystem::path& dir) {
     const auto old = t_paths.kiln;
     t_paths.kiln = dir / "preview-config";
@@ -1128,6 +1292,7 @@ int main(int argc, char** argv) {
     client_gate(dir);
     client_gate_threads();
     client_preview(dir);
+    tasks_config(dir);
     json_file();
     writer();
     writer_retry();

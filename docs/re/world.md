@@ -21,7 +21,8 @@ Tags: **static** = read in the code at the address given; **live** = seen in the
 | table capacity | `0x380` (896) | `41 BE 80 03 00 00; cmp ax, r14w` | static |
 | table / stride | `world+0x746350`, stride **0x1F28** (was 0x1F20) | `imul rbx,rax,0x1F28; add rbx,0x746350`; entry `+0x00` desc*, `+0x08` u16 id (index+1), `+0x10` name, `+0x20` flags, `+0x24` interval | static |
 | name map / init list | `world+0xE17660` / count `world+0xE17658`, list `+0xE16F58` | same function | static |
-| "may finalize" | u8 `world+0xE17958` | `FinalizePrograms` `0x6c2500`: `cmp byte [rcx],0; jne; cmp byte [rcx+0xE17958],0` (setter `0x69de40`) | static |
+| "finalized" | u8 `world+0` | `FinalizePrograms` `0x6c2500` returns at once while it is set and sets it at its end (C `0xa25f97`) | static |
+| "may finalize" | u8 `world+0xE17958` | `FinalizePrograms` `0x6c2500`: `cmp byte [rcx],0; jne; cmp byte [rcx+0xE17958],0; je` (it finalizes only while this byte is **set**; setter `0x69de40`). A permission, not a state: a client world is made with it set (section "Client and prediction registration") | static |
 | engine vanilla count | 817 programs | game log `[ecss] Programs: 817` (lab2, vanilla) | live |
 | with kiln.world | 821 (kiln_world + 3 self-test programs) | `[ecss] Programs: 821`; kiln.log `program kiln_world registered as #818` | live |
 
@@ -254,6 +255,24 @@ the entity on the tracker's list **[dis]**; the type only decides whether the ma
   `ServerToggleState.lastChange`, written tracked together with `state`, read 0 after the restart while `state` was
   kept. Which fields a type's save record holds is the game's; kiln.world does not know it.
 
+### Transform scale and the save
+Lab **[rt]**, dev.28 fix round, server 26430253.
+- A tracked write of `CurrentTransform.transform.scale` (+40, three float32) on a placed chest
+  (`Prop_Decoration_T1_Storage_24_Magic`, a player base's prop) answered `Written`, kept one step later, `SaveTracked`
+  true; after the shutdown save and a restart the chest stood at 1, 1, 1 again (dev.28 13b labs, and the fix round's
+  boot 2 below, where Kiln's own log shows the game's value before Kiln sets it again: `(1, 1, 1) -> (1.25, 0.75, 1.5)`).
+- The save file says why: `world0.ksd` (SV2C container, zstd blocks) before and after that write holds the three floats
+  nowhere, neither as float32 nor as float16, in any block. The `base00` block (the player base) is byte-identical
+  before and after; `entity_chunk00` changed only where the run's other writes (Fuel) went. The entity records seen in
+  `entity_chunk00` are template + float32 position + a packed rotation, with no scale field. So the save's record of a
+  placed prop has no transform scale, whatever the write tracking marks: the loaded prop takes its template's.
+- Kiln keeps the scale beside the save instead (kiln.saves' entity attachments, bundle `entity/kiln:world`) and sets it
+  again through the same tracked write when the loaded entity is matched: world loaded 12:28:35.510 (step 260),
+  matched 12:28:36.378, set again 12:28:36.576 (`world-writes-test`: `PASS world.scale-persist`, then `PASS
+  world.scale-forgotten` after a restore and a third start). Putting the scale into the game's own record would need a
+  hook in the base/entity serializer and its loader plus a format the game does not know: large, and broken by any
+  change of the format.
+
 ### Lab results (lab `dev27-world`, the standard save with a base, no player; server 26430253) **[rt]**
 `mods/tests/world-writes-test`, built with Kiln.Sdk (its manifest lists `NetworkFuel`, `UsedItem`,
 `ServerToggleState` and the made-up `NoSuchComponentKiln`; the build added `Fuel` and `ScaleComponent` from the
@@ -382,9 +401,28 @@ runner path. Dead RunSlice recorded zero calls in dedicated and hosted probes. I
 ProgramRunner and `entry+0x28` (e.g. 41 `init_spawn_time` slices in the dedicated census). [static] [lab] [seen]
 
 `R=*(Storage+0)=world+0x928`; table `R+0x745a28=world+0x746350`, u16 count `R+0xe16628=world+0xe16f50`.
-Entry `+0x28` is fetched anew per slice. Slice is 0x38 B: entry pointer `+0x10`, archetype group `+0x20`, first/end
-rows u32 `+0x28/+0x2c`. Job J: Storage `+0`, command buffer `+8`, entity list `+0x830` (16 B/entry), count `+0x838`.
+Entry `+0x28` is fetched anew per slice. Slice is 0x38 B: entry pointer `+0x10`, archetype layout `+0x18` (the archetype
+object, bitset at +0, the same object as an entity record's `world/entity.layout`; ProgramRunner passes it to the column
+setup S `0x629570` / C `0x98d6e0`), archetype group `+0x20`, first/end rows u32 `+0x28/+0x2c` (end - first = the job's
+count). ProgramRunner's rdx is this record, and the update call reads `[[rdi+0x10]+0x28]` from it (S `0x64b169`), so the
+update runs inside the runner call of its own record: kiln.world's `world.slice_record` (sigdb
+`@world/ProgramRunner.slice` / `.layout`, dev.29) keeps rdx for WhenArchetype with a typed link around the runner: the
+record is set for exactly the one continuation call (the single update call at F+0x571, the return at F+0x5b6) and the
+outer value is restored when it returns, is skipped by a later hook or unwinds (Windows `__finally`), so it never
+outlives the runner call it came from; a trampoline takes it once. [static] Job J: Storage `+0`, command buffer `+8`, entity list `+0x830` (16 B/entry), count `+0x838`.
 Task: Storage `+0`, slices `+8`, slice index u32 `+0x10`, worker value u32 `+0x14`. [static] [lab]
+
+### World stop and the world's jobs [static]
+
+Each world has its own TaskQueue at `world+0xe17960` (`world.jobs`), made in WorldCreate's constructor (C `0x983a5b`).
+StepPrograms waits for the whole queue before its only return whenever it ran slices as tasks (`WaitTaskGroup` at
+S `0x64a516` / C `0x9ae686`); RunInitPrograms and the serial path run ProgramRunner inline. So no program slice of a world
+outlives the StepPrograms call that ran it, on every kind. WorldDestroy does not wait: after its teardown has begun it
+hands the queue to the release (S `0x5d6510` / C `0x8eb7d0`), which only checks idleness and logs `[task] TaskQueue '%s'
+is not idle during destroy!`. A world is destroyed on the thread that steps it (GameServer thread; main thread for the
+client world). WaitWorldJobs (`mov rcx,[world+0xe17960]; jmp WaitTaskGroup`) is called by the game only at the end of the
+GameServer update; the core calls it on the server and (since 0.2.0-dev.29) the client world before their STOPPING
+(capability rows `world.stop_drain.*`). Listings: out/06a-program-wraps/client-static/r8.
 
 ### Parallel selection and affinity [static] [lab] [seen]
 
@@ -420,6 +458,18 @@ RegisterAllPrograms `0x4acf80` at `0x3a85a5`. Hosted server setup C `0x49be10` /
 C `0x4a0126` / S `0x2381f6`. RegisterProgram C `0x9e2e40` / S `0x67ede0` is shared by the worlds. No
 RegisterAllPrograms call exists for kind 1: prediction uses the **client world's table**, not the hosted server's.
 This table ownership was observed in both hosted session 2 and joined session 4.
+
+The two state bytes of the table (client exe `5d9ef2f1…`, read for the owner's 29.18 client, where Kiln refused every
+client world): FinalizePrograms C `0xa25c50` returns while `world+0` is set (`0xa25c66`) or while `world+0xE17958` is
+**clear** (`0xa25c7e`), and sets `world+0` at its end (`0xa25f97`); its only callers are the world's step functions
+(C `0x9d545a`, `0x9d5a35`). createWorld C `0x983140` copies `world+0xE17958` from its config `+0x43` (`0x98320d`). The
+client world's config sets it: `mov dword [rbp+0x40],0x1000000` (`0x84d05d`, kind byte 2 at `0x84d06e`, createWorld at
+`0x84d076`). The server world's clears it (`0xe53bc6`), and its GameServer sets it later through the setter C
+`0xa00dd0`, whose only caller is `0xe61339` (on GameServer+0x1d0, the server world). Client setup `0x3a60b0` runs at
+`0x84d681` in the same function as the client world's createWorld, with no step in between. So in every client world's
+RegisterAllPrograms the may-finalize byte is 1 and `world+0` is 0, and only `world+0` says that a client table is closed.
+0.2.0-dev.29 to 29.18 refused a client world when either byte was set, so they never registered a client program
+(`client world 0x… is already finalizing its programs`). The server world keeps both checks. [static] [seen]
 
 Server kind 0 selects programs without flag `0x1`; client kind 2 selects flag `0x1`; prediction excludes `0x1`,
 `0x10` and engine bit `0x40`. A test SYSTEM program with flags `0x5` ran in the client world on its main thread,
@@ -457,3 +507,160 @@ Time pointer. Systems VERIFY refuted the earlier prototype; chapter 06b now carr
 call in `fuel_setup` (S `0xf73e0`, C `0x3378e0`), fed by GetGameTime. `@weather/SampleAt.site` uniquely captures the
 callee on all three builds. No arbitrary-thread call or runtime weather-sampling proof was established here.
 Other current helper prototypes and Win64 lane/return-buffer evidence are in [hooks.md](hooks.md).
+
+## The change recorder for untracked components (server 26430253, client 26430625) [static]
+
+Kiln's compare-exchange writes from task threads (docs/kiln/services/world.md, "World writes from task threads") do
+not call the engine's ECS change recorder. This is why, from static disassembly of read-only copies of both exact
+builds. The recorder is `ecsWriteLayout.changeTrackerRva` in sigdb/engine: server `0x66F170`, client `0x9D3280`; its
+first 33 bytes are the profile's `changeTrackerBytes`, and the two bodies are instruction for instruction the same.
+Arguments (Win64): rcx the entity manager, rdx the tracking context, r8 the entity record, r9w the component's
+registration index.
+
+```
+mov  r10, [r8+0x20]                 ; the entity's layout record
+mov  r9d, [r8+0x30]                 ; its row
+movzx eax, word [r10+0x14]          ; rbx = r10 + eax + row*16 (a per-row descriptor)
+cmp  byte [rcx+8], 0                ; jne -> skip A
+cmp  word [rcx+0x7bc2d0], 0         ; je  -> skip A
+mov  r8, [rcx]                      ; the registry owner
+test bit index of [r8 + 0x190 + (index/64)*8]   ; tracking bit A (changeTrackerRegistryAOffset 400)
+je   skip A                         ; clear: no call (set: call S 0x66F2C0, the save-tracking queue)
+skip A:
+mov  eax, [rbx+4] ; movzx ecx, byte [rbx+0xd] ; cmp byte [rbx+0xc], 0   ; reads only
+test bit index of [registry + 0x230 + (index/64)*8]   ; tracking bit B (changeTrackerRegistryBOffset 560)
+je   return                         ; clear: no call (set: call S 0x66F360, the replication-tracking queue)
+```
+
+With both bits clear the recorder reads the manager (`+0x8`, `+0x7bc2d0`, its registry pointer), the registry's two bit
+words for the index, the entity's layout record and row and one 16-byte row descriptor; writes only its own stack frame;
+has no `lock`-prefixed instruction and no call on that path; uses no `gs:` or `fs:` state. It records nothing.
+
+The tracked paths are different: S `0x66F2C0` claims a per-component stamp with `lock cmpxchg` and appends to a growable
+buffer (S `0x6B7C70`) whose grow callback is called through a pointer (`call [rcx+0x18]`, an allocator), then
+`lock inc`/`lock dec` on a counter; S `0x66F360` follows the same pattern into the queue code at S `0x650C50`. That is
+one more reason the write policy refuses tracked components.
+
+What Kiln relies on: for the components the policy admits (both bits clear), calling the recorder has no effect on these
+two builds, so the write path leaves it out and no engine code runs inside Kiln's hold. The live check inside the hold
+reads exactly the two words the recorder tests, at the profile's offsets `0x190` and `0x230` (the host test checks the
+profiles name them, and that setting either bit after the policy was cached refuses the write with nothing written).
+A new game build needs the recorder's body and both offsets re-checked; until it has an exact profile, every write is
+unavailable.
+
+## A mod's client-world program and wraps, checked for their first real use (0.2.0-dev.29.18; client 26430625)
+
+Client exe `5d9ef2f1…` (Steam 26430625, svn 1287369). Static reads with capstone over the PE image, except where
+marked. Asked for by the Holster Hotkey rework (a client-world program that moves the local player's weapon visual by
+writing its `SlotAttachment`, and a server wrap of `equipment_visuals`). **[seen]** = the owner's own Kiln
+0.2.0-dev.29.17 client logs of 2026-11-18 (a hosted world) and the dev.28 client sessions' censuses.
+
+### The path resolves and is called for the client world
+- sigdb offline (`tools/sigport/sigdb_check.py sigdb/symbols/client.json`, composed client.d): 1646 names resolve, one
+  `@` capture probe does not (`@net.session_kick_command`, feature `net.disconnect`, off on this build as before); every
+  world feature is on (`world.programs`, `.names`, `.queue`, `.write`, `.read_other`, `.entities`, `.find`,
+  `.systems`, `.slice_record`, `world.lifecycle`, `client.local_player`, `types.systems`, `tick.wait_jobs`).
+  `world/RegisterAllPrograms` 0x4acf80, `RegisterProgram` 0x9e2e40, `IterBegin` 0x9c7b80, `IterNext` 0x9c2780,
+  `CurrentEntityId` 0x9bf9e0, `MarkWritten` 0x9d3150, `ReadOther` 0x9b2b50, `types/ProgramRunner` 0x9aed70,
+  `world/StepPrograms` 0x9ade50, `WaitWorldJobs` 0xa2d7d0. **[static]**
+- `RegisterAllPrograms` 0x4acf80 has two callers: client setup 0x3a60b0 (at 0x3a85a5) and hosted server setup 0x49be10
+  (at 0x4a0126); it holds 816 of the 817 `RegisterProgram` calls (the 817th is `client_event_tracking`'s tail call).
+  **[static]** The owner's client hooked it (`raw link "world/RegisterAllPrograms" on rva 0x4acf80`) and it ran for the
+  client world (`RegisterAllPrograms for a world of kind 2: not the server world; no Kiln programs there`: no mod
+  declared a client program), and the rows `world.programs.client` and `systems.wraps.client` were available with
+  `world.stop_drain.client`. **[seen]**
+- The storage kind byte is `storage+8` (0 server, 1 prediction, 2 client): the game's own world label switch reads the
+  same byte and prints `s`, `p`, `c` (processMessage 0x9c69b0 at 0x9c69fa, createEntityWithId 0x987e50). **[static]**
+
+### When it runs, against the game's programs
+- `StepPrograms` 0x9ade50 builds the step's program set per storage kind from each table entry's flags (`entry+0x20`
+  = the descriptor's `+0x180`, +2 when registered disabled: RegisterProgram 0x9e304c..0x9e3068): it skips
+  INIT (0x8), disabled (0x2) and skipped (0x20) entries; kind 1 also skips 0x40; kind 0 takes entries without 0x1,
+  kind 1 entries without 0x1 and 0x10, kind 2 entries with 0x1; a non-SYSTEM entry also needs a matching archetype
+  group in that storage (`word [storage + (id-1)*24 + 0x3cc40c] > 0`). **[static]**
+- So a mod's client program (registered after `RegisterAllPrograms` returned, flag 0x1 + SYSTEM or the declared flags)
+  runs in every client step, and two programs whose access conflicts run in registration order (section "Where the
+  write sits in the step"). A program that writes `SlotAttachment` conflicts with `slot_attachment` (flags 0x201,
+  write `SlotAttachment`, `RenderTransform`) and `slot_attachment_init` (0x9): **it runs after them**. Its write is what
+  `slot_attachment` reads (and turns into `RenderTransform`) in the **next** client step: one step late on a change,
+  and a new visual entity is drawn with its template's pose for its first step. **[static]** (the first-step look:
+  **[inf]**, from the order)
+- In the same step and before the game: a client-world wrap `Before`/`BeforeEach` on `slot_attachment` (and
+  `slot_attachment_init` for an entity's first step) runs in that program's slot before its update. Its view has only
+  that program's lists (`SlotAttachment`, `RenderTransform`, `ScaleComponent`; other-read
+  `AnimationGraphSlotComponent`, `DespawnLink`, `RenderTeleportCount`), so it cannot tell weapons apart by
+  `ModelResource`; a mod's own program can (and caches its answer per entity for a wrap). **[static]**
+- The owner's client stepped its client world at 19.2 steps/s (its clock 60/s, interval p50 48.8 ms) and the
+  prediction storage at 72.6/s while hosting (tick-stats.jsonl, 13:40:30). A client program runs once per client
+  step, as `slot_attachment` does. **[seen]**
+
+### What a client program can reach on an entity it did not create
+- Replicated entities keep the **server's ids** in a client's world. ProcessClientMessage 0x9db7f0, create case: the
+  header's `u32 entity` (`msg+8`) goes to `r14`, is looked up in the client storage's entity map (`storage+0x170` keys,
+  `+0x188` records) and is passed as the id to `createEntityWithId` 0x987e50 (call at 0x9dbcb8; `[rbp+0x8c8]` set at
+  0x9dba59); the header's `u32 parent` (`msg+0xC`) and GUID (`msg+0x10`) go with it. A host's own client gets its
+  entities through the same pipeline (machine 0, docs/re/network.md). So the server's id of a player's character names
+  the same character in every client's world, and that character's visual entities name it as their parent. An id that
+  is already in that map is not created again: its record's tick (`+0x80`) is compared and a newer state updates the
+  entity (0x9dbc17..0x9dbc47). `createEntityWithId` uses any nonzero id it is given as the entity's id (looked up in
+  the storage's entity map at `storage+0x148` with the map's find 0x9b4dc0, at 0x988954), takes the next value of the
+  storage's own counter (`lock xadd [storage+0x498]`, 0x988933) only for id 0, and hands a bit-31 id to its world
+  group (0x98884e; bit-31 ids are world-group ids, docs/re/network.md). Ids a client makes for itself are not
+  covered, and whether that counter can reach an id the server sends was not read. **[static]**
+- The current entity's components: through the program's own iterator slots (`TryRead` read lists, `TryWrite` and
+  since 0.2.0-dev.29.18 `TryReadWritable` write lists). A client job's slot for a write component is a pointer into the
+  entity's chunk, as on the server (one IterNext, 0x9c2780, builds the slots for every world of the client). Writes there are local:
+  `SlotAttachment`'s replication bit is clear (docs/re/mounts.md) and Kiln does not call `MarkWritten` in a client
+  world. The game writes only `attachedToEntityId` of it (updateSlotAttachment 0x3215e0, re-native dossier §2.1): a
+  written offset and slot stay until the entity is made again. **[static]**
+- Other entities: `TryReadOther` runs the engine's `ReadOther` (GetComponentByType through the job's storage) under
+  the guard in a client job; the game's own `client_player_fishing` (0x201) declares `SlotAttachment` under
+  other_write, so other access to it in a client job is the game's own pattern. `TryWriteOther` stays refused in a
+  client world. The client's network apply (ClientReceive → ProcessMessages → ProcessClientMessage) runs on the main
+  thread outside StepPrograms, which waits for the world's tasks before it returns (docs/re/network.md), so it does not
+  change the client storage's entity map while a client slice runs. **[static]**
+- Template data: a `tpl` slot is the entity's per-entity pointer column for that template component
+  (0x98d870: chunk + `layout[0x584 + 2·type]` + row·8, null when the archetype lacks it). 40 of the game's 197 client
+  programs use `tpl` / `tpl_opt` (`static_render_model` tpl `ModelResource`, `dynamic_render_model` tpl_opt
+  `ModelResource`, ...), so a client program's `tpl: ["ModelResource"]` is the game's own route. No game program, server
+  or client, declares `tpl` on a component that is also read or written dynamically (`SlotAttachment` is): a `tpl`
+  `SlotAttachment` slot is not proven; read the template's values from the template data (`Content.Templates`) or
+  keep the live value you overwrote. **[static]**
+- Typed: Kiln.Game's generated `Ecs.SlotAttachment` (48 B), `Ecs.Offset` (40 B), `Ecs.EquipmentAnimationSets` (2 B),
+  `Ecs.DespawnLink`, `Ecs.ModelResource` and the enums `Ecs.AttachmentSlot`, `Ecs.AttachmentTarget`,
+  `Ecs.PrimaryAnimationSet`, `Ecs.SecondaryAnimationSet` come from the server dump `f0d824be…`; the client dump
+  `5d9ef2f1…` has the same 1839 types with 0 differences. The owner's client ran kiln.types (12658 types, 687
+  components), which `TryRead`/`TryWrite` size against. **[static] [seen]**
+
+### The prediction storage recomputes the stance
+- `equipment_visuals`, `locomotion_animation` and `server_to_network_animation_graph_input` have descriptor flags 0,
+  so the prediction storage (kind 1) steps them where its storage has their archetype. The dev.28 joined-client census
+  (`client-session4/sysprobe-census-k1-*`, 205 programs) lists all three in the prediction storage, each 1800 calls
+  over 1800 entities (one entity a call: the local player), on the main thread. **[seen]**
+- So on the player's own screen `EquipmentAnimationSets` is recomputed from the held item every prediction step; a
+  server-only override reaches the other players and not that one. `equipment_visuals` (#336 in that census) comes
+  before `locomotion_animation` (#410) and conflicts with it on `EquipmentAnimationSets`, so an After in
+  `equipment_visuals`' slot runs before `locomotion_animation` reads it, in the server world and in prediction alike.
+  Since 0.2.0-dev.29.18 a wrap can be the prediction storage's: `WrapOptions.World = WorldKind.Prediction`
+  (docs/kiln/services/systems.md). **[static] [seen]**
+- The prediction storage's write records carry no tracker, so a write there is not marked. `IterNext` 0x9c2780 (one
+  for every world of the client) fills a write record's `[5]`, the tracker `MarkWritten` takes, with
+  `storage + 0x7bc030` only when the job's write entry has byte `+0xc` or `+0xd` set and `J+0x1c0` is not null, and
+  with 0 otherwise (`[1]` to `[3]` the same way; 0x9c28ab..0x9c2963). `MarkWritten` 0x9d3150 reads through `[5]` at
+  once (0x9d316e), and the game's own write helpers test it first: 0x216bd0 calls `MarkWritten` only when the record's
+  tracker is not null, then returns the data pointer (the server's helpers in docs/re/rules.md do the same). Its
+  replication arm skips every storage whose kind byte is not 0 as well (0x9d3192). Which of the two inputs is zero
+  in the prediction storage was not followed. **[static]**
+- In the owner's hosted game (0.2.0-dev.29.18 trial, client 26430625, 2026-11-19) Holster Hotkey's prediction wrap of
+  `equipment_visuals` threw at its first write of `EquipmentAnimationSets`: kiln.world's `game_slice_mark` answered
+  `KILN_ERR_UNAVAILABLE` (3), its answer for a record without a tracker, while the server world's wrap of the same
+  program in the same process reported no fault. Since then Kiln.Systems writes such a slot unmarked outside the
+  server world, as the game's own update does there. **[seen]**
+
+### Only a real client proves
+- That a mod's managed client program registers into a client world, runs, and its `SlotAttachment` write moves a
+  weapon on screen for its first time (guided checks `programs.client-visual`, `14-client-world-programs`).
+- That a client-world and a prediction wrap's stages run there (`06a-wraps.client`; prediction has no guided check yet)
+  and that a prediction `EquipmentAnimationSets` write is what the local player's animation uses.
+- That the entity ids match on a joined client in practice (one log line: a character's id in the server's
+  `players:` line and in a joined client's program), and what `attachedToEntityId` resolves to for dagger children.

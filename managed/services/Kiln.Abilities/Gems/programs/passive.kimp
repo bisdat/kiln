@@ -1,0 +1,35 @@
+.kimp 1
+; Kiln gem trampoline: passive. Shared by every gem a mod registers with Gems.Register and GemTrigger.Passive
+; (docs/kiln/services/gems-new.md). While the gem's impact runs on its wearer (equipment_impacts) it signals every
+; 250 ms; Kiln.Abilities calls the mod's handler at the gem's own interval (a multiple of 250 ms is exact).
+; The value is the wearer (the impact's root). Its GUID is fixed forever: saved gem items name it.
+; Assemble (no game files needed): python3 tools/impact/impact.py asm passive.kimp -o passive.bin
+program 6b696c6e-6765-6d73-8000-000000000006
+stack 256
+streams none
+
+; the game writes the used item's power into a program's first impact.DamageSetup variable: this one takes it
+var $power      impact.DamageSetup
+var $root       ecs.EntityId
+var $period     Time = 250ms
+
+code:
+loop:   gload $period
+        ltime
+        iadd
+wait:   dup
+        ltime
+        ileq
+        brt go
+        rvm
+        br wait
+go:     pop
+        ecall getRoot($root)
+        pop
+        ecall kiln.Signal($root, 0x6b470006)
+        pop
+        br loop
+        halt
+
+shutdown:
+        halt

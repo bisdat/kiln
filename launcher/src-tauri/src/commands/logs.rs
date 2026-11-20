@@ -74,9 +74,15 @@ pub struct ReportSaved {
 
 /// What a report covers: a game, a local server, or (None) the system and the launcher only. Reads every time, keeps
 /// nothing between calls.
-fn report_input(app: &tauri::AppHandle, target: Option<LogTarget>) -> Result<kiln_manage::report::ReportInput, Error> {
+pub(crate) fn report_input(app: &tauri::AppHandle, target: Option<LogTarget>) -> Result<kiln_manage::report::ReportInput, Error> {
+    let version = app.package_info().version.to_string();
     let mut input = kiln_manage::report::ReportInput {
-        tool: format!("kiln-launcher {}", app.package_info().version),
+        // a test build says so in the tool's name and in the channel line (dev.29)
+        tool: match crate::distribution::beta() {
+            Some(n) => format!("kiln-launcher {version} beta {n}"),
+            None => format!("kiln-launcher {version}"),
+        },
+        channel: Some(report_channel(&version)),
         dirs: crate::state::dirs().ok(),
         deck: Some(crate::deck::detect::current().detected),
         roots: Some(crate::state::steam_roots()),
@@ -86,6 +92,19 @@ fn report_input(app: &tauri::AppHandle, target: Option<LogTarget>) -> Result<kil
     if let Some(c) = crate::render::choice() {
         input.facts.push(("Launcher".into(), crate::render::says(c)));
     }
+    // Linux: WebKit's DMA-BUF renderer in this start, why, and the sticky marker's sentence (crate::render)
+    if let Some(d) = crate::render::dmabuf_report() {
+        input.facts.push(("Launcher DMA-BUF".into(), d));
+    }
+    // Linux: whether WebKit composites (its hardware acceleration as applied; what the page measured: inbox 94)
+    input.facts.extend(crate::render::compositing_report());
+    // Linux: WebKit's sandbox in this start and the probe of bwrap; a finding when bwrap cannot start (crate::sandbox)
+    if let Some(s) = crate::sandbox::state() {
+        input.facts.push(("WebKit sandbox".into(), s.says()));
+        input.findings.extend(crate::sandbox::finding(s));
+    }
+    // Windows: the launcher's own exe or uninstaller gone from its folder (an antivirus; crate::own_files)
+    input.findings.extend(crate::own_files::finding());
     match target {
         Some(LogTarget::Game(id)) => input.install = Some(crate::state::game(&id)?),
         Some(t @ LogTarget::Server(_)) => input.game_dir = Some(target_dir(&t)?),
@@ -94,13 +113,35 @@ fn report_input(app: &tauri::AppHandle, target: Option<LogTarget>) -> Result<kil
     Ok(input)
 }
 
-/// Writes the support report zip to `path` (".zip" added when missing).
+/// The launcher's channel for the report: its build's (baked in for a test build) and the one it follows.
+fn report_channel(version: &str) -> kiln_manage::report::ReportChannel {
+    let baked = env!("KILN_LAUNCHER_BUILD_CHANNEL");
+    let build = if !baked.is_empty() { baked } else if version.contains('-') { "dev" } else { "stable" };
+    // the Nexus build follows nothing (no self-update): its own channel
+    let setting = if crate::distribution::CURRENT.self_updates() { crate::state::read_settings().ok().and_then(|s| s.update_channel) } else { None };
+    let follows = setting.filter(|s| matches!(s.as_str(), "stable" | "dev" | "beta")).unwrap_or_else(|| build.to_string());
+    kiln_manage::report::ReportChannel { build: build.into(), beta: crate::distribution::beta(), follows }
+}
+
+/// "What's in this report" before Save or Send: the report built as `report_save` would write it (nothing is written),
+/// each file with its group, size and how often each replacement stands in it, the files `exclude` leaves out, and what
+/// a report never holds (kiln_manage::report::contents).
 #[tauri::command]
-pub async fn report_save(app: tauri::AppHandle, target: Option<LogTarget>, path: String) -> Result<ReportSaved, Error> {
+pub async fn report_preview(app: tauri::AppHandle, target: Option<LogTarget>, exclude: Option<Vec<String>>) -> Result<kiln_manage::report::Contents, Error> {
+    let mut input = report_input(&app, target)?;
+    input.exclude = exclude.unwrap_or_default();
+    blocking(move || Ok(kiln_manage::report::contents(&kiln_manage::report::build(&input)))).await
+}
+
+/// Writes the support report zip to `path` (".zip" added when missing). `exclude`: other mods' files the player left
+/// out ("What's in this report"; Kiln's own files cannot be left out).
+#[tauri::command]
+pub async fn report_save(app: tauri::AppHandle, target: Option<LogTarget>, path: String, exclude: Option<Vec<String>>) -> Result<ReportSaved, Error> {
     if path.trim().is_empty() {
         return Err(Error::invalid("Choose where to save the report."));
     }
-    let input = report_input(&app, target)?;
+    let mut input = report_input(&app, target)?;
+    input.exclude = exclude.unwrap_or_default();
     blocking(move || {
         let mut out = PathBuf::from(&path);
         if !out.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
@@ -108,7 +149,7 @@ pub async fn report_save(app: tauri::AppHandle, target: Option<LogTarget>, path:
         }
         let r = kiln_manage::report::build(&input);
         let size = kiln_manage::report::write_zip(&r, &out)?;
-        crate::commands::app::launcher_log("report", &format!("support report written ({size} bytes, {} findings)", r.findings.len()));
+        crate::commands::app::launcher_log("report", &format!("support report written ({size} bytes, {} findings, {} files left out)", r.findings.len(), r.left_out.len()));
         Ok(ReportSaved { path: out.display().to_string(), size, findings: r.findings, errors: r.errors })
     })
     .await

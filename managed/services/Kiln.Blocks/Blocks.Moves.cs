@@ -9,7 +9,8 @@ public static partial class Blocks
 {
     /// <summary>Where a weapon's moves with follow-ups are: waiting for the game's data, applied, refused (and why), or removed with the mod.
     /// A snapshot: it does not change; ask again, or subscribe to <see cref="WeaponMovesApplicationChangedEvent"/>. A weapon with follow-ups applies all
-    /// its moves at once or none, and a refused attempt leaves the last applied one playing (<see cref="MoveApplicationResult.AppliedGeneration"/>).</summary>
+    /// its moves as a generation. A verified rollback keeps the previous generation; an unverifiable rollback revokes the mod's layers.
+    /// See <see cref="MoveApplicationResult.Reason"/> and <see cref="MoveApplicationResult.AppliedGeneration"/> for the outcome.</summary>
     /// <exception cref="ArgumentException">The handle is another mod's, is not the block the mod has under that name now (a reload made a new one), or its moves have no follow-ups.</exception>
     /// <exception cref="KilnUnavailableException"><c>blocks.move_followups</c> is off here.</exception>
     [AnyThread, RequiresCapability("blocks.move_followups")]
@@ -32,6 +33,17 @@ public static partial class Blocks
     {
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         MoveApplications.RefuseDefines = count;
+    }
+
+    /// <summary>For Kiln's own lab: the next <paramref name="count"/> documents a routed weapon writes (a new generation's, or an applied one's written
+    /// again after a content application) are applied and then reported refused, as if kiln.content had refused a rule in them; the content
+    /// transaction takes back what they wrote.</summary>
+    [Experimental("KILNX001", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/analyzers.md#kilnx001")]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static void LabFailMoveWrites(int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        MoveApplications.FailWrites = count;
     }
 
     /// <summary>For Kiln's own lab: plans and applies a routed weapon's moves again now, as a content application would. False: the weapon has no follow-ups.</summary>
