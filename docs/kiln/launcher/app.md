@@ -630,9 +630,9 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
   that draws with the GPU and no variable explains it (`WEBKIT_DISABLE_COMPOSITING_MODE` / `WEBKIT_DISABLE_DMABUF_RENDERER`),
   the launcher starts again once with `KILN_LAUNCHER_X11_RESTARTED=1`; that start sets `GDK_BACKEND=x11` itself (named in
   `KILN_LAUNCHER_RENDER_SET`: programs of the host, the game and the tools never get it).
-  - WebKit composites through X11: `<data>/state/x11.json`, later starts go straight to X11;
-  - still Never through X11: `<data>/state/x11-no-help.json`, that start goes on (no worse than Wayland), later starts
-    stay on Wayland and never switch again;
+  - that X11 start writes `<data>/state/x11.json`, later starts go straight to X11; also when WebKit still composites
+    nothing through X11 (work-cm 2026-11-20: Oryx593's lag was gone under `GDK_BACKEND=x11` although the torch stood
+    still, so X11's painting on the CPU was far better than Wayland's);
   - the page late through X11: `x11-no-help.json` and a restart on Wayland (`KILN_LAUNCHER_X11_RESTARTED=0`: X11 is not
     tried again in that chain), whose own late page then takes the steps above (DMA-BUF, then software);
   - precedence: the user's own `GDK_BACKEND` (any value, never changed), no Wayland session with XWayland, software mode,
