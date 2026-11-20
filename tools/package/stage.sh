@@ -13,6 +13,8 @@
 # Kiln.Admin, Kiln.Game or the samples that fails to build stops the stage, naming it, and the staged tree must hold
 # every plugin DLL (tools/release/lib/plugins.py). --allow-missing (local dev only; refused when KILN_RELEASE_BUILD=1,
 # as in release.sh) warns and leaves such a part out instead.
+# KILN_NATIVE_PREBUILT=DIR: the native CMake targets' bin/ built elsewhere with the same toolchain (release.sh,
+# KILN_BUILD_REMOTE=win1): copied in, and only what it lacks builds here.
 # KILN_OUT (default <repo>/.out/package) holds the build; the .NET runtime comes from tools/package/fetch-dotnet.sh.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
@@ -78,7 +80,20 @@ if ((build)); then
   for dir in "$repo"/native/services/*/ "$repo"/native/plugins/*/; do
     [[ -f $dir/CMakeLists.txt ]] && targets+=("kiln-$(basename "$dir")")
   done
-  if ! built native-all "$repo/native/build.sh" "${targets[@]}" 2>/dev/null; then
+  if [[ -n ${KILN_NATIVE_PREBUILT:-} ]]; then
+    # KILN_NATIVE_PREBUILT (tools/release/release.sh with KILN_BUILD_REMOTE=win1): the native targets' bin/ as
+    # tools/release/lib/remote-win1-native.sh built it on kiln-win1 with this toolchain; a target it does not hold
+    # (kiln-shroudlink: Rust, cargo xwin) builds here, alone.
+    [[ -s $KILN_NATIVE_PREBUILT/kiln-core.dll && -s $KILN_NATIVE_PREBUILT/dinput8.dll ]] || die "KILN_NATIVE_PREBUILT=$KILN_NATIVE_PREBUILT holds no native build"
+    mkdir -p "$out/cmake/bin"
+    cp -a "$KILN_NATIVE_PREBUILT"/. "$out/cmake/bin"/
+    for dir in "$repo"/native/plugins/*/; do
+      p=$(basename "$dir"); [[ -f $dir/CMakeLists.txt ]] || continue
+      grep -q "Builds no plugin" "$dir/CMakeLists.txt" && continue
+      [[ -s $out/cmake/bin/plugins/kiln-$p.dll ]] && continue
+      built "kiln-$p" "$repo/native/build.sh" "kiln-$p" || miss "native plugin kiln-$p failed to build (log: $logs/kiln-$p.log)"
+    done
+  elif ! built native-all "$repo/native/build.sh" "${targets[@]}" 2>/dev/null; then
     echo "stage: the one native build failed (log: $logs/native-all.log): building each target alone" >&2
     "$repo/native/build.sh" kiln-core kiln-proxy kiln-native-hello >/dev/null
     for dir in "$repo"/native/services/*/; do

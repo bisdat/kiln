@@ -74,7 +74,9 @@
 # KILN_BUILD_REMOTE=win1: the sample mods build on kiln-win1 (ssh kiln-win1, the owner's Windows PC; lib/remote-win1.sh)
 #   while this machine builds the rest, and come back as output folders that are zipped here like a local build's. Same
 #   .NET SDK version there; nothing signed or secret goes there. A failed or unreachable win1 means a local build of the
-#   samples (noted in the log), never a missing sample. Off by default.
+#   samples (noted in the log), never a missing sample. Off by default. With it the native Windows DLLs build there too
+#   (lib/remote-win1-native.sh: the same clang-cl/lld-link release and this machine's xwin CRT/SDK, the same path maps; the
+#   DLLs equal this machine's but for the PDB id) and the runtime stage builds only the rest (KILN_NATIVE_PREBUILT).
 # The Windows launcher builds (direct, Nexus) run beside the Linux ones once the notices are complete (their frontend in
 #   launcher/dist-windows); KILN_RELEASE_SERIAL_LAUNCHERS=1 runs them one after the other.
 # NuGet: the builds restore into a private package cache, $work/nuget-packages (KILN_RELEASE_NUGET_PACKAGES), never
@@ -181,6 +183,7 @@ cleanup_release() {
   rm -rf -- "$work/appimage-root"
   # the kiln-win1 sample build (KILN_BUILD_REMOTE), when the release stops before it is collected
   if [[ -n $remote_pid ]]; then kill "$remote_pid" 2>/dev/null || true; fi
+  if [[ -n ${native_pid:-} ]]; then kill "$native_pid" 2>/dev/null || true; fi
   if [[ -n ${win_pid:-} ]]; then kill "$win_pid" 2>/dev/null || true; fi
   if [[ -n ${sdk_pid:-} ]]; then kill "$sdk_pid" 2>/dev/null || true; fi
 }
@@ -450,6 +453,15 @@ if ((!launcher_only)); then
     remote_pid=$!
   fi
 fi
+# The native Windows DLLs (CMake targets) on kiln-win1 too, with the same clang-cl, lld-link and xwin CRT/SDK as here
+# (lib/remote-win1-native.sh): collected before the runtime stage, which then builds only what they leave out.
+unset KILN_NATIVE_PREBUILT
+native_pid=""
+if [[ $remote == win1 ]]; then
+  step "native DLLs: building on kiln-win1 meanwhile (lib/remote-win1-native.sh; log $work/remote-win1-native.log)"
+  RELEASE_WORK=$work "$lib/remote-win1-native.sh" "$src" "$work/remote-win1-native" >"$work/remote-win1-native.log" 2>&1 &
+  native_pid=$!
+fi
 
 # ---------------------------------------------------------------- 3. dependencies, command-line tools
 step "dependencies (bun, npm)"
@@ -476,6 +488,17 @@ kilnctl=$lin_target/release/kilnctl
 
 # ---------------------------------------------------------------- 4. runtime
 step "runtime: native + managed build, stage"
+if [[ -n $native_pid ]]; then
+  nrc=0; wait "$native_pid" || nrc=$?
+  native_pid=""
+  cat "$work/remote-win1-native.log" >>"$log"
+  if ((nrc == 0)) && [[ -f $work/remote-win1-native/ok ]]; then
+    export KILN_NATIVE_PREBUILT=$work/remote-win1-native/bin
+    note "native DLLs: built on kiln-win1 ($(grep -o 'build rc=0, [0-9]* s' "$work/remote-win1-native.log" || true)); the stage builds what they leave out"
+  else
+    note "native DLLs: the kiln-win1 build failed (exit $nrc, $work/remote-win1-native.log): building them here"
+  fi
+fi
 stage=$work/stage
 # the native DLLs name their PDB without a path (/pdbaltpath); the PDBs themselves hold the build machine's paths, so
 # they stay out of the release and go to $work/symbols (keep them for crash reports of this build)
