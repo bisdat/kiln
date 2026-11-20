@@ -153,6 +153,17 @@ internal static class ModValuesService
         return new(true, null, d.Key);
     }
 
+    /// <summary>The test kit: the real ledger on <paramref name="store"/>, characters live by <paramref name="isLive"/>;
+    /// definitions start over. No channel, no native backend, no save hooks.</summary>
+    internal static void UseForTests(IValueStore store, Func<CharacterKey, bool> isLive)
+    {
+        lock (Gate) _started = true;
+        Registry.Clear();
+        Touched.Clear();
+        _ledger = new Ledger(Registry, store, isLive, new BusValueEvents());
+        ModValuesCaps.Rows.Ensure();
+    }
+
     internal static Ledger NeedLedger(string api)
     {
         EnsureStarted();  // a mod's OnLoad runs before the first service tick
