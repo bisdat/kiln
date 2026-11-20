@@ -38,6 +38,8 @@
     <ProjectReference Include="../services/Kiln.Terrain/Kiln.Terrain.csproj" />
     <!-- Kiln.Saves needs it at run time (CharacterSync's channel); it references it without copying it. -->
     <ProjectReference Include="../services/Kiln.Network/Kiln.Network.csproj" />
+    <!-- The fake of kiln.ui.inventory (Fakes/UiInventory/): Ui.Inventory's records, and its marks (MarkOf). -->
+    <ProjectReference Include="../services/Kiln.Ui/Kiln.Ui.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- Kiln.TestKit.Xunit: [KilnTest] methods as xunit tests (the extensibility package, not a runner). -->

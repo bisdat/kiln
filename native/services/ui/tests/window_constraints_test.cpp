@@ -37,7 +37,10 @@ static_assert(offsetof(KilnUiApi, graphics_set) == offsetof(KilnUiApi, set_texts
 static_assert(offsetof(KilnUiApi, graphics_status) == 1024);
 // chat_completion (internal to Kiln.Ui, GitHub issue 44) after them
 static_assert(offsetof(KilnUiApi, chat_completion) == 1032);
-static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, chat_completion) + sizeof(void*));
+// subscribe_pointer_press (0.2.0-dev.30, presses on the game's own UI) after it
+static_assert(offsetof(KilnUiApi, subscribe_pointer_press) == offsetof(KilnUiApi, chat_completion) + sizeof(void*));
+static_assert(offsetof(KilnUiApi, subscribe_pointer_press) == 1040);
+static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, subscribe_pointer_press) + sizeof(void*));
 int main() {
     // Drawing off: no frame/context, just as KILN_UI_OVERLAY=0. Must not enter ImGui.
     kui_draw::t_set_next_window_size_constraints(300, 0, 300, 918);

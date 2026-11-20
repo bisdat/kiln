@@ -429,6 +429,9 @@ internal static unsafe class UiInventoryBridge
         return d;
     }
 
+    /// <summary>The mark a slot shows now (an item mark first, then the rules): what DrawMarks would draw on it.</summary>
+    internal static SlotMark? MarkOf(VisibleSlot s) => Find(s, ByItem(), Rules.Snapshot());
+
     internal static SlotMark? Find(VisibleSlot s, Dictionary<uint, SlotMark> byItem, (Func<VisibleSlot, SlotMark?> Fn, ModContext? Owner)[] rules)
     {
         if (s.ClientEntity.Value != 0 && byItem.TryGetValue(s.ClientEntity.Value, out var marked)) return marked;

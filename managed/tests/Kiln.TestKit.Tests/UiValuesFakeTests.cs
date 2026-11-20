@@ -136,6 +136,7 @@ public sealed unsafe class UiValuesFakeTests
             uint required = 0;
             return T->CopySlots(77, 0, 0, null, null, 0, &required);
         });
-        Assert.Equal(FakeTables.Unavailable, none);  // not modelled: unavailable, never "ok"
+        // the slot frames are modelled since 0.2.0-dev.30 (the frames a test draws, Fakes/UiInventory): no frame record is refused
+        Assert.Equal(FakeTables.InvalidArgument, none);
     }
 }
