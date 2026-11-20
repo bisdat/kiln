@@ -606,7 +606,7 @@ class Recipes(unittest.TestCase):
         rp = self.mod("on", self.BANNER_PHYSICS, experimental=None)
         r = recipe.run(rp, self.client, self.types, update_manifest=True)
         self.assertTrue(r["ok"], json.dumps(r["steps"])[:2000])
-        self.assertEqual(r["features"], [])
+        self.assertNotIn("features", r)  # no key: no feature named in the report
         self.assertFalse(r.get("warnings"))
         d = Decoder(self.types).decode("keen::RenderModel", (rp.parent / "cooked" / "banner.bin").read_bytes())
         self.assertEqual(d["cloth"]["meshes"][0]["data"]["fabric"]["anchors"], [0, 1, 0, 1])

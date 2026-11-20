@@ -479,7 +479,7 @@ class Recipes(Game, unittest.TestCase):
             recipe.run(rp, self.k, self.types, update_manifest=True)
         r = recipe.run(rp, self.k, self.types, update_manifest=True)  # on since 0.2.0-dev.31
         self.assertTrue(r["ok"], json.dumps(r["steps"])[:2000])
-        self.assertEqual(r["features"], [])
+        self.assertNotIn("features", r)  # no key: no feature named in the report
 
 
 if __name__ == "__main__":
