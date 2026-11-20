@@ -41,7 +41,7 @@ internal static unsafe class ReplNetNative
         public byte Channel, PeerFlags, Machine, Pad;
         public uint Entity, Tick, ComponentHash;
         public delegate* unmanaged[Cdecl]<FilterCtx*, uint, uint, uint*, void*> Read;
-        public void* Reserved;
+        public uint* Failed;
     }
 
     /// <summary>KilnReplItemSite (12 bytes).</summary>

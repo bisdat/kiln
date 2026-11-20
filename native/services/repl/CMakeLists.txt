@@ -11,3 +11,8 @@ add_executable(repl-gate-test tests/repl_gate_test.cpp repl.cpp loopback.cpp sta
                filter.cpp touch.cpp remap.cpp messages.cpp schema.cpp)
 target_include_directories(repl-gate-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
 set_target_properties(repl-gate-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/repl-tests")
+
+# kiln.repl.net's pure snapshot step (snapcore.h): the remap over a component's sites, the list-1 mask test, a filter call
+add_executable(repl-net-test tests/repl_net_test.cpp)
+target_include_directories(repl-net-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
+set_target_properties(repl-net-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/repl-tests")

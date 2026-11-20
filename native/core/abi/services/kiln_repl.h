@@ -322,10 +322,12 @@ typedef struct KilnReplFilterCtx {
     /* Another component of any entity, read-only, as the world holds it now (job-safe; the world is quiet during the
      * send step). NULL when the entity or the component is absent; *out_size its bytes. Valid during the call. */
     const void*(KILN_CALL* read)(const struct KilnReplFilterCtx* self, uint32_t entity, uint32_t component_hash, uint32_t* out_size);
-    void* reserved;
+    /* Set *failed to 1 to say the filter failed (a managed filter that threw): as a fault, the component's edits of this
+     * snapshot are discarded and the filter is removed. */
+    uint32_t* failed;
 } KilnReplFilterCtx;
 /* Edits scratch (size bytes: this peer's copy of the component in its snapshot). Job threads, in parallel. A fault
- * discards this filter's edits for this snapshot (the game's bytes go out), removes the filter and logs once. */
+ * discards the component's edits for this snapshot (the game's bytes go out), removes the filter and logs once. */
 typedef void(KILN_CALL* KilnReplFilterFn)(uint8_t* scratch, uint32_t size, const KilnReplFilterCtx* ctx, void* user);
 
 /* touch() out_status */
