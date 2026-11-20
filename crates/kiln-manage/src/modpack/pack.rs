@@ -381,7 +381,7 @@ pub fn check_index(ix: &PackIndex) -> Result<()> {
         if !path_ok {
             problems.push(format!("mod {}: path {:?} (must be {})", m.id, m.path, mod_path(m.kind, &m.id)));
         }
-        if !mod_id_ok(&m.id) || m.id.starts_with(LAYER_PREFIX) {
+        if !mod_id_ok(&m.id) || m.id.starts_with(LAYER_PREFIX) || m.id.starts_with(PLAYER_LAYER_PREFIX) {
             problems.push(format!("mod id {:?} is not valid", m.id));
         }
         if !semver_ok(&m.version) {
@@ -1100,6 +1100,12 @@ pub fn build(dirs: &DataDirs, req: &BuildRequest, out_dir: &Path, progress: &mut
             if progress.canceled() {
                 return Err(err(ErrorCode::Canceled, "canceled"));
             }
+            if kind == ModKind::Kiln && m.id.starts_with(PLAYER_LAYER_PREFIX) {
+                // a player layer belongs to one PC's instance: its id would meet the receiver's own (profile ids repeat)
+                notes.push(format!("{} (your own data changes to an installed pack) is not in the pack: copy what should travel into the pack layer", m.id));
+                done += 1;
+                continue;
+            }
             progress.report(Some(done as f32 / total as f32 * 0.5), &format!("hashing {}", m.id));
             done += 1;
             let r = LibraryRef { kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
@@ -1776,7 +1782,7 @@ fn apply_overrides(config_dir: &Path, r: &ReadPack, side_ok: &dyn Fn(PartSide) -
 }
 
 /// `profiles/<pid>/pack/base/`: the index and the overrides of the version installed (the merge base of the next update).
-fn write_base(dirs: &DataDirs, pid: &str, r: &ReadPack, live: &[(String, Option<Vec<u8>>)]) -> Result<()> {
+fn write_base(dirs: &DataDirs, pid: &str, r: &ReadPack, written: &Written) -> Result<()> {
     let base = pack_dir(dirs, pid).join("base");
     let tmp = pack_dir(dirs, pid).join("base.tmp");
     let _ = std::fs::remove_dir_all(&tmp);
@@ -1789,25 +1795,14 @@ fn write_base(dirs: &DataDirs, pid: &str, r: &ReadPack, live: &[(String, Option<
         }
         std::fs::write(&p, bytes).map_err(crate::util::io_at(&p, "writing"))?;
     }
-    // the config files as this install or update leaves them: what the next update compares the player's files with
-    let mut list = Vec::new();
-    for (path, bytes) in live {
-        if let Some(b) = bytes {
-            let p = tmp.join(LIVE_DIR).join(path);
-            if let Some(d) = p.parent() {
-                std::fs::create_dir_all(d).map_err(crate::util::io_at(d, "creating"))?;
-            }
-            std::fs::write(&p, b).map_err(crate::util::io_at(&p, "writing"))?;
-        }
-        list.push(LiveEntry { path: path.clone(), present: bytes.is_some() });
-    }
-    crate::util::write_json_atomic(&tmp.join(LIVE_LIST), &list)?;
+    // what Kiln has written into the config files: the next update tells the player's values from Kiln's by it
+    crate::util::write_json_atomic(&tmp.join(WRITTEN), written)?;
     swap_in(&tmp, &base)
 }
 
 /// Moves a staged folder into place: the old one moves aside to <dest>.old first and comes back if the new one cannot
 /// take its place, so there is always one (read_base falls back to base.old).
-fn swap_in(staged: &Path, dest: &Path) -> Result<()> {
+pub(crate) fn swap_in(staged: &Path, dest: &Path) -> Result<()> {
     let old = crate::util::with_suffix(dest, ".old");
     let _ = std::fs::remove_dir_all(&old);
     if dest.exists() {
@@ -1867,7 +1862,7 @@ pub fn install(dirs: &DataDirs, game: Option<&GameInstall>, req: &InstallRequest
         let profile = crate::profile::save(dirs, &profile)?;
         let config_dir = dirs.profile(&pid).join("config");
         let written = apply_overrides(&config_dir, &r, &|s| s.for_client())?;
-        write_base(dirs, &pid, &r, &live_snapshot(&config_dir, &client_paths(&r.index)))?;
+        write_base(dirs, &pid, &r, &written_now(&config_dir, &r.index, &r.overrides, None, &BTreeMap::new())?)?;
         let inst = Instance {
             format: 1,
             pack: r.index.id.clone(),
@@ -2051,6 +2046,8 @@ struct Computed {
     plan: UpdatePlan,
     mods: crate::profile::ProfileMods,
     files: Vec<FileWork>,
+    /// new path -> old path
+    renamed: BTreeMap<String, String>,
 }
 
 fn side_leaves(ix: &PackIndex, ov: &BTreeMap<(PartSide, String), Vec<u8>>, path: &str) -> Result<Option<(OverrideMode, Leaves)>> {
@@ -2078,6 +2075,15 @@ fn base_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
+/// Two settings paths of one mod, plausibly: the same file name, the same folder, or one's name (without its
+/// extension) a folder of the other (`alpha.json` -> `alpha/settings.json`).
+fn related(a: &str, b: &str) -> bool {
+    let dir = |p: &str| p.rsplit_once('/').map(|x| x.0.to_string()).unwrap_or_default();
+    let stem = |p: &str| base_name(p).rsplit_once('.').map(|x| x.0.to_ascii_lowercase()).unwrap_or_else(|| base_name(p).to_ascii_lowercase());
+    let in_dirs = |s: &str, p: &str| !s.is_empty() && dir(p).split('/').any(|c| c.eq_ignore_ascii_case(s));
+    base_name(a).eq_ignore_ascii_case(base_name(b)) || dir(a) == dir(b) || in_dirs(&stem(a), b) || in_dirs(&stem(b), a)
+}
+
 /// Override files the new version renamed: (new path -> old path). A file the old version had and the new one has not,
 /// matched with a file the new version adds: the same kind of file setting the same keys (a whole-file override: the
 /// same text, or the same file name in another folder).
@@ -2097,13 +2103,16 @@ fn renames(base: &PackIndex, base_ov: &BTreeMap<(PartSide, String), Vec<u8>>, th
             if bm != tm {
                 continue;
             }
+            // never two files of different mods that merely look alike: the paths must belong together
+            if !related(from, to) {
+                continue;
+            }
             let same_keys = !bl.is_empty() && bl.keys().eq(tl.keys());
-            let score = match (bl == tl, same_keys, base_name(from) == base_name(to)) {
+            let score = match (bl == tl, same_keys, base_name(from).eq_ignore_ascii_case(base_name(to))) {
                 (true, _, true) => 4,
-                (true, _, false) if tm != OverrideMode::Replace => 3,
+                (true, _, false) => 3,
                 (_, true, true) => 2,
                 (_, true, false) if tm != OverrideMode::Replace => 1,
-                (true, _, false) => 1,
                 _ => 0,
             };
             if score > 0 && best.is_none_or(|(_, s)| score > s) {
@@ -2117,30 +2126,42 @@ fn renames(base: &PackIndex, base_ov: &BTreeMap<(PartSide, String), Vec<u8>>, th
     Ok(out)
 }
 
-const LIVE_DIR: &str = "live";
-const LIVE_LIST: &str = "live.json";
+/// `base/written.json`: per config file, each key Kiln wrote into it (installs and updates) and the value it left
+/// there (null: removed). The next update tells the player's values from Kiln's by it.
+const WRITTEN: &str = "written.json";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct LiveEntry {
-    path: String,
-    present: bool,
+type Written = BTreeMap<String, Vec<(Key, Option<Value>)>>;
+
+/// What Kiln has written now: `prev` (a renamed file's keys under the new name), then each client override key of `ix`
+/// as the config folder holds it after the install or update.
+fn written_now(config_dir: &Path, ix: &PackIndex, ov: &BTreeMap<(PartSide, String), Vec<u8>>, prev: Option<Written>, renamed: &BTreeMap<String, String>)
+    -> Result<Written> {
+    let mut out = prev.unwrap_or_default();
+    for (to, from) in renamed {
+        if let Some(v) = out.remove(from) {
+            out.insert(to.clone(), v);
+        }
+    }
+    for path in client_paths(ix) {
+        let Some((mode, leaves)) = side_leaves(ix, ov, &path)? else { continue };
+        let text = std::fs::read(config_dir.join(&path)).ok().map(|b| crate::manifest::decode_text(&b));
+        let list = out.entry(path.clone()).or_default();
+        for k in leaves.keys() {
+            let v = merge::value_at(mode, text.as_deref(), k);
+            match list.iter_mut().find(|(x, _)| x == k) {
+                Some(e) => e.1 = v,
+                None => list.push((k.clone(), v)),
+            }
+        }
+    }
+    Ok(out)
 }
 
-/// The config files of `paths` as they are now in a config folder (None: missing): kept with the base, so the next
-/// update knows which values the player changed since.
-fn live_snapshot(config_dir: &Path, paths: &BTreeSet<String>) -> Vec<(String, Option<Vec<u8>>)> {
-    paths.iter().map(|p| (p.clone(), std::fs::read(config_dir.join(p)).ok().filter(|b| b.len() as u64 <= MAX_OVERRIDE * 16))).collect()
-}
-
-/// The config files as the last install or update left them (None: an instance from before Kiln kept them).
-fn read_installed(dirs: &DataDirs, pid: &str) -> Option<BTreeMap<String, Option<String>>> {
+/// What Kiln wrote (None: an instance from before Kiln kept it).
+fn read_written(dirs: &DataDirs, pid: &str) -> Option<Written> {
     let pd = pack_dir(dirs, pid);
     let base = if pd.join("base").join(super::MANIFEST).is_file() { pd.join("base") } else { pd.join("base.old") };
-    let list: Vec<LiveEntry> = crate::util::read_json(&base.join(LIVE_LIST)).ok().flatten()?;
-    Some(list.into_iter().map(|e| {
-        let text = e.present.then(|| std::fs::read(base.join(LIVE_DIR).join(&e.path)).ok().map(|b| crate::manifest::decode_text(&b))).flatten();
-        (e.path, text)
-    }).collect())
+    crate::util::read_json(&base.join(WRITTEN)).ok().flatten()
 }
 
 /// The data files of the layer in a pack zip (`layer/content/*.json`).
@@ -2239,7 +2260,7 @@ fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, 
     // config files (client side), base U theirs; a renamed file is merged into its new name
     let config_dir = dirs.profile(&profile.id).join("config");
     let renamed = renames(&base, &base_ov, theirs, &new.overrides)?;
-    let installed = read_installed(dirs, &profile.id);
+    let written = read_written(dirs, &profile.id);
     let paths: BTreeSet<String> = client_paths(&base).union(&client_paths(theirs)).filter(|p| !renamed.values().any(|f| f == *p)).cloned().collect();
     let read_live = |p: &str| std::fs::read(config_dir.join(p)).ok().map(|b| crate::manifest::decode_text(&b));
     let mut files = Vec::new();
@@ -2253,14 +2274,16 @@ fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, 
         let mode = t.as_ref().or(b.as_ref()).map(|x| x.0).unwrap_or(OverrideMode::for_path(&path));
         let live = read_live(&mine_path);
         let mine = |k: &[String]| merge::value_at(mode, live.as_deref(), k);
-        let then: Option<Option<String>> = installed.as_ref().and_then(|m| m.get(&mine_path).cloned());
-        let then_at = |k: &[String]| merge::value_at(mode, then.as_ref().and_then(|t| t.as_deref()), k);
-        let installed_fn: Option<&dyn Fn(&[String]) -> Option<Value>> = if then.is_some() { Some(&then_at) } else { None };
-        let m = merge::three_way_since(b.as_ref().map(|x| &x.1), t.as_ref().map(|x| &x.1), &mine, installed_fn);
+        let empty = Vec::new();
+        let kiln_wrote = written.as_ref().map(|w| w.get(&mine_path).unwrap_or(&empty));
+        let wrote_at = |k: &[String]| kiln_wrote.and_then(|l| l.iter().find(|(x, _)| x.as_slice() == k).map(|(_, v)| v.clone()));
+        let written_fn: Option<&dyn Fn(&[String]) -> Option<Option<Value>>> = if kiln_wrote.is_some() { Some(&wrote_at) } else { None };
+        let m = merge::three_way_since(b.as_ref().map(|x| &x.1), t.as_ref().map(|x| &x.1), &mine, written_fn);
         let (mut start, mut carry) = (None, Vec::new());
         if from.is_some() {
             let here = read_live(&path);
-            if here.is_none() {
+            if here.is_none() && from.as_deref().map(base_name).is_some_and(|f| f.eq_ignore_ascii_case(base_name(&path))) {
+                // the same file moved: it starts as a copy of the player's (their other keys come along)
                 start = live.clone();
             } else {
                 // the new file is there already: the player's values follow from the old one, key by key
@@ -2296,7 +2319,8 @@ fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, 
     };
     // the player layer: kept; the fields the new pack layer sets too are listed (the player's value still wins)
     let local_files = super::layers::content_files(&super::layers::local_dir(dirs, &profile.id))?;
-    let local_plan = if local_files.is_empty() && !mods.kiln.iter().any(|m| m.id == local) {
+    // only a player layer the profile uses: edits never saved (pack_local_save) stay unsaved
+    let local_plan = if !mods.kiln.iter().any(|m| m.id == local) {
         None
     } else {
         let theirs_files = if theirs.layer.is_some() { layer_files_in(zip_file)? } else { Vec::new() };
@@ -2319,7 +2343,7 @@ fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, 
         conflicts,
         local: local_plan,
     };
-    Ok(Computed { plan, mods, files })
+    Ok(Computed { plan, mods, files, renamed })
 }
 
 fn same_pack(inst: &Instance, ix: &PackIndex) -> Result<()> {
@@ -2448,7 +2472,7 @@ pub fn update(dirs: &DataDirs, req: &UpdateRequest, progress: &mut dyn Progress)
             config_written = true;
             crate::util::write_atomic(target, out.as_bytes())?;
         }
-        write_base(dirs, &profile.id, &r, &live_snapshot(&config_dir, &client_paths(&r.index)))?;
+        write_base(dirs, &profile.id, &r, &written_now(&config_dir, &r.index, &r.overrides, read_written(dirs, &profile.id).or_else(|| Some(Written::new())), &c.renamed)?)?;
         let mut optional = inst.optional.clone();
         for m in r.index.mods.iter().filter(|m| m.dep == Dep::Optional) {
             let on = saved.mods.list(m.kind).iter().find(|e| e.id == m.id).map(|e| e.enabled).unwrap_or(m.default.unwrap_or(true));
@@ -2770,6 +2794,16 @@ mod tests {
             ov.insert((*side, "a.json".to_string()), text.as_bytes().to_vec());
         }
         ReadPack { index: ix, overrides: ov, sha256: String::new(), size: 0, code: BTreeSet::new(), absent: BTreeSet::new() }
+    }
+
+    #[test]
+    fn renames_only_between_paths_that_belong_together() {
+        assert!(related("alpha.json", "alpha/settings.json"));
+        assert!(related("kiln-auto-loot-keys.json", "kiln-auto-loot-keys/hotkeys.json"));
+        assert!(related("a/settings.json", "b/settings.json"));
+        assert!(related("mods/a.json", "mods/b.json"));
+        assert!(!related("alpha.json", "beta/settings.json"));
+        assert!(!related("alpha/x.json", "beta/y.json"));
     }
 
     #[test]

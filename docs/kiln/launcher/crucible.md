@@ -126,15 +126,19 @@ pack's mods and the player layer (loading after everything) wins over the layer.
 and makes it the profile's last Kiln mod; a working copy without data files takes it out of the profile again.
 A data field is `[section, target, field]` (`["items", "Logs", "maxStackSize"]`; a target with conditions carries its
 `@where`; a definition of an `add` list is `[section, "add", name]`; a value straight under a section is `[section, key]`),
-whatever file holds it: a pack layer that moves a field to another file still overlaps.
+whatever file holds it: a pack layer that moves a field to another file still overlaps. A profile naming its player
+layer whose working copy is gone (no `local/kiln.mod.json`: a copied or restored profile) gets it back from the Library
+entry at the next save or update. A pack built from an instance leaves the player layer out (a note says so): `local.`
+ids are refused in packs, since profile ids repeat on every PC. Undo of an update also takes back player-layer edits
+saved after it.
 
 ## Updating an instance
 `pack::plan_update(dirs, pid, file, sha256?, optional) -> UpdatePlan` shows what an update does without writing
 anything (`kilnctl pack diff <pid> <file>`); `pack::update(dirs, UpdateRequest, progress) -> UpdateResult` does it.
 The new file must be the same pack (same `id`), else `refused`.
 
-Inputs: base = `pack/base/` (the version installed, and in `base/live/` the config files as that install or update left
-them), theirs = the new file, mine = the profile, its config folder and its player layer now.
+Inputs: base = `pack/base/` (the version installed, and `base/written.json`: each config key Kiln wrote at installs and
+updates, with the value it left), theirs = the new file, mine = the profile, its config folder and its player layer now.
 - **Mods**: the new version's set. Mods the player added are kept ("yours"), after the layer. The player's switch on a
   mod the installed version had is kept ("your switch"); a new optional mod takes the request's choice, else its
   default. Mods that leave the pack leave the profile and stay in the Library. The layer is replaced.
@@ -146,14 +150,15 @@ them), theirs = the new file, mine = the profile, its config folder and its play
 - **Config, per key** (JSON: a key path; INI: `section.key`; replace: the whole file): only the pack changed it -> the
   pack's value is written ("updated by the pack"); only the player changed it, or the pack no longer sets it (a key or a
   whole override file the new version drops) -> the player's stays ("your change kept"); a key new in the pack ->
-  written, unless the file held another value at the last install or update than it holds now (the player changed it
-  since: a conflict `{key, base: null, pack, mine}`; a key the file did not hold then, such as a default the mod wrote,
-  is taken); both changed it differently, a removal against an edit included -> a conflict `{key, base, pack, mine}`.
-  Edits keep the file's comments and layout. Instances from before `base/live/` existed take new keys as before.
-- **Renamed settings files**: an override the new version drops matched with one it adds (same mode and the same
-  keys; a whole-file override: the same text or the same file name) is a rename (`files[].renamedFrom`): the player's
-  values are read at the old name and merged into the new one (a copy of the old file when the new one is not there
-  yet, else key by key); the old file stays as it was.
+  written when the file does not hold it or holds what Kiln last wrote there; a value Kiln never wrote (the player's,
+  or a default the mod wrote: Kiln cannot tell them apart) that differs is a conflict `{key, base: null, pack, mine}`;
+  both changed it differently, a removal against an edit included -> a conflict `{key, base, pack, mine}`.
+  Edits keep the file's comments and layout. Instances installed before `written.json` existed take new keys as before until their first update.
+- **Renamed settings files**: an override the new version drops matched with one it adds is a rename
+  (`files[].renamedFrom`) when the paths belong together (the same file name, the same folder, or the old name a folder of
+  the new path: `alpha.json` -> `alpha/settings.json`) and the overrides match (same mode, the same values or the same
+  keys). The player's values are read at the old name: a file of the same name not there yet starts as a copy of the
+  old one; otherwise the pack's keys are carried key by key. The old file stays as it was.
 - **Conflicts** need a choice before anything is written: `resolve` maps `"<path>#<key>"` (as the plan names them, e.g.
   `"kiln-auto-loot.json#range"`) to `pack` or `mine`, `all` answers the rest. Without one the update is refused with
   `conflict` and the plan in the error's `detail`.
@@ -334,6 +339,8 @@ Code: `crates/kiln-manage/src/crucible/` (`mod.rs` client and flows, `sign.rs` t
 - engine mods whose settings live in their own folder (not the configDir) cannot carry overrides yet;
 - a pack's optional mods are imported into the Library even when off (on purpose: switching one on later needs no
   download and works offline);
+- the preview's local check of a dropped file reads it whole: a client-only pack (Crucible's
+  `<vid>.client.kilnpack` cache, never offered to players) fails it;
 - Pack Studio, the Crucible browse page, comments and upvotes in the launcher, "Make it public".
 
 ## Checks done

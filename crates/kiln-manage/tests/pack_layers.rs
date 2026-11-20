@@ -162,6 +162,11 @@ fn the_player_layer_stays_last_across_an_update_with_drop_my_change_and_undo() {
     assert_eq!(json_of(&layers::local_dir(&dirs, &ip).join("content/mine.json"))["items"]["Logs"]["maxStackSize"], 999);
     assert_eq!(local_entry(&dirs, &ip).hash, first.hash);
 
+    // a working copy that went missing comes back from the Library entry the profile names
+    std::fs::remove_dir_all(layers::local_dir(&dirs, &ip)).unwrap();
+    layers::save(&dirs, &ip).unwrap();
+    assert_eq!(local_entry(&dirs, &ip).hash, first.hash);
+    assert!(layers::local_dir(&dirs, &ip).join("content/mine.json").is_file());
     // a player layer emptied leaves the profile
     layers::write(&dirs, &ip, "content/mine.json", None).unwrap();
     layers::save(&dirs, &ip).unwrap();
@@ -189,7 +194,7 @@ fn a_renamed_settings_file_carries_the_players_values() {
     assert!(f.conflicts.is_empty() && f.kept == ["range"], "{f:?}");
     assert!(!plan.files.iter().any(|f| f.path == "alpha.json"), "the old name is no file of its own: {:?}", plan.files);
     pack::update(&dirs, &up(&ip, &v2), &mut NoProgress).unwrap();
-    assert_eq!(json_of(&cfg.join("alpha/settings.json")), json!({ "range": 30, "smash": false, "own": "yes" }), "a copy of the player's file");
+    assert_eq!(json_of(&cfg.join("alpha/settings.json")), json!({ "range": 30, "smash": false }), "the player's values of the pack's keys move along");
     assert_eq!(json_of(&cfg.join("alpha.json"))["range"], 30, "the old file stays as it was");
 
     // another player whose mod made the new file already, and a pack that also changed range: one question, the
@@ -234,11 +239,20 @@ fn a_key_new_to_the_pack_asks_when_the_player_changed_it_and_a_dropped_override_
     assert_eq!(f.conflicts.len(), 1, "{f:?}");
     assert_eq!((f.conflicts[0].key.as_str(), f.conflicts[0].base.clone(), f.conflicts[0].pack.clone(), f.conflicts[0].mine.clone()),
         ("hotkey", None, Some(json!("F10")), Some(json!("F5"))));
-    // left as the update found it (F9): the pack's value is simply taken
+    // the mod's own default (F9, never written by Kiln) is asked about too: Kiln cannot tell it from a player's value
     put(&cfg, "alpha.json", br#"{ "range": 21, "hotkey": "F9" }"#);
+    let plan = pack::plan_update(&dirs, &ip, &v3.file, None, &BTreeMap::new()).unwrap();
+    assert_eq!(plan.files.iter().find(|f| f.path == "alpha.json").unwrap().conflicts.len(), 1);
+    // a file without the key: simply taken
+    put(&cfg, "alpha.json", br#"{ "range": 21 }"#);
     let plan = pack::plan_update(&dirs, &ip, &v3.file, None, &BTreeMap::new()).unwrap();
     let f = plan.files.iter().find(|f| f.path == "alpha.json").unwrap();
     assert!(f.conflicts.is_empty() && f.taken == ["hotkey"], "{f:?}");
+    pack::update(&dirs, &up(&ip, &v3), &mut NoProgress).unwrap();
+    // now Kiln wrote F10: the player's later change of a key the pack stops and starts managing again is theirs
+    put(&cfg, "alpha.json", br#"{ "range": 21, "hotkey": "F10" }"#);
+    let plan = pack::plan_update(&dirs, &ip, &v3.file, None, &BTreeMap::new()).unwrap();
+    assert_eq!(plan.conflicts, 0, "as Kiln left it");
 
     // the pack stops shipping alpha.json: the player's file and values stay as they are
     put(&cfg, "alpha.json", br#"{ "range": 99, "hotkey": "F5" }"#);

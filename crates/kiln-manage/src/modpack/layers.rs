@@ -154,7 +154,23 @@ pub fn save(dirs: &DataDirs, pid: &str) -> Result<Profile> {
 pub(crate) fn place(dirs: &DataDirs, p: &mut Profile) -> Result<Option<LibraryRef>> {
     let me = local_id(&p.id);
     let d = local_dir(dirs, &p.id);
-    let had = p.mods.kiln.iter().find(|m| m.id == me).map(|m| m.enabled);
+    let had = p.mods.kiln.iter().find(|m| m.id == me).cloned();
+    if let Some(e) = &had
+        && !d.join(crate::hash::MOD_MANIFEST).is_file()
+    {
+        // the profile names a player layer but its working copy is gone (a copied or restored profile, a folder
+        // removed by hand; files the player removed leave the folder and its manifest): the Library entry is the
+        // player's data, so the working copy comes back from it
+        let r = LibraryRef { kind: ModKind::Kiln, id: e.id.clone(), version: e.version.clone(), hash: e.hash.clone() };
+        if let Ok(at) = crate::library::path_of(dirs, &r)
+            && at.is_dir()
+        {
+            let tmp = crate::util::with_suffix(&d, ".tmp");
+            let _ = std::fs::remove_dir_all(&tmp);
+            crate::util::copy_tree(&at, &tmp)?;
+            super::pack::swap_in(&tmp, &d)?;
+        }
+    }
     p.mods.kiln.retain(|m| m.id != me);
     if content_files(&d)?.is_empty() {
         return Ok(None);
@@ -164,7 +180,7 @@ pub(crate) fn place(dirs: &DataDirs, p: &mut Profile) -> Result<Option<LibraryRe
     let r = report.imported.iter().chain(&report.existing).find(|r| r.kind == ModKind::Kiln && r.id == me).cloned()
         .ok_or_else(|| Error::new(ErrorCode::Internal, format!("the library did not take the player layer {me}"))
             .with_detail(serde_json::to_value(&report.skipped).unwrap_or_default()))?;
-    p.mods.kiln.push(ProfileMod { id: r.id.clone(), version: r.version.clone(), hash: r.hash.clone(), enabled: had.unwrap_or(true) });
+    p.mods.kiln.push(ProfileMod { id: r.id.clone(), version: r.version.clone(), hash: r.hash.clone(), enabled: had.map(|e| e.enabled).unwrap_or(true) });
     Ok(Some(r))
 }
 
@@ -285,6 +301,7 @@ pub fn drop(dirs: &DataDirs, pid: &str, keys: &[String]) -> Result<usize> {
     }
     let d = local_dir(dirs, pid);
     let mut list = content_files(&d)?;
+    let before = list.clone();
     let mut gone = 0usize;
     for key in keys {
         let k: Vec<String> = serde_json::from_str(key).map_err(|_| Error::invalid(format!("not a data field: {key}")))?;
@@ -300,8 +317,15 @@ pub fn drop(dirs: &DataDirs, pid: &str, keys: &[String]) -> Result<usize> {
             gone += 1;
         }
     }
-    for f in &list {
-        crate::util::write_atomic(&d.join(&f.path), f.text.as_bytes())?;
+    // all or nothing: the changed files go into a copy that replaces the working copy in one move
+    if list != before {
+        let tmp = crate::util::with_suffix(&d, ".tmp");
+        let _ = std::fs::remove_dir_all(&tmp);
+        crate::util::copy_tree(&d, &tmp)?;
+        for f in &list {
+            crate::util::write_atomic(&tmp.join(&f.path), f.text.as_bytes())?;
+        }
+        super::pack::swap_in(&tmp, &d)?;
     }
     Ok(gone)
 }

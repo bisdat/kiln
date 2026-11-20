@@ -213,12 +213,12 @@ pub fn three_way(base: Option<&Leaves>, theirs: Option<&Leaves>, mine: &dyn Fn(&
     three_way_since(base, theirs, mine, None)
 }
 
-/// [`three_way`] that also knows the file as the last install or update left it (`installed`: the value at a key then).
-/// A key the pack sets for the first time is then a conflict when the player changed it since (it held another value
-/// then), instead of being overwritten; a key the file did not hold then is taken (a mod writing its defaults is no
-/// player change).
+/// [`three_way`] that also knows what Kiln itself wrote into the file (`written`: Some(value) a key Kiln wrote, as it
+/// left it, None: a key Kiln never wrote). A key the pack sets for the first time is then taken only when the file
+/// holds what Kiln left there (or nothing); a value Kiln did not put there (the player's, or a default the mod wrote)
+/// that differs from the pack's is a conflict: the player decides instead of losing it.
 pub fn three_way_since(
-    base: Option<&Leaves>, theirs: Option<&Leaves>, mine: &dyn Fn(&[String]) -> Option<Value>, installed: Option<&dyn Fn(&[String]) -> Option<Value>>,
+    base: Option<&Leaves>, theirs: Option<&Leaves>, mine: &dyn Fn(&[String]) -> Option<Value>, written: Option<&dyn Fn(&[String]) -> Option<Option<Value>>>,
 ) -> Merged {
     let empty = Leaves::new();
     let (b, t) = (base.unwrap_or(&empty), theirs.unwrap_or(&empty));
@@ -231,7 +231,10 @@ pub fn three_way_since(
             (Some(_), None) => {}
             // a key the pack sets for the first time
             (None, Some(tv)) => {
-                let changed_since = installed.and_then(|f| f(k)).is_some_and(|then| m.as_ref() != Some(&then));
+                let changed_since = written.is_some_and(|f| match f(k) {
+                    Some(then) => m != then,
+                    None => m.is_some(),
+                });
                 if m == *tv {
                 } else if changed_since {
                     out.conflicts.push((k.clone(), KeyConflict { key: key_text(k), base: None, pack: tv.clone(), mine: m }));
@@ -369,17 +372,18 @@ mod tests {
         // without the installed state: the pack's value is written (old instances)
         let m = three_way(None, Some(&theirs), &mine);
         assert_eq!(m.taken, ["fresh", "hotkey"]);
-        // the file held F9 at the install and the player made it F5: ask; "fresh" was not in the file then: take it
+        // Kiln wrote hotkey F9 once (an earlier version managed it) and the player made it F5: ask; "fresh" holds 0, a
+        // value Kiln never wrote (the player's or the mod's): ask too
         let then = json!({ "hotkey": "F9" });
-        let installed = |k: &[String]| then.get(&k[0]).cloned();
-        let m = three_way_since(None, Some(&theirs), &mine, Some(&installed));
-        assert_eq!(m.taken, ["fresh"]);
-        assert_eq!(m.conflicts.len(), 1);
+        let written = |k: &[String]| then.get(&k[0]).map(|v| Some(v.clone()));
+        let m = three_way_since(None, Some(&theirs), &mine, Some(&written));
+        assert!(m.taken.is_empty(), "{:?}", m.taken);
+        assert_eq!(m.conflicts.iter().map(|(_, c)| c.key.as_str()).collect::<Vec<_>>(), ["fresh", "hotkey"]);
         assert_eq!(m.conflicts[0].1.base, None);
-        // unchanged since the install (still F9 now): taken
+        // as Kiln left it (F9), and a key the file does not hold: taken
         let live = json!({ "hotkey": "F9" });
         let mine = |k: &[String]| live.get(&k[0]).cloned();
-        let m = three_way_since(None, Some(&theirs), &mine, Some(&installed));
+        let m = three_way_since(None, Some(&theirs), &mine, Some(&written));
         assert_eq!(m.taken, ["fresh", "hotkey"]);
         assert!(m.conflicts.is_empty());
     }
