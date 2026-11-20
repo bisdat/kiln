@@ -881,31 +881,70 @@ enum Ev {
     AttachRefused(String),
 }
 
-/// Blocks the signals that mean "the client is going away" and turns them into events. The mask is inherited, so this
-/// runs after netcoredbg has been spawned.
+/// The write end of the pipe [`on_client_signal`] writes to; -1 until [`watch_signals`] made it.
+#[cfg(unix)]
+static SIGNAL_PIPE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+#[cfg(unix)]
+extern "C" fn on_client_signal(sig: libc::c_int) {
+    let fd = SIGNAL_PIPE.load(std::sync::atomic::Ordering::Relaxed);
+    if fd >= 0 {
+        let b = sig as u8;
+        // SAFETY: write(2) is async-signal-safe; the end is non-blocking, so a full pipe drops the byte (one is enough).
+        unsafe { libc::write(fd, (&raw const b).cast(), 1) };
+    }
+}
+
+/// Turns the signals that mean "the client is going away" (SIGINT, SIGTERM, SIGHUP) into events. A handler, not a
+/// blocked mask: the kernel hands a process signal to any thread that does not block it, and a thread started before
+/// this point (the debug-inspect helper's reader, on Linux) did not, so it took the default action and the proxy died
+/// without its safe detach (debug_dap suite, case 4). A handler runs on whichever thread gets the signal and only
+/// writes a byte to a pipe; a thread of ours turns it into the event. netcoredbg starts with the default actions
+/// (exec resets handlers).
 #[cfg(unix)]
 fn watch_signals(tx: mpsc::Sender<Ev>) {
-    // SAFETY: sigset calls on a local set; sigwait only blocks this thread.
+    let mut fds = [0 as libc::c_int; 2];
+    // SAFETY: a pipe of our own, its flags, and handlers that only write to it.
     unsafe {
-        let mut set: libc::sigset_t = std::mem::zeroed();
-        libc::sigemptyset(&mut set);
-        for s in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
-            libc::sigaddset(&mut set, s);
+        if libc::pipe(fds.as_mut_ptr()) != 0 {
+            eprintln!("kiln debug: signals cannot be watched ({}); a signal may end kiln debug without a clean detach", std::io::Error::last_os_error());
+            return;
         }
-        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
-        std::thread::spawn(move || {
-            loop {
-                let mut sig = 0;
-                if libc::sigwait(&set, &mut sig) == 0 {
-                    let _ = tx.send(Ev::ClientGone(match sig {
-                        libc::SIGINT => "SIGINT",
-                        libc::SIGTERM => "SIGTERM",
-                        _ => "SIGHUP",
-                    }));
-                }
-            }
-        });
+        for fd in fds {
+            libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
+        }
+        libc::fcntl(fds[1], libc::F_SETFL, libc::fcntl(fds[1], libc::F_GETFL) | libc::O_NONBLOCK);
+        SIGNAL_PIPE.store(fds[1], std::sync::atomic::Ordering::Relaxed);
+        for s in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+            let mut a: libc::sigaction = std::mem::zeroed();
+            a.sa_sigaction = on_client_signal as extern "C" fn(libc::c_int) as libc::sighandler_t;
+            a.sa_flags = libc::SA_RESTART;
+            libc::sigemptyset(&mut a.sa_mask);
+            libc::sigaction(s, &a, std::ptr::null_mut());
+        }
     }
+    let read_end = fds[0];
+    std::thread::spawn(move || {
+        loop {
+            let mut b = 0u8;
+            // SAFETY: one byte into a local.
+            let n = unsafe { libc::read(read_end, (&raw mut b).cast(), 1) };
+            if n == 1 {
+                let what = match libc::c_int::from(b) {
+                    libc::SIGINT => "SIGINT",
+                    libc::SIGTERM => "SIGTERM",
+                    _ => "SIGHUP",
+                };
+                if tx.send(Ev::ClientGone(what)).is_err() {
+                    break;
+                }
+            } else if n < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            } else {
+                break;
+            }
+        }
+    });
 }
 
 /// Windows: Ctrl-C, Ctrl-Break, closing the console, logoff and shutdown become the same event; on the last three
