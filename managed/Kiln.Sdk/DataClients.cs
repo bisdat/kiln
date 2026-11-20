@@ -29,6 +29,8 @@ internal static class DataClients
         ["creatures"] = None, ["bodies"] = None, ["animations"] = None, ["ais"] = None, ["behaviours"] = None, ["attacks"] = None, ["rules"] = None,
         // affix kinds and pools: Kiln's own on the server; the rolls reach Kiln clients as item data, and vanilla clients need nothing
         ["affixes"] = None, ["affixPools"] = None,
+        // rarity at creation and rarity upgrades: the server's rules (kiln.items); the rarity they give is the game's own item state
+        ["rarityRolls"] = None, ["rarityUpgrades"] = None,
         // built by every player's game from the mod's own files
         ["vfx"] = Mod, ["windows"] = Mod, ["hudLines"] = Mod, ["keyBindings"] = Mod, ["sounds"] = Mod, ["materials"] = Mod, ["talents"] = Mod, ["talentTrees"] = Mod, ["buildingMaterialPools"] = Mod, ["buildingMaterials"] = Mod, ["blueprints"] = Mod, ["npcs"] = Mod, ["terrainMaterials"] = Mod,
         // the game's own journal and NPC menu, built from the mod's files at start
