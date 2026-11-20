@@ -82,7 +82,7 @@ thread_local! {
     static ADAPTER_STARTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-fn cli_error(e: DebugError) -> anyhow::Error {
+pub(crate) fn cli_error(e: DebugError) -> anyhow::Error {
     let mut c = CliError::new(e.code.as_str(), e.message.clone());
     if let Some(d) = e.detail() {
         c = c.with_detail(d);
@@ -187,10 +187,16 @@ fn canon(p: &Path) -> PathBuf {
 }
 
 /// $KILN_NETCOREDBG, else <data>/tools/netcoredbg/netcoredbg.exe. Not bundled (docs/kiln/modding/debugging.md).
-fn netcoredbg() -> Result<PathBuf> {
-    let (p, how) = match std::env::var_os("KILN_NETCOREDBG").filter(|v| !v.is_empty()) {
-        Some(v) => (PathBuf::from(v), "KILN_NETCOREDBG"),
-        None => (kiln_manage::paths::DataDirs::locate()?.root.join("tools/netcoredbg/netcoredbg.exe"), "the default place"),
+/// Checked against the pinned release (kiln_manage::debug::netcoredbg): the default place must hold it; an explicit
+/// KILN_NETCOREDBG that differs starts with a warning (the second value), unless KILN_NETCOREDBG_PINNED=1 says the
+/// caller took it from a pinned bundle (the VS Code extension's own copy), when it must match too.
+fn netcoredbg() -> Result<(PathBuf, Option<String>)> {
+    use kiln_manage::debug::netcoredbg::{check, Origin};
+    let explicit = std::env::var_os("KILN_NETCOREDBG").filter(|v| !v.is_empty());
+    let vouched = std::env::var("KILN_NETCOREDBG_PINNED").is_ok_and(|v| v == "1");
+    let (p, how, origin) = match explicit {
+        Some(v) => (PathBuf::from(v), "KILN_NETCOREDBG", if vouched { Origin::Pinned } else { Origin::Override }),
+        None => (kiln_manage::paths::DataDirs::locate()?.root.join("tools/netcoredbg/netcoredbg.exe"), "the default place", Origin::Pinned),
     };
     if !p.is_file() {
         return Err(CliError::new(
@@ -199,7 +205,12 @@ fn netcoredbg() -> Result<PathBuf> {
         )
         .into());
     }
-    Ok(canon(&p))
+    let p = canon(&p);
+    let warning = check(&p, origin).map_err(cli_error)?;
+    if let Some(w) = &warning {
+        eprintln!("kiln debug: {w}");
+    }
+    Ok((p, warning))
 }
 
 /// The server's Wine prefix: labs `<labs>/<name>.pfx`, instances their record. None on Windows.
@@ -390,7 +401,7 @@ fn plan_server(a: &DebugArgs) -> Result<Planned> {
             return Err(CliError::new("not_found", format!("the server's Wine prefix {} does not exist", p.display())).into());
         }
     }
-    let netcoredbg = netcoredbg()?;
+    let (netcoredbg, netcoredbg_note) = netcoredbg()?;
     let wine = match &prefix {
         Some(p) => {
             let host = resolver::server_host_pid(&s.dir, p).map_err(cli_error)?;
@@ -411,13 +422,14 @@ fn plan_server(a: &DebugArgs) -> Result<Planned> {
     };
     let mut host = ServerHost { spec, dir: s.dir.clone(), wine: wine.clone() };
     let mut source = open_source(runner.as_ref()).map_err(cli_error)?;
-    let resolved = match prepare(kind, false, &mut host, source.as_mut(), &mut resolver::new_challenge) {
+    let mut resolved = match prepare(kind, false, &mut host, source.as_mut(), &mut resolver::new_challenge) {
         Ok(r) => r,
         Err(e) => {
             source.close();
             return Err(cli_error(e));
         }
     };
+    resolved.notes.extend(netcoredbg_note);
     let target = Target {
         kind,
         install: s.dir.clone(),
@@ -502,16 +514,17 @@ fn plan_client(a: &DebugArgs, sel: &str) -> Result<Planned> {
     let kind = TargetKind::Client;
     let max_pause_ms = max_pause(a, kind)?;
     let g = find_client(sel)?;
-    let netcoredbg = netcoredbg()?;
+    let (netcoredbg, netcoredbg_note) = netcoredbg()?;
     let (mut host, launch) = client_sides(&g, Path::new("/proc")).map_err(cli_error)?;
     let mut source = open_source(launch.as_ref()).map_err(cli_error)?;
-    let resolved = match prepare(kind, a.allow_client_pause, &mut host, source.as_mut(), &mut resolver::new_challenge) {
+    let mut resolved = match prepare(kind, a.allow_client_pause, &mut host, source.as_mut(), &mut resolver::new_challenge) {
         Ok(r) => r,
         Err(e) => {
             source.close();
             return Err(cli_error(e));
         }
     };
+    resolved.notes.extend(netcoredbg_note);
     let target = Target {
         kind,
         install: g.path.clone(),
