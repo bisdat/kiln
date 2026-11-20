@@ -254,10 +254,11 @@ from Kiln's own exit path. A worker that will not stop within the exit bound is 
 
 ## Faults the pool cannot contain
 
-On native Windows a stack overflow in a native body is caught by the same structured-exception boundary as any other
-fault. Under Wine (Linux servers, Proton) that boundary does not fire for a stack overflow: the worker stays stuck, the
-watchdog names the task, only its owner's slot is held, and exit detaches that worker within its bound. The native
-Windows behaviour is still to be confirmed on a real Windows machine.
+A stack overflow in a native body is not contained, on native Windows (checked on Windows 11 25H2 on 2026-11-20 with
+`native/core/tests/tasks_windows_host.cpp`) as under Wine (Linux servers, Proton): the structured-exception boundary does
+not end the task, so it never turns Faulted and its owner is not quarantined. The worker stays stuck, the watchdog names
+the task, only its owner's slot is held, other owners keep running, and exit detaches that worker within its bound.
+Every other native fault (an access violation, a guard page) is contained as described above.
 
 ## Diagnostics
 

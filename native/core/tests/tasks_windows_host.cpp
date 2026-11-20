@@ -21,7 +21,9 @@ void check(bool ok, const char* what) {
 }
 template <class F>
 bool until(F pred, int ms = 5000) {
-    for (int i = 0; i < ms && !pred(); ++i) Sleep(1);
+    // a deadline, not a count of Sleep(1): native Windows sleeps a whole timer tick (15.6 ms by default), Wine about 1 ms
+    const ULONGLONG end = GetTickCount64() + static_cast<ULONGLONG>(ms);
+    while (!pred() && GetTickCount64() < end) Sleep(1);
     return pred();
 }
 // mirrors tasks_test_module.cpp's Shared
