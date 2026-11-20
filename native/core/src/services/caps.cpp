@@ -133,6 +133,8 @@ std::atomic<bool> g_hooks{false};  // read by refresh_tick() before it takes the
 bool g_verified = false;
 std::string g_safe_idle;
 std::vector<std::string> g_feature_names;
+// Mod fragments' rows (fragment_rows): a fragment's id -> the names its last load reported, as the core's feature rows.
+std::map<std::string, std::vector<std::string>, std::less<>> g_fragment_rows;
 std::atomic<uint8_t> g_tick_seen{0};  // bit 0 tick::installed(), bit 1 tick::lifecycle()
 
 // ---- small helpers ----
@@ -388,6 +390,15 @@ uint8_t tick_bits() { return (tick::installed() ? 1 : 0) | (tick::lifecycle() ? 
 void set_feature_locked(const std::string& f, std::vector<Event>& ev) {
     const Verdict v = feature_verdict(f);
     set_core_locked(f, kFeature, v.state, v.reason, v.text, "sigdb", 0, ev);
+}
+
+// Takes back the core's feature report of a mod fragment's row (a client gate's report of that name stays).
+void drop_fragment_row_locked(const std::string& name, std::vector<Event>& ev) {
+    auto it = g_names.find(name);
+    if (it == g_names.end()) return;
+    const size_t before = it->second.reports.size();
+    std::erase_if(it->second.reports, [](const Report& r) { return r.owner == 0 && r.kind == kFeature; });
+    if (it->second.reports.size() != before) refresh_locked(it, ev);
 }
 
 // world.stop_drain.<kind>: the core's guarantee about a world kind's jobs at its STOPPING (tick::stop_drain).
@@ -951,6 +962,52 @@ void owner_gone(KilnOwner owner) {
     try {
         op([&](std::vector<Event>& ev) {
             drop_owner_locked(owner, ev);
+            return 0;
+        });
+    } catch (...) {
+    }
+}
+
+// kiln.hooks loaded (or reloaded) mod fragment `id` (load_symbols: Symbols.LoadShipped, a native mod): its features
+// become the core's rows the way Kiln's own sigdb features are, "sig/<id>/<Name>" for every described symbol (source
+// sigdb; off with the reason as sigdb words it). Rows of an earlier load of `id` that this one no longer has go. A name
+// Kiln's own sigdb reports (a fragment id that shadows a Kiln area) stays Kiln's.
+void fragment_rows(std::string_view id) {
+    try {
+        const std::vector<sigdb::FeatureRow> rows = sigdb::fragment_features(id);  // outside the registry's lock
+        op([&](std::vector<Event>& ev) {
+            std::vector<std::string> names;
+            for (const sigdb::FeatureRow& r : rows) {
+                if (!name_ok(r.name) ||
+                    std::find(g_feature_names.begin(), g_feature_names.end(), r.name) != g_feature_names.end())
+                    continue;
+                const Verdict v = !g_hooks ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, g_safe_idle}
+                                : r.ok     ? Verdict{KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, {}}
+                                           : Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING, r.problem};
+                set_core_locked(r.name, kFeature, v.state, v.reason, v.text, "sigdb", 0, ev);
+                names.push_back(r.name);
+            }
+            auto it = g_fragment_rows.find(id);
+            if (it != g_fragment_rows.end()) {
+                for (const std::string& n : it->second)
+                    if (std::find(names.begin(), names.end(), n) == names.end()) drop_fragment_row_locked(n, ev);
+                g_fragment_rows.erase(it);
+            }
+            if (!names.empty()) g_fragment_rows.emplace(std::string(id), std::move(names));
+            return 0;
+        });
+    } catch (...) {
+    }
+}
+
+// kiln.hooks unloaded mod fragment `id` (unload_symbols: the mod unloads): its rows go.
+void fragment_gone(std::string_view id) {
+    try {
+        op([&](std::vector<Event>& ev) {
+            auto it = g_fragment_rows.find(id);
+            if (it == g_fragment_rows.end()) return 0;
+            for (const std::string& n : it->second) drop_fragment_row_locked(n, ev);
+            g_fragment_rows.erase(it);
             return 0;
         });
     } catch (...) {

@@ -1244,6 +1244,31 @@ bool unload_fragment(std::string_view id) {
     return removed;
 }
 
+std::vector<FeatureRow> fragment_features(std::string_view id) {
+    std::vector<FeatureRow> rows;
+    std::lock_guard lock(g_frag_mutex);
+    auto it = g_fragments.find(std::string(id));
+    if (it == g_fragments.end()) return rows;
+    const Resolver& r = *it->second;
+    std::vector<std::string> names = r.feature_names();
+    std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    for (std::string& n : names) {
+        FeatureRow row;
+        row.ok = r.feature(n);
+        if (!row.ok) {
+            std::string name, text;
+            bool constant = false;
+            row.problem = r.feature_problem(n, &name, &text, &constant)
+                ? std::string(constant ? "constant " : "symbol ") + name + ": " + text
+                : "not resolved on this game build";
+        }
+        row.name = std::move(n);
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
 bool any_symbol(std::string_view name, uintptr_t* out) {
     if (g_core.symbol(name, out)) return true;
     const std::string pfx = prefix_of(name);
