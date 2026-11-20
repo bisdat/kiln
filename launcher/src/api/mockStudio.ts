@@ -233,7 +233,8 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
       const r = a.request as StudioNewPack;
       const name = S(r.name).trim();
       if (!name) err("invalid_argument", "the pack needs a name");
-      let base = r.id ?? (d.slug(name) || "pack"), id = base, n = 2;
+      const base = r.id ?? (name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 59) || "pack");
+      let id = base, n = 2;
       while (studios.has(id)) id = base + "-" + n++;
       let pid = r.from ?? null;
       if (pid && !d.profiles.has(pid)) err("not_found", "No profile '" + pid + "'.");
@@ -355,9 +356,15 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
             match: m.id === "new-items" ? "kiln" : known ? "manifest" : "manual", confidence: m.id === "new-items" ? "certain" : known ? "unverified" : "none" };
         });
         const layerSets = [...s.layer.values()].some((t) => t.includes("Material_T1_Wood_Logs"));
-        const conflicts = layerSets ? [{ section: "items", field: "maxStackSize", conditional: false,
-          earlier: { mod: "big-stacks", file: "content/stacks.json", selector: "Material_T1_*", value: 1000 },
-          later: { mod: "pack." + s.source.id, file: "content/items.json", selector: "Material_T1_Wood_Logs", value: 500 } }] : [];
+        const twigs = [...s.layer.values()].some((t) => t.includes("Material_T1_Twigs"));
+        const conflicts = [
+          ...(layerSets ? [{ section: "items", field: "maxStackSize", conditional: false,
+            earlier: { mod: "big-stacks", file: "content/stacks.json", selector: "Material_T1_*", value: 1000 },
+            later: { mod: "pack." + s.source.id, file: "content/items.json", selector: "Material_T1_Wood_Logs", value: 500 } }] : []),
+          ...(twigs ? [] : [{ section: "items", field: "weight", conditional: false,
+            earlier: { mod: "new-items", file: "content/items.json", selector: "Material_T1_Twigs", value: 0.2 },
+            later: { mod: "weather-plus", file: "content/tweaks.json", selector: "Material_T1_Twigs", value: 0.5 } }]),
+        ];
         const code = mods.filter((m) => m.kind === "native" || m.kind === "plugin");
         return { format: 1, kind: "kiln.pack-check", tool: "kiln", version: "mock", ok: true, complete: true,
           pack: { id: s.source.id, name: s.source.name, version: s.source.version },
