@@ -322,6 +322,32 @@ pub(crate) fn open_source(runner: Option<&RunnerLaunch>) -> std::result::Result<
     Ok(Box::new(crate::debug_inspect::HelperSource::spawn(runner.helper_command(&helper))?))
 }
 
+/// Refuses an install without a debug descriptor before anything starts, with resolve's own refusal (refused,
+/// developer_debugging_off): without it, `wine kiln.exe debug-inspect` would be started under the target's runner only
+/// for resolve to find nothing to prove.
+fn descriptor_gate(spec: &HostSpec) -> std::result::Result<(), DebugError> {
+    if !kiln_manage::debug::identity::read_descriptors(&spec.state_dir).is_empty() {
+        return Ok(());
+    }
+    let what = match spec.kind {
+        TargetKind::Server => "server",
+        TargetKind::Client => "game",
+    };
+    Err(DebugError::refused(
+        format!(
+            "no debug descriptor in {}: start the {what} with developer debugging on (kiln.json \"developer_debugging\": true, or the launcher's Developer debugging switch)",
+            spec.state_dir.join(kiln_manage::debug::identity::DESCRIPTOR_DIR).display()
+        ),
+        "developer_debugging_off",
+    ))
+}
+
+/// The Windows side of an install that has a debug descriptor ([`descriptor_gate`] first, then [`open_source`]).
+fn open_checked(spec: &HostSpec, runner: Option<&RunnerLaunch>) -> std::result::Result<Box<dyn ProcessSource + Send>, DebugError> {
+    descriptor_gate(spec)?;
+    open_source(runner)
+}
+
 /// A resolved target with its host and Windows sides, ready for the proxy or for `--json`.
 struct Planned {
     target: Target,
@@ -429,7 +455,7 @@ fn plan_server(a: &DebugArgs) -> Result<Planned> {
         _ => None,
     };
     let mut host = ServerHost { spec, dir: s.dir.clone(), wine: wine.clone() };
-    let mut source = open_source(runner.as_ref()).map_err(cli_error)?;
+    let mut source = open_checked(&host.spec, runner.as_ref()).map_err(cli_error)?;
     let resolved = match prepare(kind, false, &mut host, source.as_mut(), &mut resolver::new_challenge) {
         Ok(r) => r,
         Err(e) => {
@@ -523,7 +549,7 @@ fn plan_client(a: &DebugArgs, sel: &str) -> Result<Planned> {
     let g = find_client(sel)?;
     let netcoredbg = netcoredbg()?;
     let (mut host, launch) = client_sides(&g, Path::new("/proc")).map_err(cli_error)?;
-    let mut source = open_source(launch.as_ref()).map_err(cli_error)?;
+    let mut source = open_checked(&host.spec, launch.as_ref()).map_err(cli_error)?;
     let resolved = match prepare(kind, a.allow_client_pause, &mut host, source.as_mut(), &mut resolver::new_challenge) {
         Ok(r) => r,
         Err(e) => {
@@ -1952,5 +1978,22 @@ mod tests {
         for k in ["WINEESYNC", "WINENTSYNC", "LD_LIBRARY_PATH", "LD_PRELOAD", "WINESERVERSOCKET", "WINELOADERNOEXEC"] {
             assert_eq!(e.get(k), Some(&None), "netcoredbg: {k}");
         }
+    }
+
+    /// No descriptor: refused as resolve refuses it, before the helper could be started. With a descriptor the same
+    /// call goes on to start the helper (here it cannot: no helper next to this test binary, no such wine).
+    #[test]
+    fn no_descriptor_starts_no_helper() {
+        let w = World::new("gate");
+        let host = w.host("a", TargetKind::Server);
+        let runner = RunnerLaunch { wine: w.root.join("no-such-wine"), env: Vec::new(), cwd: w.root.clone() };
+        let e = open_checked(&host.spec, Some(&runner)).err().expect("refused");
+        assert_eq!((e.code, e.reason.as_deref()), (DebugCode::Refused, Some("developer_debugging_off")));
+        let r = resolver::resolve(&mut w.host("a", TargetKind::Server), &mut FakeSource::default(), &mut counter()).unwrap_err();
+        assert_eq!((e.message.as_str(), e.reason.as_deref()), (r.message.as_str(), r.reason.as_deref()), "the same refusal as resolve's");
+        let (_, d) = w.kiln("a", 32, 100, N1, TargetKind::Server);
+        w.put("a", &d);
+        let e = open_checked(&host.spec, Some(&runner)).err().expect("no helper here");
+        assert_eq!(e.code, DebugCode::ToolMissing, "past the gate, the helper is what is missing: {}", e.message);
     }
 }
