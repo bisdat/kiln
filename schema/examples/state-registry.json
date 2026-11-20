@@ -1,0 +1,291 @@
+{
+  "added": [
+    {
+      "id": "blades:edge",
+      "registry": "items"
+    }
+  ],
+  "base": {
+    "origin": "live",
+    "writer": "none"
+  },
+  "conflicts": [
+    {
+      "certainty": "certain",
+      "field": "items[game:material_t1_wood_logs].maxStack",
+      "id": "game:material_t1_wood_logs",
+      "kind": "composedOn",
+      "loser": "oldstacks: content/a.json",
+      "registry": "items",
+      "text": "items[game:material_t1_wood_logs].maxStack: bigstacks's change composed on oldstacks: content/a.json's value: 100 -> 400",
+      "winner": "bigstacks"
+    },
+    {
+      "certainty": "named",
+      "field": "items[game:material_t1_stone].maxStack",
+      "id": "game:material_t1_stone",
+      "kind": "composedOn",
+      "loser": "shroudforge:betterstacks",
+      "registry": "items",
+      "text": "items[game:material_t1_stone].maxStack: bigstacks's change composed on shroudforge:betterstacks's value: 25 -> 100",
+      "winner": "bigstacks"
+    },
+    {
+      "certainty": "certain",
+      "field": "balance[game:balance].levelCap",
+      "id": "game:balance",
+      "kind": "exclusive",
+      "loser": "caps",
+      "registry": "balance",
+      "text": "Conflict (exclusive): bigstacks wrote balance[game:balance].levelCap exclusively; the later edit is refused",
+      "winner": "bigstacks"
+    }
+  ],
+  "counts": {
+    "added": 1,
+    "conflicts": 3,
+    "fields": 6,
+    "refused": 2,
+    "removed": 0
+  },
+  "fields": [
+    {
+      "applies": "restart",
+      "base": {
+        "origin": "archive",
+        "value": 50
+      },
+      "field": "levelCap",
+      "id": "game:balance",
+      "registry": "balance",
+      "result": 60,
+      "winner": "bigstacks",
+      "writers": [
+        {
+          "certainty": "certain",
+          "exclusive": true,
+          "kind": "registry",
+          "mod": "bigstacks",
+          "n": 1,
+          "op": 60,
+          "source": "content/bigstacks.json",
+          "stage": "alter",
+          "value": 60
+        }
+      ]
+    },
+    {
+      "applies": "worldLoad",
+      "base": {
+        "origin": "added",
+        "value": 1
+      },
+      "field": "maxStack",
+      "id": "blades:edge",
+      "registry": "items",
+      "result": 2,
+      "winner": "blades",
+      "writers": [
+        {
+          "certainty": "certain",
+          "kind": "registry",
+          "mod": "blades",
+          "n": 0,
+          "op": 2,
+          "source": "content/blades.json",
+          "stage": "add",
+          "value": 2
+        }
+      ]
+    },
+    {
+      "applies": "worldLoad",
+      "base": {
+        "origin": "archive",
+        "value": 20
+      },
+      "field": "maxStack",
+      "id": "game:material_t1_stone",
+      "registry": "items",
+      "result": 100,
+      "winner": "bigstacks",
+      "writers": [
+        {
+          "certainty": "named",
+          "kind": "archiveWriter",
+          "op": 25,
+          "value": 25,
+          "who": "shroudforge:betterstacks"
+        },
+        {
+          "certainty": "certain",
+          "kind": "registry",
+          "mod": "bigstacks",
+          "n": 0,
+          "op": {
+            "mul": 4.0
+          },
+          "source": "content/bigstacks.json",
+          "stage": "alter",
+          "value": 100
+        }
+      ]
+    },
+    {
+      "applies": "worldLoad",
+      "base": {
+        "origin": "archive",
+        "value": 10
+      },
+      "field": "maxStack",
+      "id": "game:material_t1_wood_logs",
+      "registry": "items",
+      "result": 400,
+      "winner": "bigstacks",
+      "writers": [
+        {
+          "certainty": "certain",
+          "kind": "oldPack",
+          "mod": "oldstacks",
+          "op": 100,
+          "value": 100,
+          "who": "oldstacks: content/a.json"
+        },
+        {
+          "certainty": "certain",
+          "kind": "registry",
+          "mod": "bigstacks",
+          "n": 0,
+          "op": {
+            "mul": 4.0
+          },
+          "source": "content/bigstacks.json",
+          "stage": "alter",
+          "value": 400
+        }
+      ]
+    },
+    {
+      "applies": "now",
+      "base": {
+        "origin": "archive",
+        "value": []
+      },
+      "field": "perks",
+      "id": "game:weapon_t1_sword",
+      "registry": "items",
+      "result": [
+        "game:perk_sharp"
+      ],
+      "winner": "blades",
+      "writers": [
+        {
+          "certainty": "certain",
+          "kind": "registry",
+          "list": {
+            "append": [
+              "game:perk_sharp"
+            ]
+          },
+          "mod": "blades",
+          "n": 1,
+          "source": "content/blades.json",
+          "stage": "alter",
+          "value": [
+            "game:perk_sharp"
+          ]
+        }
+      ]
+    },
+    {
+      "applies": "now",
+      "base": {
+        "origin": "archive",
+        "value": 1.0
+      },
+      "field": "DamageSetup.DmgMod",
+      "id": "game:weapon_t1_sword",
+      "raw": true,
+      "registry": "items",
+      "result": 2.0,
+      "winner": "blades",
+      "writers": [
+        {
+          "certainty": "certain",
+          "kind": "registry",
+          "mod": "blades",
+          "n": 0,
+          "op": {
+            "mul": 2.0
+          },
+          "raw": "DamageSetup.DmgMod",
+          "source": "content/blades.json",
+          "stage": "alter",
+          "value": 2.0
+        }
+      ]
+    }
+  ],
+  "format": 1,
+  "generation": 1,
+  "kiln": "0.2.0-dev.31",
+  "order": [
+    {
+      "editsHash": "9c1f",
+      "mod": "bigstacks",
+      "version": "1.2.0"
+    },
+    {
+      "editsHash": "77aa",
+      "mod": "caps",
+      "version": "1.0.0"
+    },
+    {
+      "editsHash": "0b0b",
+      "mod": "blades",
+      "version": "0.3.0"
+    }
+  ],
+  "orderSource": "kiln.host",
+  "phase": "start",
+  "pid": 1234,
+  "plan": null,
+  "refused": [
+    {
+      "mod": "caps",
+      "n": 0,
+      "reason": "Conflict (exclusive): bigstacks wrote balance[game:balance].levelCap exclusively; the later edit is refused",
+      "source": "content/caps.json",
+      "stage": "alter"
+    },
+    {
+      "mod": "caps",
+      "n": 1,
+      "reason": "no entry game:nothing in items",
+      "source": "content/caps.json",
+      "stage": "alter"
+    }
+  ],
+  "regmap": {
+    "exeSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "record": "regmap/server/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.json",
+    "side": "server",
+    "verified": true
+  },
+  "removed": [],
+  "schema": {
+    "registries": {
+      "balance": "1.1.0",
+      "items": "1.0.0"
+    },
+    "registrySchema": 1
+  },
+  "truncated": {
+    "added": 0,
+    "conflicts": 0,
+    "fields": 0,
+    "refused": 0,
+    "removed": 0
+  },
+  "written": "2026-11-20T16:00:00Z"
+}

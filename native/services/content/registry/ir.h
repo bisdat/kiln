@@ -12,7 +12,13 @@
 // The op vocabulary and its evaluation are today's data packs' (packs.cpp parse_value): r = clamp(v * mul + add, min, max),
 // then raiseOnly / lowerOnly against v, integer fields rounded. Validation is per edit and all or nothing: a malformed edit is
 // refused with a reason, the rest of the batch stands. The schema descriptor below is what S1's generator emits
-// (schema/registry/*.json); here it is filled by hand by the tests.
+// (schema/registry/*.json); here it is filled by hand by the tests. The document's JSON Schema: schema/registry-ir.schema.json.
+//
+// The Advanced tier (owner decision D5): {"registry": "items", "select": {...}, "raw": {"damageSetup.dmgMod": 1.5}} names the
+// game's own member paths of an entry, in a registry whose schema allows it ("raw": "allowed"). It works while the game's names
+// and layout hold: each path is resolved per entry on this game build (S5's model) and an edit naming one that does not resolve
+// there is refused, never written blind. The IR checks only the shape here (a member path, a plain value or an op); the type and
+// range checks are the member's own, at composition (compose.h).
 // Nothing here touches the game, a service table or a lock: plain data in, plain data out.
 #pragma once
 #include <cstdint>
@@ -29,10 +35,13 @@ using json = nlohmann::json;
 
 // ---- the schema descriptor (generated from schema/registry/*.json by S1) ----
 enum class Applies : uint8_t { Now = 1, WorldLoad = 2, Restart = 3 };  // KILN_REGISTRY_APPLIES_*
-enum class FieldType : uint8_t { Int, Float, Bool, Enum, Id, List };
+// Flags: a set of the schema's names (enum_values), held as a list in the schema's order, each name at most once.
+// Struct: only as a list's element (FieldSpec::element): an element with fields of its own (recipes.inputs {item, count},
+// drops.entries), its leaves in element_fields; the schema names each leaf "<list>[].<leaf>" ("inputs[].count").
+enum class FieldType : uint8_t { Int, Float, Bool, Enum, Id, List, Flags, Struct };
 
 struct FieldSpec {
-    std::string name;  // the Kiln field path, as edits name it ("maxStack", "damage.fire", "inputs")
+    std::string name;  // the Kiln field path, as edits name it ("maxStack", "damage.fire", "inputs", "inputs[].count")
     FieldType type = FieldType::Int;
     FieldType element = FieldType::Int;  // a list's elements
     std::optional<double> min, max;      // the range of a number (of a list's numbers)
@@ -40,19 +49,34 @@ struct FieldSpec {
     std::vector<std::string> enum_values;
     bool read_only = false;
     Applies applies = Applies::Restart;
+    std::string ref;  // an id (or a list of ids): the registry its ids name (the schema's "ref"); a reference the stage checks
+    std::vector<FieldSpec> element_fields;  // element Struct: its leaves by their own name ("item", "count"); link_elements()
+    const FieldSpec* element_field(const std::string& leaf) const {
+        for (const FieldSpec& f : element_fields)
+            if (f.name == leaf) return &f;
+        return nullptr;
+    }
 };
+
+// "inputs[3].count" and "inputs[*].count" as the schema names them: "inputs[].count".
+std::string generic_path(const std::string& path);
 
 struct RegistrySpec {
     std::string name;
+    std::string version;  // the registry schema's "version" ("1.0.0"): registry.json "schema.registries"
     std::map<std::string, FieldSpec> fields;
     bool add = true, remove = true;
+    bool raw = false;  // "raw": "allowed": edits may name the game's member paths (the Advanced tier, D5)
+    // A field by its path; an element's index ("[3]", "[*]") reads as "[]": "inputs[2].count" is "inputs[].count".
     const FieldSpec* field(const std::string& path) const {
-        const auto it = fields.find(path);
+        auto it = fields.find(path);
+        if (it == fields.end() && path.find('[') != std::string::npos) it = fields.find(generic_path(path));
         return it == fields.end() ? nullptr : &it->second;
     }
 };
 
 struct Schema {
+    int format = 1;  // "registrySchema": the schema format (registry.json "schema.registrySchema")
     std::map<std::string, RegistrySpec> registries;
     const RegistrySpec* registry(const std::string& name) const {
         const auto it = registries.find(name);
@@ -60,14 +84,24 @@ struct Schema {
     }
 };
 
+// After a descriptor is filled: every leaf row "<list>[].<leaf>" joins its list's element_fields (the list's element becomes
+// Struct). schema_ir.h (generated_schema) calls it; so do hand-filled descriptors with element leaves.
+void link_elements(Schema* schema);
+
 // ---- values ----
 struct Value {
-    enum Kind : uint8_t { None, Int, Num, Bool, Text, List } kind = None;
+    enum Kind : uint8_t { None, Int, Num, Bool, Text, List, Struct } kind = None;
     int64_t i = 0;
     double d = 0;
     bool b = false;
     std::string t;  // an enum member's name, an id
-    std::vector<Value> list;
+    std::vector<Value> list;        // a List's values; a Struct's values, in keys' order
+    std::vector<std::string> keys;  // a Struct's leaf names, sorted
+    const Value* leaf(const std::string& k) const {
+        for (size_t n = 0; n < keys.size(); ++n)
+            if (keys[n] == k) return &list[n];
+        return nullptr;
+    }
 
     static Value integer(int64_t v) { Value x; x.kind = Int, x.i = v, x.d = static_cast<double>(v); return x; }
     static Value number(double v) { Value x; x.kind = Num, x.d = v; return x; }
@@ -108,17 +142,36 @@ struct Selector {
     bool exact() const { return id.find_first_of("*?") == std::string::npos; }
 };
 
+// One raw member path of an Advanced-tier edit (D5).
+struct RawWrite {
+    std::string path;  // as written ("damageSetup.dmgMod"), for messages and the report
+    std::string key;   // raw_key(path): one spelling per place
+    json op;           // a plain value or {set | mul | add | min | max | raiseOnly | lowerOnly}: typed per entry against the member
+};
+
+// A field path into one element of a list: "inputs[2].count" (a leaf of element 2), "inputs[*].count" (that leaf of every
+// element), "inputs[3]" / "perks[1]" (the whole element). The edit changes it inside the list's own chain.
+struct ElementRef {
+    bool on = false;
+    std::string list;  // "inputs"
+    bool all = false;  // [*]
+    uint32_t index = 0;
+    std::string leaf;  // "count"; empty: the whole element
+};
+
 struct Edit {
     uint32_t n = 0;  // ordinal in its batch
     std::string registry;
     Selector select;
-    std::string field;
+    std::string field;  // as the schema names a place: "maxStack", "inputs", "inputs[2].count" (indices as plain numbers)
+    ElementRef element;  // field names an element of a list
     Op op;
     ListOp list = ListOp::None;
     std::vector<Value> list_values;
     EntryOp entry = EntryOp::None;
     std::string add_id, like;
     std::map<std::string, Value> add_fields;
+    std::vector<RawWrite> raw;  // not empty: an Advanced-tier edit of raw member paths (then field, op and list are unset)
     bool exclusive = false, yield = false;
 };
 
@@ -133,15 +186,45 @@ struct Refusal {
     Stage stage = Stage::Alter;
     uint32_t n = 0;
     std::string reason;
+    std::string entry;  // a refused add: the "<registry>|<id>" it would have made (a reference to it names this refusal as its cause)
 };
 
-// One IR document. false: the document itself is unusable (*err: why; nothing of it is taken). true: *out holds every edit
-// that passed validation; each refused edit is one row in *refused, named by its mod, source and ordinal.
+// One IR document. false: the document itself is unusable (*err: why; nothing of it is taken): not JSON, nested deeper than
+// 32 levels, larger than 16 MiB, no usable ir / mod / stage / edits. true: *out holds every edit that passed validation; each
+// refused edit is one row in *refused, named by its mod, source and ordinal ("n", else its position; an "n" that is not
+// 0..4294967295 or is used twice refuses that edit). No exception leaves either form.
 bool parse_batch(const std::string& text, const Schema& schema, Batch* out, std::vector<Refusal>* refused, std::string* err);
 bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<Refusal>* refused, std::string* err);
 
+// A data pack's "registry" section (schema/registry-section.schema.json): {"add": [edits], "alter": [edits], "final":
+// [edits]}, each list an IR batch of that stage for mod, named source ("content/<file>.json"). false: the section itself is
+// unusable (*err; nothing of it is taken). true: *out holds one batch per stage present (add, alter, final), each edit
+// checked as parse_batch checks it (refusals in *refused).
+bool lower_section(const json& section, const std::string& mod, const std::string& mod_version, const std::string& source, const Schema& schema,
+                   std::vector<Batch>* out, std::vector<Refusal>* refused, std::string* err);
+
 // Today's numeric operation on a value (packs.cpp parse_value's order): the base for a relative op. Integer fields round.
+// false + *why: the result is not finite, or past what a whole-number field holds (checked before any rounding).
+bool op_result(const Op& op, const Value& base, const FieldSpec& f, Value* out, std::string* why);
+// The same, total: a result op_result refuses leaves the value as it was (for back-ends re-evaluating a chain over another
+// value; the stage itself refuses such an edit through op_result).
 Value apply_op(const Op& op, const Value& base, const FieldSpec& f);
+
+// A Kiln mod id ("^[a-z0-9][a-z0-9._-]{0,63}$", kiln.mod.schema.json) that is not reserved ("game", "kiln", ...): a batch of
+// any other "mod" is refused whole, so no mod mints game: or kiln: ids. false + *err: why not.
+bool mod_id_ok(const std::string& id, std::string* err);
+
+// An edit's "op" for field f: a plain value (an absolute set), {"set": v}, or relative numbers {mul, add, min, max, raiseOnly,
+// lowerOnly} (number fields only). false + *err: why not.
+bool op_of(const json& j, const FieldSpec& f, Op* op, std::string* err);
+
+// A raw member path ("damageSetup.dmgMod", "perkIds[2]", "a.b[03].c": member names [A-Za-z_][A-Za-z0-9_]*, indices [n]) into
+// its key, one spelling per place: names lower-case (the game's reflection names are matched without case, as packs do),
+// indices as plain numbers ("a.b[3].c"). No "*": a raw edit names exact places. false + *err: not such a path.
+bool raw_key(const std::string& path, std::string* key, std::string* err);
+// The field name a raw path's chain is kept under (compose.h FieldRef::field): "raw:" + its key. Schema fields have no ':'.
+inline std::string raw_field(const std::string& key) { return "raw:" + key; }
+inline bool is_raw_field(const std::string& field) { return field.rfind("raw:", 0) == 0; }
 
 // Case-insensitive glob ('*' any run, '?' one character), as packs' selectors.
 bool glob_ci(const std::string& pattern, const std::string& text);

@@ -1,0 +1,457 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "registry-ir.schema.json",
+  "title": "Kiln registry edit IR, format 1 (one batch: one mod's edits in one stage)",
+  "description": "The one form every registry edit takes before Kiln's registry stage runs it: a data pack's \"registry\" section is lowered to it, Kiln.Registry (C#) serialises its calls into it, and a native mod hands it to kiln.registry's submit (native/core/abi/services/kiln_registry.h). Reader: native/services/content/registry/ir.cpp parse_batch (nlohmann::json, comments allowed). Validation is per edit and all or nothing: a malformed edit is refused with a reason (registry.json \"refused\"), the rest of the batch stands; an unusable document (not JSON, another \"ir\", no mod or stage) is refused whole. The op vocabulary and its evaluation are data packs' (packs.cpp parse_value): r = clamp(v * mul + add, min, max), then raiseOnly / lowerOnly against v, whole-number fields rounded. Within format 1 Kiln only adds optional members: this Kiln's reader ignores unknown members at the top level and refuses them in an edit. Field names, their types, ranges, ops and \"applies\" come from the registry schemas (schema/registry/<registry>.json); this schema checks the shape only.",
+  "type": "object",
+  "required": [
+    "ir",
+    "mod",
+    "stage",
+    "edits"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "ir": {
+      "const": 1,
+      "description": "The IR format. A Kiln that reads only format 1 refuses another number for the whole document."
+    },
+    "mod": {
+      "$ref": "common.schema.json#/$defs/modId",
+      "description": "The mod the batch belongs to: its place in the load order. An added entry's id starts with \"<mod>:\"."
+    },
+    "modVersion": {
+      "type": "string",
+      "description": "The mod's version, for the report."
+    },
+    "stage": {
+      "enum": [
+        "add",
+        "alter",
+        "final"
+      ],
+      "description": "add: entries are created (every mod's add runs before any alter). alter: field edits, in load order, each mod seeing the base, all adds and the earlier mods' alters. final: like alter, after every alter; a mod's final sees add + alter and its own final edits, never another mod's final."
+    },
+    "source": {
+      "type": "string",
+      "description": "What the report names as the edits' origin: \"content/<file>.json\", \"code:<Type>.OnRegistry\", or a native mod's own text."
+    },
+    "edits": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edit"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "edit": {
+      "type": "object",
+      "required": [
+        "registry"
+      ],
+      "properties": {
+        "n": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "The edit's ordinal in its batch (default: its position): with the mod, stage and source the key the report names it by. An n used twice in a batch, or not 0..4294967295, refuses that edit."
+        },
+        "registry": {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9]*$",
+          "description": "The registry (items, recipes, loot, drops, balance in the first release). An unknown one refuses the edit."
+        },
+        "exclusive": {
+          "type": "boolean",
+          "description": "Today's strict rule for this edit: another writer's edit of the same field (either order) is a conflict in which the later one in load order is refused whole."
+        },
+        "yield": {
+          "type": "boolean",
+          "description": "Apply only where no earlier writer (an older Kiln path, an archive-writer package, an earlier registry edit) set the field; the entries skipped are reported \"yielded\"."
+        }
+      },
+      "oneOf": [
+        {
+          "title": "field edit",
+          "required": [
+            "select",
+            "field"
+          ],
+          "properties": {
+            "select": {
+              "$ref": "#/$defs/selector"
+            },
+            "field": {
+              "$ref": "#/$defs/field"
+            },
+            "op": {
+              "$ref": "#/$defs/op"
+            },
+            "list": {
+              "$ref": "#/$defs/listOp"
+            }
+          },
+          "oneOf": [
+            {
+              "required": [
+                "op"
+              ]
+            },
+            {
+              "required": [
+                "list"
+              ]
+            }
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "raw"
+                ]
+              },
+              {
+                "required": [
+                  "entry"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "title": "raw edit (Advanced tier)",
+          "description": "The game's own member paths of the selected entries, in a registry whose schema allows it (\"raw\": \"allowed\"). Advanced tier (owner decision D5): works while the game's names and layout hold; each path is resolved per entry on this game build and an edit naming one that does not resolve there is refused, never written blind. The member's own type and range check the value. A path that is exactly a Kiln field's member is that field's place (one chain with the field's other edits); a path behind a field Kiln converts (units, a formula) is never composed with that field: the later of the two is refused. Stages alter and final only. Prefer the Kiln field where one exists: it survives game updates.",
+          "required": [
+            "select",
+            "raw"
+          ],
+          "properties": {
+            "select": {
+              "$ref": "#/$defs/selector"
+            },
+            "raw": {
+              "$ref": "#/$defs/raw"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "field"
+                ]
+              },
+              {
+                "required": [
+                  "op"
+                ]
+              },
+              {
+                "required": [
+                  "list"
+                ]
+              },
+              {
+                "required": [
+                  "entry"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "title": "entry add (stage add)",
+          "required": [
+            "entry",
+            "id"
+          ],
+          "properties": {
+            "entry": {
+              "const": "add"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}:[^*?]+$",
+              "description": "\"<this mod>:<name>\". Ids are never reused: an id taken (or retired) refuses the add."
+            },
+            "like": {
+              "$ref": "#/$defs/id",
+              "description": "An entry whose values the new one starts from (it exists at add time: the base or an earlier add)."
+            },
+            "fields": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/$defs/field"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/scalar"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/scalar"
+                    }
+                  }
+                ]
+              },
+              "description": "Absolute values of Kiln fields for the new entry."
+            }
+          }
+        },
+        {
+          "title": "entry remove (stage alter or final)",
+          "required": [
+            "entry",
+            "select"
+          ],
+          "properties": {
+            "entry": {
+              "const": "remove"
+            },
+            "select": {
+              "$ref": "#/$defs/selector"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}:.+$",
+      "description": "A Kiln id: \"game:<stable name>\" or \"<mod id>:<name>\"."
+    },
+    "field": {
+      "type": "string",
+      "pattern": "^[^:\\s]+$",
+      "description": "A Kiln field path of the registry's schema: \"maxStack\", \"damage.fire\", \"levels.min\"; or an element of a list: \"inputs[2].count\" (a leaf of element 2), \"inputs[*].count\" (that leaf of every element), \"inputs[3]\" / \"perks[1]\" (the whole element). An element edit takes \"op\" and changes the element inside the list's own chain; one level of list."
+    },
+    "selector": {
+      "description": "The entries an edit applies to: an id, a case-insensitive glob over ids (\"game:material_*\", \"*\"), or an old debug name (\"Material_T1_Wood_Logs\" names \"game:material_t1_wood_logs\"); as a plain string or an object with conditions.",
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "where": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/$defs/field"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/scalar"
+              },
+              "description": "Every condition holds on the view the stage gives: \">=1\", \"<=2\", \"!=x\", \"==x\", \">1\", \"<1\", or a plain value (equal; names ignore case)."
+            },
+            "has": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Traits every selected entry has."
+            },
+            "hasNot": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Traits no selected entry has."
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "scalar": {
+      "type": [
+        "number",
+        "boolean",
+        "string"
+      ]
+    },
+    "op": {
+      "description": "A plain value (an absolute set; a list or flags field takes its whole value as a list), {\"set\": value} (a whole element with fields: {\"set\": {<its fields>}}), or a relative change of a number: {mul, add, min, max, raiseOnly, lowerOnly} (min not above max; not raiseOnly and lowerOnly together). Relative changes of several mods stack.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/scalar"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scalar"
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "set"
+          ],
+          "properties": {
+            "set": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/scalar"
+                },
+                {
+                  "type": "array"
+                },
+                {
+                  "type": "object"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "not": {
+            "required": [
+              "set"
+            ]
+          },
+          "properties": {
+            "mul": {
+              "type": "number"
+            },
+            "add": {
+              "type": "number"
+            },
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            },
+            "raiseOnly": {
+              "type": "boolean"
+            },
+            "lowerOnly": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "listOp": {
+      "description": "A list field's change: clear and replace set the whole list; append and remove change it relatively (several mods' appends are all kept, in load order).",
+      "oneOf": [
+        {
+          "const": "clear",
+          "description": "The short form of {\"clear\": true}."
+        },
+        {
+          "type": "object",
+          "required": [
+            "clear"
+          ],
+          "properties": {
+            "clear": {
+              "const": true
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "append"
+          ],
+          "properties": {
+            "append": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/scalar"
+                  },
+                  {
+                    "type": "object",
+                    "description": "An element with fields of its own ({\"item\": \"game:wood\", \"count\": 2})."
+                  }
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "remove"
+          ],
+          "properties": {
+            "remove": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/scalar"
+                  },
+                  {
+                    "type": "object",
+                    "description": "An element with fields of its own ({\"item\": \"game:wood\", \"count\": 2})."
+                  }
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "replace"
+          ],
+          "properties": {
+            "replace": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/scalar"
+                  },
+                  {
+                    "type": "object",
+                    "description": "An element with fields of its own ({\"item\": \"game:wood\", \"count\": 2})."
+                  }
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "raw": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 32,
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\[[0-9]{1,9}\\])*(\\.[A-Za-z_][A-Za-z0-9_]*(\\[[0-9]{1,9}\\])*)*$",
+        "description": "A member path of the game's type for the registry's entries: names as the game's reflection has them (matched without case), indices [n]; no \"*\". Two spellings of one place in one edit are refused."
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/op"
+      }
+    }
+  }
+}
