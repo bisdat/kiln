@@ -186,8 +186,11 @@ nothing back and never wait for a game or window thread.
 
 - **`read_original`** copies the exe file's bytes at `address`, relocated to where the exe is loaded. Never live memory:
   a function that Kiln or another module hooked reads as the game shipped it. The range must lie inside the exe's
-  executable `.text`: a zero size, a range outside it or one that wraps, and a null `out` are
-  `KILN_ERR_INVALID_ARGUMENT`. `KILN_ERR_UNAVAILABLE` when the file's bytes are not there. A refusal writes nothing.
+  executable `.text` and be at most `KILN_HOOKS_CODE_RANGE_MAX` (64 KiB, since 0.2.0-dev.29.19) long: a zero size,
+  a larger one, a range outside `.text` or one that wraps, and a null `out` are `KILN_ERR_INVALID_ARGUMENT`, checked
+  before anything is read. Exactly 64 KiB is accepted; ask about the bytes you need (a function's first instructions, a
+  call site), not the whole `.text`. `KILN_ERR_UNAVAILABLE` when the file's bytes are not there. A refusal writes
+  nothing.
 - **`code_state`** says whether the live code in the range is still the file's (the same range rules). It reads the live
   bytes twice under a fault guard and compares them with the file's, and with what Kiln's own detours and patches
   wrote there:
@@ -210,10 +213,11 @@ changed place, see the map's `codePatches` below.
 **The generation is one counter for the whole process**, not one per range. It moves when Kiln writes a detour,
 installs or removes a patch, when a chain's links change (an install, a revoke, a link that faulted), on `write`, and
 when a `code_state` call sees other bytes, readability or state than the call before it. Kiln remembers only the last
-range anyone asked about, so a call for another range moves it too, whoever made it: two mods that take turns with two
-ranges see it move on every call. The same value as at your last call means nothing changed and no one asked about
-another range since; a new value means "ask again", not "it changed". It is no lock and no watch: another module can
-write the code right after the call returns, and nothing tells you when it does.
+range anyone asked about (at most 64 KiB, so what it keeps stays small; a refused call changes nothing), so a call for
+another range moves it too, whoever made it: two mods that take turns with two ranges see it move on every call. The
+same value as at your last call means nothing changed and no one asked about another range since; a new value means
+"ask again", not "it changed". It is no lock and no watch: another module can write the code right after the call
+returns, and nothing tells you when it does.
 
 **Locking.** `code_state` and Kiln's own writers of game code share one lock:
 - `patch` holds the patch list's mutex and this lock while it reads the old bytes, writes the new ones and records
@@ -505,21 +509,23 @@ are not counted per call. Structured and mid dispatches are counted by each thre
   the caller table in the TEB's TLS slots and in the expansion slots, then once in `slots` mode (every link slot used) and
   once in `targets` mode (every target slot used, a new address refused, a hooked one still takes links). Original
   code: `read_original` and `code_state` on the real service (a detour and its revoke, a patch, `write`, an unreadable
-  page, polls while patches and detours come and go); a first install, `patch`, `unpatch` and `write` that each wait
-  for a thread holding the `code_state` lock and write nothing meanwhile; four threads polling `code_state` through
-  sixteen first installs (each stops every other thread), seeing only ORIGINAL or MANAGED; a `code_state` call that
-  waits for the lock while a first install stops every thread (a pause inside the install makes it deterministic): it
-  finishes after the install and reads MANAGED, and a `read_original` call made meanwhile returns at once. Each run
-  has a time limit (300 s), so a lock-order deadlock fails the run instead of hanging it.
+  page, polls while patches and detours come and go, exactly 64 KiB accepted and one byte more refused); a first
+  install, `patch`, `unpatch` and `write` that each wait for a thread holding the `code_state` lock and write nothing
+  meanwhile; four threads polling `code_state` through sixteen first installs (each stops every other thread), seeing
+  only ORIGINAL or MANAGED; a `code_state` call that waits for the lock while a first install stops every thread (a
+  pause inside the install makes it deterministic): it finishes after the install and reads MANAGED, and a
+  `read_original` call made meanwhile returns at once. Each run has a time limit (300 s), so a lock-order deadlock
+  fails the run instead of hanging it.
 - `native/core/tests/test-hooks-typed.sh` (Wine, no game): the typed link kind (the T3 set of sret, f64, eight stack
   arguments, narrow integers, mixed positions; the call state machine, faults before and after `CallOriginal`, a
   24- and a 128-byte struct return restored whole after a faulting handler, eight callers while a ninth installs and
   revokes) and `detour_typed_checked` (a thread parked inside the bytes: refused with `KILN_HOOKS_ERR_UNCHECKED`,
   nothing written; with the thread gone it installs; a second link writes no patch). The same time limit applies.
 - `native/core/tests/test-hooks-code.sh asan` and `... tsan` (host): the registry behind `code_state` with fake file and live
-  readers: ranges and refusals, relocated bytes, patches over patches and over another module's bytes, unreadable and
-  changing pages, two ranges taking turns, a query in flight while a writer waits for the lock, and polls racing
-  installs, removals and faulted links.
+  readers: ranges and refusals (one byte over the 64 KiB limit refused before any read or allocation of that size),
+  relocated bytes, patches over patches and over another module's bytes, unreadable and changing pages, two ranges
+  taking turns, a query in flight while a writer waits for the lock, and polls racing installs, removals and faulted
+  links.
 - `native/core/tests/test-hooks-checked-patch.sh`, `test-hooks-thread-stop.sh`, `test-hooks-typed-result.sh`,
   `test-hooks-fingerprint.sh` (host): the checked patch policy and the typed result code, the thread-stop loop, the
   complete-result snapshot, the fingerprint pass and the compiled-against-loaded descriptor comparison.

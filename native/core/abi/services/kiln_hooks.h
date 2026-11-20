@@ -230,6 +230,8 @@ typedef void(KILN_CALL* KilnOwnerRetiringFn)(KilnOwner retiring, void* user);
                                  Kiln detour placed over another module's bytes */
 #define KILN_CODE_UNKNOWN 3u  /* the live bytes could not be read or changed while they were read, or Kiln's record of
                                  what it wrote there does not lead back to the file's bytes */
+/* read_original's and code_state's largest range, in bytes (since 0.2.0-dev.29.19): a larger size is refused. */
+#define KILN_HOOKS_CODE_RANGE_MAX 65536u
 
 typedef struct KilnHooksApi {
     KilnServiceHeader header;
@@ -411,9 +413,10 @@ typedef struct KilnHooksApi {
      *
      * read_original: copies `size` bytes of the exe file's code at `address` (relocated to where the exe is loaded)
      * into `out`. Never live memory: a function that Kiln or another module hooked reads as the game shipped it. The
-     * whole range must lie inside the exe's executable .text: a zero `size`, a range outside it or one that wraps, and
-     * a NULL `out` are KILN_ERR_INVALID_ARGUMENT. KILN_ERR_UNAVAILABLE when the file's bytes are not there. A refusal
-     * writes nothing.
+     * whole range must lie inside the exe's executable .text and be at most KILN_HOOKS_CODE_RANGE_MAX (64 KiB) long: a
+     * zero `size`, a larger one, a range outside .text or one that wraps, and a NULL `out` are
+     * KILN_ERR_INVALID_ARGUMENT, checked before anything is read. KILN_ERR_UNAVAILABLE when the file's bytes are not
+     * there. A refusal writes nothing.
      *
      * code_state: whether the live code in [address, address + size) is the file's (the same range rules). It reads the
      * live bytes twice under a fault guard and compares them with the file's and with what Kiln's own detours and
@@ -425,10 +428,11 @@ typedef struct KilnHooksApi {
      * *generation is one counter for the whole process, not per range. It moves when Kiln writes a detour, installs or
      * removes a patch, when a chain's links change (an install, a revoke, a link that faulted), on `write`, and when a
      * call sees other bytes, readability or state than the call before it. Only the last range asked about is
-     * remembered, so a call for another range (by any mod) moves it too: two callers taking turns with two ranges see
-     * it move on every call. The same value as at your last call means nothing changed and no one asked about another
-     * range in between; another value means "ask again", not "changed". It is no lock: another module may write the
-     * code right after the call returns. A refusal writes neither output.
+     * remembered (at most 64 KiB, so what Kiln keeps stays small; a refused call changes nothing), so a call for
+     * another range (by any mod) moves it too: two callers taking turns with two ranges see it move on every call. The
+     * same value as at your last call means nothing changed and no one asked about another range in between; another
+     * value means "ask again", not "changed". It is no lock: another module may write the code right after the call
+     * returns. A refusal writes neither output.
      *
      * Locking: Kiln's writers of game code (patch, unpatch, write, revoke and revoke_owner of patches, every detour
      * install, revoke and sweep) take the lock code_state reads under; an install takes it before it stops the game's

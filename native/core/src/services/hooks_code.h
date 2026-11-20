@@ -27,12 +27,13 @@ struct Image {
     bool (*live)(uintptr_t, uint8_t*, size_t);
 };
 inline bool valid_range(const Image& image, uintptr_t address, size_t size) {
-    // Subtraction-based bounds checks also refuse wraparound in malformed image metadata.
+    // Subtraction-based bounds checks also refuse wraparound in malformed image metadata. The size limit comes first:
+    // both members check the range before they allocate or read anything sized by it.
     const auto max = std::numeric_limits<uintptr_t>::max();
-    return size && image.base && image.size <= max - image.base && image.text >= image.base &&
-        image.text - image.base <= image.size && image.text_size <= image.size - (image.text - image.base) &&
-        address >= image.text && address - image.text < image.text_size &&
-        size <= image.text_size - (address - image.text);
+    return size && size <= KILN_HOOKS_CODE_RANGE_MAX && image.base && image.size <= max - image.base &&
+        image.text >= image.base && image.text - image.base <= image.size &&
+        image.text_size <= image.size - (image.text - image.base) && address >= image.text &&
+        address - image.text < image.text_size && size <= image.text_size - (address - image.text);
 }
 inline KilnResult read_original(const Image& image, uintptr_t address, void* out, size_t size) {
     if (!out || !valid_range(image, address, size)) return KILN_ERR_INVALID_ARGUMENT;

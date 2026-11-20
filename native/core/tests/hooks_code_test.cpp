@@ -1,19 +1,24 @@
 // SPDX-License-Identifier: MIT
 #include "services/hooks_code.h"
 
+#include <sanitizer/allocator_interface.h>
+
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <barrier>
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <string>
 #include <thread>
+#include <vector>
 
 using namespace kiln::hooks::code;
 namespace {
 int passed = 0, failed = 0;
-void check(bool ok, const char* text) {
-    std::printf("%s %s\n", ok ? "PASS" : "FAIL", text);
+void check(bool ok, const char* text, const std::string& detail = "") {
+    std::printf("%s %s%s%s\n", ok ? "PASS" : "FAIL", text, detail.empty() ? "" : ": ", detail.c_str());
     ok ? ++passed : ++failed;
 }
 std::array<uint8_t, 128> file{}, live{};
@@ -34,6 +39,27 @@ bool live_copy(uintptr_t a, uint8_t* out, size_t n) {
     return true;
 }
 Image image{base, file.size(), text, 96, file_copy, live_copy};
+
+// For the range limit: a .text two bytes longer than KILN_HOOKS_CODE_RANGE_MAX. Its file reads are counted, and so are
+// the allocations larger than the limit while `counting` is set (the sanitizer's malloc hook sees operator new too).
+constexpr uintptr_t big_base = 0x200000;
+std::array<uint8_t, KILN_HOOKS_CODE_RANGE_MAX + 2> big{};
+std::atomic<unsigned> big_reads{0}, big_allocs{0};
+std::atomic<bool> counting{false};
+bool big_copy(uintptr_t a, uint8_t* out, size_t n) {
+    std::memcpy(out, big.data() + (a - big_base), n);
+    return true;
+}
+bool big_file(uintptr_t a, uint8_t* out, size_t n) {
+    ++big_reads;
+    return big_copy(a, out, n);
+}
+__attribute__((no_sanitize("address", "thread", "undefined"))) void on_malloc(const volatile void*, size_t n) {
+    if (counting.load(std::memory_order_relaxed) && n > KILN_HOOKS_CODE_RANGE_MAX)
+        big_allocs.fetch_add(1, std::memory_order_relaxed);
+}
+void on_free(const volatile void*) {}
+Image big_image{big_base, big.size(), big_base, big.size(), big_file, big_copy};
 
 bool has_original(const void* raw) {
     const auto* h = static_cast<const KilnHooksApi*>(raw);
@@ -77,6 +103,53 @@ int main() {
     check(read_original(image, text, sentinel.data(), sentinel.size()) == KILN_ERR_UNAVAILABLE && sentinel[0] == 0x55,
           "absent/short verified file never falls back to live and writes nothing");
     disk = true;
+
+    {   // The range limit: exactly KILN_HOOKS_CODE_RANGE_MAX (64 KiB) is accepted. One byte more is refused before
+        // anything sized by it is allocated or read, writes nothing and leaves the generation and the remembered range.
+        static_assert(KILN_HOOKS_CODE_RANGE_MAX == 65536);
+        constexpr size_t cap = KILN_HOOKS_CODE_RANGE_MAX;
+        for (size_t i = 0; i < big.size(); ++i) big[i] = static_cast<uint8_t>(i * 7 + 1);
+        __sanitizer_install_malloc_and_free_hooks(on_malloc, on_free);
+        std::vector<uint8_t> copy(cap + 1, 0x55);
+        const auto untouched = [&] {
+            return std::all_of(copy.begin(), copy.end(), [](uint8_t b) { return b == 0x55; });
+        };
+        check(read_original(big_image, big_base + 1, copy.data(), cap) == KILN_OK &&
+                  !std::memcmp(copy.data(), big.data() + 1, cap) && copy[cap] == 0x55,
+              "range limit: read_original accepts exactly 64 KiB");
+        std::fill(copy.begin(), copy.end(), 0x55);
+        const unsigned reads = big_reads.load();
+        counting = true;
+        const KilnResult over = read_original(big_image, big_base, copy.data(), cap + 1);
+        counting = false;
+        check(over == KILN_ERR_INVALID_ARGUMENT && untouched(),
+              "range limit: read_original refuses 64 KiB + 1 and writes nothing");
+        check(big_reads.load() == reads && big_allocs.load() == 0,
+              "range limit: read_original refuses before a read or an allocation of that size",
+              std::to_string(big_reads.load() - reads) + " reads, " + std::to_string(big_allocs.load()) +
+                  " allocations");
+        Registry limited;
+        uint32_t s = 99;
+        uint64_t g = 0;
+        check(limited.code_state(big_image, big_base + 1, cap, &s, &g) == KILN_OK && s == KILN_CODE_ORIGINAL,
+              "range limit: code_state accepts exactly 64 KiB");
+        const uint64_t kept = g;
+        uint32_t s2 = 77;
+        uint64_t g2 = 88;
+        const unsigned reads_before = big_reads.load();
+        counting = true;
+        const KilnResult state_over = limited.code_state(big_image, big_base, cap + 1, &s2, &g2);
+        counting = false;
+        check(state_over == KILN_ERR_INVALID_ARGUMENT && s2 == 77 && g2 == 88,
+              "range limit: code_state refuses 64 KiB + 1 and leaves state and generation alone");
+        check(big_reads.load() == reads_before && big_allocs.load() == 0,
+              "range limit: code_state refuses before a read or an allocation of that size",
+              std::to_string(big_reads.load() - reads_before) + " reads, " + std::to_string(big_allocs.load()) +
+                  " allocations");
+        uint64_t again = 0;
+        check(limited.code_state(big_image, big_base + 1, cap, &s, &again) == KILN_OK && again == kept,
+              "range limit: the refused call left the remembered range alone (the same range keeps the generation)");
+    }
 
     Registry r;
     uint32_t state = 99; uint64_t generation = 0;

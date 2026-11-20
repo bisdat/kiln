@@ -377,6 +377,9 @@ __asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n.balign 32, 0xCC\n"
         ".rept 16\n  push rbx\n  sub rsp, 0x20\n  mov eax, ecx\n  add eax, 1\n  add rsp, 0x20\n  pop rbx\n  ret\n  .balign 32, 0xCC\n.endr\n"
         ".text\n");
 
+// Filler that makes the test's code section longer than KILN_HOOKS_CODE_RANGE_MAX (test_code_range_limit); never run.
+__asm__(".section .game,\"xr\"\n.balign 4096, 0xCC\ngame_code_filler:\n.fill 0x10400, 1, 0xCC\n.text\n");
+
 // 600 small functions, 32 bytes apart, `int f(int x)` = x + 1, for the target-cap test (512 distinct addresses to hook).
 __asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n.balign 32, 0xCC\n"
         ".globl game_many\n.def game_many; .scl 2; .type 32; .endef\ngame_many:\n"
@@ -678,6 +681,38 @@ void test_code_inspection() {
     }
     done = true; observer.join();
     check(polls > 0 && bad == 0, "a poller sees only ORIGINAL or MANAGED while patches and links come and go 1000 times");
+}
+
+// The range limit on the real members: exactly KILN_HOOKS_CODE_RANGE_MAX (64 KiB) is accepted; one byte more is refused
+// with nothing written, and the generation and the remembered range are left alone. game_code_filler makes the
+// test's code section longer than that.
+void test_code_range_limit() {
+    std::puts("-- original code: a range of exactly 64 KiB is accepted, one byte more is refused");
+    constexpr size_t cap = KILN_HOOKS_CODE_RANGE_MAX;
+    const uintptr_t at = reinterpret_cast<uintptr_t>(kiln::g_image.text);
+    check(kiln::g_image.text_size > cap, "the test's code section is longer than 64 KiB",
+          std::to_string(kiln::g_image.text_size));
+    std::vector<uint8_t> out(cap + 1, 0x55);
+    const auto untouched = [&] { return std::all_of(out.begin(), out.end(), [](uint8_t b) { return b == 0x55; }); };
+    check(A->read_original(at, out.data(), cap) == KILN_OK && out[cap] == 0x55 &&
+              !std::memcmp(out.data(), reinterpret_cast<const void*>(at), cap),
+          "read_original accepts exactly 64 KiB");
+    std::fill(out.begin(), out.end(), 0x55);
+    check(A->read_original(at, out.data(), cap + 1) == KILN_ERR_INVALID_ARGUMENT && untouched(),
+          "read_original refuses 64 KiB + 1 and writes nothing");
+    uint32_t state = 99;
+    uint64_t generation = 0;
+    check(A->code_state(at, cap, &state, &generation) == KILN_OK && state <= KILN_CODE_UNKNOWN,
+          "code_state accepts exactly 64 KiB");
+    const uint64_t kept = generation;
+    uint32_t refused_state = 77;
+    uint64_t refused_generation = 88;
+    check(A->code_state(at, cap + 1, &refused_state, &refused_generation) == KILN_ERR_INVALID_ARGUMENT &&
+              refused_state == 77 && refused_generation == 88,
+          "code_state refuses 64 KiB + 1 and leaves state and generation alone");
+    uint64_t again = 0;
+    check(A->code_state(at, cap, &state, &again) == KILN_OK && again == kept,
+          "the refused call left the remembered range alone (the same range keeps the generation)");
 }
 
 // A first install takes code_state's lock before it reads the target and stops the game's threads. A code_state call
@@ -2500,6 +2535,7 @@ int main(int argc, char** argv) {
     check(A->raw_detour && A->caller && A->detour2 && A->call_original2 && A->mid2 && A->map_json, "every v2 entry is set");
 
     test_code_inspection();
+    test_code_range_limit();
     test_code_lock_order();
     test_code_wait_during_stop();
     test_raw_chain_9args();
