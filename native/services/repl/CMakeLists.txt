@@ -7,6 +7,10 @@ kiln_service(repl repl.cpp loopback.cpp stats.cpp watch.cpp client.cpp net.cpp t
 add_executable(repl-host-test tests/repl_host_test.cpp)
 target_include_directories(repl-host-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
 set_target_properties(repl-host-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/repl-tests")
+# - repl-track-test: kiln.repl.net's sidecar tracking as data (track.h): batch -> events, rings, gaps, the track table
+add_executable(repl-track-test tests/repl_track_test.cpp)
+target_include_directories(repl-track-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
+set_target_properties(repl-track-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/repl-tests")
 add_executable(repl-gate-test tests/repl_gate_test.cpp repl.cpp loopback.cpp stats.cpp watch.cpp client.cpp net.cpp track.cpp
                filter.cpp touch.cpp remap.cpp messages.cpp schema.cpp)
 target_include_directories(repl-gate-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")

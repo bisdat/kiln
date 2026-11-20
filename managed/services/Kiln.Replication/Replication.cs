@@ -13,7 +13,7 @@ namespace Kiln;
 /// <para>The counters and watches cost a little on the server's network jobs while they are on: Kiln hooks the game's
 /// send path only while some mod holds the stats or a watch, and a watch copies only its own entity.</para>
 /// </summary>
-public static class Replication
+public static partial class Replication
 {
     private static readonly object Gate = new();
     private static readonly HashSet<ulong> StatsOwners = [];

@@ -9,7 +9,14 @@ namespace ReplicationTests;
 
 public sealed class PeersTests
 {
-    private sealed class Ext(string name, int version, int size, uint hash) : ReplicatedExtension(name, version, size, hash);
+    private sealed class Ext(string name, int version, int size, uint hash) : ReplicatedExtension(name, version, size, hash)
+    {
+        internal override IReadOnlyList<SidecarProvider> Providers => [];
+
+        internal override void RaiseChanged(EntityId entity, uint createTick, ReadOnlySpan<byte> value, NetPeer? peer)
+        {
+        }
+    }
 
     private static NetPeer Peer(uint id, NetPeerState state, string? ext = null, bool cleared = false)
     {

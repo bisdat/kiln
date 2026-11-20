@@ -186,6 +186,15 @@ public static class Descriptors
         "list the row in kiln.mod.json \"features\", or mark the calling method [RequiresCapability(\"row\")] to pass the " +
         "requirement on to its callers.");
 
+    public static readonly DiagnosticDescriptor ExtensionValueType = Rule("KILN199",
+        "Replicated extension value type outside the rule",
+        "'{0}' cannot be the value of a replicated extension: {1}",
+        Contract, DiagnosticSeverity.Error,
+        "Replication.Extension<T> sends T as its own bytes to Kiln clients and checks T when the extension is registered: an " +
+        "unmanaged struct with [StructLayout(LayoutKind.Sequential, Pack = 1)] made only of byte, sbyte, short, ushort, int, uint, " +
+        "long, ulong, float, double, enums of those and nested structs under the same rule, at most 1,024 bytes. bool, char, " +
+        "nint, nuint, pointers, fixed buffers and reference types are refused (ArgumentException). Since 0.2.0-dev.31.");
+
     private const string Blocks = "Kiln.Blocks";
 
     public static readonly DiagnosticDescriptor BlockName = Rule("KILN110",

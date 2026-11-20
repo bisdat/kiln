@@ -4,6 +4,7 @@
 // hash, the id this process gave it) and the per-peer "has it" decision from the handshake property repl.ext.
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Kiln;
 
@@ -50,11 +51,47 @@ public abstract class ReplicatedExtension
 
     private bool _registered = true;
 
-    /// <summary>The id this process gave it on the wire (kiln:repl DEFS); a new one after a hot reload. Tick thread.</summary>
-    internal ushort Id { get; set; }
+    /// <summary>The id this process gave it on the wire (kiln:repl DEFS); a new one after a hot reload.</summary>
+    internal ushort Id { get; init; }
 
-    /// <summary>Marks it gone (dispose, its mod's unload).</summary>
-    internal void MarkUnregistered() => Volatile.Write(ref _registered, false);
+    /// <summary>The mod that registered it (null: Kiln's own code).</summary>
+    internal ModContext? Owner { get; init; }
+
+    /// <summary>The values this process knows, by entity (a remote client: what the server sent for the generation it
+    /// has; a server or a hosted world: what the providers gave last). Replaced, never changed: TryGet reads it from any
+    /// thread.</summary>
+    private IReadOnlyDictionary<uint, byte[]> _view = EmptyView;
+
+    private static readonly IReadOnlyDictionary<uint, byte[]> EmptyView = new Dictionary<uint, byte[]>();
+
+    /// <summary>Publishes a new view (once per frame, by the part that owns the values here).</summary>
+    internal void Publish(IReadOnlyDictionary<uint, byte[]> view) => Volatile.Write(ref _view, view);
+
+    /// <summary>The value bytes of an entity in the current view.</summary>
+    internal bool TryView(uint entity, out byte[] bytes)
+    {
+        if (Volatile.Read(ref _view).TryGetValue(entity, out var b) && b.Length == Size)
+        {
+            bytes = b;
+            return true;
+        }
+        bytes = [];
+        return false;
+    }
+
+    /// <summary>The providers (server): component hash, name, and how to call one.</summary>
+    internal abstract IReadOnlyList<SidecarProvider> Providers { get; }
+
+    /// <summary>Raises Changed (the owner's mod as the current mod; a handler's exception is logged, never thrown on).
+    /// <paramref name="value"/> empty: the value went.</summary>
+    internal abstract void RaiseChanged(EntityId entity, uint createTick, ReadOnlySpan<byte> value, NetPeer? peer);
+
+    /// <summary>Marks it gone (dispose, its mod's unload); its view empties.</summary>
+    internal void MarkUnregistered()
+    {
+        Volatile.Write(ref _registered, false);
+        Volatile.Write(ref _view, EmptyView);
+    }
 
     /// <summary>
     /// Whether <paramref name="peer"/> has this extension: a Kiln client whose handshake advertised the same name,
@@ -158,4 +195,157 @@ internal static class ExtensionAdvert
     {
         lock (Warned) Warned.Clear();
     }
+}
+
+/// <summary>
+/// Computes an extension's value for one entity on the server (tick thread). Fill <paramref name="value"/> and return
+/// true to send it; return false when the entity has no value (a value sent before is cleared on the clients).
+/// <paramref name="value"/> starts as default.
+/// </summary>
+public delegate bool ExtensionProvider<T>(EntityId entity, ref T value) where T : unmanaged;
+
+/// <summary>An extension's value changed: on a server, a value was sent to <see cref="Peer"/> (or cleared there); on a
+/// client, a value arrived from the server or went (<see cref="Value"/> null).</summary>
+/// <param name="Entity">The entity (the server's id).</param>
+/// <param name="CreateTick">The entity's generation on that peer (the server tick of its create; 0 when the server's
+/// tracking began after it).</param>
+/// <param name="Value">The new value; null when it went (cleared, the entity was destroyed or left the peer's view).</param>
+/// <param name="Peer">Server: the peer it was sent to (null for a hosted world's own client). Client: null.</param>
+public sealed record ReplExtensionChanged<T>(EntityId Entity, uint CreateTick, T? Value, NetPeer? Peer) where T : struct;
+
+/// <summary>One provider of an extension (server).</summary>
+internal sealed class SidecarProvider(uint componentHash, string componentName, Func<EntityId, byte[], bool> provide, ModContext? mod)
+{
+    public uint ComponentHash { get; } = componentHash;
+    public string ComponentName { get; } = componentName;
+    public ModContext? Mod { get; } = mod;
+    public int Faults;
+    public volatile bool Removed;
+
+    /// <summary>Runs the provider into <paramref name="into"/> (Size bytes, zeroed first). False: no value.</summary>
+    public bool Provide(EntityId entity, byte[] into) => provide(entity, into);
+}
+
+/// <summary>
+/// A replicated extension with values of <typeparamref name="T"/> (<see cref="Replication.Extension{T}"/>). The server
+/// computes them (<see cref="On{TComponent}"/>) for the entities each Kiln client with the extension was sent, and
+/// sends a value again only when it changed; a client reads them with <see cref="TryGet"/>.
+/// </summary>
+public sealed class ReplicatedExtension<T> : ReplicatedExtension, IDisposable where T : unmanaged
+{
+    private SidecarProvider[] _providers = [];
+    private readonly object _gate = new();
+    private Action<ReplExtensionChanged<T>>? _changed;
+
+    internal ReplicatedExtension(string name, int version, int size, uint layoutHash, ModContext? owner)
+        : base(name, version, size, layoutHash) => Owner = owner;
+
+    internal override IReadOnlyList<SidecarProvider> Providers => Volatile.Read(ref _providers);
+
+    /// <summary>
+    /// Computes the value on entities that have component <typeparamref name="TComponent"/>: Kiln calls
+    /// <paramref name="provider"/> on the server's tick thread once per step for every such entity that some Kiln client with
+    /// this extension was sent, and sends the value to those clients when it differs from the last one they got. With
+    /// several providers, the first registered whose component the entity has gives the value.
+    /// </summary>
+    /// <typeparam name="TComponent">A game component (a Kiln.Game type, such as <c>Kiln.Ecs.Fuel</c>).</typeparam>
+    /// <returns>Dispose it to remove the provider (the values it gave are cleared on the clients).</returns>
+    /// <remarks>On a game client that does not host, the provider is kept and never called (only a server computes
+    /// values), so one OnLoad can serve both sides.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="provider"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">The extension was disposed or its mod unloaded.</exception>
+    /// <exception cref="KilnUnavailableException"><c>repl.sidecar</c> is off on this server (its tracking or kiln.net's
+    /// transport).</exception>
+    [ServerOnly]
+    [TickThreadOnly]
+    [RequiresCapability(ReplicationCaps.Sidecar)]
+    public IDisposable On<TComponent>(ExtensionProvider<T> provider) where TComponent : unmanaged, IGameComponent<TComponent>
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        ObjectDisposedException.ThrowIf(!IsRegistered, this);
+        Sidecars.RequireProviders();
+        var mod = ModContext.CurrentMod ?? Owner;
+        var entry = new SidecarProvider(TComponent.Hash, TComponent.Name, (entity, into) =>
+        {
+            var v = default(T);
+            if (!provider(entity, ref v)) return false;
+            MemoryMarshal.Write(into, in v);
+            return true;
+        }, mod);
+        lock (_gate) Volatile.Write(ref _providers, [.. _providers, entry]);
+        Sidecars.ProvidersChanged(this);
+        return new ProviderRegistration(this, entry);
+    }
+
+    private sealed class ProviderRegistration(ReplicatedExtension<T> ext, SidecarProvider entry) : IDisposable
+    {
+        private int _done;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _done, 1) != 0) return;
+            entry.Removed = true;
+            lock (ext._gate) Volatile.Write(ref ext._providers, Array.FindAll(ext._providers, p => !ReferenceEquals(p, entry)));
+            Sidecars.ProvidersChanged(ext);
+        }
+    }
+
+    /// <summary>
+    /// The value of <paramref name="entity"/> as this process knows it: on a Kiln client, the last value the server sent
+    /// for the generation of the entity the client has; on a server or a hosted world, the last value the providers gave.
+    /// The values are swapped in once per frame, so a read never sees a half-written value.
+    /// </summary>
+    /// <returns>False when there is none (no provider gives one, the server has not sent it yet, the entity is gone, or the
+    /// extension is off here).</returns>
+    [AnyThread]
+    public bool TryGet(EntityId entity, out T value)
+    {
+        if (TryView(entity.Value, out var b))
+        {
+            value = MemoryMarshal.Read<T>(b);
+            return true;
+        }
+        value = default;
+        return false;
+    }
+
+    /// <summary>A value changed. Server: raised on the tick thread for every value sent to a peer (and cleared there).
+    /// Client: raised on the main thread when a value from the server arrives or goes. A handler's exception is logged.</summary>
+    public event Action<ReplExtensionChanged<T>>? Changed
+    {
+        add { lock (_gate) _changed += value; }
+        remove { lock (_gate) _changed -= value; }
+    }
+
+    internal override void RaiseChanged(EntityId entity, uint createTick, ReadOnlySpan<byte> value, NetPeer? peer)
+    {
+        var handlers = Volatile.Read(ref _changed);
+        if (handlers is null) return;
+        T? v = value.Length == Size ? MemoryMarshal.Read<T>(value) : null;
+        var e = new ReplExtensionChanged<T>(entity, createTick, v, peer);
+        var outer = ModContext.CurrentMod;
+        try
+        {
+            ModContext.CurrentMod = Owner;
+            foreach (var h in handlers.GetInvocationList())
+            {
+                try
+                {
+                    ((Action<ReplExtensionChanged<T>>)h)(e);
+                }
+                catch (Exception ex)
+                {
+                    Sidecars.Report(Owner, $"a Changed handler of extension {this} threw", ex);
+                }
+            }
+        }
+        finally
+        {
+            ModContext.CurrentMod = outer;
+        }
+    }
+
+    /// <summary>Removes the extension: the server stops sending it (clients drop its values at the next DEFS) and its
+    /// name is free again. Also done when its mod unloads. Idempotent.</summary>
+    public void Dispose() => Sidecars.Unregister(this);
 }
