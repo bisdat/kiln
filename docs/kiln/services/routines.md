@@ -133,16 +133,32 @@ the start of the next step and the task completes on that step's Post. What the 
 
 - **One owner per villager.** The first mod whose assign is accepted holds the villager; it may replace its plan. Another
   mod's assign, remove or resume answers `Ok = false`, `Reason = "OwnedBy:<mod>"`, and changes nothing. There is no
-  priority between mods. The owner's unload removes its routines from the running world at the next step (event reason `OwnerUnloaded`), but not from the world's save: a server stop unloads every mod before its last save, and a mod switched off may come back. At the next world start the saved routine is bound again when its mod and plan are there, else removed (`OwnerMissing`, `DefinitionMissing`).
+  priority between mods. A mod's routines come with its own owner, whether its code assigned them or its blocks files
+  (`npc.routine`) did, so after a restart its code can change the routines its data files gave. The owner's unload
+  removes its routines from the running world at the next step (event reason `OwnerUnloaded`), but not from the world's
+  save: a server stop unloads every mod before its last save, and a mod switched off may come back. A mod reloaded while
+  the world runs gets its saved routines bound again as soon as it is back with its plans; at the next world start a
+  saved routine is bound again when its mod and plan are there, else removed (`OwnerMissing`, `DefinitionMissing`).
 - **Queue.** At most 256 changes wait for the next step; one more answers `QueueFull` before anything changed. A world
-  that stops completes what is queued with `WorldStopped`; a mod that unloads first gets `Revoked`.
+  that stops completes what is queued with `WorldStopped`. A mod that unloads is never called back: its queued changes
+  are dropped (its tasks are canceled).
+- **World start.** Until the world's saved routines are bound again (its data is there and no mod's data files wait for
+  their pass, normally within the first steps), `Assign`, `Remove` and `Resume` answer `Ok = false`,
+  `Reason = "WorldLoading"`: call again at a later step. Once they can, a call first binds the saved routines, so a
+  change made early is never undone by them.
 - **Revisions** count the changes of all assignments of a world and never go back, also across a restart.
 - **Manual commands suspend.** `Villager.GoTo`, `Teleport`, `Stay` or `Follow` (or any other source of the game's Reset
   or GoTo command that the villager takes: a native plugin, another loader) suspend its routine: the running task ends
   `Suspended`, the assignment becomes `ManualSuspended` (event reason `ManualSuspended`), and the game decides for the
-  villager until the owner calls `Routines.Resume`. `StopFollowing` does not resume. `Resume` ends a Follow and lets
-  the plan decide again at the villager's next decision, without a teleport. A command the game ignores (a GoTo while the
-  villager is in state `Start`) suspends nothing.
+  villager until the owner calls `Routines.Resume`. `StopFollowing` does not resume. `Resume` ends a Follow at the
+  call (a GoTo the Follow sent just before is dropped, not taken as a new manual command) and lets the plan decide again
+  at the villager's next decision, without a teleport; the snapshot shows no task until then. A command the game ignores
+  (a GoTo while the villager is in state `Start`) suspends nothing. `LastReason` is `ManualCommand` while suspended.
+- **A player's summon tool suspends too.** The game's command carries no sender: a player re-homing a villager with the
+  summon tool sends the same Reset as `Villager.Teleport`, and the routine is suspended (and saved so) until the
+  owner's `Resume`. A mod that wants routines to follow re-homing calls `Resume` on `RoutineAssignmentChangedEvent` with
+  reason `ManualSuspended` when no code of its own moved the villager. (The intended rule, re-homing keeps the routine,
+  needs a hook on the summon tool's own path: not in this version.)
 - **Interruptions stay the game's.** Water, the build cursor, dialogue and the game's other safety states interrupt a
   task as without a plan (task state `Suspended`, reason `SafetyInterrupt` or `Interrupted`); the plan decides again at
   the next decision. A task the game cannot do (no seat, no bed, no path) ends `Refused`, and the next decision tries
@@ -185,7 +201,11 @@ is decided against the plans as defined now:
 **Raise `Version` when you change a plan** (its windows or its fallback). Renaming a plan keeps its saved assignments
 when the new block says `Was = "<old name>"`. After the restart the time of day decides: nothing of the time between is
 replayed. The routine of an NPC block (`NpcBlock.Routine`) is given at each world start only to a villager the world has
-no saved routine for.
+no saved routine for and whose owner did not remove it (`Routines.Remove`: the removal is saved and sticks). A routine
+refused at a restart (`VersionMismatch`) is not running; its owner's `Routines.Remove` takes it out of the save.
+
+The hooks' counters (decisions, pauses and resumes, sleep checks kept awake, MarkWritten calls, manual commands) are in
+kiln.log as `routines: counters (...)` lines, at a world's stop and about every 10 s while they change.
 
 ## Threads and errors
 

@@ -51,7 +51,18 @@ public sealed unsafe class RoutinesBindingTests : IDisposable
         t->UnsubscribeEvents = &Unsubscribe;
         t->Restore = &Restore;
         t->SetRevisionFloor = &SetFloor;
+        t->ClaimMod = &ClaimMod;
         return t;
+    }
+
+    private static readonly List<(ulong Owner, string Mod)> Claims = [];
+    private static int _restoresWhenQueued = -1;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int ClaimMod(ulong owner, NativeStr mod)
+    {
+        Claims.Add((owner, mod.ToString()));
+        return RoutineNative.Ok;
     }
 
     private sealed record Restored(ulong Owner, uint NpcId, string Plan, ulong Revision, uint Flags, string Reason);
@@ -77,6 +88,7 @@ public sealed unsafe class RoutinesBindingTests : IDisposable
     private static int Queue(string function, ulong owner, uint npc, string? plan, void* done, void* user, ulong* ticket)
     {
         Calls.Add(new Call(function, owner, npc, plan, (nint)done, (nint)user));
+        _restoresWhenQueued = Restores.Count;
         *ticket = 0;
         if (_answer != RoutineNative.Ok) return _answer;
         *ticket = ++_tickets;
@@ -125,7 +137,8 @@ public sealed unsafe class RoutinesBindingTests : IDisposable
     /// <summary>The service completes call <paramref name="index"/> (as on its Post).</summary>
     private static void Complete(int index, bool ok, ulong revision, string reason = "")
     {
-        var c = Calls[index];
+        // the n-th queued call (Resume reads the routine first: an inspect is not queued)
+        var c = Calls.Where(x => x.Function != "inspect").ElementAt(index);
         var bytes = Encoding.UTF8.GetBytes(reason);
         fixed (byte* p = bytes)
         {
@@ -165,6 +178,8 @@ public sealed unsafe class RoutinesBindingTests : IDisposable
         Revoked.Clear();
         Restores.Clear();
         Floors.Clear();
+        Claims.Clear();
+        _restoresWhenQueued = -1;
         (_answer, _snapshot, _eventFn, _eventUser) = (RoutineNative.Ok, null, 0, 0);
         Backend.Current = _backend;
         Capabilities.Reset();
@@ -240,8 +255,8 @@ public sealed unsafe class RoutinesBindingTests : IDisposable
     {
         var remove = Routines.Remove(_villager);
         var resume = Routines.Resume(_villager);
-        Assert.Equal(["remove", "resume"], Calls.Select(c => c.Function));
-        Assert.All(Calls, c => Assert.Equal((ModOwner, 7u), (c.Owner, c.NpcId)));
+        Assert.Equal(["remove", "inspect", "resume"], Calls.Select(c => c.Function));  // Resume reads whose routine it is first
+        Assert.All(Calls, c => Assert.Equal(7u, c.NpcId));
         Complete(0, ok: true, revision: 0);                                   // nothing to remove
         Complete(1, ok: true, revision: 4);                                   // not suspended: the old revision
         Assert.Equal(new RoutineResult(true, null, 7, 0), remove.Result);
@@ -442,5 +457,66 @@ public sealed unsafe class RoutinesBindingTests : IDisposable
         next.LastRevision = 4;
         RoutineSaves.Tick();
         Assert.Equal(new Restored(ModOwner, 7, RoutineTests.GoldenWire, 5, 0, "Migrated"), Assert.Single(Restores));
+    }
+
+    [Fact]
+    public void A_call_before_the_restore_runs_the_restore_first_with_the_mods_own_owner()
+    {
+        // review 1 and 2: the restore binds under the owner the mod's own calls use (claimed first), and a Routines call
+        // made before the world's restore ran waits for it (else its revision would sit under the saved floor, or a Remove
+        // would be undone by the restore)
+        var book = UseBook();
+        var plan = RoutineRegistry.Find(_day)!.Plan;
+        book.LastRevision = 6;
+        book.Assignments.Add(new SavedRoutine { NpcId = 9, Owner = ModId, Key = plan.Key, PlanVersion = plan.Version, ContentHash = plan.ContentHash, Revision = 6 });
+        Routines.Assign(_villager, _day);
+        Assert.Equal(1, _restoresWhenQueued);                                     // the restore was queued before the assign
+        Assert.Equal([6ul], Floors);
+        Assert.Equal(new Restored(ModOwner, 9, RoutineTests.GoldenWire, 6, 0, ""), Assert.Single(Restores));
+        Assert.All(Claims, c => Assert.Equal((ModOwner, ModId), c));             // one owner for the mod: the restore's and the call's
+        Assert.NotEmpty(Claims);
+        Assert.Equal(ModOwner, Assert.Single(Calls, c => c.Function == "assign").Owner);
+        // the next call does not restore again
+        Routines.Remove(_villager);
+        Assert.Single(Restores);
+    }
+
+    [Fact]
+    public void Remove_clears_a_saved_routine_the_restart_refused()
+    {
+        // review 8: a VersionMismatch row is not in kiln.routines; the owner's Remove drops it from the save
+        var book = UseBook();
+        var plan = RoutineRegistry.Find(_day)!.Plan;
+        book.LastRevision = 3;
+        book.Assignments.Add(new SavedRoutine { NpcId = 7, Owner = ModId, Key = plan.Key, PlanVersion = plan.Version, ContentHash = "changed", Revision = 3 });
+        RoutineSaves.Tick();
+        Assert.Empty(Restores);
+        Assert.Equal(RoutineAssignmentState.VersionMismatch, Assert.IsType<RoutineAssignmentChangedEvent>(Assert.Single(_events)).After.Assignment);
+        var removed = Routines.Remove(_villager);
+        Assert.Equal(new RoutineResult(true, null, 7, 4), removed.Result);
+        Assert.Empty(book.Assignments);
+        Assert.DoesNotContain(Calls, c => c.Function == "remove");                // nothing in kiln.routines to remove
+        var e = Assert.IsType<RoutineAssignmentChangedEvent>(_events[^1]);
+        Assert.Equal(("Removed", RoutineAssignmentState.Removed, 4ul), (e.Reason, e.After.Assignment, e.After.Revision));
+    }
+
+    [Fact]
+    public void An_owners_removal_of_an_NPC_blocks_routine_sticks_across_a_restart()
+    {
+        var book = UseBook();
+        RoutineRegistry.BindNpc(ModId, "fisher", RoutineRegistry.Find(_day)!.Key, 7);
+        Routines.Assign(_villager, _day);
+        Send(Event(Snapshot, "Assigned"));
+        Send(Event(Snapshot.Replace("\"revision\":1", "\"revision\":2").Replace("\"Assigned\"", "\"Removed\""), "Removed"));
+        Assert.Equal([7u], book.RemovedByOwner);
+        Calls.Clear();
+        UseBook("world-2");
+        RoutineSaves.TestBook!.RemovedByOwner.Add(7);
+        RoutineSaves.Tick();
+        Assert.DoesNotContain(Calls, c => c.Function == "assign");
+        // without the removal the NPC block's routine is given at the world start
+        UseBook("world-3");
+        RoutineSaves.Tick();
+        Assert.Equal(7u, Assert.Single(Calls, c => c.Function == "assign").NpcId);
     }
 }

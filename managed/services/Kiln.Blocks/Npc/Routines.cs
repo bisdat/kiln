@@ -32,7 +32,8 @@ public static unsafe class Routines
     /// change is made before the next sim step and the task completes after that step.</summary>
     /// <returns><c>Ok</c> with the assignment's revision; or <c>Ok = false</c> with <c>OwnedBy:&lt;mod&gt;</c> (another
     /// mod's routine is on the villager), <c>WorldStopped</c> (no world runs, or it stopped before the change was made),
-    /// <c>Revoked</c> or <c>QueueFull</c> (256 changes already wait for the next step).</returns>
+    /// <c>Revoked</c>, <c>QueueFull</c> (256 changes already wait for the next step) or <c>WorldLoading</c> (the world's
+    /// saved routines are not bound again yet: its data or a mod's data files are not there; try again at a later step).</returns>
     /// <exception cref="ArgumentException">A plan another mod defined, or one that is no longer defined (its mod was
     /// reloaded: define it again and use the new handle).</exception>
     /// <exception cref="KilnUnavailableException"><c>routines.decisions</c> is off.</exception>
@@ -48,6 +49,7 @@ public static unsafe class Routines
             throw new ArgumentException($"the routine {plan} is a plan of mod {plan.Mod}: a mod assigns the plans it defined itself", nameof(plan));
         var def = RoutineRegistry.Find(plan)
                   ?? throw new ArgumentException($"the routine {plan} is not defined now (was its mod reloaded? Define it again and use the new handle)", nameof(plan));
+        if (Gate(t, mod, npc.NpcId) is { } wait) return wait;
         var wire = Encoding.UTF8.GetBytes(def.Plan.Wire);
         fixed (byte* p = wire)
         {
@@ -59,7 +61,7 @@ public static unsafe class Routines
 
     /// <summary>Takes the calling mod's routine off <paramref name="npc"/>: the game chooses for it again.</summary>
     /// <returns><c>Ok</c> (also when the villager had no routine: then the revision is 0 and no event follows); or
-    /// <c>Ok = false</c> with <c>OwnedBy:&lt;mod&gt;</c>, <c>WorldStopped</c>, <c>Revoked</c> or <c>QueueFull</c>.</returns>
+    /// <c>Ok = false</c> with <c>OwnedBy:&lt;mod&gt;</c>, <c>WorldStopped</c>, <c>Revoked</c>, <c>QueueFull</c> or <c>WorldLoading</c>.</returns>
     /// <exception cref="KilnUnavailableException"><c>routines.decisions</c> is off.</exception>
     /// <exception cref="InvalidOperationException">Not on the tick thread, or not from mod code.</exception>
     [TickThreadOnly, RequiresCapability(Capability)]
@@ -68,6 +70,10 @@ public static unsafe class Routines
         ArgumentNullException.ThrowIfNull(npc);
         var t = Table("Routines.Remove");
         var mod = Mod("Routines.Remove");
+        if (Gate(t, mod, npc.NpcId) is { } wait) return wait;
+        // a saved routine the restart refused (VersionMismatch) is not in kiln.routines: the saved row goes here
+        if (RoutineSaves.RemoveMismatch(npc.NpcId, mod.Info.Id) is var removed and not 0)
+            return System.Threading.Tasks.Task.FromResult(new RoutineResult(true, null, npc.NpcId, removed));
         var pending = Begin(mod, npc.NpcId, out var id);
         ulong ticket = 0;
         return Finish(t->Remove(mod.Owner, npc.NpcId, &Done, (void*)id, &ticket), id, pending, "Routines.Remove");
@@ -76,7 +82,7 @@ public static unsafe class Routines
     /// <summary>Ends the suspension a manual command put on <paramref name="npc"/>'s routine: it decides again at the
     /// villager's next decision, without a teleport. A <see cref="Villager.Follow"/> on it ends with the resume.</summary>
     /// <returns><c>Ok</c> (also when it was not suspended: then nothing changed and no event follows); or
-    /// <c>Ok = false</c> with <c>NotAssigned</c>, <c>OwnedBy:&lt;mod&gt;</c>, <c>WorldStopped</c>, <c>Revoked</c> or <c>QueueFull</c>.</returns>
+    /// <c>Ok = false</c> with <c>NotAssigned</c>, <c>OwnedBy:&lt;mod&gt;</c>, <c>WorldStopped</c>, <c>Revoked</c>, <c>QueueFull</c> or <c>WorldLoading</c>.</returns>
     /// <exception cref="KilnUnavailableException"><c>routines.decisions</c> is off.</exception>
     /// <exception cref="InvalidOperationException">Not on the tick thread, or not from mod code.</exception>
     [TickThreadOnly, RequiresCapability(Capability)]
@@ -85,8 +91,11 @@ public static unsafe class Routines
         ArgumentNullException.ThrowIfNull(npc);
         var t = Table("Routines.Resume");
         var mod = Mod("Routines.Resume");
+        if (Gate(t, mod, npc.NpcId) is { } wait) return wait;
+        // The calling mod's routine: a Follow on the villager ends now, before the Resume is queued, so no GoTo of it is
+        // sent after the Resume (one sent before is dropped by kiln.routines at the Resume's step).
+        if (Inspect(npc) is { } s && s.Owner == mod.Info.Id) npc.StopFollowing();
         var pending = Begin(mod, npc.NpcId, out var id);
-        pending.StopsFollow = npc;
         ulong ticket = 0;
         return Finish(t->Resume(mod.Owner, npc.NpcId, &Done, (void*)id, &ticket), id, pending, "Routines.Resume");
     }
@@ -142,6 +151,15 @@ public static unsafe class Routines
         return t;
     }
 
+    // The restart's saved routines first (a change before them would land under the saved revisions or be undone by
+    // them), and the owner the calling mod's calls come with named to kiln.routines. A refusal to wait, or null.
+    private static Task<RoutineResult>? Gate(RoutineNative.Table* t, ModContext mod, uint npcId)
+    {
+        if (RoutineSaves.Ensure() is { } wait) return System.Threading.Tasks.Task.FromResult(new RoutineResult(false, wait, npcId, 0));
+        RoutineSaves.Claim(t, mod.Owner, mod.Info.Id);
+        return null;
+    }
+
     private static ModContext Mod(string api)
     {
         var mod = ModContext.CurrentMod ?? throw new InvalidOperationException($"{api} must be called from mod code");
@@ -167,8 +185,6 @@ public static unsafe class Routines
     {
         public readonly ModContext Mod = mod;
         public readonly uint NpcId = npcId;
-        // Resume: the villager whose Follow ends when the resume is made (chapter 16g §4.3: the owner's resume stops a Follow)
-        public Villager? StopsFollow;
         public readonly TaskCompletionSource<RoutineResult> Source = new();
     }
 
@@ -217,8 +233,6 @@ public static unsafe class Routines
         {
             if (r == null || !Waiting.TryRemove((nint)user, out var pending)) return;
             var ok = r->Ok != 0;
-            // a Follow would send the next command within a second and suspend the routine again
-            if (ok && pending.StopsFollow is { } v) v.StopFollowing();
             pending.Source.TrySetResult(new RoutineResult(ok, ok ? null : r->Reason.ToString() is { Length: > 0 } why ? why : "Refused", r->NpcId, r->Revision));
         }
         catch (Exception e)

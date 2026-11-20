@@ -33,6 +33,9 @@ internal sealed class RoutineBook
     /// after the assignment it belonged to was removed.</summary>
     [JsonInclude] public ulong LastRevision { get; set; }
     [JsonInclude] public List<SavedRoutine> Assignments { get; set; } = [];
+    /// <summary>Villagers whose owner removed their routine: an NPC block's routine is not given to them again at the next
+    /// world start (the owner's removal sticks). A later assignment takes the villager off this list.</summary>
+    [JsonInclude] public List<uint> RemovedByOwner { get; set; } = [];
 
     public SavedRoutine? Find(uint npcId) => Assignments.FirstOrDefault(a => a.NpcId == npcId);
 

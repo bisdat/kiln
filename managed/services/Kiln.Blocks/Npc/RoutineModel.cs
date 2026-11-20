@@ -134,6 +134,8 @@ public enum RoutineTaskState
 /// <param name="Task">The current task, or null.</param>
 /// <param name="TaskState">Where it stands.</param>
 /// <param name="NativeState">The game's state of the villager.</param>
-/// <param name="LastReason">The last refusal or suspension, or null.</param>
+/// <param name="LastReason">The last refusal or suspension, or null: a task's refusal (<c>NativeSleepNotCurrentlyAllowed</c>,
+/// <c>TaskFailed</c>, ...) or, while the assignment is <see cref="RoutineAssignmentState.ManualSuspended"/>,
+/// <c>ManualCommand</c> (a Reset or GoTo command reached the villager).</param>
 public sealed record RoutineSnapshot(uint NpcId, string Owner, string Key, uint PlanVersion, ulong Revision, RoutineAssignmentState Assignment,
     int WindowIndex, ulong Invocation, RoutineTask? Task, RoutineTaskState TaskState, VillagerState NativeState, string? LastReason);

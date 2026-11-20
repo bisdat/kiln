@@ -79,9 +79,9 @@ internal static class BlockCapabilities
     /// <summary>For tests: report again at the next <see cref="Ensure"/>.</summary>
     internal static void Rearm() => Interlocked.Exchange(ref _reported, 0);
 
-    // ---- villager routines (0.2.0-dev.28; docs/kiln/services/routines.md) ------------------------------------------
-    // routines.decisions is a sigdb feature kiln.routines serves (the villager task chooser and its sleep check), held by
-    // the client gate until its game test; Kiln.Blocks only lowers it where the service is not here (BlocksRows.Report:
+    // ---- villager routines (0.2.0-dev.31; docs/kiln/services/routines.md) ------------------------------------------
+    // routines.decisions is a sigdb feature kiln.routines serves (the villager task chooser and its sleep check); nothing
+    // holds it (its guided check 16g-cc16g is the owner's game pass); Kiln.Blocks only lowers it where the service is not here (BlocksRows.Report:
     // a rows report, never a mod's own call, asks for the table), as Kiln.Queries does for the voxel ray. routines.anchors (a task that walks to an authored place) and routines.jobs (work at a station)
     // are names the wire format reserves: declared, and off in this version.
     internal const string RoutinesService = "kiln.routines", RoutineDecisions = "routines.decisions",

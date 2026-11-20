@@ -382,6 +382,9 @@ internal static class BlocksStartup
         CompileLoaded();
     }
 
+    /// <summary>A mod's data files are still to compile (the next data pass): its routine plans may not be defined yet.</summary>
+    internal static bool PassDue => Mods.All.Any(Due);
+
     private static bool Due(ModEntry m) =>
         m.IsLoaded && m.Directory.Length > 0 && !Done.Contains(m.Id) && Directory.Exists(Path.Combine(m.Directory, "blocks"));
 

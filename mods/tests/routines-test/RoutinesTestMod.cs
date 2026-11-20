@@ -156,7 +156,7 @@ public sealed class RoutinesTestMod : Mod
     {
         try { await Run(); }
         catch (Exception e) { Check(false, "threw: " + e); }
-        Log.Info($"routines-test: RUN{_run?.Run ?? 0} DONE pass={_pass} fail={_fail}");
+        Log.Info($"routines-test: RUN{_run?.Run ?? 0} DONE {_pass} PASS, {_fail} FAIL");
     }
 
     private RoutineTestRun? _run;

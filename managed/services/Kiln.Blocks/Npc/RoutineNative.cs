@@ -32,16 +32,25 @@ internal static unsafe class RoutineNative
         public delegate* unmanaged[Cdecl]<ulong, void> RevokeOwner;
         public delegate* unmanaged[Cdecl]<ulong, delegate* unmanaged[Cdecl]<NativeStr, void*, void>, void*, ulong*, int> SubscribeEvents;
         public delegate* unmanaged[Cdecl]<ulong, int> UnsubscribeEvents;
-        // since 0.2.0-dev.31 (check HasRestore)
+        // the framework members (kiln_routines.h): the service ships with them; the test kit's fake serves the seven above
         public delegate* unmanaged[Cdecl]<ulong, uint, NativeStr, ulong, uint, NativeStr, delegate* unmanaged[Cdecl]<Result*, void*, void>, void*, ulong*, int> Restore;
         public delegate* unmanaged[Cdecl]<ulong, int> SetRevisionFloor;
+        public delegate* unmanaged[Cdecl]<ulong, NativeStr, int> ClaimMod;
     }
 
-    /// <summary>The size of v1's table (the members up to UnsubscribeEvents).</summary>
+    /// <summary>The size of the table without the framework members (what the test kit's fake serves).</summary>
     public static readonly uint V1Size = (uint)(sizeof(ServiceHeader) + 7 * sizeof(nint));
 
-    /// <summary>The table has restore and set_revision_floor (0.2.0-dev.31).</summary>
-    public static bool HasRestore(Table* t) => t != null && t->Header.Size >= (uint)sizeof(Table) && t->Restore != null && t->SetRevisionFloor != null;
+    /// <summary>The table has the framework members: restore, set_revision_floor and claim_mod.</summary>
+    public static bool HasRestore(Table* t) => t != null && t->Header.Size >= (uint)sizeof(Table) && t->Restore != null && t->SetRevisionFloor != null && t->ClaimMod != null;
+
+    /// <summary>Names the owner a mod's calls come with (claim_mod); nothing when the table has no framework members.</summary>
+    public static void Claim(Table* t, ulong owner, string mod)
+    {
+        if (!HasRestore(t) || owner == 0 || mod.Length == 0) return;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(mod);
+        fixed (byte* p = bytes) t->ClaimMod(owner, new NativeStr { Ptr = p, Len = (nuint)bytes.Length });
+    }
 
     public const uint RestoreSuspended = 1;
 
