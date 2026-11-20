@@ -2510,8 +2510,7 @@
           "title": "Station screens count station outputs",
           "text": "On a Kiln client with a Kiln server, a production station's fill buttons and the Available counts include the finished items other stations lend (GitHub #68).",
           "area": "content",
-          "kind": "improved",
-          "gamePending": true
+          "kind": "improved"
         },
         {
           "title": "Nine more languages",
