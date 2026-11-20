@@ -37,6 +37,19 @@ namespace Kiln;
 /// rest waits for the next step and is never dropped. On a joined client a client-world hop is the mods' tick there
 /// (<c>Game.IsTickThread</c> is true, as in its <c>Context.Tick</c>); on a hosting client it is like a <c>Client.Tick</c>
 /// handler, and server-world tick-only APIs belong to a server-world hop.</para>
+/// <para><b>Menu hops</b> (since 0.2.0-dev.30). <c>ToTick(WorldKind.Menu)</c>, <c>OnTick(WorldKind.Menu, ...)</c> and
+/// <c>PostToTick(WorldKind.Menu, ...)</c> run on the game's UI frame on a client while no world runs (the main menu, and
+/// between two worlds), about 30 times a second, with a budget of their own (64 hops and 1 ms per mod, 2 ms in all per
+/// frame). Each menu stretch between two worlds is a session of its own: a menu hop still waiting when a world starts ends
+/// the task <see cref="KilnTaskState.Cancelled"/> through its own token, quietly, and a task bound to one stretch never
+/// hops into the next (its menu hops then end it Cancelled). While a world runs there is no menu: a menu hop of a task not
+/// bound to a menu stretch throws <see cref="KilnUnavailableException"/>.
+/// Only any-thread APIs and the game's main-thread UI APIs work in a menu hop: <c>Game.IsTickThread</c> is false there,
+/// and tick-thread (world) APIs throw <see cref="InvalidOperationException"/> saying it is a menu hop. The menu has no
+/// gate windows (<c>NextGateWindow(WorldKind.Menu)</c> throws <see cref="ArgumentOutOfRangeException"/>). A task started
+/// on the main thread in the menu belongs to the client world (its parameterless hops throw
+/// <see cref="KilnUnavailableException"/> there, as any hop to a world that is not running) and is bound to that menu
+/// stretch; a task started in a menu hop belongs to the menu.</para>
 /// </remarks>
 public sealed class KilnTaskContext
 {
@@ -52,7 +65,8 @@ public sealed class KilnTaskContext
 
     /// <summary>The world the parameterless <see cref="ToTick()"/>, <see cref="OnTick{T}(Func{T})"/>,
     /// <see cref="PostToTick(Action)"/> and <see cref="NextGateWindow()"/> go to: the one the task was started in
-    /// (<see cref="WorldKind.Server"/> or <see cref="WorldKind.Client"/>). Any thread.</summary>
+    /// (<see cref="WorldKind.Server"/> or <see cref="WorldKind.Client"/>; <see cref="WorldKind.Menu"/> for a task started
+    /// in a menu hop). Any thread.</summary>
     [AnyThread]
     public WorldKind TickWorld => _run.Home;
 
@@ -70,10 +84,12 @@ public sealed class KilnTaskContext
     public TickHop ToTick() => Hop(_run.Home);
 
     /// <summary><c>await ctx.ToTick(WorldKind.Client)</c>: <see cref="ToTick()"/> to the named world (the server world's tick,
-    /// or the client world's step on the game's main thread), whatever the task's own world is.</summary>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="world"/> is not Server or Client.</exception>
-    /// <exception cref="KilnUnavailableException">No world of that kind here and the task is not bound to one
-    /// (tasks.pool).</exception>
+    /// or the client world's step on the game's main thread), whatever the task's own world is.
+    /// <c>ToTick(WorldKind.Menu)</c> (since 0.2.0-dev.30) goes to the game's UI frame in the main menu (about 30 a second,
+    /// only while no world runs): see "Menu hops" above.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="world"/> is not Server, Client or Menu.</exception>
+    /// <exception cref="KilnUnavailableException">No world of that kind here (for Menu: a world runs) and the task is not
+    /// bound to one (tasks.pool).</exception>
     /// <exception cref="InvalidOperationException">As <see cref="ToTick()"/>.</exception>
     [RequiresCapability(TaskRun.Capability)]
     public TickHop ToTick(WorldKind world) => Hop(TaskRun.HopWorld(world, nameof(world)));
@@ -107,7 +123,7 @@ public sealed class KilnTaskContext
 
     /// <summary><see cref="OnTick{T}(Func{T})"/> on the named world's tick: <c>await ctx.OnTick(WorldKind.Client, () =&gt;
     /// _view.Selected)</c>.</summary>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="world"/> is not Server or Client.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="world"/> is not Server, Client or Menu.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="apply"/> is null.</exception>
     /// <exception cref="KilnUnavailableException">As <see cref="OnTick{T}(Func{T})"/>.</exception>
     /// <exception cref="InvalidOperationException">As <see cref="OnTick{T}(Func{T})"/>.</exception>
@@ -141,7 +157,7 @@ public sealed class KilnTaskContext
 
     /// <summary><see cref="PostToTick(Action)"/> to the named world's tick: <c>ctx.PostToTick(WorldKind.Client, () =&gt;
     /// _view.Show(marks))</c>.</summary>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="world"/> is not Server or Client.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="world"/> is not Server, Client or Menu.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="apply"/> is null.</exception>
     /// <exception cref="KilnUnavailableException">As <see cref="PostToTick(Action)"/>.</exception>
     /// <exception cref="OperationCanceledException">As <see cref="PostToTick(Action)"/>.</exception>
@@ -164,16 +180,20 @@ public sealed class KilnTaskContext
     /// (tasks.pool).</exception>
     /// <exception cref="InvalidOperationException">The task's work has ended; or the mod is unloading and this is not the
     /// task's own work.</exception>
+    /// <exception cref="InvalidOperationException">A task of the main menu (started in a menu hop): the menu has no steps;
+    /// name a world with <see cref="NextGateWindow(WorldKind)"/>.</exception>
     [RequiresCapability(TaskRun.Capability)]
-    public GateWindow NextGateWindow() => Window(_run.Home);
+    public GateWindow NextGateWindow() => Window(_run.Home != WorldKind.Menu ? _run.Home
+        : throw new InvalidOperationException($"the task '{_run.Name}' belongs to the main menu, which has no world steps to wait for: name a world (NextGateWindow(WorldKind.Client)) or await Task.Delay"));
 
     /// <summary><see cref="NextGateWindow()"/> after a later step of the named world: <c>NextGateWindow(WorldKind.Client)</c>
     /// resumes on a worker after the client world's next step (about 60 a second while in game).</summary>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="world"/> is not Server or Client.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="world"/> is not Server or Client (the menu has no
+    /// gate windows).</exception>
     /// <exception cref="KilnUnavailableException">As <see cref="NextGateWindow()"/>.</exception>
     /// <exception cref="InvalidOperationException">As <see cref="NextGateWindow()"/>.</exception>
     [RequiresCapability(TaskRun.Capability)]
-    public GateWindow NextGateWindow(WorldKind world) => Window(TaskRun.HopWorld(world, nameof(world)));
+    public GateWindow NextGateWindow(WorldKind world) => Window(TaskRun.WindowWorld(world, nameof(world)));
 
     private GateWindow Window(WorldKind world)
     {

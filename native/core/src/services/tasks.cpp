@@ -244,6 +244,15 @@ KilnResult KILN_CALL h_resume_after_step_world(KilnLease lease, uint64_t registr
     return with_service(
         [&](tasks::Service& s) { return s.host_resume_after_step_world(lease, registration, world, session, refusal); });
 }
+// The game's UI frame while no world runs (#83): Kiln.Host's kiln.ui.tick calls it on the UI thread.
+uint32_t KILN_CALL h_menu_frame() {
+    tasks::Service* service = g_service.load(std::memory_order_acquire);
+    try {
+        return service ? static_cast<uint32_t>(service->menu_frame()) : 0;
+    } catch (...) {  // nothing leaves the UI frame
+        return 0;
+    }
+}
 uint32_t KILN_CALL h_server_session() {
     const tasks::Service* service = g_service.load(std::memory_order_acquire);
     try {
@@ -379,7 +388,8 @@ const KilnTasksHostApi kHostTable = {{sizeof(KilnTasksHostApi), KILN_TASKS_HOST_
                                      &h_stats_totals,
                                      &h_world_session,
                                      &h_tick_hop_in,
-                                     &h_resume_after_step_world};
+                                     &h_resume_after_step_world,
+                                     &h_menu_frame};
 
 // tasks.pool's source (caps.cpp reads it lock-free at every registry call): -1 no pool, 0 no worker, 1 available.
 int pool_state() {

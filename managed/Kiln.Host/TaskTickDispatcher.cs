@@ -47,6 +47,17 @@ internal sealed class TaskTickDispatcher(ModManager mods)
         ClientHops++;
         hop();  // never throws: the task catches its work's exceptions
     }
+
+    /// <summary>Menu hops run on the game's UI frame while no world runs (#83).</summary>
+    public long MenuHops { get; private set; }
+
+    /// <summary>A menu hop (#83): UI-thread work in the main menu, where the mods have no tick; counted here only.</summary>
+    public void RunMenu(ulong owner, Action hop)
+    {
+        _ = owner;
+        MenuHops++;
+        hop();  // never throws: the task catches its work's exceptions
+    }
 }
 
 /// <summary>The frame a client-world hop runs in on a client (#82), apart from <see cref="HostRuntime"/> so its one rule is

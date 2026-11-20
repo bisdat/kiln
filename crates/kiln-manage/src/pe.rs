@@ -200,6 +200,111 @@ pub fn parse(b: &[u8]) -> Result<PeInfo> {
     Ok(PeInfo { machine, characteristics, magic, exports })
 }
 
+/// What a PE image imports, and whether it is a .NET assembly (the pack analysis' code scan, modpack::check).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CodeFacts {
+    /// A CLR header (data directory 14): a managed assembly; its imports are only mscoree's _CorDllMain.
+    pub managed: bool,
+    /// (DLL name lower case, imported function names; `#n` for an ordinal), normal and delay-load imports.
+    pub imports: Vec<(String, Vec<String>)>,
+}
+
+/// Imports (normal and delay-load) and the CLR flag of a PE image (file layout). Bounded: 4096 DLLs, 65 536 names.
+pub fn code_facts(b: &[u8]) -> Result<CodeFacts> {
+    if b.get(0..2) != Some(b"MZ") {
+        return Err(parse_error("no MZ header"));
+    }
+    let nt = u32_at(b, 0x3c).ok_or_else(|| parse_error("truncated DOS header"))? as usize;
+    if b.get(nt..nt.saturating_add(4)) != Some(b"PE\0\0") {
+        return Err(parse_error("no PE signature"));
+    }
+    let coff = nt + 4;
+    let nsect = u16_at(b, coff + 2).ok_or_else(|| parse_error("truncated COFF header"))? as usize;
+    let opt_size = u16_at(b, coff + 16).ok_or_else(|| parse_error("truncated COFF header"))? as usize;
+    let opt = coff + 20;
+    let magic = u16_at(b, opt).ok_or_else(|| parse_error("no optional header"))?;
+    let (ndirs_rel, dirs_rel, wide) = match magic {
+        PE32_PLUS => (108, 112, true),
+        0x10b => (92, 96, false),
+        _ => return Err(parse_error("unknown optional header")),
+    };
+    let optional = b.get(opt..opt.checked_add(opt_size).ok_or_else(|| parse_error("header overflow"))?).ok_or_else(|| parse_error("truncated optional header"))?;
+    let ndirs = (u32_at(optional, ndirs_rel).ok_or_else(|| parse_error("short optional header"))? as usize).min(opt_size.saturating_sub(dirs_rel) / 8);
+    let sections = opt + opt_size;
+    let mut list = Vec::new();
+    for i in 0..nsect.min(96) {
+        let s = sections + i * 40;
+        let (Some(size), Some(va), Some(raw)) = (u32_at(b, s + 8), u32_at(b, s + 12), u32_at(b, s + 20)) else { break };
+        let raw_size = u32_at(b, s + 16).unwrap_or(0);
+        let _ = size;
+        let len = raw_size as usize;
+        if (raw as usize).checked_add(len).is_some_and(|e| e <= b.len()) {
+            list.push((va, raw as usize, len));
+        }
+    }
+    let at = |rva: u32| -> Option<&[u8]> {
+        list.iter().find_map(|&(va, raw, size)| {
+            let d = rva.checked_sub(va)? as usize;
+            (d < size).then(|| &b[raw + d..raw + size])
+        })
+    };
+    let dir = |i: usize| -> Option<u32> { (i < ndirs).then(|| u32_at(optional, dirs_rel + i * 8)).flatten().filter(|&r| r != 0) };
+    let cstr = |rva: u32| -> Option<String> {
+        let s = at(rva)?;
+        let end = s.iter().take(512).position(|&c| c == 0)?;
+        Some(String::from_utf8_lossy(&s[..end]).into_owned())
+    };
+    let mut facts = CodeFacts { managed: dir(14).is_some(), imports: Vec::new() };
+    let mut names_left = 65_536usize;
+    let mut thunks = |rva: u32, out: &mut Vec<String>| {
+        let Some(t) = at(rva) else { return };
+        let step = if wide { 8 } else { 4 };
+        for k in 0..(t.len() / step) {
+            if names_left == 0 {
+                return;
+            }
+            let v = if wide { u64::from_le_bytes(t[k * 8..k * 8 + 8].try_into().unwrap()) } else { u32_at(t, k * 4).unwrap() as u64 };
+            if v == 0 {
+                return;
+            }
+            names_left -= 1;
+            let ordinal = if wide { v >> 63 == 1 } else { v >> 31 == 1 };
+            if ordinal {
+                out.push(format!("#{}", v & 0xffff));
+            } else if let Some(n) = cstr((v as u32).wrapping_add(2)) {
+                out.push(n);
+            }
+        }
+    };
+    if let Some(d) = dir(1).and_then(at) {
+        for k in 0..(d.len() / 20).min(4096) {
+            let e = &d[k * 20..k * 20 + 20];
+            let (oft, name, ft) = (u32_at(e, 0).unwrap(), u32_at(e, 12).unwrap(), u32_at(e, 16).unwrap());
+            if oft == 0 && name == 0 && ft == 0 {
+                break;
+            }
+            let Some(dll) = cstr(name) else { continue };
+            let mut fns = Vec::new();
+            thunks(if oft != 0 { oft } else { ft }, &mut fns);
+            facts.imports.push((dll.to_ascii_lowercase(), fns));
+        }
+    }
+    if let Some(d) = dir(13).and_then(at) {
+        for k in 0..(d.len() / 32).min(4096) {
+            let e = &d[k * 32..k * 32 + 32];
+            let (name, int) = (u32_at(e, 4).unwrap(), u32_at(e, 16).unwrap());
+            if name == 0 {
+                break;
+            }
+            let Some(dll) = cstr(name) else { continue };
+            let mut fns = Vec::new();
+            thunks(int, &mut fns);
+            facts.imports.push((dll.to_ascii_lowercase(), fns));
+        }
+    }
+    Ok(facts)
+}
+
 /// Exported names of a PE DLL.
 pub fn exports(path: &Path) -> Result<Vec<String>> {
     let b = std::fs::read(path).map_err(crate::util::io_at(path, "reading"))?;
@@ -416,6 +521,59 @@ pub fn build_test_dll(exports: &[&str], extra: &[u8]) -> Vec<u8> {
     b
 }
 
+/// A PE32+ image with an import table (and a CLR directory when managed), for tests of the code scan (modpack::check).
+#[doc(hidden)]
+pub fn build_test_import_dll(imports: &[(&str, &[&str])], managed: bool) -> Vec<u8> {
+    let mut b = build_test_dll(&[], b"");
+    b.truncate(0x200);
+    let va = 0x1000u32;
+    let mut data = vec![0u8; 20 * (imports.len() + 1)];
+    let mut fixups = Vec::new();
+    for (k, (dll, fns)) in imports.iter().enumerate() {
+        let ilt = va + data.len() as u32;
+        let mut ilt_bytes = vec![0u8; 8 * (fns.len() + 1)];
+        let ilt_at = data.len();
+        data.extend_from_slice(&ilt_bytes);
+        for (i, f) in fns.iter().enumerate() {
+            let hint = va + data.len() as u32;
+            data.extend_from_slice(&[0, 0]);
+            data.extend_from_slice(f.as_bytes());
+            data.push(0);
+            ilt_bytes[i * 8..i * 8 + 8].copy_from_slice(&(hint as u64).to_le_bytes());
+        }
+        data[ilt_at..ilt_at + ilt_bytes.len()].copy_from_slice(&ilt_bytes);
+        let name = va + data.len() as u32;
+        data.extend_from_slice(dll.as_bytes());
+        data.push(0);
+        fixups.push((k, ilt, name));
+    }
+    for (k, ilt, name) in fixups {
+        data[k * 20..k * 20 + 4].copy_from_slice(&ilt.to_le_bytes());
+        data[k * 20 + 12..k * 20 + 16].copy_from_slice(&name.to_le_bytes());
+        data[k * 20 + 16..k * 20 + 20].copy_from_slice(&ilt.to_le_bytes());
+    }
+    let size = data.len() as u32;
+    let raw = size.div_ceil(0x200) * 0x200;
+    data.resize(raw as usize, 0);
+    let opt = 0x84 + 20;
+    let sec = opt + 240;
+    b[sec..sec + 8].copy_from_slice(b".idata\0\0");
+    b[sec + 8..sec + 12].copy_from_slice(&size.to_le_bytes());
+    b[sec + 12..sec + 16].copy_from_slice(&va.to_le_bytes());
+    b[sec + 16..sec + 20].copy_from_slice(&raw.to_le_bytes());
+    b[sec + 20..sec + 24].copy_from_slice(&0x200u32.to_le_bytes());
+    let dirs = opt + 112;
+    b[dirs..dirs + 8].fill(0); // no exports
+    b[dirs + 8..dirs + 12].copy_from_slice(&va.to_le_bytes());
+    b[dirs + 12..dirs + 16].copy_from_slice(&size.to_le_bytes());
+    if managed {
+        b[dirs + 14 * 8..dirs + 14 * 8 + 4].copy_from_slice(&(va + size - 1).to_le_bytes());
+        b[dirs + 14 * 8 + 4..dirs + 14 * 8 + 8].copy_from_slice(&72u32.to_le_bytes());
+    }
+    b.extend_from_slice(&data);
+    b
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -429,6 +587,24 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn imports_and_the_clr_flag_of_a_built_dll() {
+        let d = build_test_import_dll(&[("WS2_32.dll", &["connect", "WSAStartup"]), ("KERNEL32.dll", &["CreateProcessW"])], false);
+        let f = code_facts(&d).unwrap();
+        assert!(!f.managed);
+        assert_eq!(f.imports, vec![("ws2_32.dll".to_string(), vec!["connect".to_string(), "WSAStartup".to_string()]),
+                                   ("kernel32.dll".to_string(), vec!["CreateProcessW".to_string()])]);
+        let m = code_facts(&build_test_import_dll(&[("mscoree.dll", &["_CorDllMain"])], true)).unwrap();
+        assert!(m.managed);
+        assert_eq!(code_facts(&build_test_dll(&["x"], b"")).unwrap(), CodeFacts::default());
+        assert!(code_facts(b"MZ").is_err());
+        // garbage after the headers never panics
+        let mut bad = d.clone();
+        for i in (0x200..bad.len()).step_by(7) { bad[i] = 0xff; }
+        let _ = code_facts(&bad);
+        let _ = code_facts(&d[..0x210]);
+    }
 
     #[test]
     fn exports_of_a_built_dll() {
