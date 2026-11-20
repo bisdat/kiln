@@ -215,7 +215,8 @@ internal static class StationMenuSync
             return $"{StationMenuStore.ContentSyncDisabled}: this server does not send its content (sendContent is off in kiln/config/sync.json), so clients would not have the recipes a menu lists";
         if (NetNative.Available && !NetAdmission.CanHoldKilnPeers)
             return $"{StationMenuStore.NoHoldGate}: kiln.net cannot hold joining Kiln clients on this build (net.gate.hold_all), so a client without the menu protocol could not be stopped";
-        var lacking = LackingPeers();
+        // only those in the world: a joining one is still decided by the admission decider (refused, never kicked)
+        var lacking = LackingPeers().Where(NetAdmission.InWorld).ToList();
         if (lacking.Count > 0)
             return $"{StationMenuStore.PeersLack}: connected Kiln clients without the station-menu protocol: {string.Join(", ", lacking.Take(8).Select(p => $"{p.Name} (0x{p.Id:x})"))}";
         if (!ChannelOpen)

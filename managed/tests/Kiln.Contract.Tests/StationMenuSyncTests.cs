@@ -404,6 +404,7 @@ public sealed class StationMenuAdmissionTests : IDisposable
         var p = Up(P);
         Hello(P, ("kiln:content", "1"));
         Assert.Equal(NetPeerState.Ready, p.State);
+        p.InGameSince = DateTime.UtcNow;  // in the world: it could only be kicked
         var r = StationMenuStore.Define(42, "m", Record(), Guid.NewGuid(), 1);
         Assert.False(r.Ok);
         Assert.StartsWith(StationMenuStore.PeersLack, r.Reason);
