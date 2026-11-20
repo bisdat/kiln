@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 // kiln.items v8 host test: gear writes without game memory (gear_logic.h): the request checks, the game's itemRarityOf,
-// the type's last filled perk slot, and what a request plans for PerkContainerNew, Level, Durability and ItemState.
+// the type's last filled perk slot, and what a request plans for PerkContainerNew, Level, Durability and ItemState; the
+// upgrades' request checks, cost split and commit check (upgrade_logic.h, package P3).
 #include <cstdio>
 #include <cstring>
 
 #include "../gear_logic.h"
+#include "../upgrade_logic.h"
 
 namespace {
 int failures = 0;
@@ -263,12 +265,136 @@ void plans() {
     p = plan(r, s, kInit, kEquipped);
     check(p.after.rarity == 0 && p.after.available == 1, "to Common: one slot");
 }
+
+// ---- upgrades (package P3): upgrade_logic.h ----
+KilnItemsUpgradeRequest up(uint32_t flags) {
+    KilnItemsUpgradeRequest u{};
+    u.size = sizeof u;
+    u.flags = flags;
+    u.player = 3;
+    u.gear.size = sizeof u.gear;
+    u.gear.entity = 5000;
+    u.gear.stamp = 7;
+    if (flags & KILN_ITEMS_UPGRADE_WRITE) {
+        u.gear.flags = KILN_ITEMS_GEAR_AVAILABLE | KILN_ITEMS_GEAR_DURABILITY_REFRESH;
+        u.gear.available = 4;
+    }
+    u.cost_count = 1;
+    u.costs[0] = {0xAAAA, 10};
+    u.payer_count = 1;
+    u.payers[0] = 3;
+    return u;
+}
+
+void upgrades() {
+    using namespace kitems::upgrade;
+    check(sizeof(KilnItemsUpgradeCost) == 8 && sizeof(KilnItemsUpgradeRequest) == 160 && sizeof(KilnItemsUpgradeResult) == 392,
+          "upgrade: the ABI sizes (8, 160, 392)");
+    check(request_valid(up(KILN_ITEMS_UPGRADE_WRITE)), "upgrade: a write paid by the player");
+    check(request_valid(up(0)), "upgrade: pay only (a failed roll that keeps the item)");
+    KilnItemsUpgradeRequest u = up(KILN_ITEMS_UPGRADE_WRITE);
+    u.cost_count = 0;
+    u.costs[0] = {};
+    check(request_valid(u), "upgrade: free (no cost)");
+    u.payer_count = 0;
+    u.payers[0] = 0;
+    check(request_valid(u), "upgrade: free needs no payer");
+    u = up(KILN_ITEMS_UPGRADE_WRITE);
+    u.payer_count = 0;
+    u.payers[0] = 0;
+    check(!request_valid(u), "upgrade: a cost without a payer is refused");
+    u = up(KILN_ITEMS_UPGRADE_WRITE);
+    u.player = 0;
+    check(!request_valid(u), "upgrade: player 0 is refused");
+    u = up(KILN_ITEMS_UPGRADE_WRITE);
+    u.gear.stamp = 0;
+    check(!request_valid(u), "upgrade: an item without its stamp is refused");
+    u = up(KILN_ITEMS_UPGRADE_WRITE);
+    u.gear.flags |= KILN_ITEMS_GEAR_DRY_RUN;
+    check(!request_valid(u), "upgrade: the write's own DRY_RUN is refused (the upgrade's flag is the one)");
+    u = up(KILN_ITEMS_UPGRADE_WRITE);
+    u.gear.available = 6;
+    check(!request_valid(u), "upgrade: a write gear_write would refuse is refused");
+    u = up(0);
+    u.gear.available = 4;
+    check(!request_valid(u), "upgrade: gear values without WRITE are refused");
+    u = up(KILN_ITEMS_UPGRADE_WRITE);
+    u.flags |= 0x100;
+    check(!request_valid(u), "upgrade: unknown flags are refused");
+    u = up(KILN_ITEMS_UPGRADE_WRITE);
+    u.cost_count = 2;
+    u.costs[1] = {0xAAAA, 3};
+    check(!request_valid(u), "upgrade: a cost item named twice is refused");
+    u.costs[1] = {0xBBBB, 0};
+    check(!request_valid(u), "upgrade: a count of 0 is refused");
+    u.costs[1] = {0xBBBB, KILN_ITEMS_UPGRADE_MAX_COUNT + 1};
+    check(!request_valid(u), "upgrade: a count above 100000 is refused");
+    u.costs[1] = {0xBBBB, KILN_ITEMS_UPGRADE_MAX_COUNT};
+    check(request_valid(u), "upgrade: two cost items");
+    u = up(KILN_ITEMS_UPGRADE_WRITE);
+    u.costs[3] = {0xCCCC, 1};
+    check(!request_valid(u), "upgrade: an unused cost entry must be 0");
+    u = up(KILN_ITEMS_UPGRADE_WRITE);
+    u.payer_count = 2;
+    u.payers[1] = 3;
+    check(!request_valid(u), "upgrade: a payer named twice is refused");
+    u.payers[1] = 9000;
+    check(request_valid(u), "upgrade: the player, then a chest");
+    u.payers[5] = 9001;
+    check(!request_valid(u), "upgrade: an unused payer entry must be 0");
+    u = up(KILN_ITEMS_UPGRADE_WRITE);
+    u.cost_count = 9;
+    check(!request_valid(u), "upgrade: more than 8 costs are refused");
+    u = up(KILN_ITEMS_UPGRADE_WRITE);
+    u.size = sizeof u - 4;
+    check(!request_valid(u), "upgrade: a short request is refused");
+    u = up(KILN_ITEMS_UPGRADE_WRITE);
+    u.expect_available = 3;
+    check(request_valid(u), "upgrade: expect_available 3");
+    u.expect_available = 6;
+    check(!request_valid(u), "upgrade: expect_available above 5 is refused");
+
+    KilnItemsGearState now = rare_sword();
+    u = up(KILN_ITEMS_UPGRADE_WRITE);
+    check(as_expected(u, now), "expected: no check when expect_available is 0");
+    u.expect_available = 3;
+    check(as_expected(u, now), "expected: 3 slots as priced");
+    u.expect_available = 4;
+    check(!as_expected(u, now), "expected: priced at 4 slots, it has 3 (another upgrade came first): CHANGED");
+    now.flags &= ~KILN_ITEMS_GEAR_HAS_PERKS;
+    u.expect_available = 3;
+    check(!as_expected(u, now), "expected: an item without slots never matches a priced count");
+
+    const uint32_t have[3] = {4, 0, 9};
+    Split s = split(10, have, 3);
+    check(s.enough && s.take[0] == 4 && s.take[1] == 0 && s.take[2] == 6 && s.have == 13, "split: each payer in order pays what it has");
+    s = split(4, have, 3);
+    check(s.enough && s.take[0] == 4 && s.take[2] == 0, "split: the first payer alone when it has enough");
+    s = split(14, have, 3);
+    check(!s.enough && s.take[0] == 0 && s.take[2] == 0 && s.have == 13, "split: too little: nobody pays a part");
+    s = split(1, have, 0);
+    check(!s.enough && s.have == 0, "split: no payer: not enough");
+
+    const KilnItemsUpgradeCost costs[2] = {{0xAAAA, 10}, {0xBBBB, 2}};
+    const uint64_t before[2] = {13, 5}, ok_after[2] = {3, 3}, rolled[2] = {13, 5}, half[2] = {3, 5}, more[2] = {2, 3};
+    check(commit_stood(before, ok_after, costs, 2), "commit: every cost came out in full");
+    check(!commit_stood(before, rolled, costs, 2), "commit: nothing came out (it rolled back by itself): no write");
+    check(!commit_stood(before, half, costs, 2), "commit: one cost missing: no write");
+    check(!commit_stood(before, more, costs, 2), "commit: more came out than the cost: no write");
+
+    check(plain_take(1, 0, 0), "op: a take that leaves the stack is a plain take");
+    check(plain_take(1, 1, 0), "op: a take that empties a plain stack (+0x30 set, no item entity) is a plain take (lab dev29-eq-p3)");
+    check(plain_take(1, 1, 0xFFFFFFFFu), "op: an emptied stack whose item entity reads 0xFFFFFFFF is plain");
+    check(!plain_take(1, 1, 2613), "op: a take that empties a stack with an item entity (gear) is refused");
+    check(!plain_take(0, 0, 0), "op: a put (kind 0) is never part of a payment");
+}
 }  // namespace
 
 int main() {
     requests();
     rarity();
     plans();
+    upgrades();
     std::printf("%s (%d failure(s))\n", failures ? "FAILED" : "all passed", failures);
     return failures ? 1 : 0;
 }

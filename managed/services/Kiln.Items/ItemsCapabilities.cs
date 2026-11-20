@@ -72,6 +72,11 @@ public static unsafe partial class Items
         /// <c>ItemStateFlag</c> reflection kiln_items_gear checks before its first write.</summary>
         public const string GearDurability = "items.gear.durability";
 
+        /// <summary>Kiln.Items' row: &lt;see cref="Items.UpgradeRarity(EntityId, ItemInstanceRef, RarityUpgradeRule, UpgradeOptions?)"/&gt;
+        /// (the write row, kiln.items' gear_upgrade of package P3 and the inventory transaction it pays on); followed with the
+        /// gear rows.</summary>
+        public const string GearUpgrade = "items.gear.upgrade";
+
         // sigdb rows the ones above need
         public const string Transaction = "items.transaction";
         public const string Read = "items.read";
@@ -101,7 +106,7 @@ public static unsafe partial class Items
             var (reason, text) = Cause(CapabilityReason.ServiceMissing, "kiln.items is not loaded", Caps.Service);
             Capabilities.Report(Caps.ResultPeek, CapabilityState.Unavailable, reason, text);
             foreach (var name in (string[])[Caps.Fuel, Caps.Move, Caps.Names, Caps.Transfer, Caps.Moves, Caps.Instances, Caps.Equip, Caps.EquipSets, Caps.GearOptions, Caps.ToolWear]) Lower(name, reason, text);
-            foreach (var name in (string[])[Caps.GearRead, Caps.GearWrite, Caps.GearDurability]) Capabilities.Report(name, CapabilityState.Unavailable, reason, text);
+            foreach (var name in (string[])[Caps.GearRead, Caps.GearWrite, Caps.GearDurability, Caps.GearUpgrade]) Capabilities.Report(name, CapabilityState.Unavailable, reason, text);
             return;
         }
         // equip (v5): kiln.items decides it at its start (the symbols, kiln.world, the program's registration)
@@ -314,6 +319,22 @@ public static unsafe partial class Items
         Capabilities.Report(Caps.GearWrite, write.Item1, write.Item2, write.Item3);
         Capabilities.Report(Caps.GearDurability, write.Item1, write.Item2,
             write.Item1 == CapabilityState.Available ? "" : $"needs {Caps.GearWrite}: {write.Item3}");
+        var (upState, upReason, upText) = DecideUpgrade(write, v8 != null && t->Header.Size >= ItemsNative.V8UpgradeEnd && v8->GearUpgrade != null,
+            Capabilities.Get(Caps.Transaction));
+        Capabilities.Report(Caps.GearUpgrade, upState, upReason, upText);
+    }
+
+    /// <summary>The upgrade row from the write row, whether the table has gear_upgrade, and the transaction row it pays on
+    /// (pure).</summary>
+    internal static (CapabilityState, CapabilityReason, string) DecideUpgrade((CapabilityState State, CapabilityReason Reason, string Text) write,
+        bool hasUpgrade, Capability transaction)
+    {
+        if (write.State != CapabilityState.Available) return (write.State, write.Reason, $"needs {Caps.GearWrite}: {write.Text}");
+        if (!hasUpgrade) return (CapabilityState.Unavailable, CapabilityReason.ServiceOlder, "kiln.items here has no upgrades (gear_upgrade, 0.2.0-dev.29.19; update Kiln)");
+        if (transaction.State == CapabilityState.Unavailable)
+            return (CapabilityState.Unavailable, transaction.Reason is CapabilityReason.None or CapabilityReason.Unknown ? CapabilityReason.SymbolMissing : transaction.Reason,
+                $"needs {Caps.Transaction}: {transaction.ReasonText}");
+        return (CapabilityState.Available, CapabilityReason.None, "");
     }
 
     // items.equip_sets every 25 steps: off for good once kiln.items switched sets off (an invariant failure: until the

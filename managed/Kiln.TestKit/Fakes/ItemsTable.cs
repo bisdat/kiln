@@ -177,6 +177,31 @@ internal static unsafe class ItemsAbi
         public fixed byte Detail[MessageMax];
     }
 
+    // ---- v8 (package P3): upgrades (kiln_items.h "upgrades") ----
+    public const uint UpgradeWrite = 0x01, UpgradeDryRun = 0x02;
+    public const int UpgradeCantPay = 9, UpgradeBadPayer = 10, UpgradeChanged = 11, UpgradeMaxCosts = 8, UpgradeMaxPayers = 8, UpgradeMaxCount = 100000;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct UpgradeRequest
+    {
+        public uint Size, Flags, Player, CostCount, PayerCount, ExpectAvailable;
+        public GearRequest Gear;
+        public fixed uint Costs[16];  // (item, count) pairs
+        public fixed uint Payers[8];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct UpgradeResult
+    {
+        public uint Size;
+        public int Status;
+        public ulong Ticket;
+        public uint Flags, CostCount, PaidFromPlayer, Reserved;
+        public fixed uint Paid[8];
+        public fixed uint Have[8];
+        public GearResult Gear;
+    }
+
     /// <summary><c>KilnItemsInstancesStatus</c> (v4), filled by the stub with flags 0 and why.</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct InstancesStatus
@@ -231,6 +256,8 @@ internal static unsafe class ItemsAbi
         // v8 (package P5): rarity_rolls, roll_status. Not modelled by the kit: null, so the rolls read as unavailable.
         public void* RarityRolls;
         public void* RollStatus;
+        // v8 (package P3): gear_upgrade
+        public delegate* unmanaged[Cdecl]<ulong, UpgradeRequest*, delegate* unmanaged[Cdecl]<UpgradeResult*, void*, void>, void*, ulong*, int> GearUpgrade;
     }
 
     /// <summary>The game's ItemId: FNV-1a-32 over the item GUID's 16 bytes.</summary>
@@ -289,6 +316,7 @@ internal static unsafe class ItemsTable
         full->GearWrite = &GearWrite;
         full->GearRead = &GearRead;
         full->GetGearStatus = &GearStatusOf;
+        full->GearUpgrade = &GearUpgrade;  // package P3
         _table = t;
         return (nint)t;
     }
@@ -377,6 +405,22 @@ internal static unsafe class ItemsTable
             if (Fake is not { } f || FakeTables.Off(ItemsFake.GearFeature) || f.Program != ItemsAbi.ProgramRunning) return FakeTables.Unavailable;
             if (!FakeTables.OnTickThread) return FakeTables.WrongThread;
             return f.ReadGear(entity, stamp, out_);
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int GearUpgrade(ulong owner, ItemsAbi.UpgradeRequest* request, delegate* unmanaged[Cdecl]<ItemsAbi.UpgradeResult*, void*, void> done, void* user, ulong* ticket)
+    {
+        try
+        {
+            if (ticket != null) *ticket = 0;
+            if (request == null || !ItemsFake.UpgradeRequestValid(*request)) return FakeTables.InvalidArgument;
+            if (Fake is not { } f) return FakeTables.Unavailable;
+            return f.SubmitUpgrade(owner, *request, (nint)done, (nint)user, ticket);
         }
         catch
         {
@@ -681,6 +725,7 @@ internal sealed unsafe partial class ItemsFake
     {
         _harness = harness;
         ResetCatalogCache();
+        ItemUpgrades.Roller = null;  // the server's random numbers until the test names rolls (HarnessItems.SetUpgradeRolls)
     }
 
     /// <summary>The 8-slot inventories a fake player's inventory gets when it is first used.</summary>
@@ -951,7 +996,7 @@ internal sealed unsafe partial class ItemsFake
         lock (_lock)
         {
             var job = _pending.FirstOrDefault(j => j.Ticket == ticket && j.Done != 0);
-            if (job is null) return CancelGear(ticket);
+            if (job is null) return CancelGear(ticket) || CancelUpgrade(ticket);
             job.Done = 0;
             return true;
         }
@@ -962,6 +1007,7 @@ internal sealed unsafe partial class ItemsFake
         lock (_lock)
             foreach (var job in _pending.Where(j => j.Owner == owner)) job.Done = 0;
         CancelGearOwner(owner);
+        CancelUpgradeOwner(owner);
     }
 
     private const int MaxPending = 1024;  // items.cpp kMaxPending
@@ -1043,6 +1089,7 @@ internal sealed unsafe partial class ItemsFake
             if (job.Done != 0) ((delegate* unmanaged[Cdecl]<ItemsAbi.Result*, void*, void>)job.Done)(&r, (void*)job.User);
         }
         RunGear(step);
+        RunUpgrades(step);
     }
 
     private const uint ErrorNoItem = 0x15, ErrorNoSetup = 0x16;

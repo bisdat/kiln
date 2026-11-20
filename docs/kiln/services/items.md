@@ -669,6 +669,75 @@ Events.On<GearEnhancedEvent>(e => Log.Info($"{e.Item}: unlocked {e.From} -> {e.T
   `HarnessItems.SetPerkSlots(item, n)` sets a type's filled perk slots, `HarnessItems.SetGear(ref, ...)` plays the game's
   own change ([unit-tests.md](../modding/unit-tests.md)).
 
+## Upgrading rarity (v8, since 0.2.0-dev.29.19)
+
+`Items.UpgradeRarity` raises an item's rarity by one step of a rule, paid for: the item gets its next enhancement slot in
+place (locked: the player unlocks it at the workbench as usual, for its cost, and gets a level and the perk), and the
+step's cost comes out of the player's inventories (or a chest) in the same server step as the change, all or nothing. The
+rule is a C# record or a block (`RarityUpgradeBlock`, `rarityUpgrades` in `blocks/*.json`:
+[item-blocks.md](../modding/item-blocks.md#rarity-upgrades-rarityupgradeblock)).
+
+```csharp
+var rule = new RarityUpgradeRule
+{
+    Items = ["Weapon_*", "Armor_*"],                    // none: every item with enhancement slots
+    Steps =                                             // by the rarity each step reaches
+    {
+        [ItemRarity.Uncommon]  = new UpgradeStep { Cost = { ["Material_T1_Metal_Scraps"] = 10 } },
+        [ItemRarity.Rare]      = new UpgradeStep { Cost = { ["Material_T1_Metal_Sheets"] = 5 }, Chance = 0.9 },
+        [ItemRarity.Epic]      = new UpgradeStep { Cost = { ["my-mod:ember-shard"] = 3 }, Chance = 0.75, OnFail = UpgradeFail.KeepItemLoseCost },
+        [ItemRarity.Legendary] = new UpgradeStep { Cost = { ["my-mod:ember-shard"] = 8 }, Chance = 0.5, LevelScale = 0.1 },
+    },
+};
+UpgradeResult r = await Items.UpgradeRarity(player, Items.Held(player), rule);
+if (!r.Ok) Chat.Tell(player, $"Not upgraded: {r.Reason}");               // Failed, CantPay, NoSlot, AtMax, ...
+await Items.UpgradeRarity(player, item, "standard-upgrades");            // a block of this mod, or "other-mod:name"
+await Items.UpgradeRarity(player, item, rule, new UpgradeOptions { PayFrom = chest });  // a chest pays
+```
+
+- **What it checks, in order** (each a result, nothing paid): the item is gone (`Stale`), has no enhancement slots
+  (`NotGear`), the rule does not take it or has no step to its next rarity (`NotAllowed`), it is at the rule's `Max` or
+  Legendary (`AtMax`), its type has no enhancement slot for the next rarity (`NoSlot`, unless `AllowEmptySlot`), a cost
+  item the game does not have or that is no plain item (`Refused`), a `GearUpgradingEvent` handler canceled it
+  (`Canceled`), the payers hold too little (`CantPay`), a payer that is another player or an NPC (`Refused`). A rule that
+  is malformed (a chance outside 0..1, a count outside 1..100000, more than 8 cost items, a step below Uncommon) throws.
+- **The cost.** Item names as everywhere in blocks: game names, `"other-mod:name"`, or the rule's own mod's item by block
+  name. Plain items only (materials, runes): an item with an entity of its own (gear, a gem) cannot be a cost, so the item
+  being upgraded is never spent. `LevelScale` grows the cost with the item's level: `count × (1 + LevelScale × (level - 1))`,
+  rounded up. `PayFrom`: a container your mod vouches for pays instead of the player (each payer pays what it has, in
+  order; kiln.items takes up to 8). `Free`: nothing is paid.
+- **The roll** is the server's (a cryptographic random number; a player's game has no part in it). `Chance` 1 (the
+  default) rolls nothing; `UpgradeOptions.Guaranteed` always succeeds. A failed roll does what the step's `OnFail` says:
+  `KeepItemLoseCost` (the default: the item stays, the cost is spent), `KeepItemKeepCost` (nothing paid), `Downgrade` (the
+  cost is spent and the item drops a rarity; a Common item stays). An upgrade never destroys an item. The result says
+  `Failed`, with `Rolled` and `Chance`.
+- **One step, all or nothing.** kiln.items' program `kiln_items_gear` checks the item's stamp, plans the write, counts the
+  costs in the payers, takes them on one inventory transaction of its own, counts again after the commit (a commit that
+  rolled back by itself ends `Refused`, nothing written), and only then writes the enhancement slots. Two upgrades of one
+  item in the same step: the second finds the slots it was priced for changed and is `Refused`, paying nothing.
+- **Options of the rule:** `Max` (default Legendary), `Durability` (default `KeepRatio`: max durability computed again at
+  the new rarity, the share kept; it needs `items.gear.durability`), `Socket` (default `Keep`; `GameChance`: a weapon
+  without a socket rolls one with the unchanged game's chances for new weapons, 0 / 5 / 25 / 50 / 100 % from Common to
+  Legendary, and a won socket re-creates the weapon in its slot as `Gems.AddSocket` does, a new item entity that
+  `UpgradeResult.After` names; not for an equipped weapon, and a pack's changed chances are not read), `AllowEmptySlot`.
+  `UpgradeStep.Unlock` also unlocks one more slot at once (one level, one more perk acting) instead of waiting for the
+  workbench.
+- `UpgradeResult` (`IKilnResult`; `Ok` only for `Done`): `Status`, `Player`, `Item`, `From`, `To`, `Before`, `After`
+  (`GearState`), `Paid` (by item), `Chance`, `Rolled`, `Message`, `Rule` (a block's id), `DryRun`, `SocketAdded`.
+  `UpgradeOptions.DryRun` checks, counts and plans, pays and changes nothing, rolls nothing: `Paid` and `After` say what a
+  success would cost and make.
+- **Events** (server, tick thread): `GearUpgradingEvent` (cancelable) inside the call, after the checks and before
+  anything is paid or rolled, for every upgrade (code or a station's interaction; not a dry run): `Player`, `Gear`, `From`,
+  `To`, settable `Cost` (by item id, already level-scaled) and `Chance`, `Rule`, `Origin`. `GearUpgradedEvent` when the
+  result arrives, for a success or a failed roll (`Succeeded`, `Result`). The rarity change itself is also a
+  `GearRarityChangedEvent` (and `GearChangedEvent`) with `Source` `Upgrade`.
+- Capability `items.gear.upgrade` (Kiln.Items' row: the write row, kiln.items' `gear_upgrade` and the inventory
+  transaction); `Items.UpgradeAvailable`.
+- **Players without Kiln:** the write is the game's own state on the server (enhancement slots), so a vanilla client should
+  show it like any server change; not seen in a real game yet (the equipment wave's client checks).
+- Test kit: the fake kiln.items runs upgrades with kiln.items' rules (pay and write together, payers, refusals);
+  `HarnessItems.SetUpgradeRolls(0.9, 0.1)` names the rolls of the upgrades that follow.
+
 ## Tool wear per debit (since 0.2.0-dev.28)
 `Items.SetToolWearPerDebit(tool, n)` (or `ToolBlock.WearPerDebit` in a block) sets what one of the game's wear debits
 costs a tool: `n` instead of the game's 1, 0 to 32767. Native table `kiln.toolwear` (`kiln_toolwear.h`), published by
@@ -758,6 +827,13 @@ owner's `KilnItemsRarityRoll` rules (item type, `KILN_ITEMS_ROLL_CRAFT` / `LOOT`
 `roll_status` counts what they did; a mid hook where createPide loads the rarity its caller asked for replaces it with a
 weighted roll among the rarities the type has a perk slot for, so the game makes the item at that rarity (docs/re/items.md
 section 10, "Rarity rolls at creation"). Managed: `RarityRollBlock` ([item-blocks.md](../modding/item-blocks.md#rarity-at-creation-rarityrollblock)).
+v8, package P3 (feature `items.gear` and the inventory transaction): `gear_upgrade` queues a `KilnItemsUpgradeRequest`: the
+item (a gear request, with `KILN_ITEMS_UPGRADE_WRITE` the write to make), up to 8 costs (plain items), up to 8 payers in
+order (the player, or containers) and `expect_available` (the enhancement slots it was priced for); `kiln_items_gear`
+counts the costs, takes them on one inventory transaction of its own, counts again after the commit, and only then makes
+the write, all or nothing. `DRY_RUN` plans without paying. The callback gets a `KilnItemsUpgradeResult` (status, what
+each cost took, what the payers held, the gear result). kiln.items never rolls: a failed roll is the caller's request
+without `WRITE`. Managed: `Items.UpgradeRarity` ("Upgrading rarity" above).
 Details and every field: the header.
 
 ## How it runs

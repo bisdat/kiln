@@ -56,6 +56,7 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `props` | object |  | Things placed that stand there: furniture, banners, lamps. |
 | `quests` | object |  | Quest chains in the game's own journal: steps, objectives, conditions, rewards. Needs "clients": "mod". |
 | `rarityRolls` | object |  | Rarity at creation: which item types roll which rarity (Common to Legendary, by weight) when the game crafts them, loot makes them or a Kiln give asks for none. The game then makes the item at that rarity. Server; asks nothing of players' games. A later definition wins an item type an earlier one also names. |
+| `rarityUpgrades` | object |  | Rarity upgrades: which items an upgrade takes, up to which rarity, and what each step costs (items, a chance, what a failed roll costs). Items.UpgradeRarity(player, item, "name") runs one; an upgraded item gets its next enhancement slot in place, which the player unlocks at the workbench as usual. Server; asks nothing of players' games. |
 | `recipes` | object |  | Recipes of their own: one more way to make any item at a station, such as a game item at the game's workbench. |
 | `resourcePatches` | object |  | Changes to the game's own resources, made before the game reads them: fields, a template's components, a list's length (a mod with "boot": true; docs/kiln/modding/resource-patches.md). Not blocks: kiln.content applies them. |
 | `rules` | object |  | Rules, for behaviours to name. |
@@ -1330,6 +1331,19 @@ Which item types roll which rarity when they are made (RarityRollBlock). A rarit
 | `sources` | string |  | Which creations roll (default "craft, loot"): craft, the game makes it without a rarity (crafting); loot, the game makes it with a rarity it rolled or fixed (random loot, random drop-table stacks); give, a Kiln give without a rarity. Pattern `^(craft\|loot\|give)(, ?(craft\|loot\|give))*$`. |
 | `weights` | object | yes | How likely each rarity is, among the five; one left out is 0. At least one above 0. |
 
+## rarityUpgrade
+
+A rarity upgrade (RarityUpgradeBlock): which items it takes, up to which rarity, and each step by the rarity it reaches. An item whose next rarity has no step, or whose type has no enhancement slot for it, is refused; nothing is paid then.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `allowEmptySlot` | boolean |  | Upgrade into an enhancement slot the item's type has no perk for (default false: refused). |
+| `durability` | `"keepRatio"` \| `"keep"` \| `"repair"` |  | What happens to durability (default keepRatio: the game computes max durability again at the new rarity, the share kept). |
+| `items` | array of string |  | The item types: game items, items of this mod by block name, "other-mod:name", or a pattern with * over the game's item names ("Weapon_*"; "my-mod:*" is every item of that mod). Left out: every item with enhancement slots. max items 1024 |
+| `max` | `"uncommon"` \| `"rare"` \| `"epic"` \| `"legendary"` |  | The highest rarity it upgrades to (default legendary). |
+| `socket` | `"keep"` \| `"gameChance"` |  | A gem socket: keep (default: as it is), or gameChance (a weapon without one rolls the game's chance at the new rarity; a won socket re-creates the item in its slot). |
+| `steps` | object | yes | The steps, by the rarity each reaches (uncommon .. legendary). A rarity without a step is not reached. |
+
 ## recipe
 
 How something is crafted.
@@ -1870,6 +1884,18 @@ Type: string or object
 Shown only while this is true: a name (game.inGame, config.clock.show: true, not 0, not empty), !name, or name == value with == != < <= > >=, joined with &&. Examples: "game.inGame", "!game.inGame", "game.screen == InGame", "game.fps < 30 && config.hud.on". min length 1
 
 Type: string
+
+## upgradeStep
+
+One step of a rarity upgrade: what reaching its rarity costs and how likely it is.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `chance` | number |  | How likely the step is to succeed (default 1). The server rolls it. min 0 max 1 |
+| `cost` | object |  | The items it costs, by name (as in items; plain items such as materials, never gear or a gem), each 1 to 100000. Left out: free. |
+| `levelScale` | number |  | The cost grows with the item's level: count x (1 + levelScale x (level - 1)), rounded up (default 0). min 0 max 1000 |
+| `onFail` | `"keepItemLoseCost"` \| `"keepItemKeepCost"` \| `"downgrade"` |  | What a failed roll costs (default keepItemLoseCost: the item stays, the cost is spent; downgrade: the cost is spent and the item drops one rarity). |
+| `unlock` | boolean |  | The new enhancement slot comes unlocked (one level, one more perk acting) instead of waiting for the workbench (default false). |
 
 ## vfx
 

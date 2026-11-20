@@ -1042,6 +1042,77 @@ typedef struct KilnItemsGearStatus {
     char detail[160];         /* why it is off; NUL-terminated */
 } KilnItemsGearStatus;
 
+/* ---------------------------------------------------------------------------------------------- upgrades ---- */
+
+/* v8, since 0.2.0-dev.29.19 (the equipment wave, package P3; feature items.gear and the inventory transaction; check
+ * header.size).
+ *
+ * A gear write paid for: gear_upgrade takes the costs from the payers and makes the gear write of `gear` in one step
+ * of kiln_items_gear, all or nothing. The program checks the item (the v4 stamp, as gear_write), plans the write
+ * (gear_logic.h: a refusal such as NO_SLOT takes nothing), counts each cost item in the payers' inventories, takes
+ * them on one inventory transaction of its own (removeItems per payer, in the payers' order: each pays what it has
+ * until the cost is met), commits it, counts again to see the commit stood, and only then writes the gear components.
+ * A commit that rolled back by itself ends REFUSED with nothing written. Without KILN_ITEMS_UPGRADE_WRITE it only
+ * pays (a failed roll that keeps the item and spends the cost). The roll itself is the caller's: kiln.items never
+ * rolls.
+ *
+ * Payers: the player, or initialized inventories that are no player's and no NPC's (a container the caller vouches
+ * for). A cost item must be a plain stack (no item entity of its own: never gear, never a gem), so the item being
+ * upgraded can never be spent. */
+
+#define KILN_ITEMS_UPGRADE_MAX_COSTS 8u
+#define KILN_ITEMS_UPGRADE_MAX_PAYERS 8u
+#define KILN_ITEMS_UPGRADE_MAX_COUNT 100000u
+
+/* KilnItemsUpgradeRequest.flags */
+enum {
+    KILN_ITEMS_UPGRADE_WRITE = 0x0001u,   /* make `gear`'s write (its flags as gear_write takes them, without DRY_RUN);
+                                             without it `gear` only names the item (flags 0) and the costs are taken */
+    KILN_ITEMS_UPGRADE_DRY_RUN = 0x0002u, /* check, count and plan; take and write nothing */
+};
+
+/* KilnItemsUpgradeResult.status: KILN_ITEMS_GEAR_DONE .. KILN_ITEMS_GEAR_REFUSED (the write's own outcome, nothing
+ * taken unless DONE), and: */
+enum {
+    KILN_ITEMS_UPGRADE_CANT_PAY = 9,  /* the payers hold too little of a cost item (have[] says how much); nothing changed */
+    KILN_ITEMS_UPGRADE_BAD_PAYER = 10,/* a payer has no initialized inventory, or is another player or an NPC */
+    KILN_ITEMS_UPGRADE_CHANGED = 11,  /* expect_available: the item's enhancement slots are not that many now */
+};
+
+typedef struct KilnItemsUpgradeCost {
+    KilnItemId item;  /* a plain stack's item (no item entity) */
+    uint32_t count;   /* 1..KILN_ITEMS_UPGRADE_MAX_COUNT */
+} KilnItemsUpgradeCost;
+
+typedef struct KilnItemsUpgradeRequest {
+    uint32_t size;               /* sizeof(KilnItemsUpgradeRequest) */
+    uint32_t flags;              /* KILN_ITEMS_UPGRADE_* */
+    KilnEntity player;           /* who upgrades (required); the only player that may pay */
+    uint32_t cost_count;         /* 0..8 */
+    uint32_t payer_count;        /* 0..8; at least 1 when cost_count is not 0 */
+    uint32_t expect_available;   /* 0, or 1..5: the item must still have this many enhancement slots (the rarity the
+                                    caller priced), else CHANGED and nothing happens (two upgrades of one item in a step) */
+    KilnItemsGearRequest gear;   /* the item (entity, stamp, item) and, with WRITE, the write */
+    KilnItemsUpgradeCost costs[KILN_ITEMS_UPGRADE_MAX_COSTS];  /* an item at most once; unused entries 0 */
+    KilnEntity payers[KILN_ITEMS_UPGRADE_MAX_PAYERS];          /* in order; each at most once; unused entries 0 */
+} KilnItemsUpgradeRequest;
+
+typedef struct KilnItemsUpgradeResult {
+    uint32_t size;               /* sizeof(KilnItemsUpgradeResult) of kiln.items */
+    int32_t status;              /* KILN_ITEMS_GEAR_DONE ... KILN_ITEMS_UPGRADE_BAD_PAYER */
+    uint64_t ticket;
+    uint32_t flags;              /* the request's */
+    uint32_t cost_count;         /* the request's */
+    uint32_t paid_from_player;   /* items the player paid, all costs together (the rest came from other payers) */
+    uint32_t reserved;           /* 0 */
+    uint32_t paid[KILN_ITEMS_UPGRADE_MAX_COSTS]; /* per cost: items taken (DONE: the count; DRY_RUN: would take) */
+    uint32_t have[KILN_ITEMS_UPGRADE_MAX_COSTS]; /* per cost: what the payers held before (capped at 2^32-1) */
+    KilnItemsGearResult gear;    /* the write's result (before, after, changed, steps, message); without WRITE before ==
+                                    after and changed 0. The upgrade's message is gear.message */
+} KilnItemsUpgradeResult;
+
+typedef void(KILN_CALL* KilnItemsUpgradeDoneFn)(const KilnItemsUpgradeResult* result, void* user);
+
 /* ---------------------------------------------------------------------------------------------- rarity rolls -- */
 
 /* v8, since 0.2.0-dev.29.19 (the equipment wave, package P5; feature items.gear.rolls; check header.size).
@@ -1300,6 +1371,19 @@ typedef struct KilnItemsApi {
      * 0); nothing changes then. Any thread; the next item the game creates uses them. */
     KilnResult(KILN_CALL* rarity_rolls)(KilnOwner owner, const KilnItemsRarityRoll* rolls, uint32_t count, uint32_t roll_size);
     KilnResult(KILN_CALL* roll_status)(KilnItemsRollStatus* out); /* any thread */
+
+    /* ---- v8, since 0.2.0-dev.29.19 (package P3): rarity upgrades, a gear write paid for (see "upgrades"; check
+     * header.size; KILN_ERR_UNAVAILABLE without feature items.gear or the inventory transaction) ---- */
+
+    /* Queues an upgrade. *out_ticket (optional) = its ticket. Refused at once with KILN_ERR_INVALID_ARGUMENT (no request
+     * or a short one, player 0, entity or stamp 0, bad flags, a WRITE whose gear request gear_write would refuse or that
+     * has DRY_RUN, gear fields set without WRITE, more than 8 costs or payers, costs without a payer, a cost item 0 or
+     * named twice, a count outside 1..100000, a payer 0 or named twice, expect_available above 5, non-zero unused entries) or
+     * KILN_ERR_UNAVAILABLE (as gear_write, or the inventory transaction is off). Otherwise `done` runs once on the tick
+     * thread in Pre with the result (it may be NULL). cancel(ticket) and cancel_owner(owner) drop the callback. Any
+     * thread. */
+    KilnResult(KILN_CALL* gear_upgrade)(KilnOwner owner, const KilnItemsUpgradeRequest* request, KilnItemsUpgradeDoneFn done,
+                                        void* user, uint64_t* out_ticket);
 } KilnItemsApi;
 
 #ifdef __cplusplus

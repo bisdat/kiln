@@ -89,7 +89,7 @@ internal static class BlockFacts
         "EffectBlock", "StatusBlock", "VfxBlock", "VisualBlock", "OnHitBlock", "WeaponStats", "ArmorStats", "WeaponClass", "ArmorSlot", "ArmorSet", "WornLook",
         "PlacementBlock", "ComfortBlock", "ProcessingBlock", "MenuBlock", "PerkBlock", "AbilityBlock", "TalentBlock", "TalentTreeBlock", "TriggerBlock",
         "SoundBlock", "MaterialBlock", "ScreenEffectBlock", "LootTableBlock", "RecipeBlock", "QuestBlock", "DialogueBlock", "WindowBlock", "HudLineBlock", "KeyBindingBlock",
-        "AffixBlock", "AffixPoolBlock", "RarityRollBlock",
+        "AffixBlock", "AffixPoolBlock", "RarityRollBlock", "RarityUpgradeBlock",
     };
 
     /// <summary>Whether a block of this type answers a reference of this kind.</summary>

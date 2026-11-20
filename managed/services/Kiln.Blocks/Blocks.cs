@@ -113,6 +113,12 @@ public static partial class Blocks
     /// once the item types exist; a later definition wins an item type an earlier one also names. It asks nothing of players' games.</summary>
     public static BlockHandle<RarityRollBlock> Define(string name, RarityRollBlock block) => Define<RarityRollBlock>(name, block);
 
+    /// <summary>Defines a rarity upgrade (which items it takes, up to which rarity, and what each step costs) as the calling
+    /// mod's: the same as a data file's "rarityUpgrades" section. <c>Items.UpgradeRarity(player, item, "name")</c> runs it (or
+    /// the handle's <c>ToString()</c>, <c>"mod:name"</c>, from another mod). It acts on the server and asks nothing of
+    /// players' games.</summary>
+    public static BlockHandle<RarityUpgradeBlock> Define(string name, RarityUpgradeBlock block) => Define<RarityUpgradeBlock>(name, block);
+
     /// <summary>A block a mod defined (its id, or null: the calling mod), or null. A block the mod staged in <see cref="Mod.OnBoot"/>
     /// and its boot generation committed is found from the commit on, also in <c>OnLoad</c> before its runtime activation and after the
     /// mod's runtime unload: the boot content stays in the game until the process ends.</summary>
@@ -338,6 +344,7 @@ internal sealed class ModBlocks(string id, ulong owner)
         LootRuntime.Forget(Id);
         AffixRuntime.Forget(Id);
         RarityRollRuntime.Forget(Id);
+        ItemUpgrades.Forget(Id);
         MoveApplications.Forget(Id);
         ToolWearRuntime.Forget(this);
         UiRuntime.Forget(Id);

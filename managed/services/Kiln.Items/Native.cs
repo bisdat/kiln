@@ -706,11 +706,53 @@ internal static unsafe class ItemsNative
         public fixed byte Detail[160];
     }
 
+    // ---- v8 (package P3): upgrades (KilnItemsUpgradeRequest, KilnItemsUpgradeResult; kiln_items.h "upgrades") ----
+    public const uint UpgradeWrite = 0x01, UpgradeDryRun = 0x02;
+    public const int UpgradeCantPay = 9, UpgradeBadPayer = 10, UpgradeChanged = 11;
+    public const int UpgradeMaxCosts = 8, UpgradeMaxPayers = 8, UpgradeMaxCount = 100000;
+
+    /// <summary><c>KilnItemsUpgradeRequest</c>, 160 bytes. Costs are (item, count) pairs: Costs[2 i], Costs[2 i + 1].</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct UpgradeRequest
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Player;
+        public uint CostCount;
+        public uint PayerCount;
+        public uint ExpectAvailable;
+        public GearRequest Gear;
+        public fixed uint Costs[16];
+        public fixed uint Payers[8];
+    }
+
+    /// <summary><c>KilnItemsUpgradeResult</c>, 392 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct UpgradeResult
+    {
+        public uint Size;
+        public int Status;
+        public ulong Ticket;
+        public uint Flags;
+        public uint CostCount;
+        public uint PaidFromPlayer;
+        public uint Reserved;
+        public fixed uint Paid[8];
+        public fixed uint Have[8];
+        public GearResult Gear;
+    }
+
     /// <summary>The v8 table (the equipment wave): v7 followed by gear_write, gear_read, gear_status (package P1, typed by
-    /// the managed gear API of package P2; 320 bytes) and rarity_rolls, roll_status (package P5; 336 bytes). Read a member
-    /// only when the header's size covers it.</summary>
+    /// the managed gear API of package P2; 320 bytes), rarity_rolls, roll_status (package P5; 336 bytes) and gear_upgrade
+    /// (package P3; 344 bytes). Read a member only when the header's size covers it.</summary>
     /// <summary>Where the v8 gear functions end (offsetof(KilnItemsApi, rarity_rolls)): a table this long has gear.</summary>
     public const uint V8GearEnd = 320;
+
+    /// <summary>Where the rarity rolls end (offsetof(KilnItemsApi, gear_upgrade)): a table this long has rarity_rolls.</summary>
+    public const uint V8RollsEnd = 336;
+
+    /// <summary>Where gear_upgrade ends: a table this long has upgrades (package P3).</summary>
+    public const uint V8UpgradeEnd = 344;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct TableV8
@@ -721,6 +763,7 @@ internal static unsafe class ItemsNative
         public delegate* unmanaged[Cdecl]<GearStatus*, int> GetGearStatus;
         public delegate* unmanaged[Cdecl]<ulong, RarityRoll*, uint, uint, int> RarityRolls;
         public delegate* unmanaged[Cdecl]<RollStatus*, int> RollStatusOf;
+        public delegate* unmanaged[Cdecl]<ulong, UpgradeRequest*, delegate* unmanaged[Cdecl]<UpgradeResult*, void*, void>, void*, ulong*, int> GearUpgrade;
     }
 
     /// <summary>True when a table of <paramref name="size"/> bytes has the v6 member that ends at <paramref name="end"/>.</summary>

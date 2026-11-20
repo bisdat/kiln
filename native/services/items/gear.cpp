@@ -12,9 +12,13 @@
 // the save) and the attribute's own formulas (AttrChanged; the UInt32 variant for Level, as the game's UnlockPerk). The
 // program first checks the marking's per-component bits: ItemState (where the game puts the rarity, level and damage it
 // derives, what players are sent) must be replicated, PerkContainerNew and Level saved; if not, gear writes stay off.
+// Upgrades (package P3, kiln_items.h "upgrades", upgrade_logic.h) run in the same program: the write planned and its
+// components marked, the costs counted in the payers and taken on one inventory transaction of the program's own,
+// counted again after the commit, and only then the write: all or nothing.
 #include "gear.h"
 
 #include <windows.h>
+#include <malloc.h>
 
 #include <algorithm>
 #include <atomic>
@@ -32,6 +36,7 @@
 
 #include "engine.h"
 #include "gear_logic.h"
+#include "upgrade_logic.h"
 #include "instances.h"
 #include "services/kiln_caps.h"
 #include "services/kiln_saves.h"
@@ -325,6 +330,41 @@ bool marked(const Access& a, uint64_t acc, KilnEntity e, const uint8_t* read) {
     return w.ptr == read;
 }
 
+// Marks every component a plan writes through the tracked path; true when each is the block that was read.
+// ItemState is marked whenever anything is written (bytes unchanged unless clear_init): it carries the replication bit,
+// so players get the entity again this step, and once more when item_state_init derives the new UI values.
+bool mark_plan(const Access& a, const Reader& rd_, KilnEntity e, const Blocks& b, const gear::Plan& plan) {
+    const bool any = plan.write_perks || plan.write_level || plan.write_durability || plan.clear_init;
+    return !((plan.write_perks && !marked(a, rd_.acc_perks, e, b.perks)) ||
+             (plan.write_level && !marked(a, rd_.acc_level, e, b.level)) ||
+             (plan.write_durability && !marked(a, rd_.acc_dur, e, b.dur)) ||
+             (any && !marked(a, a.acc[A_ITEMSTATE], e, b.state)));
+}
+
+// The writes of a plan into the marked blocks.
+void write_plan(const Reader& rd_, const Blocks& b, const gear::Plan& plan) {
+    if (plan.write_perks) {
+        auto* pk = const_cast<uint8_t*>(b.perks);
+        pk[0] = plan.after.available;
+        pk[1] = plan.after.unlocked;
+    }
+    if (plan.write_level) {
+        uint32_t* v = attr_values(b.level);
+        v[b.lv_max] = plan.after.level_max;  // max first, as UnlockPerk raises it before the level
+        v[b.lv] = plan.after.level;
+        F.attr_changed_u32(const_cast<uint8_t*>(b.level), rd_.attributes);
+    }
+    if (plan.write_durability) {
+        attr_values(b.dur)[b.du] = static_cast<uint32_t>(plan.after.durability);
+        E.attr_changed(const_cast<uint8_t*>(b.dur), rd_.attributes);
+    }
+    if (plan.clear_init) {
+        auto* st = const_cast<uint8_t*>(b.state);
+        const uint16_t bits = static_cast<uint16_t>(rd<uint16_t>(st, F.state_bits) & ~F.init_bit);
+        std::memcpy(st + F.state_bits, &bits, sizeof bits);
+    }
+}
+
 void run_impl(void* p) {
     auto* c = static_cast<RunCall*>(p);
     const Reader& rd_ = *c->reader;
@@ -346,38 +386,187 @@ void run_impl(void* p) {
         return;
     }
     // Mark every component first through the tracked path; write only when each is the block that was read.
-    // ItemState is marked whenever anything is written (bytes unchanged unless clear_init): it carries the replication bit,
-    // so players get the entity again this step, and once more when item_state_init derives the new UI values.
-    const bool any = plan.write_perks || plan.write_level || plan.write_durability || plan.clear_init;
-    if ((plan.write_perks && !marked(a, rd_.acc_perks, r.entity, b.perks)) ||
-        (plan.write_level && !marked(a, rd_.acc_level, r.entity, b.level)) ||
-        (plan.write_durability && !marked(a, rd_.acc_dur, r.entity, b.dur)) ||
-        (any && !marked(a, a.acc[A_ITEMSTATE], r.entity, b.state))) {
+    if (!mark_plan(a, rd_, r.entity, b, plan)) {
         res->changed = 0;
         return fail(res, KILN_ITEMS_GEAR_REFUSED, "the game's tracked write did not return the component that was read");
     }
-    if (plan.write_perks) {
-        auto* pk = const_cast<uint8_t*>(b.perks);
-        pk[0] = plan.after.available;
-        pk[1] = plan.after.unlocked;
-    }
-    if (plan.write_level) {
-        uint32_t* v = attr_values(b.level);
-        v[b.lv_max] = plan.after.level_max;  // max first, as UnlockPerk raises it before the level
-        v[b.lv] = plan.after.level;
-        F.attr_changed_u32(const_cast<uint8_t*>(b.level), rd_.attributes);
-    }
-    if (plan.write_durability) {
-        attr_values(b.dur)[b.du] = static_cast<uint32_t>(plan.after.durability);
-        E.attr_changed(const_cast<uint8_t*>(b.dur), rd_.attributes);
-    }
-    if (plan.clear_init) {
-        auto* st = const_cast<uint8_t*>(b.state);
-        const uint16_t bits = static_cast<uint16_t>(rd<uint16_t>(st, F.state_bits) & ~F.init_bit);
-        std::memcpy(st + F.state_bits, &bits, sizeof bits);
-    }
+    write_plan(rd_, b, plan);
     Blocks after;
     read_state(rd_, r.entity, &res->after, &after);  // read back: what the formulas left
+    res->status = KILN_ITEMS_GEAR_DONE;
+}
+
+
+// ---- one upgrade inside the program (package P3: kiln_items.h "upgrades", upgrade_logic.h) ----
+struct UpReq {
+    uint64_t ticket;
+    KilnOwner owner;
+    KilnItemsUpgradeRequest r;
+    uint64_t submitted;
+};
+struct UpCallback {
+    KilnItemsUpgradeDoneFn fn;
+    void* user;
+    KilnOwner owner;
+};
+std::deque<UpReq> g_up_pending;                          // g_mu
+std::vector<KilnItemsUpgradeResult> g_up_done;           // g_mu
+std::unordered_map<uint64_t, UpCallback> g_up_callbacks; // g_mu
+constexpr uint32_t kUpgradesPerStep = 8;  // each is an inventory transaction
+uint8_t* g_tx = nullptr;                  // E.tx_size bytes, 16-aligned (the program is serial: one user)
+
+// g_mu held: what waits for the program, writes and upgrades together.
+void count_pending() {
+    g_pending_n.store(static_cast<uint32_t>(g_pending.size() + g_up_pending.size()), std::memory_order_release);
+}
+
+void up_fail(KilnItemsUpgradeResult* res, int32_t status, const char* fmt, ...) {
+    res->status = status;
+    res->gear.status = status <= KILN_ITEMS_GEAR_REFUSED ? status : KILN_ITEMS_GEAR_REFUSED;
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(res->gear.message, sizeof res->gear.message, fmt, ap);
+    va_end(ap);
+}
+
+struct UpCall {
+    const Reader* reader;
+    const UpReq* q;
+    KilnItemsUpgradeResult* res;
+    bool tx_open;    // a transaction of ours is open on g_tx (a fault: abandon it)
+    bool paid;       // the payment committed
+    bool invariant;  // paid, then the write could not be made: gear writes go off
+};
+
+PageSet g_pages;  // the program's own scratch (serial)
+
+// Every payer's count of each cost item (plain stacks only: a stack with an item entity is never a cost).
+bool count_costs(const Access& a, const KilnItemsUpgradeRequest& r, uint32_t (*have)[upgrade::kMaxPayers], uint64_t* total,
+                 KilnItemsUpgradeResult* res) {
+    for (uint32_t c = 0; c < r.cost_count; ++c) total[c] = 0;
+    for (uint32_t p = 0; p < r.payer_count; ++p) {
+        bool init = false;
+        if (!read_pages(a, r.payers[p], &g_pages, &init) || !init)
+            return up_fail(res, KILN_ITEMS_UPGRADE_BAD_PAYER, "payer %u has no initialized inventory", r.payers[p]), false;
+        for (uint32_t c = 0; c < r.cost_count; ++c) {
+            uint64_t n = 0;
+            for (uint32_t i = 0; i < g_pages.n; ++i)
+                for (const Stack& s : g_pages.p[i].s)
+                    if (!is_empty(s) && pide_of(s) == 0 && s.item == r.costs[c].item) n += s.count;
+            have[c][p] = n > 0xFFFFFFFFull ? 0xFFFFFFFFu : static_cast<uint32_t>(n);
+            total[c] += n;
+        }
+    }
+    return true;
+}
+
+void run_upgrade_impl(void* p) {
+    auto* c = static_cast<UpCall*>(p);
+    const Reader& rd_ = *c->reader;
+    const Access& a = *rd_.a;
+    const KilnItemsUpgradeRequest& r = c->q->r;
+    KilnItemsUpgradeResult* res = c->res;
+    KilnItemsGearResult& g = res->gear;
+    const bool write = (r.flags & KILN_ITEMS_UPGRADE_WRITE) != 0, dry = (r.flags & KILN_ITEMS_UPGRADE_DRY_RUN) != 0;
+    Blocks b;
+    if (!read_state(rd_, r.gear.entity, &g.before, &b)) return up_fail(res, KILN_ITEMS_GEAR_STALE, "the entity is no item entity now");
+    g.after = g.before;
+    if ((r.gear.item && g.before.item != r.gear.item) || stamp_for(r.gear.entity, g.before.item) != r.gear.stamp)
+        return up_fail(res, KILN_ITEMS_GEAR_STALE, "the entity is not the stamped item entity any more");
+    if (!upgrade::as_expected(r, g.before))
+        return up_fail(res, KILN_ITEMS_UPGRADE_CHANGED, "the item has %u enhancement slots now, not the %u the upgrade was priced for",
+                       g.before.available, r.expect_available);
+    gear::Plan plan{};
+    plan.after = g.before;
+    if (write) {
+        plan = gear::plan(r.gear, g.before, F.init_bit, F.equipped_bit);
+        if (plan.status != KILN_ITEMS_GEAR_DONE) return up_fail(res, plan.status, "%s", plan.why);
+    }
+    // the payers: the player, or containers (an initialized inventory that is no player's and no NPC's)
+    for (uint32_t i = 0; i < r.payer_count; ++i) {
+        if (r.payers[i] == r.player) continue;
+        uint8_t fl = 0;
+        if (!setup_flags(a, r.payers[i], &fl))
+            return up_fail(res, KILN_ITEMS_UPGRADE_BAD_PAYER, "payer %u has no inventory (not loaded, or no container)", r.payers[i]);
+        if (fl & 0x03) return up_fail(res, KILN_ITEMS_UPGRADE_BAD_PAYER, "payer %u is another player or an NPC, not a container", r.payers[i]);
+    }
+    // the cost items: in the registry, plain stacks (never an item with an entity of its own: it could be the item itself)
+    for (uint32_t i = 0; i < r.cost_count; ++i) {
+        const auto* info = static_cast<const uint8_t*>(E.item_find(r.costs[i].item, a.items));
+        if (!info) return up_fail(res, KILN_ITEMS_GEAR_REFUSED, "cost item 0x%08x is not in the item registry", r.costs[i].item);
+        if (rd<uint32_t>(info, E.item_flags) & 2u)
+            return up_fail(res, KILN_ITEMS_GEAR_REFUSED, "cost item 0x%08x has an item entity of its own (gear, a gem): not a cost", r.costs[i].item);
+    }
+    uint32_t have[upgrade::kMaxCosts][upgrade::kMaxPayers] = {};
+    uint64_t before[upgrade::kMaxCosts] = {}, after[upgrade::kMaxCosts] = {};
+    upgrade::Split split[upgrade::kMaxCosts];
+    if (r.cost_count) {
+        if (!count_costs(a, r, have, before, res)) return;
+        for (uint32_t i = 0; i < r.cost_count; ++i) {
+            split[i] = upgrade::split(r.costs[i].count, have[i], r.payer_count);
+            res->have[i] = split[i].have > 0xFFFFFFFFull ? 0xFFFFFFFFu : static_cast<uint32_t>(split[i].have);
+        }
+        for (uint32_t i = 0; i < r.cost_count; ++i)
+            if (!split[i].enough)
+                return up_fail(res, KILN_ITEMS_UPGRADE_CANT_PAY, "the payers hold %llu of the %u of item 0x%08x it costs",
+                               static_cast<unsigned long long>(split[i].have), r.costs[i].count, r.costs[i].item);
+    }
+    if (dry) {
+        for (uint32_t i = 0; i < r.cost_count; ++i) res->paid[i] = r.costs[i].count;
+        g.after = plan.after;
+        g.changed = plan.changed;
+        res->status = KILN_ITEMS_GEAR_DONE;
+        return;
+    }
+    // everything the write needs is checked before anything is paid
+    if (write && !mark_plan(a, rd_, r.gear.entity, b, plan))
+        return up_fail(res, KILN_ITEMS_GEAR_REFUSED, "the game's tracked write did not return the component that was read");
+    if (r.cost_count) {
+        tx_begin(a, r.player, g_tx);
+        c->tx_open = true;
+        for (uint32_t i = 0; i < r.cost_count; ++i)
+            for (uint32_t k = 0; k < r.payer_count; ++k) {
+                if (!split[i].take[k]) continue;
+                Result12 out{};
+                E.remove_items(&out, g_tx, r.payers[k], r.costs[i].item, 0, split[i].take[k]);
+                if (out.error || out.value) {
+                    E.rollback(g_tx);
+                    E.free_arrays(g_tx);
+                    c->tx_open = false;
+                    return up_fail(res, KILN_ITEMS_GEAR_REFUSED, "the game refused taking item 0x%08x from %u (error 0x%02x, %u missing)",
+                                   r.costs[i].item, r.payers[k], out.error, out.value);
+                }
+            }
+        if (!tx_takes_plain_only(g_tx)) {
+            E.rollback(g_tx);
+            E.free_arrays(g_tx);
+            c->tx_open = false;
+            return up_fail(res, KILN_ITEMS_GEAR_REFUSED, "the game's transaction would have taken more than plain stacks: nothing taken");
+        }
+        E.commit(g_tx);
+        E.free_arrays(g_tx);
+        c->tx_open = false;
+        uint32_t ignore[upgrade::kMaxCosts][upgrade::kMaxPayers] = {};
+        if (!count_costs(a, r, ignore, after, res) || !upgrade::commit_stood(before, after, r.costs, r.cost_count))
+            return up_fail(res, KILN_ITEMS_GEAR_REFUSED, "the game's commit did not take the cost (it rolled back by itself): nothing written");
+        c->paid = true;
+        for (uint32_t i = 0; i < r.cost_count; ++i) {
+            res->paid[i] = r.costs[i].count;
+            for (uint32_t k = 0; k < r.payer_count; ++k)
+                if (r.payers[k] == r.player) res->paid_from_player += split[i].take[k];
+        }
+    }
+    if (write) {
+        // the commit changed only the payers' inventories; read the item again and mark what it hands back now
+        Blocks now;
+        KilnItemsGearState again{};
+        if (!read_state(rd_, r.gear.entity, &again, &now) || !mark_plan(a, rd_, r.gear.entity, now, plan))
+            return c->invariant = true, up_fail(res, KILN_ITEMS_GEAR_REFUSED, "paid, but the item could not be written after the payment");
+        write_plan(rd_, now, plan);
+        g.changed = plan.changed;
+        Blocks back;
+        read_state(rd_, r.gear.entity, &g.after, &back);  // read back: what the formulas left
+    }
     res->status = KILN_ITEMS_GEAR_DONE;
 }
 
@@ -445,6 +634,64 @@ void own_check_impl(void* p) {
     x->ok = true;
 }
 
+// Up to kUpgradesPerStep upgrades, each one transaction of ours (g_tx) around its write.
+void run_upgrades(const Reader& reader, uint64_t step, unsigned long* code) {
+    std::vector<UpReq> batch;
+    {
+        std::lock_guard lock(g_mu);
+        while (batch.size() < kUpgradesPerStep && !g_up_pending.empty()) {
+            batch.push_back(g_up_pending.front());
+            g_up_pending.pop_front();
+        }
+        count_pending();
+    }
+    if (batch.empty()) return;
+    std::vector<KilnItemsUpgradeResult> results(batch.size());
+    for (size_t i = 0; i < batch.size(); ++i) {
+        KilnItemsUpgradeResult& res = results[i];
+        res = KilnItemsUpgradeResult{};
+        res.size = sizeof res;
+        res.ticket = batch[i].ticket;
+        res.flags = batch[i].r.flags;
+        res.cost_count = batch[i].r.cost_count;
+        KilnItemsGearResult& g = res.gear;
+        g.size = sizeof g;
+        g.ticket = batch[i].ticket;
+        g.entity = batch[i].r.gear.entity;
+        g.stamp = batch[i].r.gear.stamp;
+        g.flags = batch[i].r.gear.flags;
+        g.step = step;
+        g.steps = static_cast<uint32_t>(step - batch[i].submitted);
+        if (g_off.load()) {
+            up_fail(&res, KILN_ITEMS_GEAR_UNAVAILABLE, "gear writes were switched off (see kiln.log)");
+            continue;
+        }
+        if (!g_tx) {
+            up_fail(&res, KILN_ITEMS_GEAR_UNAVAILABLE, "no memory for the upgrades' transaction");
+            continue;
+        }
+        UpCall call{&reader, &batch[i], &res, false, false, false};
+        if (!guard(&run_upgrade_impl, &call, code)) {
+            if (call.tx_open) abandon_tx(g_tx);
+            char b[160];
+            std::snprintf(b, sizeof b, "an upgrade faulted (0x%08lx) on entity %u%s", *code, g.entity,
+                          call.paid ? " after its payment committed" : "");
+            res.gear.changed = 0;
+            up_fail(&res, KILN_ITEMS_GEAR_UNAVAILABLE, "%s", b);
+            switch_off(KILN_CAP_REASON_FAULTED, b);
+            continue;
+        }
+        if (call.invariant) {
+            LOGE("upgrade ticket %llu: %s (entity %u)", static_cast<unsigned long long>(res.ticket), res.gear.message, g.entity);
+            switch_off(KILN_CAP_REASON_FAULTED, "an upgrade was paid but its item could not be written (see kiln.log)");
+        }
+        if (res.status == KILN_ITEMS_GEAR_DONE && g.changed && !(res.flags & KILN_ITEMS_UPGRADE_DRY_RUN))
+            g_writes.fetch_add(1, std::memory_order_relaxed);
+    }
+    std::lock_guard lock(g_mu);
+    for (auto& r : results) g_up_done.push_back(r);
+}
+
 void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity, void*) {
     g_last_update.store(current_step(), std::memory_order_relaxed);
     if (g_off.load() || g_pending_n.load(std::memory_order_acquire) == 0) return;
@@ -483,7 +730,7 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity, void*) {
             batch.push_back(g_pending.front());
             g_pending.pop_front();
         }
-        g_pending_n.store(static_cast<uint32_t>(g_pending.size()), std::memory_order_release);
+        count_pending();
     }
     std::vector<KilnItemsGearResult> results(batch.size());
     const uint64_t step = current_step();
@@ -513,8 +760,11 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity, void*) {
         if (res.status == KILN_ITEMS_GEAR_DONE && res.changed && !(res.flags & KILN_ITEMS_GEAR_DRY_RUN))
             g_writes.fetch_add(1, std::memory_order_relaxed);
     }
-    std::lock_guard lock(g_mu);
-    for (auto& r : results) g_done.push_back(r);
+    {
+        std::lock_guard lock(g_mu);
+        for (auto& r : results) g_done.push_back(r);
+    }
+    run_upgrades(reader, step, &code);
 }
 
 bool guarded_done(KilnItemsGearDoneFn fn, const KilnItemsGearResult* r, void* user) {
@@ -931,7 +1181,11 @@ void gear_resolve() {
     F.attr_dur = E.attr_durability;
     F.attr_dur_max = E.attr_durability_max;
     F.sym = true;
-    LOGI("gear writes: the symbols resolved (Level 0x%08x / max 0x%08x)", F.attr_level, F.attr_level_max);
+    // upgrades (package P3) pay on an inventory transaction of their own: the program is serial, so one buffer
+    if (E.tx_ok && E.tx_size > 0 && E.tx_size < 0x10000)
+        g_tx = static_cast<uint8_t*>(_aligned_malloc(static_cast<size_t>(E.tx_size), 16));  // process lifetime
+    LOGI("gear writes: the symbols resolved (Level 0x%08x / max 0x%08x); upgrades %s", F.attr_level, F.attr_level_max,
+         g_tx ? "can pay (the inventory transaction)" : "OFF (no inventory transaction)");
 }
 
 void gear_register(const KilnWorldApi* w) {
@@ -977,9 +1231,81 @@ void gear_register(const KilnWorldApi* w) {
     gear_selftest_init();
 }
 
+namespace {
+bool guarded_up_done(KilnItemsUpgradeDoneFn fn, const KilnItemsUpgradeResult* r, void* user) {
+    __try {
+        fn(r, user);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+KilnItemsUpgradeResult up_dropped(const UpReq& q, int32_t status, const char* why) {
+    KilnItemsUpgradeResult r{};
+    r.size = sizeof r;
+    r.ticket = q.ticket;
+    r.flags = q.r.flags;
+    r.cost_count = q.r.cost_count;
+    r.gear.size = sizeof r.gear;
+    r.gear.ticket = q.ticket;
+    r.gear.entity = q.r.gear.entity;
+    r.gear.stamp = q.r.gear.stamp;
+    r.gear.flags = q.r.gear.flags;
+    r.gear.steps = static_cast<uint32_t>(current_step() - q.submitted);
+    up_fail(&r, status, "%s", why);
+    return r;
+}
+
+// Tick thread, Pre: the upgrades' results (g_mu not held).
+void upgrades_pre(uint64_t step) {
+    std::vector<KilnItemsUpgradeResult> done;
+    std::vector<UpCallback> cbs;
+    {
+        std::lock_guard lock(g_mu);
+        while (g_off.load() && !g_up_pending.empty()) {
+            g_up_done.push_back(up_dropped(g_up_pending.front(), KILN_ITEMS_GEAR_UNAVAILABLE, "gear writes were switched off (see kiln.log)"));
+            g_up_pending.pop_front();
+        }
+        const uint64_t last = g_last_update.load(std::memory_order_relaxed);
+        while (!g_up_pending.empty() && step > g_up_pending.front().submitted + kTimeoutSteps &&
+               last < g_up_pending.front().submitted + kTimeoutSteps) {
+            g_up_done.push_back(up_dropped(g_up_pending.front(), KILN_ITEMS_GEAR_DROPPED, "the server world did not run kiln_items_gear for 10 s"));
+            g_up_pending.pop_front();
+        }
+        count_pending();
+        if (g_up_done.empty()) return;
+        done.swap(g_up_done);
+        for (const auto& r : done) {
+            auto it = g_up_callbacks.find(r.ticket);
+            if (it != g_up_callbacks.end()) {
+                cbs.push_back(it->second);
+                g_up_callbacks.erase(it);
+            } else {
+                cbs.push_back(UpCallback{nullptr, nullptr, 0});
+            }
+        }
+    }
+    for (size_t i = 0; i < done.size(); ++i) {
+        const KilnItemsUpgradeResult& r = done[i];
+        if (r.status != KILN_ITEMS_GEAR_DONE) g_refused.fetch_add(1, std::memory_order_relaxed);
+        LOGI("upgrade ticket %llu%s: entity %u (stamp %u) write 0x%x, %u cost(s) -> status %d, changed 0x%x: perks %u/%u -> %u/%u, "
+             "level %u -> %u; paid %u %u %u%s%s",
+             static_cast<unsigned long long>(r.ticket), (r.flags & KILN_ITEMS_UPGRADE_DRY_RUN) ? " (dry run)" : "", r.gear.entity,
+             r.gear.stamp, (r.flags & KILN_ITEMS_UPGRADE_WRITE) ? r.gear.flags : 0u, r.cost_count, r.status, r.gear.changed,
+             r.gear.before.unlocked, r.gear.before.available, r.gear.after.unlocked, r.gear.after.available, r.gear.before.level,
+             r.gear.after.level, r.paid[0], r.paid[1], r.paid[2], r.gear.message[0] ? ": " : "", r.gear.message);
+        if (cbs[i].fn && !guarded_up_done(cbs[i].fn, &r, cbs[i].user))
+            LOGE("an upgrade result callback (owner %llu) faulted; ignored", static_cast<unsigned long long>(cbs[i].owner));
+    }
+}
+
+}  // namespace
+
 void gear_pre(uint64_t step) {
     poll_program();
     st::step(step);
+    upgrades_pre(step);
     std::vector<KilnItemsGearResult> done;
     std::vector<Callback> cbs;
     {
@@ -995,7 +1321,7 @@ void gear_pre(uint64_t step) {
             g_done.push_back(dropped(g_pending.front(), KILN_ITEMS_GEAR_DROPPED, "the server world did not run kiln_items_gear for 10 s"));
             g_pending.pop_front();
         }
-        g_pending_n.store(static_cast<uint32_t>(g_pending.size()), std::memory_order_release);
+        count_pending();
         if (g_done.empty()) return;
         done.swap(g_done);
         for (const auto& r : done) {
@@ -1028,20 +1354,28 @@ void gear_world_closed() {
         g_done.push_back(dropped(g_pending.front(), KILN_ITEMS_GEAR_DROPPED, "the server world closed"));
         g_pending.pop_front();
     }
-    g_pending_n.store(0, std::memory_order_release);
+    while (!g_up_pending.empty()) {
+        g_up_done.push_back(up_dropped(g_up_pending.front(), KILN_ITEMS_GEAR_DROPPED, "the server world closed"));
+        g_up_pending.pop_front();
+    }
+    count_pending();
     g_verified = false;  // the next world's registry is checked again
     if (g_state.load() == KILN_ITEMS_PROGRAM_RUNNING) g_state.store(KILN_ITEMS_PROGRAM_ACTIVE);
 }
 
 bool gear_cancel(uint64_t ticket) {
     std::lock_guard lock(g_mu);
-    return g_callbacks.erase(ticket) != 0;
+    return g_callbacks.erase(ticket) != 0 || g_up_callbacks.erase(ticket) != 0;
 }
 
 void gear_cancel_owner(KilnOwner owner) {
     std::lock_guard lock(g_mu);
     for (auto it = g_callbacks.begin(); it != g_callbacks.end();) {
         if (it->second.owner == owner) it = g_callbacks.erase(it);
+        else ++it;
+    }
+    for (auto it = g_up_callbacks.begin(); it != g_up_callbacks.end();) {
+        if (it->second.owner == owner) it = g_up_callbacks.erase(it);
         else ++it;
     }
 }
@@ -1061,7 +1395,29 @@ KilnResult gear_write(KilnOwner owner, const KilnItemsGearRequest* request, Kiln
         if (g_pending.size() >= kMaxPending) return KILN_ERR_UNAVAILABLE;
         g_pending.push_back(q);
         if (done) g_callbacks[q.ticket] = Callback{done, user, owner};
-        g_pending_n.store(static_cast<uint32_t>(g_pending.size()), std::memory_order_release);
+        count_pending();
+    }
+    if (out_ticket) *out_ticket = q.ticket;
+    return KILN_OK;
+}
+
+KilnResult gear_upgrade(KilnOwner owner, const KilnItemsUpgradeRequest* request, KilnItemsUpgradeDoneFn done, void* user,
+                        uint64_t* out_ticket) {
+    if (!request || !upgrade::request_valid(*request)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!usable() || !E.tx_ok || !g_tx) return KILN_ERR_UNAVAILABLE;
+    UpReq q{};
+    q.ticket = items_next_ticket();
+    q.owner = owner;
+    q.r = *request;
+    q.r.size = sizeof(KilnItemsUpgradeRequest);
+    q.r.gear.size = sizeof(KilnItemsGearRequest);
+    q.submitted = current_step();
+    {
+        std::lock_guard lock(g_mu);
+        if (g_pending.size() + g_up_pending.size() >= kMaxPending) return KILN_ERR_UNAVAILABLE;
+        g_up_pending.push_back(q);
+        if (done) g_up_callbacks[q.ticket] = UpCallback{done, user, owner};
+        count_pending();
     }
     if (out_ticket) *out_ticket = q.ticket;
     return KILN_OK;

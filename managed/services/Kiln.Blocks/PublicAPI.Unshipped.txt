@@ -20,3 +20,25 @@ override Kiln.RarityRollBlock.ToString() -> string!
 static Kiln.Blocks.Define(string! name, Kiln.RarityRollBlock! block) -> Kiln.BlockHandle<Kiln.RarityRollBlock!>!
 static Kiln.RarityRollBlock.operator !=(Kiln.RarityRollBlock? left, Kiln.RarityRollBlock? right) -> bool
 static Kiln.RarityRollBlock.operator ==(Kiln.RarityRollBlock? left, Kiln.RarityRollBlock? right) -> bool
+Kiln.RarityUpgradeBlock
+Kiln.RarityUpgradeBlock.<Clone>$() -> Kiln.RarityUpgradeBlock!
+Kiln.RarityUpgradeBlock.AllowEmptySlot.get -> bool
+Kiln.RarityUpgradeBlock.AllowEmptySlot.init -> void
+Kiln.RarityUpgradeBlock.Durability.get -> Kiln.DurabilityRule
+Kiln.RarityUpgradeBlock.Durability.init -> void
+Kiln.RarityUpgradeBlock.Equals(Kiln.RarityUpgradeBlock? other) -> bool
+Kiln.RarityUpgradeBlock.Items.get -> System.Collections.Generic.IReadOnlyList<Kiln.ItemRef>?
+Kiln.RarityUpgradeBlock.Items.init -> void
+Kiln.RarityUpgradeBlock.Max.get -> Kiln.Rarity
+Kiln.RarityUpgradeBlock.Max.init -> void
+Kiln.RarityUpgradeBlock.RarityUpgradeBlock() -> void
+Kiln.RarityUpgradeBlock.Socket.get -> Kiln.SocketRule
+Kiln.RarityUpgradeBlock.Socket.init -> void
+Kiln.RarityUpgradeBlock.Steps.get -> System.Collections.Generic.IDictionary<Kiln.Rarity, Kiln.UpgradeStep!>!
+Kiln.RarityUpgradeBlock.Steps.init -> void
+override Kiln.RarityUpgradeBlock.Equals(object? obj) -> bool
+override Kiln.RarityUpgradeBlock.GetHashCode() -> int
+override Kiln.RarityUpgradeBlock.ToString() -> string!
+static Kiln.Blocks.Define(string! name, Kiln.RarityUpgradeBlock! block) -> Kiln.BlockHandle<Kiln.RarityUpgradeBlock!>!
+static Kiln.RarityUpgradeBlock.operator !=(Kiln.RarityUpgradeBlock? left, Kiln.RarityUpgradeBlock? right) -> bool
+static Kiln.RarityUpgradeBlock.operator ==(Kiln.RarityUpgradeBlock? left, Kiln.RarityUpgradeBlock? right) -> bool

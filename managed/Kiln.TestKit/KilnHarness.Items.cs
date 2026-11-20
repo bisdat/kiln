@@ -189,7 +189,10 @@ public sealed class FakeInventory
 /// <c>SetRarity</c>, <c>SetEnhancements</c> and <c>SetLevel</c> run Kiln.Items' own code on it with kiln.items' rules (a write at
 /// the start of the next step, its task then; the shown rarity and level one step later), and the gear events are
 /// Kiln.Items' (the game's own change: <see cref="SetGear"/>, seen by Kiln.Items' read of the players' items). Max durability
-/// is not computed again after a change (the kit has no balancing table) and nothing is equipped.</para>
+/// is not computed again after a change (the kit has no balancing table) and nothing is equipped. Upgrades
+/// (&lt;c&gt;items.gear.upgrade&lt;/c&gt;): &lt;see cref="global::Kiln.Items.UpgradeRarity(EntityId, ItemInstanceRef, RarityUpgradeRule, UpgradeOptions?)"/&gt;
+/// runs Kiln.Items' own code; the fake takes the cost from the payers' plain stacks and makes the write in the same step, all
+/// or nothing, with kiln.items' rules (&lt;see cref="SetUpgradeRolls"/&gt; names the rolls).</para>
 /// <para><b>Not modelled</b> (they report offline): water (<c>items.fuel</c>), moves between inventories
 /// (<c>items.move</c>: the v3 functions are not there), container names, transfer hooks, item instances (locations,
 /// save-record fields, <c>Items.Held</c>), equip and unequip, recipe results, upgrades and gem slots at creation; the
@@ -292,6 +295,26 @@ public sealed class HarnessItems
     {
         if (item.IsNone) throw new ArgumentException("no item", nameof(item));
         _harness.Run(() => Fake.SetGear(item.Entity.Id.Value, (uint)(item.Entity.Serial & IdentitySources.MaxStampValue), enhancements, unlocked, level, durability));
+    }
+
+    /// <summary>Names the rolls of the upgrades that follow (<see cref="global::Kiln.Items.UpgradeRarity(EntityId, ItemInstanceRef, RarityUpgradeRule, UpgradeOptions?)"/>),
+    /// in order, each 0 (inclusive) to 1 (exclusive): a roll below the step's chance succeeds. Only a chance between 0 and 1
+    /// takes a roll (and <see cref="SocketRule.GameChance"/>'s socket roll after a success). No rolls: the server's random
+    /// numbers again. An upgrade that needs a roll after the named ones are used throws.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">A roll outside 0 (inclusive) to 1 (exclusive).</exception>
+    public void SetUpgradeRolls(params double[] rolls)
+    {
+        ArgumentNullException.ThrowIfNull(rolls);
+        foreach (var r in rolls)
+            if (!(r >= 0 && r < 1)) throw new ArgumentOutOfRangeException(nameof(rolls), r, "a roll is 0 (inclusive) to 1 (exclusive)");
+        if (rolls.Length == 0)
+        {
+            ItemUpgrades.Roller = null;
+            return;
+        }
+        var queue = new Queue<double>(rolls);
+        ItemUpgrades.Roller = () => queue.Count > 0 ? queue.Dequeue()
+            : throw new InvalidOperationException($"the test named {rolls.Length} upgrade roll(s) and an upgrade needed another (HarnessItems.SetUpgradeRolls)");
     }
 
     /// <summary>The ref of a gear item entity with its stamp (none without one), as Kiln.Items builds it.</summary>

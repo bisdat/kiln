@@ -83,8 +83,13 @@ static_assert(offsetof(KilnItemsApi, socket_roll) == 288);
 static_assert(offsetof(KilnItemsApi, gear_write) == 296 && offsetof(KilnItemsApi, gear_read) == 304 &&
               offsetof(KilnItemsApi, gear_status) == 312);
 // v8 (package P5) then appends rarity_rolls and roll_status: a reader built before them sees a table ending at 320.
-static_assert(offsetof(KilnItemsApi, rarity_rolls) == 320 && offsetof(KilnItemsApi, roll_status) == 328 &&
-              sizeof(KilnItemsApi) == 336);
+static_assert(offsetof(KilnItemsApi, rarity_rolls) == 320 && offsetof(KilnItemsApi, roll_status) == 328);
+// v8 (package P3) then appends gear_upgrade: a reader built before it sees a table ending at 336.
+static_assert(offsetof(KilnItemsApi, gear_upgrade) == 336 && sizeof(KilnItemsApi) == 344);
+static_assert(sizeof(KilnItemsUpgradeCost) == 8 && sizeof(KilnItemsUpgradeRequest) == 160 && offsetof(KilnItemsUpgradeRequest, gear) == 24 &&
+              offsetof(KilnItemsUpgradeRequest, costs) == 64 && offsetof(KilnItemsUpgradeRequest, payers) == 128 &&
+              sizeof(KilnItemsUpgradeResult) == 392 && offsetof(KilnItemsUpgradeResult, paid) == 32 &&
+              offsetof(KilnItemsUpgradeResult, have) == 64 && offsetof(KilnItemsUpgradeResult, gear) == 96);
 static_assert(sizeof(KilnItemsRarityRoll) == 32 && offsetof(KilnItemsRarityRoll, weights) == 8 &&
               sizeof(KilnItemsRollStatus) == 248 && offsetof(KilnItemsRollStatus, rolled) == 24);
 static_assert(sizeof(KilnItemsGearRequest) == 40 && sizeof(KilnItemsGearState) == 44 && sizeof(KilnItemsGearResult) == 296 &&
@@ -1674,6 +1679,12 @@ KilnResult KILN_CALL t_rarity_rolls(KilnOwner owner, const KilnItemsRarityRoll* 
 }
 KilnResult KILN_CALL t_roll_status(KilnItemsRollStatus* out) { return pide_roll_status(out); }
 
+// ---- v8 (P3): upgrades, a gear write paid for (gear.cpp) ----
+KilnResult KILN_CALL t_gear_upgrade(KilnOwner owner, const KilnItemsUpgradeRequest* r, KilnItemsUpgradeDoneFn done, void* user,
+                                    uint64_t* out_ticket) {
+    return gear_upgrade(owner, r, done, user, out_ticket);
+}
+
 const KilnItemsApi kTable = {
     {sizeof(KilnItemsApi), KILN_ITEMS_VERSION},
     &t_give, &t_take, &t_cancel, &t_cancel_owner, &t_read, &t_find,
@@ -1687,6 +1698,7 @@ const KilnItemsApi kTable = {
     &t_socket_roll,
     &t_gear_write, &t_gear_read, &t_gear_status,
     &t_rarity_rolls, &t_roll_status,
+    &t_gear_upgrade,
 };
 
 // ============================================================================================= self-test =======
