@@ -3,7 +3,8 @@
 // real thing): the ABI layout of kiln_repl.h; the fault rule of guard.h, the one shape of every observer detour (a
 // forced access violation in an observer leaves the original's result intact, the original runs exactly once, the
 // hook is disabled and says so once); the record rings (rings.h: overflow counts `dropped`, the next record carries
-// gap = 1, wrap, the record limit, a second producer); what a send-callback batch counts for (wire.h).
+// gap = 1, wrap, the record limit, a second producer); what a send-callback batch counts for (wire.h); a state blob
+// sliced for a watch, both forms of its whole component set (wire.h state_parts, with a stand-in StateIndex).
 #include <windows.h>
 
 #include <cstddef>
@@ -353,6 +354,139 @@ void observer_depth() {
     CHECK(f.disabled.load() && repl::t_in_observer == 0);  // a fault leaves the depth right
 }
 
+
+// ---- S5: a state blob sliced for a watch (wire.h state_parts) ----
+// The game's StateIndex gives each component's data offset; a stand-in built from the format (chapter 11 §2.3) plays
+// it here: list 1 (u16 index [+ u8 version]), the whole component set in either form (fewer than 40: u8 0, u8 n,
+// n x u16; 40 or more: u8 1 + the 80-byte mask), then list 1's data, each aligned to its type's alignment.
+struct FakeReg {
+    uint32_t count = 64;
+    struct Facts {
+        uint16_t size = 0;
+        uint32_t flags = 0;
+        uint32_t hash = 0;
+    } at[repl::kMaxComponents];
+};
+struct BlobPart {
+    uint16_t index, size, align;
+    bool versioned;
+    uint8_t fill;
+};
+uint32_t align_up(uint32_t v, uint32_t a) { return (v + a - 1) / a * a; }
+
+std::vector<uint8_t> make_blob(const std::vector<BlobPart>& parts, const std::vector<uint16_t>& whole, uint32_t tick) {
+    std::vector<uint8_t> b(8);
+    for (const BlobPart& p : parts) {
+        b.push_back(static_cast<uint8_t>(p.index));
+        b.push_back(static_cast<uint8_t>(p.index >> 8));
+        if (p.versioned) b.push_back(0x77);
+    }
+    if (whole.size() < 40) {
+        b.push_back(0);
+        b.push_back(static_cast<uint8_t>(whole.size()));
+        for (uint16_t i : whole) {
+            b.push_back(static_cast<uint8_t>(i));
+            b.push_back(static_cast<uint8_t>(i >> 8));
+        }
+    } else {
+        b.push_back(1);
+        uint8_t mask[80] = {};
+        for (uint16_t i : whole) mask[i >> 3] |= static_cast<uint8_t>(1u << (i & 7));
+        b.insert(b.end(), mask, mask + 80);
+    }
+    for (const BlobPart& p : parts) {
+        b.resize(align_up(static_cast<uint32_t>(b.size()), p.align), 0xEE);
+        b.insert(b.end(), p.size, p.fill);
+    }
+    const uint16_t size = static_cast<uint16_t>(b.size()), count = static_cast<uint16_t>(parts.size());
+    std::memcpy(b.data(), &size, 2);
+    std::memcpy(b.data() + 2, &count, 2);
+    std::memcpy(b.data() + 4, &tick, 4);
+    return b;
+}
+
+// The stand-in StateIndex: offsets (from state + 8) at +kIndexOffsets, the whole set's mask at +kIndexWholeSet; it ORs
+// into the buffer and leaves absent components alone, as the game's does (§2.7).
+const FakeReg* g_index_reg = nullptr;
+std::vector<uint16_t> g_index_aligns;
+bool stand_in_index(uint8_t* index, const uint8_t* s) {
+    const uint16_t total = repl::u16_at(s), count = repl::u16_at(s + 2);
+    uint32_t o = 8;
+    std::vector<uint16_t> list;
+    for (uint32_t k = 0; k < count; ++k) {
+        const uint16_t i = repl::u16_at(s + o);
+        o += 2;
+        if (g_index_reg->at[i].flags & KILN_REPL_COMPONENT_VERSIONED) o += 1;
+        list.push_back(i);
+    }
+    if (s[o] == 0) {
+        const uint8_t n = s[o + 1];
+        o += 2;
+        for (uint8_t k = 0; k < n; ++k, o += 2) {
+            const uint16_t i = repl::u16_at(s + o);
+            index[repl::kIndexWholeSet + (i >> 3)] |= static_cast<uint8_t>(1u << (i & 7));
+        }
+    } else {
+        for (int k = 0; k < 80; ++k) index[repl::kIndexWholeSet + k] |= s[o + 1 + k];
+        o += 81;
+    }
+    for (uint16_t i : list) {
+        o = align_up(o, g_index_aligns[i]);
+        const uint16_t off = static_cast<uint16_t>(o - 8);
+        std::memcpy(index + repl::kIndexOffsets + i * 2, &off, 2);
+        o += g_index_reg->at[i].size;
+    }
+    (void)total;  // the game's StateIndex checks nothing either: state_parts must
+    return true;
+}
+
+void state_blobs() {
+    static FakeReg reg;
+    g_index_reg = &reg;
+    g_index_aligns.assign(repl::kMaxComponents, 1);
+    const std::vector<BlobPart> parts = {{3, 4, 4, false, 0x11}, {9, 1, 1, true, 0x22}, {17, 16, 16, false, 0x33},
+                                         {40, 2, 2, false, 0x44}, {63, 12, 4, true, 0x55}};
+    for (const BlobPart& p : parts) {
+        reg.at[p.index].size = p.size;
+        reg.at[p.index].flags = p.versioned ? KILN_REPL_COMPONENT_VERSIONED : 0;
+        g_index_aligns[p.index] = p.align;
+    }
+    std::vector<uint16_t> small = {3, 5, 9, 17, 22, 40, 63};  // the whole set: client-only components too
+    std::vector<uint16_t> big;
+    for (uint16_t i = 0; i < 45; ++i) big.push_back(i);
+    big.push_back(63);
+    for (const auto* whole : {&small, &big}) {
+        const std::vector<uint8_t> blob = make_blob(parts, *whole, 1234);
+        repl::Part got[16];
+        uint32_t n = 99;
+        const bool ok = repl::state_parts(reg, blob.data(), &stand_in_index, got, 16, &n);
+        CHECK(ok && n == parts.size());
+        bool same = ok && n == parts.size();
+        for (uint32_t k = 0; same && k < n; ++k) {
+            same = got[k].index == parts[k].index && got[k].size == parts[k].size && got[k].off % parts[k].align == 0 &&
+                   got[k].off + got[k].size <= blob.size();
+            for (uint32_t b = 0; same && b < got[k].size; ++b) same = blob[got[k].off + b] == parts[k].fill;
+        }
+        CHECK(same);  // every slice is that component's bytes, in list 1's order, both whole-set forms
+    }
+    // a blob whose size field is cut short of its data: refused, never read past it
+    std::vector<uint8_t> cut = make_blob(parts, small, 1);
+    const uint16_t short_size = static_cast<uint16_t>(cut.size() - 8);
+    std::memcpy(cut.data(), &short_size, 2);
+    repl::Part got[16];
+    uint32_t n = 0;
+    CHECK(!repl::state_parts(reg, cut.data(), &stand_in_index, got, 16, &n));
+    // a component index outside the registry: refused
+    reg.count = 50;
+    const std::vector<uint8_t> blob = make_blob(parts, small, 1);
+    CHECK(!repl::state_parts(reg, blob.data(), &stand_in_index, got, 16, &n));
+    reg.count = 64;
+    // more parts than the caller's room: refused (a watch copies all or nothing)
+    CHECK(!repl::state_parts(reg, blob.data(), &stand_in_index, got, 3, &n));
+    // the index faulted: nothing
+    CHECK(!repl::state_parts(reg, blob.data(), [](uint8_t*, const uint8_t*) { return false; }, got, 16, &n) && n == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -361,6 +495,7 @@ int main() {
     rings();
     batches();
     observer_depth();
+    state_blobs();
     std::printf("repl host tests: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
 }

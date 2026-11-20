@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <iterator>
 #include <cstdlib>
 #include <cstring>
 #include <malloc.h>
@@ -72,11 +73,13 @@ std::mutex g_owners_mu;                // the tick thread and an owner-retiring 
 KilnOwner g_owners[kMaxOwners];
 uint32_t g_owner_n = 0;
 std::atomic<bool> g_hooks_dirty{false};  // an owner went off the tick thread: Pre applies it
+std::atomic<bool> g_counting{false};     // some owner holds the stats (the hooks may be in for a watch alone)
 
 // ---- the hooks ----
 Guard g_cb_guard{"stats-callback"}, g_wr_guard{"stats-writer"}, g_ack_guard{"stats-ack"}, g_reset_guard{"stats-reset"};
 kiln::RawHook h_cb, h_wr, h_ack, h_reset;
-bool g_hooked = false;  // tick thread
+bool g_send_hooked = false;  // tick thread: SendCallback and EntityWriter (the stats and the watches)
+bool g_tick_hooked = false;  // tick thread: AckReceive and EcsReset (the stats only)
 
 using CallbackFn = void (*)(CbPair* pair);
 using WriterFn = uint64_t (*)(WriterOut* out, uint8_t* args);
@@ -93,15 +96,18 @@ void cb_after(void* p) {
     const Batch* b = c->pair ? c->pair->batch : nullptr;
     if (!b || b->machine >= KILN_REPL_MACHINES) return;
     Slot& s = g_slot[b->machine][b->pred & 1];
-    const BatchCount n = count_batch(b->msgs, b->count, b->sent);
-    add(s.frames);
-    add(s.messages, n.messages);
-    add(s.bytes, n.bytes);
-    add(s.refused, n.refused);
-    add(s.creates, n.creates);
-    add(s.updates, n.updates);
-    add(s.destroy_lists, n.destroy_lists);
-    add(s.destroyed_ids, n.destroyed_ids);
+    if (g_counting.load(std::memory_order_relaxed)) {
+        const BatchCount n = count_batch(b->msgs, b->count, b->sent);
+        add(s.frames);
+        add(s.messages, n.messages);
+        add(s.bytes, n.bytes);
+        add(s.refused, n.refused);
+        add(s.creates, n.creates);
+        add(s.updates, n.updates);
+        add(s.destroy_lists, n.destroy_lists);
+        add(s.destroyed_ids, n.destroyed_ids);
+    }
+    if (watch_active()) watch_callback(b);
     if (t0) {
         add(s.cb_calls);
         add(s.cb_cycles, __rdtsc() - t0);
@@ -133,8 +139,9 @@ void wr_before(void* p) {
     if (m < 0) return;
     c->ctx = ctx;
     c->pred = pred;
-    c->unchanged_before = *reinterpret_cast<const uint64_t*>(ctx + kCtxUnchanged);
+    if (g_counting.load(std::memory_order_relaxed)) c->unchanged_before = *reinterpret_cast<const uint64_t*>(ctx + kCtxUnchanged);
     c->machine = m;
+    watch_writer_before(c->args, ctx, m, pred);
     if (t0) c->cycles = __rdtsc() - t0;
 }
 void wr_after(void* p) {
@@ -142,11 +149,12 @@ void wr_after(void* p) {
     auto* c = static_cast<WrCall*>(p);
     if (c->machine < 0) return;
     Slot& s = g_slot[c->machine][c->pred & 1];
-    if (c->result && c->out && c->out->skipped) {
+    if (g_counting.load(std::memory_order_relaxed) && c->result && c->out && c->out->skipped) {
         // §2.6: nothing changed moves the context's unchanged counter; a message over the channel's maximum does not
         if (*reinterpret_cast<const uint64_t*>(c->ctx + kCtxUnchanged) != c->unchanged_before) add(s.unchanged);
         else add(s.too_big);
     }
+    watch_writer_after(c->out, c->result);
     if (t0) {
         add(s.wr_calls);
         add(s.wr_cycles, c->cycles + (__rdtsc() - t0));
@@ -154,7 +162,9 @@ void wr_after(void* p) {
 }
 uint64_t d_wr(WriterOut* out, uint8_t* args) {
     WrCall c{out, args, 0, 0, 0, 0, -1, 0};
-    return detour(g_wr_guard, &c, &wr_before, &wr_after, h_wr.original<WriterFn>(), out, args);
+    const uint64_t r = detour(g_wr_guard, &c, &wr_before, &wr_after, h_wr.original<WriterFn>(), out, args);
+    watch_writer_done();  // outside the guard: no watch reservation outlives the writer call
+    return r;
 }
 
 // AckReceive, EcsReset (tick thread)
@@ -166,7 +176,7 @@ void tick_before(void* p) {
     const uint64_t t0 = tsc();
     const auto* c = static_cast<TickCall*>(p);
     const uint32_t m = static_cast<uint8_t>(c->machine);
-    if (m >= KILN_REPL_MACHINES) return;
+    if (m >= KILN_REPL_MACHINES || !g_counting.load(std::memory_order_relaxed)) return;
     Slot& s = g_slot[m][static_cast<uint8_t>(c->pred) & 1];
     add(c->reset ? s.resets : s.acks);
     if (t0) {
@@ -183,45 +193,69 @@ void d_reset(uintptr_t world, uint64_t machine, const Slice* ids, uint64_t pred)
     detour(g_reset_guard, &c, &tick_before, nullptr, h_reset.original<ResetFn>(), world, machine, ids, pred);
 }
 
-void unhook() {
-    for (kiln::RawHook* h : {&h_cb, &h_wr, &h_ack, &h_reset}) h->revoke();
-    g_hooked = false;
+struct One {
+    kiln::RawHook* h;
+    uintptr_t target;
+    void* fn;
+    const char* label;
+};
+
+// Installs a group of hooks, all or none.
+bool install_all(const One* all, size_t n, const char* what) {
+    for (size_t i = 0; i < n; ++i)
+        if (!all[i].h->install(g_api, g_owner, all[i].target, all[i].fn, all[i].label)) {
+            logf(KILN_LOG_WARN, "repl: %s hooks not installed (%s: %s)", what, all[i].label, all[i].h->error() ? all[i].h->error() : "?");
+            for (size_t k = 0; k < n; ++k) all[k].h->revoke();
+            return false;
+        }
+    return true;
 }
 
-// Tick thread: the hooks follow the owners.
-void apply_hooks() {
+}  // namespace
+
+// Tick thread: the hooks follow the owners (counting) and the watches (the writer and the callback serve both).
+void stats_apply_hooks() {
     g_hooks_dirty.store(false, std::memory_order_relaxed);
-    bool want;
+    bool counting;
     {
         std::lock_guard lock(g_owners_mu);
-        want = g_owner_n > 0;
+        counting = g_owner_n > 0;
     }
-    if (want == g_hooked) return;
-    if (!want) {
-        unhook();
-        logf(KILN_LOG_INFO, "repl: stats hooks removed (no owner holds the stats)");
-        return;
-    }
-    struct One {
-        kiln::RawHook* h;
-        uintptr_t target;
-        void* fn;
-        const char* label;
-    } all[] = {
-        {&h_cb, F.send_callback, reinterpret_cast<void*>(&d_cb), "repl/stats SendCallback"},
-        {&h_wr, F.entity_writer, reinterpret_cast<void*>(&d_wr), "repl/stats EntityWriter"},
-        {&h_ack, F.ack_receive, reinterpret_cast<void*>(&d_ack), "repl/stats AckReceive"},
-        {&h_reset, F.ecs_reset, reinterpret_cast<void*>(&d_reset), "repl/stats EcsReset"},
-    };
-    for (const One& o : all)
-        if (!o.h->install(g_api, g_owner, o.target, o.fn, o.label)) {
-            logf(KILN_LOG_WARN, "repl: stats hooks not installed (%s: %s)", o.label, o.h->error() ? o.h->error() : "?");
-            unhook();
-            return;
+    g_counting.store(counting, std::memory_order_relaxed);
+    const bool want_send = counting || watch_active(), want_tick = counting;
+    if (want_send != g_send_hooked) {
+        if (want_send) {
+            const One send[] = {
+                {&h_cb, F.send_callback, reinterpret_cast<void*>(&d_cb), "repl/stats SendCallback"},
+                {&h_wr, F.entity_writer, reinterpret_cast<void*>(&d_wr), "repl/stats EntityWriter"},
+            };
+            g_send_hooked = install_all(send, std::size(send), "send");
+            if (g_send_hooked) logf(KILN_LOG_INFO, "repl: send hooks installed (send callback, entity writer) for %s", counting ? "the stats" : "a watch");
+        } else {
+            h_cb.revoke();
+            h_wr.revoke();
+            g_send_hooked = false;
+            logf(KILN_LOG_INFO, "repl: send hooks removed (no stats, no watch)");
         }
-    g_hooked = true;
-    logf(KILN_LOG_INFO, "repl: stats hooks installed (send callback, entity writer, ack, reset)");
+    }
+    if (want_tick != g_tick_hooked) {
+        if (want_tick) {
+            const One tick[] = {
+                {&h_ack, F.ack_receive, reinterpret_cast<void*>(&d_ack), "repl/stats AckReceive"},
+                {&h_reset, F.ecs_reset, reinterpret_cast<void*>(&d_reset), "repl/stats EcsReset"},
+            };
+            g_tick_hooked = install_all(tick, std::size(tick), "ack");
+            if (g_tick_hooked) logf(KILN_LOG_INFO, "repl: ack hooks installed (ack, reset)");
+        } else {
+            h_ack.revoke();
+            h_reset.revoke();
+            g_tick_hooked = false;
+            logf(KILN_LOG_INFO, "repl: ack hooks removed (no owner holds the stats)");
+        }
+    }
 }
+
+namespace {
 
 void clear_all_stats() {
     for (auto& m : g_slot)
@@ -230,6 +264,7 @@ void clear_all_stats() {
 
 // ---- owner revoked (any thread) ----
 void KILN_CALL owner_retiring(KilnOwner owner, void*) {
+    watch_owner_retiring(owner);
     std::lock_guard lock(g_owners_mu);
     for (uint32_t i = 0; i < g_owner_n; ++i)
         if (g_owners[i] == owner) {
@@ -267,7 +302,7 @@ void stats_init() {
 }
 
 void stats_pre() {
-    if (g_hooks_dirty.load(std::memory_order_relaxed)) apply_hooks();
+    if (g_hooks_dirty.load(std::memory_order_relaxed)) stats_apply_hooks();
 }
 
 void stats_peer_changed(uint32_t machine) {
@@ -296,13 +331,13 @@ KilnResult KILN_CALL t_stats_enable(KilnOwner owner, bool on) {
         while (i < g_owner_n && g_owners[i] != owner) ++i;
         if (on && i == g_owner_n) {
             if (g_owner_n >= kMaxOwners) return KILN_ERR_INVALID_ARGUMENT;
-            if (g_owner_n == 0 && !g_hooked) clear_all_stats();  // the first enable: counters from 0 (no hook runs yet)
+            if (g_owner_n == 0) clear_all_stats();  // the first enable: counters from 0 (tick thread: no replication job runs)
             g_owners[g_owner_n++] = owner;
         } else if (!on && i < g_owner_n) {
             g_owners[i] = g_owners[--g_owner_n];
         }
     }
-    apply_hooks();
+    stats_apply_hooks();
     return KILN_OK;
 }
 
@@ -318,7 +353,7 @@ KilnResult KILN_CALL t_peer_stats(KilnReplPeerStats* out, uint32_t cap, uint32_t
         if (m == 0 && side() == KILN_SIDE_CLIENT) flags |= KILN_REPL_PEER_LOCAL;
         for (uint32_t ch = 0; ch < 2; ++ch) {
             const Slot& s = g_slot[m][ch];
-            const uint64_t dropped = 0;  // the watch rings (S5)
+            const uint64_t dropped = watch_dropped(m, ch);  // records the watch rings dropped
             if (!s.any() && !dropped) continue;
             if (rows < cap) {
                 KilnReplPeerStats& r = out[rows];
@@ -397,6 +432,12 @@ KilnResult KILN_CALL lab_hook_cost(KilnReplHookCost* out, bool reset) {
         out->tick_calls = get(g_tick_calls);
         out->tick_ns = ns(get(g_tick_cycles));
         out->allocations = g_observer_allocs.load(std::memory_order_relaxed);
+        WatchCost wc{};
+        watch_cost(&wc);
+        out->delta_calls = wc.delta_calls;
+        out->delta_ns = ns(wc.delta_cycles);
+        out->watch_records = wc.records;
+        out->watch_dropped = wc.dropped;
     }
     if (reset) {
         for (auto& m : g_slot)
@@ -404,6 +445,7 @@ KilnResult KILN_CALL lab_hook_cost(KilnReplHookCost* out, bool reset) {
         g_tick_calls.store(0, std::memory_order_relaxed);
         g_tick_cycles.store(0, std::memory_order_relaxed);
         g_observer_allocs.store(0, std::memory_order_relaxed);
+        watch_cost_reset();
         g_steps = 0;
         g_last_step_start = 0;
         g_window_tsc = now;

@@ -122,9 +122,14 @@ void snapshot_peers() {
             p.peer = lab_peer_of(m, &p.flags);
         else if (gs && L.gs_machines >= 0)
             p.peer = read<uint32_t>(gs + static_cast<uintptr_t>(L.gs_machines) + m * kMachineSlotStride);
-        const bool changed = p.peer != g_peers[m].peer;
+        if (m == 0 && p.peer && g_side == KILN_SIDE_CLIENT) p.flags |= KILN_REPL_PEER_LOCAL;  // a hosted world's own client
+        const uint32_t old = g_peers[m].peer;
+        const bool changed = p.peer != old;
         g_peers[m] = p;
-        if (changed) stats_peer_changed(m);
+        if (changed) {
+            stats_peer_changed(m);
+            watch_peer_changed(m, old);
+        }
     }
 }
 
@@ -133,6 +138,7 @@ namespace {
 // ---- the registry's component facts ----
 std::mutex g_registry_mu;            // component_info off the tick thread
 Registry* g_registry = nullptr;      // read on the tick thread, published under g_registry_mu
+std::atomic<const Registry*> g_registry_hot{nullptr};  // the same, for the job threads (registry_hot)
 uintptr_t g_registry_world = 0;      // the world it was read from
 
 struct RawRegistry {
@@ -223,6 +229,7 @@ void read_registry(uintptr_t world) {
         g_registry = reg;
         g_registry_world = world;
     }
+    g_registry_hot.store(reg, std::memory_order_release);  // Pre: no replication job runs now
     delete old;
     uint32_t replicated = 0, custom = 0;
     for (uint32_t i = 0; i < reg->count; ++i) {
@@ -248,6 +255,7 @@ void KILN_CALL on_pre(const KilnTickInfo*, void*) {
     stats_pre();
     if (world) {
         lab_pre(world);
+        watch_deliver();   // the last frame's records, under the peers that frame had
         snapshot_peers();
     }
 }
@@ -255,6 +263,7 @@ void KILN_CALL on_pre(const KilnTickInfo*, void*) {
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (!ev || ev->kind != KILN_WORLD_SERVER || ev->event != KILN_WORLD_STOPPING) return;
     lab_world_stopping();
+    watch_world_stopping();
     stats_world_stopping();
     for (MachinePeer& p : g_peers) p = MachinePeer{};
     g_world.store(0, std::memory_order_relaxed);
@@ -266,12 +275,6 @@ uint32_t KILN_CALL t_capabilities() {
     return (g_observe ? KILN_REPL_CAP_OBSERVE : 0u) | (lab_allowed() ? KILN_REPL_CAP_LOOPBACK : 0u);
 }
 
-KilnResult KILN_CALL t_watch(KilnOwner, KilnEntity, uint32_t, uint32_t, KilnReplWatchFn, void*, KilnHandle* out) {
-    if (out) *out = 0;
-    return KILN_ERR_UNAVAILABLE;
-}
-KilnResult KILN_CALL t_remove(KilnHandle h) { return h == 0 ? KILN_ERR_INVALID_ARGUMENT : KILN_ERR_NOT_FOUND; }
-KilnResult KILN_CALL t_capture(KilnOwner, uint32_t, uint32_t, KilnStr) { return KILN_ERR_UNAVAILABLE; }
 
 KilnResult KILN_CALL t_component_info(uint32_t hash, KilnReplComponentInfo* out) {
     if (!out || out->size < sizeof(KilnReplComponentInfo)) return KILN_ERR_INVALID_ARGUMENT;
@@ -364,6 +367,15 @@ int machine_of_ctx(uintptr_t world, uintptr_t ctx, uint8_t* pred) {
     return static_cast<int>(m);
 }
 
+const Registry* registry_hot() { return g_registry_hot.load(std::memory_order_acquire); }
+
+// The client's receive side is not built yet: KILN_REPL_RECEIVE watches are refused.
+KilnResult client_watch(KilnOwner, KilnEntity, KilnReplWatchFn, void*, KilnHandle* out) {
+    if (out) *out = 0;
+    return KILN_ERR_UNAVAILABLE;
+}
+KilnResult client_remove(KilnHandle) { return KILN_ERR_NOT_FOUND; }
+
 const Registry* registry() {
     std::lock_guard lock(g_registry_mu);
     return g_registry;
@@ -403,6 +415,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     } else {
         g_observe = true;
         stats_init();
+        watch_init();
         logf(KILN_LOG_INFO, "repl: observe on (send step hooked; per-peer stats and watches install their hooks when asked)");
     }
     // repl.client: a Kiln client's receive side.

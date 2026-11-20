@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// kiln.repl's send watch (kiln_repl.h watch / remove; the dossier's chapter 11 §4.1 "Server watch", §2.3, §2.6).
+// kiln.repl's send watch and capture (kiln_repl.h watch / remove / capture; the dossier's chapter 11 §4.1 "Server watch",
+// §2.3, §2.6, §5.2 "Surfaces").
 //
 // A watch is the snapshot, no decoder and no mirror: what a peer is sent of an entity is the state the delta writer
 // codes, so the DeltaWriter hook copies the watched entity's components out of that snapshot (offsets from the game's
@@ -11,12 +12,19 @@
 // In the next Pre the tick thread reads the rings and calls each watch's fn: one event per message, then
 // KILN_REPL_KIND_DESTROYED, then KILN_REPL_KIND_ENDED as the last event (destroyed, id reused for another template,
 // its one peer left, the world stopped). Only a watched entity is copied; nothing allocates in a hook.
+//
+// A capture is the same for every entity one peer is sent, for a few seconds: the snapshot of each entity message, and
+// (SendCallback) the bytes of every message the session accepted for that peer. The tick thread writes them as JSON
+// lines (tools/replinspect reads them) into kiln/logs.
 #include <windows.h>
 
 #include <intrin.h>
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
+#include <iterator>
+#include <string>
 
 #include "kiln_hook.hpp"
 #include "repl.h"
@@ -48,12 +56,14 @@ struct Watch {
 Watch g_w[kMaxWatches];
 uint64_t g_serial = 0;
 constexpr uint64_t kHandleTag = 0x5245ull << 48;  // "RE"
+std::atomic<bool> g_dirty{false};                 // a watch or the capture was removed off the tick thread: Pre applies it
 
-// What the hooks read: published on the tick thread (Pre, watch(), between frames).
+// What the hooks read: published on the tick thread (Pre, watch(), capture(), between frames).
 struct Hot {
     std::atomic<uint32_t> n{0};
     std::atomic<uint32_t> entity[kMaxWatches];
     std::atomic<uint32_t> machines[kMaxWatches];
+    std::atomic<uint32_t> capture{0};  // bit per machine: every entity's snapshot and every message's bytes
 };
 Hot g_hot;
 
@@ -79,13 +89,14 @@ struct Tls {
     uint32_t entity = 0;
     uintptr_t ctx = 0;
     uint64_t msgs_before = 0;
-    uint8_t* rec = nullptr;  // an open reservation in the (machine, channel)'s ring
+    WSlot* open = nullptr;   // the slot whose ring this writer call may hold a reservation in
+    uint8_t* rec = nullptr;  // that reservation
     uint32_t rec_len = 0;
 };
 thread_local Tls t_w;
 
 // Ring records.
-enum : uint16_t { kRecWatch = 1, kRecDestroy = 2 };
+enum : uint16_t { kRecWatch = 1, kRecDestroy = 2, kRecRaw = 3 };
 struct WatchRec {
     uint32_t entity, tick, seq, baseline_tick, payload_bytes;
     uint8_t kind, pad[3];
@@ -101,9 +112,13 @@ struct RecComp {
 struct DestroyRec {
     uint32_t entity, tick, seq;
 };
-static_assert(sizeof(WatchRec) == 48 && sizeof(RecComp) == 16);
+struct RawRec {  // then `size` bytes: a whole message as the session took it (capture)
+    uint32_t seq, size;
+    uint8_t type, pad[3];
+};
+static_assert(sizeof(WatchRec) == 48 && sizeof(RecComp) == 16 && sizeof(RawRec) == 12);
 
-bool watched(uint32_t entity, uint32_t machine) {
+bool watched_list(uint32_t entity, uint32_t machine) {
     const uint32_t n = g_hot.n.load(std::memory_order_acquire);
     for (uint32_t i = 0; i < n; ++i)
         if (g_hot.entity[i].load(std::memory_order_relaxed) == entity &&
@@ -111,6 +126,8 @@ bool watched(uint32_t entity, uint32_t machine) {
             return true;
     return false;
 }
+bool captured(uint32_t machine) { return (g_hot.capture.load(std::memory_order_acquire) >> machine) & 1; }
+bool watched(uint32_t entity, uint32_t machine) { return captured(machine) || watched_list(entity, machine); }
 
 struct DeltaCall {
     const uint8_t* snap;
@@ -135,19 +152,20 @@ void delta_before(void* p) {
     uint32_t data = 0;
     for (uint32_t k = 0; k < n; ++k) data += parts[k].size;
     const uint32_t len = static_cast<uint32_t>(sizeof(WatchRec) + n * sizeof(RecComp)) + data;
+    t_w.open = &ws;  // before the reservation: a fault after it still lets the writer's end give it back
     uint8_t* rec = ws.ring.reserve(kRecWatch, len);
     if (!rec) return;  // full: dropped and counted; the next record carries gap
     WatchRec h{};
     h.entity = t_w.entity;
     h.count = static_cast<uint16_t>(n);
     h.data_bytes = data;
-    auto* comps = reinterpret_cast<RecComp*>(rec + sizeof(WatchRec));
+    auto* comps = rec + sizeof(WatchRec);
     uint8_t* out = rec + sizeof(WatchRec) + n * sizeof(RecComp);
     uint32_t off = 0;
     for (uint32_t k = 0; k < n; ++k) {
         const ComponentFacts& f = reg->at[parts[k].index];
         RecComp rc{parts[k].index, parts[k].size, f.hash, off, static_cast<uint8_t>((f.flags & KILN_REPL_COMPONENT_CUSTOM_CODEC) ? 1 : 0), {}};
-        std::memcpy(&comps[k], &rc, sizeof rc);
+        std::memcpy(comps + k * sizeof(RecComp), &rc, sizeof rc);
         std::memcpy(out + off, c->snap + parts[k].off, parts[k].size);
         off += parts[k].size;
     }
@@ -199,9 +217,171 @@ void end(Watch& w, uint32_t reason) {
 
 KilnReplComponent g_comps[kMaxComponents];  // the event's component list (tick thread)
 
+// ---- the capture (tick thread) ----
+struct CaptureState {
+    std::FILE* f = nullptr;
+    KilnOwner owner = 0;
+    uint32_t peer = 0, machines = 0;
+    uint64_t end_ms = 0;  // GetTickCount64() deadline
+    uint64_t messages = 0, dropped_before = 0;
+    std::atomic<bool> removed{false};  // its owner went (any thread)
+    std::string path;
+};
+CaptureState g_cap;
+// The snapshot records of the (machine, channel) being drained, by seq, for its messages' lines.
+struct Stash {
+    uint32_t seq;
+    const uint8_t* rec;
+    uint32_t len;
+};
+constexpr uint32_t kStash = 4096;
+Stash g_stash[kStash];
+uint32_t g_stash_n = 0;
+
+uint64_t utc_ms() {
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    const uint64_t t = (static_cast<uint64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+    return t / 10000 - 11644473600000ull;
+}
+std::string utc_iso() {
+    SYSTEMTIME st;
+    GetSystemTime(&st);
+    char b[40];
+    std::snprintf(b, sizeof b, "%04u-%02u-%02uT%02u:%02u:%02u.%03uZ", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+                  st.wMilliseconds);
+    return b;
+}
+void hex(std::string& out, const uint8_t* p, uint64_t n) {
+    static constexpr char k[] = "0123456789abcdef";
+    const size_t at = out.size();
+    out.resize(at + n * 2);
+    for (uint64_t i = 0; i < n; ++i) {
+        out[at + 2 * i] = k[p[i] >> 4];
+        out[at + 2 * i + 1] = k[p[i] & 15];
+    }
+}
+void json_str(std::string& out, const std::string& s) {
+    out += '"';
+    for (char c : s) {
+        if (c == '"' || c == '\\') out += '\\';
+        if (static_cast<unsigned char>(c) < 0x20) continue;
+        out += c;
+    }
+    out += '"';
+}
+uint64_t capture_ring_drops() {
+    uint64_t d = 0;
+    if (g_rings)
+        for (uint32_t m = 0; m < KILN_REPL_MACHINES; ++m)
+            if ((g_cap.machines >> m) & 1) d += g_ws[m][0].ring.dropped() + g_ws[m][1].ring.dropped();
+    return d;
+}
+
+void capture_end(const char* why) {
+    if (!g_cap.f) return;
+    const uint64_t dropped = capture_ring_drops() - g_cap.dropped_before;
+    std::string line = "{\"type\":\"end\",\"messages\":" + std::to_string(g_cap.messages) + ",\"dropped\":" + std::to_string(dropped) +
+                       ",\"utc\":\"" + utc_iso() + "\",\"reason\":";
+    json_str(line, why);
+    line += "}\n";
+    std::fputs(line.c_str(), g_cap.f);
+    std::fclose(g_cap.f);
+    g_cap.f = nullptr;
+    logf(KILN_LOG_INFO, "repl: capture of peer 0x%x ended (%s): %llu messages, %llu records dropped; %s", g_cap.peer, why,
+         static_cast<unsigned long long>(g_cap.messages), static_cast<unsigned long long>(dropped), g_cap.path.c_str());
+    g_cap.machines = 0;
+    g_cap.owner = 0;
+    g_cap.removed.store(false, std::memory_order_relaxed);
+    g_dirty.store(true, std::memory_order_relaxed);
+}
+
+// One line per message the captured peer's session took: its bytes and, for an entity message, the snapshot it coded.
+void capture_line(uint32_t m, uint32_t ch, const RecordHeader& rh, const uint8_t* p) {
+    if (!g_cap.f || !((g_cap.machines >> m) & 1) || rh.len < sizeof(RawRec)) return;
+    RawRec r;
+    std::memcpy(&r, p, sizeof r);
+    if (sizeof(RawRec) + uint64_t{r.size} > rh.len) return;
+    const uint8_t* d = p + sizeof(RawRec);
+    uint8_t flags = 0;
+    const uint32_t peer = peer_of(m, &flags);
+    std::string line;
+    line.reserve(256 + r.size * 2);
+    line += "{\"type\":\"msg\",\"t\":" + std::to_string(utc_ms()) + ",\"peer\":" + std::to_string(peer) + ",\"ch\":" +
+            std::to_string(ch ? 5 : 4) + ",\"msg\":" + std::to_string(r.type) + ",\"kind\":";
+    uint32_t entity = 0, tick = 0, base = 0;
+    const uint8_t* snap = nullptr;
+    uint32_t snap_len = 0;
+    std::string extra;
+    if (r.type == kMsgEntity) {
+        Header h{};
+        if (parse_header(d, r.size, &h)) {
+            line += h.kind == kKindCreate ? "\"create\"" : "\"update\"";
+            entity = h.entity;
+            tick = h.tick;
+            base = h.kind == kKindUpdate ? h.base : 0;
+            for (uint32_t i = 0; i < g_stash_n; ++i)
+                if (g_stash[i].seq == r.seq) {
+                    snap = g_stash[i].rec;
+                    snap_len = g_stash[i].len;
+                    break;
+                }
+        } else {
+            line += "\"entity\"";
+        }
+    } else if (r.type == kMsgList) {
+        line += "\"destroy\"";
+        DestroyList l;
+        if (parse_destroy(d, r.size, &l)) {
+            tick = l.tick;
+            extra += ",\"a\":[";
+            for (uint32_t k = 0; k < l.na; ++k) extra += (k ? "," : "") + std::to_string(u32_at(l.ids + 4 * k));
+            extra += "],\"b\":[";
+            for (uint32_t k = 0; k < l.nb; ++k) extra += (k ? "," : "") + std::to_string(u32_at(l.ids + 4 * (l.na + k)));
+            extra += "]";
+        }
+    } else {
+        line += r.type == kMsgHandshake ? "\"handshake\"" : "\"frame\"";
+        if (r.type == kMsgFrame && r.size >= 4) tick = u32_at(d) >> 3;
+    }
+    line += ",\"entity\":" + std::to_string(entity) + ",\"tick\":" + std::to_string(tick) + ",\"seq\":" + std::to_string(r.seq) +
+            ",\"base\":" + std::to_string(base) + ",\"bytes\":" + std::to_string(r.size) + ",\"gap\":" + (rh.gap ? "true" : "false");
+    line += extra;
+    const Registry* reg = registry();
+    if (snap && reg && snap_len >= sizeof(WatchRec)) {
+        WatchRec h;
+        std::memcpy(&h, snap, sizeof h);
+        if (sizeof(WatchRec) + uint64_t{h.count} * sizeof(RecComp) + h.data_bytes <= snap_len) {
+            const uint8_t* comps = snap + sizeof(WatchRec);
+            const uint8_t* data = comps + h.count * sizeof(RecComp);
+            line += ",\"components\":{";
+            for (uint32_t k = 0; k < h.count; ++k) {
+                RecComp rc;
+                std::memcpy(&rc, comps + k * sizeof(RecComp), sizeof rc);
+                if (rc.offset + uint64_t{rc.size} > h.data_bytes) break;
+                if (k) line += ',';
+                json_str(line, rc.index < reg->count ? reg->names[rc.index] : "#" + std::to_string(rc.index));
+                line += ":\"";
+                hex(line, data + rc.offset, rc.size);
+                line += '"';
+            }
+            line += '}';
+        }
+    }
+    line += ",\"raw\":\"";
+    hex(line, d, r.size);
+    line += "\"}\n";
+    std::fwrite(line.data(), 1, line.size(), g_cap.f);
+    ++g_cap.messages;
+}
+
 void deliver_record(uint32_t m, uint32_t ch, const RecordHeader& rh, const uint8_t* p) {
     uint8_t flags = 0;
     const uint32_t peer = peer_of(m, &flags);
+    if (rh.type == kRecRaw) {
+        capture_line(m, ch, rh, p);
+        return;
+    }
     if (rh.type == kRecDestroy && rh.len >= sizeof(DestroyRec)) {
         DestroyRec d;
         std::memcpy(&d, p, sizeof d);
@@ -210,6 +390,7 @@ void deliver_record(uint32_t m, uint32_t ch, const RecordHeader& rh, const uint8
             KilnReplWatchEvent e{};
             e.size = sizeof e;
             e.peer = peer;
+            e.peer_flags = flags;
             e.direction = KILN_REPL_SEND;
             e.channel = static_cast<uint8_t>(ch ? 5 : 4);
             e.kind = KILN_REPL_KIND_DESTROYED;
@@ -226,6 +407,11 @@ void deliver_record(uint32_t m, uint32_t ch, const RecordHeader& rh, const uint8
     WatchRec h;
     std::memcpy(&h, p, sizeof h);
     if (sizeof(WatchRec) + uint64_t{h.count} * sizeof(RecComp) + h.data_bytes > rh.len || h.count > kMaxComponents) return;
+    if (g_cap.f && ((g_cap.machines >> m) & 1) && g_stash_n < kStash) g_stash[g_stash_n++] = Stash{h.seq, p, rh.len};
+    bool any = false;
+    for (Watch& w : g_w)
+        any = any || (w.handle.load(std::memory_order_relaxed) && !w.ended && w.entity == h.entity && ((w.machines >> m) & 1));
+    if (!any) return;
     const auto* comps = p + sizeof(WatchRec);
     const uint8_t* data = comps + h.count * sizeof(RecComp);
     for (uint32_t k = 0; k < h.count; ++k) {
@@ -249,6 +435,7 @@ void deliver_record(uint32_t m, uint32_t ch, const RecordHeader& rh, const uint8
         KilnReplWatchEvent e{};
         e.size = sizeof e;
         e.peer = peer;
+        e.peer_flags = flags;
         e.direction = KILN_REPL_SEND;
         e.channel = static_cast<uint8_t>(ch ? 5 : 4);
         e.kind = h.kind;
@@ -285,12 +472,13 @@ bool alloc_rings() {
 }  // namespace
 
 // ---- the EntityWriter and SendCallback hooks' watch part (stats.cpp calls these inside its guard) ----
-bool watch_active() { return g_hot.n.load(std::memory_order_relaxed) != 0; }
+bool watch_active() { return g_hot.n.load(std::memory_order_relaxed) != 0 || g_hot.capture.load(std::memory_order_relaxed) != 0; }
 
 void watch_writer_before(const uint8_t* args, uintptr_t ctx, int32_t machine, uint8_t pred) {
     t_w.machine = -1;
     t_w.rec = nullptr;
-    if (machine < 0) return;
+    t_w.open = nullptr;
+    if (machine < 0 || !watch_active()) return;
     const uintptr_t entry = *reinterpret_cast<const uintptr_t*>(args + kWriterEntry);
     const uint32_t entity = *reinterpret_cast<const uint32_t*>(entry);
     if (!watched(entity, static_cast<uint32_t>(machine))) return;
@@ -307,6 +495,7 @@ void watch_writer_after(const WriterOut* out, uint64_t result) {
     uint8_t* rec = t_w.rec;
     t_w.machine = -1;
     t_w.rec = nullptr;
+    t_w.open = nullptr;
     if (!rec) return;
     const uint64_t count = *reinterpret_cast<const uint64_t*>(t_w.ctx + kCtxMsgCount);
     const auto* msgs = *reinterpret_cast<const MsgEntry* const*>(t_w.ctx + kCtxMsgs);
@@ -331,17 +520,38 @@ void watch_writer_after(const WriterOut* out, uint64_t result) {
     ws.records.fetch_add(1, std::memory_order_relaxed);
 }
 
+// After every writer call, outside any guard (plain stores to kiln.repl's own memory): a reservation an observer left
+// open (it faulted, or its guard is off) is given back, so a ring never stays held.
+void watch_writer_done() {
+    if (t_w.open && t_w.open->ring.reserved()) t_w.open->ring.abort();
+    t_w.open = nullptr;
+    t_w.rec = nullptr;
+    t_w.machine = -1;
+}
+
 void watch_callback(const Batch* b) {
-    if (b->machine >= KILN_REPL_MACHINES) return;
+    if (b->machine >= KILN_REPL_MACHINES || !b->msgs) return;
     WSlot& ws = g_ws[b->machine][b->pred & 1];
+    const bool cap = captured(b->machine);
     const uint32_t ok = b->sent < b->count ? b->sent : b->count;
     for (uint32_t i = 0; i < ok; ++i) {
         const MsgEntry& m = b->msgs[i];
+        if (!m.data) continue;
+        if (cap && m.size <= 0xffffu) {
+            uint8_t* r = ws.ring.reserve(kRecRaw, static_cast<uint32_t>(sizeof(RawRec) + m.size));
+            if (r) {
+                const RawRec h{m.seq, static_cast<uint32_t>(m.size), m.type, {}};
+                std::memcpy(r, &h, sizeof h);
+                std::memcpy(r + sizeof h, m.data, m.size);
+                ws.ring.commit(static_cast<uint32_t>(sizeof(RawRec) + m.size));
+                ws.records.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
         DestroyList l;
-        if (m.type != kMsgList || !m.data || !parse_destroy(m.data, m.size, &l)) continue;
+        if (m.type != kMsgList || !parse_destroy(m.data, m.size, &l)) continue;
         for (uint32_t k = 0; k < l.na; ++k) {  // list A: destroyed (list B: left this peer's relevance)
             const uint32_t id = u32_at(l.ids + 4 * k);
-            if (!watched(id, b->machine)) continue;
+            if (!watched_list(id, b->machine)) continue;
             DestroyRec d{id, l.tick, l.seq};
             if (ws.ring.push(kRecDestroy, &d, sizeof d)) ws.records.fetch_add(1, std::memory_order_relaxed);
         }
@@ -351,20 +561,29 @@ void watch_callback(const Batch* b) {
 // ---- the service's side (tick thread) ----
 void watch_init() { add_guard(&g_delta_guard); }
 
-// Every Pre: the last frame's records to their watches (before the peer snapshot moves on).
+// Every Pre: the last frame's records to their watches and the capture file (before the peer snapshot moves on).
 void watch_deliver() {
-    if (!g_rings) return;
-    for (uint32_t m = 0; m < KILN_REPL_MACHINES; ++m)
-        for (uint32_t ch = 0; ch < 2; ++ch)
-            g_ws[m][ch].ring.drain([&](const RecordHeader& rh, const uint8_t* p) { deliver_record(m, ch, rh, p); });
+    if (g_rings)
+        for (uint32_t m = 0; m < KILN_REPL_MACHINES; ++m)
+            for (uint32_t ch = 0; ch < 2; ++ch) {
+                g_stash_n = 0;
+                g_ws[m][ch].ring.drain([&](const RecordHeader& rh, const uint8_t* p) { deliver_record(m, ch, rh, p); });
+            }
+    g_stash_n = 0;
     for (Watch& w : g_w)
         if (w.destroyed) {
             w.destroyed = false;
             end(w, KILN_REPL_END_DESTROYED);
         }
+    if (g_cap.f) {
+        if (g_cap.removed.load(std::memory_order_acquire)) capture_end("its owner went");
+        else if (GetTickCount64() >= g_cap.end_ms) capture_end("time");
+        else std::fflush(g_cap.f);
+    }
+    if (g_dirty.exchange(false, std::memory_order_relaxed)) watch_apply();
 }
 
-// The hot list, the rings and the delta hook follow the live watches; removed ones free their slots.
+// The hot list, the rings and the delta hook follow the live watches and the capture; removed watches free their slots.
 void watch_apply() {
     uint32_t n = 0;
     for (Watch& w : g_w) {
@@ -379,27 +598,34 @@ void watch_apply() {
         g_hot.machines[n].store(w.machines, std::memory_order_relaxed);
         ++n;
     }
-    g_hot.n.store(n, std::memory_order_release);
-    if (n && !g_delta_hooked) {
+    const uint32_t cap = g_cap.f ? g_cap.machines : 0;
+    const bool need = n || cap;
+    if (need && !g_delta_hooked) {
         if (!alloc_rings()) {
             logf(KILN_LOG_WARN, "repl: watches have no rings (out of memory): no events");
-            g_hot.n.store(0, std::memory_order_release);
-            return;
-        }
-        if (!h_delta.install(g_api, g_owner, F.delta_writer, reinterpret_cast<void*>(&d_delta), "repl/watch DeltaWriter")) {
+            n = 0;
+        } else if (!h_delta.install(g_api, g_owner, F.delta_writer, reinterpret_cast<void*>(&d_delta), "repl/watch DeltaWriter")) {
             logf(KILN_LOG_WARN, "repl: the watch hook could not be installed (%s): no events", h_delta.error() ? h_delta.error() : "?");
-            g_hot.n.store(0, std::memory_order_release);
-            return;
+            n = 0;
+        } else {
+            g_delta_hooked = true;
+            logf(KILN_LOG_INFO, "repl: watch hooks installed");
         }
-        g_delta_hooked = true;
-        logf(KILN_LOG_INFO, "repl: watch hooks installed");
-    } else if (!n && g_delta_hooked) {
-        h_delta.revoke();
-        g_delta_hooked = false;
-        bool any_slot = false;
-        for (Watch& w : g_w) any_slot = any_slot || w.handle.load(std::memory_order_relaxed) != 0;
-        if (!any_slot) free_rings();  // an ended watch not removed yet keeps nothing to read
-        logf(KILN_LOG_INFO, "repl: watch hooks removed (no live watch)");
+    }
+    if (!g_delta_hooked) {
+        g_hot.n.store(0, std::memory_order_release);
+        g_hot.capture.store(0, std::memory_order_release);
+    } else {
+        g_hot.n.store(n, std::memory_order_release);
+        g_hot.capture.store(cap, std::memory_order_release);
+        if (!need) {
+            h_delta.revoke();
+            g_delta_hooked = false;
+            bool any_slot = false;
+            for (Watch& w : g_w) any_slot = any_slot || w.handle.load(std::memory_order_relaxed) != 0;
+            if (!any_slot) free_rings();  // an ended watch not removed yet keeps nothing to read
+            logf(KILN_LOG_INFO, "repl: watch hooks removed (no live watch)");
+        }
     }
     stats_apply_hooks();  // the writer and callback hooks serve the watches too
 }
@@ -414,24 +640,32 @@ void watch_peer_changed(uint32_t machine, uint32_t old_peer) {
     if (!old_peer) return;
     for (Watch& w : g_w)
         if (w.handle.load(std::memory_order_relaxed) && w.peer == old_peer) end(w, KILN_REPL_END_PEER_LEFT);
+    if (g_cap.f && g_cap.peer == old_peer) capture_end("the peer left");
 }
 
 void watch_world_stopping() {
     for (Watch& w : g_w)
         if (w.handle.load(std::memory_order_relaxed)) end(w, KILN_REPL_END_WORLD_STOPPED);
+    capture_end("the world stopped");
     if (g_rings)
         for (auto& m : g_ws)
             for (WSlot& s : m) s.ring.discard();
     watch_apply();
 }
 
-// An owner revoked (any thread): its watches go silently.
+// An owner revoked (any thread): its watches go silently, its capture ends at the next Pre.
 void watch_owner_retiring(KilnOwner owner) {
     for (Watch& w : g_w)
-        if (w.handle.load(std::memory_order_acquire) && w.owner == owner) w.removed.store(true, std::memory_order_release);
+        if (w.handle.load(std::memory_order_acquire) && w.owner == owner) {
+            w.removed.store(true, std::memory_order_release);
+            g_dirty.store(true, std::memory_order_relaxed);
+        }
+    if (owner && g_cap.owner == owner) g_cap.removed.store(true, std::memory_order_release);
 }
 
-uint64_t watch_dropped(uint32_t machine, uint32_t ch) { return g_rings ? g_ws[machine][ch].ring.dropped() : 0; }
+uint64_t watch_dropped(uint32_t machine, uint32_t ch) {
+    return g_rings && machine < KILN_REPL_MACHINES && ch < 2 ? g_ws[machine][ch].ring.dropped() : 0;
+}
 
 void watch_cost(WatchCost* out) {
     for (auto& m : g_ws)
@@ -455,7 +689,7 @@ void watch_cost_reset() {
 KilnResult KILN_CALL t_watch(KilnOwner owner, KilnEntity e, uint32_t peer_or_all, uint32_t direction, KilnReplWatchFn fn,
                              void* user, KilnHandle* out) {
     if (out) *out = 0;
-    if (direction == KILN_REPL_RECEIVE) return KILN_ERR_UNAVAILABLE;  // the client side (S9)
+    if (direction == KILN_REPL_RECEIVE) return client_watch(owner, e, fn, user, out);
     if (!observe_on()) return KILN_ERR_UNAVAILABLE;
     if (!g_api->on_tick_thread()) return KILN_ERR_WRONG_THREAD;
     if (!e || !fn || !out || direction != KILN_REPL_SEND) return KILN_ERR_INVALID_ARGUMENT;
@@ -502,10 +736,84 @@ KilnResult KILN_CALL t_remove(KilnHandle h) {
     if (!h) return KILN_ERR_INVALID_ARGUMENT;
     for (Watch& w : g_w)
         if (w.handle.load(std::memory_order_acquire) == h) {
-            w.removed.store(true, std::memory_order_release);
+            if (!w.removed.exchange(true, std::memory_order_acq_rel)) g_dirty.store(true, std::memory_order_relaxed);
             return KILN_OK;
         }
-    return KILN_ERR_NOT_FOUND;
+    return client_remove(h);
+}
+
+KilnResult KILN_CALL t_capture(KilnOwner owner, uint32_t peer, uint32_t seconds, KilnStr path) {
+    if (!observe_on()) return KILN_ERR_UNAVAILABLE;
+    if (!g_api->on_tick_thread()) return KILN_ERR_WRONG_THREAD;
+    if (!owner || !peer || peer == KILN_REPL_ALL_MACHINES || seconds < 1 || seconds > 600 || (path.len && !path.ptr) ||
+        path.len > 400)
+        return KILN_ERR_INVALID_ARGUMENT;
+    if (g_cap.f) return KILN_ERR_INVALID_ARGUMENT;  // one capture at a time
+    uint32_t machines = 0;
+    for (uint32_t m = 0; m < KILN_REPL_MACHINES; ++m) {
+        uint8_t flags = 0;
+        if (peer_of(m, &flags) == peer) machines |= 1u << m;
+    }
+    if (!machines) return KILN_ERR_INVALID_ARGUMENT;  // not connected
+    const Registry* reg = registry();
+    if (!reg) return KILN_ERR_UNAVAILABLE;
+    // the file: a relative path (or none) is in kiln/logs
+    std::string name(path.len ? std::string(path.ptr, path.len) : std::string());
+    if (name.empty()) {
+        SYSTEMTIME st;
+        GetSystemTime(&st);
+        char b[64];
+        std::snprintf(b, sizeof b, "repl-%08x-%04u%02u%02uT%02u%02u%02uZ.jsonl", peer, st.wYear, st.wMonth, st.wDay, st.wHour,
+                      st.wMinute, st.wSecond);
+        name = b;
+    }
+    const bool absolute = (name.size() > 1 && name[1] == ':') || name[0] == '\\' || name[0] == '/';
+    if (!absolute) {
+        if (name.find("..") != std::string::npos) return KILN_ERR_INVALID_ARGUMENT;
+        char dir[1024];
+        size_t n = 0;
+        if (g_api->path(KILN_PATH_LOGS, dir, sizeof dir, &n) != KILN_OK) return KILN_ERR_UNAVAILABLE;
+        name = std::string(dir, n) + "\\" + name;
+    }
+    const int wn = MultiByteToWideChar(CP_UTF8, 0, name.data(), static_cast<int>(name.size()), nullptr, 0);
+    std::wstring wide(static_cast<size_t>(wn > 0 ? wn : 0), L'\0');
+    if (wn > 0) MultiByteToWideChar(CP_UTF8, 0, name.data(), static_cast<int>(name.size()), wide.data(), wn);
+    std::FILE* f = wn > 0 ? _wfopen(wide.c_str(), L"wb") : nullptr;
+    if (!f) {
+        logf(KILN_LOG_WARN, "repl: capture: could not create %s", name.c_str());
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    std::setvbuf(f, nullptr, _IOFBF, 1u << 20);
+    std::string head = "{\"type\":\"header\",\"version\":1,\"peer\":" + std::to_string(peer) + ",\"seconds\":" + std::to_string(seconds) +
+                       ",\"utc\":\"" + utc_iso() + "\",\"registry\":[";
+    for (uint32_t i = 0; i < reg->count; ++i) {
+        if (i) head += ',';
+        head += "{\"index\":" + std::to_string(i) + ",\"name\":";
+        json_str(head, reg->names[i]);
+        head += ",\"hash\":" + std::to_string(reg->at[i].hash) + ",\"size\":" + std::to_string(reg->at[i].size) +
+                ",\"flags\":" + std::to_string(reg->at[i].flags) + "}";
+    }
+    head += "]}\n";
+    std::fputs(head.c_str(), f);
+    g_cap.f = f;
+    g_cap.owner = owner;
+    g_cap.peer = peer;
+    g_cap.machines = machines;
+    g_cap.messages = 0;
+    g_cap.end_ms = GetTickCount64() + seconds * 1000ull;
+    g_cap.removed.store(false, std::memory_order_relaxed);
+    g_cap.path = name;
+    watch_apply();
+    if (!g_delta_hooked) {
+        std::fclose(f);
+        g_cap.f = nullptr;
+        g_cap.machines = 0;
+        watch_apply();
+        return KILN_ERR_UNAVAILABLE;
+    }
+    g_cap.dropped_before = capture_ring_drops();
+    logf(KILN_LOG_INFO, "repl: capture of peer 0x%x for %u s into %s", peer, seconds, name.c_str());
+    return KILN_OK;
 }
 
 }  // namespace repl

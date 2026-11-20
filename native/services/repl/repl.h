@@ -63,6 +63,9 @@ struct Registry {
     std::string names[kMaxComponents];
 };
 const Registry* registry();  // tick thread; nullptr until a world's registry was read
+// The same for the game's job threads during the send step (no lock: the registry is replaced only on the tick thread,
+// in Pre, while no replication job runs).
+const Registry* registry_hot();
 
 // Guarded copies of game memory (false on a bad address).
 bool read_mem(uintptr_t address, void* out, size_t n);
@@ -100,9 +103,38 @@ void stats_peer_changed(uint32_t machine);    // tick thread: machine's slot has
 void snapshot_peers();                        // tick thread: which peer stands behind each machine, now
 void stats_world_stopping();
 void note_send_step(uint64_t start_tsc, uint64_t end_tsc);  // tick thread, lab: one send step
+void stats_apply_hooks();                     // tick thread: the hooks follow the stats' owners and the watches
 KilnResult KILN_CALL t_stats_enable(KilnOwner owner, bool on);
 KilnResult KILN_CALL t_peer_stats(KilnReplPeerStats* out, uint32_t cap, uint32_t* count);
 KilnResult KILN_CALL lab_hook_cost(KilnReplHookCost* out, bool reset);
+
+// ---- the send watch and the capture (watch.cpp) ----
+struct WatchCost {
+    uint64_t delta_calls = 0, delta_cycles = 0, records = 0, dropped = 0;
+};
+void watch_init();                            // kiln_plugin_main
+bool watch_active();                          // any thread: a watch or a capture needs the writer and callback hooks
+// The EntityWriter and SendCallback hooks' watch part (stats.cpp, inside their guards); watch_writer_done after every
+// writer call, outside the guard.
+void watch_writer_before(const uint8_t* args, uintptr_t ctx, int32_t machine, uint8_t pred);
+void watch_writer_after(const WriterOut* out, uint64_t result);
+void watch_writer_done();
+void watch_callback(const Batch* b);
+void watch_deliver();                         // tick thread, every Pre: the last frame's records to watches and capture
+void watch_apply();                           // tick thread: hot list, rings and the delta hook follow the watches
+void watch_peer_changed(uint32_t machine, uint32_t old_peer);  // tick thread
+void watch_world_stopping();                  // tick thread
+void watch_owner_retiring(KilnOwner owner);   // any thread
+uint64_t watch_dropped(uint32_t machine, uint32_t ch);
+void watch_cost(WatchCost* out);
+void watch_cost_reset();
+KilnResult KILN_CALL t_watch(KilnOwner owner, KilnEntity e, uint32_t peer_or_all, uint32_t direction, KilnReplWatchFn fn,
+                             void* user, KilnHandle* out);
+KilnResult KILN_CALL t_remove(KilnHandle h);
+KilnResult KILN_CALL t_capture(KilnOwner owner, uint32_t peer, uint32_t seconds, KilnStr path);
+// ---- a client's receive side (KILN_REPL_RECEIVE watches) ----
+KilnResult client_watch(KilnOwner owner, KilnEntity e, KilnReplWatchFn fn, void* user, KilnHandle* out);
+KilnResult client_remove(KilnHandle h);
 
 // ---- the loopback harness (loopback.cpp) ----
 bool lab_init();                    // kiln_plugin_main, after the features resolved: what the harness needs
