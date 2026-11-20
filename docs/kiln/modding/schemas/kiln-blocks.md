@@ -23,6 +23,7 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `armorSlots` | object |  | Parts: your own slot, starting from a premade. |
 | `armorStats` | object |  | Parts: a piece of armor's numbers. |
 | `attacks` | object |  | Attacks, for behaviours to name. |
+| `baseRules` | object |  | Base rules (since 0.2.0-dev.31): room for more Flame Altars and larger build zones, in Kiln's own names (a mod with "boot": true; docs/kiln/services/build.md, Base rules and base limits). Kiln combines every mod's rules (the largest count per Flame level, the largest size per altar level and axis) and applies them after every resource patch, raising only: two mods with base rules never conflict. Not blocks: kiln.content applies them. |
 | `beards` | object |  | Beards: worn looks on the jaw. A look with files of the mod's own needs "clients": "mod". |
 | `beds` | object |  | Beds: the game's sleep and rest, comfort of the bed category; with Kiln a spawn point and a night slept through. |
 | `behaviours` | object |  | Behaviours: attacks, rules, a brain. |
@@ -350,6 +351,18 @@ What a piece of armor gives. A number left out: what its slot has at that level.
 ## armorStatsRef
 
 Type: [ref](#ref) or [armorStats](#armorstats)
+
+## baseRule
+
+One base rule. Every member is optional; a rule never lowers the game's numbers.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `buildAreaPercent` | integer \| null |  | Every altar level's build zone at this share of the game's own size, at most 256 metres on an axis. min 100 max 200 |
+| `extraAltars` | integer |  | This many more Flame Altars than the game's own number at every Flame level; the result is at most 16. min 0 max 15 |
+| `format` | `1` |  |  |
+| `minimumAltars` | integer \| null |  | At least this many Flame Altars at every Flame level. Above 16 is refused: the game counts no more. min 1 max 16 |
+| `sizes` | array \| null |  | At least this full size for an altar of a level, one entry per level. |
 
 ## beard
 

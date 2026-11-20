@@ -5,7 +5,7 @@
 // (Kiln.Network does not reference Kiln.Host) and sends it in HELLO and WELCOME.
 //
 // What it covers, for one mod: every document the IR envelope commits for it (each collector's {owner, key, document}: what its OnBoot
-// staged, as Kiln.Blocks lowered it), and the "resourcePatches" of its blocks/*.json and the "gearRules" of its content/*.json, read as
+// staged, as Kiln.Blocks lowered it), and the "resourcePatches" (and "baseRules", keyed "baseRules@<name>") of its blocks/*.json and the "gearRules" of its content/*.json, read as
 // kiln.content's prepare reads them (gamedata_bootpatch.cpp file_docs; a key the file and OnBoot both have stays the file's). What it leaves out, because it differs per
 // machine or per role and changes no committed data: the envelope's owner entry (roles, the inputs hash over the whole folder, the
 // requires list), object key order, file-system order (entries are sorted by collector and key, except patches keep application order; files by name), number spelling (1500,
@@ -157,8 +157,8 @@ internal static class BootFingerprint
         return sb.ToString();
     }
 
-    /// <summary>The "resourcePatches" sections of the mod's blocks/*.json (files by name, ordinal), as kiln.content reads them: a file that
-    /// does not name the section, or is not JSON with comments and trailing commas, gives none. Then the "gearRules" of its data packs
+    /// <summary>The "resourcePatches" and "baseRules" sections of the mod's blocks/*.json (files by name, ordinal), as kiln.content reads them
+    /// (a base rule keyed "baseRules@&lt;name&gt;"): a file that does not name a section, or is not JSON with comments and trailing commas, gives none. Then the "gearRules" of its data packs
     /// (content/*.json, any case of .json, comments but no trailing commas), one entry "gearRules@&lt;file&gt;" each: kiln.content lowers
     /// them to a BalancingTable patch at the boot (gamedata_bootpatch.cpp gear_rule_docs); the section as written is what is hashed.</summary>
     internal static List<(string Key, JsonNode? Document)> FilePatches(string directory)
@@ -170,9 +170,13 @@ internal static class BootFingerprint
         {
             try
             {
-                if (!text.Contains("resourcePatches", StringComparison.Ordinal)) continue;
+                if (!text.Contains("resourcePatches", StringComparison.Ordinal) && !text.Contains("baseRules", StringComparison.Ordinal)) continue;
                 using var parsed = JsonDocument.Parse(text, relaxed);
-                if (LastValues(parsed.RootElement) is not JsonObject root || root["resourcePatches"] is not JsonObject section) continue;
+                if (LastValues(parsed.RootElement) is not JsonObject root) continue;
+                // base rules (since 0.2.0-dev.31): keyed "baseRules@<name>", as kiln.content keys them and a staged rule
+                if (root["baseRules"] is JsonObject rules)
+                    foreach (var (key, doc) in rules.OrderBy(p => p.Key, StringComparer.Ordinal)) list.Add(("baseRules@" + key, doc));
+                if (root["resourcePatches"] is not JsonObject section) continue;
                 foreach (var (key, doc) in section.OrderBy(p => p.Key, StringComparer.Ordinal)) list.Add((key, doc));
             }
             catch (Exception e) when (e is JsonException or ArgumentException or InvalidOperationException)

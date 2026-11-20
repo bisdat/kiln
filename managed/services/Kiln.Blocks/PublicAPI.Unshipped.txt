@@ -68,3 +68,21 @@ static Kiln.UpgradeAction.operator ==(Kiln.UpgradeAction? left, Kiln.UpgradeActi
 static Kiln.UpgradeStation.Available.get -> bool
 static Kiln.UpgradeStation.Offer(Kiln.EntityId entity, Kiln.UpgradeAction! action, out string! reason, Kiln.OfferOptions? options = null) -> bool
 static Kiln.UpgradeStation.Use(Kiln.EntityId player, Kiln.EntityId station, Kiln.UpgradeAction! action) -> System.Threading.Tasks.Task<Kiln.UpgradeResult?>!
+const Kiln.BaseRulesBlock.MaxAltars = 16 -> int
+Kiln.BaseRulesBlock
+Kiln.BaseRulesBlock.<Clone>$() -> Kiln.BaseRulesBlock!
+Kiln.BaseRulesBlock.BaseRulesBlock() -> void
+Kiln.BaseRulesBlock.BuildAreaPercent.get -> int?
+Kiln.BaseRulesBlock.BuildAreaPercent.init -> void
+Kiln.BaseRulesBlock.Equals(Kiln.BaseRulesBlock? other) -> bool
+Kiln.BaseRulesBlock.ExtraAltars.get -> int
+Kiln.BaseRulesBlock.ExtraAltars.init -> void
+Kiln.BaseRulesBlock.MinimumAltars.get -> int?
+Kiln.BaseRulesBlock.MinimumAltars.init -> void
+Kiln.BaseRulesBlock.Sizes.get -> System.Collections.Generic.IReadOnlyList<Kiln.AltarSize!>?
+Kiln.BaseRulesBlock.Sizes.init -> void
+override Kiln.BaseRulesBlock.Equals(object? obj) -> bool
+override Kiln.BaseRulesBlock.GetHashCode() -> int
+override Kiln.BaseRulesBlock.ToString() -> string!
+static Kiln.BaseRulesBlock.operator !=(Kiln.BaseRulesBlock? left, Kiln.BaseRulesBlock? right) -> bool
+static Kiln.BaseRulesBlock.operator ==(Kiln.BaseRulesBlock? left, Kiln.BaseRulesBlock? right) -> bool

@@ -224,6 +224,12 @@
       "description": "Changes to the game's own resources, made before the game reads them: fields, a template's components, a list's length (a mod with \"boot\": true; docs/kiln/modding/resource-patches.md). Not blocks: kiln.content applies them.",
       "propertyNames": { "pattern": "^[a-z][a-z0-9_.-]{0,95}$" },
       "additionalProperties": { "$ref": "#/$defs/resourcePatch" }
+    },
+    "baseRules": {
+      "type": "object",
+      "description": "Base rules (since 0.2.0-dev.31): room for more Flame Altars and larger build zones, in Kiln's own names (a mod with \"boot\": true; docs/kiln/services/build.md, Base rules and base limits). Kiln combines every mod's rules (the largest count per Flame level, the largest size per altar level and axis) and applies them after every resource patch, raising only: two mods with base rules never conflict. Not blocks: kiln.content applies them.",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_.-]{0,95}$" },
+      "additionalProperties": { "$ref": "#/$defs/baseRule" }
     }
   },
   "patternProperties": {
@@ -241,6 +247,31 @@
   "additionalProperties": false,
   "$defs": {
     "buildingMaterialPool": {"type": "object", "required": ["name", "materials"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1}, "roof": {"type": "boolean"}, "was": {"type": "string", "minLength": 1}, "materials": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"oneOf": [{"type": "object", "required": ["material"], "additionalProperties": false, "properties": {"material": {"type": "string", "minLength": 1}}}, {"type": "object", "required": ["gameMaterial"], "additionalProperties": false, "properties": {"gameMaterial": {"type": "string", "minLength": 1}}}]}}}},
+
+    "baseRule": {
+      "type": "object",
+      "description": "One base rule. Every member is optional; a rule never lowers the game's numbers.",
+      "additionalProperties": false,
+      "properties": {
+        "format": { "const": 1 },
+        "minimumAltars": { "type": ["integer", "null"], "minimum": 1, "maximum": 16, "description": "At least this many Flame Altars at every Flame level. Above 16 is refused: the game counts no more." },
+        "extraAltars": { "type": "integer", "minimum": 0, "maximum": 15, "description": "This many more Flame Altars than the game's own number at every Flame level; the result is at most 16." },
+        "buildAreaPercent": { "type": ["integer", "null"], "minimum": 100, "maximum": 200, "description": "Every altar level's build zone at this share of the game's own size, at most 256 metres on an axis." },
+        "sizes": {
+          "type": ["array", "null"],
+          "description": "At least this full size for an altar of a level, one entry per level.",
+          "items": {
+            "type": "object",
+            "required": ["altarLevel", "size"],
+            "additionalProperties": false,
+            "properties": {
+              "altarLevel": { "type": "integer", "minimum": 1, "maximum": 5, "description": "The altar level (1 to 5)." },
+              "size": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number", "minimum": 0.5, "maximum": 256, "multipleOf": 0.5 }, "description": "The full size [x, y, z] in metres." }
+            }
+          }
+        }
+      }
+    },
 
     "resourcePatch": {
       "type": "object",
