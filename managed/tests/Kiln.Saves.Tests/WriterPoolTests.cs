@@ -322,9 +322,7 @@ public sealed class WriterPoolTests : IDisposable
         Assert.Equal(a.Keys.Order(), b.Keys.Order());
         foreach (var (name, bytes) in a)
             Assert.True(bytes.AsSpan().SequenceEqual(b[name]),
-                $"{name} differs between the pool and the synchronous path:
-pool: {System.Text.Encoding.UTF8.GetString(bytes)}
-sync: {System.Text.Encoding.UTF8.GetString(b[name])}");
+                $"{name} differs between the pool and the synchronous path: pool {System.Text.Encoding.UTF8.GetString(bytes)} sync {System.Text.Encoding.UTF8.GetString(b[name])}");
 
         Dictionary<string, byte[]> Files(string root) => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
             .ToDictionary(f => Path.GetRelativePath(root, f).Replace('\\', '/'), f => Normalize(f));
