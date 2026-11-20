@@ -1,0 +1,214 @@
+{
+  "catalog": false,
+  "description": "mod-values/*.json: the dossier's example and every field in clean files (good); what the schema refuses: experience without thresholds or with a scale, thresholds not from 0 or on another kind, a negative currency, a carried currency or untrusted carried value, readMods without allowList, a number format outside the list, numbers not in their string form, unknown keys and ids (schema); what kiln lint adds: the 64-bit range, min above max, initial outside them, thresholds that do not increase, a label over 1024 bytes, an id in two files (rules)",
+  "diagnostics": [
+    {
+      "code": "KL350",
+      "col": 55,
+      "file": "rules/mod-values/a.json",
+      "line": 4,
+      "message": "value over: max \"9223372036854775808\" is outside the 64-bit range Kiln stores (-9223372036854775808 to 9223372036854775807)",
+      "severity": "error"
+    },
+    {
+      "code": "KL350",
+      "col": 56,
+      "file": "rules/mod-values/a.json",
+      "line": 5,
+      "message": "value under: min \"-9223372036854775809\" is outside the 64-bit range Kiln stores (-9223372036854775808 to 9223372036854775807)",
+      "severity": "error"
+    },
+    {
+      "code": "KL351",
+      "col": 57,
+      "file": "rules/mod-values/a.json",
+      "line": 6,
+      "message": "value upside: min \"10\" is above max \"5\": Kiln refuses the definition",
+      "severity": "error"
+    },
+    {
+      "code": "KL351",
+      "col": 64,
+      "file": "rules/mod-values/a.json",
+      "line": 7,
+      "message": "value below-default: min \"0\" (the default) is above max \"-1\": Kiln refuses the definition",
+      "severity": "error"
+    },
+    {
+      "code": "KL351",
+      "col": 77,
+      "file": "rules/mod-values/a.json",
+      "line": 8,
+      "message": "value init-high: initial \"11\" is outside min \"0\" (the default) and max \"10\": Kiln refuses the definition (it never clamps)",
+      "severity": "error"
+    },
+    {
+      "code": "KL352",
+      "col": 79,
+      "file": "rules/mod-values/a.json",
+      "line": 9,
+      "message": "value steps: thresholds[2] \"400\" is not above thresholds[1] \"900\": thresholds strictly increase (Kiln refuses the definition)",
+      "severity": "error"
+    },
+    {
+      "code": "KL352",
+      "col": 94,
+      "file": "rules/mod-values/a.json",
+      "line": 9,
+      "message": "value steps: thresholds[4] \"1000\" is not above thresholds[3] \"1000\": thresholds strictly increase (Kiln refuses the definition)",
+      "severity": "error"
+    },
+    {
+      "code": "KL353",
+      "col": 43,
+      "file": "rules/mod-values/a.json",
+      "line": 10,
+      "message": "value long: label is 1102 bytes as compact JSON, and Kiln takes at most 1024 per definition (all its languages together)",
+      "severity": "error"
+    },
+    {
+      "code": "KL354",
+      "col": 5,
+      "file": "rules/mod-values/b.json",
+      "line": 4,
+      "message": "value shared is also defined in mod-values/a.json: an id is defined once per mod, across all its mod-values files (Kiln refuses the second definition)",
+      "severity": "error"
+    },
+    {
+      "code": "KL104",
+      "col": 5,
+      "file": "schema/mod-values/kinds.json",
+      "line": 4,
+      "message": "kind \"experience\" needs \"thresholds\" (the points each level starts at: \"0\", then strictly increasing)",
+      "severity": "error"
+    },
+    {
+      "code": "KL105",
+      "col": 65,
+      "file": "schema/mod-values/kinds.json",
+      "line": 5,
+      "message": "an experience value counts whole points: \"scale\" is 0",
+      "severity": "error"
+    },
+    {
+      "code": "KL105",
+      "col": 73,
+      "file": "schema/mod-values/kinds.json",
+      "line": 6,
+      "message": "the first threshold is \"0\" (level 1 starts at 0 points)",
+      "severity": "error"
+    },
+    {
+      "code": "KL109",
+      "col": 70,
+      "file": "schema/mod-values/kinds.json",
+      "line": 7,
+      "message": "\"thresholds\" are for kind \"experience\" only",
+      "severity": "error"
+    },
+    {
+      "code": "KL106",
+      "col": 66,
+      "file": "schema/mod-values/kinds.json",
+      "line": 8,
+      "message": "a currency or an experience value never goes below 0: \"min\" is \"0\" or more",
+      "severity": "error"
+    },
+    {
+      "code": "KL105",
+      "col": 32,
+      "file": "schema/mod-values/kinds.json",
+      "line": 9,
+      "message": "\"currency\": only a counter or an experience value can be carried (a currency is never carried)",
+      "severity": "error"
+    },
+    {
+      "code": "KL104",
+      "col": 5,
+      "file": "schema/mod-values/kinds.json",
+      "line": 10,
+      "message": "persistence \"carried\" needs \"trustClientImports\": true (a carried value comes from the player's client)",
+      "severity": "error"
+    },
+    {
+      "code": "KL106",
+      "col": 67,
+      "file": "schema/mod-values/kinds.json",
+      "line": 11,
+      "message": "a carried value never goes below 0: \"min\" is \"0\" or more",
+      "severity": "error"
+    },
+    {
+      "code": "KL108",
+      "col": 94,
+      "file": "schema/mod-values/kinds.json",
+      "line": 12,
+      "message": "\"readMods\" is read with \"readPolicy\": \"allowList\" only: leave it empty, or use allowList",
+      "severity": "error"
+    },
+    {
+      "code": "KL106",
+      "col": 70,
+      "file": "schema/mod-values/kinds.json",
+      "line": 13,
+      "message": "a number format: N0..N6, F0..F6, \"0\", or \"0.\" followed by 1 to 6 zeros",
+      "severity": "error"
+    },
+    {
+      "code": "KL106",
+      "col": 63,
+      "file": "schema/mod-values/kinds.json",
+      "line": 14,
+      "message": "a whole number as a base-10 string (\"0\", \"250\", \"-12\"): no '+', no leading zeros, no spaces, at most 19 digits",
+      "severity": "error"
+    },
+    {
+      "code": "KL106",
+      "col": 76,
+      "file": "schema/mod-values/kinds.json",
+      "line": 14,
+      "message": "a whole number as a base-10 string (\"0\", \"250\", \"-12\"): no '+', no leading zeros, no spaces, at most 19 digits",
+      "severity": "error"
+    },
+    {
+      "code": "KL101",
+      "col": 94,
+      "file": "schema/mod-values/kinds.json",
+      "line": 14,
+      "message": "a whole number as a base-10 string (\"0\", \"250\", \"-12\"): no '+', no leading zeros, no spaces, at most 19 digits",
+      "severity": "error"
+    },
+    {
+      "code": "KL102",
+      "col": 48,
+      "file": "schema/mod-values/kinds.json",
+      "line": 15,
+      "message": "\"intial\" is not allowed here; did you mean \"initial\"?",
+      "severity": "error"
+    },
+    {
+      "code": "KL105",
+      "col": 28,
+      "file": "schema/mod-values/kinds.json",
+      "line": 16,
+      "message": "\"currncy\" is not one of \"counter\", \"currency\", \"experience\"; did you mean \"currency\"?",
+      "severity": "error"
+    },
+    {
+      "code": "KL104",
+      "col": 5,
+      "file": "schema/mod-values/kinds.json",
+      "line": 17,
+      "message": "missing \"label\"",
+      "severity": "error"
+    },
+    {
+      "code": "KL106",
+      "col": 5,
+      "file": "schema/mod-values/kinds.json",
+      "line": 18,
+      "message": "key \"Bad_Id\": a value id: a lower-case letter, then up to 63 of a-z, 0-9, '.', '_' and '-'",
+      "severity": "error"
+    }
+  ]
+}

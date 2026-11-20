@@ -255,9 +255,26 @@ pub fn schema_markdown(id: &str) -> Option<String> {
         .filter_map(|(name, d)| d.as_object().map(|o| (name, d, o)))
         .filter(|(name, d, o)| has_keys(o) || !notes(d).is_empty() || linked.contains(name.as_str()))
         .collect();
+    // documentation-only keywords, before the tables: the format's example (JSON Schema's own `examples`, the first) and
+    // the rules kiln lint adds to the schema (`x-kiln-rules`, Markdown lines)
+    let mut extra: Vec<&str> = Vec::new();
+    let mut extra_md = String::new();
+    if let Some(ex) = doc["examples"].as_array().and_then(|a| a.first()) {
+        extra.push("Example");
+        extra_md.push_str(&format!("## Example\n\n```json\n{}\n```\n\n", serde_json::to_string_pretty(ex).unwrap_or_default()));
+    }
+    if let Some(rules) = doc["x-kiln-rules"].as_array() {
+        extra.push("Beyond the schema");
+        extra_md.push_str("## Beyond the schema\n\nWhat kiln lint checks that the schema cannot say:\n\n");
+        for r in rules.iter().filter_map(J::as_str) {
+            extra_md.push_str(&format!("- {r}\n"));
+        }
+        extra_md.push('\n');
+    }
     let title = doc["title"].as_str().unwrap_or(id);
-    let slugs = unique_slugs([title, "Top level"].into_iter().chain(shown.iter().map(|(n, _, _)| n.as_str())));
-    let anchors: Anchors = shown.iter().zip(slugs.into_iter().skip(2)).map(|((n, _, _), a)| ((*n).clone(), a)).collect();
+    let slugs = unique_slugs([title].into_iter().chain(extra.iter().copied()).chain(["Top level"]).chain(shown.iter().map(|(n, _, _)| n.as_str())));
+    let anchors: Anchors = shown.iter().zip(slugs.into_iter().skip(2 + extra.len())).map(|((n, _, _), a)| ((*n).clone(), a)).collect();
+    out.push_str(&extra_md);
     out.push_str("## Top level\n\n");
     if let Some(o) = doc.as_object() {
         table(o, id, &anchors, &mut out);

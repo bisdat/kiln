@@ -25,6 +25,171 @@ fn file_names_map_to_schemas() {
     assert_eq!(k("mods/x/native.json").as_deref(), Some("native"));
     assert_eq!(k("game/kiln/config/native.json"), None);
     assert_eq!(k("hut.kschem").as_deref(), Some("schematic"));
+    assert_eq!(k("mods/x/mod-values/fishing.json").as_deref(), Some("mod-values"));
+    assert_eq!(k("mods/x/mod-values/sub/fishing.json"), None); // Kiln.ModValues reads the folder itself, not below it
+}
+
+/// A mod folder with these mod-values files, linted whole: (file, code, pointer, severity) of each finding at warning or above.
+fn mod_values_findings(name: &str, files: &[(&str, String)]) -> Vec<(String, String, String, Severity)> {
+    let dir = std::env::temp_dir().join(format!("kiln-lint-mv-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("mod-values")).unwrap();
+    std::fs::write(dir.join("kiln.mod.json"), r#"{"id":"mv-test","name":"MV test","version":"1.0.0","apiVersion":"0.2","side":"both","clients":"mod","license":"MIT"}"#).unwrap();
+    for (f, text) in files {
+        std::fs::write(dir.join(f), text).unwrap();
+    }
+    let r = lint_paths(std::slice::from_ref(&dir), &LintOptions { no_catalog: true, ..Default::default() });
+    let out = r
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity >= Severity::Warning)
+        .map(|d| (Path::new(&d.file).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), d.code.clone(), d.pointer.clone().unwrap_or_default(), d.severity))
+        .collect();
+    std::fs::remove_dir_all(&dir).unwrap();
+    out
+}
+
+fn values(defs: &str) -> String {
+    format!(r#"{{"format":1,"values":{{{defs}}}}}"#)
+}
+
+fn has(found: &[(String, String, String, Severity)], code: &str, pointer: &str) -> bool {
+    found.iter().any(|(_, c, p, s)| c == code && p == pointer && *s == Severity::Error)
+}
+
+#[test]
+fn mod_values_example_lints_clean() {
+    let example = include_str!("../../../../schema/examples/kiln-mod-values.json").to_string();
+    assert_eq!(mod_values_findings("example", &[("mod-values/fishing.json", example)]), vec![]);
+}
+
+#[test]
+fn mod_values_numbers_are_64_bit_strings() {
+    let f = mod_values_findings("numbers", &[("mod-values/n.json", values(concat!(
+        r#""edges":{"kind":"counter","label":"E","min":"-9223372036854775808","max":"9223372036854775807"},"#,
+        r#""over":{"kind":"counter","label":"O","max":"9223372036854775808"},"#,
+        r#""under":{"kind":"counter","label":"U","min":"-9223372036854775809"},"#,
+        r#""plus":{"kind":"counter","label":"P","max":"+5"},"#,
+        r#""zeros":{"kind":"counter","label":"Z","max":"007"},"#,
+        r#""number":{"kind":"counter","label":"N","max":5}"#)))]);
+    assert!(has(&f, "KL350", "/values/over/max"), "{f:?}");
+    assert!(has(&f, "KL350", "/values/under/min"), "{f:?}");
+    assert!(has(&f, "KL106", "/values/plus/max"), "{f:?}");
+    assert!(has(&f, "KL106", "/values/zeros/max"), "{f:?}");
+    assert!(has(&f, "KL101", "/values/number/max"), "{f:?}");
+    assert!(!f.iter().any(|x| x.2.starts_with("/values/edges")), "{f:?}");
+}
+
+#[test]
+fn mod_values_bounds_and_initial() {
+    let f = mod_values_findings("bounds", &[("mod-values/b.json", values(concat!(
+        r#""upside":{"kind":"counter","label":"A","min":"10","max":"5"},"#,
+        r#""below-default":{"kind":"counter","label":"B","max":"-1"},"#,
+        r#""init-high":{"kind":"counter","label":"C","max":"10","initial":"11"},"#,
+        r#""init-low":{"kind":"counter","label":"D","min":"-5","max":"10","initial":"-6"},"#,
+        r#""starts-at-min":{"kind":"counter","label":"E","min":"10","max":"20"},"#,
+        r#""init-edge":{"kind":"counter","label":"F","min":"-5","max":"10","initial":"10"}"#)))]);
+    assert!(has(&f, "KL351", "/values/upside/min"), "{f:?}");
+    assert!(has(&f, "KL351", "/values/below-default/max"), "{f:?}");
+    assert!(has(&f, "KL351", "/values/init-high/initial"), "{f:?}");
+    assert!(has(&f, "KL351", "/values/init-low/initial"), "{f:?}");
+    assert!(!f.iter().any(|x| x.2.starts_with("/values/starts-at-min") || x.2.starts_with("/values/init-edge")), "{f:?}");
+}
+
+#[test]
+fn mod_values_kind_rules() {
+    let f = mod_values_findings("kinds", &[("mod-values/k.json", values(concat!(
+        r#""xp-no-steps":{"kind":"experience","label":"A"},"#,
+        r#""xp-scaled":{"kind":"experience","label":"B","scale":2,"thresholds":["0","10"]},"#,
+        r#""xp-negative":{"kind":"experience","label":"C","min":"-1","thresholds":["0"]},"#,
+        r#""xp-from-one":{"kind":"experience","label":"D","thresholds":["1","10"]},"#,
+        r#""coins-steps":{"kind":"currency","label":"E","thresholds":["0"]},"#,
+        r#""coins-negative":{"kind":"currency","label":"F","min":"-10"},"#,
+        r#""coins-carried":{"kind":"currency","label":"G","persistence":"carried","trustClientImports":true},"#,
+        r#""carried-untrusted":{"kind":"counter","label":"H","persistence":"carried"},"#,
+        r#""carried-negative":{"kind":"counter","label":"I","min":"-1","persistence":"carried","trustClientImports":true},"#,
+        r#""readers-public":{"kind":"counter","label":"J","readPolicy":"public","readMods":["other-mod"]},"#,
+        r#""readers-ok":{"kind":"counter","label":"K","readPolicy":"allowList","readMods":["other-mod"]},"#,
+        r#""carried-ok":{"kind":"experience","label":"L","persistence":"carried","trustClientImports":true,"thresholds":["0","5"]},"#,
+        r#""negative-counter":{"kind":"counter","label":"M","min":"-100"},"#,
+        r#""format-bad":{"kind":"counter","label":"N","numberFormat":"C2"},"#,
+        r#""format-ok":{"kind":"counter","label":"O","scale":3,"numberFormat":{"en":"0.000","*":"F3"}},"#,
+        r#""typo":{"kind":"counter","label":"P","intial":"1"},"#,
+        r#""Bad_Id":{"kind":"counter","label":"Q"}"#)))]);
+    let at = |p: &str| f.iter().any(|x| x.3 == Severity::Error && (x.2 == p || x.2.starts_with(&format!("{p}/"))));
+    for p in ["/values/xp-no-steps", "/values/xp-scaled/scale", "/values/xp-negative/min", "/values/xp-from-one/thresholds/0",
+              "/values/coins-steps/thresholds", "/values/coins-negative/min", "/values/coins-carried/kind", "/values/carried-untrusted",
+              "/values/carried-negative/min", "/values/readers-public/readMods", "/values/format-bad/numberFormat", "/values/typo/intial", "/values/Bad_Id"] {
+        assert!(at(p), "no error at {p}: {f:?}");
+    }
+    for p in ["/values/readers-ok", "/values/carried-ok", "/values/negative-counter", "/values/format-ok"] {
+        assert!(!at(p), "an error at {p}: {f:?}");
+    }
+}
+
+#[test]
+fn mod_values_thresholds_increase_as_whole_numbers() {
+    let f = mod_values_findings("steps", &[("mod-values/t.json", values(concat!(
+        r#""flat":{"kind":"experience","label":"A","thresholds":["0","100","100"]},"#,
+        r#""down":{"kind":"experience","label":"B","thresholds":["0","900","400","1000"]},"#,
+        r#""text-order":{"kind":"experience","label":"C","thresholds":["0","9","10"]},"#,
+        r#""past-double":{"kind":"experience","label":"D","thresholds":["0","9007199254740992","9007199254740993"]}"#)))]);
+    assert!(has(&f, "KL352", "/values/flat/thresholds/2"), "{f:?}");
+    assert!(has(&f, "KL352", "/values/down/thresholds/2"), "{f:?}");
+    assert!(!f.iter().any(|x| x.2.contains("/values/down/thresholds/3")), "{f:?}");
+    assert!(!f.iter().any(|x| x.2.starts_with("/values/text-order") || x.2.starts_with("/values/past-double")), "{f:?}");
+}
+
+#[test]
+fn mod_values_size_limits() {
+    let long = "a".repeat(1100);
+    let fits = "a".repeat(1000); // with its quotes 1002 bytes
+    let formats: Vec<String> = (0..30).map(|i| format!(r#""l{i:02}":"N0""#)).collect();
+    let steps: Vec<String> = (0..256).map(|i| format!(r#""{}""#, i as i64 * 1_000_000_000_000)).collect();
+    let f = mod_values_findings("sizes", &[("mod-values/s.json", values(&format!(
+        r#""long":{{"kind":"counter","label":"{long}"}},"fits":{{"kind":"counter","label":"{fits}"}},"formats":{{"kind":"counter","label":"F","numberFormat":{{{}}}}},"big":{{"kind":"experience","label":"B","thresholds":[{}]}}"#,
+        formats.join(","), steps.join(","))))]);
+    assert!(has(&f, "KL353", "/values/long/label"), "{f:?}");
+    assert!(has(&f, "KL353", "/values/formats/numberFormat"), "{f:?}");
+    assert!(has(&f, "KL353", "/values/big"), "{f:?}");
+    assert!(!f.iter().any(|x| x.2.starts_with("/values/fits")), "{f:?}");
+}
+
+#[test]
+fn mod_values_ids_across_files() {
+    let a: Vec<String> = (0..100).map(|i| format!(r#""a{i}":{{"kind":"counter","label":"A"}}"#)).collect();
+    let b: Vec<String> = (0..40).map(|i| format!(r#""b{i}":{{"kind":"counter","label":"B"}}"#)).collect();
+    let f = mod_values_findings("ids", &[
+        ("mod-values/a.json", values(&format!(r#"{},"shared":{{"kind":"counter","label":"S"}}"#, a.join(",")))),
+        ("mod-values/b.json", values(&format!(r#"{},"shared":{{"kind":"counter","label":"S"}}"#, b.join(",")))),
+    ]);
+    assert!(f.iter().any(|x| x.0 == "b.json" && x.1 == "KL354" && x.2 == "/values/shared"), "{f:?}");
+    assert!(!f.iter().any(|x| x.0 == "a.json" && x.1 == "KL354"), "{f:?}");
+    // 101 in a.json, then b0..b26 are values 102..128: b27 is the 129th
+    assert!(f.iter().any(|x| x.0 == "b.json" && x.1 == "KL355" && x.2 == "/values/b27"), "{f:?}");
+    assert_eq!(f.iter().filter(|x| x.1 == "KL355").count(), 1, "{f:?}");
+    // one file over 128 is the schema's (KL108), not said twice
+    let many: Vec<String> = (0..129).map(|i| format!(r#""v{i}":{{"kind":"counter","label":"V"}}"#)).collect();
+    let g = mod_values_findings("many", &[("mod-values/m.json", values(&many.join(",")))]);
+    assert!(g.iter().any(|x| x.1 == "KL108" && x.2 == "/values"), "{g:?}");
+    assert!(!g.iter().any(|x| x.1 == "KL355"), "{g:?}");
+}
+
+#[test]
+fn mod_values_dialect_is_strict() {
+    let def = r#""a":{"kind":"counter","label":"A"}"#;
+    let f = mod_values_findings("dialect", &[
+        ("mod-values/twice.json", format!(r#"{{"format":1,"values":{{{def},{def}}}}}"#)),
+        ("mod-values/comment.json", format!("// note
+{}", values(r#""b":{"kind":"counter","label":"B"}"#))),
+        ("mod-values/comma.json", r#"{"format":1,"values":{"c":{"kind":"counter","label":"C",}}}"#.to_string()),
+        ("mod-values/v2.json", r#"{"format":2,"values":{}}"#.to_string()),
+    ]);
+    assert!(f.iter().any(|x| x.0 == "twice.json" && x.1 == "KL004" && x.3 == Severity::Error), "{f:?}");
+    assert!(!f.iter().any(|x| x.1 == "KL354"), "a key twice in one file is KL004 only: {f:?}");
+    assert!(f.iter().any(|x| x.0 == "comment.json" && x.1 == "KL002"), "{f:?}");
+    assert!(f.iter().any(|x| x.0 == "comma.json" && x.1 == "KL003"), "{f:?}");
+    assert!(f.iter().any(|x| x.0 == "v2.json" && x.1 == "KL111"), "{f:?}");
 }
 
 #[test]
