@@ -517,10 +517,12 @@ internal static unsafe class UiEngine
                 var text = h.Text;
                 if (h.Provider is { } p)
                 {
-                    try { text = p() ?? ""; }
-                    catch (Exception e)
+                    // as the line's mod, like a window's draw: what it reads is read as that mod (05b review)
+                    var got = new string?[1];
+                    if (UiModCalls.Invoke(h.Owner, static a => a.Got[0] = a.P(), (P: p, Got: got), $"HUD line '{h.Id}'")) text = got[0] ?? "";
+                    else
                     {
-                        text = "!" + e.GetType().Name;
+                        text = "!error";
                         if (Fault(h, h.Owner, $"HUD line '{h.Id}'")) h.Provider = null;
                     }
                 }

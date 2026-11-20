@@ -323,6 +323,20 @@ internal sealed class ServerSession
         return result;
     }
 
+    /// <summary>The offer's sidecar revision (0 when absent or malformed): passed to CharacterImportingEvent.</summary>
+    internal static long ParseOfferRevision(byte[] doc)
+    {
+        try
+        {
+            var p = JsonSerializer.Deserialize<ModValuesWire.OfferPayload>(doc, ModValuesWire.Options);
+            return p is not null && ModValuesWire.TryU64(p.SidecarRevision, out var r) && r <= long.MaxValue ? (long)r : 0;
+        }
+        catch (JsonException)
+        {
+            return 0;
+        }
+    }
+
     /// <summary>Reads an offer document; null when malformed (the whole offer is refused).</summary>
     internal static List<OfferEntry>? ParseOffer(byte[] doc)
     {

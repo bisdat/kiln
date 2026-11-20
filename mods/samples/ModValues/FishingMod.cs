@@ -20,14 +20,16 @@ public sealed class FishingMod : Mod
     private NetChannel? _channel;
     private UiWindow? _window;
 
-    private static ModValueKey Xp => ModValues.Key("xp");
-    private static ModValueKey Tokens => ModValues.Key("tokens");
-    private static ModValueKey Mastery => ModValues.Key("mastery");  // carried: travels with the character to other worlds
+    // Keys are made once in OnLoad (ModValues.Key names the calling mod: in OnLoad that is this mod on every thread later)
+    private ModValueKey Xp, Tokens, Mastery;  // mastery is carried: it travels with the character to other worlds
 
     public sealed record BuyBait;
 
     public override void OnLoad()
     {
+        Xp = ModValues.Key("xp");
+        Tokens = ModValues.Key("tokens");
+        Mastery = ModValues.Key("mastery");
         _channel = Network.Channel("fishing:shop", "1", required: false)
             .RegisterJson<BuyBait>((request, ctx) => { _ = Buy(ctx.Player, r => ctx.Channel.SendTo(ctx.Sender, r)); }, NetDirection.ToServer)
             .RegisterJson<string>((text, _) => Hud.Toast(text), NetDirection.ToClient);
@@ -117,7 +119,7 @@ public sealed class FishingMod : Mod
                 UiTooltipLines.With(new TooltipLine(UiText.Of(("en", $"Costs {BaitPrice} fishing tokens"), ("de", $"Kostet {BaitPrice} Angelmarken")), TooltipColor.Default, Small: true)));
     }
 
-    private static string HudText()
+    private string HudText()
     {
         var xp = ModValues.Synced(Xp);
         var tokens = ModValues.Synced(Tokens);
