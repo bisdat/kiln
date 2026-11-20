@@ -127,7 +127,6 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
         _reserved = 2;
         NetNative.TestTransport = _loop;
         NetEngine.TestServerRole = true;
-        NetAdmission.ResetForTests();
         NetAdmission.TestGate = _gate;
         Lifecycle.ModsLoaded = true;
 
@@ -148,6 +147,7 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
         Swap(typeof(Content), "_gdTried", false);
 
         ContentSync.Start();  // once per process: the kiln:content channel and its handlers
+        NetAdmission.ResetForTests();  // after Start: one kiln.content decider, registered below
         Swap(typeof(ContentSync), "_owner", 77UL);
         Swap(typeof(ContentSync), "_appliedState", 0u);
         Swap(typeof(ContentSync), "_contentAdmission", null);
@@ -280,7 +280,8 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
 
         // in the world, its game applies the state and fails: the server refuses it with its reason
         var id = SendPlaceholderState(p);
-        Assert.DoesNotContain(Backend.Lines, l => l.Contains("received while joining", StringComparison.Ordinal));  // no WELCOME property: no early answer
+        // no WELCOME property, no early answer: it waits for its registries as before (not Backend.Lines: other tests' threads log into it)
+        Assert.Equal("waiting for this game's registries", ContentSync.Status.Detail);
         ContentChannel.SendToServer(new ContentSync.AckMsg(id, 1, 0, 0, 1, 0, "client: definition essai.essai-rage: refused"));
         _loop.Pump();
         Assert.Equal("client: definition essai.essai-rage: refused", RejectTo(Peer));
