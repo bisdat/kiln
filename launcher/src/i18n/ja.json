@@ -4477,7 +4477,21 @@
       "getKiln": "Kiln を入手",
       "joinDiscord": "Discord に参加",
       "onToast": "リッチプレゼンスをオンにしました",
-      "offToast": "リッチプレゼンスをオフにしました"
+      "offToast": "リッチプレゼンスをオフにしました",
+      "pack": {
+        "label": "Discord プロフィールに Crucible のパックを表示",
+        "hint": "Crucible のパックで遊んでいる間：パック名と、パックのページを開く「このモッドパックを入手」ボタン。この PC で作ったパックの名前は表示されません。",
+        "never": "表示されないもの：サーバー名、ワールド名、キャラクター。Crucible のパックで遊んでいる間は、その名前とページが表示されます。",
+        "state": {
+          "other": "{pack}（{count} 個のモッド）"
+        },
+        "getPack": "このモッドパックを入手",
+        "example": "残り火の旅",
+        "turnOn": "パックを表示",
+        "turnOff": "パックを隠す",
+        "onToast": "Crucible のパックが Discord に表示されます",
+        "offToast": "Crucible のパックは Discord に表示されなくなりました"
+      }
     },
     "signIn": {
       "title": "Discord でサインイン",
@@ -4623,6 +4637,7 @@
       "reportTeam": "別の選択をしない限り Kiln チームのみ: レポート zip。30 日後にチームのチャンネルから削除されます。",
       "presenceTitle": "リッチプレゼンス",
       "presence": "オンにしてプレイしている間だけ、この PC の Discord アプリにだけ送ります: Kiln で Enshrouded をプレイしていること、オンのモッド数、時間。サーバー名、ワールド名、キャラクター、使っているモッドは送りません。",
+      "presencePack": "「Crucible のパックを表示」がオンのときは、遊んでいる Crucible のパックの名前と frostdev.io にあるそのページへのリンクも表示されます。この PC で作ったパックの名前は表示されません。",
       "testerTitle": "テスターに志願したとき",
       "tester": "Kiln チームは、この PC のグラフィックカード、ドライバー、ビデオメモリ、システム、ゲームの動作状況を受け取ります。結果は #testing のビルドの投稿に送られます。添付したサポートレポートはチームだけに送られます。",
       "keptTitle": "frostdev.io が保持するもの",

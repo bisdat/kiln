@@ -4477,7 +4477,21 @@
       "getKiln": "Kiln 받기",
       "joinDiscord": "Discord 참가",
       "onToast": "Rich Presence 켜짐",
-      "offToast": "Rich Presence 꺼짐"
+      "offToast": "Rich Presence 꺼짐",
+      "pack": {
+        "label": "내 Discord 프로필에 Crucible 팩 표시",
+        "hint": "Crucible 팩을 플레이하는 동안: 팩 이름과 팩 페이지를 여는 '이 모드팩 받기' 버튼. 이 PC에서 만든 팩의 이름은 표시되지 않습니다.",
+        "never": "표시되지 않는 것: 서버 이름, 월드 이름, 캐릭터. Crucible 팩을 플레이하는 동안에는 팩 이름과 페이지가 표시됩니다.",
+        "state": {
+          "other": "{pack} (모드 {count}개)"
+        },
+        "getPack": "이 모드팩 받기",
+        "example": "잉걸불 여정",
+        "turnOn": "내 팩 표시",
+        "turnOff": "내 팩 숨기기",
+        "onToast": "Crucible 팩이 Discord에 표시됩니다",
+        "offToast": "Crucible 팩이 더 이상 Discord에 표시되지 않습니다"
+      }
     },
     "signIn": {
       "title": "Discord로 로그인",
@@ -4623,6 +4637,7 @@
       "reportTeam": "다르게 고르지 않는 한 Kiln 팀만: 보고서 zip. 팀 채널에서 30일 뒤에 삭제됩니다.",
       "presenceTitle": "Rich Presence",
       "presence": "켜져 있고 플레이하는 동안에만, 이 PC의 Discord 앱으로만: Kiln과 함께하는 Enshrouded, 켜진 모드 수, 시간. 서버나 월드 이름, 캐릭터, 어떤 모드를 쓰는지는 절대 보내지 않습니다.",
+      "presencePack": "'Crucible 팩 표시'가 켜져 있으면 플레이 중인 Crucible 팩의 이름과 frostdev.io에 있는 팩 페이지 링크도 표시됩니다. 이 PC에서 만든 팩의 이름은 표시되지 않습니다.",
       "testerTitle": "테스터로 지원할 때",
       "tester": "Kiln 팀은 이 PC의 그래픽 카드, 드라이버, 비디오 메모리, 시스템, 게임 실행 방식을 받습니다. 결과는 #testing의 해당 빌드 게시글로 갑니다. 첨부한 지원 보고서는 팀에게만 갑니다.",
       "keptTitle": "frostdev.io가 보관하는 것",

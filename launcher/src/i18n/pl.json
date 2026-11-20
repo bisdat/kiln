@@ -4768,7 +4768,24 @@
       "getKiln": "Pobierz Kiln",
       "joinDiscord": "Dołącz do Discorda",
       "onToast": "Rich Presence włączone",
-      "offToast": "Rich Presence wyłączone"
+      "offToast": "Rich Presence wyłączone",
+      "pack": {
+        "label": "Pokazuj moją paczkę z Crucible na profilu Discord",
+        "hint": "Gdy grasz w paczkę z Crucible: jej nazwa i przycisk Pobierz tę paczkę modów, który otwiera stronę paczki. Paczki zrobione na tym PC nigdy nie są pokazywane z nazwy.",
+        "never": "Nigdy nie pokazujemy: nazw serwerów, nazw światów ani twojej postaci. Nazwa i strona twojej paczki z Crucible są pokazywane, gdy w nią grasz.",
+        "state": {
+          "one": "{pack} ({count} mod)",
+          "few": "{pack} ({count} mody)",
+          "many": "{pack} ({count} modów)",
+          "other": "{pack} ({count} modów)"
+        },
+        "getPack": "Pobierz tę paczkę modów",
+        "example": "Bieg żaru",
+        "turnOn": "Pokaż moją paczkę",
+        "turnOff": "Ukryj moją paczkę",
+        "onToast": "Twoja paczka z Crucible jest widoczna na Discordzie",
+        "offToast": "Twoja paczka z Crucible nie jest już widoczna na Discordzie"
+      }
     },
     "signIn": {
       "title": "Zaloguj się przez Discord",
@@ -4914,6 +4931,7 @@
       "reportTeam": "Tylko dla zespołu Kiln, chyba że wybierzesz inaczej: plik zip raportu. Jest usuwany z kanału zespołu po 30 dniach.",
       "presenceTitle": "Rich Presence",
       "presence": "Tylko gdy jest włączone i grasz, i tylko do aplikacji Discord na tym PC: Enshrouded z Kiln, ile modów jest włączonych i czas. Nigdy nazwy serwerów ani światów, twoja postać czy to, jakich modów używasz.",
+      "presencePack": "Z włączonym Pokazuj moją paczkę z Crucible także nazwa paczki z Crucible, w którą grasz, i link do jej strony na frostdev.io. Paczki zrobione na tym PC nigdy nie są pokazywane z nazwy.",
       "testerTitle": "Gdy zgłaszasz się na testera",
       "tester": "Zespół Kiln dostaje informacje o karcie graficznej tego PC, sterowniku, pamięci wideo, systemie i tym, jak działa gra. Twoje wyniki trafiają do posta wersji na #testing. Dołączony raport dla wsparcia trafia tylko do zespołu.",
       "keptTitle": "Co przechowuje frostdev.io",
