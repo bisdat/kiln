@@ -46,8 +46,9 @@ const DISCONNECT_WAIT: Duration = Duration::from_secs(30);
 const EXIT_WAIT: Duration = Duration::from_secs(15);
 /// Seconds to wait for the control command `gc` before attaching.
 const GC_WAIT: u64 = 15;
-/// How often an attached session asks the Windows side whether the debuggee still runs and is still itself.
-const WATCH_EVERY: Duration = Duration::from_secs(2);
+/// How often an attached session asks the Windows side whether the debuggee still runs and is still itself
+/// (kiln_manage::debug::resolver::limits: longer than one poll can take).
+const WATCH_EVERY: Duration = resolver::limits::WATCH_EVERY;
 /// `--max-pause-ms` bounds (chapter 12a §4 step 8) and the default where a watchdog is on by default (clients).
 const PAUSE_MIN_MS: u64 = 100;
 const PAUSE_MAX_MS: u64 = 60_000;
@@ -574,6 +575,7 @@ fn observe_poll(
     let mut state = proven.ok();
     let mut mode = state.as_ref().map(|(r, _)| r.target.session_mode);
     let mut last = std::time::Instant::now();
+    let mut unknown: Option<String> = None;
     Box::new(move || {
         if let Some(f) = first.take() {
             return Some(f);
@@ -585,11 +587,27 @@ fn observe_poll(
         last = std::time::Instant::now();
         match resolver::watch(r, source.as_mut(), &mut resolver::new_challenge) {
             WatchOutcome::Same(m) if Some(m) != mode => {
+                unknown = None;
                 mode = Some(m);
                 let name = json!(m).as_str().unwrap_or("unknown").to_string();
                 Some(header(format!("session mode: {name}"), json!({ "event": "sessionMode", "sessionMode": name })))
             }
-            WatchOutcome::Same(_) => None,
+            WatchOutcome::Same(_) => {
+                unknown = None;
+                None
+            }
+            // proves nothing: keep observing and ask again at the next poll; said once per reason
+            WatchOutcome::Unknown(why) => {
+                if unknown.as_deref() == Some(why.as_str()) {
+                    return None;
+                }
+                let line = header(
+                    format!("the game did not answer this check ({why}); still observing, asking again in {} s", WATCH_EVERY.as_secs()),
+                    json!({ "event": "watchUnknown", "reason": why }),
+                );
+                unknown = Some(why);
+                Some(line)
+            }
             WatchOutcome::Gone => {
                 source.close();
                 state = None;
@@ -1205,10 +1223,14 @@ fn proxy(p: Planned) -> Result<i32> {
         let tx = tx.clone();
         let (source, resolved) = (source.clone(), t.resolved.clone());
         std::thread::spawn(move || {
+            // polls start WATCH_EVERY apart (one poll ends within resolver::limits::HELPER_WATCH_ANSWER); only an exit or a
+            // field proven different ends the watch: a poll that proves nothing (Unknown) is followed by the next one
+            let mut next = Instant::now() + WATCH_EVERY;
             loop {
-                std::thread::sleep(WATCH_EVERY);
+                std::thread::sleep(next.saturating_duration_since(Instant::now()));
+                next = Instant::now() + WATCH_EVERY;
                 let w = resolver::watch(&resolved, source.lock().unwrap().as_mut(), &mut resolver::new_challenge);
-                let last = !matches!(w, WatchOutcome::Same(_));
+                let last = matches!(w, WatchOutcome::Gone | WatchOutcome::Changed(_));
                 if tx.send(Ev::Watch(w)).is_err() || last {
                     break;
                 }
@@ -1224,6 +1246,8 @@ fn proxy(p: Planned) -> Result<i32> {
     let mut own = OWN_SEQ + 1;
     let mut code = 0;
     let mut end: (SessionState, Option<String>) = (SessionState::Detached, None);
+    // the reason of the last watch poll that proved nothing, said once until a poll answers again
+    let mut unknown: Option<String> = None;
     let send_disconnect = |adapter_in: &Mutex<Option<std::process::ChildStdin>>| {
         let m = json!({ "seq": OWN_SEQ, "type": "request", "command": "disconnect", "arguments": { "terminateDebuggee": false, "suspendDebuggee": false } });
         if let Some(w) = adapter_in.lock().unwrap().as_mut() {
@@ -1318,7 +1342,21 @@ fn proxy(p: Planned) -> Result<i32> {
                 _ => {}
             },
             Ev::Watch(w) => match w {
-                WatchOutcome::Same(mode) => states.mode(mode),
+                WatchOutcome::Same(mode) => {
+                    unknown = None;
+                    states.mode(mode)
+                }
+                // proves nothing: still attached; the watcher asks again at its next poll
+                WatchOutcome::Unknown(why) => {
+                    if unknown.as_deref() != Some(why.as_str()) {
+                        eprintln!(
+                            "kiln debug: the Windows side could not check the {} (PID {pid}) this time ({why}); still attached, checking again every {} s",
+                            t.what(),
+                            WATCH_EVERY.as_secs()
+                        );
+                        unknown = Some(why);
+                    }
+                }
                 WatchOutcome::Gone | WatchOutcome::Changed(_) => {
                     let (reason, text) = match &w {
                         WatchOutcome::Gone => ("debuggee_exited".to_string(), format!("kiln debug: the {} (PID {pid}) has exited; the session ends.", t.what())),
@@ -1326,7 +1364,7 @@ fn proxy(p: Planned) -> Result<i32> {
                             "identity_changed".to_string(),
                             format!("kiln debug: the {} answering for PID {pid} is no longer the attached process ({r}); detaching.", t.what()),
                         ),
-                        WatchOutcome::Same(_) => unreachable!(),
+                        WatchOutcome::Same(_) | WatchOutcome::Unknown(_) => unreachable!(),
                     };
                     eprintln!("{text}");
                     let _ = write_json(&mut *client_out.lock().unwrap(), &output_event(&text, "important"));
@@ -1384,6 +1422,7 @@ fn tell_client_adapter_died(t: &Target, source: &mut dyn ProcessSource, client_o
         WatchOutcome::Same(_) => (false, format!("netcoredbg exited while attached; the {what} is still running. Check that it still responds before trusting it.\n")),
         WatchOutcome::Gone => (true, format!("netcoredbg exited while attached and the {what} is gone with it; see kiln/logs/kiln.log and restart it.\n")),
         WatchOutcome::Changed(r) => (true, format!("netcoredbg exited while attached, and the {what} no longer answers as the attached process ({r}); see kiln/logs/kiln.log.\n")),
+        WatchOutcome::Unknown(r) => (false, format!("netcoredbg exited while attached; whether the {what} still runs could not be checked ({r}). Check that it still responds before trusting it.\n")),
     };
     eprintln!("kiln debug: {}", text.trim_end());
     let mut out = client_out.lock().unwrap();
@@ -1877,6 +1916,50 @@ mod tests {
         assert!(text.starts_with("observing the log only: no debug descriptor (refused)"), "{text}");
         assert!(text.contains(r#""text":"counter 2""#), "{text}");
         assert_eq!(ADAPTER_STARTS.with(|n| n.get()), before, "observing started an adapter");
+    }
+
+    /// Review item 2: a poll that proves nothing (here a helper that did not answer in time) does not end observing.
+    #[test]
+    fn observe_keeps_watching_through_a_poll_that_proves_nothing() {
+        struct Shared(Arc<Mutex<FakeSource>>);
+        impl ProcessSource for Shared {
+            fn elevated(&mut self) -> Option<bool> {
+                self.0.lock().unwrap().elevated()
+            }
+            fn inspect(&mut self, p: &resolver::Probe) -> std::result::Result<resolver::Seen, DebugError> {
+                self.0.lock().unwrap().inspect(p)
+            }
+            fn prepare_attach(&mut self, p: &resolver::Probe) -> std::result::Result<resolver::Seen, DebugError> {
+                self.0.lock().unwrap().prepare_attach(p)
+            }
+            fn watch(&mut self, p: &resolver::Probe) -> std::result::Result<resolver::Watch, DebugError> {
+                let mut s = self.0.lock().unwrap();
+                let w = s.watch(p);
+                if s.fail.take().is_some() {
+                    s.procs.clear(); // after the slow poll, the game exits
+                }
+                w
+            }
+            fn close(&mut self) {
+                self.0.lock().unwrap().close()
+            }
+        }
+        let w = World::new("observe-unknown");
+        let (p, d) = w.kiln("a", 32, 100, N1, TargetKind::Client);
+        w.put("a", &d);
+        let src = Arc::new(Mutex::new(FakeSource::new(vec![p])));
+        let r = resolver::resolve(&mut w.host("a", TargetKind::Client), &mut Shared(src.clone()), &mut counter()).unwrap();
+        src.lock().unwrap().fail = Some(DebugError::new(DebugCode::Timeout, "the debug-inspect helper did not answer watch_exit").because("helper_no_answer"));
+        let mut poll = observe_poll(Ok((r, Box::new(Shared(src)))), |t, _| t);
+        let mut lines = vec![poll().expect("the header")];
+        let t0 = Instant::now();
+        while !lines.iter().any(|l| l.contains("has exited")) && t0.elapsed() < WATCH_EVERY * 4 {
+            lines.extend(poll());
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(lines.iter().any(|l| l.contains("the game has exited")), "observing ended at the slow poll: {lines:?}");
+        assert!(!lines.iter().any(|l| l.contains("no longer answers")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("did not answer this check (helper_no_answer); still observing")), "{lines:?}");
     }
 
     #[test]

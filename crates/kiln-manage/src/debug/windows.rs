@@ -13,8 +13,9 @@
 //! Nothing here terminates a process, and no job created here ends what it holds.
 
 use super::errors::{DebugCode, DebugError};
+use super::resolver::{PipeAnswer, Probe, Seen};
 #[cfg(windows)]
-use super::resolver::{PipeAnswer, Probe, ProcessSource, Seen, Watch};
+use super::resolver::{ProcessSource, Watch};
 
 /// Process creation flags (Win32 values; the same numbers on every host so the decision can be tested anywhere).
 pub const DETACHED_PROCESS: u32 = 0x0000_0008;
@@ -64,12 +65,65 @@ pub fn refusal(op: &str, error: u32, pid: u32) -> DebugError {
     }
 }
 
+/// The OS calls behind one look at a held process: Win32 in [`NativeSource`], a table in the tests' fake
+/// (`resolver::fake`). [`look`] decides their order, so both run the same checks in the same order.
+pub trait HeldProcess {
+    fn pid(&self) -> u32;
+    /// The process has ended (its handle is signalled).
+    fn exited(&mut self) -> bool;
+    /// `GetProcessTimes`' creation time (100 ns units) as a decimal string.
+    fn creation_time_100ns(&mut self) -> Result<String, DebugError>;
+    /// `QueryFullProcessImageNameW`.
+    fn image(&mut self) -> Result<String, DebugError>;
+    /// SHA-256 of the image file.
+    fn hash_image(&mut self, image: &str) -> Result<String, DebugError>;
+    /// One identify exchange on the probe's control pipe.
+    fn ask_pipe(&mut self, probe: &Probe) -> Result<PipeAnswer, DebugError>;
+}
+
+/// The image digest of one held handle (image path, SHA-256). Reset whenever another handle is opened. While the
+/// handle is held its process cannot be replaced, so its image is the one hashed: watch polls take this digest instead
+/// of reading the whole image (tens of MB) again, and an image file swapped on disk under a running process does not
+/// count as another process.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DigestCache(Option<(String, String)>);
+
+/// Whether a look hashes the image again or takes the digest of this handle's earlier look.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hashing {
+    /// `inspect` and `prepare_attach`: read and hash the image file.
+    Fresh,
+    /// `watch_exit`: the digest this handle's last fresh look hashed, when the image path is the same.
+    Cached,
+}
+
+/// One look at a held process: what the OS says about it and its control pipe's answer to the probe's challenge.
+pub fn look(p: &mut dyn HeldProcess, probe: &Probe, digest: &mut DigestCache, hashing: Hashing) -> Result<Seen, DebugError> {
+    let pid = p.pid();
+    if p.exited() {
+        return Err(DebugError::new(DebugCode::NotRunning, format!("PID {pid} has exited")).because("exited"));
+    }
+    let creation_time_100ns = p.creation_time_100ns()?;
+    let image = p.image()?;
+    let image_sha256 = match (&digest.0, hashing) {
+        (Some((path, sha)), Hashing::Cached) if *path == image => sha.clone(),
+        _ => {
+            let sha = p.hash_image(&image)?;
+            digest.0 = Some((image.clone(), sha.clone()));
+            sha
+        }
+    };
+    let pipe = p.ask_pipe(probe)?;
+    Ok(Seen { windows_pid: pid, image, creation_time_100ns, image_sha256, pipe })
+}
+
 #[cfg(windows)]
 pub use imp::*;
 
 #[cfg(windows)]
 mod imp {
     use super::*;
+    use crate::debug::resolver::limits::{PIPE_ANSWER, PIPE_CONNECT};
     use std::io::{Read, Write};
     use std::os::windows::io::AsRawHandle;
     use std::sync::{Condvar, Mutex, OnceLock};
@@ -89,8 +143,6 @@ mod imp {
         PROCESS_SYNCHRONIZE, QueryFullProcessImageNameW, WaitForSingleObject,
     };
 
-    /// How long the control pipe has to answer (the helper's whole answer is due within 5 s).
-    const PIPE_ANSWER: Duration = Duration::from_secs(3);
 
     /// An open process handle (query + synchronize). Closed on drop; never used to end the process.
     struct Held {
@@ -155,19 +207,21 @@ mod imp {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    /// One identify exchange on the control pipe. A pipe that is not there is not this process's (identity_changed);
-    /// one that does not answer in time proves nothing (timeout).
+    /// One identify exchange on the control pipe, within PIPE_CONNECT + PIPE_ANSWER (resolver::limits). A pipe that is
+    /// not there is pipe_missing; one that stays busy or does not answer in time proves nothing (timeout).
     fn ask_pipe(probe: &Probe) -> Result<PipeAnswer, DebugError> {
         let pid = probe.windows_pid;
-        let mut tries = 0;
+        let t0 = std::time::Instant::now();
         let mut f = loop {
             match std::fs::OpenOptions::new().read(true).write(true).open(&probe.pipe) {
                 Ok(f) => break f,
-                Err(e) if e.raw_os_error() == Some(231) && tries < 3 => {
-                    // ERROR_PIPE_BUSY: another client is being served; wait for the instance
-                    tries += 1;
+                Err(e) if e.raw_os_error() == Some(231) && t0.elapsed() < PIPE_CONNECT => {
+                    // ERROR_PIPE_BUSY: the core's one instance serves another client; wait for it, PIPE_CONNECT in all
+                    let left = PIPE_CONNECT.saturating_sub(t0.elapsed());
                     // SAFETY: a NUL-terminated name.
-                    unsafe { WaitNamedPipeW(wide(&probe.pipe).as_ptr(), 1000) };
+                    if unsafe { WaitNamedPipeW(wide(&probe.pipe).as_ptr(), left.as_millis().max(1) as u32) } == 0 {
+                        std::thread::sleep(left.min(Duration::from_millis(20)));
+                    }
                 }
                 Err(e) if matches!(e.raw_os_error(), Some(2 | 3)) => {
                     return Err(DebugError::identity_changed(format!("PID {pid} serves no control pipe {}", probe.pipe), "pipe_missing"));
@@ -215,19 +269,29 @@ mod imp {
         match rx.recv_timeout(PIPE_ANSWER) {
             Ok(Ok(answer)) => super::super::resolver::parse_pipe_answer(&answer),
             Ok(Err(why)) => Err(DebugError::new(DebugCode::Timeout, format!("the control pipe of PID {pid} gave no answer ({why})")).because("pipe_no_answer")),
-            Err(_) => Err(DebugError::new(DebugCode::Timeout, format!("the control pipe of PID {pid} did not answer within {} s", PIPE_ANSWER.as_secs())).because("pipe_no_answer")),
+            Err(_) => Err(DebugError::new(DebugCode::Timeout, format!("the control pipe of PID {pid} did not answer within {} ms", PIPE_ANSWER.as_millis())).because("pipe_no_answer")),
         }
     }
 
-    fn look(held: &Held, probe: &Probe) -> Result<Seen, DebugError> {
-        if exited(held) {
-            return Err(DebugError::new(DebugCode::NotRunning, format!("PID {} has exited", held.pid)).because("exited"));
+    impl HeldProcess for Held {
+        fn pid(&self) -> u32 {
+            self.pid
         }
-        let created = creation(held)?;
-        let image = image(held)?;
-        let image_sha256 = digest(&image, held.pid)?;
-        let pipe = ask_pipe(probe)?;
-        Ok(Seen { windows_pid: held.pid, image, creation_time_100ns: created.to_string(), image_sha256, pipe })
+        fn exited(&mut self) -> bool {
+            exited(self)
+        }
+        fn creation_time_100ns(&mut self) -> Result<String, DebugError> {
+            creation(self).map(|c| c.to_string())
+        }
+        fn image(&mut self) -> Result<String, DebugError> {
+            image(self)
+        }
+        fn hash_image(&mut self, image: &str) -> Result<String, DebugError> {
+            digest(image, self.pid)
+        }
+        fn ask_pipe(&mut self, probe: &Probe) -> Result<PipeAnswer, DebugError> {
+            ask_pipe(probe)
+        }
     }
 
     /// Whether this process's token is elevated.
@@ -250,12 +314,12 @@ mod imp {
     #[derive(Default)]
     pub struct NativeSource {
         held: Option<Held>,
+        /// The image digest of `held`.
+        digest: DigestCache,
     }
 
-    impl NativeSource {
-        fn held(&self, pid: u32) -> Result<&Held, DebugError> {
-            self.held.as_ref().filter(|h| h.pid == pid).ok_or_else(|| DebugError::identity_changed(format!("PID {pid} is not the held process"), "not_held"))
-        }
+    fn held_of(held: &mut Option<Held>, pid: u32) -> Result<&mut Held, DebugError> {
+        held.as_mut().filter(|h| h.pid == pid).ok_or_else(|| DebugError::identity_changed(format!("PID {pid} is not the held process"), "not_held"))
     }
 
     impl ProcessSource for NativeSource {
@@ -264,23 +328,26 @@ mod imp {
         }
         fn inspect(&mut self, probe: &Probe) -> Result<Seen, DebugError> {
             self.held = None;
-            let held = open(probe.windows_pid)?;
-            let seen = look(&held, probe)?;
+            self.digest = DigestCache::default();
+            let mut held = open(probe.windows_pid)?;
+            let seen = look(&mut held, probe, &mut self.digest, Hashing::Fresh)?;
             self.held = Some(held);
             Ok(seen)
         }
         fn prepare_attach(&mut self, probe: &Probe) -> Result<Seen, DebugError> {
-            look(self.held(probe.windows_pid)?, probe)
+            let held = held_of(&mut self.held, probe.windows_pid)?;
+            look(held, probe, &mut self.digest, Hashing::Fresh)
         }
         fn watch(&mut self, probe: &Probe) -> Result<Watch, DebugError> {
-            let held = self.held(probe.windows_pid)?;
+            let held = held_of(&mut self.held, probe.windows_pid)?;
             if exited(held) {
                 return Ok(Watch::Exited);
             }
-            look(held, probe).map(Watch::Alive)
+            look(held, probe, &mut self.digest, Hashing::Cached).map(Watch::Alive)
         }
         fn close(&mut self) {
             self.held = None;
+            self.digest = DigestCache::default();
         }
     }
 

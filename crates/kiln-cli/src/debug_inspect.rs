@@ -15,7 +15,9 @@
 //! to `close` (or end of input). `close` releases the handle and exits; nothing here ends any process.
 //!
 //! [`HelperSource`] is the other end: the host's `ProcessSource` that starts the helper and speaks to it, with the
-//! first answer due within 15 s (the runner starts the helper) and every later one within 5 s.
+//! time limits of `kiln_manage::debug::resolver::limits`: the first answer within 15 s (the runner starts the
+//! helper), a `watch_exit` answer within 2.5 s and every other one within 5 s. A request that times out does not end
+//! the helper: its answer may still come, and is then dropped by its challenge.
 
 #[cfg(not(windows))]
 use crate::out::CliError;
@@ -23,15 +25,15 @@ use anyhow::Result;
 use kiln_manage::debug::resolver::{Probe, ProcessSource, Seen, Watch, check_seen};
 use kiln_manage::debug::{DebugCode, DebugError};
 use serde_json::{Value, json};
+use kiln_manage::debug::resolver::limits::{HELPER_ANSWER as ANSWER, HELPER_FIRST_ANSWER as FIRST_ANSWER, HELPER_WATCH_ANSWER as WATCH_ANSWER};
+use std::collections::VecDeque;
 use std::io::{BufRead, Write};
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MAX_LINE: usize = kiln_manage::debug::identity::MAX_FRAME;
-/// The answer to every request but the first is due within this.
-const ANSWER: Duration = Duration::from_secs(5);
-/// The first answer includes starting the helper under its runner.
-const FIRST_ANSWER: Duration = Duration::from_secs(15);
+/// How many timed-out requests' challenges are remembered (their late answers are dropped).
+const LATE_KEPT: usize = 16;
 
 #[derive(clap::Args)]
 pub struct InspectArgs {}
@@ -225,8 +227,12 @@ pub struct HelperSource {
     from: mpsc::Receiver<String>,
     child: Option<std::process::Child>,
     first: bool,
+    /// Set when the helper cannot serve any more (it ended, its input is closed, it answered a challenge never asked).
+    /// A timeout does not set it.
     broken: Option<DebugError>,
     elevated: Option<bool>,
+    /// Challenges of requests that timed out, oldest first: their answers can still come and are dropped.
+    late: VecDeque<String>,
 }
 
 impl HelperSource {
@@ -251,7 +257,47 @@ impl HelperSource {
                 }
             }
         });
-        HelperSource { to: Some(to), from: rx, child: None, first: true, broken: None, elevated: None }
+        HelperSource { to: Some(to), from: rx, child: None, first: true, broken: None, elevated: None, late: VecDeque::new() }
+    }
+
+    fn expect_late(&mut self, challenge: &str) {
+        if self.late.len() == LATE_KEPT {
+            self.late.pop_front();
+        }
+        self.late.push_back(challenge.to_string());
+    }
+
+    /// The answer echoing `challenge`, within `wait`. Answers to requests that timed out earlier are dropped on the way.
+    fn answer_to(&mut self, op: &str, challenge: &str, wait: Duration) -> std::result::Result<Value, DebugError> {
+        let deadline = Instant::now() + wait;
+        loop {
+            let line = match self.from.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(l) => l,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    // proves nothing and leaves the helper usable: its late answer is dropped by this challenge
+                    self.expect_late(challenge);
+                    return Err(DebugError::new(DebugCode::Timeout, format!("the debug-inspect helper did not answer {op} within {} ms", wait.as_millis())).because("helper_no_answer"));
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    let e = DebugError::new(DebugCode::Timeout, "the debug-inspect helper has ended").because("helper_gone");
+                    self.broken = Some(e.clone());
+                    return Err(e);
+                }
+            };
+            let Ok(v) = serde_json::from_str::<Value>(&line) else {
+                self.expect_late(challenge);
+                return Err(DebugError::new(DebugCode::Timeout, "the debug-inspect helper answered something that is not its protocol").because("helper_no_answer"));
+            };
+            match v["challenge"].as_str() {
+                Some(c) if c == challenge => return Ok(v),
+                Some(c) if self.late.iter().any(|l| l == c) => self.late.retain(|l| l != c),
+                _ => {
+                    let e = DebugError::identity_changed("the debug-inspect helper's answer does not echo this request's challenge", "helper_challenge");
+                    self.broken = Some(e.clone());
+                    return Err(e);
+                }
+            }
+        }
     }
 
     fn request(&mut self, op: &str, probe: &Probe) -> std::result::Result<Value, DebugError> {
@@ -261,28 +307,18 @@ impl HelperSource {
         let mut target = serde_json::to_value(probe).expect("plain data");
         target.as_object_mut().expect("an object").remove("challenge");
         let line = json!({ "v": 1, "op": op, "challenge": probe.challenge, "target": target }).to_string();
-        let gone = |what: String| DebugError::new(DebugCode::Timeout, what).because("helper_no_answer");
         let sent = self.to.as_mut().map(|w| writeln!(w, "{line}").and_then(|()| w.flush()));
         if !matches!(sent, Some(Ok(()))) {
-            let e = gone("the debug-inspect helper is not running".into());
+            let e = DebugError::new(DebugCode::Timeout, "the debug-inspect helper is not running").because("helper_gone");
             self.broken = Some(e.clone());
             return Err(e);
         }
-        let wait = if std::mem::take(&mut self.first) { FIRST_ANSWER } else { ANSWER };
-        let answer = match self.from.recv_timeout(wait) {
-            Ok(a) => a,
-            Err(_) => {
-                let e = gone(format!("the debug-inspect helper did not answer {op} within {} s", wait.as_secs()));
-                self.broken = Some(e.clone());
-                return Err(e);
-            }
+        let wait = match (std::mem::take(&mut self.first), op) {
+            (true, _) => FIRST_ANSWER,
+            (false, "watch_exit") => WATCH_ANSWER,
+            (false, _) => ANSWER,
         };
-        let v: Value = serde_json::from_str(&answer).map_err(|_| gone("the debug-inspect helper answered something that is not its protocol".into()))?;
-        if v["challenge"] != json!(probe.challenge) {
-            let e = DebugError::identity_changed("the debug-inspect helper's answer does not echo this request's challenge", "helper_challenge");
-            self.broken = Some(e.clone());
-            return Err(e);
-        }
+        let v = self.answer_to(op, &probe.challenge, wait)?;
         if v["ok"] != true {
             return Err(serde_json::from_value::<DebugError>(v["error"].clone())
                 .unwrap_or_else(|_| DebugError::new(DebugCode::UnsupportedIdentity, format!("the debug-inspect helper refused {op}")).because("helper_refused")));
@@ -323,7 +359,7 @@ impl ProcessSource for HelperSource {
         {
             let c = json!({ "v": 1, "op": "close", "challenge": "close-request" }).to_string();
             if writeln!(w, "{c}").and_then(|()| w.flush()).is_ok() {
-                let _ = self.from.recv_timeout(Duration::from_secs(2));
+                let _ = self.answer_to("close", "close-request", Duration::from_secs(2));
             }
         }
         // its input closes: the helper exits on its own (it is never killed)
@@ -397,6 +433,10 @@ mod tests {
 
     /// A helper (serve over a fake process table) on its own thread, and the host's HelperSource talking to it.
     fn pair(src: FakeSource) -> (HelperSource, std::thread::JoinHandle<FakeSource>) {
+        pair_with(src)
+    }
+
+    fn pair_with<S: ProcessSource + Send + 'static>(src: S) -> (HelperSource, std::thread::JoinHandle<S>) {
         let (up, down) = (Chan::default(), Chan::default());
         let (up_r, down_w) = (ChanR(up.clone()), ChanW(down.clone()));
         let h = std::thread::spawn(move || {
@@ -541,6 +581,54 @@ mod tests {
         std::fs::remove_dir_all(&t).unwrap();
     }
 
+    /// A Windows side whose first watch takes longer than the host waits for it.
+    struct SlowWatch {
+        inner: FakeSource,
+        delay: Option<Duration>,
+    }
+
+    impl ProcessSource for SlowWatch {
+        fn elevated(&mut self) -> Option<bool> {
+            self.inner.elevated()
+        }
+        fn inspect(&mut self, probe: &Probe) -> std::result::Result<Seen, DebugError> {
+            self.inner.inspect(probe)
+        }
+        fn prepare_attach(&mut self, probe: &Probe) -> std::result::Result<Seen, DebugError> {
+            self.inner.prepare_attach(probe)
+        }
+        fn watch(&mut self, probe: &Probe) -> std::result::Result<Watch, DebugError> {
+            if let Some(d) = self.delay.take() {
+                std::thread::sleep(d);
+            }
+            self.inner.watch(probe)
+        }
+        fn close(&mut self) {
+            self.inner.close()
+        }
+    }
+
+    /// Review item 2: one answer later than the host waits is a timeout for that request only. The late answer is
+    /// dropped by its challenge (never taken for the next request's), and the helper keeps serving.
+    #[test]
+    fn a_late_answer_is_dropped_and_the_helper_keeps_serving() {
+        let limit = WATCH_ANSWER;
+        let p = kiln(32);
+        let (mut h, t) = pair_with(SlowWatch { inner: FakeSource::new(vec![p.clone()]), delay: Some(limit + Duration::from_millis(700)) });
+        h.inspect(&probe_of(&p, N1, "challenge-0001")).unwrap();
+        let e = h.watch(&probe_of(&p, N1, "challenge-0002")).unwrap_err();
+        assert_eq!(e.code, DebugCode::Timeout);
+        // the late answer to challenge-0002 arrives first and is dropped; this request gets its own
+        match h.watch(&probe_of(&p, N1, "challenge-0003")) {
+            Ok(Watch::Alive(s)) => assert_eq!(s.pipe.challenge, "challenge-0003"),
+            other => panic!("the helper is poisoned by one late answer: {other:?}"),
+        }
+        assert!(matches!(h.watch(&probe_of(&p, N1, "challenge-0004")), Ok(Watch::Alive(_))));
+        h.close();
+        let src = t.join().unwrap();
+        assert_eq!(src.inner.calls, vec!["inspect 32", "watch 32", "watch 32", "watch 32", "close"]);
+    }
+
     #[test]
     fn a_helper_that_lies_or_stalls_is_refused() {
         // answers with another challenge
@@ -548,15 +636,24 @@ mod tests {
         let mut h = HelperSource::over(Box::new(std::io::sink()), std::io::Cursor::new(reply.into_bytes()));
         let e = h.inspect(&probe_of(&kiln(32), N1, "challenge-0001")).unwrap_err();
         assert_eq!(e.reason.as_deref(), Some("helper_challenge"));
-        // says nothing: a timeout (never proof that the target is gone), and the source stays broken
+        // says nothing: a timeout for that request (never proof that the target is gone), within the request's limit
         let silent = Chan::default();
         let mut h = HelperSource::over(Box::new(std::io::sink()), std::io::BufReader::new(ChanR(silent.clone())));
         h.first = false;
         let t0 = std::time::Instant::now();
         let e = h.inspect(&probe_of(&kiln(32), N1, "challenge-0001")).unwrap_err();
-        assert_eq!(e.code, DebugCode::Timeout);
+        assert_eq!((e.code, e.reason.as_deref()), (DebugCode::Timeout, Some("helper_no_answer")));
         assert!(t0.elapsed() >= ANSWER && t0.elapsed() < ANSWER + Duration::from_secs(2));
-        assert_eq!(h.prepare_attach(&probe_of(&kiln(32), N1, "challenge-0002")).unwrap_err().code, DebugCode::Timeout);
+        // not poisoned: the next request is sent and waits for its own answer (a watch poll, within its shorter limit)
+        let t0 = std::time::Instant::now();
+        assert_eq!(h.watch(&probe_of(&kiln(32), N1, "challenge-0002")).unwrap_err().reason.as_deref(), Some("helper_no_answer"));
+        assert!(t0.elapsed() >= WATCH_ANSWER && t0.elapsed() < WATCH_ANSWER + Duration::from_secs(2));
+        // a helper that ended: every request after that says so at once
         drop(ChanW(silent));
+        let e = h.watch(&probe_of(&kiln(32), N1, "challenge-0003")).unwrap_err();
+        assert_eq!((e.code, e.reason.as_deref()), (DebugCode::Timeout, Some("helper_gone")));
+        let t0 = std::time::Instant::now();
+        assert_eq!(h.watch(&probe_of(&kiln(32), N1, "challenge-0004")).unwrap_err().reason.as_deref(), Some("helper_gone"));
+        assert!(t0.elapsed() < Duration::from_secs(1));
     }
 }

@@ -111,6 +111,37 @@ pub fn parse_pipe_answer(line: &str) -> Result<PipeAnswer, DebugError> {
     })
 }
 
+/// The time limits of the Windows side, in one place. Each one is longer than everything it waits for, so a slow step
+/// times out where it happens and the step above it still answers in time. A watch poll that times out proves nothing
+/// ([`WatchOutcome::Unknown`]): the session goes on and the next poll asks again.
+///
+/// | limit | value | what it bounds |
+/// |---|---|---|
+/// | [`PIPE_CONNECT`](limits::PIPE_CONNECT) | 0.5 s | waiting for the control pipe's one instance while it serves another client |
+/// | [`PIPE_ANSWER`](limits::PIPE_ANSWER) | 1.5 s | the core's identify answer on a connected pipe (its control worker answers from snapshots) |
+/// | [`HELPER_WATCH_ANSWER`](limits::HELPER_WATCH_ANSWER) | 2.5 s | the helper's answer to `watch_exit`: one pipe exchange (at most 2 s) and the process queries; the image digest is the held handle's, not hashed again |
+/// | [`WATCH_EVERY`](limits::WATCH_EVERY) | 3 s | the watch poll period, from the start of one poll to the next: longer than a poll can take |
+/// | [`HELPER_ANSWER`](limits::HELPER_ANSWER) | 5 s | the helper's answer to `inspect` and `prepare_attach`: one pipe exchange, the process queries and one image hash (chapter 12a §4 step 4: one response within 5 s) |
+/// | [`HELPER_FIRST_ANSWER`](limits::HELPER_FIRST_ANSWER) | 15 s | the helper's first answer, which includes starting it under its runner |
+///
+/// So: pipe exchange (PIPE_CONNECT + PIPE_ANSWER) < the helper's limit for that request < the watch poll period. The
+/// native Windows CLI asks in-process: the pipe limits are its only ones.
+pub mod limits {
+    use std::time::Duration;
+
+    pub const PIPE_CONNECT: Duration = Duration::from_millis(500);
+    pub const PIPE_ANSWER: Duration = Duration::from_millis(1500);
+    pub const HELPER_WATCH_ANSWER: Duration = Duration::from_millis(2500);
+    pub const WATCH_EVERY: Duration = Duration::from_secs(3);
+    pub const HELPER_ANSWER: Duration = Duration::from_secs(5);
+    pub const HELPER_FIRST_ANSWER: Duration = Duration::from_secs(15);
+
+    const _: () = assert!(PIPE_CONNECT.as_millis() + PIPE_ANSWER.as_millis() < HELPER_WATCH_ANSWER.as_millis());
+    const _: () = assert!(HELPER_WATCH_ANSWER.as_millis() < WATCH_EVERY.as_millis());
+    const _: () = assert!(PIPE_CONNECT.as_millis() + PIPE_ANSWER.as_millis() < HELPER_ANSWER.as_millis());
+    const _: () = assert!(HELPER_ANSWER.as_millis() < HELPER_FIRST_ANSWER.as_millis());
+}
+
 /// A watch poll: the held process ended, or it is still there (and answered again).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Watch {
@@ -394,31 +425,46 @@ pub fn revalidate(
     Ok(seen)
 }
 
-/// What a watch poll means for an attached session.
+/// What a watch poll means for an attached session. Only `Gone` and `Changed` end it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WatchOutcome {
     /// Still the resolved process; its current session mode.
     Same(SessionMode),
     /// It ended.
     Gone,
-    /// Something answers that is not the resolved process (reason).
+    /// A field of the resolved identity is proven different (the reason names it, see [`PROOF`]).
     Changed(String),
+    /// This poll proved nothing either way (a timeout, a transport error, a pipe or query that failed): the session
+    /// goes on and the next poll asks again (reason).
+    Unknown(String),
+}
+
+/// The refusals that prove the process answering is not the resolved one, by the field that differs: the PID opened,
+/// its creation time, image path or digest, the pipe's nonce, its echo of the challenge, the process its answer names
+/// or the process serving it. Anything else (no answer in time, a pipe that is not there or busy, an answer that is not
+/// the protocol, rights, a failed query) is not proof.
+pub const PROOF: [&str; 8] = ["pid", "creation_time", "image_path", "image_digest", "nonce", "challenge", "pipe_identity", "pipe_server"];
+
+fn proves_changed(e: &DebugError) -> bool {
+    e.code == DebugCode::IdentityChanged && e.reason.as_deref().is_some_and(|r| PROOF.contains(&r))
 }
 
 /// One watch poll of the held process (helper `watch_exit`).
 pub fn watch(r: &Resolved, source: &mut dyn ProcessSource, challenge: &mut dyn FnMut() -> Result<String, DebugError>) -> WatchOutcome {
     let probe = match challenge() {
         Ok(c) => Probe::of(&r.descriptor, c),
-        Err(e) => return WatchOutcome::Changed(e.message),
+        Err(e) => return WatchOutcome::Unknown(e.reason.unwrap_or(e.message)),
     };
-    match source.watch(&probe) {
-        Ok(Watch::Exited) => WatchOutcome::Gone,
-        Ok(Watch::Alive(seen)) => match check_seen(&probe, &seen) {
-            Ok(()) => WatchOutcome::Same(seen.pipe.session_mode),
-            Err(e) => WatchOutcome::Changed(e.reason.unwrap_or(e.message)),
-        },
+    let seen = source.watch(&probe).and_then(|w| match w {
+        Watch::Exited => Ok(None),
+        Watch::Alive(seen) => check_seen(&probe, &seen).map(|()| Some(seen.pipe.session_mode)),
+    });
+    match seen {
+        Ok(Some(mode)) => WatchOutcome::Same(mode),
+        Ok(None) => WatchOutcome::Gone,
         Err(e) if e.code == DebugCode::NotRunning => WatchOutcome::Gone,
-        Err(e) => WatchOutcome::Changed(e.reason.unwrap_or(e.message)),
+        Err(e) if proves_changed(&e) => WatchOutcome::Changed(e.reason.unwrap_or(e.message)),
+        Err(e) => WatchOutcome::Unknown(e.reason.unwrap_or(e.message)),
     }
 }
 
@@ -541,6 +587,7 @@ pub fn runner_sha256(runner: &Path) -> Result<String, DebugError> {
 /// A fake Windows side and host side for tests (here and in kiln-cli): a process table the test edits between steps.
 pub mod fake {
     use super::*;
+    use crate::debug::windows::{DigestCache, HeldProcess, Hashing, look};
 
     #[derive(Debug, Clone)]
     pub struct FakePipe {
@@ -562,6 +609,8 @@ pub mod fake {
         pub pipe: Option<FakePipe>,
         /// OpenProcess is refused (another user, elevated).
         pub denied: bool,
+        /// Its image file cannot be read (hashing it fails).
+        pub unreadable: bool,
     }
 
     impl FakeProc {
@@ -575,6 +624,7 @@ pub mod fake {
                 image_sha256: sha.to_string(),
                 pipe: Some(FakePipe { name: pipe.clone(), session_nonce: nonce.into(), managed_ready: true, session_mode: SessionMode::Hosted, runtime_version: "8.0.11".into(), echo: true }),
                 denied: false,
+                unreadable: false,
             };
             let d = Descriptor {
                 format: DESCRIPTOR_FORMAT,
@@ -597,6 +647,52 @@ pub mod fake {
 
     type Hook = Box<dyn FnMut(&mut Vec<FakeProc>) + Send>;
 
+    /// One held row of the table, as the OS calls of [`crate::debug::windows::look`] see it.
+    struct FakeHeld<'a> {
+        p: &'a FakeProc,
+        hashes: &'a mut u32,
+    }
+
+    impl HeldProcess for FakeHeld<'_> {
+        fn pid(&self) -> u32 {
+            self.p.windows_pid
+        }
+        fn exited(&mut self) -> bool {
+            false // an exit is the row leaving the table
+        }
+        fn creation_time_100ns(&mut self) -> Result<String, DebugError> {
+            Ok(self.p.creation_time_100ns.clone())
+        }
+        fn image(&mut self) -> Result<String, DebugError> {
+            Ok(self.p.image.clone())
+        }
+        fn hash_image(&mut self, image: &str) -> Result<String, DebugError> {
+            *self.hashes += 1;
+            if self.p.unreadable {
+                return Err(DebugError::new(DebugCode::UnsupportedIdentity, format!("the image of PID {} ({image}) cannot be read", self.p.windows_pid)).because("image_read"));
+            }
+            Ok(self.p.image_sha256.clone())
+        }
+        fn ask_pipe(&mut self, probe: &Probe) -> Result<PipeAnswer, DebugError> {
+            let p = self.p;
+            let pid = p.windows_pid;
+            let pipe = p.pipe.as_ref().filter(|x| x.name == probe.pipe).ok_or_else(|| {
+                DebugError::identity_changed(format!("PID {pid} serves no pipe {}", probe.pipe), "pipe_missing")
+            })?;
+            Ok(PipeAnswer {
+                session_nonce: pipe.session_nonce.clone(),
+                challenge: if pipe.echo { probe.challenge.clone() } else { "0".repeat(32) },
+                windows_pid: pid,
+                creation_time_100ns: p.creation_time_100ns.clone(),
+                image: p.image.clone(),
+                image_sha256: p.image_sha256.clone(),
+                managed_ready: pipe.managed_ready,
+                session_mode: pipe.session_mode,
+                runtime_version: pipe.runtime_version.clone(),
+            })
+        }
+    }
+
     /// The Windows side of one namespace, from a table. Records every call; never kills anything (it cannot).
     #[derive(Default)]
     pub struct FakeSource {
@@ -608,6 +704,10 @@ pub mod fake {
         pub before_prepare: Option<Hook>,
         pub calls: Vec<String>,
         pub held: Option<u32>,
+        /// How often an image was hashed.
+        pub hashes: u32,
+        /// The image digest of the held row.
+        digest: DigestCache,
     }
 
     impl FakeSource {
@@ -615,7 +715,7 @@ pub mod fake {
             FakeSource { procs, ..Default::default() }
         }
 
-        fn look(&mut self, probe: &Probe) -> Result<Seen, DebugError> {
+        fn look(&mut self, probe: &Probe, hashing: Hashing) -> Result<Seen, DebugError> {
             if let Some(e) = &self.fail {
                 return Err(e.clone());
             }
@@ -627,27 +727,11 @@ pub mod fake {
             if p.denied {
                 return Err(DebugError::new(DebugCode::PrivilegeMismatch, format!("OpenProcess({pid}): access denied")).because("open_denied"));
             }
+            if self.held != Some(pid) {
+                self.digest = DigestCache::default(); // another handle
+            }
             self.held = Some(pid);
-            let pipe = p.pipe.as_ref().filter(|x| x.name == probe.pipe).ok_or_else(|| {
-                DebugError::identity_changed(format!("PID {pid} serves no pipe {}", probe.pipe), "pipe_missing")
-            })?;
-            Ok(Seen {
-                windows_pid: p.windows_pid,
-                image: p.image.clone(),
-                creation_time_100ns: p.creation_time_100ns.clone(),
-                image_sha256: p.image_sha256.clone(),
-                pipe: PipeAnswer {
-                    session_nonce: pipe.session_nonce.clone(),
-                    challenge: if pipe.echo { probe.challenge.clone() } else { "0".repeat(32) },
-                    windows_pid: p.windows_pid,
-                    creation_time_100ns: p.creation_time_100ns.clone(),
-                    image: p.image.clone(),
-                    image_sha256: p.image_sha256.clone(),
-                    managed_ready: pipe.managed_ready,
-                    session_mode: pipe.session_mode,
-                    runtime_version: pipe.runtime_version.clone(),
-                },
-            })
+            look(&mut FakeHeld { p, hashes: &mut self.hashes }, probe, &mut self.digest, hashing)
         }
     }
 
@@ -657,7 +741,8 @@ pub mod fake {
         }
         fn inspect(&mut self, probe: &Probe) -> Result<Seen, DebugError> {
             self.calls.push(format!("inspect {}", probe.windows_pid));
-            self.look(probe)
+            self.digest = DigestCache::default(); // inspect opens a new handle
+            self.look(probe, Hashing::Fresh)
         }
         fn prepare_attach(&mut self, probe: &Probe) -> Result<Seen, DebugError> {
             self.calls.push(format!("prepare_attach {}", probe.windows_pid));
@@ -667,18 +752,19 @@ pub mod fake {
             if self.held != Some(probe.windows_pid) {
                 return Err(DebugError::identity_changed(format!("PID {} is not the held process", probe.windows_pid), "not_held"));
             }
-            self.look(probe)
+            self.look(probe, Hashing::Fresh)
         }
         fn watch(&mut self, probe: &Probe) -> Result<Watch, DebugError> {
             self.calls.push(format!("watch {}", probe.windows_pid));
             if !self.procs.iter().any(|p| p.windows_pid == probe.windows_pid && Some(p.windows_pid) == self.held) {
                 return Ok(Watch::Exited);
             }
-            self.look(probe).map(Watch::Alive)
+            self.look(probe, Hashing::Cached).map(Watch::Alive)
         }
         fn close(&mut self) {
             self.calls.push("close".into());
             self.held = None;
+            self.digest = DigestCache::default();
         }
     }
 
@@ -1084,6 +1170,68 @@ mod tests {
         src.procs.clear();
         assert_eq!(watch(&r, &mut src, &mut counter()), WatchOutcome::Gone);
         assert!(!src.calls.iter().any(|c| c.contains("kill") || c.contains("terminate")));
+    }
+
+    /// Review item 2: one slow or failed poll is not a reason to end a session; only a field proven different is.
+    #[test]
+    fn a_watch_poll_that_proves_nothing_keeps_the_session() {
+        let w = World::new("unknown");
+        let (p, d) = w.kiln("a", 32, 100, N1);
+        w.put("a", &d);
+        let mut src = FakeSource::new(vec![p]);
+        let r = run(&mut w.host("a", TargetKind::Server), &mut src).unwrap();
+        // a slow helper or pipe, a busy pipe, a pipe the core closed while its process exits, an answer that is not the
+        // protocol, a lost handle, rights, a failed query: none of them shows another process
+        let transient = [
+            DebugError::new(DebugCode::Timeout, "the debug-inspect helper did not answer watch_exit").because("helper_no_answer"),
+            DebugError::new(DebugCode::Timeout, "the debug-inspect helper has ended").because("helper_gone"),
+            DebugError::new(DebugCode::Timeout, "the control pipe did not answer").because("pipe_no_answer"),
+            DebugError::new(DebugCode::Timeout, "the control pipe stayed busy").because("pipe_busy"),
+            DebugError::identity_changed("PID 32 serves no control pipe", "pipe_missing"),
+            DebugError::identity_changed("the control pipe's answer is not Kiln's", "pipe_answer"),
+            DebugError::identity_changed("the helper's answer does not echo this request's challenge", "helper_challenge"),
+            DebugError::identity_changed("PID 32 is not the held process", "not_held"),
+            DebugError::new(DebugCode::PrivilegeMismatch, "the control pipe refuses this user").because("pipe_denied"),
+            DebugError::new(DebugCode::UnsupportedIdentity, "the image cannot be read").because("image_read"),
+        ];
+        for e in transient {
+            src.fail = Some(e.clone());
+            let got = watch(&r, &mut src, &mut counter());
+            assert!(!matches!(got, WatchOutcome::Changed(_) | WatchOutcome::Gone), "{:?} ended the session: {got:?}", e.reason);
+            assert_eq!(got, WatchOutcome::Unknown(e.reason.clone().unwrap()));
+        }
+        src.fail = None;
+        let got = watch(&r, &mut src, &mut || Err(DebugError::new(DebugCode::UnsupportedIdentity, "no random challenge")));
+        assert!(!matches!(got, WatchOutcome::Changed(_) | WatchOutcome::Gone), "no challenge ended the session: {got:?}");
+        assert_eq!(got, WatchOutcome::Unknown("no random challenge".into()));
+        // the next poll that answers is the session again
+        assert_eq!(watch(&r, &mut src, &mut counter()), WatchOutcome::Same(SessionMode::Hosted));
+        // a field proven different ends it
+        for reason in ["pid", "creation_time", "image_path", "image_digest", "nonce", "challenge", "pipe_identity", "pipe_server"] {
+            src.fail = Some(DebugError::identity_changed("differs", reason));
+            assert_eq!(watch(&r, &mut src, &mut counter()), WatchOutcome::Changed(reason.into()), "{reason}");
+        }
+    }
+
+    /// Review item 2: the held handle's image is hashed once; a watch poll does not read the whole image again.
+    #[test]
+    fn watch_polls_reuse_the_image_digest_of_the_held_handle() {
+        let w = World::new("digest");
+        let (p, d) = w.kiln("a", 32, 100, N1);
+        w.put("a", &d);
+        let mut src = FakeSource::new(vec![p]);
+        let mut host = w.host("a", TargetKind::Server);
+        let r = run(&mut host, &mut src).unwrap();
+        assert_eq!(src.hashes, 1, "inspect hashes");
+        permit(&r, false, &mut host, &mut src, &mut counter()).unwrap();
+        assert_eq!(src.hashes, 2, "prepare_attach hashes again (the last check before an attach)");
+        for _ in 0..3 {
+            assert_eq!(watch(&r, &mut src, &mut counter()), WatchOutcome::Same(SessionMode::Hosted));
+        }
+        assert_eq!(src.hashes, 2, "watch polls take the digest of the held handle");
+        // another handle (a new inspect) hashes again
+        run(&mut host, &mut src).unwrap();
+        assert_eq!(src.hashes, 3);
     }
 
     /// The answer lines exactly as native/core/src/debug_descriptor.cpp writes them.
