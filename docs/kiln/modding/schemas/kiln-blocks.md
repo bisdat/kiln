@@ -58,8 +58,8 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `rarityRolls` | object |  | Rarity at creation: which item types roll which rarity (Common to Legendary, by weight) when the game crafts them, loot makes them or a Kiln give asks for none. The game then makes the item at that rarity. Server; asks nothing of players' games. A later definition wins an item type an earlier one also names. |
 | `rarityUpgrades` | object |  | Rarity upgrades: which items an upgrade takes, up to which rarity, and what each step costs (items, a chance, what a failed roll costs). Items.UpgradeRarity(player, item, "name") runs one; an upgraded item gets its next enhancement slot in place, which the player unlocks at the workbench as usual. Server; asks nothing of players' games. |
 | `recipes` | object |  | Recipes of their own: one more way to make any item at a station, such as a game item at the game's workbench. |
-| `routines` | object |  | Day plans for villagers: windows of the game day, each with one of the game's own villager tasks, and a fallback. Bound to a villager by code (Routines.Assign) or by an NPC block's routine. Server; asks nothing of players' games. |
 | `resourcePatches` | object |  | Changes to the game's own resources, made before the game reads them: fields, a template's components, a list's length (a mod with "boot": true; docs/kiln/modding/resource-patches.md). Not blocks: kiln.content applies them. |
+| `routines` | object |  | Day plans for villagers: windows of the game day, each with one of the game's own villager tasks, and a fallback. Bound to a villager by code (Routines.Assign) or by an NPC block's routine. Server; asks nothing of players' games. |
 | `rules` | object |  | Rules, for behaviours to name. |
 | `screenEffects` | object |  | Full-screen effects: colour grading, a tint, a vignette, fades and flashes. Drawn by each Kiln client; players' games need nothing for them. |
 | `seats` | object |  | Seats: the game's sitting, comfort of the chair category. |
@@ -1382,6 +1382,24 @@ What it takes to use it. item, count, uses and time are the game's own lock, sho
 | `uses` | boolean |  | The use takes item from the bag, as a lockpick goes. |
 | `when` | [states](#states) |  | Only while the player is in one of these. |
 
+## resourcePatch
+
+One resource and what to change in it: fields to set, a template's components, lists cleared, replaced or appended to. At least one of set, append, replace, clear, addComponents, removeComponents, copyComponents. Made in the order removeComponents, addComponents, copyComponents, clear, replace, append, set. A patch is applied whole or not at all.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `addComponents` | array of string |  | Components of the game's types a template gets, zeroed ("PickupItemZone"); one it has already stays. Made after removeComponents; set then fills them in ("PickupItemZone.lastAttempt.value"). min items 1 |
+| `append` | object |  | List path to the values added at its end: a list of numbers, bools or enum members. Made after the components, clear and replace, before set. |
+| `clear` | array of string |  | List paths made empty, any element type ("noBuildZones"). A path names one list: [i] on the way is fine, [*] is not. Made after the components, before replace. min items 1 |
+| `copyComponents` | object |  | Component type name to the GUID of the template it is copied from, whole (its lists, strings and nested structs with it): added when the template has none of that type, its own replaced when it has. The source must have the component; CurrentTransform, and what an actor needs to live, are refused. Made after addComponents; set can then change the copy's fields. |
+| `format` | `1` |  |  |
+| `part` | integer |  | The part index; 0 when left out. min 0 |
+| `removeComponents` | array of string |  | A template's (keen::ecs::TemplateResource) components to take out, by type name ("SpawnTime"); one it has not got is skipped. Made first. CurrentTransform, and what an actor needs to live, are refused. min items 1 |
+| `replace` | object |  | List path to the values it holds afterwards, exactly: a list of numbers, bools or enum members. Made after clear, before append. |
+| `resource` | string | yes | The resource's GUID. |
+| `set` | object |  | Member path to value. A path: members by name, [i] an element of a list, [*] every element. |
+| `type` | string | yes | The resource's qualified type name, as keen::BalancingTable. min length 1 |
+
 ## routine
 
 A villager's day plan (RoutineBlock). At each decision the villager takes the window with the highest priority that covers the game minute; equal priorities go to the window written first; no window: the fallback.
@@ -1420,24 +1438,6 @@ One window: from startMinute up to, not including, endMinute, in minutes of the 
 | `priority` | integer |  | Among the windows that cover a minute the highest wins (default 0). min -2147483648 max 2147483647 |
 | `startMinute` | integer |  | The first minute of the window (default 0). min 0 max 1439 |
 | `task` | [routineTask](#routinetask) | yes |  |
-## resourcePatch
-
-One resource and what to change in it: fields to set, a template's components, lists cleared, replaced or appended to. At least one of set, append, replace, clear, addComponents, removeComponents, copyComponents. Made in the order removeComponents, addComponents, copyComponents, clear, replace, append, set. A patch is applied whole or not at all.
-
-| Key | Type | Required | Notes |
-|---|---|---|---|
-| `addComponents` | array of string |  | Components of the game's types a template gets, zeroed ("PickupItemZone"); one it has already stays. Made after removeComponents; set then fills them in ("PickupItemZone.lastAttempt.value"). min items 1 |
-| `append` | object |  | List path to the values added at its end: a list of numbers, bools or enum members. Made after the components, clear and replace, before set. |
-| `clear` | array of string |  | List paths made empty, any element type ("noBuildZones"). A path names one list: [i] on the way is fine, [*] is not. Made after the components, before replace. min items 1 |
-| `copyComponents` | object |  | Component type name to the GUID of the template it is copied from, whole (its lists, strings and nested structs with it): added when the template has none of that type, its own replaced when it has. The source must have the component; CurrentTransform, and what an actor needs to live, are refused. Made after addComponents; set can then change the copy's fields. |
-| `format` | `1` |  |  |
-| `part` | integer |  | The part index; 0 when left out. min 0 |
-| `removeComponents` | array of string |  | A template's (keen::ecs::TemplateResource) components to take out, by type name ("SpawnTime"); one it has not got is skipped. Made first. CurrentTransform, and what an actor needs to live, are refused. min items 1 |
-| `replace` | object |  | List path to the values it holds afterwards, exactly: a list of numbers, bools or enum members. Made after clear, before append. |
-| `resource` | string | yes | The resource's GUID. |
-| `set` | object |  | Member path to value. A path: members by name, [i] an element of a list, [*] every element. |
-| `type` | string | yes | The resource's qualified type name, as keen::BalancingTable. min length 1 |
-
 ## rule
 
 On a trigger, every so often, when its conditions hold, do something.
