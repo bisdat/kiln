@@ -1,0 +1,11 @@
+{
+  "id": "mod-values-test",
+  "name": "Mod values test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "license": "MIT",
+  "entryAssembly": "ModValuesTest.dll",
+  "side": "both",
+  "clients": "none",
+  "description": "Drives Kiln.ModValues on a dedicated lab server without a player: values defined in C# and in mod-values/*.json, awards and spends through a server command run as a player, refusals, two characters, the stream kiln:mod-values and the carry offer. mvnet.py is the fake client; lines 'mod-values-test:' go to kiln.log."
+}

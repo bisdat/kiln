@@ -461,3 +461,14 @@ A mod asks `world.ecs_read` (`WorldConcurrent.IsAvailable`) for the task-thread 
 compare-exchange writes, not the `engine.*` rows: those say what the profile
 carries, the `world.*` rows say whether kiln.world reads or writes with it in this process (both are among the
 kiln.world rows above).
+
+## Rows added in dev.31
+Kiln.ModValues ([mod-values.md](mod-values.md)), managed rows reported at its start (the first service tick) and every 25
+steps.
+
+| Row | Kind | Reported by | What it says |
+|---|---|---|---|
+| `stats.definitions` | managed, static | Kiln.ModValues | `ModValues.Describe` and `Definition`: always available where the library is |
+| `stats.own` | managed; static on a dedicated server, session on a client | Kiln.ModValues | the server ledger (`Define`, `Read`, `Add`, `Spend`, `Set`, `Reset`): needs kiln.saves (`service-missing`); on a client pending until it hosts a world |
+| `stats.sync` | managed, static | Kiln.ModValues | `ModValues.Synced`: client only (`wrong-side` on a server), needs kiln.net |
+| `stats.ui` | managed, static | Kiln.ModValues | the stat source of UI blocks: client only (`wrong-side` on a server), needs kiln.ui |

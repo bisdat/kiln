@@ -17,5 +17,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../services/Kiln.ModValues/Kiln.ModValues.csproj" />
+    <ProjectReference Include="../../Kiln.TestKit/Kiln.TestKit.csproj" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,11 @@
+{
+  "id": "fishing",
+  "name": "Fishing (mod values sample)",
+  "version": "1.0.0",
+  "apiVersion": "0.2",
+  "license": "MIT",
+  "entryAssembly": "ModValuesSample.dll",
+  "side": "both",
+  "clients": "optional",
+  "description": "Kiln.ModValues sample: fishing XP with levels and fishing tokens per character, saved with the character on the server; /fishing-catch, /fishing-buy-bait, /fishing-stats; a HUD line, a window (F9) and a tooltip line on Kiln clients. Vanilla players can use the commands; they just see no HUD."
+}

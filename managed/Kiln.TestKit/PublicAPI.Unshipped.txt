@@ -29,6 +29,12 @@ Kiln.TestKit.FakeSlotClickResult.FakeSlotClickResult(int Delivered, bool Taken) 
 Kiln.TestKit.FakeSlotClickResult.FakeSlotClickResult() -> void
 Kiln.TestKit.FakeSlotClickResult.Taken.get -> bool
 Kiln.TestKit.FakeSlotClickResult.Taken.init -> void
+Kiln.TestKit.HarnessModValues
+Kiln.TestKit.HarnessModValues.Join(Kiln.CharacterKey character) -> void
+Kiln.TestKit.HarnessModValues.Leave(Kiln.CharacterKey character) -> void
+Kiln.TestKit.HarnessModValues.Record(Kiln.CharacterKey character, string! mod, string! partition = "world") -> string?
+Kiln.TestKit.HarnessModValues.World.get -> System.Guid
+Kiln.TestKit.HarnessModValues.World.set -> void
 Kiln.TestKit.HarnessUiInventory
 Kiln.TestKit.HarnessUiInventory.Click(int index, Kiln.SlotButton button = Kiln.SlotButton.Left, Kiln.SlotModifiers modifiers = Kiln.SlotModifiers.None) -> Kiln.TestKit.FakeSlotClickResult
 Kiln.TestKit.HarnessUiInventory.ClickSubscriptions.get -> int
@@ -36,7 +42,9 @@ Kiln.TestKit.HarnessUiInventory.Draw(Kiln.HudScreen screen, params Kiln.TestKit.
 Kiln.TestKit.HarnessUiInventory.Drawn.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeInventorySlot>!
 Kiln.TestKit.HarnessUiInventory.Hover(int? index) -> void
 Kiln.TestKit.HarnessUiInventory.MarkOf(int index) -> Kiln.SlotMark?
+Kiln.TestKit.KilnHarness.ModValues.get -> Kiln.TestKit.HarnessModValues!
 Kiln.TestKit.KilnHarness.UiInventory.get -> Kiln.TestKit.HarnessUiInventory!
+static Kiln.TestKit.HarnessModValues.Character(int n) -> Kiln.CharacterKey
 ~override Kiln.TestKit.FakeInventorySlot.Equals(object obj) -> bool
 override Kiln.TestKit.FakeInventorySlot.GetHashCode() -> int
 ~override Kiln.TestKit.FakeInventorySlot.ToString() -> string
