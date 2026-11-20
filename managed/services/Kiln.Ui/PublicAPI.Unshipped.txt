@@ -27,6 +27,22 @@ Kiln.TooltipPlace
 Kiln.TooltipPlace.AfterStats = 1 -> Kiln.TooltipPlace
 Kiln.TooltipPlace.End = 0 -> Kiln.TooltipPlace
 Kiln.Ui.Tooltip
+Kiln.UiDraw.BeginTab(string! label, bool select) -> bool
+Kiln.UiDraw.HasBlockWidgets.get -> bool
+Kiln.UiDraw.InputText(string! label, ref string! value, int maxBytes, Kiln.UiTextFieldFlags flags, float width = 0, float height = 0) -> bool
+Kiln.UiDraw.LastItemState.get -> Kiln.UiItemState
+Kiln.UiDraw.SetNextItemOpen(bool open) -> void
+Kiln.UiItemState
+Kiln.UiItemState.Active = 1 -> Kiln.UiItemState
+Kiln.UiItemState.Deactivated = 2 -> Kiln.UiItemState
+Kiln.UiItemState.DeactivatedAfterEdit = 4 -> Kiln.UiItemState
+Kiln.UiItemState.Edited = 8 -> Kiln.UiItemState
+Kiln.UiItemState.None = 0 -> Kiln.UiItemState
+Kiln.UiTextFieldFlags
+Kiln.UiTextFieldFlags.EnterReturns = 1 -> Kiln.UiTextFieldFlags
+Kiln.UiTextFieldFlags.Multiline = 4 -> Kiln.UiTextFieldFlags
+Kiln.UiTextFieldFlags.None = 0 -> Kiln.UiTextFieldFlags
+Kiln.UiTextFieldFlags.ReadOnly = 2 -> Kiln.UiTextFieldFlags
 Kiln.UiTooltipLines
 Kiln.UiTooltipLines.<Clone>$() -> Kiln.UiTooltipLines!
 Kiln.UiTooltipLines.Deconstruct(out bool Ok, out string? Reason, out System.Collections.Generic.IReadOnlyList<Kiln.TooltipLine>! Lines) -> void

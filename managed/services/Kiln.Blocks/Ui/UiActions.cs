@@ -18,13 +18,13 @@ internal static class UiActions
     private static readonly Queue<Job> Jobs = new();
 
     /// <summary>Runs an action. Never throws: what goes wrong is a toast and a log line.</summary>
-    public static void Run(ActionPlan plan, string mod, string source, UiLifetime? lifetime = null)
+    public static void Run(ActionPlan plan, string mod, string source, UiLifetime? lifetime = null, UiWindowState? state = null)
     {
-        if (lifetime != null) lifetime.Run(() => RunCore(plan, mod, source, lifetime));
-        else RunCore(plan, mod, source, null);
+        if (lifetime != null) lifetime.Run(() => RunCore(plan, mod, source, lifetime, state));
+        else RunCore(plan, mod, source, null, state);
     }
 
-    private static void RunCore(ActionPlan plan, string mod, string source, UiLifetime? lifetime)
+    private static void RunCore(ActionPlan plan, string mod, string source, UiLifetime? lifetime, UiWindowState? state)
     {
         try
         {
@@ -40,6 +40,14 @@ internal static class UiActions
                     break;
                 case SetPlan s:
                     UiEdits.Set(s.Config, s.Value, immediate: true, lifetime);
+                    break;
+                case StateTogglePlan st when state != null:
+                    // from what is queued, if anything: two quick clicks flip twice
+                    var now = state.View().TryGetValue(st.Key, out var cur) && cur is UiStateValue.Bool { Value: true };
+                    state.Enqueue(UiWindowState.WriteKind.Value, st.Key, new UiStateValue.Bool(!now), null, null, UiStateChangeCause.Action, wantResult: false);
+                    break;
+                case StateSetPlan ss when state != null:
+                    state.Enqueue(UiWindowState.WriteKind.Value, ss.Key, ss.Value, null, null, UiStateChangeCause.Action, wantResult: false);
                     break;
                 case CastPlan c:
                     UiRuntime.Backend.RequestCast(c.AbilityId);

@@ -150,6 +150,18 @@ internal static unsafe class UiNative
         public delegate* unmanaged[Cdecl]<byte> WheelActive;
     }
 
+    /// <summary>kiln.ui.blocks v1 (kiln_ui_blocks.h, 0.2.0-dev.31): controlled tabs and trees, the last item's edit state, a
+    /// text field with Kiln's own flags. A table of its own (kiln.ui does not grow while dev.30 is open).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BlocksTable
+    {
+        public ServiceHeader Header;
+        public delegate* unmanaged[Cdecl]<NativeStr, uint, byte> BeginTabItemEx;
+        public delegate* unmanaged[Cdecl]<byte, uint, void> SetNextItemOpen;
+        public delegate* unmanaged[Cdecl]<uint> ItemState;
+        public delegate* unmanaged[Cdecl]<NativeStr, byte*, nuint, uint, float, float, byte> InputTextEx;
+    }
+
     /// <summary>KilnUiCursor (kiln_ui.h v3).</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct Cursor
@@ -787,6 +799,31 @@ internal static unsafe class UiNative
 
     private static Table6* _table6;
 
+    /// <summary>kiln.ui.blocks v1, or null on a Kiln without it (tabs and trees of UI blocks are then off).</summary>
+    public static BlocksTable* Blocks
+    {
+        get
+        {
+            if (_blocks == null && !_blocksTried)
+            {
+                _blocksTried = true;
+                var t = Services.Get<BlocksTable>("kiln.ui.blocks", 1);
+                if (t != null && t->Header.Size >= (uint)sizeof(BlocksTable)) _blocks = t;
+            }
+            return _blocks;
+        }
+    }
+
+    private static BlocksTable* _blocks;
+    private static bool _blocksTried;
+
+    /// <summary>Tests: a fake kiln.ui.blocks (null: look the service up again).</summary>
+    internal static void SetBlocksForTests(BlocksTable* table)
+    {
+        _blocks = table;
+        _blocksTried = table != null;
+    }
+
     /// <summary>Forgets the cached tables (tests swap the backend).</summary>
     internal static void ResetForTests()
     {
@@ -795,6 +832,8 @@ internal static unsafe class UiNative
         _table3 = null;
         _table4 = null;
         _table6 = null;
+        _blocks = null;
+        _blocksTried = false;
         LooksOverride = null;
         ImageExOverride = null;
 

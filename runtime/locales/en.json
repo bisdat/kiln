@@ -877,6 +877,12 @@
       "too_many": "too many commands waiting: slow down",
       "command_failed": "{command} failed",
       "server_value": "{config}: {path} is the server's: it can be changed after leaving"
+    },
+    "ui": {
+      "too_much_text": "This window has more text than it can show (1 MiB at most).",
+      "no_picture": "(no picture: {reason})",
+      "unavailable": "\u2014 ({reason})",
+      "too_many_rows": "{count} rows: more than this table shows ({max})"
     }
   },
   "abilities": {

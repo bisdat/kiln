@@ -759,6 +759,16 @@ const KilnUiApi kTable = {
     &t_subscribe_pointer_press,  // presses on the game's own UI (0.2.0-dev.30)
 };
 
+// kiln.ui.blocks (kiln_ui_blocks.h, 0.2.0-dev.31): the richer UI blocks' slots, a table of its own while kiln.ui is frozen.
+static_assert(offsetof(KilnUiBlocksApi, begin_tab_item_ex) == 8 && offsetof(KilnUiBlocksApi, set_next_item_open) == 16 &&
+                  offsetof(KilnUiBlocksApi, item_state) == 24 && offsetof(KilnUiBlocksApi, input_text_ex) == 32 &&
+                  sizeof(KilnUiBlocksApi) == 40,
+              "KilnUiBlocksApi layout (UiNative.BlocksTable)");
+const KilnUiBlocksApi kBlocksTable = {
+    {sizeof(KilnUiBlocksApi), KILN_UI_BLOCKS_VERSION},
+    &t_begin_tab_item_ex, &t_set_next_item_open, &t_item_state, &t_input_text_ex,
+};
+
 std::string api_path(int kind) {
     char b[1024];
     size_t n = 0;
@@ -845,6 +855,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     }
     if (game) api->register_service(owner, KilnStr{KILN_UI_TICK_SERVICE, sizeof(KILN_UI_TICK_SERVICE) - 1}, &kTickTable);
     api->register_service(owner, KilnStr{KILN_RENDER_SERVICE, sizeof(KILN_RENDER_SERVICE) - 1}, render_table());
+    api->register_service(owner, KilnStr{KILN_UI_BLOCKS_SERVICE, sizeof(KILN_UI_BLOCKS_SERVICE) - 1}, &kBlocksTable);
     const auto result = api->register_service(owner, KilnStr{KILN_UI_SERVICE, sizeof(KILN_UI_SERVICE) - 1}, &kTable);
     if (!overlay_drawing_on()) report_drawing_off(g_overlay_reason);
     return result;

@@ -13,6 +13,7 @@
 #include "imgui_internal.h"
 #include "kiln_api.h"
 #include "services/kiln_ui.h"
+#include "services/kiln_ui_blocks.h"
 #include "slider.h"
 
 namespace kui {
@@ -221,6 +222,7 @@ bool KILN_CALL t_is_item_clicked(uint32_t button) {
 #include "draw_slots_v3.inl"
 #include "draw_slots_v4.inl"
 #include "draw_slots_looks.inl"
+#include "draw_slots_blocks.inl"
 
 }  // namespace
 }  // namespace kui_draw
