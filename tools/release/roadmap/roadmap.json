@@ -2582,7 +2582,7 @@
         },
         {
           "title": "A smoother launcher on Linux",
-          "text": "With the animated fire on, the Linux launcher redraws far less, so typing and hovering keep up in large windows.",
+          "text": "The Linux launcher draws with the GPU's compositing again, so it stays smooth in large windows; if a PC can't start that way, it switches back by itself and remembers it.",
           "area": "launcher",
           "kind": "improved"
         },
@@ -2590,6 +2590,12 @@
           "title": "Clearer logs and reports for support",
           "text": "kiln.log names the file another mod's hook comes from, and support reports include Building Tools', ShroudLink's and Auto Loot Plus' logs.",
           "area": "launcher",
+          "kind": "improved"
+        },
+        {
+          "title": "A warning before the game runs out of impact memory",
+          "area": "core",
+          "text": "kiln.log warns when the game's impact memory runs low and names what fills it, which helps find the cause of late-session slow motion and crashes.",
           "kind": "improved"
         },
         {
