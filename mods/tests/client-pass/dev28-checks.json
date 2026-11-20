@@ -1878,6 +1878,16 @@
    ],
    "state": "open",
    "added": "dev30-ui-hooks slice 2"
+  },
+  {
+   "id": "ui-hooks.c8",
+   "title": "A client mod's own symbol fragment: its typed hook installs and runs in the game client",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks slice 3"
   }
  ]
 }

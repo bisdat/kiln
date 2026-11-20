@@ -240,4 +240,20 @@ public sealed partial class ClientPassMod
                    "panel asked for chests only)?");
         await c.Verdict();
     }
+
+    [ClientCheck("ui-hooks.c8", "A client mod's own symbol fragment: its typed hook installs and runs in the game client",
+        Area = "Client hooks for mods", Since = Dev30, Needs = ClientCheckNeeds.Hosted, Order = 2417)]
+    public async Task ClientOwnFragment(CheckContext c)
+    {
+        // mods/samples/ClientHookSample (side client, advanced): sigdb/client.json names GetItemVolume under its own name
+        if (!await Need(c, "client-hook-sample")) return;
+        const string row = "sig/client-hook-sample/ItemVolume";
+        c.Expect(Capabilities.Is("hooks.typed"), "hooks.typed is available in this game", Capabilities.Why("hooks.typed"));
+        c.Expect(await c.Until(() => Capabilities.Is(row), TimeSpan.FromSeconds(30), "the sample's descriptor row"),
+            "the sample's own client descriptor fits this game client", Capabilities.Why(row));
+        c.Instruct("Host a world. Fill a watering can at a well (or pour water from it). Then open kiln/logs/kiln.log and " +
+                   "look for 'client-hook-sample'. Is there a line 'hooked' (or 'the hook goes in at the next safe tick'), " +
+                   "and a line 'GetItemVolume called N time(s)'? Did the game play on normally, with the usual amount of water?");
+        await c.Verdict();
+    }
 }
