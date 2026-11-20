@@ -107,6 +107,8 @@ struct MachinePeer {
     uint32_t peer = 0;
     uint8_t flags = 0;
 };
+// The records a hook stamps with the slot's handle: a handle other than the snapshot's (not a fake's) is a peer that took
+// the machine's slot within the frame; it is that peer's, without the snapshot's flags.
 MachinePeer g_peers[KILN_REPL_MACHINES];  // tick thread
 
 }  // namespace
@@ -386,6 +388,14 @@ const Registry* registry() {
     return g_registry;
 }
 
+uint32_t peer_at(uint32_t machine, uint32_t raw, uint8_t* flags) {
+    if (machine < KILN_REPL_MACHINES && raw && !(g_peers[machine].flags & KILN_REPL_PEER_FAKE) && raw != g_peers[machine].peer) {
+        if (flags) *flags = 0;
+        return raw;
+    }
+    return peer_of(machine, flags);
+}
+
 uint32_t peer_of(uint32_t machine, uint8_t* flags) {
     if (flags) *flags = 0;
     if (machine >= KILN_REPL_MACHINES) return 0;
@@ -409,6 +419,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     cst("world.storage", &L.world_storage);
     cst("world/registry.replicated", &L.reg_replicated);
     add_guard(&g_send_step_guard);
+    retiring_init();  // whatever repl.observe is: a receive watch's owner may go too
 
     // repl.observe: the send step's hook gives the GameServer (machine slots, per-Pre peer snapshot); the stats and
     // watch hooks install on demand.

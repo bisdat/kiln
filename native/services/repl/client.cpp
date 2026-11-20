@@ -190,6 +190,9 @@ void end(RxWatch& w, uint32_t reason) {
     e.reason = reason;
     deliver(w, e);
     w.ended = true;
+    // ENDED is its last event: the slot goes back at the next apply (a remove() after it is not needed)
+    w.removed.store(true, std::memory_order_release);
+    g_dirty.store(true, std::memory_order_relaxed);
 }
 
 KilnReplComponent g_comps[kMaxComponents];
@@ -312,6 +315,7 @@ void KILN_CALL on_client_world(const KilnWorldEvent* ev, void*) {
     g_reg_hot.store(nullptr, std::memory_order_release);
     delete g_reg;
     g_reg = nullptr;
+    g_dirty.store(false, std::memory_order_relaxed);
     apply();
 }
 
@@ -340,6 +344,7 @@ KilnResult client_watch(KilnOwner owner, KilnEntity e, KilnReplWatchFn fn, void*
     if (!g_resolved) return KILN_ERR_UNAVAILABLE;
     if (!g_api->on_world_thread(KILN_WORLD_CLIENT)) return KILN_ERR_WRONG_THREAD;
     if (!e || !fn || !out) return KILN_ERR_INVALID_ARGUMENT;
+    if (g_dirty.exchange(false, std::memory_order_relaxed)) apply();  // ended and removed watches give their slots back
     RxWatch* slot = nullptr;
     for (RxWatch& w : g_rx)
         if (!w.handle.load(std::memory_order_relaxed)) {

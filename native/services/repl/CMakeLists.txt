@@ -9,3 +9,8 @@ set_target_properties(repl-host-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAK
 add_executable(repl-gate-test tests/repl_gate_test.cpp repl.cpp loopback.cpp stats.cpp watch.cpp client.cpp)
 target_include_directories(repl-gate-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
 set_target_properties(repl-gate-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/repl-tests")
+#  - repl-watch-test: stats and watch bookkeeping against a stand-in kiln.hooks (refused hooks, ENDED frees a slot,
+#    a revoked owner's watches, capture's file names)
+add_executable(repl-watch-test tests/repl_watch_test.cpp repl.cpp loopback.cpp stats.cpp watch.cpp client.cpp)
+target_include_directories(repl-watch-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
+set_target_properties(repl-watch-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/repl-tests")

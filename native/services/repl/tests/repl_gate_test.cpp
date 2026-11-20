@@ -15,6 +15,7 @@
 
 #include "kiln_api.h"
 #include "services/kiln_caps.h"
+#include "services/kiln_hooks.h"
 #include "services/kiln_net.h"
 #include "services/kiln_repl.h"
 
@@ -88,6 +89,18 @@ KilnResult KILN_CALL net_status(KilnNetStatus* out) {
     return KILN_OK;
 }
 KilnResult KILN_CALL net_selftest(uint32_t, uint64_t, uint64_t, uint64_t*) { return KILN_ERR_INVALID_ARGUMENT; }
+// kiln.hooks: refuses every link (so repl.observe stays off: the send step cannot be hooked), and records the
+// owner-retiring subscription, which a receive watch needs whatever repl.observe is
+KilnOwnerRetiringFn g_retiring = nullptr;
+KilnResult KILN_CALL hooks_raw_detour(KilnOwner, uintptr_t, const KilnHookOrder*, void*, void**, KilnHandle*) {
+    return KILN_ERR_UNAVAILABLE;
+}
+KilnResult KILN_CALL hooks_revoke(KilnHandle) { return KILN_OK; }
+KilnResult KILN_CALL hooks_subscribe_retiring(KilnOwner, KilnOwnerRetiringFn fn, void*, KilnHandle* out) {
+    g_retiring = fn;
+    *out = 77;
+    return KILN_OK;
+}
 
 const void* KILN_CALL api_service(KilnStr name, uint32_t) {
     static KilnCapsApi caps = [] {
@@ -104,10 +117,19 @@ const void* KILN_CALL api_service(KilnStr name, uint32_t) {
         t.lab_selftest = &net_selftest;
         return t;
     }();
+    static KilnHooksApi hooks = [] {
+        KilnHooksApi t{};
+        t.header = {sizeof t, KILN_HOOKS_VERSION};
+        t.raw_detour = &hooks_raw_detour;
+        t.revoke = &hooks_revoke;
+        t.subscribe_owner_retiring = &hooks_subscribe_retiring;
+        return t;
+    }();
     const std::string n(name.ptr, name.len);
     if (n == KILN_CAPS_SERVICE) return &caps;
     if (n == KILN_NET_SERVICE) return &net;
-    return nullptr;  // no kiln.hooks: the send step stays unhooked (observe off), which this test does not look at
+    if (n == KILN_HOOKS_SERVICE) return &hooks;  // refuses every link: the send step stays unhooked (observe off)
+    return nullptr;
 }
 KilnResult KILN_CALL api_register(KilnOwner, KilnStr name, const void* table) {
     const std::string n(name.ptr, name.len);
@@ -277,9 +299,11 @@ int main() {
     refused(KILN_ERR_UNAVAILABLE);
     CHECK(g_reports.count("repl.loopback") && g_reports["repl.loopback"].text.find("policy \"any\" and kiln.net's lab port") != std::string::npos);
 
-    // without kiln.hooks the send step is not hooked: observe is off, and every observe function says so
+    // kiln.hooks refused the send step: observe is off, and every observe function says so; revoked owners are still
+    // followed (a receive watch's owner, repl.observe or not)
     g_case = "observe off";
     CHECK((g_table->capabilities() & (KILN_REPL_CAP_OBSERVE | KILN_REPL_CAP_CLIENT)) == 0);
+    CHECK(g_retiring != nullptr);
     KilnHandle wh = 99;
     CHECK(g_table->watch(7, 5, KILN_REPL_ALL_MACHINES, KILN_REPL_SEND, [](const KilnReplWatchEvent*, void*) {}, nullptr, &wh) ==
               KILN_ERR_UNAVAILABLE && wh == 0);
