@@ -110,7 +110,8 @@ internal static class StationMenuStore
         {
             Services.RequireTickThread("StationMenuRegistration.Dispose");
             var (rc, generation) = Backend.Remove(owner, handle);
-            if (rc is not (StationMenuNative.Ok or StationMenuNative.NotFound)) return new(false, $"{Refused}: {StationMenuNative.Message(rc)}", handle, Generation);
+            // a revoked owner's layer is gone natively already (its mod unloaded): forget it here too
+            if (rc is not (StationMenuNative.Ok or StationMenuNative.NotFound or StationMenuNative.Revoked)) return new(false, $"{Refused}: {StationMenuNative.Message(rc)}", handle, Generation);
             lock (Lock)
             {
                 Layers.Remove(handle);
