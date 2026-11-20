@@ -16,8 +16,8 @@ Status:
   upright, icons, and a crafted new item.
 - **Skinned models: proven offline, on a dedicated server, and drawn in a client as a held model with moving parts**
   (2026-11-11, Kiln Equipment's Sunspire); a creature's body has not been seen drawn yet. See [Skinned models](#skinned-models). Blend shapes are written (morph targets,
-  [cosmetics.md](cosmetics.md)). Cloth and bone chains are written since 0.2.0-dev.30, behind a cook switch until their game test
-  passes: [Physics](#physics).
+  [cosmetics.md](cosmetics.md)). Cloth and bone chains are written since 0.2.0-dev.31 (on, not yet confirmed in a game client):
+  [Physics](#physics).
 
 ## The rule: ship sources and a recipe, never game data
 A mod folder holds only what its author made:
@@ -421,7 +421,7 @@ own cloth and chain code; a dedicated server only serves the cooked files, and K
 **On, not yet confirmed in a game.** The two cook features, `modelcook.cloth` and `modelcook.chains2`, are on: a model with an entry in
 `assets/physics.json` or a body with `cloth`/`chains` is cooked with them, no switch needed. The game has not yet been seen to draw a Kiln-cooked
 cloth or chain (guided check `16e-cc16e`): if yours hangs wrong, the cook's fabric or the fixed tuning below may be why; please report it. A
-recipe written for 0.2.0-dev.30 that lists them under `"experimental"` still cooks (the key changes nothing for a feature that is on).
+recipe that lists them under `"experimental"` still cooks: that key only matters for a cook feature a release holds.
 
 ### Step by step
 1. **Model it.** Cloth is one glTF primitive of its own (its own material slot in Blender), with real triangles: a quad strip, a cape, a skirt.

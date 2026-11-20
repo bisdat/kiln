@@ -89,7 +89,7 @@ for paths) and `Colliders` (a capsule or sphere for hits and one for what it bum
 `Cloth` and `Chains` give its model cloth and swinging joints: [Model physics](#model-physics).
 
 ### Model physics
-Since 0.2.0-dev.30 a body of your own can carry **cloth** (`ModelClothBlock`: a primitive of its model the game simulates as cloth) and **bone
+Since 0.2.0-dev.31 a body of your own can carry **cloth** (`ModelClothBlock`: a primitive of its model the game simulates as cloth) and **bone
 chains** (`ModelChainBlock`: 2 to 8 joints of its skeleton that swing). They are cooked into the model when the mod builds; the game simulates them
 on players' machines. The fields, ranges and rules are those of `assets/physics.json` ([models.md](models.md#physics)). Like every body with files,
 it is written in blocks/*.json:

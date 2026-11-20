@@ -2,7 +2,7 @@
 
 <!-- Generated from schema/physics.schema.json by kiln_manage::lint::docs (cargo test -p kiln-manage --test lint with KILN_LINT_WRITE=1). Do not edit. -->
 
-The cloth and bone chains a mod asks the cook to write into its models (tools/modelcook/cook/physics.py; docs/kiln/modding/models.md#physics). A body block's cloth and chains (Kiln.Blocks ModelClothBlock, ModelChainBlock) become the same tree; a model both name is refused. The game simulates them with its own cloth and chain code on a player's machine; a dedicated server only serves the cooked files. Writing them needs the cook features modelcook.cloth and modelcook.chains2, off until their guided client check passes: a recipe turns them on for one mod with "experimental": ["modelcook.cloth", "modelcook.chains2"] in assets/cook.json. Strict JSON: no comments, no trailing commas, a key twice, NaN and an unknown key are errors. Every refusal of the cook starts with the field path.
+The cloth and bone chains a mod asks the cook to write into its models (tools/modelcook/cook/physics.py; docs/kiln/modding/models.md#physics). A body block's cloth and chains (Kiln.Blocks ModelClothBlock, ModelChainBlock) become the same tree; a model both name is refused. The game simulates them with its own cloth and chain code on a player's machine; a dedicated server only serves the cooked files. Writing them needs the cook features modelcook.cloth and modelcook.chains2, on since 0.2.0-dev.31 (not yet confirmed in a game client: guided check 16e-cc16e). Strict JSON: no comments, no trailing commas, a key twice, NaN and an unknown key are errors. Every refusal of the cook starts with the field path.
 
 - Files: `**/assets/physics.json`
 - JSON: comments **not allowed**, trailing commas **not allowed**
