@@ -75,6 +75,9 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/mouse_pr
 # Issue 44: scoped chat Up/Down and UI-thread queue must never steal gameplay or releases.
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined "$here/chat_keys_test.cpp" -o "$out/chat_keys_test"
 "$out/chat_keys_test"
+# the same under ThreadSanitizer: the window thread's key router against the render thread's completion state
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=thread "$here/chat_keys_test.cpp" -o "$out/chat_keys_tsan_test"
+"$out/chat_keys_tsan_test"
 # Issue 44 Phase 1b: bounded, UTF-8-valid editor snapshots and revision-safe replacement.
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/chat_completion_text_test.cpp" -o "$out/chat_completion_text_test"
 "$out/chat_completion_text_test"

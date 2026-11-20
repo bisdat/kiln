@@ -619,13 +619,16 @@ internal static unsafe class UiNative
         if (t != null) t->SetHoverCapture(hovering ? 1u : 0u);
     }
 
-    internal static bool ChatCandidates(bool hasSuggestions, bool active)
+    // Turning suggestions on names the snapshot (field, revision) they belong to: native refuses a stale one, so a
+    // focus loss on the game's UI thread is never undone by this render frame. Turning them off needs no snapshot.
+    internal static bool ChatCandidates(bool hasSuggestions, bool active, uint field = 0, uint revision = 0)
     {
         var slot = ChatCompletionSlot;
         if (slot == null) return false;
         var request = new ChatCompletion {
             Size = (uint)sizeof(ChatCompletion), Operation = 2,
             Suggestions = hasSuggestions ? 1u : 0u, ListOpen = active ? 1u : 0u,
+            Field = field, Revision = revision,
         };
         return slot(&request) == Ok;
     }

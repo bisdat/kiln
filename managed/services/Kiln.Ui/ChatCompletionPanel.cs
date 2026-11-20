@@ -199,7 +199,7 @@ internal static unsafe class ChatCompletionPanel
             }
         }
 
-        UiNative.ChatCandidates(_suggestions.Length > 0 && !_dismissed, _active && !_dismissed);
+        UiNative.ChatCandidates(_suggestions.Length > 0 && !_dismissed, _active && !_dismissed, input.Field, input.Revision);
         if (_suggestions.Length == 0 || _dismissed) return;
 
         // Use the player's current Kiln look, including game-style themes.

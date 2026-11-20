@@ -61,9 +61,10 @@ internal static class ChatCompletionRules
         !word.Any(char.IsControl) &&
         Utf8LengthWithin(word, 128);
 
-    // Commands.Complete returns a UTF-8 byte start, never an offset into the
-    // middle of a codepoint. Verify that at the protocol boundary as well as
-    // in the managed UI, so malformed replies cannot enter the active model.
+    // The reply's start is a UTF-8 byte offset (the server converts
+    // Commands.Complete's UTF-16 index), never one into the middle of a
+    // codepoint. Verify that at the protocol boundary as well as in the
+    // managed UI, so malformed replies cannot enter the active model.
     internal static bool StartBoundary(string text, ushort start)
     {
         if (!RequestText(text)) return false;
@@ -97,6 +98,7 @@ internal static class ChatCompletionNetwork
     private static ChatCompletionReply? _reply;
     private static int _nextId;
     private static bool _startedTick;
+    private static NetPeer? _unsupportedOn;  // the server link that refused kiln:chat (client side)
 
     internal static void Start()
     {
@@ -129,19 +131,32 @@ internal static class ChatCompletionNetwork
     // Called from Kiln.Ui's render frame (client). SendToServer is any-thread.
     // A hosting client's local request uses the exact same tick-thread handler
     // as a remote client but has no network peer to impersonate.
+    //
+    // A server without kiln:chat (vanilla, or a Kiln older than completion) refuses every send. That connection is
+    // remembered, so a "/" line kept open does not try again every frame; a new connection (a new link) asks again.
     internal static uint Ask(string text)
     {
         if (!ChatCompletionRules.RequestText(text)) return 0;
         Start();
-        var id = unchecked((uint)Interlocked.Increment(ref _nextId));
-        var request = new ChatCompletionRequest(id, text);
         if (Client.IsHosting && Client.HasLocalPlayer)
         {
-            Local.Enqueue((Client.LocalPlayer, request));
-            return id;
+            var local = new ChatCompletionRequest(NextId(), text);
+            EnqueueLocal(Client.LocalPlayer, local);
+            return local.Id;
         }
-        return _channel?.SendToServer(request) == true ? id : 0;
+        var server = Network.Server;
+        if (server is null || ReferenceEquals(server, Volatile.Read(ref _unsupportedOn))) return 0;
+        var request = new ChatCompletionRequest(NextId(), text);
+        if (_channel?.SendToServer(request) == true) return request.Id;
+        // still connecting: try again later; Kiln's handshake done (or no Kiln there) and still refused: not this link
+        if (server.State is NetPeerState.Ready or NetPeerState.Vanilla) Volatile.Write(ref _unsupportedOn, server);
+        return 0;
     }
+
+    private static uint NextId() => unchecked((uint)Interlocked.Increment(ref _nextId));
+
+    /// <summary>A hosting client's own request: answered by the server tick (<see cref="DrainLocal"/>), like a remote one.</summary>
+    internal static void EnqueueLocal(EntityId player, ChatCompletionRequest request) => Local.Enqueue((player, request));
 
     internal static bool TakeReply(out ChatCompletionReply reply)
     {
@@ -171,6 +186,11 @@ internal static class ChatCompletionNetwork
     private static void OnServerTick(in TickInfo tick)
     {
         if (_channel is null) Start();
+        DrainLocal();
+    }
+
+    internal static void DrainLocal()
+    {
         while (Local.TryDequeue(out var local))
             Request(local.Player, local.Request, null);
     }
@@ -179,14 +199,24 @@ internal static class ChatCompletionNetwork
     // elevated source, or permission bit can be supplied on the wire.
     private static void Request(EntityId player, ChatCompletionRequest request, NetPeer? peer)
     {
-        if (player.IsNone || !ChatCompletionRules.RequestText(request.Text)) return;
-        uint key = peer?.Id ?? uint.MaxValue;  // local host has a distinct bucket
+        var response = Complete(player, request, peer?.Id ?? LocalKey, Environment.TickCount64);
+        if (response is null) return;
+        if (peer is null) Receive(response);
+        else _channel?.SendTo(peer, response);
+    }
+
+    internal const uint LocalKey = uint.MaxValue;  // local host has a distinct rate bucket
+
+    /// <summary>The reply to one request from <paramref name="player"/> (whose own permissions decide), or null when it
+    /// is dropped: no player, a bad line, or more than 10 a second from <paramref name="key"/> (the peer).</summary>
+    internal static ChatCompletionReply? Complete(EntityId player, ChatCompletionRequest request, uint key, long now)
+    {
+        if (player.IsNone || !ChatCompletionRules.RequestText(request.Text)) return null;
         lock (Gate)
         {
             if (!Rates.TryGetValue(key, out var q)) Rates[key] = q = new Queue<long>();
-            var now = Environment.TickCount64;
             while (q.Count > 0 && now - q.Peek() >= 1000) q.Dequeue();
-            if (q.Count >= 10) return;
+            if (q.Count >= 10) return null;
             q.Enqueue(now);
             // Prune stale peer buckets occasionally (the queue is bounded).
             if (Rates.Count > 128)
@@ -199,17 +229,16 @@ internal static class ChatCompletionNetwork
             var source = CommandSource.ForPlayer(player); // NEVER HostConsole or Console
             var suggestions = Commands.Complete(source, request.Text, ChatCompletionRules.MaxSuggestions);
             var start = suggestions.Start;
-            if (start < 0 || start > request.Text.Length) return;
+            if (start < 0 || start > request.Text.Length) return null;
             var utf8Start = Encoding.UTF8.GetByteCount(request.Text.AsSpan(0, start));
             var safe = suggestions.Suggestions.Where(ChatCompletionRules.Candidate).Take(20).ToArray();
-            var response = new ChatCompletionReply(request.Id, request.Text, (ushort)utf8Start, safe);
-            if (peer is null) Receive(response);
-            else _channel?.SendTo(peer, response);
+            return new ChatCompletionReply(request.Id, request.Text, (ushort)utf8Start, safe);
         }
         catch (Exception e)
         {
             // No typed text, names or command payload in logs.
             Backend.Current.Log(0, LogLevel.Warn, "chat completion refused: " + e.GetType().Name);
+            return null;
         }
     }
 
@@ -218,5 +247,6 @@ internal static class ChatCompletionNetwork
         lock (Gate) Rates.Clear();
         while (Local.TryDequeue(out _)) { }
         lock (ReplyGate) _reply = null;
+        Volatile.Write(ref _unsupportedOn, null);
     }
 }

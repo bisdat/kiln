@@ -793,9 +793,20 @@ KilnResult chat_completion_io(KilnUiChatCompletion* io) {
         }
         return KILN_OK;
     }
-    case 2: // set suggestion/list state; atomics safe on render thread
+    case 2: { // set suggestion/list state from the render thread
+        // Turning suggestions on must name the snapshot they belong to: frame_end may have just cleared them on a
+        // focus loss, and a late call from the render thread must not re-arm Tab for a field it no longer sees.
+        // Turning them off is always safe.
+        std::lock_guard lock(g_completion_mu);
+        const auto& snap = g_completion_snapshot;
+        if (io->suggestions == 0 && io->list_open == 0) {
+            g_keys.completion(true, false, false);
+            return KILN_OK;
+        }
+        if (!snap.focused || io->field != snap.field || io->revision != snap.revision) return KILN_ERR_UNAVAILABLE;
         g_keys.completion(true, io->suggestions != 0, io->list_open != 0);
         return KILN_OK;
+    }
     case 3: { // replace: expected text, matching revision and focused field
         if (io->text_len > 256 || io->replacement_len > 256) return KILN_ERR_INVALID_ARGUMENT;
         const std::string expected(io->text, io->text_len), replacement(io->replacement, io->replacement_len);
