@@ -37,7 +37,7 @@ int main() {
     CHECK(rows == std::size(gen::kFields));
     size_t specs = 0;
     for (const auto& [n, r] : s.registries) specs += r.fields.size();
-    CHECK(specs + unsupported_fields().size() == std::size(gen::kFields));
+    CHECK(specs == std::size(gen::kFields));
     // ---- types, ranges, applies
     const FieldSpec* ms = s.registry("items")->field("maxStack");
     CHECK(ms && ms->type == FieldType::Int && ms->min == 1.0 && ms->max == 65535.0 && ms->applies == Applies::WorldLoad && !ms->read_only);
@@ -52,19 +52,19 @@ int main() {
     const FieldSpec* cap = s.registry("balance")->field("levelCap");
     CHECK(cap && cap->applies == Applies::Restart);
     const FieldSpec* alt = s.registry("balance")->field("altarsPerFlameLevel");
-    CHECK(alt && alt->type == FieldType::List && alt->element == FieldType::Int && alt->max && *alt->max == 16.0);
+    CHECK(alt && alt->type == FieldType::List && alt->element == FieldType::Int && alt->max && *alt->max == 16.0 && alt->indexed);
     const FieldSpec* rarities = s.registry("loot")->field("rarities");
-    CHECK(rarities && rarities->type == FieldType::List && rarities->element == FieldType::Enum && rarities->max_items == 5);
+    CHECK(rarities && rarities->type == FieldType::Flags && rarities->max_items == 5);
     const FieldSpec* cnt = s.registry("recipes")->field("inputs[].count");
     CHECK(cnt && cnt->type == FieldType::Int && cnt->min == 1.0);
     CHECK(!s.registry("items")->add == false && s.registry("drops")->add == false && s.registry("drops")->remove == false);
     CHECK(s.registry("loot")->remove && !s.registry("loot")->add);
-    // ---- what ir.h cannot hold yet (lists of entries with fields): named, so that S3 can take them
-    const std::set<std::string> un(unsupported_fields().begin(), unsupported_fields().end());
-    CHECK(un == std::set<std::string>({"recipes.inputs", "recipes.outputs", "drops.entries", "balance.buildzoneSizesPerAltarLevel"}));
-    for (const std::string& q : un) {
-        const auto dot = q.find('.');
-        CHECK(s.registry(q.substr(0, dot))->field(q.substr(dot + 1)) == nullptr);
+    // ---- lists whose elements have fields: Struct elements with their leaves (link_elements)
+    for (const char* q : {"recipes.inputs", "recipes.outputs", "drops.entries", "balance.buildzoneSizesPerAltarLevel"}) {
+        const std::string qs = q;
+        const auto dot = qs.find('.');
+        const FieldSpec* l = s.registry(qs.substr(0, dot))->field(qs.substr(dot + 1));
+        CHECK(l && l->type == FieldType::List && l->element == FieldType::Struct && !l->element_fields.empty());
     }
     // ---- IR against the generated schema
     {

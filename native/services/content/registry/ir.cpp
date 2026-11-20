@@ -217,6 +217,10 @@ bool scalar_of(const json& j, FieldType type, const FieldSpec& f, Value* out, st
             return true;
         }
         case FieldType::Id:
+            if (j.is_null()) {  // clearing a reference: only where the schema says it may be absent
+                if (f.optional) return *out = Value{}, true;
+                return *err = f.name + ": a reference that is not optional cannot be cleared (null)", false;
+            }
             // TODO(S5): an id named as a value (a perk, an item of a recipe) is not checked to exist here; S5's model refuses one
             // that names no entry (per edit, at composition).
             if (!j.is_string() || j.get<std::string>().find(':') == std::string::npos)
@@ -423,6 +427,9 @@ bool edit_of(const json& e, const Batch& b, const Schema& schema, Edit* out, std
         const FieldSpec* lf = reg->field(r.list);
         if (!lf || lf->type != FieldType::List) return *err = out->registry + " has no list \"" + r.list + "\"", false;
         if (lf->read_only) return *err = out->registry + "." + r.list + " is read-only", false;
+        if (lf->indexed && lf->fixed_length && !r.all && r.index >= lf->fixed_length)
+            return *err = out->registry + "." + r.list + " has a fixed length of " + std::to_string(lf->fixed_length) + " elements: no element " +
+                          std::to_string(r.index), false;
         out->field = r.list + "[" + (r.all ? std::string("*") : std::to_string(r.index)) + "]" + (r.leaf.empty() ? "" : "." + r.leaf);
         if (e.contains("list")) return *err = "a list op names the list itself (\"" + r.list + "\"), not an element", false;
         if (!r.leaf.empty()) {
@@ -446,6 +453,9 @@ bool edit_of(const json& e, const Batch& b, const Schema& schema, Edit* out, std
     const FieldSpec* f = reg->field(out->field);
     if (!f) return *err = out->registry + " has no field \"" + out->field + "\"", false;
     if (f->read_only) return *err = out->registry + "." + out->field + " is read-only", false;
+    if (f->indexed)
+        return *err = out->registry + "." + out->field + " has a fixed length: edit one element (" + out->field +
+                      "[i]) with a value or a number op, not the whole list", false;
     const bool listish = f->type == FieldType::List || f->type == FieldType::Flags;
     if (e.contains("op")) {
         if (listish && !e["op"].is_array() && !(e["op"].is_object() && e["op"].contains("set")))

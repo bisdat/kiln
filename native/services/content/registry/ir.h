@@ -51,6 +51,10 @@ struct FieldSpec {
     Applies applies = Applies::Restart;
     std::string ref;  // an id (or a list of ids): the registry its ids name (the schema's "ref"); a reference the stage checks
     std::vector<FieldSpec> element_fields;  // element Struct: its leaves by their own name ("item", "count"); link_elements()
+    bool optional = false;   // an id that may be absent: null clears it (the schema's "optional")
+    bool indexed = false;    // a list of fixed length (ops "indexed"): only its elements are edited ("xpPerLevel[2]"), never the
+                             // whole list and no list op
+    size_t fixed_length = 0; // indexed: exactly this many elements (0: the length follows another field, checked at composition)
     const FieldSpec* element_field(const std::string& leaf) const {
         for (const FieldSpec& f : element_fields)
             if (f.name == leaf) return &f;
