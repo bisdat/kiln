@@ -13,7 +13,7 @@ it comes off when the mod unloads or reloads, and it is applied again at the nex
 | Native | `native/services/content/` → `kiln/services/kiln-content.dll` |
 | Managed | `managed/services/Kiln.Content/` → `kiln/host/Kiln.Content.dll` (namespace `Kiln`, class `Content`) |
 | Test | `mods/tests/content-test/` (PASS / FAIL lines) + `Observer/` (logs value changes); `mods/tests/newcontent-test/` (new items / recipes); `mods/tests/kitbash-test/` (references, texts, distribution; `syncdefs.py`: definitions in the content sync); `mods/tests/placeholder-test/` (+ `Items/`: missing content over four restarts); `mods/tests/craftmatch-test/` (a made item is what its recipe tooltip promises); `native/services/content/tests/run.sh` (`text_test.cpp`: the game's own texts over a fake lookup; near memory: the allocation policy on simulated address spaces and, under Wine, on a real fragmented one) |
-| Sample | `mods/samples/BigStacks/` (bigger stacks, a C# port of EMF's big_stacks idea); `mods/samples/NewItems/` (new items and recipes, side both) |
+| Sample | `mods/samples/BigStacks/` (bigger stacks, a C# port of EMF's big_stacks idea); `mods/samples/NewItems/` (new items and recipes, side both); `mods/samples/GearValues/` (gear values in the tooltip's numbers, data only) |
 
 ## Data packs
 A mod folder may hold `content/*.json`. kiln.content applies every loaded mod's files when the world's registries
@@ -44,7 +44,8 @@ in mod load order and file-name order inside a mod. A pack follows its mod: unlo
 ```
 
 - **Sections**: `items`, `recipes`, `loot` (random loot of containers and world pickups, per item), `drops`
-  (default-inventory tables: enemy loot, fixed chests; key = table GUID or a glob), `options`.
+  (default-inventory tables: enemy loot, fixed chests; key = table GUID or a glob), `gear` and `gearRules` ([gear
+  values](#gear-values): typed item values in the tooltip's numbers), `options`.
 - **Selectors** (keys): a debug name (`Material_T1_Wood_Logs`), an id (`0x2b0cf1d5`, decimal), or a
   case-insensitive glob (`Material_*`, `*`). Recipe names are the recipes' debug names (`Content.Dump()` lists them).
 - **`@where`**: conditions on the game's original values: a number / bool / enum name for equality, `">1"`, `">="`,
@@ -70,6 +71,116 @@ in mod load order and file-name order inside a mod. A pack follows its mod: unlo
   and listed in `Content.PackReport()`. A clone's definition and its own mod's later changes to it are not: the definition is
   the clone's starting value (a block writes `none` until a game VFX's name is known, then a rule writes that VFX). Problems (unknown field, value out of range, selector matching nothing) are
   logged per file and never stop the other entries.
+
+## Gear values
+A typed face over the item fields of gear, in the numbers the game's own tooltip shows: a server owner writes "power 30" or
+"physical armour 45" instead of solving `damageSetup.dmgMod` or `armorSetup.distribution.physical` by hand. The `gear`
+section of a data pack and `Content.Gear(item)` in C# set the same values; Kiln solves them per item with the game's
+formulas, and writes them as ordinary item fields: layers of the pack's (or the calling mod's) owner, reverted with it,
+listed as conflicts, synced to Kiln clients like every items rule. Sample: `mods/samples/GearValues/` (data only).
+Capability `content.gear` (Kiln.Content's row; off only without kiln.content).
+
+```json
+{ "format": 1,
+  "gear": {
+    "Weapon_T1_1H_Sword_Craft": { "power": 30, "damage": { "cut": 0.75, "fire": 0.25 }, "levels": [5, 5] },
+    "Armor_T2_*":               { "@where": { "rarity": "Rare" }, "armor": { "physical": { "mul": 1.2 } } },
+    "Ring_T3_Ring_of_Light":    { "socket": true, "rolled": false } },
+  "gearRules": { "rarityDurability": [0.9, 0.95, 1, 1.1, 1.25], "socketChance": { "epic": 0.75 } } }
+```
+
+| Key | Means | Writes |
+|---|---|---|
+| `power` | the damage the tooltip shows at the item's lowest level (`levels` of the same rule, else the game's), 0..100000 | `damageSetup.dmgMod`, solved with the item's speed: tooltip = int(int(10 × 0.15 × level + 10) × dmgMod × speedMod) |
+| `speed` | the damage factor of the weapon's speed class (it multiplies the damage; the attack speed itself is the animation), more than 0, at most 100 | `damageSetup.speedMod`. Alone it changes the tooltip's damage: give `power` too to keep it |
+| `damage` | shares per kind: `cut`, `pierce`, `blunt`, `fire`, `ice`, `shroud` (the game's fog), `lightning`, `poison`, `healing` (0..10; 0.5 = half); `wood`, `stone`, `metal`, `explosion`: the whole numbers the game keeps for what a tool harvests and breaks. Kinds not named keep their value | `damageSetup.distribution.*`. Shares of the hit kinds that do not add up to 1 are a warning (Kiln's weapon blocks write shares that add up to 1) |
+| `armor` | the armour the tooltip shows per kind at the item's lowest level: `physical`, `magical`, `cut`, `pierce`, `blunt`, `fire`, `ice`, `shroud`, `lightning`, 0..100000 | `armorSetup.distribution.*`: tooltip = round((15 × level + 23) × share) |
+| `block` | how well the item blocks, 0..1 | `blockSetup.quality` |
+| `staminaCost` | the item's StaminaCost value, for items that have one (as weapon blocks write it) | `impactValues.StaminaCost` |
+| `rarity` | `common` … `legendary` (any case, or 0..4): what the recipe tooltip shows and a copy is made with when the game does not roll it. The game has no rarity above legendary | `rarity` |
+| `levels` | a level (both ends) or `[lowest, highest]`, 1..55 | `itemLevelRange.minLevel` / `maxLevel` |
+| `rolled` | the game rolls the rarity of each new copy (as for loot weapons) or not | `generateRarity` |
+| `perks` | the five perk slots, as the items section's `perks` (a perk GUID or name, `item:<name>`, `none`, null = keep); a game item needs `"@refs": true` (or `"options": {"refs": true}`), as there | `perkReferences[i]`, `perkIds[i]` |
+| `socket` | new copies get a gem socket (gear other than weapons needs Kiln's sockets: [gems-sockets.md](gems-sockets.md)) | `gemSlotOverride` |
+| `maxStack` | 1..65535 | `maxStackSize` |
+| `recipe` | `{"inputs": [...] or {"mul": x}, "duration": seconds}` for every recipe that makes the item (other recipe fields: the recipes section). No recipe making it is a warning | the recipes' `inputs`, `craftingDuration` |
+
+- **Numbers or ops.** Every number takes an op relative to the game's value of that item, in the same units: `"power":
+  {"mul": 1.2}` is a fifth more than the game's tooltip damage, `"armor": {"magical": {"add": 5}}` five more armour; also
+  `set`, `min`, `max`, `raiseOnly`, `lowerOnly`. Values are solved for each item a selector matches, at its own level.
+- **Selectors, `@where`, order** as in the items section. The `gear` section applies after `items` in the same document,
+  so a typed key wins over a raw path that names the same field; other keys of a gear rule are item field paths and pass
+  through as in `items`.
+- **Levels.** `power` and `armor` are the numbers at the item's lowest level (the recipe tooltip's). A rolled loot
+  weapon's copies at higher levels get more, by the game's curve. `levels` alone keeps `dmgMod` and the armour shares,
+  so the tooltip's numbers follow the game's curve to the new level: give `power` and `armor` in the same rule to keep them.
+  The game brings an existing copy's level into the item's range when the save loads ("Rarity, level and perks of new
+  gear" below): narrowing a released item's range lowers the level of copies players have.
+- **Rarity.** A copy has rarity + 1 enhancement slots, filled from the type's perk slots: a slot left empty makes the copy
+  one rarity lower, so raise `rarity` together with `perks` where the type has fewer slots. Copies already made keep theirs.
+- **Validation.** Each problem is one line of the pack's report and kiln.log, naming the item and the key
+  (`gear Weapon_X.power: this item deals no damage of its own (damageSetup.isSet is off)`, `gear Y.levels: [0, 60] is not
+  within the game's item levels 1..55, lowest first`, `gear Z.damage.frost: not a kind of damage; there are cut, pierce,
+  ...`); the rest of the rule and the file still apply. `kiln lint` checks names, kinds, ranges and op keys before you start.
+- **Who sees it.** The server's values act for everyone. Kiln clients get them through the content sync (the tooltip shows
+  the new numbers without the mod); a player without Kiln plays with them and sees the game's numbers in the tooltip.
+- **Formulas.** The tooltip's damage and armour follow from the game's balancing table (`genericWeaponSeed` 10,
+  `powerCreepWeapon` 0.15, armour offset 23 and gradient 15 on the builds Kiln measures). Kiln.Blocks checks them against
+  the running game when a mod uses item blocks, and logs a warning if a game update changed them (gear values and item
+  blocks are then off by that much until Kiln follows).
+  Native: `native/services/content/gear.cpp`, managed: `Kiln.Content/GearMath.cs`, the same numbers in both.
+
+### In C#
+```csharp
+Content.OnReady(_ =>
+{
+    var sword = Content.Gear("Weapon_T1_1H_Sword_Craft")!;   // null: no such item
+    sword.Power = 30;                                         // the tooltip's damage at sword.Level
+    sword.SetDamage(GearDamageKind.Fire, 0.25);
+    sword.SetDamage(GearDamageKind.Cut, 0.75);
+    var chest = Content.Gear("Armor_T2_Warrior_Tank_Chest")!;
+    chest.SetArmor(GearArmorKind.Physical, chest.Armor(GearArmorKind.Physical) + 10);
+    chest.Rarity = ItemRarity.Epic;                           // the type's: copies made from now on
+});
+```
+- `Content.Gear(string | ItemId | ContentEntry)` → `GearStats`: `Power`, `PowerAt(level)`, `Speed`, `Damage(kind)` /
+  `SetDamage`, `Armor(kind)` / `SetArmor`, `Block`, `Rarity`, `Rolled`, `Socket`, `MaxStack`, `Level`, `MaxLevel`,
+  `SetLevels(lowest, highest?)`, `HasDamage`, `HasArmor`, `Reset()` (takes this mod's layers off these fields). Perks:
+  `Content.Items.Get(item).SetPerks(...)`. Reads give the values now (every layer applied).
+- Writes are `ContentEntry` writes of the calling mod (reverted with it, `ContentChangedEvent`, conflicts with packs and
+  other mods). A value out of range throws `ArgumentOutOfRangeException`; `Power` or `SetDamage` on an item without damage
+  of its own, `SetArmor` on one without armour, throw `InvalidOperationException`. Tick thread.
+- Test: `managed/tests/Kiln.Blocks.Tests/GearValuesTests.cs` (offline), `native/services/content/tests/gear_test.sh`
+  (the pack section's expansion), `mods/tests/content-test` (lab: its pack's `gear` rules and `Content.Gear`).
+
+### Gear rules (boot values)
+`gearRules` changes the game's balancing values for gear (`keen::BalancingTable`). The game reads them once, when it
+starts, so they are [resource patches](../modding/resource-patches.md) made before that: the mod needs `"boot": true`
+in its kiln.mod.json, and the capability `mods.boot.resource_patches`. Kiln reads every loaded mod's `content/*.json` at
+the boot (files by name) and turns each file's `gearRules` into one patch of the table (`gearRules@<file>` in
+`state/boot.json` and kiln.log).
+
+| Key | Means | Member (the game's values) |
+|---|---|---|
+| `rarityDurability` | the factor of each rarity on a copy's max durability, 0.01..100 | `rarityDurabilityMod` (0.9, 0.95, 1, 1.05, 1.1) |
+| `socketChance` | the chance of each rarity that a new weapon gets a gem socket, 0..1 | `gemSlotProbability` (0, 0.05, 0.25, 0.5, 1) |
+| `durability.start`, `.growth` | max durability = (start + growth × (level − 1)) × the rarity's factor × the item's own factor | `durabilityStart` (145), `durabilityGrowth` (2) |
+| `unlockCost.seed`, `.creep` | what unlocking an enhancement at the workbench costs, and how it grows with the level | `perkUpgradeCostSeed` (8), `perkCostCreep` (0.15) |
+| `unlockCost.weapons`, `.armor`, `.rings` | the cost's factor per kind of gear | `perkCostFactorWeaponsShield`, `perkCostFactorArmor`, `perkCostFactorRings` |
+| `unlockCost.advanced`, `.advancedFrom` | the extra cost of a legendary item's later unlocks, and from which unlock (0..5) | `advancedPerkCostNominator` (8), `advancedPerkCostStartLevel` (4) |
+
+- A rarity's five values: a list, common to legendary (`null` keeps the game's), or `{"epic": 0.75}`. Numbers or ops
+  (`{"mul": 2}`) as in resource patches.
+- **Whole or not at all**: one wrong value (out of range, an unknown key) leaves the file's `gearRules` out, with the reason
+  in kiln.log (`mod my-mod: content/gear.json: its gearRules are not applied: gearRules.socketChance[4]: 1.5 is outside 0..1`);
+  a mod with `"boot": "required"` stops the start instead. Without `"boot"` in its kiln.mod.json, kiln.log says the rules
+  are not applied. At a world's load kiln.content skips `gearRules` (they are not item rules).
+- `lootRarityRates` (the game's loot rarity rates) is refused: Kiln has not mapped the resource that holds them yet.
+- **Server values act; a Kiln client with the mod shows them.** Each process applies the mod it has: a player without the
+  mod (or without Kiln) predicts with the game's numbers (a durability bar, a socket on a weapon the server made). Put
+  such a mod on both sides (`"clients": "mod"`).
+- Two mods setting the same member are a conflict of resource patches: the later mod in the load order is refused
+  ([resource-patches.md](../modding/resource-patches.md#two-mods-on-one-resource)).
 
 ## C#
 Reference the assembly like any Kiln service:
@@ -197,7 +308,7 @@ export KILN_OUT=<build dir>
 dotnet build mods/tests/content-test/ContentTest.csproj -c Release -o $KILN_OUT/mods/content-test --artifacts-path $KILN_OUT/dotnet
 dotnet build mods/tests/content-test/Observer/ContentObserver.csproj -c Release -o $KILN_OUT/mods/content-observer --artifacts-path $KILN_OUT/dotnet
 tools/deploy-server.sh ~/srv/enshrouded/labs/content --policy any --samples
-tools/lab/lab.sh start content        # fresh: 34 PASS (registries, pack, code changes, 1500 logs in one slot, drops, dump)
+tools/lab/lab.sh start content        # fresh: 34 PASS (registries, pack, code changes, 1500 logs in one slot, drops, dump), and since 0.2.0-dev.29.19 six gear checks (written, not run in a lab yet)
 echo "reload content-test" > ~/srv/enshrouded/labs/content/kiln/control/r.cmd   # 5 PASS: code layers came off, pack stayed
 echo "unload content-test" > …/u.cmd; echo "load content-test" > …/l.cmd        # OBSERVE lines: everything back / again
 tools/lab/lab.sh stop content; tools/lab/lab.sh start content   # 2 PASS: pack at world load, code re-applied

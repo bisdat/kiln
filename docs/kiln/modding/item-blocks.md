@@ -173,6 +173,100 @@ Blocks.Define("ember-scavenger", new CreatureBlock { Body = Bodies.Vukah, Drops 
 - **Mistakes.** An empty table, `Pick = One` with every weight 0 (or weights too large to add up), a chance outside 0 to 1, a `countMax` under `countMin`, a block that is no item or no table: refused at load, by block and field. An item name that is nobody's is said once content is ready: `block loottable x, entries[1].item: the game has no item "No_Such_Item"` (`drops.entries[1].item` in a table written in a creature). The rest of the table still rolls.
 - **`clients`.** A table asks nothing of players' games. The items in it ask what they ask.
 
+## Rarity at creation (RarityRollBlock)
+Since 0.2.0-dev.29.19 (the equipment wave). Name item types and five weights, and the server rolls the item's rarity, Common to
+Legendary, whenever the game makes one: a craft at a station or by hand, random loot in a container or on the ground, a
+random drop-table stack. The game then makes the item at that rarity itself: its enhancement slots (one more than the
+rank), the weapon socket chance of that rarity, its durability. So one item type with five perk slots covers common to
+legendary drops and crafts, instead of one item per tier.
+```csharp
+Blocks.Define("ember-rolls", new RarityRollBlock
+{
+    Items = ["my-mod:*"],                                   // every item of this mod; or names, GameItems constants, "Weapon_*"
+    Sources = ItemSource.Craft | ItemSource.Loot,           // the default
+    Weights = new Dictionary<Rarity, double> { [Rarity.Common] = 50, [Rarity.Uncommon] = 30, [Rarity.Rare] = 15, [Rarity.Epic] = 4, [Rarity.Legendary] = 1 },
+});
+```
+```jsonc
+{ "format": 1,
+  "rarityRolls": {
+    "ember-rolls": { "items": [ "my-mod:*" ], "sources": "craft, loot",
+                     "weights": { "common": 50, "uncommon": 30, "rare": 15, "epic": 4, "legendary": 1 } } } }
+```
+- **`items`**: game item names (`Weapon_T1_1H_Sword_Craft`), items of this mod by block name, `"other-mod:name"`, or a pattern
+  with `*` over the game's item names (`"Weapon_*"`; `"my-mod:*"` is every item of that mod). Names are resolved on the server
+  once the world's item registry has them, and again when it grows; a name that matches nothing is said once in kiln.log.
+- **`sources`**: `craft` (the game makes the item and asks for no rarity: crafting, `Items.GiveRecipeResult`), `loot` (the
+  game makes it with a rarity it rolled: random loot, random drop-table stacks; an item whose loot entry fixes its rarity is
+  loot too, so leave `loot` out to keep that), `give` (a Kiln `Items.Give` without `Gear.Rarity`). A give with a rarity is
+  never rolled, nor is anything Kiln re-creates (`Gems.AddSocket`).
+- **`weights`**: per rarity, 0 or more, at least one above 0; a rarity left out is 0. A rarity whose perk slot the item type
+  lacks never comes up (most tools stop at Rare or Epic; a data pack can fill `perkReferences`); with none left the game's own
+  rarity stays.
+- One rule per item type: a later definition (of any mod) wins an item type an earlier one also names, and kiln.log says so.
+  A mod's rules end with the mod.
+- **What players see.** The item is made by the game's own item creation at the rolled rarity, the same way as an item whose
+  rarity the game rolled itself, so its colour, enhancement list and "LEVEL x/y" are the game's (players without Kiln get them
+  like any loot; not yet confirmed in a real game). A recipe's tooltip still shows the item type's rarity (the
+  game builds it from the type, not from a roll): `kiln lint` warns (KL406) when a rule rolls crafts of an item with a recipe.
+- **Where it runs.** On the server: a dedicated server, or the game of the player who hosts the world. A game client joined to
+  another server rolls nothing. Capability `items.gear.rolls` (the hook in the game's item creation); without it items are
+  made at the game's rarity and kiln.log says why.
+- The per-item rarity at creation is the game's; changing an item's rarity afterwards is `Items.SetRarity` / upgrades (the
+  gear API). Balancing-table values (the game's loot rarity rates, rarity durability factors, socket chances) are the
+  content pack's `gearRules`, not this block.
+
+## Rarity upgrades (RarityUpgradeBlock)
+Since 0.2.0-dev.29.19 (the equipment wave). The rule of an upgrade a station, a command or a quest runs on an item: which items
+it takes, up to which rarity, and what each step costs. An upgraded item gets its next enhancement slot in place (the same
+item, its item data and affixes kept), which the player then unlocks at the workbench as usual. The upgrade itself is
+`Items.UpgradeRarity(player, item, "name")` ([../services/items.md](../services/items.md#upgrading-rarity-v8-since-020-dev2919));
+a station that runs it when a player uses it is `InteractBlock.Upgrade` ([world-blocks.md](world-blocks.md#upgrade-stations)).
+```csharp
+Blocks.Define("standard-upgrades", new RarityUpgradeBlock
+{
+    Items = ["Weapon_*", "Armor_*", "Ring_*"],              // none: every item with enhancement slots
+    Max = Rarity.Legendary,                                 // the default
+    Steps =                                                 // by the rarity each step reaches
+    {
+        [Rarity.Uncommon]  = new UpgradeStep { Cost = { [GameItems.Material_T1_Metal_Scraps] = 10 } },
+        [Rarity.Rare]      = new UpgradeStep { Cost = { [GameItems.Material_T1_Metal_Sheets] = 5 }, Chance = 0.9 },
+        [Rarity.Epic]      = new UpgradeStep { Cost = { ["ember-shard"] = 3 }, Chance = 0.75, OnFail = UpgradeFail.KeepItemLoseCost },
+        [Rarity.Legendary] = new UpgradeStep { Cost = { ["ember-shard"] = 8 }, Chance = 0.5, LevelScale = 0.1 },
+    },
+    Durability = DurabilityRule.KeepRatio,                  // the default
+    Socket = SocketRule.Keep,                               // the default; or GameChance
+});
+// later, on the server's tick thread:
+UpgradeResult r = await Items.UpgradeRarity(player, Items.Held(player), "standard-upgrades");
+```
+```jsonc
+{ "format": 1,
+  "rarityUpgrades": {
+    "standard-upgrades": {
+      "items": [ "Weapon_*", "Armor_*", "Ring_*" ], "max": "legendary",
+      "steps": {
+        "uncommon":  { "cost": { "Material_T1_Metal_Scraps": 10 } },
+        "rare":      { "cost": { "Material_T1_Metal_Sheets": 5 }, "chance": 0.9 },
+        "epic":      { "cost": { "ember-shard": 3 }, "chance": 0.75, "onFail": "keepItemLoseCost" },
+        "legendary": { "cost": { "ember-shard": 8 }, "chance": 0.5, "levelScale": 0.1 } },
+      "durability": "keepRatio", "socket": "keep" } } }
+```
+- **`items`**: as `rarityRolls` takes them: game names, items of this mod by block name, `"other-mod:name"`, or a pattern
+  with `*` (`"my-mod:*"` is every item of that mod). Left out: every item with enhancement slots.
+- **`steps`**: by the rarity each reaches (`uncommon` to `legendary`), at least one. `cost`: item names as in `items`, plain
+  items only (never gear or a gem), each 1 to 100000, at most 8; left out: free. `chance` 0 to 1 (default 1; the server rolls
+  it). `onFail`: `keepItemLoseCost` (default), `keepItemKeepCost`, `downgrade`. `levelScale` (default 0): the cost grows
+  with the item's level, `count × (1 + levelScale × (level - 1))` rounded up. `unlock` (default false): the new slot comes
+  unlocked.
+- **`max`** (default `legendary`), **`durability`** (`keepRatio`, the default; `keep`; `repair`), **`socket`** (`keep`, the
+  default; `gameChance`: a weapon without a socket rolls the game's chance at its new rarity, and a won socket re-creates the
+  weapon in its slot), **`allowEmptySlot`** (default false: a rarity whose slot the type has no perk for is refused).
+- An item whose next rarity has no step, or whose type has no slot for it (most tools stop at Rare or Epic), is refused and
+  pays nothing. The same name defined again replaces the rule; a mod's rules end with the mod.
+- **Where it runs.** On the server; asks nothing of players' games (the new rarity is the game's own item state).
+  Capability `items.gear.upgrade`.
+
 ## Recipes of their own
 A `RecipeBlock` on an item says how that item is made. A `RecipeBlock` of its own, in `recipes`, is one more recipe for any item: a game item at the game's workbench, or an item of yours there. It needs `Output`.
 

@@ -1,0 +1,1 @@
+{ "id": "fixture-gear", "name": "Fixture: gear values", "version": "1.0.0", "apiVersion": "0.2", "side": "both", "clients": "mod", "license": "MIT", "boot": true }

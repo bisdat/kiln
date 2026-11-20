@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // kiln.items: gear options at creation (pide.cpp): KILN_ITEMS_UNLOCK and KILN_ITEMS_GEM_SLOT; v7 (the gem wave):
-// KILN_ITEMS_GEM_SLOT_ANY, KILN_ITEMS_DYE, KILN_ITEMS_DURABILITY, gemSlotOverride on any gear, socket rolls.
+// KILN_ITEMS_GEM_SLOT_ANY, KILN_ITEMS_DYE, KILN_ITEMS_DURABILITY, gemSlotOverride on any gear, socket rolls; v8 (P5):
+// rarity rolls at creation.
 #pragma once
 #include <cstdint>
 
@@ -35,6 +36,13 @@ void pide_counters(uint64_t* unlocked, uint64_t* gems, uint64_t* faults);
 void pide_socket_counters(uint64_t* by_give, uint64_t* by_override, uint64_t* by_roll, uint64_t* extras);
 // v7: socket_roll of the table. NULL ends the owner's rolls (also what cancel_owner does).
 KilnResult pide_socket_roll(KilnOwner owner, const KilnItemsSocketRoll* roll);
+
+// v8 (P5): rarity rolls at creation (kiln_items.h "rarity rolls"). install: feature items.gear.rolls and the mid hook at
+// items/PideRarity; false: rolls stay off (rarity_rolls answers KILN_ERR_UNAVAILABLE). rarity_rolls(owner, NULL, 0, 0)
+// ends the owner's rules (cancel_owner does it).
+bool pide_install_rolls(const KilnApi* api, KilnOwner owner);
+KilnResult pide_rarity_rolls(KilnOwner owner, const KilnItemsRarityRoll* rolls, uint32_t count, uint32_t roll_size);
+KilnResult pide_roll_status(KilnItemsRollStatus* out);
 
 // The kind of gear an ItemInfo is, for rolls and GEM_SLOT_ANY: by category and equipment slot type (0xFF: unknown).
 enum SocketKind : int { kKindNone = -1, kKindRings = 0, kKindArmour = 1, kKindShields = 2, kKindOther = 3, kKindWeapon = 4 };

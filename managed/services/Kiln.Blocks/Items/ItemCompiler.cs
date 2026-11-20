@@ -12,14 +12,15 @@ namespace Kiln;
 internal static partial class Compiler
 {
     // The game's armour: round((gradient * level + offset) * distribution[kind]) (client 0xe6dfe0, keen::BalancingTable +0x2a0 armorSetup). Checked at ready (ItemChecks).
-    internal static float ArmorOffset = 23, ArmorGradient = 15;
+    internal static float ArmorOffset => GearMath.ArmorOffset;  // Kiln.Content's GearMath, shared with the gear values
+    internal static float ArmorGradient => GearMath.ArmorGradient;
     private const uint ConfigLevel = 0x17147b63, RowDuration = 0x86a75e07, RowHealth = 0xf38b388c, RowItemLevel = 0x88fbd16d;
     // A food item's own time for the status it gives (PrimerBuffDuration, a Time in seconds). Eaten, the game gives the status for this long, not for the
     // status's defaultLifeTime; the tooltip's Duration row follows it. Every food starter has one (Honey: 60 s).
     private const uint ConfigFoodDuration = 0xbee6d4a9;
     private const string ConfigStamina = "StaminaCost";
 
-    internal static double ArmorShare(int armor, int level) => armor / (ArmorGradient * level + ArmorOffset);
+    internal static double ArmorShare(int armor, int level) => GearMath.ArmorShare(armor, level);
 
     /// <summary>The blocks of this file. Null: not one of them.</summary>
     private static BlockHandle? DefineItemBlock<T>(BlockContext ctx, Lowered low, string name, T block) where T : class, IBlock

@@ -1,1 +1,81 @@
 #nullable enable
+const Kiln.Ui.Tooltip.LinesCapability = "ui.tooltip.lines" -> string!
+const Kiln.Ui.Tooltip.ValuesCapability = "ui.tooltip.values" -> string!
+Kiln.TooltipColor
+Kiln.TooltipColor.Common = 3 -> Kiln.TooltipColor
+Kiln.TooltipColor.Default = 0 -> Kiln.TooltipColor
+Kiln.TooltipColor.Epic = 6 -> Kiln.TooltipColor
+Kiln.TooltipColor.Legendary = 7 -> Kiln.TooltipColor
+Kiln.TooltipColor.Muted = 9 -> Kiln.TooltipColor
+Kiln.TooltipColor.Negative = 2 -> Kiln.TooltipColor
+Kiln.TooltipColor.Positive = 1 -> Kiln.TooltipColor
+Kiln.TooltipColor.Rare = 5 -> Kiln.TooltipColor
+Kiln.TooltipColor.Uncommon = 4 -> Kiln.TooltipColor
+Kiln.TooltipColor.Unique = 8 -> Kiln.TooltipColor
+Kiln.TooltipLine
+Kiln.TooltipLine.Color.get -> Kiln.TooltipColor
+Kiln.TooltipLine.Color.init -> void
+Kiln.TooltipLine.Deconstruct(out Kiln.UiText! Text, out Kiln.TooltipColor Color, out bool Small) -> void
+Kiln.TooltipLine.Equals(Kiln.TooltipLine other) -> bool
+Kiln.TooltipLine.Small.get -> bool
+Kiln.TooltipLine.Small.init -> void
+Kiln.TooltipLine.Text.get -> Kiln.UiText!
+Kiln.TooltipLine.Text.init -> void
+Kiln.TooltipLine.TooltipLine(Kiln.UiText! Text, Kiln.TooltipColor Color = Kiln.TooltipColor.Default, bool Small = false) -> void
+Kiln.TooltipLine.TooltipLine() -> void
+Kiln.TooltipPlace
+Kiln.TooltipPlace.AfterStats = 1 -> Kiln.TooltipPlace
+Kiln.TooltipPlace.End = 0 -> Kiln.TooltipPlace
+Kiln.Ui.Tooltip
+Kiln.UiTooltipLines
+Kiln.UiTooltipLines.<Clone>$() -> Kiln.UiTooltipLines!
+Kiln.UiTooltipLines.Deconstruct(out bool Ok, out string? Reason, out System.Collections.Generic.IReadOnlyList<Kiln.TooltipLine>! Lines) -> void
+Kiln.UiTooltipLines.Equals(Kiln.UiTooltipLines? other) -> bool
+Kiln.UiTooltipLines.Lines.get -> System.Collections.Generic.IReadOnlyList<Kiln.TooltipLine>!
+Kiln.UiTooltipLines.Lines.init -> void
+Kiln.UiTooltipLines.Ok.get -> bool
+Kiln.UiTooltipLines.Ok.init -> void
+Kiln.UiTooltipLinesProvider
+Kiln.UiTooltipLines.Reason.get -> string?
+Kiln.UiTooltipLines.Reason.init -> void
+Kiln.UiTooltipLines.UiTooltipLines(bool Ok, string? Reason, System.Collections.Generic.IReadOnlyList<Kiln.TooltipLine>! Lines) -> void
+Kiln.UiTooltipScale
+Kiln.UiTooltipScale.<Clone>$() -> Kiln.UiTooltipScale!
+Kiln.UiTooltipScale.Deconstruct(out bool Ok, out string? Reason, out float Factor) -> void
+Kiln.UiTooltipScale.Equals(Kiln.UiTooltipScale? other) -> bool
+Kiln.UiTooltipScale.Factor.get -> float
+Kiln.UiTooltipScale.Factor.init -> void
+Kiln.UiTooltipScale.Ok.get -> bool
+Kiln.UiTooltipScale.Ok.init -> void
+Kiln.UiTooltipScale.Reason.get -> string?
+Kiln.UiTooltipScale.Reason.init -> void
+Kiln.UiTooltipScale.UiTooltipScale(bool Ok, string? Reason, float Factor) -> void
+Kiln.UiTooltipValuesProvider
+~override Kiln.TooltipLine.Equals(object obj) -> bool
+override Kiln.TooltipLine.GetHashCode() -> int
+~override Kiln.TooltipLine.ToString() -> string
+override Kiln.UiTooltipLines.Equals(object? obj) -> bool
+override Kiln.UiTooltipLines.GetHashCode() -> int
+override Kiln.UiTooltipLines.ToString() -> string!
+override Kiln.UiTooltipScale.Equals(object? obj) -> bool
+override Kiln.UiTooltipScale.GetHashCode() -> int
+override Kiln.UiTooltipScale.ToString() -> string!
+static Kiln.TooltipLine.operator !=(Kiln.TooltipLine left, Kiln.TooltipLine right) -> bool
+static Kiln.TooltipLine.operator ==(Kiln.TooltipLine left, Kiln.TooltipLine right) -> bool
+static Kiln.Ui.Tooltip.AddLines(Kiln.ItemId item, Kiln.UiTooltipLinesProvider! provider, Kiln.TooltipPlace place = Kiln.TooltipPlace.End) -> Kiln.UiValueRegistration!
+static Kiln.Ui.Tooltip.AddLines(Kiln.UiTooltipLinesProvider! provider, Kiln.TooltipPlace place = Kiln.TooltipPlace.End) -> Kiln.UiValueRegistration!
+static Kiln.Ui.Tooltip.AddValues(Kiln.ItemId item, Kiln.UiTooltipValuesProvider! provider) -> Kiln.UiValueRegistration!
+static Kiln.Ui.Tooltip.AddValues(Kiln.UiTooltipValuesProvider! provider) -> Kiln.UiValueRegistration!
+static Kiln.Ui.Tooltip.InGame.get -> bool
+static Kiln.UiTooltipLines.operator !=(Kiln.UiTooltipLines? left, Kiln.UiTooltipLines? right) -> bool
+static Kiln.UiTooltipLines.operator ==(Kiln.UiTooltipLines? left, Kiln.UiTooltipLines? right) -> bool
+static Kiln.UiTooltipLines.Refuse(string! reason) -> Kiln.UiTooltipLines!
+static Kiln.UiTooltipLines.With(params Kiln.TooltipLine[]! lines) -> Kiln.UiTooltipLines!
+static Kiln.UiTooltipScale.By(float factor) -> Kiln.UiTooltipScale!
+static Kiln.UiTooltipScale.operator !=(Kiln.UiTooltipScale? left, Kiln.UiTooltipScale? right) -> bool
+static Kiln.UiTooltipScale.operator ==(Kiln.UiTooltipScale? left, Kiln.UiTooltipScale? right) -> bool
+static Kiln.UiTooltipScale.Refuse(string! reason) -> Kiln.UiTooltipScale!
+static readonly Kiln.UiTooltipLines.None -> Kiln.UiTooltipLines!
+static readonly Kiln.UiTooltipScale.None -> Kiln.UiTooltipScale!
+virtual Kiln.UiTooltipLinesProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItemView item) -> Kiln.UiTooltipLines!
+virtual Kiln.UiTooltipValuesProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItemView item) -> Kiln.UiTooltipScale!

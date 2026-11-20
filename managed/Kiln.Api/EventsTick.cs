@@ -64,7 +64,9 @@ internal static class ServiceTick
          ("Kiln.SlotUi", "Kiln.SlotUiStartup"),
          ("Kiln.World", "Kiln.WorldStartup"),
          // 0.2.0-dev.29.17 (GitHub #68): the channel kiln:craftstock only, before anyone joins; not Kiln.Blocks' data tick
-         ("Kiln.Blocks", "Kiln.CraftStockStartup")];
+         ("Kiln.Blocks", "Kiln.CraftStockStartup"),
+         // 0.2.0-dev.29.19 (the equipment wave, P7): per-instance gear values kept through loads, written again after each
+         ("Kiln.Blocks", "Kiln.GearKeepStartup")];
 
     /// <summary>Of <see cref="AutoStart"/>, the services the host starts right before the mods load (their OnLoad runs
     /// before the first service tick): rows a mod reads in OnLoad and that depend on no mod. Kiln.World's

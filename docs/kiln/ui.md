@@ -284,9 +284,55 @@ no slot, count or entity: a provider for one item's instance passes there.
 
 Limits: 128 registrations per mod (values, lines, slots and change subscriptions together; one more comes back with
 `Ok` false), 16 tooltip lines per detail view (all providers together). Bad arguments throw `ArgumentException`, a row
-that is off throws `KilnUnavailableException` naming it, a refusal comes back as a result. Not done: lines in the game's
-own tooltip (3-5 days of layout work), rows in the inventory header or character sheet, pet bars, values for a chest a
-player only opened (`InstanceData` Holder sync covers the holder only).
+that is off throws `KilnUnavailableException` naming it, a refusal comes back as a result. Not done: rows in the
+inventory header or character sheet, pet bars, values for a chest a player only opened (`InstanceData` Holder sync
+covers the holder only). Lines inside the game's own tooltip: `Ui.Tooltip` below.
+
+### Lines and numbers inside the game's item detail view (Ui.Tooltip, equipment wave)
+`Ui.Tooltip` draws lines into the game's **own** item detail view, and scales the numbers its stats block draws, on
+this client. Native: `tooltip_lines_native` and `tooltip_values` in `kiln_ui_values.h` (since 0.2.0-dev.29.19); the game
+code it uses is mapped in [../re/game-ui.md](../re/game-ui.md) and `sigdb/symbols/client.d/equip-tooltips.json`.
+
+```csharp
+Ui.Tooltip.AddLines(myItem, (in UiValueContext c, in UiItemView v) =>
+    UiTooltipLines.With(new TooltipLine("+12 % fire damage", TooltipColor.Positive),
+                        new TooltipLine("Ember set: 2 of 4", TooltipColor.Epic, Small: true)));
+Ui.Tooltip.AddLines((in UiValueContext c, in UiItemView v) => UiTooltipLines.With(new TooltipLine("Affix: sharp")),
+    TooltipPlace.AfterStats);
+Ui.Tooltip.AddValues(myItem, (in UiValueContext c, in UiItemView v) => UiTooltipScale.By(1.25f));
+```
+
+| Member | What it does | Row (guided check) |
+|---|---|---|
+| `AddLines(item, provider, place)`, `AddLines(provider, place)` | lines after the last vanilla line (`TooltipPlace.End`) or between the stats and the description (`AfterStats`), wrapped at the panel's width as the game wraps its description, in a `TooltipColor` (the game's rarity colours, `Positive`, `Negative`, `Muted`), optionally in the smaller detail size; also listed in Kiln's Item details window | needs `ui.values.tooltip_lines`; drawn in the game's view while `ui.tooltip.lines` is on (`equip.c5` to `equip.c8`) |
+| `AddValues(item, provider)`, `AddValues(provider)` | the stats block's numbers (the main damage, armour or block number and its other values) multiplied by the providers' factors (finite, 0 to 1000 in all) | `ui.tooltip.values` (`equip.c9`) |
+| `InGame` | true while lines are drawn into the game's view | – |
+
+How it behaves:
+- **Inside the scrolled content.** A line is the last child of the detail's scrolled content list (or sits right after
+  the stats block), so the panel's own layout places it under the vanilla lines and its scrollbar reaches it. Lines are
+  built the way the game builds the description: same style and alignment, size "fill the width, fit the height", so
+  the game wraps them; Kiln measures nothing itself.
+- **Fallback, never half drawn.** Lines also go to Kiln's Item details window. They are only in that window where the
+  game's view cannot take them: `ui.tooltip.lines` off or held, a game build Kiln has not measured, a detail screen that
+  does not reach these places (the guided check `equip.c8` lists which do), or after a fault while drawing (one
+  kiln.log line; native drawing then stays off for the session).
+- **Colours.** `Common` .. `Legendary`, `Unique` and `Muted` are the palette entries the game uses for the header's
+  rarity colour. `Positive` is the Uncommon colour and `Negative` the text's own colour until `equip.c7` confirms a
+  better match; a later Kiln can change what they map to without an API change.
+- **Values.** A picture on this client only: the server's numbers do not change and vanilla clients show the game's
+  numbers. The enhancement rows of the stats block are not scaled in this version.
+- **Budgets and threads** are `Ui.Values`' (above): 16 lines per detail view for all line providers together, text
+  kept for the process, providers on the client's main thread inside the game's UI frame, five faults in a row remove
+  a provider. A `Ui.Values.TooltipLines` provider stays in Kiln's window only.
+- **Held until the guided checks.** Both rows are held by the client gate (`native/core/gates/equip-tooltips.json`)
+  until `equip.c5` to `equip.c9` pass; `"preview"` in kiln.json lifts them. Without `ui.tooltip.lines`, `AddLines`
+  still works (Item details window); without `ui.tooltip.values`, `AddValues` throws `KilnUnavailableException`.
+
+**The tooltip probe** (for the guided client session, not for players): `"tooltipProbe": true` (or a key name) in
+kiln.json, or the environment variable `KILN_TOOLTIP_PROBE=1`, draws a fixed test block through the same path, stepped
+through with a key (default F3: off, short, 16 lines, long English, long German, colours, after-stats, values x2), and
+writes `tooltip-probe:` lines to kiln.log (each detail's mode and identity, the sites it passed, rectangles, values).
 
 ## Windows (immediate mode)
 ```csharp
