@@ -942,6 +942,21 @@ the address space), the largest free run that lies in the window and whether it 
 "The whole window is reserved or committed" means the game left no room; "the window was not seen in full" means the walk was cut short and
 the line is the evidence to send. Internals and measurements: `docs/re/content.md` section 10.
 
+## Station menus (kiln.stationmenus, since 0.2.0-dev.31)
+kiln.content's DLL also serves the table `kiln.stationmenus` v1 (`native/core/abi/services/kiln_station_menus.h`): the
+crafting-menu layouts of mods' own workshops ("menus with tabs of their own",
+[../modding/world-blocks.md](../modding/world-blocks.md#menus-with-tabs-of-their-own-since-020-dev31)). One normalized
+record per layout (format 1, canonical JSON: origin station and its workshop, the definition, the base menu, tabs, sets
+and recipe ids), one parser and serializer for `define`, `export_layouts` and `remote_replace`. Layers per (owner,
+definition): the newest accepted wins its workshop, removing it shows the one before or the game's layout; a joined
+client's server collection (`remote_replace`, `remote_clear`) is above every local layer. 256 layers, 1 MiB per record, 64
+MiB in all. On a game client the existing crafting-menu hook (`content.recipe_menu`) builds the menu of a workshop with a
+layout (all arrays in near memory first, both collection headers switched last; at most 16 builds per workshop and 64 MiB
+in all, then `RestartRequired`); `set_pending` keeps own workshops empty while a joined client waits for the server's
+menus; `drain_applied` hands what the hook built to Kiln.Content, which posts `StationMenuAppliedEvent` on the tick. The
+managed side is `StationMenuStore` / `StationMenuSync` in Kiln.Content; the channel is [../sync.md](../sync.md#station-menus).
+Capability rows: `stationmenus.store`, `stationmenus.render`, `stationmenus.sync.v1` ([caps.md](caps.md)).
+
 ## Not yet
 - A changed reference of a **game** item is not sent to clients for list fields (`model`'s per-body / pickup model
   lists): clients get the GUID fields. New items (definitions) are complete on both sides.

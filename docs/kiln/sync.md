@@ -177,6 +177,32 @@ ids are explicit.
 | content 1 ACK | client → server | u32 state id, u8 result (0 applied, 1 failed, 2 hosting, 3 refused), varint applied, reset, errors, ms, str detail |
 | config 0 STATE | server → client | u16 format (1), u32 state id, configs `[str id, str mod, u8 kind, str values JSON]` (at most 512) |
 | config 1 ACK | client → server | u32 state id, varint applied, varint refused, str detail |
+| station-menu 0 PART | server → client | u16 format (1), str state id (64 hex), str session (36), u64 generation, u32 raw length, u16 part (from 0), u16 parts (1..4096), u8 codec (1 = raw deflate), bytes data (at most 96 KiB) |
+| station-menu 1 ACK | client → server | str state id, str session, u64 generation, u8 stage (0 stored, 1 applied, 2 refused), str reason (at most 4096 bytes) |
+
+## Station menus
+Channel `kiln:station-menu` v1 (since 0.2.0-dev.31), opened by Kiln.Content at its start, `required: false`: on a server
+always, on a game client only while it can draw menus (`stationmenus.render`), so a client never claims what it cannot
+follow. What authors write: [modding/world-blocks.md](modding/world-blocks.md#menus-with-tabs-of-their-own-since-020-dev31).
+
+- **Server.** On each join of a Kiln client that declared the channel, and after every change of its menus, it sends one
+  full snapshot: `{"contentStateId": <kiln:content state>, "format": 1, "generation": <u64>, "menus": [records], "session":
+  "<guid>"}` (canonical: keys sorted, compact). `menus: []` is the snapshot with no menu (it takes the previous ones
+  off). The session is new for every world the server starts. The menu export and the content state come from one
+  content generation (read before and after; tried again at the next tick on a change). State id: SHA-256 of the exact
+  bytes sent, 64 lower-case hex. Limits: 64 MiB of JSON, 65 MiB deflated, 4096 parts. The hosting player's own game gets
+  nothing (it draws from the same process).
+- **Admission.** While a menu exists, a Kiln client that did not declare `kiln:station-menu` at exactly "1" is refused
+  after its hello, before it enters the world, under every `modSync`: "station-menu protocol1 required". One in the
+  world that announces its channels again without it is refused the same way. Until the mods' OnLoad pass and the
+  blocks pass are done, joining Kiln clients are held (at most 25 s) and then decided. Clients without Kiln are not
+  refused for menus: they never get a mod's own station (Kiln-only templates, [network.md](network.md#clients-without-kiln)).
+  A first menu defined while a Kiln client without the channel is in the world is refused (`PeersLackStationMenus`).
+- **Client.** It keeps the parts of one snapshot (another state, session or generation starts over; 30 s to get them
+  all), checks the hash and the envelope (no definition or workshop twice), acks `stored`, waits until its content sync
+  applied the named content state (at most 120 s, then `refused ContentNotReady`, and tried again when that state
+  arrives), then swaps the server's collection in one call and acks `applied`. Until then a mod's own workshops list
+  nothing. Leaving the server takes the server's menus off. The same snapshot again changes nothing.
 
 ## Tests
 Lab, without a client (`lab.sh new sync 25900 --save …`, `kiln/config/network.json` `{"labPort": 25901}`,

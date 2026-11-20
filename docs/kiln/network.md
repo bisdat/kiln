@@ -236,9 +236,10 @@ registered, the gate behaves exactly as before: the three built-in rules of [Cli
 
 | Requirement | Registered by | What it does |
 |---|---|---|
-| mandatory protocol (`SetMandatoryProtocol(name, version, …)`) | a service whose clients must speak a channel (16a's `kiln:station-menu`) | a client without that channel at that version is refused in its hello, before Welcome, under every `modSync`; a Ready client that announces its channels again without it is refused; a vanilla client is refused. Enabling it answers `Ok=false` (not installed) while a connected peer lacks it (`PeersLacking`) |
-| join hold (`HoldJoins`) | a service that must finish something before anyone enters (18's policy change, 16a's menu latch) | no peer is let in while it lives; at its deadline it ends with an error line |
+| mandatory protocol (`SetMandatoryProtocol(name, version, …)`) | a service whose clients, Kiln or not, must speak a channel | a client without that channel at that version is refused in its hello, before Welcome, under every `modSync`; a Ready client that announces its channels again without it is refused; a vanilla client is refused. Enabling it answers `Ok=false` (not installed) while a connected peer lacks it (`PeersLacking`) |
+| join hold (`HoldJoins`) | a service that must finish something before anyone enters (18's policy change) | no peer is let in while it lives; at its deadline it ends with an error line |
 | peer hold (`HoldPeer`, from an `OnJoin` decider) | a service that needs one client's acknowledgement first (18's late join) | that peer stays out until the hold ends; at its deadline the peer is refused with the holder's reason |
+| `OnJoin` decider `kiln.stationmenus` (since 0.2.0-dev.31) | Kiln.Content while a station menu exists or the mods' menus are not declared yet ([sync.md](sync.md#station-menus)) | a Kiln client without `kiln:station-menu` v1 is refused after its hello, before the world, under every `modSync` ("station-menu protocol1 required"), and one in the world that announces its channels again without it; until the mods' OnLoad and blocks pass are done each joining Kiln client is held (25 s at most). A client without Kiln is not concerned (not a mandatory protocol: it never gets a mod's own station) |
 | vanilla condition (`Require`) | a service that keeps vanilla clients safe only while something holds (15's item remap) | while it answers false, vanilla clients are refused |
 
 **Order for a joining peer:** hello → built-in checks (mods, channels, world tables, player graph) → mandatory protocols →

@@ -60,7 +60,7 @@ JSON sections: `props`, `stations`, and for parts `placements`, `comforts`, `pro
 | `PlacementBlock` | `On` (`Surface.Floor`, `Wall`, `Ceiling`, or several: the first is tried first), `InBase`, `Size` (metres), `Snap`, `Water`, `Fog`, `Consumed` |
 | `ComfortBlock` | `Amount`, `Category` (`ComfortCategory`), `Range` (metres, 5), `Warmth` (1) |
 | `ProcessingBlock` | `Slots` (1..64), `GoesOutInRain`, `Running` (`Vfx`, `Sound`) |
-| `MenuBlock` | `Like`: the station whose menu it opens |
+| `MenuBlock` | `Like`: the station whose menu it opens; `Tabs`: tabs, sets and headings of its own (a workshop of its own, since 0.2.0-dev.31) |
 
 All take `Name`, `Description` and `Was`. A field left out is what the block starts from.
 
@@ -90,12 +90,69 @@ Blocks.Define("rune-bench", new StationBlock
 ```
 - **Its recipes.** `Recipes` lists what it makes, each with `Output`. An item says the same from its side with `Recipe = new RecipeBlock { Station = thisStation, ... }`. At a workshop of its own a recipe needs `Seconds`: there are no recipes of the game to take a time from. `Seconds` is at the game's normal speed: a world's production speed setting divides it as it does the game's own recipes, so a 4 s recipe takes 2 s in a world set to twice the speed. A cycle takes its inputs when it starts and gives its outputs when it ends; with nothing left it stops, and starts again by itself when given more.
 - **Fuel.** `Burns` lists fuel the way `Needs` lists ingredients. It's an input, as charcoal is in the game's forge, so a station out of fuel stops like one out of anything else. A burn timer that runs on its own isn't a block yet.
-- **The menu.** A station with a workshop of its own has a menu of its own: its recipes and no others, each once, under the tabs and headings its kind's menu (or `Menu.Like`'s) would list them under, and titled with the station's name. Its screen offers its first recipe until a player picks one, and its recipe picker ("Change recipe") lists the same. The game's stations of its kind don't list these recipes. A station that shares its kind's workshop opens its kind's menu, or `Menu.Like`'s, and its recipes are listed there among that station's own. A menu with tabs of its own is a later block that plugs into `Menu`.
+- **The menu.** A station with a workshop of its own has a menu of its own: its recipes and no others, each once, under the tabs and headings its kind's menu (or `Menu.Like`'s) would list them under, and titled with the station's name. Its screen offers its first recipe until a player picks one, and its recipe picker ("Change recipe") lists the same. The game's stations of its kind don't list these recipes. A station that shares its kind's workshop opens its kind's menu, or `Menu.Like`'s, and its recipes are listed there among that station's own. With `Menu.Tabs` it lays its menu out itself: see [Menus with tabs of their own](#menus-with-tabs-of-their-own-since-020-dev31).
 - **Where its item is crafted and listed.** `Recipe` makes the block's item at a station (by hand without one). In that station's menu it is listed beside the game's recipe for the item it starts from, when the station makes that one too, else with the first group of placed things there: at the workbench, a station goes with the chests and a table with the game's tables.
 - **Where it places.** As its starter: the item is the starter item's in everything the game's placement check reads (box, colliders, angles, base and no-build rules), apart from what `Placement` says.
 - **Comfort.** `Comfort` gives the placed thing the game's comfort, also where its starter had none, and the item's tooltip gets the Comfort row. The game's rule applies: only the best of a category counts near a player.
 - **Rain and roofs.** `GoesOutInRain = false` keeps it lit in any rain. A station that works on its own never checks a roof: the game's don't either, so their recipes refuse `Sheltered`. On a bench recipe, `Sheltered` is the game's own flag.
 - **Light.** A VFX on it for as long as it stands, which is where the game's lamps have their light. `Visual.Vfx` says the same from the look; one of the two.
+
+### Menus with tabs of their own (since 0.2.0-dev.31)
+A station with a workshop of its own can lay its crafting menu out: tabs with names, sets of recipes in each tab, a
+heading above every set but the first. Recipes are named by a key of yours (`MenuKey`), never by the game's names.
+```csharp
+var forge = Blocks.Define("rune-forge", new StationBlock
+{
+    Name = "Rune Forge", Kind = StationKind.Forge, Processing = new ProcessingBlock(),
+    Menu = new MenuBlock
+    {
+        Like = StationKind.Workbench,   // the menu whose tab icons it reuses
+        Tabs =
+        [
+            new StationMenuTabBlock { Key = "metal", Name = new UiText(new Dictionary<string, string> { ["en"] = "Metal", ["de"] = "Metall" }), IconFromTab = 0,
+                Sets = [new StationMenuSetBlock { Key = "main", Recipes = ["reclaim", "bolts"] }] },
+            new StationMenuTabBlock { Key = "fine", Name = "Fine", IconFromTab = 1,
+                Sets = [new StationMenuSetBlock { Key = "main", Recipes = ["wire"] },
+                        new StationMenuSetBlock { Key = "plates", Heading = "Fine work", Recipes = ["other-mod:plate"] }] },
+        ],
+    },
+    Recipes = [new RecipeBlock { MenuKey = "reclaim", Seconds = 6, Needs = { [GameItems.Material_T1_Metal_Sheets] = 1 }, Output = GameItems.Material_T1_Metal_Scraps }],
+});
+// an item says the same from its side
+Blocks.Define("bolts", new ItemBlock { Name = "Bolts", Recipe = new RecipeBlock { Station = forge, MenuKey = "bolts", Seconds = 2, Needs = { [GameItems.Material_T1_Metal_Scraps] = 1 } } });
+```
+```json
+"menu": { "like": "workbench", "tabs": [
+  { "key": "metal", "name": { "en": "Metal", "de": "Metall" }, "iconFromTab": 0, "sets": [ { "key": "main", "recipes": ["reclaim", "bolts"] } ] },
+  { "key": "fine", "name": "Fine", "iconFromTab": 1, "sets": [ { "key": "main", "recipes": ["wire"] },
+      { "key": "plates", "heading": "Fine work", "recipes": ["other-mod:plate"] } ] } ] },
+"recipes": [ { "menuKey": "reclaim", "seconds": 6, "needs": { "Material_T1_Metal_Sheets": 1 }, "output": "Material_T1_Metal_Scraps" } ]
+```
+- **Recipes by key.** `MenuKey` (`[A-Za-z0-9._-]`, 1..64, case counts, no colon) names a recipe in a station's list or an
+  item's recipe; it changes nothing else about the recipe. A menu names it as `"key"` (this mod's) or `"mod:key"`
+  (another mod's recipe at this station). Two recipes that make the same thing are fine with two keys. The menu lists
+  exactly what it names, once each: a recipe it doesn't name stays valid but is not shown. A name that matches no recipe
+  at this workshop, or two, is a mistake.
+- **Tabs, sets, headings.** At most 15 tabs, 28 sets in a tab and 512 recipes in a tab. The first set of a tab has no
+  heading (the game shows the tab's name there). Empty tabs and sets are allowed: whether the game hides an empty tab is
+  for the game to say. Texts are a string (every language) or a map of languages (at most 35, `"en"`, `"de"`, ...), 1 to
+  4,096 bytes each.
+- **Icons.** `IconFromTab`: the icon of that tab (from 0) of the menu it is `Like`, as the game has it; -1 (the default)
+  is its first. A tab the game's menu does not have is refused when a player's game builds the menu: the menu is then
+  listed the way it is without tabs, never with another tab's icon. Icons of your own are not supported yet.
+- **Only a workshop of its own.** Tabs on a station that shares its kind's workshop are refused: the game's own stations
+  keep the game's own menus on every player's game.
+- **More than one layout.** `StationMenus.Define(station, new StationMenuDefinition { Key = "forge.winter", Tabs = [...] })`
+  on the tick thread puts a layout of code over the block's (another mod may do it for your station too). The newest
+  wins; `Registration.Dispose()` takes it off and the one before shows again. Defining the same layout again changes
+  nothing. A refusal comes back as `Ok = false` with a reason: `PendingContent` (a recipe it names is not registered
+  yet; the block's own menu is retried with the next content), `ContentSyncDisabled` (the server does not send its
+  content), `PeersLackStationMenus` (a player in the world has a Kiln too old for menus), `NoHoldGate`.
+  `StationMenuDefinitionChangedEvent` follows every change; on a game client `StationMenuAppliedEvent` says when the
+  game built the menu (or refused it, with the reason).
+- **Players.** A server sends its menus to Kiln players (channel `kiln:station-menu`, [../sync.md](../sync.md#station-menus)).
+  While a menu exists, a player whose Kiln is too old for it is refused before entering the world ("station-menu
+  protocol1 required"). Players without Kiln are not refused for it: they never get a mod's own station.
 
 ### From code
 ```csharp
@@ -121,7 +178,7 @@ blocks/forge.json: block station rack, recipes[0].seconds: a station of its own 
 ```
 
 ### What players' games need
-`clients: kiln`: a new item, template and recipe. A model of your own, a PNG icon, a cue of your own or `Provides` needs `mod`.
+`clients: kiln`: a new item, template and recipe (a menu with tabs needs nothing more: Kiln sends it). A model of your own, a PNG icon, a cue of your own or `Provides` needs `mod`.
 
 Not proven with a client: a cooked prop model drawn, the cursor's ghost, and bumping into its box or boxes. The lab reads the boxes back from the template and the item (`mods/tests/blocks-more-test`, `mods/tests/furniture-test`). Also not proven with a client: that a recipe's tooltip lists a crafting prop under its item's name, and that a station's screen offers the recipe once the prop stands near it (the server's check is the lab's).
 
