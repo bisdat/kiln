@@ -63,3 +63,4 @@
 .kcr-deck-share { display: flex; gap: 2rem; align-items: center; }
 .kcr-deck-share-text { display: flex; flex-direction: column; gap: .6rem; flex: 1; min-width: 0; }
 .kcr-deck-input { font-size: 2.4rem; letter-spacing: .12em; text-transform: uppercase; text-align: center; width: 100%; box-sizing: border-box; padding: .5rem; }
+.deck-btn.primary.kcr-deck-wait { filter: saturate(.45) brightness(.85); }

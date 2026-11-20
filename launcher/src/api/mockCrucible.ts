@@ -254,9 +254,9 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
     const plan: PackUpdatePlan = {
       profile: pid, pack: p.pack.slug, from: from.version, to: v.version, changes: v.changes ?? undefined,
       mods: {
-        added: v.mods.filter((x) => !had.has(x.id)).map((x) => ({ kind: x.kind, id: x.id, version: x.version, enabled: x.optional ? !!x.on : true })),
-        updated: v.mods.filter((x) => had.has(x.id) && had.get(x.id)!.version !== x.version).map((x) => ({ kind: x.kind, id: x.id, from: had.get(x.id)!.version, to: x.version })),
-        removed: from.mods.filter((x) => !next.has(x.id)).map((x) => ({ kind: x.kind, id: x.id, version: x.version, enabled: true })),
+        added: v.mods.filter((x) => !had.has(x.id)).map((x) => ({ kind: x.kind, id: x.id, version: x.version, enabled: x.optional ? !!x.on : true, name: x.name })),
+        updated: v.mods.filter((x) => had.has(x.id) && had.get(x.id)!.version !== x.version).map((x) => ({ kind: x.kind, id: x.id, from: had.get(x.id)!.version, to: x.version, name: x.name })),
+        removed: from.mods.filter((x) => !next.has(x.id)).map((x) => ({ kind: x.kind, id: x.id, version: x.version, enabled: true, name: x.name })),
         yours: mine.filter((x) => !had.has(x.id) && !x.id.startsWith("pack.")).map((x) => ({ kind: x.kind, id: x.id, version: x.version, enabled: x.enabled })),
         keptSwitches: mine.filter((x) => had.has(x.id) && next.has(x.id) && !x.enabled).map((x) => x.id),
       },

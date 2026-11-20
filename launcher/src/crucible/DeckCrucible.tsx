@@ -157,7 +157,7 @@ export function DeckPreviewDialog({ source, onClose }: { source: NonNullable<Ret
         ))}
         {m && !m.instance && (
           <>
-            <p className="deck-line" data-testid="deck-crucible-warning"><Word tone="warn">!</Word> {t("crucible.preview.warning")}</p>
+            <p className="deck-line" data-testid="deck-crucible-warning"><Word tone="warn">{t("crucible.preview.warning")}</Word></p>
             {m.trusted ? <p className="deck-note">{t("crucible.preview.trustedAlready", { name: m.creator?.name ?? "" })}</p> : (
               <>
                 <Row id="crucible-trust" title={m.creator ? t("crucible.preview.trust", { name: m.creator.name }) : t("crucible.preview.trustFile")} lit={trust}

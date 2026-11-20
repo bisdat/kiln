@@ -13,7 +13,7 @@ import { Button, ProgressBar, Spinner, TextInput, pickPaths, runTask, toast, use
 import { create } from "zustand";
 import MARK from "../assets/crucible/mark-64.png";
 import { useCommunityUi } from "../community/state";
-import { anyChange, countsOf, crucibleTarget, codeInput } from "./code";
+import { anyChange, codeInput, codeOf, countsOf, crucibleTarget } from "./code";
 import { openCrucible } from "./Preview";
 import { copyText, crk, crucibleError, readClipboard, shortLink, useCrucibleStatus, useCrucibleUi, useShareRun, useShared } from "./state";
 
@@ -237,7 +237,7 @@ function CodePanel({ onDone }: { onDone: () => void }) {
   const typed = useRef(false);
   // the clipboard's code (or link) is filled in when it holds one
   useEffect(() => {
-    void readClipboard().then((c) => { const x = crucibleTarget(c); if (x && !typed.current) setValue(x); });
+    void readClipboard().then((c) => { const x = crucibleTarget(c); if (x && !typed.current) setValue(codeOf(x) ?? x); });
   }, []);
   const open = async () => {
     const target = crucibleTarget(value);

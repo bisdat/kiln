@@ -2568,8 +2568,9 @@ export interface PackInstance {
   format: 1; pack: string; name: string; version: string; sha256: string; url?: string;
   crucible?: CrucibleRef; optional: Record<string, boolean>; installed: string; updated?: string; previous?: string;
 }
-export interface PackPlanMod { kind: ModKind; id: string; version: string; enabled: boolean }
-export interface PackPlanUpdate { kind: ModKind; id: string; from: string; to: string }
+/** `name`: (UI ask, FROM-UI.md) the index's mod name: a mod the update adds is not in the Library yet. */
+export interface PackPlanMod { kind: ModKind; id: string; version: string; enabled: boolean; name?: string }
+export interface PackPlanUpdate { kind: ModKind; id: string; from: string; to: string; name?: string }
 export interface PackKeyConflict { key: string; base: unknown; pack: unknown; mine: unknown }
 export interface PackFileMerge { path: string; side: PackSide; mode: PackMergeMode; taken: string[]; kept: string[]; conflicts: PackKeyConflict[] }
 export interface PackUpdatePlan {

@@ -65,7 +65,7 @@ export function UpdateModal({ profileId }: { profileId: ProfileId }) {
   useEffect(() => { if (q.data && !plan) setPlan(q.data.plan); }, [q.data, plan]);
   const name = profiles.data?.find((p) => p.id === profileId)?.name ?? profileId;
   const active = qc.getQueryData<api.Activation | null>(qk.active(game?.id ?? ""))?.profileId === profileId;
-  const modName = (id: string) => lib.data?.find((e) => e.id === id)?.name ?? id;
+  const modName = (id: string, name?: string) => name ?? lib.data?.find((e) => e.id === id)?.name ?? id;
   const conflicts = plan?.files.flatMap((f) => f.conflicts.map((c) => ({ file: f.path, ...c, key2: f.path + "#" + c.key }))) ?? [];
   const keptKeys = plan?.files.reduce((s, f) => s + f.kept.length, 0) ?? 0;
   const yours = plan ? plan.mods.yours.length + plan.mods.keptSwitches.length : 0;
@@ -106,9 +106,9 @@ export function UpdateModal({ profileId }: { profileId: ProfileId }) {
             <>
               {plan.changes && <p className="kcr-p kcr-quote">{plan.changes}</p>}
               <ul className="kcr-diff" data-testid="crucible-diff">
-                {plan.mods.added.map((m) => <li key={"a" + m.id} className="add"><b>+</b> {modName(m.id)} {m.version}</li>)}
-                {plan.mods.updated.map((m) => <li key={"u" + m.id} className="upd"><b>~</b> {modName(m.id)} {m.from} → {m.to}</li>)}
-                {plan.mods.removed.map((m) => <li key={"r" + m.id} className="rem"><b>−</b> {t("crucible.update.removedKept", { name: modName(m.id) })}</li>)}
+                {plan.mods.added.map((m) => <li key={"a" + m.id} className="add"><b>+</b> {modName(m.id, m.name)} {m.version}</li>)}
+                {plan.mods.updated.map((m) => <li key={"u" + m.id} className="upd"><b>~</b> {modName(m.id, m.name)} {m.from} → {m.to}</li>)}
+                {plan.mods.removed.map((m) => <li key={"r" + m.id} className="rem"><b>−</b> {t("crucible.update.removedKept", { name: modName(m.id, m.name) })}</li>)}
                 {plan.layer.changed && <li className="upd"><b>~</b> {t("crucible.update.packData")}</li>}
               </ul>
               {(keptKeys > 0 || yours > 0) && <p className="kcr-p k-muted" data-testid="crucible-kept">{t("crucible.update.kept", { settings: keptKeys, mods: yours })}</p>}
