@@ -171,6 +171,19 @@ export interface RenderInfo {
   marker: boolean;
   /** Who set the marker, why and when. */
   markerWhy?: string;
+  /** X11 (XWayland) in this start: only on a Wayland session with XWayland (render.rs, 0.2.0-dev.30). */
+  x11?: X11Info;
+}
+export interface X11Info {
+  /** This start draws through X11 (the launcher set GDK_BACKEND=x11). */
+  on: boolean;
+  /** Why: GTK's default (Wayland), the user's GDK_BACKEND, software mode, Settings off, the switch's restart, the
+   *  marker of a start where X11 helped, X11 tried without help. */
+  why: "default" | "yours" | "unavailable" | "software" | "off" | "restart" | "marker" | "tried";
+  /** Settings' switch: the launcher may switch to X11 by itself. */
+  auto: boolean;
+  /** The user's own GDK_BACKEND. */
+  yours?: string;
 }
 /** Where this launcher build comes from (src-tauri/src/distribution.rs, api/distribution.ts). */
 export type Distribution = "direct" | "nexus";
@@ -1345,6 +1358,8 @@ export const appStarted = () => call<null>("app_started");
 export const appRenderReport = (report: PageRender) => call<null>("app_render_report", { report });
 /** Settings, "Draw the launcher without the GPU": sets or clears the marker for the next start (Linux). */
 export const appRenderSet = (software: boolean) => call<RenderInfo>("app_render_set", { software });
+/** Settings, "Switch to X11 when drawing is slow on Wayland": on lets the launcher switch by itself, off keeps Wayland (Linux). */
+export const appRenderX11Set = (on: boolean) => call<RenderInfo>("app_render_x11_set", { on });
 /** Settings, "WebKit's sandbox": on removes the marker, off writes it, for the next start (Linux). */
 export const appSandboxSet = (on: boolean) => call<SandboxInfo>("app_sandbox_set", { on });
 /** Settings, "Kiln Launcher in the app menu" (Linux AppImage): writes or removes the entry and its icons. */
@@ -2300,7 +2315,7 @@ export const COMMANDS = [
   "report_save", "report_summary", "report_preview",
   "data_folder_get", "data_folder_size", "data_folder_check", "data_folder_move", "data_folder_use", "data_folder_reset",
   "data_folder_notice_ack", "data_folder_restart",
-  "app_started", "app_render_set", "app_render_report",
+  "app_started", "app_render_set", "app_render_x11_set", "app_render_report",
   "updates_check",
   "app_desktop_set",
   "app_locales",

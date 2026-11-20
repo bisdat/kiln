@@ -2793,7 +2793,16 @@
       "noGpuEnv": "Este início desenha sem a GPU: KILN_LAUNCHER_RENDER está definido e vale mais que esta chave.",
       "gpuEnv": "Este início desenha com a GPU: KILN_LAUNCHER_RENDER está definido e vale mais que esta chave.",
       "noGpuArg": "Este início desenha sem a GPU: {flag} foi passado e vale mais que esta chave.",
-      "gpuArg": "Este início desenha com a GPU: {flag} foi passado e vale mais que esta chave."
+      "gpuArg": "Este início desenha com a GPU: {flag} foi passado e vale mais que esta chave.",
+      "x11": "Mudar para X11 quando o desenho estiver lento no Wayland",
+      "x11Intro": "No Wayland, quando o WebKit não consegue usar a GPU, o launcher inicia mais uma vez pelo X11 (XWayland), o que costuma acabar com o travamento. Vale a partir do próximo início.",
+      "x11Wayland": "Este início desenha no Wayland.",
+      "x11On": "Este início desenha pelo X11.",
+      "x11Tried": "O X11 foi testado e não ajudou, então o launcher fica no Wayland. Desligue e ligue isto de novo para tentar outra vez.",
+      "x11Software": "Não é usado enquanto o launcher desenha sem a GPU.",
+      "x11Yours": "Seu GDK_BACKEND={value} decide.",
+      "x11NextOn": "O launcher pode mudar para X11 sozinho",
+      "x11NextOff": "O próximo início fica no Wayland"
     },
     "dev": {
       "mock": "Desenvolvedor: dados de exemplo",

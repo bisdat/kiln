@@ -2793,7 +2793,16 @@
       "noGpuEnv": "Este inicio dibuja sin la GPU: KILN_LAUNCHER_RENDER está definida y tiene prioridad sobre este interruptor.",
       "gpuEnv": "Este inicio dibuja con la GPU: KILN_LAUNCHER_RENDER está definida y tiene prioridad sobre este interruptor.",
       "noGpuArg": "Este inicio dibuja sin la GPU: se indicó {flag} y tiene prioridad sobre este interruptor.",
-      "gpuArg": "Este inicio dibuja con la GPU: se indicó {flag} y tiene prioridad sobre este interruptor."
+      "gpuArg": "Este inicio dibuja con la GPU: se indicó {flag} y tiene prioridad sobre este interruptor.",
+      "x11": "Cambiar a X11 cuando el dibujo vaya lento en Wayland",
+      "x11Intro": "En Wayland, cuando WebKit no puede usar la GPU, el launcher se inicia una vez más a través de X11 (XWayland), lo que a menudo acaba con el retraso. Se aplica en el próximo inicio.",
+      "x11Wayland": "Este inicio dibuja en Wayland.",
+      "x11On": "Este inicio dibuja a través de X11.",
+      "x11Tried": "Se probó X11 y no ayudó, así que el launcher se queda en Wayland. Desactiva y vuelve a activar esto para intentarlo otra vez.",
+      "x11Software": "No se usa mientras el launcher dibuja sin la GPU.",
+      "x11Yours": "Tu GDK_BACKEND={value} decide.",
+      "x11NextOn": "El launcher puede cambiar a X11 por sí mismo",
+      "x11NextOff": "El próximo inicio se queda en Wayland"
     },
     "dev": {
       "mock": "Desarrollo: datos de ejemplo de respaldo",

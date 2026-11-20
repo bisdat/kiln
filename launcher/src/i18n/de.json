@@ -2793,7 +2793,16 @@
       "noGpuEnv": "Dieser Start zeichnet ohne GPU: KILN_LAUNCHER_RENDER ist gesetzt und hat Vorrang vor diesem Schalter.",
       "gpuEnv": "Dieser Start zeichnet mit GPU: KILN_LAUNCHER_RENDER ist gesetzt und hat Vorrang vor diesem Schalter.",
       "noGpuArg": "Dieser Start zeichnet ohne GPU: {flag} wurde angegeben und hat Vorrang vor diesem Schalter.",
-      "gpuArg": "Dieser Start zeichnet mit GPU: {flag} wurde angegeben und hat Vorrang vor diesem Schalter."
+      "gpuArg": "Dieser Start zeichnet mit GPU: {flag} wurde angegeben und hat Vorrang vor diesem Schalter.",
+      "x11": "Zu X11 wechseln, wenn das Zeichnen unter Wayland langsam ist",
+      "x11Intro": "Wenn WebKit unter Wayland die GPU nicht nutzen kann, startet der Launcher noch einmal über X11 (XWayland), was das Ruckeln oft beendet. Gilt ab dem nächsten Start.",
+      "x11Wayland": "Dieser Start zeichnet unter Wayland.",
+      "x11On": "Dieser Start zeichnet über X11.",
+      "x11Tried": "X11 wurde versucht und hat nicht geholfen, daher bleibt der Launcher bei Wayland. Schalte das aus und wieder an, um es noch einmal zu versuchen.",
+      "x11Software": "Wird nicht genutzt, solange der Launcher ohne GPU zeichnet.",
+      "x11Yours": "Dein GDK_BACKEND={value} entscheidet.",
+      "x11NextOn": "Der Launcher darf von selbst zu X11 wechseln",
+      "x11NextOff": "Der nächste Start bleibt bei Wayland"
     },
     "dev": {
       "mock": "Entwickler: Beispieldaten als Ersatz",

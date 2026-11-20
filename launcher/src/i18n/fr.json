@@ -2793,7 +2793,16 @@
       "noGpuEnv": "Ce démarrage affiche sans le GPU : KILN_LAUNCHER_RENDER est défini et l'emporte sur cet interrupteur.",
       "gpuEnv": "Ce démarrage affiche avec le GPU : KILN_LAUNCHER_RENDER est défini et l'emporte sur cet interrupteur.",
       "noGpuArg": "Ce démarrage affiche sans le GPU : {flag} a été donné et l'emporte sur cet interrupteur.",
-      "gpuArg": "Ce démarrage affiche avec le GPU : {flag} a été donné et l'emporte sur cet interrupteur."
+      "gpuArg": "Ce démarrage affiche avec le GPU : {flag} a été donné et l'emporte sur cet interrupteur.",
+      "x11": "Passer à X11 quand l'affichage est lent sous Wayland",
+      "x11Intro": "Sous Wayland, quand WebKit ne peut pas utiliser le GPU, le launcher redémarre une fois via X11 (XWayland), ce qui supprime souvent les ralentissements. S'applique au prochain démarrage.",
+      "x11Wayland": "Ce démarrage dessine sous Wayland.",
+      "x11On": "Ce démarrage dessine via X11.",
+      "x11Tried": "X11 a été essayé sans résultat, le launcher reste donc sous Wayland. Désactive puis réactive cette option pour réessayer.",
+      "x11Software": "Inutilisé tant que le launcher dessine sans le GPU.",
+      "x11Yours": "Ton GDK_BACKEND={value} décide.",
+      "x11NextOn": "Le launcher peut passer à X11 tout seul",
+      "x11NextOff": "Le prochain démarrage reste sous Wayland"
     },
     "dev": {
       "mock": "Développeur : données factices de secours",

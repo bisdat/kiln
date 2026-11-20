@@ -24,6 +24,11 @@
 //! - the user's own [`DMABUF_VAR`] always wins; software mode keeps it off as before; `--dmabuf` / `--no-dmabuf` and
 //!   `KILN_LAUNCHER_DMABUF=on|off` win over the markers; Settings' switch turned off clears the sticky marker too;
 //! - a [`DMABUF_VAR`] the launcher set is named in [`SET_BY_US`] like software mode's variables: host programs never get it.
+//!
+//! X11 on Wayland (0.2.0-dev.30): where WebKit turns hardware acceleration off by itself on a Wayland session with
+//! XWayland, one restart through X11 ([`X11_VAR`]`=x11`, [`X11_RESTARTED`]); the outcome is remembered
+//! ([`x11_marker`] / [`x11_no_help`]), a page late through X11 goes back to Wayland first, the user's own
+//! `GDK_BACKEND` always wins, Settings can turn it off ([`x11_auto_off`]); never a loop.
 //! docs/kiln/launcher/app.md, "Drawing without the GPU".
 
 use kiln_manage::paths::DataDirs;
@@ -219,9 +224,108 @@ pub fn dmabuf_crash_why(pending: &Path) -> String {
     }
 }
 
+/// GTK's own choice of display server: `x11` on a Wayland session draws through XWayland.
+pub const X11_VAR: &str = "GDK_BACKEND";
+/// Set only for a start the launcher made itself: "1", the switch to X11 (that start draws through XWayland even when
+/// its marker could not be written yet); "0", X11 was tried in this chain of restarts and did not help (no switch again).
+pub(crate) const X11_RESTARTED: &str = "KILN_LAUNCHER_X11_RESTARTED";
+
+/// Why this start draws through X11 (XWayland) or not (0.2.0-dev.30, Oryx593 on KDE Wayland + NVIDIA: WebKit turned
+/// hardware acceleration off by itself on Wayland, and with GDK_BACKEND=x11 the lag was gone).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum X11Why {
+    /// Nothing asked: GTK's default (Wayland); the launcher may switch once if WebKit composites nothing.
+    Default,
+    /// The user's own `GDK_BACKEND` (any value): theirs, never changed.
+    Yours,
+    /// Not a Wayland session with XWayland (`WAYLAND_DISPLAY` and `DISPLAY` both set): nothing to switch to.
+    Unavailable,
+    /// Software mode: draws without the GPU anyway, X11 would change nothing.
+    Software,
+    /// Settings: the automatic switch is off.
+    Off,
+    /// This process is the switch's restart (`KILN_LAUNCHER_X11_RESTARTED=1`).
+    Restart,
+    /// The marker of an earlier start where X11 helped (`state/x11.json`).
+    Marker,
+    /// X11 was tried and did not help (`state/x11-no-help.json`, or `KILN_LAUNCHER_X11_RESTARTED=0`).
+    Tried,
+}
+
+/// X11 in this start: `on` means the launcher sets `GDK_BACKEND=x11` itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct X11 {
+    pub on: bool,
+    pub why: X11Why,
+}
+
+/// X11 for this start, before GTK. Precedence: the user's own `GDK_BACKEND` (`yours`, after the launcher's own
+/// variables were taken back), no Wayland session with XWayland, software mode, the restart that said X11 did not help
+/// (`restarted` "0"), Settings' switch off, the switch's restart ("1"), the marker that X11 did not help, the marker
+/// that it did, then GTK's default.
+#[allow(clippy::too_many_arguments)]
+pub fn decide_x11(yours: Option<&str>, wayland: bool, display: bool, software: bool, off: bool, restarted: Option<&str>,
+    marker: bool, no_help: bool) -> X11 {
+    let why = match restarted {
+        _ if yours.is_some() => X11Why::Yours,
+        _ if !wayland || !display => X11Why::Unavailable,
+        _ if software => X11Why::Software,
+        Some("0") => X11Why::Tried,
+        _ if off => X11Why::Off,
+        Some("1") => X11Why::Restart,
+        _ if no_help => X11Why::Tried,
+        _ if marker => X11Why::Marker,
+        _ => X11Why::Default,
+    };
+    X11 { on: matches!(why, X11Why::Restart | X11Why::Marker), why }
+}
+
+/// What a start does about X11 once it knows WebKit's hardware acceleration (the webview's policy, [`window_created`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum X11Step {
+    /// Wayland, and WebKit composites nothing: start again once through X11.
+    Switch,
+    /// X11, and WebKit composites: remember it (`state/x11.json`), later starts go straight to X11.
+    Keep,
+    /// X11, and WebKit still composites nothing: X11 did not help; later starts stay on Wayland (no restart now: this
+    /// start is no worse than the Wayland one was).
+    NoHelp,
+    /// Nothing to do.
+    Nothing,
+}
+
+/// `off`: WebKit turned hardware acceleration off by itself. `by_vars`: a variable explains it
+/// (`WEBKIT_DISABLE_COMPOSITING_MODE` / `WEBKIT_DISABLE_DMABUF_RENDERER`): X11 would not change that, so no switch.
+pub fn x11_step(x: &X11, off: bool, by_vars: bool) -> X11Step {
+    match x.why {
+        X11Why::Default if off && !by_vars => X11Step::Switch,
+        X11Why::Restart | X11Why::Marker if off => X11Step::NoHelp,
+        X11Why::Restart if !off => X11Step::Keep,
+        _ => X11Step::Nothing,
+    }
+}
+
+/// `<data>/state/x11.json`: X11 helped in an earlier start; a Wayland start goes straight to X11.
+pub fn x11_marker(d: &DataDirs) -> PathBuf {
+    d.root.join("state").join("x11.json")
+}
+
+/// `<data>/state/x11-no-help.json`: X11 was tried and did not help; no automatic switch while it is there.
+pub fn x11_no_help(d: &DataDirs) -> PathBuf {
+    d.root.join("state").join("x11-no-help.json")
+}
+
+/// `<data>/state/x11-auto-off.json`: Settings turned the automatic switch off.
+pub fn x11_auto_off(d: &DataDirs) -> PathBuf {
+    d.root.join("state").join("x11-auto-off.json")
+}
+
 /// What a start does when the page has not said it started in time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Late {
+    /// This start draws through X11 (the launcher's switch): X11 made it worse; start again on Wayland, X11 marked as no help.
+    NoX11,
     /// Write the DMA-BUF marker and start again with the GPU, without the DMA-BUF renderer.
     NoDmabuf,
     /// Write the marker and start again without the GPU.
@@ -268,6 +372,12 @@ pub fn when_late(c: &Choice, d: &Dmabuf) -> Late {
     }
 }
 
+/// [`when_late`] with X11 first: a start the launcher switched to X11 goes back to Wayland before any other step (the
+/// newest change goes first); that start then takes the steps [`when_late`] says, never X11 again.
+pub fn when_late_x11(c: &Choice, d: &Dmabuf, x: &X11) -> Late {
+    if x.on { Late::NoX11 } else { when_late(c, d) }
+}
+
 /// What the fallback starts: the AppImage file when `$APPIMAGE` is set (the running binary sits in the AppImage's
 /// mount, which goes away with this process), else this executable. `true`: an AppImage.
 pub fn restart_target(appimage: Option<OsString>, exe: Option<PathBuf>) -> Option<(PathBuf, bool)> {
@@ -295,6 +405,14 @@ impl Relaunch {
     pub fn dmabuf_fallback() -> Relaunch {
         Relaunch { set: vec![(DMABUF_RESTARTED, "1".into())], ..Default::default() }
     }
+    /// The switch to X11: the same arguments, [`X11_RESTARTED`]=1 (the new start sets `GDK_BACKEND=x11` itself).
+    pub fn x11_switch() -> Relaunch {
+        Relaunch { set: vec![(X11_RESTARTED, "1".into())], ..Default::default() }
+    }
+    /// Back from X11 to Wayland: [`X11_RESTARTED`]=0 (X11 is not tried again in this chain), without our `GDK_BACKEND`.
+    pub fn x11_back() -> Relaunch {
+        Relaunch { unset: vec![X11_VAR], set: vec![(X11_RESTARTED, "0".into())], ..Default::default() }
+    }
     /// The player clicked "Start without the GPU" (crate::sandbox's message): their click wins over a GPU they asked
     /// for with an argument or `KILN_LAUNCHER_RENDER`, for this restart.
     pub fn software_by_click() -> Relaunch {
@@ -308,6 +426,11 @@ impl Relaunch {
         }
         if dmabuf().is_some_and(|d| d.why == DmabufWhy::Restart) {
             self.add(DMABUF_RESTARTED, "1");
+        }
+        match x11().map(|x| x.why) {
+            Some(X11Why::Restart) => self.add(X11_RESTARTED, "1"),
+            Some(X11Why::Tried) => self.add(X11_RESTARTED, "0"),
+            _ => {}
         }
         crate::sandbox::keep(&mut self);
         self
@@ -346,11 +469,11 @@ pub fn software_env(get: impl Fn(&str) -> Option<OsString>) -> Vec<(&'static str
     SOFTWARE_ENV.iter().copied().filter(|(k, _)| get(k).is_none()).collect()
 }
 
-/// The names in a [`SET_BY_US`] value that are ours to take back (only [`SOFTWARE_ENV`] names and [`DMABUF_VAR`],
-/// never anything else).
+/// The names in a [`SET_BY_US`] value that are ours to take back (only [`SOFTWARE_ENV`] names, [`DMABUF_VAR`] and
+/// [`X11_VAR`], never anything else).
 pub fn set_by_us(list: Option<&str>) -> Vec<&'static str> {
     let list = list.unwrap_or_default();
-    SOFTWARE_ENV.iter().map(|(k, _)| *k).chain([DMABUF_VAR]).filter(|k| list.split(',').any(|x| x.trim() == *k)).collect()
+    SOFTWARE_ENV.iter().map(|(k, _)| *k).chain([DMABUF_VAR, X11_VAR]).filter(|k| list.split(',').any(|x| x.trim() == *k)).collect()
 }
 
 // ---------------------------------------------------------------- the marker
@@ -481,6 +604,19 @@ impl Default for Watch {
 static WATCH: Watch = Watch::new();
 static CHOICE: OnceLock<Choice> = OnceLock::new();
 static DMABUF: OnceLock<Dmabuf> = OnceLock::new();
+static X11_CHOICE: OnceLock<X11> = OnceLock::new();
+/// What X11 taught this start, for the data folder: written once the beta copy's gate is open (`.0`), whichever
+/// comes first ([`x11_note`]).
+static X11_NOTE: Mutex<(bool, Option<X11Note>)> = Mutex::new((false, None));
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+enum X11Note {
+    /// X11 helped: `state/x11.json`, the no-help marker goes.
+    Helped,
+    /// X11 did not help (the sentence): `state/x11-no-help.json`, the X11 marker goes.
+    NoHelp(String),
+}
 /// The pending marker this start wrote (a guarded start, [`watch`]); removed at most once.
 static PENDING: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// A pending marker an earlier start left: its path and the sticky marker's sentence, for [`after_gate`].
@@ -496,6 +632,38 @@ pub fn dmabuf() -> Option<&'static Dmabuf> {
     DMABUF.get()
 }
 
+/// This start's X11 choice (Linux, after [`prepare`]).
+pub fn x11() -> Option<&'static X11> {
+    X11_CHOICE.get()
+}
+
+/// Keeps `note` for the data folder and writes the newest one once the gate is open (`gate`: it opened now).
+fn x11_note(note: Option<X11Note>, gate: bool) {
+    let mut g = X11_NOTE.lock().unwrap_or_else(|e| e.into_inner());
+    g.0 |= gate;
+    if note.is_some() {
+        g.1 = note;
+    }
+    if !g.0 {
+        return;
+    }
+    let Some(note) = g.1.take() else { return };
+    drop(g);
+    let Ok(dirs) = crate::state::dirs() else { return };
+    let (write, clear, why) = match note {
+        X11Note::Helped => (x11_marker(&dirs), x11_no_help(&dirs),
+            "The launcher turned this on by itself: WebKit drew without the GPU on Wayland, and with it through X11 (XWayland)".to_string()),
+        X11Note::NoHelp(why) => (x11_no_help(&dirs), x11_marker(&dirs), why),
+    };
+    match write_marker_file(&write, &why) {
+        Ok(()) => log(&format!("X11: wrote {} ({why})", write.display())),
+        Err(e) => log(&format!("X11: could not write {}: {}", write.display(), e.message)),
+    }
+    if let Err(e) = clear_marker_file(&clear) {
+        log(&format!("X11: could not remove {}: {}", clear.display(), e.message));
+    }
+}
+
 /// Removes the pending marker this start wrote (the page started and settled, a clean exit, a restart).
 fn clear_pending(when: &str) {
     let Some(p) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
@@ -509,6 +677,7 @@ fn clear_pending(when: &str) {
 /// earlier start left (then that one goes), or for this start's watchdog restart when its marker could not be written
 /// then. Before the gate a start only reads the data folder (and writes its own pending marker).
 pub fn after_gate() {
+    x11_note(None, true);
     let Some(d) = dmabuf() else { return };
     let Ok(dirs) = crate::state::dirs() else { return };
     let off = dmabuf_marker(&dirs);
@@ -737,6 +906,23 @@ pub struct RenderInfo {
     /// WebKit's DMA-BUF renderer in this start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dmabuf: Option<DmabufInfo>,
+    /// X11 (XWayland) in this start; only on a Wayland session with XWayland.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x11: Option<X11Info>,
+}
+
+/// `app_info.render.x11`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct X11Info {
+    /// This start draws through X11 (the launcher set `GDK_BACKEND=x11`).
+    pub on: bool,
+    pub why: X11Why,
+    /// Settings' switch: the launcher may switch to X11 by itself (no `state/x11-auto-off.json`).
+    pub auto: bool,
+    /// The user's own `GDK_BACKEND`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yours: Option<String>,
 }
 
 /// `app_info.render.dmabuf`.
@@ -766,7 +952,31 @@ pub fn info() -> Option<RenderInfo> {
             marker: d.as_ref().is_some_and(|d| dmabuf_marker(d).is_file()),
             marker_why: d.as_ref().and_then(|d| marker_file_why(&dmabuf_marker(d))),
         }),
+        x11: x11().filter(|x| x.why != X11Why::Unavailable).map(|x| X11Info {
+            on: x.on,
+            why: x.why,
+            auto: !d.as_ref().is_some_and(|d| x11_auto_off(d).is_file()),
+            yours: if x.why == X11Why::Yours { std::env::var(X11_VAR).ok() } else { None },
+        }),
     })
+}
+
+/// Settings, "Switch to X11 when drawing is slow on Wayland": off writes `state/x11-auto-off.json` and removes the X11
+/// marker (the next start stays on Wayland); on removes it and the no-help marker (X11 may be tried again).
+pub fn set_x11_auto(on: bool) -> Result<RenderInfo, Error> {
+    if choice().is_none() {
+        return Err(Error::new(kiln_manage::ErrorCode::Unsupported, "Only the Linux launcher has this."));
+    }
+    let d = crate::state::dirs()?;
+    if on {
+        clear_marker_file(&x11_auto_off(&d))?;
+        clear_marker_file(&x11_no_help(&d))?;
+    } else {
+        write_marker_file(&x11_auto_off(&d), "Turned off in Settings")?;
+        clear_marker_file(&x11_marker(&d))?;
+    }
+    log(&format!("Settings: the automatic switch to X11 is {}", if on { "on (X11 may be tried again)" } else { "off (the next start stays on Wayland)" }));
+    info().ok_or_else(|| Error::new(kiln_manage::ErrorCode::Internal, "no render state"))
 }
 
 /// Settings, "Draw the launcher without the GPU": the marker for the next start.
@@ -831,6 +1041,21 @@ pub fn says_dmabuf(d: &Dmabuf) -> String {
     format!("WebKit's DMA-BUF renderer {}: {why}", if d.on { "on" } else { "off" })
 }
 
+/// "X11 (XWayland) on: switched once after ...", for the logs.
+pub fn says_x11(x: &X11) -> String {
+    let why = match x.why {
+        X11Why::Default => "the default (Wayland); the launcher switches once if WebKit draws without the GPU here",
+        X11Why::Yours => "your GDK_BACKEND decides",
+        X11Why::Unavailable => "not a Wayland session with XWayland",
+        X11Why::Software => "software mode",
+        X11Why::Off => "the automatic switch is off in Settings",
+        X11Why::Restart => "restarted because WebKit drew without the GPU on Wayland",
+        X11Why::Marker => "X11 helped in an earlier start",
+        X11Why::Tried => "X11 was tried and did not help",
+    };
+    format!("X11 (XWayland) {}: {why}", if x.on { "on, GDK_BACKEND=x11" } else { "off" })
+}
+
 /// The support report's line: [`says_dmabuf`] and the sticky marker's sentence when there is one.
 pub fn dmabuf_report() -> Option<String> {
     let d = dmabuf()?;
@@ -851,6 +1076,7 @@ pub fn prepare(args: &[String]) {
     let ours = set_by_us(std::env::var(SET_BY_US).ok().as_deref());
     let restarted = std::env::var_os(RESTARTED).is_some();
     let dmabuf_restarted = std::env::var_os(DMABUF_RESTARTED).is_some();
+    let x11_restarted = std::env::var(X11_RESTARTED).ok();
     // SAFETY: main, before any thread exists (the callers' contract).
     unsafe {
         for k in &ours {
@@ -859,6 +1085,7 @@ pub fn prepare(args: &[String]) {
         std::env::remove_var(SET_BY_US);
         std::env::remove_var(RESTARTED);
         std::env::remove_var(DMABUF_RESTARTED);
+        std::env::remove_var(X11_RESTARTED);
     }
     // read only, before the beta copy's gate opens (state::dirs() refuses until then: 0.2.0-dev.29 to 29.17 never saw the marker)
     let dirs = crate::folder::found_dirs();
@@ -887,6 +1114,20 @@ pub fn prepare(args: &[String]) {
         // SAFETY: as above.
         unsafe { std::env::set_var(DMABUF_VAR, "1") };
         set.push(DMABUF_VAR);
+    }
+    // X11 (XWayland) on a Wayland session: the user's own GDK_BACKEND (ours were taken back above) always wins
+    let present = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
+    let has = |f: fn(&DataDirs) -> PathBuf| dirs.as_ref().is_some_and(|dd| f(dd).is_file());
+    let x = decide_x11(std::env::var(X11_VAR).ok().as_deref(), present("WAYLAND_DISPLAY"), present("DISPLAY"), c.mode == Mode::Software,
+        has(x11_auto_off), x11_restarted.as_deref(), has(x11_marker), has(x11_no_help));
+    if x.on {
+        // SAFETY: as above.
+        unsafe { std::env::set_var(X11_VAR, "x11") };
+        set.push(X11_VAR);
+    }
+    if x.why == X11Why::Tried && x11_restarted.as_deref() == Some("0") && !has(x11_no_help) {
+        // the start before went back from X11 (its page did not start in time there) and could not write this yet
+        x11_note(Some(X11Note::NoHelp("The launcher turned this on by itself: the page did not start in time through X11 (XWayland)".into())), false);
     }
     if !set.is_empty() {
         // SAFETY: as above.
@@ -947,8 +1188,10 @@ pub fn prepare(args: &[String]) {
     } else {
         log(&line);
     }
+    log(&says_x11(&x));
     let _ = CHOICE.set(c);
     let _ = DMABUF.set(d);
+    let _ = X11_CHOICE.set(x);
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -972,8 +1215,9 @@ pub fn watch() {
             Err(e) => log(&format!("could not write the DMA-BUF start guard {}: {}", p.display(), e.message)),
         }
     }
+    let x = x11().cloned().unwrap_or(X11 { on: false, why: X11Why::Unavailable });
     let begun = Instant::now();
-    std::thread::Builder::new().name("kiln-render-watch".into()).spawn(move || watchdog(c, d, begun)).ok();
+    std::thread::Builder::new().name("kiln-render-watch".into()).spawn(move || watchdog(c, d, x, begun)).ok();
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -981,7 +1225,7 @@ pub fn watch() {}
 
 /// The watchdog: the page's ready call in time, or the fallback.
 #[cfg(target_os = "linux")]
-fn watchdog(c: Choice, d: Dmabuf, begun: Instant) {
+fn watchdog(c: Choice, d: Dmabuf, x: X11, begun: Instant) {
     let window = match WATCH.wait(begun, TIMEOUT, NO_WINDOW_TIMEOUT) {
         Seen::Started(after) => {
             log(&format!("the page started {} ms after the window was made ({:?}, dmabuf {})", after.as_millis(), c.mode,
@@ -995,7 +1239,18 @@ fn watchdog(c: Choice, d: Dmabuf, begun: Instant) {
         Seen::Late { window } => window,
     };
     let what = if window { format!("the page did not start within {} s of the window", TIMEOUT.as_secs()) } else { format!("no window within {} s", NO_WINDOW_TIMEOUT.as_secs()) };
-    match when_late(&c, &d) {
+    match when_late_x11(&c, &d, &x) {
+        Late::NoX11 => {
+            let why = format!("The launcher turned this on by itself: {what} through X11 (XWayland)");
+            log(&format!("X11: {what} through X11 ({}); X11 did not help: starting again on Wayland, X11 is not tried again", says_x11(&x)));
+            eprintln!("Kiln Launcher: {what} through X11; starting again on Wayland");
+            // written now when the gate is open; else the restart's variable says so and the next start writes it
+            x11_note(Some(X11Note::NoHelp(why)), false);
+            let err = restart(&Relaunch::x11_back().keeping());
+            log(&format!("PROBLEM: could not start again on Wayland: {err}"));
+            eprintln!("Kiln Launcher: {what}; could not start again on Wayland: {err}.");
+            crate::dialog::late(&c, &what, Some(&err.to_string()));
+        }
         Late::NoDmabuf => {
             let why = format!("The launcher turned this on by itself: {what} with WebKit's DMA-BUF renderer");
             let wrote = crate::state::dirs().and_then(|dd| write_marker_file(&dmabuf_marker(&dd), &why).map(|_| dmabuf_marker(&dd)));
@@ -1092,6 +1347,7 @@ pub fn window_created(app: &tauri::AppHandle) {
     }
     let Some(w) = app.get_webview_window("main") else { return };
     let software = c.mode == Mode::Software;
+    let x = x11().cloned();
     let _ = w.with_webview(move |pw| {
         use webkit2gtk::{HardwareAccelerationPolicy, SettingsExt, WebViewExt};
         let wv = pw.inner();
@@ -1105,8 +1361,11 @@ pub fn window_created(app: &tauri::AppHandle) {
             let policy = s.hardware_acceleration_policy();
             log(&format!("the webview's hardware acceleration policy: {policy:?}, WebGL: {}", if s.enables_webgl() { "on" } else { "off" }));
             // with the GPU, Never is WebKit's own answer: it composites nothing (inbox 94); say which check failed
-            let accel = if !software && policy == HardwareAccelerationPolicy::Never {
-                let env = |k: &str| std::env::var(k).ok();
+            let off = !software && policy == HardwareAccelerationPolicy::Never;
+            let env = |k: &str| std::env::var(k).ok();
+            // a variable that turns compositing off explains it whatever the display server: X11 would not help
+            let by_vars = [env("WEBKIT_DISABLE_COMPOSITING_MODE"), env(DMABUF_VAR)].iter().any(|v| v.as_deref().is_some_and(|v| v != "0"));
+            let accel = if off {
                 let reasons = webkit_off_reasons(env("WEBKIT_DISABLE_COMPOSITING_MODE").as_deref(), env(DMABUF_VAR).as_deref(),
                     egl_client_extensions().as_deref(), Some(gtk_gl_check()));
                 let why = if reasons.is_empty() { "none of the checks the launcher knows failed here".to_string() } else { reasons.join("; ") };
@@ -1117,6 +1376,9 @@ pub fn window_created(app: &tauri::AppHandle) {
                 format!("{policy:?}")
             };
             let _ = ACCEL.set(accel);
+            if let Some(x) = &x {
+                x11_after_policy(x, off, by_vars);
+            }
         }
         // what the web context itself says about its sandbox: crate::sandbox read the variables, this is WebKit's own
         // answer (a WebKitGTK that ran the sandbox by default would show here)
@@ -1134,6 +1396,35 @@ pub fn window_created(app: &tauri::AppHandle) {
 
 #[cfg(not(target_os = "linux"))]
 pub fn window_created(_app: &tauri::AppHandle) {}
+
+/// Linux, once the webview's acceleration policy is known (`off`: WebKit's own Never): the switch to X11, or what an X11
+/// start learned ([`x11_step`]); one line in launcher.log for each decision.
+#[cfg(target_os = "linux")]
+fn x11_after_policy(x: &X11, off: bool, by_vars: bool) {
+    match x11_step(x, off, by_vars) {
+        X11Step::Switch => {
+            log("X11: WebKit draws without the GPU on Wayland; starting again once through X11 (XWayland, GDK_BACKEND=x11). \
+                Settings > Appearance > \"Switch to X11 when drawing is slow on Wayland\" turns this off");
+            eprintln!("Kiln Launcher: WebKit draws without the GPU on Wayland; starting again once through X11 (GDK_BACKEND=x11)");
+            let err = restart(&Relaunch::x11_switch().keeping());
+            log(&format!("PROBLEM: could not start again through X11: {err}; this start goes on on Wayland"));
+        }
+        X11Step::Keep => {
+            log("X11: WebKit draws with the GPU through X11 (XWayland): later starts go straight to X11");
+            x11_note(Some(X11Note::Helped), false);
+        }
+        X11Step::NoHelp => {
+            log(&format!("X11: WebKit draws without the GPU through X11 too ({}): X11 did not help; this start goes on, later \
+                starts stay on Wayland", says_x11(x)));
+            x11_note(Some(X11Note::NoHelp("The launcher turned this on by itself: WebKit drew without the GPU through X11 (XWayland) too".into())), false);
+        }
+        X11Step::Nothing if off => {
+            let why = if by_vars && x.why == X11Why::Default { "a variable turns WebKit's compositing off, X11 would not change that".to_string() } else { says_x11(x) };
+            log(&format!("X11: not switching ({why})"));
+        }
+        X11Step::Nothing => {}
+    }
+}
 
 /// The first line of `/proc/driver/nvidia/version`, without the driver build's `(user@host)` (a module built on the
 /// player's machine names it; launcher.log goes into support reports).
@@ -1338,10 +1629,111 @@ mod tests {
 
     #[test]
     fn host_programs_know_every_variable_software_mode_sets() {
-        let names: Vec<&str> = SOFTWARE_ENV.iter().map(|(k, _)| *k).chain([DMABUF_VAR]).collect();
+        let names: Vec<&str> = SOFTWARE_ENV.iter().map(|(k, _)| *k).chain([DMABUF_VAR, X11_VAR]).collect();
         assert_eq!(names, kiln_manage::hostenv::RENDER_VARS, "kiln_manage::hostenv takes back exactly these");
     }
 
+
+    // ------------------------------------------------------------ X11 (XWayland) on Wayland (0.2.0-dev.30)
+
+    /// decide_x11 on a Wayland session with XWayland: (yours, software, off, restarted, marker, no_help).
+    fn x11_of(yours: Option<&str>, software: bool, off: bool, restarted: Option<&str>, marker: bool, no_help: bool) -> X11 {
+        decide_x11(yours, true, true, software, off, restarted, marker, no_help)
+    }
+
+    #[test]
+    fn wayland_without_acceleration_switches_to_x11_once() {
+        // a plain Wayland start: GTK's default, and WebKit's own Never there means one switch
+        let first = x11_of(None, false, false, None, false, false);
+        assert_eq!(first, X11 { on: false, why: X11Why::Default });
+        assert_eq!(x11_step(&first, true, false), X11Step::Switch);
+        assert_eq!(x11_step(&first, false, false), X11Step::Nothing, "WebKit composites: nothing to do");
+        // the switch's restart says which start it is: X11, without a marker yet
+        let r = Relaunch::x11_switch();
+        assert_eq!(r.set, vec![(X11_RESTARTED, "1".to_string())]);
+        let second = x11_of(None, false, false, Some("1"), false, false);
+        assert_eq!(second, X11 { on: true, why: X11Why::Restart });
+        // X11 helped: remembered; X11 did not: no help, and never a switch from an X11 start
+        assert_eq!(x11_step(&second, false, false), X11Step::Keep);
+        assert_eq!(x11_step(&second, true, false), X11Step::NoHelp);
+        assert_ne!(x11_step(&second, true, true), X11Step::Switch);
+    }
+
+    #[test]
+    fn a_users_own_gdk_backend_always_wins() {
+        for v in ["wayland", "x11", "", "wayland,x11"] {
+            for (restarted, marker) in [(None, false), (Some("1"), false), (None, true)] {
+                let x = x11_of(Some(v), false, false, restarted, marker, false);
+                assert_eq!(x, X11 { on: false, why: X11Why::Yours }, "{v:?} {restarted:?} {marker}");
+                assert_eq!(x11_step(&x, true, false), X11Step::Nothing);
+            }
+        }
+    }
+
+    #[test]
+    fn the_remembered_choice_goes_straight_to_x11() {
+        let x = x11_of(None, false, false, None, true, false);
+        assert_eq!(x, X11 { on: true, why: X11Why::Marker });
+        assert_eq!(x11_step(&x, false, false), X11Step::Nothing, "already remembered: nothing to write");
+        assert_eq!(x11_step(&x, true, false), X11Step::NoHelp, "X11 stopped helping: back to Wayland next time");
+        // Settings' switch off: the marker no longer counts (set_x11_auto removes it too)
+        assert_eq!(x11_of(None, false, true, None, true, false), X11 { on: false, why: X11Why::Off });
+        // no help beats an old X11 marker
+        assert_eq!(x11_of(None, false, false, None, true, true).why, X11Why::Tried);
+    }
+
+    #[test]
+    fn x11_never_loops() {
+        // X11 did not help (marker, or the way back's variable): Wayland, and the PROBLEM only reports
+        for (restarted, no_help) in [(None, true), (Some("0"), false), (Some("0"), true)] {
+            let x = x11_of(None, false, false, restarted, false, no_help);
+            assert_eq!(x, X11 { on: false, why: X11Why::Tried });
+            assert_eq!(x11_step(&x, true, false), X11Step::Nothing);
+        }
+        // the way back's "0" beats even a stale X11 marker and Settings
+        assert_eq!(x11_of(None, false, false, Some("0"), true, false).why, X11Why::Tried);
+        // a late page through X11 goes back to Wayland first, before the DMA-BUF and software steps; the way back is "0"
+        let gpu = c(Mode::Gpu, Why::Default);
+        let on = dm(true, DmabufWhy::Default);
+        let x11 = x11_of(None, false, false, Some("1"), false, false);
+        assert_eq!(when_late_x11(&gpu, &on, &x11), Late::NoX11);
+        let back = Relaunch::x11_back();
+        assert_eq!(back.set, vec![(X11_RESTARTED, "0".to_string())]);
+        assert_eq!(back.unset, vec![X11_VAR]);
+        let wayland = x11_of(None, false, false, Some("0"), false, false);
+        assert_eq!(when_late_x11(&gpu, &on, &wayland), Late::NoDmabuf, "then the steps as before");
+        assert_eq!(when_late_x11(&gpu, &dm(false, DmabufWhy::Restart), &wayland), Late::Restart);
+        // software mode never draws through X11
+        let sw = x11_of(None, true, false, Some("1"), true, false);
+        assert_eq!(sw, X11 { on: false, why: X11Why::Software });
+        assert_eq!(when_late_x11(&c(Mode::Software, Why::Restart), &dm(false, DmabufWhy::Software), &sw), Late::Report);
+        // the restart command carries the variable and leaves our GDK_BACKEND out
+        let a = [OsString::from("--deck")];
+        let vars = vec![(OsString::from(X11_VAR), OsString::from("x11")), (OsString::from(SET_BY_US), OsString::from(X11_VAR))];
+        let cmd = restart_command(Path::new("/games/Kiln.AppImage"), true, &a, vars.clone(), &back);
+        let envs: Vec<_> = cmd.get_envs().map(|(k, v)| (k.to_os_string(), v.map(|v| v.to_os_string()))).collect();
+        assert!(envs.contains(&(OsString::from(X11_VAR), None)), "{envs:?}");
+        assert!(envs.contains(&(OsString::from(X11_RESTARTED), Some(OsString::from("0")))), "{envs:?}");
+    }
+
+    #[test]
+    fn x11_needs_a_wayland_session_with_xwayland() {
+        assert_eq!(decide_x11(None, false, true, false, false, None, true, false).why, X11Why::Unavailable, "X11 session");
+        assert_eq!(decide_x11(None, true, false, false, false, Some("1"), true, false).why, X11Why::Unavailable, "no XWayland");
+        assert!(!decide_x11(None, true, false, false, false, Some("1"), true, false).on);
+    }
+
+    #[test]
+    fn a_variable_that_turns_compositing_off_is_no_reason_to_switch() {
+        let x = x11_of(None, false, false, None, false, false);
+        assert_eq!(x11_step(&x, true, true), X11Step::Nothing);
+    }
+
+    #[test]
+    fn x11_is_ours_to_take_back_only_when_we_named_it() {
+        assert_eq!(set_by_us(Some("WEBKIT_DISABLE_DMABUF_RENDERER,GDK_BACKEND")), vec![DMABUF_VAR, X11_VAR]);
+        assert!(set_by_us(Some("WEBKIT_DISABLE_DMABUF_RENDERER")).iter().all(|k| *k != X11_VAR), "the user's own stays");
+    }
 
     // ------------------------------------------------------------ WebKit's DMA-BUF renderer
 

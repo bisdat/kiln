@@ -2793,7 +2793,16 @@
       "noGpuEnv": "This start draws without the GPU: KILN_LAUNCHER_RENDER is set and wins over this switch.",
       "gpuEnv": "This start draws with the GPU: KILN_LAUNCHER_RENDER is set and wins over this switch.",
       "noGpuArg": "This start draws without the GPU: {flag} was given and wins over this switch.",
-      "gpuArg": "This start draws with the GPU: {flag} was given and wins over this switch."
+      "gpuArg": "This start draws with the GPU: {flag} was given and wins over this switch.",
+      "x11": "Switch to X11 when drawing is slow on Wayland",
+      "x11Intro": "On Wayland, when WebKit cannot use the GPU, the launcher starts once more through X11 (XWayland), which often ends the lag. Applies at the next start.",
+      "x11Wayland": "This start draws on Wayland.",
+      "x11On": "This start draws through X11.",
+      "x11Tried": "X11 was tried and did not help, so the launcher stays on Wayland. Turn this off and on again to try once more.",
+      "x11Software": "Not used while the launcher draws without the GPU.",
+      "x11Yours": "Your GDK_BACKEND={value} decides.",
+      "x11NextOn": "The launcher may switch to X11 by itself",
+      "x11NextOff": "The next start stays on Wayland"
     },
     "dev": {
       "mock": "Developer: mock data fallback",
