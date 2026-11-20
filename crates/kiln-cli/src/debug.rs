@@ -1402,6 +1402,9 @@ fn proxy(p: Planned) -> Result<i32> {
                     // nothing more to say to it, and netcoredbg can sit on a read until its stdin closes
                     adapter_in.lock().unwrap().take();
                     deadline = Some(Instant::now() + EXIT_WAIT);
+                    // Windows: a console close or logoff handler holding the process for the detach may let it end
+                    // now (the call at the end is harmless after this one)
+                    detach_finished();
                 }
             }
             Ev::AdapterEof => {
