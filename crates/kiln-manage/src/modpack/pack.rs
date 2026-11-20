@@ -1847,6 +1847,9 @@ pub struct PlanMod {
     pub id: String,
     pub version: String,
     pub enabled: bool,
+    /// The mod's name as the pack names it (a mod an update adds is not in the Library yet).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1856,6 +1859,8 @@ pub struct PlanUpdate {
     pub id: String,
     pub from: String,
     pub to: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1972,6 +1977,7 @@ fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, 
         choices.insert(k.clone(), *v);
     }
     let mut mods = pack_mods(theirs, &choices);
+    let name_of = |k: ModKind, id: &str| theirs.find(k, id).or_else(|| base.find(k, id)).and_then(|m| m.name.clone());
     for kind in ModKind::ALL {
         let mine = profile.mods.list(kind);
         let list = mods.list_mut(kind);
@@ -1984,11 +1990,11 @@ fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, 
             match mine.iter().find(|m| m.id == e.id) {
                 Some(m) if m.version != e.version || m.hash != e.hash => {
                     if !layer_ids.contains(&e.id) {
-                        changes.updated.push(PlanUpdate { kind, id: e.id.clone(), from: m.version.clone(), to: e.version.clone() });
+                        changes.updated.push(PlanUpdate { kind, id: e.id.clone(), from: m.version.clone(), to: e.version.clone(), name: name_of(kind, &e.id) });
                     }
                 }
                 Some(_) => {}
-                None if !layer_ids.contains(&e.id) => changes.added.push(PlanMod { kind, id: e.id.clone(), version: e.version.clone(), enabled: e.enabled }),
+                None if !layer_ids.contains(&e.id) => changes.added.push(PlanMod { kind, id: e.id.clone(), version: e.version.clone(), enabled: e.enabled, name: name_of(kind, &e.id) }),
                 None => {}
             }
         }
@@ -1998,11 +2004,11 @@ fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, 
             }
             if in_base(kind, &m.id) || layer_ids.contains(&m.id) {
                 if !layer_ids.contains(&m.id) {
-                    changes.removed.push(PlanMod { kind, id: m.id.clone(), version: m.version.clone(), enabled: m.enabled });
+                    changes.removed.push(PlanMod { kind, id: m.id.clone(), version: m.version.clone(), enabled: m.enabled, name: name_of(kind, &m.id) });
                 }
             } else {
                 // the player's own: kept, after the pack's
-                changes.yours.push(PlanMod { kind, id: m.id.clone(), version: m.version.clone(), enabled: m.enabled });
+                changes.yours.push(PlanMod { kind, id: m.id.clone(), version: m.version.clone(), enabled: m.enabled, name: None });
                 list.push(m.clone());
             }
         }
@@ -2298,11 +2304,11 @@ pub struct PackDiff {
 /// What changed between two versions of a pack (the automatic change list).
 pub fn diff(old: &PackIndex, new: &PackIndex) -> PackDiff {
     let mut d = PackDiff { from: old.version.clone(), to: new.version.clone(), ..Default::default() };
-    let pm = |m: &PackMod| PlanMod { kind: m.kind, id: m.id.clone(), version: m.version.clone(), enabled: m.dep == Dep::Required || m.default.unwrap_or(true) };
+    let pm = |m: &PackMod| PlanMod { kind: m.kind, id: m.id.clone(), version: m.version.clone(), enabled: m.dep == Dep::Required || m.default.unwrap_or(true), name: m.name.clone() };
     for m in &new.mods {
         match old.find(m.kind, &m.id) {
             None => d.added.push(pm(m)),
-            Some(o) if o.hash != m.hash => d.updated.push(PlanUpdate { kind: m.kind, id: m.id.clone(), from: o.version.clone(), to: m.version.clone() }),
+            Some(o) if o.hash != m.hash => d.updated.push(PlanUpdate { kind: m.kind, id: m.id.clone(), from: o.version.clone(), to: m.version.clone(), name: m.name.clone() }),
             Some(_) => {}
         }
     }

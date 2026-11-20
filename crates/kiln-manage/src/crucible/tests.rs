@@ -224,6 +224,7 @@ impl Fake {
                 let pack = s.versions[*vid].0.clone();
                 json(200, serde_json::json!({ "version": Self::version_view(&s, vid), "pack": Self::pack_view(&s, &pack) }))
             }
+            (Method::Get, ["packs", id]) => json(200, serde_json::json!({ "pack": Self::pack_view(&s, id) })),
             (Method::Get, ["packs", id, "head"]) => {
                 let latest = s.packs[*id].3.clone();
                 json(200, serde_json::json!({ "pack": id, "title": "x", "version": latest.map(|v| Self::version_view(&s, &v)) }))
@@ -356,6 +357,8 @@ fn share_receive_update_and_undo() {
     let ups = updates(&b, &cb).unwrap();
     assert_eq!(ups.len(), 1);
     assert_eq!(ups[0].to.version_id, r2.version.id);
+    assert_eq!(ups[0].by.as_deref(), Some("Emberfox"));
+    assert_eq!(ups[0].counts, Some(UpdateCounts { added: 1, updated: 0, removed: 0 }));
     let plan = update_plan(&b, &cb, &pid_b, &mut NoProgress).unwrap();
     assert_eq!(plan.plan.mods.added.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["gamma"]);
     let done = update(&b, &cb, &UpdateRequest { profile: pid_b.clone(), version_id: plan.version_id.clone(), consent: true, ..Default::default() }, &mut NoProgress).unwrap();

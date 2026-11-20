@@ -978,6 +978,18 @@ pub struct UpdateAvailable {
     pub name: String,
     pub from: UpdateFrom,
     pub to: UpdateTo,
+    /// The creator's name (the banner's "by Emberfox").
+    pub by: Option<String>,
+    /// What the new version changes in mods (from the signed indexes, nothing downloaded): the banner's counts.
+    pub counts: Option<UpdateCounts>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCounts {
+    pub added: usize,
+    pub updated: usize,
+    pub removed: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1008,12 +1020,21 @@ pub fn updates(dirs: &DataDirs, c: &Crucible) -> Result<Vec<UpdateAvailable>> {
         };
         let Some(v) = head.version else { continue };
         if v.id != vid {
+            let base: Option<PackIndex> = crate::util::read_json(&dirs.profile(&pid).join(pack::INSTANCE_DIR).join("base").join(crate::modpack::MANIFEST)).ok().flatten();
+            let counts = base.zip(c.index(&v.id).ok()).map(|(old, (new, _))| {
+                let d = pack::diff(&old, &new);
+                UpdateCounts { added: d.added.len(), updated: d.updated.len(), removed: d.removed.len() }
+            });
+            let by = c.get::<Value>(&format!("/packs/{pack_id}"), false).ok()
+                .and_then(|p| p.get("pack")?.get("owner")?.get("name")?.as_str().map(str::to_string));
             out.push(UpdateAvailable {
                 profile: pid,
                 pack: pack_id.into(),
                 name: inst.name.clone(),
                 from: UpdateFrom { version: inst.version.clone(), number: None },
                 to: UpdateTo { version_id: v.id, version: v.version, number: v.number },
+                by,
+                counts,
             });
         }
     }
