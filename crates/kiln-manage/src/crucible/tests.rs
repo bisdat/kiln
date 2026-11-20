@@ -651,3 +651,28 @@ fn a_publish_that_stops_midway_resumes_the_same_pack_and_version() {
     assert_eq!(s.published.as_ref().unwrap().pack, r2.pack.id);
     assert_eq!(s.published.as_ref().unwrap().versions.len(), 2, "the local history stays");
 }
+
+#[test]
+fn an_update_from_another_crucible_pack_with_the_same_index_id_is_refused() {
+    // review: an instance follows its own Crucible pack, not any pack whose creator picked the same index id
+    let t = tmp("samepackid");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (a, pid) = creator(&t);
+    let ca = Crucible::new(&ep, &fake, "0.2.0-dev").with_session(Some(KEY.into()));
+    let r1 = share(&a, &ca, &ShareRequest { profile: pid.clone(), ..Default::default() }, None, &mut NoProgress).unwrap();
+    let b = DataDirs::at(t.0.join("friend"));
+    let cb = Crucible::new(&ep, &fake, "0.2.0-dev");
+    let ir = install(&b, &cb, None, &InstallRequest { target: r1.version.id.clone(), consent: true, ..Default::default() }, None, false, &mut NoProgress).unwrap();
+    let other = DataDirs::at(t.0.join("other"));
+    let op = crate::profile::create(&other, "Ember run", None).unwrap();
+    add_mods(&other, &op.id, &t.0.join("o"), &["delta"]);
+    let r2 = share(&other, &ca, &ShareRequest { profile: op.id.clone(), ..Default::default() }, None, &mut NoProgress).unwrap();
+    assert_ne!(r2.pack.id, r1.pack.id);
+    assert_eq!(cb.index(&r2.version.id).unwrap().0.id, cb.index(&r1.version.id).unwrap().0.id, "the same index id");
+    let e = update(&b, &cb, &UpdateRequest { profile: ir.profile.id.clone(), version_id: r2.version.id.clone(), consent: true, ..Default::default() }, &mut NoProgress).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
+    // and the preview of the other pack does not call the friend's instance its own
+    let (p, _) = preview(&b, &cb, &r2.pack.url, None).unwrap();
+    assert_eq!(p.instance, None);
+}
