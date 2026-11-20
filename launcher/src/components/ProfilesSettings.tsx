@@ -17,6 +17,9 @@ import { forgetProfileEdits, useProfileEdit } from "../pages/profiles/useProfile
 import { notifyLibraryChanged } from "../shell/libraryChanged";
 import { notifyActivation } from "../shell/notices";
 import { rich, useT } from "../i18n";
+import { CruciblePacksCard, PackLine, UninstallPackModal, packMenu } from "../crucible/Profiles";
+import { useCrucibleOn, useInstances, useUpdates } from "../crucible/state";
+import type { PackInstance } from "../api/commands";
 import { Button, Card, ConfirmDanger, EmptyState, Field, Menu, Modal, Skeleton, TextInput, errorText, fmtAgo, notifyPlacementCleanup, toast } from "../ui";
 
 export function ProfilesCard() {
@@ -30,6 +33,11 @@ export function ProfilesCard() {
   const [rename, setRename] = useState<ProfileSummary | null>(null);
   const [folders, setFolders] = useState<string | null>(null);
   const [del, setDel] = useState<ProfileSummary | null>(null);
+  // (dev.30) Crucible packs: a profile made from a pack is an instance (its pack, version, update, Undo, Uninstall)
+  const crucible = useCrucibleOn();
+  const instances = useInstances(crucible);
+  const updates = useUpdates(game?.id, crucible);
+  const [uninstall, setUninstall] = useState<{ id: string; instance: PackInstance } | null>(null);
   const running = !!status.data?.running;
   const installed = !!status.data?.runtime.installed;
   const loaded = active.data?.profileId ?? null;
@@ -52,6 +60,7 @@ export function ProfilesCard() {
   const cur = list.find((p) => p.id === loaded) ?? null;
 
   return (
+    <>
     <Card id="profiles" aria-label={t("profilesSettings.title")} title={t("profilesSettings.title")}
       sub={status.data?.otherFolderProfile
         ? <span className="k-tone-warn" title={otherFolderTitle(status.data.otherFolderProfile)} data-testid="other-folder-profile">{otherFolderProfile()}</span>
@@ -62,10 +71,13 @@ export function ProfilesCard() {
           {list.map((p) => {
             const n = totalCount(p.counts);
             const here = p.id === loaded;
+            const inst = crucible ? instances.byProfile.get(p.id) ?? null : null;
+            const upd = inst ? updates.data?.find((u) => u.profile === p.id) ?? null : null;
             return (
               <li key={p.id} className="k-list-item" style={{ padding: "8px 0" }}>
                 <span className="k-stack" style={{ gap: 1, flex: 1, minWidth: 0 }}>
-                  <span className="k-item-title k-ellipsis">{p.name}</span>
+                  <span className="k-item-title k-ellipsis">{p.name}{inst && <span className="kcr-tag" data-testid="crucible-tag">{t("crucible.profiles.tag")}</span>}</span>
+                  {inst && <PackLine instance={inst} update={upd} profileId={p.id} />}
                   <span className="k-item-sub">{p.server
                     ? t("profilesSettings.lineServer", { count: n, server: p.server.name ?? p.server.id, ago: fmtAgo(p.updated) })
                     : t("profilesSettings.line", { count: n, ago: fmtAgo(p.updated) })}</span>
@@ -76,7 +88,8 @@ export function ProfilesCard() {
                 <Menu label={t("profilesSettings.more", { name: p.name })} icon={<MoreHorizontal />} size="s" items={[
                   { label: t("profilesSettings.rename"), onSelect: () => setRename(p) },
                   { label: t("profilesSettings.folders"), onSelect: () => setFolders(p.id) },
-                  { label: t("common.delete"), danger: true, disabled: p.active.length > 0, onSelect: () => setDel(p) },
+                  ...(inst ? packMenu(p.id, inst, upd, game?.id ?? null, qc, p.active.length > 0, () => setUninstall({ id: p.id, instance: inst })) : []),
+                  ...(inst ? [] : [{ label: t("common.delete"), danger: true, disabled: p.active.length > 0, onSelect: () => setDel(p) }]),
                 ]} />
               </li>
             );
@@ -98,6 +111,7 @@ export function ProfilesCard() {
         toast.ok(t("profilesSettings.savedAs", { name: p.name }), cur ? t("profilesSettings.staysLoaded", { name: cur.name }) : t("profilesSettings.loadedStaysLoaded"), { actions: game ? [{ label: t("profilesSettings.loadIt"), onClick: () => load.mutate(p.id) }] : [] });
       }} />
       <RenameModal profile={rename} onClose={() => setRename(null)} />
+      {uninstall && <UninstallPackModal profileId={uninstall.id} instance={uninstall.instance} onClose={() => setUninstall(null)} />}
       {folders && <FoldersModal id={folders} onClose={() => setFolders(null)} />}
       <ConfirmDanger open={!!del} onClose={() => setDel(null)} title={t("profilesSettings.deleteAsk", { name: del?.name ?? "" })} message={t("profilesSettings.deleteMessage")} word={del?.id ?? ""}
         action={t("common.delete")} onConfirm={async () => {
@@ -114,6 +128,8 @@ export function ProfilesCard() {
           catch (e) { toast.error(e); throw e; }
         }} />
     </Card>
+    {crucible && <CruciblePacksCard />}
+    </>
   );
 }
 

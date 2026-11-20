@@ -33,11 +33,26 @@ fn nxm_argument(args: &[String]) -> Result<Option<&str>, ()> {
     }
 }
 
+/// A kiln:// link (Crucible): `--link <url>` (what Kiln registers) or a bare `kiln://` argument, nothing else with it.
+fn link_argument(args: &[String]) -> Result<Option<&str>, ()> {
+    let is_url = |s: &str| s.get(..7).is_some_and(|p| p.eq_ignore_ascii_case("kiln://"));
+    if !args.iter().skip(1).any(|a| a == "--link" || is_url(a)) { return Ok(None); }
+    match args {
+        [_, flag, url] if flag == "--link" && is_url(url) => Ok(Some(url)),
+        [_, url] if is_url(url) => Ok(Some(url)),
+        _ => Err(()),
+    }
+}
+
 fn main() {
     // `<launcher> --kiln-ctrl-c <pid>`: the short-lived helper that sends a Windows server its Ctrl-C (Stop), so the
     // launcher itself never attaches to the server's console (kiln_manage::server::run::set_ctrl_c_helper)
     let args: Vec<String> = std::env::args().collect();
     let nxm = match nxm_argument(&args) {
+        Ok(link) => link,
+        Err(()) => std::process::exit(1),
+    };
+    let link = match link_argument(&args) {
         Ok(link) => link,
         Err(()) => std::process::exit(1),
     };
@@ -55,7 +70,13 @@ fn main() {
     {
         std::process::exit(0);
     }
-    if nxm.is_none() && args.iter().any(|a| a == "--selftest") {
+    // `--link <kiln://...>`: a Crucible link goes to the running launcher (this process ends) or waits for this one
+    if let Some(url) = link
+        && !kiln_launcher_lib::link_entry(url)
+    {
+        std::process::exit(0);
+    }
+    if nxm.is_none() && link.is_none() && args.iter().any(|a| a == "--selftest") {
         #[cfg(windows)]
         attach_parent_console();
         std::process::exit(kiln_launcher_lib::selftest());
@@ -99,6 +120,18 @@ mod tests {
             vec!["--nxm", url, "--software-render"], vec!["--gpu-render", url], vec!["--nxm", url, "--no-webkit-sandbox"],
             vec!["--nxm", url, "--no-dmabuf"], vec!["--dmabuf", url], vec![url, "--no-dmabuf"]] {
             assert!(nxm_argument(&args(&tail)).is_err());
+        }
+    }
+
+    #[test]
+    fn link_invocations_cannot_inject_launcher_options() {
+        let url = "kiln://crucible/H7QK-3MZP";
+        assert_eq!(link_argument(&args(&["--link", url])), Ok(Some(url)));
+        assert_eq!(link_argument(&args(&[url])), Ok(Some(url)));
+        assert_eq!(link_argument(&args(&["--deck"])), Ok(None));
+        for tail in [vec!["--link"], vec!["--link", "--selftest"], vec!["--link", url, "--selftest"], vec![url, "--software-render"],
+            vec!["--kiln-ctrl-c", "1", url], vec!["--link", "nxm://enshrouded/mods/1/files/2"]] {
+            assert!(link_argument(&args(&tail)).is_err(), "{tail:?}");
         }
     }
 }

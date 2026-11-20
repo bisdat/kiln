@@ -21,6 +21,7 @@ import { GraphicsCard, isGraphicsPath } from "../components/GraphicsSettings";
 import { StartModal, UnknownBuild, useStartWord } from "../components/GameStart";
 import { rich, t, useT } from "../i18n";
 import { CommunityToggle } from "../community/parts";
+import { useCrucibleOn } from "../crucible/state";
 import {
   Badge, Button, Card, ConfirmDanger, EmptyState, Field, IconButton, NumberInput, Page, PageHeader, PathPicker, SchemaForm, Select, Skeleton,
   Toggle, errorText, fmtAgo, fmtBytes, setTypeToConfirm, toast, typeToConfirm,
@@ -59,6 +60,13 @@ export default function SettingsPage() {
   );
 }
 
+/** (dev.30) Crucible's anonymous install counts; only where this build has Crucible. */
+function CrucibleStatsToggle({ value, onChange }: { value: boolean; onChange: (on: boolean) => void }) {
+  const t = useT();
+  if (!useCrucibleOn()) return null;
+  return <Toggle checked={value} onChange={onChange} label={t("crucible.settings.stats")} hint={t("crucible.settings.statsHint")} />;
+}
+
 function LauncherCard() {
   const t = useT();
   const qc = useQueryClient();
@@ -90,6 +98,7 @@ function LauncherCard() {
       <CommunityToggle />
       <Toggle checked={v.modUpdatesDaily === true} onChange={(on) => set({ modUpdatesDaily: on })} label={t("settings.launcher.dailyUpdates")}
         hint={t(nexusEnabled ? "settings.launcher.dailyUpdatesHint" : "settings.launcher.dailyUpdatesHintNoNexus")} />
+      <CrucibleStatsToggle value={v.crucibleStats !== false} onChange={(on) => set({ crucibleStats: on })} />
       <TypeToConfirmToggle />
       <Field label={t("settings.launcher.steamRoots")} hint={t("settings.launcher.steamRootsHint")}>
         <div className="k-stack">
