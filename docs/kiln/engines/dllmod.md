@@ -27,7 +27,10 @@ export `EnshroudedModInitialize`, and settings without `EnshroudedModConfigure`.
 ## When the mods start
 
 Exactly when the loader starts them: when a world of your own starts (Play, or Load on a world in the world list),
-before the game opens it. For each switched-on mod Kiln:
+before the game opens it. The mods start one after the other in the loader's order: sorted by package id
+(`carryon/carryon.dll` before `lantern/lantern.dll`), whatever their order in the profile, each after the packages it
+requires. The order matters: mods that patch the same game data expect the order they were tested in (CarryOn fails
+with `truncated native resource` when Lantern's crafting-menu patch is already in place). For each mod Kiln:
 
 1. loads the packages it requires first (`require=<package>@<version>`, a `kind=library` package with that exact
    version; it must be in your profile as well), then the mod's DLL, from its folder and System32 only;
