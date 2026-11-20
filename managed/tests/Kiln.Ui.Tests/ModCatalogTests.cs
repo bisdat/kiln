@@ -287,6 +287,77 @@ public sealed class ModCatalogTests : IDisposable
         Assert.False(m.NeedsAttention);
     }
 
+    /// <summary>kiln-dllmod (packages for Enshrouded ModLoader, docs/kiln/engines/dllmod.md): its mods are listed with the
+    /// state of kiln/state/dllmod.json. Before a world of your own starts they wait for it; started, refused with the
+    /// plugin's reason, switched off; a profile entry it has not reported yet is still a row.</summary>
+    [Fact]
+    public void Enshrouded_modloader_packages_show_their_state_from_dllmod_json()
+    {
+        var carry = Dir("Mods", "EnshroudedModLoader", "carryon");
+        var unseen = Dir("Mods", "EnshroudedModLoader", "unseen");
+        Profile(new() { ["dllmod"] = [new { id = "carryon", version = "0.1.50-dev", path = carry }, new { id = "unseen", version = "1", path = unseen }] });
+        Write("dllmod.json", new
+        {
+            format = 1, pid = Pid, status = "waiting", reason = "the mods start when a world of your own starts", steppedAside = false,
+            mods = new object[]
+            {
+                new { id = "carryon", package = "carryon/carryon.dll", name = "carryon", version = "0.1.50-dev", status = "waiting", reason = "", folder = carry },
+                new { id = "lantern", package = "lantern/lantern.dll", name = "lantern", version = "0.1.29-dev", status = "started", reason = "" },
+                new { id = "broken", package = "broken/broken.dll", name = "broken", version = "1", status = "rejected", reason = "broken.dll.mod: abi must be given once" },
+                new { id = "off", package = "off/off.dll", name = "off", version = "1", status = "disabled", reason = "switched off in the profile" },
+            },
+        });
+        var s = Read();
+        var w = Mod(s, "dllmod", "carryon");
+        Assert.Equal(ModRunState.Waiting, w.State);
+        Assert.Contains("world of your own", w.Reason);
+        Assert.False(w.NeedsAttention);
+        Assert.Equal(ModRunState.Loaded, Mod(s, "dllmod", "lantern").State);
+        var b = Mod(s, "dllmod", "broken");
+        Assert.Equal(ModRunState.Failed, b.State);
+        Assert.Equal("broken.dll.mod: abi must be given once", b.Reason);
+        Assert.NotNull(b.Help);
+        Assert.Equal(ModRunState.Disabled, Mod(s, "dllmod", "off").State);
+        Assert.Equal(ModRunState.NotLoaded, Mod(s, "dllmod", "unseen").State);  // in the profile, not in the report
+        var e = s.Engines.Single(e => e.Kind == "dllmod");
+        Assert.Equal("Enshrouded ModLoader", e.Name);
+        Assert.Contains("Enshrouded ModLoader", ModCatalog.EngineAbout("dllmod"));
+        Assert.Equal(ModCatalog.EngineOrder.Length - 1, Array.IndexOf(ModCatalog.EngineOrder, "dllmod"));  // the launcher's order: last
+    }
+
+    [Fact]
+    public void Enshrouded_modloader_steps_aside_and_refuses_another_build()
+    {
+        Profile([]);
+        Write("dllmod.json", new
+        {
+            format = 1, pid = Pid, status = "stepped aside", steppedAside = true, steppedAsideReason = "Enshrouded ModLoader runs in this game: it is loaded (dinput8.dll)",
+            mods = new object[]
+            {
+                new { id = "carryon", status = "own-loader", reason = "runs under Enshrouded ModLoader's own loader; switch it on in the world's Edit > MODS page" },
+                new { id = "lib-copy", status = "not-loaded", reason = "Enshrouded ModLoader's own loader runs this start" },
+            },
+        });
+        var s = Read();
+        Assert.Equal(ModRunState.Loaded, Mod(s, "dllmod", "carryon").State);
+        var nl = Mod(s, "dllmod", "lib-copy");
+        Assert.Equal(ModRunState.Failed, nl.State);
+        Assert.NotNull(nl.Help);
+        Assert.StartsWith("Stepped aside", s.Engines.Single(e => e.Kind == "dllmod").Note);
+
+        Write("dllmod.json", new
+        {
+            format = 1, pid = Pid, status = "unsupported", steppedAside = false,
+            reason = "mods for Enshrouded ModLoader are made for client build 26430625 (enshrouded.exe 5d9ef2f1), and this game is 0123abcd",
+            mods = new object[] { new { id = "carryon", status = "skipped", reason = "mods for Enshrouded ModLoader are made for client build 26430625" } },
+        });
+        s = Read();
+        Assert.Equal(ModRunState.NotLoaded, Mod(s, "dllmod", "carryon").State);
+        var e = s.Engines.Single(e => e.Kind == "dllmod");
+        Assert.Equal(EngineHealth.Problem, e.Health);
+        Assert.Contains("26430625", e.Note);
+    }
+
     [Fact]
     public void Stepped_aside_engines_say_so_and_their_mods_are_not_loaded()
     {
@@ -343,6 +414,185 @@ public sealed class ModCatalogTests : IDisposable
         Assert.Equal(ModRunState.Failed, Mod(s, "shroudforge", "pack").State);
         Assert.Equal(EngineHealth.Problem, s.Engines.Single(e => e.Kind == "shroudforge").Health);
     }
+
+    // ---- inbox 84: in Copy path mode a ShroudForge profile entry names Kiln's second copy under kiln/profiles/, which
+    // ShroudForge never reads; the row is the copy ShroudForge runs (in <game>/mods), and a setting written there sticks ----
+
+    private const string UtHash = "kdh1:a516c609cfc5672f9ac9484f92f28b0280024635510c7c0630ec9f6b33fc2668";
+
+    /// <summary>A ShroudForge package shaped like Unified EML Tweaks 2.1.1: mod.json, extended.mod.json with one setting,
+    /// native-plugin.ini naming bin/ut_native.dll (ShroudForge's own DLL loader loads it), and Kiln's marker when placed.</summary>
+    private string SfPackage(string folder, bool on = true, string? marker = null)
+    {
+        Directory.CreateDirectory(Path.Combine(folder, "bin"));
+        File.WriteAllText(Path.Combine(folder, "mod.json"), """{"id":"unifiedemltweaks","name":"Unified EML Tweaks","version":"2.1.1","capabilities":["patch","export"]}""");
+        File.WriteAllText(Path.Combine(folder, "extended.mod.json"), "{\n  \"schemaVersion\": 1,\n  \"enabled\": " + (on ? "true" : "false") +
+            ",\n  \"settings\": {\n    \"stackSize\": { \"value\": false, \"label\": \"Bigger stacks\", \"control\": \"toggle\" }\n  }\n}\n");
+        File.WriteAllText(Path.Combine(folder, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=bin/ut_native.dll\n");
+        File.WriteAllBytes(Path.Combine(folder, "bin", "ut_native.dll"), [0x4d, 0x5a]);
+        if (marker is not null)
+            File.WriteAllText(Path.Combine(folder, ".kiln-library.json"), JsonSerializer.Serialize(new { format = 1, kind = marker, id = "unifiedemltweaks", version = "2.1.1", hash = UtHash }));
+        return folder;
+    }
+
+    /// <summary>The player's kiln/profile.json (pathMode copy, a ShroudForge entry with a path relative to kiln/, no
+    /// "enabled" key), ShroudForge hosted with its mods folder in the game's mods folder.</summary>
+    private void CopyModeProfile(string path)
+    {
+        var file = Path.Combine(Kiln, "profile.json");
+        File.WriteAllText(file, $$"""
+            {"configDir":"profiles/my-mods/config","dataDir":null,"dropins":true,"format":1,"generation":14,"id":"my-mods",
+             "mods":{"emf":[],"kiln":[],"native":[],"plugin":[],
+               "shroudforge":[{"hash":"{{UtHash}}","id":"unifiedemltweaks","path":{{JsonSerializer.Serialize(path)}},"version":"2.1.1"}]},
+             "name":"My mods","pathMode":"copy","writer":"kiln-manage 0.2.0-dev"}
+            """);
+        Write("boot.json", new { format = 1, pid = Pid, side = "client", profile = new { mode = "active", id = "my-mods", name = "My mods", file, missing = Array.Empty<object>() }, plugins = Array.Empty<object>(), chain = Array.Empty<object>() });
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = Path.Combine(_root, "mods"), startupPrepared = true });
+    }
+
+    private static string ExtendedOf(string folder) => File.ReadAllText(Path.Combine(folder, "extended.mod.json"));
+
+    [Fact]
+    public void In_copy_mode_a_shroudforge_profile_row_is_the_copy_shroudforge_runs_and_a_setting_lands_there()
+    {
+        var copy = SfPackage(Path.Combine(Kiln, "profiles", "my-mods", "shroudforge", "unifiedemltweaks"));
+        var placed = SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"), marker: "shroudforge");
+        CopyModeProfile("profiles/my-mods/shroudforge/unifiedemltweaks");
+        var s = Read();
+        var row = Mod(s, "shroudforge", "unifiedemltweaks");
+        Assert.Equal(("profile", placed), (row.Source, row.Folder));  // the details' FOLDER line names the folder ShroudForge runs
+        Assert.False(row.Missing);
+        // listed once: ShroudForge's own DLL loader loads its native-plugin.ini, it is no XHL-Core plugin of its own
+        Assert.DoesNotContain(s.Mods, m => m.Engine == "xhl");
+        Assert.Single(s.Mods, m => m.Folder is { } f && ModCatalog.SamePath(f, placed));
+
+        // the page writes the row's folder (ShroudForgeUi.Edit -> ShroudForgePackages.SetSetting)
+        var before = ExtendedOf(copy);
+        ShroudForgePackages.SetSetting(row.Folder!, "stackSize", System.Text.Json.Nodes.JsonValue.Create(true));
+        Assert.True(ShroudForgePackages.Read(placed).Values["stackSize"]!.GetValue<bool>());
+        Assert.Equal(before, ExtendedOf(copy));  // Kiln's second copy under kiln/profiles/ is not touched
+        // read again (the page reads the row's folder once a second): the value it shows is the one ShroudForge reads
+        Assert.True(ShroudForgePackages.Read(Mod(Read(), "shroudforge", "unifiedemltweaks").Folder!).Values["stackSize"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void In_copy_mode_without_kilns_copy_in_the_mods_folder_the_row_keeps_the_profile_path()
+    {
+        var copy = SfPackage(Path.Combine(Kiln, "profiles", "my-mods", "shroudforge", "unifiedemltweaks"));
+        // another kind's copy of that name (Kiln's marker says xhl): not this entry's
+        SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"), marker: "xhl");
+        CopyModeProfile("profiles/my-mods/shroudforge/unifiedemltweaks");
+        Assert.Equal(copy, Mod(Read(), "shroudforge", "unifiedemltweaks").Folder);
+        // no folder of that name at all
+        Directory.Delete(Path.Combine(_root, "mods", "unifiedemltweaks"), true);
+        Assert.Equal(copy, Mod(Read(), "shroudforge", "unifiedemltweaks").Folder);
+        // the player's own folder of the same package (no marker), as the launcher's settings editor finds it
+        var own = SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"));
+        Assert.Equal(own, Mod(Read(), "shroudforge", "unifiedemltweaks").Folder);
+    }
+
+    [Fact]
+    public void In_normal_path_mode_a_shroudforge_profile_row_is_unchanged()
+    {
+        var placed = SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"), marker: "shroudforge");
+        Profile(new() { ["shroudforge"] = [new { id = "unifiedemltweaks", version = "2.1.1", hash = UtHash, path = placed }] });
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = Path.Combine(_root, "mods"), startupPrepared = true });
+        var s = Read();
+        var row = Mod(s, "shroudforge", "unifiedemltweaks");
+        Assert.Equal(("profile", placed), (row.Source, row.Folder));
+        Assert.DoesNotContain(s.Mods, m => m.Engine == "xhl");
+        ShroudForgePackages.SetSetting(row.Folder!, "stackSize", System.Text.Json.Nodes.JsonValue.Create(true));
+        Assert.True(ShroudForgePackages.Read(placed).Values["stackSize"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void A_shroudforge_package_with_a_native_plugin_ini_is_listed_once_and_a_real_xhl_plugin_still_shows()
+    {
+        Profile([]);
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = Path.Combine(_root, "mods"), startupPrepared = true });
+        // a ShroudForge package the player put there (no marker), with its own DLL loader file
+        var sf = SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"));
+        // an XHL-Core plugin: an EML mod with native-plugin.ini, no ShroudForge file of its own
+        var xhl = Dir("mods", "XHL-Auto-Loot");
+        File.WriteAllText(Path.Combine(xhl, "mod.json"), """{"id":"XHL-Auto-Loot","name":"XHL Auto Loot","version":"1.0.0"}""");
+        File.WriteAllText(Path.Combine(xhl, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=auto-loot.dll\n");
+        // an XHL-Core plugin that ShroudForge runs as an EML package (its switch: launcher EML): still an XHL-Core plugin
+        var switched = Dir("mods", "XHL-Stacks");
+        File.WriteAllText(Path.Combine(switched, "mod.json"), """{"id":"XHL-Stacks","name":"XHL Stacks","version":"1.0.0"}""");
+        File.WriteAllText(Path.Combine(switched, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=stacks.dll\n");
+        File.WriteAllText(Path.Combine(switched, "extended.mod.json"), """{"schemaVersion":1,"enabled":true,"launcher":"EML"}""");
+        var s = Read();
+        Assert.Equal("shroudforge", Assert.Single(s.Mods, m => m.Folder is { } f && ModCatalog.SamePath(f, sf)).Engine);
+        Assert.Contains(s.Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, xhl));
+        Assert.Contains(s.Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, switched));
+        // ShroudForge configured to another mods folder: the game's mods folder is XHL-Core's alone again, and its plugins
+        // still show; this package is no XHL-Core plugin all the same (XHL-Core refuses Dll=bin/ut_native.dll, a path)
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = Dir("elsewhere") });
+        Directory.CreateDirectory(Path.Combine(_root, "shroudforge", "config"));
+        File.WriteAllText(Path.Combine(_root, "shroudforge", "config", "modloader-config.json"), JsonSerializer.Serialize(new { paths = new { mods = Dir("elsewhere") } }));
+        s = Read();
+        Assert.Contains(s.Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, xhl));
+        Assert.DoesNotContain(s.Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, sf));
+    }
+
+    /// <summary>A minimal PE32+ DLL file with these exports (the shape of kiln-manage's <c>pe::build_test_dll</c>).</summary>
+    private static byte[] TestDll(params string[] exports)
+    {
+        var b = new byte[0x200];
+        void U16(byte[] a, int at, ushort v) => System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(a.AsSpan(at), v);
+        void U32(byte[] a, int at, uint v) => System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(a.AsSpan(at), v);
+        b[0] = (byte)'M'; b[1] = (byte)'Z'; U32(b, 0x3c, 0x80); U32(b, 0x80, 0x4550);
+        const int coff = 0x84, opt = coff + 20;
+        U16(b, coff, 0x8664); U16(b, coff + 2, 1); U16(b, coff + 16, 240); U16(b, coff + 18, 0x2022);
+        U16(b, opt, 0x20b); U32(b, opt + 108, 16);
+        const uint va = 0x1000;
+        var n = (uint)exports.Length;
+        uint funcs = va + 40, names = funcs + 4 * n, ords = names + 4 * n, strings = ords + 2 * n;
+        var str = new List<byte>(System.Text.Encoding.ASCII.GetBytes("plugin.dll\0"));
+        var dllName = strings; strings += (uint)str.Count;
+        var nameRvas = new List<uint>();
+        foreach (var e in exports) { nameRvas.Add(strings); str.AddRange(System.Text.Encoding.ASCII.GetBytes(e + "\0")); strings += (uint)e.Length + 1; }
+        var head = new byte[40]; U32(head, 12, dllName); U32(head, 16, 1); U32(head, 20, n); U32(head, 24, n); U32(head, 28, funcs); U32(head, 32, names); U32(head, 36, ords);
+        var data = new List<byte>(head);
+        for (var i = 0; i < n; i++) data.AddRange(BitConverter.GetBytes(0x2000u));
+        foreach (var r in nameRvas) data.AddRange(BitConverter.GetBytes(r));
+        for (var i = 0; i < n; i++) data.AddRange(BitConverter.GetBytes((ushort)i));
+        data.AddRange(str);
+        var size = (uint)data.Count; var raw = (size + 0x1ff) / 0x200 * 0x200;
+        while (data.Count < raw) data.Add(0);
+        var sec = opt + 240;
+        System.Text.Encoding.ASCII.GetBytes(".edata").CopyTo(b, sec); U32(b, sec + 8, size); U32(b, sec + 12, va); U32(b, sec + 16, raw); U32(b, sec + 20, 0x200); U32(b, sec + 36, 0x40000040);
+        U32(b, opt + 112, va); U32(b, opt + 116, size);
+        return [.. b, .. data];
+    }
+
+    /// <summary>inbox 92 and Smart Quick Stack: <c>native-plugin.ini</c> is ShroudForge's file too. A folder XHL-Core would not
+    /// run (a Dll value with a path, a DLL without XHL-Core's exports) is no XHL row; XHL's own plugins still are.</summary>
+    [Fact]
+    public void Only_a_folder_xhl_core_would_run_is_listed_as_an_xhl_plugin()
+    {
+        Profile([]);
+        var path = Dir("mods", "smart-quick-stack");
+        File.WriteAllText(Path.Combine(path, "mod.json"), """{"id":"smart-quick-stack","name":"Smart Quick Stack","version":"0.16.1-beta"}""");
+        File.WriteAllText(Path.Combine(path, "native-plugin.ini"), "[Plugin]\r\nEnabled=1\r\nDll=bin\\sqs.dll\r\n");
+        Directory.CreateDirectory(Path.Combine(path, "bin"));
+        File.WriteAllBytes(Path.Combine(path, "bin", "sqs.dll"), TestDll("DllMain"));
+        var plain = Dir("mods", "plain-dll-mod");
+        File.WriteAllText(Path.Combine(plain, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=PlainMod.dll\n");
+        File.WriteAllBytes(Path.Combine(plain, "PlainMod.dll"), TestDll("DllMain", "Init"));
+        var json = Dir("mods", "XHL-Remote-Chest");
+        File.WriteAllText(Path.Combine(json, "native-plugin.ini"), "[Plugin]\nDll=XHL-Remote-Chest.dll\n");
+        File.WriteAllText(Path.Combine(json, "xhl-plugin.json"), "{}");
+        File.WriteAllBytes(Path.Combine(json, "XHL-Remote-Chest.dll"), TestDll("DllMain"));
+        var abi = Dir("mods", "XHL-Free-Climb");
+        File.WriteAllText(Path.Combine(abi, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=XHL-Free-Climb.dll\n[Climbing]\nspeed=2\n");
+        File.WriteAllBytes(Path.Combine(abi, "XHL-Free-Climb.dll"), TestDll("XhlNativePluginQuery", "XhlNativePluginStart", "XhlNativePluginRequestStop"));
+        Assert.Equal(["XhlNativePluginQuery", "XhlNativePluginStart", "XhlNativePluginRequestStop"], ModCatalog.PeExports(Path.Combine(abi, "XHL-Free-Climb.dll")));
+        var xhlRows = Read().Mods.Where(m => m.Engine == "xhl").Select(m => LeafName(m.Folder!)).Order().ToArray();
+        Assert.Equal(["XHL-Free-Climb", "XHL-Remote-Chest"], xhlRows);
+    }
+
+    private static string LeafName(string p) => Path.GetFileName(p.TrimEnd('/', '\\'));
 
     [Fact]
     public void Shroudforge_reports_real_activation_errors_side_and_switches_not_just_the_host()
@@ -1343,8 +1593,9 @@ public sealed class ModCatalogTests : IDisposable
     public void Sections_wrap_both_ways()
     {
         Assert.Equal(ModManagerSection.Network, ModManagerLogic.Step(ModManagerSection.Mods, 1));
-        Assert.Equal(ModManagerSection.Overlay, ModManagerLogic.Step(ModManagerSection.Mods, -1));
-        Assert.Equal(ModManagerSection.Mods, ModManagerLogic.Step(ModManagerSection.Overlay, 1));
+        Assert.Equal(ModManagerSection.Graphics, ModManagerLogic.Step(ModManagerSection.Mods, -1));
+        Assert.Equal(ModManagerSection.Graphics, ModManagerLogic.Step(ModManagerSection.Overlay, 1));
+        Assert.Equal(ModManagerSection.Mods, ModManagerLogic.Step(ModManagerSection.Graphics, 1));
     }
 
     [Fact]

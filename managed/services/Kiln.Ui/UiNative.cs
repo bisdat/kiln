@@ -506,7 +506,69 @@ internal static unsafe class UiNative
 
     internal static delegate* unmanaged[Cdecl]<Texts*, int> SetTextsOverride;
 
-    /// <summary>Issue #44: internal completion handoff at kiln.ui offset 1016.</summary>
+    /// <summary>KilnUiGraphics (kiln_ui.h, 0.2.0-dev.29.18): the player's graphics settings (graphics_set).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Graphics
+    {
+        public uint Size, FpsCap, DlssPreset, DlssScale;
+        public float CustomScale;
+        public fixed float ModeScale[4];
+        public uint Readout;
+        /// <summary>(phase B) KILN_UI_UPSCALER_* and KILN_UI_AMD_UPSCALER_* (were reserved; 0: the game's own, AMD's auto).</summary>
+        public uint Upscaler, AmdUpscaler;
+    }
+
+    /// <summary>KilnUiGraphicsStatus (kiln_ui.h, 0.2.0-dev.29.18): what Kiln's graphics tools do now (graphics_status). 248
+    /// bytes with phase B's upscaler fields from offset 72; kiln.ui fills them when the size says they are there.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphicsStatus
+    {
+        public uint Size, Flags, AsideCap, AsideDlss, FpsCap;
+        public float RenderedFps, OutputFps, FrameMs;
+        public uint OutputWidth, OutputHeight;
+        public int DlssQuality;
+        public uint DlssPreset, RenderWidth, RenderHeight, DlssOutputWidth, DlssOutputHeight;
+        public fixed uint Reserved[2];
+        // ---- phase B (KILN_UI_GRAPHICS_STATUS_SIZE_V2): the upscaler behind the game's FSR 3 option ----
+        public uint Upscaler, AmdUpscaler, UpscaleRunning, UpscaleReason, UpscaleFlags, AsideUpscale, UpscaleVersion;
+        public uint UpscaleRenderWidth, UpscaleRenderHeight, UpscaleOutputWidth, UpscaleOutputHeight;
+        public uint Reserved2;
+        /// <summary>The reason in English words, UTF-8, NUL-terminated (for logs and tooltips).</summary>
+        public fixed byte UpscaleDetail[UpscaleDetailBytes];
+    }
+
+    /// <summary>KILN_UI_GRAPHICS_STATUS_SIZE_V1 / _V2: phase A's status, and with phase B's fields.</summary>
+    public const uint GraphicsStatusSizeV1 = 72, GraphicsStatusSizeV2 = 248;
+
+    /// <summary>KilnUiGraphicsStatus.upscale_detail's size.</summary>
+    public const int UpscaleDetailBytes = 128;
+
+    /// <summary>The tail after set_texts (0.2.0-dev.29.18): graphics_set, graphics_status.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableGraphics
+    {
+        public TableTexts Base;
+        public delegate* unmanaged[Cdecl]<Graphics*, int> GraphicsSet;
+        public delegate* unmanaged[Cdecl]<GraphicsStatus*, int> GraphicsStatusFn;
+    }
+
+    /// <summary>kiln.ui's graphics tail, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.29.18). Tests:
+    /// <see cref="GraphicsOverride"/>.</summary>
+    public static TableGraphics* GraphicsTable
+    {
+        get
+        {
+            if (GraphicsOverride != null) return GraphicsOverride;
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableGraphics)) return null;
+            return (TableGraphics*)t;
+        }
+    }
+
+    /// <summary>Tests: a table of the graphics tail in place of kiln.ui's.</summary>
+    internal static TableGraphics* GraphicsOverride;
+
+    /// <summary>Issue #44: internal completion handoff at kiln.ui offset 1032, after the graphics tail.</summary>
     /// <remarks>Native writes text and the native-chat rectangle on its UI
     /// thread. Only managed Kiln.Ui may use this slot. No game pointers cross
     /// threads. Layout: 44-byte header, 16-byte rect, two 257-byte buffers;
@@ -525,7 +587,7 @@ internal static unsafe class UiNative
     [StructLayout(LayoutKind.Sequential)]
     internal struct TableChat
     {
-        public TableTexts Base;
+        public TableGraphics Base;
         public delegate* unmanaged[Cdecl]<ChatCompletion*, int> ChatCompletion;
     }
 
@@ -595,8 +657,7 @@ internal static unsafe class UiNative
         return System.Text.Encoding.UTF8.GetString(copy.Text, (int)copy.TextLen);
     }
 
-
-    /// <summary>KILN_UI_GLYPHS_* (kiln_ui.h look_info): the overlay's glyphs of a Chinese, Japanese or Korean language.</summary>
+    /// <summary>KILN_UI_GLYPHS_* (kiln_ui.h look_info): the overlay's glyphs of a Chinese, Japanese, Korean or Cyrillic language.</summary>
     public const byte GlyphsLatin = 0, GlyphsLoading = 1, GlyphsReady = 2, GlyphsFailed = 3;
 
     /// <summary>KILN_UI_IMAGE_WAITING / READY / FAILED (kiln_ui.h image_state).</summary>
@@ -725,6 +786,7 @@ internal static unsafe class UiNative
         ImageExOverride = null;
 
         SetTextsOverride = null;
+        GraphicsOverride = null;
         MouseKeysAvailable = false;
     }
 

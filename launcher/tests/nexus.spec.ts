@@ -60,8 +60,11 @@ test("Nexus build: Settings and About show only 'New versions: Nexus Mods', whic
   await expect(page.getByRole("button", { name: "Check now" })).toHaveCount(0);
   await expect(page.getByText("Up to date")).toHaveCount(0);
   await shot(page, "nexus-about");
+  // open() above changes only the hash, so the page (and the mock's list of opened links) usually stays: this click's
+  // own link is the one that counts
+  const before = await opened(page);
   await page.getByTestId("nexus-page").click();
-  await expect.poll(() => opened(page)).toEqual([NEXUS_PAGE]);
+  await expect.poll(() => opened(page)).toEqual([...before, NEXUS_PAGE]);
   expect(await updateCalls(page)).toEqual([]);
 });
 

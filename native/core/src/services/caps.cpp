@@ -425,8 +425,46 @@ void set_drain_rows_locked(std::vector<Event>& ev) {
     }
 }
 
+// kiln.tasks' pool (services/tasks.cpp sets the source): tasks.pool follows the pool's health. The state is read
+// lock-free at every registry call, so a change (workers that started late, or every one lost) reaches the row and
+// its subscribers on the calling thread, never under the pool's locks. -1: no pool (kiln.tasks did not start, or a
+// host without it); 0: no worker can run work; 1: available.
+constexpr int kTasksIdle = -2;
+std::atomic<int (*)()> g_tasks_pool{nullptr};
+std::atomic<int> g_tasks_seen{kTasksIdle};
+int tasks_pool_state() {
+    const auto state = g_tasks_pool.load(std::memory_order_acquire);
+    return state ? state() : -1;
+}
+void set_tasks_pool_locked(int state, const std::string& safe_idle, std::vector<Event>& ev) {
+    g_tasks_seen.store(state, std::memory_order_release);
+    if (state == kTasksIdle)
+        set_core_locked("tasks.pool", kService, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
+                        "not started in safe idle: " + safe_idle, "core", 0, ev);
+    else if (state < 0)
+        set_core_locked("tasks.pool", kService, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
+                        "kiln.tasks did not start; kiln.log says why", "core", 0, ev);
+    else if (state == 0)
+        set_core_locked("tasks.pool", kService, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED,
+                        "no task worker can run (a start failed or every worker was lost; retried every second); "
+                        "kiln.log says why", "core", 0, ev);
+    else
+        set_core_locked("tasks.pool", kService, KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "task workers running", "core", 0,
+                        ev);
+}
+void refresh_tasks_pool() {
+    if (!g_rows_built.load(std::memory_order_acquire) || !g_hooks) return;
+    const int state = tasks_pool_state();
+    if (state == g_tasks_seen.load(std::memory_order_acquire)) return;
+    op([&](std::vector<Event>& ev) {
+        set_tasks_pool_locked(state, {}, ev);
+        return 0;
+    });
+}
+
 // The tick hook faulted (or came back) since the rows were built: its rows follow.
 void refresh_tick() {
+    refresh_tasks_pool();
     if (!g_rows_built.load(std::memory_order_acquire) || !g_hooks) return;
     const uint8_t bits = tick_bits();
     if (bits == g_tick_seen.load(std::memory_order_acquire)) return;
@@ -844,6 +882,22 @@ void core_rows(bool hooks, bool verified, const std::string& safe_idle) {
                 set_core_locked(s.name, kService, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
                                 "not started in safe idle: " + safe_idle, "core", 0, ev);
         }
+        set_tasks_pool_locked(hooks ? tasks_pool_state() : kTasksIdle, safe_idle, ev);  // kiln.tasks' pool
+        // kiln.hooks' read_original and code_state read the exe file's code (sigdb's verified file view). sigdb's
+        // live-code fallback is not the original code, so they are off there. Static: the view is made once.
+        const bool hooks_service = std::any_of(services.begin(), services.end(), [](const Svc& s) {
+            return s.name == "kiln.hooks" && s.available;
+        });
+        const bool original_code = hooks && hooks_service && sigdb::code_from_disk();
+        for (const char* name : {"hooks.read_original", "hooks.code_state"}) {
+            const uint32_t reason = !hooks ? KILN_CAP_REASON_POLICY : !hooks_service ? KILN_CAP_REASON_SERVICE_MISSING :
+                original_code ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SYMBOL_MISSING;
+            const std::string text = !hooks ? "not started in safe idle: " + safe_idle : !hooks_service ?
+                "kiln.hooks did not start" : original_code ? "verified relocated executable file code" :
+                "verified executable file code unavailable; live fallback is not original code";
+            set_core_locked(name, kService, original_code ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE,
+                            reason, text, "core", 0, ev);
+        }
         for (const auto& file : idle_dlls) {
             const std::string name = dll_row_name(file);
             if (name.empty()) continue;
@@ -950,6 +1004,29 @@ void service_dll(const std::filesystem::path& file, std::string_view status, con
     } catch (...) {
     }
 }
+
+// load_one: a kiln/services DLL of another build loads without Kiln-internal tables; row "<its row>.internal" says so.
+void service_internal_refused(const std::filesystem::path& file, const std::string& text) {
+    const std::string name = dll_row_name(file);
+    if (name.empty()) return;
+    try {
+        op([&](std::vector<Event>& ev) {
+            Report r;
+            r.kind = kDll;
+            r.state = KILN_CAP_UNAVAILABLE;
+            r.reason = KILN_CAP_REASON_SERVICE_OLDER;
+            r.text = cut(text, KILN_CAP_TEXT_MAX);
+            r.source = "core";
+            g_dll_failed[name + ".internal"] = r;
+            set_core_locked(name + ".internal", kDll, r.state, r.reason, r.text, r.source, 0, ev);
+            return 0;
+        });
+    } catch (...) {
+    }
+}
+
+// services/tasks.cpp at its init: where tasks.pool reads the pool's health from (see refresh_tasks_pool).
+void tasks_pool_source(int (*state)()) { g_tasks_pool.store(state, std::memory_order_release); }
 
 }  // namespace kiln::caps
 

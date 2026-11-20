@@ -71,6 +71,55 @@ public static class Descriptors
         "game's tick thread (Kiln's UI and client callbacks on the game's other threads). A blocking wait there " +
         "freezes the server, and a test that blocks cannot be timed out.");
 
+    // The task rows of KILN105 share its id: one severity setting covers every way of waiting on, or
+    // escaping, a Kiln task. Their messages differ because the fixes differ.
+    public static readonly DiagnosticDescriptor BlockingTaskCall = Rule("KILN105",
+        "Blocking call in a Kiln task",
+        "'{0}' blocks {1}: Kiln refuses a blocking wait on the tick and in a Kiln task (it can deadlock the tick or starve the task pool), and the Task that KilnTask.AsTask() hands out escapes that refusal; await the KilnTask instead",
+        Threading, DiagnosticSeverity.Warning,
+        "KilnTask.Wait is refused on the tick thread and on Kiln's task workers, and inside a task body a " +
+        "blocking wait holds a pool worker (or a tick hop) that other tasks and the tick may need. AsTask() " +
+        "gives a plain Task for composition (Task.WhenAll); Kiln cannot intercept Wait, Result or " +
+        "GetAwaiter().GetResult() on it, so blocking on that Task in a task is the same mistake.");
+
+    public static readonly DiagnosticDescriptor TickHopDiscarded = Rule("KILN105",
+        "Tick hop result is never awaited",
+        "'{0}' is never awaited: a tick hop does not happen until it is awaited, so the code after it still runs where it ran before; write 'await {0}'",
+        Threading, DiagnosticSeverity.Warning,
+        "KilnTaskContext.ToTick() only makes the hop: nothing is queued for the tick until the returned " +
+        "TickHop is awaited (its awaiter is what hands the continuation to the tick). A ToTick() call whose " +
+        "result is dropped, or kept in a local that nobody awaits, never hops, and the code after it runs on " +
+        "a worker (or wherever it ran) with no warning from the tick-thread rules about that fact alone.");
+
+    public static readonly DiagnosticDescriptor ClientNextTickLeavesTask = Rule("KILN105",
+        "Awaiting Client.NextTick() leaves the Kiln task",
+        "'await Client.NextTick()' leaves the task {0}: the rest of the method runs on the game's main thread outside the task (not tracked by it, not cancelled with it, and left waiting for good if the mod unloads first); write 'await ctx.ToTick(WorldKind.Client)'",
+        Threading, DiagnosticSeverity.Warning,
+        "Client.NextTick() is Kiln.Client's own way to the main thread: its continuation is a plain Client.Post. Inside a " +
+        "Kiln task that continuation is no hop of the task, so the task stops tracking the rest of its own work. " +
+        "ctx.ToTick(WorldKind.Client) is the task's hop to the client world's step: tracked, cancellable, ended with the " +
+        "client world and budgeted.");
+
+    public static readonly DiagnosticDescriptor GatedCallOutOfScope = Rule("KILN105",
+        "Task-thread world call outside a Kiln task",
+        "'{0}' is refused {1}: the task-thread world calls (WorldConcurrent's reads and compare-exchange writes) work only inside a Kiln task or on the tick, and this code has no task scope; {2}",
+        Threading, DiagnosticSeverity.Warning,
+        "WorldConcurrent's reads and writes check, on every call, that a Kiln task's scope is installed on the calling " +
+        "thread (a task segment or a tick hop) or that the call runs on the tick. Code after 'await ...ConfigureAwait(false)' " +
+        "still belongs to the task body but has left the task, and Task.Run work, threads, timers and thread-pool " +
+        "callbacks never had one: Kiln refuses the call there with InvalidOperationException.");
+
+    public static readonly DiagnosticDescriptor GatedWriteOnTick = Rule("KILN105",
+        "Compare-exchange write in tick code",
+        "'{0}' never writes {1}: the server frame holds the engine's write gate for its whole update, so from tick code a compare-exchange always answers Busy (and a client's world, which the writes never touch, answers Unavailable); call it from a Kiln task's worker (Context.Tasks.Run, or after 'await ctx.NextGateWindow()'), or use World.Write on the tick",
+        Threading, DiagnosticSeverity.Warning,
+        "WorldConcurrent.TryCompareExchange and TryCompareExchangeBytes write under the engine's own write gate, which " +
+        "the GameServer frame holds for its whole update. Tick code (OnLoad, tick and event handlers, command and chat " +
+        "handlers, Scheduler.Post work, a task after 'await ctx.ToTick()', ctx.OnTick and ctx.PostToTick delegates) " +
+        "runs inside that frame, so the write is refused Busy (WriteReason.InFrame) every time, without reaching the " +
+        "engine (on a client the writes answer Unavailable: they write the server world only). World.Write is the tick's way " +
+        "to write; a compare-exchange belongs on a task's worker.");
+
     public static readonly DiagnosticDescriptor Unreleased = Rule("KILN106",
         "Thread, timer or subscription is never released",
         "{0} is not released: Kiln does not stop threads, timers, watchers, sockets or external subscriptions a mod creates itself; dispose/stop it in OnUnload",

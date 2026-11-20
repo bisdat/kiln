@@ -26,6 +26,11 @@
 #    --sdk-site; the SHA256SUMS that goes up lists what goes up.
 # 3. GitHub: publishes the draft v<version> (a pre-release for dev builds; "latest" for a stable one) and points the
 #    dev channel at it: the `updates-dev` pre-release holds the dev channel's latest.json (created when missing).
+# 4. The roadmap (a release, never a test build; releasing.md "The roadmap"): once the GitHub release is published,
+#    tools/release/roadmap.py ship moves the version to the released ones in tools/release/roadmap/roadmap.json (its date:
+#    the GitHub publish time in New York); publish.sh prints the command that commits it, then roadmap.py deploy updates
+#    and deploys the frostdev.io checkout in KILN_SITE_DIR (default ~/Work/frostdev.io). A roadmap failure never fails or
+#    undoes the release: a loud warning names the retry, and the exit status is the release's.
 # The nginx locations for /kiln/updates/ and /kiln/downloads/ must be live on the host first (releasing.md).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -167,9 +172,11 @@ pointer() { # release-name title-word
   r gh release upload "$1" --repo "$gh_repo" --clobber "$dir/updates/github/latest.json"
 }
 echo "== GitHub ($gh_repo)"
+gh_published=0
 if ask "Publish the draft $tag and point the GitHub ${channels[*]} channels at it?"; then
   if [[ $channel == stable ]]; then r gh release edit "$tag" --repo "$gh_repo" --draft=false --latest
   else r gh release edit "$tag" --repo "$gh_repo" --draft=false --prerelease; fi
+  gh_published=1
   # the dev channel's fixed pre-release (GitHub's "latest" skips pre-releases); a stable release also serves dev
   if [[ " ${channels[*]} " == *" dev "* ]]; then
     pointer updates-dev dev
@@ -186,6 +193,42 @@ if ask "Publish the draft $tag and point the GitHub ${channels[*]} channels at i
   fi
 fi
 
+# 4. the roadmap: the version as released on frostdev.io/kiln/roadmap. Its failure is a warning, never the release's
+roadmap_warning=""
+if [[ $channel != beta ]]; then
+  echo "== Roadmap (frostdev.io/kiln/roadmap)"
+  site_dir=${KILN_SITE_DIR:-$HOME/Work/frostdev.io}
+  roadmap=(python3 -I "$here/roadmap.py")
+  roadmap_file=tools/release/roadmap/roadmap.json
+  deploy_args=(deploy "$site_dir" --version "$version")
+  ((yes && !dry)) && deploy_args+=(--yes)
+  commit_cmd="git -C $(printf %q "$repo_dir") commit -m $(printf %q "Kiln roadmap: $version released") -- $roadmap_file"
+  retry="  python3 -I $(printf %q "$here/roadmap.py") ship $version   (add --date YYYY-MM-DD if GitHub has no publish date)
+  $commit_cmd
+  python3 -I $(printf %q "$here/roadmap.py") ${deploy_args[*]}"
+  if ((dry)); then
+    "${roadmap[@]}" check "$version" || echo "WARNING: the roadmap check failed (above): the real run would not update the roadmap" >&2
+    r "${roadmap[@]}" ship "$version"
+    echo "would print: $commit_cmd"
+    r "${roadmap[@]}" "${deploy_args[@]}"
+  elif ((!gh_published)); then
+    roadmap_warning="the GitHub release was not published in this run, so the roadmap was left alone. Once it is:
+$retry"
+  elif ! "${roadmap[@]}" ship "$version"; then
+    roadmap_warning="roadmap.py ship failed (above). Fix the source, then:
+$retry"
+  else
+    if ! git -C "$repo_dir" diff --quiet -- "$roadmap_file"; then
+      echo "The roadmap source changed in $repo_dir: commit it (and push it with the release branch):"
+      echo "  $commit_cmd"
+    fi
+    "${roadmap[@]}" "${deploy_args[@]}" || roadmap_warning="roadmap.py deploy failed or was declined (above). The source is shipped; to retry the site:
+  python3 -I $(printf %q "$here/roadmap.py") ${deploy_args[*]}"
+  fi
+  # said now as well as at the end: a later step (Nexus Mods) may stop the script first
+  if [[ -n $roadmap_warning ]]; then echo "WARNING: ROADMAP NOT UPDATED: $roadmap_warning" >&2; fi
+fi
+
 if ((nexus)); then
   echo "== Nexus Mods"
   python3 -I "$here/nexus.py" "$dir"
@@ -197,3 +240,8 @@ fi
 if [[ -n $beta_warning ]]; then
   printf '\n== Beta channel publication decision\n%s\n' "$beta_warning" >&2
 fi
+if [[ -n $roadmap_warning ]]; then
+  printf '\n%s\nWARNING: ROADMAP NOT UPDATED. The release %s itself is published; only frostdev.io/kiln/roadmap is behind.\n%s\n%s\n' \
+    "$(printf '!%.0s' {1..100})" "$name" "$roadmap_warning" "$(printf '!%.0s' {1..100})" >&2
+fi
+exit 0

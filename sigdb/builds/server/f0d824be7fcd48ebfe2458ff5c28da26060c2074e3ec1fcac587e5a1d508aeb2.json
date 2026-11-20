@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified in labs on this exe, 2026-11-11, Kiln 0.2.0-dev+20261112.68988ae, policy any, standard lab save copied fresh for each group, one group per boot (or per run of boots): the running core resolved sigdb 447/447 symbols (355 defined, 92 captured), 542/542 constants (493 defined, 49 captured) and 146/146 features, each to the same value as the offline resolve (compared per name from sigdb-report.json); base world 24/0, players 30/0, chat+time 50/0, hooks 17/0, content 33/0, newcontent 24/0; api 74/0; settings 70/0; items 95/0 (kiln.items self-test on); combat 203/0 (watch-all); spawn 57/0 over 3 boots; gameplay 48/0; creatures 63/0; assets 17/0; rules 53/0; pacing 21/0; types 32/0 + types-peer 8/0; progression 45/0 (no player); net 168/0 with nettest 95 PASS, 0 FAIL; quests 188/0 over 3 boots; skills 124/0 over 2 boots; characters 53/0 over 3 boots; gamedata 71/0 over 2 boots (reload, restart); saves 54/0 over 8 boots (SIGINT, kill -9 x3, restore, game backup); build 79/0 over 4 boots; placeholder 34/0 over 4 boots (kill -9). Failing, so their names stay static: abilities 70/3, 70/3, 71/2 over three runs (the bow shot is refused by the core's PlaySequence guard every time, the Greet emote ran 73/66/79 steps of the 80 the test wants, the staff cast 38/35 then passed, the PC under heavy load); npcai 25/6 twice (force ready unavailable on four spawned creatures, the peacekeeper's relations not applied). Not run: emf (its probe needs third-party EMF mods). Levels: lab 1093 names in 24 services, static 42 (abilities, npcai, emf). With this record under verified-only: build verified, SimStep hooked, every server service loaded (27; audio, screen, ui and vfx skipped as client-only), 0 error lines.",
   "declared": {
-    "symbols": 590,
-    "constants": 684,
-    "features": 184
+    "symbols": 597,
+    "constants": 696,
+    "features": 186
   },
   "features": {
     "abilities.attributes": true,
@@ -80,8 +80,10 @@
     "gems.craft": true,
     "gems.payers": true,
     "gems.sockets": true,
+    "hooks.foreign_modules": true,
     "hooks.owner_cleanup": true,
     "hooks.typed": true,
+    "impact.pool": true,
     "items.catalog": true,
     "items.equip": true,
     "items.equip_sets": true,
@@ -340,6 +342,9 @@
     "gems/RecycleGive": "0x1450cb",
     "gems/UnslotMove": "0x1b4bb0",
     "gems/UnslotMoveCall": "0x145392",
+    "impact/AllocStats": "0x599c60",
+    "impact/PoolAlloc": "0x9952f0",
+    "impact/ReportUsage": "0x99c680",
     "items/ActorSpawnUpdate": "0x454f0",
     "items/AddComponent": "0x5fc570",
     "items/AreaDeposit": "0x1b2a70",
@@ -815,6 +820,18 @@
     "gems/input.weapon": "0x260",
     "gems/iter.size": "0xf0",
     "gems/multiplier.key": "0xff88b470",
+    "impact/alloc.capacity": "0xf0",
+    "impact/alloc.used": "0xa0",
+    "impact/block.capacity": "0x10",
+    "impact/block.live": "0x18",
+    "impact/block.slots": "0x8",
+    "impact/pool.blocks": "0x10",
+    "impact/pool.live": "0x58",
+    "impact/pool.peak": "0x60",
+    "impact/slot.program": "0xc",
+    "impact/sys.block_count": "0x90",
+    "impact/sys.blocks": "0x88",
+    "impact/sys.pool": "0x78",
     "items/attr.durability": "0xed71dc01",
     "items/attr.durability_max": "0x3c8a292f",
     "items/attr.fuel": "0x5b0bf75",
@@ -2040,6 +2057,16 @@
         "quests.npc_pages": "static"
       }
     },
+    "dev29-xhl-foreign-modules": {
+      "level": "static",
+      "date": "2026-11-19",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {},
+      "constants": {},
+      "features": {
+        "hooks.foreign_modules": "static"
+      }
+    },
     "emf": {
       "level": "static",
       "date": "2026-11-11",
@@ -2214,6 +2241,37 @@
       },
       "features": {
         "gems.sockets": "static"
+      }
+    },
+    "impact-pool": {
+      "level": "static",
+      "date": "2026-11-19",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@impact/AllocStats.fields": "static",
+        "@impact/CreateInstance.pool": "static",
+        "@impact/PoolAlloc.counts": "static",
+        "@impact/ReportUsage.walk": "static",
+        "impact/AllocStats": "static",
+        "impact/PoolAlloc": "static",
+        "impact/ReportUsage": "static"
+      },
+      "constants": {
+        "impact/alloc.capacity": "static",
+        "impact/alloc.used": "static",
+        "impact/block.capacity": "static",
+        "impact/block.live": "static",
+        "impact/block.slots": "static",
+        "impact/pool.blocks": "static",
+        "impact/pool.live": "static",
+        "impact/pool.peak": "static",
+        "impact/slot.program": "static",
+        "impact/sys.block_count": "static",
+        "impact/sys.blocks": "static",
+        "impact/sys.pool": "static"
+      },
+      "features": {
+        "impact.pool": "static"
       }
     },
     "items": {

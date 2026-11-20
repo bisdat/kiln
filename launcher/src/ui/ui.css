@@ -275,6 +275,11 @@
 .k-flame.on svg { fill: var(--k-ember-500); stroke: var(--k-gold-400); transform: scale(1.08); filter: drop-shadow(0 0 5px rgba(255, 106, 26, .75));
   animation: k-lick 1.9s ease-in-out infinite; }
 @keyframes k-lick { 0%, 100% { transform: scale(1.08) rotate(-1deg); } 35% { transform: scale(1.02, 1.14) rotate(2deg); } 70% { transform: scale(1.1, 1.03) rotate(-2deg); } }
+/* drawing without the GPU, or WebKit without compositing ("flat": shell/Stage.tsx flatDrawing; shell/AppShell.tsx
+   data-render): a lit flame stands still. Every frame of the flicker repainted each flame and its glow on the CPU, most
+   of the launcher's time on a page full of lit mods (inbox 94); with more than ten flames WebKit repaints the box round
+   all of them, and with the fire's frames the whole window */
+.k-app[data-render="software"] .k-flame.on svg, .k-app[data-render="flat"] .k-flame.on svg { animation: none; }
 
 /* ---------------------------------------------------------------- tables: small-caps heads, rules, one line per row */
 .k-table { display: flex; flex-direction: column; min-width: 0; min-height: 0; font-size: 16.5px; }

@@ -59,6 +59,8 @@ pub enum ProxyKind {
     Shroudlink,
     /// Ember's server loader (powrprof.dll, iphlpapi.dll, dbghelp.dll).
     Ember,
+    /// AndyPimms' Enshrouded ModLoader (dinput8.dll): runs packages with a .dll.mod manifest.
+    Dllmod,
     /// ModLoader Proxy (chainloader.ini).
     ModLoaderProxy,
     /// Ultimate ASI Loader (.asi plugins; runs only under its own proxy names).
@@ -75,6 +77,8 @@ pub enum ProxyKind {
     ChainLoader,
     /// CharosDX's dinput8.dll loader: loads every `mods\<mod>\native\*.dll` (Sparkworks Enhanced, Cross-Base Storage).
     NativeFolders,
+    /// OptiScaler, the upscaler and frame generation tool (dxgi.dll, winmm.dll, version.dll, dbghelp.dll ...).
+    OptiScaler,
     /// Some other DLL mod or proxy.
     Unknown,
     /// Not a 64-bit PE DLL.

@@ -18,6 +18,8 @@ export const NAV_MAIN: NavItem[] = [
   { get label() { return t("nav.saves"); }, to: "/saves" },
   { get label() { return t("nav.editor"); }, to: "/editor" },
   { get label() { return t("nav.servers"); }, to: "/servers" },
+  // Kiln's Discord (src/community/): hidden with Settings' "Show the Community page" off (shell/AppShell.tsx)
+  { get label() { return t("community.nav"); }, to: "/community" },
 ];
 
 export const NAV_SIDE: NavItem[] = [

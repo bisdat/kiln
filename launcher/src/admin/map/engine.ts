@@ -6,7 +6,7 @@
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { AdminPlayer, AdminPos } from "../../api/admin";
-import { t as tr } from "../../i18n";
+import { formatLocale, t as tr } from "../../i18n";
 import { GameMapLayer, Height, WORLD } from "./gamemap";
 
 const NATIVE = 5;
@@ -533,7 +533,7 @@ export class MapEngine {
           const scale = (16 + 10 * Math.min(1, Math.log10(Math.max(1, vol)) / 4)) / 24;
           add(x, z, { scale, opacity: surf ? 1 : 0.45, ring: f.slug.startsWith("archaic-essence") ? "#ff5ad8" : null, sub: tr("admin.map.ore") },
             () => {
-              const volume = vol.toLocaleString("en-US");
+              const volume = vol.toLocaleString(formatLocale() ?? "en-US");
               return tip(e.n, esc(depth > 0
                 ? surf ? tr("admin.map.oreDepth", { vol: volume, depth }) : tr("admin.map.oreBuriedDepth", { vol: volume, depth })
                 : surf ? tr("admin.map.oreVolume", { vol: volume }) : tr("admin.map.oreBuried", { vol: volume })));

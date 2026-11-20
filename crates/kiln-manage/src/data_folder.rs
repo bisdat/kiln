@@ -1041,6 +1041,11 @@ pub struct Space {
     pub unit: u64,
 }
 
+/// The free space of the volume an existing folder is on, as [`RealFacts`] reads it; None when it is not known.
+pub fn space_at(dir: &Path) -> Option<Space> {
+    sys::space(dir)
+}
+
 /// What [`check`] asks the system. [`RealFacts`] asks it; [`Facts`] holds fixed answers (tests, the launcher's mock).
 pub trait SystemFacts {
     /// A sentence part naming the running game of one of `installs` ("enshrouded.exe is running (pid 4242)"), if one

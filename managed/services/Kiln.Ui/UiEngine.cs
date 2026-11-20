@@ -107,6 +107,7 @@ internal static unsafe class UiEngine
         if (UiNative.DrawingOffReason is { } reason) Log(LogLevel.Info, reason);
         PlayerLook.Start();  // the player's look of Kiln's UI (kiln.json "ui")
         UiLanguage.Start();  // the language of Kiln's own texts (kiln.json "ui.language"), handed to kiln.ui too
+        GraphicsTools.Start();  // Kiln's own graphics tools (kiln.json "graphics"), handed to kiln.ui (0.2.0-dev.29.18)
         ChatCompletionNetwork.Start(); // optional kiln:chat completion protocol
         KeyBindings.Load();
         ApplyMenuKey(KeyBindings.MenuKey);
@@ -290,6 +291,7 @@ internal static unsafe class UiEngine
         Ui.Screens.RemoveOwnedBy(mod);
         Ui.Crafting.RemoveOwnedBy(mod);
         KeyBindings.RemoveOwnedBy(mod);
+        KeyInput.RemoveOwnedBy(mod);
         FrameHandlers.RemoveOwnedBy(mod);
         Recount();
     }

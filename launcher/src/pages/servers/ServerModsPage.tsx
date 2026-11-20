@@ -243,7 +243,7 @@ function SyncDialog({ id, open, onClose, mods }: { id: string; open: boolean; on
               <Toggle checked={!!cur} disabled={handPlaced} label={e.name} hint={handPlaced ? t("servers.mods.handPlaced") : `${e.kind}, ${e.id}`}
                 onChange={(on) => {
                   const m = new Map(want);
-                  const v = defaultVersion(e);
+                  const v = defaultVersion(e, "server");
                   if (on && v) m.set(k, { kind: e.kind, id: e.id, version: v.version, hash: v.hash });
                   else m.delete(k);
                   setWant(m);

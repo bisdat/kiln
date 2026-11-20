@@ -78,16 +78,35 @@ internal static class KilnText
     internal static int Generation => Current().Generation;
 
     /// <summary>The overlay's texts are English for now although <see cref="Language"/> is not: Kiln.Ui's glyphs of that
-    /// language (the game's own Chinese, Japanese or Korean font) are still loading, or could not be loaded.</summary>
+    /// language (the game's own Chinese, Japanese or Korean font, or the Cyrillic one of its default font group) are still
+    /// loading, or could not be loaded.</summary>
     internal static bool Gated => Current().Gated;
 
     /// <summary>Whether drawing <paramref name="language"/> needs glyphs the overlay's Latin fonts lack (Chinese, Japanese,
-    /// Korean): kiln.ui loads the game's own font of that language group first.</summary>
-    internal static bool NeedsGlyphs(string language)
+    /// Korean, Cyrillic): kiln.ui loads the game's own fonts of that script first.</summary>
+    internal static bool NeedsGlyphs(string language) => GlyphLanguage(language) != 0;
+
+    /// <summary>The keen::LanguageId kiln.ui reports the glyphs of for a tag (font_group.h language_id): zh-TW, zh-HK, zh-MO
+    /// and zh-Hant 21, every other zh 20, ja 11, ko 13; ru 9, uk 34, bg 24, and the other Cyrillic languages (be, mk, sr but
+    /// sr-Latn, kk, ky, mn, tg) 9; else 0 (Latin: the overlay's own fonts).</summary>
+    internal static byte GlyphLanguage(string language)
     {
         var l = ModLocale.Normalize(language);
         var dash = l.IndexOf('-');
-        return (dash > 0 ? l[..dash] : l) is "zh" or "ja" or "ko";
+        var primary = dash > 0 ? l[..dash] : l;
+        if (primary == "ja") return 11;
+        if (primary == "ko") return 13;
+        if (l is "zh-tw" or "zh-hk" or "zh-mo" || l.StartsWith("zh-hant", StringComparison.Ordinal)) return 21;
+        if (primary == "zh") return 20;
+        return primary switch
+        {
+            "ru" => 9,
+            "uk" => 34,
+            "bg" => 24,
+            "sr" => l.StartsWith("sr-latn", StringComparison.Ordinal) ? (byte)0 : (byte)9,
+            "be" or "mk" or "kk" or "ky" or "mn" or "tg" => 9,
+            _ => 0,
+        };
     }
 
     /// <summary>Kiln.Ui, each overlay frame: whether the overlay can draw the language in use (kiln.ui's glyph state). Until it
@@ -181,18 +200,38 @@ internal static class KilnText
     /// <summary>Whether the table has <paramref name="key"/> (in any language of the lookup, English included).</summary>
     internal static bool Has(string key) => Current().Shown.ContainsKey(key);
 
-    /// <summary>The keys under <see cref="NativePrefix"/> with their texts now (for kiln.ui). The game draws them with its own
-    /// fonts, which have every language's glyphs, so they are the language's also while the overlay's texts are gated.
-    /// kiln.ui picks a plural form as English does (.one for 1, else .other): for a group whose language has no singular
-    /// form .one is its .other.</summary>
+    /// <summary>The native keys the game draws with its own fonts, which have every language's glyphs: the Mods entry of its
+    /// menus and the main menu's footer. Every other native key is drawn by kiln.ui in the overlay (the graphics readout, the
+    /// fallback window) with the overlay's fonts.</summary>
+    internal static readonly string[] GameDrawnPrefixes = [NativePrefix + "menu.", NativePrefix + "footer."];
+
+    /// <summary>The keys under <see cref="NativePrefix"/> with their texts now (for kiln.ui). Those the game draws
+    /// (<see cref="GameDrawnPrefixes"/>) are the language's also while the overlay's texts are gated; those kiln.ui draws in
+    /// the overlay are English then, as every other overlay text, so they never show as boxes. kiln.ui picks a plural form as
+    /// English does (.one for 1, else .other): for a group whose language has no singular form .one is its .other.</summary>
     internal static IReadOnlyList<KeyValuePair<string, string>> Native()
     {
         var st = Current();
-        var native = st.Table.Where(p => p.Key.StartsWith(NativePrefix, StringComparison.Ordinal)).ToDictionary(StringComparer.Ordinal);
-        foreach (var (b, from) in st.Origin)
-            if (b.StartsWith(NativePrefix, StringComparison.Ordinal) && PluralForm(from, 1) == "other" && native.TryGetValue(b + ".other", out var other))
-                native[b + ".one"] = other;
+        var native = new Dictionary<string, string>(StringComparer.Ordinal);
+        void Take(Dictionary<string, string> table, Dictionary<string, string> origin, bool game)
+        {
+            foreach (var (k, v) in table)
+                if (k.StartsWith(NativePrefix, StringComparison.Ordinal) && GameDrawn(k) == game) native[k] = v;
+            foreach (var (b, from) in origin)
+                if (b.StartsWith(NativePrefix, StringComparison.Ordinal) && GameDrawn(b) == game && PluralForm(from, 1) == "other" &&
+                    native.TryGetValue(b + ".other", out var other))
+                    native[b + ".one"] = other;
+        }
+        Take(st.Table, st.Origin, game: true);
+        Take(st.Shown, st.ShownOrigin, game: false);
         return native.OrderBy(p => p.Key, StringComparer.Ordinal).ToArray();
+    }
+
+    private static bool GameDrawn(string key)
+    {
+        foreach (var p in GameDrawnPrefixes)
+            if (key.StartsWith(p, StringComparison.Ordinal)) return true;
+        return false;
     }
 
     /// <summary>The languages Kiln has texts for: English, then the files in the locales folder, as normalized tags.</summary>
@@ -233,10 +272,12 @@ internal static class KilnText
         return string.Join('-', parts);
     }
 
-    /// <summary>The CLDR plural category of <paramref name="n"/> among one / other: languages without a singular form (Chinese,
-    /// Japanese, Korean, Vietnamese, Thai, Indonesian, Malay) always "other"; French and Brazilian Portuguese "one" for 0
-    /// and 1; every other language "one" for 1. A translation that needs more forms (few, many) writes them; Kiln's
-    /// English has one and other, so a missing form falls back to .other.</summary>
+    /// <summary>The CLDR plural category of <paramref name="n"/> (a whole number): languages without a singular form
+    /// (Chinese, Japanese, Korean, Vietnamese, Thai, Indonesian, Malay) always "other"; French and Brazilian Portuguese
+    /// "one" for 0 and 1; Russian, Ukrainian and Belarusian "one" (1, 21, 31, ... but not 11), "few" (2-4, 22-24, ... but
+    /// not 12-14) and "many" (0, 5-20, 25-30, ...); Polish "one" (1 only), "few" (as Russian) and "many" (0, 5-21, ...);
+    /// every other language "one" for 1. A translation that lacks a form falls back to .other; Kiln's English has one and
+    /// other.</summary>
     internal static string PluralForm(string language, long n)
     {
         var l = ModLocale.Normalize(language);
@@ -244,6 +285,14 @@ internal static class KilnText
         var primary = dash > 0 ? l[..dash] : l;
         if (primary is "zh" or "ja" or "ko" or "vi" or "th" or "id" or "ms" or "lo" or "my" or "km") return "other";
         if (primary is "fr" || l is "pt-br" || (primary is "pt" && l is not "pt-pt")) return n is 0 or 1 ? "one" : "other";
+        if (primary is "ru" or "uk" or "be" or "pl")
+        {
+            var a = n == long.MinValue ? long.MaxValue : Math.Abs(n);
+            long m10 = a % 10, m100 = a % 100;
+            if (primary is "pl" ? a == 1 : m10 == 1 && m100 != 11) return "one";
+            if (m10 is >= 2 and <= 4 && m100 is < 12 or > 14) return "few";
+            return "many";
+        }
         return n == 1 ? "one" : "other";
     }
 
@@ -288,6 +337,7 @@ internal static class KilnText
         {
             Log(LogLevel.Warn, "texts: a listener of the language change failed: " + e.Message);
         }
+        KilnLanguage.Raise();  // mods' handlers (each guarded on its own)
         return made;
     }
 

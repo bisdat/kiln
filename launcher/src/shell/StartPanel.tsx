@@ -1,7 +1,9 @@
 // The start's bar on the Play page (and the bar alone on the Deck's Home): the running step's line (a status), the bar
 // (a progressbar with the step and the time left as its text), the time left or the first start's sentence (where the
 // number comes from on hover), and, where there is room, every step: the done ones with what they took, the running
-// one, the ones to come with what they usually take. shell/startProgress.ts has the words.
+// one, the ones to come with what they usually take. shell/startProgress.ts has the words. `action` sits after the time
+// left, on its line when there is room (Play's "Stop waiting" while Steam has not started the game).
+import type { ReactNode } from "react";
 import type { PreStart, StartTimeline } from "../api/commands";
 import { startWords, stepTime } from "./startProgress";
 import { useT } from "../i18n";
@@ -16,7 +18,7 @@ export function StartBar({ t: tl, words, className = "k-start-bar" }: { t: Start
   );
 }
 
-export function StartProgress({ t: tl, prep }: { t: StartTimeline; prep?: PreStart | null }) {
+export function StartProgress({ t: tl, prep, action }: { t: StartTimeline; prep?: PreStart | null; action?: ReactNode }) {
   const t = useT();
   const words = startWords(tl, prep);
   const steps = tl.steps.filter((s) => s.state !== "skipped");
@@ -24,10 +26,13 @@ export function StartProgress({ t: tl, prep }: { t: StartTimeline; prep?: PreSta
     <div className="k-start" data-testid="start-progress">
       <p className="k-hero-say k-start-line" role="status" title={words.line}>{words.line}</p>
       <StartBar t={tl} words={words} />
-      <p className={"k-start-left" + (tl.estimate.slow ? " k-tone-warn" : "")} title={words.basis ?? undefined} data-testid="start-left">
-        {words.left}
-        {words.basis && <span className="k-start-basis"> {words.basis}.</span>}
-      </p>
+      <div className="k-start-leftrow">
+        <p className={"k-start-left" + (tl.estimate.slow ? " k-tone-warn" : "")} title={words.basis ?? undefined} data-testid="start-left">
+          {words.left}
+          {words.basis && <span className="k-start-basis"> {words.basis}.</span>}
+        </p>
+        {action}
+      </div>
       <ol className="k-start-steps" aria-label={t("shell.startPanel.stepsAria")}>
         {steps.map((s) => (
           <li key={s.id} className={`k-start-step is-${s.state}`} aria-current={s.state === "running" ? "step" : undefined}>

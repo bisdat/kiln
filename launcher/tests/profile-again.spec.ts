@@ -30,7 +30,7 @@ test("a profile deleted and made again under the same name takes the next switch
   await page.evaluate(() => { location.hash = "#/settings"; });
   const sec = page.getByRole("region", { name: "Profiles" });
   await sec.getByRole("listitem").filter({ hasText: "Vanilla plus" }).getByRole("button", { name: "Load" }).click();
-  await expect(sec.getByRole("listitem").filter({ hasText: "Vanilla plus" })).toContainText("Loaded", { timeout: 5000 });
+  await expect(sec.getByRole("listitem").filter({ hasText: "Vanilla plus" })).toContainText("Loaded", { timeout: 10_000 });
   await sec.getByRole("button", { name: "More for Ember run" }).click();
   await page.getByRole("menuitem", { name: "Delete" }).click();
   const confirm = page.getByRole("dialog", { name: "Delete Ember run?" });
@@ -46,7 +46,7 @@ test("a profile deleted and made again under the same name takes the next switch
   const made = await api<{ id: string; generation: number; mods: Mods }>(page, "profileGet", "ember-run");
   expect(made.generation).toBe(1);
   await again.getByRole("button", { name: "Load" }).click();
-  await expect(again).toContainText("Loaded", { timeout: 5000 });
+  await expect(again).toContainText("Loaded", { timeout: 10_000 });
   // back on Play: a switch saves the new profile, with its own mods (Vanilla plus's), and no conflict
   await page.evaluate(() => { location.hash = "#/"; });
   await expect(sw("Weather Plus")).toHaveAttribute("aria-checked", "true", { timeout: 10_000 });

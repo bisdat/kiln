@@ -335,6 +335,58 @@ presentation; a program that must change what others see belongs in the server w
   end of the kiln.world table (offsets 496 to 520, after the foreign views at 448 to 488; the table is 528 bytes;
   [kiln_world.h](../../../native/core/abi/services/kiln_world.h)).
 
+#### A client program on the game's entities: what holds (0.2.0-dev.29.18)
+Checked statically against the client build 26430625 (evidence and addresses:
+[docs/re/world.md](../../re/world.md#a-mods-client-world-program-and-wraps-checked-for-their-first-real-use-020-dev2918-client-26430625)),
+for a program that changes how the game draws an entity it did not make (the weapon visual of a character).
+- **It is there.** Every symbol on the path resolves on that build, the hook on `RegisterAllPrograms` is called for each
+  client world (seen in a real client of 0.2.0-dev.29.17), and the client world steps every program flagged for it.
+- **Its place in the step.** After every game program it conflicts with: a program that writes `SlotAttachment` runs after
+  the game's `slot_attachment` and `slot_attachment_init`. The game reads what you wrote in the **next** client step, so a
+  change shows one client step late, and a new entity shows its template's values for its first step. To act before the
+  game's program in the same step, wrap it: a client-world `BeforeEach` on `slot_attachment` (and `slot_attachment_init`
+  for new entities) with `WrapOptions.World = WorldKind.Client` ([systems.md](systems.md)). The wrap sees only that
+  program's lists; keep what only your program can see (a template's `ModelResource`, say) in your program and share the
+  answer per entity.
+- **Entity ids.** An entity the server sends has the **server's id** in your client world, on a joined client and on a
+  host alike: the game creates it under the id in the server's message. The entity id of a player's character that your
+  server half has (`Players`, `ctx.Entity` in a server program) names that character in every client's world, and its
+  equipment visuals name it as their parent (`DespawnLink.parentEntityId`, and `SlotAttachment.attachedToEntityId` once
+  the game's `slot_attachment` filled it in). Ids of entities a client makes by itself are its own.
+- **Reading and writing the entity.** `TryWrite` writes the current entity's own component; nothing marks it for the save
+  or replication, and a component that is not replicated (`SlotAttachment`) is never sent. Read a component you also
+  write with `TryReadWritable` / `TryGetWritable` (since 0.2.0-dev.29.18): declare it once, under `write`. `TryReadOther`
+  works in a client program; `TryWriteOther` stays refused there.
+- **Template data.** `tpl` gives the entity's template value of a template component: `tpl: ["ModelResource"]` is what the
+  game's own client programs use (40 of its 197 client programs have a `tpl` list). No game program uses `tpl` on a
+  component that also changes per entity (`SlotAttachment`, `Hide`), so that is not proven: read such a template's values
+  from its data (`Content.Templates`) or keep the live value before your first write.
+- **Typed.** Kiln.Game's `Ecs.SlotAttachment` (with `Ecs.Offset`, `Ecs.AttachmentSlot`, `Ecs.AttachmentTarget`),
+  `Ecs.EquipmentAnimationSets` (`Ecs.PrimaryAnimationSet`, `Ecs.SecondaryAnimationSet`), `Ecs.DespawnLink` and
+  `Ecs.ModelResource` are the game's layouts on the client build too (its type table equals the server's, 1839 types),
+  checked against the running game on first use:
+
+```json
+{ "format": 1, "programs": { "weapon_pose": { "world": "client",
+    "with": ["VisualEquipment"], "write": ["SlotAttachment"], "tpl": ["ModelResource"] } } }
+```
+
+```csharp
+binding = EcsPrograms.TryBind("weapon_pose", c =>
+{
+    if (!c.TryGetWritable(out Ecs.SlotAttachment sa) || !c.TryGet(out Ecs.ModelResource model, template: true)) return;
+    if ((uint)sa.attachedToEntityId != localPlayer) return;            // the owner's id: the server's (above)
+    sa.attachmentSlot = Ecs.AttachmentSlot.Chest;                      // your pose; the game re-reads it every step
+    c.TrySet(sa);
+}, WorldKind.Client).Handle;
+```
+
+- **The prediction storage** runs the server programs of the client world's table for the local player (the stance's
+  `equipment_visuals` among them), so a server-side change to the local player's own animation input needs the same
+  change there: a prediction wrap ([systems.md](systems.md#the-prediction-storage-worldkindprediction-since-020-dev2918)).
+- **Only a real client shows** that the write moves the model on screen (guided check `programs.client-visual`), that a
+  client-world wrap's and a prediction wrap's stages run there, and that a joined client's ids match in practice.
+
 ## Native (other services)
 
 Look the table up in `on_ready` (services load in file-name order, so `kiln.world` may not exist yet in your
@@ -400,6 +452,357 @@ if (W->register_program(owner, &d, &g_prog) == KILN_OK)
   declared. Never create/destroy entities or call `find` from inside an update.
 - Limits: tpl 8, read+write 42, singletons 64 per list, other_tpl 9, other 92, events 24, iterator 4096 bytes; a name
   may appear once per access group. events_in slots resolve only when the list has a single event.
+
+### World reads from task threads
+
+A task thread can read entities and components through seven members appended to `kiln.world` (offsets 528 to 576; the
+table is 584 bytes with them, 616 with the writes below; version stays 4, so check `header.size`) and `kiln.types`' `ecs_registry`. Every one of them runs
+on the calling thread, the tick included: none posts work to a tick and none waits on one. Every engine byte goes
+through `kiln.internal.engine`'s guarded copy, so a page the game freed or protected fails the read, never the game.
+
+| Member | What it returns |
+|---|---|
+| `entity_open` | a `KilnObjectRef`: id, generation, world session, layout stamp and the caller's reload epoch. A value, not a handle; nothing is pinned |
+| `entity_validate` | the same ref re-checked, as a `KilnObjectInfo` that names the generation and session seen now |
+| `ecs_context_snapshot` | which worlds and sessions exist now, and whether this build has an exact engine profile |
+| `ecs_query` | every entity that has all of the named components, optionally inside a radius, as refs in ascending entity id. Complete or nothing |
+| `ecs_snapshot` | one component's bytes, checked before and after the copy |
+| `ecs_snapshot_many` | several components, each with its own presence. Not one atomic read across components |
+| `ecs_template_uuid` | the template the entity was spawned from, 16 bytes, checked before and after |
+| `kiln.types` `ecs_registry` | the component catalog: index, hash, size, type identity, and tracking flags only when they were actually read |
+
+**What works where.** Entity and component reads work on the two exact builds Kiln has profiles for, dedicated server
+26430253 and client 26430625:
+
+| World | Dedicated server | Client hosting a game | Client joined to a server |
+|---|---|---|---|
+| server (`KILN_WORLD_SERVER`) | yes | yes | no server world (unavailable) |
+| client (`KILN_WORLD_CLIENT`) | no client world | yes | yes |
+| prediction | unavailable (a storage no engine view names) | unavailable | unavailable |
+
+On any other build, and on these two when a check below fails, every entity read answers unavailable and the
+capability row `world.ecs_read` says why; `ecs_context_snapshot` still answers.
+
+**How a read finds an entity.** From the exact profile's `ecsReadLayout`: the world's entity manager, its entity map
+(the engine's own id hash and linear probe over the occupancy bits and keys, bounded), the entity record (id,
+generation, archetype layout, chunk, row, definition), the layout's component bits, offsets and strides, and the
+engine's component registration rows (each one's hash checked against its name; a stride must equal the registered
+size). The view the engine gate resolves for the world kind must name the very world object Kiln sees for that kind.
+The entity's layout pointer is its layout stamp, so a component added or removed makes its refs stale; a row that
+moves inside the same archetype does not.
+
+**When reads turn on.** At boot (`on_ready`) `world.ecs_read` is available only when kiln.engine matched an exact
+profile, `kiln.internal.engine` is here, the profile's read section carries the entity id index and every offset the
+reads use, and kiln.world's own resolution of the same fields on the running exe (its sigdb constants for the entity
+map, the hash map's fields, the record's id, layout, chunk and row, the layout's offsets and strides) agrees with the
+profile field by field. The row's text names the first check that failed. `tools/engine/validate.py` shows the same
+fields statically in both exes (docs/kiln/services/engine.md).
+
+**The refusals stay distinct.** **Absent**: no such entity, or the entity has no such component. **Stale**: the same
+id now names a new entity (a new generation), or the session, the layout or the caller's reload epoch changed.
+**Unreadable**: the copy faulted, the bytes changed during the read, or a query's membership changed while it was being
+read (`KILN_WORLD_ERR_CHANGED`; nothing is copied); try again. **Unavailable**: no exact profile, no world of that kind,
+or reads are off on this build. **Busy** and **unsupported**: frame-quiet reads only (below). A short buffer is
+`KILN_ERR_BUFFER_TOO_SMALL` with `*required` set and nothing written; `ecs_snapshot_many` works out the size before it
+copies anything.
+
+**Reload epochs.** Kiln keeps each owner at the newest `reload_epoch` it opened a ref with (0 until then). Opening
+under a newer epoch is the owner's reload: from then on its refs of every other epoch validate stale. Opening under an
+older epoch is stale. `ecs_query` refs carry the caller's current epoch. A retiring owner's epoch is dropped.
+
+**Two read modes for component bytes.**
+
+- **Stable copy** (the default). The engine keeps no version per component, so Kiln copies the bytes twice between
+  identity checks, compares the copies and hashes the bytes before and after each copy; a value that changes during the
+  read is refused unreadable. The limit, plainly: a game writer that is descheduled half way through storing a value
+  leaves a half-written value that stays put, and a stable copy cannot tell it from a whole one. The host test measures
+  it with a writer that stores byte by byte and yields half way: some mixed values get through. A writer that stores
+  whole values, as the game's systems do, never got one through.
+- **Frame-quiet** (opt-in, server world only): `KILN_ECS_READ_FRAME_QUIET` on a `KilnEcsSnapshotSpec` (a single
+  component is `ecs_snapshot_many` with one spec), `KILN_ECS_QUERY_FRAME_QUIET` on a query. The copies run only while no
+  server frame runs: Kiln reads the server step, then the engine's Scene word (the word the GameServer frame holds for
+  its whole update and the write gate takes), copies, and reads the word and the step again. The word must be free both
+  times and the step must not have moved: a frame that overlapped the copies either held the word at one of the two
+  looks or ran entirely between them and moved the step. Kiln only observes the word: it takes no gate, writes
+  nothing, and the copy window allocates nothing and takes no lock. **Busy** (`KILN_ECS_ERR_BUSY`): a frame ran during
+  the read, nothing was copied; retry after the step (`NextGateWindow` in C#, a `KILN_TASK_AFTER_STEP` task natively).
+  **Unsupported** (`KILN_ECS_ERR_UNSUPPORTED`): a client or prediction world, which has no such word; Kiln never falls
+  back to a stable copy for a frame-quiet request. It rests on two facts of the engine: every frame that writes
+  components holds the Scene word, and runs Kiln's Pre (which moves the step).
+- `ecs_snapshot` is always a stable copy. `ecs_template_uuid` has no mode: its 16 bytes are the template definition's,
+  game data that no frame writes, reached through one aligned pointer of the entity record.
+
+**Host and Windows tests, no game.** `KILN_OUT=… native/services/world/tests/run.sh` runs `ecs_reads_test` (the logic
+over a scripted backend) and `ecs_engine_test` (the engine backend under that logic, over the real kiln.engine booted
+with a fake core and a fake engine laid out from both exact profiles: a recycled id, a removed entity, an archetype
+change, a moved row, faulting pages, a catalog that does not check out, a stride that is not the registered size, a
+view naming another world, a session change, reload epochs, a resized table, a probe without a free slot, concurrent
+writers, and frame-quiet reads against frames), each under ASan/UBSan and ThreadSanitizer.
+`native/services/types/test-types.sh` runs `ecs_registry_test`. `native/build.sh world-ecs-fault` and
+`WINEPREFIX=<private prefix> native/services/world/tests/wine.sh` run the fault paths over kiln.engine's real Windows
+SEH copy: pages made unreadable, guarded, decommitted and flipped under the reads, every read refused cleanly.
+
+**In-game check (the owner's).** Create the empty file `<game>/kiln/data/kiln.world/ecs-read-check` before starting.
+While a server world runs, every 20 s (6 rounds) kiln.world takes the players and the nearest container through the
+game's own `GetComponent` on the tick, then a `kiln.tasks` task reads the same entities through the members above and
+compares: `world ecs-read check: ...` lines in `kiln.log`, one `PASS` or `FAIL` line per round.
+
+1. Dedicated server: start it with the file in place, join with a client, stand still next to a chest for two minutes.
+   Expect `world.ecs_read: on (enshrouded-server-26430253)` at boot and `world ecs-read check: PASS round N` lines: the
+   player's position read from the task within 0.5 m of the tick's, the Inventory size the same, the chest in the
+   bounded query, a frame-quiet read of the player's transform (`ok after N busy look(s)`), and `snapshot_many`.
+2. Client hosting a game (single player or co-op host), the file in `<game>/kiln/data/kiln.world/`: the same lines,
+   and `world.ecs_read: on (enshrouded-client-26430625)`; the client-world lines show entities near the player, and the
+   frame-quiet client-world query is refused `unsupported`.
+3. Send `kiln.log` if any round says `FAIL`, or if `world.ecs_read` is off (its text says why). Remove the file again
+   afterwards.
+
+#### From C#: `WorldConcurrent` (experimental)
+
+`WorldConcurrent` (Kiln.World) is the C# face of these members, for code in a Kiln task (the guide:
+[../modding/tasks.md](../modding/tasks.md#reading-the-world-from-a-task)). It is
+`[Experimental("KILNX003")]`: opt in with `<NoWarn>$(NoWarn);KILNX003</NoWarn>` in the mod's project
+([KILNX003](../modding/analyzers.md#kilnx003); `KILNX001`, the lab members' id, does not opt in). It can change until it
+leaves experimental, and that waits for the in-game check above to pass on both exact builds.
+
+```csharp
+// CurrentTransform starts with x, y, z as 32.32 fixed-point metres (layouts depend on the game build)
+struct TransformHead { public long X, Y, Z; }
+
+var scan = Context.Tasks.Run("chest-scan", async ctx =>
+{
+    var near = new ConcurrentEntity[64];
+    var query = new EntityQuery(WorldKind.Server, "Inventory") { Center = playerPos, Radius = 10 };
+    var found = WorldConcurrent.Query(query, near);
+    if (found.Status == ReadStatus.Unavailable) { await ctx.OnTick(() => ScanOnTick()); return; }   // no exact profile
+    for (var i = 0; i < found.Count; i++)
+    {
+        var t = WorldConcurrent.Read<TransformHead>(near[i], "CurrentTransform", ReadMode.FrameQuiet);
+        while (t.Status == ReadStatus.Busy)                     // a server frame ran during the read
+        {
+            await ctx.NextGateWindow();
+            t = WorldConcurrent.Read<TransformHead>(near[i], "CurrentTransform", ReadMode.FrameQuiet);
+        }
+        if (t.IsOk) Remember(near[i], t.Value);                  // the mod's own; Stale, Absent, Unreadable: skip this one
+    }
+});
+```
+
+| Member | Native member | Notes |
+|---|---|---|
+| `IsAvailable` | `capabilities` (`KILN_WORLD_CAP_ECS_READ`), `ecs_context_snapshot` | the members are here, their capability bit is set, and the build has an exact profile. Any thread |
+| `IsPresent(world)` | `ecs_context_snapshot` | a world of that kind exists now. Any thread |
+| `Open(id, world)` | `entity_open` | a `ConcurrentEntity`: a value, not a handle. `EntityId.None` is `Absent` |
+| `Validate(entity)` | `entity_validate` | the ref's status now |
+| `Read<T>(entity, component, mode)` | `ecs_snapshot`, or `ecs_snapshot_many` with the frame-quiet flag | the first `sizeof(T)` bytes of a verified whole-component copy, as `World.TryRead`; `SizeMismatch` when the component is smaller |
+| `ReadBytes(entity, component, into, mode)` | the same | the whole component; `TooSmall` with `Required` and nothing copied when `into` is short |
+| `ReadMany(entity, set, mode)` | `ecs_snapshot_many` | a `ConcurrentSnapshot`: each component's status and bytes; one frame-quiet window for all of them |
+| `Query(query, into)` | `ecs_query` | refs in ascending id; `TooSmall` with `Required` (the match count), `Changed` when the membership moved; complete or nothing |
+| `Template(entity)` | `ecs_template_uuid` | the template's GUID; `Absent` when it names none |
+| `OrOnTick(ctx, offTick, onTick)` | | the fallback in one line: `offTick` in the task when `IsAvailable`, else `onTick` through `ctx.OnTick`, on the task's tick world (`ctx.TickWorld`: the server tick for a task started in server code, the game's main thread for one started there) |
+
+**Statuses.** `ReadStatus` 0 to 6 are the native `KILN_ECS_*` values (`Ok`, `Absent`, `Stale`, `Unreadable`,
+`Unavailable`, `Busy`, `Unsupported`). Three more come from the C# side: `Changed` (a query whose membership changed,
+`KILN_WORLD_ERR_CHANGED`), `TooSmall` (the caller's buffer) and `SizeMismatch` (a component smaller than `T`). An
+ordinary miss never throws. Only misuse does: a `default` `ConcurrentEntity` or `EntityQuery`, an empty component name,
+a query `Center` that is not finite or has no finite radius above 0, or the wrong thread.
+
+**Where it may be called.** Inside a Kiln task (its work on a worker, or after `await ctx.ToTick()`) and on the tick,
+from a mod's code. Anywhere else it throws `InvalidOperationException`: a `new Thread`, `Task.Run`, or code after
+`ConfigureAwait(false)` (the message names the task the code came from). The analyzer reports such calls at build time
+([KILN105](../modding/analyzers.md#kiln105)). The reads are made for the task's mod, or for the mod whose code runs on the
+tick.
+
+**Frame-quiet on the tick.** The server tick runs inside the server frame (tick handlers, and a task's server-world hops), so a
+`ReadMode.FrameQuiet` read there would always meet the frame. There it answers `Busy` at once, without reading the
+engine (`Unsupported` for a client-world entity or query, which has no frame-quiet window anywhere). Read `Stable` on the tick, or retry from a worker: `await ctx.NextGateWindow()` takes the work back to one, so
+the retry loop above also works when it starts in a tick hop. A task's client-world hop runs on the game's main thread,
+beside the server world's frame: there a frame-quiet read of the server world is read like one from a worker.
+
+**Reloads.** A mod's owner id is the reload epoch of its reads, and every load of a mod gets a new owner id. Refs taken
+before a reload come back `Stale` after it: open the entities again.
+
+### World writes from task threads
+
+Four more members, appended after the reads (offsets 584 to 608; the table is 616 bytes; version stays 4, so check
+`header.size` and `KILN_WORLD_CAP_ECS_WRITE`), let a task thread change one whole component of a server-world entity by
+compare-exchange: Kiln compares the component with the bytes the caller expects and, only when they are equal, writes
+the new bytes. The write happens under the engine's own write gate (`kiln.internal.engine`, the gate the GameServer
+frame holds for its whole update), so it can only land between frames and a frame never sees a half-written component.
+Nothing waits: a call that cannot take the gate now answers busy at once.
+
+| Member | What it does |
+|---|---|
+| `ecs_write_policy(world_kind, component, &policy)` | whether a task may write this component, and why not. Any thread |
+| `ecs_compare_exchange(owner, &ref, component, expected, mask, desired, bytes, confirmed, &reply)` | compare the whole component with `expected`; when equal, write `desired` under `mask`. Any thread but a world's own |
+| `ecs_write_subscribe(owner, fn, user, &handle)` | `fn` once per committed write, on the server tick, after the write's gate was released |
+| `ecs_write_unsubscribe(handle)` | no later event reaches it. From another thread it waits for a callback of it that is running to return, so a callback must never wait on a thread that may unsubscribe it (a deadlock); from inside a callback it returns at once; on the tick outside a delivery it never waits |
+
+**What may be written.** Only what the policy admits, decided by rules, never by a list of names:
+
+1. the server world (the gate is the local authority's): a dedicated server, or a client while it hosts;
+2. an exact engine profile whose write gate is enabled, and a server world running;
+3. a registered component whose two change-tracking bits, read from the engine, are both clear. A tracked component
+   (one the game records for the save or for replication) stays on the tick: use `World.Write`;
+4. plain bytes all the way down: walked through kiln.types' reflection (every base class, field, typedef and static
+   array), only booleans, integers, floats, enums, bit masks and GUIDs. Dynamic arrays, strings, optionals and variants
+   (they own heap memory), blob types (offsets into blob data), object references (pointers), and anything kiln.types
+   cannot describe are refused: swapping a pointer could hand the engine memory it never allocated;
+5. the reflected size is the registered size, and the component is at most the profile's write budget (64 KiB).
+
+`KilnEcsWritePolicy` names the first rule that refused (`why_code` and the same in words). The answer is cached per
+server session; the tracking bits are read again inside every write. Over sigdb's reflection of both exact builds, 535
+of the 687 components are plain (the largest, `ClientCursor`, is 4,328 bytes); which of those are untracked is read
+from the engine at run time, and the in-game check below lists them.
+
+**One call, step by step.**
+
+- Before the gate (the calling thread; this part may allocate and lock): the arguments; the caller's owner (a ref is
+  the caller's when its `reload_epoch` is the caller's owner id, as Kiln's managed host opens every ref; a native
+  caller that writes opens its refs with `entity_open(owner, owner, ...)`); the policy; `bytes` must be the registered
+  size; the uncertain latch below; the ref through the reads' checks (session, reload epoch, generation, layout); the
+  caller's buffers copied once; a place in the event queue; then the gate, taken without waiting.
+- Inside the gate's hold (no wait, allocation, lock, log or call into the engine's code; every loop has a fixed
+  bound): the gate validated; the entity found again from the ref (same generation and layout); the component's two
+  tracking bits read again from the engine's registry, at the profile's offsets; the current bytes copied and
+  compared in full with `expected`; `desired` merged under `mask` (a nonzero mask byte takes the byte from `desired`;
+  no mask takes every byte); nothing to change ends here; the entity found again; the write; the bytes read back and
+  the entity found once more. A write that does not read back is rolled back in the same hold, and the rollback is read
+  back too: after the release the next frame may already have written the component, and a rollback then would undo
+  the game's write.
+- After the release: `confirmed`, the latch, the event, and the reply with the hold's time.
+
+**Outcomes** (`KilnMutationReply.status`; the `KilnResult` says the same):
+
+| Status | Result | When | Retry? |
+|---|---|---|---|
+| `OK` | `KILN_OK` | written and read back (`WRITTEN`), or nothing to change (`NO_OP`: no write, no event) | |
+| `CONFLICT` | `KILN_ECS_ERR_CONFLICT` | the bytes are not `expected`; `confirmed` holds them; nothing written | yes, from the new value |
+| `BUSY` | `KILN_ECS_ERR_BUSY` | a frame holds the gate (every frame), another Kiln writer holds it, this owner had a busy refusal from the gate in this server step, the call came from the server tick (`IN_FRAME`), the event queue is full, or an owner retired during the hold; nothing written | after the step: `NextGateWindow` in C#, a `KILN_TASK_AFTER_STEP` task natively |
+| `STALE` | `KILN_ECS_ERR_STALE` | the generation, session, layout or reload epoch changed, the ref is another owner's, or the calling owner is unloading or unloaded | no: open the entity again |
+| `NOT_WRITABLE` | `KILN_ECS_ERR_NOT_WRITABLE` | the policy refuses the component, `bytes` is not its size, or a tracking bit was set when the hold read it | no |
+| `UNCERTAIN` | `KILN_ECS_ERR_UNCERTAIN` | a write was attempted and neither its readback nor a rollback proved the bytes; also every later call on that target this session (`TARGET_LATCHED`) | no |
+| `UNAVAILABLE` | `KILN_ERR_UNAVAILABLE` | no exact profile or write gate, no kiln.types, not the server world, no server world, or the server world is stopping | use the tick |
+| `ABSENT` | `KILN_ERR_NOT_FOUND` | the entity is gone, or has no such component | |
+| `UNREADABLE` | `KILN_ECS_ERR_UNREADABLE` | a read faulted before any write; or a write was rolled back and the rollback proven (`ROLLED_BACK`): the bytes are as they were | yes |
+
+Only the gate's own busy refusal latches the owner for the rest of the server step (the gate's busy latch); no other
+outcome does, so several writes per step stay possible. Argument errors are `KILN_ERR_INVALID_ARGUMENT` and leave the
+reply untouched.
+
+**Uncertain latches its target.** A fixed table of 512 entries keyed by session, entity, generation and component.
+A latched target answers uncertain without taking the gate. When the table is full, every compare-exchange of that
+server session answers uncertain (one `kiln.log` line says so). A new session clears it.
+
+**Events.** Every committed write gives exactly one `KilnEcsWriteEvent` (entity, generation, component, the owner that
+wrote, session, step), delivered in the order of the holds, on the server tick in kiln.world's Pre, after the write's
+gate was released; at the server world's STOPPING what is left is delivered on the stopping thread. Callbacks run under
+kiln.world's fault containment: one that faults is logged, its subscription ends, and the others still get the event.
+An owner's subscriptions end when it unloads or reloads, or when its start fails (a callback already under way then may still finish). A subscription may be made from `kiln_plugin_main` on: one made before kiln.world is ready carries over and gets every event. The queue holds 4,096 events; a full queue makes writes answer
+busy until the next delivery.
+
+**Threads.** From a task's worker, between frames. On the server tick (tick handlers, a task's tick hops) a
+compare-exchange always answers busy (`IN_FRAME`) before touching an engine word: the frame holds the gate there. Use
+`World.Write` on the tick. Kiln's tracked writes (`World.Write`) handle tracked components and this member refuses them,
+so the two paths never write the same component type. Stable reads from other tasks may meet a write between their two
+copies and answer unreadable (retry); frame-quiet reads see the gate taken and answer busy.
+
+**How long the gate is held.** The work inside the hold is fixed: up to three lookups of the entity (about 70 guarded
+reads with the gate's own checks when the entity's id is found at the first slot it hashes to) plus one read of the
+component, its write and its readback; a rollback adds a write and a read. Each lookup's id probe stops at 8,192 slots,
+so a long run of occupied slots in the entity table adds reads up to that bound, never beyond it. Measured with Kiln's real Windows primitives under Wine (the fake engine of the tests laid out from the server
+profile, 1,000 writes each, three runs): the largest plain component (4,328 bytes) held the gate 12 to 15 µs at the
+median and 24 to 92 µs at worst; a 64 KiB component 44 to 48 µs at the median and 93 to 176 µs at worst. The GameServer thread that wants its next frame meanwhile spins (pause, then `SwitchToThread`); the
+holder runs above normal priority. On a heavily loaded host (load average about 45, the test at the lowest CPU
+priority, three runs under Wine) the medians stayed the same (15 to 18 µs for 4,328 bytes, 68 to 72 µs for 64 KiB) and
+the worst holds reached 0.5 to 2.5 ms: the host's scheduler preempting the holder inside the hold. How long a hold can
+last on native Windows under load, with the priority raise, is measured by the tester kit (#58). The 64 KiB cap stays.
+
+**Relies on, per build.** For the components the policy admits, the engine's change recorder only reads and returns on
+both exact builds (docs/re/world.md, "The change recorder for untracked components"), so the write does not call it and
+no engine code runs inside Kiln's hold. A new game build needs that re-checked; without an exact profile every write is
+unavailable anyway.
+
+**Host and Windows tests, no game.** `KILN_OUT=… native/services/world/tests/run.sh` runs `ecs_writes_test` over the
+real kiln.engine (its write gate) and the fake engine of both exact profiles, under ASan/UBSan and ThreadSanitizer: every
+outcome above forced (a frame holding the gate, the busy latch, a call from the server thread, a second Kiln writer, a
+full queue, a generation bump inside the hold, a tracking bit set after the policy was cached, a rogue write between the
+write and its readback, a write fault part-way through a page, pages that turn unreadable, the latch and its full
+table), no allocation and no core call inside the hold, the id probe's bound, events (order, a faulting subscriber,
+unsubscribing during a delivery, owners retiring), four writers racing on one counter against a simulated frame and a drain, and
+the plain-bytes rule over sigdb's reflection of both builds against an independent walk of the same data.
+`tests/lint_hold.py` checks the code that runs inside the hold; `tests/mutate_writes.py <scratch dir>` breaks each
+check alone and expects the suite to fail. `native/build.sh world-ecs-fault` and `WINEPREFIX=<private prefix>
+native/services/world/tests/wine.sh` run the write's fault paths over the real Windows SEH write and Interlocked words.
+Not covered there: the priority raise against a real GameServer spin on native Windows. The tester kit for that is
+[../priority-kit.md](../priority-kit.md): a native mod doing these compare-exchanges in a loop on a padding byte of the
+host's character, a CPU-load helper, collection scripts and the analysis (GitHub #58).
+
+**In-game check (the owner's, on a lab or test world only).** It changes a component of a live world, so it runs only
+when its file names that world:
+
+1. Create the empty file `<game>/kiln/data/kiln.world/ecs-write-check` and start the lab or test world: the check
+   logs `world ecs-write check: this world is <GUID>` and does nothing else.
+2. Put `world=<that GUID>` in the file and start again. With that line only, the check lists the components a task may
+   write and which of them the first player has, and does a no-op exchange. On any other world it stays off.
+3. To check a real write, add `component=<a name from that list>` and optionally `offset=<byte>` (default 0): the check
+   flips the lowest bit of that byte, flips it back and reads the component again, which must equal the original. The
+   change lasts a few frames at most; pick a component whose value does not matter on the test world.
+4. Join with a client and wait about a minute: `world ecs-write check: ...` lines in `kiln.log`, a compare-exchange from
+   the tick answering busy (in frame), two committed-write events, and one `PASS` or `FAIL` line. Send `kiln.log` and
+   remove the file afterwards.
+
+The write protocol is adapted from ShroudForge's `write_entity_components.cpp` (MIT, bonsaibauer), as the gate is.
+
+#### From C#: compare-exchange (experimental)
+
+`WorldConcurrent` (Kiln.World) has the C# face of these members, `[Experimental("KILNX003")]` like the reads. A task
+reads a component, works out the new value off the tick, and writes it only if nothing changed it meanwhile:
+
+```csharp
+// A plain, untracked component; WritePolicy says which ones are (the in-game check lists them for this build)
+struct Charge { public int Value; public int Max; }
+
+var task = Context.Tasks.Run("recharge", async ctx =>
+{
+    var e = WorldConcurrent.Open(entityId).Value;
+    while (true)
+    {
+        var now = WorldConcurrent.Read<Charge>(e, "Charge");
+        if (!now.IsOk) return;                                    // Stale, Absent, Unavailable ...: give up or reopen
+        var next = now.Value with { Value = Math.Min(now.Value.Max, now.Value.Value + 1) };
+        var r = WorldConcurrent.TryCompareExchange(e, "Charge", now.Value, next);
+        if (r.Status is ExchangeStatus.Busy or ExchangeStatus.Unreadable)
+            await ctx.NextGateWindow();                           // a frame held the gate, or a read faulted: after the step
+        else if (r.Status != ExchangeStatus.Conflict) return;     // Ok, or a refusal a retry can't change (NotWritable,
+                                                                  // Uncertain, Stale, Absent, Unavailable)
+        // Conflict: r.Current is the value now; the loop reads again and retries from it
+    }
+});
+```
+
+| Member | Native member | Notes |
+|---|---|---|
+| `CanWrite` | `capabilities` (`KILN_WORLD_CAP_ECS_WRITE`) | the members are here and on for this build. Any thread |
+| `WritePolicy(component, world)` | `ecs_write_policy` | a `ComponentWritePolicy`: `IsWritable`, `Status`, `Size`, `Budget`, `TrackingKnown`, `IsTracked`, `IsPlain`, `Reason`, `Text`. Any thread |
+| `TryCompareExchange<T>(entity, component, expected, desired)` | `ecs_compare_exchange` | `T` is the whole component (its size is the registered size, else `NotWritable` with `Reason.Size`), and every byte of it is compared and written, padding too: give `T` a field for every byte, or use the byte form; an `ExchangeResult<T>` with `Status`, `Flags`, `Reason`, `Current` (the value the write saw) and `HoldTime` |
+| `TryCompareExchangeBytes(entity, component, expected, desired, mask, current)` | `ecs_compare_exchange` | the same with bytes and an optional per-byte mask; `current` (optional) gets the bytes the write saw |
+| `ComponentExchangedEvent` | `ecs_write_subscribe` | on the server tick after each committed write: `Entity`, `Generation`, `ComponentHash` (`Is("Charge")`), `Session`, `Step`, `Mod` (the mod that wrote, null for a native service). Kiln's service tick posts them; should it stop for many steps, events beyond 65,536 waiting are dropped and kiln.log says how many |
+
+`ExchangeStatus` has the native statuses (`Ok`, `Absent`, `Stale`, `Unreadable`, `Unavailable`, `Busy`, `Conflict`,
+`NotWritable`, `Uncertain`), `ExchangeFlags` the `KILN_MUTATION_*` flags and `WriteReason` the `KILN_ECS_WRITE_WHY_*`
+codes. A refusal never throws; misuse does (a `default` `ConcurrentEntity`, an empty component name, byte buffers of
+different lengths, the wrong thread). The writes may be called where the reads may (inside a Kiln task, or on the tick
+from a mod's code); on the server tick (and in a task's server-world hop) a write is always `Busy` with `Reason.InFrame`
+and reaches nothing, so write from a task's worker and keep the tick for `World.Write`
+([KILN105](../modding/analyzers.md#kiln105) reports a write in tick code). A task's client-world hop is not the server
+tick: a server-world write from there meets the engine's gate like any task write. A mod writes with the refs it opened
+itself: a ref another mod opened is `Stale`, as is every ref after the mod reloads.
+
+**In the test kit.** `KilnHarness` has the writes on its fake world with the same rules. The kit cannot read the engine's
+tracking bits, so a component is writable there only after the test says it is untracked:
+`kiln.Entities.Track("Charge", save: false, replication: false)`. `kiln.Entities.BusyWrites = 1` makes the next write meet
+a busy gate, for the retry loop; the event comes at the next `kiln.Step()`.
 
 ### Entities and teleport from native code
 Tick thread (Pre/Post) or inside your program: `component(e, hash, &size)`, `exists`, `transform`, `position`,

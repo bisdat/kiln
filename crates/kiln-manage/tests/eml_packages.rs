@@ -2342,3 +2342,36 @@ fn play_with_an_unchanged_profile_names_the_players_own_xhl_folder_of_a_mod_that
     let note = a.safety_notes.iter().find(|n| n.starts_with("xhl:xhl-vein-mining:")).unwrap_or_else(|| panic!("{a:?}"));
     assert!(note.contains(&own.display().to_string()) && a.warnings.contains(note), "{a:?}");
 }
+
+/// XHL ships Kiln builds of his mods (Nexus "(Kiln)" files) under the ids of his XHL-Core plugins. A profile with both
+/// switched on runs the mod twice where the game has XHL-Core: Kiln loads the Kiln build, and XHL-Core loads the plugin
+/// Kiln placed in the game's mods folder. The activation says so, and only then.
+#[test]
+fn a_kiln_build_beside_its_xhl_core_plugin_is_named_when_both_run() {
+    const TWICE: &str = "so the mod runs twice";
+    let (t, dirs, g) = fresh("xhl-twin");
+    let pkg = t.0.join("XHL-Auto-Loot 2.1.0");
+    layout(&pkg, "xhl-hybrid-core");
+    add(&dirs, &g, &pkg);
+    let build = t.0.join("XHL-Auto-Loot (Kiln)").join("xhl-auto-loot");
+    put(&build, "kiln.mod.json", br#"{ "id": "xhl-auto-loot", "name": "XHL-Auto-Loot", "version": "0.1.0", "apiVersion": "0.2.7",
+        "side": "both", "entryAssembly": "XhlAutoLoot.dll" }"#);
+    put(&build, "XhlAutoLoot.dll", b"managed");
+    let r = add(&dirs, &g, build.parent().unwrap());
+    let a = r.activation.expect("the drop activates the profile");
+    let twice: Vec<&String> = a.warnings.iter().filter(|w| w.contains(TWICE)).collect();
+    assert_eq!(twice.len(), 1, "{:?}", a.warnings);
+    assert!(twice[0].contains("kiln:xhl-auto-loot") && twice[0].contains("eml:xhl-auto-loot") && twice[0].contains("XHL-Core"), "{}", twice[0]);
+    // the XHL-Core plugin off: one of them runs
+    let mut p = my_mods_of(&dirs);
+    p.mods.eml.iter_mut().for_each(|m| m.enabled = false);
+    let mut p = profile::save(&dirs, &p).unwrap();
+    let a = profile::activate(&dirs, &p.id, &g).unwrap();
+    assert!(!a.warnings.iter().any(|w| w.contains(TWICE)), "{:?}", a.warnings);
+    // both on, but no XHL-Core in the game: Kiln's build runs alone
+    p.mods.eml.iter_mut().for_each(|m| m.enabled = true);
+    p.mods.native.iter_mut().for_each(|m| m.enabled = false);
+    profile::save(&dirs, &p).unwrap();
+    let a = profile::activate(&dirs, &p.id, &g).unwrap();
+    assert!(!a.warnings.iter().any(|w| w.contains(TWICE)), "{:?}", a.warnings);
+}

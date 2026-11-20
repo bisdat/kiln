@@ -11,6 +11,10 @@ flags=(-std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined -fn
 g++ "${flags[@]}" "$here/natives_test.cpp" "$here/../verify.cpp" -o "$out/natives_test"
 "$out/natives_test"
 
+# The impact pool watch's pure parts (impact_watch.h): layout check, thresholds, top programs, age table, control words.
+g++ "${flags[@]}" "$here/impact_watch_test.cpp" -o "$out/impact_watch_test"
+"$out/impact_watch_test"
+
 # Compile the actual Windows thunk body against a tiny fake dispatcher on the host.
 python3 - "$here/../abilities.cpp" "$out/thunk_under_test.h" <<'PYCODE'
 from pathlib import Path

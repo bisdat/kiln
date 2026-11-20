@@ -2016,6 +2016,7 @@ name = "kiln-launcher"
 version = "0.2.0-dev"
 dependencies = [
  "evdev",
+ "gtk",
  "kiln-manage",
  "libc",
  "semver",

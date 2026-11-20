@@ -3,7 +3,7 @@
 // follows its own channel for "beta"). Every public release so far is a dev build (`X.Y.Z-dev.N`), so the dev line is
 // the release players have: it is called "Release" until a stable release exists (STABLE_RELEASED). "Stable" is offered
 // only where it is already chosen (it has no builds yet).
-import { t } from "../i18n";
+import { formatLocale, t } from "../i18n";
 import type { UpdateChannel } from "./commands";
 
 /** Is there a stable release (an `X.Y.Z` without `-dev.N`)? Flip with the first one: then "stable" is the Release and
@@ -89,7 +89,7 @@ export function switchWords(kind: SwitchKind, targetVersion?: string): { title: 
 /** The restore choice of a switch back (a "before beta" copy exists). */
 export function restoreWords(taken: string): { label: string; hint: string } {
   const d = new Date(taken);
-  const when = Number.isNaN(d.getTime()) ? taken : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  const when = Number.isNaN(d.getTime()) ? taken : d.toLocaleDateString(formatLocale(), { day: "numeric", month: "short", year: "numeric" });
   return {
     label: t("api.channel.restore.label"),
     hint: t("api.channel.restore.hint", { when }),

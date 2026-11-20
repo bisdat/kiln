@@ -194,6 +194,19 @@ internal static unsafe class WorldAbi
         public delegate* unmanaged[Cdecl]<ulong, uint, int*, NativeStr*, int> ProgramWorldState;
         public delegate* unmanaged[Cdecl]<ulong, NativeStr, NativeStr, uint, void*, void*, void*, ulong*, int> BindProgramWorld;
         public delegate* unmanaged[Cdecl]<ulong, int> UnbindProgramWorld;
+        // appended in v4 (528..576): the ECS reads from task threads (World/EcsReadsFake.cs)
+        public delegate* unmanaged[Cdecl]<ulong, ulong, uint, ulong, uint, EcsObjectRefNative*, int> EntityOpen;
+        public delegate* unmanaged[Cdecl]<ulong, EcsObjectRefNative*, EcsObjectInfoNative*, int> EntityValidate;
+        public delegate* unmanaged[Cdecl]<EcsContextInfoNative*, int> EcsContextSnapshot;
+        public delegate* unmanaged[Cdecl]<ulong, EcsQueryRequestNative*, EcsObjectRefNative*, uint, uint*, uint*, int> EcsQuery;
+        public delegate* unmanaged[Cdecl]<ulong, EcsObjectRefNative*, uint, void*, uint, uint*, int> EcsSnapshot;
+        public delegate* unmanaged[Cdecl]<ulong, EcsObjectRefNative*, EcsSnapshotSpecNative*, uint, void*, uint, uint*, uint*, int> EcsSnapshotMany;
+        public delegate* unmanaged[Cdecl]<ulong, EcsObjectRefNative*, byte*, int> EcsTemplateUuid;
+        // appended in v4 (584..608, the table is 616 bytes): the compare-exchange writes from task threads
+        public delegate* unmanaged[Cdecl]<uint, uint, EcsWritePolicyNative*, int> EcsWritePolicy;
+        public delegate* unmanaged[Cdecl]<ulong, EcsObjectRefNative*, uint, void*, void*, void*, uint, void*, MutationReplyNative*, int> EcsCompareExchange;
+        public delegate* unmanaged[Cdecl]<ulong, delegate* unmanaged[Cdecl]<EcsWriteEventNative*, void*, void>, void*, ulong*, int> EcsWriteSubscribe;
+        public delegate* unmanaged[Cdecl]<ulong, int> EcsWriteUnsubscribe;
     }
 
     /// <summary>FNV-1a-32 of "keen::ecs::" + name (the name as given when it contains "::"): the engine's component hash.</summary>
@@ -213,14 +226,18 @@ internal static unsafe class WorldAbi
 /// transform, position, find, entity_count, server_world, status, capabilities, and the tracked writes (write_submit,
 /// write_cancel, write_info, write_status). Unavailable, each with the native service's own "no": program registration and
 /// everything inside a program update (there is no scheduler), teleport, write_declare (a native service's list).</summary>
-internal static unsafe class WorldTable
+internal static unsafe partial class WorldTable
 {
     private static WorldAbi.Table* _table;
 
 #pragma warning disable CA2255  // a test kit: the table must be published before any Kiln service asks for one
     [ModuleInitializer]
 #pragma warning restore CA2255
-    internal static void ModuleInit() => KitBackend.Instance.RegisterTable(WorldAbi.Service, Create());
+    internal static void ModuleInit()
+    {
+        KitBackend.Instance.RegisterTable(WorldAbi.Service, Create());
+        FakeTables.Features([EcsReadsFake.Row, EcsReadsFake.WriteRow]);  // the ECS reads and writes from task threads: a test may switch them off
+    }
 
     public static nint Create()
     {
@@ -266,6 +283,7 @@ internal static unsafe class WorldTable
         t->ProgramWorldState = &ProgramWorldState;
         t->BindProgramWorld = &BindProgramWorld;
         t->UnbindProgramWorld = &UnbindProgramWorld;
+        EcsReadsFake.Fill(t);  // the ECS reads from task threads
         _table = t;
         return (nint)t;
     }
@@ -368,7 +386,7 @@ internal static unsafe class WorldTable
 
     // Only tracked writes of the capability word: no write_other inside a program, no events, no bind.
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static uint Capabilities() => Fake is null ? 0 : WorldAbi.CapTrackedWrites;
+    private static uint Capabilities() => Fake is { } fake ? EcsReadsFake.Capabilities(fake, WorldAbi.CapTrackedWrites) : 0;
 
     // ---- entities ----
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

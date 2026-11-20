@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: MIT
-// Runs the real loading of the game's Chinese, Japanese and Korean fonts (style.cpp, font_group.h) on a headless Dear ImGui
-// context under ASan/UBSan, with a fake kiln.assets serving a made-up keen::UiFontResource (the shape of client 26430625's:
-// a default group and zh-CN, ja-JP, ko-KR, zh-TW groups) and a system TTF for every font file (no game data):
-//  - Kiln's language (set_texts) picks the group; else the game's language; Latin needs none;
+// Runs the real loading of the game's other fonts (style.cpp, font_group.h) on a headless Dear ImGui context under
+// ASan/UBSan, with a fake kiln.assets serving a made-up keen::UiFontResource (the shape of client 26430625's: a default
+// group with Cyrillic, Thai and large CJK fallbacks, and zh-CN, ja-JP, ko-KR, zh-TW, Cyrillic groups) and a system TTF for
+// every font file (padded to the size the resource gives; no game data):
+//  - the default group's small fonts after its Latin source, for every language, before a CJK group's; a Cyrillic
+//    language is READY with them, FAILED when they lack Cyrillic (logged);
+//  - Kiln's language (set_texts) picks the CJK group; else the game's language; Latin needs none;
 //  - look_info's glyph state (loading, ready, failed) and its language;
 //  - the group's fonts merged into the overlay's default font and into the game's UI font and bold, also when those arrive
 //    after the group; another language's group replaces them; back to Latin removes them;
@@ -95,17 +98,21 @@ struct FakeGroup {
 static std::vector<uint8_t> resource(const fg::Layout& l, uint32_t font_bytes) {
     const uint64_t bit = 1;
     const std::vector<FakeGroup> groups = {
-        {(bit << 1) | (bit << 3) | (bit << 20), true, {{4, 2, {0, 0x2e7f}}, {0, 0, {0, 0x2e7f}}, {24, 1, {0, 0x2e7f}}, {13, 0, {0x2e80, 0xabff}}}},
+        {(bit << 1) | (bit << 3) | (bit << 20), true,
+         {{4, 2, {0, 0x2e7f}}, {0, 0, {0, 0x2e7f}}, {24, 1, {0, 0x2e7f}}, {13, 0, {0x2e80, 0xabff}}, {26, 1, {0x400, 0x4ff}},
+          {10, 0, {0x400, 0x4ff}}, {12, 0, {0xac00, 0xffff}}, {6, 0, {0xe00, 0xe7f}}}},
         {bit << 20, false, {{18, 2, {0, 0xabff}}, {13, 0, {0, 0xabff}}, {5, 1, {0, 0xabff}}, {12, 0, {0xac00, 0xffff}}}},
         {bit << 11, false, {{3, 0, {0, 0xabff}}, {12, 0, {0xac00, 0xffff}}}},
         {bit << 13, false, {{12, 0, {0, 0xffff}}}},
         {bit << 21, false, {{21, 0, {0, 0xabff}}, {12, 0, {0xac00, 0xffff}}}},
+        {(bit << 9) | (bit << 34), false, {{10, 0, {0, 0xabff}}, {12, 0, {0xac00, 0xffff}}, {13, 0, {0x500, 0xabff}}}},
     };
     std::vector<uint8_t> b(8192, 0);
     size_t at = 64;
     const size_t fonts = at;
     for (uint32_t i = 0; i < 28; ++i) {
-        put32(b, fonts + i * l.font_size, font_bytes);
+        // the CJK files (12, 13) are large, as the game's: the default group's fonts leave them to the CJK groups
+        put32(b, fonts + i * l.font_size, i == 12 || i == 13 ? (3u << 20) : font_bytes);
         put32(b, fonts + i * l.font_size + 4, 1000 + i);  // hash0: the font's index
     }
     put_array(b, l.res_fonts, fonts, 28);
@@ -162,9 +169,12 @@ KilnResult KILN_CALL as_read(const KilnAssetKey* key, void* buf, size_t cap, siz
 KilnResult KILN_CALL as_blob(const KilnContentHash* h, void* buf, size_t cap, size_t* len) {
     if (!h || h->hash0 < 1000 || h->hash0 - 1000 == g_missing.load()) return KILN_ERR_NOT_FOUND;
     const std::vector<uint8_t>& f = h->hash0 == 1013 && !g_cjk.empty() ? g_cjk : g_latin;
-    if (h->size != f.size()) return KILN_ERR_NOT_FOUND;
-    if (len) *len = f.size();
-    if (buf && cap >= f.size()) std::memcpy(buf, f.data(), f.size());
+    if (h->size < f.size()) return KILN_ERR_NOT_FOUND;  // a larger one: the TTF, then zeros (a TTF reads its tables by offset)
+    if (len) *len = h->size;
+    if (buf && cap >= h->size) {
+        std::memcpy(buf, f.data(), f.size());
+        std::memset(static_cast<uint8_t*>(buf) + f.size(), 0, h->size - f.size());
+    }
     return KILN_OK;
 }
 
@@ -343,14 +353,49 @@ int main() {
     ember.background = 0.55f;
     CHECK(kui::look_set(&ember) == KILN_OK);
 
-    // 1. Latin: nothing to load
+    // 0. the default group's fonts load at the first frame, whatever the language and look; here its Cyrillic file (font 10)
+    //    cannot be read: Thai alone joins, a Cyrillic language's glyphs fail (logged once), Latin needs none
+    g_missing = 10;
+    set_kiln("en-us");
+    for (int n = 0; n < 2000 && kui::g_extra_state.load() != 3; ++n) {
+        frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    frame();
+    CHECK(kui::g_extra_state.load() == 3 && merged(base) == 1);
+    CHECK(info().glyphs == KILN_UI_GLYPHS_LATIN && info().glyph_language == 0);
+    CHECK(logged("the game's default font group joined the overlay's font atlas (group 0, fonts 6 of 28"));
+    CHECK(logged("fonts 13, 12 left out (over 2 MiB"));
+    CHECK(logged("fonts 10 unreadable"));
+    CHECK(logged("has no Cyrillic font Kiln can use"));
+    set_kiln("ru");
+    CHECK(until(KILN_UI_GLYPHS_FAILED, fg::kRuRu));
+    CHECK(kui::g_group_lang.load() == 0);  // Cyrillic needs no group of its own
+    // the same read with font 10 there (as a new process would): Cyrillic from it, after the overlay's own font
+    kui::unmerge(kui::g_extra_fonts, kui::g_extra_into);
+    kui::g_extra_state = 0;
+    kui::g_extra_tries = 0;
+    kui::g_extra_retry_at = 0;
+    g_missing = 21;
+    CHECK(until(KILN_UI_GLYPHS_READY, fg::kRuRu));
+    frame();
+    CHECK(merged(base) == 2 && base->IsGlyphInFont(0x416));  // Ж: ImGui's own font has none, font 10 (a system TTF) has
+    CHECK(std::strstr(base->Sources[1]->Name, "game font 10 (default group)") && std::strstr(base->Sources[2]->Name, "game font 6"));
+    CHECK(logged("fonts 10, 6 of 28, ") && logged("; Cyrillic; fonts 13, 12 left out"));
+    // Kiln in English, the game in Ukrainian: the game's language is reported (mods' texts follow it)
+    set_kiln("en-us");
+    kui::g_game_language = fg::kUkUa;
+    CHECK(until(KILN_UI_GLYPHS_READY, fg::kUkUa));
+    kui::g_game_language = 0;
+
+    // 1. Latin: no group to load; the default group's fonts stay
     set_kiln("en-us");
     for (int n = 0; n < 5; ++n) frame();
     CHECK(info().glyphs == KILN_UI_GLYPHS_LATIN && info().glyph_language == 0);
-    CHECK(merged(base) == 0);
+    CHECK(merged(base) == 2);
 
-    // 2. Kiln forced Chinese: the zh-CN group's regular fonts (13, then 12), merged into the default font; the game's UI
-    //    font and its bold, read when the player picks the game's look, get them as they arrive
+    // 2. Kiln forced Chinese: the zh-CN group's regular fonts (13, then 12), merged into the default font after the default
+    //    group's; the game's UI font and its bold, read when the player picks the game's look, get both as they arrive
     set_kiln("zh-cn");
     frame();
     CHECK(info().glyphs == KILN_UI_GLYPHS_LOADING && info().glyph_language == fg::kZhCn);
@@ -358,7 +403,8 @@ int main() {
     CHECK(kui::game_font() == nullptr);
     ember.look = KILN_UI_LOOK_GAME;
     CHECK(kui::look_set(&ember) == KILN_OK);
-    CHECK(merged(base) == 2);
+    CHECK(merged(base) == 4);
+    CHECK(std::strstr(base->Sources[2]->Name, "(default group)") && std::strstr(base->Sources[3]->Name, "game font 13 (language group)"));
     CHECK(logged("joined the overlay's font atlas (group 1, fonts 13, 12 of 28"));
     CHECK(logged("layout of 26430625 (no kiln.types)"));
     for (int n = 0; n < 1500 && !kui::game_font(); ++n) {  // the game's own font (default group: fonts 0 and 24)
@@ -366,38 +412,50 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     frame();
-    CHECK(kui::game_font() != nullptr && merged(kui::game_font()) == 2);  // merged into it as it arrived
-    CHECK(merged(kui::g_game_bold) == 2);
+    CHECK(kui::game_font() != nullptr && merged(kui::game_font()) == 4);  // merged into it as it arrived
+    CHECK(std::strstr(kui::game_font()->Sources[1]->Name, "game font 10 (default group)"));
+    CHECK(merged(kui::g_game_bold) == 4);
     if (!g_cjk.empty()) {  // a real CJK file as font 13: the overlay's fonts have 模 (U+6A21) now, the Latin ones never did
         CHECK(base->IsGlyphInFont(0x6A21) && kui::game_font()->IsGlyphInFont(0x6A21));
         std::printf("group_host_test: the real CJK font gives 模 (%zu bytes)\n", g_cjk.size());
     }
 
-    // 3. Japanese: zh-CN's fonts leave, ja-JP's (3, 12) come
+    // 3. Japanese: zh-CN's fonts leave, ja-JP's (3, 12) come; the default group's stay
     set_kiln("ja-jp");
     CHECK(until(KILN_UI_GLYPHS_READY, fg::kJaJp));
-    CHECK(merged(base) == 2 && merged(kui::game_font()) == 2);
+    CHECK(merged(base) == 4 && merged(kui::game_font()) == 4);
     CHECK(logged("the game's font of language 20 left the overlay's font atlas"));
 
     // 4. Kiln English in a Korean game: the game's language picks (mods' texts are Korean): font 12 alone
     set_kiln("en-us");
     kui::g_game_language = fg::kKoKr;
     CHECK(until(KILN_UI_GLYPHS_READY, fg::kKoKr));
-    CHECK(merged(base) == 1);
+    CHECK(merged(base) == 3);
 
-    // 5. a group whose own file cannot be read (zh-TW's font 21): failed, logged, nothing merged
+    // 5. a group whose own file cannot be read (zh-TW's font 21): failed, logged, nothing of it merged
     set_kiln("zh-tw");
     CHECK(until(KILN_UI_GLYPHS_FAILED, fg::kZhTw));
     frame();  // the frame after the read says it once
-    CHECK(merged(base) == 0);
+    CHECK(merged(base) == 2);
     CHECK(logged("font 21 of the group is unreadable"));
     CHECK(logged("Kiln's texts stay English"));
 
-    // 6. back to Latin: the atlas as it was
+    // 5b. Kiln in Russian in a Chinese game: Russian's glyphs reported, the Chinese group still loads for mods' texts
+    set_kiln("ru-ru");
+    kui::g_game_language = fg::kZhCn;
+    CHECK(until(KILN_UI_GLYPHS_READY, fg::kRuRu));
+    for (int n = 0; n < 2000 && kui::g_group_state.load() != 3; ++n) {
+        frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    frame();
+    CHECK(kui::g_group_lang.load() == fg::kZhCn && merged(base) == 4);
+
+    // 6. back to Latin: the atlas as it was before the groups
     set_kiln("de-de");
     kui::g_game_language = 3;
     CHECK(until(KILN_UI_GLYPHS_LATIN, 0));
-    CHECK(merged(base) == 0 && merged(kui::game_font()) == 0);
+    CHECK(merged(base) == 2 && merged(kui::game_font()) == 2);
 
     // 7. the fields' places from the game's reflection: another layout read right
     {
@@ -408,7 +466,7 @@ int main() {
     g_missing = 99;
     set_kiln("zh-cn");
     CHECK(until(KILN_UI_GLYPHS_READY, fg::kZhCn));
-    CHECK(merged(base) == 2);
+    CHECK(merged(base) == 4);
     CHECK(logged("layout from the game's reflection"));
     set_kiln("en");
     CHECK(until(KILN_UI_GLYPHS_LATIN, 0));

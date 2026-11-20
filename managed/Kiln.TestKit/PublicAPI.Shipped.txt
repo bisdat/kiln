@@ -534,6 +534,10 @@ Kiln.TestKit.HarnessQueries.Rays.get -> System.Collections.Generic.IReadOnlyList
 Kiln.TestKit.HarnessQueries.Voxels.get -> System.Func<Kiln.TestKit.FakeVoxelRay, Kiln.TestKit.FakeVoxelAnswer>?
 Kiln.TestKit.HarnessQueries.Voxels.set -> void
 Kiln.TestKit.HarnessQueries.WithoutSpawnTime(Kiln.EntityId entity) -> void
+Kiln.TestKit.HarnessSide
+Kiln.TestKit.HarnessSide.DedicatedServer = 0 -> Kiln.TestKit.HarnessSide
+Kiln.TestKit.HarnessSide.HostingClient = 1 -> Kiln.TestKit.HarnessSide
+Kiln.TestKit.HarnessSide.JoinedClient = 2 -> Kiln.TestKit.HarnessSide
 Kiln.TestKit.HarnessSpawn
 Kiln.TestKit.HarnessSpawn.AddTemplate(string! name, Kiln.TemplateKind kind = Kiln.TemplateKind.Creature, string! displayName = "", System.Guid id = default(System.Guid)) -> System.Guid
 Kiln.TestKit.HarnessSpawn.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeSpawned!>!
@@ -547,6 +551,9 @@ Kiln.TestKit.HarnessState.Running = 2 -> Kiln.TestKit.HarnessState
 Kiln.TestKit.HarnessState.Starting = 1 -> Kiln.TestKit.HarnessState
 Kiln.TestKit.HarnessState.Stopped = 3 -> Kiln.TestKit.HarnessState
 Kiln.TestKit.HarnessStoppedException
+Kiln.TestKit.HarnessTasks
+Kiln.TestKit.HarnessTasks.Live.get -> int
+Kiln.TestKit.HarnessTasks.Settle(int maxSteps = 1000, System.TimeSpan? timeout = null) -> int
 Kiln.TestKit.HarnessTerrain
 Kiln.TestKit.HarnessTerrain.AddBase(Kiln.CellBox box) -> void
 Kiln.TestKit.HarnessTerrain.Editing.get -> System.Action<Kiln.CellBox>?
@@ -615,6 +622,7 @@ Kiln.TestKit.KilnHarness.DataDirectory.get -> string!
 Kiln.TestKit.KilnHarness.Decisions.get -> Kiln.TestKit.HarnessDecisions!
 Kiln.TestKit.KilnHarness.Dispose() -> void
 Kiln.TestKit.KilnHarness.DumpLogs() -> string!
+Kiln.TestKit.KilnHarness.EnterWorld() -> void
 Kiln.TestKit.KilnHarness.Entities.get -> Kiln.TestKit.FakeWorld!
 Kiln.TestKit.KilnHarness.FindLogs(string! text, string? modId = null) -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.LogLine!>!
 Kiln.TestKit.KilnHarness.GameLog(string! text, Kiln.LogLevel level = Kiln.LogLevel.Info) -> void
@@ -626,17 +634,21 @@ Kiln.TestKit.KilnHarness.KilnDirectory.get -> string!
 Kiln.TestKit.KilnHarness.KilnHarness(Kiln.TestKit.KilnHarnessOptions? options = null) -> void
 Kiln.TestKit.KilnHarness.Language.get -> string!
 Kiln.TestKit.KilnHarness.Language.set -> void
+Kiln.TestKit.KilnHarness.LeaveWorld() -> void
 Kiln.TestKit.KilnHarness.Load<TMod>(Kiln.TestKit.ModManifest? manifest = null) -> Kiln.TestKit.ModHandle!
 Kiln.TestKit.KilnHarness.LoadFolder(string! path) -> Kiln.TestKit.ModHandle!
+Kiln.TestKit.KilnHarness.LogFile.get -> string!
 Kiln.TestKit.KilnHarness.Logs.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.LogLine!>!
 Kiln.TestKit.KilnHarness.LogsDirectory.get -> string!
 Kiln.TestKit.KilnHarness.LogsOf(Kiln.TestKit.ModHandle! mod) -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.LogLine!>!
 Kiln.TestKit.KilnHarness.LogsOf(string! modId) -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.LogLine!>!
 Kiln.TestKit.KilnHarness.Mod(string! id) -> Kiln.TestKit.ModHandle!
 Kiln.TestKit.KilnHarness.ModsDirectory.get -> string!
+Kiln.TestKit.KilnHarness.OnMainThread(System.Action! work) -> void
 Kiln.TestKit.KilnHarness.Players.get -> Kiln.TestKit.HarnessPlayers!
 Kiln.TestKit.KilnHarness.Programs.get -> Kiln.TestKit.HarnessPrograms!
 Kiln.TestKit.KilnHarness.Queries.get -> Kiln.TestKit.HarnessQueries!
+Kiln.TestKit.KilnHarness.ReadLogFile() -> string!
 Kiln.TestKit.KilnHarness.Reload(Kiln.TestKit.ModHandle! mod, bool checkCollected = true) -> Kiln.TestKit.ModHandle!
 Kiln.TestKit.KilnHarness.ReportWorldRunning() -> void
 Kiln.TestKit.KilnHarness.Run(System.Action! action) -> void
@@ -653,6 +665,7 @@ Kiln.TestKit.KilnHarness.StateDirectory.get -> string!
 Kiln.TestKit.KilnHarness.Step(int steps = 1) -> void
 Kiln.TestKit.KilnHarness.StepUntil(System.Func<bool>! condition, int maxSteps = 1000, System.TimeSpan pace = default(System.TimeSpan)) -> int
 Kiln.TestKit.KilnHarness.Stop(string! reason = "SIGINT") -> void
+Kiln.TestKit.KilnHarness.Tasks.get -> Kiln.TestKit.HarnessTasks!
 Kiln.TestKit.KilnHarness.Terrain.get -> Kiln.TestKit.HarnessTerrain!
 Kiln.TestKit.KilnHarness.Time.get -> Kiln.TestKit.HarnessTime!
 Kiln.TestKit.KilnHarness.UiValues.get -> Kiln.TestKit.HarnessUiValues!
@@ -677,6 +690,8 @@ Kiln.TestKit.KilnHarnessOptions.LogSink.get -> System.Action<Kiln.TestKit.LogLin
 Kiln.TestKit.KilnHarnessOptions.LogSink.init -> void
 Kiln.TestKit.KilnHarnessOptions.ServerDirectory.get -> string?
 Kiln.TestKit.KilnHarnessOptions.ServerDirectory.init -> void
+Kiln.TestKit.KilnHarnessOptions.Side.get -> Kiln.TestKit.HarnessSide
+Kiln.TestKit.KilnHarnessOptions.Side.init -> void
 Kiln.TestKit.KilnHarnessOptions.StopTimeout.get -> System.TimeSpan
 Kiln.TestKit.KilnHarnessOptions.StopTimeout.init -> void
 Kiln.TestKit.KilnHarnessOptions.TempDirectory.get -> string?
@@ -794,6 +809,10 @@ Kiln.TestKit.Xunit.KilnTestOrderer.OrderTestCases<TTestCase>(System.Collections.
 Kiln.TestKit.Xunit.KilnTestSuite<TMod>
 Kiln.TestKit.Xunit.KilnTestSuite<TMod>.KilnTest(string! name) -> void
 Kiln.TestKit.Xunit.KilnTestSuite<TMod>.KilnTestSuite() -> void
+[KILNX003]Kiln.TestKit.FakeWorld.BusyReads.get -> int
+[KILNX003]Kiln.TestKit.FakeWorld.BusyReads.set -> void
+[KILNX003]Kiln.TestKit.FakeWorld.BusyWrites.get -> int
+[KILNX003]Kiln.TestKit.FakeWorld.BusyWrites.set -> void
 const Kiln.TestKit.HarnessSpawn.PickupTemplate = "Base_LootPickup_Generic_Gravity" -> string!
 override Kiln.TestKit.BootRun.Equals(object? obj) -> bool
 override Kiln.TestKit.BootRun.GetHashCode() -> int

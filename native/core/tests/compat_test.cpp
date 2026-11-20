@@ -13,6 +13,7 @@
 #include "compat.h"
 #include "compat_rules.h"
 #include "hook_owner.h"
+#include "module_place.h"
 #include "nlohmann/json.hpp"
 
 namespace {
@@ -476,6 +477,59 @@ void before_cases() {
     check(late_with_target.id.empty(), "a target belongs to before only");
 }
 
+// netjunk's report (2026-11-20): two Library DLLs named dinput8.dll (a ShroudLink player addon and Building Tools). The
+// lines name each module's file too, and the chain entry is the one at that path, not the first of that name.
+void module_place_cases() {
+    const std::string game = "D:\\SteamLibrary\\steamapps\\common\\Enshrouded";
+    const std::string lib = "C:\\Users\\p\\AppData\\Local\\Kiln\\library\\native\\building-tools\\0.0.0+26bc47c7\\dinput8.dll";
+    check(module_path_text(game + "\\kiln\\chain\\xhl-core\\xhl-core.dll", game) == "kiln/chain/xhl-core/xhl-core.dll",
+          "path text: a module under the game folder is relative, with '/'");
+    check(module_path_text("\\\\?\\d:\\steamlibrary\\STEAMAPPS\\common\\enshrouded\\mods\\creative\\creative.dll", game + "\\") ==
+              "mods/creative/creative.dll",
+          "path text: case, a \\\\?\\ prefix and a trailing separator do not matter");
+    check(module_path_text(game + "\\dinput8.dll", game) == "dinput8.dll", "path text: a module in the game folder itself");
+    check(module_path_text(lib, game) == lib, "path text: a Library DLL keeps its full path (its folder names the mod)");
+    check(module_path_text(game + "x\\a.dll", game) == game + "x\\a.dll", "path text: a sibling folder with a longer name is not inside");
+    check(module_path_text("", game).empty() && module_path_text(lib, "") == lib, "path text: empty path, unknown game folder");
+    check(module_place_suffix("kiln/chain/xhl-core/xhl-core.dll") == " [kiln/chain/xhl-core/xhl-core.dll]" &&
+              module_place_suffix("dinput8.dll") == " [game folder]" && module_place_suffix(lib) == " [" + lib + "]" &&
+              module_place_suffix("").empty(),
+          "place suffix: relative path, game folder, full path, nothing");
+    check(module_path_matches(game + "\\kiln\\chain\\xhl-core\\xhl-core.dll", "kiln/chain/xhl-core/xhl-core.dll") &&
+              module_path_matches("\\\\?\\" + lib, lib) &&
+              !module_path_matches(game + "\\kiln\\chain\\myxhl-core\\xhl-core.dll", "xhl-core/xhl-core.dll") && !module_path_matches(lib, ""),
+          "path match: a full path, a game-relative tail on a separator, never a partial folder name");
+
+    const std::string addon = "C:\\Users\\p\\AppData\\Local\\Kiln\\library\\native\\player-addon\\0.0.0+9b0759ea\\dinput8.dll";
+    ChainRow a = row("dinput8.dll", "loaded", false, "profile");
+    a.path = addon;
+    ChainRow b = row("dinput8.dll", "late", true, "profile");
+    b.path = lib;
+    json before = dest("dinput8.dll", "0x54230");
+    before["path"] = addon;
+    json over = dest("dinput8.dll", "0x3e080");
+    over["path"] = lib;
+    json map = {{"targets", json::array({target("0x1000", "ui/ItemSlot", {"service:kiln-ui-values.dll"}, before),
+                                         target("0x2000", "gameplay/PlaceBlueprint", {"service:kiln-gameplay.dll"}, nullptr, over)})},
+                {"foreign", json::array()}};
+    // Building Tools listed first: a file-name match alone would take its late row for the addon's hook
+    json o = compute_overlaps(map, {b, a}, {});
+    check(o.size() == 2, "two dinput8.dll overlaps (" + std::to_string(o.size()) + ")");
+    if (o.size() == 2) {
+        const std::string m0 = o[0]["message"].get<std::string>(), m1 = o[1]["message"].get<std::string>();
+        check(m0.rfind("dinput8.dll+0x54230 [" + addon + "] hooked the function before Kiln did", 0) == 0, "foreign-before names the file: " + m0);
+        check(m1.rfind("dinput8.dll+0x3e080 [" + lib + "] hooked over Kiln's gameplay/PlaceBlueprint", 0) == 0, "foreign-over names the file: " + m1);
+        check(o[0]["foreign"]["path"] == addon && o[1]["foreign"]["path"] == lib, "the overlap's foreign side carries the path");
+        check(o[0]["chainEntry"].is_object() && o[0]["chainEntry"]["path"] == addon && o[0]["fix"] == "late",
+              "the chain entry is the one at that path: " + o[0]["chainEntry"].dump());
+    }
+    // without a path (an older hooks map) nothing changes: the file name alone, the first row of that name that is on
+    o = compute_overlaps({{"targets", json::array({target("0x1000", "ui/ItemSlot", {"service:kiln-ui-values.dll"}, dest("dinput8.dll", "0x54230"))})}},
+                         {b, a}, {});
+    check(o.size() == 1 && o[0]["message"].get<std::string>().rfind("dinput8.dll+0x54230 hooked the function", 0) == 0 && !o[0]["foreign"].contains("path"),
+          "no path: the line as before");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -486,6 +540,7 @@ int main(int argc, char** argv) {
     chain_status_cases();
     late_limit_cases();
     before_cases();
+    module_place_cases();
     std::printf("compat_test: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
 }

@@ -139,7 +139,7 @@ internal static class ModCatalog
 {
     /// <summary>Engines in the order the screen lists them (the launcher's MOD_KINDS, with chain DLLs after plugins).</summary>
     public static readonly string[] EngineOrder =
-        ["kiln", "native", "plugin", "chain", "emf", "eml", "xhl", "shroudforge", "set", "greeneye", "flame", "shroudtopia", "enshwick", "shroudlink", "ember"];
+        ["kiln", "native", "plugin", "chain", "emf", "eml", "xhl", "shroudforge", "set", "greeneye", "flame", "shroudtopia", "enshwick", "shroudlink", "ember", "dllmod"];
 
     /// <summary>The names players see (the launcher's KIND_SHORT, plain words for Kiln's own kinds).</summary>
     public static string EngineName(string kind) => kind switch
@@ -147,7 +147,7 @@ internal static class ModCatalog
         "kiln" => "Kiln", "native" => KilnText.T("catalog.engine.native"), "plugin" => KilnText.T("catalog.engine.plugin"),
         "chain" => KilnText.T("catalog.engine.chain"), "emf" => "EMF",
         "eml" => "EML", "xhl" => "XHL", "shroudforge" => "ShroudForge", "set" => "SET", "greeneye" => "Greeneye", "flame" => "Flame",
-        "shroudtopia" => "Shroudtopia", "enshwick" => "Enshwick", "shroudlink" => "shroudlink", "ember" => "Ember", _ => kind,
+        "shroudtopia" => "Shroudtopia", "enshwick" => "Enshwick", "shroudlink" => "shroudlink", "ember" => "Ember", "dllmod" => "Enshrouded ModLoader", _ => kind,
     };
 
     /// <summary>One line about what the engine is, for the details.</summary>
@@ -165,7 +165,7 @@ internal static class ModCatalog
     {
         ["kiln-emf"] = "emf", ["kiln-eml"] = "eml", ["shroudforge"] = "shroudforge", ["kiln-shroudforge"] = "shroudforge",
         ["kiln-set"] = "set", ["kiln-greeneye"] = "greeneye", ["kiln-flame"] = "flame", ["kiln-shroudtopia"] = "shroudtopia",
-        ["kiln-enshwick"] = "enshwick", ["kiln-shroudlink"] = "shroudlink", ["kiln-ember"] = "ember",
+        ["kiln-enshwick"] = "enshwick", ["kiln-shroudlink"] = "shroudlink", ["kiln-ember"] = "ember", ["kiln-dllmod"] = "dllmod",
     };
 
     // ------------------------------------------------------------------------------------------- normalisation ----
@@ -332,7 +332,7 @@ internal static class ModCatalog
     }
 
     // A profile entry (mods.<kind>[]).
-    internal sealed record ProfileEntry(string Kind, string? Id, string? Version, string Path, bool Enabled);
+    internal sealed record ProfileEntry(string Kind, string? Id, string? Version, string Path, bool Enabled, string? Hash = null);
 
     internal sealed class Profile
     {
@@ -389,7 +389,7 @@ internal static class ModCatalog
             foreach (var e in kind.Value.EnumerateArray())
             {
                 if (e.ValueKind != JsonValueKind.Object || Str(e, "path") is not { } path) continue;
-                list.Add(new ProfileEntry(kind.Name, Str(e, "id"), Str(e, "version"), ResolvePath(src, path), Bool(e, "enabled") != false));
+                list.Add(new ProfileEntry(kind.Name, Str(e, "id"), Str(e, "version"), ResolvePath(src, path), Bool(e, "enabled") != false, Str(e, "hash")));
             }
             if (list.Count > 0) prof.Mods[kind.Name] = list;  // an empty list is written by no launcher: like no list
         }
@@ -510,11 +510,12 @@ internal static class ModCatalog
         }
 
         /// <summary>The folder in <c>&lt;game&gt;/mods</c> that still holds a profile entry's copy: the entry's own folder
-        /// when it is placed there (XHL companions, EML mods a DLL reads there), Kiln's copy for Enshwick's loader.</summary>
-        private string? KeptInGameMods(string kind, ProfileEntry e, string id)
+        /// (<paramref name="folder"/>, <see cref="FolderOf"/>) when it is placed there (XHL companions, EML mods a DLL reads
+        /// there, ShroudForge's copies), Kiln's copy for Enshwick's loader.</summary>
+        private string? KeptInGameMods(string kind, string folder, string id)
         {
-            if (ParentOf(e.Path) is { } parent && SamePath(parent, Path.Combine(Src.GameDir, "mods")))
-                return DirExists(e.Path) ? e.Path : null;
+            if (ParentOf(folder) is { } parent && SamePath(parent, Path.Combine(Src.GameDir, "mods")))
+                return DirExists(folder) ? folder : null;
             if (kind != "enshwick") return null;
             string copy;
             try { copy = Path.Combine(Src.GameDir, "mods", id); }
@@ -525,6 +526,20 @@ internal static class ModCatalog
         public void Engine(string kind, string? word, EngineHealth health, string? note, bool reported) =>
             Engines[kind] = (word, health, note, reported);
 
+        private readonly Dictionary<ProfileEntry, string?> _runFolders = new();
+
+        /// <summary>The folder the engine runs a profile entry from when that is not the entry's path, else null
+        /// (<see cref="EngineRunFolder"/>; read once per snapshot).</summary>
+        public string? RunFolder(ProfileEntry e)
+        {
+            if (!_runFolders.TryGetValue(e, out var f)) _runFolders[e] = f = EngineRunFolder(Src, e);
+            return f;
+        }
+
+        /// <summary>The folder a profile entry's row stands for: where its engine runs it (<see cref="RunFolder"/>), else
+        /// the entry's path.</summary>
+        public string FolderOf(ProfileEntry e) => RunFolder(e) ?? e.Path;
+
         /// <summary>Profile entries of an engine that its report did not name: disabled, missing, or not loaded.</summary>
         public void ProfileRest(string kind, Func<ProfileEntry, bool> reported, string notReportedReason, ModRunState notReportedState = ModRunState.NotLoaded,
             string? notReportedHelp = null)
@@ -533,14 +548,17 @@ internal static class ModCatalog
             {
                 if (reported(e)) continue;
                 var id = e.Id ?? LeafName(e.Path);
-                var (name, version) = Manifest(e.Path);
-                var missing = MissingPaths.Contains(e.Path) || !DirExists(e.Path);
+                // the folder its engine runs (ShroudForge's and SET's own folder in the game, in every path mode), else the
+                // entry's path: what the row shows and where the page reads and writes its settings
+                var folder = FolderOf(e);
+                var (name, version) = Manifest(folder);
+                var missing = RunFolder(e) is null && (MissingPaths.Contains(e.Path) || !DirExists(e.Path));
                 // switched off, but a copy is still in <game>/mods (kept because it was changed there, say), where a loader
                 // that reads the folder may still run it
-                var kept = e.Enabled ? null : KeptInGameMods(kind, e, id);
+                var kept = e.Enabled ? null : KeptInGameMods(kind, folder, id);
                 Add(new CatalogMod
                 {
-                    Engine = kind, Id = id, Name = name ?? id, Version = e.Version ?? version ?? "", Folder = e.Path, Source = "profile",
+                    Engine = kind, Id = id, Name = name ?? id, Version = e.Version ?? version ?? "", Folder = folder, Source = "profile",
                     Missing = missing && e.Enabled,
                     State = !e.Enabled ? ModRunState.Disabled : missing ? ModRunState.Failed : notReportedState,
                     Word = !e.Enabled ? "disabled" : missing ? "missing" : "not reported",
@@ -597,7 +615,7 @@ internal static class ModCatalog
         Guard("native", () => NativeMods(b));
         Guard("plugin", () => PluginMods(b, bootDoc));
         Guard("chain", () => ChainMods(b, bootDoc));
-        foreach (var kind in new[] { "emf", "eml", "set", "greeneye", "flame", "shroudtopia", "shroudlink", "ember" })
+        foreach (var kind in new[] { "emf", "eml", "set", "greeneye", "flame", "shroudtopia", "shroudlink", "ember", "dllmod" })
             Guard(kind, () => EngineMods(b, kind, bootDoc));
         Guard("xhl", () => Xhl(b));
         Guard("shroudforge", () => ShroudForge(b, bootDoc));
@@ -855,6 +873,9 @@ internal static class ModCatalog
                     reason ??= KilnText.T("catalog.ember.reason");
                     help = KilnText.T("catalog.ember.help");
                 }
+                // kiln-dllmod starts its packages when a world of your own starts: until then they wait for it
+                else if (kind == "dllmod" && state == ModRunState.Waiting && string.IsNullOrEmpty(reason))
+                    reason = KilnText.T("catalog.dllmod.waiting");
                 // own-loader: the engine's own loader runs it (Kiln copied it into that loader's folder)
                 else if (aside && state != ModRunState.Failed && line.State != "own-loader")
                 {
@@ -893,7 +914,8 @@ internal static class ModCatalog
             : !f.Current ? KilnText.T("catalog.engine_mods.old_report", ("engine", EngineName(kind)))
             : KilnText.T("catalog.engine_mods.not_reported", ("engine", EngineName(kind)));
         var why = Why(false);
-        b.ProfileRest(kind, e => (e.Id is not null && (reported.Contains(e.Id) || reportedSlugs.Contains(e.Id))) || reportedFolders.Contains(NormPath(e.Path)), why,
+        b.ProfileRest(kind, e => (e.Id is not null && (reported.Contains(e.Id) || reportedSlugs.Contains(e.Id))) || reportedFolders.Contains(NormPath(e.Path)) ||
+                                 reportedFolders.Contains(NormPath(b.FolderOf(e))), why,
             notReportedHelp: !f.Exists || !f.Current ? KilnText.T("catalog.engine_mods.plugin_help", ("engine", EngineName(kind))) : null);
         if (kind == "set" && !f.Current && b.Profile.ReadsFolder("set"))
         {
@@ -956,6 +978,14 @@ internal static class ModCatalog
                 };
             case "ember":
                 return (EngineHealth.Idle, KilnText.T("catalog.note.ember"));
+            // kiln-dllmod (packages for Enshrouded ModLoader): one client build only, never on a dedicated server
+            case "dllmod":
+                return word switch
+                {
+                    "unsupported" => (EngineHealth.Problem, KilnText.T("catalog.note.dllmod_unsupported")),
+                    "client only" => (EngineHealth.Idle, KilnText.T("catalog.note.dllmod_server")),
+                    _ => (health, null),
+                };
             case "shroudlink":
                 if (Bool(d, "claimedElsewhere") == true) return (EngineHealth.Idle, KilnText.T("catalog.note.shroudlink_elsewhere"));
                 return (health, null);
@@ -1416,7 +1446,11 @@ internal static class ModCatalog
     }
 
     /// <summary>The kind in Kiln's placement marker of a folder (kiln-manage <c>engine_mods::MARKER</c>), or null.</summary>
-    private static string? PlacedKind(string dir)
+    private static string? PlacedKind(string dir) => PlacedMarker(dir)?.Kind;
+
+    /// <summary>Kiln's placement marker of a folder (kiln-manage <c>engine_mods::Marker</c>: kind, id, version, hash), or
+    /// null when the folder has none (not a copy Kiln's launcher placed).</summary>
+    internal static (string? Kind, string? Id, string? Version, string? Hash)? PlacedMarker(string dir)
     {
         var path = Path.Combine(dir, ".kiln-library.json");
         try
@@ -1424,7 +1458,71 @@ internal static class ModCatalog
             if (!File.Exists(path) || new FileInfo(path).Length > 64 << 10) return null;
         }
         catch (Exception) { return null; }
-        return ReadJson(path, out _) is { ValueKind: JsonValueKind.Object } d ? Str(d, "kind") : null;
+        return ReadJson(path, out _) is { ValueKind: JsonValueKind.Object } d ? (Str(d, "kind"), Str(d, "id"), Str(d, "version"), Str(d, "hash")) : null;
+    }
+
+    /// <summary>The folder an engine reads its mods from when it never reads the profile's path for them (kiln-manage
+    /// <c>engine_mods::placed_folder</c>, keep in step): ShroudForge's mods folder (its <c>paths.mods</c>, else
+    /// <c>&lt;game&gt;/mods</c>: <c>shroudforge::mods_dir</c>) and SET's <c>shrouded_engine_tweaks/mods</c>. Null for every
+    /// other kind: its plugin loads the mod from the path the profile names.</summary>
+    internal static string? PlacedRoot(CatalogSources src, string kind) => kind switch
+    {
+        "shroudforge" => PlainPath(SfFolder(src.GameDir, "mods")),
+        "set" => Path.Combine(src.GameDir, "shrouded_engine_tweaks", "mods"),
+        _ => null,
+    };
+
+    /// <summary>A Windows path without the verbatim prefix ShroudForge writes (<c>\\?\D:\x</c> is <c>D:\x</c>,
+    /// <c>\\?\UNC\server\share</c> is <c>\\server\share</c>): the same folder, as the profile and the page name it.</summary>
+    internal static string PlainPath(string p)
+    {
+        if (p.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase) || p.StartsWith("//?/UNC/", StringComparison.OrdinalIgnoreCase)) return @"\\" + p[8..];
+        if (p.StartsWith(@"\\?\", StringComparison.Ordinal) || p.StartsWith("//?/", StringComparison.Ordinal)) return p[4..];
+        return p;
+    }
+
+    /// <summary>The folder the engine of a profile entry runs it from, when that is not the entry's path; else null.
+    ///
+    /// ShroudForge and SET read their mods only from their own folder in the game (<see cref="PlacedRoot"/>), never from
+    /// the path the profile names. Activation places Kiln's copy of each such mod there as <c>&lt;folder&gt;/&lt;id&gt;</c>,
+    /// with a <c>.kiln-library.json</c> marker naming the mod. In the normal path modes the profile names that copy. In Copy
+    /// mode (the launcher's data folder has no Windows path in the game's prefix: a Steam Deck with the game on an SD card)
+    /// the profile names a second copy under <c>kiln/profiles/&lt;profile&gt;/&lt;kind&gt;/</c>, which the engine never
+    /// reads: settings changed there never applied, and the next activation replaced them from the Library. So the row is
+    /// Kiln's copy in the engine's folder whenever its marker names this entry's kind and id, as the launcher's own settings
+    /// editor finds it (kiln-manage <c>engine_mods::sf_folder</c>: the receipt's kind and id; a copy of another version that
+    /// activation kept because it changed is still the one the engine runs). The settings a player changes there are the
+    /// ones the launcher's next profile update keeps (it compares <c>extended.mod.json</c> without them). A folder of that
+    /// name without Kiln's marker is the player's own: it serves the entry in the normal path modes too, so it is the row
+    /// as well when it holds the same package (the same <c>mod.json</c> id as the entry's copy).</summary>
+    internal static string? EngineRunFolder(CatalogSources src, ProfileEntry e)
+    {
+        if (e.Id is not { Length: > 0 } id || PlacedRoot(src, e.Kind) is not { } root) return null;
+        string placed;
+        try
+        {
+            if (id.IndexOfAny(['/', '\\', ':']) >= 0 || id is "." or "..") return null;
+            placed = Path.Combine(root, id);
+        }
+        catch (Exception) { return null; }
+        if (SamePath(placed, e.Path) || !DirExists(placed)) return null;  // the profile names it already (the normal path modes)
+        if (PlacedMarker(placed) is { } marker)
+            return string.Equals(marker.Kind, e.Kind, StringComparison.OrdinalIgnoreCase) && string.Equals(marker.Id, id, StringComparison.Ordinal)
+                ? placed : null;
+        // the player's own folder of the same package (the launcher's sf_folder looks for the package id too)
+        return ManifestId(placed) is { } own && own == ManifestId(e.Path) ? placed : null;
+    }
+
+    /// <summary>A mod folder's <c>mod.json</c> id, or null.</summary>
+    private static string? ManifestId(string folder)
+    {
+        try
+        {
+            var path = Path.Combine(folder, "mod.json");
+            if (!File.Exists(path) || new FileInfo(path).Length > 1 << 20) return null;
+            return ReadJson(path, out _) is { ValueKind: JsonValueKind.Object } d ? Str(d, "id") : null;
+        }
+        catch (Exception) { return null; }
     }
 
     /// <summary>The folders (as <see cref="NormPath"/>) the profile's entries of every kind but <paramref name="except"/>
@@ -1434,7 +1532,11 @@ internal static class ModCatalog
         var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (kind, entries) in b.Profile.Mods)
             if (!kind.Equals(except, StringComparison.OrdinalIgnoreCase))
-                foreach (var e in entries) taken.Add(NormPath(e.Path));
+                foreach (var e in entries)
+                {
+                    taken.Add(NormPath(e.Path));
+                    taken.Add(NormPath(b.FolderOf(e)));  // the folder its engine runs (ShroudForge's copy in <game>/mods)
+                }
         foreach (var (kind, rows) in b.Mods)
             if (!kind.Equals(except, StringComparison.OrdinalIgnoreCase))
                 foreach (var m in rows)
@@ -1478,12 +1580,16 @@ internal static class ModCatalog
         // XHL-Core plugins put into the game's mods folder by hand
         var taken = TakenFolders(b, "xhl");
         var listed = new HashSet<string>(b.Profile.Of("xhl").Select(e => NormPath(e.Path)), StringComparer.OrdinalIgnoreCase);
-        foreach (var sub in SubDirs(Path.Combine(b.Src.GameDir, "mods")))
+        var mods = Path.Combine(b.Src.GameDir, "mods");
+        // ShroudForge reads this folder too when it is its mods folder: its packages are ShroudForge's rows
+        var sfReads = PlacedRoot(b.Src, "shroudforge") is { } sfRoot && SamePath(sfRoot, mods);
+        foreach (var sub in SubDirs(mods))
         {
             bool plugin;
-            try { plugin = File.Exists(Path.Combine(sub, XhlPluginIni)); }
+            try { plugin = IsXhlPlugin(sub); }
             catch (Exception) { plugin = false; }
             if (!plugin || listed.Contains(NormPath(sub)) || taken.Contains(NormPath(sub))) continue;
+            if (sfReads && IsSfPackage(sub)) continue;
             var name = LeafName(sub);
             b.Add(new CatalogMod
             {
@@ -1494,6 +1600,110 @@ internal static class ModCatalog
         }
         if (b.Mods.ContainsKey("xhl") || b.Profile.Of("xhl").Count > 0)
             b.Engine("xhl", null, EngineHealth.Idle, core ? KilnText.T("catalog.xhl.note_core") : KilnText.T("catalog.xhl.note"), true);
+    }
+
+    /// <summary>Is <paramref name="dir"/> an XHL-Core plugin, and not only a folder with a <c>native-plugin.ini</c>? That file is
+    /// ShroudForge's too: its DLL Manager loads the DLL <c>[Plugin] Dll=</c> names inside the package (<c>Dll=bin/x.dll</c>,
+    /// Unified Tweaks). XHL-Core 2.1.0 takes <c>Dll</c> as a file name in the plugin's folder and refuses one with a path in
+    /// it, and refuses a DLL without its plugin exports (<c>XhlNativePluginQuery</c>, <c>XhlNativePluginStart</c>,
+    /// <c>XhlNativePluginRequestStop</c>). A folder is XHL-Core's when it has XHL's <c>xhl-plugin.json</c>, or when nothing
+    /// says otherwise: a plain <c>Dll</c> file name, and the DLL, when it can be read, exports something of XHL's
+    /// (<c>Xhl…</c>). The rule of kiln-manage <c>engine_mods::is_xhl_plugin</c>.</summary>
+    internal static bool IsXhlPlugin(string dir)
+    {
+        try
+        {
+            var ini = Path.Combine(dir, XhlPluginIni);
+            if (!File.Exists(ini)) return false;
+            if (File.Exists(Path.Combine(dir, XhlPluginJson))) return true;
+            if (new FileInfo(ini).Length > 64 << 10 || IniDll(File.ReadAllText(ini)) is not { } dll) return true;
+            if (dll.Contains('/')) return false;
+            var path = Path.Combine(dir, dll);
+            if (!File.Exists(path) || PeExports(path) is not { } exports) return true;
+            return exports.Any(e => e.StartsWith("Xhl", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception) { return File.Exists(Path.Combine(dir, XhlPluginIni)); }
+    }
+
+    private const string XhlPluginJson = "xhl-plugin.json";
+
+    /// <summary>The DLL the <c>[Plugin]</c> section of a <c>native-plugin.ini</c> names (<c>Dll=</c>, section and key in any
+    /// case), '/'-separated; null when there is none or it leaves the folder (kiln-manage <c>engine_mods::xhl_ini_dll</c>).</summary>
+    internal static string? IniDll(string text)
+    {
+        var plugin = false;
+        foreach (var raw in text.Split('\n'))
+        {
+            var line = raw.Trim().TrimStart('\uFEFF');
+            if (line.StartsWith('[') && line.EndsWith(']')) { plugin = line[1..^1].Trim().Equals("Plugin", StringComparison.OrdinalIgnoreCase); continue; }
+            var eq = line.IndexOf('=');
+            if (!plugin || line.StartsWith(';') || line.StartsWith('#') || eq <= 0) continue;
+            if (!line[..eq].Trim().Equals("Dll", StringComparison.OrdinalIgnoreCase)) continue;
+            var value = line[(eq + 1)..].Trim().Trim('"').Replace('\\', '/');
+            while (value.StartsWith("./", StringComparison.Ordinal)) value = value[2..];
+            var leaves = value.Length == 0 || value.StartsWith('/') || value.Contains(':') || value.Split('/').Any(p => p == "..");
+            return leaves ? null : value;
+        }
+        return null;
+    }
+
+    /// <summary>The export names of the PE file at <paramref name="path"/>; null when it is not one Kiln can read.</summary>
+    internal static List<string>? PeExports(string path)
+    {
+        try
+        {
+            if (new FileInfo(path).Length > 512L << 20) return null;
+            var file = File.ReadAllBytes(path);
+            using var pe = new System.Reflection.PortableExecutable.PEReader(new MemoryStream(file));
+            var h = pe.PEHeaders;
+            if (h.PEHeader is not { } opt) return null;
+            var dir = opt.ExportTableDirectory;
+            if (dir.Size == 0 || dir.RelativeVirtualAddress == 0) return [];
+            int Off(int rva)
+            {
+                foreach (var s in h.SectionHeaders)
+                    if (rva >= s.VirtualAddress && rva < s.VirtualAddress + Math.Max(s.VirtualSize, s.SizeOfRawData))
+                        return rva - s.VirtualAddress + s.PointerToRawData;
+                return -1;
+            }
+            uint U32(int at) => at >= 0 && at + 4 <= file.Length ? System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(file.AsSpan(at)) : throw new InvalidDataException();
+            var ed = Off(dir.RelativeVirtualAddress);
+            var count = U32(ed + 24);
+            var names = Off((int)U32(ed + 32));
+            if (count > 65536 || names < 0) return null;
+            var list = new List<string>((int)count);
+            for (var i = 0; i < count; i++)
+            {
+                var at = Off((int)U32(names + 4 * i));
+                if (at < 0) return null;
+                var end = Array.IndexOf(file, (byte)0, at, Math.Min(512, file.Length - at));
+                if (end < 0) return null;
+                list.Add(Encoding.ASCII.GetString(file, at, end - at));
+            }
+            return list;
+        }
+        catch (Exception) { return null; }
+    }
+
+    /// <summary>A ShroudForge package with a <c>native-plugin.ini</c> is not an XHL-Core plugin of its own: ShroudForge's own
+    /// DLL loader reads that file and loads the DLL it names (its dll_manager), and the folder is ShroudForge's row. Told
+    /// apart from an XHL-Core plugin (an EML mod with that file) by ShroudForge's own file: a package is ShroudForge's when
+    /// Kiln's marker says so, or, with no marker of another kind, when its <c>extended.mod.json</c> is ShroudForge's own
+    /// and not the switch of an EML package (<c>"launcher": "EML"</c>, which ShroudForge and Kiln write into an EML
+    /// mod's folder so ShroudForge runs it; that mod stays an XHL-Core plugin too). The test kiln-shroudforge and the
+    /// server's advertised list use (plugin.cpp legacy_wanted, AdvertiseEngines EngineKindOf).</summary>
+    internal static bool IsSfPackage(string dir)
+    {
+        if (PlacedKind(dir) is { } kind) return kind.Equals("shroudforge", StringComparison.OrdinalIgnoreCase);
+        JsonElement? ext;
+        try
+        {
+            var path = Path.Combine(dir, "extended.mod.json");
+            if (!File.Exists(path) || new FileInfo(path).Length > 4 << 20) return false;
+            ext = ReadJson(path, out _);
+        }
+        catch (Exception) { return false; }
+        return ext is { ValueKind: JsonValueKind.Object } e && Str(e, "launcher") != "EML";
     }
 
     private static IEnumerable<string> SubDirs(string dir)

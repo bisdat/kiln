@@ -117,11 +117,54 @@ public sealed unsafe class UiLanguageTests : IDisposable
         Assert.Equal(20, UiLanguage.LanguageId("zh"));
         Assert.Equal(13, UiLanguage.LanguageId("ko"));
         Assert.Equal(0, UiLanguage.LanguageId("en-us"));
+        // Cyrillic: the default font group's glyphs, reported for the language's id
+        Assert.False(UiLanguage.GlyphsReady("ru", (UiNative.GlyphsLatin, 0)));                 // not read yet
+        Assert.False(UiLanguage.GlyphsReady("ru", (UiNative.GlyphsLoading, 9)));
+        Assert.True(UiLanguage.GlyphsReady("ru-RU", (UiNative.GlyphsReady, 9)));
+        Assert.True(UiLanguage.GlyphsReady("uk", (UiNative.GlyphsReady, 9)));                  // one font for all Cyrillic
+        Assert.False(UiLanguage.GlyphsReady("uk", (UiNative.GlyphsReady, 20)));                // Chinese glyphs only
+        Assert.False(UiLanguage.GlyphsReady("ru", (UiNative.GlyphsFailed, 9)));                // kiln.log says why: English
+        Assert.Equal(9, UiLanguage.LanguageId("ru"));
+        Assert.Equal(24, UiLanguage.LanguageId("bg"));
+        Assert.Equal("ru-ru", GameLanguage.KeyOf(9));
+        Assert.Equal("bg-bg", GameLanguage.KeyOf(24));
+        Assert.Equal("uk-ua", GameLanguage.KeyOf(34));
         // the same numbers as kiln.ui's (font_group.h) and the game's keen::LanguageId (GameLanguage)
         Assert.Equal("zh-cn", GameLanguage.KeyOf(20));
         Assert.Equal("zh-tw", GameLanguage.KeyOf(21));
         Assert.Equal("ja-jp", GameLanguage.KeyOf(11));
         Assert.Equal("ko-kr", GameLanguage.KeyOf(13));
+    }
+
+    [Fact]
+    public void A_language_is_named_by_its_tag_while_the_overlay_cannot_draw_its_name()
+    {
+        File.WriteAllText(Path.Combine(_dir, "zh-CN.json"), """{ "language": { "name": "简体中文" } }""");
+        try
+        {
+            KilnLook.GlyphsForTests((UiNative.GlyphsLatin, 0));       // an English game: no Chinese font in the overlay
+            var (labels, ids) = LanguagePage.Choices("auto");
+            Assert.Equal(["auto", "en", "zh-CN"], ids);
+            Assert.Equal(["English", "zh-CN"], labels[1..]);
+            KilnLook.GlyphsForTests((UiNative.GlyphsLoading, 20));    // Chinese chosen: its font is being read
+            Assert.Equal("zh-CN", LanguagePage.Choices("zh-CN").Labels[^1]);
+            KilnLook.GlyphsForTests((UiNative.GlyphsFailed, 20));     // the font could not be read: the tag stays
+            Assert.Equal("zh-CN", LanguagePage.Choices("zh-CN").Labels[^1]);
+            KilnLook.GlyphsForTests((UiNative.GlyphsReady, 11));      // Japanese glyphs are not Chinese ones
+            Assert.Equal("zh-CN", LanguagePage.Choices("zh-CN").Labels[^1]);
+            KilnLook.GlyphsForTests((UiNative.GlyphsReady, 20));      // the font joined the atlas
+            Assert.Equal("简体中文", LanguagePage.Choices("zh-CN").Labels[^1]);
+            // a Chinese game on auto: "Automatic" names the game's language by its tag until the font is there
+            KilnText.Refresh("zh-cn");
+            KilnLook.GlyphsForTests((UiNative.GlyphsLoading, 20));
+            Assert.Equal("Automatic (the game's language: zh-CN)", LanguagePage.Choices("auto").Labels[0]);
+            KilnLook.GlyphsForTests(null);                            // a kiln.ui that does not say is taken at its word
+            Assert.Equal("简体中文", LanguagePage.Choices("auto").Labels[^1]);
+        }
+        finally
+        {
+            KilnLook.GlyphsForTests(null);
+        }
     }
 
     [Fact]
@@ -132,13 +175,15 @@ public sealed unsafe class UiLanguageTests : IDisposable
         Assert.Equal(24, (int)Marshal.OffsetOf<UiNative.Texts>(nameof(UiNative.Texts.Keys)));
         Assert.Equal(1008, (int)Marshal.OffsetOf<UiNative.TableTexts>(nameof(UiNative.TableTexts.SetTexts)));
         var h = File.ReadAllText(Path.Combine(RepoRoot(), "native", "core", "abi", "services", "kiln_ui.h"));
-        Assert.Contains("KilnResult(KILN_CALL* set_texts)(const KilnUiTexts* texts);", h, StringComparison.Ordinal);
-        // The internal completion slot was appended after the texts tail;
-        // preserve the previous field layout rather than requiring end-of-struct.
-        Assert.Contains("KilnResult(KILN_CALL* chat_completion)(KilnUiChatCompletion* io);",
-                        h, StringComparison.Ordinal);
+        // the graphics tail (0.2.0-dev.29.18) follows it: GraphicsTests checks that one
+        Assert.Contains("KilnResult(KILN_CALL* set_texts)(const KilnUiTexts* texts);\n", h, StringComparison.Ordinal);
+        // the internal chat completion slot (issue #44) is appended after the graphics tail: offset 1032, table 1040
+        Assert.Contains("KilnResult(KILN_CALL* chat_completion)(KilnUiChatCompletion* io);\n} KilnUiApi;", h, StringComparison.Ordinal);
         Assert.True(h.IndexOf("chat_completion)(KilnUiChatCompletion* io)", StringComparison.Ordinal) >
-                    h.IndexOf("set_texts)(const KilnUiTexts* texts)", StringComparison.Ordinal));
+                    h.IndexOf("graphics_status)(KilnUiGraphicsStatus* out)", StringComparison.Ordinal));
+        Assert.Equal(1032, (int)Marshal.OffsetOf<UiNative.TableChat>(nameof(UiNative.TableChat.ChatCompletion)));
+        Assert.Equal(1040, sizeof(UiNative.TableChat));
+        Assert.Equal(576, sizeof(UiNative.ChatCompletion));
     }
 
     private static string RepoRoot([CallerFilePath] string source = "")

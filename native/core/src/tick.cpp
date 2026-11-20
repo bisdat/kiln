@@ -24,6 +24,17 @@
 #include "progress_state.h"
 #include "worldinfo.h"
 
+namespace kiln::tasks_svc {  // services/tasks.cpp: the server and client worlds' sessions and Post edges for kiln.tasks
+void session_started(uint32_t world, uint32_t session);
+void post_edge(uint32_t world, uint32_t session, uint64_t step);
+void session_stopping(uint32_t world, uint32_t session);
+void tick_hops(uint32_t world);  // the managed host's queued tick hops of that world, bounded, before its Pre
+// Issue #49: the task pool's diagnostics window for this line; false when the pool does not exist
+// (the line then keeps its older shape). Never takes a pool lock. `world`: whose hop account the line
+// carries; `apply_only`: that account alone (the pool-wide parts ride on the line that drives the mods).
+bool tasks_window(uint32_t world, bool apply_only, kiln::tasks_stats::WindowSnapshot* out);
+}  // namespace kiln::tasks_svc
+
 namespace kiln::tick {
 namespace {
 
@@ -103,6 +114,7 @@ struct Window {
     uint64_t steps = 0;
     uint64_t clock = 0;
     std::vector<float> step, pre, post, interval;
+    stats::Paused paused;  // the server world's paused gaps (tick_stats.h paused_gap), kept out of `interval`
     // since 0.2.0-dev.29, the parts of Pre and Post (tick_stats.h): the server world's job wait per step that waited, the
     // window services' end, and the worst step
     std::vector<float> wait;
@@ -115,6 +127,7 @@ void reset(Window& w) {
     w.steps = 0;
     w.clock = 0;
     for (auto* v : {&w.step, &w.pre, &w.post, &w.interval, &w.wait}) v->clear();
+    w.paused = stats::Paused{};
     w.wait_part = stats::Part{};
     w.windows = stats::Part{};
     stats::reset(w.worst);
@@ -183,9 +196,62 @@ float pct(std::vector<float>& v, double q) {
 
 float maxof(const std::vector<float>& v) { return v.empty() ? 0 : *std::max_element(v.begin(), v.end()); }
 
-// One tick-stats.jsonl line of the window (write_window).
+// Which part of the kiln.tasks window (issue #49) a tick-stats line carries: none (the prediction world), the whole
+// window with this world's hop account (the server world; a joined client's client world), or that account alone (a
+// hosting client's client world: the pool-wide parts are on its server line).
+enum class TasksPart { None, Whole, ApplyOnly };
+
+// since 0.2.0-dev.29.19 (inbox 116): the world's impact memory pool for the line (tick_stats.h ImpactPool): five guarded
+// reads through sigdb's impact.pool offsets (the ones kiln.abilities' impact pool watch uses), once a minute on the world's
+// thread, no allocation. False (the line keeps its older shape) on a build without them, for the prediction world (no
+// singletons), with kiln/control/impacts saying "off", or on a fault.
+bool read_impact_pool(uint32_t kind, stats::ImpactPool* out) {
+    struct Offsets {
+        int64_t used = -1, cap = -1, pool = -1, live = -1, peak = -1;
+    };
+    static const Offsets o = [] {  // once, thread-safe (the server and the client worlds write lines on two threads)
+        Offsets x;
+        if (!sigdb::feature("impact.pool") || !sigdb::constant("impact/alloc.used", &x.used) ||
+            !sigdb::constant("impact/alloc.capacity", &x.cap) || !sigdb::constant("impact/sys.pool", &x.pool) ||
+            !sigdb::constant("impact/pool.live", &x.live) || !sigdb::constant("impact/pool.peak", &x.peak))
+            x.used = -1;
+        return x;
+    }();
+    const int64_t used = o.used, cap = o.cap, pool = o.pool, live = o.live, peak = o.peak;
+    if (used < 0 || kind == KILN_WORLD_PREDICTION) return false;
+    {
+        std::error_code ec;
+        const auto ctl = paths().kiln / L"control" / L"impacts";
+        if (std::filesystem::exists(ctl, ec)) {
+            char b[16] = {};
+            if (std::FILE* f = _wfopen(ctl.c_str(), L"rb")) {
+                const size_t n = std::fread(b, 1, sizeof b - 1, f);
+                std::fclose(f);
+                size_t a = 0, e = n;
+                while (a < e && (b[a] == ' ' || b[a] == '\t' || b[a] == '\r' || b[a] == '\n')) ++a;
+                while (e > a && (b[e - 1] == ' ' || b[e - 1] == '\t' || b[e - 1] == '\r' || b[e - 1] == '\n')) --e;
+                if (e - a == 3 && (b[a] | 0x20) == 'o' && (b[a + 1] | 0x20) == 'f' && (b[a + 2] | 0x20) == 'f') return false;
+            }
+        }
+    }
+    const uintptr_t world = worldinfo::world(kind);
+    const uintptr_t sys = world ? worldinfo::singleton(world, "impact::ImpactSystem") : 0;
+    uintptr_t alloc = 0;
+    uint64_t up[2] = {};
+    if (!sys || !guard::copy(&alloc, sys, 8) || !alloc || !guard::copy(up, alloc + static_cast<uintptr_t>(used), 16) ||
+        !guard::copy(&out->capacity, alloc + static_cast<uintptr_t>(cap), 8) ||
+        !guard::copy(&out->live, sys + static_cast<uintptr_t>(pool + live), 8) ||
+        !guard::copy(&out->live_peak, sys + static_cast<uintptr_t>(pool + peak), 8))
+        return false;
+    out->used = up[0];
+    out->peak = up[1];
+    return stats::impact_pool_sane(*out);
+}
+
+// One tick-stats.jsonl line of the window (write_window), the kiln.tasks part collected here, once a minute, never on
+// a step.
 void write_line(Window& w, const stats::Subs& slots, const char* world, double span, size_t pre_subs, size_t post_subs,
-                bool waits) {
+                bool waits, TasksPart tasks, uint32_t kind) {
     SYSTEMTIME t;
     GetLocalTime(&t);
     stats::Line l;
@@ -203,6 +269,7 @@ void write_line(Window& w, const stats::Subs& slots, const char* world, double s
     l.pre = {pct(w.pre, 0.5), pct(w.pre, 0.99), maxof(w.pre)};
     l.post = {pct(w.post, 0.5), pct(w.post, 0.99), maxof(w.post)};
     l.interval = {pct(w.interval, 0.5), pct(w.interval, 0.99), maxof(w.interval)};
+    l.paused = w.paused;
     l.pre_count = pre_subs;
     l.post_count = post_subs;
     l.waits = waits;
@@ -228,6 +295,8 @@ void write_line(Window& w, const stats::Subs& slots, const char* world, double s
         l.worst_pre_subs = stats::by_owner(w.worst.pre_subs, name);
         stats::top(l.worst_pre_subs, stats::kPreTop);
     }
+    if (tasks != TasksPart::None) l.has_tasks = tasks_svc::tasks_window(kind, tasks == TasksPart::ApplyOnly, &l.tasks);
+    l.has_impact = read_impact_pool(kind, &l.impact);
     const std::string line = stats::format(l);
     {
         std::lock_guard lock(g_stats_mutex);
@@ -242,13 +311,14 @@ void write_line(Window& w, const stats::Subs& slots, const char* world, double s
 // ("server", ...); null on a dedicated server, whose lines keep their original shape. `waits`: this world's Post waits for
 // its jobs (the server world with WaitWorldJobs), so the line has the wait and the window services' end. Owner names are
 // looked up here, once a minute, not on each step.
-void write_window(Window& w, stats::Subs& slots, const char* world, size_t pre_subs, size_t post_subs, bool waits) {
+void write_window(Window& w, stats::Subs& slots, const char* world, size_t pre_subs, size_t post_subs, bool waits,
+                  TasksPart tasks = TasksPart::None, uint32_t kind = KILN_WORLD_SERVER) {
     const double now = now_ms();
     if (w.start == 0) w.start = now;
     const double span = now - w.start;
     if (span < 60000.0) return;
     try {  // a line that cannot be built (out of memory) is skipped; it never stops the tick
-        write_line(w, slots, world, span, pre_subs, post_subs, waits);
+        write_line(w, slots, world, span, pre_subs, post_subs, waits, tasks, kind);
     } catch (...) {
     }
     reset(w);
@@ -324,6 +394,7 @@ void begin_world(uint32_t kind, uintptr_t world) {
     KLOG_I("tick: %s world 0x%llx started (session %u, thread %lu%s)", kKindName[kind],
            static_cast<unsigned long long>(world), session, GetCurrentThreadId(),
            old ? "; the previous one stopped without a destroy event" : "");
+    if (kind == KILN_WORLD_SERVER || kind == KILN_WORLD_CLIENT) tasks_svc::session_started(kind, session);
     dispatch_event(KILN_WORLD_STARTED, kind, world, session);
 }
 
@@ -393,6 +464,7 @@ uintptr_t server_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr
             g_last = info;
         }
         window_clock::pre(info.step);
+        tasks_svc::tick_hops(KILN_WORLD_SERVER);  // kiln.tasks: the managed host's tick hops (budgeted), before Pre
         run(g_pre, g_slots.pre, info, now_ms());
         // After the last Pre subscriber: the window services sample the world (kiln_window_clock.h, phase 2), then Sim.
         window_clock::begin();
@@ -429,8 +501,15 @@ uintptr_t server_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr
                 KLOG_W("tick: Post subscribers exist but WaitWorldJobs is unresolved; Post is not delivered");
             }
         }
+        // kiln.tasks' AFTER_STEP: Kiln's Post of this step ran (a scheduling hint); queues the released tasks for
+        // the pool, never runs one here
+        tasks_svc::post_edge(KILN_WORLD_SERVER, g_sessions[KILN_WORLD_SERVER].load(), info.step);
         const double t3 = now_ms();
-        if (g_step > 1 && info.wall_delta_ms > 0) g_win.interval.push_back(static_cast<float>(t0 - g_prev_start));
+        if (g_step > 1 && info.wall_delta_ms > 0) {
+            const float gap = static_cast<float>(t0 - g_prev_start);
+            if (stats::paused_gap(gap, info.clock_delta)) g_win.paused.add(gap);
+            else g_win.interval.push_back(gap);
+        }
         g_win.step.push_back(static_cast<float>(t2 - t1));
         g_win.pre.push_back(static_cast<float>(t1 - t0));
         g_win.post.push_back(static_cast<float>(t3 - t2));
@@ -530,6 +609,8 @@ uintptr_t other_step(uint32_t kind, uintptr_t storage, uintptr_t ticked, uintptr
         }
         refresh(kind, K);
         drain_tasks(kind);
+        // kiln.tasks: the client world's tick hops (budgeted, its own budget), before its Pre subscribers
+        if (kind == KILN_WORLD_CLIENT) tasks_svc::tick_hops(KILN_WORLD_CLIENT);
         info.size = sizeof info;
         info.world_kind = kind;
         info.step = ++K.step;
@@ -554,6 +635,8 @@ uintptr_t other_step(uint32_t kind, uintptr_t storage, uintptr_t ticked, uintptr
     try {
         const bool post_ran = !K.post.empty();
         if (post_ran) run_subs(K.post, K.slots.post, info, t2);  // a client-side world's step finished its own jobs
+        // kiln.tasks' AFTER_STEP and NextGateWindow of the client world: its Post ran (a scheduling hint)
+        if (kind == KILN_WORLD_CLIENT) tasks_svc::post_edge(KILN_WORLD_CLIENT, g_sessions[KILN_WORLD_CLIENT].load(), info.step);
         const double t3 = now_ms();
         Window& w = K.win;
         if (K.step > 1 && info.wall_delta_ms > 0) w.interval.push_back(static_cast<float>(t0 - K.prev_start));
@@ -566,7 +649,11 @@ uintptr_t other_step(uint32_t kind, uintptr_t storage, uintptr_t ticked, uintptr
         ++w.steps;
         K.prev_clock = info.clock;
         K.prev_start = t0;
-        write_window(w, K.slots, kKindName[kind], K.pre.size(), K.post.size(), false);
+        // the client world's line carries its hop account; the pool-wide parts too while no server world drives the mods
+        const TasksPart part = kind != KILN_WORLD_CLIENT ? TasksPart::None
+                               : worldinfo::server_world() ? TasksPart::ApplyOnly
+                                                           : TasksPart::Whole;
+        write_window(w, K.slots, kKindName[kind], K.pre.size(), K.post.size(), false, part, kind);
     } catch (...) {
         disable("client/prediction Post");
     }
@@ -625,6 +712,7 @@ void __fastcall hk_world_destroy(uintptr_t world) {
                 worldinfo::set_world(KILN_WORLD_PREDICTION, 0);
             }
             if (kind == KILN_WORLD_SERVER) window_clock::stopping();
+            if (kind == KILN_WORLD_SERVER || kind == KILN_WORLD_CLIENT) tasks_svc::session_stopping(kind, session);
             dispatch_event(KILN_WORLD_STOPPING, kind, world, session);
             if (kind == KILN_WORLD_SERVER) window_clock::stopped();
             worldinfo::set_world(kind, 0);  // the next step of this kind (even at the same address) starts a session
@@ -708,7 +796,7 @@ KilnResult last(KilnTickInfo* out) {
 
 void write_stats_if_due() {
     write_window(g_win, g_slots, image().side == KILN_SIDE_CLIENT ? "server" : nullptr, g_pre.size(), g_post.size(),
-                 g_wait_jobs != nullptr);
+                 g_wait_jobs != nullptr, TasksPart::Whole, KILN_WORLD_SERVER);
 }
 
 KilnResult subscribe_world_tick(KilnOwner owner, uint32_t kind, int32_t phase, KilnTickFn fn, void* user,

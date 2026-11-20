@@ -99,6 +99,7 @@ void after_library_load() {
     // every load: vulkan-1.dll present and our hooks not in its code (first load, or a reload) -> (re)install
     if (overlay_drawing_on() && GetModuleHandleW(L"vulkan-1.dll")) vk_install();
     if (overlay_drawing_on()) input_hook_xinput();
+    graphics_after_load();  // NVIDIA's DLSS core, when a DLSS setting or the readout was on at start (one load otherwise)
 }
 
 // Calls a native frame callback under a fault guard (the game's render thread must survive a bad subscriber).
@@ -159,6 +160,59 @@ void set_error(const char* fmt, ...) {
         std::snprintf(g_error, sizeof g_error, "%s", buf);
     }
     logf(KILN_LOG_ERROR, "ui: %s", buf);
+}
+
+// The overlay's drawing turned off during this session (ui.h). The reason is written once, before the flag.
+std::atomic<bool> g_overlay_failed{false};
+namespace {
+std::string g_off_reason;
+std::atomic<bool> g_off_said{false};
+// The drawing capability rows say why the overlay does not draw (kiln.caps; capabilities.json, the support report):
+// at the start for a drawing-off start, on a pool thread when it turned off later (a report may run subscribers on the
+// calling thread, which is a present call then).
+void report_drawing_off(const std::string& reason) {
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(KilnStr{KILN_CAPS_SERVICE, sizeof(KILN_CAPS_SERVICE) - 1}, 1));
+    if (!caps || !caps->report) return;
+    for (const char* name : {"ui.windows", "ui.draw", "ui.menu_page", "render.draw", "kiln.screen"})
+        caps->report(g_owner, KilnStr{name, std::strlen(name)}, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
+                     KilnStr{reason.data(), reason.size()});
+}
+DWORD WINAPI report_drawing_off_later(void* p) {
+    std::unique_ptr<std::string> reason(static_cast<std::string*>(p));
+    try { report_drawing_off(*reason); } catch (...) {}
+    return 0;
+}
+}  // namespace
+
+const std::string& overlay_off_reason() {
+    static const std::string none;
+    return overlay_failed() ? g_off_reason : none;
+}
+
+void overlay_turned_off(int level, const char* reason, const char* detail) {
+    if (g_off_said.exchange(true)) return;
+    try {
+        g_off_reason = std::string("the overlay's drawing is off: ") + (reason && *reason ? reason : "a Vulkan error");
+        g_overlay_failed.store(true, std::memory_order_release);
+        release_input_after_turn_off();
+        logf(level, "ui: Kiln's overlay drawing is off for the rest of this game session: %s%s%s. The game's frames go on "
+             "as the game made them (Kiln hands each present on untouched); key bindings and the Mods menu still work, Kiln's "
+             "windows and HUDs do not show. The next start tries the overlay again", reason && *reason ? reason : "a Vulkan error",
+             detail && *detail ? "; " : "", detail ? detail : "");
+        {
+            std::lock_guard<std::mutex> lk(g_err_mu);
+            std::snprintf(g_error, sizeof g_error, "%s", g_off_reason.c_str());
+        }
+        game_overlay_turned_off();
+        // the overlay's own work failed (an error, not a present it would not draw on): a death soon after is one at the
+        // overlay, for the crash guard
+        if (level == KILN_LOG_ERROR) overlay_guard_failed();
+        auto* copy = new std::string(g_off_reason);
+        if (!QueueUserWorkItem(&report_drawing_off_later, copy, WT_EXECUTEDEFAULT)) delete copy;
+    } catch (...) {
+        g_overlay_failed.store(true, std::memory_order_release);
+        release_input_after_turn_off();
+    }
 }
 
 bool imgui_ready() { return g_imgui; }
@@ -230,6 +284,7 @@ bool build_frame(float width, float height, float dpi) {
         io.WantSaveIniSettings = false;
     }
     footer_overlay();  // Kiln's mark next to its line in the main menu's footer, behind every window (menu_footer.cpp)
+    graphics_overlay();  // the graphics readout in the top right corner, when the player turned it on (graphics.cpp)
     KilnUiFrame f{};
     f.size = sizeof f;
     f.width = width;
@@ -278,7 +333,7 @@ bool dispatch_key(const KilnUiKey& key, bool mouse) {
     // punctuation key is the key at its place on any layout (key_names.h), as for Kiln.Ui's bindings
     if (key.down && !key.repeat && !key.text_input && keys::matches(g_menu_vk.load(), key.vk, key.scan) &&
         key.mods == g_menu_mods.load()) {
-        if (overlay_drawing_on() && page_menu_key()) return true;
+        if (overlay_draws() && page_menu_key()) return true;
         g_menu_open = !g_menu_open.load();
         logf(KILN_LOG_DEBUG, "ui: Kiln menu %s", g_menu_open ? "open" : "closed");
         return true;
@@ -515,6 +570,18 @@ KilnResult KILN_CALL t_set_look(const KilnUiLook* look) {
 }
 KilnResult KILN_CALL t_look_info(KilnUiLookInfo* out) { return look_info(out); }
 
+// Kiln's own graphics tools (graphics.cpp, 0.2.0-dev.29.18). Like set_look, graphics_set is Kiln.Ui's call only: the player
+// chooses them. graphics_status is anyone's.
+KilnResult KILN_CALL t_graphics_set(const KilnUiGraphics* g) {
+    if (caller_is_plugin(_ReturnAddress())) {
+        static std::atomic<bool> said{false};
+        if (!said.exchange(true)) logf(KILN_LOG_WARN, "ui: a native plugin called graphics_set: refused (the player chooses Kiln's graphics settings)");
+        return KILN_ERR_UNAVAILABLE;
+    }
+    return graphics_set(g);
+}
+KilnResult KILN_CALL t_graphics_status(KilnUiGraphicsStatus* out) { return graphics_status(out); }
+
 // Kiln's own texts in the player's language (ui_text.h). Like set_look, Kiln.Ui's call only: the player chooses the language.
 KilnResult KILN_CALL t_set_texts(const KilnUiTexts* t) {
     if (caller_is_plugin(_ReturnAddress())) {
@@ -590,8 +657,23 @@ static_assert(sizeof(KilnUiImageDraw) == 32 && offsetof(KilnUiImageDraw, width) 
               "KilnUiImageDraw layout (UiNative.ImageDraw)");
 static_assert(offsetof(KilnUiApi, set_texts) == 1008,
               "kiln.ui appends set_texts after image_opaque_rect (0.2.0-dev.29.16; UiNative.TableTexts)");
-static_assert(offsetof(KilnUiApi, chat_completion) == 1016 && sizeof(KilnUiApi) == 1024,
-              "chat completion must append after the unchanged 1016-byte v29.16 table");
+static_assert(offsetof(KilnUiApi, graphics_set) == 1016 && offsetof(KilnUiApi, graphics_status) == 1024,
+              "kiln.ui appends graphics_set and graphics_status after set_texts (0.2.0-dev.29.18; UiNative.TableGraphics)");
+static_assert(sizeof(KilnUiGraphics) == 48 && offsetof(KilnUiGraphics, custom_scale) == 16 && offsetof(KilnUiGraphics, mode_scale) == 20 &&
+                  offsetof(KilnUiGraphics, readout) == 36 && offsetof(KilnUiGraphics, upscaler) == 40 &&
+                  offsetof(KilnUiGraphics, amd_upscaler) == 44,
+              "KilnUiGraphics layout (UiNative.Graphics)");
+static_assert(sizeof(KilnUiGraphicsStatus) == KILN_UI_GRAPHICS_STATUS_SIZE_V2 && offsetof(KilnUiGraphicsStatus, rendered_fps) == 20 &&
+                  offsetof(KilnUiGraphicsStatus, output_width) == 32 && offsetof(KilnUiGraphicsStatus, dlss_quality) == 40 &&
+                  offsetof(KilnUiGraphicsStatus, render_width) == 48 && offsetof(KilnUiGraphicsStatus, dlss_output_width) == 56 &&
+                  offsetof(KilnUiGraphicsStatus, upscaler) == KILN_UI_GRAPHICS_STATUS_SIZE_V1 &&
+                  offsetof(KilnUiGraphicsStatus, upscale_running) == 80 && offsetof(KilnUiGraphicsStatus, upscale_reason) == 84 &&
+                  offsetof(KilnUiGraphicsStatus, upscale_flags) == 88 && offsetof(KilnUiGraphicsStatus, aside_upscale) == 92 &&
+                  offsetof(KilnUiGraphicsStatus, upscale_version) == 96 && offsetof(KilnUiGraphicsStatus, upscale_render_width) == 100 &&
+                  offsetof(KilnUiGraphicsStatus, upscale_output_width) == 108 && offsetof(KilnUiGraphicsStatus, upscale_detail) == 120,
+              "KilnUiGraphicsStatus layout (UiNative.GraphicsStatus; phase B fields from 72)");
+static_assert(offsetof(KilnUiApi, chat_completion) == 1032 && sizeof(KilnUiApi) == 1040,
+              "chat completion appends after graphics_status (internal, Kiln.Ui only; UiNative.TableChat)");
 static_assert(offsetof(KilnUiChatCompletion, text) == 60 &&
               offsetof(KilnUiChatCompletion, replacement) == 317 &&
               sizeof(KilnUiChatCompletion) == 576,
@@ -664,6 +746,7 @@ const KilnUiApi kTable = {
     // part of an image, trimmed images (0.2.0-dev.29.16)
     &t_image_ex, &t_image_opaque_rect,
     &t_set_texts,  // Kiln's own texts (0.2.0-dev.29.16)
+    &t_graphics_set, &t_graphics_status,  // Kiln's own graphics tools (0.2.0-dev.29.18)
     &t_chat_completion,  // issue #44 internal managed completion
 };
 
@@ -708,6 +791,12 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         return KILN_ERR_UNAVAILABLE;
     }
     overlay_guard_start();
+    {
+        // Kiln's own graphics tools: kiln.json "graphics" and what they step aside for (graphics.cpp)
+        bool optiscaler = false, streamline = false;
+        overlay_guard_tools(&optiscaler, &streamline);
+        graphics_start(optiscaler, streamline);
+    }
     try {
         const std::string data = api_path(KILN_PATH_DATA);
         if (!data.empty()) {
@@ -734,6 +823,10 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         // No Vulkan load observer, exports, objects or pre-overlay callbacks in this mode.
     } else if (GetModuleHandleW(L"vulkan-1.dll")) {
         vk_install();
+        // NVIDIA's DLSS core loads after vulkan-1.dll: its hooks need the load hook all the same
+        if (graphics_wants_load_hook() && !load_hook::install(&after_library_load))
+            logf(KILN_LOG_WARN, "graphics: hooking LoadLibraryExW failed: Kiln's DLSS settings are off");
+        graphics_after_load();
     } else {
         if (!load_hook::install(&after_library_load)) {
             logf(KILN_LOG_ERROR, "ui: hooking LoadLibraryExW failed: no overlay");
@@ -744,13 +837,6 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     if (game) api->register_service(owner, KilnStr{KILN_UI_TICK_SERVICE, sizeof(KILN_UI_TICK_SERVICE) - 1}, &kTickTable);
     api->register_service(owner, KilnStr{KILN_RENDER_SERVICE, sizeof(KILN_RENDER_SERVICE) - 1}, render_table());
     const auto result = api->register_service(owner, KilnStr{KILN_UI_SERVICE, sizeof(KILN_UI_SERVICE) - 1}, &kTable);
-    if (!overlay_drawing_on()) {
-        const auto* caps = static_cast<const KilnCapsApi*>(api->service(KilnStr{KILN_CAPS_SERVICE, sizeof(KILN_CAPS_SERVICE)-1}, 1));
-        if (caps && caps->report) {
-            for (const char* name : {"ui.windows", "ui.draw", "ui.menu_page", "render.draw", "kiln.screen"})
-                caps->report(owner, KilnStr{name, std::strlen(name)}, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
-                             KilnStr{g_overlay_reason.data(), g_overlay_reason.size()});
-        }
-    }
+    if (!overlay_drawing_on()) report_drawing_off(g_overlay_reason);
     return result;
 }

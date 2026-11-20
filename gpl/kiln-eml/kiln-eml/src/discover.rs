@@ -193,7 +193,9 @@ pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathB
         // DLL looks for (`mods/XHL-Auto-Loot` for the Library id `xhl-auto-loot`)
         let own_path = paths.get(i).map(|c| c.path.clone())
             .filter(|p| p.parent().is_some_and(|parent| roots.iter().any(|r| is_root(parent, r))));
-        let copy = roots.iter().map(|r| r.join(&id)).chain(own_path).find(|d| kiln_copy_of(d).is_some_and(|m| m == id));
+        // The entry's own path first: on Windows `<root>\<id>` also opens `<root>\XHL-Auto-Loot` (names are not case
+        // sensitive there), and the report must name the folder as the launcher placed it.
+        let copy = own_path.into_iter().chain(roots.iter().map(|r| r.join(&id))).find(|d| kiln_copy_of(d).is_some_and(|m| m == id));
         let wanted = paths.get(i).and_then(|c| classify(&c.path).ok()).map(|m| m.id).unwrap_or_else(|| id.clone());
         let manual = if copy.is_none() {
             roots.iter().flat_map(|r| folder_candidates(r, "own-loader")).map(|c| c.path)
@@ -518,11 +520,26 @@ fn manifest(text: &str, flame: bool, extended: Option<&str>) -> Result<ModManife
     serde_json::from_value(raw).map_err(|e| format!("not an EML manifest: {e}"))
 }
 
+/// Why a Kiln mod (a `kiln.mod.json`, no `mod.json`) dropped into EML's folders is skipped. Logged, unlike a plain
+/// "no mod.json" folder: players unzip Kiln mods there by mistake (inbox 81).
+const KILN_MOD: &str = "a Kiln mod (kiln.mod.json), not an EML mod: Kiln runs it from kiln/mods. Add its zip in the Kiln \
+    Launcher (Library, Add mods; or, on a server, unzip it into kiln/mods/<mod>/) and remove it from this folder";
+const KILN_MOD_LOOSE: &str = "part of a Kiln mod unzipped loose into EML's mods folder (a kiln.mod.json lies next to \
+    it): remove the loose files there and add the mod's zip in the Kiln Launcher (Library, Add mods; on a server, unzip it into \
+    kiln/mods/<mod>/)";
+
 /// The manifest of an EML mod, or why the folder/zip is not one EML runs.
 pub fn classify(path: &Utf8Path) -> Result<ModManifest, String> {
     if path.is_dir() {
         let has = |f: &str| path.join(f).is_file();
         if !has("mod.json") {
+            if has("kiln.mod.json") {
+                return Err(KILN_MOD.into());
+            }
+            // a Kiln mod's zip unpacked loose into EML's mods folder: its subfolders (sigdb/ ...) land here as entries
+            if path.parent().is_some_and(|p| p.join("kiln.mod.json").is_file()) {
+                return Err(KILN_MOD_LOOSE.into());
+            }
             return Err("no mod.json (not an EML mod)".into());
         }
         fn text(path: &Utf8Path) -> Result<String, String> {
@@ -563,6 +580,13 @@ pub fn classify(path: &Utf8Path) -> Result<ModManifest, String> {
             f.by_ref().take(1024 * 1024 + 1).read_to_string(&mut text).map_err(|e| e.to_string())?;
             if text.len() > 1024 * 1024 { return Err("manifest exceeds 1 MiB".into()); }
             Ok(text)
+        }
+        if zip.by_name("mod.json").is_err()
+            && zip.file_names().any(|n| n == "kiln.mod.json" || n.strip_suffix("/kiln.mod.json").is_some_and(|d| !d.contains('/'))) {
+            return Err(KILN_MOD.into());
+        }
+        if zip.by_name("mod.json").is_err() {
+            return Err("no mod.json in the zip (not an EML mod)".into());
         }
         let t = text(&mut zip, "mod.json")?;
         let flame = zip.by_name("flame.json").is_ok();
@@ -692,6 +716,28 @@ mod tests {
         let empty = d.join("empty");
         std::fs::create_dir_all(&empty).unwrap();
         assert!(classify(&empty).unwrap_err().starts_with("no mod.json"));
+        // a Kiln mod in its own folder, and one unzipped loose (its sigdb/ becomes an entry of the mods folder)
+        let kiln = d.join("kiln-mod");
+        std::fs::create_dir_all(kiln.join("sigdb")).unwrap();
+        std::fs::write(kiln.join("kiln.mod.json"), r#"{"id":"k","name":"K","version":"1.0.0"}"#).unwrap();
+        assert_eq!(classify(&kiln).unwrap_err(), KILN_MOD);
+        assert_eq!(classify(&kiln.join("sigdb")).unwrap_err(), KILN_MOD_LOOSE);
+        assert!(!classify(&kiln).unwrap_err().starts_with("no mod.json"), "logged, not quiet");
+        // a Kiln mod's zip, flat or with one top folder (the SDK's KilnPack layout)
+        for (name, entry) in [("flat.zip", "kiln.mod.json"), ("nested.zip", "more-flame-altars/kiln.mod.json")] {
+            let z = d.join(name);
+            let mut w = zip::ZipWriter::new(std::fs::File::create(&z).unwrap());
+            w.start_file(entry, zip::write::SimpleFileOptions::default()).unwrap();
+            std::io::Write::write_all(&mut w, br#"{"id":"k"}"#).unwrap();
+            w.finish().unwrap();
+            assert_eq!(classify(&z).unwrap_err(), KILN_MOD, "{name}");
+        }
+        // any other zip without mod.json says so, not the zip crate's "specified file not found in archive"
+        let other = d.join("other.zip");
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&other).unwrap());
+        w.start_file("readme.txt", zip::write::SimpleFileOptions::default()).unwrap();
+        w.finish().unwrap();
+        assert_eq!(classify(&other).unwrap_err(), "no mod.json in the zip (not an EML mod)");
         let huge = eml_mod(&d, "huge", "huge");
         std::fs::write(huge.join("mod.json"), vec![b' '; 1024 * 1024 + 1]).unwrap();
         assert!(classify(&huge).unwrap_err().contains("exceeds 1 MiB"));
@@ -805,7 +851,8 @@ mod tests {
         let e = aside_entries(j, &d.join("kiln"), &[d.join("mods")], "EML's own loader", None);
         let states: Vec<_> = e.iter().map(|x| (x.id.as_deref().unwrap(), x.state.as_str())).collect();
         assert_eq!(states, [("a", "own-loader"), ("b", "not-loaded"), ("c", "disabled")]);
-        assert_eq!(e[0].path, copy.as_str());
+        // the folder `copy` names, spelled with the system's separator (`mods\a` on Windows): compared as paths
+        assert_eq!(Utf8Path::new(&e[0].path), copy);
         assert!(e[1].reason.as_deref().unwrap().starts_with("EML's own loader runs this start and reads only"));
         assert_eq!(e[1].path, "/lib/b");
         std::fs::remove_dir_all(d).unwrap();
@@ -948,7 +995,8 @@ mod tests {
         assert_eq!(run, [copy.clone()]);
         assert_eq!(entries.len(), 1);
         let aside = aside_entries(&json, &d.join("kiln"), &[d.join("mods")], "EML's own loader", None);
-        assert_eq!((aside[0].state.as_str(), aside[0].path.as_str()), ("own-loader", copy.as_str()));
+        // as paths (Windows spells it with `\`), and with the case the launcher placed it with (`XHL-Native-Mod`, not the id)
+        assert_eq!((aside[0].state.as_str(), Utf8Path::new(&aside[0].path)), ("own-loader", copy.as_path()));
         // No marker: a real hand installation is still loaded by the foreign loader, not missing in the Library.
         std::fs::remove_file(copy.join(".kiln-library.json")).unwrap();
         let aside = aside_entries(&json, &d.join("kiln"), &[d.join("mods")], "EML's own loader", None);

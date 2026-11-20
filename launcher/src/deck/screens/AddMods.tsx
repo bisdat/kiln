@@ -16,6 +16,7 @@ import { DeckButton, Row, Screen, Word } from "../ui";
 import { KIND_WORD, ago, size } from "../status";
 import type { DeckAction } from "../layers";
 import { t, useT } from "../../i18n";
+import { deckAddTitle } from "../../shell/addWords";
 
 /** A zip or folder holding one mod: that mod. */
 const one = (m: DeckFoundMod) => (m.detected.kind === "unknown" && m.detected.items.length === 1 ? m.detected.items[0] : m.detected);
@@ -68,7 +69,8 @@ export default function AddMods() {
       rememberAdd({ heading: r.added.length ? t("deck.addMods.addedOn") : r.already.length ? t("deck.addMods.alreadyOn") : r.libraryOnly ? t("deck.addMods.addedOff") : t("deck.addMods.nothingAdded"),
         summary: summarize(r.import), libraryOnly: r.libraryOnly });
       if (r.modpacks.length) setPack(r.modpacks[0]);
-      else if (r.added.length) toast.ok(r.added.length === 1 ? t("deck.addMods.addedOne", { name: r.added[0].name }) : t("deck.addMods.addedMany", { count: r.added.length }),
+      // "Updated Night Owl: 1.2.0 → 1.3.0" when the profile had another version of it (29.18, inbox 90)
+      else if (r.added.length) toast.ok(deckAddTitle(r),
         r.missing.length ? t("deck.addMods.needs", { ids: r.missing.map((x) => x.id).join(", ") }) : undefined);
       else if (r.already.length) toast.info(r.already.length === 1 ? t("deck.addMods.alreadyOne", { name: r.already[0].name }) : t("deck.addMods.alreadyMany", { count: r.already.length }));
       else if (r.libraryOnly && (r.import.imported.length || r.import.existing.length)) toast.info(t("deck.addMods.addedOff"), t("deck.addMods.noProfileLoaded"));

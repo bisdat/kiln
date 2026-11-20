@@ -3,7 +3,7 @@
 // Play button, which shrinks to a pilot light in the corner while a sheet is up), toasts and the splash.
 // Mounts the backend event feeds once, the first run's game detection, the window-wide mod drop, the rows' right click
 // (ui/Menu.tsx) and the Install Kiln confirm.
-import { Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { NavLink, useLocation, useNavigate, useOutlet } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAppInfo, useBackendEvents, useNexusEnabled, useSettings } from "../api/hooks";
@@ -15,6 +15,7 @@ import { UpdateTray } from "./UpdateNotice";
 import { BetaMark, ChannelSwitchDialog } from "./ChannelSwitch";
 import { RouteErrorBoundary } from "./ErrorBoundary";
 import { DataFolderNotice } from "./DataFolderGate";
+import { OwnFilesNotice } from "./OwnFilesNotice";
 import { NAV_MAIN, NAV_SIDE, navFor } from "./nav";
 import { DropAnywhere, ModpackDropOffer, useAddMods } from "./drop";
 import { ImportDetails, PickProfile } from "./importResult";
@@ -22,11 +23,26 @@ import { NxmListener } from "./catalogInstall";
 import { ModUpdatesWatcher } from "./modUpdates";
 import { InstallKilnModal, detectGames, useAutoDetect, useDetect, useInstallPrompt, useKilnInstall } from "./firstRun";
 import { clock, usePlayControl, type PlayControl } from "./play";
-import { Stage, stageInput, type Heat } from "./Stage";
+import { applyingWord } from "./applying";
+import { Stage, flatDrawing, stageInput, wakeStage, type Heat } from "./Stage";
 import { startWords } from "./startProgress";
 import { useT } from "../i18n";
+import { CommunityDesktopHost } from "../community/Host";
+import { NavCount } from "../community/parts";
+import { useShown } from "../community/state";
+import { watchCrashes } from "../community/crash";
 
-const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+const MOTION = "(prefers-reduced-motion: reduce)";
+const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.(MOTION).matches;
+
+/** prefers-reduced-motion, followed while the launcher runs (KDE's animation speed "Instant" turns it on). */
+function useReducedMotion(): boolean {
+  return useSyncExternalStore((changed) => {
+    const q = window.matchMedia?.(MOTION);
+    q?.addEventListener?.("change", changed);
+    return () => q?.removeEventListener?.("change", changed);
+  }, reduced, () => false);
+}
 
 /** Keeps the last value shown for `ms` after `show` turns false (so a sheet can drop with its page still on it). */
 function useLinger<T>(value: T, show: boolean, ms: number): T | null {
@@ -49,7 +65,8 @@ function Header({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
   const nav = useRef<HTMLElement>(null);
   const active = navFor(loc.pathname);
   const nexusEnabled = useNexusEnabled();
-  const main = NAV_MAIN.filter((n) => nexusEnabled || n.to !== "/catalog");
+  const community = useShown();
+  const main = NAV_MAIN.filter((n) => (nexusEnabled || n.to !== "/catalog") && (community || n.to !== "/community"));
   // the gold diamond sits under the active word (placed from its offset: words differ in width)
   useLayoutEffect(() => {
     const place = () => {
@@ -60,7 +77,7 @@ function Header({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
     window.addEventListener("resize", place);
     document.fonts?.ready.then(place).catch(() => {});
     return () => window.removeEventListener("resize", place);
-  }, [active?.to, nexusEnabled]);
+  }, [active?.to, nexusEnabled, community]);
   const v = ctl.view;
   // a start that says what it does: its step, and the time left (else how far, in percent)
   const tl = ctl.timeline;
@@ -78,7 +95,7 @@ function Header({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
       <nav ref={nav} className="k-nav" aria-label={t("shell.appShell.navAria")}>
         {main.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.to === "/"} className={"k-navb" + (active?.to === n.to ? " on" : "")} aria-current={active?.to === n.to ? "page" : undefined}>
-            <span>{n.label}</span>
+            <span>{n.label}</span>{n.to === "/community" && <NavCount />}
           </NavLink>
         ))}
         {active && main.includes(active) && <span className="k-nav-dia" aria-hidden><i className="k-dia" /></span>}
@@ -133,12 +150,19 @@ function Mouth({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
     const time = ctl.elapsed !== null ? clock(ctl.elapsed) : v.label;
     word = time; sub = v.label; heat = v.word === "safeIdle" ? "low" : "embers"; act = null;
     aria = ctl.elapsed !== null ? t("shell.appShell.labelFor", { label: v.label, time }) : v.label;
+  } else if (ctl.applying) {
+    // (29.18) a profile is being applied to the game, whatever started it: Play waits for it (shell/applying.ts)
+    const what = applyingWord(ctl.applying);
+    word = t("nav.play"); sub = what; heat = "low"; act = null;
+    aria = ctl.applying.title ? t("shell.play.applyingAria", { what, title: ctl.applying.title }) : what;
   } else {
     word = t("nav.play"); sub = ""; heat = "idle"; act = ctl.canPlay ? () => ctl.play("profile") : null; aria = t("shell.appShell.playName", { name });
   }
   stageInput.heat = heat;
   stageInput.hover = hot && !!act;
   stageInput.game = !!ctl.running && !ctl.starting;
+  // a still fire (reduced motion) draws only when told: after each render of the mouth (and so of the shell)
+  useEffect(() => wakeStage());
   const subTone = v.phase === "vanilla" ? " k-tone-info" : v.phase === "updating" || v.word === "safeIdle" ? " k-tone-warn" : "";
   return (
     <button type="button" className={`k-door ${isPlay ? "play" : "pilot"} heat-${heat}${hot && act ? " hot" : ""}`} disabled={!act}
@@ -154,6 +178,8 @@ function Mouth({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
 
 export function AppShell() {
   const t = useT();
+  // the crash notice follows every run from the launcher's start, whichever page is open (community/crash.ts)
+  useEffect(() => watchCrashes(), []);
   const info = useAppInfo();
   const settings = useSettings();
   // the WebGL fire, unless turned off (Settings, Appearance) or KILN_LAUNCHER_NO_WEBGL=1; decided once both are known
@@ -187,28 +213,50 @@ export function AppShell() {
   );
   const sheet = useLinger<ReactNode>(page, !isPlay, 480);
   const hero = useLinger<ReactNode>(page, isPlay, 360);
-  // the torch: a soft warm light follows the pointer across the sheet
+  // the torch: a soft warm light follows the pointer across the sheet (and the fire's camera leans after it). Only while
+  // the fire burns (Stage's onLit: not with Animated fire off, without the GPU or without WebGL) and motion is not
+  // reduced; the pointer listener exists only then, and goes (with its pending frame) as either turns off. The pointer
+  // goes onto the light's own layer (.k-torch, no children) and moves it: on .k-app (inbox 94) every move restyled the
+  // whole window and repainted the whole sheet.
   const root = useRef<HTMLDivElement>(null);
-  const frame = useRef(0);
-  const torch = (e: React.MouseEvent) => {
-    if (frame.current || reduced()) return;
-    const x = e.clientX, y = e.clientY;
-    frame.current = requestAnimationFrame(() => {
-      frame.current = 0;
-      const b = root.current?.getBoundingClientRect();
-      if (b?.width) { stageInput.mx = ((x - b.left) / b.width) * 2 - 1; stageInput.my = 1 - ((y - b.top) / b.height) * 2; }
-      root.current?.style.setProperty("--mx", `${x}px`);
-      root.current?.style.setProperty("--my", `${y}px`);
-    });
-  };
+  const light = useRef<HTMLDivElement>(null);
+  const [lit, setLit] = useState(false);
+  const still = useReducedMotion();
+  // WebKit without compositing (Stage.tsx flatDrawing): each move of the light repainted its 634 x 490 px of the page on
+  // the CPU, about 24 ms a move in a 2560 x 1440 window; it stands still there, as without the GPU
+  const [flat] = useState(flatDrawing);
+  const torchOn = lit && !still && !flat;
+  useEffect(() => {
+    const app = root.current, l = light.current;
+    if (!torchOn || !app || !l) return;
+    let frame = 0, x = 0, y = 0;
+    const show = () => {
+      frame = 0;
+      const b = app.getBoundingClientRect();
+      if (b.width) { stageInput.mx = ((x - b.left) / b.width) * 2 - 1; stageInput.my = 1 - ((y - b.top) / b.height) * 2; }
+      l.style.setProperty("--mx", `${x}px`);
+      l.style.setProperty("--my", `${y}px`);
+      if (!l.dataset.at) l.dataset.at = "1";
+    };
+    const move = (e: MouseEvent) => {
+      x = e.clientX; y = e.clientY;
+      if (!frame) frame = requestAnimationFrame(show);
+    };
+    app.addEventListener("mousemove", move);
+    return () => { app.removeEventListener("mousemove", move); cancelAnimationFrame(frame); };
+  }, [torchOn]);
   // `t` changes with the language: the title follows it
   useEffect(() => { document.title = isPlay ? "Kiln" : t("shell.appShell.docTitle", { page: navFor(loc.pathname)?.label ?? "Kiln" }); }, [isPlay, loc.pathname, t]);
   return (
-    <div ref={root} className={"k-app" + (isPlay ? " is-play" : " is-sheet")} onMouseMove={torch}>
-      <div className="k-stage" aria-hidden><Stage root={root} key={fire ? "fire" : "plain"} enabled={fire} /><div className="k-fall" /></div>
+    <div ref={root} className={"k-app" + (isPlay ? " is-play" : " is-sheet")}
+      data-render={info.data?.render?.mode === "software" ? "software" : flat ? "flat" : undefined}>
+      <div className="k-stage" aria-hidden><Stage root={root} key={fire ? "fire" : "plain"} enabled={fire} onLit={setLit} /><div className="k-fall" /></div>
       <Header isPlay={isPlay} ctl={ctl} />
       <div className={"k-hero-layer" + (isPlay ? " on" : "")} aria-hidden={!isPlay}>{hero}</div>
       <main className={"k-sheet" + (isPlay ? " down" : " up")} id="main" aria-hidden={isPlay}>
+        {/* leaves: the lit top edge (the flicker's --fire) and the torch (--mx, --my); nothing goes inside them */}
+        <div className="k-sheet-rim" aria-hidden />
+        <div ref={light} className="k-torch" aria-hidden />
         <div className="k-sheet-in">{sheet}</div>
       </main>
       <Mouth isPlay={isPlay} ctl={ctl} />
@@ -222,6 +270,8 @@ export function AppShell() {
       <NxmListener />
       <ModUpdatesWatcher />
       <DataFolderNotice />
+      <CommunityDesktopHost />
+      <OwnFilesNotice />
       <Toaster />
       <Splash done={ready} />
     </div>

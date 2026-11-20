@@ -17,7 +17,7 @@
 // The four members appended in 0.2.0-dev.29, after game_program_contract (440): tests/abi.json says the same.
 static_assert(offsetof(KilnWorldApi, register_program_world) == 496 && offsetof(KilnWorldApi, program_world_state) == 504 &&
               offsetof(KilnWorldApi, bind_program_world) == 512 && offsetof(KilnWorldApi, unbind_program_world) == 520 &&
-              sizeof(KilnWorldApi) == 528);
+              offsetof(KilnWorldApi, entity_open) == 528 && sizeof(KilnWorldApi) == 616); // the ECS reads append at 528, the writes at 584
 
 namespace kw {
 const KilnApi* g_api;
@@ -71,6 +71,7 @@ void writes_world_changing() {}
 void writes_before_world(uintptr_t) {}
 void writes_after_world() {}
 uint32_t writes_capability() { return 0; }
+uint32_t ecs_capability() { return 0; }
 thread_local bool t_in_stage = false;
 bool game_in_slice() { return t_in_stage; }
 uint32_t current_thread_id() { return static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()) | 1u); }
@@ -157,6 +158,10 @@ bool logged_has(const char* text) {
 
 // ---- the fake process: worlds with a program table, storages with a kind and maps, jobs for slices ----
 constexpr int64_t kStorage = 0x100, kKind = 0x8, kCount = 0x40, kTable = 0x200, kStride = 0x30;
+// world+0 is the engine's "finalized" byte and world+kMayFinalize its may-finalize byte (L.may_finalize, sigdb's
+// world/world.may_finalize): createWorld copies the latter from the world's config, 0 for a server world (its GameServer
+// sets it later) and 1 for a client world (client exe 26430625: C 0x84d05d, copied at C 0x98320d). make() does the same.
+constexpr int64_t kMayFinalize = 0x80;
 constexpr size_t kWorldBytes = kTable + 896 * kStride + 0x100;
 
 struct FakeWorld {
@@ -171,6 +176,7 @@ struct FakeWorld {
         std::memcpy(storage(), &reg, 8);  // storage[0]: the registry
         storage()[kKind] = kind;
         count() = game_programs;
+        mem[kMayFinalize] = kind == KILN_WORLD_CLIENT ? 1 : 0;  // as the game makes the world (see kMayFinalize)
     }
     uintptr_t map(MapKind k) { return map_base(reinterpret_cast<uintptr_t>(registry.data()), k); }
     void know(const char* name, uint16_t index) { maps[{map(M_DYN), fnv1a(name, fnv1a("keen::ecs::"))}] = index; }
@@ -324,7 +330,7 @@ int main(int argc, char** argv) {
         field("bind_program_world", offsetof(KilnWorldApi, bind_program_world));
         field("unbind_program_world", offsetof(KilnWorldApi, unbind_program_world));
         nlohmann::json want = nlohmann::json::object();
-        want["size"] = sizeof(KilnWorldApi);
+        want["size"] = offsetof(KilnWorldApi, unbind_program_world) + sizeof(void*); // this section's end (528); the ECS reads append after it
         want["fields"] = fields;
         check(fx == want, "abi.json: KilnWorldApiClientPrograms field for field (496, 504, 512, 520; 528 bytes)");
         check(fx.at("fields")[0][1] == offsetof(KilnWorldApi, foreign_attr_changed) + sizeof(void*),
@@ -354,6 +360,7 @@ int main(int argc, char** argv) {
     L.programs_table = kTable;
     L.programs_stride = kStride;
     L.programs_max = 896;
+    L.may_finalize = kMayFinalize;
     L.reg_components = 8, L.reg_templates = 16, L.reg_singletons = 24, L.reg_events = 32;
     L.job_tpl_count = 0x10, L.job_read_count = 0x20, L.job_write_count = 0x22, L.job_singletons = 0x28,
     L.singletons_count = 0, L.job_other_tpl_count = 0x30, L.job_other_count = 0x31, L.job_events_in_count = 0x38,
@@ -423,6 +430,72 @@ int main(int argc, char** argv) {
           "a server-only program's dispatch does not look at the storage kind (unchanged server path)");
     check(state_of(hs, KILN_WORLD_CLIENT) == -1, "program_world_state: a server program is not for the client world (NOT_FOUND)");
     reset_programs();
+
+    // ---- the table's state bytes (the owner's 29.18 client: every client world was refused) ----
+    // A client world is made with its may-finalize byte set and finalizes at its first step, after RegisterAllPrograms:
+    // only world+0 (finalized) closes its table. The server world keeps both checks.
+    {
+        server.make(KILN_WORLD_SERVER, 758);
+        client.make(KILN_WORLD_CLIENT, 817);
+        check(client.mem[kMayFinalize] == 1 && server.mem[kMayFinalize] == 0 && L.may_finalize == kMayFinalize,
+              "the fake worlds carry the game's may-finalize bytes (client 1, server 0)");
+        KilnProgramDesc may = system_desc("cw_may_finalize");
+        KilnHandle hm = 0;
+        check(register_program_world(5, KILN_WORLD_CLIENT, &may, &hm) == KILN_OK && hm != 0, "a client program is accepted");
+        on_world(server.at());  // a host: the server world first
+        on_world(client.at());
+        check(client.count() == 818 && state_of(hm, KILN_WORLD_CLIENT) == KILN_PROGRAM_ACTIVE &&
+                  !logged_has("closed to new programs"),
+              "a client world whose may-finalize byte is set (every client world) and not finalized: registered");
+        client_stops(client.at());
+
+        client.make(KILN_WORLD_CLIENT, 817);
+        client.mem[0] = 1;  // finalized
+        on_world(client.at());
+        std::string w;
+        check(client.count() == 817 &&
+                  logged_has("has already finalized its programs; no Kiln programs registered there (its client programs are refused)"),
+              "a client world that already finalized: nothing registered, kiln.log says why");
+        check(state_of(hm, KILN_WORLD_CLIENT, &w) == KILN_PROGRAM_REFUSED && w.find("closed to new programs") != std::string::npos &&
+                  w.find("already finalized") != std::string::npos,
+              "... and the mod's client side is REFUSED with the reason (program_world_state), not left pending");
+        check(log_count("program cw_may_finalize refused for the client world") == 1, "kiln.log names the refused program once");
+
+        client.make(KILN_WORLD_CLIENT, 817);
+        fail_copy_from = client.mem.data();  // the finalized byte's read faults
+        on_world(client.at());
+        fail_copy_from = nullptr;
+        check(client.count() == 817 && logged_has("its finalized byte could not be read; no Kiln programs registered there") &&
+                  state_of(hm, KILN_WORLD_CLIENT) == KILN_PROGRAM_REFUSED,
+              "a finalized byte that cannot be read: nothing registered, refused, kiln.log says so");
+
+        client.make(KILN_WORLD_CLIENT, 817);
+        on_world(client.at());
+        check(client.count() == 818 && state_of(hm, KILN_WORLD_CLIENT, &w) == KILN_PROGRAM_ACTIVE && w.empty(),
+              "the next client world registers it again (a refusal holds for its world only)");
+        client_stops(client.at());
+
+        // The server world: a set may-finalize byte means its next step finalizes (the GameServer set it): refused.
+        reset_programs();
+        KilnProgramDesc srv = system_desc("cw_server_may");
+        KilnHandle hsrv = 0;
+        check(register_program(7, &srv, &hsrv, false) == KILN_OK, "a server program is accepted");
+        server.make(KILN_WORLD_SERVER, 758);
+        server.mem[kMayFinalize] = 1;
+        on_world(server.at());
+        check(server.count() == 758 && logged_has("finalizes its programs at its next step; no Kiln programs registered"),
+              "a server world whose may-finalize byte is set: nothing registered (unchanged)");
+        server.make(KILN_WORLD_SERVER, 758);
+        server.mem[0] = 1;
+        on_world(server.at());
+        check(server.count() == 758 && logged_has("server world 0x") && logged_has("has already finalized its programs; no Kiln programs registered"),
+              "a server world that already finalized: nothing registered (unchanged)");
+        server.make(KILN_WORLD_SERVER, 758);
+        on_world(server.at());
+        check(server.count() == 759 && state_of(hsrv, KILN_WORLD_SERVER) == KILN_PROGRAM_ACTIVE,
+              "a server world with both bytes clear registers (unchanged)");
+        reset_programs();
+    }
 
     // ---- registration: flags, HOST_ONLY, both, refusal per world, one slot ----
     server.make(KILN_WORLD_SERVER, 758);

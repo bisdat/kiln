@@ -67,7 +67,7 @@ export type TaskId = string;
  *  ./kinds.ts. */
 export type ModKind = "kiln" | "native" | "plugin" | "emf"
   | "eml" | "xhl" | "shroudforge" | "set" | "greeneye" | "flame" | "shroudtopia"
-  | "enshwick" | "shroudlink" | "ember";
+  | "enshwick" | "shroudlink" | "ember" | "dllmod";
 export type Side = "server" | "client" | "both";
 export type RunSide = "server" | "client";
 export type Clients = "none" | "kiln" | "mod";
@@ -97,6 +97,39 @@ export interface AppInfo {
   render?: RenderInfo;
   /** Linux AppImage only: the app menu entry Kiln writes so taskbars and docks show its icon (desktop.rs). */
   desktop?: DesktopInfo;
+  /** (dev.29.18) Linux only: WebKit's sandbox in this start and whether the next start turns it off (sandbox.rs). */
+  sandbox?: SandboxInfo;
+  /** (dev.29.18) A Windows install's own files gone from the launcher's folder at this start (its exe, `uninstall.exe`:
+   *  an antivirus took them; own_files.rs). Absent while none is, and from older backends. */
+  ownFilesMissing?: string[];
+  /** (dev.29) The previews on for this start (settings.json `preview`, KILN_LAUNCHER_PREVIEW). None uses it in
+   *  0.2.0-dev.29.18 (the upscaler files are out of preview). Absent: none. */
+  preview?: string[];
+}
+/** WebKit's process sandbox on Linux (src-tauri/src/sandbox.rs). */
+export interface SandboxInfo {
+  /** This start's choice: on (the launcher leaves WebKit as it is) or off (it sets WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS). */
+  want: "on" | "off";
+  /** Why: nothing asked; the marker (Settings, or a message's button at an earlier start); the restart after such a
+   *  button; KILN_LAUNCHER_WEBKIT_SANDBOX; --no-webkit-sandbox / --webkit-sandbox. */
+  why: "default" | "marker" | "restart" | "environment" | "argument";
+  /** The marker is there: a start without KILN_LAUNCHER_WEBKIT_SANDBOX or an argument turns the sandbox off. */
+  marker: boolean;
+  /** Who set the marker, why and when. */
+  markerWhy?: string;
+  /** What WebKit does in this start: runs its sandbox, has it turned off, or does not use it (its GTK 3 API runs it
+   *  only when WEBKIT_FORCE_SANDBOX=1 is set). */
+  webkit: "on" | "off" | "unused";
+  /** Why, in the backend's words. */
+  webkitWhy: string;
+  /** The player's own WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS value: it decides, the switch does not. */
+  yours?: string;
+  /** The probe of the bwrap WebKit runs: "works", "fails", "missing" or "unknown", and its sentence. */
+  probe: "works" | "fails" | "missing" | "unknown";
+  probeSays: string;
+  /** bwrap cannot start here and that says something about this system (not the AppImage's own missing bwrap while the
+   *  start does not run the sandbox): Settings shows probeSays. */
+  probeFailed?: boolean;
 }
 /** The AppImage's app menu entry (src-tauri/src/desktop.rs). */
 export interface DesktopInfo {
@@ -149,6 +182,8 @@ export interface LauncherSettings {
   keepVersions?: number;
   /** The launcher's language (Settings, Language; src/i18n): "system" or absent = the system's, else a tag ("zh-CN"). */
   language?: string | null;
+  /** (dev.29) Previews of unfinished features, set by hand in settings.json; kept as it is by every save. */
+  preview?: string[];
 }
 /** The most `keepVersions` may be (kiln_manage::kept::KEEP_MAX). */
 export const KEEP_MAX = 5;
@@ -191,6 +226,80 @@ export interface LaunchOptionsInfo {
   hasDllOverride: boolean;
   chainedOverrideMissing?: boolean;
   advice: string | null;
+  /** Explicit override to try after a real "No Kiln" failure, even on known-native runners. */
+  fallbackAdvice?: string | null;
+  dinput8NativeByRunner?: boolean;
+}
+/** A graphics tool in the game folder that runs on its own next to Kiln (kiln_manage::game::GraphicsToolNote). */
+export interface GraphicsToolNote {
+  engine: EngineId;
+  /** The tool's file directly in the game folder ("dxgi.dll", "OptiScaler.asi"). */
+  file: string;
+  /** What to expect from Kiln's overlay next to it (English, from the launcher's backend). */
+  text: string;
+  /** Kiln's overlay draws next to it (OptiScaler's own menu is off); false: Kiln's drawing steps aside. */
+  kilnOverlay: boolean;
+}
+/** (dev.29.18) A tool in the game folder next to which Kiln's graphics tools (kiln.json "graphics") step aside
+ *  (kiln_manage::game::GraphicsStepAside). */
+export interface GraphicsStepAside {
+  /** "optiscaler", "streamline" (sl.interposer.dll), "vkfg" (EnshroudedVKFG.ini), "dlsstweaks" (dlsstweaks.ini),
+   *  "nvngx" (nvngx.dll or _nvngx.dll: another DLSS loader) or (dev.29.18) "upscaler" (AMD's or Intel's upscaler DLLs
+   *  next to the game: another tool's); a kind this launcher does not know reads as another tool. */
+  kind: "optiscaler" | "streamline" | "vkfg" | "dlsstweaks" | "nvngx" | "upscaler" | (string & {});
+  /** The tool's file relative to the game folder, forward slashes ("dxgi.dll", "Streamline/sl.interposer.dll"). */
+  file: string;
+  /** Kiln's frame cap steps aside too; false: only Kiln's DLSS settings do. The readout always works. */
+  frameCap: boolean;
+  /** (dev.29.18) Kiln's upscaler behind the game's FSR 3 option steps aside too. Absent from an older backend: false. */
+  upscaler?: boolean;
+}
+
+/** (dev.29.18) kiln.json `graphics.upscaler`: what runs behind the game's FSR 3 option. */
+export type UpscalerChoice = "game" | "amd" | "xess";
+/** kiln.json `graphics.amdUpscaler`. */
+export type AmdUpscalerMode = "auto" | "fsr3" | "fsr4";
+/** What upscales behind the game's FSR 3 option (kiln_ui.h KILN_UI_UPSCALE_RUN_*; "unknown": a runtime that does not say). */
+export type UpscalerRunning = "off" | "notFsr" | "gameFsr3" | "amdFsr4" | "amdFsr31" | "xess" | "unknown";
+/** Why the chosen upscaler does not run (kiln_ui.h KILN_UI_UPSCALE_WHY_* in camelCase; docs/kiln/graphics.md); a code
+ *  this launcher does not know reads as "unknown". */
+export const UPSCALER_REASONS = ["restart", "filesMissing", "filesBad", "loadFailed", "device", "createFailed", "runtimeFailed", "fault", "aside",
+  "noSignatures", "inputs", "unavailable", "waiting", "noVulkan"] as const;
+export type UpscalerReason = (typeof UPSCALER_REASONS)[number] | "unknown";
+
+/** (dev.29.18) `<game>/kiln/state/graphics.json` (Kiln.Ui; schema/state-graphics.schema.json, kiln_manage::state::GraphicsState). */
+export interface GraphicsStateFile {
+  format: 1;
+  pid: number;
+  written: string;
+  kiln?: string | null;
+  upscaler: {
+    chosen: UpscalerChoice | (string & {});
+    amdUpscaler: AmdUpscalerMode | (string & {});
+    running: UpscalerRunning | (string & {});
+    reason?: string | null;
+    reasonNumber?: number;
+    version?: string;
+    hooked?: boolean;
+    fsrSeen?: boolean;
+    filesOk?: boolean;
+    deviceOk?: boolean;
+    fellBack?: boolean;
+    amdPinned?: boolean;
+    /** The tools it steps aside for (KILN_UI_GFX_ASIDE_* by name: "optiscaler", "upscaler", ...). */
+    aside?: string[];
+    /** kiln.ui's English detail of the reason (a file's or a Vulkan extension's name). */
+    detail?: string;
+  };
+  /** Per vendor folder (amd, intel): this runtime's version and what of it is in kiln/vendor/. */
+  files?: Record<string, { version: string; state: "present" | "missing" | "changed" | (string & {}) }>;
+  frameCap?: unknown;
+  dlss?: unknown;
+}
+/** GameStatus.graphicsState: the file, and whether the game that wrote it runs now ("Now"; false: "Last game"). */
+export interface GraphicsNow {
+  current: boolean;
+  state: GraphicsStateFile;
 }
 export interface GameStatus {
   id: GameId;
@@ -213,6 +322,16 @@ export interface GameStatus {
   start?: StartMode;
   /** (dev.29.17) Whether Kiln knows the exe's build; absent when it cannot be told. */
   build?: BuildCheck;
+  /** (dev.29.18) Graphics tools next to the game that change what Kiln's in-game overlay does (OptiScaler); absent or
+   *  empty: none (kiln_manage::game::graphics_tools). */
+  graphicsTools?: GraphicsToolNote[];
+  /** (dev.29.18) Tools next to the game that make Kiln's frame cap and DLSS settings step aside (OptiScaler,
+   *  Streamline, a DLSS frame generation mod, DLSSTweaks, another DLSS loader), in that order; absent or empty: none
+   *  (kiln_manage::game::graphics_step_aside). */
+  graphicsStepAside?: GraphicsStepAside[];
+  /** (dev.29.18) kiln/state/graphics.json: what Kiln's graphics tools did in the game's last run (`current`: it runs
+   *  now). Absent for a server and while there is none. */
+  graphicsState?: GraphicsNow;
 }
 /** How an install starts (kiln_manage::direct). */
 export type StartMode = "steam" | "direct";
@@ -296,8 +415,8 @@ export interface BundlePart {
 }
 export type ProxyKind = "none" | "kiln" | "shroudforge" | "emf" | "unknown" | "notdll"
   // other engines' loaders and tools under a proxy name (kiln_manage::engines)
-  | "eml" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember" | "modloaderproxy"
-  | "ultimateasiloader" | "aldrich" | "livemap" | "sharedxp" | "reshade" | "chainloader" | "nativefolders";
+  | "eml" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember" | "dllmod" | "modloaderproxy"
+  | "ultimateasiloader" | "aldrich" | "livemap" | "sharedxp" | "reshade" | "chainloader" | "nativefolders" | "optiscaler";
 export interface ProxyClass {
   kind: ProxyKind;
   version: string | null;
@@ -362,7 +481,11 @@ export interface InstallState {
   installed: boolean;
   receipt: InstallReceipt | null;
   proxy: ProxyClass | null;
+  /** Receipt files changed since the install, missing ones included (game-relative, "/" separators). */
   modified: string[];
+  /** (29.18) The files of `modified` that are not in the game folder at all: deleted, or removed or quarantined by an
+   *  antivirus. A reinstall of the installed bundle (Runtime's Repair) puts them back. Absent from older backends. */
+  missingFiles?: string[];
   upgradeAvailable: string | null;
   /** Parts absent from the receipt that a reinstall adds: defaults not turned off, plus required dependencies.
    *  Absent from older backends. */
@@ -455,7 +578,7 @@ export interface OwnLoaderNote {
   file: string;
   /** proxy: under a proxy name next to the game (on Linux it runs only with a DLL override); chain: kiln/chain.ini;
    * emf-chain: dinput8-chain.ini; hosted-shroud-forge: Kiln hosts ShroudForge for this profile. */
-  via: "proxy" | "chain" | "emf-chain" | "hosted-shroud-forge";
+  via: "proxy" | "chain" | "emf-chain" | "hosted-shroud-forge" | "native-module";
   /** Game-relative folder the loader reads ("mods", "emf/mods"). */
   folder: string;
   /** placed: the launcher copies the profile's mods there; plugin: Kiln's plugin does; none: nothing can. */
@@ -529,7 +652,9 @@ export interface LibraryVersion {
   side: Side | null;
   clients: Clients | null;
   size: number;
-  source: { type: "file" | "folder" | "modpack" | "replaced-dll"; from: string } | null;
+  /** `packagedFor`: the side the download packed this copy for (a client/ or server/ folder around it, as Town Portals
+   *  2.0.3 ships both copies of one version in one zip). Absent: no such folder. */
+  source: { type: "file" | "folder" | "modpack" | "replaced-dll"; from: string; packagedFor?: "client" | "server" } | null;
   /** The id the mod's own manifest gives, when the Library id is not that (an engine mod such as "Hoarders Helper":
    *  the Library id is its Kiln-id slug). Engine plugins report their state rows under this id. */
   manifestId: string | null;
@@ -588,12 +713,12 @@ export interface LibraryEntry {
 }
 export type DetectKind = "kiln" | "native" | "plugin" | "emf" | "modpack" | "runtime" | "bare-dll" | "unknown"
   // made for other engines, or not mods: imported only once Kiln supports them; `reason` says why not yet
-  | "eml" | "xhl" | "shroudforge" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember"
+  | "eml" | "xhl" | "shroudforge" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember" | "dllmod"
   | "proxy" | "data" | "save" | "reshade" | "cheat-table" | "asi";
 /** kiln_manage::engines::Engine */
 export type EngineId = "kiln" | "emf" | "shroudforge" | "eml" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame"
-  | "shroudlink" | "ember" | "mod-loader-proxy" | "ultimate-asi-loader" | "aldrich" | "live-map" | "shared-xp" | "reshade"
-  | "chain-loader" | "native-folders";
+  | "shroudlink" | "ember" | "dllmod" | "mod-loader-proxy" | "ultimate-asi-loader" | "aldrich" | "live-map" | "shared-xp" | "reshade"
+  | "chain-loader" | "native-folders" | "optiscaler";
 export interface Detected {
   kind: DetectKind;
   path: string;
@@ -1114,7 +1239,8 @@ export interface ModpackManifest {
   created?: string;
   server: { id: ServerId; name?: string | null };
   kiln?: string;
-  mods: { kind: ModKind; id: string; version: string; name?: string; path: string; hash: string; clients?: Clients; side?: Side }[];
+  // identity (0.2.0-dev.29.18): what the server advertises for an engine mod when that is not hash (kiln-manage modpack.rs)
+  mods: { kind: ModKind; id: string; version: string; name?: string; path: string; hash: string; identity?: string; clients?: Clients; side?: Side }[];
 }
 export interface BuiltModpack {
   file: string;
@@ -1180,6 +1306,9 @@ export const appSettingsSet = (settings: LauncherSettings) => call<LauncherSetti
  *  folder: the backend joins and normalises it for Explorer (never `${base}/${path}` here). */
 export const appOpenPath = (path: string, base?: string) => call<null>("app_open_path", { path, base });
 export const appOpenUrl = (url: string) => call<null>("app_open_url", { url });
+/** "Open in Discord": a discord.com link in the Discord app when this PC has it, else (or in Game Mode) in the browser;
+ *  `fallback` is the web link to open instead of `url` then (default: `url`). Answers where it opened. */
+export const appOpenDiscord = (url: string, fallback?: string) => call<"app" | "web">("app_open_discord", { url, fallback: fallback ?? null });
 export const taskList = () => call<Task[]>("task_list");
 export const taskGet = (taskId: TaskId) => call<Task>("task_get", { taskId });
 export const taskCancel = (taskId: TaskId) => call<null>("task_cancel", { taskId });
@@ -1187,6 +1316,8 @@ export const taskCancel = (taskId: TaskId) => call<null>("task_cancel", { taskId
 export const appStarted = () => call<null>("app_started");
 /** Settings, "Draw the launcher without the GPU": sets or clears the marker for the next start (Linux). */
 export const appRenderSet = (software: boolean) => call<RenderInfo>("app_render_set", { software });
+/** Settings, "WebKit's sandbox": on removes the marker, off writes it, for the next start (Linux). */
+export const appSandboxSet = (on: boolean) => call<SandboxInfo>("app_sandbox_set", { on });
 /** Settings, "Kiln Launcher in the app menu" (Linux AppImage): writes or removes the entry and its icons. */
 export const appDesktopSet = (on: boolean) => call<DesktopInfo>("app_desktop_set", { on });
 /** Translation files a player put in the data folder's `locales/` (docs/kiln/translating.md): `<tag>.json` each, read
@@ -1438,6 +1569,9 @@ export interface EngineStatus {
   /** ShroudForge's startup pass failed at the last start (sf_startup.rs): on the shroudforge row whoever ran it, on the
    *  eml row as a pointer while ShroudForge runs the EML mods. */
   startupFailed?: SfStartupNote | null;
+  /** ShroudForge's startup pass failed in one mod and ran again without it (sf_startup.rs `skipped`): on the shroudforge
+   *  row, a warning (the other mods of the pass loaded). */
+  startupSkipped?: SfSkipNote | null;
 }
 /** ShroudForge's own record of a failed startup pass: the mods it writes into the game data did not load. `text` is the
  *  sentence for the row (no full stop): what happened, which mods, what to change (`cure`). */
@@ -1449,6 +1583,27 @@ export interface SfStartupNote {
   build?: string;
   mods: string[];
   cure?: string;
+  /** Kiln's ShroudForge tried the pass once more without the mod it failed in (first), and that failed too. */
+  skipped?: SfSkippedMod[];
+  retryError?: string;
+  text: string;
+}
+/** A mod ShroudForge's startup pass ran without: the one it failed in, then any left out because they need it. */
+export interface SfSkippedMod {
+  id: string;
+  name?: string;
+  version?: string;
+  error: string;
+}
+/** ShroudForge's startup pass ran without a mod (it failed in it); the other mods loaded. `text`: the sentence for the
+ *  row (no full stop), with the mod, its error and what to do. */
+export interface SfSkipNote {
+  skipped: SfSkippedMod[];
+  loaded: number;
+  at?: string;
+  ownLoader: boolean;
+  version?: string;
+  build?: string;
   text: string;
 }
 /** Shared `.kfc.bak`; `patched` means the `.kfc` differs, not that EML owns it. */
@@ -1759,7 +1914,7 @@ export const configKilnReset = (gameId: GameId, path: string) => call<ConfigDocu
 
 // launch.rs
 /** Through the activation guard (./oneActivation.ts): the start applies the active profile again (refresh_active). */
-export const launchPlay = (gameId: GameId, request: LaunchRequest) => oneActivation(gameId, () => call<LaunchResult>("launch_play", { gameId, request }));
+export const launchPlay = (gameId: GameId, request: LaunchRequest) => oneActivation(gameId, () => call<LaunchResult>("launch_play", { gameId, request }), { play: true });
 export const launchState = (gameId: GameId) => call<BootState>("launch_state", { gameId });
 export const launchPrestart = (gameId: GameId) => call<PreStart | null>("launch_prestart", { gameId });
 /** Play was pressed (before the cook): the launcher times the start's own steps from now. */
@@ -2049,7 +2204,7 @@ export const dataFolderRestart = () => call<null>("data_folder_restart");
 /** Every command name (the Rust side registers the same list; mock.ts answers or rejects each). */
 export const COMMANDS = [
   "snapshot_status", "snapshot_continue",
-  "app_info", "app_settings_get", "app_settings_set", "app_open_path", "app_open_url", "task_list", "task_get", "task_cancel",
+  "app_info", "app_settings_get", "app_settings_set", "app_open_path", "app_open_url", "app_open_discord", "task_list", "task_get", "task_cancel",
   "game_list", "game_detect", "game_add", "game_remove", "game_status", "game_start_get", "game_start_set",
   "runtime_list", "runtime_import", "runtime_status", "runtime_install", "runtime_uninstall", "runtime_rollback", "runtime_classify",
   "profile_list", "profile_get", "profile_create", "profile_save", "profile_delete", "profile_resolve", "profile_activate",
@@ -2086,6 +2241,11 @@ export const COMMANDS = [
   "updates_check",
   "app_desktop_set",
   "app_locales",
+  "app_sandbox_set",
+  "vendor_status", "vendor_license", "vendor_download", "vendor_remove",
+  "community_settings_get", "community_settings_set", "community_status", "community_feed", "community_check_member", "community_signout", "community_signin_start", "community_signin_poll", "community_signin_cancel",
+  "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",
+  "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -2109,6 +2269,9 @@ export interface KilnEvents {
   "kiln://mod-updates": import("./updates").CheckReport;
   /** A profile was written again without profile_activate and its notices wait: take them with activation_notices. */
   "kiln://activation": { gameId: GameId };
+  /** The Discord features (community_*): something the Community page shows changed (`changed`: a sign-in, a post's
+   *  state, the settings), or Kiln support replied (`reply`: the post, its title and link, who replied). */
+  "kiln://community": { kind: "changed" | "reply"; post?: string; title?: string; url?: string; by?: string };
 }
 export type KilnEventName = keyof KilnEvents;
 
@@ -2124,3 +2287,196 @@ export const snapshotContinue = () => call<null>("snapshot_continue");
 
 export interface ShroudlinkNotice { mods: string[]; addons: LibraryRef[] }
 export const shroudlinkNotice = (profile: Profile, gameId: GameId) => call<ShroudlinkNotice | null>("shroudlink_notice", { profile, gameId });
+
+// ---------------------------------------------------------------- community: the optional Discord features
+// docs/kiln/launcher/discord.md. The Rust side (src-tauri/src/commands/community.rs, kiln_manage::community) talks to
+// the relay on frostdev.io and, for Rich Presence, to the Discord app on this PC; the browser mock answers in
+// ./mockCommunity.ts (`?discord=` flags). The UI (src/community/) talks to Discord only through these.
+
+/** `community.json`: the Community page shown (Settings), Rich Presence, reply notifications. */
+export interface CommunitySettings { format: number; shown: boolean; presence: boolean; notify: boolean; relay?: string | null }
+export type CommunitySettingsPatch = Partial<Pick<CommunitySettings, "shown" | "presence" | "notify">>;
+export interface CommunityAccount {
+  /** Discord user id (a snowflake). */
+  id: string;
+  name: string;
+  /** In the Kiln Discord. */
+  member: boolean;
+  tester: boolean;
+}
+export type PostStatus = "waiting" | "replied" | "solved" | "closed";
+/** Who sees a report's zip: the Kiln team only (default), everyone in #support, nobody (not sent). */
+export type ZipAudience = "team" | "public" | "none";
+export interface SupportPost {
+  id: string;
+  title: string;
+  /** https://discord.com/channels/<guild>/<thread> */
+  url: string;
+  created: string;
+  status: PostStatus;
+  replies: number;
+  /** Replies the player has not seen in the launcher. */
+  unread: number;
+  lastReply: { name: string; team: boolean; at: string } | null;
+  tags: string[];
+  zip: ZipAudience;
+}
+export interface PresenceStatus {
+  on: boolean;
+  /** The Discord app's socket is there (looked for only while the switch is on). */
+  discordRunning: boolean;
+  /** Shown on Discord now: the game runs with Kiln. */
+  showing: boolean;
+}
+/** What the page and the header show, from what the launcher already has (no request). */
+export interface CommunityStatus {
+  shown: boolean;
+  account: CommunityAccount | null;
+  online: boolean;
+  relay: "ok" | "down";
+  presence: PresenceStatus;
+  notify: boolean;
+  unread: number;
+  /** When the posts were last read (offline: the time they show as of). */
+  postsAsOf: string | null;
+}
+export interface FeedRelease { title: string; date: string; line: string; url: string }
+export interface FeedEvent { title: string; start: string; end?: string | null; where?: string | null; url: string }
+export interface CommunityFeed { releases: FeedRelease[]; events: FeedEvent[] }
+export type SignInMode = "browser" | "qr";
+export interface SignInStart {
+  id: string;
+  /** The short code the phone page shows too (QR pairing); empty in browser mode. */
+  code: string;
+  /** What the browser or the phone opens. */
+  url: string;
+  expiresAt: string;
+}
+export type SignInState =
+  | { state: "waiting" }
+  | { state: "approved"; account: CommunityAccount }
+  | { state: "denied" | "expired" | "canceled" };
+/** What the browser tab says after the desktop round trip. */
+export interface SignInTexts { done: string; failed: string }
+export type ProblemKind = "noload" | "mod" | "crash" | "launcher" | "server" | "other";
+/** Where a report was started. */
+export type SendFrom = "logs" | "banner" | "crash" | "community" | "deck";
+export interface ReportDraft {
+  title: string;
+  kind: ProblemKind;
+  /** Deck: when it happens (picked from a list). */
+  when?: string | null;
+  text: string;
+  zip: ZipAudience;
+}
+export type FindingLevel = "problem" | "warning" | "info";
+export interface PostFinding { id: string; level: FindingLevel; text: string }
+export type KnownAction = "mods" | "runtime" | "logs" | "settings";
+export interface KnownProblem {
+  id: string;
+  title: string;
+  fix: string;
+  /** A line to copy (a launch option). */
+  copy?: string | null;
+  /** The fix's own button. */
+  action?: KnownAction | null;
+  /** The button's words from the list; absent: the launcher's own for the action. */
+  label?: string | null;
+}
+/** A support report prepared for sending: exactly what the check step shows and what Send sends. */
+export interface ReportPreview {
+  /** Send names this: the zip and the post go as prepared. */
+  prepared: string;
+  findings: PostFinding[];
+  versions: [string, string][];
+  /** The system's #support tag ("Linux", "Windows", "Steam Deck"). */
+  tags: string[];
+  /** Each kind's tag ("Mods", "Crash", ...; null: none): the post's first tag follows the kind the player picks. */
+  kindTags: Record<ProblemKind, string | null>;
+  /** The zip's size; `limit` what the relay takes. */
+  size: number;
+  limit: number;
+  files: { path: string; size: number }[];
+  known: KnownProblem | null;
+}
+/** Rich Presence's words in the launcher's language (en.json community.presence.*). */
+export interface PresenceTexts { details: string; stateOne: string; stateOther: string; getKiln: string; joinDiscord: string }
+export type Capability = "fsr4" | "xess" | "framegen" | "deck";
+export interface Hardware {
+  gpu: string;
+  driver: string;
+  vram: string;
+  os: string;
+  runner: string;
+  caps: Capability[];
+  /** What this hardware can test that the team cannot (FSR 4, XeSS, frame generation, Steam Deck). */
+  covers: string[];
+}
+export type StepResult = "worked" | "failed" | "skipped";
+export interface TestStep {
+  id: string;
+  title: string;
+  /** Plain steps, one per line. */
+  how: string[];
+  /** Who it is for; null: everyone. */
+  for: { label: string; needs: Capability[] } | null;
+  result: StepResult | null;
+  note: string;
+}
+export interface TestPlan {
+  build: string;
+  /** The #testing post of this build. */
+  url: string;
+  until: string;
+  /** Only the steps for this hardware. */
+  steps: TestStep[];
+  /** Steps for other hardware (not shown). */
+  hidden: number;
+  /** Results sent for this build, and whether the team read them. */
+  sent: { at: string; read: { by: string; at: string } | null; replied: boolean } | null;
+}
+export interface TesterStatus {
+  tester: boolean;
+  /** The launcher follows test builds. */
+  beta: boolean;
+  /** What Volunteer would share (read on this PC; shown before anything is sent). */
+  hardware: Hardware;
+  plan: TestPlan | null;
+}
+
+export const communitySettingsGet = () => call<CommunitySettings>("community_settings_get");
+export const communitySettingsSet = (patch: CommunitySettingsPatch) => call<CommunitySettings>("community_settings_set", { patch });
+export const communityStatus = () => call<CommunityStatus>("community_status");
+/** News and events (public; also refreshes the known-problems copy). Only when the Community page opens. */
+export const communityFeed = () => call<CommunityFeed>("community_feed");
+/** The player's posts, fresh from the relay. */
+export const communityPosts = () => call<SupportPost[]>("community_posts");
+export const communityPostSeen = (id: string) => call<null>("community_post_seen", { id });
+export const communityPostSolved = (id: string) => call<null>("community_post_solved", { id });
+export const communityPostDelete = (id: string) => call<null>("community_post_delete", { id });
+/** `mode` browser: the desktop opens `url` in the browser; qr: the Deck shows it as a QR code with `code`. */
+export const communitySignInStart = (mode: SignInMode, join: boolean, texts?: SignInTexts) => call<SignInStart>("community_signin_start", { mode, join, texts });
+export const communitySignInPoll = (id: string) => call<SignInState>("community_signin_poll", { id });
+export const communitySignInCancel = (id: string) => call<null>("community_signin_cancel", { id });
+/** `forget`: frostdev.io deletes what it keeps about the player too; `posts`: and their support posts on Discord. */
+export const communitySignOut = (forget: boolean, posts = false) => call<null>("community_signout", { forget, posts });
+/** The account and membership again (the page opens, "I've joined"). */
+export const communityCheckMember = () => call<CommunityAccount | null>("community_check_member");
+/** The reply notification's words in the launcher's language. */
+export interface NotifyTexts { title: string; detail: string; open: string }
+/** What only the window knows: the mods on (the Play page's count; null when Rich Presence is off) and the words of
+ *  Rich Presence and of the reply notification. */
+export const communityPresenceFacts = (mods: number | null, texts: PresenceTexts, notify?: NotifyTexts) => call<null>("community_presence_facts", { mods, texts, notify });
+export const communityReportPrepare = (target: LogTarget | null, from: SendFrom) => call<ReportPreview>("community_report_prepare", { target, from });
+export const communityReportSend = (prepared: string, draft: ReportDraft) => call<SupportPost>("community_report_send", { prepared, draft });
+export const testerStatus = () => call<TesterStatus>("tester_status");
+/** Sends the hardware tester_status showed and asks for the Tester role. */
+export const testerJoin = (beta: boolean) => call<null>("tester_join", { beta });
+export const testerLeave = () => call<null>("tester_leave");
+/** `result` or `note` left out: that one stays as it is (a note typed after a pick never undoes the pick); "clear":
+ *  back to Not tried. */
+export const testerResultSet = (step: string, result?: StepResult | "clear", note?: string) => call<TestPlan | null>("tester_result_set", { step, result, note });
+/** `prepared`: the support report the checklist showed (communityReportPrepare), for the team only when `withReport`. */
+export const testerResultsSend = (withReport: boolean, prepared?: string) => call<TestPlan | null>("tester_results_send", { withReport, prepared });
+/** Deck: asks Steam for its on-screen keyboard (steam://open/keyboard) for a field that takes words; nothing elsewhere. */
+export const communitySteamKeyboard = () => call<null>("community_steam_keyboard");

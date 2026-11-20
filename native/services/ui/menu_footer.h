@@ -11,11 +11,18 @@
 // The line: "Kiln <version> - <N> Mods Loaded" ("1 Mod Loaded"), the version without a "+build" suffix. With the overlay
 // drawing, it starts with a gap of no-break spaces where the overlay draws Kiln's mark (the logo is a picture; the game's
 // text cannot show one), sized from the line's own rectangle in the game's layout.
+//
+// With XHL-Core (owner's decision, 2026-11-19): the line reads "Kiln <version> with XHL-Core - <N> Mods Loaded", and
+// XHL-Core's own line, its only warning channel (red, clickable: "XHL: Game updated · Click to view", "Mod conflict
+// detected. Click to view", which open its diagnostics), is drawn again while XHL-Core reports a problem: Kiln's copy
+// then calls XHL-Core's patched targets of the footer's two calls, so XHL-Core draws its line, and takes its clicks, as it
+// does without Kiln. Its green "All mods loaded" stays left out (Kiln's line says XHL-Core runs).
 #pragma once
 
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <string_view>
 
@@ -42,15 +49,19 @@ constexpr int kGapSpaces = 7;
 constexpr float kMarkEm = 1.0f;
 constexpr char kNoBreakSpace[] = "\xC2\xA0";
 
+// The plural group of the line's text: with XHL-Core in the footer, the one that names it.
+inline const char* line_key(bool xhl) { return xhl ? "native.footer.xhl" : "native.footer.loaded"; }
+
 // The line's text. `mods` < 0: not known yet (no line). `gap`: start with the mark's gap. `tmpl`: the text in the language
-// of Kiln's texts (native.footer.loaded.one / .other, ui_text.h), with {version} and {count}; empty: English.
-inline std::string line_text(std::string_view version, int64_t mods, bool gap, std::string_view tmpl = {}) {
+// of Kiln's texts (native.footer.loaded.one / .other, or native.footer.xhl.* with `xhl`; ui_text.h), with {version} and
+// {count}; empty: English.
+inline std::string line_text(std::string_view version, int64_t mods, bool gap, std::string_view tmpl = {}, bool xhl = false) {
     if (mods < 0) return {};
     std::string out;
     if (gap)
         for (int i = 0; i < kGapSpaces; ++i) out += kNoBreakSpace;
     const std::string v = release_version(version);
-    const std::string english = kui::text::english(mods == 1 ? "native.footer.loaded.one" : "native.footer.loaded.other");
+    const std::string english = kui::text::english(std::string(line_key(xhl)) + (mods == 1 ? ".one" : ".other"));
     const std::string count = std::to_string(static_cast<long long>(mods));
     std::string line = kui::text::fill(tmpl.empty() ? std::string_view(english) : tmpl, {{"version", v}, {"count", count}});
     if (v.empty()) {  // no version (a build without one): no double space where it would be
@@ -102,5 +113,32 @@ enum class Take {
 inline Take take(bool ready, bool shown, int64_t mods, bool failed) {
     return ready && shown && mods >= 0 && !failed ? Take::copy : Take::original;
 }
+
+// The footer's window call (window "LegalLine"): the function's first call, at +0x4b. ui/MainMenuFooter's pattern
+// (sigdb/symbols/client.d/ui.json) starts at the function's first byte with fixed lengths and ends with this call's E8,
+// so the offset holds on every build the feature resolves on (tests/menu_footer_test.cpp reads the pattern). XHL-Core
+// 2.1.0 patches this call too: its detour turns the window's input on while its line can be clicked.
+constexpr uint32_t kWindowCallAt = 0x4b;
+
+// XHL-Core's footer state. Its detour of the build-number call (2.1.0: dinput8.dll RVA 0x596a0) reads its startup state
+// first, through a getter that is an atomic read of one int: `xor ecx,ecx; xor eax,eax; lock cmpxchg [rip+rel32],ecx;
+// ret` (RVA 0x43af0, the int at RVA 0x109160). 0: nothing to report (its green "All mods loaded" once its check is done,
+// else no line); not 0: the problem its red line names. Kiln finds the getter by its shape among the first calls the
+// detour makes, not by an address, and only reads the int.
+constexpr size_t kXhlGetterLen = 13;
+constexpr size_t kXhlDetourScan = 0x100;  // how far into the detour the getter's call is looked for
+// Whether `b` (n bytes at `addr`) is the getter; `state`: the int's address.
+inline bool xhl_state_getter(const uint8_t* b, size_t n, uint64_t addr, uint64_t* state) {
+    static const uint8_t head[] = {0x31, 0xC9, 0x31, 0xC0, 0xF0, 0x0F, 0xB1, 0x0D};
+    if (n < kXhlGetterLen || std::memcmp(b, head, sizeof head) != 0 || b[12] != 0xC3) return false;
+    int32_t rel = 0;
+    std::memcpy(&rel, b + 8, 4);
+    *state = addr + 12 + static_cast<int64_t>(rel);
+    return true;
+}
+
+// Whether Kiln's copy calls XHL-Core's footer line this frame: XHL-Core patched the footer and has a problem to report,
+// or its state cannot be read (then its line shows as XHL-Core draws it, green or red: a warning is never hidden).
+inline bool follow_xhl(bool xhl, bool state_known, int32_t state) { return xhl && (!state_known || state != 0); }
 
 }  // namespace menu_footer

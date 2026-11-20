@@ -7,7 +7,7 @@ at the end of the native table, after `subscribe_key_ex`; the service version st
 It forwards to Dear ImGui `SetNextWindowSizeConstraints` for the next `begin`, in
 screen pixels. Call it inside a frame callback before `begin`, every frame that
 needs constraints. Like the neighbouring window setters it does nothing outside
-a drawing frame, including `KILN_UI_OVERLAY=0`.
+a drawing frame, including `KILN_UI_OVERLAY=0` and kiln.json `"ui": {"overlay": "off"}`.
 
 Readers must check `header.size >= offsetof(KilnUiApi, set_next_window_size_constraints) +
 sizeof(ui->set_next_window_size_constraints)` and that the pointer is non-null.
@@ -163,11 +163,62 @@ through it and its pointer). The guide: [translating-game.md](../translating-gam
   font, the game's UI font and its bold face (`MergeMode`, the target's size, `GlyphExcludeRanges` = every rune outside the
   set's ranges), now or as those fonts arrive; another group's files replace them, a Latin language removes them (their
   sources leave the fonts; glyphs are made again as drawn). Mods' fonts get none.
+- **The default group's other fonts** (0.2.0-dev.29.19). For every language, at the first overlay frame (any look), kiln.ui
+  reads the default group's regular glyph sets after its first (the Latin source), each font once, only files up to 2 MiB,
+  at most 4 and 4 MiB together (`font_budget.h` `admit_default`; 26430625: Noto Serif for Cyrillic, Noto Sans Thai, 577 KB;
+  the CJK fallbacks are left to the CJK groups), and merges them into the same three fonts the same way, before a CJK
+  group's (which waits for them, unless they failed). Kept for the process; asked again while the resource is not listed,
+  as above.
 - `KilnUiLookInfo.glyphs` (byte 30; it was reserved) is `KILN_UI_GLYPHS_LATIN` (0, no such language), `LOADING` (1),
   `READY` (2) or `FAILED` (3, kiln.log says why), and `glyph_language` (byte 31) the `keen::LanguageId` it is about (20 zh-CN,
-  21 zh-TW, 11 ja-JP, 13 ko-KR). Kiln.Ui shows its overlay texts in English until `READY` for its language.
+  21 zh-TW, 11 ja-JP, 13 ko-KR; since 29.19 9 ru-RU, 24 bg-BG, 34 uk-UA, other Cyrillic tags 9). The language is Kiln's
+  (set_texts) when its script is not Latin, else the game's when its is not (`font_group.h` `needed`). For a CJK one the
+  state is its group's; for a Cyrillic one the default group's fonts' (`READY` only when they cover U+0410..U+044F).
+  Kiln.Ui shows its overlay texts in English until `READY` for its language.
 - Host tests (`tests/run.sh`): `ui_text_test.cpp` (the handoff, plurals, placeholders, the built-in English against
   en.json), `font_group_test.cpp` (the group, sets and exclusions from made-up resource bytes, another layout, bad data, the
   budget), `group_host_test.cpp` (style.cpp's loading on a headless ImGui context with a made-up resource and a system TTF:
-  the language's choice, the state, merging into fonts that arrive later, replacing, removing, a failed read, the layout
-  from reflection; `KILN_TEST_CJK_FONT=<an extracted CJK font>` also checks a real CJK glyph).
+  the default group's fonts and the Cyrillic state, the language's choice, the state, merging into fonts that arrive later
+  in order, replacing, removing, a failed read, the layout from reflection; `KILN_TEST_CJK_FONT=<an extracted CJK font>` also checks a real CJK glyph).
+
+## Kiln's graphics tools (0.2.0-dev.29.18)
+
+Two slots after `set_texts`: `graphics_set` at byte offset 1016 and `graphics_status` at 1024 (the table is 1032 bytes;
+check `header.size` through the member and that its pointer is non-null). Player side and kiln.json keys:
+[graphics.md](../graphics.md).
+- `graphics_status(&KilnUiGraphicsStatus)` (72 bytes; set `size` first): what Kiln's frame cap, DLSS settings and readout
+  do now. `flags`: `KILN_UI_GFX_CAP_ACTIVE` (the cap paces frames now), `_DLSS_HOOKED` (Kiln's hooks on NVIDIA's NGX core
+  are in), `_DLSS_ACTIVE` (the game upscaled with DLSS in the last two seconds), `_DLSS_RESTART` (a DLSS setting or the
+  readout is on but was not at start), `_DLSS_PRESET` / `_DLSS_SCALED` (the DLSS in use got Kiln's preset / render size),
+  `_COUNTING` (the frame counts are kept), `_DLSS_LIMITED` (the player's render scale was outside DLSS's range for the
+  mode in use: it renders at the nearest size DLSS allows). `aside_cap` / `aside_dlss`: `KILN_UI_GFX_ASIDE_*` bits (OptiScaler,
+  Streamline, EnshroudedVKFG.ini, DLSSTweaks, nvngx.dll next to the game, NGX patched by another module, Kiln's overlay
+  off). Then the cap, `rendered_fps`, `output_fps` (equal until a frame generation phase), `frame_ms`, the swapchain's
+  size, and the DLSS in use: `dlss_quality` (`NVSDK_NGX_PerfQuality_Value`: 0 Performance, 1 Balanced, 2 Quality, 3
+  Ultra Performance, 4 Ultra Quality, 5 DLAA; -1 none), `dlss_preset` (as asked: Kiln's, else the game's hint; 0 DLSS's
+  default, 1..15 A..O; without bit 31, which the game's NGX SDK code sets on the default it fills in, so 0x8000000B
+  reads 11, K), `render_width/height` (this frame's while the readout is on, else at creation) and
+  `dlss_output_width/height`. Any thread.
+- `graphics_set(&KilnUiGraphics)` (48 bytes): the player's settings. Kiln.Ui's call only, from kiln.json "graphics" and
+  the Kiln menu's Graphics tab; a native plugin's is refused (`KILN_ERR_UNAVAILABLE`): mods never choose them.
+
+## The overlay's drawing off: kiln.json and a session that turned it off (0.2.0-dev.29.18)
+
+No table change. Player side: [ui.md](../ui.md#frame-generation-mods-and-drawing-off).
+- **kiln.json `"ui": {"overlay": "off"}`** turns the overlay's drawing off from the game's start, the same as
+  `KILN_UI_OVERLAY=0` (which wins where it is set, as `KILN_UI_OVERLAY=1` does). `"auto"` is the default. Read once by
+  kiln.ui at start (`native/services/ui/overlay_setting.h`), top level only; the launcher's Settings writes it. For a
+  native plugin it is the drawing-off mode as with `KILN_UI_OVERLAY=0`: `KilnUiStatus.error` says "the overlay's
+  drawing is off: turned off in Kiln's settings (kiln.json ui.overlay)", and the drawing capability rows are unavailable
+  with that text.
+- **Drawing that turns off during a session.** The overlay's first failure (its submit, its resources, ImGui, a fault,
+  or a present from a queue Kiln cannot draw on: [ui.md](../ui.md#when-the-overlay-fails-during-a-session)) turns its
+  drawing off until the game closes. From then on frame callbacks and pre-overlay callbacks are no longer called,
+  `KilnUiStatus.drawing` turns 0, `KilnUiStatus.error` reads "the overlay's drawing is off: <reason>", `wheel_open`
+  returns `KILN_ERR_UNAVAILABLE`, and the rows `ui.windows`, `ui.draw`, `ui.menu_page`, `render.draw` and
+  `kiln.screen` turn unavailable (`KILN_CAP_REASON_POLICY`, the same text) a moment later. Keys, native menu rows,
+  `kiln.ui.tick` and the window's input subscriptions go on.
+- **Pre-overlay callbacks** (`subscribe_pre_overlay`) are called only for a present on a queue the game got (not one a
+  tool added to the device while it was made, such as frame generation's present queue) whose family has graphics;
+  `queue_family` is that queue's own family, never a guess. A queue Kiln did not see the game get is looked up among the
+  queues the game asked for when it made its device, so the game's own counts wherever it got it.

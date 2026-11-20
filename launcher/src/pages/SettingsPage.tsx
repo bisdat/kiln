@@ -1,11 +1,13 @@
 // /settings: profiles (a background feature: components/ProfilesSettings.tsx), the library's storage, launcher settings,
-// games, and Kiln's kiln.json for the selected game. `#profiles` (Play's profile line, the old /profiles) scrolls there.
+// games, and Kiln's kiln.json for the selected game (its "graphics" section on the Graphics card, with the upscaler
+// behind the game's FSR 3 and the vendor upscaler files: components/GraphicsSettings.tsx, UpscalerSettings.tsx).
+// `#profiles` (Play's profile line, the old /profiles) scrolls there; `#graphics` and `#upscalers` too.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderPlus, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import * as api from "../api/commands";
-import { KEEP_MAX, type ConfigDocument, type DesktopInfo, type Json, type LauncherSettings, type RenderInfo } from "../api/commands";
+import { KEEP_MAX, type ConfigDocument, type DesktopInfo, type Json, type LauncherSettings, type RenderInfo, type SandboxInfo } from "../api/commands";
 import { qk, useAppInfo, useGame, useGameStatus, useNexusEnabled, useSettings } from "../api/hooks";
 import { fallbackEnabled } from "../api/fallback";
 import { useAssetsStatus, useExtractTask } from "../components/GameArt";
@@ -15,8 +17,10 @@ import { NexusCard } from "../components/NexusSettings";
 import { ProfilesCard } from "../components/ProfilesSettings";
 import { LibraryCard } from "../components/LibrarySettings";
 import { LanguageCard } from "../components/LanguageSettings";
+import { GraphicsCard, isGraphicsPath } from "../components/GraphicsSettings";
 import { StartModal, UnknownBuild, useStartWord } from "../components/GameStart";
 import { rich, t, useT } from "../i18n";
+import { CommunityToggle } from "../community/parts";
 import {
   Badge, Button, Card, ConfirmDanger, EmptyState, Field, IconButton, NumberInput, Page, PageHeader, PathPicker, SchemaForm, Select, Skeleton,
   Toggle, errorText, fmtAgo, fmtBytes, setTypeToConfirm, toast, typeToConfirm,
@@ -49,6 +53,7 @@ export default function SettingsPage() {
         {nexusEnabled && <NexusCard />}
       </div>
       <KilnJsonCard />
+      <GraphicsCard />
       <AssetsCard />
     </Page>
   );
@@ -59,6 +64,7 @@ function LauncherCard() {
   const qc = useQueryClient();
   const s = useSettings();
   const { games } = useGame();
+  const nexusEnabled = useNexusEnabled();
   const [root, setRoot] = useState("");
   if (s.isLoading) return <Card title={t("settings.launcher.title")}><Skeleton /></Card>;
   if (!s.data) return <Card title={t("settings.launcher.title")}><EmptyState title={t("settings.launcher.unavailable")} hint={errorText(s.error)} /></Card>;
@@ -81,8 +87,9 @@ function LauncherCard() {
       <Toggle checked={v.modFolderNotes !== false} onChange={(on) => set({ modFolderNotes: on })} label={t("settings.launcher.folderNotes")}
         hint={t("settings.launcher.folderNotesHint")} />
       <Toggle checked={v.allowHttpModpacks} onChange={(on) => set({ allowHttpModpacks: on })} label={t("settings.launcher.httpModpacks")} hint={t("settings.launcher.httpModpacksHint")} />
+      <CommunityToggle />
       <Toggle checked={v.modUpdatesDaily === true} onChange={(on) => set({ modUpdatesDaily: on })} label={t("settings.launcher.dailyUpdates")}
-        hint={t("settings.launcher.dailyUpdatesHint")} />
+        hint={t(nexusEnabled ? "settings.launcher.dailyUpdatesHint" : "settings.launcher.dailyUpdatesHintNoNexus")} />
       <TypeToConfirmToggle />
       <Field label={t("settings.launcher.steamRoots")} hint={t("settings.launcher.steamRootsHint")}>
         <div className="k-stack">
@@ -104,8 +111,9 @@ function LauncherCard() {
 }
 
 /** Appearance: the fire on Play. Off (or KILN_LAUNCHER_NO_WEBGL=1 for one start) draws the plain Play button, the same
- *  one a machine without WebGL gets. On Linux also "Draw the launcher without the GPU" (the render marker, render.rs) and,
- *  in the AppImage, "Kiln Launcher in the app menu" (desktop.rs). */
+ *  one a machine without WebGL gets. On Linux also "Draw the launcher without the GPU" (the render marker, render.rs),
+ *  "WebKit's sandbox" (the sandbox marker, sandbox.rs) and, in the AppImage, "Kiln Launcher in the app menu"
+ *  (desktop.rs). */
 function AppearanceCard() {
   const t = useT();
   const qc = useQueryClient();
@@ -123,11 +131,17 @@ function AppearanceCard() {
     qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, render: next } : cur));
     toast.ok(on ? t("settings.appearance.nextNoGpu") : t("settings.appearance.nextGpu"));
   }).catch((e) => toast.error(e));
+  const sandbox = info.data?.sandbox;
+  const setSandbox = (on: boolean) => api.appSandboxSet(on).then((next) => {
+    qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, sandbox: next } : cur));
+    toast.ok(on ? t("settings.sandbox.nextOn") : t("settings.sandbox.nextOff"));
+  }).catch((e) => toast.error(e));
   return (
     <Card title={t("settings.appearance.title")}>
       <Toggle checked={!forced && s.data.animatedFire !== false} disabled={forced} onChange={(on) => void saveSettings(qc, () => ({ animatedFire: on }))}
         label={t("settings.appearance.fire")} hint={forced ? fireOff(info.data) : t("settings.appearance.fireHint")} />
       {render && <Toggle checked={render.marker} onChange={(on) => void setRender(on)} label={t("settings.appearance.noGpu")} hint={renderHint(render)} />}
+      {sandbox && <Toggle checked={!sandbox.marker} onChange={(on) => void setSandbox(on)} label={t("settings.sandbox.label")} hint={sandboxHint(sandbox)} />}
       {desktop && <Toggle checked={desktop.on && desktop.installed} onChange={(on) => void setDesktop(on)} label={t("settings.appearance.desktop")} hint={desktopHint(desktop)} />}
     </Card>
   );
@@ -149,9 +163,24 @@ function renderHint(r: RenderInfo): string {
   const now = r.why === "restart" ? (sw ? t("settings.render.noGpuRestart") : t("settings.render.gpuRestart"))
     : r.why === "environment" ? (sw ? t("settings.render.noGpuEnv") : t("settings.render.gpuEnv"))
     : r.why === "argument" ? (sw ? t("settings.render.noGpuArg", { flag: "--software-render" }) : t("settings.render.gpuArg", { flag: "--gpu-render" }))
+    : r.why === "marker" && sw && r.marker ? t("settings.render.noGpuMarker")
     : sw ? t("settings.render.noGpu") : t("settings.render.gpu");
   // markerWhy: the backend's sentence, as it is
   return `${t("settings.render.intro")} ${now}${r.marker && r.markerWhy ? ` ${r.markerWhy}.` : ""}`;
+}
+
+/** What the sandbox switch says: what off means and when it applies, what WebKit does in this start and why, who turned
+ *  it off, what the probe of bwrap found when it failed. */
+function sandboxHint(sb: SandboxInfo): string {
+  const now = sb.yours !== undefined ? t("settings.sandbox.yours", { value: sb.yours })
+    : sb.why === "argument" ? (sb.want === "off" ? t("settings.sandbox.argOff", { flag: "--no-webkit-sandbox" }) : t("settings.sandbox.argOn", { flag: "--webkit-sandbox" }))
+    : sb.why === "environment" ? t("settings.sandbox.env")
+    : sb.webkit === "unused" ? t("settings.sandbox.unused")
+    : sb.webkit === "on" ? t("settings.sandbox.on")
+    : t("settings.sandbox.off");
+  const probe = sb.probeFailed ? ` ${t("settings.sandbox.probe", { says: sb.probeSays })}` : "";
+  // markerWhy: the backend's sentence, as it is
+  return `${t("settings.sandbox.intro")} ${now}${sb.marker && sb.markerWhy ? ` ${sb.markerWhy}.` : ""}${probe}`;
 }
 
 function DevCard() {
@@ -239,8 +268,9 @@ function KilnJsonCard() {
     <Card title={t("settings.kilnJson.title")} sub={rich("settings.kilnJson.sub", { file: <span className="k-mono">kiln/kiln.json</span> })}>
       {status.data && !installed ? <EmptyState title={t("settings.kilnJson.notInstalled")} hint={t("settings.kilnJson.notInstalledHint")} /> :
         doc.isLoading ? <Skeleton lines={5} /> : doc.error ? <EmptyState title={t("settings.kilnJson.unavailable")} hint={errorText(doc.error)} /> : doc.data?.schema && (
-          // ui.language has its own control (Language: components/LanguageSettings.tsx)
-          <SchemaForm schema={{ ...doc.data.schema, entries: doc.data.schema.entries.filter((e) => e.path !== "ui.language") }} values={doc.data.values} errors={doc.data.errors} disabled={set.isPending}
+          // ui.language has its own control (Language: components/LanguageSettings.tsx), graphics.* its own card (Graphics:
+          // components/GraphicsSettings.tsx)
+          <SchemaForm schema={{ ...doc.data.schema, entries: doc.data.schema.entries.filter((e) => e.path !== "ui.language" && !isGraphicsPath(e.path)) }} values={doc.data.values} errors={doc.data.errors} disabled={set.isPending}
             onChange={(path, value) => set.mutate({ path, value })} onReset={(path) => reset.mutate(path)} />
         )}
       {doc.data && <span className="k-hint">{t("settings.kilnJson.overrides")}</span>}

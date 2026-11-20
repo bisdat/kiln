@@ -24,6 +24,8 @@ pub mod found;
 pub mod cook;
 pub mod data_folder;
 pub mod updates;
+pub mod vendor;
+pub mod community;
 
 /// A background task id; the task reports through `kiln://task`.
 pub type TaskId = String;
@@ -37,6 +39,7 @@ pub const NAMES: &[&str] = &[
     "app_settings_set",
     "app_open_path",
     "app_open_url",
+    "app_open_discord",
     "task_list",
     "task_get",
     "task_cancel",
@@ -212,6 +215,33 @@ pub const NAMES: &[&str] = &[
     "updates_check",
     "app_desktop_set",
     "app_locales",
+    "app_sandbox_set",
+    "vendor_status",
+    "vendor_license",
+    "vendor_download",
+    "vendor_remove",
+    "community_settings_get",
+    "community_settings_set",
+    "community_status",
+    "community_feed",
+    "community_check_member",
+    "community_signout",
+    "community_signin_start",
+    "community_signin_poll",
+    "community_signin_cancel",
+    "community_posts",
+    "community_post_seen",
+    "community_post_solved",
+    "community_post_delete",
+    "community_presence_facts",
+    "community_report_prepare",
+    "community_report_send",
+    "tester_status",
+    "tester_join",
+    "tester_leave",
+    "tester_result_set",
+    "tester_results_send",
+    "community_steam_keyboard",
 ];
 
 #[cfg(test)]

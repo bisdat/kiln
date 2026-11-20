@@ -1,0 +1,1089 @@
+{
+  "language": {
+    "name": "Español"
+  },
+  "menu": {
+    "title": "Gestor de mods",
+    "game_title": "MODS",
+    "subtitle": {
+      "loaded": "{loaded} de {count} mods cargados"
+    },
+    "sections": {
+      "mods": "Mods",
+      "network": "Red",
+      "keys": "Teclas",
+      "overlay": "Superposición",
+      "graphics": "Gráficos"
+    },
+    "shroudlink": {
+      "open": "Menús de shroudlink",
+      "back": "Volver a los mods"
+    },
+    "hints": {
+      "back": "Atrás",
+      "next_section": "Siguiente sección",
+      "arrows": "Flechas",
+      "move": "Mover",
+      "choose": "Elegir",
+      "search": "Buscar",
+      "gamepad": "Mando: LB / RB secciones, A elegir, B atrás"
+    }
+  },
+  "mods": {
+    "engines": {
+      "all": "Todos los mods",
+      "attention": "Requiere atención",
+      "menus": "Entradas de menú",
+      "menus_note": "Las entradas que los mods añadieron a los menús del juego. Elige una aquí para hacer lo que hace en el menú.",
+      "settings": "Ajustes de Kiln"
+    },
+    "captions": {
+      "engines": "MOTORES",
+      "all": "TODOS LOS MODS",
+      "attention": "REQUIERE ATENCIÓN",
+      "details": "DETALLES",
+      "settings": "AJUSTES DE KILN",
+      "pause_entries": "ENTRADAS DEL MENÚ DE PAUSA",
+      "main_entries": "ENTRADAS DEL MENÚ PRINCIPAL"
+    },
+    "search": {
+      "hint": "Buscar mods (Ctrl+F)"
+    },
+    "empty": {
+      "loading": "Leyendo la lista de mods...",
+      "none": "No hay mods instalados.",
+      "none_hint": "Añade mods en el launcher de Kiln (Biblioteca), ponlos en tu perfil y vuelve a iniciar el juego.",
+      "no_match": "Ningún mod coincide con \"{search}\".",
+      "no_match_hint": "Prueba otra palabra o borra el cuadro de búsqueda.",
+      "nothing": "No hay nada aquí.",
+      "nothing_hint": "Elige Todos los mods a la izquierda."
+    },
+    "side": {
+      "client": "Solo el juego",
+      "both": "Juego y servidor",
+      "world": "Solo tu mundo",
+      "server": "Solo el servidor"
+    },
+    "details": {
+      "pick_list": "Elige un mod de la lista para ver qué es, si se cargó y sus ajustes.",
+      "pick": "Elige un mod para ver sus detalles.",
+      "id_version": "{id}   ·   versión {version}",
+      "wrong": "QUÉ SALIÓ MAL",
+      "state": "ESTADO",
+      "engine": "MOTOR",
+      "load_order": "ORDEN DE CARGA",
+      "loads_as": "Se carga en el puesto {number}.",
+      "needs": "NECESITA",
+      "dependency": "{id} {range}",
+      "dependency_optional": "{id} {range} (opcional)",
+      "dependency_optional_off": "{id} {range} (opcional): no cargado",
+      "dependency_missing": "{id} {range}: falta",
+      "folder": "CARPETA",
+      "status": "ESTADO ACTUAL"
+    },
+    "menus": {
+      "open": "Abrir",
+      "unavailable": "\"{entry}\" no está disponible aquí ahora.",
+      "plugin": "un plugin de Kiln",
+      "hidden": "{mod}   ·   no está en el menú del juego ahora"
+    }
+  },
+  "catalog": {
+    "chip": {
+      "loaded": "Cargado",
+      "waiting": "En espera",
+      "off": "Desactivado",
+      "failed": "Falló",
+      "not_loaded": "No cargado",
+      "missing": "Falta"
+    },
+    "engine": {
+      "native": "Mods DLL nativos",
+      "plugin": "Plugins de Kiln",
+      "chain": "DLL encadenadas"
+    },
+    "about": {
+      "kiln": "Los mods propios de Kiln (C#).",
+      "native": "Mods DLL que Kiln carga al iniciar.",
+      "plugin": "Plugins nativos que amplían Kiln.",
+      "chain": "Otras DLL que Kiln inicia junto al juego.",
+      "emf": "Mods de Enshrouded Mod Framework, ejecutados por Kiln.",
+      "eml": "Mods de Enshrouded Mod Loader: cambian los datos del juego antes de que se inicie.",
+      "xhl": "Plugins de XHL-Core, puestos en la carpeta de mods del juego. Solo XHL-Core, instalado aparte, los carga; Kiln no.",
+      "shroudforge": "Mods de ShroudForge, ejecutados por el runtime de ShroudForge.",
+      "set": "Mods Lua de Shrouded Engine Tweaks, ejecutados por Kiln.",
+      "greeneye": "Mods de Greeneye Loader, ejecutados por Kiln.",
+      "flame": "Mods de Flame, ejecutados por Kiln.",
+      "shroudtopia": "Mods de Shroudtopia, ejecutados por Kiln.",
+      "enshwick": "Mods de Enshwick, ejecutados por el cargador de Enshwick.",
+      "shroudlink": "Mods de shroudlink, ejecutados por Kiln.",
+      "ember": "Mods de servidor de Ember.",
+      "dllmod": "Mods de Enshrouded ModLoader (CarryOn, Belt Lantern), que Kiln inicia cuando empieza un mundo tuyo."
+    },
+    "profile": {
+      "no_mods": "Juega una vez sin mods: ningún mod se carga en este inicio.",
+      "invalid": "No se pudo leer el perfil, así que no se carga ningún mod.",
+      "invalid_why": "No se pudo leer el perfil, así que no se carga ningún mod ({error}).",
+      "legacy": "Sin perfil: Kiln carga las carpetas de mods.",
+      "name": "Perfil: {name}",
+      "off": "Desactivado en el perfil.",
+      "missing": "Falta su carpeta: {path}",
+      "kept_xhl": "Desactivado en el perfil, pero su carpeta sigue en la carpeta de mods del juego ({folder}), así que XHL-Core aún podría cargarlo.",
+      "kept_enshwick": "Desactivado en el perfil, pero su carpeta sigue en la carpeta de mods del juego ({folder}), así que el cargador de Enshwick, que ejecuta cada carpeta de ahí, aún podría ejecutarlo.",
+      "kept": "Desactivado en el perfil, pero su carpeta sigue en la carpeta de mods del juego ({folder}), así que un mod o cargador que lea esa carpeta aún podría usarlo."
+    },
+    "help": {
+      "turn_on": "Actívalo en el Kiln Launcher (Perfiles) y vuelve a iniciar el juego.",
+      "kept": "Quítalo en el Kiln Launcher, o saca esa carpeta de la carpeta de mods del juego, para asegurarte de que no se ejecute.",
+      "repair": "Repáralo o quítalo en el Kiln Launcher (Biblioteca) y vuelve a iniciar el juego."
+    },
+    "file": {
+      "too_large": "el archivo es demasiado grande",
+      "invalid": "está cortado o no es JSON válido",
+      "unreadable": "no se pudo leer el archivo: {error}",
+      "not_object": "el archivo no es un objeto JSON"
+    },
+    "engine_unreadable": "Kiln no pudo leer el informe de este motor: {error}",
+    "report_unreadable": "No se pudo leer su informe: {error}",
+    "see_log": "consulta kiln.log",
+    "kiln": {
+      "with_world": "Se inicia con tu propio mundo, cuando juegas solo o tus amigos se unen a ti. No se ejecuta en el mundo de otra persona.",
+      "hosted_off": "Desactivado en este juego: su kiln.json desactiva los mods que se inician con tu mundo (mods.hosted es false).",
+      "hosted_off_help": "Para dejar que se inicie, quita \"hosted\": false de la parte \"mods\" de kiln/kiln.json en la carpeta del juego y vuelve a iniciar el juego.",
+      "pending": "Se carga cuando le toca (por ejemplo, cuando se inicia un mundo).",
+      "disabled": "Kiln lo desactivó tras demasiados errores. Vuelve a iniciar el juego para reintentarlo, o actualiza el mod.",
+      "failed": "Lee el motivo de arriba. Actualiza el mod o lo que necesita en el Kiln Launcher y vuelve a iniciar el juego. kiln/logs/kiln.log tiene los detalles.",
+      "unloaded": "Se descargó con un comando. Vuelve a iniciar el juego para cargarlo.",
+      "not_reported": "Está en el perfil, pero Kiln no lo cargó en este inicio.",
+      "not_reported_help": "Vuelve a iniciar el juego. Si sigue así, revisa kiln/logs/kiln.log."
+    },
+    "native": {
+      "policy": "La política nativa de Kiln no carga mods DLL en esta build del juego.",
+      "failed_help": "Lee el motivo de arriba. Actualiza el mod DLL en el Kiln Launcher y vuelve a iniciar el juego.",
+      "no_report": "El cargador nativo de Kiln no escribió ningún informe en este inicio.",
+      "old_report": "El informe del cargador nativo es de un inicio anterior.",
+      "not_reported": "Está en el perfil, pero el cargador nativo no informó de él."
+    },
+    "plugin": {
+      "engine_failed": "El plugin {engine} de Kiln no se inició: {error}. Sus mods no pueden ejecutarse.",
+      "failed_help": "Actualiza o quita el plugin en el Kiln Launcher y vuelve a iniciar el juego.",
+      "no_report": "Falta el informe de inicio de Kiln, así que no se sabe si se cargó.",
+      "not_reported": "Está en el perfil, pero Kiln no lo cargó."
+    },
+    "chain": {
+      "failed_help": "Revisa la DLL en chain.ini (o en el Kiln Launcher) y vuelve a iniciar el juego."
+    },
+    "ember": {
+      "reason": "Los mods de Ember aún no pueden ejecutarse: Ember no ha publicado una forma de ejecutar mods.",
+      "help": "No hay nada que hacer por ahora. El mod se queda en tu perfil y se ejecutará cuando Kiln admita mods de Ember."
+    },
+    "dllmod": {
+      "waiting": "Se inicia cuando empieza un mundo tuyo."
+    },
+    "shroudtopia": {
+      "off": "Desactivado en los ajustes de Shroudtopia.",
+      "off_help": "En shroudtopia/shroudtopia.json, en la carpeta de configuración del perfil, pon active en true en la entrada de mods llamada \"{name}\" (el nombre de la línea Registered mod de kiln.log). Guarda el archivo; Shroudtopia lo vuelve a leer mientras el juego está en marcha.",
+      "not_active": "Activado, pero el mod no indica que esté activo.",
+      "not_active_help": "Kiln ejecuta los mods de Shroudtopia mediante la interfaz de mods de Shroudtopia 0.1.1 y sigue llamando a Activate de este mod. Un mod hecho para otra versión del juego, o compilado con otro Shroudtopia, puede quedarse así sin hacer nada. kiln/logs/kiln.log tiene sus propias líneas como [shroudtopia:{name}]; el autor del mod puede decirte si admite esta versión del juego."
+    },
+    "engine_mods": {
+      "own_loader": "El cargador propio de {engine} ejecuta los mods de {engine} en este inicio y solo lee su propia carpeta. Vuelve a activar el perfil en el Kiln Launcher (copia el mod allí) y vuelve a iniciar el juego.",
+      "failed_help": "Lee el motivo de arriba. Actualiza el mod en el Kiln Launcher y vuelve a iniciar el juego. kiln/logs/kiln.log tiene las líneas de {engine}.",
+      "unreadable": "No se pudo leer el informe de {engine}: {error}. Kiln lo vuelve a leer en un momento.",
+      "not_run": "{engine} no se ejecutó en este inicio, así que este mod no se cargó.",
+      "not_run_folder": "{engine} no se ejecutó en este inicio, así que el mod no se cargó.",
+      "old_report": "{engine} no informó en este inicio (su último informe es de un inicio anterior).",
+      "not_reported": "Está en el perfil, pero {engine} no informó de él en este inicio.",
+      "plugin_help": "Comprueba que el plugin {engine} de Kiln esté instalado (kiln/plugins) y vuelve a iniciar el juego.",
+      "note_old": "{engine} no informó en este inicio; su último informe es de un inicio anterior.",
+      "note_not_run": "{engine} no se ejecutó en este inicio."
+    },
+    "note": {
+      "aside_emf": "EMF: se hizo a un lado para el EMF original.",
+      "aside_emf_why": "EMF: se hizo a un lado para el EMF original ({reason}).",
+      "aside": "Se hizo a un lado: otro cargador de {engine} ejecuta estos mods.",
+      "aside_why": "Se hizo a un lado: otro cargador de {engine} ejecuta estos mods ({reason}).",
+      "emf_idle": "EMF quedó inactivo en esta build del juego: {reason}",
+      "eml_patched": {
+        "one": "Datos del juego parcheados antes de iniciar el juego ({count} cambio).",
+        "other": "Datos del juego parcheados antes de iniciar el juego ({count} cambios)."
+      },
+      "eml_failed": "EML falló: {error}. Los datos del juego se dejaron como estaban.",
+      "eml_aside_sf": "EML: se hizo a un lado para ShroudForge, que ejecuta los mods de EML de su carpeta de mods que tengan activado el interruptor de ShroudForge.",
+      "eml_aside": "EML: se hizo a un lado para el cargador propio de EML.",
+      "eml_aside_why": "EML: se hizo a un lado para el cargador propio de EML ({reason}).",
+      "eml_idle": "No hay mods de EML en este inicio.",
+      "ember": "Ember: se encuentran mods, pero aún no pueden ejecutarse.",
+      "dllmod_unsupported": "Enshrouded ModLoader: sus mods están hechos para la versión 26430625 del juego, así que ninguno se inicia en esta versión.",
+      "dllmod_server": "Enshrouded ModLoader: sus mods son para el cliente del juego; un servidor dedicado no inicia ninguno.",
+      "shroudlink_elsewhere": "Otro cargador de shroudlink ejecuta estos mods.",
+      "set_aside": "SET: se hizo a un lado para el cargador propio de SET.",
+      "set_aside_why": "SET: se hizo a un lado para el cargador propio de SET ({reason}).",
+      "set_waiting": "Los mods se cargan en el menú principal.",
+      "set_off": "Desactivado en este inicio."
+    },
+    "sf": {
+      "hosted_menu": "ShroudForge: runtime alojado por Kiln. Elige un mod para activarlo o desactivarlo y cambiar sus ajustes aquí (la ventana Modloader propia de ShroudForge no está en marcha).",
+      "hosted": "ShroudForge: runtime alojado por Kiln. Elige un mod para activarlo o desactivarlo y cambiar sus ajustes.",
+      "self_hosted": "ShroudForge: su propio cargador ejecuta los mods; Kiln se hizo a un lado. Elige un mod para activarlo o desactivarlo y cambiar sus ajustes.",
+      "not_installed": "ShroudForge no está instalado, así que sus mods no pueden ejecutarse.",
+      "off": "ShroudForge está desactivado en este inicio.",
+      "off_why": "ShroudForge está desactivado: {reason}.",
+      "failed": "ShroudForge falló: {reason}.",
+      "no_report": "ShroudForge no informó en este inicio.",
+      "not_run": "ShroudForge no se ejecutó en este inicio.",
+      "runs_it": "ShroudForge lo ejecuta.",
+      "fix_first": "Arregla primero ShroudForge (mira la línea del motor) y vuelve a iniciar el juego.",
+      "unconfirmed": "ShroudForge se ejecuta, pero Kiln no pudo leer lo que dice sobre este mod (mira la línea del motor). Esto no prueba que el mod esté activo.",
+      "off_in_settings": "Desactivado en los ajustes de ShroudForge.",
+      "eml_failed_help": "Arregla primero ShroudForge (consulta kiln.log) y vuelve a iniciar el juego. El EML de Kiln se hizo a un lado y no aplicó este mod.",
+      "eml_aside_but": "El EML de Kiln se hizo a un lado para ShroudForge, pero {note}",
+      "eml_off": {
+        "one": "{count} de los mods de EML del perfil está desactivado en ShroudForge, así que nada lo aplica en este inicio. ShroudForge ejecuta los mods de EML de su carpeta que tengan activado el interruptor de ShroudForge.",
+        "other": "{count} de los mods de EML del perfil están desactivados en ShroudForge, así que nada los aplica en este inicio. ShroudForge ejecuta los mods de EML de su carpeta que tengan activado el interruptor de ShroudForge."
+      },
+      "hand_off": "Pusiste este mod tú mismo en la carpeta de ShroudForge, y ShroudForge lo tiene desactivado.",
+      "hand_off_profile_help": "Actívalo en Mods > ShroudForge (su propia fila ahí), o quita la carpeta y pulsa Jugar en el Kiln Launcher: el mod está en tu perfil, así que Kiln pone entonces su propia copia, activada.",
+      "off_in_sf_help": "ShroudForge solo lo ejecuta cuando su interruptor está activado: el motivo de arriba indica dónde activarlo. Luego vuelve a iniciar el juego.",
+      "no_switch_file": "ShroudForge no lo ha activado: no tiene extended.mod.json, el archivo que guarda el interruptor de ShroudForge, así que ShroudForge no lo ejecuta.",
+      "package_unreadable": "ShroudForge lee esta carpeta, pero Kiln no puede leer el paquete como lo hace ShroudForge ({error}); ShroudForge rechaza un paquete que no puede leer.",
+      "eml_switch_off": "Está en la carpeta de mods de ShroudForge, pero su extended.mod.json (el archivo que guarda el interruptor de ShroudForge) dice enabled: false, así que nada lo aplica en este inicio.",
+      "eml_no_switch": "Está en la carpeta de mods de ShroudForge, pero no tiene extended.mod.json, el archivo que guarda el interruptor de ShroudForge, y ShroudForge deja un paquete desactivado hasta que su interruptor esté activado, así que nada lo aplica en este inicio.",
+      "eml_press_play": "Pulsa Jugar en el Kiln Launcher (o vuelve a activar el perfil): Kiln lo activa en los ajustes de ShroudForge. Luego vuelve a iniciar el juego.",
+      "eml_other_side": "ShroudForge solo lo ejecuta en {sides}.",
+      "and": " y ",
+      "eml_unconfirmed": "Su interruptor de ShroudForge está activado, pero el registro de ShroudForge de la pasada de arranque de este inicio no lo incluye en esta versión, así que Kiln no puede confirmar que se aplicó.",
+      "startup_failed": "La pasada de datos del juego de ShroudForge al arrancar falló en este inicio del juego.",
+      "startup_failed_why": "La pasada de datos del juego de ShroudForge al arrancar falló en este inicio del juego: {error}",
+      "startup_failed_help": "El registro de ShroudForge tiene los detalles. Vuelve a iniciar el juego cuando la causa esté arreglada.",
+      "startup_applied": "ShroudForge aplicó sus cambios en los datos del juego al comienzo de este inicio del juego (su registro de la pasada de arranque incluye este mod). Un cambio en sus ajustes se aplica en el siguiente inicio.",
+      "startup_current": "ShroudForge vio que sus cambios en los datos del juego de un inicio anterior siguen vigentes para los mods de este inicio (su registro de la pasada de arranque incluye este mod). Un cambio en sus ajustes se aplica en el siguiente inicio.",
+      "settings_unreadable": "No se pueden leer los ajustes de su paquete; la activación por mod de ShroudForge no está confirmada.",
+      "hand_off_help_live": "Actívalo abajo, o quita la carpeta y añade el mod con Añadir mods en el Kiln Launcher. ShroudForge lo inicia mientras juegas.",
+      "hand_off_help_next": "Actívalo abajo, o quita la carpeta y añade el mod con Añadir mods en el Kiln Launcher. Se aplica en el siguiente inicio del juego.",
+      "no_switch_help_live": "Actívalo abajo: Kiln escribe el extended.mod.json que escribe el Modloader propio de ShroudForge. ShroudForge lo inicia mientras juegas.",
+      "no_switch_help_next": "Actívalo abajo: Kiln escribe el extended.mod.json que escribe el Modloader propio de ShroudForge. Se aplica en el siguiente inicio del juego.",
+      "off_ext": "Desactivado en los ajustes de ShroudForge (el extended.mod.json del mod).",
+      "off_ext_repair": "Desactivado en los ajustes de ShroudForge (el extended.mod.json del mod). {repair}",
+      "switch_on_below": "Actívalo abajo.",
+      "repair_help": "Cambia cualquiera de sus ajustes, o desactívalo y vuelve a activarlo, una vez en el menú de Kiln: eso lo repara.",
+      "other_side": "Solo se ejecuta en {sides}.",
+      "no_runtime": "Su interruptor está activado, pero ShroudForge no tiene un informe de runtime por mod actual. Esto no prueba que el mod esté activo.",
+      "error": "ShroudForge: {error}",
+      "restart": "Vuelve a iniciar el juego.",
+      "error_help": "Lee el motivo de arriba. Actualiza el mod y vuelve a iniciar el juego. El registro de ShroudForge tiene los detalles.",
+      "startup_unconfirmed": "Activado para los cambios en los datos del juego al arrancar; el registro de ShroudForge de la pasada de arranque de este inicio no lo incluye en esta versión, así que Kiln no puede confirmarlo.",
+      "inactive": "ShroudForge no lo ejecuta ahora mismo; un cambio de su interruptor tarda un segundo o dos, o se inicia en el siguiente inicio del juego.",
+      "effect": "El Lua de ShroudForge está activo; efecto indicado: {effect}. {detail}",
+      "effect_failed_help": "El mod indica que su cambio no se aplicó. El registro de ShroudForge tiene los detalles.",
+      "active": "ShroudForge ejecuta su Lua; el mod no indica ningún resultado de efecto."
+    },
+    "enshwick": {
+      "no_report": "Enshwick no informó en este inicio.",
+      "not_run": "Enshwick no se ejecutó en este inicio.",
+      "started": "El cargador de Enshwick se inició.",
+      "starting": "El cargador de Enshwick se está iniciando.",
+      "failed": "El cargador de Enshwick falló: {reason}.",
+      "no_loader": "Falta el cargador de Enshwick: {reason}.",
+      "install": "instala Enshwick",
+      "aside": "Enshwick: se hizo a un lado para el cargador propio de Enshwick.",
+      "runs_it": "El cargador de Enshwick lo ejecuta. Enshwick no indica ningún resultado por mod.",
+      "fix_first": "Arregla primero Enshwick (mira la línea del motor) y vuelve a iniciar el juego.",
+      "copy_failed": "Kiln no pudo copiarlo a la carpeta de mods del juego.",
+      "copy_failed_help": "Cierra otras herramientas que usen la carpeta de mods del juego y vuelve a iniciar el juego.",
+      "removed": "Quitado de la carpeta de mods del juego."
+    },
+    "xhl": {
+      "prerequisite": "Requiere XHL-Core: solo ese host, instalado aparte, lo carga. Importa XHL-Core en el Kiln Launcher como mod nativo y actívalo, o instálalo como indica su autor, y vuelve a iniciar el juego.",
+      "core_started": "Puesto en la carpeta de mods del juego para XHL-Core. XHL-Core se inició con el juego y es él quien carga este plugin, no Kiln. Si el plugin se inició o no figura en el registro propio de XHL-Core, XHL-Native-Plugin-Host.log, junto a XHL-Core.",
+      "placed": "Puesto en la carpeta de mods del juego para XHL-Core. Kiln no lo carga, y Kiln no puede saber si XHL-Core lo ejecuta.",
+      "found_core": "Un plugin de XHL-Core en la carpeta de mods del juego. XHL-Core se inició con el juego y es él quien carga este plugin, no Kiln. Si el plugin se inició o no figura en el registro propio de XHL-Core, XHL-Native-Plugin-Host.log, junto a XHL-Core.",
+      "found": "Un plugin de XHL-Core en la carpeta de mods del juego. Kiln no lo carga, y Kiln no puede saber si XHL-Core lo ejecuta.",
+      "note_core": "XHL: puesto para XHL-Core, un host aparte. XHL-Core se inició con el juego y carga estos plugins; Kiln nunca los carga por sí mismo.",
+      "note": "XHL: puesto para XHL-Core, un host aparte. Kiln nunca carga estas DLL de plugin y aquí no comprueba si XHL-Core está instalado."
+    }
+  },
+  "config": {
+    "read_only_synced": "Configuración del servidor: solo lectura mientras estás conectado a un servidor. Las entradas sincronizadas muestran los valores del servidor.",
+    "read_only": "Configuración del servidor: solo lectura mientras estás conectado a un servidor (se aplica cuando eres el anfitrión).",
+    "server_values": {
+      "one": "{count} entrada tiene el valor del servidor mientras estás conectado (solo lectura).",
+      "other": "{count} entradas tienen el valor del servidor mientras estás conectado (solo lectura)."
+    },
+    "file_error": "archivo: {error}",
+    "not_saved": "no guardado: {error}",
+    "columns": {
+      "entry": "Entrada",
+      "value": "Valor"
+    },
+    "marks": {
+      "server": " [servidor]",
+      "synced": " (sincronizado)",
+      "restart": " (reinicio)"
+    },
+    "server_value": "El valor del servidor. El tuyo: {value} (vuelve cuando sales).",
+    "hint": {
+      "duration": "una duración: 30s, 5m, 1h30m",
+      "list": "una lista: [1, 2, 3] o 1, 2, 3"
+    },
+    "read_only_nul": "Solo lectura aquí: contiene un carácter NUL. Cámbialo en el archivo de configuración.",
+    "read_only_long": "Solo lectura aquí: ocupa más de 512 bytes. Cámbialo en el archivo de configuración.",
+    "default": "predeterminado",
+    "default_tip": "Predeterminado: {value}",
+    "type_here": "Escribe el valor aquí.",
+    "range": "un número de {min} a {max}",
+    "describe": {
+      "entry": "{path}: {type}, predeterminado {default}",
+      "entry_range": "{path}: {type}, predeterminado {default}, rango {min}..{max}",
+      "options": "opciones: {options}",
+      "synced": "Sincronizado: el servidor envía su valor a los clientes.",
+      "restart": "Requiere reiniciar: un cambio se aplica cuando el mod se vuelve a cargar.",
+      "from_server": "Tiene el valor del servidor mientras estás conectado."
+    },
+    "apply": "Aplicar ({count})",
+    "undo": "Deshacer",
+    "saved_later": "(se guarda cuando hay un mundo en marcha)",
+    "all_defaults": "Todo a predeterminado",
+    "applied": {
+      "one": "{count} cambio aplicado (se guarda cuando hay un mundo en marcha)",
+      "other": "{count} cambios aplicados (se guardan cuando hay un mundo en marcha)"
+    },
+    "saved": "{id}: guardado"
+  },
+  "configpage": {
+    "caption": "AJUSTES"
+  },
+  "settings": {
+    "look": {
+      "caption": "ASPECTO",
+      "look": "Aspecto",
+      "game": "El aspecto del juego",
+      "translucent": "El aspecto del juego, translúcido",
+      "kiln": "El aspecto clásico de Kiln (brasa)",
+      "theme": "{theme} ({mod})",
+      "theme_missing": "{theme} (su mod no está cargado)",
+      "background": "Opacidad del fondo (%)",
+      "opacity": "Opacidad (%)",
+      "size": "Tamaño (%)",
+      "game_read": "El aspecto del juego usa los colores y la fuente del propio juego, leídos de tu juego.",
+      "game_not_read": "No se pudieron leer (aún) los colores de tu juego: se usa un tono oscuro neutro en su lugar.",
+      "saved": "Guardado en kiln/kiln.json (\"ui\"); los Ajustes del launcher muestran lo mismo. Los mods pueden ofrecer más aspectos."
+    },
+    "language": {
+      "caption": "IDIOMA",
+      "language": "Idioma",
+      "auto": "Automático (el idioma del juego: {language})",
+      "missing": "{language} (Kiln no tiene textos en este idioma)",
+      "saved": "Los menús y mensajes propios de Kiln; los textos de los mods siguen el idioma del juego. Guardado en kiln/kiln.json (\"ui\"), como muestran los Ajustes del launcher."
+    }
+  },
+  "set": {
+    "about": "Ajustes de mods de SET, compatibilidad, entidades, hooks, asignaciones, consola e informe de soporte local.",
+    "unavailable": "Las herramientas de SET no están disponibles (kiln-set no está en marcha).",
+    "open": "Ajustes y herramientas de SET",
+    "open_failed": "Las herramientas de SET no están disponibles; revisa el estado del motor."
+  },
+  "shroudforge": {
+    "labels": {
+      "waits": "LO QUE ESPERA",
+      "settings": "INTERRUPTOR Y AJUSTES"
+    },
+    "waits": {
+      "restart": "El siguiente inicio del juego: ShroudForge carga la configuración cambiada de este mod solo cuando el juego vuelve a iniciarse.",
+      "dependency": "Un mod que necesita: ShroudForge lo inicia cuando ese mod se ejecute (el motivo de arriba lo nombra).",
+      "write_access": "Acceso de escritura al mundo del juego. ShroudForge lo da cuando está en marcha un mundo que aloja este juego: tu mundo de un jugador, o un mundo cooperativo que alojas tú. En el mundo de otra persona o en un servidor dedicado puede que nunca llegue; ahí el mod tiene que ejecutarse en el juego del anfitrión o en el servidor.",
+      "world": "Un mundo: empieza a funcionar cuando estás en un mundo que aloja este juego, no en el menú principal.",
+      "player": "Tu personaje en el mundo.",
+      "glide": "Que planees. Solo cambia el planeador mientras planeas, así que entre vuelos (y siempre que este menú esté abierto) indica que espera. Es normal: se aplica cuando despegas.",
+      "other": "Algo que el mod necesita aún no está; sus propias palabras están en ESTADO, arriba."
+    },
+    "reading": "Leyendo sus ajustes...",
+    "cannot_show": "No se pueden mostrar sus ajustes: {error}",
+    "files_unreadable": "no se pudieron leer sus archivos: {error}",
+    "value_unreadable": "no se puede leer el valor del ajuste {setting} ({error})",
+    "too_many": "demasiadas opciones, grupos o acciones para esta página (1000 en total como máximo). Cambia los ajustes en el extended.mod.json del mod; el archivo no ha cambiado.",
+    "value_error": "no se puede leer un valor ({error})",
+    "on": "Activado",
+    "off": "Desactivado",
+    "switch_live": "ShroudForge lo activa o desactiva mientras juegas.",
+    "switch_next": "Activarlo o desactivarlo surte efecto en el siguiente inicio del juego (cambia datos del juego cuando el juego se inicia).",
+    "switch_profile": "Tu perfil de Kiln incluye este mod: el Kiln Launcher pone este interruptor según el perfil cuando inicia el juego. Para conservar un cambio, hazlo también en el perfil.",
+    "repair": "ShroudForge rechaza este mod hasta que sus ajustes se guarden una vez: un Kiln anterior escribió {settings} sin su parte decimal.",
+    "repair_more": "ShroudForge rechaza este mod hasta que sus ajustes se guarden una vez: un Kiln anterior escribió {settings} y {more} más sin su parte decimal.",
+    "repair_here": "{repair} Cambiar aquí cualquier ajuste o su interruptor lo repara.",
+    "no_settings": "Este mod no tiene ajustes.",
+    "other_settings": "Otros ajustes",
+    "hidden": {
+      "one": "{count} ajuste más no se muestra aquí (este mod tiene {total}; la página muestra los primeros {shown}). Cámbialo en el extended.mod.json del mod.",
+      "other": "{count} ajustes más no se muestran aquí (este mod tiene {total}; la página muestra los primeros {shown}). Cámbialos en el extended.mod.json del mod."
+    },
+    "saved_to": "Guardado en el extended.mod.json del mod, el archivo que leen ShroudForge y el Kiln Launcher.",
+    "next_start": "Se aplica en el siguiente inicio del juego.",
+    "only_used_while": "{value}  (solo se usa mientras {setting} esté en {want})",
+    "value_on": "activado",
+    "value_off": "desactivado",
+    "shortcut": "Atajo: {key}",
+    "shortcut_help": "Edita abajo la asignación SDL (no se captura la tecla): Ctrl+SDL:66 es Ctrl+F9; Mouse:4 es el botón 4 del ratón. Vacío lo desactiva. SF comprueba si el teclado está disponible.",
+    "field_nul": "Este valor contiene un carácter NUL, que un campo de texto no puede mostrar ni conservar: cámbialo en el extended.mod.json del mod.",
+    "field_long": "Demasiado largo para editarlo aquí ({length} caracteres): cámbialo en el extended.mod.json del mod.",
+    "not_a_number": "{setting}: \"{text}\" no es un número",
+    "save": {
+      "switch_live_on": "Guardado: se pidió activar {mod}; un ShroudForge en marcha suele aplicarlo en un segundo o dos. Revisa su estado arriba.",
+      "switch_live_off": "Guardado: se pidió desactivar {mod}; un ShroudForge en marcha suele aplicarlo en un segundo o dos. Revisa su estado arriba.",
+      "switch_next_on": "Guardado: {mod} queda activado para el siguiente inicio del juego.",
+      "switch_next_off": "Guardado: {mod} queda desactivado para el siguiente inicio del juego.",
+      "setting_live": "Guardado: {setting} puede aplicarse mientras su mod esté activo; ShroudForge suele aplicarlo en un segundo o dos.",
+      "setting_next": "Guardado: {setting} queda configurado para el siguiente inicio del juego.",
+      "unreadable_after": "extended.mod.json se cambió, pero no se puede volver a leer: {error}. ShroudForge podría rechazar el mod hasta que se arregle el archivo.",
+      "failed": "No se pudo guardar: {error}"
+    },
+    "action": {
+      "confirm": "Confirmar: {action}",
+      "not_running": "{action} no se envió: ShroudForge solo ejecuta acciones mientras ejecuta el mod (mira su estado arriba). No se puso nada en cola.",
+      "still_waiting": "{action}: una petición anterior para {mod} (de este inicio del juego o de uno anterior) sigue esperando a ShroudForge, que la ejecuta cuando el mod la recoja; no se puso nada nuevo en cola.",
+      "requested": "Solicitado: {action}.",
+      "failed": "No se pudo enviar {action}: {error}"
+    },
+    "binding": "Mods de ShroudForge: abrir la página de ShroudForge de Kiln",
+    "check": {
+      "whole": "{setting} admite un número entero",
+      "type": "{setting} admite un valor de tipo {type}, no {given}",
+      "keep_one": "{setting} debe conservar al menos una opción para que ShroudForge mantenga su tipo de opción",
+      "finite": "{setting} admite un número finito",
+      "null_first": "{setting}: \"{choice}\" no puede ir primero en esta lista (no tiene valor, y ShroudForge rechazaría el mod)",
+      "no_value_choice": "una opción sin valor",
+      "shortcut": "{setting}: usa un atajo SDL como Ctrl+SDL:66 o Mouse:4 (vacío lo desactiva; orden de modificadores: Ctrl, Alt, Shift, Meta)",
+      "length": "{setting} debe tener entre {min} y {max} caracteres",
+      "length_min": "{setting} debe tener al menos {min} caracteres",
+      "range": "{setting} debe estar entre {min} y {max}",
+      "not_option": "{setting}: no es ninguno de {options}"
+    },
+    "kind": {
+      "boolean": "sí/no",
+      "integer": "número entero",
+      "number": "número",
+      "array": "lista",
+      "string": "texto",
+      "value": "valor"
+    }
+  },
+  "shroudlink": {
+    "needs_addon": "Esto requiere un complemento de cliente de shroudlink compatible con la ABI de puente v1. El complemento original no cambia.",
+    "waiting": "Esperando un host de shroudlink activo, el protocolo de UI 2, un mundo reconocido y una concesión de presentación.",
+    "no_entries": "El host no ha enviado ninguna entrada de menú.",
+    "apply": "Aplicar",
+    "item": "Objeto {id} × {count}",
+    "close_window": "Cerrar ventana",
+    "declined": "shroudlink rechazó la última solicitud ({error}); recargando su estado actual."
+  },
+  "keys": {
+    "help_mouse": "Haz clic en una tecla y pulsa la nueva: una tecla, el botón central o un botón lateral del ratón, o un giro de la rueda, con Ctrl, Shift o Alt si quieres (el clic izquierdo y el derecho no se pueden asignar). Vuelve a hacer clic para cancelar; Escape cancela y cierra el menú. Desasignar deja una acción sin tecla. Se guarda en kiln/config/keybinds.json.",
+    "help": "Haz clic en una tecla y pulsa la nueva. Vuelve a hacer clic para cancelar; Escape cancela y cierra el menú. Desasignar deja una acción sin tecla. Se guarda en kiln/config/keybinds.json.",
+    "col_action": "Acción",
+    "col_key": "Tecla",
+    "col_default": "Predet.",
+    "menu": "Kiln: abrir este menú",
+    "press": "pulsa una tecla...",
+    "reset": "Restablecer",
+    "unbind": "Desasignar",
+    "toast": {
+      "wheel_menu": "La tecla del menú de Kiln no puede estar en la rueda ({key}): cerraría el menú al desplazarte por él"
+    }
+  },
+  "network": {
+    "on": "La red de Kiln está activa: los mods pueden comunicarse entre este juego y un servidor de Kiln.",
+    "off": "La red de Kiln no está en marcha en esta sesión.",
+    "role": {
+      "both": "servidor y cliente",
+      "server": "servidor",
+      "client": "cliente",
+      "none": "ninguno"
+    },
+    "stats": "Rol: {role}. Mensajes recibidos {in}, enviados {out}, descartados {dropped}. Canales: {channels}. Mensaje más grande: {largest} bytes.",
+    "server": {
+      "caption": "Servidor",
+      "ready": "Kiln {version} en el servidor",
+      "vanilla": "el servidor no tiene Kiln (vanilla)",
+      "rejected": "el servidor rechazó este cliente",
+      "handshake": "negociación en curso",
+      "round_trip": "ida y vuelta {ms:F0} ms",
+      "mods": "mods del servidor: {mods}",
+      "none": "Sin conexión a un servidor."
+    },
+    "sync": {
+      "applied": "contenido: {count} cambio(s) del servidor{reset}{errors} ({kib:F0} KiB)",
+      "reset": ", {count} cambio(s) propio(s) revertido(s)",
+      "errors": ", {count} error(es)",
+      "hosting": "contenido: anfitrión (el contenido del servidor es el de este juego)",
+      "waiting": "contenido: {detail}",
+      "failed": "contenido: sin sincronizar: {detail}",
+      "none": "contenido: el servidor no envió ningún estado de contenido",
+      "configs": "configuraciones: {count} configuración(es) sincronizada(s) del servidor, {used} en uso aquí",
+      "configs_none": "configuraciones: el servidor no envió configuraciones sincronizadas"
+    },
+    "clients": {
+      "caption": "Clientes ({count})",
+      "col_player": "Jugador",
+      "col_state": "Estado",
+      "col_mods": "Mods",
+      "col_rtt": "RTT",
+      "col_frames": "Tramas rec./env."
+    },
+    "peer": {
+      "connecting": "Conectando",
+      "ready": "Listo",
+      "vanilla": "Vanilla",
+      "rejected": "Rechazado",
+      "closed": "Cerrado"
+    },
+    "ms": "{ms:F0} ms",
+    "admission": "Admisión",
+    "channels": {
+      "caption": "Canales ({count})",
+      "line": "{name} v{version}: recibidos {in}, enviados {out}",
+      "required": "{name} v{version} (obligatorio): recibidos {in}, enviados {out}"
+    }
+  },
+  "overlay": {
+    "surface": "{width}x{height}, formato {format}, escala {scale:F2}",
+    "frames": "presentados {presents}, dibujados {drawn}, último fotograma de la superposición {ms:F2} ms",
+    "counts": "ventanas {windows}, líneas del HUD {hud}, manejadores de fotograma {handlers}",
+    "screen": "pantalla del juego: {kind} ({state}/{hud}), idioma {language}, fotograma de UI {frame}",
+    "screen_station": "pantalla del juego: {kind} ({state}/{hud}), idioma {language}, fotograma de UI {frame}; estación de fabricación, taller 0x{workshop:x8} receta 0x{recipe:x8}",
+    "screen_own": "pantalla del juego: {kind} ({state}/{hud}), idioma {language}, fotograma de UI {frame}; fabricación propia, taller 0x{workshop:x8} receta 0x{recipe:x8}",
+    "panels_on": "pantallas abiertas {screens}, paneles de fabricación {panels}, extensión de menú activada",
+    "panels_off": "pantallas abiertas {screens}, paneles de fabricación {panels}, extensión de menú desactivada",
+    "test_toast": "Aviso de prueba",
+    "test_toast_text": "La superposición de Kiln funciona"
+  },
+  "classic": {
+    "tab": {
+      "mods": "Mods",
+      "network": "Red",
+      "keys": "Teclas",
+      "overlay": "Superposición"
+    },
+    "mods": {
+      "back": "Volver a los mods",
+      "shroudlink": "Menús de shroudlink",
+      "count": "{loaded} cargados, {found} encontrados (lado: {side})",
+      "kiln_settings": "Ajustes de Kiln",
+      "kiln_settings_close": "Cerrar ajustes de Kiln",
+      "col_mod": "Mod",
+      "col_version": "Versión",
+      "col_side": "Lado",
+      "col_state": "Estado",
+      "state": {
+        "pending": "pendiente",
+        "loaded": "cargado",
+        "disabled": "desactivado",
+        "failed": "falló",
+        "skipped": "omitido",
+        "unloaded": "descargado"
+      },
+      "config": "Config.",
+      "config_close": "Cerrar",
+      "status": "Estado ({count})",
+      "config_of": "Configuración: {mod}",
+      "no_pages": "Los mods añaden páginas de configuración con Ui.AddConfigPage (el editor del registro de configuraciones se conecta aquí)."
+    }
+  },
+  "details": {
+    "menu": "Detalles del objeto",
+    "title": "Detalles del objeto",
+    "snapshot": "Último objeto inspeccionado — instantánea (objeto {item:x8}, fotograma {frame})",
+    "refresh": "Recargar",
+    "close": "Cerrar"
+  },
+  "gamemenu": {
+    "scroll_crashed": "Kiln: el menú de pausa con desplazamiento cerró el juego la última vez, así que sigue desactivado; la página Mods de Kiln lista las entradas de menú de los mods.",
+    "summary": {
+      "auto_scrolls": "El menú de pausa las muestra todas y se desplaza cuando no caben (Ajustes de Kiln, modEntries: Auto).",
+      "auto": "Un menú del juego las muestra mientras tenga 3 como máximo, para que sus propias entradas (Salir) sigan en pantalla (Ajustes de Kiln, modEntries: Auto; este menú no se desplaza aquí).",
+      "always": "Los menús del juego las muestran todas (Ajustes de Kiln, modEntries: Always).",
+      "never": "Los menús del juego no muestran ninguna (Ajustes de Kiln, modEntries: Never).",
+      "few": "Un menú del juego las muestra mientras tenga 3 como máximo, para que sus propias entradas (Salir) sigan en pantalla (Ajustes de Kiln, modEntries: Few).",
+      "not_drawn": {
+        "one": "{how} {count} de ellas no está ahora en el menú del juego; elígela aquí.",
+        "other": "{how} {count} de ellas no están ahora en el menú del juego; elígelas aquí."
+      }
+    }
+  },
+  "toast": {
+    "render_off_errors": "{mod}: se desactivó un manejador de renderizado (errores)",
+    "render_off_slow": "{mod}: se desactivó un manejador de renderizado (demasiado lento)"
+  },
+  "refusal": {
+    "server": "El servidor rechazó este juego.",
+    "named": "{server} rechazó este juego.",
+    "needs_one": "Necesita un mod que no tienes:",
+    "needs_many": "Necesita mods que no tienes:",
+    "you_have": "{mod} {version} (tienes {have})",
+    "more": "y {count} más",
+    "modpack": "El launcher de Kiln ofrece el modpack de este servidor.",
+    "add": "Añádelos en el launcher de Kiln y vuelve a unirte.",
+    "no_reason": "Rechazado por el servidor."
+  },
+  "creative": {
+    "title": "Creativo",
+    "menu": "Creativo",
+    "hud": "Creativo",
+    "key": {
+      "category": "Creativo",
+      "open": "Abrir el menú creativo",
+      "flight": "Activar o desactivar el vuelo del personaje (modo creativo)"
+    },
+    "asking": "Consultando al servidor...",
+    "no_server": "Este servidor no tiene el menú creativo de Kiln (necesita Kiln en el servidor).",
+    "idle": "Este servidor usa Creative Mode (un mod de Flame), así que el menú creativo de Kiln está inactivo aquí: usa el menú propio de Creative Mode. El modo creativo de Kiln no se puede activar mientras se esté ejecutando.",
+    "on": "El modo creativo está activado",
+    "off": "El modo creativo está desactivado",
+    "turn_off": "Desactivar",
+    "turn_on": "Activar",
+    "admin_turns_on": "(lo activa un administrador: /creative on <tú>)",
+    "refused": "Rechazado: {reason}",
+    "needs_creative": "Requiere el modo creativo.",
+    "tab": {
+      "items": "Objetos",
+      "world": "Mundo",
+      "rules": "Reglas"
+    },
+    "rules": {
+      "yours": "Tus reglas: {rules}",
+      "game": "Tus reglas: las del juego",
+      "key": "Tecla: {key} (menú de Kiln > Teclas para cambiarla)."
+    },
+    "items": {
+      "cannot_give": "La build del juego de este servidor no puede dar objetos.",
+      "needs_creative": "Tomar objetos requiere el modo creativo.",
+      "search": "Buscar",
+      "no_equipment": "Sin equipo",
+      "journey": "Solo lo que he encontrado",
+      "journey_tip": "Recorrido: objetos que has recogido, fabricado o usado. Encuentra o fabrica el primero como el juego pretende y luego toma tantos como quieras.",
+      "category": "Categoría",
+      "found_unknown": "Este servidor no puede saber qué objetos has encontrado.",
+      "loading": "Cargando el catálogo...",
+      "of": "{count} de {total} objetos",
+      "none_found": "Aún no se ha encontrado nada aquí: primero recoge o fabrica objetos.",
+      "none_match": "Ningún objeto coincide.",
+      "pick": "Elige un objeto.",
+      "previous": "Anterior",
+      "page": "Página {page} de {pages}",
+      "next": "Siguiente"
+    },
+    "category": {
+      "all": "Todo",
+      "materials": "Materiales",
+      "building": "Construcción",
+      "consumables": "Consumibles",
+      "ammunition": "Munición",
+      "weapons": "Armas",
+      "equipment": "Equipo",
+      "tools": "Herramientas",
+      "instruments": "Instrumentos",
+      "fishing": "Pesca",
+      "customization": "Personalización",
+      "gems": "Gemas",
+      "palettes": "Paletas de colores",
+      "animal_food": "Comida para animales",
+      "collectibles": "Coleccionables",
+      "blueprints": "Planos",
+      "currency": "Moneda"
+    },
+    "backpack": {
+      "caption": "Mochila",
+      "holding": "Llevas {item} x{count}: haz clic en una casilla vacía (o en una con el mismo objeto).",
+      "put_back": "Devolver",
+      "hint": "Toma un objeto con \"Colocar...\" y luego haz clic en una casilla.",
+      "reading": "Leyendo tu mochila..."
+    },
+    "item": {
+      "stacks": "{category}, se apila hasta {count}",
+      "level": "Nivel",
+      "level_fixed": "Nivel {level}",
+      "rarity": "Rareza",
+      "upgrades": "Mejoras",
+      "upgrades_tip": "Mejoras obtenidas, como en el banco de trabajo (cada una sube el nivel en 1). 5: todas las que tiene el objeto (su rareza decide cuántas).",
+      "gem_slot": "Ranura de gema",
+      "journey_level": "Solo lo que he encontrado: el nivel está limitado al nivel de tu personaje.",
+      "count": "Cantidad",
+      "take": "Tomar {count}",
+      "place": "Colocar...",
+      "place_tip": "Tómalo y luego haz clic en una casilla de la cuadrícula de la mochila de abajo para ponerlo ahí."
+    },
+    "rarity": {
+      "common": "Común",
+      "uncommon": "Poco común",
+      "rare": "Raro",
+      "epic": "Épico",
+      "legendary": "Legendario"
+    },
+    "map": {
+      "caption": "Revelar mapa",
+      "unavailable": "Esta build del juego no permite revelar el mapa (Kiln no encontró aquí la niebla de guerra).",
+      "radius": "Radio de revelado",
+      "game": "El del juego",
+      "r200": "200 m",
+      "r400": "400 m",
+      "whole": "Mapa entero",
+      "help": "Descubre el mapa a tu alrededor mientras te mueves (Mapa entero: todo, una vez). Lo descubierto sigue descubierto para este personaje, también después del modo creativo. Vuelve al del juego cuando sales del mundo."
+    },
+    "flight": {
+      "caption": "Vuelo del personaje",
+      "unavailable": "El vuelo del personaje requiere allowCharacterFlight en rules.json y los hooks de vuelo correspondientes en ambos juegos.",
+      "flight": "Vuelo",
+      "off": "Desactivado",
+      "unlimited": "Ilimitado",
+      "building": "Solo zonas de construcción",
+      "help": "Salta para despegar, mantén saltar para subir, agáchate para bajar, esprinta para ir más rápido; al bajar hasta el suelo aterrizas. Tecla: {key} (menú de Kiln > Teclas)."
+    },
+    "time": {
+      "caption": "Hora del día",
+      "now": "Son las {time}.",
+      "unknown": "No se conoce la hora del día.",
+      "cannot": "Esta build no puede cambiar la hora del día.",
+      "admin_only": "Solo un administrador cambia la hora del día.",
+      "help": "Avanza hasta la hora que elijas.",
+      "hour": "Hora",
+      "set": "Fijar"
+    },
+    "cycle": {
+      "caption": "Ciclo de día y noche",
+      "now_stopped": "Ahora: detenido (el sol no se mueve)",
+      "now_fast": "Ahora: rápido (un día y una noche en unos 90 s)",
+      "now_normal": "Ahora: normal",
+      "cannot": "Esta build no puede cambiar la velocidad del ciclo.",
+      "admin_only": "Solo un administrador cambia el ciclo.",
+      "normal": "Normal",
+      "stopped": "Detenido",
+      "fast": "Rápido",
+      "help": "Para todo el mundo, hasta que se restablezca o el servidor se reinicie."
+    }
+  },
+  "checks": {
+    "title": "Pruebas guiadas",
+    "header": "Pruebas guiadas · {session}",
+    "session": {
+      "hosted": "mundo propio",
+      "joined": "unido a un servidor (las pruebas se ejecutan allí)",
+      "server": "servidor dedicado",
+      "menu": "menú principal: aloja un mundo o únete a un servidor para ejecutar pruebas"
+    },
+    "totals": "   {passed} superadas · {failed} fallidas · {skipped} omitidas · {never} nunca ejecutadas",
+    "guard": "Protección de logros: {guard}",
+    "guard_warning": "AVISO DE PROTECCIÓN: {warning}",
+    "ledger": "Registro de resultados: {ledger}",
+    "idle": "No hay ninguna prueba en marcha. Elige una abajo o ejecútalas todas en orden.",
+    "run_these": "Ejecutar estas {count}",
+    "run_all": "Ejecutar todas",
+    "refresh": "Recargar",
+    "queued": "{count} más en cola",
+    "only_new": "Solo la(s) {count} prueba(s) nueva(s) en Kiln {version}",
+    "none_server": "El servidor no lista ninguna prueba.",
+    "none_mods": "Ningún mod cargado registró pruebas.",
+    "area": "{area}  ({done}/{count} superadas)",
+    "cheats_note": "Las pruebas marcadas como trucos cambian el personaje para siempre: usa un personaje desechable y elimínalo después.",
+    "verdict": {
+      "pass": "BIEN",
+      "fail": "FALLO",
+      "skip": "OMITIDA"
+    },
+    "run": "Ejecutar",
+    "item": {
+      "needs": "{ids}  necesita {needs}",
+      "refused": "    rechazada: {reason}",
+      "note": "    nota: {note}"
+    },
+    "now": "Ahora: {title}",
+    "now_cheats": "{mod}/{id} · {area} · trucos",
+    "confirm": {
+      "before": "Antes de que empiece esta prueba:",
+      "no": "No, no la ejecutes",
+      "yes": "Sí, ejecútala",
+      "yes_wait": "Sí, ejecútala (lee primero el texto)"
+    },
+    "setting_up": "(preparando…)",
+    "fail_note": "¿Qué salió mal? Enter registra el fallo con esta línea; Escape lo registra sin ella.",
+    "pass": "Superada",
+    "fail": "Fallida…",
+    "skip": "Omitir",
+    "stop": "Detener (sin registro)",
+    "writing": "Escribiendo el resultado…",
+    "assert": {
+      "ok": "ok   {what}",
+      "ok_detail": "ok   {what} — {detail}",
+      "fail": "FALLO {what}",
+      "fail_detail": "FALLO {what} — {detail}"
+    },
+    "hud": {
+      "confirming": "La prueba \"{title}\" hace antes una pregunta: abre la lista ({open})",
+      "finishing": "Prueba \"{title}\": escribiendo el resultado",
+      "running": "Prueba \"{title}\": {instruction}   [superada {pass} · fallida {fail} · omitir {skip}]",
+      "setting_up": "preparando…"
+    },
+    "key": {
+      "category": "Pruebas guiadas",
+      "open": "Abrir la lista de pruebas guiadas",
+      "pass": "Dar por superada la prueba en marcha",
+      "fail": "Dar por fallida la prueba en marcha (luego escribe una línea)",
+      "skip": "Omitir la prueba en marcha"
+    },
+    "keys": "Teclas: lista {open} · superada {pass} · fallida {fail} · omitir {skip} (menú de Kiln, Teclas)"
+  },
+  "talents": {
+    "key": {
+      "category": "Talentos",
+      "open": "Abrir el árbol de talentos {tree}"
+    },
+    "no_server_trees": "el servidor no tiene árboles de talentos de Kiln",
+    "not_connected": "sin conexión a un servidor de Kiln",
+    "waiting": "Esperando al servidor...",
+    "points": "Puntos: {0} disponibles  ({1} de {2} gastados)",
+    "select": "Elige un talento.",
+    "level_cost": "Nivel {0} / {1}   Coste {2}",
+    "needs_all": "Requiere todos estos: {0}",
+    "needs_one": "Requiere uno de estos: {0}",
+    "needs_points": "Requiere {0} puntos gastados en este árbol",
+    "needs_level": "Requiere nivel de personaje {0}",
+    "unlock": "Obtener ({0})",
+    "next_level": "Siguiente nivel ({0})",
+    "refund": "Reembolsar",
+    "respec": "Reasignar (gratis)",
+    "close": "Cerrar",
+    "tooltip": "{0}  ({1}/{2}, coste {3})",
+    "paused": "El juego está en pausa: esto se aplica al reanudar.",
+    "effect": {
+      "attribute": "atributo {0} +{1}/nivel",
+      "buff": "efecto {0}",
+      "game_node": "nodo del juego {0}",
+      "program": "programa {0}",
+      "ability": "habilidad {0}",
+      "code": "código"
+    }
+  },
+  "blocks": {
+    "toast": {
+      "baked_vfx": "{mod}: el VFX \"{name}\" no coincide con la build del mod: vuelve a compilar el mod",
+      "baked_material": "{mod}: el material \"{name}\" no coincide con la build del mod: vuelve a compilar el mod",
+      "new_vfx": "{mod}: nuevo VFX \"{name}\": reinicia el juego para verlo",
+      "new_material": "{mod}: nuevo material \"{name}\": reinicia el juego para verlo",
+      "no_window": "{window} no es una ventana que tenga este juego",
+      "too_many": "demasiados comandos en espera: ve más despacio",
+      "command_failed": "{command} falló",
+      "server_value": "{config}: {path} es del servidor: se puede cambiar después de salir"
+    }
+  },
+  "abilities": {
+    "server_lacks": "el servidor no tiene esta habilidad",
+    "not_connected": "sin conexión a un servidor de Kiln",
+    "cooldown": "{ability} [{key}]: {seconds:F1} s"
+  },
+  "gemforge": {
+    "outcome": "Forja de gemas: {message}"
+  },
+  "dev": {
+    "window_key": "Ventana {window}",
+    "filter": "Filtrar",
+    "clear": "Borrar",
+    "systems": {
+      "title": "Kiln: Sistemas",
+      "unavailable": "Los sistemas no están disponibles en esta build: {status}",
+      "off_only": "Solo desactivados",
+      "profile": "Perfilar",
+      "stop_profiling": "Dejar de perfilar",
+      "all_on": "Activar todos",
+      "log_top": "Registrar los 30 primeros",
+      "col_on": "Activo",
+      "col_system": "Sistema",
+      "col_calls": "llamadas/s",
+      "col_world": "Mundo"
+    },
+    "types": {
+      "title": "Kiln: Tipos",
+      "unavailable": "Los tipos no están disponibles en esta build: {status}",
+      "search": "Buscar",
+      "base": "Base: {type}"
+    },
+    "bindings": {
+      "title": "Kiln: Asignaciones",
+      "key_for": "Tecla para {binding}:",
+      "set": "Fijar",
+      "unbind": "Desasignar",
+      "default": "Predet.",
+      "col_mod": "Mod",
+      "col_binding": "Asignación",
+      "col_key": "Tecla",
+      "col_description": "Descripción",
+      "also_bound": "También asignada: {bindings}"
+    },
+    "resources": {
+      "title": "Kiln: Recursos",
+      "type": "Tipo",
+      "list": "Lista",
+      "more": "... (filtra para ver más)",
+      "log_guid": "Registrar GUID"
+    },
+    "hooks": {
+      "title": "Kiln: Hooks"
+    },
+    "log": {
+      "title": "Kiln: Registro del juego",
+      "hide_noise": "Ocultar ruido",
+      "hidden": "({count} línea(s) antigua(s) sin dibujar; filtra para encontrarlas)"
+    },
+    "status": {
+      "title": "Kiln: Estado",
+      "none": "No hay archivos de estado en {folder}"
+    },
+    "console": {
+      "title": "Kiln: Consola",
+      "run": "Ejecutar",
+      "history": "Historial:"
+    }
+  },
+  "graphics": {
+    "cap": {
+      "caption": "Límite de fotogramas",
+      "on": "Limitar la tasa de fotogramas",
+      "fps": "Fotogramas por segundo",
+      "hint": "El juego renderiza como máximo esta cantidad de fotogramas por segundo: Kiln espacia por igual el inicio de sus fotogramas. Se aplica al instante. Si también está activado el límite de fotogramas del juego o la sincronización vertical, decide el límite más bajo."
+    },
+    "dlss": {
+      "caption": "DLSS (tarjetas NVIDIA RTX)",
+      "preset": "Preset de renderizado",
+      "preset_hint": "Predeterminado lo deja en manos del juego y de DLSS. J y K son los modelos transformer de DLSS 4; L y M, los más nuevos de DLSS 4.5. DLAA mantiene el preset del juego. La anulación de DLSS de la app de NVIDIA, si la configuras ahí, tiene prioridad sobre esto.",
+      "scale": "Tamaño de renderizado",
+      "render_scale": "Escala de renderizado (%)",
+      "mode_scale": "{mode} (%)",
+      "scale_hint": "La parte de la resolución del juego a la que DLSS renderiza antes de escalar: más baja es más rápida, más alta es más nítida. DLAA siempre renderiza a tamaño completo. Los ajustes de DLSS se aplican la próxima vez que el juego prepara DLSS: al cargar un mundo, o al cambiar el modo de DLSS o la resolución en los ajustes del juego."
+    },
+    "scale": {
+      "game": "La propia de DLSS para cada modo",
+      "per_mode": "Una escala para cada modo de DLSS",
+      "custom": "Una escala para todos los modos"
+    },
+    "mode": {
+      "performance": "Rendimiento",
+      "balanced": "Equilibrado",
+      "quality": "Calidad",
+      "ultra_performance": "Ultrarrendimiento",
+      "ultra_quality": "Ultracalidad"
+    },
+    "preset": {
+      "default": "predeterminado"
+    },
+    "readout": {
+      "caption": "Indicador",
+      "on": "Mostrar el indicador",
+      "hint": "Unas líneas en la esquina superior derecha: fotogramas por segundo (renderizados y de salida), tiempo por fotograma, el escalador con su modo, el tamaño de renderizado y de salida, y el preset de DLSS. La latencia no se muestra: Kiln no puede medirla con fiabilidad en este juego."
+    },
+    "status": {
+      "caption": "Ahora",
+      "unavailable": "Las herramientas gráficas de Kiln necesitan el kiln-ui.dll de Kiln 0.2.0-dev.29.18 o posterior.",
+      "cap_on": "Límite de fotogramas: {fps} fps.",
+      "cap_aside": "Límite de fotogramas ({fps} fps): desactivado, en manos de {tools}.",
+      "fps": "Renderizados {rendered} fps, salida {output} fps, {ms} ms por fotograma.",
+      "dlss_aside": "Ajustes de DLSS: en manos de {tools}.",
+      "dlss_active": "DLSS {mode}: de {render} a {output}, preset {preset}.",
+      "dlss_limited": "Tu escala de renderizado está fuera de lo que DLSS permite en {mode}: renderiza al tamaño permitido más cercano (arriba).",
+      "dlss_idle": "DLSS no está en uso ahora (el juego usa FSR 3, XeSS o ningún escalador, o no hay ningún mundo cargado).",
+      "dlss_none": "El juego no ha preparado DLSS en esta sesión (DLSS necesita una tarjeta NVIDIA RTX y DLSS elegido en los ajustes del juego).",
+      "restart": "Reinicia el juego para los ajustes de DLSS de Kiln y la línea de DLSS del indicador: Kiln solo engancha DLSS si uno de ellos está activado cuando se inicia el juego."
+    },
+    "aside": {
+      "optiscaler": "OptiScaler",
+      "streamline": "NVIDIA Streamline (un mod de generación de fotogramas)",
+      "vkfg": "un mod de generación de fotogramas de DLSS (EnshroudedVKFG.ini)",
+      "dlsstweaks": "DLSSTweaks",
+      "nvngx": "otro cargador de DLSS (nvngx.dll junto al juego)",
+      "ngx_patched": "otra herramienta que engancha DLSS",
+      "overlay_off": "la superposición de Kiln desactivada",
+      "upscaler": "otra herramienta de escalado (archivos del escalador de AMD o de Intel junto al juego, o una pasada de FSR 3 modificada)"
+    },
+    "upscaler": {
+      "caption": "Detrás del FSR 3 del juego",
+      "choice": "Escalador",
+      "game": "El FSR 3 propio del juego",
+      "amd": "AMD FSR",
+      "xess": "Intel XeSS",
+      "amd_mode": "Versión de AMD FSR",
+      "amd_auto": "Automático (FSR 3.1 por ahora)",
+      "amd_fsr3": "FSR 3.1",
+      "amd_fsr4": "FSR 4 (experimental)",
+      "amd_hint": "Automático usa FSR 3.1 hasta que FSR 4 esté confirmado en este juego. FSR 4 (experimental) deja elegir a AMD: FSR 4 en las tarjetas gráficas y controladores que lo ejecutan, FSR 3.1 en los demás; puede mostrar las escenas oscuras demasiado oscuras.",
+      "hint": "Elige FSR 3 como escalador en los ajustes gráficos del juego: Kiln ejecuta tu elección en su lugar. Un cambio se aplica al momento mientras FSR 3 funciona en un mundo; si no, al cargar un mundo. Kiln necesita los archivos del fabricante para AMD FSR e Intel XeSS; el launcher de Kiln los descarga (Ajustes, Gráficos).",
+      "files": {
+        "present": "{name} {version}: los archivos están en {folder}.",
+        "missing": "Los archivos de {name} aún no están en este juego. Descárgalos en el launcher de Kiln (Ajustes, Gráficos) con el juego cerrado. Hasta entonces funciona el FSR 3 propio del juego.",
+        "changed": "Faltan o han cambiado algunos archivos de {name} en {folder}. Vuelve a descargarlos en el launcher de Kiln (Ajustes, Gráficos) con el juego cerrado. Hasta entonces funciona el FSR 3 propio del juego."
+      },
+      "running": {
+        "off": "El escalador de Kiln no está en uso detrás del FSR 3 del juego ahora.",
+        "not_fsr": "El juego no está escalando con FSR 3 ahora: FSR 3 no está elegido en los ajustes gráficos del juego, o no hay ningún mundo cargado.",
+        "game_fsr3": "Funciona el FSR 3 propio del juego.",
+        "amd_fsr4": "AMD FSR 4 funciona en lugar del FSR 3 del juego.",
+        "amd_fsr31": "AMD FSR 3.1 funciona en lugar del FSR 3 del juego.",
+        "xess": "Intel XeSS funciona en lugar del FSR 3 del juego.",
+        "unknown": "Kiln no puede saber qué escala detrás del FSR 3 del juego: sus partes son de versiones distintas."
+      },
+      "size": "Renderiza a {render} para {output}.",
+      "size_version": "Versión {version}, renderizando a {render} para {output}.",
+      "amd_fsr3_auto": "La selección de AMD eligió FSR 3.1: FSR 4 no funciona en esta tarjeta gráfica o controlador.",
+      "detail": "Detalles: {detail}",
+      "restart_now": "Reinicia el juego para usar {upscaler}. Hasta entonces funciona el FSR 3 propio del juego.",
+      "reason": {
+        "restart": "{upscaler} funciona a partir del próximo inicio del juego: Kiln lo prepara cuando se inicia el juego.",
+        "files_missing": "Los archivos de {upscaler} aún no están descargados, así que funciona el FSR 3 propio del juego.",
+        "files_bad": "Un archivo de {upscaler} no es el que Kiln espera (su tamaño o su SHA-256 no coinciden), así que Kiln no lo carga. Vuelve a descargarlo.",
+        "load_failed": "Un archivo de {upscaler} no se cargó, así que funciona el FSR 3 propio del juego.",
+        "device": "A tu tarjeta gráfica o controlador le falta una función de Vulkan que {upscaler} necesita, así que funciona el FSR 3 propio del juego.",
+        "create_failed": "No se pudo preparar {upscaler} para esta resolución, así que funciona el FSR 3 propio del juego.",
+        "runtime_failed": "{upscaler} falló mientras escalaba. El FSR 3 propio del juego funciona hasta que reinicies el juego.",
+        "fault": "{upscaler} o el código de Kiln que lo rodea tuvo un fallo. El FSR 3 propio del juego funciona hasta que reinicies el juego.",
+        "aside": "Kiln se hace a un lado por {tools}, así que no cambia el FSR 3 del juego.",
+        "no_signatures": "Kiln aún no conoce el FSR 3 de esta build del juego, así que funciona el FSR 3 propio del juego. Una actualización de Kiln para esta build del juego lo soluciona.",
+        "inputs": "Las imágenes del juego no son las que {upscaler} admite, así que funciona el FSR 3 propio del juego.",
+        "unavailable": "{upscaler} no está disponible en esta build de Kiln o en este sistema, así que funciona el FSR 3 propio del juego.",
+        "waiting": "{upscaler} está listo. Empieza en cuanto el juego ejecute FSR 3: carga un mundo con FSR 3 elegido en los ajustes gráficos del juego.",
+        "no_vulkan": "Kiln no vio que el juego preparara su dispositivo gráfico en esta sesión. Reinicia el juego para {upscaler}.",
+        "unknown": "{upscaler} no funciona (motivo {number}, de un Kiln más reciente), así que funciona el FSR 3 propio del juego."
+      }
+    },
+    "saved": "Guardado en kiln/kiln.json (la página Ajustes del launcher también los tiene)."
+  },
+  "native": {
+    "menu": {
+      "mods": "Mods",
+      "mods_off": "Mods: {reason}"
+    },
+    "footer": {
+      "loaded": {
+        "one": "Kiln {version} - {count} mod cargado",
+        "other": "Kiln {version} - {count} mods cargados"
+      },
+      "xhl": {
+        "one": "Kiln {version} con XHL-Core - {count} mod cargado",
+        "other": "Kiln {version} con XHL-Core - {count} mods cargados"
+      }
+    },
+    "fallback": {
+      "title": "Kiln {version}",
+      "body": "El host administrado de Kiln (Kiln.Ui) no está en marcha en esta sesión, así que la lista de mods y las pantallas de mods no están disponibles aquí. Revisa kiln/logs/kiln.log.",
+      "close": "Pulsa {key} para cerrar."
+    },
+    "graphics": {
+      "fps": "Renderizados {rendered} fps | Salida {output} fps | {ms} ms",
+      "dlss": "DLSS {mode}: {render} -> {output}, preset {preset}",
+      "preset_default": "predeterminado",
+      "not_dlss": "Ahora no es DLSS (el FSR 3 del juego, XeSS o ninguno): {output}",
+      "unknown": "DLSS: se lee en el próximo inicio del juego: {output}",
+      "aside": "Escalador: en manos de {tools}: {output}",
+      "cap": "Límite de fotogramas {fps} fps",
+      "cap_aside": "Límite de fotogramas {fps} fps: desactivado por {tools}",
+      "upscale": "Detrás de FSR 3: {upscaler}: {render} -> {output}",
+      "game_fsr3": "el FSR 3 propio del juego",
+      "upscale_why": "{upscaler} no está funcionando: {why}",
+      "upscale_restart": "Reinicia el juego para usar {upscaler}"
+    }
+  }
+}

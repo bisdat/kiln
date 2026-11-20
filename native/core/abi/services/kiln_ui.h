@@ -10,7 +10,9 @@
  * The size-guarded tail after v7 appends set_next_window_size_constraints, menu_footer (0.2.0-dev.29.11),
  * image_load_rgba, screen_target and image_state (0.2.0-dev.29.15), and looks, themes and fonts (0.2.0-dev.29.16:
  * theme_create, theme_free, push_theme, set_look, look_info, font_load, font_free, push_font_handle; then image_ex and
- * image_opaque_rect: part of an image, trimmed item icons; then set_texts: Kiln's own texts in the player's language).
+ * image_opaque_rect: part of an image, trimmed item icons; then set_texts: Kiln's own texts in the player's language), and
+ * graphics_set and graphics_status (0.2.0-dev.29.18): Kiln's own graphics tools, the frame cap, DLSS settings and readout,
+ * then chat_completion (internal to Kiln.Ui, refused from native plugins): Tab completion in the game's chat (issue #44).
  *
  * How (docs/re/client-render.md):
  *  - The game loads vulkan-1.dll at run time and presents with vkQueuePresentKHR on queue family 0 (no static Vulkan
@@ -620,9 +622,10 @@ typedef struct KilnUiLook {
     uint32_t reserved;
 } KilnUiLook;               /* 32 bytes */
 
-/* KilnUiLookInfo.glyphs (0.2.0-dev.29.16): the game's own font of the language group Kiln's language (else the game's) needs */
+/* KilnUiLookInfo.glyphs (0.2.0-dev.29.16): the game's own fonts Kiln's language (else the game's) needs: a Chinese, Japanese
+   or Korean language's group, or (0.2.0-dev.29.19) for a Cyrillic language the default group's Cyrillic font */
 enum {
-    KILN_UI_GLYPHS_LATIN = 0,    /* no Chinese, Japanese or Korean language: the overlay's fonts as they are */
+    KILN_UI_GLYPHS_LATIN = 0,    /* no CJK or Cyrillic language: the overlay's fonts need nothing more */
     KILN_UI_GLYPHS_LOADING = 1,  /* being read from the game's data (Kiln's texts show in English meanwhile) */
     KILN_UI_GLYPHS_READY = 2,    /* merged into the overlay's font atlas */
     KILN_UI_GLYPHS_FAILED = 3,   /* not available (kiln.log says why): Kiln's texts stay English */
@@ -636,8 +639,9 @@ typedef struct KilnUiLookInfo {
     float background, opacity, scale;  /* as set (clamped) */
     uint8_t game_colors;    /* 1: the game's colours were read from its data; 0: the neutral stand-in (so far) */
     uint8_t game_font;      /* 1: the game's UI font is loaded */
-    uint8_t glyphs;         /* KILN_UI_GLYPHS_*: the overlay's glyphs of a Chinese, Japanese or Korean language (set_texts) */
-    uint8_t glyph_language; /* the keen::LanguageId `glyphs` is about (20 zh-CN, 21 zh-TW, 11 ja-JP, 13 ko-KR), 0 none */
+    uint8_t glyphs;         /* KILN_UI_GLYPHS_*: the overlay's glyphs of a CJK or Cyrillic language (set_texts) */
+    uint8_t glyph_language; /* the keen::LanguageId `glyphs` is about (20 zh-CN, 21 zh-TW, 11 ja-JP, 13 ko-KR; 9 ru-RU,
+                               24 bg-BG, 34 uk-UA, other Cyrillic 9), 0 none */
     uint32_t roles[16];     /* KILN_UI_ROLE_COUNT colours, 0xRRGGBBAA: inside a frame callback the look pushed now (the
                                player's when none is), elsewhere the player's. WINDOW_BG's alpha is the windows' opacity */
     uint32_t role_count;    /* KILN_UI_ROLE_COUNT */
@@ -654,8 +658,151 @@ typedef struct KilnUiTexts {
     const KilnStr* texts;   /* their texts, UTF-8 */
 } KilnUiTexts;              /* 40 bytes */
 
+/* graphics_set (0.2.0-dev.29.18): the player's graphics settings (Kiln.Ui sets them from kiln.json "graphics"; docs/kiln/graphics.md). */
+enum {
+    KILN_UI_DLSS_SCALE_GAME = 0,      /* DLSS's own render size for the game's DLSS mode */
+    KILN_UI_DLSS_SCALE_PER_MODE = 1,  /* mode_scale[] by DLSS mode */
+    KILN_UI_DLSS_SCALE_CUSTOM = 2,    /* custom_scale for every DLSS mode */
+};
+typedef struct KilnUiGraphics {
+    uint32_t size;          /* sizeof(KilnUiGraphics) */
+    uint32_t fps_cap;       /* the most frames a second the game renders: 0 off, else 20..500 (1..19 count as 20) */
+    uint32_t dlss_preset;   /* 0: the game's and DLSS's own; else a DLSS render preset: 10 J, 11 K, 12 L, 13 M (others: 0) */
+    uint32_t dlss_scale;    /* KILN_UI_DLSS_SCALE_* */
+    float custom_scale;     /* SCALE_CUSTOM: the render width and height as a share of the output's, 0.33..1 */
+    float mode_scale[4];    /* SCALE_PER_MODE: Quality, Balanced, Performance, Ultra Performance; 0.33..1 each */
+    uint32_t readout;       /* 1: the readout in the top right corner of the game */
+    /* 0.2.0-dev.29.18 phase B (were reserved, 0 in older callers: the game's own FSR 3, AMD's own choice) */
+    uint32_t upscaler;      /* KILN_UI_UPSCALER_*: what runs behind the game's FSR 3 option (kiln.json graphics.upscaler) */
+    uint32_t amd_upscaler;  /* KILN_UI_AMD_UPSCALER_* (kiln.json graphics.amdUpscaler) */
+} KilnUiGraphics;           /* 48 bytes */
+
+/* KilnUiGraphics.upscaler / KilnUiGraphicsStatus.upscaler: what the player chose to run behind the game's FSR 3 option.
+ * Applies at the game's next FSR 3 set-up (a world load, the FSR quality, the resolution or the 3D render scale). */
+enum {
+    KILN_UI_UPSCALER_GAME = 0,  /* "game": the game's own FSR 3, nothing changes (default) */
+    KILN_UI_UPSCALER_AMD = 1,   /* "amd": AMD FSR, FSR 4 where the GPU and driver run it (AMD's own selection), else FSR 3.1 */
+    KILN_UI_UPSCALER_XESS = 2,  /* "xess": Intel XeSS */
+};
+/* KilnUiGraphics.amd_upscaler */
+enum {
+    KILN_UI_AMD_UPSCALER_AUTO = 0,  /* "auto": FSR 3.1 until FSR 4 is confirmed in this game (was AMD's selection up to
+                                       0.2.0-dev.29.19 beta 3) */
+    KILN_UI_AMD_UPSCALER_FSR3 = 1,  /* "fsr3": FSR 3.1 even where FSR 4 runs */
+    KILN_UI_AMD_UPSCALER_FSR4 = 2,  /* "fsr4": AMD's selection, FSR 4 where it runs (experimental); since 0.2.0-dev.29.19 */
+};
+
+/* KilnUiGraphicsStatus.flags */
+enum {
+    KILN_UI_GFX_CAP_ACTIVE = 1u << 0,     /* the frame cap paces the game's frames now */
+    KILN_UI_GFX_DLSS_HOOKED = 1u << 1,    /* Kiln's hooks on NVIDIA's DLSS are in (a DLSS setting or the readout was on at start) */
+    KILN_UI_GFX_DLSS_ACTIVE = 1u << 2,    /* the game upscaled with DLSS in the last two seconds */
+    KILN_UI_GFX_DLSS_RESTART = 1u << 3,   /* a DLSS setting or the readout is on now, but was not at start: DLSS is hooked
+                                             from the next start of the game */
+    KILN_UI_GFX_DLSS_PRESET = 1u << 4,    /* the DLSS in use got Kiln's render preset */
+    KILN_UI_GFX_DLSS_SCALED = 1u << 5,    /* the DLSS in use got Kiln's render size */
+    KILN_UI_GFX_COUNTING = 1u << 6,       /* the frame counts below are kept (the frame cap or the readout is on) */
+    KILN_UI_GFX_DLSS_LIMITED = 1u << 7,   /* the player's render scale was outside DLSS's range for the mode in use: DLSS
+                                             renders at the nearest size it allows (render_width/height) */
+};
+/* KilnUiGraphicsStatus.aside_cap / aside_dlss: what the frame cap and the DLSS settings step aside for (bits). */
+enum {
+    KILN_UI_GFX_ASIDE_OPTISCALER = 1u << 0,   /* OptiScaler in the game folder */
+    KILN_UI_GFX_ASIDE_STREAMLINE = 1u << 1,   /* NVIDIA Streamline (sl.interposer.dll; frame generation mods) */
+    KILN_UI_GFX_ASIDE_VKFG = 1u << 2,         /* EnshroudedVKFG.ini: a DLSS frame generation mod */
+    KILN_UI_GFX_ASIDE_DLSSTWEAKS = 1u << 3,   /* dlsstweaks.ini: DLSSTweaks */
+    KILN_UI_GFX_ASIDE_NVNGX = 1u << 4,        /* nvngx.dll or _nvngx.dll next to the game: another DLSS loader */
+    KILN_UI_GFX_ASIDE_NGX_PATCHED = 1u << 5,  /* NVIDIA's DLSS functions were already patched by another module */
+    KILN_UI_GFX_ASIDE_OVERLAY_OFF = 1u << 6,  /* Kiln's overlay hooks are off (KilnUiStatus.error says why) */
+    KILN_UI_GFX_ASIDE_UPSCALER = 1u << 7,     /* (0.2.0-dev.29.18) another upscaler tool's files in the game folder: AMD
+                                                 FidelityFX or XeSS DLLs next to the game (another mod's), or the FSR 3
+                                                 pass already patched by another module */
+};
+/* graphics_status: what Kiln's graphics tools do now. */
+typedef struct KilnUiGraphicsStatus {
+    uint32_t size;            /* sizeof(KilnUiGraphicsStatus) */
+    uint32_t flags;           /* KILN_UI_GFX_* */
+    uint32_t aside_cap;       /* KILN_UI_GFX_ASIDE_* that keep the frame cap off (0: none) */
+    uint32_t aside_dlss;      /* KILN_UI_GFX_ASIDE_* that keep the DLSS settings off (0: none) */
+    uint32_t fps_cap;         /* the frame cap set (0 off) */
+    float rendered_fps;       /* the game's frames a second over the last half second (GFX_COUNTING) */
+    float output_fps;         /* frames presented a second: rendered_fps until a frame generation phase exists */
+    float frame_ms;           /* the mean time between the game's frames */
+    uint32_t output_width, output_height;    /* the game window's swapchain */
+    int32_t dlss_quality;     /* the DLSS in use (GFX_DLSS_HOOKED): NVSDK_NGX_PerfQuality_Value, 0 Performance, 1 Balanced,
+                                 2 Quality, 3 Ultra Performance, 4 Ultra Quality, 5 DLAA; -1 none */
+    uint32_t dlss_preset;     /* its render preset as asked (Kiln's, else the game's hint): 0 DLSS's default, 1..15 A..O
+                                 (above: no letter). Without bit 31, which the game's NGX SDK code sets on the default
+                                 it fills in for a hint the game left at 0 (0x8000000B: K) */
+    uint32_t render_width, render_height;    /* DLSS's input this frame (dynamic resolution may lower it) */
+    uint32_t dlss_output_width, dlss_output_height;
+    uint32_t reserved[2];
+    /* ---- 0.2.0-dev.29.18 phase B, an upscaler behind the game's FSR 3 option: filled when size >=
+     * KILN_UI_GRAPHICS_STATUS_SIZE_V2 (248); a 72-byte caller gets the fields above only. ---- */
+    uint32_t upscaler;          /* KILN_UI_UPSCALER_* the player chose (the setting now) */
+    uint32_t amd_upscaler;      /* KILN_UI_AMD_UPSCALER_* */
+    uint32_t upscale_running;   /* KILN_UI_UPSCALE_RUN_*: what upscales behind the game's FSR 3 option now */
+    uint32_t upscale_reason;    /* KILN_UI_UPSCALE_WHY_*: why the chosen upscaler does not run now (0: it runs, or GAME) */
+    uint32_t upscale_flags;     /* KILN_UI_UPSCALE_* */
+    uint32_t aside_upscale;     /* KILN_UI_GFX_ASIDE_* that keep Kiln's swap off (0: none) */
+    uint32_t upscale_version;   /* what runs: (major << 22) | (minor << 12) | patch (FSR 4.1.2, FSR 3.1.6, XeSS 2.0.2:
+                                   the upscaler's own version, so Super Resolution's from the XeSS SDK 3.0.2);
+                                   0: the game's FSR 3 or nothing */
+    uint32_t upscale_render_width, upscale_render_height;  /* the FSR 3 pass's input this frame (while FSR_SEEN) */
+    uint32_t upscale_output_width, upscale_output_height;
+    uint32_t reserved2;
+    char upscale_detail[128];   /* the reason in English words, UTF-8, NUL-terminated (a missing extension's or file's
+                                   name, a fault); "" when there is nothing to add. For logs and tooltips: the UI says
+                                   the reason in the player's language from upscale_reason */
+} KilnUiGraphicsStatus;     /* 248 bytes (72 before 0.2.0-dev.29.18's phase B fields) */
+#define KILN_UI_GRAPHICS_STATUS_SIZE_V1 72u
+#define KILN_UI_GRAPHICS_STATUS_SIZE_V2 248u
+
+/* KilnUiGraphicsStatus.upscale_running */
+enum {
+    KILN_UI_UPSCALE_RUN_OFF = 0,        /* Kiln's swap is not in: "game" chosen, or the swap's hooks are not in (see
+                                           upscale_reason); whatever the game chose runs and Kiln does not see it */
+    KILN_UI_UPSCALE_RUN_NOT_FSR = 1,    /* the swap is in, but the game did not upscale with FSR 3 in the last two
+                                           seconds: FSR 3 is not the game's chosen upscaler (DLSS, none), or no world */
+    KILN_UI_UPSCALE_RUN_GAME_FSR3 = 2,  /* the game's own FSR 3 runs (the chosen one does not: upscale_reason) */
+    KILN_UI_UPSCALE_RUN_AMD_FSR4 = 3,   /* AMD FSR 4 runs in place of the game's FSR 3 */
+    KILN_UI_UPSCALE_RUN_AMD_FSR3 = 4,   /* AMD FSR 3.1 */
+    KILN_UI_UPSCALE_RUN_XESS = 5,       /* Intel XeSS */
+};
+/* KilnUiGraphicsStatus.upscale_reason: why the chosen upscaler does not run. Stable numbers (never renumbered). */
+enum {
+    KILN_UI_UPSCALE_WHY_NONE = 0,            /* it runs, or GAME is chosen */
+    KILN_UI_UPSCALE_WHY_RESTART = 1,         /* chosen while the game runs: it needs Kiln's hooks or device features from
+                                                the game's start, so it runs from the next start of the game */
+    KILN_UI_UPSCALE_WHY_FILES_MISSING = 2,   /* its files are not downloaded (launcher: Settings, Graphics) */
+    KILN_UI_UPSCALE_WHY_FILES_BAD = 3,       /* a file is not the pinned one (size or SHA-256), or is a link: download again */
+    KILN_UI_UPSCALE_WHY_LOAD_FAILED = 4,     /* a vendor DLL did not load */
+    KILN_UI_UPSCALE_WHY_DEVICE = 5,          /* the GPU or driver lacks a Vulkan extension or feature it needs */
+    KILN_UI_UPSCALE_WHY_CREATE_FAILED = 6,   /* it could not be set up for these sizes: the game's FSR 3 runs */
+    KILN_UI_UPSCALE_WHY_RUNTIME_FAILED = 7,  /* it failed while upscaling: the game's FSR 3 for the rest of the session */
+    KILN_UI_UPSCALE_WHY_FAULT = 8,           /* a fault in it or in Kiln's code around it: the game's FSR 3 for the session */
+    KILN_UI_UPSCALE_WHY_ASIDE = 9,           /* Kiln steps aside for another tool (aside_upscale) */
+    KILN_UI_UPSCALE_WHY_NO_SIGNATURES = 10,  /* this game build's FSR 3 pass was not found (or could not be hooked): the
+                                                swap is off */
+    KILN_UI_UPSCALE_WHY_INPUTS = 11,         /* the game's textures are not what it takes (format, size, a missing one) */
+    KILN_UI_UPSCALE_WHY_UNAVAILABLE = 12,    /* not in this build of Kiln, or not on this system */
+    KILN_UI_UPSCALE_WHY_WAITING = 13,        /* ready: it starts at the game's next FSR 3 frame (load a world with FSR 3
+                                                chosen in the game's settings) */
+    KILN_UI_UPSCALE_WHY_NO_VULKAN = 14,      /* Kiln did not see the game's Vulkan device created: restart the game */
+};
+/* KilnUiGraphicsStatus.upscale_flags */
+enum {
+    KILN_UI_UPSCALE_HOOKED = 1u << 0,      /* Kiln's hooks on the game's FSR 3 pass are in (an upscaler other than GAME was
+                                              chosen at the game's start) */
+    KILN_UI_UPSCALE_FSR_SEEN = 1u << 1,    /* the game upscaled with FSR 3 in the last two seconds (the sizes are its) */
+    KILN_UI_UPSCALE_FILES_OK = 1u << 2,    /* the chosen backend's files are there and match their pins */
+    KILN_UI_UPSCALE_DEVICE_OK = 1u << 3,   /* the game's device has what the chosen backend needs */
+    KILN_UI_UPSCALE_FELL_BACK = 1u << 4,   /* the chosen backend failed in this session: the game's FSR 3 until restart */
+    KILN_UI_UPSCALE_AMD_PINNED = 1u << 5,  /* AMD FSR 3.1 runs because Kiln pins it (amd_upscaler AUTO or FSR3) */
+};
+
 /* Issue #44: internal Kiln.Ui chat-completion transport, NOT for native plugins.
- * Appended after set_texts at byte 1016; kiln.ui v1's earlier slots never move.
+ * Appended after graphics_status at byte 1032; kiln.ui v1's earlier slots never move.
  * The caller sets size and operation:
  *  1: snapshot the focused native HUD/Social chat input, plus one queued key action.
  *  2: set whether suggestions exist and whether the list is active.
@@ -1072,6 +1219,18 @@ typedef struct KilnUiApi {
      * overlay's font atlas. Copied; any thread. A call from a native plugin is refused (KILN_ERR_UNAVAILABLE): the player
      * chooses the language. INVALID_ARGUMENT: NULL, size too small, count over 4096 or NULL arrays with a count. */
     KilnResult(KILN_CALL* set_texts)(const KilnUiTexts* texts);
+    /* Additive size-guarded tail (0.2.0-dev.29.18; check header.size >= offsetof(KilnUiApi, x) + sizeof(void*) and the
+     * pointer for each): Kiln's own graphics tools (docs/kiln/graphics.md).
+     * graphics_set: the player's settings (KilnUiGraphics, set size first; values are clamped). Kiln.Ui calls it from
+     *   kiln.json "graphics" and its Graphics page; a call from a native plugin is refused (KILN_ERR_UNAVAILABLE): the
+     *   player chooses them. The frame cap and the readout follow at once; DLSS settings when the game next sets up
+     *   DLSS, and only when Kiln hooked DLSS at start (KILN_UI_GFX_DLSS_RESTART). Any thread. INVALID_ARGUMENT: NULL or
+     *   size too small.
+     * graphics_status: what the tools do now (set out->size first): the frame cap, the frame rates (while the cap or the
+     *   readout is on), the DLSS in use (its mode, preset, render and output size) and what they step aside for. Mods may
+     *   read it. Any thread. INVALID_ARGUMENT: NULL or size too small. */
+    KilnResult(KILN_CALL* graphics_set)(const KilnUiGraphics* settings);
+    KilnResult(KILN_CALL* graphics_status)(KilnUiGraphicsStatus* out);
     /* Appended internal-only slot (issue #44). Native plugins are refused;
      * Kiln.Ui uses this on its render thread, never calls game input itself.
      * The game UI thread owns all reads and actual EditSetText replacements. */

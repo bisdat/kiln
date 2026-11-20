@@ -258,18 +258,21 @@ typedef struct KilnPluginInfo {
      * not yet confirmed to be 0; the guided client check must confirm it. Called at the process's exit call: after
      * the game saved, closed its worlds and returned from main, before Windows ends the other threads and before any
      * DLL_PROCESS_DETACH, never under the loader lock. A plugin stays loaded for the life of the process; nothing is
-     * unloaded after the call. Every service and plugin that loaded is called, in reverse load order (plugins before
-     * the services they use), each on a thread kiln-core starts for the call (not the main thread, not a world
-     * thread) while the exiting thread waits. A fault is caught (kiln.log and a crash report) and the next handler
-     * runs; a handler that has not returned after 3 s is given up (named in kiln.log; its thread ends with the
-     * process), and once 10 s have gone by in all, the rest are not called. Do: write your own files (atomically),
+     * unloaded after the call. Kiln's own exit steps come first: Kiln's own services (kiln/services DLLs of this
+     * build) are called, then kiln.tasks parks its pool (no task body or done runs any more: do not wait for your own
+     * tasks), then every plugin that loaded, last loaded first; each handler on a thread kiln-core starts for the call
+     * (not the main thread, not a world thread) while the exiting thread waits. A fault is caught
+     * (kiln.log and a crash report) and the next handler runs; a handler that has not returned after 3 s is given up
+     * (named in kiln.log; its thread ends with the process), and once 10 s have gone by in all (the pool's park, at
+     * most 0.5 s, not counted), the rest are not called. Do: write your own files (atomically),
      * stop your own threads and wait for them briefly. Do not: touch game memory or call game code, post to or wait
      * for a world thread or the main thread, LoadLibrary or FreeLibrary, restore patched game code, end the process.
      * Not called: a killed process (TerminateProcess, kill -9, a forced quit), a crash (also one the game catches and
      * ends with a non-zero exit code), safe idle, kiln_plugin_early (early plugins) and native mods (kiln_native.h).
-     * Where: under Wine (Linux servers, Proton clients, the Steam Deck) it is on. On native Windows it is off by
-     * default in this release (not yet proven there): kiln.json "unloadAtExit": "on" turns it on, "off" turns it off
-     * everywhere, "auto" (the default) is the rule above. kiln.log's "unload:" line at boot says which and why.
+     * Where: under Wine (Linux servers, Proton clients, the Steam Deck) it is on. On native Windows a plugin's is off
+     * by default in this release (not yet proven there; Kiln's own exit steps still run): kiln.json "unloadAtExit":
+     * "on" turns it on, "off" turns the whole exit link off everywhere (Kiln's own steps too), "auto" (the default) is
+     * the rule above. kiln.log's "unload:" line at boot says which and why.
      * Test hosts may call it at any time. */
     void(KILN_CALL* on_unload)(void* user);
     void* user;

@@ -23,10 +23,13 @@ Code: `crates/kiln-manage/src/report.rs` (`build`, `redact`, `write_zip`), the T
 | `report.json` | the findings and the unreadable sections as JSON (`{format, written, tool, findings: [{id, level, text}], errors}`) |
 | `game/kiln/logs/kiln.log` | the last 1 MiB |
 | `game/kiln/logs/proxy.log`, `game/kiln/logs/eml.log`, `game/shroudlink_client.log` | the last 192 KiB of each, when present (a link in its place is not followed: the report says "a link, not followed"); the shroudlink addon's own log gets the same redaction as Kiln's logs and nothing more (see below) |
-| `game/kiln/logs/tick-stats.jsonl` | the last 1 MiB (whole lines), when present: Kiln's step times per world and minute, rewritten at every game start (since dev.29) |
+| `game/kiln/logs/tick-stats.jsonl` | the last 1 MiB (whole lines), when present: Kiln's step times per world and minute, rewritten at every game start (since dev.29); since dev.29.19 also each world's impact memory (`impact`; kiln.log warns at 50/75/90 % and names the programs that fill it: [../services/abilities.md](../services/abilities.md#impact-memory-watch)) |
+| `game/XHL-Native-Plugin-Host.log`, `game/kiln/chain/<id>/XHL-Native-Plugin-Host.log` | (dev.29.18) XHL-Core's own log, when present, next to the DLL it runs as: the game's `dinput8.dll` (its author's instructions) or Kiln's copy of it for a Native mod of the profile (`kiln/chain/<id>/xhl-core.dll`, at most 4 such folders, each a Kiln mod id): which plugin folders it loaded, skipped or refused. The last 192 KiB of each, redacted as Kiln's logs; a link in the file's or the folder's place is not followed |
 | `game/kiln/logs/greeneye-loader.log`, `game/greeneye/loader.log`, `game/greeneye/loader.second-copy.log` | kiln-greeneye's log and Greeneye Loader's own, the last 64 KiB of each, when present |
 | `greeneye-mods/<id>/game/*.log`, `.../game/*.status`, `greeneye-mods/<id>/library/...` | each Greeneye mod's own log and status files, one zip folder per mod folder (`game`: its folder in `greeneye/`, `library`: a Library entry; one id may have both) (top level of its folder, at most 4 per mod and 12 mods, the last 64 KiB of each): a Greeneye mod writes what it found and patched only there (The Worst Map Mod: `unlock_map_markers.log`, `UnlockMapMarkers.status`). The folders are those `kiln/state/greeneye.json` names and those in `greeneye/`, read only inside `<game>/greeneye/` or the launcher's `library/greeneye/` (resolved, no links); any other folder is left out with a note (`greeneye-log-skipped`). Compared resolved, so a different spelling of the same folder is the same. Its settings (`.ini`) and data are not read |
+| `game/OptiScaler.ini`, `game/OptiScaler.log` | (dev.29.18) only with OptiScaler in the game folder (`engines::optiscaler_in`): its settings as they are, redacted, at most 1 MiB, and the last 192 KiB of its own log when it writes one (`[Log] LogToFile=true`), each under its name on disk |
 | `game/kiln/crash-reports/<newest>` | the last 64 KiB of the newest crash report |
+| `game/BuildingTools.log`, `game/BuildingTools.prev.log`, `game/shroudlink.log`, `game/auto-loot-plus.log` | (dev.29.19) other mods' own logs in the game folder, when present: Building Tools' (this start and the one before), ShroudLink's core, Auto Loot Plus' native part. The last 192 KiB of each, redacted as Kiln's logs, added after Kiln's own logs and the crash report; a link in the file's place is not followed. Their settings (`BuildingTools.ini`) are not read |
 | `game/kiln/state/*.json` | every state file (boot, mods, native, last-server, hooks, each engine's), at most 1 MiB each |
 | `game/kiln/profile.json`, `kiln/chain.ini`, `kiln/kiln.json`, `kiln/.install.json`, `dinput8-chain.ini` | as they are, redacted; a link in a file's place, and a state file that is a link, is not followed ("a link, not followed") |
 | `launcher/launcher.log` | the last 192 KiB of `<data>/logs/launcher.log` |
@@ -41,7 +44,9 @@ lines. A file that is cut says so in its first line.
 ### summary.txt
 
 - **System:** OS (Windows edition, version and build from the registry; on Linux `/etc/os-release` and the kernel), a
-  Steam Deck (the launcher's own detection; kilnctl: DMI `Jupiter`/`Galileo`, SteamOS, `SteamDeck=1`).
+  Steam Deck (the launcher's own detection; kilnctl: DMI `Jupiter`/`Galileo`, SteamOS, `SteamDeck=1`). The Linux
+  launcher adds how it draws its window (`Launcher:`) and (dev.29.18) WebKit's sandbox in this start and the probe of
+  bwrap (`WebKit sandbox:`).
 - **Game:** the folder (redacted), client or server, platform, Steam build, the Proton prefix, the compat tool from
   Steam's `config.vdf` and the prefix's `version` file, Steam's launch options (not for a direct start), running or not,
   the exe's sha256 and whether `kiln/sigdb/builds/<side>/<sha256>.json` says Kiln verified this build. (dev.29.17)
@@ -67,6 +72,7 @@ Each is one plain sentence. `problem` explains why mods don't load, `warning` ma
 | `proxy-not-kiln` | `dinput8.dll` is another engine's or an unknown DLL, with or without Kiln's receipt |
 | `files-missing` | files of the receipt are gone (names them; the usual cause is an antivirus quarantine) |
 | `files-changed` | files of the receipt have another sha256 (`install::modified_files`) |
+| `install-blocked` | (dev.29.18, inbox 92) a problem: an install, update, Repair or rollback of Kiln in this game folder failed because Windows refused one of Kiln's DLLs or exes (access denied, os error 5, or a sharing violation, os error 32: an antivirus or another program; Windows Security's virus errors 225 and 226; `blocked::last_in_log`), as launcher.log says, and no install worked since: no later install, rollback or uninstall is done in the log, and the receipt is older than that failure or missing. A later refusal (the game was running) leaves it standing. Names the task, the time and the file. A launcher since 0.2.0-dev.29.18 writes the error's `{"blocked": ...}` detail into that line; an older launcher's line is read by its words (the path in the game folder and the os error) |
 | `not-loaded` | the game runs and boot.json is not from this start (`launch::boot_is_current`); or the last launcher start (`<data>/installs/<id>.launch.json`) is newer than boot.json; or the game has a log but Kiln wrote neither proxy.log nor boot.json. Under Proton without the dinput8 override the sentence names the launch option (`game::launch_options_info`) |
 | `proton-override` | Kiln is in a Proton game, nothing says it failed, and Steam's launch options have no dinput8 override |
 | `unknown-build` | no build record for the exe's sha256 (problem: "Kiln doesn't know this game build (<12 hex digits>). Kiln starts with the game but stays idle: no mods load.", the launcher's words on Play and in Settings) or one that is not verified (warning) |
@@ -81,7 +87,10 @@ Each is one plain sentence. `problem` explains why mods don't load, `warning` ma
 | `crash` | there is a crash report (the newest is in the zip) |
 | `profile-invalid` | `kiln/profile.json` does not parse, or the last start found it invalid |
 | `newer-mods` | Kiln mods of the profile built against a newer Kiln (`game::newer_mods`, the Play page's "Update Kiln") |
+| `optiscaler` | (dev.29.18) a note: OptiScaler is in the game folder (`game::graphics_tools`), with the file and what Kiln's overlay does next to it with its OptiScaler.ini (the Play page's words): steps aside with OptiScaler's own menu on or frame generation set, draws with `OverlayMenu=false`. summary.txt says the same in a "Graphics tool:" line under the proxies |
 | `no-game` | the report was made without a game (note) |
+| `webkit-sandbox` | (dev.29.18, from the Linux launcher: `ReportInput.findings`, `sandbox::finding`) the start's probe found that the bwrap WebKit runs cannot start (its line) or is missing: a problem when this start runs WebKit's sandbox (the launcher's page cannot open; turn it off in the launcher's message or with `--no-webkit-sandbox`), a note when it does not (a default start: then it is not why a window stays empty); the AppImage's own missing bwrap (it has none on any system) only when the start runs the sandbox. With the AppArmor value when it restricts user namespaces. summary.txt's system has a `WebKit sandbox:` line in every Linux launcher report ([app.md](app.md), "WebKit's sandbox (Linux)") |
+| `launcher-files-missing` | (dev.29.18, inbox 92, from the Windows launcher: `ReportInput.findings`, `own_files::finding`) a warning: the launcher was installed by its setup (NSIS) and its own `uninstall.exe`, or its exe while it ran, is gone from its folder at this start: an antivirus may have quarantined it. Names the files; launcher.log has a `launcher:` line, and the window says it once |
 
 ## Privacy
 
@@ -109,7 +118,8 @@ names to replace). `summary.txt` ends with this list.
 
 What redaction cannot catch: a character or server name the player chose that appears in a log line, and 8.3 short
 names that cut the user name (`FROSTL~1`). `game/shroudlink_client.log` is written by the third-party shroudlink
-client addon, not by Kiln: its text gets only the redaction above, so whatever else the addon logs stays as it is
+client addon, not by Kiln (as `game/BuildingTools*.log`, `game/shroudlink.log` and `game/auto-loot-plus.log` are written by
+those mods): its text gets only the redaction above, so whatever else the addon logs stays as it is
 (IPv6 addresses, server DNS or UNC host names, other players' names, anything like `password=...`).
 
 ## When things are broken

@@ -1,6 +1,6 @@
 // Small formatters.
 import { toKilnError } from "../api/commands";
-import { t } from "../i18n";
+import { formatLocale, t } from "../i18n";
 
 export function fmtBytes(n: number | null | undefined): string {
   if (n === null || n === undefined) return "-";
@@ -22,13 +22,13 @@ export function fmtAgo(at: string | number | null | undefined, now = Date.now())
   if (s < 3600) return t("format.ago.minutes", { n: Math.round(s / 60) });
   if (s < 86400) return t("format.ago.hours", { n: Math.round(s / 3600) });
   if (s < 172800) return t("format.ago.yesterday");
-  return new Date(ms).toLocaleDateString();
+  return new Date(ms).toLocaleDateString(formatLocale());
 }
 
 export function fmtTime(at: string | number | null | undefined): string {
   if (at === null || at === undefined || at === "") return "-";
   const d = new Date(typeof at === "number" ? at : Date.parse(at));
-  return Number.isNaN(d.getTime()) ? String(at) : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return Number.isNaN(d.getTime()) ? String(at) : d.toLocaleString(formatLocale(), { dateStyle: "medium", timeStyle: "short" });
 }
 
 /** `kdh1:3f2a9c1d…` → `3f2a9c1d`; a sha256 → its first 8. */

@@ -1,0 +1,1081 @@
+{
+  "language": {
+    "name": "日本語"
+  },
+  "menu": {
+    "title": "モッドマネージャー",
+    "game_title": "モッド",
+    "subtitle": {
+      "loaded": "{count} 個中 {loaded} 個のモッドを読み込み済み"
+    },
+    "sections": {
+      "mods": "モッド",
+      "network": "ネットワーク",
+      "keys": "キー",
+      "overlay": "オーバーレイ",
+      "graphics": "グラフィック"
+    },
+    "shroudlink": {
+      "open": "shroudlink メニュー",
+      "back": "モッドに戻る"
+    },
+    "hints": {
+      "back": "戻る",
+      "next_section": "次のセクション",
+      "arrows": "矢印キー",
+      "move": "移動",
+      "choose": "選択",
+      "search": "検索",
+      "gamepad": "ゲームパッド: LB / RB でセクション、A で選択、B で戻る"
+    }
+  },
+  "mods": {
+    "engines": {
+      "all": "すべてのモッド",
+      "attention": "要確認",
+      "menus": "メニュー項目",
+      "menus_note": "モッドがゲームのメニューに追加した項目です。ここで選ぶと、メニューでの動作と同じことを行います。",
+      "settings": "Kiln の設定"
+    },
+    "captions": {
+      "engines": "エンジン",
+      "all": "すべてのモッド",
+      "attention": "要確認",
+      "details": "詳細",
+      "settings": "Kiln の設定",
+      "pause_entries": "ポーズメニューの項目",
+      "main_entries": "メインメニューの項目"
+    },
+    "search": {
+      "hint": "モッドを検索 (Ctrl+F)"
+    },
+    "empty": {
+      "loading": "モッドリストを読み込み中...",
+      "none": "モッドはインストールされていません。",
+      "none_hint": "Kiln ランチャー（ライブラリ）でモッドを追加し、プロファイルに入れてから、ゲームを再起動してください。",
+      "no_match": "\"{search}\" に一致するモッドはありません。",
+      "no_match_hint": "別の言葉で試すか、検索欄をクリアしてください。",
+      "nothing": "ここには何もありません。",
+      "nothing_hint": "左の「すべてのモッド」を選んでください。"
+    },
+    "side": {
+      "client": "ゲームのみ",
+      "both": "ゲームとサーバー",
+      "world": "自分のワールドのみ",
+      "server": "サーバーのみ"
+    },
+    "details": {
+      "pick_list": "リストからモッドを選ぶと、その内容、読み込まれたかどうか、設定が表示されます。",
+      "pick": "モッドを選ぶと詳細が表示されます。",
+      "id_version": "{id}   ·   バージョン {version}",
+      "wrong": "問題の内容",
+      "state": "状態",
+      "engine": "エンジン",
+      "load_order": "読み込み順",
+      "loads_as": "{number} 番目に読み込まれます。",
+      "needs": "必要なもの",
+      "dependency": "{id} {range}",
+      "dependency_optional": "{id} {range}（任意）",
+      "dependency_optional_off": "{id} {range}（任意）: 読み込まれていません",
+      "dependency_missing": "{id} {range}: ありません",
+      "folder": "フォルダー",
+      "status": "ステータス"
+    },
+    "menus": {
+      "open": "開く",
+      "unavailable": "\"{entry}\" は今ここでは使えません。",
+      "plugin": "Kiln プラグイン",
+      "hidden": "{mod}   ·   現在ゲームのメニューにはありません"
+    }
+  },
+  "catalog": {
+    "chip": {
+      "loaded": "読み込み済み",
+      "waiting": "待機中",
+      "off": "オフ",
+      "failed": "失敗",
+      "not_loaded": "未読み込み",
+      "missing": "不足"
+    },
+    "engine": {
+      "native": "ネイティブ DLL モッド",
+      "plugin": "Kiln プラグイン",
+      "chain": "チェーン DLL"
+    },
+    "about": {
+      "kiln": "Kiln 独自のモッド（C#）。",
+      "native": "Kiln が起動時に読み込む DLL モッド。",
+      "plugin": "Kiln を拡張するネイティブプラグイン。",
+      "chain": "Kiln がゲームと並べて起動する他の DLL。",
+      "emf": "Kiln が実行する Enshrouded Mod Framework のモッド。",
+      "eml": "Enshrouded Mod Loader のモッド: ゲームの起動前にゲームのデータを変更します。",
+      "xhl": "ゲームの mods フォルダーに置かれる XHL-Core のプラグイン。読み込むのは別途インストールした XHL-Core だけで、Kiln は読み込みません。",
+      "shroudforge": "ShroudForge ランタイムが実行する ShroudForge のモッド。",
+      "set": "Kiln が実行する Shrouded Engine Tweaks の Lua モッド。",
+      "greeneye": "Kiln が実行する Greeneye Loader のモッド。",
+      "flame": "Kiln が実行する Flame のモッド。",
+      "shroudtopia": "Kiln が実行する Shroudtopia のモッド。",
+      "enshwick": "Enshwick のローダーが実行する Enshwick のモッド。",
+      "shroudlink": "Kiln が実行する shroudlink のモッド。",
+      "ember": "Ember のサーバーモッド。",
+      "dllmod": "Enshrouded ModLoader 用のモッド（CarryOn、Belt Lantern）。自分のワールドを開始するときに Kiln が起動します。"
+    },
+    "profile": {
+      "no_mods": "今回だけモッドなしでプレイ: 今回の起動ではどのモッドも読み込まれません。",
+      "invalid": "プロファイルを読み込めなかったため、どのモッドも読み込まれません。",
+      "invalid_why": "プロファイルを読み込めなかったため、どのモッドも読み込まれません（{error}）。",
+      "legacy": "プロファイルなし: Kiln は mods フォルダーを読み込みます。",
+      "name": "プロファイル: {name}",
+      "off": "プロファイルでオフになっています。",
+      "missing": "フォルダーがありません: {path}",
+      "kept_xhl": "プロファイルではオフですが、フォルダーがまだゲームの mods フォルダー（{folder}）にあるため、XHL-Core が読み込む可能性があります。",
+      "kept_enshwick": "プロファイルではオフですが、フォルダーがまだゲームの mods フォルダー（{folder}）にあるため、そこにあるすべてのフォルダーを実行する Enshwick のローダーが実行する可能性があります。",
+      "kept": "プロファイルではオフですが、フォルダーがまだゲームの mods フォルダー（{folder}）にあるため、そのフォルダーを読むモッドやローダーが使う可能性があります。"
+    },
+    "help": {
+      "turn_on": "Kiln ランチャー（「プロファイル」）でオンにしてから、ゲームを再起動してください。",
+      "kept": "確実に動作させないためには、Kiln ランチャーで削除するか、そのフォルダーをゲームの mods フォルダーの外に移動してください。",
+      "repair": "Kiln ランチャー（「ライブラリ」）で修復または削除してから、ゲームを再起動してください。"
+    },
+    "file": {
+      "too_large": "ファイルが大きすぎます",
+      "invalid": "途中で切れているか、正しい JSON ではありません",
+      "unreadable": "ファイルを読み込めませんでした: {error}",
+      "not_object": "ファイルが JSON オブジェクトではありません"
+    },
+    "engine_unreadable": "Kiln はこのエンジンのレポートを読み込めませんでした: {error}",
+    "report_unreadable": "レポートを読み込めませんでした: {error}",
+    "see_log": "kiln.log を参照",
+    "kiln": {
+      "with_world": "ひとりで遊ぶときやフレンドが参加したときに、自分のワールドと一緒に開始します。他人のワールドでは動作しません。",
+      "hosted_off": "このゲームではオフ: kiln.json の設定で、ワールドと一緒に開始するモッドがオフになっています（mods.hosted が false）。",
+      "hosted_off_help": "開始できるようにするには、ゲームフォルダーの kiln/kiln.json の \"mods\" の部分から \"hosted\": false を削除して、ゲームを再起動してください。",
+      "pending": "順番が来たときに読み込まれます（ワールドの開始時など）。",
+      "disabled": "エラーが多すぎたため、Kiln がオフにしました。もう一度試すにはゲームを再起動するか、モッドを更新してください。",
+      "failed": "上の理由を読んでください。Kiln ランチャーでモッドかその必要なものを更新してから、ゲームを再起動してください。詳細は kiln/logs/kiln.log にあります。",
+      "unloaded": "コマンドでアンロードされました。読み込むにはゲームを再起動してください。",
+      "not_reported": "プロファイルにありますが、今回の起動で Kiln は読み込みませんでした。",
+      "not_reported_help": "ゲームを再起動してください。このままの場合は kiln/logs/kiln.log を確認してください。"
+    },
+    "native": {
+      "policy": "Kiln のネイティブポリシーにより、このゲームビルドでは DLL モッドを読み込みません。",
+      "failed_help": "上の理由を読んでください。Kiln ランチャーで DLL モッドを更新してから、ゲームを再起動してください。",
+      "no_report": "今回の起動では、Kiln のネイティブローダーはレポートを書き出しませんでした。",
+      "old_report": "ネイティブローダーのレポートは以前の起動のものです。",
+      "not_reported": "プロファイルにありますが、ネイティブローダーから報告がありませんでした。"
+    },
+    "plugin": {
+      "engine_failed": "Kiln の {engine} プラグインが起動しませんでした: {error}。そのモッドは実行できません。",
+      "failed_help": "Kiln ランチャーでプラグインを更新または削除してから、ゲームを再起動してください。",
+      "no_report": "Kiln の起動レポートがないため、読み込まれたかどうか分かりません。",
+      "not_reported": "プロファイルにありますが、Kiln は読み込みませんでした。"
+    },
+    "chain": {
+      "failed_help": "chain.ini（または Kiln ランチャー）で DLL を確認してから、ゲームを再起動してください。"
+    },
+    "ember": {
+      "reason": "Ember モッドはまだ実行できません: Ember はモッドを実行する方法を公開していません。",
+      "help": "今は何もする必要はありません。モッドはプロファイルに残り、Kiln が Ember モッドに対応すると動作します。"
+    },
+    "dllmod": {
+      "waiting": "自分のワールドを開始すると起動します。"
+    },
+    "shroudtopia": {
+      "off": "Shroudtopia の設定でオフになっています。",
+      "off_help": "プロファイルの config フォルダーにある shroudtopia/shroudtopia.json で、\"{name}\" という名前の mods の項目（kiln.log の Registered mod の行にある名前）の active を true にしてください。ファイルを保存すると、Shroudtopia はゲームの実行中に読み込み直します。",
+      "not_active": "オンになっていますが、モッドが自身を有効と報告していません。",
+      "not_active_help": "Kiln は Shroudtopia 0.1.1 のモッドインターフェースで Shroudtopia のモッドを実行し、このモッドの Activate を呼び続けます。別のゲームバージョン向けのモッドや、別の Shroudtopia でビルドされたモッドは、何もせずこのままになることがあります。kiln/logs/kiln.log にこのモッド自身の行が [shroudtopia:{name}] として記録されています。このゲームバージョンに対応しているかはモッドの作者に確認してください。"
+    },
+    "engine_mods": {
+      "own_loader": "今回の起動では {engine} 独自のローダーが {engine} のモッドを実行し、自分のフォルダーだけを読みます。Kiln ランチャーでプロファイルを再度有効にして（モッドがそこにコピーされます）、ゲームを再起動してください。",
+      "failed_help": "上の理由を読んでください。Kiln ランチャーでモッドを更新してから、ゲームを再起動してください。{engine} の行は kiln/logs/kiln.log にあります。",
+      "unreadable": "{engine} のレポートを読み込めませんでした: {error}。Kiln はすぐにもう一度読み込みます。",
+      "not_run": "今回の起動で {engine} が実行されなかったため、このモッドは読み込まれませんでした。",
+      "not_run_folder": "今回の起動で {engine} が実行されなかったため、モッドは読み込まれませんでした。",
+      "old_report": "{engine} は今回の起動について報告していません（最後のレポートは以前の起動のものです）。",
+      "not_reported": "プロファイルにありますが、今回の起動で {engine} から報告がありませんでした。",
+      "plugin_help": "Kiln の {engine} プラグインがインストールされているか（kiln/plugins）確認してから、ゲームを再起動してください。",
+      "note_old": "{engine} は今回の起動について報告していません。最後のレポートは以前の起動のものです。",
+      "note_not_run": "今回の起動で {engine} は実行されませんでした。"
+    },
+    "note": {
+      "aside_emf": "EMF: 本来の EMF に譲りました。",
+      "aside_emf_why": "EMF: 本来の EMF に譲りました（{reason}）。",
+      "aside": "控え中: 別の {engine} ローダーがこれらのモッドを実行しています。",
+      "aside_why": "控え中: 別の {engine} ローダーがこれらのモッドを実行しています（{reason}）。",
+      "emf_idle": "このゲームビルドでは EMF は待機状態になりました: {reason}",
+      "eml_patched": {
+        "other": "ゲームの起動前にゲームデータをパッチしました（{count} 件の変更）。"
+      },
+      "eml_failed": "EML が失敗しました: {error}。ゲームデータは元に戻しました。",
+      "eml_aside_sf": "EML: ShroudForge に譲りました。ShroudForge は、自分の mods フォルダーにある EML モッドのうち ShroudForge のスイッチがオンのものを実行します。",
+      "eml_aside": "EML: EML 独自のローダーに譲りました。",
+      "eml_aside_why": "EML: EML 独自のローダーに譲りました（{reason}）。",
+      "eml_idle": "今回の起動では EML モッドはありません。",
+      "ember": "Ember: モッドは見つかりましたが、まだ実行できません。",
+      "dllmod_unsupported": "Enshrouded ModLoader：モッドはゲームのビルド 26430625 用に作られているため、このビルドではどれも起動しません。",
+      "dllmod_server": "Enshrouded ModLoader：モッドはゲームクライアント用です。専用サーバーではどれも起動しません。",
+      "shroudlink_elsewhere": "別の shroudlink ローダーがこれらのモッドを実行しています。",
+      "set_aside": "SET: SET 独自のローダーに譲りました。",
+      "set_aside_why": "SET: SET 独自のローダーに譲りました（{reason}）。",
+      "set_waiting": "モッドはメインメニューで読み込まれます。",
+      "set_off": "今回の起動ではオフです。"
+    },
+    "sf": {
+      "hosted_menu": "ShroudForge: Kiln がホストするランタイム。モッドを選ぶと、ここでオン/オフの切り替えや設定の変更ができます（ShroudForge 自身の Modloader ウィンドウは動作していません）。",
+      "hosted": "ShroudForge: Kiln がホストするランタイム。モッドを選ぶと、オン/オフの切り替えや設定の変更ができます。",
+      "self_hosted": "ShroudForge: 独自のローダーがモッドを実行しており、Kiln は控えています。モッドを選ぶと、オン/オフの切り替えや設定の変更ができます。",
+      "not_installed": "ShroudForge がインストールされていないため、そのモッドは実行できません。",
+      "off": "今回の起動では ShroudForge はオフです。",
+      "off_why": "ShroudForge はオフです: {reason}。",
+      "failed": "ShroudForge が失敗しました: {reason}。",
+      "no_report": "ShroudForge は今回の起動について報告していません。",
+      "not_run": "今回の起動で ShroudForge は実行されませんでした。",
+      "runs_it": "ShroudForge が実行しています。",
+      "fix_first": "先に ShroudForge を直してから（エンジンの行を参照）、ゲームを再起動してください。",
+      "unconfirmed": "ShroudForge は動作していますが、このモッドについての情報を Kiln が読み込めませんでした（エンジンの行を参照）。モッドが有効だという証明にはなりません。",
+      "off_in_settings": "ShroudForge の設定でオフになっています。",
+      "eml_failed_help": "先に ShroudForge を直してから（kiln.log を参照）、ゲームを再起動してください。Kiln EML は控えたため、このモッドを適用していません。",
+      "eml_aside_but": "Kiln EML は ShroudForge に譲りましたが、{note}",
+      "eml_off": {
+        "other": "プロファイルの EML モッドのうち {count} 個が ShroudForge でオフになっているため、今回の起動ではどれも適用されません。ShroudForge は、自分のフォルダーにある EML モッドのうち ShroudForge のスイッチがオンのものを実行します。"
+      },
+      "hand_off": "このモッドはあなたが自分で ShroudForge のフォルダーに入れたもので、ShroudForge ではオフになっています。",
+      "hand_off_profile_help": "「モッド」>「ShroudForge」（そこにある専用の行）でオンにするか、フォルダーを削除して Kiln ランチャーで「プレイ」を押してください。モッドはプロファイルにあるので、Kiln が自分のコピーをオンの状態で配置します。",
+      "off_in_sf_help": "ShroudForge はスイッチがオンのときだけ実行します。どこでオンにするかは上の理由にあります。その後ゲームを再起動してください。",
+      "no_switch_file": "ShroudForge はこれをオンにしていません: ShroudForge のスイッチを保持するファイル extended.mod.json がないため、ShroudForge は実行しません。",
+      "package_unreadable": "ShroudForge はこのフォルダーを読みますが、Kiln は ShroudForge と同じようにパッケージを読み込めません（{error}）。ShroudForge は読めないパッケージを拒否します。",
+      "eml_switch_off": "ShroudForge の mods フォルダーにありますが、extended.mod.json（ShroudForge のスイッチを保持するファイル）が enabled: false になっているため、今回の起動では適用されません。",
+      "eml_no_switch": "ShroudForge の mods フォルダーにありますが、ShroudForge のスイッチを保持するファイル extended.mod.json がありません。ShroudForge はスイッチがオンになるまでパッケージをオフにしておくため、今回の起動では適用されません。",
+      "eml_press_play": "Kiln ランチャーで「プレイ」を押してください（またはプロファイルを再度有効にしてください）。Kiln が ShroudForge の設定でオンにします。その後ゲームを再起動してください。",
+      "eml_other_side": "ShroudForge はこれを {sides} でのみ実行します。",
+      "and": "と",
+      "eml_unconfirmed": "ShroudForge のスイッチはオンですが、今回の起動処理についての ShroudForge の記録にこのバージョンでは載っていないため、適用されたか Kiln には確認できません。",
+      "startup_failed": "今回のゲーム起動で、ShroudForge の起動時ゲームデータ処理が失敗しました。",
+      "startup_failed_why": "今回のゲーム起動で、ShroudForge の起動時ゲームデータ処理が失敗しました: {error}",
+      "startup_failed_help": "詳細は ShroudForge のログにあります。原因を直したら、ゲームを再起動してください。",
+      "startup_applied": "ShroudForge は今回のゲーム起動時にゲームデータの変更を適用しました（起動処理の記録にこのモッドが載っています）。設定の変更は次回の起動時に反映されます。",
+      "startup_current": "ShroudForge は、以前の起動時のゲームデータの変更が今回のモッド構成でもそのまま有効だと判断しました（起動処理の記録にこのモッドが載っています）。設定の変更は次回の起動時に反映されます。",
+      "settings_unreadable": "パッケージの設定を読み込めません。ShroudForge でのモッドごとの有効化は確認できていません。",
+      "hand_off_help_live": "下でオンにするか、フォルダーを削除して Kiln ランチャーの「モッドを追加」でモッドを追加してください。ShroudForge がプレイ中に開始します。",
+      "hand_off_help_next": "下でオンにするか、フォルダーを削除して Kiln ランチャーの「モッドを追加」でモッドを追加してください。次回のゲーム起動時に反映されます。",
+      "no_switch_help_live": "下でオンにしてください: Kiln が、ShroudForge 自身の Modloader が書くのと同じ extended.mod.json を書き込みます。ShroudForge がプレイ中に開始します。",
+      "no_switch_help_next": "下でオンにしてください: Kiln が、ShroudForge 自身の Modloader が書くのと同じ extended.mod.json を書き込みます。次回のゲーム起動時に反映されます。",
+      "off_ext": "ShroudForge の設定（モッドの extended.mod.json）でオフになっています。",
+      "off_ext_repair": "ShroudForge の設定（モッドの extended.mod.json）でオフになっています。{repair}",
+      "switch_on_below": "下でオンにしてください。",
+      "repair_help": "Kiln のメニューで設定をどれか変更するか、一度オフにしてからオンにしてください。それで修復されます。",
+      "other_side": "{sides} でのみ動作します。",
+      "no_runtime": "スイッチはオンですが、ShroudForge から現在のモッドごとのランタイムレポートがありません。モッドが有効だという証明にはなりません。",
+      "error": "ShroudForge: {error}",
+      "restart": "ゲームを再起動してください。",
+      "error_help": "上の理由を読んでください。モッドを更新してから、ゲームを再起動してください。詳細は ShroudForge のログにあります。",
+      "startup_unconfirmed": "起動時のゲームデータ変更に対して有効ですが、今回の起動処理についての ShroudForge の記録にこのバージョンでは載っていないため、Kiln には確認できません。",
+      "inactive": "ShroudForge は現在これを実行していません。スイッチの変更には 1～2 秒かかるか、次回のゲーム起動時に開始します。",
+      "effect": "ShroudForge の Lua が有効です。報告された効果: {effect}。{detail}",
+      "effect_failed_help": "モッドは変更が適用されなかったと報告しています。詳細は ShroudForge のログにあります。",
+      "active": "ShroudForge が Lua を実行しています。モッドから効果の結果は報告されていません。"
+    },
+    "enshwick": {
+      "no_report": "Enshwick は今回の起動について報告していません。",
+      "not_run": "今回の起動で Enshwick は実行されませんでした。",
+      "started": "Enshwick のローダーが起動しました。",
+      "starting": "Enshwick のローダーを起動中です。",
+      "failed": "Enshwick のローダーが失敗しました: {reason}。",
+      "no_loader": "Enshwick のローダーがありません: {reason}。",
+      "install": "Enshwick をインストール",
+      "aside": "Enshwick: Enshwick 独自のローダーに譲りました。",
+      "runs_it": "Enshwick のローダーが実行しています。Enshwick はモッドごとの結果を報告しません。",
+      "fix_first": "先に Enshwick を直してから（エンジンの行を参照）、ゲームを再起動してください。",
+      "copy_failed": "Kiln はこれをゲームの mods フォルダーにコピーできませんでした。",
+      "copy_failed_help": "ゲームの mods フォルダーを使っている他のツールを閉じてから、ゲームを再起動してください。",
+      "removed": "ゲームの mods フォルダーから削除しました。"
+    },
+    "xhl": {
+      "prerequisite": "XHL-Core が必要です: 読み込むのは別途インストールしたそのホストだけです。Kiln ランチャーで XHL-Core をネイティブモッドとしてインポートしてオンにするか、作者の説明どおりにインストールしてから、ゲームを再起動してください。",
+      "core_started": "XHL-Core 用にゲームの mods フォルダーに配置しました。XHL-Core はゲームと一緒に起動し、このプラグインは Kiln ではなく XHL-Core 自身が読み込みます。プラグインが起動したかは、XHL-Core 自身のログ（XHL-Core の隣にある XHL-Native-Plugin-Host.log）にあります。",
+      "placed": "XHL-Core 用にゲームの mods フォルダーに配置しました。Kiln はこれを読み込まず、XHL-Core が実行しているかも Kiln には分かりません。",
+      "found_core": "ゲームの mods フォルダーにある XHL-Core のプラグインです。XHL-Core はゲームと一緒に起動し、このプラグインは Kiln ではなく XHL-Core 自身が読み込みます。プラグインが起動したかは、XHL-Core 自身のログ（XHL-Core の隣にある XHL-Native-Plugin-Host.log）にあります。",
+      "found": "ゲームの mods フォルダーにある XHL-Core のプラグインです。Kiln はこれを読み込まず、XHL-Core が実行しているかも Kiln には分かりません。",
+      "note_core": "XHL: 別のホストである XHL-Core 用に配置しました。XHL-Core はゲームと一緒に起動し、これらのプラグインを読み込みます。Kiln 自身が読み込むことはありません。",
+      "note": "XHL: 別のホストである XHL-Core 用に配置しました。Kiln がこれらのプラグイン DLL を読み込むことはなく、ここでは XHL-Core がインストールされているかも確認しません。"
+    }
+  },
+  "config": {
+    "read_only_synced": "サーバーの設定: サーバーに接続中は読み取り専用です。同期される項目にはサーバーの値が表示されます。",
+    "read_only": "サーバーの設定: サーバーに接続中は読み取り専用です（自分がホストするときに反映されます）。",
+    "server_values": {
+      "other": "接続中は {count} 個の項目がサーバーの値になります（読み取り専用）。"
+    },
+    "file_error": "ファイル: {error}",
+    "not_saved": "保存されていません: {error}",
+    "columns": {
+      "entry": "項目",
+      "value": "値"
+    },
+    "marks": {
+      "server": " [サーバー]",
+      "synced": "（同期）",
+      "restart": "（再起動）"
+    },
+    "server_value": "サーバーの値です。あなたの値: {value}（退出すると戻ります）。",
+    "hint": {
+      "duration": "時間: 30s、5m、1h30m",
+      "list": "リスト: [1, 2, 3] または 1, 2, 3"
+    },
+    "read_only_nul": "ここでは読み取り専用です: NUL 文字を含みます。設定ファイルで変更してください。",
+    "read_only_long": "ここでは読み取り専用です: 512 バイトを超えています。設定ファイルで変更してください。",
+    "default": "既定",
+    "default_tip": "既定値: {value}",
+    "type_here": "ここに値を入力してください。",
+    "range": "{min}～{max} の数値",
+    "describe": {
+      "entry": "{path}: {type}、既定値 {default}",
+      "entry_range": "{path}: {type}、既定値 {default}、範囲 {min}..{max}",
+      "options": "選択肢: {options}",
+      "synced": "同期: サーバーがクライアントに値を送ります。",
+      "restart": "再起動が必要: モッドが再び読み込まれたときに反映されます。",
+      "from_server": "接続中はサーバーの値になります。"
+    },
+    "apply": "適用 ({count})",
+    "undo": "元に戻す",
+    "saved_later": "（ワールドの実行中に保存）",
+    "all_defaults": "すべて既定値に",
+    "applied": {
+      "other": "{count} 件の変更を適用しました（ワールドの実行中に保存）"
+    },
+    "saved": "{id}: 保存しました"
+  },
+  "configpage": {
+    "caption": "設定"
+  },
+  "settings": {
+    "look": {
+      "caption": "外観",
+      "look": "外観",
+      "game": "ゲームの外観",
+      "translucent": "ゲームの外観（半透明）",
+      "kiln": "Kiln のクラシックな外観（残り火）",
+      "theme": "{theme}（{mod}）",
+      "theme_missing": "{theme}（そのモッドは読み込まれていません）",
+      "background": "背景の不透明度 (%)",
+      "opacity": "不透明度 (%)",
+      "size": "サイズ (%)",
+      "game_read": "ゲームの外観では、ゲームから読み取ったゲーム本来の色とフォントを使います。",
+      "game_not_read": "ゲームの色を（まだ）読み取れませんでした。代わりに落ち着いた暗い配色を使っています。",
+      "saved": "kiln/kiln.json（\"ui\"）に保存されます。ランチャーの設定にも同じ内容が表示されます。モッドによっては他の外観もあります。"
+    },
+    "language": {
+      "caption": "言語",
+      "language": "言語",
+      "auto": "自動（ゲームの言語: {language}）",
+      "missing": "{language}（Kiln にはこの言語のテキストがありません）",
+      "saved": "Kiln 自体のメニューとメッセージです。モッドのテキストはゲームの言語に従います。kiln/kiln.json（\"ui\"）に保存され、ランチャーの設定にも表示されます。"
+    }
+  },
+  "set": {
+    "about": "SET のモッド設定、互換性、エンティティ、フック、キー割り当て、コンソール、ローカルのサポートレポート。",
+    "unavailable": "SET のツールは使えません（kiln-set が実行されていません）。",
+    "open": "SET の設定とツール",
+    "open_failed": "SET のツールは使えません。エンジンの状態を確認してください。"
+  },
+  "shroudforge": {
+    "labels": {
+      "waits": "待っているもの",
+      "settings": "スイッチと設定"
+    },
+    "waits": {
+      "restart": "次回のゲーム起動: ShroudForge がこのモッドの変更された設定を読み込むのは、ゲームを再起動したときだけです。",
+      "dependency": "必要なモッド: そのモッドが動作すると ShroudForge がこれを開始します（上の理由にモッド名があります）。",
+      "write_access": "ゲームワールドへの書き込み権限。このゲームがホストするワールド（シングルプレイのワールド、または自分がホストする協力プレイのワールド）が動作すると、ShroudForge が権限を与えます。他人のワールドや専用サーバーでは得られない場合があり、その場合モッドはホストのゲームかサーバーで動かす必要があります。",
+      "world": "ワールド: メインメニューではなく、このゲームがホストするワールドに入ると動作し始めます。",
+      "player": "ワールド内のあなたのキャラクター。",
+      "glide": "グライダーでの滑空。滑空中だけグライダーを変更するので、飛行と飛行の間（とこのメニューを開いている間）は待機中と表示されます。これは正常で、飛び立つと反映されます。",
+      "other": "モッドに必要なものがまだありません。モッド自身の説明は上の「状態」にあります。"
+    },
+    "reading": "設定を読み込み中...",
+    "cannot_show": "設定を表示できません: {error}",
+    "files_unreadable": "ファイルを読み込めませんでした: {error}",
+    "value_unreadable": "設定 {setting} の値を読み込めません（{error}）",
+    "too_many": "このページには選択肢、グループ、操作が多すぎます（合計 1000 個まで）。モッドの extended.mod.json で設定を変更してください。ファイルは変更されていません。",
+    "value_error": "値を読み込めません（{error}）",
+    "on": "オン",
+    "off": "オフ",
+    "switch_live": "ShroudForge がプレイ中にオン/オフを切り替えます。",
+    "switch_next": "オン/オフの切り替えは次回のゲーム起動時に反映されます（ゲームの起動時にゲームデータを変更するためです）。",
+    "switch_profile": "Kiln のプロファイルにこのモッドが含まれています。Kiln ランチャーはゲームの起動時に、プロファイルに従ってこのスイッチを設定します。変更を残すには、プロファイルでも変更してください。",
+    "repair": "ShroudForge は、設定が一度保存されるまでこのモッドを拒否します。以前の Kiln が {settings} を小数部なしで書き込みました。",
+    "repair_more": "ShroudForge は、設定が一度保存されるまでこのモッドを拒否します。以前の Kiln が {settings} ほか {more} 個を小数部なしで書き込みました。",
+    "repair_here": "{repair} ここで設定かスイッチをどれか変更すると修復されます。",
+    "no_settings": "このモッドには設定がありません。",
+    "other_settings": "その他の設定",
+    "hidden": {
+      "other": "あと {count} 個の設定はここに表示されていません（このモッドには {total} 個あり、このページには最初の {shown} 個を表示）。モッドの extended.mod.json で変更してください。"
+    },
+    "saved_to": "モッドの extended.mod.json に保存されます。ShroudForge と Kiln ランチャーが読むファイルです。",
+    "next_start": "次回のゲーム起動時に反映されます。",
+    "only_used_while": "{value}（{setting} が {want} のときのみ使用）",
+    "value_on": "オン",
+    "value_off": "オフ",
+    "shortcut": "ショートカット: {key}",
+    "shortcut_help": "下の SDL の割り当てを編集してください（キー入力の取得ではありません）: Ctrl+SDL:66 は Ctrl+F9、Mouse:4 はマウスボタン 4 です。空欄で無効になります。キーボードが使えるかは SF が確認します。",
+    "field_nul": "この値には NUL 文字が含まれており、テキスト欄では表示も保持もできません。モッドの extended.mod.json で変更してください。",
+    "field_long": "長すぎてここでは編集できません（{length} 文字）。モッドの extended.mod.json で変更してください。",
+    "not_a_number": "{setting}: \"{text}\" は数値ではありません",
+    "save": {
+      "switch_live_on": "保存しました: {mod} のオンを要求しました。実行中の ShroudForge は通常 1～2 秒以内に反映します。上の状態を確認してください。",
+      "switch_live_off": "保存しました: {mod} のオフを要求しました。実行中の ShroudForge は通常 1～2 秒以内に反映します。上の状態を確認してください。",
+      "switch_next_on": "保存しました: {mod} は次回のゲーム起動時にオンになります。",
+      "switch_next_off": "保存しました: {mod} は次回のゲーム起動時にオフになります。",
+      "setting_live": "保存しました: {setting} はモッドが有効な間に反映できます。ShroudForge は通常 1～2 秒以内に反映します。",
+      "setting_next": "保存しました: {setting} は次回のゲーム起動時に反映されます。",
+      "unreadable_after": "extended.mod.json は変更されましたが、読み戻せません: {error}。ファイルを直すまで ShroudForge がモッドを拒否する可能性があります。",
+      "failed": "保存できませんでした: {error}"
+    },
+    "action": {
+      "confirm": "確認: {action}",
+      "not_running": "{action} は送信されませんでした: ShroudForge が操作を実行するのは、モッドを実行している間だけです（上の状態を参照）。何も予約していません。",
+      "still_waiting": "{action}: {mod} への以前の要求（今回または以前のゲーム起動時のもの）がまだ ShroudForge を待っています。モッドが受け取ると実行されます。新たな予約はしていません。",
+      "requested": "要求しました: {action}。",
+      "failed": "{action} を送信できませんでした: {error}"
+    },
+    "binding": "ShroudForge モッド: Kiln の ShroudForge ページを開く",
+    "check": {
+      "whole": "{setting} には整数を指定します",
+      "type": "{setting} には {given} ではなく {type} を指定します",
+      "keep_one": "ShroudForge がオプションの種類を保てるよう、{setting} には少なくとも 1 つの選択肢を残す必要があります",
+      "finite": "{setting} には有限の数値を指定します",
+      "null_first": "{setting}: \"{choice}\" はこのリストの先頭にできません（値がなく、ShroudForge がモッドを拒否します）",
+      "no_value_choice": "値のない選択肢",
+      "shortcut": "{setting}: Ctrl+SDL:66 や Mouse:4 のような SDL ショートカットを使ってください（空欄で無効、修飾キーの順番は Ctrl、Alt、Shift、Meta）",
+      "length": "{setting} は {min}～{max} 文字にしてください",
+      "length_min": "{setting} は {min} 文字以上にしてください",
+      "range": "{setting} は {min}～{max} の範囲にしてください",
+      "not_option": "{setting}: {options} のいずれでもありません"
+    },
+    "kind": {
+      "boolean": "はい/いいえの値",
+      "integer": "整数",
+      "number": "数値",
+      "array": "リスト",
+      "string": "テキスト",
+      "value": "値"
+    }
+  },
+  "shroudlink": {
+    "needs_addon": "これには、ブリッジ ABI v1 に対応した shroudlink クライアントアドオンが必要です。標準のアドオンは変更されていません。",
+    "waiting": "稼働中の shroudlink ホスト、UI プロトコル 2、認識済みのワールド、表示権の取得を待っています。",
+    "no_entries": "ホストからメニュー項目が送られていません。",
+    "apply": "適用",
+    "item": "アイテム {id} × {count}",
+    "close_window": "ウィンドウを閉じる",
+    "declined": "shroudlink が直前のリクエストを拒否しました（{error}）。現在の状態を更新しています。"
+  },
+  "keys": {
+    "help_mouse": "キーをクリックしてから、新しいキーを押してください: キー、マウスの中ボタンかサイドボタン、ホイールの回転のいずれかで、必要なら Ctrl、Shift、Alt と組み合わせられます（左クリックと右クリックは割り当てできません）。もう一度クリックするとキャンセルします。Escape でキャンセルしてメニューを閉じます。「解除」で操作からキーを外します。kiln/config/keybinds.json に保存されます。",
+    "help": "キーをクリックしてから、新しいキーを押してください。もう一度クリックするとキャンセルします。Escape でキャンセルしてメニューを閉じます。「解除」で操作からキーを外します。kiln/config/keybinds.json に保存されます。",
+    "col_action": "操作",
+    "col_key": "キー",
+    "col_default": "既定",
+    "menu": "Kiln: このメニューを開く",
+    "press": "キーを押してください...",
+    "reset": "リセット",
+    "unbind": "解除",
+    "toast": {
+      "wheel_menu": "Kiln メニューのキーはホイール（{key}）にできません: スクロールするとメニューが閉じてしまいます"
+    }
+  },
+  "network": {
+    "on": "Kiln のネットワークはオンです: このゲームと Kiln サーバーの間でモッドが通信できます。",
+    "off": "このセッションでは Kiln のネットワークは動作していません。",
+    "role": {
+      "both": "サーバーとクライアント",
+      "server": "サーバー",
+      "client": "クライアント",
+      "none": "なし"
+    },
+    "stats": "役割: {role}。メッセージ 受信 {in}、送信 {out}、破棄 {dropped}。チャンネル: {channels}。最大メッセージ: {largest} バイト。",
+    "server": {
+      "caption": "サーバー",
+      "ready": "サーバーに Kiln {version}",
+      "vanilla": "サーバーに Kiln はありません（バニラ）",
+      "rejected": "サーバーがこのクライアントを拒否しました",
+      "handshake": "ハンドシェイク中",
+      "round_trip": "往復 {ms:F0} ms",
+      "mods": "サーバーのモッド: {mods}",
+      "none": "サーバーに接続していません。"
+    },
+    "sync": {
+      "applied": "コンテンツ: サーバーからの変更 {count} 件{reset}{errors}（{kib:F0} KiB）",
+      "reset": "、自分の変更 {count} 件を元に戻しました",
+      "errors": "、エラー {count} 件",
+      "hosting": "コンテンツ: ホスト中（サーバーのコンテンツはこのゲームのものです）",
+      "waiting": "コンテンツ: {detail}",
+      "failed": "コンテンツ: 未同期: {detail}",
+      "none": "コンテンツ: サーバーからコンテンツの状態は送られていません",
+      "configs": "設定: サーバーから同期された設定 {count} 個、ここで使用中 {used} 個",
+      "configs_none": "設定: サーバーから同期された設定は送られていません"
+    },
+    "clients": {
+      "caption": "クライアント ({count})",
+      "col_player": "プレイヤー",
+      "col_state": "状態",
+      "col_mods": "モッド",
+      "col_rtt": "RTT",
+      "col_frames": "フレーム 受信/送信"
+    },
+    "peer": {
+      "connecting": "接続中",
+      "ready": "準備完了",
+      "vanilla": "バニラ",
+      "rejected": "拒否",
+      "closed": "切断"
+    },
+    "ms": "{ms:F0} ms",
+    "admission": "参加許可",
+    "channels": {
+      "caption": "チャンネル ({count})",
+      "line": "{name} v{version}: 受信 {in}、送信 {out}",
+      "required": "{name} v{version}（必須）: 受信 {in}、送信 {out}"
+    }
+  },
+  "overlay": {
+    "surface": "{width}x{height}、フォーマット {format}、スケール {scale:F2}",
+    "frames": "表示 {presents}、描画 {drawn}、最後のオーバーレイフレーム {ms:F2} ms",
+    "counts": "ウィンドウ {windows}、HUD 行 {hud}、フレームハンドラー {handlers}",
+    "screen": "ゲーム画面: {kind}（{state}/{hud}）、言語 {language}、UI フレーム {frame}",
+    "screen_station": "ゲーム画面: {kind}（{state}/{hud}）、言語 {language}、UI フレーム {frame}。クラフト台 ワークショップ 0x{workshop:x8} レシピ 0x{recipe:x8}",
+    "screen_own": "ゲーム画面: {kind}（{state}/{hud}）、言語 {language}、UI フレーム {frame}。手持ちクラフト ワークショップ 0x{workshop:x8} レシピ 0x{recipe:x8}",
+    "panels_on": "開いている画面 {screens}、クラフトパネル {panels}、メニュー拡張オン",
+    "panels_off": "開いている画面 {screens}、クラフトパネル {panels}、メニュー拡張オフ",
+    "test_toast": "テスト通知",
+    "test_toast_text": "Kiln のオーバーレイは動作しています"
+  },
+  "classic": {
+    "tab": {
+      "mods": "モッド",
+      "network": "ネットワーク",
+      "keys": "キー",
+      "overlay": "オーバーレイ"
+    },
+    "mods": {
+      "back": "モッドに戻る",
+      "shroudlink": "shroudlink メニュー",
+      "count": "読み込み済み {loaded}、検出 {found}（側: {side}）",
+      "kiln_settings": "Kiln の設定",
+      "kiln_settings_close": "Kiln の設定を閉じる",
+      "col_mod": "モッド",
+      "col_version": "バージョン",
+      "col_side": "側",
+      "col_state": "状態",
+      "state": {
+        "pending": "保留中",
+        "loaded": "読み込み済み",
+        "disabled": "無効",
+        "failed": "失敗",
+        "skipped": "スキップ",
+        "unloaded": "アンロード済み"
+      },
+      "config": "設定",
+      "config_close": "閉じる",
+      "status": "ステータス ({count})",
+      "config_of": "設定: {mod}",
+      "no_pages": "モッドは Ui.AddConfigPage で設定ページを追加します（設定レジストリのエディターはここに組み込まれます）。"
+    }
+  },
+  "details": {
+    "menu": "アイテムの詳細",
+    "title": "アイテムの詳細",
+    "snapshot": "最後に調べたアイテム — スナップショット（アイテム {item:x8}、フレーム {frame}）",
+    "refresh": "更新",
+    "close": "閉じる"
+  },
+  "gamemenu": {
+    "scroll_crashed": "Kiln: 前回、スクロールするポーズメニューでゲームが終了したため、オフのままにしています。Kiln の「モッド」ページにモッドのメニュー項目が一覧表示されます。",
+    "summary": {
+      "auto_scrolls": "ポーズメニューはすべての項目を表示し、収まらないときはスクロールします（Kiln の設定、modEntries: Auto）。",
+      "auto": "ゲームのメニューは、項目が 3 個以下のときだけ表示します。メニュー本来の項目（終了）が画面に残るようにするためです（Kiln の設定、modEntries: Auto。このメニューはここではスクロールしません）。",
+      "always": "ゲームのメニューはすべての項目を表示します（Kiln の設定、modEntries: Always）。",
+      "never": "ゲームのメニューはどの項目も表示しません（Kiln の設定、modEntries: Never）。",
+      "few": "ゲームのメニューは、項目が 3 個以下のときだけ表示します。メニュー本来の項目（終了）が画面に残るようにするためです（Kiln の設定、modEntries: Few）。",
+      "not_drawn": {
+        "other": "{how} そのうち {count} 個は現在ゲームのメニューにありません。ここで選んでください。"
+      }
+    }
+  },
+  "toast": {
+    "render_off_errors": "{mod}: 描画ハンドラーをオフにしました（エラー）",
+    "render_off_slow": "{mod}: 描画ハンドラーをオフにしました（遅すぎるため）"
+  },
+  "refusal": {
+    "server": "サーバーがこのゲームを拒否しました。",
+    "named": "{server} がこのゲームを拒否しました。",
+    "needs_one": "お持ちでないモッドが必要です:",
+    "needs_many": "お持ちでないモッドが必要です:",
+    "you_have": "{mod} {version}（お持ちのもの: {have}）",
+    "more": "ほか {count} 個",
+    "modpack": "Kiln ランチャーでこのサーバーのモッドパックを入手できます。",
+    "add": "Kiln ランチャーで追加してから、もう一度参加してください。",
+    "no_reason": "サーバーに拒否されました。"
+  },
+  "creative": {
+    "title": "クリエイティブ",
+    "menu": "クリエイティブ",
+    "hud": "クリエイティブ",
+    "key": {
+      "category": "クリエイティブ",
+      "open": "クリエイティブメニューを開く",
+      "flight": "キャラクターの飛行のオン/オフ（クリエイティブモード）"
+    },
+    "asking": "サーバーに問い合わせ中...",
+    "no_server": "このサーバーには Kiln のクリエイティブメニューがありません（サーバーに Kiln が必要です）。",
+    "idle": "このサーバーでは Creative Mode（Flame のモッド）が動作しているため、ここでは Kiln のクリエイティブメニューは待機状態です。Creative Mode 自身のメニューを使ってください。それが動作している間、Kiln のクリエイティブモードはオンにできません。",
+    "on": "クリエイティブモードはオンです",
+    "off": "クリエイティブモードはオフです",
+    "turn_off": "オフにする",
+    "turn_on": "オンにする",
+    "admin_turns_on": "（管理者がオンにします: /creative on <you>）",
+    "refused": "拒否されました: {reason}",
+    "needs_creative": "クリエイティブモードが必要です。",
+    "tab": {
+      "items": "アイテム",
+      "world": "ワールド",
+      "rules": "ルール"
+    },
+    "rules": {
+      "yours": "あなたのルール: {rules}",
+      "game": "あなたのルール: ゲームの既定",
+      "key": "キー: {key}（変更は Kiln メニュー >「キー」）。"
+    },
+    "items": {
+      "cannot_give": "このサーバーのゲームビルドではアイテムを渡せません。",
+      "needs_creative": "アイテムを取るにはクリエイティブモードが必要です。",
+      "search": "検索",
+      "no_equipment": "装備を除く",
+      "journey": "見つけたものだけ",
+      "journey_tip": "ジャーニー: 拾った、クラフトした、または使ったことのあるアイテム。最初の 1 つはゲームの意図どおりに見つけるかクラフトし、その後は好きなだけ取れます。",
+      "category": "カテゴリー",
+      "found_unknown": "このサーバーでは、どのアイテムを見つけたか判断できません。",
+      "loading": "カタログを読み込み中...",
+      "of": "{total} 個中 {count} 個のアイテム",
+      "none_found": "ここではまだ何も見つけていません: 先にアイテムを拾うかクラフトしてください。",
+      "none_match": "一致するアイテムはありません。",
+      "pick": "アイテムを選んでください。",
+      "previous": "前へ",
+      "page": "{page} / {pages} ページ",
+      "next": "次へ"
+    },
+    "category": {
+      "all": "すべて",
+      "materials": "素材",
+      "building": "建築",
+      "consumables": "消耗品",
+      "ammunition": "弾薬",
+      "weapons": "武器",
+      "equipment": "装備",
+      "tools": "道具",
+      "instruments": "楽器",
+      "fishing": "釣り",
+      "customization": "カスタマイズ",
+      "gems": "ジェム",
+      "palettes": "カラーパレット",
+      "animal_food": "動物のエサ",
+      "collectibles": "収集品",
+      "blueprints": "設計図",
+      "currency": "通貨"
+    },
+    "backpack": {
+      "caption": "バックパック",
+      "holding": "{item} x{count} を持っています: 空きスロット（または同じアイテムのスロット）をクリックしてください。",
+      "put_back": "戻す",
+      "hint": "「配置...」でアイテムを持ち上げてから、スロットをクリックしてください。",
+      "reading": "バックパックを読み込み中..."
+    },
+    "item": {
+      "stacks": "{category}、最大 {count} 個までスタック",
+      "level": "レベル",
+      "level_fixed": "レベル {level}",
+      "rarity": "レア度",
+      "upgrades": "強化",
+      "upgrades_tip": "作業台と同じく解放された強化（それぞれレベルが 1 上がります）。5: そのアイテムのすべて（数はレア度で決まります）。",
+      "gem_slot": "ジェムスロット",
+      "journey_level": "見つけたものだけ: レベルはキャラクターのレベルが上限です。",
+      "count": "数",
+      "take": "{count} 個取る",
+      "place": "配置...",
+      "place_tip": "持ち上げてから、下のバックパックのグリッドでスロットをクリックすると、そこに置けます。"
+    },
+    "rarity": {
+      "common": "コモン",
+      "uncommon": "アンコモン",
+      "rare": "レア",
+      "epic": "エピック",
+      "legendary": "レジェンダリー"
+    },
+    "map": {
+      "caption": "マップの開放",
+      "unavailable": "このゲームビルドではマップを開放できません（Kiln がここで戦場の霧を見つけられませんでした）。",
+      "radius": "開放する半径",
+      "game": "ゲームの既定",
+      "r200": "200 m",
+      "r400": "400 m",
+      "whole": "マップ全体",
+      "help": "移動するにつれて周りのマップを開放します（マップ全体: 一度ですべて）。開放した部分は、クリエイティブモードの終了後も、このキャラクターでは開放されたままです。ワールドを出るとゲームの既定に戻ります。"
+    },
+    "flight": {
+      "caption": "キャラクターの飛行",
+      "unavailable": "キャラクターの飛行には、rules.json の allowCharacterFlight と、両方のゲームで対応する飛行用フックが必要です。",
+      "flight": "飛行",
+      "off": "オフ",
+      "unlimited": "無制限",
+      "building": "建築エリアのみ",
+      "help": "ジャンプで離陸、ジャンプ長押しで上昇、しゃがみで下降、ダッシュで加速。地面まで下降すると着地します。キー: {key}（Kiln メニュー >「キー」）。"
+    },
+    "time": {
+      "caption": "時刻",
+      "now": "現在 {time} です。",
+      "unknown": "時刻が分かりません。",
+      "cannot": "このビルドでは時刻を設定できません。",
+      "admin_only": "時刻を変更できるのは管理者だけです。",
+      "help": "選んだ時刻まで進めます。",
+      "hour": "時",
+      "set": "設定"
+    },
+    "cycle": {
+      "caption": "昼夜のサイクル",
+      "now_stopped": "現在: 停止（太陽が止まっています）",
+      "now_fast": "現在: 高速（約 90 秒で昼と夜が一巡）",
+      "now_normal": "現在: 通常",
+      "cannot": "このビルドではサイクルの速さを変更できません。",
+      "admin_only": "サイクルを変更できるのは管理者だけです。",
+      "normal": "通常",
+      "stopped": "停止",
+      "fast": "高速",
+      "help": "ワールド全体に対して、元に戻すかサーバーが再起動するまで続きます。"
+    }
+  },
+  "checks": {
+    "title": "ガイド付きチェック",
+    "header": "ガイド付きチェック · {session}",
+    "session": {
+      "hosted": "ホスト中のワールド",
+      "joined": "サーバーに参加中（チェックはサーバーで実行）",
+      "server": "専用サーバー",
+      "menu": "メインメニュー: チェックを実行するには、ワールドをホストするかサーバーに参加してください"
+    },
+    "totals": "   成功 {passed} · 失敗 {failed} · スキップ {skipped} · 未実行 {never}",
+    "guard": "実績ガード: {guard}",
+    "guard_warning": "ガード警告: {warning}",
+    "ledger": "記録: {ledger}",
+    "idle": "実行中のチェックはありません。下から 1 つ選ぶか、すべてを順番に実行してください。",
+    "run_these": "この {count} 件を実行",
+    "run_all": "すべて実行",
+    "refresh": "更新",
+    "queued": "あと {count} 件が待機中",
+    "only_new": "Kiln {version} で追加された {count} 件のチェックのみ",
+    "none_server": "サーバーにチェックはありません。",
+    "none_mods": "読み込まれたモッドはチェックを登録していません。",
+    "area": "{area}（{count} 中 {done} 成功）",
+    "cheats_note": "cheats タグの付いたチェックはキャラクターを恒久的に変更します。使い捨てのキャラクターを使い、後で削除してください。",
+    "verdict": {
+      "pass": "成功",
+      "fail": "失敗",
+      "skip": "スキップ"
+    },
+    "run": "実行",
+    "item": {
+      "needs": "{ids}  必要: {needs}",
+      "refused": "    拒否: {reason}",
+      "note": "    メモ: {note}"
+    },
+    "now": "実行中: {title}",
+    "now_cheats": "{mod}/{id} · {area} · cheats",
+    "confirm": {
+      "before": "このチェックを始める前に:",
+      "no": "いいえ、実行しない",
+      "yes": "はい、実行する",
+      "yes_wait": "はい、実行する（先に文章を読んでください）"
+    },
+    "setting_up": "（準備中…）",
+    "fail_note": "何が問題でしたか？ Enter でこの行と一緒に失敗を記録し、Escape で行なしで記録します。",
+    "pass": "成功",
+    "fail": "失敗…",
+    "skip": "スキップ",
+    "stop": "中止（記録なし）",
+    "writing": "結果を書き込み中…",
+    "assert": {
+      "ok": "ok   {what}",
+      "ok_detail": "ok   {what} — {detail}",
+      "fail": "失敗 {what}",
+      "fail_detail": "失敗 {what} — {detail}"
+    },
+    "hud": {
+      "confirming": "チェック「{title}」は最初に質問をします: 一覧を開いてください（{open}）",
+      "finishing": "チェック「{title}」: 結果を書き込み中",
+      "running": "チェック「{title}」: {instruction}   [成功 {pass} · 失敗 {fail} · スキップ {skip}]",
+      "setting_up": "準備中…"
+    },
+    "key": {
+      "category": "ガイド付きチェック",
+      "open": "ガイド付きチェックの一覧を開く",
+      "pass": "実行中のチェックを成功にする",
+      "fail": "実行中のチェックを失敗にする（その後 1 行入力）",
+      "skip": "実行中のチェックをスキップ"
+    },
+    "keys": "キー: 一覧 {open} · 成功 {pass} · 失敗 {fail} · スキップ {skip}（Kiln メニューの「キー」）"
+  },
+  "talents": {
+    "key": {
+      "category": "タレント",
+      "open": "タレントツリー {tree} を開く"
+    },
+    "no_server_trees": "サーバーに Kiln のタレントツリーがありません",
+    "not_connected": "Kiln サーバーに接続していません",
+    "waiting": "サーバーを待っています...",
+    "points": "ポイント: 残り {0}（{2} 中 {1} 使用）",
+    "select": "タレントを選んでください。",
+    "level_cost": "レベル {0} / {1}   コスト {2}",
+    "needs_all": "すべてが必要: {0}",
+    "needs_one": "いずれか 1 つが必要: {0}",
+    "needs_points": "このツリーで {0} ポイントの使用が必要",
+    "needs_level": "キャラクターレベル {0} が必要",
+    "unlock": "習得 ({0})",
+    "next_level": "次のレベル ({0})",
+    "refund": "払い戻し",
+    "respec": "振り直し（無料）",
+    "close": "閉じる",
+    "tooltip": "{0}（{1}/{2}、コスト {3}）",
+    "paused": "ゲームは一時停止中です: 再開したときに反映されます。",
+    "effect": {
+      "attribute": "能力値 {0} +{1}/レベル",
+      "buff": "バフ {0}",
+      "game_node": "ゲームノード {0}",
+      "program": "プログラム {0}",
+      "ability": "アビリティ {0}",
+      "code": "コード"
+    }
+  },
+  "blocks": {
+    "toast": {
+      "baked_vfx": "{mod}: VFX \"{name}\" がモッドのビルドと異なります: モッドをリビルドしてください",
+      "baked_material": "{mod}: マテリアル \"{name}\" がモッドのビルドと異なります: モッドをリビルドしてください",
+      "new_vfx": "{mod}: 新しい VFX \"{name}\": 表示するにはゲームを再起動してください",
+      "new_material": "{mod}: 新しいマテリアル \"{name}\": 表示するにはゲームを再起動してください",
+      "no_window": "{window} はこのゲームにあるウィンドウではありません",
+      "too_many": "待機中のコマンドが多すぎます: ペースを落としてください",
+      "command_failed": "{command} に失敗しました",
+      "server_value": "{config}: {path} はサーバーの値です: 退出後に変更できます"
+    }
+  },
+  "abilities": {
+    "server_lacks": "サーバーにはこのアビリティがありません",
+    "not_connected": "Kiln サーバーに接続していません",
+    "cooldown": "{ability} [{key}]: {seconds:F1} 秒"
+  },
+  "gemforge": {
+    "outcome": "ジェムフォージ: {message}"
+  },
+  "dev": {
+    "window_key": "{window} ウィンドウ",
+    "filter": "絞り込み",
+    "clear": "クリア",
+    "systems": {
+      "title": "Kiln: システム",
+      "unavailable": "このビルドではシステムを使えません: {status}",
+      "off_only": "オフのみ",
+      "profile": "プロファイル計測",
+      "stop_profiling": "計測を停止",
+      "all_on": "すべてオン",
+      "log_top": "上位 30 件をログ出力",
+      "col_on": "オン",
+      "col_system": "システム",
+      "col_calls": "呼び出し/秒",
+      "col_world": "ワールド"
+    },
+    "types": {
+      "title": "Kiln: 型",
+      "unavailable": "このビルドでは型を使えません: {status}",
+      "search": "検索",
+      "base": "基底: {type}"
+    },
+    "bindings": {
+      "title": "Kiln: キー割り当て",
+      "key_for": "{binding} のキー:",
+      "set": "設定",
+      "unbind": "解除",
+      "default": "既定",
+      "col_mod": "モッド",
+      "col_binding": "割り当て",
+      "col_key": "キー",
+      "col_description": "説明",
+      "also_bound": "他の割り当て: {bindings}"
+    },
+    "resources": {
+      "title": "Kiln: リソース",
+      "type": "型",
+      "list": "一覧",
+      "more": "...（絞り込むとさらに表示）",
+      "log_guid": "GUID をログ出力"
+    },
+    "hooks": {
+      "title": "Kiln: フック"
+    },
+    "log": {
+      "title": "Kiln: ゲームログ",
+      "hide_noise": "ノイズを隠す",
+      "hidden": "（古い行 {count} 件は表示していません。絞り込むと見つかります）"
+    },
+    "status": {
+      "title": "Kiln: ステータス",
+      "none": "{folder} に状態ファイルはありません"
+    },
+    "console": {
+      "title": "Kiln: コンソール",
+      "run": "実行",
+      "history": "履歴:"
+    }
+  },
+  "graphics": {
+    "cap": {
+      "caption": "フレーム上限",
+      "on": "フレームレートを制限",
+      "fps": "1 秒あたりのフレーム数",
+      "hint": "ゲームは 1 秒あたり最大でこのフレーム数まで描画します。Kiln はフレームの開始を均等に配分します。すぐに反映されます。ゲーム自体のフレーム制限や V-Sync もオンの場合は、最も低い制限が優先されます。"
+    },
+    "dlss": {
+      "caption": "DLSS（NVIDIA RTX カード）",
+      "preset": "レンダープリセット",
+      "preset_hint": "既定ではゲームと DLSS に任せます。J と K は DLSS 4 の Transformer モデル、L と M は DLSS 4.5 の新しいモデルです。DLAA ではゲームのプリセットを使います。NVIDIA アプリで DLSS のオーバーライドを設定している場合は、そちらが優先されます。",
+      "scale": "レンダーサイズ",
+      "render_scale": "レンダースケール (%)",
+      "mode_scale": "{mode} (%)",
+      "scale_hint": "DLSS がアップスケールする前に描画する、ゲームの解像度に対する割合です。低いほど速く、高いほど鮮明になります。DLAA は常にフルサイズで描画します。DLSS の設定は、ゲームが次に DLSS を準備したとき（ワールドの読み込み時、またはゲームの設定で DLSS モードや解像度を変更したとき）に反映されます。"
+    },
+    "scale": {
+      "game": "各モードで DLSS 既定",
+      "per_mode": "DLSS モードごとのスケール",
+      "custom": "全モード共通のスケール"
+    },
+    "mode": {
+      "performance": "パフォーマンス",
+      "balanced": "バランス",
+      "quality": "クオリティ",
+      "ultra_performance": "ウルトラパフォーマンス",
+      "ultra_quality": "ウルトラクオリティ"
+    },
+    "preset": {
+      "default": "既定"
+    },
+    "readout": {
+      "caption": "情報表示",
+      "on": "情報表示をオン",
+      "hint": "右上に数行を表示します: 1 秒あたりのフレーム数（描画と出力）、フレーム時間、アップスケーラーとそのモード、描画サイズと出力サイズ、DLSS プリセット。レイテンシは表示しません。このゲームでは Kiln が正確に測定できないためです。"
+    },
+    "status": {
+      "caption": "現在",
+      "unavailable": "Kiln のグラフィックツールには、Kiln 0.2.0-dev.29.18 以降の kiln-ui.dll が必要です。",
+      "cap_on": "フレーム上限: {fps} fps。",
+      "cap_aside": "フレーム上限（{fps} fps）: オフ、{tools} に任せています。",
+      "fps": "描画 {rendered} fps、出力 {output} fps、1 フレーム {ms} ms。",
+      "dlss_aside": "DLSS の設定: {tools} に任せています。",
+      "dlss_active": "DLSS {mode}: {render} から {output}、プリセット {preset}。",
+      "dlss_limited": "レンダースケールが {mode} で DLSS が許す範囲外です。DLSS が許す最も近いサイズで描画します（上記）。",
+      "dlss_idle": "DLSS は現在使われていません（ゲームが FSR 3、XeSS を使っているかアップスケーラーなし、またはワールドが読み込まれていません）。",
+      "dlss_none": "このセッションではゲームが DLSS を準備していません（DLSS には NVIDIA RTX カードと、ゲームの設定で DLSS を選ぶことが必要です）。",
+      "restart": "Kiln の DLSS 設定と情報表示の DLSS 行を使うには、ゲームを再起動してください。Kiln が DLSS をフックするのは、ゲーム起動時にどちらかがオンの場合だけです。"
+    },
+    "aside": {
+      "optiscaler": "OptiScaler",
+      "streamline": "NVIDIA Streamline（フレーム生成モッド）",
+      "vkfg": "DLSS フレーム生成モッド（EnshroudedVKFG.ini）",
+      "dlsstweaks": "DLSSTweaks",
+      "nvngx": "別の DLSS ローダー（ゲームの隣の nvngx.dll）",
+      "ngx_patched": "DLSS をフックする別のツール",
+      "overlay_off": "Kiln のオーバーレイがオフであること",
+      "upscaler": "別のアップスケーラーツール（ゲームの隣にある AMD や Intel のアップスケーラーファイル、または変更された FSR 3 パス）"
+    },
+    "upscaler": {
+      "caption": "ゲームの FSR 3 の代わりに",
+      "choice": "アップスケーラー",
+      "game": "ゲーム本来の FSR 3",
+      "amd": "AMD FSR",
+      "xess": "Intel XeSS",
+      "amd_mode": "AMD FSR のバージョン",
+      "amd_auto": "自動（当面は FSR 3.1）",
+      "amd_fsr3": "FSR 3.1",
+      "amd_fsr4": "FSR 4（試験的）",
+      "amd_hint": "自動は、このゲームで FSR 4 が確認されるまで FSR 3.1 を使います。FSR 4（試験的）は AMD に選ばせます。対応するグラフィックカードとドライバーでは FSR 4、それ以外では FSR 3.1 です。暗い場面が暗くなりすぎることがあります。",
+      "hint": "ゲームのグラフィック設定でアップスケーラーに FSR 3 を選んでください。Kiln がその代わりに選んだものを実行します。変更は、ワールドで FSR 3 が動いている間はすぐに、そうでなければワールドの読み込み時に反映されます。AMD FSR と Intel XeSS には各社のファイルが必要で、Kiln ランチャーがダウンロードします（「設定」の「グラフィック」）。",
+      "files": {
+        "present": "{name} {version}: ファイルは {folder} にあります。",
+        "missing": "このゲームにはまだ {name} のファイルがありません。ゲームを終了した状態で、Kiln ランチャー（「設定」の「グラフィック」）でダウンロードしてください。それまではゲーム本来の FSR 3 が動作します。",
+        "changed": "{folder} にある {name} のファイルの一部がないか、変更されています。ゲームを終了した状態で、Kiln ランチャー（「設定」の「グラフィック」）で再ダウンロードしてください。それまではゲーム本来の FSR 3 が動作します。"
+      },
+      "running": {
+        "off": "現在、ゲームの FSR 3 の代わりに Kiln のアップスケーラーは使われていません。",
+        "not_fsr": "ゲームは今 FSR 3 でアップスケールしていません。ゲームのグラフィック設定で FSR 3 が選ばれていないか、ワールドが読み込まれていません。",
+        "game_fsr3": "ゲーム本来の FSR 3 が動作しています。",
+        "amd_fsr4": "ゲームの FSR 3 の代わりに AMD FSR 4 が動作しています。",
+        "amd_fsr31": "ゲームの FSR 3 の代わりに AMD FSR 3.1 が動作しています。",
+        "xess": "ゲームの FSR 3 の代わりに Intel XeSS が動作しています。",
+        "unknown": "ゲームの FSR 3 の代わりに何がアップスケールしているか、Kiln には判断できません。各パーツのバージョンが異なります。"
+      },
+      "size": "{output} 用に {render} で描画しています。",
+      "size_version": "バージョン {version}、{output} 用に {render} で描画しています。",
+      "amd_fsr3_auto": "AMD の選択で FSR 3.1 になりました。このグラフィックカードまたはドライバーでは FSR 4 は動作しません。",
+      "detail": "詳細: {detail}",
+      "restart_now": "{upscaler} を使うにはゲームを再起動してください。それまではゲーム自身の FSR 3 が動作します。",
+      "reason": {
+        "restart": "{upscaler} は次回のゲーム起動から動作します。Kiln はゲームの起動時にそれを準備します。",
+        "files_missing": "{upscaler} のファイルがまだダウンロードされていないため、ゲーム本来の FSR 3 が動作します。",
+        "files_bad": "{upscaler} のファイルが Kiln の想定と異なる（サイズまたは SHA-256 が違う）ため、Kiln は読み込みません。再ダウンロードしてください。",
+        "load_failed": "{upscaler} のファイルが読み込まれなかったため、ゲーム本来の FSR 3 が動作します。",
+        "device": "グラフィックカードまたはドライバーに {upscaler} が必要とする Vulkan の機能がないため、ゲーム本来の FSR 3 が動作します。",
+        "create_failed": "この解像度では {upscaler} を準備できなかったため、ゲーム本来の FSR 3 が動作します。",
+        "runtime_failed": "{upscaler} がアップスケール中に失敗しました。ゲームを再起動するまで、ゲーム本来の FSR 3 が動作します。",
+        "fault": "{upscaler} またはその周りの Kiln のコードでエラーが起きました。ゲームを再起動するまで、ゲーム本来の FSR 3 が動作します。",
+        "aside": "Kiln は {tools} のために控えるので、ゲームの FSR 3 を変更しません。",
+        "no_signatures": "Kiln はこのゲームビルドの FSR 3 をまだ知らないため、ゲーム本来の FSR 3 が動作します。このゲームビルドに対応した Kiln のアップデートで解決します。",
+        "inputs": "ゲームの画像が {upscaler} の受け付ける形式ではないため、ゲーム本来の FSR 3 が動作します。",
+        "unavailable": "{upscaler} はこの Kiln のビルドまたはこのシステムでは使えないため、ゲーム本来の FSR 3 が動作します。",
+        "waiting": "{upscaler} の準備ができました。ゲームが FSR 3 を実行するとすぐに開始します。ゲームのグラフィック設定で FSR 3 を選んだ状態でワールドを読み込んでください。",
+        "no_vulkan": "このセッションでは、ゲームがグラフィックデバイスを準備するところを Kiln が確認できませんでした。{upscaler} を使うにはゲームを再起動してください。",
+        "unknown": "{upscaler} は動作しません（新しい Kiln からの理由 {number}）。ゲーム本来の FSR 3 が動作します。"
+      }
+    },
+    "saved": "kiln/kiln.json に保存されます（ランチャーの設定ページにも同じ項目があります）。"
+  },
+  "native": {
+    "menu": {
+      "mods": "モッド",
+      "mods_off": "モッド: {reason}"
+    },
+    "footer": {
+      "loaded": {
+        "other": "Kiln {version} - {count} 個のモッドを読み込み済み"
+      },
+      "xhl": {
+        "other": "Kiln {version}（XHL-Core 併用） - {count} 個のモッドを読み込み済み"
+      }
+    },
+    "fallback": {
+      "title": "Kiln {version}",
+      "body": "このセッションでは Kiln のマネージドホスト（Kiln.Ui）が動作していないため、ここではモッド一覧とモッドの画面を使えません。kiln/logs/kiln.log を確認してください。",
+      "close": "{key} を押して閉じる。"
+    },
+    "graphics": {
+      "fps": "描画 {rendered} fps | 出力 {output} fps | {ms} ms",
+      "dlss": "DLSS {mode}: {render} -> {output}、プリセット {preset}",
+      "preset_default": "既定",
+      "not_dlss": "現在は DLSS ではありません（ゲームの FSR 3、XeSS、またはなし）: {output}",
+      "unknown": "DLSS: 次のゲーム起動時に読み取ります: {output}",
+      "aside": "アップスケーラー: {tools} に任せています: {output}",
+      "cap": "フレーム上限 {fps} fps",
+      "cap_aside": "フレーム上限 {fps} fps: {tools} のためオフ",
+      "upscale": "FSR 3 の代わり: {upscaler}: {render} -> {output}",
+      "game_fsr3": "ゲーム本来の FSR 3",
+      "upscale_why": "{upscaler} は動作していません: {why}",
+      "upscale_restart": "{upscaler} を使うにはゲームを再起動"
+    }
+  }
+}

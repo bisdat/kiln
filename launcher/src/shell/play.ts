@@ -15,12 +15,15 @@ function clearStop(id: string) {
 }
 import * as api from "../api/commands";
 import type { GameInstall, LaunchMode, StartTimeline } from "../api/commands";
-import { invalidateGame, useActiveProfile, useGame, useGameStatus, useLaunchState, useProfiles, useRuntimeChanges, useStartTimeline } from "../api/hooks";
+import { invalidateGame, qk, useActiveProfile, useGame, useGameStatus, useLaunchState, useProfiles, useRuntimeChanges, useStartTimeline } from "../api/hooks";
 import { runTask, toast } from "../ui";
 import { bootSnapshotBeforeOnce, cookBeforePlay, cookingNotice } from "./cook";
 import { notifyLibraryChanged } from "./libraryChanged";
+import { activationBusy } from "../api/oneActivation";
+import { useApplying, type Applying } from "./applying";
 import { gameState, playState, runStarted, type GameStateView } from "./gameState";
 import { notifyActivation, notifyActivationOf, notifyInstall } from "./notices";
+import { blockedLine } from "./RuntimeFailure";
 import { quietIsKiln, quietText, showsProgress, STEAM_WAIT_MS } from "./startProgress";
 import { t } from "../i18n";
 
@@ -42,13 +45,24 @@ export function rememberLaunch(gameId: string, mode: LaunchMode) {
   useLaunchMemo.setState((m) => ({ at: { ...m.at, [gameId]: playNow() }, mode: { ...m.mode, [gameId]: mode } }));
 }
 
+/** The window stops following the start it asked Steam for (its time and mode go): Play again. */
+function forgetLaunch(gameId: string) {
+  useLaunchMemo.setState((m) => {
+    const drop = <T,>(r: Record<string, T>) => { const n = { ...r }; delete n[gameId]; return n; };
+    return { at: drop(m.at), mode: drop(m.mode) };
+  });
+}
+
 export interface PlayControl {
   game: GameInstall | null;
   view: GameStateView;
   installed: boolean;
   running: boolean;
-  /** Play can start now (a game, stopped, not updating). */
+  /** Play can start now (a game, stopped, not updating, no profile being applied). */
   canPlay: boolean;
+  /** (29.18) A profile is being applied to the game now (a Load in Settings, an add, a modpack, Kiln's install with its
+   *  profile, whatever started it; shell/applying.ts): Play says so and waits. Null otherwise. */
+  applying: Applying | null;
   busy: boolean;
   /** Waiting for Kiln to boot: a start this launcher made (or a play-once start) with no fresh boot.json yet. */
   starting: boolean;
@@ -67,6 +81,14 @@ export interface PlayControl {
   lastTimeline: StartTimeline | null;
   stoppedStart: api.StoppedStart | null;
   dismissStop: () => void;
+  /** (29.18) Steam was asked for the game and its process does not exist yet: Play waits for it (up to STEAM_WAIT_MS).
+   *  The Play page and the Deck's Home offer "Stop waiting" (stopWaiting) meanwhile, for a launch cancelled in Steam
+   *  (its "Processing Vulkan shaders" dialog, say). Never while the game runs, nor before Steam was asked. */
+  waitingForGame: boolean;
+  /** Ends that wait at once: Play is back, and the backend's start is dropped too (launch_end), so the next
+   *  launch_progress does not bring the wait back. It touches no process: a game that runs by then is left as it is
+   *  (its running views take over), and a game Steam still starts later is shown as running. */
+  stopWaiting: () => void;
   profileName: string | null;
   play: (mode: LaunchMode, profileId?: string) => void;
 }
@@ -79,6 +101,7 @@ export function usePlayControl(): PlayControl {
   const active = useActiveProfile(game?.id);
   const profiles = useProfiles();
   const changingRuntime = useRuntimeChanges((m) => !!game && m.last[game.id]?.state === "running");
+  const applying = useApplying(game?.id);
   const memo = useLaunchMemo();
   const id = game?.id ?? "";
   const stops = useStops();
@@ -171,10 +194,7 @@ export function usePlayControl(): PlayControl {
       }));
     } else if (!running && !since && memo.at[id] !== undefined && !pending && launching === 0) {
       // Steam was asked and no game came within the wait (the backend gave the start up too): Play again
-      useLaunchMemo.setState((m) => {
-        const drop = <T,>(r: Record<string, T>) => { const n = { ...r }; delete n[id]; return n; };
-        return { at: drop(m.at), mode: drop(m.mode) };
-      });
+      forgetLaunch(id);
     } else if (!running && since) {
       // the run this launcher saw has ended: its launch (time, mode) is over too, so a later start from Steam is not
       // taken for it
@@ -188,12 +208,25 @@ export function usePlayControl(): PlayControl {
   const starting = stoppedStart ? false : exception ? state.starting && !s?.steamUpdating
     : (state.starting && !(spoke && !progress)) || running_ || (!running && !s?.steamUpdating && (launching > 0 || (!!progress && pending) || (at !== undefined && now - at < 120_000)));
   const activeProfile = profiles.data?.find((p) => p.id === active.data?.profileId) ?? null;
+  // Steam took the start (launch_play answered) and no game process exists yet
+  const waitingForGame = !!game && starting && pending && launching === 0;
+  const stopWaiting = async (gameId: string) => {
+    // the game may have come since the last status: then it is left alone, and its running views take over
+    const fresh = await api.gameStatus(gameId).catch(() => null);
+    if (fresh) qc.setQueryData(qk.gameStatus(gameId), fresh);
+    if (fresh?.running) return;
+    forgetLaunch(gameId);
+    qc.setQueryData(["launch_progress", gameId], null);
+    // the backend forgets the start too (its Steam step, its timings): no later launch_progress brings the wait back
+    await api.launchEnd(gameId).catch(() => {});
+  };
   return {
     game,
     view,
     installed: !!s?.runtime.installed,
     running,
-    canPlay: !!s && !running && !s.steamUpdating && launching === 0 && !starting && !changingRuntime,
+    canPlay: !!s && !running && !s.steamUpdating && launching === 0 && !starting && !changingRuntime && !applying,
+    applying,
     busy: launching > 0 || starting,
     starting,
     elapsed: running && since ? Math.max(0, Math.round((now - since) / 1000)) : null,
@@ -203,8 +236,14 @@ export function usePlayControl(): PlayControl {
     lastTimeline: tl,
     stoppedStart,
     dismissStop: () => clearStop(id),
+    waitingForGame,
+    stopWaiting: () => void stopWaiting(id),
     profileName: activeProfile?.name ?? null,
-    play: (mode, profileId) => launch.mutate({ gameId: id, req: { mode, profileId: profileId ?? null } }),
+    play: (mode, profileId) => {
+      // a dialog opened before an activation began (Vanilla once, the Deck's Play once) waits for it too (29.18)
+      if (applying) { toast.info(activationBusy()); return; }
+      launch.mutate({ gameId: id, req: { mode, profileId: profileId ?? null } });
+    },
   };
 }
 
@@ -223,7 +262,9 @@ export async function switchBackFirst(gameId: string, req: api.LaunchRequest): P
     notifyInstall(r);
     return true;
   } catch (e) {
-    toast.error(e, t("shell.play.switchBackFailed", { to: back.to, from: back.from }));
+    // a DLL Windows refused (an antivirus, inbox 92): its plain words before the raw error
+    const err = api.toKilnError(e), blocked = blockedLine(err, undefined);
+    toast.error(blocked ? { ...err, message: `${blocked} ${err.message}` } : e, t("shell.play.switchBackFailed", { to: back.to, from: back.from }));
     return false;
   }
 }

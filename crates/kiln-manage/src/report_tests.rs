@@ -226,6 +226,105 @@ fn healthy_install_finds_nothing() {
     }
 }
 
+/// (0.2.0-dev.29.18) The facts a public post may name: Kiln's version, the system, the game's build and how many mods
+/// are on (never which), also in report.json.
+#[test]
+fn the_public_facts_name_versions_and_a_mod_count_not_the_mods() {
+    let f = Fx::healthy("public-facts");
+    let r = build(&f.input());
+    assert_eq!(r.facts.kiln.as_deref(), Some("0.2.0-dev.22"));
+    assert_eq!(r.facts.mods_on, Some(1));
+    assert!(!r.facts.os.is_empty());
+    let json: serde_json::Value = serde_json::from_str(file(&r, "report.json").unwrap()).unwrap();
+    // the relay's shape (docs/relay-api.md): {kiln, launcher, os, runner, gameBuild, modsOn, deck}
+    let v = &json["versions"];
+    assert_eq!((v["kiln"].as_str(), v["modsOn"].as_u64(), v["deck"].as_bool()), (Some("0.2.0-dev.22"), Some(1), Some(false)));
+    assert_eq!(v["runner"], "Windows");
+    assert!(v.get("launcher").is_none(), "the tool here is not a launcher's");
+    assert!(!v.to_string().contains("chat-plus"), "{v}");
+    // with the launcher as the tool, its version
+    let mut input = f.input();
+    input.tool = "kiln-launcher 0.2.0-dev.29.18 beta 3".into();
+    let r = build(&input);
+    assert_eq!(r.facts.versions()["launcher"], "0.2.0-dev.29.18");
+    // report.json alone for a post without the zip: the launcher's version, the findings, the versions, nothing else
+    // (not when it was written, not the test build's number: the post shows neither)
+    let alone: serde_json::Value = serde_json::from_slice(&public_json(&r)).unwrap();
+    let mut keys: Vec<&str> = alone.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort();
+    assert_eq!(keys, ["findings", "format", "tool", "versions"]);
+    assert_eq!((alone["format"].as_u64(), alone["tool"].as_str()), (Some(1), Some("kiln-launcher 0.2.0-dev.29.18")));
+}
+
+/// (0.2.0-dev.29.18) The zip in memory is the zip on disk: the same files with the same bytes (the launcher sends it
+/// without writing it to a shared temp folder).
+#[cfg(feature = "zip")]
+#[test]
+fn the_zip_in_memory_holds_what_the_zip_on_disk_holds() {
+    let f = Fx::healthy("zip-bytes");
+    let r = build(&f.input());
+    let bytes = zip_bytes(&r).unwrap();
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    assert_eq!(z.len(), r.files.len());
+    for (name, data) in &r.files {
+        let mut got = Vec::new();
+        std::io::Read::read_to_end(&mut z.by_name(name).unwrap(), &mut got).unwrap();
+        assert_eq!(&got, data, "{name}");
+    }
+}
+
+/// OptiScaler next to the game (an upscaler with its own overlay, inbox 80): one Info finding with what Kiln's overlay
+/// does next to it, its ini in the zip, nothing found when it is not there.
+#[test]
+fn optiscaler_is_named_with_what_kilns_overlay_does() {
+    let f = Fx::healthy("optiscaler");
+    f.w("OptiScaler.ini", "[Menu]\nOverlayMenu=auto\n");
+    let r = build(&f.input());
+    assert!(!r.findings.iter().any(|x| x.id == "optiscaler"), "its ini alone is no OptiScaler: {:#?}", r.findings);
+    f.w("winmm.dll", crate::pe::build_test_dll(&["timeGetTime"], b"OptiScaler.ini"));
+    let r = build(&f.input());
+    assert_eq!(ids(&r), Vec::<&str>::new(), "an Info finding only: {}", r.summary);
+    let x = finding(&r, "optiscaler");
+    assert!(x.text.contains("OptiScaler is installed (winmm.dll)") && x.text.contains("steps aside"), "{}", x.text);
+    assert!(r.summary.contains("Graphics tool: OptiScaler (winmm.dll): Kiln's overlay drawing steps aside"), "{}", r.summary);
+    assert!(r.summary.contains("winmm.dll        OptiScaler"), "{}", r.summary);
+    assert!(file(&r, "game/OptiScaler.ini").is_some_and(|t| t.contains("OverlayMenu=auto")));
+    assert!(file(&r, "game/OptiScaler.log").is_none() && r.errors.is_empty(), "no log: nothing, no error: {:?}", r.errors);
+    f.w("OptiScaler.ini", "[Menu]\nOverlayMenu=false\n");
+    let r = build(&f.input());
+    assert!(finding(&r, "optiscaler").text.contains("draws next to it"));
+    assert!(r.summary.contains("Graphics tool: OptiScaler (winmm.dll): Kiln's overlay draws next to it (its own menu and frame generation are off"), "{}", r.summary);
+    // Inbox 80: its menu off, frame generation set: Kiln steps aside, and the finding says why
+    f.w("OptiScaler.ini", "[FrameGen]\r\nFGInput=upscaler\r\nFGOutput=fsrfg\r\n[Menu]\r\nOverlayMenu=false\r\n");
+    let r = build(&f.input());
+    let x = finding(&r, "optiscaler");
+    assert!(x.text.contains("frame generation is set") && x.text.contains("steps aside"), "{}", x.text);
+    assert!(r.summary.contains("Graphics tool: OptiScaler (winmm.dll): Kiln's overlay drawing steps aside"), "{}", r.summary);
+    // the DLL as it really is: ReShade's texts first, its own later (29.17 named it "ReShade (text reshade)")
+    let mut text = b"ReShade 6.4 reshade64.dll ".to_vec();
+    text.extend(std::iter::repeat_n(0u8, 2048));
+    text.extend("OptiScaler.ini".encode_utf16().flat_map(|c| c.to_le_bytes()));
+    f.w("winmm.dll", crate::pe::build_test_dll(&["timeGetTime"], &text));
+    let r = build(&f.input());
+    assert!(r.summary.contains("winmm.dll        OptiScaler") && !r.summary.contains("winmm.dll        ReShade"), "{}", r.summary);
+    f.w("OptiScaler.ini", "[Menu]\nOverlayMenu=false\n");
+    // its log can grow large (debug level): only its tail, within a log's budget, as for the other tools' logs
+    let old = "[info] an earlier line of OptiScaler's log\n";
+    f.w("OptiScaler.log", old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + "[info] HookDevice: the newest line\n");
+    let r = build(&f.input());
+    let log = file(&r, "game/OptiScaler.log").expect("its log is in the zip");
+    assert!(log.starts_with("... (older lines left out") && log.len() as u64 <= SMALL_LOG_MAX + 200, "{}", log.len());
+    assert!(log.contains("the newest line"));
+    // a Linux folder is case sensitive: the files under their names on disk
+    std::fs::remove_file(f.game.join("OptiScaler.ini")).unwrap();
+    std::fs::rename(f.game.join("OptiScaler.log"), f.game.join("optiscaler.log")).unwrap();
+    f.w("optiscaler.ini", "[menu]\noverlaymenu=false\n");
+    let r = build(&f.input());
+    assert!(finding(&r, "optiscaler").text.contains("draws next to it"));
+    assert!(file(&r, "game/optiscaler.ini").is_some_and(|t| t.contains("overlaymenu=false")), "{:?}", r.files.iter().map(|x| &x.0).collect::<Vec<_>>());
+    assert!(file(&r, "game/optiscaler.log").is_some() && r.errors.is_empty(), "{:?}", r.errors);
+}
+
 // The state files of Kiln's deliberate stops (roster, the mods' NPCs and quests not built) go into the zip whole, the
 // next start's .last copies too: a support thread can tell which stop it was (dev.29).
 #[test]
@@ -286,6 +385,76 @@ fn addon_log_is_optional_bounded_and_redacted() {
         old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + last, "collection is read-only");
 }
 
+/// netjunk's report (2026-11-20): Building Tools' own logs were in the game folder's listing only. Other mods' and
+/// loaders' logs that sit in the game folder are in the zip now (Building Tools' BuildingTools.log and .prev.log,
+/// ShroudLink's core shroudlink.log, Auto Loot Plus' auto-loot-plus.log): each optional, a bounded tail, redacted; their
+/// settings files are not read.
+#[test]
+fn other_mods_logs_in_the_game_folder_are_optional_bounded_and_redacted() {
+    let f = Fx::healthy("other-mod-logs");
+    let names = ["BuildingTools.log", "BuildingTools.prev.log", "shroudlink.log", "auto-loot-plus.log"];
+    let absent = build(&f.input());
+    for n in names {
+        assert!(file(&absent, &format!("game/{n}")).is_none(), "{n}");
+    }
+    assert!(absent.errors.is_empty(), "{:?}", absent.errors);
+
+    let old = "[1] old line\n";
+    for n in names {
+        f.w(n, old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + &format!("[2] {n} last line (Z:\\var\\home\\frostling\\x.dll)\n"));
+    }
+    f.w("BuildingTools.ini", "[Keys]\nSecretSetting=1\n");
+    let r = build(&f.input());
+    for n in names {
+        let log = file(&r, &format!("game/{n}")).unwrap_or_else(|| panic!("{n} must be collected"));
+        assert!(log.starts_with("... (older lines left out") && log.len() as u64 <= SMALL_LOG_MAX + 200, "{n}: {} bytes", log.len());
+        assert!(log.contains(&format!("{n} last line")) && log.contains(r"<home>\x.dll") && !log.contains("frostling"), "{n}: {log}");
+    }
+    assert!(!r.files.iter().any(|(n, _)| n.ends_with("BuildingTools.ini")), "a mod's settings stay out");
+}
+
+/// inbox 86: XHL-Core loaded a mod the profile had off, and the report had nothing of XHL-Core's own. Its log,
+/// XHL-Native-Plugin-Host.log, written next to the DLL it runs as (the game's dinput8.dll, or Kiln's copy in
+/// kiln/chain/<id>/), is in the zip now when it is there: bounded and redacted as Kiln's logs, never through a link.
+#[test]
+fn xhl_cores_own_log_is_collected_where_it_runs_from() {
+    let f = Fx::healthy("xhl-core-log");
+    let absent = build(&f.input());
+    assert!(!absent.files.iter().any(|(n, _)| n.ends_with("XHL-Native-Plugin-Host.log")), "nothing without XHL-Core");
+    assert!(absent.errors.is_empty(), "{:?}", absent.errors);
+
+    let old = "[XHL-Native-Host] an older line\n";
+    let last = "[XHL-Native-Host] loaded plugin: BuildingTools 0.34.0 (Z:\\var\\home\\frostling\\Enshrouded\\mods\\building-tools)\n";
+    f.w("kiln/chain/xhl-core/xhl-core.dll", b"MZ");
+    f.w("kiln/chain/xhl-core/XHL-Native-Plugin-Host.log", old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + last);
+    f.w("XHL-Native-Plugin-Host.log", "[XHL-Native-Host] core: DirectInput8Create is forwarded to System32 dinput8.dll.\n");
+    // the copy of another profile without a log, and a folder that is no mod id: nothing, no error
+    f.w("kiln/chain/xhl-core-old/xhl-core.dll", b"MZ");
+    f.w("kiln/chain/Not An Id/XHL-Native-Plugin-Host.log", "not read\n");
+    let r = build(&f.input());
+    let log = file(&r, "game/kiln/chain/xhl-core/XHL-Native-Plugin-Host.log").expect("Kiln's copy's log is in the zip");
+    assert!(log.starts_with("... (older lines left out") && log.len() as u64 <= SMALL_LOG_MAX + 200, "bounded");
+    assert!(log.contains("loaded plugin: BuildingTools 0.34.0") && log.contains(r"<home>\Enshrouded") && !log.contains("frostling"), "{log}");
+    assert!(file(&r, "game/XHL-Native-Plugin-Host.log").is_some_and(|l| l.contains("forwarded to System32")), "the game's own XHL-Core's log");
+    let xhl: Vec<&str> = r.files.iter().map(|(n, _)| n.as_str()).filter(|n| n.ends_with("XHL-Native-Plugin-Host.log")).collect();
+    assert_eq!(xhl.len(), 2, "{xhl:?}");
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    #[cfg(unix)]
+    {
+        // a link in place of the log or of the copy's folder is not followed
+        let secret = f.root.join("secret.log");
+        std::fs::write(&secret, "SECRET\n").unwrap();
+        f.rm("XHL-Native-Plugin-Host.log");
+        std::os::unix::fs::symlink(&secret, f.game.join("XHL-Native-Plugin-Host.log")).unwrap();
+        std::os::unix::fs::symlink(f.root.join("elsewhere"), f.game.join("kiln/chain/linked")).unwrap();
+        std::fs::create_dir_all(f.root.join("elsewhere")).unwrap();
+        std::fs::write(f.root.join("elsewhere/XHL-Native-Plugin-Host.log"), "SECRET\n").unwrap();
+        let r = build(&f.input());
+        assert!(!r.files.iter().any(|(_, b)| String::from_utf8_lossy(b).contains("SECRET")), "a link was followed");
+        assert!(file(&r, "game/kiln/chain/linked/XHL-Native-Plugin-Host.log").is_none());
+    }
+}
+
 /// GitHub issue 39: a player's "slow motion" report could not be told apart from the save cycle because the zip had no
 /// tick-stats.jsonl (Kiln's per-minute step times, rewritten at every game start). It is in the zip now: the newest lines,
 /// whole, within [`TICK_STATS_MAX`].
@@ -302,7 +471,11 @@ fn tick_stats_are_collected_newest_lines_whole_and_bounded() {
          \"post_ms\":{{\"p50\":0.0110,\"p99\":0.0500,\"max\":0.200}},\"interval_ms\":{{\"p50\":16.67,\"p99\":33.40,\"max\":2402.10}},\
          \"subs\":{{\"pre\":12,\"post\":9}}}}\n");
     let old = line("22:45:00", 59.67);
-    let last = line("00:33:00", 24.46);
+    // issue #49: the newest line carries a tasks object; the collector keeps it whole like the rest
+    let base = line("00:33:00", 24.46);
+    let last = format!(
+        "{},\"tasks\":{{\"window\":{{\"id\":7,\"span_ms\":60000.0,\"age_ms\":0.0}},\"pool\":{{\"workers\":3,\"long_running\":1,\"queue_max\":12}},\"owners\":[{{\"owner\":\"kiln-auto-loot\",\"queued\":{{\"current\":0,\"max\":4}},\"running\":{{\"current\":1,\"max\":2}},\"completed\":120,\"faulted\":0,\"cancelled\":2,\"cpu_ms\":830.5,\"wall_ms\":910.2,\"longest_ms\":44.1,\"longest_name\":\"loot-scan\",\"queued_too_long\":0,\"running_too_long\":0,\"queue_full\":0,\"unload_blocked\":0}}],\"apply\":{{\"applied\":96,\"deferred\":3,\"cancelled\":0,\"ms\":4.2,\"owner_budget_stops\":1,\"step_budget_stops\":0,\"owners_served\":1,\"backlog\":0}},\"hops\":{{\"refused\":0}}}}}}\n",
+        base.strip_suffix("}\n").unwrap());
     let n = TICK_STATS_MAX as usize / old.len() + 50;
     f.w("kiln/logs/tick-stats.jsonl", old.repeat(n) + &last);
     let r = build(&f.input());
@@ -316,6 +489,9 @@ fn tick_stats_are_collected_newest_lines_whole_and_bounded() {
         serde_json::from_str::<serde_json::Value>(l).unwrap_or_else(|e| panic!("every line after the note is whole JSON ({e}): {l}"));
     }
     assert_eq!(rest.last().copied(), Some(last.trim_end()), "the newest line is kept");
+    let parsed = crate::logs::tick_stats(rest.last().unwrap());
+    assert_eq!(parsed[0].tasks.as_ref().map(|t| (t.window.as_ref().and_then(|w| w.id), t.owners[0].completed)), Some((Some(7), 120)),
+        "the kept line's tasks object still parses, old fields with it");
     assert_eq!(std::fs::read_to_string(f.game.join("kiln/logs/tick-stats.jsonl")).unwrap(), old.repeat(n) + &last, "collection is read-only");
     // a short file whole, without the note
     f.w("kiln/logs/tick-stats.jsonl", last.clone());
@@ -371,6 +547,45 @@ fn files_missing_or_changed_against_the_receipt() {
     assert!(finding(&r, "files-changed").text.contains("kiln/Kiln.Host.dll"));
 }
 
+/// Inbox 92 (a player on Windows 11): an antivirus held kiln-greeneye.dll while Kiln installed it, the install failed with
+/// "Access is denied. (os error 5)" and was undone, and the report said only "Kiln is not installed". launcher.log had the
+/// cause: the report now says it (`install-blocked`), until an install works (a newer receipt).
+#[test]
+fn an_install_windows_refused_a_dll_of_is_a_finding_until_an_install_works() {
+    let f = Fx::new("blocked");
+    f.w("enshrouded.exe", b"MZ");
+    let log = f.root.join("data/logs/launcher.log");
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    // a 0.2.0-dev.29.18 launcher's lines: the error's detail after its words (this test's folder is a Linux path, so
+    // the words alone would not count: 5 is no refusal there; blocked.rs has the Windows lines of older launchers)
+    let failed = |at: &str, game: &Path| format!(
+        "{at} task: runtime_install-2-6afe1f10 started: Install Kiln 0.2.0-dev.29.18\n\
+         {at} task: runtime_install-2-6afe1f10 failed: [permission] installing {}/kiln/plugins/kiln-greeneye.dll: Access is denied. (os error 5) \
+         {{\"blocked\":{{\"osError\":5,\"path\":\"kiln/plugins/kiln-greeneye.dll\"}}}} (last step: installed kiln/plugins/kiln-flame.dll)\n\
+         {at} update: automatic check (dev): up to date (frostdev.io)\n", game.display());
+    std::fs::write(&log, failed("2026-11-18T21:10:08Z", &f.game)).unwrap();
+    let r = build(&f.input());
+    let b = finding(&r, "install-blocked");
+    assert_eq!(b.level, Level::Problem);
+    assert!(b.text.starts_with("A Kiln install in this game folder (Install Kiln 0.2.0-dev.29.18, 2026-11-18T21:10:08Z) failed because Windows denied access to kiln/plugins/kiln-greeneye.dll (os error 5), and no install has worked since."), "{}", b.text);
+    assert!(b.text.contains("An antivirus or another program may be blocking the file"), "{}", b.text);
+    assert!(ids(&r).contains(&"not-installed"), "the receipt's own finding stays: {:?}", ids(&r));
+    assert!(r.summary.contains("kiln-greeneye.dll (os error 5)") && r.short.contains("kiln-greeneye.dll (os error 5)"), "{}", r.short);
+    assert!(file(&r, "launcher/launcher.log").is_some_and(|t| t.contains("os error 5")), "the raw line stays in the log");
+    // another game folder's failure is not this one's
+    std::fs::write(&log, failed("2026-11-18T21:10:08Z", &f.root.join("EnshroudedServer"))).unwrap();
+    assert!(!ids(&build(&f.input())).contains(&"install-blocked"));
+
+    // Kiln installed: a failed update after the receipt is found, one before it is over (an install worked since)
+    let h = Fx::healthy("blocked-update");
+    let log = h.root.join("data/logs/launcher.log");
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    std::fs::write(&log, failed("2026-11-18T21:10:08Z", &h.game)).unwrap();
+    assert_eq!(ids(&build(&h.input())), ["install-blocked"]);
+    std::fs::write(&log, failed("2026-11-09T21:10:08Z", &h.game)).unwrap();
+    assert_eq!(ids(&build(&h.input())), Vec::<&str>::new());
+}
+
 #[test]
 fn kiln_did_not_load() {
     // the game ran (its log is there) and Kiln's proxy never wrote anything
@@ -384,7 +599,16 @@ fn kiln_did_not_load() {
     i.install = Some(f.install(Platform::Proton));
     let r = build(&i);
     let n = finding(&r, "not-loaded");
-    assert!(n.text.contains("Launch options") || n.text.contains("launch options"), "{}", n.text);
+    assert!(n.text.contains("launch options") && n.text.contains(crate::game::DLL_OVERRIDE_ADVICE), "{}", n.text);
+    // If the dinput8 override is already present, don't recommend setting it again.
+    let prefix = f.root.join("pfx");
+    std::fs::create_dir_all(&prefix).unwrap();
+    std::fs::write(prefix.join("user.reg"), "[Software\\\\Wine\\\\DllOverrides]\n\"dinput8\"=\"native,builtin\"\n").unwrap();
+    i.install.as_mut().unwrap().prefix = Some(prefix);
+    let r = build(&i);
+    let n = finding(&r, "not-loaded");
+    assert!(n.text.contains("Check Steam's launch options for Enshrouded (WINEDLLOVERRIDES) and the Proton version."), "{}", n.text);
+    assert!(!n.text.contains("try this fallback") && !n.text.contains(crate::game::DLL_OVERRIDE_ADVICE), "{}", n.text);
     // a launch from the launcher after the last boot.json
     let g = Fx::healthy("stale");
     let old = SystemTime::now() - std::time::Duration::from_secs(3600);
@@ -759,12 +983,14 @@ fn failed_mods_and_crash() {
     assert!(!ids(&build(&f.input())).contains(&"mod-failed"));
     f.w("kiln/state/mods.json", br#"{"format":1,"pid":412,"written":"2026-11-10T11:00:01Z","generation":3,"mods":[{"id":"chat-plus","state":"failed","reason":"missing dependency kiln.ui >= 2"}]}"#);
     f.w("kiln/state/flame.json", br#"{"status":"running","mods":[{"name":"BiggerTorch","status":"failed","error":"LoadLibrary 126"}]}"#);
-    f.w("kiln/crash-reports/crash-20261110T110500Z.txt", "chat-plus faulted 5 times\n");
+    f.w("kiln/crash-reports/crash-20261110T110500Z.txt",
+        "chat-plus faulted 5 times\n\n-- Tasks --\n  running thread=42 owner=\"kiln-auto-loot\" task=\"loot-scan\" handle=0x1234 started_ns=99 elapsed_ms=12.500 state=running\n");
     let r = build(&f.input());
     let m = finding(&r, "mod-failed");
     assert!(m.text.contains("missing dependency kiln.ui") && m.text.contains("BiggerTorch") && m.text.contains("LoadLibrary 126"), "{}", m.text);
     assert!(finding(&r, "crash").text.contains("crash-20261110T110500Z.txt"));
-    assert!(file(&r, "game/kiln/crash-reports/crash-20261110T110500Z.txt").is_some());
+    let crash = file(&r, "game/kiln/crash-reports/crash-20261110T110500Z.txt").expect("the crash report is collected");
+    assert!(crash.contains("-- Tasks --") && crash.contains("task=\"loot-scan\""), "the crash report's task lines are kept: {crash}");
 }
 
 /// Player report (Nexus, 2026-11-11): a client's server mods (Loot Leveler) are "skipped" in the menu's mods.json and
@@ -826,6 +1052,31 @@ fn no_game_folder_or_a_missing_one() {
     let r = build(&i);
     assert!(r.errors.iter().any(|e| e.contains("does not exist")), "{:?}", r.errors);
     assert!(r.summary.contains("Left out"));
+}
+
+/// (dev.29.18) A finding the launcher knows (WebKit's sandbox) is listed with the report's own, problems first, in
+/// summary.txt, report.json and the short summary, redacted like them; with a game and without one.
+#[test]
+fn the_callers_findings_are_listed_with_the_reports_own() {
+    let f = Fx::new("caller-findings");
+    let mut i = f.input();
+    i.findings.push(Finding { id: "webkit-sandbox".into(), level: Level::Problem,
+        text: format!("WebKit's sandbox cannot start on this system (bwrap: setting up uid map: Permission denied); launcher.log: {HOME}/.local/share/kiln/logs/launcher.log") });
+    for game in [true, false] {
+        if !game {
+            i.install = None;
+        }
+        let r = build(&i);
+        let w = r.findings.iter().find(|x| x.id == "webkit-sandbox").expect("listed");
+        assert_eq!(w.level, Level::Problem);
+        assert!(w.text.contains("<home>/.local/share/kiln/logs/launcher.log") && !w.text.contains(HOME), "{}", w.text);
+        assert_eq!(r.findings[0].level, Level::Problem, "problems first");
+        assert!(r.summary.contains("[problem] WebKit's sandbox cannot start"), "{}", r.summary);
+        assert!(r.short.contains("WebKit's sandbox cannot start"), "{}", r.short);
+        assert!(file(&r, "report.json").unwrap().contains("\"webkit-sandbox\""));
+    }
+    // none given: none listed
+    assert!(build(&f.input()).findings.iter().all(|x| x.id != "webkit-sandbox"));
 }
 
 #[test]
@@ -1024,6 +1275,35 @@ fn a_start_without_shroudforge_does_not_repeat_an_earlier_starts_failed_pass() {
         assert!(!r.findings.iter().any(|x| x.id == "sf-startup-failed"), "pid {pid}: {:#?}", r.findings);
         assert!(!r.summary.contains("ShroudForge's record of its startup pass"), "pid {pid}: {}", r.summary);
     }
+}
+
+/// dev.29.18 (inbox 79): Kiln's ShroudForge ran its startup pass again without the one mod it failed in. The report
+/// names the mod and its error as a warning; the other mods loaded, so it is no `sf-startup-failed`.
+#[test]
+fn a_startup_pass_that_ran_without_one_mod_is_a_warning() {
+    let f = Fx::healthy("sf-skipped");
+    f.w("kiln/plugins/kiln-shroudforge.dll", b"adapter");
+    f.w("kiln/plugins/shroudforge/shroudforge-runtime.dll", b"runtime");
+    for id in ["bone-caller", "wisp"] {
+        f.w(&format!("mods/{id}/mod.json"), serde_json::to_vec(&serde_json::json!({"id": id, "name": id, "version": "1.0.0", "capabilities": ["patch"]})).unwrap());
+        f.w(&format!("mods/{id}/extended.mod.json"), br#"{"schemaVersion":1,"enabled":true,"targets":["client"],"settings":{}}"#);
+        f.w(&format!("mods/{id}/src/mod.lua"), "return {}");
+    }
+    f.w("kiln/state/shroudforge.json", br#"{"format":1,"mode":"hosted","source":"bundled","pid":412,"side":"client","updated":1794308430,
+        "bundled":{"version":"1.7.9","build":"kiln.4b1ab16"},"startupPrepared":true}"#);
+    f.w("shroudforge/state.json", br#"{"schemaVersion":1,"assets":{"schemaVersion":1,"status":"applied","phase":"startup","target":"enshrouded",
+        "completedAt":1794308405,"fingerprint":"f","mods":[{"id":"bone-caller","version":"1.0.0"}],
+        "skipped":[{"id":"wisp","name":"Wisp Light Timer","version":"1.0.3","error":"runtime error: Missing base localization: keenglish"}]}}"#);
+    let r = build(&f.input());
+    let s = finding(&r, "sf-startup-skipped");
+    assert_eq!(s.level, Level::Warning);
+    assert!(s.text.starts_with("ShroudForge 1.7.9, hosted by Kiln, left Wisp Light Timer (wisp 1.0.3) out of its startup pass"), "{}", s.text);
+    assert!(s.text.contains("(runtime error: Missing base localization: keenglish)") && s.text.contains("The other mod that needs that step loaded")
+        && s.text.ends_with("Turn Wisp Light Timer off, or check whether it clashes with another mod: one that changes the same game data can make its check fail."),
+        "{}", s.text);
+    assert!(!r.findings.iter().any(|x| x.id == "sf-startup-failed"), "{:#?}", r.findings);
+    assert!(r.summary.contains("ShroudForge's record of its startup pass (state.json \"assets\"): applied at 2026-11-10T11:00:05Z without Wisp Light Timer"),
+        "{}", r.summary);
 }
 
 #[test]

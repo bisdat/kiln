@@ -46,11 +46,18 @@
  *    same opt-in is the last source of a player's craft. kiln-items pays such a craft inside the game's own payment
  *    (through kiln.rules' hook on it), only when the base's opted-in outputs cover every line's shortfall; a Kiln client's
  *    crafting menu counts what the server sends it (set_craft_stock, craft_items). docs/re/stations.md section 10.
+ *  - The station screen's fill buttons on a Kiln client (since 0.2.0-dev.29.19, capability stations.fill_ui): the game
+ *    enables a production station's "+1" and "+10" fill only when its own dry run of the fill succeeds on the client's
+ *    view (the bag and the Magic chests). While the server's craft-stock snapshot is on, kiln-items answers "can fill"
+ *    for a fill the game refused for missing materials when the server said its own fill, with opted-in station outputs,
+ *    covers that many crafts (set_fill_answers); the refused fills with no answer yet are what the client asks the
+ *    server about (fill_asks). The press is the game's own; the server's Kiln.Blocks runs it as Kiln's fill. Not
+ *    authority. docs/re/stations.md section 10.3.
  *  - A finished cycle is kiln.gameplay's KILN_GAMEPLAY_CRAFTED with actor == target == the station (once per cycle since
  *    0.2.0-dev.29). This table adds state, placed, removed and base-list events by polling (watch, events).
  *
  * Threads: status, submit, cancel, watch, last_seq, set_output_source, output_sources, max_chests, collect,
- * set_craft_stock: any thread. Every read (base_* including base_stock_with_stations, stations, station_read, recipe*,
+ * set_craft_stock, set_fill_answers, fill_asks: any thread. Every read (base_* including base_stock_with_stations, stations, station_read, recipe*,
  * category*, workshop_recipes, plan, events, craft_items): the tick thread, Pre or Post (KILN_ERR_WRONG_THREAD otherwise). Actions (submit, collect) run
  * inside kiln.items' program kiln_items_stations (registered through kiln.world, after the game's programs, so a player's
  * own action in the same step runs first); their callbacks come on the tick thread in Pre, one step after they ran.
@@ -76,6 +83,7 @@ extern "C" {
 /* KilnStationRequest through reserved[4]. A caller built before ordinary chests passes this size and names none. */
 #define KILN_STATION_REQUEST_V1 88u
 #define KILN_STATIONS_MAX_CRAFT_STOCK 1024u /* rows in a Kiln client's crafting-stock snapshot (set_craft_stock) */
+#define KILN_STATIONS_MAX_FILL_KEYS 16u /* fills a Kiln client asks about, and answers it keeps (since 0.2.0-dev.29.19) */
 
 /* A base's id: the 16 bytes of the game's BaseId (a GUID, saved with the altar). All zero: no altar was found. */
 typedef struct KilnBaseId {
@@ -94,6 +102,22 @@ typedef struct KilnStationStack {
     KilnItemId item;
     uint32_t count;
 } KilnStationStack;
+
+/* A fill the station screen asks the game about (since 0.2.0-dev.29.19): the station, the recipe and its category
+ * choices as the screen passes them (a choice's reserved bytes are 0 here whatever the game held). 40 bytes. */
+typedef struct KilnStationFillKey {
+    KilnEntity station;
+    uint32_t recipe;
+    KilnStationChoice choices[4];
+} KilnStationFillKey;
+
+/* The server's answer for one key: how many more complete crafts its fill with opted-in station outputs covers now
+ * (0: none). 48 bytes. */
+typedef struct KilnStationFillAnswer {
+    KilnStationFillKey key;
+    uint32_t crafts;
+    uint32_t reserved; /* 0 */
+} KilnStationFillAnswer;
 
 /* KilnStation.state: the game's FactoryStationState */
 enum {
@@ -450,6 +474,15 @@ typedef struct KilnStationsApi {
      * KILN_ERR_BUFFER_TOO_SMALL: *out_count = needed. */
     KilnResult(KILN_CALL* craft_items)(const KilnItemId* items, uint32_t count, KilnItemId* out, uint32_t capacity,
                                        uint32_t* out_count);
+    /* ---- the station screen's fill buttons for Kiln clients, GitHub #68 (since 0.2.0-dev.29.19; header.size tells) ---- */
+    /* The server's answers for the fills this client asked about; count 0 clears them. They count only while the
+     * craft-stock snapshot is on (set_craft_stock with rows; clearing it clears these and the asks too). Any thread.
+     * KILN_ERR_INVALID_ARGUMENT: count over KILN_STATIONS_MAX_FILL_KEYS, rows null with count set, a reserved byte set. */
+    KilnResult(KILN_CALL* set_fill_answers)(const KilnStationFillAnswer* rows, uint32_t count);
+    /* The fills the station screen asked the game about while the snapshot was on, that the game refused for missing
+     * materials and that no answer names: at most KILN_STATIONS_MAX_FILL_KEYS, oldest first. They stay until an answer
+     * names them or the snapshot goes. Any thread. KILN_ERR_BUFFER_TOO_SMALL: *out_count = needed. */
+    KilnResult(KILN_CALL* fill_asks)(KilnStationFillKey* out, uint32_t capacity, uint32_t* out_count);
 } KilnStationsApi;
 
 /* KilnStationCollect.flags. Bits 16 and up, so a result's flags never read as a request flag (KILN_STATION_DRY_RUN). */

@@ -251,11 +251,42 @@ Kiln.KeyChord.Mods.get -> Kiln.KeyMods
 Kiln.KeyChord.Mods.init -> void
 Kiln.KeyChord.VirtualKey.get -> uint
 Kiln.KeyChord.VirtualKey.init -> void
+Kiln.KeyInput
+Kiln.KeyListenFlags
+Kiln.KeyListenFlags.Mouse = 1 -> Kiln.KeyListenFlags
+Kiln.KeyListenFlags.None = 0 -> Kiln.KeyListenFlags
+Kiln.KeyListener
+Kiln.KeyListener.Dispose() -> void
+Kiln.KeyListener.Mouse.get -> bool
+Kiln.KeyListener.Ok.get -> bool
+Kiln.KeyListener.Reason.get -> string?
 Kiln.KeyMods
 Kiln.KeyMods.Alt = 4 -> Kiln.KeyMods
 Kiln.KeyMods.Ctrl = 1 -> Kiln.KeyMods
 Kiln.KeyMods.None = 0 -> Kiln.KeyMods
 Kiln.KeyMods.Shift = 2 -> Kiln.KeyMods
+Kiln.KeyPress
+Kiln.KeyPress.Captured.get -> bool
+Kiln.KeyPress.Captured.init -> void
+Kiln.KeyPress.Chord.get -> Kiln.KeyChord
+Kiln.KeyPress.Code.get -> uint
+Kiln.KeyPress.Deconstruct(out uint VirtualKey, out uint ScanCode, out Kiln.KeyMods Mods, out bool Down, out bool Repeat, out bool TextInput, out bool Captured) -> void
+Kiln.KeyPress.Down.get -> bool
+Kiln.KeyPress.Down.init -> void
+Kiln.KeyPress.Equals(Kiln.KeyPress other) -> bool
+Kiln.KeyPress.IsMouse.get -> bool
+Kiln.KeyPress.KeyPress() -> void
+Kiln.KeyPress.KeyPress(uint VirtualKey, uint ScanCode, Kiln.KeyMods Mods, bool Down, bool Repeat, bool TextInput, bool Captured) -> void
+Kiln.KeyPress.Mods.get -> Kiln.KeyMods
+Kiln.KeyPress.Mods.init -> void
+Kiln.KeyPress.Repeat.get -> bool
+Kiln.KeyPress.Repeat.init -> void
+Kiln.KeyPress.ScanCode.get -> uint
+Kiln.KeyPress.ScanCode.init -> void
+Kiln.KeyPress.TextInput.get -> bool
+Kiln.KeyPress.TextInput.init -> void
+Kiln.KeyPress.VirtualKey.get -> uint
+Kiln.KeyPress.VirtualKey.init -> void
 Kiln.MarkerShape
 Kiln.MarkerShape.Circle = 1 -> Kiln.MarkerShape
 Kiln.MarkerShape.Cross = 4 -> Kiln.MarkerShape
@@ -1246,6 +1277,7 @@ override Kiln.GemForgeCandidatesSnapshot.ToString() -> string!
 override Kiln.KeyBinding.ToString() -> string!
 override Kiln.KeyChord.GetHashCode() -> int
 override Kiln.KeyChord.ToString() -> string!
+override Kiln.KeyPress.GetHashCode() -> int
 override Kiln.ModStatus.Equals(object? obj) -> bool
 override Kiln.ModStatus.GetHashCode() -> int
 override Kiln.ModStatus.ToString() -> string!
@@ -1333,6 +1365,10 @@ static Kiln.KeyChord.Parse(string! text) -> Kiln.KeyChord
 static Kiln.KeyChord.TryParse(string? text, out Kiln.KeyChord chord) -> bool
 static Kiln.KeyChord.operator !=(Kiln.KeyChord left, Kiln.KeyChord right) -> bool
 static Kiln.KeyChord.operator ==(Kiln.KeyChord left, Kiln.KeyChord right) -> bool
+static Kiln.KeyInput.Listen(System.Func<Kiln.KeyPress, bool>! onKey, Kiln.KeyListenFlags flags = Kiln.KeyListenFlags.Mouse) -> Kiln.KeyListener!
+static Kiln.KeyInput.PressCode(uint virtualKey, uint scanCode) -> uint
+static Kiln.KeyPress.operator !=(Kiln.KeyPress left, Kiln.KeyPress right) -> bool
+static Kiln.KeyPress.operator ==(Kiln.KeyPress left, Kiln.KeyPress right) -> bool
 static Kiln.ModStatus.operator !=(Kiln.ModStatus? left, Kiln.ModStatus? right) -> bool
 static Kiln.ModStatus.operator ==(Kiln.ModStatus? left, Kiln.ModStatus? right) -> bool
 static Kiln.Render.Available.get -> bool
@@ -1474,6 +1510,8 @@ virtual Kiln.UiTooltipProvider.Invoke(in Kiln.UiValueContext context, in Kiln.Ui
 ~override Kiln.GameScreen.Equals(object obj) -> bool
 ~override Kiln.GameScreen.ToString() -> string
 ~override Kiln.KeyChord.Equals(object obj) -> bool
+~override Kiln.KeyPress.Equals(object obj) -> bool
+~override Kiln.KeyPress.ToString() -> string
 ~override Kiln.RenderStats.Equals(object obj) -> bool
 ~override Kiln.RenderStats.ToString() -> string
 ~override Kiln.UiCursor.Equals(object obj) -> bool

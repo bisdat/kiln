@@ -52,6 +52,32 @@ test("changes survive leaving the page; another character asks first; Discard dr
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/desktop-editor.png` });
 });
 
+// The art check (an image the page loads to see whether the game art is there) can answer long after the page shows on a
+// busy machine: the page stays as the player left it. It once remounted its views when the check answered (in the
+// development build's StrictMode), closing the character menu opened meanwhile and dropping the Deck's focus.
+test("a late answer of the game art check leaves the page as it is: the character menu stays open", async ({ page }) => {
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  let asked = 0, answered = 0;
+  await page.route("**/assets-local/editor/ui/tinted/tab_mark.webp", async (route) => {
+    asked++;
+    await held;
+    await route.fulfill({ status: 404, body: "" });
+    answered++;
+  });
+  await open(page);
+  await page.locator(".ke-who-btn").click();
+  const brienne = page.getByRole("option", { name: /Brienne/ });
+  await expect(brienne).toBeVisible();
+  release();
+  // the check has answered (no art here: the hint says so) and the page has drawn what it does with the answer
+  await expect(page.locator(".kiln-editor-hint")).toContainText("Game art not found");
+  await expect.poll(() => asked > 0 && answered === asked).toBe(true);
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await expect(brienne).toBeVisible();
+  await expect(page.locator(".ke-who-btn")).toHaveAttribute("aria-expanded", "true");
+});
+
 test("backups name their kind; a restore keeps the save it replaced", async ({ page }) => {
   await open(page);
   await page.getByRole("button", { name: "Backups" }).click();

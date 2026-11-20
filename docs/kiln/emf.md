@@ -17,6 +17,11 @@ Evidence, design and the mapping of each function: [docs/re/emf-compat.md](../re
    `<game>/emf/mods/<name>.dll`. EMF's Lua mods also need the `lua` mod (`emf/mods/lua/`).
    With the Kiln Launcher, a profile's `emf` entries are loaded too (`kiln.profile`). The `emf/mods` folder still
    counts while the profile has EMF drop-ins on, which is the default.
+   EMF's Lua mods can be added in the launcher too, one folder or EMF's whole zip (its Lua mods are in
+   `game/emf/mods/`; its `examples/lua/` and `template_lua/` are left out, as EMF does not install them). EMF's `lua`
+   mod finds a Lua mod only by its folder in `emf/mods`, so activation copies each enabled one to
+   `<game>/emf/mods/<id>/` with Kiln's marker, with or without EMF's own loader, and the profile names that copy (a
+   folder of the same mod you put there yourself is used as it is). EMF's DLL mods still run from the Library.
 3. Switch it on. Most shipped EMF mods start switched off. Edit `<configDir>/emf/<id>.ini`:
    ```ini
    [big_stacks]

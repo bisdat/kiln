@@ -278,6 +278,11 @@ pub fn is_sf_mod(folder: &Path) -> bool {
     if m.get("$schema").and_then(|s| s.as_str()).is_some_and(|s| s.to_ascii_lowercase().contains("shroudforge")) {
         return true;
     }
+    // a package whose native-plugin.ini is ShroudForge's (its DLL Manager loads the DLL it names; no Lua needed), not an
+    // XHL-Core plugin's (engine_mods::is_xhl_plugin)
+    if crate::engine_mods::has_xhl_plugin_ini(folder) && !crate::engine_mods::is_xhl_plugin(folder) {
+        return true;
+    }
     folder.join("mod.lua").is_file()
         || std::fs::read_dir(folder.join("src"))
             .into_iter()

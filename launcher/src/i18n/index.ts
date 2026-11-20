@@ -133,6 +133,10 @@ export const currentLanguage = (): string => chain[0] ?? FALLBACK;
 /** The tag of the language shown, as its file is named ("zh-CN"), for Intl formatters. */
 export const currentLocale = (): string => tables.get(currentLanguage())?.tag ?? FALLBACK;
 
+/** The locale dates and numbers are written in (`toLocaleString(formatLocale(), ...)`): the shown translation's tag
+ * ("zh-CN": 2026年11月18日), or undefined while English is shown (the system's own formats, as before translations). */
+export const formatLocale = (): string | undefined => (currentLanguage() === FALLBACK ? undefined : currentLocale());
+
 function report(key: string, where: string) {
   if (!dev || reported.has(`${where}|${key}`)) return;
   reported.add(`${where}|${key}`);

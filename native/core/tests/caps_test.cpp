@@ -136,6 +136,7 @@ bool init_no() { return false; }
 }  // namespace
 KILN_SERVICE(fakeok, "kiln.fakeok", 3, &kFakeTable, &init_yes);
 KILN_SERVICE(fakeno, "kiln.fakeno", 2, &kFakeTable, &init_no);
+KILN_SERVICE(fakehooks, "kiln.hooks", 2, &kFakeTable, &init_yes);
 
 namespace {
 namespace caps = kiln::caps;
@@ -563,6 +564,50 @@ void core_rows(const std::filesystem::path& dir) {
     for (const char* f : {"items.fuel", "net.kick", "tick", "tick.wait_jobs", "world.lifecycle"})
         all = all && is(f, A, KILN_CAP_REASON_NONE) && get(f).source == "sigdb";
     CHECK(all, "features: a resolver run with every symbol found gives every feature available, source sigdb");
+    CHECK(is("hooks.read_original", A, 0) && is("hooks.code_state", A, 0),
+          "hooks inspection: verified file and running service publish both static rows");
+    const bool from_disk = sigdb::code().disk;
+    sigdb::g_code.view.disk = false;
+    caps::core_rows(true, true, "");
+    CHECK(is("hooks.read_original", U, KILN_CAP_REASON_SYMBOL_MISSING) && is("hooks.code_state", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
+              get("hooks.code_state").text == "verified executable file code unavailable; live fallback is not original code",
+          "hooks inspection: on sigdb's live-code fallback both rows are unavailable, symbol-missing (never faulted)");
+    sigdb::g_code.view.disk = from_disk;
+    kiln_service_fakehooks.available = false;
+    caps::core_rows(true, true, "");
+    CHECK(is("hooks.read_original", U, KILN_CAP_REASON_SERVICE_MISSING), "hooks inspection: missing service refuses");
+    kiln_service_fakehooks.available = true;
+    caps::core_rows(false, false, "test idle");
+    CHECK(is("hooks.code_state", U, KILN_CAP_REASON_POLICY), "hooks inspection: safe idle policy refuses");
+    static const kiln::gates::Gate inspection_gate[] = {
+        {"hooks.code_state", "hooks-code", kiln::gates::kBoth}, {nullptr, nullptr, 0}};
+    kiln::gates::use_list_for_tests(inspection_gate);
+    kiln::gates::configure(KILN_SIDE_SERVER, false, {});
+    reset();
+    caps::core_rows(true, true, "");
+    CHECK(is("hooks.code_state", U, KILN_CAP_REASON_POLICY) && is("hooks.read_original", A, 0),
+          "hooks inspection: central hold overrides support without holding the other member");
+    static const kiln::gates::Gate no_inspection_gate[] = {{nullptr, nullptr, 0}};
+    kiln::gates::use_list_for_tests(no_inspection_gate);
+    kiln::gates::configure(KILN_SIDE_SERVER, false, {});
+    reset();
+    caps::core_rows(true, true, "");
+    // kiln.tasks' pool: tasks.pool follows the pool's health (read at every registry call, outside the pool's locks)
+    {
+        static std::atomic<int> health{0};
+        CHECK(is("tasks.pool", U, KILN_CAP_REASON_SERVICE_MISSING) && get("tasks.pool").source == "core",
+              "tasks.pool: no pool source (kiln.tasks did not start): unavailable, service-missing, source core");
+        caps::tasks_pool_source(+[] { return health.load(); });
+        CHECK(is("tasks.pool", U, KILN_CAP_REASON_FAULTED), "tasks.pool: every worker start failed: unavailable, faulted");
+        health = 1;
+        CHECK(is("tasks.pool", A, 0), "tasks.pool: a retried start succeeded: the row becomes available on its own");
+        health = 0;
+        CHECK(is("tasks.pool", U, KILN_CAP_REASON_FAULTED), "tasks.pool: every worker lost again: unavailable");
+        health = 1;
+        caps::core_rows(false, false, "test idle");
+        CHECK(is("tasks.pool", U, KILN_CAP_REASON_POLICY), "tasks.pool: safe idle: policy");
+        caps::tasks_pool_source(nullptr);
+    }
     reset();
     resolve_with(dir, "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E9");  // E8 -> E9: no match on this build
     caps::core_rows(true, true, "");
@@ -1115,6 +1160,60 @@ void client_gate(const std::filesystem::path& dir) {
     reset();
 }
 
+// kiln.json "tasks": the four global knobs, their defaults, bounds, wrong types and side overrides (config.cpp).
+void tasks_config(const std::filesystem::path& dir) {
+    const auto old = t_paths.kiln;
+    t_paths.kiln = dir / "tasks-config";
+    std::filesystem::create_directories(t_paths.kiln);
+    const auto read = [&](const char* text) {
+        kiln::g_config = kiln::Config{};
+        kiln::g_doc = nlohmann::json{};
+        {
+            std::lock_guard l(t_mutex);
+            t_infos.clear();
+        }
+        write(t_paths.kiln / "kiln.json", text);
+        kiln::load_config();
+        kiln::apply_side(KILN_SIDE_SERVER);
+        return kiln::config().tasks;
+    };
+    const auto warned = [&](const char* key, const char* bound) {
+        std::lock_guard l(t_mutex);
+        int n = 0;
+        for (const auto& line : t_infos)
+            n += line.find(std::string("tasks.") + key) != std::string::npos && line.find(bound) != std::string::npos;
+        return n;
+    };
+    auto c = read(R"({})");
+    CHECK(c.workers == 0 && c.long_running_global == 8 && c.watchdog_running_s == 30 && c.watchdog_queued_s == 30,
+          "tasks config: absent: the defaults (workers 0 = clamp(cores/4, 1, 4), 8, 30 s, 30 s)");
+    c = read(R"({"tasks":{"workers":3,"long_running_global":12,"watchdog_running_s":5,"watchdog_queued_s":600}})");
+    CHECK(c.workers == 3 && c.long_running_global == 12 && c.watchdog_running_s == 5 && c.watchdog_queued_s == 600,
+          "tasks config: values inside their bounds are taken (bounds inclusive)");
+    c = read(R"({"tasks":{"workers":9,"long_running_global":0,"watchdog_running_s":4,"watchdog_queued_s":601}})");
+    CHECK(c.workers == 0 && c.long_running_global == 8 && c.watchdog_running_s == 30 && c.watchdog_queued_s == 30 &&
+              warned("workers", "1..8") == 1 && warned("long_running_global", "1..16") == 1 &&
+              warned("watchdog_running_s", "5..600") == 1 && warned("watchdog_queued_s", "5..600") == 1,
+          "tasks config: out of bounds: the default and one warning naming the key and its bound");
+    c = read(R"({"tasks":{"workers":"4","long_running_global":2.5,"watchdog_running_s":true,"watchdog_queued_s":null}})");
+    CHECK(c.workers == 0 && c.long_running_global == 8 && c.watchdog_running_s == 30 && c.watchdog_queued_s == 30 &&
+              warned("workers", "1..8") == 1 && warned("long_running_global", "1..16") == 1 &&
+              warned("watchdog_running_s", "5..600") == 1 && warned("watchdog_queued_s", "5..600") == 1,
+          "tasks config: a wrong type: the default and one warning each");
+    c = read(R"({"tasks":7})");
+    {
+        std::lock_guard l(t_mutex);
+        int n = 0;
+        for (const auto& line : t_infos) n += line.find("\"tasks\"") != std::string::npos;
+        CHECK(c.workers == 0 && c.long_running_global == 8 && n == 1, "tasks config: \"tasks\" not an object: defaults, one warning");
+    }
+    c = read(R"({"tasks":{"workers":2,"watchdog_running_s":60},"server":{"tasks":{"workers":4}},"client":{"tasks":{"workers":1}}})");
+    CHECK(c.workers == 4 && c.watchdog_running_s == 60, "tasks config: the side section overrides key by key; the rest stays");
+    c = read(R"({"tasks":{"workers":2},"server":{"tasks":{"workers":99}}})");
+    CHECK(c.workers == 0 && warned("workers", "1..8") == 1, "tasks config: an invalid side value gives the default, warned");
+    t_paths.kiln = old;
+}
+
 void client_preview(const std::filesystem::path& dir) {
     const auto old = t_paths.kiln;
     t_paths.kiln = dir / "preview-config";
@@ -1193,6 +1292,7 @@ int main(int argc, char** argv) {
     client_gate(dir);
     client_gate_threads();
     client_preview(dir);
+    tasks_config(dir);
     json_file();
     writer();
     writer_retry();

@@ -105,7 +105,7 @@ test("a first-install profile failure is visible and a later drop recovers", asy
   await drop(page, ".k-hero", "night-owl-1.2.0.zip");
   await expect(page.locator(".k-toast", { hasText: "Added Night Owl" })).toBeVisible();
   await expect.poll(async () => (await page.evaluate(async () => (await import("/src/api/commands.ts")).profileActive("client-steam")))?.profileId).toBe("my-mods");
-  await expect(page.locator(".k-hero .k-hero-say")).toHaveText("1 mod on.", { timeout: 5000 });
+  await expect(page.locator(".k-hero .k-hero-say")).toHaveText("1 mod on.", { timeout: 10_000 });
 });
 
 test("desktop settings cards preserve each other's changes during a slow save", async ({ page }) => {

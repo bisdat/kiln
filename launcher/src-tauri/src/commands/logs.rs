@@ -74,7 +74,7 @@ pub struct ReportSaved {
 
 /// What a report covers: a game, a local server, or (None) the system and the launcher only. Reads every time, keeps
 /// nothing between calls.
-fn report_input(app: &tauri::AppHandle, target: Option<LogTarget>) -> Result<kiln_manage::report::ReportInput, Error> {
+pub(crate) fn report_input(app: &tauri::AppHandle, target: Option<LogTarget>) -> Result<kiln_manage::report::ReportInput, Error> {
     let version = app.package_info().version.to_string();
     let mut input = kiln_manage::report::ReportInput {
         // a test build says so in the tool's name and in the channel line (dev.29)
@@ -92,6 +92,17 @@ fn report_input(app: &tauri::AppHandle, target: Option<LogTarget>) -> Result<kil
     if let Some(c) = crate::render::choice() {
         input.facts.push(("Launcher".into(), crate::render::says(c)));
     }
+    // Linux: WebKit's DMA-BUF renderer in this start, why, and the sticky marker's sentence (crate::render)
+    if let Some(d) = crate::render::dmabuf_report() {
+        input.facts.push(("Launcher DMA-BUF".into(), d));
+    }
+    // Linux: WebKit's sandbox in this start and the probe of bwrap; a finding when bwrap cannot start (crate::sandbox)
+    if let Some(s) = crate::sandbox::state() {
+        input.facts.push(("WebKit sandbox".into(), s.says()));
+        input.findings.extend(crate::sandbox::finding(s));
+    }
+    // Windows: the launcher's own exe or uninstaller gone from its folder (an antivirus; crate::own_files)
+    input.findings.extend(crate::own_files::finding());
     match target {
         Some(LogTarget::Game(id)) => input.install = Some(crate::state::game(&id)?),
         Some(t @ LogTarget::Server(_)) => input.game_dir = Some(target_dir(&t)?),

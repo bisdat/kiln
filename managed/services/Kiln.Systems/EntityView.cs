@@ -67,10 +67,13 @@ public unsafe ref struct EntityView
 
     /// <summary>The entity's <paramref name="component"/> to write (a write list of the program): a reference into the
     /// game's storage. The first use per entity and component in the stage marks it for the save and replication (the
-    /// game's own MarkWritten); the stage's change raises <see cref="ComponentWrittenEvent"/> in the next step.</summary>
+    /// game's own MarkWritten); the stage's change raises <see cref="ComponentWrittenEvent"/> in the next step. In the
+    /// prediction storage and a client world a write record without a tracker is written unmarked, as the game's own
+    /// update does there (the prediction storage's records have none).</summary>
     /// <typeparam name="T">The component's layout; at most the component's reflected size.</typeparam>
     /// <exception cref="InvalidOperationException">The program does not write it; an optional one the entity lacks;
-    /// <typeparamref name="T"/> is larger than the component on this build.</exception>
+    /// <typeparamref name="T"/> is larger than the component on this build; in the server world, the write cannot be
+    /// marked.</exception>
     public readonly ref T Write<T>(string component) where T : unmanaged =>
         ref Unsafe.AsRef<T>(Need(component, true, sizeof(T), out _, out _, out _));
 
@@ -387,7 +390,7 @@ internal sealed unsafe class ViewContext
     private byte[] _before = new byte[256];
     private int _used;
     private uint _entity;
-    private bool _track, _events, _watching;
+    private bool _track, _events, _watching, _local;
     private ulong _step;
     private ManagedStage? _stage;
 
@@ -400,7 +403,7 @@ internal sealed unsafe class ViewContext
         _spare = null;
         ctx._stage = stage;
         ctx.Program = stage.Wrap.Program;
-        ctx.Lists = ProgramLists.Of(t, stage.Wrap.World, stage.Wrap.Program, s->ProgramIndex);
+        ctx.Lists = ProgramLists.Of(t, stage.Wrap.Table, stage.Wrap.Program, s->ProgramIndex);
         ctx._step = s->Step;
         // the change events: server worlds only (a client world's are chapter 14's), and only while someone listens
         // the bytes before are kept for ComponentWrittenEvent and, since 07 S7, for a component watch (its Kiln origin)
@@ -408,6 +411,7 @@ internal sealed unsafe class ViewContext
         ctx._events = stage.Wrap.World == WorldKind.Server && Events.HasSubscribers<ComponentWrittenEvent>();
         ctx._watching = stage.Wrap.World == WorldKind.Server && ComponentChanges.Watching;
         ctx._track = ctx._events || ctx._watching;
+        ctx._local = stage.Wrap.World != WorldKind.Server;
         ctx._count = 0;
         ctx._used = 0;
         ctx._entity = 0;
@@ -435,7 +439,12 @@ internal sealed unsafe class ViewContext
         var rc = t->GameSliceMark(s, iter, list, index);
         if (rc == SystemsNative.InvalidArgument)
             throw new InvalidOperationException($"{Program}: {component} is not one of its write slots");
-        if (rc != SystemsNative.Ok)
+        // The prediction storage and a client world (since 0.2.0-dev.29.18): kiln.world answers Unavailable for a write
+        // record without a tracker. The engine builds the prediction storage's records without one, and the game's own
+        // update there writes without MarkWritten when the record has none; nothing there is saved or sent. So the write
+        // goes ahead unmarked, as the game's own (docs/re/world.md, "The prediction storage recomputes the stance").
+        // The server world is unchanged: a write it cannot mark is refused.
+        if (rc != SystemsNative.Ok && !(_local && rc == SystemsNative.Unavailable))
             throw new InvalidOperationException($"{Program}: {component} could not be marked for save and replication (result {rc})");
         if (_count == _recs.Length) Array.Resize(ref _recs, _count * 2);
         var at = _used;

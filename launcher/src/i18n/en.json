@@ -1263,6 +1263,7 @@
       "flame": "Flame mod",
       "shroudlink": "shroudlink mod",
       "ember": "Ember mod (doesn't run yet)",
+      "dllmod": "Enshrouded ModLoader mod",
       "proxy": "Loader",
       "data": "Game data",
       "save": "Save file",
@@ -1344,6 +1345,10 @@
       "lastBoot": "Last boot",
       "sfModsFailed": "mods did not load",
       "sfPassFailed": "startup pass failed",
+      "sfModSkipped": {
+        "one": "one mod left out, the others loaded",
+        "other": "{count} mods left out, the others loaded"
+      },
       "sfWhy": "ShroudForge: why, and what to do",
       "pickFolder": "Pick folder",
       "updateKiln": "Update Kiln",
@@ -1352,7 +1357,8 @@
       "notLoading": "Kiln is not loading",
       "mouthAria": "{word}: {sub}",
       "sfModsTitle": "ShroudForge mods did not load",
-      "sfPassTitle": "ShroudForge's startup pass failed"
+      "sfPassTitle": "ShroudForge's startup pass failed",
+      "sfSkippedTitle": "ShroudForge left a mod out"
     },
     "mods": {
       "notTaken": "not taken",
@@ -1512,6 +1518,10 @@
       "nothingAdded": "Nothing was added",
       "addedOne": "Added {name}",
       "addedMany": "Added {count} mods",
+      "updatedOne": "Updated {name}: {from} → {to}",
+      "updatedName": "Updated {name}",
+      "updatedMany": "Updated {count} mods",
+      "addedAndUpdated": "{added} added, {updated} updated",
       "needs": "Needs {ids}",
       "alreadyOne": "{name} already on",
       "alreadyMany": "{count} mods already on",
@@ -1595,7 +1605,9 @@
       "restoreGoes": "Your profiles and settings from before the beta go back before the restart.",
       "settingsStay": "Your current profiles and settings stay.",
       "noCopy": "No complete copy from before the beta: {warnings}",
-      "downloadingDots": "Downloading…"
+      "downloadingDots": "Downloading…",
+      "upscaler": "Upscaler behind the game's FSR 3",
+      "upscalerNow": "Upscaler now"
     }
   },
   "mods": {
@@ -2065,8 +2077,8 @@
       "stopping": "Stopping.",
       "stoppedWithKiln": "Stopped. Start runs it with {runner}, Kiln {kiln}.",
       "stoppedWith": "Stopped. Start runs it with {runner}.",
-      "stoppedKiln": "Stopped. Start runs it , Kiln {kiln}.",
-      "stopped": "Stopped. Start runs it .",
+      "stoppedKiln": "Stopped. Start runs it with Kiln {kiln}.",
+      "stopped": "Stopped. Press Start to run it.",
       "updateGame": "Update the game (SteamCMD)",
       "upToDate": "Server files are up to date",
       "updateKilnMenu": "Update Kiln…",
@@ -2453,6 +2465,7 @@
         "one": "{names} needs a newer Kiln.",
         "other": "{names} need a newer Kiln."
       },
+      "graphicsTool": "{name} is installed ({file})",
       "settingAsi": "One Steam setting for Ultimate ASI Loader",
       "notLoading": "Kiln is not loading",
       "didNotStart": "Kiln did not start",
@@ -2622,6 +2635,25 @@
     },
     "partsMissing": "Parts missing",
     "partsMissingText": "Kiln {version} has parts this game does not: {parts}. Mods that need them do not load until they are in.",
+    "repair": "Repair",
+    "filesMissing": "Files missing",
+    "filesMissingText": {
+      "one": "{count} of Kiln's files is missing: {files}",
+      "other": "{count} of Kiln's files are missing: {files}"
+    },
+    "filesMissingAntivirus": {
+      "one": "An antivirus may have removed it.",
+      "other": "An antivirus may have removed them."
+    },
+    "filesMissingRepair": {
+      "one": "Repair puts it back.",
+      "other": "Repair puts them back."
+    },
+    "filesMissingNoBundle": {
+      "one": "Kiln {version} is not among the bundles below: update Kiln, or add its bundle, to put it back.",
+      "other": "Kiln {version} is not among the bundles below: update Kiln, or add its bundle, to put them back."
+    },
+    "antivirusHelp": "Antivirus help",
     "chainTitle": "What the game loads, in order",
     "chainLive": "Live, from this boot.",
     "chainNotLive": "Live statuses show after a start.",
@@ -2717,6 +2749,7 @@
       "httpModpacksHint": "Off: https only.",
       "dailyUpdates": "Check for mod updates once a day",
       "dailyUpdatesHint": "Off: only when you press Check for updates above your mods. A check reads the pages your mods name (GitHub, and Nexus Mods with your sign-in) and shows a notice with a link. It never downloads or installs a mod.",
+      "dailyUpdatesHintNoNexus": "Off: only when you press Check for updates above your mods. A check reads the GitHub pages your mods name and shows a notice with a link. It never downloads or installs a mod.",
       "steamRoots": "Extra Steam folders",
       "steamRootsHint": "Libraries Kiln does not find on its own."
     },
@@ -2736,9 +2769,24 @@
       "desktopOn": "Kiln Launcher is in the app menu",
       "desktopOff": "Kiln Launcher is out of the app menu"
     },
+    "sandbox": {
+      "label": "WebKit's sandbox",
+      "intro": "Applies at the next start. Off: the launcher's page runs without WebKit's process sandbox; it shows only the launcher's own pages and, from the internet, only images from Nexus Mods.",
+      "unused": "This start: WebKit does not use its sandbox (its version for this launcher uses it only when WEBKIT_FORCE_SANDBOX=1 is set).",
+      "on": "This start: WebKit's sandbox is on (WEBKIT_FORCE_SANDBOX=1 is set).",
+      "off": "This start: WebKit's sandbox is off.",
+      "argOff": "This start: off, because {flag} was given; it wins over this switch.",
+      "argOn": "This start: {flag} was given and wins over this switch.",
+      "env": "This start: KILN_LAUNCHER_WEBKIT_SANDBOX is set and wins over this switch.",
+      "yours": "This start: WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS={value} is set in your environment and decides, whatever this switch says.",
+      "probe": "On this system: {says}.",
+      "nextOn": "The next start leaves WebKit's sandbox on",
+      "nextOff": "The next start turns WebKit's sandbox off"
+    },
     "render": {
       "intro": "For a window that stays black. Applies at the next start.",
       "noGpu": "This start draws without the GPU.",
+      "noGpuMarker": "This start draws without the GPU because this switch is on, and every start does until you turn it off.",
       "gpu": "This start draws with the GPU.",
       "noGpuRestart": "This start draws without the GPU: the page did not start with it.",
       "gpuRestart": "This start draws with the GPU: the page did not start with it.",
@@ -2771,6 +2819,178 @@
       "unavailable": "kiln.json unavailable",
       "overrides": "\"client\" and \"server\" override sections are kept as they are.",
       "chatCompletionHint": "Tab completion is experimental and off by default. Enable ui.chatCompletion to suggest Kiln commands in the game's chat; restart after changing it."
+    },
+    "graphics": {
+      "title": "Graphics",
+      "sub": "Kiln's own graphics tools in the game, also in the game's Kiln menu (Insert) under Graphics. The frame cap and the readout apply at once, DLSS settings when the game next sets up DLSS, the upscaler when the game next sets up FSR.",
+      "aside": {
+        "line": "{tool}: {effect}",
+        "optiscaler": "OptiScaler is installed ({file})",
+        "streamline": "NVIDIA Streamline is in the game folder ({file})",
+        "vkfg": "A DLSS frame generation mod is installed ({file})",
+        "dlsstweaks": "DLSSTweaks is installed ({file})",
+        "nvngx": "Another DLSS loader is in the game folder ({file})",
+        "unknown": "Another graphics tool is in the game folder ({file})",
+        "frameCap": "Kiln's frame cap and DLSS settings step aside; the readout still works.",
+        "frameCapUpscaler": "Kiln's frame cap, DLSS settings and upscaler choice step aside; the readout still works.",
+        "dlss": "Kiln's DLSS settings step aside; the frame cap and the readout still work.",
+        "upscaler": "Another upscaler tool's files are next to the game ({file})",
+        "upscalerOnly": "Kiln's upscaler choice steps aside; the frame cap, DLSS settings and readout still work."
+      },
+      "labels": {
+        "fpsCap": "Frame cap",
+        "dlssPreset": "DLSS render preset",
+        "dlssScale": "DLSS render size",
+        "dlssRenderScale": "DLSS render scale, every mode",
+        "dlssQualityScale": "DLSS render scale, Quality",
+        "dlssBalancedScale": "DLSS render scale, Balanced",
+        "dlssPerformanceScale": "DLSS render scale, Performance",
+        "dlssUltraPerformanceScale": "DLSS render scale, Ultra Performance",
+        "readout": "Readout"
+      },
+      "upscaler": {
+        "title": "Behind the game's FSR 3",
+        "label": "Upscaler",
+        "hint": "Choose FSR 3 as the upscaler in the game's graphics settings: Kiln runs your choice in its place. A change applies at once while FSR 3 runs in a world, else when a world loads. Chosen for the first time while the game runs, it applies from the next game start.",
+        "choice": {
+          "game": "The game's own FSR 3",
+          "amd": "AMD FSR",
+          "xess": "Intel XeSS"
+        },
+        "choiceHint": {
+          "game": "Nothing changes: the game's FSR 3 runs as it does without Kiln.",
+          "amd": "AMD FSR 3.1, or FSR 4 as an experimental choice on graphics cards and drivers that run it. Needs AMD's files (70 MB).",
+          "xess": "Intel's XeSS, on Intel, AMD and NVIDIA cards. Needs Intel's file (74 MB)."
+        },
+        "amdLabel": "AMD FSR version",
+        "amd": {
+          "auto": "Auto (FSR 3.1 for now)",
+          "fsr3": "FSR 3.1",
+          "fsr4": "FSR 4 (experimental)"
+        },
+        "amdHint": "Auto runs FSR 3.1 until FSR 4 is confirmed in this game. FSR 4 (experimental) lets AMD choose: FSR 4 on graphics cards and drivers that run it, FSR 3.1 on the others; it may render dark scenes too dark.",
+        "heading": {
+          "now": "Now",
+          "last": "Last game",
+          "plan": "When you play"
+        },
+        "offer": "{name}'s files are not in this game yet. Until they are, the game's own FSR 3 runs.",
+        "offerDamaged": "Some of {name}'s files are missing or changed. Until you download them again, the game's own FSR 3 runs.",
+        "offerRunning": "Close the game to download them: the launcher does not change the game's files while it runs.",
+        "running": {
+          "off": "Kiln's upscaler is not in use behind the game's FSR 3 now.",
+          "notFsr": "The game is not upscaling with FSR 3 right now: FSR 3 is not chosen in the game's graphics settings, or no world is loaded.",
+          "gameFsr3": "The game's own FSR 3 runs.",
+          "amdFsr4": "AMD FSR 4 runs in place of the game's FSR 3.",
+          "amdFsr31": "AMD FSR 3.1 runs in place of the game's FSR 3.",
+          "xess": "Intel XeSS runs in place of the game's FSR 3.",
+          "unknown": "Kiln cannot tell what upscales behind the game's FSR 3: its parts are of different versions."
+        },
+        "version": "Version {version}.",
+        "amdFsr3Auto": "AMD's selection chose FSR 3.1: FSR 4 does not run on this graphics card or driver.",
+        "changedNow": "You have chosen {upscaler} since that game started: it applies when the game next sets FSR up, or from its next start.",
+        "restartNow": "Restart the game to use {upscaler}. Until then the game's own FSR 3 runs.",
+        "detail": "Details: {detail}",
+        "plan": {
+          "amd": "With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR 3.1 in its place. FSR 4 is available as an experimental choice.",
+          "amdFsr3": "With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR 3.1 in its place.",
+          "amdFsr4": "With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR in its place: FSR 4 where your graphics card and driver run it, else FSR 3.1. FSR 4 is experimental and may render dark scenes too dark.",
+          "xess": "With FSR 3 chosen in the game's graphics settings, Kiln runs Intel XeSS in its place."
+        },
+        "reason": {
+          "restart": "{upscaler} runs from the next start of the game: Kiln sets it up when the game starts.",
+          "filesMissing": "{upscaler}'s files are not downloaded yet, so the game's own FSR 3 runs.",
+          "filesBad": "A file of {upscaler} is not the one Kiln expects (its size or SHA-256 differs), so Kiln does not load it. Download it again.",
+          "loadFailed": "A file of {upscaler} did not load, so the game's own FSR 3 runs.",
+          "device": "Your graphics card or driver lacks a Vulkan feature {upscaler} needs, so the game's own FSR 3 runs.",
+          "createFailed": "{upscaler} could not be set up for this resolution, so the game's own FSR 3 runs.",
+          "runtimeFailed": "{upscaler} failed while it upscaled. The game's own FSR 3 runs until you restart the game.",
+          "fault": "{upscaler} or Kiln's code around it faulted. The game's own FSR 3 runs until you restart the game.",
+          "aside": "Kiln steps aside for {tools}, so it does not change the game's FSR 3.",
+          "noSignatures": "Kiln does not know this game build's FSR 3 yet, so the game's own FSR 3 runs. A Kiln update for this game build fixes that.",
+          "inputs": "The game's images are not what {upscaler} takes, so the game's own FSR 3 runs.",
+          "unavailable": "{upscaler} is not available in this build of Kiln or on this system, so the game's own FSR 3 runs.",
+          "waiting": "{upscaler} is ready. It starts as soon as the game runs FSR 3: load a world with FSR 3 chosen in the game's graphics settings.",
+          "noVulkan": "Kiln did not see the game set up its graphics device in this session. Restart the game for {upscaler}.",
+          "unknown": "{upscaler} does not run (reason {number} from a newer Kiln), so the game's own FSR 3 runs."
+        },
+        "tools": {
+          "optiscaler": "OptiScaler",
+          "streamline": "NVIDIA Streamline (a frame generation mod)",
+          "vkfg": "a DLSS frame generation mod (EnshroudedVKFG.ini)",
+          "dlsstweaks": "DLSSTweaks",
+          "nvngx": "another DLSS loader (nvngx.dll next to the game)",
+          "ngxPatched": "another tool that hooks DLSS",
+          "overlayOff": "Kiln's overlay being off",
+          "upscaler": "another upscaler tool (AMD's or Intel's upscaler files next to the game, or a changed FSR 3 pass)",
+          "unknown": "another graphics tool"
+        }
+      }
+    },
+    "upscalers": {
+      "title": "Upscaler files",
+      "sub": "AMD's and Intel's upscaler files, for Kiln to run behind the game's FSR 3 option. Kiln downloads them only when you ask, into the game's kiln/vendor folder.",
+      "purpose": "Kiln checks every file against the size and SHA-256 it pinned, and the game checks them again before it loads them. Remove deletes them again.",
+      "unreadable": "The upscaler files could not be read",
+      "starting": "Starting the download",
+      "unavailable": "Not available in this build of Kiln.",
+      "gameRunning": "Close the game to download or remove these files: the launcher does not change the game's files while it runs.",
+      "damaged": "A file of it is missing or changed. Download it again.",
+      "failedUnknown": "The download failed.",
+      "failedTitle": "{name} was not downloaded",
+      "size": "{size} from {host}.",
+      "partial": "{done} of it arrived already: the download goes on from there.",
+      "installed": "Version {version}, {size} on disk.",
+      "update": "Version {installed} is downloaded. Version {version} is out: {size} from {host}.",
+      "state": {
+        "notDownloaded": "Not downloaded",
+        "downloading": "Downloading",
+        "downloaded": "Downloaded",
+        "updateAvailable": "Update available",
+        "unavailable": "Not available in this build",
+        "failed": "Failed"
+      },
+      "action": {
+        "download": "Download",
+        "continue": "Continue download",
+        "update": "Update",
+        "tryAgain": "Try again",
+        "downloadAgain": "Download again"
+      },
+      "actionLabel": {
+        "download": "Download {name}",
+        "continue": "Continue the download of {name}",
+        "update": "Update {name}",
+        "tryAgain": "Try the download of {name} again",
+        "downloadAgain": "Download {name} again",
+        "remove": "Remove {name}",
+        "cancel": "Cancel the download of {name}"
+      },
+      "done": "{name} is downloaded",
+      "doneDetail": "Kiln checked every file. They are in {folder} in the game folder.",
+      "removeTitle": "Remove {name}?",
+      "removeText": "Kiln deletes {folder} ({size}) from the game folder. You can download it again later.",
+      "removed": "{name} is removed",
+      "removedDetail": "{size} freed.",
+      "removeFailed": "{name} was not removed",
+      "dialog": {
+        "title": "Download {name}",
+        "what": "What",
+        "size": "Size",
+        "files": {
+          "one": "{size}, {count} file",
+          "other": "{size}, {count} files"
+        },
+        "from": "From",
+        "fromText": "{host}: {vendor}'s own repository on GitHub, version {version}",
+        "to": "Goes to",
+        "toText": "{folder} in the game folder",
+        "licenseLead": "{vendor} licenses these files under the {license}. Here is its text in full. Read it before you agree.",
+        "licenseFrom": "Where this text is",
+        "unreadable": "The licence text could not be read",
+        "privacy": "Kiln asks {host} for these files and sends nothing else. {host} sees your IP address and a user agent that names Kiln and its version.",
+        "agree": "I agree, download"
+      }
     },
     "art": {
       "icons": "{count:N0} icons",
@@ -3267,8 +3487,14 @@
       "kilnWhat": "Kiln {version} · {what}"
     },
     "play": {
+      "applyingProfile": "Applying profile…",
+      "installingKiln": "Installing Kiln…",
+      "removingKiln": "Removing Kiln…",
+      "applyingAria": "{what} ({title})",
       "stoppedStart": "Kiln stopped the start",
       "waitingForKiln": "Waiting for Kiln",
+      "stopWaiting": "Stop waiting",
+      "stopWaitingTip": "Steam has not started the game. Stop waiting and show Play again, for example after you cancelled the launch in Steam. Nothing is closed.",
       "noWord": "No word from Kiln",
       "hookedNothing": "Kiln hooked nothing",
       "kilnStopped": "Kiln stopped",
@@ -3422,6 +3648,8 @@
       "undoKeptDetail.one": "{count} mod was changed since this add.",
       "undoKeptDetail.other": "{count} mods were changed since this add.",
       "undone": "Undone",
+      "updatedFromTo": "Updated {name}: {from} → {to}",
+      "addedAndUpdated": "Added {added}, updated {updated}",
       "noGame": "No game yet",
       "noGameModpack": "Find Enshrouded on Play before installing a modpack.",
       "headingAddedOff": "Added, switched off",
@@ -3615,6 +3843,8 @@
       "whereHint": "Kiln only reads there and shows a notice with a link. It never downloads or installs a version.",
       "githubReleases": "GitHub releases",
       "nexusFile": "A file on Nexus Mods",
+      "nexusOff": "Nexus Mods is switched off in this build",
+      "nexusOffBody": "This mod's saved source is the Nexus Mods file {destination}. Kiln keeps it, but does not check it in this build. Save a GitHub source here to check there instead.",
       "repository": "Repository",
       "repositoryHint": "owner/repo, as in github.com/owner/repo.",
       "releaseTag": "Release tag",
@@ -3664,6 +3894,22 @@
       "failed": "Could not roll back {name}",
       "onAgain": "{name} is on {version} again",
       "changedSince": "{name} was changed since the roll back."
+    },
+    "ownFiles": {
+      "title": {
+        "one": "A file of the launcher is missing",
+        "other": "Files of the launcher are missing"
+      },
+      "text": {
+        "one": "{files} is gone from the launcher's folder. An antivirus may have quarantined it. Restore it from the quarantine and add an exclusion, or install the launcher again.",
+        "other": "{files} are gone from the launcher's folder. An antivirus may have quarantined them. Restore them from the quarantine and add an exclusion, or install the launcher again."
+      }
+    },
+    "runtimeBlocked": {
+      "file": "Windows did not let Kiln write {file}.",
+      "why": "An antivirus or another program may be blocking it.",
+      "fix": "Add an exclusion for the game folder in your antivirus, then try again.",
+      "raw": "Details: {error}"
     },
     "runtimeChange": {
       "alreadyRunning": "A runtime change is already running",
@@ -4117,6 +4363,448 @@
     "word": {
       "steam": "through Steam",
       "direct": "directly"
+    }
+  },
+  "community": {
+    "nav": "Community",
+    "navCount": {
+      "one": "{count} new reply from Kiln support",
+      "other": "{count} new replies from Kiln support"
+    },
+    "title": "Community",
+    "say": {
+      "out": "Kiln's Discord: help from the Kiln team and from other players. All of it is optional.",
+      "in": "Signed in as {name}.",
+      "unread": {
+        "one": "Signed in as {name}. {count} new reply from Kiln support.",
+        "other": "Signed in as {name}. {count} new replies from Kiln support."
+      },
+      "offline": "You're offline. Your posts show as they were at {time}.",
+      "offlineOut": "You're offline. This page needs the internet.",
+      "relay": "Kiln support isn't answering right now. Your posts show as they were at {time}."
+    },
+    "join": "Join the Kiln Discord",
+    "openDiscord": "Open the Kiln Discord",
+    "help": {
+      "title": "Get help",
+      "sub": "Kiln support answers in #support on the Kiln Discord.",
+      "text": "Send a report and the launcher writes the post for you: your words, what the report found, and your logs for the Kiln team.",
+      "send": "Send a report",
+      "save": "Save report instead",
+      "needsSignIn": "Sending needs a Discord sign-in. You can write the report first."
+    },
+    "posts": {
+      "title": "Your support posts",
+      "emptyOut": "Sign in to see your posts and their replies here.",
+      "empty": "No posts yet. A report you send shows here with its replies.",
+      "status": {
+        "waiting": "Waiting",
+        "replied": "New reply",
+        "repliedSeen": "Replied",
+        "solved": "Solved",
+        "closed": "Closed"
+      },
+      "lastReply": "{name} replied {ago}.",
+      "lastReplyTeam": "{name} of the Kiln team replied {ago}.",
+      "noReply": "Sent {ago}. No reply yet.",
+      "replies": {
+        "one": "{count} reply",
+        "other": "{count} replies"
+      },
+      "open": "Open in Discord",
+      "more": "More for {title}",
+      "copyLink": "Copy link",
+      "fixed": "It's fixed",
+      "fixedDone": "Marked as solved",
+      "fixedDetail": "Your post has the Solved tag now. Thanks for saying so.",
+      "delete": "Delete my post",
+      "deleteAsk": "Delete this post?",
+      "deleteText": "The post and its replies are removed from Discord. The Kiln team's copy of your report zip is deleted too.",
+      "deleted": "Post deleted",
+      "copied": "Link copied",
+      "asOf": "As of {time}"
+    },
+    "news": {
+      "title": "News",
+      "all": "All releases",
+      "offline": "News loads when you're back online."
+    },
+    "events": {
+      "title": "Events",
+      "empty": "No events planned right now."
+    },
+    "links": {
+      "title": "Links",
+      "docs": "Kiln's docs",
+      "issues": "Bug reports on GitHub",
+      "nexus": "Kiln on Nexus Mods",
+      "download": "Download page"
+    },
+    "account": {
+      "title": "Discord",
+      "out": "Not signed in.",
+      "outHint": "Sign in so the launcher can post your reports and show their replies here. It can't read your messages or see your servers.",
+      "signIn": "Sign in with Discord",
+      "alsoJoin": "Also join the Kiln Discord",
+      "member": "In the Kiln Discord",
+      "notMember": "Not in the Kiln Discord yet",
+      "tester": "Tester",
+      "signOut": "Sign out",
+      "forget": "Sign out and forget me",
+      "signedOut": "Signed out",
+      "signedOutDetail": "The launcher holds nothing of your Discord account now.",
+      "whatIsSent": "What is sent and kept"
+    },
+    "notify": {
+      "label": "Tell me when Kiln support replies",
+      "hint": "A system notification, also while the launcher is in the background.",
+      "title": "Kiln support replied",
+      "detail": "{by} replied to “{title}”."
+    },
+    "presence": {
+      "title": "Rich Presence",
+      "label": "Show Kiln on my Discord profile",
+      "hint": "While you play: Enshrouded with Kiln, how many mods are on, and for how long.",
+      "on": "On. It shows while you play.",
+      "off": "Off.",
+      "noDiscord": "Discord isn't running on this PC. It shows once Discord is open.",
+      "noDiscordDeck": "Discord isn't running on this Deck. It shows once Discord is open.",
+      "preview": "How others see it on your Discord profile",
+      "never": "Never shown: server names, world names, your character, or which mods you use.",
+      "playing": "Playing",
+      "name": "Kiln",
+      "details": "Enshrouded with Kiln",
+      "state": {
+        "one": "{count} mod on",
+        "other": "{count} mods on"
+      },
+      "elapsed": "{time} elapsed",
+      "getKiln": "Get Kiln",
+      "joinDiscord": "Join the Discord",
+      "onToast": "Rich Presence is on",
+      "offToast": "Rich Presence is off"
+    },
+    "signIn": {
+      "title": "Sign in with Discord",
+      "text": "Your browser opens Discord's sign-in page through frostdev.io. You approve Kiln there, then come back here.",
+      "gets": "Kiln gets your Discord name, ID and picture. Nothing else: not your email, your messages, your friends or your servers.",
+      "joinHint": "Discord then also asks to let Kiln add you to the server.",
+      "open": "Open the sign-in page",
+      "waitingTitle": "Finish in your browser",
+      "waiting": "Approve Kiln on the page that opened. This window moves on by itself.",
+      "waitingWord": "Waiting for Discord",
+      "again": "Open the page again",
+      "done": "Signed in as {name}",
+      "doneDetail": "Your reports can go straight to Kiln support now.",
+      "canceled": "You cancelled on Discord's page. Nothing changed.",
+      "expired": "The sign-in timed out after 10 minutes. Try again.",
+      "denied": "The sign-in was declined. Nothing changed.",
+      "offline": "You're offline. Signing in needs the internet.",
+      "relay": "frostdev.io isn't answering. Try again in a few minutes.",
+      "tooMany": "Too many sign-ins came from your network in the last hour. Try again in {wait}.",
+      "retry": "Try again",
+      "tabDone": "Signed in. You can close this tab and go back to the launcher.",
+      "tabFailed": "The sign-in did not finish. You can close this tab and go back to the launcher."
+    },
+    "kind": {
+      "noload": "Kiln doesn't load",
+      "mod": "A mod doesn't work",
+      "crash": "The game crashes",
+      "launcher": "The launcher",
+      "server": "My server",
+      "something": "Something else"
+    },
+    "send": {
+      "title": "Send to Kiln support",
+      "checking": "Reading your setup",
+      "line": "What went wrong, in one line",
+      "linePh": {
+        "noload": "Kiln doesn't load since the last game update",
+        "mod": "Big Stacks doesn't change the stack sizes",
+        "crash": "The game crashes when I open the map",
+        "launcher": "The launcher shows a black window",
+        "server": "My server turns away players with Kiln",
+        "something": "Say it in a few words"
+      },
+      "lineCount": "{count} of {max}",
+      "lineNeeded": "Write one line first.",
+      "kind": "What kind of problem?",
+      "more": "Anything else? (optional)",
+      "morePh": "What were you doing? Did it work before? What have you tried?",
+      "next": "Next: check what is sent",
+      "known": {
+        "word": "Known problem",
+        "fixes": "If this fixes it, there's nothing to send. If it doesn't, carry on.",
+        "copy": "Copy the line",
+        "copied": "Line copied",
+        "action": {
+          "mods": "Show my mods",
+          "runtime": "Open Runtime",
+          "logs": "Open the Logs page",
+          "settings": "Open Settings"
+        }
+      },
+      "check": {
+        "title": "Check what is sent",
+        "public": "In #support, for everyone",
+        "publicHint": "Posted by the Kiln bot with you mentioned, so Discord tells you about replies.",
+        "postTitle": "Title",
+        "words": "Your words",
+        "noWords": "None",
+        "kind": "Kind",
+        "tags": "Tags",
+        "found": "What the report found",
+        "versions": "Versions",
+        "level": {
+          "problem": "Problem",
+          "warning": "Warning",
+          "info": "Note"
+        },
+        "zip": "The report zip",
+        "zipHint": "{size}, {count} files: Kiln's logs and state files, the profile, the launcher's log and lists of the game folder.",
+        "showFiles": "Show the files",
+        "hideFiles": "Hide the files",
+        "who": "Who sees the report zip?",
+        "team": "The Kiln team only",
+        "teamHint": "Sent to a channel only the Kiln team can read. It's deleted there after 30 days.",
+        "everyone": "Everyone in #support",
+        "everyoneHint": "Attached to your post, so other players can look too.",
+        "noZip": "Nobody",
+        "noZipHint": "Only the post goes. The team may ask you for the zip.",
+        "redacted": "In every file your user name, PC name, Steam names, Steam ID and IP addresses are replaced. Saves and mod settings are never in it. A character or server name you chose can still be in a log line.",
+        "as": "Posting as {name}",
+        "send": "Send to Kiln support",
+        "signInToSend": "Sign in with Discord to send",
+        "signInHint": "Sending needs a Discord sign-in. Your draft stays here while you sign in.",
+        "sending": "Sending"
+      },
+      "err": {
+        "offlineTitle": "You're offline",
+        "offline": "Your draft is kept. Send it when you're back online, or save the report and post it yourself.",
+        "relayTitle": "Kiln support can't be reached",
+        "relay": "frostdev.io isn't answering. Your draft is kept. Try again in a few minutes.",
+        "notMemberTitle": "You're not in the Kiln Discord yet",
+        "notMember": "Replies happen on Discord, so join the server first. Then come back and press Send.",
+        "joined": "I've joined",
+        "rateTitle": "That's a lot of reports",
+        "rate": "You sent {sent} reports in the last hour. Wait for a reply, or add to your last post on Discord. You can send again in {wait}.",
+        "rateDay": "You sent {sent} reports in the last 24 hours. Wait for a reply, or add to your last post on Discord. You can send again in {wait}.",
+        "rateNetwork": "Many reports came from your network in the last 24 hours, so sending is paused for now. You can send again in {wait}.",
+        "openLast": "Open my last post",
+        "tooNewTitle": "This Discord account is too new",
+        "tooNew": "Kiln support takes reports from Discord accounts that are at least 3 days old. Your draft is kept: send it then, or save the report now.",
+        "staleTitle": "The report was made again",
+        "stale": "It was prepared over 30 minutes ago, so the launcher made a new one. Check what is sent, then press Send again.",
+        "bigTitle": "The report is too big to send",
+        "big": "This report is {size}, and up to {limit} can be sent. Send the post without the zip, then save the report and give it to the team on Discord.",
+        "sendWithout": "Send without the zip",
+        "saveReport": "Save report",
+        "stillNot": "You're still not in the Kiln Discord. Join with the invite, then press I've joined.",
+        "prepareTitle": "The report could not be made",
+        "discordTitle": "Discord didn't accept the report",
+        "discord": "Discord said: {reason}. This is on Kiln's side, not your connection. Your report is kept: try again later, or save the report and post it yourself.",
+        "discordNoReason": "This is on Kiln's side, not your connection. Your report is kept: try again later, or save the report and post it yourself.",
+        "discordLimitTitle": "Discord asks Kiln support to wait",
+        "discordLimit": "Discord limits how often Kiln support can post, and the limit is reached right now. This is not your connection. Your report is kept: try again in {wait}."
+      },
+      "sent": {
+        "title": "Sent",
+        "text": "Your post is up in #support: “{title}”.",
+        "team": "The report zip went to the Kiln team only.",
+        "public": "The report zip is attached to your post.",
+        "none": "The post went without the zip.",
+        "replies": "Replies show on the Community page, and Discord tells you too.",
+        "open": "Open in Discord"
+      }
+    },
+    "privacy": {
+      "title": "What is sent and kept",
+      "never": "Nothing is sent until you press a button on a screen that shows what goes.",
+      "signInTitle": "When you sign in",
+      "signIn": "Kiln gets your Discord user ID, name and picture. frostdev.io keeps them while you're signed in. It never gets your email, your password, your messages, your friends or your servers.",
+      "join": "If you tick Also join, frostdev.io adds you to the Kiln Discord once, right then.",
+      "reportTitle": "When you send a report",
+      "reportPublic": "In #support, for everyone: your line, your words, the kind of problem, what the report found, the versions, how many mods are on and your Discord name.",
+      "reportTeam": "For the Kiln team only, unless you choose otherwise: the report zip. It's deleted from the team's channel after 30 days.",
+      "presenceTitle": "Rich Presence",
+      "presence": "Only while it's on and you play, and only to the Discord app on this PC: Enshrouded with Kiln, how many mods are on, and the time. Never server or world names, your character, or which mods you use.",
+      "testerTitle": "When you volunteer as a tester",
+      "tester": "The Kiln team gets this PC's graphics card, driver, video memory, system and how the game runs. Your results go to the build's post in #testing. A support report you attach goes to the team only.",
+      "keptTitle": "What frostdev.io keeps",
+      "kept": "A fingerprint of your sign-in, until you sign out or for 90 days unused. Your Discord ID with the list of your posts, so the launcher can show their replies. Your name and picture while you're signed in. Your hardware if you test. A Deck's sign-in code and the network it came from, for 10 minutes. Counts for the sending limits, for a day. A post leaves the list 90 days after it's solved or closed, and Sign out and forget me deletes all of it at once. Report zips are never stored on frostdev.io.",
+      "undoTitle": "Undo any of it",
+      "undo": "Sign out. Sign out and forget me. Delete a post from its menu. Stop testing. Turn Rich Presence off.",
+      "forgetAsk": "Sign out and forget you?",
+      "forgetText": "frostdev.io deletes your name, your ID, your hardware, the list of your posts and the Kiln team's copies of your report zips. Your posts stay on Discord until you delete them.",
+      "alsoDelete": "Also delete my support posts from Discord",
+      "forgetFailedTitle": "Signed out on this PC only",
+      "forgetFailed": "frostdev.io didn't hear it, so it still keeps what it had. Sign in again and use Sign out and forget me, or write to admin@frostdev.io.",
+      "ai": "The Kiln team uses AI assistants. They help read support posts and reports, and they write many of the replies. The privacy page names them.",
+      "page": "The full privacy page",
+      "terms": "Terms",
+      "pageUrl": "frostdev.io/kiln/privacy"
+    },
+    "banner": {
+      "send": "Send to Kiln support",
+      "crashTitle": "The game closed unexpectedly",
+      "crash": "It closed at {time}, {after} after it started. Kiln wrote a crash report.",
+      "crashReport": "See the crash report",
+      "afterSeconds": {
+        "one": "{count} second",
+        "other": "{count} seconds"
+      },
+      "afterMinutes": {
+        "one": "{count} minute",
+        "other": "{count} minutes"
+      },
+      "afterHours": {
+        "one": "{count} hour",
+        "other": "{count} hours"
+      }
+    },
+    "tester": {
+      "title": "Help test Kiln",
+      "pitch": "Kiln's next graphics work needs hardware the team doesn't have: AMD RX 6000 and newer for FSR 4, Intel Arc for XeSS, NVIDIA RTX 40 and 50 for frame generation, and the Steam Deck.",
+      "yours": "This PC can test {what}.",
+      "yoursDeck": "This Steam Deck can test the Steam Deck.",
+      "any": "Every PC helps: each test build needs a few players on it.",
+      "volunteer": "Volunteer as a tester",
+      "you": "You're a tester.",
+      "joinText": "Testers get the Tester role on the Kiln Discord, the test builds, and a short checklist for each one. It takes about 15 minutes a build.",
+      "hwTitle": "What the launcher shares about this PC",
+      "hwTitleDeck": "What the launcher shares about this Deck",
+      "hwHint": "Sent only when you press Volunteer, to the Kiln team, so they know what you can test.",
+      "gpu": "Graphics card",
+      "driver": "Driver",
+      "vram": "Video memory",
+      "os": "System",
+      "runner": "Runs the game with",
+      "covers": "Can test",
+      "beta": "Switch the launcher to test builds",
+      "betaHint": "You can switch back to the release in Settings at any time.",
+      "send": "Volunteer",
+      "done": "You're a tester",
+      "doneDetail": "You have the Tester role. Each test build's checklist shows on the Community page.",
+      "leave": "Stop testing",
+      "leaveDone": "You're not a tester any more",
+      "signInFirst": "Volunteering needs a Discord sign-in: the Tester role is on the Kiln Discord.",
+      "plan": {
+        "title": "Test {build}",
+        "say": "{done} of {count} steps tried. Open until {until}.",
+        "open": "Open the checklist",
+        "for": "For {what}",
+        "result": {
+          "worked": "Worked",
+          "failed": "Didn't work",
+          "skipped": "Couldn't try",
+          "none": "Not tried"
+        },
+        "note": "One line (optional)",
+        "notePh": "What happened?",
+        "attach": "Attach a support report for the Kiln team",
+        "attachHint": "The zip goes to the team only, as with a report to support.",
+        "sendResults": "Send results",
+        "sent": "Results sent {ago}. The Kiln team hasn't read them yet.",
+        "read": "{name} of the Kiln team read your results {ago}.",
+        "replied": "They also replied in the build's post on Discord.",
+        "openPost": "Open the build's post",
+        "noPlan": "No test build right now. The next one shows here.",
+        "hidden": {
+          "one": "{count} step is for other hardware.",
+          "other": "{count} steps are for other hardware."
+        },
+        "sentToast": "Results sent",
+        "sentToastDetail": "They're in the build's post in #testing. The team marks them when they've read them.",
+        "how": "How",
+        "untried": "Try each step, or mark it Couldn't try.",
+        "more": "More for this test build",
+        "discordTitle": "Discord didn't accept the results",
+        "discord": "Discord said: {reason}. This is on Kiln's side, not your connection. Your results are kept: try again later.",
+        "discordNoReason": "This is on Kiln's side, not your connection. Your results are kept: try again later.",
+        "discordLimit": "Discord limits how often Kiln support can post, and the limit is reached right now. Your results are kept: try again in {wait}."
+      },
+      "unknown": "Not known"
+    },
+    "deck": {
+      "tab": "Community",
+      "on": "On",
+      "off": "Off",
+      "turnOn": "Turn on",
+      "turnOff": "Turn off",
+      "sayOut": "Help from the Kiln team on Discord. Optional.",
+      "signInSub": "With your phone: scan a code",
+      "accountSub": "Signed in. In the Kiln Discord.",
+      "accountSubOut": "Signed in. Not in the Kiln Discord yet.",
+      "sendSub": "Your logs go to the Kiln team",
+      "joinSub": "A code for your phone",
+      "presenceSub": "Kiln on your Discord profile while you play",
+      "privacySub": "Everything this tab can send",
+      "testerSub": "Test builds and a checklist",
+      "testerSubOn": "{done} of {count} steps tried",
+      "support": "Support",
+      "discord": "Discord",
+      "qr": {
+        "title": "Sign in with your phone",
+        "step1": "Scan the code with your phone's camera.",
+        "step2": "Sign in with Discord on the page that opens.",
+        "step3": "Check that the page shows {code}, then press Approve.",
+        "noCamera": "No camera? Open frostdev.io/link on any device and type the code.",
+        "waiting": "Waiting for your phone. The code works for {left}.",
+        "expired": "This code has expired.",
+        "denied": "Declined on your phone. Nothing changed.",
+        "newCode": "New code",
+        "privacy": "What it can do is on frostdev.io/kiln/privacy."
+      },
+      "joinQr": {
+        "title": "Join the Kiln Discord",
+        "text": "Scan the code with your phone to open the invite in Discord."
+      },
+      "postQr": "Scan to open the post on your phone.",
+      "privacyQr": "Scan the code to read the privacy page on your phone.",
+      "when": {
+        "title": "When does it happen?",
+        "start": "when I press Play",
+        "menu": "on the main menu",
+        "load": "when I load a world",
+        "play": "while I play",
+        "join": "when I join a server",
+        "another": "at another time"
+      },
+      "titles": {
+        "noload": "Kiln doesn't load",
+        "mod": "A mod doesn't work",
+        "crash": "The game crashes",
+        "launcher": "The launcher has a problem",
+        "server": "My server has a problem",
+        "something": "Something is wrong"
+      },
+      "what": "What went wrong?",
+      "check": "Check and send",
+      "type": "Type",
+      "edit": "Change",
+      "typeTitle": "Type your words",
+      "typeHint": "Steam's keyboard opens by itself. If it doesn't, press Steam and X.",
+      "wordsNone": "None. Optional.",
+      "zipRow": "Report zip",
+      "whatIsSent": "What is sent",
+      "next": "Next",
+      "pick": "Pick",
+      "toggle": "Change",
+      "done": "Done",
+      "holdDelete": "Hold to delete my post",
+      "postSay": "{status}. {replies}.",
+      "noteWhy": {
+        "title": "What happened?",
+        "crashed": "The game crashed",
+        "wrong": "It looked wrong",
+        "slow": "It was slow or stuttered",
+        "missing": "I couldn't find the option",
+        "type": "Type a line"
+      }
+    },
+    "settings": {
+      "show": "Show the Community page",
+      "showHint": "Kiln's Discord in the launcher. Off hides the page, its Deck tab and every Send to Kiln support, and the launcher stops everything it does with Discord."
     }
   }
 }

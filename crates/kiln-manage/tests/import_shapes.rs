@@ -39,6 +39,8 @@ pub mod shapes {
     pub fn st_mod() -> Vec<u8> { build_test_dll(&["CreateModInstance"], b"") }
     pub fn plain_dinput8() -> Vec<u8> { build_test_dll(&["DirectInput8Create"], b"a mod's own proxy") }
     pub fn plain_winmm() -> Vec<u8> { build_test_dll(&["timeGetTime"], b"a mod's own proxy") }
+    /// OptiScaler's DLL: it reads OptiScaler.ini and can load ReShade itself, so it names both.
+    pub fn optiscaler_dll() -> Vec<u8> { build_test_dll(&["CreateDXGIFactory"], b"OptiScaler.ini ReShade64.dll") }
     pub fn plain_powrprof() -> Vec<u8> { build_test_dll(&["PowerGetActiveScheme"], b"a mod's own proxy") }
 
     pub fn eml_json(id: &str, name: &str) -> Vec<u8> {
@@ -136,6 +138,22 @@ pub mod shapes {
                 put(root, "aldrich-modmenu/aldrich-modmenu.ini", b"[menu]\n");
                 put(root, "aldrich-modmenu/VK_LAYER_ALDRICH_modmenu.json", b"{}");
                 put(root, "aldrich-modmenu/aldrich_modmenu_layer.dll", &build_test_dll(&["vkNegotiateLoaderLayerInterfaceVersion"], b""));
+            }
+            // OptiScaler's release archive (github.com/optiscaler/OptiScaler): its DLL as it ships, its settings, the
+            // upscaler DLLs it loads and its setup scripts; the player renames OptiScaler.dll to dxgi.dll and so on
+            "optiscaler" => {
+                put(root, "OptiScaler.dll", &optiscaler_dll());
+                put(root, "OptiScaler.ini", b"[Upscalers]\nDx11Upscaler=auto\n");
+                put(root, "amd_fidelityfx_vk.dll", &build_test_dll(&["ffxCreateContext"], b""));
+                put(root, "amd_fidelityfx_dx12.dll", &build_test_dll(&["ffxCreateContext"], b""));
+                put(root, "libxess.dll", &build_test_dll(&["xessD3D12CreateContext"], b""));
+                put(root, "setup_windows.bat", b"@echo off\n");
+                put(root, "remove_optiscaler.bat", b"@echo off\n");
+            }
+            // the same DLL renamed OptiScaler.asi for Ultimate ASI Loader, packed with its settings only
+            "optiscaler-asi" => {
+                put(root, "OptiScaler.asi", &optiscaler_dll());
+                put(root, "OptiScaler.ini", b"[Menu]\nOverlayMenu=false\n");
             }
             "141-dlss-fg" => {
                 put(root, "powrprof.dll", &plain_powrprof());
@@ -510,11 +528,48 @@ fn a_tools_package_is_left_out_whole_with_one_reason() {
 }
 
 #[test]
+fn optiscalers_package_is_left_out_whole_with_one_reason() {
+    // a player imports OptiScaler's archive: it runs on its own next to Kiln, none of its upscaler DLLs is a mod
+    let (_t, packed) = ways("optiscaler");
+    for (how, path) in packed {
+        let (_k, _d, r) = import(&[path]);
+        assert!(r.imported.is_empty(), "{how}: OptiScaler's DLLs are no mods: {r:?}");
+        assert_eq!(r.skipped.len(), 1, "{how}: {:?}", r.skipped);
+        assert!(r.skipped[0].reason.contains("OptiScaler") && r.skipped[0].reason.contains("runs on its own next to Kiln"),
+            "{}", r.skipped[0].reason);
+    }
+    // its .asi build with its settings (renamed for Ultimate ASI Loader): left out as the tool, never an .asi package that
+    // Kiln places in scripts\ and loads (a lone OptiScaler.asi is left out the same way: engines::detect_file)
+    let (_t, ways_asi) = ways("optiscaler-asi");
+    for (how, path) in ways_asi {
+        let (_k, _d, r) = import(&[path]);
+        assert!(r.imported.is_empty(), "{how}: OptiScaler.asi is no .asi package: {r:?}");
+        assert_eq!(r.skipped.len(), 1, "{how}: {:?}", r.skipped);
+        assert!(r.skipped[0].reason.contains("is OptiScaler, which runs on its own next to Kiln"), "{how}: {}", r.skipped[0].reason);
+    }
+    // in a scripts folder of its package, as Ultimate ASI Loader reads it, and next to the upscaler DLLs it loads
+    let s = tmp("optiscaler-scripts");
+    put(&s.0, "pack/scripts/OptiScaler.asi", &optiscaler_dll());
+    put(&s.0, "pack/amd_fidelityfx_vk.dll", &build_test_dll(&["ffxCreateContext"], b""));
+    let (_k, _d, r) = import(&[s.0.join("pack")]);
+    assert!(r.imported.is_empty() && r.skipped.len() == 1, "{r:?}");
+    assert!(r.skipped[0].reason.contains("OptiScaler.asi is OptiScaler"), "{}", r.skipped[0].reason);
+    // renamed to one of its proxy names, alone: OptiScaler too, never a DLL mod and never ReShade
+    let t = tmp("optiscaler-renamed");
+    for name in ["dxgi.dll", "winmm.dll", "version.dll", "dbghelp.dll", "d3d12.dll", "winhttp.dll", "wininet.dll"] {
+        put(&t.0, &format!("{name}/{name}"), &optiscaler_dll());
+        let (_k, _d, r) = import(&[t.0.join(name).join(name)]);
+        assert!(r.imported.is_empty() && r.skipped.len() == 1, "{name}: {r:?}");
+        assert!(r.skipped[0].reason.contains("is OptiScaler"), "{name}: {}", r.skipped[0].reason);
+    }
+}
+
+#[test]
 fn reasons_are_one_sentence_a_player_can_read() {
     use kiln_manage::engines::{loader_reason, Engine};
     for e in [Engine::Eml, Engine::Emf, Engine::ShroudForge, Engine::Set, Engine::Greeneye, Engine::Flame, Engine::Shroudtopia,
         Engine::Enshwick, Engine::Shroudlink, Engine::Ember, Engine::ModLoaderProxy, Engine::ChainLoader, Engine::LiveMap, Engine::SharedXp,
-        Engine::ReShade, Engine::Aldrich, Engine::UltimateAsiLoader, Engine::Kiln] {
+        Engine::ReShade, Engine::Aldrich, Engine::UltimateAsiLoader, Engine::OptiScaler, Engine::Kiln] {
         let r = loader_reason(e, "x.dll");
         assert!(!r.ends_with('.') && !r.contains(". ") && r.len() < 160, "{e:?}: {r}");
         assert!(!r.contains("not a mod to import") && !r.contains("chains it when installed over"), "{e:?}: {r}");
@@ -526,7 +581,7 @@ fn a_loader_named_like_kilns_own_dll_is_never_to_be_copied_into_the_game() {
     // 0.2.0-dev.29 said "copy it into the Enshrouded folder yourself" for Ultimate ASI Loader's dinput8.dll: that
     // replaces Kiln's own loader (HadToRegister, 2026-11-16)
     use kiln_manage::engines::{loader_is_note, loader_reason, Engine};
-    for e in [Engine::UltimateAsiLoader, Engine::Aldrich, Engine::ReShade, Engine::LiveMap, Engine::SharedXp] {
+    for e in [Engine::UltimateAsiLoader, Engine::Aldrich, Engine::ReShade, Engine::LiveMap, Engine::SharedXp, Engine::OptiScaler] {
         for file in ["dinput8.dll", "DINPUT8.DLL"] {
             let r = loader_reason(e, file);
             assert!(!r.contains("yourself") && !r.contains("copy it into") && !r.contains("copy its files"), "{e:?} {file}: {r}");
@@ -838,6 +893,86 @@ fn set_release_zip_leaves_its_loader_out_and_imports_its_mods() {
                 assert!(r.imported.iter().all(|x| x.kind != ModKind::Native), "never a native mod: {}", summary(&r));
                 assert_eq!(r.notes.iter().map(|n| n.text.as_str()).collect::<Vec<_>>(), [SET_NOTE], "{how}: {}", summary(&r));
             }
+        }
+    }
+}
+
+
+/// XHL's Kiln builds (Nexus 377 XHL-Kiln-Core, 364 XHL Blueprint, and the "(Kiln)" files of his mods, laid out as the
+/// Kiln SDK packs them): each is one Kiln mod, or one native Kiln mod, under its own id, with nothing left out and no
+/// note. Their ids start with "xhl-" like the XHL-Core plugins', and the Core carries a native DLL of its own in
+/// runtime/win-x64: neither makes them XHL-Core plugins (no native-plugin.ini), native proxies or engine mods.
+#[test]
+fn xhls_kiln_builds_import_as_kiln_mods() {
+    let t = tmp("xhl-kiln-builds");
+    let core = t.0.join("XHL-Kiln-Core-0.1.0");
+    put(&core, "xhl-kiln-core/kiln.mod.json", br#"{ "id": "xhl-kiln-core", "name": "XHL-Core (Kiln)", "version": "0.1.0",
+        "authors": ["XHL (original mods)", "Kiln port"], "apiVersion": "0.2.9", "side": "both", "entryAssembly": "Xhl.Kiln.Core.dll",
+        "exports": ["Xhl.Kiln.Core.dll"], "advanced": true,
+        "kilnBuild": { "version": "0.2.0-dev.29.17+20261118.c6b3352", "created": "2026-11-18T04:21:15Z" } }"#);
+    put(&core, "xhl-kiln-core/Xhl.Kiln.Core.dll", b"managed");
+    put(&core, "xhl-kiln-core/XHL-panel-font-OFL.txt", b"licence");
+    put(&core, "xhl-kiln-core/locales/en.json", br#"{"panel.title":"Mod Settings"}"#);
+    put(&core, "xhl-kiln-core/locales/zh-CN.json", br#"{"panel.title":"Mod Settings"}"#);
+    put(&core, "xhl-kiln-core/runtime/win-x64/xhl-game-panels.dll", &build_test_dll(&["xhl_hud_panels_v1"], b""));
+    let blueprint = t.0.join("XHL-Blueprint-0.1.0");
+    put(&blueprint, "native.json", br#"{ "format": 1, "id": "xhl-blueprint", "name": "XHL-blueprint", "version": "0.1.0", "side": "client",
+        "clients": "none", "dlls": ["xhl-blueprint.dll"], "phase": "boot", "init": "kiln_native_init", "kiln": ">=0.2.0-dev.28" }"#);
+    put(&blueprint, "xhl-blueprint.dll", &build_test_dll(&["kiln_native_init"], b""));
+    put(&blueprint, "Xhl.Blueprint.Keys.dll", b"managed");
+    put(&blueprint, "OFL.txt", b"licence");
+    let grapple = t.0.join("XHL-Grappling-Hook-Pull-2x-Kiln");
+    put(&grapple, "xhl-grappling-hook-pull-2x/kiln.mod.json", br#"{ "id": "xhl-grappling-hook-pull-2x", "name": "XHL-Grappling-Hook-Pull-2x",
+        "version": "0.1.0", "authors": ["XHL (original mods)", "Kiln port"], "apiVersion": "0.2.7", "side": "both",
+        "entryAssembly": "XhlGrapplingHookPull2x.dll" }"#);
+    put(&grapple, "xhl-grappling-hook-pull-2x/XhlGrapplingHookPull2x.dll", b"managed");
+    put(&grapple, "xhl-grappling-hook-pull-2x/xhl-display-names.json", br#"{"en":"Grappling Hook Pull 2x"}"#);
+    put(&grapple, "xhl-grappling-hook-pull-2x/lang/xhl-locales.json", br#"{"en":{}}"#);
+    let cases = [(&core, "kiln/xhl-kiln-core"), (&blueprint, "native/xhl-blueprint"), (&grapple, "kiln/xhl-grappling-hook-pull-2x")];
+    for (dir, want) in cases {
+        let z = t.0.join(format!("{}.zip", dir.file_name().unwrap().to_string_lossy()));
+        zip_of(dir, &z);
+        for (how, path) in [("zip", z), ("folder", dir.to_path_buf())] {
+            let (_k, dirs, r) = import(&[path]);
+            assert_eq!(found(&r), [want], "{want} {how}:\n{}", summary(&r));
+            assert!(r.skipped.is_empty() && r.notes.is_empty(), "{want} {how}:\n{}", summary(&r));
+            let lr = &r.imported[0];
+            let folder = library::path_of(&dirs, lr).unwrap();
+            match lr.kind {
+                ModKind::Kiln => assert!(folder.join("kiln.mod.json").is_file(), "{want} {how}: {}", folder.display()),
+                _ => assert!(folder.join("native.json").is_file() && folder.join("Xhl.Blueprint.Keys.dll").is_file(), "{want} {how}"),
+            }
+            if lr.id == "xhl-kiln-core" {
+                assert!(folder.join("runtime/win-x64/xhl-game-panels.dll").is_file() && folder.join("locales/zh-CN.json").is_file(),
+                    "the Core keeps its own native DLL and its texts: {}", folder.display());
+            }
+        }
+    }
+    // all of them in one drop, beside XHL's own XHL-Core plugin of the same mod (an EML package with native-plugin.ini):
+    // the Kiln build and the plugin are two Library entries of two kinds, the Kiln one never taken for the plugin
+    let both = t.0.join("both");
+    for (dir, _) in cases { copy_tree(dir, &both.join(dir.file_name().unwrap())); }
+    put(&both, "mods/XHL-Grappling-Hook-Pull-2x/mod.json", br#"{"id":"xhl-grappling-hook-pull-2x","name":"XHL-Grappling-Hook-Pull-2x","version":"2.1.0","capabilities":[]}"#);
+    put(&both, "mods/XHL-Grappling-Hook-Pull-2x/src/mod.lua", b"return {}");
+    put(&both, "mods/XHL-Grappling-Hook-Pull-2x/native-plugin.ini", b"[Plugin]\r\nEnabled=1\r\nDll=XHL-Grappling-Hook-Pull-2x.dll\r\n");
+    put(&both, "mods/XHL-Grappling-Hook-Pull-2x/xhl-plugin.json", br#"{"schema":1,"id":"xhl-grappling-hook-pull-2x","version":"2.1.0"}"#);
+    put(&both, "mods/XHL-Grappling-Hook-Pull-2x/XHL-Grappling-Hook-Pull-2x.dll", &build_test_dll(&["XhlNativePluginQuery", "XhlNativePluginStart", "XhlNativePluginRequestStop"], b""));
+    let (_k, _dirs, r) = import(&[both]);
+    assert_eq!(found(&r), ["eml/xhl-grappling-hook-pull-2x", "kiln/xhl-grappling-hook-pull-2x", "kiln/xhl-kiln-core", "native/xhl-blueprint"],
+        "{}", summary(&r));
+    assert!(r.skipped.is_empty(), "{}", summary(&r));
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    for e in std::fs::read_dir(from).unwrap() {
+        let e = e.unwrap();
+        let dst = to.join(e.file_name());
+        if e.file_type().unwrap().is_dir() {
+            std::fs::create_dir_all(&dst).unwrap();
+            copy_tree(&e.path(), &dst);
+        } else {
+            std::fs::create_dir_all(to).unwrap();
+            std::fs::copy(e.path(), dst).unwrap();
         }
     }
 }

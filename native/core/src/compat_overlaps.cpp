@@ -6,6 +6,7 @@
 
 #include "compat.h"
 #include "hook_owner.h"
+#include "module_place.h"
 
 namespace kiln::compat {
 namespace {
@@ -27,11 +28,17 @@ void add_unique(std::vector<std::string>& v, const std::string& s) {
     if (!s.empty() && std::find(v.begin(), v.end(), s) == v.end()) v.push_back(s);
 }
 
-// The chain entry named `module`; an entry that is on wins over one that is not.
-const ChainRow* find_row(const std::vector<ChainRow>& rows, const std::string& module) {
+// The chain entry named `module`; an entry that is on wins over one that is not. With the module's path text (hooks.json
+// "path", module_place.h) only the entries at that path count, when one is: two DLLs can share a file name (two Library
+// dinput8.dll, netjunk's report 2026-11-20). A path in the game folder itself ("dinput8.dll") narrows nothing.
+const ChainRow* find_row(const std::vector<ChainRow>& rows, const std::string& module, const std::string& path = {}) {
+    const bool by_path = path.find_first_of("/\\") != std::string::npos &&
+                         std::any_of(rows.begin(), rows.end(), [&](const ChainRow& r) {
+                             return same_name(r.file, module) && module_path_matches(r.path, path);
+                         });
     const ChainRow* found = nullptr;
     for (const ChainRow& r : rows) {
-        if (!same_name(r.file, module)) continue;
+        if (!same_name(r.file, module) || (by_path && !module_path_matches(r.path, path))) continue;
         if (r.on()) return &r;
         if (!found) found = &r;
     }
@@ -91,7 +98,7 @@ std::string module_at(const ojson& f) {
         const std::string address = hex_text(f.value("address", ojson()));
         return address.empty() ? "an unnamed module" : "an unnamed module (jump target " + address + ")";
     }
-    return module + "+" + hex_text(f.value("offset", ojson()));
+    return module + "+" + hex_text(f.value("offset", ojson())) + module_place_suffix(json_text(f, "path"));
 }
 
 }  // namespace
@@ -190,7 +197,8 @@ ojson compute_overlaps(const ojson& map, const std::vector<ChainRow>& chain, con
             if (!t.contains(key) || !t[key].is_object() || json_flag(t[key], "own")) continue;
             const ojson& f = t[key];
             const std::string module = json_text(f, "module");
-            const ChainRow* row = module.empty() ? nullptr : find_row(chain, module);
+            const std::string path = json_text(f, "path");
+            const ChainRow* row = module.empty() ? nullptr : find_row(chain, module, path);
             ojson o;
             o["symbol"] = t.contains("symbol") && t["symbol"].is_string() ? t["symbol"] : ojson(nullptr);
             o["rva"] = t.contains("rva") && t["rva"].is_string() ? t["rva"] : ojson(nullptr);
@@ -200,6 +208,7 @@ ojson compute_overlaps(const ojson& map, const std::vector<ChainRow>& chain, con
             fo["offset"] = f.contains("offset") && f["offset"].is_string() ? f["offset"] : ojson(nullptr);
             if (f.contains("address")) fo["address"] = f["address"];
             if (json_flag(f, "inPlace")) fo["inPlace"] = true;
+            if (!path.empty()) fo["path"] = path;
             o["foreign"] = fo;
             o["owners"] = owners;
             const char* fix = before ? fix_for(row) : "none";

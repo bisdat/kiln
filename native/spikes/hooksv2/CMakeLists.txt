@@ -12,6 +12,12 @@ target_include_directories(hooks_v2_test PRIVATE ../../core/abi ../../core/src .
 target_link_libraries(hooks_v2_test PRIVATE kiln-safetyhook)
 set_target_properties(hooks_v2_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/hooksv2")
 
+# hooks-v2-module.dll: "another module" (a mod's or a loader's DLL) that hooks_v2_test opens and hooks inside
+# (open_module, test_foreign_module). Not deployed.
+add_library(hooks_v2_module SHARED ../../core/tests/hooks_module_dll.cpp)
+set_target_properties(hooks_v2_module PROPERTIES OUTPUT_NAME hooks-v2-module RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/hooksv2")
+add_dependencies(hooks_v2_test hooks_v2_module)
+
 # foreign-stub.dll: a stand-in for another engine's hooks in lab tests (see foreign_stub.cpp). Not deployed.
 add_library(foreign_stub SHARED foreign_stub.cpp)
 target_link_libraries(foreign_stub PRIVATE kiln-safetyhook)

@@ -24,8 +24,8 @@ public sealed class HarnessTests
             Assert.False(File.Exists(Path.Combine(kiln.ModsDirectory, "tk-base", "Kiln.Api.dll")));
             kiln.Step();
             Assert.Equal(Path.Combine(kiln.DataDirectory, "tk-base"), mod.Context.DataDirectory);
-            Assert.Contains("life: OnLoad", File.ReadAllText(Path.Combine(kiln.LogsDirectory, "kiln.log")));
-            Assert.Contains("tk-base", File.ReadAllText(Path.Combine(kiln.StateDirectory, "mods.json")));
+            Assert.Equal(Path.Combine(kiln.LogsDirectory, "kiln.log"), kiln.LogFile);
+            Assert.Contains("life: OnLoad", kiln.ReadLogFile());  // File.ReadAllText fails on Windows while the harness writes it            Assert.Contains("tk-base", File.ReadAllText(Path.Combine(kiln.StateDirectory, "mods.json")));
         }
         Assert.False(Directory.Exists(server));
     }

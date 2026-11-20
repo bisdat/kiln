@@ -106,6 +106,7 @@ public sealed class SystemsFakeTests
         Assert.True(kiln.Capabilities.Is("systems.wraps.typed"));
         Assert.False(kiln.Capabilities.Is("systems.define"));
         Assert.False(kiln.Capabilities.Is("systems.wraps.client"));
+        Assert.False(kiln.Capabilities.Is("systems.wraps.prediction"));
         Assert.Contains(Coverage.All, r => r.Area == "Systems" && r.Kind == CoverageKind.RecordingFake && r.Capabilities.Contains("systems.wraps"));
     }
 

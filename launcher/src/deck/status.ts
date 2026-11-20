@@ -57,6 +57,7 @@ export const KIND_WORD: Readonly<Record<ModKind | DetectKind, string>> = {
   get flame() { return t("deck.kinds.flame"); },
   get shroudlink() { return t("deck.kinds.shroudlink"); },
   get ember() { return t("deck.kinds.ember"); },
+  get dllmod() { return t("deck.kinds.dllmod"); },
   get proxy() { return t("deck.kinds.proxy"); },
   get data() { return t("deck.kinds.data"); },
   get save() { return t("deck.kinds.save"); },

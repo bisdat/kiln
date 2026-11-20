@@ -1,0 +1,67 @@
+{
+  "format": 1,
+  "components": [
+    {
+      "id": "amd-fsr",
+      "vendor": "amd",
+      "vendorName": "AMD",
+      "name": "AMD FSR",
+      "enables": "AMD's FSR upscalers (FSR 4 on recent AMD cards, FSR 3.1 on other cards) and FSR frame generation, for Kiln to run behind the game's FSR 3 option.",
+      "version": "2.4.0",
+      "source": "https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases/tag/v2.4.0",
+      "license": {
+        "name": "MIT licence",
+        "file": "vendor-licenses/amd-fidelityfx-sdk-v2.4.0-mit.txt",
+        "sha256": "24aef78e79eacadb9eac757f41f60894c1f6ce4cb45e34d6f6b5a5baa1550d09",
+        "from": "https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/v2.4.0/Kits/FidelityFX/docs/license.md"
+      },
+      "files": [
+        {
+          "name": "amd_fidelityfx_loader_vk.dll",
+          "url": "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v2.4.0/Kits/FidelityFX/signedbin/amd_fidelityfx_loader_vk.dll",
+          "size": 39184,
+          "sha256": "38a56a01fb3565c0757d9f5c1e4e69de4b65e5f2e5769b323b200dc1f142bab9",
+          "gitBlob": "fb9877780927cd41ee0a25d5cd9314da118ddd27"
+        },
+        {
+          "name": "amd_fidelityfx_upscaler_vk.dll",
+          "url": "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v2.4.0/Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_vk.dll",
+          "size": 36135696,
+          "sha256": "4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7",
+          "gitBlob": "9e2fade37c51fc2fd6323218bf3d736969e9dd2a"
+        },
+        {
+          "name": "amd_fidelityfx_framegeneration_vk.dll",
+          "url": "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v2.4.0/Kits/FidelityFX/signedbin/amd_fidelityfx_framegeneration_vk.dll",
+          "size": 36806928,
+          "sha256": "d002dabff8c5e71eaa715fc99438cd4dc81230262a7897b16bc402efec3498b4",
+          "gitBlob": "ed7b4c7552821bed77b2839129a8c19514781835"
+        }
+      ]
+    },
+    {
+      "id": "intel-xess",
+      "vendor": "intel",
+      "vendorName": "Intel",
+      "name": "Intel XeSS",
+      "enables": "Intel's XeSS upscaler (it also runs on AMD and NVIDIA cards), for Kiln to run behind the game's FSR 3 option.",
+      "version": "3.0.2",
+      "source": "https://github.com/intel/xess/releases/tag/v3.0.2",
+      "license": {
+        "name": "Intel Simplified Software License (October 2022)",
+        "file": "vendor-licenses/intel-xess-v3.0.2-license.txt",
+        "sha256": "e15ca2a10f34d836cfff59922c35dd9277ae8068353abb588c851f9d16d4737d",
+        "from": "https://github.com/intel/xess/blob/v3.0.2/LICENSE.txt"
+      },
+      "files": [
+        {
+          "name": "libxess.dll",
+          "url": "https://raw.githubusercontent.com/intel/xess/v3.0.2/bin/libxess.dll",
+          "size": 77795704,
+          "sha256": "251659dd84a3e84de67c886a4186e01f3eca49b00641906fe38bb6b807e5d5b7",
+          "gitBlob": "548837c12b215d189884d54db0a480cd3bf2bfd1"
+        }
+      ]
+    }
+  ]
+}

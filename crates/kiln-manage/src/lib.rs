@@ -25,6 +25,7 @@
 //! | [`winpath`] | host <-> game path translation (Z:, copy mode) |
 //! | [`bundle`] | runtime bundles (`kiln-runtime.json`) |
 //! | [`install`] | install / upgrade / uninstall / rollback, receipts (`.install.json`) |
+//! | [`blocked`] | a DLL or exe the install could not write because Windows refused it (an antivirus, another program): `detail.blocked`, the report's finding from launcher.log |
 //! | [`chain`] | `kiln/chain.ini`, `kiln/chain/once.ini` |
 //! | [`compat`] | closed DLL mods: compat rules, the last session's hooks.json overlaps, chain.ini [late] plans |
 //! | [`manifest`] | `kiln.mod.json` (port of Manifest.cs), `native.json` |
@@ -64,6 +65,8 @@
 //! | [`publish`] | `kiln publish`: the artifact policy and audit of a mod zip (`zip`) |
 //! | [`release_binding`] | `kiln-release.json`: which mod, version and zip a release holds |
 //! | [`updates`] | update checks for installed mods: source receipts, one status per mod from every provider; a notice and a link, never a download |
+//! | [`vendor`] | vendor upscaler files the player asks the launcher for (AMD FSR, Intel XeSS): the shipped manifest with its pins and licences, downloads checked by size and SHA-256, `<game>/kiln/vendor/`, removal |
+//! | [`community`] | the launcher's optional Discord features: the relay client, the session key, sign-in, the public post of a report, known problems, testers, Rich Presence |
 
 pub mod error;
 pub mod task;
@@ -82,6 +85,7 @@ pub mod paths;
 pub mod data_folder;
 pub mod data_folder_move;
 pub mod engines;
+pub mod dllmod;
 pub mod pe;
 pub mod proc;
 pub mod steam;
@@ -93,6 +97,7 @@ pub mod bundle;
 pub mod chain;
 pub mod compat;
 pub mod install;
+pub mod blocked;
 pub mod archive;
 pub mod library;
 pub mod manifest;
@@ -154,6 +159,8 @@ pub mod net;
 pub mod release_binding;
 pub mod publish;
 pub mod updates;
+pub mod vendor;
+pub mod community;
 
 pub use error::{Error, ErrorCode, Result};
 

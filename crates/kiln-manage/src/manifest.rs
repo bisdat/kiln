@@ -77,10 +77,13 @@ pub enum ModKind {
     /// Ember server SDK mods (one library per folder), found and reported by kiln-ember; not run until Ember publishes
     /// its mod ABI.
     Ember,
+    /// Packages for AndyPimms' Enshrouded ModLoader (a DLL with a `<file>.dll.mod` manifest, ABI 1: CarryOn, Belt
+    /// Lantern), run by kiln-dllmod from Kiln's copy in `<game>/Mods/EnshroudedModLoader/<id>/`.
+    Dllmod,
 }
 
 impl ModKind {
-    pub const ALL: [ModKind; 14] = [
+    pub const ALL: [ModKind; 15] = [
         ModKind::Kiln,
         ModKind::Native,
         ModKind::Plugin,
@@ -95,6 +98,7 @@ impl ModKind {
         ModKind::Enshwick,
         ModKind::Shroudlink,
         ModKind::Ember,
+        ModKind::Dllmod,
     ];
     /// Kiln's own kinds (kiln-core's `kiln.profile` service counts these: KILN_PROFILE_KIND_*).
     pub const CORE: [ModKind; 4] = [ModKind::Kiln, ModKind::Native, ModKind::Plugin, ModKind::Emf];
@@ -115,6 +119,7 @@ impl ModKind {
             ModKind::Enshwick => "enshwick",
             ModKind::Shroudlink => "shroudlink",
             ModKind::Ember => "ember",
+            ModKind::Dllmod => "dllmod",
         }
     }
 
@@ -143,6 +148,7 @@ impl ModKind {
             ModKind::Enshwick => Engine::Enshwick,
             ModKind::Shroudlink => Engine::Shroudlink,
             ModKind::Ember => Engine::Ember,
+            ModKind::Dllmod => Engine::Dllmod,
         })
     }
 
@@ -164,6 +170,7 @@ impl ModKind {
             D::Enshwick => ModKind::Enshwick,
             D::Shroudlink => ModKind::Shroudlink,
             D::Ember => ModKind::Ember,
+            D::Dllmod => ModKind::Dllmod,
             _ => return None,
         })
     }
@@ -186,6 +193,7 @@ impl ModKind {
             ModKind::Enshwick => D::Enshwick,
             ModKind::Shroudlink => D::Shroudlink,
             ModKind::Ember => D::Ember,
+            ModKind::Dllmod => D::Dllmod,
         }
     }
 
@@ -1114,10 +1122,10 @@ pub fn parse_native(text: &str) -> Result<NativeManifest> {
     if let Some(b) = root.get("builds").filter(|n| !n.is_null()) {
         let ok = b.is_array()
             && b.elements().iter().all(|e| {
-                e.node.as_str().is_some_and(|s| s.len() == 64 && s.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)))
+                e.node.as_str().is_some_and(|s| s.len() == 64 && s.bytes().all(|c| c.is_ascii_hexdigit()))
             });
         if !ok {
-            return Err(nbad("builds must be an array of lower-case sha256 hex strings"));
+            return Err(nbad("builds must be an array of sha256 hex strings"));
         }
     }
     // "updates" is read by its own rules and never refuses the file: a value that breaks one is left out
@@ -1178,12 +1186,16 @@ mod tests {
         let base = r#"{"id": "m", "version": "1.0.0", "dlls": ["m.dll"]"#;
         let with = |extra: &str| format!("{base}{extra}}}");
         assert!(parse_native(&with("")).is_ok());
+        // Enshrouded ModLoader 0.6.15 writes its native.json with the exe's hash in upper case; kiln-core compares
+        // case-insensitively, so the Library reads it too
+        assert!(parse_native(&with(r#", "builds": ["5D9EF2F140B8ED49E30DBEE655841B89D08BAEC20F799A1817E171A18A850C77"]"#)).is_ok());
         for (extra, want) in [
             (r#", "phase": "dllmain", "init": "go""#, "init must be null for phase dllmain"),
             (r#", "format": 2"#, "format 2 is newer"),
             (r#", "phase": "late""#, "phase \"late\" must be"),
             (r#", "after": ["Bad"]"#, "after: 'Bad' is not a valid mod id"),
             (r#", "builds": ["ABC"]"#, "builds must be"),
+            (r#", "builds": ["5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c7g"]"#, "builds must be"),
             (r#", "kiln": "abc""#, "kiln: version range"),
             (r#", "init": "1x""#, "init \"1x\" must be"),
         ] {

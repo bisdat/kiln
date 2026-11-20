@@ -179,6 +179,9 @@ fn roots(game: &Path) -> Vec<Root> {
         Root { rel: String::new(), abs: game.join(crate::engine_mods::SHROUDLINK_MODS), kinds: vec![K::Shroudlink],
             files: Files { dll: true, zip: false }, folders: true },
         Root { rel: String::new(), abs: game.join(crate::engine_mods::EMBER_MODS), kinds: vec![K::Ember], files: none, folders: true },
+        // packages for Enshrouded ModLoader: package folders, and DLL + .dll.mod pairs directly in it
+        Root { rel: String::new(), abs: game.join(crate::dllmod::RUN_FOLDER), kinds: vec![K::Dllmod], files: Files { dll: true, zip: false },
+            folders: true },
     ];
     // ShroudForge's mods folder is `mods` unless its config names another
     let sf = crate::shroudforge::mods_dir(game);
@@ -208,6 +211,7 @@ fn folders_of(kind: ModKind) -> &'static str {
         ModKind::Flame | ModKind::Shroudtopia | ModKind::Enshwick => "mods",
         ModKind::Shroudlink => "shroudlink_mods",
         ModKind::Ember => "ember/mods",
+        ModKind::Dllmod => crate::dllmod::RUN_FOLDER,
     }
 }
 
@@ -239,6 +243,7 @@ fn loader_kinds(e: Engine) -> Vec<ModKind> {
         Engine::Flame => vec![K::Flame],
         Engine::Shroudlink => vec![K::Shroudlink],
         Engine::Ember => vec![K::Ember],
+        Engine::Dllmod => vec![K::Dllmod],
         _ => vec![],
     }
 }
@@ -442,6 +447,29 @@ fn entry(cx: &Ctx, root: &Root, abs: &Path, file_name: &str, is_zip: bool) -> Fo
         m.profile_mod = Some(pm.id.clone());
         return m;
     }
+    // An EMF Lua mod runs under EMF's lua mod, whoever loads the EMF mods: without it nothing runs the mod
+    let lua = kind == ModKind::Emf && abs.is_dir() && crate::library::is_emf_lua(abs);
+    match lua.then(|| emf_lua_host(cx)) {
+        Some(Some(false)) => {
+            m.reason = "An EMF Lua mod. EMF's lua mod runs Lua mods, and this profile has it switched off.".into();
+            return m;
+        }
+        Some(None) => {
+            m.reason = format!("An EMF Lua mod. EMF's lua mod runs Lua mods, and it is not in {} or in this profile. Add EMF's lua mod \
+                (game/emf/mods/lua in EMF's download) to run it.", folders_of(kind));
+            return m;
+        }
+        _ => {}
+    }
+    let mut m = found_loads(cx, kind, m);
+    if lua && m.state == FoundState::Loads {
+        m.reason.push_str(" EMF's lua mod runs its Lua.");
+    }
+    m
+}
+
+/// [`entry`] from the own loader on: who loads the mod of `kind` with this profile, and why.
+fn found_loads(cx: &Ctx, kind: ModKind, mut m: FoundMod) -> FoundMod {
     let loader = cx.loaders.iter().find(|l| l.kinds.contains(&kind));
     // A chained loader always runs. One under a proxy name always runs on Windows (the game imports those names);
     // under Wine and Proton only with a DLL override, which the launcher cannot see.
@@ -478,6 +506,26 @@ fn entry(cx: &Ctx, root: &Root, abs: &Path, file_name: &str, is_zip: bool) -> Fo
     }
     m
 }
+
+/// Is EMF's `lua` mod, the host of EMF's Lua mods, there for this profile: Some(on) when the profile lists it (kiln-emf
+/// takes the profile's entry first, and a copy in emf/mods is then ignored); else Some(true) for a folder in emf/mods
+/// whose mod.json gives the id `lua` beside its DLL, or a loose emf/mods/lua.dll; None when there is none. While EMF's
+/// own loader runs (as [`found_loads`] tells it), that folder counts first: EMF reads emf/mods itself, whatever the
+/// profile says, and Kiln copies the profile's entry there when it is on.
+fn emf_lua_host(cx: &Ctx) -> Option<bool> {
+    let own = cx.loaders.iter().any(|l| l.kinds.contains(&ModKind::Emf) && !(cx.wine && !l.file.contains('/')));
+    let listed = cx.profile.mods.emf.iter().find(|m| m.id == EMF_LUA_HOST).map(|m| m.enabled);
+    if !own && listed.is_some() {
+        return listed;
+    }
+    let dir = cx.game.join(crate::paths::game::DROPIN_EMF);
+    let folder = || std::fs::read_dir(&dir).into_iter().flatten().flatten().take(MAX_ENTRIES)
+        .any(|e| e.path().is_dir() && crate::library::emf_dll_mod_id(&e.path()).as_deref() == Some(EMF_LUA_HOST));
+    if dir.join(format!("{EMF_LUA_HOST}.dll")).is_file() || folder() { Some(true) } else { listed }
+}
+
+/// The id of EMF's `lua` mod (EMF's mods/lua/mod.json).
+const EMF_LUA_HOST: &str = "lua";
 
 /// [`entry`] for an EML folder in ShroudForge's mods folder while ShroudForge runs the EML mods ([`Ctx::sf_eml`]): its
 /// switch decides. One the player copied there by hand that ShroudForge keeps off gets the words promised on Nexus
@@ -598,6 +646,10 @@ pub fn scan(dirs: &DataDirs, install: &GameInstall, profile: &Profile) -> FoundR
                 }
                 // Enshwick's loader keeps its own files in mods/enshwick/: never a mod
                 if root.kinds.contains(&ModKind::Enshwick) && lower == crate::engine_mods::ENSHWICK_LOADER_FOLDER {
+                    continue;
+                }
+                // mods/EnshroudedModLoader is Mods/EnshroudedModLoader on Windows: its packages are that root's entries
+                if root.kinds.contains(&ModKind::Eml) && lower == "enshroudedmodloader" {
                     continue;
                 }
             } else if t.is_file() {

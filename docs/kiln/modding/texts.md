@@ -25,3 +25,10 @@ is limited to a 512 MiB catalog, two million texts and 64 KiB per text.
 
 SET's `Res.text(locaGuid)` reads this same catalog for tags beyond items and templates. Its item and template names keep
 using Kiln's shipped names. A tag the available sources do not know returns `nil`.
+
+## In the player's language (game clients)
+
+`Texts` is English only. On a game client, `Content.Text(locaTag)` (since 0.2.0-dev.29.18, mod API 0.2.10) asks the game
+itself, in the language the game shows now (`Content.TextLanguage`), on the game client's main thread only;
+`Content.TextAvailable` says whether it works here (false on a dedicated server). `Content.TooltipValues(ItemId)` gives
+an item type's tooltip rows with their labels. Details: [../services/content.md](../services/content.md#the-games-own-texts).

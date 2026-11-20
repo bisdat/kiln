@@ -389,7 +389,7 @@ mod tests {
         use std::os::fd::FromRawFd;
         let (mut master, mut slave) = (-1, -1);
         // A private pseudo-terminal, never the user's terminal or keyring.
-        assert_eq!(unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null(), std::ptr::null()) }, 0);
+        assert_eq!(unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) }, 0);
         let _master = unsafe { std::fs::File::from_raw_fd(master) };
         let _slave = unsafe { std::fs::File::from_raw_fd(slave) };
         let flags = || {

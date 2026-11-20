@@ -198,7 +198,10 @@ check_disabled_nexus_tests() {
     echo "Nexus is on in this release: the disabled-build tests do not apply"
     return 0
   fi
-  (cd "$src" && linux "$src/tools/test-nexus-disabled.sh")
+  # a test build's beta identity (KILN_LAUNCHER_CHANNEL/BETA/BASE_RELEASE) is for the shipped launcher only: the
+  # tripwire test binaries compile from the export, whose version is still X.Y.Z-dev, and build.rs refuses a beta base
+  # release that does not precede it (0.2.0-dev.29.19 beta 1's check failed so; the shipped launcher was fine)
+  (cd "$src" && KILN_LAUNCHER_CHANNEL= KILN_LAUNCHER_BETA= KILN_LAUNCHER_BASE_RELEASE= linux "$src/tools/test-nexus-disabled.sh")
 }
 
 # A subshell: its package cache and dotnet home never reach the release's own shell, also when a step fails half-way.

@@ -32,13 +32,14 @@ internal static unsafe class FakeRegistry
     public static bool HasSymbols(string id) { lock (Gate) return Symbols.Contains(id); }
 
     /// <summary>Puts a fresh fake in place of the core's table. <paramref name="typed"/>: a dev.28 core's table, whose
-    /// header.size covers the typed members (<see cref="FakeTyped"/>); else an older one's.</summary>
-    public static void Install(bool typed = false)
+    /// header.size covers the typed members (<see cref="FakeTyped"/>); else an older one's. <paramref name="modules"/>: a
+    /// 0.2.0-dev.29.19 core's, with open_module and module_scan (<see cref="FakeModules"/>; implies typed).</summary>
+    public static void Install(bool typed = false, bool modules = false)
     {
         lock (Gate) { Slots.Clear(); Symbols.Clear(); }
         if (_table == null)
         {
-            _table = (HooksNative.TypedTable*)NativeMemory.AllocZeroed((nuint)sizeof(HooksNative.CheckedTable));
+            _table = (HooksNative.TypedTable*)NativeMemory.AllocZeroed((nuint)sizeof(HooksNative.ModulesTable));
             var v1 = &_table->V1;
             v1->Detour = &Detour;
             v1->Mid = &Mid;
@@ -49,10 +50,12 @@ internal static unsafe class FakeRegistry
             *(nint*)&v1->LoadSymbols = (nint)(delegate* unmanaged[Cdecl]<ulong, NativeText, NativeText, HooksNative.SigSummary*, int>)&LoadSymbols;
             *(nint*)&v1->UnloadSymbols = (nint)(delegate* unmanaged[Cdecl]<NativeText, int>)&UnloadSymbols;
             FakeTyped.Fill(_table);
+            FakeModules.Fill((HooksNative.ModulesTable*)_table);
         }
         // header.size (the table's first field) says how far the table goes: an older core's stops before the typed members
-        *(uint*)_table = typed ? (uint)sizeof(HooksNative.CheckedTable) : 0;
+        *(uint*)_table = modules ? (uint)sizeof(HooksNative.ModulesTable) : typed ? (uint)sizeof(HooksNative.CheckedTable) : 0;
         FakeTyped.Reset();
+        FakeModules.Reset();
         HooksNative.UseForTests(&_table->V1);
     }
 
@@ -60,7 +63,9 @@ internal static unsafe class FakeRegistry
     {
         DuringInstall = null;
         DuringRevokeOwner = null;
+        RefuseAddress = null;
         FakeTyped.Reset();
+        FakeModules.Reset();
         HooksNative.UseForTests(null);
     }
 
@@ -87,9 +92,14 @@ internal static unsafe class FakeRegistry
     /// <summary>Runs inside the native install, before the link is made (tests use it to race a retire).</summary>
     public static Action? DuringInstall;
 
+    /// <summary>Addresses the fake's address check refuses (KILN_ERR_INVALID_ARGUMENT), as the core refuses one outside the
+    /// game's image and the opened modules' code.</summary>
+    public static Func<nuint, bool>? RefuseAddress;
+
     internal static int Add(byte kind, ulong owner, nuint address, nint fn, nint user, ulong* handle)
     {
         DuringInstall?.Invoke();
+        if (RefuseAddress?.Invoke(address) == true) return HooksNative.InvalidArgument;
         lock (Gate)
         {
             var link = Slots.FirstOrDefault(l => !l.Live && l.Kind == kind && l.Fn == fn && l.User == user &&

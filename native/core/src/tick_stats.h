@@ -19,10 +19,47 @@
 #include <utility>
 #include <vector>
 
+#include "tasks_stats.h"
+
 namespace kiln::tick::stats {
 
 inline constexpr float kSlowMs = 50.0f;  // "over50"
 inline constexpr size_t kPreTop = 8;     // Pre subscribers listed per line and in the worst step
+
+// The game's world clock runs at 60 ticks a second (clock_rate 60.0 in every running minute, on a hosting client and on
+// a dedicated server, whose steps advance it 2-3 ticks each).
+inline constexpr double kClockTickMs = 1000.0 / 60.0;
+inline constexpr double kPauseMinMs = 1000.0;
+// A gap between two server-world steps that the world's clock did not cover: the world was paused (a single-player
+// world stops while the game's menu is open, and its clock goes on from where it stopped), not stalled (after a stall
+// the clock catches up in the next step: clock_rate stays 60 while rate drops). Such gaps go into "paused_ms", not
+// "interval_ms" (since 0.2.0-dev.29.19; a player report read three menu pauses as 10-17 s stalls).
+inline bool paused_gap(double gap_ms, uint32_t clock_delta) {
+    return gap_ms >= kPauseMinMs && clock_delta * kClockTickMs < gap_ms * 0.5;
+}
+// The paused gaps of a window.
+struct Paused {
+    uint32_t count = 0;
+    double total = 0;
+    float max = 0;
+    void add(float ms) {
+        ++count;
+        total += ms;
+        if (ms > max) max = ms;
+    }
+};
+
+// since 0.2.0-dev.29.19 (inbox 116): the world's impact memory pool (kiln.abilities' impact pool watch reads the same
+// counters; docs/re/impact.md "The impact memory pool"), read once when the line is written: the allocator's bytes in
+// use, their peak and its capacity, and the live impact instances with their peak. Shown only when sane (the watch's
+// layout check: a capacity that is a power of two between 1 MiB and 1 GiB, used <= peak <= capacity, live <= peak).
+struct ImpactPool {
+    uint64_t used = 0, peak = 0, capacity = 0, live = 0, live_peak = 0;
+};
+inline bool impact_pool_sane(const ImpactPool& p) {
+    return p.capacity >= (1ull << 20) && p.capacity <= (1ull << 30) && (p.capacity & (p.capacity - 1)) == 0 &&
+           p.used <= p.peak && p.peak <= p.capacity && p.live <= p.live_peak && p.live_peak < (1ull << 24);
+}
 
 // One timed part over a window.
 struct Part {
@@ -160,6 +197,16 @@ struct Line {
     float worst_pre = 0, worst_step = 0, worst_post = 0, worst_wait = 0, worst_windows = 0;
     unsigned worst_hour = 0, worst_minute = 0, worst_second = 0, worst_milli = 0;
     std::vector<NamedMs> worst_post_subs, worst_pre_subs;  // worst_pre_subs: the kPreTop longest in that step
+    // Issue #49: the kiln.tasks window, appended after every older field. Absent (has_tasks false)
+    // when the task pool does not exist, so a line without a pool keeps its old shape byte for byte.
+    bool has_tasks = false;
+    kiln::tasks_stats::WindowSnapshot tasks;
+    // since 0.2.0-dev.29.19, the server world's paused gaps (paused_gap), after every older field; absent when there
+    // were none, so a line without a pause keeps its old shape
+    Paused paused;
+    // since 0.2.0-dev.29.19, the world's impact memory pool (ImpactPool), last; absent when unread or not sane
+    bool has_impact = false;
+    ImpactPool impact;
 };
 
 // Slots by owner name, in run order (an owner's first slot gives its place); one owner's subscribers add up.
@@ -339,6 +386,20 @@ inline std::string format(const Line& l) {
         out += ",\"pre_subs\":";
         detail::named_ms(out, l.worst_pre_subs);
         out += '}';
+    }
+    if (l.has_tasks) {
+        out += ',';
+        out += kiln::tasks_stats::format_window_json(l.tasks);
+    }
+    if (l.paused.count)
+        appendf(out, ",\"paused_ms\":{\"count\":%u,\"total\":%.1f,\"max\":%.1f}", l.paused.count, fin(l.paused.total),
+                fin(l.paused.max));
+    if (l.has_impact && impact_pool_sane(l.impact)) {
+        const double cap = static_cast<double>(l.impact.capacity);
+        appendf(out, ",\"impact\":{\"used_pct\":%.2f,\"peak_pct\":%.2f,\"capacity_mib\":%.0f,\"live\":%llu,\"live_peak\":%llu}",
+                fin(static_cast<double>(l.impact.used) * 100.0 / cap), fin(static_cast<double>(l.impact.peak) * 100.0 / cap),
+                fin(cap / (1024.0 * 1024.0)), static_cast<unsigned long long>(l.impact.live),
+                static_cast<unsigned long long>(l.impact.live_peak));
     }
     out += "}\n";
     return out;

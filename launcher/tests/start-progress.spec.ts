@@ -42,8 +42,6 @@ async function wholeStart(page: Page) {
   await expect(page.locator(".k-head-state")).toHaveText("Stopped");
 }
 
-test.describe.configure({ mode: "serial" });
-
 test("first start: the steps are named and Kiln says it is timing them; then the second start counts down", async ({ page }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1280, height: 800 });

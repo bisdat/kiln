@@ -2,7 +2,10 @@
 //   - a key en.json does not have (a typo, or a text the launcher no longer shows),
 //   - a value that is not text,
 //   - placeholders that differ from en.json's ({0}, {name}, {count:N0}: the names must match; a plural form may leave
-//     out {count}),
+//     out {count}), and number formats that differ ({count:N0} where English has {count}, or the other way round),
+//   - what a translation is never to bring (it is a player's file, read as data): an HTML tag or entity, a Markdown
+//     link, a link or URL, an invisible or control character, a line break, where English has none at that key; an
+//     empty text; a text far longer than English's; a confirm word (common.confirmWord.*) that is not one short word,
 // and, with --source, that every t("key") in launcher/src (the save editor aside) is in en.json.
 //
 //   bun scripts/i18n-check.ts                       every src/i18n/*.json, and the source
@@ -12,21 +15,58 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { parse, type ParseError } from "jsonc-parser";
-import { flatten, placeholders, pluralBase, PLURAL_FORMS, type Table } from "../src/i18n/format";
+import { flatten, placeholders, placeholderTokens, pluralBase, PLURAL_FORMS, type Table } from "../src/i18n/format";
 
 export interface Problem {
   key: string;
-  kind: "unknown-key" | "not-text" | "placeholders" | "not-json";
+  kind: "unknown-key" | "not-text" | "placeholders" | "format" | "markup" | "control" | "empty" | "length" | "confirm-word" | "not-json";
   message: string;
 }
 
-/** en.json's text(s) for a key a locale has: the key itself, or all plural forms of its base. Null: en.json lacks it. */
+/** What a translation must not have more of than English at the same key: the launcher shows texts as React text (and
+ * the admin map escapes them for Leaflet), so none of these would work as markup, but a translator never needs them. */
+const MARKUP: readonly [string, RegExp][] = [
+  ["an HTML tag", /<\s*\/?\s*[A-Za-z!?]/g],
+  ["an HTML entity", /&(?:#\d+|#x[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);/g],
+  ["a Markdown link", /\]\s*\(/g],
+  ["a link", /\b[A-Za-z][A-Za-z0-9+.-]*:\/\/|\b(?:javascript|data|vbscript|file|mailto):|\bwww\./gi],
+];
+/** Invisible and control characters (line breaks, tabs, bidi overrides, zero-width ones, private use, unassigned). */
+const CONTROL = /[\p{Cc}\p{Cf}\p{Co}\p{Cs}\p{Cn}\p{Zl}\p{Zp}]/gu;
+// a URL as written in English (ASCII), without the sentence's last punctuation
+const URL = /\b[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'<>()\u0080-\uffff]*/g;
+const urls = (s: string) => (s.match(URL) ?? []).map((u) => u.replace(/[.,;:!?]+$/, ""));
+const count = (s: string, re: RegExp) => (s.match(re) ?? []).length;
+const formats = (s: string) => placeholderTokens(s).filter((p) => p.includes(":")).sort().join(" ");
+
+/** The data checks of one text against English's text(s) for its key. */
+function dataProblems(key: string, text: string, english: string[]): Problem[] {
+  const out: Problem[] = [];
+  for (const [what, re] of MARKUP)
+    if (count(text, re) > Math.max(...english.map((e) => count(e, re)))) out.push({ key, kind: "markup", message: `${what}, which English has not here` });
+  const links = new Set(english.flatMap(urls));
+  for (const u of urls(text)) if (!links.has(u)) out.push({ key, kind: "markup", message: `the link ${u}, which English has not here` });
+  for (const c of new Set(text.match(CONTROL) ?? []))
+    if (!english.some((e) => e.includes(c)))
+      out.push({ key, kind: "control", message: `U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")} (an invisible or control character), which English has not here` });
+  if (text.trim() === "" && english.some((e) => e.trim() !== "")) out.push({ key, kind: "empty", message: "empty (a text the translation lacks shows in English: leave the key out instead)" });
+  const longest = Math.max(...english.map((e) => e.length));
+  if (text.length > 4 * longest + 80) out.push({ key, kind: "length", message: `${text.length} characters, English ${longest}` });
+  if (/(^|\.)confirmWord\./.test(key) && !/^[^\s\p{C}]{1,12}$/u.test(text))
+    out.push({ key, kind: "confirm-word", message: "a word the player types to confirm: one short word, no spaces" });
+  return out;
+}
+
+/** en.json's text(s) for a key a locale has: for a plural form, all of English's forms of its base (a language's
+ * `one` may be more than 1: Russian's is also 21, 31, ...; French and Brazilian Portuguese's also 0, so its `.one` may
+ * need the `{count}` English's `.one` leaves out); else the key itself. Null: en.json lacks it. */
 function englishFor(en: Table, key: string): string[] | null {
-  if (en[key] !== undefined) return [en[key]];
   const base = pluralBase(key);
-  if (base === key) return null;
-  const forms = PLURAL_FORMS.map((f) => en[`${base}.${f}`]).filter((x): x is string => x !== undefined);
-  return forms.length ? forms : null;
+  if (base !== key) {
+    const forms = PLURAL_FORMS.map((f) => en[`${base}.${f}`]).filter((x): x is string => x !== undefined);
+    if (forms.length) return forms;
+  }
+  return en[key] !== undefined ? [en[key]] : null;
 }
 
 /** What is wrong in one locale file's object, compared with en.json's. */
@@ -44,17 +84,24 @@ export function checkLocale(enTable: Table, file: unknown): Problem[] {
       out.push({ key, kind: "unknown-key", message: "en.json has no such key" });
       continue;
     }
-    const want = new Set(english.flatMap(placeholders));
+    // allowed: what any English form of the key has; needed: what English's own text at this key has (all forms' for a
+    // plural form English does not have, e.g. Russian's .few)
+    const allowed = new Set(english.flatMap(placeholders));
+    const want = new Set(enTable[key] !== undefined ? placeholders(enTable[key]) : allowed);
     const have = new Set(placeholders(text));
     const plural = pluralBase(key) !== key;
-    const extra = [...have].filter((p) => !want.has(p));
+    const extra = [...have].filter((p) => !allowed.has(p));
     const missing = [...want].filter((p) => !have.has(p) && !(plural && p === "count"));
     if (extra.length || missing.length) {
       const parts = [];
       if (missing.length) parts.push(`missing ${missing.map((p) => `{${p}}`).join(", ")}`);
       if (extra.length) parts.push(`not in English: ${extra.map((p) => `{${p}}`).join(", ")}`);
       out.push({ key, kind: "placeholders", message: parts.join("; ") });
+    } else if (!english.some((e) => formats(e) === formats(text))) {
+      // the same names: the same number formats too ({count:N0} groups digits, {count} writes the number as code does)
+      out.push({ key, kind: "format", message: `number formats {${formats(text) || "none"}}, English {${formats(english[english.length - 1]) || "none"}}` });
     }
+    out.push(...dataProblems(key, text, english));
   }
   return out;
 }

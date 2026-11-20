@@ -8,6 +8,7 @@ import { useGame, useGameStatus, useRuntimeChanges } from "../../api/hooks";
 import { useTasks } from "../../ui";
 import { useKilnInstall } from "../../shell/firstRun";
 import { isOlder, runRuntimeChange } from "../../shell/runtimeChange";
+import { blockedLine } from "../../shell/RuntimeFailure";
 import { InstallDialog } from "../dialogs";
 import { switchUi } from "../mode";
 import { DeckButton, HoldButton, Screen, Word } from "../ui";
@@ -49,7 +50,7 @@ export default function Kiln() {
             <p className="deck-line" data-testid="deck-kiln-task"><Word tone="ember">{change?.what}</Word> <span className="deck-dim">{task?.message ?? t("deck.shared.starting")}</span>
               {task?.progress != null && <span className="deck-bar" aria-hidden><i style={{ width: `${Math.round(task.progress * 100)}%` }} /></span>}</p>
           )}
-          {!busy && change?.state === "failed" && <p className="deck-line"><Word tone="err">{t("deck.shared.whatFailed", { what: change.what })}</Word> <span className="deck-dim">{change.error?.message}</span></p>}
+          {!busy && change?.state === "failed" && <p className="deck-line"><Word tone="err">{t("deck.shared.whatFailed", { what: change.what })}</Word> <span className="deck-dim">{blockedLine(change.error, game?.platform) ?? change.error?.message}</span></p>}
           {!busy && change?.state === "done" && <p className="deck-line"><Word tone="ok">{t("deck.kiln.whatDone", { what: change.what })}</Word></p>}
           {running && <p className="deck-line"><Word tone="warn">{t("deck.shared.closeGameFirst")}</Word></p>}
           {updating && <p className="deck-line"><Word tone="warn">{t("deck.shared.steamUpdating")}</Word></p>}

@@ -52,7 +52,8 @@ The format, in short (the launcher's translating guide says the same at length):
 - Placeholders `{0}`, `{name}`, `{count:N0}` stay exactly as written; move them where your grammar needs them; never add
   or drop one. `{{` and `}}` are literal braces.
 - Plurals are `.one` / `.other` pairs (`"loaded": { "one": "...", "other": "..." }`). Chinese, Japanese and Korean have one
-  form: write only `.other`. A language with more forms adds them (`zero`, `two`, `few`, `many`).
+  form: write only `.other`. Russian, Ukrainian and Belarusian (`one`, `few`, `many`, `other`) and Polish (the same
+  four) get their `few` and `many` in game since 0.2.0-dev.29.19; a form a file lacks falls back to its `.other`.
 - Groups follow Kiln's pages: `menu` (the Kiln menu's frame), `mods`, `catalog` (the Mods page's sentences about mods),
   `config`, `settings`, `set`, `shroudforge`, `shroudlink`, `keys`, `network`, `overlay`, `classic` (the old small window),
   `details` (Item details), `gamemenu`, `toast`, `refusal`, `creative`, `checks`, `talents`, `blocks`, `abilities`,
@@ -78,6 +79,39 @@ kiln.json's `ui` section, key `language`:
 - Lookup: the file of the exact tag (`zh-cn`), then its main language (`zh`), then English; `es-mx` tries `es-419`, `nb`
   and `no` try each other (`ModLocale.LookupOrder`). Kiln's texts stay in that language while mods' texts follow the game.
 
+## Cyrillic and the other scripts of the game's default font group
+
+The overlay's game-style font is the game's Harmonique Display, which has Latin only. Since 0.2.0-dev.29.19 kiln-ui.dll
+also reads **the other fonts of the game's default language group** at run time, for every language, and merges them into
+the overlay's fonts (its default, the game's UI font and bold) after their Latin source, as the game routes them: Noto
+Serif for Cyrillic (U+0400 to U+04FF, and U+20A9 and U+2116), Noto Sans Thai for Thai (U+0E00 to U+0E7F). So Russian,
+Ukrainian and Bulgarian, Kiln's texts or a mod's, draw in game with the game's own Cyrillic font; Latin keeps Harmonique
+Display. Kiln ships no font.
+- **Which files.** The default group's regular glyph sets after its first one (the Latin source), each limited to its own
+  rune ranges (`native/services/ui/font_group.h` `pick_default`). Only files up to 2 MiB, at most 4 and 4 MiB together
+  (`font_budget.h` `admit_default`): on client 26430625 Noto Serif (515 KB) and Noto Sans Thai (62 KB). The group's CJK
+  fallbacks (Noto Serif SC 11.2 MB, KR 7.4 MB) are left out: a Chinese, Japanese or Korean language's own group brings them
+  (below), after these.
+- **As the game, nearly.** The game draws Russian, Bulgarian and Ukrainian with a group of their own, Noto Serif for Latin
+  too; Kiln keeps one Latin look for every language (as it does for CJK) and takes only the Cyrillic from Noto Serif. Bold
+  text gets the regular Noto Serif, as CJK text gets its regular face.
+- **Cost.** 577 KB (0.5 MiB) read once at the first overlay frame, on a worker (1-2 ms from a warm cache in the preview),
+  and kept for the process; the atlas makes a Cyrillic glyph only when one is drawn (ImGui 1.92 dynamic atlas), so a Latin
+  language costs no atlas space more. Measured in the preview with the real fonts: the Mods page in Russian uses a 512x512
+  atlas (1 MiB RGBA, about 580 glyphs), in English the same 512x256 atlas (512 KiB) as before; the first frame in Russian
+  about 65 ms of software rendering in the preview.
+- **No "????".** A Cyrillic language (ru, uk, bg; be, mk, sr but sr-Latn, kk, ky, mn and tg count as ru-RU for the glyphs)
+  waits for those fonts as a CJK language waits for its group: until they joined the atlas, Kiln's overlay texts are
+  English (the game-drawn `native.menu.` / `native.footer.` texts are in the language at once). When they cannot be read
+  (no `kiln.assets`, another build's data) or have no Cyrillic, kiln.log says why and Kiln's texts stay English:
+  `ui: the game's default font group is not available (...): Kiln's texts in a Cyrillic language stay English, ...` or
+  `ui: the game's default font group has no Cyrillic font Kiln can use: ...`. `KilnUiLookInfo.glyphs` reports it for the
+  language's `keen::LanguageId` (9 ru-RU, 24 bg-BG, 34 uk-UA). The Language entry shows Русский once those fonts are in
+  (in a Latin game, a Cyrillic language's name is its tag, as CJK's: the readout is about the language in use).
+- kiln.log: `ui: the game's default font group joined the overlay's font atlas (group 0, fonts 10, 6 of 28, 0.5 MB;
+  Cyrillic; fonts 13, 12 left out (over 2 MiB: a Chinese, Japanese or Korean language's own group brings them); layout
+  from the game's reflection; read in 1 ms)`.
+
 ## Chinese, Japanese and Korean
 
 The overlay's own fonts are Latin (the game's Harmonique Display, the system font). When Kiln's language, or else the
@@ -88,7 +122,8 @@ reads the game's UI font, and merges it into the overlay's fonts after their Lat
   overlay gets the glyphs the game would draw for that language: zh-CN Noto Serif SC (runes up to U+ABFF) and Noto Serif KR
   (U+AC00 to U+FFFF), ja-JP Noto Serif JP Light and KR, zh-TW Noto Serif TC and KR, ko-KR Noto Serif KR
   (`native/services/ui/font_group.h`; the layout from the game's reflection, checked against client 26430625's data).
-  Latin keeps the overlay's font; only what it lacks comes from the group's font.
+  Latin keeps the overlay's font; only what it lacks comes from the group's font, after the default group's Cyrillic and
+  Thai fonts (above).
 - **Cost.** The overlay's ImGui font atlas makes glyphs as they are drawn (ImGui 1.92+, dynamic textures), so a group's
   font costs nothing until text in it is drawn, and its ranges only route runes to it. ImGui's
   `GetGlyphRangesChineseSimplifiedCommon` (2,500 ideographs) is a preload list for renderers without dynamic textures: it
@@ -103,6 +138,10 @@ reads the game's UI font, and merges it into the overlay's fonts after their Lat
   `kiln.assets`, another build's data), kiln.log says why (`ui: the game's font of language 20 is not available (...)`),
   the overlay keeps its Latin fonts and Kiln's texts stay English. `KilnUiLookInfo.glyphs` says which
   (`KILN_UI_GLYPHS_LATIN / LOADING / READY / FAILED`).
+  The same holds for what kiln-ui.dll draws in the overlay itself (the graphics readout, the fallback window): only the
+  `native.` texts the game draws (`KilnText.GameDrawnPrefixes`: `native.menu.`, `native.footer.`) are in the language
+  meanwhile. In **Language**, a Chinese, Japanese or Korean language's own name (简体中文) shows once the overlay has its
+  glyphs, else its tag: an English game lists Simplified Chinese as `zh-CN` (since 0.2.0-dev.29.18).
 - kiln.log: `ui: the game's font of language 20 joined the overlay's font atlas (group 1, fonts 13, 12 of 28, 17.7 MB; ...)`.
 
 ## Testing a translation

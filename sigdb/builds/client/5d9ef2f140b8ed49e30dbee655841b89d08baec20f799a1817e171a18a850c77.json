@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 778,
-    "constants": 869,
-    "features": 228
+    "symbols": 814,
+    "constants": 904,
+    "features": 233
   },
   "features": {
     "abilities.attributes": true,
@@ -93,8 +93,10 @@
     "gems.craft": true,
     "gems.payers": true,
     "gems.sockets": true,
+    "hooks.foreign_modules": true,
     "hooks.owner_cleanup": true,
     "hooks.typed": true,
+    "impact.pool": true,
     "items.catalog": true,
     "items.equip": true,
     "items.equip_sets": true,
@@ -193,8 +195,10 @@
     "stations.craft_ui": true,
     "stations.events": true,
     "stations.fill": true,
+    "stations.fill_ui": true,
     "stations.output_sources": true,
     "stations.read": true,
+    "stations.stock_ui": true,
     "steam.achievement_guard": true,
     "tick": true,
     "tick.wait_jobs": true,
@@ -224,6 +228,7 @@
     "ui.values.hud": true,
     "ui.values.slot": true,
     "ui.values.tooltip_lines": true,
+    "upscale.swap": true,
     "vfx.guard": true,
     "vfx.play": true,
     "weather.sample": true,
@@ -428,6 +433,9 @@
     "gems/RecycleGive": "0x385dc2",
     "gems/UnslotMove": "0x415010",
     "gems/UnslotMoveCall": "0x386089",
+    "impact/AllocStats": "0x8c0890",
+    "impact/PoolAlloc": "0x123e410",
+    "impact/ReportUsage": "0x12454b0",
     "items/ActorSpawnUpdate": "0x228130",
     "items/AddComponent": "0x960a20",
     "items/AreaDeposit": "0x412ed0",
@@ -647,6 +655,10 @@
     "stations/RebuildBaseStock": "0x46fde0",
     "stations/ResolveRecipeInputs": "0xe86340",
     "stations/StationWrite": "0x2c0c60",
+    "stations/client.AvailableRowRet1": "0xbb19b8",
+    "stations/client.AvailableRowRet2": "0xbb280a",
+    "stations/client.UiActionStatus": "0xb2dbe0",
+    "stations/client.UiAvailableCount": "0xd397d0",
     "steamguard/AchievementUnlockText": "0x1dd0f10",
     "steamguard/ReportAchievements": "0x1088440",
     "time/DaytimeSyncIfChanged": "0xec7ed0",
@@ -728,6 +740,19 @@
     "ui/UiStateNop": "0xa3b900",
     "ui/UiVStack": "0xa3c790",
     "ui/WaterChargeAmount": "0xe9fa40",
+    "upscale/client.CmdChunkAlloc": "0xfc6190",
+    "upscale/client.CmdExecute": "0x101f9e0",
+    "upscale/client.DlssCommandWrite": "0x11aa16",
+    "upscale/client.DlssExecuteTextures": "0x1021420",
+    "upscale/client.DlssFlushCall": "0x11a9cd",
+    "upscale/client.DlssResolveCall": "0x11a9e6",
+    "upscale/client.FlushBarriers": "0x47a70",
+    "upscale/client.Fsr3Create": "0x805d0",
+    "upscale/client.Fsr3CreateCall": "0x105d3d",
+    "upscale/client.Fsr3Dispatch": "0x81900",
+    "upscale/client.Fsr3DispatchCall": "0x11ae11",
+    "upscale/client.PassRecord": "0x11a870",
+    "upscale/client.ResolveHandle": "0x10308e0",
     "vfx/CreateInstance": "0x197de0",
     "vfx/FxLookup": "0x29f5b0",
     "vfx/FxPlayAt": "0x2a0f30",
@@ -1042,6 +1067,18 @@
     "gems/input.weapon": "0x260",
     "gems/iter.size": "0xf0",
     "gems/multiplier.key": "0xff88b470",
+    "impact/alloc.capacity": "0xf0",
+    "impact/alloc.used": "0xa0",
+    "impact/block.capacity": "0x10",
+    "impact/block.live": "0x18",
+    "impact/block.slots": "0x8",
+    "impact/pool.blocks": "0x10",
+    "impact/pool.live": "0x58",
+    "impact/pool.peak": "0x60",
+    "impact/slot.program": "0xc",
+    "impact/sys.block_count": "0x90",
+    "impact/sys.blocks": "0x88",
+    "impact/sys.pool": "0x78",
     "items/attr.durability": "0xed71dc01",
     "items/attr.durability_max": "0x3c8a292f",
     "items/attr.fuel": "0x5b0bf75",
@@ -1535,6 +1572,29 @@
     "ui/view.rarity": "0x2c",
     "ui/view.slotIndex": "0x4",
     "ui/view.stride": "0x48",
+    "upscale/client.cmd.last": "0x2e",
+    "upscale/client.create.output": "0xc",
+    "upscale/client.create.render": "0x4",
+    "upscale/client.ctx.writer": "0x10",
+    "upscale/client.desc.exposure": "0x13c",
+    "upscale/client.desc.far": "0xfc",
+    "upscale/client.desc.fov": "0x100",
+    "upscale/client.desc.frame_ns": "0x108",
+    "upscale/client.desc.jitter": "0x128",
+    "upscale/client.desc.mv_scale": "0x130",
+    "upscale/client.desc.near": "0xf8",
+    "upscale/client.desc.prev_render": "0x118",
+    "upscale/client.desc.render": "0x110",
+    "upscale/client.desc.reset": "0x138",
+    "upscale/client.desc.sharpness": "0x140",
+    "upscale/client.desc.upscale": "0x120",
+    "upscale/client.handle.table": "0x178",
+    "upscale/client.tex.format": "0x21",
+    "upscale/client.tex.height": "0x14",
+    "upscale/client.tex.image": "0x30",
+    "upscale/client.tex.view": "0x38",
+    "upscale/client.tex.width": "0x10",
+    "upscale/client.writer.chunk": "0x28",
     "vfx/fx.end_time": "0x180",
     "vfx/fx.finish_time": "0x190",
     "vfx/fx.guid": "0x160",
@@ -2622,6 +2682,16 @@
         "quests.npc_pages": "static"
       }
     },
+    "dev29-xhl-foreign-modules": {
+      "level": "static",
+      "date": "2026-11-19",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {},
+      "constants": {},
+      "features": {
+        "hooks.foreign_modules": "static"
+      }
+    },
     "emf": {
       "level": "lab",
       "date": "2026-11-05",
@@ -2860,6 +2930,37 @@
       },
       "features": {
         "gems.sockets": "static"
+      }
+    },
+    "impact-pool": {
+      "level": "static",
+      "date": "2026-11-19",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@impact/AllocStats.fields": "static",
+        "@impact/CreateInstance.pool": "static",
+        "@impact/PoolAlloc.counts": "static",
+        "@impact/ReportUsage.walk": "static",
+        "impact/AllocStats": "static",
+        "impact/PoolAlloc": "static",
+        "impact/ReportUsage": "static"
+      },
+      "constants": {
+        "impact/alloc.capacity": "static",
+        "impact/alloc.used": "static",
+        "impact/block.capacity": "static",
+        "impact/block.live": "static",
+        "impact/block.slots": "static",
+        "impact/pool.blocks": "static",
+        "impact/pool.live": "static",
+        "impact/pool.peak": "static",
+        "impact/slot.program": "static",
+        "impact/sys.block_count": "static",
+        "impact/sys.blocks": "static",
+        "impact/sys.pool": "static"
+      },
+      "features": {
+        "impact.pool": "static"
       }
     },
     "items": {
@@ -3710,6 +3811,23 @@
         "stations.craft_ui": "static"
       }
     },
+    "stations-fill-ui": {
+      "level": "static",
+      "date": "2026-11-19",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@stations/client.UiActionStatus.fill": "static",
+        "stations/client.AvailableRowRet1": "static",
+        "stations/client.AvailableRowRet2": "static",
+        "stations/client.UiActionStatus": "static",
+        "stations/client.UiAvailableCount": "static"
+      },
+      "constants": {},
+      "features": {
+        "stations.fill_ui": "static",
+        "stations.stock_ui": "static"
+      }
+    },
     "steamguard": {
       "level": "static",
       "date": "2026-11-11",
@@ -3916,6 +4034,65 @@
         "ui.menu_scroll": "static",
         "ui.screens": "lab",
         "ui.system_menu": "lab"
+      }
+    },
+    "upscale": {
+      "level": "static",
+      "date": "2026-11-18",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@upscale/client.ResolveHandle.fields": "static",
+        "@upscale/client.create.params": "static",
+        "@upscale/client.desc.depth": "static",
+        "@upscale/client.desc.exposure": "static",
+        "@upscale/client.desc.fov": "static",
+        "@upscale/client.desc.frame_ns": "static",
+        "@upscale/client.desc.mv_scale": "static",
+        "@upscale/client.desc.reset": "static",
+        "@upscale/client.desc.sharpness": "static",
+        "@upscale/client.desc.sizes": "static",
+        "@upscale/client.tex.format": "static",
+        "upscale/client.CmdChunkAlloc": "static",
+        "upscale/client.CmdExecute": "static",
+        "upscale/client.DlssCommandWrite": "static",
+        "upscale/client.DlssExecuteTextures": "static",
+        "upscale/client.DlssFlushCall": "static",
+        "upscale/client.DlssResolveCall": "static",
+        "upscale/client.FlushBarriers": "static",
+        "upscale/client.Fsr3Create": "static",
+        "upscale/client.Fsr3CreateCall": "static",
+        "upscale/client.Fsr3Dispatch": "static",
+        "upscale/client.Fsr3DispatchCall": "static",
+        "upscale/client.PassRecord": "static",
+        "upscale/client.ResolveHandle": "static"
+      },
+      "constants": {
+        "upscale/client.cmd.last": "static",
+        "upscale/client.create.output": "static",
+        "upscale/client.create.render": "static",
+        "upscale/client.ctx.writer": "static",
+        "upscale/client.desc.exposure": "static",
+        "upscale/client.desc.far": "static",
+        "upscale/client.desc.fov": "static",
+        "upscale/client.desc.frame_ns": "static",
+        "upscale/client.desc.jitter": "static",
+        "upscale/client.desc.mv_scale": "static",
+        "upscale/client.desc.near": "static",
+        "upscale/client.desc.prev_render": "static",
+        "upscale/client.desc.render": "static",
+        "upscale/client.desc.reset": "static",
+        "upscale/client.desc.sharpness": "static",
+        "upscale/client.desc.upscale": "static",
+        "upscale/client.handle.table": "static",
+        "upscale/client.tex.format": "static",
+        "upscale/client.tex.height": "static",
+        "upscale/client.tex.image": "static",
+        "upscale/client.tex.view": "static",
+        "upscale/client.tex.width": "static",
+        "upscale/client.writer.chunk": "static"
+      },
+      "features": {
+        "upscale.swap": "static"
       }
     },
     "vfx": {

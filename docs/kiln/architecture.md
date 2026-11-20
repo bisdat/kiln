@@ -76,7 +76,10 @@ per step. Per step:
 Kiln writes `kiln/logs/tick-stats.jsonl` every 60 s: step time, Kiln's own Pre/Post time, interval, subscribers. Since
 0.2.0-dev.29 each line also carries `post_parts` (the game's job wait, the window services' end and each Post
 subscriber by owner), `pre_parts` (the eight slowest Pre subscribers) and `worst` (the window's slowest step taken
-apart); a support report keeps the last 1 MiB of the file. `kilnctl tick-compare` compares two such files
+apart). Since 0.2.0-dev.29.19 a server-world gap of a second or more that the world's clock did not cover (a
+single-player world stands still while the game's menu is open) goes into `paused_ms` (count, total, max), written only
+when there was one, and not into `interval_ms`: a stall shows as a long interval with `clock_rate` staying at 60 (the
+clock catches up), a pause as `paused_ms`. Since 0.2.0-dev.29.19 each server and client world line ends with `impact` (the game's impact memory pool: `used_pct`, `peak_pct`, `capacity_mib`, `live`, `live_peak`; [services/abilities.md](services/abilities.md#impact-memory-watch)). A support report keeps the last 1 MiB of the file. `kilnctl tick-compare` compares two such files
 (before/after a change; `kiln_manage::tick_compare`, the method in [kilnctl.md](kilnctl.md#measuring-a-task-change-tick-compare-t12)).
 
 ## C ABI (`native/core/abi/kiln_api.h`, ABI 1)
