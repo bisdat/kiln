@@ -369,6 +369,9 @@ void Pool::Core::deliver_body(Worker& self, Work& work) {
         if (m->resident) --resident_running;
     }
     if (info.faulted) {
+        // the quarantine before Faulted is published: whoever sees Faulted (its own done included) sees the owner
+        // quarantined, so no new root slips in between (on_fault quarantines again: a no-op)
+        model.quarantine(work.owner);
         model.segment_ended(work, false, Outcome::Faulted);  // publish Faulted, queue its done for a healthy worker
         on_fault(self, work.owner);
         wake_all();
