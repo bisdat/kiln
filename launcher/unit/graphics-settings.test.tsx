@@ -33,7 +33,7 @@ test("the snapshot's graphics entries are the ones the game reads", () => {
     expect(by[`graphics.${k}`]).toMatchObject({ type: "float", default: d, min: 0.33, max: 1 });
   expect(by["graphics.readout"]).toMatchObject({ type: "bool", default: false });
   expect(by["graphics.upscaler"]).toMatchObject({ type: "enum", default: "game", options: ["game", "amd", "xess"] });
-  expect(by["graphics.amdUpscaler"]).toMatchObject({ type: "enum", default: "auto", options: ["auto", "fsr3"] });
+  expect(by["graphics.amdUpscaler"]).toMatchObject({ type: "enum", default: "auto", options: ["auto", "fsr3", "fsr4"] });
   expect(by["graphics.upscaler"].comment).not.toMatch(/dlss|unlock/i);
   for (const e of schema.entries.filter((e) => isGraphicsPath(e.path))) {
     expect(e.requiresRestart).toBe(false);

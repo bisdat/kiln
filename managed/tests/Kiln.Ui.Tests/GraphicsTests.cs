@@ -365,7 +365,14 @@ public unsafe class GraphicsTests : IDisposable
         var warnings = new List<string>();
         var bad = GraphicsTools.Parse("{ \"graphics\": { \"upscaler\": \"DLSS\", \"amdUpscaler\": 4 } }", warnings.Add);
         Assert.Equal(GraphicsSettings.Default, bad);
-        Assert.Equal(["graphics.upscaler is not game, amd or xess: game", "graphics.amdUpscaler is not auto or fsr3: auto"], warnings);
+        Assert.Equal(["graphics.upscaler is not game, amd or xess: game", "graphics.amdUpscaler is not auto, fsr3 or fsr4: auto"], warnings);
+        // FSR 4 as an explicit, experimental choice ("auto" runs FSR 3.1 until FSR 4 is confirmed in this game)
+        Assert.Equal(AmdUpscalerMode.Fsr4, GraphicsTools.Parse("{ \"graphics\": { \"upscaler\": \"amd\", \"amdUpscaler\": \"fsr4\" } }").AmdUpscaler);
+        Assert.Equal("AMD FSR 4 (experimental) behind the game's FSR 3",
+            GraphicsTools.Describe(GraphicsSettings.Default with { Upscaler = UpscalerChoice.Amd, AmdUpscaler = AmdUpscalerMode.Fsr4 }));
+        var four = GraphicsSettings.Default with { Upscaler = UpscalerChoice.Amd, AmdUpscaler = AmdUpscalerMode.Fsr4 };
+        Assert.Contains("\"amdUpscaler\": \"fsr4\"", GraphicsTools.Splice("", four));
+        Assert.Equal(four, GraphicsTools.Parse(GraphicsTools.Splice("", four)));
         // written with the rest of the section; comments stay; an older section gains the two keys
         var mine = GraphicsSettings.Default with { FpsCap = 90, Upscaler = UpscalerChoice.Xess, AmdUpscaler = AmdUpscalerMode.Fsr3 };
         const string old = "{\n  \"graphics\": {\n    \"fpsCap\": 60 // mine\n  }\n}\n";
@@ -407,7 +414,7 @@ public unsafe class GraphicsTests : IDisposable
         // kiln.ui takes the choice from graphics_set at every call (every 2 seconds and on every change): left at 0, it would
         // turn the player's choice back to the game's own FSR 3 at the next FSR set-up
         foreach (var (name, choice, native) in new[] { ("game", UpscalerChoice.Game, 0u), ("amd", UpscalerChoice.Amd, 1u), ("xess", UpscalerChoice.Xess, 2u) })
-            foreach (var (amdName, amd, amdNative) in new[] { ("auto", AmdUpscalerMode.Auto, 0u), ("fsr3", AmdUpscalerMode.Fsr3, 1u) })
+            foreach (var (amdName, amd, amdNative) in new[] { ("auto", AmdUpscalerMode.Auto, 0u), ("fsr3", AmdUpscalerMode.Fsr3, 1u), ("fsr4", AmdUpscalerMode.Fsr4, 2u) })
             {
                 var s = GraphicsTools.Parse($"{{ \"graphics\": {{ \"upscaler\": \"{name}\", \"amdUpscaler\": \"{amdName}\", \"fpsCap\": 60 }} }}");
                 Assert.Equal((choice, amd), (s.Upscaler, s.AmdUpscaler));
@@ -475,6 +482,7 @@ public unsafe class GraphicsTests : IDisposable
         foreach (var (bit, key) in GraphicsPage.AsideKeys) Assert.Equal(bit, aside[key.ToUpperInvariant()]);
         Assert.Equal(1u, HeaderEnum(h, "KILN_UI_UPSCALER_").Single(x => x.Name == "AMD").Value);
         Assert.Equal(1u, HeaderEnum(h, "KILN_UI_AMD_UPSCALER_").Single(x => x.Name == "FSR3").Value);
+        Assert.Equal((uint)AmdUpscalerMode.Fsr4, HeaderEnum(h, "KILN_UI_AMD_UPSCALER_").Single(x => x.Name == "FSR4").Value);
     }
 
     [Fact]
@@ -560,10 +568,11 @@ public unsafe class GraphicsTests : IDisposable
         Assert.Empty(GraphicsPage.UpscalerLines(GraphicsSettings.Default, UpscalerStatus.FromNative(Phase(0, 0)), available: true));
         var running = GraphicsPage.StatusLines(amd, Phase(3, 0, UpscalerNow.Hooked | UpscalerNow.FsrSeen, version: (4u << 22) | (1u << 12) | 2u));
         Assert.Equal(["AMD FSR 4 runs in place of the game's FSR 3.", "Version 4.1.2, rendering at 1707x960 for 2560x1440."], running);
-        // FSR 3.1 by AMD's selection, and pinned
+        // FSR 3.1 by AMD's selection (FSR 4 chosen), and pinned (FSR 3.1, or auto: FSR 3.1 until FSR 4 is confirmed)
         Assert.Equal(["AMD FSR 3.1 runs in place of the game's FSR 3.", "Version 3.1.6, rendering at 1707x960 for 2560x1440.",
             "AMD's selection chose FSR 3.1: FSR 4 does not run on this graphics card or driver."],
-            GraphicsPage.StatusLines(amd, Phase(4, 0, UpscalerNow.FsrSeen, version: (3u << 22) | (1u << 12) | 6u)));
+            GraphicsPage.StatusLines(amd with { AmdUpscaler = AmdUpscalerMode.Fsr4 }, Phase(4, 0, UpscalerNow.FsrSeen, version: (3u << 22) | (1u << 12) | 6u)));
+        Assert.Equal(2, GraphicsPage.StatusLines(amd, Phase(4, 0, UpscalerNow.FsrSeen | UpscalerNow.AmdPinned, version: (3u << 22) | (1u << 12) | 6u)).Count);
         Assert.Equal(2, GraphicsPage.StatusLines(amd with { AmdUpscaler = AmdUpscalerMode.Fsr3 },
             Phase(4, 0, UpscalerNow.FsrSeen | UpscalerNow.AmdPinned, version: (3u << 22) | (1u << 12) | 6u)).Count);
         // files missing: the game's FSR 3 and why

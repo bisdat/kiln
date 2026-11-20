@@ -258,7 +258,7 @@ export interface GraphicsStepAside {
 /** (dev.29.18) kiln.json `graphics.upscaler`: what runs behind the game's FSR 3 option. */
 export type UpscalerChoice = "game" | "amd" | "xess";
 /** kiln.json `graphics.amdUpscaler`. */
-export type AmdUpscalerMode = "auto" | "fsr3";
+export type AmdUpscalerMode = "auto" | "fsr3" | "fsr4";
 /** What upscales behind the game's FSR 3 option (kiln_ui.h KILN_UI_UPSCALE_RUN_*; "unknown": a runtime that does not say). */
 export type UpscalerRunning = "off" | "notFsr" | "gameFsr3" | "amdFsr4" | "amdFsr31" | "xess" | "unknown";
 /** Why the chosen upscaler does not run (kiln_ui.h KILN_UI_UPSCALE_WHY_* in camelCase; docs/kiln/graphics.md); a code

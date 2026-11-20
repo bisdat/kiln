@@ -1001,9 +1001,10 @@
       "amd": "AMD FSR",
       "xess": "Intel XeSS",
       "amd_mode": "AMD FSR 버전",
-      "amd_auto": "자동 (지원되면 FSR 4)",
+      "amd_auto": "자동 (당분간 FSR 3.1)",
       "amd_fsr3": "FSR 3.1",
-      "amd_hint": "자동은 AMD가 고릅니다: 지원하는 그래픽 카드와 드라이버에서는 FSR 4, 그 밖에서는 FSR 3.1. FSR 3.1을 고르면 FSR 4가 될 곳에서도 FSR 3.1을 씁니다.",
+      "amd_fsr4": "FSR 4 (실험적)",
+      "amd_hint": "자동은 이 게임에서 FSR 4가 확인될 때까지 FSR 3.1을 씁니다. FSR 4 (실험적)는 AMD가 고르게 합니다. 지원하는 그래픽 카드와 드라이버에서는 FSR 4, 나머지에서는 FSR 3.1이며, 어두운 장면이 너무 어둡게 보일 수 있습니다.",
       "hint": "게임 그래픽 설정에서 업스케일러로 FSR 3를 고르세요. 그 자리에서 Kiln이 선택한 것을 실행합니다. 변경은 월드에서 FSR 3가 실행 중이면 바로, 아니면 월드를 불러올 때 적용됩니다. AMD FSR과 Intel XeSS에는 제조사의 파일이 필요하며, Kiln 런처가 다운로드합니다 (설정, 그래픽).",
       "files": {
         "present": "{name} {version}: 파일이 {folder}에 있습니다.",

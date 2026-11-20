@@ -2858,15 +2858,16 @@
         },
         "choiceHint": {
           "game": "Rien ne change : le FSR 3 du jeu tourne comme sans Kiln.",
-          "amd": "FSR 4 sur les cartes graphiques et pilotes qui le font tourner (sélection d'AMD), FSR 3.1 sur les autres. Nécessite les fichiers d'AMD (70 Mo).",
+          "amd": "AMD FSR 3.1, ou le FSR 4 en choix expérimental sur les cartes graphiques et pilotes qui le prennent en charge. Nécessite les fichiers d'AMD (70 Mo).",
           "xess": "Le XeSS d'Intel, sur les cartes Intel, AMD et NVIDIA. Nécessite le fichier d'Intel (74 Mo)."
         },
         "amdLabel": "Version d'AMD FSR",
         "amd": {
-          "auto": "Auto (FSR 4 là où il tourne)",
-          "fsr3": "FSR 3.1"
+          "auto": "Auto (FSR 3.1 pour l'instant)",
+          "fsr3": "FSR 3.1",
+          "fsr4": "FSR 4 (expérimental)"
         },
-        "amdHint": "Auto laisse AMD choisir : FSR 4 sur les cartes graphiques et pilotes qui le font tourner, FSR 3.1 sur les autres. FSR 3.1 garde FSR 3.1 même là où FSR 4 tournerait.",
+        "amdHint": "Auto utilise le FSR 3.1 jusqu'à ce que le FSR 4 soit confirmé dans ce jeu. FSR 4 (expérimental) laisse AMD choisir : le FSR 4 sur les cartes graphiques et pilotes qui le prennent en charge, le FSR 3.1 sur les autres ; les scènes sombres peuvent être rendues trop sombres.",
         "heading": {
           "now": "Actuellement",
           "last": "Dernière partie",
@@ -2890,8 +2891,9 @@
         "restartNow": "Redémarrez le jeu pour utiliser {upscaler}. D'ici là, c'est le FSR 3 du jeu qui tourne.",
         "detail": "Détails : {detail}",
         "plan": {
-          "amd": "Avec FSR 3 choisi dans les paramètres graphiques du jeu, Kiln exécute AMD FSR à sa place : FSR 4 si votre carte graphique et votre pilote le font tourner, sinon FSR 3.1.",
+          "amd": "Avec le FSR 3 choisi dans les paramètres graphiques du jeu, Kiln exécute AMD FSR 3.1 à sa place. Le FSR 4 est disponible en choix expérimental.",
           "amdFsr3": "Avec FSR 3 choisi dans les paramètres graphiques du jeu, Kiln exécute AMD FSR 3.1 à sa place.",
+          "amdFsr4": "Avec le FSR 3 choisi dans les paramètres graphiques du jeu, Kiln exécute AMD FSR à sa place : le FSR 4 là où votre carte graphique et votre pilote le prennent en charge, sinon le FSR 3.1. Le FSR 4 est expérimental et peut rendre les scènes sombres trop sombres.",
           "xess": "Avec FSR 3 choisi dans les paramètres graphiques du jeu, Kiln exécute Intel XeSS à sa place."
         },
         "reason": {

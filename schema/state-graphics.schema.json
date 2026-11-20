@@ -16,7 +16,7 @@
       "required": ["chosen", "amdUpscaler", "running", "reason"],
       "properties": {
         "chosen": { "enum": ["game", "amd", "xess"], "description": "kiln.json graphics.upscaler in use." },
-        "amdUpscaler": { "enum": ["auto", "fsr3"], "description": "kiln.json graphics.amdUpscaler in use." },
+        "amdUpscaler": { "enum": ["auto", "fsr3", "fsr4"], "description": "kiln.json graphics.amdUpscaler in use." },
         "running": {
           "enum": ["off", "notFsr", "gameFsr3", "amdFsr4", "amdFsr31", "xess", "unknown"],
           "description": "What upscales behind the game's FSR 3 option now (kiln_ui.h KILN_UI_UPSCALE_RUN_*). off: Kiln's swap is not in (the game's own chosen, or see reason). notFsr: the swap is in but the game did not upscale with FSR 3 in the last two seconds (FSR 3 not chosen in the game's settings, or no world). unknown: a kiln-ui.dll without the phase B status."

@@ -59,7 +59,7 @@ internal sealed record GraphicsSettings(int FpsCap, string DlssPreset, DlssScale
     /// <summary>What runs behind the game's FSR 3 option (<c>graphics.upscaler</c>; phase B).</summary>
     public UpscalerChoice Upscaler { get; init; }
 
-    /// <summary>AMD FSR's auto selection, or FSR 3.1 pinned (<c>graphics.amdUpscaler</c>).</summary>
+    /// <summary>Which AMD FSR (<c>graphics.amdUpscaler</c>): auto (FSR 3.1 for now), FSR 3.1, or FSR 4 (experimental).</summary>
     public AmdUpscalerMode AmdUpscaler { get; init; }
 
     public GraphicsSettings Clamped() => this with
@@ -192,7 +192,12 @@ internal static unsafe class GraphicsTools
                 $"DLSS render scale per mode {s.QualityScale:0.###}/{s.BalancedScale:0.###}/{s.PerformanceScale:0.###}/{s.UltraPerformanceScale:0.###}"));
         if (s.Readout) parts.Add("readout on");
         if (s.Upscaler == UpscalerChoice.Amd)
-            parts.Add(s.AmdUpscaler == AmdUpscalerMode.Fsr3 ? "AMD FSR 3.1 behind the game's FSR 3" : "AMD FSR (auto) behind the game's FSR 3");
+            parts.Add(s.AmdUpscaler switch
+            {
+                AmdUpscalerMode.Fsr3 => "AMD FSR 3.1 behind the game's FSR 3",
+                AmdUpscalerMode.Fsr4 => "AMD FSR 4 (experimental) behind the game's FSR 3",
+                _ => "AMD FSR (auto) behind the game's FSR 3",
+            });
         else if (s.Upscaler == UpscalerChoice.Xess) parts.Add("Intel XeSS behind the game's FSR 3");
         return parts.Count == 0 ? "all off" : string.Join(", ", parts);
     }
@@ -257,7 +262,7 @@ internal static unsafe class GraphicsTools
             {
                 amd = UpscalerCodes.AmdOf(a.ValueKind == JsonValueKind.String ? a.GetString() : null) ?? AmdUpscalerMode.Auto;
                 if (UpscalerCodes.AmdOf(a.ValueKind == JsonValueKind.String ? a.GetString() : null) is null)
-                    warn?.Invoke("graphics.amdUpscaler is not auto or fsr3: auto");
+                    warn?.Invoke("graphics.amdUpscaler is not auto, fsr3 or fsr4: auto");
             }
             return new GraphicsSettings(fps, preset, mode, Num("dlssRenderScale", d.RenderScale), Num("dlssQualityScale", d.QualityScale),
                 Num("dlssBalancedScale", d.BalancedScale), Num("dlssPerformanceScale", d.PerformanceScale),
@@ -599,7 +604,7 @@ internal static unsafe class GraphicsPage
                 : KilnText.T("graphics.upscaler.size", ("render", size.render), ("output", size.output)));
         }
         if (now.Running == UpscalerRunning.AmdFsr31 && s.Upscaler == UpscalerChoice.Amd && (now.Flags & UpscalerNow.AmdPinned) == 0 &&
-            s.AmdUpscaler == AmdUpscalerMode.Auto)
+            s.AmdUpscaler == AmdUpscalerMode.Fsr4)
             lines.Add(KilnText.T("graphics.upscaler.amd_fsr3_auto"));
         if (UpscalerCodes.Reason(now.Reason) is { } code)
             lines.Add(KilnText.T("graphics.upscaler.reason." + UpscalerCodes.Key(code), ("upscaler", ChoiceName(s)), ("tools", AsideNames(now.Aside)),
@@ -637,7 +642,8 @@ internal static unsafe class GraphicsPage
         _presetItems = UiDraw.ComboItems([KilnText.T("graphics.preset.default"), "J", "K", "L", "M"]);
         _scaleItems = UiDraw.ComboItems([KilnText.T("graphics.scale.game"), KilnText.T("graphics.scale.per_mode"), KilnText.T("graphics.scale.custom")]);
         _upscalerItems = UiDraw.ComboItems([KilnText.T("graphics.upscaler.game"), KilnText.T("graphics.upscaler.amd"), KilnText.T("graphics.upscaler.xess")]);
-        _amdItems = UiDraw.ComboItems([KilnText.T("graphics.upscaler.amd_auto"), KilnText.T("graphics.upscaler.amd_fsr3")]);
+        _amdItems = UiDraw.ComboItems([KilnText.T("graphics.upscaler.amd_auto"), KilnText.T("graphics.upscaler.amd_fsr3"),
+            KilnText.T("graphics.upscaler.amd_fsr4")]);
         _textsGeneration = g;
     }
 
@@ -738,7 +744,7 @@ internal static unsafe class GraphicsPage
         {
             var amd = (int)cur.AmdUpscaler;
             ui.NextItemWidth(w);
-            if (ui.Combo(KilnText.T("graphics.upscaler.amd_mode") + "##kiln.gfx.amd", ref amd, _amdItems, 2))
+            if (ui.Combo(KilnText.T("graphics.upscaler.amd_mode") + "##kiln.gfx.amd", ref amd, _amdItems, 3))
                 GraphicsTools.Change(cur with { AmdUpscaler = (AmdUpscalerMode)amd });
             Hint(KilnText.T("graphics.upscaler.amd_hint"));
         }

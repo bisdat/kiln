@@ -1007,9 +1007,10 @@
       "amd": "AMD FSR",
       "xess": "Intel XeSS",
       "amd_mode": "Version d'AMD FSR",
-      "amd_auto": "Auto (FSR 4 là où il tourne)",
+      "amd_auto": "Auto (FSR 3.1 pour l'instant)",
       "amd_fsr3": "FSR 3.1",
-      "amd_hint": "Auto laisse AMD choisir : FSR 4 sur les cartes graphiques et pilotes qui le font tourner, FSR 3.1 sur les autres. FSR 3.1 garde FSR 3.1 même là où FSR 4 tournerait.",
+      "amd_fsr4": "FSR 4 (expérimental)",
+      "amd_hint": "Auto utilise le FSR 3.1 jusqu'à ce que le FSR 4 soit confirmé dans ce jeu. FSR 4 (expérimental) laisse AMD choisir : le FSR 4 sur les cartes graphiques et pilotes qui le prennent en charge, le FSR 3.1 sur les autres ; les scènes sombres peuvent être rendues trop sombres.",
       "hint": "Choisissez FSR 3 comme mise à l'échelle dans les paramètres graphiques du jeu : Kiln exécute votre choix à sa place. Un changement s'applique tout de suite pendant que le FSR 3 tourne dans un monde, sinon au chargement d'un monde. Kiln a besoin des fichiers du fabricant pour AMD FSR et Intel XeSS ; le lanceur Kiln les télécharge (Paramètres, Graphismes).",
       "files": {
         "present": "{name} {version} : les fichiers sont dans {folder}.",

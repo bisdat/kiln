@@ -162,6 +162,11 @@ inline bool latch_at_frame(bool any, uint32_t latched, uint32_t latched_pin, uin
 inline bool restart_to_use(uint32_t chosen, uint32_t reason) {
     return static_cast<Choice>(chosen) != Choice::game && static_cast<Why>(reason) == Why::restart;
 }
+// Whether the AMD backend pins FSR 3.1 through AMD's version override (else AMD's own selection runs: FSR 4 where it
+// runs). "auto" pins it too until FSR 4 is confirmed in this game (dark scenes too dark on an RX 9070 XT, 29.19 betas 1
+// and 3); FSR 4 stays the explicit, experimental "fsr4".
+inline bool amd_pins_fsr3(AmdPin pin) { return pin != AmdPin::fsr4; }
+
 // The game's pre-exposure over a stretch of frames, for kiln.log's "upscaled N frames" lines (29.19 beta 3: 1 right after
 // a load, 0.077 in the world; how it moves decides what FSR 4 should get).
 struct ExposureRange {

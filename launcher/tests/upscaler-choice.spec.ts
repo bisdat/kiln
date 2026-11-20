@@ -57,7 +57,9 @@ test.describe("desktop: Settings, Graphics", () => {
     await b.getByLabel("Upscaler").selectOption("amd");
     await expect.poll(async () => (await kilnJson(page)).upscaler).toBe("amd");
     await expect(b.getByLabel("AMD FSR version")).toHaveValue("auto");
-    await expect(b).toContainText("FSR 4 on graphics cards and drivers that run it (AMD's own selection), FSR 3.1 on the others.");
+    await expect(b).toContainText("AMD FSR 3.1, or FSR 4 as an experimental choice on graphics cards and drivers that run it.");
+    // FSR 4 is the explicit, experimental choice ("auto" runs FSR 3.1 for now)
+    await expect(b.getByLabel("AMD FSR version").locator("option")).toHaveText(["Auto (FSR 3.1 for now)", "FSR 3.1", "FSR 4 (experimental)"]);
     await expect(b.getByTestId("upscaler-offer")).toHaveText("AMD FSR's files are not in this game yet. Until they are, the game's own FSR 3 runs.");
     await expect(b.getByTestId("upscaler-status")).toHaveAttribute("data-heading", "plan");
     await expect(b.getByTestId("upscaler-status")).toContainText("When you play");
@@ -81,7 +83,7 @@ test.describe("desktop: Settings, Graphics", () => {
     // the files are there: no offer, the plan says what will run
     await expect(b.getByTestId("upscaler-offer")).toHaveCount(0);
     await expect(b.getByTestId("upscaler-status-line")).toHaveText([
-      "With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR in its place: FSR 4 where your graphics card and driver run it, else FSR 3.1."]);
+      "With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR 3.1 in its place. FSR 4 is available as an experimental choice."]);
     await b.getByLabel("AMD FSR version").selectOption("fsr3");
     await expect.poll(async () => (await kilnJson(page)).amdUpscaler).toBe("fsr3");
     await expect(b.getByTestId("upscaler-status-line")).toHaveText(["With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR 3.1 in its place."]);
@@ -193,11 +195,14 @@ test.describe("Steam Deck: Settings", () => {
     await pad(page, "a");
     await expect(choice).toContainText("AMD FSR");
     await expect.poll(async () => (await kilnJson(page)).upscaler).toBe("amd");
-    await expect(row(page, "set-amd-upscaler")).toContainText("Auto (FSR 4 where it runs)");
+    await expect(row(page, "set-amd-upscaler")).toContainText("Auto (FSR 3.1 for now)");
     await row(page, "set-amd-upscaler").focus();
     await pad(page, "a");
     await expect(row(page, "set-amd-upscaler")).toContainText("FSR 3.1");
     await expect.poll(async () => (await kilnJson(page)).amdUpscaler).toBe("fsr3");
+    await pad(page, "a");
+    await expect(row(page, "set-amd-upscaler")).toContainText("FSR 4 (experimental)");
+    await expect.poll(async () => (await kilnJson(page)).amdUpscaler).toBe("fsr4");
     await pad(page, "a");
     await expect.poll(async () => (await kilnJson(page)).amdUpscaler).toBe("auto");
     const now = row(page, "set-upscaler-now");
@@ -234,7 +239,7 @@ test.describe("Steam Deck: Settings", () => {
     await expect(amd).toContainText("Downloading");
     await shot(page, "deck-downloading");
     await expect(amd).toContainText("Downloaded", { timeout: 15_000 });
-    await expect(now).toContainText("Kiln runs AMD FSR in its place");
+    await expect(now).toContainText("Kiln runs AMD FSR 3.1 in its place");
     await shot(page, "deck-downloaded");
     // A on a downloaded row asks to remove; Remove
     await amd.focus();
@@ -248,9 +253,9 @@ test.describe("Steam Deck: Settings", () => {
   test("the status row says what the running game runs", async ({ page }) => {
     await page.goto("/?deck=steamdeck#/deck/settings");
     await expect(page.locator('[data-deck-screen="settings"]')).toBeVisible();
-    await mock(page, "setKilnJson", "graphics", { upscaler: "amd" });
+    await mock(page, "setKilnJson", "graphics", { upscaler: "amd", amdUpscaler: "fsr4" });
     await vmock(page, "install", "amd-fsr", "2.4.0");
-    await mock(page, "setGraphicsState", state({ running: "amdFsr31", version: "3.1.6" }));
+    await mock(page, "setGraphicsState", state({ amdUpscaler: "fsr4", running: "amdFsr31", version: "3.1.6" }));
     await mock(page, "startOutside", 5);
     await again(page, "#/deck/help", "#/deck/settings");
     await expect(page.locator('[data-deck-screen="settings"]')).toBeVisible();

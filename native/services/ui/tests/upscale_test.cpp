@@ -59,6 +59,14 @@ static void settings() {
     // the numbers are the ABI's
     CHECK(static_cast<uint32_t>(gfx::Upscaler::amd) == KILN_UI_UPSCALER_AMD && static_cast<uint32_t>(gfx::Upscaler::xess) == KILN_UI_UPSCALER_XESS);
     CHECK(static_cast<uint32_t>(Choice::amd) == KILN_UI_UPSCALER_AMD && static_cast<uint32_t>(AmdPin::fsr3) == KILN_UI_AMD_UPSCALER_FSR3);
+    // "fsr4": FSR 4 as an explicit, experimental choice; "auto" runs FSR 3.1 until FSR 4 is confirmed in this game
+    s = parse(R"({"graphics": {"upscaler": "amd", "amdUpscaler": "fsr4"}})");
+    CHECK(s.amd_pin == gfx::AmdPin::fsr4 && static_cast<uint32_t>(AmdPin::fsr4) == KILN_UI_AMD_UPSCALER_FSR4 &&
+          static_cast<uint32_t>(gfx::AmdPin::fsr4) == KILN_UI_AMD_UPSCALER_FSR4);
+    gfx::Settings four;
+    four.amd_pin = gfx::AmdPin::fsr4;
+    CHECK(gfx::clamped(four).amd_pin == gfx::AmdPin::fsr4);
+    CHECK(amd_pins_fsr3(AmdPin::automatic) && amd_pins_fsr3(AmdPin::fsr3) && !amd_pins_fsr3(AmdPin::fsr4));
     CHECK(std::string(gfx::upscaler_key(gfx::Upscaler::xess)) == "xess");
     CHECK(std::string(gfx::upscaler_name(gfx::Upscaler::amd)).find("DLSS") == std::string::npos);
 }

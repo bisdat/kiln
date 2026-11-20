@@ -3,7 +3,8 @@
 // signed Vulkan DLLs from FidelityFX SDK 2.4.0, downloaded by the launcher into <game>/kiln/vendor/amd/2.4.0/:
 // amd_fidelityfx_loader_vk.dll (the five API functions) and amd_fidelityfx_upscaler_vk.dll (FSR 4.1.2, FSR 3.1.6 and
 // FSR 2.3.4). AMD's selection runs the newest the GPU supports (FSR 4 on recent AMD GPUs, else FSR 3.1); with
-// graphics.amdUpscaler "fsr3" Kiln pins the newest FSR 3.x through AMD's version override.
+// graphics.amdUpscaler "auto" or "fsr3" Kiln pins the newest FSR 3.x through AMD's version override; "fsr4" (experimental)
+// leaves it to AMD's selection.
 //  - The DLLs are mapped when the game's device exists (device_ready), from Kiln's folder only: the upscaler DLL first,
 //    so AMD's loader finds it already mapped and never looks in the game's folder (its first place) for another copy.
 //  - The context is made for the colour texture's size (max render) and the output's, with HDR, inverted depth and
@@ -200,7 +201,7 @@ class AmdBackend final : public Backend {
         destroy();  // the core calls it first; once more is harmless
         tuning_ = amd::parse_tuning(read_control());  // a knob changed in a test applies at the next set-up
         const int fsr3 = amd::pick_fsr3(version_names_);
-        bool pin = ci.amd == AmdPin::fsr3 && fsr3 >= 0;
+        bool pin = amd_pins_fsr3(ci.amd) && fsr3 >= 0;
         // the create flags depend on what runs (FSR 4: no DYNAMIC_RESOLUTION, as OptiScaler's working FSR 4): what AMD's
         // selection will run, checked below against what it ran
         Running expect = amd::expected_running(version_names_, pin);

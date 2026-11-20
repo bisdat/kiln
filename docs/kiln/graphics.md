@@ -30,7 +30,7 @@ where the card runs it) or Intel XeSS ([below](#behind-the-games-fsr-3-phase-b))
 | `dlssQualityScale`, `dlssBalancedScale`, `dlssPerformanceScale`, `dlssUltraPerformanceScale` | 0.33..1 each: with `perMode` | DLSS's own: 0.667, 0.58, 0.5, 0.333 | " |
 | `readout` | `true` / `false` | `false` | at once |
 | `upscaler` | `game` (the game's own FSR 3), `amd` (AMD FSR: FSR 4 where the GPU runs it, else FSR 3.1), `xess` (Intel XeSS): what runs in place of the game's FSR 3 | `game` | at the next FSR 3 frame (in a world with FSR 3 chosen in the game), else when a world loads; Kiln's hooks go in only when it is not `game` at the game's start ([below](#behind-the-games-fsr-3-phase-b)) |
-| `amdUpscaler` | `auto` (AMD's selection: FSR 4 where it runs, else FSR 3.1), `fsr3` (FSR 3.1 even where FSR 4 runs): with `amd` | `auto` | at the next FSR 3 frame |
+| `amdUpscaler` | `auto` (FSR 3.1 until FSR 4 is confirmed in this game), `fsr3` (FSR 3.1), `fsr4` (AMD's selection: FSR 4 where it runs, else FSR 3.1; experimental): with `amd` | `auto` | at the next FSR 3 frame |
 
 "When the game next sets DLSS up": loading a world, or changing the DLSS mode or the resolution in the game's own
 settings. One more rule: Kiln hooks DLSS only when a DLSS setting or the readout is on **when the game starts**. A DLSS
@@ -104,9 +104,10 @@ limits: AMD's and Intel's own libraries decide what runs on a card.
 
 ### The choice
 - **The game's own FSR 3** (`game`, the default): nothing changes, and Kiln puts no hook on the game's FSR 3.
-- **AMD FSR** (`amd`): AMD's FidelityFX SDK 2.4.0. With `amdUpscaler` `auto`, AMD's own selection runs FSR 4 (4.1.2)
-  where the card and driver run it, else FSR 3.1 (3.1.6). `fsr3` keeps FSR 3.1 even where FSR 4 would run (some players
-  prefer its look, or its cost on an older card).
+- **AMD FSR** (`amd`): AMD's FidelityFX SDK 2.4.0. With `amdUpscaler` `auto` (and `fsr3`), Kiln runs FSR 3.1 (3.1.6)
+  until FSR 4 is confirmed in this game: FSR 4 drew dark scenes too dark on an RX 9070 XT (0.2.0-dev.29.19 betas 1 and
+  3). `fsr4`, shown as experimental, leaves it to AMD's own selection: FSR 4 (4.1.2) where the card and driver run it,
+  else FSR 3.1.
 - **Intel XeSS** (`xess`): Intel's XeSS SDK 3.0.2, its Super Resolution only (which reports itself as version 2.0.2),
   on Intel, AMD and NVIDIA cards.
 
@@ -118,7 +119,7 @@ and render scale stay what decides the render size.
 
 **What each graphics card gets** (AMD's and Intel's lists; nothing of it has run in a real game yet):
 
-| card | AMD FSR (`auto`) | AMD FSR (`fsr3`) | Intel XeSS |
+| card | AMD FSR (`fsr4`, experimental) | AMD FSR (`auto`, `fsr3`) | Intel XeSS |
 |---|---|---|---|
 | AMD RX 9000 | FSR 4 (FP8 model) | FSR 3.1 | XeSS |
 | AMD RX 7000, RX 6000 | FSR 4 (INT8 model, new in SDK 2.4.0) | FSR 3.1 | XeSS |
@@ -249,7 +250,7 @@ Two slots after `set_texts` (byte offsets 1016 and 1024; the table is 1032 bytes
   preset asked for, this frame's render size and the output size. Set `size` first.
 - `graphics_set(&KilnUiGraphics)`: Kiln.Ui's only (the player's settings); a native plugin's call is refused with
   `KILN_ERR_UNAVAILABLE`. Since phase B its two last words are `upscaler` (`KILN_UI_UPSCALER_GAME` 0, `_AMD` 1,
-  `_XESS` 2) and `amd_upscaler` (`KILN_UI_AMD_UPSCALER_AUTO` 0, `_FSR3` 1); still 48 bytes.
+  `_XESS` 2) and `amd_upscaler` (`KILN_UI_AMD_UPSCALER_AUTO` 0, `_FSR3` 1, `_FSR4` 2 since 0.2.0-dev.29.19); still 48 bytes.
 - Phase B's status fields follow at offset 72 (`KilnUiGraphicsStatus` is 248 bytes, `KILN_UI_GRAPHICS_STATUS_SIZE_V2`;
   a 72-byte caller gets the fields before only): `upscaler`, `amd_upscaler`, `upscale_running`
   (`KILN_UI_UPSCALE_RUN_OFF` 0, `_NOT_FSR` 1, `_GAME_FSR3` 2, `_AMD_FSR4` 3, `_AMD_FSR3` 4, `_XESS` 5), `upscale_reason`
@@ -331,8 +332,8 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
   launcher's Settings, Graphics card). Kiln checks each file's size and SHA-256 against the pins built into Kiln (the same
   values as the launcher's manifest; `tools/release/vendor_pins_header.py --check`) before it maps them, keeps them
   open so they cannot change (on Windows; under Proton that binds only Wine's own programs, contracts.md 5.15), and
-  maps them only from that folder. AMD's own selection picks FSR 4 where the GPU and driver run it (RX 9000, RX 7000
-  and 6000, some recent APUs), else FSR 3.1; `fsr3` pins FSR 3.1. Where FSR 4 is
+  maps them only from that folder. With `fsr4` AMD's own selection picks FSR 4 where the GPU and driver run it (RX 9000,
+  RX 7000 and 6000, some recent APUs), else FSR 3.1; `auto` and `fsr3` pin FSR 3.1. Where FSR 4 is
   chosen but does not start, Kiln runs FSR 3.1 instead and says so in kiln.log. The device additions: everything AMD's
   Vulkan backend uses when the GPU offers it (subgroup size control, 16-bit floats, synchronization2, AMD's buffer
   markers and coherent memory, descriptor indexing) and FSR 4's set (cooperative matrix, FP8, integer dot product,

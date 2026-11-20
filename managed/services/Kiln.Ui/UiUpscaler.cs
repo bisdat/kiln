@@ -25,10 +25,13 @@ internal enum UpscalerChoice
 /// <summary>Which AMD FSR (kiln.json <c>graphics.amdUpscaler</c>).</summary>
 internal enum AmdUpscalerMode
 {
-    /// <summary>AMD's own selection: FSR 4 where it runs, else FSR 3.1.</summary>
+    /// <summary>FSR 3.1 until FSR 4 is confirmed in this game (AMD's own selection up to 0.2.0-dev.29.19 beta 3).</summary>
     Auto = 0,
     /// <summary>FSR 3.1 even where FSR 4 runs.</summary>
     Fsr3 = 1,
+    /// <summary>AMD's own selection: FSR 4 where it runs, else FSR 3.1 (experimental: dark scenes too dark in 29.19 betas 1
+    /// and 3).</summary>
+    Fsr4 = 2,
 }
 
 /// <summary>What upscales behind the game's FSR 3 option now: <c>KILN_UI_UPSCALE_RUN_*</c> (kiln_ui.h), plus
@@ -97,9 +100,12 @@ internal static class UpscalerCodes
         "game" => UpscalerChoice.Game, "amd" => UpscalerChoice.Amd, "xess" => UpscalerChoice.Xess, _ => null,
     };
 
-    public static string Amd(AmdUpscalerMode m) => m == AmdUpscalerMode.Fsr3 ? "fsr3" : "auto";
+    public static string Amd(AmdUpscalerMode m) => m switch { AmdUpscalerMode.Fsr3 => "fsr3", AmdUpscalerMode.Fsr4 => "fsr4", _ => "auto" };
 
-    public static AmdUpscalerMode? AmdOf(string? s) => s switch { "auto" => AmdUpscalerMode.Auto, "fsr3" => AmdUpscalerMode.Fsr3, _ => null };
+    public static AmdUpscalerMode? AmdOf(string? s) => s switch
+    {
+        "auto" => AmdUpscalerMode.Auto, "fsr3" => AmdUpscalerMode.Fsr3, "fsr4" => AmdUpscalerMode.Fsr4, _ => null,
+    };
 
     public static string Running(UpscalerRunning r) => r switch
     {

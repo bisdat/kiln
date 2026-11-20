@@ -54,7 +54,10 @@ test("the plan: what Kiln will run, or why not, and the offer of the files", () 
   expect(missing.lines).toEqual(["AMD FSR's files are not downloaded yet, so the game's own FSR 3 runs."]);
   expect(missing.offer?.id).toBe("amd-fsr");
   const ready = upscalerView("amd", "auto", undefined, both("downloaded"));
-  expect(ready.lines).toEqual(["With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR in its place: FSR 4 where your graphics card and driver run it, else FSR 3.1."]);
+  // auto runs FSR 3.1 until FSR 4 is confirmed in this game (29.19 beta 3: FSR 4 dark on an RX 9070 XT); FSR 4 is the explicit, experimental choice
+  expect(ready.lines).toEqual(["With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR 3.1 in its place. FSR 4 is available as an experimental choice."]);
+  expect(upscalerView("amd", "fsr4", undefined, both("downloaded")).lines[0]).toBe("With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR in its place: FSR 4 where your graphics card and driver run it, else FSR 3.1. FSR 4 is experimental and may render dark scenes too dark.");
+  expect(amdModeOf({ graphics: { amdUpscaler: "fsr4" } })).toBe("fsr4");
   expect(ready.offer).toBeNull();
   expect(upscalerView("amd", "fsr3", undefined, both("downloaded")).lines[0]).toBe("With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR 3.1 in its place.");
   expect(upscalerView("xess", "auto", undefined, both("downloaded", "updateAvailable")).lines[0]).toContain("Kiln runs Intel XeSS in its place");
@@ -83,9 +86,10 @@ test("the plan: what Kiln will run, or why not, and the offer of the files", () 
 test("now: what the running game wrote, with the version and the reason", () => {
   const fsr4 = upscalerView("amd", "auto", now({ running: "amdFsr4", version: "4.1.2" }), both("downloaded"));
   expect(fsr4).toEqual({ heading: "now", lines: ["AMD FSR 4 runs in place of the game's FSR 3.", "Version 4.1.2."], detail: undefined, offer: null });
-  const auto31 = upscalerView("amd", "auto", now({ running: "amdFsr31", version: "3.1.6" }), both("downloaded"));
+  const auto31 = upscalerView("amd", "fsr4", now({ amdUpscaler: "fsr4", running: "amdFsr31", version: "3.1.6" }), both("downloaded"));
   expect(auto31.lines).toEqual(["AMD FSR 3.1 runs in place of the game's FSR 3.", "Version 3.1.6.", "AMD's selection chose FSR 3.1: FSR 4 does not run on this graphics card or driver."]);
   expect(upscalerView("amd", "fsr3", now({ amdUpscaler: "fsr3", running: "amdFsr31", amdPinned: true }), both("downloaded")).lines).toHaveLength(1);
+  expect(upscalerView("amd", "auto", now({ running: "amdFsr31", version: "3.1.6", amdPinned: true }), both("downloaded")).lines).toHaveLength(2);
   const device = upscalerView("amd", "auto", now({ running: "gameFsr3", reason: "device", detail: "VK_KHR_shader_float16_int8 is missing" }), both("downloaded"));
   expect(device.lines).toEqual(["The game's own FSR 3 runs.", "Your graphics card or driver lacks a Vulkan feature AMD FSR needs, so the game's own FSR 3 runs."]);
   expect(device.detail).toBe("VK_KHR_shader_float16_int8 is missing");
@@ -129,7 +133,7 @@ test("the last game: shown while its choice is the one set and what it said stil
   // files missing then, downloaded since: the plan
   const since = upscalerView("amd", "auto", now({ running: "gameFsr3", reason: "filesMissing" }, false), both("downloaded"));
   expect(since.heading).toBe("plan");
-  expect(since.lines[0]).toContain("Kiln runs AMD FSR in its place");
+  expect(since.lines[0]).toContain("Kiln runs AMD FSR 3.1 in its place");
   // still missing: the last game's words, and the offer
   const still = upscalerView("amd", "auto", now({ running: "gameFsr3", reason: "filesMissing" }, false), both());
   expect(still.heading).toBe("last");

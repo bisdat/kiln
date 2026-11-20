@@ -2802,15 +2802,16 @@
         },
         "choiceHint": {
           "game": "바뀌는 것 없음: 게임의 FSR 3가 Kiln이 없을 때처럼 실행됩니다.",
-          "amd": "지원하는 그래픽 카드와 드라이버에서는 FSR 4 (AMD가 직접 선택), 그 밖에서는 FSR 3.1. AMD의 파일(70 MB)이 필요합니다.",
+          "amd": "AMD FSR 3.1, 또는 지원하는 그래픽 카드와 드라이버에서 실험적 선택지로 FSR 4. AMD의 파일이 필요합니다 (70 MB).",
           "xess": "Intel, AMD, NVIDIA 카드에서 쓰는 Intel XeSS. Intel의 파일(74 MB)이 필요합니다."
         },
         "amdLabel": "AMD FSR 버전",
         "amd": {
-          "auto": "자동 (지원되면 FSR 4)",
-          "fsr3": "FSR 3.1"
+          "auto": "자동 (당분간 FSR 3.1)",
+          "fsr3": "FSR 3.1",
+          "fsr4": "FSR 4 (실험적)"
         },
-        "amdHint": "자동은 AMD가 고릅니다: 지원하는 그래픽 카드와 드라이버에서는 FSR 4, 그 밖에서는 FSR 3.1. FSR 3.1을 고르면 FSR 4가 될 곳에서도 FSR 3.1을 씁니다.",
+        "amdHint": "자동은 이 게임에서 FSR 4가 확인될 때까지 FSR 3.1을 씁니다. FSR 4 (실험적)는 AMD가 고르게 합니다. 지원하는 그래픽 카드와 드라이버에서는 FSR 4, 나머지에서는 FSR 3.1이며, 어두운 장면이 너무 어둡게 보일 수 있습니다.",
         "heading": {
           "now": "현재",
           "last": "지난 게임",
@@ -2834,8 +2835,9 @@
         "restartNow": "{upscaler}를 쓰려면 게임을 다시 시작하세요. 그때까지는 게임 자체의 FSR 3가 실행됩니다.",
         "detail": "자세히: {detail}",
         "plan": {
-          "amd": "게임 그래픽 설정에서 FSR 3를 고르면 Kiln이 그 자리에서 AMD FSR을 실행합니다. 그래픽 카드와 드라이버가 지원하면 FSR 4, 아니면 FSR 3.1입니다.",
+          "amd": "게임 그래픽 설정에서 FSR 3를 고르면 Kiln이 그 자리에서 AMD FSR 3.1을 실행합니다. FSR 4는 실험적 선택지로 고를 수 있습니다.",
           "amdFsr3": "게임 그래픽 설정에서 FSR 3를 고르면 Kiln이 그 자리에서 AMD FSR 3.1을 실행합니다.",
+          "amdFsr4": "게임 그래픽 설정에서 FSR 3를 고르면 Kiln이 그 자리에서 AMD FSR을 실행합니다. 그래픽 카드와 드라이버가 지원하면 FSR 4, 아니면 FSR 3.1입니다. FSR 4는 실험적이며 어두운 장면이 너무 어둡게 보일 수 있습니다.",
           "xess": "게임 그래픽 설정에서 FSR 3를 고르면 Kiln이 그 자리에서 Intel XeSS를 실행합니다."
         },
         "reason": {

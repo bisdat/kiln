@@ -537,7 +537,7 @@ pub struct GraphicsState {
 pub struct UpscalerState {
     /// `game`, `amd` or `xess` (kiln.json `graphics.upscaler` in use).
     pub chosen: String,
-    /// `auto` or `fsr3`.
+    /// `auto`, `fsr3` or `fsr4`.
     #[serde(default)]
     pub amd_upscaler: String,
     /// `off`, `notFsr`, `gameFsr3`, `amdFsr4`, `amdFsr31`, `xess` or `unknown`.

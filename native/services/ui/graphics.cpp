@@ -524,6 +524,7 @@ std::string describe(const gfx::Settings& s) {
         out += out.empty() ? "" : ", ";
         out += std::string("upscaler ") + gfx::upscaler_name(s.upscaler);
         if (s.upscaler == gfx::Upscaler::amd && s.amd_pin == gfx::AmdPin::fsr3) out += " (FSR 3.1 pinned)";
+        if (s.upscaler == gfx::Upscaler::amd && s.amd_pin == gfx::AmdPin::fsr4) out += " (FSR 4, experimental)";
     }
     return out.empty() ? "all off" : out;
 }

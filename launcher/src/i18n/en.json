@@ -2858,15 +2858,16 @@
         },
         "choiceHint": {
           "game": "Nothing changes: the game's FSR 3 runs as it does without Kiln.",
-          "amd": "FSR 4 on graphics cards and drivers that run it (AMD's own selection), FSR 3.1 on the others. Needs AMD's files (70 MB).",
+          "amd": "AMD FSR 3.1, or FSR 4 as an experimental choice on graphics cards and drivers that run it. Needs AMD's files (70 MB).",
           "xess": "Intel's XeSS, on Intel, AMD and NVIDIA cards. Needs Intel's file (74 MB)."
         },
         "amdLabel": "AMD FSR version",
         "amd": {
-          "auto": "Auto (FSR 4 where it runs)",
-          "fsr3": "FSR 3.1"
+          "auto": "Auto (FSR 3.1 for now)",
+          "fsr3": "FSR 3.1",
+          "fsr4": "FSR 4 (experimental)"
         },
-        "amdHint": "Auto lets AMD choose: FSR 4 on graphics cards and drivers that run it, FSR 3.1 on the others. FSR 3.1 keeps FSR 3.1 even where FSR 4 would run.",
+        "amdHint": "Auto runs FSR 3.1 until FSR 4 is confirmed in this game. FSR 4 (experimental) lets AMD choose: FSR 4 on graphics cards and drivers that run it, FSR 3.1 on the others; it may render dark scenes too dark.",
         "heading": {
           "now": "Now",
           "last": "Last game",
@@ -2890,8 +2891,9 @@
         "restartNow": "Restart the game to use {upscaler}. Until then the game's own FSR 3 runs.",
         "detail": "Details: {detail}",
         "plan": {
-          "amd": "With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR in its place: FSR 4 where your graphics card and driver run it, else FSR 3.1.",
+          "amd": "With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR 3.1 in its place. FSR 4 is available as an experimental choice.",
           "amdFsr3": "With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR 3.1 in its place.",
+          "amdFsr4": "With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR in its place: FSR 4 where your graphics card and driver run it, else FSR 3.1. FSR 4 is experimental and may render dark scenes too dark.",
           "xess": "With FSR 3 chosen in the game's graphics settings, Kiln runs Intel XeSS in its place."
         },
         "reason": {

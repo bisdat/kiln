@@ -685,8 +685,10 @@ enum {
 };
 /* KilnUiGraphics.amd_upscaler */
 enum {
-    KILN_UI_AMD_UPSCALER_AUTO = 0,  /* "auto": AMD's selection (FSR 4 where it runs) */
+    KILN_UI_AMD_UPSCALER_AUTO = 0,  /* "auto": FSR 3.1 until FSR 4 is confirmed in this game (was AMD's selection up to
+                                       0.2.0-dev.29.19 beta 3) */
     KILN_UI_AMD_UPSCALER_FSR3 = 1,  /* "fsr3": FSR 3.1 even where FSR 4 runs */
+    KILN_UI_AMD_UPSCALER_FSR4 = 2,  /* "fsr4": AMD's selection, FSR 4 where it runs (experimental); since 0.2.0-dev.29.19 */
 };
 
 /* KilnUiGraphicsStatus.flags */
@@ -795,7 +797,7 @@ enum {
     KILN_UI_UPSCALE_FILES_OK = 1u << 2,    /* the chosen backend's files are there and match their pins */
     KILN_UI_UPSCALE_DEVICE_OK = 1u << 3,   /* the game's device has what the chosen backend needs */
     KILN_UI_UPSCALE_FELL_BACK = 1u << 4,   /* the chosen backend failed in this session: the game's FSR 3 until restart */
-    KILN_UI_UPSCALE_AMD_PINNED = 1u << 5,  /* AMD FSR 3.1 runs because amd_upscaler is FSR3 (FSR 4 would run) */
+    KILN_UI_UPSCALE_AMD_PINNED = 1u << 5,  /* AMD FSR 3.1 runs because Kiln pins it (amd_upscaler AUTO or FSR3) */
 };
 
 typedef struct KilnUiApi {

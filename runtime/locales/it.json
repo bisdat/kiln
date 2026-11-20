@@ -1007,9 +1007,10 @@
       "amd": "AMD FSR",
       "xess": "Intel XeSS",
       "amd_mode": "Versione AMD FSR",
-      "amd_auto": "Auto (FSR 4 dove funziona)",
+      "amd_auto": "Auto (FSR 3.1 per ora)",
       "amd_fsr3": "FSR 3.1",
-      "amd_hint": "Auto lascia scegliere ad AMD: FSR 4 sulle schede video e i driver che lo supportano, FSR 3.1 sugli altri. FSR 3.1 mantiene FSR 3.1 anche dove FSR 4 funzionerebbe.",
+      "amd_fsr4": "FSR 4 (sperimentale)",
+      "amd_hint": "Auto usa FSR 3.1 finché FSR 4 non è confermato in questo gioco. FSR 4 (sperimentale) lascia scegliere ad AMD: FSR 4 sulle schede video e i driver che lo supportano, FSR 3.1 sugli altri; le scene scure possono risultare troppo scure.",
       "hint": "Scegli FSR 3 come upscaler nelle impostazioni grafiche del gioco: Kiln esegue la tua scelta al suo posto. Una modifica vale subito mentre FSR 3 è attivo in un mondo, altrimenti quando si carica un mondo. Per AMD FSR e Intel XeSS Kiln ha bisogno dei file del produttore; li scarica il launcher di Kiln (Impostazioni, Grafica).",
       "files": {
         "present": "{name} {version}: i file sono in {folder}.",

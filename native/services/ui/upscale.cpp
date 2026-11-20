@@ -653,7 +653,7 @@ bool ensure_context(const Frame& f) {
     g_hist.drop();
     g_running = static_cast<uint32_t>(g_backend->running());
     g_version = g_backend->version();
-    g_amd_pinned = ci.amd == AmdPin::fsr3 && g_backend->choice() == Choice::amd;
+    g_amd_pinned = amd_pins_fsr3(ci.amd) && g_backend->choice() == Choice::amd;
     logf(KILN_LOG_INFO, "graphics: upscaler: %s set up for %ux%u -> %ux%u (output texture %ux%u)%s%s", g_backend->name().c_str(),
          ci.max_render_width, ci.max_render_height, ci.output_width, ci.output_height, ci.output_texture_width, ci.output_texture_height,
          detail.empty() ? "" : ": ", detail.c_str());

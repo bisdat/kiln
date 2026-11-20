@@ -2858,15 +2858,16 @@
         },
         "choiceHint": {
           "game": "Nada cambia: el FSR 3 del juego funciona igual que sin Kiln.",
-          "amd": "FSR 4 en tarjetas gráficas y controladores que lo admiten (según la selección de AMD), FSR 3.1 en los demás. Necesita los archivos de AMD (70 MB).",
+          "amd": "AMD FSR 3.1, o FSR 4 como opción experimental en las tarjetas gráficas y controladores que lo ejecutan. Necesita los archivos de AMD (70 MB).",
           "xess": "XeSS de Intel, en tarjetas Intel, AMD y NVIDIA. Necesita el archivo de Intel (74 MB)."
         },
         "amdLabel": "Versión de AMD FSR",
         "amd": {
-          "auto": "Auto (FSR 4 donde funcione)",
-          "fsr3": "FSR 3.1"
+          "auto": "Automático (FSR 3.1 por ahora)",
+          "fsr3": "FSR 3.1",
+          "fsr4": "FSR 4 (experimental)"
         },
-        "amdHint": "Auto deja elegir a AMD: FSR 4 en tarjetas gráficas y controladores que lo admiten, FSR 3.1 en los demás. FSR 3.1 mantiene FSR 3.1 incluso donde funcionaría FSR 4.",
+        "amdHint": "Automático usa FSR 3.1 hasta que FSR 4 esté confirmado en este juego. FSR 4 (experimental) deja elegir a AMD: FSR 4 en las tarjetas gráficas y controladores que lo ejecutan, FSR 3.1 en los demás; puede mostrar las escenas oscuras demasiado oscuras.",
         "heading": {
           "now": "Ahora",
           "last": "Última partida",
@@ -2890,8 +2891,9 @@
         "restartNow": "Reinicia el juego para usar {upscaler}. Hasta entonces funciona el FSR 3 propio del juego.",
         "detail": "Detalles: {detail}",
         "plan": {
-          "amd": "Con FSR 3 elegido en los ajustes gráficos del juego, Kiln ejecuta AMD FSR en su lugar: FSR 4 donde tu tarjeta gráfica y tu controlador lo admitan, si no FSR 3.1.",
+          "amd": "Con FSR 3 elegido en los ajustes gráficos del juego, Kiln ejecuta AMD FSR 3.1 en su lugar. FSR 4 está disponible como opción experimental.",
           "amdFsr3": "Con FSR 3 elegido en los ajustes gráficos del juego, Kiln ejecuta AMD FSR 3.1 en su lugar.",
+          "amdFsr4": "Con FSR 3 elegido en los ajustes gráficos del juego, Kiln ejecuta AMD FSR en su lugar: FSR 4 donde tu tarjeta gráfica y tu controlador lo ejecutan, si no FSR 3.1. FSR 4 es experimental y puede mostrar las escenas oscuras demasiado oscuras.",
           "xess": "Con FSR 3 elegido en los ajustes gráficos del juego, Kiln ejecuta Intel XeSS en su lugar."
         },
         "reason": {

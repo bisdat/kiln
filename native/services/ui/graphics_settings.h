@@ -92,8 +92,9 @@ inline const char* upscaler_key(Upscaler u) { return u == Upscaler::amd ? "amd" 
 inline const char* upscaler_name(Upscaler u) {
     return u == Upscaler::amd ? "AMD FSR" : u == Upscaler::xess ? "Intel XeSS" : "the game's own FSR 3";
 }
-// kiln.json graphics.amdUpscaler (KILN_UI_AMD_UPSCALER_*): AMD's own choice, or FSR 3.1 even where FSR 4 runs.
-enum class AmdPin : uint32_t { automatic = 0, fsr3 = 1 };
+// kiln.json graphics.amdUpscaler (KILN_UI_AMD_UPSCALER_*): auto (FSR 3.1 until FSR 4 is confirmed in this game), fsr3
+// (FSR 3.1), fsr4 (AMD's own choice: FSR 4 where it runs; experimental: dark scenes too dark in 29.19 betas 1 and 3).
+enum class AmdPin : uint32_t { automatic = 0, fsr3 = 1, fsr4 = 2 };
 
 struct Settings {
     uint32_t fps_cap = 0;  // clamp_fps: 0 off, 20..500
@@ -123,7 +124,7 @@ inline Settings clamped(Settings s) {
     s.custom_scale = clamp_scale(s.custom_scale, 0.67f);
     for (size_t i = 0; i < 4; ++i) s.mode_scale[i] = clamp_scale(s.mode_scale[i], kDlssScales[i]);
     if (static_cast<uint32_t>(s.upscaler) > 2) s.upscaler = Upscaler::game;
-    if (static_cast<uint32_t>(s.amd_pin) > 1) s.amd_pin = AmdPin::automatic;
+    if (static_cast<uint32_t>(s.amd_pin) > 2) s.amd_pin = AmdPin::automatic;
     return s;
 }
 
@@ -186,7 +187,8 @@ inline Settings parse_settings(const nlohmann::json& root, std::vector<std::stri
         const std::string m = v->is_string() ? v->get<std::string>() : std::string();
         if (m == "auto") s.amd_pin = AmdPin::automatic;
         else if (m == "fsr3") s.amd_pin = AmdPin::fsr3;
-        else warn("graphics.amdUpscaler is not auto or fsr3: auto is used");
+        else if (m == "fsr4") s.amd_pin = AmdPin::fsr4;
+        else warn("graphics.amdUpscaler is not auto, fsr3 or fsr4: auto is used");
     }
     return s;
 }

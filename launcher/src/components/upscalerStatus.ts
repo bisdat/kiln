@@ -9,7 +9,7 @@ import type { VendorComponent } from "../api/vendor";
 import { t } from "../i18n";
 
 export const UPSCALER_CHOICES: UpscalerChoice[] = ["game", "amd", "xess"];
-export const AMD_MODES: AmdUpscalerMode[] = ["auto", "fsr3"];
+export const AMD_MODES: AmdUpscalerMode[] = ["auto", "fsr3", "fsr4"];
 
 /** kiln.json `graphics.upscaler` from the document's values (the game's own for anything else). */
 export function choiceOf(values: Json | undefined): UpscalerChoice {
@@ -19,7 +19,8 @@ export function choiceOf(values: Json | undefined): UpscalerChoice {
 
 /** kiln.json `graphics.amdUpscaler` (auto for anything else). */
 export function amdModeOf(values: Json | undefined): AmdUpscalerMode {
-  return (values as { graphics?: { amdUpscaler?: unknown } } | undefined)?.graphics?.amdUpscaler === "fsr3" ? "fsr3" : "auto";
+  const v = (values as { graphics?: { amdUpscaler?: unknown } } | undefined)?.graphics?.amdUpscaler;
+  return v === "fsr3" || v === "fsr4" ? v : "auto";
 }
 
 /** The vendor folder of a choice (the manifest's `vendor`), null for the game's own. */
@@ -89,7 +90,7 @@ export function upscalerView(choice: UpscalerChoice, amd: AmdUpscalerMode, state
     if (s.chosen === "game" && choice === "game" && (s.running === "off" || s.running === "unknown")) return { heading: null, lines: [], offer: null };
     const lines = [t(`settings.graphics.upscaler.running.${["off", "notFsr", "gameFsr3", "amdFsr4", "amdFsr31", "xess"].includes(s.running) ? s.running : "unknown"}`)];
     if (s.version && ["amdFsr4", "amdFsr31", "xess"].includes(s.running)) lines.push(t("settings.graphics.upscaler.version", { version: s.version }));
-    if (s.running === "amdFsr31" && s.chosen === "amd" && s.amdUpscaler === "auto" && !s.amdPinned) lines.push(t("settings.graphics.upscaler.amdFsr3Auto"));
+    if (s.running === "amdFsr31" && s.chosen === "amd" && s.amdUpscaler === "fsr4" && !s.amdPinned) lines.push(t("settings.graphics.upscaler.amdFsr3Auto"));
     const why = reasonOf(s.reason);
     if (why) lines.push(reasonText(why, s.chosen, s.aside ?? [], s.reasonNumber));
     // the choice changed while that game runs: when it applies
@@ -106,6 +107,6 @@ export function upscalerView(choice: UpscalerChoice, amd: AmdUpscalerMode, state
   else if (!c || c.state === "unavailable") lines.push(reasonText("unavailable", choice));
   else if (c.state === "damaged") lines.push(reasonText("filesBad", choice));
   else if (!filesThere) lines.push(reasonText("filesMissing", choice));
-  else lines.push(t(`settings.graphics.upscaler.plan.${choice === "amd" ? (amd === "fsr3" ? "amdFsr3" : "amd") : "xess"}`));
+  else lines.push(t(`settings.graphics.upscaler.plan.${choice === "amd" ? (amd === "fsr3" ? "amdFsr3" : amd === "fsr4" ? "amdFsr4" : "amd") : "xess"}`));
   return { heading: "plan", lines, offer };
 }

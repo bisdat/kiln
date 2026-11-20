@@ -52,7 +52,7 @@ namespace kui::upscale {
 // kiln.json graphics.upscaler, the same numbers as KILN_UI_UPSCALER_* (kiln_ui.h).
 enum class Choice : uint32_t { game = 0, amd = 1, xess = 2 };
 // kiln.json graphics.amdUpscaler, the same numbers as KILN_UI_AMD_UPSCALER_*.
-enum class AmdPin : uint32_t { automatic = 0, fsr3 = 1 };
+enum class AmdPin : uint32_t { automatic = 0, fsr3 = 1, fsr4 = 2 };
 // What runs behind the game's FSR 3 option now: KILN_UI_UPSCALE_RUN_* (kiln_ui.h). A backend says which of the last
 // three it is (Backend::running).
 enum class Running : uint32_t { off = 0, not_fsr = 1, game_fsr3 = 2, amd_fsr4 = 3, amd_fsr3 = 4, xess = 5 };
