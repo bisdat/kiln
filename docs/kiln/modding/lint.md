@@ -873,6 +873,22 @@ kiln.mod.json:1:1: warning KL605: assets/cooked/ holds files made from the game'
 ```
 Fix: add `assets/cooked/` to the mod's `.gitignore`. If they are already committed, remove them from git too.
 
+## KL7xx: mods together
+
+### KL701 data-conflict
+Warning. Two mods linted together (`--profile`, or the mods of a Crucible pack) give one field of one game entry
+different values in their data packs (`content/*.json`). kiln.content applies packs in load order and the later mod
+wins ([content.md](../services/content.md), "Order and conflicts"), so the earlier mod's value never takes effect.
+Selectors are compared as the runtime matches them: names without regard to case, globs expanded against the game-data
+catalog (without one, a glob overlaps the names it matches and `*` overlaps everything). `@where` conditions need the
+game's values: a conflict with one, or found through two globs without the catalog, says it "may not touch the same
+entries". Within one mod later entries win and are no conflict; the same value from both mods is none either.
+```text
+content/loot.json:3:5: warning KL701: items Material_T1_Twigs.maxStackSize: big-stacks sets 1000, pack.ember sets 600 (the later mod wins: pack.ember)
+```
+Fix: if the later value is what you want, nothing (a pack layer loads last on purpose); otherwise leave the field to
+one mod. `kilnctl pack check` lists every such field of a pack (Crucible shows them under "Checks").
+
 ## KL9xx: the linter itself
 
 ### KL901 no-catalog

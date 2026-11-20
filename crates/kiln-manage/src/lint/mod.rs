@@ -13,6 +13,7 @@
 
 mod catalog;
 pub mod codes;
+pub mod conflicts;
 pub mod docs;
 pub mod json;
 mod regex;
