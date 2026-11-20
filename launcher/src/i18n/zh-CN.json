@@ -4257,6 +4257,203 @@
         "discordNoReason": "问题出在 Kiln 这边，不是你的网络连接。你的结果已保留：请稍后再试。",
         "discordLimit": "Discord 限制了 Kiln 支持发帖的频率，目前已达到上限。你的结果已保留：请在 {wait}后再试。"
       }
+    },
+    "presence": {
+      "pack": {
+        "label": "在我的 Discord 个人资料中显示我的 Crucible 整合包",
+        "hint": "当你游玩来自 Crucible 的整合包时：显示它的名称，以及一个打开整合包页面的“获取这个整合包”按钮。在这台电脑上制作的整合包永远不会显示名称。",
+        "never": "永远不会显示：服务器名称、世界名称或你的角色。游玩 Crucible 整合包时，会显示它的名称和页面。",
+        "state": {
+          "other": "{pack}（{count} 个模组）"
+        },
+        "getPack": "获取这个整合包",
+        "example": "余烬之旅",
+        "turnOn": "显示我的整合包",
+        "turnOff": "隐藏我的整合包",
+        "onToast": "你的 Crucible 整合包会显示在 Discord 上",
+        "offToast": "你的 Crucible 整合包不再显示在 Discord 上"
+      }
+    },
+    "privacy": {
+      "presencePack": "开启“显示我的 Crucible 整合包”后，还会显示你正在游玩的 Crucible 整合包名称，以及它在 frostdev.io 上页面的链接。在这台电脑上制作的整合包永远不会显示名称。"
+    }
+  },
+  "crucible": {
+    "banner": {
+      "title": "整合包更新",
+      "head": "{name} {change}",
+      "headBy": "{name} {change}，来自 {by}",
+      "line": "{head}：{changes}。",
+      "ready": "{head}：有更新可用。",
+      "seeChanges": "查看变更"
+    },
+    "change": {
+      "added.other": "新增 {count} 个",
+      "updated.other": "更新 {count} 个",
+      "removed.other": "移除 {count} 个",
+      "addedWord.other": "新增 {count} 个",
+      "updatedWord.other": "更新 {count} 个",
+      "removedWord.other": "移除 {count} 个"
+    },
+    "code": {
+      "link": "有代码吗？",
+      "title": "用代码打开整合包",
+      "hint": "粘贴朋友发给你的代码或链接。"
+    },
+    "err": {
+      "notFound": "找不到这个代码。代码长这样：H7QK-3MZP。",
+      "offline": "Kiln 连不上 Crucible。请向朋友要整合包文件（分享到 Crucible → 另存为文件）。",
+      "gone": "这个整合包已不在 Crucible 上了。",
+      "badDownload": "整合包没有下载完整，什么都没有安装。请再试一次。",
+      "gameRunning": "请先关闭 Enshrouded。"
+    },
+    "install": {
+      "done": "已安装 {name}",
+      "doneDetail": "它现在是你加载的配置方案，你的其他配置方案保持原样。",
+      "failed": "未能安装 {name}",
+      "backTo": "回到 {name}",
+      "backToNone": "回到不用配置方案",
+      "backDetail": "{name} 仍在「设置 → 配置方案」里。",
+      "undoFailed": "未能返回"
+    },
+    "preview": {
+      "title": "整合包",
+      "by": "作者 {name}",
+      "fromFile": "来自文件",
+      "versionN": "v{version}（#{number}）",
+      "upvotes": "点赞",
+      "fits": "适配你的游戏（版本 {build}）",
+      "fitsAny": "适配你的游戏",
+      "otherBuild": "为游戏版本 {build} 制作，你的是 {current}。部分模组可能需要更新。",
+      "download": "下载 {size}",
+      "downloadSome.other": "下载 {size}。模组库里已有 {count} 个模组。",
+      "allInLibrary.other": "无需下载：全部 {count} 个模组都已在模组库里。",
+      "code": "代码 {code}",
+      "kilnOldTitle": "Kiln 版本太旧，无法使用这个整合包",
+      "kilnOld": "需要 Kiln {version} 或更新版本。",
+      "updateKiln": "更新 Kiln",
+      "uploadingTitle": "仍在上传",
+      "stillUploading": "{name} 的整合包还在上传（{pct}%）。准备好后 Kiln 会自动安装。",
+      "wait": "等待",
+      "waiting": "正在等待 {name} 上传完成（{pct}%）…",
+      "ownProfile": "会作为单独的配置方案安装，你现有的模组保持原样。",
+      "have": "你已经有这个整合包了。",
+      "haveUpdate": "你已经有这个整合包，{version} 版本已就绪。",
+      "loadIt": "加载",
+      "loaded": "已加载 {name}",
+      "optional": "可选模组",
+      "seeMods.other": "查看这 {count} 个模组及其作者",
+      "hideMods": "收起模组",
+      "modBy": "作者 {name}",
+      "codeTag": "代码",
+      "codeTip": "会在你的电脑上运行代码",
+      "optionalTag": "可选",
+      "newTag": "新",
+      "inLibrary": "已在你的模组库中",
+      "warning": "这个整合包含有其他人制作的模组，其中包括代码。Crucible 会自动检查整合包，但不会人工审核。",
+      "trust": "我信任 {name} 的整合包",
+      "trustFile": "我信任这个整合包",
+      "trustAlways": "始终信任 {name} 的整合包",
+      "trustedAlready": "你信任 {name} 的整合包。",
+      "tickFirst": "请先勾选「我信任」。",
+      "installPlay": "安装并开始游戏",
+      "cantOpen": "无法打开这个整合包",
+      "noGame": "Kiln 还没有找到 Enshrouded。",
+      "installKiln": "请先把 Kiln 安装到游戏里。"
+    },
+    "profiles": {
+      "tag": "Crucible 整合包",
+      "line": "{name} {version} · {ago}",
+      "updateReady": "{version} 已就绪",
+      "seeUpdate": "查看更新",
+      "undoUpdate": "撤销上次更新（回到 {version}）",
+      "uninstall": "卸载",
+      "uninstallAsk": "卸载 {name}？",
+      "uninstallText": "这个配置方案会被删除。它的模组仍留在你的模组库里，你的其他配置方案保持原样。",
+      "uninstalled": "已卸载 {name}",
+      "unused.other": "有 {count} 个模组不再使用：在「模组库 → 清理」中可以移除。",
+      "cardTitle": "Crucible",
+      "cardSub": "你安装的和你分享的整合包。",
+      "installed": "已安装的整合包",
+      "shared": "你分享的整合包",
+      "asProfile": "配置方案：{name}",
+      "updateTo": "更新到 {version}",
+      "noInstalled": "还没有整合包。朋友给了你代码？在「开始游戏」页输入吧。",
+      "noShared": "还没有分享过。在「开始游戏」页点「分享到 Crucible」，就能把你的模组变成一个链接。",
+      "sharedVersion": "第 {number} 版"
+    },
+    "save": {
+      "button": "另存为文件",
+      "pick": "整合包文件保存到哪里",
+      "done": "已将 {name} 保存为文件",
+      "failed": "未能保存 {name}",
+      "openFolder": "打开文件夹"
+    },
+    "settings": {
+      "stats": "统计我的安装次数（匿名）",
+      "statsHint": "Crucible 会按天统计每个整合包的安装次数，不会发送任何与你有关的信息。"
+    },
+    "share": {
+      "button": "分享到 Crucible",
+      "uploadingShort": "正在上传…",
+      "changedPill": "整合包已更改",
+      "signInText": "请用 Discord 登录后再分享。你的朋友不需要登录。",
+      "signIn": "使用 Discord 登录",
+      "saveInstead": "改为另存为文件",
+      "uploadingTitle": "正在分享 {name}",
+      "starting": "正在准备…",
+      "keepsGoing": "你可以关掉这个窗口，上传会继续进行。",
+      "copied": "链接已复制，发给你的朋友吧。",
+      "ready": "你的链接已就绪",
+      "pasteIt": "朋友点开链接，再点「安装并开始游戏」。",
+      "copyIt": "复制链接，发给你的朋友。",
+      "sharedTitle": "已分享 {name}",
+      "changedTitle": "你的整合包已更改",
+      "updateAsk": "要为朋友更新链接吗？{changes}",
+      "updateLink": "更新链接",
+      "codeLabel": "代码",
+      "linkCopied": "链接已复制",
+      "codeCopied": "代码已复制",
+      "copyLink": "复制链接",
+      "noClipboard": "这里无法复制，请手动选中文字。",
+      "failed": "分享没有成功",
+      "versionLine": "第 {number} 版"
+    },
+    "update": {
+      "title": "{name}：{from} → {to}",
+      "titleLoading": "正在更新 {name}",
+      "getting": "正在准备更新…",
+      "cantRead": "无法读取这次更新",
+      "removedKept": "{name}（保留在你的模组库中）",
+      "packData": "整合包自带的数据有变化",
+      "kept": "你的改动已保留：{settings} 项设置，{mods} 个模组。",
+      "download": "下载 {size}",
+      "needsYou.other": "需要你决定（{count}）",
+      "both": "整合包现在是 {pack}，你之前是 {mine}。",
+      "takePack": "采用 {value}",
+      "keepMine": "保留 {value}",
+      "notNow": "以后再说",
+      "update": "更新",
+      "updatePlay": "更新并开始游戏",
+      "chooseFirst": "请先为每项设置做出选择。",
+      "needsChoice": "有设置需要你来选择。",
+      "done": "{name} 已是最新（{version}）",
+      "doneDetail": "你自己的改动都还在。",
+      "failed": "未能更新 {name}",
+      "undone": "{name} 已回到 {version}",
+      "undoFailed": "未能撤销这次更新"
+    },
+    "deck": {
+      "shareTitle": "分享 {name}",
+      "scan": "朋友可以用手机扫描二维码，或在 Kiln 里输入代码。",
+      "enterCode": "输入代码",
+      "codeHint": "8 位字母和数字，例如 H7QK-3MZP。",
+      "installing": "正在安装…",
+      "loading": "正在打开整合包…",
+      "tick": "勾选",
+      "untick": "取消勾选",
+      "turnOn": "开启",
+      "turnOff": "关闭"
     }
   }
 }

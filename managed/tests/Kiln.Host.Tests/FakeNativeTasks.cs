@@ -59,6 +59,9 @@ internal sealed unsafe class FakeNativeTasks : IDisposable
     private uint _clientSession, _clientSessions, _clientLast;
     private ulong _clientEdge;
     private readonly List<(ulong Owner, Queue<Lease> Hops)> _clientHops = [];
+    // The main menu (#83): its sessions (opened by HMenuFrame while no world runs, ended by a world's start) and hops.
+    private uint _menuSession, _menuSessions, _menuLast;
+    private readonly List<(ulong Owner, Queue<Lease> Hops)> _menuHops = [];
     private readonly Thread _mainThread;
     private readonly BlockingCollection<Action> _mainJobs = new();
     private uint _serverLast;
@@ -111,6 +114,7 @@ internal sealed unsafe class FakeNativeTasks : IDisposable
             WorldSession = &HWorldSession,
             TickHopIn = &HTickHopIn,
             ResumeAfterStepWorld = &HResumeAfterStepWorld,
+            MenuFrame = &HMenuFrame,
         };
         *_tasks = new KilnTasksApi { Size = (uint)sizeof(KilnTasksApi), Version = 1, Cancel = &TCancel, Status = &TStatus, DrainOwner = &TDrainOwner };
         s_current = this;
@@ -309,6 +313,7 @@ internal sealed unsafe class FakeNativeTasks : IDisposable
             {
                 0 => (f._session, f._serverLast),
                 2 => (f._clientSession, f._clientLast),
+                3 => (f._menuSession, f._menuLast),
                 _ => (0u, 0u),
             };
             if (state != null) *state = live != 0 ? 1u : last != 0 ? 2u : 0u;
@@ -325,13 +330,13 @@ internal sealed unsafe class FakeNativeTasks : IDisposable
         lock (f._lock)
         {
             f.TickHopInCalls++;
-            if (world is not (0 or 2)) return KilnAbi.ErrInvalidArgument;
-            var live = world == 2 ? f._clientSession : f._session;
+            if (world is not (0 or 2 or 3)) return KilnAbi.ErrInvalidArgument;
+            var live = world switch { 2 => f._clientSession, 3 => f._menuSession, _ => f._session };
             if (live == 0 || session != live) return KilnAbi.ErrUnavailable;  // never into another session
             var l = f.Find(lease);
             if (l is null || l.EndQueued) return f.Misuse("tick_hop_in", l);
             l.HopsPending++;
-            var hops = world == 2 ? f._clientHops : f._hops;
+            var hops = world switch { 2 => f._clientHops, 3 => f._menuHops, _ => f._hops };
             var queue = hops.FirstOrDefault(q => q.Owner == l.Owner).Hops;
             if (queue is null)
             {
@@ -640,14 +645,62 @@ internal sealed unsafe class FakeNativeTasks : IDisposable
 
     public void StartSession()
     {
-        List<Lease> old;
+        List<Lease> old, menu;
         lock (_lock)
         {
             old = TakeHops();  // a world that stopped without a stop event: never carried into the new one
             _session = _serverLast = ++_sessions;
             _edge = 0;
+            menu = EndMenu();
         }
         foreach (var h in old) DispatchHop(h, cancelled: true);
+        foreach (var h in menu) DispatchHop(h, cancelled: true, what: 4);
+    }
+
+    // ---- the main menu (#83) ----
+
+    public int MenuFrameCalls;
+
+    // Under _lock: a world's start ends the menu session; its waiting hops are handed back to be dispatched cancelled.
+    private List<Lease> EndMenu()
+    {
+        _menuSession = 0;
+        var hops = _menuHops.SelectMany(q => q.Hops).ToList();
+        _menuHops.Clear();
+        return hops;
+    }
+
+    public uint MenuSession
+    {
+        get
+        {
+            lock (_lock) return _menuSession;
+        }
+    }
+
+    public int PendingMenuHops
+    {
+        get
+        {
+            lock (_lock) return _menuHops.Sum(q => q.Hops.Count);
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static uint HMenuFrame()
+    {
+        var f = s_current!;
+        List<(Lease Hop, bool Cancel)> hops;
+        lock (f._lock)
+        {
+            f.MenuFrameCalls++;
+            if (f._session != 0 || f._clientSession != 0) return 0;
+            if (f._menuSession == 0) f._menuSession = f._menuLast = ++f._menuSessions;
+            hops = f._menuHops.SelectMany(q => q.Hops).Select(h => (h, h.Cancel)).ToList();
+            f._menuHops.Clear();
+        }
+        foreach (var (hop, cancel) in hops) f.DispatchHop(hop, cancel, what: 4);
+        return (uint)hops.Count;
     }
 
     // ---- the client world (#82), on the fake main thread ----
@@ -665,15 +718,17 @@ internal sealed unsafe class FakeNativeTasks : IDisposable
 
     public void StartClientSession()
     {
-        List<Lease> old;
+        List<Lease> old, menu;
         lock (_lock)
         {
             old = _clientHops.SelectMany(q => q.Hops).ToList();
             _clientHops.Clear();
             _clientSession = _clientLast = ++_clientSessions;
             _clientEdge = 0;
+            menu = EndMenu();
         }
         foreach (var h in old) DispatchHop(h, cancelled: true, what: 3);
+        foreach (var h in menu) DispatchHop(h, cancelled: true, what: 4);
     }
 
     /// <summary>The client world's STOPPING (call it on the main thread, as the game does): its hops dispatched
