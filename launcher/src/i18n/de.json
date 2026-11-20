@@ -5034,7 +5034,14 @@
       "noneSelectedHint": "Wähle einen Platz, um seinen Gegenstand zu sehen und zu ändern.",
       "emptyHint": "Wähle einen Gegenstand aus dem Katalog, um ihn hier abzulegen.",
       "pickItem": "Gegenstand wählen",
-      "notFound": "In diesem Inventar wurden keine Gegenstände gefunden, und der Editor kann nicht sicher sagen, wo es in diesem Spielstand liegt. Zeigt das Spiel hier Gegenstände, konnten sie nicht gelesen werden: Es lässt sich nichts hinzufügen. Eine Kopie dieses Spielstands an uns hilft, das zu beheben."
+      "notFound": "In diesem Inventar wurden keine Gegenstände gefunden, und der Editor kann nicht sicher sagen, wo es in diesem Spielstand liegt. Zeigt das Spiel hier Gegenstände, konnten sie nicht gelesen werden: Es lässt sich nichts hinzufügen. Eine Kopie dieses Spielstands an uns hilft, das zu beheben.",
+      "modItem": "Mod-Gegenstand, bleibt unverändert",
+      "hiddenModItem": "{place} enthält einen versteckten Gegenstand einer anderen Mod (ID {id}); Kiln lässt ihn unverändert.",
+      "place": {
+        "backpack": "Rucksackplatz {n}",
+        "swap": "Wechselleiste, Platz {n}",
+        "action": "Aktionsleiste, Platz {n}"
+      }
     },
     "inspector": {
       "item": "Gegenstand",

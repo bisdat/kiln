@@ -5240,7 +5240,14 @@
       "noneSelectedHint": "Wybierz miejsce, aby zobaczyć i zmienić jego przedmiot.",
       "emptyHint": "Wybierz przedmiot z katalogu, aby go tu umieścić.",
       "pickItem": "Wybierz przedmiot",
-      "notFound": "W tym ekwipunku nie znaleziono przedmiotów, a edytor nie wie na pewno, gdzie leży on w tym zapisie. Jeśli gra pokazuje tu przedmioty, nie udało się ich odczytać: nie można niczego dodać. Kopia tego zapisu przesłana do nas pomoże to naprawić."
+      "notFound": "W tym ekwipunku nie znaleziono przedmiotów, a edytor nie wie na pewno, gdzie leży on w tym zapisie. Jeśli gra pokazuje tu przedmioty, nie udało się ich odczytać: nie można niczego dodać. Kopia tego zapisu przesłana do nas pomoże to naprawić.",
+      "modItem": "Przedmiot moda, pozostawiony bez zmian",
+      "hiddenModItem": "{place} zawiera ukryty przedmiot innego moda (id {id}); Kiln zostawia go bez zmian.",
+      "place": {
+        "backpack": "Miejsce {n} w plecaku",
+        "swap": "Miejsce {n} na pasku zamiany",
+        "action": "Miejsce {n} na pasku akcji"
+      }
     },
     "inspector": {
       "item": "Przedmiot",

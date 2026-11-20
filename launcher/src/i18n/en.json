@@ -5034,7 +5034,14 @@
       "noneSelectedHint": "Pick a slot to see and change its item.",
       "emptyHint": "Pick an item from the catalog to put here.",
       "pickItem": "Pick item",
-      "notFound": "No items were found in this inventory, and the editor cannot tell for sure where it sits in this save. If the game shows items here, they could not be read: nothing can be added. A copy of this save sent to us helps fix it."
+      "notFound": "No items were found in this inventory, and the editor cannot tell for sure where it sits in this save. If the game shows items here, they could not be read: nothing can be added. A copy of this save sent to us helps fix it.",
+      "modItem": "Mod item, kept untouched",
+      "hiddenModItem": "{place} holds a hidden item from another mod (id {id}); Kiln keeps it untouched.",
+      "place": {
+        "backpack": "Backpack slot {n}",
+        "swap": "Swap bar slot {n}",
+        "action": "Action bar slot {n}"
+      }
     },
     "inspector": {
       "item": "Item",

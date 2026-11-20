@@ -5034,7 +5034,14 @@
       "noneSelectedHint": "Elige un espacio para ver y cambiar su objeto.",
       "emptyHint": "Elige un objeto del catálogo para ponerlo aquí.",
       "pickItem": "Elegir objeto",
-      "notFound": "No se encontraron objetos en este inventario y el editor no puede saber con certeza dónde está en esta partida. Si el juego muestra objetos aquí, no se pudieron leer: no se puede añadir nada. Enviarnos una copia de esta partida nos ayuda a arreglarlo."
+      "notFound": "No se encontraron objetos en este inventario y el editor no puede saber con certeza dónde está en esta partida. Si el juego muestra objetos aquí, no se pudieron leer: no se puede añadir nada. Enviarnos una copia de esta partida nos ayuda a arreglarlo.",
+      "modItem": "Objeto de mod, se deja intacto",
+      "hiddenModItem": "{place} guarda un objeto oculto de otro mod (id {id}); Kiln lo deja intacto.",
+      "place": {
+        "backpack": "Casilla {n} de la mochila",
+        "swap": "Casilla {n} de la barra de cambio",
+        "action": "Casilla {n} de la barra de acción"
+      }
     },
     "inspector": {
       "item": "Objeto",

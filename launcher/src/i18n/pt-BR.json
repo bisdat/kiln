@@ -5034,7 +5034,14 @@
       "noneSelectedHint": "Escolha um espaço para ver e alterar o item.",
       "emptyHint": "Escolha um item do catálogo para colocar aqui.",
       "pickItem": "Escolher item",
-      "notFound": "Nenhum item foi encontrado neste inventário, e o editor não sabe com certeza onde ele fica neste save. Se o jogo mostra itens aqui, eles não puderam ser lidos: nada pode ser adicionado. Uma cópia deste save enviada para nós ajuda a corrigir isso."
+      "notFound": "Nenhum item foi encontrado neste inventário, e o editor não sabe com certeza onde ele fica neste save. Se o jogo mostra itens aqui, eles não puderam ser lidos: nada pode ser adicionado. Uma cópia deste save enviada para nós ajuda a corrigir isso.",
+      "modItem": "Item de mod, mantido intacto",
+      "hiddenModItem": "{place} guarda um item oculto de outro mod (id {id}); o Kiln o mantém intacto.",
+      "place": {
+        "backpack": "Espaço {n} da mochila",
+        "swap": "Espaço {n} da barra de troca",
+        "action": "Espaço {n} da barra de ação"
+      }
     },
     "inspector": {
       "item": "Item",

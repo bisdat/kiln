@@ -5034,7 +5034,14 @@
       "noneSelectedHint": "Choisissez un emplacement pour voir et modifier son objet.",
       "emptyHint": "Choisissez un objet dans le catalogue pour le placer ici.",
       "pickItem": "Choisir un objet",
-      "notFound": "Aucun objet n'a été trouvé dans cet inventaire, et l'éditeur ne peut pas savoir avec certitude où il se trouve dans cette sauvegarde. Si le jeu montre des objets ici, ils n'ont pas pu être lus : rien ne peut être ajouté. Nous envoyer une copie de cette sauvegarde aide à corriger cela."
+      "notFound": "Aucun objet n'a été trouvé dans cet inventaire, et l'éditeur ne peut pas savoir avec certitude où il se trouve dans cette sauvegarde. Si le jeu montre des objets ici, ils n'ont pas pu être lus : rien ne peut être ajouté. Nous envoyer une copie de cette sauvegarde aide à corriger cela.",
+      "modItem": "Objet de mod, laissé intact",
+      "hiddenModItem": "{place} contient un objet caché d'un autre mod (id {id}) ; Kiln le laisse intact.",
+      "place": {
+        "backpack": "Emplacement {n} du sac",
+        "swap": "Emplacement {n} de la barre d'échange",
+        "action": "Emplacement {n} de la barre d'action"
+      }
     },
     "inspector": {
       "item": "Objet",

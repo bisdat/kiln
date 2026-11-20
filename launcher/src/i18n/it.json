@@ -5034,7 +5034,14 @@
       "noneSelectedHint": "Scegli uno slot per vedere e cambiare il suo oggetto.",
       "emptyHint": "Scegli un oggetto dal catalogo da mettere qui.",
       "pickItem": "Scegli oggetto",
-      "notFound": "Non sono stati trovati oggetti in questo inventario e l'editor non può sapere con certezza dove si trovi in questo salvataggio. Se il gioco mostra oggetti qui, non è stato possibile leggerli: non si può aggiungere nulla. Inviarci una copia di questo salvataggio aiuta a risolvere il problema."
+      "notFound": "Non sono stati trovati oggetti in questo inventario e l'editor non può sapere con certezza dove si trovi in questo salvataggio. Se il gioco mostra oggetti qui, non è stato possibile leggerli: non si può aggiungere nulla. Inviarci una copia di questo salvataggio aiuta a risolvere il problema.",
+      "modItem": "Oggetto di una mod, lasciato intatto",
+      "hiddenModItem": "{place} contiene un oggetto nascosto di un'altra mod (id {id}); Kiln lo lascia intatto.",
+      "place": {
+        "backpack": "Casella {n} dello zaino",
+        "swap": "Casella {n} della barra di scambio",
+        "action": "Casella {n} della barra delle azioni"
+      }
     },
     "inspector": {
       "item": "Oggetto",

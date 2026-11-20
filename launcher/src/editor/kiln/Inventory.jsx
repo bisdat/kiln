@@ -13,6 +13,10 @@ import { Catalog } from './Catalog.jsx';
 import { Slot } from './parts.jsx';
 import { useDeckActions, useEditorEnv } from './env.jsx';
 
+/** An item no table has (another mod keeps it in the slot): shown locked, kept untouched (the save is read-only). */
+const isModItem = (e) => !!e && !items[e.itemId];
+const hexId = (id) => '0x' + ((Number(id) || 0) >>> 0).toString(16).padStart(8, '0');
+
 export default function Inventory({ model, setModel }) {
   const [sel, setSel] = useState(null);
   const [catalog, setCatalog] = useState(false);
@@ -67,12 +71,13 @@ export default function Inventory({ model, setModel }) {
 
   const cell = (key, n) => {
     const e = bySlot.get(key);
+    const mod = isModItem(e);
     return (
       <div key={key} className="ke-cell"
         onDragOver={(ev) => { ev.preventDefault(); ev.dataTransfer.dropEffect = 'move'; }}
         onDrop={(ev) => { ev.preventDefault(); const from = ev.dataTransfer.getData('text/plain') || dragFrom; if (from && bySlot.has(from)) move(from, key); setDragFrom(null); }}>
-        <Slot entry={e} n={n} selected={sel === key || moving === key} drop={(dragFrom !== null && dragFrom !== key) || (moving !== null && moving !== key)} title={e ? itemName(e.itemId) : undefined}
-          label={e ? `${itemName(e.itemId)}${e.count > 1 ? ` ×${e.count}` : ''}` : t('editor.inventory.slotEmpty', { n: slotNo(key) })}
+        <Slot entry={e} n={n} mod={mod} selected={sel === key || moving === key} drop={(dragFrom !== null && dragFrom !== key) || (moving !== null && moving !== key)} title={e ? itemName(e.itemId) : undefined}
+          label={mod ? `${placeOf(key)}: ${t('editor.inventory.modItem')}` : e ? `${itemName(e.itemId)}${e.count > 1 ? ` ×${e.count}` : ''}` : t('editor.inventory.slotEmpty', { n: slotNo(key) })}
           deckId={`slot-${key}`} deckA={moving ? t('editor.inventory.putHere') : e ? t('editor.common.change') : t('editor.common.add')}
           onFocus={env.deck ? () => { setSel(key); setInPanel(false); } : undefined}
           onClick={() => press(key, e)} onDoubleClick={() => { if (!e && !env.deck) { setSel(key); setCatalog(true); } }}
@@ -91,12 +96,23 @@ export default function Inventory({ model, setModel }) {
     if (scroller.current) ro.observe(scroller.current);
     return () => ro.disconnect();
   }, [layout.bag.length]);
+  // items no table has (another mod's, e.g. Hands-Free Lantern's hidden lantern in a bag slot): named by their place
+  const placeOf = (key) => {
+    const [c, s] = key.split(':'); const i = Number(s);
+    if (c === 'main' && i >= 16 && i < 24) return t('editor.inventory.place.swap', { n: i - 15 });
+    if (c === 'main' && i >= 24 && i < 32) return t('editor.inventory.place.action', { n: i - 23 });
+    return t('editor.inventory.place.backpack', { n: slotNo(key) });
+  };
+  const modItems = layout.all.filter((k) => isModItem(bySlot.get(k)));
   const slotNo = (key) => (layout.bag.indexOf(key) >= 0 ? layout.bag.indexOf(key) + 1 : Number(key.split(':')[1]) + 1);
 
   return (
     <div className="ke-split">
       <div className="ke-main">
         {model.inventoryUnsure && !model.main.length && !model.extra.length && <p className="ke-note warn" role="alert">{t('editor.inventory.notFound')}</p>}
+        {modItems.map((k) => (
+          <p key={k} className="ke-note warn ke-mod-note">{t('editor.inventory.hiddenModItem', { place: placeOf(k), id: hexId(bySlot.get(k).itemId) })}</p>
+        ))}
         <section className="ke-group ke-group-grow">
           <header className="ke-group-head">
             <h2 className="k-card-title">{t('editor.tabs.inventory')}</h2>

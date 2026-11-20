@@ -36,20 +36,22 @@ export const rarityWord = (r) => tv(RARITY_PT[r] || RARITY_PT[0]);
  * line along the bottom. `n`: a small number in the corner (action bar keys). `lazy`: the icon loads when the slot
  * is scrolled to (the catalog's long grid).
  */
-export function Slot({ entry, selected, onClick, onDoubleClick, drag, drop, n, size, title, dim, onFocus, deckId, deckA, label, lazy }) {
+export function Slot({ entry, selected, onClick, onDoubleClick, drag, drop, n, size, title, dim, onFocus, deckId, deckA, label, lazy, mod }) {
   const it = entry && items[entry.itemId];
   const r = entry ? rarityOf(entry) : 0;
   const dur = entry?.durability !== undefined && entry.maxDurability ? entry.durability / entry.maxDurability : null;
   const name = entry ? (title ?? undefined) : undefined;
   return (
-    <button type="button" className={'ke-slot' + (selected ? ' on' : '') + (entry ? ' full' : '') + (drop ? ' drop' : '') + (dim ? ' dim' : '')}
+    <button type="button" className={'ke-slot' + (selected ? ' on' : '') + (entry ? ' full' : '') + (drop ? ' drop' : '') + (dim ? ' dim' : '') + (mod ? ' mod' : '')}
       style={{ ...(size ? { '--s': `${size}px` } : null), ...(r > 0 ? { '--r': rarityColor(r) } : null) }}
       onClick={onClick} onDoubleClick={onDoubleClick} onFocus={onFocus} title={name} aria-pressed={selected || undefined} aria-label={label}
       data-deck-id={deckId} data-deck-a={deckA} {...(drag || {})}>
       {entry && <img src={iconOf(entry.itemId)} alt="" draggable={false} loading={lazy ? 'lazy' : undefined} decoding={lazy ? 'async' : undefined} />}
       {n !== undefined && <span className="ke-slot-n">{n}</span>}
-      {entry && it?.maxStack > 1 && <span className="ke-slot-count">{entry.count}</span>}
-      {entry && !(it?.maxStack > 1) && entry.level !== undefined && <span className="ke-slot-count lv">{entry.level}</span>}
+      {/* `mod`: an item another mod keeps in this slot (no table has it): a lock, no count (its count bits are the mod's) */}
+      {mod && <svg className="ke-slot-lock" viewBox="0 0 24 24" aria-hidden><path d="M7 11V8a5 5 0 0 1 10 0v3M5 11h14v10H5z" /></svg>}
+      {entry && !mod && it?.maxStack > 1 && <span className="ke-slot-count">{entry.count}</span>}
+      {entry && !mod && !(it?.maxStack > 1) && entry.level !== undefined && <span className="ke-slot-count lv">{entry.level}</span>}
       {dur !== null && <i className={'ke-slot-dur' + (dur < 0.25 ? ' low' : '')} style={{ width: `calc((100% - 12px) * ${Math.max(0, Math.min(1, dur)).toFixed(3)})` }} />}
     </button>
   );
