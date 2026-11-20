@@ -633,6 +633,7 @@ mod data_use_tests {
             &["run", "s"][..], &["start", "s"], &["stop", "s"], &["logs", "s", "--follow"], &["port", "s"], &["gate", "s"],
             &["install", "s"], &["prefix", "s"], &["status", "s"], &["list"], &["deploy", "s"], &["bundle", "verify", "k.zip"],
             &["cmd", "s", "help"], &["tick-compare", "a.jsonl", "b.jsonl"], &["pack", "verify", "p.kilnpack"],
+            &["pack", "check", "p.kilnpack"], &["pack", "check", "--index", "i.json", "--files", "f"],
         ] {
             assert_eq!(use_of(args), Use::None, "{args:?}");
         }

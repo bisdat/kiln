@@ -23,6 +23,9 @@ pub mod pack;
 pub mod merge;
 /// Pack Studio: the creator's pack source (a profile, chosen settings keys, the pack layer, credits) and its builds.
 pub mod studio;
+/// The pack analysis: Crucible's checks and the credits' identification (`kilnctl pack check`).
+#[cfg(feature = "zip")]
+pub mod check;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
