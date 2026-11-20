@@ -2532,7 +2532,14 @@
         },
         {
           "title": "AMD FSR on AMD cards",
-          "text": "Kiln's AMD FSR runs on AMD graphics cards, FSR 4 included (with AMD's auto-exposure), and a change of upscaler applies at once while FSR 3 runs in a world.",
+          "text": "Kiln's AMD FSR runs on AMD graphics cards, and a change of upscaler applies at once while FSR 3 runs in a world (a choice that needs a game restart says so first).",
+          "area": "core",
+          "kind": "fix",
+          "gamePending": true
+        },
+        {
+          "title": "AMD FSR 4 in dark scenes",
+          "text": "FSR 4 measures the picture's exposure itself and gets new inputs for the game's dark scenes. Not yet confirmed on an RX 9000 card. FSR 3.1 stays a choice under AMD FSR version.",
           "area": "core",
           "kind": "fix",
           "gamePending": true
@@ -2587,10 +2594,22 @@
           "kind": "improved"
         },
         {
+          "title": "A lighter launcher behind its pages",
+          "text": "Behind an open page the launcher's fire draws only the header band, and without compositing the flames and torch hold still.",
+          "area": "launcher",
+          "kind": "improved"
+        },
+        {
           "title": "Clearer logs and reports for support",
           "text": "kiln.log names the file another mod's hook comes from, and support reports include Building Tools', ShroudLink's and Auto Loot Plus' logs.",
           "area": "launcher",
           "kind": "improved"
+        },
+        {
+          "title": "No Nexus Mods choices without Nexus Mods",
+          "text": "In builds with Nexus Mods switched off, a mod's Updates dialog offers only GitHub and the update hint no longer mentions a Nexus sign-in.",
+          "area": "launcher",
+          "kind": "fix"
         },
         {
           "title": "A warning before the game runs out of impact memory",
