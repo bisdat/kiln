@@ -337,6 +337,16 @@ Code: `crates/kiln-manage/src/crucible/` (`mod.rs` client and flows, `sign.rs` t
 - Pack Studio, the Crucible browse page, comments and upvotes in the launcher, "Make it public".
 
 ## Checks done
+Player layer and update merge (dev.30 pack-layers): `tests/pack_layers.rs` (the player layer last across an update,
+its data overlap with a renamed layer file, a drop refused for no overlap, Drop my change keeping comments, undo of
+both; a renamed settings file new and already there with a conflict; a key new to the pack changed by the player since
+vs. left alone; an override the pack stops shipping; a client pack without the server-only mod read, installed and
+planned, refused whole and for a server; the save backup of the active game on update and undo), merge matrix unit
+tests in `modpack::merge`, `modpack::layers` units, `crucible::links` resume, `crucible::tests` a client downloading
+no server-only mod; Playwright crucible-update (overlaps, drop), crucible-resume, crucible-receive (file checks);
+`crucible-e2e.mjs` with a player-layer change surviving the update and undo. The NSIS hook compiles (makensis); a real
+Windows install from a renamed setup file is not tried.
+
 `cargo test -p kiln-manage --features zip,http,server --test packs`: a deterministic build from a profile (same
 bytes twice), the index (optional-off from a switched-off mod, the layer manifest written with `loadAfter`, chosen keys
 only), the format-1 reader refusing a pack; verify refusing a wrong sha256, an unlisted entry, a changed mod file, a

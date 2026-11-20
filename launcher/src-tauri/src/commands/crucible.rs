@@ -363,6 +363,13 @@ mod tests {
         let ir = crucible::install(&b, &cb, None, &crucible::InstallRequest { target: pv.version.id.clone(), consent: true, ..Default::default() }, pv.pack.owner.as_ref(), true, &mut NoProgress).expect("install");
         assert_eq!(ir.profile.mods.kiln.len(), 2);
         step(&format!("installed as profile {} ({} bytes downloaded)", ir.profile.id, ir.downloaded));
+        // the friend's own change: a data edit in the player layer (local.<pid>), which must outlive the update
+        let mine = r#"{ "format": 1, "items": { "Material_T1_Wood_Logs": { "maxStackSize": 999 } } }"#;
+        kiln_manage::modpack::layers::write(&b, &ir.profile.id, "content/mine.json", Some(mine)).expect("player layer");
+        let lp = kiln_manage::modpack::layers::save(&b, &ir.profile.id).expect("save player layer");
+        let local_id = kiln_manage::modpack::layers::local_id(&ir.profile.id);
+        assert_eq!(lp.mods.kiln.last().map(|m| m.id.as_str()), Some(local_id.as_str()));
+        step("the player's data change saved as the player layer");
         // the creator adds a mod and updates the link: only the new archive goes up
         add(&a, &p.id, vec![mk("kiln-equipment", "0.3.0")]);
         let r2 = crucible::share(&a, &ca, &crucible::ShareRequest { profile: p.id.clone(), ..Default::default() }, None, &mut NoProgress).expect("share 2");
@@ -373,11 +380,18 @@ mod tests {
         assert_eq!(ups.len(), 1);
         let plan = crucible::update_plan(&b, &cb, &ir.profile.id, &mut NoProgress).expect("plan");
         assert_eq!(plan.plan.mods.added.len(), 1);
+        assert!(plan.plan.mods.yours.is_empty(), "the player layer is no mod of yours: {:?}", plan.plan.mods.yours);
+        assert_eq!(plan.plan.local.as_ref().map(|l| l.fields), Some(1), "the plan shows the player's data edit");
         let done = crucible::update(&b, &cb, &crucible::UpdateRequest { profile: ir.profile.id.clone(), version_id: plan.version_id, consent: true, ..Default::default() }, &mut NoProgress).expect("update");
-        assert_eq!(done.profile.mods.kiln.len(), 3);
-        step("update found, planned and applied");
-        kiln_manage::modpack::pack::undo(&b, &ir.profile.id).expect("undo");
-        step("undo");
+        assert_eq!(done.profile.mods.kiln.len(), 4);
+        assert_eq!(done.profile.mods.kiln.last().map(|m| m.id.as_str()), Some(local_id.as_str()), "the player layer still loads last");
+        let kept = kiln_manage::modpack::layers::files(&b, &ir.profile.id).unwrap();
+        assert_eq!(kept.iter().map(|f| f.text.as_str()).collect::<Vec<_>>(), [mine], "the player's change survived the update");
+        step("update found, planned and applied; the player's change kept, still last");
+        let back = kiln_manage::modpack::pack::undo(&b, &ir.profile.id).expect("undo");
+        assert_eq!(back.mods.kiln.len(), 3);
+        assert_eq!(back.mods.kiln.last().map(|m| m.id.as_str()), Some(local_id.as_str()));
+        step("undo (the player layer stays)");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
