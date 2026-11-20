@@ -1,0 +1,13 @@
+{
+  "regmap": 1,
+  "registry": "items",
+  "entries": {
+    "kind": "resource",
+    "resourceType": "keen::ItemInfo",
+    "name": "debugName",
+    "guid": "objectId",
+    "id": "itemId",
+    "unnamed": "item_%08x"
+  },
+  "rows": {}
+}

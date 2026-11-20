@@ -1,0 +1,11 @@
+{
+  "regmap": 1,
+  "registry": "balance",
+  "entries": {
+    "kind": "single",
+    "resourceType": "keen::BalancingTable",
+    "resourceGuid": "82706b40-61b1-4b8f-8b23-dcec6971bda1",
+    "unnamed": "balance"
+  },
+  "rows": {}
+}

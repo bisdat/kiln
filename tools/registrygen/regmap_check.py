@@ -1,0 +1,387 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""regmap_check: Kiln's regmap (regmap/) checked offline against the game's types.
+
+    regmap_check.py [--root <repo>]                          against the committed type dumps (sigdb/types/<side>/*.json)
+    regmap_check.py [--root <repo>] --exe <a copy of the exe>   against that executable's own reflection (tools/kfc refl;
+                                                             the file is read as data, never run)
+    regmap_check.py ... --exe <copy> --record --side <server|client> --game-build <b> --steam-build <b>
+                                                             write regmap/<side>/<exe sha256>.json from the proof
+
+What it checks: every row's paths resolve from its entry's root type (an array's element, a list's element) to a member
+of the kind its conversion needs; an int field's schema range fits its storage type; enum and flags names exist in the
+game's enum; a static array holds the schema's maxItems; the routing rule (regmap/README.md); rows name schema fields.
+A schema field with no row is listed as unmapped (not an error: it is refused per entry until a row exists). A root type
+the type source does not have (the committed dumps hold the ECS closure only, not the resource types) is listed as
+absent; --exe checks everything. Exit 0: no error.
+"""
+import argparse
+import json
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import registrygen as rg  # noqa: E402
+
+# reflection kinds (tools/kfc/kfc/refl.py, the same numbers in sigdb/types)
+K_BOOL, K_U8, K_S8, K_U16, K_S16, K_U32, K_S32, K_U64, K_S64, K_F32, K_F64 = range(1, 12)
+K_ENUM, K_BM8, K_BM16, K_BM32, K_BM64, K_TYPEDEF, K_STRUCT, K_STATIC_ARRAY = range(12, 20)
+K_BLOB_ARRAY, K_OBJECT_REF, K_GUID = 24, 28, 29
+INT_RANGE = {K_U8: (0, 255), K_S8: (-128, 127), K_U16: (0, 65535), K_S16: (-32768, 32767), K_U32: (0, 4294967295),
+             K_S32: (-2147483648, 2147483647), K_U64: (0, 2 ** 64 - 1), K_S64: (-2 ** 63, 2 ** 63 - 1)}
+FLOATS = (K_F32, K_F64)
+BITMASKS = (K_BM8, K_BM16, K_BM32, K_BM64)
+ARRAYS = (K_STATIC_ARRAY, K_BLOB_ARRAY)
+READ_RANK = {"now": 0, "worldLoad": 1, "restart": 2}
+CONVS = ("int", "float", "bool", "time", "enum", "flags", "ref", "refList", "formula", "impactConfig", "list", "stackCount",
+         "inventoryWalk", "unlock", "optionalEnum")
+
+
+class TypeDb:
+    """Types by qualified name: {name, kind, size, inner, fields[{name, type}], values[{name}], layout, count}."""
+
+    def __init__(self, types, exe_sha256=""):
+        self.by_name = {t["name"]: t for t in types}
+        self.exe_sha256 = exe_sha256
+
+    @classmethod
+    def from_refl(cls, dump):
+        return cls(dump["types"], dump.get("exe_sha256", ""))
+
+    @classmethod
+    def from_dump(cls, dump):
+        """A committed sigdb/types dump (schema 2)."""
+        types = []
+        for t in dump["types"]:
+            x = {"name": t["qualifiedName"], "kind": t["kind"], "size": t["size"], "inner": t.get("inner"),
+                 "fields": t.get("fields", []), "values": t.get("values", []), "layout": None}
+            types.append(x)
+        db = cls(types, dump.get("exe_sha256", ""))
+        for t in db.by_name.values():  # a static array's count from its size
+            if t["kind"] == K_STATIC_ARRAY and t.get("inner") in db.by_name and db.by_name[t["inner"]]["size"]:
+                t["count"] = t["size"] // db.by_name[t["inner"]]["size"]
+        return db
+
+    @classmethod
+    def from_exe(cls, exe):
+        sys.path.insert(0, str(HERE.parent / "kfc"))
+        from kfc import refl  # noqa: E402
+        return cls.from_refl(refl.extract(str(exe)))
+
+    def get(self, name):
+        return self.by_name.get(name)
+
+    def resolve(self, t):
+        for _ in range(16):
+            if t is None or t["kind"] != K_TYPEDEF:
+                return t
+            t = self.by_name.get(t.get("inner"))
+        return t
+
+    def fields(self, t):
+        out, cur, chain = [], self.resolve(t), []
+        while cur is not None and cur["kind"] == K_STRUCT:
+            chain.append(cur)
+            cur = self.resolve(self.by_name.get(cur.get("inner"))) if cur.get("inner") else None
+        for c in reversed(chain):
+            out += c.get("fields", [])
+        return out
+
+    def member_type(self, type_name, member):
+        for f in self.fields(self.get(type_name)):
+            if f["name"] == member:
+                return self.get(f["type"])
+        return None
+
+    def path(self, root, dotted):
+        """The type at a dotted member path from a root type; (type, error)."""
+        t = self.get(root)
+        for part in dotted.split("."):
+            r = self.resolve(t)
+            if r is None or r["kind"] != K_STRUCT:
+                return None, f"{dotted}: {t['name'] if t else '?'} has no members"
+            nxt = None
+            for f in self.fields(r):
+                if f["name"] == part:
+                    nxt = self.get(f["type"])
+                    if nxt is None:
+                        return None, f"{dotted}: the type of {part} ({f['type']}) is not in the type source"
+                    break
+            if nxt is None:
+                return None, f"{dotted}: {r['name']} has no member {part}"
+            t = nxt
+        return t, None
+
+    def element(self, t):
+        r = self.resolve(t)
+        if r is None or r["kind"] not in ARRAYS:
+            return None
+        return self.get(r.get("inner"))
+
+
+@dataclass
+class Result:
+    errors: list = field(default_factory=list)
+    unmapped: list = field(default_factory=list)
+    absent: list = field(default_factory=list)
+    resolved: int = 0
+    rows: dict = field(default_factory=dict)       # qualified field -> "ok" | "unmapped"
+    layouts: dict = field(default_factory=dict)    # root type -> layout hash
+
+
+def load_regmap(root):
+    out = {}
+    for p in sorted((Path(root) / "regmap" / "common").glob("*.json")):
+        d = json.loads(p.read_text(encoding="utf-8"))
+        out[d.get("registry", p.stem)] = d
+    return out
+
+
+def kind_name(t):
+    names = {K_BOOL: "bool", K_U8: "u8", K_S8: "s8", K_U16: "u16", K_S16: "s16", K_U32: "u32", K_S32: "s32", K_U64: "u64",
+             K_S64: "s64", K_F32: "f32", K_F64: "f64", K_ENUM: "enum", K_STRUCT: "struct", K_STATIC_ARRAY: "static array",
+             K_BLOB_ARRAY: "blob array", K_OBJECT_REF: "object reference", K_GUID: "guid"}
+    return f"{t['name']} ({names.get(t['kind'], 'kind ' + str(t['kind']))})" if t else "?"
+
+
+def check_conv(db, q, conv, types, row, spec):
+    """Errors of one row's member types against its conversion."""
+    errs = []
+    rs = [db.resolve(t) for t in types]
+
+    def want(i, ok, what):
+        if i >= len(rs) or rs[i] is None or not ok(rs[i]):
+            errs.append(f"{q}: {row['paths'][i] if i < len(row['paths']) else '?'} is {kind_name(types[i] if i < len(types) else None)}, "
+                        f"a {conv} row needs {what}")
+            return False
+        return True
+
+    is_int = lambda r: r["kind"] in INT_RANGE  # noqa: E731
+    is_num = lambda r: r["kind"] in INT_RANGE or r["kind"] in FLOATS  # noqa: E731
+    if conv == "int":
+        if want(0, is_int, "an integer") and spec.get("type") in ("int",):
+            lo, hi = INT_RANGE[rs[0]["kind"]]
+            if spec.get("min") is not None and spec["min"] < lo or spec.get("max") is not None and spec["max"] > hi:
+                errs.append(f"{q}: the schema's range {spec.get('min')}..{spec.get('max')} does not fit {kind_name(types[0])} ({lo}..{hi})")
+    elif conv == "float":
+        want(0, is_num, "a number")
+    elif conv == "bool":
+        want(0, lambda r: r["kind"] == K_BOOL, "a bool")
+    elif conv == "time":
+        want(0, lambda r: r["name"] == "keen::Time", "a keen::Time")
+    elif conv in ("enum", "optionalEnum"):
+        at = 1 if conv == "optionalEnum" else 0
+        if conv == "optionalEnum":
+            want(0, lambda r: r["kind"] == K_BOOL, "the switch (a bool) first")
+        if want(at, lambda r: r["kind"] == K_ENUM, "an enum"):
+            have = {v["name"] for v in rs[at].get("values", [])}
+            for k, v in row.get("values", {}).items():
+                if conv == "optionalEnum" and k == "none":
+                    continue
+                if v not in have:
+                    errs.append(f"{q}: {k} maps to {v}, which {rs[at]['name']} does not have")
+            for k in spec.get("values", []):
+                if k not in row.get("values", {}):
+                    errs.append(f"{q}: the schema's value {k} has no game name in the row")
+    elif conv == "flags":
+        if want(0, lambda r: r["kind"] in BITMASKS, "a bitmask"):
+            en = db.resolve(db.get(rs[0].get("inner")))
+            have = {v["name"] for v in (en or {}).get("values", [])}
+            for k, v in row.get("values", {}).items():
+                if v not in have:
+                    errs.append(f"{q}: {k} maps to {v}, which the bitmask's enum does not have")
+            for k in spec.get("values", []):
+                if k not in row.get("values", {}):
+                    errs.append(f"{q}: the schema's value {k} has no game name in the row")
+    elif conv == "ref":
+        want(0, is_int, "the 32-bit id first")
+        want(1, lambda r: r["kind"] in (K_OBJECT_REF, K_GUID), "the reference (an object reference or a GUID) second")
+    elif conv == "refList":
+        if want(0, lambda r: r["kind"] in ARRAYS, "an array of references first"):
+            el = db.resolve(db.element(types[0]))
+            if el is None or el["kind"] not in (K_OBJECT_REF, K_GUID):
+                errs.append(f"{q}: {row['paths'][0]} does not hold references")
+        if want(1, lambda r: r["kind"] in ARRAYS, "an array of ids second"):
+            el = db.resolve(db.element(types[1]))
+            if el is None or not is_int(el):
+                errs.append(f"{q}: {row['paths'][1]} does not hold ids")
+            a, b = rs[0], rs[1]
+            if a and b and a["kind"] == K_STATIC_ARRAY and b["kind"] == K_STATIC_ARRAY and a.get("count") != b.get("count"):
+                errs.append(f"{q}: the two arrays differ in length")
+    elif conv in ("formula", "stackCount"):
+        for i in range(len(rs)):
+            want(i, is_num, "a number")
+    elif conv == "impactConfig":
+        want(0, lambda r: r["name"] == "keen::impact::Configurations", "the impact configurations")
+    elif conv == "list":
+        if want(0, lambda r: r["kind"] in ARRAYS, "an array"):
+            if rs[0]["kind"] == K_STATIC_ARRAY and spec.get("maxItems") and rs[0].get("count") and spec["maxItems"] > rs[0]["count"]:
+                errs.append(f"{q}: maxItems {spec['maxItems']} is more than the game's {rs[0]['count']} slots")
+    elif conv == "inventoryWalk":
+        if want(0, lambda r: r["kind"] == K_STRUCT, "the root group (a struct)"):
+            names = {f["name"] for f in db.fields(rs[0])}
+            if not {"stacks", "groups"} <= names:
+                errs.append(f"{q}: {rs[0]['name']} has no stacks and groups")
+    elif conv == "unlock":
+        want(0, lambda r: r["kind"] == K_STRUCT, "the knowledge requirement (a struct)")
+    return errs
+
+
+def list_element_root(db, root, rows, list_path):
+    """The element type of a list row's array (inventoryWalk: the stacks' element)."""
+    row = rows.get(list_path)
+    if not row or not row.get("paths"):
+        return None
+    t, err = db.path(root, row["paths"][0])
+    if err:
+        return None
+    if row.get("conv") == "inventoryWalk":
+        t, err = db.path(t["name"], "stacks")
+        if err:
+            return None
+    el = db.element(t)
+    return el["name"] if el else None
+
+
+def check(root, db):
+    """Every row of regmap/common against the schema and a type source."""
+    res = Result()
+    model = rg.load(root)
+    res.errors += [f"schema: {e}" for e in model.errors]
+    maps = load_regmap(root)
+    for name, reg in model.registries.items():
+        m = maps.get(name)
+        if m is None:
+            res.errors.append(f"{name}: no regmap/common/{name}.json")
+            continue
+        rows = m.get("rows", {})
+        specs = {r.path: r for r in reg.rows}
+        for f in rows:
+            if f not in specs:
+                res.errors.append(f"{name}.{f}: the schema has no such field")
+        e = m.get("entries", {})
+        rtype = e.get("resourceType", "")
+        root_t = db.get(rtype)
+        if root_t is None:
+            res.absent.append(rtype)
+        entry_root = rtype if root_t is not None else None
+        if root_t is not None:
+            res.layouts[rtype] = root_t.get("layout")
+            if e.get("kind") == "array":
+                t, err = db.path(rtype, e.get("array", ""))
+                el = db.element(t) if t else None
+                if err or el is None:
+                    res.errors.append(f"{name}: entries.array {e.get('array')}: {err or 'not an array'}")
+                    entry_root = None
+                else:
+                    entry_root = el["name"]
+                    res.layouts[entry_root] = el.get("layout")
+            for member in ("name", "guid", "id"):
+                if e.get(member) and entry_root and db.path(entry_root, e[member])[1]:
+                    res.errors.append(f"{name}: entries.{member} {e[member]}: {db.path(entry_root, e[member])[1]}")
+        for path, spec_row in specs.items():
+            q = f"{name}.{path}"
+            row = rows.get(path)
+            if row is None or row.get("state") == "unmapped":
+                res.unmapped.append(q)
+                res.rows[q] = "unmapped"
+                continue
+            errs = []
+            conv = row.get("conv")
+            if conv not in CONVS:
+                errs.append(f"{q}: conv {conv!r} is not one of regmap/README.md's")
+            read, backend = row.get("read"), row.get("backend")
+            if read == "unknown":
+                if row.get("state") != "unproven":
+                    errs.append(f"{q}: the game's read time is not traced: the row is unproven until it is")
+            elif read not in READ_RANK:
+                errs.append(f"{q}: read is now, worldLoad, restart or unknown")
+            elif READ_RANK[read] > READ_RANK[spec_row.applies]:
+                errs.append(f"{q}: the schema promises it applies {spec_row.applies} but the game reads it at {read} only")
+            if spec_row.read_only:
+                if backend != "none":
+                    errs.append(f"{q}: a read-only field has no back-end (backend none)")
+            elif backend == "boot" and spec_row.applies != "restart":
+                errs.append(f"{q}: a boot back-end write acts only after a restart, the schema says {spec_row.applies}")
+            elif backend == "live" and spec_row.applies == "restart":
+                errs.append(f"{q}: a restart field goes through the boot back-end (before the game reads it)")
+            elif backend not in ("live", "boot"):
+                errs.append(f"{q}: a writable field needs a back-end (live or boot)")
+            base = entry_root
+            if spec_row.list_path:
+                base = list_element_root(db, entry_root, rows, spec_row.list_path) if entry_root else None
+            if root_t is not None and base is None:
+                errs.append(f"{q}: its list's element type is not found")
+            if base is not None:
+                types = []
+                for p in row.get("paths", []):
+                    t, err = db.path(base, p)
+                    if err:
+                        errs.append(f"{q}: {err}")
+                    types.append(t)
+                if not any("has no member" in x or "not in the type source" in x for x in errs) and types:
+                    errs += check_conv(db, q, conv, types, row, rg.scalar_spec(spec_row) if spec_row.kind == "list" and spec_row.element != "struct" and conv != "list" else spec_row.spec)
+                if not errs:
+                    res.resolved += 1
+            res.errors += errs
+            res.rows[q] = "ok" if not errs and base is not None else "unmapped"
+    return res
+
+
+def record(root, db, side, game_build, steam_build):
+    res = check(root, db)
+    proof = ("regmap_check.py --exe: every mapped row resolved and type-checked against this exe's own reflection"
+             if not res.errors and not res.absent else "regmap_check.py --exe: not every row resolved (see rows)")
+    return {"regmap": 1, "side": side, "exeSha256": db.exe_sha256, "gameBuild": game_build, "steamBuild": steam_build,
+            # verified: the proof covered every root type; a row that failed it is listed "unmapped" and refused alone
+            "verified": not res.absent,
+            "proof": proof,
+            "layouts": {k: f"0x{v:08x}" for k, v in sorted(res.layouts.items()) if v is not None},
+            "rows": dict(sorted(res.rows.items())),
+            "aliases": {"renames": [], "removals": [], "suffixes": []}}
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Kiln's regmap checked against the game's types")
+    ap.add_argument("--root", default=str(HERE.parents[1]))
+    ap.add_argument("--exe")
+    ap.add_argument("--record", action="store_true")
+    ap.add_argument("--side", choices=("server", "client"))
+    ap.add_argument("--game-build", default="")
+    ap.add_argument("--steam-build", default="")
+    a = ap.parse_args(argv)
+    root = Path(a.root)
+    sources = []
+    if a.exe:
+        sources.append((a.exe, TypeDb.from_exe(a.exe)))
+    else:
+        for side in ("server", "client"):
+            for p in sorted((root / "sigdb" / "types" / side).glob("*.json")):
+                d = json.loads(p.read_text(encoding="utf-8"))
+                if d.get("schema") == 2:
+                    sources.append((f"sigdb/types/{side}/{p.name}", TypeDb.from_dump(d)))
+    bad = 0
+    for label, db in sources:
+        res = check(root, db)
+        for e in res.errors:
+            print(f"regmap_check: {label}: {e}", file=sys.stderr)
+        bad += len(res.errors)
+        print(f"regmap_check: {label}: {res.resolved} rows resolved, {len(res.unmapped)} fields unmapped, "
+              f"{len(res.absent)} root types not in this source{' (' + ', '.join(res.absent) + ')' if res.absent else ''}, "
+              f"{len(res.errors)} errors")
+        if a.record:
+            if not a.exe or not a.side:
+                print("regmap_check: --record needs --exe and --side", file=sys.stderr)
+                return 2
+            rec = record(root, db, a.side, a.game_build, a.steam_build)
+            out = root / "regmap" / a.side / f"{db.exe_sha256}.json"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
+            print(f"regmap_check: wrote {out.relative_to(root)} (verified: {str(rec['verified']).lower()})")
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

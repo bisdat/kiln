@@ -1,0 +1,11 @@
+{
+  "regmap": 1,
+  "registry": "drops",
+  "entries": {
+    "kind": "resource",
+    "resourceType": "keen::ecs::DefaultInventoryResource",
+    "nameFrom": "keen::ecs::DefaultInventory.defaultInventory",
+    "unnamed": "drops_%.8s"
+  },
+  "rows": {}
+}

@@ -1,0 +1,14 @@
+{
+  "regmap": 1,
+  "registry": "recipes",
+  "entries": {
+    "kind": "array",
+    "resourceType": "keen::RecipeRegistryResource",
+    "array": "recipes",
+    "name": "debugName",
+    "guid": "recipeGuid",
+    "id": "recipeId",
+    "unnamed": "recipe_%08x"
+  },
+  "rows": {}
+}

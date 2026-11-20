@@ -10,7 +10,8 @@
 #           once, with a level (sigdb/builds/README.md); a sigdb name added without a refresh fails here
 #   registry tools/registrygen/registrygen.py --check: the registry schemas (schema/registry/*.json) are valid, every name
 #           is in ids.lock.json, and the files made from them (Kiln.Registry's Generated/*.g.cs, schema.g.h, the data
-#           section's schema, docs/kiln/modding/registries/*.md) are current
+#           section's schema, docs/kiln/modding/registries/*.md) are current; tools/registrygen/regmap_check.py: regmap/
+#           rows route as the schemas' "applies" say and resolve in the committed type dumps
 #   build   every managed project with a PublicAPI.Shipped.txt (found by that file, so gate 1, the PublicApiAnalyzers
 #           record, runs), Kiln.Host and the unit test projects: one Release build of one generated solution
 #           ($KILN_OUT/check/check.slnx), so each project is built once
@@ -100,8 +101,9 @@ fi
 
 # registry
 t=$SECONDS
-if python3 -I "$repo/tools/registrygen/registrygen.py" --check >"$work/registry.log" 2>&1; then
-  result registry OK $((SECONDS - t)) "$(tail -1 "$work/registry.log" | sed 's/^registrygen: //')"
+if python3 -I "$repo/tools/registrygen/registrygen.py" --check >"$work/registry.log" 2>&1 &&
+   python3 -I "$repo/tools/registrygen/regmap_check.py" >>"$work/registry.log" 2>&1; then
+  result registry OK $((SECONDS - t)) "$(grep '^registrygen: ' "$work/registry.log" | tail -1 | sed 's/^registrygen: //'); regmap rows checked"
 else
   result registry FAILED $((SECONDS - t)) "the registry schemas or the files made from them:"
   head -40 "$work/registry.log"

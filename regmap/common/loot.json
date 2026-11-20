@@ -1,0 +1,13 @@
+{
+  "regmap": 1,
+  "registry": "loot",
+  "entries": {
+    "kind": "array",
+    "resourceType": "keen::LootableItemsResource",
+    "array": "items",
+    "id": "itemId",
+    "key": "items",
+    "unnamed": "item_%08x"
+  },
+  "rows": {}
+}
