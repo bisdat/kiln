@@ -2344,8 +2344,9 @@ export const shroudlinkNotice = (profile: Profile, gameId: GameId) => call<Shrou
 // ./mockCommunity.ts (`?discord=` flags). The UI (src/community/) talks to Discord only through these.
 
 /** `community.json`: the Community page shown (Settings), Rich Presence, reply notifications. */
-export interface CommunitySettings { format: number; shown: boolean; presence: boolean; notify: boolean; relay?: string | null }
-export type CommunitySettingsPatch = Partial<Pick<CommunitySettings, "shown" | "presence" | "notify">>;
+/** `presencePack`: "Show my Crucible pack on my Discord profile" (off by default; older backends leave it out). */
+export interface CommunitySettings { format: number; shown: boolean; presence: boolean; presencePack?: boolean; notify: boolean; relay?: string | null }
+export type CommunitySettingsPatch = Partial<Pick<CommunitySettings, "shown" | "presence" | "presencePack" | "notify">>;
 export interface CommunityAccount {
   /** Discord user id (a snowflake). */
   id: string;
@@ -2452,7 +2453,8 @@ export interface ReportPreview {
   contents: ReportContents;
 }
 /** Rich Presence's words in the launcher's language (en.json community.presence.*). */
-export interface PresenceTexts { details: string; stateOne: string; stateOther: string; getKiln: string; joinDiscord: string }
+/** Rich Presence's lines; the last three for "Show my Crucible pack" ("{pack} ({count} mods)", "Get this modpack"). */
+export interface PresenceTexts { details: string; stateOne: string; stateOther: string; getKiln: string; joinDiscord: string; packStateOne: string; packStateOther: string; getPack: string }
 export type Capability = "fsr4" | "xess" | "framegen" | "deck";
 export interface Hardware {
   gpu: string;

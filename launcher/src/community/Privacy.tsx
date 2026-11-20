@@ -14,7 +14,7 @@ const open = (url: string) => { api.appOpenUrl(url).catch((e) => toast.error(e))
 
 /** The sections in order, each with its paragraphs (en.json community.privacy.*). */
 export const PRIVACY_SECTIONS: [string, string[]][] = [
-  ["signInTitle", ["signIn", "join"]], ["reportTitle", ["reportPublic", "reportTeam", "ai"]], ["presenceTitle", ["presence"]],
+  ["signInTitle", ["signIn", "join"]], ["reportTitle", ["reportPublic", "reportTeam", "ai"]], ["presenceTitle", ["presence", "presencePack"]],
   ["testerTitle", ["tester"]], ["keptTitle", ["kept"]], ["undoTitle", ["undo"]],
 ];
 

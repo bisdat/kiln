@@ -195,6 +195,41 @@ test.describe("Rich Presence", () => {
     await expect(page.getByTestId("kc-presence-state")).toHaveCount(0);
   });
 
+  test("Show my Crucible pack: off by default, only with Rich Presence on; the preview names the pack and its button", async ({ page }) => {
+    await open(page, "/?mock=1#/community");
+    const pack = page.getByTestId("kc-presence-pack").getByRole("switch");
+    await expect(pack).not.toBeChecked();
+    await expect(pack).toBeDisabled();
+    await page.getByTestId("kc-presence").getByRole("switch").first().click({ force: true });
+    await expect(pack).toBeEnabled();
+    await expect(pack).not.toBeChecked();
+    await expect(page.getByTestId("kc-presence-card-second")).toHaveText("Join the Discord");
+    const before = (await requests(page)).length;
+    await pack.click({ force: true });
+    await expect(page.locator(".k-toast").filter({ hasText: "Your Crucible pack shows on Discord" })).toBeVisible();
+    await expect(page.getByTestId("kc-presence-card-state")).toHaveText(/^Ember run \(\d+ mods?\)$/);
+    await expect(page.getByTestId("kc-presence-card-second")).toHaveText("Get this modpack");
+    await expect(page.getByTestId("kc-presence")).toContainText("Your Crucible pack's name and page are shown while you play it.");
+    expect((await requests(page)).length).toBe(before);
+    // Rich Presence off: the pack switch goes dim and the preview is the plain one again
+    await page.getByTestId("kc-presence").getByRole("switch").first().click({ force: true });
+    await expect(pack).toBeDisabled();
+    await expect(page.getByTestId("kc-presence-card-second")).toHaveText("Join the Discord");
+  });
+
+  test("the Deck's dialog: Show my pack once Rich Presence is on", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/?mock=1&deck=steamdeck&discord=presence#/deck/community");
+    await page.locator('[data-deck-id="presence"]').click();
+    const dlg = page.locator('[data-deck-dialog="community-presence"]');
+    await expect(page.getByTestId("deck-presence-pack")).toContainText("Off");
+    await dlg.getByRole("button", { name: "Show my pack" }).click();
+    await expect(page.getByTestId("deck-presence-pack")).toContainText("On");
+    await expect(page.getByTestId("kc-presence-card-second")).toHaveText("Get this modpack");
+    await dlg.getByRole("button", { name: "Hide my pack" }).click();
+    await expect(page.getByTestId("kc-presence-card-second")).toHaveText("Join the Discord");
+  });
+
   test("Discord not running: the page says so", async ({ page }) => {
     await open(page, "/?mock=1&discord=presence,nodiscord#/community");
     await expect(page.getByTestId("kc-presence-state")).toHaveText("Discord isn't running on this PC. It shows once Discord is open.");

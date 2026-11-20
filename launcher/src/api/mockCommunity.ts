@@ -12,6 +12,7 @@
 //   signinlimit the relay takes no more sign-ins from this network for now
 //   known       the report matches a known problem with a fix     nodiscord   the Discord app is not running
 //   presence    Rich Presence on     notify      reply notifications on
+//   pack        Show my Crucible pack on (with presence)
 //   cancel      sign-in: cancelled on Discord's page              expire   sign-in: the code runs out
 //   deny        QR sign-in: declined on the phone                 tester   already a tester (with a test plan)
 //   sent        tester: results sent, not read yet                read     tester: results read by the team
@@ -53,7 +54,7 @@ const NO_BUILD = has("noplan") || has("nobuild");
 const SIGNED_IN = has("in") || has("empty") || has("notmember") || TESTER;
 const me = (): CommunityAccount => ({ id: "731204485922648124", name: "emberfox", member: !has("notmember"), tester });
 
-let settings: CommunitySettings = { format: 1, shown: !has("hidden"), presence: has("presence"), notify: has("notify") };
+let settings: CommunitySettings = { format: 1, shown: !has("hidden"), presence: has("presence"), presencePack: has("pack"), notify: has("notify") };
 let tester = TESTER;
 let account: CommunityAccount | null = SIGNED_IN ? me() : null;
 let online = !has("offline");
@@ -197,7 +198,7 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
     community_settings_get: () => ({ ...settings }),
     community_settings_set: (a) => {
       const p = (a.patch ?? {}) as Partial<CommunitySettings>;
-      settings = { ...settings, ...(p.shown !== undefined ? { shown: !!p.shown } : {}), ...(p.presence !== undefined ? { presence: !!p.presence } : {}), ...(p.notify !== undefined ? { notify: !!p.notify } : {}) };
+      settings = { ...settings, ...(p.shown !== undefined ? { shown: !!p.shown } : {}), ...(p.presence !== undefined ? { presence: !!p.presence } : {}), ...(p.presencePack !== undefined ? { presencePack: !!p.presencePack } : {}), ...(p.notify !== undefined ? { notify: !!p.notify } : {}) };
       // hidden: a sign-in on its way ends (the backend closes its listener)
       if (!settings.shown) pending.clear();
       changed();

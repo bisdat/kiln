@@ -4257,6 +4257,25 @@
         "discordNoReason": "问题出在 Kiln 这边，不是你的网络连接。你的结果已保留：请稍后再试。",
         "discordLimit": "Discord 限制了 Kiln 支持发帖的频率，目前已达到上限。你的结果已保留：请在 {wait}后再试。"
       }
+    },
+    "presence": {
+      "pack": {
+        "label": "在我的 Discord 个人资料中显示我的 Crucible 整合包",
+        "hint": "当你游玩来自 Crucible 的整合包时：显示它的名称，以及一个打开整合包页面的“获取这个整合包”按钮。在这台电脑上制作的整合包永远不会显示名称。",
+        "never": "永远不会显示：服务器名称、世界名称或你的角色。游玩 Crucible 整合包时，会显示它的名称和页面。",
+        "state": {
+          "other": "{pack}（{count} 个模组）"
+        },
+        "getPack": "获取这个整合包",
+        "example": "余烬之旅",
+        "turnOn": "显示我的整合包",
+        "turnOff": "隐藏我的整合包",
+        "onToast": "你的 Crucible 整合包会显示在 Discord 上",
+        "offToast": "你的 Crucible 整合包不再显示在 Discord 上"
+      }
+    },
+    "privacy": {
+      "presencePack": "开启“显示我的 Crucible 整合包”后，还会显示你正在游玩的 Crucible 整合包名称，以及它在 frostdev.io 上页面的链接。在这台电脑上制作的整合包永远不会显示名称。"
     }
   }
 }
