@@ -4,7 +4,8 @@
 // the Discord sign-in, the real service started from an env file. Then the ignored Rust test
 // commands::crucible::tests::end_to_end_against_a_local_crucible runs with KILN_CRUCIBLE_DEV (the local API, CDN and
 // signing key) and KILN_CRUCIBLE_E2E_SESSION (the stub's session): share -> code -> signed index -> install -> version 2
-// with only the new file uploaded -> update -> undo. No GUI, no game.
+// with only the new file uploaded -> update -> undo; and commands::studio::tests::studio_publish_end_to_end_against_a_local_crucible:
+// Pack Studio's publish (link-only, then public with credits) and a friend's install by code. No GUI, no game.
 //
 //   CRUCIBLE_DIR=<the crucible service repo> node launcher/scripts/crucible-e2e.mjs     (from the repo root; needs Docker)
 import { spawn, execFileSync } from 'node:child_process';
@@ -62,7 +63,8 @@ const env = {
 };
 // spawn, not spawnSync: the fake relay answers the service from this process's event loop
 const status = await new Promise((resolve) => {
-  const c = spawn('cargo', ['test', '-p', 'kiln-launcher', '--lib', '--offline', 'commands::crucible::tests::end_to_end_against_a_local_crucible', '--', '--ignored', '--nocapture'],
+  // the client's share/receive/update flow and Pack Studio's publish (commands::studio::tests::studio_publish_end_to_end_...)
+  const c = spawn('cargo', ['test', '-p', 'kiln-launcher', '--lib', '--offline', 'end_to_end_against_a_local_crucible', '--', '--ignored', '--nocapture', '--test-threads=1'],
     { cwd: repo, env, stdio: 'inherit' });
   c.on('exit', (code) => resolve(code ?? 1));
 });

@@ -225,3 +225,81 @@ pub async fn studio_server_pack(app: AppHandle, pack_id: String, version: String
         to_value(pack::install_server(&d, &inst, &req, p)?)
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pack Studio's publish end to end against a Crucible running on this machine (launcher/scripts/crucible-e2e.mjs
+    /// starts it and runs this with KILN_CRUCIBLE_DEV and KILN_CRUCIBLE_E2E_SESSION; plain cargo test skips it): a pack
+    /// source from a profile with a layer file, a captured settings key and credits; published link-only, then the next
+    /// version public; a friend opens it by its code without a sign-in and installs it, layer and override included.
+    #[test]
+    #[ignore = "needs a local Crucible: launcher/scripts/crucible-e2e.mjs"]
+    fn studio_publish_end_to_end_against_a_local_crucible() {
+        use kiln_manage::crucible::{self, publish::PublishRequest};
+        use kiln_manage::modpack::studio::{CaptureChoice, Visibility};
+        use kiln_manage::paths::DataDirs;
+        use kiln_manage::task::NoProgress;
+        let session = std::env::var("KILN_CRUCIBLE_E2E_SESSION").expect("KILN_CRUCIBLE_E2E_SESSION");
+        let (ep, t) = super::super::crucible::service().expect("KILN_CRUCIBLE_DEV");
+        assert!(ep.dev && ep.enabled(), "KILN_CRUCIBLE_DEV must name the local service and its key");
+        let root = std::env::temp_dir().join(format!("kiln-studio-e2e-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let step = |s: &str| eprintln!("ok   {s}");
+        let a = DataDirs::at(root.join("creator"));
+        let src = root.join("src");
+        let mk = |id: &str, v: &str| {
+            let dir = src.join(format!("{id}-{v}"));
+            std::fs::create_dir_all(dir.join("content")).unwrap();
+            std::fs::write(dir.join("kiln.mod.json"), format!(r#"{{ "id": "{id}", "name": "{id}", "version": "{v}", "apiVersion": "0.2", "side": "both", "authors": ["frostdev"] }}"#)).unwrap();
+            std::fs::write(dir.join("content/data.json"), format!(r#"{{ "format": 1, "note": "{id} {v}" }}"#)).unwrap();
+            dir
+        };
+        let p = kiln_manage::profile::create(&a, "Studio run", None).unwrap();
+        let r = kiln_manage::library::import(&a, &[mk("studio-alpha", "1.0.0"), mk("studio-beta", "0.2.0")], &mut NoProgress).unwrap();
+        let mut prof = kiln_manage::profile::get(&a, &p.id).unwrap();
+        for lr in r.imported.iter().chain(&r.existing) {
+            prof.mods.kiln.push(kiln_manage::profile::ProfileMod { id: lr.id.clone(), version: lr.version.clone(), hash: lr.hash.clone(), enabled: true });
+        }
+        kiln_manage::profile::save(&a, &prof).unwrap();
+        let cfg = a.profile(&p.id).join("config");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::write(cfg.join("studio-alpha.json"), r#"{ "range": 20, "hotkey": "F9" }"#).unwrap();
+        let st = studio::create(&a, &NewPack { name: "Studio run".into(), from: Some(p.id.clone()), id: None }).unwrap();
+        studio::layer_write(&st.dir, "content/items.json", r#"{ "format": 1, "items": { "Material_T1_Wood_Logs": { "maxStackSize": 500 } } }"#).unwrap();
+        studio::set_capture(&a, &st.dir, &[CaptureChoice { path: "studio-alpha.json".into(), side: Default::default(), keys: vec!["range".into()], whole: false }]).unwrap();
+        step("pack source: 2 mods, a layer file, one captured key");
+        let c = Crucible::new(&ep, t.as_ref(), "0.2.0-dev").with_session(Some(session));
+        let r1 = publish::publish(&a, &c, &st.dir, &PublishRequest { version: "1.0.0".into(), changes: Some("first".into()), ..Default::default() }, None, &mut NoProgress).expect("publish 1");
+        assert!(!r1.public);
+        assert_eq!(r1.version.status, "ready", "{r1:?}");
+        step(&format!("published link-only: {} code {} ({} files, {} bytes up)", r1.pack.url, r1.pack.code, r1.files, r1.uploaded));
+        // credits, a summary, the attestation: version 1.0.1 public
+        let mut credits = BTreeMap::new();
+        for id in ["studio-alpha", "studio-beta"] {
+            credits.insert(id.to_string(), pack::Credit { author: "frostdev".into(), source: format!("https://github.com/frostdev-ops/{id}"), match_kind: Some("manifest".into()) });
+        }
+        let st = studio::set_credits(&a, &st.dir, &credits).unwrap();
+        let mut s = st.source.clone();
+        s.summary = Some("Two mods and a layer, end to end".into());
+        studio::save(&a, &st.dir, s).unwrap();
+        let r2 = publish::publish(&a, &c, &st.dir, &PublishRequest { version: "1.0.1".into(), visibility: Visibility::Public, attest: true, ..Default::default() }, None, &mut NoProgress).expect("publish 2");
+        assert_eq!((r2.pack.id.as_str(), r2.version.number), (r1.pack.id.as_str(), 2));
+        assert!(r2.public, "public: {:?}", r2.needs);
+        assert!(r2.skipped > 0, "the mods were on Crucible already: {r2:?}");
+        step(&format!("version 1.0.1 public ({} bytes up, {} kept)", r2.uploaded, r2.skipped));
+        // a friend, no sign-in
+        let b = DataDirs::at(root.join("friend"));
+        let cb = Crucible::new(&ep, t.as_ref(), "0.2.0-dev");
+        let (pv, _) = crucible::preview(&b, &cb, &r2.pack.code, None).expect("preview");
+        assert_eq!(pv.version.version, "1.0.1");
+        assert!(pv.index.mods.iter().all(|m| m.credit.as_ref().is_some_and(|c| c.author == "frostdev")), "credits travel in the index");
+        let ir = crucible::install(&b, &cb, None, &crucible::InstallRequest { target: pv.version.id.clone(), consent: true, ..Default::default() }, pv.pack.owner.as_ref(), false, &mut NoProgress).expect("install");
+        assert!(ir.profile.mods.kiln.iter().any(|m| m.id == "pack.studio-run"), "the layer is installed");
+        let ov = std::fs::read_to_string(b.profile(&ir.profile.id).join("config/studio-alpha.json")).unwrap();
+        assert!(ov.contains("range") && !ov.contains("hotkey"), "{ov}");
+        step(&format!("installed by code as {} with the layer and the captured key", ir.profile.id));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
