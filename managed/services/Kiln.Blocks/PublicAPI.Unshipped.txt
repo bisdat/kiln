@@ -1,4 +1,5 @@
 #nullable enable
+Kiln.BlockUi
 Kiln.ItemSource
 Kiln.ItemSource.Craft = 1 -> Kiln.ItemSource
 Kiln.ItemSource.Give = 4 -> Kiln.ItemSource
@@ -14,9 +15,113 @@ Kiln.RarityRollBlock.Sources.get -> Kiln.ItemSource
 Kiln.RarityRollBlock.Sources.init -> void
 Kiln.RarityRollBlock.Weights.get -> System.Collections.Generic.IReadOnlyDictionary<Kiln.Rarity, double>!
 Kiln.RarityRollBlock.Weights.init -> void
+Kiln.UiDemandRegistration
+Kiln.UiDemandRegistration.Dispose() -> void
+Kiln.UiDemandRegistration.Handle.get -> ulong
+Kiln.UiDemandRegistration.Ok.get -> bool
+Kiln.UiDemandRegistration.Reason.get -> string?
+Kiln.UiInventoryValue
+Kiln.UiInventoryValue.<Clone>$() -> Kiln.UiInventoryValue!
+Kiln.UiInventoryValue.Count.get -> uint
+Kiln.UiInventoryValue.Count.init -> void
+Kiln.UiInventoryValue.Deconstruct(out string! Key, out uint Holder, out uint InventoryPage, out byte SlotIndex, out uint Item, out uint Count, out uint Pide) -> void
+Kiln.UiInventoryValue.Equals(Kiln.UiInventoryValue? other) -> bool
+Kiln.UiInventoryValue.Holder.get -> uint
+Kiln.UiInventoryValue.Holder.init -> void
+Kiln.UiInventoryValue.InventoryPage.get -> uint
+Kiln.UiInventoryValue.InventoryPage.init -> void
+Kiln.UiInventoryValue.Item.get -> uint
+Kiln.UiInventoryValue.Item.init -> void
+Kiln.UiInventoryValue.Key.get -> string!
+Kiln.UiInventoryValue.Key.init -> void
+Kiln.UiInventoryValue.Pide.get -> uint
+Kiln.UiInventoryValue.Pide.init -> void
+Kiln.UiInventoryValue.SlotIndex.get -> byte
+Kiln.UiInventoryValue.SlotIndex.init -> void
+Kiln.UiInventoryValue.UiInventoryValue(string! Key, uint Holder, uint InventoryPage, byte SlotIndex, uint Item, uint Count, uint Pide) -> void
+Kiln.UiSnapshotStamp
+Kiln.UiSnapshotStamp.<Clone>$() -> Kiln.UiSnapshotStamp!
+Kiln.UiSnapshotStamp.CaptureMs.get -> ulong
+Kiln.UiSnapshotStamp.CaptureMs.init -> void
+Kiln.UiSnapshotStamp.Deconstruct(out ulong Session, out ulong Step, out ulong CaptureMs) -> void
+Kiln.UiSnapshotStamp.Equals(Kiln.UiSnapshotStamp? other) -> bool
+Kiln.UiSnapshotStamp.Session.get -> ulong
+Kiln.UiSnapshotStamp.Session.init -> void
+Kiln.UiSnapshotStamp.Step.get -> ulong
+Kiln.UiSnapshotStamp.Step.init -> void
+Kiln.UiSnapshotStamp.UiSnapshotStamp(ulong Session, ulong Step, ulong CaptureMs) -> void
+Kiln.UiWorldFields
+Kiln.UiWorldFields.HostTime = 8 -> Kiln.UiWorldFields
+Kiln.UiWorldFields.LocalInventory = 4 -> Kiln.UiWorldFields
+Kiln.UiWorldFields.LocalPosition = 2 -> Kiln.UiWorldFields
+Kiln.UiWorldFields.LocalVitals = 1 -> Kiln.UiWorldFields
+Kiln.UiWorldFields.None = 0 -> Kiln.UiWorldFields
+Kiln.UiWorldReadResult
+Kiln.UiWorldReadResult.<Clone>$() -> Kiln.UiWorldReadResult!
+Kiln.UiWorldReadResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.UiWorldSnapshot? Snapshot) -> void
+Kiln.UiWorldReadResult.Equals(Kiln.UiWorldReadResult? other) -> bool
+Kiln.UiWorldReadResult.Ok.get -> bool
+Kiln.UiWorldReadResult.Ok.init -> void
+Kiln.UiWorldReadResult.Reason.get -> string?
+Kiln.UiWorldReadResult.Reason.init -> void
+Kiln.UiWorldReadResult.Snapshot.get -> Kiln.UiWorldSnapshot?
+Kiln.UiWorldReadResult.Snapshot.init -> void
+Kiln.UiWorldReadResult.UiWorldReadResult(bool Ok, string? Reason, Kiln.UiWorldSnapshot? Snapshot) -> void
+Kiln.UiWorldSnapshot
+Kiln.UiWorldSnapshot.<Clone>$() -> Kiln.UiWorldSnapshot!
+Kiln.UiWorldSnapshot.AvailableMask.get -> uint
+Kiln.UiWorldSnapshot.AvailableMask.init -> void
+Kiln.UiWorldSnapshot.Deconstruct(out ulong Publication, out uint AvailableMask, out Kiln.UiSnapshotStamp! Local, out Kiln.UiSnapshotStamp! Server, out uint LocalPlayer, out uint Health, out uint HealthMax, out uint Stamina, out uint StaminaMax, out uint Mana, out uint ManaMax, out long XFixed, out long YFixed, out long ZFixed, out decimal ServerHours, out System.Collections.Generic.IReadOnlyList<Kiln.UiInventoryValue!>! Inventory, out System.Collections.Generic.IReadOnlyList<string?>! UnavailableReasons) -> void
+Kiln.UiWorldSnapshot.Equals(Kiln.UiWorldSnapshot? other) -> bool
+Kiln.UiWorldSnapshot.Has(Kiln.UiWorldFields fields) -> bool
+Kiln.UiWorldSnapshot.Health.get -> uint
+Kiln.UiWorldSnapshot.Health.init -> void
+Kiln.UiWorldSnapshot.HealthMax.get -> uint
+Kiln.UiWorldSnapshot.HealthMax.init -> void
+Kiln.UiWorldSnapshot.Inventory.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiInventoryValue!>!
+Kiln.UiWorldSnapshot.Inventory.init -> void
+Kiln.UiWorldSnapshot.Local.get -> Kiln.UiSnapshotStamp!
+Kiln.UiWorldSnapshot.Local.init -> void
+Kiln.UiWorldSnapshot.LocalPlayer.get -> uint
+Kiln.UiWorldSnapshot.LocalPlayer.init -> void
+Kiln.UiWorldSnapshot.Mana.get -> uint
+Kiln.UiWorldSnapshot.Mana.init -> void
+Kiln.UiWorldSnapshot.ManaMax.get -> uint
+Kiln.UiWorldSnapshot.ManaMax.init -> void
+Kiln.UiWorldSnapshot.Publication.get -> ulong
+Kiln.UiWorldSnapshot.Publication.init -> void
+Kiln.UiWorldSnapshot.Server.get -> Kiln.UiSnapshotStamp!
+Kiln.UiWorldSnapshot.Server.init -> void
+Kiln.UiWorldSnapshot.ServerHours.get -> decimal
+Kiln.UiWorldSnapshot.ServerHours.init -> void
+Kiln.UiWorldSnapshot.Stamina.get -> uint
+Kiln.UiWorldSnapshot.Stamina.init -> void
+Kiln.UiWorldSnapshot.StaminaMax.get -> uint
+Kiln.UiWorldSnapshot.StaminaMax.init -> void
+Kiln.UiWorldSnapshot.UiWorldSnapshot(ulong Publication, uint AvailableMask, Kiln.UiSnapshotStamp! Local, Kiln.UiSnapshotStamp! Server, uint LocalPlayer, uint Health, uint HealthMax, uint Stamina, uint StaminaMax, uint Mana, uint ManaMax, long XFixed, long YFixed, long ZFixed, decimal ServerHours, System.Collections.Generic.IReadOnlyList<Kiln.UiInventoryValue!>! Inventory, System.Collections.Generic.IReadOnlyList<string?>! UnavailableReasons) -> void
+Kiln.UiWorldSnapshot.UnavailableReasons.get -> System.Collections.Generic.IReadOnlyList<string?>!
+Kiln.UiWorldSnapshot.UnavailableReasons.init -> void
+Kiln.UiWorldSnapshot.XFixed.get -> long
+Kiln.UiWorldSnapshot.XFixed.init -> void
+Kiln.UiWorldSnapshot.YFixed.get -> long
+Kiln.UiWorldSnapshot.YFixed.init -> void
+Kiln.UiWorldSnapshot.ZFixed.get -> long
+Kiln.UiWorldSnapshot.ZFixed.init -> void
 override Kiln.RarityRollBlock.Equals(object? obj) -> bool
 override Kiln.RarityRollBlock.GetHashCode() -> int
 override Kiln.RarityRollBlock.ToString() -> string!
+override Kiln.UiInventoryValue.Equals(object? obj) -> bool
+override Kiln.UiInventoryValue.GetHashCode() -> int
+override Kiln.UiInventoryValue.ToString() -> string!
+override Kiln.UiSnapshotStamp.Equals(object? obj) -> bool
+override Kiln.UiSnapshotStamp.GetHashCode() -> int
+override Kiln.UiSnapshotStamp.ToString() -> string!
+override Kiln.UiWorldReadResult.Equals(object? obj) -> bool
+override Kiln.UiWorldReadResult.GetHashCode() -> int
+override Kiln.UiWorldReadResult.ToString() -> string!
+override Kiln.UiWorldSnapshot.Equals(object? obj) -> bool
+override Kiln.UiWorldSnapshot.GetHashCode() -> int
+override Kiln.UiWorldSnapshot.ToString() -> string!
 static Kiln.Blocks.Define(string! name, Kiln.RarityRollBlock! block) -> Kiln.BlockHandle<Kiln.RarityRollBlock!>!
 static Kiln.RarityRollBlock.operator !=(Kiln.RarityRollBlock? left, Kiln.RarityRollBlock? right) -> bool
 static Kiln.RarityRollBlock.operator ==(Kiln.RarityRollBlock? left, Kiln.RarityRollBlock? right) -> bool
@@ -63,6 +168,14 @@ const Kiln.UpgradeStation.Capability = "blocks.upgrade_station" -> string!
 override Kiln.UpgradeAction.Equals(object? obj) -> bool
 override Kiln.UpgradeAction.GetHashCode() -> int
 override Kiln.UpgradeAction.ToString() -> string!
+static Kiln.UiInventoryValue.operator !=(Kiln.UiInventoryValue? left, Kiln.UiInventoryValue? right) -> bool
+static Kiln.UiInventoryValue.operator ==(Kiln.UiInventoryValue? left, Kiln.UiInventoryValue? right) -> bool
+static Kiln.UiSnapshotStamp.operator !=(Kiln.UiSnapshotStamp? left, Kiln.UiSnapshotStamp? right) -> bool
+static Kiln.UiSnapshotStamp.operator ==(Kiln.UiSnapshotStamp? left, Kiln.UiSnapshotStamp? right) -> bool
+static Kiln.UiWorldReadResult.operator !=(Kiln.UiWorldReadResult? left, Kiln.UiWorldReadResult? right) -> bool
+static Kiln.UiWorldReadResult.operator ==(Kiln.UiWorldReadResult? left, Kiln.UiWorldReadResult? right) -> bool
+static Kiln.UiWorldSnapshot.operator !=(Kiln.UiWorldSnapshot? left, Kiln.UiWorldSnapshot? right) -> bool
+static Kiln.UiWorldSnapshot.operator ==(Kiln.UiWorldSnapshot? left, Kiln.UiWorldSnapshot? right) -> bool
 static Kiln.UpgradeAction.operator !=(Kiln.UpgradeAction? left, Kiln.UpgradeAction? right) -> bool
 static Kiln.UpgradeAction.operator ==(Kiln.UpgradeAction? left, Kiln.UpgradeAction? right) -> bool
 static Kiln.UpgradeStation.Available.get -> bool
