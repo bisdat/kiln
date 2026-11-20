@@ -74,7 +74,8 @@ function DeckPresence({ onClose, name }: { onClose: () => void; name: string }) 
   const { game } = useGame();
   const mods = useMods(game);
   const on = !!s?.presence.on;
-  const packOn = on && !!useCommunitySettings().data?.presencePack;
+  const packSetting = !!useCommunitySettings().data?.presencePack;
+  const packOn = on && packSetting;
   return (
     <Dialog name="community-presence" title={t("community.presence.title")} wide onClose={onClose} backLabel={t("common.close")}
       buttons={<>

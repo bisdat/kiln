@@ -179,18 +179,20 @@ test.describe("Rich Presence", () => {
   test("off by default; on shows the preview lit and asks the relay for nothing", async ({ page }) => {
     await open(page, "/?mock=1#/community");
     const card = page.getByTestId("kc-presence");
-    await expect(card.getByRole("switch")).not.toBeChecked();
+    // the first switch: Rich Presence (the second, Show my Crucible pack, has its own test)
+    const sw = card.getByRole("switch").first();
+    await expect(sw).not.toBeChecked();
     await expect(page.getByTestId("kc-presence-card")).toHaveClass(/dim/);
     await expect(page.getByTestId("kc-presence-card")).toContainText("Enshrouded with Kiln");
     await expect(page.getByTestId("kc-presence-card")).toContainText(/\d+ mods? on/);
     await expect(card).toContainText("Never shown: server names, world names, your character, or which mods you use.");
     const before = (await requests(page)).length;
-    await card.getByRole("switch").click({ force: true });
+    await sw.click({ force: true });
     await expect(page.locator(".k-toast").filter({ hasText: "Rich Presence is on" })).toBeVisible();
     await expect(page.getByTestId("kc-presence-state")).toHaveText("On. It shows while you play.");
     await expect(page.getByTestId("kc-presence-card")).not.toHaveClass(/dim/);
     expect((await requests(page)).length).toBe(before);
-    await card.getByRole("switch").click({ force: true });
+    await sw.click({ force: true });
     await expect(page.locator(".k-toast").filter({ hasText: "Rich Presence is off" })).toBeVisible();
     await expect(page.getByTestId("kc-presence-state")).toHaveCount(0);
   });
