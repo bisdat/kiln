@@ -61,7 +61,7 @@ bool leaf_of(const TType* t, Field* f) {
     return false;
 }
 // The resource's bytes: {value u32 +0, flag u32 +4, n u32 +8, list u32[16] +12}. The walker of these bytes: "value",
-// "flag", "list[i]" (an element the list has), "list[*]" (every element; none of an empty list, as gd::resolve), and on
+// "flag", "list[i]" (an element the list has), "list[*]" (every element; none of an empty list, no error, as gd::resolve), and on
 // a template "<Component>.x" / ".y" (the u32 at +0). Anything else has no field.
 struct Res {
     uint32_t value, flag, n, list[16];
@@ -73,7 +73,7 @@ bool resolve(Root kind, Node root, const std::string& path, std::vector<Resolved
     if (path == "flag") return at(root.addr + 4, &boolean), true;
     if (path == "list[*]") {
         for (uint32_t i = 0; i < r->n; ++i) at(root.addr + 12 + 4 * i, &scalar);
-        return !out->empty();
+        return true;
     }
     if (path.rfind("list[", 0) == 0 && path.back() == ']') {
         const unsigned long i = std::stoul(path.substr(5));

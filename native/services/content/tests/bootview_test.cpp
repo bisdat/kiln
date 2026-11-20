@@ -84,6 +84,14 @@ void wildcard() {
     v.values[kFixture] = json({{"value", 75}, {"flag", true}, {"list", json::array()}});
     g_view = &v;
     check(accepted(docs_of({{"a", "k", set1("list[*]", 1)}})), "[*] over an empty list is accepted");
+    serve(75, {});
+    {
+        std::lock_guard lk(g_log_mutex);
+        g_log.clear();
+    }
+    run(docs_of({{"a", "k", set1("list[*]", 1)}, {"b", "k2", set1("value", 5)}}));
+    check(faults.empty() && put_count == 1 && patched.value == 5 && patched.n == 0 && logged("the list is empty"),
+          "and when it is written it changes nothing and is no fault");
     check(refused(docs_of({{"a", "k", set1("list[0]", 1)}}), "a", "IndexPastEnd"), "[0] of an empty list is refused");
     v.values[kFixture]["list"] = {4, 5};
     serve(75, {4, 5});
