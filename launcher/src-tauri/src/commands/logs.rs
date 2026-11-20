@@ -96,6 +96,8 @@ pub(crate) fn report_input(app: &tauri::AppHandle, target: Option<LogTarget>) ->
     if let Some(d) = crate::render::dmabuf_report() {
         input.facts.push(("Launcher DMA-BUF".into(), d));
     }
+    // Linux: whether WebKit composites (its hardware acceleration as applied; what the page measured: inbox 94)
+    input.facts.extend(crate::render::compositing_report());
     // Linux: WebKit's sandbox in this start and the probe of bwrap; a finding when bwrap cannot start (crate::sandbox)
     if let Some(s) = crate::sandbox::state() {
         input.facts.push(("WebKit sandbox".into(), s.says()));

@@ -253,6 +253,7 @@ pub fn run() {
             commands::data_folder::data_folder_restart,
             commands::app::app_started,
             commands::app::app_render_set,
+            commands::app::app_render_report,
             commands::updates::updates_check,
             commands::app::app_desktop_set,
             commands::app::app_locales,

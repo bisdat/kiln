@@ -143,6 +143,24 @@ export interface DesktopInfo {
   file: string;
 }
 /** How the Linux launcher draws its window (src-tauri/src/render.rs). */
+/** `app_render_report` (src-tauri render.rs PageRender): every field optional, each call sends what it has. */
+export interface PageRender {
+  /** (-webkit-transform-3d): WebKit composites (Stage.tsx flatDrawing is its negation). */
+  composited?: boolean;
+  /** WebGL's version and renderer, or "none". */
+  webgl?: string;
+  dpr?: number;
+  /** The window's CSS size. */
+  width?: number;
+  height?: number;
+  reducedMotion?: boolean;
+  /** The fire burns (WebGL, Animated fire on). */
+  fire?: boolean;
+  frames?: FrameSample;
+}
+/** requestAnimationFrame over a stretch of Play (ms): `slow` frames came more than 50 ms after the one before. */
+export interface FrameSample { ms: number; frames: number; p50: number; p95: number; max: number; slow: number }
+
 export interface RenderInfo {
   /** This start: with the GPU, or without it (software mode). */
   mode: "gpu" | "software";
@@ -1314,6 +1332,8 @@ export const taskGet = (taskId: TaskId) => call<Task>("task_get", { taskId });
 export const taskCancel = (taskId: TaskId) => call<null>("task_cancel", { taskId });
 /** The first screen is up (once per start: shell/started.ts). */
 export const appStarted = () => call<null>("app_started");
+/** What the page measured about its drawing (shell/renderReport.ts), into launcher.log: at most two lines a start. */
+export const appRenderReport = (report: PageRender) => call<null>("app_render_report", { report });
 /** Settings, "Draw the launcher without the GPU": sets or clears the marker for the next start (Linux). */
 export const appRenderSet = (software: boolean) => call<RenderInfo>("app_render_set", { software });
 /** Settings, "WebKit's sandbox": on removes the marker, off writes it, for the next start (Linux). */
@@ -2237,7 +2257,7 @@ export const COMMANDS = [
   "report_save", "report_summary",
   "data_folder_get", "data_folder_size", "data_folder_check", "data_folder_move", "data_folder_use", "data_folder_reset",
   "data_folder_notice_ack", "data_folder_restart",
-  "app_started", "app_render_set",
+  "app_started", "app_render_set", "app_render_report",
   "updates_check",
   "app_desktop_set",
   "app_locales",

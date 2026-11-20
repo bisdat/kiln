@@ -212,6 +212,7 @@ pub const NAMES: &[&str] = &[
     "data_folder_restart",
     "app_started",
     "app_render_set",
+    "app_render_report",
     "updates_check",
     "app_desktop_set",
     "app_locales",

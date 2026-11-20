@@ -957,6 +957,7 @@ const handlers: Record<string, Handler> = {
     noWebgl: render.mode === "software", distribution: MOCK_DISTRIBUTION, nexusEnabled: NEXUS_MOCK_ENABLED, render: { ...render }, desktop: { ...desktop }, sandbox: { ...sandbox },
     ...(MOCK_PREVIEW.length ? { preview: [...MOCK_PREVIEW] } : {}), ...(OWN_FILES.length ? { ownFilesMissing: [...OWN_FILES] } : {}) }),
   app_started: () => null,
+  app_render_report: () => null,
   app_render_set: (a) => {
     render = { ...render, marker: !!a.software, markerWhy: a.software ? `Turned on in Settings (${new Date().toISOString()})` : undefined };
     return { ...render };
