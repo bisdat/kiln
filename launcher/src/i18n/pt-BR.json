@@ -5087,5 +5087,253 @@
       "turnOn": "Ligar",
       "turnOff": "Desligar"
     }
+  },
+  "studio": {
+    "nav": "Studio",
+    "title": "Pack Studio",
+    "sub": "Crie packs do Crucible a partir dos seus perfis: mods, configurações, seus próprios dados, créditos, e depois publique.",
+    "new": "Novo pack",
+    "newFrom": "Começar de",
+    "newEmpty": "Vazio (um perfil novo)",
+    "newProfile": "{name} ({count} mods)",
+    "newName": "Nome",
+    "newNamePh": "Meu pack",
+    "create": "Criar",
+    "newFailed": "O pack não foi criado",
+    "empty": {
+      "title": "Nenhum pack ainda",
+      "hint": "Comece um a partir de um perfil que você joga: os mods e configurações dele vêm junto."
+    },
+    "packLine": {
+      "one": "v{version} · {count} mod · alterado {ago}",
+      "other": "v{version} · {count} mods · alterado {ago}"
+    },
+    "packSub": {
+      "one": "Versão {version}, feita a partir do perfil {profile} ({count} mod).",
+      "other": "Versão {version}, feita a partir do perfil {profile} ({count} mods)."
+    },
+    "profileGone": "O perfil de onde este pack veio não existe mais.",
+    "missing": "Este pack não está aqui",
+    "back": "Todos os packs",
+    "allPacks": "Todos os packs",
+    "tabsAria": "Pack Studio",
+    "deleteTitle": "Excluir {name}?",
+    "deleteText": "O rascunho do pack vai para os backups do Kiln. O perfil dele fica, e o que você publicou continua no Crucible.",
+    "recheck": "Verificar de novo",
+    "state": {
+      "draft": "Rascunho",
+      "link": "Só por link",
+      "public": "Público"
+    },
+    "tab": {
+      "mods": "Mods",
+      "settings": "Configurações",
+      "data": "Dados",
+      "order": "Ordem de carga",
+      "test": "Testar",
+      "credits": "Créditos",
+      "publish": "Publicar"
+    },
+    "mods": {
+      "lead": "Os mods do perfil {profile}, cada um como a sua Biblioteca tem. Os jogadores ligam ou desligam os mods opcionais antes de instalar.",
+      "addLibrary": "Adicionar da minha Biblioteca",
+      "addFile": "Adicionar arquivo",
+      "pickFile": "Adicionar um arquivo de mod ao pack",
+      "addFailed": "O mod não foi adicionado",
+      "removeFailed": "{name} não foi removido",
+      "empty": "Nenhum mod ainda. Adicione alguns da sua Biblioteca.",
+      "mod": "Mod",
+      "version": "Versão",
+      "need": "No pack",
+      "sides": "Roda em",
+      "source": "Origem",
+      "needAria": "Como {name} está no pack",
+      "sidesAria": "Onde {name} roda",
+      "required": "Obrigatório",
+      "optionalOn": "Opcional, ligado",
+      "optionalOff": "Opcional, desligado",
+      "both": "Jogadores e servidores",
+      "client": "Só jogadores",
+      "server": "Só servidores",
+      "checking": "Verificando…",
+      "unknown": "Não identificado",
+      "filter": "Filtrar",
+      "libraryEmpty": "Todos os mods da sua Biblioteca já estão no pack.",
+      "addN": {
+        "one": "Adicionar {count} mod",
+        "other": "Adicionar {count} mods"
+      }
+    },
+    "settings": {
+      "lead": "As configurações vão como as chaves que você escolher, tiradas do perfil como você joga. Chaves iguais ao padrão do mod ficam de fora, e também atalhos de teclado, a menos que você os marque. Nada que pareça privado vai junto.",
+      "capture": "Pegar das minhas configurações atuais",
+      "captureFailed": "O Kiln não conseguiu ler as configurações do perfil",
+      "save": {
+        "one": "Usar {count} chave",
+        "other": "Usar {count} chaves"
+      },
+      "saved": {
+        "one": "{count} arquivo de configuração está no pack",
+        "other": "{count} arquivos de configuração estão no pack"
+      },
+      "saveFailed": "As configurações não foram pegas",
+      "none": "Este perfil ainda não tem arquivos de configuração. Jogue uma vez, mude o que quiser e depois pegue.",
+      "refused": "não pode ir junto: {why}",
+      "wholeOnly": "vai como arquivo inteiro",
+      "differs": {
+        "one": "difere do padrão do mod em {count} chave",
+        "other": "difere do padrão do mod em {count} chaves"
+      },
+      "noDefaults": {
+        "one": "{count} chave (padrões desconhecidos)",
+        "other": "{count} chaves (padrões desconhecidos)"
+      },
+      "sideAria": "Quem recebe {file}",
+      "whole": "Arquivo inteiro",
+      "default": "(padrão {value})",
+      "personal": "pessoal",
+      "secret": "privado"
+    },
+    "server": {
+      "title": "Configurações de jogo do servidor",
+      "lead": "As configurações de jogo que um servidor deste pack usa (vida, inimigos, construção). Tiradas de um dos seus servidores; nome, senha e portas nunca vão junto.",
+      "none": "Adicione um servidor em Servidores para pegar as configurações de jogo dele.",
+      "pick": "Servidor",
+      "take": "Pegar deste servidor",
+      "takeFailed": "O Kiln não conseguiu ler as configurações do servidor",
+      "use": "Usar as configurações marcadas",
+      "saved": "As configurações de jogo do servidor estão no pack",
+      "clear": "Removê-las"
+    },
+    "data": {
+      "soon": {
+        "one": "A camada do pack tem {count} arquivo.",
+        "other": "A camada do pack tem {count} arquivos."
+      }
+    },
+    "order": {
+      "title": "Ordem de carga",
+      "always": "(a camada do pack, sempre por último)",
+      "late": "DLLs nativas tardias: {list}",
+      "conflicts": "Conflitos",
+      "none": "Nenhum par de mods define o mesmo campo de forma diferente.",
+      "noCatalog": "Sem o catálogo de dados do jogo, conflitos com curingas são só palpites.",
+      "maybe": "talvez",
+      "wins": "vence hoje",
+      "setIn": "Definir no pack:",
+      "set": "Definir",
+      "setAria": "Valor de {field} no pack",
+      "setDone": "{field} está definido na camada do pack"
+    },
+    "test": {
+      "lead": "Teste o pack exatamente como os jogadores recebem: o Kiln monta e instala como um perfil próprio.",
+      "backup": "Seus saves são copiados antes.",
+      "world": "Comece um mundo novo para o teste e seus mundos ficam como estão.",
+      "server": "Para um pack de servidor, coloque uma versão publicada em um dos seus servidores (Publicar).",
+      "make": "Testar este pack",
+      "again": "Testar de novo",
+      "play": "Jogar o teste",
+      "end": "Encerrar o teste",
+      "failed": "A instância de teste não foi criada",
+      "ready": "{name} está pronto",
+      "readyDetail": "Aperte Jogar para iniciar.",
+      "noGame": "Adicione o jogo primeiro.",
+      "reported": "O que o jogo informou",
+      "notYet": "Jogue o teste e volte aqui.",
+      "clean": "Nenhum conflito ou erro na última partida.",
+      "conflicts": {
+        "one": "{count} conflito de dados",
+        "other": "{count} conflitos de dados"
+      },
+      "problems": {
+        "one": "{count} erro ou aviso",
+        "other": "{count} erros ou avisos"
+      }
+    },
+    "credits": {
+      "lead": "Packs públicos dão crédito a cada mod: o autor e um link https de onde ele vem. O Kiln preenche o que reconhece; confira cada linha.",
+      "author": "Autor",
+      "source": "Origem",
+      "matched": "Encontrado por",
+      "authorAria": "Autor de {name}",
+      "sourceAria": "De onde vem {name}",
+      "notIdentified": "Não identificado: preencha ou remova o mod",
+      "missing": {
+        "one": "{count} mod ainda precisa de crédito para um pack público",
+        "other": "{count} mods ainda precisam de crédito para um pack público"
+      },
+      "complete": "Todos os mods têm crédito",
+      "save": "Salvar créditos",
+      "saved": "Os créditos foram salvos",
+      "saveFailed": "Os créditos não foram salvos"
+    },
+    "match": {
+      "kiln": "do próprio Kiln",
+      "crucible": "Crucible",
+      "github": "release do GitHub",
+      "nexus": "Nexus",
+      "manifest": "o manifesto do mod",
+      "manual": "você"
+    },
+    "confidence": {
+      "certain": "certo",
+      "likely": "provável",
+      "conflict": "diferente de um crédito anterior",
+      "unverified": "não verificado",
+      "creator": "seu",
+      "unconfirmed": "não confirmado",
+      "none": "nenhum"
+    },
+    "publish": {
+      "signInTitle": "Entre para publicar",
+      "signIn": "Publicar usa o seu login do Discord. Os jogadores não precisam de um para instalar.",
+      "version": "Versão",
+      "changes": "O que mudou",
+      "changesPh": "Saque rebalanceado; Busy Hands adicionado",
+      "tested": "Testado com a build do jogo {build}",
+      "visibility": "Visibilidade",
+      "public": "Público",
+      "link": "Só por link",
+      "summary": "Resumo",
+      "summaryHint": "Uma linha para as listas do Crucible (pelo menos 10 caracteres).",
+      "attest": "Dei crédito a cada mod e ao seu autor, e posso compartilhar estes arquivos.",
+      "checks": "Verificações",
+      "check": {
+        "format": "formato",
+        "sizes": "tamanhos",
+        "blocked": "arquivos maliciosos conhecidos",
+        "code": {
+          "one": "análise de código ({count} nota)",
+          "other": "análise de código ({count} notas)"
+        },
+        "lint": {
+          "one": "lint ({count} aviso)",
+          "other": "lint ({count} avisos)"
+        }
+      },
+      "tone": {
+        "ok": "ok",
+        "warn": "verificar",
+        "err": "erro",
+        "note": "nota"
+      },
+      "go": "Publicar",
+      "saveFile": "Salvar como arquivo",
+      "failed": "O pack não foi publicado",
+      "donePublic": "A versão {version} é pública",
+      "doneLink": "A versão {version} foi publicada",
+      "copied": "Link copiado.",
+      "isPublic": "Público no Crucible",
+      "isLink": "Publicado, só por link",
+      "history": "Versões publicadas",
+      "toServer": "Colocar em um servidor"
+    },
+    "serverPack": {
+      "title": "{name} {version} em um servidor",
+      "lead": "Os mods de servidor da versão, as configurações de servidor e de jogo dela vão para o servidor, e o modpack que os jogadores baixam é montado a partir dele. Pare o servidor antes.",
+      "go": "Colocar no servidor",
+      "done": "{version} está no servidor",
+      "failed": "O pack de servidor não foi criado"
+    }
   }
 }

@@ -5087,5 +5087,253 @@
       "turnOn": "Activer",
       "turnOff": "Désactiver"
     }
+  },
+  "studio": {
+    "nav": "Studio",
+    "title": "Pack Studio",
+    "sub": "Crée des packs Crucible à partir de tes profils : mods, réglages, tes propres données, crédits, puis publie.",
+    "new": "Nouveau pack",
+    "newFrom": "À partir de",
+    "newEmpty": "Vide (un nouveau profil)",
+    "newProfile": "{name} ({count} mods)",
+    "newName": "Nom",
+    "newNamePh": "Mon pack",
+    "create": "Créer",
+    "newFailed": "Le pack n'a pas été créé",
+    "empty": {
+      "title": "Pas encore de pack",
+      "hint": "Commence à partir d'un profil auquel tu joues : ses mods et ses réglages suivent."
+    },
+    "packLine": {
+      "one": "v{version} · {count} mod · modifié {ago}",
+      "other": "v{version} · {count} mods · modifié {ago}"
+    },
+    "packSub": {
+      "one": "Version {version}, faite à partir du profil {profile} ({count} mod).",
+      "other": "Version {version}, faite à partir du profil {profile} ({count} mods)."
+    },
+    "profileGone": "Le profil d'origine de ce pack n'existe plus.",
+    "missing": "Ce pack n'est pas ici",
+    "back": "Tous les packs",
+    "allPacks": "Tous les packs",
+    "tabsAria": "Pack Studio",
+    "deleteTitle": "Supprimer {name} ?",
+    "deleteText": "Le brouillon du pack va dans les sauvegardes de Kiln. Son profil reste, et ce que tu as publié reste sur Crucible.",
+    "recheck": "Revérifier",
+    "state": {
+      "draft": "Brouillon",
+      "link": "Lien seulement",
+      "public": "Public"
+    },
+    "tab": {
+      "mods": "Mods",
+      "settings": "Réglages",
+      "data": "Données",
+      "order": "Ordre de chargement",
+      "test": "Test",
+      "credits": "Crédits",
+      "publish": "Publier"
+    },
+    "mods": {
+      "lead": "Les mods du profil {profile}, chacun tel que ta bibliothèque le contient. Les joueurs activent ou non les mods optionnels avant d'installer.",
+      "addLibrary": "Ajouter depuis ma bibliothèque",
+      "addFile": "Ajouter un fichier",
+      "pickFile": "Ajouter un fichier de mod au pack",
+      "addFailed": "Le mod n'a pas été ajouté",
+      "removeFailed": "{name} n'a pas été retiré",
+      "empty": "Pas encore de mods. Ajoutes-en depuis ta bibliothèque.",
+      "mod": "Mod",
+      "version": "Version",
+      "need": "Dans le pack",
+      "sides": "Tourne chez",
+      "source": "Source",
+      "needAria": "Comment {name} est dans le pack",
+      "sidesAria": "Où tourne {name}",
+      "required": "Requis",
+      "optionalOn": "Optionnel, activé",
+      "optionalOff": "Optionnel, désactivé",
+      "both": "Joueurs et serveurs",
+      "client": "Joueurs seulement",
+      "server": "Serveurs seulement",
+      "checking": "Vérification…",
+      "unknown": "Non identifié",
+      "filter": "Filtrer",
+      "libraryEmpty": "Tous les mods de ta bibliothèque sont déjà dans le pack.",
+      "addN": {
+        "one": "Ajouter {count} mod",
+        "other": "Ajouter {count} mods"
+      }
+    },
+    "settings": {
+      "lead": "Les réglages voyagent sous forme des clés que tu choisis, prises dans le profil tel que tu y joues. Les clés égales à la valeur par défaut du mod sont laissées de côté, ainsi que les raccourcis sauf si tu les coches. Rien qui ressemble à une donnée privée ne voyage.",
+      "capture": "Prendre mes réglages actuels",
+      "captureFailed": "Kiln n'a pas pu lire les réglages du profil",
+      "save": {
+        "one": "Utiliser {count} clé",
+        "other": "Utiliser {count} clés"
+      },
+      "saved": {
+        "one": "{count} fichier de réglages est dans le pack",
+        "other": "{count} fichiers de réglages sont dans le pack"
+      },
+      "saveFailed": "Les réglages n'ont pas été pris",
+      "none": "Ce profil n'a pas encore de fichier de réglages. Joue-le une fois, change ce que tu veux, puis prends-les.",
+      "refused": "ne peut pas voyager : {why}",
+      "wholeOnly": "voyage en fichier entier",
+      "differs": {
+        "one": "diffère des valeurs par défaut du mod sur {count} clé",
+        "other": "diffère des valeurs par défaut du mod sur {count} clés"
+      },
+      "noDefaults": {
+        "one": "{count} clé (valeurs par défaut inconnues)",
+        "other": "{count} clés (valeurs par défaut inconnues)"
+      },
+      "sideAria": "Qui reçoit {file}",
+      "whole": "Fichier entier",
+      "default": "(par défaut {value})",
+      "personal": "personnel",
+      "secret": "privé"
+    },
+    "server": {
+      "title": "Réglages de partie du serveur",
+      "lead": "Les réglages de partie qu'utilise un serveur de ce pack (santé, ennemis, construction). Pris sur un de tes serveurs ; son nom, son mot de passe et ses ports ne voyagent jamais.",
+      "none": "Ajoute un serveur dans Serveurs pour prendre ses réglages de partie.",
+      "pick": "Serveur",
+      "take": "Prendre sur ce serveur",
+      "takeFailed": "Kiln n'a pas pu lire les réglages du serveur",
+      "use": "Utiliser les réglages cochés",
+      "saved": "Les réglages de partie du serveur sont dans le pack",
+      "clear": "Les retirer"
+    },
+    "data": {
+      "soon": {
+        "one": "La couche du pack a {count} fichier.",
+        "other": "La couche du pack a {count} fichiers."
+      }
+    },
+    "order": {
+      "title": "Ordre de chargement",
+      "always": "(la couche du pack, toujours en dernier)",
+      "late": "DLL natives tardives : {list}",
+      "conflicts": "Conflits",
+      "none": "Aucun mod ne règle le même champ autrement qu'un autre.",
+      "noCatalog": "Sans le catalogue des données du jeu, les conflits à jokers ne sont que des suppositions.",
+      "maybe": "peut-être",
+      "wins": "gagne aujourd'hui",
+      "setIn": "Fixer dans le pack :",
+      "set": "Fixer",
+      "setAria": "Valeur de {field} dans le pack",
+      "setDone": "{field} est fixé dans la couche du pack"
+    },
+    "test": {
+      "lead": "Essaie le pack exactement comme les joueurs le reçoivent : Kiln le construit et l'installe comme un profil à part.",
+      "backup": "Tes sauvegardes sont copiées avant.",
+      "world": "Lance un nouveau monde pour le test, tes mondes restent tels quels.",
+      "server": "Pour un pack serveur, mets une version publiée sur un de tes serveurs (Publier).",
+      "make": "Tester ce pack",
+      "again": "Retester",
+      "play": "Jouer le test",
+      "end": "Terminer le test",
+      "failed": "L'instance de test n'a pas été créée",
+      "ready": "{name} est prêt",
+      "readyDetail": "Appuie sur Jouer pour le lancer.",
+      "noGame": "Ajoute d'abord le jeu.",
+      "reported": "Ce que le jeu a signalé",
+      "notYet": "Joue le test, puis reviens ici.",
+      "clean": "Ni conflit ni erreur lors de la dernière partie.",
+      "conflicts": {
+        "one": "{count} conflit de données",
+        "other": "{count} conflits de données"
+      },
+      "problems": {
+        "one": "{count} erreur ou avertissement",
+        "other": "{count} erreurs ou avertissements"
+      }
+    },
+    "credits": {
+      "lead": "Les packs publics créditent chaque mod : son auteur et un lien https vers son origine. Kiln remplit ce qu'il reconnaît ; vérifie chaque ligne.",
+      "author": "Auteur",
+      "source": "Source",
+      "matched": "Trouvé via",
+      "authorAria": "Auteur de {name}",
+      "sourceAria": "D'où vient {name}",
+      "notIdentified": "Non identifié : remplis-le ou retire le mod",
+      "missing": {
+        "one": "{count} mod doit encore être crédité pour un pack public",
+        "other": "{count} mods doivent encore être crédités pour un pack public"
+      },
+      "complete": "Chaque mod est crédité",
+      "save": "Enregistrer les crédits",
+      "saved": "Les crédits sont enregistrés",
+      "saveFailed": "Les crédits n'ont pas été enregistrés"
+    },
+    "match": {
+      "kiln": "de Kiln",
+      "crucible": "Crucible",
+      "github": "release GitHub",
+      "nexus": "Nexus",
+      "manifest": "le manifeste du mod",
+      "manual": "toi"
+    },
+    "confidence": {
+      "certain": "sûr",
+      "likely": "probable",
+      "conflict": "diffère d'un crédit antérieur",
+      "unverified": "non vérifié",
+      "creator": "le tien",
+      "unconfirmed": "non confirmé",
+      "none": "aucun"
+    },
+    "publish": {
+      "signInTitle": "Connecte-toi pour publier",
+      "signIn": "Publier utilise ta connexion Discord. Les joueurs n'en ont pas besoin pour installer.",
+      "version": "Version",
+      "changes": "Ce qui a changé",
+      "changesPh": "Butin rééquilibré ; Busy Hands ajouté",
+      "tested": "Testé avec la build du jeu {build}",
+      "visibility": "Visibilité",
+      "public": "Public",
+      "link": "Lien seulement",
+      "summary": "Résumé",
+      "summaryHint": "Une ligne pour les listes de Crucible (au moins 10 caractères).",
+      "attest": "J'ai crédité chaque mod et son auteur, et je peux partager ces fichiers.",
+      "checks": "Vérifications",
+      "check": {
+        "format": "format",
+        "sizes": "tailles",
+        "blocked": "fichiers malveillants connus",
+        "code": {
+          "one": "analyse du code ({count} note)",
+          "other": "analyse du code ({count} notes)"
+        },
+        "lint": {
+          "one": "lint ({count} avertissement)",
+          "other": "lint ({count} avertissements)"
+        }
+      },
+      "tone": {
+        "ok": "ok",
+        "warn": "à voir",
+        "err": "erreur",
+        "note": "note"
+      },
+      "go": "Publier",
+      "saveFile": "Enregistrer en fichier",
+      "failed": "Le pack n'a pas été publié",
+      "donePublic": "La version {version} est publique",
+      "doneLink": "La version {version} est publiée",
+      "copied": "Lien copié.",
+      "isPublic": "Public sur Crucible",
+      "isLink": "Publié, lien seulement",
+      "history": "Versions publiées",
+      "toServer": "Mettre sur un serveur"
+    },
+    "serverPack": {
+      "title": "{name} {version} sur un serveur",
+      "lead": "Les mods serveur de la version, ses réglages serveur et de partie vont sur le serveur, et le modpack que téléchargent les joueurs est construit à partir de lui. Arrête d'abord le serveur.",
+      "go": "Mettre sur le serveur",
+      "done": "{version} est sur le serveur",
+      "failed": "Le pack serveur n'a pas été créé"
+    }
   }
 }

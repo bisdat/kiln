@@ -9,7 +9,7 @@ import type { ProfileId, Studio } from "../api/commands";
 import { useGame, useProfiles } from "../api/hooks";
 import { useT } from "../i18n";
 import { Button, ConfirmDanger, EmptyState, Field, Page, PageHeader, Select, Spinner, TextInput, fmtAgo, toast } from "../ui";
-import { useCrucibleOn } from "../crucible/state";
+import { useCrucibleStatus } from "../crucible/state";
 import COVER from "../assets/crucible/cover-forge.webp";
 import EMPTY from "../assets/crucible/empty.webp";
 import MARK from "../assets/crucible/mark-64.png";
@@ -25,9 +25,11 @@ import "./studio.css";
 const DataTab = lazy(() => import("./data/DataTab"));
 
 export default function StudioPage() {
-  const on = useCrucibleOn();
+  const status = useCrucibleStatus();
   const { packId, tab } = useParams();
-  if (!on) return <Navigate to="/" replace />;
+  // a deep link waits for Crucible's status: only a known "off" leaves the Studio
+  if (status.isLoading) return <Page><Spinner /></Page>;
+  if (status.data?.enabled !== true) return <Navigate to="/" replace />;
   if (!packId) return <StudioIndex />;
   if (!tab || !(TABS as readonly string[]).includes(tab)) return <Navigate to={"/studio/" + encodeURIComponent(packId) + "/mods"} replace />;
   return <StudioPack packId={packId} tab={tab as StudioTab} />;

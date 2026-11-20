@@ -5087,5 +5087,253 @@
       "turnOn": "Einschalten",
       "turnOff": "Ausschalten"
     }
+  },
+  "studio": {
+    "nav": "Studio",
+    "title": "Pack Studio",
+    "sub": "Mach Crucible-Packs aus deinen Profilen: Mods, Einstellungen, eigene Daten, Credits, dann veröffentlichen.",
+    "new": "Neues Pack",
+    "newFrom": "Ausgehend von",
+    "newEmpty": "Leer (ein neues Profil)",
+    "newProfile": "{name} ({count} Mods)",
+    "newName": "Name",
+    "newNamePh": "Mein Pack",
+    "create": "Erstellen",
+    "newFailed": "Das Pack wurde nicht erstellt",
+    "empty": {
+      "title": "Noch keine Packs",
+      "hint": "Starte eins aus einem Profil, das du spielst: Seine Mods und Einstellungen kommen mit."
+    },
+    "packLine": {
+      "one": "v{version} · {count} Mod · geändert {ago}",
+      "other": "v{version} · {count} Mods · geändert {ago}"
+    },
+    "packSub": {
+      "one": "Version {version}, aus dem Profil {profile} ({count} Mod).",
+      "other": "Version {version}, aus dem Profil {profile} ({count} Mods)."
+    },
+    "profileGone": "Das Profil, aus dem dieses Pack entstand, gibt es nicht mehr.",
+    "missing": "Dieses Pack ist nicht hier",
+    "back": "Alle Packs",
+    "allPacks": "Alle Packs",
+    "tabsAria": "Pack Studio",
+    "deleteTitle": "{name} löschen?",
+    "deleteText": "Der Entwurf des Packs kommt in Kilns Sicherungen. Sein Profil bleibt, und was du veröffentlicht hast, bleibt auf Crucible.",
+    "recheck": "Erneut prüfen",
+    "state": {
+      "draft": "Entwurf",
+      "link": "Nur per Link",
+      "public": "Öffentlich"
+    },
+    "tab": {
+      "mods": "Mods",
+      "settings": "Einstellungen",
+      "data": "Daten",
+      "order": "Ladereihenfolge",
+      "test": "Test",
+      "credits": "Credits",
+      "publish": "Veröffentlichen"
+    },
+    "mods": {
+      "lead": "Die Mods des Profils {profile}, jeweils so, wie deine Bibliothek sie hat. Spieler schalten optionale Mods vor der Installation an oder aus.",
+      "addLibrary": "Aus meiner Bibliothek",
+      "addFile": "Datei hinzufügen",
+      "pickFile": "Eine Mod-Datei zum Pack hinzufügen",
+      "addFailed": "Die Mod wurde nicht hinzugefügt",
+      "removeFailed": "{name} wurde nicht entfernt",
+      "empty": "Noch keine Mods. Füge welche aus deiner Bibliothek hinzu.",
+      "mod": "Mod",
+      "version": "Version",
+      "need": "Im Pack",
+      "sides": "Läuft bei",
+      "source": "Quelle",
+      "needAria": "Wie {name} im Pack ist",
+      "sidesAria": "Wo {name} läuft",
+      "required": "Erforderlich",
+      "optionalOn": "Optional, an",
+      "optionalOff": "Optional, aus",
+      "both": "Spieler und Server",
+      "client": "Nur Spieler",
+      "server": "Nur Server",
+      "checking": "Wird geprüft…",
+      "unknown": "Nicht erkannt",
+      "filter": "Filter",
+      "libraryEmpty": "Jede Mod deiner Bibliothek ist schon im Pack.",
+      "addN": {
+        "one": "{count} Mod hinzufügen",
+        "other": "{count} Mods hinzufügen"
+      }
+    },
+    "settings": {
+      "lead": "Einstellungen reisen als die Schlüssel, die du wählst, genommen aus dem Profil, wie du es spielst. Schlüssel mit dem Standardwert der Mod bleiben weg, ebenso Tastenkürzel, außer du hakst sie an. Was privat aussieht, reist nie mit.",
+      "capture": "Aus meinen aktuellen Einstellungen übernehmen",
+      "captureFailed": "Kiln konnte die Einstellungen des Profils nicht lesen",
+      "save": {
+        "one": "{count} Schlüssel verwenden",
+        "other": "{count} Schlüssel verwenden"
+      },
+      "saved": {
+        "one": "{count} Einstellungsdatei ist im Pack",
+        "other": "{count} Einstellungsdateien sind im Pack"
+      },
+      "saveFailed": "Die Einstellungen wurden nicht übernommen",
+      "none": "Dieses Profil hat noch keine Einstellungsdateien. Spiel es einmal, ändere, was du magst, dann übernimm sie.",
+      "refused": "kann nicht mitreisen: {why}",
+      "wholeOnly": "reist als ganze Datei",
+      "differs": {
+        "one": "weicht in {count} Schlüssel vom Standard der Mod ab",
+        "other": "weicht in {count} Schlüsseln vom Standard der Mod ab"
+      },
+      "noDefaults": {
+        "one": "{count} Schlüssel (keine Standardwerte bekannt)",
+        "other": "{count} Schlüssel (keine Standardwerte bekannt)"
+      },
+      "sideAria": "Wer {file} bekommt",
+      "whole": "Ganze Datei",
+      "default": "(Standard {value})",
+      "personal": "persönlich",
+      "secret": "privat"
+    },
+    "server": {
+      "title": "Spieleinstellungen des Servers",
+      "lead": "Spieleinstellungen, die ein Server dieses Packs nutzt (Gesundheit, Gegner, Bauen). Von einem deiner Server übernommen; Name, Passwort und Ports reisen nie mit.",
+      "none": "Füge unter Server einen Server hinzu, um seine Spieleinstellungen zu übernehmen.",
+      "pick": "Server",
+      "take": "Von diesem Server übernehmen",
+      "takeFailed": "Kiln konnte die Einstellungen des Servers nicht lesen",
+      "use": "Angehakte Einstellungen verwenden",
+      "saved": "Die Spieleinstellungen des Servers sind im Pack",
+      "clear": "Entfernen"
+    },
+    "data": {
+      "soon": {
+        "one": "Die Pack-Ebene hat {count} Datei.",
+        "other": "Die Pack-Ebene hat {count} Dateien."
+      }
+    },
+    "order": {
+      "title": "Ladereihenfolge",
+      "always": "(die Pack-Ebene, immer zuletzt)",
+      "late": "Späte native DLLs: {list}",
+      "conflicts": "Konflikte",
+      "none": "Keine zwei Mods setzen dasselbe Feld unterschiedlich.",
+      "noCatalog": "Ohne den Spieldaten-Katalog sind Konflikte mit Platzhaltern nur Vermutungen.",
+      "maybe": "vielleicht",
+      "wins": "gewinnt jetzt",
+      "setIn": "Im Pack festlegen:",
+      "set": "Festlegen",
+      "setAria": "Wert von {field} im Pack",
+      "setDone": "{field} ist in der Pack-Ebene festgelegt"
+    },
+    "test": {
+      "lead": "Probier das Pack genau so aus, wie Spieler es bekommen: Kiln baut es und installiert es als eigenes Profil.",
+      "backup": "Deine Spielstände werden vorher gesichert.",
+      "world": "Starte für den Test eine neue Welt, damit deine eigenen Welten bleiben, wie sie sind.",
+      "server": "Für ein Server-Pack bring eine veröffentlichte Version auf einen deiner Server (Veröffentlichen).",
+      "make": "Dieses Pack testen",
+      "again": "Erneut testen",
+      "play": "Test spielen",
+      "end": "Test beenden",
+      "failed": "Die Testinstanz wurde nicht erstellt",
+      "ready": "{name} ist bereit",
+      "readyDetail": "Drück Spielen, um es zu starten.",
+      "noGame": "Füge zuerst das Spiel hinzu.",
+      "reported": "Was das Spiel gemeldet hat",
+      "notYet": "Spiel den Test, dann komm hierher zurück.",
+      "clean": "Keine Konflikte oder Fehler im letzten Lauf.",
+      "conflicts": {
+        "one": "{count} Datenkonflikt",
+        "other": "{count} Datenkonflikte"
+      },
+      "problems": {
+        "one": "{count} Fehler oder Warnung",
+        "other": "{count} Fehler oder Warnungen"
+      }
+    },
+    "credits": {
+      "lead": "Öffentliche Packs nennen jede Mod: ihren Autor und einen https-Link, woher sie stammt. Kiln füllt aus, was es erkennt; prüf jede Zeile.",
+      "author": "Autor",
+      "source": "Quelle",
+      "matched": "Gefunden über",
+      "authorAria": "Autor von {name}",
+      "sourceAria": "Woher {name} stammt",
+      "notIdentified": "Nicht erkannt: ausfüllen oder die Mod entfernen",
+      "missing": {
+        "one": "{count} Mod braucht noch Credits für ein öffentliches Pack",
+        "other": "{count} Mods brauchen noch Credits für ein öffentliches Pack"
+      },
+      "complete": "Jede Mod ist genannt",
+      "save": "Credits speichern",
+      "saved": "Die Credits sind gespeichert",
+      "saveFailed": "Die Credits wurden nicht gespeichert"
+    },
+    "match": {
+      "kiln": "Kilns eigene",
+      "crucible": "Crucible",
+      "github": "GitHub-Release",
+      "nexus": "Nexus",
+      "manifest": "das Manifest der Mod",
+      "manual": "du"
+    },
+    "confidence": {
+      "certain": "sicher",
+      "likely": "wahrscheinlich",
+      "conflict": "weicht von früheren Credits ab",
+      "unverified": "ungeprüft",
+      "creator": "deine",
+      "unconfirmed": "unbestätigt",
+      "none": "keine"
+    },
+    "publish": {
+      "signInTitle": "Zum Veröffentlichen anmelden",
+      "signIn": "Veröffentlichen nutzt deine Discord-Anmeldung. Spieler brauchen keine, um zu installieren.",
+      "version": "Version",
+      "changes": "Was sich geändert hat",
+      "changesPh": "Beute neu ausbalanciert; Busy Hands hinzugefügt",
+      "tested": "Getestet mit Spiel-Build {build}",
+      "visibility": "Sichtbarkeit",
+      "public": "Öffentlich",
+      "link": "Nur per Link",
+      "summary": "Kurzbeschreibung",
+      "summaryHint": "Eine Zeile für die Listen von Crucible (mindestens 10 Zeichen).",
+      "attest": "Ich habe jede Mod und ihren Autor genannt und darf diese Dateien teilen.",
+      "checks": "Prüfungen",
+      "check": {
+        "format": "Format",
+        "sizes": "Größen",
+        "blocked": "bekannte schädliche Dateien",
+        "code": {
+          "one": "Code-Scan ({count} Hinweis)",
+          "other": "Code-Scan ({count} Hinweise)"
+        },
+        "lint": {
+          "one": "Lint ({count} Warnung)",
+          "other": "Lint ({count} Warnungen)"
+        }
+      },
+      "tone": {
+        "ok": "ok",
+        "warn": "ansehen",
+        "err": "Fehler",
+        "note": "Hinweis"
+      },
+      "go": "Veröffentlichen",
+      "saveFile": "Als Datei speichern",
+      "failed": "Das Pack wurde nicht veröffentlicht",
+      "donePublic": "Version {version} ist öffentlich",
+      "doneLink": "Version {version} ist veröffentlicht",
+      "copied": "Link kopiert.",
+      "isPublic": "Öffentlich auf Crucible",
+      "isLink": "Veröffentlicht, nur per Link",
+      "history": "Veröffentlichte Versionen",
+      "toServer": "Auf einen Server"
+    },
+    "serverPack": {
+      "title": "{name} {version} auf einem Server",
+      "lead": "Die Server-Mods der Version, ihre Server-Einstellungen und Spieleinstellungen kommen auf den Server, und das Modpack für Spieler wird daraus gebaut. Halte den Server vorher an.",
+      "go": "Auf den Server",
+      "done": "{version} ist auf dem Server",
+      "failed": "Das Server-Pack wurde nicht erstellt"
+    }
   }
 }
