@@ -68,7 +68,7 @@ test("the clipboard's code is filled in", async ({ page }) => {
 });
 
 test("a kiln:// link opens the preview; a trusted creator's pack already installed offers its update", async ({ page }) => {
-  await open(page);
+  await open(page, "/?mock=1&crucible=packs#/");
   await crucible(page, (h) => h.link("kiln://crucible/R7MX-2HNQ"));
   await expect(page.getByTestId("crucible-preview")).toContainText("Ashen Frontier");
   await expect(page.getByTestId("crucible-has-instance")).toHaveText("You have this pack. Version 1.1.0 is ready.");

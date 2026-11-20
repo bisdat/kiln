@@ -57,7 +57,7 @@ test("dismissing the banner keeps it away for that version", async ({ page }) =>
 });
 
 test("Settings > Profiles: the instance's pack line, Update, Undo, then Uninstall", async ({ page }) => {
-  await open(page, "/?mock=1#/settings");
+  await open(page, "/?mock=1&crucible=packs#/settings");
   const row = page.locator(".k-profiles li").filter({ hasText: "Ashen Frontier" });
   await expect(row.getByTestId("crucible-tag")).toHaveText("Crucible pack");
   await expect(row.getByTestId("crucible-pack-line")).toContainText("Ashen Frontier 1.0.0");

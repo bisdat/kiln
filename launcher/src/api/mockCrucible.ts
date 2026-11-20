@@ -4,7 +4,8 @@
 //   ?crucible=off       crucible_status.enabled false: every Crucible surface hides
 //   ?crucible=dev       a dev override is in use ("Crucible (dev)")
 //   ?crucible=shared    "Ember run" was shared before and changed since (+1 added, 1 updated)
-//   ?crucible=instance  the instance "Ashen Frontier" is the loaded profile (its update banner shows on Play)
+//   ?crucible=packs     an instance "Ashen Frontier" (1.0.0, its 1.1.0 waiting with one conflict) is installed
+//   ?crucible=instance  the same, and it is the loaded profile (its update banner shows on Play)
 // Tests and the console: __kilnCrucibleMock.link(url) (a kiln://crucible link arrives), .setOnline(bool),
 // .requests() (every crucible/pack call with its arguments), .state().
 import type {
@@ -311,8 +312,9 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
     ] }] };
   };
 
-  // seeds: the instance with an update waiting, and (?crucible=shared) Ember run shared before
-  if (d.seeded) {
+  // seeds (only with a flag: other tests count the Library's entries): the instance with an update waiting
+  // (?crucible=packs, or =instance to load it), and (?crucible=shared) Ember run shared before
+  if (d.seeded && (FLAGS.has("packs") || FLAGS.has("instance"))) {
     const ashen = packs.find((x) => x.pack.slug === "ashen-frontier")!;
     const v1 = ashen.versions[0];
     const before = d.activations["client-steam"]?.profileId ?? null;
@@ -324,6 +326,8 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
     prof.created = prof.updated = ago(8);
     if (FLAGS.has("instance")) d.activate(prof.id, "client-steam");
     else if (before) d.activate(before, "client-steam");
+  }
+  if (d.seeded) {
     if (FLAGS.has("shared") && d.profiles.has("ember-run")) {
       share({ profile: "ember-run" });
       const s = shared.get("ember-run")!;
