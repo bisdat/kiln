@@ -85,7 +85,11 @@ int main(int argc, char** argv) {
         CHECK(reg::formulas::read("gear.armor", {v, 3}, game, &v) && v == 60);
         CHECK(!reg::formulas::read("gear.power", {1.0}, game, &v));            // too few inputs
         CHECK(!reg::formulas::write("gear.power", 42, {0, 0.0, 5}, game, &v)); // speed 0: no dmgMod gives a power
-        CHECK(!reg::formulas::write("gear.power", 42, {0, 1.0, 0}, game, &v)); // level outside 1..55
+        CHECK(!reg::formulas::write("gear.power", 42, {0, 1.0, 0}, game, &v)); // level outside the field's 1..105
+        CHECK(!reg::formulas::write("gear.power", 42, {0, 1.0, 106}, game, &v));
+        // the game's items go up to level 105 (gems): the formula takes the field's whole range
+        CHECK(reg::formulas::write("gear.power", 900, {0, 1.0, 105}, game, &v) && reg::formulas::read("gear.power", {v, 1.0, 105}, game, &v) && v == 900);
+        CHECK(reg::formulas::write("gear.armor", 400, {0, 80}, game, &v) && reg::formulas::read("gear.armor", {v, 80}, game, &v) && v == 400);
         CHECK(!reg::formulas::read("gear.nothing", {1, 1, 1}, game, &v));
     }
     // ---- 10,000 generated inputs: the numbers GearMath (C#) must give as well

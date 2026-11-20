@@ -4,6 +4,8 @@
 
 #include <cmath>
 
+#include "schema.g.h"
+
 namespace kc::reg::formulas {
 
 gear::Constants constants_of(const std::map<std::string, double>& balance) {
@@ -25,8 +27,15 @@ int armor_read(double share, int min_level, const gear::Constants& c) { return g
 double armor_write(int armor, int min_level, const gear::Constants& c) { return gear::armor_share_for(armor, min_level, c); }
 
 namespace {
+// The items registry's level range (schema: levels.min / levels.max, 1..105: the game's gems reach 105), not the old gear
+// section's 1..55: the formula holds for every level the field allows.
+double level_limit(bool high) {
+    for (const gen::Field& f : gen::kFields)
+        if (std::string(f.registry) == "items" && std::string(f.path) == "levels.min") return high ? f.max : f.min;
+    return high ? gear::kMaxLevel : gear::kMinLevel;
+}
 bool level_of(double v, int* out) {
-    if (!std::isfinite(v) || v != std::floor(v) || v < gear::kMinLevel || v > gear::kMaxLevel) return false;
+    if (!std::isfinite(v) || v != std::floor(v) || v < level_limit(false) || v > level_limit(true)) return false;
     *out = static_cast<int>(v);
     return true;
 }
