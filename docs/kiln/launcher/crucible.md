@@ -290,7 +290,8 @@ Code: `crates/kiln-manage/src/crucible/` (`mod.rs` client and flows, `sign.rs` t
 - engine mods whose settings live in their own folder (not the configDir) cannot carry overrides yet;
 - a pack's optional mods are imported into the Library even when off (so switching one on later needs no download);
 - a pack also downloads its server-only mods (the assembled .kilnpack must hold every mod for its checks);
-- Pack Studio, the Crucible browse page, comments and upvotes in the launcher, "Make it public".
+- the Crucible browse page, comments and upvotes in the launcher. Pack Studio (making packs, credits, publishing link-only
+  or public, server packs, kilnctl pack init/add/capture-settings/lint/credits/publish): [pack-studio.md](pack-studio.md).
 
 ## Checks done
 `cargo test -p kiln-manage --features zip,http,server --test packs`: a deterministic build from a profile (same

@@ -1640,6 +1640,25 @@ line, the last one wins, else `KILN_LAUNCHER_UI=deck|desktop`). The UI: `forced`
 | crucible | `crucible_trust` | - | `Trust[]` {id, name, since} |
 | crucible | `crucible_trust_set` | id, name, trusted | null |
 | crucible | `crucible_links` | - | string[] (kiln:// links that arrived; drained) |
+| studio | `studio_list` | - | `StudioSummary[]` ([pack-studio.md](pack-studio.md)) |
+| studio | `studio_create` | request: {name, from?, id?} | `Studio` {dir, source, mods, credits, profileName, layerFiles} |
+| studio | `studio_get` / `studio_delete` | packId | `Studio` / null |
+| studio | `studio_save` | packId, source: `PackSource` | `Studio` |
+| studio | `studio_credits_set` | packId, credits: {id: {author, source, match?}} | `Studio` |
+| studio | `studio_capture` | packId, gameId? | `CaptureFile[]` {path, mod?, mode, defaults, keys: {key, value, default?, chosen, personal, secret?}[], whole, side, size, refused?} |
+| studio | `studio_capture_set` | packId, choices: {path, side, keys, whole?}[] | `Studio` |
+| studio | `studio_order` | packId | `StudioOrder` {kiln: {id, name, loads, reason?, layer}[], late, warnings} |
+| studio | `studio_layer_files` / `studio_layer_read` | packId (, path) | `LayerFile[]` / string |
+| studio | `studio_layer_write` / `studio_layer_delete` / `studio_layer_set` / `studio_layer_lint` | packId, path, text / path / section, selector, field, value | `LintReport` of the layer |
+| studio | `studio_pick` | packId, section, query, limit? | `PickHit[]` {section, name, id?, displayName?, from?} |
+| studio | `studio_fields` | section | catalog `FieldInfo[]` |
+| studio | `studio_analyze` | packId | TaskId -> `CheckReport` (modpack::check) |
+| studio | `studio_test` | packId, gameId? | TaskId -> `pack::InstallResult` ("<name> (test)") |
+| studio | `studio_test_report` / `studio_test_end` | packId (, gameId?) | `TestReport` {profile?, ran, conflicts, problems} / null |
+| studio | `studio_build` | packId, outDir (absolute) | TaskId -> `BuiltPack` |
+| studio | `studio_publish_check` | packId, request: `PublishRequest` | string[] (what is missing; sends nothing) |
+| studio | `studio_publish` | packId, request: {version, changes?, visibility, attest, gameBuilds?}, gameId? | TaskId -> `PublishResult` {pack, version, files, uploaded, skipped, public, needs, file}; signed out: `auth_failed` |
+| studio | `studio_server_pack` | packId, version, serverId | TaskId -> `ServerInstallResult` (the version's server part + the player modpack) |
 
 The community commands ([discord.md](discord.md)) refuse every request that would leave the PC while
 `community.json`'s `shown` is false (`refused`, `detail.kind` "hidden"); their errors carry `detail.kind` (`offline`,
@@ -1781,6 +1800,8 @@ default; the launcher uses `full`. Builds for Linux and `x86_64-pc-windows-msvc`
 | `gameart` (feature `gameart`) | `extract_editor`, `extract_map`, `status`, `game_build`, `build_of`, `read_source`, `write_source`, `recipe_of`, `GameData::open`; `SourceInfo`, `GameSource`, `ArtStatus`, `GameBuild`, `EditorOptions`, `MapOptions`, `LayoutSource`; `kfc::Kfc`, `refl::{PeFile, TypeDb}`, `res`, `texture`, `image`, `work` ([gameart.md](gameart.md)) |
 | `modpack` | `inspect`, `download`, `verify`, `extract`, `check_against`, `install`, `build`, `publish`, `publish_state`, `client_mods`, `required`, `server_identity`; `ModpackManifest`, `ModpackMod`, `ModpackServer`, `ModpackSource`, `ModpackPreview`, `ModpackInstallRequest`, `ModpackInstallResult`, `BuiltModpack`, `ModpackPublishState`, `ClientMod` |
 | `modpack::pack` | Crucible packs ([crucible.md](crucible.md)): `build`, `read`, `verify`, `peek_format`, `inspect`, `install`, `instance`, `instances`, `plan_update`, `update`, `undo`, `uninstall`, `diff`, `install_server`, `check_index`, `secret_findings`, `override_path_ok`; `PackIndex`, `PackMod`, `PackLayer`, `PackOverride`, `BuildRequest`, `BuiltPack`, `PackPreview`, `Instance`, `InstallRequest`, `InstallResult`, `UpdatePlan`, `UpdateRequest`, `UpdateResult`, `PackDiff`, `ServerInstallRequest`, `ServerInstallResult` |
+| `modpack::studio` | Pack Studio's pack source ([pack-studio.md](pack-studio.md)): `init`, `create`, `open`, `list`, `save`, `delete`, `set_credits`, `public_needs`, `build_request`, `build`, `analyze`, `keep_version`, `version_file`, `record_published`, `capture`, `set_capture`, `layer_files`, `layer_read`, `layer_write`, `layer_delete`, `layer_set`, `layer_lint`, `pick`, `fields`, `order`, `test`, `test_report`, `test_end`; `PackSource`, `Studio`, `StudioMod`, `NewPack`, `CaptureFile`, `CaptureChoice`, `StudioOrder`, `PickHit`, `TestReport`, `Published` |
+| `crucible::publish` | `publish(&DataDirs, &Crucible, &Path, &PublishRequest, Option<&GameInstall>, &mut dyn Progress) -> Result<PublishResult>`, `precheck`, `pack_state` |
 | `modpack::merge` | the three-way merge of config overrides: `leaves`, `value_at`, `apply`, `three_way`; `OverrideMode`, `Pick`, `KeyConflict` |
 | `lint` | `lint_paths`, `lint_text`, `lint_profile`, `lint_library_entry`, `rules`, `schema_for`, `docs::{idrefs, schema_markdown}`; `LintOptions`, `LintReport`, `Diagnostic`, `Severity`, `Span`, `Fix`, `TextEdit`, `Related` |
 | `vendor` (`manifest agreements store download`; 0.2.0-dev.29) | `builtin()`, `manifest::{parse, check_url, license_text, license_sha256, vendor_orgs, redirect_hosts, file_name_ok, BUILTIN, LICENSE_TEXTS, HOSTS, NOT_PINNED, MAX_FILE, VendorManifest, Component, License, VendorFile}`, `agreements::{Agreements::{load, agreed, agreed_at}, record, path, Agreement}`, `store::{Store::{at, for_game, root, folder, rel, lock, receipts, problems, partial, status, component_status, remove}, version_cmp, Receipt, ReceiptFile, ReceiptLicense, VendorState, ComponentStatus, LicenseInfo, FileInfo, Installed, RemoveReport, DIR, RECEIPT, PART_SUFFIX, LOCK}`, `download::{download, policy, user_agent, DownloadReport}` (section 5.15) |
