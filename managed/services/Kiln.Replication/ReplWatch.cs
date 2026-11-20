@@ -58,7 +58,14 @@ public sealed unsafe class ReplWatch : IDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         Live.TryRemove(_id, out _);
-        if (_handle != 0) ReplNative.Remove(_handle);
+        Release();
+    }
+
+    /// <summary>Gives kiln.repl's watch slot back (once): an ended watch keeps its slot there until it is removed.</summary>
+    private void Release()
+    {
+        var handle = Interlocked.Exchange(ref _handle, 0);
+        if (handle != 0) ReplNative.Remove(handle);
     }
 
     internal static ReplWatch Start(ulong owner, ModContext? mod, EntityId entity, uint peerOrAll, NetPeer? peer, uint direction)
@@ -113,6 +120,7 @@ public sealed unsafe class ReplWatch : IDisposable
             {
                 HasEnded = true;
                 Live.TryRemove(_id, out _);
+                Release();  // the slot goes back now: a mod need not dispose an ended watch
                 Ended?.Invoke(new ReplWatchEnded(Entity, e->Reason switch
                 {
                     1 => "destroyed",
