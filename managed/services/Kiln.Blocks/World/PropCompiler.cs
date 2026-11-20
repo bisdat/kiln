@@ -24,7 +24,7 @@ internal static partial class Compiler
         PlacementBlock p => Part(ctx, low, name, p, (x, b) => CheckPlacement(x, b, "")),
         ComfortBlock c => Part(ctx, low, name, c, (x, b) => CheckComfort(x, b, "")),
         ProcessingBlock p => Part(ctx, low, name, p, (x, b) => CheckProcessing(x, b, "")),
-        MenuBlock m => Part(ctx, low, name, m, null),
+        MenuBlock m => Part(ctx, low, name, m, (x, b) => CheckMenu(x, b, "")),
         _ => null,
     };
 
@@ -375,6 +375,27 @@ internal static partial class Compiler
 
     private static StationKind KindOf(StationBlock s, ProcessingBlock? processing) => s.Kind ?? (processing != null ? StationKind.DryingRack : StationKind.Workbench);
 
+    /// <summary>A menu block on its own (a part): its tabs are checked where they are written; a station that uses it checks them again as its own.</summary>
+    private static void CheckMenu(BlockContext ctx, MenuBlock m, string path)
+    {
+        if (m.Tabs is not { } tabs) return;
+        try { StationMenuCompiler.Check(ctx.Mod.Id, "menu", ctx.Mod.Id, tabs, path); }
+        catch (StationMenuCompiler.MenuError e) { throw new BlockError(ctx.Block, e.Field, e.Message); }
+    }
+
+    /// <summary>A station's own tabs (MenuBlock.Tabs), checked: its definition is "&lt;station&gt;.menu" of its mod. Tabs on a game workshop are refused:
+    /// the game's own stations keep the game's tabs on every player's game, a vanilla one included.</summary>
+    private static StationMenuCompiler.Menu CheckStationTabs(BlockContext ctx, StationMenuCompiler.Station station, IReadOnlyList<StationMenuTabBlock> tabs)
+    {
+        if (!station.Own)
+            throw new BlockError(ctx.Block, "menu.tabs", "tabs are for a station with a workshop of its own (ownWorkshop, or a kind that works on its own with processing or recipes): a game workshop keeps the game's tabs");
+        var definition = $"{station.Key}.menu";
+        if (!StationMenuCompiler.ValidKey(definition))
+            throw new BlockError(ctx.Block, "menu.tabs", $"the station's name \"{station.Key}\" is too long for its menu's key \"{definition}\" (at most 64 characters): give it a shorter one");
+        try { return StationMenuCompiler.Check(station.Mod, definition, station.Mod, tabs, "menu."); }
+        catch (StationMenuCompiler.MenuError e) { throw new BlockError(ctx.Block, e.Field, e.Message); }
+    }
+
     private static BlockHandle DefineStation(BlockContext ctx, Lowered low, string name, StationBlock s)
     {
         RequireName(ctx, s.Name, "a station");
@@ -389,13 +410,17 @@ internal static partial class Compiler
                 throw new BlockError(ctx.Block, "processing", $"a {kind.Key} doesn't work on its own: a player crafts at it at once. Give it a kind that does ({string.Join(", ", StationKind.All.Where(k => k.Timed).Select(k => k.Key))}), or leave processing out");
         }
         var timed = kind.Timed;
-        var shown = s.Menu != null ? ctx.Part(s.Menu, "menu").Like ?? kind : kind;
+        var menuBlock = s.Menu != null ? ctx.Part(s.Menu, "menu") : null;
+        var shown = menuBlock?.Like ?? kind;
         // Where its recipes go: the id its template carries, what kiln.content takes for a recipe at it, and the menu that lists them when it isn't that workshop's own.
         var own = s.OwnWorkshop ?? (timed && (processing != null || s.Recipes is { Count: > 0 }));
         var workshopGuid = BlockIds.Derive(mod, "workshop", key);
         var workshop = own ? BlockIds.Fnv(workshopGuid) : Convert.ToUInt32(kind.Workshop, 16);
         var station = own ? $"workshop:{workshopGuid}" : kind.Workshop;
         var menu = own || shown.Workshop != kind.Workshop ? shown.Workshop : null;
+        // what a menu with tabs of its own lays out (StationMenus.Define reads it from the handle): the station's own workshop and the one its menu is like
+        var menuStation = new StationMenuCompiler.Station(mod, key, workshopGuid, own ? workshop : 0, Convert.ToUInt32(shown.Workshop, 16), own);
+        var tabs = menuBlock?.Tabs is { } authored ? CheckStationTabs(ctx, menuStation, authored) : null;
 
         var d = new Draft(ctx, low, key, name, kind.Item);
         // What is placed: a template of its own. Crafting.workshopId is the workshop it runs, CraftingInteraction.workshopId the one its screens
@@ -408,6 +433,7 @@ internal static partial class Compiler
         CommitPlaced(ctx, low, p, s, name, key);
 
         var made = new HashSet<string>();
+        var menuKeys = new Dictionary<string, string>(StringComparer.Ordinal);  // a MenuKey of this list -> the recipe that has it
         for (var i = 0; i < (s.Recipes?.Count ?? 0); i++)
         {
             var r = s.Recipes![i];
@@ -421,10 +447,20 @@ internal static partial class Compiler
             for (var n = 2; !made.Add(entry); n++) entry = n == 2 ? $"{entry}.{n}" : $"{entry[..entry.LastIndexOf('.')]}.{n}";
             if (timed && r.Sheltered != null)
                 throw new BlockError(ctx.Block, $"{path}.sheltered", $"a {kind.Key} works on its own, and the game's stations that do never check a roof: rain is what puts them out (GoesOutInRain). Leave this out");
+            if (r.MenuKey is { } menuKey && menuKeys.TryGetValue(menuKey, out var before))
+                throw new BlockError(ctx.Block, $"{path}.menuKey", $"\"{menuKey}\" is the menuKey of {before} too: give each recipe its own");
+            if (r.MenuKey is { } mk) menuKeys[mk] = $"{mod}.{name}.makes.{entry}";
             LowerRecipe(ctx, low, $"{key}.makes.{entry}", $"{mod}.{name}.makes.{entry}", item, r, path, (station, menu, own ? d.Game : null), timed && own, r.Sheltered, factory: timed);
         }
         low.Json["workshop"] = new JsonObject { ["id"] = $"0x{workshop:x8}", ["station"] = station, ["menu"] = menu, ["own"] = own };
-        return new StationHandle(mod, name, d.Guid, d.Game, s, station, menu, own ? d.Game : null);
+        if (tabs != null)
+        {
+            // the tabs are shown from content ready on, once every recipe they name is lowered and registered (StationMenuRuntime)
+            low.Json["menuTabs"] = new JsonObject { ["definition"] = tabs.Id.ToString(), ["key"] = tabs.Key, ["tabs"] = tabs.Tabs.Count };
+            var ledger = ctx.Mod;
+            low.AfterCommit(() => StationMenuRuntime.AddInline(ledger, menuStation, tabs));
+        }
+        return new StationHandle(mod, name, d.Guid, d.Game, s, station, menu, own ? d.Game : null) { MenuStation = menuStation };
     }
 
     private static void ApplyProcessing(Placed p, ProcessingBlock b)
@@ -488,6 +524,15 @@ internal static partial class Compiler
         foreach (var (what, count) in r.Needs) Add(what, count, "needs");
         foreach (var (what, count) in r.Burns) Add(what, count, "burns");
         var (station, menu, stationItem) = at ?? ctx.StationOf(r.Station, $"{path}.station");
+        // a name in a station's menu with tabs: metadata only, the recipe's name and GUID stay what they are
+        Guid? menuWorkshop = null;
+        if (r.MenuKey is { } menuKey)
+        {
+            if (StationMenuCompiler.KeyProblem(menuKey, "menuKey") is { } bad) throw new BlockError(ctx.Block, $"{path}.menuKey", bad);
+            if (!station.StartsWith("workshop:", StringComparison.Ordinal) || !Guid.TryParse(station.AsSpan("workshop:".Length), out var w))
+                throw new BlockError(ctx.Block, $"{path}.menuKey", $"a menuKey names a recipe in the menu of a station with a workshop of its own; this recipe is made at {station}: leave it out");
+            menuWorkshop = w;
+        }
         if (r.Seconds == null && (needsTime || (at == null && station.StartsWith("workshop:", StringComparison.Ordinal))))
             throw new BlockError(ctx.Block, $"{path}.seconds", "a station of its own has no recipes of the game to take a time from: say how many seconds");
         var fields = new Dictionary<string, object>();
@@ -510,12 +555,19 @@ internal static partial class Compiler
             return;
         }
         if (props.Count > 0) low.Json["needsProps"] = new JsonArray(props.Select(x => (JsonNode)new JsonObject { ["id"] = $"0x{x.Id:x8}", ["index"] = x.Index }).ToArray());
-        low.Recipe(new RecipeDefinition
+        var recipe = new RecipeDefinition
         {
             Guid = BlockIds.Derive(ctx.Mod.Id, "recipe", key), Name = name, Station = station, Menu = menu, StationItem = stationItem, Inputs = inputs,
             Outputs = [new RecipeIngredient(item, r.Makes)], Duration = r.Seconds is { } d ? TimeSpan.FromSeconds(d) : null, Fields = fields.Count > 0 ? fields : null,
             Props = props.Count > 0 ? props : null,
-        });
+        };
+        low.Recipe(recipe);
+        if (menuWorkshop is { } at2 && r.MenuKey is { } boundKey)
+        {
+            // the binding table: (the station's own workshop, this mod, the key) -> this recipe, once the block is committed
+            var ledger = ctx.Mod;
+            low.AfterCommit(() => StationMenuCompiler.Bind(new StationMenuCompiler.Binding(at2, ledger.Id, boundKey, recipe.Name, recipe.Guid, ledger, ledger.Owner)));
+        }
     }
 }
 
@@ -526,4 +578,6 @@ internal sealed class StationHandle(string mod, string name, Guid guid, string g
     public string Station { get; } = station;
     public string? Menu { get; } = menu;
     public string? Item { get; } = item;
+    /// <summary>What a menu with tabs of its own lays out: the station's own workshop (if it has one) and the workshop its menu is like.</summary>
+    public StationMenuCompiler.Station? MenuStation { get; init; }
 }

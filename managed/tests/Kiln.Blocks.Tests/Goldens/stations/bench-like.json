@@ -1,0 +1,32 @@
+{
+  "templates": [
+    {
+      "guid": "c1cc4c5c-93c4-572b-9f5d-5e1eb68f4951",
+      "name": "golden-stations.bench-like.station",
+      "base": "Craftingstation_Workbench",
+      "fields": {
+        "CraftingInteraction.workshopId": 2308352196
+      }
+    }
+  ],
+  "items": [
+    {
+      "guid": "109f8c4a-3578-5217-bc56-dd2184da3fc6",
+      "name": "golden-stations.bench-like",
+      "base": "Craftingstation_Workbench",
+      "displayName": "Like Bench",
+      "description": "",
+      "fields": {},
+      "refs": {
+        "equipment.placedEntity": "c1cc4c5c-93c4-572b-9f5d-5e1eb68f4951"
+      }
+    }
+  ],
+  "itemRules": {},
+  "workshop": {
+    "id": "0x4da88f73",
+    "station": "0x4da88f73",
+    "menu": "0x8996a8c4",
+    "own": false
+  }
+}

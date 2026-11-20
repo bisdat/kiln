@@ -170,3 +170,88 @@ static Kiln.ModelClothBlock.operator ==(Kiln.ModelClothBlock? left, Kiln.ModelCl
 virtual Kiln.ClothColliderBlock.EqualityContract.get -> System.Type!
 virtual Kiln.ClothColliderBlock.Equals(Kiln.ClothColliderBlock? other) -> bool
 virtual Kiln.ClothColliderBlock.PrintMembers(System.Text.StringBuilder! builder) -> bool
+Kiln.MenuBlock.Tabs.get -> System.Collections.Generic.IReadOnlyList<Kiln.StationMenuTabBlock!>?
+Kiln.MenuBlock.Tabs.init -> void
+Kiln.MenuDefinitionResult
+Kiln.MenuDefinitionResult.<Clone>$() -> Kiln.MenuDefinitionResult!
+Kiln.MenuDefinitionResult.Equals(Kiln.MenuDefinitionResult? other) -> bool
+Kiln.MenuDefinitionResult.Generation.get -> ulong
+Kiln.MenuDefinitionResult.Generation.init -> void
+Kiln.MenuDefinitionResult.MenuDefinitionResult() -> void
+Kiln.MenuDefinitionResult.Ok.get -> bool
+Kiln.MenuDefinitionResult.Ok.init -> void
+Kiln.MenuDefinitionResult.Reason.get -> string!
+Kiln.MenuDefinitionResult.Reason.init -> void
+Kiln.MenuDefinitionResult.Registration.get -> Kiln.StationMenuRegistration?
+Kiln.MenuDefinitionResult.Registration.init -> void
+Kiln.RecipeBlock.MenuKey.get -> string?
+Kiln.RecipeBlock.MenuKey.init -> void
+Kiln.StationMenuDefinition
+Kiln.StationMenuDefinition.<Clone>$() -> Kiln.StationMenuDefinition!
+Kiln.StationMenuDefinition.Equals(Kiln.StationMenuDefinition? other) -> bool
+Kiln.StationMenuDefinition.Key.get -> string!
+Kiln.StationMenuDefinition.Key.init -> void
+Kiln.StationMenuDefinition.StationMenuDefinition() -> void
+Kiln.StationMenuDefinition.Tabs.get -> System.Collections.Generic.IReadOnlyList<Kiln.StationMenuTabBlock!>!
+Kiln.StationMenuDefinition.Tabs.init -> void
+Kiln.StationMenuRegistration
+Kiln.StationMenuRegistration.DefinitionId.get -> System.Guid
+Kiln.StationMenuRegistration.Dispose() -> void
+Kiln.StationMenuRegistration.Generation.get -> ulong
+Kiln.StationMenuSetBlock
+Kiln.StationMenuSetBlock.<Clone>$() -> Kiln.StationMenuSetBlock!
+Kiln.StationMenuSetBlock.Equals(Kiln.StationMenuSetBlock? other) -> bool
+Kiln.StationMenuSetBlock.Heading.get -> Kiln.UiText?
+Kiln.StationMenuSetBlock.Heading.init -> void
+Kiln.StationMenuSetBlock.Key.get -> string!
+Kiln.StationMenuSetBlock.Key.init -> void
+Kiln.StationMenuSetBlock.Recipes.get -> System.Collections.Generic.IReadOnlyList<Kiln.StationRecipeRef>!
+Kiln.StationMenuSetBlock.Recipes.init -> void
+Kiln.StationMenuSetBlock.StationMenuSetBlock() -> void
+Kiln.StationMenuTabBlock
+Kiln.StationMenuTabBlock.<Clone>$() -> Kiln.StationMenuTabBlock!
+Kiln.StationMenuTabBlock.Equals(Kiln.StationMenuTabBlock? other) -> bool
+Kiln.StationMenuTabBlock.IconFromTab.get -> int
+Kiln.StationMenuTabBlock.IconFromTab.init -> void
+Kiln.StationMenuTabBlock.Key.get -> string!
+Kiln.StationMenuTabBlock.Key.init -> void
+Kiln.StationMenuTabBlock.Name.get -> Kiln.UiText!
+Kiln.StationMenuTabBlock.Name.init -> void
+Kiln.StationMenuTabBlock.Sets.get -> System.Collections.Generic.IReadOnlyList<Kiln.StationMenuSetBlock!>!
+Kiln.StationMenuTabBlock.Sets.init -> void
+Kiln.StationMenuTabBlock.StationMenuTabBlock() -> void
+Kiln.StationMenus
+Kiln.StationRecipeRef
+Kiln.StationRecipeRef.Deconstruct(out string! Value) -> void
+Kiln.StationRecipeRef.Equals(Kiln.StationRecipeRef other) -> bool
+Kiln.StationRecipeRef.StationRecipeRef() -> void
+Kiln.StationRecipeRef.StationRecipeRef(string! Value) -> void
+Kiln.StationRecipeRef.Value.get -> string!
+Kiln.StationRecipeRef.Value.init -> void
+override Kiln.MenuDefinitionResult.Equals(object? obj) -> bool
+override Kiln.MenuDefinitionResult.GetHashCode() -> int
+override Kiln.MenuDefinitionResult.ToString() -> string!
+override Kiln.StationMenuDefinition.Equals(object? obj) -> bool
+override Kiln.StationMenuDefinition.GetHashCode() -> int
+override Kiln.StationMenuDefinition.ToString() -> string!
+override Kiln.StationMenuSetBlock.Equals(object? obj) -> bool
+override Kiln.StationMenuSetBlock.GetHashCode() -> int
+override Kiln.StationMenuSetBlock.ToString() -> string!
+override Kiln.StationMenuTabBlock.Equals(object? obj) -> bool
+override Kiln.StationMenuTabBlock.GetHashCode() -> int
+override Kiln.StationMenuTabBlock.ToString() -> string!
+override Kiln.StationRecipeRef.GetHashCode() -> int
+override Kiln.StationRecipeRef.ToString() -> string!
+static Kiln.MenuDefinitionResult.operator !=(Kiln.MenuDefinitionResult? left, Kiln.MenuDefinitionResult? right) -> bool
+static Kiln.MenuDefinitionResult.operator ==(Kiln.MenuDefinitionResult? left, Kiln.MenuDefinitionResult? right) -> bool
+static Kiln.StationMenuDefinition.operator !=(Kiln.StationMenuDefinition? left, Kiln.StationMenuDefinition? right) -> bool
+static Kiln.StationMenuDefinition.operator ==(Kiln.StationMenuDefinition? left, Kiln.StationMenuDefinition? right) -> bool
+static Kiln.StationMenuSetBlock.operator !=(Kiln.StationMenuSetBlock? left, Kiln.StationMenuSetBlock? right) -> bool
+static Kiln.StationMenuSetBlock.operator ==(Kiln.StationMenuSetBlock? left, Kiln.StationMenuSetBlock? right) -> bool
+static Kiln.StationMenuTabBlock.operator !=(Kiln.StationMenuTabBlock? left, Kiln.StationMenuTabBlock? right) -> bool
+static Kiln.StationMenuTabBlock.operator ==(Kiln.StationMenuTabBlock? left, Kiln.StationMenuTabBlock? right) -> bool
+static Kiln.StationMenus.Define(Kiln.BlockHandle<Kiln.StationBlock!>! station, Kiln.StationMenuDefinition! definition) -> Kiln.MenuDefinitionResult!
+static Kiln.StationRecipeRef.implicit operator Kiln.StationRecipeRef(string! value) -> Kiln.StationRecipeRef
+static Kiln.StationRecipeRef.operator !=(Kiln.StationRecipeRef left, Kiln.StationRecipeRef right) -> bool
+static Kiln.StationRecipeRef.operator ==(Kiln.StationRecipeRef left, Kiln.StationRecipeRef right) -> bool
+~override Kiln.StationRecipeRef.Equals(object obj) -> bool
