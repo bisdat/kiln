@@ -1234,10 +1234,12 @@ fn proxy(p: Planned) -> Result<i32> {
                     }
                     Policy::Disconnect => {
                         *client_disconnect_seq.lock().unwrap() = m["seq"].as_i64();
+                        // the session learns of it before netcoredbg does: its answer (from the other thread, on the
+                        // same channel) then always comes after, and is never missed as an unawaited response
+                        let _ = tx.send(Ev::ClientDisconnect);
                         if let Some(w) = adapter_in.lock().unwrap().as_mut() {
                             let _ = write_json(w, &m);
                         }
-                        let _ = tx.send(Ev::ClientDisconnect);
                     }
                 }
             }
