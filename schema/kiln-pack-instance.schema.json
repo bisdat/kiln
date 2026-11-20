@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kiln-pack-instance.schema.json",
+  "title": "A Crucible pack instance: <data>/profiles/<pid>/pack/instance.json",
+  "description": "Which pack a profile is an instance of. Beside it: base/ (the installed version's kiln-modpack.json and override files: the merge base of the next update) and undo/ (meta.json, config/, instance.json and base/ from before the last update). Written by kiln-manage modpack::pack.",
+  "type": "object",
+  "required": [
+    "format",
+    "pack",
+    "name",
+    "version",
+    "sha256",
+    "installed"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "pack": {
+      "$ref": "common.schema.json#/$defs/modId",
+      "description": "The pack's id (kiln-modpack.json id)."
+    },
+    "name": {
+      "type": "string"
+    },
+    "version": {
+      "$ref": "common.schema.json#/$defs/semver"
+    },
+    "sha256": {
+      "$ref": "common.schema.json#/$defs/sha256",
+      "description": "Of the .kilnpack installed."
+    },
+    "url": {
+      "type": "string"
+    },
+    "crucible": {
+      "type": "object"
+    },
+    "optional": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "description": "The player's switches of optional mods."
+    },
+    "installed": {
+      "$ref": "common.schema.json#/$defs/time"
+    },
+    "updated": {
+      "$ref": "common.schema.json#/$defs/time"
+    },
+    "previous": {
+      "$ref": "common.schema.json#/$defs/semver",
+      "description": "The version before the last update (Undo goes back to it)."
+    }
+  },
+  "additionalProperties": true
+}

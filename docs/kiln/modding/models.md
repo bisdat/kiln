@@ -16,7 +16,8 @@ Status:
   upright, icons, and a crafted new item.
 - **Skinned models: proven offline, on a dedicated server, and drawn in a client as a held model with moving parts**
   (2026-11-11, Kiln Equipment's Sunspire); a creature's body has not been seen drawn yet. See [Skinned models](#skinned-models). Blend shapes are written (morph targets,
-  [cosmetics.md](cosmetics.md)); cloth and chains aren't.
+  [cosmetics.md](cosmetics.md)). Cloth and bone chains are written since 0.2.0-dev.31 (on, not yet confirmed in a game client):
+  [Physics](#physics).
 
 ## The rule: ship sources and a recipe, never game data
 A mod folder holds only what its author made:
@@ -278,8 +279,8 @@ The sample `tools/modelcook/samples/rigged_figure.py` writes such a creature wit
 
 A coarser LOD may use fewer materials (101 of the game's models do) and any joints of the skeleton. Primitives with identical vertices share a vertex group, as the game's LODs do.
 
-Not written: cloth, chains, sleeves, card clusters, and a skinned tree. None of them is needed for a creature (no creature model uses blend shapes, and cloth and chains are
-optional on the ones that have them).
+Not written: sleeves, card clusters, and a skinned tree. None of them is needed for a creature. Cloth and bone chains are written when a mod asks for
+them: [Physics](#physics).
 
 ### globalScale
 
@@ -411,6 +412,99 @@ model; only the behaviour is a copy of the Vukah's.
 - whether the shadow follows the pose.
 
 **Afterwards:** quit the game, then `tools/client/client.sh undeploy --real`. Don't use `level`, `xp` or `skillpoints` for these checks: on a real client they can fire Steam achievements.
+
+## Physics
+Since 0.2.0-dev.31 the cook writes **cloth** (a primitive the game simulates as cloth: a banner, a cape, a skirt) and **bone chains** (2 to 8 joints
+of the model's own skeleton that swing: a pendant, a tail, a braid) into a mod's models. The game simulates them on each player's machine with its
+own cloth and chain code; a dedicated server only serves the cooked files, and Kiln adds no hook and no runtime call. Players need the mod.
+
+**On, not yet confirmed in a game.** The two cook features, `modelcook.cloth` and `modelcook.chains2`, are on: a model with an entry in
+`assets/physics.json` or a body with `cloth`/`chains` is cooked with them, no switch needed. The game has not yet been seen to draw a Kiln-cooked
+cloth or chain (guided check `16e-cc16e`): if yours hangs wrong, the cook's fabric or the fixed tuning below may be why; please report it. A
+recipe that lists them under `"experimental"` still cooks: that key only matters for a cook feature a release holds.
+
+### Step by step
+1. **Model it.** Cloth is one glTF primitive of its own (its own material slot in Blender), with real triangles: a quad strip, a cape, a skirt.
+   Chains are a line of bones of **your own skeleton**, each link with a length, nothing hanging below the last. Keep scale 1 everywhere.
+2. **Say what moves.** Write the model's entry in `assets/physics.json` (below): for cloth, `pin` per vertex (1 on the edge that holds, 0 on what
+   hangs); for a chain, its first and last swinging bone. Or let the Blender helper write it from a painted vertex group
+   ([From Blender](#from-blender)). For a creature's body, put the same entries in the body block instead
+   ([npc-blocks.md](npc-blocks.md#model-physics)).
+3. **Cook it** as any model: a `model` step in `assets/cook.json` names the glTF (a worn look and a body's model are model steps too), then
+   `kiln build` (or `kiln cook` in the mod's folder). The cook finds the entry by the model file's path and refuses, with the field named,
+   anything it cannot write; nothing is written then.
+4. **Look at it in the game**: place, wear or spawn the thing, walk past it, turn, teleport and reload. The cook's report (`assets/cooked/cook-report.json`)
+   lists each model's cloth particles and chain joints.
+
+### assets/physics.json
+One file names every model's physics, by the model file's path in the mod (as a recipe step, a worn look or a body names it). A body block's
+`cloth` and `chains` are the same entries ([npc-blocks.md](npc-blocks.md#model-physics)); a model that both name is refused. Schema:
+[schemas/physics.md](schemas/physics.md).
+```json
+{ "format": 1,
+  "models": {
+    "models/banner.gltf": { "cloth": [ { "mesh": 0, "primitive": 0, "particleIds": [0, 1, 2, 3], "pin": [1, 1, 0, 0], "massKg": 0.3 } ] },
+    "models/pendant.glb": { "chains": [ { "rootJoint": "pendant_0", "tipJoint": "pendant_2" } ] } } }
+```
+| Field | Default, range | Meaning |
+|---|---|---|
+| `mesh`, `primitive` | required, 0 or more | the glTF mesh and its primitive, by their indices in the file (one node may use it) |
+| `particleIds` | every vertex its own | one id per POSITION element: equal ids weld the copies a UV or normal seam made (within 1e-6 m, the same skin). Particles are numbered in the order their id first appears |
+| `pin` | required, [0, 1] each | one per particle: 1 holds it on the model (it follows its joint, or stays put on an unskinned model), 0 lets it hang; between makes it heavier and limits its motion |
+| `massKg` | 1, [0.001, 100] | the whole cloth's mass, spread over its particles by the area around each |
+| `gravity` | 9.81, [0, 50] | m/s², downwards |
+| `damping` | 0.4, [0, 0.99] | |
+| `stiffness` | 0.8, (0, 1] | one stiffness for stretch and bend |
+| `colliders` | none | spheres `{ "type": "sphere", "x", "y", "z", "radius", "joint" }` and capsules `{ "type": "capsule", "a": {…}, "b": {…} }` in bind pose (metres, glTF axes; on a model attached to one joint, in the file's space like its vertices, the joint at the origin), radius up to 8 m; on a skinned model each names the joint it follows (both ends of a capsule the same one), on an unskinned one none. All colliders of a model: at most 32 spheres, a capsule counting two |
+| `rootJoint`, `tipJoint` | required | a chain from the first joint that swings to the last, along one branch of the skeleton |
+| `particleMassKg` | 1, [0.001, 100] | one moving joint's mass |
+| `damping` (chain) | 0.01, [0, 0.99] | |
+| `stiffness`, `bendStiffness` (chain) | 10000, [1, 1000000]; 5, [0, 1000000] | the game's own coefficients |
+| `particleRadius` | 0, [0, 1] m | stored in millimetres |
+
+Everything else is fixed: cloth wind 2, drag 0.6, lift 0.3, linear inertia 0.6, angular and centrifugal inertia 0.3, tether stiffness 0.6, phase
+compression 0.8 and stretch 1, motion stiffness 1, friction 0.5, solver 300 Hz, motion radii 4 m; chains gravity 9.81, linear inertia 0.2, angular
+and centrifugal inertia 0.2, friction 0.1, drag 0, compression 0.7, stretch 1, motion radii 1, 2, 3, 3, 3, 3, 3 m, no angle limit.
+
+**Rules the cook checks** (each refusal names the field):
+- **Cloth:** every triangle has an area and three particles (after welding), a face once (no back faces), an edge in at most two triangles, every
+  particle in a triangle, and every connected piece holds a particle with pin 1. At most 65,535 particles and render vertices per cloth mesh, 255
+  cloth meshes per model. A model with cloth has **one LOD**, **globalScale 1**, and **no morph target on a cloth primitive**.
+- **Chains** need a **skeleton of the mod's own** (a skeleton step or a body's model): the game's skeletons, the player's too, are moved by the
+  game's animations, so none of their joints can swing. The root's parent stays animated (the anchor), a chain is 2 to 8 joints (more would overrun
+  the game's fixed storage), no joint swings in two chains, nothing hangs below a swinging joint, bones are rigid and unit scale, links have a
+  length and a chain is at most 32.7675 m long. **No clip of the skeleton animates a swinging joint**, root included (the clips steps and the
+  animations of the mod's blocks are read).
+- **Cloth and chains on one model:** a cloth vertex may not be weighted to a swinging joint (the cloth would follow the joint's animated pose,
+  not the swing).
+- Not written, refused where asked: sleeves, simulated morph targets, per-vertex stiffness, a second cloth LOD, scaled physics.
+
+**The fabric** is Kiln's own, not the game's cooker: every triangle edge is a distance constraint, every pair of triangles sharing an edge adds one
+between their far corners, constraints run in independent batches, each particle is tethered to its nearest pinned particle along the mesh, and
+the mass is spread by area. It may hang stiffer or looser than the game's own cloth.
+
+**Chains** keep the model's whole skeleton. Vertices on a swinging joint are skinned to a slot of its own after the model's other joints; the cook
+writes each chain's rest shape from the joints' bind pose. A chain's id follows from the mod, the model file and its root and tip.
+
+**A game update** that moves the game's cloth or chain types makes the cook refuse physics for that build ("this game's cloth types differ …");
+models without physics cook as before.
+
+### From Blender
+`tools/modelcook/blender/kiln_physics_export.py` writes a model's entry from what you painted: a vertex group `pin` (1 holds, 0 hangs) on the
+cloth's mesh objects, and the bone names of each chain. In Blender it exports the glTF too, so the ids match that file:
+```
+blender -b scene.blend --python tools/modelcook/blender/kiln_physics_export.py -- \
+    --gltf MOD/models/cape.gltf --key models/cape.gltf --object Cape --pin-group pin --mass 0.8 --chain tail_0:tail_3 --out MOD/assets/physics.json
+```
+Without `--object` it reads a glTF exported with Attributes on, from a float point attribute named `_KILN_PIN`. The physics.json it writes is
+read back with the cook's own reader; edit it by hand as you like.
+
+### What the cook checks of a cooked model
+Next to the [validation](#validation-every-cook) of every model: cloth selectors one-based and complete, every cloth array the size its partners
+say (all 320 cloth meshes of the game keep these relations), totals, at most 32 collider spheres; every swinging joint's slot after the others, and
+each chain's packed rest shape within half a code of its stored matrices. Engine facts: [docs/re/models.md](../../re/models.md) section 9.
+
+Sample: `mods/samples/ModelPhysics` (a banner from `assets/physics.json` and a three-joint pendant from a body block). Lab test: `mods/tests/model-physics-test` (a dedicated server: the cooked files through kiln.assets and the game's reflection; nothing is drawn there). Guided check `16e-cc16e` with its fixture `mods/tests/model-physics-client` (a banner to place, a worn cape, a creature with a pendant; [client-pass.md](../client-pass.md)).
 
 ## Sample
 `mods/samples/ModelSample`:

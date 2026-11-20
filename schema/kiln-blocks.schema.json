@@ -1607,7 +1607,70 @@
           "properties": { "radius": { "type": "number", "description": "Metres.", "minimum": 0 }, "height": { "type": "number", "description": "Metres.", "minimum": 0 } }
         },
         "workshop": { "type": "string", "pattern": "^0x[0-9a-fA-F]+$" },
-        "tool": { "type": "string" }
+        "tool": { "type": "string" },
+        "cloth": { "type": "array", "maxItems": 255, "items": { "$ref": "#/$defs/modelCloth" }, "description": "Primitives of the model the game simulates as cloth, cooked into it when the mod builds (assets/physics.json's form). Needs the cook feature modelcook.cloth (on) and scale 1." },
+        "chains": { "type": "array", "items": { "$ref": "#/$defs/modelChain" }, "description": "Joint chains of the model's skeleton the game swings, cooked into it when the mod builds. Needs the cook feature modelcook.chains2 (on) and scale 1." }
+      }
+    },
+    "modelCloth": {
+      "type": "object",
+      "required": ["mesh", "primitive", "pin"],
+      "additionalProperties": false,
+      "description": "One glTF primitive simulated as cloth (Kiln.Blocks ModelClothBlock).",
+      "properties": {
+        "mesh": { "type": "integer", "minimum": 0, "description": "The glTF mesh, by its index in the file." },
+        "primitive": { "type": "integer", "minimum": 0, "description": "The primitive of that mesh, by its index." },
+        "particleIds": { "type": ["array", "null"], "minItems": 1, "maxItems": 65535, "items": { "type": "integer", "minimum": 0, "maximum": 2147483647 }, "description": "One id per POSITION element; equal ids weld seam copies (within 1e-6 m, same skin). Absent: every vertex its own particle." },
+        "pin": { "type": "array", "minItems": 1, "maxItems": 65535, "items": { "type": "number", "minimum": 0, "maximum": 1 }, "description": "One value per particle: 1 held on the model, 0 hangs. Every connected piece needs a 1." },
+        "massKg": { "type": "number", "minimum": 0.001, "maximum": 100, "default": 1, "description": "The whole cloth's mass." },
+        "gravity": { "type": "number", "minimum": 0, "maximum": 50, "default": 9.81, "description": "m/s², downwards." },
+        "damping": { "type": "number", "minimum": 0, "maximum": 0.99, "default": 0.4 },
+        "stiffness": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "default": 0.8 },
+        "colliders": { "type": "array", "items": { "$ref": "#/$defs/clothCollider" }, "description": "What it does not pass through, in bind pose (metres, glTF axes). All cloth of a model: at most 32 spheres, a capsule counting two." }
+      }
+    },
+    "clothSphere": {
+      "type": "object",
+      "required": ["x", "y", "z", "radius"],
+      "properties": {
+        "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" },
+        "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 8, "description": "Metres." },
+        "joint": { "type": ["string", "null"], "minLength": 1, "description": "The joint it follows (name or j<index>); null: rigid, on a model without a skeleton." }
+      }
+    },
+    "clothCollider": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "enum": ["sphere", "capsule"] } },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "sphere" } } }, "then": { "$ref": "#/$defs/clothSphere", "properties": { "type": {}, "x": {}, "y": {}, "z": {}, "radius": {}, "joint": {} }, "additionalProperties": false } },
+        {
+          "if": { "properties": { "type": { "const": "capsule" } } },
+          "then": {
+            "required": ["a", "b"],
+            "additionalProperties": false,
+            "properties": {
+              "type": {},
+              "a": { "$ref": "#/$defs/clothSphere", "properties": { "x": {}, "y": {}, "z": {}, "radius": {}, "joint": {} }, "additionalProperties": false },
+              "b": { "$ref": "#/$defs/clothSphere", "properties": { "x": {}, "y": {}, "z": {}, "radius": {}, "joint": {} }, "additionalProperties": false, "description": "Not at a's centre; the same joint as a." }
+            }
+          }
+        }
+      ]
+    },
+    "modelChain": {
+      "type": "object",
+      "required": ["rootJoint", "tipJoint"],
+      "additionalProperties": false,
+      "description": "A chain of 2 to 8 joints the game swings (Kiln.Blocks ModelChainBlock).",
+      "properties": {
+        "rootJoint": { "type": "string", "minLength": 1, "description": "The first joint that swings; its parent stays animated." },
+        "tipJoint": { "type": "string", "minLength": 1, "description": "The last joint, below the root along one branch." },
+        "particleMassKg": { "type": "number", "minimum": 0.001, "maximum": 100, "default": 1, "description": "One moving joint's mass." },
+        "damping": { "type": "number", "minimum": 0, "maximum": 0.99, "default": 0.01 },
+        "stiffness": { "type": "number", "minimum": 1, "maximum": 1000000, "default": 10000 },
+        "bendStiffness": { "type": "number", "minimum": 0, "maximum": 1000000, "default": 5 },
+        "particleRadius": { "type": "number", "minimum": 0, "maximum": 1, "default": 0, "description": "Metres." }
       }
     },
     "ai": {

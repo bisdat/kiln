@@ -92,6 +92,12 @@ def _say_steps(r):
               + ("" if s["ok"] else " " + json.dumps({c: v for c, v in s["checks"].items() if not v})))
 
 
+def _say_warnings(r):
+    """The recipe's own warnings (the experimental cook features it turns on: one line)."""
+    for w in r.get("warnings", []):
+        print(f"warning: {w}")
+
+
 def _say_marks(r):
     """The "side": "client" marks a server's cook of 0.2.0-dev.26 wrote on the models' entries: taken out, or still there."""
     def n(files):
@@ -122,6 +128,7 @@ def cmd_recipe(a):
         return _dispatch(a, doc, ["--update-manifest"] if a.update_manifest else []) if others else 0
     k, t = _ctx(a)
     r = recipe.run(a.recipe, k, t, exe_sha256=t.dump.get("exe_sha256"), update_manifest=a.update_manifest)
+    _say_warnings(r)
     _say_steps(r)
     if r["manifest"]["missing"] or r["manifest"]["mismatched"]:
         print("assets.json does not match the cooked files (run with --update-manifest):")
@@ -184,6 +191,7 @@ def cmd_looks(a):
         return 1 if need else 0
     k, t = _ctx(a)
     r = recipe.run(path, k, t, exe_sha256=t.dump.get("exe_sha256"), update_manifest=a.update_manifest, given=doc)
+    _say_warnings(r)
     _say_steps(r)
     if r["manifest"]["missing"] or r["manifest"]["mismatched"]:
         print("assets.json does not match the cooked files (run with --update-manifest)")

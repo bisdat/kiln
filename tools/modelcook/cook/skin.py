@@ -58,10 +58,12 @@ def _matrix43(s):
 
 
 class Target:
-    """The skeleton a model is bound to. `bind[j]` is joint j's bind matrix in game space."""
+    """The skeleton a model is bound to. `bind[j]` is joint j's bind matrix in game space. `parents[j]` is its parent joint (None for a root),
+    or `parents` is None when not known (what bone chains need, cook/chains.py)."""
 
-    def __init__(self, guid, names, bind, source):
+    def __init__(self, guid, names, bind, source, parents=None):
         self.guid, self.names, self.bind, self.source = guid, list(names), bind, source
+        self.parents = list(parents) if parents is not None else None
         self.index = {n: i for i, n in enumerate(self.names)}
 
     def __len__(self):
@@ -84,11 +86,12 @@ class Target:
         for i, (t, q, s) in enumerate(sk.rest):
             local = _trs(t, q, s)
             chain.append(local if sk.parents[i] == 0xFFFF else kmesh._mul4(chain[sk.parents[i]], local))
-        return cls(guid, sk.names, chain, sk.source)
+        return cls(guid, sk.names, chain, sk.source, [None if p == 0xFFFF else p for p in sk.parents])
 
     @classmethod
     def from_game(cls, value, guid):
-        """A decoded keen::ModelHierarchyResource. Joints are named j<index>, as tools/kfc exports them: the game's own names are stripped."""
+        """A decoded keen::ModelHierarchyResource. Joints are named j<index>, as tools/kfc exports them: the game's own names are stripped. Its parents
+        are left unknown: the game's animations move its joints, so none of them can swing in a chain."""
         n = value["jointCount"]
         return cls(guid, [f"j{i}" for i in range(n)], [kmesh._inv_affine(_matrix43(s)) for s in value["skinToJointMatrices"][:n]], "game")
 
