@@ -14,7 +14,7 @@ internal static unsafe class RoutineSaves
     // book object), restores again
     private static string? _restored;
     private static RoutineBook? _book;
-    private static bool _warned;
+    private static bool _warned, _toldOff, _toldNoBook, _toldSaving;
 
     /// <summary>Set by tests that run without a game: where the assignments are kept, instead of the world's data.</summary>
     internal static RoutineBook? TestBook;
@@ -31,7 +31,13 @@ internal static unsafe class RoutineSaves
     {
         if (TestBook == null && (!ServerSide || !Spawn.WorldRunning)) return;
         var t = RoutineNative.T;
-        if (t == null || !RoutineNative.HasRestore(t) || !Capabilities.Is(BlockCapabilities.RoutineDecisions)) return;
+        if (t == null || !RoutineNative.HasRestore(t) || !Capabilities.Is(BlockCapabilities.RoutineDecisions))
+        {
+            if (!_toldOff && t != null)
+                BlocksBridge.Log(LogLevel.Info, $"routines: saved routines wait: {(RoutineNative.HasRestore(t) ? "routines.decisions is off" : "kiln.routines has no restore")}");
+            _toldOff = true;
+            return;
+        }
         if (!Book(out var book, out var world)) return;
         if (_restored == world && ReferenceEquals(_book, book)) return;
         _restored = world;
@@ -69,16 +75,27 @@ internal static unsafe class RoutineSaves
             _book = null;
             return;
         }
-        if (!Book(out var book, out _)) return;
+        if (!Book(out var book, out _))
+        {
+            if (!_toldNoBook) BlocksBridge.Log(LogLevel.Info, "routines: an assignment changed before the world's data is ready: not saved yet");
+            _toldNoBook = true;
+            return;
+        }
         var after = e.After;
         if (after.Assignment == RoutineAssignmentState.Removed)
         {
-            book.Remove(after.NpcId, after.Revision);
+            // An owner that unloads is not the owner removing its routine: the server's shutdown unloads every mod before
+            // the world's last save, and a mod switched off comes back with the next start. The saved row stays; the next
+            // world start binds it again when the mod and its plan are there, or removes it (OwnerMissing).
+            if (e.Reason == "OwnerUnloaded") book.LastRevision = Math.Max(book.LastRevision, after.Revision);
+            else book.Remove(after.NpcId, after.Revision);
             return;
         }
         var plan = RoutineRegistry.Find(after.Key)?.Plan;
         if (plan == null || plan.Version != after.PlanVersion) return;  // not this process's plan: the saved row stays as it was
         book.Record(after.NpcId, after.Owner, plan, after.Assignment == RoutineAssignmentState.ManualSuspended, after.Revision);
+        if (!_toldSaving) BlocksBridge.Log(LogLevel.Info, $"routines: the world's saved routines follow the assignments ({book.Assignments.Count} now)");
+        _toldSaving = true;
     }
 
     internal static void Forget()
@@ -125,8 +142,7 @@ internal static unsafe class RoutineSaves
                     break;
             }
         }
-        if (rows.Count > 0)
-            BlocksBridge.Log(LogLevel.Info, $"routines: world {world}: {bound} saved routine(s) bound again, {removed} removed, {refused} refused");
+        BlocksBridge.Log(LogLevel.Info, $"routines: world {world}: {bound} saved routine(s) bound again, {removed} removed, {refused} refused (last revision {book.LastRevision})");
     }
 
     private static bool Bind(RoutineNative.Table* t, ulong owner, SavedRoutine row, RoutinePlan plan, string reason)

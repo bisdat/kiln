@@ -405,9 +405,13 @@ public sealed unsafe class RoutinesBindingTests : IDisposable
         // the world stops: the book is what the next start binds again
         Send(Event(Snapshot.Replace("\"revision\":1", "\"revision\":2").Replace("\"Assigned\"", "\"PendingSpawn\""), "WorldStopped", teardown: true));
         Assert.True(Assert.Single(book.Assignments).ManualSuspended);
-        Send(Event(Snapshot.Replace("\"revision\":1", "\"revision\":3").Replace("\"Assigned\"", "\"Removed\""), "Removed"));
-        Assert.Empty(book.Assignments);
+        // the owner unloads (a server stop unloads every mod before its last save): the saved row stays for the next start
+        Send(Event(Snapshot.Replace("\"revision\":1", "\"revision\":3").Replace("\"Assigned\"", "\"Removed\""), "OwnerUnloaded"));
+        Assert.True(Assert.Single(book.Assignments).ManualSuspended);
         Assert.Equal(3ul, book.LastRevision);
+        Send(Event(Snapshot.Replace("\"revision\":1", "\"revision\":4").Replace("\"Assigned\"", "\"Removed\""), "Removed"));
+        Assert.Empty(book.Assignments);
+        Assert.Equal(4ul, book.LastRevision);
     }
 
     [Fact]

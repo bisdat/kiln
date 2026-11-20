@@ -25,6 +25,7 @@
 #include "services/kiln_caps.h"
 #include "services/kiln_hooks.h"
 #include "services/kiln_routines.h"
+#include "services/kiln_spawn.h"
 #include "services/kiln_types.h"
 #include "services/kiln_world.h"
 #include "state.h"
@@ -36,6 +37,7 @@ using namespace kroutines;
 const KilnApi* g_api = nullptr;
 KilnOwner g_owner = 0;
 const KilnWorldApi* W = nullptr;
+const KilnSpawnApi* g_spawn = nullptr;  // an entity's template (its NpcId): ActiveNpcState is template data, not per entity
 const KilnCapsApi* g_caps = nullptr;
 
 Engine g_engine;
@@ -222,7 +224,7 @@ bool check_layout(std::string* why) {
 
 // ------------------------------------------------------------------------------------- the world, read in Pre ----
 
-uint32_t h_active = 0, h_dynamic = 0;
+uint32_t h_dynamic = 0;
 constexpr KilnEntity kTwice = 0xffffffffu;
 std::unordered_map<uint32_t, KilnEntity> g_entity;  // NpcId -> its entity; kTwice: more than one has it
 uint64_t g_scanned = 0;                               // the step of the last scan
@@ -240,22 +242,28 @@ bool seh_read(const void* p, void* out, size_t n) {
     }
 }
 
+// The villager's NpcId: FNV-1a-32 over its template's GUID bytes (the game's roster id, the u32 its ActiveNpcState
+// template starts with, and Kiln.Creatures' Villager.NpcId). ActiveNpcState is template data, so kiln.world's
+// per-entity reads do not see it; the entity's template comes from kiln.spawn.
 uint32_t npc_of(KilnEntity e) {
-    uint32_t size = 0, id = 0;
-    const void* p = W->component(e, h_active, &size);
-    return p && size >= 4 && seh_read(p, &id, 4) ? id : 0;
+    KilnEntitySnapshot s{};
+    s.size = sizeof s;
+    if (!g_spawn || g_spawn->entity_info(e, &s) != KILN_OK || !s.has_template) return 0;
+    uint32_t h = 0x811c9dc5u;
+    for (uint8_t b : s.template_guid.b) h = (h ^ b) * 0x01000193u;
+    return h;
 }
 
-// Every villager of the server world, by NpcId. One pass over the entities that have an ActiveNpcState.
+// Every villager of the server world, by NpcId. One pass over the entities that have a DynamicActiveNpcState.
 void scan(uint64_t step) {
     g_scanned = step;
     g_entity.clear();
     uint32_t count = 0;
     g_scan.resize(256);
-    KilnResult rc = W->find(h_active, g_scan.data(), static_cast<uint32_t>(g_scan.size()), &count);
+    KilnResult rc = W->find(h_dynamic, g_scan.data(), static_cast<uint32_t>(g_scan.size()), &count);
     if (rc == KILN_ERR_BUFFER_TOO_SMALL) {
         g_scan.resize(count + 64);
-        rc = W->find(h_active, g_scan.data(), static_cast<uint32_t>(g_scan.size()), &count);
+        rc = W->find(h_dynamic, g_scan.data(), static_cast<uint32_t>(g_scan.size()), &count);
     }
     if (rc != KILN_OK) return;
     for (uint32_t i = 0; i < count && i < g_scan.size(); ++i) {
@@ -458,6 +466,8 @@ bool decide(std::string* why, uint32_t* reason) {
     *reason = KILN_CAP_REASON_SERVICE_MISSING;
     if (!kiln::hooks_v2(g_api)) return *why = "kiln.hooks v2 is not here", false;
     if (!W || !W->component || !W->find || !W->component_hash) return *why = "kiln.world is not here", false;
+    if (!g_spawn || g_spawn->header.size < offsetof(KilnSpawnApi, entity_info) + sizeof(void*) || !g_spawn->entity_info)
+        return *why = "kiln.spawn is not here to name a villager's template", false;
     if (!g_api->feature(ks("world.lifecycle"))) return *why = "world stops are not seen on this build, so a routine could outlive its world", false;
     *reason = KILN_CAP_REASON_FAULTED;
     return check_layout(why);
@@ -465,6 +475,7 @@ bool decide(std::string* why, uint32_t* reason) {
 
 void KILN_CALL on_ready(void*) {
     W = static_cast<const KilnWorldApi*>(g_api->service(ks(KILN_WORLD_SERVICE), 1));
+    g_spawn = static_cast<const KilnSpawnApi*>(g_api->service(ks(KILN_SPAWN_SERVICE), KILN_SPAWN_VERSION));
     g_caps = static_cast<const KilnCapsApi*>(g_api->service(ks(KILN_CAPS_SERVICE), KILN_CAPS_VERSION));
     std::string why;
     uint32_t reason = KILN_CAP_REASON_POLICY;
@@ -476,7 +487,6 @@ void KILN_CALL on_ready(void*) {
         RT_I("off: %s. The game chooses for every villager", why.c_str());
         return;
     }
-    h_active = W->component_hash(ks("ActiveNpcState"));
     h_dynamic = W->component_hash(ks("DynamicActiveNpcState"));
     g_engine.game = Game{&next_worker,       &next_decide,     &next_set_state,   &next_finish_state, &game_set_decision,
                          &game_set_state,    &game_finish_state, &game_sleep_check, &next_sleep_check,  &game_mark_written, &next_commands};

@@ -133,7 +133,7 @@ the start of the next step and the task completes on that step's Post. What the 
 
 - **One owner per villager.** The first mod whose assign is accepted holds the villager; it may replace its plan. Another
   mod's assign, remove or resume answers `Ok = false`, `Reason = "OwnedBy:<mod>"`, and changes nothing. There is no
-  priority between mods. The owner's unload removes its routines at the next step (event reason `OwnerUnloaded`).
+  priority between mods. The owner's unload removes its routines from the running world at the next step (event reason `OwnerUnloaded`), but not from the world's save: a server stop unloads every mod before its last save, and a mod switched off may come back. At the next world start the saved routine is bound again when its mod and plan are there, else removed (`OwnerMissing`, `DefinitionMissing`).
 - **Queue.** At most 256 changes wait for the next step; one more answers `QueueFull` before anything changed. A world
   that stops completes what is queued with `WorldStopped`; a mod that unloads first gets `Revoked`.
 - **Revisions** count the changes of all assignments of a world and never go back, also across a restart.
