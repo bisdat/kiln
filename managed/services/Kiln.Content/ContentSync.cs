@@ -101,7 +101,7 @@ public static unsafe class ContentSync
     }
 
     /// <summary>Client to server: what the client did with a state. Result 0 applied, 1 failed, 2 hosting (skipped),
-    /// 3 refused (too big / disabled).</summary>
+    /// 3 refused (too big / disabled, no added-buff room), 4 deferred (<see cref="AckDeferred"/>).</summary>
     internal sealed record AckMsg(uint StateId, byte Result, uint Applied, uint Reset, uint Errors, uint Millis, string Detail)
     {
         public void Encode(NetWriter w) =>
@@ -110,6 +110,18 @@ public static unsafe class ContentSync
         public static AckMsg Decode(ref NetReader r) =>
             new(r.UInt32(), r.Byte(), (uint)r.VarUInt(), (uint)r.VarUInt(), (uint)r.VarUInt(), (uint)r.VarUInt(), r.String(4096));
     }
+
+    /// <summary>Ack result: a client that cannot apply the state yet (its world does not run: a server holds it at the join,
+    /// and a joining game's registries load only in its world's steps) received it and applies it once its world runs. That
+    /// later ack decides (a failure refuses it then). Since 0.2.0-dev.29.23, sent only to a server whose WELCOME has
+    /// <see cref="HeldAnswerProperty"/>: an older server reads any result but 0 and 2 as a failure.</summary>
+    internal const byte AckDeferred = 4;
+
+    /// <summary>Handshake property, value "1", on both sides. A client's HELLO: it answers a content state while the server
+    /// holds it at the join (<see cref="AckDeferred"/> or a refusal); a server holds only such clients for its added-buff
+    /// check (an older client answers once its world runs, which the hold prevents: every join was refused after 25 s). A
+    /// server's WELCOME: it takes that answer.</summary>
+    internal const string HeldAnswerProperty = "kiln.content.held-answer";
 
     private static readonly object Lock = new();
     private static NetChannel? _channel;
@@ -177,6 +189,7 @@ public static unsafe class ContentSync
                     .Register<AckMsg>(MsgAck, static (m, w) => m.Encode(w), static (ref NetReader r) => AckMsg.Decode(ref r), OnAck, NetDirection.ToServer);
                 Network.Disconnected += _ => OnLeave("left the server");
                 Network.ServerReady += _ => { OnLeave(null); EnsureContentAdmission(); };
+                Network.SetHandshakeProperty(HeldAnswerProperty, static () => "1");
                 EnsureContentAdmission();
             }
             finally
@@ -262,15 +275,33 @@ public static unsafe class ContentSync
             return;
         }
         if (_contentAdmission != null) return;
-        _contentAdmission = NetAdmission.OnJoin("kiln.content", peer =>
-        {
-            if (!peer.HasChannel(ChannelName) || !RequiresBuffAdmission()) return null;
-            if (ContentHolds.Remove(peer.Id, out var previous)) previous.End();
-            var hold = NetAdmission.HoldPeer(peer, "kiln.content", "Waiting for this game's content and added-buff capacity check", ContentAdmissionDeadline);
-            ContentHolds[peer.Id] = hold;
-            return hold;
-        });
+        _contentAdmission = NetAdmission.OnJoin("kiln.content", DecideJoin);
     }
+
+    internal const string HoldReason = "Waiting for this game's answer to the server's content and added-buff check";
+    internal const string HoldTimeoutRefusal = "Your game did not answer this server's content and added-buff check in time. " +
+                                               "Try joining again; if it happens again, update Kiln on your game and on the server.";
+
+    /// <summary>The join decision (tick thread): a Kiln client that answers while held (<see cref="HeldAnswerProperty"/>) is held
+    /// until its answer: a refusal refuses it at the join, a deferral or an applied state lets it in. An older client is not
+    /// held: it applies the state once its world runs and could not answer before (a hold on it only ended at its deadline,
+    /// refused); a failure of that later apply refuses it then (<see cref="OnAck"/>).</summary>
+    internal static AdmissionHold? DecideJoin(NetPeer peer)
+    {
+        if (!peer.HasChannel(ChannelName) || !RequiresBuffAdmission()) return null;
+        if (ContentHolds.Remove(peer.Id, out var previous)) previous.End();
+        if (!AnswersWhileHeld(peer))
+        {
+            Log(LogLevel.Info, $"{peer.Name} (0x{peer.Id:x}): its Kiln answers the content and added-buff check only once its world runs: " +
+                               "not held for it; a failure then refuses it");
+            return null;
+        }
+        var hold = NetAdmission.HoldPeer(peer, "kiln.content", HoldReason, ContentAdmissionDeadline, HoldTimeoutRefusal);
+        if (!hold.Ended) ContentHolds[peer.Id] = hold;
+        return hold;
+    }
+
+    internal static bool AnswersWhileHeld(NetPeer peer) => peer.Properties.TryGetValue(HeldAnswerProperty, out var v) && v == "1";
     private static uint _serverSession;
     private static bool _serving;
 
@@ -620,10 +651,20 @@ public static unsafe class ContentSync
 
     private static void OnAck(AckMsg a, NetContext ctx)
     {
-        var what = a.Result switch { 0 => "applied", 1 => "FAILED", 2 => "skipped (hosting)", 3 => "refused", _ => $"result {a.Result}" };
-        Log(a.Result is 0 or 2 ? LogLevel.Info : LogLevel.Warn,
+        var what = a.Result switch
+        {
+            0 => "applied", 1 => "FAILED", 2 => "skipped (hosting)", 3 => "refused", AckDeferred => "received while joining (applied once its world runs)",
+            _ => $"result {a.Result}",
+        };
+        Log(a.Result is 0 or 2 or AckDeferred ? LogLevel.Info : LogLevel.Warn,
             $"{ctx.Sender.Name}: content state {a.StateId:x8} {what}: {a.Applied} change(s), {a.Reset} local reset, {a.Errors} error(s) in {a.Millis} ms" +
             (a.Detail.Length > 0 ? $"; {a.Detail}" : ""));
+        if (a.Result == AckDeferred)
+        {
+            // held at the join: its world cannot run before it is let in, nor its registries load. Its apply then decides.
+            if (ContentHolds.Remove(ctx.Sender.Id, out var held)) held.End();
+            return;
+        }
         if (a.Result is not (0 or 2))
         {
             lock (Sent) Acked.Remove(ctx.Sender.Id);
@@ -731,6 +772,79 @@ public static unsafe class ContentSync
         }
         _dirty = true;
         if (Game.IsTickThread) ClientTick();
+        AnswerWhileWaiting();
+    }
+
+    private static uint _heldAnswered;  // the state this game answered before it could apply it
+
+    /// <summary>Client, any thread: a state this game cannot apply yet because its registries are not loaded (a joining game
+    /// loads them in its world's steps, and a server holding it at the join sends it no world data until it answers) is
+    /// answered at once, once per state: refused when this game's added-buff room is known and too small, else deferred
+    /// (<see cref="AckDeferred"/>). It is applied once the world runs, and that ack decides.</summary>
+    private static void AnswerWhileWaiting()
+    {
+        (uint StateId, string Json, uint Fields, int Compressed) p;
+        lock (Lock)
+        {
+            if (_pending is not { } pp || _heldAnswered == pp.StateId || _appliedState == pp.StateId) return;
+            p = pp;
+        }
+        if (Kiln.Client.IsClient && Kiln.Client.IsHosting) return;
+        if (!ServerTakesHeldAnswers) return;  // an older server: it would read the answer as a failure
+        // the cases ClientTick answers without the registries: those answers do not wait for the world
+        if (!SyncSettings.Current.AcceptContent || !Content.Available || !HasExport || _owner == 0) return;
+        if (Content.Status() is { Ready: true }) return;  // ClientTick applies it
+        lock (Lock)
+        {
+            if (_heldAnswered == p.StateId) return;
+            _heldAnswered = p.StateId;
+        }
+        AckMsg ack;
+        try
+        {
+            var server = JsonNode.Parse(p.Json) as JsonObject;
+            CapacityInfo? room = null;
+            IReadOnlySet<Guid> existing = new HashSet<Guid>();
+            if (server?["buffs"] is JsonObject { } buffs && buffs["add"] is JsonArray { Count: > 0 })
+            {
+                var budget = Content.Buffs.GetBudget();
+                if (budget.Budget is { Ready: true } known)
+                {
+                    room = known;
+                    existing = Content.Buffs.Definitions().Where(d => d.State is "registered" or "orphaned").Select(d => d.Guid).ToHashSet();
+                }
+            }
+            ack = HeldAnswer(p.StateId, server, room, existing);
+        }
+        catch (Exception)
+        {
+            ack = HeldAnswer(p.StateId, null, null, new HashSet<Guid>());  // what cannot be checked now is checked when it applies
+        }
+        if (ack.Result == AckDeferred)
+        {
+            Log(LogLevel.Info, $"content state {p.StateId:x8}: this game's registries load once its world runs: told the server, applied then");
+            _status = _status with { State = ContentSyncState.Waiting, StateId = p.StateId, Detail = "applies once this game's world runs" };
+        }
+        else
+        {
+            Log(LogLevel.Warn, $"content state {p.StateId:x8} refused while joining: {ack.Detail}");
+            _status = _status with { State = ContentSyncState.Failed, StateId = p.StateId, Detail = ack.Detail };
+        }
+        _channel?.SendToServer(ack);
+    }
+
+    internal const string DeferredDetail = "client: this game applies the server's content once its world runs";
+
+    /// <summary>The server this game joined said in its WELCOME that it takes an answer while it holds this game.</summary>
+    private static bool ServerTakesHeldAnswers => Network.Server is { } server && AnswersWhileHeld(server);
+
+    /// <summary>The answer to a state this game cannot apply yet: refused (3) with the numbers when its added-buff room
+    /// (<paramref name="room"/>, null when not known yet) cannot hold the server's added buffs, else deferred. Pure (tests).</summary>
+    internal static AckMsg HeldAnswer(uint stateId, JsonObject? server, CapacityInfo? room, IReadOnlySet<Guid> existing)
+    {
+        if (server is not null && room is { Ready: true } r && BuffRoomRefusal(server, r, existing) is { } reason)
+            return new AckMsg(stateId, 3, 0, 0, 1, 0, reason);
+        return new AckMsg(stateId, AckDeferred, 0, 0, 0, 0, DeferredDetail);
     }
 
     /// <summary>Applies a received state once this game's registries are ready (tick thread).</summary>
@@ -778,7 +892,20 @@ public static unsafe class ContentSync
             return;
         }
         if (_appliedState == p.StateId && _appliedGeneration == st.Generation) return;
-        Apply(p.StateId, p.Json, p.Fields, p.Compressed, st.Generation);
+        try
+        {
+            Apply(p.StateId, p.Json, p.Fields, p.Compressed, st.Generation);
+        }
+        catch (Exception e)
+        {
+            // never silent: a server that holds this game, or waits for its content ack, gets the reason
+            _appliedState = p.StateId;
+            _appliedGeneration = st.Generation;
+            var why = $"client: applying the server's content failed: {e.GetType().Name}: {e.Message}";
+            Log(LogLevel.Warn, $"content state {p.StateId:x8}: {why}");
+            _status = _status with { State = ContentSyncState.Failed, StateId = p.StateId, Detail = why };
+            _channel?.SendToServer(new AckMsg(p.StateId, 1, 0, 0, 1, 0, why));
+        }
     }
 
     internal static string? BuffRoomRefusal(JsonObject server, CapacityInfo room, IReadOnlySet<Guid> existing)
@@ -1056,6 +1183,7 @@ public static unsafe class ContentSync
         _leavePending = false;
         var had = _appliedState != 0;
         _appliedState = 0;
+        _heldAnswered = 0;
         _appliedGeneration = 0;
         var n = 0;
         if (had && _owner != 0 && Content.T != null)

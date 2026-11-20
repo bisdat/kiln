@@ -36,17 +36,22 @@ internal sealed record AdmissionEntry(AdmissionKind Kind, string Holder, string 
 /// It lives until <see cref="End"/>, <see cref="Refuse"/> or its deadline; Dispose ends it.</summary>
 internal sealed class AdmissionHold : IDisposable
 {
-    internal AdmissionHold(string holder, string reason, DateTime deadline, NetPeer? peer)
+    internal AdmissionHold(string holder, string reason, DateTime deadline, NetPeer? peer, string? timeoutRefusal = null)
     {
         Holder = holder;
         Reason = reason;
         Deadline = deadline;
         Peer = peer;
+        TimeoutRefusal = timeoutRefusal;
     }
 
     public string Holder { get; }
     public string Reason { get; }
     public DateTime Deadline { get; }
+
+    /// <summary>What the peer of a peer hold is refused with when the deadline passes (null: <see cref="Reason"/>): the
+    /// reason says what it waits for, a refusal what did not happen.</summary>
+    public string? TimeoutRefusal { get; }
 
     /// <summary>The held peer; null for a hold on every join.</summary>
     public NetPeer? Peer { get; }
@@ -349,10 +354,10 @@ internal static class NetAdmission
     /// <summary>Keeps <paramref name="peer"/> out of the world until the hold ends; at its deadline the peer is refused
     /// with <paramref name="reason"/>. A peer already in the world is not held again (the hold answers ended).</summary>
     /// <exception cref="KilnUnavailableException"><c>net.gate.hold_all</c>: kiln.net cannot hold Kiln clients.</exception>
-    internal static AdmissionHold HoldPeer(NetPeer peer, string holder, string reason, TimeSpan deadline)
+    internal static AdmissionHold HoldPeer(NetPeer peer, string holder, string reason, TimeSpan deadline, string? timeoutRefusal = null)
     {
         ArgumentNullException.ThrowIfNull(peer);
-        var h = NewHold(holder, reason, deadline, peer, "NetAdmission.HoldPeer");
+        var h = NewHold(holder, reason, deadline, peer, "NetAdmission.HoldPeer", timeoutRefusal);
         if (h.Ended) return h;
         if (IsLocalMachine(peer) || InWorld(peer) || peer.State is NetPeerState.Closed or NetPeerState.Rejected)
         {
@@ -623,13 +628,13 @@ internal static class NetAdmission
 
     // ---- holds ----
 
-    private static AdmissionHold NewHold(string holder, string reason, TimeSpan deadline, NetPeer? peer, string api)
+    private static AdmissionHold NewHold(string holder, string reason, TimeSpan deadline, NetPeer? peer, string api, string? timeoutRefusal = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(holder);
         if (deadline <= TimeSpan.Zero || deadline > MaxDeadline)
             throw new ArgumentOutOfRangeException(nameof(deadline), deadline, $"a hold lasts more than 0 and at most {MaxDeadline.TotalSeconds:0} s");
         reason = string.IsNullOrWhiteSpace(reason) ? $"held by {holder}" : reason;
-        var h = new AdmissionHold(holder, reason, DateTime.UtcNow + deadline, peer);
+        var h = new AdmissionHold(holder, reason, DateTime.UtcNow + deadline, peer, string.IsNullOrWhiteSpace(timeoutRefusal) ? null : timeoutRefusal);
         if (!ServerRole)
         {
             h.MarkEnded();
@@ -703,7 +708,7 @@ internal static class NetAdmission
             }
             else
             {
-                h.Refuse(h.Reason);
+                h.Refuse(h.TimeoutRefusal ?? h.Reason);
             }
         }
     }

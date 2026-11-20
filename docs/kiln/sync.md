@@ -75,6 +75,22 @@ Status for displays: `ContentSync.Status` (client: state, fields, bytes), `Conte
      Kiln-only template added during play (a hot load) makes a new state due at once; its entities wait for that state's ack.
 
   When local packs are re-applied while connected (a local mod reloads), the layer goes on top again.
+- **The added-buff check at the join** (a server whose buff room holds records: added buffs of loaded mods, or the
+  placeholders of a removed mod's buffs). The server holds each joining Kiln client at its Gameplay Ready until the
+  client answers its content state. A joining game cannot apply the state then: its registries load in its client
+  world's steps, and a held game gets no world data, so its world does not step. Since 0.2.0-dev.29.23 it answers at
+  once instead (ack result 4, "deferred", sent only to a server whose WELCOME has the handshake property
+  `kiln.content.held-answer`, which a client's HELLO has too): refused there when its own
+  buff room is already known (a game that joined before) and too small, with the numbers; otherwise let in, and the
+  ack of its apply once its world runs decides (a failure then refuses it with the reason). A client whose handshake
+  does not have that property (an older Kiln) is not held for this check: it can only answer once its world runs. A
+  held client that does not answer within 25 s is refused with "Your game did not answer this server's content and
+  added-buff check in time". 0.2.0-dev.29 to 0.2.0-dev.29.22 held every Kiln client there and refused it after 25 s
+  with "Waiting for this game's content and added-buff capacity check": no Kiln player could join such a server.
+  The programs the state carries (`@programs`, e.g. a StatusBlock's) are served through kiln.assets as before; a
+  joined client no longer reports kiln.abilities' `program_refresh` answer WRONG_THREAD (4) as an error (it registers
+  programs on the server world's thread only, and a joined client runs none): 0.2.0-dev.29 to .22 refused such a
+  player with "kiln.abilities did not register the programs (4)".
 - **Leave**: on `Network.Disconnected`, or a new server's handshake, the layer comes off on the client's main
   thread. If the client world stops first, kiln.content itself puts every change back while the world is still
   intact (`world_reset`, see below). Either order is safe.
