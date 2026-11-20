@@ -3976,7 +3976,12 @@
       "leavesListed.other": "Ses fichiers quittent la Bibliothèque. {others} le listent aussi et l'afficheront comme manquant.",
       "leaves": "Ses fichiers quittent la Bibliothèque.",
       "notSaved": "Votre liste de mods n'a pas pu être enregistrée ; rien n'a été retiré.",
-      "notRemovable": "dans le dossier du jeu, Kiln ne l'y a pas placé : retirez-le là-bas"
+      "notRemovable": "dans le dossier du jeu, Kiln ne l'y a pas placé : retirez-le là-bas",
+      "settingsToo": "Retirer aussi ses paramètres",
+      "settingsTooHint": "Ses paramètres dans ce jeu et dans vos profils partent aussi. Kiln en garde une copie dans les sauvegardes.",
+      "settingsTooMany": "Retirer aussi leurs paramètres",
+      "settingsTooManyHint": "Leurs paramètres dans ce jeu et dans vos profils partent aussi. Kiln en garde une copie dans les sauvegardes.",
+      "settingsLeft": "Certains paramètres sont restés"
     },
     "rollback": {
       "settingsBack.one": "Ses paramètres d'avant la mise à jour reviennent avec lui ({count} fichier).",

@@ -3976,7 +3976,12 @@
       "leavesListed.other": "Its files leave the Library. {others} list it too and will show it as missing.",
       "leaves": "Its files leave the Library.",
       "notSaved": "Your mod list could not be saved; nothing was removed.",
-      "notRemovable": "in the game folder, Kiln did not place it: remove it there"
+      "notRemovable": "in the game folder, Kiln did not place it: remove it there",
+      "settingsToo": "Remove its settings too",
+      "settingsTooHint": "Its settings in this game and your profiles go too. Kiln keeps a copy in backups.",
+      "settingsTooMany": "Remove their settings too",
+      "settingsTooManyHint": "Their settings in this game and your profiles go too. Kiln keeps a copy in backups.",
+      "settingsLeft": "Some settings stayed"
     },
     "rollback": {
       "settingsBack.one": "Its settings from before the update come back with it ({count} file).",

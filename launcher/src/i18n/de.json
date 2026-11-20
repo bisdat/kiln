@@ -3976,7 +3976,12 @@
       "leavesListed.other": "Ihre Dateien verlassen die Bibliothek. {others} führen sie auch und werden sie als fehlend zeigen.",
       "leaves": "Ihre Dateien verlassen die Bibliothek.",
       "notSaved": "Deine Modliste ließ sich nicht speichern; nichts wurde entfernt.",
-      "notRemovable": "im Spielordner, Kiln hat sie nicht dort abgelegt: Entferne sie dort"
+      "notRemovable": "im Spielordner, Kiln hat sie nicht dort abgelegt: Entferne sie dort",
+      "settingsToo": "Auch ihre Einstellungen entfernen",
+      "settingsTooHint": "Ihre Einstellungen in diesem Spiel und in deinen Profilen gehen mit. Kiln behält eine Kopie in den Backups.",
+      "settingsTooMany": "Auch ihre Einstellungen entfernen",
+      "settingsTooManyHint": "Ihre Einstellungen in diesem Spiel und in deinen Profilen gehen mit. Kiln behält eine Kopie in den Backups.",
+      "settingsLeft": "Einige Einstellungen sind geblieben"
     },
     "rollback": {
       "settingsBack.one": "Ihre Einstellungen von vor dem Update kommen mit zurück ({count} Datei).",

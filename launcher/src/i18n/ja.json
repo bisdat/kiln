@@ -3890,7 +3890,12 @@
       "leavesListed.other": "ファイルはライブラリから削除されます。{others} にも含まれていて、不足として表示されます。",
       "leaves": "ファイルはライブラリから削除されます。",
       "notSaved": "モッドリストを保存できなかったため、何も削除していません。",
-      "notRemovable": "ゲームフォルダーにあり、Kiln が置いたものではありません。そこで削除してください"
+      "notRemovable": "ゲームフォルダーにあり、Kiln が置いたものではありません。そこで削除してください",
+      "settingsToo": "設定も削除する",
+      "settingsTooHint": "このゲームとプロファイルにあるこの MOD の設定も削除されます。Kiln はバックアップにコピーを残します。",
+      "settingsTooMany": "設定も削除する",
+      "settingsTooManyHint": "このゲームとプロファイルにあるこれらの MOD の設定も削除されます。Kiln はバックアップにコピーを残します。",
+      "settingsLeft": "一部の設定は残りました"
     },
     "rollback": {
       "settingsBack.other": "アップデート前の設定も一緒に戻ります（{count} 個のファイル）。",

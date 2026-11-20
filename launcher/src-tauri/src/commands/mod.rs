@@ -74,6 +74,7 @@ pub const NAMES: &[&str] = &[
     "library_import",
     "library_remove",
     "library_remove_many",
+    "library_remove_settings",
     "library_unused",
     "library_users",
     "library_lint",

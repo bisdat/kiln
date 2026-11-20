@@ -8,7 +8,7 @@ import type {
   Activation, AddReport, BootSnapshot, BundlePart, RunSide, AddedMod, AdminEndpoint, AppInfo, BootJson, BootState, ConfigDocument, CookJob, CookReason, CookedMod, ConfigFileInfo, ConfigTarget, CrashReport, ReportFinding, ReportSaved, Detected, Distribution,
   FoundMod, FoundReport, GameInstall, GameStatus, ImportReport, InstallReceipt, InstallResult, InstallState, Json, KilnError, LastServer, LaunchRequest, NewerKilnMod, GraphicsToolNote, GraphicsStepAside, GraphicsStateFile,
   LaunchResult, LauncherSettings, RenderInfo, SandboxInfo, DesktopInfo, LibraryEntry, LibraryRef, LibraryVersion, RollbackReport, VersionRef, TakenOver, LogFile, LogTarget, ModKind, ModpackInstallRequest, ModpackInstallResult, ModsJson,
-  NativeJson, NativePlanEntry, NativeUserState, PreStart, Profile, ProfileChange, ProfileMod, ProfileSummary, ProxyClass, Rejection, RemoveReport, ResolvePreview, RuntimeBundle, SaveBackup, SaveSlot,
+  NativeJson, NativePlanEntry, NativeUserState, PreStart, Profile, ProfileChange, ProfileMod, ProfileSummary, ProxyClass, Rejection, RemoveReport, ResolvePreview, SettingsRemoval, RuntimeBundle, SaveBackup, SaveSlot,
   SchemaSnapshot, ServerInstance, ServerStatus, Task, TaskState, StartMode, StartSettings, StartSetup, RunnerInfo, BuildCheck,
 } from "./commands";
 import { adminMockHandlers } from "../admin/mock";
@@ -78,6 +78,18 @@ const commandPlans: Record<string, CommandPlan[]> = typeof window === "undefined
 const commandCalls: string[] = [];
 /** report_save's `exclude` each time ("What's in this report"; tests: `__kilnMock.reportSaves()`). */
 const reportSaves: string[][] = [];
+/** "Remove its settings too": each mod whose settings went ("<kind>/<id>"; tests: `__kilnMock.settingsRemoved()`). */
+const settingsRemoved: string[] = [];
+/** library_remove's `settings` / library_remove_settings (kiln_manage::mod_settings::remove): refused while the Library
+ *  holds a version, else the mod's settings files go, after a copy into the backups folder. */
+function mockRemoveSettings(kind: ModKind, id: string): SettingsRemoval {
+  if (library.some((l) => l.kind === kind && l.id === id && l.versions.length)) reject("conflict", `${kind} ${id} is still in the Library: its settings stay`);
+  settingsRemoved.push(`${kind}/${id}`);
+  return {
+    removed: [`/home/player/.local/share/kiln/profiles/default/config/${id}.json`, `/home/player/.local/share/Steam/steamapps/common/Enshrouded/kiln/state/placed-settings/${kind}/${id}`],
+    backup: `/home/player/.local/share/kiln/backups/mod-settings/${kind}-${id}-20261120T120000Z`, notes: [],
+  };
+}
 
 // ---------------------------------------------------------------- games
 
@@ -1238,8 +1250,14 @@ const handlers: Record<string, Handler> = {
   library_rollback: (a) => mockRollback(a),
   library_remove: (a) => {
     if (Object.values(running).some(Boolean)) reject("game_running", "Close Enshrouded first: the game may be reading this mod.");
-    mockLibraryRemove(a.entry as LibraryRef, Array.isArray(a.shown) ? (a.shown as string[]) : !!a.force);
-    return null;
+    const r = a.entry as LibraryRef;
+    mockLibraryRemove(r, Array.isArray(a.shown) ? (a.shown as string[]) : !!a.force);
+    // its settings go with its last version
+    return a.settings && !library.some((l) => l.kind === r.kind && l.id === r.id) ? mockRemoveSettings(r.kind, r.id) : null;
+  },
+  library_remove_settings: (a) => {
+    if (Object.values(running).some(Boolean)) reject("game_running", "Close Enshrouded first: the game may be reading the mod's settings.");
+    return mockRemoveSettings(a.kind as ModKind, a.id as string);
   },
   library_remove_many: (a) => {
     if (Object.values(running).some(Boolean)) reject("game_running", "Close Enshrouded first: the game may be reading this mod.");
@@ -1928,6 +1946,7 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
   calls: () => [...commandCalls],
   /** Each report_save's `exclude`, in order. */
   reportSaves: () => reportSaves.map((x) => [...x]),
+  settingsRemoved: () => [...settingsRemoved],
   planCommand: (cmd: string, plan: CommandPlan) => { (commandPlans[cmd] ??= []).push(plan); },
   openGate: (name: string) => { const g = gateOf(name); g.open = true; g.waiters.splice(0).forEach((w) => w()); },
   planActivation: (report: Pick<Activation, "retained" | "keptFiles" | "warnings">) => { activationPlan = report; },

@@ -3976,7 +3976,12 @@
       "leavesListed.other": "Sus archivos salen de la Biblioteca. {others} también lo incluyen y lo mostrarán como faltante.",
       "leaves": "Sus archivos salen de la Biblioteca.",
       "notSaved": "No se pudo guardar tu lista de mods; no se quitó nada.",
-      "notRemovable": "está en la carpeta del juego y Kiln no lo puso ahí: quítalo desde ahí"
+      "notRemovable": "está en la carpeta del juego y Kiln no lo puso ahí: quítalo desde ahí",
+      "settingsToo": "Quitar también sus ajustes",
+      "settingsTooHint": "Sus ajustes en este juego y en tus perfiles también se van. Kiln guarda una copia en las copias de seguridad.",
+      "settingsTooMany": "Quitar también sus ajustes",
+      "settingsTooManyHint": "Sus ajustes en este juego y en tus perfiles también se van. Kiln guarda una copia en las copias de seguridad.",
+      "settingsLeft": "Algunos ajustes se quedaron"
     },
     "rollback": {
       "settingsBack.one": "Sus ajustes de antes de la actualización vuelven con él ({count} archivo).",

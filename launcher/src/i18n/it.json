@@ -3976,7 +3976,12 @@
       "leavesListed.other": "I suoi file escono dalla Libreria. Anche {others} la elencano e la mostreranno come mancante.",
       "leaves": "I suoi file escono dalla Libreria.",
       "notSaved": "Non è stato possibile salvare il tuo elenco di mod; non è stato rimosso nulla.",
-      "notRemovable": "è nella cartella del gioco, non l'ha messa Kiln: rimuovila lì"
+      "notRemovable": "è nella cartella del gioco, non l'ha messa Kiln: rimuovila lì",
+      "settingsToo": "Rimuovi anche le sue impostazioni",
+      "settingsTooHint": "Anche le sue impostazioni in questo gioco e nei tuoi profili vengono rimosse. Kiln ne tiene una copia nei backup.",
+      "settingsTooMany": "Rimuovi anche le loro impostazioni",
+      "settingsTooManyHint": "Anche le loro impostazioni in questo gioco e nei tuoi profili vengono rimosse. Kiln ne tiene una copia nei backup.",
+      "settingsLeft": "Alcune impostazioni sono rimaste"
     },
     "rollback": {
       "settingsBack.one": "Tornano con essa le sue impostazioni di prima dell'aggiornamento ({count} file).",

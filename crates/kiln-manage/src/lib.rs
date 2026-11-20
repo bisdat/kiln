@@ -108,6 +108,7 @@ pub mod notices;
 pub mod quick;
 pub mod kept;
 pub mod settings_files;
+pub mod mod_settings;
 pub(crate) mod durable;
 pub mod engine_mods;
 pub mod game_files;

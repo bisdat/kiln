@@ -4148,7 +4148,12 @@
       "leavesListed.other": "Jego pliki znikną z biblioteki. {others} też go wymieniają i pokażą go jako brakujący.",
       "leaves": "Jego pliki znikną z biblioteki.",
       "notSaved": "Nie udało się zapisać twojej listy modów; nic nie usunięto.",
-      "notRemovable": "jest w folderze gry, nie umieścił go tam Kiln: usuń go stamtąd"
+      "notRemovable": "jest w folderze gry, nie umieścił go tam Kiln: usuń go stamtąd",
+      "settingsToo": "Usuń też jego ustawienia",
+      "settingsTooHint": "Jego ustawienia w tej grze i w twoich profilach też znikną. Kiln zachowa kopię w kopiach zapasowych.",
+      "settingsTooMany": "Usuń też ich ustawienia",
+      "settingsTooManyHint": "Ich ustawienia w tej grze i w twoich profilach też znikną. Kiln zachowa kopię w kopiach zapasowych.",
+      "settingsLeft": "Część ustawień została"
     },
     "rollback": {
       "settingsBack.one": "Jego ustawienia sprzed aktualizacji wracają razem z nim ({count} plik).",

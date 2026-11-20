@@ -3775,7 +3775,12 @@
       "leavesListed.other": "其文件将从模组库移除。{others} 也引用此项，移除后会显示为缺失。",
       "leaves": "其文件将从模组库移除。",
       "notSaved": "未能保存模组列表，未移除任何内容。",
-      "notRemovable": "这个模组并非由 Kiln 安装，请到游戏文件夹中手动移除。"
+      "notRemovable": "这个模组并非由 Kiln 安装，请到游戏文件夹中手动移除。",
+      "settingsToo": "同时删除它的设置",
+      "settingsTooHint": "它在这个游戏和你的配置档中的设置也会删除。Kiln 会在备份中保留一份副本。",
+      "settingsTooMany": "同时删除它们的设置",
+      "settingsTooManyHint": "它们在这个游戏和你的配置档中的设置也会删除。Kiln 会在备份中保留一份副本。",
+      "settingsLeft": "部分设置被保留了"
     },
     "rollback": {
       "settingsBack.other": "将一并还原更新前的设置（{count} 个文件）。",

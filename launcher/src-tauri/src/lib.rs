@@ -115,6 +115,7 @@ pub fn run() {
             commands::library::library_import,
             commands::library::library_remove,
             commands::library::library_remove_many,
+            commands::library::library_remove_settings,
             commands::library::library_unused,
             commands::library::library_users,
             commands::library::library_lint,
