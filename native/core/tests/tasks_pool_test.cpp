@@ -130,7 +130,8 @@ KILN_TASKS_TEST(runs_off_thread) {
     check(platform.acquires() == 2 && platform.releases() == 2, "every acquire was released");
     State s = State::None;
     check(pool.status(1, h, &s) == KILN_OK && s == State::Completed && pool.release(1, h) == KILN_OK, "terminal, released");
-    check(platform.lowered() >= 2, "workers run below normal");
+    // each worker lowers its priority first thing on its own thread: the second may not have got there yet
+    check(until([&] { return platform.lowered() >= 2; }), "workers run below normal");
     bool active = false;
     for (auto& [id, text] : platform.description_log()) active |= text == "mod.one/work";
     check(active, "the worker described itself <mod>/<task> while running");
@@ -1598,16 +1599,25 @@ KILN_TASKS_TEST(resident_drain_and_exit_park) {
     pool.close();
     check(until([&] { return signalled.load(); }), "the exit signals the running resident loop");
     Parker parker;
-    parker.start(pool, 500ull * 1000 * 1000);
+    // park() bounds its wait by the real clock (it has no clock seam), and the released loop must leave its worker
+    // inside that bound: 3 s leaves a loaded machine room, and the test says which side came first
+    // drain_owner returned once the drained loop's done had returned, but its worker holds that item until it dropped
+    // the task's metadata: wait for it to leave, so the park starts with exactly the two resident bodies in hand
+    check(until([&] { return pool.items_in_hand() == 2; }), "only the two resident bodies are in hand");
+    parker.start(pool, 3ull * 1000 * 1000 * 1000);
     check(until([&] { return pool.parked(); }), "the park began while both run");
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     check(!parker.returned.load(), "park waits while the resident bodies run");
     parked.release.open();
+    check(until([&] { return pool.items_in_hand() == 1; }) && !parker.returned.load(),
+          "the released loop left its worker while the park still waited");
     check(until([&] { return parker.returned.load(); }), "park returns at its bound");
     parker.join();
     check(parker.result.running_at_start == 2 && parker.result.still_running == 1 &&
               parker.result.names == "mod.three/ignores",
-          "the park waited for both and names the resident body that ignores its cancel: '" + parker.result.names + "'");
+          "the park waited for both and names the resident body that ignores its cancel: '" + parker.result.names + "' (" +
+              std::to_string(parker.result.running_at_start) + " at its start, " +
+              std::to_string(parker.result.still_running) + " at its end)");
     stuck.release.open();
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     check(parked.done_calls.load() == 0 && stuck.done_calls.load() == 0, "no done runs once the pool parked");
@@ -1645,7 +1655,8 @@ KILN_TASKS_TEST(resident_start_noted_once) {
     std::atomic<std::size_t> noted_before_body{99};
     loop.extra = [&](const TaskRun*) { noted_before_body = notes.resident().size(); };
     const KilnHandle lh = submit(pool, 1, resident("loop"), loop);
-    check(until([&] { return loop.body_runs.load() == 1; }), "the resident body runs");
+    // body_runs counts before the body's extra records what it saw: wait for that record, not only the count
+    check(until([&] { return loop.body_runs.load() == 1 && noted_before_body.load() != 99; }), "the resident body runs");
     check(noted_before_body.load() == 1, "its start was noted before its body ran");
     std::vector<PoolNote> r = notes.resident();
     check(r.size() == 1 && r[0].owner == 1 && r[0].task == lh && r[0].name == "loop" && r[0].owner_name == "mod.service" &&
@@ -1771,7 +1782,12 @@ KILN_TASKS_TEST(resident_one_per_owner) {
                                                               "task are accepted; that one runs");
     fill1.release.open();
     fill2.release.open();
-    check(until([&] { return first.body_runs.load() == 1 && plain.body_runs.load() == 1; }), "the first one runs");
+    // and the fills' dones have run and left their workers (release_meta drops their module references after the done
+    // returns): refused() compares the references held before and after, so nothing else may release meanwhile
+    check(until([&] {
+        return first.body_runs.load() == 1 && plain.body_runs.load() == 1 && fill1.done_calls.load() == 1 &&
+               fill2.done_calls.load() == 1 && pool.items_in_hand() == 3;
+    }), "the first one runs");
     refused(1, "a second one while the first runs");
     check(pool.cancel(1, fh, &st) == KILN_OK && st == State::Running, "cancel: asked, the body has not returned");
     refused(1, "a second one while the cancelled first one's body still runs");

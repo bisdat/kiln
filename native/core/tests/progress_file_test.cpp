@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -144,28 +145,38 @@ int main() {
         CHECK(b.written.size() == 4);
     }
     // ---- the thread: the last change is written when its time comes, with no further call ----
+    // The writer's own thread against the test's clock (the clock seam the game fills with its real one): the time it
+    // reads moves only when the test moves it, so a loaded machine cannot change what is due; the waits below only
+    // give the thread time to act and end as soon as it has.
     {
-        std::atomic<int> writes{0};
+        std::atomic<uint64_t> clock{0};
         std::string last;
         std::mutex m;
-        const auto t0 = std::chrono::steady_clock::now();
         Writer w(
             Model(who(), kClientPlan),
             [&](const std::string& t) {
                 std::lock_guard lk(m);
                 last = t;
-                ++writes;
                 return true;
             },
-            [t0] { return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count()); },
-            true);
+            [&clock] { return clock.load(); }, true);
+        const auto until = [&w](uint64_t n) {
+            for (int i = 0; i < 60000 && w.writes() < n; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return w.writes() >= n;
+        };
         w.first("start", 0);
+        CHECK(until(1) && w.writes() == 1);  // the first step: written at once
         for (int i = 0; i < 200; ++i) w.step("start", {}, "item " + std::to_string(i), static_cast<uint64_t>(i + 1), 200);
-        std::this_thread::sleep_for(std::chrono::milliseconds(600));
+        clock = 249;  // 200 changes within 250 ms of the last write: they wait (the thread re-reads the clock each pass)
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        CHECK(w.writes() == 1);
+        clock = 250;  // their time comes: the thread writes the last of them, with no further call
+        CHECK(until(2));
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        CHECK(w.writes() == 2);  // once: nothing is pending after it
         std::lock_guard lk(m);
-        CHECK(writes.load() >= 2 && writes.load() <= 4);
         auto d = json::parse(last);
-        CHECK(d["steps"][0]["detail"] == "item 199" && d["steps"][0]["done"] == 200);
+        CHECK(d["steps"][0]["detail"] == "item 199" && d["steps"][0]["done"] == 200 && d["atMs"] == 250);
     }
     // ---- atomic replacement: a reader never sees half a file (the sink's rule: <file>.tmp, then a rename) ----
     {

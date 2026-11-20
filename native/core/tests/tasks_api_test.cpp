@@ -275,7 +275,10 @@ KILN_TASKS_TEST(queue_full) {
     KilnHandle ha = 0, hb = 0;
     s.submit(1, &i, &body, &done, &a, &ha, nullptr);
     s.submit(1, &i, &body, &done, &b, &hb, nullptr);
-    check(until([&] { return a.done_calls.load() == 1 && b.done_calls.load() == 1; }), "two tasks ran");
+    // and their dones have left the workers: release_meta drops a task's module references after its done returns, and
+    // refused() compares the references held before and after the refused submit
+    check(until([&] { return a.done_calls.load() == 1 && b.done_calls.load() == 1 && pool.items_in_hand() == 0; }),
+          "two tasks ran");
     refused(s, p, pool, 1, &i, &body, &done, KILN_ERR_UNAVAILABLE, KILN_TASK_REFUSAL_QUEUE_FULL,
             "at the cap (terminal records count): UNAVAILABLE + QUEUE_FULL");
     check(s.release(1, ha) == KILN_OK, "release one terminal task");
