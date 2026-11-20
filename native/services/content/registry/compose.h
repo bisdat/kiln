@@ -79,6 +79,8 @@ struct OldWrite {
     std::string who;  // "<mod>/<key>", "<mod>: content/<file>", "shroudforge:<package>"
     FieldRef field;
     Op op;
+    ListOp list = ListOp::None;  // a list write (op unused): clear, append, remove, replace
+    std::vector<Value> list_values;
 };
 
 struct ChainRow {

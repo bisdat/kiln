@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
+#include <unordered_set>
 
 namespace kc::reg {
 
@@ -37,20 +39,42 @@ const char* line_kind_name(LineKind k) {
     }
 }
 
+namespace {
+
+// One spelling per value as operator== sees it (1 and 1.0 are one number), for a hashed remove.
+std::string value_key(const Value& v) {
+    if (v.numeric()) {
+        const double d = v.as_double() == 0 ? 0.0 : v.as_double();
+        char buf[40];
+        std::snprintf(buf, sizeof buf, "n%.17g", d);
+        return buf;
+    }
+    switch (v.kind) {
+        case Value::Bool: return v.b ? "b1" : "b0";
+        case Value::Text: return "t" + v.t;
+        case Value::List: return "l" + v.to_json().dump();
+        default: return "z";
+    }
+}
+
+Value list_step(const ListOp op, const std::vector<Value>& values, const Value& v) {
+    std::vector<Value> l = v.kind == Value::List ? v.list : std::vector<Value>{};
+    if (op == ListOp::Clear) l.clear();
+    else if (op == ListOp::Replace) l = values;
+    else if (op == ListOp::Append) l.insert(l.end(), values.begin(), values.end());
+    else {
+        std::unordered_set<std::string> gone;
+        for (const Value& x : values) gone.insert(value_key(x));
+        std::erase_if(l, [&](const Value& x) { return gone.count(value_key(x)) != 0; });
+    }
+    return Value::of_list(std::move(l));
+}
+
+}  // namespace
+
 Value evaluate(const std::vector<ChainRow>& rows, const Value& below, const FieldSpec& f) {
     Value v = below;
-    for (const ChainRow& r : rows) {
-        if (r.list == ListOp::None) {
-            v = apply_op(r.op, v, f);
-            continue;
-        }
-        std::vector<Value> l = v.kind == Value::List ? v.list : std::vector<Value>{};
-        if (r.list == ListOp::Clear) l.clear();
-        else if (r.list == ListOp::Replace) l = r.list_values;
-        else if (r.list == ListOp::Append) l.insert(l.end(), r.list_values.begin(), r.list_values.end());
-        else std::erase_if(l, [&](const Value& x) { return std::find(r.list_values.begin(), r.list_values.end(), x) != r.list_values.end(); });
-        v = Value::of_list(std::move(l));
-    }
+    for (const ChainRow& r : rows) v = r.list == ListOp::None ? apply_op(r.op, v, f) : list_step(r.list, r.list_values, v);
     return v;
 }
 
@@ -69,20 +93,52 @@ struct EntryState {
     std::string removed_by, removed_in;
     bool added = false;  // a mod's entry: its raw members are its like entry's
     std::string like;
+    bool retired = false;  // the ids ledger retired this id: never added again, never edited
 };
 
+// The stage's state. A final's own view is an overlay over the post-alter state (parent): reads fall through, writes stay in
+// the overlay, so a mod's final costs what it touches, not a copy of everything.
 struct State {
-    std::map<std::string, std::vector<EntryState>> regs;
-    std::map<EntryRef, size_t> at;
-    std::map<FieldRef, FieldOutcome> fields;
+    const State* parent = nullptr;
+    std::map<std::string, std::vector<EntryState>> regs;  // the root's entries, in each registry's order
+    std::map<EntryRef, size_t> at;                        // the root's index into regs
+    std::map<EntryRef, EntryState> over;                  // an overlay's changed entries
+    std::map<FieldRef, FieldOutcome> fields;              // this level's fields (an overlay: the ones it touched)
 
     const EntryState* entry(const std::string& reg, const std::string& id) const {
+        if (parent) {
+            const auto it = over.find({reg, id});
+            return it != over.end() ? &it->second : parent->entry(reg, id);
+        }
         const auto it = at.find({reg, id});
         return it == at.end() ? nullptr : &regs.at(reg)[it->second];
     }
     EntryState* entry(const std::string& reg, const std::string& id) {
+        if (parent) {
+            const auto it = over.find({reg, id});
+            if (it != over.end()) return &it->second;
+            const EntryState* p = parent->entry(reg, id);
+            return p ? &over.emplace(EntryRef{reg, id}, *p).first->second : nullptr;
+        }
         const auto it = at.find({reg, id});
         return it == at.end() ? nullptr : &regs[reg][it->second];
+    }
+    // every entry of a registry, in its order, as this level sees it
+    void each_entry(const std::string& reg, const std::function<void(const EntryState&)>& fn) const {
+        if (parent) {
+            parent->each_entry(reg, [&](const EntryState& e) {
+                const auto it = over.find({reg, e.id});
+                fn(it != over.end() ? it->second : e);
+            });
+            return;
+        }
+        if (const auto it = regs.find(reg); it != regs.end())
+            for (const EntryState& e : it->second) fn(e);
+    }
+    const FieldOutcome* find_field(const FieldRef& f) const {
+        const auto it = fields.find(f);
+        if (it != fields.end()) return &it->second;
+        return parent ? parent->find_field(f) : nullptr;
     }
     Value base_of(const FieldRef& f) const {
         const EntryState* e = entry(f.registry, f.id);
@@ -91,15 +147,18 @@ struct State {
         return b == e->base.end() ? Value{} : b->second;
     }
     Value current(const FieldRef& f) const {
-        const auto it = fields.find(f);
-        return it != fields.end() ? it->second.result : base_of(f);
+        const FieldOutcome* fo = find_field(f);
+        return fo ? fo->result : base_of(f);
     }
     FieldOutcome& touch(const FieldRef& f) {
         auto [it, fresh] = fields.try_emplace(f);
-        if (fresh) it->second.result = it->second.base = base_of(f);
+        if (fresh) {
+            if (const FieldOutcome* p = parent ? parent->find_field(f) : nullptr) it->second = *p;
+            else it->second.result = it->second.base = base_of(f);
+        }
         return it->second;
     }
-    void add_entry(const std::string& reg, EntryState e) {
+    void add_entry(const std::string& reg, EntryState e) {  // the root only: entries are added in stage add
         auto& list = regs[reg];
         at[{reg, e.id}] = list.size();
         list.push_back(std::move(e));
@@ -109,12 +168,18 @@ struct State {
     // added entry through its like entry). nullptr + *why: it does not resolve there.
     std::map<FieldRef, std::optional<RawMember>> raw_members;
     std::map<FieldRef, std::string> raw_why;
+    bool cached_raw(const FieldRef& ref, const RawMember** m, std::string* why) const {
+        if (const auto it = raw_members.find(ref); it != raw_members.end()) {
+            *m = it->second ? &*it->second : nullptr;
+            if (!it->second) *why = raw_why.at(ref);
+            return true;
+        }
+        return parent && parent->cached_raw(ref, m, why);
+    }
     const RawMember* raw_member(const BaseModel& b, const std::string& reg, const std::string& id, const std::string& key, std::string* why) {
         const FieldRef ref{reg, id, raw_field(key)};
-        if (const auto it = raw_members.find(ref); it != raw_members.end()) {
-            if (!it->second) *why = raw_why[ref];
-            return it->second ? &*it->second : nullptr;
-        }
+        const RawMember* known = nullptr;
+        if (cached_raw(ref, &known, why)) return known;
         std::optional<RawMember> m;
         std::string w;
         std::string game = id;  // the game entry whose data it is
@@ -158,10 +223,9 @@ public:
     }
     std::vector<std::string> ids(const std::string& reg) const override {
         std::vector<std::string> out;
-        const auto it = s_.regs.find(reg);
-        if (it != s_.regs.end())
-            for (const EntryState& e : it->second)
-                if (!e.removed) out.push_back(e.id);
+        s_.each_entry(reg, [&](const EntryState& e) {
+            if (!e.removed) out.push_back(e.id);
+        });
         return out;
     }
     bool has_trait(const std::string& reg, const std::string& id, const std::string& t) const override {
@@ -214,7 +278,8 @@ bool select(const View& v, const Schema& schema, const State& s, const std::stri
         for (const auto& [k, c] : sel.where.items())
             if (!schema.registry(reg)->field(k)) return *why = "where: " + reg + " has no field \"" + k + "\"", false;
     // D3: the old debug-name forms keep working: "Material_T1_Wood_Logs" names "game:material_t1_wood_logs"
-    const std::string id = sel.id.find(':') == std::string::npos && sel.id != "*" ? "game:" + lower(sel.id) : sel.id;
+    // Kiln ids are lower case: an exact id selects without case, as a glob does
+    const std::string id = sel.id.find(':') == std::string::npos && sel.id != "*" ? "game:" + lower(sel.id) : lower(sel.id);
     auto keep = [&](const std::string& e) {
         if (sel.where.is_object())
             for (const auto& [k, c] : sel.where.items()) {
@@ -231,7 +296,7 @@ bool select(const View& v, const Schema& schema, const State& s, const std::stri
         if (!v.exists(reg, id)) {
             const EntryState* e = s.entry(reg, id);
             if (e && !e->removed_in.empty()) return *why = id + " was removed by game build " + e->removed_in + "; this edit was not applied", false;
-            if (e && e->removed && e->removed_by != "retired") return *dropped_by = e->removed_by, true;
+            if (e && e->removed && !e->retired) return *dropped_by = e->removed_by, true;
             return *why = "no entry " + id + " in " + reg, false;
         }
         if (keep(id)) ids->push_back(id);
@@ -245,7 +310,7 @@ bool select(const View& v, const Schema& schema, const State& s, const std::stri
 // One write of an edit into one place: a Kiln field, or a raw member (the Advanced tier).
 struct Target {
     FieldRef ref;
-    FieldSpec spec;  // the schema's field, or the raw member's own spec on this build
+    const FieldSpec* spec = nullptr;  // the schema's field, or the raw member's own spec on this build (both outlive the stage)
     Op op;
     ListOp list = ListOp::None;
     std::vector<Value> list_values;
@@ -264,18 +329,15 @@ std::string place_text(const Target& t) {
 
 // The value an edit makes of cur. false: refused (*why).
 bool next_value(const Target& t, const Value& cur, Value* next, std::string* why) {
-    const FieldSpec& f = t.spec;
+    const FieldSpec& f = *t.spec;
     if (t.list == ListOp::None) {
         if (t.op.relative() && !cur.numeric()) return *why = f.name + " has no number to change here", false;
-        *next = apply_op(t.op, cur, f);
+        if (!op_result(t.op, cur, f, next, why)) return false;
         if (next->numeric() && ((f.min && next->as_double() < *f.min) || (f.max && next->as_double() > *f.max)))
             return *why = f.name + ": the result " + next->text_of() + " is outside the field's range", false;
         return true;
     }
-    ChainRow r;
-    r.list = t.list;
-    r.list_values = t.list_values;
-    *next = evaluate({r}, cur, f);
+    *next = list_step(t.list, t.list_values, cur);
     if (f.max_items && next->list.size() > f.max_items)
         return *why = f.name + " would hold " + std::to_string(next->list.size()) + " values; it holds at most " + std::to_string(f.max_items), false;
     return true;
@@ -307,15 +369,15 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
         const ChainRow* scale = nullptr;
         std::string scale_place;
         if (!t.conv_field.empty()) {
-            const auto it = s.fields.find({t.ref.registry, t.ref.id, t.conv_field});
-            if (it != s.fields.end() && !it->second.chain.empty()) scale = &it->second.chain.back(), scale_place = t.ref.registry + "." + t.conv_field;
+            const FieldOutcome* o = s.find_field({t.ref.registry, t.ref.id, t.conv_field});
+            if (o && !o->chain.empty()) scale = &o->chain.back(), scale_place = t.ref.registry + "." + t.conv_field;
         } else if (t.raw.empty()) {
             const auto conv = c.converted.find({t.ref.registry, t.ref.field});
             if (conv != c.converted.end())
                 for (const std::string& key : conv->second) {
-                    const auto it = s.fields.find({t.ref.registry, t.ref.id, raw_field(key)});
-                    if (it == s.fields.end() || it->second.chain.empty()) continue;
-                    scale = &it->second.chain.back(), scale_place = "raw path " + (it->second.raw.empty() ? key : it->second.raw);
+                    const FieldOutcome* o = s.find_field({t.ref.registry, t.ref.id, raw_field(key)});
+                    if (!o || o->chain.empty()) continue;
+                    scale = &o->chain.back(), scale_place = "raw path " + (o->raw.empty() ? key : o->raw);
                     break;
                 }
         }
@@ -327,32 +389,36 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
         }
         Step st;
         st.t = &t;
-        const auto fo = s.fields.find(t.ref);
-        const Value cur = s.current(t.ref);
+        const FieldOutcome* fo = s.find_field(t.ref);
+        const Value cur = fo ? fo->result : s.base_of(t.ref);
         // another writer: another mod's registry edit, an old path of another mod, an archive-writer package (the mod's own
         // older path is no conflict with itself)
         auto other = [&](const ChainRow& r) { return r.mod != w.mod || r.mod.empty(); };
-        const ChainRow* last_other = nullptr;  // the latest other writer
         const ChainRow* prev = nullptr;        // the row just before this edit
-        bool other_exclusive = false;
-        if (fo != s.fields.end())
-            for (const ChainRow& r : fo->second.chain) {
+        const ChainRow* last_other = nullptr;  // the latest other writer that is not the archive writer (its value is base, D1)
+        const ChainRow* excl = nullptr;        // the latest other writer whose edit is exclusive
+        bool earlier = false;                  // an earlier writer for yield: not the archive writer, not the mod itself
+        if (fo)
+            for (const ChainRow& r : fo->chain) {
                 prev = &r;
-                if (!other(r)) continue;
+                if (!other(r) || r.kind == WriterKind::ArchiveWriter) continue;
+                earlier = true;
                 last_other = &r;
-                other_exclusive = other_exclusive || r.exclusive;
+                if (r.exclusive) excl = &r;
             }
-        if (e.yield && fo != s.fields.end() && !fo->second.chain.empty()) {
+        if (e.yield && earlier) {
             st.yielded = true;
             steps.push_back(std::move(st));
             continue;
         }
         if (!next_value(t, cur, &st.next, why)) return *why = t.ref.id + ": " + *why, false;
-        if (last_other) {
+        if (last_other && (e.exclusive || excl)) {
             const bool agreed = absolute(t) && absolute(*last_other) && st.next == cur;
-            if ((e.exclusive || other_exclusive) && !agreed)
-                return refuse_line(t, last_other->who, certainty_of(last_other->kind),
-                                   "Conflict (exclusive): " + last_other->who + " also writes " + place_text(t) + "; the later edit is refused");
+            const ChainRow& named = e.exclusive ? *last_other : *excl;  // the conflict is with the exclusive edit
+            if (!agreed)
+                return refuse_line(t, named.who, certainty_of(named.kind),
+                                   "Conflict (exclusive): " + named.who + (e.exclusive ? " also writes " : " wrote ") + place_text(t) +
+                                       (e.exclusive ? "; the later edit is refused" : " exclusively; the later edit is refused"));
         }
         if (prev && other(*prev)) {  // a line when this edit follows another writer's (not after the mod's own)
             if (absolute(t)) {
@@ -377,7 +443,7 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
         FieldOutcome& fo = s.touch(t.ref);
         if (is_raw_field(t.ref.field)) {
             if (fo.raw.empty()) fo.raw = t.raw;
-            if (!fo.raw_spec) fo.raw_spec = t.spec;
+            if (!fo.raw_spec) fo.raw_spec = *t.spec;
         }
         const Value before = fo.result;
         ChainRow r;
@@ -414,7 +480,7 @@ std::vector<Target> field_targets(const FieldSpec& f, const Edit& e, const std::
     for (const std::string& id : ids) {
         Target t;
         t.ref = {e.registry, id, e.field};
-        t.spec = f;
+        t.spec = &f;
         t.op = e.op;
         t.list = e.list;
         t.list_values = e.list_values;
@@ -437,7 +503,7 @@ bool raw_target(Ctx& c, State& s, const std::string& reg, const std::string& id,
         if (f->read_only) return *why = id + ": raw path \"" + rw.path + "\" is the member of " + reg + "." + cover->field + ", which is read-only", false;
         if (f->type == FieldType::List) return *why = id + ": raw path \"" + rw.path + "\" is the list " + reg + "." + cover->field + ": change it with list ops on that field", false;
         t->ref = {reg, id, cover->field};
-        t->spec = *f;
+        t->spec = f;
         if (!op_of(rw.op, *f, &t->op, &err)) return *why = id + ": raw path \"" + rw.path + "\" (" + reg + "." + cover->field + "): " + err, false;
         return true;
     }
@@ -447,13 +513,44 @@ bool raw_target(Ctx& c, State& s, const std::string& reg, const std::string& id,
                       "); raw paths are the Advanced tier, checked per entry: this edit was not applied", false;
     if (m->spec.read_only) return *why = id + ": raw path \"" + rw.path + "\" is read-only on this game build", false;
     t->ref = {reg, id, raw_field(rw.key)};
-    t->spec = m->spec;
+    t->spec = &m->spec;
     if (cover) t->conv_field = cover->field;
     if (!op_of(rw.op, m->spec, &t->op, &err)) return *why = id + ": raw path \"" + rw.path + "\": " + err, false;
     return true;
 }
 
 void refuse(Ctx& c, const Who& w, const Edit& e, const std::string& why) { c.out.refused.push_back({w.mod, w.source, w.stage, e.n, why}); }
+
+// A value a field can take (code batches bypass the IR reader's checks): its type, its range, a list's size.
+bool value_fits(const Value& v, const FieldSpec& f, std::string* why, bool element = false) {
+    const FieldType t = element ? f.element : f.type;
+    auto range = [&](double d) {
+        if (!std::isfinite(d)) return *why = f.name + ": not a finite number", false;
+        if ((f.min && d < *f.min) || (f.max && d > *f.max)) return *why = f.name + ": " + v.text_of() + " is outside the field's range", false;
+        return true;
+    };
+    switch (t) {
+        case FieldType::Int:
+            if (v.kind != Value::Int) return *why = f.name + ": a whole number is expected", false;
+            return range(static_cast<double>(v.i));
+        case FieldType::Float:
+            if (!v.numeric()) return *why = f.name + ": a number is expected", false;
+            return range(v.as_double());
+        case FieldType::Bool:
+            return v.kind == Value::Bool || (*why = f.name + ": true or false is expected", false);
+        case FieldType::Enum:
+            if (v.kind == Value::Text && std::find(f.enum_values.begin(), f.enum_values.end(), v.t) != f.enum_values.end()) return true;
+            return *why = f.name + ": one of the schema's names is expected", false;
+        case FieldType::Id:
+            return (v.kind == Value::Text && v.t.find(':') != std::string::npos) || (*why = f.name + ": an id is expected", false);
+        default:
+            if (element || v.kind != Value::List) return *why = f.name + ": a list is expected", false;
+            if (f.max_items && v.list.size() > f.max_items) return *why = f.name + ": at most " + std::to_string(f.max_items) + " values", false;
+            for (const Value& x : v.list)
+                if (!value_fits(x, f, why, true)) return false;
+            return true;
+    }
+}
 
 // The field an edit's report lines name: its Kiln field, or its first raw path's chain.
 std::string edit_field(const Edit& e) { return e.raw.empty() ? e.field : raw_field(e.raw.front().key); }
@@ -462,35 +559,43 @@ std::string edit_field(const Edit& e) { return e.raw.empty() ? e.field : raw_fie
 void run_edit(Ctx& c, State& s, const Who& w, const Edit& e, bool report, const std::vector<std::string>* resolved) {
     const RegistrySpec* reg = c.schema.registry(e.registry);
     if (!reg) return refuse(c, w, e, "no registry \"" + e.registry + "\"");
-    if (e.entry == EntryOp::Add) {
+    if (e.entry == EntryOp::Add) {  // all or nothing: the entry and every field it is given, or none of it
         if (w.stage != Stage::Add) return refuse(c, w, e, "an entry is added in stage add");
         if (e.add_id.rfind(w.mod + ":", 0) != 0) return refuse(c, w, e, "an added entry's id is \"" + w.mod + ":<name>\"");
+        if (lower(e.add_id) != e.add_id) return refuse(c, w, e, "an added entry's id is lower case (Kiln ids are), not \"" + e.add_id + "\"");
         if (s.entry(e.registry, e.add_id)) return refuse(c, w, e, "the id " + e.add_id + " is taken (ids are never reused)");
+        std::vector<std::pair<const FieldSpec*, Value>> given;
+        for (const auto& [k, v] : e.add_fields) {
+            const FieldSpec* f = reg->field(k);
+            std::string why;
+            if (!f) return refuse(c, w, e, e.registry + " has no field \"" + k + "\"; the entry is not added");
+            if (f->read_only) return refuse(c, w, e, e.registry + "." + k + " is read-only; the entry is not added");
+            if (!value_fits(v, *f, &why)) return refuse(c, w, e, why + "; the entry is not added");
+            given.emplace_back(f, v);
+        }
         EntryState n;
         n.id = e.add_id;
         n.added = true;
-        n.like = e.like;
-        if (!e.like.empty()) {
-            const EntryState* l = s.entry(e.registry, e.like);
+        n.like = lower(e.like);
+        if (!n.like.empty()) {
+            const EntryState* l = s.entry(e.registry, n.like);
             if (!l || l->removed) return refuse(c, w, e, "like: no entry " + e.like + " in " + e.registry);
             n.traits = l->traits;
             n.base = l->base;
-            for (const auto& [ref, fo] : s.fields)
-                if (ref.registry == e.registry && ref.id == e.like) n.base[ref.field] = fo.result;
+            for (auto it = s.fields.lower_bound({e.registry, n.like, ""}); it != s.fields.end() && it->first.registry == e.registry && it->first.id == n.like; ++it)
+                n.base[it->first.field] = it->second.result;
         }
         s.add_entry(e.registry, std::move(n));
         if (report) c.out.added.push_back({e.registry, e.add_id});
-        for (const auto& [k, v] : e.add_fields) {
+        for (const auto& [f, v] : given) {  // a fresh entry: no other writer, nothing to refuse
             Edit set;
             set.n = e.n;
             set.registry = e.registry;
-            set.field = k;
+            set.field = f->name;
             set.op.set = true;
             set.op.value = v;
             std::string why;
-            const FieldSpec* f = reg->field(k);
-            if (!f) refuse(c, w, e, e.registry + " has no field \"" + k + "\"");
-            else if (!apply_targets(c, s, w, set, field_targets(*f, set, {e.add_id}), report, &why)) refuse(c, w, e, why);
+            apply_targets(c, s, w, set, field_targets(*f, set, {e.add_id}), report, &why);
         }
         return;
     }
@@ -542,6 +647,21 @@ void run_edit(Ctx& c, State& s, const Who& w, const Edit& e, bool report, const 
 }
 
 void run_mod(Ctx& c, State& s, const ModInput& m, Stage stage) {
+    std::string bad_id;
+    if (!mod_id_ok(m.id, &bad_id)) {  // "game", "kiln", or no Kiln mod id: it mints no ids and edits nothing
+        auto refuse_all = [&](const Batch& b) {
+            for (const Edit& e : b.edits) refuse(c, {m.id, b.source, stage}, e, "mod id " + bad_id);
+        };
+        for (const Batch& b : m.batches)
+            if (b.stage == stage) refuse_all(b);
+        if (m.code) {
+            Batch cb;
+            cb.source = "code";
+            m.code(stage, StateView(s), &cb);
+            refuse_all(cb);
+        }
+        return;
+    }
     for (const Batch& b : m.batches) {
         if (b.stage != stage) continue;
         const Who w{m.id, b.source, stage};
@@ -590,12 +710,16 @@ Result compose(const Schema& schema, const BaseModel& base, const std::vector<Ol
         if (s.entry(reg, id)) continue;
         EntryState x;
         x.id = id;
-        x.removed = true;
-        x.removed_by = "retired";
+        x.removed = x.retired = true;
+        x.removed_by = "the ids ledger (retired)";
         s.add_entry(reg, std::move(x));
     }
     // D1: Kiln's older paths and the archive writer's packages lie below every registry edit, in the order they apply
-    // (a raw member's chain too: "raw:<key>", when the member resolves on this build)
+    // (a raw member's chain too: "raw:<key>", when the member resolves on this build). Old data packs (and Content.* code)
+    // are applied by the game's kiln.content as today: each one's relative op over the value below the packs (what the game
+    // loaded: the archive writer's and old boot patches' result), the later one winning (packs.cpp parse_value); so two
+    // packs' mul 2 and mul 3 give x3, not x6. Registry edits above them compose on the result.
+    std::map<FieldRef, Value> below_packs;
     for (const OldWrite& w : old) {
         const RegistrySpec* reg = schema.registry(w.field.registry);
         if (!reg || !s.entry(w.field.registry, w.field.id)) continue;
@@ -611,20 +735,25 @@ Result compose(const Schema& schema, const BaseModel& base, const std::vector<Ol
             if (fo.raw.empty()) fo.raw = m->spec.name;
             if (!fo.raw_spec) fo.raw_spec = m->spec;
         }
+        Value from = fo.result;
+        if (w.kind == WriterKind::OldPack || w.kind == WriterKind::Code) from = below_packs.try_emplace(w.field, fo.result).first->second;
         ChainRow r;
         r.kind = w.kind;
         r.mod = w.mod;
         r.who = w.who;
         r.op = w.op;
-        r.after = apply_op(w.op, fo.result, *f);
+        r.list = w.list;
+        r.list_values = w.list_values;
+        r.after = w.list == ListOp::None ? apply_op(w.op, from, *f) : list_step(w.list, w.list_values, from);
         fo.result = r.after;
         fo.winner = w.who;
         fo.chain.push_back(std::move(r));
     }
     for (const Stage stage : {Stage::Add, Stage::Alter})
         for (const ModInput& m : mods) run_mod(c, s, m, stage);
-    // final: each mod on its own copy of the post-alter state (it sees add+alter and its own final edits, never another
-    // mod's); the entries it named are composed afterwards, in load order, with alter's rules
+    // final: each mod on its own overlay over the post-alter state (it sees add+alter and its own final edits, never another
+    // mod's; the post-alter state is not changed until every final ran); the entries it named are composed afterwards, in
+    // load order, with alter's rules
     struct Held {
         Who who;
         Edit edit;
@@ -632,11 +761,18 @@ Result compose(const Schema& schema, const BaseModel& base, const std::vector<Ol
         std::string dropped_by;
     };
     std::vector<Held> held;
-    const State frozen = s;
     for (const ModInput& m : mods) {
         const bool any = m.code || std::any_of(m.batches.begin(), m.batches.end(), [](const Batch& b) { return b.stage == Stage::Final; });
         if (!any) continue;
-        State scratch = frozen;
+        std::string bad_id;
+        if (!mod_id_ok(m.id, &bad_id)) {
+            State scratch;
+            scratch.parent = &s;
+            run_mod(c, scratch, m, Stage::Final);  // refuses each of its edits
+            continue;
+        }
+        State scratch;
+        scratch.parent = &s;
         Result ignored;
         Ctx sc{schema, ignored, base, c.converted};
         auto take = [&](const Who& w, const Edit& e, const std::string& batch_mod) {

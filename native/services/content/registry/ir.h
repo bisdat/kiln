@@ -152,13 +152,23 @@ struct Refusal {
     std::string reason;
 };
 
-// One IR document. false: the document itself is unusable (*err: why; nothing of it is taken). true: *out holds every edit
-// that passed validation; each refused edit is one row in *refused, named by its mod, source and ordinal.
+// One IR document. false: the document itself is unusable (*err: why; nothing of it is taken): not JSON, nested deeper than
+// 32 levels, larger than 16 MiB, no usable ir / mod / stage / edits. true: *out holds every edit that passed validation; each
+// refused edit is one row in *refused, named by its mod, source and ordinal ("n", else its position; an "n" that is not
+// 0..4294967295 or is used twice refuses that edit). No exception leaves either form.
 bool parse_batch(const std::string& text, const Schema& schema, Batch* out, std::vector<Refusal>* refused, std::string* err);
 bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<Refusal>* refused, std::string* err);
 
 // Today's numeric operation on a value (packs.cpp parse_value's order): the base for a relative op. Integer fields round.
+// false + *why: the result is not finite, or past what a whole-number field holds (checked before any rounding).
+bool op_result(const Op& op, const Value& base, const FieldSpec& f, Value* out, std::string* why);
+// The same, total: a result op_result refuses leaves the value as it was (for back-ends re-evaluating a chain over another
+// value; the stage itself refuses such an edit through op_result).
 Value apply_op(const Op& op, const Value& base, const FieldSpec& f);
+
+// A Kiln mod id ("^[a-z0-9][a-z0-9._-]{0,63}$", kiln.mod.schema.json) that is not reserved ("game", "kiln", ...): a batch of
+// any other "mod" is refused whole, so no mod mints game: or kiln: ids. false + *err: why not.
+bool mod_id_ok(const std::string& id, std::string* err);
 
 // An edit's "op" for field f: a plain value (an absolute set), {"set": v}, or relative numbers {mul, add, min, max, raiseOnly,
 // lowerOnly} (number fields only). false + *err: why not.

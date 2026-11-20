@@ -4,9 +4,66 @@
 
 #include <algorithm>
 #include <cctype>
+#include <climits>
 #include <cmath>
+#include <set>
 
 namespace kc::reg {
+
+namespace {
+
+constexpr int kMaxDepth = 32;              // nesting levels of an IR document (a real one has fewer than 8)
+constexpr size_t kMaxListValues = 4096;    // values in one list op or list value
+constexpr size_t kMaxIrBytes = 16u << 20;  // KILN_REGISTRY_MAX_IR_BYTES
+// The whole numbers an int64 holds, as doubles: [-2^63, 2^63).
+constexpr double kInt64Lo = -9223372036854775808.0, kInt64Hi = 9223372036854775808.0;
+
+// An untrusted value for a message: a scalar as written (a text cut to 64 bytes on a character boundary), never the whole of
+// a list or an object.
+std::string brief(const json& j) {
+    if (j.is_string()) {
+        std::string s = j.get<std::string>();
+        if (s.size() > 64) {
+            size_t cut = 64;
+            while (cut > 0 && (static_cast<unsigned char>(s[cut]) & 0xC0) == 0x80) --cut;
+            s = s.substr(0, cut) + "...";
+        }
+        return json(s).dump(-1, ' ', false, json::error_handler_t::replace);
+    }
+    if (j.is_number() || j.is_boolean() || j.is_null()) return j.dump();
+    return j.is_array() ? "a list" : j.is_object() ? "an object" : "a value";
+}
+
+// Thrown by the parser's callback past kMaxDepth: the document is refused before anything nests deeper (nothing here recurses
+// on an untrusted document).
+struct TooDeep {};
+
+bool too_deep(const json& doc) {  // the same limit for a document handed over as JSON; iterative
+    std::vector<std::pair<const json*, int>> stack{{&doc, 0}};
+    while (!stack.empty()) {
+        const auto [j, d] = stack.back();
+        stack.pop_back();
+        if (!j->is_structured()) continue;
+        if (d >= kMaxDepth) return true;
+        for (const json& c : *j) stack.emplace_back(&c, d + 1);
+    }
+    return false;
+}
+
+const char* const kReservedMods[] = {"kiln", "kiln.api", "game", "enshrouded", "native", "permissions"};
+
+}  // namespace
+
+bool mod_id_ok(const std::string& id, std::string* err) {
+    const bool shape = !id.empty() && id.size() <= 64 && (std::islower(static_cast<unsigned char>(id[0])) || std::isdigit(static_cast<unsigned char>(id[0]))) &&
+                       std::all_of(id.begin(), id.end(), [](char c) {
+                           return std::islower(static_cast<unsigned char>(c)) || std::isdigit(static_cast<unsigned char>(c)) || c == '.' || c == '_' || c == '-';
+                       });
+    if (!shape) return *err = "\"" + json(id).dump(-1, ' ', false, json::error_handler_t::replace).substr(1) + " is no Kiln mod id (a-z, 0-9, '.', '_', '-'; at most 64)", false;
+    for (const char* r : kReservedMods)
+        if (id == r) return *err = "\"" + id + "\" is reserved (game: and kiln ids are Kiln's own), not a mod's id", false;
+    return true;
+}
 
 json Value::to_json() const {
     switch (kind) {
@@ -84,39 +141,53 @@ bool in_range(double v, const FieldSpec& f, std::string* err) {
 
 bool scalar_of(const json& j, FieldType type, const FieldSpec& f, Value* out, std::string* err) {
     switch (type) {
-        case FieldType::Int:
-            if (j.is_number_integer() || (j.is_number_float() && std::nearbyint(j.get<double>()) == j.get<double>())) {
-                const double v = j.get<double>();
-                if (!in_range(v, f, err)) return false;
-                *out = Value::integer(j.is_number_integer() ? (j.is_number_unsigned() ? static_cast<int64_t>(j.get<uint64_t>()) : j.get<int64_t>())
-                                                            : static_cast<int64_t>(v));
-                return true;
+        case FieldType::Int: {
+            int64_t v = 0;
+            if (j.is_number_unsigned()) {
+                const uint64_t u = j.get<uint64_t>();
+                if (u > static_cast<uint64_t>(INT64_MAX)) return *err = f.name + ": " + j.dump() + " is too large for a whole-number field", false;
+                v = static_cast<int64_t>(u);
+            } else if (j.is_number_integer()) {
+                v = j.get<int64_t>();
+            } else if (j.is_number_float()) {
+                const double d = j.get<double>();
+                if (!std::isfinite(d) || std::nearbyint(d) != d) return *err = f.name + ": a whole number is expected, not " + brief(j), false;
+                if (d < kInt64Lo || d >= kInt64Hi) return *err = f.name + ": " + brief(j) + " is too large for a whole-number field", false;
+                v = static_cast<int64_t>(d);
+            } else {
+                return *err = f.name + ": a whole number is expected, not " + brief(j), false;
             }
-            return *err = f.name + ": a whole number is expected, not " + j.dump(), false;
+            if (!in_range(static_cast<double>(v), f, err)) return false;
+            *out = Value::integer(v);
+            return true;
+        }
         case FieldType::Float:
-            if (!j.is_number()) return *err = f.name + ": a number is expected, not " + j.dump(), false;
+            if (!j.is_number()) return *err = f.name + ": a number is expected, not " + brief(j), false;
+            if (!std::isfinite(j.get<double>())) return *err = f.name + ": a finite number is expected", false;
             if (!in_range(j.get<double>(), f, err)) return false;
             *out = Value::number(j.get<double>());
             return true;
         case FieldType::Bool:
-            if (!j.is_boolean()) return *err = f.name + ": true or false is expected, not " + j.dump(), false;
+            if (!j.is_boolean()) return *err = f.name + ": true or false is expected, not " + brief(j), false;
             *out = Value::boolean(j.get<bool>());
             return true;
         case FieldType::Enum: {
-            if (!j.is_string()) return *err = f.name + ": one of the names is expected, not " + j.dump(), false;
+            if (!j.is_string()) return *err = f.name + ": one of the names is expected, not " + brief(j), false;
             const std::string s = j.get<std::string>();
             const auto it = std::find_if(f.enum_values.begin(), f.enum_values.end(), [&](const std::string& e) { return glob_ci(e, s) && e.size() == s.size(); });
             if (it == f.enum_values.end()) {
                 std::string names;
                 for (const std::string& e : f.enum_values) names += (names.empty() ? "" : ", ") + e;
-                return *err = f.name + ": \"" + s + "\" is not one of " + names, false;
+                return *err = f.name + ": " + brief(j) + " is not one of " + names, false;
             }
             *out = Value::text(*it);
             return true;
         }
         case FieldType::Id:
+            // TODO(S5): an id named as a value (a perk, an item of a recipe) is not checked to exist here; S5's model refuses one
+            // that names no entry (per edit, at composition).
             if (!j.is_string() || j.get<std::string>().find(':') == std::string::npos)
-                return *err = f.name + ": an id (\"game:<name>\" or \"<mod>:<name>\") is expected, not " + j.dump(), false;
+                return *err = f.name + ": an id (\"game:<name>\" or \"<mod>:<name>\") is expected, not " + brief(j), false;
             *out = Value::text(j.get<std::string>());
             return true;
         default:
@@ -132,10 +203,10 @@ bool scalar(const json& j) { return j.is_number() || j.is_boolean() || j.is_stri
 bool raw_op_shape(const json& v, const std::string& path, std::string* err) {
     if (scalar(v)) return true;
     const std::string what = "raw path \"" + path + "\"";
-    if (!v.is_object()) return *err = what + ": a plain value (a number, true or false, a name) or an op is expected, not " + v.dump(), false;
+    if (!v.is_object()) return *err = what + ": a plain value (a number, true or false, a name) or an op is expected, not " + brief(v), false;
     if (v.contains("set")) {
         if (v.size() != 1) return *err = what + ": \"set\" stands alone", false;
-        if (!scalar(v["set"])) return *err = what + ": \"set\" takes a plain value (a number, true or false, a name), not " + v["set"].dump(), false;
+        if (!scalar(v["set"])) return *err = what + ": \"set\" takes a plain value (a number, true or false, a name), not " + brief(v["set"]), false;
         return true;
     }
     FieldSpec any;  // relative ops: numbers whatever the member's type; the member says at composition whether it is a number
@@ -154,6 +225,8 @@ bool selector_of(const json& j, Selector* s, std::string* err) {
     s->id = j["id"].get<std::string>();
     if (j.contains("where")) {
         if (!j["where"].is_object()) return *err = "\"where\" is {\"<field>\": <condition>}", false;
+        for (const auto& [k, c] : j["where"].items())
+            if (!scalar(c)) return *err = "where \"" + k + "\": a condition is a plain value (\">=1\", 5, true, a name), not " + brief(c), false;
         s->where = j["where"];
     }
     for (const char* k : {"has", "hasNot"}) {
@@ -215,7 +288,9 @@ bool edit_of(const json& e, const Batch& b, const Schema& schema, Edit* out, std
             const std::string prefix = b.mod + ":";
             if (out->add_id.size() <= prefix.size() || out->add_id.compare(0, prefix.size(), prefix) != 0 ||
                 out->add_id.find_first_of("*?", prefix.size()) != std::string::npos)
-                return *err = "an added entry's id is \"" + prefix + "<name>\", not \"" + out->add_id + "\"", false;
+                return *err = "an added entry's id is \"" + prefix + "<name>\", not " + brief(e["id"]), false;
+            if (std::any_of(out->add_id.begin(), out->add_id.end(), [](char c) { return c >= 'A' && c <= 'Z'; }))
+                return *err = "an added entry's id is lower case (Kiln ids are), not " + brief(e["id"]), false;
             if (e.contains("like")) {
                 if (!e["like"].is_string()) return *err = "\"like\" is an id", false;
                 out->like = e["like"].get<std::string>();
@@ -264,6 +339,7 @@ bool edit_of(const json& e, const Batch& b, const Schema& schema, Edit* out, std
     out->list = k == "append" ? ListOp::Append : k == "remove" ? ListOp::Remove : k == "replace" ? ListOp::Replace : ListOp::None;
     if (out->list == ListOp::None) return *err = "unknown list operation \"" + k + "\" (clear, append, remove, replace)", false;
     if (!v.is_array() || (v.empty() && out->list != ListOp::Replace)) return *err = "\"" + k + "\" takes a list of values", false;
+    if (v.size() > kMaxListValues) return *err = "\"" + k + "\" takes at most " + std::to_string(kMaxListValues) + " values", false;
     for (const json& x : v) {
         Value y;
         if (!value_of(x, *f, true, &y, err)) return false;
@@ -278,8 +354,9 @@ bool edit_of(const json& e, const Batch& b, const Schema& schema, Edit* out, std
 
 bool value_of(const json& j, const FieldSpec& f, bool element, Value* out, std::string* err) {
     if (f.type == FieldType::List && !element) {
-        if (!j.is_array()) return *err = f.name + ": a list is expected, not " + j.dump(), false;
+        if (!j.is_array()) return *err = f.name + ": a list is expected, not " + brief(j), false;
         if (f.max_items && j.size() > f.max_items) return *err = f.name + ": at most " + std::to_string(f.max_items) + " values", false;
+        if (j.size() > kMaxListValues) return *err = f.name + ": at most " + std::to_string(kMaxListValues) + " values in one list", false;
         std::vector<Value> v;
         for (const json& x : j) {
             Value y;
@@ -309,6 +386,7 @@ bool op_of(const json& j, const FieldSpec& f, Op* op, std::string* err) {
     for (const auto& [k, v] : j.items()) {
         if (k == "mul" || k == "add" || k == "min" || k == "max") {
             if (!v.is_number()) return *err = f.name + ": \"" + k + "\" takes a number", false;
+            if (!std::isfinite(v.get<double>())) return *err = f.name + ": \"" + k + "\" takes a finite number", false;
             (k == "mul" ? op->mul : k == "add" ? op->add : k == "min" ? op->min : op->max) = v.get<double>();
         } else if (k == "raiseOnly" || k == "lowerOnly") {
             if (!v.is_boolean()) return *err = f.name + ": \"" + k + "\" takes true or false", false;
@@ -352,40 +430,95 @@ bool raw_key(const std::string& path, std::string* key, std::string* err) {
     return true;
 }
 
-Value apply_op(const Op& op, const Value& base, const FieldSpec& f) {
-    if (op.set) return op.value;
+bool op_result(const Op& op, const Value& base, const FieldSpec& f, Value* out, std::string* why) {
+    if (op.set) return *out = op.value, true;
     const double v = base.as_double();
     double r = v * op.mul.value_or(1.0) + op.add.value_or(0.0);
-    r = std::clamp(r, op.min.value_or(-INFINITY), op.max.value_or(INFINITY));
+    if (op.min && r < *op.min) r = *op.min;  // std::clamp's order without its precondition on NaN
+    if (op.max && r > *op.max) r = *op.max;
     if (op.raise_only) r = std::max(r, v);
     if (op.lower_only) r = std::min(r, v);
-    return f.type == FieldType::Int ? Value::integer(static_cast<int64_t>(std::llround(r))) : Value::number(r);
+    if (!std::isfinite(r)) return *why = f.name + ": the result is not a finite number", false;
+    if (f.type != FieldType::Int) return *out = Value::number(r), true;
+    if (r < kInt64Lo || r >= kInt64Hi) return *why = f.name + ": the result " + json(r).dump() + " is more than a whole-number field holds", false;
+    *out = Value::integer(static_cast<int64_t>(std::llround(r)));  // in range: llround is defined
+    return true;
+}
+
+Value apply_op(const Op& op, const Value& base, const FieldSpec& f) {
+    Value x;
+    std::string why;
+    return op_result(op, base, f, &x, &why) ? x : base;
 }
 
 bool parse_batch(const std::string& text, const Schema& schema, Batch* out, std::vector<Refusal>* refused, std::string* err) {
-    const json doc = json::parse(text, nullptr, false, true);
-    if (doc.is_discarded()) return *err = "the IR document is not JSON", false;
+    *out = Batch{};
+    if (text.size() > kMaxIrBytes) return *err = "the IR document is larger than 16 MiB", false;
+    json doc;
+    try {
+        doc = json::parse(
+            text,
+            [](int depth, json::parse_event_t, json&) {
+                if (depth >= kMaxDepth) throw TooDeep{};
+                return true;
+            },
+            true, true);
+    } catch (const TooDeep&) {
+        return *err = "the IR document nests deeper than " + std::to_string(kMaxDepth) + " levels", false;
+    } catch (const std::exception&) {
+        return *err = "the IR document is not JSON", false;
+    }
     return parse_batch(doc, schema, out, refused, err);
 }
 
 bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<Refusal>* refused, std::string* err) {
     *out = Batch{};
-    if (!doc.is_object()) return *err = "the IR document is an object", false;
-    if (!doc.contains("ir") || doc["ir"] != 1) return *err = "\"ir\": 1 is the only IR format this Kiln reads", false;
-    if (!doc.contains("mod") || !doc["mod"].is_string() || doc["mod"].get<std::string>().empty()) return *err = "\"mod\" names the mod", false;
-    if (!doc.contains("stage") || !doc["stage"].is_string() || !stage_of(doc["stage"].get<std::string>(), &out->stage))
-        return *err = "\"stage\" is add, alter or final", false;
-    if (!doc.contains("edits") || !doc["edits"].is_array()) return *err = "\"edits\" is a list", false;
-    out->mod = doc["mod"].get<std::string>();
-    out->mod_version = doc.value("modVersion", "");
-    out->source = doc.value("source", "");
-    uint32_t n = 0;
+    // nothing thrown inside leaves: a document that makes the reader throw is refused whole, an edit that does is refused alone
+    try {
+        if (too_deep(doc)) return *err = "the IR document nests deeper than " + std::to_string(kMaxDepth) + " levels", false;
+        if (!doc.is_object()) return *err = "the IR document is an object", false;
+        if (!doc.contains("ir") || doc["ir"] != 1) return *err = "\"ir\": 1 is the only IR format this Kiln reads", false;
+        if (!doc.contains("mod") || !doc["mod"].is_string() || doc["mod"].get<std::string>().empty()) return *err = "\"mod\" names the mod", false;
+        if (!mod_id_ok(doc["mod"].get<std::string>(), err)) return *err = "\"mod\": " + *err, false;
+        if (!doc.contains("stage") || !doc["stage"].is_string() || !stage_of(doc["stage"].get<std::string>(), &out->stage))
+            return *err = "\"stage\" is add, alter or final", false;
+        if (!doc.contains("edits") || !doc["edits"].is_array()) return *err = "\"edits\" is a list", false;
+        for (const char* k : {"modVersion", "source"})
+            if (doc.contains(k) && !doc[k].is_string()) return *err = std::string("\"") + k + "\" is a text", false;
+        out->mod = doc["mod"].get<std::string>();
+        out->mod_version = doc.value("modVersion", "");
+        out->source = doc.value("source", "");
+    } catch (const std::exception& e) {
+        *out = Batch{};
+        return *err = std::string("the IR document could not be read: ") + e.what(), false;
+    }
+    std::set<uint32_t> used;
+    uint32_t pos = 0;
     for (const json& e : doc["edits"]) {
         Edit x;
-        x.n = e.is_object() && e.contains("n") && e["n"].is_number_unsigned() ? e["n"].get<uint32_t>() : n;
-        ++n;
+        const uint32_t at = pos++;
+        x.n = at;
         std::string why;
-        if (edit_of(e, *out, schema, &x, &why)) out->edits.push_back(std::move(x));
+        bool ok = false;
+        try {
+            if (e.is_object() && e.contains("n")) {
+                const json& n = e["n"];
+                if (!n.is_number_unsigned() || n.get<uint64_t>() > UINT32_MAX) {
+                    refused->push_back({out->mod, out->source, out->stage, at, "\"n\" is a whole number 0..4294967295, not " + brief(n)});
+                    continue;
+                }
+                x.n = static_cast<uint32_t>(n.get<uint64_t>());
+            }
+            if (!used.insert(x.n).second) {
+                refused->push_back({out->mod, out->source, out->stage, x.n, "the edit number " + std::to_string(x.n) + " is used twice in this batch"});
+                continue;
+            }
+            ok = edit_of(e, *out, schema, &x, &why);
+        } catch (const std::exception& ex) {
+            ok = false;
+            why = std::string("this edit could not be read: ") + ex.what();
+        }
+        if (ok) out->edits.push_back(std::move(x));
         else refused->push_back({out->mod, out->source, out->stage, x.n, why});
     }
     return true;
