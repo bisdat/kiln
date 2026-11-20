@@ -411,6 +411,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
                 BuildStamp = KilnBuild.Of(typeof(Kiln.Mod).Assembly)?.Version,
                 TickHop = TaskHop,
                 ClientHop = _client ? ClientTaskHop : null,
+                MenuHop = _client ? MenuTaskHop : null,
             });
             ComponentTask.Owners = ComponentOwner;
         }
@@ -473,6 +474,26 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
     /// Context.Tick is on a joined client. While hosting the server world drives them on its own thread: the hop is
     /// main-thread work like a Client.Tick handler and never takes the drive lock (that would make the main thread wait
     /// for the server thread's whole step).</summary>
+    /// <summary>One menu hop of a task (#83), on the game's UI frame while no world runs: inside <see cref="UiTick"/>, under
+    /// the drive lock like the mods' other menu work, but with no thread marked as the driver, so
+    /// <c>Game.IsTickThread</c> is false there (no world runs) and the world APIs refuse.</summary>
+    private void MenuTaskHop(ulong owner, Action hop)
+    {
+        lock (_drive)
+        {
+            var previous = Volatile.Read(ref _driver);
+            Volatile.Write(ref _driver, 0);
+            try
+            {
+                _mods.TaskTick.RunMenu(owner, hop);
+            }
+            finally
+            {
+                Volatile.Write(ref _driver, previous);
+            }
+        }
+    }
+
     private void ClientTaskHop(ulong owner, Action hop) =>
         ClientHopFrame.Run(ServerWorldLive(), _drive, ref _driver, () => _mods.TaskTick.Run(owner, hop), () => _mods.TaskTick.RunClient(owner, hop));
 
@@ -723,7 +744,8 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
     }
 
     /// <summary>The game's UI thread, after each UI frame: while no world steps, load the mods once (first call), then
-    /// about 30 times a second run mod requests and Kiln's service tick. A world's step (Drive) takes over as before.</summary>
+    /// about 30 times a second run mod requests, Kiln tasks' menu hops and Kiln's service tick. A world's step (Drive)
+    /// takes over as before.</summary>
     public void UiTick(ulong frame)
     {
         if (_uiThread == 0) Volatile.Write(ref _uiThread, Environment.CurrentManagedThreadId);
@@ -734,6 +756,9 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         {
             if (InWorld()) return;  // a hosted server world may have started on its own thread meanwhile
             Volatile.Write(ref _driver, Environment.CurrentManagedThreadId);
+            // Kiln tasks' menu hops (#83): the core opens the menu's session (before the mods load, so a task their OnLoad
+            // starts here belongs to it) and runs the hops queued before this frame
+            HostTasks.Bound?.MenuFrame();
             if (!_modsLoaded)
             {
                 _modsLoaded = true;
