@@ -12,7 +12,13 @@
 //   - an edit is all or nothing over its selection (a refusal names the mod, its source and the edit's ordinal);
 //   - final: every mod's final reads the same frozen post-alter view (plus its own final edits); its edits are held back
 //     and composed after every final ran, in load order, with alter's rules;
-//   - old paths are never refused because of a registry edit.
+//   - old paths are never refused because of a registry edit;
+//   - the Advanced tier (raw member paths, D5): each path is resolved per entry on this game build through the base model;
+//     one that does not resolve refuses its edit (never a blind write). A raw path that is exactly a Kiln field's member
+//     on this build (BaseModel::raw_cover) is that field's place: the edit joins the field's chain, so it composes with the
+//     field's other writers and every conflict between them is seen. A raw path behind a field Kiln converts (units, a
+//     formula) is one place on two scales: an edit of the raw path and a writer of the field there (another mod, the same
+//     mod, an old path) cannot be composed, so the later of the two is refused whole and reported (as "exclusive").
 // The result is deterministic: it depends on the inputs and their order only. Plain data in, plain data out: no game
 // memory, no service table, no lock, no clock.
 #pragma once
@@ -33,6 +39,12 @@ struct FieldRef {
     std::string text() const { return registry + "[" + id + "]." + field; }
 };
 
+// A raw member path of one entry as this game build has it (S5's model resolves it through the game's reflection).
+struct RawMember {
+    FieldSpec spec;  // its type and range (the member's own type), read_only (identities), applies (the registry's back-end)
+    Value value;     // its value in the base
+};
+
 // The base as Kiln fields (S5's model fills it from the base view; tests by hand).
 struct BaseModel {
     struct Entry {
@@ -43,6 +55,18 @@ struct BaseModel {
     };
     std::map<std::string, std::vector<Entry>> registries;  // entries in the registry's own order
     std::set<std::string> retired;                          // "<registry>|<id>" the ids ledger retired: never added again
+
+    // The Advanced tier: the member at raw path key (raw_key) of entry id, on this game build. nullopt + *why: it does not
+    // resolve there (the game's names or layout changed, or the entry has no game data): every raw edit naming it there is
+    // refused. Unset: no raw path resolves. An entry a mod added resolves through its "like" entry.
+    std::function<std::optional<RawMember>(const std::string& registry, const std::string& id, const std::string& key, std::string* why)> raw;
+    // Raw paths (keys) that are a Kiln field's member on this build, per registry (S2's regmap rows):
+    // raw_cover["items"]["maxstacksize"] = {"maxStack", false}. converted: Kiln converts the value (units, a formula).
+    struct Cover {
+        std::string field;
+        bool converted = false;
+    };
+    std::map<std::string, std::map<std::string, Cover>> raw_cover;
 };
 
 enum class WriterKind : uint8_t { ArchiveWriter, OldPatch, OldPack, Code, Registry };
@@ -59,6 +83,7 @@ struct OldWrite {
 
 struct ChainRow {
     WriterKind kind = WriterKind::Registry;
+    std::string raw;  // the raw member path as written, when this row came from an Advanced-tier edit
     std::string mod;  // the Kiln mod (empty: an archive-writer package)
     std::string who;  // what the report names: the mod, or the old writer
     Stage stage = Stage::Alter;
@@ -76,14 +101,23 @@ struct FieldOutcome {
     std::vector<ChainRow> chain;
     Value result;
     std::string winner;  // the writer whose row decided the result last (empty: the base)
+    // A raw member's own chain (FieldRef::field "raw:<key>"): the path as first written, and the member's spec on this build
+    // (a Kiln field's spec is the schema's). Back-ends evaluate the chain with it.
+    std::string raw;
+    std::optional<FieldSpec> raw_spec;
 };
 
 enum class LineKind : uint8_t { Overridden, Composed, ComposedOn, Exclusive, Dropped, Yielded };
 const char* line_kind_name(LineKind k);
+// How sure a conflict line is (registry.json "certainty"): Kiln's own writers are seen for certain; an archive-writer package
+// is named from its journal (sfi R1); other loaders' DLLs and hooks (P4's drift probe) are best effort.
+enum class Certainty : uint8_t { Certain, Named, BestEffort };
+const char* certainty_name(Certainty c);
 struct Line {
     LineKind kind = LineKind::Overridden;
     FieldRef field;
     std::string winner, loser, text;
+    Certainty certainty = Certainty::Certain;
 };
 
 class View {

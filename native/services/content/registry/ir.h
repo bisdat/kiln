@@ -12,7 +12,13 @@
 // The op vocabulary and its evaluation are today's data packs' (packs.cpp parse_value): r = clamp(v * mul + add, min, max),
 // then raiseOnly / lowerOnly against v, integer fields rounded. Validation is per edit and all or nothing: a malformed edit is
 // refused with a reason, the rest of the batch stands. The schema descriptor below is what S1's generator emits
-// (schema/registry/*.json); here it is filled by hand by the tests.
+// (schema/registry/*.json); here it is filled by hand by the tests. The document's JSON Schema: schema/registry-ir.schema.json.
+//
+// The Advanced tier (owner decision D5): {"registry": "items", "select": {...}, "raw": {"damageSetup.dmgMod": 1.5}} names the
+// game's own member paths of an entry, in a registry whose schema allows it ("raw": "allowed"). It works while the game's names
+// and layout hold: each path is resolved per entry on this game build (S5's model) and an edit naming one that does not resolve
+// there is refused, never written blind. The IR checks only the shape here (a member path, a plain value or an op); the type and
+// range checks are the member's own, at composition (compose.h).
 // Nothing here touches the game, a service table or a lock: plain data in, plain data out.
 #pragma once
 #include <cstdint>
@@ -44,8 +50,10 @@ struct FieldSpec {
 
 struct RegistrySpec {
     std::string name;
+    std::string version;  // the registry schema's "version" ("1.0.0"): registry.json "schema.registries"
     std::map<std::string, FieldSpec> fields;
     bool add = true, remove = true;
+    bool raw = false;  // "raw": "allowed": edits may name the game's member paths (the Advanced tier, D5)
     const FieldSpec* field(const std::string& path) const {
         const auto it = fields.find(path);
         return it == fields.end() ? nullptr : &it->second;
@@ -53,6 +61,7 @@ struct RegistrySpec {
 };
 
 struct Schema {
+    int format = 1;  // "registrySchema": the schema format (registry.json "schema.registrySchema")
     std::map<std::string, RegistrySpec> registries;
     const RegistrySpec* registry(const std::string& name) const {
         const auto it = registries.find(name);
@@ -108,6 +117,13 @@ struct Selector {
     bool exact() const { return id.find_first_of("*?") == std::string::npos; }
 };
 
+// One raw member path of an Advanced-tier edit (D5).
+struct RawWrite {
+    std::string path;  // as written ("damageSetup.dmgMod"), for messages and the report
+    std::string key;   // raw_key(path): one spelling per place
+    json op;           // a plain value or {set | mul | add | min | max | raiseOnly | lowerOnly}: typed per entry against the member
+};
+
 struct Edit {
     uint32_t n = 0;  // ordinal in its batch
     std::string registry;
@@ -119,6 +135,7 @@ struct Edit {
     EntryOp entry = EntryOp::None;
     std::string add_id, like;
     std::map<std::string, Value> add_fields;
+    std::vector<RawWrite> raw;  // not empty: an Advanced-tier edit of raw member paths (then field, op and list are unset)
     bool exclusive = false, yield = false;
 };
 
@@ -142,6 +159,18 @@ bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<
 
 // Today's numeric operation on a value (packs.cpp parse_value's order): the base for a relative op. Integer fields round.
 Value apply_op(const Op& op, const Value& base, const FieldSpec& f);
+
+// An edit's "op" for field f: a plain value (an absolute set), {"set": v}, or relative numbers {mul, add, min, max, raiseOnly,
+// lowerOnly} (number fields only). false + *err: why not.
+bool op_of(const json& j, const FieldSpec& f, Op* op, std::string* err);
+
+// A raw member path ("damageSetup.dmgMod", "perkIds[2]", "a.b[03].c": member names [A-Za-z_][A-Za-z0-9_]*, indices [n]) into
+// its key, one spelling per place: names lower-case (the game's reflection names are matched without case, as packs do),
+// indices as plain numbers ("a.b[3].c"). No "*": a raw edit names exact places. false + *err: not such a path.
+bool raw_key(const std::string& path, std::string* key, std::string* err);
+// The field name a raw path's chain is kept under (compose.h FieldRef::field): "raw:" + its key. Schema fields have no ':'.
+inline std::string raw_field(const std::string& key) { return "raw:" + key; }
+inline bool is_raw_field(const std::string& field) { return field.rfind("raw:", 0) == 0; }
 
 // Case-insensitive glob ('*' any run, '?' one character), as packs' selectors.
 bool glob_ci(const std::string& pattern, const std::string& text);

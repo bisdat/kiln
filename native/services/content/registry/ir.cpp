@@ -124,34 +124,24 @@ bool scalar_of(const json& j, FieldType type, const FieldSpec& f, Value* out, st
     }
 }
 
-bool op_of(const json& j, const FieldSpec& f, Op* op, std::string* err) {
-    *op = Op{};
-    if (!j.is_object()) {
-        op->set = true;
-        return value_of(j, f, false, &op->value, err);
+constexpr size_t kMaxRawPaths = 32;
+
+bool scalar(const json& j) { return j.is_number() || j.is_boolean() || j.is_string(); }
+
+// A raw path's value: its shape only (the member's type and range are checked per entry at composition).
+bool raw_op_shape(const json& v, const std::string& path, std::string* err) {
+    if (scalar(v)) return true;
+    const std::string what = "raw path \"" + path + "\"";
+    if (!v.is_object()) return *err = what + ": a plain value (a number, true or false, a name) or an op is expected, not " + v.dump(), false;
+    if (v.contains("set")) {
+        if (v.size() != 1) return *err = what + ": \"set\" stands alone", false;
+        if (!scalar(v["set"])) return *err = what + ": \"set\" takes a plain value (a number, true or false, a name), not " + v["set"].dump(), false;
+        return true;
     }
-    if (j.contains("set")) {
-        if (j.size() != 1) return *err = f.name + ": \"set\" stands alone", false;
-        op->set = true;
-        return value_of(j["set"], f, false, &op->value, err);
-    }
-    if (f.type != FieldType::Int && f.type != FieldType::Float)
-        return *err = f.name + ": {mul, add, min, max} works on numbers; this field takes a plain value", false;
-    if (j.empty()) return *err = f.name + ": an empty operation", false;
-    for (const auto& [k, v] : j.items()) {
-        if (k == "mul" || k == "add" || k == "min" || k == "max") {
-            if (!v.is_number()) return *err = f.name + ": \"" + k + "\" takes a number", false;
-            (k == "mul" ? op->mul : k == "add" ? op->add : k == "min" ? op->min : op->max) = v.get<double>();
-        } else if (k == "raiseOnly" || k == "lowerOnly") {
-            if (!v.is_boolean()) return *err = f.name + ": \"" + k + "\" takes true or false", false;
-            (k == "raiseOnly" ? op->raise_only : op->lower_only) = v.get<bool>();
-        } else {
-            return *err = f.name + ": unknown operation \"" + k + "\" (set, mul, add, min, max, raiseOnly, lowerOnly)", false;
-        }
-    }
-    if (op->min && op->max && *op->min > *op->max) return *err = f.name + ": min must not be greater than max", false;
-    if (op->raise_only && op->lower_only) return *err = f.name + ": raiseOnly and lowerOnly together change nothing", false;
-    return true;
+    FieldSpec any;  // relative ops: numbers whatever the member's type; the member says at composition whether it is a number
+    any.name = what, any.type = FieldType::Float;
+    Op op;
+    return op_of(v, any, &op, err);
 }
 
 bool selector_of(const json& j, Selector* s, std::string* err) {
@@ -190,7 +180,30 @@ bool edit_of(const json& e, const Batch& b, const Schema& schema, Edit* out, std
         if (e.contains(k) && !e[k].is_boolean()) return *err = std::string("\"") + k + "\" is true or false", false;
     out->exclusive = e.value("exclusive", false);
     out->yield = e.value("yield", false);
-    if (e.contains("raw")) return *err = "\"raw\" game paths are not part of IR 1's checked edits yet (Advanced tier; P2)", false;
+    if (e.contains("raw")) {  // the Advanced tier (D5): raw game member paths
+        for (const char* k : {"field", "op", "list", "entry", "id", "like", "fields"})
+            if (e.contains(k)) return *err = std::string("\"raw\" (game member paths) and \"") + k + "\" in one edit: an edit has one or the other", false;
+        if (!reg->raw)
+            return *err = out->registry + ": raw game paths (the Advanced tier) are not allowed in this registry: its schema does not allow them; use its Kiln fields", false;
+        if (b.stage == Stage::Add) return *err = "stage add adds entries; field edits, raw ones too, belong in alter or final", false;
+        if (!e.contains("select")) return *err = "\"select\" names the entries a raw edit applies to", false;
+        if (!selector_of(e["select"], &out->select, err)) return false;
+        const json& r = e["raw"];
+        if (!r.is_object()) return *err = "\"raw\" is {\"<game member path>\": <value or op>}", false;
+        if (r.empty()) return *err = "\"raw\" names at least one game member path", false;
+        if (r.size() > kMaxRawPaths) return *err = "\"raw\" names at most " + std::to_string(kMaxRawPaths) + " game member paths in one edit", false;
+        for (const auto& [p, v] : r.items()) {
+            RawWrite w;
+            w.path = p;
+            if (!raw_key(p, &w.key, err)) return false;
+            for (const RawWrite& o : out->raw)
+                if (o.key == w.key) return *err = "raw paths \"" + o.path + "\" and \"" + p + "\" name one place", false;
+            if (!raw_op_shape(v, p, err)) return false;
+            w.op = v;
+            out->raw.push_back(std::move(w));
+        }
+        return true;
+    }
     if (e.contains("entry")) {
         const std::string what = e["entry"].is_string() ? e["entry"].get<std::string>() : "";
         if (what == "add") {
@@ -277,6 +290,66 @@ bool value_of(const json& j, const FieldSpec& f, bool element, Value* out, std::
         return true;
     }
     return scalar_of(j, element ? f.element : f.type, f, out, err);
+}
+
+bool op_of(const json& j, const FieldSpec& f, Op* op, std::string* err) {
+    *op = Op{};
+    if (!j.is_object()) {
+        op->set = true;
+        return value_of(j, f, false, &op->value, err);
+    }
+    if (j.contains("set")) {
+        if (j.size() != 1) return *err = f.name + ": \"set\" stands alone", false;
+        op->set = true;
+        return value_of(j["set"], f, false, &op->value, err);
+    }
+    if (f.type != FieldType::Int && f.type != FieldType::Float)
+        return *err = f.name + ": {mul, add, min, max} works on numbers; this field takes a plain value", false;
+    if (j.empty()) return *err = f.name + ": an empty operation", false;
+    for (const auto& [k, v] : j.items()) {
+        if (k == "mul" || k == "add" || k == "min" || k == "max") {
+            if (!v.is_number()) return *err = f.name + ": \"" + k + "\" takes a number", false;
+            (k == "mul" ? op->mul : k == "add" ? op->add : k == "min" ? op->min : op->max) = v.get<double>();
+        } else if (k == "raiseOnly" || k == "lowerOnly") {
+            if (!v.is_boolean()) return *err = f.name + ": \"" + k + "\" takes true or false", false;
+            (k == "raiseOnly" ? op->raise_only : op->lower_only) = v.get<bool>();
+        } else {
+            return *err = f.name + ": unknown operation \"" + k + "\" (set, mul, add, min, max, raiseOnly, lowerOnly)", false;
+        }
+    }
+    if (op->min && op->max && *op->min > *op->max) return *err = f.name + ": min must not be greater than max", false;
+    if (op->raise_only && op->lower_only) return *err = f.name + ": raiseOnly and lowerOnly together change nothing", false;
+    return true;
+}
+
+bool raw_key(const std::string& path, std::string* key, std::string* err) {
+    auto bad = [&](const std::string& why) { return *err = "raw path \"" + path + "\": " + why, false; };
+    if (path.empty()) return bad("empty");
+    if (path.size() > 256) return bad("longer than 256 characters");
+    if (path.find('*') != std::string::npos) return bad("'*' is not allowed: a raw edit names exact places");
+    auto letter = [](char c) { return std::isalpha(static_cast<unsigned char>(c)) || c == '_'; };
+    auto word = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+    std::string k;
+    size_t i = 0;
+    for (;;) {
+        if (i >= path.size() || !letter(path[i])) return bad("a member name starts with a letter or '_' (members are a.b, indices [n])");
+        while (i < path.size() && word(path[i])) k += static_cast<char>(std::tolower(static_cast<unsigned char>(path[i++])));
+        while (i < path.size() && path[i] == '[') {
+            const size_t j = ++i;
+            while (i < path.size() && std::isdigit(static_cast<unsigned char>(path[i]))) ++i;
+            if (i == j || i >= path.size() || path[i] != ']') return bad("an index is [n], n a whole number");
+            if (i - j > 9) return bad("an index has at most 9 digits");
+            const size_t z = path.find_first_not_of('0', j);
+            k += "[" + (z >= i ? std::string("0") : path.substr(z, i - z)) + "]";
+            ++i;
+        }
+        if (i == path.size()) break;
+        if (path[i] != '.') return bad("members are separated by '.'");
+        k += '.';
+        ++i;
+    }
+    *key = std::move(k);
+    return true;
 }
 
 Value apply_op(const Op& op, const Value& base, const FieldSpec& f) {
