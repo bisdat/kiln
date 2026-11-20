@@ -53,6 +53,33 @@ def normalize(data: bytes) -> bytes:
                 b[md + so:md + so + 16] = bytes(16)        # the Module row's MVID (GUID index 1)
     return bytes(b)
 
+def mvid(data: bytes) -> str:
+    """The module MVID of a managed PE file, as a lowercase GUID string."""
+    import uuid
+    b = data
+    pe = struct.unpack_from("<I", b, 0x3C)[0]
+    nsec = struct.unpack_from("<H", b, pe + 6)[0]
+    optsize = struct.unpack_from("<H", b, pe + 20)[0]
+    opt = pe + 24
+    dd = opt + (96 if struct.unpack_from("<H", b, opt)[0] == 0x10B else 112)
+    secs = [struct.unpack_from("<IIII", b, opt + optsize + 40 * i + 8) for i in range(nsec)]
+    def off(rva):
+        for vsize, va, rsize, rptr in secs:
+            if va <= rva < va + max(vsize, rsize):
+                return rva - va + rptr
+        raise ValueError(f"RVA {rva:#x} in no section")
+    md = off(struct.unpack_from("<I", b, off(struct.unpack_from("<I", b, dd + 14 * 8)[0]) + 8)[0])
+    p = md + 16 + struct.unpack_from("<I", b, md + 12)[0]
+    nstreams = struct.unpack_from("<H", b, p + 2)[0]
+    p += 4
+    for _ in range(nstreams):
+        so, ss = struct.unpack_from("<II", b, p)
+        name_end = b.index(0, p + 8)
+        if bytes(b[p + 8:name_end]) == b"#GUID":
+            return str(uuid.UUID(bytes_le=bytes(b[md + so:md + so + 16])))
+        p = (name_end + 4) & ~3
+    raise ValueError("no #GUID stream")
+
 def main():
     a, b = (open(p, "rb").read() for p in sys.argv[1:3])
     if a == b:

@@ -75,6 +75,8 @@
 #   while this machine builds the rest, and come back as output folders that are zipped here like a local build's. Same
 #   .NET SDK version there; nothing signed or secret goes there. A failed or unreachable win1 means a local build of the
 #   samples (noted in the log), never a missing sample. Off by default.
+# The Windows launcher builds (direct, Nexus) run beside the Linux ones once the notices are complete (their frontend in
+#   launcher/dist-windows); KILN_RELEASE_SERIAL_LAUNCHERS=1 runs them one after the other.
 # NuGet: the builds restore into a private package cache, $work/nuget-packages (KILN_RELEASE_NUGET_PACKAGES), never
 #   ~/.nuget/packages: a trial run of a version leaves no kiln.* packages of it behind for later local builds.
 set -euo pipefail
@@ -179,6 +181,7 @@ cleanup_release() {
   rm -rf -- "$work/appimage-root"
   # the kiln-win1 sample build (KILN_BUILD_REMOTE), when the release stops before it is collected
   if [[ -n $remote_pid ]]; then kill "$remote_pid" 2>/dev/null || true; fi
+  if [[ -n ${win_pid:-} ]]; then kill "$win_pid" 2>/dev/null || true; fi
 }
 trap cleanup_release EXIT
 trap 'exit 130' INT
@@ -223,6 +226,15 @@ tar --sort=name --owner=0 --group=0 --numeric-owner --mode='u=rwX,go=rX' --mtime
 # the exported files (NUL-separated): the modding site's guide stages these pages and checks its links against them,
 # since the export has no .git (tools/docs-site/stage-guide.py, KILN_DOCS_TRACKED)
 (cd "$src" && find . -type f -printf '%P\0') > "$work/src-files"
+# KILN_RELEASE_OVERLAY=DIR (trial builds of build-script changes only): DIR's files are copied over the export after
+# the source tarball, so a trial builds one commit's sources (and stamps) with newer tools/package or tools/launcher
+# scripts, for a byte-by-byte comparison with a build of that commit. The folder says so; never publish it.
+if [[ -n ${KILN_RELEASE_OVERLAY:-} ]]; then
+  [[ -d $KILN_RELEASE_OVERLAY ]] || die "KILN_RELEASE_OVERLAY=$KILN_RELEASE_OVERLAY is no folder"
+  cp -a "$KILN_RELEASE_OVERLAY"/. "$src"/
+  built_from="$built_from with build scripts from $KILN_RELEASE_OVERLAY (a test build, not a release)"
+  note "WARNING: KILN_RELEASE_OVERLAY: $(cd "$KILN_RELEASE_OVERLAY" && find . -type f | sed 's,^\./,,' | tr '\n' ' ')copied over the export: a test build, never publish it"
+fi
 [[ $(sed 's/[-+].*//' "$src/VERSION") == "${version%%-*}" ]] || die "VERSION in the export is $(cat "$src/VERSION"), not for $version"
 # The API gate (tools/release/api-gate.sh), before any build: no line of a PublicAPI.Shipped.txt removed since the
 # previous v* release, and new API only with a raised API version (Kiln.Mods.ApiVersion), so a mod can ask for it.
@@ -555,27 +567,46 @@ unsquashfs -q -n -o "$(python3 "$lib/release.py" offset "$appimage")" -d "$work/
 (cd "$src" && linux python3 "$lib/notices.py" --src "$src" --out "$notices" \
   --append-appimage --appimage-root "$work/appimage-root/r") | tee -a "$log"
 rm -rf "$work/appimage-root"
+# The Windows launcher builds (direct, then Nexus) run beside the Linux ones from here on: their Cargo target and bundle
+# folders are their own (the Linux files build in the container, in $lin_target), and their frontend goes to its own
+# folder, launcher/dist-windows, so the two Vite runs never write the same files. They have the notices complete.
+# KILN_RELEASE_SERIAL_LAUNCHERS=1: one after the other, as before. Their log: $work/launcher-windows.log, then $log.
+setup="" nexus_setup="" win_pid=""
+win_dist='{"build":{"beforeBuildCommand":"bun run build:web --outDir dist-windows","frontendDist":"../dist-windows"}}'
+windows_launchers() {
+  local log=$work/launcher-windows.log
+  : >"$log"
+  step "launcher: Windows (NSIS)"
+  wargs=(--runtime "$runtime_zip" --version "$version" --config "$(resources "$notices")" --config "$win_dist")
+  ((signing)) && wargs+=(--config "{\"bundle\":{\"windows\":{\"signCommand\":{\"cmd\":\"$here/authenticode.sh\",\"args\":[\"sign\",\"%1\"]}}}}")
+  rm -rf "$CARGO_TARGET_DIR/$win/release/bundle"
+  (cd "$src" && quiet low "${win_env[@]}" tools/launcher/build-windows.sh "${wargs[@]}")
+  sign_pe "$CARGO_TARGET_DIR/$win/release/kilnctl.exe" "$CARGO_TARGET_DIR/$win/release/kiln.exe"
+  if ((nexus_build)); then
+    step "launcher: Nexus Mods build, Windows (no self-update)"
+    rm -rf "$CARGO_TARGET_DIR/$win/release/bundle"
+    (cd "$src" && quiet low "${win_env[@]}" tools/launcher/build-windows.sh --nexus "${wargs[@]}")
+  fi
+}
+if ((!skip_windows)); then
+  if [[ ${KILN_RELEASE_SERIAL_LAUNCHERS:-} == 1 ]]; then
+    windows_launchers
+    cat "$work/launcher-windows.log" >>"$log"
+  else
+    windows_launchers & win_pid=$!
+    note "launcher: the Windows builds run beside the Linux ones (log: $work/launcher-windows.log)"
+  fi
+fi
 (cd "$src" && quiet linux tools/launcher/build-linux.sh --bundles appimage --runtime "$runtime_zip" --version "$version" --config "$(resources "$notices")")
 appimage=$(ls -t "$lin"/*.AppImage | head -1)
 deb=$(ls -t "$lin"/*.deb | head -1)
 rpm=$(ls -t "$lin"/*.rpm 2>/dev/null | head -1 || true)
 
-setup=""
-if ((!skip_windows)); then
-  step "launcher: Windows (NSIS)"
-  wargs=(--runtime "$runtime_zip" --version "$version" --config "$(resources "$notices")")
-  ((signing)) && wargs+=(--config "{\"bundle\":{\"windows\":{\"signCommand\":{\"cmd\":\"$here/authenticode.sh\",\"args\":[\"sign\",\"%1\"]}}}}")
-  rm -rf "$CARGO_TARGET_DIR/$win/release/bundle"
-  (cd "$src" && quiet low "${win_env[@]}" tools/launcher/build-windows.sh "${wargs[@]}")
-  setup=$KILN_OUT/bundles/windows/kiln-launcher-setup.exe
-  sign_pe "$CARGO_TARGET_DIR/$win/release/kilnctl.exe" "$CARGO_TARGET_DIR/$win/release/kiln.exe"
-fi
-
 # the Nexus Mods build: the same launcher, runtime and notices without the self-update. Nexus Mods does not allow
 # programs that update themselves, so it has no self-update feature (cargo --no-default-features: no updater plugin, no
 # update feeds) and no updater key in its config (launcher/src-tauri/tauri.nexus.conf.json); it is never signed for
 # the updater and has no manifest. The bundle folders are emptied first: the direct build's files must not be taken.
-nexus_appimage="" nexus_deb="" nexus_setup=""
+nexus_appimage="" nexus_deb=""
 if ((nexus_build)); then
 step "launcher: Nexus Mods build, Linux (no self-update)"
 rm -rf "$lin_target/release/bundle"
@@ -585,12 +616,18 @@ rm -rf "$lin_target/release/bundle"
 nexus_appimage=$(ls -t "$KILN_OUT"/bundles/linux-nexus/*.AppImage | head -1)
 nexus_deb=$(ls -t "$KILN_OUT"/bundles/linux-nexus/*.deb | head -1)
 fi
-if ((nexus_build && !skip_windows)); then
-  step "launcher: Nexus Mods build, Windows (no self-update)"
-  rm -rf "$CARGO_TARGET_DIR/$win/release/bundle"
-  (cd "$src" && quiet low "${win_env[@]}" tools/launcher/build-windows.sh --nexus "${wargs[@]}")
-  nexus_setup=$KILN_OUT/bundles/windows-nexus/kiln-launcher-setup.exe
+if [[ -n $win_pid ]]; then
+  wrc=0; wait "$win_pid" || wrc=$?
+  win_pid=""
+  cat "$work/launcher-windows.log" >>"$log"
+  ((wrc == 0)) || { tail -40 "$work/launcher-windows.log" >&2; die "the Windows launcher builds failed (log: $work/launcher-windows.log)"; }
+  note "launcher: the Windows builds are done"
 fi
+if ((!skip_windows)); then
+  setup=$KILN_OUT/bundles/windows/kiln-launcher-setup.exe
+  ((nexus_build)) && nexus_setup=$KILN_OUT/bundles/windows-nexus/kiln-launcher-setup.exe
+fi
+
 
 # ---------------------------------------------------------------- 6. SDK, VS Code, samples
 sdk_version="" vsix=""

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # remote-win1.sh samples SRC RWORK OUTDIRS: builds the sample mods of a release export on kiln-win1 (the owner's Windows
 # PC, ssh kiln-win1) for tools/release/release.sh (KILN_BUILD_REMOTE=win1). Nothing signed and no key ever goes there:
-# it gets the export (SRC, minus .cache and node_modules), the game-data catalog this machine's build would use (for
+# it gets the export (SRC, minus .cache, node_modules and third_party), the game-data catalog this machine's build would use (for
 # Kiln.GameIds; none when there is none here), and sends back each sample's output folder, minus what the sample zips
 # leave out anyway (the shared Kiln.* assemblies except Kiln.Admin.dll and Kiln.TestKit*, *.deps.json,
 # *.runtimeconfig.json, assets/cooked/). release.sh zips them here exactly as it zips a local build's.
@@ -63,9 +63,17 @@ fi
 if [[ -n $remote_catalog ]]; then say "catalog: $cat"; else say "catalog: none"; fi
 
 # the upload: src/ (the export), catalog/, samples.slnx, rels.txt
-tar -cf "$rwork/up.tar" --exclude=./.cache --exclude=./launcher/node_modules --exclude=./tools/vscode/node_modules \
+# (third_party/: ShroudForge's fork, which no sample project references, built in the export meanwhile)
+tar -cf "$rwork/up.tar" --exclude=./.cache --exclude=./launcher/node_modules --exclude=./tools/vscode/node_modules --exclude=./third_party \
   -C "$src" --transform 's,^\.,src,' .
 tar -rf "$rwork/up.tar" -C "$rwork/up" catalog -C "$rwork" samples.slnx rels.txt
+# JSON with CRLF in the upload itself (see the line-end step below): counted in what was sent, not the live export
+crlf_sources=$(python3 -I - "$rwork/up.tar" <<'PY'
+import sys, tarfile
+with tarfile.open(sys.argv[1]) as t:
+    print(sum(1 for m in t if m.isfile() and m.name.startswith("src/") and m.name.endswith(".json") and b"\r" in t.extractfile(m).read()))
+PY
+)
 say "upload: $(du -h "$rwork/up.tar" | cut -f1), $n sample projects, .NET SDK $ver"
 
 # a slot on win1, like tools/win1
@@ -158,7 +166,7 @@ rm -rf -- "$rwork/up"
 # The SDK's build tasks write the JSON they generate (kiln.mod.json, kiln.gametypes.json, impact/natives.json, ...) with
 # the platform's line ends: CRLF on Windows, LF here. Back to LF, as a local build writes them, when no JSON file of the
 # export has a CR (so every CR came from the Windows build); otherwise the job does not count.
-if grep -rlIq --include='*.json' $'\r' "$src"; then say "the export has JSON files with CRLF: cannot tell generated line ends apart"; exit 8; fi
+if ((crlf_sources)); then say "the upload has JSON files with CRLF: cannot tell generated line ends apart"; exit 8; fi
 python3 -I - "$rwork/out" <<'PY'
 import os, sys
 n = 0
