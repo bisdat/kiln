@@ -259,4 +259,11 @@ active (0.2.0-dev.28): the players mask stayed `0x0000` while the replication sl
 harness covers the replication jobs only: to test a hook on a sim program on worker threads, use the sim's
 forced-parallel switch (a test-kit-only native call, package `06a-program-wraps`) as well.
 
+The network inspector works on fakes too ([../services/replication.md](../services/replication.md)): `Replication.Stats()`
+has a row per fake and channel with `Fake = true` and `PeerId = 0x80000000 | machine`, and `Replication.Watch(entity)`
+delivers what each fake is sent, so a test can compare the sent values with `ReplicationLab.Decoded`. Such rows and events
+have no `NetPeer`; to give a fake one, bind a kiln.net lab peer to its machine with kiln.net's lab op `BIND_MACHINE`
+(`kiln_net.h`, `KILN_NET_SELFTEST_BIND_MACHINE`): the fake then shows as that lab peer, and `Watch(entity, peer)` can name
+it.
+
 `mods/tests/repl-test` is the harness's own lab test (`repl-test: loopback decode PASS`, `repl-test: release PASS`).
