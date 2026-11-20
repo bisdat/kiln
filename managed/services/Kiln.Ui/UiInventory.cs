@@ -232,7 +232,7 @@ internal static unsafe class UiInventoryBridge
             };
         }
         sub.Handle = r.Handle;
-        var reg = new Registration(id);
+        var reg = new Registration(id, mod);
         if (mod is not null)
         {
             mod.Retiring += reg.Dispose;
@@ -241,12 +241,13 @@ internal static unsafe class UiInventoryBridge
         return reg;
     }
 
-    private sealed class Registration(long id) : IDisposable
+    private sealed class Registration(long id, ModContext? mod) : IDisposable
     {
         private int _done;
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _done, 1) != 0) return;
+            if (mod is not null) mod.Retiring -= Dispose;  // a mod that subscribes and disposes often keeps no dead handlers
             if (!Subs.TryRemove(id, out var sub)) return;
             var t = UiInventoryNative.T;
             if (t != null && sub.Handle != 0) t->Unsubscribe(sub.Handle);
@@ -304,12 +305,20 @@ internal static unsafe class UiInventoryBridge
     {
         if (item.Value == 0) throw new ArgumentException("an item entity is needed (not 0)", nameof(item));
         if (!float.IsFinite(mark.Thickness) || mark.Thickness < 0) throw new ArgumentException("Thickness must be finite and >= 0");
-        UiValueBridge.RequireCapability(Ui.Inventory.MarkCapability);
+        RequireMarks();
         var mod = UiModCalls.Caller;
         UiModCalls.RequireAlive(mod);
         Watch(mod);
         Marks[(mod, item.Value)] = mark;
         EnsureDrawing();
+    }
+
+    // marks are placed with kiln.ui.inventory's mapping: without that table (an older kiln-core) they could never show
+    private static void RequireMarks()
+    {
+        UiValueBridge.RequireCapability(Ui.Inventory.MarkCapability);
+        if (UiInventoryNative.T == null)
+            throw new KilnUnavailableException(Ui.Inventory.MarkCapability, "kiln.ui.inventory is not there (an older kiln-core)");
     }
 
     internal static void Unmark(EntityId item)
@@ -330,7 +339,7 @@ internal static unsafe class UiInventoryBridge
     internal static IDisposable AddRule(Func<VisibleSlot, SlotMark?> rule)
     {
         ArgumentNullException.ThrowIfNull(rule);
-        UiValueBridge.RequireCapability(Ui.Inventory.MarkCapability);
+        RequireMarks();
         var mod = UiModCalls.Caller;
         Watch(mod);
         Rules.Add(rule);

@@ -214,6 +214,10 @@ public sealed unsafe class InventoryTests : IDisposable
     {
         Use(new FakeInventory.Backend(Rows, withTable: false));
         Assert.Throws<KilnUnavailableException>(() => Ui.Inventory.OnClick(new SlotClickOptions(), _ => { }));
+        // marks are drawn through kiln.ui.inventory's mapping: without the table they could never show
+        Assert.Throws<KilnUnavailableException>(() => Ui.Inventory.Mark(new EntityId(900), new SlotMark(Color.Red)));
+        Assert.Throws<KilnUnavailableException>(() => Ui.Inventory.MarkWhen(_ => null));
+        Assert.Empty(UiInventoryBridge.ByItem());
         Use(new FakeInventory.Backend(["ui.slots.inspect"]));
         Assert.Throws<KilnUnavailableException>(() => Ui.Inventory.OnClick(new SlotClickOptions(), _ => { }));
     }
