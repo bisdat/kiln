@@ -338,6 +338,13 @@ pub fn windows_device(part: &str) -> bool {
     matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") || numbered("COM") || numbered("LPT")
 }
 
+const SERVER_SETTINGS_RULE: &str = "server.settings holds gameSettings only (an object; no name, ports, user groups, passwords or bans)";
+
+/// A pack's server settings: `{gameSettings: {...}}` and nothing else.
+fn server_settings_ok(s: &Value) -> bool {
+    s.as_object().is_some_and(|o| o.keys().all(|k| k == "gameSettings") && o.get("gameSettings").is_none_or(Value::is_object))
+}
+
 fn semver_ok(v: &str) -> bool {
     crate::semver::SemVersion::parse(v).is_ok()
 }
@@ -435,13 +442,10 @@ pub fn check_index(ix: &PackIndex) -> Result<()> {
             problems.push(format!("override {}: mode {:?} does not fit the file", o.path, o.mode));
         }
     }
-    if let Some(s) = ix.server.as_ref().and_then(|s| s.settings.as_ref()) {
-        // only the game's rules travel: a server's name, ports, user groups (their passwords: admin rights) and bans
-        // are the server owner's, and a pack would set them on every server it is put on
-        let only_game = s.as_object().is_some_and(|o| o.keys().all(|k| k == "gameSettings") && o.get("gameSettings").is_none_or(Value::is_object));
-        if !only_game {
-            problems.push("server.settings holds gameSettings only (an object; no name, ports, user groups, passwords or bans)".into());
-        }
+    // only the game's rules travel: a server's name, ports, user groups (their passwords: admin rights) and bans are
+    // the server owner's, and a pack would set them on every server it is put on
+    if let Some(s) = ix.server.as_ref().and_then(|s| s.settings.as_ref()) && !server_settings_ok(s) {
+        problems.push(SERVER_SETTINGS_RULE.into());
     }
     if problems.is_empty() {
         Ok(())
@@ -1124,6 +1128,9 @@ pub fn build(dirs: &DataDirs, req: &BuildRequest, out_dir: &Path, progress: &mut
         }
     }
     if let Some(s) = &req.server_settings {
+        if !server_settings_ok(s) {
+            return Err(err(ErrorCode::Schema, SERVER_SETTINGS_RULE));
+        }
         let found = secret_value_findings("server settings", s);
         if !found.is_empty() {
             return Err(err(ErrorCode::Refused, format!("the server settings may hold private data ({}); leave those keys out", found.join("; "))).with_detail(found));
