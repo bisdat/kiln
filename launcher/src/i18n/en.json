@@ -5150,6 +5150,7 @@
       "available": "Available",
       "enterTotal": "enter total…",
       "changeTotal": "Click to change the total",
+      "totalFromGame": "Total {total}, worked out as the game does: 2 points per level above 1, plus the Shroud Roots and Elixir Wells this character has cleared. The game does not store it, so it is not edited here.",
       "totalHint": "Point total (in use + available, as the game shows it):",
       "zoomIn": "Zoom in",
       "zoomOut": "Zoom out",

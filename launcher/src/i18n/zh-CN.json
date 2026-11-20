@@ -4503,6 +4503,7 @@
       "available": "可用",
       "enterTotal": "输入总数…",
       "changeTotal": "点击更改总数",
+      "totalFromGame": "总计 {total}，按游戏的方式计算：1 级以上每级 2 点，加上该角色清除的雾霾根系和灵药井。游戏不保存这个数值，因此这里不能编辑。",
       "totalHint": "技能点总数（已用 + 可用，与游戏中显示的一致）：",
       "zoomIn": "放大",
       "zoomOut": "缩小",

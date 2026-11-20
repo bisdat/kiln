@@ -5150,6 +5150,7 @@
       "available": "Disponibles",
       "enterTotal": "introduce el total…",
       "changeTotal": "Haz clic para cambiar el total",
+      "totalFromGame": "Total {total}, calculado como lo hace el juego: 2 puntos por nivel por encima de 1, más las raíces del velo y los pozos de elixir que este personaje ha destruido. El juego no lo guarda, así que aquí no se edita.",
       "totalHint": "Total de puntos (en uso + disponibles, como lo muestra el juego):",
       "zoomIn": "Acercar",
       "zoomOut": "Alejar",

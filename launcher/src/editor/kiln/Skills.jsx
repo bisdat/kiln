@@ -9,7 +9,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { Button } from '../../ui';
 import { skills, nomeDe, descricaoDe, ATRIBUTOS, atributosDaArvore } from '../src/gamedata.js';
 import { ui, tex } from '../src/ui.js';
-import { totalKey as totalKeyOf, checkTree } from '../src/treecheck.js';
+import { totalKey as totalKeyOf, checkTree, gameTotal } from '../src/treecheck.js';
 import { t } from '../../i18n';
 import { t as tv } from '../src/i18n.js';
 import { useDeckActions, useEditorEnv } from './env.jsx';
@@ -40,7 +40,10 @@ export default function Skills({ model, setModel }) {
   // the total is not in the character save (part of it comes from the world): the player types what the game shows
   const totalKey = totalKeyOf(model);
   const readTotal = () => { try { const v = localStorage.getItem(totalKey); return v === null ? null : Number(v); } catch { return null; } };
-  const [total, setTotal] = useState(readTotal);
+  const [typed, setTotal] = useState(readTotal);
+  // the game's own total (level and skill-point knowledge, as the game works it out at load): not stored, not editable
+  const derived = gameTotal(model);
+  const total = derived ?? typed;
   const [editTotal, setEditTotal] = useState(false);
   const [draft, setDraft] = useState('');
   useEffect(() => { setTotal(readTotal()); }, [totalKey]);
@@ -190,10 +193,13 @@ export default function Skills({ model, setModel }) {
         <div><span className="k-label">{t('editor.skills.used')}</span><b className="k-num">{used}</b></div>
         <div>
           <span className="k-label">{t('editor.skills.available')}</span>
-          {total === null
+          {derived !== null
+            ? <b className={'ke-tree-avail k-num' + (total - used < 0 ? ' neg' : '')}>{total - used}</b>
+            : total === null
             ? <button type="button" className="k-link" onClick={() => askTotal(used)}>{t('editor.skills.enterTotal')}</button>
             : <button type="button" className={'ke-tree-avail k-num' + (total - used < 0 ? ' neg' : '')} title={t('editor.skills.changeTotal')} onClick={() => askTotal(total)}>{total - used}</button>}
         </div>
+        {derived !== null && <span className="ke-note ke-tree-from-game">{t('editor.skills.totalFromGame', { total })}</span>}
         {editTotal && (
           <div className="ke-tree-total">
             <span className="ke-note">{t('editor.skills.totalHint')}</span>
