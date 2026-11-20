@@ -166,3 +166,21 @@ static Kiln.ReplSent.operator !=(Kiln.ReplSent? left, Kiln.ReplSent? right) -> b
 static Kiln.ReplSent.operator ==(Kiln.ReplSent? left, Kiln.ReplSent? right) -> bool
 static Kiln.ReplWatchEnded.operator !=(Kiln.ReplWatchEnded? left, Kiln.ReplWatchEnded? right) -> bool
 static Kiln.ReplWatchEnded.operator ==(Kiln.ReplWatchEnded? left, Kiln.ReplWatchEnded? right) -> bool
+Kiln.PeerSelector
+Kiln.PeerSelector.Description.get -> string!
+Kiln.PeerSelector.Matches(Kiln.NetPeer! peer) -> bool
+override Kiln.PeerSelector.ToString() -> string!
+Kiln.Peers
+static Kiln.Peers.All.get -> Kiln.PeerSelector!
+static Kiln.Peers.LackingContent.get -> Kiln.PeerSelector!
+static Kiln.Peers.Vanilla.get -> Kiln.PeerSelector!
+static Kiln.Peers.With(Kiln.ReplicatedExtension! extension) -> Kiln.PeerSelector!
+static Kiln.Peers.Without(Kiln.ReplicatedExtension! extension) -> Kiln.PeerSelector!
+Kiln.ReplicatedExtension
+Kiln.ReplicatedExtension.IsAvailableFor(Kiln.NetPeer! peer) -> bool
+Kiln.ReplicatedExtension.IsRegistered.get -> bool
+Kiln.ReplicatedExtension.LayoutHash.get -> uint
+Kiln.ReplicatedExtension.Name.get -> string!
+Kiln.ReplicatedExtension.Size.get -> int
+Kiln.ReplicatedExtension.Version.get -> int
+override Kiln.ReplicatedExtension.ToString() -> string!
