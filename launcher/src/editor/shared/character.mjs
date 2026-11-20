@@ -94,7 +94,7 @@ function parseCharacter(p, isItem, isSkill, ehEquipavel = null) {
   // parser does not know), or when it is empty and not the only fit.
   const findInventory = (from) => {
     const fits = [];
-    let broken = false;
+    const broken = []; // where headers that read some entries but not all start
     for (let s = from + 4; s < p.length; s++) {
       const pages = p[s - 4], mc = p[s - 3], groups = p[s - 2], ec = p[s - 1];
       if (pages < 1 || pages > 16 || groups > 8 || (ec && !groups)) continue;
@@ -105,14 +105,16 @@ function parseCharacter(p, isItem, isSkill, ehEquipavel = null) {
         q = e._end;
       }
       if (read === mc + ec) {
-        fits.push({ invStart: s, mainCount: mc, extraCount: ec, unsure: broken });
+        // a broken header counts when it ends before this one begins: four bytes that overlap this header are this
+        // header's own bytes read at the wrong offset (a 2026-11-20 player save has 01 00 05 18 there)
+        fits.push({ invStart: s, mainCount: mc, extraCount: ec, unsure: broken.some((b) => b <= s - 4) });
         if (mc + ec > 0) break; // the first fit with entries is the one; what follows it is the rest of the block
-      } else if (read > 0) broken = true;
+      } else if (read > 0) broken.push(s);
     }
     if (!fits.length) return null;
     const chosen = fits[fits.length - 1];
     if (chosen.mainCount + chosen.extraCount > 0) return chosen;
-    return { ...fits[0], unsure: fits.length > 1 || broken };
+    return { ...fits[0], unsure: fits.length > 1 || broken.length > 0 };
   };
 
   // Equipamento: lista densa com os índices em ordem crescente (0, 1, 2…), precedida pela máscara
@@ -249,10 +251,10 @@ function readCharacter(p, isItem, isSkill, ehEquipavel = null) {
   try {
     lenient = parseCharacter(p, (id) => id > 0xffff, isSkill, (id) => !isItem(id) || !ehEquipavel || ehEquipavel(id));
   } catch { /* keep the strict reading's error */ }
-  // past an empty or unsure strict reading, the lenient one must be sure, hold unknown items and look like stacks (a
-  // count, a slot in the grids): random bytes read with any id accepted can pass for a few entries
-  const plausible = (c) => [...c.main, ...c.extra].every((e) => e.count > 0 && e.slot < 128);
-  if (lenient && (!strict || (!lenient._invUnsure && plausible(lenient) && [...lenient.equipment, ...lenient.main, ...lenient.extra].some((e) => !isItem(e.itemId))))) {
+  // past an empty or unsure strict reading, the lenient one must be sure and hold unknown items (its entries' slots
+  // already lie in their pages: random bytes read with any id accepted rarely pass that). A count of 0 is no sign of
+  // garbage: the game keeps such rows (a 2026-11-20 player save has one in its backpack)
+  if (lenient && (!strict || (!lenient._invUnsure && [...lenient.equipment, ...lenient.main, ...lenient.extra].some((e) => !isItem(e.itemId))))) {
     return { character: lenient, unknownItems: true };
   }
   if (strict) return { character: strict, unknownItems: false };

@@ -35,7 +35,7 @@ const U32_FIVE = Buffer.from([5, 0, 0, 0]);
 
 /** A player_character block: seven worn pieces (two weapon bits more in the mask), 20 free places, `between` bytes before
  *  the inventory header, then the inventory and `tail`. */
-function block({ main, extra = [], between = Buffer.alloc(4), tail = Buffer.alloc(24), bagPages = 5 }: { main: E[]; extra?: E[]; between?: Buffer; tail?: Buffer; bagPages?: number }) {
+function block({ main, extra = [], between = Buffer.alloc(4), tail = Buffer.alloc(24), bagPages = 5, backpackPages = 4 }: { main: E[]; extra?: E[]; between?: Buffer; tail?: Buffer; bagPages?: number; backpackPages?: number }) {
   const top = Buffer.alloc(12);
   top.writeUInt32LE(25, 0); top.writeUInt32LE(100, 4); top.writeUInt32LE(1, 8);
   const node = Buffer.alloc(5); node.writeUInt32LE(31613866, 0); node[4] = 1;
@@ -45,7 +45,7 @@ function block({ main, extra = [], between = Buffer.alloc(4), tail = Buffer.allo
   return Buffer.concat([
     Buffer.alloc(0x3a), top, node, mid,
     ...worn.map(([, itemId], slot) => entry({ slot, itemId, count: 1, level: 10 })),
-    Buffer.from([20, 0]), between, Buffer.from([bagPages, main.length, extra.length ? 4 : 0, extra.length]),
+    Buffer.from([20, 0]), between, Buffer.from([bagPages, main.length, extra.length ? backpackPages : 0, extra.length]),
     ...main.map(entry), ...extra.map(entry), tail,
   ]);
 }
@@ -116,6 +116,22 @@ describe("the inventory header", () => {
     expect(r.unknownItems).toBe(true);
     expect(r.character.main.length).toBe(4);
     expect(r.character.extra.length).toBe(1);
+  });
+
+  // the shape of the reporting player's save (game-written, 2026-11-20), rebuilt here with other items: 05 00 01 00 just
+  // before the real header (the old search took it: empty Backpack), an item no table has (count 0x8001, a level) in
+  // the bag, a 16-slot backpack (2 pages) holding a stack of count 0 (the game keeps such rows)
+  test("the reported save's shape: the whole inventory reads, with the unknown item, and writes back the same bytes", () => {
+    const main: E[] = [...MAIN, { slot: 9, itemId: 0xa0cdd2e9, count: 0x8001, level: 1 }, { slot: 31, itemId: I.iron, count: 3 }];
+    const extra: E[] = [{ slot: 15, itemId: I.scraps, count: 0 }];
+    const p = block({ main, extra, backpackPages: 2, between: Buffer.from([5, 0, 1, 0]), tail: Buffer.concat([Buffer.from([0x0f, 0x94, 0x37, 0x72, 0x99, 0, 0, 0, 2, 0, 3]), Buffer.alloc(11)]) });
+    const r = read(p);
+    expect(r.unknownItems).toBe(true);
+    expect(r.character._invUnsure).toBe(false);
+    expect(r.character.main.map((e: E) => e.slot)).toEqual([0, 1, 2, 9, 31]);
+    expect(r.character.main[3]).toMatchObject({ itemId: 0xa0cdd2e9, count: 0x8001, level: 1 });
+    expect(r.character.extra).toEqual([{ slot: 15, itemId: I.scraps, count: 0, flags: 0 }]);
+    expect(Buffer.compare(buildCharacter(r.character), p)).toBe(0);
   });
 
   test("a full main inventory and backpack (40 + 32 stacks) read whole", () => {
