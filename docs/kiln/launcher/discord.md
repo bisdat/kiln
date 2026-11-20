@@ -24,7 +24,8 @@ Code: `launcher/src/community/` (the UI), `launcher/src/api/commands.ts` (the co
   or a client secret. The application's client ID (`1570849158431244459`) is public: it names the app for Rich
   Presence.
 - **Rich Presence** talks only to the Discord app on this PC (its local IPC socket), only while the switch is on and the
-  game runs with Kiln. Nothing goes to Frostdev for it. It never shows a server, world, character or mod name.
+  game runs with Kiln. Nothing goes to Frostdev for it. It never shows a server, world, character or mod name; with
+  "Show my Crucible pack" also on, the name and page of the Crucible pack being played (nothing else).
 
 ## What it does
 
@@ -97,6 +98,15 @@ for its art goes again without it). Its own thread follows the watcher, tries th
 runs, and clears the activity at once when anything ends; it never holds up a start. "Discord isn't running on this
 PC" (or Deck) when the switch is on and no socket is there.
 
+**Show my Crucible pack on my Discord profile** (Crucible, DESIGN.md 8; `community.json` `presencePack`, off by
+default, usable only with Rich Presence on; the card's second switch, the Deck dialog's "Show my pack"): while the
+profile active on the running game is an instance of a Crucible pack (its `pack/instance.json` carries Crucible's
+block with a share code or slug), the state line names the pack, "Ember run (12 mods)", and the second button
+becomes "Get this modpack" opening `https://frostdev.io/kiln/crucible/p/<CODE>` (else `/kiln/crucible/<slug>`;
+`presence::pack_page` checks both, and no other address is ever a button). A pack built or opened from a file on this
+PC is never named. The active profile is read again each round, so a profile switch shows on the next one. Still no
+party, no secrets, no Ask to Join (the Social SDK is not used). Mock flag `pack`.
+
 **Mock mode** (`?mock=1&discord=<flags>`, `src/api/mockCommunity.ts`): `in`, `empty`, `notmember`, `offline`,
 `relaydown`, `ratelimit`, `toobig`, `known`, `nodiscord`, `presence`, `notify`, `cancel`, `expire`, `deny`, `tester`,
 `sent`, `read`, `noplan`, `nobuild` (a volunteer gets no checklist), `hidden`; `&problem=crash` (the game runs four
@@ -122,7 +132,8 @@ and kept" says it in short; `unit/community.test.ts` checks that its words keep 
   mod settings are never in it.
 - Testers: the hardware lines shown, sent by Volunteer only; results to the build's post; an attached report to the
   team only. Stop testing removes the role and the hardware.
-- Rich Presence: only to the Discord app on this PC, nothing to Frostdev.
+- Rich Presence: only to the Discord app on this PC, nothing to Frostdev. With Show my Crucible pack on, also the
+  Crucible pack's name and its page.
 
 ## The contract with the relay
 
@@ -218,7 +229,7 @@ relay's versions line ("Kiln 0.2.0-dev.29.18 · Launcher 0.2.0-dev.29.18 · Arch
 
 | File (data folder) | What | Until |
 |---|---|---|
-| `community.json` | `{format: 1, shown, presence, notify, relay?}` | the player changes it |
+| `community.json` | `{format: 1, shown, presence, presencePack, notify, relay?}` | the player changes it |
 | keyring entry, or `community-session.json` (0600) | `{format: 1, relay: "<host>", session, account}` | sign out |
 | `community-known.json` | the last known-problems list (public) | replaced at the next page open |
 | `community-tester.json` | a tester's results for the current test build `{build, steps: {id: {result, note}}}` | the next build, Stop testing, sign out |

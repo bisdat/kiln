@@ -163,7 +163,7 @@ public sealed partial class KilnHarness : IDisposable
     /// <summary>Capability rows as mods see them offline, and the test's overrides.</summary>
     public HarnessCapabilities Capabilities { get; }
 
-    internal bool IsTickThread => _tick?.IsCurrent ?? false;
+    internal bool IsTickThread => (_tick?.IsCurrent ?? false) && !TaskExecutionScope.InMenuHop;  // no world in a menu hop (#83)
 
     /// <summary>The harness's tick thread (the watchdog's handle on it).</summary>
     internal TickThread TickThread => _tick;

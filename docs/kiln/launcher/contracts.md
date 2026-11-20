@@ -43,7 +43,8 @@ Machine-readable copies:
 | `<configDir>/.schema/<file>.json` | Kiln.Api `Config.Register`, kiln-emf | launcher | `config-schema.schema.json`, `examples/config-schema*.json` |
 | `kiln-runtime.json` (bundle root) | `kilnctl bundle create` | installer | `kiln-runtime.schema.json`, `examples/kiln-runtime.json` |
 | `<game>/kiln/.install.json` | installer | installer, launcher | `install-receipt.schema.json`, `examples/install-receipt.json` |
-| `kiln-modpack.json` (modpack root) | modpack build | launcher | `kiln-modpack.schema.json`, `examples/kiln-modpack.json` |
+| `kiln-modpack.json` (modpack root) | modpack build (format 1), pack build (format 2, a Crucible `.kilnpack`: [crucible.md](crucible.md)) | launcher | `kiln-modpack.schema.json`, `examples/kiln-modpack.json`, `examples/kiln-pack.json` |
+| `profiles/<pid>/pack/instance.json` (+ `base/`, `undo/`) | launcher (Crucible pack install/update) | launcher | `kiln-pack-instance.schema.json`, `examples/kiln-pack-instance.json` |
 | `<game>/kiln/state/boot.json` | kiln-core | launcher | `state-boot.schema.json`, `examples/state-boot.json` |
 | `<game>/kiln/state/progress.json` | kiln-core (dev.27; services, plugins and Kiln.Host report through kiln.progress v2) | launcher, server operators | `state-progress.schema.json`, `examples/state-progress.json`; section "Start progress" below |
 | `<game>/kiln/state/mods.json` | Kiln.Host | launcher | `state-mods.schema.json`, `examples/state-mods.json` |
@@ -1627,6 +1628,30 @@ line, the last one wins, else `KILN_LAUNCHER_UI=deck|desktop`). The UI: `forced`
 | community | `tester_result_set` | step, result?: "worked"\|"failed"\|"skipped"\|"clear", note? | plan \| null (kept on this PC) |
 | community | `tester_results_send` | withReport: boolean, prepared?: string (the report `community_report_prepare` showed) | plan \| null |
 | community | `community_steam_keyboard` | - | null (a Steam Deck only: `steam://open/keyboard`) |
+| pack | `pack_inspect` | source: {path, sha256?} (a local .kilnpack; no URL) | `PackPreview` ([crucible.md](crucible.md)) |
+| pack | `pack_install` | gameId?, request: `pack::InstallRequest` (local source, consent) | TaskId -> `pack::InstallResult` |
+| pack | `pack_instance` | profileId | `Instance` \| null |
+| pack | `pack_instances` | - | [profileId, `Instance`][] |
+| pack | `pack_update_plan` | profileId, source (local), optional? | `UpdatePlan` |
+| pack | `pack_update` | request: `pack::UpdateRequest` (local source) | TaskId -> `UpdateResult` (error `conflict`, plan in detail) |
+| pack | `pack_undo` | profileId | `Profile` |
+| pack | `pack_uninstall` | profileId | `UninstallResult` {profile, unused} |
+| pack | `pack_build` | request: `BuildRequest`, outDir (absolute) | TaskId -> `BuiltPack` ("Save as file") |
+| pack | `pack_verify` | path, sha256? | `PackIndex` |
+| pack | `pack_diff` | oldPath, newPath | `PackDiff` |
+| pack | `pack_secret_scan` | file, text | string[] |
+| pack | `pack_peek_format` | path | 1 (server modpack) \| 2 (Crucible pack) |
+| crucible | `crucible_status` | - | `{enabled, dev, api, signedIn, account: {id, name} \| null}` (enabled false: no Crucible surface) |
+| crucible | `crucible_open` | gameId?, target (code, share link, pack link, kiln:// link, version id) | `crucible::Preview`; a pack still uploading: `busy` with `{uploading: {version, progress}, pack}` |
+| crucible | `crucible_install` | gameId?, request: {target (version id), consent, trustAlways?, optional?, name?, play?} | TaskId -> `crucible::InstallResult` {profile, instance, imported, overrides, previous, downloaded} |
+| crucible | `crucible_updates` | gameId?, force? | `UpdateAvailable[]` (cached 5 minutes) |
+| crucible | `crucible_update_plan` | profileId | `{versionId, download, plan: UpdatePlan}` (downloads what it needs) |
+| crucible | `crucible_update` | gameId?, request: {profile, versionId, consent, optional?, resolve?, all?} | TaskId -> `UpdateResult` |
+| crucible | `crucible_share` | gameId?, request: {profile, title?, overrides?} | TaskId -> `ShareResult` {pack, version, files, uploaded, skipped}; signed out: `auth_failed` |
+| crucible | `crucible_shared` | profileId | `SharedState` {profile, pack, version, changed: {added, updated, removed} \| null, pending} \| null |
+| crucible | `crucible_trust` | - | `Trust[]` {id, name, since} |
+| crucible | `crucible_trust_set` | id, name, trusted | null |
+| crucible | `crucible_links` | - | string[] (kiln:// links that arrived; drained) |
 
 The community commands ([discord.md](discord.md)) refuse every request that would leave the PC while
 `community.json`'s `shown` is false (`refused`, `detail.kind` "hidden"); their errors carry `detail.kind` (`offline`,
@@ -1663,6 +1688,10 @@ queued in `<data>/nexus/inbox/` and handed to the launcher that runs (this proce
 it; another game's well-formed link goes to the handler before Kiln and the process exits. URL invocations accept
 exactly `--nxm <link>` or one bare link, without additional launcher options; malformed invocations exit 1.
 
+`kiln-launcher --link <kiln://crucible/...>` (what Kiln registers for kiln:// while Crucible is on) or a bare `kiln://`
+argument: the link is queued in `<data>/crucible/inbox/` and handed to the launcher that runs (this process exits), or
+this process starts with it; the same strict argument shape as nxm.
+
 ## 10. Events
 Emitted with `app.emit(name, payload)`; `launcher/src/api/commands.ts` exports `KilnEvents` with the payload types.
 
@@ -1678,6 +1707,7 @@ Emitted with `app.emit(name, payload)`; `launcher/src/api/commands.ts` exports `
 | `kiln://console` | `{subscription, serverId, reset: boolean, source, path: string \| null, truncated, lines: ConsoleLine[]}` (`reset`: `lines` replace everything shown: a start, a stop, a start outside the launcher) |
 | `kiln://gamepad` | `{kind: 'button', button: 'a'\|'b'\|'x'\|'y'\|'lb'\|'rb'\|'lt'\|'rt'\|'select'\|'start'\|'guide'\|'ls'\|'rs'\|'up'\|'down'\|'left'\|'right', pressed, repeat, device} \| {kind: 'axis', axis: 'rx'\|'ry', value: -1..1, device} \| {kind: 'connected', device, name, vendor, product} \| {kind: 'disconnected', device, name}` (the Deck UI's native reader while `deck_gamepad(true)`: directions merge the D-pad and the left stick and repeat while held (`repeat: true`); the right stick is sent for scrolling, at most ~25 a second, then one 0; [deck.md](deck.md)) |
 | `kiln://nxm` | `{count}` (an Enshrouded Mod Manager Download link arrived; `count` links wait in `nexus_links`; the window comes to the front) |
+| `kiln://crucible-link` | `{count}` (a kiln:// Crucible link arrived; `crucible_links` hands them over; the window comes to the front) |
 | `kiln://mod-updates` | `CheckReport` (the result of every `updates_check`, also the daily one) |
 | `kiln://community` | `{kind: 'changed'\|'reply', post?, title?, url?, by?}` (the Discord features: something the Community page shows changed, or Kiln support replied to a post; [discord.md](discord.md)) |
 | `kiln://activation` | `{gameId}` (a profile was written again without `profile_activate`: after `profile_save`, `profile_revert` or `chain_set_late`, a change of `profile.json` outside the launcher, the watcher's start-up pass, `profile_ensure_default`; its `Activation` waits until the window takes it with `activation_notices`, which the launcher also calls once its listener is up) |
@@ -1762,6 +1792,8 @@ default; the launcher uses `full`. Builds for Linux and `x86_64-pc-windows-msvc`
 | `admin` (`protocol client bridge tunnel discover hub`) | `protocol::{encode, decode, decode_known, write_frame, read_payload, parse_token, mac_message, mac, op_budget, error_code, Frame, KapErrorCode, Endpoint, Limits, ServerIdent}` + constants (`MAX_SERVER_FRAME` = 16 MiB), `client::{AdminClient::{connect, connect_dir, connect_ssh, connect_tcp, connect_file, session, call, subscribe, unsubscribe, next_event, is_open, shutdown, close, send_frame}, Transport, AdminSession, AdminEvent, TcpTarget}`, `bridge::FileBridge::{new, locate, alive, call, call_raw, state}`, `tunnel::SshTunnel::{open, close, alive}`, `discover::{endpoint, token, probe, remote_endpoint, remote_token}`, `hub::{AdminHub::{new, connect, call, subscribe, unsubscribe, disconnect, sessions, session_of, shutdown}, HubEvent, Connector}` |
 | `gameart` (feature `gameart`) | `extract_editor`, `extract_map`, `status`, `game_build`, `build_of`, `read_source`, `write_source`, `recipe_of`, `GameData::open`; `SourceInfo`, `GameSource`, `ArtStatus`, `GameBuild`, `EditorOptions`, `MapOptions`, `LayoutSource`; `kfc::Kfc`, `refl::{PeFile, TypeDb}`, `res`, `texture`, `image`, `work` ([gameart.md](gameart.md)) |
 | `modpack` | `inspect`, `download`, `verify`, `extract`, `check_against`, `install`, `build`, `publish`, `publish_state`, `client_mods`, `required`, `server_identity`; `ModpackManifest`, `ModpackMod`, `ModpackServer`, `ModpackSource`, `ModpackPreview`, `ModpackInstallRequest`, `ModpackInstallResult`, `BuiltModpack`, `ModpackPublishState`, `ClientMod` |
+| `modpack::pack` | Crucible packs ([crucible.md](crucible.md)): `build`, `read`, `verify`, `peek_format`, `inspect`, `install`, `instance`, `instances`, `plan_update`, `update`, `undo`, `uninstall`, `diff`, `install_server`, `check_index`, `secret_findings`, `override_path_ok`; `PackIndex`, `PackMod`, `PackLayer`, `PackOverride`, `BuildRequest`, `BuiltPack`, `PackPreview`, `Instance`, `InstallRequest`, `InstallResult`, `UpdatePlan`, `UpdateRequest`, `UpdateResult`, `PackDiff`, `ServerInstallRequest`, `ServerInstallResult` |
+| `modpack::merge` | the three-way merge of config overrides: `leaves`, `value_at`, `apply`, `three_way`; `OverrideMode`, `Pick`, `KeyConflict` |
 | `lint` | `lint_paths`, `lint_text`, `lint_profile`, `lint_library_entry`, `rules`, `schema_for`, `docs::{idrefs, schema_markdown}`; `LintOptions`, `LintReport`, `Diagnostic`, `Severity`, `Span`, `Fix`, `TextEdit`, `Related` |
 | `vendor` (`manifest agreements store download`; 0.2.0-dev.29) | `builtin()`, `manifest::{parse, check_url, license_text, license_sha256, vendor_orgs, redirect_hosts, file_name_ok, BUILTIN, LICENSE_TEXTS, HOSTS, NOT_PINNED, MAX_FILE, VendorManifest, Component, License, VendorFile}`, `agreements::{Agreements::{load, agreed, agreed_at}, record, path, Agreement}`, `store::{Store::{at, for_game, root, folder, rel, lock, receipts, problems, partial, status, component_status, remove}, version_cmp, Receipt, ReceiptFile, ReceiptLicense, VendorState, ComponentStatus, LicenseInfo, FileInfo, Installed, RemoveReport, DIR, RECEIPT, PART_SUFFIX, LOCK}`, `download::{download, policy, user_agent, DownloadReport}` (section 5.15) |
 | `nexus` (`api catalog install nxm handler keystore oauth version`; network: feature `http`) | `client(token, app_version)`; `api::{Client::{new, with_credentials, has_credentials, search, mod_details, mod_files, file_versions, file_version_by_gsid, dependencies, download_links, validate, manifest, open_download, rate}, Credentials, Transport, UreqTransport, AppId, Account, ManifestEntry, RateState, parse_manifest}`, `catalog::{Catalog::{new, search, details, verify, files, requirements, installed, check_updates, record_install, cached_verdict}, classify, newest, bbcode_to_text, files_url, mod_url, root_of, refuse_kiln, GAME, KILN_MOD, KILN_EPOCH, CHECK_BATCH, Query, Filter, Sort, Page, CatalogMod, Details, CatalogFile, Requirement, InstallRecord, InstalledMod, InstalledInfo, ModType, Verdict}`, `install::{install, download, check_zip, InstallRequest, InstallReport, CheckReport}`, `nxm::{parse, game_of, NxmLink}`, `handler::{register, unregister, status, state, forward, platform, acquire_instance, queue_link, take_links, exec_argv, exec_quote, fill_command, split_command, LinuxMime, HandlerPlatform, HandlerState, HandlerStatus, Previous}`, `keystore::{TokenStore::{new, with_backend, get, set, clear, file_path}, TokenPlace, SecretBackend, retire_legacy, write_private}`, `oauth::{Config::{registered, new}, Login::{bind, authorize_url, wait}, Session::{new, save, clear, place}, Tokens}`, `version::{compare, is_newer}` ([catalog.md](catalog.md)) |

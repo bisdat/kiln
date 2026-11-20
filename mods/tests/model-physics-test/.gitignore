@@ -1,0 +1,7 @@
+# Made by build-assets.py on the machine that builds the test (generated sources, the cook's outputs): never committed.
+models/
+assets/cooked/
+assets/assets.json
+blocks/models_pendant.materials.json
+bin/
+obj/

@@ -1,0 +1,25 @@
+<Project>
+  <!-- Sample: a client mod's own typed hook (docs/kiln/modding/client-hooks.md). The mod ships its own symbol fragment,
+       sigdb/client.json, which names a function of the game client (enshrouded.exe) by a byte pattern and describes its
+       signature; Kiln checks both against the running exe and the Kiln.Sigs generator makes the typed class
+       Kiln.Sigs.ClientHookSample.ItemVolume from it. The hook only counts calls and passes the game's answer through.
+       The advanced tier: it may stop working after a game update until the fragment is updated (Kiln refuses it then,
+       it never patches blindly). -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>client-hook-sample</KilnModId>
+    <KilnModName>Client hook (sample)</KilnModName>
+    <Version>0.1.0</Version>
+    <Description>Counts the game client's calls of GetItemVolume through a typed hook of the mod's own sigdb/client.json (advanced tier; changes nothing).</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <KilnServices>Hooks;Sigs</KilnServices>
+    <KilnAdvanced>true</KilnAdvanced>
+    <KilnSide>client</KilnSide>
+    <!-- the generated typed classes use pointers -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="sigdb/client.json" CopyToOutputDirectory="PreserveNewest" Link="sigdb/client.json" />
+  </ItemGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>
