@@ -17,6 +17,11 @@ use std::path::{Path, PathBuf};
 
 pub const MANIFEST: &str = "kiln-modpack.json";
 
+/// Crucible packs (format 2, `.kilnpack`): build, verify, install as an instance, update, uninstall.
+pub mod pack;
+/// The three-way merge of a pack's config overrides.
+pub mod merge;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModpackServer {
@@ -796,7 +801,11 @@ pub fn verify(zip_file: &Path, sha256: Option<&str>) -> Result<ModpackManifest> 
         let e = a.by_name(MANIFEST).map_err(|_| err(ErrorCode::Schema, format!("{}: no {MANIFEST}", zip_file.display())))?;
         let mut b = Vec::new();
         e.take(4 << 20).read_to_end(&mut b)?;
-        serde_json::from_slice(&b).map_err(|e| err(ErrorCode::Schema, format!("{MANIFEST}: {e}")))?
+        let v: serde_json::Value = serde_json::from_slice(&b).map_err(|e| err(ErrorCode::Schema, format!("{MANIFEST}: {e}")))?;
+        if v.get("format").and_then(|f| f.as_u64()) == Some(u64::from(pack::FORMAT)) {
+            return Err(err(ErrorCode::Unsupported, "this is a Crucible pack (format 2), not a server modpack: install it as a pack"));
+        }
+        serde_json::from_value(v).map_err(|e| err(ErrorCode::Schema, format!("{MANIFEST}: {e}")))?
     };
     if manifest.format != 1 {
         return Err(err(ErrorCode::Unsupported, format!("{MANIFEST} format {} is newer than this launcher", manifest.format)));

@@ -1,5 +1,7 @@
 # Server modpacks
 
+Crucible packs (format 2, `.kilnpack`, made by players for players) are another thing: [crucible.md](crucible.md).
+
 How a player gets a server's mods: the server says what it needs, the launcher offers it, the player agrees, the
 launcher downloads, checks and installs it into a profile. Formats: [contracts.md](contracts.md) 5.8 and 5.9,
 `schema/kiln-modpack.schema.json`, `schema/state-last-server.schema.json`. Handshake side: [../network.md](../network.md)

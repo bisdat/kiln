@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-// kiln.ui.inventory v1 (abi/services/kiln_ui_inventory.h): slot clicks, slot_at and the units-to-pixels mapping, on the
-// slot frames of ui_values_slots.cpp and kiln.ui's presses (subscribe_pointer_press). Plain C++ over Env.
+// kiln.ui.inventory v2 (abi/services/kiln_ui_inventory.h): slot clicks, slot_at and the units-to-pixels mapping (v1), and
+// the backpack/chest screen view (v2, screen_view), on the slot frames of ui_values_slots.cpp and kiln.ui's presses
+// (subscribe_pointer_press) and screen_target. Plain C++ over Env.
 //
 //   press (window thread)   on_pointer: the latest slot frame (this session, <= 250 ms, a viewport, a pointer screen),
 //                           the slot under the press (outer rectangle, last drawn wins), the matching subscribers; queues
@@ -12,6 +13,7 @@
 // button | mods << 8 | flags << 16.
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <mutex>
 #include <vector>
@@ -24,6 +26,7 @@ namespace {
 constexpr uint64_t kMaxFrameAgeMs = 250;  // a press hit-tests a frame at most this old
 constexpr size_t kMaxPending = 64;        // clicks waiting for the next frame
 constexpr uint32_t kModsAll = KILN_UI_MOD_CTRL | KILN_UI_MOD_SHIFT | KILN_UI_MOD_ALT;
+constexpr const char* kPanelsRow = "ui.inventory.panels";  // v2 screen_view
 
 uint32_t pack_filter(const KilnUiSlotClickFilter& f) { return f.button | (f.mods << 8) | (f.flags << 16); }
 uint32_t packed_button(uint32_t item) { return item & 0xff; }
@@ -174,6 +177,89 @@ KilnResult KILN_CALL t_mapping(KilnOwner owner, float tw, float th, KilnUiSlotMa
     }
 }
 
+// A rectangle of pixels growing to hold slots.
+struct Bounds {
+    float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    uint32_t n = 0;
+    void add(float a0, float b0, float a1, float b1) {
+        if (n++ == 0) {
+            x0 = a0, y0 = b0, x1 = a1, y1 = b1;
+            return;
+        }
+        x0 = std::min(x0, a0), y0 = std::min(y0, b0), x1 = std::max(x1, a1), y1 = std::max(y1, b1);
+    }
+    KilnUiRect rect() const { return n ? KilnUiRect{x0, y0, x1 - x0, y1 - y0} : KilnUiRect{}; }
+};
+
+KilnResult KILN_CALL t_screen_view(KilnOwner owner, float tw, float th, KilnUiScreenView* out) {
+    if (owner == 0 || !out || out->size < sizeof(KilnUiScreenView)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!env().client_side || !env().client_side()) return KILN_ERR_UNAVAILABLE;
+    if (!env().owner_alive(owner)) return KILN_ERR_REVOKED;
+    const uint32_t size = out->size;
+    *out = KilnUiScreenView{};
+    out->size = size;
+    try {
+        if (!env().row_available || !env().row_available(kPanelsRow)) return KILN_ERR_UNAVAILABLE;
+        if (!ensure_installed(kListSlots)) return KILN_ERR_UNAVAILABLE;
+        uint32_t reason = 0;
+        const auto f = usable_frame(&reason);
+        if (!f) {
+            out->reason = reason;
+            return KILN_OK;
+        }
+        const KilnUiScreen& s = f->meta.screen;
+        const uint32_t kind = panel_screen(s);
+        if (kind == KUI_VIEW_NONE) {
+            out->reason = KUI_NO_PANEL_SCREEN;
+            return KILN_OK;
+        }
+        out->kind = kind;
+        out->hud_screen = s.hud_screen;
+        out->local_player = f->meta.local_player;
+        out->session = f->meta.session;
+        out->frame = f->meta.frame;
+        if (kind == KUI_VIEW_CHEST && env().screen_target) {
+            // kiln.ui's target is of its last completed frame: take it only while kiln.ui still shows this frame's screen
+            KilnUiScreen now{};
+            now.size = sizeof now;
+            if (env().screen && env().screen(&now) && now.ui_state == s.ui_state && now.hud_screen == s.hud_screen)
+                out->container = env().screen_target();
+        }
+        float sx, sy, ox, oy;
+        if (!map_frame(f->meta, tw, th, &sx, &sy, &ox, &oy)) {
+            out->reason = KUI_NO_VIEWPORT;
+            return KILN_OK;
+        }
+        if (tw > 0 && th > 0 && (tw != f->meta.canvas_width || th != f->meta.canvas_height)) out->flags |= KUI_VIEW_SCALED;
+        Bounds all, mine, theirs;
+        for (const KilnUiVisibleSlot& v : f->slots) {
+            if (!(v.available & KUI_OUTER_RECT)) continue;
+            const float x0 = ox + v.outer_ui.x * sx, y0 = oy + v.outer_ui.y * sy;
+            const float x1 = x0 + v.outer_ui.width * sx, y1 = y0 + v.outer_ui.height * sy;
+            if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(x1) || !std::isfinite(y1)) continue;
+            all.add(x0, y0, x1, y1);
+            if (v.holder != 0 && v.holder == out->local_player) mine.add(x0, y0, x1, y1);
+            if (v.holder != 0 && v.holder == out->container) theirs.add(x0, y0, x1, y1);
+        }
+        out->slot_count = all.n;
+        out->player_slots = mine.n;
+        out->container_slots = theirs.n;
+        out->all_px = all.rect();
+        out->player_px = mine.rect();
+        out->container_px = theirs.rect();
+        if (theirs.n) out->flags |= KUI_VIEW_HOLDER_MATCH;
+        // the in-game menu shows other tabs too (map, journal, character): the backpack is open while its slots are drawn
+        if (all.n == 0 || (s.hud_screen == 4 && mine.n == 0)) {
+            out->reason = KUI_NO_SLOT;
+            return KILN_OK;
+        }
+        out->ok = 1;
+        return KILN_OK;
+    } catch (...) {
+        return KILN_ERR_INTERNAL;
+    }
+}
+
 KilnResult KILN_CALL t_inv_unsubscribe(KilnHandle h) {
     try {
         return remove(h);
@@ -188,7 +274,10 @@ const KilnUiInventoryApi kInventoryTable = {
     &t_slot_at,
     &t_mapping,
     &t_inv_unsubscribe,
+    &t_screen_view,  // v2
 };
+static_assert(offsetof(KilnUiInventoryApi, screen_view) == offsetof(KilnUiInventoryApi, unsubscribe) + sizeof(void*),
+              "kiln.ui.inventory v2 appends screen_view after unsubscribe");
 
 }  // namespace
 
@@ -206,6 +295,21 @@ bool pointer_screen(const KilnUiScreen& s) {
             return true;
         default:  // 1 InGame: the hotbar is drawn but a click attacks; everything else unknown
             return false;
+    }
+}
+
+uint32_t panel_screen(const KilnUiScreen& s) {
+    if (s.size == 0 || s.ui_state != KILN_UI_STATE_PLAY) return KUI_VIEW_NONE;
+    switch (s.hud_screen) {
+        case 9:  // Backpack
+            return KUI_VIEW_BACKPACK;
+        case 4:  // InGameMenu: its inventory tab (screen_view also wants the local player's slots drawn); not a crafting tab
+            return s.crafting == 0 ? KUI_VIEW_BACKPACK : KUI_VIEW_NONE;
+        case 22:  // StorageChest: the chest-style transfer screen 0xb9d0f0(0)
+        case 41:  // CommerceProductChest: 0xb9d0f0(1)
+            return KUI_VIEW_CHEST;
+        default:  // the play view, stations and factories (Ui.Crafting's panels), everything unknown
+            return KUI_VIEW_NONE;
     }
 }
 

@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "models": {
+    "models/banner.gltf": {
+      "cloth": [
+        {
+          "mesh": 0,
+          "primitive": 0,
+          "particleIds": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "pin": [
+            1,
+            1,
+            0,
+            0
+          ],
+          "massKg": 0.3
+        }
+      ]
+    }
+  }
+}
