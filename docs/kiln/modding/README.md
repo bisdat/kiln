@@ -30,6 +30,7 @@ generated [../status.generated.md](../status.generated.md); what has no API yet 
 | [cosmetics.md](cosmetics.md) | Pieces for the vanity slots on models of your own: skinned or on one joint, both bodies from one file, `kiln skeleton player` |
 | [impact.md](impact.md) | Impact programs: tools/impact (dis/asm/lint/clone/cook), Kiln natives, packaging into kiln.assets |
 | [ecs-programs.md](ecs-programs.md) | ECS programs in the game's scheduler (`kiln.programs.json`, `EcsPrograms.Bind`) and hooks on the game's systems |
+| [client-hooks.md](client-hooks.md) | Client hooks for mods (advanced tier, may break on game updates): typed hooks of the game client from a mod's own `sigdb/client.json`, what is allowed, what Kiln refuses; `mods/samples/ClientHookSample` |
 | [sounds.md](sounds.md) | Sounds, cues, music, voice-over: tools/soundcook, cook.json sound steps, SoundSample |
 | [vfx.md](vfx.md) | Effects: particles, lights and the game's VFX by name, in `blocks/*.json` or C#, the budget, VfxSample |
 | [shaders.md](shaders.md) | Particle shaders (advanced): your own HLSL hooks for a particle, linked into Kiln's sprite; `kiln-vfxcook shader` |
@@ -86,7 +87,7 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `SampleTasks` | Kiln tasks (`Context.Tasks`): a task that waits for its cancellation and unwinds at unload, one that throws (only that task faults), one that computes on a worker and applies on the tick with `await ctx.ToTick()` |
 | `resolver/*` | manifest-only fixtures: missing dependency, cycle, a dependent of a cycle, version mismatch, incompatible, client-only, feature, API, bad manifest |
 | `HookSample` | `advanced` mods (kiln.hooks): a detour that counts calls of the game's `GetComponent`, a mid hook reading a register, a reversible byte patch, a mod-shipped symbol fragment |
-| `TypedHookVolume` | typed hooks (`Kiln.Sigs`, since 0.2.0-dev.29): a hook of the game's `GetItemVolume` that lets the game answer and doubles the volume it gave (a watering can takes twice the water); built, not run in a game (guided check `06b-typed-hooks.client`) |
+| `TypedHookVolume` | typed hooks (`Kiln.Sigs`, since 0.2.0-dev.29): a hook of the game's `GetItemVolume` that lets the game answer and doubles the volume it gave (a watering can takes twice the water); built, not run in a game (guided check `06b-typed-hooks.client`, in the dev.30 pass) |
 | `EngineRoom` | The advanced tier's managed side in one admin command: `/engine systems` and `/engine profile` list and measure the game's systems (`GameSystems`), `/engine watch <system>` counts one system's runs through `GameSystems.Hook` (callbacks on the game's worker threads), `/engine stack <item> <count>` changes one field of an item's resource as a claim (`ReflectedResources.FindByField`, `Set`), `/engine claims` and `/engine undo` show and give back claims (`Overrides.Active`, `Claim`, `RestoreAll`); what to do when a game update renames something |
 | `WorldPrograms` | an ECS program declared in `kiln.programs.json` and bound with `EcsPrograms.Bind`, emitting and reading a game event |
 | `LightsOut` | tracked world writes: `/lights off` puts out every lantern, torch and candle with `World.Update<Ecs.ServerToggleState>`, and a restart keeps them out; the build fills `"writes"` |
@@ -143,7 +144,8 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `SoundSample` | tools/soundcook + Kiln.Audio: test tones as UI, positional, looped and streamed sounds, music, a replaced game cue, a voiced line and a narration |
 | `UiSample` | Kiln.Ui from code: an FPS line on the HUD, a window (F8) with widgets, toasts |
 | `MenuButtons` | Kiln.Ui game UI: entries in the main and pause menus opening a screen, a crafting info panel, a subcategory and tab in the crafting menu |
-| `SlotMarks` | `Ui.Inventory` (0.2.0-dev.30), client + server: Ctrl+click asks the server to mark an item (the game does not pick it up; the server half checks the item is in the sender's inventory with `Items.Read` first), Alt+right-click lists it, a tint on big stacks |
+| `SlotMarks` | `Ui.Inventory` (0.2.0-dev.30), client + server: Ctrl+click asks the server to mark an item (the game does not pick it up; the server half checks the item is in the sender's inventory with `Items.Read` first), Alt+right-click lists it, a tint on big stacks; a "Count this chest" panel beside storage chests (`Ui.Inventory.AddPanel`, the chest's entity checked by the server half: a container near the sender, not a player) |
+| `ClientHookSample` | client hooks for mods (0.2.0-dev.30, advanced): the mod's own `sigdb/client.json` describes the game client's `GetItemVolume`; the generated `Kiln.Sigs.ClientHookSample.ItemVolume` hooks it and counts calls (guided check `ui-hooks.c8`) |
 | `ValueBars` | `Ui.Values` (dev.28): a water container's detail number in charges with a label, its slot bar, the health pair as a percentage, tooltip lines in Kiln's Item details window (F8) |
 | `RenderSample` | render events: an FPS counter, a compass and waypoint markers in the world |
 | `BlobCatalog` | `Assets.OpenBlobCatalog`: `/blobs` counts the content blobs the game serves by where they come from, lists the ones mods registered, and writes the first entries as JSON |

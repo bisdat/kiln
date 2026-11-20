@@ -11,7 +11,7 @@
   "declared": {
     "symbols": 839,
     "constants": 945,
-    "features": 241
+    "features": 242
   },
   "features": {
     "abilities.attributes": true,
@@ -219,6 +219,7 @@
     "ui.error_popup": true,
     "ui.gemforge.inspect": true,
     "ui.gemforge.sources": true,
+    "ui.inventory.panels": true,
     "ui.language": true,
     "ui.main_menu": true,
     "ui.menu_footer": true,
@@ -4188,6 +4189,7 @@
       "symbols": {},
       "constants": {},
       "features": {
+        "ui.inventory.panels": "static",
         "ui.slots.click": "static"
       }
     },
