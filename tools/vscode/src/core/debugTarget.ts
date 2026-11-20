@@ -190,3 +190,84 @@ export function findNetcoredbg(setting: string | undefined, env: NodeJS.ProcessE
   }
   return found;
 }
+
+/**
+ * The environment for `kiln debug` with the netcoredbg the extension found: KILN_NETCOREDBG always; KILN_NETCOREDBG_PINNED=1
+ * when it is the extension's own bundled copy or the Kiln data folder's (the CLI then refuses one that is not the pinned
+ * release), never for the user's explicit setting or $KILN_NETCOREDBG (a mismatch there only warns).
+ */
+export function netcoredbgEnv(found: string, setting: string | undefined, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const explicit = !!(setting || env.KILN_NETCOREDBG);
+  return explicit ? { KILN_NETCOREDBG: found } : { KILN_NETCOREDBG: found, KILN_NETCOREDBG_PINNED: "1" };
+}
+
+/**
+ * Which adapter carries a session: `kiln debug … --dap` when the CLI has it; else the built-in proxy, for servers only.
+ * A client needs the CLI's adapter (its pause limit, the identity check right before the attach, the session file and
+ * the session states): the built-in proxy has none of them, so a client without it is refused.
+ */
+export function adapterKind(kind: "server" | "client", cliHasDap: boolean): "cli" | "proxy" {
+  if (cliHasDap) return "cli";
+  if (kind === "client") {
+    throw new DebugRefused("tool_missing", "debugging a game client needs `kiln debug --dap` (its pause limit and identity checks), and this kiln CLI has no --dap: update Kiln's SDK (kiln.cli.path).");
+  }
+  return "proxy";
+}
+
+/** Server folders with a debug session of this window (the built-in proxy writes no session file). */
+export const activeDebugTargets = new Set<string>();
+
+const ATTACHED = new Set(["attaching", "running", "paused", "detaching"]);
+
+/** Seconds since 1970 that /proc says a process started at (Linux), or undefined. */
+function linuxStartSeconds(pid: number): number | undefined {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    const ticks = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]);
+    const btime = Number(/^btime (\d+)$/m.exec(fs.readFileSync("/proc/stat", "utf8"))?.[1]);
+    return Number.isFinite(ticks) && Number.isFinite(btime) ? Math.floor(btime + ticks / 100) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The attached session `kiln debug --dap` recorded in `<install>/kiln/state/debug/session.json`, when its proxy still
+ * runs (the same PID, and on Linux the same start, as kiln_manage::debug::attached_session checks); undefined otherwise.
+ */
+export function attachedSession(installDir: string, alive: (pid: number) => boolean = pidAlive, started: (pid: number) => number | undefined = linuxStartSeconds): { proxyPid: number; state: string } | undefined {
+  let f: any;
+  try {
+    f = JSON.parse(fs.readFileSync(path.join(installDir, "kiln", "state", "debug", "session.json"), "utf8"));
+  } catch {
+    return undefined;
+  }
+  const state = String(f?.state?.state ?? "");
+  const pid = Number(f?.proxyPid);
+  if (!ATTACHED.has(state) || !Number.isInteger(pid) || pid <= 0 || !alive(pid)) return undefined;
+  const now = started(pid);
+  if (now !== undefined && typeof f.proxyStarted === "number" && Math.abs(now - f.proxyStarted) > 2) return undefined;
+  return { proxyPid: pid, state };
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** Control commands that unload mod code, refused while a debugger is attached (the host refuses them too). */
+export function unloadsModCode(command: string): boolean {
+  return /^(reload|unload|reload-test)(\s|$)/.test(command.trim());
+}
+
+/** Why a reload (or unload) of mods on this server must wait, or undefined: a debug session of this window, or one
+ *  `kiln debug` recorded for that server. */
+export function reloadBlockedBy(serverDir: string): string | undefined {
+  if (activeDebugTargets.has(path.resolve(serverDir))) return "a debugger of this window is attached to this server: stop the debug session first";
+  const s = attachedSession(serverDir);
+  return s ? `a debugger is attached to this server (kiln debug, pid ${s.proxyPid}, ${s.state}): disconnect it first` : undefined;
+}

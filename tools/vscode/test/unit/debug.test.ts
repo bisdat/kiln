@@ -8,8 +8,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { DapGuard, DapMessage, DapReader, encodeDap, ProxySpec, staleContextsWarning } from "../../src/core/dap";
 import {
-  DebugRefused, debugArgs, describeDebugState, describeResolution, findNetcoredbg, netcoredbgCandidates, parseResolution, proxySpecFromCli, refusalMessage,
-  resolveWithCli, selectTarget,
+  activeDebugTargets, adapterKind, attachedSession, DebugRefused, debugArgs, describeDebugState, describeResolution, findNetcoredbg, netcoredbgCandidates,
+  netcoredbgEnv, parseResolution, proxySpecFromCli, refusalMessage, reloadBlockedBy, resolveWithCli, selectTarget, unloadsModCode,
 } from "../../src/core/debugTarget";
 
 const EXT = path.resolve(__dirname, "../../..");
@@ -314,6 +314,42 @@ process.exit(v.ok ? 0 : 1);
     fs.mkdirSync(path.dirname(installed), { recursive: true });
     fs.writeFileSync(installed, "");
     assert.equal(findNetcoredbg("", { KILN_DATA_DIR: path.join(d, "data") }, bundled), installed);
+  });
+  test("the CLI checks the extension's own netcoredbg against the pin; an explicit choice only warns", () => {
+    assert.deepEqual(netcoredbgEnv("/b/netcoredbg.exe", "", {}), { KILN_NETCOREDBG: "/b/netcoredbg.exe", KILN_NETCOREDBG_PINNED: "1" });
+    assert.deepEqual(netcoredbgEnv("/s/netcoredbg.exe", "/s/netcoredbg.exe", {}), { KILN_NETCOREDBG: "/s/netcoredbg.exe" });
+    assert.deepEqual(netcoredbgEnv("/e/netcoredbg.exe", "", { KILN_NETCOREDBG: "/e/netcoredbg.exe" }), { KILN_NETCOREDBG: "/e/netcoredbg.exe" });
+  });
+  test("a client is never carried by the built-in proxy (no pause limit, no identity re-check there)", () => {
+    assert.equal(adapterKind("server", true), "cli");
+    assert.equal(adapterKind("client", true), "cli");
+    assert.equal(adapterKind("server", false), "proxy");
+    assert.throws(() => adapterKind("client", false), (e: DebugRefused) => e.code === "tool_missing" && /--dap/.test(e.message));
+  });
+  test("reloads wait while a debugger is attached: this window's session, or a live kiln debug's session file", () => {
+    const d = tmp();
+    const file = path.join(d, "kiln", "state", "debug", "session.json");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const write = (state: string, proxyPid = process.pid, proxyStarted?: number) =>
+      fs.writeFileSync(file, JSON.stringify({ format: 1, proxyPid, proxyStarted, state: { state, identity: { windowsPid: 32 } } }));
+    assert.equal(reloadBlockedBy(d), undefined, "no file");
+    write("paused", 4321, 1000);
+    assert.deepEqual(attachedSession(d, () => true, () => 1001), { proxyPid: 4321, state: "paused" });
+    assert.equal(attachedSession(d, () => false, () => 1001), undefined, "a proxy that is gone does not count");
+    assert.equal(attachedSession(d, () => true, () => 5000), undefined, "another process under that PID does not count");
+    write("detached", 4321, 1000);
+    assert.equal(attachedSession(d, () => true, () => 1000), undefined, "an ended session does not count");
+    write("running"); // this test process stands in for a live proxy
+    assert.match(reloadBlockedBy(d)!, /kiln debug, pid \d+, running/);
+    fs.rmSync(file);
+    activeDebugTargets.add(path.resolve(d));
+    try {
+      assert.match(reloadBlockedBy(d)!, /this window/);
+    } finally {
+      activeDebugTargets.delete(path.resolve(d));
+    }
+    for (const c of ["reload m", "unload m", "reload-test m 20"]) assert.ok(unloadsModCode(c), c);
+    for (const c of ["mods", "gc", "load folder", "test m", "reloadx"]) assert.ok(!unloadsModCode(c), c);
   });
   test("the fetch script's pin refuses any other file", () => {
     const d = tmp();
