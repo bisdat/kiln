@@ -61,7 +61,7 @@ public sealed class BaseRulesTestMod : Mod
         var run = 0;
         try
         {
-            var marker = Path.Combine(Context.DataDirectory, "runs.txt");
+            var marker = Path.Combine(Directory.CreateDirectory(Context.DataDirectory).FullName, "runs.txt");
             run = (File.Exists(marker) ? int.Parse(File.ReadAllText(marker).Trim()) : 0) + 1;
             File.WriteAllText(marker, run.ToString());
             Info($"run {run} (the lab starts the server twice: the second start applies the rules again)");
@@ -143,7 +143,11 @@ public sealed class BaseRulesTestMod : Mod
         EntityId altar;
         try
         {
-            altar = Build.PlaceProp("Home_Base_FlameAltar", at, options: new BuildOptions { Flags = BuildFlags.AllowAltars | BuildFlags.Transient, Journal = false });
+            // a dedicated server without a player streams no tiles in: ask for the ones around the place first
+            var loaded = await Build.Load(Build.BoxAround(at, 8, 8, 8), TimeSpan.FromSeconds(90));
+            Info($"run {run}: the tiles around {at} {(loaded ? "are loaded" : "did not load within 90 s: placing without them")}");
+            var flags = BuildFlags.AllowAltars | BuildFlags.Transient | (loaded ? BuildFlags.None : BuildFlags.Unloaded);
+            altar = Build.PlaceProp("Home_Base_FlameAltar", at, options: new BuildOptions { Flags = flags, Journal = false });
         }
         catch (Exception e) when (e is BuildException or ArgumentException)
         {
