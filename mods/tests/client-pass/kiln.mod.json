@@ -1,7 +1,7 @@
 {
   "id": "client-pass",
   "name": "Client pass",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "apiVersion": "0.2",
   "entryAssembly": "ClientPass.dll",
   "side": "both",
