@@ -432,7 +432,7 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
     [Fact]
     public void An_older_clients_program_refresh_error_on_a_joined_game_does_not_refuse_it()
     {
-        // review of dev29/statusblock-join: a Kiln client before 0.2.0-dev.29.24 still reports kiln.abilities'
+        // review of dev29/statusblock-join: a Kiln client before 0.2.0-dev.30 still reports kiln.abilities'
         // WRONG_THREAD for a state with programs (a StatusBlock's) although it applied it whole. The fixed server is not
         // to refuse it for that (at the join, or at a hot load with the player in).
         HostAccess.Current = null;

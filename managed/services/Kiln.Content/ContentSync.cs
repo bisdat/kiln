@@ -113,7 +113,7 @@ public static unsafe class ContentSync
 
     /// <summary>Ack result: a client that cannot apply the state yet (its world does not run: a server holds it at the join,
     /// and a joining game's registries load only in its world's steps) received it and applies it once its world runs. That
-    /// later ack decides (a failure refuses it then). Since 0.2.0-dev.29.24, sent only to a server whose WELCOME has
+    /// later ack decides (a failure refuses it then). Since 0.2.0-dev.30, sent only to a server whose WELCOME has
     /// <see cref="HeldAnswerProperty"/>: an older server reads any result but 0 and 2 as a failure.</summary>
     internal const byte AckDeferred = 4;
 
@@ -649,14 +649,14 @@ public static unsafe class ContentSync
         return true;
     }
 
-    /// <summary>The one error a Kiln client before 0.2.0-dev.29.24 reports for a state with programs (a StatusBlock's, any
+    /// <summary>The one error a Kiln client before 0.2.0-dev.30 reports for a state with programs (a StatusBlock's, any
     /// clone with a program) although it applied the state whole: kiln.abilities' program_refresh answers WRONG_THREAD (4)
     /// on a joined client, which runs no Impact programs (<see cref="SyncPrograms.RefreshProblem"/>).</summary>
     internal const string OlderClientProgramRefresh = "kiln.abilities did not register the programs (4)";
 
     /// <summary>An older Kiln client's failed ack whose only error is <see cref="OlderClientProgramRefresh"/>: its apply
     /// was whole (any other error, or a native apply failure, adds an error of its own), so it counts as applied. Without
-    /// this a client before 0.2.0-dev.29.24 was refused by a server with a StatusBlock, at the join or at a hot load. Pure (tests).</summary>
+    /// this a client before 0.2.0-dev.30 was refused by a server with a StatusBlock, at the join or at a hot load. Pure (tests).</summary>
     internal static bool OlderClientAppliedWhole(AckMsg a, NetPeer sender) =>
         a.Result == 1 && a.Errors == 1 && a.Detail == OlderClientProgramRefresh && !AnswersWhileHeld(sender);
 
