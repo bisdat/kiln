@@ -1,0 +1,11 @@
+{
+  "id": "model-physics-client",
+  "name": "Model physics client fixture",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "ModelPhysicsClient.dll",
+  "side": "both",
+  "clients": "mod",
+  "advanced": true,
+  "description": "The fixture of guided check 16e-cc16e (mods/tests/client-pass/Dev28ClothChains.cs): a banner to place (cloth from assets/physics.json, a collider), a worn cape cut down its middle for its UVs (cloth on the player's Chest joint, a collider on it) and a creature wearing a three-link pendant (a chain its body block declares). build-assets.py writes the sources and cooks them. On a game client its code counts, read only, how often the game's cloth and chain code runs (the sigdb features models.cloth.readers and models.chain2.readers) and writes the counts to kiln/data/model-physics-client/counts.json."
+}

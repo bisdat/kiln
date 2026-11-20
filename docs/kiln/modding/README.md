@@ -139,6 +139,7 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `ShaderSample` | particle shaders (advanced): curl-noise particles moved by `shaders/swirl.hlsl`, the same block on Kiln's sprite, and a hook that fails its checks on purpose |
 | `MaterialSample` | `MaterialBlock`: two swords on materials written from nothing, by hand and from a glTF's materials, and a particle that takes a material's look |
 | `ModelSample` | tools/modelcook + kiln.assets: a game sword's model replaced, a new sword with its own model and visual template, icons rendered from the glTF |
+| `ModelPhysics` | cloth and bone chains in the model cook ([models.md](models.md#physics)): a banner with cloth from `assets/physics.json`, a three-link pendant whose chain a body block declares (on since 0.2.0-dev.31, not yet confirmed in a game) |
 | `PlayerStates` | states of a mod's own in the player's animation graph (`assets/player-states.json`): a sword whose first light attack, heavy attack and block play them (the game's clips with the sample's sword arm, from a glTF of its own rig), and a staff cast for the guided checks; cook its clips first |
 | `AssetSample` | kiln.assets: a PNG icon for a new item from a data pack, a retexture of a game item's inventory icon |
 | `SoundSample` | tools/soundcook + Kiln.Audio: test tones as UI, positional, looped and streamed sounds, music, a replaced game cue, a voiced line and a narration |
