@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "comment": "Made by tools/modelcook from pendant.gltf. Change the glTF and cook again, or copy a block to a file of your own and name it in the recipe.",
+  "materials": {
+    "models_pendant.pendant_metal": {
+      "tint": "#e1dac4",
+      "roughness": 0.35,
+      "metallic": 0.9,
+      "kind": "metal"
+    }
+  }
+}

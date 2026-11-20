@@ -1,0 +1,11 @@
+{
+  "id": "model-physics-test",
+  "name": "Model physics lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "ModelPhysicsTest.dll",
+  "side": "both",
+  "clients": "mod",
+  "advanced": true,
+  "description": "Lab test of cloth and bone chains in the model cook (dedicated server, no player): the cooked banner and pendant, made by build-assets.py from generated sources (no game data), go through kiln.assets' manifest, registration and read-back, the game's own reflection reads their arrays, the physics-off build was refused, and cleanup leaves the game's resources as they were. PASS and FAIL lines in kiln.log. Nothing here is drawn or simulated."
+}

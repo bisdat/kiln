@@ -290,6 +290,7 @@ internal static unsafe class UiEngine
         Ui.Menus.RemoveOwnedBy(mod);
         Ui.Screens.RemoveOwnedBy(mod);
         Ui.Crafting.RemoveOwnedBy(mod);
+        UiInventoryScreens.RemoveOwnedBy(mod);
         KeyBindings.RemoveOwnedBy(mod);
         KeyInput.RemoveOwnedBy(mod);
         FrameHandlers.RemoveOwnedBy(mod);
@@ -310,8 +311,8 @@ internal static unsafe class UiEngine
         }
         lock (Toasts) demand += (uint)Toasts.Count;
         demand += (uint)FrameHandlers.Count;
-        demand += (uint)Ui.Crafting.VisiblePanels;
-        var hover = (uint)Ui.Crafting.InteractivePanels;
+        demand += (uint)(Ui.Crafting.VisiblePanels + UiInventoryScreens.VisiblePanels);
+        var hover = (uint)(Ui.Crafting.InteractivePanels + UiInventoryScreens.InteractivePanels);
         if (hover != _lastHover && UiNative.HasGameUi)
         {
             _lastHover = hover;
@@ -391,6 +392,7 @@ internal static unsafe class UiEngine
             DrawWindow(ui, w);
         }
         Ui.Crafting.DrawPanels(ui);
+        UiInventoryScreens.Draw(ui);  // panels beside the game's backpack and chest screens
         ChatCompletionPanel.Draw(ui); // non-focusable suggestions over native HUD/Social chat
         DrawScreens(ui);
         foreach (var (h, owner) in FrameHandlers.Snapshot())

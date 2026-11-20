@@ -1181,7 +1181,9 @@ typedef struct KilnUiApi {
     /* Additive size-guarded tail (0.2.0-dev.29.15; check header.size >= offsetof(KilnUiApi, screen_target) + sizeof(void*)
      * and the pointer): the entity the open screen is about, as of the last completed UI frame, while it is a factory screen
      * (hud_screen 28, FactoryCrafting: a kiln's, a smelter's...): the station's entity id (play.target; replicated ids are the
-     * server's), else 0. 0 too on a build where the constant ui/play.target did not resolve. A factory screen runs no crafting
+     * server's), else 0. Since 0.2.0-dev.30 also on the other chest-style transfer screens: a storage chest (22) and 41
+     * (CommerceProductChest): the chest's entity (kiln.ui.inventory's screen_view reads it); a change of it is a screen
+     * change (subscribe_screen). 0 too on a build where the constant ui/play.target did not resolve. A factory screen runs no crafting
      * builder (docs/re/game-ui.md section 5), so KilnUiScreen.crafting stays 0 there; its workshop is KilnUiScreen.interaction.
      * Any thread. */
     uint32_t(KILN_CALL* screen_target)(void);

@@ -14,7 +14,7 @@
 //   ui_values_tooltip.cpp  native lines drawn inside the game's item detail view (ui.tooltip.lines), stat numbers
 //                          scaled in it (ui.tooltip.values), and the tooltip probe for the guided client session
 //   ui_values_inventory.cpp kiln.ui.inventory: slot clicks (kiln.ui presses hit-tested on the slot frames), slot_at,
-//                          the units-to-pixels mapping
+//                          the units-to-pixels mapping, the backpack/chest screen view (v2)
 //   ui_values_service.cpp  the production environment (owners, kiln.caps, sigdb, kiln.hooks, kiln.client, kiln.ui),
 //                          the SEH guards and the service's registration with the core
 //
@@ -115,6 +115,9 @@ struct Env {
     bool (*subscribe_pointer)(KilnUiPointerFn fn, void* user) = nullptr;
     bool (*call_click)(KilnUiSlotClickFn fn, const KilnUiSlotClick* c, void* user) = nullptr;
     bool (*cursor_client)(float* x, float* y, float* width, float* height) = nullptr;
+    // kiln.inventory v2: kiln.ui's screen_target (the entity a chest, chest-style or factory screen is about, of its last
+    // completed UI frame; 0 = none, an older kiln.ui, the constant not resolved).
+    uint32_t (*screen_target)() = nullptr;
 };
 Env& env();
 void logf(int level, const char* fmt, ...);
@@ -200,7 +203,8 @@ KilnResult register_list(KilnOwner owner, uint32_t list, uint32_t item, void* fn
 // the slots' publish, UI thread: delivers the clicks pressed since the last frame; a click of another client session
 // than this frame's (the world was left in between) is dropped
 void clicks_frame_published(uint64_t session);
-bool pointer_screen(const KilnUiScreen& s);  // the screen has a pointer: slot clicks may hit there
+bool pointer_screen(const KilnUiScreen& s);
+uint32_t panel_screen(const KilnUiScreen& s);  // KUI_VIEW_* of a screen a panel may sit beside (KUI_VIEW_NONE: none)  // the screen has a pointer: slot clicks may hit there
 // units-to-pixels for a target size; false = the frame has no usable viewport
 bool map_frame(const KilnUiSlotsFrame& m, float target_w, float target_h, float* sx, float* sy, float* ox, float* oy);
 // the slot under (x, y) target pixels: its index, -1 = none (the last drawn wins)

@@ -289,6 +289,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("content-pack.schema.json", include_str!("../../../../schema/content-pack.schema.json")),
     ("assets.schema.json", include_str!("../../../../schema/assets.schema.json")),
     ("cook.schema.json", include_str!("../../../../schema/cook.schema.json")),
+    ("physics.schema.json", include_str!("../../../../schema/physics.schema.json")),
     ("player-states.schema.json", include_str!("../../../../schema/player-states.schema.json")),
     ("impact-natives.schema.json", include_str!("../../../../schema/impact-natives.schema.json")),
     ("kschem-header.schema.json", include_str!("../../../../schema/kschem-header.schema.json")),
@@ -673,7 +674,7 @@ impl<'o> Linter<'o> {
             v.sort();
             want.extend(v.into_iter().map(|p| (p, "mod-values".to_string())));
         }
-        for (rel, kind) in [("assets/assets.json", "assets"), ("assets/cook.json", "cook"), ("assets/player-states.json", "playerstates"), ("impact/cook.json", "cook"), ("impact/natives.json", "natives"), ("kiln-modpack.json", "modpack")] {
+        for (rel, kind) in [("assets/assets.json", "assets"), ("assets/cook.json", "cook"), ("assets/physics.json", "physics"), ("assets/player-states.json", "playerstates"), ("impact/cook.json", "cook"), ("impact/natives.json", "natives"), ("kiln-modpack.json", "modpack")] {
             if root.join(rel).is_file() {
                 want.push((root.join(rel), kind.into()));
             }
@@ -900,7 +901,7 @@ fn generated_manifest(d: &Path) -> Option<PathBuf> {
 
 fn reader_note(e: &SchemaEntry) -> String {
     match e.kind.as_str() {
-        "cook" | "natives" => "the cook tools read this file with Python's json module (plain JSON)".into(),
+        "cook" | "natives" | "physics" => "the cook tools read this file with Python's json module (plain JSON)".into(),
         "playerstates" => "animcook and kiln.playeranim read this file as strict JSON (no comments, no trailing commas)".into(),
         "modpack" => "the launcher reads this file as plain JSON".into(),
         "mod-values" => "Kiln.ModValues reads this file as strict JSON (no comments, no trailing commas)".into(),
