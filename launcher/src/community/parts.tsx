@@ -26,7 +26,7 @@ export function QrCode({ text, size = 220, title }: { text: string; size?: numbe
 
 /** What others see on the player's Discord profile while they play (drawn by the launcher in neutral greys, not
  *  Discord's own picture and without its marks). */
-export function PresenceCard({ name, mods, time, dim }: { name: string; mods: number; time: string; dim?: boolean }) {
+export function PresenceCard({ name, mods, time, dim, pack }: { name: string; mods: number; time: string; dim?: boolean; pack?: boolean }) {
   const t = useT();
   return (
     <div className={"kc-presence" + (dim ? " dim" : "")} role="group" aria-label={t("community.presence.preview")} data-testid="kc-presence-card">
@@ -40,13 +40,13 @@ export function PresenceCard({ name, mods, time, dim }: { name: string; mods: nu
         <span className="kc-presence-lines">
           <b>{t("community.presence.name")}</b>
           <span>{t("community.presence.details")}</span>
-          <span>{t("community.presence.state", { count: mods })}</span>
+          <span data-testid="kc-presence-card-state">{pack ? t("community.presence.pack.state", { count: mods, pack: t("community.presence.pack.example") }) : t("community.presence.state", { count: mods })}</span>
           <span className="kc-presence-time">{t("community.presence.elapsed", { time })}</span>
         </span>
       </div>
       <div className="kc-presence-btns">
         <span>{t("community.presence.getKiln")}</span>
-        <span>{t("community.presence.joinDiscord")}</span>
+        <span data-testid="kc-presence-card-second">{pack ? t("community.presence.pack.getPack") : t("community.presence.joinDiscord")}</span>
       </div>
     </div>
   );

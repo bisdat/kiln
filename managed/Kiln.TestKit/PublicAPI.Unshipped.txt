@@ -79,3 +79,4 @@ static Kiln.TestKit.FakePhysicsCookHost.ContentHashOf(byte[]! bytes) -> string!
 static Kiln.TestKit.FakePhysicsCookHost.Features.get -> System.Collections.Generic.IReadOnlyList<string!>!
 static Kiln.TestKit.PhysicsCookResult.operator !=(Kiln.TestKit.PhysicsCookResult? left, Kiln.TestKit.PhysicsCookResult? right) -> bool
 static Kiln.TestKit.PhysicsCookResult.operator ==(Kiln.TestKit.PhysicsCookResult? left, Kiln.TestKit.PhysicsCookResult? right) -> bool
+Kiln.TestKit.KilnHarness.MenuFrame() -> int

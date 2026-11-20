@@ -32,6 +32,7 @@ import { CommunityDesktopHost } from "../community/Host";
 import { NavCount } from "../community/parts";
 import { useShown } from "../community/state";
 import { watchCrashes } from "../community/crash";
+import { CrucibleHost } from "../crucible/Host";
 
 const MOTION = "(prefers-reduced-motion: reduce)";
 const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.(MOTION).matches;
@@ -294,6 +295,7 @@ export function AppShell() {
       <ModUpdatesWatcher />
       <DataFolderNotice />
       <CommunityDesktopHost />
+      <CrucibleHost />
       <OwnFilesNotice />
       <Toaster />
       <Splash done={ready} />

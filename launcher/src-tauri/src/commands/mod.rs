@@ -26,6 +26,8 @@ pub mod data_folder;
 pub mod updates;
 pub mod vendor;
 pub mod community;
+pub mod pack;
+pub mod crucible;
 
 /// A background task id; the task reports through `kiln://task`.
 pub type TaskId = String;
@@ -244,6 +246,30 @@ pub const NAMES: &[&str] = &[
     "tester_result_set",
     "tester_results_send",
     "community_steam_keyboard",
+    "pack_inspect",
+    "pack_install",
+    "pack_instance",
+    "pack_instances",
+    "pack_update_plan",
+    "pack_update",
+    "pack_undo",
+    "pack_uninstall",
+    "pack_build",
+    "pack_verify",
+    "pack_diff",
+    "pack_secret_scan",
+    "pack_peek_format",
+    "crucible_status",
+    "crucible_open",
+    "crucible_install",
+    "crucible_updates",
+    "crucible_update_plan",
+    "crucible_update",
+    "crucible_share",
+    "crucible_shared",
+    "crucible_trust",
+    "crucible_trust_set",
+    "crucible_links",
 ];
 
 #[cfg(test)]

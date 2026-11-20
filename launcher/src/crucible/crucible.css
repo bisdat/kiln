@@ -1,0 +1,66 @@
+/* Crucible (src/crucible/): the share dock under Play, its popovers, the pack preview, the update screen, the Profiles
+   card's pack lines. Colours from the Hearth tokens; Crucible's own accent is its frost cyan (#17c8f4 / #6fdcff). */
+.kcr-dock { position: absolute; right: 48px; width: var(--kiln); top: calc(100% - 78px); pointer-events: auto; z-index: 5; }
+.kcr-dock-row { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.kcr-share-btn { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 14px 6px 8px; border-radius: 999px;
+  font-family: var(--k-font-label); font-size: 16px; color: var(--k-text-0); background: rgba(8, 19, 32, .72); box-shadow: inset 0 0 0 1px rgba(23, 200, 244, .45); }
+.kcr-share-btn:hover, .kcr-share-btn.on { box-shadow: inset 0 0 0 1px #6fdcff, 0 0 18px rgba(23, 200, 244, .25); }
+.kcr-share-btn:focus-visible { outline: 2px solid var(--k-gold-400); outline-offset: 2px; }
+.kcr-pill { font-family: var(--k-font-ui); font-size: 12.5px; padding: 1px 8px; border-radius: 999px; background: #9a6bff; color: #fff; }
+.kcr-code-link { font-size: 15px; }
+.kcr-pop { position: absolute; right: calc(100% + 16px); bottom: 8px; width: 420px; max-width: calc(100vw - var(--kiln) - 120px); padding: 16px 18px; border-radius: 10px;
+  background: var(--k-soot-2, #15100d); box-shadow: 0 0 0 1px rgba(23, 200, 244, .35), 0 18px 44px rgba(0, 0, 0, .55); display: flex; flex-direction: column; gap: 10px; }
+.kcr-pop-title { font-family: var(--k-font-label); font-size: 18px; color: var(--k-text-0); }
+.kcr-pop-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.kcr-p { margin: 0; font-size: 15.5px; line-height: 1.4; }
+.kcr-links { display: flex; flex-direction: column; gap: 6px; }
+.kcr-link-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.kcr-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.kcr-code { letter-spacing: .08em; color: #6fdcff; }
+.kcr-code-form { display: flex; gap: 8px; }
+.kcr-code-form input { flex: 1; text-transform: uppercase; letter-spacing: .08em; }
+.kcr-changed { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+
+.kcr-preview, .kcr-update { display: flex; flex-direction: column; gap: 12px; }
+.kcr-cover { position: relative; height: 150px; border-radius: 8px; background-size: cover; background-position: center; overflow: hidden; }
+.kcr-cover::after { content: ""; position: absolute; inset: 0; background: linear-gradient(0deg, rgba(8, 19, 32, .92) 0, rgba(8, 19, 32, .2) 70%); }
+.kcr-cover-text { position: absolute; left: 16px; right: 16px; bottom: 12px; z-index: 1; display: flex; flex-direction: column; gap: 2px; }
+.kcr-cover-title { font-family: var(--k-font-display); font-size: 30px; line-height: 1.05; color: #eaf6f9; }
+.kcr-cover-sub { font-size: 15px; color: #cfe6ee; }
+.kcr-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 15px; }
+.kcr-label { font-family: var(--k-font-label); font-size: 15px; color: var(--k-ash-1h, #b9a99a); }
+.kcr-optional { display: flex; flex-direction: column; gap: 6px; }
+.kcr-mods { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 240px; overflow: auto; }
+.kcr-mods li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid rgba(255, 255, 255, .06); }
+.kcr-mod-main { display: flex; flex-direction: column; min-width: 0; }
+.kcr-mod-name { font-size: 15.5px; }
+.kcr-mod-sub { font-size: 13.5px; color: var(--k-text-2); }
+.kcr-mod-tags { display: flex; gap: 6px; align-items: center; flex: none; }
+.kcr-trust { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
+.kcr-warn { display: flex; gap: 8px; align-items: flex-start; font-size: 15px; color: var(--k-text-0); padding: 10px 12px; border-radius: 8px; background: rgba(255, 155, 52, .1); box-shadow: inset 0 0 0 1px rgba(255, 155, 52, .35); }
+.kcr-warn svg { flex: none; margin-top: 2px; color: #ff9b34; }
+.kcr-tick { display: flex; align-items: flex-start; gap: 10px; font-size: 15.5px; cursor: pointer; }
+.kcr-tick .k-check, .kcr-tick input[type="radio"] { margin-top: 3px; }
+.kcr-quote { font-style: italic; color: var(--k-text-1, #ddd); }
+.kcr-diff { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 15.5px; }
+.kcr-diff b { display: inline-block; width: 16px; }
+.kcr-diff .add b { color: var(--k-ok, #7cc47f); }
+.kcr-diff .upd b { color: #6fdcff; }
+.kcr-diff .rem b { color: var(--k-text-2); }
+.kcr-conflicts { display: flex; flex-direction: column; gap: 8px; }
+.kcr-conflict { margin: 0; border: 0; padding: 10px 12px; border-radius: 8px; background: rgba(154, 107, 255, .1); box-shadow: inset 0 0 0 1px rgba(154, 107, 255, .35); display: flex; flex-direction: column; gap: 6px; }
+.kcr-conflict legend { float: left; font-size: 15px; padding: 0; margin-bottom: 4px; }
+
+.kcr-card-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.kcr-card-list > li { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.kcr-thumb { width: 64px; height: 36px; flex: none; border-radius: 4px; background-size: cover; background-position: center; }
+.kcr-empty { display: flex; align-items: center; gap: 16px; padding: 6px 0; }
+.kcr-empty img { width: 120px; height: 90px; flex: none; }
+.kcr-tag { font-size: 12.5px; padding: 1px 8px; border-radius: 999px; color: #081320; background: #6fdcff; margin-left: 8px; vertical-align: 2px; }
+
+/* Deck */
+.kcr-deck-big { font-family: var(--k-font-mono); font-weight: 700; font-size: 3.4rem; letter-spacing: .08em; color: #6fdcff; text-align: center; }
+.kcr-deck-share { display: flex; gap: 2rem; align-items: center; }
+.kcr-deck-share-text { display: flex; flex-direction: column; gap: .6rem; flex: 1; min-width: 0; }
+.kcr-deck-input { font-size: 2.4rem; letter-spacing: .12em; text-transform: uppercase; text-align: center; width: 100%; box-sizing: border-box; padding: .5rem; }
+.deck-btn.primary.kcr-deck-wait { filter: saturate(.45) brightness(.85); }
