@@ -6,6 +6,20 @@ checksum), and the module MVID. Everything else (headers, IL, metadata, resource
 Used to compare the sample mods win1 builds (tools/release/lib/remote-win1.sh) with a local build of the same commit."""
 import struct, sys
 
+def unsigned(data: bytes) -> bytes:
+    """The PE file without its Authenticode signature: the attribute certificate table cut off, its directory entry and
+    the checksum zeroed (a signature's time stamp differs on every signing run)."""
+    b = bytearray(data)
+    pe = struct.unpack_from("<I", b, 0x3C)[0]
+    opt = pe + 24
+    dd = opt + (96 if struct.unpack_from("<H", b, opt)[0] == 0x10B else 112)
+    off, size = struct.unpack_from("<II", b, dd + 4 * 8)       # IMAGE_DIRECTORY_ENTRY_SECURITY: a file offset
+    if off:
+        del b[off:off + size]
+        struct.pack_into("<II", b, dd + 4 * 8, 0, 0)
+    struct.pack_into("<I", b, opt + 64, 0)
+    return bytes(b)
+
 def normalize(data: bytes) -> bytes:
     b = bytearray(data)
     pe = struct.unpack_from("<I", b, 0x3C)[0]
