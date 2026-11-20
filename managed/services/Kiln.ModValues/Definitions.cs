@@ -221,24 +221,52 @@ internal sealed class Def
     };
 }
 
-/// <summary>What each owner described and activated in this load generation of it. A retired owner (its mod
-/// unloaded) keeps nothing active; its saved values are parked, and its next load defines them again.</summary>
+/// <summary>What each owner described and activated. Every definition remembers who registered it (its token: the
+/// ModContext of a managed mod's load generation, a native owner's handle, null for Kiln's own reads of a mod's JSON
+/// files); a retirement takes only that token's definitions out of the active view, and a token whose mod context is no
+/// longer alive counts as retired. Saved values are parked, never deleted, and come back with the next definition.</summary>
 internal sealed class Registry
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, Owner> _owners = new(StringComparer.Ordinal);
     private int _version;
 
+    private sealed class Entry(Def def, object? token)
+    {
+        public Def Def = def;
+        public object? Token = token;
+    }
+
     private sealed class Owner
     {
-        public readonly Dictionary<string, Def> Described = new(StringComparer.Ordinal);
-        public readonly Dictionary<string, Def> Active = new(StringComparer.Ordinal);
+        public readonly Dictionary<string, Entry> Described = new(StringComparer.Ordinal);
+        public readonly Dictionary<string, Entry> Active = new(StringComparer.Ordinal);
         public readonly HashSet<string> Retired = new(StringComparer.Ordinal);
-        public object? Token;  // the ModContext of this load generation (null: native or Kiln itself)
     }
 
     /// <summary>Changes whenever a definition is activated, changed or retired (the stream sends a new full).</summary>
     public int Version => Volatile.Read(ref _version);
+
+    private static bool Stale(object? token) => token is ModContext m && !m.Alive;
+
+    /// <summary>Retires what tokens of an earlier load generation registered (their mod unloaded, a reload).</summary>
+    private void Prune(Owner o)
+    {
+        foreach (var id in o.Described.Where(kv => Stale(kv.Value.Token)).Select(kv => kv.Key).ToList()) o.Described.Remove(id);
+        foreach (var id in o.Active.Where(kv => Stale(kv.Value.Token)).Select(kv => kv.Key).ToList())
+        {
+            o.Active.Remove(id);
+            o.Retired.Add(id);
+            _version++;
+        }
+    }
+
+    private Owner OwnerOf(string owner)
+    {
+        if (!_owners.TryGetValue(owner, out var o)) _owners[owner] = o = new Owner();
+        Prune(o);
+        return o;
+    }
 
     /// <summary>Registers the metadata. Null on success, else a reason.</summary>
     public string? Describe(Def d, object? token, out bool added)
@@ -246,10 +274,15 @@ internal sealed class Registry
         added = false;
         lock (_gate)
         {
-            var o = OwnerFor(d.Owner, token);
-            if (o.Described.TryGetValue(d.Id, out var have)) return have.Canonical == d.Canonical ? null : ModValueReasons.DefinitionConflict;
+            var o = OwnerOf(d.Owner);
+            if (o.Described.TryGetValue(d.Id, out var have))
+            {
+                if (have.Def.Canonical != d.Canonical) return ModValueReasons.DefinitionConflict;
+                have.Token ??= token;  // the mod's own code took over what Kiln read from its files
+                return null;
+            }
             if (o.Described.Count >= ModValueRules.MaxDefinitionsPerOwner) return ModValueReasons.Budget;
-            o.Described[d.Id] = d;
+            o.Described[d.Id] = new Entry(d, token);
             o.Retired.Remove(d.Id);
             added = true;
             return null;
@@ -265,70 +298,85 @@ internal sealed class Registry
             var why = Describe(d, token, out _);
             if (why is not null) return why;
             var o = _owners[d.Owner];
-            if (o.Active.TryGetValue(d.Id, out var have)) return have.Canonical == d.Canonical ? null : ModValueReasons.DefinitionConflict;
-            o.Active[d.Id] = d;
+            if (o.Active.TryGetValue(d.Id, out var have))
+            {
+                if (have.Def.Canonical != d.Canonical) return ModValueReasons.DefinitionConflict;
+                have.Token ??= token;
+                return null;
+            }
+            o.Active[d.Id] = new Entry(d, token);
             activated = true;
             _version++;
             return null;
         }
     }
 
-    private Owner OwnerFor(string owner, object? token)
-    {
-        if (!_owners.TryGetValue(owner, out var o)) _owners[owner] = o = new Owner();
-        // a new load generation of the owner starts from nothing it described before
-        if (token is not null && !ReferenceEquals(o.Token, token))
-        {
-            if (o.Token is not null) RetireLocked(o);
-            o.Token = token;
-        }
-        return o;
-    }
-
-    private void RetireLocked(Owner o)
-    {
-        foreach (var id in o.Active.Keys) o.Retired.Add(id);
-        o.Described.Clear();
-        if (o.Active.Count > 0) _version++;
-        o.Active.Clear();
-    }
-
-    /// <summary>The owner unloaded: its definitions leave the active view, its data stays. Returns what was active.</summary>
+    /// <summary>Takes the definitions <paramref name="token"/> registered (null: all of the owner's) out of the
+    /// described and active views; their data stays. Returns what was active.</summary>
     public IReadOnlyList<Def> Retire(string owner, object? token = null)
     {
         lock (_gate)
         {
-            if (!_owners.TryGetValue(owner, out var o) || token is not null && !ReferenceEquals(o.Token, token)) return [];
-            var was = o.Active.Values.ToList();
-            RetireLocked(o);
-            o.Token = null;
+            if (!_owners.TryGetValue(owner, out var o)) return [];
+            bool Mine(Entry e) => token is null || Equals(e.Token, token);
+            var was = o.Active.Where(kv => Mine(kv.Value)).Select(kv => kv.Value.Def).ToList();
+            foreach (var d in was)
+            {
+                o.Active.Remove(d.Id);
+                o.Retired.Add(d.Id);
+            }
+            foreach (var id in o.Described.Where(kv => Mine(kv.Value)).Select(kv => kv.Key).ToList()) o.Described.Remove(id);
+            if (was.Count > 0) _version++;
             return was;
         }
     }
 
     public Def? Active(ModValueKey key)
     {
-        lock (_gate) return _owners.TryGetValue(key.Mod, out var o) ? o.Active.GetValueOrDefault(key.Id) : null;
+        lock (_gate)
+        {
+            if (!_owners.TryGetValue(key.Mod, out var o)) return null;
+            Prune(o);
+            return o.Active.GetValueOrDefault(key.Id)?.Def;
+        }
     }
 
     public Def? Described(ModValueKey key)
     {
-        lock (_gate) return _owners.TryGetValue(key.Mod, out var o) ? o.Described.GetValueOrDefault(key.Id) : null;
+        lock (_gate)
+        {
+            if (!_owners.TryGetValue(key.Mod, out var o)) return null;
+            Prune(o);
+            return o.Described.GetValueOrDefault(key.Id)?.Def;
+        }
     }
 
     public bool IsRetired(ModValueKey key)
     {
-        lock (_gate) return _owners.TryGetValue(key.Mod, out var o) && o.Retired.Contains(key.Id);
+        lock (_gate)
+        {
+            if (!_owners.TryGetValue(key.Mod, out var o)) return false;
+            Prune(o);
+            return o.Retired.Contains(key.Id);
+        }
     }
 
     public IReadOnlyList<Def> AllActive()
     {
-        lock (_gate) return _owners.Values.SelectMany(o => o.Active.Values).OrderBy(d => d.Qualified, StringComparer.Ordinal).ToList();
+        lock (_gate)
+        {
+            foreach (var o in _owners.Values) Prune(o);
+            return _owners.Values.SelectMany(o => o.Active.Values).Select(e => e.Def).OrderBy(d => d.Qualified, StringComparer.Ordinal).ToList();
+        }
     }
 
     public IReadOnlyList<Def> AllDescribed()
     {
-        lock (_gate) return _owners.Values.SelectMany(o => o.Described.Values).OrderBy(d => d.Qualified, StringComparer.Ordinal).ToList();
+        lock (_gate)
+        {
+            foreach (var o in _owners.Values) Prune(o);
+            return _owners.Values.SelectMany(o => o.Described.Values).Select(e => e.Def).OrderBy(d => d.Qualified, StringComparer.Ordinal).ToList();
+        }
     }
 
     public void Clear()
