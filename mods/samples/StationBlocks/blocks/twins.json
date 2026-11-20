@@ -25,12 +25,33 @@
         { "seconds": 3, "burns": { "Material_T1_Charcoal": 2 }, "needs": { "Material_T1_Metal_Scraps": 1 }, "output": "Material_T1_Metal_Sheets" }
       ]
     },
+    "rune-forge-json": {
+      "name": "Rune Forge", "description": "Sorts what it makes into tabs of its own.",
+      "kind": "forge",
+      "processing": { "slots": 12 },
+      "recipe": { "station": "0x4da88f73", "needs": { "Build_TerrainMaterial_T1_Stone": 20 } },
+      "menu": { "like": "workbench", "tabs": [
+        { "key": "metal", "name": { "en": "Metal", "de": "Metall" }, "iconFromTab": 0,
+          "sets": [ { "key": "main", "recipes": ["reclaim", "rune-bolts"] } ] },
+        { "key": "fine", "name": "Fine", "iconFromTab": 1,
+          "sets": [ { "key": "main", "recipes": ["sheets"] }, { "key": "double", "heading": "In bulk", "recipes": ["sheets-bulk"] } ] }
+      ] },
+      "recipes": [
+        { "menuKey": "reclaim", "seconds": 6, "needs": { "Material_T1_Metal_Sheets": 1 }, "output": "Material_T1_Metal_Scraps", "makes": 2 },
+        { "menuKey": "sheets", "seconds": 3, "needs": { "Material_T1_Metal_Scraps": 2 }, "output": "Material_T1_Metal_Sheets" },
+        { "menuKey": "sheets-bulk", "seconds": 12, "needs": { "Material_T1_Metal_Scraps": 8 }, "output": "Material_T1_Metal_Sheets", "makes": 4 }
+      ]
+    },
     "fine-bench-json": {
       "name": "Fine Bench", "kind": "workbench",
       "recipes": [ { "needs": { "Material_T1_Twigs": 1 }, "output": "Material_T1_Resin" } ]
     }
   },
   "items": {
+    "rune-bolts-json": {
+      "name": "Rune Bolts", "stack": 50, "visual": { "like": "Material_T1_Metal_Scraps" },
+      "recipe": { "station": "rune-forge-json", "menuKey": "rune-bolts", "seconds": 2, "needs": { "Material_T1_Metal_Scraps": 1 } }
+    },
     "frost-ingot-json": {
       "name": "Frost Ingot", "stack": 50, "visual": { "like": "Material_T5_Silver_Bar" },
       "recipe": { "station": "cold-forge-json", "seconds": 2, "burns": { "Material_T1_Charcoal": 1 }, "needs": { "Material_T1_Metal_Sheets": 1 } }

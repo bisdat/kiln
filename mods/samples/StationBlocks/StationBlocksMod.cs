@@ -52,6 +52,51 @@ public sealed class StationBlocksMod : Mod
             Recipe = new RecipeBlock { Station = forge, Seconds = 2, Burns = { [GameItems.Material_T1_Charcoal] = 1 }, Needs = { [GameItems.Material_T1_Metal_Sheets] = 1 } },
         });
 
+        // A menu of its own (since 0.2.0-dev.31): tabs and sets laid out by you, recipes named by MenuKey (never by the game's names). Like = the menu
+        // whose tab icons it reuses. A recipe the menu does not name stays valid but is not shown; the first set of a tab has no heading.
+        var runeForge = Blocks.Define("rune-forge", new StationBlock
+        {
+            Name = "Rune Forge", Description = "Sorts what it makes into tabs of its own.",
+            Kind = StationKind.Forge,
+            Processing = new ProcessingBlock { Slots = 12 },
+            Recipe = new RecipeBlock { Station = StationKind.Workbench.Workshop, Needs = { [GameItems.Build_TerrainMaterial_T1_Stone] = 20 } },
+            Menu = new MenuBlock
+            {
+                Like = StationKind.Workbench,
+                Tabs =
+                [
+                    new StationMenuTabBlock
+                    {
+                        Key = "metal", Name = new UiText(new Dictionary<string, string> { ["en"] = "Metal", ["de"] = "Metall" }), IconFromTab = 0,
+                        Sets = [new StationMenuSetBlock { Key = "main", Recipes = ["reclaim", "rune-bolts"] }],
+                    },
+                    new StationMenuTabBlock
+                    {
+                        Key = "fine", Name = "Fine", IconFromTab = 1,
+                        Sets =
+                        [
+                            new StationMenuSetBlock { Key = "main", Recipes = ["sheets"] },
+                            new StationMenuSetBlock { Key = "double", Heading = "In bulk", Recipes = ["sheets-bulk"] },
+                        ],
+                    },
+                ],
+            },
+            Recipes =
+            [
+                new RecipeBlock { MenuKey = "reclaim", Seconds = 6, Needs = { [GameItems.Material_T1_Metal_Sheets] = 1 }, Output = GameItems.Material_T1_Metal_Scraps, Makes = 2 },
+                new RecipeBlock { MenuKey = "sheets", Seconds = 3, Needs = { [GameItems.Material_T1_Metal_Scraps] = 2 }, Output = GameItems.Material_T1_Metal_Sheets },
+                // the same output twice is fine with two keys
+                new RecipeBlock { MenuKey = "sheets-bulk", Seconds = 12, Needs = { [GameItems.Material_T1_Metal_Scraps] = 8 }, Output = GameItems.Material_T1_Metal_Sheets, Makes = 4 },
+            ],
+        });
+        // an item's recipe at that forge, named from the item's side
+        Blocks.Define("rune-bolts", new ItemBlock
+        {
+            Name = "Rune Bolts", Stack = 50,
+            Visual = new VisualBlock { Like = GameItems.Material_T1_Metal_Scraps },
+            Recipe = new RecipeBlock { Station = runeForge, MenuKey = "rune-bolts", Seconds = 2, Needs = { [GameItems.Material_T1_Metal_Scraps] = 1 } },
+        });
+
         // The same block with no time and no processing: a player crafts at it at once. It shares the game's workbench: its recipes are listed there too.
         Blocks.Define("fine-bench", new StationBlock
         {
