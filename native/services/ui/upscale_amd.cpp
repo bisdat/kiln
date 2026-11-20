@@ -201,12 +201,16 @@ class AmdBackend final : public Backend {
         tuning_ = amd::parse_tuning(read_control());  // a knob changed in a test applies at the next set-up
         const int fsr3 = amd::pick_fsr3(version_names_);
         bool pin = ci.amd == AmdPin::fsr3 && fsr3 >= 0;
-        uint32_t r = make(ci, pin ? version_ids_[static_cast<size_t>(fsr3)] : 0);
+        // the create flags depend on what runs (FSR 4: no DYNAMIC_RESOLUTION, as OptiScaler's working FSR 4): what AMD's
+        // selection will run, checked below against what it ran
+        Running expect = amd::expected_running(version_names_, pin);
+        uint32_t r = make(ci, pin ? version_ids_[static_cast<size_t>(fsr3)] : 0, expect);
         std::string note;
         if (r != FFX_API_RETURN_OK && !pin && fsr3 >= 0) {
             // AMD's choice (FSR 4 where it runs) could not start: FSR 3.1 instead
             note = std::string("AMD's own choice could not start (") + amd::code_name(r) + "), FSR " + version_names_[static_cast<size_t>(fsr3)] + " runs";
-            r = make(ci, version_ids_[static_cast<size_t>(fsr3)]);
+            expect = Running::amd_fsr3;
+            r = make(ci, version_ids_[static_cast<size_t>(fsr3)], expect);
             pin = true;
         }
         if (r != FFX_API_RETURN_OK) {
@@ -224,10 +228,21 @@ class AmdBackend final : public Backend {
             destroy();
             return false;
         }
+        if (running_ != expect && running_ == Running::amd_fsr3 && fsr3 >= 0) {
+            // AMD's selection ran FSR 3.1 where Kiln expected FSR 4: once more with FSR 3.1's flags (the context is unused)
+            fx_.DestroyContext(&ctx_, nullptr);
+            ctx_ = nullptr;
+            expect = Running::amd_fsr3;
+            if ((r = make(ci, version_ids_[static_cast<size_t>(fsr3)], expect)) != FFX_API_RETURN_OK) {
+                *detail = std::string("ffxCreateContext (FSR 3.1 flags): ") + amd::code_name(r);
+                running_ = Running::off;
+                return false;
+            }
+        }
         ci_ = ci;
         reset_ = true;
         // what AMD FSR was told about the game's picture (kiln.log, for reports: the dark-picture fix of 29.19)
-        *detail = "FSR " + version_name_ + " (" + amd::flags_text(amd::create_flags(ci, tuning_)) +
+        *detail = "FSR " + version_name_ + " (" + amd::flags_text(amd::create_flags(ci, tuning_, expect)) +
                   (tuning_.changed() ? ", from kiln/control/amd" : "") + "; " + amd::tuning_text(running_, tuning_) + ", no exposure texture)" +
                   (note.empty() ? "" : "; " + note);
         for (const auto& n : tuning_.notes) *detail += "; kiln/control/amd: not understood: " + n;
@@ -308,10 +323,10 @@ class AmdBackend final : public Backend {
         return ok ? std::string(buf, got) : std::string();
     }
 
-    uint32_t make(const CreateInfo& ci, uint64_t version_id) {
+    uint32_t make(const CreateInfo& ci, uint64_t version_id, Running running) {
         ffxCreateContextDescUpscale c{};
         c.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
-        c.flags = amd::create_flags(ci, tuning_);
+        c.flags = amd::create_flags(ci, tuning_, running);
         c.maxRenderSize = {ci.max_render_width, ci.max_render_height};
         c.maxUpscaleSize = {ci.output_width, ci.output_height};
         c.fpMessage = &ffx_message;

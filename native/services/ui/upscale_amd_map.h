@@ -166,16 +166,25 @@ enum class Colour : uint32_t { linear = 0, srgb = 1, pq = 2 };
 //   masks auto|on|off               both masks at once
 //   hdr on|off                      on: the HDR flag (the colour is linear HDR); off: without it
 //   colour linear|srgb|pq           linear; srgb / pq: tell FSR the colour is perceptual
+//   dynres auto|on|off              auto: no DYNAMIC_RESOLUTION flag for FSR 4 (with it FSR 4 runs its dynamic-resolution
+//                                   network, OptiScaler's FSR4ModelSelection.cpp; OptiScaler never sets it), the flag
+//                                   for FSR 3.1
+//   planes auto|game|swap           auto: the camera planes swapped for FSR 4 (OptiScaler does that with inverted depth,
+//                                   FSR31Feature_VkOn12.cpp), the game's for FSR 3.1
+enum class Planes : uint32_t { automatic = 0, game = 1, swap = 2 };
 struct Tuning {
     Exposure exposure = Exposure::automatic;
     PreExposure pre_exposure = PreExposure::automatic;
     Mask reactive = Mask::automatic, transparency = Mask::automatic;
     bool hdr_off = false;
     Colour colour = Colour::linear;
+    Mask dynres = Mask::automatic;
+    Planes planes = Planes::automatic;
     std::vector<std::string> notes;  // lines Kiln did not understand
     bool changed() const {
         return exposure != Exposure::automatic || pre_exposure != PreExposure::automatic || reactive != Mask::automatic ||
-               transparency != Mask::automatic || hdr_off || colour != Colour::linear;
+               transparency != Mask::automatic || hdr_off || colour != Colour::linear || dynres != Mask::automatic ||
+               planes != Planes::automatic;
     }
 };
 inline Tuning parse_tuning(std::string_view text) {
@@ -213,6 +222,9 @@ inline Tuning parse_tuning(std::string_view text) {
         else if ((w[0] == "colour" || w[0] == "color") && v == "linear") t.colour = Colour::linear;
         else if ((w[0] == "colour" || w[0] == "color") && v == "srgb") t.colour = Colour::srgb;
         else if ((w[0] == "colour" || w[0] == "color") && v == "pq") t.colour = Colour::pq;
+        else if (w[0] == "dynres" && (v == "auto" || v == "on" || v == "off")) t.dynres = v == "on" ? Mask::on : v == "off" ? Mask::off : Mask::automatic;
+        else if (w[0] == "planes" && (v == "auto" || v == "game" || v == "swap"))
+            t.planes = v == "game" ? Planes::game : v == "swap" ? Planes::swap : Planes::automatic;
         else t.notes.push_back(line);
     }
     return t;
@@ -226,6 +238,10 @@ inline float pre_exposure_for(Running running, const Tuning& t, float game) {
 }
 // Whether a mask of the game goes to AMD FSR, for what runs.
 inline bool mask_used(Running running, Mask m) { return m == Mask::on || (m == Mask::automatic && running != Running::amd_fsr4); }
+// Whether the camera planes go swapped (near = the far plane), for what runs.
+inline bool planes_swapped(Running running, const Tuning& t) {
+    return t.planes == Planes::swap || (t.planes == Planes::automatic && running == Running::amd_fsr4);
+}
 // What AMD FSR gets beyond the flags, in words, for kiln.log's set-up line.
 inline std::string tuning_text(Running running, const Tuning& t) {
     const bool game_pe = pre_exposure_for(running, t, 0.5f) == 0.5f;
@@ -234,15 +250,17 @@ inline std::string tuning_text(Running running, const Tuning& t) {
     s += r && tr ? ", the game's masks" : r ? ", the game's reactive mask only" : tr ? ", the game's transparency mask only" : ", no masks";
     if (t.colour == Colour::srgb) s += ", colour said sRGB";
     if (t.colour == Colour::pq) s += ", colour said PQ";
+    if (planes_swapped(running, t)) s += ", planes swapped";
     return s;
 }
 
-inline uint32_t create_flags(const CreateInfo& ci, const Tuning& t = {}) {
+inline uint32_t create_flags(const CreateInfo& ci, const Tuning& t = {}, Running running = Running::amd_fsr3) {
     uint32_t f = 0;
     if (ci.hdr && !t.hdr_off) f |= FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE;
     if (ci.depth_inverted) f |= FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
     if (ci.depth_infinite) f |= FFX_UPSCALE_ENABLE_DEPTH_INFINITE;
-    if (ci.dynamic_resolution) f |= FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION;
+    if (ci.dynamic_resolution && (t.dynres == Mask::on || (t.dynres == Mask::automatic && running != Running::amd_fsr4)))
+        f |= FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION;
     if (t.colour != Colour::linear) f |= FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE;
     if (t.exposure == Exposure::automatic) f |= FFX_UPSCALE_ENABLE_AUTO_EXPOSURE;  // the game has no exposure texture
     return f;  // render-size MVs (no DISPLAY_RESOLUTION_MOTION_VECTORS), no jitter in them (no JITTER_CANCELLATION), linear
@@ -275,6 +293,12 @@ inline uint32_t version_major(const char* name) {
 inline Running running_of(const char* name) {
     const uint32_t m = version_major(name);
     return m >= 4 ? Running::amd_fsr4 : m == 3 ? Running::amd_fsr3 : Running::off;
+}
+// What AMD's selection will run, before the context exists (the create flags depend on it): the first of AMD's list
+// (ffxQueryDescGetVersions gives the newest first), or FSR 3.1 where Kiln pins it.
+inline Running expected_running(const std::vector<std::string>& names, bool pin_fsr3) {
+    if (names.empty()) return Running::off;
+    return pin_fsr3 ? Running::amd_fsr3 : running_of(names.front().c_str());
 }
 // For the FSR 3.1 pin: the index of the newest 3.x of AMD's list (`names`, as ffxQueryDescGetVersions gives them);
 // -1 when there is none.
@@ -339,8 +363,8 @@ inline ffxDispatchDescUpscale dispatch(const Frame& f, const Texture& motion, bo
     d.frameTimeDelta = f.frame_ms;
     d.preExposure = pre_exposure_for(running, t, f.pre_exposure);
     d.reset = reset || f.reset;
-    d.cameraNear = f.camera_near;
-    d.cameraFar = f.camera_far;
+    d.cameraNear = planes_swapped(running, t) ? f.camera_far : f.camera_near;
+    d.cameraFar = planes_swapped(running, t) ? f.camera_near : f.camera_far;
     d.cameraFovAngleVertical = f.fov_y;
     d.viewSpaceToMetersFactor = 1.0f;  // the game's units are metres
     d.flags = t.colour == Colour::srgb ? static_cast<uint32_t>(FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB)

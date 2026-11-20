@@ -323,7 +323,9 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
   So FSR 4 gets pre-exposure 1 and none of the game's masks; FSR 3.1 keeps the game's (which part matters is not proven).
   Test knobs, one per line in `<game>/kiln/control/amd`, read at each FSR set-up and named in kiln.log's `set up for`
   line (the first value is the default): `exposure auto|one`, `preexposure auto|game|one`, `reactive auto|on|off`,
-  `transparency auto|on|off`, `masks auto|on|off` (both), `hdr on|off`, `colour linear|srgb|pq`. kiln.log's `upscaled N frames` lines
+  `transparency auto|on|off`, `masks auto|on|off` (both), `hdr on|off`, `colour linear|srgb|pq`, `dynres auto|on|off` (auto: no DYNAMIC_RESOLUTION flag for FSR 4, which
+  otherwise runs its dynamic-resolution network; OptiScaler never sets it), `planes auto|game|swap` (auto: the camera planes
+  swapped for FSR 4, as OptiScaler passes them with inverted depth). kiln.log's `upscaled N frames` lines
   give the range of the game's pre-exposure since the line before. History is dropped when the game sets FSR 3 up, after a load and when a size changes.
 - **AMD FSR.** AMD's signed Vulkan DLLs from the FidelityFX SDK 2.4.0, from `<game>/kiln/vendor/amd/2.4.0/` (the
   launcher's Settings, Graphics card). Kiln checks each file's size and SHA-256 against the pins built into Kiln (the same

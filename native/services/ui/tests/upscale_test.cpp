@@ -435,7 +435,7 @@ static void amd_fsr4_inputs() {
     const ffxDispatchDescUpscale d3 = amd::dispatch(f, mv, false, Running::amd_fsr3, def);
     CHECK(d3.preExposure == 0.077f && d3.reactive.resource == reinterpret_cast<void*>(f.reactive.image) &&
           d3.transparencyAndComposition.resource == reinterpret_cast<void*>(f.transparency.image));
-    CHECK(amd::tuning_text(Running::amd_fsr4, def) == "pre-exposure 1, no masks");
+    CHECK(amd::tuning_text(Running::amd_fsr4, def) == "pre-exposure 1, no masks, planes swapped");
     CHECK(amd::tuning_text(Running::amd_fsr3, def) == "pre-exposure from the game, the game's masks");
     // preexposure game|one|auto
     const amd::Tuning pg = amd::parse_tuning("preexposure game\n");
@@ -447,11 +447,11 @@ static void amd_fsr4_inputs() {
     const amd::Tuning ron = amd::parse_tuning("reactive on");
     CHECK(amd::dispatch(f, mv, false, Running::amd_fsr4, ron).reactive.resource != nullptr &&
           amd::dispatch(f, mv, false, Running::amd_fsr4, ron).transparencyAndComposition.resource == nullptr);
-    CHECK(amd::tuning_text(Running::amd_fsr4, ron) == "pre-exposure 1, the game's reactive mask only");
+    CHECK(amd::tuning_text(Running::amd_fsr4, ron) == "pre-exposure 1, the game's reactive mask only, planes swapped");
     const amd::Tuning ton = amd::parse_tuning("transparency on");
-    CHECK(amd::tuning_text(Running::amd_fsr4, ton) == "pre-exposure 1, the game's transparency mask only");
+    CHECK(amd::tuning_text(Running::amd_fsr4, ton) == "pre-exposure 1, the game's transparency mask only, planes swapped");
     const amd::Tuning mon = amd::parse_tuning("masks on"), moff = amd::parse_tuning("masks off");
-    CHECK(amd::tuning_text(Running::amd_fsr4, mon) == "pre-exposure 1, the game's masks");
+    CHECK(amd::tuning_text(Running::amd_fsr4, mon) == "pre-exposure 1, the game's masks, planes swapped");
     CHECK(amd::dispatch(f, mv, false, Running::amd_fsr3, moff).reactive.resource == nullptr &&
           amd::dispatch(f, mv, false, Running::amd_fsr3, moff).transparencyAndComposition.resource == nullptr);
     // beta 3's FSR 4 inputs, whole: "preexposure game" + "masks on"
@@ -488,6 +488,39 @@ static void exposure_range() {
     CHECK(r.text() == "none");
     r.add(0.0f);  // the game's 0 (none): shown as it is
     CHECK(r.text() == "0..0 (last 0)");
+}
+
+// FSR 4 like OptiScaler's working FSR 4 in this game (0.9.5, "FSR3 w/Dx12", fed from the game's DLSS path; 29.19 beta 3
+// report optiscaler-fsr4): no DYNAMIC_RESOLUTION flag (with it FSR 4 runs its dynamic-resolution network, preset 4,
+// FSR4ModelSelection.cpp; OptiScaler never sets it, FSR31Feature_VkOn12.cpp 587-620) and, with inverted depth, the two
+// camera planes swapped (FSR31Feature_VkOn12.cpp 317-326). FSR 3.1 keeps the game's planes and the flag.
+static void amd_fsr4_model() {
+    CreateInfo ci;
+    const amd::Tuning def{};
+    CHECK(!(amd::create_flags(ci, def, Running::amd_fsr4) & FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION));
+    CHECK(amd::create_flags(ci, def, Running::amd_fsr3) & FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION);
+    CHECK(amd::create_flags(ci, amd::parse_tuning("dynres on"), Running::amd_fsr4) & FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION);
+    CHECK(!(amd::create_flags(ci, amd::parse_tuning("dynres off"), Running::amd_fsr3) & FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION));
+    CHECK(amd::parse_tuning("dynres on").changed() && !amd::parse_tuning("dynres auto").changed());
+    // planes
+    Frame f = b0_frame();
+    Texture mv = tex(VK_FORMAT_R16G16_SFLOAT, 960, 540, 0x8000);
+    const ffxDispatchDescUpscale d4 = amd::dispatch(f, mv, false, Running::amd_fsr4, def);
+    CHECK(d4.cameraNear == 10000.0f && d4.cameraFar == 0.01f);
+    const ffxDispatchDescUpscale d3 = amd::dispatch(f, mv, false, Running::amd_fsr3, def);
+    CHECK(d3.cameraNear == 0.01f && d3.cameraFar == 10000.0f);
+    const amd::Tuning pg = amd::parse_tuning("planes game"), ps = amd::parse_tuning("planes swap");
+    CHECK(amd::dispatch(f, mv, false, Running::amd_fsr4, pg).cameraNear == 0.01f && pg.changed());
+    CHECK(amd::dispatch(f, mv, false, Running::amd_fsr3, ps).cameraNear == 10000.0f);
+    // the set-up line names both
+    CHECK(amd::tuning_text(Running::amd_fsr4, def) == "pre-exposure 1, no masks, planes swapped");
+    CHECK(amd::tuning_text(Running::amd_fsr3, def) == "pre-exposure from the game, the game's masks");
+    CHECK(amd::flags_text(amd::create_flags(ci, def, Running::amd_fsr4)) == "HDR, inverted depth, auto exposure");
+    // what AMD's selection will run, before the context exists: the first of AMD's list unless FSR 3.1 is pinned
+    CHECK(amd::expected_running({"4.1.2", "3.1.6", "2.3.4"}, false) == Running::amd_fsr4);
+    CHECK(amd::expected_running({"4.1.2", "3.1.6", "2.3.4"}, true) == Running::amd_fsr3);
+    CHECK(amd::expected_running({"3.1.6", "2.3.4"}, false) == Running::amd_fsr3);
+    CHECK(amd::expected_running({}, false) == Running::off);
 }
 
 static void amd_map() {
@@ -635,6 +668,7 @@ int main(int argc, char** argv) {
     restart_lead();
     latch();
     amd_map();
+    amd_fsr4_model();
     amd_fsr4_inputs();
     exposure_range();
     std::printf("upscale_test: %d checks passed\n", g_checks);
