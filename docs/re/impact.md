@@ -364,3 +364,36 @@ Scratch `@abilities/ECall.site` captures displacements `ctx=0xd0`, `args=0xb0`, 
 `abilities/Interpreter` and this site resolve once on S/C and old server `d7baa768…` (svn 1273043). They are fallback
 inspection/hook anchors: the tested wrap works through the registry, with no ECALL instruction patch. Typed-hook
 Win64 lane/hidden-return evidence is in [hooks.md](hooks.md); full API proposals remain in dossier chapters 06b/06c.
+
+## 10. The impact memory pool (inbox 116; server 26430253 / client 26430625)
+
+Every impact instance takes its memory from two places owned by the world's `impact::ImpactSystem` (the
+createImpactInstance/runImpact `rcx`; kiln.abilities' `kiln.log` names it per world). Both are read by kiln.abilities'
+impact pool watch and by the `impact` object of `tick-stats.jsonl` (docs/kiln/services/abilities.md "Impact memory
+watch"); sigdb: `sigdb/symbols/server.d/impact-pool.json`, feature `impact.pool` (shared with the client, all names
+unique on both exes, `static` in both build records). Addresses: server `f0d824be…` (26430253) / client `5d9ef2f1…`
+(26430625).
+
+| What | Where | Evidence |
+|---|---|---|
+| the allocator (one per ImpactSystem, 16 MiB) | `*(ImpactSystem + 0)` | the report's `mov rcx, [rcx]` before its stats call (server `0x99c680`+0x36 / client `0x12454b0`+0x36) |
+| bytes in use / peak / capacity | allocator `+0xa0` / `+0xa8` / `+0xf0` (`impact/alloc.used`, peak = used + 8, `impact/alloc.capacity`) | the stats copy `impact/AllocStats` (server `0x599c60` / client `0x8c0890`, reached by the report's `call`; the pattern alone matches 3 functions, so it is taken through the call): `movups [rcx+0xa0]` ... `movsd [rcx+0xf0]`; the report divides stats+0 by stats+0x50 (×100 = "Allocator Usage") and compares stats+8 with its last peak (+1 MiB rule) |
+| the instance slot pool | `ImpactSystem + 0x78` (`impact/sys.pool`) | the report's `lea rcx, [rsi+0x78]` before the walk; createImpactInstance's `lea rax, [r13+0x78]` before `impact/PoolAlloc` (two votes) |
+| live / peak instances | pool `+0x58` / `+0x60` (ImpactSystem `+0xd0` / `+0xd8`; `impact/pool.live`, `impact/pool.peak`) | `impact/PoolAlloc` (server `0x9952f0` / client `0x123e410`): `inc [rbx+0x58]`, `cmova` into `[rbx+0x60]` |
+| blocks | pool `+0x10` array (ImpactSystem `+0x88`), count pool `+0x18` (`+0x90`); 0x40 bytes each | the report's `mov rax, [rsi+0x88]` / `cmp rdx, [rsi+0x90]`, `shl rdx, 6`; PoolAlloc's `sub rsi, [rbx+0x10]` / `sar rsi, 6`; the begin iterator (server `0x991cd0`, client `0x123adf0`) |
+| a block | `+0x08` slot array, `+0x10` capacity (slots), `+0x18` live slots, `+0x20` high water, `+0x28` free-list head | PoolAlloc: `mov r10, [r8+8]`, `cmp rax, [r8+0x10]`, `inc [r8+0x18]`, `[r8+0x20]`++, `[r8+0x28]` = next free; the begin iterator skips a block whose `+0x18` is 0 |
+| a slot | 0x200 bytes; dword `+0`: bit 31 = free, low byte = generation (`and 0xfe`, `or 1`); the instance starts at `+8` (its `+0` = its id, `+4` program id, `+8` impact entity) | PoolAlloc `and [r9], 0x7fffffff`, `shl 9`; the report reads the program id at slot `+0xc` (`impact/slot.program`); createImpactInstance writes `[r14] = id`, `[r14+4]`, `[r14+8]` (abilities/inst.program, inst.entity) |
+| an impact id | `generation << 24 \| block << [pool+0x38] \| slot` | PoolAlloc `shl esi, cl` / `or esi, eax` / `shl eax, 0x18` |
+
+The game's own report (`impact/ReportUsage`) runs when 30 min passed (`0x1a3185c5000` ns) or the peak grew by more
+than 1 MiB, logs "[impact] Allocator Usage" (under 75 %), "High" (under 90 %) or "Critical", then walks every live slot
+and prints "Impact <program GUID> runs N Times" per program (the program from `getProgram(*(ImpactSystem+8), id)`, its
+GUID at +4). Kiln's walk is the same walk, read-only, bounded (256 blocks, 65,536 slots a block, 262,144 slots in all).
+
+On failure createImpactInstance frees the slot at once (`0x12381f0` client) and logs "could not allocate impact
+(stack, hit memory & data)" / "(collisions)" etc.: each such line is one impact (one hit or attack) that never ran.
+An impact entity's `LifeTime` (`0xf22c253c`, 24 B: `lifeTime` +0, `endOfLife` +8 (ECS ns), `enforceDestroy` +16,
+`preventDestroy` +17, `triggeredDestroy` +18) is what ends a melee hit (`0c3a7176-…` loops until its entity goes);
+the watch prints those fields for the oldest instances of the top program, with the ImpactHierarchy root (+4) as the
+attacker. Why 1,144 instances of `0c3a7176-…` outlived their 150 ms in inbox 116 is still open: the next occurrence's
+kiln.log names the hit entities, whether they still exist and their LifeTime state.

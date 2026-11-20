@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 807,
-    "constants": 892,
-    "features": 232
+    "symbols": 814,
+    "constants": 904,
+    "features": 233
   },
   "features": {
     "abilities.attributes": true,
@@ -96,6 +96,7 @@
     "hooks.foreign_modules": true,
     "hooks.owner_cleanup": true,
     "hooks.typed": true,
+    "impact.pool": true,
     "items.catalog": true,
     "items.equip": true,
     "items.equip_sets": true,
@@ -432,6 +433,9 @@
     "gems/RecycleGive": "0x385dc2",
     "gems/UnslotMove": "0x415010",
     "gems/UnslotMoveCall": "0x386089",
+    "impact/AllocStats": "0x8c0890",
+    "impact/PoolAlloc": "0x123e410",
+    "impact/ReportUsage": "0x12454b0",
     "items/ActorSpawnUpdate": "0x228130",
     "items/AddComponent": "0x960a20",
     "items/AreaDeposit": "0x412ed0",
@@ -1063,6 +1067,18 @@
     "gems/input.weapon": "0x260",
     "gems/iter.size": "0xf0",
     "gems/multiplier.key": "0xff88b470",
+    "impact/alloc.capacity": "0xf0",
+    "impact/alloc.used": "0xa0",
+    "impact/block.capacity": "0x10",
+    "impact/block.live": "0x18",
+    "impact/block.slots": "0x8",
+    "impact/pool.blocks": "0x10",
+    "impact/pool.live": "0x58",
+    "impact/pool.peak": "0x60",
+    "impact/slot.program": "0xc",
+    "impact/sys.block_count": "0x90",
+    "impact/sys.blocks": "0x88",
+    "impact/sys.pool": "0x78",
     "items/attr.durability": "0xed71dc01",
     "items/attr.durability_max": "0x3c8a292f",
     "items/attr.fuel": "0x5b0bf75",
@@ -2914,6 +2930,37 @@
       },
       "features": {
         "gems.sockets": "static"
+      }
+    },
+    "impact-pool": {
+      "level": "static",
+      "date": "2026-11-19",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@impact/AllocStats.fields": "static",
+        "@impact/CreateInstance.pool": "static",
+        "@impact/PoolAlloc.counts": "static",
+        "@impact/ReportUsage.walk": "static",
+        "impact/AllocStats": "static",
+        "impact/PoolAlloc": "static",
+        "impact/ReportUsage": "static"
+      },
+      "constants": {
+        "impact/alloc.capacity": "static",
+        "impact/alloc.used": "static",
+        "impact/block.capacity": "static",
+        "impact/block.live": "static",
+        "impact/block.slots": "static",
+        "impact/pool.blocks": "static",
+        "impact/pool.live": "static",
+        "impact/pool.peak": "static",
+        "impact/slot.program": "static",
+        "impact/sys.block_count": "static",
+        "impact/sys.blocks": "static",
+        "impact/sys.pool": "static"
+      },
+      "features": {
+        "impact.pool": "static"
       }
     },
     "items": {
