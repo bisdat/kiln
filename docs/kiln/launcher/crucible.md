@@ -160,9 +160,45 @@ exactly these; hand-placed folders stay; kinds without a server folder are liste
 order); `server.settings` into enshrouded_server.json (a running server is refused before any mod moves). With `modpackOut` the server modpack for players (format 1, [modpacks.md](modpacks.md)) is built right
 after, so players joining get the same version through the existing join offer.
 
+## Checks and the pack analysis
+`kiln_manage::modpack::check::check(Input, &CheckOptions) -> CheckReport` (`kilnctl pack check`) is the analysis Crucible
+runs on every upload (DESIGN.md section 6) and the launcher can show before an install; one code path for both. It reads
+a whole `.kilnpack` (`Input::Pack`) or Crucible's stored form (`Input::Stored {index, files}`: the index as uploaded and
+a folder holding every file it names as `<sha256>`: the mods' and the layer's archives as `pack::mod_archive` writes
+them, the raw override files). The stored form is assembled into a `.kilnpack` by raw entry copies (nothing is
+unpacked), so both go through `pack::read` and the same rules. It never fetches anything and never runs what a pack
+holds; Crucible runs it in a sandbox without network (crucible repo, `src/worker.mjs`).
+
+| Check | Level | Code |
+|---|---|---|
+| index rules, zip safety (no symlinks, absolute or `..` paths, dot entries, device names, case twins, every entry in a listed part), kdh1 of every mod and the layer, override sha256/size, cooked files | error | `index`, `zip`, `refused`, `hash`, `format` |
+| sizes: 512 MiB a file, 2 GiB a pack, 50 000 entries (read from the zip's end record before its table is built), 4 GiB unpacked, 64 KiB an override, 1 MiB of overrides | error | `size`, `zip`, `refused` |
+| stored form: every named file present with the index's size and sha256, sha256 values that are hex (never a path) | error | `missing-file`, `size`, `hash`, `index` |
+| blocklist: sha256 of the archives, overrides and the pack, kdh1 of every mod and the layer (`--blocklist`) | error | `blocked` |
+| secret scan of the overrides, server settings and the layer's settings-like files (the build's rules) | error | `secret` |
+| resolver on servers and on game clients (dependencies, incompatible, cycles inside the pack); a mod needing a newer Kiln than the checker, or an optional one, is a warning | error / warning | `resolve` |
+| kiln lint on the layer with the pack's Kiln mods as its profile (catalog with `--catalog`; Crucible's is built from the dedicated server's files and never shipped) | error / warning | `KLxxx` |
+| data conflicts between every pair of mods (KL701 data-conflict, [lint.md](../modding/lint.md#kl701-data-conflict)); listed in `conflicts[]` | warning | `KL701` |
+| code scan: managed assemblies (CLR header), native DLLs/EXEs (PE imports: networking DLLs, process creation, registry), scripts; manifest capabilities (`advanced`, `boot`, `writes`, `features`). Roslyn analyzers need source, so compiled assemblies are read for the API names they reference instead | warning (touches) / note | `code-network`, `code-process`, `code-registry`, `code`, `capability` |
+
+Identification (`credits[]`, DESIGN.md 6.2, first match wins): Kiln's own mods (`--own`, Crucible's
+`data/kiln-own-mods.json`: by id "likely", with a listed kdh1 "certain") -> earlier confirmed credits for the same kdh1
+(`--known`; two different ones: "conflict") -> the manifest's `updates` (GitHub repository or Nexus mod id: named, not
+fetched, "unverified") -> the manifest's authors and url -> the creator's own credit ("creator") -> nothing. Each row:
+`{kind, id, version, kdh1, author, source (https), match, confidence, nexusModId?, flag?}`; `flag` says why a row needs a
+look (the creator credits someone else than earlier packs did).
+
+The report (`--json`, kind `kiln.pack-check`, format 1): `{ok, complete, pack {id, name, version, sha256?, size?},
+summary {errors, warnings, notes}, findings[{level: error|warning|note, code, message, mod?, file?}], mods[{kind, id,
+version, hash, name?, authors[], url?, license?, updates?, code {managed[], native[], scripts[], touches[], evidence[]},
+capabilities, blocked?}], conflicts[{section, field, earlier {mod, file, selector, value}, later {...}, conditional}],
+credits[], catalog}`. `complete` is false when the pack could not be read; the mods and credits then come from the index
+alone. Exit 0 without errors, 1 with.
+
 ## kilnctl pack
 | Command | What |
 |---|---|
+| `pack check FILE \| --index I --files DIR [--own F] [--known F] [--blocklist F] [--catalog C] [--work DIR] [--json]` | the pack analysis (above); no data folder needed |
 | `pack build P --version V [--id] [--name] [--layer DIR] [--override PATH[:K,K][@both\|client\|server]]... [--optional ID[=off]]... [--client-only ID]... [--server-only ID]... [--server-settings FILE] [--changes TEXT] [--out DIR] [--json]` | a pack from profile P |
 | `pack verify FILE [--sha256 S] [--json]` | every check; prints the mods, layer and overrides (no data folder needed) |
 | `pack install FILE --yes [--name N] [--optional ID=on\|off]... [--json]` | an instance; prints how to activate it (`kilnctl client activate`) |
