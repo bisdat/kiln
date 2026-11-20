@@ -299,7 +299,8 @@ test("with reduced motion the still fire behind a sheet is the header band too",
 });
 
 /** WebKit without compositing (WebKitGTK with hardware acceleration off: WEBKIT_DISABLE_DMABUF_RENDERER=1, which the
- *  launcher sets, or WEBKIT_DISABLE_COMPOSITING_MODE=1) answers (-webkit-transform-3d) with false; Chromium says true. */
+ *  Linux launcher sets only where the DMA-BUF renderer failed since 0.2.0-dev.29.19, or WEBKIT_DISABLE_COMPOSITING_MODE=1)
+ *  answers (-webkit-transform-3d) with false; Chromium says true. */
 async function flatWebKit(page: Page) {
   await page.addInitScript(() => {
     const mm = window.matchMedia.bind(window);

@@ -73,8 +73,9 @@ and `libraryWebgl` show the fire on (their style numbers are the real signal; th
   the frames the fire draws. `tests/sheet-perf.spec.ts` counts the writes, the torch's listener and the frames asked
   for.
 - **WebKit without compositing** (`.k-app[data-render="flat"]`, `Stage.tsx flatDrawing`): WebKitGTK with hardware
-  acceleration off (webkit://gpu says "Policy never"; `WEBKIT_DISABLE_DMABUF_RENDERER=1`, which the launcher sets, or
-  `WEBKIT_DISABLE_COMPOSITING_MODE=1`) paints every change again on the CPU with everything over and under it, in one
+  acceleration off (webkit://gpu says "Policy never"; `WEBKIT_DISABLE_DMABUF_RENDERER=1`, which the launcher set
+  every time up to 0.2.0-dev.29.18 and from 29.19 only where the DMA-BUF renderer failed (its marker, `--no-dmabuf`),
+  or `WEBKIT_DISABLE_COMPOSITING_MODE=1`, software mode) paints every change again on the CPU with everything over and under it, in one
   picture of the window: scrolling repaints the whole list, so its cost grows with the window. WebKit answers
   `(-webkit-transform-3d)` with false there (Chromium and WebKit with compositing: true). Then lit flames and the torch
   stand still and the fire on Play draws about 15 frames a second instead of 30 (`FLAT_PLAY_MS`).

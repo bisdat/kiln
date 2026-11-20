@@ -92,6 +92,10 @@ pub(crate) fn report_input(app: &tauri::AppHandle, target: Option<LogTarget>) ->
     if let Some(c) = crate::render::choice() {
         input.facts.push(("Launcher".into(), crate::render::says(c)));
     }
+    // Linux: WebKit's DMA-BUF renderer in this start, why, and the sticky marker's sentence (crate::render)
+    if let Some(d) = crate::render::dmabuf_report() {
+        input.facts.push(("Launcher DMA-BUF".into(), d));
+    }
     // Linux: WebKit's sandbox in this start and the probe of bwrap; a finding when bwrap cannot start (crate::sandbox)
     if let Some(s) = crate::sandbox::state() {
         input.facts.push(("WebKit sandbox".into(), s.says()));

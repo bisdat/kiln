@@ -568,33 +568,69 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
   map says WebGL2 is missing. Programs the launcher starts (Steam when it was closed, the browser) do not get the
   variables the launcher set itself (`KILN_LAUNCHER_RENDER_SET` names them; `kiln_manage::hostenv` takes them back);
   a value the user set goes along as before.
+- **WebKit's DMA-BUF renderer** (0.2.0-dev.29.19): on by default again, so WebKitGTK composites on the GPU (layers;
+  a change repaints only itself). Up to 0.2.0-dev.29.18 the launcher always set `WEBKIT_DISABLE_DMABUF_RENDERER=1`
+  (for "Gdk Error 71 (Protocol error)" at the start, seen on GNOME + NVIDIA), which turned compositing off: every change
+  was painted again on the CPU with everything over and under it, the Linux launcher's lag in large windows
+  ([perf.md](perf.md)). Now:
+  - a start that uses it because nothing asked otherwise writes `<data>/state/dmabuf-pending.json` right before Tauri,
+    GTK's window and WebKit start (after the sandbox message, whose restart or Quit is no crash), and removes it 10 s
+    (`render::SETTLE`) after the page said it started, at a clean exit after that, or before any restart. A start that
+    finds it left behind (that start died: the Gdk Error 71 case ends the process) draws without the DMA-BUF renderer,
+    says so on stderr and in `launcher.log` (`PROBLEM: WebKit's DMA-BUF renderer off: the last start with it ended
+    before its page had started ...`, with how to undo it) and, once the beta copy's gate opens, writes the sticky
+    `<data>/state/dmabuf-off.json` (`{format, why, at, version}`, "why" names the dead start's time and version) and
+    removes the pending one;
+  - with the sticky marker a start draws with the GPU without the DMA-BUF renderer (`WEBKIT_DISABLE_DMABUF_RENDERER=1`,
+    the old default, which worked for everyone who had a working launcher before);
+  - precedence: the user's own `WEBKIT_DISABLE_DMABUF_RENDERER` (any value but `0` is off, as WebKit reads it), software
+    mode (off, as before), `--dmabuf` / `--no-dmabuf` (the last one given wins), `KILN_LAUNCHER_DMABUF=on|off`, the
+    watchdog's restart (`KILN_LAUNCHER_DMABUF_RESTARTED`), a pending marker left behind, the sticky marker, then on. Only
+    the default start is guarded and may step down; a DMA-BUF renderer the user asked for is theirs;
+  - Settings > Appearance, "Draw the launcher without the GPU" turned off removes the sticky marker too (GPU drawing
+    back on means "try the default again"); no new switch;
+  - like software mode's variables, a `WEBKIT_DISABLE_DMABUF_RENDERER` the launcher set itself is named in
+    `KILN_LAUNCHER_RENDER_SET`: programs of the host never get it (`kiln_manage::hostenv`), a launcher it starts again
+    decides afresh. (A first start after an update from 0.2.0-dev.29.18 or older, restarted by that launcher, still
+    inherits its unnamed `=1` and reads it as the user's, for that one start.)
 - **The fallback**: when the page has not said it started 15 s after the window was made (30 s after the start when no
-  window came), a start that drew with the GPU by default writes `<data>/state/software-render.json`
+  window came), a start with the DMA-BUF renderer by default (and the GPU by default) writes
+  `<data>/state/dmabuf-off.json` and starts again the same way with `KILN_LAUNCHER_DMABUF_RESTARTED=1`: the GPU without
+  the DMA-BUF renderer. Only a start already without it (that restart, the sticky marker, a choice), drawing with the GPU
+  by default, writes `<data>/state/software-render.json`
   (`{format, why, at, version}`), logs why and starts again in software mode, in the same process (exec): `$APPIMAGE`
   when it is set (the AppImage file, with the environment a fresh start has), else the executable, with the same
   arguments. A start in software mode, or with a mode the user forced, never restarts: it writes
   `PROBLEM: the page did not start ...` to `launcher.log` and stderr and (0.2.0-dev.29.18) shows the launcher's own
   message instead of leaving an empty window, also when the restart itself failed ("WebKit's sandbox (Linux)" below,
-  "The messages"). One restart at most, never a loop.
-- **Choosing the mode**: `--software-render` / `--gpu-render` (the last one given wins), then
+  "The messages"). So the steps are: DMA-BUF on, then the GPU without DMA-BUF, then software; one restart per step at
+  most, never a loop (each restart's variable says its step, so a marker that could not be written does not repeat it;
+  the restart's own marker is then written once the gate opens).
+- **Choosing the mode** (the DMA-BUF renderer has its own order, above): `--software-render` / `--gpu-render` (the last one given wins), then
   `KILN_LAUNCHER_RENDER=software|gpu`, then the marker, then the GPU. Settings > Appearance, "Draw the launcher without
   the GPU", sets or clears the marker (`app_render_set`) for the next start. A start with an nxm link takes no other
-  argument (main.rs). The marker is read from the data folder as found (`folder::found_dirs`, read only): 0.2.0-dev.29
+  argument (main.rs; neither `--dmabuf` nor `--no-dmabuf`). The marker is read from the data folder as found (`folder::found_dirs`, read only): 0.2.0-dev.29
   to 29.17 read it through `state::dirs()`, which refuses until the beta copy's gate opens (after the window exists),
   so those starts never saw it. A marker written then (by Settings, or by a fallback whose next starts drew with the
   GPU again) takes effect from 0.2.0-dev.29.18: such a start says on stderr and in `launcher.log` that it stays so until
   the switch is off, and the switch's hint says the same.
 - **What it says**: at the start, one line on stderr with the log's path and the mode. `launcher.log`, `render:` lines:
   the mode and why, the WebKitGTK version, `XDG_SESSION_TYPE` and whether `DISPLAY` / `WAYLAND_DISPLAY` are set, the
-  first line of `/proc/driver/nvidia/version` (or that there is none), WebKit's sandbox and the probe of bwrap, when the
-  page started, a web process that ended. Lines from before the beta copy's gate opens (the start's own) go to stderr at
+  first line of `/proc/driver/nvidia/version` (or that there is none), `WEBKIT_DISABLE_DMABUF_RENDERER` with the DMA-BUF
+  decision and why (default, yours, software mode, an override, the restart, a dead start, the marker with its sentence),
+  WebKit's sandbox and the probe of bwrap, when the page started, a web process that ended. Lines from before the beta copy's gate opens (the start's own) go to stderr at
   once and into `launcher.log` when it opens (`flush_early_log`; a start that restarts or quits before that leaves them
-  on stderr only). The support report's summary.txt has a `Launcher:` line with the mode.
+  on stderr only). The support report's summary.txt has a `Launcher:` line with the mode and a `Launcher DMA-BUF:` line (the decision,
+  why, the sticky marker's sentence); `app_info.render.dmabuf` has the same for the UI.
 - **Tests**: `cargo test -p kiln-launcher render::`, `bun test unit/started.test.ts`. Debug and QA (`dev-eval`) builds
   only: `KILN_LAUNCHER_TEST_WITHHOLD_READY=gpu|software|all` ignores `app_started` in that mode, so the fallback can be
-  watched on a machine that renders (on a private Xvfb display).
+  watched on a machine that renders (on a private Xvfb display); `KILN_LAUNCHER_TEST_EXIT_AFTER_WINDOW=dmabuf|all` ends
+  the process 2 s after the window was made without exit handlers (`dmabuf`: only a start that uses the DMA-BUF
+  renderer), as the Gdk Error 71 crash does.
 - **Troubleshooting a black or empty window** (what players are pointed to): start the launcher from a terminal; its
-  first line names `launcher.log`. Within 15 s it should start again without the GPU by itself. If the window stays
+  first line names `launcher.log`. Within 15 s it should start again without the DMA-BUF renderer by itself, and 15 s
+  after that, if still empty, without the GPU. A launcher that closes at once ("Gdk Error 71 (Protocol error)") starts
+  without the DMA-BUF renderer the next time by itself; `--no-dmabuf` does it from the first start. If the window stays
   empty, the launcher shows a message (0.2.0-dev.29.18) with what it tried, where `launcher.log` is and what is left to
   try ("Start without the GPU", "Start without WebKit's sandbox" when WebKit runs it, "Open the log folder", "Quit").
   Without that message, start it with `--software-render` (`./Kiln*.AppImage --software-render`, or

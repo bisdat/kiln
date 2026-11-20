@@ -252,7 +252,9 @@ steps instead:
   Input off, the Deck's own `hid-steam` device works the same.
 - WebKitGTK inside gamescope drew fine here (below). If a Deck shows a blank window, the launcher starts again
   without the GPU by itself after 15 s; `--software-render` in the launch options does it from the start (the fire
-  falls back to the CSS arch; [app.md](app.md), "Drawing without the GPU"). (The launcher already sets
+  falls back to the CSS arch; [app.md](app.md), "Drawing without the GPU"). (From 0.2.0-dev.29.19 the launcher
+  uses WebKit's DMA-BUF renderer by default and steps down by itself first: a blank window starts again without it
+  before software mode; `--no-dmabuf` in the launch options skips it. Up to 29.18 it always set
   `WEBKIT_DISABLE_DMABUF_RENDERER=1`.)
 - `cargo xwin check` for Windows was not run for the Deck code; the reader is Linux-only by `cfg`, Windows uses the
   browser Gamepad API.

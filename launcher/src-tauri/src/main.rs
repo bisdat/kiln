@@ -67,15 +67,12 @@ fn main() {
     // docks find the entry and its icon (desktop.rs)
     #[cfg(target_os = "linux")]
     kiln_launcher_lib::desktop::set_app_id();
-    // WebKitGTK's DMA-BUF renderer fails on some Wayland/NVIDIA setups ("Gdk Error 71 (Protocol error)" at start,
-    // seen on GNOME + NVIDIA). Off unless the user set it; costs nothing visible for this UI.
-    #[cfg(target_os = "linux")]
-    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        // SAFETY: first thing in main, before any thread exists.
-        unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
-    }
     // How the window is drawn: `--software-render` / `--gpu-render` (here, after the nxm check above: a link start has
-    // no other argument), `KILN_LAUNCHER_RENDER`, the marker; software mode's variables, the watchdog (render.rs).
+    // no other argument), `KILN_LAUNCHER_RENDER`, the marker; software mode's variables, the watchdog (render.rs). And
+    // WebKit's DMA-BUF renderer (0.2.0-dev.29.19): on by default (compositing; up to 29.18 always off here, for "Gdk
+    // Error 71 (Protocol error)" on GNOME + NVIDIA, which made large windows lag), with its start guard and the
+    // watchdog's step without it before software mode; `--dmabuf` / `--no-dmabuf`, `KILN_LAUNCHER_DMABUF`, and the
+    // user's own WEBKIT_DISABLE_DMABUF_RENDERER, which always wins (render.rs).
     #[cfg(target_os = "linux")]
     kiln_launcher_lib::render::prepare(&args);
     // WebKit's sandbox (`--no-webkit-sandbox` / `--webkit-sandbox`, KILN_LAUNCHER_WEBKIT_SANDBOX, the marker; its
@@ -99,7 +96,8 @@ mod tests {
         assert_eq!(nxm_argument(&args(&[url])), Ok(Some(url)));
         assert_eq!(nxm_argument(&args(&["--selftest"])), Ok(None));
         for tail in [vec!["--nxm"], vec!["--nxm", "--selftest"], vec!["--nxm", url, "--kiln-ctrl-c", "1"], vec!["--kiln-ctrl-c", "1", url], vec![url, "--selftest"],
-            vec!["--nxm", url, "--software-render"], vec!["--gpu-render", url], vec!["--nxm", url, "--no-webkit-sandbox"]] {
+            vec!["--nxm", url, "--software-render"], vec!["--gpu-render", url], vec!["--nxm", url, "--no-webkit-sandbox"],
+            vec!["--nxm", url, "--no-dmabuf"], vec!["--dmabuf", url], vec![url, "--no-dmabuf"]] {
             assert!(nxm_argument(&args(&tail)).is_err());
         }
     }

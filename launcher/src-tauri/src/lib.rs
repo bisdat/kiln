@@ -288,6 +288,8 @@ pub fn run() {
         .expect("error while building the Kiln Launcher")
         .run(|_, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                // a clean exit after the page started is no DMA-BUF crash: its start guard goes (render.rs)
+                render::leaving();
                 watch::leaving();
                 leave_for_sure();
                 deck::gamepad::stop();
@@ -319,6 +321,8 @@ pub(crate) fn after_snapshot(app: &tauri::AppHandle) {
     commands::app::flush_early_log();
     // a message's "off" from the start before, when its marker could not be written then
     sandbox::after_gate();
+    // WebKit's DMA-BUF renderer: the sticky marker for a start that died with it, or for the watchdog's restart (render.rs)
+    render::after_gate();
     // an antivirus that took the launcher's uninstaller (or its exe while it ran): launcher.log says it (own_files.rs)
     own_files::start();
     // the installed runtime's and the bundles' sha256s from the last run (a start does not hash 1.5 GB again)

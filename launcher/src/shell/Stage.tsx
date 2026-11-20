@@ -113,7 +113,8 @@ export const FIRE_READERS = ".k-sheet-rim, .k-title";
 export const FLAT_PLAY_MS = 66;
 
 /** WebKit drawing without compositing: WebKitGTK with hardware acceleration off (webkit://gpu "Policy never":
- *  WEBKIT_DISABLE_DMABUF_RENDERER=1, which the Linux launcher sets, or WEBKIT_DISABLE_COMPOSITING_MODE=1). There every
+ *  WEBKIT_DISABLE_DMABUF_RENDERER=1, which the Linux launcher sets only where the DMA-BUF renderer failed since
+ *  0.2.0-dev.29.19 (every start before), or WEBKIT_DISABLE_COMPOSITING_MODE=1). There every
  *  change is painted again on the CPU with everything over and under it, in one picture of the window (no layers).
  *  WebKit answers (-webkit-transform-3d) with false then; Chromium (WebView2) and WebKit with compositing say true. */
 export function flatDrawing(): boolean {

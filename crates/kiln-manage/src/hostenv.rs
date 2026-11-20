@@ -20,9 +20,12 @@ use std::process::Command;
 const OWN: [&str; 4] = ["APPDIR", "APPIMAGE", "ARGV0", "OWD"];
 
 /// The Linux launcher's software mode (launcher/src-tauri/src/render.rs) sets these for its own webview, and names the
-/// ones it set (not the user's own) in [`RENDER_SET`], comma-separated. They are the launcher's, not the host's: a
-/// Steam it starts would draw its own window in software, so a program of the host never gets them.
-pub const RENDER_VARS: [&str; 3] = ["WEBKIT_DISABLE_COMPOSITING_MODE", "WEBKIT_SKIA_ENABLE_CPU_RENDERING", "LIBGL_ALWAYS_SOFTWARE"];
+/// ones it set (not the user's own) in [`RENDER_SET`], comma-separated; so does its choice against WebKit's DMA-BUF
+/// renderer (`WEBKIT_DISABLE_DMABUF_RENDERER`, 0.2.0-dev.29.19: set only where that renderer failed). They are the
+/// launcher's, not the host's: a Steam it starts would draw its own window in software (or without DMA-BUF), so a
+/// program of the host never gets them.
+pub const RENDER_VARS: [&str; 4] =
+    ["WEBKIT_DISABLE_COMPOSITING_MODE", "WEBKIT_SKIA_ENABLE_CPU_RENDERING", "LIBGL_ALWAYS_SOFTWARE", "WEBKIT_DISABLE_DMABUF_RENDERER"];
 pub const RENDER_SET: &str = "KILN_LAUNCHER_RENDER_SET";
 /// (dev.29.18) The Linux launcher turns WebKit's process sandbox off for its own webview when the player chose so
 /// (launcher/src-tauri/src/sandbox.rs) and names the variable in [`SANDBOX_SET`] when it set it (not the player's own).
@@ -226,6 +229,19 @@ mod tests {
         }
         // no list: nothing of the kind changes
         assert!(changes(vars(&[("LIBGL_ALWAYS_SOFTWARE", "1")])).is_empty());
+    }
+
+    /// (dev.29.19) The launcher's own WEBKIT_DISABLE_DMABUF_RENDERER (set where the DMA-BUF renderer failed) stays with
+    /// it; the user's own (not in the list) goes along to Steam as before.
+    #[test]
+    fn the_launchers_dmabuf_variable_stays_with_the_launcher() {
+        let ours = vars(&[(RENDER_SET, "WEBKIT_DISABLE_DMABUF_RENDERER"), ("WEBKIT_DISABLE_DMABUF_RENDERER", "1")]);
+        for env in [ours.clone(), ours.iter().cloned().chain(seen()).collect()] {
+            let c = changes(env);
+            assert_eq!(of(&c, "WEBKIT_DISABLE_DMABUF_RENDERER"), Some(&None), "{c:?}");
+            assert_eq!(of(&c, RENDER_SET), Some(&None));
+        }
+        assert!(changes(vars(&[("WEBKIT_DISABLE_DMABUF_RENDERER", "1")])).is_empty(), "the user's own value goes along");
     }
 
     /// (dev.29.18) WebKit's sandbox turned off for the launcher's own page: a browser or Steam the launcher starts gets
