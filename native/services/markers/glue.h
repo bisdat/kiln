@@ -35,6 +35,8 @@ struct Glue {
     KilnOwner owner = 0;                // kiln-markers.dll's own owner (process-owned work: the receiver's virtual publishers)
     uint32_t side = KILN_SIDE_SERVER;   // KILN_SIDE_CLIENT on a game client (hosted or joined)
     bool lifecycle = false;             // world STARTED / STOPPING are seen
+    bool server_post = false;           // the server world's Post is subscribed (the link's server role)
+    bool client_post = false;           // the client world's Post is subscribed (the link's receiver)
     Store* store = nullptr;
     Subscribers* subs = nullptr;
     CatalogHolder* catalog = nullptr;
@@ -76,6 +78,9 @@ KilnResult link_clear_sent(KilnOwner owner, KilnEntity recipient, KilnMarkerResu
 KilnResult link_suppress_sent(KilnOwner owner, KilnEntity recipient, KilnStr key, KilnMarkerResult* r);
 void link_release_owner(KilnOwner owner);     // release_owner: the owner's sent records
 extern const KilnMarkersBridgeApi kBridgeTable;
+// markers.cpp: the link took a verified client's icon catalog (a dedicated server): markers.catalog is available from
+// here and CatalogChanged goes out for role 0 at the next server step.
+void catalog_from_link();
 
 }  // namespace kmk
 #endif

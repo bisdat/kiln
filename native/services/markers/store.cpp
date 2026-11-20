@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "store.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -13,6 +15,7 @@ namespace kmk {
 namespace {
 
 constexpr uint32_t kSurfaceBits = KILN_MARKER_MAP | KILN_MARKER_COMPASS | KILN_MARKER_WORLD;
+uint64_t steady_ms();  // the store's default clock (the link part, below)
 
 void reset(KilnMarkerResult* r) {
     const uint32_t size = r->size;
@@ -313,6 +316,7 @@ KilnResult Store::clear_local(KilnOwner owner, KilnMarkerResult* r) {
 
 void Store::clear_world(uint32_t kind) {
     if (kind != KILN_WORLD_CLIENT) return;  // the server's sent records arrive with the server layers
+    clear_received(KILN_MARKER_WORLD_STOPPED);  // received records end with the client world too (the link part)
     for (auto& [owner, b] : bindings_) {
         const uint32_t n = static_cast<uint32_t>(b.local.size());
         if (!n) continue;
@@ -358,6 +362,26 @@ void Store::snapshot_client(std::vector<ClientRow>* out) const {
             out->push_back(std::move(row));
         }
     }
+    // received records (the link part): the virtual publishers' rows, with their poses
+    const uint64_t now = clock_ ? clock_() : steady_ms();
+    for (const auto& [k, rr] : received_) {
+        ClientRow row;
+        row.source = KILN_MARKER_RECEIVED;
+        row.publisher_generation = rr.virtual_generation;
+        row.peer_generation = received_link_;
+        row.ns = std::get<0>(k);
+        row.key = std::get<2>(k);
+        row.rec = rr.rec;
+        row.source_reason = rr.source_reason;
+        row.followed = rr.followed;
+        row.pose_prev = rr.pose_prev;
+        row.pose_last = rr.pose_last;
+        row.pose_prev_ms = rr.pose_prev_ms;
+        row.pose_last_ms = rr.pose_last_ms;
+        if (rr.followed && rr.source_reason != KILN_MARKER_ANCHOR_ENDED && now > rr.pose_last_ms + 750)
+            row.source_reason = KILN_MARKER_SOURCE_STALE;  // no pose for 750 ms: hidden until one comes
+        out->push_back(std::move(row));
+    }
 }
 
 uint32_t Store::local_count() const {
@@ -375,6 +399,234 @@ uint64_t Store::text_charged(std::string_view ns) const {
     for (const LedgerEntry& e : ledger_)
         if (e.ns == ns) return e.text_charged;
     return 0;
+}
+
+// ---- the link part: shared validation, the server layers' notes, received records (wire v1) -----------------------------
+
+const char* validate_spec(const KilnMarkerSpec& s, Record* out, std::string_view* key) { return validate(s, out, key); }
+
+namespace {
+constexpr uint32_t kReceivedRecords = 512;                 // received records on a client
+constexpr uint64_t kReceivedTextBytes = uint64_t{1} << 20;  // new arena bytes all received text may add, ever
+
+uint64_t steady_ms() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+}  // namespace
+
+bool Store::publisher(KilnOwner owner, std::string* ns, uint64_t* generation) const {
+    std::lock_guard g(mu_);
+    auto it = bindings_.find(owner);
+    if (it == bindings_.end()) return false;
+    if (ns) *ns = ledger_[it->second.ledger].ns;
+    if (generation) *generation = it->second.generation;
+    return true;
+}
+
+void Store::enqueue_note(uint32_t role, std::string_view ns, uint64_t publisher_generation, uint32_t kind, uint32_t audience, uint32_t recipient,
+                         uint64_t peer_generation, std::string_view key, uint32_t affected, uint32_t cause) {
+    Note n;
+    n.kind = Note::Change;
+    n.role = role;
+    n.counted = false;
+    n.publisher_generation = publisher_generation;
+    KilnMarkerChange& c = n.change;
+    c.size = sizeof(KilnMarkerChange);
+    c.kind = kind;
+    c.audience = audience;
+    c.recipient = recipient;
+    c.world_epoch = epochs_[role == kRoleClient ? KILN_WORLD_CLIENT : KILN_WORLD_SERVER].load();
+    c.peer_generation = peer_generation;
+    c.publisher_generation = publisher_generation;
+    c.sequence = ++sequence_[role];
+    c.affected = affected;
+    c.cause = cause;
+    copy_field(c.owner, sizeof c.owner, ns);
+    copy_field(c.key, sizeof c.key, key);
+    queue_[role].push_back(n);
+}
+
+bool Store::server_change(KilnOwner owner, uint32_t kind, uint32_t audience, uint32_t recipient, uint64_t peer_generation, std::string_view key,
+                          uint32_t affected, uint32_t cause, bool counted, const char** why) {
+    std::lock_guard g(mu_);
+    Binding* b = bound(owner);
+    if (!b) {
+        if (why) *why = "the owner is not bound (bind_owner)";
+        return false;
+    }
+    if (counted) {
+        if (b->pending >= kPendingPerPublisher) {
+            if (why) *why = "64 changes of this publisher wait for the next server step";
+            return false;
+        }
+        if (pending_[kRoleServer] >= kPendingPerRole) {
+            if (why) *why = "256 marker changes wait for the next server step";
+            return false;
+        }
+        ++b->pending;
+        ++pending_[kRoleServer];
+    }
+    enqueue_note(kRoleServer, ledger_[b->ledger].ns, b->generation, kind, audience, recipient, peer_generation, key, affected, cause);
+    queue_[kRoleServer].back().counted = counted;
+    return true;
+}
+
+bool Store::received_apply(uint64_t peer_generation, const std::vector<ReceivedRecord>& upserts,
+                           const std::vector<std::tuple<std::string, uint64_t, std::string>>& removes, bool replace, uint32_t cause, std::string* why) {
+    auto fail = [&](const char* text) {
+        if (why) *why = text;
+        return false;
+    };
+    std::lock_guard g(mu_);
+    const uint64_t now = clock_ ? clock_() : steady_ms();
+    // the projected view's keys
+    std::map<RKey, const ReceivedRecord*> up;
+    for (const ReceivedRecord& r : upserts)
+        if (!up.emplace(RKey{r.ns, r.remote_generation, r.key}, &r).second) return fail("a transaction names one key twice");
+    std::map<std::string, uint32_t, std::less<>> per_ns;
+    uint32_t total = 0;
+    if (!replace) {
+        for (const auto& [k, row] : received_) {
+            if (up.count(k)) continue;
+            if (std::find(removes.begin(), removes.end(), k) != removes.end()) continue;
+            ++per_ns[std::get<0>(k)];
+            ++total;
+        }
+    }
+    for (const auto& [k, r] : up) {
+        ++per_ns[std::get<0>(k)];
+        ++total;
+    }
+    if (total > kReceivedRecords) return fail("Full: more than 512 received markers");
+    if (local_total_ + total > kClientRecords) return fail("Full: more than 1024 markers on this client (local and received)");
+    for (const auto& [ns, n] : per_ns)
+        if (n > kPerNamespace) return fail("Full: more than 128 received markers in one namespace");
+    // text: what is new to the arena, per namespace and in all
+    std::map<std::string, uint64_t, std::less<>> need;
+    std::vector<std::string_view> fresh;
+    uint64_t need_total = 0;
+    for (const auto& [k, r] : up) {
+        const std::string_view t = r->rec.text;
+        if (t.empty() || arena_.contains(t) || std::find(fresh.begin(), fresh.end(), t) != fresh.end()) continue;
+        fresh.push_back(t);
+        need[std::get<0>(k)] += t.size();
+        need_total += t.size();
+    }
+    for (const auto& [ns, n] : need) {
+        auto it = received_charged_.find(ns);
+        if ((it == received_charged_.end() ? 0 : it->second) + n > Arena::kNamespaceBytes) return fail("Full: a received namespace's text budget (256 KiB) is spent");
+    }
+    if (received_text_ + need_total > kReceivedTextBytes) return fail("Full: the received text budget (1 MiB) is spent");
+    if (arena_.used() + need_total > Arena::kGlobalBytes) return fail("Full: the marker text budget (4 MiB) is spent");
+    // intern (cannot fail now), then commit
+    std::map<RKey, std::string_view> interned;
+    for (const auto& [k, r] : up) {
+        uint64_t& charged = received_charged_[std::get<0>(k)];
+        const uint64_t before = charged;
+        std::string_view v;
+        const char* w = nullptr;
+        if (!arena_.intern(r->rec.text, &charged, &v, &w)) return fail(w ? w : "Full: text");
+        received_text_ += charged - before;
+        interned[k] = v;
+    }
+    received_link_ = peer_generation;
+    // removals
+    for (auto it = received_.begin(); it != received_.end();) {
+        const bool gone = replace ? !up.count(it->first) : std::find(removes.begin(), removes.end(), it->first) != removes.end();
+        if (!gone) {
+            ++it;
+            continue;
+        }
+        enqueue_note(kRoleClient, std::get<0>(it->first), it->second.virtual_generation, KILN_MARKER_REMOVED, KILN_MARKER_RECEIVED, 0, peer_generation,
+                     std::get<2>(it->first), 1, cause);
+        it = received_.erase(it);
+    }
+    // upserts
+    for (const auto& [k, r] : up) {
+        Record rec = r->rec;
+        rec.text = interned[k];
+        const KilnVec3 at{rec.x, rec.y, rec.z};
+        auto it = received_.find(k);
+        if (it == received_.end()) {
+            auto [vt, fresh_pub] = virtual_.try_emplace(std::make_pair(std::get<0>(k), std::get<1>(k)), 0);
+            if (fresh_pub) vt->second = ++next_generation_;
+            RRow row;
+            row.virtual_generation = vt->second;
+            row.wire_id = r->wire_id;
+            row.revision = r->revision;
+            row.rec = rec;
+            row.source_reason = r->source_reason;
+            row.followed = r->followed;
+            row.pose_prev = row.pose_last = at;
+            row.pose_prev_ms = row.pose_last_ms = now;
+            enqueue_note(kRoleClient, std::get<0>(k), row.virtual_generation, KILN_MARKER_ADDED, KILN_MARKER_RECEIVED, 0, peer_generation, std::get<2>(k), 1,
+                         cause);
+            received_.emplace(k, row);
+            continue;
+        }
+        RRow& row = it->second;
+        const bool changed = row.wire_id != r->wire_id || row.revision != r->revision;
+        if (r->followed && (at.x != row.pose_last.x || at.y != row.pose_last.y || at.z != row.pose_last.z)) {
+            row.pose_prev = row.pose_last;
+            row.pose_prev_ms = row.pose_last_ms;
+            row.pose_last = at;
+        }
+        if (r->followed) row.pose_last_ms = now;  // the record itself carries the latest pose
+        row.wire_id = r->wire_id;
+        row.revision = r->revision;
+        row.rec = rec;
+        row.source_reason = r->source_reason;
+        row.followed = r->followed;
+        if (changed)
+            enqueue_note(kRoleClient, std::get<0>(k), row.virtual_generation, KILN_MARKER_UPDATED, KILN_MARKER_RECEIVED, 0, peer_generation, std::get<2>(k), 1,
+                         cause);
+    }
+    // virtual publishers without a row go
+    for (auto it = virtual_.begin(); it != virtual_.end();) {
+        bool used = false;
+        for (const auto& [k, row] : received_)
+            if (std::get<0>(k) == it->first.first && std::get<1>(k) == it->first.second) {
+                used = true;
+                break;
+            }
+        it = used ? std::next(it) : virtual_.erase(it);
+    }
+    received_total_ = static_cast<uint32_t>(received_.size());
+    return true;
+}
+
+void Store::received_pose(std::string_view ns, uint64_t remote_generation, std::string_view key, double x, double y, double z, uint32_t source_reason) {
+    std::lock_guard g(mu_);
+    auto it = received_.find(RKey{std::string(ns), remote_generation, std::string(key)});
+    if (it == received_.end()) return;
+    RRow& row = it->second;
+    row.pose_prev = row.pose_last;
+    row.pose_prev_ms = row.pose_last_ms;
+    row.pose_last = KilnVec3{x, y, z};
+    row.pose_last_ms = clock_ ? clock_() : steady_ms();
+    row.rec.x = x;
+    row.rec.y = y;
+    row.rec.z = z;
+    row.source_reason = source_reason;
+}
+
+void Store::clear_received(uint32_t cause) {
+    std::map<std::string, uint32_t, std::less<>> per_ns;
+    for (const auto& [k, row] : received_) ++per_ns[std::get<0>(k)];
+    for (const auto& [ns, n] : per_ns) enqueue_note(kRoleClient, ns, 0, KILN_MARKER_CLEARED, KILN_MARKER_RECEIVED, 0, received_link_, {}, n, cause);
+    received_.clear();
+    virtual_.clear();
+    received_total_ = 0;
+}
+
+void Store::received_clear(uint32_t cause) {
+    std::lock_guard g(mu_);
+    clear_received(cause);
+}
+
+uint32_t Store::received_count() const {
+    std::lock_guard g(mu_);
+    return static_cast<uint32_t>(received_.size());
 }
 
 }  // namespace kmk

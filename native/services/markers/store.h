@@ -13,6 +13,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -74,6 +75,29 @@ struct ClientRow {
     Record rec;                                // rec.text lives in the arena (process lifetime)
     uint32_t source_reason = KILN_MARKER_READY; // received: the sender's FOLLOW_MISSING, ANCHOR_ENDED or BAD_POSITION,
                                                 // or SOURCE_STALE; local: READY (follow state comes from the anchors)
+    // Received followed rows (the server follows the entity and sends poses): the last two poses and when they arrived
+    // (the store's clock, steady milliseconds). rec.x/y/z is pose_last. The surfaces interpolate pose_prev -> pose_last
+    // over 100 ms after pose_last_ms, clamped, no extrapolation. SOURCE_STALE above: no pose for 750 ms. Before a second
+    // pose, pose_prev == pose_last.
+    bool followed = false;
+    KilnVec3 pose_prev{}, pose_last{};
+    uint64_t pose_prev_ms = 0, pose_last_ms = 0;
+};
+
+// The spec's own rules (chapter 04 §4.5 schema) for any store (local or the server layers): nullptr when it is valid;
+// `out` then holds the normalized record (its text still the caller's bytes) and `key` the key.
+const char* validate_spec(const KilnMarkerSpec& s, Record* out, std::string_view* key);
+
+// One received record as the receiver hands it to the store (wire v1, the link part). rec.text is the receiver's bytes
+// until the store interns it.
+struct ReceivedRecord {
+    std::string ns;
+    uint64_t remote_generation = 0;  // the server's publisher generation
+    std::string key;
+    uint64_t wire_id = 0, revision = 0;
+    Record rec;
+    uint32_t source_reason = KILN_MARKER_READY;
+    bool followed = false;
 };
 
 class Store {
@@ -102,6 +126,30 @@ public:
     void post_catalog(uint32_t role, const KilnMarkerCatalogChange& change);  // not counted against the change limits
     std::vector<Note> take(uint32_t role);  // the queued notes of a role, in order; frees their reservations
 
+    // ---- the server layers' notes (the link part, server role) ----
+    // The bound publisher of `owner`: its namespace and generation. False when it is not bound.
+    bool publisher(KilnOwner owner, std::string* ns, uint64_t* generation) const;
+    // Queues one server logical change (role 0) of a bound publisher. counted: it takes a pending slot (an API call),
+    // false and *why when the publisher's or the role's limit is reached (nothing queued then).
+    bool server_change(KilnOwner owner, uint32_t kind, uint32_t audience, uint32_t recipient, uint64_t peer_generation, std::string_view key,
+                       uint32_t affected, uint32_t cause, bool counted, const char** why);
+
+    // ---- received records (the link part, client role): virtual publishers under the process owner ----
+    // Applies one received transaction at once or not at all. replace: the upserts are the whole new view (a snapshot);
+    // else they and the removes patch it (a delta). One logical note per changed key (audience RECEIVED, peer_generation):
+    // ADDED, UPDATED (another wire id or revision), REMOVED; the same wire id and revision again is no change. Limits:
+    // 512 received, 1024 with the local ones, 128 per namespace; received text 1 MiB of new arena bytes in all and 256 KiB
+    // per namespace. False and *why (nothing changed) when a limit would be passed.
+    bool received_apply(uint64_t peer_generation, const std::vector<ReceivedRecord>& upserts,
+                        const std::vector<std::tuple<std::string, uint64_t, std::string>>& removes, bool replace, uint32_t cause, std::string* why);
+    // A pose of a received followed record (no logical note).
+    void received_pose(std::string_view ns, uint64_t remote_generation, std::string_view key, double x, double y, double z, uint32_t source_reason);
+    // Every received record goes: one CLEARED per nonempty namespace.
+    void received_clear(uint32_t cause);
+    uint32_t received_count() const;
+    // The store's clock (steady milliseconds; tests set their own).
+    void set_clock(uint64_t (*clock)()) { clock_ = clock; }
+
     // ---- for tests and logs ----
     // The client's rows now (local, then received), for the surfaces at a client Post.
     void snapshot_client(std::vector<ClientRow>* out) const;
@@ -127,6 +175,27 @@ private:
     Binding* bound(KilnOwner owner);
     void enqueue_change(uint32_t role, const Binding& b, uint32_t kind, std::string_view key, uint32_t affected, uint32_t cause, bool counted);
     void clear_world(uint32_t kind);  // under mu_
+    void clear_received(uint32_t cause);  // under mu_
+    void enqueue_note(uint32_t role, std::string_view ns, uint64_t publisher_generation, uint32_t kind, uint32_t audience, uint32_t recipient,
+                      uint64_t peer_generation, std::string_view key, uint32_t affected, uint32_t cause);  // under mu_, uncounted
+
+    // received records, by (namespace, the server's publisher generation, key)
+    using RKey = std::tuple<std::string, uint64_t, std::string>;
+    struct RRow {
+        uint64_t virtual_generation = 0;  // the virtual publisher's generation (this process's numbering)
+        uint64_t wire_id = 0, revision = 0;
+        Record rec;
+        uint32_t source_reason = KILN_MARKER_READY;
+        bool followed = false;
+        KilnVec3 pose_prev{}, pose_last{};
+        uint64_t pose_prev_ms = 0, pose_last_ms = 0;
+    };
+    std::map<RKey, RRow> received_;
+    std::map<std::pair<std::string, uint64_t>, uint64_t, std::less<>> virtual_;  // (namespace, server generation) -> virtual generation
+    std::map<std::string, uint64_t, std::less<>> received_charged_;  // new arena bytes per received namespace, ever
+    uint64_t received_text_ = 0;   // ... in all
+    uint64_t received_link_ = 0;   // the peer generation of the received view
+    uint64_t (*clock_)() = nullptr;
 
     Arena& arena_;
     const Switches& sw_;
