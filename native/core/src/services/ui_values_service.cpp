@@ -264,6 +264,45 @@ bool subscribe_frames(void (*fn)(uint64_t, void*), void* user) {
     return ui->subscribe_ui_tick(g_owner, &on_ui_tick, nullptr, &h) == KILN_OK;
 }
 
+// kiln.ui.inventory: kiln.ui's presses (subscribe_pointer_press, 0.2.0-dev.30), with the service's owner.
+bool subscribe_pointer(KilnUiPointerFn fn, void* user) {
+    KilnUiScreen probe{};
+    if (!screen(&probe)) return false;  // also finds kiln.ui's table
+    const KilnUiApi* ui = g_ui.load(std::memory_order_acquire);
+    if (!ui || ui->header.size < offsetof(KilnUiApi, subscribe_pointer_press) + sizeof(void*) || !ui->subscribe_pointer_press ||
+        !g_owner)
+        return false;
+    KilnHandle h = 0;
+    return ui->subscribe_pointer_press(g_owner, fn, user, &h) == KILN_OK;
+}
+
+bool call_click(KilnUiSlotClickFn fn, const KilnUiSlotClick* c, void* user) {
+    crash::Capture cap{};
+    unsigned long code = 0;
+    __try {
+        fn(c, user);
+        return true;
+    } __except (crash::filter(GetExceptionInformation(), &cap, &code)) {
+        crash::report(cap, "kiln.ui.inventory click subscriber", reinterpret_cast<const void*>(fn));
+        return false;
+    }
+}
+
+// The cursor in the client pixels of this process's window in front (the game's), with the client area's size.
+bool cursor_client(float* x, float* y, float* w, float* h) {
+    HWND wnd = GetForegroundWindow();
+    DWORD pid = 0;
+    if (!wnd || !GetWindowThreadProcessId(wnd, &pid) || pid != GetCurrentProcessId()) return false;
+    POINT p{};
+    RECT rc{};
+    if (!GetCursorPos(&p) || !ScreenToClient(wnd, &p) || !GetClientRect(wnd, &rc)) return false;
+    *x = static_cast<float>(p.x);
+    *y = static_cast<float>(p.y);
+    *w = static_cast<float>(rc.right - rc.left);
+    *h = static_cast<float>(rc.bottom - rc.top);
+    return *x >= 0 && *y >= 0 && *x < *w && *y < *h;
+}
+
 bool gemforge_contract() {
     uintptr_t grid = 0, lower = 0, end = 0;
     hooks::fp::Fingerprint fp;
@@ -367,6 +406,9 @@ void wire() {
     e.key_down = [](uint32_t vk) { return (GetAsyncKeyState(static_cast<int>(vk)) & 0x8000) != 0; };
     e.thread_id = []() -> uint32_t { return GetCurrentThreadId(); };
     e.feature_open = [](const char* n) { return sigdb::feature(n) && !gates::is_held(n); };
+    e.subscribe_pointer = &subscribe_pointer;
+    e.call_click = &call_click;
+    e.cursor_client = &cursor_client;
     e.log = [](int level, const char* text) { kiln::log::write(level, "kiln", text); };
 }
 
@@ -383,7 +425,7 @@ bool init() {
     static const char* const kFeatures[] = {"ui.values.detail", "ui.values.slot",          "ui.values.held",
                                             "ui.values.hud",    "ui.values.tooltip_lines", "ui.slots.inspect",
                                             "ui.gemforge.inspect", "gems.sockets", "ui.gemforge.sources",
-                                            "ui.tooltip.lines", "ui.tooltip.values"};
+                                            "ui.tooltip.lines", "ui.tooltip.values", "ui.slots.click"};
     if (!env().layout_supported())
         for (uint32_t k = 0; k < kLists; ++k)
             if (row_of(k)) disable_kind(k, "private UI layout is not measured for this client image");
@@ -406,3 +448,10 @@ bool init() {
 }  // namespace kiln::uivalues
 
 KILN_SERVICE(ui_values, KILN_UI_VALUES_SERVICE, KILN_UI_VALUES_VERSION, kiln::uivalues::table(), &kiln::uivalues::init);
+
+namespace {
+// kiln.ui.inventory shares kiln.ui.values' registry, environment and slot frames: available where that one is.
+bool inventory_init() { return kiln::image().side == KILN_SIDE_CLIENT; }
+}  // namespace
+KILN_SERVICE(ui_inventory, KILN_UI_INVENTORY_SERVICE, KILN_UI_INVENTORY_VERSION, kiln::uivalues::inventory_table(),
+             &inventory_init);

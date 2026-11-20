@@ -79,3 +79,78 @@ static readonly Kiln.UiTooltipLines.None -> Kiln.UiTooltipLines!
 static readonly Kiln.UiTooltipScale.None -> Kiln.UiTooltipScale!
 virtual Kiln.UiTooltipLinesProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItemView item) -> Kiln.UiTooltipLines!
 virtual Kiln.UiTooltipValuesProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItemView item) -> Kiln.UiTooltipScale!
+Kiln.SlotButton
+Kiln.SlotButton.Left = 1 -> Kiln.SlotButton
+Kiln.SlotButton.Right = 3 -> Kiln.SlotButton
+Kiln.SlotClick
+Kiln.SlotClick.<Clone>$() -> Kiln.SlotClick!
+Kiln.SlotClick.Button.get -> Kiln.SlotButton
+Kiln.SlotClick.Button.init -> void
+Kiln.SlotClick.Deconstruct(out Kiln.SlotButton Button, out Kiln.SlotModifiers Modifiers, out Kiln.VisibleSlot! Slot, out Kiln.GameScreen Screen, out bool Taken) -> void
+Kiln.SlotClick.Equals(Kiln.SlotClick? other) -> bool
+Kiln.SlotClick.Holder.get -> Kiln.EntityId
+Kiln.SlotClick.Item.get -> Kiln.ItemId
+Kiln.SlotClick.ItemEntity.get -> Kiln.EntityId
+Kiln.SlotClick.Modifiers.get -> Kiln.SlotModifiers
+Kiln.SlotClick.Modifiers.init -> void
+Kiln.SlotClick.Screen.get -> Kiln.GameScreen
+Kiln.SlotClick.Screen.init -> void
+Kiln.SlotClick.Slot.get -> Kiln.VisibleSlot!
+Kiln.SlotClick.Slot.init -> void
+Kiln.SlotClick.SlotClick(Kiln.SlotButton Button, Kiln.SlotModifiers Modifiers, Kiln.VisibleSlot! Slot, Kiln.GameScreen Screen, bool Taken) -> void
+Kiln.SlotClick.Taken.get -> bool
+Kiln.SlotClick.Taken.init -> void
+Kiln.SlotClickOptions
+Kiln.SlotClickOptions.<Clone>$() -> Kiln.SlotClickOptions!
+Kiln.SlotClickOptions.Button.get -> Kiln.SlotButton
+Kiln.SlotClickOptions.Button.init -> void
+Kiln.SlotClickOptions.Equals(Kiln.SlotClickOptions? other) -> bool
+Kiln.SlotClickOptions.Modifiers.get -> Kiln.SlotModifiers
+Kiln.SlotClickOptions.Modifiers.init -> void
+Kiln.SlotClickOptions.SlotClickOptions() -> void
+Kiln.SlotClickOptions.Take.get -> bool
+Kiln.SlotClickOptions.Take.init -> void
+Kiln.SlotMark
+Kiln.SlotMark.Color.get -> Kiln.Color
+Kiln.SlotMark.Color.init -> void
+Kiln.SlotMark.Deconstruct(out Kiln.Color Color, out Kiln.SlotMarkStyle Style, out float Thickness) -> void
+Kiln.SlotMark.Equals(Kiln.SlotMark other) -> bool
+Kiln.SlotMark.SlotMark() -> void
+Kiln.SlotMark.SlotMark(Kiln.Color Color, Kiln.SlotMarkStyle Style = Kiln.SlotMarkStyle.Border, float Thickness = 3) -> void
+Kiln.SlotMark.Style.get -> Kiln.SlotMarkStyle
+Kiln.SlotMark.Style.init -> void
+Kiln.SlotMark.Thickness.get -> float
+Kiln.SlotMark.Thickness.init -> void
+Kiln.SlotMarkStyle
+Kiln.SlotMarkStyle.Border = 0 -> Kiln.SlotMarkStyle
+Kiln.SlotMarkStyle.Corner = 2 -> Kiln.SlotMarkStyle
+Kiln.SlotMarkStyle.Fill = 1 -> Kiln.SlotMarkStyle
+Kiln.SlotModifiers
+Kiln.SlotModifiers.Alt = 4 -> Kiln.SlotModifiers
+Kiln.SlotModifiers.Ctrl = 1 -> Kiln.SlotModifiers
+Kiln.SlotModifiers.None = 0 -> Kiln.SlotModifiers
+Kiln.SlotModifiers.Shift = 2 -> Kiln.SlotModifiers
+Kiln.Ui.Inventory
+const Kiln.Ui.Inventory.ClickCapability = "ui.slots.click" -> string!
+const Kiln.Ui.Inventory.MarkCapability = "ui.slots.inspect" -> string!
+override Kiln.SlotClick.Equals(object? obj) -> bool
+override Kiln.SlotClick.GetHashCode() -> int
+override Kiln.SlotClick.ToString() -> string!
+override Kiln.SlotClickOptions.Equals(object? obj) -> bool
+override Kiln.SlotClickOptions.GetHashCode() -> int
+override Kiln.SlotClickOptions.ToString() -> string!
+override Kiln.SlotMark.GetHashCode() -> int
+static Kiln.SlotClick.operator !=(Kiln.SlotClick? left, Kiln.SlotClick? right) -> bool
+static Kiln.SlotClick.operator ==(Kiln.SlotClick? left, Kiln.SlotClick? right) -> bool
+static Kiln.SlotClickOptions.operator !=(Kiln.SlotClickOptions? left, Kiln.SlotClickOptions? right) -> bool
+static Kiln.SlotClickOptions.operator ==(Kiln.SlotClickOptions? left, Kiln.SlotClickOptions? right) -> bool
+static Kiln.SlotMark.operator !=(Kiln.SlotMark left, Kiln.SlotMark right) -> bool
+static Kiln.SlotMark.operator ==(Kiln.SlotMark left, Kiln.SlotMark right) -> bool
+static Kiln.Ui.Inventory.ClearMarks() -> void
+static Kiln.Ui.Inventory.Hovered.get -> Kiln.VisibleSlot?
+static Kiln.Ui.Inventory.Mark(Kiln.EntityId item, Kiln.SlotMark mark) -> void
+static Kiln.Ui.Inventory.MarkWhen(System.Func<Kiln.VisibleSlot!, Kiln.SlotMark?>! rule) -> System.IDisposable!
+static Kiln.Ui.Inventory.OnClick(Kiln.SlotClickOptions! options, System.Action<Kiln.SlotClick!>! handler) -> System.IDisposable!
+static Kiln.Ui.Inventory.Unmark(Kiln.EntityId item) -> void
+~override Kiln.SlotMark.Equals(object obj) -> bool
+~override Kiln.SlotMark.ToString() -> string

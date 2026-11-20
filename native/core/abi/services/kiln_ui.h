@@ -12,7 +12,8 @@
  * theme_create, theme_free, push_theme, set_look, look_info, font_load, font_free, push_font_handle; then image_ex and
  * image_opaque_rect: part of an image, trimmed item icons; then set_texts: Kiln's own texts in the player's language), and
  * graphics_set and graphics_status (0.2.0-dev.29.18): Kiln's own graphics tools, the frame cap, DLSS settings and readout,
- * then chat_completion (internal to Kiln.Ui, refused from native plugins): Tab completion in the game's chat (issue #44).
+ * then chat_completion (internal to Kiln.Ui, refused from native plugins): Tab completion in the game's chat (issue #44),
+ * then subscribe_pointer_press (0.2.0-dev.30): left and right presses over the game's own UI, take or pass.
  *
  * How (docs/re/client-render.md):
  *  - The game loads vulkan-1.dll at run time and presents with vkQueuePresentKHR on queue family 0 (no static Vulkan
@@ -821,6 +822,22 @@ typedef struct KilnUiChatCompletion {
     char text[257];
     char replacement[257];
 } KilnUiChatCompletion;
+/* ---- presses on the game's own UI (subscribe_pointer_press, size-guarded tail, 0.2.0-dev.30) ----
+ * One left or right mouse button press over the game window while Kiln does not capture input and the cursor is not
+ * over a Kiln panel. Kiln.Ui and the core's kiln.ui.inventory (slot clicks) use it; any native plugin may. */
+enum { KILN_UI_POINTER_PASS = 0u, KILN_UI_POINTER_TAKE = 1u };
+typedef struct KilnUiPointerPress {
+    uint32_t size;          /* sizeof(KilnUiPointerPress) */
+    uint32_t button;        /* 1 left, 3 right (the numbering of KILN_UI_INPUT_MOUSE_BUTTON) */
+    uint32_t mods;          /* KILN_UI_MOD_* held at the press */
+    uint32_t time;          /* the message time (GetMessageTime, milliseconds, wraps) */
+    float x, y;             /* the cursor in the window's client pixels */
+    float client_width;     /* the client area's size in pixels */
+    float client_height;
+} KilnUiPointerPress;       /* 32 bytes */
+/* Window thread, inside Kiln's window procedure: decide at once (no waiting, no game calls). KILN_UI_POINTER_TAKE keeps
+ * this press from the game; anything else passes it. */
+typedef uint32_t(KILN_CALL* KilnUiPointerFn)(const KilnUiPointerPress* press, void* user);
 
 typedef struct KilnUiApi {
     KilnServiceHeader header; /* { sizeof(KilnUiApi), KILN_UI_VERSION } */
@@ -1235,6 +1252,16 @@ typedef struct KilnUiApi {
      * Kiln.Ui uses this on its render thread, never calls game input itself.
      * The game UI thread owns all reads and actual EditSetText replacements. */
     KilnResult(KILN_CALL* chat_completion)(KilnUiChatCompletion* io);
+    /* Additive size-guarded tail (0.2.0-dev.30; check header.size >= offsetof(KilnUiApi, subscribe_pointer_press) +
+     * sizeof(void*) and the pointer): presses on the game's own UI (docs/kiln/ui.md "The game's inventory slots").
+     * subscribe_pointer_press: fn(press) once per physical left or right button press (its raw input record and its
+     *   window message are paired, mouse_press.h's rule), on the window thread, only while Kiln does not capture input
+     *   and the cursor is not over a Kiln panel. When any subscriber answers KILN_UI_POINTER_TAKE the press is kept from
+     *   the game (the raw record's button flag is taken out, or the record kept whole when it carries nothing else; the
+     *   button message is not passed on); its release always reaches the game, so nothing stays held. fn must decide at
+     *   once: it runs inside the window procedure. A structured exception in fn removes the subscription (logged).
+     *   Remove it with unsubscribe (KILN_OK: a call in flight has ended). INVALID_ARGUMENT: no fn. */
+    KilnResult(KILN_CALL* subscribe_pointer_press)(KilnOwner owner, KilnUiPointerFn fn, void* user, KilnHandle* out);
 } KilnUiApi;
 
 /* ====================================================================================================================

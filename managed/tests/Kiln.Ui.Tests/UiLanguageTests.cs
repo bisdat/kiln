@@ -177,8 +177,9 @@ public sealed unsafe class UiLanguageTests : IDisposable
         var h = File.ReadAllText(Path.Combine(RepoRoot(), "native", "core", "abi", "services", "kiln_ui.h"));
         // the graphics tail (0.2.0-dev.29.18) follows it: GraphicsTests checks that one
         Assert.Contains("KilnResult(KILN_CALL* set_texts)(const KilnUiTexts* texts);\n", h, StringComparison.Ordinal);
-        // the internal chat completion slot (issue #44) is appended after the graphics tail: offset 1032, table 1040
-        Assert.Contains("KilnResult(KILN_CALL* chat_completion)(KilnUiChatCompletion* io);\n} KilnUiApi;", h, StringComparison.Ordinal);
+        // the internal chat completion slot (issue #44) is appended after the graphics tail: offset 1032; subscribe_pointer_press
+        // follows it at 1040 (0.2.0-dev.30, GraphicsTests checks that one)
+        Assert.Contains("KilnResult(KILN_CALL* chat_completion)(KilnUiChatCompletion* io);\n", h, StringComparison.Ordinal);
         Assert.True(h.IndexOf("chat_completion)(KilnUiChatCompletion* io)", StringComparison.Ordinal) >
                     h.IndexOf("graphics_status)(KilnUiGraphicsStatus* out)", StringComparison.Ordinal));
         Assert.Equal(1032, (int)Marshal.OffsetOf<UiNative.TableChat>(nameof(UiNative.TableChat.ChatCompletion)));

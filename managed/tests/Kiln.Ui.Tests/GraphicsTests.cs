@@ -224,8 +224,13 @@ public unsafe class GraphicsTests : IDisposable
                  })
             Assert.Equal(at, (int)Marshal.OffsetOf<UiNative.GraphicsStatus>(field));
         var h = File.ReadAllText(Path.Combine(RepoRoot(), "native", "core", "abi", "services", "kiln_ui.h"));
-        // the internal chat completion slot follows it (UiLanguageTests checks that one)
         Assert.Contains("KilnResult(KILN_CALL* graphics_status)(KilnUiGraphicsStatus* out);\n", h, StringComparison.Ordinal);
+        // what follows the graphics tail: chat_completion's slot (PR #73) at 1032, then subscribe_pointer_press (0.2.0-dev.30)
+        Assert.Equal(1032, (int)Marshal.OffsetOf<UiNative.TableChat>(nameof(UiNative.TableChat.ChatCompletion)));
+        Assert.Equal(1040, (int)Marshal.OffsetOf<UiNative.TablePointer>(nameof(UiNative.TablePointer.SubscribePointerPress)));
+        Assert.Equal(1048, sizeof(UiNative.TablePointer));
+        Assert.Contains("KilnResult(KILN_CALL* subscribe_pointer_press)(KilnOwner owner, KilnUiPointerFn fn, void* user, KilnHandle* out);\n} KilnUiApi;",
+            h, StringComparison.Ordinal);
         // a kiln.ui without the tail: nothing to call, nothing happens
         Assert.False(GraphicsTools.Available);
         GraphicsTools.Apply();

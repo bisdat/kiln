@@ -1599,6 +1599,94 @@ void replay_screen_opens() {
     ImGui::DestroyContext();
 }
 
+// ---- subscribe_pointer_press (0.2.0-dev.30): left/right presses over the game's UI for the core's slot clicks ----
+struct PointerLog {
+    std::vector<KilnUiPointerPress> asked;
+    uint32_t take_mods = ~0u;  // answer TAKE when the press's modifiers are exactly these
+};
+uint32_t KILN_CALL pointer_collect(const KilnUiPointerPress* p, void* user) {
+    auto* log = static_cast<PointerLog*>(user);
+    log->asked.push_back(*p);
+    return p->mods == log->take_mods ? KILN_UI_POINTER_TAKE : KILN_UI_POINTER_PASS;
+}
+uint32_t KILN_CALL pointer_fault(const KilnUiPointerPress*, void*) {
+    volatile int* null = nullptr;
+    return static_cast<uint32_t>(*null);
+}
+void pointer_presses() {
+    fresh();
+    PointerLog log;
+    log.take_mods = KILN_UI_MOD_CTRL;
+    KilnHandle h = 0;
+    check(kui::input_pointer_subscribe(11, &pointer_collect, &log, &h) == KILN_OK && h, "pointer: subscribed");
+    hold(true);
+    Run r = run([] {
+        send(WM_LBUTTONDOWN, MK_LBUTTON | MK_CONTROL, MAKELPARAM(10, 20));
+        send(WM_LBUTTONUP, MK_CONTROL, MAKELPARAM(10, 20));
+    }, nullptr);
+    check(log.asked.size() == 1 && log.asked[0].button == 1 && log.asked[0].mods == KILN_UI_MOD_CTRL &&
+              log.asked[0].x == 10 && log.asked[0].y == 20 && log.asked[0].size == sizeof(KilnUiPointerPress),
+          "pointer: Ctrl+left as a message: asked once, at the message's point, with Ctrl (%zu asks)", log.asked.size());
+    check(!contains(r.game, "0201 ") && contains(r.game, "0202 "),
+          "pointer: a taken press is kept from the game, its release reaches it:%s", game_text(r).c_str());
+    hold(false);
+    log.asked.clear();
+    r = run([] {
+        send(WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(30, 40));
+        send(WM_RBUTTONUP, 0, MAKELPARAM(30, 40));
+    }, nullptr);
+    check(log.asked.size() == 1 && log.asked[0].button == 3 && log.asked[0].mods == 0 && contains(r.game, "0204 ") &&
+              contains(r.game, "0205 "),
+          "pointer: a plain right click is asked about (button 3) and passed: the game gets both:%s", game_text(r).c_str());
+    // the raw record and its message are one press: never asked twice; both follow one answer
+    fresh();
+    log.asked.clear();
+    hold(true);
+    r = run([] {
+        send(WM_INPUT, RIM_INPUT, raw_mouse(RI_MOUSE_LEFT_BUTTON_DOWN));
+        send(WM_LBUTTONDOWN, MK_LBUTTON | MK_CONTROL, MAKELPARAM(10, 20));
+        send(WM_INPUT, RIM_INPUT, raw_mouse(RI_MOUSE_LEFT_BUTTON_UP));
+        send(WM_LBUTTONUP, MK_CONTROL, MAKELPARAM(10, 20));
+    }, nullptr);
+    const bool raw_kept = !contains(r.game, "00ff mouse 1 "), msg_kept = !contains(r.game, "0201 ");
+    check(log.asked.size() <= 1 && raw_kept == msg_kept && raw_kept == (log.asked.size() == 1) &&
+              contains(r.game, "00ff mouse 2 ") && contains(r.game, "0202 "),
+          "pointer: raw record + message of one Ctrl+left: asked %zu time(s) (0 = no cursor position without a display: "
+          "passed), both treated alike, releases reach the game:%s", log.asked.size(), game_text(r).c_str());
+    // a raw record with motion: only the taken press flag goes (the import hook), motion stays
+    if (log.asked.size() == 1) {
+        fresh();
+        r = run([] {
+            send(WM_INPUT, RIM_INPUT, raw_mouse(RI_MOUSE_LEFT_BUTTON_DOWN, 4, -2));
+            send(WM_LBUTTONDOWN, MK_LBUTTON | MK_CONTROL, MAKELPARAM(10, 20));
+        }, nullptr);
+        check(r.game == std::vector<std::string>{"00ff mouse 0 4 -2 0"},
+              "pointer: a taken press in a record with motion: the game gets the motion only:%s", game_text(r).c_str());
+    }
+    hold(false);
+    // the Kiln menu captures input: nobody is asked, the press is the menu's
+    fresh();
+    log.asked.clear();
+    kui::g_menu_open = true;
+    run([] { send(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(10, 20)); send(WM_LBUTTONUP, 0, MAKELPARAM(10, 20)); }, nullptr);
+    kui::g_menu_open = false;
+    check(log.asked.empty(), "pointer: while Kiln captures input nobody is asked (%zu)", log.asked.size());
+    // unsubscribed: never asked again
+    check(kui::input_pointer_unsubscribe(h) == KILN_OK && kui::input_pointer_unsubscribe(h) == KILN_ERR_NOT_FOUND,
+          "pointer: unsubscribed (once)");
+    fresh();
+    r = run([] { send(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(10, 20)); }, nullptr);
+    check(log.asked.empty() && contains(r.game, "0201 "), "pointer: after unsubscribe nobody is asked, the game gets it");
+    // a faulting subscriber is removed; the press reaches the game
+    KilnHandle f = 0;
+    check(kui::input_pointer_subscribe(12, &pointer_fault, nullptr, &f) == KILN_OK, "pointer: a faulting subscriber");
+    fresh();
+    r = run([] { send(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(10, 20)); }, nullptr);
+    check(contains(r.game, "0201 ") && kui::input_pointer_unsubscribe(f) == KILN_ERR_NOT_FOUND,
+          "pointer: a fault removes the subscriber, the press reaches the game:%s", game_text(r).c_str());
+    check(kui::input_pointer_subscribe(13, nullptr, nullptr, &f) == KILN_ERR_INVALID_ARGUMENT, "pointer: no fn -> INVALID_ARGUMENT");
+}
+
 int main() {
     if (!patch_import("GetRawInputData", reinterpret_cast<void*>(&fake_raw), reinterpret_cast<void**>(&g_real_raw))) {
         std::printf("FAIL this exe imports no GetRawInputData to stand in for\n");
@@ -1664,6 +1752,7 @@ int main() {
     mouse_wheel_small_deltas();
     mouse_wheel_bound();
     mouse_buttons();
+    pointer_presses();
     mouse_captured();
     kui::keys_unsubscribe(kiln_ui_h);
     mouse_subscribers();

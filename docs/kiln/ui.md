@@ -5,7 +5,7 @@ The client-side UI for mods (Forge: Screens, GUI overlays, toasts, KeyMappings, 
 window's input, and hooks the game's own UI (its screens, its main and pause menus, its crafting menus). Managed:
 `managed/services/Kiln.Ui`. RE: `docs/re/client-render.md` (overlay, input), `docs/re/game-ui.md` (the game's UI).
 Samples: `mods/samples/UiSample` (overlay), `mods/samples/MenuButtons` (game menus, a screen, crafting),
-`mods/samples/ValueBars` (values in the game's own UI). Test:
+`mods/samples/ValueBars` (values in the game's own UI), `mods/samples/SlotMarks` (marks and clicks on the game's slots). Test:
 `mods/tests/ui-test`. On a dedicated server `Ui.Available` is false and every call does nothing (a `side: both` mod may
 call it freely).
 
@@ -333,6 +333,70 @@ How it behaves:
 kiln.json, or the environment variable `KILN_TOOLTIP_PROBE=1`, draws a fixed test block through the same path, stepped
 through with a key (default F3: off, short, 16 lines, long English, long German, colours, after-stats, values x2), and
 writes `tooltip-probe:` lines to kiln.log (each detail's mode and identity, the sites it passed, rectangles, values).
+
+## The game's inventory slots (0.2.0-dev.30)
+
+`Ui.Inventory` (client only) treats the slots the game draws (backpack, the inventory menu, a chest, a crafting station or
+factory, an NPC's crafting) as something your mod acts on: marks over a slot, and clicks on a slot with the item's
+identity. Sample: `mods/samples/SlotMarks` (both sides: the client asks, its server half checks the item is the sender's,
+then the client draws the mark). Native: `kiln.ui.inventory` (`native/core/abi/services/kiln_ui_inventory.h`)
+on `kiln.ui.values`' slot frames and kiln.ui's `subscribe_pointer_press`.
+
+```csharp
+// Ctrl+click marks an item; the game never sees the press (no pick-up)
+Ui.Inventory.OnClick(new SlotClickOptions { Modifiers = SlotModifiers.Ctrl }, click =>
+{
+    if (click.ItemEntity.Value == 0) return;           // an empty slot
+    SendToMyServer(click.ItemEntity);                  // your mod's own message: the server half checks it, then keeps the mark
+    Ui.Inventory.Mark(click.ItemEntity, new SlotMark(new Color(235, 60, 50)));   // the picture, at once
+});
+// watch a click without taking it from the game
+Ui.Inventory.OnClick(new SlotClickOptions { Button = SlotButton.Right, Modifiers = SlotModifiers.Alt, Take = false }, c => Log.Info(c.ToString()));
+// a rule per drawn slot (render thread: a lookup, nothing slow)
+using var tint = Ui.Inventory.MarkWhen(s => myMarked.Contains(s.ClientEntity) ? new SlotMark(Color.Red, SlotMarkStyle.Fill) : null);
+var under = Ui.Inventory.Hovered;                      // the slot under the cursor, or null (for a key binding)
+```
+
+| Member | What | Row |
+|---|---|---|
+| `OnClick(options, handler)` | clicks matching `Button` (Left, Right) and `Modifiers` (exactly: Ctrl alone is not Ctrl+Shift); `Take` (default) keeps the press from the game, its release still reaches it. The handler runs on the client's main thread after the next UI frame. Dispose to stop | `ui.slots.click` |
+| `Mark(item, mark)`, `Unmark(item)`, `ClearMarks()` | a mark on the item's slot wherever the game draws it (it follows the item: move it and the mark moves); `SlotMark(Color, Style = Border/Fill/Corner, Thickness = 3)` | `ui.slots.inspect` |
+| `MarkWhen(rule)` | a mark from a rule asked for each drawn slot (an item mark wins) | `ui.slots.inspect` |
+| `Hovered` | the slot under the cursor in the game's latest UI frame | `ui.slots.inspect` |
+
+**The item's identity.** `SlotClick.ItemEntity` (and `VisibleSlot.ClientEntity`) is the item's entity in this game's
+world. For an item the server sent (every item in a player's, a chest's or a station's inventory) that is the server's own
+id of it: the game creates replicated entities with the server's id (`docs/re/network.md`, dossier chapter 05a section 6).
+`Holder`, `Slot.InventoryPage` and `Slot.SlotIndex` say where it was drawn. Send the id to your server half and check
+there that the item is in the sender's inventory or a container they may use (Kiln.Items) before acting: a click is a wish,
+never authority. Kiln Auto Loot's salvage marks work this way.
+
+**Where clicks count (fail closed).** Only on screens with a pointer: the in-game menu (inventory tab), the backpack, the
+player's crafting, a storage chest, a station, an NPC's crafting, a factory. Never in the play view: the hotbar is drawn
+there but a click attacks. Only while Kiln does not have the input (no Kiln menu or screen open) and the cursor is not over
+a Kiln panel. The game's latest slot frame must be this session's and at most 250 ms old. Anything missing: no event, and
+the game gets the click as without Kiln. A click still waiting for its UI frame when the world is left is dropped.
+
+**Marks** are drawn by Kiln's overlay over the game's slots, on the same screens and on the play view's hotbar, in this
+player's game only. Two mods marking one item: one of the marks shows (no layering in this version).
+
+**Coordinates.** Kiln maps the game's UI units to pixels from the game's own canvas, viewport and pixels per unit, scaled
+to the window when their sizes differ. This mapping is read from the game's code, not yet confirmed in a running game: the
+client checks `ui-hooks.c1` (marks on the slots at two resolutions and UI scales) and `ui-hooks.c2` (clicks on the right
+slot) do that (`tools/client-checks`). Until they pass both rows say "game test pending".
+
+**Multiplayer and vanilla.** Everything happens in one player's game: the server and other players see nothing unless your
+mod sends a message. A vanilla client or server is unaffected.
+
+**C (native plugins).** `kiln.ui.inventory` v1: `subscribe_clicks(owner, &filter, fn, user, &reg)` (`KilnUiSlotClickFilter`
+`{size, button 1/3, mods, flags KUI_CLICK_TAKE}`; `fn(const KilnUiSlotClick*)` with the slot record and the screen),
+`slot_at(owner, x, y, target_w, target_h, &hit)` (x < 0: the cursor), `mapping(owner, target_w, target_h, &map)` (pixel =
+offset + unit * scale), `unsubscribe`. Registrations share kiln.ui.values' budget. kiln.ui's `subscribe_pointer_press` (a
+size-guarded tail at byte 1040, after `chat_completion`'s slot at 1032) gives any native plugin the left and right presses
+over the game's UI with a take-or-pass answer.
+
+**Not in this version** (next in dev.30): a button inside the game's chest screen where Enlarge sits, panels next
+to the chest and backpack screens, the game's own slot colours (marks are drawn over the slot), the gamepad's focused slot.
 
 ## Windows (immediate mode)
 ```csharp

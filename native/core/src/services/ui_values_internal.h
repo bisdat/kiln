@@ -13,6 +13,8 @@
 //   ui_values_lines.cpp    tooltip lines collected at the item detail view, the details window's snapshots
 //   ui_values_tooltip.cpp  native lines drawn inside the game's item detail view (ui.tooltip.lines), stat numbers
 //                          scaled in it (ui.tooltip.values), and the tooltip probe for the guided client session
+//   ui_values_inventory.cpp kiln.ui.inventory: slot clicks (kiln.ui presses hit-tested on the slot frames), slot_at,
+//                          the units-to-pixels mapping
 //   ui_values_service.cpp  the production environment (owners, kiln.caps, sigdb, kiln.hooks, kiln.client, kiln.ui),
 //                          the SEH guards and the service's registration with the core
 //
@@ -28,6 +30,7 @@
 #include <vector>
 
 #include "services/kiln_hooks.h"
+#include "services/kiln_ui_inventory.h"
 #include "services/kiln_ui_values.h"
 
 namespace kiln::uivalues {
@@ -47,7 +50,7 @@ inline constexpr double kNewStringsPerSecond = 64;  // per mod
 inline constexpr double kNewStringsBurst = 128;
 
 // Registration lists: the value kinds (KilnUiValueKind), then these.
-enum : uint32_t { kListLines = kValueKinds, kListSlots, kListChanges, kListGemForge, kListValues, kLists };
+enum : uint32_t { kListLines = kValueKinds, kListSlots, kListChanges, kListGemForge, kListValues, kListClicks, kLists };
 
 // The capability row of a list ("ui.values.hud" for the three HUD kinds).
 const char* row_of(uint32_t list);
@@ -106,6 +109,12 @@ struct Env {
     bool (*feature_open)(const char* name) = nullptr;
     bool (*call_scale)(KilnUiScaleFn fn, const KilnUiProviderContext* c, const KilnUiItemView* v, float* scale,
                        void* user, KilnResult* rc) = nullptr;
+    // kiln.inventory (0.2.0-dev.30): kiln.ui's subscribe_pointer_press with the service's owner (false: not there, too
+    // old, refused); a click subscriber called under a structured-exception guard; the cursor in the game window's
+    // client pixels with the client area's size (false: no game window in front).
+    bool (*subscribe_pointer)(KilnUiPointerFn fn, void* user) = nullptr;
+    bool (*call_click)(KilnUiSlotClickFn fn, const KilnUiSlotClick* c, void* user) = nullptr;
+    bool (*cursor_client)(float* x, float* y, float* width, float* height) = nullptr;
 };
 Env& env();
 void logf(int level, const char* fmt, ...);
@@ -178,6 +187,27 @@ void lines_reset_for_tests();
 KilnResult slots_copy(KilnOwner owner, uint64_t expected_session, uint64_t expected_frame, KilnUiSlotsFrame* frame,
                       KilnUiVisibleSlot* slots, uint32_t capacity, uint32_t* required);
 void slots_reset_for_tests();
+// The latest completed slot frame (immutable; null before the first). Any thread.
+struct SlotsSnapshot {
+    KilnUiSlotsFrame meta{};
+    std::vector<KilnUiVisibleSlot> slots;
+};
+std::shared_ptr<const SlotsSnapshot> slots_latest();
+
+// ---- kiln.ui.inventory (ui_values_inventory.cpp) ----
+// Registration of any list after the caller checked its arguments (ui_values.cpp's register_in).
+KilnResult register_list(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out);
+// the slots' publish, UI thread: delivers the clicks pressed since the last frame; a click of another client session
+// than this frame's (the world was left in between) is dropped
+void clicks_frame_published(uint64_t session);
+bool pointer_screen(const KilnUiScreen& s);  // the screen has a pointer: slot clicks may hit there
+// units-to-pixels for a target size; false = the frame has no usable viewport
+bool map_frame(const KilnUiSlotsFrame& m, float target_w, float target_h, float* sx, float* sy, float* ox, float* oy);
+// the slot under (x, y) target pixels: its index, -1 = none (the last drawn wins)
+int hit_slot(const SlotsSnapshot& f, float x, float y, float target_w, float target_h);
+uint32_t on_pointer(const KilnUiPointerPress* p);  // what kiln.ui's press callback does (tests call it directly)
+const KilnUiInventoryApi* inventory_table();
+void clicks_reset_for_tests();
 KilnResult gemforge_copy(KilnOwner, uint64_t, uint64_t, KilnUiGemForgeFrame*, KilnUiGemForgeCandidate*, uint32_t,
                         uint32_t*);
 void gemforge_reset_for_tests();

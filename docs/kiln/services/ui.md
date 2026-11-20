@@ -204,7 +204,7 @@ check `header.size` through the member and that its pointer is non-null). Player
 
 ## Chat completion's slot (internal, GitHub issue 44)
 
-One slot after `graphics_status`: `chat_completion` at byte offset 1032 (the table is 1040 bytes). It is Kiln.Ui's
+One slot after `graphics_status`: `chat_completion` at byte offset 1032 (the table was 1040 bytes in 0.2.0-dev.29.22). It is Kiln.Ui's
 transport for Tab completion in the game's chat ([chat-history.md](../chat-history.md#tab-completion)), **not** an API:
 a call from a native plugin is refused (`KILN_ERR_UNAVAILABLE`), and `KilnUiChatCompletion`'s layout (576 bytes) may
 change with Kiln.Ui. It answers only while `ui.chatCompletion` is on (the default; `false` turns it off) and the sigdb
@@ -219,6 +219,13 @@ only gets copies:
 - operation 3: one replace of the whole line, applied by the UI thread with `EditSetText` only when the field, the
   revision and the expected text still match.
 Game evidence: [docs/re/chat-input.md](../../re/chat-input.md#tab-completion-cursor-node-and-rectangle).
+
+After them: byte 1032 is `chat_completion` (Kiln.Ui's own chat Tab completion, refused from native plugins), and
+`subscribe_pointer_press` at 1040 (0.2.0-dev.30; the table is 1048 bytes; check `header.size` and the pointer):
+`fn(const KilnUiPointerPress*)` once per left or right press over the game window (its raw record and its window message
+are paired), on the window thread, only while Kiln does not capture input and the cursor is not over a Kiln panel; an
+answer of `KILN_UI_POINTER_TAKE` keeps the press from the game, its release always reaches it. A fault in `fn` removes the
+subscription. The core's `kiln.ui.inventory` (slot clicks, `kiln_ui_inventory.h`) is its first user.
 
 ## The overlay's drawing off: kiln.json and a session that turned it off (0.2.0-dev.29.18)
 

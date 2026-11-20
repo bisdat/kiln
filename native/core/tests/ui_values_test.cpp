@@ -26,6 +26,7 @@
 #include "../src/services/ui_values_sources.cpp"
 #include "../src/services/ui_values_lines.cpp"
 #include "../src/services/ui_values_tooltip.cpp"
+#include "../src/services/ui_values_inventory.cpp"
 
 using namespace kiln::uivalues;
 
@@ -58,6 +59,11 @@ KilnUiScreen screen{};
 bool have_screen = true;
 std::map<std::string, uintptr_t> symbols;
 std::map<std::string, int64_t> constants;
+bool pointer_ok = true;                 // kiln.ui offers subscribe_pointer_press
+KilnUiPointerFn pointer_fn = nullptr;   // what the service subscribed
+void* pointer_user = nullptr;
+bool cursor_ok = true;
+float cursor[4] = {50, 50, 1920, 1080};  // x, y, client width, height
 struct Raw {
     uintptr_t target;
     std::string label;
@@ -156,6 +162,28 @@ void install() {
         if (hook_result == KILN_OK) mids.push_back({t, label, fn});
         return hook_result;
     };
+    e.subscribe_pointer = [](KilnUiPointerFn fn, void* user) {
+        if (!pointer_ok) return false;
+        pointer_fn = fn;
+        pointer_user = user;
+        return true;
+    };
+    e.call_click = [](KilnUiSlotClickFn fn, const KilnUiSlotClick* c, void* user) {
+        try {
+            fn(c, user);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    };
+    e.cursor_client = [](float* x, float* y, float* w, float* h) {
+        if (!cursor_ok) return false;
+        *x = cursor[0];
+        *y = cursor[1];
+        *w = cursor[2];
+        *h = cursor[3];
+        return true;
+    };
     // the host stand-in of the SEH guard: a provider "faults" by throwing
     e.call_value = [](KilnUiValueFn fn, const KilnUiProviderContext* c, const KilnUiItemView* v,
                       const KilnUiBarValue* in, KilnUiBarEdit* ed, void* user, KilnResult* rc) {
@@ -235,6 +263,11 @@ void reset() {
     frame_fn = nullptr;
     frame_user = nullptr;
     for (uint32_t l = 0; l < kLists; ++l) set_installer(l, &always_installed);
+    pointer_ok = true;
+    pointer_fn = nullptr;
+    pointer_user = nullptr;
+    cursor_ok = true;
+    kiln::uivalues::clicks_reset_for_tests();
 }
 }  // namespace fake
 
@@ -2050,6 +2083,209 @@ void slots_holders() {
     CHECK(copy(o, 8).slots[0].holder_serial != own, "holder: a new client session starts new serials");
 }
 
+
+// ============================================================================ S5b: slot clicks (kiln.ui.inventory)
+const KilnUiInventoryApi* I() { return inventory_table(); }
+struct ClicksSeen {
+    std::vector<KilnUiSlotClick> got;
+    bool throw_it = false;
+};
+void KILN_CALL on_click(const KilnUiSlotClick* c, void* user) {
+    auto* s = static_cast<ClicksSeen*>(user);
+    if (s->throw_it) throw std::runtime_error("click subscriber fault");
+    s->got.push_back(*c);
+}
+KilnUiPointerPress press(float x, float y, uint32_t button = 1, uint32_t mods = 0) {
+    KilnUiPointerPress p{};
+    p.size = sizeof p;
+    p.button = button;
+    p.mods = mods;
+    p.x = x;
+    p.y = y;
+    p.client_width = 1920;
+    p.client_height = 1080;
+    return p;
+}
+uint32_t do_press(const KilnUiPointerPress& p) { return fake::pointer_fn ? fake::pointer_fn(&p, fake::pointer_user) : 99; }
+KilnUiSlotClickFilter click_filter(uint32_t button, uint32_t mods, uint32_t flags) {
+    KilnUiSlotClickFilter f{};
+    f.size = sizeof f;
+    f.button = button;
+    f.mods = mods;
+    f.flags = flags;
+    return f;
+}
+void prime_clicks() {
+    prime_slots();
+    set_installer(kListClicks, &kiln::uivalues::install_clicks);
+    fake::rows.insert("ui.slots.click");
+    fake::screen.ui_state = KILN_UI_STATE_PLAY;
+    fake::screen.hud_screen = 22;  // a storage chest
+}
+
+void clicks_basics() {
+    prime_clicks();
+    const KilnOwner o = fake::owner("mod:clicks");
+    ClicksSeen ctrl_take, plain, right;
+    auto r = reg_record();
+    auto f = click_filter(1, KILN_UI_MOD_CTRL, KUI_CLICK_TAKE);
+    auto bad2 = click_filter(2, 0, 0), badm = click_filter(1, 8, 0), badf = click_filter(1, 0, 2);
+    auto small = f;
+    small.size = 8;
+    CHECK(I()->subscribe_clicks(o, &bad2, &on_click, nullptr, &r) == KILN_ERR_INVALID_ARGUMENT &&
+              I()->subscribe_clicks(o, &badm, &on_click, nullptr, &r) == KILN_ERR_INVALID_ARGUMENT &&
+              I()->subscribe_clicks(o, &badf, &on_click, nullptr, &r) == KILN_ERR_INVALID_ARGUMENT &&
+              I()->subscribe_clicks(o, &small, &on_click, nullptr, &r) == KILN_ERR_INVALID_ARGUMENT &&
+              I()->subscribe_clicks(0, &f, &on_click, nullptr, &r) == KILN_ERR_INVALID_ARGUMENT &&
+              I()->subscribe_clicks(o, &f, nullptr, nullptr, &r) == KILN_ERR_INVALID_ARGUMENT,
+          "clicks: the middle button, unknown modifiers or flags, a short filter, owner 0, no fn -> INVALID_ARGUMENT");
+    fake::rows.erase("ui.slots.click");
+    CHECK(I()->subscribe_clicks(o, &f, &on_click, &ctrl_take, &r) == KILN_ERR_UNAVAILABLE && !fake::pointer_fn,
+          "clicks: ui.slots.click off -> UNAVAILABLE, no press subscription");
+    fake::rows.insert("ui.slots.click");
+    CHECK(I()->subscribe_clicks(o, &f, &on_click, &ctrl_take, &r) == KILN_OK && r.ok == 1 && fake::pointer_fn &&
+              arm_slots(),
+          "clicks: subscribed; the slot sites and kiln.ui's press subscription went in");
+    auto fp = click_filter(1, 0, 0), fr = click_filter(3, KILN_UI_MOD_CTRL, KUI_CLICK_TAKE);
+    auto r2 = reg_record(), r3 = reg_record();
+    CHECK(I()->subscribe_clicks(o, &fp, &on_click, &plain, &r2) == KILN_OK && r2.ok == 1 &&
+              I()->subscribe_clicks(o, &fr, &on_click, &right, &r3) == KILN_OK && r3.ok == 1,
+          "clicks: two more filters (plain left; Ctrl+right)");
+
+    CHECK(do_press(press(50, 50, 1, KILN_UI_MOD_CTRL)) == KILN_UI_POINTER_PASS,
+          "press: no slot frame yet -> PASS (the game gets it)");
+    FakeSlot a;  // outer {10, 20, 80, 80} units; ppu 1.3333, canvas = client 1920x1080: pixels 13.3..120, 26.7..133
+    g_frame_script = {desc(&a, 0x5000, 2, 0xAA, 900)};
+    ui_frame(1000);
+    CHECK(do_press(press(50, 50, 1, KILN_UI_MOD_CTRL)) == KILN_UI_POINTER_TAKE && ctrl_take.got.empty(),
+          "press: Ctrl+left on the slot -> TAKE (a subscriber asked), delivered only after the next frame");
+    ui_frame(1001);
+    CHECK(ctrl_take.got.size() == 1 && plain.got.empty() && right.got.empty() && ctrl_take.got[0].taken == 1 &&
+              ctrl_take.got[0].slot.client_entity == 900 && ctrl_take.got[0].slot.item == 0xAA &&
+              ctrl_take.got[0].slot.inventory_page == 0x5000 && ctrl_take.got[0].slot.slot_index == 2 &&
+              ctrl_take.got[0].mods == KILN_UI_MOD_CTRL && ctrl_take.got[0].frame == 1000 &&
+              ctrl_take.got[0].screen.hud_screen == 22 && ctrl_take.got[0].size == sizeof(KilnUiSlotClick),
+          "deliver: only the matching filter, with the slot's identity (page, index, item, pide) and the frame");
+    ui_frame(1002);
+    CHECK(ctrl_take.got.size() == 1, "deliver: once");
+    CHECK(do_press(press(50, 50)) == KILN_UI_POINTER_PASS, "press: a plain left click (observe only) -> PASS");
+    ui_frame(1003);
+    CHECK(plain.got.size() == 1 && plain.got[0].taken == 0 && ctrl_take.got.size() == 1,
+          "deliver: the observer gets it, taken 0; the exact modifiers keep Ctrl's filter out");
+    CHECK(do_press(press(50, 50, 1, KILN_UI_MOD_CTRL | KILN_UI_MOD_SHIFT)) == KILN_UI_POINTER_PASS,
+          "press: Ctrl+Shift matches no filter (modifiers are exact) -> PASS");
+    CHECK(do_press(press(500, 500, 1, KILN_UI_MOD_CTRL)) == KILN_UI_POINTER_PASS, "press: off every slot -> PASS");
+    CHECK(do_press(press(50, 50, 3, KILN_UI_MOD_CTRL)) == KILN_UI_POINTER_TAKE, "press: Ctrl+right -> its own filter");
+    ui_frame(1004);
+    CHECK(right.got.size() == 1 && right.got[0].button == 3 && ctrl_take.got.size() == 1, "deliver: the right button");
+
+    // fail closed
+    fake::screen.hud_screen = 1;  // the play view: the hotbar is drawn, a click attacks
+    ui_frame(1005);
+    CHECK(do_press(press(50, 50, 1, KILN_UI_MOD_CTRL)) == KILN_UI_POINTER_PASS, "closed: the play view (HUD 1) -> PASS");
+    fake::screen.hud_screen = 9;
+    ui_frame(1006);
+    CHECK(do_press(press(50, 50, 1, KILN_UI_MOD_CTRL)) == KILN_UI_POINTER_TAKE, "open: the backpack (HUD 9)");
+    ui_frame(1007);
+    fake::ticks += 251;
+    CHECK(do_press(press(50, 50, 1, KILN_UI_MOD_CTRL)) == KILN_UI_POINTER_PASS, "closed: a frame older than 250 ms -> PASS");
+    ui_frame(1008);
+    fake::client.session = 9;
+    CHECK(do_press(press(50, 50, 1, KILN_UI_MOD_CTRL)) == KILN_UI_POINTER_PASS, "closed: another client session -> PASS");
+    fake::client.session = 5;
+    put(g_system, 0x48, 0.0f);  // no usable viewport
+    ui_frame(1009);
+    CHECK(do_press(press(50, 50, 1, KILN_UI_MOD_CTRL)) == KILN_UI_POINTER_PASS, "closed: no usable viewport -> PASS");
+    put(g_system, 0x48, 1.3333f);
+    ui_frame(1010);
+    const size_t before = ctrl_take.got.size();
+    CHECK(T()->unsubscribe(r.handle) == KILN_OK && do_press(press(50, 50, 1, KILN_UI_MOD_CTRL)) == KILN_UI_POINTER_PASS,
+          "unsubscribe: the filter is gone -> PASS");
+    ui_frame(1011);
+    CHECK(ctrl_take.got.size() == before, "unsubscribe: nothing delivered");
+
+    // a subscriber that faults five times is removed
+    plain.throw_it = true;
+    for (int i = 0; i < 5; ++i) {
+        do_press(press(50, 50));
+        ui_frame(1100 + i);
+    }
+    CHECK(do_press(press(50, 50)) == KILN_UI_POINTER_PASS && providers(kListClicks)->size() == 1,
+          "faults: five in a row remove the subscriber (the Ctrl+right one stays)");
+}
+
+void clicks_mapping_and_slot_at() {
+    prime_clicks();
+    const KilnOwner o = fake::owner("mod:map");
+    KilnUiSlotMapping m{};
+    m.size = sizeof m;
+    CHECK(I()->mapping(o, 1920, 1080, &m) == KILN_OK && m.ok == 0 && m.reason == KUI_NO_FRAME,
+          "mapping: no frame yet -> KUI_NO_FRAME (and the slot sites went in)");
+    arm_slots();
+    FakeSlot a, b;
+    b.outer[0] = 100;  // pixels 146.7..253.3
+    g_frame_script = {desc(&a, 0x5000, 0, 0xAA, 900), desc(&b, 0x5000, 1, 0xBB, 901)};
+    ui_frame(2000);
+    CHECK(I()->mapping(o, 1920, 1080, &m) == KILN_OK && m.ok == 1 && m.scale_x == 1.3333f && m.offset_x == 0 &&
+              !(m.flags & KUI_MAP_SCALED) && !(m.flags & KUI_MAP_VERIFIED) && m.frame == 2000,
+          "mapping: a client of the canvas's size -> pixels = units * ppu; never VERIFIED in v1");
+    CHECK(I()->mapping(o, 3840, 2160, &m) == KILN_OK && m.ok == 1 && std::fabs(m.scale_x - 2.6666f) < 1e-3f &&
+              (m.flags & KUI_MAP_SCALED),
+          "mapping: a target twice the canvas -> scaled twice, flagged SCALED");
+    KilnUiSlotHit h{};
+    h.size = sizeof h;
+    CHECK(I()->slot_at(o, 200, 50, 1920, 1080, &h) == KILN_OK && h.ok == 1 && h.slot.item == 0xBB &&
+              h.slot.slot_index == 1 && h.pointer_screen == 1,
+          "slot_at: the slot under a point, and whether the screen takes clicks");
+    CHECK(I()->slot_at(o, 400, 50, 1920, 1080, &h) == KILN_OK && h.ok == 0 && h.reason == KUI_NO_SLOT,
+          "slot_at: between slots -> KUI_NO_SLOT");
+    fake::cursor[0] = 60;
+    CHECK(I()->slot_at(o, -1, -1, 0, 0, &h) == KILN_OK && h.ok == 1 && h.slot.item == 0xAA,
+          "slot_at: x < 0 -> the cursor in the game window");
+    fake::cursor_ok = false;
+    CHECK(I()->slot_at(o, -1, -1, 0, 0, &h) == KILN_OK && h.ok == 0 && h.reason == KUI_NO_SLOT,
+          "slot_at: no game window in front -> KUI_NO_SLOT");
+    fake::client_side = false;
+    CHECK(I()->slot_at(o, 1, 1, 0, 0, &h) == KILN_ERR_UNAVAILABLE && I()->mapping(o, 0, 0, &m) == KILN_ERR_UNAVAILABLE,
+          "server: UNAVAILABLE");
+}
+
+// a click pressed in one client session and not yet delivered when the world is left reaches nobody: its slot's item
+// entity names an item of the old world
+void clicks_across_a_session_change() {
+    prime_clicks();
+    const KilnOwner o = fake::owner("mod:session");
+    ClicksSeen seen;
+    auto r = reg_record();
+    auto f = click_filter(1, 0, KUI_CLICK_TAKE);
+    fake::client.session = 5;
+    CHECK(I()->subscribe_clicks(o, &f, &on_click, &seen, &r) == KILN_OK && r.ok == 1 && arm_slots(),
+          "session: subscribed");
+    FakeSlot a;
+    g_frame_script = {desc(&a, 0x5000, 2, 0xAA, 900)};
+    ui_frame(3000);
+    CHECK(do_press(press(50, 50)) == KILN_UI_POINTER_TAKE, "session: a press on the slot in session 5");
+    fake::client.session = 6;  // the world was left and another joined before the next frame
+    ui_frame(3001);
+    CHECK(seen.got.empty(), "session: the next frame is of another session -> the old click is dropped, not delivered");
+    ui_frame(3002);
+    CHECK(do_press(press(50, 50)) == KILN_UI_POINTER_TAKE, "session: a press in the new session");
+    ui_frame(3003);
+    CHECK(seen.got.size() == 1 && seen.got[0].session == 6, "session: delivered in its own session");
+    fake::client.session = 5;
+}
+
+void clicks_without_kiln_ui() {
+    prime_clicks();
+    fake::pointer_ok = false;  // an older kiln-ui.dll: no subscribe_pointer_press
+    const KilnOwner o = fake::owner("mod:old");
+    auto f = click_filter(1, 0, 0);
+    auto r = reg_record();
+    CHECK(I()->subscribe_clicks(o, &f, &on_click, nullptr, &r) == KILN_ERR_UNAVAILABLE &&
+              std::find(fake::rows_off.begin(), fake::rows_off.end(), "ui.slots.click") != fake::rows_off.end(),
+          "clicks: kiln.ui without presses -> UNAVAILABLE, ui.slots.click reported off");
+}
+
 // ========================================================================== S6: tooltip lines and the details window
 using DetailHookFn = void (*)(void*, uint8_t);
 DetailHookFn g_detail_hook = nullptr;
@@ -2481,6 +2717,10 @@ int main() {
     slots_basics();
     slots_budget_and_nesting();
     slots_holders();
+    clicks_basics();
+    clicks_mapping_and_slot_at();
+    clicks_across_a_session_change();
+    clicks_without_kiln_ui();
     lines_collect();
     lines_window();
     retire_during_dispatch();
