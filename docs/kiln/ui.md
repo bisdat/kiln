@@ -325,9 +325,9 @@ How it behaves:
 - **Budgets and threads** are `Ui.Values`' (above): 16 lines per detail view for all line providers together, text
   kept for the process, providers on the client's main thread inside the game's UI frame, five faults in a row remove
   a provider. A `Ui.Values.TooltipLines` provider stays in Kiln's window only.
-- **Held until the guided checks.** Both rows are held by the client gate (`native/core/gates/equip-tooltips.json`)
-  until `equip.c5` to `equip.c9` pass; `"preview"` in kiln.json lifts them. Without `ui.tooltip.lines`, `AddLines`
-  still works (Item details window); without `ui.tooltip.values`, `AddValues` throws `KilnUnavailableException`.
+- **On for every player** (0.2.0-dev.30: nothing is held; `equip.c5` to `equip.c9` are the guided checks a real game
+  confirms). When a row is down (its sigdb feature missing on a game build, or lowered after a fault), `AddLines`
+  still works (Item details window) and `AddValues` throws `KilnUnavailableException`.
 
 **The tooltip probe** (for the guided client session, not for players): `"tooltipProbe": true` (or a key name) in
 kiln.json, or the environment variable `KILN_TOOLTIP_PROBE=1`, draws a fixed test block through the same path, stepped

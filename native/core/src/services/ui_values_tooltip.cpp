@@ -15,7 +15,7 @@
 // scrolled content list, so the list's own layout places it after the vanilla lines and the scroll extent grows with
 // it. Colours are the game's palette entries (the header's rarity colours). Everything the recipe needs comes from
 // sigdb captures of the description, compact-line, small-text and palette code (sigdb/symbols/client.d/
-// equip-tooltips.json); a missing one leaves the row off and the lines go to Kiln's details window only.
+// equip-tooltips.json in sigdb/symbols/client.d); a missing one leaves the row off and the lines go to Kiln's details window only.
 //
 // Failure: a draw that faults turns the native lines off for the session (one kiln.log line, the row reported off);
 // the details window keeps working. All of this runs on the client's main thread inside ItemDetail; the per-occurrence

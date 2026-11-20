@@ -1,6 +1,6 @@
 # The client gate's list
 
-**0.2.0-dev.29 ships with this list empty.** The owner decided on 2026-11-14 that nothing ships held: every capability
+**0.2.0-dev.30 ships with this list empty too** (owner, 2026-11-20: "nothing held, I will test before release"; the equipment tooltips' `equip-tooltips.json` was removed). **0.2.0-dev.29 ships with this list empty.** The owner decided on 2026-11-14 that nothing ships held: every capability
 0.2.0-dev.28 held (22 rows: world queries and paths, terrain overlays, tool wear, values in the game's UI, the client
 asset catalog, a mod's OnBoot, resource patches and boot VFX on a client, program wraps and replication watching on a
 client, weapon follow-ups, transform scale) is on

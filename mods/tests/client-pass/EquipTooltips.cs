@@ -6,7 +6,7 @@ using static Kiln.Testing.ClientCheckTags;
 namespace ClientPass;
 
 // Equipment wave P8b: Ui.Tooltip, lines and stat numbers inside the game's own item detail view (capabilities
-// ui.tooltip.lines and ui.tooltip.values, held by native/core/gates/equip-tooltips.json until these checks pass).
+// ui.tooltip.lines and ui.tooltip.values; on for every player since 0.2.0-dev.30, these checks confirm them in a real game).
 // equip.c5 lines inside the scrolled content, equip.c6 wrapping and UI scale, equip.c7 colours, equip.c8 screens and the
 // AfterStats place, equip.c9 the stat numbers scaled. Each check registers its own providers, removes them at its end and
 // expects that the game called them. Orders 7000-7009.
