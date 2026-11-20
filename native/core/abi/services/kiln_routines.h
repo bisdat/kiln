@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-/* kiln.routines (kiln-routines.dll), since 0.2.0-dev.28: a villager follows a day plan.
+/* kiln.routines (kiln-routines.dll), since 0.2.0-dev.31: a villager follows a day plan.
  *
  * A plan is data: windows of the game day, each with one of the game's own villager tasks (idle, roam, sit, inspect,
  * sleep, or "vanilla": the game's own choice), and a fallback. The service hooks the villager worker and its task

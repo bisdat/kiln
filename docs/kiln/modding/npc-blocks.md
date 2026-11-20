@@ -248,7 +248,8 @@ with slots. `Was` keeps the ids through a rename.
 | A body or animation with files written in C# | Data files only | A source generator that hands the build the block's cook steps: M |
 | Dodges and the base's other motions on a body of your own | Off (taunt, blocking, call for help, idle turns, sleep, spawn sequence) | Copies onto your states, as hit reactions are: S per kind |
 | `Sight` with line of sight in a brain's own perception | Voxels only, on request (`behaviour.perception`, dev.28): terrain and buildings block, props and creatures do not | A collider ray: L |
-| A new FSM state, faction relations, villager routines | Not built | Hooks on `HandleCondition`/`StateDispatch`, the faction leaf, `DecideTask`: M each |
+| A new FSM state, faction relations | Not built | Hooks on `HandleCondition`/`StateDispatch`, the faction leaf: M each |
+| Villager routines | Built in dev.31: an NPC block's `routine`, or `Routines.Assign` ([routines](../services/routines.md)) | - |
 | Ragdolls | A `Dead` state | Client physics: XL, not planned |
 
 ## Test

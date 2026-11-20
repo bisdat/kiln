@@ -6,14 +6,14 @@ public sealed partial class KilnHarness
     private HarnessRoutines? _routines;
 
     /// <summary>The kit's fake kiln.routines of this harness: the game time and the villagers' decisions a test plays,
-    /// for the routines a mod assigns with <c>Routines.Assign</c>. Since 0.2.0-dev.28.</summary>
+    /// for the routines a mod assigns with <c>Routines.Assign</c>. Since 0.2.0-dev.31.</summary>
     public HarnessRoutines Routines => _routines ??= new HarnessRoutines(this);
 }
 
 /// <summary>
 /// The fake kiln.routines of a harness (<see cref="KilnHarness.Routines"/>): Kiln.Blocks' own code (<c>Routines.Assign</c>,
 /// <c>Remove</c>, <c>Resume</c>, <c>Inspect</c>, <c>RoutineAssignmentChangedEvent</c>, <c>RoutineTaskChangedEvent</c>)
-/// runs on it. Since 0.2.0-dev.28.
+/// runs on it. Since 0.2.0-dev.31.
 /// </summary>
 /// <remarks>
 /// <para><b>Modelled.</b> One routine per villager (its NpcId): the first mod that assigns one holds it, another mod's

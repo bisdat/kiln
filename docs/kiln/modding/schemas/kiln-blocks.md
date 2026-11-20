@@ -1438,6 +1438,7 @@ One window: from startMinute up to, not including, endMinute, in minutes of the 
 | `priority` | integer |  | Among the windows that cover a minute the highest wins (default 0). min -2147483648 max 2147483647 |
 | `startMinute` | integer |  | The first minute of the window (default 0). min 0 max 1439 |
 | `task` | [routineTask](#routinetask) | yes |  |
+
 ## rule
 
 On a trigger, every so often, when its conditions hold, do something.

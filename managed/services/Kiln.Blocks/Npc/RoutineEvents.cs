@@ -25,8 +25,11 @@ public sealed class RoutineAssignmentChangedEvent : KilnEvent
     public RoutineSnapshot? Before { get; }
     /// <summary>The assignment after it (state <see cref="RoutineAssignmentState.Removed"/> for a removal).</summary>
     public RoutineSnapshot After { get; }
-    /// <summary>What happened: <c>Assigned</c>, <c>Replaced</c>, <c>Resumed</c>, <c>Removed</c>, <c>OwnerUnloaded</c>,
-    /// <c>WorldStopped</c>.</summary>
+    /// <summary>What happened: <c>Assigned</c>, <c>Replaced</c>, <c>ManualSuspended</c> (a Reset or GoTo command reached the
+    /// villager), <c>Resumed</c>, <c>Removed</c>, <c>OwnerUnloaded</c>, <c>WorldStopped</c>; at a world's start after a restart
+    /// <c>Migrated</c> (the plan's Version was raised), <c>VersionNotBumped</c> or <c>Downgrade</c> (refused, the assignment kept
+    /// as <see cref="RoutineAssignmentState.VersionMismatch"/>), <c>OwnerMissing</c>, <c>DefinitionMissing</c> or
+    /// <c>OtherWorld</c> (removed). A plain rebind after a restart sends no event.</summary>
     public string Reason { get; }
     /// <summary>The world is stopping: see the remarks.</summary>
     public bool Teardown { get; }
