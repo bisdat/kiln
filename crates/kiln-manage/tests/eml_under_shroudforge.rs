@@ -859,6 +859,50 @@ fn runtime_eml_refuses_play_once_with_the_loader_conflict_message() {
     assert!(!s.game.join("kiln/play-once.ini").exists());
 }
 
+/// sfi V8.9: the compatibility entry render adds to mods.shroudforge for a runtime EML package (and kiln-eml's route
+/// switched off for it) are the launcher's own, not a change of ShroudForge's fixed folder: play-once of the active
+/// selection runs, a different selection is still refused.
+#[test]
+fn play_once_of_a_runtime_eml_profile_is_not_refused_by_its_own_compatibility_entry() {
+    for with_sf_mod in [false, true] {
+        let s = setup(&format!("runtime-once-{with_sf_mod}"));
+        let mut p = runtime_eml(&s, "runtime");
+        if with_sf_mod { p.mods.shroudforge = vec![pm(&s.sf, true)]; }
+        let p = profile::save(&s.dirs, &p).unwrap();
+        let install = runtime_install(&s.game);
+        profile::activate(&s.dirs, &p.id, &install).unwrap();
+        let active: profile::ProfileFile = serde_json::from_slice(&std::fs::read(s.game.join("kiln/profile.json")).unwrap()).unwrap();
+        assert!(active.mods.shroudforge.iter().any(|m| m.id == "quiver" && m.enabled), "the compatibility entry is there");
+        let once = profile::write_once(&s.dirs, &p.id, &install).unwrap();
+        assert_eq!(once.eml_runtime, ["quiver"]);
+        assert!(s.game.join("kiln/profile.once.json").is_file());
+        // A selection that differs in ShroudForge's folder still needs an activation: with a ShroudForge mod on, Kiln
+        // hosts ShroudForge for the single start too, and it would run the switched-on copy of the package that is off.
+        let mut off = profile::create(&s.dirs, "off", None).unwrap();
+        off.mods = p.mods.clone();
+        off.mods.eml[0].enabled = false;
+        let off = profile::save(&s.dirs, &off).unwrap();
+        if with_sf_mod {
+            let e = profile::write_once(&s.dirs, &off.id, &install).unwrap_err();
+            assert_eq!(e.code, kiln_manage::ErrorCode::Unsupported, "{e:?}");
+        } else {
+            // nothing hosts ShroudForge for that start (as before the runtime packages: an EML switch is the profile's)
+            assert!(profile::write_once(&s.dirs, &off.id, &install).unwrap().eml_runtime.is_empty());
+        }
+        let mut sf_changed = profile::create(&s.dirs, "sf-changed", None).unwrap();
+        sf_changed.mods = p.mods.clone();
+        sf_changed.mods.shroudforge = if with_sf_mod { Vec::new() } else { vec![pm(&s.sf, true)] };
+        let sf_changed = profile::save(&s.dirs, &sf_changed).unwrap();
+        let e = profile::write_once(&s.dirs, &sf_changed.id, &install).unwrap_err();
+        assert_eq!(e.code, kiln_manage::ErrorCode::Unsupported, "{e:?}");
+        // and the other way round: the active profile has the package off, so ShroudForge's folder has no switched-on
+        // copy of it; a single start that needs it there is refused, not started without it
+        profile::activate(&s.dirs, &off.id, &install).unwrap();
+        let e = profile::write_once(&s.dirs, &p.id, &install).unwrap_err();
+        assert_eq!(e.code, kiln_manage::ErrorCode::Unsupported, "{e:?}");
+    }
+}
+
 #[test]
 fn patch_only_eml_and_disabled_runtime_eml_keep_standalone_loader_behavior() {
     let s = setup("runtime-refuse-controls");
