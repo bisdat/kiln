@@ -2721,8 +2721,41 @@
   ],
   "upcoming": [
     {
-      "version": "0.2.0-dev.30",
+      "version": "0.2.0-dev.29.23",
       "status": "next",
+      "title": "A safer save editor",
+      "summary": "The launcher's save editor in your language, read-only when it can't read a save for sure, other mods' hidden items shown as locked tiles, and the game's own skill-point count.",
+      "patch": true,
+      "features": [
+        {
+          "title": "The save editor in your language",
+          "text": "The editor's texts follow the launcher's 11 languages; item and skill names stay the game's.",
+          "area": "launcher",
+          "kind": "improved"
+        },
+        {
+          "title": "No guessing at a backpack",
+          "text": "A save the editor can't read for sure, or one holding another mod's data, opens read-only with the reason, so nothing is written at a guessed place.",
+          "area": "launcher",
+          "kind": "fix"
+        },
+        {
+          "title": "Other mods' hidden items as locked tiles",
+          "text": "An item Kiln doesn't know shows as a locked tile with a note naming its slot, and is kept untouched.",
+          "area": "launcher",
+          "kind": "improved"
+        },
+        {
+          "title": "The game's own skill-point count",
+          "text": "Available skill points are worked out the way the game does at each load, and a skill tree that spends more than that is not saved.",
+          "area": "launcher",
+          "kind": "fix"
+        }
+      ]
+    },
+    {
+      "version": "0.2.0-dev.30",
+      "status": "planned",
       "title": "ShroudForge on Kiln, equipment, tasks and the game's UI",
       "summary": "ShroudForge and EML mods on Kiln's own engine, an equipment API for item rarity, values, tooltips and upgrades, hooks into the game's own UI and client, and Kiln tasks checked in real games and no longer experimental.",
       "note": "No date: this release ships when it is ready. Items marked as waiting for a game test are built and checked, but not yet seen in a real game. Fixes keep coming as 0.2.0-dev.29 patches until then.",
