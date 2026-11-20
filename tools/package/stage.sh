@@ -13,6 +13,7 @@
 # Kiln.Admin, Kiln.Game or the samples that fails to build stops the stage, naming it, and the staged tree must hold
 # every plugin DLL (tools/release/lib/plugins.py). --allow-missing (local dev only; refused when KILN_RELEASE_BUILD=1,
 # as in release.sh) warns and leaves such a part out instead.
+# KILN_SF_CACHE=DIR: keep ShroudForge's built runtime by the hash of its inputs and reuse it (verified by sha256).
 # KILN_NATIVE_PREBUILT=DIR: the native CMake targets' bin/ built elsewhere with the same toolchain (release.sh,
 # KILN_BUILD_REMOTE=win1): copied in, and only what it lacks builds here.
 # KILN_OUT (default <repo>/.out/package) holds the build; the .NET runtime comes from tools/package/fetch-dotnet.sh.
@@ -51,6 +52,40 @@ built() { # name command...
 }
 
 "$repo/tools/package/fetch-dotnet.sh" >/dev/null
+# the ShroudForge cache (KILN_SF_CACHE, below): key, restore (verified), store
+sf_cache_key() {
+  local sfroot=${KILN_SHROUDFORGE_SRC:-$repo/third_party/shroudforge} xw=${XWIN_ROOT:-$HOME/.cache/cargo-xwin/xwin} work
+  work=$(dirname "$out")
+  {
+    echo "sf-cache 1"
+    (cd "$sfroot" && find . -type f -not -path './.git/*' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+    rustc -vV; cargo xwin --version; clang-cl --version | head -1; cmake --version | head -1; ninja --version
+    node --version; npm --version
+    (cd "$xw" && find crt sdk -type f -not -path '*/aarch64/*' -not -path '*/arm64/*' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+    printf '%s' "${CARGO_ENCODED_RUSTFLAGS:-}" | sed -e "s|$work|<work>|g" -e "s|$HOME|<home>|g" -e "s|$repo|<src>|g"
+  } 2>&1 | sha256sum | cut -c1-24
+}
+sf_cache_restore() { # key: 0 when the cached component is complete and every file matches its recorded sha256
+  local c=$KILN_SF_CACHE/$1
+  [[ -s $c/MANIFEST.sha256 && -d $c/shroudforge ]] || return 1
+  [[ $(cd "$c/shroudforge" && find . -type f | wc -l) == $(wc -l <"$c/MANIFEST.sha256") ]] || return 1
+  (cd "$c/shroudforge" && sha256sum --quiet -c ../MANIFEST.sha256) >/dev/null 2>&1 || return 1
+  rm -rf -- "$out/shroudforge-build/shroudforge"
+  mkdir -p "$out/shroudforge-build"
+  cp -a "$c/shroudforge" "$out/shroudforge-build/shroudforge"
+  (cd "$out/shroudforge-build/shroudforge" && sha256sum --quiet -c "$c/MANIFEST.sha256") >/dev/null 2>&1 || return 1
+  if [[ -n ${SOURCE_DATE_EPOCH:-} ]]; then find "$out/shroudforge-build/shroudforge" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +; fi
+}
+sf_cache_store() { # key
+  local c=$KILN_SF_CACHE/$1 tmp
+  [[ -d $out/shroudforge-build/shroudforge ]] || return 1
+  [[ -d $c ]] && return 0
+  mkdir -p "$KILN_SF_CACHE"
+  tmp=$(mktemp -d "$KILN_SF_CACHE/.store.XXXXXX")
+  cp -a "$out/shroudforge-build/shroudforge" "$tmp/shroudforge"
+  (cd "$tmp/shroudforge" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) >"$tmp/MANIFEST.sha256"
+  mv -T -- "$tmp" "$c" 2>/dev/null || rm -rf -- "$tmp"
+}
 if ((build)); then
   # The Rust parts that need nothing from the native or managed builds (kiln-eml, Enshwick's loader, ShroudForge's
   # runtime) build in the background meanwhile, each into its own log; their results are collected below, with the same
@@ -67,8 +102,22 @@ if ((build)); then
   # Enshwick's own loader (MIT), which kiln-enshwick hosts: built from the pinned upstream tag + commit
   env CARGO_TARGET_DIR="$out/cargo-enshwick" "$repo/native/plugins/enshwick/tools/build-runtime.sh" --out "$out/enshwick-runtime" \
     >"$logs/enshwick-loader.log" 2>&1 & bg_enshwick=$!
-  # ShroudForge runtime: a separate GPL-3 component built from the frostdev-ops/shroudforge fork (staged below)
-  "$sfsrc/kiln/build.sh" "$out/shroudforge-build" >"$logs/shroudforge.log" 2>&1 & bg_sf=$!
+  # ShroudForge runtime: a separate GPL-3 component built from the frostdev-ops/shroudforge fork (staged below).
+  # KILN_SF_CACHE=DIR: its staged output is kept in DIR/<key>, the key a hash of everything the build reads (the fork's
+  # whole source tree as exported, the Rust, cargo-xwin, clang, CMake, Ninja, Node and npm versions, the xwin CRT/SDK's
+  # content, the Rust flags with this build's folders taken out); a hit is used only when every file still matches the
+  # sha256 recorded when it was stored, and gets this build's file times, as the build gives them.
+  sf_key="" sf_hit=0
+  if [[ -n ${KILN_SF_CACHE:-} ]]; then
+    sf_key=$(sf_cache_key) || sf_key=""
+    if [[ -n $sf_key ]] && sf_cache_restore "$sf_key"; then
+      sf_hit=1
+      echo "stage: ShroudForge runtime from the cache ($KILN_SF_CACHE/$sf_key)" >&2
+    fi
+  fi
+  if ((!sf_hit)); then
+    "$sfsrc/kiln/build.sh" "$out/shroudforge-build" >"$logs/shroudforge.log" 2>&1 & bg_sf=$!
+  fi
   collect() { # name pid: 0 when the background build succeeded, else its log's tail and 1
     if wait "$2"; then return 0; fi
     tail -25 "$logs/$1.log" >&2
@@ -122,10 +171,12 @@ if ((build)); then
   collect enshwick-loader "$bg_enshwick" \
     || miss "Enshwick loader (enshwick.dll for kiln-enshwick) failed to build (log: $logs/enshwick-loader.log)"
   bg_enshwick=""
-  sf_rc=0; collect shroudforge "$bg_sf" || sf_rc=1
+  sf_rc=0
+  if [[ -n $bg_sf ]]; then collect shroudforge "$bg_sf" || sf_rc=1; fi
   bg_sf=""
   trap - EXIT
   ((sf_rc == 0)) || die "ShroudForge runtime build failed (log: $logs/shroudforge.log)"
+  if ((!sf_hit)) && [[ -n $sf_key ]]; then sf_cache_store "$sf_key" || warn "could not store the ShroudForge runtime in $KILN_SF_CACHE"; fi
 fi
 bin=$out/cmake/bin
 [[ -f $bin/dinput8.dll && -f $bin/kiln-core.dll && -f $out/host/Kiln.Host.dll ]] || die "no Kiln build in $out (run without --no-build)"
