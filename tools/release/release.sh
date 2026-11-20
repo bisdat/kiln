@@ -69,6 +69,12 @@
 # KILN_API_BASELINE: the last release's Kiln.Api .nupkg (or it unzipped) for pack.sh's API compat gate; unset: a loud
 #   warning, at the start and in the closing text, and the release goes on.
 # Builds run one at a time (they share Cargo's build directory); KILN_RELEASE_NICE=1 runs them at the lowest priority.
+# The sample mods build in one MSBuild run (the shared projects once, the samples side by side), zipped one by one; when
+#   that run fails, each sample builds alone as before and a failing one is left out.
+# KILN_BUILD_REMOTE=win1: the sample mods build on kiln-win1 (ssh kiln-win1, the owner's Windows PC; lib/remote-win1.sh)
+#   while this machine builds the rest, and come back as output folders that are zipped here like a local build's. Same
+#   .NET SDK version there; nothing signed or secret goes there. A failed or unreachable win1 means a local build of the
+#   samples (noted in the log), never a missing sample. Off by default.
 # NuGet: the builds restore into a private package cache, $work/nuget-packages (KILN_RELEASE_NUGET_PACKAGES), never
 #   ~/.nuget/packages: a trial run of a version leaves no kiln.* packages of it behind for later local builds.
 set -euo pipefail
@@ -168,7 +174,12 @@ if [[ -e $out && -n $(ls -A "$out" 2>/dev/null) ]]; then
   rm -rf "$out"
 fi
 mkdir -p "$out" "$work"
-cleanup_release() { rm -rf -- "$work/appimage-root"; }
+remote_pid=""
+cleanup_release() {
+  rm -rf -- "$work/appimage-root"
+  # the kiln-win1 sample build (KILN_BUILD_REMOTE), when the release stops before it is collected
+  if [[ -n $remote_pid ]]; then kill "$remote_pid" 2>/dev/null || true; fi
+}
 trap cleanup_release EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -400,6 +411,33 @@ else
   note "Linux files: built in $image ($KILN_LINUX_IMAGE); cargo target $lin_target"
 fi
 
+# ---------------------------------------------------------------- sample mods: projects, output folders, kiln-win1
+# The sample projects zipped from their output folders (a sample on Kiln.Sdk packs itself, below) and each one's
+# OutDir, in one MSBuild run (lib/sample-outdirs.proj). With KILN_BUILD_REMOTE=win1 they build there from now on.
+remote=${KILN_BUILD_REMOTE:-}
+[[ -z $remote || $remote == win1 ]] || die "KILN_BUILD_REMOTE=$remote: the only remote builder is win1"
+samples_tsv=$work/samples-outdirs.tsv
+: >"$samples_tsv"
+if ((!launcher_only)); then
+  : >"$work/samples-projects.txt"
+  for proj in "$src"/mods/samples/*/*.csproj; do grep -q 'Sdk="Kiln.Sdk' "$proj" || printf '%s\n' "$proj" >>"$work/samples-projects.txt"; done
+  if [[ -s $work/samples-projects.txt ]]; then
+    dotnet msbuild "$here/lib/sample-outdirs.proj" -nologo -t:Show -p:KilnSampleList="$work/samples-projects.txt" \
+      -p:ArtifactsPath="$KILN_OUT/dotnet" 2>>"$log" | awk -F'|' '/KILN-OUTDIR\|/ {print $2 "\t" $3}' >"$samples_tsv" \
+      || die "cannot read the sample projects' output folders (lib/sample-outdirs.proj; log: $log)"
+    [[ $(wc -l <"$samples_tsv") == $(wc -l <"$work/samples-projects.txt") ]] \
+      || die "the sample projects' output folders: $(wc -l <"$samples_tsv") of $(wc -l <"$work/samples-projects.txt") (lib/sample-outdirs.proj)"
+    while IFS=$'\t' read -r proj o; do
+      [[ $o == "$KILN_OUT/dotnet/"* ]] || die "$proj: unexpected output folder '$o'"
+    done <"$samples_tsv"
+  fi
+  if [[ $remote == win1 && -s $samples_tsv ]]; then
+    step "sample mods: building on kiln-win1 meanwhile (lib/remote-win1.sh; log $work/remote-win1.log)"
+    "$lib/remote-win1.sh" samples "$src" "$work/remote-win1" "$samples_tsv" >"$work/remote-win1.log" 2>&1 &
+    remote_pid=$!
+  fi
+fi
+
 # ---------------------------------------------------------------- 3. dependencies, command-line tools
 step "dependencies (bun, npm)"
 (cd "$src/launcher" && quiet low bun install --frozen-lockfile)
@@ -571,19 +609,11 @@ rm -rf "$work/samples" && mkdir -p "$work/samples"
 skipped_samples=() not_mods=()
 # a sample on Kiln.Sdk packs itself (KilnPack); an older one builds its output folder (a deployable mod folder), which
 # is zipped the way KilnPack does: <id>-<version>.zip holding <id>/, without the shared Kiln.* assemblies, *.deps.json
-# and cooked game files
-pack_folder() { # project
-  local proj=$1 o
-  # The project's own output folder, not `-o`: -o is a global property, so every project the build references writes
-  # there too (in repository mode a Blocks sample references the bake, Kiln.Sdk.Bake with Kiln.TestKit, and xunit's
-  # assemblies ended up in 21 sample zips of the 0.2.0-dev.30 trial). Emptied first: the work folder is reused.
-  o=$(dotnet msbuild "$proj" -getProperty:OutDir -p:Configuration=Release -p:ArtifactsPath="$KILN_OUT/dotnet" 2>>"$log") || return 1
-  o=${o%/}
-  [[ -n $o && $o == "$KILN_OUT/dotnet/"* ]] || { echo "release: $proj: unexpected output folder '$o'" >>"$log"; return 1; }
-  rm -rf "$o"
-  low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo >>"$log" 2>&1 || return 1
-  [ -f "$o/kiln.mod.json" ] || return 2   # a library or test project of a sample (SampleLib.Api): no mod to zip
-  python3 - "$o" "$work/samples" <<'PY'
+# and cooked game files. zip_mod_folder FOLDER: 2 when it holds no kiln.mod.json (a library or test project of a sample,
+# SampleLib.Api), 3 when it holds test assemblies.
+zip_mod_folder() {
+  [ -f "$1/kiln.mod.json" ] || return 2
+  python3 - "$1" "$work/samples" <<'PY'
 import json, os, re, sys, zipfile
 o, dest = sys.argv[1:]
 text = re.sub(r"^\s*//.*$", "", open(os.path.join(o, "kiln.mod.json"), encoding="utf-8").read(), flags=re.M)
@@ -604,6 +634,42 @@ with zipfile.ZipFile(os.path.join(dest, f"{mid}-{ver}.zip"), "w", zipfile.ZIP_DE
             z.write(os.path.join(d, n), f"{mid}/{rel}")
 PY
 }
+# The project's own output folder, not `-o`: -o is a global property, so every project the build references writes
+# there too (in repository mode a Blocks sample references the bake, Kiln.Sdk.Bake with Kiln.TestKit, and xunit's
+# assemblies ended up in 21 sample zips of the 0.2.0-dev.30 trial). Emptied first: the work folder is reused.
+declare -A sample_out=()
+while IFS=$'\t' read -r proj o; do sample_out[$proj]=${o%/}; done <"$samples_tsv"
+pack_folder() { # project: builds it alone, then zips its output folder
+  local proj=$1 o=${sample_out[$1]:-}
+  [[ -n $o ]] || return 1
+  rm -rf "$o"
+  low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo >>"$log" 2>&1 || return 1
+  zip_mod_folder "$o"
+}
+# the output folders to zip: kiln-win1's (KILN_BUILD_REMOTE=win1), else one local build of every sample
+declare -A sample_built=()
+if [[ -n $remote_pid ]]; then
+  rrc=0; wait "$remote_pid" || rrc=$?
+  remote_pid=""
+  cat "$work/remote-win1.log" >>"$log"
+  if ((rrc == 0)) && [[ -f $work/remote-win1/ok ]]; then
+    for proj in "${!sample_out[@]}"; do sample_built[$proj]=$work/remote-win1/out/${sample_out[$proj]#"$KILN_OUT/dotnet/"}; done
+    note "sample mods: built on kiln-win1 ($(grep -o 'dotnet build rc=0 in [0-9]* s' "$work/remote-win1.log" || true))"
+  else
+    note "sample mods: the kiln-win1 build failed (exit $rrc, $work/remote-win1.log): building them here"
+  fi
+fi
+if ((!${#sample_built[@]})) && [[ -s $samples_tsv ]]; then
+  for proj in "${!sample_out[@]}"; do rm -rf "${sample_out[$proj]}"; done
+  printf '<Solution>\n' >"$work/samples.slnx"
+  while IFS=$'\t' read -r proj o; do printf '  <Project Path="%s" />\n' "$proj" >>"$work/samples.slnx"; done <"$samples_tsv"
+  printf '</Solution>\n' >>"$work/samples.slnx"
+  if low dotnet build "$work/samples.slnx" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo >>"$log" 2>&1; then
+    for proj in "${!sample_out[@]}"; do sample_built[$proj]=${sample_out[$proj]}; done
+  else
+    note "sample mods: the one build of all samples failed: building each alone (the failing ones are left out)"
+  fi
+fi
 # (the loop's variable is not `name`: that is the release's name, used for the files and links below)
 for proj in "$src"/mods/samples/*/*.csproj; do
   sample=$(basename "$proj" .csproj)
@@ -611,7 +677,9 @@ for proj in "$src"/mods/samples/*/*.csproj; do
     low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo -t:KilnPack \
       -p:KilnPackageOutputPath="$work/samples/" >>"$log" 2>&1 || skipped_samples+=("$sample")
   else
-    rc=0; pack_folder "$proj" 2>>"$log" || rc=$?
+    rc=0
+    if [[ -n ${sample_built[$proj]:-} ]]; then zip_mod_folder "${sample_built[$proj]}" 2>>"$log" || rc=$?
+    else pack_folder "$proj" 2>>"$log" || rc=$?; fi
     ((rc == 2)) && not_mods+=("$sample")
     ((rc == 1)) && skipped_samples+=("$sample")
     ((rc == 3)) && die "sample $sample: test assemblies in its zip's files (log: $log)"
