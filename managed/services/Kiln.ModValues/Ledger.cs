@@ -60,7 +60,8 @@ internal sealed class Entry
 
 internal sealed class ValueRecord
 {
-    public int Schema { get; set; } = 1;
+    /// <summary>1; a stored object without it is not a record of ours (another writer used the reserved key).</summary>
+    public int Schema { get; set; }
 
     [JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)]
     public ulong PartitionRevision { get; set; }
@@ -100,7 +101,7 @@ internal sealed class Ledger(Registry defs, IValueStore store, Func<CharacterKey
     internal ValueRecord? Load(Partition p, CharacterKey c, string owner)
     {
         var json = Store.Read(p, c, owner);
-        if (json is null) return new ValueRecord();
+        if (json is null) return new ValueRecord { Schema = 1 };
         try
         {
             var r = JsonSerializer.Deserialize<ValueRecord>(json, Json);
@@ -379,7 +380,7 @@ internal sealed class Ledger(Registry defs, IValueStore store, Func<CharacterKey
                 Store.Write(Partition.Projection, c, owner, EmptyJson);
     }
 
-    private static readonly string EmptyJson = JsonSerializer.Serialize(new ValueRecord(), Json);
+    private static readonly string EmptyJson = JsonSerializer.Serialize(new ValueRecord { Schema = 1 }, Json);
 
     /// <summary>A client's carried offer for a live character: per entry, rescale, clamp, then the exact maximum of
     /// the canonical value and the offered one (never a sum). Valid entries commit together; the rest are rejected

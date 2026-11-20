@@ -134,7 +134,8 @@ public sealed class StreamTests
             p.Server.Pump(p.Now, () => p.Rig.Ledger.Visible(p.A), m => p.ToClient.Add(m));
             p.Now += TimeSpan.FromSeconds(1);
         }
-        var parts = p.ToClient.OfType<ModValuesWire.StatePart>().ToList();
+        var all = p.ToClient.OfType<ModValuesWire.StatePart>().ToList();
+        var parts = all.Take(all[0].Parts).ToList();  // the first round (the server retried the unacknowledged transfer)
         p.Client.OnPart(parts[0]);
         p.Client.OnPart(parts[0]);
         Assert.Empty(p.ToServer);
