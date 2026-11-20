@@ -4,7 +4,7 @@
 // Chest joint) and a creature wearing a three-link pendant (a chain). What the code can see is asserted: the fixture is cooked, and the game's cloth
 // and chain code ran (the fixture's read-only counts on the sigdb anchors models/…). What only a player can judge is asked: the pins hold, the
 // loose parts move without exploding, the seam stays joined, the collider sits where it should, and nothing is left behind.
-// Opens modelcook.cloth and modelcook.chains2 (native/core/gates/dev28-16e-cloth-chains.json).
+// Confirms modelcook.cloth and modelcook.chains2 (on since 0.2.0-dev.31, never held: NeedOpen passes unless a release holds them again).
 using System.Text.Json;
 using Kiln;
 using Kiln.Testing;
@@ -28,7 +28,7 @@ public sealed partial class ClientPassMod
     private static long Grew(Dictionary<string, long> before, Dictionary<string, long> after, string key) =>
         after.GetValueOrDefault(key) - before.GetValueOrDefault(key);
 
-    [ClientCheck("16e-cc16e", "Cloth and chains: a banner, a cape and a pendant cooked by Kiln hang and swing", Area = "Models", Since = Dev30,
+    [ClientCheck("16e-cc16e", "Cloth and chains: a banner, a cape and a pendant cooked by Kiln hang and swing", Area = "Models", Since = Dev31,
         Tags = [Visual], Needs = ClientCheckNeeds.Hosted, Order = ClothChainsOrder)]
     public async Task ClothAndChainsOnScreen(CheckContext c)
     {

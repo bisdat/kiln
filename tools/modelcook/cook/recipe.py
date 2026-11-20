@@ -40,8 +40,8 @@ A mod with no assets/cook.json of modelcook's still has those: looks_recipe() is
 cook-report.looks.json.
 
 Cloth and bone chains (cook/physics.py, docs/kiln/modding/models.md#physics): the mod's assets/physics.json names them per model file (and a
-body block's "cloth" and "chains" its model's), and the model step of that file writes them. They need cook features that are off until the game has been seen to show them right (cook/features.py):
-`"experimental": ["modelcook.cloth", "modelcook.chains2"]` turns them on for this mod, with one warning line. A model with physics whose
+body block's "cloth" and "chains" its model's), and the model step of that file writes them. They need the cook features modelcook.cloth and modelcook.chains2 (cook/features.py), on since 0.2.0-dev.31; while a release holds one,
+`"experimental": ["modelcook.cloth", "modelcook.chains2"]` turns it on for this mod, with one warning line. A model with physics whose
 feature is off, and physics for a model no step cooks, are refused by name.
 
 A step may name its own cooker with `"tool"` (default: the file's `tool`), so one recipe can cook models and sounds:

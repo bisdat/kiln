@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Physics format 1 input (cook/physics.py) and the cook's feature rows (cook/features.py), without game files: the banner sidecar
 (tests/fixtures/banner, synthetic: the research's reference banner) parses, each refusal names its field, the mesh rules of
-docs/kiln/modding/models.md#physics hold on small hand-made primitives, and the feature rows that wait for a game test are the client gate's entries too.
+docs/kiln/modding/models.md#physics hold on small hand-made primitives, the feature rows are on (each naming its guided check), and a row that is
+held is refused by name and is a client gate entry too.
 
     python3 -m unittest discover -s tools/modelcook/tests -p test_physics_input.py
 """
@@ -12,9 +13,10 @@ import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))
+sys.path[:0] = [str(HERE), str(HERE.parent)]
 
 from cook import features as F, physics as P  # noqa: E402
+from heldrows import held  # noqa: E402
 
 BANNER = HERE / "fixtures" / "banner"
 GATES = HERE.parent.parent.parent / "native" / "core" / "gates"
@@ -310,16 +312,37 @@ class MeshRules(unittest.TestCase):
 
 
 class FeatureRows(unittest.TestCase):
-    def test_the_rows_and_their_reason(self):
+    def test_the_rows_are_on_and_name_their_check(self):
+        """Nothing ships held (0.2.0-dev.31): both rows on without the recipe key; 16e-cc16e is still the check that confirms them."""
         self.assertEqual([f.name for f in F.ROWS], ["modelcook.cloth", "modelcook.chains2"])
         for f in F.ROWS:
-            self.assertFalse(f.default)
-            self.assertEqual(f.reason, "game test pending: 16e-cc16e")
-            self.assertFalse(F.is_on(f.name))
-            self.assertTrue(F.is_on(f.name, {f.name}))
-        self.assertFalse(F.is_on("modelcook.cloth", {"modelcook.chains2"}))
+            self.assertTrue(f.default)
+            self.assertIsNone(f.reason)
+            self.assertEqual(f.checks, ("16e-cc16e",))
+            self.assertTrue(F.is_on(f.name))
+            F.require(f.name, frozenset(), "assets/physics.json")
+        self.assertIsNone(F.warning(frozenset()))
+        self.assertIsNone(F.warning({"modelcook.cloth", "modelcook.chains2"}), "the key naming rows that are on says nothing")
+        self.assertEqual(F.table(), [{"name": "modelcook.cloth", "default": True, "reason": None, "checks": ["16e-cc16e"]},
+                                     {"name": "modelcook.chains2", "default": True, "reason": None, "checks": ["16e-cc16e"]}])
         with self.assertRaises(KeyError):
             F.is_on("modelcook.sleeves")
+
+    def test_a_held_row_and_its_reason(self):
+        with held():
+            for f in F.ROWS:
+                self.assertFalse(f.default)
+                self.assertEqual(f.reason, "game test pending: 16e-cc16e")
+                self.assertFalse(F.is_on(f.name))
+                self.assertTrue(F.is_on(f.name, {f.name}))
+            self.assertFalse(F.is_on("modelcook.cloth", {"modelcook.chains2"}))
+        with held("modelcook.chains2"):
+            self.assertTrue(F.is_on("modelcook.cloth"))
+            self.assertFalse(F.is_on("modelcook.chains2"))
+        self.assertTrue(F.is_on("modelcook.chains2"), "the hold ends with the test")
+        with self.assertRaises(KeyError):
+            with held("modelcook.sleeves"):
+                pass
 
     def test_the_recipe_key(self):
         self.assertEqual(F.experimental({"format": 1}), frozenset())
@@ -329,7 +352,8 @@ class FeatureRows(unittest.TestCase):
         with self.assertRaisesRegex(F.FeatureError, "is a list of cook feature names"):
             F.experimental({"experimental": "modelcook.cloth"})
 
-    def test_requested_but_off_is_refused_by_name(self):
+    @held()
+    def test_requested_but_held_is_refused_by_name(self):
         where = 'assets/physics.json: models["banner.gltf"].cloth'
         with self.assertRaises(F.FeatureOff) as e:
             F.require("modelcook.cloth", frozenset(), where)
@@ -341,7 +365,8 @@ class FeatureRows(unittest.TestCase):
         with self.assertRaises(F.FeatureOff):
             F.require("modelcook.chains2", {"modelcook.cloth"}, where)
 
-    def test_one_warning_line(self):
+    @held()
+    def test_one_warning_line_for_held_rows(self):
         self.assertIsNone(F.warning(frozenset()))
         w = F.warning({"modelcook.cloth", "modelcook.chains2"})
         self.assertNotIn("\n", w)
@@ -352,7 +377,8 @@ class FeatureRows(unittest.TestCase):
 @unittest.skipUnless(GATES.is_dir(), "the client gate's list is not here (a packed SDK): it is checked in the repository")
 class GateListAgrees(unittest.TestCase):
     """Every cook row that waits for a game test is held by the client gate with the same checks, and every gate entry named
-    modelcook.* is such a row (ruling e-01: one gate, two places that say so). The cook never reads the gate list."""
+    modelcook.* is such a row (ruling e-01: one gate, two places that say so). The cook never reads the gate list. Since 0.2.0-dev.31
+    no row waits and no gate entry names one: a hold is one commit that flips a row's default and adds its gate entry."""
 
     def gates(self):
         out = {}

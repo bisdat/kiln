@@ -17,9 +17,20 @@ public sealed class PhysicsCookHostTests
     };
 
     [Fact]
-    public void A_feature_that_is_off_commits_and_registers_nothing()
+    public void Both_features_are_on_without_the_key()
     {
         var host = new FakePhysicsCookHost();
+        Assert.True(host.IsOn("modelcook.cloth"));
+        Assert.True(host.IsOn("modelcook.chains2"));
+        Assert.Empty(host.Held);
+        Assert.True(host.Cook("models/banner.gltf", ["modelcook.cloth", "modelcook.chains2"], Banner).Ok);
+        Assert.Equal(2, host.Registrations.Count);
+    }
+
+    [Fact]
+    public void A_held_feature_commits_and_registers_nothing()
+    {
+        var host = new FakePhysicsCookHost { Held = ["modelcook.cloth"] };
         var r = host.Cook("models/banner.gltf", ["modelcook.cloth"], Banner);
         Assert.False(r.Ok);
         Assert.Contains("needs cook feature modelcook.cloth, which is off (game test pending: 16e-cc16e)", r.Reason, StringComparison.Ordinal);
@@ -28,7 +39,9 @@ public sealed class PhysicsCookHostTests
         Assert.Empty(host.Files);
         Assert.Empty(host.Registrations);
         // the other row on is not enough
-        Assert.False(new FakePhysicsCookHost("modelcook.chains2").Cook("models/banner.gltf", ["modelcook.cloth"], Banner).Ok);
+        Assert.False(new FakePhysicsCookHost("modelcook.chains2") { Held = FakePhysicsCookHost.Features.ToArray() }.Cook("models/banner.gltf", ["modelcook.cloth"], Banner).Ok);
+        // the key turns a held one on
+        Assert.True(new FakePhysicsCookHost("modelcook.cloth") { Held = ["modelcook.cloth"] }.Cook("models/banner.gltf", ["modelcook.cloth"], Banner).Ok);
     }
 
     [Fact]
@@ -64,6 +77,7 @@ public sealed class PhysicsCookHostTests
     {
         Assert.Throws<ArgumentException>(() => new FakePhysicsCookHost("modelcook.clth"));
         Assert.Throws<ArgumentException>(() => new FakePhysicsCookHost().IsOn("modelcook.sleeves"));
+        Assert.Throws<ArgumentException>(() => new FakePhysicsCookHost { Held = ["modelcook.sleeves"] });
         Assert.Throws<ArgumentException>(() => new FakePhysicsCookHost().Cook("m.gltf", [], new Dictionary<string, byte[]>()));
     }
 
@@ -85,7 +99,7 @@ public sealed class PhysicsCookHostTests
         var rows = Regex.Matches(text, @"Feature\(""(?<name>[a-z0-9.]+)"",\s*(?<on>True|False),\s*\((?<checks>[^)]*)\)")
             .Select(m => (Name: m.Groups["name"].Value, On: m.Groups["on"].Value == "True", Checks: m.Groups["checks"].Value)).ToList();
         Assert.Equal(FakePhysicsCookHost.Features, rows.Select(r => r.Name));
-        Assert.All(rows, r => Assert.False(r.On));
+        Assert.All(rows, r => Assert.True(r.On));  // nothing ships held (0.2.0-dev.31)
         Assert.All(rows, r => Assert.Equal(FakePhysicsCookHost.PendingReason, "game test pending: " + string.Join(", ", Regex.Matches(r.Checks, "\"([^\"]+)\"").Select(m => m.Groups[1].Value))));
     }
 }

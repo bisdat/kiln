@@ -1,11 +1,7 @@
 {
   "format": 1,
-  "comment": "The client fixture's recipe: every model comes from blocks/fixture.json (the banner prop, the cape look, the pendant body); \"experimental\" turns on the two cook features that wait for check 16e-cc16e.",
+  "comment": "The client fixture's recipe: every model comes from blocks/fixture.json (the banner prop, the cape look, the pendant body). The cloth and chain cook features are on (since 0.2.0-dev.31); check 16e-cc16e confirms them in a game client.",
   "tool": "modelcook",
   "out": "cooked",
-  "experimental": [
-    "modelcook.cloth",
-    "modelcook.chains2"
-  ],
   "steps": []
 }

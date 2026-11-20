@@ -32,8 +32,8 @@ public sealed record ClothCapsuleBlock(ClothSphereBlock A, ClothSphereBlock B) :
 
 /// <summary>
 /// One primitive of a body's model the game simulates as cloth. The cook writes it into the model (<c>kiln build</c>, <c>kiln cook</c>); it needs
-/// the cook feature <c>modelcook.cloth</c>, off until its game test passes: <c>"experimental": ["modelcook.cloth"]</c> in the mod's
-/// assets/cook.json. Every field is checked when the block is defined, and again by the cook against the model's vertices.
+/// the cook feature <c>modelcook.cloth</c> (on since 0.2.0-dev.31; not yet confirmed in a game client, guided check <c>16e-cc16e</c>). Every field
+/// is checked when the block is defined, and again by the cook against the model's vertices.
 /// </summary>
 public sealed record ModelClothBlock
 {
@@ -62,8 +62,8 @@ public sealed record ModelClothBlock
 
 /// <summary>
 /// A chain of the skeleton's joints the game swings (its chains2): from <see cref="RootJoint"/>, whose parent stays animated, to
-/// <see cref="TipJoint"/> along one branch, 2 to 8 joints. The cook writes it into the model; it needs the cook feature <c>modelcook.chains2</c>,
-/// off until its game test passes (<c>"experimental": ["modelcook.chains2"]</c> in assets/cook.json). The joints of a chain carry no animation.
+/// <see cref="TipJoint"/> along one branch, 2 to 8 joints. The cook writes it into the model; it needs the cook feature <c>modelcook.chains2</c>
+/// (on since 0.2.0-dev.31; not yet confirmed in a game client, guided check <c>16e-cc16e</c>). The joints of a chain carry no animation.
 /// </summary>
 public sealed record ModelChainBlock
 {
@@ -308,7 +308,8 @@ internal static class NpcPhysics
     }
 
     /// <summary>One warning per mod and row while a body carries what a held cook feature wrote: the mod's build turned the feature on, and
-    /// the game has not been seen to show it right yet. <c>"preview"</c> in kiln.json lifts the row and so this warning.</summary>
+    /// the game has not been seen to show it right yet. <c>"preview"</c> in kiln.json lifts the row and so this warning. Since 0.2.0-dev.31 no
+    /// release holds the two rows, so this says nothing unless a release holds one again (a gate entry in native/core/gates).</summary>
     internal static void WarnHeld(BlockContext ctx, Lowered low, BodyBlock b)
     {
         foreach (var (row, has, what) in new[] { (ClothRow, b.Cloth is { Count: > 0 }, "cloth"), (ChainsRow, b.Chains is { Count: > 0 }, "bone chains") })

@@ -3,10 +3,6 @@
   "comment": "The lab fixture's recipe: the banner's model step; the pendant comes from blocks/pendant.json. build-assets.py runs it, then moves assets.json into cooked/ (the test loads it itself).",
   "tool": "modelcook",
   "out": "cooked",
-  "experimental": [
-    "modelcook.cloth",
-    "modelcook.chains2"
-  ],
   "inputs": {
     "bronze_model": {
       "guid": "9c38c7f0-fd0a-41a6-b91e-9a16287b8f59",

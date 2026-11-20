@@ -414,18 +414,27 @@ model; only the behaviour is a copy of the Vukah's.
 **Afterwards:** quit the game, then `tools/client/client.sh undeploy --real`. Don't use `level`, `xp` or `skillpoints` for these checks: on a real client they can fire Steam achievements.
 
 ## Physics
-Since 0.2.0-dev.30 the cook writes **cloth** (a primitive the game simulates as cloth: a banner, a cape, a skirt) and **bone chains** (2 to 8 joints
+Since 0.2.0-dev.31 the cook writes **cloth** (a primitive the game simulates as cloth: a banner, a cape, a skirt) and **bone chains** (2 to 8 joints
 of the model's own skeleton that swing: a pendant, a tail, a braid) into a mod's models. The game simulates them on each player's machine with its
 own cloth and chain code; a dedicated server only serves the cooked files, and Kiln adds no hook and no runtime call. Players need the mod.
 
-**Held until its game test.** The game has not yet been seen to show a Kiln-cooked cloth or chain (guided check `16e-cc16e`). Until it has, the two
-cook features are off: a model that asks for cloth or chains is refused, with the field named. A mod that wants them anyway says so in its recipe,
-and the cook prints one warning line:
-```json
-{ "format": 1, "experimental": ["modelcook.cloth", "modelcook.chains2"], "steps": [ … ] }
-```
-Every game also reports `modelcook.cloth` and `modelcook.chains2` as held ([services/caps.md](../services/caps.md#rows-added-in-dev28)); a body
-block that carries them logs one warning per mod while they are ([npc-blocks.md](npc-blocks.md#model-physics)).
+**On, not yet confirmed in a game.** The two cook features, `modelcook.cloth` and `modelcook.chains2`, are on: a model with an entry in
+`assets/physics.json` or a body with `cloth`/`chains` is cooked with them, no switch needed. The game has not yet been seen to draw a Kiln-cooked
+cloth or chain (guided check `16e-cc16e`): if yours hangs wrong, the cook's fabric or the fixed tuning below may be why; please report it. A
+recipe written for 0.2.0-dev.30 that lists them under `"experimental"` still cooks (the key changes nothing for a feature that is on).
+
+### Step by step
+1. **Model it.** Cloth is one glTF primitive of its own (its own material slot in Blender), with real triangles: a quad strip, a cape, a skirt.
+   Chains are a line of bones of **your own skeleton**, each link with a length, nothing hanging below the last. Keep scale 1 everywhere.
+2. **Say what moves.** Write the model's entry in `assets/physics.json` (below): for cloth, `pin` per vertex (1 on the edge that holds, 0 on what
+   hangs); for a chain, its first and last swinging bone. Or let the Blender helper write it from a painted vertex group
+   ([From Blender](#from-blender)). For a creature's body, put the same entries in the body block instead
+   ([npc-blocks.md](npc-blocks.md#model-physics)).
+3. **Cook it** as any model: a `model` step in `assets/cook.json` names the glTF (a worn look and a body's model are model steps too), then
+   `kiln build` (or `kiln cook` in the mod's folder). The cook finds the entry by the model file's path and refuses, with the field named,
+   anything it cannot write; nothing is written then.
+4. **Look at it in the game**: place, wear or spawn the thing, walk past it, turn, teleport and reload. The cook's report (`assets/cooked/cook-report.json`)
+   lists each model's cloth particles and chain joints.
 
 ### assets/physics.json
 One file names every model's physics, by the model file's path in the mod (as a recipe step, a worn look or a body names it). A body block's
@@ -495,7 +504,7 @@ Next to the [validation](#validation-every-cook) of every model: cloth selectors
 say (all 320 cloth meshes of the game keep these relations), totals, at most 32 collider spheres; every swinging joint's slot after the others, and
 each chain's packed rest shape within half a code of its stored matrices. Engine facts: [docs/re/models.md](../../re/models.md) section 9.
 
-Sample: `mods/samples/ModelPhysics` (a banner and a three-joint pendant). Lab test: `mods/tests/model-physics-test` (a dedicated server: the cooked files through kiln.assets and the game's reflection; nothing is drawn there). Guided check `16e-cc16e` with its fixture `mods/tests/model-physics-client` (a banner to place, a worn cape, a creature with a pendant; [client-pass.md](../client-pass.md)).
+Sample: `mods/samples/ModelPhysics` (a banner from `assets/physics.json` and a three-joint pendant from a body block). Lab test: `mods/tests/model-physics-test` (a dedicated server: the cooked files through kiln.assets and the game's reflection; nothing is drawn there). Guided check `16e-cc16e` with its fixture `mods/tests/model-physics-client` (a banner to place, a worn cape, a creature with a pendant; [client-pass.md](../client-pass.md)).
 
 ## Sample
 `mods/samples/ModelSample`:

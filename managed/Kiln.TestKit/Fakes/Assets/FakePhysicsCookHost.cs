@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// The model cook's physics as a unit test sees it (docs/kiln/modding/models.md#physics): the cook features and a recipe's "experimental" key
+// The model cook's physics as a unit test sees it (docs/kiln/modding/models.md#physics): the cook features (on since 0.2.0-dev.31; a test can hold
+// one as a release would) and a recipe's "experimental" key
 // (tools/modelcook/cook/features.py, kept equal by Kiln.TestKit.Tests' PhysicsCookHostTests), one model's cooked files committed whole or not at
 // all, and the kiln.assets registrations those files make (a content blob per render data, a keen::RenderModel per model). A refused cook, a
 // feature that is off or input the cook refuses, commits no file and registers nothing. The cook itself is Python: nothing here cooks.
@@ -14,19 +15,21 @@ namespace Kiln.TestKit;
 public sealed record PhysicsCookResult(bool Ok, string? Reason, IReadOnlyList<string> Files) : IKilnResult;
 
 /// <summary>
-/// A stand-in for <c>kiln cook</c>'s physics step in unit tests: the two cook features (<c>modelcook.cloth</c>, <c>modelcook.chains2</c>, off
-/// until their game test, turned on per mod by the recipe's <c>"experimental"</c> key) and a transaction per model: everything or nothing is
-/// committed to <see cref="Files"/>, and only committed files are registered (<see cref="Registrations"/>).
+/// A stand-in for <c>kiln cook</c>'s physics step in unit tests: the two cook features (<c>modelcook.cloth</c>, <c>modelcook.chains2</c>, on since
+/// 0.2.0-dev.31; <see cref="Held"/> holds one as a release would, and the recipe's <c>"experimental"</c> key turns a held one on for a mod) and a
+/// transaction per model: everything or nothing is committed to <see cref="Files"/>, and only committed files are registered
+/// (<see cref="Registrations"/>).
 /// </summary>
 public sealed class FakePhysicsCookHost
 {
     /// <summary>The cook features of physics, as the cook names them.</summary>
     public static IReadOnlyList<string> Features { get; } = ["modelcook.cloth", "modelcook.chains2"];
 
-    /// <summary>Why a feature is off by default (the same text kiln.caps shows for the held row).</summary>
+    /// <summary>Why a held feature is off by default (the same text kiln.caps shows for a held row).</summary>
     public const string PendingReason = "game test pending: 16e-cc16e";
 
     private readonly HashSet<string> _on;
+    private readonly HashSet<string> _held = new(StringComparer.Ordinal);
     private readonly Dictionary<string, byte[]> _files = new(StringComparer.Ordinal);
     private readonly List<string> _registrations = [];
 
@@ -40,8 +43,25 @@ public sealed class FakePhysicsCookHost
         _on = [.. experimental];
     }
 
-    /// <summary>Whether <paramref name="feature"/> is on for this host's recipe.</summary>
-    public bool IsOn(string feature) => Features.Contains(feature) ? _on.Contains(feature) : throw new ArgumentException($"\"{feature}\" is not a cook feature", nameof(feature));
+    /// <summary>The features this host holds (off unless the recipe's <c>"experimental"</c> key names them), as a release that holds a row would.
+    /// Empty by default: every feature is on.</summary>
+    /// <exception cref="ArgumentException">A name that is no cook feature.</exception>
+    public IReadOnlyCollection<string> Held
+    {
+        get => _held;
+        init
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            foreach (var n in value)
+                if (!Features.Contains(n)) throw new ArgumentException($"Held: \"{n}\" is not a cook feature", nameof(value));
+            _held.UnionWith(value);
+        }
+    }
+
+    /// <summary>Whether <paramref name="feature"/> is on for this host's recipe: on unless held, and a held one when the recipe names it.</summary>
+    public bool IsOn(string feature) => Features.Contains(feature)
+        ? !_held.Contains(feature) || _on.Contains(feature)
+        : throw new ArgumentException($"\"{feature}\" is not a cook feature", nameof(feature));
 
     /// <summary>The files committed so far, by path in the mod.</summary>
     public IReadOnlyDictionary<string, byte[]> Files => _files;

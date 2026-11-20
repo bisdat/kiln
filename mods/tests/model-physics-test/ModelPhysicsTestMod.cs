@@ -16,8 +16,10 @@ namespace ModelPhysicsTest;
 /// and its render data reference names its blob.</item>
 /// <item><c>arrays-match-golden</c>: the banner's fabric, masses and maps and the pendant's chain read through the game's reflection equal the
 /// research's golden and the cook's report.</item>
-/// <item><c>physics-off-build-refused</c>: build-assets.py's cook without the recipe's "experimental" key was refused by name and wrote nothing.</item>
-/// <item><c>held-row-warned-once</c>: the pendant body carries a chain while modelcook.chains2 is held: one warning for the mod.</item>
+/// <item><c>refused-build-wrote-nothing</c>: build-assets.py's cook of the same mod with a bad cloth pin was refused by its field and wrote
+/// nothing.</item>
+/// <item><c>held-row-warning</c>: the pendant body carries a chain: one warning for the mod while modelcook.chains2 is held, none while it is on
+/// (since 0.2.0-dev.31 nothing holds it).</item>
 /// <item><c>cleanup</c>: what the test registered is gone again, and a game resource reads as before.</item>
 /// </list>
 /// </summary>
@@ -48,12 +50,12 @@ public sealed class ModelPhysicsTestMod : Mod
         for (var i = 0; i < 5; i++) await Context.Scheduler.NextTick();
         try { Run(); }
         catch (Exception e) { Check(false, $"the test stopped: {e.GetType().Name}: {e.Message}"); }
-        // 5. the held row's warning: once for the mod, whatever the number of bodies. Kiln.Blocks reads blocks/*.json after OnLoad: wait for the body.
+        // 5. a held row's warning: once for the mod, whatever the number of bodies; none while the row is on. Kiln.Blocks reads blocks/*.json after OnLoad: wait for the body.
         for (var i = 0; i < 600 && Blocks.Find("pendant", Context.Info.Id) == null; i++) await Context.Scheduler.NextTick();
         var held = Capabilities.IsHeld("modelcook.chains2");
         var warned = Blocks.Warnings(Context.Info.Id).Count(w => w.StartsWith("modelcook.chains2:", StringComparison.Ordinal));
         Check(Blocks.Find("pendant", Context.Info.Id) != null && (held ? warned == 1 : warned == 0),
-              $"held-row-warned-once (the pendant body {(Blocks.Find("pendant", Context.Info.Id) != null ? "defined" : "NOT defined")}; modelcook.chains2 {(held ? "held" : "open")}, {warned} warning)");
+              $"held-row-warning (the pendant body {(Blocks.Find("pendant", Context.Info.Id) != null ? "defined" : "NOT defined")}; modelcook.chains2 {(held ? "held" : "open")}, {warned} warning)");
         Log.Info($"{Tag} done: {_pass} PASS, {_fail} FAIL");
     }
 
@@ -159,12 +161,12 @@ public sealed class ModelPhysicsTestMod : Mod
         }
         Check(problems.Count == 0, $"arrays-match-golden ({(problems.Count == 0 ? "banner fabric, masses, maps; pendant chain" : string.Join("; ", problems.Take(6)))})");
 
-        // 4. the cook without the key
-        using var off = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(cooked, "physics-off.json")));
+        // 4. the cook of bad physics: refused by its field, nothing written
+        using var off = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(cooked, "refused-build.json")));
         var o = off.RootElement;
         Check(o.GetProperty("refused").GetBoolean() && o.GetProperty("files").GetArrayLength() == 0
-              && o.GetProperty("message").GetString()!.Contains("needs cook feature modelcook.cloth", StringComparison.Ordinal),
-              $"physics-off-build-refused (exit {o.GetProperty("exit").GetInt32()}, {o.GetProperty("files").GetArrayLength()} files)");
+              && o.GetProperty("message").GetString()!.Contains("cloth[0].pin[2]: 2.0 is outside [0, 1]", StringComparison.Ordinal),
+              $"refused-build-wrote-nothing (exit {o.GetProperty("exit").GetInt32()}, {o.GetProperty("files").GetArrayLength()} files)");
 
         // 6. cleanup
         foreach (var k in keys) Assets.RemoveResource(k);

@@ -1,18 +1,21 @@
 # SPDX-License-Identifier: MIT
 """Cook features: what modelcook may write into a cooked model, one row each, and whether a cook of a mod has a row on.
 
-A row that is off by default is a format the cook can write but the game has not been seen to read right yet: its
-guided client check is still open. A recipe asks for such a row by name, for that mod only:
+Since 0.2.0-dev.31 every row is on (the owner's rule: nothing ships held). A row still names the guided client checks
+that have not confirmed it in a real game yet (`checks`; the release notes list it under "on, not yet confirmed").
+
+The switch stays for a row the owner decides to hold at a release: such a row is off by default, and a recipe asks for
+it by name, for that mod only:
 
     { "format": 1, "experimental": ["modelcook.cloth", "modelcook.chains2"], "steps": [ ... ] }
 
 and the cook prints one warning line for it. A model that asks for a row that is off is refused, the row and the
-reason named: a cook never leaves authored physics out without a word.
+reason named: a cook never leaves authored physics out without a word. The key naming a row that is on is accepted and
+changes nothing (recipes written for 0.2.0-dev.30's held rows keep cooking).
 
-The rows that wait for a game test are also entries of the client gate's list (native/core/gates/
-dev28-16e-cloth-chains.json), so every game's capability table says "game test pending" for them too. The cook never
-reads that list (it does not ship with the cook): tests/test_physics_input.py keeps the two the same. The day the check
-passes, one commit removes the gate entry and sets the row's default here to on.
+A held row is also an entry of the client gate's list (native/core/gates/*.json, with the same checks), so every game's
+capability table says "game test pending" for it too. The cook never reads that list (it does not ship with the cook):
+tests/test_physics_input.py keeps the two the same.
 """
 from dataclasses import dataclass
 
@@ -32,7 +35,7 @@ class FeatureOff(Exception):
 class Feature:
     name: str
     default: bool  # on without the recipe key
-    checks: tuple  # guided client checks that open it, lower-case ids
+    checks: tuple  # guided client checks that confirm it in a real game (that open it, while it is held), lower-case ids
     what: str
 
     @property
@@ -42,8 +45,8 @@ class Feature:
 
 
 ROWS = (
-    Feature("modelcook.cloth", False, ("16e-cc16e",), "cloth simulation data (ClothData, fabric, colliders) in a cooked RenderModel"),
-    Feature("modelcook.chains2", False, ("16e-cc16e",), "bone chains (chains2) in a cooked RenderModel"),
+    Feature("modelcook.cloth", True, ("16e-cc16e",), "cloth simulation data (ClothData, fabric, colliders) in a cooked RenderModel"),
+    Feature("modelcook.chains2", True, ("16e-cc16e",), "bone chains (chains2) in a cooked RenderModel"),
 )
 BY_NAME = {f.name: f for f in ROWS}
 

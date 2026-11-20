@@ -19,6 +19,7 @@ TOOLS = HERE.parent.parent
 sys.path[:0] = [str(HERE), str(HERE.parent), str(TOOLS / "kfc"), str(TOOLS / "kfc" / "tests"), str(TOOLS / "animcook")]
 
 import fakegame  # noqa: E402
+from heldrows import held  # noqa: E402
 from anicook import skeleton as K  # noqa: E402
 from anicook.gltfdoc import Doc  # noqa: E402
 from anicook.graphgen import derive  # noqa: E402
@@ -370,7 +371,8 @@ class Refusals(Game, unittest.TestCase):
         path = self.dir / "n.gltf"
         rig(path, links=3)
         phys = physics("n.gltf", ("p0", "p2"))
-        self.refused(r"\.chains: needs cook feature modelcook.chains2, which is off \(game test pending: 16e-cc16e\)", path, phys, features=frozenset())
+        with held("modelcook.chains2"):
+            self.refused(r"\.chains: needs cook feature modelcook.chains2, which is off \(game test pending: 16e-cc16e\)", path, phys, features=frozenset())
         game = S.Target(SKELETON, ["root", "spine", "p0", "p1", "p2"], S.Target.from_skeleton(K.from_gltf(Doc(path)), SKELETON).bind, "game")
         self.refused(r"\.chains: skeleton .* is the game's", path, phys, target=game)
         flat = write_gltf(self.dir / "flat.gltf", [[{"positions": [(0, 0, 0), (1, 0, 0), (0, 1, 0)], "indices": [0, 1, 2]}]], [{"mesh": 0}])
@@ -473,8 +475,11 @@ class Recipes(Game, unittest.TestCase):
 
     def test_without_the_key(self):
         rp = self.mod("chains-off", experimental=None)
-        with self.assertRaisesRegex(recipe.RecipeError, r'models\["assets/src/pendant.gltf"\]\.chains: needs cook feature modelcook.chains2'):
+        with held("modelcook.chains2"), self.assertRaisesRegex(recipe.RecipeError, r'models\["assets/src/pendant.gltf"\]\.chains: needs cook feature modelcook.chains2'):
             recipe.run(rp, self.k, self.types, update_manifest=True)
+        r = recipe.run(rp, self.k, self.types, update_manifest=True)  # on since 0.2.0-dev.31
+        self.assertTrue(r["ok"], json.dumps(r["steps"])[:2000])
+        self.assertEqual(r["features"], [])
 
 
 if __name__ == "__main__":

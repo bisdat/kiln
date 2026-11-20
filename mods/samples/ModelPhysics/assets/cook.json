@@ -1,12 +1,8 @@
 {
   "format": 1,
-  "comment": "ModelPhysics's cook recipe: the banner's model step; the pendant's steps come from blocks/pendant.json by themselves. \"experimental\" turns on the two cook features that wait for their game test (16e-cc16e): the cook prints one warning line.",
+  "comment": "ModelPhysics's cook recipe: the banner's model step; the pendant's steps come from blocks/pendant.json by themselves. The cloth and chain cook features are on (since 0.2.0-dev.31): no key needed.",
   "tool": "modelcook",
   "out": "cooked",
-  "experimental": [
-    "modelcook.cloth",
-    "modelcook.chains2"
-  ],
   "inputs": {
     "bronze_model": {
       "guid": "9c38c7f0-fd0a-41a6-b91e-9a16287b8f59",

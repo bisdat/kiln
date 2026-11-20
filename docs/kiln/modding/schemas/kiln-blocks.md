@@ -424,8 +424,8 @@ What a creature is: a skinned glTF of the mod, or a game creature's body ("like"
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
-| `chains` | array of [modelChain](#modelchain) |  | Joint chains of the model's skeleton the game swings, cooked into it when the mod builds. Needs "experimental": ["modelcook.chains2"] in assets/cook.json until the game test passes, and scale 1. |
-| `cloth` | array of [modelCloth](#modelcloth) |  | Primitives of the model the game simulates as cloth, cooked into it when the mod builds (assets/physics.json's form). Needs "experimental": ["modelcook.cloth"] in assets/cook.json until the game test passes, and scale 1. max items 255 |
+| `chains` | array of [modelChain](#modelchain) |  | Joint chains of the model's skeleton the game swings, cooked into it when the mod builds. Needs the cook feature modelcook.chains2 (on) and scale 1. |
+| `cloth` | array of [modelCloth](#modelcloth) |  | Primitives of the model the game simulates as cloth, cooked into it when the mod builds (assets/physics.json's form). Needs the cook feature modelcook.cloth (on) and scale 1. max items 255 |
 | `colliders` | array of [collider](#collider) |  | max items 2 |
 | `like` | `"vukah"` \| `"scavenger"` \| `"fisher"` \| `"villager"` |  |  |
 | `model` | string |  | Pattern `\.([gG][lL][bB]\|[gG][lL][tT][fF])$`. |

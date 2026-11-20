@@ -7,7 +7,7 @@
    turns their holder), written by mods/samples/ModelPhysics/make_sources.py;
 2. assets/physics.json: the banner's and the cape's cloth (the cape's collider follows the Chest joint, whose index is read from the installed
    game's animation graph); the pendant's chain is its body block's;
-3. the cook of assets/cook.json (its "experimental" key on) against the installed game, read only;
+3. the cook of assets/cook.json against the installed game, read only;
 4. assets/cooked/expected.json: what the writer made, for the check to log and compare: per cloth mesh its particles and pinned particles with
    their bind positions (game space), per chain its joints, extents and GUID.
 

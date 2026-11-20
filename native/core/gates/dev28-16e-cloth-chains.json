@@ -1,4 +1,0 @@
-{ "gates": [
-    { "name": "modelcook.cloth", "checks": ["16e-cc16e"] },
-    { "name": "modelcook.chains2", "checks": ["16e-cc16e"] }
-] }

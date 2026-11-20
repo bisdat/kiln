@@ -26,6 +26,7 @@ import cube_sword  # noqa: E402
 import kiln_physics_export as KX  # noqa: E402
 import fakegame  # noqa: E402
 import rigged_figure  # noqa: E402
+from heldrows import held  # noqa: E402
 from anicook import skeleton as K  # noqa: E402
 from anicook.gltfdoc import Doc  # noqa: E402
 from cook import fabric as FB, gltf, physics as PH, recipe, rendermodel as RM, skin as S, steps  # noqa: E402
@@ -414,9 +415,10 @@ class Refusals(Game, unittest.TestCase):
     def banner(self):
         return PH.load(BANNER / "physics.json").get("banner.gltf")
 
-    def test_feature_off(self):
-        with self.assertRaisesRegex(steps.StepError, r'^assets/physics.json: models\["banner.gltf"\]\.cloth: needs cook feature modelcook.cloth, which is off \(game test pending: 16e-cc16e\)'):
+    def test_feature_held(self):
+        with held("modelcook.cloth"), self.assertRaisesRegex(steps.StepError, r'^assets/physics.json: models\["banner.gltf"\]\.cloth: needs cook feature modelcook.cloth, which is off \(game test pending: 16e-cc16e\)'):
             self.cook(BANNER / "banner.gltf", self.banner(), features=frozenset())
+        self.cook(BANNER / "banner.gltf", self.banner(), features=frozenset())  # on since 0.2.0-dev.31: no recipe key needed
 
     def test_a_second_lod(self):
         with self.assertRaisesRegex(steps.StepError, "one LOD"):
@@ -600,19 +602,35 @@ class Recipes(unittest.TestCase):
 
     BANNER_PHYSICS = {"format": 1, "models": {"assets/src/banner.gltf": {"cloth": [{"mesh": 0, "primitive": 0, "pin": [1, 1, 0, 0], "massKg": 0.3}]}}}
 
-    def test_cooks_with_the_key_and_says_so_once(self):
-        rp = self.mod("on", self.BANNER_PHYSICS)
+    def test_cooks_without_the_key_and_says_nothing(self):
+        rp = self.mod("on", self.BANNER_PHYSICS, experimental=None)
         r = recipe.run(rp, self.client, self.types, update_manifest=True)
         self.assertTrue(r["ok"], json.dumps(r["steps"])[:2000])
-        self.assertEqual(r["features"], ["modelcook.cloth"])
-        self.assertEqual(len(r["warnings"]), 1)
-        self.assertIn("modelcook.cloth (game test pending: 16e-cc16e)", r["warnings"][0])
+        self.assertEqual(r["features"], [])
+        self.assertFalse(r.get("warnings"))
         d = Decoder(self.types).decode("keen::RenderModel", (rp.parent / "cooked" / "banner.bin").read_bytes())
         self.assertEqual(d["cloth"]["meshes"][0]["data"]["fabric"]["anchors"], [0, 1, 0, 1])
         self.assertIn("physics.json", r["sources"])
         self.assertFalse(recipe.needs_cook(rp))
         (rp.parent / "physics.json").write_text(json.dumps({"format": 1, "models": {"assets/src/banner.gltf": {"cloth": [{"mesh": 0, "primitive": 0, "pin": [1, 1, 0, 0], "massKg": 0.4}]}}}))
         self.assertTrue(recipe.needs_cook(rp), "a changed physics.json means a new cook")
+
+    def test_the_key_still_cooks(self):
+        """A recipe written for 0.2.0-dev.30 (the rows held, the key on) cooks as before, with no warning now; while a row is held the key
+        turns it on with one warning line."""
+        rp = self.mod("key", self.BANNER_PHYSICS)
+        r = recipe.run(rp, self.client, self.types, update_manifest=True)
+        self.assertTrue(r["ok"], json.dumps(r["steps"])[:2000])
+        self.assertEqual(r["features"], ["modelcook.cloth"])
+        self.assertFalse(r.get("warnings"))
+        with held("modelcook.cloth"):
+            rp = self.mod("key-held", self.BANNER_PHYSICS)
+            r = recipe.run(rp, self.client, self.types, update_manifest=True)
+        self.assertTrue(r["ok"], json.dumps(r["steps"])[:2000])
+        self.assertEqual(len(r["warnings"]), 1)
+        self.assertIn("modelcook.cloth (game test pending: 16e-cc16e)", r["warnings"][0])
+        d = Decoder(self.types).decode("keen::RenderModel", (rp.parent / "cooked" / "banner.bin").read_bytes())
+        self.assertEqual(d["cloth"]["meshes"][0]["data"]["fabric"]["anchors"], [0, 1, 0, 1])
 
     def test_materials_made_from_the_gltf_keep_the_cloth(self):
         """A step with "materials": "gltf" (what a body's and a look's steps do) once lost its model's physics.json entry (16e S4: a loop
@@ -626,7 +644,8 @@ class Recipes(unittest.TestCase):
         self.assertTrue(r["ok"], json.dumps(r["steps"])[:2000])
         self.assertEqual(r["steps"][0]["cloth"]["meshes"][0]["particles"], 4)
 
-    def test_without_the_key_the_build_is_refused_on_both_sides(self):
+    @held("modelcook.cloth")
+    def test_a_held_row_without_the_key_refuses_the_build_on_both_sides(self):
         for side, k in (("client", self.client), ("server", self.server)):
             with self.subTest(side=side):
                 rp = self.mod(f"off-{side}", self.BANNER_PHYSICS, experimental=None)
@@ -685,10 +704,14 @@ class Recipes(unittest.TestCase):
         self.assertTrue(recipe.run(rp2, self.client, self.types, update_manifest=True)["ok"])
         self.assertNotIn("physics", json.loads((rp2.parent / "cooked" / "assets_src_cape.model.json").read_text()))
 
-    def test_a_body_blocks_cloth_needs_the_key(self):
+    def test_a_body_blocks_cloth_needs_the_key_only_while_held(self):
         rp = self.body_mod("body-off", {"bodies": {"caped": {"model": "assets/src/cape.gltf", "cloth": self.CAPE_CLOTH}}}, experimental=None)
-        with self.assertRaisesRegex(recipe.RecipeError, r"^blocks/npc.json: body caped\.cloth: needs cook feature modelcook.cloth"):
+        with held("modelcook.cloth"), self.assertRaisesRegex(recipe.RecipeError, r"^blocks/npc.json: body caped\.cloth: needs cook feature modelcook.cloth"):
             recipe.run(rp, self.client, self.types, update_manifest=True)
+        r = recipe.run(rp, self.client, self.types, update_manifest=True)
+        self.assertTrue(r["ok"], json.dumps(r["steps"])[:2000])
+        d = Decoder(self.types).decode("keen::RenderModel", (rp.parent / "cooked" / "assets_src_cape.bin").read_bytes())
+        self.assertEqual(d["cloth"]["meshes"][0]["data"]["fabric"]["numParticles"], 9)
 
     def test_one_model_physics_from_one_place(self):
         both = {"format": 1, "models": {"assets/src/cape.gltf": {"cloth": self.CAPE_CLOTH}}}

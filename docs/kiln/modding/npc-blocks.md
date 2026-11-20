@@ -117,9 +117,9 @@ new BodyBlock
   physics.json).
 - **One place per model.** A model's physics come from one body or from physics.json, never both.
 - **Scale 1.** A body with cloth or chains keeps `Scale` unset or 1 (the game scales the cloth's colliders by the model's own size).
-- **Held.** The cook writes them only with `"experimental": ["modelcook.cloth"]` (and `"modelcook.chains2"`) in `assets/cook.json` until the game
-  test `16e-cc16e` passes. While a game reports the row held, a mod with such a body logs one warning (`Blocks.Warnings`); `"preview"` in kiln.json
-  lifts the row and the warning.
+- **On, not yet confirmed in a game** (since 0.2.0-dev.31): the cook writes them with no switch; guided check `16e-cc16e` is still open. Should a
+  release hold the cook features again, the cook writes them only with `"experimental": ["modelcook.cloth"]` (and `"modelcook.chains2"`) in
+  `assets/cook.json`, and a mod with such a body logs one warning (`Blocks.Warnings`) while the game reports the row held.
 - **Chains need the body's own skeleton**, and no clip of it may animate a swinging joint; a cloth vertex may not be weighted to one.
 - An NPC's body is a game NPC's for now, so `Cloth` and `Chains` are refused there ("a game body has its own").
 

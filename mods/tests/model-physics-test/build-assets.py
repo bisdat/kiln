@@ -4,10 +4,10 @@
 
 1. models/banner.gltf (the research's reference banner) and models/pendant.gltf (three links on a skeleton of their own), written by
    mods/samples/ModelPhysics/make_sources.py;
-2. the cook of assets/cook.json (its "experimental" key on) against the installed game, read only, into assets/cooked; its assets.json is
-   moved to assets/cooked/manifest.json, which the test loads itself (a dedicated server skips a model's entries at boot);
-3. the same mod cooked without the key, in a temporary folder: it has to be refused, by name, writing nothing. The outcome goes to
-   assets/cooked/physics-off.json;
+2. the cook of assets/cook.json against the installed game, read only, into assets/cooked; its assets.json is moved to
+   assets/cooked/manifest.json, which the test loads itself (a dedicated server skips a model's entries at boot);
+3. the same mod cooked with a bad pin in its physics.json, in a temporary folder: it has to be refused, by the field, writing nothing. The
+   outcome goes to assets/cooked/refused-build.json;
 4. assets/cooked/golden.json: what the test compares the game's reflection of the cooked banner and pendant with (the banner's fabric is the
    research's golden, tools/modelcook/tests/fixtures/banner/expected-fabric.json, in float32).
 
@@ -48,20 +48,20 @@ def main():
     cooked = HERE / "assets/cooked"
     shutil.move(str(HERE / "assets/assets.json"), str(cooked / "manifest.json"))
 
-    with tempfile.TemporaryDirectory() as t:  # the same mod without the key
+    with tempfile.TemporaryDirectory() as t:  # the same mod with a pin outside [0, 1]
         mod = Path(t) / "model-physics-test"
-        for part in ("kiln.mod.json", "models", "blocks", "assets/physics.json"):
+        for part in ("kiln.mod.json", "models", "blocks", "assets/cook.json"):
             src, dst = HERE / part, mod / part
             dst.parent.mkdir(parents=True, exist_ok=True)
             (shutil.copytree if src.is_dir() else shutil.copy)(src, dst)
-        doc = json.loads((HERE / "assets/cook.json").read_text())
-        doc.pop("experimental")
-        (mod / "assets/cook.json").write_text(json.dumps(doc))
+        doc = json.loads((HERE / "assets/physics.json").read_text())
+        doc["models"]["models/banner.gltf"]["cloth"][0]["pin"][2] = 2
+        (mod / "assets/physics.json").write_text(json.dumps(doc))
         off = cook(mod / "assets/cook.json")
         made = sorted(str(p.relative_to(mod)) for p in (mod / "assets").rglob("*") if p.is_file() and p.name not in ("cook.json", "physics.json"))
-    (cooked / "physics-off.json").write_text(json.dumps({"exit": off.returncode, "refused": off.returncode == 2, "message": off.stderr.strip()[-600:],
+    (cooked / "refused-build.json").write_text(json.dumps({"exit": off.returncode, "refused": off.returncode == 2, "message": off.stderr.strip()[-600:],
                                                          "files": made}, indent=1) + "\n")
-    print(f"build-assets: physics off: exit {off.returncode}, files {made}")
+    print(f"build-assets: bad physics: exit {off.returncode}, files {made}")
 
     report = json.loads((cooked / "cook-report.json").read_text())
     want = json.loads((ROOT / "tools/modelcook/tests/fixtures/banner/expected-fabric.json").read_text())
@@ -77,7 +77,7 @@ def main():
                     "chainGuid": pendant_step["chains"][0]["guid"]},
     }
     (cooked / "golden.json").write_text(json.dumps(golden, indent=1) + "\n")
-    print("build-assets: wrote assets/cooked (manifest.json, physics-off.json, golden.json)")
+    print("build-assets: wrote assets/cooked (manifest.json, refused-build.json, golden.json)")
     return 0 if off.returncode == 2 and not made else 1
 
 
