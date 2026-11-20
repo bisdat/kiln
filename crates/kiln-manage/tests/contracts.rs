@@ -212,6 +212,11 @@ fn every_example_deserializes_into_its_type() {
     assert!(r.files.iter().any(|f| f.config));
     let _: install::InstallReceipt = example("install-receipt.json");
     let _: modpack::ModpackManifest = example("kiln-modpack.json");
+    let pack: modpack::pack::PackIndex = example("kiln-pack.json");
+    modpack::pack::check_index(&pack).unwrap();
+    assert_eq!(pack.layer_id(), "pack.ember-run");
+    let inst: modpack::pack::Instance = example("kiln-pack-instance.json");
+    assert_eq!(inst.pack, pack.id);
     let b: state::BootJson = example("state-boot.json");
     assert_eq!(b.chain[2].detail, Some(state::RefusalDetail::ShroudForge));
     let _: state::ModsJson = example("state-mods.json");

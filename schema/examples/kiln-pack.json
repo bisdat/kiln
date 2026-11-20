@@ -1,0 +1,103 @@
+{
+  "format": 2,
+  "kind": "pack",
+  "id": "ember-run",
+  "name": "Ember run",
+  "version": "1.2.0",
+  "created": "2026-11-20T12:00:00Z",
+  "authors": [
+    "Emberfox"
+  ],
+  "description": "Hardcore survival with unified loot.",
+  "game": {
+    "builds": [
+      26430253
+    ]
+  },
+  "kiln": ">=0.2.0-dev",
+  "api": ">=0.2.11",
+  "crucible": {
+    "pack": "pck_7f3k",
+    "version": "pv_9q2m",
+    "slug": "ember-run",
+    "code": "H7QK-3MZP"
+  },
+  "mods": [
+    {
+      "kind": "kiln",
+      "id": "kiln-auto-loot",
+      "version": "0.1.8",
+      "name": "Kiln Auto Loot",
+      "path": "mods/kiln/kiln-auto-loot",
+      "hash": "kdh1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dep": "required",
+      "file": {
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "size": 412311,
+        "url": "https://cdn.frostdev.io/f/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.zip"
+      },
+      "credit": {
+        "author": "frostdev",
+        "source": "https://github.com/frostdev-ops/kiln-auto-loot",
+        "match": "kiln"
+      }
+    },
+    {
+      "kind": "eml",
+      "id": "bigger-stacks",
+      "version": "0.1.0",
+      "path": "mods/eml/bigger-stacks",
+      "hash": "kdh1:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "dep": "required",
+      "credit": {
+        "author": "AuthorName",
+        "source": "https://www.nexusmods.com/enshrouded/mods/310",
+        "match": "nexus"
+      }
+    },
+    {
+      "kind": "kiln",
+      "id": "minimap",
+      "version": "1.3.0",
+      "path": "mods/kiln/minimap",
+      "hash": "kdh1:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "dep": "optional",
+      "default": true,
+      "env": {
+        "client": "optional",
+        "server": "unsupported"
+      }
+    }
+  ],
+  "layer": {
+    "id": "pack.ember-run",
+    "version": "1.2.0",
+    "path": "layer",
+    "hash": "kdh1:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "order": {
+    "kiln": [
+      "kiln-auto-loot",
+      "minimap",
+      "pack.ember-run"
+    ],
+    "late": []
+  },
+  "overrides": [
+    {
+      "path": "kiln-auto-loot.json",
+      "mode": "merge-patch",
+      "side": "both",
+      "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  ],
+  "server": {
+    "settings": {
+      "gameSettings": {
+        "playerHealthFactor": 1.5
+      }
+    },
+    "notes": "Hardcore: one life."
+  },
+  "changes": "Rebalanced loot; added Busy Hands"
+}
