@@ -262,6 +262,7 @@ pub const NAMES: &[&str] = &[
     "pack_local_files",
     "pack_local_write",
     "pack_local_save",
+    "pack_check",
     "crucible_status",
     "crucible_open",
     "crucible_install",

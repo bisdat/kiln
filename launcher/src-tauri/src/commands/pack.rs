@@ -108,6 +108,18 @@ pub async fn pack_secret_scan(file: String, text: String) -> Result<Vec<String>,
     Ok(pack::secret_findings(&file, &text))
 }
 
+/// The pack analysis (kiln_manage::modpack::check, as Crucible runs it on uploads) of a .kilnpack on this PC: the
+/// preview of a dropped or opened file shows it (errors block the install). Never runs anything the pack holds.
+#[tauri::command]
+pub async fn pack_check(path: PathBuf) -> Result<kiln_manage::modpack::check::CheckReport, Error> {
+    blocking(move || {
+        let d = dirs()?;
+        let opts = kiln_manage::modpack::check::CheckOptions { work: Some(d.root.join("modpacks").join("check")), ..Default::default() };
+        kiln_manage::modpack::check::check(kiln_manage::modpack::check::Input::Pack(&path), &opts)
+    })
+    .await
+}
+
 /// The player layer of an instance (local.<pid>): its data files.
 #[tauri::command]
 pub async fn pack_local_files(profile_id: String) -> Result<Vec<layers::LocalFile>, Error> {

@@ -4574,7 +4574,22 @@
       "getKiln": "Kiln holen",
       "joinDiscord": "Dem Discord beitreten",
       "onToast": "Rich Presence ist an",
-      "offToast": "Rich Presence ist aus"
+      "offToast": "Rich Presence ist aus",
+      "pack": {
+        "label": "Mein Crucible-Pack in meinem Discord-Profil zeigen",
+        "hint": "Während du ein Pack von Crucible spielst: sein Name und ein Knopf „Dieses Modpack holen“, der die Seite des Packs öffnet. Packs, die auf diesem PC gebaut wurden, werden nie genannt.",
+        "never": "Nie gezeigt: Server- und Weltnamen oder dein Charakter. Name und Seite deines Crucible-Packs werden gezeigt, während du es spielst.",
+        "state": {
+          "one": "{pack} ({count} Mod)",
+          "other": "{pack} ({count} Mods)"
+        },
+        "getPack": "Dieses Modpack holen",
+        "example": "Glutlauf",
+        "turnOn": "Mein Pack zeigen",
+        "turnOff": "Mein Pack verbergen",
+        "onToast": "Dein Crucible-Pack wird auf Discord gezeigt",
+        "offToast": "Dein Crucible-Pack wird nicht mehr auf Discord gezeigt"
+      }
     },
     "signIn": {
       "title": "Mit Discord anmelden",
@@ -4720,6 +4735,7 @@
       "reportTeam": "Nur für das Kiln-Team, außer du wählst etwas anderes: das Bericht-Zip. Es wird nach 30 Tagen aus dem Kanal des Teams gelöscht.",
       "presenceTitle": "Rich Presence",
       "presence": "Nur solange es an ist und du spielst, und nur an die Discord-App auf diesem PC: Enshrouded mit Kiln, wie viele Mods an sind, und die Zeit. Nie Server- oder Weltnamen, dein Charakter oder welche Mods du nutzt.",
+      "presencePack": "Mit „Mein Crucible-Pack zeigen“ außerdem der Name des Crucible-Packs, das du spielst, und ein Link zu seiner Seite auf frostdev.io. Packs, die auf diesem PC gebaut wurden, werden nie genannt.",
       "testerTitle": "Wenn du dich als Tester meldest",
       "tester": "Das Kiln-Team erhält die Grafikkarte, den Treiber, den Videospeicher und das System dieses PCs sowie wie das Spiel läuft. Deine Ergebnisse gehen in den Beitrag der Version in #testing. Ein Supportbericht, den du anhängst, geht nur an das Team.",
       "keptTitle": "Was frostdev.io speichert",
@@ -4900,6 +4916,16 @@
     }
   },
   "crucible": {
+    "checks": {
+      "running": "Das Pack wird geprüft…",
+      "couldNot": "Das Pack konnte nicht geprüft werden",
+      "passed": "Prüfungen: bestanden",
+      "failed.one": "{count} Problem verhindert die Installation",
+      "failed.other": "{count} Probleme verhindern die Installation",
+      "warnings.one": "{count} Hinweis zum Ansehen",
+      "warnings.other": "{count} Hinweise zum Ansehen",
+      "failedBlock": "Das Pack hat die Prüfungen nicht bestanden: es kann nicht installiert werden."
+    },
     "banner": {
       "title": "Pack-Update",
       "head": "{name} {change}",

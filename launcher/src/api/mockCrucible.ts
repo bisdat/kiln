@@ -495,6 +495,14 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       const unused = MOD_KINDS.flatMap((k) => (prof.mods[k] ?? []).filter((x) => !used.has(k + "/" + x.id + "@" + x.version)).map((x) => ({ kind: k, id: x.id, version: x.version, hash: x.hash })));
       return { profile: clone(prof), unused };
     },
+    // the pack analysis of a file: a path with "unsafe" in it fails, "warn" has a warning
+    pack_check: (a) => {
+      const p = String(a.path);
+      const findings = /unsafe/i.test(p) ? [{ level: "error", code: "zip", message: "entry \"../evil.dll\" has an unsafe path" }]
+        : /warn/i.test(p) ? [{ level: "warning", code: "code-network", message: "references networking (System.Net.Http)", mod: "fps-unlock" }] : [];
+      const errors = findings.filter((f) => f.level === "error").length;
+      return { format: 1, kind: "kiln.pack-check", ok: errors === 0, complete: true, summary: { errors, warnings: findings.length - errors, notes: 0 }, findings, mods: [], conflicts: [], credits: [], catalog: false };
+    },
     pack_peek_format: (a) => (/modpack/i.test(String(a.path)) && !/\.kilnpack$/i.test(String(a.path)) ? 1 : 2),
     pack_build: (a) => {
       const req = a.request as { profile: string; version: string; name?: string };

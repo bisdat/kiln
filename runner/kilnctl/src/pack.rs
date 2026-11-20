@@ -62,6 +62,35 @@ pub enum PackCmd {
         #[arg(long)]
         json: bool,
     },
+    /// The pack analysis Crucible runs on every upload (checks, code scan, data conflicts, prefilled credits). Exit 0:
+    /// no errors; 1: errors (the report says which). Reads nothing outside its inputs, never the network
+    Check {
+        /// A .kilnpack (or give --index and --files: Crucible's stored form)
+        file: Option<PathBuf>,
+        /// kiln-modpack.json of the stored form
+        #[arg(long, requires = "files", conflicts_with = "file")]
+        index: Option<PathBuf>,
+        /// The folder with each file the index names, called by its sha256
+        #[arg(long, requires = "index")]
+        files: Option<PathBuf>,
+        /// Kiln's own mods (Crucible's data/kiln-own-mods.json)
+        #[arg(long)]
+        own: Option<PathBuf>,
+        /// Earlier confirmed credits: [{"kdh1", "author", "source"}]
+        #[arg(long)]
+        known: Option<PathBuf>,
+        /// Blocked sha256/kdh1 values: a JSON list, or Crucible's {"blocked": [{"sha256"}]}
+        #[arg(long)]
+        blocklist: Option<PathBuf>,
+        /// The game-data catalog for lint and the conflict analysis (default: none; names of the game unchecked)
+        #[arg(long)]
+        catalog: Option<PathBuf>,
+        /// Where to unpack [default: the temp folder]
+        #[arg(long)]
+        work: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Install a .kilnpack as an instance (a profile of its own). It runs code from other people: --yes says you agree
     Install {
         file: PathBuf,
@@ -149,7 +178,7 @@ pub enum PackCmd {
 
 /// Does this command use the launcher's data root (the lock)?
 pub fn uses_data(cmd: &PackCmd) -> bool {
-    !matches!(cmd, PackCmd::Verify { .. })
+    !matches!(cmd, PackCmd::Verify { .. } | PackCmd::Check { .. })
 }
 
 fn switches(list: &[String], default_on: bool) -> Result<BTreeMap<String, bool>> {
@@ -272,6 +301,38 @@ pub fn run(cmd: PackCmd) -> Result<i32> {
             show_index(&ix);
             println!("ok");
             Ok(0)
+        }
+        PackCmd::Check { file, index, files, own, known, blocklist, catalog, work, json } => {
+            use kiln_manage::modpack::check::{self, CheckOptions, Input, Level};
+            let read_json = |p: &PathBuf| -> Result<serde_json::Value> {
+                Ok(serde_json::from_slice(&std::fs::read(p).map_err(|e| anyhow::anyhow!("{}: {e}", p.display()))?)?)
+            };
+            let mut o = CheckOptions { work, ..Default::default() };
+            if let Some(p) = &own { o.own = Some(serde_json::from_value(read_json(p)?)?); }
+            if let Some(p) = &known { o.known = serde_json::from_value(read_json(p)?)?; }
+            if let Some(p) = &blocklist { o.blocked = CheckOptions::read_blocklist(&read_json(p)?); }
+            o.lint.no_catalog = catalog.is_none();
+            o.lint.catalog = catalog;
+            let input = match (&file, &index, &files) {
+                (Some(f), None, None) => Input::Pack(f),
+                (None, Some(i), Some(d)) => Input::Stored { index: i, files: d },
+                _ => bail!("give a .kilnpack, or --index and --files"),
+            };
+            let r = check::check(input, &o).km()?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&r)?);
+            } else {
+                if let Some(p) = &r.pack { println!("pack {} {} ({})", p.name, p.version, p.id); }
+                for f in &r.findings {
+                    let l = match f.level { Level::Error => "error", Level::Warning => "warning", Level::Note => "note" };
+                    println!("  {l} {}: {}", f.code, f.message);
+                }
+                for c in &r.credits {
+                    println!("  credit {:<24} {} {} ({}, {})", c.id, c.author.as_deref().unwrap_or("?"), c.source.as_deref().unwrap_or("-"), c.match_kind, c.confidence);
+                }
+                println!("{}: {} error(s), {} warning(s), {} note(s)", if r.ok { "ok" } else { "not ok" }, r.summary.errors, r.summary.warnings, r.summary.notes);
+            }
+            Ok(if r.ok { 0 } else { 1 })
         }
         PackCmd::Install { file, sha256, name, optional, yes, json } => {
             if !yes { bail!("a pack runs code from other people on this PC: add --yes if you trust it"); }

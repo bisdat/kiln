@@ -2298,7 +2298,7 @@ export const COMMANDS = [
   "community_settings_get", "community_settings_set", "community_status", "community_feed", "community_check_member", "community_signout", "community_signin_start", "community_signin_poll", "community_signin_cancel",
   "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",
   "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
-  "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "pack_local_files", "pack_local_write", "pack_local_save", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links", "crucible_resume",
+  "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "pack_local_files", "pack_local_write", "pack_local_save", "pack_check", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links", "crucible_resume",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -2349,8 +2349,9 @@ export const shroudlinkNotice = (profile: Profile, gameId: GameId) => call<Shrou
 // ./mockCommunity.ts (`?discord=` flags). The UI (src/community/) talks to Discord only through these.
 
 /** `community.json`: the Community page shown (Settings), Rich Presence, reply notifications. */
-export interface CommunitySettings { format: number; shown: boolean; presence: boolean; notify: boolean; relay?: string | null }
-export type CommunitySettingsPatch = Partial<Pick<CommunitySettings, "shown" | "presence" | "notify">>;
+/** `presencePack`: "Show my Crucible pack on my Discord profile" (off by default; older backends leave it out). */
+export interface CommunitySettings { format: number; shown: boolean; presence: boolean; presencePack?: boolean; notify: boolean; relay?: string | null }
+export type CommunitySettingsPatch = Partial<Pick<CommunitySettings, "shown" | "presence" | "presencePack" | "notify">>;
 export interface CommunityAccount {
   /** Discord user id (a snowflake). */
   id: string;
@@ -2457,7 +2458,8 @@ export interface ReportPreview {
   contents: ReportContents;
 }
 /** Rich Presence's words in the launcher's language (en.json community.presence.*). */
-export interface PresenceTexts { details: string; stateOne: string; stateOther: string; getKiln: string; joinDiscord: string }
+/** Rich Presence's lines; the last three for "Show my Crucible pack" ("{pack} ({count} mods)", "Get this modpack"). */
+export interface PresenceTexts { details: string; stateOne: string; stateOther: string; getKiln: string; joinDiscord: string; packStateOne: string; packStateOther: string; getPack: string }
 export type Capability = "fsr4" | "xess" | "framegen" | "deck";
 export interface Hardware {
   gpu: string;
@@ -2590,6 +2592,10 @@ export interface PackUpdatePlan {
   layer: { from?: string; to?: string; changed: boolean }; files: PackFileMerge[]; conflicts: number;
   local?: PackLocalPlan | null;
 }
+/** One finding of the pack analysis (kilnctl pack check). */
+export interface PackCheckFinding { level: "error" | "warning" | "note"; code: string; message: string; mod?: string; file?: string }
+/** pack_check: the analysis Crucible runs on uploads, run here on a .kilnpack file (kind "kiln.pack-check"). */
+export interface PackCheckReport { ok: boolean; complete: boolean; summary: { errors: number; warnings: number; notes: number }; findings: PackCheckFinding[] }
 /** A data file of the player layer (`content/<name>.json`). */
 export interface PackLocalFile { path: string; text: string }
 /** pack_inspect: a .kilnpack file before installing it. */
@@ -2728,6 +2734,8 @@ export const crucibleResume = () => call<CrucibleResume>("crucible_resume");
 export const packLocalFiles = (profileId: ProfileId) => call<PackLocalFile[]>("pack_local_files", { profileId });
 export const packLocalWrite = (profileId: ProfileId, path: string, text: string | null) => call<null>("pack_local_write", { profileId, path, text });
 export const packLocalSave = (profileId: ProfileId) => call<Profile>("pack_local_save", { profileId });
+/** The pack analysis of a .kilnpack on this PC (may take seconds for a large pack). */
+export const packCheck = (path: string) => call<PackCheckReport>("pack_check", { path });
 export const packInstance = (profileId: ProfileId) => call<PackInstance | null>("pack_instance", { profileId });
 export const packInstances = () => call<[ProfileId, PackInstance][]>("pack_instances");
 export const packUndo = (profileId: ProfileId) => call<Profile>("pack_undo", { profileId });

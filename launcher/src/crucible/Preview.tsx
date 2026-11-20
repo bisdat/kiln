@@ -178,7 +178,11 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
   useEffect(() => { if (m && !optional) setOptional({ ...m.optional }); }, [m, optional]);
   // a pack that finished uploading while the player waited: Install is ready
   useEffect(() => { if (wait && m && m.uploading == null) setWait(false); }, [wait, m]);
-  const block = installBlock(m, game, status.data);
+  const checks = useQuery({ queryKey: ["pack_check", source.kind === "file" ? source.path : ""], enabled: source.kind === "file",
+    queryFn: () => api.packCheck((source as { path: string }).path), retry: false, staleTime: 5 * 60_000 });
+  const checkErrors = checks.data?.findings.filter((f) => f.level === "error") ?? [];
+  const block = installBlock(m, game, status.data) ?? (source.kind !== "file" ? null : checks.isLoading ? t("crucible.checks.running")
+    : checks.error ? t("crucible.checks.couldNot") : checkErrors.length || checks.data?.ok === false ? t("crucible.checks.failedBlock") : null);
   const trusted = !!m?.trusted;
   const ok = !!m && (trust || trusted) && !block && !busy;
   const go = async () => {
@@ -251,6 +255,7 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
                 {wait ? t("crucible.preview.waiting", { name: m.creator?.name ?? m.title, pct: m.uploading }) : t("crucible.preview.stillUploading", { name: m.creator?.name ?? m.title, pct: m.uploading })}
               </Banner></div>
             )}
+            {source.kind === "file" && <Checks q={checks} />}
             {m.instance ? (
               <p className="kcr-p" data-testid="crucible-has-instance">{update ? t("crucible.preview.haveUpdate", { version: update.to.version }) : t("crucible.preview.have")}</p>
             ) : <p className="kcr-p">{t("crucible.preview.ownProfile")}</p>}
@@ -288,6 +293,24 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
         )}
       </div>
     </Modal>
+  );
+}
+
+/** The pack analysis of a file (no Crucible result exists for one): errors in red (they block the install), warnings
+ *  in yellow, "Checks: passed" when there is nothing to say. */
+function Checks({ q }: { q: { isLoading: boolean; error: unknown; data?: api.PackCheckReport } }) {
+  const t = useT();
+  if (q.isLoading) return <p className="k-hint" data-testid="crucible-checks">{t("crucible.checks.running")}</p>;
+  if (q.error || !q.data) return <div data-testid="crucible-checks"><Banner tone="err" title={t("crucible.checks.couldNot")}>{crucibleError(q.error)}</Banner></div>;
+  const errors = q.data.findings.filter((f) => f.level === "error");
+  const warnings = q.data.findings.filter((f) => f.level === "warning");
+  const line = (f: api.PackCheckFinding, i: number) => <li key={i}>{f.mod ? <span className="k-mono">{f.mod}: </span> : null}{f.message}</li>;
+  return (
+    <div data-testid="crucible-checks">
+      {errors.length > 0 && <Banner tone="err" title={t("crucible.checks.failed", { count: errors.length })}><ul className="kcr-findings">{errors.slice(0, 20).map(line)}</ul></Banner>}
+      {warnings.length > 0 && <Banner tone="warn" title={t("crucible.checks.warnings", { count: warnings.length })}><ul className="kcr-findings">{warnings.slice(0, 20).map(line)}</ul></Banner>}
+      {!errors.length && !warnings.length && <p className="k-hint">{t("crucible.checks.passed")}</p>}
+    </div>
   );
 }
 

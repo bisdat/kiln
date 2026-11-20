@@ -46,7 +46,7 @@ after a schema change.
   - `docs` links the code to its page.
   - Spans are UTF-8 byte offsets; columns in the text form are code points.
   - Codes: KL0xx syntax, KL1xx schema, KL2xx manifest, KL3xx ids, KL4xx game ids, KL5xx assets/cook, KL6xx licences,
-    KL9xx internal.
+    KL7xx mods together, KL9xx internal.
 - **Game ids.** Completion and hover come from the game-data catalog.
   - Location: `kiln.catalog.path`, else `$KILN_CATALOG`, else `~/.local/share/kiln/catalog`. The extension reads
     `client.json`, else `server.json`.

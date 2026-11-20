@@ -306,6 +306,7 @@ pub fn run() {
             commands::pack::pack_local_files,
             commands::pack::pack_local_write,
             commands::pack::pack_local_save,
+            commands::pack::pack_check,
             commands::crucible::crucible_status,
             commands::crucible::crucible_open,
             commands::crucible::crucible_install,

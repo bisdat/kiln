@@ -4574,7 +4574,22 @@
       "getKiln": "Consigue Kiln",
       "joinDiscord": "Únete al Discord",
       "onToast": "Rich Presence activado",
-      "offToast": "Rich Presence desactivado"
+      "offToast": "Rich Presence desactivado",
+      "pack": {
+        "label": "Mostrar mi pack de Crucible en mi perfil de Discord",
+        "hint": "Mientras juegas un pack de Crucible: su nombre y un botón Conseguir este modpack que abre la página del pack. Los packs hechos en este PC nunca se nombran.",
+        "never": "Nunca se muestra: nombres de servidores, nombres de mundos ni tu personaje. El nombre y la página de tu pack de Crucible se muestran mientras lo juegas.",
+        "state": {
+          "one": "{pack} ({count} mod)",
+          "other": "{pack} ({count} mods)"
+        },
+        "getPack": "Conseguir este modpack",
+        "example": "Carrera de brasas",
+        "turnOn": "Mostrar mi pack",
+        "turnOff": "Ocultar mi pack",
+        "onToast": "Tu pack de Crucible se muestra en Discord",
+        "offToast": "Tu pack de Crucible ya no se muestra en Discord"
+      }
     },
     "signIn": {
       "title": "Iniciar sesión con Discord",
@@ -4720,6 +4735,7 @@
       "reportTeam": "Solo para el equipo de Kiln, salvo que elijas otra cosa: el zip del informe. Se elimina del canal del equipo a los 30 días.",
       "presenceTitle": "Rich Presence",
       "presence": "Solo mientras está activado y juegas, y solo a la app de Discord de este PC: Enshrouded con Kiln, cuántos mods están activos y el tiempo. Nunca nombres de servidores o mundos, tu personaje ni qué mods usas.",
+      "presencePack": "Con Mostrar mi pack de Crucible activado, también el nombre del pack de Crucible que juegas y un enlace a su página en frostdev.io. Los packs hechos en este PC nunca se nombran.",
       "testerTitle": "Cuando te ofreces como tester",
       "tester": "El equipo de Kiln recibe la tarjeta gráfica, el controlador, la memoria de video y el sistema de este PC, y cómo va el juego. Tus resultados van a la publicación de la build en #testing. Un informe de soporte que adjuntes va solo al equipo.",
       "keptTitle": "Qué guarda frostdev.io",
@@ -4900,6 +4916,16 @@
     }
   },
   "crucible": {
+    "checks": {
+      "running": "Revisando el pack…",
+      "couldNot": "No se pudo revisar el pack",
+      "passed": "Revisiones: superadas",
+      "failed.one": "{count} problema impide la instalación",
+      "failed.other": "{count} problemas impiden la instalación",
+      "warnings.one": "{count} cosa para revisar",
+      "warnings.other": "{count} cosas para revisar",
+      "failedBlock": "El pack no superó las revisiones: no se puede instalar."
+    },
     "banner": {
       "title": "Actualización del pack",
       "head": "{name} {change}",

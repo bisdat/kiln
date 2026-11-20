@@ -4574,7 +4574,22 @@
       "getKiln": "Get Kiln",
       "joinDiscord": "Join the Discord",
       "onToast": "Rich Presence is on",
-      "offToast": "Rich Presence is off"
+      "offToast": "Rich Presence is off",
+      "pack": {
+        "label": "Show my Crucible pack on my Discord profile",
+        "hint": "While you play a pack from Crucible: its name, and a Get this modpack button that opens the pack's page. Packs made on this PC are never named.",
+        "never": "Never shown: server names, world names or your character. Your Crucible pack's name and page are shown while you play it.",
+        "state": {
+          "one": "{pack} ({count} mod)",
+          "other": "{pack} ({count} mods)"
+        },
+        "getPack": "Get this modpack",
+        "example": "Ember run",
+        "turnOn": "Show my pack",
+        "turnOff": "Hide my pack",
+        "onToast": "Your Crucible pack shows on Discord",
+        "offToast": "Your Crucible pack no longer shows on Discord"
+      }
     },
     "signIn": {
       "title": "Sign in with Discord",
@@ -4720,6 +4735,7 @@
       "reportTeam": "For the Kiln team only, unless you choose otherwise: the report zip. It's deleted from the team's channel after 30 days.",
       "presenceTitle": "Rich Presence",
       "presence": "Only while it's on and you play, and only to the Discord app on this PC: Enshrouded with Kiln, how many mods are on, and the time. Never server or world names, your character, or which mods you use.",
+      "presencePack": "With Show my Crucible pack on, also the name of the Crucible pack you play and a link to its page on frostdev.io. Packs made on this PC are never named.",
       "testerTitle": "When you volunteer as a tester",
       "tester": "The Kiln team gets this PC's graphics card, driver, video memory, system and how the game runs. Your results go to the build's post in #testing. A support report you attach goes to the team only.",
       "keptTitle": "What frostdev.io keeps",
@@ -4900,6 +4916,16 @@
     }
   },
   "crucible": {
+    "checks": {
+      "running": "Checking the pack…",
+      "couldNot": "The pack couldn't be checked",
+      "passed": "Checks: passed",
+      "failed.one": "{count} problem stops the install",
+      "failed.other": "{count} problems stop the install",
+      "warnings.one": "{count} thing to look at",
+      "warnings.other": "{count} things to look at",
+      "failedBlock": "The pack failed its checks: it can't be installed."
+    },
     "banner": {
       "title": "Pack update",
       "head": "{name} {change}",

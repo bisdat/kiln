@@ -4574,7 +4574,22 @@
       "getKiln": "Obtenir Kiln",
       "joinDiscord": "Rejoindre le Discord",
       "onToast": "Rich Presence activé",
-      "offToast": "Rich Presence désactivé"
+      "offToast": "Rich Presence désactivé",
+      "pack": {
+        "label": "Afficher mon pack Crucible sur mon profil Discord",
+        "hint": "Pendant que tu joues un pack de Crucible : son nom et un bouton Obtenir ce modpack qui ouvre la page du pack. Les packs créés sur ce PC ne sont jamais nommés.",
+        "never": "Jamais affiché : noms de serveurs, noms de mondes ou ton personnage. Le nom et la page de ton pack Crucible sont affichés pendant que tu y joues.",
+        "state": {
+          "one": "{pack} ({count} mod)",
+          "other": "{pack} ({count} mods)"
+        },
+        "getPack": "Obtenir ce modpack",
+        "example": "Course des braises",
+        "turnOn": "Afficher mon pack",
+        "turnOff": "Masquer mon pack",
+        "onToast": "Ton pack Crucible s'affiche sur Discord",
+        "offToast": "Ton pack Crucible ne s'affiche plus sur Discord"
+      }
     },
     "signIn": {
       "title": "Se connecter avec Discord",
@@ -4720,6 +4735,7 @@
       "reportTeam": "Pour l'équipe Kiln seulement, sauf si vous choisissez autrement : le zip du rapport. Il est supprimé du salon de l'équipe au bout de 30 jours.",
       "presenceTitle": "Rich Presence",
       "presence": "Seulement quand c'est activé et que vous jouez, et seulement vers l'application Discord de ce PC : Enshrouded avec Kiln, le nombre de mods activés et la durée. Jamais les noms de serveurs ou de mondes, votre personnage ni les mods que vous utilisez.",
+      "presencePack": "Avec Afficher mon pack Crucible activé, aussi le nom du pack Crucible auquel tu joues et un lien vers sa page sur frostdev.io. Les packs créés sur ce PC ne sont jamais nommés.",
       "testerTitle": "Quand vous devenez testeur",
       "tester": "L'équipe Kiln reçoit la carte graphique de ce PC, le pilote, la mémoire vidéo, le système et la façon dont le jeu tourne. Vos résultats vont dans le message de la version dans #testing. Un rapport d'assistance que vous joignez va à l'équipe seulement.",
       "keptTitle": "Ce que garde frostdev.io",
@@ -4900,6 +4916,16 @@
     }
   },
   "crucible": {
+    "checks": {
+      "running": "Vérification du pack…",
+      "couldNot": "Le pack n'a pas pu être vérifié",
+      "passed": "Vérifications : réussies",
+      "failed.one": "{count} problème empêche l'installation",
+      "failed.other": "{count} problèmes empêchent l'installation",
+      "warnings.one": "{count} point à regarder",
+      "warnings.other": "{count} points à regarder",
+      "failedBlock": "Le pack n'a pas passé les vérifications : il ne peut pas être installé."
+    },
     "banner": {
       "title": "Mise à jour du pack",
       "head": "{name} {change}",
