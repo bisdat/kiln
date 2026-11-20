@@ -3,7 +3,8 @@
 import React from 'react';
 import { items, CATEGORY_PT } from '../src/gamedata.js';
 import { itemIcon, rarityColor, rarityOf, RARITY_PT } from '../src/ui.js';
-import { t } from '../src/i18n.js';
+import { t } from '../../i18n';
+import { t as tv } from '../src/i18n.js';
 import { useEditorEnv } from './env.jsx';
 
 /** A neutral square: an item with no icon (an unknown item, a mod item without one) and, through art.js, a game icon
@@ -22,12 +23,13 @@ export const tierOf = (itemId) => {
 /** A category's word: the translation, else the game's name spelled out ("FishingRod": "Fishing rod"). */
 export const categoryWord = (c) => {
   if (!c) return '';
-  const w = t(CATEGORY_PT[c] || c);
+  // upstream's category words are Portuguese keys (src/gamedata.js): tv words them in the launcher's language
+  const w = CATEGORY_PT[c] ? tv(CATEGORY_PT[c]) : c;
   return w !== c ? w : c.replace(/([a-z])([A-Z])/g, (_, a, b) => `${a} ${b.toLowerCase()}`);
 };
 
 /** The rarity words, 1..5 (Common .. Legendary). */
-export const rarityWord = (r) => t(RARITY_PT[r] || RARITY_PT[0]);
+export const rarityWord = (r) => tv(RARITY_PT[r] || RARITY_PT[0]);
 
 /**
  * One slot: a dark well, the item's icon, its count (stacks) or level, a durability line, and its rarity as a glaze
@@ -64,7 +66,7 @@ export function Stepper({ value, onChange, min = 0, max = 65535, big, label, pre
       {big && <button type="button" className="ke-step-b" onClick={() => step(-big)} disabled={value <= min} aria-label={`−${big}`}>−{big}</button>}
       <button type="button" className="ke-step-b" onClick={() => step(-1)} disabled={value <= min} aria-label="−1">−</button>
       {env.deck ? (
-        <button type="button" className="ke-step-v" aria-label={`${label}: ${value}`} data-deck-a={t('Mudar')} data-deck-id={id ?? `value-${label}`}
+        <button type="button" className="ke-step-v" aria-label={`${label}: ${value}`} data-deck-a={t('editor.common.change')} data-deck-id={id ?? `value-${label}`}
           onClick={() => env.askNumber({ title: label, value, min, max, presets, onDone: (v) => onChange(clamp(v)) })}>{value}</button>
       ) : (
         <input className="ke-step-v" type="number" inputMode="numeric" value={value} min={min} max={max} aria-label={label}
@@ -79,7 +81,7 @@ export function Stepper({ value, onChange, min = 0, max = 65535, big, label, pre
 /** Five diamonds in the rarity glazes; the chosen one and those below it are lit. */
 export function RarityPick({ value, onChange }) {
   return (
-    <span className="ke-dias" role="radiogroup" aria-label={t('Raridade')}>
+    <span className="ke-dias" role="radiogroup" aria-label={t('editor.common.rarity')}>
       {[1, 2, 3, 4, 5].map((r) => (
         <button key={r} type="button" role="radio" aria-checked={value === r} title={rarityWord(r)} className={'ke-dia' + (r <= value ? ' on' : '')}
           style={{ '--r': rarityColor(r) }} onClick={() => onChange(r)}><i /></button>
@@ -92,7 +94,7 @@ export function RarityPick({ value, onChange }) {
 /** Upgrade diamonds: `value` of `max` lit (gold); a click sets the count, a click on the last lit one takes it back. */
 export function UpgradePick({ value, max, onChange }) {
   return (
-    <span className="ke-dias" role="group" aria-label={t('Melhorias')}>
+    <span className="ke-dias" role="group" aria-label={t('editor.common.upgrades')}>
       {Array.from({ length: max }, (_, i) => (
         <button key={i} type="button" className={'ke-dia gold' + (i < value ? ' on' : '')} aria-label={`${i + 1}`}
           onClick={() => onChange(i + 1 === value ? i : i + 1)}><i /></button>
@@ -115,10 +117,10 @@ export function Meter({ value, max, tone, onChange, label }) {
   return (
     <span className="ke-meter">
       {env.deck ? (
-        <button type="button" className={`ke-meter-bar ${tone || ''}`} aria-label={`${label}: ${value}/${max}`} data-deck-a={t('Mudar')} data-deck-id={`value-${label}`}
-          onClick={() => env.askNumber({ title: label, value, min: 0, max, presets: [{ label: t('Cheio'), value: max }], onDone: onChange })}>{bar}</button>
+        <button type="button" className={`ke-meter-bar ${tone || ''}`} aria-label={`${label}: ${value}/${max}`} data-deck-a={t('editor.common.change')} data-deck-id={`value-${label}`}
+          onClick={() => env.askNumber({ title: label, value, min: 0, max, presets: [{ label: t('editor.parts.full'), value: max }], onDone: onChange })}>{bar}</button>
       ) : (
-        <span className={`ke-meter-bar ${tone || ''}`} onClick={set} title={t('Clique para definir')} role="presentation">{bar}</span>
+        <span className={`ke-meter-bar ${tone || ''}`} onClick={set} title={t('editor.parts.clickToSet')} role="presentation">{bar}</span>
       )}
       <span className="k-mono ke-meter-n">{value}/{max}</span>
     </span>

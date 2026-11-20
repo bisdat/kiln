@@ -4263,5 +4263,338 @@
         "discordLimit": "Discord 限制了 Kiln 支持发帖的频率，目前已达到上限。你的结果已保留：请在 {wait}后再试。"
       }
     }
+  },
+  "editor": {
+    "page": {
+      "title": "编辑器",
+      "lookingForSaves": "正在查找存档…",
+      "pickCharacter": "请选择角色。",
+      "noSaves": "未找到角色存档。",
+      "cannotParse": "无法解析此存档，不能编辑。",
+      "readOnlyNoSave": "此存档只能查看：保存功能已关闭。",
+      "gameOpen": "游戏正在运行：请先关闭游戏再保存。",
+      "unsaved": "改动尚未保存。Kiln 会在写入前备份存档。",
+      "levelBackup": "{n} 级。Kiln 会在写入前备份存档。",
+      "notSaved": "未保存",
+      "discard": "放弃更改",
+      "backups": "备份",
+      "save": "保存",
+      "saving": "正在保存…",
+      "saved": "已保存",
+      "savedHint": "保存前的存档已放入「备份」。",
+      "gameOpenShort": "游戏运行中：关闭后才能保存",
+      "error": "错误",
+      "note": "注意",
+      "readAgain": "重新读取",
+      "close": "关闭",
+      "parts": "存档内容",
+      "characters": "角色",
+      "openFile": "打开文件…",
+      "pickCharacterButton": "选择角色",
+      "open": "打开",
+      "opened": "已打开",
+      "discardTitle": "放弃更改？",
+      "discardAndOpen": "放弃并打开",
+      "discardBody": "对 {nome} 的改动尚未保存。",
+      "cancel": "取消",
+      "back": "返回",
+      "readOnlyError": "只读：{erro}",
+      "pointsRaised": "你提高了已用技能点（{antes} → {depois}）。请在「技能」页输入技能点总数，以便编辑器检查；超过总数时，游戏会重置整个技能树。",
+      "notWritten": "未保存。{problemas}",
+      "gameWroteSince": "编辑器读取此存档后，游戏又写入了它。请重新读取，以编辑当前的存档（此处的改动会丢失）。"
+    },
+    "tabs": {
+      "equipment": "装备",
+      "inventory": "背包",
+      "skills": "技能",
+      "knowledge": "知识"
+    },
+    "backups": {
+      "title": "{nome} 的备份",
+      "openFolder": "打开文件夹",
+      "hint": "游戏会自动保留最近 10 份存档；编辑器每次写入前也会复制一份存档。",
+      "dropsChanges": "还原会丢弃尚未保存的改动。",
+      "looking": "正在查找备份…",
+      "none": "此存档没有备份。",
+      "restore": "还原",
+      "restored": "已还原",
+      "restoredBody": "{arquivo}（{quando}）。还原前的存档已保留为备份。",
+      "restoreTitle": "还原此备份？",
+      "restoreBody": "当前存档会保留为备份。",
+      "kindGame": "游戏副本",
+      "kindKiln": "Kiln 备份",
+      "beforeSave": "保存前"
+    },
+    "common": {
+      "level": "等级",
+      "empty": "空",
+      "change": "更改",
+      "add": "添加",
+      "tierN": "{n} 阶",
+      "rarity": "稀有度",
+      "amount": "数量",
+      "aboveStack": "超过游戏的堆叠上限 {n}：适用于装有提高堆叠上限模组的世界",
+      "gameStack": "游戏堆叠上限（{n}）",
+      "maxAmount": "单格上限（{n}）",
+      "upgrades": "升级",
+      "remove": "移除",
+      "levelN": "{n} 级",
+      "pick": "选择",
+      "noMatch": "没有符合筛选条件的内容。",
+      "all": "全部"
+    },
+    "equipment": {
+      "xp": "本级经验",
+      "attrsHint": "属性来自技能树节点（在「技能」页编辑）。",
+      "attrsFlameHint": "游戏还会加上随灵火等级提升的节点和装备加成；这两者都不保存在角色存档中。",
+      "emptyHint": "空栏位。请在游戏中装备；这里可以编辑或卸下已穿戴的装备。",
+      "backpackFull": {
+        "other": "不会卸下 {item}：这会删除它的容器以及其中保存的 {count} 格物品。请先在游戏中清空。"
+      },
+      "groups": {
+        "armour": "护甲",
+        "appearance": "外观",
+        "accessories": "饰品"
+      },
+      "slots": {
+        "headVanity": "头部（外观）",
+        "chestVanity": "胸部（外观）",
+        "armsVanity": "手部（外观）",
+        "legsVanity": "腿部（外观）",
+        "feetVanity": "脚部（外观）",
+        "head": "头部",
+        "chest": "胸部",
+        "arms": "手部",
+        "legs": "腿部",
+        "feet": "脚部",
+        "ring": "戒指",
+        "shield": "盾牌",
+        "hook": "钩爪",
+        "glider": "滑翔翼",
+        "backpack": "背包",
+        "slot": "栏位 {n}"
+      }
+    },
+    "inventory": {
+      "move": "移动",
+      "slotEmpty": "第 {n} 格为空",
+      "putHere": "放到这里",
+      "slotsUsed": {
+        "other": "{n}/{total} 格"
+      },
+      "addItem": "添加物品",
+      "swapBar": "切换栏",
+      "swapBarHint": "按 Alt 与快捷栏互换",
+      "actionBar": "快捷栏",
+      "deckHint": "A 更改物品 · Y 移动物品 · 在空格上按 A 添加物品",
+      "hint": "拖动可移动 · 双击空格可添加 · Delete 删除 · Ctrl+D 复制",
+      "noneSelected": "未选择物品。",
+      "noneSelectedHint": "选择一个格子以查看和更改其中的物品。",
+      "emptyHint": "从物品目录中选择要放到这里的物品。",
+      "pickItem": "选择物品"
+    },
+    "inspector": {
+      "item": "物品",
+      "stacksTo": "最多堆叠 {n} 个",
+      "max": "最大",
+      "levelSplit": {
+        "other": "= 基础 {base} + {count} 次升级"
+      },
+      "aboveItemMax": "超过此物品的上限（{max}）：除非模组放宽了范围，服务器加载时会将其限制在上限内",
+      "upgradesHint": "稀有度决定物品可升级的次数：最高等级 = 基础等级 + 稀有度。",
+      "gem": "镶嵌的宝石",
+      "gemUnknown": "id {id} 不在物品目录中",
+      "noGem": "— 无宝石 —",
+      "gemLevel": "宝石等级",
+      "aboveGemMax": "超过此宝石的上限（{max}）：除非模组放宽了范围，服务器加载时会将其限制在上限内",
+      "durability": "耐久度",
+      "repair": "修复",
+      "water": "水量",
+      "fill": "装满",
+      "duplicateHint": "将物品复制到第一个空格",
+      "duplicate": "复制",
+      "attributes": "属性",
+      "physicalArmour": "物理护甲",
+      "magicalArmour": "魔法护甲",
+      "raisesSkill": "提升 {no} 的技能等级",
+      "unknownLines": "没有数值的属性会按尚未测定的公式随物品等级变化；编辑器不会显示无法确认的数值。"
+    },
+    "parts": {
+      "full": "已满",
+      "clickToSet": "点击设置"
+    },
+    "catalog": {
+      "items": "物品",
+      "countLimited": {
+        "other": "{count} 个物品（显示 {limite} 个，请缩小搜索范围）"
+      },
+      "count": {
+        "other": "{count} 个物品"
+      },
+      "categories": "分类",
+      "searchDeck": "按名称搜索（Steam + X：键盘）",
+      "search": "按名称搜索…",
+      "searchLabel": "搜索",
+      "type": "输入",
+      "allRarities": "全部",
+      "tier": "阶",
+      "targetFull": "目标：物品栏已满",
+      "target": "目标：第 {n} 格",
+      "pickHint": "请选择物品。",
+      "deckHint": "按 A 选择，再按 A 添加。",
+      "hint": "双击可直接添加。",
+      "cat": {
+        "weapons": "武器",
+        "armour": "护甲",
+        "ammo": "弹药",
+        "magic": "法术与宝石",
+        "consumables": "消耗品",
+        "materials": "材料",
+        "tools": "工具",
+        "building": "建筑",
+        "cosmetics": "装饰品与收藏品"
+      }
+    },
+    "knowledge": {
+      "noBlock": "此存档没有知识数据。",
+      "search": "按名称或 id 搜索",
+      "above": "高于等级",
+      "allLevels": "全部",
+      "show": "显示",
+      "filter": {
+        "itemsRecipes": "物品和配方",
+        "items": "仅物品",
+        "recipes": "仅配方",
+        "everything": "全部"
+      },
+      "removeN": "移除 {n} 项",
+      "kind": "类型",
+      "name": "名称",
+      "state": "状态",
+      "id": "id {id}",
+      "kinds": {
+        "item": "物品",
+        "recipe": "配方",
+        "misc": "其他"
+      },
+      "count": {
+        "other": "{n}/{total} 条"
+      },
+      "unnamed": {
+        "other": "{count} 条名称未知"
+      },
+      "shownLimit": "仅显示前 400 条；使用搜索或等级筛选查看其余条目。",
+      "hint": "移除高等级材料会关闭依赖它的配方。配方不保存在存档中：游戏会根据知识重新计算，本地和服务器世界中都是如此。"
+    },
+    "skills": {
+      "total": "技能点总数",
+      "minusLevel": "−1 级",
+      "plusLevel": "+1 级",
+      "tree": "技能树",
+      "used": "已用",
+      "available": "可用",
+      "enterTotal": "输入总数…",
+      "changeTotal": "点击更改总数",
+      "totalHint": "技能点总数（已用 + 可用，与游戏中显示的一致）：",
+      "zoomIn": "放大",
+      "zoomOut": "缩小",
+      "centre": "居中",
+      "cost": "消耗 {n}",
+      "maxN": "最高 {n}",
+      "deckHint": "A：+1 级 · Y：−1",
+      "hint": "左键：+1 级 · 右键：−1",
+      "class": {
+        "warrior": "战士",
+        "ranger": "游侠",
+        "mage": "法师",
+        "neutral": "中立"
+      }
+    },
+    "deck": {
+      "delete": "删除",
+      "range": "{min} 至 {max}",
+      "min": "最小",
+      "use": "使用",
+      "current": "当前"
+    },
+    "art": {
+      "preparing": "正在准备游戏图像…",
+      "needsClient": "游戏图像需要 Enshrouded 客户端（设置 → 游戏）。",
+      "notFound": "未找到游戏图像。请运行 {script}。"
+    },
+    "game": {
+      "tree": {
+        "aboveMax": "{no}：等级 {nivel} 超过上限 {max}",
+        "orphans": "与技能树其余部分不相连的节点：{nos}",
+        "overTotal": "已用技能点（{usados}）超过角色总数（{total}）"
+      },
+      "unknownItem": "未知物品（0x{h}）",
+      "errors": {
+        "unknownItems": "此存档含有未知物品（可能来自已移除的模组）：只读",
+        "levelXp": "等级或经验无效",
+        "skill": "技能无效",
+        "item": "未知物品：{id}",
+        "slotAmount": "格子或数量无效",
+        "sameSlot": "两个物品位于物品栏的同一格",
+        "knowledge": "知识条目无效",
+        "knowledgeRepeated": "知识条目 id 重复",
+        "closeGame": "保存前请关闭 Enshrouded：否则游戏会覆盖编辑内容。",
+        "notOpen": "存档未打开编辑",
+        "noEquipment": "编辑器在此存档中找不到装备和物品栏",
+        "skillList": "编辑器无法识别此存档的技能列表",
+        "notSave": "不是 Enshrouded 存档"
+      },
+      "saveFileFilter": "Enshrouded 存档",
+      "rarity": {
+        "none": "无稀有度",
+        "common": "普通",
+        "uncommon": "罕见",
+        "rare": "稀有",
+        "epic": "史诗",
+        "legendary": "传奇"
+      },
+      "category": {
+        "weapon": "武器",
+        "equipment": "装备",
+        "material": "材料",
+        "consumable": "消耗品",
+        "ammunition": "弹药",
+        "tool": "工具",
+        "building": "建筑",
+        "blueprint": "蓝图",
+        "collectible": "收藏品",
+        "cosmetic": "装饰品",
+        "gem": "宝石"
+      },
+      "attribute": {
+        "constitution": "体质",
+        "spirit": "精神",
+        "endurance": "耐力",
+        "strength": "力量",
+        "dexterity": "敏捷",
+        "intelligence": "智力"
+      },
+      "classes": {
+        "survivor": "生存者",
+        "beastmaster": "驯兽师",
+        "ranger": "游侠",
+        "assassin": "刺客",
+        "trickster": "诡术师",
+        "wizard": "巫师",
+        "healer": "治疗者",
+        "battlemage": "战斗法师",
+        "tank": "坦克",
+        "warrior": "战士",
+        "barbarian": "野蛮人",
+        "athlete": "运动员"
+      },
+      "knowledge": {
+        "pickedUp": "已拾取",
+        "used": "已使用",
+        "inspected": "已查看",
+        "seen": "已见过",
+        "crafted": "已制作"
+      }
+    }
   }
 }

@@ -28,7 +28,8 @@ Unchanged: `data/*`, `shared/*` except `character.mjs`, and every `src/` file no
 | `src/Catalog.jsx` | gameart: the item list is built when the catalog opens (mod items merge after the module loads) |
 | `shared/character.mjs` | gameart: when no equipment list of at least 4 pieces fits, the search accepts a shorter one (new characters wear fewer; the inventory header and the mask must still close; checked: byte-identical round trips) |
 | `src/i18n/en.json` | gameart: "Unknown item (0x{h})", the read-only note for saves with unknown items; Kiln's UI strings (`kiln/`, `deck/`) at the end, with English words for upstream's three messages about a save it cannot read |
-| `src/i18n.js` | without a saved choice, anything but Portuguese defaults to English (upstream: Portuguese) |
+| `src/i18n.js` | without a saved choice, anything but Portuguese defaults to English (upstream: Portuguese); outside Portuguese, `t()` words a Portuguese key listed in `src/i18n/launcher-keys.json` with the launcher's text (`launcher/src/i18n`, "editor.game.*") in the launcher's language, and `localeAtual()` is the launcher's locale |
+| `src/i18n/launcher-keys.json` | Kiln's: each upstream text the launcher shows (tree checks, save errors, rarity, category and attribute words, skill-tree class labels, knowledge states) → its launcher key; `bun scripts/i18n-check.ts` checks that each key exists |
 | `src/styles.css` | scoped under `.kiln-editor` by `launcher/scripts/scope-editor-css.ts` (`:root`/`html`/`body`/`#root` → `.kiln-editor`, every selector prefixed, `.viewport` absolute instead of fixed). Regenerate, don't hand-edit |
 
 Also Kiln's: `deck/` (the Deck's Editor tab, `DeckEditor.jsx`: the same views in the Deck env, the number pad, the
@@ -52,8 +53,11 @@ its rules (equipment mask order, socket bytes, level includes upgrades, the tree
 appears only as item and skill icons. Two rules differ: an amount may go above the item's stack size, up to the
 65535 the save holds, with a note (a mod may have raised stack sizes, which the editor cannot know; upstream stopped
 at the vanilla stack). And the level warning compares the base level (level minus
-upgrades) with the item's maxLevel, as the game writes a level-10 hat with 5 upgrades as level 15. The UI is English
-(`definirIdioma('en')`); Kiln's strings are at the end of `src/i18n/en.json`.
+upgrades) with the item's maxLevel, as the game writes a level-10 hat with 5 upgrades as level 15. The UI speaks the
+launcher's language: Kiln's files call the launcher's `t("editor.…")` (`launcher/src/i18n/*.json`, the `editor` keys, checked
+by `bun scripts/i18n-check.ts --source`), upstream's texts go through `src/i18n.js` and `launcher-keys.json`. Item and skill
+names stay the game's (`definirIdioma('en')`: English outside Portuguese). The Kiln strings at the end of `src/i18n/en.json`
+are no longer read (kept for a clean re-vendor diff).
 
 No longer mounted, kept for a clean re-vendor: `src/App.jsx`, `src/Backpack.jsx`, `src/Character.jsx`,
 `src/SkillTree.jsx`, `src/Conhecimento.jsx`, `src/Catalog.jsx`, `src/ItemEditor.jsx`, `src/ItemStats.jsx`,

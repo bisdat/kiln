@@ -4903,5 +4903,345 @@
       "show": "Show the Community page",
       "showHint": "Kiln's Discord in the launcher. Off hides the page, its Deck tab and every Send to Kiln support, and the launcher stops everything it does with Discord."
     }
+  },
+  "editor": {
+    "page": {
+      "title": "Editor",
+      "lookingForSaves": "Looking for saves…",
+      "pickCharacter": "Pick a character.",
+      "noSaves": "No character saves found.",
+      "cannotParse": "This save could not be parsed for editing.",
+      "readOnlyNoSave": "This save can only be read: Save is off.",
+      "gameOpen": "The game is open: close it to save.",
+      "unsaved": "Changes not saved yet. Kiln backs the save up before it writes.",
+      "levelBackup": "Level {n}. Kiln backs the save up before it writes.",
+      "notSaved": "Not saved",
+      "discard": "Discard",
+      "backups": "Backups",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "savedHint": "The save before it is in Backups.",
+      "gameOpenShort": "Game running: close it to save",
+      "error": "Error",
+      "note": "Note",
+      "readAgain": "Read again",
+      "close": "Close",
+      "parts": "Parts of the save",
+      "characters": "Characters",
+      "openFile": "Open file…",
+      "pickCharacterButton": "Pick a character",
+      "open": "Open",
+      "opened": "Open",
+      "discardTitle": "Discard the changes?",
+      "discardAndOpen": "Discard and open",
+      "discardBody": "The changes to {nome} are not saved yet.",
+      "cancel": "Cancel",
+      "back": "Back",
+      "readOnlyError": "Read-only: {erro}",
+      "pointsRaised": "You raised the points in use ({antes} → {depois}). Enter your point total on the Skills tab so the editor can check it; above the total, the game resets the whole tree.",
+      "notWritten": "Not saved. {problemas}",
+      "gameWroteSince": "The game wrote this save after the editor read it. Read it again to edit the save as it is now (the changes made here are lost)."
+    },
+    "tabs": {
+      "equipment": "Equipment",
+      "inventory": "Backpack",
+      "skills": "Skills",
+      "knowledge": "Knowledge"
+    },
+    "backups": {
+      "title": "Backups for {nome}",
+      "openFolder": "Open folder",
+      "hint": "The game keeps the last 10 saves automatically; the editor also copies the save before every write.",
+      "dropsChanges": "Restoring drops the changes that are not saved.",
+      "looking": "Looking for backups…",
+      "none": "No backup found for this save.",
+      "restore": "Restore",
+      "restored": "Restored",
+      "restoredBody": "{arquivo} ({quando}). The save before it was kept as a backup.",
+      "restoreTitle": "Restore this backup?",
+      "restoreBody": "The save as it is now is kept as a backup.",
+      "kindGame": "Game's copy",
+      "kindKiln": "Kiln backup",
+      "beforeSave": "before a save"
+    },
+    "common": {
+      "level": "Level",
+      "empty": "Empty",
+      "change": "Change",
+      "add": "Add",
+      "tierN": "Tier {n}",
+      "rarity": "Rarity",
+      "amount": "Amount",
+      "aboveStack": "more than the game's stack of {n}: for worlds with a mod that raises stack sizes",
+      "gameStack": "Game's stack ({n})",
+      "maxAmount": "Most a slot holds ({n})",
+      "upgrades": "Upgrades",
+      "remove": "Remove",
+      "levelN": "level {n}",
+      "pick": "Pick",
+      "noMatch": "Nothing matches these filters.",
+      "all": "All"
+    },
+    "equipment": {
+      "xp": "XP in level",
+      "attrsHint": "Attributes come from the skill tree nodes (edit them on the Skills tab).",
+      "attrsFlameHint": "The game also adds the nodes that scale with your Flame level and the bonuses from your gear; neither is stored in the character save.",
+      "emptyHint": "Empty slot. Equip the piece in game; here you can edit or take off what is already worn.",
+      "backpackFull": {
+        "one": "I will not take off the {item}: that would delete its container and the {count} slot stored in it. Empty it in game first.",
+        "other": "I will not take off the {item}: that would delete its container and the {count} slots stored in it. Empty it in game first."
+      },
+      "groups": {
+        "armour": "Armour",
+        "appearance": "Appearance",
+        "accessories": "Accessories"
+      },
+      "slots": {
+        "headVanity": "Head (vanity)",
+        "chestVanity": "Chest (vanity)",
+        "armsVanity": "Arms (vanity)",
+        "legsVanity": "Legs (vanity)",
+        "feetVanity": "Feet (vanity)",
+        "head": "Head",
+        "chest": "Chest",
+        "arms": "Arms",
+        "legs": "Legs",
+        "feet": "Feet",
+        "ring": "Ring",
+        "shield": "Shield",
+        "hook": "Grappling hook",
+        "glider": "Glider",
+        "backpack": "Backpack",
+        "slot": "Slot {n}"
+      }
+    },
+    "inventory": {
+      "move": "Move",
+      "slotEmpty": "Slot {n} empty",
+      "putHere": "Put here",
+      "slotsUsed": {
+        "one": "{n} of {total} slot",
+        "other": "{n} of {total} slots"
+      },
+      "addItem": "Add item",
+      "swapBar": "Swap bar",
+      "swapBarHint": "Alt swaps it with the action bar",
+      "actionBar": "Action bar",
+      "deckHint": "A changes the item · Y moves it · A on an empty slot adds one",
+      "hint": "Drag to move · double-click an empty slot to add · Delete removes · Ctrl+D duplicates",
+      "noneSelected": "No item selected.",
+      "noneSelectedHint": "Pick a slot to see and change its item.",
+      "emptyHint": "Pick an item from the catalog to put here.",
+      "pickItem": "Pick item"
+    },
+    "inspector": {
+      "item": "Item",
+      "stacksTo": "stacks up to {n}",
+      "max": "Max",
+      "levelSplit": {
+        "one": "= base {base} + {count} upgrade",
+        "other": "= base {base} + {count} upgrades"
+      },
+      "aboveItemMax": "above this item's maximum ({max}): the server clamps it on load, unless its range was opened up by a mod",
+      "upgradesHint": "Rarity sets how many upgrades the item takes: max level = base level + rarity.",
+      "gem": "Socketed gem",
+      "gemUnknown": "id {id} is not in the catalog",
+      "noGem": "— no gem —",
+      "gemLevel": "Gem level",
+      "aboveGemMax": "above this gem's maximum ({max}): the server clamps it on load, unless its range was opened up by a mod",
+      "durability": "Durability",
+      "repair": "Repair",
+      "water": "Water",
+      "fill": "Fill",
+      "duplicateHint": "Copies the item into the first free slot",
+      "duplicate": "Duplicate",
+      "attributes": "Attributes",
+      "physicalArmour": "Physical Armour",
+      "magicalArmour": "Magical Armour",
+      "raisesSkill": "raises the skill level of {no}",
+      "unknownLines": "The lines without a number scale with the item level by a formula that has not been measured yet; the editor does not show a value it cannot stand behind."
+    },
+    "parts": {
+      "full": "Full",
+      "clickToSet": "Click to set"
+    },
+    "catalog": {
+      "items": "Items",
+      "countLimited": {
+        "one": "{count} item (showing {limite}; narrow the search)",
+        "other": "{count} items (showing {limite}; narrow the search)"
+      },
+      "count": {
+        "one": "{count} item",
+        "other": "{count} items"
+      },
+      "categories": "Categories",
+      "searchDeck": "Search by name (Steam + X: keyboard)",
+      "search": "Search by name…",
+      "searchLabel": "Search",
+      "type": "Type",
+      "allRarities": "All",
+      "tier": "Tier",
+      "targetFull": "Target: inventory full",
+      "target": "Target: slot {n}",
+      "pickHint": "Pick an item.",
+      "deckHint": "A picks it, A again adds it.",
+      "hint": "Double-click adds it at once.",
+      "cat": {
+        "weapons": "Weapons",
+        "armour": "Armour",
+        "ammo": "Ammunition",
+        "magic": "Spells and gems",
+        "consumables": "Consumables",
+        "materials": "Materials",
+        "tools": "Tools",
+        "building": "Building",
+        "cosmetics": "Cosmetics and collectibles"
+      }
+    },
+    "knowledge": {
+      "noBlock": "This save has no knowledge block.",
+      "search": "Search by name or id",
+      "above": "Above level",
+      "allLevels": "all",
+      "show": "Show",
+      "filter": {
+        "itemsRecipes": "Items and recipes",
+        "items": "Items only",
+        "recipes": "Recipes only",
+        "everything": "Everything"
+      },
+      "removeN": "Remove {n}",
+      "kind": "Kind",
+      "name": "Name",
+      "state": "State",
+      "id": "id {id}",
+      "kinds": {
+        "item": "item",
+        "recipe": "recipe",
+        "misc": "other"
+      },
+      "count": {
+        "one": "{n} of {total} entry",
+        "other": "{n} of {total} entries"
+      },
+      "unnamed": {
+        "one": "{count} with no known name",
+        "other": "{count} with no known name"
+      },
+      "shownLimit": "Showing the first 400; use the search or the level cut-off to see the rest.",
+      "hint": "Removing a high-level material closes the recipes that depend on it. Recipes are not stored in the save: the game recomputes them from the knowledge, both here and in the server world."
+    },
+    "skills": {
+      "total": "Total points",
+      "minusLevel": "−1 level",
+      "plusLevel": "+1 level",
+      "tree": "Skill tree",
+      "used": "In use",
+      "available": "Available",
+      "enterTotal": "enter total…",
+      "changeTotal": "Click to change the total",
+      "totalHint": "Point total (in use + available, as the game shows it):",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out",
+      "centre": "Centre",
+      "cost": "cost {n}",
+      "maxN": "max {n}",
+      "deckHint": "A: +1 level · Y: −1",
+      "hint": "Click: +1 level · Right click: −1",
+      "class": {
+        "warrior": "Warrior",
+        "ranger": "Ranger",
+        "mage": "Mage",
+        "neutral": "Neutral"
+      }
+    },
+    "deck": {
+      "delete": "Delete",
+      "range": "From {min} to {max}",
+      "min": "Min",
+      "use": "Use",
+      "current": "Now"
+    },
+    "art": {
+      "preparing": "Preparing game art…",
+      "needsClient": "Game art needs the Enshrouded client (Settings → Games).",
+      "notFound": "Game art not found. Run {script}."
+    },
+    "game": {
+      "tree": {
+        "aboveMax": "{no}: level {nivel} above the maximum of {max}",
+        "orphans": "Nodes with no link to the rest of the tree: {nos}",
+        "overTotal": "Points in use ({usados}) exceed the character total ({total})"
+      },
+      "unknownItem": "Unknown item (0x{h})",
+      "errors": {
+        "unknownItems": "Unknown items in this save (a mod that is gone?): read-only",
+        "levelXp": "Invalid level or XP",
+        "skill": "Invalid skill",
+        "item": "Unknown item: {id}",
+        "slotAmount": "Invalid slot or amount",
+        "sameSlot": "Two items in the same inventory slot",
+        "knowledge": "Invalid knowledge entry",
+        "knowledgeRepeated": "Knowledge with a repeated id",
+        "closeGame": "Close Enshrouded before saving: the game would overwrite the edit.",
+        "notOpen": "Save not open for editing",
+        "noEquipment": "The editor cannot find the equipment and inventory in this save",
+        "skillList": "The editor does not know this save's skill list",
+        "notSave": "Not an Enshrouded save"
+      },
+      "saveFileFilter": "Enshrouded save",
+      "rarity": {
+        "none": "No rarity",
+        "common": "Common",
+        "uncommon": "Uncommon",
+        "rare": "Rare",
+        "epic": "Epic",
+        "legendary": "Legendary"
+      },
+      "category": {
+        "weapon": "Weapon",
+        "equipment": "Equipment",
+        "material": "Material",
+        "consumable": "Consumable",
+        "ammunition": "Ammunition",
+        "tool": "Tool",
+        "building": "Building",
+        "blueprint": "Blueprint",
+        "collectible": "Collectible",
+        "cosmetic": "Cosmetic",
+        "gem": "Gem"
+      },
+      "attribute": {
+        "constitution": "Constitution",
+        "spirit": "Spirit",
+        "endurance": "Endurance",
+        "strength": "Strength",
+        "dexterity": "Dexterity",
+        "intelligence": "Intelligence"
+      },
+      "classes": {
+        "survivor": "Survivor",
+        "beastmaster": "Beastmaster",
+        "ranger": "Ranger",
+        "assassin": "Assassin",
+        "trickster": "Trickster",
+        "wizard": "Wizard",
+        "healer": "Healer",
+        "battlemage": "Battlemage",
+        "tank": "Tank",
+        "warrior": "Warrior",
+        "barbarian": "Barbarian",
+        "athlete": "Athlete"
+      },
+      "knowledge": {
+        "pickedUp": "picked up",
+        "used": "used",
+        "inspected": "inspected",
+        "seen": "seen",
+        "crafted": "crafted"
+      }
+    }
   }
 }

@@ -4903,5 +4903,345 @@
       "show": "Afficher la page Communauté",
       "showHint": "Le Discord de Kiln dans le lanceur. Désactivé : la page, son onglet Deck et chaque « Envoyer à l'assistance Kiln » sont masqués, et le lanceur arrête tout ce qu'il fait avec Discord."
     }
+  },
+  "editor": {
+    "page": {
+      "title": "Éditeur",
+      "lookingForSaves": "Recherche des sauvegardes…",
+      "pickCharacter": "Choisissez un personnage.",
+      "noSaves": "Aucune sauvegarde de personnage trouvée.",
+      "cannotParse": "Cette sauvegarde n'a pas pu être analysée pour l'édition.",
+      "readOnlyNoSave": "Cette sauvegarde est en lecture seule : l'enregistrement est désactivé.",
+      "gameOpen": "Le jeu est ouvert : fermez-le pour enregistrer.",
+      "unsaved": "Modifications pas encore enregistrées. Kiln fait une copie de secours de la sauvegarde avant d'écrire.",
+      "levelBackup": "Niveau {n}. Kiln fait une copie de secours de la sauvegarde avant d'écrire.",
+      "notSaved": "Non enregistré",
+      "discard": "Abandonner",
+      "backups": "Copies de secours",
+      "save": "Enregistrer",
+      "saving": "Enregistrement…",
+      "saved": "Enregistré",
+      "savedHint": "La sauvegarde précédente est dans les copies de secours.",
+      "gameOpenShort": "Jeu en cours : fermez-le pour enregistrer",
+      "error": "Erreur",
+      "note": "Attention",
+      "readAgain": "Relire",
+      "close": "Fermer",
+      "parts": "Parties de la sauvegarde",
+      "characters": "Personnages",
+      "openFile": "Ouvrir un fichier…",
+      "pickCharacterButton": "Choisir un personnage",
+      "open": "Ouvrir",
+      "opened": "Ouvert",
+      "discardTitle": "Abandonner les modifications ?",
+      "discardAndOpen": "Abandonner et ouvrir",
+      "discardBody": "Les modifications de {nome} ne sont pas encore enregistrées.",
+      "cancel": "Annuler",
+      "back": "Retour",
+      "readOnlyError": "Lecture seule : {erro}",
+      "pointsRaised": "Vous avez augmenté les points utilisés ({antes} → {depois}). Saisissez votre total de points dans l'onglet Compétences pour que l'éditeur puisse le vérifier ; au-delà du total, le jeu réinitialise tout l'arbre.",
+      "notWritten": "Non enregistré. {problemas}",
+      "gameWroteSince": "Le jeu a écrit cette sauvegarde après sa lecture par l'éditeur. Relisez-la pour modifier la sauvegarde dans son état actuel (les modifications faites ici seront perdues)."
+    },
+    "tabs": {
+      "equipment": "Équipement",
+      "inventory": "Sac à dos",
+      "skills": "Compétences",
+      "knowledge": "Connaissances"
+    },
+    "backups": {
+      "title": "Copies de secours de {nome}",
+      "openFolder": "Ouvrir le dossier",
+      "hint": "Le jeu garde automatiquement les 10 dernières sauvegardes ; l'éditeur copie aussi la sauvegarde avant chaque écriture.",
+      "dropsChanges": "La restauration abandonne les modifications non enregistrées.",
+      "looking": "Recherche des copies de secours…",
+      "none": "Aucune copie de secours trouvée pour cette sauvegarde.",
+      "restore": "Restaurer",
+      "restored": "Restaurée",
+      "restoredBody": "{arquivo} ({quando}). La sauvegarde précédente a été gardée comme copie de secours.",
+      "restoreTitle": "Restaurer cette copie de secours ?",
+      "restoreBody": "La sauvegarde dans son état actuel est gardée comme copie de secours.",
+      "kindGame": "Copie du jeu",
+      "kindKiln": "Copie Kiln",
+      "beforeSave": "avant un enregistrement"
+    },
+    "common": {
+      "level": "Niveau",
+      "empty": "Vide",
+      "change": "Modifier",
+      "add": "Ajouter",
+      "tierN": "Rang {n}",
+      "rarity": "Rareté",
+      "amount": "Quantité",
+      "aboveStack": "plus que la pile du jeu ({n}) : pour les mondes avec un mod qui augmente la taille des piles",
+      "gameStack": "Pile du jeu ({n})",
+      "maxAmount": "Maximum par emplacement ({n})",
+      "upgrades": "Améliorations",
+      "remove": "Retirer",
+      "levelN": "niveau {n}",
+      "pick": "Choisir",
+      "noMatch": "Rien ne correspond à ces filtres.",
+      "all": "Tout"
+    },
+    "equipment": {
+      "xp": "XP dans le niveau",
+      "attrsHint": "Les attributs viennent des nœuds de l'arbre de compétences (modifiez-les dans l'onglet Compétences).",
+      "attrsFlameHint": "Le jeu ajoute aussi les nœuds qui évoluent avec votre niveau de Flamme et les bonus de votre équipement ; ni les uns ni les autres ne sont stockés dans la sauvegarde du personnage.",
+      "emptyHint": "Emplacement vide. Équipez la pièce en jeu ; ici, vous pouvez modifier ou retirer ce qui est déjà porté.",
+      "backpackFull": {
+        "one": "Je ne retire pas {item} : cela supprimerait son contenant et {count} emplacement qui y est stocké. Videz-le d'abord en jeu.",
+        "other": "Je ne retire pas {item} : cela supprimerait son contenant et les {count} emplacements qui y sont stockés. Videz-le d'abord en jeu."
+      },
+      "groups": {
+        "armour": "Armure",
+        "appearance": "Apparence",
+        "accessories": "Accessoires"
+      },
+      "slots": {
+        "headVanity": "Tête (apparence)",
+        "chestVanity": "Torse (apparence)",
+        "armsVanity": "Bras (apparence)",
+        "legsVanity": "Jambes (apparence)",
+        "feetVanity": "Pieds (apparence)",
+        "head": "Tête",
+        "chest": "Torse",
+        "arms": "Bras",
+        "legs": "Jambes",
+        "feet": "Pieds",
+        "ring": "Anneau",
+        "shield": "Bouclier",
+        "hook": "Grappin",
+        "glider": "Planeur",
+        "backpack": "Sac à dos",
+        "slot": "Emplacement {n}"
+      }
+    },
+    "inventory": {
+      "move": "Déplacer",
+      "slotEmpty": "Emplacement {n} vide",
+      "putHere": "Placer ici",
+      "slotsUsed": {
+        "one": "{n} sur {total} emplacement",
+        "other": "{n} sur {total} emplacements"
+      },
+      "addItem": "Ajouter un objet",
+      "swapBar": "Échanger la barre",
+      "swapBarHint": "Alt l'échange avec la barre d'action",
+      "actionBar": "Barre d'action",
+      "deckHint": "A modifie l'objet · Y le déplace · A sur un emplacement vide en ajoute un",
+      "hint": "Glissez pour déplacer · double-clic sur un emplacement vide pour ajouter · Delete retire · Ctrl+D duplique",
+      "noneSelected": "Aucun objet sélectionné.",
+      "noneSelectedHint": "Choisissez un emplacement pour voir et modifier son objet.",
+      "emptyHint": "Choisissez un objet dans le catalogue pour le placer ici.",
+      "pickItem": "Choisir un objet"
+    },
+    "inspector": {
+      "item": "Objet",
+      "stacksTo": "s'empile jusqu'à {n}",
+      "max": "Max",
+      "levelSplit": {
+        "one": "= base {base} + {count} amélioration",
+        "other": "= base {base} + {count} améliorations"
+      },
+      "aboveItemMax": "au-dessus du maximum de cet objet ({max}) : le serveur le ramène dans la limite au chargement, sauf si un mod a élargi sa plage",
+      "upgradesHint": "La rareté fixe le nombre d'améliorations de l'objet : niveau max = niveau de base + rareté.",
+      "gem": "Gemme sertie",
+      "gemUnknown": "l'id {id} n'est pas dans le catalogue",
+      "noGem": "— aucune gemme —",
+      "gemLevel": "Niveau de la gemme",
+      "aboveGemMax": "au-dessus du maximum de cette gemme ({max}) : le serveur la ramène dans la limite au chargement, sauf si un mod a élargi sa plage",
+      "durability": "Durabilité",
+      "repair": "Réparer",
+      "water": "Eau",
+      "fill": "Remplir",
+      "duplicateHint": "Copie l'objet dans le premier emplacement libre",
+      "duplicate": "Dupliquer",
+      "attributes": "Attributs",
+      "physicalArmour": "Armure physique",
+      "magicalArmour": "Armure magique",
+      "raisesSkill": "augmente le niveau de compétence de {no}",
+      "unknownLines": "Les lignes sans nombre évoluent avec le niveau de l'objet selon une formule pas encore mesurée ; l'éditeur n'affiche pas une valeur dont il n'est pas sûr."
+    },
+    "parts": {
+      "full": "Plein",
+      "clickToSet": "Cliquez pour définir"
+    },
+    "catalog": {
+      "items": "Objets",
+      "countLimited": {
+        "one": "{count} objet ({limite} affichés ; affinez la recherche)",
+        "other": "{count} objets ({limite} affichés ; affinez la recherche)"
+      },
+      "count": {
+        "one": "{count} objet",
+        "other": "{count} objets"
+      },
+      "categories": "Catégories",
+      "searchDeck": "Chercher par nom (Steam + X : clavier)",
+      "search": "Chercher par nom…",
+      "searchLabel": "Chercher",
+      "type": "Saisir",
+      "allRarities": "Toutes",
+      "tier": "Rang",
+      "targetFull": "Cible : inventaire plein",
+      "target": "Cible : emplacement {n}",
+      "pickHint": "Choisissez un objet.",
+      "deckHint": "A le choisit, A à nouveau l'ajoute.",
+      "hint": "Un double-clic l'ajoute directement.",
+      "cat": {
+        "weapons": "Armes",
+        "armour": "Armures",
+        "ammo": "Munitions",
+        "magic": "Sorts et gemmes",
+        "consumables": "Consommables",
+        "materials": "Matériaux",
+        "tools": "Outils",
+        "building": "Construction",
+        "cosmetics": "Cosmétiques et objets de collection"
+      }
+    },
+    "knowledge": {
+      "noBlock": "Cette sauvegarde n'a pas de bloc de connaissances.",
+      "search": "Chercher par nom ou id",
+      "above": "Au-dessus du niveau",
+      "allLevels": "tous",
+      "show": "Afficher",
+      "filter": {
+        "itemsRecipes": "Objets et recettes",
+        "items": "Objets seulement",
+        "recipes": "Recettes seulement",
+        "everything": "Tout"
+      },
+      "removeN": "Retirer {n}",
+      "kind": "Type",
+      "name": "Nom",
+      "state": "État",
+      "id": "id {id}",
+      "kinds": {
+        "item": "objet",
+        "recipe": "recette",
+        "misc": "autre"
+      },
+      "count": {
+        "one": "{n} sur {total} entrée",
+        "other": "{n} sur {total} entrées"
+      },
+      "unnamed": {
+        "one": "{count} sans nom connu",
+        "other": "{count} sans nom connu"
+      },
+      "shownLimit": "Les 400 premières sont affichées ; utilisez la recherche ou le filtre de niveau pour voir le reste.",
+      "hint": "Retirer un matériau de haut niveau ferme les recettes qui en dépendent. Les recettes ne sont pas stockées dans la sauvegarde : le jeu les recalcule à partir des connaissances, ici comme dans le monde du serveur."
+    },
+    "skills": {
+      "total": "Total des points",
+      "minusLevel": "−1 niveau",
+      "plusLevel": "+1 niveau",
+      "tree": "Arbre de compétences",
+      "used": "Utilisés",
+      "available": "Disponibles",
+      "enterTotal": "saisir le total…",
+      "changeTotal": "Cliquez pour modifier le total",
+      "totalHint": "Total des points (utilisés + disponibles, comme le jeu l'affiche) :",
+      "zoomIn": "Zoom avant",
+      "zoomOut": "Zoom arrière",
+      "centre": "Centrer",
+      "cost": "coût {n}",
+      "maxN": "max {n}",
+      "deckHint": "A : +1 niveau · Y : −1",
+      "hint": "Clic : +1 niveau · Clic droit : −1",
+      "class": {
+        "warrior": "Guerrier",
+        "ranger": "Rôdeur",
+        "mage": "Mage",
+        "neutral": "Neutre"
+      }
+    },
+    "deck": {
+      "delete": "Effacer",
+      "range": "De {min} à {max}",
+      "min": "Min",
+      "use": "Utiliser",
+      "current": "Actuel"
+    },
+    "art": {
+      "preparing": "Préparation des images du jeu…",
+      "needsClient": "Les images du jeu nécessitent le client Enshrouded (Paramètres → Jeux).",
+      "notFound": "Images du jeu introuvables. Lancez {script}."
+    },
+    "game": {
+      "tree": {
+        "aboveMax": "{no} : niveau {nivel} au-dessus du maximum de {max}",
+        "orphans": "Nœuds sans lien avec le reste de l'arbre : {nos}",
+        "overTotal": "Les points utilisés ({usados}) dépassent le total du personnage ({total})"
+      },
+      "unknownItem": "Objet inconnu (0x{h})",
+      "errors": {
+        "unknownItems": "Objets inconnus dans cette sauvegarde (un mod retiré ?) : lecture seule",
+        "levelXp": "Niveau ou XP invalide",
+        "skill": "Compétence invalide",
+        "item": "Objet inconnu : {id}",
+        "slotAmount": "Emplacement ou quantité invalide",
+        "sameSlot": "Deux objets dans le même emplacement d'inventaire",
+        "knowledge": "Entrée de connaissance invalide",
+        "knowledgeRepeated": "Connaissance avec un id en double",
+        "closeGame": "Fermez Enshrouded avant d'enregistrer : le jeu écraserait la modification.",
+        "notOpen": "Sauvegarde non ouverte pour l'édition",
+        "noEquipment": "L'éditeur ne trouve pas l'équipement et l'inventaire dans cette sauvegarde",
+        "skillList": "L'éditeur ne connaît pas la liste de compétences de cette sauvegarde",
+        "notSave": "Ce n'est pas une sauvegarde Enshrouded"
+      },
+      "saveFileFilter": "Sauvegarde Enshrouded",
+      "rarity": {
+        "none": "Sans rareté",
+        "common": "Commun",
+        "uncommon": "Peu commun",
+        "rare": "Rare",
+        "epic": "Épique",
+        "legendary": "Légendaire"
+      },
+      "category": {
+        "weapon": "Arme",
+        "equipment": "Équipement",
+        "material": "Matériau",
+        "consumable": "Consommable",
+        "ammunition": "Munitions",
+        "tool": "Outil",
+        "building": "Construction",
+        "blueprint": "Plan",
+        "collectible": "Objet de collection",
+        "cosmetic": "Cosmétique",
+        "gem": "Gemme"
+      },
+      "attribute": {
+        "constitution": "Constitution",
+        "spirit": "Esprit",
+        "endurance": "Endurance",
+        "strength": "Force",
+        "dexterity": "Dextérité",
+        "intelligence": "Intelligence"
+      },
+      "classes": {
+        "survivor": "Survivant",
+        "beastmaster": "Maître des bêtes",
+        "ranger": "Rôdeur",
+        "assassin": "Assassin",
+        "trickster": "Filou",
+        "wizard": "Sorcier",
+        "healer": "Guérisseur",
+        "battlemage": "Mage de bataille",
+        "tank": "Tank",
+        "warrior": "Guerrier",
+        "barbarian": "Barbare",
+        "athlete": "Athlète"
+      },
+      "knowledge": {
+        "pickedUp": "ramassé",
+        "used": "utilisé",
+        "inspected": "examiné",
+        "seen": "vu",
+        "crafted": "fabriqué"
+      }
+    }
   }
 }
