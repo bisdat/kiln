@@ -605,6 +605,22 @@ pub fn record_published(dir: &Path, published: Published) -> Result<PackSource> 
     Ok(s)
 }
 
+/// The pack analysis of the source as it is now (DESIGN 6.1/6.2; [super::check]): the source built into
+/// <folder>/out/analyze, then Crucible's checks over it: format and zip safety, sizes, code scan, resolution, lint of the
+/// layer, data conflicts, and the credits prefilled from the identification. The Credits, Load order and Publish tabs
+/// read it. Offline: no network, no Kiln's-own list or earlier credits here (Crucible identifies again on upload).
+#[cfg(feature = "zip")]
+pub fn analyze(dirs: &DataDirs, dir: &Path, progress: &mut dyn Progress) -> Result<super::check::CheckReport> {
+    let out = dir.join("out").join("analyze");
+    let built = build(dirs, dir, Some(&out), &mut Scaled { inner: progress, from: 0.0, to: 0.6 })?;
+    progress.report(Some(0.65), "checking the pack");
+    let opts = super::check::CheckOptions { work: Some(dir.join("out")), ..Default::default() };
+    let r = super::check::check(super::check::Input::Pack(&built.file), &opts);
+    let _ = std::fs::remove_file(&built.file);
+    progress.report(Some(1.0), "checked");
+    r
+}
+
 // ================================================================================================= settings (3.2)
 
 /// One key of a settings file the creator may carry.

@@ -2299,7 +2299,7 @@ export const COMMANDS = [
   "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",
   "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
   "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links",
-  "studio_list", "studio_create", "studio_get", "studio_save", "studio_delete", "studio_credits_set", "studio_capture", "studio_capture_set", "studio_order", "studio_layer_files", "studio_layer_read", "studio_layer_write", "studio_layer_delete", "studio_layer_set", "studio_layer_lint", "studio_pick", "studio_fields", "studio_test", "studio_test_report", "studio_test_end", "studio_build", "studio_publish_check", "studio_publish", "studio_server_pack",
+  "studio_list", "studio_create", "studio_get", "studio_save", "studio_delete", "studio_credits_set", "studio_capture", "studio_capture_set", "studio_order", "studio_layer_files", "studio_layer_read", "studio_layer_write", "studio_layer_delete", "studio_layer_set", "studio_layer_lint", "studio_pick", "studio_fields", "studio_analyze", "studio_test", "studio_test_report", "studio_test_end", "studio_build", "studio_publish_check", "studio_publish", "studio_server_pack",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -2751,6 +2751,26 @@ export interface StudioLayerFile { path: string; size: number }
 export interface StudioPickHit { section: string; name: string; id?: string; displayName?: string; from?: string }
 /** A catalog section's field (kiln_manage::catalog::FieldInfo). */
 export interface CatalogFieldInfo { path: string; type: string; writable?: boolean; enum?: string[]; enumNumbers?: number[]; kind?: string }
+/** kiln_manage::modpack::check::CheckReport (kilnctl pack check --json). */
+export interface PackCheckFinding { level: "error" | "warning" | "note"; code: string; message: string; mod?: string; file?: string }
+export interface PackCreditRow {
+  kind: ModKind; id: string; version: string; kdh1: string; author: string | null; source: string | null;
+  match: "kiln" | "crucible" | "github" | "nexus" | "manifest" | "manual" | string;
+  confidence: "certain" | "likely" | "conflict" | "unverified" | "creator" | "unconfirmed" | "none" | string;
+  nexusModId?: number; flag?: string;
+}
+export interface PackDataSetter { mod: string; file: string; selector: string; value: Json }
+export interface PackDataConflict { section: string; field: string; earlier: PackDataSetter; later: PackDataSetter; conditional: boolean }
+export interface PackCheckReport {
+  format: number; kind: string; tool: string; version: string; ok: boolean; complete: boolean;
+  pack: { id: string; name: string; version: string; sha256?: string; size?: number } | null;
+  summary: { errors: number; warnings: number; notes: number };
+  findings: PackCheckFinding[];
+  mods: { kind: ModKind; id: string; version: string; hash: string; name?: string; authors?: string[]; url?: string; code: { managed: string[]; native: string[]; scripts: string[]; touches: string[] }; blocked: boolean }[];
+  conflicts: PackDataConflict[];
+  credits: PackCreditRow[];
+  catalog: boolean;
+}
 export interface StudioTestReport { profile?: ProfileId; ran: boolean; conflicts: string[]; problems: string[] }
 export interface StudioPublishRequest { version: string; changes?: string | null; visibility: StudioVisibility; attest: boolean; gameBuilds?: number[] }
 export interface StudioPublishResult {
@@ -2786,6 +2806,8 @@ export const studioLayerLint = (packId: string) => call<LintReport>("studio_laye
 /** Game entries (the catalog) and what the pack's mods add, for the data editors' pickers. */
 export const studioPick = (packId: string, section: string, query: string, limit = 50) => call<StudioPickHit[]>("studio_pick", { packId, section, query, limit });
 export const studioFields = (section: string) => call<CatalogFieldInfo[]>("studio_fields", { section });
+/** The pack analysis (a task; result PackCheckReport): checks, code scan, data conflicts, prefilled credits. */
+export const studioAnalyze = (packId: string) => call<TaskId>("studio_analyze", { packId });
 /** A task (result PackInstallResult): "<name> (test)" built, installed and activated; then Play. */
 export const studioTest = (packId: string, gameId?: GameId | null) => call<TaskId>("studio_test", { packId, gameId: gameId ?? null });
 export const studioTestReport = (packId: string, gameId?: GameId | null) => call<StudioTestReport>("studio_test_report", { packId, gameId: gameId ?? null });

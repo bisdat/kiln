@@ -268,3 +268,19 @@ fn a_test_instance_is_the_built_pack_installed_and_replaced_by_the_next() {
     assert_eq!(profile::get(&dirs, &second.profile.id).unwrap_err().code, ErrorCode::NotFound);
     assert!(studio::read_source(&st.dir).unwrap().test_profile.is_none());
 }
+
+#[test]
+fn the_analysis_prefills_credits_and_finds_conflicts_with_the_layer() {
+    let t = tmp("analyze");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let st = studio_of(&dirs, &t.0);
+    studio::layer_write(&st.dir, "content/items.json", r#"{ "format": 1, "items": { "Material_T1_Wood_Logs": { "maxStackSize": 500 } } }"#).unwrap();
+    let r = studio::analyze(&dirs, &st.dir, &mut NoProgress).unwrap();
+    let v = serde_json::to_value(&r).unwrap();
+    let credits = v["credits"].as_array().unwrap();
+    let ids: Vec<&str> = credits.iter().map(|c| c["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["alpha", "beta"], "{v}");
+    assert!(credits.iter().all(|c| c.get("match").is_some() && c.get("confidence").is_some()));
+    assert!(v["pack"]["id"] == "ember-run");
+    assert!(!st.dir.join("out/analyze/ember-run-1.0.0.kilnpack").exists(), "the analysed build is not kept");
+}

@@ -137,6 +137,13 @@ pub async fn studio_fields(section: String) -> Result<Vec<kiln_manage::catalog::
     blocking(move || Ok(studio::fields(&section))).await
 }
 
+/// The pack analysis (a task; result check::CheckReport): checks, code scan, data conflicts, prefilled credits.
+#[tauri::command]
+pub async fn studio_analyze(app: AppHandle, pack_id: String) -> Result<TaskId, Error> {
+    let (d, at) = blocking(move || Ok((dirs()?, dir(&pack_id)?))).await?;
+    Ok(spawn_task(&app, "studio_analyze", "Checking the pack".into(), move |p| to_value(studio::analyze(&d, &at, p)?)))
+}
+
 /// "Test this pack" (a task; result pack::InstallResult): the pack built and installed as "<name> (test)", activated
 /// for the game (then Play starts it); the last test instance is replaced.
 #[tauri::command]

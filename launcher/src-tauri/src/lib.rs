@@ -331,6 +331,7 @@ pub fn run() {
             commands::studio::studio_layer_lint,
             commands::studio::studio_pick,
             commands::studio::studio_fields,
+            commands::studio::studio_analyze,
             commands::studio::studio_test,
             commands::studio::studio_test_report,
             commands::studio::studio_test_end,
