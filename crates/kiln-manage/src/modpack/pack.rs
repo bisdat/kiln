@@ -736,28 +736,152 @@ pub struct BuiltPack {
     pub notes: Vec<String>,
 }
 
-/// Lines of a settings file that look like secrets: key names with token/secret/password/api key/webhook/bearer and a
-/// text value, Steam ids, Discord webhook URLs. A pack never carries them: the creator leaves the key out.
+/// Key names that hold secrets: the name squashed (letters and digits, lower case) contains one of these...
+const SECRET_PARTS: [&str; 14] = ["token", "secret", "password", "passwd", "passphrase", "apikey", "webhook", "bearer", "privatekey", "accesskey",
+    "credential", "authorization", "cookie", "sessionid"];
+/// ...or one of its words (split at separators and camelCase) is one of these.
+const SECRET_WORDS: [&str; 3] = ["pwd", "pass", "auth"];
+
+fn key_words(key: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut prev_lower = false;
+    for c in key.chars() {
+        if !c.is_alphanumeric() {
+            out.push(std::mem::take(&mut cur));
+            prev_lower = false;
+            continue;
+        }
+        if c.is_uppercase() && prev_lower {
+            out.push(std::mem::take(&mut cur));
+        }
+        prev_lower = c.is_lowercase() || c.is_ascii_digit();
+        cur.extend(c.to_lowercase());
+    }
+    out.push(cur);
+    out.retain(|w| !w.is_empty());
+    out
+}
+
+/// The secret word a key name holds, if any.
+fn secret_key(key: &str) -> Option<&'static str> {
+    let squashed: String = key.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect();
+    SECRET_PARTS.iter().find(|w| squashed.contains(*w)).copied()
+        .or_else(|| key_words(key).iter().find_map(|w| SECRET_WORDS.iter().find(|s| *s == w).copied()))
+}
+
+/// A value that cannot be a secret: empty, a number, a switch, null, an opening bracket.
+fn harmless(v: &str) -> bool {
+    v.is_empty() || v.parse::<f64>().is_ok() || matches!(v.to_ascii_lowercase().as_str(), "true" | "false" | "null" | "{" | "[" | "yes" | "no" | "on" | "off")
+}
+
+/// Text that is a secret whatever key holds it: a Discord webhook URL or bot token, a Steam id, a GitHub or Slack
+/// token, a JWT, a bearer token, a private key.
+fn secret_shape(s: &str) -> Option<&'static str> {
+    let lower = s.to_ascii_lowercase();
+    if (lower.contains("discord.com/api/") || lower.contains("discordapp.com/api/")) && lower.contains("/webhooks/") {
+        return Some("a Discord webhook URL");
+    }
+    let chars: Vec<char> = s.chars().collect();
+    if chars.windows(17).any(|w| w.iter().all(char::is_ascii_digit) && w[..7].iter().collect::<String>() == "7656119") {
+        return Some("a Steam id");
+    }
+    if let Some(i) = lower.find("steam_") {
+        let parts: Vec<&str> = lower[i + 6..].splitn(3, ':').collect();
+        if parts.len() == 3 && parts.iter().all(|p| p.bytes().next().is_some_and(|b| b.is_ascii_digit())) {
+            return Some("a Steam id");
+        }
+    }
+    if lower.contains("[u:1:") {
+        return Some("a Steam id");
+    }
+    if lower.contains("-----begin") && lower.contains("private key") {
+        return Some("a private key");
+    }
+    if let Some(i) = lower.find("bearer ") && lower[i + 7..].split_whitespace().next().is_some_and(|t| t.len() >= 16) {
+        return Some("a bearer token");
+    }
+    let b64 = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+    for word in s.split(|c: char| !(b64(c) || c == '.')) {
+        let parts: Vec<&str> = word.split('.').collect();
+        if parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.chars().all(b64)) {
+            if parts[0].len() >= 23 && parts[1].len() >= 6 && parts[2].len() >= 27 {
+                return Some("a Discord bot token");
+            }
+            if parts[0].starts_with("eyJ") && parts.iter().all(|p| p.len() >= 10) {
+                return Some("a JWT");
+            }
+        }
+        let w = word.to_ascii_lowercase();
+        if ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "xoxb-", "xoxp-", "glpat-"].iter().any(|p| w.starts_with(p)) && w.len() >= 24 {
+            return Some("an API token");
+        }
+    }
+    None
+}
+
+fn secret_walk(file: &str, v: &Value, path: &mut Vec<String>, out: &mut Vec<String>) {
+    let at = |path: &[String]| if path.is_empty() { "(top)".to_string() } else { path.join(".") };
+    match v {
+        Value::Object(m) => {
+            for (k, x) in m {
+                path.push(k.clone());
+                secret_walk(file, x, path, out);
+                path.pop();
+            }
+        }
+        Value::Array(a) => {
+            for x in a {
+                secret_walk(file, x, path, out);
+            }
+        }
+        Value::String(s) => {
+            if let Some(what) = secret_shape(s) {
+                out.push(format!("{file} {}: {what}", at(path)));
+            } else if let Some(word) = path.last().and_then(|k| secret_key(k)) && !harmless(s.trim()) {
+                out.push(format!("{file} {}: looks like a secret ({word})", at(path)));
+            }
+        }
+        Value::Number(n) => {
+            if let Some(what) = secret_shape(&n.to_string()) {
+                out.push(format!("{file} {}: {what}", at(path)));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// What in a JSON value looks like a secret (the rules of secret_findings).
+pub fn secret_value_findings(file: &str, v: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    secret_walk(file, v, &mut Vec::new(), &mut out);
+    out
+}
+
+/// What in a settings file looks like a secret: a key whose name says token, secret, password, pass, pwd, auth, api
+/// key, webhook, bearer, private key, credential, cookie... holding text (numbers, switches and empty values are
+/// fine), or text shaped like a secret under any key (Discord webhook URLs and bot tokens, Steam ids, GitHub tokens,
+/// JWTs, bearer tokens, private keys). JSON files are read as JSON (by key, whatever the layout), other files by
+/// line ("key = value", "key: value"). Words in plain text ("the secret passage") are no finding. A pack never
+/// carries what this finds: the creator leaves the key out.
 pub fn secret_findings(file: &str, text: &str) -> Vec<String> {
-    const WORDS: [&str; 10] = ["token", "secret", "password", "passwd", "api_key", "apikey", "api-key", "webhook", "bearer", "private_key"];
+    if file.to_ascii_lowercase().ends_with(".json") && let Ok(tree) = crate::jsonc::parse_tree(text) {
+        return secret_value_findings(file, &tree.to_value());
+    }
     let mut out = Vec::new();
     for (n, line) in text.lines().enumerate() {
-        let lower = line.to_ascii_lowercase();
-        if lower.contains("discord.com/api/webhooks") || lower.contains("discordapp.com/api/webhooks") {
-            out.push(format!("{file} line {}: a Discord webhook URL", n + 1));
+        if let Some(what) = secret_shape(line) {
+            out.push(format!("{file} line {}: {what}", n + 1));
             continue;
         }
-        let digits: Vec<char> = line.chars().collect();
-        let steam = digits.windows(17).any(|w| w.iter().all(|c| c.is_ascii_digit()) && w.iter().take(7).collect::<String>() == "7656119");
-        if steam {
-            out.push(format!("{file} line {}: a Steam id", n + 1));
+        let t = line.trim();
+        if t.starts_with(['[', '#', ';']) || t.starts_with("//") {
             continue;
         }
-        if let Some(word) = WORDS.iter().find(|w| lower.contains(*w)) {
-            let value = line.split_once([':', '=']).map(|(_, v)| v.trim().trim_end_matches(',').trim()).unwrap_or("");
-            let plain = value.trim_matches('"').trim_matches('\'');
-            let harmless = plain.is_empty() || plain.parse::<f64>().is_ok() || matches!(plain, "true" | "false" | "null" | "{" | "[");
-            if !harmless {
+        if let Some((k, v)) = t.split_once(['=', ':']) {
+            let key = k.trim().trim_matches(['"', '\'']);
+            let value = v.trim().trim_end_matches(',').trim().trim_matches(['"', '\'']).trim();
+            if let Some(word) = secret_key(key) && !harmless(value) {
                 out.push(format!("{file} line {}: looks like a secret ({word})", n + 1));
             }
         }
@@ -999,6 +1123,12 @@ pub fn build(dirs: &DataDirs, req: &BuildRequest, out_dir: &Path, progress: &mut
             return Err(Error::invalid(format!("{id} is not a mod of profile {}", profile.id)));
         }
     }
+    if let Some(s) = &req.server_settings {
+        let found = secret_value_findings("server settings", s);
+        if !found.is_empty() {
+            return Err(err(ErrorCode::Refused, format!("the server settings may hold private data ({}); leave those keys out", found.join("; "))).with_detail(found));
+        }
+    }
     let kiln_ids: Vec<String> = mods.iter().filter(|m| m.kind == ModKind::Kiln).map(|m| m.id.clone()).collect();
     let mut index = PackIndex {
         format: FORMAT,
@@ -1031,6 +1161,16 @@ pub fn build(dirs: &DataDirs, req: &BuildRequest, out_dir: &Path, progress: &mut
         let dir = stage.path().join(LAYER_PATH);
         stage_layer(src, &dir, &index, &kiln_ids, &mut notes)?;
         let files = super::mod_files(ModKind::Kiln, &dir)?;
+        // the layer's settings-like files get the overrides' secret scan
+        let mut found = Vec::new();
+        for (rel, p) in &files {
+            if crate::settings_files::is_settings_extension(rel) && std::fs::metadata(p).is_ok_and(|m| m.len() <= 4 << 20) {
+                found.extend(secret_findings(&format!("layer/{rel}"), &crate::manifest::decode_text(&std::fs::read(p)?)));
+            }
+        }
+        if !found.is_empty() {
+            return Err(err(ErrorCode::Refused, format!("the pack layer may hold private data ({}); take it out", found.join("; "))).with_detail(found));
+        }
         let hash = crate::hash::of_mod_records(ModKind::Kiln, records(&files)?)?;
         for (rel, p) in files {
             entries.push((format!("{LAYER_PATH}/{rel}"), Src::Disk(p)));
@@ -1910,4 +2050,43 @@ pub fn install_server(dirs: &DataDirs, server: &crate::server::instance::ServerI
     };
     progress.report(Some(1.0), &format!("pack {} {} placed on the server", r.index.name, r.index.version));
     Ok(ServerInstallResult { mods, imported, overrides, settings, left_out, modpack })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_secret_scan_reads_keys_not_words_in_text() {
+        // normal settings and text pass
+        for (f, t) in [
+            ("loot.json", r#"{ "name": "Secret Stash", "description": "the password is under the old tree", "maxTokens": 5, "hotkey": "F9", "author": "Ana", "showPassword": true }"#),
+            ("loot.ini", "[Chest]\ntitle = Secret room\npassive = yes\nkeyBinding = K\n"),
+            ("notes.txt", "Find the secret passage behind the waterfall.\n"),
+        ] {
+            assert_eq!(secret_findings(f, t), Vec::<String>::new(), "{f}");
+        }
+        // secrets are found, also on one line and under other key names
+        for (f, t) in [
+            ("bot.json", r#"{"discord":{"enabled":true,"token":"abc"}}"#),
+            ("bot.json", r#"{ "hook": "https://discord.com/api/v10/webhooks/123/abcDEF" }"#),
+            ("bot.json", r#"{ "hook": "https://ptb.discord.com/api/webhooks/123/abcDEF" }"#),
+            ("bot.json", r#"{ "owner": 76561198000000001 }"#),
+            ("bot.json", r#"{ "admins": ["76561198000000001"] }"#),
+            ("bot.json", r#"{ "x": "MTA4NjQ3NzQ0NjMwNjQ3NjA5Mg.GhK2aB.TOKENTAIL" }"#),
+            ("bot.json", r#"{ "gh": "ghp_abcdefghijklmnopqrstuvwxyz0123456789" }"#),
+            ("bot.json", r#"{ "rcon": { "pass": "hunter2" } }"#),
+            ("bot.json", r#"{ "db": { "pwd": "hunter2" } }"#),
+            ("bot.json", r#"{ "apiKey": "k-123" }"#),
+            ("bot.json", r#"{ "client_secret": "s" }"#),
+            ("bot.ini", "[Rcon]\nPassword = hunter2\n"),
+            ("bot.ini", "Auth = Bearer abcdefghijklmnopqrstuvwxyz\n"),
+            ("bot.cfg", "webhook=https://discordapp.com/api/webhooks/1/x\n"),
+            ("bot.txt", "STEAM_0:1:12345678\n"),
+        ] {
+            // a bot token's last part, made here: written out, it would be a secret to scanners
+            let t = &t.replace("TOKENTAIL", &"x".repeat(27));
+            assert!(!secret_findings(f, t).is_empty(), "{f}: {t}");
+        }
+    }
 }
