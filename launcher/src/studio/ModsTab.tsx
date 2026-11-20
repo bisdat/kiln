@@ -22,8 +22,13 @@ export default function ModsTab({ studio: st, gameId }: { studio: Studio; gameId
   const an = useAnalysisOf(st);
   const [adding, setAdding] = useState(false);
   const credit = (m: StudioMod) => an.report?.credits.find((c) => c.kind === m.kind && c.id === m.id);
-  const setChoice = (m: StudioMod, dep: Dep, sides: Sides) => {
+  /** One change (the need or the sides) on top of the latest source: two quick changes keep each other. */
+  const setChoice = (m: StudioMod, change: { dep?: Dep; sides?: Sides }) => {
     const base = latestSource(qc, st.source.id, st.source);
+    const prev = base.mods[m.id];
+    const curDep: Dep = prev ? (prev.dep === "required" ? "required" : prev.default === false ? "off" : "on") : depOf(m);
+    const curSides: Sides = prev ? sidesOf(prev.env ?? m.env) : sidesOf(m.env);
+    const dep = change.dep ?? curDep, sides = change.sides ?? curSides;
     const mods = { ...base.mods };
     mods[m.id] = { dep: dep === "required" ? "required" : "optional", ...(dep === "required" ? {} : { default: dep === "on" }), ...(sides === "both" ? {} : { env: envOf(sides) }) };
     save.mutate({ ...base, mods }, { onError: (e) => toast.error(e) });
@@ -69,12 +74,12 @@ export default function ModsTab({ studio: st, gameId }: { studio: Studio; gameId
                   <td className="kst-mono">{m.version}</td>
                   <td>
                     <Select value={depOf(m)} aria-label={t("studio.mods.needAria", { name: m.name })} data-testid={"studio-dep-" + m.id}
-                      onChange={(v) => setChoice(m, v as Dep, sidesOf(m.env))}
+                      onChange={(v) => setChoice(m, { dep: v as Dep })}
                       options={[{ value: "required", label: t("studio.mods.required") }, { value: "on", label: t("studio.mods.optionalOn") }, { value: "off", label: t("studio.mods.optionalOff") }]} />
                   </td>
                   <td>
                     <Select value={sidesOf(m.env)} aria-label={t("studio.mods.sidesAria", { name: m.name })} data-testid={"studio-sides-" + m.id}
-                      onChange={(v) => setChoice(m, depOf(m), v as Sides)}
+                      onChange={(v) => setChoice(m, { sides: v as Sides })}
                       options={[{ value: "both", label: t("studio.mods.both") }, { value: "client", label: t("studio.mods.client") }, { value: "server", label: t("studio.mods.server") }]} />
                   </td>
                   <td className="kst-source">{own ? <span title={own.source}>{own.author}{c ? <span className="kst-dim"> · {t(matchWord(c.match))}</span> : null}</span>
