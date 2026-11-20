@@ -276,6 +276,15 @@ bool subscribe_pointer(KilnUiPointerFn fn, void* user) {
     return ui->subscribe_pointer_press(g_owner, fn, user, &h) == KILN_OK;
 }
 
+// kiln.ui.inventory v2: kiln.ui's screen_target (0.2.0-dev.29.15 tail; since dev.30 also a chest's), 0 without it.
+uint32_t screen_target() {
+    KilnUiScreen probe{};
+    if (!screen(&probe)) return 0;  // also finds kiln.ui's table
+    const KilnUiApi* ui = g_ui.load(std::memory_order_acquire);
+    if (!ui || ui->header.size < offsetof(KilnUiApi, screen_target) + sizeof(void*) || !ui->screen_target) return 0;
+    return ui->screen_target();
+}
+
 bool call_click(KilnUiSlotClickFn fn, const KilnUiSlotClick* c, void* user) {
     crash::Capture cap{};
     unsigned long code = 0;
@@ -409,6 +418,7 @@ void wire() {
     e.subscribe_pointer = &subscribe_pointer;
     e.call_click = &call_click;
     e.cursor_client = &cursor_client;
+    e.screen_target = &screen_target;
     e.log = [](int level, const char* text) { kiln::log::write(level, "kiln", text); };
 }
 
@@ -425,7 +435,8 @@ bool init() {
     static const char* const kFeatures[] = {"ui.values.detail", "ui.values.slot",          "ui.values.held",
                                             "ui.values.hud",    "ui.values.tooltip_lines", "ui.slots.inspect",
                                             "ui.gemforge.inspect", "gems.sockets", "ui.gemforge.sources",
-                                            "ui.tooltip.lines", "ui.tooltip.values", "ui.slots.click"};
+                                            "ui.tooltip.lines", "ui.tooltip.values", "ui.slots.click",
+                                            "ui.inventory.panels"};
     if (!env().layout_supported())
         for (uint32_t k = 0; k < kLists; ++k)
             if (row_of(k)) disable_kind(k, "private UI layout is not measured for this client image");

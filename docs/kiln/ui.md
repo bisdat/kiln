@@ -338,8 +338,9 @@ writes `tooltip-probe:` lines to kiln.log (each detail's mode and identity, the 
 
 `Ui.Inventory` (client only) treats the slots the game draws (backpack, the inventory menu, a chest, a crafting station or
 factory, an NPC's crafting) as something your mod acts on: marks over a slot, and clicks on a slot with the item's
-identity. Sample: `mods/samples/SlotMarks` (both sides: the client asks, its server half checks the item is the sender's,
-then the client draws the mark). Native: `kiln.ui.inventory` (`native/core/abi/services/kiln_ui_inventory.h`)
+identity, and (since slice 2) panels beside the backpack and chest screens with the chest's entity. Sample:
+`mods/samples/SlotMarks` (both sides: the client asks, its server half checks the item is the sender's, then the client
+draws the mark; a "Count this chest" panel beside chests). Native: `kiln.ui.inventory` (`native/core/abi/services/kiln_ui_inventory.h`)
 on `kiln.ui.values`' slot frames and kiln.ui's `subscribe_pointer_press`.
 
 ```csharp
@@ -395,8 +396,57 @@ offset + unit * scale), `unsubscribe`. Registrations share kiln.ui.values' budge
 size-guarded tail at byte 1040, after `chat_completion`'s slot at 1032) gives any native plugin the left and right presses
 over the game's UI with a take-or-pass answer.
 
-**Not in this version** (next in dev.30): a button inside the game's chest screen where Enlarge sits, panels next
-to the chest and backpack screens, the game's own slot colours (marks are drawn over the slot), the gamepad's focused slot.
+### Panels beside the backpack and chest screens, and the chest's entity (0.2.0-dev.30)
+
+A mod can dock a Kiln panel (Kiln.Ui's own widgets, the player's look, KilnText) beside the game's backpack screen and a
+storage chest's screen while they are open, and learns which of them is open with the chest's entity. Sample:
+`mods/samples/SlotMarks` (a "Count this chest" button its server half answers). The quick path to a "Salvage" button
+next to a chest.
+
+```csharp
+using var panel = Ui.Inventory.AddPanel("Auto Loot", (ui, screen) =>
+{
+    if (screen.Container.Value == 0) { ui.TextDisabled("..."); return; }   // the game names the chest a frame later
+    if (ui.Button("Salvage marked")) channel.SendToServer(new SalvageRequest(screen.Container.Value));
+}, new InventoryPanelOptions { Screens = InventoryScreens.Chest, Width = 240 });
+
+Ui.Inventory.ScreenChanged += (before, now) => Log.Info($"{before?.Kind} -> {now?.Kind} {now?.Container}");
+InventoryScreen? open = Ui.Inventory.Screen;           // Backpack or Chest, with Hud and Container; null: neither
+EntityId target = Ui.Screens.Current.Target;           // the same entity on any chest-style screen (chests, factories)
+```
+
+| Member | What | Row |
+|---|---|---|
+| `AddPanel(title, draw, options)` | a panel drawn every overlay frame (render thread) while a screen of `options.Screens` (Backpack, Chest, All) is open and `When` says so, docked beside the slots the game drew: `Side` Right (default; to their left when there is no room), Left, Below; level with the chest's slots on a chest screen. `Width`, `Style`, `Theme`, `Interactive` (its buttons take the mouse while it is over the panel) as for crafting panels. Dispose to remove | `ui.inventory.panels` |
+| `Screen` | the open `InventoryScreen(Kind, Hud, Container)` or null (any thread) | `ui.screens` |
+| `ScreenChanged` | `(before, now)` on the game's UI thread after the frame in which a backpack or chest screen opened, closed or changed (another chest; the chest's entity named a frame late). `InventoryScreenChangedEvent` on the event bus for the tick thread | `ui.screens` |
+| `GameScreen.Target` | the entity a chest-style screen is about: a storage chest's (StorageChest, CommerceProductChest) or a production station's (FactoryCrafting) | `ui.screens` |
+
+**Which screens.** Backpack: the backpack screen, or the in-game menu while it draws the player's slots (not its crafting
+tab, map or journal). Chest: a storage chest (HUD StorageChest) and the commerce-product chest that uses the same screen.
+Not: stations and factories (use `Ui.Crafting.AddPanel` with `AtFactories`), loot chests, the play view, any other screen.
+
+**The chest's entity.** `InventoryScreen.Container` is the entity the game's chest screen reads the other inventory from
+(play data `+0x2c50` on client 26430625; `docs/re/game-ui.md`). For a chest the server sent, that is the server's id of
+it, so your server half can find it: `Items.Read(chest)` for its contents, `World.Position(chest)` for where it is. Check
+there that it is a container (not a player: `Players.IsPlayer`), near the sender, and one they may use, before acting. A
+panel click is a wish, never authority. `EntityId.None` for the frame or two before the game names it; `ScreenChanged`
+fires again when it does.
+
+**Fail closed.** The panel is drawn only when Kiln knows where the game drew the slots this frame (the slot frame of
+`ui.slots.inspect` is this session's, at most 250 ms old, of the same screen, with a usable viewport). On an unknown screen,
+an unmeasured build, an older kiln-core (no `screen_view`) or a frame Kiln cannot read, there is no panel and the game's
+screen is as without Kiln. Placement uses the same pixel mapping as marks: game test pending (client checks
+`ui-hooks.c5` to `ui-hooks.c7`).
+
+**C (native plugins).** `kiln.ui.inventory` v2 appends `screen_view(owner, target_w, target_h, &view)` (size-guarded at byte
+40; the table is 48 bytes): `KilnUiScreenView` with `kind` (`KUI_VIEW_BACKPACK`, `KUI_VIEW_CHEST`), `hud_screen`,
+`container`, the local player, `KUI_VIEW_HOLDER_MATCH` (a drawn slot's holder is the container), and the rectangles of all
+drawn slots, the player's and the container's in the target's pixels. kiln.ui's `screen_target` now also answers on the
+two chest screens (before 0.2.0-dev.30: factories only).
+
+**Not in this version:** a button inside the game's chest screen where Enlarge sits (drawn by the game's own button
+renderer), the game's own slot colours (marks are drawn over the slot), the gamepad's focused slot.
 
 ## Windows (immediate mode)
 ```csharp

@@ -1,0 +1,8 @@
+# Made by build-assets.py on the machine that builds the fixture (generated sources, the cook's outputs): never committed.
+models/
+assets/cooked/
+assets/assets.json
+assets/physics.json
+blocks/*.materials.json
+bin/
+obj/

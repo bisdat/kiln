@@ -470,3 +470,33 @@ not observed. Do not call render-task solvers from a managed tick, retain instan
 No server counterpart is qualified; reflected server types alone do not prove cosmetic simulation. Novel authored
 cloth/chain behavior remains unverified in client. Scratch `models.cloth.readers` / `models.chain2.readers` are
 inspection features, not production capabilities.
+
+### What Kiln's cook relies on (tools/modelcook, 0.2.0-dev.30) [refl] [data]
+
+Structure and index spaces only; the authoring side is [docs/kiln/modding/models.md#physics](../kiln/modding/models.md#physics).
+The cook writes cloth and chains2 against these layouts and refuses physics when the reflected types of the exe it reads
+differ in size, offset or field type (`cook/rendermodel.py` `PHYSICS_LAYOUTS`; layout hashes of client 26430625:
+RenderModel `0x0a4db420`, ClothData `0x2ced6d9a`, RenderClothMesh `0xffeba681`, MeshResource `0x9bd855cf`, Fabric
+`0x3be74eb9`, ClothColliderData `0x1e7244a8`, ChainData `0xa051aa1c`, Chain2 `0xa411726a`, Config2 `0x7e592e98`).
+
+| Field | Index space | Corpus evidence |
+|---|---|---|
+| RenderModelMesh `clothMeshIndex` | 0 rigid, 1..N the cloth mesh (one-based) | every index ≤ its model's cloth mesh count |
+| MeshResource `simulationSkinningData` joints | **skeleton (hierarchy) joint**, u8 | 83,724 of 83,726 render/simulation skin pairs agree through skinningMap |
+| render skin stream | skin-palette slot (skinningMap index) | all skinned models |
+| collider sphere/capsule skin joints | **skeleton joint**, u8 | 55 of 105 models with skinned colliders use indices at or above their palette size |
+| ChainData `joints` | skin-palette slot, after the sorted slots; skinningMap 0 there | all 52 chain models |
+| ChainData `anchorHierarchyJoints` | skeleton joint, u8 | all 52 |
+
+- `skinnedVertexIndices` lists exactly the particles with inverse mass 0, in ascending order (320 of 320 meshes).
+- The fabric's `triangles` are the simulation triangles flattened; the render triangles map onto them through
+  `renderSimulationVertexIndices` in the same order and winding (319 of 320 meshes; the other has different counts).
+- `stiffnessValues` and `simulationStiffnesses` are empty in all 320 meshes; ClothData's two totals are the sums of the
+  meshes' simulation triangles and render vertices (235 of 235 models).
+- Collider `instances`: one per cloth mesh, in cloth order, each listing its sphere and capsule indices, whenever the
+  model has colliders; none when it has none (all 110 models with colliders; 125 without).
+- `chainColliders`: one per chain, and chain i names collider i (`colliderIndex`), in all 52 chain models; 22 of the
+  139 colliders are empty (no shape, `hasSkinning` false). CreateChains2 (`0xe7e30`) does not read `colliderIndex`.
+- Runtime anchor index of chain i is the legacy chain count + i (`0xee380`); the legacy list is empty everywhere.
+- Every chain re-encodes within one code step through the cook's own frame and quantizer
+  (`tools/modelcook/tests/game_chain_check.py` on client 26430625: 139 of 139, worst error 1 code).

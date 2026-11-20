@@ -9,6 +9,7 @@ mod gate;
 mod kiln;
 mod lock;
 mod ops;
+mod pack;
 mod preflight;
 mod profiles;
 mod procs;
@@ -295,6 +296,12 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ProfileCmd,
     },
+    /// Crucible packs (.kilnpack): build from a profile, verify, install as an instance, update, diff, undo, uninstall,
+    /// put the server part on a server folder
+    Pack {
+        #[command(subcommand)]
+        cmd: pack::PackCmd,
+    },
     /// Compare two tick-stats.jsonl files (before/after moving a mod's work into tasks): per-world step time and
     /// steps over budget, per-mod Pre/Post time and share of the step, and the tasks section when present (T12)
     TickCompare {
@@ -526,6 +533,7 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
                 ProfileCmd::Show { profile, side } => profiles::show(&profile, &side),
             };
         }
+        Cmd::Pack { cmd } => return pack::run(cmd),
         Cmd::Client { cmd } => {
             return match cmd {
                 ClientCmd::Status { dir } => client::status(dir),
@@ -570,6 +578,7 @@ fn data_use(cmd: &Cmd) -> lock::Use {
         Cmd::Deploy { bundle, .. } => if bundle.is_some() { Use::Whole } else { Use::None },
         Cmd::Update { .. } => Use::Part,
         Cmd::Backup { .. } | Cmd::Report { .. } | Cmd::Library { .. } | Cmd::Profile { .. } | Cmd::Client { .. } => Use::Whole,
+        Cmd::Pack { cmd } => if pack::uses_data(cmd) { Use::Whole } else { Use::None },
         Cmd::Bundle { cmd } => match cmd {
             BundleCmd::Create { .. } | BundleCmd::Verify { .. } => Use::None,
             BundleCmd::Install { .. } | BundleCmd::Uninstall { .. } => Use::Whole,
@@ -616,13 +625,14 @@ mod data_use_tests {
             &["profile", "create", "p"][..], &["profile", "show", "p"], &["library", "list"], &["library", "import", "x.zip"], &["library", "take-over", "eml:x"],
             &["client", "status"], &["deploy", "s", "--bundle", "k.zip"], &["bundle", "install", "k.zip", "--dir", "/g"],
             &["bundle", "uninstall", "--dir", "/g"], &["backup", "s"], &["report"],
+            &["pack", "install", "p.kilnpack", "--yes"], &["pack", "update", "p", "p.kilnpack"], &["pack", "build", "p", "--version", "1.0.0"], &["pack", "list"],
         ] {
             assert_eq!(use_of(args), Use::Whole, "{args:?}");
         }
         for args in [
             &["run", "s"][..], &["start", "s"], &["stop", "s"], &["logs", "s", "--follow"], &["port", "s"], &["gate", "s"],
             &["install", "s"], &["prefix", "s"], &["status", "s"], &["list"], &["deploy", "s"], &["bundle", "verify", "k.zip"],
-            &["cmd", "s", "help"], &["tick-compare", "a.jsonl", "b.jsonl"],
+            &["cmd", "s", "help"], &["tick-compare", "a.jsonl", "b.jsonl"], &["pack", "verify", "p.kilnpack"],
         ] {
             assert_eq!(use_of(args), Use::None, "{args:?}");
         }

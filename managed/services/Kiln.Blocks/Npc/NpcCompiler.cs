@@ -38,6 +38,7 @@ internal static class NpcCompiler
         {
             case BodyBlock body:
                 CheckBody(ctx, Liked(ctx, body, null), "", name);
+                NpcPhysics.WarnHeld(ctx, low, body);
                 low.Json["body"] = name;
                 return new BlockHandle<BodyBlock>(mod, name, BlockIds.Derive(mod, "body", name), $"{mod}.{name}", body);
             case AnimationBlock anim:
@@ -135,6 +136,7 @@ internal static class NpcCompiler
             if (c.Radius <= 0 || c.Height < c.Radius * 2 && c.Shape == "capsule") throw new BlockError(ctx.Block, Join(path, $"colliders[{i}]"), "a radius above 0, and a capsule at least as high as it is wide");
         }
         if (b.Colliders is { Count: > 2 }) throw new BlockError(ctx.Block, Join(path, "colliders"), "at most two: one for hits, one for what it bumps into");
+        NpcPhysics.Check(ctx, b, path);
     }
 
     private static void CheckFile(BlockContext ctx, string file, string path)
@@ -298,11 +300,12 @@ internal static class NpcCompiler
         return new Graph(template, t.AnimationGraph, Guid.Empty, states, [], true);
     }
 
-    private static (Guid Guid, Guid Skeleton, JsonNode? Box) CookedModel(BlockContext ctx, string mod, string model, string path, string file)
+    private static (Guid Guid, Guid Skeleton, JsonNode? Box) CookedModel(BlockContext ctx, string mod, string model, string path, string file, BodyBlock? body = null)
     {
         var stem = model.Replace('/', '_');
         var j = ReadJson(Path.Combine(Cooked(mod), $"{stem}.model.json"))
                 ?? throw new BlockError(ctx.Block, path, $"its model {model} is not cooked: a body with a model is cooked from {file} when the mod builds (kiln build, or kiln cook in the mod's folder). A body written in C# is not seen by the cook: put it in blocks/*.json and name it");
+        if (body != null) NpcPhysics.CheckCooked(ctx, body, j, model, "body");
         return (Guid.Parse(j["guid"]!.GetValue<string>()), Guid.Parse(j["skeleton"]?.GetValue<string>() ?? Guid.Empty.ToString()), j["boundingBox"]);
     }
 
@@ -343,6 +346,7 @@ internal static class NpcCompiler
         var key = c.Was ?? name;
         var p = Resolve(ctx, name, c.Body, c.Animation, c.AI, c.Behaviour);
         var (body, anim, ai, bh) = (p.Body.Block, p.Anim.Block, p.Ai.Block, p.Behaviour.Block);
+        NpcPhysics.WarnHeld(ctx, low, body);
         var own = body.Model != null || anim.Clips != null;
         if (body.Template != null && anim.Clips != null)
             throw new BlockError(ctx.Block, "animation", $"the game's {body.Template} is posed by its own skeleton, and this animation has a skeleton of its own: give the creature a body of its own on that skeleton");
@@ -365,7 +369,7 @@ internal static class NpcCompiler
                 throw new BlockError(ctx.Block, "animation", $"the body's skeleton is {bodySkeleton} and the animation's {skeleton}: the game poses a model only by the skeleton its graph names, so they must be one (the same glTF, or the same \"skeleton\")");
             var graphName = body.Slots is { Count: > 0 } ? $"{p.Anim.Name}.{p.Body.Name}" : p.Anim.Name;
             graph = CookedGraph(ctx, p.Anim.Mod, graphName, "animation", "blocks/*.json");
-            (model, var modelSkeleton, box) = CookedModel(ctx, p.Body.Mod, ModelName(body.Model!), "body.model", "blocks/*.json");
+            (model, var modelSkeleton, box) = CookedModel(ctx, p.Body.Mod, ModelName(body.Model!), "body.model", "blocks/*.json", body);
             if (modelSkeleton != graph.Skeleton)
                 throw new BlockError(ctx.Block, "body.model", $"the model is cooked on skeleton {modelSkeleton} and the graph on {graph.Skeleton}: the client would draw it unposed. Cook both from the same skeleton");
             foreach (var (slot, joint) in body.Slots ?? new Dictionary<Slot, string>())
