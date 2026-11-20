@@ -158,6 +158,84 @@ pub fn try_hold(dirs: &DataDirs) -> Result<Option<QuickLock>> {
     }
 }
 
+/// Names a browser gives a download until it is done: the finished file gets another name, so these are never waited for.
+const PARTIAL_DOWNLOAD: [&str; 5] = [".crdownload", ".part", ".partial", ".download", ".opdownload"];
+
+/// How long [`wait_until_ready`] waits for one file at most.
+const READY_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Waits until each picked or dropped file can be read and has stopped changing: not there yet, held by another
+/// program (Windows' sharing violation, os error 32: a browser finishing the download, an antivirus scan) or written
+/// within the last second and still growing. Tried again with a growing pause for [`READY_WAIT`]; then refused with
+/// "still downloading or being scanned". A browser's partial download (`.crdownload`, `.part`, ...) is refused at once.
+pub fn wait_until_ready(paths: &[PathBuf], progress: &mut dyn Progress) -> Result<()> {
+    for p in paths {
+        let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let still = |why: &str| Error::new(ErrorCode::Refused, format!(
+            "{} is still downloading or being scanned ({why}). Wait until the download has finished, then add it again.", p.display()));
+        if PARTIAL_DOWNLOAD.iter().any(|s| name.ends_with(s)) {
+            return Err(still("the browser has not finished it"));
+        }
+        let started = std::time::Instant::now();
+        let mut pause = std::time::Duration::from_millis(150);
+        let mut said = false;
+        let mut last: Option<(u64, Option<std::time::SystemTime>)> = None;
+        loop {
+            let why = match ready_now(p, &mut last) {
+                Ready::Yes => break,
+                Ready::No(why) => why,
+                Ready::Fail(e) => return Err(e),
+            };
+            if started.elapsed() >= READY_WAIT {
+                let e = still(why);
+                // a path that never appeared stays "not found" for callers that tell that apart
+                return Err(if why == "not there yet" { Error { code: ErrorCode::NotFound, ..e } } else { e });
+            }
+            if !said {
+                said = true;
+                progress.report(None, &format!("waiting for {} ({why})", p.display()));
+            }
+            std::thread::sleep(pause);
+            pause = (pause * 2).min(std::time::Duration::from_millis(1200));
+        }
+    }
+    Ok(())
+}
+
+enum Ready {
+    Yes,
+    /// Not yet, and why (for the message).
+    No(&'static str),
+    Fail(Error),
+}
+
+fn ready_now(p: &Path, last: &mut Option<(u64, Option<std::time::SystemTime>)>) -> Ready {
+    let m = match std::fs::metadata(p) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ready::No("not there yet"),
+        Err(e) if e.raw_os_error() == Some(32) && cfg!(windows) => return Ready::No("another program holds it"),
+        Err(e) => return Ready::Fail(crate::util::io_at(p, "reading")(e)),
+    };
+    if m.is_dir() {
+        return Ready::Yes;
+    }
+    if let Err(e) = std::fs::File::open(p) {
+        return match e.raw_os_error() {
+            Some(32 | 33) if cfg!(windows) => Ready::No("another program holds it"),
+            _ if e.kind() == std::io::ErrorKind::NotFound => Ready::No("not there yet"),
+            _ => Ready::Fail(crate::util::io_at(p, "reading")(e)),
+        };
+    }
+    let now = (m.len(), m.modified().ok());
+    // written within the last second: the same size and time a moment later, or it is still being written
+    let fresh = now.1.and_then(|t| t.elapsed().ok()).is_some_and(|age| age < std::time::Duration::from_secs(1));
+    if fresh && *last != Some(now) {
+        *last = Some(now);
+        return Ready::No("its size is still changing");
+    }
+    Ready::Yes
+}
+
 /// How long an add waits before it writes the game's profile.json a second time (put_in_profile).
 const REFRESH_RETRY: std::time::Duration = std::time::Duration::from_millis(400);
 
@@ -669,6 +747,9 @@ fn add_impl(dirs: &DataDirs, install: &GameInstall, paths: &[PathBuf], is_runnin
         return Err(Error::invalid("Nothing to add."));
     }
     kiln_in_game(install)?;
+    // a picked or dropped file a browser is still writing or an antivirus is still scanning: waited for (a few seconds)
+    // before the data folder is held
+    wait_until_ready(paths, progress)?;
     let _lock = lock(dirs)?;
     // where the mods go is decided before anything is imported, so a refusal changes nothing
     let dest = destination(dirs, install)?;
@@ -1036,6 +1117,72 @@ mod refresh_retry_tests {
         assert_eq!(enabled_in_game(&g), ["a"]);
         let p = profile::get(&dirs, first.profile_id.as_deref().unwrap()).unwrap();
         assert_eq!(p.mods.kiln.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["a"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A browser's partial download is refused at once, with words a player understands.
+    #[test]
+    fn a_partial_download_is_refused_as_still_downloading() {
+        let (root, dirs, g) = setup("partial");
+        let f = root.join("Cool Mod.zip.crdownload");
+        std::fs::write(&f, b"PK").unwrap();
+        let t0 = std::time::Instant::now();
+        let e = add_with(&dirs, &g, &[f], false, &mut NoProgress).unwrap_err();
+        assert!(e.message.contains("still downloading or being scanned"), "{}", e.message);
+        assert!(t0.elapsed() < std::time::Duration::from_secs(1), "not waited for");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A dropped file that is not there yet (a browser moving the finished download into place) is waited for.
+    #[test]
+    fn a_file_that_arrives_a_moment_later_is_added() {
+        let (root, dirs, g) = setup("late");
+        let src = kiln_mod(&root, "late");
+        let target = root.join("late-mod");
+        let mover = {
+            let (src, target) = (src.clone(), target.clone());
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                std::fs::rename(src, target).unwrap();
+            })
+        };
+        let r = add_with(&dirs, &g, std::slice::from_ref(&target), false, &mut NoProgress);
+        mover.join().unwrap();
+        let r = r.expect("added once it arrived");
+        assert_eq!(r.added.len(), 1, "{r:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A file that never arrives: refused after the wait, as still downloading.
+    #[test]
+    fn a_file_that_never_arrives_is_refused_after_the_wait() {
+        let (root, _dirs, _g) = setup("never");
+        let e = wait_until_ready(&[root.join("gone.zip")], &mut NoProgress).unwrap_err();
+        assert!(e.message.contains("still downloading or being scanned (not there yet)"), "{}", e.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A file still growing is waited for until its size stays the same.
+    #[test]
+    fn a_growing_file_is_waited_for() {
+        let (root, _dirs, _g) = setup("grow");
+        let f = root.join("big.zip");
+        std::fs::write(&f, b"PK").unwrap();
+        let writer = {
+            let f = f.clone();
+            std::thread::spawn(move || {
+                use std::io::Write;
+                let mut h = std::fs::OpenOptions::new().append(true).open(&f).unwrap();
+                for _ in 0..6 {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    h.write_all(&[0u8; 4096]).unwrap();
+                }
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        wait_until_ready(std::slice::from_ref(&f), &mut NoProgress).unwrap();
+        writer.join().unwrap();
+        assert_eq!(std::fs::metadata(&f).unwrap().len(), 2 + 6 * 4096, "ready only once the writes were done");
         let _ = std::fs::remove_dir_all(&root);
     }
 
