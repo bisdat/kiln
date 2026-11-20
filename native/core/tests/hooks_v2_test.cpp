@@ -182,6 +182,12 @@ bool load_fragment(std::string_view, const std::filesystem::path&, const std::fi
     return false;
 }
 bool unload_fragment(std::string_view) { return false; }
+}  // namespace sigdb
+namespace caps {  // a fragment's capability rows (caps.cpp): no registry here
+void fragment_rows(std::string_view) {}
+void fragment_gone(std::string_view) {}
+}  // namespace caps
+namespace sigdb {
 bool file_bytes(uintptr_t a, uint8_t* out, size_t n) {
     bool found = false;
     for (auto& [at, bytes] : g_file)
