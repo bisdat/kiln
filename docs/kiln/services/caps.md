@@ -475,3 +475,5 @@ steps.
 | `stats.own` | managed; static on a dedicated server, session on a client | Kiln.ModValues | the server ledger (`Define`, `Read`, `Add`, `Spend`, `Set`, `Reset`): needs kiln.saves (`service-missing`); on a client pending until it hosts a world |
 | `stats.sync` | managed, static | Kiln.ModValues | `ModValues.Synced`: client only (`wrong-side` on a server), needs kiln.net |
 | `stats.ui` | managed, static | Kiln.ModValues | the stat source of UI blocks: client only (`wrong-side` on a server), needs kiln.ui |
+| `kiln.mod-values` | core (in-core service) | core | the native facade's table is here; its calls answer `unavailable` until Kiln.ModValues has bound the backend |
+| `kiln.mod-values.backend` | core (in-core service, host only) | core | the table through which Kiln.ModValues binds the backend once; not for mods |

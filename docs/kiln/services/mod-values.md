@@ -116,9 +116,30 @@ is held, never overwritten.
 | `stats.ui` | client | the stat source of UI blocks (package 09); needs kiln.ui |
 
 ## Native facade
-`kiln.mod-values` v1 (`native/core/abi/services/kiln_mod_values.h`): the same ledger for native mods and other
-engines, owners mapped to namespaces (a managed mod's id; a native owner's `native.` + 32 hex digits of SHA-256 of its
-registry name). See the header for the slots and rules.
+`kiln.mod-values` v1 (`native/core/abi/services/kiln_mod_values.h`, in the core): the same ledger, registry and synced
+copy for native mods and other engines. Kiln.ModValues hands the core its backend at its start (the first service tick)
+through the host-only table `kiln.mod-values.backend` v1; before that, or without Kiln.ModValues, every slot but
+`owner_namespace` answers `KILN_ERR_UNAVAILABLE` (call from a tick and try again on a later one).
+
+- `api->service("kiln.mod-values", 1)`; `owner_namespace(owner, buf, cap, &required)` gives your namespace: a managed
+  mod's manifest id, else `native.` and the first 32 hex digits of the SHA-256 of the owner's registry name (a plugin:
+  `plugin:<file>.dll`; a native mod: `native:<id>`). `required` counts the NUL; a short buffer gets nothing.
+- Keys are `"<namespace>:<id>"`. `describe` any thread; `define`, `read`, `change` on the server's tick thread
+  (`KILN_ERR_WRONG_THREAD` elsewhere); `read_synced` on a client, any thread.
+- `KilnModValueDef`: `size`, `version >= 1`, `carry_epoch >= 1`; `label_json` and `number_format_json` are UiText JSON
+  (`"\"Coins\""` or `{"en":"Coins"}`); `KMV_HAS_INITIAL` says `initial` is used (0 is a real initial value);
+  `KMV_TRUST_IMPORTS` for Carried. Strings and arrays are copied.
+- Results: `KILN_OK` with `ok = 0` is a refusal with a `KMV_*` reason (the managed `ModValueReasons`, plus
+  `KMV_DEFINITION_CONFLICT` = 15); `flags`: a read gives AFTER, an accepted change BEFORE|AFTER, a refusal 0. Bad
+  shapes are `KILN_ERR_INVALID_ARGUMENT`, a revoked owner `KILN_ERR_REVOKED`.
+- Characters are `{account key, CharacterId in RFC 4122 byte order}` (not `Guid.ToByteArray`'s order); world GUIDs too.
+- `change`: ADD (signed for a World counter, else 0 or more), SPEND (currency, positive), SET (absolute raw), RESET
+  (refused for Carried); compare-and-set with `KMV_EXPECT_REVISION` and `{world, value_revision}` (revision 0 is valid).
+- `subscribe(owner, KMV_CANONICAL_EVENTS | KMV_SYNCED_EVENTS, filter, fn, user, &handle)`: filter `""` (your namespace),
+  `"ns:id"` or `"ns:*"`; another namespace's events only while its read policy lets you read it (synced: also sync
+  Readers). Canonical callbacks on the server tick, synced ones on the client's main thread; records are borrowed until
+  the callback returns; a faulting callback is removed. Revoking the owner removes its subscriptions and retires its
+  definitions (the data stays parked).
 
 ## Test kit
 `kiln.ModValues` (`HarnessModValues`): the real ledger on an in-memory store; `Join`/`Leave` a character
