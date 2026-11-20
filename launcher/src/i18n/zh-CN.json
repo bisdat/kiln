@@ -4279,6 +4279,14 @@
     }
   },
   "crucible": {
+    "checks": {
+      "running": "正在检查整合包…",
+      "couldNot": "无法检查整合包",
+      "passed": "检查：通过",
+      "failed.other": "{count} 个问题导致无法安装",
+      "warnings.other": "{count} 项需要留意",
+      "failedBlock": "整合包未通过检查：无法安装。"
+    },
     "banner": {
       "title": "整合包更新",
       "head": "{name} {change}",
@@ -4334,6 +4342,7 @@
       "updateKiln": "更新 Kiln",
       "uploadingTitle": "仍在上传",
       "stillUploading": "{name} 的整合包还在上传（{pct}%）。准备好后 Kiln 会自动安装。",
+      "resumed": "Kiln 已就绪。这就是你要找的整合包 {name}。",
       "wait": "等待",
       "waiting": "正在等待 {name} 上传完成（{pct}%）…",
       "ownProfile": "会作为单独的配置方案安装，你现有的模组保持原样。",
@@ -4427,6 +4436,13 @@
       "removedKept": "{name}（保留在你的模组库中）",
       "packData": "整合包自带的数据有变化",
       "kept": "你的改动已保留：{settings} 项设置，{mods} 个模组。",
+      "keptData": "你的改动已保留：{settings} 项设置，{data} 项数据改动，{mods} 个模组。",
+      "renamed": "{from} 现在是 {to}：你的设置会一起迁移。",
+      "stillWins.other": "你的改动仍然优先（{count}）",
+      "dataChanged": "整合包现在设为 {pack}。你的 {mine} 仍然生效。",
+      "dataSame": "整合包设为 {pack}。你的 {mine} 仍然生效。",
+      "dropMine": "放弃我的改动（使用 {value}）",
+      "savesFirst": "会先备份你的存档。",
       "download": "下载 {size}",
       "needsYou.other": "需要你决定（{count}）",
       "both": "整合包现在是 {pack}，你之前是 {mine}。",

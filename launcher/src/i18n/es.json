@@ -4916,6 +4916,16 @@
     }
   },
   "crucible": {
+    "checks": {
+      "running": "Revisando el pack…",
+      "couldNot": "No se pudo revisar el pack",
+      "passed": "Revisiones: superadas",
+      "failed.one": "{count} problema impide la instalación",
+      "failed.other": "{count} problemas impiden la instalación",
+      "warnings.one": "{count} cosa para revisar",
+      "warnings.other": "{count} cosas para revisar",
+      "failedBlock": "El pack no superó las revisiones: no se puede instalar."
+    },
     "banner": {
       "title": "Actualización del pack",
       "head": "{name} {change}",
@@ -4979,6 +4989,7 @@
       "updateKiln": "Actualizar Kiln",
       "uploadingTitle": "Aún se está subiendo",
       "stillUploading": "El pack de {name} aún se está subiendo ({pct} %). Kiln lo instalará cuando esté listo.",
+      "resumed": "Kiln está listo. Aquí tienes {name}, el pack que buscabas.",
       "wait": "Esperar",
       "waiting": "Esperando la subida de {name} ({pct} %)…",
       "ownProfile": "Se instala como su propio perfil. Tus mods actuales se quedan como están.",
@@ -5074,6 +5085,14 @@
       "removedKept": "{name} (se queda en tu biblioteca)",
       "packData": "Han cambiado los datos del propio pack",
       "kept": "Tus cambios se mantienen: {settings} ajustes, {mods} mods.",
+      "keptData": "Tus cambios se mantienen: {settings} ajustes, {data} cambios de datos, {mods} mods.",
+      "renamed": "{from} ahora es {to}: tus ajustes se mueven con él.",
+      "stillWins.one": "Tu cambio sigue mandando ({count})",
+      "stillWins.other": "Tus cambios siguen mandando ({count})",
+      "dataChanged": "El pack ahora pone {pack}. El tuyo, {mine}, sigue contando.",
+      "dataSame": "El pack pone {pack}. El tuyo, {mine}, sigue contando.",
+      "dropMine": "Quitar mi cambio (usar {value})",
+      "savesFirst": "Primero se hace una copia de tus partidas.",
       "download": "Descargar {size}",
       "needsYou.one": "Te necesita ({count})",
       "needsYou.other": "Te necesita ({count})",

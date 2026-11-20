@@ -4814,6 +4814,14 @@
     }
   },
   "crucible": {
+    "checks": {
+      "running": "パックを確認しています…",
+      "couldNot": "パックを確認できませんでした",
+      "passed": "確認: 問題なし",
+      "failed.other": "{count} 件の問題でインストールできません",
+      "warnings.other": "{count} 件の確認事項",
+      "failedBlock": "パックが確認に通りませんでした: インストールできません。"
+    },
     "banner": {
       "title": "パックの更新",
       "head": "{name} {change}",
@@ -4869,6 +4877,7 @@
       "updateKiln": "Kiln を更新",
       "uploadingTitle": "アップロード中",
       "stillUploading": "{name} さんのパックはまだアップロード中です（{pct}%）。準備ができたら Kiln がインストールします。",
+      "resumed": "Kiln の準備ができました。お目当てのパック {name} です。",
       "wait": "待つ",
       "waiting": "{name} さんのアップロードを待っています（{pct}%）…",
       "ownProfile": "専用のプロファイルとしてインストールされます。今のモッドはそのままです。",
@@ -4962,6 +4971,13 @@
       "removedKept": "{name}（ライブラリに残ります）",
       "packData": "パック自体のデータが変更されました",
       "kept": "あなたの変更は保持されます: 設定 {settings} 件、モッド {mods} 個。",
+      "keptData": "あなたの変更は保持されます: 設定 {settings} 件、データ変更 {data} 件、モッド {mods} 個。",
+      "renamed": "{from} は {to} になりました: あなたの設定も移ります。",
+      "stillWins.other": "あなたの変更が引き続き優先されます（{count}）",
+      "dataChanged": "パックは {pack} に変わりました。あなたの {mine} が引き続き有効です。",
+      "dataSame": "パックは {pack} です。あなたの {mine} が引き続き有効です。",
+      "dropMine": "自分の変更をやめる（{value} を使う）",
+      "savesFirst": "先にセーブデータをバックアップします。",
       "download": "{size} をダウンロード",
       "needsYou.other": "確認が必要です（{count}）",
       "both": "パックは今 {pack} になっています。あなたは {mine} でした。",

@@ -4916,6 +4916,16 @@
     }
   },
   "crucible": {
+    "checks": {
+      "running": "Das Pack wird geprüft…",
+      "couldNot": "Das Pack konnte nicht geprüft werden",
+      "passed": "Prüfungen: bestanden",
+      "failed.one": "{count} Problem verhindert die Installation",
+      "failed.other": "{count} Probleme verhindern die Installation",
+      "warnings.one": "{count} Hinweis zum Ansehen",
+      "warnings.other": "{count} Hinweise zum Ansehen",
+      "failedBlock": "Das Pack hat die Prüfungen nicht bestanden: es kann nicht installiert werden."
+    },
     "banner": {
       "title": "Pack-Update",
       "head": "{name} {change}",
@@ -4979,6 +4989,7 @@
       "updateKiln": "Kiln aktualisieren",
       "uploadingTitle": "Lädt noch hoch",
       "stillUploading": "Das Pack von {name} lädt noch hoch ({pct} %). Kiln installiert es, sobald es fertig ist.",
+      "resumed": "Kiln ist bereit. Hier ist {name}, das Pack, wegen dem du gekommen bist.",
       "wait": "Warten",
       "waiting": "Warte auf den Upload von {name} ({pct} %)…",
       "ownProfile": "Wird als eigenes Profil installiert. Deine aktuellen Mods bleiben, wie sie sind.",
@@ -5074,6 +5085,14 @@
       "removedKept": "{name} (bleibt in deiner Bibliothek)",
       "packData": "Die eigenen Daten des Packs haben sich geändert",
       "kept": "Deine Änderungen bleiben: {settings} Einstellungen, {mods} Mods.",
+      "keptData": "Deine Änderungen bleiben: {settings} Einstellungen, {data} Datenänderungen, {mods} Mods.",
+      "renamed": "{from} heißt jetzt {to}: deine Einstellungen ziehen mit um.",
+      "stillWins.one": "Deine Änderung gilt weiter ({count})",
+      "stillWins.other": "Deine Änderungen gelten weiter ({count})",
+      "dataChanged": "Das Pack setzt jetzt {pack}. Deins, {mine}, gilt weiter.",
+      "dataSame": "Das Pack setzt {pack}. Deins, {mine}, gilt weiter.",
+      "dropMine": "Meine Änderung verwerfen ({value} nehmen)",
+      "savesFirst": "Deine Spielstände werden vorher gesichert.",
       "download": "{size} herunterladen",
       "needsYou.one": "Braucht dich ({count})",
       "needsYou.other": "Braucht dich ({count})",

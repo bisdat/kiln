@@ -4916,6 +4916,16 @@
     }
   },
   "crucible": {
+    "checks": {
+      "running": "Vérification du pack…",
+      "couldNot": "Le pack n'a pas pu être vérifié",
+      "passed": "Vérifications : réussies",
+      "failed.one": "{count} problème empêche l'installation",
+      "failed.other": "{count} problèmes empêchent l'installation",
+      "warnings.one": "{count} point à regarder",
+      "warnings.other": "{count} points à regarder",
+      "failedBlock": "Le pack n'a pas passé les vérifications : il ne peut pas être installé."
+    },
     "banner": {
       "title": "Mise à jour du pack",
       "head": "{name} {change}",
@@ -4979,6 +4989,7 @@
       "updateKiln": "Mettre Kiln à jour",
       "uploadingTitle": "Envoi en cours",
       "stillUploading": "Le pack de {name} est encore en cours d'envoi ({pct} %). Kiln l'installera quand il sera prêt.",
+      "resumed": "Kiln est prêt. Voici {name}, le pack pour lequel vous êtes venu.",
       "wait": "Attendre",
       "waiting": "En attente de l'envoi de {name} ({pct} %)…",
       "ownProfile": "S'installe comme un profil à part. Vos mods actuels restent comme ils sont.",
@@ -5074,6 +5085,14 @@
       "removedKept": "{name} (gardé dans votre bibliothèque)",
       "packData": "Les données propres au pack ont changé",
       "kept": "Vos changements sont gardés : {settings} réglages, {mods} mods.",
+      "keptData": "Vos changements sont gardés : {settings} réglages, {data} modifications de données, {mods} mods.",
+      "renamed": "{from} s'appelle maintenant {to} : vos réglages suivent.",
+      "stillWins.one": "Votre changement reste prioritaire ({count})",
+      "stillWins.other": "Vos changements restent prioritaires ({count})",
+      "dataChanged": "Le pack met maintenant {pack}. Le vôtre, {mine}, compte toujours.",
+      "dataSame": "Le pack met {pack}. Le vôtre, {mine}, compte toujours.",
+      "dropMine": "Retirer mon changement (prendre {value})",
+      "savesFirst": "Vos sauvegardes sont copiées d'abord.",
       "download": "Télécharger {size}",
       "needsYou.one": "Besoin de vous ({count})",
       "needsYou.other": "Besoin de vous ({count})",

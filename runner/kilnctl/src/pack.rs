@@ -7,6 +7,7 @@ use anyhow::{Result, bail};
 use clap::Subcommand;
 use kiln_manage::modpack::ModpackSource;
 use kiln_manage::modpack::merge::Pick;
+use kiln_manage::modpack::layers;
 use kiln_manage::modpack::pack::{self, BuildRequest, Env, InstallRequest, Need, OverrideSpec, PartSide, ServerInstallRequest, UpdateRequest};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -121,8 +122,23 @@ pub enum PackCmd {
         /// A new optional mod's switch: ID=on|off
         #[arg(long = "optional", value_name = "ID=on|off")]
         optional: Vec<String>,
+        /// Let go of a player-layer field the pack sets too ("Drop my change"; KEY as the plan prints it)
+        #[arg(long = "drop", value_name = "KEY")]
+        drop: Vec<String>,
         #[arg(long)]
         yes: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The player layer of an instance (local.<profile>): list its data files, or set/remove some and save it
+    Local {
+        profile: String,
+        /// content/NAME.json=FILE: that file's text as the player layer's content/NAME.json
+        #[arg(long = "set", value_name = "content/NAME.json=FILE")]
+        set: Vec<String>,
+        /// content/NAME.json to take out
+        #[arg(long = "remove", value_name = "content/NAME.json")]
+        remove: Vec<String>,
         #[arg(long)]
         json: bool,
     },
@@ -232,10 +248,18 @@ fn show_plan(p: &pack::UpdatePlan) {
     for s in &p.mods.kept_switches { println!("  = {s}"); }
     if p.layer.changed { println!("  pack data changed"); }
     for f in &p.files {
+        if let Some(from) = &f.renamed_from { println!("  {from} is {} now: your values move along", f.path); }
         for k in &f.taken { println!("  {}: {k} updated by the pack", f.path); }
         for k in &f.kept { println!("  {}: {k} your change kept", f.path); }
         for c in &f.conflicts {
             println!("  CONFLICT {}#{}: pack had {}, now {}, you have {}", f.path, c.key, shown(&c.base), shown(&c.pack), shown(&c.mine));
+        }
+    }
+    if let Some(l) = &p.local {
+        println!("  your changes ({}, {} file(s)) are kept and still load last", l.id, l.files);
+        for o in &l.overlaps {
+            println!("  data {} {} {}: pack {}{}, yours {} still wins (--drop '{}')", o.section, o.target, o.field, o.pack,
+                if o.changed { " (changed)" } else { "" }, o.mine, o.key);
         }
     }
     if p.conflicts > 0 {
@@ -320,7 +344,7 @@ pub fn run(cmd: PackCmd) -> Result<i32> {
             println!("installed {} {} as profile {} ({}); activate it with: kilnctl client activate {}", r.instance.name, r.instance.version, r.profile.id, r.profile.name, r.profile.id);
             Ok(0)
         }
-        PackCmd::Update { profile, file, sha256, resolve, all, optional, yes, json } => {
+        PackCmd::Update { profile, file, sha256, resolve, all, optional, drop, yes, json } => {
             if !yes { bail!("a pack runs code from other people on this PC: add --yes if you trust it"); }
             let dirs = data_dirs()?;
             let mut res = BTreeMap::new();
@@ -329,7 +353,7 @@ pub fn run(cmd: PackCmd) -> Result<i32> {
                 res.insert(k.to_string(), pick(p)?);
             }
             let req = UpdateRequest { profile, source: ModpackSource::Path { path: file, sha256 }, consent: true, allow_http: false,
-                optional: switches(&optional, false)?, resolve: res, all: all.as_deref().map(pick).transpose()? };
+                optional: switches(&optional, false)?, resolve: res, all: all.as_deref().map(pick).transpose()?, drop };
             match pack::update(&dirs, &req, &mut Printer::new()) {
                 Ok(r) => {
                     if json { return print_json(&r); }
@@ -367,6 +391,25 @@ pub fn run(cmd: PackCmd) -> Result<i32> {
             let plan = pack::plan_update(&dirs, &from, &to, None, &BTreeMap::new()).km()?;
             if json { return print_json(&plan); }
             show_plan(&plan);
+            Ok(0)
+        }
+        PackCmd::Local { profile, set, remove, json } => {
+            let dirs = data_dirs()?;
+            if !(set.is_empty() && remove.is_empty()) {
+                for s in &set {
+                    let Some((rel, from)) = s.split_once('=') else { bail!("{s:?}: content/NAME.json=FILE") };
+                    let text = std::fs::read_to_string(from)?;
+                    layers::write(&dirs, &profile, rel, Some(&text)).km()?;
+                }
+                for rel in &remove {
+                    layers::write(&dirs, &profile, rel, None).km()?;
+                }
+                layers::save(&dirs, &profile).km()?;
+            }
+            let files = layers::files(&dirs, &profile).km()?;
+            if json { return print_json(&files); }
+            for f in &files { println!("{} ({} bytes)", f.path, f.text.len()); }
+            if files.is_empty() { println!("no player layer: kilnctl pack local {profile} --set content/mine.json=FILE makes one"); }
             Ok(0)
         }
         PackCmd::Undo { profile } => {

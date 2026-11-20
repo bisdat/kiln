@@ -370,6 +370,43 @@ fn share_receive_update_and_undo() {
 }
 
 #[test]
+fn a_game_client_downloads_no_server_only_mod() {
+    let t = tmp("serveronly");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (a, pid) = creator(&t);
+    add_mods(&a, &pid, &t.0, &["srv"]);
+    let ca = Crucible::new(&ep, &fake, "0").with_session(Some(KEY.into()));
+    let shared = share(&a, &ca, &ShareRequest { profile: pid, ..Default::default() }, None, &mut NoProgress).unwrap();
+    assert_eq!(shared.files, 3, "Crucible holds the whole pack");
+    // the creator marked srv for servers only (Pack Studio's sides): the signed index says so
+    {
+        let mut s = fake.s.lock().unwrap();
+        let ix = &mut s.versions.get_mut(&shared.version.id).unwrap().2;
+        for m in ix["mods"].as_array_mut().unwrap() {
+            if m["id"] == "srv" {
+                m["env"] = serde_json::json!({ "client": "unsupported", "server": "required" });
+            }
+        }
+    }
+
+    let b = DataDirs::at(t.0.join("friend"));
+    let cb = Crucible::new(&ep, &fake, "0");
+    let (pv, _) = preview(&b, &cb, &shared.pack.code, None).unwrap();
+    let srv = pv.index.mods.iter().find(|m| m.id == "srv").unwrap();
+    assert_eq!(srv.env().client, pack::Need::Unsupported);
+    let srv_sha = srv.file.as_ref().unwrap().sha256.clone();
+    assert!(!pv.missing.iter().chain(&pv.present).any(|m| m.id == "srv"), "the preview counts what this PC installs");
+    let alpha = pv.index.mods.iter().find(|m| m.id == "alpha").unwrap().file.as_ref().unwrap().size;
+    assert!(pv.download < alpha * 2 + srv.file.as_ref().unwrap().size, "the download leaves the server's mod out: {}", pv.download);
+    let ir = install(&b, &cb, None, &InstallRequest { target: pv.version.id.clone(), consent: true, ..Default::default() }, None, false, &mut NoProgress).unwrap();
+    assert_eq!(ir.profile.mods.kiln.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["alpha", "beta"]);
+    assert!(!fake.sent().iter().any(|r| r.contains(&srv_sha)), "the server's mod was not downloaded");
+    // an update plan from the same (client) pack reads it too
+    assert!(update_plan(&b, &cb, &ir.profile.id, &mut NoProgress).is_ok());
+}
+
+#[test]
 fn sharing_needs_the_sign_in_and_sends_nothing_without_it() {
     let t = tmp("signin");
     let fake = Fake::new();

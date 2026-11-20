@@ -4916,6 +4916,16 @@
     }
   },
   "crucible": {
+    "checks": {
+      "running": "Checking the pack…",
+      "couldNot": "The pack couldn't be checked",
+      "passed": "Checks: passed",
+      "failed.one": "{count} problem stops the install",
+      "failed.other": "{count} problems stop the install",
+      "warnings.one": "{count} thing to look at",
+      "warnings.other": "{count} things to look at",
+      "failedBlock": "The pack failed its checks: it can't be installed."
+    },
     "banner": {
       "title": "Pack update",
       "head": "{name} {change}",
@@ -4979,6 +4989,7 @@
       "updateKiln": "Update Kiln",
       "uploadingTitle": "Still uploading",
       "stillUploading": "{name}'s pack is still uploading ({pct}%). Kiln will install it when it's ready.",
+      "resumed": "Kiln is ready. Here is {name}, the pack you came for.",
       "wait": "Wait",
       "waiting": "Waiting for {name}'s upload ({pct}%)…",
       "ownProfile": "Installs as its own profile. Your current mods stay as they are.",
@@ -5074,6 +5085,14 @@
       "removedKept": "{name} (kept in your Library)",
       "packData": "The pack's own data changed",
       "kept": "Your changes kept: {settings} settings, {mods} mods.",
+      "keptData": "Your changes kept: {settings} settings, {data} data edits, {mods} mods.",
+      "renamed": "{from} is {to} now: your settings move with it.",
+      "stillWins.one": "Your change still wins ({count})",
+      "stillWins.other": "Your changes still win ({count})",
+      "dataChanged": "The pack now sets {pack}. Yours, {mine}, still counts.",
+      "dataSame": "The pack sets {pack}. Yours, {mine}, still counts.",
+      "dropMine": "Drop my change (use {value})",
+      "savesFirst": "Your saves are backed up first.",
       "download": "Download {size}",
       "needsYou.one": "Needs you ({count})",
       "needsYou.other": "Needs you ({count})",

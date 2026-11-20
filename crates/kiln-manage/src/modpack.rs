@@ -21,6 +21,8 @@ pub const MANIFEST: &str = "kiln-modpack.json";
 pub mod pack;
 /// The three-way merge of a pack's config overrides.
 pub mod merge;
+/// The player layer (`local.<pid>`) and data fields of pack layers.
+pub mod layers;
 /// The pack analysis: Crucible's checks and the credits' identification (`kilnctl pack check`).
 #[cfg(feature = "zip")]
 pub mod check;

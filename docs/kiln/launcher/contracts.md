@@ -1629,6 +1629,10 @@ line, the last one wins, else `KILN_LAUNCHER_UI=deck|desktop`). The UI: `forced`
 | pack | `pack_diff` | oldPath, newPath | `PackDiff` |
 | pack | `pack_secret_scan` | file, text | string[] |
 | pack | `pack_peek_format` | path | 1 (server modpack) \| 2 (Crucible pack) |
+| pack | `pack_local_files` | profileId | `LocalFile[]` `{path, text}` (the player layer's data files) |
+| pack | `pack_local_write` | profileId, path (`content/<name>.json`), text \| null (removes) | null |
+| pack | `pack_local_save` | profileId | `Profile` (the player layer into the Library, last; out when empty) |
+| pack | `pack_check` | path | `CheckReport` (the pack analysis of a file; the preview shows it) |
 | crucible | `crucible_status` | - | `{enabled, dev, api, signedIn, account: {id, name} \| null}` (enabled false: no Crucible surface) |
 | crucible | `crucible_open` | gameId?, target (code, share link, pack link, kiln:// link, version id) | `crucible::Preview`; a pack still uploading: `busy` with `{uploading: {version, progress}, pack}` |
 | crucible | `crucible_install` | gameId?, request: {target (version id), consent, trustAlways?, optional?, name?, play?} | TaskId -> `crucible::InstallResult` {profile, instance, imported, overrides, previous, downloaded} |
@@ -1640,6 +1644,7 @@ line, the last one wins, else `KILN_LAUNCHER_UI=deck|desktop`). The UI: `forced`
 | crucible | `crucible_trust` | - | `Trust[]` {id, name, since} |
 | crucible | `crucible_trust_set` | id, name, trusted | null |
 | crucible | `crucible_links` | - | string[] (kiln:// links that arrived; drained) |
+| crucible | `crucible_resume` | - | `{firstStart, code}` (asked once at start: come back after installing Kiln) |
 
 The community commands ([discord.md](discord.md)) refuse every request that would leave the PC while
 `community.json`'s `shown` is false (`refused`, `detail.kind` "hidden"); their errors carry `detail.kind` (`offline`,

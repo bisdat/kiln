@@ -115,9 +115,33 @@ test("a dropped .kilnpack opens the same preview and installs from the file", as
   });
   await expect(page.getByTestId("crucible-preview")).toContainText("Cinder Trails");
   await expect(page.getByTestId("crucible-warning")).toBeVisible();
+  await expect(page.getByTestId("crucible-checks")).toHaveText("Checks: passed");
   await page.getByTestId("crucible-trust").check();
   await page.getByTestId("crucible-install").click();
   await expect(page.locator(".k-toast").filter({ hasText: "Cinder Trails is installed" })).toBeVisible({ timeout: 15_000 });
   const req = (await crucible(page, (h) => h.requests())).find((r) => r.cmd === "pack_install");
   expect((req?.args.request as { source: unknown; consent: boolean }).source).toEqual({ path: "cinder-trails-1.2.0.kilnpack" });
+});
+
+const drop = (page: Page, name: string) => page.evaluate((n) => {
+  const dt = new DataTransfer();
+  dt.items.add(new File(["x"], n));
+  document.body.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+}, name);
+
+test("a dropped file is checked here: an error blocks the install, a warning is shown", async ({ page }) => {
+  await open(page);
+  await drop(page, "cinder-trails-unsafe.kilnpack");
+  const checks = page.getByTestId("crucible-checks");
+  await expect(checks).toContainText("1 problem stops the install");
+  await expect(checks).toContainText('entry "../evil.dll" has an unsafe path');
+  await page.getByTestId("crucible-trust").check();
+  await expect(page.getByTestId("crucible-install")).toBeDisabled();
+  await expect(page.getByTestId("crucible-block")).toHaveText("The pack failed its checks: it can't be installed.");
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await drop(page, "cinder-trails-warn.kilnpack");
+  await expect(page.getByTestId("crucible-checks")).toContainText("1 thing to look at");
+  await expect(page.getByTestId("crucible-checks")).toContainText("fps-unlock: references networking");
+  await page.getByTestId("crucible-trust").check();
+  await expect(page.getByTestId("crucible-install")).toBeEnabled();
 });
