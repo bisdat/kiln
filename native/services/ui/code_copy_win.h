@@ -81,42 +81,54 @@ inline uint8_t* alloc_near(uintptr_t lo, uintptr_t hi, size_t size) {
 }
 
 // A working copy of the function at `fn` (it must have an unwind entry of its own, without a handler or chain; at most
-// 8 KiB), made from the exe file's bytes, placed within reach of the image, its near call at `call_site` sent to
-// `thunk` (through a 14-byte jump next to the copy), checked against the original (code_clone::same_meaning), with the
-// original's unwind information registered for it. The copy is never freed. False (and `why`): nothing was made.
+// 8 KiB), made from the exe file's bytes, placed within reach of the image, each of its near calls at a `sites` entry's
+// `call_site` sent to that entry's `thunk` (through a 14-byte jump next to the copy), checked against the original
+// (code_clone::same_meaning), with the original's unwind information registered for it. The copy is never freed. False
+// (and `why`): nothing was made.
 struct Copy {
     void* fn = nullptr;
     uint32_t size = 0;
     std::vector<uint8_t> file;  // the function's bytes as the exe file has them
 };
-inline bool make(uintptr_t fn, uintptr_t call_site, const void* thunk, Copy* out, std::string* why) {
+struct Site {
+    uintptr_t call_site = 0;
+    const void* thunk = nullptr;
+};
+inline bool make(uintptr_t fn, const Site* sites, size_t count, Copy* out, std::string* why) {
+    if (count == 0 || count > 4) return *why = "no call to send elsewhere", false;
     DWORD64 base = 0;
     PRUNTIME_FUNCTION rf = RtlLookupFunctionEntry(fn, &base, nullptr);
     if (!rf || base + rf->BeginAddress != fn) return *why = "the function has no unwind entry of its own", false;
     const uint32_t n = rf->EndAddress - rf->BeginAddress;
-    if (n < 16 || n > 8192 || call_site <= fn || call_site + 5 > fn + n)
-        return *why = "the call to send elsewhere is not inside the function", false;
+    if (n < 16 || n > 8192) return *why = "the function's size is not what a copy takes", false;
+    for (size_t i = 0; i < count; ++i)
+        if (sites[i].call_site <= fn || sites[i].call_site + 5 > fn + n)
+            return *why = "the call to send elsewhere is not inside the function", false;
     if (rf->UnwindData & 1) return *why = "the function's unwind entry is chained", false;
     const auto* uw = reinterpret_cast<const uint8_t*>(base + rf->UnwindData);
     if ((uw[0] >> 3) != 0) return *why = "the function's unwind information has a handler or a chain", false;
     const uint32_t uw_len = 4 + 2 * ((uw[2] + 1u) & ~1u);
     std::vector<uint8_t> file;
     if (!read_file_code(static_cast<uint32_t>(fn - base), n, &file, why)) return false;
-    // code, a 16-byte stub to the thunk, the unwind information, the function table entry
-    const uint32_t stub_at = (n + 15) & ~15u, uw_at = (stub_at + 16 + 3) & ~3u, rf_at = (uw_at + uw_len + 3) & ~3u;
+    // code, a 16-byte stub per thunk, the unwind information, the function table entry
+    const uint32_t stub_at = (n + 15) & ~15u, uw_at = (stub_at + 16 * static_cast<uint32_t>(count) + 3) & ~3u,
+                   rf_at = (uw_at + uw_len + 3) & ~3u;
     const uint32_t total = rf_at + sizeof(RUNTIME_FUNCTION);
     uint8_t* mem = alloc_near(static_cast<uintptr_t>(base), fn + n, total);
     if (!mem) return *why = "no memory within reach of the game's code", false;
     std::memset(mem, 0xCC, total);
-    uint8_t* stub = mem + stub_at;  // jmp [rip+0]; dq thunk
-    stub[0] = 0xFF, stub[1] = 0x25, stub[2] = stub[3] = stub[4] = stub[5] = 0;
-    const uint64_t to = reinterpret_cast<uint64_t>(thunk);
-    std::memcpy(stub + 6, &to, 8);
-    std::string err;
-    const uint32_t site = static_cast<uint32_t>(call_site - fn);
     const auto at = reinterpret_cast<uint64_t>(mem);
-    if (!code_clone::relocate(file.data(), n, fn, mem, at, site, at + stub_at, &err) ||
-        !code_clone::same_meaning(file.data(), fn, mem, at, n, site, at + stub_at, &err)) {
+    code_clone::Redirect redirects[4];
+    for (size_t i = 0; i < count; ++i) {
+        uint8_t* stub = mem + stub_at + 16 * i;  // jmp [rip+0]; dq thunk
+        stub[0] = 0xFF, stub[1] = 0x25, stub[2] = stub[3] = stub[4] = stub[5] = 0;
+        const uint64_t to = reinterpret_cast<uint64_t>(sites[i].thunk);
+        std::memcpy(stub + 6, &to, 8);
+        redirects[i] = {static_cast<uint32_t>(sites[i].call_site - fn), at + stub_at + 16 * i};
+    }
+    std::string err;
+    if (!code_clone::relocate(file.data(), n, fn, mem, at, redirects, count, &err) ||
+        !code_clone::same_meaning(file.data(), fn, mem, at, n, redirects, count, &err)) {
         VirtualFree(mem, 0, MEM_RELEASE);
         return *why = "the function could not be copied: " + err, false;
     }
@@ -140,6 +152,12 @@ inline bool make(uintptr_t fn, uintptr_t call_site, const void* thunk, Copy* out
     out->size = n;
     out->file = std::move(file);
     return true;
+}
+
+// One call sent elsewhere.
+inline bool make(uintptr_t fn, uintptr_t call_site, const void* thunk, Copy* out, std::string* why) {
+    const Site s{call_site, thunk};
+    return make(fn, &s, 1, out, why);
 }
 
 }  // namespace code_copy

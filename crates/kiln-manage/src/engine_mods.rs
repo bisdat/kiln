@@ -79,6 +79,9 @@ pub fn run_folder(kind: ModKind) -> Option<&'static str> {
         _ => None,
     }
 }
+/// Enshrouded ModLoader's own folder in [`crate::dllmod::RUN_FOLDER`] (0.6.15: per-world profiles and settings): never a
+/// package's Library id, so Kiln never places a copy there.
+pub const DLLMOD_WORLDS: &str = "worlds";
 /// Ember's mods folder, relative to the server: `ember/mods/<mod>/`, one library each.
 pub const EMBER_MODS: &str = "ember/mods";
 /// Enshwick's loader keeps its own files in `<game>/mods/enshwick/`: no mod may take that folder name.
@@ -331,6 +334,11 @@ pub fn import_engine_mod(ctx: &mut ImportCtx) -> Result<()> {
         if src.is_dir() && src.join("pack.toml").is_file() && crate::engines::pack_toml(src).is_none() {
             return skip(ctx.report, "its pack.toml is invalid or uses metadata Kiln can't read".into());
         }
+    }
+    if kind == ModKind::Dllmod && manifest_id.eq_ignore_ascii_case(DLLMOD_WORLDS) {
+        // Kiln places a package in Mods/EnshroudedModLoader/<id>/, and worlds/ there is Enshrouded ModLoader's own folder
+        // (its per-world profiles and settings, 0.6.15): never a package of Kiln's
+        return skip(ctx.report, "a package named \"worlds\" would go into Enshrouded ModLoader's own folder of per-world profiles and settings (Mods/EnshroudedModLoader/worlds): rename the package folder".into());
     }
     if kind == ModKind::Xhl && (!src.is_dir() || !is_game_folder_name(&manifest_id)) {
         return skip(ctx.report, "add the original XHL-Core plugin folder with its native-plugin.ini, using a safe Windows folder name".into());

@@ -5,7 +5,7 @@
 //
 // The copy keeps the layout byte for byte: every instruction stays at the same offset with the same length. Only the
 // relative fields that point outside the function (rip-relative data, calls and jumps out of it) are rewritten for the
-// copy's address, and one call can be sent elsewhere (Kiln's thunk). A jump inside the function keeps its field, since
+// copy's address, and chosen calls can be sent elsewhere (Kiln's thunks). A jump inside the function keeps its field, since
 // source and target moved together. A relative field to the outside that is not 32 bits wide, an indirect jump (a jump
 // table could lead back into the original), an undecodable byte or a target out of the copy's reach refuses the copy:
 // the caller then runs the original instead.
@@ -101,24 +101,33 @@ inline bool scan(const uint8_t* code, size_t n, uint64_t addr, std::vector<Rel>*
 
 inline bool fits32(int64_t d) { return d >= INT32_MIN && d <= INT32_MAX; }
 
+// A near call of the copy sent elsewhere: its offset in the function and its new target.
+struct Redirect {
+    uint32_t at = 0;
+    uint64_t to = 0;
+};
+
 // Copies the function `src` (n bytes, at `src_addr`) to `dst` (at least n bytes; it will run at `dst_addr`) and
-// rewrites its outside references for that address. `redirect_at` (an offset, or UINT32_MAX for none) names a near
-// call whose target becomes `redirect_to`. False (and `err`): see the file comment.
-inline bool relocate(const uint8_t* src, size_t n, uint64_t src_addr, uint8_t* dst, uint64_t dst_addr,
-                     uint32_t redirect_at, uint64_t redirect_to, std::string* err) {
+// rewrites its outside references for that address. Each of the `count` redirects names a near call whose target becomes
+// its `to`. False (and `err`): see the file comment.
+inline bool relocate(const uint8_t* src, size_t n, uint64_t src_addr, uint8_t* dst, uint64_t dst_addr, const Redirect* redirects,
+                     size_t count, std::string* err) {
     std::vector<Rel> rels;
     if (!scan(src, n, src_addr, &rels, nullptr, err)) return false;
     std::memcpy(dst, src, n);
-    bool redirected = redirect_at == UINT32_MAX;
+    size_t redirected = 0;
     for (const Rel& r : rels) {
         uint64_t target = r.target;
-        if (r.at == redirect_at) {
+        const Redirect* to = nullptr;
+        for (size_t i = 0; i < count; ++i)
+            if (redirects[i].at == r.at) to = &redirects[i];
+        if (to) {
             if (!r.call) {
                 if (err) *err = "the instruction to send elsewhere is not a near call";
                 return false;
             }
-            target = redirect_to;
-            redirected = true;
+            target = to->to;
+            ++redirected;
         } else if (r.inside) {
             continue;  // moved together with its target: the field stays
         }
@@ -134,18 +143,25 @@ inline bool relocate(const uint8_t* src, size_t n, uint64_t src_addr, uint8_t* d
         const int32_t v = static_cast<int32_t>(d);
         std::memcpy(dst + r.at + r.field, &v, 4);
     }
-    if (!redirected) {
+    if (redirected != count) {
         if (err) *err = "no instruction at the offset to send elsewhere";
         return false;
     }
     return true;
 }
 
+// One call sent elsewhere (`redirect_at` an offset, or UINT32_MAX for none).
+inline bool relocate(const uint8_t* src, size_t n, uint64_t src_addr, uint8_t* dst, uint64_t dst_addr,
+                     uint32_t redirect_at, uint64_t redirect_to, std::string* err) {
+    const Redirect r{redirect_at, redirect_to};
+    return relocate(src, n, src_addr, dst, dst_addr, &r, redirect_at == UINT32_MAX ? 0 : 1, err);
+}
+
 // The copy checked against the original: the same instructions at the same offsets, and every relative field of the
-// copy (at `copy_addr`) points where the original's does (at `src_addr`), except the redirected call, which points at
-// `redirect_to`. Kiln runs this on the copy it made before it ever calls it.
+// copy (at `copy_addr`) points where the original's does (at `src_addr`), except the redirected calls, which point at
+// their `to`. Kiln runs this on the copy it made before it ever calls it.
 inline bool same_meaning(const uint8_t* src, uint64_t src_addr, const uint8_t* copy, uint64_t copy_addr, size_t n,
-                         uint32_t redirect_at, uint64_t redirect_to, std::string* err) {
+                         const Redirect* redirects, size_t count, std::string* err) {
     std::vector<Rel> a, b;
     std::vector<uint32_t> sa, sb;
     if (!scan(src, n, src_addr, &a, &sa, err) || !scan(copy, n, copy_addr, &b, &sb, err)) return false;
@@ -154,9 +170,10 @@ inline bool same_meaning(const uint8_t* src, uint64_t src_addr, const uint8_t* c
         return false;
     }
     for (size_t i = 0; i < a.size(); ++i) {
-        const uint64_t want = a[i].at == redirect_at ? redirect_to
-                              : a[i].inside            ? a[i].target - src_addr + copy_addr
-                                                       : a[i].target;
+        const Redirect* to = nullptr;
+        for (size_t k = 0; k < count; ++k)
+            if (redirects[k].at == a[i].at) to = &redirects[k];
+        const uint64_t want = to ? to->to : a[i].inside ? a[i].target - src_addr + copy_addr : a[i].target;
         if (b[i].at != a[i].at || b[i].target != want) {
             if (err) *err = "the copy's field at +0x" + std::to_string(a[i].at) + " points elsewhere";
             return false;
@@ -172,6 +189,33 @@ inline bool same_meaning(const uint8_t* src, uint64_t src_addr, const uint8_t* c
             return false;
         }
     return true;
+}
+
+inline bool same_meaning(const uint8_t* src, uint64_t src_addr, const uint8_t* copy, uint64_t copy_addr, size_t n,
+                         uint32_t redirect_at, uint64_t redirect_to, std::string* err) {
+    const Redirect r{redirect_at, redirect_to};
+    return same_meaning(src, src_addr, copy, copy_addr, n, &r, redirect_at == UINT32_MAX ? 0 : 1, err);
+}
+
+// The targets of the near calls (E8 rel32) in `code` (n bytes at `addr`), decoded straight from its start, in order;
+// it stops at the first byte that does not decode or at an instruction cut by `n`. For reading another module's
+// function from its entry (menu_footer.cpp: XHL-Core's footer detour), where returns and indirect jumps are expected.
+inline std::vector<uint64_t> calls_in(const uint8_t* code, size_t n, uint64_t addr) {
+    std::vector<uint64_t> out;
+    ZydisDecoder dec{};
+    if (!ZYAN_SUCCESS(ZydisDecoderInit(&dec, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64))) return out;
+    size_t o = 0;
+    while (o < n) {
+        ZydisDecodedInstruction ins{};
+        if (!ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(&dec, nullptr, code + o, n - o, &ins))) break;
+        if (ins.mnemonic == ZYDIS_MNEMONIC_CALL && ins.length == 5 && code[o] == 0xE8) {
+            int32_t rel = 0;
+            std::memcpy(&rel, code + o + 1, 4);
+            out.push_back(addr + o + 5 + static_cast<int64_t>(rel));
+        }
+        o += ins.length;
+    }
+    return out;
 }
 
 // Where the live function differs from the file's: each differing instruction of the file's code once.

@@ -1958,3 +1958,49 @@ fn only_a_launcher_test_build_counts_as_one() {
         assert!(!install::installed_by_test_build(&receipt(i)), "{i:?}");
     }
 }
+
+/// Enshrouded ModLoader 0.6.15 installs itself next to Kiln as a Kiln native module (its Install.cmd:
+/// kiln/native/enshrouded-modloader/modloader.dll + native.json) and keeps its per-world profiles and settings, and its
+/// installer's backups, beside the game (Mods/EnshroudedModLoader/worlds/, RandomWorld/). Kiln's runtime install, update,
+/// repair (the same bundle again), profile activation, rollback and uninstall never touch any of it: none of it is in
+/// Kiln's receipt or placements.
+#[test]
+fn enshrouded_modloaders_native_module_and_its_worlds_survive_install_repair_activation_and_uninstall() {
+    use kiln_manage::profile;
+    let t = tmp("dllmod-native-module");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let game = t.0.join("game");
+    put(&game, "enshrouded.exe", b"MZ");
+    let inst = client(&game);
+    let make = |tag: &str, epoch, git| bundle::import(&dirs, &bundle::create(&stage(&t.0, tag, false), &t.0.join("out"), &opts(epoch, git)).unwrap()).unwrap();
+    let a = make("a", 1_793_793_600, "aaaaaaa");
+    let b = make("b", 1_793_880_000, "bbbbbbb");
+    install::install(&dirs, &inst, &a.file, &InstallOptions::default(), &mut NoProgress).unwrap();
+    // what his Install.cmd leaves, after Kiln was installed
+    let his: Vec<(&str, Vec<u8>)> = vec![
+        ("kiln/native/enshrouded-modloader/modloader.dll", build_test_dll(&["DirectInput8Create", "kiln_native_init"], b"ENSHROUDED_MODS_V1\0")),
+        ("kiln/native/enshrouded-modloader/native.json", br#"{"format":1,"id":"enshrouded-modloader","version":"0.6.15","dlls":["modloader.dll"],"phase":"boot","init":"kiln_native_init","builds":["5D9EF2F140B8ED49E30DBEE655841B89D08BAEC20F799A1817E171A18A850C77"]}"#.to_vec()),
+        ("Mods/EnshroudedModLoader/worlds/0123456789abcdef0123456789abcdef.mods", b"ENSHROUDED_MODS_V1\ncarryon/carryon.dll\n".to_vec()),
+        ("Mods/EnshroudedModLoader/worlds/0123456789abcdef0123456789abcdef.settings-v2/ab.ini", b"ENSHROUDED_SETTINGS_V1\nmove_chests=false\n".to_vec()),
+        ("Mods/EnshroudedModLoader/carryon/carryon.dll", build_test_dll(&["EnshroudedModInitialize", "EnshroudedModConfigure"], b"c")),
+        ("Mods/EnshroudedModLoader/carryon/carryon.dll.mod", b"ENSHROUDED_PACKAGE_V1\nkind=mod\nversion=0.1.52-dev\nabi=1\n".to_vec()),
+        ("RandomWorld/worlds-backup.1/0123456789abcdef0123456789abcdef.mods", b"old".to_vec()),
+    ];
+    for (rel, data) in &his { put(&game, rel, data); }
+    let same = |when: &str| for (rel, data) in &his {
+        assert_eq!(std::fs::read(game.join(rel)).ok().as_deref(), Some(data.as_slice()), "{when}: {rel}");
+    };
+    install::install(&dirs, &inst, &b.file, &InstallOptions::default(), &mut NoProgress).unwrap();
+    same("update");
+    install::install(&dirs, &inst, &b.file, &InstallOptions::default(), &mut NoProgress).unwrap();
+    same("repair");
+    let mut p = profile::create(&dirs, "With his loader", None).unwrap();
+    p.dropins = kiln_manage::manifest::ModKind::ALL.to_vec();
+    let p = profile::save(&dirs, &p).unwrap();
+    profile::activate(&dirs, &p.id, &inst).unwrap();
+    same("activation");
+    install::rollback(&dirs, &inst, &a.version, &mut NoProgress).unwrap();
+    same("rollback");
+    install::uninstall(&dirs, &inst, &mut NoProgress).unwrap();
+    same("uninstall");
+}

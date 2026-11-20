@@ -76,10 +76,14 @@ enum {
  * zero-initialised request selects Normal. */
 enum { KILN_TASK_PRIORITY_NORMAL = 0, KILN_TASK_PRIORITY_LOW = 1, KILN_TASK_PRIORITY_HIGH = 2 };
 
-/* KilnTaskInfo.flags. Unknown bits are refused (ARGUMENT). */
+/* KilnTaskInfo.flags. Unknown bits are refused (ARGUMENT). A Kiln older than a bit refuses it the same way: a caller
+ * that sees INVALID_ARGUMENT + ARGUMENT for a newer bit may retry without it (KilnApi.version() tells an older Kiln from
+ * another wrong field). */
 enum {
     KILN_TASK_LONG_RUNNING = 1u << 0, /* a dedicated below-normal thread: at most 2 per owner and 8 in all, else queued */
-    KILN_TASK_AFTER_STEP = 1u << 1    /* runnable only after the live server world's next Post edge (see below) */
+    KILN_TASK_AFTER_STEP = 1u << 1,   /* runnable only after the live server world's next Post edge (see below) */
+    KILN_TASK_RESIDENT = 1u << 2      /* since 0.2.0-dev.29.19, with LONG_RUNNING only: a body meant to run until it
+                                         is cancelled (a service loop); see "Resident tasks" below */
 };
 
 /* submit's `refusal` out, written on EVERY non-OK return (when non-NULL), untouched on OK. New reasons append. */
@@ -120,11 +124,26 @@ enum {
  * its body never starts after that session ended: still queued at the session's end (its STOPPING, or a new session
  * of that world), it is CANCELLED with its done delivered; a body already running sees cancelled(). The body always
  * runs on a pool worker, never on the world's thread: hand phase-bound work to it with KilnApi.post_world.
+ *
+ * Resident tasks (KILN_TASK_RESIDENT, since 0.2.0-dev.29.19): for a body meant to run for its owner's whole life, such
+ * as a service loop. Only together with KILN_TASK_LONG_RUNNING (else INVALID_ARGUMENT + ARGUMENT); it holds one of the
+ * owner's two LongRunning threads until it returns. Everything else is as for any LongRunning task: caps, priority,
+ * cancel, drain, faults, exit. The watchdog's running-too-long warning counts only from the moment its cancellation is
+ * asked (cancel, drain, revoke, a submit_in task's session ending, the exit): a resident body still running
+ * watchdog_running_s (30 s by default) after that is reported once. A queued resident task is reported like any queued
+ * task. Its first start writes one kiln.log info line (the owner, the task, the LongRunning threads resident tasks
+ * hold now). An owner has at most one resident task: a second one, while its first is queued or running (a cancelled
+ * body that has not returned yet included), is refused INVALID_ARGUMENT + ARGUMENT, after the checks every task gets
+ * (a malformed request, then CAPABILITY, SHUTDOWN, OWNER_SEALED, OWNER_QUARANTINED). A native fault quarantines the
+ * owner but does not ask its running bodies to stop: a quarantined owner's resident body keeps running, and the
+ * watchdog counts for it only from a cancel, a drain or the owner's unload. Its body's time is not added to
+ * tick-stats' cpu_ms / wall_ms and is never the window's longest segment. Poll run->cancelled() at least every 50 ms
+ * and return soon after it says 1: at exit the pool waits only 500 ms for running bodies.
  */
 
 typedef struct KilnTaskInfo {
     uint32_t size;     /* sizeof(KilnTaskInfo) of the caller (32); shorter is refused, longer accepted (see above) */
-    uint32_t flags;    /* KILN_TASK_LONG_RUNNING | KILN_TASK_AFTER_STEP */
+    uint32_t flags;    /* KILN_TASK_LONG_RUNNING | KILN_TASK_AFTER_STEP | KILN_TASK_RESIDENT */
     KilnStr name;      /* 1..128 bytes of UTF-8, no NUL or control characters; copied at submit, never truncated */
     uint32_t priority; /* KILN_TASK_PRIORITY_* */
     uint32_t reserved; /* 0 */

@@ -1058,6 +1058,10 @@
       "loaded": {
         "one": "Kiln {version} - {count} mod caricata",
         "other": "Kiln {version} - {count} mod caricate"
+      },
+      "xhl": {
+        "one": "Kiln {version} con XHL-Core - {count} mod caricata",
+        "other": "Kiln {version} con XHL-Core - {count} mod caricate"
       }
     },
     "fallback": {

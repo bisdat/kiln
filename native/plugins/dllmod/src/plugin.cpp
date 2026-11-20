@@ -143,7 +143,10 @@ bool settings_for(const Mod& m, const std::string& world, Values* v, std::string
             return read_settings_file(kiln, m.manifest, v, err);
         }
     }
-    const fs::path own = g_game / L"ModLoader" / L"worlds" / (to_wide(world) + L".settings-v2") / (to_wide(sha256_hex(m.package)) + L".ini");
+    // 0.6.15 keeps them in Mods/EnshroudedModLoader/worlds; earlier versions in ModLoader/worlds
+    fs::path own = g_root / L"worlds" / (to_wide(world) + L".settings-v2") / (to_wide(sha256_hex(m.package)) + L".ini");
+    if (!kcompat::exists(own))
+        own = g_game / L"ModLoader" / L"worlds" / (to_wide(world) + L".settings-v2") / (to_wide(sha256_hex(m.package)) + L".ini");
     if (kcompat::exists(own)) {
         *from = "Enshrouded ModLoader's settings for this world (" + path_utf8(own) + ")";
         return read_settings_file(own, m.manifest, v, err);
@@ -172,6 +175,18 @@ bool is_loader_file(const fs::path& f) {
     return d.find(profile) != std::string::npos || d.find(log16) != std::string::npos;
 }
 
+// Kiln's own modules, which name every engine. Not compat's kiln_own_module: that one counts everything under
+// <game>\kiln\ (but kiln\chain\) as Kiln's, and Enshrouded ModLoader 0.6.15 installs itself next to Kiln as a Kiln native
+// module, kiln\native\enshrouded-modloader\modloader.dll. Kiln's own: the proxy, kiln-core.dll, plugins and services.
+bool kiln_module(HMODULE h, const fs::path& f) {
+    if (h && (GetProcAddress(h, "KilnProxyInfo") || GetProcAddress(h, "kiln_boot") || GetProcAddress(h, "kiln_plugin_main"))) return true;
+    const std::string p = kcompat::lower(path_utf8(f)), k = kcompat::lower(path_utf8(g_kiln)) + "\\";
+    if (kcompat::lower(path_utf8(f.filename())) == "kiln-core.dll") return true;
+    for (const char* own : {"plugins\\", "services\\", "host\\"})
+        if (p.rfind(k + own, 0) == 0) return true;
+    return false;
+}
+
 std::string loader_in_process() {
     HMODULE mods[1024];
     DWORD needed = 0;
@@ -186,7 +201,7 @@ std::string loader_in_process() {
         if (!GetModuleFileNameW(mods[i], p, MAX_PATH)) continue;
         const fs::path f(p);
         if (!system.empty() && kcompat::lower(path_utf8(f)).rfind(system, 0) == 0) continue;
-        if (kcompat::kiln_own_module(mods[i], f) || !kcompat::module_is_file(mods[i], f)) continue;
+        if (kiln_module(mods[i], f) || !kcompat::module_is_file(mods[i], f)) continue;
         if (GetProcAddress(mods[i], "DirectInput8Create") && is_loader_file(f)) return path_utf8(f);
     }
     return {};
@@ -223,6 +238,44 @@ std::string loader_listed() {
             const fs::path p = (line.size() > 2 && line[1] == ':') ? fs::path(to_wide(line)) : base / to_wide(line);
             if (kcompat::exists(p) && is_loader_file(p)) return path_utf8(list) + " lists it (" + line + ")";
         }
+    }
+    return {};
+}
+
+// Enshrouded ModLoader 0.6.15+ as a Kiln native module (its installer puts it in kiln\native\enshrouded-modloader\ with
+// a native.json, phase boot). kiln-core loads phase boot native mods after every plugin's on_ready, so it is not loaded
+// yet when kiln-dllmod decides: what counts is whether kiln-core will load it, the profile's native entries (switched
+// on) and the kiln\native drop-in folder when the profile reads it (the core's rule, native_mods.cpp discover).
+std::string loader_native_module() {
+    std::vector<fs::path> folders;
+    bool dropins = true;
+    if (const auto* prof = H.service<KilnProfileApi>(KILN_PROFILE_SERVICE, 1)) {
+        const uint32_t mode = prof->mode();
+        if (mode == KILN_PROFILE_NO_MODS || mode == KILN_PROFILE_INVALID) return {};
+        dropins = (prof->dropins() & (1u << KILN_PROFILE_KIND_NATIVE)) != 0;
+        if (mode != KILN_PROFILE_LEGACY) {
+            try {
+                const auto doc = nlohmann::json::parse(std::string(kcompat::sv(prof->json())), nullptr, true, true);
+                if (doc.is_object() && doc.contains("mods") && doc["mods"].is_object() && doc["mods"].contains("native") &&
+                    doc["mods"]["native"].is_array())
+                    for (const auto& m : doc["mods"]["native"])
+                        if (m.is_object() && m.contains("path") && m["path"].is_string() &&
+                            !(m.contains("enabled") && m["enabled"].is_boolean() && !m["enabled"].get<bool>()))
+                            folders.push_back(kcompat::resolve_profile_path(m["path"].get<std::string>(), g_kiln));
+            } catch (...) {
+            }
+        }
+    }
+    if (dropins) {
+        std::error_code ec;
+        for (const auto& d : fs::directory_iterator(g_kiln / L"native", ec))
+            if (d.is_directory(ec) && kcompat::exists(d.path() / L"native.json")) folders.push_back(d.path());
+    }
+    for (const auto& folder : folders) {
+        std::error_code ec;
+        for (const auto& e : fs::directory_iterator(folder, ec))
+            if (e.is_regular_file(ec) && kcompat::lower(path_utf8(e.path().extension())) == ".dll" && is_loader_file(e.path()))
+                return "kiln-core loads it as a native mod (" + path_utf8(e.path()) + ")";
     }
     return {};
 }
@@ -309,6 +362,10 @@ void add_dropins(const kcompat::EnginePlan& plan, std::set<std::string>* seen) {
         const auto& e = *it;
         if (e.is_symlink(ec)) {
             it.disable_recursion_pending();
+            continue;
+        }
+        if (e.is_directory(ec) && it.depth() == 0 && kcompat::lower(path_utf8(e.path().filename())) == "worlds") {
+            it.disable_recursion_pending();  // Enshrouded ModLoader's per-world profiles and settings (0.6.15)
             continue;
         }
         if (e.is_directory(ec) && it.depth() == 0) {
@@ -462,34 +519,11 @@ void KILN_CALL on_ready(void*) {
         return;
     }
 
-    // 1. the side and the build
-    KilnBuildInfo bi{};
-    bi.size = sizeof bi;
-    H.api->build_info(&bi);
-    g_build = std::string(bi.exe_sha256).substr(0, 8);
-    if (H.api->side() == KILN_SIDE_SERVER) {
-        const std::string why = "mods for Enshrouded ModLoader are made for the game client; a dedicated server starts none";
-        mark_waiting("skipped", why);
-        set_status("client only", why);
-        if (any) H.logf(KILN_LOG_INFO, "%s", why.c_str());
-        write_status();
-        return;
-    }
-    g_bind = binding_for(bi.exe_sha256);
-    if (!g_bind) {
-        const std::string why = "mods for Enshrouded ModLoader are made for client build 26430625 (enshrouded.exe 5d9ef2f1), "
-                                "and this game is " + g_build + ": Kiln starts none of them on it";
-        mark_waiting("skipped", why);
-        set_status("unsupported", why);
-        if (any) H.logf(KILN_LOG_WARN, "%s", why.c_str());
-        write_status();
-        return;
-    }
-
-    // 2. Enshrouded ModLoader itself
+    // 1. Enshrouded ModLoader itself (before the build: the loader runs its own mods, Kiln hooks nothing for them)
     std::string loader = loader_in_process();
+    if (!loader.empty()) loader = "it is loaded (" + loader + ")";
     if (loader.empty()) loader = loader_listed();
-    else loader = "it is loaded (" + loader + ")";
+    if (loader.empty()) loader = loader_native_module();
     if (!loader.empty()) {
         {
             std::lock_guard lock(g_mu);
@@ -509,6 +543,30 @@ void KILN_CALL on_ready(void*) {
         }
         set_status("stepped aside", g_aside);
         H.logf(KILN_LOG_INFO, "kiln-dllmod steps aside: %s. It starts its mods itself; Kiln hooks nothing for them", g_aside.c_str());
+        write_status();
+        return;
+    }
+
+    // 2. the side and the build
+    KilnBuildInfo bi{};
+    bi.size = sizeof bi;
+    H.api->build_info(&bi);
+    g_build = std::string(bi.exe_sha256).substr(0, 8);
+    if (H.api->side() == KILN_SIDE_SERVER) {
+        const std::string why = "mods for Enshrouded ModLoader are made for the game client; a dedicated server starts none";
+        mark_waiting("skipped", why);
+        set_status("client only", why);
+        if (any) H.logf(KILN_LOG_INFO, "%s", why.c_str());
+        write_status();
+        return;
+    }
+    g_bind = binding_for(bi.exe_sha256);
+    if (!g_bind) {
+        const std::string why = "mods for Enshrouded ModLoader are made for client build 26430625 (enshrouded.exe 5d9ef2f1), "
+                                "and this game is " + g_build + ": Kiln starts none of them on it";
+        mark_waiting("skipped", why);
+        set_status("unsupported", why);
+        if (any) H.logf(KILN_LOG_WARN, "%s", why.c_str());
         write_status();
         return;
     }

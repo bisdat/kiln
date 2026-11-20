@@ -392,11 +392,9 @@ KilnResult Model::submit(KilnOwner owner, const SubmitArgs& args, KilnHandle* ta
     r->payload = args.payload;
     hook(Point::SubmitBeforePublish);
     Lock lock(*this);
-    if (closing_) return fail(KILN_ERR_UNAVAILABLE, Refusal::Shutdown);
+    Refusal state_why = Refusal::None;
+    if (const KilnResult s = owner_state_locked(owner, &state_why); s != KILN_OK) return fail(s, state_why);
     const auto o = find_open(owner);
-    if (!o || o->retired) return fail(KILN_ERR_REVOKED, Refusal::OwnerSealed);
-    if (o->quarantined) return fail(KILN_ERR_UNAVAILABLE, Refusal::OwnerQuarantined);
-    if (o->sealed) return fail(KILN_ERR_UNAVAILABLE, Refusal::OwnerSealed);
     if (o->records.size() >= limits_.owner_capacity || o->issued >= limits_.max_sequence)
         return fail(KILN_ERR_UNAVAILABLE, Refusal::QueueFull);
     // All or nothing: the one allocation that can fail after this point is placing the record (the owner's table,
@@ -429,6 +427,24 @@ KilnResult Model::submit(KilnOwner owner, const SubmitArgs& args, KilnHandle* ta
     o->issued = seq;
     ++o->outstanding;
     *task = r->handle;
+    return KILN_OK;
+}
+
+KilnResult Model::owner_state(KilnOwner owner, Refusal* why) const {
+    Lock lock(*this);
+    return owner_state_locked(owner, why);
+}
+
+KilnResult Model::owner_state_locked(KilnOwner owner, Refusal* why) const {
+    const auto refuse = [&](KilnResult r, Refusal w) {
+        if (why) *why = w;
+        return r;
+    };
+    if (closing_) return refuse(KILN_ERR_UNAVAILABLE, Refusal::Shutdown);
+    const auto o = find_open(owner);
+    if (!o || o->retired) return refuse(KILN_ERR_REVOKED, Refusal::OwnerSealed);
+    if (o->quarantined) return refuse(KILN_ERR_UNAVAILABLE, Refusal::OwnerQuarantined);
+    if (o->sealed) return refuse(KILN_ERR_UNAVAILABLE, Refusal::OwnerSealed);
     return KILN_OK;
 }
 

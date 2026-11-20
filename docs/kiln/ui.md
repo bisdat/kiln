@@ -105,15 +105,25 @@ right above the build number: Kiln's mark, then **Kiln &lt;version&gt; - &lt;N&g
   EMF, EML, XHL, ShroudForge, SET, Greeneye, Flame, Shroudtopia, Enshwick, shroudlink and Ember. Kiln's own services
   and plugins are not mods; a mod switched off, waiting, failed or not loaded does not count. Kiln.Ui reads the list
   again every 2 seconds while the title or the main menu shows, so a mod that an engine starts late is counted too.
-- **XHL-Core.** XHL-Core 2.1.0 draws its own line at this place ("All mods loaded", or a red line about a problem).
-  **Kiln's line takes its place**: while Kiln's line shows, XHL-Core's is not drawn. Nothing else of XHL-Core changes
-  (its plugins, its Insert menu, its other hooks); it installs as it always did, whether it starts before Kiln or after.
-  How: Kiln runs its own copy of the game's footer function, made from the exe file at start, so the line XHL-Core
-  patches into the game's footer code is not reached (docs/re/game-ui.md "The main menu's footer"). kiln.log names
-  the module that patched the footer (`ui: the main menu's footer: a module patched the game's footer call at ...`).
+- **XHL-Core.** XHL-Core 2.1.0 draws its own line at this place: a green "All mods loaded", or a red line about a
+  problem ("XHL: Game updated · Click to view", "Mod conflict detected. Click to view") that opens XHL-Core's
+  diagnostics when clicked. With XHL-Core in the game, **Kiln's line names it**: "Kiln 0.2.0-dev.29.19 with XHL-Core -
+  N Mods Loaded" (key `native.footer.xhl`, in every language Kiln has). XHL-Core's green line is left out (Kiln's line
+  says XHL-Core runs); **its red line is drawn under Kiln's** while XHL-Core reports a problem, in XHL-Core's words,
+  colour and language, and it opens XHL-Core's diagnostics on a click, with the keyboard or with a pad, as without Kiln.
+  Nothing else of XHL-Core changes (its plugins, its Insert menu, its other hooks); it installs as it always did,
+  whether it starts before Kiln or after, and Kiln notices its patches when they come late.
+  How: Kiln runs its own copy of the game's footer function, made from the exe file at start, whose window call and
+  build-number call go through Kiln. They call the game's functions, or, while XHL-Core reports a problem, the targets
+  XHL-Core patched into the game's footer, so XHL-Core draws its line and takes its clicks itself. Kiln knows XHL-Core
+  by the export `XhlNativeGameBuild` of the module behind the patched call, and reads only its startup state (one
+  number, found by the shape of XHL-Core's state getter, not by an address); where that state cannot be found, XHL-Core's
+  line is always drawn, green or red, so a warning is never hidden (docs/re/game-ui.md "The main menu's footer").
+  kiln.log: `ui: the main menu's footer: XHL-Core's footer line is at ...`, then `... XHL-Core reports a problem` or
+  `... reports no problem` whenever that changes.
 - **The setting** `mainMenuFooter` (on by default; Kiln's config `kiln/config/menus-client.json`, on the Mods page under
-  **Kiln settings**) hides it: the game's footer is then drawn as it always was, with XHL-Core's line where XHL-Core is
-  installed.
+  **Kiln settings**) hides it: the game's footer is then drawn as it always was, with XHL-Core's line (green or red) where
+  XHL-Core is installed.
 - **Fail safe.** On a game build where the footer's code does not match (feature `ui.menu_footer` off), when the copy
   cannot be made or checked, when another module changed the footer's code in a way other than a patched call, before
   Kiln.Ui has counted the mods, or after a fault in Kiln's line, the game's own footer function runs (with XHL-Core's
@@ -447,6 +457,23 @@ of that language group (never shipped); Kiln's texts are English until it is loa
 Mods' own texts are theirs (`Mod.Text`, `UiText`) and follow the game's language. For translators and Kiln's developers:
 [translating-game.md](translating-game.md).
 
+**Following Kiln's language** (`KilnLanguage`, Kiln.Api, since 0.2.0-dev.29.19). A mod whose pages sit beside Kiln's and
+should read in the same language (a settings panel in the Kiln menu's style, a shared core for several mods) asks Kiln
+instead of the game:
+```csharp
+var lang = KilnLanguage.Current;           // "zh-cn", "en-us": ui.language's tag, or the game's while it is "auto"
+var text = Context.Locale.GetIn(KilnLanguage.OverlayInEnglish ? "en" : lang, "panel.title");
+KilnLanguage.Changed += () => Relabel();   // another language, the English fallback switched, or a reload
+```
+- `Current` is a lower-case tag; `Setting` is `ui.language` as set (`"auto"` or the tag). On a dedicated server both
+  follow its game language (`"en-us"`).
+- `OverlayInEnglish` is true while Kiln's overlay shows its texts in English because it cannot draw `Current`'s script
+  yet (the game's Chinese, Japanese, Korean or Cyrillic font is loading, or could not be loaded). Text a mod draws in the
+  overlay in that language shows as boxes meanwhile; follow Kiln and show English too.
+- `Changed` runs on the thread that made the change (often the overlay's render thread, or the window thread for the
+  in-game setting), after the new values are in place. Keep it short. A handler that throws is logged under its mod and
+  does not stop the others; a mod's handlers are dropped when it unloads.
+
 ### Mod themes
 ```csharp
 var frost = Ui.Themes.Define("frost", new UiThemeSpec
@@ -691,6 +718,66 @@ b.OnRelease = …;  b.IsDown;  b.TakePresses();  b.Consume = false;  b.WhileCapt
   Creative Mode (Nexus 146) runs in the game: its own menu applies.
 - `kiln.menu` (default **Insert**) opens the Kiln menu. Its toggle is native, so it works without the managed host.
   Escape closes the menu.
+
+### Key and mouse presses as they come (`KeyInput`, since 0.2.0-dev.29.19)
+For a mod that reads presses itself rather than giving an action a key: its own "press a key" field, a key it handles by
+state, a shortcut layer of its own. An action the player should be able to remap on the Keys page stays a
+`KeyBindings.Register` binding.
+```csharp
+var listener = KeyInput.Listen(p =>
+{
+    if (!p.Down || p.Repeat || p.Captured || p.TextInput) return false;  // play only, presses only
+    if (!_capturing) return false;
+    _capturing = false;
+    Save(p.Chord.ToString());                 // "Ctrl+K", "Backquote", "Mouse4", "WheelUp": the names keybinds.json uses
+    return true;                              // keep this press from the game
+});
+if (!listener.Ok) Context.Log.Info(listener.Reason!);  // no Kiln overlay here (a dedicated server)
+listener.Dispose();                           // or let the mod's unload end it
+```
+- `Listen` is kiln.ui's key subscription (`subscribe_key_ex` in `kiln_ui.h`). With `KeyListenFlags.Mouse` (the default)
+  it gets the middle and side mouse buttons and the wheel's notches too, as key bindings do; `KeyListenFlags.None` gets
+  keyboard keys only. Next to an older kiln-ui.dll (a hand-mixed install) it gets keys only and `listener.Mouse` is false.
+- It runs on the game's window thread while the message is handled, before the game gets the press: keep it short.
+  Returning true keeps the press from the game. Every listener and Kiln's own key bindings get every press whatever
+  another returned; kiln.ui keeps a press from the game when any of them asked.
+- Every press comes, also while the Kiln menu, a Kiln screen or a Kiln text field has the input: `KeyPress.Captured` and
+  `KeyPress.TextInput` say so. `Down` is false for a release; a wheel notch is a press with no release. `Mods` holds
+  Ctrl, Shift and Alt.
+- `KeyPress.Code` (and `KeyInput.PressCode(vk, scan)`) is the code the Keys page stores: a punctuation key by its place
+  on a US keyboard, found by its scan code on any layout, every other key by its virtual key. `KeyPress.Chord` is the
+  press as the Keys page saves it, and its `ToString()` parses back with `KeyChord.TryParse` and `KeyBindings.Rebind`.
+- The listener belongs to the calling mod (kiln.ui is told whose it is) and ends when the mod unloads. A handler that
+  throws is logged under its mod and keeps nothing. `Listen` returns a listener that is not `Ok`, with a `Reason`, where
+  there is no Kiln overlay; it never throws for that.
+
+### XHL-Core (Kiln): from reflection to public members (0.2.0-dev.29.19)
+XHL-Core (Kiln) 0.1.0 reads a few Kiln internals by name. They stay as they are (Kiln.Ui.Tests' XhlKilnCoreReflectionTests
+pins each name and shape), so the published 0.1.0 keeps working; on 0.2.0-dev.29.19 and later the public members below do
+the same jobs and are covered by the API promise (`PublicAPI.Shipped.txt`, never removed before API 1.0.0):
+
+| Read today by reflection | Public member |
+|---|---|
+| `Kiln.KilnText.Language` (static, non-public) | `KilnLanguage.Current` |
+| `Kiln.KilnText.Gated` | `KilnLanguage.OverlayInEnglish` |
+| `Kiln.KilnText.Changed` (event `Action`) | `KilnLanguage.Changed` (event `Action`; guarded per handler, dropped at the mod's unload) |
+| `Kiln.UiNative.T` with `Table7.SubscribeKeyEx` (flag `KILN_UI_KEYS_MOUSE`), the owner from `ModContext.Owner` | `KeyInput.Listen(onKey, KeyListenFlags.Mouse)`; the owner is the calling mod, filled in by Kiln |
+| `Kiln.UiNative.Table.Unsubscribe` | `KeyListener.Dispose()` (also done at the mod's unload) |
+| `Kiln.KeyNames.PressCode(vk, scan)` | `KeyInput.PressCode(virtualKey, scanCode)`, or `KeyPress.Code` / `KeyPress.Chord` inside a listener |
+| `KeyBinding.Category`, `KeyBinding.Description` | already public (read them directly) |
+
+`ModContext.Owner` stays internal: it is the mod's native owner handle, and a mod holding it could register, and revoke,
+native subscriptions in any service as that mod. Its one use here, the key subscription, is now `KeyInput.Listen`, which
+passes the owner itself. A mod that needs a native service Kiln has no managed member for should ask for the member (below)
+rather than for the handle.
+
+**Where new APIs come from.** Hooks and call sites a mod author has found in the game (as XHL has for his native mods) are
+welcome as proposals for Kiln's general API, so that every mod can use them: a GitHub issue on
+[frostdev-ops/kiln](https://github.com/frostdev-ops/kiln/issues) naming the game function or data, how to find it (a
+pattern or the code around it), and what a mod would do with it. Kiln adds such a site as a sigdb feature with its own
+capability row ([services/caps.md](services/caps.md)), then a typed event or service member in the Kiln.* assembly it
+belongs to (a UI site in Kiln.Ui, a gameplay site in Kiln.Gameplay, and so on). Until then an advanced mod reaches a site
+itself through `Kiln.Hooks` ([hooks.md](hooks.md)).
 
 ## The Kiln menu (the mod manager)
 A page in the player's look (the game's colours and its UI font unless the player chose another look under **Kiln

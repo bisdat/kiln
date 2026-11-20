@@ -1072,6 +1072,12 @@
         "few": "Kiln {version} - wczytano {count} mody",
         "many": "Kiln {version} - wczytano {count} modów",
         "other": "Kiln {version} - wczytano {count} modów"
+      },
+      "xhl": {
+        "one": "Kiln {version} z XHL-Core - wczytano {count} mod",
+        "few": "Kiln {version} z XHL-Core - wczytano {count} mody",
+        "many": "Kiln {version} z XHL-Core - wczytano {count} modów",
+        "other": "Kiln {version} z XHL-Core - wczytano {count} modów"
       }
     },
     "fallback": {

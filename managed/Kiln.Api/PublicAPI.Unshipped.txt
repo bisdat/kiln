@@ -1,1 +1,6 @@
 #nullable enable
+Kiln.KilnLanguage
+static Kiln.KilnLanguage.Changed -> System.Action?
+static Kiln.KilnLanguage.Current.get -> string!
+static Kiln.KilnLanguage.OverlayInEnglish.get -> bool
+static Kiln.KilnLanguage.Setting.get -> string!

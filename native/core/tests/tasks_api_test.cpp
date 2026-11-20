@@ -10,6 +10,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "tasks.h"
 #include "tasks_platform_host.h"
@@ -78,6 +79,9 @@ void KILN_CALL done(KilnHandle, uint32_t state, void* user) {
     j->done_state.store(state);
     j->done_calls.fetch_add(1);
 }
+
+// A managed host's dispatcher that is never called (only refused admissions use it).
+void KILN_CALL no_dispatch(KilnLease, uint32_t, uint32_t, void*) {}
 
 template <class F>
 bool until(F pred, int ms = 5000) {
@@ -160,8 +164,10 @@ KILN_TASKS_TEST(malformed_requests_change_nothing) {
     i.size = sizeof(KilnTaskInfo) - 1;
     bad(i, "a short info");
     i = ok;
-    i.flags = 1u << 2;
+    i.flags = 1u << 3;
     bad(i, "an unknown flag");
+    i.flags = KILN_TASK_LONG_RUNNING | (1u << 31);
+    bad(i, "an unknown flag beside a known one");
     i = ok;
     i.priority = 3;
     bad(i, "priority 3");
@@ -357,6 +363,123 @@ KILN_TASKS_TEST(capability_and_shutdown) {
     check(until([&] { return running.done_calls.load() == 1; }) && running.saw_cancel.load() == 1,
           "a running body is signalled at exit");
     check(until([&] { return pool.counts().outstanding == 0; }), "quiescent (every job outlives its callbacks)");
+}
+
+// KILN_TASK_RESIDENT only with KILN_TASK_LONG_RUNNING: alone it is refused INVALID_ARGUMENT + ARGUMENT like an unknown
+// bit, before any side effect (no owner opened, nothing referenced), on submit and submit_in alike. With it the task is
+// accepted, also with AFTER_STEP, through submit_in and at any priority; it runs, cancel reaches its body, and the
+// watchdog does not report it running before that cancel.
+KILN_TASKS_TEST(resident_flag) {
+    HostPlatform p;
+    FakeEnv env;
+    env.add(1);
+    env.add(2);
+    env.add(3);
+    PoolConfig c = config();
+    c.running_watchdog_ns = 1000;
+    c.queued_watchdog_ns = 1000ull * 1000 * 1000 * 1000;
+    Pool pool(c, &p);
+    Service s(pool, env);
+    const auto argument = [&](uint32_t flags, const std::string& what) {
+        const KilnTaskInfo i = info("loop", flags);
+        refused(s, p, pool, 1, &i, &body, &done, KILN_ERR_INVALID_ARGUMENT, KILN_TASK_REFUSAL_ARGUMENT, what);
+    };
+    argument(KILN_TASK_RESIDENT, "RESIDENT alone: INVALID_ARGUMENT + ARGUMENT");
+    argument(KILN_TASK_RESIDENT | KILN_TASK_AFTER_STEP, "RESIDENT | AFTER_STEP: ARGUMENT (before the world check)");
+    {
+        Job j;
+        KilnHandle h = 77;
+        uint32_t why = 99;
+        const KilnTaskInfo i = info("loop", KILN_TASK_RESIDENT);
+        check(s.submit_in(1, &i, KILN_WORLD_SERVER, 0, &body, &done, &j, &h, &why) == KILN_ERR_INVALID_ARGUMENT &&
+                  why == KILN_TASK_REFUSAL_ARGUMENT && h == 0,
+              "submit_in: RESIDENT alone is ARGUMENT (before NO_WORLD)");
+    }
+    {
+        // the managed host's admit shares the check: refused the same way (its lease context is freed)
+        check(s.host_bind(&no_dispatch) == KILN_OK, "a host dispatcher is bound");
+        KilnLease l = 77;
+        uint32_t why = 99;
+        const KilnTaskInfo i = info("loop", KILN_TASK_RESIDENT);
+        check(s.host_admit(1, &i, nullptr, &l, &why) == KILN_ERR_INVALID_ARGUMENT && why == KILN_TASK_REFUSAL_ARGUMENT &&
+                  l == 0,
+              "host_admit: RESIDENT alone is ARGUMENT");
+    }
+    check(pool.counts().owners == 0 && pool.counts().records == 0 && p.acquires() == p.releases(),
+          "no refusal opened the owner or referenced a module");
+    // accepted: plain, with AFTER_STEP, and bound with submit_in, at High priority (one owner each: one resident task
+    // per owner)
+    s.session_started(KILN_WORLD_SERVER, 1);
+    Job plain, after, bound;
+    KilnHandle hp = 0, ha = 0, hb = 0;
+    uint32_t why = 1234;
+    KilnTaskInfo i = info("loop", KILN_TASK_RESIDENT | KILN_TASK_LONG_RUNNING, KILN_TASK_PRIORITY_HIGH);
+    check(s.submit(1, &i, &body, &done, &plain, &hp, &why) == KILN_OK && hp != 0 && why == 1234,
+          "RESIDENT | LONG_RUNNING is accepted (High priority)");
+    i = info("after", KILN_TASK_RESIDENT | KILN_TASK_LONG_RUNNING | KILN_TASK_AFTER_STEP);
+    check(s.submit(2, &i, &body, &done, &after, &ha, &why) == KILN_OK && state_of(s, 2, ha) == KILN_TASK_QUEUED,
+          "with AFTER_STEP: accepted, waiting for the Post edge");
+    i = info("bound", KILN_TASK_RESIDENT | KILN_TASK_LONG_RUNNING);
+    check(s.submit_in(3, &i, KILN_WORLD_SERVER, 1, &body, &done, &bound, &hb, &why) == KILN_OK && hb != 0,
+          "submit_in: accepted");
+    check(until([&] { return plain.body_runs.load() == 1; }), "the plain one runs");
+    {
+        // one resident task per owner: a second one of owner 1 is refused through submit and the host's admit alike
+        const KilnTaskInfo second = info("second", KILN_TASK_RESIDENT | KILN_TASK_LONG_RUNNING);
+        refused(s, p, pool, 1, &second, &body, &done, KILN_ERR_INVALID_ARGUMENT, KILN_TASK_REFUSAL_ARGUMENT,
+                "a second resident task of the owner: INVALID_ARGUMENT + ARGUMENT");
+        KilnLease l = 77;
+        uint32_t w = 99;
+        const auto records = pool.counts().records;
+        check(s.host_admit(1, &second, nullptr, &l, &w) == KILN_ERR_INVALID_ARGUMENT &&
+                  w == KILN_TASK_REFUSAL_ARGUMENT && l == 0 && pool.counts().records == records,
+              "host_admit: a second resident task is ARGUMENT too");
+    }
+    check(s.post_edge(KILN_WORLD_SERVER, 1, 1), "a Post edge");
+    // the pool's two LongRunning threads: `plain` holds one, the edge made `after` runnable beside `bound`
+    check(until([&] { return after.body_runs.load() + bound.body_runs.load() == 1; }), "one more runs in the second slot");
+    p.advance(5000);
+    std::vector<Watch> reports;
+    pool.run_watchdog(+[](const Watch& w, void* user) { static_cast<std::vector<Watch>*>(user)->push_back(w); }, &reports);
+    check(reports.empty(), "the watchdog reports none of them running (" + std::to_string(reports.size()) + ")");
+    uint32_t st = 0;
+    check(s.cancel(1, hp, &st) == KILN_OK && st == KILN_TASK_RUNNING, "cancel: requested, still RUNNING");
+    plain.release.open();
+    check(until([&] { return plain.done_calls.load() == 1; }) && plain.saw_cancel.load() == 1 &&
+              plain.done_state.load() == static_cast<uint32_t>(KILN_TASK_COMPLETED),
+          "its body saw cancelled() and returned; its done ran (Completed)");
+    check(until([&] { return after.body_runs.load() == 1 && bound.body_runs.load() == 1; }), "the third runs in the freed slot");
+    after.release.open();
+    bound.release.open();
+    check(until([&] { return pool.counts().outstanding == 0; }), "quiescent");
+}
+
+// At the exit a resident task is signalled like any other, and the park waits for its body.
+KILN_TASKS_TEST(resident_exit_park) {
+    HostPlatform p;
+    FakeEnv env;
+    env.add(1);
+    Pool pool(config(), &p);
+    Service s(pool, env);
+    const KilnTaskInfo i = info("loop", KILN_TASK_RESIDENT | KILN_TASK_LONG_RUNNING);
+    Job running;
+    KilnHandle h = 0;
+    check(s.submit(1, &i, &body, &done, &running, &h, nullptr) == KILN_OK, "accepted");
+    check(until([&] { return running.body_runs.load() == 1; }), "it runs");
+    s.exiting();
+    std::atomic<bool> returned{false};
+    Pool::ParkResult parked;
+    std::thread parker([&] {
+        parked = s.park(5ull * 1000 * 1000 * 1000);
+        returned = true;
+    });
+    check(until([&] { return pool.parked(); }), "the park began");
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    check(!returned.load(), "the park waits for the resident body");
+    running.release.open();
+    parker.join();
+    check(parked.running_at_start == 1 && parked.still_running == 0 && running.saw_cancel.load() == 1,
+          "it saw its cancel, returned, and the park ended without it");
 }
 
 // After the exit began, drain_owner still reports the owner's real running count (seal, cancel queued, poll); with

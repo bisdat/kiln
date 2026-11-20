@@ -20,6 +20,10 @@ dllmod_test_mod(fault TM_FAULT)
 dllmod_test_mod(lib TM_LIB)
 dllmod_test_mod(uses_lib TM_USES_LIB)
 target_link_libraries(dllmod-test-uses_lib PRIVATE dllmod-test-lib)
+add_library(dllmod-test-fake_loader SHARED tests/fake_loader.cpp)
+set_target_properties(dllmod-test-fake_loader PROPERTIES OUTPUT_NAME fake_modloader RUNTIME_OUTPUT_DIRECTORY "${DLLMOD_TESTS}"
+                      ARCHIVE_OUTPUT_DIRECTORY "${DLLMOD_TESTS}/lib")
+add_dependencies(kiln-dllmod dllmod-test-fake_loader)
 
 add_executable(dllmod-host-test tests/host_test.cpp src/session.cpp)
 target_include_directories(dllmod-host-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")

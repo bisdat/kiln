@@ -1058,6 +1058,10 @@
       "loaded": {
         "one": "Kiln {version} - {count} mod chargé",
         "other": "Kiln {version} - {count} mods chargés"
+      },
+      "xhl": {
+        "one": "Kiln {version} avec XHL-Core - {count} mod chargé",
+        "other": "Kiln {version} avec XHL-Core - {count} mods chargés"
       }
     },
     "fallback": {

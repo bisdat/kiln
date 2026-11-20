@@ -290,6 +290,7 @@ internal static unsafe class UiEngine
         Ui.Screens.RemoveOwnedBy(mod);
         Ui.Crafting.RemoveOwnedBy(mod);
         KeyBindings.RemoveOwnedBy(mod);
+        KeyInput.RemoveOwnedBy(mod);
         FrameHandlers.RemoveOwnedBy(mod);
         Recount();
     }

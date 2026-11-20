@@ -416,8 +416,17 @@ that its own call sites are still calls). The thunk builds and draws Kiln's line
 exactly as the game builds its build-number line (the same style, mode, fields; text with 7 no-break spaces in front of
 it for the mark), reads its rectangle (`UiNodeRect`, the last layout's) and then calls the game's `NativeTextLine` for
 the build number. Kiln never writes to the function's body, so XHL-Core's scan and its call patches go in as before in
-either order; the copy simply does not reach them, so its line (and its window-input patch, which only served that line)
-is not drawn, and its two main-menu patches find no status line to reach. At the first use kiln.ui compares the live
+either order. The copy's window call (`0xc18a2b`, `+0x4b`: the last byte of `ui/MainMenuFooter`'s pattern) goes through
+a second thunk. Both thunks call the game's functions, unless XHL-Core is in the footer and reports a problem: then they
+call XHL-Core's patched targets (its stubs: `jmp [rip+0]` with no register move for these two sites: their entries in the
+site list handed to `FUN_180030160` carry register 0xffffffff; only `FUN_180059560`'s gets a `mov r9, reg`), so XHL-Core draws its red line under Kiln's and its window
+patch lets the line take clicks; its two main-menu patches work as they do without Kiln. Kiln knows XHL-Core by the
+export `XhlNativeGameBuild` of the module the build-number call's stub leads to, and reads its state through the first
+call of the detour `FUN_1800596a0` whose target has the getter's shape `xor ecx,ecx; xor eax,eax; lock cmpxchg
+[rip+rel32],ecx; ret` (`FUN_180043af0`, the int `DAT_180109160`: 0 = no problem, its green line or nothing; else the
+problem its red line names, via `FUN_180043bd0`). Kiln looks at the two live calls each frame its copy runs (XHL-Core
+patches from its own thread, maybe late). Its green "All mods loaded" is left out (Kiln's line reads "Kiln ... with
+XHL-Core - N Mods Loaded"); where the getter is not found, XHL-Core's line is always drawn. At the first use kiln.ui compares the live
 function with the file's: a patched call is logged (module and offset); any other change (or base-relocated bytes) leaves
 the footer to the game's function. The game font's metrics for the mark's gap: Harmonique Display Regular, 1000 units per
 em, ascent 980, descent 220, space and no-break space 191 (fontTools over font 0 of the UiFontResource) **[data]**.
@@ -435,11 +444,17 @@ Without XHL-Core:
 4. Kiln settings → `mainMenuFooter` off: the line and the mark go at once, the game's footer is as before; on again:
    they come back.
 With XHL-Core 2.1.0 (as a chain DLL):
-5. The same line in the same place; XHL-Core's green "All mods loaded" is not shown at any moment. kiln.log names
-   XHL-Core: `a module patched the game's footer call at +0x234 to <XHL-Core's file>+0x596a0` (its detour, found through
-   its stub; the file is dinput8.dll or its chain name).
-6. XHL-Core's Insert menu, its plugins and its other features work as before, in the main menu and in a world.
-7. `mainMenuFooter` off: XHL-Core's green line is back above the build number.
+5. Kiln's line reads "Kiln <version> with XHL-Core - N Mods Loaded" (in Kiln's language) in the same place; with no
+   XHL-Core problem its green "All mods loaded" is not shown at any moment. kiln.log names XHL-Core: `a module patched
+   the game's footer call at +0x234 to <XHL-Core's file>+0x596a0` (and at `+0x4b` to `+0x59bf0`), `XHL-Core's footer
+   line is at <file>+0x596a0; ... shows while XHL-Core reports a problem (it takes clicks)`, `XHL-Core reports no
+   problem: Kiln's line only`.
+6. With an XHL-Core problem (see the report's check list for how to provoke one): XHL-Core's red line ("XHL: Game
+   updated · Click to view" or "Mod conflict detected. Click to view") right under Kiln's line, above the build number;
+   a click on it opens XHL-Core's startup diagnostics window; kiln.log `XHL-Core reports a problem: its red line shows
+   under Kiln's`.
+7. XHL-Core's Insert menu, its plugins and its other features work as before, in the main menu and in a world.
+8. `mainMenuFooter` off: XHL-Core's own line (green or red) is back above the build number, as XHL-Core draws it.
 
 ## 6. Other strings worth knowing
 "[GameUi] … opened" log lines exist for every menu (Backpack, Map, Journal, Skill Tree, Settings, Social, NPC dialog,

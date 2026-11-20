@@ -147,7 +147,47 @@ def idle():
     return g
 
 
-SCENARIOS = {"unsupported": unsupported, "server": server, "dropins": dropins, "idle": idle}
+def native_module(where):
+    """Enshrouded ModLoader 0.6.15 installed next to Kiln as a native module (kiln/native/enshrouded-modloader/
+    modloader.dll + native.json, phase boot): kiln-core loads it after every plugin's on_ready, so kiln-dllmod must see it
+    on disk and step aside, hooking nothing (the loader refuses to start when one of its functions was patched)."""
+    g = Game("native-" + where)
+    g.package("Mods/EnshroudedModLoader/lantern", "dllmod_test_plain.dll", "lantern.dll", PLAIN)
+    os.makedirs(g.p("Mods/EnshroudedModLoader/worlds/0123456789abcdef0123456789abcdef.settings-v2"))
+    native = "kiln/native/enshrouded-modloader"
+    os.makedirs(g.p(native))
+    shutil.copy(os.path.join(MODS, "fake_modloader.dll"), g.p(native, "modloader.dll"))
+    with open(g.p(native, "native.json"), "w", encoding="utf-8") as f:
+        json.dump({"format": 1, "id": "enshrouded-modloader", "version": "0.6.15", "dlls": ["modloader.dll"], "phase": "boot",
+                   "init": "kiln_native_init", "builds": ["5D9EF2F140B8ED49E30DBEE655841B89D08BAEC20F799A1817E171A18A850C77"]}, f)
+    if where == "profile-entry":   # the launcher's profile names it in mods.native (drop-ins off)
+        g.profile([], dropins=False)
+        doc = json.load(open(g.p("kiln", "profile.json"), encoding="utf-8"))
+        doc["mods"]["native"] = [{"id": "enshrouded-modloader", "path": "native/enshrouded-modloader"}]
+        doc["dropins"] = ["dllmod"]
+        json.dump(doc, open(g.p("kiln", "profile.json"), "w", encoding="utf-8"))
+    elif where == "dropins-off":   # the profile reads no native drop-ins: kiln-core does not load it, Kiln's engine runs
+        g.profile([], dropins=False)
+        doc = json.load(open(g.p("kiln", "profile.json"), encoding="utf-8"))
+        doc["dropins"] = ["dllmod"]
+        json.dump(doc, open(g.p("kiln", "profile.json"), "w", encoding="utf-8"))
+    g.run()
+    s = g.state
+    if where == "dropins-off":
+        g.check(not s.get("steppedAside") and s.get("status") == "unsupported", f"not stepped aside: {s.get('status')} {s.get('steppedAsideReason')}")
+    else:
+        g.check(s.get("steppedAside") is True and s.get("status") == "stepped aside", f"stepped aside: {s.get('status')}")
+        g.check("enshrouded-modloader" in s.get("steppedAsideReason", "") and "native mod" in s.get("steppedAsideReason", ""), s.get("steppedAsideReason"))
+        g.check(g.mod("lantern/lantern.dll").get("status") == "own-loader", f"lantern: {g.mod('lantern/lantern.dll')}")
+    ids = [m["id"] for m in s.get("mods", [])]
+    g.check(not any("worlds" in i for i in ids), f"the loader's worlds folder is no mod: {ids}")
+    g.check("RESULT hooks_raw_links=0" in g.out, "nothing hooked")
+    return g
+
+
+SCENARIOS = {"unsupported": unsupported, "server": server, "dropins": dropins, "idle": idle,
+             "native-legacy": lambda: native_module("legacy"), "native-profile": lambda: native_module("profile-entry"),
+             "native-dropins-off": lambda: native_module("dropins-off")}
 
 
 def main():

@@ -183,7 +183,8 @@ the test edits there reaches the change handlers through the file watcher, so pa
 **Logs.** `kiln.Logs` holds every line Kiln wrote while the harness lived: the mods' loggers, Kiln's services and
 the host. `LogsOf(mod)`, `FindLogs(text)`, `HasLog(text, modId)`, `DumpLogs()` (for an assertion message);
 `KilnHarnessOptions.LogSink` sees each line as it is written. `kiln/logs/kiln.log` in the temporary folder has
-them too.
+them too (`kiln.LogFile`); read it with `kiln.ReadLogFile()`, not `File.ReadAllText`, which Windows refuses while
+the harness holds the file open for writing.
 
 **Faults.** Kiln.Host's fault policy runs as in the game (5 faults in 60 s of virtual time disable a mod, a crash
 report in the temporary folder). A harness call during which a mod faulted throws `ModFaultException` when the call

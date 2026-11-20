@@ -1003,6 +1003,9 @@
     "footer": {
       "loaded": {
         "other": "Kiln {version} - 已加载 {count} 个模组"
+      },
+      "xhl": {
+        "other": "Kiln {version}（搭配 XHL-Core） - 已加载 {count} 个模组"
       }
     },
     "fallback": {

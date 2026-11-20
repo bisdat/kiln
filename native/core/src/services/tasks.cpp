@@ -139,13 +139,24 @@ KilnResult KILN_CALL t_drain_owner(KilnOwner owner, uint32_t timeout_ms, uint32_
 void log_watch(const tasks::Watch& w, void*) {
     const bool running = w.kind == tasks::Watch::Kind::RunningTooLong;
     const std::string owner = w.owner_name.empty() ? "owner " + std::to_string(w.owner) : w.owner_name;
+    if (running && w.after_cancel) {  // a resident task: reported only once its cancellation was asked
+        KLOG_W("kiln.tasks: %s/%s (task 0x%llx) is still running %.1f s after its cancellation was asked (the watchdog "
+               "reports it once; nothing is stopped)",
+               owner.c_str(), w.name.c_str(), static_cast<unsigned long long>(w.task), static_cast<double>(w.age_ns) / 1e9);
+        return;
+    }
     KLOG_W("kiln.tasks: %s/%s (task 0x%llx) has been %s for %.1f s (the watchdog reports it once; nothing is stopped)",
            owner.c_str(), w.name.c_str(), static_cast<unsigned long long>(w.task), running ? "running" : "queued",
            static_cast<double>(w.age_ns) / 1e9);
 }
 
-// A worker kind that lost its last worker (or got one back): one kiln.log line each way.
+// A worker kind that lost its last worker (or got one back): one kiln.log line each way. A resident task's first
+// start: one info line (on its worker, before its body), with the LongRunning threads resident tasks hold.
 void log_note(const tasks::PoolNote& n, void*) {
+    if (n.kind == tasks::PoolNote::Kind::ResidentStarted) {
+        KLOG_I("%s", tasks::resident_started_line(n).c_str());
+        return;
+    }
     const char* kind = n.slot == tasks::Slot::Normal ? "normal" : "LongRunning";
     if (n.kind == tasks::PoolNote::Kind::SlotLost)
         KLOG_E("kiln.tasks: the %s task workers lost their last worker (its replacement could not start); %zu queued "

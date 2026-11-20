@@ -1051,6 +1051,9 @@
     "footer": {
       "loaded": {
         "other": "Kiln {version} - 모드 {count}개 로드됨"
+      },
+      "xhl": {
+        "other": "Kiln {version} (XHL-Core 함께 사용) - 모드 {count}개 로드됨"
       }
     },
     "fallback": {

@@ -1072,6 +1072,12 @@
         "few": "Kiln {version} - загружено {count} мода",
         "many": "Kiln {version} - загружено {count} модов",
         "other": "Kiln {version} - загружено {count} мода"
+      },
+      "xhl": {
+        "one": "Kiln {version} с XHL-Core - загружен {count} мод",
+        "few": "Kiln {version} с XHL-Core - загружено {count} мода",
+        "many": "Kiln {version} с XHL-Core - загружено {count} модов",
+        "other": "Kiln {version} с XHL-Core - загружено {count} мода"
       }
     },
     "fallback": {

@@ -32,6 +32,10 @@ pub enum Via {
     /// Kiln hosts ShroudForge for this profile (it lists enabled ShroudForge mods); ShroudForge then owns startup
     /// patching and writes the EML packages of its mods folder whose `extended.mod.json` says `enabled: true`.
     HostedShroudForge,
+    /// A Kiln native mod: Enshrouded ModLoader 0.6.15+ installs itself next to Kiln as
+    /// `kiln/native/enshrouded-modloader/modloader.dll` (phase boot), a drop-in the profile reads, or the profile's native
+    /// entry holding that DLL.
+    NativeModule,
 }
 
 /// How the profile's mods of a kind reach the own loader.
@@ -189,6 +193,28 @@ pub fn find(game_dir: &Path, profile: Option<&ProfileView>) -> Vec<OwnLoader> {
     for (file, host) in emf_chained(game_dir) {
         if let Ok(c) = crate::pe::classify_proxy(&host) { add(c.kind, file, Via::EmfChain); }
     }
+    // Enshrouded ModLoader 0.6.15+ as a Kiln native mod (its installer: kiln/native/enshrouded-modloader/modloader.dll):
+    // a native drop-in folder the profile reads (no profile: every drop-in folder), or a switched-on native entry of the
+    // profile holding its DLL. kiln-dllmod steps aside for it the same way (native/plugins/dllmod, loader_native_module).
+    let mut native_dirs: Vec<PathBuf> = Vec::new();
+    if profile.is_none_or(|p| p.dropins_native) {
+        let root = game_dir.join(crate::paths::game::DROPIN_NATIVE);
+        let mut dirs: Vec<PathBuf> = std::fs::read_dir(&root).into_iter().flatten().flatten().map(|e| e.path())
+            .filter(|p| p.is_dir() && !p.is_symlink() && p.join(crate::manifest::NATIVE_MANIFEST).is_file()).collect();
+        dirs.sort();
+        native_dirs.extend(dirs);
+    }
+    if let Some(p) = profile {
+        native_dirs.extend(p.sources.iter().filter(|(k, _, _)| *k == ModKind::Native).map(|(_, _, path)| path.clone()));
+    }
+    for dir in native_dirs {
+        for dll in crate::engines::dlls_in(&dir) {
+            if crate::pe::classify_proxy(&dll).is_ok_and(|c| c.kind == ProxyKind::Dllmod) {
+                let shown = dll.strip_prefix(game_dir).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| dll.display().to_string());
+                add(ProxyKind::Dllmod, shown, Via::NativeModule);
+            }
+        }
+    }
     // kiln-shroudforge hosts ShroudForge when the profile lists an enabled ShroudForge mod, or has ShroudForge drop-ins
     // on and ShroudForge's mods folder holds a ShroudForge package, and a ShroudForge runtime is there. ShroudForge then
     // owns the startup patch, runs the EML mods of its mods folder itself (those its switch has on: Kiln's copies there
@@ -271,6 +297,8 @@ pub struct ProfileView {
     /// folder of a mod by that entry's manifest id ([`own_folder_of`]).
     pub sources: Vec<(ModKind, String, PathBuf)>,
     pub eml_runtime: Vec<String>,
+    /// The profile reads the `kiln/native` drop-in folder (`dropins` true or naming native), as kiln-core does.
+    pub dropins_native: bool,
 }
 
 fn names_shroudforge(d: &crate::profile::Dropins) -> bool {
@@ -286,7 +314,8 @@ impl ProfileView {
         for k in ModKind::ALL {
             for m in p.mods.list(k) { mods.push((k, m.id.clone(), m.enabled)); }
         }
-        ProfileView { mods, dropins_shroudforge: names_shroudforge(&p.dropins_file()), sources: Vec::new(), eml_runtime: Vec::new() }
+        let d = p.dropins_file();
+        ProfileView { mods, dropins_shroudforge: names_shroudforge(&d), sources: Vec::new(), eml_runtime: Vec::new(), dropins_native: d.names(ModKind::Native) }
     }
 
     pub fn of_file(f: &crate::profile::ProfileFile) -> Self {
@@ -294,11 +323,17 @@ impl ProfileView {
         for k in ModKind::ALL {
             for m in f.mods.folders(k).into_iter().flatten() { mods.push((k, m.id.clone(), m.enabled)); }
         }
-        ProfileView { mods, dropins_shroudforge: names_shroudforge(&f.dropins), sources: Vec::new(), eml_runtime: f.eml_runtime.clone() }
+        ProfileView { mods, dropins_shroudforge: names_shroudforge(&f.dropins), sources: Vec::new(), eml_runtime: f.eml_runtime.clone(),
+            dropins_native: f.dropins.names(ModKind::Native) }
     }
 
     /// [`ProfileView::sources`] of a launcher profile's EML mods, from the Library.
     pub fn with_library(mut self, dirs: &crate::paths::DataDirs, p: &crate::profile::Profile) -> Self {
+        // switched-on native mods: one may be Enshrouded ModLoader's DLL (find, Via::NativeModule)
+        for m in p.mods.list(ModKind::Native).iter().filter(|m| m.enabled) {
+            let r = crate::library::LibraryRef { kind: ModKind::Native, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
+            if let Ok(path) = crate::library::path_of(dirs, &r) { self.sources.push((ModKind::Native, m.id.clone(), path)); }
+        }
         for m in p.mods.list(ModKind::Eml) {
             let r = crate::library::LibraryRef { kind: ModKind::Eml, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
             if let Ok(path) = crate::library::path_of(dirs, &r) {
@@ -312,7 +347,8 @@ impl ProfileView {
     /// [`ProfileView::sources`] of the game's `kiln/profile.json` EML mods: their game-side paths on this system (a `Z:`
     /// path, a path relative to `<game>/kiln`, or a host path).
     pub fn with_file_sources(mut self, f: &crate::profile::ProfileFile, game_dir: &Path) -> Self {
-        for m in f.mods.folders(ModKind::Eml).into_iter().flatten() {
+        let natives = f.mods.folders(ModKind::Native).into_iter().flatten().filter(|m| m.enabled).map(|m| (ModKind::Native, m));
+        for (kind, m) in f.mods.folders(ModKind::Eml).into_iter().flatten().map(|m| (ModKind::Eml, m)).chain(natives) {
             let p = m.path.trim();
             let host = crate::winpath::z_to_unix(p).or_else(|| {
                 let h = PathBuf::from(p);
@@ -320,7 +356,7 @@ impl ProfileView {
                 else if crate::winpath::is_absolute_game_path(p) { None }
                 else { Some(p.split(['\\', '/']).filter(|c| !c.is_empty()).fold(game_dir.join("kiln"), |d, c| if c == ".." { d.parent().map(Path::to_path_buf).unwrap_or(d) } else { d.join(c) })) }
             });
-            if let Some(h) = host { self.sources.push((ModKind::Eml, m.id.clone(), h)); }
+            if let Some(h) = host { self.sources.push((kind, m.id.clone(), h)); }
         }
         self
     }
