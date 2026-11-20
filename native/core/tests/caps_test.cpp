@@ -43,17 +43,33 @@ std::filesystem::path t_last_file;
 kiln::Paths t_paths;
 double t_now = 0;
 std::mutex t_clock_mutex;
+// Each set_clock starts a new epoch; a read of the clock by another thread than main's (the writer thread: flush and
+// boot_complete run on main here) marks the epoch seen. The writer reads it only under caps::g_wmutex, to measure its
+// gap and to take a write, so a seen epoch tells the test that the writer looked at the time set last. The same for
+// the writer's reads of the tick hook's state (refresh_tick, at the top of each of its rounds).
+const std::thread::id t_main = std::this_thread::get_id();  // static initialisation runs on main's thread
+uint64_t t_clock_epoch = 0, t_seen_epoch = 0;  // under t_clock_mutex
+uint64_t t_tick_epoch = 0, t_tick_seen = 0;    // under t_clock_mutex
 double fake_clock() {
     std::lock_guard l(t_clock_mutex);
+    if (std::this_thread::get_id() != t_main) t_seen_epoch = t_clock_epoch;
     return t_now;
+}
+void tick_read_noted() {
+    std::lock_guard l(t_clock_mutex);
+    if (std::this_thread::get_id() != t_main) t_tick_seen = t_tick_epoch;
 }
 void set_clock(double v) {
     {
         std::lock_guard l(t_clock_mutex);
         t_now = v;
+        ++t_clock_epoch;
     }
     kiln::caps::g_wcv.notify_all();  // the writer looks again (a real wake-up would come from its own timeout)
 }
+// The bound of a wait that must end. Generous: the shared build machine can be loaded far beyond its cores, and a
+// passing wait returns as soon as its condition holds.
+constexpr std::chrono::seconds kMustEnd{300};
 size_t writes() {
     std::lock_guard l(t_mutex);
     return t_writes.size();
@@ -117,7 +133,10 @@ bool owner_alive(KilnOwner owner) {
 uint64_t version() { return t_version.load(); }
 }  // namespace reg
 namespace tick {
-bool installed() { return t_tick; }
+bool installed() {
+    tick_read_noted();
+    return t_tick;
+}
 bool lifecycle() { return t_lifecycle; }
 bool waits_jobs() { return t_wait; }
 StopDrain stop_drain(uint32_t kind) { return stop_drain_of(kind, image().side, t_tick, t_lifecycle, t_wait); }
@@ -770,7 +789,7 @@ void json_file() {
     rep(o, "items.moves", P, KILN_CAP_REASON_SESSION, "no world is loaded yet");
     rep(o, "z.future", U, 11, "bad \xFF byte");
     rep(o, "a.ok", A, 0, "v3");
-    json doc = json::parse(caps::render(std::chrono::milliseconds(1000)));
+    json doc = json::parse(caps::render(kMustEnd));
     bool top = doc["format"] == 1 && doc["kiln"].is_string() && doc["pid"] == 4242 && doc["written"].is_string() &&
                doc["side"] == "server" && doc["exe"]["sha256"].is_string() && doc["exe"]["verified"] == false &&
                doc["hooks"] == false && doc["safeIdle"] == "the game image cannot be parsed" &&
@@ -799,14 +818,48 @@ void json_file() {
               row("z.future")["reasonText"].get<std::string>().find("bad ") == 0,
           "json: a code with no name is other-<n>; a bad UTF-8 byte does not stop the file");
     caps::core_rows(true, true, "");
-    doc = json::parse(caps::render(std::chrono::milliseconds(1000)));
+    doc = json::parse(caps::render(kMustEnd));
     CHECK(doc["hooks"] == true && doc["safeIdle"].is_null() && doc["exe"]["verified"] == true,
           "json: hooks on, safeIdle null");
 }
 
+// Polls until done() holds, at most kMustEnd.
+template <class F>
+bool poll_until(F done) {
+    const auto give_up = std::chrono::steady_clock::now() + kMustEnd;
+    while (!done()) {
+        if (std::chrono::steady_clock::now() > give_up) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
 bool wait_writes(size_t n) {
-    for (int i = 0; i < 300 && writes() < n; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    return writes() >= n;
+    return poll_until([n] { return writes() >= n; });
+}
+// The writer thread looked at the time set last (see fake_clock) and is done deciding: the test then takes g_wmutex,
+// under which the writer measures its gap and takes a write, so the writer is either waiting out its gap or has taken
+// a write (g_in_flight). True for the first: a must-not-write check that follows proves the writer saw the change and
+// the time, and chose to wait. Called while something is dirty: a writer found clean has written it (false at once).
+bool writer_waits() {
+    bool seen = false, idle = false;
+    poll_until([&] {
+        {
+            std::lock_guard l(t_clock_mutex);
+            seen = t_seen_epoch == t_clock_epoch;
+        }
+        std::lock_guard l(caps::g_wmutex);
+        idle = !caps::g_in_flight;
+        return seen || (idle && !caps::g_dirty);
+    });
+    return seen && idle;
+}
+// Nothing dirty and no write in flight: the writer thread takes no write until the next change marks the file dirty.
+// Polls, since a write that just reached the stub has not ended yet.
+bool writer_clean() {
+    return poll_until([] {
+        std::lock_guard l(caps::g_wmutex);
+        return !caps::g_dirty && !caps::g_in_flight;
+    });
 }
 
 void writer() {
@@ -822,10 +875,8 @@ void writer() {
     CHECK(writes() == 1 && t_last_file == dir / "capabilities.json" && last_write().find("w.zero") != std::string::npos,
           "writer: boot_complete writes at once, to <state>/capabilities.json");
     rep(o, "w.one", A, 0);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
     set_clock(10999);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(writes() == 1, "writer: a change within the second waits");
+    CHECK(writer_waits() && writes() == 1, "writer: a change within the second waits (the writer saw it at 10999)");
     set_clock(11000);
     CHECK(wait_writes(2) && writes() == 2 && last_write().find("w.one") != std::string::npos,
           "writer: written once the second is over");
@@ -833,21 +884,19 @@ void writer() {
         rep(o, "w.many", U, KILN_CAP_REASON_POLICY, "step " + std::to_string(i));
         set_clock(11000 + i * 40);
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(writes() == 2, "writer: twenty changes in the next second, no write yet");
+    CHECK(writer_waits() && writes() == 2, "writer: twenty changes in the next second, no write yet");
     set_clock(12000);
     CHECK(wait_writes(3), "writer: then one write");
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(writes() == 3 && last_write().find("step 19") != std::string::npos, "writer: one write with the last state");
+    CHECK(writer_clean() && writes() == 3 && last_write().find("step 19") != std::string::npos,
+          "writer: one write with the last state, and nothing left dirty");
     set_clock(50000);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(writes() == 3 && caps::flush() && writes() == 3, "writer: nothing dirty, nothing written (thread or flush)");
+    CHECK(writer_clean() && writes() == 3 && caps::flush() && writes() == 3,
+          "writer: nothing dirty, nothing written (thread or flush)");
     rep(o, "w.last", A, 0);
     CHECK(caps::flush() && writes() == 4 && last_write().find("w.last") != std::string::npos,
           "writer: flush writes what is dirty at once, inside the second");
     set_clock(60000);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(writes() == 4, "writer: after flush the thread has nothing left to write");
+    CHECK(writer_clean() && writes() == 4, "writer: after flush the thread has nothing left to write");
 }
 
 size_t attempts() {
@@ -855,8 +904,7 @@ size_t attempts() {
     return t_attempts.size();
 }
 bool wait_attempts(size_t n) {
-    for (int i = 0; i < 300 && attempts() < n; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    return attempts() >= n;
+    return poll_until([n] { return attempts() >= n; });
 }
 size_t infos_with(const char* what) {
     std::lock_guard l(t_mutex);
@@ -875,7 +923,11 @@ void block(bool on) {
 }
 bool wait_in_write() {
     std::unique_lock l(t_mutex);
-    return t_write_cv.wait_for(l, std::chrono::seconds(3), [] { return t_in_write; });
+    return t_write_cv.wait_for(l, kMustEnd, [] { return t_in_write; });
+}
+bool in_write() {
+    std::lock_guard l(t_mutex);
+    return t_in_write;
 }
 
 // A write that fails (the stub's t_fail_next, as Wine's replacing rename while a reader holds the file) is tried again
@@ -888,22 +940,17 @@ void writer_retry() {
     fail_next(2);
     rep(o, "r.one", A, 0);
     CHECK(wait_attempts(a0 + 1) && writes() == w0, "retry: the writer's write fails");
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
     set_clock(70999);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(attempts() == a0 + 1, "retry: no second try within the second (no busy loop)");
+    CHECK(writer_waits() && attempts() == a0 + 1, "retry: no second try within the second (no busy loop)");
     set_clock(71000);
     CHECK(wait_attempts(a0 + 2) && writes() == w0, "retry: tried again once the second is over, with no new change; fails again");
     set_clock(71999);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(attempts() == a0 + 2, "retry: still at most one try a second across failures");
+    CHECK(writer_waits() && attempts() == a0 + 2, "retry: still at most one try a second across failures");
     set_clock(72000);
     CHECK(wait_writes(w0 + 1) && attempts() == a0 + 3 && last_write().find("r.one") != std::string::npos,
           "retry: the third try writes, and the file holds the change");
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
     set_clock(90000);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(attempts() == a0 + 3 && writes() == w0 + 1, "retry: then parked, nothing dirty");
+    CHECK(writer_clean() && attempts() == a0 + 3 && writes() == w0 + 1, "retry: then parked, nothing dirty");
     CHECK(infos_with("cannot write") == 1 && infos_with("written again") == 1,
           "retry: one line for the failures, one when writing works again");
 
@@ -921,44 +968,49 @@ void writer_retry() {
     CHECK(second && writes() == w1 + 1 && last_write().find("r.two") != std::string::npos,
           "flush: the dirt of the failed write stayed, so the next flush writes it");
 
-    // flush during the writer's write in flight
+    // flush during the writer's write in flight. The stub holds that write for as long as the test says, so flush's own
+    // bound (1 s) runs out with the write still in flight: flush answers false and writes nothing (it never claims a
+    // file it has not seen written). Then the write ends, and flush answers true with no second write.
     const size_t w2 = writes();
     rep(o, "r.three", A, 0);
     block(true);
     set_clock(91000);  // past flush's last try (90000): the writer takes the write and stays inside it
     const bool entered = wait_in_write();
-    std::atomic<bool> returned{false};
-    bool result = false;
-    std::thread f([&] {
-        result = caps::flush();
-        returned = true;
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    const bool waited = !returned;
+    auto f0 = std::chrono::steady_clock::now();
+    const bool held = caps::flush();
+    const auto waited = std::chrono::steady_clock::now() - f0;
+    const bool still = in_write() && writes() == w2;
     block(false);
-    f.join();
-    CHECK(entered && waited && result && writes() == w2 + 1 && last_write().find("r.three") != std::string::npos,
-          "flush: waits for the write in flight and answers true once it is in the file (one write)");
+    // flush took its whole bound before it answered: it waited for the write in flight (a flush that gave up at once
+    // would answer false too). A lower bound, so a loaded machine cannot fail it.
+    CHECK(entered && !held && still && waited >= std::chrono::milliseconds(1000),
+          "flush: a write in flight past flush's bound: flush waits its 1 s for it, answers false and writes nothing "
+          "(%lld ms)",
+          static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(waited).count()));
+    CHECK(wait_writes(w2 + 1) && writer_clean() && caps::flush() && writes() == w2 + 1 &&
+              last_write().find("r.three") != std::string::npos,
+          "flush: once the write in flight is in the file, flush answers true (one write)");
 
-    // the write in flight fails: flush writes itself
-    const size_t w3 = writes();
+    // the write in flight fails: its dirt comes back, the writer waits out its gap (the fake clock stays), and flush
+    // writes itself
+    const size_t w3 = writes(), a3 = attempts();
     rep(o, "r.four", A, 0);
     fail_next(1);
     block(true);
     set_clock(92000);
     const bool entered2 = wait_in_write();
-    returned = false;
-    result = false;
-    std::thread g([&] {
-        result = caps::flush();
-        returned = true;
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    const bool waited2 = !returned;
+    f0 = std::chrono::steady_clock::now();
+    const bool held2 = caps::flush();
+    const auto waited2 = std::chrono::steady_clock::now() - f0;
     block(false);
-    g.join();
-    CHECK(entered2 && waited2 && result && writes() == w3 + 1 && last_write().find("r.four") != std::string::npos,
-          "flush: a write in flight that fails is done again by flush, which then answers true");
+    const bool failed = wait_attempts(a3 + 1) && poll_until([] {
+        std::lock_guard l(caps::g_wmutex);
+        return caps::g_dirty && !caps::g_in_flight;
+    });
+    const bool result = caps::flush();
+    CHECK(entered2 && !held2 && waited2 >= std::chrono::milliseconds(1000) && failed && result && writes() == w3 + 1 &&
+              attempts() == a3 + 2 && last_write().find("r.four") != std::string::npos,
+          "flush: waits its 1 s for a write in flight; when that write fails, flush does it again and answers true");
 }
 
 // No registry entry point after the fault: a subscriber (the managed snapshot's source), the stored rows and the
@@ -978,8 +1030,25 @@ void idle_tick_fault(const std::filesystem::path& dir) {
     Seen seen;
     KilnHandle h = 0;
     T->subscribe(owner("host"), &record_change, &seen, &h);
-    // Let the writer park with a clean file. Moving this fake clock does not wake it after the fault.
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // The writer parks with a clean file: woken once, it read the tick hook's state (refresh_tick, the top of its round)
+    // and, with nothing dirty, has nothing to do but wait. Moving this fake clock does not wake it after the fault.
+    {
+        std::lock_guard c(t_clock_mutex);
+        ++t_tick_epoch;
+    }
+    caps::g_wcv.notify_all();  // one more round now rather than at its next second
+    const bool parked = poll_until([] {
+        {
+            std::lock_guard l(t_clock_mutex);
+            if (t_tick_seen != t_tick_epoch) return false;
+        }
+        std::lock_guard l(caps::g_wmutex);
+        if (!caps::g_dirty && !caps::g_in_flight) return true;
+        std::lock_guard c(t_clock_mutex);  // not clean yet: one more round
+        ++t_tick_epoch;
+        return false;
+    });
+    CHECK(parked, "idle fault: the writer read the tick hook's state and parked with nothing dirty");
     const size_t before = writes();
     const auto start = std::chrono::steady_clock::now();
     {
@@ -987,10 +1056,10 @@ void idle_tick_fault(const std::filesystem::path& dir) {
         t_now = 101000;
     }
     t_tick = t_lifecycle = false;
-    const auto deadline = start + std::chrono::milliseconds(1250);
-    // the three tick rows and, derived from the same hooks, the server world's stop_drain row (dev.29)
-    while ((seen.size() < 4 || writes() == before) && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    // the three tick rows and, derived from the same hooks, the server world's stop_drain row (dev.29). The writer
+    // looks each second; how long it took is shown, not checked (a loaded machine stretches it).
+    poll_until([&] { return seen.size() >= 4 && writes() > before; });
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
     bool rows = true;
     {
         std::lock_guard l(caps::g_mutex);
@@ -1000,8 +1069,8 @@ void idle_tick_fault(const std::filesystem::path& dir) {
         }
     }
     CHECK(rows && seen.size() == 4 && writes() > before,
-          "idle fault: rows, subscriber snapshot and file follow within 1250 ms without a registry call (rows %d, events %zu, writes %zu -> %zu)",
-          rows, seen.size(), before, writes());
+          "idle fault: rows, subscriber snapshot and file follow without a registry call (rows %d, events %zu, writes %zu -> %zu, after %lld ms)",
+          rows, seen.size(), before, writes(), static_cast<long long>(took.count()));
     const auto doc = nlohmann::json::parse(last_write());
     unsigned faulted = 0;
     for (const auto& row : doc["capabilities"])
