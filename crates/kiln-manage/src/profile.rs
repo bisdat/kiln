@@ -2187,6 +2187,21 @@ pub fn refresh_active(dirs: &DataDirs, install: &GameInstall) -> Result<Option<A
     activate(dirs, &profile.id, install).map(Some)
 }
 
+/// Undoes what [`render`] does to a profile's list for an enabled EML package that needs ShroudForge's runtime
+/// (`eml_runtime`): kiln-eml's route switched off, and the compatibility entry (an exact copy of the EML entry, switched
+/// on) in mods.shroudforge. A ShroudForge entry that differs in any field is a mod of the profile's and stays.
+fn without_runtime_eml_signals(mut file: ProfileFile) -> ProfileFile {
+    for id in &file.eml_runtime {
+        let Some(m) = file.mods.eml.iter_mut().find(|m| &m.id == id) else { continue };
+        m.enabled = true;
+        let compat = m.clone();
+        if let Some(i) = file.mods.shroudforge.iter().position(|s| *s == compat) {
+            file.mods.shroudforge.remove(i);
+        }
+    }
+    file
+}
+
 /// Launch mode once: renders the profile into `kiln/profile.once.json` and its chain plan (dllmain natives, the [chain]
 /// and [late] lists with its compat rules applied) into `kiln/chain/once.ini` (play-once mode=profile then boots it for
 /// one start).
@@ -2197,12 +2212,16 @@ pub fn write_once(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> R
     check_profile(&profile)?;
     // These engines consume fixed folders, not the profile's paths. Changing them for a single start would also
     // change the next Steam launch, which does not call refresh_active. Only a persistent activation may do that.
-    let active = read_game_profile(&install.path)?;
+    // The active file as its profile listed it: render's own entries for EML packages that need ShroudForge's runtime
+    // (the compatibility entry in mods.shroudforge, kiln-eml's route switched off) are not a selection of the player's.
+    let active = read_game_profile(&install.path)?.map(without_runtime_eml_signals);
     // EML, EMF, Greeneye, Flame and Shroudtopia read a fixed folder too while their own loader is installed (Kiln
     // copies the active profile's mods there): their selection cannot change for a single start either.
-    let loaders = crate::own_loaders::find(&install.path, Some(&crate::own_loaders::ProfileView::of_profile(&profile)));
-    // Name the runtime conflict before a fixed-folder refusal suggests activating this unsafe combination.
+    // The view knows the profile's EML packages that need ShroudForge's runtime (the Library says so), as render's does:
+    // Kiln hosts ShroudForge for them alone, and ShroudForge then runs the EML copies placed in its folder.
     let view = crate::own_loaders::ProfileView::of_profile(&profile).with_library(dirs, &profile);
+    let loaders = crate::own_loaders::find(&install.path, Some(&view));
+    // Name the runtime conflict before a fixed-folder refusal suggests activating this unsafe combination.
     crate::own_loaders::check_runtime_eml_loader(&loaders, &view.eml_runtime)?;
     let fixed = crate::own_loaders::PLACED_FOR_LOADER.into_iter().filter(|k| crate::own_loaders::of_kind(&loaders, *k)
         .is_some_and(|l| l.delivery == crate::own_loaders::Delivery::Placed));
