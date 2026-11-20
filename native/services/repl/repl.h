@@ -63,6 +63,8 @@ struct Registry {
     std::string names[kMaxComponents];
 };
 const Registry* registry();  // tick thread; nullptr until a world's registry was read
+// The registry facts of any world (the client world's too); allocates, so never inside a hook. nullptr when unreadable.
+Registry* build_registry(uintptr_t world);
 // The same for the game's job threads during the send step (no lock: the registry is replaced only on the tick thread,
 // in Pre, while no replication job runs).
 const Registry* registry_hot();
@@ -132,9 +134,12 @@ KilnResult KILN_CALL t_watch(KilnOwner owner, KilnEntity e, uint32_t peer_or_all
                              void* user, KilnHandle* out);
 KilnResult KILN_CALL t_remove(KilnHandle h);
 KilnResult KILN_CALL t_capture(KilnOwner owner, uint32_t peer, uint32_t seconds, KilnStr path);
-// ---- a client's receive side (KILN_REPL_RECEIVE watches) ----
+// ---- a client's receive side (client.cpp: KILN_REPL_RECEIVE watches) ----
+bool client_init();                           // kiln_plugin_main on a game client: repl.client's symbols, the client Pre
+bool client_on();                             // repl.client resolved here
 KilnResult client_watch(KilnOwner owner, KilnEntity e, KilnReplWatchFn fn, void* user, KilnHandle* out);
 KilnResult client_remove(KilnHandle h);
+void client_owner_retiring(KilnOwner owner);  // any thread
 
 // ---- the loopback harness (loopback.cpp) ----
 bool lab_init();                    // kiln_plugin_main, after the features resolved: what the harness needs

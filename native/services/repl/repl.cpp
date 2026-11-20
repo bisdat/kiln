@@ -122,7 +122,7 @@ void snapshot_peers() {
             p.peer = lab_peer_of(m, &p.flags);
         else if (gs && L.gs_machines >= 0)
             p.peer = read<uint32_t>(gs + static_cast<uintptr_t>(L.gs_machines) + m * kMachineSlotStride);
-        if (m == 0 && p.peer && g_side == KILN_SIDE_CLIENT) p.flags |= KILN_REPL_PEER_LOCAL;  // a hosted world's own client
+        if (m == 0 && g_side == KILN_SIDE_CLIENT) p.flags |= KILN_REPL_PEER_LOCAL;  // a hosted world's own client
         const uint32_t old = g_peers[m].peer;
         const bool changed = p.peer != old;
         g_peers[m] = p;
@@ -195,9 +195,12 @@ bool read_component_raw(const RawRegistry& r, uint32_t i, RawComponent* c) {
     }
 }
 
-void read_registry(uintptr_t world) {
+}  // namespace
+
+// The registry facts of `world` (any world: the client world's too), or nullptr. Allocates: never inside a hook.
+Registry* build_registry(uintptr_t world) {
     RawRegistry raw{};
-    if (!read_registry_raw(world, &raw)) return;
+    if (!read_registry_raw(world, &raw)) return nullptr;
     auto* reg = new Registry;
     reg->address = raw.address;
     reg->count = static_cast<uint32_t>(raw.count);
@@ -205,7 +208,7 @@ void read_registry(uintptr_t world) {
         RawComponent c{};
         if (!read_component_raw(raw, i, &c)) {
             delete reg;
-            return;
+            return nullptr;
         }
         ComponentFacts& f = reg->at[i];
         f.hash = c.hash;
@@ -222,6 +225,14 @@ void read_registry(uintptr_t world) {
         else
             reg->names[i] = "#" + std::to_string(i);
     }
+    return reg;
+}
+
+namespace {
+
+void read_registry(uintptr_t world) {
+    Registry* reg = build_registry(world);
+    if (!reg) return;
     Registry* old = nullptr;
     {
         std::lock_guard lock(g_registry_mu);
@@ -272,7 +283,8 @@ void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
 
 // ---- the table ----
 uint32_t KILN_CALL t_capabilities() {
-    return (g_observe ? KILN_REPL_CAP_OBSERVE : 0u) | (lab_allowed() ? KILN_REPL_CAP_LOOPBACK : 0u);
+    return (g_observe ? KILN_REPL_CAP_OBSERVE : 0u) | (client_on() ? KILN_REPL_CAP_CLIENT : 0u) |
+           (lab_allowed() ? KILN_REPL_CAP_LOOPBACK : 0u);
 }
 
 
@@ -369,13 +381,6 @@ int machine_of_ctx(uintptr_t world, uintptr_t ctx, uint8_t* pred) {
 
 const Registry* registry_hot() { return g_registry_hot.load(std::memory_order_acquire); }
 
-// The client's receive side is not built yet: KILN_REPL_RECEIVE watches are refused.
-KilnResult client_watch(KilnOwner, KilnEntity, KilnReplWatchFn, void*, KilnHandle* out) {
-    if (out) *out = 0;
-    return KILN_ERR_UNAVAILABLE;
-}
-KilnResult client_remove(KilnHandle) { return KILN_ERR_NOT_FOUND; }
-
 const Registry* registry() {
     std::lock_guard lock(g_registry_mu);
     return g_registry;
@@ -420,8 +425,10 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     }
     // repl.client: a Kiln client's receive side.
     if (g_side == KILN_SIDE_CLIENT) {
-        logf(KILN_LOG_INFO, "repl: client off (the receive side is not built in this version)");
-        report_off("repl.client", KILN_CAP_REASON_SERVICE_OLDER, "kiln.repl has no client receive side in this version");
+        if (client_init())
+            logf(KILN_LOG_INFO, "repl: client on (receive watches install their hooks when asked)");
+        else
+            logf(KILN_LOG_INFO, "repl: client off (%s)", row_text("repl.client", "feature repl.client is off on this build").c_str());
     } else {
         logf(KILN_LOG_INFO, "repl: client off (a game client's receive side; this is a server)");
     }

@@ -265,6 +265,7 @@ void clear_all_stats() {
 // ---- owner revoked (any thread) ----
 void KILN_CALL owner_retiring(KilnOwner owner, void*) {
     watch_owner_retiring(owner);
+    client_owner_retiring(owner);
     std::lock_guard lock(g_owners_mu);
     for (uint32_t i = 0; i < g_owner_n; ++i)
         if (g_owners[i] == owner) {

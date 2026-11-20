@@ -277,6 +277,20 @@ int main() {
     refused(KILN_ERR_UNAVAILABLE);
     CHECK(g_reports.count("repl.loopback") && g_reports["repl.loopback"].text.find("policy \"any\" and kiln.net's lab port") != std::string::npos);
 
+    // without kiln.hooks the send step is not hooked: observe is off, and every observe function says so
+    g_case = "observe off";
+    CHECK((g_table->capabilities() & (KILN_REPL_CAP_OBSERVE | KILN_REPL_CAP_CLIENT)) == 0);
+    KilnHandle wh = 99;
+    CHECK(g_table->watch(7, 5, KILN_REPL_ALL_MACHINES, KILN_REPL_SEND, [](const KilnReplWatchEvent*, void*) {}, nullptr, &wh) ==
+              KILN_ERR_UNAVAILABLE && wh == 0);
+    CHECK(g_table->watch(7, 5, KILN_REPL_ALL_MACHINES, KILN_REPL_RECEIVE, [](const KilnReplWatchEvent*, void*) {}, nullptr, &wh) ==
+          KILN_ERR_UNAVAILABLE);  // a server has no receive side
+    CHECK(g_table->capture(7, 0x81, 5, KilnStr{nullptr, 0}) == KILN_ERR_UNAVAILABLE);
+    CHECK(g_table->stats_enable(7, true) == KILN_ERR_UNAVAILABLE);
+    uint32_t rows = 9;
+    CHECK(g_table->peer_stats(nullptr, 0, &rows) == KILN_ERR_UNAVAILABLE && rows == 0);
+    CHECK(g_table->remove(0) == KILN_ERR_INVALID_ARGUMENT && g_table->remove(0x1234) == KILN_ERR_NOT_FOUND);
+
     DeleteFileA((g_dir + "\\kiln.json").c_str());
     RemoveDirectoryA(g_dir.c_str());
     std::printf("repl lab gate tests: %d checks, %d failed\n", g_checks, g_failed);
