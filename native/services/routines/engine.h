@@ -68,6 +68,8 @@ struct Runtime {
     // the window whose task the game refused last: the next decision in it takes the fallback once instead
     int32_t skip_window = kNoSkip;
     uint64_t decisions = 0;
+    // a manual command (Reset, GoTo) reached the villager in this step: Post suspends the assignment
+    bool manual = false;
 
     // this step's task changes, in order. When more than kEvents happen in one step the last slot is overwritten, so
     // the newest change is always there; `dropped` counts what was lost in between.
@@ -91,6 +93,12 @@ struct Bind {
 struct Layout {
     uint32_t ctx_dynamic, ctx_common, ctx_template, ctx_time, time_now;
     uint32_t dyn_state, dyn_previous, dyn_decision;
+    // The keep-awake prefix (S4): each write record's tracker object (the record's pointer + 0x28; the bookkeeping
+    // words MarkWritten takes sit between them), and NpcCommon's flags byte, sleep and wake hours and the bit of the
+    // game's forced sleep window.
+    uint32_t ctx_dynamic_tracker = 0, ctx_common_tracker = 0;
+    uint32_t common_flags = 0, common_sleep = 0, common_wake = 0;
+    uint8_t sleep_override_bit = 0;
 };
 
 // The game. *_next: the rest of the hook chain and then the game's function (what a hook calls to go on).
@@ -104,10 +112,19 @@ struct Game {
     void (*set_state)(void* ctx, uint8_t state);
     bool (*finish_state)(void* ctx, uint8_t condition);
     bool (*sleep_check)(void* ctx);
+    // S4: the rest of the chain on SleepCheck, and the game's MarkWritten (a write tracker object and the record's
+    // bookkeeping words, copied as they are).
+    bool (*sleep_check_next)(void* ctx) = nullptr;
+    void (*mark_written)(void* tracker, uint64_t a, uint64_t b, uint64_t c, uint16_t d, uint8_t e) = nullptr;
+    void (*commands_next)(void* ctx) = nullptr;  // S5: the rest of the chain on ProcessCommands
 };
 
 struct Stats {
     std::atomic<uint64_t> workers{0}, owned{0}, stale{0}, decisions{0}, passed{0}, nested{0}, paused{0};
+    // SleepCheck: calls seen, calls answered by the keep-awake prefix, second calls inside one decision answered from
+    // the first, MarkWritten calls the prefix made
+    std::atomic<uint64_t> sleep_checks{0}, kept_awake{0}, sleep_repeats{0}, marks{0};
+    std::atomic<uint64_t> commands{0}, manual{0};  // ProcessCommands calls; manual commands that suspended a routine
 };
 
 class Engine {
@@ -127,6 +144,8 @@ public:
     void on_decide(void* ctx, uint8_t phase);
     void on_set_state(void* ctx, uint8_t state);
     bool on_finish_state(void* ctx, uint8_t condition);
+    bool on_sleep_check(void* ctx);
+    void on_commands(void* ctx);
 
     // The invocation serial given last (tick thread reads it for tests).
     uint64_t invocations() const noexcept { return invocations_.load(std::memory_order_relaxed); }
@@ -142,6 +161,8 @@ private:
     void choose(void* ctx, uint8_t phase, const Bind& slot);
     void enter(void* ctx, uint8_t phase, const Bind& slot, int32_t window, Kind kind);
     uint8_t state_of(void* ctx) const noexcept;
+    void keep_awake(void* ctx);
+    void mark(void* ctx, uint32_t record, uint32_t tracker);
 
     std::atomic<const Snapshot*> live_{nullptr};
     // Lists a worker may still have loaded when the next one is published are never freed at once: the last two wait.

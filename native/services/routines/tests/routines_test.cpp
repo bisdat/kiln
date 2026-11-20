@@ -233,6 +233,10 @@ struct Villager {
     std::vector<std::thread::id> threads;
     int vanilla = 0, vanilla_phase2 = 0;
     bool sleep_allowed = false;
+    bool vanilla_checks_sleep = false;  // the game's chooser asks its sleep check first (as the real one does)
+    uint8_t common_moved[1688] = {};    // where a write tracker moves NpcCommon to (copy on write), when the test asks
+    bool move_common_on_mark = false;
+    uint8_t command_state = 0;  // the game's ProcessCommands takes a command: 1 Start (a Reset), 7 Roam (a GoTo); 0 none
     uint8_t vanilla_previous_seen = 0xff, previous_at_first_decision = 0xff;
     // what the game's own code does inside the worker this step
     void (*script)(Villager&) = nullptr;
@@ -246,6 +250,17 @@ struct Villager {
         put(0x300, common);
         put(0x450, tmpl);
         put(0x148, time);
+        // the write records' bookkeeping words (opaque to the hooks: copied to MarkWritten as they are)
+        for (uint32_t base : {0x1b0u, 0x300u}) {
+            const uint64_t a = base + 1, b = base + 2, c = base + 3;
+            const uint16_t d = static_cast<uint16_t>(base + 4);
+            const uint8_t e = static_cast<uint8_t>(base + 5);
+            std::memcpy(ctx + base + 8, &a, 8);
+            std::memcpy(ctx + base + 16, &b, 8);
+            std::memcpy(ctx + base + 24, &c, 8);
+            std::memcpy(ctx + base + 32, &d, 2);
+            std::memcpy(ctx + base + 34, &e, 1);
+        }
         std::memcpy(tmpl, &npc_id, 4);
         state() = native::DecideTask;
         previous() = native::DecideTask;
@@ -255,6 +270,18 @@ struct Villager {
     uint8_t& previous() { return dyn[1]; }
     uint8_t& decision() { return dyn[2]; }
     uint8_t& failures() { return common[0x68e]; }
+    uint8_t* common_now() { uint8_t* p; std::memcpy(&p, ctx + 0x300, sizeof p); return p; }
+    // the job's write trackers: a non-null object makes the hooks call MarkWritten for that record
+    void trackers(bool on) {
+        void* t1 = on ? static_cast<void*>(&dyn[0]) : nullptr;
+        void* t2 = on ? static_cast<void*>(&common[0]) : nullptr;
+        put(0x1b0 + 0x28, t1);
+        put(0x300 + 0x28, t2);
+    }
+    void hours(float sleep, float wake) {
+        std::memcpy(common_now() + 0x50, &sleep, 4);
+        std::memcpy(common_now() + 0x54, &wake, 4);
+    }
     void now(int hour, int minute = 0) {
         const int64_t ns = (hour * 60LL + minute) * kNsPerMinute;
         std::memcpy(time + 0x48, &ns, 8);
@@ -296,6 +323,7 @@ void game_decide(void* ctx, uint8_t phase) {
     ++v.vanilla;
     v.calls.push_back({'V', phase});
     v.vanilla_previous_seen = v.previous();
+    if (v.vanilla_checks_sleep && g_engine->game.sleep_check(ctx)) return;  // it already took FindBed
     // the game's own choice, here always Idle
     g_engine->game.set_decision(ctx, native::WantsIdle);
     g_engine->game.set_state(ctx, native::Idle);
@@ -338,6 +366,38 @@ bool game_sleep_check(void* ctx) {
 // The entries: a call of the game's function goes through the service's own link first.
 void entry_set_state(void* ctx, uint8_t state) { g_engine->on_set_state(ctx, state); }
 bool entry_finish_state(void* ctx, uint8_t condition) { return g_engine->on_finish_state(ctx, condition); }
+bool entry_sleep_check(void* ctx) { return g_engine->on_sleep_check(ctx); }
+void game_commands(void* ctx) {
+    Villager& v = Villager::of(ctx);
+    v.calls.push_back({'C', v.command_state});
+    if (v.command_state) g_engine->game.set_state(ctx, v.command_state);
+}
+void entry_commands(void* ctx) { g_engine->on_commands(ctx); }
+
+// MarkWritten: what each call got. The tracker names the record (the stub's trackers are the records' first bytes).
+struct Mark {
+    char record;  // 'd' DynamicActiveNpcState, 'c' NpcCommon
+    uint64_t a, b, c;
+    uint16_t d;
+    uint8_t e;
+};
+thread_local std::vector<Mark> t_marks;
+thread_local Villager* t_marked = nullptr;  // the villager whose trackers these are (for the copy-on-write move)
+void game_mark_written(void* tracker, uint64_t a, uint64_t b, uint64_t c, uint16_t d, uint8_t e) {
+    Villager& v = *t_marked;
+    const char record = tracker == &v.dyn[0] ? 'd' : tracker == &v.common[0] ? 'c' : '?';
+    t_marks.push_back({record, a, b, c, d, e});
+    // a tracker may give the record new storage: the copy is the record from now on
+    if (record == 'c' && v.move_common_on_mark && v.common_now() == v.common) {
+        std::memcpy(v.common_moved, v.common, sizeof v.common);
+        v.put(0x300, v.common_moved);
+    }
+}
+std::string marks_seen() {
+    std::string s;
+    for (const Mark& m : t_marks) s += m.record;
+    return s;
+}
 
 struct World {
     Engine engine;
@@ -346,9 +406,10 @@ struct World {
     uint64_t step = 0;
 
     World() {
-        engine.layout = Layout{0x1b0, 0x300, 0x450, 0x148, 0x48, 0, 1, 2};
-        engine.game = Game{&game_worker, &game_decide, &game_set_state, &game_finish_state, &game_set_decision, &entry_set_state,
-                           &entry_finish_state, &game_sleep_check};
+        engine.layout = Layout{0x1b0, 0x300, 0x450, 0x148, 0x48, 0, 1, 2, 0x1d8, 0x328, 0, 0x50, 0x54, 0x10};
+        engine.game = Game{&game_worker,        &game_decide,       &game_set_state,   &game_finish_state, &game_set_decision,
+                           &entry_set_state,    &entry_finish_state, &entry_sleep_check, &game_sleep_check,  &game_mark_written,
+                           &game_commands};
         g_engine = &engine;
     }
     Runtime& bind(Villager& v, const std::string& plan, bool active = true, uintptr_t dynamic = 1) {
@@ -361,11 +422,13 @@ struct World {
     void pre() { engine.publish(binds, ++step); }
     // one worker update: the dispatch of the villager's state with `phase`
     void update(Villager& v, uint8_t phase = native::PhaseUpdate) {
+        t_marked = &v;
         v.script_phase = phase;
         v.script = [](Villager& x) { dispatch(x, x.script_phase); };
         engine.on_worker(v.ctx);
     }
     void run(Villager& v, void (*script)(Villager&)) {
+        t_marked = &v;
         v.script = script;
         engine.on_worker(v.ctx);
     }
@@ -761,6 +824,290 @@ void test_threads() {
                 static_cast<unsigned long long>(decisions));
 }
 
+
+// ------------------------------------------------------------------------------- S4: SleepCheck and keep-awake ----
+
+// The interrupt pass before a state's update asks the sleep check; what it answered is kept here.
+thread_local int t_answer = -1;
+void interrupt_pass(Villager& x) { t_answer = g_engine->game.sleep_check(x.ctx) ? 1 : 0; }
+int count(const std::vector<Call>& c, char what) {
+    int n = 0;
+    for (const Call& k : c) n += k.what == what;
+    return n;
+}
+
+void test_sleep_check_runs_once_per_decision() {
+    // The S3 defect: a Sleep the game does not allow, then a vanilla fallback whose chooser asks the sleep check again
+    // (exit and enter handlers behind a yes would run twice). The game's check runs once; the second call hears "no".
+    World w;
+    Villager v(7);
+    v.vanilla_checks_sleep = true;
+    Runtime& rt = w.bind(v, wire("m:day", Kind::Vanilla, {all_day(Kind::Sleep)}));
+    w.pre();
+    w.update(v);
+    CHECK_EQ(count(v.calls, 'Z'), 1);
+    CHECK(v.calls == calls({{'Z', 0}, {'V', 1}, {'D', native::WantsIdle}, {'S', native::Idle}}));
+    CHECK_EQ(w.engine.stats.sleep_repeats.load(), 1u);
+    CHECK(rt.task == Kind::Vanilla && rt.window == -1 && v.state() == native::Idle);
+    CHECK(events(rt) == (std::vector<Seen>{{TaskState::None, TaskState::Chosen, Reason::None, Kind::Sleep},
+                                            {TaskState::Chosen, TaskState::Refused, Reason::SleepNotAllowed, Kind::Sleep},
+                                            {TaskState::None, TaskState::Chosen, Reason::None, Kind::Vanilla},
+                                            {TaskState::Chosen, TaskState::Started, Reason::None, Kind::Vanilla}}));
+    // the next decision asks afresh: now the game allows it, once, and its own check took FindBed
+    v.state() = native::DecideTask;
+    v.calls.clear();
+    v.sleep_allowed = true;
+    w.update(v);
+    CHECK(v.calls == calls({{'Z', 0}, {'D', native::WantsSleep}, {'S', native::FindBed}}));
+    CHECK(rt.task == Kind::Sleep && rt.state == TaskState::Started);
+    // a window whose task is the game's own choice: its chooser asks once, as without Kiln
+    World x;
+    Villager y(8);
+    y.vanilla_checks_sleep = true;
+    y.sleep_allowed = true;
+    x.bind(y, wire("m:day", Kind::Idle, {all_day(Kind::Vanilla)}));
+    x.pre();
+    x.update(y);
+    CHECK(y.calls == calls({{'V', 1}, {'Z', 0}, {'D', native::WantsSleep}, {'S', native::FindBed}}));
+    CHECK_EQ(x.engine.stats.sleep_repeats.load(), 0u);
+}
+
+void test_sleep_check_is_the_games_where_it_should_be() {
+    // not owned, suspended, not decided yet, the game's own choice, Sleep: the game's check, exactly once, nothing else
+    struct Case {
+        const char* name;
+        Kind window;
+        bool active, bound, decide;
+    };
+    const Case cases[] = {{"unowned", Kind::Idle, true, false, false},  {"suspended", Kind::Idle, false, true, true},
+                          {"not decided", Kind::Idle, true, true, false}, {"vanilla", Kind::Vanilla, true, true, true},
+                          {"sleep", Kind::Sleep, true, true, true}};
+    for (const Case& c : cases) {
+        World w;
+        Villager v(7);
+        v.trackers(true);
+        v.sleep_allowed = c.window == Kind::Sleep;  // the Sleep task's decision took FindBed
+        if (c.bound) w.bind(v, wire("m:day", Kind::Idle, {all_day(c.window)}), c.active);
+        w.pre();
+        if (c.decide) w.update(v);
+        v.calls.clear();
+        t_marks.clear();
+        v.sleep_allowed = false;
+        w.run(v, &interrupt_pass);
+        if (count(v.calls, 'Z') != 1 || !t_marks.empty() || t_answer != 0) {
+            ++g_fail;
+            std::printf("FAIL sleep check for %s: %d game checks, marks \"%s\"\n", c.name, count(v.calls, 'Z'), marks_seen().c_str());
+        } else ++g_pass;
+    }
+    // and when the game says yes there, it puts the villager to bed itself, as without Kiln
+    World w;
+    Villager v(7);
+    w.bind(v, wire("m:day", Kind::Idle, {all_day(Kind::Vanilla)}));
+    w.pre();
+    w.update(v);
+    v.calls.clear();
+    v.sleep_allowed = true;
+    w.run(v, &interrupt_pass);
+    CHECK(t_answer == 1 && v.calls == calls({{'Z', 0}, {'D', native::WantsSleep}, {'S', native::FindBed}}));
+}
+
+// A villager whose plan has it Idle at night, with the game's sleep check wanting it in bed.
+struct Awake {
+    World w;
+    Villager v{7};
+    Runtime* rt = nullptr;
+    Awake(Kind task = Kind::Idle) {
+        rt = &w.bind(v, wire("m:day", Kind::Idle, {all_day(task)}));
+        w.pre();
+        w.update(v);
+        events(*rt);
+        v.sleep_allowed = true;
+        v.trackers(true);
+        v.hours(21.0f, 6.0f);
+        v.now(23);
+        v.failures() = 42;
+        v.calls.clear();
+        t_marks.clear();
+    }
+    void pass() {
+        t_marks.clear();
+        v.calls.clear();
+        w.run(v, &interrupt_pass);
+    }
+};
+
+void test_keep_awake_prefix() {
+    for (Kind task : {Kind::Idle, Kind::Roam, Kind::Sit, Kind::Inspect}) {
+        Awake a(task);
+        const uint8_t state = a.v.state(), previous = a.v.previous(), decision = a.v.decision();
+        a.v.state() = native::Idle;  // where the interrupt pass finds it (Sit and Inspect start in FindTarget)
+        a.pass();
+        CHECK_EQ(t_answer, 0);
+        CHECK(a.v.calls.empty());  // neither the game's check nor a setter
+        CHECK(marks_seen() == "dcc");
+        CHECK(a.v.state() == native::Idle && a.v.previous() == previous && a.v.decision() == decision && a.v.failures() == 42);
+        CHECK_EQ(a.rt->n_events, 0u);
+        (void)state;
+    }
+    // MarkWritten gets each record's tracker and its bookkeeping words as they are
+    Awake a;
+    a.pass();
+    CHECK(t_marks.size() == 3 && t_marks[0].a == 0x1b1 && t_marks[0].b == 0x1b2 && t_marks[0].c == 0x1b3 && t_marks[0].d == 0x1b4 &&
+          t_marks[0].e == 0xb5 && t_marks[1].a == 0x301 && t_marks[2].c == 0x303 && t_marks[2].d == 0x304 && t_marks[2].e == 0x05);
+    CHECK_EQ(a.w.engine.stats.kept_awake.load(), 1u);
+    CHECK_EQ(a.w.engine.stats.marks.load(), 3u);
+}
+
+void test_keep_awake_forced_window_flag() {
+    // the game's forced sleep window (flag 0x10 in NpcCommon's first byte) goes once now is past the wake hour
+    struct Case {
+        int hour, minute;
+        bool cleared;
+        const char* marks;
+    };
+    const Case cases[] = {{5, 59, false, "dcccc"}, {6, 0, false, "dcccc"}, {6, 1, true, "dccccc"}, {12, 0, true, "dccccc"}};
+    for (const Case& c : cases) {
+        Awake a;
+        a.v.common[0] = 0x10 | 0x01;
+        a.v.now(c.hour, c.minute);
+        a.pass();
+        CHECK_EQ(t_answer, 0);
+        if (marks_seen() != c.marks || (a.v.common[0] == 0x01) != c.cleared || !(a.v.common[0] & 0x01)) {
+            ++g_fail;
+            std::printf("FAIL forced window at %02d:%02d: marks \"%s\", flags 0x%02x\n", c.hour, c.minute, marks_seen().c_str(), a.v.common[0]);
+        } else ++g_pass;
+        CHECK(a.v.calls.empty() && a.v.failures() == 42 && a.v.state() == native::Idle && a.v.decision() == native::WantsIdle);
+    }
+    // the flag and the wake hour are read again after the marks: with a record the tracker moved, the write goes to the
+    // record's new storage and the old copy is left alone
+    Awake m;
+    m.v.common[0] = 0x10;
+    m.v.move_common_on_mark = true;
+    m.v.now(7);
+    m.pass();
+    CHECK(m.v.common_now() == m.v.common_moved);
+    CHECK_EQ(m.v.common_moved[0], 0);
+    CHECK_EQ(m.v.common[0], 0x10);
+    // no tracker in this job: no MarkWritten call, the same write
+    Awake n;
+    n.v.trackers(false);
+    n.v.common[0] = 0x10;
+    n.v.now(7);
+    n.pass();
+    CHECK(t_marks.empty() && n.v.common[0] == 0 && t_answer == 0);
+    CHECK_EQ(n.w.engine.stats.marks.load(), 0u);
+}
+
+void test_keep_awake_every_state() {
+    // all 18 states, with a decision of Idle and of Sleep, a forced window that has run out and trackers on
+    for (uint8_t s = 0; s < native::StateCount; ++s)
+        for (uint8_t decision : {uint8_t{native::WantsIdle}, uint8_t{native::WantsSleep}}) {
+            Awake a;
+            a.v.common[0] = 0x10;
+            a.v.now(7);
+            a.v.state() = s;
+            a.v.decision() = decision;
+            a.pass();
+            const bool go_to = s == native::GoToTarget;
+            const bool full = s == native::Idle || s == native::DecideTask || s == native::Roam || (go_to && decision != native::WantsSleep);
+            // GoToTarget marks the dynamic record a second time before it reads the decision
+            const std::string want = std::string(go_to ? "dd" : "d") + (full ? "ccccc" : "");
+            if (marks_seen() != want || a.v.common[0] != (full ? 0 : 0x10) || t_answer != 0 || !a.v.calls.empty() || a.v.state() != s ||
+                a.v.decision() != decision || a.v.failures() != 42) {
+                ++g_fail;
+                std::printf("FAIL keep-awake in state %u decision %u: marks \"%s\" (want \"%s\"), flags 0x%02x, answer %d\n", s, decision,
+                            marks_seen().c_str(), want.c_str(), a.v.common[0], t_answer);
+            } else ++g_pass;
+        }
+}
+
+void test_keep_awake_until_the_next_decision() {
+    // a Sleep window that begins while an Idle of the plan runs: no bed until the idle is over, then the game's own
+    // check at the decision, once
+    World w;
+    Villager v(7);
+    w.bind(v, wire("m:day", Kind::Idle, {Window{360, 1320, false, 0, Kind::Idle}, Window{1320, 360, false, 0, Kind::Sleep}}));
+    w.pre();
+    v.now(21, 59);
+    w.update(v);
+    CHECK(v.state() == native::Idle);
+    v.sleep_allowed = true;
+    v.now(22, 0);
+    v.calls.clear();
+    w.run(v, &interrupt_pass);
+    CHECK(t_answer == 0 && v.calls.empty() && v.state() == native::Idle);
+    w.run(v, [](Villager& x) { g_engine->game.finish_state(x.ctx, 0); });  // the idle is over
+    w.run(v, [](Villager& x) { g_engine->game.finish_state(x.ctx, 0); });  // FinishTask -> DecideTask: the plan decides
+    CHECK_EQ(count(v.calls, 'Z'), 1);
+    CHECK(v.state() == native::FindBed && v.decision() == native::WantsSleep);
+    // in bed the plan's task is Sleep: the interrupt pass is the game's again
+    v.calls.clear();
+    w.run(v, &interrupt_pass);
+    CHECK_EQ(count(v.calls, 'Z'), 1);
+}
+
+// ------------------------------------------------------------------------------------ S5: manual commands, restore ----
+
+void test_manual_command_suspends() {
+    World w;
+    Villager v(7);
+    Runtime& rt = w.bind(v, wire("m:day", Kind::Idle, {all_day(Kind::Roam)}));
+    w.pre();
+    w.update(v);
+    events(rt);
+    // a Reset (state Start) while the plan's Roam runs: suspended at once; the chooser in the same call is the game's
+    v.command_state = 1;
+    v.calls.clear();
+    w.run(v, [](Villager& x) {
+        entry_commands(x.ctx);
+        x.state() = native::DecideTask;  // the game's Start hands over to DecideTask (as far as this test needs)
+        dispatch(x, native::PhaseUpdate);
+    });
+    CHECK(rt.manual);
+    CHECK_EQ(v.vanilla, 1);
+    CHECK(events(rt) == (std::vector<Seen>{{TaskState::Started, TaskState::Suspended, Reason::ManualSuspended, Kind::Roam}}));
+    CHECK_EQ(w.engine.stats.manual.load(), 1u);
+    // a GoTo (Roam, the state it may already be in) counts too; a SetState outside ProcessCommands does not
+    World x;
+    Villager y(8);
+    Runtime& r = x.bind(y, wire("m:day", Kind::Idle, {all_day(Kind::Roam)}));
+    x.pre();
+    x.update(y);
+    y.command_state = native::Roam;
+    x.run(y, [](Villager& z) { entry_commands(z.ctx); });
+    CHECK(r.manual);
+    World n;
+    Villager m(9);
+    Runtime& q = n.bind(m, wire("m:day", Kind::Idle, {all_day(Kind::Roam)}));
+    n.pre();
+    n.update(m);
+    n.run(m, [](Villager& z) { g_engine->game.set_state(z.ctx, native::AvoidWater); });
+    m.command_state = 0;
+    n.run(m, [](Villager& z) { entry_commands(z.ctx); });  // no command for it: nothing
+    CHECK(!q.manual);
+    // a villager without a routine, and a suspended one: the command is the game's business only
+    World u;
+    Villager free_one(10), held(11);
+    Runtime& h = u.bind(held, wire("m:day", Kind::Idle), false);
+    u.pre();
+    free_one.command_state = 1;
+    held.command_state = 1;
+    u.run(free_one, [](Villager& z) { entry_commands(z.ctx); });
+    u.run(held, [](Villager& z) { entry_commands(z.ctx); });
+    CHECK(!h.manual && u.engine.stats.manual.load() == 0);
+    CHECK(free_one.state() == 1 && held.state() == 1);
+}
+
+void test_sleep_check_after_a_command_is_the_games() {
+    Awake a;
+    a.v.command_state = 1;
+    a.w.run(a.v, [](Villager& x) { entry_commands(x.ctx); });
+    a.v.state() = native::Idle;
+    a.pass();
+    CHECK_EQ(count(a.v.calls, 'Z'), 1);
+    CHECK(t_marks.empty());
+}
+
 }  // namespace
 
 void test_state();  // state_test part, below
@@ -785,6 +1132,14 @@ int main(int argc, char** argv) {
     test_sleep();
     test_task_tracking();
     test_event_overflow_keeps_the_newest();
+    test_sleep_check_runs_once_per_decision();
+    test_sleep_check_is_the_games_where_it_should_be();
+    test_keep_awake_prefix();
+    test_keep_awake_forced_window_flag();
+    test_keep_awake_every_state();
+    test_keep_awake_until_the_next_decision();
+    test_manual_command_suspends();
+    test_sleep_check_after_a_command_is_the_games();
     test_threads();
     test_state();
     std::printf("kiln.routines: %d passed, %d failed\n", g_pass, g_fail);
@@ -1082,6 +1437,93 @@ void test_replace_closes_the_running_task() {
     CHECK(v.state() == native::Idle && has(s.events.back(), "\"key\":\"a:night\""));
 }
 
+
+void test_manual_suspension_in_the_book() {
+    Service s;
+    s.assign(1, 7, wire("a:day", Kind::Idle, {all_day(Kind::Roam)}));
+    Villager v(7);
+    s.where[7] = v.dynamic();
+    s.pre();
+    s.world.update(v);
+    s.post();
+    const size_t events = s.events.size();
+    v.command_state = 1;
+    s.pre();
+    s.world.run(v, [](Villager& x) { entry_commands(x.ctx); });
+    s.post();
+    // the assignment first, at a new revision; then the task the command ended
+    CHECK_EQ(s.events.size(), events + 2);
+    CHECK(has(s.events[events], "\"type\":\"assignment\"") && has(s.events[events], "\"reason\":\"ManualSuspended\"") &&
+          has(s.events[events], "\"after\":{\"npcId\":7") && has(s.events[events], "\"assignment\":\"ManualSuspended\"") &&
+          has(s.events[events], "\"revision\":2"));
+    CHECK(has(s.events[events + 1], "\"to\":\"Suspended\",\"reason\":\"ManualSuspended\""));
+    CHECK(has(s.inspect(7), "\"assignment\":\"ManualSuspended\"") && has(s.inspect(7), "\"lastReason\":\"ManualCommand\""));
+    // later commands while suspended: no new revision, no event
+    s.pre();
+    s.world.run(v, [](Villager& x) { entry_commands(x.ctx); });
+    s.post();
+    CHECK_EQ(s.events.size(), events + 2);
+    CHECK_EQ(s.book.revision(), 2u);
+    // the game decides while suspended
+    v.command_state = 0;
+    v.state() = native::DecideTask;
+    s.pre();
+    s.world.update(v);
+    s.post();
+    CHECK_EQ(v.vanilla, 1);
+    // the owner resumes: the plan decides at the next decision
+    uint64_t t = 0;
+    CHECK_EQ(s.book.resume(1, 7, &done, nullptr, &t), KILN_OK);
+    s.tick();
+    CHECK(has(s.events.back(), "\"reason\":\"Resumed\"") && has(s.inspect(7), "\"assignment\":\"Assigned\""));
+    v.state() = native::DecideTask;
+    s.pre();
+    s.world.update(v);
+    s.post();
+    CHECK(v.state() == native::Roam && v.vanilla == 1);
+}
+
+void test_restore() {
+    Service s;
+    const std::string day = wire("a:day", Kind::Idle, {all_day(Kind::Roam)});
+    uint64_t t = 0;
+    std::string problem;
+    CHECK_EQ(s.book.restore(1, 7, day, 0, false, "", &done, nullptr, &t, &problem), KILN_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(s.book.restore(1, 7, wire("b:day", Kind::Idle), 3, false, "", &done, nullptr, &t), KILN_OK);  // binds owner 1 to b
+    CHECK_EQ(s.book.restore(1, 8, day, 3, false, "", &done, nullptr, &t, &problem), KILN_ERR_INVALID_ARGUMENT);  // a's plan, b's owner
+    Service r;
+    // a plain rebind: the saved revision, the saved suspension, no event
+    uint64_t t1 = 0, t2 = 0;
+    CHECK_EQ(r.book.restore(1, 7, day, 5, true, "", &done, nullptr, &t1), KILN_OK);
+    CHECK_EQ(r.book.restore(1, 8, wire("a:day", Kind::Idle, {}, 2), 9, false, "Migrated", &done, nullptr, &t2), KILN_OK);
+    r.tick();
+    CHECK(is(r.completions[0], t1, true, KILN_ROUTINE_OK, "", 7, 5));
+    CHECK(is(r.completions[1], t2, true, KILN_ROUTINE_OK, "", 8, 9));
+    CHECK(has(r.inspect(7), "\"revision\":5") && has(r.inspect(7), "\"assignment\":\"ManualSuspended\"") &&
+          has(r.inspect(7), "\"lastReason\":\"ManualCommand\""));
+    CHECK_EQ(r.events.size(), 1u);  // only the migrated one says so
+    CHECK(has(r.events[0], "\"reason\":\"Migrated\"") && has(r.events[0], "\"before\":null") && has(r.events[0], "\"planVersion\":2"));
+    // the counter goes on above the restored revisions and the floor
+    r.book.set_revision_floor(20);
+    r.book.set_revision_floor(4);  // never down
+    uint64_t t3 = 0;
+    CHECK_EQ(r.book.resume(1, 7, &done, nullptr, &t3), KILN_OK);
+    r.tick();
+    CHECK(is(r.completions[2], t3, true, KILN_ROUTINE_OK, "", 7, 21));
+    // a villager that already has a routine keeps it (the owner assigned before world-ready): ok, nothing changes
+    uint64_t t4 = 0;
+    CHECK_EQ(r.book.restore(1, 7, wire("a:day", Kind::Idle), 2, false, "", &done, nullptr, &t4), KILN_OK);
+    r.tick();
+    CHECK(is(r.completions[3], t4, true, KILN_ROUTINE_OK, "", 7, 21));
+    CHECK(has(r.inspect(7), "\"key\":\"a:day\"") && has(r.inspect(7), "\"revision\":21"));
+    // and the hooks run the restored plan
+    Villager v(8);
+    r.where[8] = v.dynamic();
+    r.pre();
+    r.world.update(v);
+    r.post();
+    CHECK(v.state() == native::Idle && v.vanilla == 0);
+}
 }  // namespace
 
 void test_state() {
@@ -1092,4 +1534,6 @@ void test_state() {
     test_revoke();
     test_world_stop();
     test_replace_closes_the_running_task();
+    test_manual_suspension_in_the_book();
+    test_restore();
 }

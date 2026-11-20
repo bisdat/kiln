@@ -9,8 +9,9 @@
  * Managed face: Kiln.Blocks (Routines, RoutineBlock). Docs: docs/kiln/services/routines.md.
  *
  * Capability: the sigdb feature routines.decisions (the worker, the chooser, the setters and the context offsets
- * resolved on this build). It is held by the client gate until its game test (native/core/gates/): while it is held,
- * or off, no hook is installed and assign / remove / resume answer KILN_ERR_UNAVAILABLE.
+ * resolved on this build; since 0.2.0-dev.31 also SleepCheck's keep-awake prefix and MarkWritten). Nothing holds it
+ * (its game test, 16g-cc16g, is a guided check, not a gate). While it is off no hook is installed and assign / remove /
+ * resume answer KILN_ERR_UNAVAILABLE.
  *
  * The plan (assign's plan_json) is exact UTF-8 JSON, format 1:
  *   {"format":1,"key":"<mod>:<name>","planVersion":1,"contentHash":"<sha256 hex>",
@@ -59,6 +60,12 @@
  * running task one with to "Suspended" and the reason "WorldStopped"; then the service forgets the world's assignments
  * (they are the caller's to keep and to assign again in the next world).
  *
+ * Manual commands (since 0.2.0-dev.31): a Reset or GoTo command the game's villager worker takes for an assigned,
+ * active villager (from any source: Kiln's Villager.GoTo/Teleport/Stay/Follow, a native plugin, another loader)
+ * suspends its routine: the task in progress ends "Suspended" with the reason "ManualSuspended", and on that step's
+ * Post the assignment becomes "ManualSuspended" at a new revision (event reason "ManualSuspended"). The game decides
+ * for it until the owner's resume. A command the game ignores suspends nothing.
+ *
  * Threads: assign, remove, resume, inspect, subscribe_events and unsubscribe_events on the tick thread
  * (KILN_ERR_WRONG_THREAD otherwise); revoke_owner on any thread (it takes effect at the next Pre).
  * The table grows at its end only; check header.size before a member added later.
@@ -86,6 +93,9 @@ enum {
     KILN_ROUTINE_REVOKED = 3,       /* "Revoked" */
     KILN_ROUTINE_NOT_ASSIGNED = 4,  /* "NotAssigned": resume of a villager without a routine */
 };
+
+/* restore's flags (since 0.2.0-dev.31) */
+#define KILN_ROUTINE_RESTORE_SUSPENDED 1u /* the saved assignment was suspended by a manual command */
 
 typedef struct KilnRoutineResult {
     uint32_t size; /* sizeof(KilnRoutineResult) of the service */
@@ -125,7 +135,28 @@ typedef struct KilnRoutinesApi {
      * subscription goes with `owner`, or with unsubscribe_events. */
     KilnResult(KILN_CALL* subscribe_events)(KilnOwner owner, KilnRoutineEventFn fn, void* user, KilnHandle* out);
     KilnResult(KILN_CALL* unsubscribe_events)(KilnHandle handle);
+
+    /* ---- since 0.2.0-dev.31 (check header.size) ---- */
+
+    /* Framework only (Kiln.Blocks, when a world is ready after a restart): queues "bind this saved assignment again"
+     * at the saved revision, not a new one, with the saved manual suspension (flags). An empty reason: a plain rebind,
+     * no event; a reason (e.g. "Migrated", the caller gave a new revision): an assignment event with that reason.
+     * Refused with OwnedBy like assign when another mod's routine holds the villager. The world's revision counter is
+     * raised to at least the revision. Same threads and errors as assign; revision 0 is KILN_ERR_INVALID_ARGUMENT. */
+    KilnResult(KILN_CALL* restore)(KilnOwner owner, uint32_t npc_id, KilnStr plan_json, uint64_t revision, uint32_t flags,
+                                   KilnStr reason, KilnRoutineDone done, void* user, uint64_t* ticket);
+    /* Framework only: the next revision the world gives is above floor (the highest revision a saved world ever
+     * gave, also of assignments since removed). Tick thread; KILN_ERR_UNAVAILABLE when no world runs. */
+    KilnResult(KILN_CALL* set_revision_floor)(uint64_t floor);
 } KilnRoutinesApi;
+
+#if defined(__cplusplus) && (defined(_WIN64) || defined(__x86_64__) || defined(__aarch64__))
+static_assert(sizeof(KilnRoutineResult) == 48, "KilnRoutineResult");
+static_assert(offsetof(KilnRoutinesApi, assign) == sizeof(KilnServiceHeader), "kiln.routines v1 starts after the header");
+static_assert(offsetof(KilnRoutinesApi, unsubscribe_events) == sizeof(KilnServiceHeader) + 6 * sizeof(void*), "kiln.routines v1");
+static_assert(offsetof(KilnRoutinesApi, restore) == sizeof(KilnServiceHeader) + 7 * sizeof(void*), "kiln.routines dev.31 tail");
+static_assert(sizeof(KilnRoutinesApi) == sizeof(KilnServiceHeader) + 9 * sizeof(void*), "kiln.routines dev.31 tail");
+#endif
 
 #ifdef __cplusplus
 }

@@ -41,13 +41,19 @@ public:
                       uint64_t* ticket, std::string* problem = nullptr);
     KilnResult remove(KilnOwner owner, uint32_t npc_id, KilnRoutineDone done, void* user, uint64_t* ticket);
     KilnResult resume(KilnOwner owner, uint32_t npc_id, KilnRoutineDone done, void* user, uint64_t* ticket);
+    // since dev.31: a saved assignment bound again at its saved revision (Kiln.Blocks at world-ready), and the floor of
+    // the world's revisions
+    KilnResult restore(KilnOwner owner, uint32_t npc_id, std::string_view plan_json, uint64_t revision, bool suspended,
+                       std::string_view reason, KilnRoutineDone done, void* user, uint64_t* ticket, std::string* problem = nullptr);
+    void set_revision_floor(uint64_t floor) { if (floor > revision_) revision_ = floor; }
     bool inspect(uint32_t npc_id, std::string& json) const;
     void revoke_owner(KilnOwner owner);  // any thread
 
     // ---- the step (tick thread) ----
     // Pre: revoked owners go, the queue commits in order, and the hooks get this step's list of villagers.
     void pre(uint64_t step, const Resolver& where);
-    // Post: what the workers reported becomes task events. Then take_completions() and take_events().
+    // Post: what the workers reported becomes task events, and a manual command a worker saw suspends the routine.
+    // Then take_completions() and take_events().
     void post();
     // The world stops: what is queued completes with WorldStopped, every assignment says goodbye with teardown events,
     // and nothing of the world is kept.
@@ -62,7 +68,7 @@ public:
     uint64_t dropped_task_events() const { return dropped_; }
 
 private:
-    enum class Op : uint8_t { Assign, Remove, Resume };
+    enum class Op : uint8_t { Assign, Remove, Resume, Restore };
     struct Change {
         uint64_t ticket;
         Op op;
@@ -71,6 +77,10 @@ private:
         std::shared_ptr<const Plan> plan;
         KilnRoutineDone done;
         void* user;
+        // Restore only
+        uint64_t revision = 0;
+        bool suspended = false;
+        std::string reason;
     };
     struct Assignment {
         KilnOwner owner = 0;
@@ -83,8 +93,7 @@ private:
     };
 
     KilnResult enqueue(Op op, KilnOwner owner, uint32_t npc_id, std::shared_ptr<const Plan> plan, KilnRoutineDone done, void* user,
-                       uint64_t* ticket);
-    void complete(const Change& c, bool ok, uint32_t code, std::string reason, uint64_t revision);
+                       uint64_t* ticket);    void complete(const Change& c, bool ok, uint32_t code, std::string reason, uint64_t revision);
     std::string snapshot(uint32_t npc_id, const Assignment& a, const char* state_override = nullptr) const;
     void assignment_event(const std::string& before, const std::string& after, std::string_view reason, bool teardown);
     void task_event(uint32_t npc_id, const Assignment& a, const TaskEvent& e, bool teardown);

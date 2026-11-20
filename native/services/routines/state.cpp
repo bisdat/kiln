@@ -31,7 +31,7 @@ KilnResult Book::enqueue(Op op, KilnOwner owner, uint32_t npc_id, std::shared_pt
     // full: refused before anything changes, so no ticket, no completion and no event
     if (queue_.size() >= KILN_ROUTINES_MAX_QUEUED) return KILN_ERR_BUFFER_TOO_SMALL;
     *ticket = ++tickets_;
-    queue_.push_back(Change{*ticket, op, owner, npc_id, std::move(plan), done, user});
+    queue_.push_back(Change{*ticket, op, owner, npc_id, std::move(plan), done, user, 0, false, {}});
     return KILN_OK;
 }
 
@@ -63,6 +63,24 @@ KilnResult Book::assign(KilnOwner owner, uint32_t npc_id, std::string_view plan_
         mod_owner_[mod] = owner;
     }
     return rc;
+}
+
+KilnResult Book::restore(KilnOwner owner, uint32_t npc_id, std::string_view plan_json, uint64_t revision, bool suspended, std::string_view reason,
+                         KilnRoutineDone done, void* user, uint64_t* ticket, std::string* problem) {
+    if (ticket) *ticket = 0;
+    if (!revision) {
+        if (problem) *problem = "a restored assignment has its saved revision (not 0)";
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    // the same checks and the same queue as assign; then the change says what the saved row said
+    const KilnResult rc = assign(owner, npc_id, plan_json, done, user, ticket, problem);
+    if (rc != KILN_OK) return rc;
+    Change& c = queue_.back();
+    c.op = Op::Restore;
+    c.revision = revision;
+    c.suspended = suspended;
+    c.reason = std::string(reason);
+    return KILN_OK;
 }
 
 KilnResult Book::remove(KilnOwner owner, uint32_t npc_id, KilnRoutineDone done, void* user, uint64_t* ticket) {
@@ -219,6 +237,30 @@ void Book::pre(uint64_t step, const Resolver& where) {
                 complete(c, true, KILN_ROUTINE_OK, "", a.revision);
                 break;
             }
+            case Op::Restore: {
+                // A saved assignment, bound again at its saved revision with its saved suspension. The service forgot
+                // the world's assignments when it stopped, so there is normally none; one made since (a mod assigned
+                // before world-ready) is the owner's newer word and stays.
+                if (it != assignments_.end()) {
+                    complete(c, true, KILN_ROUTINE_OK, "", it->second.revision);
+                    break;
+                }
+                it = assignments_.emplace(c.npc_id, Assignment{}).first;
+                Assignment& a = it->second;
+                a.owner = c.owner;
+                a.plan = std::move(c.plan);
+                a.revision = c.revision;
+                if (c.revision > revision_) revision_ = c.revision;
+                a.suspended = c.suspended;
+                if (c.suspended) {
+                    a.suspend_reason = "ManualCommand";
+                    a.runtime->last_reason = Reason::ManualSuspended;
+                }
+                a.present = where && where(c.npc_id) != 0;
+                if (!c.reason.empty()) assignment_event("", snapshot(c.npc_id, a), c.reason, false);
+                complete(c, true, KILN_ROUTINE_OK, "", a.revision);
+                break;
+            }
             case Op::Remove:
                 // nothing to remove is already as asked: ok, no revision, no event
                 if (it == assignments_.end()) complete(c, true, KILN_ROUTINE_OK, "", 0);
@@ -257,7 +299,22 @@ void Book::pre(uint64_t step, const Resolver& where) {
 }
 
 void Book::post() {
-    for (auto& [npc, a] : assignments_) drain(npc, a);
+    for (auto& [npc, a] : assignments_) {
+        Runtime& rt = *a.runtime;
+        const bool manual = rt.manual;
+        rt.manual = false;
+        if (manual && !a.suspended) {
+            // A Reset or GoTo the worker took this step: the assignment first, then the task it ended (the hook already
+            // closed it with ManualSuspended).
+            std::string before = snapshot(npc, a);
+            a.suspended = true;
+            a.suspend_reason = "ManualCommand";
+            rt.last_reason = Reason::ManualSuspended;
+            a.revision = ++revision_;
+            assignment_event(before, snapshot(npc, a), "ManualSuspended", false);
+        }
+        drain(npc, a);
+    }
 }
 
 void Book::stop() {

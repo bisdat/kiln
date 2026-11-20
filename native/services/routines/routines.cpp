@@ -8,8 +8,8 @@
 // Contract: native/core/abi/services/kiln_routines.h; docs/kiln/services/routines.md.
 //
 // The links go in with the first assignment (kiln.hooks adds links while the game runs) and stay: without a list of
-// villagers each costs one load and one branch. Nothing is installed while routines.decisions is held by the client
-// gate or off; then assign, remove and resume answer KILN_ERR_UNAVAILABLE and the game chooses alone.
+// villagers each costs one load and one branch. Nothing is installed while routines.decisions is off (or a policy
+// holds it); then assign, remove and resume answer KILN_ERR_UNAVAILABLE and the game chooses alone.
 #include <windows.h>
 
 #include <cstdarg>
@@ -62,11 +62,15 @@ bool world_runs() { return g_api->server_world && g_api->server_world() != 0; }
 
 // ------------------------------------------------------------------------------------------ what is resolved ----
 
-enum { kWorker, kDecide, kSetState, kFinishState, kSetDecision, kSleepCheck, kSymbols };
-const char* const kNames[kSymbols] = {"routines/VillagerWorker", "routines/DecideTask",  "routines/SetState",
-                                      "routines/FinishState",    "routines/SetDecision", "routines/SleepCheck"};
+enum { kWorker, kDecide, kSetState, kFinishState, kSetDecision, kSleepCheck, kCommands, kSymbols };
+const char* const kNames[kSymbols] = {"routines/VillagerWorker", "routines/DecideTask",  "routines/SetState",      "routines/FinishState",
+                                      "routines/SetDecision",    "routines/SleepCheck", "routines/ProcessCommands"};
 uintptr_t g_at[kSymbols] = {};
-kiln::RawHook g_link[4];  // kWorker .. kFinishState
+kiln::RawHook g_link[kSymbols];  // every function but SetDecision
+// MarkWritten, captured from the call in the game's SetDecision (no descriptor of its own: its arguments are the ones
+// that call passes, chapter 16g §4.1)
+constexpr const char* kMarkWritten = "routines/MarkWritten";
+uintptr_t g_mark_written = 0;
 
 // Why the service cannot serve, in words; empty: it can. Decided once at start, and again when a link or the layout
 // fails later.
@@ -97,20 +101,32 @@ void game_set_decision(void* ctx, uint8_t decision) { reinterpret_cast<void (*)(
 void game_set_state(void* ctx, uint8_t state) { reinterpret_cast<void (*)(void*, uint8_t)>(g_at[kSetState])(ctx, state); }
 bool game_finish_state(void* ctx, uint8_t condition) { return reinterpret_cast<bool (*)(void*, uint8_t)>(g_at[kFinishState])(ctx, condition); }
 bool game_sleep_check(void* ctx) { return reinterpret_cast<bool (*)(void*)>(g_at[kSleepCheck])(ctx); }
+bool next_sleep_check(void* ctx) { return g_link[kSleepCheck].original<bool (*)(void*)>()(ctx); }
+void next_commands(void* ctx) { g_link[kCommands].original<void (*)(void*)>()(ctx); }
+void game_mark_written(void* tracker, uint64_t a, uint64_t b, uint64_t c, uint16_t d, uint8_t e) {
+    reinterpret_cast<void (*)(void*, uint64_t, uint64_t, uint64_t, uint16_t, uint8_t)>(g_mark_written)(tracker, a, b, c, d, e);
+}
 
 // ---- the links ----
 void hk_worker(void* ctx) { g_engine.on_worker(ctx); }
 void hk_decide(void* ctx, uint8_t phase) { g_engine.on_decide(ctx, phase); }
 void hk_set_state(void* ctx, uint8_t state) { g_engine.on_set_state(ctx, state); }
 bool hk_finish_state(void* ctx, uint8_t condition) { return g_engine.on_finish_state(ctx, condition); }
+bool hk_sleep_check(void* ctx) { return g_engine.on_sleep_check(ctx); }
+void hk_commands(void* ctx) { g_engine.on_commands(ctx); }
 
-// Tick thread. The links of the four hooked functions, once; a failure is final.
+// Tick thread. The links of the six hooked functions, once; a failure is final.
 bool ensure_links() {
     if (g_linked) return true;
-    void* const fns[4] = {reinterpret_cast<void*>(&hk_worker), reinterpret_cast<void*>(&hk_decide), reinterpret_cast<void*>(&hk_set_state),
-                          reinterpret_cast<void*>(&hk_finish_state)};
-    // the worker last: until it is in, no context is authorized and the other three only pass through
-    for (int i : {kDecide, kSetState, kFinishState, kWorker}) {
+    void* fns[kSymbols] = {};
+    fns[kWorker] = reinterpret_cast<void*>(&hk_worker);
+    fns[kDecide] = reinterpret_cast<void*>(&hk_decide);
+    fns[kSetState] = reinterpret_cast<void*>(&hk_set_state);
+    fns[kFinishState] = reinterpret_cast<void*>(&hk_finish_state);
+    fns[kSleepCheck] = reinterpret_cast<void*>(&hk_sleep_check);
+    fns[kCommands] = reinterpret_cast<void*>(&hk_commands);
+    // the worker last: until it is in, no context is authorized and the others only pass through
+    for (int i : {kDecide, kSetState, kFinishState, kSleepCheck, kCommands, kWorker}) {
         if (g_link[i]) continue;
         if (!g_link[i].install(g_api, g_owner, g_at[i], fns[i], kNames[i])) {
             fail(std::string("the hook on ") + kNames[i] + " did not install (" + (g_link[i].error() ? g_link[i].error() : "?") + ")");
@@ -118,7 +134,7 @@ bool ensure_links() {
         }
     }
     g_linked = true;
-    RT_I("the links on the villager worker, its chooser, SetState and FinishState are in");
+    RT_I("the links on the villager worker, its chooser, SetState, FinishState, SleepCheck and ProcessCommands are in");
     return true;
 }
 
@@ -153,16 +169,30 @@ constexpr uint32_t kActiveSize = 456, kDynamicSize = 136, kCommonSize = 1688, kF
 // checked against each other and against the game's reflection. A word in `why` when something does not fit.
 bool check_layout(std::string* why) {
     Layout& l = g_engine.layout;
-    uint32_t failures = 0, states = 0, exit_phase = 0;
+    uint32_t failures = 0, states = 0, exit_phase = 0, override_bit = 0;
     const struct {
         const char* name;
         uint32_t* out;
     } wanted[] = {{"routines/ctx.dynamic", &l.ctx_dynamic},   {"routines/ctx.common", &l.ctx_common},     {"routines/ctx.template", &l.ctx_template},
                   {"routines/ctx.time", &l.ctx_time},         {"routines/time.now", &l.time_now},         {"routines/dynamic.state", &l.dyn_state},
                   {"routines/dynamic.previous", &l.dyn_previous}, {"routines/dynamic.decision", &l.dyn_decision},
-                  {"routines/common.failures", &failures},    {"routines/state.count", &states},          {"routines/phase.exit", &exit_phase}};
+                  {"routines/common.failures", &failures},    {"routines/state.count", &states},          {"routines/phase.exit", &exit_phase},
+                  {"routines/ctx.dynamicTracker", &l.ctx_dynamic_tracker}, {"routines/ctx.commonTracker", &l.ctx_common_tracker},
+                  {"routines/common.flags", &l.common_flags}, {"routines/common.sleep", &l.common_sleep}, {"routines/common.wake", &l.common_wake},
+                  {"routines/common.sleepOverrideBit", &override_bit}};
     for (const auto& c : wanted)
         if (!constant(c.name, c.out)) return *why = std::string("constant ") + c.name + " is not resolved", false;
+    // The keep-awake prefix's marks: each record's tracker object sits 0x28 after the record's pointer, with the
+    // bookkeeping words MarkWritten takes between them; the hours are floats inside NpcCommon; the flag is one bit.
+    if (l.ctx_dynamic_tracker != l.ctx_dynamic + 0x28 || l.ctx_common_tracker != l.ctx_common + 0x28)
+        return *why = "a write record's tracker is not where MarkWritten's bookkeeping words put it", false;
+    if (l.common_flags >= kCommonSize || l.common_sleep + 4 > kCommonSize || l.common_wake + 4 > kCommonSize || l.common_sleep == l.common_wake)
+        return *why = "NpcCommon's flags, sleep and wake hours are not inside a 1688-byte record", false;
+    if (!override_bit || override_bit > 0x80 || (override_bit & (override_bit - 1)))
+        return *why = "the forced sleep window's flag is not one bit of a byte", false;
+    l.sleep_override_bit = static_cast<uint8_t>(override_bit);
+    if (g_api->symbol(ks(kMarkWritten), &g_mark_written) != KILN_OK || !g_mark_written)
+        return *why = std::string("symbol ") + kMarkWritten + " is not resolved", false;
     if (l.dyn_state >= kDynamicSize || l.dyn_previous >= kDynamicSize || l.dyn_decision >= kDynamicSize || l.dyn_state == l.dyn_decision ||
         l.dyn_state == l.dyn_previous)
         return *why = "the state, previous state and decision of DynamicActiveNpcState are not where a 136-byte record has them", false;
@@ -371,6 +401,26 @@ KilnResult KILN_CALL inspect(uint32_t npc_id, char* json, size_t cap, size_t* ou
 
 void KILN_CALL revoke_owner(KilnOwner owner) { on_owner_retiring(owner, nullptr); }
 
+KilnResult KILN_CALL restore(KilnOwner owner, uint32_t npc_id, KilnStr plan_json, uint64_t revision, uint32_t flags, KilnStr reason,
+                             KilnRoutineDone done, void* user, uint64_t* ticket) {
+    if (ticket) *ticket = 0;
+    if (KilnResult rc = ready(); rc != KILN_OK) return rc;
+    if (!plan_json.ptr || (flags & ~KILN_ROUTINE_RESTORE_SUSPENDED)) return KILN_ERR_INVALID_ARGUMENT;
+    std::string problem;
+    const KilnResult rc = g_book.restore(owner, npc_id, std::string_view(plan_json.ptr, plan_json.len), revision,
+                                         (flags & KILN_ROUTINE_RESTORE_SUSPENDED) != 0, reason.ptr ? std::string_view(reason.ptr, reason.len) : std::string_view(),
+                                         done, user, ticket, &problem);
+    if (rc == KILN_ERR_INVALID_ARGUMENT) RT_W("restore for villager 0x%08x refused: %s", npc_id, problem.c_str());
+    return rc;
+}
+
+KilnResult KILN_CALL set_revision_floor(uint64_t floor) {
+    if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    if (!g_off.empty() || !world_runs()) return KILN_ERR_UNAVAILABLE;
+    g_book.set_revision_floor(floor);
+    return KILN_OK;
+}
+
 KilnResult KILN_CALL subscribe_events(KilnOwner owner, KilnRoutineEventFn fn, void* user, KilnHandle* out) {
     if (!owner || !fn || !out) return KILN_ERR_INVALID_ARGUMENT;
     *out = 0;
@@ -388,7 +438,7 @@ KilnResult KILN_CALL unsubscribe_events(KilnHandle handle) {
 }
 
 const KilnRoutinesApi kTable = {{sizeof(KilnRoutinesApi), KILN_ROUTINES_VERSION}, &assign, &remove, &resume, &inspect, &revoke_owner,
-                                &subscribe_events,                                &unsubscribe_events};
+                                &subscribe_events, &unsubscribe_events, &restore, &set_revision_floor};
 
 // --------------------------------------------------------------------------------------------------- start ----
 
@@ -428,8 +478,8 @@ void KILN_CALL on_ready(void*) {
     }
     h_active = W->component_hash(ks("ActiveNpcState"));
     h_dynamic = W->component_hash(ks("DynamicActiveNpcState"));
-    g_engine.game = Game{&next_worker, &next_decide, &next_set_state, &next_finish_state, &game_set_decision, &game_set_state, &game_finish_state,
-                         &game_sleep_check};
+    g_engine.game = Game{&next_worker,       &next_decide,     &next_set_state,   &next_finish_state, &game_set_decision,
+                         &game_set_state,    &game_finish_state, &game_sleep_check, &next_sleep_check,  &game_mark_written, &next_commands};
     KilnHandle h = 0;
     if (g_api->subscribe_tick(g_owner, KILN_TICK_PRE, &on_pre, nullptr, &h) != KILN_OK ||
         g_api->subscribe_tick(g_owner, KILN_TICK_POST, &on_post, nullptr, &h) != KILN_OK ||
