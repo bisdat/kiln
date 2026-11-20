@@ -27,6 +27,8 @@ internal sealed class ServerSession
     private readonly HashSet<string> _dirty = new(StringComparer.Ordinal);
     private DateTime _nextTransferAt, _retryFullAt;
     private double _tokens = Burst;
+    private DateTime _lastNow, _lastResync;
+    internal static readonly TimeSpan ResyncGap = TimeSpan.FromSeconds(2);
     private DateTime _tokensAt;
 
     // the carry offer: one per nonce
@@ -96,6 +98,7 @@ internal sealed class ServerSession
     /// is asked only when a transfer starts.</summary>
     public void Pump(DateTime now, Func<IReadOnlyList<(Def Def, ModValueSnapshot? Value)>> state, Action<object> send)
     {
+        _lastNow = now;
         _tokens = Math.Min(Burst, _tokens + (now - _tokensAt).TotalSeconds * BytesPerSecond);
         _tokensAt = now;
         if (_flight is { } f)
@@ -239,6 +242,9 @@ internal sealed class ServerSession
     public void OnResync(ModValuesWire.Resync r)
     {
         if (r.Nonce != Nonce) return;
+        // at most one per 2 s, as the client promises: a flood cannot restart the stream over and over
+        if (_lastResync != default && _lastNow - _lastResync < ResyncGap) return;
+        _lastResync = _lastNow;
         _flight = null;
         _needFull = _changed = true;
     }
@@ -252,7 +258,13 @@ internal sealed class ServerSession
     {
         if (m.Nonce != Nonce) return null;
         ModValuesWire.CarryResult Refuse(string why) =>
-            new(Nonce, m.Transfer, false, 0, 0, 0, new Dictionary<string, int> { [why] = 1 });
+            new(Nonce, m.Transfer ?? "", false, 0, 0, 0, new Dictionary<string, int> { [why] = 1 });
+        if (m.Transfer is null || m.Sha256 is null || m.PayloadB64 is null)
+        {
+            // a JSON message without its fields: refused, never an exception per part
+            send(Refuse("malformed"));
+            return null;
+        }
         if (_offerDone is { } done)
         {
             send(done.Transfer == m.Transfer && done.Sha == m.Sha256 ? done.Result : Refuse("one-offer-per-stream"));
