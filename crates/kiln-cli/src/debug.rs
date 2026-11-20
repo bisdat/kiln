@@ -1302,6 +1302,13 @@ fn proxy(p: Planned) -> Result<i32> {
                     }
                     if deadline.is_some_and(|d| Instant::now() >= d) {
                         eprintln!("kiln debug: netcoredbg has not finished after a disconnect; leaving it to detach (its stdin is closed)");
+                        if awaiting.is_some() {
+                            // the detach was never confirmed: not a clean detach
+                            code = 1;
+                            if end.0 != SessionState::Ended {
+                                end = (SessionState::Ended, Some("detach_unanswered".into()));
+                            }
+                        }
                         break;
                     }
                     continue;
@@ -1402,6 +1409,13 @@ fn proxy(p: Planned) -> Result<i32> {
                     code = 1;
                     let gone = tell_client_adapter_died(&t, source.lock().unwrap().as_mut(), &client_out);
                     end = (SessionState::Ended, Some(if gone { "debuggee_exited" } else { "adapter_exited" }.into()));
+                } else if awaiting.is_some() {
+                    // netcoredbg ended before it answered the disconnect: the detach was never confirmed
+                    eprintln!("kiln debug: netcoredbg exited without answering the disconnect");
+                    code = 1;
+                    if end.0 != SessionState::Ended {
+                        end = (SessionState::Ended, Some("detach_unanswered".into()));
+                    }
                 }
                 break;
             }
