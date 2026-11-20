@@ -1268,6 +1268,7 @@ fn proxy(p: Planned) -> Result<i32> {
     let mut deadline = None;
     let mut own = OWN_SEQ + 1;
     let mut code = 0;
+    let mut attached = false;
     let mut end: (SessionState, Option<String>) = (SessionState::Detached, None);
     let send_disconnect = |adapter_in: &Mutex<Option<std::process::ChildStdin>>| {
         let m = json!({ "seq": OWN_SEQ, "type": "request", "command": "disconnect", "arguments": { "terminateDebuggee": false, "suspendDebuggee": false } });
@@ -1344,17 +1345,33 @@ fn proxy(p: Planned) -> Result<i32> {
                     states.set(SessionState::Running, None, None);
                 }
             }
-            Ev::Attached(ok) => {
-                if ok {
-                    states.set(SessionState::Running, None, None);
-                } else {
-                    end = (SessionState::Ended, Some("attach_failed".into()));
-                    states.set(SessionState::Ended, Some("attach_failed"), None);
-                }
+            Ev::Attached(true) => {
+                attached = true;
+                states.set(SessionState::Running, None, None);
             }
-            Ev::AttachRefused(reason) => {
+            ev @ (Ev::Attached(false) | Ev::AttachRefused(_)) => {
+                // the editor would wait on a session that cannot attach: it is told, and the session ends
+                let reason = match ev {
+                    Ev::AttachRefused(r) => r,
+                    _ => "attach_failed".to_string(),
+                };
+                code = 1;
                 end = (SessionState::Ended, Some(reason.clone()));
-                states.set(SessionState::Ended, Some(&reason), None);
+                eprintln!("kiln debug: the attach failed ({reason}); the session ends");
+                let _ = write_json(&mut *client_out.lock().unwrap(), &json!({ "seq": OWN_SEQ + 1, "type": "event", "event": "terminated", "body": {} }));
+                if !attached {
+                    // nothing is attached: close netcoredbg's input and go
+                    states.set(SessionState::Ended, Some(&reason), None);
+                    break;
+                }
+                // an earlier attach still holds: detach it safely first, as when the debuggee changes
+                if !disconnect_sent {
+                    disconnect_sent = true;
+                    awaiting = Some(OWN_SEQ);
+                    send_disconnect(&adapter_in);
+                    deadline = Some(Instant::now() + DISCONNECT_WAIT);
+                }
+                states.set(SessionState::Detaching, Some(&reason), None);
             }
             Ev::Pause(m) => match pause.adapter(&m, Instant::now()) {
                 Some(PauseChange::Paused) => {
