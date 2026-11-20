@@ -18,3 +18,10 @@ ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -Wno-missing-field-initiali
   -I"$here/host" -I"$here/.." -I"$here/../../../core/abi" -I"$here/../../../third_party" \
   "$here/native_pack_test.cpp" "$here/../questbuild.cpp" -o "$out/native_pack_test"
 ASAN_OPTIONS=detect_leaks=0 "$out/native_pack_test" "$out"
+# kiln.survivors' game-free core (dev.31 package 18): request shapes, outcome and authorization rules, result cache, events
+${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined \
+  -I"$here/.." -I"$here/../../../core/abi" "$here/survivors_test.cpp" -o "$out/survivors_test"
+ASAN_OPTIONS=detect_leaks=0 "$out/survivors_test"
+${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=thread \
+  -I"$here/.." -I"$here/../../../core/abi" "$here/survivors_test.cpp" -o "$out/survivors_test_tsan"
+"$out/survivors_test_tsan"
