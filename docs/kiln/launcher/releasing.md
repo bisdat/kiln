@@ -478,7 +478,10 @@ Each release:
 4. `tools/release/github-draft.sh ~/Kiln-release/kiln-$V` → a draft release `v$V` with the files (flat names, its own
    SHA256SUMS). Check it on GitHub.
 5. `tools/release/publish.sh ~/Kiln-release/kiln-$V --host <the web server's ssh name>`: uploads to frostdev.io (files first, then the manifests),
-   publishes the draft, points `updates-dev` at it. Launchers on that channel see it at their next check.
+   publishes the draft, points `updates-dev` at it. Launchers on that channel see it at their next check. Then the
+   roadmap ("The roadmap" below): `roadmap.py ship $V`, the commit command for the source (run it), and
+   `roadmap.py deploy` of the site checkout in `KILN_SITE_DIR` (default `~/Work/frostdev.io`). A roadmap failure
+   prints `WARNING: ROADMAP NOT UPDATED` and the retry commands; the release itself stays published.
 6. After a stable release: raise `VERSION` to the next `-dev` version.
 7. The website's download page (`https://frostdev.io/kiln/download`, with the stable links `/kiln/download/windows`,
    `/linux`, `/deb`, `/server`, `/runtime`) lists every file of the release with its size and SHA-256. In the site
@@ -488,6 +491,32 @@ Each release:
    run, GET calls only; release.sh runs it at the end when the key is there), then add `--publish` to upload. It
    uploads the Nexus build (nexus/), never the direct one. When an upload fails half way (a storage error), run it
    again with `--only` naming the kinds that are still missing: a kind that went up must not be uploaded twice.
+
+### The roadmap
+Every release, minor patches (0.2.0-dev.29.N) and majors (0.2.0-dev.30) alike, moves on
+<https://frostdev.io/kiln/roadmap>. Its source is `tools/release/roadmap/roadmap.json` in this repository (the site's
+`src/data/kilnRoadmap.json` byte for byte; format and editorial rules in `tools/release/roadmap/README.md`).
+1. **Before the build:** the release's entry is the first `upcoming` one (`"status": "next"`), with what ships, in
+   player words. `release.sh $V` runs `roadmap.py check $V` before it builds anything: no entry, or another unreleased
+   entry before it, stops a final build; a test build (`--beta`, `--worktree`) only warns. Release-notes bullets the
+   entry doesn't seem to mention are warnings.
+2. **At publish:** after the GitHub release and the frostdev.io downloads, `publish.sh` runs
+   `roadmap.py ship $V` (released, dated with the GitHub publish time in New York; the next entry becomes `next`),
+   prints the commit command for the source (commit it on the release branch, push it with the release), then
+   `roadmap.py deploy "$KILN_SITE_DIR" --version $V` (`--yes` when publish.sh has it): in the site checkout it refuses
+   a dirty tree, pulls origin main, stops unless the live revision (`ssh loothing-vps readlink
+   /opt/frostdev-public/current`) is origin/main, writes the data (nothing to do when unchanged), runs `npm ci`,
+   `npm run check`, `npm run build`, commits "Kiln roadmap: $V released", pushes, runs `ops/deploy.sh` and checks the
+   page shows $V as released. `publish.sh --dry-run` runs the check and prints the ship and deploy commands.
+3. **When it fails** (live site ahead of origin, a dirty checkout, a build error, GitHub without a date): the release is
+   out regardless and publish.sh exits with the release's status; the closing `WARNING: ROADMAP NOT UPDATED` names the
+   commands. By hand: `python3 -I tools/release/roadmap.py ship $V [--date YYYY-MM-DD]`, commit the source,
+   `python3 -I tools/release/roadmap.py deploy ~/Work/frostdev.io --version $V --dry-run`, then without `--dry-run`. A
+   deploy that failed after its push is retried by the same command (it deploys undeployed roadmap-only commits).
+4. **Test builds** never touch the roadmap. The page has no "in beta" field: the next minor patch's `note` says it in
+   words when wanted, edited by hand.
+
+Tests: `python3 -I tools/release/test_roadmap.py` (offline; git, ssh, npm and curl stubbed).
 
 ### Cutting a beta (a test build for the Discord testers)
 A test build is a release folder of its own, built from a pushed commit like a release, that moves only the beta

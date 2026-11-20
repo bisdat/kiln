@@ -7,7 +7,9 @@
 #   packages, kiln CLI, VS Code extension, sample mods, modding site or NuGet feed (mod authors keep the previous
 #   release's SDK). The release checks need the SDK, so it implies --no-checks; the API record is not promoted.
 #                                    [--skip-windows] [--no-checks] [--force] [--host-build] [--no-nexus]
-# VERSION: X.Y.Z (stable) or X.Y.Z-dev.N (dev) for this tree's VERSION (tools/release/version.sh prints one).
+# VERSION: X.Y.Z (stable) or X.Y.Z-dev.N (dev) for this tree's VERSION (tools/release/version.sh prints one). A release
+#   needs its entry in the roadmap source (tools/release/roadmap/roadmap.json, checked with roadmap.py check before the
+#   build; publish.sh ships it to frostdev.io/kiln/roadmap): a missing one stops here, a test build only warns.
 # --beta N (or --channel beta --beta N): test build N of VERSION for the beta channel (docs/kiln/launcher/releasing.md,
 #   "Test builds", "Cutting a beta"): the launcher keeps VERSION and has the channel and N baked in
 #   (KILN_LAUNCHER_CHANNEL=beta, KILN_LAUNCHER_BETA=N); its files are named and signed for the build id
@@ -151,6 +153,16 @@ if ((!host_build)); then
 fi
 key=$HOME/.config/kiln-release/updater.key
 [[ -f $key && -f $key.password ]] || { echo "no updater key at $key (+ .password): see releasing.md" >&2; exit 1; }
+# The roadmap (tools/release/roadmap.py, releasing.md "The roadmap"): a release needs its entry on frostdev.io/kiln/roadmap
+# (the first upcoming one in tools/release/roadmap/roadmap.json), which publish.sh moves to the released ones. Checked
+# before anything is built; a test build (--beta, --worktree) only warns.
+if [[ $channel == beta ]] || ((worktree)); then
+  python3 -I "$here/roadmap.py" check "$version" ||
+    echo "WARNING: the roadmap has no usable entry for $version (above); a test build goes on, the release will not" >&2
+else
+  python3 -I "$here/roadmap.py" check "$version" ||
+    { echo "release: $version cannot ship without its roadmap entry (above): add it to tools/release/roadmap/roadmap.json (tools/release/roadmap/README.md), commit, and build again" >&2; exit 1; }
+fi
 if [[ -e $out && -n $(ls -A "$out" 2>/dev/null) ]]; then
   ((force)) || { echo "$out is not empty (use --force to replace it)" >&2; exit 1; }
   rm -rf "$out"
@@ -812,7 +824,8 @@ else
   closing="Release $version is in $out (log: $log). Nothing is published.
 Next (by hand, see docs/kiln/launcher/releasing.md):
   tools/release/github-draft.sh $out        a DRAFT GitHub release with the files (needs the commit pushed)
-  tools/release/publish.sh $out             publish: the GitHub release, the dev and beta channel pointers, frostdev.io
+  tools/release/publish.sh $out             publish: the GitHub release, the dev and beta channel pointers, frostdev.io,
+                                            then the roadmap: $version as released on frostdev.io/kiln/roadmap
   python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update"
 fi
 step "done"
