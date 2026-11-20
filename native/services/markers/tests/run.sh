@@ -30,3 +30,9 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-s
   "$here/catalog_test.cpp" "$src/catalog.cpp" "$src/store.cpp" "$src/events.cpp" "$src/arena.cpp" "$src/text.cpp" "$src/guard.cpp" \
   -o "$out/catalog_test"
 "$out/catalog_test"
+
+# Admission, visibility and the native map list on fakes (M03 with a sentinel list, M04, M14 visibility half, the reason
+# precedence, the entry encoder, the heading).
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-sanitize-recover=undefined -I"$src" -I"$abi" \
+  "$here/surfaces_test.cpp" "$src/select.cpp" "$src/visibility.cpp" "$src/map_list.cpp" -o "$out/surfaces_test"
+"$out/surfaces_test"

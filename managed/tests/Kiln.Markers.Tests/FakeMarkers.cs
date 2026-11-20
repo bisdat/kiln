@@ -28,6 +28,7 @@ internal static unsafe class FakeMarkers
     public static (int Rc, uint Status, string Reason)? Next;  // the next mutation's scripted answer
     public static nint ChangeFn;
     public static nint ChangeUser;
+    public static nint VisibilityFn;
     public static ulong SubscribedOwner;
     public static int Subscribes;
     private static readonly List<MarkersNative.Change> Queue = new();
@@ -55,7 +56,7 @@ internal static unsafe class FakeMarkers
         Queue.Clear();
         BindAnswer = 0;
         Next = null;
-        ChangeFn = ChangeUser = 0;
+        ChangeFn = ChangeUser = VisibilityFn = 0;
         SubscribedOwner = 0;
         Subscribes = 0;
         _sequence = 0;
@@ -196,6 +197,7 @@ internal static unsafe class FakeMarkers
         SubscribedOwner = owner;
         ChangeFn = (nint)changed;
         ChangeUser = (nint)user;
+        VisibilityFn = (nint)visibility;
         *h = 1;
         return 0;
     }

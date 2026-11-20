@@ -1,0 +1,420 @@
+// SPDX-License-Identifier: MIT
+// kiln.markers' admission, visibility and native map list on fakes (no game): chapter 04 §6 M03 (ordering and map
+// capacity on a fake list with sentinels: prefix bytes unchanged, a mismatched header refused), M04 (camera and range
+// transitions), M14 (visibility collapse), the reason precedence of §4.6, the entry encoder (port of the research
+// probe's layout checks) and the heading of §4.5.
+#include <cmath>
+#include <cstring>
+#include <limits>
+#include <string>
+#include <vector>
+
+#include "check.h"
+#include "map_list.h"
+#include "select.h"
+#include "visibility.h"
+
+using namespace kmk;
+
+namespace {
+
+constexpr double kPi = 3.14159265358979323846;
+
+// The measured layout (client 26430625): list header at +0x36ea00, entries of 0xa0.
+MapLayout layout() {
+    MapLayout l;
+    l.header = 0x36ea00;
+    l.capacity = 1024;
+    l.entry_size = 0xa0;
+    l.position = 0x10;
+    l.z = 0x20;
+    l.type = 0x30;
+    l.visibility = 0x34;
+    return l;
+}
+
+// A fake UI play data object: the list header and its inline storage, every byte outside our rows a sentinel.
+struct FakeUi {
+    MapLayout l = layout();
+    std::vector<uint8_t> mem;
+    FakeUi() : mem(static_cast<size_t>(l.header) + 0x28 + 1024 * 0xa0 + 64, 0xab) { set_header(0, 1024); }
+    uint8_t* ui() { return mem.data(); }
+    uint8_t* h() { return mem.data() + l.header; }
+    void set_header(uint64_t count, uint64_t cap, int64_t data_skew = 0) {
+        const uint64_t data = reinterpret_cast<uintptr_t>(h()) + 0x28 + data_skew;
+        std::memcpy(h(), &data, 8);
+        std::memcpy(h() + 8, &count, 8);
+        std::memcpy(h() + 16, &cap, 8);
+    }
+    uint64_t count() {
+        uint64_t c;
+        std::memcpy(&c, h() + 8, 8);
+        return c;
+    }
+    uint8_t* entry(uint64_t i) { return h() + 0x28 + i * 0xa0; }
+};
+
+ClientRow row(const char* ns, const char* key, uint32_t surfaces, uint32_t source = KILN_MARKER_LOCAL, uint64_t gen = 1) {
+    ClientRow r;
+    r.source = source;
+    r.publisher_generation = gen;
+    r.ns = ns;
+    r.key = key;
+    r.rec.surfaces = surfaces;
+    r.rec.x = 3670, r.rec.y = 820, r.rec.z = 1500;
+    r.rec.icon = surfaces & KILN_MARKER_MAP ? 0xffe5e444u : 0;
+    r.rec.sequence = 1;
+    return r;
+}
+
+Candidate cand(const ClientRow& r) {
+    Candidate c;
+    c.requested = r.rec.surfaces;
+    c.source_rank = r.source == KILN_MARKER_LOCAL ? 0 : 1;
+    c.priority = r.rec.priority;
+    c.ns = r.ns;
+    c.key = r.key;
+    c.publisher_generation = r.publisher_generation;
+    c.x = r.rec.x, c.y = r.rec.y, c.z = r.rec.z;
+    c.height = r.rec.height;
+    c.max_distance = r.rec.max_distance;
+    return c;
+}
+
+View view_all(uint32_t map_room = 1024) {
+    View v;
+    v.world_active = true;
+    v.cap[0] = v.cap[1] = v.cap[2] = true;
+    v.map_room = map_room;
+    return v;
+}
+
+void with_camera(View* v, double x, double y, double z, double fx = 0, double fz = 1) {
+    v->camera = true;
+    v->viewport = true;
+    v->cam[0] = x, v->cam[1] = y, v->cam[2] = z;
+    v->fwd[0] = fx, v->fwd[1] = 0, v->fwd[2] = fz;
+}
+
+struct Post {
+    Visibility vis;
+    std::vector<Note> notes;
+    std::vector<Admitted> adm;
+    std::vector<uint32_t> order[3];
+    void run(const View& v, const std::vector<ClientRow>& rows) {
+        std::vector<Candidate> c;
+        for (const auto& r : rows) c.push_back(cand(r));
+        run(v, rows, c);
+    }
+    void run(const View& v, const std::vector<ClientRow>& rows, const std::vector<Candidate>& c) {
+        notes.clear();
+        admit(v, c, &adm, order);
+        vis.step(7, rows, adm, &notes);
+    }
+};
+
+void order_is_exact() {
+    kmk_test::begin();
+    // equal everything but one field at a time: the earlier field decides
+    std::vector<ClientRow> rows = {row("b", "k", KILN_MARKER_COMPASS), row("a", "k", KILN_MARKER_COMPASS),
+                                   row("a", "k", KILN_MARKER_COMPASS, KILN_MARKER_RECEIVED), row("a", "j", KILN_MARKER_COMPASS, KILN_MARKER_LOCAL, 2),
+                                   row("a", "j", KILN_MARKER_COMPASS)};
+    rows[0].rec.priority = 5;  // highest priority wins although its namespace sorts last
+    std::vector<Candidate> c;
+    for (const auto& r : rows) c.push_back(cand(r));
+    View v = view_all();
+    with_camera(&v, 3670, 820, 1400);
+    std::vector<Admitted> adm;
+    std::vector<uint32_t> order[3];
+    admit(v, c, &adm, order);
+    // 0 (priority), then local "a"/gen 1: key j (4) before k (1), then gen 2 "j" (3), then received (2)
+    const std::vector<uint32_t> want = {0, 4, 1, 3, 2};
+    CHECK(order[kSurfCompass] == want);
+    // distance comes before source: a nearer received row beats a farther local one
+    c[2].z = 1450;
+    admit(v, c, &adm, order);
+    CHECK_EQ(order[kSurfCompass][1], 2u);
+    // without a camera every distance is infinite: the tie goes on to source, namespace, generation, key
+    View nocam = view_all();
+    std::vector<ClientRow> mrows = rows;  // the candidates' names point into these
+    std::vector<Candidate> m;
+    for (auto& r : mrows) {
+        r.rec.surfaces = KILN_MARKER_MAP;
+        m.push_back(cand(r));
+    }
+    m[0].priority = 0;
+    admit(nocam, m, &adm, order);
+    const std::vector<uint32_t> want2 = {4, 1, 3, 0, 2};
+    CHECK(order[kSurfMap] == want2);
+    kmk_test::end("selection order: priority, camera distance, source, namespace, generation, key (no insertion order)");
+}
+
+void m03_map_capacity() {
+    kmk_test::begin();
+    FakeUi f;
+    f.set_header(1023, 1024);
+    const std::vector<uint8_t> before(f.mem.begin(), f.mem.end());
+    std::vector<ClientRow> rows = {row("modb", "k", KILN_MARKER_MAP), row("moda", "k", KILN_MARKER_MAP)};
+    uint64_t count = 0, room = 0;
+    CHECK(read_list(f.ui(), f.l, &count, &room) == ListState::Ok);
+    CHECK_EQ(room, 1u);
+    Post p;
+    p.run(view_all(static_cast<uint32_t>(room)), rows);
+    CHECK_EQ(p.adm[1].after, static_cast<uint32_t>(KILN_MARKER_MAP));  // "moda" wins the only slot
+    CHECK_EQ(p.adm[0].after, 0u);
+    CHECK_EQ(p.adm[0].reason[kSurfMap], static_cast<uint32_t>(KILN_MARKER_MAP_CAPACITY));
+    CHECK_EQ(p.notes.size(), 2u);  // one initial event each
+    std::vector<MapRow> mr;
+    for (uint32_t i : p.order[kSurfMap]) mr.push_back(MapRow{rows[i].rec.x, rows[i].rec.y, rows[i].rec.z, rows[i].rec.icon});
+    Appended last;
+    ListState st;
+    CHECK_EQ(append_rows(f.ui(), f.l, mr.data(), static_cast<uint32_t>(mr.size()), &last, &st), 1u);
+    CHECK(st == ListState::Ok);
+    CHECK_EQ(f.count(), 1024u);
+    // every byte but the count and our one entry is as it was: the 1023 entries before, the header, the tail
+    const size_t ours = static_cast<size_t>(f.entry(1023) - f.ui());
+    bool prefix = std::memcmp(f.mem.data(), before.data(), static_cast<size_t>(f.l.header) + 8) == 0 &&
+                  std::memcmp(f.mem.data() + f.l.header + 16, before.data() + f.l.header + 16, ours - (f.l.header + 16)) == 0 &&
+                  std::memcmp(f.mem.data() + ours + 0xa0, before.data() + ours + 0xa0, f.mem.size() - ours - 0xa0) == 0;
+    CHECK(prefix);
+    // the next step the game cleared and refilled 1022 rows: both fit, the loser recovers with a visibility event only
+    f.set_header(1022, 1024);
+    CHECK(read_list(f.ui(), f.l, &count, &room) == ListState::Ok);
+    p.run(view_all(static_cast<uint32_t>(room)), rows);
+    CHECK_EQ(p.adm[0].after, static_cast<uint32_t>(KILN_MARKER_MAP));
+    CHECK_EQ(p.notes.size(), 1u);
+    if (p.notes.size() == 1) {
+        CHECK_EQ(p.notes[0].visibility.before, 0u);
+        CHECK_EQ(p.notes[0].visibility.after, static_cast<uint32_t>(KILN_MARKER_MAP));
+        CHECK_EQ(p.notes[0].visibility.initial, 0u);
+        CHECK_EQ(p.notes[0].visibility.reason[kSurfMap], static_cast<uint32_t>(KILN_MARKER_READY));
+        CHECK(std::strcmp(p.notes[0].visibility.key, "k") == 0 && std::strcmp(p.notes[0].visibility.owner, "modb") == 0);
+    }
+    // a mismatched data pointer or capacity is refused before anything is written
+    for (int bad = 0; bad < 3; ++bad) {
+        FakeUi g;
+        if (bad == 0) g.set_header(10, 1024, 8);
+        if (bad == 1) g.set_header(10, 2048);
+        if (bad == 2) g.set_header(1025, 1024);
+        const std::vector<uint8_t> was(g.mem.begin(), g.mem.end());
+        Appended l2;
+        CHECK_EQ(append_rows(g.ui(), g.l, mr.data(), 1, &l2, &st), 0u);
+        CHECK(st == ListState::BadHeader);
+        CHECK(g.mem == was);
+    }
+    // 1024 candidates with an empty list: at most 128 map rows, the rest SURFACE_BUDGET; world 128 and compass 64 apart
+    std::vector<std::string> keys(1024);
+    std::vector<ClientRow> many;
+    for (int i = 0; i < 1024; ++i) {
+        char k[16];
+        std::snprintf(k, sizeof k, "k%04d", i);
+        many.push_back(row("m", k, KILN_MARKER_MAP | KILN_MARKER_COMPASS | KILN_MARKER_WORLD));
+    }
+    View v = view_all(1024);
+    with_camera(&v, 3670, 820, 1400);
+    Post q;
+    q.run(v, many);
+    CHECK_EQ(q.order[kSurfMap].size(), 128u);
+    CHECK_EQ(q.order[kSurfCompass].size(), 64u);
+    CHECK_EQ(q.order[kSurfWorld].size(), 128u);
+    CHECK_EQ(q.adm[1000].reason[kSurfMap], static_cast<uint32_t>(KILN_MARKER_SURFACE_BUDGET));
+    CHECK_EQ(q.notes.size(), 1024u);
+    kmk_test::end("M03 ordering and map capacity: one slot to the full tie order, prefix bytes unchanged, recovery without a logical change, bad headers refused, budgets 128/64/128");
+}
+
+void m04_camera_range() {
+    kmk_test::begin();
+    std::vector<ClientRow> rows = {row("m", "w", KILN_MARKER_WORLD | KILN_MARKER_COMPASS)};
+    rows[0].rec.max_distance = 50;
+    Post p;
+    View v = view_all();
+    p.run(v, rows);  // no camera
+    CHECK_EQ(p.notes.size(), 1u);
+    CHECK_EQ(p.notes[0].visibility.initial, 1u);
+    CHECK_EQ(p.notes[0].visibility.reason[kSurfWorld], static_cast<uint32_t>(KILN_MARKER_NO_CAMERA));
+    CHECK_EQ(p.notes[0].visibility.reason[kSurfCompass], static_cast<uint32_t>(KILN_MARKER_NO_CAMERA));
+    CHECK_EQ(p.notes[0].visibility.reason[kSurfMap], static_cast<uint32_t>(KILN_MARKER_NOT_REQUESTED));
+    with_camera(&v, 3670, 820, 1400);  // 100 m away: out of range
+    p.run(v, rows);
+    CHECK_EQ(p.notes.size(), 1u);
+    CHECK_EQ(p.adm[0].reason[kSurfWorld], static_cast<uint32_t>(KILN_MARKER_OUT_OF_RANGE));
+    p.run(v, rows);  // nothing changed: no event
+    CHECK_EQ(p.notes.size(), 0u);
+    with_camera(&v, 3670, 820, 1470);  // 30 m, facing it
+    p.run(v, rows);
+    CHECK_EQ(p.notes.size(), 1u);
+    CHECK_EQ(p.adm[0].after, static_cast<uint32_t>(KILN_MARKER_WORLD | KILN_MARKER_COMPASS));
+    with_camera(&v, 3670, 820, 1475);  // moved 5 m closer: same admission, no event
+    p.run(v, rows);
+    CHECK_EQ(p.notes.size(), 0u);
+    with_camera(&v, 3670, 820, 1470, 0, -1);  // turned around: World is behind, the compass still has it
+    p.run(v, rows);
+    CHECK_EQ(p.notes.size(), 1u);
+    CHECK_EQ(p.adm[0].reason[kSurfWorld], static_cast<uint32_t>(KILN_MARKER_BEHIND));
+    CHECK_EQ(p.adm[0].after, static_cast<uint32_t>(KILN_MARKER_COMPASS));
+    with_camera(&v, 3670, 820, 1470);
+    p.run(v, rows);
+    CHECK_EQ(p.notes.size(), 1u);
+    CHECK_EQ(p.adm[0].after, static_cast<uint32_t>(KILN_MARKER_WORLD | KILN_MARKER_COMPASS));
+    // an unlimited map row needs no camera; a ranged one does
+    std::vector<ClientRow> maps = {row("m", "a", KILN_MARKER_MAP), row("m", "b", KILN_MARKER_MAP)};
+    maps[1].rec.max_distance = 10;
+    Post q;
+    q.run(view_all(), maps);
+    CHECK_EQ(q.adm[0].after, static_cast<uint32_t>(KILN_MARKER_MAP));
+    CHECK_EQ(q.adm[1].reason[kSurfMap], static_cast<uint32_t>(KILN_MARKER_NO_CAMERA));
+    // a viewport of zero is no camera for the drawn surfaces
+    View z = view_all();
+    with_camera(&z, 3670, 820, 1470);
+    z.viewport = false;
+    Post r;
+    r.run(z, rows);
+    CHECK_EQ(r.adm[0].reason[kSurfCompass], static_cast<uint32_t>(KILN_MARKER_NO_CAMERA));
+    kmk_test::end("M04 camera and range: NoCamera, OutOfRange, Ready, Behind (World only), each transition once, none for camera motion");
+}
+
+void m14_visibility_collapse() {
+    kmk_test::begin();
+    Post p;
+    // a row set and removed before any Post was never evaluated: no visibility at all
+    p.run(view_all(), {});
+    CHECK_EQ(p.notes.size(), 0u);
+    std::vector<ClientRow> rows = {row("m", "a", KILN_MARKER_MAP), row("m", "b", KILN_MARKER_MAP | KILN_MARKER_COMPASS),
+                                   row("n", "a", KILN_MARKER_MAP, KILN_MARKER_RECEIVED, 9)};
+    p.run(view_all(), rows);
+    CHECK_EQ(p.notes.size(), 3u);
+    // a pose-only change with the same admission: nothing
+    rows[0].rec.x += 0.5;
+    p.run(view_all(), rows);
+    CHECK_EQ(p.notes.size(), 0u);
+    // a clear of the evaluated rows: one terminal event each, after 0, requested surfaces Removed
+    p.run(view_all(), {});
+    CHECK_EQ(p.notes.size(), 3u);
+    bool terminal = true;
+    for (const Note& n : p.notes) {
+        terminal &= n.kind == Note::Visibility && n.visibility.after == 0 && n.visibility.initial == 0;
+        for (uint32_t s = 0; s < 3; ++s)
+            terminal &= n.visibility.reason[s] == ((n.visibility.requested & kSurfaceBit[s]) ? uint32_t(KILN_MARKER_VIS_REMOVED) : uint32_t(KILN_MARKER_NOT_REQUESTED));
+    }
+    CHECK(terminal);
+    CHECK_EQ(p.vis.size(), 0u);
+    // world stop: terminal for every evaluated row, then nothing remembered
+    p.run(view_all(), rows);
+    std::vector<Note> stop;
+    p.vis.clear(7, &stop);
+    CHECK_EQ(stop.size(), 3u);
+    CHECK_EQ(p.vis.size(), 0u);
+    // a spec change that changes the requested mask is a visibility change too
+    p.run(view_all(), rows);
+    rows[0].rec.surfaces = KILN_MARKER_MAP | KILN_MARKER_COMPASS;
+    p.run(view_all(), rows);
+    CHECK_EQ(p.notes.size(), 1u);
+    if (!p.notes.empty()) CHECK_EQ(p.notes[0].visibility.reason[kSurfCompass], static_cast<uint32_t>(KILN_MARKER_NO_CAMERA));
+    kmk_test::end("M14 visibility: none for a never-evaluated row, none for a pose-only change, one terminal per evaluated row on clear and world stop");
+}
+
+void reason_precedence() {
+    kmk_test::begin();
+    std::vector<ClientRow> rows = {row("m", "a", KILN_MARKER_COMPASS)};
+    Candidate c = cand(rows[0]);
+    std::vector<Admitted> adm;
+    std::vector<uint32_t> order[3];
+    View v;  // no world, capability off, no camera
+    c.source_state = KILN_MARKER_ANCHOR_ENDED;
+    admit(v, {c}, &adm, order);
+    CHECK_EQ(adm[0].reason[kSurfCompass], static_cast<uint32_t>(KILN_MARKER_NO_WORLD));
+    v.world_active = true;
+    admit(v, {c}, &adm, order);
+    CHECK_EQ(adm[0].reason[kSurfCompass], static_cast<uint32_t>(KILN_MARKER_CAPABILITY_OFF));
+    v.cap[kSurfCompass] = true;
+    admit(v, {c}, &adm, order);
+    CHECK_EQ(adm[0].reason[kSurfCompass], static_cast<uint32_t>(KILN_MARKER_ANCHOR_ENDED));
+    c.source_state = KILN_MARKER_SOURCE_STALE;
+    admit(v, {c}, &adm, order);
+    CHECK_EQ(adm[0].reason[kSurfCompass], static_cast<uint32_t>(KILN_MARKER_SOURCE_STALE));
+    c.source_state = KILN_MARKER_READY;
+    c.x = std::numeric_limits<double>::quiet_NaN();
+    admit(v, {c}, &adm, order);
+    CHECK_EQ(adm[0].reason[kSurfCompass], static_cast<uint32_t>(KILN_MARKER_BAD_POSITION));
+    c.x = 3670;
+    admit(v, {c}, &adm, order);
+    CHECK_EQ(adm[0].reason[kSurfCompass], static_cast<uint32_t>(KILN_MARKER_NO_CAMERA));
+    kmk_test::end("reason precedence: NoWorld, CapabilityOff, AnchorEnded, SourceStale, BadPosition, NoCamera");
+}
+
+void encoder_and_reuse() {
+    kmk_test::begin();
+    const MapLayout l = layout();
+    std::vector<uint8_t> e(0xa0, 0xcd);
+    encode_entry(e.data(), l, MapRow{3670.5, -12.25, 1500.0, 0xa13a918cu});
+    int64_t x, y, z;
+    uint32_t type;
+    std::memcpy(&x, e.data() + 0x10, 8);
+    std::memcpy(&y, e.data() + 0x18, 8);
+    std::memcpy(&z, e.data() + 0x20, 8);
+    std::memcpy(&type, e.data() + 0x30, 4);
+    CHECK(x == static_cast<int64_t>(3670.5 * 4294967296.0) && y == -static_cast<int64_t>(12.25 * 4294967296.0) && z == (int64_t{1500} << 32));
+    CHECK_EQ(type, 0xa13a918cu);
+    CHECK_EQ(e[0x34], 2);
+    bool zero = true;  // entity, second key, marker loca id, both text views and every optional field stay zero
+    for (size_t i = 0; i < e.size(); ++i) {
+        if ((i >= 0x10 && i < 0x28) || (i >= 0x30 && i < 0x35)) continue;
+        zero &= e[i] == 0;
+    }
+    CHECK(zero);
+    // the game did not clear its list between two of our steps: our rows are replaced, not appended again
+    FakeUi f;
+    f.set_header(5, 1024);
+    MapRow r[2] = {{3670, 820, 1500, 1}, {3671, 820, 1500, 2}};
+    Appended last;
+    ListState st;
+    CHECK_EQ(append_rows(f.ui(), f.l, r, 2, &last, &st), 2u);
+    CHECK_EQ(f.count(), 7u);
+    CHECK_EQ(append_rows(f.ui(), f.l, r, 1, &last, &st), 1u);
+    CHECK_EQ(f.count(), 6u);
+    CHECK_EQ(append_rows(f.ui(), f.l, r, 0, &last, &st), 0u);
+    CHECK_EQ(f.count(), 5u);
+    // the game cleared and refilled with other rows: we append after them
+    CHECK_EQ(append_rows(f.ui(), f.l, r, 2, &last, &st), 2u);
+    f.set_header(7, 1024);
+    std::memset(f.entry(5), 0x11, 0xa0);  // the game's own row now where ours was
+    CHECK_EQ(append_rows(f.ui(), f.l, r, 2, &last, &st), 2u);
+    CHECK_EQ(f.count(), 9u);
+    CHECK_EQ(f.entry(5)[0], 0x11);
+    kmk_test::end("entry encoder (MapLabel.None: 32.32 position, type, visibility 2, every other byte zero) and a list the game did not clear");
+}
+
+void heading() {
+    kmk_test::begin();
+    double fwd[3];
+    const float id[4] = {0, 0, 0, 1};
+    CHECK(forward_of(id, fwd));
+    CHECK(std::fabs(fwd[2] - 1) < 1e-9 && std::fabs(heading_of(fwd, 9)) < 1e-9);
+    const float s = static_cast<float>(std::sqrt(0.5));
+    const float east[4] = {0, s, 0, s};  // 90 degrees about +Y turns +Z to +X
+    CHECK(forward_of(east, fwd));
+    CHECK(std::fabs(heading_of(fwd, 0) - kPi / 2) < 1e-6);
+    const float west[4] = {0, -s, 0, s};
+    CHECK(forward_of(west, fwd));
+    CHECK(std::fabs(heading_of(fwd, 0) + kPi / 2) < 1e-6);
+    const double down[3] = {0, -1, 0};
+    CHECK_EQ(heading_of(down, 1.25), 1.25);
+    const float zero[4] = {0, 0, 0, 0};
+    CHECK(!forward_of(zero, fwd));
+    const float scaled[4] = {0, 2 * s, 0, 2 * s};  // normalized first
+    CHECK(forward_of(scaled, fwd) && std::fabs(fwd[0] - 1) < 1e-6);
+    kmk_test::end("camera heading: north 0, east pi/2, west -pi/2, the last heading kept looking straight down");
+}
+
+}  // namespace
+
+int main() {
+    order_is_exact();
+    m03_map_capacity();
+    m04_camera_range();
+    m14_visibility_collapse();
+    reason_precedence();
+    encoder_and_reuse();
+    heading();
+    return kmk_test::finish("surfaces_test");
+}

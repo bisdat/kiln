@@ -2,7 +2,7 @@
   "format": 1,
   "side": "client",
   "extends": "server.d/dev28-04-markers.json",
-  "comment": "kiln.markers on the game client (dossier chapter 04 §2.3/§3, docs/re/map.md; client 26430625). markers.client_map: the guards of the native map list kiln.markers appends to in a completed client step, never calling the game's append: the clear program's three count offsets (markers/Clear), the entry layout (two independent strategies of @markers/Entry), the four list capacities of 1024 at their offsets (@markers/ListCapacity) and the 0xa0 entry stride (@markers/EntryStride: index*5<<5). The fixed constants must equal their captures: a layout change turns the feature off, it is not followed. markers.anchors.client: the server-world anchor names plus the network create site and its entity/parent stack fields, reused from net.json (net/CreateTemplateCall, @net.create_fields) and not declared again (chapter 04 §4.2). Research-only symbols of the proposal (waypoint, boss, compass, canvas, fog) are not shipped.",
+  "comment": "kiln.markers on the game client (dossier chapter 04 §2.3/§3, docs/re/map.md; client 26430625). markers.client_map: the guards of the native map list kiln.markers appends to in a completed client step, never calling the game's append: the clear program's three count offsets (markers/Clear), the entry layout (two independent strategies of @markers/Entry, and the type id store @markers/EntryType), the four list capacities of 1024 at their offsets (@markers/ListCapacity) and the 0xa0 entry stride (@markers/EntryStride: index*5<<5). The fixed constants must equal their captures: a layout change turns the feature off, it is not followed. markers.anchors.client: the server-world anchor names plus the network create site and its entity/parent stack fields, reused from net.json (net/CreateTemplateCall, @net.create_fields) and not declared again (chapter 04 §4.2). Research-only symbols of the proposal (waypoint, boss, compass, canvas, fog) are not shipped.",
   "symbols": {
     "markers/Clear": {
       "comment": "clear_map_markers_for_ui (client 0x304470): only its count stores are used, as a guard",
@@ -36,6 +36,14 @@
       "find": [
         {
           "pattern": "48 8D 0C 80 48 8B 03 48 C1 E1 05 48 03 C1 33 C9 48 89 50 10 48 89 50 18 48 89 50 20"
+        }
+      ]
+    },
+    "@markers/EntryType": {
+      "comment": "replicate_map_markers_for_ui's store of the marker type id (FNV-1a-32 of MapMarker.markerType, client 0x31667d): the entry offset kiln.markers writes its icon type to",
+      "find": [
+        {
+          "pattern": "41 0F B6 42 1F 69 D1 93 01 00 01 33 D0 69 C2 93 01 00 01 89 46 {markers/entry.type:d8} 4C 8B 44 24 40 4D 85 C0"
         }
       ]
     }
@@ -87,6 +95,9 @@
     },
     "markers/entry.label_hash": {
       "value": 96
+    },
+    "markers/entry.type": {
+      "value": 48
     }
   },
   "features": {
@@ -95,7 +106,8 @@
         "markers/Clear",
         "@markers/Entry",
         "@markers/ListCapacity",
-        "@markers/EntryStride"
+        "@markers/EntryStride",
+        "@markers/EntryType"
       ],
       "constants": [
         "markers/list.capacity",
@@ -112,7 +124,8 @@
         "markers/entry.z",
         "markers/entry.visibility",
         "markers/entry.label",
-        "markers/entry.label_hash"
+        "markers/entry.label_hash",
+        "markers/entry.type"
       ]
     },
     "markers.anchors.client": {

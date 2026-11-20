@@ -123,6 +123,37 @@ Kiln.MarkerSurface
 Kiln.MarkerSurface.Compass = 2 -> Kiln.MarkerSurface
 Kiln.MarkerSurface.Map = 1 -> Kiln.MarkerSurface
 Kiln.MarkerSurface.World = 4 -> Kiln.MarkerSurface
+Kiln.MarkerVisibilityChangedEvent
+Kiln.MarkerVisibilityChangedEvent.After.get -> Kiln.MarkerSurface
+Kiln.MarkerVisibilityChangedEvent.Audience.get -> Kiln.MarkerSource
+Kiln.MarkerVisibilityChangedEvent.Before.get -> Kiln.MarkerSurface
+Kiln.MarkerVisibilityChangedEvent.Compass.get -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityChangedEvent.Id.get -> string!
+Kiln.MarkerVisibilityChangedEvent.Initial.get -> bool
+Kiln.MarkerVisibilityChangedEvent.Map.get -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityChangedEvent.Owner.get -> string!
+Kiln.MarkerVisibilityChangedEvent.PeerGeneration.get -> ulong
+Kiln.MarkerVisibilityChangedEvent.PublisherGeneration.get -> ulong
+Kiln.MarkerVisibilityChangedEvent.Recipient.get -> Kiln.EntityId
+Kiln.MarkerVisibilityChangedEvent.Requested.get -> Kiln.MarkerSurface
+Kiln.MarkerVisibilityChangedEvent.Sequence.get -> ulong
+Kiln.MarkerVisibilityChangedEvent.World.get -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityChangedEvent.WorldEpoch.get -> ulong
+Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.AnchorEnded = 7 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.BehindCamera = 4 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.CameraUnavailable = 3 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.CapabilityOff = 9 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.FollowMissing = 6 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.InvalidPosition = 11 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.MapCapacity = 1 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.NotRequested = 13 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.OutOfRange = 5 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.Ready = 0 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.Removed = 12 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.SourceStale = 10 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.SurfaceBudget = 2 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.WorldInactive = 8 -> Kiln.MarkerVisibilityReason
 override Kiln.MarkerIcon.GetHashCode() -> int
 override Kiln.MarkerIconInfo.Equals(object? obj) -> bool
 override Kiln.MarkerIconInfo.GetHashCode() -> int
@@ -153,6 +184,7 @@ static Kiln.Markers.Icons.IsReady.get -> bool
 static Kiln.Markers.Icons.Resolve(string! name) -> Kiln.MarkerIconResult!
 static Kiln.Markers.Remove(string! id) -> Kiln.MarkerResult!
 static Kiln.Markers.Set(Kiln.MarkerSpec! marker) -> Kiln.MarkerResult!
+static Kiln.Markers.VisibilityChanged -> System.Action<Kiln.MarkerVisibilityChangedEvent!>?
 static Kiln.MarkerSpec.FromJson(string! json) -> Kiln.MarkerSpec!
 static Kiln.MarkerSpec.FromJson(System.Text.Json.JsonElement json) -> Kiln.MarkerSpec!
 static Kiln.MarkerSpec.operator !=(Kiln.MarkerSpec? left, Kiln.MarkerSpec? right) -> bool
