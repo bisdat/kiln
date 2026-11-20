@@ -46,6 +46,7 @@ public abstract class HostTaskTest : ModsFixture
     internal HostTasks Tasks { get; private set; } = null!;
     internal readonly List<(ulong Owner, bool OnTick)> Hops = [];
     internal readonly List<(ulong Owner, bool OnMain)> ClientHops = [];  // client-world hops (#82): their mod, on the main thread?
+    internal readonly List<(ulong Owner, bool OnMain, bool Tick)> MenuHops = [];  // menu hops (#83): on the main thread? Game.IsTickThread?
     private readonly List<FakeNativeTasks> _old = [];
     private readonly List<ModContext> _mods = [];
 
@@ -87,6 +88,11 @@ public abstract class HostTaskTest : ModsFixture
             ClientHop = (owner, hop) =>
             {
                 lock (ClientHops) ClientHops.Add((owner, native.IsMainThread));
+                hop();
+            },
+            MenuHop = (owner, hop) =>
+            {
+                lock (MenuHops) MenuHops.Add((owner, native.IsMainThread, Game.IsTickThread));
                 hop();
             },
         });

@@ -2035,6 +2035,7 @@ dependencies = [
 name = "kiln-manage"
 version = "0.2.0-dev"
 dependencies = [
+ "base64 0.23.1",
  "bcdec_rs",
  "flate2",
  "getrandom 0.4.3",
@@ -2043,6 +2044,7 @@ dependencies = [
  "jsonc-parser",
  "libc",
  "png",
+ "ring",
  "serde",
  "serde_json",
  "sevenz-rust2",
