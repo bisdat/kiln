@@ -57,12 +57,14 @@ void abi() {
     static_assert(sizeof(repl::Item12) == 12 && sizeof(repl::MsgEntry) == 32 && sizeof(repl::Batch) == 24 &&
                   sizeof(repl::Holder) == 48 && offsetof(repl::WriterOut, skipped) == 16);
     CHECK(sizeof(KilnReplApi) >= 64);
-    // dev.28's lab slots, then dev.31's at the end
+    // dev.28's lab slots end the table (dev.29 shipped it so); dev.31's lab functions are a table of their own
     static_assert(offsetof(KilnReplApi, lab_add_fakes) == 64 && offsetof(KilnReplApi, lab_decoded) == 96 &&
-                  offsetof(KilnReplApi, lab_payload) == 104 && offsetof(KilnReplApi, lab_hook_cost) == 112 &&
-                  sizeof(KilnReplApi) == 120);
-    static_assert(sizeof(KilnReplHookCost) == 8 + 17 * 8 && offsetof(KilnReplHookCost, callback_calls) == 48 &&
-                  offsetof(KilnReplHookCost, allocations) == 128);
+                  sizeof(KilnReplApi) == 104);
+    static_assert(offsetof(KilnReplLabApi, payload) == 8 && offsetof(KilnReplLabApi, hook_cost) == 16 &&
+                  sizeof(KilnReplLabApi) == 24);
+    static_assert(sizeof(KilnReplHookCost) == 8 + 16 * 8 && offsetof(KilnReplHookCost, window_ns) == 8 &&
+                  offsetof(KilnReplHookCost, callback_calls) == 48 && offsetof(KilnReplHookCost, delta_calls) == 80 &&
+                  offsetof(KilnReplHookCost, allocations) == 112 && offsetof(KilnReplHookCost, watch_dropped) == 128);
     static_assert(offsetof(KilnReplWatchEvent, reason) == 36);  // dev.28's pad2: same place
     static_assert(KILN_REPL_KIND_CREATE == 2 && KILN_REPL_KIND_UPDATE == 3 && KILN_REPL_KIND_DESTROYED == 4 &&
                   KILN_REPL_KIND_ENDED == 5 && KILN_REPL_PEER_LOCAL == 4);

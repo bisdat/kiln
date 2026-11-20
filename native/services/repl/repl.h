@@ -97,6 +97,7 @@ extern std::atomic<uint64_t> g_observer_allocs; // allocations made inside obser
 void stats_init();                            // kiln_plugin_main, after repl.observe resolved
 void stats_pre();                             // tick thread, every Pre: an owner that went off the tick thread
 void stats_peer_changed(uint32_t machine);    // tick thread: machine's slot has another peer
+void snapshot_peers();                        // tick thread: which peer stands behind each machine, now
 void stats_world_stopping();
 void note_send_step(uint64_t start_tsc, uint64_t end_tsc);  // tick thread, lab: one send step
 KilnResult KILN_CALL t_stats_enable(KilnOwner owner, bool on);

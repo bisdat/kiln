@@ -109,7 +109,10 @@ struct MachinePeer {
 };
 MachinePeer g_peers[KILN_REPL_MACHINES];  // tick thread
 
-// A machine whose slot has another peer than at the last Pre starts over (its counters, its rings, its watches).
+}  // namespace
+
+// A machine whose slot has another peer than at the last Pre starts over (its counters, its rings, its watches). Every
+// Pre, and at once when the harness adds or removes fakes (so the fakes' first frame is counted for their new peer).
 void snapshot_peers() {
     const uintptr_t gs = g_gs.load(std::memory_order_relaxed);
     const uint32_t fakes = lab_fake_mask();
@@ -124,6 +127,8 @@ void snapshot_peers() {
         if (changed) stats_peer_changed(m);
     }
 }
+
+namespace {
 
 // ---- the registry's component facts ----
 std::mutex g_registry_mu;            // component_info off the tick thread
@@ -287,9 +292,9 @@ KilnResult KILN_CALL t_component_info(uint32_t hash, KilnReplComponentInfo* out)
 const KilnReplApi kTable = {{sizeof(KilnReplApi), KILN_REPL_VERSION}, &t_capabilities, &t_stats_enable, &t_peer_stats,
                             &t_watch, &t_remove, &t_component_info, &t_capture,
                             // lab (loopback.cpp)
-                            &lab_add_fakes, &lab_force_relevant, &lab_remove_fakes, &lab_stats, &lab_decoded,
-                            // lab, since 0.2.0-dev.31
-                            &lab_payload, &lab_hook_cost};
+                            &lab_add_fakes, &lab_force_relevant, &lab_remove_fakes, &lab_stats, &lab_decoded};
+// kiln.repl.lab (since 0.2.0-dev.31): the harness's later functions, in a table of their own
+const KilnReplLabApi kLabTable = {{sizeof(KilnReplLabApi), KILN_REPL_LAB_VERSION}, &lab_payload, &lab_hook_cost};
 
 void KILN_CALL on_ready(void*) {
     if (g_side == KILN_SIDE_SERVER) lab_ready(g_side);
@@ -416,5 +421,10 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     KilnHandle h = 0;
     if (KilnResult rc = api->subscribe_tick(owner, KILN_TICK_PRE, &on_pre, nullptr, &h); rc != KILN_OK) return rc;
     api->subscribe_world(owner, &on_world, nullptr, &h);
-    return api->register_service(owner, KilnStr{KILN_REPL_SERVICE, sizeof(KILN_REPL_SERVICE) - 1}, &kTable);
+    if (KilnResult rc = api->register_service(owner, KilnStr{KILN_REPL_SERVICE, sizeof(KILN_REPL_SERVICE) - 1}, &kTable); rc != KILN_OK)
+        return rc;
+    if (g_side == KILN_SIDE_SERVER &&
+        api->register_service(owner, KilnStr{KILN_REPL_LAB_SERVICE, sizeof(KILN_REPL_LAB_SERVICE) - 1}, &kLabTable) != KILN_OK)
+        logf(KILN_LOG_WARN, "repl: %s could not be published", KILN_REPL_LAB_SERVICE);
+    return KILN_OK;
 }

@@ -37,6 +37,7 @@ std::string g_dir;           // <tmp>\repl-gate-test: the stand-in <game>\kiln
 uint32_t g_lab_port = 0;     // kiln.net's lab transport in this case
 bool g_tick_thread = true;
 const KilnReplApi* g_table = nullptr;
+const KilnReplLabApi* g_lab_table = nullptr;
 std::vector<std::string> g_log;
 struct Report {
     uint32_t state, reason;
@@ -108,8 +109,11 @@ const void* KILN_CALL api_service(KilnStr name, uint32_t) {
     if (n == KILN_NET_SERVICE) return &net;
     return nullptr;  // no kiln.hooks: the send step stays unhooked (observe off), which this test does not look at
 }
-KilnResult KILN_CALL api_register(KilnOwner, KilnStr, const void* table) {
-    g_table = static_cast<const KilnReplApi*>(table);
+KilnResult KILN_CALL api_register(KilnOwner, KilnStr name, const void* table) {
+    const std::string n(name.ptr, name.len);
+    if (n == KILN_REPL_SERVICE) g_table = static_cast<const KilnReplApi*>(table);
+    else if (n == KILN_REPL_LAB_SERVICE) g_lab_table = static_cast<const KilnReplLabApi*>(table);
+    else return KILN_ERR_INVALID_ARGUMENT;
     return KILN_OK;
 }
 KilnResult KILN_CALL api_subscribe_tick(KilnOwner, int32_t, KilnTickFn, void*, KilnHandle* out) {
@@ -165,6 +169,11 @@ void refused(KilnResult rc) {
     CHECK(g_table->lab_stats(&s) == rc);
     uint32_t len = 0, tick = 0;
     CHECK(g_table->lab_decoded(16, 5, 0x1234, nullptr, 0, &len, &tick) == rc);
+    // kiln.repl.lab (dev.31) behind the same gate
+    CHECK(g_lab_table->payload(16, 5, KILN_REPL_KIND_CREATE, nullptr, 0, &len, &tick) == rc);
+    KilnReplHookCost cost{};
+    cost.size = sizeof cost;
+    CHECK(g_lab_table->hook_cost(&cost, true) == rc);
 }
 
 }  // namespace
@@ -181,8 +190,9 @@ int main() {
     g_lab_port = 28130;
     const KilnResult main_rc = kiln_plugin_main(&api, 7, &info);
     g_case = "start";
-    CHECK(main_rc == KILN_OK && g_table && info.on_ready);
-    if (!g_table || !info.on_ready) return 1;
+    CHECK(main_rc == KILN_OK && g_table && g_lab_table && info.on_ready);
+    if (!g_table || !g_lab_table || !info.on_ready) return 1;
+    CHECK(g_lab_table->header.size == sizeof(KilnReplLabApi) && g_lab_table->header.version == KILN_REPL_LAB_VERSION);
     CHECK(g_table->header.size >= offsetof(KilnReplApi, lab_decoded) + sizeof(g_table->lab_decoded));
 
     // policy "any" and a lab port: the harness answers (no world here, so it stops at that)
@@ -202,6 +212,14 @@ int main() {
     uint32_t added = 0;
     CHECK(g_table->lab_add_fakes(0, fakes, 4, &added) == KILN_ERR_INVALID_ARGUMENT);
     CHECK(g_table->lab_add_fakes(4, fakes, 4, &added) == KILN_ERR_UNAVAILABLE && added == 0);  // no server world
+    uint32_t plen = 7, ptick = 7;
+    CHECK(g_lab_table->payload(16, 5, KILN_REPL_KIND_CREATE, nullptr, 0, &plen, &ptick) == KILN_ERR_NOT_FOUND && plen == 0);
+    CHECK(g_lab_table->payload(16, 5, 9, nullptr, 0, &plen, &ptick) == KILN_ERR_INVALID_ARGUMENT);
+    KilnReplHookCost hc{};
+    hc.size = sizeof hc;
+    CHECK(g_lab_table->hook_cost(&hc, true) == KILN_OK && g_lab_table->hook_cost(&hc, false) == KILN_OK && hc.allocations == 0);
+    hc.size = 8;
+    CHECK(g_lab_table->hook_cost(&hc, false) == KILN_ERR_INVALID_ARGUMENT);
     // ... off the tick thread
     g_tick_thread = false;
     refused(KILN_ERR_WRONG_THREAD);

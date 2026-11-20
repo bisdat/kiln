@@ -105,7 +105,9 @@ typedef struct KilnReplWatchEvent { /* tick thread (send) / main thread (receive
     uint32_t entity, tick, seq;
     uint32_t baseline_tick;        /* update: the tick of the state it was coded against (0: the template) */
     uint32_t payload_bytes;        /* create, update: the message's payload bytes (after its header) */
-    uint16_t count, pad;           /* components at `components` */
+    uint16_t count;                /* components at `components` */
+    uint8_t peer_flags;            /* KILN_REPL_PEER_* of `peer` (was pad before dev.31) */
+    uint8_t pad;
     uint32_t reason;               /* KILN_REPL_END_* for KILN_REPL_KIND_ENDED, else 0 (was pad2 before dev.31) */
     const KilnReplComponent* components;
 } KilnReplWatchEvent;
@@ -162,7 +164,7 @@ typedef struct KilnReplLoopbackStats { /* since the fakes were added (counters s
     uint32_t slot_mask;            /* the world's mask of player slots being replicated, now */
 } KilnReplLoopbackStats;
 
-/* lab_hook_cost: kiln.repl's observer code (everything its hooks do besides calling the game) in nanoseconds, by hook,
+/* kiln.repl.lab hook_cost: kiln.repl's observer code (everything its hooks do besides calling the game) in nanoseconds, by hook,
  * over a window that starts at a call with reset = true; the game's send step and frame interval over the same window
  * (the cost's yardsticks); heap allocations made inside observer code (operator new in kiln-repl.dll; 0 by design). */
 typedef struct KilnReplHookCost {
@@ -226,16 +228,26 @@ typedef struct KilnReplApi {
      * KILN_ERR_NOT_FOUND: nothing decoded for it, or that state has no such component; KILN_ERR_BUFFER_TOO_SMALL. */
     KilnResult(KILN_CALL* lab_decoded)(uint32_t machine, KilnEntity entity, uint32_t hash, uint8_t* out, uint32_t cap,
                                        uint32_t* len, uint32_t* tick);
+} KilnReplApi;
 
-    /* ---- lab, since 0.2.0-dev.31; check header.size ---- */
+/* ---- kiln.repl.lab (since 0.2.0-dev.31): more of the lab harness, in a table of its own ----
+ * Published by the same DLL as kiln.repl, on servers. Every function answers KILN_ERR_UNAVAILABLE unless the harness
+ * may run (kiln.json's policy "any" and kiln.net's lab port, as kiln.repl's lab functions), and KILN_ERR_WRONG_THREAD
+ * off the tick thread. The table only grows at its end; readers check header.size. */
+#define KILN_REPL_LAB_SERVICE "kiln.repl.lab"
+#define KILN_REPL_LAB_VERSION 1u
+
+typedef struct KilnReplLabApi {
+    KilnServiceHeader header;      /* { sizeof(KilnReplLabApi), KILN_REPL_LAB_VERSION } */
     /* The payload (the bytes after the message header) of the newest message of `kind` (KILN_REPL_KIND_CREATE or
      * _UPDATE) that fake `machine` was sent for `entity` on its client channel, and that message's tick. Same buffer
-     * rules as lab_decoded. KILN_ERR_NOT_FOUND: no such message since the fakes were added. */
-    KilnResult(KILN_CALL* lab_payload)(uint32_t machine, KilnEntity entity, uint32_t kind, uint8_t* out, uint32_t cap,
-                                       uint32_t* len, uint32_t* tick);
-    /* What kiln.repl's own hook code costs (measured on lab servers only), since the last call with reset = true. */
-    KilnResult(KILN_CALL* lab_hook_cost)(KilnReplHookCost* out, bool reset);
-} KilnReplApi;
+     * rules as kiln.repl's lab_decoded. KILN_ERR_NOT_FOUND: no such message since the fakes were added. */
+    KilnResult(KILN_CALL* payload)(uint32_t machine, KilnEntity entity, uint32_t kind, uint8_t* out, uint32_t cap,
+                                   uint32_t* len, uint32_t* tick);
+    /* What kiln.repl's own hook code costs (measured on lab servers only), since the last call with reset = true;
+     * the first call starts the window. KILN_ERR_INVALID_ARGUMENT: out is NULL or out->size is too small. */
+    KilnResult(KILN_CALL* hook_cost)(KilnReplHookCost* out, bool reset);
+} KilnReplLabApi;
 
 #ifdef __cplusplus
 }

@@ -684,6 +684,7 @@ void release(uintptr_t world, bool call_game) {
         free_buffers(m);
     }
     if (g_hooked) unhook();
+    if (call_game) snapshot_peers();  // tick thread: the fakes' machines have no peer from now on
     if (const uint64_t traps = g_alloc_traps.load(); traps) logf(KILN_LOG_WARN, "repl: lab: the allocator's other slots were called %llu times", static_cast<unsigned long long>(traps));
 }
 
@@ -853,6 +854,7 @@ KilnResult KILN_CALL lab_add_fakes(uint32_t count, KilnReplFake* out, uint32_t c
     g_pres = 0;
     g_pending.store(false);
     g_fakes.store(mask, std::memory_order_release);
+    snapshot_peers();  // the fakes are peers from their first frame on (their counters start now)
     std::string list;
     for (uint32_t i = 0; i < n; ++i) {
         if (out && i < cap) out[i] = picked[i];
