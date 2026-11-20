@@ -2296,6 +2296,7 @@ export const COMMANDS = [
   "community_settings_get", "community_settings_set", "community_status", "community_feed", "community_check_member", "community_signout", "community_signin_start", "community_signin_poll", "community_signin_cancel",
   "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",
   "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
+  "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 

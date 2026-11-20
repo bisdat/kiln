@@ -17,6 +17,7 @@
 //! always trusts), `cache/` (archives by sha256, kept for dedupe and re-installs), `packs/` (assembled packs).
 
 pub mod dev;
+pub mod links;
 pub mod sign;
 
 use crate::game::GameInstall;
@@ -530,7 +531,7 @@ impl<'a> Crucible<'a> {
         };
         let mut parts = Vec::new();
         if u.multipart {
-            let part_size = u.part_size.max(5 * 1024 * 1024);
+            let part_size = u.part_size.max(1);
             for p in &u.parts {
                 let offset = (p.part_number as u64 - 1) * part_size;
                 let len = part_size.min(size.saturating_sub(offset));

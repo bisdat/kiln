@@ -113,6 +113,10 @@ pub struct LauncherSettings {
     /// adds names for one start. Left out while empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preview: Vec<String>,
+    /// (dev.30) "Count my installs" (Settings): a Crucible pack installed sends Crucible an anonymous install count
+    /// (`POST /versions/<id>/installed`, no account, once per network a day on the service's side). On by default.
+    #[serde(default = "yes")]
+    pub crucible_stats: bool,
 }
 
 impl Default for LauncherSettings {
@@ -132,6 +136,7 @@ impl Default for LauncherSettings {
             keep_versions: kiln_manage::kept::KEEP_DEFAULT,
             language: None,
             preview: Vec::new(),
+            crucible_stats: true,
         }
     }
 }

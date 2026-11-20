@@ -26,6 +26,9 @@ dev-eval = []
 # Update tests only: KILN_UPDATE_FEEDS may point the self-update at loopback feeds (always on in debug builds). Never in
 # shipped bundles.
 update-test-feeds = ["self-update"]
+# QA builds only: KILN_CRUCIBLE_DEV may point Crucible at a local service and add its signing key (always on in debug
+# builds; commands/crucible.rs). Never in shipped bundles.
+crucible-dev = []
 
 [build-dependencies]
 semver = "1"
