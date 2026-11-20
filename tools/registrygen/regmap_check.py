@@ -159,6 +159,14 @@ def check_conv(db, q, conv, types, row, spec):
         return True
 
     is_int = lambda r: r["kind"] in INT_RANGE  # noqa: E731
+
+    def is_id(r):  # a 32-bit id: an integer, or a struct of one integer (keen::HashKey32)
+        if r is None:
+            return False
+        if r["kind"] in INT_RANGE:
+            return True
+        fs = db.fields(r) if r["kind"] == K_STRUCT else []
+        return len(fs) == 1 and (db.resolve(db.get(fs[0]["type"])) or {}).get("kind") in INT_RANGE
     is_num = lambda r: r["kind"] in INT_RANGE or r["kind"] in FLOATS  # noqa: E731
     if conv == "int":
         if want(0, is_int, "an integer") and spec.get("type") in ("int",):
@@ -196,7 +204,7 @@ def check_conv(db, q, conv, types, row, spec):
                 if k not in row.get("values", {}):
                     errs.append(f"{q}: the schema's value {k} has no game name in the row")
     elif conv == "ref":
-        want(0, is_int, "the 32-bit id first")
+        want(0, is_id, "the 32-bit id first")
         want(1, lambda r: r["kind"] in (K_OBJECT_REF, K_GUID), "the reference (an object reference or a GUID) second")
     elif conv == "refList":
         if want(0, lambda r: r["kind"] in ARRAYS, "an array of references first"):
@@ -205,7 +213,7 @@ def check_conv(db, q, conv, types, row, spec):
                 errs.append(f"{q}: {row['paths'][0]} does not hold references")
         if want(1, lambda r: r["kind"] in ARRAYS, "an array of ids second"):
             el = db.resolve(db.element(types[1]))
-            if el is None or not is_int(el):
+            if el is None or not is_id(el):
                 errs.append(f"{q}: {row['paths'][1]} does not hold ids")
             a, b = rs[0], rs[1]
             if a and b and a["kind"] == K_STATIC_ARRAY and b["kind"] == K_STATIC_ARRAY and a.get("count") != b.get("count"):
@@ -219,6 +227,14 @@ def check_conv(db, q, conv, types, row, spec):
         if want(0, lambda r: r["kind"] in ARRAYS, "an array"):
             if rs[0]["kind"] == K_STATIC_ARRAY and spec.get("maxItems") and rs[0].get("count") and spec["maxItems"] > rs[0]["count"]:
                 errs.append(f"{q}: maxItems {spec['maxItems']} is more than the game's {rs[0]['count']} slots")
+            el, of = db.resolve(db.element(types[0])), spec.get("of") or {}
+            if of.get("type") == "int":
+                if el is None or el["kind"] not in INT_RANGE:
+                    errs.append(f"{q}: the elements are {kind_name(el)}, the schema says int")
+                else:
+                    lo, hi = INT_RANGE[el["kind"]]
+                    if of.get("min", 0) < lo or of.get("max", 0) > hi:
+                        errs.append(f"{q}: the elements' range {of.get('min')}..{of.get('max')} does not fit {kind_name(el)} ({lo}..{hi})")
     elif conv == "inventoryWalk":
         if want(0, lambda r: r["kind"] == K_STRUCT, "the root group (a struct)"):
             names = {f["name"] for f in db.fields(rs[0])}

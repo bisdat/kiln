@@ -8,6 +8,7 @@
 #include <string>
 
 #include "../registry/regmap.h"
+#include "../registry/schema.g.h"
 
 using namespace kc::reg;
 using map::Mapping;
@@ -200,6 +201,16 @@ int main(int argc, char** argv) {
                 for (const std::string& e : r) std::printf("  routing: %s\n", e.c_str());
                 CHECK(r.empty());
             }
+            // S6: every R1 field is mapped on this build, or explicitly unproven with its reason; none unmapped
+            int mapped = 0, unproven = 0, unmapped = 0;
+            for (const gen::Field& f : gen::kFields) {
+                std::string why;
+                const Mapping m = one.mapping(f.registry, f.path, &why);
+                (m == Mapping::Mapped ? mapped : m == Mapping::Unproven ? unproven : unmapped)++;
+                if (m == Mapping::Unmapped) std::printf("  unmapped on %s: %s\n", side, why.c_str());
+            }
+            std::printf("regmap %s: %d mapped, %d unproven, %d unmapped\n", side, mapped, unproven, unmapped);
+            CHECK(unmapped == 0 && mapped + unproven == static_cast<int>(std::size(gen::kFields)));
             rm = std::move(one);
         }
         std::printf("regmap: %zu registries loaded from %s\n", rm.registries.size(), argv[1]);

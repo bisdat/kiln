@@ -9,5 +9,81 @@
     "key": "items",
     "unnamed": "item_%08x"
   },
-  "rows": {}
+  "rows": {
+    "stack.min": {
+      "paths": [
+        "stackSizeMin"
+      ],
+      "conv": "int",
+      "read": "now",
+      "backend": "live",
+      "evidence": "docs/re/content.md: the roll 0x16b5f0 reads it at each roll"
+    },
+    "stack.max": {
+      "paths": [
+        "stackSizeMax"
+      ],
+      "conv": "int",
+      "read": "now",
+      "backend": "live",
+      "evidence": "docs/re/content.md: the roll 0x16b5f0 reads it at each roll"
+    },
+    "stack.scalable": {
+      "paths": [
+        "stackSizeScalable"
+      ],
+      "conv": "bool",
+      "read": "now",
+      "backend": "live",
+      "state": "unproven",
+      "reason": "read by the roll per the decompile; not yet seen in a lab",
+      "evidence": "docs/re/content.md 0x16db30"
+    },
+    "stack.maxScaled": {
+      "paths": [
+        "stackSizeMaxScaled"
+      ],
+      "conv": "int",
+      "read": "now",
+      "backend": "live",
+      "state": "unproven",
+      "reason": "read by the roll per the decompile; not yet seen in a lab"
+    },
+    "rarities": {
+      "paths": [
+        "rarities"
+      ],
+      "conv": "flags",
+      "read": "now",
+      "backend": "live",
+      "values": {
+        "common": "Common",
+        "uncommon": "Uncommon",
+        "rare": "Rare",
+        "epic": "Epic",
+        "legendary": "Legendary"
+      },
+      "state": "unproven",
+      "reason": "two reverse-engineering notes disagree whether rolls read it live (docs/re/content.md 8.4 vs open question 6): a lab roll settles it"
+    },
+    "fixedRarity": {
+      "paths": [
+        "useUiRarity",
+        "uiRarity"
+      ],
+      "conv": "optionalEnum",
+      "read": "now",
+      "backend": "live",
+      "values": {
+        "none": "",
+        "common": "Common",
+        "uncommon": "Uncommon",
+        "rare": "Rare",
+        "epic": "Epic",
+        "legendary": "Legendary"
+      },
+      "state": "unproven",
+      "reason": "not yet seen in a lab roll"
+    }
+  }
 }

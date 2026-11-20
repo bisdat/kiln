@@ -7,5 +7,364 @@
     "resourceGuid": "82706b40-61b1-4b8f-8b23-dcec6971bda1",
     "unnamed": "balance"
   },
-  "rows": {}
+  "rows": {
+    "xpPerLevel": {
+      "paths": [
+        "experienceNeedPerLevel"
+      ],
+      "conv": "list",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true,
+      "evidence": "docs/kiln/modding/typed-fields.md: an OnLoad write did not change XpForLevel; a boot patch did"
+    },
+    "xpCurve.start": {
+      "paths": [
+        "killToLevelUPStart"
+      ],
+      "conv": "int",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "xpCurve.end": {
+      "paths": [
+        "killToLevelUPEnd"
+      ],
+      "conv": "int",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "xpCurve.levelMax": {
+      "paths": [
+        "playerLevelMax"
+      ],
+      "conv": "int",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "xpCurve.seed": {
+      "paths": [
+        "xpSeedEnemy"
+      ],
+      "conv": "int",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "xpCurve.fromKnowledge": {
+      "paths": [
+        "xpNeededFromKnowledge"
+      ],
+      "conv": "int",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "levelCap": {
+      "paths": [
+        "playerLevelCap"
+      ],
+      "conv": "int",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "skillPointsPerLevel": {
+      "paths": [
+        "skillPointsPerLevel"
+      ],
+      "conv": "int",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "flameLevelMax": {
+      "paths": [
+        "flameLevelMax"
+      ],
+      "conv": "int",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "altarsPerFlameLevel": {
+      "paths": [
+        "altarsPerFlameLevel"
+      ],
+      "conv": "list",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true,
+      "evidence": "release notes 0.2.0-dev.29: More Flame Altars patched before the game read them, confirmed in a real game"
+    },
+    "waterSourcesPerFlameLevel": {
+      "paths": [
+        "waterSourcesPerFlameLevel"
+      ],
+      "conv": "list",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "buildzoneSizesPerAltarLevel": {
+      "paths": [
+        "buildzoneSizesPerAltarLevel"
+      ],
+      "conv": "list",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "buildzoneSizesPerAltarLevel[].x": {
+      "paths": [
+        "x"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "buildzoneSizesPerAltarLevel[].y": {
+      "paths": [
+        "y"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "buildzoneSizesPerAltarLevel[].z": {
+      "paths": [
+        "z"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "fogResistance.base": {
+      "paths": [
+        "playerBaseFogResistance"
+      ],
+      "conv": "int",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "fogResistance.perFlameLevel": {
+      "paths": [
+        "playerFogResistancePerFlameLevel"
+      ],
+      "conv": "int",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "durability.start": {
+      "paths": [
+        "durabilityStart"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "durability.growth": {
+      "paths": [
+        "durabilityGrowth"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "unlockCost.seed": {
+      "paths": [
+        "perkUpgradeCostSeed"
+      ],
+      "conv": "int",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "unlockCost.creep": {
+      "paths": [
+        "perkCostCreep"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "unlockCost.weapons": {
+      "paths": [
+        "perkCostFactorWeaponsShield"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "unlockCost.armor": {
+      "paths": [
+        "perkCostFactorArmor"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "unlockCost.rings": {
+      "paths": [
+        "perkCostFactorRings"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "unlockCost.advanced": {
+      "paths": [
+        "advancedPerkCostNominator"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "unlockCost.advancedFrom": {
+      "paths": [
+        "advancedPerkCostStartLevel"
+      ],
+      "conv": "int",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "gear.seed": {
+      "paths": [
+        "genericWeaponSeed"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "none"
+    },
+    "gear.creep": {
+      "paths": [
+        "powerCreepWeapon"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "none"
+    },
+    "gear.armorOffset": {
+      "paths": [
+        "armorSetup.offset"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "none"
+    },
+    "gear.armorGradient": {
+      "paths": [
+        "armorSetup.gradient"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "none"
+    },
+    "rarityDurability.common": {
+      "paths": [
+        "rarityDurabilityMod.common"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "socketChance.common": {
+      "paths": [
+        "gemSlotProbability.common"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "rarityDurability.uncommon": {
+      "paths": [
+        "rarityDurabilityMod.uncommon"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "socketChance.uncommon": {
+      "paths": [
+        "gemSlotProbability.uncommon"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "rarityDurability.rare": {
+      "paths": [
+        "rarityDurabilityMod.rare"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "socketChance.rare": {
+      "paths": [
+        "gemSlotProbability.rare"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "rarityDurability.epic": {
+      "paths": [
+        "rarityDurabilityMod.epic"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "socketChance.epic": {
+      "paths": [
+        "gemSlotProbability.epic"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "rarityDurability.legendary": {
+      "paths": [
+        "rarityDurabilityMod.legendary"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    },
+    "socketChance.legendary": {
+      "paths": [
+        "gemSlotProbability.legendary"
+      ],
+      "conv": "float",
+      "read": "restart",
+      "backend": "boot",
+      "clientNeeds": true
+    }
+  }
 }

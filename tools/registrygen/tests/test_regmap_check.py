@@ -141,6 +141,11 @@ class Checks(unittest.TestCase):
         s["fields"]["three"]["maxItems"] = 4
         self.assertTrue(any("things.three" in e and "3" in e for e in self.run_check(schema=s).errors))
 
+    def test_list_elements_fit_their_storage(self):
+        s = copy.deepcopy(SCHEMA)
+        s["fields"]["three"]["of"]["max"] = 5000000000
+        self.assertTrue(any("things.three" in e and "4294967295" in e for e in self.run_check(schema=s).errors))
+
     def test_routing(self):
         rows = copy.deepcopy(ROWS)
         rows["size"]["read"] = "restart"
