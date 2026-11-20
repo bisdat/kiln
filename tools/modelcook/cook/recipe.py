@@ -73,6 +73,7 @@ they differ: the entries in assets/assets.json (update_manifest) and the materia
 (blocks/<stem>.materials.json). A mod that ships them cooked once is not changed by a cook anywhere.
 """
 import json
+import math
 import os
 from pathlib import Path
 
@@ -177,6 +178,9 @@ def load(path, given=None):
                 raise RecipeError(f"step {i} (model): base, material or materialMap missing, or \"materials\": \"gltf\": nothing says what to draw it with")
             if st.get("materials", "gltf") != "gltf":
                 raise RecipeError(f"step {i} (model): materials {st['materials']!r}: the only value is \"gltf\"")
+            gs = st.get("globalScale")
+            if gs is not None and (isinstance(gs, bool) or not isinstance(gs, (int, float)) or not math.isfinite(gs) or gs <= 0):
+                raise RecipeError(f"step {i} (model): globalScale {gs!r}: a number above 0 (1 is the game's own size)")
     # what the mod's blocks ask for; a step of the recipe that names the same file says more, and wins
     named = {st.get("model") for st in doc.get("steps", []) if st.get("op") == "worn"}
     doc["steps"] = doc.get("steps", []) + [st for st in W.steps_from_blocks(_mod_dir(p)) if st["model"] not in named]
@@ -337,10 +341,7 @@ def physics_of(path, doc=None):
 
 def _animated(doc, st, base_dir):
     """{joint name: [where]} of what the recipe's clips (its own and its blocks') animate on a model step's skeleton: no bone chain may swing them."""
-    try:
-        from anicook import clips as AC
-    except ImportError:
-        return {}
+    from anicook import clips as AC
     out = {}
     for cst in doc.get("steps", []):
         if tool_of(doc, cst) != "animcook" or cst.get("op") != "clips" or cst.get("skeleton") != st.get("skeleton") or not cst.get("gltf"):
@@ -349,8 +350,9 @@ def _animated(doc, st, base_dir):
         rt = cst.get("retarget")
         try:
             moved = AC.animated_joints(Path(base_dir) / cst["gltf"], names or None, rt.get("map") if isinstance(rt, dict) else None)
-        except (OSError, ValueError) as e:
-            raise RecipeError(f"clips {cst['gltf']}: {e}") from e
+        except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError, RecursionError) as e:  # a glTF that does not read
+            detail = str(e) if isinstance(e, (OSError, ValueError)) else f"not a glTF its reader can read ({type(e).__name__}: {e})"
+            raise RecipeError(f"clips {cst['gltf']}: {detail}") from e
         for joint, anims in moved.items():
             out.setdefault(joint, []).extend(f"clip {a!r} of {cst['gltf']}" for a in anims)
     return out

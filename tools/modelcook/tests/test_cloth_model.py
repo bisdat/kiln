@@ -15,6 +15,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -420,6 +421,18 @@ class Refusals(Game, unittest.TestCase):
             self.cook(BANNER / "banner.gltf", self.banner(), features=frozenset())
         self.cook(BANNER / "banner.gltf", self.banner(), features=frozenset())  # on since 0.2.0-dev.31: no recipe key needed
 
+    def test_a_failed_cloth_read_back_writes_nothing(self):
+        """A cooked model whose cloth does not read back as written is refused: no file of it is returned to be written (review of dev.31)."""
+        real = steps.validate
+
+        def broken(*a, **kw):
+            r = real(*a, **kw)
+            r["checks"]["cloth_arrays_agree"] = False
+            r["ok"] = False
+            return r
+        with mock.patch.object(steps, "validate", broken), self.assertRaisesRegex(steps.StepError, r"cloth_arrays_agree"):
+            self.cook(BANNER / "banner.gltf", self.banner())
+
     def test_a_second_lod(self):
         with self.assertRaisesRegex(steps.StepError, "one LOD"):
             self.cook([BANNER / "banner.gltf", BANNER / "banner.gltf"], self.banner())
@@ -493,6 +506,14 @@ class BlenderHelper(Game, unittest.TestCase):
         self.assertTrue(r["ok"])
         self.assertEqual([m["clothMeshIndex"] for m in d["meshes"]], [0, 1])
         self.assertEqual(d["cloth"]["meshes"][0]["data"]["fabric"]["numParticles"], 9)
+
+    def test_a_physics_json_that_does_not_read_is_a_clear_error(self):
+        out = self.dir / "broken-physics.json"
+        for text in ("{not json", "[1, 2]", "{\"format\": 1, \"models\": []}"):
+            with self.subTest(text=text):
+                out.write_text(text)
+                self.assertEqual(KX.main(["--gltf", str(self.seamed()), "--key", "seamed.gltf", "--out", str(out)]), 2)
+                self.assertEqual(out.read_text(), text, "the file is left as it was")
 
     def test_it_refuses_what_it_cannot_read(self):
         sword = self.dir / "plain.gltf"
@@ -665,6 +686,21 @@ class Recipes(unittest.TestCase):
         rp = self.mod("unused", doc)
         with self.assertRaisesRegex(recipe.RecipeError, r'models\["assets/src/other.gltf"\]: no model step of this mod cooks assets/src/other.gltf'):
             recipe.run(rp, self.client, self.types, update_manifest=True)
+
+    def test_a_global_scale_that_is_no_number(self):
+        for gs in ("2", True, 0, -1, float("inf")):
+            with self.subTest(globalScale=gs):
+                rp = self.mod(f"gs-{gs!s}", None, steps_=[{"op": "model", "gltf": "src/banner.gltf", "material": fakegame.MATERIAL, "guid": NEW, "mode": "new",
+                                                         "stem": "banner", "globalScale": gs}])
+                with self.assertRaisesRegex(recipe.RecipeError, r"step 0 \(model\): globalScale .* a number above 0"):
+                    recipe.load(rp)
+
+    def test_a_clip_file_that_does_not_read_is_a_refusal(self):
+        doc = {"steps": [{"tool": "animcook", "op": "clips", "skeleton": "s", "gltf": "src/a.gltf", "clips": {"wave": {"animation": "Wave"}}}]}
+        for err in (KeyError("nodes"), IndexError("list index out of range"), TypeError("bad"), ValueError("bad")):
+            with self.subTest(err=type(err).__name__), mock.patch("anicook.clips.animated_joints", side_effect=err):
+                with self.assertRaisesRegex(recipe.RecipeError, r"^clips src/a.gltf: "):
+                    recipe._animated(doc, {"skeleton": "s"}, self.dir)
 
     def test_unknown_feature_name(self):
         rp = self.mod("typo", None, experimental=("modelcook.clth",))

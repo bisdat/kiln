@@ -12,6 +12,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -366,6 +367,19 @@ class Refusals(Game, unittest.TestCase):
         self.refused(r"joints 'p0' and 'p1' are at one place", path, physics("z.gltf", ("p0", "p2")))
         rig(path, links=3, link=lambda i: [0, -40, 0] if i == 1 else None)
         self.refused(r"the chain is 40\.\d+ m long: at most 32\.7675 m", path, physics("z.gltf", ("p0", "p2")))
+
+    def test_a_failed_chain_read_back_writes_nothing(self):
+        path = self.dir / "rb.gltf"
+        rig(path, links=3)
+        real = steps.validate
+
+        def broken(*a, **kw):
+            r = real(*a, **kw)
+            r["checks"]["chain_rest_within_a_code_step"] = False
+            r["ok"] = False
+            return r
+        with mock.patch.object(steps, "validate", broken):
+            self.refused(r"chain_rest_within_a_code_step", path, physics("rb.gltf", ("p0", "p2")))
 
     def test_what_a_chain_needs_of_its_model(self):
         path = self.dir / "n.gltf"

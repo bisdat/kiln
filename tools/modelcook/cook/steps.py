@@ -366,6 +366,10 @@ def model(k, t, gltf_files, base, guid=None, mode=None, name=None, material=None
     own_guids = {m["material"] for m in materials if not k.has(ResourceKey(m["material"], t.get("keen::RenderMaterialResource")["hash"], 0))} if own_materials else ()
     report = validate(k, t, data, blob, against=base_key.guid if base_key else None, gltf_docs=docs, target=target, own_materials=own_guids,
                       palette=chains["palette"] if chains else None)
+    failed = sorted(c for c, ok in report["checks"].items() if c.startswith(("cloth_", "chain_")) and not ok)
+    if failed:  # physics the game would read wrong is not written: no file of this model leaves the step
+        raise StepError(f"{(physics.where + ': ') if physics is not None else ''}the cooked model's cloth or chains did not read back as written "
+                        f"({', '.join(failed)}): nothing of it is written. This is a bug of the cook: please report it with the model")
     report.update({"op": "model", "guid": out_guid, "mode": mode, "base": base_key.guid if base_key else None, "bin": fb, "blob": fo,
                    "bin_size": len(data), "blob_size": len(blob), "content_hash": desc["renderData"]["hash"],
                    "materials": materials, "warnings": warnings})

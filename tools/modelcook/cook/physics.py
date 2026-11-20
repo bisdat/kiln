@@ -205,6 +205,8 @@ def loads(text, source=FILE):
         if isinstance(e, PhysicsError):
             raise
         raise PhysicsError(f"{source}: not JSON ({e})") from e
+    except RecursionError as e:
+        raise PhysicsError(f"{source}: nested too deep to read") from e
     return parse(doc, source)
 
 
@@ -214,6 +216,8 @@ def load(path, source=FILE):
             text = f.read()
     except UnicodeDecodeError as e:
         raise PhysicsError(f"{source}: not UTF-8 text ({e})") from e
+    except OSError as e:
+        raise PhysicsError(f"{source}: cannot be read ({e.strerror or e})") from e
     return loads(text, source)
 
 

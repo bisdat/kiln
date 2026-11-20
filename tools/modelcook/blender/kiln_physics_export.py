@@ -80,7 +80,14 @@ def cloth_entries(path, attribute=ATTRIBUTE, mass=1.0):
 def write(out_path, key, cloth, chains):
     """Puts the model's entry into the physics.json at out_path (made when missing), checked by the cook's reader."""
     p = Path(out_path)
-    doc = json.loads(p.read_text()) if p.exists() else {"format": 1, "models": {}}
+    doc = {"format": 1, "models": {}}
+    if p.exists():
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError, RecursionError) as e:
+            raise ExportError(f"{p}: cannot read it as JSON ({e}); fix or move it, nothing was written") from e
+        if not isinstance(doc, dict) or not isinstance(doc.get("models", {}), dict):
+            raise ExportError(f"{p}: not a physics.json (an object with \"models\" an object of models); fix or move it, nothing was written")
     doc.setdefault("models", {})[key] = {"cloth": cloth, "chains": chains}
     text = json.dumps(doc, indent=1, ensure_ascii=False) + "\n"
     P.loads(text, str(p))  # what the cook would refuse is refused here, by field

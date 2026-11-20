@@ -311,6 +311,20 @@ class MeshRules(unittest.TestCase):
         self.refused(cloth([0.5] * 6), STRIP, STRIP_TRIS, "no particle with pin 1")
 
 
+class ReadErrors(unittest.TestCase):
+    """What the reader cannot read is a PhysicsError naming the file, never a Python error (review of dev.31)."""
+
+    def test_nesting_too_deep(self):
+        with self.assertRaisesRegex(P.PhysicsError, r"^assets/physics.json: "):
+            P.loads("[" * 200000 + "]" * 200000)
+
+    def test_a_file_that_cannot_be_read(self):
+        with self.assertRaisesRegex(P.PhysicsError, r"^assets/physics.json: cannot be read"):
+            P.load(HERE / "fixtures" / "no-such-physics.json")
+        with self.assertRaisesRegex(P.PhysicsError, r"^assets/physics.json: cannot be read"):
+            P.load(HERE / "fixtures")  # a folder
+
+
 class FeatureRows(unittest.TestCase):
     def test_the_rows_are_on_and_name_their_check(self):
         """Nothing ships held (0.2.0-dev.31): both rows on without the recipe key; 16e-cc16e is still the check that confirms them."""
