@@ -461,3 +461,16 @@ A mod asks `world.ecs_read` (`WorldConcurrent.IsAvailable`) for the task-thread 
 compare-exchange writes, not the `engine.*` rows: those say what the profile
 carries, the `world.*` rows say whether kiln.world reads or writes with it in this process (both are among the
 kiln.world rows above).
+
+## Rows added in dev.31
+
+Rows a dev.31 package adds, by service. None is held: the "Unconfirmed" column names the guided check a real game has
+not passed yet for a row that is on.
+
+| Row | Kind | Reported by | Unconfirmed | What it says |
+|---|---|---|---|---|
+| `survivors.assignment.layout` | sigdb feature (`{server,client}.d/dev31-18-survivors.json`) | core (sigdb) | - | the bed relation's layout (NpcCommon's bed, NpcBed's NPC, the NPC's home and bed radius, the base id) on this build |
+| `survivors.read` | native, static | kiln-quests.dll (kiln.survivors), at on_ready and when a server world starts | - | `Survivors.Find`, `List`, `Of`, `BaseAt`: needs kiln.knowledge's roster (`quests.knowledge`, `quests.npc`), kiln.world and kiln.spawn (`service-missing` otherwise) |
+| `survivors.recruit` | native, static | kiln.survivors | `18-c18.1` | `Survivors.RecruitWorld`: `survivors.read` plus world grants (`quests.changes`) and kiln.items |
+| `survivors.summon` | native, static | kiln.survivors | `18-c18.1` | `Survivors.Summon`: `survivors.recruit` plus kiln.creatures' npc_command and kiln.build's base zones |
+| `survivors.assign` | native, session | kiln.survivors | `18-c18.4` | `Survivors.AssignBed`, `UnassignBed`, `BedOccupant`: `survivors.read` plus `survivors.assignment.layout` (`symbol-missing`), the bed program `kiln_survivors_beds` registered for the server world (`session`), kiln.players, kiln.gameplay and kiln.build |

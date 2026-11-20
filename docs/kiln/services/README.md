@@ -35,6 +35,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [items.md](items.md) | kiln.items: items in inventories |
 | [knowledge.md](knowledge.md) | kiln.knowledge: the game's knowledge, the vanilla journal, dialogue events, the client veto |
 | [npcs.md](npcs.md) | Friendly NPCs and quests in the game's own UI |
+| [survivors.md](survivors.md) | kiln.survivors: recruit roster survivors, give their summon tool, summon them into a base, assign beds (since 0.2.0-dev.31) |
 | [pacing.md](pacing.md) | kiln.pacing: where the game waits, and its task pools |
 | [player-state.md](player-state.md) | Player state and actions |
 | [playeranim.md](playeranim.md) | kiln.playeranim / PlayerAnimStates: mods' states in the player's animation graph, merged at boot, the same on the server and every client |
