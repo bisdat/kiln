@@ -675,7 +675,9 @@ Events.On<GearEnhancedEvent>(e => Log.Info($"{e.Item}: unlocked {e.From} -> {e.T
 place (locked: the player unlocks it at the workbench as usual, for its cost, and gets a level and the perk), and the
 step's cost comes out of the player's inventories (or a chest) in the same server step as the change, all or nothing. The
 rule is a C# record or a block (`RarityUpgradeBlock`, `rarityUpgrades` in `blocks/*.json`:
-[item-blocks.md](../modding/item-blocks.md#rarity-upgrades-rarityupgradeblock)).
+[item-blocks.md](../modding/item-blocks.md#rarity-upgrades-rarityupgradeblock)). A station that runs it when a player uses it is
+`InteractBlock.Upgrade`, and from code `UpgradeStation.Use` / `UpgradeStation.Offer`
+([../modding/world-blocks.md](../modding/world-blocks.md#upgrade-stations)).
 
 ```csharp
 var rule = new RarityUpgradeRule

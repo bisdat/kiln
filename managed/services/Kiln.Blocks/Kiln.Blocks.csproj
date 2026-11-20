@@ -21,6 +21,8 @@
     <InternalsVisibleTo Include="Kiln.Sdk.Tests" />
     <InternalsVisibleTo Include="Kiln.TestKit" />
     <InternalsVisibleTo Include="FurnitureTest" />
+    <!-- the upgrade station's lab test stands a chest in for the player (UpgradeStations' seams) -->
+    <InternalsVisibleTo Include="UpgradeStationTest" />
     <InternalsVisibleTo Include="KindsFaultTest" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Content/Kiln.Content.csproj" Private="false" />

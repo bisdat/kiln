@@ -221,7 +221,7 @@ Since 0.2.0-dev.29.19 (the equipment wave). The rule of an upgrade a station, a 
 it takes, up to which rarity, and what each step costs. An upgraded item gets its next enhancement slot in place (the same
 item, its item data and affixes kept), which the player then unlocks at the workbench as usual. The upgrade itself is
 `Items.UpgradeRarity(player, item, "name")` ([../services/items.md](../services/items.md#upgrading-rarity-v8-since-020-dev2919));
-a station's interaction that runs it is a later package of the wave.
+a station that runs it when a player uses it is `InteractBlock.Upgrade` ([world-blocks.md](world-blocks.md#upgrade-stations)).
 ```csharp
 Blocks.Define("standard-upgrades", new RarityUpgradeBlock
 {

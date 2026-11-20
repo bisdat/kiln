@@ -31,6 +31,13 @@ public sealed record InteractBlock : IBlock
 
     /// <summary>What happens to the player when <see cref="Requires"/> refuses them.</summary>
     public IReadOnlyList<EffectRef>? OnRefused { get; init; }
+
+    /// <summary>The use raises an item's rarity by one step of a rarity upgrade rule (<c>RarityUpgradeBlock</c>), on the server
+    /// once the game has accepted it: the item in the player's hand, or (<see cref="UpgradeTarget.Choose"/>) the one they pick
+    /// in a window on a Kiln player's game. The player is told the outcome. Without <see cref="Plays"/> the player plays the
+    /// hand on it (<see cref="InteractPlay.Toggle"/>), which replaces what the starter's own use did (a station's menu).
+    /// Capability <c>blocks.upgrade_station</c>.</summary>
+    public UpgradeAction? Upgrade { get; init; }
 }
 
 /// <summary>A toggle's prompts, and how it starts. A prompt left out is its starter's: a door's open and close.</summary>

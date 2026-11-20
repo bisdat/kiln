@@ -2,7 +2,7 @@
 // What a placed thing does when used, beyond what its game components say, on the server world (dedicated server and host):
 //  - the checks of an interaction on the player (states, code): kiln.gameplay's InteractEvent is the game's AcceptOfferedInteractionEvent in the Pre of the step that
 //    handles it, and a cancel turns it into the game's own DeclinedInteraction, so the host never accepts and the guest's sequence ends (docs/re/gameplay.md 4).
-//  - effects once the game accepted: InteractionResultEvent, the next step's Pre.
+//  - effects once the game accepted: InteractionResultEvent, the next step's Pre; so is a rarity upgrade (UpgradeStations).
 //  - beds: the last spawn bed a player slept in is where a respawn's teleport goes (TeleportEvent), and a night ends when every player in the world sleeps in a bed that says so.
 //  - doors that say Sides: a player on the other side of the door is declined as a failed check is.
 // Nothing subscribes until a block needs it, and only on the server world. A player's action events (Kiln.Players) see the interaction sequence start, but the accept event is
@@ -13,7 +13,8 @@ namespace Kiln;
 
 internal static class InteractRuntime
 {
-    internal sealed record Entry(string Mod, string Block, Guid? Effects, Guid? Refused, PlayerStateId[]? When, PlayerStateId[]? Unless, Func<Player, bool>? If);
+    internal sealed record Entry(string Mod, string Block, Guid? Effects, Guid? Refused, PlayerStateId[]? When, PlayerStateId[]? Unless, Func<Player, bool>? If,
+        UpgradeStations.Station? Upgrade = null);
     private sealed record Bed(string Mod, string Block, bool SpawnPoint, bool SkipsNight);
     private sealed record Door(string Mod, string Block, DoorSide Sides);
 
@@ -90,7 +91,7 @@ internal static class InteractRuntime
         lock (Gate)
         {
             if (Doors.Count > 0 || Entries.Values.Any(e => e.When != null || e.Unless != null || e.If != null)) _attempts ??= Events.On<InteractEvent>(OnAttempt);
-            if (Entries.Values.Any(e => e.Effects != null) || Beds.Values.Any(b => b.SpawnPoint)) _results ??= Events.On<InteractionResultEvent>(OnResult);
+            if (Entries.Values.Any(e => e.Effects != null || e.Upgrade != null) || Beds.Values.Any(b => b.SpawnPoint)) _results ??= Events.On<InteractionResultEvent>(OnResult);
             if (Beds.Values.Any(b => b.SpawnPoint)) _teleports ??= Events.On<TeleportEvent>(OnTeleport);
         }
     }
@@ -161,8 +162,9 @@ internal static class InteractRuntime
             entry = Entries.GetValueOrDefault(template);
             bed = Beds.GetValueOrDefault(template);
         }
-        if ((entry?.Effects == null && bed is not { SpawnPoint: true }) || !IsPlayer(e.Guest)) return;
+        if ((entry?.Effects == null && entry?.Upgrade == null && bed is not { SpawnPoint: true }) || !IsPlayer(e.Guest)) return;
         Run(entry?.Effects, e.Guest, entry?.Block ?? "");
+        if (entry?.Upgrade is { } upgrade) _ = UpgradeStations.Use(e.Guest, e.Host, upgrade);
         if (bed is { SpawnPoint: true }) SleptIn(e.Guest, e.Host, bed);
     }
 
