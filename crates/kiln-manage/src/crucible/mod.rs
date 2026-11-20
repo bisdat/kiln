@@ -46,7 +46,7 @@ pub const UPLOAD_SUFFIX: &str = ".r2.cloudflarestorage.com";
 /// Public keys of Crucible's index signer (raw Ed25519, base64). The pair is made on the server at the first deploy
 /// and its public key goes here once the owner approves it (DESIGN.md section 13.6). Until then this is empty and the
 /// launcher shows no Crucible surface ([`Endpoints::enabled`]).
-pub const KEYS: &[&str] = &[];
+pub const KEYS: &[&str] = &["3wedy1u9hKuyGh6UcRGBe1X8YvAiPyeALoIpVaBXK/s="];
 /// The largest pack Crucible takes (2 GiB) and the largest file (512 MiB).
 pub const MAX_PACK: u64 = 2 * 1024 * 1024 * 1024;
 
