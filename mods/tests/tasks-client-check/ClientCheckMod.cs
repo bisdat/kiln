@@ -46,6 +46,7 @@ public sealed class ClientCheckMod : Mod
     private KilnTask? _menuBacklog;
     private int _menuApplied, _menuAppliedInWorld, _menuWaiting;
     private bool _menuChecked;
+    private volatile bool _worldTicked;  // a client world has stepped (its first Client.Tick): the menu is over by then
 
     private void StartMenuChecks()
     {
@@ -86,7 +87,7 @@ public sealed class ClientCheckMod : Mod
                         ctx.PostToTick(WorldKind.Menu, () =>
                         {
                             Interlocked.Decrement(ref _menuWaiting);
-                            if (Client.InGame) Interlocked.Increment(ref _menuAppliedInWorld);
+                            if (_worldTicked) Interlocked.Increment(ref _menuAppliedInWorld);
                             else Interlocked.Increment(ref _menuApplied);
                         });
                     }
@@ -114,6 +115,7 @@ public sealed class ClientCheckMod : Mod
 
     private void OnClientTick()
     {
+        _worldTicked = true;
         if (Client.InGame) CheckMenuEnded();
         if (_running || !Client.InGame || Client.LocalPlayer.IsNone) return;
         var session = Client.ClientWorldSession;

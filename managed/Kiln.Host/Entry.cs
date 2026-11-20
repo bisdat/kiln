@@ -476,9 +476,16 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
     /// for the server thread's whole step).</summary>
     /// <summary>One menu hop of a task (#83), on the game's UI frame while no world runs: inside <see cref="UiTick"/>, under
     /// the drive lock like the mods' other menu work, but with no thread marked as the driver, so
-    /// <c>Game.IsTickThread</c> is false there (no world runs) and the world APIs refuse.</summary>
+    /// <c>Game.IsTickThread</c> is false there (no world runs) and the world APIs refuse. Outside UiTick (the client
+    /// world's start on the main thread flushing the menu's waiting hops cancelled) the hop runs no mod code: it never
+    /// waits for the drive lock, which a hosted server world's step may hold.</summary>
     private void MenuTaskHop(ulong owner, Action hop)
     {
+        if (!Monitor.IsEntered(_drive))
+        {
+            _mods.TaskTick.RunMenu(owner, hop);
+            return;
+        }
         lock (_drive)
         {
             var previous = Volatile.Read(ref _driver);

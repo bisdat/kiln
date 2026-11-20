@@ -42,12 +42,14 @@ namespace Kiln;
 /// between two worlds), about 30 times a second, with a budget of their own (64 hops and 1 ms per mod, 2 ms in all per
 /// frame). Each menu stretch between two worlds is a session of its own: a menu hop still waiting when a world starts ends
 /// the task <see cref="KilnTaskState.Cancelled"/> through its own token, quietly, and a task bound to one stretch never
-/// hops into the next. While a world runs there is no menu: a menu hop throws <see cref="KilnUnavailableException"/>.
+/// hops into the next (its menu hops then end it Cancelled). While a world runs there is no menu: a menu hop of a task not
+/// bound to a menu stretch throws <see cref="KilnUnavailableException"/>.
 /// Only any-thread APIs and the game's main-thread UI APIs work in a menu hop: <c>Game.IsTickThread</c> is false there,
 /// and tick-thread (world) APIs throw <see cref="InvalidOperationException"/> saying it is a menu hop. The menu has no
 /// gate windows (<c>NextGateWindow(WorldKind.Menu)</c> throws <see cref="ArgumentOutOfRangeException"/>). A task started
-/// on the main thread in the menu belongs to the client world (its parameterless hops wait for one); a task started in a
-/// menu hop belongs to the menu.</para>
+/// on the main thread in the menu belongs to the client world (its parameterless hops throw
+/// <see cref="KilnUnavailableException"/> there, as any hop to a world that is not running) and is bound to that menu
+/// stretch; a task started in a menu hop belongs to the menu.</para>
 /// </remarks>
 public sealed class KilnTaskContext
 {

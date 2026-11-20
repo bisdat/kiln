@@ -344,14 +344,16 @@ overloads do, with these rules:
   dropped and ends the task `Cancelled` through its own token, quietly, as a world's stop does for its hops. A task bound
   to one menu stretch never hops into the next one: back in the menu after a world, its menu hops end it `Cancelled`.
   A world hop never runs in the menu either (a world's stop ends them, as above).
-- **No menu, no hop.** While a world runs, and on a dedicated server, a menu hop throws `KilnUnavailableException`
-  naming `tasks.pool` at once, and the task stays usable. Right after a world ends there is no menu session until the
-  game's next UI frame (a moment).
+- **No menu, no hop.** While a world runs, and on a dedicated server, a menu hop of a task that is not bound to a menu
+  stretch (one started in the world, or off the main thread) throws `KilnUnavailableException` naming `tasks.pool` at
+  once, and the task stays usable. A task started in the menu is bound to that stretch: its menu hops after it end it
+  `Cancelled`, as above. Right after a world ends there is no menu session until the game's next UI frame (a moment).
 - **No gate windows.** The menu has no world steps: `NextGateWindow(WorldKind.Menu)` throws
   `ArgumentOutOfRangeException`. Wait with `await Task.Delay(...)` in the task instead.
 - **Which world.** A task started on the main thread in the menu (`OnLoad` there, a UI callback) still belongs to the
-  client world, so its parameterless `ToTick()` goes to the next client world; name the menu with
-  `ToTick(WorldKind.Menu)`. A task started inside a menu hop belongs to the menu (`ctx.TickWorld` is `Menu`).
+  client world: its parameterless `ToTick()` throws `KilnUnavailableException` while no client world runs, so name
+  the menu with `ToTick(WorldKind.Menu)`. A task started inside a menu hop belongs to the menu (`ctx.TickWorld` is
+  `Menu`).
 
 Menu hops are new in 0.2.0-dev.30 (mod API 0.2.12): on an older Kiln `WorldKind.Menu` does not exist, so a mod that
 uses it needs this Kiln.

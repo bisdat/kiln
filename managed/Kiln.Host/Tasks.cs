@@ -383,9 +383,8 @@ internal sealed unsafe class HostTasks : TaskBackend
             frame(pin.Owner, () => dispatch(lease, LeaseWork.TickHop, cancelled, pin.State));  // on the server tick, before Pre
         else if (what == (uint)LeaseWork.ClientHop && _env.ClientHop is { } client && OnWorldThread(WorldKind.Client))
             client(pin.Owner, () => dispatch(lease, LeaseWork.ClientHop, cancelled, pin.State));  // the client world's step
-        else if (what == (uint)LeaseWork.MenuHop && !cancelled && _env.MenuHop is { } menu && OnWorldThread(WorldKind.Menu))
+        else if (what == (uint)LeaseWork.MenuHop && _env.MenuHop is { } menu && OnWorldThread(WorldKind.Menu))
             menu(pin.Owner, () => dispatch(lease, LeaseWork.MenuHop, cancelled, pin.State));  // the menu's UI frame
-        // (a cancelled menu hop runs no mod code: the world start that flushes it never waits for the drive lock)
         else
             dispatch(lease, (LeaseWork)what, cancelled, pin.State);  // a segment; or a world's end flushing its hops
     }
