@@ -5206,9 +5206,170 @@
       "clear": "Remove them"
     },
     "data": {
-      "soon": {
-        "one": "The pack layer has {count} file.",
-        "other": "The pack layer has {count} files."
+      "tabsAria": "Data editors",
+      "tab": {
+        "items": "Items",
+        "recipes": "Recipes",
+        "loot": "Loot",
+        "drops": "Drops",
+        "added": "New items",
+        "raw": "Raw JSON"
+      },
+      "lint": {
+        "line": "Lint: {errors}, {warnings}",
+        "errors": {
+          "one": "{count} error",
+          "other": "{count} errors"
+        },
+        "warnings": {
+          "one": "{count} warning",
+          "other": "{count} warnings"
+        },
+        "checking": "Lint: checking…",
+        "show": "Show problems",
+        "hide": "Hide problems",
+        "error": "Error",
+        "warning": "Warning",
+        "info": "Note"
+      },
+      "noCatalog": "No game-data catalog on this PC: the pickers list only what the pack's mods add, and fields are typed by hand.",
+      "thisPack": "this pack",
+      "save": "Save",
+      "saved": "Saved",
+      "unsaved": "Unsaved changes",
+      "discard": "Discard",
+      "remove": "Remove",
+      "saveFailed": "{file} was not saved",
+      "broken": "This file is not valid JSON. Fix it in Raw JSON first.",
+      "alsoIn": "Also set in {files} (Raw JSON).",
+      "name": "Name",
+      "guid": "Fixed GUID (made once, never change it)",
+      "badName": "A name is 1 to 200 letters, digits, _ - or .",
+      "dupName": "{name} is used twice",
+      "pick": {
+        "ph": "Search items",
+        "selectorPh": "Name or pattern like Material_T1_*",
+        "glob": "every match",
+        "unknown": "not found in the game or the pack's mods",
+        "none": "Nothing found",
+        "searching": "Searching…"
+      },
+      "value": {
+        "set": "set to",
+        "mul": "times",
+        "add": "plus",
+        "min": "min",
+        "max": "max",
+        "modeAria": "How {field} changes",
+        "minAria": "Lowest {field}",
+        "maxAria": "Highest {field}",
+        "raiseOnly": "raise only",
+        "lowerOnly": "lower only",
+        "on": "on",
+        "off": "off"
+      },
+      "field": {
+        "add": "+ Field",
+        "remove": "Remove {field}",
+        "nameAria": "Field"
+      },
+      "where": {
+        "add": "+ Condition",
+        "where": "where",
+        "and": "and",
+        "fieldAria": "Condition field",
+        "fieldPh": "field",
+        "valueAria": "Condition on {field}",
+        "remove": "Remove condition"
+      },
+      "rules": {
+        "add": "+ Rule",
+        "addAll": "+ Rule for every item",
+        "remove": "Remove rule",
+        "selectorAria": "Which entries",
+        "noSelector": "Every rule needs a name or a pattern",
+        "duplicate": "{selector} has two rules: merge them into one"
+      },
+      "items": {
+        "lead": "Change the game's items and the pack's mods' items: a rule per item or pattern, with conditions on the game's values. The pack layer loads after every mod, so its values win.",
+        "empty": "No item rules yet.",
+        "selector": "Items"
+      },
+      "loot": {
+        "lead": "Random loot of chests and world pickups, per item: how many come in a stack.",
+        "empty": "No loot rules yet.",
+        "selector": "Item"
+      },
+      "recipes": {
+        "lead": "Change what recipes take and make, and how long they take, or add recipes of your own.",
+        "changes": "Changed recipes",
+        "noChanges": "No recipe changes yet.",
+        "add": "+ Change a recipe",
+        "recipe": "Recipe",
+        "noRecipe": "Every change needs a recipe",
+        "changeInputs": "Change the inputs",
+        "changeOutputs": "Change the outputs",
+        "inputs": "Inputs",
+        "outputs": "Outputs",
+        "addInput": "+ Input",
+        "addOutput": "+ Output",
+        "duration": "Duration",
+        "durationPh": "game's",
+        "seconds": "seconds",
+        "itemAria": "Item",
+        "countAria": "Count",
+        "category": "any item of category {id}",
+        "modNote": "Changes the mod's recipe; the pack layer wins (it loads after {mod}).",
+        "stationNote": "A recipe of the game keeps its station; new recipes choose their own.",
+        "new": "New recipes",
+        "noNew": "No new recipes yet.",
+        "addNew": "+ New recipe",
+        "removeNew": "Remove new recipe",
+        "station": "Station",
+        "stationPh": "Search stations",
+        "hand": "Crafted by hand",
+        "noStation": "Every new recipe needs a station",
+        "needStacks": "Every new recipe needs an input and an output"
+      },
+      "drops": {
+        "lead": "Default inventories: enemy loot and fixed chests, by table or for every table (*).",
+        "empty": "No drop rules yet.",
+        "table": "Table",
+        "add": "+ Table",
+        "addAll": "+ Rule for every table",
+        "count": "Amounts",
+        "chance": "Chance",
+        "items": "Single items",
+        "addItem": "+ Item",
+        "noTable": "Every drop rule needs a table"
+      },
+      "added": {
+        "lead": "Items of your own: each is a copy of a base item (its model, icon and behaviour) with its own name and values.",
+        "empty": "No new items yet.",
+        "add": "+ New item",
+        "remove": "Remove new item",
+        "displayName": "Shown as",
+        "base": "Base item",
+        "description": "Description",
+        "rolledLoot": "Rolled like loot (rarity and level vary)",
+        "fields": "Values",
+        "noBase": "Every new item needs a base item"
+      },
+      "raw": {
+        "none": "No files yet.",
+        "newPh": "name.json",
+        "newAria": "New file name",
+        "new": "New file",
+        "rename": "Rename",
+        "renameAria": "New name",
+        "renameOk": "Rename",
+        "exists": "{file} exists already",
+        "delete": "Delete",
+        "deleteTitle": "Delete {file}?",
+        "deleteText": "The file leaves the pack layer.",
+        "textAria": "Text of {file}",
+        "clean": "No problems in this file.",
+        "pick": "Pick a file or make a new one."
       }
     },
     "order": {

@@ -5444,11 +5444,174 @@
       "clear": "Usuń je"
     },
     "data": {
-      "soon": {
-        "one": "Warstwa paczki ma {count} plik.",
-        "few": "Warstwa paczki ma {count} pliki.",
-        "many": "Warstwa paczki ma {count} plików.",
-        "other": "Warstwa paczki ma {count} plików."
+      "tabsAria": "Edytory danych",
+      "tab": {
+        "items": "Przedmioty",
+        "recipes": "Receptury",
+        "loot": "Łup",
+        "drops": "Dropy",
+        "added": "Nowe przedmioty",
+        "raw": "Raw JSON"
+      },
+      "lint": {
+        "line": "Lint: {errors}, {warnings}",
+        "errors": {
+          "one": "{count} błąd",
+          "few": "{count} błędy",
+          "many": "{count} błędów",
+          "other": "{count} błędu"
+        },
+        "warnings": {
+          "one": "{count} ostrzeżenie",
+          "few": "{count} ostrzeżenia",
+          "many": "{count} ostrzeżeń",
+          "other": "{count} ostrzeżenia"
+        },
+        "checking": "Lint: sprawdzanie…",
+        "show": "Pokaż problemy",
+        "hide": "Ukryj problemy",
+        "error": "Błąd",
+        "warning": "Ostrzeżenie",
+        "info": "Uwaga"
+      },
+      "noCatalog": "Brak katalogu danych gry na tym komputerze: listy wyboru pokazują tylko to, co dodają mody paczki, a pola wpisuje się ręcznie.",
+      "thisPack": "ta paczka",
+      "save": "Zapisz",
+      "saved": "Zapisano",
+      "unsaved": "Niezapisane zmiany",
+      "discard": "Odrzuć",
+      "remove": "Usuń",
+      "saveFailed": "Nie zapisano {file}",
+      "broken": "Ten plik nie jest poprawnym JSON-em. Najpierw popraw go w Raw JSON.",
+      "alsoIn": "Ustawione także w {files} (Raw JSON).",
+      "name": "Nazwa",
+      "guid": "Stały GUID (tworzony raz, nigdy go nie zmieniaj)",
+      "badName": "Nazwa ma od 1 do 200 liter, cyfr, _ - lub .",
+      "dupName": "{name} występuje dwa razy",
+      "pick": {
+        "ph": "Szukaj przedmiotów",
+        "selectorPh": "Nazwa lub wzorzec, np. Material_T1_*",
+        "glob": "każde dopasowanie",
+        "unknown": "nie znaleziono w grze ani w modach paczki",
+        "none": "Nic nie znaleziono",
+        "searching": "Szukanie…"
+      },
+      "value": {
+        "set": "ustaw na",
+        "mul": "razy",
+        "add": "plus",
+        "min": "min.",
+        "max": "maks.",
+        "modeAria": "Jak zmienia się {field}",
+        "minAria": "Najniższa wartość: {field}",
+        "maxAria": "Najwyższa wartość: {field}",
+        "raiseOnly": "tylko zwiększ",
+        "lowerOnly": "tylko zmniejsz",
+        "on": "wł.",
+        "off": "wył."
+      },
+      "field": {
+        "add": "+ Pole",
+        "remove": "Usuń {field}",
+        "nameAria": "Pole"
+      },
+      "where": {
+        "add": "+ Warunek",
+        "where": "gdzie",
+        "and": "i",
+        "fieldAria": "Pole warunku",
+        "fieldPh": "pole",
+        "valueAria": "Warunek dla {field}",
+        "remove": "Usuń warunek"
+      },
+      "rules": {
+        "add": "+ Reguła",
+        "addAll": "+ Reguła dla każdego przedmiotu",
+        "remove": "Usuń regułę",
+        "selectorAria": "Które wpisy",
+        "noSelector": "Każda reguła potrzebuje nazwy lub wzorca",
+        "duplicate": "{selector} ma dwie reguły: połącz je w jedną"
+      },
+      "items": {
+        "lead": "Zmieniaj przedmioty gry i przedmioty modów paczki: jedna reguła na przedmiot lub wzorzec, z warunkami na wartości gry. Warstwa paczki ładuje się po wszystkich modach, więc jej wartości wygrywają.",
+        "empty": "Brak reguł przedmiotów.",
+        "selector": "Przedmioty"
+      },
+      "loot": {
+        "lead": "Losowy łup ze skrzyń i przedmiotów w świecie, według przedmiotu: ile trafia do jednego stosu.",
+        "empty": "Brak reguł łupu.",
+        "selector": "Przedmiot"
+      },
+      "recipes": {
+        "lead": "Zmieniaj, co receptury zużywają i wytwarzają oraz ile trwają, albo dodaj własne receptury.",
+        "changes": "Zmienione receptury",
+        "noChanges": "Brak zmian receptur.",
+        "add": "+ Zmień recepturę",
+        "recipe": "Receptura",
+        "noRecipe": "Każda zmiana potrzebuje receptury",
+        "changeInputs": "Zmień składniki",
+        "changeOutputs": "Zmień wyniki",
+        "inputs": "Składniki",
+        "outputs": "Wyniki",
+        "addInput": "+ Składnik",
+        "addOutput": "+ Wynik",
+        "duration": "Czas trwania",
+        "durationPh": "jak w grze",
+        "seconds": "sekund",
+        "itemAria": "Przedmiot",
+        "countAria": "Liczba",
+        "category": "dowolny przedmiot z kategorii {id}",
+        "modNote": "Zmienia recepturę moda; warstwa paczki wygrywa (ładuje się po {mod}).",
+        "stationNote": "Receptura z gry zachowuje swoją stację; nowe receptury wybierają własną.",
+        "new": "Nowe receptury",
+        "noNew": "Brak nowych receptur.",
+        "addNew": "+ Nowa receptura",
+        "removeNew": "Usuń nową recepturę",
+        "station": "Stacja",
+        "stationPh": "Szukaj stacji",
+        "hand": "Wytwarzane ręcznie",
+        "noStation": "Każda nowa receptura potrzebuje stacji",
+        "needStacks": "Każda nowa receptura potrzebuje składnika i wyniku"
+      },
+      "drops": {
+        "lead": "Domyślne ekwipunki: łup z wrogów i stałe skrzynie, według tabeli lub dla każdej tabeli (*).",
+        "empty": "Brak reguł dropu.",
+        "table": "Tabela",
+        "add": "+ Tabela",
+        "addAll": "+ Reguła dla każdej tabeli",
+        "count": "Ilości",
+        "chance": "Szansa",
+        "items": "Pojedyncze przedmioty",
+        "addItem": "+ Przedmiot",
+        "noTable": "Każda reguła dropu potrzebuje tabeli"
+      },
+      "added": {
+        "lead": "Własne przedmioty: każdy jest kopią przedmiotu bazowego (jego modelu, ikony i zachowania) z własną nazwą i wartościami.",
+        "empty": "Brak nowych przedmiotów.",
+        "add": "+ Nowy przedmiot",
+        "remove": "Usuń nowy przedmiot",
+        "displayName": "Wyświetlany jako",
+        "base": "Przedmiot bazowy",
+        "description": "Opis",
+        "rolledLoot": "Losowany jak łup (rzadkość i poziom się różnią)",
+        "fields": "Wartości",
+        "noBase": "Każdy nowy przedmiot potrzebuje przedmiotu bazowego"
+      },
+      "raw": {
+        "none": "Brak plików.",
+        "newPh": "name.json",
+        "newAria": "Nazwa nowego pliku",
+        "new": "Nowy plik",
+        "rename": "Zmień nazwę",
+        "renameAria": "Nowa nazwa",
+        "renameOk": "Zmień nazwę",
+        "exists": "{file} już istnieje",
+        "delete": "Usuń",
+        "deleteTitle": "Usunąć {file}?",
+        "deleteText": "Plik opuszcza warstwę paczki.",
+        "textAria": "Tekst pliku {file}",
+        "clean": "Brak problemów w tym pliku.",
+        "pick": "Wybierz plik albo utwórz nowy."
       }
     },
     "order": {

@@ -55,19 +55,23 @@ export const GAME: Record<string, { name: string; displayName?: string; id?: str
     { name: "Recipe_Material_T3_Iron_Bar", displayName: "Iron Bar" },
     { name: "Recipe_Consumable_Food_Berry_Pie", displayName: "Berry Pie" },
   ],
+  // random loot is per item (content.md "loot")
   loot: [
-    { name: "Loot_Chest_T1_Common", displayName: "Common chest (tier 1)" },
-    { name: "Loot_Chest_T2_Rare", displayName: "Rare chest (tier 2)" },
+    { name: "Material_T1_Wood_Logs", displayName: "Wood Logs", id: "0x0000a1b2" },
+    { name: "Material_T1_Stone", displayName: "Stone", id: "0x0000a1b4" },
+    { name: "Material_T2_Shroud_Spores", displayName: "Shroud Spores", id: "0x0000a1c0" },
   ],
+  // drop tables are keyed by their GUID (content.md "drops")
   drops: [
-    { name: "Drop_Enemy_Scavenger", displayName: "Scavenger" },
-    { name: "Drop_Enemy_Wolf", displayName: "Wolf" },
+    { name: "Drop_Enemy_Scavenger", displayName: "Scavenger", id: "a20e8eae-7833-462e-9ea9-59d1e17a1b98" },
+    { name: "Drop_Enemy_Wolf", displayName: "Wolf", id: "5b0c2f1e-1d3a-4c8e-9f60-2b7d4e0a9c11" },
   ],
-  stations: [
-    { name: "Blacksmith", displayName: "Blacksmith" },
-    { name: "Alchemist", displayName: "Alchemist" },
-    { name: "Hunter", displayName: "Hunter" },
-    { name: "Workbench", displayName: "Workbench" },
+  // crafting stations (the catalog's "workshops"; a new recipe's station is "0x<workshop id>" or "hand")
+  workshops: [
+    { name: "Workshop_Blacksmith", displayName: "Blacksmith", id: "0x0c0c0001" },
+    { name: "Workshop_Alchemist", displayName: "Alchemist", id: "0x0c0c0002" },
+    { name: "Workshop_Hunter", displayName: "Hunter", id: "0x0c0c0003" },
+    { name: "Workshop_Workbench", displayName: "Workbench", id: "0x0c0c0004" },
   ],
 };
 
@@ -86,12 +90,14 @@ export const FIELDS: Record<string, CatalogFieldInfo[]> = {
     { path: "duration", type: "Time", writable: true, kind: "time" },
   ],
   loot: [
-    { path: "rolls", type: "uint8", writable: true, kind: "uint8" },
-    { path: "entries", type: "BlobArray<LootEntry>", writable: true, kind: "list" },
+    { path: "stackSizeMin", type: "uint16", writable: true, kind: "uint16" },
+    { path: "stackSizeMax", type: "uint16", writable: true, kind: "uint16" },
   ],
   drops: [
-    { path: "chance", type: "float32", writable: true, kind: "float32" },
-    { path: "items", type: "BlobArray<DropItem>", writable: true, kind: "list" },
+    { path: "countMin", type: "uint32", writable: true, kind: "uint32" },
+    { path: "countMax", type: "uint32", writable: true, kind: "uint32" },
+    { path: "spawnProbability", type: "float32", writable: true, kind: "float32" },
+    { path: "weight", type: "float32", writable: true, kind: "float32" },
   ],
 };
 
@@ -164,7 +170,20 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
     ({ file, code, severity, rule, message, span: { start: 0, end: 0 }, line: 1, col: 1, endLine: 1, endCol: 1, fixes: [], related: [] }) as unknown as LintDiagnostic;
   const lint = (s: MockStudio): LintReport => {
     const diagnostics: LintDiagnostic[] = [];
-    const known = new Set([...Object.values(GAME).flat().map((g) => g.name), ...Object.values(ADDED).flat().map((a) => a.name)]);
+    const known = new Set([...Object.values(GAME).flat().flatMap((g) => [g.name, ...(g.id ? [g.id] : [])]), ...Object.values(ADDED).flat().map((a) => a.name)]);
+    // the layer's own new items and recipes ("add") are known too
+    for (const text of s.layer.values()) {
+      try {
+        const o = JSON.parse(text.replace(/\/\/[^\n]*/g, "")) as Record<string, { add?: { name?: string }[] }>;
+        for (const body of Object.values(o ?? {})) for (const x of (Array.isArray(body?.add) ? body.add : [])) if (x?.name) known.add(x.name);
+      } catch { /* reported below */ }
+    }
+    const refs = (list: unknown, where: string, path: string) => {
+      for (const st of Array.isArray(list) ? list : []) {
+        const item = typeof st === "string" ? st : (st as { item?: unknown })?.item;
+        if (typeof item === "string" && item && !known.has(item)) diagnostics.push(diag("KL104", "unknown-ref", "warning", where + ": no item " + item + " in the game or the pack's mods", "layer/" + path));
+      }
+    };
     for (const [path, text] of s.layer) {
       let v: unknown;
       try { v = JSON.parse(text.replace(/\/\/[^\n]*/g, "")); } catch (e) {
@@ -177,6 +196,13 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
           if (sel === "add" || sel.includes("*") || sel.startsWith("@")) continue;
           if (!known.has(sel)) diagnostics.push(diag("KL103", "unknown-name", "warning", section + ": no entry " + sel + " in the game or the pack's mods", "layer/" + path));
         }
+      }
+      for (const [sel, body] of Object.entries(o.recipes ?? {})) {
+        const list = sel === "add" ? (Array.isArray(body) ? body : []) : [body];
+        for (const r of list as { inputs?: unknown; outputs?: unknown; name?: string }[]) { refs(r?.inputs, "recipes " + (r?.name ?? sel) + " inputs", path); refs(r?.outputs, "recipes " + (r?.name ?? sel) + " outputs", path); }
+      }
+      for (const [sel, body] of Object.entries(o.drops ?? {})) {
+        refs(Object.keys(((body ?? {}) as { items?: Record<string, unknown> }).items ?? {}).filter((k) => !k.includes("*")), "drops " + sel + " items", path);
       }
     }
     const errors = diagnostics.filter((x) => x.severity === "error").length;
@@ -340,7 +366,7 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
           for (const [sec, body] of Object.entries(o)) for (const x of body?.add ?? []) if (x.name) added.push({ section: sec, name: x.name, displayName: x.displayName, from: "pack." + s.source.id });
         } catch { /* lint says */ }
       }
-      const match = (x: { name: string; displayName?: string }) => !query || x.name.toLowerCase().includes(query) || !!x.displayName?.toLowerCase().includes(query);
+      const match = (x: { name: string; displayName?: string; id?: string }) => !query || x.name.toLowerCase().includes(query) || !!x.displayName?.toLowerCase().includes(query) || x.id?.toLowerCase() === query;
       const own = added.filter((x) => x.section === section && match(x)).map((x) => ({ section, name: x.name, displayName: x.displayName, from: x.from }));
       const game = FLAGS.has("nocatalog") ? [] : (GAME[section] ?? []).filter(match).map((x) => ({ section, name: x.name, id: x.id, displayName: x.displayName }));
       return [...own, ...game.filter((g) => !own.some((o) => o.name === g.name))].slice(0, limit);

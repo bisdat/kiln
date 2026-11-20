@@ -1,0 +1,71 @@
+/* Pack Studio, Data (src/studio/data/): the pack layer's editors. Hearth tokens; kst- classes from studio.css. */
+.kd { display: flex; flex-direction: column; gap: 12px; }
+.kd-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.kd-grow { flex: 1; }
+.kd-lint { font-family: var(--k-font-label); font-size: 15px; color: var(--k-ok, #7cc47f); }
+.kd-lint-warn { color: #ffb066; }
+.kd-lint-err { color: #ff7a6b; }
+.kd-note { margin: 0; font-size: 14px; }
+.kd-body { padding-top: 4px; }
+.kd-editor { display: flex; flex-direction: column; gap: 12px; max-width: 1080px; }
+
+.kd-card { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 10px;
+  background: rgba(255, 255, 255, .03); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07); }
+.kd-card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.kd-sub { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; margin-left: 12px; border-left: 2px solid rgba(23, 200, 244, .25); }
+.kd-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.kd-line.kd-top { align-items: flex-start; }
+.kd-key { min-width: 110px; }
+.kd-name { width: 280px; }
+.kd-text { width: 420px; max-width: 100%; }
+.kd-guid { font-size: 12.5px; }
+
+.kd-fields, .kd-where, .kd-stacks { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.kd-field, .kd-stack { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.kd-fname { width: 220px; }
+.kd-where-word { min-width: 44px; font-size: 14px; }
+.kd-value { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.kd-mode { width: 128px; }
+.kd-enum { min-width: 160px; }
+.kd-num { width: 96px; }
+.kd-loose { width: 220px; }
+.kd-tick { font-size: 14px; }
+.kd-cat { padding: 4px 8px; border-radius: 6px; background: rgba(255, 255, 255, .05); }
+
+/* pickers */
+.kd-pick { position: relative; display: inline-flex; align-items: center; gap: 8px; }
+.kd-pick-input { width: 260px; font-family: var(--k-font-mono); font-size: 14px; }
+.kd-pick-name { font-size: 14.5px; color: var(--k-text-2); display: inline-flex; gap: 8px; align-items: center; }
+.kd-icon { width: 28px; height: 28px; flex: none; border-radius: 6px; object-fit: contain; background: rgba(0, 0, 0, .25); }
+.kd-pick-list { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; list-style: none; margin: 0; padding: 4px; min-width: 360px; max-height: 320px; overflow: auto;
+  border-radius: 10px; background: #14100e; box-shadow: inset 0 0 0 1px rgba(23, 200, 244, .3), 0 12px 28px rgba(0, 0, 0, .55); }
+.kd-pick-none { padding: 8px 10px; color: var(--k-text-2); font-size: 14px; }
+.kd-hit { display: flex; align-items: center; gap: 10px; width: 100%; padding: 5px 8px; border: 0; border-radius: 7px; background: none; color: inherit; text-align: left; cursor: pointer; }
+.kd-hit:hover, .kd-hit.on { background: rgba(23, 200, 244, .12); }
+.kd-hit-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.kd-hit-name { font-size: 15px; }
+.kd-hit-id { font-family: var(--k-font-mono); font-size: 12.5px; color: var(--k-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kd-from { font-size: 12.5px; padding: 1px 8px; border-radius: 999px; color: #6fdcff; box-shadow: inset 0 0 0 1px rgba(111, 220, 255, .4); white-space: nowrap; }
+
+/* save bar */
+.kd-savebar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 0; font-size: 14.5px; }
+
+/* lint */
+.kd-diags { list-style: none; margin: 0; padding: 8px 10px; border-radius: 8px; background: rgba(0, 0, 0, .3); display: flex; flex-direction: column; gap: 4px; font-size: 14px; max-height: 240px; overflow: auto; }
+.kd-diag { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.kd-sev { font-family: var(--k-font-label); font-size: 13px; min-width: 64px; }
+.kd-sev-error { color: #ff7a6b; }
+.kd-sev-warning { color: #ffb066; }
+.kd-sev-info, .kd-sev-hint { color: #6fdcff; }
+
+/* raw JSON */
+.kd-raw { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; }
+.kd-raw-files { display: flex; flex-direction: column; gap: 12px; }
+.kd-raw-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.kd-raw-file { width: 100%; text-align: left; padding: 6px 10px; border: 0; border-radius: 7px; background: none; color: inherit; font-family: var(--k-font-mono); font-size: 14px; cursor: pointer; }
+.kd-raw-file:hover { background: rgba(255, 255, 255, .05); }
+.kd-raw-file.on { background: rgba(23, 200, 244, .14); color: #6fdcff; }
+.kd-raw-new { display: flex; gap: 6px; }
+.kd-raw-new .k-input { min-width: 0; flex: 1; }
+.kd-raw-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.kd-raw-text { width: 100%; min-height: 380px; font-family: var(--k-font-mono); font-size: 13.5px; line-height: 1.5; tab-size: 2; white-space: pre; }
