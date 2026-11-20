@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  // More Flame Altars 0.4.0 (MoreFlameAltarsMod.Patch) with Altars 4, ExtraAltars 2, BuildArea 150: its exact patch
+  "resourcePatches": {
+    "altars": {
+      "resource": "82706b40-61b1-4b8f-8b23-dcec6971bda1",
+      "type": "keen::BalancingTable",
+      "set": {
+        "altarsPerFlameLevel[*]": { "add": 2, "min": 4, "max": 16, "raiseOnly": true },
+        "buildzoneSizesPerAltarLevel[*].x": { "mul": 1.5, "raiseOnly": true },
+        "buildzoneSizesPerAltarLevel[*].y": { "mul": 1.5, "raiseOnly": true },
+        "buildzoneSizesPerAltarLevel[*].z": { "mul": 1.5, "raiseOnly": true }
+      }
+    }
+  }
+}

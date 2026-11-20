@@ -1,0 +1,10 @@
+{
+  "id": "base-rules-data",
+  "name": "base rules lab fixture: a data-only pack",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "side": "server",
+  "clients": "none",
+  "boot": true,
+  "description": "base-rules-test's fixture: blocks/bases.json gives 3 more Flame Altars and build areas at 120%."
+}

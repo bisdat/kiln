@@ -274,6 +274,10 @@ failed). The start goes on without that patch. If your mod is `"boot": "required
 - A patch lasts for the run of the game. It is not written to disk and not stored in a save.
 - The game's own hard limits still hold. Example: the game never allows more than 16 Flame Altars, whatever the table
   says.
+- For the Flame Altar count and the build-zone sizes, prefer Kiln's base rules
+  ([../services/build.md](../services/build.md#base-rules-and-base-limits-since-020-dev31), since 0.2.0-dev.31): Kiln's
+  own names, and no conflict with another mod. They are written after every resource patch and only raise, so a mod that
+  still patches `altarsPerFlameLevel` or `buildzoneSizesPerAltarLevel` itself keeps working beside them.
 
 ## Example: three changes of a data mod, in Kiln
 

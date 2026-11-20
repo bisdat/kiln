@@ -1,0 +1,11 @@
+{
+  "id": "base-rules-mfa",
+  "name": "base rules lab fixture: More Flame Altars' patch",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "side": "server",
+  "clients": "none",
+  "boot": true,
+  "advanced": true,
+  "description": "base-rules-test's fixture: More Flame Altars 0.4.0's own boot patch of the balancing table (Altars 4, ExtraAltars 2, BuildArea 150), as a blocks file."
+}

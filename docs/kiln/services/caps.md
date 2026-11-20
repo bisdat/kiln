@@ -461,3 +461,11 @@ A mod asks `world.ecs_read` (`WorldConcurrent.IsAvailable`) for the task-thread 
 compare-exchange writes, not the `engine.*` rows: those say what the profile
 carries, the `world.*` rows say whether kiln.world reads or writes with it in this process (both are among the
 kiln.world rows above).
+
+## Rows added in dev.31
+Rows a dev.31 package adds, as in "Rows added in dev.29" above. None is held.
+
+| Row | Kind | Reported by | Unconfirmed | What it says |
+|---|---|---|---|---|
+| `build.base_rules` | native, static (since 0.2.0-dev.31) | kiln.content, at its start, with `mods.boot.resource_patches` | — (a player's build zone on screen: package 18's client checks) | Kiln's base rules (`BaseRulesBlock`, a blocks file's `baseRules`; [build.md](build.md#base-rules-and-base-limits-since-020-dev31)) can be staged and are written in this process. Unavailable as `mods.boot.resource_patches` is: `policy` without a boot phase (no enabled mod says `"boot"`) or while that row is held, `service-missing` without kiln.assets' resources |
+| `build.base_limits` | managed, static (since 0.2.0-dev.31) | Kiln.Build, at its first use | — | `Build.BaseLimits` reads the Flame Altar counts and build-zone sizes (the game's own and this start's) and the world's Flame level: `service-missing` without kiln.base_rules (kiln.content older than 0.2.0-dev.31) or without kiln.world |
