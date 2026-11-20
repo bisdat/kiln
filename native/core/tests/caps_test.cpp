@@ -976,10 +976,17 @@ void writer_retry() {
     block(true);
     set_clock(91000);  // past flush's last try (90000): the writer takes the write and stays inside it
     const bool entered = wait_in_write();
+    auto f0 = std::chrono::steady_clock::now();
     const bool held = caps::flush();
+    const auto waited = std::chrono::steady_clock::now() - f0;
     const bool still = in_write() && writes() == w2;
     block(false);
-    CHECK(entered && !held && still, "flush: a write in flight past flush's bound: flush answers false and writes nothing");
+    // flush took its whole bound before it answered: it waited for the write in flight (a flush that gave up at once
+    // would answer false too). A lower bound, so a loaded machine cannot fail it.
+    CHECK(entered && !held && still && waited >= std::chrono::milliseconds(1000),
+          "flush: a write in flight past flush's bound: flush waits its 1 s for it, answers false and writes nothing "
+          "(%lld ms)",
+          static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(waited).count()));
     CHECK(wait_writes(w2 + 1) && writer_clean() && caps::flush() && writes() == w2 + 1 &&
               last_write().find("r.three") != std::string::npos,
           "flush: once the write in flight is in the file, flush answers true (one write)");
@@ -992,16 +999,18 @@ void writer_retry() {
     block(true);
     set_clock(92000);
     const bool entered2 = wait_in_write();
+    f0 = std::chrono::steady_clock::now();
     const bool held2 = caps::flush();
+    const auto waited2 = std::chrono::steady_clock::now() - f0;
     block(false);
     const bool failed = wait_attempts(a3 + 1) && poll_until([] {
         std::lock_guard l(caps::g_wmutex);
         return caps::g_dirty && !caps::g_in_flight;
     });
     const bool result = caps::flush();
-    CHECK(entered2 && !held2 && failed && result && writes() == w3 + 1 && attempts() == a3 + 2 &&
-              last_write().find("r.four") != std::string::npos,
-          "flush: a write in flight that fails is done again by flush, which then answers true");
+    CHECK(entered2 && !held2 && waited2 >= std::chrono::milliseconds(1000) && failed && result && writes() == w3 + 1 &&
+              attempts() == a3 + 2 && last_write().find("r.four") != std::string::npos,
+          "flush: waits its 1 s for a write in flight; when that write fails, flush does it again and answers true");
 }
 
 // No registry entry point after the fault: a subscriber (the managed snapshot's source), the stored rows and the
