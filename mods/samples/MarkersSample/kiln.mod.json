@@ -1,0 +1,9 @@
+{
+  "id": "markers-sample",
+  "name": "Markers sample (Kiln.Markers)",
+  "version": "1.0.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "MarkersSample.dll",
+  "side": "client",
+  "description": "Markers from markers.json on the map, the compass strip and in the world; Ctrl+Shift+M drops a pin where you stand, Ctrl+Alt+M puts a label over your character that follows it. Session only: they are set again in every world."
+}

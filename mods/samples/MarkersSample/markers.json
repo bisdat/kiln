@@ -1,0 +1,6 @@
+[
+  {"id":"thornhold","position":{"x":4593,"y":300,"z":3153},"text":"Thornhold","icon":"village",
+   "surfaces":["map","compass"],"priority":10},
+  {"id":"springlands_well","position":{"x":3670,"y":820,"z":1500},"text":"A well","icon":"well_plant",
+   "surfaces":["map","compass","world"],"height":2,"maxDistance":2000,"rgba":2160852991}
+]

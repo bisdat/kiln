@@ -34,6 +34,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [hooks.md](hooks.md) | kiln.hooks v2: one registry for every hook |
 | [items.md](items.md) | kiln.items: items in inventories |
 | [knowledge.md](knowledge.md) | kiln.knowledge: the game's knowledge, the vanilla journal, dialogue events, the client veto |
+| [markers.md](markers.md) | kiln.markers / Kiln.Markers: markers on the game's map, Kiln's compass strip and world labels, following an entity, server markers to players with Kiln |
 | [npcs.md](npcs.md) | Friendly NPCs and quests in the game's own UI |
 | [pacing.md](pacing.md) | kiln.pacing: where the game waits, and its task pools |
 | [player-state.md](player-state.md) | Player state and actions |
