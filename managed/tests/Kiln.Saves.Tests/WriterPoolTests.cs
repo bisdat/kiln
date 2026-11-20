@@ -392,6 +392,7 @@ public sealed class WriterPoolTests : IDisposable
     {
         using var native = new FakeSavesTable();
         var pool = Folder(onPool: true);
+        Assert.True(Store.Writer.Stop("the pool's run is done"));  // no runner left to take the synchronous run's jobs
         using var other = new InstanceHarness();  // a new folder for the same saves; _h's is deleted at the end as usual
         ComponentTask.Owners = null;
         var sync = Folder(onPool: false, other);
