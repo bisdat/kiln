@@ -347,7 +347,7 @@ on `kiln.ui.values`' slot frames and kiln.ui's `subscribe_pointer_press`.
 // Ctrl+click marks an item; the game never sees the press (no pick-up)
 Ui.Inventory.OnClick(new SlotClickOptions { Modifiers = SlotModifiers.Ctrl }, click =>
 {
-    if (click.ItemEntity.Value == 0) return;           // an empty slot
+    if (click.ItemEntity.Value == 0) return;           // an empty slot, or a plain stack (no item entity)
     SendToMyServer(click.ItemEntity);                  // your mod's own message: the server half checks it, then keeps the mark
     Ui.Inventory.Mark(click.ItemEntity, new SlotMark(new Color(235, 60, 50)));   // the picture, at once
 });
@@ -366,8 +366,12 @@ var under = Ui.Inventory.Hovered;                      // the slot under the cur
 | `Hovered` | the slot under the cursor in the game's latest UI frame | `ui.slots.inspect` |
 
 **The item's identity.** `SlotClick.ItemEntity` (and `VisibleSlot.ClientEntity`) is the item's entity in this game's
-world. For an item the server sent (every item in a player's, a chest's or a station's inventory) that is the server's own
-id of it: the game creates replicated entities with the server's id (`docs/re/network.md`, dossier chapter 05a section 6).
+world. Only items with an item entity of their own have one: weapons, tools, armour, cans (the items `Items.Read` also
+gives an `ItemEntity`). A plain stack (materials, consumables, ammunition: the game keeps it as an item id and a count)
+has none, so a click on it says `ItemEntity` 0 with its `Item` and `Slot.Count`; name such a stack by `Holder`,
+`Slot.InventoryPage`, `Slot.SlotIndex` and `Item`. For an item the server sent (every item in a player's, a chest's or a
+station's inventory) the entity is the server's own id of it: the game creates replicated entities with the server's id
+(`docs/re/network.md`, dossier chapter 05a section 6).
 `Holder`, `Slot.InventoryPage` and `Slot.SlotIndex` say where it was drawn. Send the id to your server half and check
 there that the item is in the sender's inventory or a container they may use (Kiln.Items) before acting: a click is a wish,
 never authority. Kiln Auto Loot's salvage marks work this way.
