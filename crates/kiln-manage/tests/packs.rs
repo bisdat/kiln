@@ -384,3 +384,68 @@ fn entries_no_hash_covers_or_windows_would_merge_are_refused() {
     let e = pack::build(&dirs, &request(&pid, &t.0, "1.0.1"), &t.0.join("out"), &mut NoProgress).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{}", e.message);
 }
+
+/// v1 installed by a friend, v2 built: (friend's dirs, instance profile id, v2).
+fn installed_and_v2(t: &Tmp) -> (DataDirs, String, pack::BuiltPack) {
+    let creator_dirs = DataDirs::at(t.0.join("creator"));
+    let pid = creator(&creator_dirs, &t.0);
+    let out = t.0.join("out");
+    let v1 = pack::build(&creator_dirs, &request(&pid, &t.0, "1.0.0"), &out, &mut NoProgress).unwrap();
+    let dirs = DataDirs::at(t.0.join("friend"));
+    let req = InstallRequest { source: ModpackSource::Path { path: v1.file.clone(), sha256: None }, consent: true, allow_http: false,
+        name: None, optional: BTreeMap::new(), activate: None };
+    let ip = pack::install(&dirs, None, &req, &mut NoProgress).unwrap().profile.id;
+    let g = import(&creator_dirs, &[kiln_mod(&t.0, "gamma", "2.0.0")]);
+    let mut cp = profile::get(&creator_dirs, &pid).unwrap();
+    cp.mods.kiln.push(pm(&find(&g, "gamma"), true));
+    profile::save(&creator_dirs, &cp).unwrap();
+    let cfg = creator_dirs.profile(&pid).join("config");
+    put(&cfg, "alpha.json", br#"{ "range": 25, "smash": true }"#);
+    put(&cfg, "beta/settings.ini", b"[Loot]\nchance = 6\n");
+    let v2 = pack::build(&creator_dirs, &request(&pid, &t.0, "1.1.0"), &out, &mut NoProgress).unwrap();
+    (dirs, ip, v2)
+}
+
+fn assert_still_v1(dirs: &DataDirs, ip: &str, alpha: &[u8]) {
+    let p = profile::get(dirs, ip).unwrap();
+    assert!(!p.mods.kiln.iter().any(|m| m.id == "gamma"), "the mods are v1's: {:?}", p.mods.kiln);
+    assert_eq!(p.mods.kiln.iter().find(|m| m.id == "pack.ember-run").unwrap().version, "1.0.0");
+    assert_eq!(pack::instance(dirs, ip).unwrap().unwrap().version, "1.0.0");
+    assert_eq!(std::fs::read(dirs.profile(ip).join("config/alpha.json")).unwrap(), alpha);
+    assert!(!dirs.profile(ip).join("pack/undo").exists(), "no undo of an update that did not happen");
+}
+
+#[test]
+fn an_update_that_cannot_merge_a_file_changes_nothing() {
+    let t = tmp("upfail1");
+    let (dirs, ip, v2) = installed_and_v2(&t);
+    // the player's alpha.json does not parse: its merge fails
+    let cfg = dirs.profile(&ip).join("config");
+    put(&cfg, "alpha.json", b"{ \"range\": 30, oops");
+    let up = UpdateRequest { profile: ip.clone(), source: ModpackSource::Path { path: v2.file.clone(), sha256: None }, consent: true,
+        allow_http: false, optional: BTreeMap::new(), resolve: BTreeMap::new(), all: Some(Pick::Pack) };
+    assert!(pack::update(&dirs, &up, &mut NoProgress).is_err());
+    assert_still_v1(&dirs, &ip, b"{ \"range\": 30, oops");
+    assert_eq!(pack::plan_update(&dirs, &ip, &v2.file, None, &BTreeMap::new()).unwrap().from, "1.0.0");
+}
+
+#[test]
+fn an_update_that_fails_while_writing_is_rolled_back() {
+    let t = tmp("upfail2");
+    let (dirs, ip, v2) = installed_and_v2(&t);
+    let cfg = dirs.profile(&ip).join("config");
+    let alpha = std::fs::read(cfg.join("alpha.json")).unwrap();
+    // beta/settings.ini is a folder now: alpha.json merges and is written first, then writing beta's file fails
+    std::fs::remove_file(cfg.join("beta/settings.ini")).unwrap();
+    std::fs::create_dir_all(cfg.join("beta/settings.ini/x")).unwrap();
+    let up = UpdateRequest { profile: ip.clone(), source: ModpackSource::Path { path: v2.file.clone(), sha256: None }, consent: true,
+        allow_http: false, optional: BTreeMap::new(), resolve: BTreeMap::new(), all: Some(Pick::Pack) };
+    assert!(pack::update(&dirs, &up, &mut NoProgress).is_err());
+    assert_still_v1(&dirs, &ip, &alpha);
+    assert!(cfg.join("beta/settings.ini/x").is_dir());
+    // and it works once the folder is gone
+    std::fs::remove_dir_all(cfg.join("beta/settings.ini")).unwrap();
+    pack::update(&dirs, &up, &mut NoProgress).unwrap();
+    assert_eq!(pack::instance(&dirs, &ip).unwrap().unwrap().version, "1.1.0");
+    assert!(pack::undo(&dirs, &ip).is_ok());
+}

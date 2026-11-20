@@ -1466,15 +1466,20 @@ fn write_base(dirs: &DataDirs, pid: &str, r: &ReadPack) -> Result<()> {
         }
         std::fs::write(&p, bytes).map_err(crate::util::io_at(&p, "writing"))?;
     }
-    // the old base moves aside first and comes back if the new one cannot take its place: an instance always has one
-    let old = pack_dir(dirs, pid).join("base.old");
+    swap_in(&tmp, &base)
+}
+
+/// Moves a staged folder into place: the old one moves aside to <dest>.old first and comes back if the new one cannot
+/// take its place, so there is always one (read_base falls back to base.old).
+fn swap_in(staged: &Path, dest: &Path) -> Result<()> {
+    let old = crate::util::with_suffix(dest, ".old");
     let _ = std::fs::remove_dir_all(&old);
-    if base.exists() {
-        std::fs::rename(&base, &old).map_err(crate::util::io_at(&base, "moving"))?;
+    if dest.exists() {
+        std::fs::rename(dest, &old).map_err(crate::util::io_at(dest, "moving"))?;
     }
-    if let Err(e) = std::fs::rename(&tmp, &base) {
-        let _ = std::fs::rename(&old, &base);
-        return Err(crate::util::io_at(&base, "moving")(e));
+    if let Err(e) = std::fs::rename(staged, dest) {
+        let _ = std::fs::rename(&old, dest);
+        return Err(crate::util::io_at(dest, "moving")(e));
     }
     let _ = std::fs::remove_dir_all(&old);
     Ok(())
@@ -1822,14 +1827,10 @@ pub fn update(dirs: &DataDirs, req: &UpdateRequest, progress: &mut dyn Progress)
         return Err(err(ErrorCode::Conflict, format!("{} setting(s) changed by both the pack and you need a choice: {}", unresolved.len(), unresolved.join(", ")))
             .with_detail(serde_json::to_value(&c.plan).unwrap_or_default()));
     }
-    let (_, imported) = import_pack(dirs, &zip_file, sha.as_deref(), &|m| m.env().client != Need::Unsupported, progress)?;
-    progress.report(Some(0.85), "keeping an undo copy");
-    snapshot_undo(dirs, &profile.id)?;
-    let mut p = profile.clone();
-    p.mods = c.mods.clone();
-    p.late = r.index.order.late.iter().cloned().chain(profile.late.iter().filter(|id| !r.index.order.late.contains(id)).cloned()).collect();
-    let saved = crate::profile::save(dirs, &p)?;
+    // every merge first: a file that cannot be merged (a live file that does not parse) stops the update here, before
+    // anything is imported or written
     let config_dir = dirs.profile(&profile.id).join("config");
+    let mut writes: Vec<(PathBuf, String)> = Vec::new();
     for (path, mode, take, conflicts) in &c.files {
         let mut edits = take.clone();
         for (key, k) in conflicts {
@@ -1843,77 +1844,137 @@ pub fn update(dirs: &DataDirs, req: &UpdateRequest, progress: &mut dyn Progress)
         }
         let target = config_dir.join(path);
         let live = std::fs::read(&target).ok().map(|b| crate::manifest::decode_text(&b));
-        let out = merge::apply(*mode, path, live.as_deref(), &edits)?;
-        if let Some(d) = target.parent() {
-            std::fs::create_dir_all(d).map_err(crate::util::io_at(d, "creating"))?;
+        writes.push((target, merge::apply(*mode, path, live.as_deref(), &edits)?));
+    }
+    let (_, imported) = import_pack(dirs, &zip_file, sha.as_deref(), &|m| m.env().client != Need::Unsupported, progress)?;
+    progress.report(Some(0.85), "keeping an undo copy");
+    // the instance as it is now, staged: it becomes the undo copy once the update stands, and puts the instance back if
+    // a step fails (a profile changed meanwhile, a file that cannot be written), so a failed update changes nothing
+    let pd = pack_dir(dirs, &profile.id);
+    let staged = pd.join("undo.new");
+    snapshot_undo(dirs, &profile.id, &staged)?;
+    let (mut mods_saved, mut config_written) = (false, false);
+    let applied = (|| -> Result<(Profile, Instance)> {
+        let mut p = profile.clone();
+        p.mods = c.mods.clone();
+        p.late = r.index.order.late.iter().cloned().chain(profile.late.iter().filter(|id| !r.index.order.late.contains(id)).cloned()).collect();
+        let saved = crate::profile::save(dirs, &p)?;
+        mods_saved = true;
+        for (target, out) in &writes {
+            if let Some(d) = target.parent() {
+                std::fs::create_dir_all(d).map_err(crate::util::io_at(d, "creating"))?;
+            }
+            config_written = true;
+            crate::util::write_atomic(target, out.as_bytes())?;
         }
-        crate::util::write_atomic(&target, out.as_bytes())?;
-    }
-    write_base(dirs, &profile.id, &r)?;
-    let mut optional = inst.optional.clone();
-    for m in r.index.mods.iter().filter(|m| m.dep == Dep::Optional) {
-        let on = saved.mods.list(m.kind).iter().find(|e| e.id == m.id).map(|e| e.enabled).unwrap_or(m.default.unwrap_or(true));
-        optional.insert(m.id.clone(), on);
-    }
-    optional.retain(|id, _| r.index.mods.iter().any(|m| &m.id == id && m.dep == Dep::Optional));
-    let new_inst = Instance {
-        version: r.index.version.clone(),
-        name: r.index.name.clone(),
-        sha256: r.sha256.clone(),
-        url: url.or(inst.url.clone()),
-        crucible: r.index.crucible.clone().or(inst.crucible.clone()),
-        optional,
-        updated: Some(crate::util::now_rfc3339()),
-        previous: Some(inst.version.clone()),
-        ..inst
+        write_base(dirs, &profile.id, &r)?;
+        let mut optional = inst.optional.clone();
+        for m in r.index.mods.iter().filter(|m| m.dep == Dep::Optional) {
+            let on = saved.mods.list(m.kind).iter().find(|e| e.id == m.id).map(|e| e.enabled).unwrap_or(m.default.unwrap_or(true));
+            optional.insert(m.id.clone(), on);
+        }
+        optional.retain(|id, _| r.index.mods.iter().any(|m| &m.id == id && m.dep == Dep::Optional));
+        let new_inst = Instance {
+            version: r.index.version.clone(),
+            name: r.index.name.clone(),
+            sha256: r.sha256.clone(),
+            url: url.clone().or(inst.url.clone()),
+            crucible: r.index.crucible.clone().or(inst.crucible.clone()),
+            optional,
+            updated: Some(crate::util::now_rfc3339()),
+            previous: Some(inst.version.clone()),
+            ..inst.clone()
+        };
+        crate::util::write_json_atomic(&pd.join(INSTANCE_FILE), &new_inst)?;
+        Ok((saved, new_inst))
+    })();
+    let (saved, new_inst) = match applied {
+        Ok(x) => x,
+        Err(e) => {
+            if let Err(back) = restore_from(dirs, &profile.id, &staged, mods_saved, config_written) {
+                // the copy stays as the undo copy: pack undo tries again
+                let _ = std::fs::remove_dir_all(pd.join("undo"));
+                let _ = std::fs::rename(&staged, pd.join("undo"));
+                return Err(Error::new(e.code, format!("{} (putting the instance back failed too: {}; Undo tries again)", e.message, back.message)));
+            }
+            let _ = std::fs::remove_dir_all(&staged);
+            return Err(e);
+        }
     };
-    crate::util::write_json_atomic(&pack_dir(dirs, &profile.id).join(INSTANCE_FILE), &new_inst)?;
+    // the update stands: its copy replaces the last undo copy
+    let undo = pd.join("undo");
+    let _ = std::fs::remove_dir_all(&undo);
+    if let Err(e) = std::fs::rename(&staged, &undo) {
+        progress.report(None, &format!("updated, but the undo copy could not be kept: {e}"));
+    }
     progress.report(Some(1.0), &format!("pack {} updated {} -> {}", r.index.name, c.plan.from, c.plan.to));
     Ok(UpdateResult { plan: c.plan, profile: saved, instance: new_inst, imported })
 }
 
-fn snapshot_undo(dirs: &DataDirs, pid: &str) -> Result<()> {
+/// A copy of the instance as it is (profile meta.json, instance.json, config/, base/) in dest.
+fn snapshot_undo(dirs: &DataDirs, pid: &str, dest: &Path) -> Result<()> {
     let pd = pack_dir(dirs, pid);
-    let undo = pd.join("undo");
-    let _ = std::fs::remove_dir_all(&undo);
-    std::fs::create_dir_all(&undo).map_err(crate::util::io_at(&undo, "creating"))?;
-    std::fs::copy(dirs.profile(pid).join(crate::profile::META), undo.join(crate::profile::META)).map_err(crate::util::io_at(&undo, "copying into"))?;
-    std::fs::copy(pd.join(INSTANCE_FILE), undo.join(INSTANCE_FILE)).map_err(crate::util::io_at(&undo, "copying into"))?;
+    let _ = std::fs::remove_dir_all(dest);
+    std::fs::create_dir_all(dest).map_err(crate::util::io_at(dest, "creating"))?;
+    std::fs::copy(dirs.profile(pid).join(crate::profile::META), dest.join(crate::profile::META)).map_err(crate::util::io_at(dest, "copying into"))?;
+    std::fs::copy(pd.join(INSTANCE_FILE), dest.join(INSTANCE_FILE)).map_err(crate::util::io_at(dest, "copying into"))?;
     let config = dirs.profile(pid).join("config");
     if config.is_dir() {
-        crate::util::copy_tree(&config, &undo.join("config"))?;
+        crate::util::copy_tree(&config, &dest.join("config"))?;
     }
-    crate::util::copy_tree(&pd.join("base"), &undo.join("base"))?;
+    crate::util::copy_tree(&pd.join("base"), &dest.join("base"))?;
     Ok(())
+}
+
+/// Puts an instance back as a copy holds it: its mods and late DLLs (with mods), its config folder (with config; the
+/// live one comes back if the copy cannot be laid down), the base and instance.json.
+fn restore_from(dirs: &DataDirs, pid: &str, snap: &Path, mods: bool, config: bool) -> Result<Profile> {
+    let pd = pack_dir(dirs, pid);
+    let mut p = crate::profile::get(dirs, pid)?;
+    if mods {
+        let before: Profile = crate::util::read_json(&snap.join(crate::profile::META))?
+            .ok_or_else(|| Error::not_found(format!("{}: no profile copy", snap.display())))?;
+        p.mods = before.mods;
+        p.late = before.late;
+        p = crate::profile::save(dirs, &p)?;
+    }
+    if config {
+        let live = dirs.profile(pid).join("config");
+        let old = dirs.profile(pid).join("config.undo-old");
+        let _ = std::fs::remove_dir_all(&old);
+        if live.exists() {
+            std::fs::rename(&live, &old).map_err(crate::util::io_at(&live, "moving"))?;
+        }
+        let laid = if snap.join("config").is_dir() {
+            crate::util::copy_tree(&snap.join("config"), &live).map(|_| ())
+        } else {
+            std::fs::create_dir_all(&live).map_err(crate::util::io_at(&live, "creating"))
+        };
+        if let Err(e) = laid {
+            let _ = std::fs::remove_dir_all(&live);
+            let _ = std::fs::rename(&old, &live);
+            return Err(e);
+        }
+        let _ = std::fs::remove_dir_all(&old);
+    }
+    let tmp = pd.join("base.tmp");
+    let _ = std::fs::remove_dir_all(&tmp);
+    crate::util::copy_tree(&snap.join("base"), &tmp)?;
+    swap_in(&tmp, &pd.join("base"))?;
+    crate::util::write_atomic(&pd.join(INSTANCE_FILE), &std::fs::read(snap.join(INSTANCE_FILE)).map_err(crate::util::io_at(snap, "reading"))?)?;
+    Ok(p)
 }
 
 /// Takes the last update back: the mods, the config folder, the base and instance.json as they were before it.
 pub fn undo(dirs: &DataDirs, pid: &str) -> Result<Profile> {
-    let pd = pack_dir(dirs, pid);
-    let undo = pd.join("undo");
-    let before: Profile = crate::util::read_json(&undo.join(crate::profile::META))?
-        .ok_or_else(|| Error::not_found(format!("profile {pid} has no update to undo")))?;
-    let mut p = crate::profile::get(dirs, pid)?;
-    p.mods = before.mods;
-    p.late = before.late;
-    let saved = crate::profile::save(dirs, &p)?;
-    let config = dirs.profile(pid).join("config");
-    let old = dirs.profile(pid).join("config.undo-old");
-    let _ = std::fs::remove_dir_all(&old);
-    if config.exists() {
-        std::fs::rename(&config, &old).map_err(crate::util::io_at(&config, "moving"))?;
+    let undo = pack_dir(dirs, pid).join("undo");
+    if !undo.join(crate::profile::META).is_file() {
+        crate::profile::get(dirs, pid)?;
+        return Err(Error::not_found(format!("profile {pid} has no update to undo")));
     }
-    if undo.join("config").is_dir() {
-        crate::util::copy_tree(&undo.join("config"), &config)?;
-    } else {
-        std::fs::create_dir_all(&config).map_err(crate::util::io_at(&config, "creating"))?;
-    }
-    let _ = std::fs::remove_dir_all(&old);
-    let _ = std::fs::remove_dir_all(pd.join("base"));
-    crate::util::copy_tree(&undo.join("base"), &pd.join("base"))?;
-    std::fs::copy(undo.join(INSTANCE_FILE), pd.join(INSTANCE_FILE)).map_err(crate::util::io_at(&pd, "copying into"))?;
+    let p = restore_from(dirs, pid, &undo, true, true)?;
     let _ = std::fs::remove_dir_all(&undo);
-    Ok(saved)
+    Ok(p)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
