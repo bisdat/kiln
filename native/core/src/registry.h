@@ -29,6 +29,12 @@ struct LogSub {
 };
 
 KilnOwner owner_create(std::string_view id);
+// An owner Kiln.Host makes through its own KilnApi (api_for_managed_host's owner_create, api.cpp): its mods'
+// "mod:<manifest id>" owners and its own. kiln.mod-values gives "mod:<id>" the manifest id as namespace only for these;
+// a native owner that names itself "mod:<id>" gets a native namespace (services/mod_values.cpp).
+KilnOwner owner_create_managed_host(std::string_view id);
+// Alive and made by owner_create_managed_host (fixed for the owner's life; owner ids are never reused).
+bool owner_managed_host(KilnOwner owner);
 std::string owner_name(KilnOwner owner);
 bool owner_alive(KilnOwner owner);
 void owner_revoke(KilnOwner owner);

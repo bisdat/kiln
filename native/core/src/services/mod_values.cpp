@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
-// kiln.mod-values v1 and kiln.mod-values.backend v1 (abi/services/kiln_mod_values.h): the native facade over the
-// managed ledger of Kiln.ModValues (dossier chapter 05b section 5). The core owns what is native: owner namespaces,
-// argument checks, the result rules (a refusal is KILN_OK with ok 0; Before/After flags), the subscriptions and owner
-// revokes. Everything about values is the backend's: Kiln.ModValues binds its process-lifetime functions once, at its
-// start (managed/services/Kiln.ModValues/NativeBackend.cs), and delivers its events through dispatch.
+// kiln.mod-values v1 (abi/services/kiln_mod_values.h) and the Kiln-internal kiln.internal.mod-values.backend v1
+// (../mod_values_host.h): the native facade over the managed ledger of Kiln.ModValues (dossier chapter 05b section 5).
+// The core owns what is native: owner namespaces, argument checks, the result rules (a refusal is KILN_OK with ok 0;
+// Before/After flags), the subscriptions and owner revokes. Everything about values is the backend's: Kiln.ModValues
+// binds its process-lifetime functions once, at its start (managed/services/Kiln.ModValues/NativeBackend.cs), through
+// the backend table only the managed host's KilnApi resolves (api.cpp), and delivers its events through dispatch.
 // Host-tested with a stub backend against the real owner registry: tests/mod_values_test.cpp.
 #include <algorithm>
 #include <atomic>
@@ -19,6 +20,7 @@
 #include "../common.h"
 #include "../guard.h"
 #include "../log.h"
+#include "../mod_values_host.h"
 #include "../registry.h"
 #include "service.h"
 #include "services/kiln_capacity_util.hpp"  // the core's portable SHA-256
@@ -98,6 +100,7 @@ bool check_def(const KilnModValueDef* d) {
     if (d->kind > KMV_EXPERIENCE || d->persistence > KMV_CARRIED || d->read_policy > KMV_READ_LIST ||
         d->sync_policy > KMV_SYNC_READERS || (d->flags & ~kDefFlags) != 0)
         return false;
+    if (d->reserved0 != 0 || d->reserved1 != 0 || d->reserved2 != 0) return false;  // free for a later version
     if (!readable(d->local_id) || !is_id(sv(d->local_id))) return false;
     if (!check_json(d->label_json, true) || !check_json(d->number_format_json, false)) return false;
     if (d->persistence == KMV_CARRIED && (d->kind == KMV_CURRENCY || (d->flags & KMV_TRUST_IMPORTS) == 0)) return false;
@@ -125,20 +128,26 @@ bool check_character(const KilnModCharacter* c) {
 
 // ---- owners and their namespaces -------------------------------------------------------------------------------------
 
-// A managed mod's owner is "mod:<manifest id>" (Kiln.Host Mods.LoadCore): the id is its namespace, as Kiln.ModValues
-// gives the mod. Every other owner: "native." + the first 32 hex digits of the SHA-256 of its exact name.
-std::string namespace_for(std::string_view owner_name) {
-    if (owner_name.size() > 4 && owner_name.substr(0, 4) == "mod:" && is_namespace(owner_name.substr(4)))
+constexpr std::string_view kNativePrefix = "native.";
+
+// A managed mod's owner is one Kiln.Host made through its own KilnApi (reg::owner_managed_host) and named
+// "mod:<manifest id>" (Kiln.Host Mods.LoadCore): the id is its namespace, as Kiln.ModValues gives the mod. Every other
+// owner, a native one named "mod:<id>" too: "native." + the first 32 hex digits of the SHA-256 of its exact name.
+// "native." stays the hashed namespaces' own: Kiln.Host refuses manifest ids that start with it, and here a host
+// owner "mod:native.<x>" is hashed as well.
+std::string namespace_for(std::string_view owner_name, bool managed_host) {
+    if (managed_host && owner_name.size() > 4 && owner_name.substr(0, 4) == "mod:" && is_namespace(owner_name.substr(4)) &&
+        !owner_name.substr(4).starts_with(kNativePrefix))
         return std::string(owner_name.substr(4));
     const auto h = capacity::detail::sha256(reinterpret_cast<const uint8_t*>(owner_name.data()), owner_name.size());
-    std::string ns = "native.";
+    std::string ns(kNativePrefix);
     capacity::detail::hex(ns, h.data(), 16);
     return ns;
 }
 
 struct OwnerState {
     std::string ns;
-    bool defines = false;  // described or defined through this facade: its namespace is retired with it
+    bool defines = false;  // described or defined through this facade: what it made is retired with it
 };
 
 struct Sub {
@@ -165,6 +174,7 @@ std::mutex g_bind_mutex;
 KilnModValuesBackend g_backend_copy{};
 std::atomic<const KilnModValuesBackend*> g_backend{nullptr};
 KilnHandle g_retiring = 0;
+std::atomic<bool> g_running{false};  // init ran: the revoke observer is in place, the managed host may bind
 
 // The subscriptions this thread is calling right now (dispatch inside a callback nests): an unsubscribe or a revoke
 // from inside a callback does not wait for the calls of its own thread. Trivial types only: no TLS destructor.
@@ -185,8 +195,9 @@ KilnResult owner_ns(KilnOwner owner, std::string* out) {
         }
     }
     const std::string name = reg::owner_name(owner);
+    const bool host = reg::owner_managed_host(owner);  // fixed for the owner's life (owner ids are never reused)
     if (!reg::owner_alive(owner)) return KILN_ERR_REVOKED;  // the name read may be a revoked owner's placeholder
-    *out = namespace_for(name);
+    *out = namespace_for(name, host);
     std::lock_guard lock(g_mutex);
     g_owners.try_emplace(owner, OwnerState{*out, false});
     return KILN_OK;
@@ -208,8 +219,9 @@ void wait_idle_locked(std::unique_lock<std::mutex>& lock, const Sub* s) {
 }
 
 // An owner is gone (revoked): its subscriptions are removed (no call of them is running when this returns, except on
-// this thread), and when it described or defined and no other live owner of its namespace did, the backend retires
-// the namespace (definitions leave the active view; the data is parked).
+// this thread), and when it described or defined, the backend retires what it made: the definitions registered with its
+// handle as the token leave the described and active views (another owner's in the same namespace stay; the data is
+// parked).
 void owner_gone(KilnOwner owner) {
     std::string retire;
     {
@@ -223,20 +235,16 @@ void owner_gone(KilnOwner owner) {
         });
         if (!removed.empty()) update_wanted_locked();
         if (auto it = g_owners.find(owner); it != g_owners.end()) {
-            const OwnerState st = std::move(it->second);
+            if (it->second.defines) retire = std::move(it->second.ns);
             g_owners.erase(it);
-            const bool shared = std::any_of(g_owners.begin(), g_owners.end(), [&](const auto& kv) {
-                return kv.second.defines && kv.second.ns == st.ns && reg::owner_alive(kv.first);
-            });
-            if (st.defines && !shared) retire = st.ns;
         }
         for (const auto& s : removed) wait_idle_locked(lock, s.get());
     }
     if (retire.empty()) return;
     if (const auto* b = backend()) {
-        KLOG_I("kiln.mod-values: owner %llu was revoked: its definitions in %s are retired (data kept)",
+        KLOG_I("kiln.mod-values: owner %llu was revoked: the definitions it made in %s are retired (data kept)",
                static_cast<unsigned long long>(owner), retire.c_str());
-        b->retire(kstr(retire));
+        b->retire(kstr(retire), owner);
     }
 }
 
@@ -350,7 +358,7 @@ KilnResult definition(bool activate, KilnOwner owner, const KilnModValueDef* def
     v1.size = sizeof v1;
     KilnModDefinitionResult r{};
     r.size = sizeof r;
-    KilnResult rc = (activate ? b->define : b->describe)(kstr(ns), &v1, &r);
+    KilnResult rc = (activate ? b->define : b->describe)(kstr(ns), owner, &v1, &r);
     if (rc == KILN_OK) {
         if (r.ok != 0) {
             r.ok = 1;
@@ -489,10 +497,11 @@ const KilnModValuesApi kTable = {{sizeof(KilnModValuesApi), KILN_MOD_VALUES_VERS
                                  &mv_subscribe,
                                  &mv_unsubscribe};
 
-// ---- kiln.mod-values.backend ---------------------------------------------------------------------------------------
+// ---- kiln.internal.mod-values.backend ------------------------------------------------------------------------------
 
 KilnResult KILN_CALL be_bind(const KilnModValuesBackend* b) {
-    if (!b || b->size < sizeof *b || !b->describe || !b->define || !b->read || !b->change || !b->read_synced || !b->retire)
+    // exactly this build's record: a Kiln-internal table is not append-only
+    if (!b || b->size != sizeof *b || !b->describe || !b->define || !b->read || !b->change || !b->read_synced || !b->retire)
         return KILN_ERR_INVALID_ARGUMENT;
     std::lock_guard lock(g_bind_mutex);
     if (g_backend.load(std::memory_order_acquire)) {
@@ -590,13 +599,16 @@ bool init() {
         KLOG_E("kiln.mod-values: no owner-retiring observer; the service is unavailable");
         return false;
     }
+    g_running.store(true, std::memory_order_release);
     return true;
 }
 
 }  // namespace
 
+// kiln.internal.mod-values.backend v1 for the managed host's KilnApi only (api.cpp api_service_managed_host): no in-core
+// service, so no other view's lookup finds it. NULL until kiln.mod-values' init ran (and when it failed).
+const void* backend_table() { return g_running.load(std::memory_order_acquire) ? &kBackendTable : nullptr; }
+
 KILN_SERVICE(mod_values, KILN_MOD_VALUES_SERVICE, KILN_MOD_VALUES_VERSION, &kTable, &init);
-KILN_SERVICE(mod_values_backend, KILN_MOD_VALUES_BACKEND_SERVICE, KILN_MOD_VALUES_BACKEND_VERSION, &kBackendTable,
-             nullptr);
 
 }  // namespace kiln::mod_values

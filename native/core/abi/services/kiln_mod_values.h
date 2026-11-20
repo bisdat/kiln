@@ -2,22 +2,26 @@
  * kiln.mod-values v1 (in-core service, since 0.2.0-dev.31): a mod's own per-character values (counters, currencies,
  * experience with levels) for native callers, over the same server ledger managed mods use (Kiln.ModValues,
  * docs/kiln/services/mod-values.md; dossier chapter 05b section 5). Not a second ledger: every call goes to the managed
- * backend Kiln.ModValues hands the core once at its start (kiln.mod-values.backend below). Until it has (before the
- * first service tick, with no .NET runtime, or an older Kiln.ModValues), describe, define, read, change and
- * read_synced answer KILN_ERR_UNAVAILABLE; owner_namespace, subscribe and unsubscribe work without it.
+ * backend Kiln.ModValues hands the core once at its start (through a Kiln-internal table of the same build, not part of
+ * this ABI). Until it has (before the first service tick, with no .NET runtime, or another build's Kiln.ModValues),
+ * describe, define, read, change and read_synced answer KILN_ERR_UNAVAILABLE; owner_namespace, subscribe and
+ * unsubscribe work without it.
  *
  * Namespaces. Every value belongs to the namespace of the owner that defines it, and a qualified key names it as
- * "namespace:id" (canonical ASCII, exactly one colon). A managed mod's owner (the host names it "mod:<manifest id>")
- * has its validated lowercase manifest id as namespace, the same one Kiln.ModValues gives the mod. Every other owner
- * has "native." plus the first 32 lowercase hex digits of the SHA-256 of its exact registry owner name (the UTF-8
- * text it was created with, e.g. "plugin:my-mod.dll"; owner 0 is "kiln"). owner_namespace tells it. This keeps native
- * and managed namespaces apart by accident; it is no sandbox: native code can name any owner.
+ * "namespace:id" (canonical ASCII, exactly one colon). A managed mod's owner (one Kiln.Host created for the mod, named
+ * "mod:<manifest id>") has its validated lowercase manifest id as namespace, the same one Kiln.ModValues gives the
+ * mod. Every other owner, also a native owner whose name merely reads "mod:<id>", has "native." plus the first 32
+ * lowercase hex digits of the SHA-256 of its exact registry owner name (the UTF-8 text it was created with, e.g.
+ * "plugin:my-mod.dll"; owner 0 is "kiln"). Manifest ids never start with "native." (Kiln.Host and kiln lint refuse
+ * them), so the two kinds never meet. owner_namespace tells it. This keeps native and managed namespaces apart by
+ * accident; it is no sandbox: native code can pass any owner handle.
  *   namespace  ^[a-z0-9][a-z0-9._-]{0,63}$        id  ^[a-z][a-z0-9._-]{0,63}$
  *
  * Results (the one error rule). KILN_OK means a syntactically valid request got a domain answer: out->ok = 1, or
  * out->ok = 0 with out->reason (KMV_*; never KMV_NONE). Unknown keys (KMV_UNDEFINED), retired definitions
  * (KMV_DEFINITION_RETIRED), another namespace's value (KMV_ACCESS_DENIED) and the like are such answers, not errors.
  *   KILN_ERR_INVALID_ARGUMENT  a null pointer, a record size below v1, an unknown enum value, flag bit or operation,
+ *                              a reserved field that is not 0,
  *                              bad key/id syntax, a definition the rules refuse (Currency + Carried, Carried without
  *                              KMV_TRUST_IMPORTS, read_mods outside KMV_READ_LIST, bad thresholds, bounds, scale,
  *                              labels or number formats), an amount the operation refuses (SPEND <= 0, a negative ADD
@@ -175,6 +179,7 @@ typedef struct KilnModValueDef {
     uint32_t carry_epoch; /* >= 1; Carried: raise it to reset carried progress */
     uint32_t read_policy; /* KilnModReadPolicy */
     uint32_t sync_policy; /* KilnModSyncPolicy */
+    uint32_t reserved0;   /* 0 (the padding before local_id, named; not 0: INVALID_ARGUMENT) */
     KilnStr local_id;     /* the id in the caller's namespace */
     KilnStr label_json;   /* UiText as JSON: "text" (every language) or {"en": "...", "de": "...", "*": "..."} */
     KilnStr number_format_json; /* the same encoding; len 0: N<scale>. N0-N6, F0-F6, "0", "0." + 1..6 zeros */
@@ -182,10 +187,10 @@ typedef struct KilnModValueDef {
     int64_t initial;            /* read only with KMV_HAS_INITIAL */
     const int64_t* xp_thresholds; /* Experience only (required there): 0 first, strictly increasing, at most 256 */
     uint32_t threshold_count;
-    uint32_t reserved0;
+    uint32_t reserved1;           /* 0 (not 0: INVALID_ARGUMENT) */
     const KilnStr* read_mods;     /* KMV_READ_LIST only: namespaces that may read, at most 32 */
     uint32_t read_mod_count;
-    uint32_t reserved1;
+    uint32_t reserved2;           /* 0 (not 0: INVALID_ARGUMENT) */
 } KilnModValueDef; /* 144 bytes */
 
 typedef struct KilnModValue {
@@ -277,59 +282,6 @@ typedef struct KilnModValuesApi {
     KilnResult(KILN_CALL* unsubscribe)(KilnHandle handle);
 } KilnModValuesApi; /* 72 bytes */
 
-/* ====================================================================================================================
- * kiln.mod-values.backend v1: for Kiln.ModValues only (precedent kiln.ui.tick). The managed host hands the core its
- * process-lifetime backend functions once (bind), and delivers the ledger's events to native subscribers (dispatch).
- * Mods never call this table.
- *  - bind: the core copies *backend (size >= sizeof(KilnModValuesBackend), every function set). The first bind wins
- *    for the life of the process; a second one is INVALID_ARGUMENT (logged). Any thread.
- *  - The core calls the backend on the facade caller's thread, after its own checks, with the owner's validated
- *    namespace as owner_ns, records of Kiln's sizeof, and out zeroed with size set. change gets expected only with
- *    KMV_EXPECT_REVISION, else NULL. The backend fills ok, reason, character, flags, before and after; the core keeps
- *    the rules above (refused: flags 0; read: AFTER; accepted change: BEFORE|AFTER, else KILN_ERR_INTERNAL).
- *    A backend function never lets an exception out: it returns a KilnResult as above.
- *  - retire(owner_ns): the last owner that described or defined in owner_ns was revoked: its definitions leave the
- *    active view, its data is parked. On the revoking thread.
- *  - wanted(): KMV_WANT_* bits of the scopes with a native subscriber now (cheap, lock-free; any thread): the host
- *    builds and dispatches an event only when its bit is set.
- *  - dispatch(change, exported): one event to every matching subscriber, on the calling thread (canonical: server
- *    tick; synced: client main), synchronously. exported is the value's read and sync policy now (rechecked here for
- *    each subscriber of another namespace). INVALID_ARGUMENT for a bad record.
- * ================================================================================================================== */
-#define KILN_MOD_VALUES_BACKEND_SERVICE "kiln.mod-values.backend"
-#define KILN_MOD_VALUES_BACKEND_VERSION 1u
-
-enum { KMV_WANT_CANONICAL = 1u << KMV_CANONICAL_EVENTS, KMV_WANT_SYNCED = 1u << KMV_SYNCED_EVENTS };
-
-typedef struct KilnModValueExport {
-    uint32_t size;           /* sizeof(KilnModValueExport) (24) */
-    uint32_t read_policy;    /* KilnModReadPolicy */
-    uint32_t sync_policy;    /* KilnModSyncPolicy */
-    uint32_t read_mod_count; /* KMV_READ_LIST: entries in read_mods */
-    const KilnStr* read_mods;
-} KilnModValueExport; /* 24 bytes */
-
-typedef struct KilnModValuesBackend {
-    uint32_t size; /* sizeof(KilnModValuesBackend) (56) */
-    uint32_t reserved;
-    KilnResult(KILN_CALL* describe)(KilnStr owner_ns, const KilnModValueDef* def, KilnModDefinitionResult* out);
-    KilnResult(KILN_CALL* define)(KilnStr owner_ns, const KilnModValueDef* def, KilnModDefinitionResult* out);
-    KilnResult(KILN_CALL* read)(KilnStr owner_ns, const KilnModCharacter* character, KilnStr qualified_key,
-                                KilnModValueResult* out);
-    KilnResult(KILN_CALL* change)(KilnStr owner_ns, const KilnModCharacter* character, KilnStr qualified_key,
-                                  uint32_t operation, int64_t amount, const KilnModValueVersion* expected,
-                                  uint64_t request_id, KilnModValueResult* out);
-    KilnResult(KILN_CALL* read_synced)(KilnStr owner_ns, KilnStr qualified_key, KilnModValueResult* out);
-    void(KILN_CALL* retire)(KilnStr owner_ns);
-} KilnModValuesBackend; /* 56 bytes */
-
-typedef struct KilnModValuesBackendApi {
-    KilnServiceHeader header; /* { sizeof(KilnModValuesBackendApi), KILN_MOD_VALUES_BACKEND_VERSION } */
-    KilnResult(KILN_CALL* bind)(const KilnModValuesBackend* backend);
-    uint32_t(KILN_CALL* wanted)(void);
-    KilnResult(KILN_CALL* dispatch)(const KilnModValueChange* change, const KilnModValueExport* exported);
-} KilnModValuesBackendApi; /* 32 bytes */
-
 #ifdef __cplusplus
 }
 #endif
@@ -345,12 +297,14 @@ KMV_ASSERT(sizeof(KilnModValueDef) == 144 && offsetof(KilnModValueDef, kind) == 
                offsetof(KilnModValueDef, persistence) == 8 && offsetof(KilnModValueDef, scale) == 12 &&
                offsetof(KilnModValueDef, flags) == 16 && offsetof(KilnModValueDef, version) == 20 &&
                offsetof(KilnModValueDef, carry_epoch) == 24 && offsetof(KilnModValueDef, read_policy) == 28 &&
-               offsetof(KilnModValueDef, sync_policy) == 32 && offsetof(KilnModValueDef, local_id) == 40 &&
+               offsetof(KilnModValueDef, sync_policy) == 32 && offsetof(KilnModValueDef, reserved0) == 36 &&
+               offsetof(KilnModValueDef, local_id) == 40 &&
                offsetof(KilnModValueDef, label_json) == 56 && offsetof(KilnModValueDef, number_format_json) == 72 &&
                offsetof(KilnModValueDef, minimum) == 88 && offsetof(KilnModValueDef, maximum) == 96 &&
                offsetof(KilnModValueDef, initial) == 104 && offsetof(KilnModValueDef, xp_thresholds) == 112 &&
-               offsetof(KilnModValueDef, threshold_count) == 120 && offsetof(KilnModValueDef, read_mods) == 128 &&
-               offsetof(KilnModValueDef, read_mod_count) == 136,
+               offsetof(KilnModValueDef, threshold_count) == 120 && offsetof(KilnModValueDef, reserved1) == 124 &&
+               offsetof(KilnModValueDef, read_mods) == 128 && offsetof(KilnModValueDef, read_mod_count) == 136 &&
+               offsetof(KilnModValueDef, reserved2) == 140,
            "KilnModValueDef v1 (x64)");
 KMV_ASSERT(sizeof(KilnModValue) == 72 && offsetof(KilnModValue, level) == 16 &&
                offsetof(KilnModValue, definition_version) == 20 && offsetof(KilnModValue, carry_epoch) == 24 &&
@@ -372,15 +326,6 @@ KMV_ASSERT(sizeof(KilnModValuesApi) == 72 && offsetof(KilnModValuesApi, owner_na
                offsetof(KilnModValuesApi, read_synced) == 48 && offsetof(KilnModValuesApi, subscribe) == 56 &&
                offsetof(KilnModValuesApi, unsubscribe) == 64,
            "KilnModValuesApi v1 (x64)");
-KMV_ASSERT(sizeof(KilnModValueExport) == 24 && offsetof(KilnModValueExport, read_mods) == 16, "KilnModValueExport v1 (x64)");
-KMV_ASSERT(sizeof(KilnModValuesBackend) == 56 && offsetof(KilnModValuesBackend, describe) == 8 &&
-               offsetof(KilnModValuesBackend, define) == 16 && offsetof(KilnModValuesBackend, read) == 24 &&
-               offsetof(KilnModValuesBackend, change) == 32 && offsetof(KilnModValuesBackend, read_synced) == 40 &&
-               offsetof(KilnModValuesBackend, retire) == 48,
-           "KilnModValuesBackend v1 (x64)");
-KMV_ASSERT(sizeof(KilnModValuesBackendApi) == 32 && offsetof(KilnModValuesBackendApi, bind) == 8 &&
-               offsetof(KilnModValuesBackendApi, wanted) == 16 && offsetof(KilnModValuesBackendApi, dispatch) == 24,
-           "KilnModValuesBackendApi v1 (x64)");
 #undef KMV_ASSERT
 
 #endif /* KILN_MOD_VALUES_H */

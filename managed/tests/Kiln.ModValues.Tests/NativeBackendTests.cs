@@ -498,14 +498,14 @@ public sealed unsafe class NativeBackendTests
         t.Header.Version = ModValuesAbi.BackendVersion;
         Assert.Null(ModValuesNative.Refusal(&t));
         t.Header.Version = 2;  // a later version of a Kiln-internal table is another build's, not a superset
-        Assert.Contains("version 2", ModValuesNative.Refusal(&t));
+        Assert.Contains("version 2", ModValuesNative.Refusal(&t)!);
         t.Header.Version = 0;
         Assert.NotNull(ModValuesNative.Refusal(&t));
         t.Header.Version = ModValuesAbi.BackendVersion;
         t.Header.Size += 8;  // larger: not append-only either
-        Assert.Contains("40-byte", ModValuesNative.Refusal(&t));
+        Assert.Contains("40-byte", ModValuesNative.Refusal(&t)!);
         t.Header.Size = 24;
-        Assert.Contains("24-byte", ModValuesNative.Refusal(&t));
+        Assert.Contains("24-byte", ModValuesNative.Refusal(&t)!);
     }
 
     // ---------------------------------------------------------------------------------------------- events ----
