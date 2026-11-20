@@ -4574,7 +4574,22 @@
       "getKiln": "Scarica Kiln",
       "joinDiscord": "Entra nel Discord",
       "onToast": "Rich Presence attiva",
-      "offToast": "Rich Presence spenta"
+      "offToast": "Rich Presence spenta",
+      "pack": {
+        "label": "Mostra il mio pack di Crucible sul mio profilo Discord",
+        "hint": "Mentre giochi un pack di Crucible: il suo nome e un pulsante Ottieni questo modpack che apre la pagina del pack. I pack creati su questo PC non vengono mai nominati.",
+        "never": "Mai mostrati: nomi dei server, nomi dei mondi o il tuo personaggio. Il nome e la pagina del tuo pack di Crucible sono mostrati mentre ci giochi.",
+        "state": {
+          "one": "{pack} ({count} mod)",
+          "other": "{pack} ({count} mod)"
+        },
+        "getPack": "Ottieni questo modpack",
+        "example": "Corsa di brace",
+        "turnOn": "Mostra il mio pack",
+        "turnOff": "Nascondi il mio pack",
+        "onToast": "Il tuo pack di Crucible è visibile su Discord",
+        "offToast": "Il tuo pack di Crucible non è più visibile su Discord"
+      }
     },
     "signIn": {
       "title": "Accedi con Discord",
@@ -4720,6 +4735,7 @@
       "reportTeam": "Solo per il team di Kiln, a meno che tu non scelga diversamente: lo zip del report. Viene cancellato dal canale del team dopo 30 giorni.",
       "presenceTitle": "Rich Presence",
       "presence": "Solo mentre è attiva e giochi, e solo all'app Discord su questo PC: Enshrouded con Kiln, quante mod sono accese e il tempo. Mai nomi di server o mondi, il tuo personaggio o quali mod usi.",
+      "presencePack": "Con Mostra il mio pack di Crucible attivo, anche il nome del pack di Crucible che giochi e un link alla sua pagina su frostdev.io. I pack creati su questo PC non vengono mai nominati.",
       "testerTitle": "Quando ti offri come tester",
       "tester": "Il team di Kiln riceve la scheda video di questo PC, il driver, la memoria video, il sistema e come gira il gioco. I tuoi risultati vanno nel post della build in #testing. Un report di supporto che alleghi va solo al team.",
       "keptTitle": "Cosa conserva frostdev.io",
@@ -4900,6 +4916,16 @@
     }
   },
   "crucible": {
+    "checks": {
+      "running": "Controllo del pack…",
+      "couldNot": "Non è stato possibile controllare il pack",
+      "passed": "Controlli: superati",
+      "failed.one": "{count} problema blocca l'installazione",
+      "failed.other": "{count} problemi bloccano l'installazione",
+      "warnings.one": "{count} cosa da guardare",
+      "warnings.other": "{count} cose da guardare",
+      "failedBlock": "Il pack non ha superato i controlli: non si può installare."
+    },
     "banner": {
       "title": "Aggiornamento del pack",
       "head": "{name} {change}",
@@ -4963,6 +4989,7 @@
       "updateKiln": "Aggiorna Kiln",
       "uploadingTitle": "Ancora in caricamento",
       "stillUploading": "Il pack di {name} è ancora in caricamento ({pct}%). Kiln lo installerà quando è pronto.",
+      "resumed": "Kiln è pronto. Ecco {name}, il pack per cui sei venuto.",
       "wait": "Aspetta",
       "waiting": "In attesa del caricamento di {name} ({pct}%)…",
       "ownProfile": "Si installa come profilo a sé. Le tue mod attuali restano come sono.",
@@ -5058,6 +5085,14 @@
       "removedKept": "{name} (resta nella tua libreria)",
       "packData": "I dati del pack stesso sono cambiati",
       "kept": "Le tue modifiche restano: {settings} impostazioni, {mods} mod.",
+      "keptData": "Le tue modifiche restano: {settings} impostazioni, {data} modifiche ai dati, {mods} mod.",
+      "renamed": "{from} ora è {to}: le tue impostazioni lo seguono.",
+      "stillWins.one": "La tua modifica vale ancora ({count})",
+      "stillWins.other": "Le tue modifiche valgono ancora ({count})",
+      "dataChanged": "Il pack ora imposta {pack}. Il tuo, {mine}, vale ancora.",
+      "dataSame": "Il pack imposta {pack}. Il tuo, {mine}, vale ancora.",
+      "dropMine": "Togli la mia modifica (usa {value})",
+      "savesFirst": "Prima viene fatto un backup dei tuoi salvataggi.",
       "download": "Scarica {size}",
       "needsYou.one": "Serve il tuo aiuto ({count})",
       "needsYou.other": "Serve il tuo aiuto ({count})",

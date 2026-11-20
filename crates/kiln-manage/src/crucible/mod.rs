@@ -778,13 +778,14 @@ pub fn preview(dirs: &DataDirs, c: &Crucible, target: &str, game: Option<&GameIn
 
 /// [`preview`] for an index already opened.
 pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion, index: PackIndex, game: Option<&GameInstall>) -> Result<Preview> {
-    let lacking: BTreeMap<String, StoredFile> = pack::lacking(dirs, &index)?.into_iter().collect();
+    let lacking: BTreeMap<String, StoredFile> = pack::lacking_for(dirs, &index, &pack::client_skips)?.into_iter().collect();
     let mut missing = Vec::new();
     let mut present = Vec::new();
     let mut size = 0u64;
     let mut download = 0u64;
     let mut code = Vec::new();
-    for m in &index.mods {
+    // what this game client takes: a server-only mod is neither downloaded nor installed here
+    for m in index.mods.iter().filter(|m| !pack::client_skips(m)) {
         size += part_size(m.file.as_ref());
         let lr = LibraryRef { kind: m.kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
         if let Some(f) = lacking.get(&m.id) {
@@ -823,19 +824,20 @@ pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion,
     Ok(Preview { game: game_fit(&index, game), kiln: kiln_fit(&index), pack, version, index, size, download, missing, present, code, optional, instance, trusted })
 }
 
-/// Downloads what the Library lacks of a version and puts the .kilnpack together (`<data>/crucible/packs/<vid>.kilnpack`;
-/// reused while it is there). Progress 0..1 over the bytes to download.
+/// Downloads what the Library lacks of a version and puts the .kilnpack together for this game client
+/// (`<data>/crucible/packs/<vid>.client.kilnpack`; reused while it is there): mods only a server uses are neither
+/// downloaded nor put in (`pack::client_skips`). Progress 0..1 over the bytes to download.
 pub fn fetch(dirs: &DataDirs, c: &Crucible, version_id: &str, progress: &mut dyn Progress) -> Result<(PackIndex, pack::Assembled, u64)> {
     progress.report(Some(0.0), "reading the pack");
     let (ix, raw) = c.index(version_id)?;
-    let out = root(dirs).join("packs").join(format!("{version_id}.{}", pack::EXTENSION));
+    let out = root(dirs).join("packs").join(format!("{version_id}.client.{}", pack::EXTENSION));
     if out.is_file()
-        && let Ok(r) = pack::read(&out, None, None)
+        && let Ok(r) = pack::read_partial(&out, None, None, &pack::client_skips)
         && r.index == ix
     {
         return Ok((ix, pack::Assembled { file: out, sha256: r.sha256, size: r.size, ..Default::default() }, 0));
     }
-    let lacking = pack::lacking(dirs, &ix)?;
+    let lacking = pack::lacking_for(dirs, &ix, &pack::client_skips)?;
     let total: u64 = lacking.iter().map(|(_, f)| f.size).sum::<u64>() + ix.overrides.iter().map(|o| o.size.unwrap_or(0)).sum::<u64>();
     if total > MAX_PACK {
         return Err(err(ErrorCode::Refused, "This pack is larger than Crucible allows (2 GB)."));
@@ -887,7 +889,7 @@ pub fn fetch(dirs: &DataDirs, c: &Crucible, version_id: &str, progress: &mut dyn
         blobs.insert(o.sha256.clone(), std::fs::read(&dest).map_err(crate::util::io_at(&dest, "reading"))?);
     }
     progress.report(Some(0.85), "checking the pack");
-    let done = pack::assemble(dirs, &ix, &archives, &blobs, &out)?;
+    let done = pack::assemble_for(dirs, &ix, &pack::client_skips, &archives, &blobs, &out)?;
     progress.report(Some(0.9), "pack checked");
     Ok((ix, done, got))
 }
@@ -1076,6 +1078,9 @@ pub struct UpdateRequest {
     pub resolve: BTreeMap<String, crate::modpack::merge::Pick>,
     #[serde(default)]
     pub all: Option<crate::modpack::merge::Pick>,
+    /// Player-layer fields to let go ("Drop my change"): `plan.local.overlaps[].key`.
+    #[serde(default)]
+    pub drop: Vec<String>,
 }
 
 pub fn update(dirs: &DataDirs, c: &Crucible, req: &UpdateRequest, progress: &mut dyn Progress) -> Result<pack::UpdateResult> {
@@ -1097,6 +1102,7 @@ pub fn update(dirs: &DataDirs, c: &Crucible, req: &UpdateRequest, progress: &mut
             optional: req.optional.clone(),
             resolve: req.resolve.clone(),
             all: req.all,
+            drop: req.drop.clone(),
         },
         &mut Scaled { inner: progress, from: 0.6, to: 1.0 },
     )

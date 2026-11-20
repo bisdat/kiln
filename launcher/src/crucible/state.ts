@@ -53,8 +53,9 @@ export function useStatusFollowsSignIn() {
 
 // ---------------------------------------------------------------- what is open
 
-/** A pack to preview: one on Crucible (a code, a link, a version id) or a dropped .kilnpack file. */
-export type PreviewSource = { kind: "crucible"; target: string } | { kind: "file"; path: string };
+/** A pack to preview: one on Crucible (a code, a link, a version id) or a dropped .kilnpack file. `resume`: Kiln's first
+ *  start brought it ("come back after installing Kiln": the download or the clipboard named the pack). */
+export type PreviewSource = { kind: "crucible"; target: string; resume?: boolean } | { kind: "file"; path: string };
 interface CrucibleUi {
   preview: PreviewSource | null;
   /** The update screen of this instance. */

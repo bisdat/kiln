@@ -23,7 +23,11 @@ test("the banner on Play, the update screen with a conflict, Update and play", a
   await expect(page.getByTestId("crucible-diff")).toContainText("Busy Hands 0.2.8");
   await expect(page.getByTestId("crucible-diff")).toContainText("0.1.7 → 0.1.8");
   await expect(page.getByTestId("crucible-diff")).toContainText("(kept in your Library)");
-  await expect(page.getByTestId("crucible-kept")).toHaveText("Your changes kept: 1 settings, 1 mods.");
+  await expect(page.getByTestId("crucible-kept")).toHaveText("Your changes kept: 2 settings, 2 data edits, 1 mods.");
+  await expect(page.getByTestId("crucible-renamed")).toHaveText("kiln-auto-loot-keys.json is kiln-auto-loot/hotkeys.json now: your settings move with it.");
+  await expect(page.getByTestId("crucible-overlaps")).toContainText("Your change still wins (1)");
+  await expect(page.getByTestId("crucible-overlaps")).toContainText("The pack now sets 800. Yours, 999, still counts.");
+  await expect(page.getByTestId("crucible-saves-first")).toHaveText("Your saves are backed up first.");
   await expect(page.getByTestId("crucible-conflicts")).toContainText("The pack now says 12. You had 20.");
   await expect(page.getByTestId("crucible-update-go")).toHaveText("Update and play");
   await expect(page.getByTestId("crucible-update-go")).toBeDisabled();
@@ -89,4 +93,34 @@ test("Settings: the shared packs list with its link and code", async ({ page }) 
   await expect(row.getByTestId("crucible-code")).toHaveText("H7QK-3MZP");
   await expect(row).toContainText("Pack changed");
   await expect(page.getByText("Count my installs (anonymous)")).toBeVisible();
+});
+
+test("the player's data changes: still winning, Drop my change sends drop, a player layer survives the update", async ({ page }) => {
+  await open(page, "/?mock=1&crucible=packs#/settings");
+  const row = page.locator(".k-profiles li").filter({ hasText: "Ashen Frontier" });
+  await row.getByTestId("crucible-profile-update").click();
+  const overlaps = page.getByTestId("crucible-overlaps");
+  await expect(overlaps).toContainText("Material_T1_Wood_Logs · maxStackSize");
+  await expect(page.getByTestId("crucible-saves-first")).toHaveCount(0);
+  await page.getByTestId("crucible-drop-mine").check();
+  await expect(overlaps.getByText("Drop my change (use 800)")).toBeVisible();
+  await page.getByTestId("crucible-keep-mine").check();
+  await shot(page, "desktop-update-overlaps");
+  await page.getByTestId("crucible-update-go").click();
+  await expect(page.locator(".k-toast").filter({ hasText: "Ashen Frontier is up to date (1.1.0)" })).toBeVisible({ timeout: 15_000 });
+  const upd = (await requests(page)).filter((r) => r.cmd === "crucible_update").at(-1);
+  expect(upd?.args).toEqual({ gameId: "client-steam", request: { profile: "ashen-frontier", versionId: "pv_ashen2", consent: true,
+    resolve: { "kiln-auto-loot.json#range": "mine" }, drop: ['["items","Material_T1_Wood_Logs","maxStackSize"]'] } });
+});
+
+test("unticking Drop my change sends no drop", async ({ page }) => {
+  await open(page, "/?mock=1&crucible=packs#/settings");
+  await page.locator(".k-profiles li").filter({ hasText: "Ashen Frontier" }).getByTestId("crucible-profile-update").click();
+  await page.getByTestId("crucible-drop-mine").check();
+  await page.getByTestId("crucible-drop-mine").uncheck();
+  await page.getByTestId("crucible-take-pack").check();
+  await page.getByTestId("crucible-update-go").click();
+  await expect(page.locator(".k-toast").filter({ hasText: "Ashen Frontier is up to date (1.1.0)" })).toBeVisible({ timeout: 15_000 });
+  const upd = (await requests(page)).filter((r) => r.cmd === "crucible_update").at(-1);
+  expect((upd?.args.request as Record<string, unknown>).drop).toBeUndefined();
 });

@@ -33,10 +33,15 @@
 #include "../tick.h"
 #include "../worldinfo.h"
 #include "nlohmann/json.hpp"
+#include "services/kiln_assets.h"
 #include "services/kiln_boot.h"
 #include "services/kiln_caps.h"
+#include "boot_archive_view.h"
 #include "boot_gamedata.h"
 #include "service.h"
+#ifdef _WIN32
+#include "../api.h"
+#endif
 
 namespace kiln::caps {
 const KilnCapsApi* table();
@@ -107,9 +112,31 @@ void os_exit(uint32_t code) { ExitProcess(code); }
 void os_exit_late(uint32_t code) { TerminateProcess(GetCurrentProcess(), code); }
 
 std::mutex& g_mutex = *new std::mutex;  // never destroyed: a late reader at process exit must still find it
-// The offline game-data view: the boot snapshot's reader (boot_gamedata.h). Opened once in decide(); it has a lock of
-// its own, and g_mutex is never held across its file IO.
+// The offline game-data view: the base view OnBoot's reads go through (boot_archive_view.h), chosen once in decide() by
+// one internal policy (g_base_policy):
+//   Snapshot  the boot snapshot's reader (boot_gamedata.h), opened in decide(): the default
+//   Live      kiln.assets' bytes, which exist only after the game's entry point: an OnBoot read answers unavailable
+// Each view has a lock of its own, and g_mutex is never held across a view's IO.
 boot_gd::Reader& g_gamedata = *new boot_gd::Reader;
+enum class Base : uint32_t { Snapshot, Live };
+Base default_base() { return Base::Snapshot; }
+Base (*g_base_policy)() = &default_base;  // the policy (the host tests set their own)
+std::atomic<Base> g_base{Base::Snapshot};  // what the policy chose in decide()
+#ifdef _WIN32
+const KilnAssetsApi* assets_service() {
+    return static_cast<const KilnAssetsApi*>(api()->service(KilnStr{KILN_ASSETS_SERVICE, sizeof KILN_ASSETS_SERVICE - 1}, KILN_ASSETS_VERSION));
+}
+#else
+const KilnAssetsApi* assets_service() { return nullptr; }  // a host test sets g_live_assets
+#endif
+const KilnAssetsApi* (*g_live_assets)() = &assets_service;  // kiln.assets for the live base
+const KilnAssetsApi* live_assets() { return g_live_assets ? g_live_assets() : nullptr; }
+boot_view::SnapshotView& g_snapshot_view = *new boot_view::SnapshotView(g_gamedata);
+boot_view::LiveView& g_live_view = *new boot_view::LiveView(&live_assets);
+boot_view::BaseView& base_view() {
+    if (g_base.load() == Base::Live) return g_live_view;
+    return g_snapshot_view;
+}
 bool g_decided = false;
 bool g_deferred = false;
 bool g_bound = false;                  // registration is over (bound() or commit())
@@ -612,9 +639,9 @@ KilnResult KILN_CALL b_finish_owner(KilnOwner owner, uint64_t generation, uint32
     return KILN_OK;
 }
 
-// The offline game-data view over the boot snapshot (boot_gamedata.h). The frame and the budget are checked under
-// g_mutex, the files are read without it (boot-thread calls are serialized, kiln_boot.h), and the bytes are charged to
-// the author when the result is written: a BUFFER_TOO_SMALL answer costs nothing.
+// The offline game-data view through the base view (boot_archive_view.h). The frame and the budget are checked under
+// g_mutex, the view reads without it (boot-thread calls are serialized, kiln_boot.h), and the bytes are charged to the
+// author when the result is written: a BUFFER_TOO_SMALL answer costs nothing.
 KilnResult KILN_CALL b_read_resource(KilnOwner owner, KilnStr query, char* out, size_t capacity, size_t* required) {
     uint64_t left = 0;
     std::string id;
@@ -629,10 +656,11 @@ KilnResult KILN_CALL b_read_resource(KilnOwner owner, KilnStr query, char* out, 
         id = o.id;
         left = KILN_BOOT_AUTHOR_READ_MAX - std::min<uint64_t>(o.read_bytes, KILN_BOOT_AUTHOR_READ_MAX);
     }
-    if (!g_gamedata.is_open()) return KILN_ERR_UNAVAILABLE;  // row mods.boot.game_data says why
+    boot_view::BaseView& view = base_view();
     std::string json, why;
+    if (!view.ready(&why)) return KILN_ERR_UNAVAILABLE;  // row mods.boot.game_data says why
     size_t need = 0, value = 0;
-    const KilnResult rc = g_gamedata.read(sv(query), capacity, KILN_BOOT_RESULT_MAX, left, &json, &need, &value, &why);
+    const KilnResult rc = view.tree(sv(query), capacity, KILN_BOOT_RESULT_MAX, left, &json, &need, &value, &why);
     if (rc == KILN_ERR_BUFFER_TOO_SMALL) {
         *required = need;
         return rc;
@@ -948,13 +976,13 @@ KilnResult KILN_CALL b_commit(KilnOwner host, uint64_t generation, KilnBootCommi
         } else {
             abort_locked(culprits, why);
         }
-        g_gamedata.release_resource_list();  // OnBoot is over: no read of the snapshot follows in this process
         out->status = g_status;
         out->owner_count = static_cast<uint32_t>(g_owners.size());
         out->issue_count = static_cast<uint32_t>(g_issues.size());
         out->generation = kGeneration;
         rows.push_back(phase_row_locked());
     }
+    base_view().release();  // OnBoot is over: no read of the game's data follows in this process (read_resource: REVOKED)
     send(rows);
     return KILN_OK;
 }
@@ -1162,6 +1190,11 @@ const KilnBootApiV1* table() { return &kTable; }
 // One read of at most 64 KiB of the game's .kfc, index.json and eight file checks: no index is loaded before a mod asks.
 static Row game_data_row(bool hooks, const std::string& idle) {
     if (!hooks) return {"mods.boot.game_data", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, idle};
+    if (g_base.load() == Base::Live) {
+        g_live_view.restart();
+        return {"mods.boot.game_data", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
+                "OnBoot reads the live game data (kiln.assets), which the game loads only after its entry point"};
+    }
     std::filesystem::path kfc = paths().exe;
     kfc.replace_extension(L".kfc");
     std::string why;
@@ -1179,6 +1212,7 @@ static Row game_data_row(bool hooks, const std::string& idle) {
 // feature row; bound() adds to it).
 void decide(bool hooks, const std::string& safe_idle) {
     if (!g_self) g_self = reg::owner_create("kiln.boot");
+    g_base.store(g_base_policy ? g_base_policy() : Base::Snapshot);  // the base OnBoot reads, before its row
     const bool client = image().side == KILN_SIDE_CLIENT;
     const std::string idle = "safe idle: " + safe_idle;
     // The decision reads mods.boot.client, so publish it first. Staged VFX/materials
@@ -1266,7 +1300,7 @@ void decide(bool hooks, const std::string& safe_idle) {
                list.c_str());
         // the game-data snapshot's files against their checksums, before any OnBoot reads them: a damaged snapshot is not
         // ready (its row says so) and nothing of it is served
-        if (g_gamedata.is_open()) {
+        if (g_base.load() == Base::Snapshot && g_gamedata.is_open()) {
             const auto t0 = std::chrono::steady_clock::now();
             std::string bad;
             if (!g_gamedata.verify(&bad)) {

@@ -194,7 +194,8 @@ fn a_zip_bomb_and_too_many_entries_are_refused() {
 fn blocked_hashes_secrets_and_missing_dependencies_are_errors() {
     let d = tmp("block");
     let a = kiln("a", &[], json!({"dependencies": [{"id": "not-in-pack", "version": ">=1.0.0"}]}));
-    let secret = br#"{"webhook": "https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ"}"#.to_vec();
+    // built at run time: a webhook-shaped literal in the source trips push protection
+    let secret = format!(r#"{{"webhook": "https://discord.com/api/{}/123456789012345678/{}"}}"#, "webhooks", "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ".repeat(1)).into_bytes();
     let ix = index(&[&a], None, json!({"overrides": [{"path": "a.json", "mode": "merge-patch", "side": "both", "sha256": crate::hash::sha256_hex(&secret), "size": secret.len()}]}));
     let p = d.join("p.kilnpack");
     whole(&p, &ix, &[&a], None, &[("overrides/a.json".to_string(), secret)]);

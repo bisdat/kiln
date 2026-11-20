@@ -2606,6 +2606,10 @@ impl Usage {
         for e in std::fs::read_dir(dirs.profiles()).into_iter().flatten().flatten() {
             let Ok(Some(p)) = crate::util::read_json::<crate::profile::Profile>(&e.path().join("meta.json")) else { continue };
             profiles.push((p.id, p.mods));
+            // a pack instance's undo copy (crate::modpack::pack::undo) still needs the entries it goes back to
+            if let Ok(Some(u)) = crate::util::read_json::<crate::profile::Profile>(&e.path().join("pack").join("undo").join("meta.json")) {
+                profiles.push((format!("{} (undo)", u.id), u.mods));
+            }
         }
         // A profile offered for restoration still needs its Library packages,
         // including switched-off entries. Pin until this snapshot is replaced.
