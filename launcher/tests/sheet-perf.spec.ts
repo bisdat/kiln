@@ -319,6 +319,19 @@ async function countDraws(page: Page) {
 }
 const draws = (page: Page) => page.evaluate(() => (window as unknown as { __draws: number }).__draws);
 
+test("WebKit drawing without compositing: the sheet has no blurred shadow (each scroll step painted it again)", async ({ page }) => {
+  await flatWebKit(page);
+  await open(page, "/settings");
+  await expect(page.locator(".k-app")).toHaveAttribute("data-render", "flat");
+  await expect(page.locator(".k-sheet")).toHaveCSS("box-shadow", "none");
+});
+
+test("with compositing the sheet keeps its shadow", async ({ page }) => {
+  await open(page, "/settings");
+  await expect(page.locator(".k-app")).not.toHaveAttribute("data-render", /.+/);
+  await expect(page.locator(".k-sheet")).not.toHaveCSS("box-shadow", "none");
+});
+
 test("WebKit drawing without compositing: lit flames and the torch stand still, the fire on Play draws fewer frames, the effect stays", async ({ page }) => {
   await flatWebKit(page);
   await countWrites(page);

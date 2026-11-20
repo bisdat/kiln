@@ -397,6 +397,7 @@
 .k-tray-pop { position: absolute; right: 0; top: calc(100% + 10px); width: 360px; z-index: 40; padding: 8px; display: flex; flex-direction: column; gap: 6px;
   max-height: 60vh; overflow: auto; background: var(--k-bg-2); border-radius: var(--k-radius-m);
   box-shadow: inset 0 0 0 1px var(--k-line-strong), 0 24px 60px rgba(0, 0, 0, .65); animation: k-pop .32s var(--k-spring) backwards; }
+.k-app[data-render] .k-tray-pop { box-shadow: inset 0 0 0 1px var(--k-line-strong); } /* as .k-upd-pop (update.css) */
 .k-tray-head { display: flex; align-items: baseline; justify-content: space-between; padding: 2px 4px 4px; }
 /* kept for pages that show a determinate bar outside the cone pack */
 .k-progress { height: 4px; border-radius: 2px; background: var(--k-bg-3); overflow: hidden; position: relative; }
