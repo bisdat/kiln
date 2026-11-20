@@ -2249,6 +2249,31 @@ void clicks_mapping_and_slot_at() {
           "server: UNAVAILABLE");
 }
 
+// a click pressed in one client session and not yet delivered when the world is left reaches nobody: its slot's item
+// entity names an item of the old world
+void clicks_across_a_session_change() {
+    prime_clicks();
+    const KilnOwner o = fake::owner("mod:session");
+    ClicksSeen seen;
+    auto r = reg_record();
+    auto f = click_filter(1, 0, KUI_CLICK_TAKE);
+    fake::client.session = 5;
+    CHECK(I()->subscribe_clicks(o, &f, &on_click, &seen, &r) == KILN_OK && r.ok == 1 && arm_slots(),
+          "session: subscribed");
+    FakeSlot a;
+    g_frame_script = {desc(&a, 0x5000, 2, 0xAA, 900)};
+    ui_frame(3000);
+    CHECK(do_press(press(50, 50)) == KILN_UI_POINTER_TAKE, "session: a press on the slot in session 5");
+    fake::client.session = 6;  // the world was left and another joined before the next frame
+    ui_frame(3001);
+    CHECK(seen.got.empty(), "session: the next frame is of another session -> the old click is dropped, not delivered");
+    ui_frame(3002);
+    CHECK(do_press(press(50, 50)) == KILN_UI_POINTER_TAKE, "session: a press in the new session");
+    ui_frame(3003);
+    CHECK(seen.got.size() == 1 && seen.got[0].session == 6, "session: delivered in its own session");
+    fake::client.session = 5;
+}
+
 void clicks_without_kiln_ui() {
     prime_clicks();
     fake::pointer_ok = false;  // an older kiln-ui.dll: no subscribe_pointer_press
@@ -2692,6 +2717,7 @@ int main() {
     slots_holders();
     clicks_basics();
     clicks_mapping_and_slot_at();
+    clicks_across_a_session_change();
     clicks_without_kiln_ui();
     lines_collect();
     lines_window();

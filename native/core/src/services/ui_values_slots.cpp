@@ -252,7 +252,7 @@ void publish(FrameCollector& f, uintptr_t sys10) {
     }
     // slot clicks pressed since the last frame (ui_values_inventory.cpp), then the subscribers, on this (the UI)
     // thread after the frame
-    clicks_frame_published();
+    clicks_frame_published(m.session);
     const auto subs = providers(kListSlots);
     for (const auto& sp : *subs) {
         Provider& p = *sp;

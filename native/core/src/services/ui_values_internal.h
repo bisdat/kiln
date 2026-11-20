@@ -180,7 +180,9 @@ std::shared_ptr<const SlotsSnapshot> slots_latest();
 // ---- kiln.ui.inventory (ui_values_inventory.cpp) ----
 // Registration of any list after the caller checked its arguments (ui_values.cpp's register_in).
 KilnResult register_list(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out);
-void clicks_frame_published();  // the slots' publish, UI thread: delivers the clicks pressed since the last frame
+// the slots' publish, UI thread: delivers the clicks pressed since the last frame; a click of another client session
+// than this frame's (the world was left in between) is dropped
+void clicks_frame_published(uint64_t session);
 bool pointer_screen(const KilnUiScreen& s);  // the screen has a pointer: slot clicks may hit there
 // units-to-pixels for a target size; false = the frame has no usable viewport
 bool map_frame(const KilnUiSlotsFrame& m, float target_w, float target_h, float* sx, float* sy, float* ox, float* oy);

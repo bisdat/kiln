@@ -6,7 +6,8 @@
 //                           the slot under the press (outer rectangle, last drawn wins), the matching subscribers; queues
 //                           one click for them and answers TAKE when one of them asked for it. Anything missing: PASS.
 //   frame (UI thread)       clicks_frame_published, from the slots' publish: delivers the queued clicks to the
-//                           subscribers they matched that are still live, under the SEH guard (faults count as usual).
+//                           subscribers they matched that are still live, under the SEH guard (faults count as usual);
+//                           a click of another client session than the frame's is dropped.
 // A click subscriber is a registration of list kListClicks (row ui.slots.click) whose item field packs the filter:
 // button | mods << 8 | flags << 16.
 #include <algorithm>
@@ -275,7 +276,7 @@ uint32_t on_pointer(const KilnUiPointerPress* p) {
     }
 }
 
-void clicks_frame_published() {
+void clicks_frame_published(uint64_t session) {
     std::vector<Pending> items;
     uint64_t dropped = 0;
     {
@@ -290,7 +291,8 @@ void clicks_frame_published() {
                       static_cast<unsigned long long>(dropped));
     if (items.empty()) return;
     const auto subs = providers(kListClicks);
-    for (const Pending& pend : items)
+    for (const Pending& pend : items) {
+        if (pend.click.session != session) continue;  // pressed in a world that is gone: its item ids are that world's
         for (const auto& sp : *subs) {
             Provider& pr = *sp;
             if (!provider_live(pr) || std::find(pend.handles.begin(), pend.handles.end(), pr.handle) == pend.handles.end())
@@ -300,6 +302,7 @@ void clicks_frame_published() {
             else
                 fault(pr, "faulted");
         }
+    }
 }
 
 const KilnUiInventoryApi* inventory_table() { return &kInventoryTable; }
