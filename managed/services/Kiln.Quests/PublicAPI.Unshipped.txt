@@ -1,1 +1,143 @@
 #nullable enable
+const Kiln.Survivors.AssignCapability = "survivors.assign" -> string!
+const Kiln.Survivors.ReadCapability = "survivors.read" -> string!
+const Kiln.Survivors.RecruitCapability = "survivors.recruit" -> string!
+const Kiln.Survivors.SummonCapability = "survivors.summon" -> string!
+Kiln.SurvivorAssignmentChangedEvent
+Kiln.SurvivorAssignmentChangedEvent.NewBed.get -> Kiln.EntityId
+Kiln.SurvivorAssignmentChangedEvent.OldBed.get -> Kiln.EntityId
+Kiln.SurvivorAssignmentOptions
+Kiln.SurvivorAssignmentOptions.<Clone>$() -> Kiln.SurvivorAssignmentOptions!
+Kiln.SurvivorAssignmentOptions.Actor.get -> Kiln.EntityId
+Kiln.SurvivorAssignmentOptions.Actor.init -> void
+Kiln.SurvivorAssignmentOptions.Authorization.get -> Kiln.SurvivorAuthorization
+Kiln.SurvivorAssignmentOptions.Authorization.init -> void
+Kiln.SurvivorAssignmentOptions.Deconstruct(out Kiln.EntityId Actor, out Kiln.SurvivorAuthorization Authorization) -> void
+Kiln.SurvivorAssignmentOptions.Equals(Kiln.SurvivorAssignmentOptions? other) -> bool
+Kiln.SurvivorAssignmentOptions.SurvivorAssignmentOptions(Kiln.EntityId Actor, Kiln.SurvivorAuthorization Authorization = Kiln.SurvivorAuthorization.PlayerPermissions) -> void
+Kiln.SurvivorAuthorization
+Kiln.SurvivorAuthorization.PlayerPermissions = 0 -> Kiln.SurvivorAuthorization
+Kiln.SurvivorAuthorization.TrustedServer = 1 -> Kiln.SurvivorAuthorization
+Kiln.SurvivorCompletion
+Kiln.SurvivorCompletion.Done = 0 -> Kiln.SurvivorCompletion
+Kiln.SurvivorCompletion.NoChange = 1 -> Kiln.SurvivorCompletion
+Kiln.SurvivorCompletion.Partial = 4 -> Kiln.SurvivorCompletion
+Kiln.SurvivorCompletion.Refused = 2 -> Kiln.SurvivorCompletion
+Kiln.SurvivorCompletion.TimedOut = 3 -> Kiln.SurvivorCompletion
+Kiln.SurvivorCompletion.WorldEnded = 5 -> Kiln.SurvivorCompletion
+Kiln.SurvivorEffects
+Kiln.SurvivorEffects.BedChanged = 32 -> Kiln.SurvivorEffects
+Kiln.SurvivorEffects.EntityCreated = 8 -> Kiln.SurvivorEffects
+Kiln.SurvivorEffects.HomeMoved = 16 -> Kiln.SurvivorEffects
+Kiln.SurvivorEffects.KnowledgeWritten = 1 -> Kiln.SurvivorEffects
+Kiln.SurvivorEffects.None = 0 -> Kiln.SurvivorEffects
+Kiln.SurvivorEffects.RegistryConfirmed = 2 -> Kiln.SurvivorEffects
+Kiln.SurvivorEffects.ToolGiven = 4 -> Kiln.SurvivorEffects
+Kiln.SurvivorEvent
+Kiln.SurvivorEvent.After.get -> Kiln.SurvivorInfo!
+Kiln.SurvivorEvent.Before.get -> Kiln.SurvivorInfo!
+Kiln.SurvivorEvent.ByKiln.get -> bool
+Kiln.SurvivorEvent.Request.get -> ulong
+Kiln.SurvivorEvent.Step.get -> ulong
+Kiln.SurvivorEvent.Survivor.get -> Kiln.SurvivorId
+Kiln.SurvivorId
+Kiln.SurvivorId.Deconstruct(out uint Value) -> void
+Kiln.SurvivorId.Equals(Kiln.SurvivorId other) -> bool
+Kiln.SurvivorId.SurvivorId() -> void
+Kiln.SurvivorId.SurvivorId(uint Value) -> void
+Kiln.SurvivorId.Value.get -> uint
+Kiln.SurvivorId.Value.init -> void
+Kiln.SurvivorInfo
+Kiln.SurvivorInfo.<Clone>$() -> Kiln.SurvivorInfo!
+Kiln.SurvivorInfo.BaseId.get -> System.Guid?
+Kiln.SurvivorInfo.BaseId.init -> void
+Kiln.SurvivorInfo.Bed.get -> Kiln.EntityId
+Kiln.SurvivorInfo.Bed.init -> void
+Kiln.SurvivorInfo.DebugName.get -> string!
+Kiln.SurvivorInfo.DebugName.init -> void
+Kiln.SurvivorInfo.Deconstruct(out Kiln.SurvivorId Id, out string! DebugName, out bool Unlocked, out Kiln.ItemId SummonTool, out Kiln.EntityId Entity, out Kiln.EntityId Bed, out System.Guid? BaseId, out Kiln.WorldPosition? Home) -> void
+Kiln.SurvivorInfo.Entity.get -> Kiln.EntityId
+Kiln.SurvivorInfo.Entity.init -> void
+Kiln.SurvivorInfo.Equals(Kiln.SurvivorInfo? other) -> bool
+Kiln.SurvivorInfo.Home.get -> Kiln.WorldPosition?
+Kiln.SurvivorInfo.Home.init -> void
+Kiln.SurvivorInfo.Id.get -> Kiln.SurvivorId
+Kiln.SurvivorInfo.Id.init -> void
+Kiln.SurvivorInfo.SummonTool.get -> Kiln.ItemId
+Kiln.SurvivorInfo.SummonTool.init -> void
+Kiln.SurvivorInfo.SurvivorInfo(Kiln.SurvivorId Id, string! DebugName, bool Unlocked, Kiln.ItemId SummonTool, Kiln.EntityId Entity, Kiln.EntityId Bed, System.Guid? BaseId, Kiln.WorldPosition? Home) -> void
+Kiln.SurvivorInfo.Unlocked.get -> bool
+Kiln.SurvivorInfo.Unlocked.init -> void
+Kiln.SurvivorRecruitedEvent
+Kiln.SurvivorRecruitOptions
+Kiln.SurvivorRecruitOptions.<Clone>$() -> Kiln.SurvivorRecruitOptions!
+Kiln.SurvivorRecruitOptions.Deconstruct(out Kiln.Player? GiveToolTo) -> void
+Kiln.SurvivorRecruitOptions.Equals(Kiln.SurvivorRecruitOptions? other) -> bool
+Kiln.SurvivorRecruitOptions.GiveToolTo.get -> Kiln.Player?
+Kiln.SurvivorRecruitOptions.GiveToolTo.init -> void
+Kiln.SurvivorRecruitOptions.SurvivorRecruitOptions(Kiln.Player? GiveToolTo = null) -> void
+Kiln.SurvivorResult
+Kiln.SurvivorResult.<Clone>$() -> Kiln.SurvivorResult!
+Kiln.SurvivorResult.After.get -> Kiln.SurvivorInfo!
+Kiln.SurvivorResult.After.init -> void
+Kiln.SurvivorResult.AfterKnown.get -> bool
+Kiln.SurvivorResult.AfterKnown.init -> void
+Kiln.SurvivorResult.Before.get -> Kiln.SurvivorInfo!
+Kiln.SurvivorResult.Before.init -> void
+Kiln.SurvivorResult.Completion.get -> Kiln.SurvivorCompletion
+Kiln.SurvivorResult.Completion.init -> void
+Kiln.SurvivorResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.SurvivorInfo! Before, out Kiln.SurvivorInfo! After, out bool AfterKnown, out Kiln.SurvivorEffects Effects, out Kiln.SurvivorCompletion Completion, out Kiln.EntityId DisplacedNpc, out int Steps) -> void
+Kiln.SurvivorResult.DisplacedNpc.get -> Kiln.EntityId
+Kiln.SurvivorResult.DisplacedNpc.init -> void
+Kiln.SurvivorResult.Effects.get -> Kiln.SurvivorEffects
+Kiln.SurvivorResult.Effects.init -> void
+Kiln.SurvivorResult.Equals(Kiln.SurvivorResult? other) -> bool
+Kiln.SurvivorResult.Ok.get -> bool
+Kiln.SurvivorResult.Ok.init -> void
+Kiln.SurvivorResult.Reason.get -> string?
+Kiln.SurvivorResult.Reason.init -> void
+Kiln.SurvivorResult.Steps.get -> int
+Kiln.SurvivorResult.Steps.init -> void
+Kiln.SurvivorResult.SurvivorResult(bool Ok, string? Reason, Kiln.SurvivorInfo! Before, Kiln.SurvivorInfo! After, bool AfterKnown, Kiln.SurvivorEffects Effects, Kiln.SurvivorCompletion Completion, Kiln.EntityId DisplacedNpc, int Steps) -> void
+Kiln.Survivors
+Kiln.SurvivorSummonedEvent
+Kiln.SurvivorToolGivenEvent
+override Kiln.SurvivorAssignmentChangedEvent.ToString() -> string!
+override Kiln.SurvivorAssignmentOptions.Equals(object? obj) -> bool
+override Kiln.SurvivorAssignmentOptions.GetHashCode() -> int
+override Kiln.SurvivorAssignmentOptions.ToString() -> string!
+override Kiln.SurvivorId.GetHashCode() -> int
+override Kiln.SurvivorId.ToString() -> string!
+override Kiln.SurvivorInfo.Equals(object? obj) -> bool
+override Kiln.SurvivorInfo.GetHashCode() -> int
+override Kiln.SurvivorInfo.ToString() -> string!
+override Kiln.SurvivorRecruitedEvent.ToString() -> string!
+override Kiln.SurvivorRecruitOptions.Equals(object? obj) -> bool
+override Kiln.SurvivorRecruitOptions.GetHashCode() -> int
+override Kiln.SurvivorRecruitOptions.ToString() -> string!
+override Kiln.SurvivorResult.Equals(object? obj) -> bool
+override Kiln.SurvivorResult.GetHashCode() -> int
+override Kiln.SurvivorResult.ToString() -> string!
+override Kiln.SurvivorSummonedEvent.ToString() -> string!
+override Kiln.SurvivorToolGivenEvent.ToString() -> string!
+static Kiln.SurvivorAssignmentOptions.operator !=(Kiln.SurvivorAssignmentOptions? left, Kiln.SurvivorAssignmentOptions? right) -> bool
+static Kiln.SurvivorAssignmentOptions.operator ==(Kiln.SurvivorAssignmentOptions? left, Kiln.SurvivorAssignmentOptions? right) -> bool
+static Kiln.SurvivorAssignmentOptions.Trusted.get -> Kiln.SurvivorAssignmentOptions!
+static Kiln.SurvivorId.operator !=(Kiln.SurvivorId left, Kiln.SurvivorId right) -> bool
+static Kiln.SurvivorId.operator ==(Kiln.SurvivorId left, Kiln.SurvivorId right) -> bool
+static Kiln.SurvivorInfo.operator !=(Kiln.SurvivorInfo? left, Kiln.SurvivorInfo? right) -> bool
+static Kiln.SurvivorInfo.operator ==(Kiln.SurvivorInfo? left, Kiln.SurvivorInfo? right) -> bool
+static Kiln.SurvivorRecruitOptions.operator !=(Kiln.SurvivorRecruitOptions? left, Kiln.SurvivorRecruitOptions? right) -> bool
+static Kiln.SurvivorRecruitOptions.operator ==(Kiln.SurvivorRecruitOptions? left, Kiln.SurvivorRecruitOptions? right) -> bool
+static Kiln.SurvivorResult.operator !=(Kiln.SurvivorResult? left, Kiln.SurvivorResult? right) -> bool
+static Kiln.SurvivorResult.operator ==(Kiln.SurvivorResult? left, Kiln.SurvivorResult? right) -> bool
+static Kiln.Survivors.AssignBed(Kiln.SurvivorId id, Kiln.EntityId bed, Kiln.SurvivorAssignmentOptions! options) -> System.Threading.Tasks.Task<Kiln.SurvivorResult!>!
+static Kiln.Survivors.BaseAt(Kiln.WorldPosition position) -> System.Guid?
+static Kiln.Survivors.BedOccupant(Kiln.EntityId bed) -> Kiln.SurvivorId?
+static Kiln.Survivors.Find(Kiln.SurvivorId id) -> Kiln.SurvivorInfo?
+static Kiln.Survivors.List() -> System.Collections.Generic.IReadOnlyList<Kiln.SurvivorInfo!>!
+static Kiln.Survivors.Of(Kiln.EntityId npc) -> Kiln.SurvivorInfo?
+static Kiln.Survivors.RecruitWorld(Kiln.SurvivorId id, Kiln.SurvivorRecruitOptions? options = null) -> System.Threading.Tasks.Task<Kiln.SurvivorResult!>!
+static Kiln.Survivors.Summon(Kiln.SurvivorId id, System.Guid baseId, Kiln.WorldPosition position, float yawDegrees = 0) -> System.Threading.Tasks.Task<Kiln.SurvivorResult!>!
+static Kiln.Survivors.UnassignBed(Kiln.SurvivorId id, Kiln.SurvivorAssignmentOptions! options) -> System.Threading.Tasks.Task<Kiln.SurvivorResult!>!
+~override Kiln.SurvivorId.Equals(object obj) -> bool
