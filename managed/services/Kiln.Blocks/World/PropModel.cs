@@ -146,11 +146,18 @@ public sealed record RunningBlock
     public SoundRef? Sound { get; init; }
 }
 
-/// <summary>The crafting menu a station opens. Today that is an existing station's, and the block's recipes are listed there among the game's. A workshop's menu with tabs of its own goes here.</summary>
+/// <summary>The crafting menu a station opens. Without <see cref="Tabs"/> that is an existing station's, laid out as it is, and the block's recipes are listed there among the game's
+/// (with a workshop of its own: only the block's). With tabs, a station with a workshop of its own lays its menu out itself.</summary>
 public sealed record MenuBlock : IBlock
 {
-    /// <summary>The station whose menu it opens. Null: the station's kind.</summary>
+    /// <summary>The station whose menu it opens. Null: the station's kind. With <see cref="Tabs"/>, the menu whose tabs lend theirs their icons.</summary>
     public StationKind? Like { get; init; }
+    /// <summary>The menu in tabs of its own: each tab a name, the icon of a tab of the menu it is <see cref="Like"/>, and sets of recipes named by their
+    /// <see cref="RecipeBlock.MenuKey"/> (this station's list, an item's recipe at it, another mod's as <c>"other-mod:key"</c>). At most 15 tabs. Only a station with a
+    /// workshop of its own takes it: the game's stations keep the game's tabs. A recipe of the station that no tab lists is still made there, but not shown.
+    /// Shown from content ready on, once every recipe it names is in the game; a layer of a mod's own goes over it: <see cref="StationMenus.Define"/>.</summary>
+    [RequiresCapability("stationmenus.store")]
+    public IReadOnlyList<StationMenuTabBlock>? Tabs { get; init; }
 }
 
 /// <summary>A workshop of the game, with the item that places it. Premade instances: the build a station starts from, and the menu it opens.</summary>
