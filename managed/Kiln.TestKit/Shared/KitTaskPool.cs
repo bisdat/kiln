@@ -2,7 +2,7 @@
 // Kiln's task pool with no core: the managed host's lease table (native/core/src/tasks_host.h) over real worker threads,
 // with the native rules: segments of one lease never overlap, one armed registration at a time, finish only inside a
 // running segment, tick hops only in a live session of their world (the server world, and the client world for #82's
-// client-world hops), after-step resumptions tied to their world's session, a queued lease cancelled without a dispatch. The harness runs it (KilnHarness.Tasks.cs: hops before the mods' Pre, the Post edge after
+// client-world hops, and the main menu for #83's menu hops), after-step resumptions tied to their world's session, a queued lease cancelled without a dispatch. The harness runs it (KilnHarness.Tasks.cs: hops before the mods' Pre, the Post edge after
 // their Post); Kiln's own unit tests run it under a tick thread of their own (Kiln.Api.Tests/FakeTaskBackend.cs). Misuse
 // the native table answers with INTERNAL is recorded in Errors (and thrown); a dispatch that leaves its thread's scope,
 // mod, context or flowed identity changed is recorded in Leaks. Both must stay empty.
@@ -36,7 +36,8 @@ internal class KitTaskPool : TaskBackend, IDisposable
     private LeaseDispatch? _dispatch;
     private ulong _nextLease = 0x1000;
 
-    // One world's sessions, Post edges and pending hops: [0] the server world, [1] the client world.
+    // One world's sessions, Post edges and pending hops: [0] the server world, [1] the client world, [2] the main menu (#83:
+    // its sessions open at a menu frame while no world runs, a world's start ends them; no Post edges).
     private sealed class WorldLine
     {
         public ulong Session;   // the live session; 0 with none
@@ -47,8 +48,8 @@ internal class KitTaskPool : TaskBackend, IDisposable
         public readonly List<LeaseRecord> Hops = [];
     }
 
-    private readonly WorldLine[] _worlds = [new(), new()];
-    private static int Line(WorldKind world) => world == WorldKind.Client ? 1 : 0;
+    private readonly WorldLine[] _worlds = [new(), new(), new()];
+    private static int Line(WorldKind world) => world switch { WorldKind.Client => 1, WorldKind.Menu => 2, _ => 0 };
     private int _running;
     private bool _disposed;
     [ThreadStatic] private static KitTaskPool? t_worker;
@@ -101,7 +102,7 @@ internal class KitTaskPool : TaskBackend, IDisposable
     public override bool OnWorldThread(WorldKind world) => world switch
     {
         WorldKind.Server => _onServerTick(),
-        WorldKind.Client => _onClientThread?.Invoke() ?? false,
+        WorldKind.Client or WorldKind.Menu => _onClientThread?.Invoke() ?? false,  // the menu's UI frame is the main thread's
         _ => false,
     };
 
@@ -109,7 +110,7 @@ internal class KitTaskPool : TaskBackend, IDisposable
     {
         lock (_lock)
         {
-            if (world is not (WorldKind.Server or WorldKind.Client))
+            if (world is not (WorldKind.Server or WorldKind.Client or WorldKind.Menu))
             {
                 state = WorldSessionState.None;
                 return 0;
@@ -209,7 +210,7 @@ internal class KitTaskPool : TaskBackend, IDisposable
     private TaskRefusal PushHop(ulong lease, WorldKind world, ulong session, bool checkSession)
     {
         var l = Find(lease);
-        if (l is null || l.Terminal || world is not (WorldKind.Server or WorldKind.Client)) throw Misuse("tick_hop", l);
+        if (l is null || l.Terminal || world is not (WorldKind.Server or WorldKind.Client or WorldKind.Menu)) throw Misuse("tick_hop", l);
         var w = _worlds[Line(world)];
         if (w.Session == 0 || (checkSession && session != w.Session))
             return world == WorldKind.Server ? TaskRefusal.NoServerWorld : TaskRefusal.NoWorld;
@@ -316,7 +317,8 @@ internal class KitTaskPool : TaskBackend, IDisposable
     /// event left hops: they are dispatched cancelled here, never carried into the new one.</summary>
     public void StartSession(WorldKind world = WorldKind.Server)
     {
-        List<LeaseRecord> old;
+        if (world == WorldKind.Menu) throw new ArgumentException("the menu's sessions open at MenuFrame", nameof(world));
+        List<LeaseRecord> old, menu;
         lock (_lock)
         {
             var w = _worlds[Line(world)];
@@ -325,8 +327,28 @@ internal class KitTaskPool : TaskBackend, IDisposable
             w.Session = w.Last = ++w.Sessions;
             w.Edge = 0;
             w.Stopping = false;
+            // a world's start ends the menu session (#83): its waiting hops are dispatched cancelled, on this thread
+            var m = _worlds[Line(WorldKind.Menu)];
+            m.Session = 0;
+            menu = [.. m.Hops];
+            m.Hops.Clear();
         }
         foreach (var h in old) DispatchHop(h, cancelled: true, world);
+        foreach (var h in menu) DispatchHop(h, cancelled: true, WorldKind.Menu);
+    }
+
+    /// <summary>The game's UI frame while no world runs (#83), on the calling thread (the game's main thread): opens a menu
+    /// session when none is live and neither world has a live session, then runs the menu's hops queued before now.
+    /// Returns the hops dispatched; 0, and nothing opened, while a world runs.</summary>
+    public int MenuFrame()
+    {
+        lock (_lock)
+        {
+            if (_worlds[0].Session != 0 || _worlds[1].Session != 0) return 0;
+            var m = _worlds[Line(WorldKind.Menu)];
+            if (m.Session == 0) m.Session = m.Last = ++m.Sessions;
+        }
+        return RunHopsCounted(WorldKind.Menu);
     }
 
     /// <summary>The live session's STOPPING of <paramref name="world"/>, on the calling thread (the one that ends the
@@ -361,7 +383,9 @@ internal class KitTaskPool : TaskBackend, IDisposable
 
     /// <summary>The hops of <paramref name="world"/> queued before now, on the calling thread (that world's step, before its
     /// Pre), each with its lease's cancellation. A hop queued while these run waits for the next call.</summary>
-    public void RunHops(WorldKind world = WorldKind.Server)
+    public void RunHops(WorldKind world = WorldKind.Server) => RunHopsCounted(world);
+
+    private int RunHopsCounted(WorldKind world)
     {
         List<LeaseRecord> hops;
         lock (_lock)
@@ -376,6 +400,7 @@ internal class KitTaskPool : TaskBackend, IDisposable
             lock (_lock) cancel = h.Cancel;
             DispatchHop(h, cancel, world);
         }
+        return hops.Count;
     }
 
     /// <summary>The live session's Post edge of <paramref name="world"/>: the after-step resumptions asked for before it
@@ -471,7 +496,7 @@ internal class KitTaskPool : TaskBackend, IDisposable
         var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
         lock (_lock)
         {
-            while (_ready.Count == 0 && _running == 0 && _worlds[0].Hops.Count == 0 && _worlds[1].Hops.Count == 0 &&
+            while (_ready.Count == 0 && _running == 0 && _worlds[0].Hops.Count == 0 && _worlds[1].Hops.Count == 0 && _worlds[2].Hops.Count == 0 &&
                    !_leases.Values.Any(l => l.Waiting))
             {
                 var left = deadline - Environment.TickCount64;
@@ -608,7 +633,7 @@ internal class KitTaskPool : TaskBackend, IDisposable
         var before = Observed();
         try
         {
-            _dispatch!(h.Id, world == WorldKind.Client ? LeaseWork.ClientHop : LeaseWork.TickHop, cancelled, h.HostState);
+            _dispatch!(h.Id, world switch { WorldKind.Client => LeaseWork.ClientHop, WorldKind.Menu => LeaseWork.MenuHop, _ => LeaseWork.TickHop }, cancelled, h.HostState);
         }
         catch (Exception e)
         {

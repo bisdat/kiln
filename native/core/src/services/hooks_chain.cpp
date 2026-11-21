@@ -866,6 +866,7 @@ struct FreezeReport {
     size_t stopped = 0;   // of those, the ones SuspendThread really stopped
     size_t unopened = 0, unstopped = 0, in_range = 0, moved = 0, no_context = 0;
     size_t exited = 0;    // listed, could not be stopped, and its thread object is signalled
+    size_t unstarted = 0; // stopped before it ever ran (Wine: listed before its creator started it); no context asked
     // the first threads that stayed unchecked, for the log line written after everything runs again
     struct Unchecked { DWORD tid, error, exit_code; bool no_id; } why[4] = {};
     size_t why_n = 0;
@@ -877,9 +878,59 @@ struct FreezeReport {
     bool written = false;
 };
 
+// ntdll's NtQueryInformationThread, looked up before any thread is stopped (a lookup may take the loader lock).
+using QueryThreadFn = LONG(NTAPI*)(HANDLE thread, ULONG info_class, void* info, ULONG size, ULONG* returned);
+
+QueryThreadFn query_thread_fn() {
+    static const auto fn = reinterpret_cast<QueryThreadFn>(
+        reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationThread")));
+    return fn;
+}
+
+// True only for a thread that has no TEB yet: it has never run. Windows makes a thread and its TEB in one kernel call,
+// so there this is never true. Wine lists a new thread (NtGetNextThread, Toolhelp) as soon as the wineserver has made
+// it, and the thread registers its TEB only when it starts at the Unix level, which its creator does after that server
+// call. GetThreadContext on such a thread waits for a context only the started thread can send, so when the creator is
+// one of the threads we stopped, it waits forever: the hook install froze the process (Wine 11.20-staging, with and
+// without ntsync; hooks_v2_test's "starts" case). A thread that has not started is not inside any code, and when it
+// starts the wineserver sees our suspension and stops it before its first instruction, so it needs no check. When the
+// query fails, the thread is treated as started (GetThreadContext as before).
+bool thread_not_started(QueryThreadFn query, HANDLE h) {
+    struct {  // THREAD_BASIC_INFORMATION
+        LONG exit_status;
+        void* teb;
+        void* client_id[2];
+        uintptr_t affinity;
+        LONG priority, base_priority;
+    } info{};
+    constexpr ULONG kThreadBasicInformation = 0;
+    return query && query(h, kThreadBasicInformation, &info, sizeof info, nullptr) >= 0 && !info.teb;
+}
+
+// Every stopped thread's instruction pointer (GetThreadContext also waits until the thread has really stopped).
+// Nothing in here may allocate, log, lock or throw: other threads are stopped.
+void read_stopped_positions(std::vector<Stopped>& th, FreezeReport& rep, QueryThreadFn query) {
+    alignas(16) CONTEXT ctx;
+    for (Stopped& s : th) {
+        if (!s.suspended) continue;
+        if (thread_not_started(query, s.h)) {
+            ++rep.unstarted;
+            continue;
+        }
+        ctx.ContextFlags = CONTEXT_CONTROL;
+        if (GetThreadContext(s.h, &ctx)) {
+            s.has_rip = true;
+            s.rip = static_cast<uintptr_t>(ctx.Rip);
+        } else {
+            ++rep.no_context;
+        }
+    }
+}
+
 // Nothing in here may allocate, log, lock or throw: other threads are stopped.
 void write_with_threads_stopped(std::vector<Stopped>& th, uintptr_t addr, const PatchBytes& pb, const IpMap* map,
-                                uintptr_t tramp, FreezeReport& rep, uint32_t* unchecked = nullptr) {
+                                uintptr_t tramp, FreezeReport& rep, uint32_t* unchecked = nullptr,
+                                QueryThreadFn query = nullptr) {
     LARGE_INTEGER t0, t1, freq;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&t0);
@@ -904,17 +955,8 @@ void write_with_threads_stopped(std::vector<Stopped>& th, uintptr_t addr, const 
         ++rep.unstopped;
         rep.note(GetThreadId(s.h), error, code, false);
     }
+    read_stopped_positions(th, rep, query);
     alignas(16) CONTEXT ctx;
-    for (Stopped& s : th) {
-        if (!s.suspended) continue;
-        ctx.ContextFlags = CONTEXT_CONTROL;  // GetThreadContext also waits until the thread has really stopped
-        if (GetThreadContext(s.h, &ctx)) {
-            s.has_rip = true;
-            s.rip = static_cast<uintptr_t>(ctx.Rip);
-        } else {
-            ++rep.no_context;
-        }
-    }
     if (unchecked) {
         size_t in_bytes = 0;
         for (const auto& s : th)
@@ -962,6 +1004,7 @@ bool enable_detour(Target& t, FreezeReport& rep, uint32_t* unchecked = nullptr) 
     if (!make_patch(t, pb)) return false;
     IpMap map;
     const bool have_map = build_ip_map(t.hook.original_bytes(), t.hook.trampoline().data(), t.hook.trampoline().size(), map);
+    const QueryThreadFn query = query_thread_fn();  // before the freeze
     std::vector<Stopped> th;
     th.reserve(512);  // the freeze must not allocate
     LARGE_INTEGER l0, l1, freq;
@@ -971,7 +1014,7 @@ bool enable_detour(Target& t, FreezeReport& rep, uint32_t* unchecked = nullptr) 
     QueryPerformanceCounter(&l1);
     rep.list_ms = 1000.0 * static_cast<double>(l1.QuadPart - l0.QuadPart) / static_cast<double>(freq.QuadPart);
     for (const Stopped& s : th) rep.threads += s.skip ? 0 : 1;
-    write_with_threads_stopped(th, t.addr, pb, have_map ? &map : nullptr, t.trampoline, rep, unchecked);
+    write_with_threads_stopped(th, t.addr, pb, have_map ? &map : nullptr, t.trampoline, rep, unchecked, query);
     for (Stopped& s : th) CloseHandle(s.h);
     return rep.written;
 }
@@ -979,11 +1022,34 @@ bool enable_detour(Target& t, FreezeReport& rep, uint32_t* unchecked = nullptr) 
 // ---------------------------------------------------------------------------------------------------------------------
 // Targets
 
+// g_mutex and code::registry()'s lock held. True when a new detour on `addr` that writes `n` bytes would overlap code a
+// Kiln service protected for its engine calls (kiln.internal.hooks, ../hooks_protect_internal.h). Checked before any
+// thread is stopped and before a byte is written. One kiln.log line at the 1st, 2nd, 4th, 8th, ... refusal of `owner`
+// (named `who`) over one protected range.
+bool protected_refusal(uintptr_t addr, size_t n, const Place& where, Kind kind, KilnOwner owner, const std::string& who) {
+    auto* p = code::registry().protected_overlap_locked(addr, n);
+    if (!p) return false;
+    const uint64_t count = code::Registry::count_refusal_locked(*p, owner);
+    if (!code::Registry::log_refusal(count)) return true;
+    const State& s = S();
+    const std::string by = s.env.owner_name ? s.env.owner_name(p->owner) : std::string("owner ") + std::to_string(p->owner);
+    KLOG_W("hooks: %s hook on %s by %s refused, nothing written: its detour would write over code that %s protected for "
+           "an engine call (%s)%s",
+           kind_name(kind), where.text.c_str(), who.c_str(), by.c_str(), p->reason.c_str(),
+           code::Registry::refusal_tail(count).c_str());
+    return true;
+}
+
 // g_mutex held. Finds or creates the target: entry stub, head cell, the one safetyhook inline detour. *refused_quietly
-// is set when the address was refused before with the same bytes (nothing allocated, nothing logged).
-Target* target_for(uintptr_t addr, const Place& where, bool* refused_quietly, uint32_t* unchecked = nullptr) {
+// is set when the address was refused before with the same bytes (nothing allocated, nothing logged). A new target over
+// protected code is refused (`kind`, `owner` and its name `who` are the request's).
+Target* target_for(uintptr_t addr, const Place& where, bool* refused_quietly, uint32_t* unchecked, Kind kind,
+                   KilnOwner owner, const std::string& who) {
     State& s = S();
     if (auto it = s.by_addr.find(addr); it != s.by_addr.end()) return it->second;
+    // Its first byte protected: refused before anything is allocated (the detour's whole extent is checked below, once
+    // safetyhook knows how many bytes it replaces).
+    if (protected_refusal(addr, 1, where, kind, owner, who)) return nullptr;
     if (auto it = s.refused.find(addr); it != s.refused.end()) {
         uint8_t now[kFootprint] = {};
         const bool readable = read_guarded(addr, now, sizeof now);
@@ -1085,6 +1151,12 @@ Target* target_for(uintptr_t addr, const Place& where, bool* refused_quietly, ui
     PatchBytes physical;
     const bool physical_known = make_patch(*t, physical);
     const auto& saved = t->hook.original_bytes();
+    // The detour writes exactly these bytes (enable_detour's patch and safetyhook's enable() alike): refused when they
+    // overlap protected code. Not remembered as a refused address: the protection may go with its owner.
+    if (protected_refusal(addr, saved.empty() ? kFootprint : saved.size(), where, kind, owner, who)) {
+        t->hook = {};  // frees the trampoline; nothing was written
+        return fail(false);
+    }
     const std::vector<uint8_t> expected = physical_known
         ? std::vector<uint8_t>(physical.b, physical.b + physical.len) : std::vector<uint8_t>(saved.size());
     const auto code_token = code::registry().add_locked(addr, saved, expected, physical_known && t->trampoline);
@@ -1099,9 +1171,9 @@ Target* target_for(uintptr_t addr, const Place& where, bool* refused_quietly, ui
     if (enable_detour(*t, rep, unchecked)) {
         KLOG_D("hooks: detour on %s written with %zu other thread(s) stopped (of %zu listed) for %.2f ms, %.2f ms to "
                "list and open them (%zu not openable, %zu moved out of the replaced bytes, %zu without a context, %zu "
-               "ended)",
+               "ended, %zu not started yet)",
                where.text.c_str(), rep.stopped, rep.threads, rep.stopped_ms, rep.list_ms, rep.unopened, rep.moved,
-               rep.no_context, rep.exited);
+               rep.no_context, rep.exited, rep.unstarted);
         if (rep.stopped_ms > 50)
             KLOG_W("hooks: the other threads stood still for %.1f ms while the detour on %s was written",
                    rep.stopped_ms, where.text.c_str());
@@ -1207,12 +1279,12 @@ KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& orde
     auto code_guard = code::registry().lock();
     const bool had_target = s.by_addr.count(addr) != 0;
     if (!had_target && s.next_link >= kMaxLinks) return KILN_ERR_UNAVAILABLE;  // a new target has nothing to revive
-    bool quiet = false;
-    Target* t = target_for(addr, where, &quiet, unchecked);
-    if (!t) return KILN_ERR_UNAVAILABLE;
-    normalize(*t);
     const std::string owner_name =
         s.env.owner_name ? s.env.owner_name(owner) : std::string("owner ") + std::to_string(owner);
+    bool quiet = false;
+    Target* t = target_for(addr, where, &quiet, unchecked, kind, owner, owner_name);
+    if (!t) return KILN_ERR_UNAVAILABLE;
+    normalize(*t);
     std::string label = order.label;
     if (label.empty()) {
         const std::string& sym = target_symbol(*t);

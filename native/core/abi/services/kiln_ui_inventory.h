@@ -23,7 +23,8 @@
  * under a structured-exception guard (five faults in a row remove the subscription). Picture and wish only: the slot's
  * identity is what this game drew; a mod's server must check the item (holder, slot, type) before acting on it.
  *
- * Identity. slot.client_entity is the item's pide in this game's world. For an item the server replicated, that is the
+ * Identity. slot.client_entity is the item's pide in this game's world; 0 (KUI_CLIENT_ENTITY clear) for a plain stack,
+ * which the game keeps without an item entity (materials, consumables). For an item the server replicated, that is the
  * server's entity id (createEntityWithId keeps the wire id: docs/re/network.md, chapter 05a §6); slot.server_entity
  * stays 0 here (KUI_SERVER_ENTITY clear): the managed side names it ItemEntity and the server checks it.
  *

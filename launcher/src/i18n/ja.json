@@ -2737,7 +2737,16 @@
       "noGpuEnv": "今回の起動は GPU を使わずに描画しています: KILN_LAUNCHER_RENDER が設定されており、このスイッチより優先されます。",
       "gpuEnv": "今回の起動は GPU で描画しています: KILN_LAUNCHER_RENDER が設定されており、このスイッチより優先されます。",
       "noGpuArg": "今回の起動は GPU を使わずに描画しています: {flag} が指定されており、このスイッチより優先されます。",
-      "gpuArg": "今回の起動は GPU で描画しています: {flag} が指定されており、このスイッチより優先されます。"
+      "gpuArg": "今回の起動は GPU で描画しています: {flag} が指定されており、このスイッチより優先されます。",
+      "x11": "Waylandで描画が遅いときにX11へ切り替える",
+      "x11Intro": "WaylandのHiDPI画面でWebKitがGPUを使えないとき、ランチャーはX11（XWayland）経由でもう一度起動します。低い解像度で描画するため、ずっと速くなりますが、くっきり感は下がります。次回の起動から適用されます。",
+      "x11Wayland": "今回の起動はWaylandで描画しています。",
+      "x11On": "今回の起動はX11経由で描画しています。",
+      "x11Tried": "X11を試しましたが改善しなかったため、ランチャーはWaylandのままです。もう一度試すには、この設定をオフにしてからオンにしてください。",
+      "x11Software": "ランチャーがGPUなしで描画している間は使われません。",
+      "x11Yours": "あなたのGDK_BACKEND={value}が優先されます。",
+      "x11NextOn": "ランチャーが自動でX11に切り替えることがあります",
+      "x11NextOff": "次回の起動はWaylandのままです"
     },
     "dev": {
       "mock": "開発者: モックデータで代用",
@@ -3808,7 +3817,29 @@
       "countWontMany": "{names} はこのゲームでは動作しません。",
       "bulkNoSwitch": "ゲームフォルダーにあり、スイッチがありません",
       "bulkOnlyKept": "ライブラリには保持されたバージョンしかありません。バージョンを明示的に選んでください",
-      "bulkNoVersion": "ライブラリにどのバージョンもありません"
+      "bulkNoVersion": "ライブラリにどのバージョンもありません",
+      "emfMissing": "{dep} が必要ですが、インストールされていません。",
+      "emfOff": "{dep} が必要ですが、オフになっています。",
+      "emfNotLoading": "{dep} が必要ですが、読み込まれません。",
+      "emfTooOld": "{dep} が必要です。お使いの {found} は古すぎます。",
+      "emfTooNew": "{dep} が必要です。お使いの {found} は新しすぎます。",
+      "emfWithEmf": "EMF のリリースに含まれています。「モッドを追加」で EMF の zip を追加してください。",
+      "emfUpdateWithEmf": "新しい版が EMF のリリースに含まれています。「モッドを追加」で EMF の zip を追加してください。",
+      "emfSwitchOn": "このリストでオンにしてください。",
+      "emfNotLoadingTip": "理由はその行に表示されています。",
+      "emfTooNewTip": "このモッドの更新を探してください。",
+      "emfSays": "EMF の表示: {reason}。",
+      "emfWhyMissing": "{dep} が必要ですが、インストールされていません",
+      "emfWhyOff": "{dep} が必要ですが、オフになっています",
+      "emfWhyNotLoading": "{dep} が必要ですが、読み込まれません",
+      "emfWhyVersion": "{dep} が必要ですが、お使いのものは {found} です",
+      "emfWhyWithEmf": "{why}（EMF のリリースに含まれています。「モッドを追加」で EMF の zip を追加してください）",
+      "emfLua": "EMF の lua モッド",
+      "emfGet": "EMF を入手",
+      "emfGetTip": "EMF のページを開きます（リリースの zip があります）",
+      "emfModPage": "モッドのページ",
+      "emfModPageTip": "モッドが {dep} について示すページを開きます",
+      "emfRejectedLast": "前回の起動で読み込まれませんでした"
     },
     "modUpdates": {
       "found.other": "{count} 個のモッドにアップデートがあります",
@@ -3890,7 +3921,12 @@
       "leavesListed.other": "ファイルはライブラリから削除されます。{others} にも含まれていて、不足として表示されます。",
       "leaves": "ファイルはライブラリから削除されます。",
       "notSaved": "モッドリストを保存できなかったため、何も削除していません。",
-      "notRemovable": "ゲームフォルダーにあり、Kiln が置いたものではありません。そこで削除してください"
+      "notRemovable": "ゲームフォルダーにあり、Kiln が置いたものではありません。そこで削除してください",
+      "settingsToo": "設定も削除する",
+      "settingsTooHint": "このゲームとプロファイルにあるこの MOD の設定も削除されます。Kiln はバックアップにコピーを残します。",
+      "settingsTooMany": "設定も削除する",
+      "settingsTooManyHint": "このゲームとプロファイルにあるこれらの MOD の設定も削除されます。Kiln はバックアップにコピーを残します。",
+      "settingsLeft": "一部の設定は残りました"
     },
     "rollback": {
       "settingsBack.other": "アップデート前の設定も一緒に戻ります（{count} 個のファイル）。",
@@ -4477,7 +4513,21 @@
       "getKiln": "Kiln を入手",
       "joinDiscord": "Discord に参加",
       "onToast": "リッチプレゼンスをオンにしました",
-      "offToast": "リッチプレゼンスをオフにしました"
+      "offToast": "リッチプレゼンスをオフにしました",
+      "pack": {
+        "label": "Discord プロフィールに Crucible のパックを表示",
+        "hint": "Crucible のパックで遊んでいる間：パック名と、パックのページを開く「このモッドパックを入手」ボタン。この PC で作ったパックの名前は表示されません。",
+        "never": "表示されないもの：サーバー名、ワールド名、キャラクター。Crucible のパックで遊んでいる間は、その名前とページが表示されます。",
+        "state": {
+          "other": "{pack}（{count} 個のモッド）"
+        },
+        "getPack": "このモッドパックを入手",
+        "example": "残り火の旅",
+        "turnOn": "パックを表示",
+        "turnOff": "パックを隠す",
+        "onToast": "Crucible のパックが Discord に表示されます",
+        "offToast": "Crucible のパックは Discord に表示されなくなりました"
+      }
     },
     "signIn": {
       "title": "Discord でサインイン",
@@ -4623,6 +4673,7 @@
       "reportTeam": "別の選択をしない限り Kiln チームのみ: レポート zip。30 日後にチームのチャンネルから削除されます。",
       "presenceTitle": "リッチプレゼンス",
       "presence": "オンにしてプレイしている間だけ、この PC の Discord アプリにだけ送ります: Kiln で Enshrouded をプレイしていること、オンのモッド数、時間。サーバー名、ワールド名、キャラクター、使っているモッドは送りません。",
+      "presencePack": "「Crucible のパックを表示」がオンのときは、遊んでいる Crucible のパックの名前と frostdev.io にあるそのページへのリンクも表示されます。この PC で作ったパックの名前は表示されません。",
       "testerTitle": "テスターに志願したとき",
       "tester": "Kiln チームは、この PC のグラフィックカード、ドライバー、ビデオメモリ、システム、ゲームの動作状況を受け取ります。結果は #testing のビルドの投稿に送られます。添付したサポートレポートはチームだけに送られます。",
       "keptTitle": "frostdev.io が保持するもの",
@@ -4796,6 +4847,1163 @@
     "settings": {
       "show": "コミュニティページを表示",
       "showHint": "ランチャー内の Kiln の Discord です。オフにすると、このページ、Deck のタブ、すべての「Kiln サポートに送る」が非表示になり、ランチャーは Discord 関連の動作をすべて止めます。"
+    }
+  },
+  "crucible": {
+    "checks": {
+      "running": "パックを確認しています…",
+      "couldNot": "パックを確認できませんでした",
+      "passed": "確認: 問題なし",
+      "failed.other": "{count} 件の問題でインストールできません",
+      "warnings.other": "{count} 件の確認事項",
+      "failedBlock": "パックが確認に通りませんでした: インストールできません。",
+      "pending": "確認: Crucible でまだ実行中",
+      "lineWarnings.other": "確認: {count} 件の確認事項",
+      "lineProblems.other": "確認: {count} 件の問題",
+      "lineFailed": "確認: Crucible で実行できませんでした"
+    },
+    "banner": {
+      "title": "パックの更新",
+      "head": "{name} {change}",
+      "headBy": "{name} {change}（{by}）",
+      "line": "{head}: {changes}。",
+      "ready": "{head}: 更新の準備ができました。",
+      "seeChanges": "変更を見る"
+    },
+    "change": {
+      "added.other": "{count} 追加",
+      "updated.other": "{count} 更新",
+      "removed.other": "{count} 削除",
+      "addedWord.other": "{count} 個追加",
+      "updatedWord.other": "{count} 個更新",
+      "removedWord.other": "{count} 個削除"
+    },
+    "code": {
+      "link": "コードをお持ちですか？",
+      "title": "コードでパックを開く",
+      "hint": "友だちから届いたコードかリンクを貼り付けてください。",
+      "paste": "貼り付け",
+      "pasteNone": "クリップボードにパックのコードがありません。"
+    },
+    "err": {
+      "notFound": "そのコードは見つかりませんでした。コードは H7QK-3MZP のような形です。",
+      "offline": "Kiln が Crucible に接続できません。友だちにパックのファイルをもらってください（Crucible で共有 > ファイルとして保存）。",
+      "gone": "このパックはもう Crucible にありません。",
+      "badDownload": "パックを正しくダウンロードできませんでした。何もインストールされていません。もう一度お試しください。",
+      "gameRunning": "先に Enshrouded を閉じてください。",
+      "offlineShare": "Kiln が Crucible に接続できません。インターネット接続を確認してもう一度試すか、「ファイルとして保存」で作ったファイルを友だちに送ってください。"
+    },
+    "install": {
+      "done": "{name} をインストールしました",
+      "doneDetail": "これが読み込み中のプロファイルになりました。ほかのプロファイルはそのままです。",
+      "failed": "{name} をインストールできませんでした",
+      "backTo": "{name} に戻す",
+      "backToNone": "プロファイルなしに戻す",
+      "backDetail": "{name} は「設定」の「プロファイル」に残ります。",
+      "undoFailed": "元に戻せませんでした",
+      "profileName": "{pack} ({creator} のパック)",
+      "doneOnly": "プロファイルに追加されました。遊びたいときに読み込んでください。"
+    },
+    "preview": {
+      "title": "パック",
+      "by": "{name} 作",
+      "fromFile": "ファイルから",
+      "versionN": "v{version}（#{number}）",
+      "upvotes": "高評価",
+      "fits": "あなたのゲームに対応（ビルド {build}）",
+      "fitsAny": "あなたのゲームに対応",
+      "otherBuild": "ゲームビルド {build} 向けです。あなたのビルドは {current} です。更新が必要なモッドがあるかもしれません。",
+      "download": "{size} をダウンロード",
+      "downloadSome.other": "{size} をダウンロード。{count} 個のモッドはすでにライブラリにあります。",
+      "allInLibrary.other": "ダウンロードするものはありません。{count} 個のモッドすべてがすでにライブラリにあります。",
+      "code": "コード {code}",
+      "kilnOldTitle": "このパックには Kiln が古すぎます",
+      "kilnOld": "Kiln {version} 以降が必要です。",
+      "updateKiln": "Kiln を更新",
+      "uploadingTitle": "アップロード中",
+      "stillUploading": "{name} さんのパックはまだアップロード中です（{pct}%）。ここで待つと、準備ができ次第インストールできます。",
+      "resumed": "Kiln の準備ができました。お目当てのパック {name} です。",
+      "wait": "待つ",
+      "waiting": "{name} さんのアップロードを待っています（{pct}%）…",
+      "ownProfile": "専用のプロファイルとしてインストールされます。今のモッドはそのままです。",
+      "have": "このパックはすでにお持ちです。",
+      "haveUpdate": "このパックはお持ちです。バージョン {version} の準備ができています。",
+      "loadIt": "読み込む",
+      "loaded": "{name} を読み込みました",
+      "optional": "オプションのモッド",
+      "seeMods.other": "{count} 個のモッドとクレジットを見る",
+      "hideMods": "モッドを隠す",
+      "modBy": "{name} 作",
+      "codeTag": "コード",
+      "codeTip": "お使いの PC でコードを実行します",
+      "optionalTag": "オプション",
+      "newTag": "新規",
+      "inLibrary": "ライブラリにあります",
+      "warning": "このパックには、ほかの人が作ったモッド（コードを含むもの）が入っています。Crucible はパックを自動でチェックしますが、人の目での審査は行いません。",
+      "trust": "{name} さんのパックを信頼する",
+      "trustFile": "このパックを信頼する",
+      "trustAlways": "{name} さんのパックを常に信頼する",
+      "trustedAlready": "{name} さんのパックを信頼しています。",
+      "tickFirst": "先に「信頼する」にチェックを入れてください。",
+      "installPlay": "インストールしてプレイ",
+      "cantOpen": "このパックを開けません",
+      "noGame": "Kiln はまだ Enshrouded を見つけていません。",
+      "installKiln": "先にゲームへ Kiln をインストールしてください。",
+      "nameLabel": "プロファイル名",
+      "nameTaken": "同じ名前のプロファイルがあります。これは {name} になります。",
+      "runningHint": "Enshrouded が起動中です。インストールはすぐにパックを追加します。ゲームを閉じてから読み込んでください。",
+      "installOnlyTip": "パックを専用のプロファイルとして追加します。読み込みやゲームの起動はしません。",
+      "warningFile": "このパックファイルには、ほかの人が作ったモッド（コードを含むもの）が入っています。Kiln はファイルをチェックしましたが、人の目での審査はされていません。"
+    },
+    "profiles": {
+      "tag": "Crucible パック",
+      "line": "{name} {version} · {ago}",
+      "updateReady": "{version} の準備ができました",
+      "seeUpdate": "更新を見る",
+      "undoUpdate": "前回の更新を取り消す（{version} に戻す）",
+      "uninstall": "アンインストール",
+      "uninstallAsk": "{name} をアンインストールしますか？",
+      "uninstallText": "プロファイルは削除されます。モッドはライブラリに残り、ほかのプロファイルはそのままです。",
+      "uninstalled": "{name} をアンインストールしました",
+      "unused.other": "{count} 個のモッドが使われなくなりました。ライブラリの「整理」で削除できます。",
+      "cardTitle": "Crucible",
+      "cardSub": "インストールしたパックと、共有したパック。",
+      "installed": "インストール済みのパック",
+      "shared": "共有したパック",
+      "asProfile": "プロファイル {name} として",
+      "updateTo": "{version} に更新",
+      "noInstalled": "パックはまだありません。友だちからコードをもらいましたか？「プレイ」で入力してください。",
+      "noShared": "共有したものはまだありません。「プレイ」の「Crucible で共有」で、モッドをリンクにできます。",
+      "sharedVersion": "バージョン {number}"
+    },
+    "save": {
+      "button": "ファイルとして保存",
+      "pick": "パックのファイルの保存先",
+      "done": "{name} をファイルとして保存しました",
+      "failed": "{name} を保存できませんでした",
+      "openFolder": "フォルダーを開く"
+    },
+    "settings": {
+      "stats": "インストール数をカウントする（匿名）",
+      "statsHint": "Crucible は各パックのインストール数を日ごとに数えます。あなたに関する情報は送信されません。"
+    },
+    "share": {
+      "button": "Crucible で共有",
+      "uploadingShort": "アップロード中…",
+      "changedPill": "パックが変更されました",
+      "signInText": "共有するには Discord でサインインしてください。友だちはサインイン不要です。",
+      "signIn": "Discord でサインイン",
+      "saveInstead": "代わりにファイルとして保存",
+      "uploadingTitle": "{name} を共有中",
+      "starting": "準備中…",
+      "keepsGoing": "閉じても大丈夫です。アップロードは続きます。",
+      "copied": "リンクをコピーしました。友だちに貼り付けて送りましょう。",
+      "ready": "リンクができました",
+      "pasteIt": "友だちがリンクを開いて「インストールしてプレイ」を押します。",
+      "copyIt": "リンクをコピーして、友だちに貼り付けて送りましょう。",
+      "sharedTitle": "{name} を共有しました",
+      "changedTitle": "パックが変更されました",
+      "updateAsk": "友だち向けのリンクを更新しますか？{changes}",
+      "updateLink": "リンクを更新",
+      "codeLabel": "コード",
+      "linkCopied": "リンクをコピーしました",
+      "codeCopied": "コードをコピーしました",
+      "copyLink": "リンクをコピー",
+      "noClipboard": "ここではコピーできません。代わりにテキストを選択してください。",
+      "failed": "共有できませんでした",
+      "versionLine": "バージョン {number}",
+      "what": "Crucible とは?",
+      "confirmTitle": "{name} を Crucible で共有しますか?",
+      "confirmWhat": "Crucible はこのプロファイルをリンクにします。友だちは Kiln で開くと同じモッドを受け取れます。",
+      "confirmGoesSize.other": "アップロードされるもの: モッドの一覧と、Crucible にまだない {count} 個のモッドのファイル (最大 {size})。",
+      "confirmGoes.other": "アップロードされるもの: モッドの一覧と、Crucible にまだない {count} 個のモッドのファイル。",
+      "confirmGoesAny": "アップロードされるもの: モッドの一覧と、Crucible にまだないモッドのファイル。",
+      "confirmStays": "この PC に残るもの: モッドの設定と、あなた自身のデータ変更。",
+      "confirmNever": "送信しないもの: セーブ、ワールド、キャラクター、そのほかの個人ファイル。",
+      "visibility": "開ける人",
+      "linkOnly": "リンクのみ:",
+      "linkOnlyText": "リンクかコードを渡した人だけ。",
+      "public": "公開:",
+      "publicText": "Crucible で誰でも見られます。公開パックは Pack Studio で作ります (クレジットと概要が必要です)。",
+      "confirmShare": "共有",
+      "confirmSignIn": "サインインして共有"
+    },
+    "update": {
+      "title": "{name}: {from} → {to}",
+      "titleLoading": "{name} を更新中",
+      "getting": "更新を準備しています…",
+      "cantRead": "更新を読み取れません",
+      "removedKept": "{name}（ライブラリに残ります）",
+      "packData": "パック自体のデータが変更されました",
+      "renamed": "{from} は {to} になりました: あなたの設定も移ります。",
+      "stillWins.other": "あなたの変更が引き続き優先されます（{count}）",
+      "dataChanged": "パックは {pack} に変わりました。あなたの {mine} が引き続き有効です。",
+      "dataSame": "パックは {pack} です。あなたの {mine} が引き続き有効です。",
+      "dropMine": "自分の変更をやめる（{value} を使う）",
+      "savesFirst": "先にセーブデータをバックアップします。",
+      "download": "{size} をダウンロード",
+      "needsYou.other": "確認が必要です（{count}）",
+      "both": "パックは今 {pack} になっています。あなたは {mine} でした。",
+      "takePack": "{value} にする",
+      "keepMine": "{value} のままにする",
+      "notNow": "今はしない",
+      "update": "更新",
+      "updatePlay": "更新してプレイ",
+      "chooseFirst": "先にそれぞれの設定を選んでください。",
+      "needsChoice": "選んでほしい設定があります。",
+      "done": "{name} は最新です（{version}）",
+      "doneDetail": "あなた自身の変更はそのままです。",
+      "failed": "{name} を更新できませんでした",
+      "undone": "{name} を {version} に戻しました",
+      "undoFailed": "更新を取り消せませんでした",
+      "keptLine": "あなたの変更は保持されます: {list}。",
+      "keptSettings": {
+        "other": "設定 {count} 件"
+      },
+      "keptData": {
+        "other": "データ変更 {count} 件"
+      },
+      "keptMods": {
+        "other": "モッド {count} 個"
+      }
+    },
+    "deck": {
+      "shareTitle": "{name} を共有",
+      "scan": "友だちはスマホでコードを読み取るか、Kiln にコードを入力します。",
+      "enterCode": "コードを入力",
+      "codeHint": "英数字 8 文字です。例: H7QK-3MZP。",
+      "installing": "インストール中…",
+      "loading": "パックを開いています…",
+      "tick": "チェックする",
+      "untick": "チェックを外す",
+      "turnOn": "オンにする",
+      "turnOff": "オフにする"
+    }
+  },
+  "studio": {
+    "nav": "スタジオ",
+    "title": "Pack Studio",
+    "sub": "プロファイルから Crucible パックを作成：MOD、設定、独自データ、クレジット、そして公開。",
+    "new": "新しいパック",
+    "newFrom": "元にする",
+    "newEmpty": "空（新しいプロファイル）",
+    "newProfile": "{name}（MOD {count} 個）",
+    "newName": "名前",
+    "newNamePh": "マイパック",
+    "create": "作成",
+    "newFailed": "パックを作成できませんでした",
+    "empty": {
+      "title": "まだパックがありません",
+      "hint": "遊んでいるプロファイルから始めましょう。MOD と設定も一緒に入ります。"
+    },
+    "packLine": {
+      "other": "v{version} · MOD {count} 個 · {ago}に変更"
+    },
+    "packSub": {
+      "other": "バージョン {version}、プロファイル {profile} から作成（MOD {count} 個）。"
+    },
+    "profileGone": "このパックの元になったプロファイルはもうありません。",
+    "missing": "このパックはここにありません",
+    "back": "すべてのパック",
+    "allPacks": "すべてのパック",
+    "tabsAria": "Pack Studio",
+    "deleteTitle": "{name} を削除しますか？",
+    "deleteText": "パックの下書きは Kiln のバックアップに移ります。プロファイルは残り、公開したものは Crucible に残ります。",
+    "recheck": "再チェック",
+    "state": {
+      "draft": "下書き",
+      "link": "リンクのみ",
+      "public": "公開"
+    },
+    "tab": {
+      "mods": "MOD",
+      "settings": "設定",
+      "data": "データ",
+      "order": "読み込み順",
+      "test": "テスト",
+      "credits": "クレジット",
+      "publish": "公開"
+    },
+    "mods": {
+      "lead": "プロファイル {profile} の MOD。それぞれライブラリにあるバージョンです。プレイヤーはインストール前に任意の MOD をオン・オフできます。",
+      "addLibrary": "ライブラリから追加",
+      "addFile": "ファイルを追加",
+      "pickFile": "MOD ファイルをパックに追加",
+      "addFailed": "MOD を追加できませんでした",
+      "removeFailed": "{name} を外せませんでした",
+      "empty": "まだ MOD がありません。ライブラリから追加してください。",
+      "mod": "MOD",
+      "version": "バージョン",
+      "need": "パック内",
+      "sides": "動作先",
+      "source": "出典",
+      "needAria": "{name} のパックでの扱い",
+      "sidesAria": "{name} の動作先",
+      "required": "必須",
+      "optionalOn": "任意・オン",
+      "optionalOff": "任意・オフ",
+      "both": "プレイヤーとサーバー",
+      "client": "プレイヤーのみ",
+      "server": "サーバーのみ",
+      "checking": "確認中…",
+      "unknown": "不明",
+      "filter": "絞り込み",
+      "libraryEmpty": "ライブラリの MOD はすべてパックに入っています。",
+      "addN": {
+        "other": "MOD を {count} 個追加"
+      }
+    },
+    "settings": {
+      "lead": "設定は、遊んでいるプロファイルから選んだキーとして渡されます。MOD の既定値と同じキーは含まれず、ホットキーもチェックしない限り含まれません。個人情報らしきものは決して渡されません。",
+      "capture": "現在の設定から取り込む",
+      "captureFailed": "Kiln はプロファイルの設定を読めませんでした",
+      "save": {
+        "other": "{count} 個のキーを使う"
+      },
+      "saved": {
+        "other": "設定ファイル {count} 個がパックに入りました"
+      },
+      "saveFailed": "設定を取り込めませんでした",
+      "none": "このプロファイルにはまだ設定ファイルがありません。一度遊んで好きに変えてから取り込んでください。",
+      "refused": "渡せません：{why}",
+      "wholeOnly": "ファイル全体として渡されます",
+      "differs": {
+        "other": "MOD の既定値と {count} 個のキーが違います"
+      },
+      "noDefaults": {
+        "other": "キー {count} 個（既定値は不明）"
+      },
+      "sideAria": "{file} を受け取る側",
+      "whole": "ファイル全体",
+      "default": "（既定 {value}）",
+      "personal": "個人用",
+      "secret": "非公開"
+    },
+    "server": {
+      "title": "サーバーのゲーム設定",
+      "lead": "このパックのサーバーが使うゲーム設定（体力、敵、建築）。あなたのサーバーから取り込みます。サーバー名、パスワード、ポートは渡されません。",
+      "none": "ゲーム設定を取り込むには「サーバー」でサーバーを追加してください。",
+      "pick": "サーバー",
+      "take": "このサーバーから取り込む",
+      "takeFailed": "Kiln はサーバーの設定を読めませんでした",
+      "use": "チェックした設定を使う",
+      "saved": "サーバーのゲーム設定がパックに入りました",
+      "clear": "外す"
+    },
+    "data": {
+      "tabsAria": "データエディター",
+      "tab": {
+        "items": "アイテム",
+        "recipes": "レシピ",
+        "loot": "ルート",
+        "drops": "ドロップ",
+        "added": "新規アイテム",
+        "raw": "Raw JSON"
+      },
+      "lint": {
+        "line": "データチェック: {errors}、{warnings}",
+        "errors": {
+          "other": "{count} 件のエラー"
+        },
+        "warnings": {
+          "other": "{count} 件の警告"
+        },
+        "checking": "データチェック: 確認中…",
+        "show": "問題を表示",
+        "hide": "問題を隠す",
+        "error": "エラー",
+        "warning": "警告",
+        "info": "メモ",
+        "lineNotes": "データチェック: {errors}、{warnings}、{notes}",
+        "notes": {
+          "other": "メモ {count} 件"
+        }
+      },
+      "noCatalog": "Kiln はまだゲームのアイテムを読み込んでいません。選択リストにはパックのMODが追加するものだけが表示され、フィールド名は手入力になります。",
+      "catalog": {
+        "reading": "ゲームのアイテムを読み込んでいます…",
+        "build": "ゲームカタログを作成",
+        "why": {
+          "noGame": "Enshrouded のクライアントが見つかりません。「設定」→「ゲーム」で追加してください。",
+          "steamUpdating": "Steam がゲームを更新中です。完了してからもう一度お試しください。",
+          "conflict": "ゲームのファイルが 2 つの異なるバージョンのものです（Steam が更新中の可能性があります）。Steam の処理が終わってからもう一度お試しください。",
+          "failed": "Kiln はゲームのアイテムを読み込めませんでした: {message}"
+        }
+      },
+      "thisPack": "このパック",
+      "save": "保存",
+      "saved": "保存しました",
+      "unsaved": "未保存の変更",
+      "discard": "破棄",
+      "remove": "削除",
+      "saveFailed": "{file} を保存できませんでした",
+      "broken": "このファイルは有効なJSONではありません。先にRaw JSONで修正してください。",
+      "alsoIn": "{files} でも設定されています（Raw JSON）。",
+      "name": "名前",
+      "guid": "固定GUID（一度だけ作成し、変更しないこと）",
+      "badName": "名前は1〜200文字の英数字、_ - または . です",
+      "dupName": "{name} が重複しています",
+      "pick": {
+        "ph": "アイテムを検索",
+        "selectorPh": "名前、または Material_T1_* のようなパターン",
+        "glob": "すべての一致",
+        "unknown": "ゲームにもパックのMODにも見つかりません",
+        "none": "見つかりません",
+        "searching": "検索中…"
+      },
+      "value": {
+        "set": "次に設定",
+        "mul": "倍",
+        "add": "加算",
+        "min": "最小",
+        "max": "最大",
+        "modeAria": "{field} の変更方法",
+        "minAria": "{field} の最小値",
+        "maxAria": "{field} の最大値",
+        "raiseOnly": "増加のみ",
+        "lowerOnly": "減少のみ",
+        "on": "オン",
+        "off": "オフ"
+      },
+      "field": {
+        "add": "+ フィールド",
+        "remove": "{field} を削除",
+        "nameAria": "フィールド"
+      },
+      "where": {
+        "add": "+ 条件",
+        "where": "条件:",
+        "and": "かつ",
+        "fieldAria": "条件のフィールド",
+        "fieldPh": "フィールド",
+        "valueAria": "{field} の条件",
+        "remove": "条件を削除"
+      },
+      "rules": {
+        "add": "+ ルール",
+        "addAll": "+ すべてのアイテムのルール",
+        "remove": "ルールを削除",
+        "selectorAria": "対象のエントリ",
+        "noSelector": "ルールには名前またはパターンが必要です",
+        "duplicate": "{selector} に2つのルールがあります。1つにまとめてください"
+      },
+      "items": {
+        "lead": "ゲームのアイテムとパックのMODのアイテムを変更します。アイテムまたはパターンごとに1つのルールを作り、ゲームの値に条件を付けられます。パックレイヤーはすべてのMODの後に読み込まれるため、その値が優先されます。",
+        "empty": "アイテムのルールはまだありません。",
+        "selector": "アイテム"
+      },
+      "loot": {
+        "lead": "チェストやワールド上の拾得物のランダムなルートを、アイテムごとに設定します。1スタックに入る数です。",
+        "empty": "ルートのルールはまだありません。",
+        "selector": "アイテム"
+      },
+      "recipes": {
+        "lead": "レシピの必要素材、完成品、所要時間を変更するか、独自のレシピを追加します。",
+        "changes": "変更したレシピ",
+        "noChanges": "レシピの変更はまだありません。",
+        "add": "+ レシピを変更",
+        "recipe": "レシピ",
+        "noRecipe": "変更にはレシピが必要です",
+        "changeInputs": "材料を変更",
+        "changeOutputs": "完成品を変更",
+        "inputs": "材料",
+        "outputs": "完成品",
+        "addInput": "+ 材料",
+        "addOutput": "+ 完成品",
+        "duration": "所要時間",
+        "durationPh": "ゲーム標準",
+        "seconds": "秒",
+        "itemAria": "アイテム",
+        "countAria": "個数",
+        "category": "カテゴリ {id} の任意のアイテム",
+        "addCategory": "+ グループのいずれか",
+        "addCategoryTip": "グループ内のどのアイテムでも支払える材料（例: どの木材でも）",
+        "anyOf": "いずれか: {names}",
+        "anyOfMore": "いずれか: {names} ほか {count} 件",
+        "categoryAria": "アイテムのグループ",
+        "categoryPh": "含まれるアイテムで検索",
+        "categoryNone": "そのアイテムを含むグループはありません",
+        "categoryItems": {
+          "other": "{count} 個のアイテム"
+        },
+        "categoryUsed": {
+          "other": "ゲームのレシピ {count} 件で使用"
+        },
+        "categoryUnused": "ゲームのレシピでは使われていません",
+        "categoryUsedBy": "これを使うゲームのレシピ: {names}",
+        "categoryUsedByMore": "これを使うゲームのレシピ: {names} ほか {count} 件",
+        "categoryShow": "アイテムを表示",
+        "categoryHide": "アイテムを隠す",
+        "categoryNoCatalog": "ゲームのアイテム情報が必要です: Kiln が先に読み込みます",
+        "removeCategory": "このグループを削除",
+        "offer": "グループのいずれかでも可にしますか？",
+        "offerAria": "代わりにグループのいずれかを受け付ける（{anyOf}）",
+        "modNote": "MODのレシピを変更します。パックレイヤーが優先されます（{mod} の後に読み込まれます）。",
+        "stationNote": "ゲームのレシピは作業台がそのままです。新規レシピは作業台を自分で選びます。",
+        "new": "新規レシピ",
+        "noNew": "新規レシピはまだありません。",
+        "addNew": "+ 新規レシピ",
+        "removeNew": "新規レシピを削除",
+        "station": "作業台",
+        "stationPh": "作業台を検索",
+        "hand": "手作業で作成",
+        "noStation": "新規レシピには作業台が必要です",
+        "needStacks": "新規レシピには材料と完成品が必要です",
+        "noCategory": "「いずれか」の材料ごとにグループを選んでください"
+      },
+      "drops": {
+        "lead": "デフォルトのインベントリ：敵のルートと固定チェストを、テーブルごと、またはすべてのテーブル（*）に設定します。",
+        "empty": "ドロップのルールはまだありません。",
+        "table": "テーブル",
+        "add": "+ テーブル",
+        "addAll": "+ すべてのテーブルのルール",
+        "count": "数量",
+        "chance": "確率",
+        "items": "単体アイテム",
+        "addItem": "+ アイテム",
+        "noTable": "ドロップのルールにはテーブルが必要です"
+      },
+      "added": {
+        "lead": "独自のアイテム：それぞれベースアイテム（モデル、アイコン、挙動）のコピーで、独自の名前と値を持ちます。",
+        "empty": "新規アイテムはまだありません。",
+        "add": "+ 新規アイテム",
+        "remove": "新規アイテムを削除",
+        "displayName": "表示名",
+        "base": "ベースアイテム",
+        "description": "説明",
+        "rolledLoot": "ルートのように抽選（レアリティとレベルが変動）",
+        "fields": "値",
+        "noBase": "新規アイテムにはベースアイテムが必要です"
+      },
+      "raw": {
+        "none": "ファイルはまだありません。",
+        "newPh": "name.json",
+        "newAria": "新しいファイル名",
+        "new": "新規ファイル",
+        "rename": "名前を変更",
+        "renameAria": "新しい名前",
+        "renameOk": "変更",
+        "exists": "{file} は既に存在します",
+        "delete": "削除",
+        "deleteTitle": "{file} を削除しますか？",
+        "deleteText": "このファイルはパックレイヤーから外れます。",
+        "textAria": "{file} のテキスト",
+        "clean": "このファイルに問題はありません。",
+        "pick": "ファイルを選ぶか、新しく作成してください。"
+      },
+      "hidden": {
+        "toggle": "非表示のゲーム項目を表示",
+        "tag": "非表示",
+        "tip": "古い・テスト用・未使用のゲーム項目です。ゲーム内では何も起きないことがあります。",
+        "tankWater": "作業台のタンクの水"
+      }
+    },
+    "order": {
+      "title": "読み込み順",
+      "always": "（パックレイヤー、常に最後）",
+      "late": "後から読み込むネイティブ DLL：{list}",
+      "conflicts": "競合",
+      "none": "同じ項目を別の値にしている MOD の組はありません。",
+      "noCatalog": "ゲームデータのカタログがないため、ワイルドカードの競合は推測にすぎません。",
+      "maybe": "かもしれない",
+      "wins": "現在の勝者",
+      "setIn": "パックで指定：",
+      "set": "指定",
+      "setAria": "パック内の {field} の値",
+      "setDone": "{field} をパックレイヤーで指定しました"
+    },
+    "test": {
+      "lead": "プレイヤーが受け取るのと同じ形でパックを試せます。Kiln がパックを組み立て、専用のプロファイルとしてインストールします。",
+      "backup": "先にセーブをバックアップします。",
+      "world": "自分のワールドをそのまま残すため、テストには新しいワールドを使ってください。",
+      "server": "サーバー用パックは、公開したバージョンをあなたのサーバーに入れて試します（公開）。",
+      "make": "このパックをテスト",
+      "again": "もう一度テスト",
+      "play": "テストをプレイ",
+      "end": "テストを終了",
+      "failed": "テスト用インスタンスを作れませんでした",
+      "ready": "{name} の準備ができました",
+      "readyDetail": "プレイを押して開始します。",
+      "noGame": "先にゲームを追加してください。",
+      "reported": "ゲームからの報告",
+      "notYet": "テストをプレイしてから戻ってください。",
+      "clean": "前回の実行では競合もエラーもありません。",
+      "conflicts": {
+        "other": "データ競合 {count} 件"
+      },
+      "problems": {
+        "other": "エラーまたは警告 {count} 件"
+      }
+    },
+    "credits": {
+      "lead": "公開パックではすべての MOD のクレジットが必要です：作者と出典への https リンク。Kiln が分かるものを埋めるので、各行を確認してください。",
+      "author": "作者",
+      "source": "出典",
+      "matched": "判定元",
+      "authorAria": "{name} の作者",
+      "sourceAria": "{name} の出典",
+      "notIdentified": "不明：入力するか MOD を外してください",
+      "missing": {
+        "other": "公開パックにはまだ {count} 個の MOD にクレジットが必要です"
+      },
+      "complete": "すべての MOD にクレジットがあります",
+      "save": "クレジットを保存",
+      "saved": "クレジットを保存しました",
+      "saveFailed": "クレジットを保存できませんでした"
+    },
+    "match": {
+      "kiln": "Kiln 公式",
+      "crucible": "Crucible",
+      "github": "GitHub リリース",
+      "nexus": "Nexus",
+      "manifest": "MOD自身の情報",
+      "manual": "あなた"
+    },
+    "confidence": {
+      "certain": "確実",
+      "likely": "おそらく",
+      "conflict": "以前のクレジットと異なる",
+      "unverified": "未検証",
+      "creator": "あなたのもの",
+      "unconfirmed": "未確認",
+      "none": "なし"
+    },
+    "publish": {
+      "signInTitle": "公開するにはサインイン",
+      "signIn": "公開には Discord のサインインを使います。プレイヤーはインストールにサインイン不要です。",
+      "version": "バージョン",
+      "changes": "変更点",
+      "changesPh": "戦利品を調整、Busy Hands を追加",
+      "tested": "ゲームビルド {build} でテスト済み",
+      "visibility": "公開範囲",
+      "public": "公開",
+      "link": "リンクのみ",
+      "summary": "概要",
+      "summaryHint": "Crucible の一覧に出る 1 行（10 文字以上）。",
+      "attest": "すべての MOD とその作者をクレジットし、これらのファイルを共有する権利があります。",
+      "checks": "チェック",
+      "check": {
+        "format": "形式",
+        "sizes": "サイズ",
+        "blocked": "既知の有害ファイル",
+        "code": {
+          "other": "コード検査（注記 {count} 件）"
+        },
+        "lint": {
+          "other": "データチェック（警告 {count} 件）"
+        }
+      },
+      "tone": {
+        "ok": "OK",
+        "warn": "要確認",
+        "err": "エラー",
+        "note": "注記"
+      },
+      "go": "公開",
+      "saveFile": "ファイルとして保存",
+      "failed": "パックを公開できませんでした",
+      "donePublic": "バージョン {version} を公開しました",
+      "doneLink": "バージョン {version} を公開しました（リンクのみ）",
+      "copied": "リンクをコピーしました。",
+      "isPublic": "Crucible で公開中",
+      "isLink": "公開済み（リンクのみ）",
+      "history": "公開したバージョン",
+      "toServer": "サーバーに入れる",
+      "makePublic": "公開する",
+      "makeLink": "リンクのみにする",
+      "goFresh": "新しいパックとして公開",
+      "goneTitle": "このパックはもう Crucible にありません",
+      "gone": "Crucible で削除または取り下げられました。公開すると新しいリンクとコードの新しいパックになります。",
+      "notYetPublic": "まだ公開されていません"
+    },
+    "serverPack": {
+      "title": "{name} {version} をサーバーへ",
+      "lead": "このバージョンのサーバー用 MOD、サーバー設定、ゲーム設定をサーバーに入れ、そこからプレイヤーがダウンロードする MOD パックを作ります。先にサーバーを停止してください。",
+      "go": "サーバーに入れる",
+      "done": "{version} をサーバーに入れました",
+      "failed": "サーバー用パックを作れませんでした"
+    }
+  },
+  "editor": {
+    "page": {
+      "title": "エディター",
+      "lookingForSaves": "セーブデータを探しています…",
+      "pickCharacter": "キャラクターを選んでください。",
+      "noSaves": "キャラクターのセーブデータが見つかりません。",
+      "cannotParse": "このセーブデータは編集用に読み取れませんでした。",
+      "readOnlyNoSave": "このセーブデータは読み取り専用です: 保存はオフです。",
+      "gameOpen": "ゲームが起動中です。保存するにはゲームを閉じてください。",
+      "unsaved": "変更はまだ保存されていません。Kiln は書き込む前にセーブデータをバックアップします。",
+      "levelBackup": "レベル {n}。Kiln は書き込む前にセーブデータをバックアップします。",
+      "notSaved": "未保存",
+      "discard": "破棄",
+      "backups": "バックアップ",
+      "save": "保存",
+      "saving": "保存中…",
+      "saved": "保存しました",
+      "savedHint": "保存前のセーブデータは「バックアップ」にあります。",
+      "gameOpenShort": "ゲーム起動中: 保存するには閉じてください",
+      "error": "エラー",
+      "note": "注意",
+      "readAgain": "再読み込み",
+      "close": "閉じる",
+      "parts": "セーブデータの構成",
+      "characters": "キャラクター",
+      "openFile": "ファイルを開く…",
+      "pickCharacterButton": "キャラクターを選ぶ",
+      "open": "開く",
+      "opened": "開いています",
+      "discardTitle": "変更を破棄しますか？",
+      "discardAndOpen": "破棄して開く",
+      "discardBody": "{nome} への変更はまだ保存されていません。",
+      "cancel": "キャンセル",
+      "back": "戻る",
+      "readOnlyError": "読み取り専用: {erro}",
+      "pointsRaised": "使用中のポイントを増やしました（{antes} → {depois}）。エディターが確認できるよう、「スキル」タブでポイントの合計を入力してください。合計を超えると、ゲームがツリー全体をリセットします。",
+      "notWritten": "保存されていません。{problemas}",
+      "gameWroteSince": "エディターが読み込んだ後に、ゲームがこのセーブデータに書き込みました。現在の状態を編集するには再読み込みしてください（ここで行った変更は失われます）。"
+    },
+    "tabs": {
+      "equipment": "装備",
+      "inventory": "バックパック",
+      "skills": "スキル",
+      "knowledge": "知識"
+    },
+    "backups": {
+      "title": "{nome} のバックアップ",
+      "openFolder": "フォルダーを開く",
+      "hint": "ゲームは直近 10 個のセーブを自動で保持します。エディターも書き込みのたびにセーブデータをコピーします。",
+      "dropsChanges": "復元すると、保存していない変更は失われます。",
+      "looking": "バックアップを探しています…",
+      "none": "このセーブデータのバックアップは見つかりません。",
+      "restore": "復元",
+      "restored": "復元しました",
+      "restoredBody": "{arquivo}（{quando}）。復元前のセーブデータはバックアップとして保管しました。",
+      "restoreTitle": "このバックアップを復元しますか？",
+      "restoreBody": "現在のセーブデータはバックアップとして保管されます。",
+      "kindGame": "ゲームのコピー",
+      "kindKiln": "Kiln のバックアップ",
+      "beforeSave": "保存前"
+    },
+    "common": {
+      "level": "レベル",
+      "empty": "空",
+      "change": "変更",
+      "add": "追加",
+      "tierN": "ティア {n}",
+      "rarity": "レア度",
+      "amount": "数量",
+      "aboveStack": "ゲームのスタック数 {n} を超えています: スタック数を増やすモッドのあるワールド向けです",
+      "gameStack": "ゲームのスタック数（{n}）",
+      "maxAmount": "1 枠の上限（{n}）",
+      "upgrades": "強化",
+      "remove": "削除",
+      "levelN": "レベル {n}",
+      "pick": "選択",
+      "noMatch": "この条件に一致するものはありません。",
+      "all": "すべて"
+    },
+    "equipment": {
+      "xp": "レベル内の XP",
+      "attrsHint": "能力値はスキルツリーのノードから決まります（「スキル」タブで編集できます）。",
+      "attrsFlameHint": "ゲームは炎のレベルに応じて伸びるノードと装備のボーナスも加算しますが、どちらもキャラクターのセーブデータには保存されません。",
+      "emptyHint": "空の枠です。装備はゲーム内で行ってください。ここでは装備中のものを編集したり外したりできます。",
+      "backpackFull": {
+        "other": "{item} は外しません。外すと、その中の {count} 枠ごと収納が削除されます。先にゲーム内で空にしてください。"
+      },
+      "groups": {
+        "armour": "防具",
+        "appearance": "外見",
+        "accessories": "アクセサリー"
+      },
+      "slots": {
+        "headVanity": "頭（外見）",
+        "chestVanity": "胴（外見）",
+        "armsVanity": "腕（外見）",
+        "legsVanity": "脚（外見）",
+        "feetVanity": "足（外見）",
+        "head": "頭",
+        "chest": "胴",
+        "arms": "腕",
+        "legs": "脚",
+        "feet": "足",
+        "ring": "指輪",
+        "shield": "盾",
+        "hook": "グラップリングフック",
+        "glider": "グライダー",
+        "backpack": "バックパック",
+        "slot": "枠 {n}"
+      }
+    },
+    "inventory": {
+      "move": "移動",
+      "slotEmpty": "枠 {n} は空",
+      "putHere": "ここに置く",
+      "slotsUsed": {
+        "other": "{n} / {total} 枠"
+      },
+      "addItem": "アイテムを追加",
+      "swapBar": "バーを入れ替え",
+      "swapBarHint": "Alt でアクションバーと入れ替えます",
+      "actionBar": "アクションバー",
+      "deckHint": "A でアイテムを変更 · Y で移動 · 空の枠で A を押すと追加",
+      "hint": "ドラッグで移動 · 空の枠をダブルクリックで追加 · Delete で削除 · Ctrl+D で複製",
+      "noneSelected": "アイテムが選択されていません。",
+      "noneSelectedHint": "枠を選ぶと、そのアイテムを確認・変更できます。",
+      "emptyHint": "カタログからアイテムを選んでここに置きます。",
+      "pickItem": "アイテムを選ぶ",
+      "notFound": "このインベントリにアイテムが見つからず、セーブデータ内のどこにあるかエディターが確実に判断できません。ゲームでここにアイテムが表示されている場合、それらは読み込めていません。アイテムは追加できません。このセーブデータのコピーを送っていただけると修正に役立ちます。",
+      "modItem": "MOD のアイテム (変更しません)",
+      "hiddenModItem": "{place} に別の MOD の隠しアイテム (ID {id}) があります。Kiln はそのまま保持します。",
+      "place": {
+        "backpack": "バックパックのスロット {n}",
+        "swap": "切り替えバーのスロット {n}",
+        "action": "アクションバーのスロット {n}"
+      }
+    },
+    "inspector": {
+      "item": "アイテム",
+      "stacksTo": "最大 {n} までスタック",
+      "max": "最大",
+      "levelSplit": {
+        "other": "= 基本 {base} + 強化 {count}"
+      },
+      "aboveItemMax": "このアイテムの上限（{max}）を超えています: モッドで範囲が広げられていない限り、サーバーが読み込み時に切り詰めます",
+      "upgradesHint": "レア度でアイテムの強化回数が決まります: 最大レベル = 基本レベル + レア度。",
+      "gem": "はめ込んだジェム",
+      "gemUnknown": "id {id} はカタログにありません",
+      "noGem": "— ジェムなし —",
+      "gemLevel": "ジェムのレベル",
+      "aboveGemMax": "このジェムの上限（{max}）を超えています: モッドで範囲が広げられていない限り、サーバーが読み込み時に切り詰めます",
+      "durability": "耐久度",
+      "repair": "修理",
+      "water": "水",
+      "fill": "満タンにする",
+      "duplicateHint": "最初の空き枠にアイテムをコピーします",
+      "duplicate": "複製",
+      "attributes": "能力値",
+      "physicalArmour": "物理防御",
+      "magicalArmour": "魔法防御",
+      "raisesSkill": "{no} のスキルレベルを上げる",
+      "unknownLines": "数値のない行は、まだ測定されていない式でアイテムレベルに応じて変化します。エディターは確かでない値を表示しません。"
+    },
+    "parts": {
+      "full": "満タン",
+      "clickToSet": "クリックで設定"
+    },
+    "catalog": {
+      "items": "アイテム",
+      "countLimited": {
+        "other": "{count} 個のアイテム（{limite} 個を表示中。検索を絞り込んでください）"
+      },
+      "count": {
+        "other": "{count} 個のアイテム"
+      },
+      "categories": "カテゴリー",
+      "searchDeck": "名前で検索（Steam + X: キーボード）",
+      "search": "名前で検索…",
+      "searchLabel": "検索",
+      "type": "入力",
+      "allRarities": "すべて",
+      "tier": "ティア",
+      "targetFull": "配置先: インベントリが満杯",
+      "target": "配置先: 枠 {n}",
+      "pickHint": "アイテムを選んでください。",
+      "deckHint": "A で選択、もう一度 A で追加します。",
+      "hint": "ダブルクリックですぐに追加します。",
+      "cat": {
+        "weapons": "武器",
+        "armour": "防具",
+        "ammo": "弾薬",
+        "magic": "呪文とジェム",
+        "consumables": "消耗品",
+        "materials": "素材",
+        "tools": "道具",
+        "building": "建築",
+        "cosmetics": "コスメティックとコレクション"
+      }
+    },
+    "knowledge": {
+      "noBlock": "このセーブデータには知識のブロックがありません。",
+      "search": "名前または id で検索",
+      "above": "レベル以上",
+      "allLevels": "すべて",
+      "show": "表示",
+      "filter": {
+        "itemsRecipes": "アイテムとレシピ",
+        "items": "アイテムのみ",
+        "recipes": "レシピのみ",
+        "everything": "すべて"
+      },
+      "removeN": "{n} 件を削除",
+      "kind": "種類",
+      "name": "名前",
+      "state": "状態",
+      "id": "id {id}",
+      "kinds": {
+        "item": "アイテム",
+        "recipe": "レシピ",
+        "misc": "その他"
+      },
+      "count": {
+        "other": "{n} / {total} 件"
+      },
+      "unnamed": {
+        "other": "名前不明 {count} 件"
+      },
+      "shownLimit": "最初の 400 件を表示しています。残りを見るには検索かレベルの絞り込みを使ってください。",
+      "hint": "高レベルの素材を削除すると、それに依存するレシピも閉じられます。レシピはセーブデータに保存されません。ゲームは知識からレシピを計算し直します（ここでもサーバーのワールドでも）。"
+    },
+    "skills": {
+      "total": "合計ポイント",
+      "minusLevel": "−1 レベル",
+      "plusLevel": "+1 レベル",
+      "tree": "スキルツリー",
+      "used": "使用中",
+      "available": "使用可能",
+      "enterTotal": "合計を入力…",
+      "changeTotal": "クリックで合計を変更",
+      "totalFromGame": "合計 {total}。ゲームと同じ方法で計算しています: レベル 1 を超える 1 レベルごとに 2 ポイント、さらにこのキャラクターが破壊したシュラウドの根とエリクサーの泉の分。ゲームはこの値を保存しないため、ここでは編集しません。",
+      "totalHint": "ポイントの合計（ゲームの表示どおり、使用中 + 使用可能）:",
+      "zoomIn": "拡大",
+      "zoomOut": "縮小",
+      "centre": "中央に戻す",
+      "cost": "コスト {n}",
+      "maxN": "最大 {n}",
+      "deckHint": "A: +1 レベル · Y: −1",
+      "hint": "クリック: +1 レベル · 右クリック: −1",
+      "class": {
+        "warrior": "ウォリアー",
+        "ranger": "レンジャー",
+        "mage": "メイジ",
+        "neutral": "ニュートラル"
+      }
+    },
+    "deck": {
+      "delete": "削除",
+      "range": "{min}～{max}",
+      "min": "最小",
+      "use": "使用",
+      "current": "現在"
+    },
+    "art": {
+      "preparing": "ゲームの画像を準備しています…",
+      "needsClient": "ゲームの画像には Enshrouded のクライアントが必要です（「設定」→「ゲーム」）。",
+      "notFound": "ゲームの画像が見つかりません。{script} を実行してください。"
+    },
+    "game": {
+      "tree": {
+        "aboveMax": "{no}: レベル {nivel} が上限 {max} を超えています",
+        "orphans": "ツリーの他の部分とつながっていないノード: {nos}",
+        "overTotal": "使用中のポイント（{usados}）がキャラクターの合計（{total}）を超えています"
+      },
+      "unknownItem": "不明なアイテム（0x{h}）",
+      "errors": {
+        "unknownItems": "このセーブデータに不明なアイテムがあります（削除されたモッドのもの？）: 読み取り専用",
+        "levelXp": "レベルまたは XP が無効です",
+        "skill": "無効なスキル",
+        "item": "不明なアイテム: {id}",
+        "slotAmount": "枠または数量が無効です",
+        "sameSlot": "インベントリの同じ枠にアイテムが 2 つあります",
+        "knowledge": "無効な知識エントリー",
+        "knowledgeRepeated": "id が重複した知識",
+        "closeGame": "保存する前に Enshrouded を閉じてください。ゲームが編集内容を上書きしてしまいます。",
+        "notOpen": "セーブデータが編集用に開かれていません",
+        "noEquipment": "エディターはこのセーブデータで装備とインベントリを見つけられません",
+        "skillList": "エディターはこのセーブデータのスキル一覧を認識できません",
+        "notSave": "Enshrouded のセーブデータではありません",
+        "inventoryUnsure": "このセーブデータのインベントリを確実に見つけられませんでした。アイテムを書き込むことはできません。",
+        "modData": "このセーブデータには、エディターが書き込めない MOD のデータ ({mods}) が含まれています。MOD のデータをそのまま保つため、読み取り専用です。",
+        "inventoryUnread": "このキャラクターのインベントリ (バックパック、切り替えバー、アクションバー) を確実に読み込めませんでした。上書きしないよう、読み取り専用です。"
+      },
+      "saveFileFilter": "Enshrouded のセーブデータ",
+      "rarity": {
+        "none": "レア度なし",
+        "common": "コモン",
+        "uncommon": "アンコモン",
+        "rare": "レア",
+        "epic": "エピック",
+        "legendary": "レジェンダリー"
+      },
+      "category": {
+        "weapon": "武器",
+        "equipment": "装備",
+        "material": "素材",
+        "consumable": "消耗品",
+        "ammunition": "弾薬",
+        "tool": "道具",
+        "building": "建築",
+        "blueprint": "設計図",
+        "collectible": "コレクション",
+        "cosmetic": "コスメティック",
+        "gem": "ジェム"
+      },
+      "attribute": {
+        "constitution": "体質",
+        "spirit": "精神",
+        "endurance": "持久力",
+        "strength": "筋力",
+        "dexterity": "器用さ",
+        "intelligence": "知力"
+      },
+      "classes": {
+        "survivor": "サバイバー",
+        "beastmaster": "ビーストマスター",
+        "ranger": "レンジャー",
+        "assassin": "アサシン",
+        "trickster": "トリックスター",
+        "wizard": "ウィザード",
+        "healer": "ヒーラー",
+        "battlemage": "バトルメイジ",
+        "tank": "タンク",
+        "warrior": "ウォリアー",
+        "barbarian": "バーバリアン",
+        "athlete": "アスリート"
+      },
+      "knowledge": {
+        "pickedUp": "入手済み",
+        "used": "使用済み",
+        "inspected": "調査済み",
+        "seen": "確認済み",
+        "crafted": "クラフト済み"
+      }
+    }
+  },
+  "sfBackend": {
+    "backend": {
+      "title": "ShroudForge",
+      "sub": "このゲームの ShroudForge MOD をどの ShroudForge で動かすか。kiln/kiln.json に保存され、次回の起動から適用されます。",
+      "label": "ShroudForge バックエンド",
+      "choice": {
+        "hosted": "Kiln 同梱の ShroudForge",
+        "installed": "インストール済みの ShroudForge",
+        "kiln": "Kiln のインタープリター"
+      },
+      "about": {
+        "hosted": "Kiln に付属する ShroudForge です。",
+        "installed": "ゲームの shroudforge フォルダーにある ShroudForge です。",
+        "kiln": "Kiln が ShroudForge MOD を自分で動かします。完全に動かせない MOD は、プレイ前に理由付きでスキップされます。"
+      },
+      "none": "ShroudForge なし",
+      "default": "既定",
+      "held": "保留中",
+      "heldWhy": "この Kiln ビルドでは使えません: {reason}",
+      "set": {
+        "default": "未設定: 既定のままです。",
+        "explicit": "選択済み: {name}。",
+        "inherited": "以前のスイッチ「インストール済みの ShroudForge を使う」から: {name}。ここで選ぶと置き換わります。",
+        "invalid": "kiln.json に Kiln の知らないバックエンド ({value}) が書かれています。選び直すまで、このゲームの ShroudForge MOD はどの ShroudForge でも動きません。"
+      },
+      "next": "次回の起動: {name}",
+      "last": "前回の起動: {name}",
+      "envRuntime": "ランチャーの環境に KILN_SHROUDFORGE_RUNTIME が設定されています。ランチャーからの起動はそれに従います。",
+      "envOff": "ランチャーの環境に KILN_SHROUDFORGE=0 が設定されています。ランチャーからの起動では ShroudForge は動きません。",
+      "route": {
+        "missing": "Kiln のインタープリターはまだこのゲームにありません。Kiln を再インストールすると追加されます。",
+        "ownLoader": "ShroudForge 自身のローダーがゲームにあります ({file})。ShroudForge MOD はそれが動かし、Kiln の選択は使われません。"
+      },
+      "running": "変更するにはゲームを閉じてください。",
+      "reset": "既定に戻す",
+      "unreadable": "kiln.json を読めないため変更できません: {reason}",
+      "saved": "保存しました。次回の起動: {name}。",
+      "ask": {
+        "title": "ShroudForge バックエンドを変更しますか?",
+        "to": "次回の起動から: {name}",
+        "replaces": "以前のスイッチ「インストール済みの ShroudForge を使う」を置き換えます。",
+        "kiln": "Kiln のインタープリターで完全に動かせない MOD は起動時にそれぞれ理由付きでスキップされ、プレイ前の警告に一覧が出ます。Kiln 同梱の ShroudForge へ自動で戻ることはありません。",
+        "unchanged": "kiln.json はすでにこの設定です。",
+        "refused": "今は選べません: {reason}",
+        "when": "保存するまで何も変わりません。ゲームは次回の起動時に読み込みます。"
+      }
+    },
+    "startWarning": {
+      "title": "今回の起動で動かない Mod があります",
+      "continue": "これらの Mod なしで続行",
+      "game": "ゲーム: {path}",
+      "changedTitle": "変更あり",
+      "changed": "前回の警告から、今回の起動で動かないものが変わりました。続行する前にもう一度お読みください。",
+      "otherGame": "この警告は別のゲームのものです。もう一度「プレイ」を押してください。",
+      "lead": {
+        "save": {
+          "title": "これらなしで保存しないでください",
+          "text": "下の Mod はセーブデータにデータを残します。オフのままワールドを保存すると、そのデータが変わったり失われたりすることがあります。保存せずに遊ぶか、キャンセルして先に直してください。"
+        },
+        "check": {
+          "title": "すべてを確認できませんでした",
+          "text": "Kiln は今回の起動についてすべてを確認できなかったため、これらの Mod は動かないかもしれません。下の理由をお読みください。"
+        },
+        "plain": {
+          "title": "これらの Mod は動きません",
+          "text": "ゲームは下の Mod なしで起動します。ほかの Mod はいつもどおり動きます。"
+        }
+      },
+      "listAria": "動かないもの ({count})",
+      "notesAria": "参考情報",
+      "nothingChanged": "続行しても何もオフにせず、何も保存・削除しません。次の「プレイ」で再び確認します。",
+      "partData": "起動データ",
+      "partLua": "Lua",
+      "partDlls": "DLL: {list}",
+      "parts": "構成: {list}",
+      "dataNotApplied": "今回の起動ではその起動データは適用されません。",
+      "chain": "原因: {chain}",
+      "folder": "フォルダー: {root}",
+      "wasActive": "以前の起動では有効でした ({launch})。",
+      "unknownStart": "起動不明",
+      "saveLine": "セーブデータにデータを残します。オフの間はワールドを保存しないでください。",
+      "saveUnknown": "セーブデータにデータを残す可能性があります。オフの間はワールドを保存しないでください。",
+      "skipped": "{name} は動きません",
+      "refused": "今回の起動では ShroudForge の Mod は動きません",
+      "notStarted": "起動されないもの: {list}",
+      "previous": "{name} は今オフです",
+      "offNow": "今回の起動では動きません。",
+      "basisPolicy": "セーブデータを持つ Mod の Kiln のリストに載っています。",
+      "basisUnknown": "ゲームデータとコードの両方を持つため、セーブデータを残す可能性があります。",
+      "about": "対象: {list}",
+      "inspector": "Kiln のアーカイブ検査ツールを使えません",
+      "planWarning": "起動プランの警告",
+      "baseTitle": "今回の起動のもとになるゲームファイル",
+      "baseRestore": "ちょうどこのファイルに戻すには、ゲームのデータを変える Mod をオフにして、Kiln からゲームを一度起動してください（ログ、エンジン:「ゲームのデータを復元」）。",
+      "baseVerify": "Steam が配布するとおりのゲームファイルにするには、Steam で「ゲームファイルの整合性を確認」を使ってください。",
+      "costTitle": "起動が遅くなります",
+      "noteTitle": "メモ",
+      "keybindsTitle": "キーボードショートカット",
+      "keybinds": "{name}: キーボードショートカットは Kiln のインタープリターではまだ動きません。MOD のほかの部分は動きます。"
+    },
+    "engineRow": {
+      "plugin": "Kiln のインタープリター (kiln-sfi)",
+      "packages": "ShroudForge の Mod",
+      "phase": {
+        "starting": "起動中",
+        "running": "実行中",
+        "ended": "終了",
+        "aside": "待機",
+        "refused": "未起動",
+        "unknown": "不明"
+      },
+      "package": {
+        "running": "実行中",
+        "dataApplied": "データ適用済み",
+        "off": "オフ",
+        "skipped": "スキップ"
+      },
+      "stale": {
+        "older-start": "この記録は以前の起動のものです。最新の起動でインタープリターが何をしたかは分かりません。",
+        "not-running": "記録は{phase}となっていますが、ゲームは実行されていません。その起動は最後の記録を残さずに終わりました（クラッシュした可能性があります）。",
+        "other-process": "この記録は別のゲームプロセスのものです。今回の起動のものではありません。"
+      },
+      "previous": {
+        "incomplete": "前回の起動は記録を書き終えずに終わりました（クラッシュした可能性があります）。",
+        "suspect": "前回の起動が残したものを Kiln は読めませんでした。"
+      },
+      "unreadable": "Kiln のインタープリターが残した記録を Kiln は読めません: {error}"
+    },
+    "restoreBase": {
+      "title": "ゲームのデータを復元",
+      "base": "Kiln はこのゲームファイルから始めました: {label}。",
+      "how": "ちょうどこのファイルに戻すには、ゲームのデータを変える Mod をオフにして、Kiln からゲームを一度起動してください。Kiln は自分が書いたと証明できるデータだけを戻します。ほかのローダーのデータはそのままです。",
+      "save": "セーブにデータを保存する Mod: オフの間はワールドを保存しないでください。",
+      "vanilla": "これは Steam が配布するとおりのファイルとは限りません。そのためには Steam で「ゲームファイルの整合性を確認」を使ってください（ゲームのプロパティ、インストール済みファイル）。",
+      "unknown": "Kiln はどのゲームファイルを戻すことになるか判断できません: {reason}。"
     }
   }
 }

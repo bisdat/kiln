@@ -557,6 +557,8 @@ pub struct SfSkipNote {
 }
 
 /// The engine list's word on ShroudForge's last startup pass: read once for all its lines.
+// the notes of a kiln-mode engine status, none: engine_mods::status
+#[derive(Default)]
 pub struct EngineNotes {
     failure: Option<SfStartupFailure>,
     skipped: Option<SfStartupSkipped>,

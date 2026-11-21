@@ -671,6 +671,10 @@ fn diagnose_disk(root: &Path, rel: &Path, failed: &Error) -> ReadFailure {
         return fail("containment check".to_string(), format!("{resolved} is a link"));
     }
 
+    if !wine_within(resolved.as_std_path(), root.as_std_path()).unwrap_or(false) {
+        return fail("containment check".to_string(), format!("{resolved} is a link Wine follows out of {root}"));
+    }
+
     match File::open(&resolved) {
         Err(e) => fail("open".to_string(), e.to_string()),
         Ok(mut f) => match std::io::read_to_string(&mut f) {
@@ -731,5 +735,79 @@ fn sanitize_path(
         return Err(Error::from(ErrorKind::PermissionDenied));
     }
 
+    if !wine_within(path.as_std_path(), root.as_std_path())? {
+        return Err(Error::from(ErrorKind::PermissionDenied));
+    }
+
     Ok(path)
+}
+
+// kiln-eml: under Wine (so Proton) a Unix symbolic link is followed by every open and kept in the
+// path by canonicalize, so the containment check above never sees one that leads out of the mod.
+// Wine's own Unix name of a path (wine_get_unix_file_name) resolves every link: the path must lie
+// at or under the root there too. Always true elsewhere, where canonicalize resolved every link.
+// A path Wine gives no Unix name is refused.
+fn wine_within(path: &std::path::Path, root: &std::path::Path) -> std::io::Result<bool> {
+    #[cfg(windows)]
+    {
+        use std::{ffi::c_void, os::windows::ffi::OsStrExt};
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetModuleHandleW(name: *const u16) -> *mut c_void;
+            fn GetProcAddress(module: *mut c_void, name: *const std::ffi::c_char) -> *mut c_void;
+            fn GetProcessHeap() -> *mut c_void;
+            fn HeapFree(heap: *mut c_void, flags: u32, memory: *mut c_void) -> i32;
+        }
+        type UnixName = unsafe extern "C" fn(*const u16) -> *mut std::ffi::c_char;
+        let address = *WINE_UNIX_NAME.get_or_init(|| {
+            let kernel32: Vec<u16> = "kernel32.dll".encode_utf16().chain([0]).collect();
+            // SAFETY: NUL-terminated names; kernel32 is loaded in every Win32 process.
+            unsafe {
+                let module = GetModuleHandleW(kernel32.as_ptr());
+                if module.is_null() { 0 } else { GetProcAddress(module, c"wine_get_unix_file_name".as_ptr()) as usize }
+            }
+        });
+        if address != 0 {
+            // SAFETY: Wine's export, char *CDECL wine_get_unix_file_name(LPCWSTR).
+            let export = unsafe { std::mem::transmute::<usize, UnixName>(address) };
+            let unix_name = |path: &std::path::Path| -> std::io::Result<Vec<u8>> {
+                let mut name: Vec<u16> = path.as_os_str().encode_wide().collect();
+                if name.contains(&0) {
+                    return Err(Error::from(ErrorKind::InvalidInput));
+                }
+                name.push(0);
+                // SAFETY: a NUL-terminated name; Wine returns a NUL-terminated string from the process heap (or
+                // null), copied and then freed with HeapFree, as documented.
+                unsafe {
+                    let result = export(name.as_ptr());
+                    if result.is_null() {
+                        return Err(Error::from(ErrorKind::PermissionDenied));
+                    }
+                    let mut bytes = std::ffi::CStr::from_ptr(result).to_bytes().to_vec();
+                    HeapFree(GetProcessHeap(), 0, result.cast());
+                    while bytes.len() > 1 && bytes.ends_with(b"/") {
+                        bytes.pop();
+                    }
+                    Ok(bytes)
+                }
+            };
+            let (path, root) = (unix_name(path)?, unix_name(root)?);
+            return Ok(path == root
+                || (path.starts_with(&root) && (root == b"/" || path.get(root.len()) == Some(&b'/'))));
+        }
+    }
+    let _ = (path, root);
+    Ok(true)
+}
+
+/// Wine's `kernel32!wine_get_unix_file_name` as [`wine_within`] looked it up (0 off Wine), once per process.
+#[cfg_attr(not(windows), allow(dead_code))]
+static WINE_UNIX_NAME: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+
+/// kiln-eml: the lookup [`wine_within`] makes once per process, made now. kiln-eml's early phase of a kiln
+/// start calls it on the boot thread before any package DLL loads: its startup pass reads the packages while a package
+/// DLL's initializer may still hold the loader lock, which Wine's GetModuleHandleW and GetProcAddress take (the pass
+/// then waited for that initializer to return).
+pub fn prime_wine_within() {
+    let _ = wine_within(std::path::Path::new("C:\\"), std::path::Path::new("C:\\"));
 }

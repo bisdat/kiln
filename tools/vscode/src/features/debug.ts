@@ -9,8 +9,8 @@ import * as vscode from "vscode";
 import { sendControl } from "../core/control";
 import { staleContextsWarning } from "../core/dap";
 import {
-  CliResolution, DebugRefused, debugArgs, describeDebugState, describeResolution, findNetcoredbg, KilnDebugConfig, netcoredbgCandidates,
-  proxySpecFromCli, refusalMessage, resolveWithCli, selectTarget,
+  activeDebugTargets, adapterKind, CliResolution, DebugRefused, debugArgs, describeDebugState, describeResolution, findNetcoredbg, KilnDebugConfig,
+  netcoredbgCandidates, netcoredbgEnv, proxySpecFromCli, refusalMessage, resolveWithCli, selectTarget,
 } from "../core/debugTarget";
 import { discoverLabs, expandHome, ServerDef } from "../core/servers";
 import { Ctx } from "../ctx";
@@ -37,10 +37,14 @@ export class DebugFeature implements vscode.DebugConfigurationProvider, vscode.D
       vscode.debug.registerDebugConfigurationProvider("kiln", this),
       vscode.debug.registerDebugAdapterDescriptorFactory("kiln", this),
       vscode.debug.onDidStartDebugSession((s) => {
-        if (s.type === "kiln" && s.configuration[KEY]) this.active.set(s.configuration[KEY], s);
+        if (s.type !== "kiln" || !s.configuration[KEY]) return;
+        this.active.set(s.configuration[KEY], s);
+        if (s.configuration.server) activeDebugTargets.add(path.resolve(s.configuration.server));
       }),
       vscode.debug.onDidTerminateDebugSession((s) => {
-        if (s.type === "kiln" && this.active.get(s.configuration[KEY]) === s) this.active.delete(s.configuration[KEY]);
+        if (s.type !== "kiln" || this.active.get(s.configuration[KEY]) !== s) return;
+        this.active.delete(s.configuration[KEY]);
+        if (s.configuration.server) activeDebugTargets.delete(path.resolve(s.configuration.server));
       }),
       vscode.debug.onDidReceiveDebugSessionCustomEvent((e) => {
         if (e.session.type !== "kiln" || e.event !== "kiln/debugState") return;
@@ -84,7 +88,7 @@ export class DebugFeature implements vscode.DebugConfigurationProvider, vscode.D
         args = debugArgs({ kind: "server", dir: def.dir }, c);
       }
       if (this.active.has(key)) throw new DebugRefused("refused", `a debugger is already attached to ${def?.name ?? (c.client ?? "")}.`);
-      this.prepared.set(key, { descriptor: await this.descriptor(args, def) });
+      this.prepared.set(key, { descriptor: await this.descriptor(sel.kind, args, def) });
       return { ...config, ...(def ? { server: def.dir } : {}), [KEY]: key };
     } catch (e) {
       if (!(e instanceof DebugRefused)) throw e;
@@ -135,17 +139,19 @@ export class DebugFeature implements vscode.DebugConfigurationProvider, vscode.D
    * The target from `kiln debug … --json` (refusals arrive here, before any adapter starts, with the CLI's code), then
    * the adapter: `kiln debug … --dap`, or for a CLI without `--dap` the built-in proxy around the CLI's own command.
    */
-  private async descriptor(args: string[], def: ServerDef | undefined): Promise<vscode.DebugAdapterDescriptor> {
+  private async descriptor(kind: "server" | "client", args: string[], def: ServerDef | undefined): Promise<vscode.DebugAdapterDescriptor> {
     if (!(await this.ctx.hasCli())) {
       throw new DebugRefused("tool_missing", `debugging needs the kiln CLI (kiln.cli.path is ${this.ctx.cliPath()}): it proves which process the debugger attaches to.`);
     }
-    const dbg = findNetcoredbg(this.ctx.setting("debug.netcoredbg", ""), process.env, this.bundledNetcoredbg());
-    const env = { KILN_NETCOREDBG: dbg }; // the CLI alone has no bundled copy to fall back on
+    const setting = this.ctx.setting("debug.netcoredbg", "");
+    const dbg = findNetcoredbg(setting, process.env, this.bundledNetcoredbg());
+    // the CLI alone has no bundled copy to fall back on; it checks this one against the pinned release
+    const env = netcoredbgEnv(dbg, setting);
     const cli = this.ctx.cliPath();
     const r: CliResolution = await resolveWithCli(cli, args, env);
     this.ctx.out.info(`debug: ${describeResolution(r)}`);
     const help = await this.ctx.exec(cli, ["debug", "--help"], { timeoutMs: 5000 });
-    if (!help.error && help.code === 0 && help.stdout.includes("--dap")) {
+    if (adapterKind(kind, !help.error && help.code === 0 && help.stdout.includes("--dap")) === "cli") {
       this.ctx.out.info(`debug: ${cli} ${[...args, "--dap"].join(" ")}`);
       return new vscode.DebugAdapterExecutable(cli, [...args, "--dap"], { env });
     }

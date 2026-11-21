@@ -95,6 +95,8 @@
 
   <UsingTask TaskName="Kiln.Sdk.KilnManifest" AssemblyFile="$(_KilnTasksDir)Kiln.Sdk.Tasks.dll" Condition="'$(KilnRepoMode)' != 'true'" />
   <UsingTask TaskName="Kiln.Sdk.KilnManifest" AssemblyFile="$(_KilnTasksDir)Kiln.Sdk.Tasks.dll" TaskFactory="TaskHostFactory" Condition="'$(KilnRepoMode)' == 'true'" />
+  <UsingTask TaskName="Kiln.Sdk.KilnDebugSession" AssemblyFile="$(_KilnTasksDir)Kiln.Sdk.Tasks.dll" Condition="'$(KilnRepoMode)' != 'true'" />
+  <UsingTask TaskName="Kiln.Sdk.KilnDebugSession" AssemblyFile="$(_KilnTasksDir)Kiln.Sdk.Tasks.dll" TaskFactory="TaskHostFactory" Condition="'$(KilnRepoMode)' == 'true'" />
 
   <ItemGroup>
     <!-- Unescape: a property function's result is escaped, so its ';' would not split the list. -->
@@ -215,24 +217,21 @@
   </Target>
 
   <!-- KilnReload while a debugger is attached: refused before anything is copied (a reload under a debugger keeps the old
-       mod's code alive and can stop at a dead copy). kiln debug writes kiln/state/debug/session.json while it runs and
-       removes it at the end; a file left by a crashed kiln debug is named in the message so it can be deleted. -->
+       mod's code alive and can stop at a dead copy). kiln debug writes kiln/state/debug/session.json at every state change;
+       it counts only while the kiln debug that wrote it still runs (KilnDebugSession: its PID and start), as kiln reload
+       checks. A file left by one that ended is a warning. -->
   <Target Name="_KilnReloadDebugGuard" Condition="'$(KilnReload)' == 'true'">
     <PropertyGroup>
       <_KilnDebugInstall Condition="'$(KilnServer)' != ''">$(KilnServer)</_KilnDebugInstall>
       <_KilnDebugInstall Condition="'$(KilnServer)' == '' and '$(KilnModsDir)' != ''">$(KilnModsDir)/../..</_KilnDebugInstall>
       <_KilnDebugSession Condition="'$(_KilnDebugInstall)' != ''">$(_KilnDebugInstall)/kiln/state/debug/session.json</_KilnDebugSession>
     </PropertyGroup>
-    <ReadLinesFromFile Condition="'$(_KilnDebugSession)' != '' and Exists('$(_KilnDebugSession)')" File="$(_KilnDebugSession)">
-      <Output TaskParameter="Lines" ItemName="_KilnDebugSessionLine" />
-    </ReadLinesFromFile>
-    <!-- quotes, spaces and commas out first: a property function would read the file's quotes and commas as its own -->
-    <PropertyGroup>
-      <_KilnDebugSessionText>@(_KilnDebugSessionLine)</_KilnDebugSessionText>
-      <_KilnDebugSessionText>$(_KilnDebugSessionText.Replace('&quot;', '').Replace(' ', '').Replace(',', ';'))</_KilnDebugSessionText>
-    </PropertyGroup>
-    <Error Condition="$(_KilnDebugSessionText.Contains('state:attaching')) or $(_KilnDebugSessionText.Contains('state:running')) or $(_KilnDebugSessionText.Contains('state:paused')) or $(_KilnDebugSessionText.Contains('state:detaching'))" Code="KILN012"
-           Text="a debugger is attached to this server ($(_KilnDebugSession)): detach it, then deploy with KilnReload again (deploy without KilnReload copies the files only). If no kiln debug runs any more, delete that file." />
+    <KilnDebugSession Condition="'$(_KilnDebugSession)' != '' and Exists('$(_KilnDebugSession)')" File="$(_KilnDebugSession)">
+      <Output TaskParameter="Attached" PropertyName="_KilnDebugAttached" />
+      <Output TaskParameter="Holder" PropertyName="_KilnDebugHolder" />
+    </KilnDebugSession>
+    <Error Condition="'$(_KilnDebugAttached)' == 'true'" Code="KILN012"
+           Text="a debugger is attached to this server ($(_KilnDebugHolder); $(_KilnDebugSession)): detach it, then deploy with KilnReload again (deploy without KilnReload copies the files only)." />
   </Target>
 
   <!-- dotnet build -t:KilnDeploy -p:KilnServer=<server folder> [-p:KilnReload=true] -->

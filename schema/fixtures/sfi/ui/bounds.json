@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "about": "The UI bridge's bounds (Kiln's own, where SF has none), one copy for both sides: Kiln.Ui (managed/services/Kiln.Ui/SfiBridgeFiles.cs) and kiln-sfi's runtime transport assert their constants against this file.",
+  "recordBytes": 2097152,
+  "pendingActionsPerOwner": 1024,
+  "noticeKeysPerProfile": 4096,
+  "entriesPerTurn": 32,
+  "receiptBytes": 65536,
+  "keepEndedLaunchDays": 7
+}

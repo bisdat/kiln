@@ -37,6 +37,8 @@ COMPONENTS = {
     "shroudforge": {"sides": BOTH, "default": True, "requires": ["core"]},
     "enshwick": {"sides": BOTH, "default": True, "requires": ["core"]},
     "samples": {"sides": ["server"], "default": False, "requires": ["core"]},
+    # Kiln's interpreter (component sfi)
+    "sfi": {"sides": BOTH, "default": True, "requires": ["core", "eml"]},
 }
 
 
@@ -73,6 +75,10 @@ class ExpectedTests(unittest.TestCase):
         self.assertEqual(exp["kiln/plugins/enshwick/LICENSE.txt"], "enshwick")
         # compat is the plugins' shared code and host tests: no DLL of its own
         self.assertNotIn("kiln/plugins/kiln-compat.dll", exp)
+        # the interpreter in its own component, never core; kiln-eml's archive inspector in eml
+        self.assertEqual(exp["kiln/plugins/kiln-sfi.dll"], "sfi")
+        self.assertEqual(exp["kiln/tools/eml-inspect/linux-x86_64/kiln-eml-inspect"], "eml")
+        self.assertEqual(exp["kiln/tools/eml-inspect/windows-x86_64/kiln-eml-inspect.exe"], "eml")
         # a plugin folder added later is expected without editing the list, unless it opts out explicitly
         for d in (ROOT / "native" / "plugins").iterdir():
             if (d / "CMakeLists.txt").is_file() and pl.NO_PLUGIN not in (d / "CMakeLists.txt").read_text():
@@ -194,6 +200,7 @@ class WiringTests(unittest.TestCase):
         self.assertIn("tools/release/lib/plugins.py\" check", s)
         self.assertRegex(s, r'"emf": \{"sides": \["server", "client"\], "default": True')
         self.assertRegex(s, r'"enshwick": \{"sides": \["server", "client"\], "default": True')
+        self.assertRegex(s, r'"sfi": \{"sides": \["server", "client"\], "default": True, "requires": \["core", "eml"\]')
         self.assertIn("build-runtime.sh", s)
 
     def test_release_runs_the_check(self):

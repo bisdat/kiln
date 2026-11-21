@@ -10,6 +10,7 @@
 | [custom-game-folders.md](custom-game-folders.md) | for players: a copy of the game no Steam library knows (an older build kept for mods): adding it, starting it directly without Steam (Windows; umu-run, Proton or Wine and the prefix on Linux), what Kiln does and doesn't do, unknown game builds |
 | [support-report.md](support-report.md) | the support report (Logs, "Save report...", `kilnctl report`): what the zip holds, the findings, what is redacted and left out |
 | [deck.md](deck.md) | the Steam Deck UI: how it is chosen, controls, screens, the Steam rule, tests and the Deck tester checklist |
+| [pack-studio.md](pack-studio.md) | Pack Studio, the creator's tool: pack sources from a profile, settings captured, the pack layer's data editors, load order and conflicts, the test instance, credits, publish (link-only or public), server packs, kilnctl pack init/add/capture-settings/lint/credits/publish |
 | [crucible.md](crucible.md) | Crucible packs (.kilnpack, format 2): the format, building from a profile, instances and their three layers, updates with a three-way merge, the server part, kilnctl pack, the API for the launcher UI and the Crucible service |
 | [perf.md](perf.md) | what the launcher costs idle and per click, the caches and poll rules that keep it low, and the two harnesses that measure it |
 

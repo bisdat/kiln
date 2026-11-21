@@ -18,13 +18,23 @@ case $cmd in
   *) echo "usage: $0 available | sign FILE... | verify FILE..." >&2; exit 2 ;;
 esac
 
+# files at once: verify and sign run this many at the same time (each signing job is one jsign run for its share of the
+# files, so one JVM and one connection per job instead of one per file)
+par=${KILN_SIGN_JOBS:-4}
+[[ $par =~ ^[1-9][0-9]*$ ]] || par=4
+
 if [[ $cmd == verify ]]; then
   command -v osslsigncode >/dev/null || { echo "authenticode: osslsigncode is not installed (needed to verify)" >&2; exit 1; }
-  fail=0
+  verify_one() {
+    if osslsigncode verify -in "$1" >/dev/null 2>&1; then echo "authenticode OK: $(basename "$1")"
+    else echo "authenticode FAILED: $1" >&2; return 1; fi
+  }
+  fail=0; pids=()
   for f in "$@"; do
-    if osslsigncode verify -in "$f" >/dev/null 2>&1; then echo "authenticode OK: $(basename "$f")"
-    else echo "authenticode FAILED: $f" >&2; fail=1; fi
+    while (( $(jobs -rp | wc -l) >= par * 2 )); do wait -n || fail=1; done
+    verify_one "$f" & pids+=($!)
   done
+  for p in "${pids[@]}"; do wait "$p" || fail=1; done
   exit $fail
 fi
 
@@ -55,9 +65,24 @@ KILN_SIGNING_TOKEN=$(cat "$cache")
 export KILN_SIGNING_TOKEN
 endpoint=${AZURE_SIGNING_ENDPOINT#https://}
 endpoint=${endpoint%/}
-for f in "$@"; do
+sign_batch() {
   "${jsign[@]}" --storetype TRUSTEDSIGNING --keystore "$endpoint" --storepass env:KILN_SIGNING_TOKEN \
     --alias "$AZURE_SIGNING_ACCOUNT/$AZURE_SIGNING_PROFILE" --alg SHA-256 \
-    --tsaurl http://timestamp.acs.microsoft.com --tsmode RFC3161 --replace "$f" >/dev/null
-  echo "authenticode: signed $(basename "$f")"
+    --tsaurl http://timestamp.acs.microsoft.com --tsmode RFC3161 --replace "$@" >/dev/null
+  local f; for f in "$@"; do echo "authenticode: signed $(basename "$f")"; done
+}
+files=("$@")
+n=${#files[@]}
+((n)) || exit 0
+((par > n)) && par=$n
+if ((par == 1)); then sign_batch "${files[@]}"; exit; fi
+# deal the files out round-robin, one jsign run per share, all at the same time; any failed share fails the call
+pids=()
+for ((j = 0; j < par; j++)); do
+  share=()
+  for ((x = j; x < n; x += par)); do share+=("${files[x]}"); done
+  sign_batch "${share[@]}" & pids+=($!)
 done
+fail=0
+for p in "${pids[@]}"; do wait "$p" || fail=1; done
+((fail == 0)) || { echo "authenticode: signing failed (see above)" >&2; exit 1; }

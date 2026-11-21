@@ -5,8 +5,9 @@
 //! itself: on end of input (after a pause with `linger`), on `fake:die`, or after its safety time. A line
 //! `{"ev":"exit",...}` in the log is what tells the suite it was not killed.
 //!
-//! Modes (`KILN_DAP_FAKE_MODE`, comma separated): `deaf` never answers a disconnect; `linger` stays 8 s after end of
-//! input. Requests the suite uses to steer it are `evaluate` expressions: `fake:stop` (answers, then a `stopped`
+//! Modes (`KILN_DAP_FAKE_MODE`, comma separated): `deaf` never answers a disconnect; `slow_disconnect` answers it
+//! after 2 s; `exit_on_disconnect` exits on a disconnect without answering it; `fail_attach` answers every attach
+//! with a failure; `linger` stays 8 s after end of input. (`refuse_attach` is the proxy child's, not the adapter's.) Requests the suite uses to steer it are `evaluate` expressions: `fake:stop` (answers, then a `stopped`
 //! event on thread 7), `fake:hold` (never answers: an evaluation that hangs), `fake:reload` (the module comes again),
 //! `fake:garbage` (noise, a non-JSON body, an unreadable length, then an `output` event), `fake:huge` (a length
 //! over the proxy's limit), `fake:die` (exits at once, as a crashed adapter).
@@ -104,11 +105,22 @@ pub(super) fn main() -> i32 {
                 out.respond(&m, caps);
                 out.event("initialized", json!({}));
             }
+            "attach" if has("fail_attach") => {
+                out.send(json!({ "type": "response", "request_seq": m["seq"], "command": "attach", "success": false, "message": "Unable to attach to the process" }));
+            }
             "attach" => {
                 out.respond(&m, json!({}));
                 out.event("module", module_new());
             }
             "disconnect" if has("deaf") => log.put(json!({ "ev": "ignored", "command": "disconnect" })),
+            "disconnect" if has("exit_on_disconnect") => {
+                log.put(json!({ "ev": "exit", "why": "exit_on_disconnect" }));
+                std::process::exit(0);
+            }
+            "disconnect" if has("slow_disconnect") => {
+                std::thread::sleep(Duration::from_secs(2));
+                out.respond(&m, json!({}));
+            }
             "continue" => out.respond(&m, json!({ "allThreadsContinued": true })),
             "evaluate" => match m["arguments"]["expression"].as_str().unwrap_or_default() {
                 "fake:stop" => {

@@ -125,10 +125,22 @@ fn proxy_child() -> i32 {
     };
     let (up_r, up_w) = std::io::pipe().expect("a pipe");
     let (down_r, down_w) = std::io::pipe().expect("a pipe");
+    // `refuse_attach`: the process is another one by the time the editor's attach is checked again (the launch's
+    // check is the first prepare_attach, the attach's the second)
+    let refuse_attach = std::env::var("KILN_DAP_FAKE_MODE").unwrap_or_default().split(',').any(|m| m == "refuse_attach");
     std::thread::spawn(move || {
         // in kiln the helper is another process: its stand-in thread here never takes the proxy's signals
         block_client_signals();
         let mut table = FakeSource::new(vec![process]);
+        if refuse_attach {
+            let mut n = 0;
+            table.before_prepare = Some(Box::new(move |t: &mut Vec<FakeProc>| {
+                n += 1;
+                if n >= 2 {
+                    t[0].creation_time_100ns = "1".into();
+                }
+            }));
+        }
         let _ = crate::debug_inspect::serve(BufReader::new(up_r), down_w, &mut table);
     });
     let mut source: Box<dyn ProcessSource + Send> = Box::new(crate::debug_inspect::HelperSource::over(Box::new(up_w), BufReader::new(down_r)));
@@ -291,6 +303,20 @@ impl Session {
     /// Everything the proxy has sent so far, a little time given for frames on their way.
     fn drain(&mut self) {
         while self.next(Instant::now() + Duration::from_millis(200)) {}
+    }
+
+/// The last `kiln/debugState` the editor got, after everything on its way has arrived.
+    fn final_state(&mut self) -> Value {
+        self.drain();
+        self.json_seen(0).into_iter().rev().find(|v| is_event(v, "kiln/debugState")).map(|v| v["body"].clone()).unwrap_or(Value::Null)
+    }
+
+    /// The final state, as the last `kiln/debugState` and as the session file both say it.
+    fn assert_final(&mut self, state: &str, reason: &str) {
+        let ev = self.final_state();
+        assert_eq!((ev["state"].as_str(), ev["reason"].as_str()), (Some(state), Some(reason)), "{}: the last kiln/debugState: {ev}\n{}", self.name, self.diag());
+        let f = self.session_file();
+        assert_eq!((f["state"]["state"].as_str(), f["state"]["reason"].as_str()), (Some(state), Some(reason)), "{}: session.json: {f}", self.name);
     }
 
     fn json_seen(&self, from: usize) -> Vec<Value> {
@@ -581,7 +607,8 @@ fn case_signal(sig: libc::c_int, name: &'static str) {
 }
 
 /// 5. An adapter that never answers the disconnect: the proxy waits its DISCONNECT_WAIT, closes the adapter's input,
-/// exits, and leaves the adapter running (it ends later, by itself).
+/// exits 1 with the session ended (detach_unanswered, not detached), and leaves the adapter running (it ends later,
+/// by itself).
 fn case_unresponsive_adapter() {
     let mut s = Session::start("unresponsive", "deaf,linger", None);
     s.initialize_and_attach();
@@ -589,7 +616,8 @@ fn case_unresponsive_adapter() {
     s.close_input();
     let st = s.wait_exit(DISCONNECT_WAIT + Duration::from_secs(25));
     let took = t0.elapsed();
-    assert_eq!(st.code(), Some(0), "{}", s.diag());
+    assert_eq!(st.code(), Some(1), "{}", s.diag());
+    s.assert_final("ended", "detach_unanswered");
     assert!(took >= DISCONNECT_WAIT && took < DISCONNECT_WAIT + Duration::from_secs(15), "the proxy gave up after {took:?}");
     s.assert_safe_disconnects(1);
     assert!(s.stderr().contains("has not finished after a disconnect"), "{}", s.diag());
@@ -598,6 +626,17 @@ fn case_unresponsive_adapter() {
     let adapter = log.iter().find(|e| e["ev"] == "start").and_then(|e| e["pid"].as_u64()).expect("the adapter's PID");
     assert!(alive(adapter), "the adapter did not outlive the proxy\n{}", s.diag());
     s.wait_adapter("exit after lingering", WAIT, |l| l.iter().any(|e| e["ev"] == "exit" && e["why"] == "linger"));
+    s.end();
+}
+
+/// 5b. An adapter that exits on the disconnect without answering it: the session ended (detach_unanswered), exit 1.
+fn case_adapter_exits_unanswered() {
+    let mut s = Session::start("exit-unanswered", "exit_on_disconnect", None);
+    s.initialize_and_attach();
+    s.request("disconnect", json!({}));
+    assert_eq!(s.wait_exit(WAIT).code(), Some(1), "{}", s.diag());
+    s.assert_safe_disconnects(1);
+    s.assert_final("ended", "detach_unanswered");
     s.end();
 }
 
@@ -682,7 +721,42 @@ fn case_adapter_dies() {
     s.end();
 }
 
-/// Cases 1-5 and 7-9 at once (case 5 alone takes DISCONNECT_WAIT).
+/// 10. The identity check right before the editor's attach fails (the process is another one now): the attach is
+/// refused and never reaches the adapter, the editor gets `terminated`, the session ends, and the proxy closes the
+/// adapter's input and exits 1 instead of waiting for the editor.
+fn case_attach_refused() {
+    let mut s = Session::start("attach-refused", "refuse_attach", None);
+    let i = s.request("initialize", json!({}));
+    s.response(i);
+    let a = s.request("attach", json!({}));
+    let r = s.response(a);
+    assert_eq!(r["success"], false, "{r}");
+    s.wait_for("terminated", |v| is_event(v, "terminated"));
+    assert_eq!(s.wait_exit(WAIT).code(), Some(1), "{}", s.diag());
+    assert!(s.adapter_got("attach").is_empty(), "{}", s.diag());
+    let st = s.final_state();
+    assert_eq!(st["state"], "ended", "{st}");
+    assert!(st["reason"].as_str().is_some_and(|r| !r.is_empty() && r != "attach_failed"), "{st}");
+    s.wait_adapter("end of input", WAIT, |l| l.iter().any(|e| e["ev"] == "eof"));
+    s.end();
+}
+
+/// 11. netcoredbg answers the attach with a failure: the editor gets `terminated`, the session ends (attach_failed),
+/// the adapter's input is closed and the proxy exits 1.
+fn case_attach_failed() {
+    let mut s = Session::start("attach-failed", "fail_attach", None);
+    let i = s.request("initialize", json!({}));
+    s.response(i);
+    let a = s.request("attach", json!({}));
+    assert_eq!(s.response(a)["success"], false);
+    s.wait_for("terminated", |v| is_event(v, "terminated"));
+    assert_eq!(s.wait_exit(WAIT).code(), Some(1), "{}", s.diag());
+    s.assert_final("ended", "attach_failed");
+    s.wait_adapter("end of input", WAIT, |l| l.iter().any(|e| e["ev"] == "eof"));
+    s.end();
+}
+
+/// Cases 1-5 and 7-11 at once (case 5 alone takes DISCONNECT_WAIT).
 #[test]
 fn detach_policy() {
     let cases: Vec<(&str, Box<dyn Fn() + Send + Sync>)> = vec![
@@ -694,11 +768,14 @@ fn detach_policy() {
         ("4 SIGINT", Box::new(|| case_signal(libc::SIGINT, "SIGINT"))),
         ("4 SIGHUP", Box::new(|| case_signal(libc::SIGHUP, "SIGHUP"))),
         ("5 unresponsive adapter", Box::new(case_unresponsive_adapter)),
+        ("5 adapter exits without answering the disconnect", Box::new(case_adapter_exits_unanswered)),
         ("7 reload", Box::new(case_reload)),
         ("8 malformed frames", Box::new(case_malformed_both_sides)),
         ("8 client frame too large", Box::new(case_client_frame_too_large)),
         ("8 adapter frame too large", Box::new(case_adapter_frame_too_large)),
         ("9 adapter dies", Box::new(case_adapter_dies)),
+        ("10 attach refused", Box::new(case_attach_refused)),
+        ("11 attach failed", Box::new(case_attach_failed)),
     ];
     let failed: Vec<&str> = std::thread::scope(|sc| {
         let running: Vec<_> = cases.iter().map(|(name, f)| (*name, sc.spawn(|| f()))).collect();
@@ -711,7 +788,7 @@ fn detach_policy() {
 
 /// 6. The pause watchdog: a stop held past maxPauseMs (an evaluation that never answers) is continued by the proxy
 /// with its own seq; the editor gets `continued` and `kiln/debugState` running/timeout_continue. A resume before the
-/// deadline cancels it.
+/// deadline cancels it, and a disconnect while paused silences it.
 #[test]
 fn pause_watchdog() {
     const MS: u64 = 1000;
@@ -750,6 +827,23 @@ fn pause_watchdog() {
     s.response(d);
     assert_eq!(s.wait_exit(WAIT).code(), Some(0), "{}", s.diag());
     s.assert_safe_disconnects(1);
+    s.end();
+    // after a disconnect the watchdog stays quiet: the editor disconnects while paused, and the adapter answers only
+    // after the pause limit; no continue may reach it
+    let mut s = Session::start("watchdog-disconnect", "slow_disconnect", Some(MS));
+    s.initialize_and_attach();
+    let q = s.request("evaluate", json!({ "expression": "fake:stop" }));
+    s.response(q);
+    s.wait_for("stopped", |v| is_event(v, "stopped"));
+    s.wait_for("state paused", |v| is_state(v, "paused"));
+    let d = s.request("disconnect", json!({}));
+    s.response(d);
+    assert_eq!(s.wait_exit(WAIT).code(), Some(0), "{}", s.diag());
+    s.assert_safe_disconnects(1);
+    let log = s.adapter_log();
+    assert!(!log.iter().any(|e| e["ev"] == "recv" && e["msg"]["command"] == "continue"), "a continue reached the adapter after the disconnect: {log:?}");
+    s.drain();
+    assert!(!s.json_seen(0).iter().any(|v| is_event(v, "continued") || v["body"]["reason"] == "timeout_continue"), "{}", s.diag());
     s.end();
     // Protocol behaviour only (a fake adapter and a fake process table), not game survival.
     println!("PASS debug.pause-watchdog (protocol behaviour only, fake adapter)");

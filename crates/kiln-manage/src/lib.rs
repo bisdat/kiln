@@ -41,6 +41,13 @@
 //! | [`game_files`] | native mods placed in the game folder itself: a plugin loader the game loads (`powrprof.dll` + `plugins\`), Ultimate ASI Loader and `.asi` plugins |
 //! | [`found`] | mods in the game folder Kiln did not put there: whether each loads with a profile, and adding one |
 //! | [`shroudforge`] | ShroudForge mods next to Kiln: install detection, mod packages, switches, settings, status (owner: sf) |
+//! | [`sfi_backend`] | kiln.json `shroudforge.backend` (hosted, installed, kiln): read and written as the core decides it at boot |
+//! | [`sfi_release`] | the release hold of Kiln's interpreter as this build ships it: the gate rows `kiln-sfi.interpreter` / `kiln-sfi.sf18` and the sf18 veto |
+//! | `sfi_scan` | feature `sfi-scan`: the pre-select inventory of `<game>/mods` ShroudForge packages a `kiln` launch plan chooses from |
+//! | `sfi_plan` | feature `sfi-scan`: the launch-plan producer, `kiln/launch-plans/<plan id>.json` for a `kiln` start |
+//! | `sfi_inspection` | feature `sfi-scan`: kiln-eml's read-only archive inspector as the plan producer runs and reads it |
+//! | `sfi_activation` | feature `sfi-scan`: the activation journal of a kiln-mode activation, `kiln/state/sfi-activation.json`: the plan, chain.ini and the game-side copies staged so that a stop ends in the earlier or the new activation, whole, and the planned start's check |
+//! | [`sfi_routing`] | where a game's ShroudForge-format mods go: main's routes, or `<game>/mods` for Kiln's interpreter when kiln.json selects it (active with feature `sfi-scan`) |
 //! | [`playonce`] | `kiln/play-once.ini` |
 //! | [`prestart`] | what kiln-eml is doing before the game's window exists (`kiln/state/eml.json`, phase running) |
 //! | [`config`] | offline mod configs, `.schema/` snapshots, `config/native.json` |
@@ -110,14 +117,31 @@ pub mod notices;
 pub mod quick;
 pub mod kept;
 pub mod settings_files;
+pub mod mod_settings;
 pub(crate) mod durable;
 pub mod engine_mods;
+pub mod emf_deps;
 pub mod game_files;
 pub mod restore_data;
 pub mod found;
 pub mod own_loaders;
 pub mod shroudforge;
 pub mod sf_startup;
+pub mod sfi_backend;
+pub mod sfi_release;
+pub mod sfi_routing;
+#[cfg(feature = "sfi-scan")]
+pub mod sfi_scan;
+#[cfg(feature = "sfi-scan")]
+pub mod sfi_inspection;
+#[cfg(feature = "sfi-scan")]
+pub mod sfi_plan;
+#[cfg(feature = "sfi-scan")]
+pub mod sfi_activation;
+// the check before Play; its warnings need sfi-scan, a build without has none
+pub mod sfi_launch;
+// the ShroudForge engine row read from kiln-sfi's sfi.json in kiln mode
+pub mod sfi_state;
 pub(crate) mod sf_paths;
 pub mod resolver;
 pub mod semver;
@@ -163,6 +187,8 @@ pub mod publish;
 pub mod updates;
 pub mod vendor;
 pub mod community;
+#[cfg(all(feature = "zip", feature = "http"))]
+pub mod crucible;
 
 pub use error::{Error, ErrorCode, Result};
 

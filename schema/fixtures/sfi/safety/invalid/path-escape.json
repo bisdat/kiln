@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "revision": 1,
+  "scope": "interpreter-only",
+  "unknownMixedDataNative": "save-sensitive",
+  "packages": [
+    {
+      "id": "synthetic-ammo",
+      "version": "1.0.0",
+      "name": "Synthetic ammo pouch",
+      "source": {
+        "site": "nexus",
+        "modId": 1
+      },
+      "risk": "save-data-loss",
+      "text": "The game drops the pouch's ammo at the next save.",
+      "evidence": "synthetic fixture",
+      "variants": [
+        {
+          "files": [
+            {
+              "path": "mod.json",
+              "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+              "size": 10
+            },
+            {
+              "path": "../pouch.dll",
+              "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+              "size": 20
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,452 @@
+[
+  {
+    "id": "file.missing",
+    "result": {
+      "blocked": {}
+    },
+    "plan": {
+      "ids": [
+        "a",
+        "b",
+        "z"
+      ],
+      "issues": []
+    }
+  },
+  {
+    "id": "file.missing-parent",
+    "result": {
+      "blocked": {}
+    },
+    "plan": {
+      "ids": [
+        "a",
+        "b",
+        "z"
+      ],
+      "issues": []
+    }
+  },
+  {
+    "id": "file.dangling-symlink",
+    "result": {
+      "blocked": {}
+    },
+    "plan": {
+      "ids": [
+        "a",
+        "b",
+        "z"
+      ],
+      "issues": []
+    }
+  },
+  {
+    "id": "file.directory",
+    "result": {
+      "err": "Is a directory (os error 21)"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: Is a directory (os error 21)"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.parent-is-file",
+    "result": {
+      "err": "Not a directory (os error 20)"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: Not a directory (os error 20)"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.unreadable",
+    "result": {
+      "err": "Permission denied (os error 13)"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: Permission denied (os error 13)"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.empty",
+    "result": {
+      "err": "EOF while parsing a value at line 1 column 0"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: EOF while parsing a value at line 1 column 0"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.whitespace",
+    "result": {
+      "err": "EOF while parsing a value at line 2 column 0"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: EOF while parsing a value at line 2 column 0"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.invalid-json",
+    "result": {
+      "err": "trailing comma at line 1 column 35"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: trailing comma at line 1 column 35"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.truncated",
+    "result": {
+      "err": "EOF while parsing a list at line 1 column 32"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: EOF while parsing a list at line 1 column 32"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.bom",
+    "result": {
+      "err": "expected value at line 1 column 1"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: expected value at line 1 column 1"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.invalid-utf8",
+    "result": {
+      "err": "invalid unicode code point at line 1 column 113"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: invalid unicode code point at line 1 column 113"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.invalid-utf8-lines",
+    "result": {
+      "err": "invalid unicode code point at line 4 column 105"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: invalid unicode code point at line 4 column 105"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.trailing-garbage",
+    "result": {
+      "err": "trailing characters at line 1 column 36"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: trailing characters at line 1 column 36"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.schemaVersion-2",
+    "result": {
+      "err": "rules: 1 was expected"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: rules: 1 was expected"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.unknown-key",
+    "result": {
+      "err": "rules: Additional properties are not allowed ('extra' was unexpected)"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: rules: Additional properties are not allowed ('extra' was unexpected)"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.unknown-rule-key",
+    "result": {
+      "err": "rules: Additional properties are not allowed ('note' was unexpected)"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: rules: Additional properties are not allowed ('note' was unexpected)"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.missing-conflicts",
+    "result": {
+      "err": "rules: \"conflicts\" is a required property"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: rules: \"conflicts\" is a required property"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.$schema",
+    "result": {
+      "err": "rules: Additional properties are not allowed ('$schema' was unexpected)"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: rules: Additional properties are not allowed ('$schema' was unexpected)"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.array",
+    "result": {
+      "err": "rules: [] is not of type \"object\""
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: rules: [] is not of type \"object\""
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.bad-range",
+    "result": {
+      "err": "unexpected character 'o' while parsing major version number"
+    },
+    "plan": {
+      "ids": [],
+      "issues": [
+        {
+          "modId": "__loader__",
+          "code": "compatibility-rules",
+          "detail": "compatibility rules: unexpected character 'o' while parsing major version number"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.valid-empty",
+    "result": {
+      "blocked": {}
+    },
+    "plan": {
+      "ids": [
+        "a",
+        "b",
+        "z"
+      ],
+      "issues": []
+    }
+  },
+  {
+    "id": "file.valid-default-bytes",
+    "result": {
+      "blocked": {}
+    },
+    "plan": {
+      "ids": [
+        "a",
+        "b",
+        "z"
+      ],
+      "issues": []
+    }
+  },
+  {
+    "id": "file.valid-match",
+    "result": {
+      "blocked": {
+        "a": "clash",
+        "b": "clash"
+      }
+    },
+    "plan": {
+      "ids": [
+        "z"
+      ],
+      "issues": [
+        {
+          "modId": "a",
+          "code": "conflict-or-plan-error",
+          "detail": "a: clash"
+        },
+        {
+          "modId": "b",
+          "code": "conflict-or-plan-error",
+          "detail": "b: clash"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.valid-match-crlf",
+    "result": {
+      "blocked": {
+        "a": "clash",
+        "b": "clash"
+      }
+    },
+    "plan": {
+      "ids": [
+        "z"
+      ],
+      "issues": [
+        {
+          "modId": "a",
+          "code": "conflict-or-plan-error",
+          "detail": "a: clash"
+        },
+        {
+          "modId": "b",
+          "code": "conflict-or-plan-error",
+          "detail": "b: clash"
+        }
+      ]
+    }
+  },
+  {
+    "id": "file.valid-disabled",
+    "result": {
+      "blocked": {}
+    },
+    "plan": {
+      "ids": [
+        "a",
+        "b",
+        "z"
+      ],
+      "issues": []
+    }
+  },
+  {
+    "id": "file.valid-later-reason",
+    "result": {
+      "blocked": {
+        "a": "last",
+        "b": "last"
+      }
+    },
+    "plan": {
+      "ids": [
+        "z"
+      ],
+      "issues": [
+        {
+          "modId": "a",
+          "code": "conflict-or-plan-error",
+          "detail": "a: last"
+        },
+        {
+          "modId": "b",
+          "code": "conflict-or-plan-error",
+          "detail": "b: last"
+        }
+      ]
+    }
+  }
+]

@@ -27,6 +27,7 @@
 #include "kiln_hook.hpp"
 #include "menu_rows.h"
 #include "menu_site.h"
+#include "overlay_guard_runtime.h"
 #include "ui.h"
 #include "ui_text.h"
 
@@ -368,14 +369,16 @@ bool __fastcall hk_main_entry(void* state, const MainDesc* d) {
             // Full page contents require ImGui. Keep the same native row/slot and
             // toggle its status caption, never an empty Credits page or extra row.
             // With the drawing on, the row's own text and its hash as they were made (nothing changes for a normal start).
-            if (!overlay_draws() && g_menu_open.load() && e.handle == g_builtin[0])
+            // After Kiln's menu fell back to the game's own rows (no frame of the overlay showed), as with the drawing off.
+            if (!menu_in_overlay() && g_menu_open.load() && e.handle == g_builtin[0])
                 c.text = status_text();
             else
                 c.text = GameText{e.text->c_str(), e.text->size(), e.fnv};
             g_draws.fetch_add(1, std::memory_order_relaxed);
             if (!g_main_hook.call<bool>(state, &c)) continue;
-            // Kiln's own MODS entry: the game's own page switch, here as the game does for its entries (menu_page.cpp)
-            if (e.handle == g_builtin[0] && overlay_draws() && page_open_from_entry(state)) {
+            // Kiln's own MODS entry: the game's own page switch, here as the game does for its entries (menu_page.cpp). The
+            // page is Kiln's menu in the overlay too: watched for a frame of it on the screen (overlay_menu_ask)
+            if (e.handle == g_builtin[0] && overlay_menu_ask() && page_open_from_entry(state)) {
                 g_clicks.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
@@ -392,7 +395,7 @@ bool __fastcall hk_sys_entry(const GameText* t, uint8_t p2, uint8_t attention) {
         uint32_t rows = 0;
         for (const Entry& e : entries_of(KILN_UI_MENU_PAUSE)) {
             ++rows;
-            const bool status_row = !overlay_draws() && g_menu_open.load() && e.handle == g_builtin[1];
+            const bool status_row = !menu_in_overlay() && g_menu_open.load() && e.handle == g_builtin[1];
             const GameText c = status_row
                 ? status_text()
                 : GameText{e.text->c_str(), e.text->size(), e.fnv};
@@ -530,9 +533,13 @@ void KILN_CALL on_craftmenu(const KilnCraftMenuInfo* info, void*) {
 }
 
 // Kiln's own "Mods" entry in both menus: opens the Kiln menu (works without the managed host). In the main menu with
-// feature ui.menu_page and a host, the entry hook opens the game page instead and this is not called.
+// feature ui.menu_page and a host, the entry hook opens the game page instead and this is not called. In the overlay the
+// menu is watched for a frame of it on the screen (overlay_menu_ask). With the drawing off (a switch, the crash guard,
+// Streamline, OptiScaler, or off since), or after Kiln's menu fell back because no frame of the overlay showed, the entry
+// toggles its caption in the game's own menu instead: the game's own Mods rows, never a menu that cannot be seen.
 void KILN_CALL on_builtin(KilnHandle, void*) {
-    g_menu_open = overlay_draws() ? true : !g_menu_open.load();
+    if (overlay_menu_ask()) g_menu_open = true;
+    else g_menu_open = !g_menu_open.load();
     logf(KILN_LOG_DEBUG, "ui: Kiln menu opened from the game's menu");
 }
 KilnResult game_menu_add_impl(KilnOwner owner, uint32_t menu, int32_t order, KilnStr text, KilnUiMenuFn fn, void* user, KilnHandle* out);
@@ -543,11 +550,13 @@ void add_builtin_entries() {
     if (L.system_menu) game_menu_add_impl(g_owner, KILN_UI_MENU_PAUSE, 1000, t, &on_builtin, nullptr, &g_builtin[1]);
 }
 
-// The Mods entry's caption while the overlay does not draw: off from the start (g_overlay_reason), or turned off during
-// this session (overlay_off_reason: ui.cpp overlay_turned_off).
+// The Mods entry's caption while Kiln's menu is not drawn by the overlay: its drawing off from the start
+// (g_overlay_reason), turned off during this session (overlay_off_reason: ui.cpp overlay_turned_off), or the menu fell
+// back because no frame of the overlay showed (overlay_menu_ask). Made with the drawing on too, so that the caption is
+// there the moment the menu falls back (from a pool thread, while the menus draw).
 void set_mods_status() {
-    if (overlay_draws()) return;
-    const std::string& reason = overlay_failed() ? overlay_off_reason() : g_overlay_reason;
+    static const std::string not_shown = "Kiln's overlay did not appear";
+    const std::string& reason = overlay_failed() ? overlay_off_reason() : overlay_drawing_on() ? not_shown : g_overlay_reason;
     const std::string s = text::fill(text::get("native.menu.mods_off"), {{"reason", reason}});
     g_native_mods_status.store(intern(KilnStr{s.data(), s.size()}), std::memory_order_release);
 }
@@ -820,6 +829,15 @@ void game_texts_changed() {
 }
 
 void game_overlay_turned_off() { set_mods_status(); }
+
+void game_menu_fell_back() {
+    set_mods_status();
+    // the main menu's page was the one asked for: back to the game's main menu, where the entry shows its caption
+    if (page_active()) {
+        page_leave();
+        g_menu_open.store(true);
+    }
+}
 
 void game_status_line(char* out, size_t cap) {
     char page[192];

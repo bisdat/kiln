@@ -79,6 +79,11 @@ internal static unsafe class MainMenuFooter
         slot(mods, flags);
     }
 
+    /// <summary>The warning variant Kiln.Ui draws at the bottom of the main menu while kiln-sfi warns that packages are off
+    /// this start (SfiNotice.cs; kiln.ui's own line keeps its count). Shown whatever the setting mainMenuFooter says.</summary>
+    internal static string WarningLine(int off, bool doNotSave = true) =>
+        (off == 1 ? "1 mod off" : $"{off} mods off") + (doNotSave ? ": do not save" : " this start");
+
     /// <summary>Forgets what was sent (tests).</summary>
     internal static void ResetForTests()
     {

@@ -34,6 +34,11 @@ Kiln builds on the work of the Enshrouded modding community.
 | [HadToRegister](https://github.com/HadToRegister) | player and tester | More than half of the quality-of-life reports that became fixes in Kiln, each with logs and patient retests. Among them: the slow motion beside Greeneye's Quick Deposit ([issue 39](https://github.com/frostdev-ops/kiln/issues/39)), autosave hitches on hard drives, the Library's add results and its advice about other loaders' `dinput8.dll`, mods that ship their own loader (Sparkworks Enhanced, Ultimate ASI Loader mods), the in-game menus at 1080p, and the hard-drive stutter recordings behind Kiln's file-work fixes. |
 | frostdev | frostdev.io | Kiln launcher theme and design. |
 
+Kiln's interpreter for ShroudForge mods (kiln-sfi, `crates/sfi`) and kiln-eml's startup pass for them
+(`gpl/kiln-eml/kiln-eml/src/sf_pass.rs`, `gpl/kiln-eml/kiln-eml/src/sf_startup/`): Adapted from ShroudForge by
+bonsaibauer, MIT ([licence](licenses/ShroudForge-LICENSE.txt)). Each adapted file names its ShroudForge source in its
+header.
+
 Enshrouded is a trademark of Keen Games GmbH. Kiln is not affiliated with or endorsed by Keen Games.
 
 ## Translations

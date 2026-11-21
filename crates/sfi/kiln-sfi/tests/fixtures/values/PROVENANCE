@@ -1,0 +1,1 @@
+typed_values.{owned,mapped}.txt and scalar_values.{owned,mapped}.txt are recorded output of the .lua scripts in this folder run over kiln-eml's ShroudForge-port wrappers (a GPL-3.0 program under gpl/kiln-eml): output data only, no source text, and nothing in this MIT crate links that program.

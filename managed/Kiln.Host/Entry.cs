@@ -411,6 +411,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
                 BuildStamp = KilnBuild.Of(typeof(Kiln.Mod).Assembly)?.Version,
                 TickHop = TaskHop,
                 ClientHop = _client ? ClientTaskHop : null,
+                MenuHop = _client ? MenuTaskHop : null,
             });
             ComponentTask.Owners = ComponentOwner;
         }
@@ -473,6 +474,33 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
     /// Context.Tick is on a joined client. While hosting the server world drives them on its own thread: the hop is
     /// main-thread work like a Client.Tick handler and never takes the drive lock (that would make the main thread wait
     /// for the server thread's whole step).</summary>
+    /// <summary>One menu hop of a task (#83), on the game's UI frame while no world runs: inside <see cref="UiTick"/>, under
+    /// the drive lock like the mods' other menu work, but with no thread marked as the driver, so
+    /// <c>Game.IsTickThread</c> is false there (no world runs) and the world APIs refuse. Outside UiTick (the client
+    /// world's start on the main thread flushing the menu's waiting hops cancelled) the hop runs no mod code: it never
+    /// waits for the drive lock, which a hosted server world's step may hold.</summary>
+    private void MenuTaskHop(ulong owner, Action hop)
+    {
+        if (!Monitor.IsEntered(_drive))
+        {
+            _mods.TaskTick.RunMenu(owner, hop);
+            return;
+        }
+        lock (_drive)
+        {
+            var previous = Volatile.Read(ref _driver);
+            Volatile.Write(ref _driver, 0);
+            try
+            {
+                _mods.TaskTick.RunMenu(owner, hop);
+            }
+            finally
+            {
+                Volatile.Write(ref _driver, previous);
+            }
+        }
+    }
+
     private void ClientTaskHop(ulong owner, Action hop) =>
         ClientHopFrame.Run(ServerWorldLive(), _drive, ref _driver, () => _mods.TaskTick.Run(owner, hop), () => _mods.TaskTick.RunClient(owner, hop));
 
@@ -723,7 +751,8 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
     }
 
     /// <summary>The game's UI thread, after each UI frame: while no world steps, load the mods once (first call), then
-    /// about 30 times a second run mod requests and Kiln's service tick. A world's step (Drive) takes over as before.</summary>
+    /// about 30 times a second run mod requests, Kiln tasks' menu hops and Kiln's service tick. A world's step (Drive)
+    /// takes over as before.</summary>
     public void UiTick(ulong frame)
     {
         if (_uiThread == 0) Volatile.Write(ref _uiThread, Environment.CurrentManagedThreadId);
@@ -734,6 +763,9 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         {
             if (InWorld()) return;  // a hosted server world may have started on its own thread meanwhile
             Volatile.Write(ref _driver, Environment.CurrentManagedThreadId);
+            // Kiln tasks' menu hops (#83): the core opens the menu's session (before the mods load, so a task their OnLoad
+            // starts here belongs to it) and runs the hops queued before this frame
+            HostTasks.Bound?.MenuFrame();
             if (!_modsLoaded)
             {
                 _modsLoaded = true;
@@ -1015,11 +1047,29 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         };
     }
 
+    /// <summary>Whether a .NET debugger is attached to this process (kiln debug, netcoredbg). A seam for the tests.</summary>
+    internal static Func<bool> DebuggerAttached = () => System.Diagnostics.Debugger.IsAttached;
+
+    /// <summary>The refusal of a control command that unloads mod code while a debugger is attached (unload, reload,
+    /// reload-test): breakpoints stay on the dead copy and such sessions have ended the server
+    /// (docs/kiln/modding/debugging.md). Null when the command may run. Every path that asks for a reload ends here: kiln
+    /// reload, the SDK's KilnReload, the VS Code extension and a hand-written .cmd file.</summary>
+    internal static string? RefusedWhileDebugging(string[] args, bool debuggerAttached) =>
+        debuggerAttached && args.Length > 0 && args[0] is "unload" or "reload" or "reload-test"
+            ? $"refused (debugger_attached): a debugger is attached to this process; detach it before '{args[0]}' (a reload under a debugger keeps breakpoints on the old copy)"
+            : null;
+
     private void Execute(string command, string resultFile)
     {
         var args = command.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (args.Length == 0) throw new ArgumentException("empty command");
         Log(LogLevel.Info, $"control: {command}");
+        if (RefusedWhileDebugging(args, DebuggerAttached()) is { } refused)
+        {
+            Log(LogLevel.Warn, $"control: {refused}");
+            WriteResult(resultFile, command, false, refused);
+            return;
+        }
         switch (args[0])
         {
             case "mods":

@@ -32,6 +32,10 @@ import { CommunityDesktopHost } from "../community/Host";
 import { NavCount } from "../community/parts";
 import { useShown } from "../community/state";
 import { watchCrashes } from "../community/crash";
+import { CrucibleHost } from "../crucible/Host";
+import { useCrucibleOn } from "../crucible/state";
+// the warning before Play
+import { SfiWarningHost } from "../components/SfiWarningDialog";
 
 const MOTION = "(prefers-reduced-motion: reduce)";
 const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.(MOTION).matches;
@@ -67,7 +71,8 @@ function Header({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
   const active = navFor(loc.pathname);
   const nexusEnabled = useNexusEnabled();
   const community = useShown();
-  const main = NAV_MAIN.filter((n) => (nexusEnabled || n.to !== "/catalog") && (community || n.to !== "/community"));
+  const crucible = useCrucibleOn();
+  const main = NAV_MAIN.filter((n) => (nexusEnabled || n.to !== "/catalog") && (community || n.to !== "/community") && (crucible || n.to !== "/studio"));
   // the gold diamond sits under the active word (placed from its offset: words differ in width)
   useLayoutEffect(() => {
     const place = () => {
@@ -78,7 +83,7 @@ function Header({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
     window.addEventListener("resize", place);
     document.fonts?.ready.then(place).catch(() => {});
     return () => window.removeEventListener("resize", place);
-  }, [active?.to, nexusEnabled, community]);
+  }, [active?.to, nexusEnabled, community, crucible]);
   const v = ctl.view;
   // a start that says what it does: its step, and the time left (else how far, in percent)
   const tl = ctl.timeline;
@@ -294,7 +299,9 @@ export function AppShell() {
       <ModUpdatesWatcher />
       <DataFolderNotice />
       <CommunityDesktopHost />
+      <CrucibleHost />
       <OwnFilesNotice />
+      <SfiWarningHost />
       <Toaster />
       <Splash done={ready} />
     </div>

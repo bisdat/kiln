@@ -5,10 +5,14 @@ use serde::{Deserialize, Serialize};
 mod io;
 // kiln-eml: fingerprint reuse (bisdat/kiln-mods#17)
 mod prints;
-mod stamp;
+// (the startup input witness reads stamps; public: `mod stamp;`)
+pub(crate) mod stamp;
 mod track;
 
 pub use prints::{FingerprintStats, Fingerprints, Need};
+// (the startup input witness, transaction.rs, trusts a stamp under the same racy window and
+// escape hatch)
+pub(crate) use prints::{full_hash_requested, now_ns, racy_window};
 pub(crate) use prints::CRC64;
 #[cfg(test)]
 pub(crate) use prints::RACY_WINDOW_OVERRIDE;

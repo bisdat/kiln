@@ -33,6 +33,42 @@ typedef struct KilnClientState {
     uint64_t server_steps;    /* server-world steps since boot */
 } KilnClientState;
 
+/* kiln-internal begin: building input, Kiln's own in this release (no supported game build has its input producer yet).
+ * The SDK's headers leave out every line from here to "kiln-internal end" (managed/Kiln.Sdk/Kiln.Sdk.csproj).
+ * One request at a time for the whole client, emitted through the local player's ordinary input path. See
+ * docs/kiln/services/client-building-input.md. */
+enum {
+    KILN_BUILDING_ACTION_SELECT = 0,    /* select item_id (and material_item_id) in actionbar slot `slot` */
+    KILN_BUILDING_ACTION_PLACE = 1,     /* the primary building action at the transform */
+    KILN_BUILDING_ACTION_REMOVE = 2,    /* the secondary building action at the transform */
+    KILN_BUILDING_ACTION_UNDO = 3,      /* the game's own building undo */
+    KILN_BUILDING_ACTION_DISMANTLE = 4, /* dismantle the exact prop target_entity_id at the transform (held 1.2 s) */
+};
+enum {
+    KILN_BUILDING_INPUT_UNKNOWN = 0,    /* not the caller's latest request */
+    KILN_BUILDING_INPUT_QUEUED = 1,     /* waiting for the input path (at most 5 s) */
+    KILN_BUILDING_INPUT_PRESSED = 2,    /* the action is held in the input; released at a later input version */
+    KILN_BUILDING_INPUT_DISPATCHED = 3, /* emitted as input: not the world's acknowledgement */
+    KILN_BUILDING_INPUT_TIMEOUT = 4,    /* not emitted within 5 s (a pressed one is still released) */
+    KILN_BUILDING_INPUT_CANCELLED = 5,  /* cancelled; its owner, its session or the producer ended; or the input faulted */
+};
+#define KILN_CLIENT_ERR_BUILDING_BUSY 200  /* a request (of any owner) is queued or pressed */
+#define KILN_CLIENT_ERR_BUILDING_STALE 201 /* no client world is live, or expected_session is not its session */
+
+typedef struct KilnBuildingInput {
+    uint32_t size;             /* set by the caller: sizeof(KilnBuildingInput) */
+    uint32_t action;           /* KILN_BUILDING_ACTION_* */
+    KilnEntity player;         /* whose ClientPlayerInput carries it: the local player (KilnClientState.local_player) */
+    uint32_t item_id;          /* SELECT: the building item, required */
+    uint32_t material_item_id; /* SELECT: terrain and default building material, 0 = leave the game's choice */
+    uint32_t slot;             /* SELECT: the actionbar slot, 0..255 */
+    uint32_t target_entity_id; /* DISMANTLE: the exact prop, required; 0 for every other action */
+    uint32_t reserved;         /* 0 */
+    double position[3];        /* PLACE, REMOVE, DISMANTLE: world position in metres */
+    double rotation[4];        /* PLACE, REMOVE, DISMANTLE: quaternion x y z w, normalized here */
+    double scale[3];           /* PLACE, REMOVE, DISMANTLE: each in (0, 1024] */
+} KilnBuildingInput;
+/* kiln-internal end */
 typedef struct KilnClientApi {
     KilnServiceHeader header; /* { sizeof(KilnClientApi), KILN_CLIENT_VERSION } */
     KilnResult(KILN_CALL* state)(KilnClientState* out);
@@ -45,9 +81,45 @@ typedef struct KilnClientApi {
     bool(KILN_CALL* on_client_thread)(void);
     /* The client world, 0 when none. Game memory: main thread only, inside a client tick. */
     uintptr_t(KILN_CALL* client_world)(void);
+    /* kiln-internal begin: building input (see KilnBuildingInput); appended, check header.size before calling.
+     * Any thread; none of them waits for the game.
+     * building_input_submit: queues one request for the live client session (`expected_session` 0, or
+     * KilnClientState.client_session). *request_id: its id, never 0; a newer request replaces it as the latest.
+     * KILN_ERR_UNAVAILABLE: a dedicated server, safe idle, or no input producer on this game build (the capability row
+     * client.building_input says why); KILN_ERR_INVALID_ARGUMENT: owner 0, a short record or a field outside its rule;
+     * KILN_ERR_REVOKED: a revoked owner; KILN_CLIENT_ERR_BUILDING_STALE, KILN_CLIENT_ERR_BUILDING_BUSY.
+     * building_input_status: *state = KILN_BUILDING_INPUT_*, a copy; UNKNOWN for any id but the caller's latest.
+     * building_input_cancel: *cancelled = 1 for the caller's latest id. A queued request is cancelled, a pressed one is
+     * released at the next input; a dispatched one stays dispatched. */
+    KilnResult(KILN_CALL* building_input_submit)(KilnOwner owner, uint64_t expected_session,
+                                                 const KilnBuildingInput* input, uint32_t* request_id);
+    KilnResult(KILN_CALL* building_input_status)(KilnOwner owner, uint32_t request_id, uint32_t* state);
+    KilnResult(KILN_CALL* building_input_cancel)(KilnOwner owner, uint32_t request_id, uint32_t* cancelled);
+    /* kiln-internal end */
 } KilnClientApi;
 
 #ifdef __cplusplus
 }
 #endif
+/* kiln-internal begin: building input layout */
+#ifdef __cplusplus
+static_assert(sizeof(KilnBuildingInput) == 112, "KilnBuildingInput is 112 bytes");
+static_assert(offsetof(KilnBuildingInput, target_entity_id) == 24 && offsetof(KilnBuildingInput, position) == 32 &&
+                  offsetof(KilnBuildingInput, rotation) == 56 && offsetof(KilnBuildingInput, scale) == 88,
+              "KilnBuildingInput layout");
+static_assert(offsetof(KilnClientApi, building_input_submit) == 56, "building_input_submit is appended at 56");
+static_assert(offsetof(KilnClientApi, building_input_status) == 64, "building_input_status is appended at 64");
+static_assert(offsetof(KilnClientApi, building_input_cancel) == 72, "building_input_cancel is appended at 72");
+static_assert(sizeof(KilnClientApi) == 80, "KilnClientApi is 80 bytes");
+#else
+_Static_assert(sizeof(KilnBuildingInput) == 112, "KilnBuildingInput is 112 bytes");
+_Static_assert(offsetof(KilnBuildingInput, target_entity_id) == 24 && offsetof(KilnBuildingInput, position) == 32 &&
+                   offsetof(KilnBuildingInput, rotation) == 56 && offsetof(KilnBuildingInput, scale) == 88,
+               "KilnBuildingInput layout");
+_Static_assert(offsetof(KilnClientApi, building_input_submit) == 56, "building_input_submit is appended at 56");
+_Static_assert(offsetof(KilnClientApi, building_input_status) == 64, "building_input_status is appended at 64");
+_Static_assert(offsetof(KilnClientApi, building_input_cancel) == 72, "building_input_cancel is appended at 72");
+_Static_assert(sizeof(KilnClientApi) == 80, "KilnClientApi is 80 bytes");
+#endif
+/* kiln-internal end */
 #endif

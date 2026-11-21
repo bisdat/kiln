@@ -8,6 +8,8 @@ use crate::{alias::{Path, PathBuf}, log::{info, warn}, IoError, ModEnvironmentEr
 
 pub use manifest::*;
 pub use fs::{FileSystem, ReadFailure}; // kiln-eml: ReadFailure
+// (kiln-eml's early phase looks up what the containment check asks Wine)
+pub use fs::prime_wine_within; // kiln-eml: prime_wine_within
 
 #[derive(Debug)]
 struct ModInner {

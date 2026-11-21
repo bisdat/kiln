@@ -109,7 +109,8 @@ struct Resolved {
     uint32_t add_id = 0;
     std::string add_rest;         // the path below the config ("scaleFactor"), empty = its value
 };
-// Resolves a path below `root` (a struct node). `[*]` fans out (several results). false + *err: no such path.
+// Resolves a path below `root` (a struct node). `[*]` fans out (several results; none over an empty list: true with *out
+// and *err empty). false + *err: no such path.
 // *first_missing: the path's first segment did not exist at all (items: not ours).
 bool identity_field(const std::string& name);  // ids, GUIDs of things: read-only
 bool resolve(Root kind, Node root, const std::string& path, std::vector<Resolved>* out, std::string* err,

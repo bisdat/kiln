@@ -17,6 +17,7 @@ use mod_loader::{Capability, ModEnvironment};
 use serde::Serialize;
 
 use crate::discover::Entry;
+use crate::kiln_mode::KilnMode;
 use crate::progress::{Display, Live};
 
 #[derive(Clone, Debug, Default)]
@@ -32,6 +33,9 @@ pub struct RunConfig {
     pub skip_cache: bool,
     /// Where the run reports what it is doing (the live state file and the progress window), when the host has one.
     pub progress: Option<Arc<Display>>,
+    /// Kiln's interpreter has this start (kiln.launch backend `kiln`): its launch plan decides the packages
+    /// that need ShroudForge's runtime (kiln_mode.rs). None: the rules from before kiln.launch.
+    pub kiln: Option<Arc<KilnMode>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -262,7 +266,16 @@ fn set_state(entries: &mut [Entry], path: &Utf8Path, state: &str, reason: Option
 // A DLL keeps the per-install lock until process exit, so another Kiln process cannot rewrite files the game uses.
 // The host runner also serializes calls in-process. OS locks are released after a crash; the lock file is never deleted.
 static RUN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-static GAME_LOCKS: std::sync::Mutex<Vec<(Utf8PathBuf, std::fs::File)>> = std::sync::Mutex::new(Vec::new());
+/// The install locks this process holds, for its life. In this crate's unit tests each keeps its test-gate hold too
+/// (mod-loader-lua's test_gate.rs), dropped after the file. The file is shared (`held_lock`): a kiln-mode start's
+/// witness, pass and publication borrow the one lock taken in kiln-eml's early phase.
+#[cfg(not(test))]
+type GameLock = Arc<std::fs::File>;
+#[cfg(test)]
+type GameLock = (Arc<std::fs::File>, mod_loader_lua::test_gate::KeptHold);
+// (each held install with its identity, so another spelling of it is the same install;
+// public: `Vec<(Utf8PathBuf, GameLock)>` compared by exact path)
+static GAME_LOCKS: std::sync::Mutex<Vec<(Utf8PathBuf, Option<crate::same_path::Identity>, GameLock)>> = std::sync::Mutex::new(Vec::new());
 #[cfg(windows)]
 fn other_game_running(game: &Utf8Path) -> bool {
     // Also refuse an already-running non-Kiln game in this install (it does not honor our cooperative file lock).
@@ -278,6 +291,12 @@ fn other_game_running(game: &Utf8Path) -> bool {
     if unsafe { K32EnumProcesses(pids.as_mut_ptr(), (pids.len() * 4) as u32, &mut needed) } == 0 { return true; }
     if needed as usize >= pids.len() * 4 { return true; }
     let targets = [game.join("enshrouded.exe"), game.join("enshrouded_server.exe")];
+    // (the game by any of its names; public: the canonical image name compared with
+    // eq_ignore_ascii_case). Under Wine an image name and its canonical path keep the spelling the game was started by
+    // (another case, an 8.3 name, Z: for C:), and on Windows a game started from a local share is named
+    // \\?\UNC\localhost\C$\...: each one counts by name (case-folded as NTFS folds) or by identity. An executable that
+    // cannot be identified is compared by name only, as before.
+    let ids: Vec<_> = targets.iter().filter_map(|t| crate::same_path::identity(t.as_std_path()).ok().flatten()).collect();
     for &pid in &pids[..needed as usize / 4] {
         if pid == 0 || pid == std::process::id() { continue; }
         let h = unsafe { OpenProcess(0x1000, 0, pid) };
@@ -287,28 +306,75 @@ fn other_game_running(game: &Utf8Path) -> bool {
         let ok = unsafe { QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut len) };
         unsafe { CloseHandle(h); }
         if ok == 0 { continue; }
-        let path = Utf8PathBuf::from(String::from_utf16_lossy(&buf[..len as usize]));
-        if let Ok(path) = path.canonicalize_utf8() {
-            if targets.iter().any(|p| p.as_str().eq_ignore_ascii_case(path.as_str())) { return true; }
-        }
+        let image = PathBuf::from(<std::ffi::OsString as std::os::windows::ffi::OsStringExt>::from_wide(&buf[..len as usize]));
+        let named = std::fs::canonicalize(&image).unwrap_or_else(|_| image.clone());
+        if targets.iter().any(|t| crate::same_path::names_equal(t.as_std_path(), &named)) { return true; }
+        if crate::same_path::identity(&image).ok().flatten().is_some_and(|id| ids.contains(&id)) { return true; }
     }
     false
 }
 
 pub(crate) fn lock_game(game: &Utf8Path) -> std::io::Result<()> {
     let game = game.canonicalize_utf8()?;
+    // (the install by name or identity; public: exact canonical path)
+    let id = crate::same_path::identity(game.as_std_path())?;
     #[cfg(windows)]
     if other_game_running(&game) { return Err(std::io::Error::other("another game process is using this install")); }
+    // In this crate's unit tests the lock is taken under the test gate (mod-loader-lua's test_gate.rs), before the
+    // GAME_LOCKS mutex: a first hold may wait for a process being created, never while it holds that mutex.
+    #[cfg(test)]
+    let hold = mod_loader_lua::test_gate::lock_hold();
     let mut held = GAME_LOCKS.lock().map_err(|_| std::io::Error::other("poisoned game lock"))?;
-    if held.iter().any(|(p, _)| p == &game) { return Ok(()); }
+    // (the exact name or the identity, never the coarser fold; public: `p == &game`)
+    if held.iter().any(|(p, i, _)| crate::same_path::same(p.as_std_path(), *i, game.as_std_path(), id)) { return Ok(()); }
     let path = game.join(".kiln-eml.lock");
     if std::fs::symlink_metadata(&path).is_ok_and(|m| !m.is_file() || m.file_type().is_symlink()) {
         return Err(std::io::Error::other("unsafe game lock path"));
     }
     let f = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(path)?;
     f.try_lock().map_err(std::io::Error::other)?;
-    held.push((game, f));
+    let f = Arc::new(f);
+    #[cfg(test)]
+    let f = (f, hold.keep());
+    held.push((game, id, f));
     Ok(())
+}
+
+/// The install lock of `game` this process holds (`lock_game`), shared: never dropped or taken again while the process
+/// lives. Every kiln-mode host borrows it, from the early witness to the startup cache's record.
+pub(crate) fn held_lock(game: &Utf8Path) -> Option<Arc<std::fs::File>> {
+    let game = game.canonicalize_utf8().ok()?;
+    // the install by its exact name or its identity, as `lock_game` knows it held
+    let id = crate::same_path::identity(game.as_std_path()).ok().flatten();
+    let held = GAME_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+    let found = held.iter().find(|(p, i, _)| crate::same_path::same(p.as_std_path(), *i, game.as_std_path(), id));
+    #[cfg(not(test))]
+    let found = found.map(|(_, _, f)| f.clone());
+    #[cfg(test)]
+    let found = found.map(|(_, _, (f, _))| f.clone());
+    found
+}
+
+/// Unit tests: run() keeps the install lock until the process exits, as the game's DLL must (GAME_LOCKS). A test drops
+/// it when it is done: Windows deletes a file that is still open only when its last handle closes (always under Wine),
+/// so a removed game folder would still hold .kiln-eml.lock (os error 145), and the test gate (mod-loader-lua's
+/// test_gate.rs) creates no process while any install lock is kept.
+#[cfg(test)]
+pub(crate) fn release_game_lock(game: &Utf8Path) {
+    let Ok(game) = game.canonicalize_utf8() else { return };
+    // (public: `p != &game`)
+    let id = crate::same_path::identity(game.as_std_path()).ok().flatten();
+    GAME_LOCKS.lock().unwrap_or_else(|e| e.into_inner()).retain(|(p, i, _)| !crate::same_path::same(p.as_std_path(), *i, game.as_std_path(), id));
+}
+
+/// Unit tests: `release_game_lock` when dropped, so a test that fails before its own release still releases the install
+/// lock as it unwinds. A kept one would make every later process creation of this test binary wait for it (the test
+/// gate), then fail after 300 s.
+#[cfg(test)]
+pub(crate) struct GameLockRelease(pub(crate) Utf8PathBuf);
+#[cfg(test)]
+impl Drop for GameLockRelease {
+    fn drop(&mut self) { release_game_lock(&self.0); }
 }
 
 fn files_differ(a: &Utf8Path, b: &Utf8Path, progress: &Progress) -> bool {
@@ -362,6 +428,11 @@ pub(crate) fn runtime_unavailable(cfg: &RunConfig) -> String {
 
 /// Runs EML over `mods` (the paths `discover::resolve` chose; `entries` are its entries, updated in place).
 pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> Outcome {
+    // In this crate's unit tests a run holds the test gate (mod-loader-lua's test_gate.rs) from before RUN_LOCK: its locks
+    // (the install lock, ShroudForge's) then never wait for a process being created while it holds RUN_LOCK, which a
+    // thread that keeps an install lock may be waiting for.
+    #[cfg(test)]
+    let _gate = mod_loader_lua::test_gate::lock_hold();
     let _serial = RUN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let started = Instant::now();
     let mut out = Outcome::new(Phase::Done, entries);
@@ -395,18 +466,27 @@ pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> 
         o.ms = started.elapsed().as_secs_f64() * 1000.0;
         o
     };
+    // Kiln's interpreter has this start: its launch plan decides and kiln-eml's startup barrier runs it;
+    // kiln/state/shroudforge.json is not read
+    if let Some(kiln) = &cfg.kiln {
+        let mut out = run_kiln(cfg, kiln, mods, std::mem::take(&mut out.mods));
+        out.ms = started.elapsed().as_secs_f64() * 1000.0;
+        return out;
+    }
     // Reaching this runner means no ShroudForge writer reserved the run. Never run just the data half.
-    let why = runtime_skip_reason(cfg);
-    mods.retain(|path| {
-        let needs = crate::discover::classify(path).is_ok_and(|m| m.capabilities.iter()
-            .any(|c| matches!(c, Capability::Runtime | Capability::RuntimeRegisterDll)));
-        if needs {
-            let reason = why.clone();
-            tracing::warn!(%path, %reason, "EML package skipped whole");
-            set_state(&mut out.mods, path, "skipped", Some(reason));
-        }
-        !needs
-    });
+    {
+        let why = runtime_skip_reason(cfg);
+        mods.retain(|path| {
+            let needs = crate::discover::classify(path).is_ok_and(|m| m.capabilities.iter()
+                .any(|c| matches!(c, Capability::Runtime | Capability::RuntimeRegisterDll)));
+            if needs {
+                let reason = why.clone();
+                tracing::warn!(%path, %reason, "EML package skipped whole");
+                set_state(&mut out.mods, path, "skipped", Some(reason));
+            }
+            !needs
+        });
+    }
     let selected = match cfg.file_name.as_deref() {
         Some(name @ ("enshrouded" | "enshrouded_server")) => Some(name.to_owned()),
         Some(_) => None,
@@ -558,6 +638,57 @@ pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> 
         let _ = std::fs::remove_file(cfg.cache_dir.join("files.json"));
     }
     finish(out)
+}
+
+/// A kiln-mode start: no EML mod runs on its own. The plan decides each discovered package
+/// (`KilnMode::apply`); kiln-eml's startup barrier (`startup_seam::barrier`) waits for kiln-sfi's native terminal, runs
+/// the startup controller's startup pass over this start's witness, publishes once and grants; the state file then shows its outcome: one
+/// row per package of the pass (`source: "shroudforge"`), the unlisted contributors of a start without a startup
+/// dialect as the EML pass left them, and everything else with the plan's reason. A start whose early phase witnessed
+/// nothing (the plan could not be read, or no early step ran) runs nothing: every package is skipped with why.
+fn run_kiln(cfg: &RunConfig, kiln: &KilnMode, mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> Outcome {
+    let mut out = Outcome::new(Phase::Idle, entries);
+    let unlisted = kiln.apply(mods, &mut out.mods);
+    out.file = match cfg.file_name.as_deref() {
+        Some(name @ ("enshrouded" | "enshrouded_server")) => Some(name.to_owned()),
+        Some(_) => None,
+        None => game_file_name(&cfg.game_dir),
+    };
+    use crate::startup_seam::{self as seam, Barriered};
+    let barrier = match kiln.plan() {
+        Ok(_) => seam::barrier(&seam::BarrierPorts {
+            cache_dir: &cfg.cache_dir,
+            unlisted: &unlisted,
+            wait: seam::TERMINAL_WAIT,
+            observe: &|_| {},
+        }),
+        Err(_) => Barriered::NoStart,
+    };
+    let (plan, finished) = match (kiln.plan(), barrier) {
+        (Ok(plan), Barriered::Done(finished)) => (plan, finished),
+        (plan, barrier) => {
+            // nothing witnessed this start's game files, or the barrier stopped: nothing of the plan runs, and no unlisted
+            // contributor either
+            let why = match (plan, barrier) {
+                (Err(why), _) => format!("Kiln could not read this start's launch plan again ({why}), so no startup pass ran \
+                    this start; its data was not applied, so the game is as without the mod. Start the game again from the \
+                    Kiln launcher"),
+                (_, Barriered::Faulted(why)) => {
+                    out.phase = Phase::Failed;
+                    out.error = Some(why.clone());
+                    why
+                }
+                _ => seam::NO_START.to_owned(),
+            };
+            for e in out.mods.iter_mut().filter(|e| e.state == "pending") {
+                e.state = "skipped".into();
+                e.reason = Some(why.clone());
+            }
+            return out;
+        }
+    };
+    seam::settle_entries(&mut out, &finished, plan, &cfg.game_dir, &unlisted);
+    out
 }
 
 /// No EML mod (left): put the game data back byte for byte from EML's backup, once, when it is output kiln-eml can
@@ -904,11 +1035,13 @@ mod tests {
         let d = Utf8PathBuf::from_path_buf(std::env::temp_dir()).unwrap().join(format!("kiln-eml-idle-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join("enshrouded_server.kfc"), b"KFC").unwrap();
+        let _release = GameLockRelease(d.clone());
         let cfg = RunConfig { game_dir: d.clone(), cache_dir: d.join("cache"), patch: true, ..Default::default() };
         let o = run(&cfg, Vec::new(), Vec::new());
         assert_eq!(o.phase, Phase::Idle);
         assert_eq!(o.file.as_deref(), Some("enshrouded_server"));
         assert!(!d.join("cache").exists());
+        release_game_lock(&d);
     }
 
     #[test]
@@ -918,6 +1051,7 @@ mod tests {
         std::fs::write(d.join("enshrouded.kfc"), b"KFC patched").unwrap();
         std::fs::write(d.join("enshrouded.kfc.bak"), b"KFC vanilla").unwrap();
         std::fs::write(d.join("cache/files.json"), b"{}").unwrap();
+        let _release = GameLockRelease(d.clone());
         let cfg = RunConfig { game_dir: d.clone(), cache_dir: d.join("cache"), patch: true, ..Default::default() };
         let o = run(&cfg, Vec::new(), Vec::new());
         assert_eq!(o.phase, Phase::Idle);
@@ -925,6 +1059,7 @@ mod tests {
         assert!(!o.restored);
         assert_eq!(std::fs::read(d.join("enshrouded.kfc")).unwrap(), b"KFC patched");
         assert_eq!(std::fs::read(d.join("cache/files.json")).unwrap(), b"{}");
+        release_game_lock(&d);
     }
 
     #[test]
@@ -936,6 +1071,7 @@ mod tests {
         for name in ["enshrouded.kfc", "enshrouded.kfc.bak", "enshrouded.kfc_resources", "enshrouded.kfc_resources.bak"] {
             std::fs::write(d.join(name), vec![7u8; 3 << 20]).unwrap();
         }
+        let _release = GameLockRelease(d.clone());
         let display = std::sync::Arc::new(Display::with_window(Some(d.join("state")), None));
         let cfg = RunConfig { game_dir: d.clone(), cache_dir: d.join("cache"), patch: true, progress: Some(display), ..Default::default() };
         let o = run(&cfg, Vec::new(), Vec::new());
@@ -958,6 +1094,7 @@ mod tests {
         assert!(files_differ(&a, &b, &progress));
         std::fs::write(&b, b"short").unwrap();
         assert!(files_differ(&a, &b, &progress), "another length");
+        release_game_lock(&d);
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -970,6 +1107,7 @@ mod tests {
             path: path.clone(), source: "test".into(), enabled: true,
         }).collect::<Vec<_>>();
         let (mods, entries) = crate::discover::resolve(&candidates);
+        let _release = GameLockRelease(d.clone());
         let cfg = RunConfig { game_dir: d.clone(), cache_dir: d.join("cache"), patch: true, ..Default::default() };
         let out = run(&cfg, mods, entries);
         assert_eq!(out.phase, Phase::Failed);
@@ -987,14 +1125,6 @@ mod tests {
         std::fs::remove_dir_all(d).unwrap();
     }
 
-    /// run() keeps the install lock until the process exits, as the game's DLL must (GAME_LOCKS). A test that removes
-    /// its game folder afterwards drops that lock first: Windows deletes a file that is still open only when its last
-    /// handle closes (always under Wine), so the folder would still hold .kiln-eml.lock (os error 145).
-    fn release_game_lock(game: &Utf8Path) {
-        let game = game.canonicalize_utf8().unwrap();
-        GAME_LOCKS.lock().unwrap().retain(|(p, _)| p != &game);
-    }
-
     #[test]
     fn fails_without_game_files() {
         let d = Utf8PathBuf::from_path_buf(std::env::temp_dir()).unwrap().join(format!("kiln-eml-nogame-{}", std::process::id()));
@@ -1002,18 +1132,28 @@ mod tests {
         let o = run(&RunConfig { game_dir: d.clone(), cache_dir: d.join("c"), ..Default::default() }, Vec::new(), Vec::new());
         assert_eq!(o.phase, Phase::Failed);
     }
+    /// The second process is created before this one takes the lock, and takes it only once told to: a process created
+    /// while the lock is held would share its file description (the test gate never creates one then), so the lock it
+    /// finds held is one it never had.
     #[test]
     fn holds_install_lock_against_a_second_process() {
+        use std::io::{Read, Write};
         if let Ok(path) = std::env::var("KILN_EML_LOCK_TEST_CHILD") {
+            let mut go = [0u8];
+            std::io::stdin().read_exact(&mut go).unwrap();
             assert!(lock_game(Utf8Path::new(&path)).is_err());
             return;
         }
         let d = Utf8PathBuf::from_path_buf(std::env::temp_dir()).unwrap().join(format!("kiln-eml-lock-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
-        lock_game(&d).unwrap();
-        let status = std::process::Command::new(std::env::current_exe().unwrap())
+        let mut child = mod_loader_lua::test_gate::spawn(std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "runner::tests::holds_install_lock_against_a_second_process"])
-            .env("KILN_EML_LOCK_TEST_CHILD", d.as_str()).status().unwrap();
+            .env("KILN_EML_LOCK_TEST_CHILD", d.as_str()).stdin(std::process::Stdio::piped())).unwrap();
+        let _release = GameLockRelease(d.clone());
+        lock_game(&d).unwrap();
+        child.stdin.take().unwrap().write_all(b"g").unwrap();
+        let status = child.wait().unwrap();
+        release_game_lock(&d);
         assert!(status.success());
         let _ = std::fs::remove_dir_all(d);
     }
@@ -1027,13 +1167,98 @@ mod tests {
         }
         let d = Utf8PathBuf::from_path_buf(std::env::temp_dir()).unwrap().join(format!("kiln-eml-exit-lock-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
-        let status = std::process::Command::new(std::env::current_exe().unwrap())
+        let status = mod_loader_lua::test_gate::status(std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "runner::tests::an_exited_process_leaves_no_stale_install_lock"])
-            .env(CHILD, d.as_str()).status().unwrap();
+            .env(CHILD, d.as_str())).unwrap();
         assert!(status.success());
         assert!(d.join(".kiln-eml.lock").exists());
+        let _release = GameLockRelease(d.clone());
         lock_game(&d).unwrap();
+        release_game_lock(&d);
         let _ = std::fs::remove_dir_all(d);
+    }
+
+    //
+    /// One install by any of its names: a game started from it by another spelling (the Greek letter's other case, the
+    /// 8.3 name, Z: under Wine or a local share on Windows) is seen running, and its install lock, once held, is held
+    /// under every name (a second lock_game would otherwise lock the same file twice and fail).
+    #[cfg(windows)]
+    #[test]
+    fn the_same_install_by_another_name_is_the_same_game() {
+        use std::io::{Read, Write};
+        use crate::same_path::windows_names;
+        const CHILD: &str = "KILN_EML_OTHER_NAME_GAME";
+        if std::env::var(CHILD).is_ok() {
+            let mut go = [0u8];
+            let _ = std::io::stdin().read_exact(&mut go);
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("kiln-eml-names-{}", std::process::id()));
+        // a long folder name (it has an 8.3 name) with a Greek letter with a subscript iota: ᾳ U+1FB3 and ᾼ U+1FBC are one
+        // letter to NTFS and Wine
+        let game = root.join("Enshrouded \u{1FB3} game");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::copy(std::env::current_exe().unwrap(), game.join("enshrouded.exe")).unwrap();
+        let canonical = Utf8PathBuf::from_path_buf(std::fs::canonicalize(&game).unwrap()).unwrap();
+        let mut names = vec![(root.join("ENSHROUDED \u{1FBC} GAME"), "another case")];
+        match windows_names::short(&game) {
+            Some(short) => names.push((short, "the 8.3 name")),
+            None => eprintln!("no 8.3 name for {} on this volume", game.display()),
+        }
+        match windows_names::other_path(&game) {
+            Some(other) => names.push((other, "another drive letter or a share")),
+            None => eprintln!("no other path to {} here", game.display()),
+        }
+        assert!(!other_game_running(&canonical), "nothing runs from the install yet");
+        let mut missed = Vec::new();
+        for (name, why) in &names {
+            assert!(std::fs::metadata(name.join("enshrouded.exe")).is_ok(), "{} is there ({why})", name.display());
+            let mut child = mod_loader_lua::test_gate::spawn(std::process::Command::new(name.join("enshrouded.exe"))
+                .args(["--exact", "runner::tests::the_same_install_by_another_name_is_the_same_game"])
+                .env(CHILD, "1").stdin(std::process::Stdio::piped())).unwrap();
+            let seen = other_game_running(&canonical);
+            child.stdin.take().unwrap().write_all(b"g").unwrap();
+            assert!(child.wait().unwrap().success());
+            if !seen { missed.push(format!("{why} ({})", name.display())); }
+        }
+        assert!(missed.is_empty(), "a game started by another name of the install was not seen running: {missed:?}");
+        let _release = GameLockRelease(canonical.clone());
+        lock_game(&canonical).unwrap();
+        for (name, why) in &names {
+            let name = Utf8PathBuf::from_path_buf(name.clone()).unwrap();
+            if let Err(e) = lock_game(&name) { missed.push(format!("{why} ({name}): {e}")); }
+        }
+        release_game_lock(&canonical);
+        assert!(missed.is_empty(), "the held install was not known by another name: {missed:?}");
+        let tag = format!("kiln-eml-names-{}", std::process::id());
+        assert!(!GAME_LOCKS.lock().unwrap().iter().any(|(p, _, _)| p.as_str().contains(&tag)), "released under its own name");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Two installs whose names the name fold joins but NTFS and Wine keep apart (the Kelvin sign and `K`: the fold is
+    /// coarser than the system's table) are two installs: holding the lock of one never counts as holding the other,
+    /// whose own lock is taken.
+    #[cfg(windows)]
+    #[test]
+    fn two_installs_the_fold_joins_are_two_locks() {
+        let root = std::env::temp_dir().join(format!("kiln-eml-kelvin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let names = [root.join("game K"), root.join("game \u{212A}")];
+        for d in &names { std::fs::create_dir_all(d).unwrap(); }
+        let [a, b] = names.map(|d| Utf8PathBuf::from_path_buf(std::fs::canonicalize(d).unwrap()).unwrap());
+        let ids = [&a, &b].map(|d| crate::same_path::identity(d.as_std_path()).unwrap());
+        assert!(ids[0].is_some() && ids[0] != ids[1], "two folders to this system: {ids:?}");
+        assert!(crate::same_path::names_equal(a.as_std_path(), b.as_std_path()), "one name to the fold");
+        let (_release_a, _release_b) = (GameLockRelease(a.clone()), GameLockRelease(b.clone()));
+        lock_game(&a).unwrap();
+        lock_game(&b).unwrap();
+        assert!(b.join(".kiln-eml.lock").is_file(), "the second install's own lock was taken");
+        let held = GAME_LOCKS.lock().unwrap().iter().filter(|(p, _, _)| *p == a || *p == b).count();
+        assert_eq!(held, 2, "each install holds its own lock");
+        release_game_lock(&a);
+        assert!(GAME_LOCKS.lock().unwrap().iter().any(|(p, _, _)| *p == b), "releasing one keeps the other");
+        release_game_lock(&b);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -1041,8 +1266,10 @@ mod tests {
         let dir = Utf8PathBuf::from_path_buf(std::env::temp_dir()).unwrap().join(format!("kiln-eml-side-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         for name in ["enshrouded", "enshrouded_server"] { std::fs::write(dir.join(format!("{name}.kfc")), "fixture").unwrap(); }
+        let _release = GameLockRelease(dir.clone());
         let config = RunConfig { game_dir: dir.clone(), file_name: Some("enshrouded_server".into()), ..Default::default() };
         assert_eq!(run(&config, Vec::new(), Vec::new()).file.as_deref(), Some("enshrouded_server"));
+        release_game_lock(&dir);
         let _ = std::fs::remove_dir_all(dir);
     }
 

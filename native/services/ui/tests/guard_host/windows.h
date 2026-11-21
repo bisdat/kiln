@@ -41,10 +41,11 @@ struct Timer {
     bool alive;
 };
 inline std::vector<Timer> timers;  // indices + 1 are the handles
-// Runs every live timer that was set to `due` ms (a one-shot one once), as the timer queue would after that time.
+// Runs every live timer that was set to `due` ms (a one-shot one once), as the timer queue would after that time. A
+// timer a callback sets meanwhile is not among them: it is due that much later.
 inline unsigned fire(DWORD due) {
     unsigned n = 0;
-    for (size_t i = 0; i < timers.size(); ++i) {
+    for (size_t i = 0, count = timers.size(); i < count; ++i) {
         if (!timers[i].alive || timers[i].due != due) continue;
         if (!timers[i].period) timers[i].alive = false;
         ++n;

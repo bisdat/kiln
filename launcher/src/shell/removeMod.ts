@@ -1,10 +1,13 @@
 // Removing a mod from the main list (desktop and Deck): out of the loaded profile, then its files out of the Library
 // (every version, or the one the row's menu named). One plain confirmation; "Type a mod's name to remove it" (Settings)
 // adds the typed word. library_remove goes past exactly the users the confirmation named (library_users), so another
-// profile that lists the mod is named there and shows it as missing afterwards.
+// profile that lists the mod is named there and shows it as missing afterwards. "Remove its settings too" (unchecked by
+// default, owner 2026-11-20) takes its settings out with the last version (library_remove's `settings`;
+// kiln_manage::mod_settings: a copy goes into the launcher's backups folder first); unchecked, they stay and come
+// back when the mod is added again.
 import { useQueries, useQuery, type QueryClient } from "@tanstack/react-query";
 import * as api from "../api/commands";
-import type { LibraryRef, ModKind, Profile, ProfileSummary } from "../api/commands";
+import type { LibraryRef, ModKind, Profile, ProfileSummary, SettingsRemoval } from "../api/commands";
 import { useProfiles } from "../api/hooks";
 import type { ModRow } from "./mods";
 import { forgetSelected } from "./selection";
@@ -21,6 +24,17 @@ export function refsOf(target: RemoveTarget | null): LibraryRef[] {
   const lib = target?.row.lib;
   if (!target || !lib) return [];
   return lib.versions.filter((v) => target.version === null || v.version === target.version).map((v) => ({ kind: lib.kind, id: lib.id, version: v.version, hash: v.hash }));
+}
+
+/** The removal takes the whole mod out of the Library (not one version of several): only then can its settings go. */
+export function wholeMod(target: RemoveTarget | null): boolean {
+  if (!target || target.row.found || !target.row.kind) return false;
+  return target.version === null || (target.row.lib?.versions.length ?? 0) <= 1;
+}
+
+/** The settings removal's notes (what stayed, why), or null when it took everything it found. */
+export function settingsNotes(s: SettingsRemoval | null | undefined): string | null {
+  return s?.notes.length ? s.notes.join(" ") : null;
 }
 
 /** "work" or "work (active in Enshrouded)" from library_users, with the profile's name. */
@@ -55,20 +69,32 @@ export function useRemoveCheck(target: RemoveTarget | null, loadedId: string | n
 }
 
 /** Takes the mod out of the loaded profile (`dropFromProfile` resolves once that is saved), then removes the versions,
- *  each past the users the confirmation saw. Throws the first failure (the caller toasts it). */
+ *  each past the users the confirmation saw; with `settings` (and the whole mod going, [`wholeMod`]) its settings go
+ *  with the last one. Throws the first failure (the caller toasts it). -> what the settings removal did, null without. */
 export async function removeMod(qc: QueryClient, target: RemoveTarget, shown: { ref: LibraryRef; users: string[] }[] | undefined,
-  dropFromProfile: () => Promise<boolean>): Promise<void> {
+  dropFromProfile: () => Promise<boolean>, settings = false): Promise<SettingsRemoval | null> {
+  const withSettings = settings && wholeMod(target);
+  let removed: SettingsRemoval | null = null;
   const whole = target.version === null || (target.row.entry?.version === target.version);
   if (target.row.entry && whole) {
     if (!(await dropFromProfile())) throw { code: "conflict", message: t("shell.removeMod.notSaved") } satisfies api.KilnError;
   }
   try {
-    for (const r of refsOf(target)) await api.libraryRemove(r, false, shown?.find((s) => s.ref.version === r.version)?.users ?? []);
+    const refs = refsOf(target);
+    for (const r of refs) {
+      removed = (await api.libraryRemove(r, false, shown?.find((s) => s.ref.version === r.version)?.users ?? [], withSettings)) ?? removed;
+    }
+    // its files were gone from the Library already: only its settings are left to take
+    if (withSettings && !refs.length && target.row.kind) {
+      removed = await api.libraryRemoveSettings(target.row.kind, target.row.id)
+        .catch((e) => ({ removed: [], backup: null, notes: [api.toKilnError(e).message] }));
+    }
     if (target.version === null) forgetSelected([target.row.key]); // the whole mod is gone: so is its place in a selection
   } finally {
     void qc.invalidateQueries({ queryKey: ["library_list"] });
     void qc.invalidateQueries({ queryKey: ["found_scan"] });
   }
+  return removed;
 }
 
 // ---- several at once (the list's selection) ----
@@ -121,22 +147,36 @@ export function useRemoveMany(rows: ModRow[], loadedId: string | null, enabled: 
   return { users, others, ready, error };
 }
 
-export interface ManyResult { removed: string[]; left: { name: string; why: string }[] }
+export interface ManyResult {
+  removed: string[];
+  left: { name: string; why: string }[];
+  /** With "Remove their settings too": what the settings removals left, one line per mod. */
+  settingsNotes: string[];
+}
 
 /** Takes every row out of the loaded profile in one save (`dropAll` resolves once it is saved; nothing is removed when
  *  it fails), then removes each row's versions past exactly the users the confirmation showed (library_remove per
- *  version: library_remove_many takes only a force flag). A row whose removal fails stays, with why; the rest go on. */
-export async function removeMany(qc: QueryClient, rows: ModRow[], shown: ManyCheck["users"], dropAll: () => Promise<boolean>): Promise<ManyResult> {
-  const out: ManyResult = { removed: [], left: [] };
+ *  version: library_remove_many takes only a force flag). A row whose removal fails stays, with why; the rest go on.
+ *  `settings`: each mod's settings go with its last version (or alone, when its files were gone already). */
+export async function removeMany(qc: QueryClient, rows: ModRow[], shown: ManyCheck["users"], dropAll: () => Promise<boolean>,
+  settings = false): Promise<ManyResult> {
+  const out: ManyResult = { removed: [], left: [], settingsNotes: [] };
   if (rows.some((r) => r.entry) && !(await dropAll())) {
     throw { code: "conflict", message: t("shell.removeMod.notSaved") } satisfies api.KilnError;
   }
   try {
     for (const r of rows) {
       try {
-        for (const ref of refsOf({ row: r, version: null })) {
-          await api.libraryRemove(ref, false, shown.get(r.key)?.find((s) => s.ref.version === ref.version)?.users ?? []);
+        const refs = refsOf({ row: r, version: null });
+        let s: SettingsRemoval | null = null;
+        for (const ref of refs) {
+          s = (await api.libraryRemove(ref, false, shown.get(r.key)?.find((x) => x.ref.version === ref.version)?.users ?? [], settings)) ?? s;
         }
+        if (settings && !refs.length && r.kind) {
+          s = await api.libraryRemoveSettings(r.kind, r.id).catch((e) => ({ removed: [], backup: null, notes: [api.toKilnError(e).message] }));
+        }
+        const notes = settingsNotes(s);
+        if (notes) out.settingsNotes.push(`${r.name}: ${notes}`);
         out.removed.push(r.name);
         forgetSelected([r.key]);
       } catch (e) {

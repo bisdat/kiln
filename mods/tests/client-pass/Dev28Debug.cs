@@ -31,7 +31,7 @@ public sealed partial class ClientPassMod
         "stopped: the same game process keeps rendering and takes input (walk, open the inventory). " +
         "6. Leave a breakpoint hit for 10 s: after maxPauseMs (5000) the editor shows a warning that Kiln continued the " +
         "game, and the game runs on. " +
-        "7. Reload the mod while attached (kiln reload debug-counter): refused (debugger_attached). Detach, reload, attach " +
+        "7. Reload the mod while attached (kiln reload debug-counter --server <the game folder>): refused (debugger_attached). Detach, reload, attach " +
         "again: the breakpoint stops again. " +
         "8. Hosted (your own world) and joined (a server) are two cases: do 3-6 in each. In the joined case also hold a " +
         "breakpoint 3 s and then 30 s and write down whether the connection held and how long; a dropped connection is a " +
