@@ -247,6 +247,9 @@ internal sealed class Registry
     /// <summary>Changes whenever a definition is activated, changed or retired (the stream sends a new full).</summary>
     public int Version => Volatile.Read(ref _version);
 
+    /// <summary>Where refusals that name two owners are reported (Kiln's log in the service).</summary>
+    public Action<string>? Report { get; set; }
+
     private static bool Stale(object? token) => token is ModContext m && !m.Alive;
 
     /// <summary>Retires what tokens of an earlier load generation registered (their mod unloaded, a reload).</summary>

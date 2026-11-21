@@ -92,4 +92,42 @@ public sealed class ReviewTests
         Assert.Equal(ModValueReasons.StaleRevision, r.Ledger.Change("fish", a, k, ChangeOp.Add, 1, before.Version, 0).Reason);
         Assert.True(r.Ledger.Change("fish", a, k, ChangeOp.Add, 1, after.Value.Version, 0).Ok);
     }
+
+    // Resume ruling (DECISIONS.md): an id belongs to the owner of its namespace; a second owner's description of it is
+    // refused for that id and reported naming both.
+    [Fact]
+    public void ASecondOwnersDescriptionOfAnIdIsRefusedAndReported()
+    {
+        var reg = new Registry();
+        var reports = new List<string>();
+        reg.Report = reports.Add;
+        var first = 11UL;   // native owner handles, boxed
+        var second = 12UL;
+        var d = Def.FromOptions("native.0123456789abcdef0123456789abcdef", "coins", new ModValueOptions(ModValueKind.Currency, "Coins"));
+        Assert.Null(reg.Describe(d, first, out _));
+        Assert.Equal(ModValueReasons.DefinitionConflict, reg.Describe(d, second, out _));
+        Assert.Equal(ModValueReasons.DefinitionConflict, reg.Activate(d, second, out _));
+        var report = Assert.Single(reports.Distinct());
+        Assert.Contains("11", report);
+        Assert.Contains("12", report);
+        Assert.Contains("native.0123456789abcdef0123456789abcdef:coins", report);
+        // the first owner's own activation still works, and its retire frees the id for the next owner
+        Assert.Null(reg.Activate(d, first, out var activated));
+        Assert.True(activated);
+        reg.Retire(d.Owner, first);
+        Assert.Null(reg.Describe(d, second, out _));
+        Assert.Null(reg.Activate(d, second, out _));
+        Assert.NotNull(reg.Active(d.Key));
+    }
+
+    [Fact]
+    public void KilnsOwnReadOfAModsFilesAndTheModsOwnCodeShareAnId()
+    {
+        var reg = new Registry();
+        var d = Def.FromOptions("fish", "coins", new ModValueOptions(ModValueKind.Currency, "Coins"));
+        var generation = new object();
+        Assert.Null(reg.Describe(d, null, out _));           // mod-values/*.json read without a live context
+        Assert.Null(reg.Activate(d, generation, out _));     // the mod's own Define of the same value
+        Assert.Null(reg.Describe(d, generation, out _));
+    }
 }
