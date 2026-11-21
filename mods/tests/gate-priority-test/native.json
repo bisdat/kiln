@@ -5,7 +5,7 @@
   "format": 1,
   "id": "gate-priority-test",
   "name": "Gate priority test",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "side": "both",
   "dlls": ["gate-priority-test.dll"],
   "phase": "boot",

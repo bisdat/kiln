@@ -136,7 +136,9 @@ A service name that starts with `kiln.internal.` is Kiln-internal:
 
 One table is the core's own and is named for one consumer: `kiln.internal.tasks.host`, the managed host's task lease
 table ([tasks.md](tasks.md)). Nobody may publish that name, and only the `KilnApi` the core hands to the managed host
-resolves it.
+resolves it. Two more are the core's own and resolve through the services' `KilnApi` only, and nobody may publish them
+either: `kiln.internal.launch` ([launch.md](launch.md)) and `kiln.internal.hooks`, the code ranges Kiln's services
+protect for their engine calls ([hooks.md](hooks.md#protected-code-ranges-kilninternalhooks-kiln-internal)).
 
 This is a reach rule, not a sandbox: it keeps tables that hand out game addresses or Kiln's own lock primitives away from
 plugins and from stale or foreign service DLLs. It is no defence against arbitrary native code already in the process,

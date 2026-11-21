@@ -24,6 +24,7 @@
 
 #include "../ecs_lookup.h"
 #include "../ecs_writes.h"
+#include "../../../core/src/launch_internal.h"
 
 std::atomic<long> g_allocations_in_hold{0};
 void* operator new(std::size_t n) {
@@ -1184,6 +1185,96 @@ Timing hold_time(Env& v, const std::string& short_name, uint32_t id, uint32_t si
     return t;
 }
 
+// The dialect owner: kiln.engine booted again with the core's kiln.internal.launch, designating kOwner after
+// kiln.engine's init (as the core does when it loads the plugin). kiln.world's compare-exchange still passes KilnMod
+// (ecs_writes.cpp is unchanged); the gate alone admits that owner without the busy latch.
+std::atomic<KilnOwner> g_dialect{0};
+KilnOwner KILN_CALL dialect_owner_fn() { return g_dialect.load(std::memory_order_acquire); }
+const KilnLaunchInternalApi g_launch = {{sizeof(KilnLaunchInternalApi), KILN_LAUNCH_INTERNAL_VERSION}, &dialect_owner_fn};
+std::atomic<int> g_holder_retries{0};
+void dialect_cases(Env& v, KilnApi& api) {
+    const std::string k = std::string(v.p.id) + ": dialect owner: ";
+    using kiln::engine::Reason;
+    kiln::engine::reset_for_tests();
+    g_tables.clear();
+    g_tables[KILN_LAUNCH_INTERNAL_SERVICE] = &g_launch;
+    g_dialect = 0;
+    KilnPluginInfo info{};
+    info.size = sizeof info;
+    check(kiln_plugin_main(&api, 7, &info) == KILN_OK, k + "kiln.engine booted with kiln.internal.launch");
+    g_dialect = kOwner;
+    const uint32_t counter = H(v.w, "Counter");
+    const uintptr_t at = component_address(v.w, 7000, "Counter");
+    put<uint64_t>(at, 50);
+    KilnObjectRef r = open(v, kOwner, 7000), ro = open(v, kOther, 7000);
+    next_step(v);
+    // a gate-busy CAS for both owners (a frame holds the Scene word), then a CAS right after it in the same step
+    *fake::word(v.e.scene_word()) = 1;
+    Call b = cx(v.wr, kOwner, r, counter, le64(50), le64(51));
+    Call bo = cx(v.wr, kOther, ro, counter, le64(50), le64(51));
+    *fake::word(v.e.scene_word()) = 0;
+    check(b.rc == KILN_ECS_ERR_BUSY && b.reply.why_code == KILN_ECS_WRITE_WHY_GATE &&
+              b.reply.engine_reason == static_cast<uint32_t>(Reason::EcsSceneFrameBusy) && bo.rc == KILN_ECS_ERR_BUSY &&
+              bo.reply.engine_reason == static_cast<uint32_t>(Reason::EcsSceneFrameBusy) && u64_at(at) == 50,
+          k + "a frame holds the Scene word: both owners busy");
+    Call a = cx(v.wr, kOwner, r, counter, le64(50), le64(51));
+    check(a.rc == KILN_OK && u64_at(at) == 51 && a.reply.step == b.reply.step,
+          k + "a CAS by the designated owner right after a gate-busy CAS in the same step is not latched (" +
+              std::to_string(a.rc) + " reason " + std::to_string(a.reply.engine_reason) + ")");
+    Call l = cx(v.wr, kOther, ro, counter, le64(51), le64(52));
+    check(l.rc == KILN_ECS_ERR_BUSY && l.reply.engine_reason == static_cast<uint32_t>(Reason::KilnBusyLatched) &&
+              l.reply.step == b.reply.step && u64_at(at) == 51,
+          k + "another owner in the same step gets kiln-gate-busy-this-step");
+    // a second Kiln holder: the designated owner's CAS started inside another owner's hold is retried (128 attempts),
+    // refused kiln-gate-busy, and not latched
+    next_step(v);
+    Call inner;
+    g_point = [&](HoldPoint p) {
+        if (p != HoldPoint::AfterLookup) return;
+        g_point = nullptr;
+        g_holder_retries = 0;
+        kiln::engine::g_gate_test_point = +[](kiln::engine::GatePoint gp) {
+            if (gp == kiln::engine::GatePoint::HolderRetry) ++g_holder_retries;
+        };
+        inner = cx(v.wr, kOwner, r, counter, le64(51), le64(53));
+        kiln::engine::g_gate_test_point = nullptr;
+    };
+    Call outer = cx(v.wr, kOther, ro, counter, le64(51), le64(52));
+    g_point = nullptr;
+    check(inner.rc == KILN_ECS_ERR_BUSY && inner.reply.engine_reason == static_cast<uint32_t>(Reason::KilnHolderBusy) &&
+              g_holder_retries.load() == 127 && outer.rc == KILN_OK && u64_at(at) == 52,
+          k + "inside another owner's hold: retried (" + std::to_string(g_holder_retries.load()) +
+              " retries), then kiln-gate-busy");
+    Call again = cx(v.wr, kOwner, r, counter, le64(52), le64(53));
+    check(again.rc == KILN_OK && u64_at(at) == 53 && again.reply.step == inner.reply.step,
+          k + "its next CAS in the same step is admitted");
+    // the other way round: the other owner inside the designated owner's hold gets no retry and is latched
+    next_step(v);
+    Call inner2;
+    g_point = [&](HoldPoint p) {
+        if (p != HoldPoint::AfterLookup) return;
+        g_point = nullptr;
+        g_holder_retries = 0;
+        kiln::engine::g_gate_test_point = +[](kiln::engine::GatePoint gp) {
+            if (gp == kiln::engine::GatePoint::HolderRetry) ++g_holder_retries;
+        };
+        inner2 = cx(v.wr, kOther, ro, counter, le64(53), le64(55));
+        kiln::engine::g_gate_test_point = nullptr;
+    };
+    Call outer2 = cx(v.wr, kOwner, r, counter, le64(53), le64(54));
+    g_point = nullptr;
+    check(inner2.rc == KILN_ECS_ERR_BUSY && inner2.reply.engine_reason == static_cast<uint32_t>(Reason::KilnHolderBusy) &&
+              g_holder_retries.load() == 0 && outer2.rc == KILN_OK && u64_at(at) == 54,
+          k + "another owner inside the designated owner's hold: kiln-gate-busy, no retry");
+    Call later = cx(v.wr, kOther, ro, counter, le64(54), le64(55));
+    check(later.rc == KILN_ECS_ERR_BUSY && later.reply.engine_reason == static_cast<uint32_t>(Reason::KilnBusyLatched) &&
+              u64_at(at) == 54,
+          k + "...and latched for the rest of the step");
+    v.wr.drain();
+    put<uint64_t>(at, 0);
+    g_dialect = 0;
+}
+
 uint32_t g_largest[2] = {0, 0};  // the largest writable component of the server and the client build (sigdb)
 
 void exact(const Profile& p) {
@@ -1275,6 +1366,7 @@ void exact(const Profile& p) {
     // component, and its readback. The count does not grow with the component.
     check(a.copies == b.copies && a.bytes - largest * 2 == b.bytes - 65535u * 2,
           std::string(p.id) + ": the hold's copies do not depend on the component's size");
+    dialect_cases(v, api);
     kiln::engine::mem::test_image = 0;
     kiln::engine::gate_reset_for_tests();
 }

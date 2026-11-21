@@ -1,0 +1,164 @@
+{
+  "source": "Hand-derived from ShroudForge 1.7.9 d8a394bc: modules/hotkeys/parse_hotkey.rs:42-97 (Chord::parts, Chord::label, Hotkey::label, chords sorted keyboard before mouse), observe_keyboard.rs:132-155 (key_label: the layout name, else SDL:<n>; mouse_label), sdl_keyboard.c:151-161 (mouse names). The same code in 1.8.0 38ef448d. 'names' stands for the layout table (Windows GetKeyNameTextW in the fork's host feed).",
+  "cases": [
+    {
+      "binding": "SDL:66",
+      "names": {
+        "66": "F9"
+      },
+      "label": "F9",
+      "why": "SF's own host test: key_label(66) == F9"
+    },
+    {
+      "binding": "Ctrl+SDL:66",
+      "names": {
+        "66": "F9"
+      },
+      "label": "Ctrl+F9"
+    },
+    {
+      "binding": "Ctrl+Alt+Shift+Meta+SDL:4",
+      "names": {
+        "4": "A"
+      },
+      "label": "Ctrl+Alt+Shift+Meta+A",
+      "why": "modifier order Ctrl, Alt, Shift, Meta"
+    },
+    {
+      "binding": "SDL:224",
+      "names": {
+        "224": "Ctrl"
+      },
+      "label": "Ctrl",
+      "why": "a modifier key alone: its own group is not written"
+    },
+    {
+      "binding": "Shift+SDL:228",
+      "names": {
+        "228": "Right Ctrl"
+      },
+      "label": "Shift+Right Ctrl"
+    },
+    {
+      "binding": "SDL:66|Mouse:4",
+      "names": {
+        "66": "F9"
+      },
+      "label": "F9 / Mouse X1",
+      "why": "keyboard chord, then mouse chord, joined by ' / '"
+    },
+    {
+      "binding": "Alt+SDL:58|Shift+Mouse:5",
+      "names": {
+        "58": "F1"
+      },
+      "label": "Alt+F1 / Shift+Mouse X2"
+    },
+    {
+      "binding": "Mouse:1",
+      "names": {},
+      "label": "Mouse Left"
+    },
+    {
+      "binding": "Mouse:2",
+      "names": {},
+      "label": "Mouse Middle"
+    },
+    {
+      "binding": "Mouse:3",
+      "names": {},
+      "label": "Mouse Right"
+    },
+    {
+      "binding": "Mouse:4",
+      "names": {},
+      "label": "Mouse X1"
+    },
+    {
+      "binding": "Mouse:5",
+      "names": {},
+      "label": "Mouse X2"
+    },
+    {
+      "binding": "Mouse:6",
+      "names": {},
+      "label": "Mouse 6",
+      "why": "no SDL name: format Mouse {n}"
+    },
+    {
+      "binding": "Ctrl+Mouse:32",
+      "names": {},
+      "label": "Ctrl+Mouse 32"
+    },
+    {
+      "binding": "SDL:300",
+      "names": {},
+      "label": "SDL:300",
+      "why": "no name in the table: SDL:<n>"
+    },
+    {
+      "binding": "SDL:57",
+      "names": {
+        "57": ""
+      },
+      "label": "SDL:57",
+      "why": "an empty name counts as none"
+    },
+    {
+      "binding": "Meta+SDL:44",
+      "names": {
+        "44": "Leertaste"
+      },
+      "label": "Meta+Leertaste",
+      "why": "the layout's own name, whatever its language"
+    },
+    {
+      "binding": "SDL:511",
+      "names": {},
+      "label": "SDL:511",
+      "why": "the highest valid scancode"
+    },
+    {
+      "binding": "",
+      "names": {},
+      "label": null,
+      "why": "no binding: keybind_label gives nil"
+    }
+  ],
+  "invalid": [
+    {
+      "binding": "Ctrl+SDL:224",
+      "why": "a modifier key's own group is not canonical"
+    },
+    {
+      "binding": "Shift+Ctrl+SDL:4",
+      "why": "modifiers out of order"
+    },
+    {
+      "binding": "Mouse:4|SDL:66",
+      "why": "mouse before keyboard"
+    },
+    {
+      "binding": "SDL:0"
+    },
+    {
+      "binding": "SDL:512"
+    },
+    {
+      "binding": "Mouse:0"
+    },
+    {
+      "binding": "Mouse:33"
+    },
+    {
+      "binding": "SDL:4|SDL:5",
+      "why": "two keyboard chords"
+    },
+    {
+      "binding": "Hyper+SDL:4"
+    },
+    {
+      "binding": "F9"
+    }
+  ]
+}

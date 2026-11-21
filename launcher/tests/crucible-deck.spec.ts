@@ -1,6 +1,6 @@
 // Crucible on the Deck (src/crucible/DeckCrucible.tsx; DESIGN 2) at 1280×800 in mock mode, driven by the pad: Share
-// to Crucible on Home (one press: the upload, then the link's QR code and the big code), Enter a code (Open), the
-// preview with focus on Install and play, the trust row, and the install.
+// to Crucible on Home (the first share's confirm, then the upload, then the link's QR code and the big code), Enter a
+// code (Open), the preview with focus on Install and play, its check line, the trust row, and the install.
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 
@@ -28,9 +28,17 @@ async function openDeck(page: Page, url: string) {
   await expect.poll(() => focused(page)).toBe("mouth");
 }
 
-test("Share to Crucible: one press, then the QR code and the big code", async ({ page }) => {
+test("Share to Crucible: the confirm, then the QR code and the big code", async ({ page }) => {
   await openDeck(page, "/?deck=steamdeck&discord=in#/");
   await focusOn(page, "crucible-share");
+  await pad(page, "a");
+  const confirm = page.getByTestId("deck-crucible-confirm");
+  await expect(confirm).toContainText("Goes up: the mod list");
+  await expect(confirm).toContainText("Never sent: your saves, worlds, characters or any other personal file.");
+  await shot(page, "deck-share-confirm");
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => (window as unknown as { __kilnCrucibleMock: { requests: () => { cmd: string }[] } }).__kilnCrucibleMock.requests().filter((r) => r.cmd === "crucible_share").length)).toBe(0);
+  await focusOn(page, "crucible-share-confirm");
   await pad(page, "a");
   await expect(page.getByTestId("deck-crucible-uploading")).toBeVisible();
   await expect(page.getByTestId("deck-crucible-code")).toHaveText("H7QK-3MZP", { timeout: 15_000 });
@@ -44,7 +52,9 @@ test("Share signed out: the sign-in comes first", async ({ page }) => {
   await openDeck(page, "/?deck=steamdeck#/");
   await focusOn(page, "crucible-share");
   await pad(page, "a");
-  await expect(page.getByTestId("deck-crucible-signin")).toHaveText("Sign in with Discord to share. Your friends don't need to.");
+  await expect(page.getByTestId("crucible-share-signin-first")).toHaveText("Sign in with Discord to share. Your friends don't need to.");
+  await focusOn(page, "crucible-share-confirm");
+  await expect(page.locator('[data-deck-id="crucible-share-confirm"]')).toHaveText("Sign in and share");
   await pad(page, "a");
   await expect(page.getByTestId("deck-qr")).toBeVisible();
 });
@@ -59,6 +69,7 @@ test("Enter a code: the preview with focus on Install and play, trust, install",
   await expect(input).toHaveValue("K4TW-9XRB");
   await input.press("Enter");
   await expect(page.getByTestId("deck-crucible-preview")).toContainText("by Cinderhawk");
+  await expect(page.getByTestId("deck-crucible-checks")).toHaveText("Checks: passed");
   await expect.poll(() => focused(page)).toBe("crucible-install");
   await expect(page.getByTestId("deck-crucible-warning")).toContainText("This pack contains mods, including code, from other people.");
   await shot(page, "deck-preview");
@@ -69,7 +80,7 @@ test("Enter a code: the preview with focus on Install and play, trust, install",
   await pad(page, "a");
   await focusOn(page, "crucible-install");
   await pad(page, "a");
-  await expect(page.locator('[data-deck-dialog="crucible-done"]')).toContainText("Cinder Trails is installed", { timeout: 15_000 });
+  await expect(page.locator('[data-deck-dialog="crucible-done"]')).toContainText("Cinder Trails (Cinderhawk's pack) is installed", { timeout: 15_000 });
   await shot(page, "deck-installed");
   await focusOn(page, "crucible-undo");
   await pad(page, "a");

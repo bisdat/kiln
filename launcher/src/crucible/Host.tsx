@@ -9,7 +9,8 @@ import { useCommunityUi, useShown } from "../community/state";
 import { PreviewModal } from "./Preview";
 import { startShare } from "./Share";
 import { UpdateModal } from "./Update";
-import { crk, useCrucibleOn, useCrucibleStatus, useCrucibleUi, useShareRun, useStatusFollowsSignIn } from "./state";
+import { resumeTarget } from "./prefill";
+import { crk, readClipboard, useCrucibleOn, useCrucibleStatus, useCrucibleUi, useShareRun, useStatusFollowsSignIn } from "./state";
 import "./crucible.css";
 
 /** Takes the kiln://crucible links that arrive and hands the first to `open`. */
@@ -25,6 +26,26 @@ export function useCrucibleLinks(open: (target: string) => void) {
     };
     api.onKilnEvent("kiln://crucible-link", () => void take()).then((f) => { if (!live) { f(); return; } off = f; void take(); }).catch(() => { if (live) void take(); });
     return () => { live = false; off?.(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [on]);
+}
+
+/** "Come back after installing Kiln" (DESIGN 1.3): once per start, the code the download carried (the installer's note,
+ *  the AppImage's name) opens the preview ("Ready to install ..."); the clipboard (the pack link the pack page copied)
+ *  only when the start says a pack page's download left a pack waiting without its code, never because the launcher
+ *  started or updated (./prefill.ts). Nothing installs without the preview's own clicks. */
+export function useCrucibleResume(open: (target: string) => void) {
+  const on = useCrucibleOn();
+  useEffect(() => {
+    if (!on) return;
+    let live = true;
+    void (async () => {
+      let r: api.CrucibleResume;
+      try { r = await api.crucibleResume(); } catch { return; }
+      const target = await resumeTarget(r, readClipboard);
+      if (live && target) open(target);
+    })();
+    return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [on]);
 }
@@ -50,6 +71,7 @@ export function CrucibleHost() {
   const update = useCrucibleUi((s) => s.update);
   const openPreview = useCrucibleUi((s) => s.openPreview);
   useCrucibleLinks((target) => openPreview({ kind: "crucible", target }));
+  useCrucibleResume((target) => openPreview({ kind: "crucible", target, resume: true }));
   const shown = useShown();
   const signIn = useCommunityUi((s) => s.signIn);
   return (

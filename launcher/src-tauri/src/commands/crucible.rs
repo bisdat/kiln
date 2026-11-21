@@ -29,6 +29,11 @@ static SEEN: LazyLock<Mutex<BTreeMap<String, CruciblePack>>> = LazyLock::new(|| 
 /// The last update check (game id -> when, what).
 static UPDATES: LazyLock<Mutex<BTreeMap<String, (std::time::Instant, Vec<crucible::UpdateAvailable>)>>> = LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
+/// The launcher's version as Crucible's User-Agent names it (Pack Studio's publish too).
+pub(crate) fn launcher_version() -> String {
+    version()
+}
+
 fn version() -> String {
     VERSION.get().cloned().unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
 }
@@ -220,6 +225,40 @@ pub async fn crucible_links() -> Result<Vec<String>, Error> {
     Ok(std::mem::take(&mut *LINKS.lock().unwrap()))
 }
 
+/// "Come back after installing Kiln" (DESIGN 1.3): the first start with this data folder, and a pack code the download
+/// carried (the Windows installer's note beside the launcher, or the AppImage's name). Asked once by the UI at start.
+#[tauri::command]
+pub async fn crucible_resume() -> Result<links::Resume, Error> {
+    blocking(|| Ok(links::resume(&dirs()?, launcher_exe().ok().as_deref()))).await
+}
+
+/// "Got a code?" and its Paste button, and the start's pack link when `crucible_resume` says a pack waits: the
+/// clipboard's text, read here (the OS clipboard through arboard) and not by the webview, so WebView2 never asks the
+/// player for clipboard access. Only text that may be a Crucible code or link crosses into the UI (the field's own
+/// check, `crucibleTarget`, decides); anything else is None. Never logged, never kept.
+#[tauri::command]
+pub async fn crucible_clipboard() -> Result<Option<String>, Error> {
+    blocking(|| Ok(clipboard_target(read_clipboard_text()))).await
+}
+
+fn read_clipboard_text() -> Option<String> {
+    arboard::Clipboard::new().ok()?.get_text().ok()
+}
+
+/// The clipboard's text when it may be a Crucible code or link (a superset of the UI's `crucibleTarget`: a code with
+/// any separators, a share, pack or kiln:// link, with or without https://, a version id), trimmed; None otherwise.
+fn clipboard_target(text: Option<String>) -> Option<String> {
+    let t = text?.trim().to_string();
+    if t.is_empty() || t.chars().count() > 200 {
+        return None;
+    }
+    let code: String = t.chars().filter(|c| !c.is_whitespace() && !matches!(c, '-' | '_' | '.')).collect();
+    let ok = crucible::parse_code(&code).is_some()
+        || crucible::parse_target(&t).is_some()
+        || (!t.contains("://") && crucible::parse_target(&format!("https://{t}")).is_some());
+    ok.then_some(t)
+}
+
 // ---------------------------------------------------------------- links arriving
 
 /// `main` calls this for `--link <url>` (or a bare kiln:// argument). True: start the window (the link waits in the
@@ -302,6 +341,34 @@ fn launcher_exe() -> Result<std::path::PathBuf, Error> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn the_clipboard_reaches_the_ui_only_when_it_may_be_a_pack() {
+        let some = |s: &str| clipboard_target(Some(s.to_string()));
+        // codes, as players copy them
+        assert_eq!(some(" H7QK-3MZP\n").as_deref(), Some("H7QK-3MZP"));
+        assert_eq!(some("h7qk3mzp").as_deref(), Some("h7qk3mzp"));
+        assert_eq!(some("h7qk 3mzp").as_deref(), Some("h7qk 3mzp"));
+        assert_eq!(some("H7QK.3MZP").as_deref(), Some("H7QK.3MZP"));
+        // links: share, public pack, kiln://, without the scheme; a version id
+        for t in [
+            "https://frostdev.io/kiln/crucible/p/H7QK-3MZP",
+            "frostdev.io/kiln/crucible/p/H7QK-3MZP",
+            "https://frostdev.io/kiln/crucible/ember-run",
+            "kiln://crucible/H7QK-3MZP",
+            "kiln://crucible/pack/ember-run",
+            "pv_abc123",
+        ] {
+            assert_eq!(some(t).as_deref(), Some(t), "{t}");
+        }
+        // anything else stays out of the webview
+        for t in ["", "   ", "a shopping list", "hunter2", "https://example.com/p/H7QK-3MZP", "H7QK-3MZ0", "https://frostdev.io/kiln"] {
+            assert_eq!(some(t), None, "{t:?}");
+        }
+        assert_eq!(some(&format!("H7QK-3MZP{}", " ".repeat(200))).as_deref(), Some("H7QK-3MZP"), "trimmed first");
+        assert_eq!(some(&"x".repeat(201)), None);
+        assert_eq!(clipboard_target(None), None, "an empty or unreadable clipboard");
+    }
+
     /// End to end against a Crucible running on this machine (MinIO for R2 and the CDN, the fake relay for the
     /// sign-in), the way the launcher's commands drive it: share a profile, open its code without a sign-in, install
     /// it in a second data folder, share the next version and update. launcher/scripts/crucible-e2e.mjs starts the
@@ -356,6 +423,13 @@ mod tests {
         let ir = crucible::install(&b, &cb, None, &crucible::InstallRequest { target: pv.version.id.clone(), consent: true, ..Default::default() }, pv.pack.owner.as_ref(), true, &mut NoProgress).expect("install");
         assert_eq!(ir.profile.mods.kiln.len(), 2);
         step(&format!("installed as profile {} ({} bytes downloaded)", ir.profile.id, ir.downloaded));
+        // the friend's own change: a data edit in the player layer (local.<pid>), which must outlive the update
+        let mine = r#"{ "format": 1, "items": { "Material_T1_Wood_Logs": { "maxStackSize": 999 } } }"#;
+        kiln_manage::modpack::layers::write(&b, &ir.profile.id, "content/mine.json", Some(mine)).expect("player layer");
+        let lp = kiln_manage::modpack::layers::save(&b, &ir.profile.id).expect("save player layer");
+        let local_id = kiln_manage::modpack::layers::local_id(&ir.profile.id);
+        assert_eq!(lp.mods.kiln.last().map(|m| m.id.as_str()), Some(local_id.as_str()));
+        step("the player's data change saved as the player layer");
         // the creator adds a mod and updates the link: only the new archive goes up
         add(&a, &p.id, vec![mk("kiln-equipment", "0.3.0")]);
         let r2 = crucible::share(&a, &ca, &crucible::ShareRequest { profile: p.id.clone(), ..Default::default() }, None, &mut NoProgress).expect("share 2");
@@ -366,11 +440,18 @@ mod tests {
         assert_eq!(ups.len(), 1);
         let plan = crucible::update_plan(&b, &cb, &ir.profile.id, &mut NoProgress).expect("plan");
         assert_eq!(plan.plan.mods.added.len(), 1);
+        assert!(plan.plan.mods.yours.is_empty(), "the player layer is no mod of yours: {:?}", plan.plan.mods.yours);
+        assert_eq!(plan.plan.local.as_ref().map(|l| l.fields), Some(1), "the plan shows the player's data edit");
         let done = crucible::update(&b, &cb, &crucible::UpdateRequest { profile: ir.profile.id.clone(), version_id: plan.version_id, consent: true, ..Default::default() }, &mut NoProgress).expect("update");
-        assert_eq!(done.profile.mods.kiln.len(), 3);
-        step("update found, planned and applied");
-        kiln_manage::modpack::pack::undo(&b, &ir.profile.id).expect("undo");
-        step("undo");
+        assert_eq!(done.profile.mods.kiln.len(), 4);
+        assert_eq!(done.profile.mods.kiln.last().map(|m| m.id.as_str()), Some(local_id.as_str()), "the player layer still loads last");
+        let kept = kiln_manage::modpack::layers::files(&b, &ir.profile.id).unwrap();
+        assert_eq!(kept.iter().map(|f| f.text.as_str()).collect::<Vec<_>>(), [mine], "the player's change survived the update");
+        step("update found, planned and applied; the player's change kept, still last");
+        let back = kiln_manage::modpack::pack::undo(&b, &ir.profile.id).expect("undo");
+        assert_eq!(back.mods.kiln.len(), 3);
+        assert_eq!(back.mods.kiln.last().map(|m| m.id.as_str()), Some(local_id.as_str()));
+        step("undo (the player layer stays)");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

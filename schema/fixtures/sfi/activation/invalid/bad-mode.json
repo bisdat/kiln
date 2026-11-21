@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "txn": "0123456789abcdef",
+  "state": "staging",
+  "profileId": "kill",
+  "generation": 3,
+  "route": "interpreter",
+  "mode": "active",
+  "prior": {
+    "profileSha256": null,
+    "placementsSha256": null,
+    "gameFiles": []
+  },
+  "stages": []
+}

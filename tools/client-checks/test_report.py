@@ -290,6 +290,9 @@ class CoverageTests(unittest.TestCase):
         dossier = {r["id"] for r in json.loads((PACK / "dev28-checks.json").read_text("utf-8"))["checks"]}
         for cid in self.ids:
             self.assertRegex(cid, r"^[a-z0-9][a-z0-9._-]{0,63}$")
+            # the interpreter's checks are named without a dot (Sfi.cs, native/core/gates/sfi.json)
+            if cid in SFI_CHECKS:
+                continue
             if cid not in dossier:
                 self.assertIn(".", cid, f"{cid}: ids are area.slug")
 
@@ -298,6 +301,46 @@ class CoverageTests(unittest.TestCase):
                          {"section": "S", "key": "ghost", "checks": ["no.such-check"]}]}
         problems = coverage_problems(rows, ["a.one", "a.one"])
         self.assertEqual(len(problems), 3, problems)
+
+
+# the checks of Kiln's interpreter (mods/tests/client-pass/Sfi.cs) and its gate row
+# (native/core/gates/sfi.json). A build whose list has no kiln-sfi.interpreter row (Kiln's interpreter a normal choice in
+# Settings) has no gate of them: the seven checks are then kiln mode's guided checks, still in the pack and the rows.
+SFI_GATE = REPO / "native" / "core" / "gates" / "sfi.json"
+SFI_GATE_ROWS = [g for g in (json.loads(SFI_GATE.read_text("utf-8"))["gates"] if SFI_GATE.exists() else [])
+                 if g["name"] == "kiln-sfi.interpreter"]
+SFI_GATE_CHECKS = {cid for g in SFI_GATE_ROWS for cid in g["checks"]}
+SFI_CHECKS = set(CHECK_ID.findall((PACK / "Sfi.cs").read_text("utf-8")))
+SFI_SECTION = "Kiln's interpreter (kiln-sfi.interpreter)"
+
+
+class SfiGateTests(unittest.TestCase):
+    """Kiln's interpreter's seven guided checks: each one must be a check of the pack, once, and a row of the rows file,
+    so a missing check is a failure here and never a silent skip in the pass. While the gate list has the interpreter's
+    row, they are that row's checks (it stays held until they pass)."""
+
+    def test_every_check_of_the_interpreter_row_is_in_the_pack_and_the_rows(self):
+        self.assertEqual(len(SFI_CHECKS), 7, sorted(SFI_CHECKS))
+        if SFI_GATE_ROWS:
+            self.assertEqual(SFI_GATE_CHECKS, SFI_CHECKS, "the interpreter's gate row names its seven checks")
+        ids = pack_check_ids()
+        rows = json.loads((PACK / "rows.json").read_text("utf-8"))["rows"]
+        for cid in sorted(SFI_CHECKS):
+            self.assertEqual(ids.count(cid), 1, f"{cid}: one [ClientCheck] in the pack")
+            self.assertEqual(sum(cid in r["checks"] for r in rows), 1, f"{cid}: one row of rows.json")
+        self.assertEqual({c for r in rows if r["section"] == SFI_SECTION for c in r["checks"]}, SFI_CHECKS,
+                         "the interpreter's rows are its checks")
+
+    def test_the_plan_reads_every_interpreter_check(self):
+        # plan.py reads the attributes with its own parser (a quote inside an interpolation hole once hid one)
+        import plan
+        self.assertLessEqual(SFI_CHECKS, {c["id"] for c in plan.read_pack(str(PACK))})
+
+    def test_the_interpreter_checks_are_in_their_own_file(self):
+        src = (PACK / "Sfi.cs").read_text("utf-8")
+        rows = json.loads((PACK / "rows.json").read_text("utf-8"))["rows"]
+        self.assertEqual(set(CHECK_ID.findall(src)), {c for r in rows if r["section"] == SFI_SECTION for c in r["checks"]})
+        self.assertEqual(set(CHECK_ID.findall(src)), SFI_GATE_CHECKS or SFI_CHECKS)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sfi-ui-envelope.schema.json",
+  "title": "kiln-sfi UI transport record, format 1",
+  "description": "One file between Kiln.Ui and kiln-sfi's Lua runtime, the interpreter's stand-in for ShroudForge 1.7.9's ui/actions and news/events folders. Three kinds: action, notice, and the launch receipt of a launch folder. The mod-page toggle is not a record (it is the named event Local\\ShroudForge.ModMenu.Open.<pid>). Closed: no pointers, no Lua references, no field the source does not have. Actions: <game>/kiln/sfi/ui/<launchId>/actions/<requestId>.json, written to the sibling <launchId>/staging/ and renamed in whole (the runtime reads every entry of actions/, so nothing temporary is ever inside it). Kiln.Ui writes <launchId>/launch.json (kind launch) when it makes the folder; only a folder with a receipt whose process has ended is ever pruned, 7 days after its last change, and never through a link. The runtime reads up to 32 entries per turn; a malformed entry or one for an inactive owner, another launch or an old epoch is removed; one whose callback is not registered yet stays (SF dispatch_mod_ui_actions.rs:65-107); the runtime's exact reading rules are schema/fixtures/sfi/ui/drain/cases.json. Notices: <configDir>/sfi/notifications/<keySha256>.json, kept across launches; the key is modId-id as SF writes it, so SF's collisions (a-b/c and a/b-c) share one file and the later write wins. Bytes on disk (schema/fixtures/sfi/ui/wire/): UTF-8 without BOM, no whitespace, no trailing newline, members in this schema's required order (an action's value after action), strings escaped as serde_json and JSON.stringify do (quote, backslash, \\b \\f \\n \\r \\t, other controls as lower-case \\u00xx, everything else raw). Bounds the files cannot say (Kiln's own, where SF has none): a record at most 2 MiB, 1024 pending actions per owner, 4096 notice keys per profile; the numbers are schema/fixtures/sfi/ui/bounds.json. Title and message limits are SF's byte limits; the schema's code-point limits are their loose side, readers check bytes.",
+  "type": "object",
+  "required": ["format", "kind"],
+  "properties": {
+    "format": { "const": 1 },
+    "kind": { "enum": ["action", "notice", "launch"] }
+  },
+  "allOf": [
+    { "if": { "properties": { "kind": { "const": "action" } } }, "then": { "$ref": "#/$defs/action" } },
+    { "if": { "properties": { "kind": { "const": "notice" } } }, "then": { "$ref": "#/$defs/notice" } },
+    { "if": { "properties": { "kind": { "const": "launch" } } }, "then": { "$ref": "#/$defs/launch" } }
+  ],
+  "$defs": {
+    "sfId": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,80}$", "description": "SF identifier (create_mod_api.rs:383-389)." },
+    "uuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "launchId": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "sfi.json launch.launchId: kiln.launch's u64 as 16 lower-case hex digits." },
+    "launch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "kind", "launchId", "planHash", "pid", "processStartMs", "createdMs"],
+      "description": "<game>/kiln/sfi/ui/<launchId>/launch.json: whose folder this is. Kiln.Ui writes it once, staged and renamed, before the first action. The cleanup reads it to prove the launch ended (pid gone, or a process with another start time); without it, or unreadable, the folder is kept.",
+      "properties": {
+        "format": { "const": 1 },
+        "kind": { "const": "launch" },
+        "launchId": { "$ref": "#/$defs/launchId", "description": "The folder's name; a receipt naming another launch is not this folder's." },
+        "planHash": { "$ref": "common.schema.json#/$defs/sha256" },
+        "pid": { "type": "integer", "minimum": 1, "description": "sfi.json launch.pid." },
+        "processStartMs": { "type": "integer", "minimum": 0, "description": "sfi.json launch.processStartMs: with pid, the start's identity." },
+        "createdMs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "kind", "requestId", "sequence", "launchId", "planHash", "ownerEpoch", "modId", "action", "createdMs"],
+      "properties": {
+        "format": { "const": 1 },
+        "kind": { "const": "action" },
+        "requestId": { "$ref": "#/$defs/uuid", "description": "Random; also the file name." },
+        "sequence": { "type": "integer", "minimum": 0, "description": "The writer's counter in this launch, for logs; not a dedup key (the source replays a request whose removal failed)." },
+        "launchId": { "$ref": "#/$defs/launchId", "description": "sfi.json launch.launchId; another launch's request is removed unread." },
+        "planHash": { "$ref": "common.schema.json#/$defs/sha256" },
+        "ownerEpoch": { "type": "integer", "minimum": 1, "description": "The requested owner's reload epoch as Kiln.Ui last read it; an old epoch is removed unread." },
+        "modId": { "$ref": "#/$defs/sfId", "description": "The SF mod whose ui.on_action callback is asked (source key modId)." },
+        "action": { "$ref": "#/$defs/sfId", "description": "The action id (source key action)." },
+        "value": { "type": "string", "maxLength": 1048576, "description": "Optional text passed to the callback (source key value); absent calls it with nil." },
+        "createdMs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "notice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "kind", "key", "keySha256", "launchId", "ownerEpoch", "notice"],
+      "properties": {
+        "format": { "const": 1 },
+        "kind": { "const": "notice" },
+        "key": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,80}-[A-Za-z0-9._-]{1,80}$", "description": "modId + '-' + the mod's notice id, SF's event key." },
+        "keySha256": { "$ref": "common.schema.json#/$defs/sha256", "description": "sha256 of key's UTF-8 bytes: the file name." },
+        "launchId": { "$ref": "#/$defs/launchId", "description": "The launch that published it: provenance only; an older launch's notice stays visible." },
+        "ownerEpoch": { "type": "integer", "minimum": 1 },
+        "notice": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "modId", "title", "message", "level", "actionUrl", "updatedAt"],
+          "description": "The payload SF 1.7.9 notifications.publish writes, field for field (create_mod_api.rs:254-263).",
+          "properties": {
+            "id": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,80}\\.[A-Za-z0-9._-]{1,80}$", "description": "modId + '.' + the mod's notice id." },
+            "modId": { "$ref": "#/$defs/sfId" },
+            "title": { "type": "string", "maxLength": 120 },
+            "message": { "type": "string", "maxLength": 2000 },
+            "level": { "enum": ["info", "error"], "description": "What SF 1.7.9 can store. publish first accepts info, success, warning, error and update (create_mod_api.rs:248), then write_event validates the payload against the embedded event-schema.json, whose level enum is trace, debug, info, warn, error (notifications/event-schema.json, validate_notification_event.rs); success, warning and update therefore fail the publish call with an error and are never written. Same in 1.8.0." },
+            "actionUrl": { "oneOf": [{ "type": "string", "pattern": "^https://" }, { "type": "null" }], "description": "Opened only on an explicit click. No length limit, as in SF (publish and event-schema.json set none); the 2 MiB record bound applies." },
+            "updatedAt": { "type": "integer", "minimum": 0, "description": "Seconds since 1970." }
+          }
+        }
+      }
+    }
+  }
+}

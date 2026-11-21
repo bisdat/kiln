@@ -98,20 +98,31 @@ pub fn dry_run() -> bool {
 }
 
 #[tauri::command]
-pub async fn launch_play(app: AppHandle, game_id: String, request: LaunchRequest) -> Result<LaunchResult, Error> {
+pub async fn launch_play(app: AppHandle, window: tauri::Window, game_id: String, request: LaunchRequest) -> Result<LaunchResult, Error> {
+    // (the launcher's Play starts nothing whose warnings nobody acknowledged: it answers them as a
+    // preflight, which launch_confirm (commands/sfi.rs) then starts through the same steps)
+    let caller = window.label().to_owned();
+    start_game(app, game_id, move |dirs, g, starter| {
+        kiln_manage::sfi_launch::play_interactive(kiln_manage::sfi_launch::Book::global(), dirs, g, &request, Some(&caller), None, starter)
+    })
+    .await
+}
+
+/// A start of this launcher (launch_play, launch_confirm): the install as it starts, its steps timed, the game started
+/// by `run` with Steam's opener or the launcher's direct start (neither under KILN_LAUNCH_DRY_RUN).
+pub(crate) async fn start_game(
+    app: AppHandle,
+    game_id: String,
+    run: impl FnOnce(&kiln_manage::paths::DataDirs, &kiln_manage::game::GameInstall, kiln_manage::launch::Starter<'_>) -> Result<LaunchResult, Error>
+        + Send
+        + 'static,
+) -> Result<LaunchResult, Error> {
     let id = game_id.clone();
     let r = blocking(move || {
         let g = crate::state::game(&id)?;
         crate::state::refuse_running(&g)?;
         // the start's own steps: the profile is checked now, Steam is asked when the opener runs
         track(&id, |t| t.begin("profile", now_ms()));
-        let asked = |uri: &str, open: &dyn Fn(&str) -> Result<(), Error>| {
-            track(&id, |t| {
-                t.begin("steam", now_ms());
-                t.asked = true;
-            });
-            open(uri)
-        };
         let dirs = dirs()?;
         // (dev.29.17) a folder that starts directly: the launcher starts its exe (umu-run, Proton or Wine on Linux)
         // instead of asking Steam, which only ever starts the copy in its own library; nothing of Steam is needed. The
@@ -125,38 +136,11 @@ pub async fn launch_play(app: AppHandle, game_id: String, request: LaunchRequest
         } else {
             None
         };
-        let r = match &direct {
-            Some(cmd) => {
-                let log = kiln_manage::launch::direct_log(&dirs, &g);
-                let go = |c: &kiln_manage::direct::DirectCommand| {
-                    track(&id, |t| {
-                        // the step keeps its id (the timeline's contract) and says what it is: no Steam in it
-                        t.direct = true;
-                        t.begin("steam", now_ms());
-                        if let Some(s) = t.steps.iter_mut().rev().find(|s| s.id == "steam") {
-                            s.label = kiln_manage::start_progress::DIRECT_STEP_LABEL.into();
-                        }
-                        t.asked = true;
-                    });
-                    crate::commands::app::launcher_log("start", &format!("{}: {} {:?} in {}", id, c.program.display(), c.args, c.cwd.display()));
-                    if dry_run() {
-                        eprintln!("KILN_LAUNCH_DRY_RUN: not starting {}", c.program.display());
-                        return Ok(());
-                    }
-                    kiln_manage::direct::spawn(c, Some(&log)).map(|_| ())
-                };
-                kiln_manage::launch::play_via(&dirs, &g, &request, None, kiln_manage::launch::Starter::Direct(cmd, &go))
-            }
-            None if dry_run() => {
-                // tests against game copies: write the play-once files, back up, but never open steam:// (that would
-                // start the real game through Steam)
-                kiln_manage::launch::play_with(&dirs, &g, &request, None, &|uri| asked(uri, &|u| {
-                    eprintln!("KILN_LAUNCH_DRY_RUN: not opening {u}");
-                    Ok(())
-                }))
-            }
-            None => kiln_manage::launch::play_with(&dirs, &g, &request, None, &|uri| asked(uri, &kiln_manage::launch::desktop_open)),
-        };
+        // (the starter built apart: a test drives it with its own opener)
+        let log = kiln_manage::launch::direct_log(&dirs, &g);
+        let spawn = |c: &kiln_manage::direct::DirectCommand, log: &Path| kiln_manage::direct::spawn(c, Some(log)).map(|_| ());
+        let r = with_starter(&id, direct.as_ref().map(|c| (c, log.as_path())), dry_run(), &kiln_manage::launch::desktop_open,
+            &spawn, &crate::commands::app::launcher_log, |starter| run(&dirs, &g, starter));
         match &r {
             // the start's mod set, as the launch record has it
             Ok(res) => {
@@ -168,6 +152,8 @@ pub async fn launch_play(app: AppHandle, game_id: String, request: LaunchRequest
                 let fp = kiln_manage::launch::last_launch(&dirs, &g).ok().flatten().map(|l| l.fingerprint);
                 track(&id, |t| t.fingerprint = fp.or(t.fingerprint.take()));
             }
+            // (warnings to acknowledge: the dialog follows, and the start the launcher times with it)
+            Err(e) if kiln_manage::sfi_launch::preflight_of(e).is_some() => {}
             Err(_) => forget(&id),
         }
         r
@@ -175,6 +161,57 @@ pub async fn launch_play(app: AppHandle, game_id: String, request: LaunchRequest
     .await?;
     crate::watch::emit_status(&app, &game_id);
     Ok(r)
+}
+
+/// The starter of a start of this launcher, `f` run with it: Steam's opener (`open`, the desktop's) or the direct start
+/// (`spawn` with its log file), each timed as the start's "steam" step and the direct one written to the launcher's log
+/// (`log`). Under KILN_LAUNCH_DRY_RUN (`dry`) neither is asked: tests against game copies write the play-once files and
+/// back up, but never open steam:// (that would start the real game through Steam) or start the exe.
+pub(crate) fn with_starter<T>(
+    id: &str,
+    direct: Option<(&kiln_manage::direct::DirectCommand, &Path)>,
+    dry: bool,
+    open: &dyn Fn(&str) -> Result<(), Error>,
+    spawn: &dyn Fn(&kiln_manage::direct::DirectCommand, &Path) -> Result<(), Error>,
+    log: &dyn Fn(&str, &str),
+    f: impl FnOnce(kiln_manage::launch::Starter<'_>) -> T,
+) -> T {
+    match direct {
+        Some((cmd, file)) => {
+            let go = |c: &kiln_manage::direct::DirectCommand| {
+                track(id, |t| {
+                    // the step keeps its id (the timeline's contract) and says what it is: no Steam in it
+                    t.direct = true;
+                    t.begin("steam", now_ms());
+                    if let Some(s) = t.steps.iter_mut().rev().find(|s| s.id == "steam") {
+                        s.label = kiln_manage::start_progress::DIRECT_STEP_LABEL.into();
+                    }
+                    t.asked = true;
+                });
+                log("start", &format!("{}: {} {:?} in {}", id, c.program.display(), c.args, c.cwd.display()));
+                if dry {
+                    eprintln!("KILN_LAUNCH_DRY_RUN: not starting {}", c.program.display());
+                    return Ok(());
+                }
+                spawn(c, file)
+            };
+            f(kiln_manage::launch::Starter::Direct(cmd, &go))
+        }
+        None => {
+            let steam = |uri: &str| {
+                track(id, |t| {
+                    t.begin("steam", now_ms());
+                    t.asked = true;
+                });
+                if dry {
+                    eprintln!("KILN_LAUNCH_DRY_RUN: not opening {uri}");
+                    return Ok(());
+                }
+                open(uri)
+            };
+            f(kiln_manage::launch::Starter::Steam(&steam))
+        }
+    }
 }
 
 // ---------------------------------------------------------------- what a start is doing (kiln_manage::start_progress)

@@ -112,35 +112,68 @@ A failure after the profile was made deletes it again (to `backups/profiles/`).
 |---|---|---|---|
 | 1. Pack mods | the mods | Library entries | nobody; an update swaps versions |
 | 2. Pack layer | the data mod, the overrides, the switches and order | Library entry `pack.<id>/<version>`; `pack/base/` | the creator (new versions) |
-| 3. The player | their settings and any mod they add (a `local.<pid>` data mod made by the launcher's editors, any Library mod) | the live config folder; the profile | the player |
+| 3. The player | their settings (the live config folder), mods they add, and their data edits in the player layer `local.<pid>` | the config folder; the profile; `pack/local/` | the player |
 
 Data packs apply in load order and the later mod wins (docs/kiln/services/content.md), so the layer wins over the
-pack's mods and a player's own data mod (loading after the layer) wins over the layer.
+pack's mods and the player layer (loading after everything) wins over the layer.
+
+### The player layer (`local.<pid>`)
+`kiln_manage::modpack::layers`: a data-only Kiln mod per instance (`kiln.mod.json` without entryAssembly, `side: both`,
+`clients: none`: joining players need nothing, `loadAfter` every other Kiln mod of the profile) whose working copy is
+`profiles/<pid>/pack/local/` (`content/<name>.json`, one level). The editors write files (`layers::write`, Tauri
+`pack_local_write`, `kilnctl pack local P --set content/X.json=FILE`; text must be one JSON object, 1 MiB at most) and
+`layers::save` (`pack_local_save`) puts the folder into the Library as an immutable entry like every mod a profile uses
+and makes it the profile's last Kiln mod; a working copy without data files takes it out of the profile again.
+A data field is `[section, target, field]` (`["items", "Logs", "maxStackSize"]`; a target with conditions carries its
+`@where`; a definition of an `add` list is `[section, "add", name]`; a value straight under a section is `[section, key]`),
+whatever file holds it: a pack layer that moves a field to another file still overlaps. A profile naming its player
+layer whose working copy is gone (no `local/kiln.mod.json`: a copied or restored profile) gets it back from the Library
+entry at the next save or update. A pack built from an instance leaves the player layer out (a note says so): `local.`
+ids are refused in packs, since profile ids repeat on every PC. Undo of an update also takes back player-layer edits
+saved after it.
 
 ## Updating an instance
 `pack::plan_update(dirs, pid, file, sha256?, optional) -> UpdatePlan` shows what an update does without writing
 anything (`kilnctl pack diff <pid> <file>`); `pack::update(dirs, UpdateRequest, progress) -> UpdateResult` does it.
 The new file must be the same pack (same `id`), else `refused`.
 
-Inputs: base = `pack/base/` (the version installed), theirs = the new file, mine = the profile and its config folder
-now.
+Inputs: base = `pack/base/` (the version installed, and `base/written.json`: each config key Kiln wrote at installs and
+updates, with the value it left), theirs = the new file, mine = the profile, its config folder and its player layer now.
 - **Mods**: the new version's set. Mods the player added are kept ("yours"), after the layer. The player's switch on a
   mod the installed version had is kept ("your switch"); a new optional mod takes the request's choice, else its
   default. Mods that leave the pack leave the profile and stay in the Library. The layer is replaced.
+- **The player layer** stays and still loads last: a fresh Library entry whose manifest names the new mods to load
+  after. `plan.local {id, files, fields, overlaps[]}`: each field the new pack layer sets too, `{key, section, target,
+  field, pack, base?, mine, file, changed}` ("your change still wins"); `UpdateRequest.drop` lists keys to let go of
+  ("Drop my change": the field leaves the player's file, an emptied target and section with it, comments kept), a key
+  that is no overlap is refused.
 - **Config, per key** (JSON: a key path; INI: `section.key`; replace: the whole file): only the pack changed it -> the
-  pack's value is written ("updated by the pack"); only the player changed it, or the pack no longer sets it -> the
-  player's stays ("your change kept"); a key new in the pack -> written; both changed it differently -> a conflict
-  `{key, base, pack, mine}`. Edits keep the file's comments and layout.
+  pack's value is written ("updated by the pack"); only the player changed it, or the pack no longer sets it (a key or a
+  whole override file the new version drops) -> the player's stays ("your change kept"); a key new in the pack ->
+  written when the file does not hold it or holds what Kiln last wrote there; a value Kiln never wrote (the player's,
+  or a default the mod wrote: Kiln cannot tell them apart) that differs is a conflict `{key, base: null, pack, mine}`;
+  both changed it differently, a removal against an edit included -> a conflict `{key, base, pack, mine}`.
+  Edits keep the file's comments and layout. Instances installed before `written.json` existed take new keys as before until their first update.
+- **Renamed settings files**: an override the new version drops matched with one it adds is a rename
+  (`files[].renamedFrom`) when the paths belong together (the same file name, the same folder, or the old name a folder of
+  the new path: `alpha.json` -> `alpha/settings.json`) and the overrides match (same mode, the same values or the same
+  keys). The player's values are read at the old name: a file of the same name not there yet starts as a copy of the
+  old one; otherwise the pack's keys are carried key by key. The old file stays as it was.
 - **Conflicts** need a choice before anything is written: `resolve` maps `"<path>#<key>"` (as the plan names them, e.g.
   `"kiln-auto-loot.json#range"`) to `pack` or `mine`, `all` answers the rest. Without one the update is refused with
   `conflict` and the plan in the error's `detail`.
+- **Saves**: before anything changes, a save backup (reason `modpack`) of each game the instance is active on
+  (`UpdateResult.backups`); a game without a save folder yet is skipped. Undo does the same. Placeholders keep saved
+  stacks of content a removed mod defined (content.md "Missing content: placeholders").
 - **All or nothing**: every file's merge is computed before anything is imported or written (a live file that does
   not parse stops the update there). The instance as it was is copied to `pack/undo.new/` (meta.json, the config
-  folder, instance.json, base/); if a later step fails (the profile changed meanwhile, a file that cannot be written)
-  the mods, the config folder, base/ and instance.json come back from that copy and the error is returned. base/ is
-  replaced by moving the old one aside first (`base.old`, read if a crash left no base).
+  folder, instance.json, base/, the player layer's local/); if a later step fails (the profile changed meanwhile, a file
+  that cannot be written) the mods, the player layer, the config folder, base/ and instance.json come back from that
+  copy and the error is returned. base/ is replaced by moving the old one aside first (`base.old`, read if a crash left
+  no base).
 - **Undo**: once the update stands, `pack/undo.new/` becomes `pack/undo/` (replacing the last one);
-  `pack::undo(dirs, pid)` (`kilnctl pack undo`) puts it back (once; the next update replaces it).
+  `pack::undo(dirs, pid)` (`kilnctl pack undo`) puts it back (once; the next update replaces it), the player layer's
+  working copy and its Library entry in the profile included.
 - The game folder follows at the profile's next activation (Play activates), as for any profile change.
 
 `pack::diff(old, new) -> PackDiff` compares two versions of a pack (mods added/updated/removed, layer changed,
@@ -218,7 +251,7 @@ Tauri commands (launcher/src-tauri/src/commands/pack.rs; the network side is "Th
 | `pack_instance` | `profileId` | `Instance \| null` | `pack::instance` |
 | `pack_instances` | | `[profileId, Instance][]` | `pack::instances` |
 | `pack_update_plan` | `profileId, source, optional?` | `UpdatePlan {profile, pack, from, to, changes?, mods{added, updated, removed, yours, keptSwitches}, layer{from, to, changed}, files[{path, side, mode, taken[], kept[], conflicts[{key, base, pack, mine}]}], conflicts}` | `pack::plan_update` |
-| `pack_update` (task) | `UpdateRequest {profile, source, consent, allowHttp?, optional?, resolve{"path#key": "pack"\|"mine"}, all?}` | `UpdateResult {plan, profile, instance, imported[]}`; error `conflict` with the plan in `detail` | `pack::update` |
+| `pack_update` (task) | `UpdateRequest {profile, source, consent, allowHttp?, optional?, resolve{"path#key": "pack"\|"mine"}, all?, drop?[]}` | `UpdateResult {plan, profile, instance, imported[]}`; error `conflict` with the plan in `detail` | `pack::update` |
 | `pack_undo` | `profileId` | `Profile` | `pack::undo` |
 | `pack_uninstall` | `profileId` | `UninstallResult {profile, unused[]}` | `pack::uninstall` |
 | `pack_build` (task) | `BuildRequest {profile, version, id?, name?, authors?, description?, changes?, optional{id: bool}, env{id: {client, server}}, credits{id: {author, source, match?}}, layer?, overrides[{path, side, keys[]}], serverSettings?, gameBuilds[]}`, `outDir` | `BuiltPack {file, sha256, size, index, notes[]}` | `pack::build` ("Save as file", Pack Studio) |
@@ -260,11 +293,32 @@ Code: `crates/kiln-manage/src/crucible/` (`mod.rs` client and flows, `sign.rs` t
   when the CDN has none) -> `sign::open` (the key id must be a trusted key, the signature over the payload bytes, then
   `check_index`; a payload naming another version is refused) -> the preview: what the Library lacks (`pack::lacking`:
   entries that still hash to their kdh1 count as present), sizes, game build fit, the Kiln range, code, the trust
-  state. Install: the lacking archives download to `<data>/crucible/cache/` (size and sha256 checked; cached for later),
+  state, and Crucible's check of the version (`version.checks`, passed through as the service sends it: `{state:
+  queued|running|waiting|done|failed|off, ok, errors[], warnings[], notes[], summary}`; the preview's facts show
+  "Checks: passed", "N things to look at", "N problems found" (named, not blocking: Crucible keeps such a pack from going
+  public), "still running on Crucible" with Refresh (crucible_open again: the full check ends minutes after an upload),
+  or "couldn't run"; nothing from a service without checks; `launcher/src/crucible/code.ts` checksLine). Install: the lacking archives download to `<data>/crucible/cache/` (size and sha256 checked; cached for later),
   overrides by their sha256, then `pack::assemble` puts a .kilnpack together (Library folders + archive entries copied
   compressed) and `pack::read` checks every kdh1 as for any pack; `pack::install` makes the instance. A creator still
   uploading: `busy` with the progress. `count` (Settings "Count my installs", `crucibleStats`, on by default) sends the
   anonymous install count.
+- **The installed pack's profile name** (dev.30.2): `InstallRequest.name`, from the preview's name field, defaulting to
+  "<pack> (<creator>'s pack)" (the UI's translated form; the backend's English one when no name comes); either way
+  `profile::unique_name` adds " (2)", " (3)"... when a profile has the name already (trimmed, any case, at most 128
+  characters), in `pack::install` too: a friend's "My mods" never sits beside the player's own "My mods".
+- **Install alone** (dev.30.2): `play: false` (`pack_install`: `activate: false`) makes the instance without the save
+  backup and the activation: only the data folder changes (the Library, `profiles/<new id>`, the Crucible cache), never
+  the game folder, so the preview's **Install** stays enabled while the game runs (and without Kiln in the game); **Install
+  and play** still needs both. The toast has no Undo (the loaded profile did not change).
+- **Share to Crucible on Play** has **What is Crucible?** beside it (https://frostdev.io/kiln/wiki/crucible-share in the
+  browser). A profile's first share asks first (dev.30.2; players did not expect one click to upload ~20 MB): one screen
+  says what goes up (the mod list, load order and switches, and the files of its N mods Crucible doesn't have yet, "up
+  to" the Library entries' size: the archives are compressed and Crucible keeps files it has; `code.ts` shareEstimate),
+  what stays (mod settings, the player layer; the Play share sends no overrides, Pack Studio does) and what is never
+  sent (saves, worlds, characters, personal files), and that the pack is link-only (Public is shown off: public packs
+  come from Pack Studio, which has the credits, the summary and the finished checks the service asks for). Share or
+  Cancel; signed out, "Sign in and share" (the share starts after the sign-in). Update link for a pack shared before,
+  Retry and a share stopped midway need no confirm. The Deck's Share dialog shows the same confirm.
 - **Sharing** (the Discord sign-in, its relay session as Bearer): `pack::build` from the profile (version `1.0.0`, then
   the next patch; the change note "1 added, 1 updated" from the last share), `pack::mod_archive` per mod and
   `pack::folder_archive` for a layer (deterministic, cached by sha256), `POST /quickshare` (or `POST /packs/<id>/versions`
@@ -274,6 +328,29 @@ Code: `crates/kiln-manage/src/crucible/` (`mod.rs` client and flows, `sign.rs` t
   midway is finished by the next press (`POST /uploads` for the same files).
 - **Updates**: `GET /packs/<id>/head` per Crucible instance (cached 5 minutes in the launcher), the new version fetched and
   planned with `pack::plan_update`, applied with `pack::update` (conflicts, undo as above).
+- **Game clients take no server-only mods**: `fetch` downloads and assembles (`pack::assemble_for` with
+  `pack::client_skips`, `<data>/crucible/packs/<vid>.client.kilnpack`) only what a client uses; the preview's sizes count
+  the same. `pack::read_partial` reads such a file (`ReadPack.absent` names what it leaves out), install and update take
+  it; the server part needs the whole pack (`pack server` with a full .kilnpack) and says so.
+- **A dropped or opened file is checked here**: the preview of a .kilnpack runs the pack analysis
+  (`pack_check` = `modpack::check::check` on the file, the code Crucible runs on uploads) and shows its errors in red
+  (they block Install) and its warnings in yellow, "Checks: passed" otherwise.
+- **Come back after installing Kiln** (DESIGN 1.3): the pack page's Get Kiln links `/kiln/download?crucible=CODE`.
+  At start the UI asks `crucible_resume` once (`links::resume`): `firstStart` (no `<data>/crucible/started` yet) and a
+  `code` the download carried: the Windows installer's note `crucible-resume.txt` beside the launcher (the NSIS
+  post-install hook `launcher/src-tauri/nsis/hooks.nsh` writes the setup file's name; read once and removed) or, at the
+  first start, the AppImage's own name, either holding `crucible-<CODE>` (`links::code_in_name`). A code opens that
+  pack's preview ("Kiln is ready. Here is <pack>, the pack you came for."). The clipboard is never read because the
+  launcher started or updated (`firstStart` is also true at the first start after an update from a launcher without
+  Crucible): only `packWaiting` (the first start, the download's name says `crucible` but its code could not be read)
+  reads it once and opens a Crucible link or code found there. Downloads whose name the launcher never sees (.deb,
+  .rpm) carry no handoff: the player opens Got a code?, which fills in the clipboard's code. Every clipboard read is
+  the backend's `crucible_clipboard` (arboard), never `navigator.clipboard`: WebView2 asks the player for clipboard
+  access on every page read ("tauri.localhost wants to see text and images in the clipboard", dev.30). Only text that
+  may be a Crucible code or link reaches the UI; Got a code? fills it in when it opens and from its Paste button
+  (src/crucible/prefill.ts). Nothing installs without the preview's clicks. The
+  download page's part (name the Windows download `...setup.crucible-<CODE>.exe` and copy the pack link when
+  `?crucible=` is set) is the site's: out/pack-layers/TO-CRUCIBLE-WEB.md.
 - **Trust**: "Always trust packs from <creator>" is kept in `<data>/crucible/trust.json` by Discord id; the warning shows
   every time.
 - **kiln:// links**: `kiln://crucible/<CODE>`, `kiln://crucible/pack/<slug>`. `--link <url>` (or a bare kiln:// argument,
@@ -288,11 +365,32 @@ Code: `crates/kiln-manage/src/crucible/` (`mod.rs` client and flows, `sign.rs` t
 
 ## Not done here (later briefs)
 - engine mods whose settings live in their own folder (not the configDir) cannot carry overrides yet;
-- a pack's optional mods are imported into the Library even when off (so switching one on later needs no download);
-- a pack also downloads its server-only mods (the assembled .kilnpack must hold every mod for its checks);
-- Pack Studio, the Crucible browse page, comments and upvotes in the launcher, "Make it public".
+- a pack's optional mods are imported into the Library even when off (on purpose: switching one on later needs no
+  download and works offline);
+- the preview's local check of a dropped file reads it whole: a client-only pack (Crucible's
+  `<vid>.client.kilnpack` cache, never offered to players) fails it;
+- the Crucible browse page, comments and upvotes in the launcher. Pack Studio (making packs, credits, publishing link-only
+  or public, Make public, server packs, kilnctl pack init/add/capture-settings/lint/credits/publish): [pack-studio.md](pack-studio.md).
 
 ## Checks done
+dev.30.2 Crucible UX: unit tests (`unit/crucible.test.ts`: uniqueName, shareEstimate, checksLine), kiln-manage
+`crucible::tests::an_installed_pack_is_named_after_the_pack_and_its_creator_and_never_twice` (the default name with the
+creator, " (2)" for a taken name and for a typed one, the service's `checks` reaching the preview, `play: false` with
+no game), `profile::review_tests::unique_names_add_a_number_when_a_profile_has_the_name`; Playwright crucible-share (What
+is Crucible?, the confirm and Cancel, signed out: confirm then sign-in, Update link without a confirm), crucible-receive
+(the check line passed / one warning / still running then Refresh, the name field and a taken name, Install alone while
+the game runs), crucible-deck (the confirm on the Deck, the check line), crucible-resume (both install buttons stay off).
+
+Player layer and update merge (dev.30 pack-layers): `tests/pack_layers.rs` (the player layer last across an update,
+its data overlap with a renamed layer file, a drop refused for no overlap, Drop my change keeping comments, undo of
+both; a renamed settings file new and already there with a conflict; a key new to the pack changed by the player since
+vs. left alone; an override the pack stops shipping; a client pack without the server-only mod read, installed and
+planned, refused whole and for a server; the save backup of the active game on update and undo), merge matrix unit
+tests in `modpack::merge`, `modpack::layers` units, `crucible::links` resume, `crucible::tests` a client downloading
+no server-only mod; Playwright crucible-update (overlaps, drop), crucible-resume, crucible-receive (file checks);
+`crucible-e2e.mjs` with a player-layer change surviving the update and undo. The NSIS hook compiles (makensis); a real
+Windows install from a renamed setup file is not tried.
+
 `cargo test -p kiln-manage --features zip,http,server --test packs`: a deterministic build from a profile (same
 bytes twice), the index (optional-off from a switched-off mod, the layer manifest written with `loadAfter`, chosen keys
 only), the format-1 reader refusing a pack; verify refusing a wrong sha256, an unlisted entry, a changed mod file, a

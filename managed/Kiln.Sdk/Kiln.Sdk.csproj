@@ -59,12 +59,77 @@
   </ItemGroup>
   <!-- The native SDK (native/ in the package; KILN_SDK_DIR for kiln_plugin, docs/kiln/modding/mdk.md "Native mods"):
        KilnPlugin.cmake, the C ABI headers and the real Linux toolchain. The repository's native/cmake/clang-cl-xwin.cmake
-       replaces the wrapper of the same name that managed/Kiln.Sdk/native/cmake has for in-repository builds. -->
+       replaces the wrapper of the same name that managed/Kiln.Sdk/native/cmake has for in-repository builds.
+       The headers are Kiln's public C ABI only: kiln.launch (the start's ShroudForge backend, which Kiln's own loaders
+       read) and kiln-eml's startup seams (kiln.eml.archive, kiln.eml.values, kiln.eml.startup) stay out, and so does
+       every "kiln-internal begin" ... "kiln-internal end" block of the others (members Kiln keeps to itself in this
+       release, such as kiln.client's building input and kiln.net's Steam messages): KilnStageAbiHeaders writes the
+       headers without those blocks into obj/ and packs that copy. native/core/tests/test-abi-headers.sh checks the
+       stripped view of the headers that have such blocks. -->
   <ItemGroup>
     <None Include="native/cmake/KilnPlugin.cmake" Pack="true" PackagePath="native/cmake/" />
     <None Include="../../native/cmake/clang-cl-xwin.cmake" Pack="true" PackagePath="native/cmake/" Visible="false" />
-    <None Include="../../native/core/abi/**/*.h;../../native/core/abi/**/*.hpp" Pack="true" PackagePath="native/include/" Visible="false" />
+    <KilnAbiHeader Include="../../native/core/abi/**/*.h;../../native/core/abi/**/*.hpp"
+                   Exclude="../../native/core/abi/services/kiln_launch.h;../../native/core/abi/services/kiln_eml_*.h" />
   </ItemGroup>
+  <UsingTask TaskName="KilnStripInternal" TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Headers ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+      <OutputDir ParameterType="System.String" Required="true" />
+      <Written ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.Collections.Generic" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text.RegularExpressions" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        // A "kiln-internal begin" line, every line after it and the "kiln-internal end" line go; blocks never nest.
+        var begin = new Regex(@"^\s*(/\*|//)\s*kiln-internal begin");
+        var end = new Regex(@"^\s*(/\*|//)\s*kiln-internal end");
+        var written = new List<ITaskItem>();
+        foreach (var header in Headers) {
+          var source = header.GetMetadata("FullPath");
+          var relative = (header.GetMetadata("RecursiveDir") ?? "").Replace('\\', '/');
+          var name = header.GetMetadata("Filename") + header.GetMetadata("Extension");
+          var kept = new List<string>();
+          var open = 0;
+          var lines = File.ReadAllLines(source);
+          for (var i = 0; i < lines.Length; i++) {
+            if (begin.IsMatch(lines[i])) {
+              if (open != 0) { Log.LogError("{0}:{1}: a kiln-internal begin inside the block that begins at line {2}", source, i + 1, open); return false; }
+              open = i + 1;
+              continue;
+            }
+            if (end.IsMatch(lines[i])) {
+              if (open == 0) { Log.LogError("{0}:{1}: a kiln-internal end without a begin", source, i + 1); return false; }
+              open = 0;
+              continue;
+            }
+            if (open == 0) kept.Add(lines[i]);
+          }
+          if (open != 0) { Log.LogError("{0}:{1}: a kiln-internal begin without an end", source, open); return false; }
+          var target = Path.Combine(OutputDir, relative, name);
+          Directory.CreateDirectory(Path.GetDirectoryName(target));
+          File.WriteAllText(target, string.Join("\n", kept) + "\n");
+          var item = new TaskItem(target);
+          item.SetMetadata("PackagePath", "native/include/" + relative);
+          written.Add(item);
+        }
+        Written = written.ToArray();
+      ]]></Code>
+    </Task>
+  </UsingTask>
+  <Target Name="KilnStageAbiHeaders" BeforeTargets="_GetPackageFiles;GenerateNuspec">
+    <RemoveDir Directories="$(IntermediateOutputPath)kiln-abi" />
+    <KilnStripInternal Headers="@(KilnAbiHeader)" OutputDir="$(IntermediateOutputPath)kiln-abi">
+      <Output TaskParameter="Written" ItemName="_KilnAbiStaged" />
+    </KilnStripInternal>
+    <ItemGroup>
+      <None Include="@(_KilnAbiStaged)" Pack="true" Visible="false" />
+    </ItemGroup>
+  </Target>
   <!-- Repository mode: a fixed task location the mods' UsingTask can name at evaluation time. -->
   <PropertyGroup>
     <KilnSdkTasksDir Condition="'$(KILN_OUT)' != ''">$([MSBuild]::NormalizeDirectory('$(KILN_OUT)', 'sdk-tasks'))</KilnSdkTasksDir>

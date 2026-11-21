@@ -3,7 +3,11 @@
 // capability rows on an exact and an unknown build, the consumer helper's version/size checks, and the internal read
 // members (copy, ecs_view, ecs_write_supported, profile) wired to the real resolution over a fake engine, and the
 // gate members: caller-thread refusals from KilnApi.on_world_thread before any word, the RAII scope, and no KilnApi call
-// or log between acquire and release (every fake KilnApi function counts its calls).
+// or log between acquire and release (every fake KilnApi function counts its calls); the content worker's lifetime guard
+// members: argument checks, an owned guard's caller-thread refusals, a borrowed guard inside a gate's hold with no
+// KilnApi call, and a consumer of another build's layout refused; the engine call: the member at 136, its argument
+// checks, a call through the scope with no KilnApi call or log inside the hold, a fault latched and logged once after
+// the release, and the server world's STARTED clearing the latch.
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -21,8 +25,10 @@
 #include "fake_engine.h"
 #include "gate.h"
 #include "include/kiln_engine_native.h"
+#include "invoke.h"
 #include "profiles.g.h"
 #include "services/kiln_caps.h"
+#include "../../../core/src/launch_internal.h"
 
 extern "C" KilnResult KILN_CALL kiln_plugin_main(const KilnApi*, KilnOwner, KilnPluginInfo*);
 namespace kiln::engine::mem {
@@ -31,6 +37,10 @@ extern std::atomic<std::uint64_t> test_reads, test_cas;
 extern std::atomic<int> test_tracker_calls;
 extern thread_local int test_priority;
 extern thread_local int test_boosts;
+}
+namespace kiln::engine::call {
+extern std::atomic<Return (*)(std::uintptr_t, const std::uint64_t*)> test_call_hook;
+extern std::atomic<std::uint64_t> test_calls;
 }
 
 namespace {
@@ -44,6 +54,7 @@ ImageFacts g_facts;
 struct Row { uint32_t state, reason; std::string text; };
 std::map<std::string, Row> g_rows;
 std::map<std::string, const void*> g_tables;
+std::map<std::string, int> g_lookups;  // lookups per name (fresh() clears them)
 std::string g_last_log;
 bool g_refuse_internal = false;
 int g_api_calls = 0;      // every fake KilnApi function counts here
@@ -60,6 +71,7 @@ KilnResult KILN_CALL cap_report(KilnOwner, KilnStr n, uint32_t s, uint32_t r, Ki
 const void* KILN_CALL lookup(KilnStr n, uint32_t v) {
     ++g_api_calls;
     const std::string name(n.ptr, n.len);
+    ++g_lookups[name];
     if (name == KILN_CAPS_SERVICE) return &g_caps;
     const auto at = g_tables.find(name);
     if (at == g_tables.end()) return nullptr;
@@ -144,7 +156,7 @@ ImageFacts facts_of(const Profile& p) {
 }
 void fresh() {
     reset_for_tests();
-    g_rows.clear(); g_tables.clear(); g_last_log.clear(); g_logs.clear(); g_refuse_internal = false; g_world_thread = -1;
+    g_rows.clear(); g_tables.clear(); g_lookups.clear(); g_last_log.clear(); g_logs.clear(); g_refuse_internal = false; g_world_thread = -1;
 }
 KilnResult boot(const KilnApi& api) {
     g_info = KilnPluginInfo{};
@@ -175,6 +187,8 @@ std::uint64_t views() {
 // The read members on an exact build: the table reaches the real copy and resolution (resolve_test covers every
 // refusal; here: the wiring, argument checks, reasons and counters).
 void gate_members(const KilnEngineNativeApi& n, KilnApi& api, const Profile& p, fake::Engine& e, const EcsView& view);
+void guard_members(const KilnEngineNativeApi& n, KilnApi& api, const Profile& p, fake::Engine& e, const EcsView& view);
+void invoke_members(const KilnEngineNativeApi& n, const Profile& p, fake::Engine& e, const EcsView& view);
 void primitives(const KilnEngineNativeApi& n, KilnApi& api, const Profile& p) {
     const std::string id = std::string(p.id) + ": ";
     check(n.header.size == sizeof(KilnEngineNativeApi) && n.copy && n.ecs_view && n.ecs_write_supported && n.profile,
@@ -223,8 +237,293 @@ void primitives(const KilnEngineNativeApi& n, KilnApi& api, const Profile& p) {
                   reason == static_cast<std::uint32_t>(Reason::EcsThreadRegistryBusy),
               id + "a busy registry word refuses at once with ecs-thread-registry-busy");
     *fake::word(e.registry_word()) = 0;
+    guard_members(n, api, p, e, view);  // before gate_members, whose exit check closes the gate for good
+    invoke_members(n, p, e, view);
     gate_members(n, api, p, e, view);
     kiln::engine::mem::test_image = 0;
+}
+
+// The content worker's lifetime guard through the real table over a fake engine (resource_guard_test covers every
+// refusal of the guard itself).
+void guard_members(const KilnEngineNativeApi& n, KilnApi& api, const Profile& p, fake::Engine& e, const EcsView& view) {
+    const std::string id = std::string(p.id) + ": guard: ";
+    e.add_content_worker();
+    const auto words_free = [&] { return *fake::word(e.registry_word()) == 0 && *fake::word(e.scene_word()) == 0; };
+    check(n.header.size == sizeof(KilnEngineNativeApi) && n.resource_guard_acquire && n.resource_guard_validate &&
+              n.resource_guard_contains && n.resource_guard_release,
+          id + "the four members present");
+    // argument checks: refused before anything, the record untouched
+    {
+        ResourceGuard g{};
+        std::uint32_t reason = 77;
+        check(n.resource_guard_acquire(nullptr, e.service(), e.reader(), &g, &reason) == KILN_ERR_INVALID_ARGUMENT &&
+                  reason == 77,
+              id + "a record without its size refused");
+        g.size = sizeof g;
+        check(n.resource_guard_acquire(nullptr, 0, e.reader(), &g, &reason) == KILN_ERR_INVALID_ARGUMENT &&
+                  n.resource_guard_acquire(nullptr, e.service(), 0, &g, &reason) == KILN_ERR_INVALID_ARGUMENT &&
+                  n.resource_guard_acquire(nullptr, e.service(), e.reader(), nullptr, &reason) == KILN_ERR_INVALID_ARGUMENT &&
+                  n.resource_guard_acquire(nullptr, e.service(), e.reader(), &g, nullptr) == KILN_ERR_INVALID_ARGUMENT,
+              id + "a service or reader of 0 and NULL records refused");
+        EcsGate short_gate{};
+        short_gate.size = 8;
+        check(n.resource_guard_acquire(&short_gate, e.service(), e.reader(), &g, &reason) == KILN_ERR_INVALID_ARGUMENT &&
+                  !g.held && words_free(),
+              id + "a gate record of the wrong size refused");
+        check(!n.resource_guard_validate(nullptr) && !n.resource_guard_contains(nullptr, e.payload.at(), 1) &&
+                  !n.resource_guard_validate(&g) && !n.resource_guard_contains(&g, e.payload.at(), 1),
+              id + "validate and contains of NULL or an unheld record answer 0");
+        n.resource_guard_release(nullptr);
+        ResourceGuard odd{};
+        odd.size = 8;
+        odd.registry_lock = e.registry_word();
+        odd.owns_registry = 1;
+        n.resource_guard_release(&odd);
+        check(words_free() && odd.registry_lock == e.registry_word(), id + "release of NULL or a wrong-size record: a no-op");
+    }
+    // owned: the caller's thread from the core, before any engine read or CAS
+    for (const auto& [kind, want] : {std::pair{static_cast<int>(KILN_WORLD_SERVER), Reason::InFrame},
+                                     std::pair{static_cast<int>(KILN_WORLD_CLIENT), Reason::WorldThread},
+                                     std::pair{static_cast<int>(KILN_WORLD_PREDICTION), Reason::WorldThread}}) {
+        g_world_thread = kind;
+        ResourceGuard g{};
+        g.size = sizeof g;
+        std::uint32_t reason = 0;
+        const std::uint64_t reads = kiln::engine::mem::test_reads.load(), cas = kiln::engine::mem::test_cas.load();
+        check(n.resource_guard_acquire(nullptr, e.service(), e.reader(), &g, &reason) == KILN_ERR_UNAVAILABLE &&
+                  reason == static_cast<std::uint32_t>(want) && !g.held && kiln::engine::mem::test_reads.load() == reads &&
+                  kiln::engine::mem::test_cas.load() == cas && words_free(),
+              id + "owned on world kind " + std::to_string(kind) + ": " + reason_name(want) + " before any engine read");
+    }
+    g_world_thread = -1;
+    {
+        const auto saved = api.on_world_thread;
+        api.on_world_thread = nullptr;
+        ResourceGuardScope owned(n, e.service(), e.reader());
+        check(!owned.held() && owned.reason() == Reason::CallerThreadUnknown && words_free(),
+              id + "owned with no on_world_thread: refused (fail closed)");
+        api.on_world_thread = saved;
+    }
+    // owned through the scope
+    {
+        ResourceGuardScope owned(n, e.service(), e.reader());
+        check(owned.held() && owned.guard().owns_registry == 1 && *fake::word(e.registry_word()) == 1 && owned.validate() &&
+                  owned.contains(e.payload.at(), e.payload.size) && owned.payload() == e.payload.at(),
+              id + "owned: held through the table, the registry word Shared, valid, its payload");
+        ResourceGuardScope wrong(n, e.service() + 8, e.reader());
+        check(!wrong.held() && wrong.result() == KILN_ERR_UNAVAILABLE &&
+                  wrong.reason() == Reason::ResourceLifetimeServiceMismatch && *fake::word(e.registry_word()) == 1,
+              id + "owned for another service: refused with its reason, the first guard's share kept");
+    }
+    check(words_free(), id + "owned scopes released");
+    // borrowed inside a gate's hold: no KilnApi call and no log from the guard's acquire to its release
+    {
+        const std::string log_before = g_last_log;
+        EcsGateScope gate(n, view, 7, ++g_step);
+        const int calls = g_api_calls;
+        const std::uint64_t cas = kiln::engine::mem::test_cas.load();
+        ResourceGuardScope guard(n, gate, e.service(), e.reader());
+        const bool held = guard.held(), valid = guard.validate(), inside = guard.contains(e.payload.at(64), 64);
+        guard.release();
+        const int section_calls = g_api_calls - calls;
+        const bool words_held = *fake::word(e.registry_word()) == 1 &&
+                                *fake::word(e.scene_word()) == static_cast<std::int32_t>(0x80000000u);
+        check(gate.held() && held && valid && inside && guard.guard().size == sizeof(ResourceGuard),
+              id + "borrowed inside the gate's hold: held, valid, contains");
+        check(section_calls == 0 && g_last_log == log_before,
+              id + "borrowed: no KilnApi call and no log inside the hold (" + std::to_string(section_calls) + ")");
+        check(words_held && (p.layout.dedicated_server || kiln::engine::mem::test_cas.load() == cas),
+              id + "borrowed: no word of its own; its release leaves the gate holding both");
+    }
+    check(words_free(), id + "gate and borrowed guard released");
+    {
+        *fake::word(e.scene_word()) = 1;  // the update's frame: the gate is refused, so is a guard borrowing from it
+        EcsGateScope gate(n, view, 7, ++g_step);
+        ResourceGuardScope guard(n, gate, e.service(), e.reader());
+        check(!gate.held() && !guard.held() && guard.reason() == Reason::ResourceLifetimeGateNotHeld,
+              id + "borrowed from a refused gate: resource-lifetime-gate-not-held");
+        *fake::word(e.scene_word()) = 0;
+    }
+    check(words_free(), id + "all guard scopes released");
+}
+
+// The engine call through the real table (invoke_test covers every refusal and outcome of the call itself). The
+// recipe is the test's, over a code page in the fake image, through the seam the shipped kiln-engine.dll is built
+// without; the host's call hook stands in for the engine function.
+std::atomic<int> g_call_mode{0};  // 0 returns 0x1234, 1 faults
+std::uint64_t g_call_args[8];
+kiln::engine::call::Return call_hook(std::uintptr_t, const std::uint64_t* args) {
+    std::memcpy(g_call_args, args, sizeof g_call_args);
+    if (g_call_mode.load() == 1) return {0, 1, 0xC0000005u};
+    return {0x1234, 0, 0};
+}
+void invoke_members(const KilnEngineNativeApi& n, const Profile& p, fake::Engine& e, const EcsView& view) {
+    const std::string id = std::string(p.id) + ": invoke: ";
+    const auto words_free = [&] { return *fake::word(e.registry_word()) == 0 && *fake::word(e.scene_word()) == 0; };
+    const auto ref = [](Reason r) { return static_cast<std::uint32_t>(r); };
+    constexpr std::uint32_t returned = static_cast<std::uint32_t>(CallOutcome::Returned);
+    constexpr std::uint32_t uncertain = static_cast<std::uint32_t>(CallOutcome::Uncertain);
+    check(n.header.size == sizeof(KilnEngineNativeApi) && n.ecs_gate_invoke && sizeof(KilnEngineNativeApi) == 144 &&
+              offsetof(KilnEngineNativeApi, ecs_gate_invoke) == 136,
+          id + "the member at 136; the table is 144 bytes");
+    kiln::engine::call::test_call_hook = &call_hook;
+    g_call_mode = 0;
+    const std::size_t page_rva = (p.layout.image_size - 0x10000) & ~std::size_t{0xfff};
+    for (std::size_t i = 0; i < 64; ++i) fake::put<std::uint8_t>(e.image.at(page_rva + i), static_cast<std::uint8_t>(i * 13 + 5));
+    static CallRecipes recipes{};
+    recipes = CallRecipes{};
+    recipes.recipe[0].id = 1;
+    recipes.recipe[0].arg_count = 2;
+    recipes.recipe[0].result_bits = 64;
+    recipes.recipe[0].range_count = 1;
+    recipes.recipe[0].ranges[0] = {page_rva, 64};
+    std::vector<std::uint8_t> captured(64);
+    std::memcpy(captured.data(), reinterpret_cast<const void*>(e.image.at(page_rva)), 64);
+    KilnEngineCall status{};
+    status.size = sizeof status;
+    status.op = static_cast<std::uint32_t>(CallOp::Status);
+    status.recipe = 1;
+    KilnEngineCallResult out{};
+    out.size = sizeof out;
+    check(n.ecs_gate_invoke(nullptr, &status, &out) == KILN_ERR_UNAVAILABLE &&
+              out.reason == ref(Reason::EngineCallRecipeUnavailable) && !p.layout.calls.recipe[0].id,
+          id + "the ported profile has no recipe: Status says unavailable");
+    gate_invoke_set_test_recipes(&recipes);
+    check(n.ecs_gate_invoke(nullptr, &status, &out) == KILN_OK && out.outcome == returned && out.size == sizeof out,
+          id + "with the test recipes: Status OK without a gate");
+    KilnEngineCall call{};
+    call.size = sizeof call;
+    call.op = static_cast<std::uint32_t>(CallOp::Invoke);
+    call.recipe = 1;
+    call.arg_count = 2;
+    call.args[0] = 0x11;
+    call.args[1] = 0x22;
+    call.code = captured.data();
+    call.code_bytes = captured.size();
+    {
+        EcsGate unheld{};
+        unheld.size = sizeof unheld;
+        EcsGate odd{};
+        odd.size = 8;
+        KilnEngineCall short_call = call;
+        short_call.size = 8;
+        KilnEngineCallResult short_out{};
+        short_out.size = 8;
+        KilnEngineCall unknown = call;
+        unknown.op = 3;
+        KilnEngineCall latch = call;
+        latch.op = static_cast<std::uint32_t>(CallOp::Latch);
+        const auto calls = kiln::engine::call::test_calls.load();
+        check(n.ecs_gate_invoke(&unheld, nullptr, &out) == KILN_ERR_INVALID_ARGUMENT &&
+                  n.ecs_gate_invoke(&unheld, &call, nullptr) == KILN_ERR_INVALID_ARGUMENT &&
+                  n.ecs_gate_invoke(&unheld, &short_call, &out) == KILN_ERR_INVALID_ARGUMENT &&
+                  n.ecs_gate_invoke(&unheld, &call, &short_out) == KILN_ERR_INVALID_ARGUMENT &&
+                  n.ecs_gate_invoke(&unheld, &unknown, &out) == KILN_ERR_INVALID_ARGUMENT &&
+                  n.ecs_gate_invoke(nullptr, &call, &out) == KILN_ERR_INVALID_ARGUMENT &&
+                  n.ecs_gate_invoke(nullptr, &latch, &out) == KILN_ERR_INVALID_ARGUMENT &&
+                  n.ecs_gate_invoke(&odd, &call, &out) == KILN_ERR_INVALID_ARGUMENT,
+              id + "NULL or wrong-size records, an unknown op, and Invoke or Latch without a gate record: refused");
+        check(n.ecs_gate_invoke(&unheld, &call, &out) == KILN_ERR_UNAVAILABLE && out.outcome == 0 &&
+                  out.reason == ref(Reason::EngineCallGateNotHeld) && kiln::engine::call::test_calls.load() == calls &&
+                  !gate_calls_latched(),
+              id + "an unheld gate: engine-call-gate-not-held, nothing called");
+    }
+    // a call through the scope: nothing between acquire and release calls the KilnApi or logs
+    {
+        EcsGateScope scope(n, view, 7, ++g_step);
+        const int calls = g_api_calls;
+        const std::size_t logs = g_logs.size();
+        KilnEngineCallResult r{};
+        r.size = sizeof r;
+        const KilnResult rc = scope.invoke(call, r);
+        const bool held = scope.held();
+        const int section_calls = g_api_calls - calls;
+        const std::size_t section_logs = g_logs.size() - logs;
+        scope.release();
+        check(held && rc == KILN_OK && r.outcome == returned && r.value == 0x1234 && g_call_args[0] == 0x11 &&
+                  g_call_args[1] == 0x22 && !g_call_args[2],
+              id + "called through the scope: returned, the arguments passed");
+        check(section_calls == 0 && section_logs == 0 && g_logs.size() == logs,
+              id + "no KilnApi call and no log inside the hold, none at the release (" + std::to_string(section_calls) + ")");
+    }
+    check(words_free(), id + "released");
+    // a fault: latched; logged once, after the release, never inside the hold
+    g_call_mode = 1;
+    {
+        EcsGateScope scope(n, view, 7, ++g_step);
+        const int calls = g_api_calls;
+        const std::size_t logs = g_logs.size();
+        KilnEngineCallResult r{};
+        r.size = sizeof r;
+        const KilnResult rc = scope.invoke(call, r);
+        const bool held = scope.held();
+        const int section_calls = g_api_calls - calls;
+        const std::size_t section_logs = g_logs.size() - logs;
+        scope.release();
+        check(held && rc == KILN_ERR_UNAVAILABLE && r.outcome == uncertain && r.faulted == 1 &&
+                  r.exception == 0xC0000005u && r.reason == ref(Reason::EngineCallFaulted) && gate_calls_latched(),
+              id + "a fault: Uncertain, latched; the gate still held until the scope releases it");
+        check(section_calls == 0 && section_logs == 0, id + "no KilnApi call and no log inside the hold after a fault");
+        const bool one = g_logs.size() == logs + 1 && g_logs.back().first == KILN_LOG_ERROR &&
+                         g_logs.back().second.find("engine call 1 ") != std::string::npos &&
+                         g_logs.back().second.find("engine-call-faulted") != std::string::npos &&
+                         g_logs.back().second.find("0xc0000005") != std::string::npos;
+        check(one, id + "logged once at the release, at error level, with the recipe, reason and code: " +
+                       (g_logs.size() > logs ? g_logs.back().second : std::string("(none)")));
+    }
+    const std::size_t after_fault = g_logs.size();
+    check(words_free(), id + "released after the fault");
+    // the next hold of the same session: refused, nothing called, no new log
+    g_call_mode = 0;
+    {
+        EcsGateScope scope(n, view, 7, ++g_step);
+        const auto calls = kiln::engine::call::test_calls.load();
+        KilnEngineCallResult r{};
+        r.size = sizeof r;
+        check(scope.invoke(call, r) == KILN_ERR_UNAVAILABLE && r.reason == ref(Reason::EngineCallLatched) &&
+                  kiln::engine::call::test_calls.load() == calls,
+              id + "the next hold: engine-call-latched, nothing called");
+    }
+    check(g_logs.size() == after_fault && n.ecs_gate_invoke(nullptr, &status, &out) == KILN_ERR_UNAVAILABLE &&
+              out.reason == ref(Reason::EngineCallLatched),
+          id + "no second log line; Status says latched");
+    // the server world's next STARTED clears it
+    world(KILN_WORLD_STARTED);
+    {
+        EcsGateScope scope(n, view, 7, ++g_step);
+        KilnEngineCallResult r{};
+        r.size = sizeof r;
+        check(n.ecs_gate_invoke(nullptr, &status, &out) == KILN_OK && scope.invoke(call, r) == KILN_OK && r.value == 0x1234,
+              id + "the next STARTED clears the latch: Status OK, the call returns");
+        // op Latch through the scope: a member's own check failed
+        KilnEngineCall latch = call;
+        latch.op = static_cast<std::uint32_t>(CallOp::Latch);
+        check(scope.invoke(latch, r) == KILN_OK && gate_calls_latched(), id + "op Latch inside the hold latches");
+        const std::size_t logs = g_logs.size();
+        scope.release();
+        check(g_logs.size() == logs + 1 && g_logs.back().second.find("engine-call-member-uncertain") != std::string::npos,
+              id + "and is logged once at the release");
+    }
+    world(KILN_WORLD_STARTED);
+    // the server world stopping while the hold is in place: refused kiln-gate-closed, nothing called
+    {
+        EcsGateScope scope(n, view, 7, ++g_step);
+        std::thread stopping([] { world(KILN_WORLD_STOPPING); });
+        stopping.join();
+        const auto calls = kiln::engine::call::test_calls.load();
+        KilnEngineCallResult r{};
+        r.size = sizeof r;
+        check(scope.invoke(call, r) == KILN_ERR_UNAVAILABLE && r.reason == ref(Reason::KilnGateClosed) &&
+                  kiln::engine::call::test_calls.load() == calls && !gate_calls_latched(),
+              id + "STOPPING during the hold: kiln-gate-closed, nothing called, nothing latched");
+    }
+    world(KILN_WORLD_STARTED);
+    check(words_free(), id + "all scopes released");
+    gate_invoke_set_test_recipes(nullptr);
+    check(n.ecs_gate_invoke(nullptr, &status, &out) == KILN_ERR_UNAVAILABLE &&
+              out.reason == ref(Reason::EngineCallRecipeUnavailable),
+          id + "without the test recipes: the profile's (none) again");
+    kiln::engine::call::test_call_hook = nullptr;
 }
 
 // The gate members through the real table over a fake engine (gate_test covers every refusal of the gate itself).
@@ -423,6 +722,27 @@ void exact_build(const Profile& p) {
     check(!kiln_engine_native(&api, 7, sizeof(KilnEngineNativeApi), why, sizeof why), "truncated internal table refused");
     copy = *native;
     check(!kiln_engine_native(&api, 7, sizeof copy + 8, why, sizeof why), "a member past the table refused");
+    // The typed resourceLayout changed Layout's size: a table from a build before it is refused, so a consumer never
+    // reads the profile through a layout of another shape
+    static_assert(sizeof(Layout) != 984, "the Layout before the typed resourceLayout was 984 bytes");
+    copy = *native; copy.layout_size = 984;
+    check(!kiln_engine_native(&api, 7, offsetof(KilnEngineNativeApi, ecs_write_supported), why, sizeof why) &&
+              std::strstr(why, "another Kiln build"),
+          "a table with the layout size before the typed resourceLayout (984) refused: a mixed build");
+    // The engine call appended ecs_gate_invoke (136 -> 144) and the engine-call recipes to the Layout: a table from a build before it
+    // is refused for an engine-call consumer, and its layout size for every consumer
+    copy = *native; copy.header.size = offsetof(KilnEngineNativeApi, ecs_gate_invoke);  // a table before the engine call (136)
+    check(!kiln_engine_native(&api, 7, sizeof(KilnEngineNativeApi), why, sizeof why) &&
+              kiln_engine_native(&api, 7, offsetof(KilnEngineNativeApi, ecs_gate_invoke), why, sizeof why) == &copy,
+          "a table without the engine-call member: refused for an engine-call consumer, accepted for a guard one");
+    copy = *native; copy.layout_size = sizeof(Layout) - sizeof(CallRecipes);
+    check(!kiln_engine_native(&api, 7, offsetof(KilnEngineNativeApi, ecs_write_supported), why, sizeof why) &&
+              std::strstr(why, "another Kiln build"),
+          "a table with the layout size before the engine call refused: a mixed build");
+    copy = *native; copy.header.size = offsetof(KilnEngineNativeApi, resource_guard_acquire);  // a table before the resource guard (104)
+    check(!kiln_engine_native(&api, 7, sizeof(KilnEngineNativeApi), why, sizeof why) &&
+              kiln_engine_native(&api, 7, offsetof(KilnEngineNativeApi, resource_guard_acquire), why, sizeof why) == &copy,
+          "a table without the guard members: refused for a guard consumer, accepted for a gate-only one");
     KilnPluginInfo again{}; again.size = sizeof again;
     check(kiln_plugin_main(&api, 8, &again) == KILN_ERR_INVALID_ARGUMENT, "second boot refused");
     g_tables[KILN_ENGINE_NATIVE_SERVICE] = native;
@@ -542,6 +862,113 @@ void raise_switch(const Profile& p) {
     g_data_dir.clear();
 }
 
+// The dialect owner: kiln.engine resolves kiln.internal.launch's dialect_owner once, at its init, through the
+// services' KilnApi; the gate reads it at each acquire, because the core designates the owner later (when it loads the
+// plugin, after every service). The designated owner is never latched; everyone else keeps the latch. An absent, older,
+// newer or malformed table leaves the gate exactly as on main.
+std::atomic<KilnOwner> g_dialect{0};
+KilnOwner KILN_CALL dialect_owner_fn() { return g_dialect.load(std::memory_order_acquire); }
+struct DialectRun {
+    bool booted = false, viewed = false;
+    int lookups_at_init = -1, lookups_after = -1;
+    bool busy_first = false;   // both candidates refused kiln-gate-busy while a third owner held the gate
+    bool admission_kept = false;  // the records' admission is still the caller's (KilnMod)
+    bool spared = false;       // the designated candidate was admitted again in the same step
+    bool other_latched = false;  // the other owner got kiln-gate-busy-this-step
+    size_t logs = 0;
+};
+constexpr KilnOwner kDialectCandidate = 30, kOtherOwner = 31;
+// One boot with `table` under kiln.internal.launch (nullptr: the core has none), then `designate` as the core does when
+// it loads the plugin, then one step of the gate: a holder, the candidate and another owner busy, then both again.
+DialectRun dialect_run(const Profile& p, const void* table, KilnOwner designate) {
+    fresh();
+    g_facts = facts_of(p);
+    g_dialect = 0;
+    if (table) g_tables[KILN_LAUNCH_INTERNAL_SERVICE] = table;
+    KilnApi api = make_api();
+    DialectRun r;
+    r.booted = boot(api) == KILN_OK;
+    r.lookups_at_init = g_lookups[KILN_LAUNCH_INTERNAL_SERVICE];
+    r.logs = g_logs.size();
+    g_dialect = designate;
+    fake::Engine e(p.layout);
+    kiln::engine::mem::test_image = e.image.at();
+    char why[160]{};
+    const KilnEngineNativeApi* n = kiln_engine_native(&api, 7, sizeof(KilnEngineNativeApi), why, sizeof why);
+    EcsView view{};
+    std::uint32_t reason = 0;
+    r.viewed = n && n->ecs_view(0, &view, &reason) == KILN_OK;
+    if (r.viewed) {
+        const std::uint64_t step = ++g_step;
+        {
+            EcsGateScope holder(*n, view, 7, step);
+            EcsGateScope candidate(*n, view, kDialectCandidate, step);
+            EcsGateScope other(*n, view, kOtherOwner, step);
+            r.busy_first = holder.held() && candidate.reason() == Reason::KilnHolderBusy &&
+                           other.reason() == Reason::KilnHolderBusy;
+            r.admission_kept = candidate.gate().admission == static_cast<std::uint32_t>(GateAdmission::KilnMod) &&
+                               other.gate().admission == static_cast<std::uint32_t>(GateAdmission::KilnMod);
+        }
+        {
+            EcsGateScope candidate(*n, view, kDialectCandidate, step);
+            r.spared = candidate.held();
+        }
+        EcsGateScope other(*n, view, kOtherOwner, step);
+        r.other_latched = !other.held() && other.reason() == Reason::KilnBusyLatched;
+    }
+    r.lookups_after = g_lookups[KILN_LAUNCH_INTERNAL_SERVICE];
+    check(*fake::word(e.registry_word()) == 0 && *fake::word(e.scene_word()) == 0,
+          std::string(p.id) + ": dialect owner: words free after the run");
+    kiln::engine::mem::test_image = 0;
+    g_dialect = 0;
+    return r;
+}
+void dialect_owner(const Profile& p) {
+    const std::string id = std::string(p.id) + ": dialect owner: ";
+    const KilnLaunchInternalApi good = {{sizeof(KilnLaunchInternalApi), KILN_LAUNCH_INTERNAL_VERSION}, &dialect_owner_fn};
+    // designated after kiln.engine's init: never latched; its refusal by another Kiln holder was retried (gate_test
+    // counts the attempts); another owner in the same step is latched
+    DialectRun d = dialect_run(p, &good, kDialectCandidate);
+    check(d.booted && d.viewed && d.busy_first && d.admission_kept, id + "designated: busy behind another Kiln holder, "
+                                                                         "the records' admission left as the caller set it");
+    check(d.spared, id + "designated after init: admitted again in the same step (not latched)");
+    check(d.other_latched, id + "another owner in the same step gets kiln-gate-busy-this-step");
+    check(d.lookups_at_init == 1 && d.lookups_after == 1,
+          id + "kiln.internal.launch is looked up once, at init, never per acquire (" + std::to_string(d.lookups_at_init) +
+              " at init, " + std::to_string(d.lookups_after) + " after)");
+    // main's gate, with the rule's lookup the only difference
+    DialectRun absent = dialect_run(p, nullptr, kDialectCandidate);
+    check(absent.booted && absent.viewed && absent.busy_first && !absent.spared && absent.other_latched &&
+              absent.lookups_at_init == 1 && absent.lookups_after == 1,
+          id + "no kiln.internal.launch (an older core): every owner latched, as on main");
+    check(absent.logs == d.logs, id + "no log line either way (" + std::to_string(absent.logs) + " and " +
+                                     std::to_string(d.logs) + " lines at boot)");
+    DialectRun nobody = dialect_run(p, &good, 0);
+    check(nobody.viewed && !nobody.spared && nobody.other_latched, id + "nobody designated: every owner latched");
+    DialectRun another = dialect_run(p, &good, kDialectCandidate + 100);
+    check(another.viewed && !another.spared && another.other_latched, id + "another owner designated: the candidate is latched");
+    KilnLaunchInternalApi older = good;
+    older.header.version = 0;
+    DialectRun o = dialect_run(p, &older, kDialectCandidate);
+    check(o.viewed && !o.spared && o.other_latched, id + "an older table (version 0): ignored, main's gate");
+    KilnLaunchInternalApi newer = good;
+    newer.header.version = KILN_LAUNCH_INTERNAL_VERSION + 1;
+    DialectRun nw = dialect_run(p, &newer, kDialectCandidate);
+    check(nw.viewed && !nw.spared && nw.other_latched, id + "a table of another version: ignored, main's gate");
+    KilnLaunchInternalApi truncated = good;
+    truncated.header.size = offsetof(KilnLaunchInternalApi, dialect_owner);
+    DialectRun tr = dialect_run(p, &truncated, kDialectCandidate);
+    check(tr.viewed && !tr.spared && tr.other_latched, id + "a table too short for dialect_owner: ignored, main's gate");
+    KilnLaunchInternalApi empty = good;
+    empty.dialect_owner = nullptr;
+    DialectRun em = dialect_run(p, &empty, kDialectCandidate);
+    check(em.viewed && !em.spared && em.other_latched, id + "a table without dialect_owner: ignored, no call, main's gate");
+    // a later boot without the table forgets the accessor of the earlier one
+    dialect_run(p, &good, kDialectCandidate);
+    DialectRun after = dialect_run(p, nullptr, kDialectCandidate);
+    check(!after.spared && after.other_latched, id + "the next boot without the table: main's gate again");
+}
+
 void internal_refused() {
     fresh();
     g_facts = facts_of(generated::kProfiles[0]);
@@ -564,6 +991,7 @@ int main() {
     g_caps.report = &cap_report;
     refusals();
     for (const auto& p : generated::kProfiles) exact_build(p);
+    for (const auto& p : generated::kProfiles) dialect_owner(p);
     unknown_build();
     raise_switch(generated::kProfiles[0]);
     internal_refused();

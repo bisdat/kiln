@@ -51,20 +51,26 @@ public sealed partial class ClientPassMod
             sub.Dispose();
             if (Items.ValuesOf(sword) is not null) Items.SetPower(sword, 1);
         });
-        c.Instruct($"Equip the new sword ({ValuesSword}) and hit one creature (a training dummy or a weak enemy) three times. Press continue.");
-        await c.Verdict();
+        int Hits(int ph) { lock (hits) return hits.Count(h => h.Phase == ph); }
+        c.Instruct($"Equip the new sword ({ValuesSword}) and hit one creature (a training dummy or a weak enemy) three times, " +
+                   "watching how much each hit takes off. The check goes on by itself after the third hit.");
+        await c.Until(() => Hits(1) >= 3, TimeSpan.FromMinutes(5), "three hits with the sword at power x1");
+        await c.Delay(TimeSpan.FromSeconds(2));  // a swing's late damage still counts as round one
         var p = Items.SetPower(sword, 3);
         c.Expect(p.Ok, "the sword's power x3", p.ToString());
         phase = 2;
-        c.Instruct("Hit the same creature three more times with the same sword. Press continue.");
-        await c.Verdict();
+        c.Instruct("The sword now has power x3. Hit the same creature three more times with the same sword. The check goes on by " +
+                   "itself after the third hit.");
+        await c.Until(() => Hits(2) >= 3, TimeSpan.FromMinutes(5), "three hits with the sword at power x3");
+        await c.Delay(TimeSpan.FromSeconds(2));
         List<(int Phase, EntityId Target, int Amount)> seen;
         lock (hits) seen = [.. hits];
         double Avg(int ph) => seen.Where(h => h.Phase == ph).Select(h => (double)h.Amount).DefaultIfEmpty(0).Average();
         var (a1, a3) = (Avg(1), Avg(2));
         c.Expect(a1 > 0 && a3 > 0, "hits seen in both phases", $"{seen.Count(h => h.Phase == 1)} then {seen.Count(h => h.Phase == 2)} hits");
         c.Expect(a1 > 0 && a3 >= 2 * a1, "the damage grew about threefold", $"average {a1:0.#} at x1, {a3:0.#} at x3");
-        c.Instruct("Did the damage numbers you saw (or the creature's health bar) drop clearly faster in the second round?");
+        c.Instruct("Pass if the damage numbers you saw (or the creature's health bar) dropped clearly faster in the second round " +
+                   "than in the first; otherwise Fail with a note saying what you saw.");
         await c.Verdict();
         foreach (var (item, count) in given) await Items.Take(c.Player, item, count);
     }
@@ -93,18 +99,24 @@ public sealed partial class ClientPassMod
             sub.Dispose();
             if (Items.ValuesOf(chest) is not null) Items.SetArmor(chest, 1);
         });
-        c.Instruct($"Wear the new chest piece ({ValuesChest}) and let one weak creature hit you three times. Press continue.");
-        await c.Verdict();
+        int Taken(int ph) { lock (taken) return taken.Count(h => h.Phase == ph); }
+        c.Instruct($"Wear the new chest piece ({ValuesChest}) and let one weak creature hit you three times, watching how much health " +
+                   "each hit takes. Also note the character screen's armour value. The check goes on by itself after the third hit.");
+        await c.Until(() => Taken(1) >= 3, TimeSpan.FromMinutes(5), "three hits taken at armour x1");
+        await c.Delay(TimeSpan.FromSeconds(2));
         var a = Items.SetArmor(chest, 10);
         c.Expect(a.Ok, "the chest piece's armour x10", a.ToString());
         phase = 2;
-        c.Instruct("Let the same creature hit you three more times. Press continue.");
-        await c.Verdict();
+        c.Instruct("The chest piece now has armour x10. Let the same creature hit you three more times. The check goes on by itself " +
+                   "after the third hit.");
+        await c.Until(() => Taken(2) >= 3, TimeSpan.FromMinutes(5), "three hits taken at armour x10");
+        await c.Delay(TimeSpan.FromSeconds(2));
         List<(int Phase, int Amount)> seen;
         lock (taken) seen = [.. taken];
         double Avg(int ph) => seen.Where(h => h.Phase == ph).Select(h => (double)h.Amount).DefaultIfEmpty(0).Average();
         c.Expect(Avg(1) > 0 && Avg(2) > 0 && Avg(2) < Avg(1), "the damage taken went down", $"average {Avg(1):0.#} at x1, {Avg(2):0.#} at x10");
-        c.Instruct("Did you lose clearly less health per hit in the second round? Does the character screen's armour value change too (say what it shows)?");
+        c.Instruct("Pass if you lost clearly less health per hit in the second round; otherwise Fail. Either way, in the note say " +
+                   "what the character screen's armour value shows now compared with before.");
         await c.Verdict();
         foreach (var (item, count) in given) await Items.Take(c.Player, item, count);
     }
@@ -123,20 +135,23 @@ public sealed partial class ClientPassMod
             return;
         }
         var g0 = Items.GearOf(sword);
+        var watch = WatchDetail(c, Items.Lookup(ValuesSword)?.Id ?? default);
         c.OnEnd(() =>
         {
             if (Items.ValuesOf(sword) is null) return;
             Items.SetPower(sword, 1);
             _ = Items.SetDurabilityMax(sword, null);
         });
-        c.Instruct($"Open the backpack and select the new sword ({ValuesSword}); note its damage number and its LEVEL line. Press continue.");
-        await c.Verdict();
+        c.Instruct($"Open the backpack and select the new sword ({ValuesSword}); note its damage number and its LEVEL line. " +
+                   Then(watch, "its detail view has shown for ten seconds", 60));
+        await UntilViews(c, watch, 1, "the sword's detail view shown", 50, linger: 10);
         var p = Items.SetPower(sword, 2);
         var lv = await Items.SetLevel(sword, 40, new GearWriteOptions { AnyLevel = true });
         var dm = await Items.SetDurabilityMax(sword, 2000);
         c.Expect(p.Ok && lv.Ok && dm.Ok, "power x2, level 40, max durability 2000", $"{p}; {lv}; {dm}");
-        c.Instruct("Select another item and the sword again. Does its damage number read about twice what it was (scaled by Kiln on this game), " +
-                   $"its LEVEL line 40 (was {g0?.Level}), and its durability bar full at a larger number if the game shows one? Say what each shows.");
+        c.Instruct("The sword has changed. Select another item and the sword again. Pass only if its damage number reads about twice " +
+                   $"what it was (scaled by Kiln on this game) and its LEVEL line reads 40 (was {g0?.Level}); in the note say what " +
+                   "each shows and whether the durability bar is full at a larger number (if the game shows one).");
         await c.Verdict();
         foreach (var (item, count) in given) await Items.Take(c.Player, item, count);
     }

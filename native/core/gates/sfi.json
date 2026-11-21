@@ -1,0 +1,5 @@
+{ "gates": [
+    { "name": "kiln-sfi.sf18",
+      "checks": ["sfi-sf18-final"],
+      "note": "Anything that needs ShroudForge 1.8. The release policy's immutable veto holds it in every build, whatever kiln.json \"preview\" says, until a Kiln build records a final ShroudForge 1.8.x." }
+] }

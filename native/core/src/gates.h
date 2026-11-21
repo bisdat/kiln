@@ -35,7 +35,10 @@ std::vector<Held> held();
 // `name` is held. Any thread, including before or during boot configuration.
 bool is_held(std::string_view name);
 
-// Host tests: another list than the compiled one (nullptr: the compiled one). Call before configure().
+// Host tests: another list than the compiled one (nullptr: the compiled one). Call before configure(). The release
+// policy's rows (sfi_release_policy.h) join the compiled list only.
 void use_list_for_tests(const Gate* list);
+// Host tests: another list, with the release policy's rows as for the compiled list (nullptr: the compiled one).
+void use_policy_list_for_tests(const Gate* list);
 
 }  // namespace kiln::gates

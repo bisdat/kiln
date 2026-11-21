@@ -52,12 +52,28 @@ public sealed partial class ClientPassMod
             if (g.Succeeded) given.Add((g.Item, 1));
             c.Expect(g.Succeeded, $"{item} given", g.ToString());
         }
-        c.Instruct($"Open your inventory and look at the new sword ({GearSword}): its tooltip should read damage 77 (the game's own is {before.Item1}). " +
-                   $"Then look at the new chest piece ({GearChest}): its physical armour should read 99 (the game's own is {before.Item2}). Is that what you see?");
-        await c.Verdict();
+        var swordId = Items.Lookup(GearSword)?.Id ?? default;
+        var chestId = Items.Lookup(GearChest)?.Id ?? default;
+        using (var seenSword = new DetailWatch(swordId))
+        using (var seenChest = new DetailWatch(chestId))
+        {
+            var watched = seenSword.Ok && seenChest.Ok;
+            c.Instruct($"Open your inventory and look at the new sword ({GearSword}): its tooltip should read damage 77 (the game's own is {before.Item1}). " +
+                       $"Then look at the new chest piece ({GearChest}): its physical armour should read 99 (the game's own is {before.Item2}). " +
+                       "Remember what each shows. " +
+                       (watched ? "The check takes the values back by itself ten seconds after you have looked at both."
+                                : "The check takes the values back by itself in 90 seconds."));
+            if (watched)
+                await c.Until(() => seenSword.Views > 0 && seenChest.Views > 0, TimeSpan.FromMinutes(5), "both items' detail views shown");
+            else
+                await c.Delay(TimeSpan.FromSeconds(80));
+            await c.Delay(TimeSpan.FromSeconds(10));
+        }
         sword.Reset();
         chest.Reset();
-        c.Instruct($"The values are taken back. Do the same two items now read the game's own numbers again (damage {before.Item1}, physical armour {before.Item2})?");
+        c.Instruct($"The values are taken back. Select another item, then the same two items again. Pass only if both held: (1) before, " +
+                   $"the sword read damage 77 and the chest piece physical armour 99; (2) now they read the game's own numbers again " +
+                   $"(damage {before.Item1}, physical armour {before.Item2}). Otherwise Fail with a note naming which part and what you saw.");
         await c.Verdict();
         foreach (var (item, count) in given) await Items.Take(p, item, count);
     }
