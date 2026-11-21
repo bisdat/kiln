@@ -170,7 +170,12 @@ bool set_for_lab_impl(uintptr_t world, KilnEntity entity, const char* text, char
     }
     PtrSize ps{};
     E.get_component(&ps, world, kHashCustomPlayerString, entity);
-    if (ps.ptr && ps.size >= 8) {
+    if (ps.ptr && ps.size >= 8 && E.write_component_tick) {
+        // the handler's tracked write (WriteOther with the world's tracker), so the save and players get it
+        reinterpret_cast<PtrSize*(__fastcall*)(PtrSize*, uintptr_t, uint32_t, uint32_t)>(E.write_component_tick)(&ps, world,
+                                                                                                         kHashCustomPlayerString, entity);
+        if (ps.ptr && ps.size >= 8) std::memcpy(ps.ptr, &id, 8);
+    } else if (ps.ptr && ps.size >= 8) {
         std::memcpy(ps.ptr, &id, 8);
     } else {
         const TextView data{reinterpret_cast<const char*>(&id), 8};
@@ -180,6 +185,109 @@ bool set_for_lab_impl(uintptr_t world, KilnEntity entity, const char* text, char
     return true;
 }
 }  // namespace
+
+// ---- v9: the game side of a rename (rename.cpp runs it, rename_logic.h decides) ----
+// The same calls as the game's rename handler (the message dispatcher's case for CustomPlayerStringClientMessage,
+// docs/re/items.md section 14): the tick-thread tracked write of the name component (items/WriteComponentTick, the
+// world's own tracker: replication and the save), set_string with the old id it releases, AddComponent for an object
+// that has never had a name. Each is guarded; a fault reports false.
+namespace {
+using WriteTickFn = PtrSize*(__fastcall*)(PtrSize* out, uintptr_t world, uint32_t hash, uint32_t entity);
+
+bool table_has_impl(const uint8_t* map, uint64_t key) {
+    const uint64_t cap = rdn<uint64_t>(map, E.hmap_capacity);
+    const auto* bits = rdn<const uint64_t*>(map, E.hmap_bits);
+    const auto* keys = rdn<const uint64_t*>(map, E.hmap_keys);
+    if (!bits || !keys || cap == 0 || (cap & (cap - 1)) != 0 || cap > (1ull << 24)) return false;
+    uint64_t idx = static_cast<uint32_t>(key) & (cap - 1);
+    for (uint64_t probe = 0; probe < cap; ++probe) {
+        if (!((bits[idx >> 6] >> (idx & 63)) & 1)) return false;
+        if (keys[idx] == key) return true;
+        idx = (idx + 1 < cap) ? idx + 1 : 0;
+    }
+    return false;
+}
+}  // namespace
+
+bool name_component(uintptr_t world, KilnEntity entity, bool* has, uint64_t* id) {
+    *has = false;
+    *id = 0;
+    if (!E.rename_ok || !world) return false;
+    __try {
+        PtrSize ps{};
+        E.get_component(&ps, world, kHashCustomPlayerString, entity);
+        if (ps.ptr && ps.size >= 8) {
+            *has = true;
+            *id = rdn<uint64_t>(ps.ptr, 0);
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool names_table(uintptr_t world, uint64_t id, bool* holds, uint32_t* used, uint32_t* limit) {
+    *holds = false;
+    *used = 0;
+    *limit = 0;
+    if (!E.rename_ok || !world) return false;
+    const uintptr_t strings = table_for(world);
+    if (!strings) return false;
+    __try {
+        const auto* base = reinterpret_cast<const uint8_t*>(strings);
+        *holds = table_has_impl(base + (E.strings_bitmap - E.hmap_bits), id);
+        *used = rdn<uint32_t>(base, E.strings_used);
+        const uint32_t pool = rdn<uint32_t>(base, E.strings_pool_cap);
+        // the insert refuses at the fixed limit, and when the record pool's count reaches its capacity
+        *limit = static_cast<uint32_t>(E.strings_limit) < pool || pool == 0 ? static_cast<uint32_t>(E.strings_limit) : pool;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool names_set_string(uintptr_t world, uint64_t old_id, const char* text, uint32_t len, uint8_t* error, uint64_t* id) {
+    *error = 0;
+    *id = 0;
+    if (!E.rename_ok || !world || len > KILN_ITEMS_NAME_CAPACITY) return false;  // set_string stops the server past its record
+    const uintptr_t strings = table_for(world);
+    if (!strings) return false;
+    __try {
+        alignas(16) uint8_t out[32] = {};
+        const TextView tv{len ? text : "", len};
+        reinterpret_cast<SetStringFn>(E.set_string)(out, strings, old_id, &tv);
+        *error = out[0];
+        *id = rdn<uint64_t>(out, 8);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        set_detail("set_string faulted during a rename");
+        return false;
+    }
+}
+
+bool names_write_id(uintptr_t world, KilnEntity entity, uint64_t id) {
+    if (!E.rename_ok || !world || !E.write_component_tick) return false;
+    __try {
+        PtrSize ps{};
+        reinterpret_cast<WriteTickFn>(E.write_component_tick)(&ps, world, kHashCustomPlayerString, entity);
+        if (!ps.ptr || ps.size < 8) return false;
+        std::memcpy(ps.ptr, &id, 8);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool names_add_id(uintptr_t world, KilnEntity entity, uint64_t id) {
+    if (!E.rename_ok || !world || !E.add_component) return false;
+    __try {
+        const TextView data{reinterpret_cast<const char*>(&id), 8};
+        reinterpret_cast<AddComponentFn>(E.add_component)(world, entity, kHashCustomPlayerString, &data);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 
 bool name_set_for_lab(uintptr_t world, KilnEntity entity, const char* text, char* msg, uint32_t cap) {
     __try {

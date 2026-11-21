@@ -18,6 +18,15 @@ void names_world_closed();                      // forget the cached table point
 uint32_t names_found();                         // lookups that found a name
 void names_detail(char* out, uint32_t cap);     // why names are off or what the table looks like
 
+// v9 (since 0.2.0-dev.30.3): the game side of a rename, tick thread, guarded (false: the call could not be made). The
+// name component (has it, its id); the string table (holds `id`, records in use, its limit); set_string with the id it
+// releases (its error byte and the new id); the tracked write of the id; AddComponent with the id.
+bool name_component(uintptr_t world, KilnEntity entity, bool* has, uint64_t* id);
+bool names_table(uintptr_t world, uint64_t id, bool* holds, uint32_t* used, uint32_t* limit);
+bool names_set_string(uintptr_t world, uint64_t old_id, const char* text, uint32_t len, uint8_t* error, uint64_t* id);
+bool names_write_id(uintptr_t world, KilnEntity entity, uint64_t id);
+bool names_add_id(uintptr_t world, KilnEntity entity, uint64_t id);
+
 // Lab: names `entity` through the game's own set_string and writes the id into its component. Returns a message.
 bool name_set_for_lab(uintptr_t world, KilnEntity entity, const char* text, char* msg, uint32_t cap);
 

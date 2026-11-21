@@ -143,7 +143,7 @@ uint64_t fnv1a64(const uint8_t* text, size_t len);
 // Looks for a name record for `key` inside the `size` bytes at `rec` (which live at address `addr`, so the record's
 // self-pointer can be checked): `{u64 key; char* text = &record + 0x28; u32 len; u32 pad; u64 capacity = 0x100; ...;
 // char text[256]}`, found at any 8-aligned offset below `max_offset`. Accepts it only when the key matches, the text is
-// 1..255 bytes, NUL-terminated and its FNV-1a 64 is the key. On success copies the text to `out` (NUL-terminated,
+// 1..256 bytes, NUL-terminated and its FNV-1a 64 is the key. On success copies the text to `out` (NUL-terminated,
 // capacity `out_cap`), sets *len to its full length and *offset to where the record starts, and returns true.
 bool parse_name_record(const uint8_t* rec, size_t size, uintptr_t addr, uint64_t key, size_t max_offset, char* out,
                        size_t out_cap, uint32_t* len, size_t* offset);
