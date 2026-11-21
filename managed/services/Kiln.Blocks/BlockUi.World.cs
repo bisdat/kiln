@@ -31,7 +31,7 @@ public static partial class BlockUi
     {
         UiWorldCaps.Require();
         var r = UiWorldSnapshotNative.Read(UiWorldSnapshotNative.OwnOwner) ?? new UiWorldReadResult(false, "Unavailable", null);
-        if (r is { Ok: false, Reason: "Unavailable" } && UiWorldSnapshotNative.T == null)
+        if (r is { Ok: false, Reason: "Unavailable" } && !UiWorldSnapshotNative.Present)
             throw ServiceCaps.Unavailable(UiWorldCaps.World, "kiln.ui.snapshot is not here");
         return r;
     }

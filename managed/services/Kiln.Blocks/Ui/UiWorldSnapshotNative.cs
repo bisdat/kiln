@@ -15,6 +15,9 @@ namespace Kiln;
 
 internal static unsafe class UiWorldSnapshotNative
 {
+    /// <summary>kiln.ui.snapshot's table is here (for callers outside an unsafe context).</summary>
+    internal static bool Present => T != null;
+
     public const string Service = "kiln.ui.snapshot";
     public const uint Version = 1;
     public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5,
@@ -341,7 +344,7 @@ internal static class UiWorldCaps
 
     private static void Report()
     {
-        if (UiWorldSnapshotNative.T == null)
+        if (!UiWorldSnapshotNative.Present)
         {
             var (reason, text) = Client.Available && !Client.IsClient
                 ? (CapabilityReason.WrongSide, "live game values are client only (a dedicated server has no local player)")
