@@ -481,6 +481,10 @@ internal static partial class KilnApis
         "M:Kiln.KnowledgeScope.Revoke(System.String,System.Int32)", // KnowledgeScope.Revoke(string, int): via Knowledge.KnowledgeId(string, string)
         "M:Kiln.KnowledgeScope.Set(System.String,System.UInt32)", // KnowledgeScope.Set(string, uint): via Knowledge.KnowledgeId(string, string)
         "M:Kiln.Markers.CaptureServerAnchor(Kiln.EntityId)", // Markers.CaptureServerAnchor(EntityId): Services.RequireTickThread
+        "M:Kiln.Markers.ClearSent(Kiln.EntityId)", // Markers.ClearSent(EntityId): Services.RequireTickThread
+        "M:Kiln.Markers.Send(Kiln.EntityId,Kiln.MarkerSpec)", // Markers.Send(EntityId, MarkerSpec): Services.RequireTickThread
+        "M:Kiln.Markers.SuppressSent(Kiln.EntityId,System.String)", // Markers.SuppressSent(EntityId, string): via Markers.Keyed(EntityId, string, string)
+        "M:Kiln.Markers.Unsend(Kiln.EntityId,System.String)", // Markers.Unsend(EntityId, string): via Markers.Keyed(EntityId, string, string)
         "M:Kiln.MarkersLab.CreateRaw(System.UInt32,System.Guid,Kiln.WorldPosition)", // MarkersLab.CreateRaw(uint, Guid, WorldPosition): Services.RequireTickThread
         "M:Kiln.Mod.WorldConfig``1(System.String)", // Mod.WorldConfig<T>(string?): Game.AssertTickThread
         "M:Kiln.NativeQuests.Holds(Kiln.NativeComputed,Kiln.QuestHolder)", // NativeQuests.Holds(NativeComputed, QuestHolder): Game.AssertTickThread

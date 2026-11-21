@@ -123,7 +123,8 @@ public sealed class MarkersSendTestMod : Mod
                     $"map.before_the_catalog_is_not_stored ({r})");
                 r = Markers.Send(new EntityId(999), Spec("lab_t", "T"));
                 Check(!r.Ok && !r.Committed && r.Reason?.StartsWith("NotFound", StringComparison.Ordinal) == true, $"target.not_connected_is_refused ({r})");
-                Check(!Capabilities.Is("markers.catalog"), $"catalog.off_before_a_verified_client ({Capabilities.Get("markers.catalog")})");
+                Check(Capabilities.Is("markers.catalog") && !Markers.Icons.IsReady,
+                    $"catalog.warming_before_a_verified_client ({Capabilities.Get("markers.catalog")}, ready {Markers.Icons.IsReady})");
                 Next(1);
                 return;
             }

@@ -39,6 +39,7 @@ internal static class ServiceNames
         "kiln.log",
         "kiln.markers",
         "kiln.markers.bridge",
+        "kiln.markers.lab",
         "kiln.net",
         "kiln.npcai",
         "kiln.pacing",

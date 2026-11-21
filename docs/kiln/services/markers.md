@@ -12,7 +12,7 @@ Markers are **session only**: nothing is saved, a player's own markers end with 
 | Native | `native/services/markers/` → `kiln/services/kiln-markers.dll` |
 | Managed | `managed/services/Kiln.Markers/` → `kiln/host/Kiln.Markers.dll` (`Markers`, `Markers.Icons`, the built-in receiver) |
 | Sample | `mods/samples/MarkersSample` |
-| Tests | `native/services/markers/tests/run.sh` (host), `managed/tests/Kiln.Markers.Tests`, lab mods `mods/tests/markers-test` and `mods/tests/markers-send-test` |
+| Tests | `native/services/markers/tests/run.sh` (host), `managed/tests/Kiln.Markers.Tests`, lab mods `mods/tests/markers-test` (anchors) and `mods/tests/markers-send-test` (server markers, with `tools/nettest/markerstest.py` as a receiving Kiln peer; its demo mode for real clients is switched on by the control file `kiln/control/markers-send-test.demo`) |
 | Evidence | dossier chapter 04 (map lists, the icon catalog, anchors, wire v1); `docs/re/map.md` |
 
 ## Using it (a player's own markers)
@@ -58,6 +58,9 @@ The same marker as JSON (`MarkerSpec.FromJson`, `ToJson`), with the same default
   types are listed (`Markers.Icons.All`) but refused on the map, so a mod cannot make a fake travel point. Map icons are
   offered only on the game build whose icon catalog Kiln has verified; after a game update `markers.map` stays off until
   Kiln is updated (`CatalogChanged.Reason` says so). Compass and world markers do not need the catalog.
+- A dedicated server has no marker icons of its own: it takes the catalog from the first player whose Kiln sends the
+  verified catalog of this game build. Until then `Markers.Icons.IsReady` is false and a server `Send` with the map
+  surface is refused with `CatalogNotReady`; wait for `Markers.CatalogChanged`. Compass and world markers can be sent at once.
 
 ## Visibility events
 `Markers.Changed` reports every accepted change of a marker's value (Added, Updated, Removed, Cleared), at the next step
@@ -100,7 +103,9 @@ server's to read back: no visibility comes back to the server.
 Kiln's own policy, not the game's: 128 markers per mod and source, 512 local and 512 received on a client (1024 in all),
 64 changes per mod (256 in all) between two client steps (the 65th is `Full`: spread big loads over steps), 4 MiB of
 marker text per process and 256 KiB of new text per mod (kept until the game exits; the same text again costs nothing),
-64 mod ids per process. A server keeps at most 1024 definitions, 512 broadcast, 128 per mod across all players, 512
+64 mod ids per process. Following: 128 anchor leases per mod, 256 per world, 512 in all, 1024 watched entities; 128 local
+markers of a client may follow an entity; 64 waiting `CaptureAnchorAsync` calls per mod (256 in all). Received markers may
+add at most 1 MiB of new text (256 KiB per server mod). A server keeps at most 1024 definitions, 512 broadcast, 128 per mod across all players, 512
 effective per player and talks to at most 32 marker peers. Nothing is evicted: a call over a limit is refused with `Full`.
 
 ## Threads and errors

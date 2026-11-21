@@ -343,8 +343,11 @@ void KILN_CALL on_ready(void*) {
     if (g_caps && g_caps->header.size < sizeof(KilnCapsApi)) g_caps = nullptr;
     g_store.set_icon_check(&kmk::CatalogHolder::check, &g_catalog);
     if (g.side != KILN_SIDE_CLIENT) {
-        g_catalog_off = "a dedicated server has no marker resources: it takes the catalog from the first verified Kiln client over the marker link";
-        g_catalog_off_reason = KILN_CAP_REASON_POLICY;
+        // the catalog comes from the first verified Kiln client over the marker link: the row is on while the link can run,
+        // and the catalog warms up (count 0, Markers.Icons.IsReady false) until that client's catalog is accepted
+        g_catalog_reader = g.lifecycle && g.server_post;
+        g_catalog_off = "a dedicated server has no marker resources and takes the catalog over the marker link, which needs the world lifecycle and the server world's step";
+        g_catalog_off_reason = KILN_CAP_REASON_SYMBOL_MISSING;
     } else {
         // kiln.assets v1 with resource_read and the appended when_resources_ready (header.size covers it)
         g_assets = static_cast<const KilnAssetsApi*>(g.api->service(KM_STR(KILN_ASSETS_SERVICE), KILN_ASSETS_VERSION));
@@ -373,8 +376,9 @@ void KILN_CALL on_ready(void*) {
 // The link took a verified client's catalog on a dedicated server (glue.h): from here markers.catalog answers, and the
 // server's subscribers get CatalogChanged (role 0) at the next server step.
 void kmk::catalog_from_link() {
+    static std::atomic<bool> s_once{false};
     const auto c = g_catalog.get();
-    if (!c || g_catalog_reader) return;
+    if (!c || s_once.exchange(true)) return;
     g_catalog_reader = true;
     report(kCatalog, KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "");
     KilnMarkerCatalogChange ch{};
