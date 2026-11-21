@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "kind": "notice",
+  "key": "world-editor-update",
+  "keySha256": "3abfce5d71f8ccb892c8d34f62d4c4275f82e91354a78f80b3985a9db7640014",
+  "launchId": "3f2b8c1e5a7d4e2f",
+  "ownerEpoch": 3,
+  "notice": {
+    "id": "world-editor.update",
+    "modId": "world-editor",
+    "title": "Saved",
+    "message": "Your layout was saved.",
+    "level": "error",
+    "actionUrl": "https://example.invalid/changelog",
+    "updatedAt": 1763520011
+  }
+}

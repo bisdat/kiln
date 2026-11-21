@@ -1,0 +1,261 @@
+{
+  "format": 1,
+  "about": "shroudforge.notifications.publish against ShroudForge 1.7.9 (MIT, Copyright (c) 2026 bonsaibauer) at the fork pin: modules/mod-runtime/lua/shroudforge/v1/create_mod_api.rs:232-268 (the reads and checks, in order), modules/notifications/write_notification_event.rs:4-21 and validate_notification_event.rs:4-20 with the embedded event-schema.json (its level enum; jsonschema 0.33.0's message, src/error.rs:814-852). kind: runtime = mlua::Error::runtime, external = mlua::Error::external (the text), conversion = mlua's own FromLua error for a field read as a string. A notice field null is left out of the Lua table. ok cases give the stored level and actionUrl.",
+  "modId": "world-editor",
+  "cases": [
+    {
+      "name": "minimal",
+      "notice": {
+        "id": "saved",
+        "title": "Saved",
+        "message": "Your layout was saved."
+      },
+      "ok": {
+        "level": "info",
+        "actionUrl": null
+      },
+      "source": "create_mod_api.rs:239-240,254-263"
+    },
+    {
+      "name": "error-with-https-url",
+      "notice": {
+        "id": "update",
+        "title": "Saved",
+        "message": "m",
+        "level": "error",
+        "action_url": "https://example.invalid/changelog?a=1&b=2"
+      },
+      "ok": {
+        "level": "error",
+        "actionUrl": "https://example.invalid/changelog?a=1&b=2"
+      },
+      "source": "create_mod_api.rs:251-252"
+    },
+    {
+      "name": "id-80",
+      "notice": {
+        "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "title": "t",
+        "message": "m"
+      },
+      "ok": {
+        "level": "info",
+        "actionUrl": null
+      },
+      "source": "create_mod_api.rs:383-389"
+    },
+    {
+      "name": "no-id",
+      "notice": {
+        "title": "t",
+        "message": "m"
+      },
+      "error": {
+        "kind": "conversion"
+      },
+      "source": "create_mod_api.rs:236"
+    },
+    {
+      "name": "no-title",
+      "notice": {
+        "id": "a",
+        "message": "m"
+      },
+      "error": {
+        "kind": "conversion"
+      },
+      "source": "create_mod_api.rs:237"
+    },
+    {
+      "name": "table-message",
+      "notice": {
+        "id": "a",
+        "title": "t",
+        "message": {
+          "lua": "{}"
+        }
+      },
+      "error": {
+        "kind": "conversion"
+      },
+      "source": "create_mod_api.rs:238"
+    },
+    {
+      "name": "id-81",
+      "notice": {
+        "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "title": "t",
+        "message": "m"
+      },
+      "error": {
+        "kind": "runtime",
+        "text": "invalid notification payload"
+      },
+      "source": "create_mod_api.rs:241-246"
+    },
+    {
+      "name": "id-slash",
+      "notice": {
+        "id": "a/b",
+        "title": "t",
+        "message": "m"
+      },
+      "error": {
+        "kind": "runtime",
+        "text": "invalid notification payload"
+      },
+      "source": "create_mod_api.rs:242"
+    },
+    {
+      "name": "id-empty",
+      "notice": {
+        "id": "",
+        "title": "t",
+        "message": "m"
+      },
+      "error": {
+        "kind": "runtime",
+        "text": "invalid notification payload"
+      },
+      "source": "create_mod_api.rs:242"
+    },
+    {
+      "name": "title-120-bytes",
+      "notice": {
+        "id": "a",
+        "title": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "message": "m"
+      },
+      "ok": {
+        "level": "info",
+        "actionUrl": null
+      },
+      "source": "create_mod_api.rs:243"
+    },
+    {
+      "name": "title-121-bytes-61-chars",
+      "notice": {
+        "id": "a",
+        "title": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééx",
+        "message": "m"
+      },
+      "error": {
+        "kind": "runtime",
+        "text": "invalid notification payload"
+      },
+      "source": "create_mod_api.rs:243 (bytes, not characters)"
+    },
+    {
+      "name": "message-2001",
+      "notice": {
+        "id": "a",
+        "title": "t",
+        "message": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm"
+      },
+      "error": {
+        "kind": "runtime",
+        "text": "invalid notification payload"
+      },
+      "source": "create_mod_api.rs:244"
+    },
+    {
+      "name": "level-debug",
+      "notice": {
+        "id": "a",
+        "title": "t",
+        "message": "m",
+        "level": "debug"
+      },
+      "error": {
+        "kind": "runtime",
+        "text": "invalid notification level"
+      },
+      "source": "create_mod_api.rs:248-249"
+    },
+    {
+      "name": "level-warn",
+      "notice": {
+        "id": "a",
+        "title": "t",
+        "message": "m",
+        "level": "warn"
+      },
+      "error": {
+        "kind": "runtime",
+        "text": "invalid notification level"
+      },
+      "source": "create_mod_api.rs:248-249"
+    },
+    {
+      "name": "http-url",
+      "notice": {
+        "id": "a",
+        "title": "t",
+        "message": "m",
+        "action_url": "http://example.invalid"
+      },
+      "error": {
+        "kind": "runtime",
+        "text": "notification action_url must use HTTPS"
+      },
+      "source": "create_mod_api.rs:251-252"
+    },
+    {
+      "name": "bad-level-before-bad-url",
+      "notice": {
+        "id": "a",
+        "title": "t",
+        "message": "m",
+        "level": "nope",
+        "action_url": "http://x"
+      },
+      "error": {
+        "kind": "runtime",
+        "text": "invalid notification level"
+      },
+      "source": "create_mod_api.rs:248-252 (order)"
+    },
+    {
+      "name": "level-success",
+      "notice": {
+        "id": "a",
+        "title": "t",
+        "message": "m",
+        "level": "success"
+      },
+      "error": {
+        "kind": "external",
+        "text": "\"success\" is not one of \"trace\", \"debug\" or 3 other candidates"
+      },
+      "source": "write_notification_event.rs:15, event-schema.json level"
+    },
+    {
+      "name": "level-warning",
+      "notice": {
+        "id": "a",
+        "title": "t",
+        "message": "m",
+        "level": "warning"
+      },
+      "error": {
+        "kind": "external",
+        "text": "\"warning\" is not one of \"trace\", \"debug\" or 3 other candidates"
+      },
+      "source": "write_notification_event.rs:15, event-schema.json level"
+    },
+    {
+      "name": "level-update",
+      "notice": {
+        "id": "a",
+        "title": "t",
+        "message": "m",
+        "level": "update"
+      },
+      "error": {
+        "kind": "external",
+        "text": "\"update\" is not one of \"trace\", \"debug\" or 3 other candidates"
+      },
+      "source": "write_notification_event.rs:15, event-schema.json level"
+    }
+  ]
+}

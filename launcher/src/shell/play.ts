@@ -26,6 +26,8 @@ import { notifyActivation, notifyActivationOf, notifyInstall } from "./notices";
 import { blockedLine } from "./RuntimeFailure";
 import { quietIsKiln, quietText, showsProgress, STEAM_WAIT_MS } from "./startProgress";
 import { t } from "../i18n";
+// the warning before Play
+import { isCanceledStart, launchWithPreflight } from "./sfiWarnings";
 
 // A shared monotonic clock: changing the system clock while a start is pending cannot restart its grace period.
 const epoch = Date.now(), tick = performance.now();
@@ -164,6 +166,8 @@ export function usePlayControl(): PlayControl {
       void qc.invalidateQueries({ queryKey: ["launch_progress", gameId] });
       if (await switchBackFirst(gameId, req)) invalidateGame(qc, gameId);
       await beforeStart(gameId, req);
+      // the warning before Play: launch_play as the prepare, its dialog, the confirm of that token
+      return launchWithPreflight(gameId, req);
       return api.launchPlay(gameId, req);
     },
     onSuccess: (r, { gameId }) => {
@@ -178,6 +182,8 @@ export function usePlayControl(): PlayControl {
     onError: (e, vars) => {
       // Play ended before the game existed: the start the launcher was timing is over (the window as before Play)
       void api.launchEnd(vars.gameId).catch(() => {}).then(() => qc.invalidateQueries({ queryKey: ["launch_progress", vars.gameId] }));
+      // Cancel in the warning before Play ended the start; the player chose it, no toast
+      if (isCanceledStart(e)) return;
       notifyActivationOf(e); if (!notifyLibraryChanged(qc, e, () => launch.mutate(vars))) toast.error(e);
     },
   });

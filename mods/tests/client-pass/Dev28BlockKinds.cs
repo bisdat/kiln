@@ -32,17 +32,27 @@ public sealed partial class ClientPassMod
         var recipes = Content.Recipes.Count(r => r.Name.StartsWith(app.GameName, StringComparison.Ordinal));
         c.Expect(item != null && recipes == 1, $"one item and one recipe of it are defined (item {item?.Id}, {recipes} recipe(s))");
 
+        // the player's lanterns, counted in the server's view of the inventory (the newest connection is the player after a rejoin)
+        var lantern = Items.Lookup(app.GameName)?.Id;
+        EntityId Me() => Network.Peers.OrderByDescending(p => p.ConnectedAt).FirstOrDefault()?.Player is { IsNone: false } p ? p : c.Player;
+        int Lanterns() => lantern is { } id ? Items.Read(Me())?.Slots.Where(s => s.Item == id).Sum(s => s.Count) ?? 0 : 0;
+
         // 2. the joined player crafts and uses it; the client has no provider code
+        var held = Lanterns();
         c.Instruct("You are joined to the dedicated server with a Kiln client that has NEITHER kinds-provider-test NOR " +
                    "kinds-consumer-test in its profile (check the client's mod list). Open the normal crafting menu, find " +
-                   "\"Camp lantern\" (2 twigs), craft one, look at it in the inventory (name, icon, durability 600), " +
-                   "equip it and use it as a torch. Pass if all of that works and looks like a torch.");
-        await c.Verdict();
+                   "\"Camp lantern\" (2 twigs) and craft one. The check sees it arrive in your inventory, then gives you 30 " +
+                   "seconds: look at it in the inventory (name, icon, durability 600), equip it and use it as a torch, and " +
+                   "remember whether all of that worked and looked like a torch.");
+        if (await c.Until(() => Lanterns() > held, TimeSpan.FromMinutes(5), "a crafted Camp lantern arrived in your inventory"))
+            await c.Delay(TimeSpan.FromSeconds(30));
 
         // 3. rejoin: the same definition, no second application
-        c.Instruct("Leave the server and join it again. Check that the lantern you crafted is still in the inventory and " +
-                   "the recipe is listed once. Then press continue.");
-        await c.Verdict();
+        var leftAt = DateTime.UtcNow;
+        c.Instruct("Leave the server and join it again; the check goes on by itself when you are back. Then remember whether " +
+                   "the lantern you crafted is still in the inventory and the recipe is listed once.");
+        if (await c.Until(() => Network.Peers.Any(p => p.ConnectedAt > leftAt && !p.Player.IsNone), TimeSpan.FromMinutes(5), "you left the server and joined it again"))
+            await c.Delay(TimeSpan.FromSeconds(20));
         var after = Blocks.Find("camp", consumer) is { } again ? Blocks.Application(again) : new BlockApplyResult { Reason = "the block is gone" };
         c.Expect(after.Ok && after.Generation == app.Generation, $"the application did not change over the rejoin (generation {app.Generation} -> {after.Generation} {after.Reason})");
         c.Expect(Content.Recipes.Count(r => r.Name.StartsWith(app.GameName, StringComparison.Ordinal)) == 1, "still one recipe");
@@ -52,9 +62,10 @@ public sealed partial class ClientPassMod
         await c.Delay(TimeSpan.FromSeconds(1));
         var kept = Blocks.Find("camp", consumer) is { } k ? Blocks.Application(k) : new BlockApplyResult { Reason = "the block is gone" };
         c.Expect(kept.Ok && kept.Generation == app.Generation && Content.Items.Get(app.GameName) != null, $"with the provider's kinds retired the lantern is still applied ({kept.State} {kept.Reason})");
-        c.Instruct("The provider's kinds were taken away on the server. Use the lantern again and craft a second one. Pass " +
-                   "if both still work.");
-        await c.Verdict();
+        var beforeSecond = Lanterns();
+        c.Instruct("The provider's kinds were taken away on the server. Use the lantern again and craft a second one; the check " +
+                   "goes on by itself when the second lantern is in your inventory. Remember whether both still worked.");
+        await c.Until(() => Lanterns() > beforeSecond, TimeSpan.FromMinutes(5), "a second Camp lantern arrived in your inventory after the provider's kinds were retired");
 
         // then the consumer goes: only what it owned goes with it
         var itemsBefore = Content.Items.Count;
@@ -63,15 +74,18 @@ public sealed partial class ClientPassMod
         c.Expect(unloaded.Ok, $"the consumer unloaded ({unloaded.Message})");
         c.Expect(Blocks.Find("camp", consumer) == null, "its block is gone");
         c.Log.Info($"client-pass: {c.Id}: items {itemsBefore} -> {Content.Items.Count}; the lantern's item is {(Content.Items.Get(app.GameName) == null ? "gone" : "still listed")}");
-        c.Instruct("The consumer mod was unloaded on the server. Look at the inventory: the lanterns must not crash the " +
-                   "game or corrupt the inventory (Kiln shows a removed mod's item as a placeholder), the recipe must be " +
-                   "gone from the crafting menu, and every other item and recipe must be as before. Pass if so.");
-        await c.Verdict();
         Mods.Send(provider, "restore");
 
-        // 5. a game without Kiln is refused
-        c.Instruct("Last step: try to join this server with a game that has no Kiln (or ask a second person to). The join " +
-                   "must be refused before the world loads. Pass if it was refused; skip if you cannot try it.");
+        // 5. a game without Kiln is refused; then the one verdict
+        c.Instruct("The consumer mod was unloaded on the server. Look at the inventory and the crafting menu, and try to join " +
+                   "this server with a game that has no Kiln (or ask a second person to). Pass only if all of these held: (1) " +
+                   "the crafted Camp lantern showed its name, icon and durability 600 and worked as a torch, (2) after the rejoin " +
+                   "it was still in the inventory and the recipe was listed once, (3) with the provider's kinds taken away the " +
+                   "lantern still worked and a second one could be crafted, (4) after the consumer was unloaded the lanterns did " +
+                   "not crash the game or corrupt the inventory (Kiln shows a removed mod's item as a placeholder), the recipe is " +
+                   "gone from the crafting menu and every other item and recipe is as before, (5) the join without Kiln was " +
+                   "refused before the world loaded (if you cannot try that, pass and write \"no join without Kiln tried\" in the " +
+                   "note). Otherwise fail with a note naming which one.");
         await c.Verdict();
     }
 }

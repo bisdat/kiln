@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # kiln.engine: exact-build engine profiles (sigdb/engine/, generated profiles.g.h) and Kiln-internal engine primitives.
-kiln_service(engine engine.cpp identity.cpp facts_win.cpp resolve.cpp memory_win.cpp gate.cpp)
+kiln_service(engine engine.cpp identity.cpp facts_win.cpp resolve.cpp memory_win.cpp gate.cpp resource_guard.cpp invoke.cpp
+                    invoke_win.cpp)
 target_include_directories(kiln-engine PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/include")
 # Stand-in Windows host for headless Wine (tests/wine.sh), built explicitly; never a game target or bundle file.
 add_executable(engine-host EXCLUDE_FROM_ALL tests/windows_host.cpp)
@@ -8,8 +9,12 @@ target_include_directories(engine-host PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "$
 # Test-only variant for headless Wine (tests/wine.sh "gate" mode): the host names the identity and the fake engine image
 # (tests/test_facts_win.cpp), so the real SEH copy, Interlocked words, tracker call and gate run against a fake engine.
 # Never shipped: built explicitly into bin/tests/, outside bin/services/ (tools/package/stage.sh stages that folder).
+# KILN_ENGINE_TEST_RECIPES (this target only, never kiln-engine): the host sets engine-call recipes over helper code in
+# its fake image (tests/test_facts_win.cpp kiln_engine_test_set_recipes), since ported profiles carry none.
 add_library(kiln-engine-test SHARED EXCLUDE_FROM_ALL engine.cpp identity.cpp tests/test_facts_win.cpp resolve.cpp
-                                                     memory_win.cpp gate.cpp "${CMAKE_SOURCE_DIR}/cmake/kiln_build_stamp.cpp")
+                                                     memory_win.cpp gate.cpp resource_guard.cpp invoke.cpp invoke_win.cpp
+                                                     "${CMAKE_SOURCE_DIR}/cmake/kiln_build_stamp.cpp")
+target_compile_definitions(kiln-engine-test PRIVATE KILN_ENGINE_TEST_RECIPES)
 target_include_directories(kiln-engine-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party"
                                                     "${KILN_GENERATED_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}"
                                                     "${CMAKE_CURRENT_SOURCE_DIR}/include")

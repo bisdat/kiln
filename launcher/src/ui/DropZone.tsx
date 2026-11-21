@@ -9,6 +9,7 @@ import { t as tr, useT } from "../i18n";
 import { Button } from "./Button";
 import { TextInput } from "./Form";
 import { toast } from "./Toast";
+import { dialogDefault, rememberDialog, type DialogKind } from "./dialogFolder";
 
 export interface PickOptions {
   directory?: boolean;
@@ -16,16 +17,24 @@ export interface PickOptions {
   /** e.g. [{ name: "Mods", extensions: ["zip", "dll"] }] */
   filters?: { name: string; extensions: string[] }[];
   title?: string;
+  /** A path the caller has for this dialog (a path box's value): the dialog opens there when it exists. */
   defaultPath?: string;
+  /** Which dialog this is: it opens in the folder this kind was last used in, else Downloads, else home (./dialogFolder.ts).
+   *  Absent: "folder" or "files". */
+  kind?: DialogKind;
 }
 
 /** Native open dialog; null when canceled or not in Tauri. */
 export async function pickPaths(opts: PickOptions = {}): Promise<string[] | null> {
   if (!isTauri()) return null;
   const { open } = await import("@tauri-apps/plugin-dialog");
-  const r = await open({ directory: opts.directory, multiple: opts.multiple, filters: opts.filters, title: opts.title, defaultPath: opts.defaultPath });
+  const kind = opts.kind ?? (opts.directory ? "folder" : "files");
+  const defaultPath = await dialogDefault(kind, { preferred: opts.defaultPath });
+  const r = await open({ directory: opts.directory, multiple: opts.multiple, filters: opts.filters, title: opts.title, defaultPath });
   if (r === null) return null;
-  return Array.isArray(r) ? r : [r];
+  const list = Array.isArray(r) ? r : [r];
+  rememberDialog(kind, list[0], !!opts.directory);
+  return list;
 }
 
 export interface DropZoneProps {
@@ -138,10 +147,12 @@ export interface PathPickerProps {
   placeholder?: string;
   id?: string;
   disabled?: boolean;
+  /** The dialog's kind (its last folder); absent: "folder" or "file". */
+  kind?: DialogKind;
 }
 
 /** A path box with a Browse button (native dialog in Tauri; typing works everywhere). */
-export function PathPicker({ value, onChange, directory, filters, placeholder, id, disabled }: PathPickerProps) {
+export function PathPicker({ value, onChange, directory, filters, placeholder, id, disabled, kind }: PathPickerProps) {
   const t = useT();
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
@@ -150,7 +161,7 @@ export function PathPicker({ value, onChange, directory, filters, placeholder, i
       <TextInput id={id} mono value={text} placeholder={placeholder} disabled={disabled} spellCheck={false}
         onChange={(e) => setText(e.target.value)} onBlur={() => text !== value && onChange(text)} onKeyDown={(e) => { if (e.key === "Enter") onChange(text); }} />
       <Button icon={<FolderOpen />} disabled={disabled || !isTauri()} title={isTauri() ? t("ui.dropZone.browse") : t("ui.dropZone.needsDesktop")}
-        onClick={async () => { const r = await pickPaths({ directory, filters, defaultPath: value || undefined }); if (r?.[0]) onChange(r[0]); }}>
+        onClick={async () => { const r = await pickPaths({ directory, filters, defaultPath: value || undefined, kind: kind ?? (directory ? "folder" : "file") }); if (r?.[0]) onChange(r[0]); }}>
         {t("ui.dropZone.browse")}
       </Button>
     </div>

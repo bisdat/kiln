@@ -6,31 +6,34 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Banner, Button, Modal, Tabs, toast } from '../../ui';
 import { api } from '../src/platform.js';
-import { t, dataHora, definirIdioma, assinarIdioma } from '../src/i18n.js';
+import { t, useLanguage } from '../../i18n';
+import { dataHora, definirIdioma, assinarIdioma } from '../src/i18n.js';
 import { canSave, discard, openSave, readOnly, restoreBackup, saveModel, setModel, setStatus, startSession, useSession } from './session.js';
 import Equipment from './Equipment.jsx';
 import Inventory from './Inventory.jsx';
 import Skills from './Skills.jsx';
 import Knowledge from './Knowledge.jsx';
 
-// the launcher is English; item and skill names follow (the game ships both)
+// the editor's own words are the launcher's (launcher/src/i18n, "editor.*", in the launcher's language); item and skill
+// names are the game's, English outside Portuguese (the game data ships both)
 definirIdioma('en');
 
-export const TABS = [['char', 'Equipamento'], ['inv', 'Mochila'], ['skills', 'Habilidades'], ['know', 'Conhecimento']];
+export const TABS = [['char', 'editor.tabs.equipment'], ['inv', 'editor.tabs.inventory'], ['skills', 'editor.tabs.skills'], ['know', 'editor.tabs.knowledge']];
 
 /** The page's one live sentence (the Deck screen says the same). */
 export function sayOf(s) {
   const { model, saves, running, dirty } = s;
   return !model
-    ? (saves === null ? t('Procurando saves…') : saves.length ? t('Escolha um personagem.') : t('Nenhum save de personagem encontrado.'))
-    : model.readOnly ? t('Este save não pôde ser interpretado para edição.')
-      : model.error ? t('Este save só pode ser lido: Salvar fica desligado.')
-      : running ? t('O jogo está aberto: feche-o para salvar.')
-        : dirty ? t('Mudanças não salvas. O editor faz um backup antes de gravar.')
-          : t('Nível {n}. O editor faz um backup antes de gravar.', { n: model.level });
+    ? (saves === null ? t('editor.page.lookingForSaves') : saves.length ? t('editor.page.pickCharacter') : t('editor.page.noSaves'))
+    : model.readOnly ? t('editor.page.cannotParse')
+      : model.error ? t('editor.page.readOnlyNoSave')
+      : running ? t('editor.page.gameOpen')
+        : dirty ? t('editor.page.unsaved')
+          : t('editor.page.levelBackup', { n: model.level });
 }
 
 export default function EditorApp() {
+  useLanguage();
   const s = useSession();
   const { saves, model, status, running, saving, dirty } = s;
   const [tab, setTab] = useState('inv');
@@ -49,7 +52,7 @@ export default function EditorApp() {
   };
   const save = async () => {
     const r = await saveModel();
-    if (r === 'saved') toast.ok(t('Salvo'), t('O save de antes está em Backups.'));
+    if (r === 'saved') toast.ok(t('editor.page.saved'), t('editor.page.savedHint'));
     if (r === 'skills') setTab('skills');
   };
   const ok = canSave(s);
@@ -78,26 +81,26 @@ export default function EditorApp() {
         <div>
           <div className="k-page-name">
             <SaveSwitch model={model} saves={saves} open={pick} setOpen={setPick} onOpen={open} />
-            {file && <span className="k-page-meta"><span className="k-mono k-muted">{file}</span>{dirty && <span className="k-sc" style={{ color: 'var(--k-gold-400)' }}>{t('Não salvo')}</span>}</span>}
+            {file && <span className="k-page-meta"><span className="k-mono k-muted">{file}</span>{dirty && <span className="k-sc" style={{ color: 'var(--k-gold-400)' }}>{t('editor.page.notSaved')}</span>}</span>}
           </div>
           <p className="k-page-sub">{sayOf(s)}</p>
         </div>
         <div className="k-page-actions">
-          {dirty && <Button variant="ghost" onClick={() => setAsk({ discard: true })} title="Z">{t('Descartar')}</Button>}
-          <Button disabled={!model} onClick={() => setBackups(true)} title="B">{t('Backups')}</Button>
-          <Button variant="primary" disabled={!ok} loading={saving} onClick={save} title={running ? t('Jogo aberto: feche para salvar') : 'Ctrl+S'}>{t('Salvar')}</Button>
+          {dirty && <Button variant="ghost" onClick={() => setAsk({ discard: true })} title="Z">{t('editor.page.discard')}</Button>}
+          <Button disabled={!model} onClick={() => setBackups(true)} title="B">{t('editor.page.backups')}</Button>
+          <Button variant="primary" disabled={!ok} loading={saving} onClick={save} title={running ? t('editor.page.gameOpenShort') : 'Ctrl+S'}>{t('editor.page.save')}</Button>
         </div>
       </header>
       {status && (
-        <Banner tone={status.tone} title={status.tone === 'err' ? t('Erro') : t('Atenção')}
+        <Banner tone={status.tone} title={status.tone === 'err' ? t('editor.page.error') : t('editor.page.note')}
           actions={<>
-            {stale && <button type="button" className="k-link" onClick={() => openSave(model.path)}>{t('Ler de novo')}</button>}
-            <button type="button" className="k-link" onClick={() => setStatus(null)}>{t('Fechar')}</button>
+            {stale && <button type="button" className="k-link" onClick={() => openSave(model.path)}>{t('editor.page.readAgain')}</button>}
+            <button type="button" className="k-link" onClick={() => setStatus(null)}>{t('editor.page.close')}</button>
           </>}>{status.text}</Banner>
       )}
       {edit && (
         <>
-          <Tabs aria-label={t('Partes do save')} value={tab} onChange={setTab}
+          <Tabs aria-label={t('editor.page.parts')} value={tab} onChange={setTab}
             items={TABS.map(([id, label]) => ({ id, label: t(label), count: id === 'know' ? model.knowledge?.length : undefined }))} />
           <div className={'ke-body' + (readOnly(model) ? ' ke-readonly' : '')} key={model.path}>
             {tab === 'char' && <Equipment model={model} setModel={setModel} />}
@@ -109,9 +112,9 @@ export default function EditorApp() {
       )}
       {backups && model && <Backups model={model} dirty={dirty} onClose={() => setBackups(false)} />}
       {ask && (
-        <Modal open onClose={() => setAsk(null)} title={t('Descartar as mudanças?')} width={520}
-          footer={<><Button variant="ghost" onClick={() => setAsk(null)}>{t('Cancelar')}</Button><Button variant="danger" onClick={() => { const a = ask; setAsk(null); if (a.open) openSave(a.open); else discard(); }}>{ask.open ? t('Descartar e abrir') : t('Descartar')}</Button></>}>
-          <p>{t('As mudanças em {nome} ainda não foram salvas.', { nome: model?.name ?? '' })}</p>
+        <Modal open onClose={() => setAsk(null)} title={t('editor.page.discardTitle')} width={520}
+          footer={<><Button variant="ghost" onClick={() => setAsk(null)}>{t('editor.page.cancel')}</Button><Button variant="danger" onClick={() => { const a = ask; setAsk(null); if (a.open) openSave(a.open); else discard(); }}>{ask.open ? t('editor.page.discardAndOpen') : t('editor.page.discard')}</Button></>}>
+          <p>{t('editor.page.discardBody', { nome: model?.name ?? '' })}</p>
         </Modal>
       )}
     </div>
@@ -133,22 +136,22 @@ function SaveSwitch({ model, saves, open, setOpen, onOpen }) {
     <div className="ke-who" ref={ref}>
       <h1 className="k-page-title">
         <button type="button" className="ke-who-btn" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-          {model ? model.name : t('Editor')}<svg viewBox="0 0 24 24" aria-hidden><path d="M5 9l7 7 7-7" /></svg>
+          {model ? model.name : t('editor.page.title')}<svg viewBox="0 0 24 24" aria-hidden><path d="M5 9l7 7 7-7" /></svg>
         </button>
       </h1>
       {open && (
-        <div className="k-popover ke-who-pop" role="listbox" aria-label={t('Personagens')}>
+        <div className="k-popover ke-who-pop" role="listbox" aria-label={t('editor.page.characters')}>
           {(saves ?? []).map((s) => (
             <button key={s.path} type="button" role="option" aria-selected={model?.path === s.path} className="k-menu-item" onClick={() => onOpen(s.path)}>
               <span style={{ fontWeight: model?.path === s.path ? 700 : 400 }}>{s.name}</span>
-              <span className="k-mono k-muted">{s.file}{s.level !== undefined ? ` · ${t('nível {n}', { n: s.level })}` : ''}</span>
+              <span className="k-mono k-muted">{s.file}{s.level !== undefined ? ` · ${t('editor.common.levelN', { n: s.level })}` : ''}</span>
               {s.error && <span className="ke-note warn">{s.error}</span>}
             </button>
           ))}
-          {saves?.length === 0 && <span className="ke-note" style={{ padding: '6px 10px' }}>{t('Nenhum save de personagem encontrado.')}</span>}
+          {saves?.length === 0 && <span className="ke-note" style={{ padding: '6px 10px' }}>{t('editor.page.noSaves')}</span>}
           <div className="k-menu-sep" />
           <button type="button" className="k-menu-item" style={{ color: 'var(--k-ember-300)' }}
-            onClick={async () => { const f = await api.browseSave(); if (f) onOpen(f); }}>{t('Abrir arquivo…')}</button>
+            onClick={async () => { const f = await api.browseSave(); if (f) onOpen(f); }}>{t('editor.page.openFile')}</button>
         </div>
       )}
     </div>
@@ -156,9 +159,9 @@ function SaveSwitch({ model, saves, open, setOpen, onOpen }) {
 }
 
 /** Upstream named the kinds jogo / pasta; the launcher's commands say game / folder. */
-export const BACKUP_KIND = { game: 'Cópia do jogo', jogo: 'Cópia do jogo', folder: 'Backup do Kiln', pasta: 'Backup do Kiln' };
+export const BACKUP_KIND = { game: 'editor.backups.kindGame', jogo: 'editor.backups.kindGame', folder: 'editor.backups.kindKiln', pasta: 'editor.backups.kindKiln' };
 /** A backup's name in a list: the game's copy number, or the time a Kiln backup was made. */
-export const backupName = (b) => (b.kind === 'game' || b.kind === 'jogo' ? b.label : t('antes de gravar'));
+export const backupName = (b) => (b.kind === 'game' || b.kind === 'jogo' ? b.label : t('editor.backups.beforeSave'));
 
 /** The save's backups (the game's last ten and the editor's copies): restore one, with a second click to confirm. */
 function Backups({ model, dirty, onClose }) {
@@ -169,30 +172,30 @@ function Backups({ model, dirty, onClose }) {
   const restore = async (b) => {
     try {
       await restoreBackup(b);
-      toast.ok(t('Restaurado'), t('{arquivo} ({quando}). O save anterior foi guardado como backup.', { arquivo: backupName(b), quando: dataHora(b.modified) }));
+      toast.ok(t('editor.backups.restored'), t('editor.backups.restoredBody', { arquivo: backupName(b), quando: dataHora(b.modified) }));
       setConfirm(null); onClose();
     } catch (e) { setErr(e.message); setConfirm(null); }
   };
   return (
-    <Modal open onClose={onClose} title={t('Backups de {nome}', { nome: model.name })} width={720}
-      footer={<><Button variant="ghost" onClick={() => api.openBackups()}>{t('Abrir pasta')}</Button><Button onClick={onClose}>{t('Fechar')}</Button></>}>
-      <p className="k-hint">{t('O jogo guarda os 10 últimos salvamentos automaticamente; o editor também copia o save antes de cada gravação.')}{dirty ? ` ${t('Restaurar descarta as mudanças não salvas.')}` : ''}</p>
-      {err && <Banner tone="err" title={t('Erro')}>{err}</Banner>}
+    <Modal open onClose={onClose} title={t('editor.backups.title', { nome: model.name })} width={720}
+      footer={<><Button variant="ghost" onClick={() => api.openBackups()}>{t('editor.backups.openFolder')}</Button><Button onClick={onClose}>{t('editor.page.close')}</Button></>}>
+      <p className="k-hint">{t('editor.backups.hint')}{dirty ? ` ${t('editor.backups.dropsChanges')}` : ''}</p>
+      {err && <Banner tone="err" title={t('editor.page.error')}>{err}</Banner>}
       <div className="ke-bk">
-        {list === null && <span className="ke-note">{t('Procurando backups…')}</span>}
-        {list?.length === 0 && !err && <span className="ke-note">{t('Nenhum backup encontrado para este save.')}</span>}
+        {list === null && <span className="ke-note">{t('editor.backups.looking')}</span>}
+        {list?.length === 0 && !err && <span className="ke-note">{t('editor.backups.none')}</span>}
         {list?.map((b) => (
           <div key={b.path} className="ke-bk-row">
-            <span className="k-sc k-muted">{t(BACKUP_KIND[b.kind] || b.kind)}</span>
+            <span className="k-sc k-muted">{BACKUP_KIND[b.kind] ? t(BACKUP_KIND[b.kind]) : b.kind}</span>
             <span className="k-num">{dataHora(b.modified)}</span>
             <span className="k-mono k-ellipsis" title={b.path}>{backupName(b)}</span>
             {confirm === b.path ? (
               <span className="k-row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-                <Button size="s" variant="ghost" onClick={() => setConfirm(null)}>{t('Cancelar')}</Button>
-                <Button size="s" variant="danger" onClick={() => restore(b)}>{t('Restaurar')}</Button>
+                <Button size="s" variant="ghost" onClick={() => setConfirm(null)}>{t('editor.page.cancel')}</Button>
+                <Button size="s" variant="danger" onClick={() => restore(b)}>{t('editor.backups.restore')}</Button>
               </span>
             ) : (
-              <span style={{ textAlign: 'right' }}><Button size="s" onClick={() => setConfirm(b.path)} disabled={!!confirm}>{t('Restaurar')}</Button></span>
+              <span style={{ textAlign: 'right' }}><Button size="s" onClick={() => setConfirm(b.path)} disabled={!!confirm}>{t('editor.backups.restore')}</Button></span>
             )}
           </div>
         ))}

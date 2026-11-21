@@ -1078,9 +1078,9 @@ KilnResult Service::drain_owner(KilnOwner owner, uint32_t timeout_ms, uint32_t* 
 }
 
 Service::Snapshot Service::snapshot(uint32_t world) const {
-    if (!session_world(world)) return {};
+    if (!hop_world(world)) return {};
     std::lock_guard lock(mutex_);
-    return snap_[world_line(world)];
+    return world == KILN_TASKS_WORLD_MENU ? menu_ : snap_[world_line(world)];
 }
 
 uint64_t Service::refused_edges(uint32_t world) const {
@@ -1093,10 +1093,27 @@ void Service::session_started(uint32_t world, uint32_t session) {
     if (!session_world(world)) return;
     const std::size_t w = world_line(world);
     uint32_t stale = 0;  // the session it replaces without a STOPPING (a world that stopped without a destroy event)
+    std::vector<Hop> menu;  // the menu session this world's start ends (#83): its hops, dispatched cancelled below
     {
         std::lock_guard lock(mutex_);
         if (snap_[w].live && snap_[w].session != 0 && snap_[w].session != session) stale = snap_[w].session;
         snap_[w] = {session, 0, true};
+        if (menu_.live) {
+            // closed under mutex_ (menu_frame opens only under it, seeing no live world) and taken under lease_mutex_ in
+            // one step: no menu hop is queued after this, and none waits into the world
+            menu_.live = false;
+            std::lock_guard hops(lease_mutex_);
+            HopQueue& q = hops_[hop_line(KILN_TASKS_WORLD_MENU)];
+            q.open = false;
+            for (auto& [owner, owner_hops] : q.owners)
+                for (const Hop& h : owner_hops) menu.push_back(h);
+            q.owners.clear();
+            q.turn = 0;
+        }
+    }
+    for (const Hop& h : menu) {  // on the starting thread, before the world's first Pre: the menu's hops end cancelled
+        if (const KilnHostDispatchFn dispatch = dispatcher()) dispatch_hop(dispatch, KILN_TASKS_WORLD_MENU, h.lease, h.host_state, 1);
+        else pool_.hop_end(h.lease);
     }
     // that session is over now, not at the new one's first Post edge: what waits on it (or is bound to it) is cancelled
     if (stale) pool_.end_session(world, stale);
@@ -1332,7 +1349,7 @@ KilnResult Service::host_tick_hop(KilnLease lease) {
 }
 
 KilnResult Service::host_tick_hop_in(KilnLease lease, uint32_t world, uint32_t session) {
-    if (!session_world(world)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!hop_world(world)) return KILN_ERR_INVALID_ARGUMENT;
     return push_hop(lease, world, session, true);
 }
 
@@ -1340,7 +1357,7 @@ KilnResult Service::host_tick_hop_in(KilnLease lease, uint32_t world, uint32_t s
 // or (check_session) when it is not `session`. The compare and the push are one lease_mutex_ section, so a STOPPING
 // or a new session never slips between them: a hop of an ended session is never queued into the next one.
 KilnResult Service::push_hop(KilnLease lease, uint32_t world, uint32_t session, bool check_session) {
-    const std::size_t w = world_line(world);
+    const std::size_t w = hop_line(world);
     const auto takes = [&](const HopQueue& q) { return q.open && (!check_session || q.session == session); };
     {
         std::lock_guard lock(lease_mutex_);
@@ -1378,19 +1395,23 @@ KilnResult Service::push_hop(KilnLease lease, uint32_t world, uint32_t session, 
 }
 
 std::size_t Service::pending_tick_hops(uint32_t world) const {
-    if (!session_world(world)) return 0;
+    if (!hop_world(world)) return 0;
     std::lock_guard lock(lease_mutex_);
     std::size_t n = 0;
-    for (const auto& [owner, q] : hops_[world_line(world)].owners) n += q.size();
+    for (const auto& [owner, q] : hops_[hop_line(world)].owners) n += q.size();
     return n;
 }
 
 std::size_t Service::run_tick_hops(uint32_t world) {
     const KilnHostDispatchFn dispatch = dispatcher();
-    if (!dispatch || !session_world(world)) return 0;
-    const std::size_t w = world_line(world);
-    const uint64_t owner_ns = world == KILN_WORLD_CLIENT ? kClientHopOwnerNs : kHopOwnerNs;
-    const uint64_t step_ns = world == KILN_WORLD_CLIENT ? kClientHopStepNs : kHopStepNs;
+    if (!dispatch || !hop_world(world)) return 0;
+    const std::size_t w = hop_line(world);
+    const uint64_t owner_ns = world == KILN_WORLD_CLIENT ? kClientHopOwnerNs
+                              : world == KILN_TASKS_WORLD_MENU ? kMenuHopOwnerNs
+                                                               : kHopOwnerNs;
+    const uint64_t step_ns = world == KILN_WORLD_CLIENT ? kClientHopStepNs
+                             : world == KILN_TASKS_WORLD_MENU ? kMenuHopStepNs
+                                                              : kHopStepNs;
     const uint64_t step_start = pool_.now_ns();
     std::size_t ran = 0, owners = 0;
     {
@@ -1470,12 +1491,32 @@ std::size_t Service::run_tick_hops(uint32_t world) {
     return ran;
 }
 
+std::size_t Service::menu_frame() {
+    {
+        std::lock_guard lock(mutex_);
+        // any live world (a session whose STOPPING has not come) keeps the menu closed; session_started closes it under
+        // this same lock, so a menu session never opens beside a live world
+        for (const Snapshot& snap : snap_)
+            if (snap.live) return 0;
+        if (!menu_.live) {
+            menu_ = {menu_.session + 1, 0, true};  // a new menu stretch: its own session, never an earlier one's hops
+            std::lock_guard hops(lease_mutex_);
+            HopQueue& q = hops_[hop_line(KILN_TASKS_WORLD_MENU)];
+            q.owners.clear();  // empty already: a world's start took them
+            q.turn = 0;
+            q.open = true;
+            q.session = menu_.session;
+        }
+    }
+    return run_tick_hops(KILN_TASKS_WORLD_MENU);
+}
+
 void Service::dispatch_hops_cancelled(uint32_t world) {
     const KilnHostDispatchFn dispatch = dispatcher();
     std::vector<Hop> all;
     {
         std::lock_guard lock(lease_mutex_);  // closed and taken in one step: nothing queued after this runs later
-        HopQueue& q = hops_[world_line(world)];
+        HopQueue& q = hops_[hop_line(world)];
         q.open = false;
         for (auto& [owner, owner_hops] : q.owners)
             for (const Hop& h : owner_hops) all.push_back(h);
@@ -1494,7 +1535,7 @@ struct HopCall {
     GuardedHeader header;  // header.callback = the dispatcher
     KilnHostDispatchFn dispatch;
     KilnLease lease;
-    uint32_t what;  // KILN_LEASE_TICK_HOP (the server world's) or KILN_LEASE_CLIENT_HOP
+    uint32_t what;  // KILN_LEASE_TICK_HOP (the server world's), KILN_LEASE_CLIENT_HOP or KILN_LEASE_MENU_HOP
     uint32_t cancelled;
     void* host_state;
 };
@@ -1508,7 +1549,9 @@ void invoke_hop(void* context) {
 // quarantines its owner (as a faulting segment would), is reported once, and the next hop runs.
 void Service::dispatch_hop(KilnHostDispatchFn dispatch, uint32_t world, KilnLease lease, void* host_state,
                            uint32_t cancelled, bool count_apply) {
-    const uint32_t what = world == KILN_WORLD_CLIENT ? KILN_LEASE_CLIENT_HOP : KILN_LEASE_TICK_HOP;
+    const uint32_t what = world == KILN_WORLD_CLIENT        ? KILN_LEASE_CLIENT_HOP
+                          : world == KILN_TASKS_WORLD_MENU ? KILN_LEASE_MENU_HOP
+                                                           : KILN_LEASE_TICK_HOP;
     HopCall call{{reinterpret_cast<uintptr_t>(dispatch)}, dispatch, lease, what, cancelled, host_state};
     // Diagnostics (issue #49): a hop runs on the tick (or, at a world's end, on the thread ending
     // it): its stats entry says on-tick while it runs, suspended again after.
@@ -1519,8 +1562,8 @@ void Service::dispatch_hop(KilnHostDispatchFn dispatch, uint32_t world, KilnLeas
     FaultInfo fault{};
     pool_.guarded(&invoke_hop, &call, &fault);
     stats.end_on_tick(entry);
-    if (count_apply)
-        stats.record_apply(static_cast<uint32_t>(world_line(world)), cancelled ? 0 : 1, cancelled ? 1 : 0,
+    if (count_apply)  // the menu has no apply account (no tick-stats line): hop_line 2 is past kApplyWorlds, ignored
+        stats.record_apply(static_cast<uint32_t>(hop_line(world)), cancelled ? 0 : 1, cancelled ? 1 : 0,
                            pool_.now_ns() - wall0, 0, false, false, 0);
     if (fault.faulted) {
         KilnOwner owner = 0;

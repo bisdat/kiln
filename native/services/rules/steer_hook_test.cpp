@@ -69,11 +69,6 @@ int main() {
     check(st::install(&api, 0, off) == 0 && !st::active() && off.find("glider steering") != std::string::npos,
           "a context slot passed to another function than CurrentEntityId: no hook");
     entity_capture = reinterpret_cast<uintptr_t>(&entity);
-    off.clear();
-    kiln::test::fail_all = true;
-    check(st::install(&api, 0, off) == 0 && !st::active() && off.find("hook failed") != std::string::npos,
-          "a failed hook leaves steering off");
-    kiln::test::fail_all = false;
     {
         alignas(16) uint8_t no_hook_input[0x300]{};
         auto r = kDefault;
@@ -81,8 +76,22 @@ int main() {
         check(!st::steers(r, no_hook_input), "without the hook the glide wrap has no steering form (GlideBoost flies as before)");
     }
     off.clear();
-    check(st::install(&api, 0, off) == KILN_RULES_HOOK_GLIDE_STEER && st::active() && off.empty(),
-          "the hook installs with the feature and the agreeing context check");
+    const int attempts_at_boot = kiln::test::attempts;
+    check(st::install(&api, 0, off) == KILN_RULES_HOOK_GLIDE_STEER && !st::active() && off.empty() &&
+              kiln::test::attempts == attempts_at_boot,
+          "with the feature and the agreeing context check steering is available, and nothing is hooked at boot");
+    check(st::tick() == 0 && !st::active() && kiln::test::attempts == attempts_at_boot,
+          "before the first world a tick hooks nothing");
+    st::world_started();
+    check(st::tick() == 0 && !st::active() && kiln::test::attempts == attempts_at_boot,
+          "no rule set asks for GlideSteer: actor_rotation stays unhooked (ShroudForge's runtime.patch.glider_pitch resolves)");
+    {
+        auto boost_only = kDefault;
+        boost_only.flags = KILN_RULES_GLIDE_BOOST;
+        set_rule(6, &boost_only);
+        check(st::tick() == 0 && !st::active(), "a rule set without GlideSteer hooks nothing either");
+        set_rule(6, nullptr);
+    }
 
     // ---- a fake actor_rotation frame ----
     alignas(16) uint8_t frame[0x400]{};
@@ -111,6 +120,9 @@ int main() {
     rule.flags = KILN_RULES_GLIDE_STEER;
     rule.glide_steer_limit = 85;
     set_rule(3, &rule);
+    check(!st::active() && st::tick() == 1 && st::active() && kiln::test::attempts == attempts_at_boot + 1,
+          "the first rule set with GlideSteer: the next tick after the first world places the hook");
+    check(st::tick() == 0 && st::active() && kiln::test::attempts == attempts_at_boot + 1, "placed once");
     check(std::fabs(step(0, 5 * kD) + max) < 1e-7f && st::steered() == 1,
           "the rule's player: S raises the nose at the game's max step (xmm6 written, counted)");
     z(0);
@@ -200,6 +212,16 @@ int main() {
     set_rule(3, &rule);
     check(std::fabs(-29.5f * kD + step(-max, -29.5f * kD) + 30 * kD) < 1e-6f, "the rule's limit is the player's (30 degrees)");
     set_rule(3, nullptr);
+
+    // a hook that fails when it is placed leaves steering off, tried once
+    off.clear();
+    kiln::test::fail_all = true;
+    check(st::install(&api, 0, off) == KILN_RULES_HOOK_GLIDE_STEER && !st::active(),
+          "a second install starts unplaced again (the rule sets seen stay seen)");
+    st::world_started();
+    check(st::tick() == -1 && !st::active() && st::tick() == 0 && !st::active(),
+          "a hook that fails when the first GlideSteer rule set asks leaves steering off, tried once");
+    kiln::test::fail_all = false;
     std::printf("steer hook: %d failure(s)\n", failures);
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }

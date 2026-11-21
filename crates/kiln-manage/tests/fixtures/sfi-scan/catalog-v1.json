@@ -1,0 +1,317 @@
+{
+  "schema_version": 1,
+  "header": {
+    "format": "kiln-sfi-parity-catalog",
+    "revisions": [
+      {
+        "id": "sf179",
+        "source_version": "1.7.9",
+        "source_pin": "d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8",
+        "inventory_sha256": "0417856c473c56cd203c2d8e9ebd1397f261d81eb5b370f52903785977089101"
+      },
+      {
+        "id": "sf180",
+        "source_version": "1.8.0",
+        "source_pin": "d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8",
+        "inventory_sha256": "6754fcea32b88564b0879ceb065063ff5c69d08e65a6046a9f07edb5b324d3e9"
+      }
+    ],
+    "final_manifest_sha256": "2443630b4620165c8b173e7265e17526fe2787ae594364dd6d839ad58f2fc007",
+    "frozen": [
+      {
+        "family": "eml-pure",
+        "sha256": "2a37042bbf62d6e040fdc8e75097e29f05326c75f8d46169c7f74de42ca282d7"
+      },
+      {
+        "family": "sf-mod-api",
+        "sha256": "6be348f330850da0f4be60a25b0f36cefce8f251ec69c94ff049daab1be53f02"
+      }
+    ],
+    "policy_sha256": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+    "registry_sha256": "872491a30d60d598962de6e7b834ab76b2aa65fbab102c6ebaaae6acdc238822",
+    "backend_build": "sample-build",
+    "evidence": {
+      "scope": "aggregate",
+      "modules": 1,
+      "runtime_modules": 0,
+      "assertions": 2,
+      "mappings": 2,
+      "sha256": "ee8250fb76e094b34b471f13a73dbbe51d1ae142e9df59d7c0d31ec20f0a0a8e"
+    },
+    "symbol_obligations": {
+      "full": 1,
+      "partial": 1,
+      "missing": 3,
+      "n/a": 2
+    },
+    "other_obligations": {
+      "full": 1,
+      "partial": 1,
+      "missing": 3,
+      "n/a": 2
+    }
+  },
+  "symbols": [
+    {
+      "name": "builtin.integer",
+      "scope": "namespace-member",
+      "kind": "namespace",
+      "introduced": null,
+      "alias_of": {
+        "target": "integer",
+        "relation": "namespace-identity"
+      },
+      "revisions": [
+        {
+          "revision": "sf179",
+          "presence": "value",
+          "parity": "missing",
+          "required": 2,
+          "proven_full": 0,
+          "tests": [],
+          "digest": "0c8aa37551fcd2c7ab3ee2d8ef01f5e3ae494c0d4d13140734e55f68547d69d5"
+        },
+        {
+          "revision": "sf180",
+          "presence": "value",
+          "parity": "missing",
+          "required": 2,
+          "proven_full": 0,
+          "tests": [],
+          "digest": "b03f2c24c52fa3f2a40fe054c7751fefd3f6b551a70d9dc40a7b6e41f3a2feda"
+        }
+      ],
+      "composite": []
+    },
+    {
+      "name": "game.types",
+      "scope": "namespace-member",
+      "kind": "namespace",
+      "introduced": null,
+      "alias_of": null,
+      "revisions": [
+        {
+          "revision": "sf179",
+          "presence": "value",
+          "parity": "missing",
+          "required": 2,
+          "proven_full": 0,
+          "tests": [],
+          "digest": "0c8aa37551fcd2c7ab3ee2d8ef01f5e3ae494c0d4d13140734e55f68547d69d5"
+        },
+        {
+          "revision": "sf180",
+          "presence": "value",
+          "parity": "missing",
+          "required": 2,
+          "proven_full": 0,
+          "tests": [],
+          "digest": "b03f2c24c52fa3f2a40fe054c7751fefd3f6b551a70d9dc40a7b6e41f3a2feda"
+        }
+      ],
+      "composite": []
+    },
+    {
+      "name": "integer",
+      "scope": "root-global",
+      "kind": "field",
+      "introduced": null,
+      "alias_of": null,
+      "revisions": [
+        {
+          "revision": "sf179",
+          "presence": "value",
+          "parity": "full",
+          "required": 2,
+          "proven_full": 2,
+          "tests": [
+            "i1",
+            "i2"
+          ],
+          "digest": "ee0c5d0dccf5aa23b41e06c458a5311505c9c96abfa4bed402066865370eee74"
+        },
+        {
+          "revision": "sf180",
+          "presence": "value",
+          "parity": "full",
+          "required": 2,
+          "proven_full": 2,
+          "tests": [
+            "i1",
+            "i2"
+          ],
+          "digest": "101031e7c82cc50ae067e6aa2cad133a579918ae4f40bc0b56a4d4ff1c2cf308"
+        }
+      ],
+      "composite": []
+    },
+    {
+      "name": "integer.u8.neg",
+      "scope": "namespace-member",
+      "kind": "function",
+      "introduced": null,
+      "alias_of": null,
+      "revisions": [
+        {
+          "revision": "sf179",
+          "presence": "absent",
+          "parity": "full",
+          "required": 2,
+          "proven_full": 2,
+          "tests": [
+            "n1"
+          ],
+          "digest": "ee0c5d0dccf5aa23b41e06c458a5311505c9c96abfa4bed402066865370eee74"
+        },
+        {
+          "revision": "sf180",
+          "presence": "absent",
+          "parity": "full",
+          "required": 2,
+          "proven_full": 2,
+          "tests": [
+            "n1"
+          ],
+          "digest": "101031e7c82cc50ae067e6aa2cad133a579918ae4f40bc0b56a4d4ff1c2cf308"
+        }
+      ],
+      "composite": []
+    },
+    {
+      "name": "loader.runtime.register_dll",
+      "scope": "namespace-member",
+      "kind": "function",
+      "introduced": null,
+      "alias_of": null,
+      "revisions": [
+        {
+          "revision": "sf179",
+          "presence": "n/a",
+          "parity": "excluded",
+          "required": 0,
+          "proven_full": 0,
+          "tests": [],
+          "digest": "1de4c6d87bd94ed86a73100eecd65cab4267b1fc8742b5eedb421e6314c1e678"
+        },
+        {
+          "revision": "sf180",
+          "presence": "n/a",
+          "parity": "excluded",
+          "required": 0,
+          "proven_full": 0,
+          "tests": [],
+          "digest": "4ac7edc23b892d7e5b2d951c6ad51f6f4ca0a47404e6e7c0b0d92b39782b9184"
+        }
+      ],
+      "composite": []
+    },
+    {
+      "name": "runtime.types",
+      "scope": "namespace-member",
+      "kind": "namespace",
+      "introduced": null,
+      "alias_of": {
+        "target": "game.types",
+        "relation": "delegate"
+      },
+      "revisions": [],
+      "composite": []
+    },
+    {
+      "name": "shroudforge.new_api",
+      "scope": "namespace-member",
+      "kind": "function",
+      "introduced": null,
+      "alias_of": null,
+      "revisions": [
+        {
+          "revision": "sf179",
+          "presence": "not-in-revision",
+          "parity": "missing",
+          "required": 2,
+          "proven_full": 0,
+          "tests": [],
+          "digest": "0c8aa37551fcd2c7ab3ee2d8ef01f5e3ae494c0d4d13140734e55f68547d69d5"
+        },
+        {
+          "revision": "sf180",
+          "presence": "callable",
+          "parity": "missing",
+          "required": 2,
+          "proven_full": 0,
+          "tests": [],
+          "digest": "b03f2c24c52fa3f2a40fe054c7751fefd3f6b551a70d9dc40a7b6e41f3a2feda"
+        }
+      ],
+      "composite": []
+    },
+    {
+      "name": "table.insert",
+      "scope": "namespace-member",
+      "kind": "function",
+      "introduced": null,
+      "alias_of": null,
+      "revisions": [
+        {
+          "revision": "sf179",
+          "presence": "callable",
+          "parity": "partial",
+          "required": 2,
+          "proven_full": 1,
+          "tests": [
+            "t1"
+          ],
+          "digest": "dd9efdea848bd36233b4dcf958495b4b106961298b04e99f85ea1715957ebed6"
+        },
+        {
+          "revision": "sf180",
+          "presence": "callable",
+          "parity": "partial",
+          "required": 2,
+          "proven_full": 1,
+          "tests": [
+            "t1"
+          ],
+          "digest": "31c5172ef469be40dbab0911dc42f199dd6bba3010eb969e8fa56ab52d95d07c"
+        }
+      ],
+      "composite": [
+        {
+          "id": "table.insert",
+          "owner": "lua-env-lifecycle",
+          "milestone": "M1",
+          "revisions": [
+            {
+              "revision": "sf179",
+              "parity": "full",
+              "digest": "a90e1e8448c90d75cbb7b6675316211b3ffa7f66137b802ccb1d4a674ff8ae40"
+            },
+            {
+              "revision": "sf180",
+              "parity": "full",
+              "digest": "a90e1e8448c90d75cbb7b6675316211b3ffa7f66137b802ccb1d4a674ff8ae40"
+            }
+          ]
+        },
+        {
+          "id": "table.insert[typed-resource]",
+          "owner": "reflection-data",
+          "milestone": "M2",
+          "revisions": [
+            {
+              "revision": "sf179",
+              "parity": "missing",
+              "digest": "bde6d8dbd97d071aeb3424cd55df34532a742eb3ec64d411a22e6856549a9322"
+            },
+            {
+              "revision": "sf180",
+              "parity": "missing",
+              "digest": "bde6d8dbd97d071aeb3424cd55df34532a742eb3ec64d411a22e6856549a9322"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "digest": "9d045a5192b3bcbf045acd9570c671059227ead57ec54c94341bb9c6c2a0958a"
+}

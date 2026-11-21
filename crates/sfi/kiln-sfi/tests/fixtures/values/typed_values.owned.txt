@@ -1,0 +1,64 @@
+types userdata userdata userdata userdata userdata userdata string
+metatable false false false
+reads 3 4 5 6 2 3 2 plain 13
+missing nil nil nil nil nil 9
+arity 1 1 3 1
+variant m6.Child 15 16 userdata
+variant-unknown-field error attempt to get an unknown field 'other'
+alias true true
+alias-edit 30 30
+clone 30 31 false
+variant-clone 31 4 m6.Child
+metatable-reads base,extra 40 41
+metatable-error error at .: missing field `extra` in struct `m6.Child`
+metatable-error-reads base,extra 40
+static-len 2 50 51
+static-len-bad error at .: expected `array of length 2`, got `array of length 3`
+static-len-bad-count 3 50
+invalid-property error attempt to set invalid property 'nope' on m6.Root
+struct-int-key error attempt to set invalid property '1' on m6.Child
+wrong-scalar error at .: expected `unsigned integer in range [0, 4294967295]`, got `x`
+negative error at .: expected `unsigned integer in range [0, 4294967295]`, got `-1`
+float error at .: expected `unsigned integer in range [0, 4294967295]`, got `1.5`
+table-for-scalar error at .: expected `unsigned integer in range [0, 4294967295]`, got `table: 0x..`
+out-of-bounds error position out of bounds: expected index in range [1, 3], got 9
+index-zero error position out of bounds: expected index in range [1, 3], got 0
+missing-field error at extra: expected `unsigned integer in range [0, 4294967295]`, got `nil`
+unknown-variant error at type: invalid type `m6.Nope`
+variant-not-subtype error at type: expected `m6.Base`, got `m6.Root`
+variant-type-number error at type: invalid type `5`
+wrong-class error at .: expected `m6.Children`, got `userdata `TypeId(0x..)``
+static-array-length error at .: expected `array of length 2`, got `array of length 1`
+array-key error bad argument #1 (64-bit unsigned integer expected, got string)
+variant-len error diff:72: attempt to get length of a VariantValue value (field 'choice')
+variant-type-set error attempt to set an unknown field 'type'
+text-number error at .: expected `string`, got `12`
+text plain
+pairs-root child:userdata,fixed:userdata,children:userdata,maybe:userdata,choice:userdata,text:string
+pairs-children 1=30,2=9,3=11
+pairs-fixed 1=50,2=51
+insert 1 4 60
+insert-at 5 62 30
+insert-out-of-bounds error position out of bounds: expected index in range [1, 6], got 99
+insert-zero error position out of bounds: expected index in range [1, 6], got 0
+insert-invalid error at base: expected `unsigned integer in range [0, 4294967295]`, got `bad`
+insert-arity error runtime error: wrong number of arguments to 'insert'
+remove 62 4 1 nil 1
+remove-out-of-bounds error position out of bounds: expected index in range [1, 5], got 6
+removed-detached 64 30 userdata
+pop 60 3
+static-insert error attempt to modify static array
+static-pop error attempt to modify static array
+static-clear error attempt to modify static array
+clear 1 0 1 nil
+not-an-array-insert error attempt to set invalid property '3' on m6.Child
+not-an-array-remove error attempt to set invalid property '2' on m6.Child
+not-an-array-clear error runtime error: 'clear' is not supported for userdata `"userdata"`
+foreign-insert error runtime error: bad argument #1 to 'table.insert' (table expected, got Foreign)
+foreign-clear error runtime error: 'clear' is not supported for userdata `"userdata"`
+remove-arity error runtime error: wrong number of arguments to 'remove'
+reentrant-insert error at .: missing field `base` in struct `m6.Child`
+after-reentrant 0
+maybe-nil nil 1
+maybe 70 userdata
+tostring [50,51]

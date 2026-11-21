@@ -682,10 +682,12 @@ above (ItemSlot `0xc046c0` raw link, SlotGeometry mid `0xc05433`, GameUiFrame) a
   (`0xb9d0f0(1)`; which game screen that is was not traced). 1 InGame is refused: the HUD's hotbar is drawn through
   ItemSlot there too, but a click is an attack. **[refl] [dis] [rt for 4, 9, 22, 25]**
 - **Identity:** the slot's ItemView `+0x14` (pide) is the server's entity id for a replicated item (05a section 6,
-  network.md). Kiln reports it as the client entity and leaves `server_entity` 0; `ui-hooks.c2` compares it with the
+  network.md). A plain stack has none (pide 0): the owner's dev.30 pass Ctrl+clicked Archaic Essence IV x10 (backpack)
+  and Springlands Dirt x12 (chest) and both views said pide 0 **[rt]**. Kiln reports it as the client entity and leaves `server_entity` 0; `ui-hooks.c2` compares it with the
   server world's own inventory in a hosted world. **[dis]**
 - **Hover byte:** ItemSlot's result `+0x10` (`ui/slot.hoverCandidate`) is still only a candidate (mouse hover or gamepad
-  focus). `ui-hooks.c4` logs it next to the cursor's slot. A gamepad slot action waits for it. **[hyp]**
+  focus). `ui-hooks.c4` logs it next to the cursor's slot (read while the cursor rests on the slot, not at a verdict: Kiln
+  then has the input for its check window and the cursor is on that window). A gamepad slot action waits for it. **[hyp]**
 
 ### Slice 2 (dev.30): the chest's entity and panels beside the screens
 - **The chest's entity:** PlayStateUi's switch sends 22, 41 and 28 to `0xb9d0f0(mode)`, which finds the other inventory by

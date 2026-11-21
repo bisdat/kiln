@@ -2,11 +2,13 @@
 //! `settings.json` so the features stay one file to read and to remove.
 //!
 //! ```json
-//! { "format": 1, "shown": true, "presence": false, "notify": false }
+//! { "format": 1, "shown": true, "presence": false, "presencePack": false, "notify": false }
 //! ```
 //! - `shown` (default true): "Show the Community page" in Settings. Off hides the page, the Deck tab, the reply count
 //!   and every "Send to Kiln support", and stops every Discord-related request ([`CommunitySettings::network_allowed`]).
 //! - `presence` (default false): Rich Presence ("Show Kiln on my Discord profile").
+//! - `presencePack` (default false): "Show my Crucible pack on my Discord profile": with Rich Presence on, the pack's name
+//!   and a "Get this modpack" button while a Crucible pack's instance is played (community::presence).
 //! - `notify` (default false): "Tell me when Kiln support replies".
 //! - `relay` (absent: [`DEFAULT_RELAY`]): the relay's address. Only https on frostdev.io or one of its subdomains is
 //!   used ([`relay_base`]): a staging relay can be tried, the session key never goes to another site.
@@ -31,6 +33,8 @@ pub struct CommunitySettings {
     #[serde(default)]
     pub presence: bool,
     #[serde(default)]
+    pub presence_pack: bool,
+    #[serde(default)]
     pub notify: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay: Option<String>,
@@ -45,7 +49,7 @@ fn yes() -> bool {
 
 impl Default for CommunitySettings {
     fn default() -> Self {
-        CommunitySettings { format: 1, shown: true, presence: false, notify: false, relay: None }
+        CommunitySettings { format: 1, shown: true, presence: false, presence_pack: false, notify: false, relay: None }
     }
 }
 
@@ -57,6 +61,8 @@ pub struct SettingsPatch {
     pub shown: Option<bool>,
     #[serde(default)]
     pub presence: Option<bool>,
+    #[serde(default)]
+    pub presence_pack: Option<bool>,
     #[serde(default)]
     pub notify: Option<bool>,
 }
@@ -88,6 +94,9 @@ impl CommunitySettings {
         }
         if let Some(v) = patch.presence {
             s.presence = v;
+        }
+        if let Some(v) = patch.presence_pack {
+            s.presence_pack = v;
         }
         if let Some(v) = patch.notify {
             s.notify = v;
@@ -159,6 +168,7 @@ mod tests {
         let t = tmp("defaults");
         let s = CommunitySettings::load(&DataDirs::at(t.path()));
         assert!(s.shown && !s.presence && !s.notify);
+        assert!(!s.presence_pack, "Show my Crucible pack is off until the player turns it on");
         assert_eq!(s.relay().url("/me"), "https://frostdev.io/kiln/relay/me");
         assert!(s.network_allowed().is_ok());
     }
@@ -179,6 +189,13 @@ mod tests {
         let s = CommunitySettings::update(&d, &SettingsPatch { shown: Some(false), ..Default::default() }).unwrap();
         assert!(!s.shown && s.presence && !s.notify);
         assert_eq!(CommunitySettings::load(&d), s);
+        let s = CommunitySettings::update(&d, &SettingsPatch { presence_pack: Some(true), ..Default::default() }).unwrap();
+        assert!(s.presence_pack && s.presence && !s.shown);
+        let raw: serde_json::Value = serde_json::from_slice(&std::fs::read(path(&d)).unwrap()).unwrap();
+        assert_eq!(raw["presencePack"], true);
+        // a file from before the switch existed reads it as off
+        std::fs::write(path(&d), br#"{ "format": 1, "shown": true, "presence": true, "notify": false }"#).unwrap();
+        assert!(!CommunitySettings::load(&d).presence_pack);
     }
 
     #[test]

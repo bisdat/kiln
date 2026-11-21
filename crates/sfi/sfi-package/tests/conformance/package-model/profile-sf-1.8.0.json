@@ -1,0 +1,4084 @@
+[
+ {
+  "id": "ok.minimal",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "schemaVersion.ok.0",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "schemaVersion.ok.1",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: floating point `1.0`, expected u32 at line 1 column 20"
+  }
+ },
+ {
+  "id": "schemaVersion.bad.0",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "schemaVersion.bad.1",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "schemaVersion.bad.2",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: string \"1\", expected u32 at line 1 column 20"
+  }
+ },
+ {
+  "id": "schemaVersion.bad.3",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: null, expected u32 at line 1 column 21"
+  }
+ },
+ {
+  "id": "schemaVersion.bad.4",
+  "accepted": [],
+  "reasons": {
+   "a.json": "missing field `schemaVersion` at line 1 column 53"
+  }
+ },
+ {
+  "id": "schemaVersion.bad.5",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid value: integer `-1`, expected u32 at line 1 column 19"
+  }
+ },
+ {
+  "id": "schemaVersion.bad.6",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: floating point `1.5`, expected u32 at line 1 column 20"
+  }
+ },
+ {
+  "id": "id.ok.0",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "x",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "id.ok.1",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "id.ok.2",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "id.ok.3",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "nonE",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "id.ok.4",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "with space",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "id.ok.5",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "../x",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "id.bad.0",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "id.bad.1",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "id.bad.2",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "id.bad.3",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "id.bad.4",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "id.bad.5",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: integer `1`, expected a string at line 1 column 25"
+  }
+ },
+ {
+  "id": "id.bad.6",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: null, expected a string at line 1 column 28"
+  }
+ },
+ {
+  "id": "id.bad.7",
+  "accepted": [],
+  "reasons": {
+   "a.json": "missing field `id` at line 1 column 61"
+  }
+ },
+ {
+  "id": "modId.ok.0",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "modId.ok.1",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "example",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "modId.ok.2",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "Example",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "modId.ok.3",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "x y",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "modId.bad.0",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: integer `1`, expected a string at line 1 column 80"
+  }
+ },
+ {
+  "id": "modId.bad.1",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: null, expected a string at line 1 column 83"
+  }
+ },
+ {
+  "id": "packageDirectory.ok.0",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "packageDirectory.ok.1",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "PKG",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "packageDirectory.ok.2",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "a.b",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "packageDirectory.ok.3",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "-",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "packageDirectory.ok.4",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "dir name",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "packageDirectory.bad.0",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "packageDirectory.bad.1",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "packageDirectory.bad.2",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "packageDirectory.bad.3",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "packageDirectory.bad.4",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "packageDirectory.bad.5",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "packageDirectory.bad.6",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "packageDirectory.bad.7",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "a/",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "packageDirectory.bad.8",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "packageDirectory.bad.9",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: integer `1`, expected a string at line 1 column 49"
+  }
+ },
+ {
+  "id": "packageDirectory.bad.10",
+  "accepted": [],
+  "reasons": {
+   "a.json": "missing field `packageDirectory` at line 1 column 46"
+  }
+ },
+ {
+  "id": "name.ok.0",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "N",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "name.ok.1",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "name.ok.2",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "name.bad.0",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "name.bad.1",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "name.bad.2",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "name.bad.3",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity"
+  }
+ },
+ {
+  "id": "name.bad.4",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: integer `1`, expected a string at line 1 column 62"
+  }
+ },
+ {
+  "id": "name.bad.5",
+  "accepted": [],
+  "reasons": {
+   "a.json": "missing field `name` at line 1 column 54"
+  }
+ },
+ {
+  "id": "target.ok.0",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "client",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "target.ok.1",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "server",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "target.ok.2",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "target.ok.3",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "target.bad.0",
+  "accepted": [],
+  "reasons": {
+   "a.json": "unknown variant `Both`, expected one of `client`, `server`, `both` at line 1 column 86"
+  }
+ },
+ {
+  "id": "target.bad.1",
+  "accepted": [],
+  "reasons": {
+   "a.json": "unknown variant `all`, expected one of `client`, `server`, `both` at line 1 column 85"
+  }
+ },
+ {
+  "id": "target.bad.2",
+  "accepted": [],
+  "reasons": {
+   "a.json": "expected value at line 1 column 81"
+  }
+ },
+ {
+  "id": "target.bad.3",
+  "accepted": [],
+  "reasons": {
+   "a.json": "expected value at line 1 column 81"
+  }
+ },
+ {
+  "id": "modJson.ok.0",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {},
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "modJson.ok.1",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "x"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "modJson.ok.2",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "capabilities": [
+      "patch"
+     ]
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "modJson.ok.3",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "modJson.bad.0",
+  "accepted": [],
+  "reasons": {
+   "a.json": "manifest additions must be JSON objects"
+  }
+ },
+ {
+  "id": "modJson.bad.1",
+  "accepted": [],
+  "reasons": {
+   "a.json": "manifest additions must be JSON objects"
+  }
+ },
+ {
+  "id": "modJson.bad.2",
+  "accepted": [],
+  "reasons": {
+   "a.json": "manifest additions must be JSON objects"
+  }
+ },
+ {
+  "id": "modJson.bad.3",
+  "accepted": [],
+  "reasons": {
+   "a.json": "a profile cannot replace the mod ID or version"
+  }
+ },
+ {
+  "id": "modJson.bad.4",
+  "accepted": [],
+  "reasons": {
+   "a.json": "a profile cannot replace the mod ID or version"
+  }
+ },
+ {
+  "id": "modJson.bad.5",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid profile capabilities: unknown variant `native`, expected one of `export`, `patch`, `runtime`, `runtime-register-dll`"
+  }
+ },
+ {
+  "id": "modJson.bad.6",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid profile capabilities: invalid type: string \"runtime\", expected a sequence"
+  }
+ },
+ {
+  "id": "extendedModJson.ok.0",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": {},
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "extendedModJson.ok.1",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": {
+     "enabled": true,
+     "targets": [
+      "server"
+     ]
+    },
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "extendedModJson.ok.2",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "extendedModJson.bad.0",
+  "accepted": [],
+  "reasons": {
+   "a.json": "manifest additions must be JSON objects"
+  }
+ },
+ {
+  "id": "extendedModJson.bad.1",
+  "accepted": [],
+  "reasons": {
+   "a.json": "manifest additions must be JSON objects"
+  }
+ },
+ {
+  "id": "extendedModJson.bad.2",
+  "accepted": [],
+  "reasons": {
+   "a.json": "manifest additions must be JSON objects"
+  }
+ },
+ {
+  "id": "packageFiles.ok.0",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "packageFiles.ok.1",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {
+     "locales/de.json": "{}"
+    },
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "packageFiles.ok.2",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {
+     "src/a.lua": ""
+    },
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "packageFiles.ok.3",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {
+     "f31.txt": "",
+     "f29.txt": "",
+     "f36.txt": "",
+     "f40.txt": "",
+     "f2.txt": "",
+     "f16.txt": "",
+     "f52.txt": "",
+     "f15.txt": "",
+     "f0.txt": "",
+     "f57.txt": "",
+     "f4.txt": "",
+     "f60.txt": "",
+     "f51.txt": "",
+     "f55.txt": "",
+     "f13.txt": "",
+     "f63.txt": "",
+     "f17.txt": "",
+     "f33.txt": "",
+     "f34.txt": "",
+     "f50.txt": "",
+     "f56.txt": "",
+     "f42.txt": "",
+     "f58.txt": "",
+     "f5.txt": "",
+     "f27.txt": "",
+     "f44.txt": "",
+     "f38.txt": "",
+     "f62.txt": "",
+     "f32.txt": "",
+     "f6.txt": "",
+     "f61.txt": "",
+     "f45.txt": "",
+     "f59.txt": "",
+     "f26.txt": "",
+     "f49.txt": "",
+     "f37.txt": "",
+     "f23.txt": "",
+     "f41.txt": "",
+     "f10.txt": "",
+     "f20.txt": "",
+     "f19.txt": "",
+     "f8.txt": "",
+     "f30.txt": "",
+     "f25.txt": "",
+     "f39.txt": "",
+     "f48.txt": "",
+     "f14.txt": "",
+     "f21.txt": "",
+     "f1.txt": "",
+     "f11.txt": "",
+     "f24.txt": "",
+     "f7.txt": "",
+     "f54.txt": "",
+     "f35.txt": "",
+     "f53.txt": "",
+     "f3.txt": "",
+     "f9.txt": "",
+     "f12.txt": "",
+     "f18.txt": "",
+     "f43.txt": "",
+     "f28.txt": "",
+     "f46.txt": "",
+     "f47.txt": "",
+     "f22.txt": ""
+    },
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "packageFiles.bad.0",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid virtual package file: mod.json"
+  }
+ },
+ {
+  "id": "packageFiles.bad.1",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid virtual package file: extended.mod.json"
+  }
+ },
+ {
+  "id": "packageFiles.bad.2",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid virtual package file: ../x"
+  }
+ },
+ {
+  "id": "packageFiles.bad.3",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid virtual package file: a\\b"
+  }
+ },
+ {
+  "id": "packageFiles.bad.4",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid virtual package file: "
+  }
+ },
+ {
+  "id": "packageFiles.bad.5",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid virtual package file: /abs"
+  }
+ },
+ {
+  "id": "packageFiles.bad.6",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid virtual package file: c:x"
+  }
+ },
+ {
+  "id": "packageFiles.bad.7",
+  "accepted": [],
+  "reasons": {
+   "a.json": "compatibility profile has too many files"
+  }
+ },
+ {
+  "id": "packageFiles.bad.8",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: integer `1`, expected a string at line 1 column 92"
+  }
+ },
+ {
+  "id": "packageFiles.bad.9",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: sequence, expected a map at line 1 column 86"
+  }
+ },
+ {
+  "id": "packageFiles.bad.10",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid virtual package file: ./a"
+  }
+ },
+ {
+  "id": "packageFiles.size.ok-1mib",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {
+     "big.txt": {
+      "len": 1048576,
+      "sha256": "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b"
+     }
+    },
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "packageFiles.size.bad-1mib",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid virtual package file: big.txt"
+  }
+ },
+ {
+  "id": "packageFiles.size.ok-4mib",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {
+     "f2": {
+      "len": 1048576,
+      "sha256": "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b"
+     },
+     "f3": {
+      "len": 1048576,
+      "sha256": "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b"
+     },
+     "f1": {
+      "len": 1048576,
+      "sha256": "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b"
+     },
+     "f0": {
+      "len": 1048576,
+      "sha256": "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b"
+     }
+    },
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "packageFiles.size.bad-4mib",
+  "accepted": [],
+  "reasons": {
+   "a.json": "virtual package files exceed 4 MiB"
+  }
+ },
+ {
+  "id": "packageFiles.size.multibyte",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid virtual package file: big.txt"
+  }
+ },
+ {
+  "id": "importFiles.ok.0",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "importFiles.ok.1",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {
+     "a.dll": "bin/a.dll"
+    },
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "importFiles.ok.2",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {
+     "s29": "d29",
+     "s60": "d60",
+     "s50": "d50",
+     "s9": "d9",
+     "s7": "d7",
+     "s12": "d12",
+     "s44": "d44",
+     "s8": "d8",
+     "s51": "d51",
+     "s59": "d59",
+     "s3": "d3",
+     "s41": "d41",
+     "s15": "d15",
+     "s17": "d17",
+     "s53": "d53",
+     "s57": "d57",
+     "s11": "d11",
+     "s47": "d47",
+     "s5": "d5",
+     "s34": "d34",
+     "s49": "d49",
+     "s21": "d21",
+     "s38": "d38",
+     "s40": "d40",
+     "s28": "d28",
+     "s13": "d13",
+     "s33": "d33",
+     "s6": "d6",
+     "s0": "d0",
+     "s4": "d4",
+     "s37": "d37",
+     "s30": "d30",
+     "s62": "d62",
+     "s1": "d1",
+     "s20": "d20",
+     "s10": "d10",
+     "s36": "d36",
+     "s43": "d43",
+     "s45": "d45",
+     "s56": "d56",
+     "s23": "d23",
+     "s54": "d54",
+     "s63": "d63",
+     "s35": "d35",
+     "s25": "d25",
+     "s46": "d46",
+     "s16": "d16",
+     "s55": "d55",
+     "s2": "d2",
+     "s26": "d26",
+     "s61": "d61",
+     "s24": "d24",
+     "s22": "d22",
+     "s52": "d52",
+     "s39": "d39",
+     "s19": "d19",
+     "s14": "d14",
+     "s31": "d31",
+     "s48": "d48",
+     "s18": "d18",
+     "s32": "d32",
+     "s42": "d42",
+     "s27": "d27",
+     "s58": "d58"
+    },
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "importFiles.bad.0",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid installation file mapping"
+  }
+ },
+ {
+  "id": "importFiles.bad.1",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid installation file mapping"
+  }
+ },
+ {
+  "id": "importFiles.bad.2",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid installation file mapping"
+  }
+ },
+ {
+  "id": "importFiles.bad.3",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid installation file mapping"
+  }
+ },
+ {
+  "id": "importFiles.bad.4",
+  "accepted": [],
+  "reasons": {
+   "a.json": "compatibility profile has too many files"
+  }
+ },
+ {
+  "id": "importFiles.bad.5",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: integer `1`, expected a string at line 1 column 91"
+  }
+ },
+ {
+  "id": "importFiles.bad.6",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: sequence, expected a map at line 1 column 85"
+  }
+ },
+ {
+  "id": "files.ok.0",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "files.ok.1",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": [
+     {
+      "path": "a.dll",
+      "mode": "library"
+     }
+    ]
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "files.ok.2",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": [
+     {
+      "path": "bin/a.DLL",
+      "mode": "dinput8"
+     }
+    ]
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "files.ok.3",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": [
+     {
+      "path": "a.dll",
+      "mode": "library"
+     }
+    ]
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "files.ok.4",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": [
+     {
+      "path": "f0.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f1.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f2.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f3.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f4.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f5.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f6.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f7.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f8.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f9.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f10.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f11.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f12.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f13.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f14.dll",
+      "mode": "library"
+     },
+     {
+      "path": "f15.dll",
+      "mode": "library"
+     }
+    ]
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "files.bad.0",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid or duplicate DLL path: a.txt"
+  }
+ },
+ {
+  "id": "files.bad.1",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid or duplicate DLL path: A.DLL"
+  }
+ },
+ {
+  "id": "files.bad.2",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid or duplicate DLL path: ../a.dll"
+  }
+ },
+ {
+  "id": "files.bad.3",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid or duplicate DLL path: a\\b.dll"
+  }
+ },
+ {
+  "id": "files.bad.4",
+  "accepted": [],
+  "reasons": {
+   "a.json": "compatibility profile has too many files"
+  }
+ },
+ {
+  "id": "files.bad.5",
+  "accepted": [],
+  "reasons": {
+   "a.json": "unknown variant `other`, expected `library` or `dinput8` at line 1 column 110"
+  }
+ },
+ {
+  "id": "files.bad.6",
+  "accepted": [],
+  "reasons": {
+   "a.json": "unknown field `extra`, expected `path` or `mode` at line 1 column 103"
+  }
+ },
+ {
+  "id": "files.bad.7",
+  "accepted": [],
+  "reasons": {
+   "a.json": "missing field `path` at line 1 column 98"
+  }
+ },
+ {
+  "id": "files.bad.8",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: integer `1`, expected a string at line 1 column 89"
+  }
+ },
+ {
+  "id": "files.bad.9",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid type: map, expected a sequence at line 1 column 79"
+  }
+ },
+ {
+  "id": "files.bad.10",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": [
+     {
+      "path": ".dll",
+      "mode": "library"
+     }
+    ]
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  }
+ },
+ {
+  "id": "files.bad.11",
+  "accepted": [],
+  "reasons": {
+   "a.json": "invalid or duplicate DLL path: c:a.dll"
+  }
+ },
+ {
+  "id": "files.bad.12",
+  "accepted": [],
+  "reasons": {
+   "a.json": "expected value at line 1 column 104"
+  }
+ },
+ {
+  "id": "unknown-field",
+  "accepted": [],
+  "reasons": {
+   "a.json": "unknown field `extra`, expected one of `schemaVersion`, `id`, `modId`, `packageDirectory`, `name`, `target`, `modJson`, `extendedModJson`, `packageFiles`, `importFiles`, `files` at line 1 column 78"
+  }
+ },
+ {
+  "id": "unknown-field-snake",
+  "accepted": [],
+  "reasons": {
+   "a.json": "unknown field `schema_version`, expected one of `schemaVersion`, `id`, `modId`, `packageDirectory`, `name`, `target`, `modJson`, `extendedModJson`, `packageFiles`, `importFiles`, `files` at line 1 column 87"
+  }
+ },
+ {
+  "id": "json.invalid",
+  "accepted": [],
+  "reasons": {
+   "a.json": "EOF while parsing a value at line 1 column 19"
+  }
+ },
+ {
+  "id": "json.trailing-comma",
+  "accepted": [],
+  "reasons": {
+   "a.json": "trailing comma at line 1 column 72"
+  }
+ },
+ {
+  "id": "json.duplicate-key",
+  "accepted": [],
+  "reasons": {
+   "a.json": "duplicate field `id` at line 1 column 32"
+  }
+ },
+ {
+  "id": "catalog.duplicate-id",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "A",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   },
+   {
+    "schemaVersion": 1,
+    "id": "p2",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "b.json": null,
+   "a.json": null,
+   "c.json": null
+  }
+ },
+ {
+  "id": "catalog.sorted",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "A",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   },
+   {
+    "schemaVersion": 1,
+    "id": "m",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   },
+   {
+    "schemaVersion": 1,
+    "id": "z",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "z.json": null,
+   "A.json": null,
+   "m.json": null
+  }
+ },
+ {
+  "id": "catalog.extension",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "upper",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   },
+   {
+    "schemaVersion": 1,
+    "id": "mixed",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.JSON": null,
+   "b.txt": null,
+   "c.json.bak": null,
+   "d.Json": null
+  }
+ },
+ {
+  "id": "catalog.invalid-skipped",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "good",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": "expected ident at line 1 column 2",
+   "b.json": null
+  }
+ },
+ {
+  "id": "overlay.none",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "other",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": null,
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "overlay.directory-case",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "PKG",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "from profile"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": "from profile",
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "overlay.modid-match",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "example",
+    "packageDirectory": "other",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "by id"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": "by id",
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "overlay.modid-mismatch",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "different",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "x"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": null,
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "overlay.capabilities-union",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "capabilities": [
+      "patch",
+      "runtime"
+     ]
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime",
+     "patch"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": null,
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "overlay.capabilities-noncanonical",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "capabilities": [
+      "runtime-register-dll"
+     ]
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "err": "mod: \"bad\" is not of type \"array\""
+  },
+  "revision": {
+   "Ok": "58a029ec9525085805e7ded314c88c0480364efcd2632bb9d79afaccbd2d3aba"
+  }
+ },
+ {
+  "id": "overlay.capabilities-missing",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "capabilities": [
+      "export"
+     ]
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "export"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": null,
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "1ef3511b0dea36dbd4cc0765661736e9ac59a52b32884f233d5abaf496413652"
+  }
+ },
+ {
+  "id": "overlay.recursive",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "authors": [
+      "x"
+     ],
+     "description": "d"
+    },
+    "extendedModJson": {
+     "settings": {
+      "level": {
+       "label": "Overlay"
+      },
+      "flag": {
+       "label": "L"
+      },
+      "added": 3
+     }
+    },
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1,
+     "added": 3
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [
+     "x"
+    ],
+    "description": "d",
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Overlay",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "added",
+      "type": "integer",
+      "control": null,
+      "label": "added",
+      "description": null,
+      "default": 3,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "overlay.enabled-stripped",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": {
+     "enabled": false,
+     "targets": [
+      "server"
+     ]
+    },
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": null,
+    "license": null,
+    "icon": null,
+    "target": "server",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "overlay.synthesized-extension",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": {
+     "targets": [
+      "client"
+     ]
+    },
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": false,
+    "settingValues": {},
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": null,
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "ff5d5e6980f935de2bd91f22414585aab7034eeb8832f730f6857666bdc37a72"
+  }
+ },
+ {
+  "id": "overlay.synthesized-empty",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": {},
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": false,
+    "settingValues": {},
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": null,
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "ff5d5e6980f935de2bd91f22414585aab7034eeb8832f730f6857666bdc37a72"
+  }
+ },
+ {
+  "id": "overlay.no-extension-overlay",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "d"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": false,
+    "settingValues": {},
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": "d",
+    "license": null,
+    "icon": null,
+    "target": "client, server",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "ff5d5e6980f935de2bd91f22414585aab7034eeb8832f730f6857666bdc37a72"
+  }
+ },
+ {
+  "id": "overlay.package-files",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {
+     "locales/de.json": "{\"mod\":{\"name\":\"Deutsch\"}}"
+    },
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "err": "locales: No such file or directory (os error 2)"
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "overlay.package-files-invalid-locale",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {
+     "locales/de.json": "{"
+    },
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "err": "locales: No such file or directory (os error 2)"
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "overlay.package-files-override",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {
+     "locales/de.json": "{\"mod\":{\"name\":\"Virtual\"}}"
+    },
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": null,
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "fb52ab76f31d7d1ba741487458ef84087d8786e38d6e931cca752b1fdf9ef0db"
+  }
+ },
+ {
+  "id": "overlay.makes-invalid",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "name": ""
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "err": "mod: \"\" is shorter than 1 character"
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "overlay.extension-makes-invalid",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": {
+     "schemaVersion": 2
+    },
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "err": "extended-mod: 1 was expected"
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "overlay.null-modjson",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "p1",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": null,
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": null,
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "select.explicit",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "auto",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "auto"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   },
+   {
+    "schemaVersion": 1,
+    "id": "chosen",
+    "modId": "nobody",
+    "packageDirectory": "elsewhere",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "chosen"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null,
+   "b.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": "chosen",
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "select.explicit-missing",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "auto",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "auto"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": null,
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "select.none",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "auto",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "auto"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": null,
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "select.empty-string",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "auto",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "auto"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": "auto",
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "select.null",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "auto",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "auto"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": "auto",
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "select.other-directory",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "auto",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "auto"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   },
+   {
+    "schemaVersion": 1,
+    "id": "chosen",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "chosen"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": null,
+   "b.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": "auto",
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "select.directory-case",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "chosen",
+    "modId": "",
+    "packageDirectory": "zzz",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "chosen"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "b.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": "chosen",
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "select.first-auto",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "first",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "first"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   },
+   {
+    "schemaVersion": 1,
+    "id": "second",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "second"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "b.json": null,
+   "a.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": "first",
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ },
+ {
+  "id": "select.invalid-skipped-auto",
+  "accepted": [
+   {
+    "schemaVersion": 1,
+    "id": "good",
+    "modId": "",
+    "packageDirectory": "pkg",
+    "name": "Profile",
+    "target": "both",
+    "modJson": {
+     "description": "good"
+    },
+    "extendedModJson": null,
+    "packageFiles": {},
+    "importFiles": {},
+    "files": []
+   }
+  ],
+  "reasons": {
+   "a.json": "invalid compatibility profile identity",
+   "b.json": null
+  },
+  "manifest": {
+   "ok": {
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "enabled": true,
+    "settingValues": {
+     "flag": true,
+     "level": 1
+    },
+    "capabilities": [
+     "runtime"
+    ],
+    "dependencies": [],
+    "authors": [],
+    "description": "good",
+    "license": null,
+    "icon": null,
+    "target": "client",
+    "changelog": [],
+    "links": {},
+    "groups": [],
+    "actions": [],
+    "settings": [
+     {
+      "key": "flag",
+      "type": "boolean",
+      "control": null,
+      "label": "flag",
+      "description": null,
+      "default": true,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     },
+     {
+      "key": "level",
+      "type": "integer",
+      "control": null,
+      "label": "Level",
+      "description": null,
+      "default": 1,
+      "group": null,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "minimumLength": null,
+      "maximumLength": null,
+      "options": [],
+      "assetPreparation": false,
+      "restartRequired": true,
+      "applyAt": "restart"
+     }
+    ],
+    "locales": {}
+   }
+  },
+  "revision": {
+   "Ok": "a753b0219636c21a77d1dd11168734bea79fd965e8022a23a8bf5088379a33d6"
+  }
+ }
+]

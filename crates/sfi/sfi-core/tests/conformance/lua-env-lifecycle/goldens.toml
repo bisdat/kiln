@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT
+# Legacy v1 raw observation, unchanged. Error userdata identity is checked, NOT message text.
+# The base predates the v2 prelude; regenerate through that shared prelude,
+# integration, never synthesize message fields or auto-upgrade this oracle observation.
+# The production VM is real; other families' namespace tables/logging are explicit test
+# doubles (tests/support/lua_environment.rs), NOT coverage of their members or delivery.
+# Multi-owner/stdlib-presence/source/error-text cases also live in lua_environment.rs,
+# lua_arguments.rs and lua_package_source.rs with both-pin file:line provenance.
+[goldens]
+"sandbox-require.golden.json" = "oracle sf-1.7.9 d8a394bc and sf-1.8.0 38ef448d; captured with ShroudForge's own mod runtime (a local differential test, not published), selftest sandbox-require.lua with its fixed seed; v1 (not message-verified)"

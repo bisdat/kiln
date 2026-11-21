@@ -1286,6 +1286,174 @@ KILN_TASKS_TEST(worlds_on_two_threads) {
           "every client hop queued and ran, none cancelled by the server world's sessions");
     end_lease(s, 1, l);
 }
+// ---- menu hops (#83): the main menu's own session line, opened by the UI frame, ended by any world's start ----
+
+KILN_TASKS_TEST(menu_hops_land_on_the_menu_frame) {
+    HostPlatform p;
+    Env env;
+    Pool pool(config(), &p);
+    Service s(pool, env);
+    const Settled settled{pool};
+    s.host_bind(&hop_dispatch);
+    reset_hops();
+    const KilnLease l = suspended_lease(s, 1, "menu");
+    uint32_t state = 9;
+    check(s.host_world_session(KILN_TASKS_WORLD_MENU, &state) == 0 && state == 0, "no menu session before a UI frame");
+    check(s.host_tick_hop_in(l, KILN_TASKS_WORLD_MENU, 1) == KILN_ERR_UNAVAILABLE,
+          "no menu session yet (a dedicated server never has one): a menu hop is refused at once");
+    check(s.menu_frame() == 0, "the first menu frame opens a session and has nothing to run");
+    check(s.host_world_session(KILN_TASKS_WORLD_MENU, &state) == 1 && state == 1, "menu session 1, live");
+    check(s.host_tick_hop_in(l, KILN_TASKS_WORLD_MENU, 2) == KILN_ERR_UNAVAILABLE, "another menu session: refused");
+    check(s.host_tick_hop_in(l, KILN_TASKS_WORLD_MENU, 1) == KILN_OK && s.pending_tick_hops(KILN_TASKS_WORLD_MENU) == 1 &&
+              s.pending_tick_hops(KILN_WORLD_SERVER) == 0 && s.pending_tick_hops(KILN_WORLD_CLIENT) == 0,
+          "queued in the menu only");
+    check(s.run_tick_hops(KILN_WORLD_SERVER) == 0 && s.run_tick_hops(KILN_WORLD_CLIENT) == 0, "no world step runs it");
+    check(s.menu_frame() == 1, "the next menu frame runs it");
+    const auto seen = seen_hops();
+    check(seen.size() == 1 && seen[0].lease == l && seen[0].what == KILN_LEASE_MENU_HOP && seen[0].cancelled == 0,
+          "dispatched as KILN_LEASE_MENU_HOP, not cancelled");
+    check(s.menu_frame() == 0 && s.host_world_session(KILN_TASKS_WORLD_MENU, &state) == 1 && state == 1,
+          "later frames keep the same session");
+    uint32_t why = 0;
+    check(s.host_resume_after_step_world(l, 1, KILN_TASKS_WORLD_MENU, 1, &why) == KILN_ERR_INVALID_ARGUMENT,
+          "the menu has no Post edges: no window waits for it");
+    end_lease(s, 1, l);
+}
+
+KILN_TASKS_TEST(a_world_start_ends_the_menu_session) {
+    for (const uint32_t world : {uint32_t{KILN_WORLD_SERVER}, uint32_t{KILN_WORLD_CLIENT}}) {
+        const std::string w = world == KILN_WORLD_SERVER ? "server" : "client";
+        HostPlatform p;
+        Env env;
+        Pool pool(config(), &p);
+        Service s(pool, env);
+        const Settled settled{pool};
+        s.host_bind(&hop_dispatch);
+        reset_hops();
+        const KilnLease l = suspended_lease(s, 1, "menu then world");
+        s.menu_frame();
+        check(s.host_tick_hop_in(l, KILN_TASKS_WORLD_MENU, 1) == KILN_OK, w + ": a menu hop waits for the next menu frame");
+        s.session_started(world, 1);
+        auto seen = seen_hops();
+        check(seen.size() == 1 && seen[0].lease == l && seen[0].what == KILN_LEASE_MENU_HOP && seen[0].cancelled == 1,
+              w + ": the world's start dispatched the waiting menu hop cancelled, on the starting thread");
+        uint32_t state = 9;
+        check(s.host_world_session(KILN_TASKS_WORLD_MENU, &state) == 1 && state == 2, w + ": menu session 1 ended");
+        check(s.host_tick_hop_in(l, KILN_TASKS_WORLD_MENU, 1) == KILN_ERR_UNAVAILABLE, w + ": the ended menu takes no hop");
+        check(s.menu_frame() == 0 && s.host_world_session(KILN_TASKS_WORLD_MENU, &state) == 1 && state == 2,
+              w + ": a UI frame while a world runs opens no menu session");
+        check(s.host_tick_hop_in(l, world, 1) == KILN_OK, w + ": the world takes its own hop");
+        s.session_stopping(world, 1);
+        seen = seen_hops();
+        check(seen.size() == 2 && seen[1].what == (world == KILN_WORLD_SERVER ? uint32_t{KILN_LEASE_TICK_HOP}
+                                                                              : uint32_t{KILN_LEASE_CLIENT_HOP}) &&
+                  seen[1].cancelled == 1,
+              w + ": the world's hop ends with its STOPPING, never in the menu");
+        check(s.menu_frame() == 0 && s.host_world_session(KILN_TASKS_WORLD_MENU, &state) == 2 && state == 1,
+              w + ": back in the menu, the next UI frame opens menu session 2");
+        check(s.host_tick_hop_in(l, KILN_TASKS_WORLD_MENU, 1) == KILN_ERR_UNAVAILABLE &&
+                  s.pending_tick_hops(KILN_TASKS_WORLD_MENU) == 0,
+              w + ": a hop for menu session 1 is never queued into menu session 2");
+        check(s.host_tick_hop_in(l, KILN_TASKS_WORLD_MENU, 2) == KILN_OK && s.menu_frame() == 1, w + ": session 2's own hop runs");
+        end_lease(s, 1, l);
+    }
+}
+
+KILN_TASKS_TEST(no_menu_while_any_world_runs) {
+    HostPlatform p;
+    Env env;
+    Pool pool(config(), &p);
+    Service s(pool, env);
+    uint32_t state = 9;
+    s.session_started(KILN_WORLD_SERVER, 1);  // a hosting client: the server world first, then its client world
+    s.session_started(KILN_WORLD_CLIENT, 1);
+    s.menu_frame();
+    check(s.host_world_session(KILN_TASKS_WORLD_MENU, &state) == 0 && state == 0, "in a world: no menu session");
+    s.session_stopping(KILN_WORLD_CLIENT, 1);
+    s.menu_frame();
+    check(s.host_world_session(KILN_TASKS_WORLD_MENU, &state) == 0 && state == 0,
+          "the server world still runs (its client world stopped first): still no menu");
+    s.session_stopping(KILN_WORLD_SERVER, 1);
+    s.menu_frame();
+    check(s.host_world_session(KILN_TASKS_WORLD_MENU, &state) == 1 && state == 1, "both stopped: the menu opens");
+    check(s.host_world_session(KILN_WORLD_SERVER, &state) == 1 && state == 2 &&
+              s.host_world_session(KILN_WORLD_CLIENT, &state) == 1 && state == 2,
+          "the menu leaves the worlds' own lines alone");
+}
+
+KILN_TASKS_TEST(menu_hop_budget_is_its_own) {
+    HostPlatform p;
+    Env env;
+    Pool pool(config(), &p);
+    Service s(pool, env);
+    const Settled settled{pool};
+    s.host_bind(&hop_dispatch);
+    reset_hops();
+    s.menu_frame();
+    const KilnLease a = suspended_lease(s, 1, "menu a"), b = suspended_lease(s, 2, "menu b");
+    for (int i = 0; i < 70; ++i) check(s.host_tick_hop_in(a, KILN_TASKS_WORLD_MENU, 1) == KILN_OK, "queued a");
+    for (int i = 0; i < 3; ++i) check(s.host_tick_hop_in(b, KILN_TASKS_WORLD_MENU, 1) == KILN_OK, "queued b");
+    check(s.menu_frame() == 67, "64 hops of a mod a frame; the other mod in the same frame");
+    check(s.menu_frame() == 6 && s.pending_tick_hops(KILN_TASKS_WORLD_MENU) == 0, "the rest in the next frame");
+    reset_hops(&p, 400 * 1000);  // each hop takes 0.4 ms
+    for (int i = 0; i < 10; ++i) s.host_tick_hop_in(a, KILN_TASKS_WORLD_MENU, 1);
+    for (int i = 0; i < 10; ++i) s.host_tick_hop_in(b, KILN_TASKS_WORLD_MENU, 1);
+    const std::size_t frame = s.menu_frame();
+    check(frame == 5 || frame == 6,
+          "a menu frame's 2 ms in all, a mod's 1 ms, checked between callbacks (got " + std::to_string(frame) + ")");
+    while (s.pending_tick_hops(KILN_TASKS_WORLD_MENU)) s.menu_frame();
+    check(s.collect_tasks_window().apply.applied == 0, "the server world's apply account counts no menu hop");
+    reset_hops();
+    end_lease(s, 1, a);
+    end_lease(s, 2, b);
+}
+
+// A menu frame on the UI thread against worlds starting and stopping on another thread (TSan): every hop queued is
+// dispatched exactly once, and none is dispatched live after the world's start returned.
+KILN_TASKS_TEST(menu_frames_race_world_starts) {
+    HostPlatform p;
+    Env env;
+    Pool pool(config(), &p);
+    Service s(pool, env);
+    const Settled settled{pool};
+    s.host_bind(&hop_dispatch);
+    reset_hops();
+    const KilnLease l = suspended_lease(s, 1, "menu race");
+    std::atomic<bool> stop{false}, in_world{false};
+    std::atomic<int> queued{0}, live_in_world{0};
+    std::thread ui([&] {
+        while (!stop.load()) {
+            const bool world = in_world.load();
+            const std::size_t before = hops_of(l);
+            s.menu_frame();
+            uint32_t state = 0;
+            const uint32_t session = s.host_world_session(KILN_TASKS_WORLD_MENU, &state);
+            if (state == 1 && s.host_tick_hop_in(l, KILN_TASKS_WORLD_MENU, session) == KILN_OK) ++queued;
+            // a frame that began after the world's start returned dispatches nothing live
+            if (world && hops_of(l) != before) {
+                std::lock_guard lock(g_hops.mutex);
+                for (std::size_t i = before; i < g_hops.seen.size(); ++i) live_in_world += g_hops.seen[i].second == 0;
+            }
+        }
+    });
+    for (uint32_t session = 1; session <= 200; ++session) {
+        s.session_started(KILN_WORLD_CLIENT, session);
+        in_world = true;
+        std::this_thread::yield();
+        in_world = false;
+        s.session_stopping(KILN_WORLD_CLIENT, session);
+        std::this_thread::yield();
+    }
+    stop = true;
+    ui.join();
+    s.session_started(KILN_WORLD_CLIENT, 201);  // flushes whatever the last menu session still held
+    check(live_in_world.load() == 0, "no menu hop ran live in a frame that began inside a world");
+    check(hops_of(l) == static_cast<std::size_t>(queued.load()) && s.pending_tick_hops(KILN_TASKS_WORLD_MENU) == 0,
+          "every queued menu hop was dispatched exactly once (got " + std::to_string(hops_of(l)) + " of " +
+              std::to_string(queued.load()) + ")");
+    reset_hops();
+    end_lease(s, 1, l);
+}
 }  // namespace
 
 int main(int argc, char** argv) { return kiln::tasks::test::run(argc, argv, "tasks host"); }

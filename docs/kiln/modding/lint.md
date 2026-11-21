@@ -743,6 +743,16 @@ block name, `"<this mod>:name"` or a pattern over this mod's items) gets it too:
 while a craft comes out at a rolled one ([item-blocks.md](item-blocks.md#rarity-at-creation-rarityrollblock)). Leave `craft` out of
 `sources` to keep crafts as the tooltip says, or accept the difference (the tooltip cannot show a roll).
 
+### KL407 hidden-entry
+Info (needs the catalog). A name the game has, but whose name marks it as one of the game's old, test or unused entries: a
+`Z_` prefix, or a word such as `DEPRECATED`, `DONOTPLACE`, `UNUSED`, `WIP`, `TEST` or `OLD` (the whole list:
+`kiln_manage::catalog::is_hidden_name`). The reference works, but the entry may do nothing in the game. Pack Studio's
+pickers leave these entries out unless "Show hidden game entries" is on.
+```text
+content/items.json:3:5: info KL407: "Z_Material_Sand_DEPRECATED" is one of the game's old, test or unused item entries (its name says so): it may do nothing in the game
+```
+Fix: pick the entry the game uses now, or keep it if you meant it.
+
 ## KL5xx: files, assets and cook recipes
 
 ### KL501 file-missing
@@ -872,6 +882,22 @@ mentions `cooked`. Those files are made from the game's data.
 kiln.mod.json:1:1: warning KL605: assets/cooked/ holds files made from the game's data: add "assets/cooked/" to the mod's .gitignore (they must never be committed or shipped)
 ```
 Fix: add `assets/cooked/` to the mod's `.gitignore`. If they are already committed, remove them from git too.
+
+## KL7xx: mods together
+
+### KL701 data-conflict
+Warning. Two mods linted together (`--profile`, or the mods of a Crucible pack) give one field of one game entry
+different values in their data packs (`content/*.json`). kiln.content applies packs in load order and the later mod
+wins ([content.md](../services/content.md), "Order and conflicts"), so the earlier mod's value never takes effect.
+Selectors are compared as the runtime matches them: names without regard to case, globs expanded against the game-data
+catalog (without one, a glob overlaps the names it matches and `*` overlaps everything). `@where` conditions need the
+game's values: a conflict with one, or found through two globs without the catalog, says it "may not touch the same
+entries". Within one mod later entries win and are no conflict; the same value from both mods is none either.
+```text
+content/loot.json:3:5: warning KL701: items Material_T1_Twigs.maxStackSize: big-stacks sets 1000, pack.ember sets 600 (the later mod wins: pack.ember)
+```
+Fix: if the later value is what you want, nothing (a pack layer loads last on purpose); otherwise leave the field to
+one mod. `kilnctl pack check` lists every such field of a pack (Crucible shows them under "Checks").
 
 ## KL9xx: the linter itself
 

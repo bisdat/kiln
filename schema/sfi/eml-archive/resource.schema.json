@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-archive/resource.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "pin": {
+      "$ref": "common.schema.json#/$defs/pin"
+    },
+    "resourceId": {
+      "type": "string",
+      "pattern": "^guid:[0-9a-f]{32}$"
+    },
+    "typeHash": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "part": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "type_index": {
+      "type": "string",
+      "pattern": "^u64:[0-9a-f]{16}$"
+    },
+    "value": {
+      "$ref": "common.schema.json#/$defs/value"
+    }
+  },
+  "required": [
+    "schema_version",
+    "pin",
+    "resourceId",
+    "typeHash",
+    "part",
+    "type_index",
+    "value"
+  ],
+  "additionalProperties": false
+}

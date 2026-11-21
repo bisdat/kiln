@@ -261,10 +261,14 @@ bool identity_field(const std::string& name) { return identity_name(name); }
 bool resolve(Root kind, Node root, const std::string& path, std::vector<Resolved>* out, std::string* err,
              bool* first_missing) {
     out->clear();
+    err->clear();
     if (first_missing) *first_missing = false;
     std::vector<Tok> toks;
     if (!tokenize(path, &toks, err)) return false;
     std::vector<State> cur{State{root, "", 0, nullptr, 0, false}};
+    // a [*] over an empty list names no element, which is no error (the path names nothing there); every other way a
+    // place drops out sets *err (cleared above)
+    bool emptied = false;
     for (size_t ti = 0; ti < toks.size(); ++ti) {
         const Tok& tk = toks[ti];
         std::vector<State> next;
@@ -389,6 +393,7 @@ bool resolve(Root kind, Node root, const std::string& path, std::vector<Resolved
             }
             uint32_t idx = 0;
             if (tk.s == "*") {
+                emptied = emptied || els.empty();
                 for (size_t i = 0; i < els.size(); ++i) {
                     State s2 = st;
                     s2.node = els[i];
@@ -453,7 +458,9 @@ bool resolve(Root kind, Node root, const std::string& path, std::vector<Resolved
                 *err = st.path + ": no " + want + " #" + std::to_string(nth) + " (" + std::to_string(seen) + " of that type)";
         }
         cur = std::move(next);
-        if (cur.empty()) return !out->empty();
+        // nothing left: what was named so far (config adds), else nothing at all, which is no error only when it ended
+        // at empty lists and no place failed
+        if (cur.empty()) return !out->empty() || (emptied && err->empty());
     }
     for (State& st : cur) {
         Node n = deref(st.node);

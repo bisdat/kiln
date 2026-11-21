@@ -58,6 +58,14 @@ using CurrentEntityIdFn = uint32_t*(__fastcall*)(void* ctx, uint32_t* out);
 CurrentEntityIdFn g_entity_of = nullptr;
 kiln::MidHook2 h_steer;
 std::atomic<bool> g_active{false};
+// Placed late (dev.30.1): ShroudForge 1.8.1's runtime.patch.glider_pitch reads actor_rotation's live code and refuses
+// a procedure holding another module's jump, so the mid hook goes in only once a rule set asks for GlideSteer, on the
+// tick thread after the first world (as the creative hooks), never at boot (docs/kiln/shroudforge-compat.md 11).
+KilnOwner g_owner_steer = 0;
+uintptr_t g_site = 0;
+std::atomic<bool> g_ready{false};  // install() found everything: tick() may place the hook
+std::atomic<bool> g_world{false};  // the first world started
+std::atomic<bool> g_tried{false};  // placed or refused once: never again
 
 struct Layout {
     int64_t ctx = 0;           // rbp + this: the ProgramContext's home slot
@@ -137,6 +145,9 @@ uint64_t faults() { return S.faults.load(std::memory_order_relaxed); }
 uint32_t install(const KilnApi* api, KilnOwner owner, std::string& off) {
     g_api = api;
     g_active.store(false);
+    g_ready.store(false);
+    g_tried.store(false);
+    h_steer = {};
     g_client = static_cast<const KilnClientApi*>(
         api->service(KilnStr{KILN_CLIENT_SERVICE, sizeof(KILN_CLIENT_SERVICE) - 1}, KILN_CLIENT_VERSION));
     auto note = [&off](const char* why) { off += (off.empty() ? "glider steering (" : ", glider steering (") + std::string(why) + ")"; };
@@ -156,16 +167,31 @@ uint32_t install(const KilnApi* api, KilnOwner owner, std::string& off) {
         return 0;
     }
     g_entity_of = reinterpret_cast<CurrentEntityIdFn>(current);
-    h_steer.install(api, owner, site, &hk_steer, "rules/GlideSteer");
-    if (!h_steer) {
-        logf(KILN_LOG_ERROR, "glider steering: hooking actor_rotation's pitch step failed; it stays off");
-        note("hook failed");
+    g_owner_steer = owner;
+    g_site = site;
+    g_ready.store(true);
+    logf(KILN_LOG_INFO, "glider steering: actor_rotation's pitch step at rva 0x%llx, hooked when a rule set first asks for "
+         "GlideSteer (S raises the nose, centred holds, W dives; until then actor_rotation stays unhooked for other loaders)",
+         static_cast<unsigned long long>(site - reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr))));
+    return KILN_RULES_HOOK_GLIDE_STEER;
+}
+
+void world_started() { g_world.store(true, std::memory_order_relaxed); }
+
+int tick() {
+    if (!g_ready.load(std::memory_order_relaxed) || !g_world.load(std::memory_order_relaxed) ||
+        g_tried.load(std::memory_order_relaxed) || !(kiln_rules_bridge::flags_seen() & KILN_RULES_GLIDE_STEER))
         return 0;
+    g_tried.store(true);
+    const auto rva = static_cast<unsigned long long>(g_site - reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)));
+    h_steer.install(g_api, g_owner_steer, g_site, &hk_steer, "rules/GlideSteer");
+    if (!h_steer) {
+        logf(KILN_LOG_ERROR, "glider steering: hooking actor_rotation's pitch step at rva 0x%llx failed; it stays off", rva);
+        return -1;
     }
     g_active.store(true);
-    logf(KILN_LOG_INFO, "glider steering: actor_rotation's pitch step at rva 0x%llx (S raises the nose, centred holds, W dives; "
-         "for players with GlideSteer)", static_cast<unsigned long long>(site - reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr))));
-    return KILN_RULES_HOOK_GLIDE_STEER;
+    logf(KILN_LOG_INFO, "glider steering: actor_rotation's pitch step at rva 0x%llx hooked (a rule set asked for GlideSteer)", rva);
+    return 1;
 }
 
 }  // namespace kiln_rules_steer

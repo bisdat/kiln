@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-archive/attribute-selector.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "schema_version",
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

@@ -21,7 +21,7 @@ export const openInDiscord = (url: string, fallback?: string) => { api.appOpenDi
 export const PRIVACY_URL = "https://frostdev.io/kiln/privacy";
 export const TERMS_URL = "https://frostdev.io/kiln/terms";
 export const LINKS = {
-  docs: "https://frostdev.io/kiln/docs",
+  docs: "https://frostdev.io/kiln/wiki",
   issues: "https://github.com/frostdev-ops/kiln/issues",
   nexus: "https://www.nexusmods.com/enshrouded/mods/301",
   download: "https://frostdev.io/kiln/download",
@@ -57,7 +57,7 @@ export const useTester = (enabled = true) => useQuery({ queryKey: cq.tester, que
 export const refreshCommunity = (qc: ReturnType<typeof useQueryClient>) =>
   qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "community" && q.queryKey[1] !== "feed" && q.queryKey[1] !== "prepare" });
 
-export async function setCommunity(qc: ReturnType<typeof useQueryClient>, patch: Partial<Pick<CommunitySettings, "shown" | "presence" | "notify">>) {
+export async function setCommunity(qc: ReturnType<typeof useQueryClient>, patch: Partial<Pick<CommunitySettings, "shown" | "presence" | "presencePack" | "notify">>) {
   const s = await api.communitySettingsSet(patch);
   qc.setQueryData(cq.settings, s);
   await refreshCommunity(qc);

@@ -32,6 +32,30 @@ public sealed class ShroudForgeMenuTests : IDisposable
         FakeUiTable.Free();
     }
 
+    // the kiln-mode menu event: auto-reset, so two signals before a wait are one toggle
+    [Fact]
+    public void The_kiln_mode_menu_event_is_auto_reset_and_coalesces_signals_before_a_wait()
+    {
+        if (!OperatingSystem.IsWindows()) return;  // a Windows event; the hosted path's tests above run everywhere
+        var h = ShroudForgeMenu.CreateKilnEvent(out var existed);
+        Assert.NotEqual(0, h);
+        Assert.False(existed);
+        try
+        {
+            Assert.Equal(258u, ShroudForgeMenu.WaitForTests(h, 0));  // not signalled at first
+            var other = ShroudForgeMenu.CreateKilnEvent(out var again);
+            Assert.True(again, "the same name opens the same event");
+            Assert.True(SetEvent(other) && SetEvent(other));
+            Assert.Equal(0u, ShroudForgeMenu.WaitForTests(h, 0));  // one wake for both
+            Assert.Equal(258u, ShroudForgeMenu.WaitForTests(h, 0));  // and reset by that wait
+            ShroudForgeMenu.CloseForTests(other);
+        }
+        finally { ShroudForgeMenu.CloseForTests(h); }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32")]
+    private static extern bool SetEvent(nint h);
+
     private static CatalogSnapshot WithShroudForge(long version) => new()
     {
         Version = version,

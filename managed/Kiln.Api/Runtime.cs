@@ -87,8 +87,9 @@ public static class Game
 {
     public static string KilnVersion => Backend.Current.Version;
 
-    /// <summary>True on the server-world tick thread, where game state may be touched.</summary>
-    public static bool IsTickThread => Backend.Current.IsTickThread;
+    /// <summary>True on the server-world tick thread, where game state may be touched. False in a Kiln task's menu hop
+    /// (<see cref="WorldKind.Menu"/>), where no world runs.</summary>
+    public static bool IsTickThread => !TaskExecutionScope.InMenuHop && Backend.Current.IsTickThread;
 
     /// <summary>The language mod texts are shown in, as a lower-case tag: <c>"en-us"</c>, <c>"de-de"</c>, <c>"pt-br"</c>
     /// (the game's own language keys). A dedicated server always says <c>"en-us"</c>. A game client says the language of the
@@ -109,6 +110,7 @@ public static class Game
     {
         if (SliceGuard.Depth > 0)
             throw new InvalidOperationException("This cannot run in a program wrap's handler (it runs inside the world's step); use slice.Post.");
+        if (TaskExecutionScope.InMenuHop) throw new InvalidOperationException(TaskExecutionScope.MenuHopRefusal(CallerName()));
         if (IsTickThread) return;
         throw new InvalidOperationException(InBoot ? NotInBoot(CallerName()) : "This must run on the tick thread; use Scheduler.Post.");
     }
@@ -118,6 +120,7 @@ public static class Game
     {
         if (SliceGuard.Depth > 0)
             throw new InvalidOperationException($"{member} cannot run in a program wrap's handler (it runs inside the world's step); use slice.Post.");
+        if (TaskExecutionScope.InMenuHop) throw new InvalidOperationException(TaskExecutionScope.MenuHopRefusal(member));
         if (IsTickThread) return;
         throw new InvalidOperationException(InBoot ? NotInBoot(member) : "This must run on the tick thread; use Scheduler.Post.");
     }
