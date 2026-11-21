@@ -25,6 +25,10 @@ It is built from:
     Lua bindings are deliberately aligned to mlua 0.11.6 / mlua-sys 0.10.0 /
     lua-src 550.0.0 (Lua 5.4); the before/after GPL dependency tests are in the source.
 
+Credit: kiln-eml's startup pass for ShroudForge mods (kiln-eml/src/sf_pass.rs, kiln-eml/src/sf_startup/) and the
+sfi-core and sfi-package crates linked into it, which Kiln's interpreter kiln-sfi.dll (component sfi) is built from too:
+Adapted from ShroudForge by bonsaibauer, MIT.
+
 Corresponding source: gpl/kiln-eml, crates/sfi (including its workspace manifest and MIT licence),
 tools/sfi/conformance, and native/core/abi with tools/sfi/abigen (the C headers kiln-abi's checked-in bindings are
 generated from, and their generator) in Kiln's source archive of this release (kiln-<version>-src.tar.gz,
