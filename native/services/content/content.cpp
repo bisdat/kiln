@@ -21,6 +21,7 @@
 #include <unordered_set>
 
 #include "content.h"
+#include "registry/stage.h"
 #include "refs.h"
 #if KC_GAMEDATA
 #include "gamedata.h"
@@ -1246,6 +1247,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         LOGI("boot profile: the boot generation's content definitions are prepared before the game's entry point");
 #if KC_GAMEDATA
     gd_boot_patches_bind();  // the seventh collector: fields of game resources, written when the resource service is up
+    registry::stage::bind_service();  // kiln.registry and kiln.internal.registry; the stage runs in the patches' resources-ready apply
 #endif
     if (!E.items || !E.reflection) {
         set_detail("the item registry or the game's reflection is not available on this build");

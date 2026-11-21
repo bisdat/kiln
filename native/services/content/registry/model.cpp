@@ -779,6 +779,8 @@ std::optional<RawMember> Model::raw(const std::string& registry, size_t i, const
 }
 
 std::set<std::string> Model::decoded() const { return d_->decoded; }
+const map::RegMap& Model::regmap() const { return d_->rm; }
+const Schema& Model::schema() const { return d_->schema; }
 
 std::vector<std::string> Model::take_notes() {
     std::vector<std::string> out;

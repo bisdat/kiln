@@ -71,7 +71,34 @@ KilnContentValue decode(const Field& f, const uint8_t* b) {
     }
     return v;
 }
+const KilnApi* g_api = nullptr;
+bool path_exists(const std::string&) { return false; }
+std::string data_dir() { return {}; }
+double as_double(const KilnContentValue& v) { return v.type == KILN_CV_INT ? static_cast<double>(v.i) : v.f; }
+bool encode(const Field& f, const KilnContentValue& v, uint8_t* bytes, std::string*) {
+    if (f.vt == KILN_CV_FLOAT) {
+        const float x = static_cast<float>(v.f);
+        std::memcpy(bytes, &x, 4);
+    } else {
+        const int64_t i = v.type == KILN_CV_FLOAT ? static_cast<int64_t>(v.f) : v.i;
+        std::memcpy(bytes, &i, f.bytes);
+    }
+    return true;
+}
+const Entry* Registry::lookup(const std::string&) const { return nullptr; }
+Registry& reg(uint32_t) {
+    static Registry r;
+    return r;
+}
+const Field* Schema::find(const std::string&) const { return nullptr; }
 namespace gd {
+const GEntry* GRegistry::lookup(const std::string&) const { return nullptr; }
+const GEntry* GRegistry::get(uint32_t) const { return nullptr; }
+GRegistry& greg(uint32_t) {
+    static GRegistry r;
+    return r;
+}
+bool buff_guid(uint32_t, uint8_t[16]) { return false; }
 std::map<std::string, const TType*>& named() {
     static std::map<std::string, const TType*> m;
     return m;
@@ -104,6 +131,14 @@ void item_type() {
     item.name = "keen::ItemInfo", item.brief = "ItemInfo", item.kind = K_STRUCT, item.size = 40;
     item.fields = {{"itemId", rec(u32), 0}, {"objectId", rec(guid), 4}, {"maxStackSize", rec(u16), 0x14}, {"debugName", rec(str), 0x18}};
     named()["keen::ItemInfo"] = &item;
+}
+void balance_type() {
+    using namespace kc::gd;
+    static TType u32, bal;
+    u32.name = u32.brief = "uint32", u32.kind = K_U32, u32.size = 4;
+    bal.name = "keen::BalancingTable", bal.brief = "BalancingTable", bal.kind = K_STRUCT, bal.size = 8;
+    bal.fields = {{"playerLevelCap", reinterpret_cast<uintptr_t>(&u32), 0}, {"skillPointsPerLevel", reinterpret_cast<uintptr_t>(&u32), 4}};
+    named()["keen::BalancingTable"] = &bal;
 }
 }  // namespace rbtest
 }  // namespace kc

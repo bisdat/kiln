@@ -117,6 +117,8 @@ class Model {
     // "registries": {"<registry>": {"<guid or #<num>>": "<kiln id>"}}}.
     json id_table_json() const;
 
+    const map::RegMap& regmap() const;
+    const Schema& schema() const;
     std::string digest() { return src_.digest(); }
     std::vector<std::pair<KilnAssetKey, std::string>> keys_read() const { return src_.keys_read(); }
     const char* source_name() const { return src_.name(); }
