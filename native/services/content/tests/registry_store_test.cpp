@@ -63,6 +63,10 @@ bool patch_code_byte(uintptr_t, uint8_t, uint8_t) { return false; }
 namespace {
 using namespace kc;
 int checks = 0;
+void check(bool yes, const std::string& name) {
+    if (!yes) throw std::runtime_error(name);
+    ++checks;
+}
 void check(bool yes, const char* name) {
     if (!yes) throw std::runtime_error(name);
     ++checks;
@@ -196,8 +200,7 @@ void another_writer_is_never_overwritten() {
     flush();
     check(at(F1) == 60, "start: 60");
     mem(F1, 777);  // a ShroudForge run-time write (kiln mode), or any other writer
-    store_drop_owner(PACK);  // a pack reload re-evaluates the slot
-    put(PACK, kPackSeq, F1, 40);
+    store_mark_evals();  // the registry's layer evaluated again (a formula input changed, a recomposition)
     flush();
     check(at(F1) == 777, "the other writer's value stays");
     auto sk = store_skipped();
@@ -209,11 +212,25 @@ void another_writer_is_never_overwritten() {
     check(at(F1) == 777, "the slot stays with the other writer");
     check(store_skipped().size() == 1, "reported once per slot");
     uint8_t b[4];
-    check(store_effective(F1, 4, b) && b[0] == 40, "the registry layer is left out of the fold");
+    check(store_effective(F1, 4, b) && b[0] == 30, "the registry layer is left out of the fold");
     store_drop_owner(PACK);  // an older path's own change is written as today (the pack's reload)
     put(PACK, kPackSeq, F1, 41);
     flush();
     check(at(F1) == 41 && store_skipped().size() == 1, "a pack's change on that slot is written as it is today");
+}
+
+// review finding 7: another writer detected in the same flush as an older path's change: the pack's new value is written
+void detection_in_the_flush_of_a_pack_change() {
+    fresh();
+    put(PACK, kPackSeq, F1, 30);
+    put_mul(F1, 2);
+    flush();
+    mem(F1, 777);
+    store_drop_owner(PACK);  // a pack reload: the pack's layer dropped and put again with its new value
+    put(PACK, kPackSeq, F1, 50);
+    flush();
+    check(store_skipped().size() == 1, "the registry's write is skipped and reported");
+    check(at(F1) == 50, "the old pack's new value is written as today (memory " + std::to_string(at(F1)) + ")");
 }
 
 // the revert compares too: dropping a registry layer over a value another writer set since leaves that value
@@ -338,6 +355,7 @@ int main() {
         {"failed_evaluation_holds_the_value_below", failed_evaluation_holds_the_value_below},
         {"conflicts_show_the_evaluated_value", conflicts_show_the_evaluated_value},
         {"another_writer_is_never_overwritten", another_writer_is_never_overwritten},
+        {"detection_in_the_flush_of_a_pack_change", detection_in_the_flush_of_a_pack_change},
         {"a_revert_is_compared_too", a_revert_is_compared_too},
         {"old_paths_unchanged", old_paths_unchanged},
         {"mark_evals_re_evaluates", mark_evals_re_evaluates},

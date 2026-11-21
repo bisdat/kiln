@@ -1,0 +1,444 @@
+// SPDX-License-Identifier: MIT
+// kiln.content, host test: the registry line review's findings on the live back-end and the store (out/registry-review,
+// L1-L3, moved here), over the real store. Harness as registry_live_test.cpp. registry_live_review_test.sh builds and runs it.
+#include <windows.h>
+#include <cstdarg>
+#include <cstdio>
+#include <cstring>
+#include <map>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include "../content.h"
+#include "../registry/formulas.h"
+#include "../registry/schema_ir.h"
+#include "../registry_live.h"
+#include "../store.cpp"
+#include "../registry_live.cpp"
+
+namespace kc {
+const KilnApi* g_api = nullptr;
+Engine E;
+RecipeLayout RL;
+DropLayout DL;
+std::unordered_map<uint32_t, std::vector<uint8_t>> g_category_guid;
+namespace {
+alignas(16) uint8_t g_arena[1 << 20];  // the made-up game memory (real addresses, so near memory is within reach)
+size_t g_near = 1 << 19;
+Registry g_regs[5];
+std::map<std::string, std::string> g_files;  // pack file rel -> its text
+}  // namespace
+uintptr_t A(size_t off) { return reinterpret_cast<uintptr_t>(g_arena) + off; }
+void logf(int, const char* fmt, ...) {
+    va_list a;
+    va_start(a, fmt);
+    std::vfprintf(stderr, fmt, a);
+    va_end(a);
+    std::fputc('\n', stderr);
+}
+bool rd(uintptr_t address, void* out, size_t n) {
+    if (address < A(0) || address + n > A(sizeof g_arena)) return false;
+    std::memcpy(out, reinterpret_cast<const void*>(address), n);
+    return true;
+}
+size_t write_batch(std::vector<Write>& writes, uintptr_t*) {
+    for (const Write& w : writes) std::memcpy(reinterpret_cast<void*>(w.addr), w.bytes, w.n);
+    return writes.size();
+}
+void* near_alloc(uintptr_t, size_t n) {
+    void* p = g_arena + g_near;
+    g_near += (n + 15) & ~size_t(15);
+    return p;
+}
+Registry& reg(uint32_t kind) { return g_regs[kind]; }
+const Entry* Registry::get(uint32_t id) const {
+    auto it = by_id.find(id);
+    return it == by_id.end() ? nullptr : &entries[it->second];
+}
+const Entry* Registry::lookup(const std::string& key) const {
+    for (const Entry& e : entries)
+        if (lower(guid_text(e.guid)) == lower(key) || e.name == key) return &e;
+    return nullptr;
+}
+std::string lower(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+std::string guid_text(const uint8_t g[16]) {
+    char b[40];
+    std::snprintf(b, sizeof b, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", g[0], g[1], g[2], g[3], g[4], g[5],
+                  g[6], g[7], g[8], g[9], g[10], g[11], g[12], g[13], g[14], g[15]);
+    return b;
+}
+bool walk_drop_table(uintptr_t resource, std::vector<DropStackRef>* out) {
+    out->clear();
+    if (resource != A(0x30000)) return false;
+    out->push_back({A(0x31000), 0});
+    out->push_back({A(0x31040), 0});
+    return true;
+}
+bool patch_code_byte(uintptr_t, uint8_t, uint8_t) { return false; }
+uintptr_t type_by_hash(uint32_t) { return 0; }
+std::string read_text(uintptr_t, uint64_t) { return {}; }
+bool guid_parse(const std::string& s, uint8_t out[16]) {
+    std::string h;
+    for (char c : s)
+        if (c != '-') h += c;
+    if (h.size() != 32) return false;
+    for (int i = 0; i < 16; ++i) out[i] = static_cast<uint8_t>(std::stoul(h.substr(2 * i, 2), nullptr, 16));
+    return true;
+}
+uint32_t fnv1a(const void* data, size_t n) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; ++i) h = (h ^ static_cast<const uint8_t*>(data)[i]) * 16777619u;
+    return h;
+}
+// kiln.gamedata's item configs: the sword has a ManaCost config (float at +0x40) with a tooltip row (+0x44, Normal format)
+bool gd_item_config_slot(const Entry& e, const std::string& path, GdValueSlot* out, std::string* why) {
+    if (e.id != 0x222 || path != "impactValues.0xaf236ece") return *why = "the item has no such configuration (Kiln's live back-end does not add one)", false;
+    out->addr = e.addr + 0x40, out->kind = 1000, out->id = e.id, out->field = 7;
+    out->f.path = "impactValues.0xaf236ece.value", out->f.offset = 0, out->f.bytes = 4, out->f.vt = KILN_CV_FLOAT, out->f.writable = true;
+    out->tip = e.addr + 0x44, out->tip_format = 0;
+    return true;
+}
+bool gd_ui_scale(uint8_t, double v, int64_t* out) { return *out = std::llround(v), true; }
+const registry::Schema& registry_schema() {
+    static const registry::Schema s = registry::generated_schema();
+    return s;
+}
+std::vector<RegistrySection> registry_sections(const std::vector<PackFile>& files, const registry::Schema& schema) {
+    std::vector<RegistrySection> out;
+    for (const PackFile& f : files) {
+        const registry::json doc = registry::json::parse(g_files[f.rel], nullptr, false, true);
+        if (doc.is_discarded() || !doc.contains("registry")) continue;
+        RegistrySection s;
+        s.mod = f.mod, s.version = f.version, s.rel = f.rel, s.source = f.rel.substr(f.rel.find("/content/") + 1);
+        s.hash = std::hash<std::string>{}(doc["registry"].dump());
+        registry::lower_section(doc["registry"], f.mod, f.version, s.source, schema, &s.batches, &s.refused, &s.error);
+        out.push_back(std::move(s));
+    }
+    return out;
+}
+}  // namespace kc
+
+namespace {
+using namespace kc;
+int checks = 0;
+void check(bool yes, const std::string& name) {
+    if (!yes) throw std::runtime_error(name);
+    ++checks;
+}
+
+constexpr KilnOwner PACK = 11, CODE = 44;
+constexpr uint64_t kPackSeq = (1ull << 44) | (1ull << 32) | 1;
+const uint8_t G1[16] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, G2[16] = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2},
+              G3[16] = {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3}, G4[16] = {4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4};
+const uint8_t P1[16] = {9, 1, 9, 1, 9, 1, 9, 1, 9, 1, 9, 1, 9, 1, 9, 1}, P2[16] = {9, 2, 9, 2, 9, 2, 9, 2, 9, 2, 9, 2, 9, 2, 9, 2};
+constexpr uint32_t WOOD = 0x111, SWORD = 0x222, PLANK = 0x333, STONE = 0x555;
+constexpr size_t WOOD_AT = 0x10000, SWORD_AT = 0x10100, STONE_AT = 0x10200, PLANK_AT = 0x20000;
+
+template <class T>
+T at(size_t off) {
+    T v{};
+    std::memcpy(&v, g_arena + off, sizeof v);
+    return v;
+}
+template <class T>
+void mem(size_t off, T v) {
+    std::memcpy(g_arena + off, &v, sizeof v);
+}
+
+Field fld(const char* path, uint32_t off, uint8_t bytes, uint8_t vt, bool f64 = false) {
+    Field f;
+    f.path = path, f.offset = off, f.bytes = bytes, f.vt = vt, f.f64 = f64, f.writable = true;
+    return f;
+}
+void add_field(Schema& s, Field f) {
+    s.by_path[f.path] = static_cast<uint32_t>(s.fields.size());
+    s.by_lower[lower(f.path)] = static_cast<uint32_t>(s.fields.size());
+    s.fields.push_back(std::move(f));
+}
+void add_entry(Registry& r, uint32_t id, const char* name, size_t at_off, const uint8_t g[16]) {
+    Entry e;
+    e.id = id, e.name = name, e.addr = A(at_off);
+    std::memcpy(e.guid, g, 16);
+    r.by_id[id] = static_cast<uint32_t>(r.entries.size());
+    r.entries.push_back(e);
+}
+
+std::shared_ptr<registry::map::RegMap> g_regmap;
+registry::Result g_last_report;
+int g_reports = 0;
+
+void world() {
+    std::string e;
+    store_reset(false, &e);
+    std::memset(g_arena, 0, sizeof g_arena);
+    g_near = 1 << 19;
+    for (Registry& r : g_regs) r = Registry{};
+    Registry& I = g_regs[KILN_CONTENT_ITEMS];
+    I.kind = KILN_CONTENT_ITEMS, I.label = "items", I.available = true;
+    add_field(I.schema, fld("maxStackSize", 0x00, 4, KILN_CV_INT));
+    Field rar = fld("rarity", 0x04, 4, KILN_CV_INT);
+    rar.enum_kind = KILN_CONTENT_ENUM;
+    rar.en = std::make_shared<EnumInfo>();
+    rar.en->values = {{"Common", 0}, {"Uncommon", 1}, {"Rare", 2}, {"Epic", 3}, {"Legendary", 4}};
+    add_field(I.schema, rar);
+    add_field(I.schema, fld("damageSetup.dmgMod", 0x08, 4, KILN_CV_FLOAT));
+    add_field(I.schema, fld("damageSetup.speedMod", 0x0C, 4, KILN_CV_FLOAT));
+    add_field(I.schema, fld("itemLevelRange.minLevel", 0x10, 4, KILN_CV_INT));
+    add_field(I.schema, fld("itemLevelRange.maxLevel", 0x14, 4, KILN_CV_INT));
+    for (int i = 0; i < 5; ++i) {
+        Field pr = fld(("perkReferences[" + std::to_string(i) + "]").c_str(), 0x30 + 16 * i, 16, KILN_CV_GUID);
+        pr.ref = true;
+        add_field(I.schema, pr);
+        add_field(I.schema, fld(("perkIds[" + std::to_string(i) + "]").c_str(), 0x80 + 4 * i, 4, KILN_CV_INT));
+    }
+    add_entry(I, WOOD, "Material_T1_Wood_Logs", WOOD_AT, G1);
+    add_entry(I, SWORD, "Sword_T2", SWORD_AT, G2);
+    add_entry(I, STONE, "Material_Stone", STONE_AT, G4);
+    mem<uint32_t>(WOOD_AT, 10);
+    std::memcpy(g_arena + WOOD_AT + 0x30, P1, 16), mem<uint32_t>(WOOD_AT + 0x80, 0x901);  // perk slot 0: perk_a
+    mem<float>(SWORD_AT + 0x40, 10.0f), mem<int32_t>(SWORD_AT + 0x44, 10);            // ManaCost 10, its tooltip 10
+    Registry& L = g_regs[KILN_CONTENT_LOOT];
+    L.kind = KILN_CONTENT_LOOT, L.label = "loot", L.available = true;
+    add_field(L.schema, fld("stackSizeMin", 0x00, 4, KILN_CV_INT));
+    add_field(L.schema, fld("stackSizeMax", 0x04, 4, KILN_CV_INT));
+    add_entry(L, WOOD, "Material_T1_Wood_Logs", 0x40000, G1);
+    mem<uint32_t>(0x40000, 1), mem<uint32_t>(0x40004, 5);
+    mem<uint32_t>(STONE_AT, 50);
+    mem<float>(SWORD_AT + 0x08, 1.0f), mem<float>(SWORD_AT + 0x0C, 1.0f), mem<uint32_t>(SWORD_AT + 0x10, 10), mem<uint32_t>(SWORD_AT + 0x14, 15);
+    Registry& R = g_regs[KILN_CONTENT_RECIPES];
+    R.kind = KILN_CONTENT_RECIPES, R.label = "recipes", R.available = true;
+    add_field(R.schema, fld("craftingDuration", 0x00, 8, KILN_CV_TIME));
+    R.schema.special["knowledgeRequirement"] = 0x50;
+    add_entry(R, PLANK, "Plank_Recipe", PLANK_AT, G3);
+    mem<uint32_t>(PLANK_AT + 0x50, 0x12345678), mem<uint32_t>(PLANK_AT + 0x58, 7);  // a knowledge requirement
+    RL.input = 0x40, RL.output = 0x48;
+    mem<int64_t>(PLANK_AT, 3'000'000'000ll);  // 3 s
+    // inputs: 2 wood (one stack of 48 bytes at +0x100), outputs: 1 sword
+    const size_t in_list = PLANK_AT + 0x100, out_list = PLANK_AT + 0x200;
+    mem<int32_t>(PLANK_AT + 0x40, static_cast<int32_t>(in_list - (PLANK_AT + 0x40))), mem<uint32_t>(PLANK_AT + 0x44, 1);
+    std::memcpy(g_arena + in_list + RL.in_item_ref, G1, 16), mem<uint32_t>(in_list + RL.in_item, WOOD), mem<uint32_t>(in_list + RL.in_count, 2);
+    mem<int32_t>(PLANK_AT + 0x48, static_cast<int32_t>(out_list - (PLANK_AT + 0x48))), mem<uint32_t>(PLANK_AT + 0x4C, 1);
+    std::memcpy(g_arena + out_list + RL.out_item_ref, G2, 16), mem<uint32_t>(out_list + RL.out_item, SWORD), mem<uint32_t>(out_list + RL.out_count, 1);
+    Registry& D = g_regs[KILN_CONTENT_DROPS];
+    D.kind = KILN_CONTENT_DROPS, D.label = "drops", D.available = true;
+    add_field(D.schema, fld("countMin", 0x14, 4, KILN_CV_INT));
+    add_field(D.schema, fld("countMax", 0x18, 4, KILN_CV_INT));
+    add_field(D.schema, fld("spawnProbability", 0x1C, 4, KILN_CV_FLOAT));
+    add_field(D.schema, fld("weight", 0x20, 4, KILN_CV_FLOAT));
+    for (size_t s : {size_t(0x31000), size_t(0x31040)}) {
+        mem<uint32_t>(s + 0x10, WOOD), mem<uint32_t>(s + 0x14, 1), mem<uint32_t>(s + 0x18, 3), mem<float>(s + 0x1C, 0.5f), mem<float>(s + 0x20, 1.0f);
+    }
+}
+void add_drop_table() { add_entry(g_regs[KILN_CONTENT_DROPS], 0x444, "DT_Wolf", 0x30000, G3); }
+
+registry::BaseModel base() {
+    registry::BaseModel b;
+    auto& items = b.registries["items"];
+    registry::BaseModel::Entry w;
+    w.id = "game:material_t1_wood_logs";
+    w.fields["maxStack"] = registry::Value::integer(10);
+    w.fields["rarity"] = registry::Value::text("common");
+    w.fields["perks"] = registry::Value::of_list({registry::Value::text("game:perk_a")});
+    items.push_back(w);
+    registry::BaseModel::Entry s;
+    s.id = "game:sword_t2";
+    double power = 0;
+    registry::formulas::read("gear.power", {1.0, 1.0, 10}, registry::formulas::constants_of({}), &power);
+    s.fields["power"] = registry::Value::integer(std::llround(power));
+    s.fields["maxStack"] = registry::Value::integer(1);
+    s.fields["manaCost"] = registry::Value::number(10);
+    items.push_back(s);
+    registry::BaseModel::Entry st;
+    st.id = "game:material_stone";
+    st.fields["maxStack"] = registry::Value::integer(50);
+    items.push_back(st);
+    registry::BaseModel::Entry rc;
+    rc.id = "game:plank_recipe";
+    rc.fields["duration"] = registry::Value::number(3);
+    rc.fields["unlock"] = registry::Value::text("game");
+    auto stru = [](std::vector<std::pair<std::string, registry::Value>> kv) {
+        registry::Value x;
+        x.kind = registry::Value::Struct;
+        std::sort(kv.begin(), kv.end(), [](auto& a, auto& b) { return a.first < b.first; });
+        for (auto& [k, v] : kv) x.keys.push_back(k), x.list.push_back(v);
+        return x;
+    };
+    rc.fields["inputs"] = registry::Value::of_list({stru({{"count", registry::Value::integer(2)}, {"item", registry::Value::text("game:material_t1_wood_logs")}})});
+    rc.fields["outputs"] = registry::Value::of_list({stru({{"count", registry::Value::integer(1)}, {"item", registry::Value::text("game:sword_t2")}})});
+    b.registries["recipes"].push_back(rc);
+    registry::BaseModel::Entry dt;
+    dt.id = "game:dt_wolf";
+    std::vector<registry::Value> st2;
+    for (int i = 0; i < 2; ++i)
+        st2.push_back(stru({{"chance", registry::Value::number(0.5)}, {"count.max", registry::Value::integer(3)}, {"count.min", registry::Value::integer(1)},
+                            {"item", registry::Value::text("game:material_t1_wood_logs")}, {"weight", registry::Value::number(1)}}));
+    dt.fields["entries"] = registry::Value::of_list(st2);
+    b.registries["drops"].push_back(dt);
+    registry::BaseModel::Entry lt;
+    lt.id = "game:material_t1_wood_logs";
+    lt.fields["stack.min"] = registry::Value::integer(1);
+    lt.fields["stack.max"] = registry::Value::integer(5);
+    b.registries["loot"].push_back(lt);
+    return b;
+}
+
+std::vector<PackFile> files_of(const std::vector<std::pair<std::string, std::string>>& mods_files) {
+    std::vector<PackFile> out;
+    for (auto& [mod, rel] : mods_files) {
+        PackFile f;
+        f.mod = mod, f.rel = rel, f.version = "1.0.0";
+        out.push_back(f);
+    }
+    return out;
+}
+
+// What S11 does at resources-ready: lower the sections, compose, install.
+void stage(const std::vector<PackFile>& files) {
+    const registry::Schema& sc = registry_schema();
+    std::vector<registry::ModInput> mods;
+    for (const RegistrySection& s : registry_sections(files, sc)) {
+        auto it = std::find_if(mods.begin(), mods.end(), [&](const registry::ModInput& m) { return m.id == s.mod; });
+        if (it == mods.end()) mods.push_back({}), it = mods.end() - 1, it->id = s.mod;
+        for (auto& b : s.batches) it->batches.push_back(b);
+        for (auto& r : s.refused) it->refused.push_back(r);
+    }
+    RegistryLive in;
+    in.schema = std::make_shared<const registry::Schema>(sc);
+    in.regmap = g_regmap;
+    in.base = base();
+    in.mods = mods;
+    in.result = registry::compose(sc, in.base, {}, mods);
+    in.ids = {{"items|game:material_t1_wood_logs", guid_text(G1)}, {"items|game:sword_t2", guid_text(G2)}, {"items|game:material_stone", guid_text(G4)},
+              {"recipes|game:plank_recipe", guid_text(G3)}, {"drops|game:dt_wolf", guid_text(G3)},
+              {"loot|game:material_t1_wood_logs", guid_text(G1)}, {"perks|game:perk_a", guid_text(P1)}, {"perks|game:perk_b", guid_text(P2)}};
+    in.nums = {{"items|game:material_t1_wood_logs", WOOD}, {"items|game:sword_t2", SWORD}, {"items|game:material_stone", STONE},
+               {"recipes|game:plank_recipe", PLANK}, {"drops|game:dt_wolf", 0x444},
+               {"loot|game:material_t1_wood_logs", WOOD}, {"perks|game:perk_a", 0x901}, {"perks|game:perk_b", 0x902}};
+    in.decoded = {"items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
+    in.report = [](const registry::Result& r) {
+        g_last_report = r;
+        ++g_reports;
+    };
+    registry_live_install(std::move(in));
+}
+
+bool reported(const std::string& needle) {
+    for (const registry::Refusal& r : g_last_report.refused)
+        if (r.reason.find(needle) != std::string::npos) return true;
+    return false;
+}
+
+void put_pack(size_t off, uint32_t v) {
+    uint8_t b[4];
+    std::memcpy(b, &v, 4);
+    set_owner_label(PACK, "pack oldstacks");
+    store_put(PACK, kPackSeq, KILN_CONTENT_ITEMS, WOOD, 0, -1, A(off), 4, b, "oldstacks: content/a.json");
+}
+
+}  // namespace
+
+// packs.cpp:430-448 and content.cpp:465-476 as they stand (packs.cpp is not linked in the host test): with no old data
+// pack holding drop rules, g_rules is empty.
+namespace kc {
+std::vector<int> g_rules_stub;
+bool drops_have_rules() { return !g_rules_stub.empty(); }
+void drops_apply_rules(const Entry& table) {
+    /* the old packs' rules: none */
+    registry_live_table(table);  // the registry's live layers of a table the world just loaded
+}
+void note_table_as_content_cpp(const Entry& t) {
+    if (drops_have_rules()) drops_apply_rules(t);
+    std::string err;
+    store_flush(&err);
+}
+}  // namespace kc
+
+namespace {
+// L1: a registry drop-table edit whose table the world loads after the world-load application never gets its layers when
+// no old data pack has drop rules: registry_live_table is reached only through drops_apply_rules, which content.cpp's
+// acquire hook calls only when drops_have_rules().
+void drop_table_without_old_rules() {
+    world();
+    g_files = {{"m/content/a.json", R"({"registry": {"alter": [{"registry": "drops", "select": {"id": "game:dt_wolf"}, "field": "entries[*].count.max", "op": {"mul": 2}}]}})"}};
+    const auto files = files_of({{"m", "m/content/a.json"}});
+    stage(files);
+    registry_live_apply(files);
+    check(at<uint32_t>(0x31018) == 3, "no table yet");
+    add_drop_table();
+    note_table_as_content_cpp(g_regs[KILN_CONTENT_DROPS].entries.back());
+    check(at<uint32_t>(0x31018) == 6, "count.max x2 once the table is acquired (now " + std::to_string(at<uint32_t>(0x31018)) + ")");
+}
+
+// L2: a hot reload that recomposes (registry_live.cpp recompose) replaces the handed-over result with a fresh compose():
+// the refusals the stage made before compose (unmapped/unproven fields, unusable sections, faulted callbacks, boot writes
+// that failed: stage.cpp run() 590-597 and finish() 654-658) leave registry.json.
+void reload_loses_stage_refusals() {
+    world();
+    g_files = {{"a/content/a.json", R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}}]}})"},
+               {"b/content/b.json", R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 2}}]}})"}};
+    const auto files = files_of({{"a", "a/content/a.json"}, {"b", "b/content/b.json"}});
+    stage(files);
+    {
+        // what stage.cpp run() hands over: pre-compose refusals at the front of result.refused
+        std::lock_guard lock(store_mutex());
+        registry::Refusal x;
+        x.mod = "a", x.source = "content/a.json", x.stage = registry::Stage::Alter, x.n = 1;
+        x.reason = "items game:material_t1_wood_logs: block: Unproven on this build; this edit was not applied";
+        g.in->result.refused.insert(g.in->result.refused.begin(), x);
+    }
+    registry_live_apply(files);
+    check(reported("Unproven"), "the world-load report has the stage's refusal");
+    g_files["b/content/b.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 3}}]}})";
+    registry_live_apply(files);
+    check(at<uint32_t>(WOOD_AT) == 120, "recomposed: x4 then x3");
+    check(reported("Unproven"), "after b's section is reloaded registry.json still names a's refused edit");
+}
+// L3: store.cpp store_flush: when compare-before-write fires on a slot in the same flush as an old pack's layer change
+// (every pack application re-puts the pack layers: apply_all_packs drops and puts them, old_changed = true), the
+// "continue" also drops the pack's write and clears old_changed, so the old pack's new value is never written that time.
+// Ruling (store, 5:22 PM) and lane D's report: old packs keep writing such a slot as they do today.
+void pack_write_lost_on_detection() {
+    world();
+    g_files = {{"bigstacks/content/a.json",
+                R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}}]}})"}};
+    const auto files = files_of({{"bigstacks", "bigstacks/content/a.json"}});
+    stage(files);
+    put_pack(WOOD_AT, 30);
+    registry_live_apply(files);
+    check(at<uint32_t>(WOOD_AT) == 120, "x4 over the pack's 30");
+    mem<uint32_t>(WOOD_AT, 777);  // another writer (a ShroudForge run-time write in kiln mode)
+    // a pack reload as apply_all_packs does it: the pack's layer dropped and put again with its new value, then the registry
+    store_drop_owner(PACK);
+    put_pack(WOOD_AT, 50);
+    registry_live_apply(files);
+    check(reported("another writer"), "the registry's edit is skipped and reported");
+    check(at<uint32_t>(WOOD_AT) == 50, "the old pack's new value is written as today (memory " + std::to_string(at<uint32_t>(WOOD_AT)) + ")");
+}
+}  // namespace
+
+int main() {
+    std::vector<std::string> errs;
+    g_regmap = std::make_shared<registry::map::RegMap>();
+    if (!registry::map::load_dir(KILN_REGMAP_DIR, "server", "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2", g_regmap.get(), &errs) || !g_regmap->has_build) {
+        std::printf("FAIL cannot load the regmap at %s\n", KILN_REGMAP_DIR);
+        return 2;
+    }
+    int failed = 0;
+    const std::pair<const char*, void (*)()> groups[] = {{"L1 drop_table_without_old_rules", &drop_table_without_old_rules},
+                                                         {"L2 reload_loses_stage_refusals", &reload_loses_stage_refusals},
+                                                         {"L3 pack_write_lost_on_detection", &pack_write_lost_on_detection}};
+    for (const auto& [name, fn] : groups) {
+        try {
+            fn();
+            std::printf("registry-live-review: PASS %s\n", name);
+        } catch (const std::exception& e) {
+            ++failed;
+            std::printf("registry-live-review: FAIL %s: %s\n", name, e.what());
+        }
+    }
+    std::printf("registry-live-review: %d check(s), %d failed group(s)\n", checks, failed);
+    return failed ? 1 : 0;
+}

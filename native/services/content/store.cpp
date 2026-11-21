@@ -442,9 +442,8 @@ size_t store_flush(std::string* error) {
                     mod.clear();
                 g_skipped.push_back(SkippedRaw{addr, s.kind, s.id, s.field, s.sub, mod, source, revert});
                 s.foreign = true;
-                s.old_changed = false;
                 std::memcpy(s.current, now, s.n);
-                continue;  // not written; the slot stays with the other writer for this world
+                fold(s, want);  // the registry's layers left out: what an older path's own change in this flush writes (today's behaviour)
             }
         }
         s.registry = has_registry_layer(s);
