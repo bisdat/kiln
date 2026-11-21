@@ -18,6 +18,9 @@ Names, and so the GUIDs that follow from <mod>:<kind>:<name>, are what Kiln.Bloc
 - graph: the animation block's name, or "<animation>.<body>" for a body on the same skeleton with slots: slots are the graph's;
 - model: the model file's path in the mod without the extension, as a worn look's (cook/worn.py in tools/modelcook).
 
+A body's "cloth" and "chains" (Kiln.Blocks' ModelClothBlock and ModelChainBlock) are its model's physics: add_to hands them to modelcook as the
+recipe's "blocksPhysics", which reads them as it reads assets/physics.json (tools/modelcook/cook/physics.py), and refuses a model both name.
+
 An animation with "retarget" brings clips authored on a rig of their own and names the "skeleton" they play on, a body's: its clips step pairs the rigs'
 joints (anicook/retarget.py) and the skeleton stays the body's.
 """
@@ -140,10 +143,12 @@ def _in_mod(mod_dir, f):
 
 
 def plan(mod_dir):
-    """What the blocks ask to be cooked: {"skeletons": {name: file}, "clips": {(skeleton, file): {key: entry}}, "graphs": [step], "models": [step]}.
+    """What the blocks ask to be cooked: {"skeletons": {name: file}, "clips": {(skeleton, file): {key: entry}}, "graphs": [step], "models": [step],
+    "physics": [{"model": file, "from": block, "physics": {"cloth": [...], "chains": [...]}}]}.
     Paths are the mod's. Raises BlocksError for what can't be cooked as written."""
     blocks = read(mod_dir)
     skeletons, clips, graphs, models = {}, {}, [], []
+    physics, physics_of = [], {}
     retargets, wanted = {}, []
 
     def skeleton_of(where, file, b):
@@ -163,6 +168,12 @@ def plan(mod_dir):
         sk = skeleton_of(where, b["model"], b)
         models.append({"tool": "modelcook", "op": "model", "gltf": b["model"], "skeleton": sk, "name": model_name(b["model"]),
                        "stem": model_name(b["model"]).replace("/", "_"), "materials": "gltf", "mode": "new", "comment": f"{where}"})
+        if b.get("cloth") or b.get("chains"):
+            file = Path(b["model"]).as_posix()
+            if file in physics_of:
+                raise BlocksError(f"{where}: its model {file} has cloth and chains from {physics_of[file]} already: declare a model's cloth and chains in one block")
+            physics_of[file] = where
+            physics.append({"model": file, "from": where, "physics": {"cloth": b.get("cloth") or [], "chains": b.get("chains") or []}})
         bodies.append((name, sk, {_slot(s): j for s, j in (b.get("slots") or {}).items()}))
 
     for fname, name, kind, b in blocks:
@@ -291,15 +302,19 @@ def plan(mod_dir):
         for k in entries:
             if seen.setdefault(k, file) != file:
                 raise BlocksError(f"clip {k}: animation {entries[k]['animation']!r} comes from {seen[k]} and {file}, on skeleton {sk}: rename one of them")
-    return {"skeletons": skeletons, "clips": clips, "graphs": graphs, "models": models, "retargets": retargets}
+    return {"skeletons": skeletons, "clips": clips, "graphs": graphs, "models": models, "retargets": retargets, "physics": physics}
 
 
-def steps_from_blocks(mod_dir, recipe_dir):
-    """The steps the mod's blocks ask for, paths relative to the recipe's folder, each with its "tool"."""
+def _plan(mod_dir):
     try:
-        p = plan(mod_dir)
+        return plan(mod_dir)
     except BlocksError as e:
         raise BlocksError(f"blocks: {e}") from e
+
+
+def steps_from_blocks(mod_dir, recipe_dir, p=None):
+    """The steps the mod's blocks ask for, paths relative to the recipe's folder, each with its "tool"."""
+    p = p if p is not None else _plan(mod_dir)
     rel = lambda f: os.path.relpath(Path(mod_dir) / f, recipe_dir)  # noqa: E731
     out = []
     for sk, file in p["skeletons"].items():
@@ -335,11 +350,15 @@ def add_to(doc, recipe_path):
     have = {(st.get("op"), st.get("name")) for st in doc.get("steps", [])}
     have |= {("clips", (st.get("skeleton"), st.get("gltf"))) for st in doc.get("steps", []) if st.get("op") == "clips"}
     extra = []
-    for st in steps_from_blocks(mod, Path(recipe_path).resolve().parent):
+    p = _plan(mod)
+    for st in steps_from_blocks(mod, Path(recipe_path).resolve().parent, p):
         key = ("clips", (st["skeleton"], st["gltf"])) if st["op"] == "clips" else (st["op"], st["name"])
         if key not in have:
             extra.append(st)
-    if extra:
+    if extra or p["physics"]:
         doc = dict(doc, steps=list(doc.get("steps", [])) + extra)
         doc["blocksSources"] = sorted(os.path.relpath(f, Path(recipe_path).resolve().parent) for f in (mod / "blocks").glob("*.json"))
+    if p["physics"]:
+        # a body's cloth and chains, whichever step cooks its model (one of the recipe's wins over the block's): modelcook reads them with physics.json
+        doc["blocksPhysics"] = p["physics"]
     return doc

@@ -57,7 +57,8 @@ public sealed record SlotClickOptions
 public sealed record SlotClick(SlotButton Button, SlotModifiers Modifiers, VisibleSlot Slot, GameScreen Screen, bool Taken)
 {
     public ItemId Item => Slot.Item;
-    /// <summary>The item entity (EntityId 0 for an empty slot or a stack the game drew without an entity).</summary>
+    /// <summary>The item entity (weapons, tools, armour, cans). EntityId 0 for an empty slot and for a plain stack
+    /// (materials, consumables), which the game keeps without an item entity: name it by Holder, slot and Item.</summary>
     public EntityId ItemEntity => Slot.ClientEntity;
     /// <summary>The entity whose inventory holds the slot (the player, a chest), when the game's models said.</summary>
     public EntityId Holder => Slot.Holder;
@@ -65,8 +66,9 @@ public sealed record SlotClick(SlotButton Button, SlotModifiers Modifiers, Visib
 
 public static partial class Ui
 {
-    /// <summary>The game's own inventory slots (backpack, chests, stations): marks and clicks. Client only.</summary>
-    public static class Inventory
+    /// <summary>The game's own inventory slots (backpack, chests, stations): marks and clicks; panels beside the backpack and
+    /// chest screens, and which of them is open with the chest's entity (since 0.2.0-dev.30). Client only.</summary>
+    public static partial class Inventory
     {
         /// <summary>The capability row of <see cref="OnClick"/>.</summary>
         public const string ClickCapability = "ui.slots.click";
@@ -141,6 +143,38 @@ internal static unsafe class UiInventoryNative
         public uint Size, Ok, Reason, PointerScreen;
         public ulong Session, Frame;
         public UiValuesNative.VisibleSlot Slot;
+    }
+
+    /// <summary>KilnUiScreenView (v2).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ScreenView
+    {
+        public uint Size, Ok, Reason, Kind;
+        public uint HudScreen, Container, LocalPlayer, Flags;
+        public ulong Session, Frame;
+        public uint SlotCount, PlayerSlots, ContainerSlots, Reserved;
+        public UiValuesNative.Rect AllPx, PlayerPx, ContainerPx;
+    }
+
+    public const uint ViewBackpack = 1, ViewChest = 2;
+    public const uint ViewHolderMatch = 1, ViewScaled = 2;
+
+    /// <summary>v2: the table through screen_view (an older kiln-core has v1's 40 bytes: <see cref="T2"/> is null then).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableV2
+    {
+        public Table Base;
+        public delegate* unmanaged[Cdecl]<ulong, float, float, ScreenView*, int> GetScreenView;
+    }
+
+    /// <summary>The v2 table (screen_view), or null on a kiln-core with v1 only.</summary>
+    public static TableV2* T2
+    {
+        get
+        {
+            var t = T;
+            return t != null && t->Header.Size >= (uint)sizeof(TableV2) && ((TableV2*)t)->GetScreenView != null ? (TableV2*)t : null;
+        }
     }
 
     [StructLayout(LayoutKind.Sequential)]

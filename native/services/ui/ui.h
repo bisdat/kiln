@@ -71,6 +71,18 @@ extern std::atomic<bool> g_overlay_failed;
 inline bool overlay_failed() { return g_overlay_failed.load(std::memory_order_acquire); }
 // The overlay draws in this session: its drawing was on at the start and has not turned off since.
 inline bool overlay_draws() { return overlay_drawing_on() && !overlay_failed(); }
+// Kiln's menu fell back to the game's own Mods rows in this session (since 0.2.0-dev.30.2): it was asked for in the
+// overlay and no frame of the overlay was drawn and presented in about a second (overlay_guard.cpp overlay_menu_ask;
+// another layer on the game's presents, say). The Mods entry then works as with the drawing off: its caption in the game's
+// own menu, g_menu_open its state. Cleared by the next ask once a frame of the overlay was presented since, and when the
+// drawing turns off (that state says it all then).
+extern std::atomic<bool> g_menu_fell_back;
+// Kiln's menu opens in the overlay: the overlay draws and its menu did not fall back.
+inline bool menu_in_overlay() { return overlay_draws() && !g_menu_fell_back.load(std::memory_order_relaxed); }
+// Kiln's menu is open in the overlay (g_menu_open), not as the Mods entry's caption after the fallback.
+inline bool menu_open_in_overlay() {
+    return g_menu_open.load(std::memory_order_relaxed) && !g_menu_fell_back.load(std::memory_order_relaxed);
+}
 // vk.cpp, once, on the present call after the overlay's drawing turned off, outside the overlay's locks: the one log
 // line (at `level`: an error for a failure, a warning for a present Kiln cannot draw in), kiln.ui's status, the Mods
 // caption, the capability rows and the crash guard (ui.cpp). `reason` is short (the Mods caption and Ui.Status.Error
@@ -84,9 +96,10 @@ const std::string& overlay_off_reason();  // the reason (after overlay_failed() 
 inline void release_input_after_turn_off() {
     g_text_input.store(false);
     g_menu_open.store(false);
+    g_menu_fell_back.store(false);
 }
 inline bool capturing() {
-    return overlay_draws() && (g_menu_open.load(std::memory_order_relaxed) || g_page_capture.load(std::memory_order_relaxed) ||
+    return overlay_draws() && (menu_open_in_overlay() || g_page_capture.load(std::memory_order_relaxed) ||
            g_interactive.load(std::memory_order_relaxed) > 0 || wheel_active());
 }
 // Something to draw this frame. The native fallback menu counts too.
@@ -171,7 +184,7 @@ bool game_screens_on();
 bool game_menu_on(uint32_t menu);
 bool game_in_menu();   // no world steps (boot, main menu, loading)
 KilnResult game_screen(KilnUiScreen* out);
-uint32_t game_screen_target();  // a factory screen's station entity of the last UI frame, else 0
+uint32_t game_screen_target();  // a chest's or factory's entity (play.target) of the last UI frame, else 0
 KilnResult game_subscribe_screen(KilnOwner owner, KilnUiScreenFn fn, void* user, KilnHandle* out);
 KilnResult game_subscribe_tick(KilnOwner owner, KilnUiTickFn fn, void* user, KilnHandle* out);
 KilnResult game_subscribe_frame_tick(KilnOwner owner, KilnUiFrameTickFn fn, void* user, KilnHandle* out);
@@ -207,6 +220,9 @@ void footer_texts_changed();                  // any thread: Kiln's texts change
 // ---- Kiln's own texts (ui_text.h; set_texts) ----
 void game_texts_changed();                    // any thread: the Mods entry and the drawing-off caption in the new language
 void game_overlay_turned_off();               // any thread, once: the Mods entry shows why the overlay's drawing went off
+// overlay_guard.cpp (a pool thread), when Kiln's menu fell back (g_menu_fell_back): the Mods entry's caption says so, and
+// the main menu's page, when it was the one asked for, is left for the game's main menu, where the caption shows.
+void game_menu_fell_back();
 
 // ---- menu_page.cpp (the Kiln menu as a page of the game's main menu: feature ui.menu_page) ----
 bool page_install(bool main_menu_hooked);  // game_install, after the MainMenuEntry hook: resolve, hook Credits
@@ -283,6 +299,7 @@ bool vk_install();  // called once vulkan-1.dll is loaded (from the LoadLibraryE
 void vk_extent(uint32_t* width, uint32_t* height);  // the game window's swapchain (any thread; 0 before one exists)
 void vk_status(KilnUiStatus* out);
 uint64_t vk_presents();  // frames the game presented through Kiln's present hook (the overlay crash guard)
+bool vk_drawing();       // a present call is making the overlay's frame right now (vk.cpp draw(), past its checks)
 KilnResult vk_subscribe_pre_overlay(KilnUiPreOverlayFn fn, KilnUiSwapchainGoneFn gone, void* user, KilnHandle* out);
 bool vk_unsubscribe(KilnHandle handle);
 void vk_set_pre_overlay_demand(uint32_t count);

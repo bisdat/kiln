@@ -159,6 +159,18 @@ public readonly record struct GameScreen(GameUiState State, HudScreen Hud, Scree
 {
     public static readonly GameScreen None = new(GameUiState.None, HudScreen.Invalid, ScreenKind.None, 0, null, 0, 0);
 
+    /// <summary>The entity the open screen is about, on the screens the game draws as a chest-style transfer screen: a storage
+    /// chest's (<see cref="HudScreen.StorageChest"/>, <see cref="HudScreen.CommerceProductChest"/>) and a production
+    /// station's (<see cref="HudScreen.FactoryCrafting"/>, also <see cref="CraftingScreen.Station"/>). Entities the game
+    /// replicates have the server's ids: send it to your server half, which checks the player may use it and is near it
+    /// before acting. <see cref="EntityId.None"/> on other screens, on a build where Kiln does not read it, and for the frame or
+    /// two before the game names it (a later change of it is a screen change: <see cref="Ui.Screens.Changed"/>). Since
+    /// 0.2.0-dev.30.</summary>
+    public EntityId Target { get; init; }
+
+    /// <summary>The HUD screens whose <see cref="Target"/> Kiln reads (the chest-style transfer screen's three modes).</summary>
+    internal static bool TargetScreen(HudScreen h) => h is HudScreen.StorageChest or HudScreen.CommerceProductChest or HudScreen.FactoryCrafting;
+
     /// <summary>The game's text language key ("de-de", ...).</summary>
     public string Language => GameLanguage.KeyOf(LanguageId);
 
@@ -205,9 +217,13 @@ public readonly record struct GameScreen(GameUiState State, HudScreen Hud, Scree
     {
         var state = (GameUiState)s.UiState;
         var hud = (HudScreen)s.HudScreen;
+        var target = state == GameUiState.Play && TargetScreen(hud) ? UiNative.ScreenTarget() : 0u;
         CraftingScreen? c = s.Crafting != 0 ? new CraftingScreen(s.Station != 0, s.Workshop != 0 ? s.Workshop : s.Station, s.Recipe, s.Crafting == 2)
-            : hud == HudScreen.FactoryCrafting ? FactoryScreen(state, hud, s.Interaction, UiNative.ScreenTarget()) : null;
-        return new GameScreen(state, hud, KindOf(state, hud, s.Crafting), s.Interaction, c, s.Language, s.Frame);
+            : hud == HudScreen.FactoryCrafting ? FactoryScreen(state, hud, s.Interaction, target) : null;
+        return new GameScreen(state, hud, KindOf(state, hud, s.Crafting), s.Interaction, c, s.Language, s.Frame)
+        {
+            Target = target != 0 ? new EntityId(target) : EntityId.None,
+        };
     }
 }
 
@@ -324,7 +340,9 @@ public static class Screens
             }
             if (prev.Kind != cur.Kind) UiEngine.Log(LogLevel.Debug, $"game screen {prev.Kind} -> {cur.Kind} ({cur.State}/{cur.Hud})");
             Crafting.ScreenChanged(prev, cur);
+            UiInventoryScreens.ScreenChanged(cur);
             RefusalNotice.ScreenChanged(prev, cur);
+            SfiSafetyNotice.ScreenChanged(prev, cur);  // entering a world shows the do-not-save banner again
             foreach (var (h, owner) in Handlers.Snapshot()) UiModCalls.Invoke(owner, x => h(x.prev, x.cur), (prev, cur), "Ui.Screens.Changed");
             if (Events.HasSubscribers<ScreenChangedEvent>()) Events.Enqueue(new ScreenChangedEvent(prev, cur));
         }
@@ -468,9 +486,20 @@ public static class Menus
     /// <summary>Kiln's own "Mods" entry (both menus; opens the Kiln menu).</summary>
     public static bool KilnEntryVisible
     {
-        set
+        set => SetKilnEntryFlag(1u, !value);  // KILN_UI_ENTRY_HIDDEN
+    }
+
+    private static readonly object KilnEntryLock = new();
+    private static uint _kilnEntryFlags;
+
+    /// <summary>Sets or clears one KILN_UI_ENTRY_* flag of Kiln's own entry and sends them all: menu_set replaces every
+    /// flag, so hiding the entry and its attention marker keep each other. Any thread.</summary>
+    internal static void SetKilnEntryFlag(uint flag, bool on)
+    {
+        lock (KilnEntryLock)
         {
-            if (UiNative.HasGameUi) UiNative.T->MenuSet(0, Utf8.Of(KilnText.T("native.menu.mods")), value ? 0u : 1u);
+            _kilnEntryFlags = on ? _kilnEntryFlags | flag : _kilnEntryFlags & ~flag;
+            if (UiNative.HasGameUi) UiNative.T->MenuSet(0, Utf8.Of(KilnText.T("native.menu.mods")), _kilnEntryFlags);
         }
     }
 

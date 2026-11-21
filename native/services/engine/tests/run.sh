@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# kiln.engine host suite: generator check, C layout, the gate path lint, identity, owner/ECS resolution and the Scene
-# gate over a fake engine, and the real DLL entry over a fake core; ASan/UBSan and ThreadSanitizer builds (any-thread
-# members). Run with KILN_OUT set.
+# kiln.engine host suite: generator check, C layout, the gate path lint, identity, owner/ECS resolution, the Scene gate,
+# the content worker's lifetime guard and the engine call inside the gate over a fake engine, and the real
+# DLL entry over a fake core; ASan/UBSan and ThreadSanitizer builds (any-thread members). Run with KILN_OUT set.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../../.." && pwd)
@@ -20,7 +20,7 @@ cxx=${CXX:-g++}
 inc=(-I"$here/.." -I"$here/../include" -I"$root/native/core/abi")
 src=("$here/../identity.cpp")
 resolve=("$here/../resolve.cpp" "$here/host/memory_host.cpp")
-gate=("$here/../gate.cpp")
+gate=("$here/../gate.cpp" "$here/../resource_guard.cpp" "$here/../invoke.cpp" "$here/host/invoke_host.cpp")
 for kind in asan tsan; do
   if [[ $kind == asan ]]; then san=(-fsanitize=address,undefined -fno-sanitize-recover=undefined); else san=(-fsanitize=thread); fi
   "$cxx" -std=c++20 -O1 -g -Wall -Wextra -Werror -pthread "${san[@]}" "${inc[@]}" "$here/identity_test.cpp" "${src[@]}" \
@@ -33,7 +33,16 @@ for kind in asan tsan; do
   "$cxx" -std=c++20 -O1 -g -Wall -Wextra -Werror -Wno-mismatched-new-delete -pthread -DKILN_ENGINE_GATE_TEST_POINTS "${san[@]}" "${inc[@]}" "$here/gate_test.cpp" \
     "${resolve[@]}" "${gate[@]}" "$here/../engine.cpp" "${src[@]}" -o "$out/gate_test_$kind"
   TSAN_OPTIONS=halt_on_error=1:exitcode=66 "$out/gate_test_$kind"
-  "$cxx" -std=c++20 -O1 -g -Wall -Wextra -Werror -pthread "${san[@]}" "${inc[@]}" "$here/plugin_host_test.cpp" \
+  # resource_guard_test also replaces operator new/delete (no allocation inside a guard or a gate hold)
+  "$cxx" -std=c++20 -O1 -g -Wall -Wextra -Werror -Wno-mismatched-new-delete -pthread -DKILN_ENGINE_GATE_TEST_POINTS "${san[@]}" "${inc[@]}" \
+    "$here/resource_guard_test.cpp" "${resolve[@]}" "${gate[@]}" "$here/../engine.cpp" "${src[@]}" -o "$out/resource_guard_test_$kind"
+  TSAN_OPTIONS=halt_on_error=1:exitcode=66 "$out/resource_guard_test_$kind"
+  # invoke_test also replaces operator new/delete (no allocation on any path of an engine call); its own recipes
+  "$cxx" -std=c++20 -O1 -g -Wall -Wextra -Werror -Wno-mismatched-new-delete -pthread "${san[@]}" "${inc[@]}" \
+    "$here/invoke_test.cpp" "${resolve[@]}" "${gate[@]}" "$here/../engine.cpp" "${src[@]}" -o "$out/invoke_test_$kind"
+  TSAN_OPTIONS=halt_on_error=1:exitcode=66 "$out/invoke_test_$kind"
+  # plugin_host_test sets test recipes through the seam the shipped kiln-engine.dll is built without
+  "$cxx" -std=c++20 -O1 -g -Wall -Wextra -Werror -pthread -DKILN_ENGINE_TEST_RECIPES "${san[@]}" "${inc[@]}" "$here/plugin_host_test.cpp" \
     "$here/../engine.cpp" "${src[@]}" "${resolve[@]}" "${gate[@]}" -o "$out/plugin_host_test_$kind"
   TSAN_OPTIONS=halt_on_error=1:exitcode=66 "$out/plugin_host_test_$kind"
 done

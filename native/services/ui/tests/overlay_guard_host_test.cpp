@@ -27,6 +27,11 @@ void logf(int, const char* fmt, ...) {
 }
 uint64_t g_presents = 0;
 uint64_t vk_presents() { return g_presents; }
+std::atomic<bool> g_overlay_failed{false};  // ui.cpp: the overlay's drawing turned off during the session
+bool g_drawing = false;                     // vk.cpp: a frame of the overlay is being made
+bool vk_drawing() { return g_drawing; }
+unsigned g_fell_back_calls = 0;             // game.cpp: the Mods entry's caption, the main menu's page left
+void game_menu_fell_back() { ++g_fell_back_calls; }
 }  // namespace kui
 
 namespace {
@@ -68,6 +73,11 @@ bool logged(const std::string& part) {
     for (const auto& line : kui::g_log)
         if (line.find(part) != std::string::npos) return true;
     return false;
+}
+unsigned count_logged(const std::string& part) {
+    unsigned n = 0;
+    for (const auto& line : kui::g_log) n += line.find(part) != std::string::npos;
+    return n;
 }
 
 // One game start in a child process; `body` runs its calls and checks. The child's checks are counted in the parent.
@@ -120,7 +130,7 @@ int main() {
     api.version = &fake_version;
     kui::g_api = &api;
     const std::string id = kui::overlay_guard::detect_wrappers(g_root / "game").identity;
-    auto rec = [&](const char* fields) { return std::string("3 ") + fields + " 0.2.0-dev.29.19 " + id + "\n"; };
+    auto rec = [&](const char* fields) { return std::string("4 ") + fields + " 0.2.0-dev.29.19 " + id + "\n"; };
     auto reset = [&] { std::filesystem::remove(g_state / "overlay-start.guard"); };
 
     // The owner's sequence, 0.2.0-dev.29.18 candidate on Proton, 2026-11-19: the game died while the overlay was
@@ -149,9 +159,9 @@ int main() {
         expect(record_text() == rec("1 0 1 1 0"), "an attempt, the first death kept, got " + record_text());
         stages(Stage::swapchain);
         draw_frames();
-        expect(record_text() == rec("0 5 1 0 0"), "60 drawn frames complete it and clear the history, got " + record_text());
+        expect(record_text() == rec("0 6 1 0 0"), "60 drawn frames complete it and clear the history, got " + record_text());
         kui::overlay_guard_exit();
-        expect(record_text() == rec("0 5 1 0 0"), "the exit of a complete start writes nothing");
+        expect(record_text() == rec("0 6 1 0 0"), "the exit of a complete start writes nothing");
     });
 
     // The record the candidate left on the owner's disk ("2 2 1 1 1 0 w2-...") heals at the next start.
@@ -208,10 +218,10 @@ int main() {
         expect(!kui::overlay_guard_start(), "on");
         stages(Stage::swapchain);
         draw_frames();
-        expect(record_text() == rec("0 5 0 0 0"), "complete, got " + record_text());
+        expect(record_text() == rec("0 6 0 0 0"), "complete, got " + record_text());
         kui::overlay_guard_exit();
         kui::overlay_guard_failed();
-        expect(record_text() == rec("0 5 0 0 0"), "a failure after the exit arms nothing, got " + record_text());
+        expect(record_text() == rec("0 6 0 0 0"), "a failure after the exit arms nothing, got " + record_text());
     });
     // ... while the same failure before the exit still arms it, and a death in its window guards the next start
     start("failed, then died", [&] {
@@ -219,7 +229,7 @@ int main() {
         stages(Stage::swapchain);
         draw_frames();
         kui::overlay_guard_failed();
-        expect(record_text() == rec("1 4 0 0 0"), "the failure arms the record again, got " + record_text());
+        expect(record_text() == rec("1 5 0 0 0"), "the failure arms the record again (the overlay's drawing), got " + record_text());
     });
     start("guarded after the failure", [&] {
         expect(kui::overlay_guard_start(), "the death after the failure guards this start");
@@ -230,7 +240,7 @@ int main() {
         expect(!kui::overlay_guard_start(), "on after the guarded start");
         stages(Stage::swapchain);
         kui::overlay_guard_exit();
-        expect(record_text() == rec("0 4 4 1 0"), "complete, the history kept, got " + record_text());
+        expect(record_text() == rec("0 4 5 1 0"), "complete, the history kept, got " + record_text());
     });
     start("on after a quiet quit", [] { expect(!kui::overlay_guard_start(), "on"); });
 
@@ -268,6 +278,190 @@ int main() {
         expect(!kui::overlay_guard_start(), "on");
         expect(!logged("Kiln was updated"), "no line for a record that kept nothing off");
         expect(record_text() == rec("0 0 0 0 0"), "written with this Kiln's version, got " + record_text());
+    });
+
+    // ---- 0.2.0-dev.30.2: ReShade's Vulkan layer kept (--keep-vulkan-layers; Eris, netjunk) ----
+    // Regression replay. ReShade compiles its effects on the first frames, so the game presented only a few frames
+    // through Kiln's hooks in the 30 s after its swapchain. That one window was all the guard watched (since 29.18 the
+    // overlay's frames alone completed a start): the record stayed trying at "swapchain created" for the whole session,
+    // and two ends that were not a normal exit (the game killed, a crash of something else) locked the overlay off. The
+    // windows repeat now, and the start counts as fine once the game presents normally.
+    reset();
+    for (int session = 1; session <= 3; ++session) {
+        start("a ReShade-like stalled start, then normal, then killed", [&] {
+            const std::string s = " (session " + std::to_string(session) + ")";
+            expect(!kui::overlay_guard_start(), "the overlay's drawing is on" + s);
+            kui::g_presents = 0;
+            stages(Stage::swapchain);
+            kui::g_presents = 9;  // ReShade compiling: a few frames in the first 30 s
+            expect(guard_host::fire(kui::kIdleProofMs) == 1, "the first window after the swapchain ends" + s);
+            expect(record_text() == rec("1 4 0 0 0"), "still watched, trying at swapchain created, got " + record_text());
+            expect(logged("only 9 frames presented in 30 s since the swapchain; the start is still being watched"), "the slow window is logged" + s);
+            kui::g_presents += 40;  // still compiling
+            expect(guard_host::fire(kui::kIdleProofMs) == 1, "watched again: a second window" + s);
+            expect(record_text() == rec("1 4 0 0 0"), "still trying, got " + record_text());
+            kui::g_presents += 1800;  // then 60 frames a second
+            expect(guard_host::fire(kui::kIdleProofMs) == 1, "watched again: a third window" + s);
+            expect(record_text() == rec("0 4 0 0 0"), "fine once the game presents normally, got " + record_text());
+            expect(logged("the game presented 1800 frames through Kiln's hooks in 30 s with nothing drawn yet (after slower first frames)"),
+                   "the line says so" + s);
+            expect(count_logged("frames presented in 30 s since the swapchain") == 1, "the slow windows are logged once" + s);
+            expect(guard_host::fire(kui::kIdleProofMs) == 0, "the watch has ended" + s);
+            // then the game is killed (Steam's Stop, a crash elsewhere): no exit step runs
+        });
+    }
+    start("after three killed sessions", [] {
+        expect(!kui::overlay_guard_start(), "the overlay's drawing is on: neither guarded nor locked");
+    });
+
+    // A start that never presents enough through Kiln's hooks (or is killed in its first windows) stays trying at
+    // "swapchain created". Nothing of the overlay's own work ran in it: such an end guards the next start only, and never
+    // locks. The overlay's first draw (vk.cpp draw(), past its checks) makes a death count again.
+    reset();
+    start("no frames after the swapchain, killed", [&] {
+        kui::overlay_guard_start();
+        kui::g_presents = 0;
+        stages(Stage::swapchain);
+        for (int i = 0; i < 4; ++i) expect(guard_host::fire(kui::kIdleProofMs) == 1, "watched window after window");
+        expect(record_text() == rec("1 4 0 0 0"), "trying at swapchain created, got " + record_text());
+    });
+    start("guarded once", [&] {
+        expect(kui::overlay_guard_start(), "the start after it leaves the drawing off");
+        expect(record_text() == rec("2 4 0 0 0"), "guarded, no failure counted, got " + record_text());
+        expect(logged("after its swapchain was made, before Kiln's overlay drew anything (stage: swapchain created)") &&
+               logged("the next start tries it again") && logged("never turns the overlay off for good"), "the warning says so");
+        kui::overlay_guard_exit();
+        expect(record_text() == rec("3 4 0 0 0"), "its normal exit writes retry, got " + record_text());
+    });
+    start("tries again, killed the same way", [&] {
+        expect(!kui::overlay_guard_start(), "the start after the guarded one tries again");
+        stages(Stage::swapchain);
+    });
+    start("guarded again, never locked", [&] {
+        expect(kui::overlay_guard_start(), "guarded");
+        expect(record_text() == rec("2 4 0 0 0"), "guarded again, got " + record_text());
+        expect(!logged("failed twice"), "no lock");
+    });
+    start("on, and the overlay's first draw", [&] {
+        expect(!kui::overlay_guard_start(), "on: never locked at swapchain created");
+        stages(Stage::swapchain);
+        kui::overlay_guard_first_draw();  // vk.cpp draw(): the overlay's own work begins
+        expect(record_text() == rec("1 5 0 0 0"), "the first draw moves the start on, got " + record_text());
+        expect(guard_host::fire(kui::kIdleProofMs) == 1 && record_text() == rec("1 5 0 0 0"),
+               "the idle watch ends at the first draw: the overlay's frames decide");
+        // killed during its first draw
+    });
+    start("guarded after a death at the first draw", [&] {
+        expect(kui::overlay_guard_start(), "guarded");
+        expect(record_text() == rec("2 5 5 1 0"), "counted at the overlay's first draw, got " + record_text());
+        expect(logged("while Kiln's overlay was starting (stage: the overlay's first draw)"), "named");
+    });
+    start("tries again, dies at the first draw again", [&] {
+        expect(!kui::overlay_guard_start(), "tries");
+        stages(Stage::swapchain);
+        kui::overlay_guard_first_draw();
+    });
+    start("locked after two deaths at the first draw", [&] {
+        expect(kui::overlay_guard_start(), "locked");
+        expect(record_text() == rec("4 5 5 2 0") && logged("it failed twice at this stage"), "locked, got " + record_text());
+    });
+
+    // Kiln's menu asked for in the overlay while no frame of the overlay reaches the screen (ReShade's Vulkan layer kept,
+    // 0.2.0-dev.30.1: the Mods entry opened a menu nobody could see). About a second without a frame of the overlay drawn
+    // and presented: the Mods entry falls back to the game's own Mods rows (logged once), and opens Kiln's menu again once
+    // a frame of the overlay was presented since.
+    reset();
+    start("Kiln's menu that never shows", [&] {
+        expect(!kui::overlay_guard_start(), "on");
+        kui::g_presents = 0;
+        stages(Stage::swapchain);
+        expect(kui::overlay_menu_ask(), "the Mods entry opens Kiln's menu in the overlay");
+        expect(kui::overlay_menu_ask(), "a second click within the second: the same watch");
+        kui::g_presents = 40;  // the game presents, none of them with a frame of the overlay
+        expect(!kui::g_menu_fell_back && kui::g_fell_back_calls == 0, "not before the second is up");
+        expect(guard_host::fire(kui::kMenuShowMs) == 1, "one watch, ended after a second");
+        expect(kui::g_menu_fell_back && kui::g_fell_back_calls == 1, "no frame of the overlay: the game's own Mods rows");
+        expect(logged("no frame of Kiln's overlay was drawn and presented in the 1000 ms after (the game presented 40 frames"),
+               "logged with what Kiln saw");
+        expect(!kui::overlay_menu_ask(), "the next click: the game's own rows (the entry's caption)");
+        expect(guard_host::fire(kui::kMenuShowMs) == 0, "and no new watch");
+        draw_frames();  // a frame of the overlay was presented since (a toast, say)
+        expect(kui::overlay_menu_ask() && !kui::g_menu_fell_back, "the next click opens Kiln's menu in the overlay again");
+        kui::overlay_guard_drawn();  // its frame comes
+        expect(guard_host::fire(kui::kMenuShowMs) == 1 && !kui::g_menu_fell_back && kui::g_fell_back_calls == 1, "shown: no fallback");
+        expect(kui::overlay_menu_ask(), "asked again");
+        expect(guard_host::fire(kui::kMenuShowMs) == 1 && kui::g_menu_fell_back && kui::g_fell_back_calls == 2,
+               "no frame again: falls back again");
+        expect(count_logged("no frame of Kiln's overlay was drawn and presented") == 1, "logged once");
+        kui::overlay_guard_exit();
+        expect(!kui::overlay_menu_ask(), "the game's own rows until the end");
+    });
+    start("the overlay still making its first frame", [&] {
+        expect(!kui::overlay_guard_start(), "on");
+        stages(Stage::swapchain);
+        expect(kui::overlay_menu_ask(), "Kiln's menu asked for");
+        kui::g_drawing = true;  // the first frame of the process: ImGui and the menu's code starting
+        expect(guard_host::fire(kui::kMenuShowMs) == 1 && !kui::g_menu_fell_back, "a frame being made: not yet");
+        expect(guard_host::fire(kui::kMenuBusyMs) == 1 && !kui::g_menu_fell_back, "looked at again");
+        kui::g_drawing = false;
+        kui::overlay_guard_first_draw();
+        kui::overlay_guard_drawn();  // the frame was presented
+        expect(guard_host::fire(kui::kMenuBusyMs) == 1 && !kui::g_menu_fell_back && kui::g_fell_back_calls == 0, "shown");
+        // frames that are made but never presented: it falls back after 5 s at most
+        expect(kui::overlay_menu_ask(), "asked again");
+        kui::g_drawing = true;
+        unsigned fires = guard_host::fire(kui::kMenuShowMs);
+        for (int i = 0; i < 40 && !kui::g_menu_fell_back; ++i) fires += guard_host::fire(kui::kMenuBusyMs);
+        expect(kui::g_menu_fell_back && fires == 1 + (kui::kMenuBusyMaxMs - kui::kMenuShowMs) / kui::kMenuBusyMs,
+               "falls back after 5 s, got " + std::to_string(fires) + " looks");
+        kui::overlay_guard_exit();
+    });
+    start("the overlay's drawing turned off during the session", [&] {
+        expect(!kui::overlay_guard_start(), "on");
+        stages(Stage::swapchain);
+        expect(kui::overlay_menu_ask(), "Kiln's menu in the overlay");
+        kui::g_overlay_failed = true;  // ui.cpp overlay_turned_off: a present from frame generation's own queue, say
+        expect(!kui::overlay_menu_ask(), "from then on the game's own Mods rows");
+        expect(guard_host::fire(kui::kMenuShowMs) == 1 && !kui::g_menu_fell_back && kui::g_fell_back_calls == 0,
+               "the pending watch ends quietly: the drawing-off state says it all");
+    });
+
+    // Kiln's drawing steps aside on purpose for another layer on the game's presents (NVIDIA Streamline, OptiScaler with
+    // its own menu or its frame generation): one line names the layer, and the Mods entry shows the game's own Mods rows,
+    // never Kiln's menu.
+    reset();
+    std::ofstream(g_root / "game/sl.interposer.dll", std::ios::binary) << "Streamline";
+    start("Streamline next to the game", [&] {
+        expect(kui::overlay_guard_start(), "the overlay's drawing steps aside for Streamline");
+        expect(count_logged("Kiln's overlay drawing steps aside for NVIDIA Streamline (sl.interposer.dll, a frame generation mod)") == 1,
+               "one line names it");
+        expect(logged("the Mods entry shows the game's own Mods rows (\"Mods: the overlay's drawing is off: NVIDIA Streamline is installed\""),
+               "and says what the Mods entry does");
+        expect(!kui::overlay_menu_ask() && guard_host::timers.empty(), "the Mods entry: the game's own Mods rows, nothing watched");
+    });
+    std::filesystem::remove(g_root / "game/sl.interposer.dll");
+    std::ofstream(g_root / "game/version.dll", std::ios::binary) << "MZ...OptiScaler.ini...";
+    std::ofstream(g_root / "game/OptiScaler.ini", std::ios::binary) << "[Menu]\nOverlayMenu=auto\n";  // as it ships
+    start("OptiScaler with its own overlay menu", [&] {
+        expect(kui::overlay_guard_start(), "the overlay's drawing steps aside for OptiScaler's menu");
+        expect(logged("Kiln's overlay drawing steps aside for OptiScaler (version.dll, its own overlay menu on)"), "named with its file");
+        expect(!kui::overlay_menu_ask(), "the game's own Mods rows");
+    });
+    std::ofstream(g_root / "game/OptiScaler.ini", std::ios::binary) << "[Menu]\nOverlayMenu=false\n[FrameGen]\nFGInput=upscaler\nFGOutput=fsrfg\n";
+    start("OptiScaler with its frame generation", [&] {
+        expect(kui::overlay_guard_start(), "the overlay's drawing steps aside for OptiScaler's frame generation");
+        expect(logged("Kiln's overlay drawing steps aside for OptiScaler (version.dll, its frame generation on)"), "named");
+        expect(!kui::overlay_menu_ask(), "the game's own Mods rows");
+    });
+    std::filesystem::remove(g_root / "game/version.dll");
+    std::filesystem::remove(g_root / "game/OptiScaler.ini");
+    reset();
+    start("KILN_UI_OVERLAY=0", [&] {
+        setenv("KILN_UI_OVERLAY", "0", 1);  // this start's process only
+        expect(kui::overlay_guard_start(), "off by the player's switch");
+        expect(logged("ui: the overlay's drawing is off: KILN_UI_OVERLAY=0; key bindings and the Mods menu still work") &&
+               !logged("steps aside"), "the switch's own line, no layer named");
+        expect(!kui::overlay_menu_ask(), "the game's own Mods rows");
     });
 
     std::filesystem::remove_all(g_root);

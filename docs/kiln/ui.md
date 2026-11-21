@@ -338,15 +338,16 @@ writes `tooltip-probe:` lines to kiln.log (each detail's mode and identity, the 
 
 `Ui.Inventory` (client only) treats the slots the game draws (backpack, the inventory menu, a chest, a crafting station or
 factory, an NPC's crafting) as something your mod acts on: marks over a slot, and clicks on a slot with the item's
-identity. Sample: `mods/samples/SlotMarks` (both sides: the client asks, its server half checks the item is the sender's,
-then the client draws the mark). Native: `kiln.ui.inventory` (`native/core/abi/services/kiln_ui_inventory.h`)
+identity, and (since slice 2) panels beside the backpack and chest screens with the chest's entity. Sample:
+`mods/samples/SlotMarks` (both sides: the client asks, its server half checks the item is the sender's, then the client
+draws the mark; a "Count this chest" panel beside chests). Native: `kiln.ui.inventory` (`native/core/abi/services/kiln_ui_inventory.h`)
 on `kiln.ui.values`' slot frames and kiln.ui's `subscribe_pointer_press`.
 
 ```csharp
 // Ctrl+click marks an item; the game never sees the press (no pick-up)
 Ui.Inventory.OnClick(new SlotClickOptions { Modifiers = SlotModifiers.Ctrl }, click =>
 {
-    if (click.ItemEntity.Value == 0) return;           // an empty slot
+    if (click.ItemEntity.Value == 0) return;           // an empty slot, or a plain stack (no item entity)
     SendToMyServer(click.ItemEntity);                  // your mod's own message: the server half checks it, then keeps the mark
     Ui.Inventory.Mark(click.ItemEntity, new SlotMark(new Color(235, 60, 50)));   // the picture, at once
 });
@@ -365,8 +366,12 @@ var under = Ui.Inventory.Hovered;                      // the slot under the cur
 | `Hovered` | the slot under the cursor in the game's latest UI frame | `ui.slots.inspect` |
 
 **The item's identity.** `SlotClick.ItemEntity` (and `VisibleSlot.ClientEntity`) is the item's entity in this game's
-world. For an item the server sent (every item in a player's, a chest's or a station's inventory) that is the server's own
-id of it: the game creates replicated entities with the server's id (`docs/re/network.md`, dossier chapter 05a section 6).
+world. Only items with an item entity of their own have one: weapons, tools, armour, cans (the items `Items.Read` also
+gives an `ItemEntity`). A plain stack (materials, consumables, ammunition: the game keeps it as an item id and a count)
+has none, so a click on it says `ItemEntity` 0 with its `Item` and `Slot.Count`; name such a stack by `Holder`,
+`Slot.InventoryPage`, `Slot.SlotIndex` and `Item`. For an item the server sent (every item in a player's, a chest's or a
+station's inventory) the entity is the server's own id of it: the game creates replicated entities with the server's id
+(`docs/re/network.md`, dossier chapter 05a section 6).
 `Holder`, `Slot.InventoryPage` and `Slot.SlotIndex` say where it was drawn. Send the id to your server half and check
 there that the item is in the sender's inventory or a container they may use (Kiln.Items) before acting: a click is a wish,
 never authority. Kiln Auto Loot's salvage marks work this way.
@@ -395,8 +400,57 @@ offset + unit * scale), `unsubscribe`. Registrations share kiln.ui.values' budge
 size-guarded tail at byte 1040, after `chat_completion`'s slot at 1032) gives any native plugin the left and right presses
 over the game's UI with a take-or-pass answer.
 
-**Not in this version** (next in dev.30): a button inside the game's chest screen where Enlarge sits, panels next
-to the chest and backpack screens, the game's own slot colours (marks are drawn over the slot), the gamepad's focused slot.
+### Panels beside the backpack and chest screens, and the chest's entity (0.2.0-dev.30)
+
+A mod can dock a Kiln panel (Kiln.Ui's own widgets, the player's look, KilnText) beside the game's backpack screen and a
+storage chest's screen while they are open, and learns which of them is open with the chest's entity. Sample:
+`mods/samples/SlotMarks` (a "Count this chest" button its server half answers). The quick path to a "Salvage" button
+next to a chest.
+
+```csharp
+using var panel = Ui.Inventory.AddPanel("Auto Loot", (ui, screen) =>
+{
+    if (screen.Container.Value == 0) { ui.TextDisabled("..."); return; }   // the game names the chest a frame later
+    if (ui.Button("Salvage marked")) channel.SendToServer(new SalvageRequest(screen.Container.Value));
+}, new InventoryPanelOptions { Screens = InventoryScreens.Chest, Width = 240 });
+
+Ui.Inventory.ScreenChanged += (before, now) => Log.Info($"{before?.Kind} -> {now?.Kind} {now?.Container}");
+InventoryScreen? open = Ui.Inventory.Screen;           // Backpack or Chest, with Hud and Container; null: neither
+EntityId target = Ui.Screens.Current.Target;           // the same entity on any chest-style screen (chests, factories)
+```
+
+| Member | What | Row |
+|---|---|---|
+| `AddPanel(title, draw, options)` | a panel drawn every overlay frame (render thread) while a screen of `options.Screens` (Backpack, Chest, All) is open and `When` says so, docked beside the slots the game drew: `Side` Right (default; to their left when there is no room), Left, Below; level with the chest's slots on a chest screen. `Width`, `Style`, `Theme`, `Interactive` (its buttons take the mouse while it is over the panel) as for crafting panels. Dispose to remove | `ui.inventory.panels` |
+| `Screen` | the open `InventoryScreen(Kind, Hud, Container)` or null (any thread) | `ui.screens` |
+| `ScreenChanged` | `(before, now)` on the game's UI thread after the frame in which a backpack or chest screen opened, closed or changed (another chest; the chest's entity named a frame late). `InventoryScreenChangedEvent` on the event bus for the tick thread | `ui.screens` |
+| `GameScreen.Target` | the entity a chest-style screen is about: a storage chest's (StorageChest, CommerceProductChest) or a production station's (FactoryCrafting) | `ui.screens` |
+
+**Which screens.** Backpack: the backpack screen, or the in-game menu while it draws the player's slots (not its crafting
+tab, map or journal). Chest: a storage chest (HUD StorageChest) and the commerce-product chest that uses the same screen.
+Not: stations and factories (use `Ui.Crafting.AddPanel` with `AtFactories`), loot chests, the play view, any other screen.
+
+**The chest's entity.** `InventoryScreen.Container` is the entity the game's chest screen reads the other inventory from
+(play data `+0x2c50` on client 26430625; `docs/re/game-ui.md`). For a chest the server sent, that is the server's id of
+it, so your server half can find it: `Items.Read(chest)` for its contents, `World.Position(chest)` for where it is. Check
+there that it is a container (not a player: `Players.IsPlayer`), near the sender, and one they may use, before acting. A
+panel click is a wish, never authority. `EntityId.None` for the frame or two before the game names it; `ScreenChanged`
+fires again when it does.
+
+**Fail closed.** The panel is drawn only when Kiln knows where the game drew the slots this frame (the slot frame of
+`ui.slots.inspect` is this session's, at most 250 ms old, of the same screen, with a usable viewport). On an unknown screen,
+an unmeasured build, an older kiln-core (no `screen_view`) or a frame Kiln cannot read, there is no panel and the game's
+screen is as without Kiln. Placement uses the same pixel mapping as marks: game test pending (client checks
+`ui-hooks.c5` to `ui-hooks.c7`).
+
+**C (native plugins).** `kiln.ui.inventory` v2 appends `screen_view(owner, target_w, target_h, &view)` (size-guarded at byte
+40; the table is 48 bytes): `KilnUiScreenView` with `kind` (`KUI_VIEW_BACKPACK`, `KUI_VIEW_CHEST`), `hud_screen`,
+`container`, the local player, `KUI_VIEW_HOLDER_MATCH` (a drawn slot's holder is the container), and the rectangles of all
+drawn slots, the player's and the container's in the target's pixels. kiln.ui's `screen_target` now also answers on the
+two chest screens (before 0.2.0-dev.30: factories only).
+
+**Not in this version:** a button inside the game's chest screen where Enlarge sits (drawn by the game's own button
+renderer), the game's own slot colours (marks are drawn over the slot), the gamepad's focused slot.
 
 ## Windows (immediate mode)
 ```csharp
@@ -1089,7 +1143,7 @@ Kiln.Ui follows [the API contract](modding/contract.md) as far as it applies. It
 
 Before Vulkan hooks are installed, Kiln writes a versioned record to
 `kiln/state/overlay-start.guard`. It records hooks installed, instance seen, device seen,
-swapchain created, and completes once the overlay's frames have been presented for a while: 60 presents with the
+swapchain created, the overlay's first draw, and completes once the overlay's frames have been presented for a while: 60 presents with the
 overlay drawn, or a 20 second window after the first in which the game presented at least 60 frames (watched window
 after window while it presents fewer, as during loading). Since 0.2.0-dev.29.18; before, the first present with the
 overlay drawn completed it, so a game that died a few frames later was not caught. When the overlay's drawing turns
@@ -1109,6 +1163,18 @@ wrote.
 A game that ends before then in any other way (a crash, a hang that was killed) counts as an interrupted attempt: the
 cost is one start without the overlay.
 
+A start whose overlay draws nothing yet (Kiln's menu and mods' windows closed) counts as fine once the game has
+presented 60 frames through Kiln's hooks in a 30 second window after its swapchain, or exits normally; the overlay's
+first draw arms the record again. Since 0.2.0-dev.30.2 those windows repeat until one has its 60 frames: a start whose
+first frames stall (ReShade's Vulkan layer kept with `--keep-vulkan-layers` compiles its effects there, a slow first
+load) counts as fine once the game presents normally. Before, the one window after the swapchain was all: such a start
+stayed an attempt for its whole session, and any end of it that was not a normal exit read as a death at the overlay's
+start. The overlay's first draw is the first present on which Kiln's drawing does work of its own (its Vulkan
+resources, ImGui, its frame, its submit), not a present Kiln got no further on (no swapchain or device of its own seen,
+a queue it does not draw on). A start that died after its swapchain was made but before that first draw (stage
+"swapchain created") did none of the overlay's own work: since 0.2.0-dev.30.2 it guards the one start after it and
+never counts towards the lock below; kiln.log says "before Kiln's overlay drew anything".
+
 On the next start only overlay drawing steps aside. Keys, native game-menu rows and
 `kiln.ui.tick` remain available. The drawing capability rows in
 `kiln/state/capabilities.json` carry the reason. The log says:
@@ -1126,18 +1192,20 @@ tries it again" unless something else keeps the drawing off then too (automatic 
 `KILN_UI_OVERLAY=0`, kiln.json `ui.overlay`); those still take precedence. Until 0.2.0-dev.29.18 a guarded start had to
 run a minute for that: one that ended sooner left the next start guarded too, and so on at every start, until the
 record was deleted. Such a record gets its new attempt at the first start of 0.2.0-dev.29.18. The record keeps the
-first interrupted attempt: a second one at the same stage keeps the drawing off at every start (a normal exit does not
+first interrupted attempt: a second one at the same stage (any stage but "swapchain created") keeps the drawing off at every start (a normal exit does not
 change that) until the record is deleted or Kiln is updated. Since 0.2.0-dev.29.19 the record notes the Kiln
 version that wrote it, and a record of another version (an update, also going back to an older one) or one without
 a version (every Kiln before 0.2.0-dev.29.19) starts fresh at the next start: its attempts, its lock and its
 wrapper-change recovery are cleared, and `kiln.log` says "Kiln was updated since the record was written". A Kiln
 before 0.2.0-dev.29.19 cannot read the new record; it starts without it (it tries the overlay) and logs that it could
 not understand the file. To re-enable it, close the
-game and delete `kiln/state/overlay-start.guard`. The record is one line, `3 <phase> <stage> <failed stage> <failures>
-<wrapper retry> <Kiln version> <wrappers>` (`-` for no version; format 2, before 0.2.0-dev.29.19, has no version);
+game and delete `kiln/state/overlay-start.guard`. The record is one line, `4 <phase> <stage> <failed stage> <failures>
+<wrapper retry> <Kiln version> <wrappers>` (`-` for no version; format 3, from 0.2.0-dev.29.19, has no first-draw
+stage, its stage 5 is the frames presented; format 2, before 0.2.0-dev.29.19, has no version; a Kiln before
+0.2.0-dev.30.2 cannot read format 4 and starts without the record);
 phase 0 is complete, 1 an attempt (the overlay starting, or a start that died during it),
 2 a guarded start, 3 a guarded start that exited normally, 4 locked; stage 0 is before hooks, 1 hooks installed,
-2 instance seen, 3 device seen, 4 swapchain created, 5 the overlay's frames presented. Removing a detected graphics wrapper
+2 instance seen, 3 device seen, 4 swapchain created, 5 the overlay's first draw, 6 the overlay's frames presented. Removing a detected graphics wrapper
 also permits a new attempt, as does adding or replacing one. The guard compares the paths,
 sizes and the first and last 64 KiB of `sl.interposer.dll`, `dxgi.dll`, `ReShade64.dll`,
 `opengl32.dll`, and `powrprof.dll` directly in the game folder or its `Streamline/` folder, and OptiScaler's DLL when
@@ -1221,6 +1289,12 @@ The `KILN_UI_*` switches are environment variables; `ui.overlay` is the one kiln
 For Steam on Linux, set the variable in the game's launch options (`KILN_UI_OVERLAY=0 %command%`); on Windows use
 `ui.overlay`. Remove the old `KILN_UI_DISABLE=1` workaround to keep keys and menus.
 
+With the drawing off for any of these reasons, or stepping aside for Streamline or OptiScaler, kiln.log names it in one
+line at the start ("ui: Kiln's overlay drawing steps aside for NVIDIA Streamline (sl.interposer.dll, a frame generation
+mod): ... the Mods entry shows the game's own Mods rows ..."), and the Mods entry and the menu key never open Kiln's
+menu: they toggle the entry's caption ("Mods: <reason>") in the game's own menu. A frame generation queue found during a
+session names OptiScaler or Streamline in its line too when one of them is installed.
+
 Drawing off preserves the game's Mods entry and mods' native menu rows, including scrolling,
 keyboard/mouse/wheel bindings and native input subscriptions, game screen/language/crafting
 state, camera reads/projection and `kiln.ui.tick`. Mod loading and audio's UI-frame drain
@@ -1241,6 +1315,21 @@ capability rows explain the degraded state. The length and layout of the fallbac
 This mode avoids Kiln's Vulkan interception. It does not make Streamline and Kiln's drawing
 compatible. Prefer automatic drawing off for frame generation; use the force-on switch only
 when intentionally testing coexistence.
+
+## When Kiln's menu does not show
+
+Since 0.2.0-dev.30.2 the Mods entry (and the menu key) also checks that Kiln's menu reaches the screen. When it opens
+Kiln's menu in the overlay (or the Mods page in the main menu) and no frame of the overlay is drawn and presented within
+about a second (longer while the overlay is still making a frame, its first with ImGui and the menu starting, up to five
+seconds), Kiln's menu falls back to the game's own Mods rows, as with the drawing off: the entry reads
+"Mods: Kiln's overlay did not appear", nothing of Kiln's takes the game's input for the menu, and kiln.log says once:
+
+> ui: Kiln's menu was opened, but no frame of Kiln's overlay was drawn and presented in the 1000 ms after (the game presented 40 frames through Kiln's hooks meanwhile): the Mods entry shows the game's own Mods rows instead, as with the overlay's drawing off, and opens Kiln's menu again once a frame of the overlay was presented
+
+Another layer on the game's presents can keep Kiln's frames from the screen (reported with ReShade's Vulkan layer kept).
+Once a frame of the overlay was drawn and presented since (a toast, a mod's HUD), the next click opens Kiln's menu in
+the overlay again. Before 0.2.0-dev.30.2 nothing checked: the Mods entry opened a menu that could not be seen, and it
+held the game's mouse and keys until Escape. Host test: `native/services/ui/tests/overlay_guard_host_test.cpp`.
 
 ## OptiScaler
 

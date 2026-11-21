@@ -21,6 +21,14 @@ shipped_runtime_resources() {
   printf '{"%s":"runtime/kiln-runtime.zip"}' "$zip"
 }
 
+# nexus_features: the launcher's default cargo features but self-update, comma-separated (may be empty). The Nexus Mods
+# build turns the defaults off (--no-default-features) to drop the self-update and adds these back, so it carries
+# every other default feature the direct build has.
+nexus_features() {
+  sed -n '/^\[features\]/,/^\[/{s/^default *= *\[\(.*\)\].*/\1/p}' "$repo/launcher/src-tauri/Cargo.toml" \
+    | tr -d ' "' | tr ',' '\n' | awk 'NF && $0 != "self-update"' | paste -sd, -
+}
+
 # shipped_python_resources [DIR|none] RESOURCES_JSON: prints RESOURCES_JSON with the Python the Windows launcher ships
 # for the cook tools added as python/ (the launcher runs python/python.exe from its resources). Empty: the pinned
 # embeddable package (tools/package/fetch-python.sh). none: unchanged. The package is flat (python.org's embeddable

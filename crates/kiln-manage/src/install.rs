@@ -1049,6 +1049,20 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                 continue; // user-editable: installed only when missing
             }
             if current.as_ref().is_some_and(|(h, _)| *h == f.sha256) {
+                // (kiln-eml-inspect: an earlier install's helper that lost its execute bits gets them
+                // back, only when it is Kiln's own file: listed with these bytes and this component in the receipt, and
+                // not a file that was there before Kiln (adopted). Proven again on its open handle before the chmod.)
+                #[cfg(unix)]
+                if crate::bundle::executable(&f.path, &f.component)
+                    && old_files.get(f.path.as_str()).is_some_and(|o| o.sha256 == f.sha256 && o.component.as_deref() == Some(f.component.as_str()))
+                    && !replaced.iter().any(|r| r.path == f.path && r.action == ReplacedAction::Adopted)
+                {
+                    match crate::bundle::restore_executable(&target, &f.sha256) {
+                        Ok(true) => progress.report(None, &format!("{} can run again (its execute permission was missing)", f.path)),
+                        Ok(false) => {}
+                        Err(e) => progress.report(None, &format!("{}: its execute permission could not be restored ({e}); Kiln's archive inspector cannot run from this folder", f.path)),
+                    }
+                }
                 continue; // already these bytes
             }
             if let Some(p) = target.parent() {
@@ -1250,7 +1264,16 @@ pub fn uninstall_report(dirs: &DataDirs, install: &GameInstall, progress: &mut d
             )));
         }
     }
+    // (an unfinished kiln-mode activation is settled before a copy is removed: rolled forward or back
+    // exactly as the next activation settles it, so unplace never meets half-placed game files)
+    #[cfg(feature = "sfi-scan")]
+    let settled = crate::profile::sfi::settle(dirs, install)?;
     let mut report = UninstallReport { placements: crate::engine_mods::unplace(dirs, game_dir)?, ..Default::default() };
+    #[cfg(feature = "sfi-scan")]
+    for note in settled {
+        progress.report(None, &note);
+        report.warnings.push(note);
+    }
     // native mods placed in the game folder itself (game_files): Kiln's files go, Ultimate ASI Loader as well
     let files = crate::game_files::unplace(game_dir)?;
     report.placements.removed.extend(files.removed);
@@ -1343,6 +1366,10 @@ pub fn uninstall_report(dirs: &DataDirs, install: &GameInstall, progress: &mut d
     let _ = std::fs::remove_dir(&chain_dir);
     let receipt_path = game_dir.join(crate::paths::game::RECEIPT);
     std::fs::remove_file(&receipt_path).map_err(io_at(&receipt_path, "removing"))?;
+    // (a refused kiln-mode activation, as settling left it, goes with Kiln as a deactivation removes it:
+    // a reinstall does not start with the planned start refused; nothing fails the uninstall now)
+    #[cfg(feature = "sfi-scan")]
+    let _ = crate::sfi_activation::supersede_refused(game_dir);
     if let Ok(Some(rec)) = crate::game::record(dirs, &receipt.install_id) {
         let _ = crate::game::write_record(dirs, &rec.install, None);
     }

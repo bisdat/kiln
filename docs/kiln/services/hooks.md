@@ -229,7 +229,8 @@ returns, and nothing tells you when it does.
   them; `unpatch`, `revoke` and `revoke_owner` hold both while they put the old bytes back;
 - `write` holds this lock around its copy;
 - a detour install takes it right after the chain mutex, before it reads the target's bytes and before it stops the
-  game's threads; `revoke`, `revoke_owner` and the sweep of faulted links take it after the chain mutex.
+  game's threads; `revoke`, `revoke_owner` and the sweep of faulted links take it after the chain mutex;
+- Kiln's own services protect code ranges under it ([below](#protected-code-ranges-kilninternalhooks-kiln-internal)).
 
 `code_state` takes only this lock, never the chain or patch mutex, and holds it for two guarded copies and the
 comparison. So it never sees a half-written Kiln detour, and a thread that a Kiln install stops is never inside
@@ -241,6 +242,51 @@ install holds this lock while it looks up modules, which can wait for the loader
 (sigdb's verified file view, the usual case). Unavailable: `policy` in safe idle, `service-missing` when kiln.hooks did
 not start, `symbol-missing` ("verified executable file code unavailable; live fallback is not original code") when
 sigdb could not use the exe file and reads the live code instead. They do not change while the game runs.
+
+## Protected code ranges: `kiln.internal.hooks` (Kiln-internal)
+Kiln's own services can protect the code an engine call of theirs runs through, so that no Kiln hook lands on it
+between their check of the code and the call ([engine-call-recipes.md](engine-call-recipes.md)). The table is
+Kiln-internal ([Kiln-internal tables](README.md#kiln-internal-tables)): header `native/core/src/hooks_protect_internal.h`,
+code `native/core/src/services/hooks_protect.cpp`; only the services' `KilnApi` resolves it, and nobody can publish the
+name, not even a Kiln service. While nothing is protected, kiln.hooks behaves exactly as described above.
+
+`kiln.internal.hooks` v1 has one member, `protect_code_ranges(owner, ranges, n, reason)`:
+- Each `KilnCodeRange {address, size}` lies inside the exe's `.text` (the ranges `read_original` and `code_state`
+  accept); 1 to 32 ranges per call, at most 64 KiB together; `reason` is 1 to 256 bytes and goes into kiln.log; `owner`
+  is the service's own, alive, not 0. Otherwise `KILN_ERR_INVALID_ARGUMENT`, or `KILN_ERR_REVOKED` for an owner that is
+  gone.
+- Under the code lock (the one `code_state` and every writer below take) every range must read `KILN_CODE_ORIGINAL`,
+  with the live bytes read twice as `code_state` reads them, and no Kiln detour or patch may be recorded over it (a
+  patch that put the file's bytes back over another patch reads `ORIGINAL` but still counts: undoing it would change
+  the code). Then all the ranges are protected together, or none is: one range that a Kiln hook or patch changed or
+  covers (`MANAGED`), that another module changed (`FOREIGN`), or that cannot be read gives `KILN_ERR_UNAVAILABLE`
+  and protects nothing. So the first comer wins: a mod that hooked the code first keeps
+  its hook and the engine call stays unavailable; a hook asked for after the protection is refused. An install racing
+  the call lands first (the call then sees it) or is refused, never both.
+- Calling it again with ranges the owner already protects is `KILN_OK` and adds nothing. Several services may protect
+  the same bytes. Every owner together protects at most 256 ranges and 512 KiB; past that `KILN_ERR_UNAVAILABLE`
+  (one warning in kiln.log).
+- A protection lasts until its owner retires (the core's owner-retiring notification); nothing else removes it.
+
+What it refuses, with `KILN_ERR_UNAVAILABLE` and a kiln.log line that names the request, its owner, the protecting
+service and its reason. One owner's refusals over one protected range are logged the 1st, 2nd, 4th, 8th, ... time
+(from the 2nd line on it says which refusal it is), so a mod that retries a refused hook every tick cannot flood
+kiln.log; `write`, which has no owner, counts as one requester:
+- a new detour on a target whose replaced bytes would overlap a protected range, for every link kind (raw, v1,
+  structured, mid, typed, the checked forms). The first byte is checked before anything is made; the whole extent once
+  safetyhook knows how many bytes it replaces. Both checks run before any thread is stopped and before a byte is
+  written. A target that already exists writes no code, so its new links are unaffected;
+- `patch` and `write` over any protected byte.
+
+Bytes right before or after a protected range stay free: a detour whose bytes end where a protected range starts is
+placed. `unpatch`, `revoke` and `revoke_owner` are not checked: they only write bytes that have a Kiln record, and a
+range with a record over it is never protected. The protection binds kiln.hooks' writers only: another module, and Kiln
+code that writes game code without kiln.hooks (the content service's code-byte patch, the shroudtopia and greeneye
+compatibility plugins' own patchers), can still write the bytes, which is why the engine call compares the live code
+with its capture inside the hold as well. The call takes the code lock and may log, so never inside a gate's hold or
+under the loader lock; it stops no thread and adds no wait to an install beyond the code lock the install already takes.
+The release runs on the thread that revokes the owner and takes the code lock there, so an owner revoked under the
+loader lock (from DllMain) could wait for an install in progress.
 
 ## The hook map: `state/hooks.json`
 
@@ -409,6 +455,8 @@ if (Capabilities.Is("hooks.typed") && Capabilities.Is(GetItemVolume.Capability))
 - **Threads**: the handler runs on the thread that calls the function, game worker threads too; it runs as its mod
   (gated calls work), and the mod's unload waits for handlers in flight (one second, then the unload goes on and the
   mod's fragment stays until the last one returns).
+- **Client hooks for mods**: what a hook of the game client may do and the advanced tier's update rule:
+  [../modding/client-hooks.md](../modding/client-hooks.md) (sample `mods/samples/ClientHookSample`, check `ui-hooks.c8`).
 - **A mod's own descriptors**: a `sig` in an entry of the mod's fragment (`sigdb/server.json`, `sigdb/client.json`;
   names `<modid>/...`) becomes a class `Kiln.Sigs.<ModId>.<Name>`, internal to the mod (Kiln.Sdk's generator; the root
   namespace is `KilnSigsNamespace`). It may name a struct of its own fragment or one of Kiln.Sigs (`OptS32`,
@@ -552,7 +600,19 @@ are not counted per call. Structured and mid dispatches are counted by each thre
   readers: ranges and refusals (one byte over the 64 KiB limit refused before any read or allocation of that size),
   relocated bytes, patches over patches and over another module's bytes, unreadable and changing pages, two ranges
   taking turns, a query in flight while a writer waits for the lock, and polls racing installs, removals and faulted
-  links.
+  links. Protected ranges: overlap at either edge and adjacency, near the top of the address space, idempotence, several
+  owners, every argument rule, the 32-per-call, 64 KiB, 256-range and 512 KiB bounds, a dead owner, MANAGED, FOREIGN,
+  unreadable and changing ranges refused whole, a range under a patch record whose bytes are the file's refused,
+  release by owner, no generation move, the refusal counts of the kiln.log rate limit; and an installer racing a caller
+  that checks, captures, protects and compares (under TSan): both orders happen, a protected byte never changes.
+- `native/core/tests/test-hooks-v2.sh` also runs `test_protected_ranges` (alone: `hooks_v2_test.exe protect`, run
+  natively on Windows too): every link kind refused on protected code with nothing written, no thread stopped and no
+  target made; patches and writes refused over it and allowed beside it; a detour whose bytes end right before protected
+  code placed, one whose last byte would cover it refused; MANAGED and FOREIGN code not protected, nor code under a
+  patch that put the file's bytes back over another patch; kiln.log's refusal lines at the 1st, 2nd, 4th, 8th, ... time
+  per owner and range; idempotence and two owners; release when an owner retires; protect waiting for a thread that
+  holds the code lock; a first install paused inside the lock landing first; first installs racing protects (exactly
+  one wins each time) and installs, patches and writes hammering protected functions while their bytes are compared.
 - `native/core/tests/test-hooks-checked-patch.sh`, `test-hooks-thread-stop.sh`, `test-hooks-typed-result.sh`,
   `test-hooks-fingerprint.sh` (host): the checked patch policy and the typed result code, the thread-stop loop, the
   complete-result snapshot, the fingerprint pass and the compiled-against-loaded descriptor comparison.

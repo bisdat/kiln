@@ -1,0 +1,46 @@
+{
+  "unknown-field.json": {
+    "path": "",
+    "why": "closed: an unknown field"
+  },
+  "missing-prior.json": {
+    "path": "",
+    "why": "prior is required"
+  },
+  "bad-txn.json": {
+    "path": "/txn",
+    "why": "txn is 16 hex digits"
+  },
+  "bad-state.json": {
+    "path": "/state",
+    "why": "a committed activation has no journal"
+  },
+  "bad-route.json": {
+    "path": "/route",
+    "why": "interpreter or legacy"
+  },
+  "unknown-stage.json": {
+    "path": "/stages/0",
+    "why": "the five stages only"
+  },
+  "plan-path-escape.json": {
+    "path": "/stages/3",
+    "why": "a plan file in launch-plans only"
+  },
+  "upper-case-sha.json": {
+    "path": "/stages/4",
+    "why": "lower-case hex"
+  },
+  "chain-prior-odd.json": {
+    "path": "/stages/1",
+    "why": "whole bytes, hex"
+  },
+  "extra-prior-field.json": {
+    "path": "/prior",
+    "why": "prior is closed"
+  },
+  "bad-mode.json": {
+    "path": "/mode",
+    "why": "once only: an active profile's journal has no mode"
+  }
+}

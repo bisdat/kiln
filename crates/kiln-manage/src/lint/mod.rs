@@ -13,6 +13,7 @@
 
 mod catalog;
 pub mod codes;
+pub mod conflicts;
 pub mod docs;
 pub mod json;
 mod regex;
@@ -192,7 +193,14 @@ pub struct LintOptions {
     pub min_severity: Severity,
     /// Codes (KL103) or rule names (unknown-key) to turn off.
     pub rules_off: Vec<String>,
+    /// What KL901 (no catalog) tells the user to do. None: the kiln CLI's "make one with `kiln catalog`, or pass
+    /// --catalog"; the launcher names its own way ([`LAUNCHER_CATALOG_HINT`]).
+    pub no_catalog_hint: Option<String>,
 }
+
+/// KL901's advice in the launcher, where Pack Studio reads the game's items itself (no CLI to run).
+pub const LAUNCHER_CATALOG_HINT: &str =
+    "Kiln will read the game's items when Pack Studio opens; if it cannot, use the 'Build the game catalog' button on Pack Studio's Data tab";
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Summary {
@@ -289,6 +297,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("content-pack.schema.json", include_str!("../../../../schema/content-pack.schema.json")),
     ("assets.schema.json", include_str!("../../../../schema/assets.schema.json")),
     ("cook.schema.json", include_str!("../../../../schema/cook.schema.json")),
+    ("physics.schema.json", include_str!("../../../../schema/physics.schema.json")),
     ("player-states.schema.json", include_str!("../../../../schema/player-states.schema.json")),
     ("impact-natives.schema.json", include_str!("../../../../schema/impact-natives.schema.json")),
     ("kschem-header.schema.json", include_str!("../../../../schema/kschem-header.schema.json")),
@@ -666,7 +675,7 @@ impl<'o> Linter<'o> {
             v.sort();
             want.extend(v.into_iter().map(|p| (p, "blocks".to_string())));
         }
-        for (rel, kind) in [("assets/assets.json", "assets"), ("assets/cook.json", "cook"), ("assets/player-states.json", "playerstates"), ("impact/cook.json", "cook"), ("impact/natives.json", "natives"), ("kiln-modpack.json", "modpack")] {
+        for (rel, kind) in [("assets/assets.json", "assets"), ("assets/cook.json", "cook"), ("assets/physics.json", "physics"), ("assets/player-states.json", "playerstates"), ("impact/cook.json", "cook"), ("impact/natives.json", "natives"), ("kiln-modpack.json", "modpack")] {
             if root.join(rel).is_file() {
                 want.push((root.join(rel), kind.into()));
             }
@@ -888,7 +897,7 @@ fn generated_manifest(d: &Path) -> Option<PathBuf> {
 
 fn reader_note(e: &SchemaEntry) -> String {
     match e.kind.as_str() {
-        "cook" | "natives" => "the cook tools read this file with Python's json module (plain JSON)".into(),
+        "cook" | "natives" | "physics" => "the cook tools read this file with Python's json module (plain JSON)".into(),
         "playerstates" => "animcook and kiln.playeranim read this file as strict JSON (no comments, no trailing commas)".into(),
         "modpack" => "the launcher reads this file as plain JSON".into(),
         "schematic" => "the schematic header is plain JSON".into(),

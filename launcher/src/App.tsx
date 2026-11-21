@@ -37,6 +37,9 @@ const ServerModpackPage = lazy(() => import("./pages/servers/ServerModpackPage")
 const ServerTicksPage = lazy(() => import("./pages/servers/ServerTicksPage"));
 const AdminRoutes = lazy(() => import("./admin").then((m) => ({ default: m.AdminRoutes })));
 
+// Pack Studio (src/studio/, DESIGN 3): desktop only, behind Crucible's switch; loaded on first visit.
+const StudioPage = lazy(() => import("./studio/StudioPage"));
+
 // The save editor is big (its game data): loaded on first visit.
 const EditorPage = lazy(() => import("./pages/EditorPage"));
 
@@ -79,6 +82,9 @@ export default function App() {
         <Route path="logs" element={<LogsPage />} />
         <Route path="saves" element={<SavesPage />} />
         <Route path="editor" element={<EditorPage />} />
+        <Route path="studio" element={<StudioPage />} />
+        <Route path="studio/:packId" element={<StudioPage />} />
+        <Route path="studio/:packId/:tab" element={<StudioPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="about" element={<AboutPage />} />
         <Route path="community" element={<CommunityRoute />} />

@@ -12,6 +12,8 @@ import { notifyActivation, notifyActivationOf } from "../../shell/notices";
 import { cookBeforePlay, cookingNotice } from "../../shell/cook";
 import { rememberLaunch } from "../../shell/play";
 import { useT } from "../../i18n";
+// the warning before Play
+import { isCanceledStart, launchWithPreflight } from "../../shell/sfiWarnings";
 
 export default function ModpackOffer({ gameId, lastServer, open, onClose }: { gameId: GameId; lastServer: LastServer; open: boolean; onClose: () => void }) {
   const t = useT();
@@ -57,6 +59,8 @@ export default function ModpackOffer({ gameId, lastServer, open, onClose }: { ga
       await api.launchBegin(gameId, "profile").catch(() => {});
       void qc.invalidateQueries({ queryKey: ["launch_progress", gameId] });
       await cookBeforePlay(gameId, cookingNotice);
+      // the warning before Play, as Play's own start has it
+      return launchWithPreflight(gameId, { mode: "profile", profileId: done?.profile.id });
       return api.launchPlay(gameId, { mode: "profile", profileId: done?.profile.id });
     },
   });
@@ -70,6 +74,8 @@ export default function ModpackOffer({ gameId, lastServer, open, onClose }: { ga
     } catch (e) {
       // the start ended before the game existed: the launcher stops timing it
       void api.launchEnd(gameId).catch(() => {});
+      // Cancel in the warning before Play: nothing opened, no toast
+      if (isCanceledStart(e)) return;
       notifyActivationOf(e);
       toast.error(e, t("servers.modpackOffer.launchFailed"));
     } finally {

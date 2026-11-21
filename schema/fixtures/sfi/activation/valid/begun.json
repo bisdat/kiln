@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "txn": "0123456789abcdef",
+  "state": "staging",
+  "profileId": "kill",
+  "generation": 2,
+  "route": "legacy",
+  "prior": {
+    "profileSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "placementsSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "gameFiles": [
+      {
+        "id": "autolootcoop",
+        "version": "0.0.0",
+        "hash": "kdh1:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    ]
+  },
+  "stages": []
+}

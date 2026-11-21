@@ -1,0 +1,49 @@
+{
+  "format": 1,
+  "entries": [
+    {
+      "kind": "blob",
+      "file": "cooked/banner.blob"
+    },
+    {
+      "kind": "resource",
+      "guid": "4a3b8f0e-6c2d-4f6e-9b1a-0d7c5e2f8a61",
+      "type": "keen::RenderModel",
+      "part": 0,
+      "file": "cooked/banner.bin",
+      "mode": "new",
+      "patch": [
+        {
+          "offset": 272,
+          "blob": "cooked/banner.blob"
+        }
+      ]
+    },
+    {
+      "kind": "blob",
+      "file": "cooked/models_pendant.blob"
+    },
+    {
+      "kind": "resource",
+      "guid": "832e2968-23a6-5516-95a0-a9810f05153c",
+      "type": "keen::RenderModel",
+      "part": 0,
+      "file": "cooked/models_pendant.bin",
+      "mode": "new",
+      "patch": [
+        {
+          "offset": 272,
+          "blob": "cooked/models_pendant.blob"
+        }
+      ]
+    },
+    {
+      "kind": "resource",
+      "guid": "373ff3ee-9d10-56f8-a11f-b2e23ded105b",
+      "type": "keen::ModelHierarchyResource",
+      "part": 0,
+      "file": "cooked/pendant.skeleton.bin",
+      "mode": "new"
+    }
+  ]
+}

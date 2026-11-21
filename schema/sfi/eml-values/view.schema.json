@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-values/view.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "description": "value_read VIEW: a scalar node's value, a typed node's class, storage and declared type (a variant also its selected type), or an iterator. Also the payload of every reply whose item is a scalar node (value_open, value_clone, pop/remove) and of value_child's reply for a scalar child (item 0).",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "packet": {
+      "const": "view"
+    },
+    "value": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/lua_value"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "typed"
+            },
+            "class": {
+              "enum": [
+                "struct",
+                "array"
+              ]
+            },
+            "storage": {
+              "enum": [
+                "owned",
+                "mapped"
+              ]
+            },
+            "type": {
+              "$ref": "common.schema.json#/$defs/type"
+            }
+          },
+          "required": [
+            "tag",
+            "class",
+            "storage",
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "typed"
+            },
+            "class": {
+              "const": "variant"
+            },
+            "storage": {
+              "enum": [
+                "owned",
+                "mapped"
+              ]
+            },
+            "type": {
+              "$ref": "common.schema.json#/$defs/type"
+            },
+            "variant_type": {
+              "$ref": "common.schema.json#/$defs/type"
+            }
+          },
+          "required": [
+            "tag",
+            "class",
+            "storage",
+            "type",
+            "variant_type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "iterator"
+            }
+          },
+          "required": [
+            "tag"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "packet",
+    "value"
+  ],
+  "additionalProperties": false
+}

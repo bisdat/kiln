@@ -31,6 +31,12 @@ public readonly record struct FakeSlotClickResult(int Delivered, bool Taken);
 /// <para><b>Not modelled.</b> The game's drawing and hooks, pixels (marks are not drawn; the mapping answers no viewport),
 /// the 250 ms frame age, client sessions. Clicks are delivered at once on the calling thread (in a game: on the client's
 /// main thread after the next UI frame).</para>
+/// <para><b>Screens and panels (0.2.0-dev.30).</b> The screen a <see cref="Draw"/> draws on is the open one:
+/// Ui.Inventory.Screen and ScreenChanged (and InventoryScreenChangedEvent) follow it; <see cref="OpenChest"/> names the
+/// chest's entity (GameScreen.Target, InventoryScreen.Container), <see cref="OpenBackpack"/> and
+/// <see cref="CloseScreen"/> the rest. <see cref="PanelsShown"/> names the Ui.Inventory.AddPanel panels that would
+/// show (their screens and When); nothing is drawn or placed (no pixels offline), so what a panel's buttons do is
+/// tested by calling the same code the button calls.</para>
 /// </remarks>
 public sealed class HarnessUiInventory
 {
@@ -78,6 +84,7 @@ public sealed class HarnessUiInventory
         }
         UiValuesNative.SlotsFrame frame = default;
         frame.Size = (uint)sizeof(UiValuesNative.SlotsFrame);
+        GameScreen open;
         lock (st.Lock)
         {
             st.Slots = drawn;
@@ -85,7 +92,9 @@ public sealed class HarnessUiInventory
             st.Frame++;
             st.Hovered = null;
             fixed (UiValuesNative.VisibleSlot* p = drawn) UiValuesFake.FillFrame(st, &frame, p, (uint)drawn.Length, null);
+            open = UiInventoryFake.GameScreenOf(screen, st.Frame, st.Container);
         }
+        UiInventoryScreens.ScreenChanged(open);  // the screen it draws on is the open one (UI thread in a game)
         // Ui.Values.SubscribeSlots' subscribers get the frame, as after a UI frame in a game
         if (FakeTables.Off(UiValuesAbi.SlotsRow) || UiValuesFake.State is not { } vs) return;
         UiValuesFakeState.Reg[] subs;
@@ -95,6 +104,32 @@ public sealed class HarnessUiInventory
                 ((delegate* unmanaged[Cdecl]<UiValuesNative.SlotsFrame*, UiValuesNative.VisibleSlot*, uint, void*, void>)r.Fn)(
                     &frame, p, frame.Count, (void*)r.User);
     }
+
+    /// <summary>The player opens the backpack with these slots drawn (the backpack screen, HUD Backpack).</summary>
+    public void OpenBackpack(params FakeInventorySlot[] slots) => Draw(HudScreen.Backpack, slots);
+
+    /// <summary>The player opens the storage chest <paramref name="chest"/> (its entity: what InventoryScreen.Container
+    /// and GameScreen.Target carry) with these slots drawn (the chest's and the backpack's; give the chest's slots
+    /// <c>Holder = chest</c>).</summary>
+    public void OpenChest(EntityId chest, params FakeInventorySlot[] slots)
+    {
+        lock (State.Lock) State.Container = chest.Value;
+        Draw(HudScreen.StorageChest, slots);
+    }
+
+    /// <summary>Every menu closed: the play view (no slots drawn).</summary>
+    public void CloseScreen()
+    {
+        lock (State.Lock) State.Container = 0;
+        Draw(HudScreen.InGame);
+    }
+
+    /// <summary>The backpack or chest screen open now (what Ui.Inventory.Screen says in a game), or null.</summary>
+    public InventoryScreen? Screen => UiInventoryScreens.Current;
+
+    /// <summary>The titles of the Ui.Inventory.AddPanel panels that show on the open screen now (their Screens and When,
+    /// in the order they were added).</summary>
+    public IReadOnlyList<string> PanelsShown => UiInventoryScreens.Showing();
 
     /// <summary>The cursor rests on drawn slot <paramref name="index"/> (null: on none): what Ui.Inventory.Hovered reads.</summary>
     public void Hover(int? index)

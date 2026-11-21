@@ -39,6 +39,9 @@ kiln catalog search "bronze sword" [--section items] [--limit 20] [--json]
 
 A build takes about a second (release build: client 0.9 s, server 0.7 s).
 
+The launcher makes the client catalog by itself when Pack Studio opens (missing or not current; in the background, the
+same refusals; docs/kiln/launcher/pack-studio.md), so players never need the CLI for it.
+
 **Current or outdated.** The catalog records the game's `.kfc` version string (it changes with every data build) and
 the extraction `recipe`. `status` reads only the `.kfc` header, so the check is cheap.
 - `current: false`: the game was updated, or Kiln's rules changed. Run `kiln catalog build` again.
@@ -177,6 +180,7 @@ Size and speed: the client catalog is 21 MB (templates 7 MB with their component
 | `build(game_dir, dest, &BuildOptions {force, steam_build, sections, icons_dir, types_dump}, &mut dyn Progress) -> BuildInfo {side, path, built, game, counts, bytes, seconds, problems, typesDump}` | `gameart` | one side |
 | `build_default(side, &BuildOptions, &mut dyn Progress) -> Vec<BuildInfo>`, `game_dirs()` | `gameart` | every installed side into `catalog_dir()` |
 | `types::{dump, write_dump, from_exe, generate_cs, DEFAULT_COMPONENTS}` | `gameart` | Kiln.Game types (below) |
+| `auto::AutoCatalog {begin, run, ensure, fail, status} -> AutoStatus {state, exists, path, built, seconds, error}` | `gameart` | the launcher's upkeep of the client catalog (one check at a time, the outcome kept for the UI) |
 
 The reader is part of the default build. Making a catalog reads KFC4 data and needs feature `gameart` (gameart's
 `kfc` and `refl` readers, a port of Kiln's MIT `tools/kfc`; no kfc-parser code).

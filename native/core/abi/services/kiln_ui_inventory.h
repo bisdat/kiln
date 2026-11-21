@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
- * kiln.ui.inventory v1 (in-core service, client only, 0.2.0-dev.30): the game's own inventory slots as something a mod
- * can act on. Built on kiln.ui.values' slot inspection (kiln_ui_values.h copy_slots: the slots the game drew in each
+ * kiln.ui.inventory v2 (in-core service, client only, 0.2.0-dev.30): the game's own inventory slots as something a mod
+ * can act on, and (v2) the game's backpack and chest screens as a place for a mod's panel. Built on kiln.ui.values' slot inspection (kiln_ui_values.h copy_slots: the slots the game drew in each
  * completed UI frame) and kiln.ui's presses (kiln_ui.h subscribe_pointer_press). docs/kiln/ui.md "The game's inventory
  * slots" is the author's page; /mnt/Dongus/kiln-wave/dev30/out/ui-hooks/DESIGN.md the design.
  *
@@ -23,12 +23,26 @@
  * under a structured-exception guard (five faults in a row remove the subscription). Picture and wish only: the slot's
  * identity is what this game drew; a mod's server must check the item (holder, slot, type) before acting on it.
  *
- * Identity. slot.client_entity is the item's pide in this game's world. For an item the server replicated, that is the
+ * Identity. slot.client_entity is the item's pide in this game's world; 0 (KUI_CLIENT_ENTITY clear) for a plain stack,
+ * which the game keeps without an item entity (materials, consumables). For an item the server replicated, that is the
  * server's entity id (createEntityWithId keeps the wire id: docs/re/network.md, chapter 05a §6); slot.server_entity
  * stays 0 here (KUI_SERVER_ENTITY clear): the managed side names it ItemEntity and the server checks it.
  *
+ * Screen view (v2, capability ui.inventory.panels: ui.slots.inspect's slot sites plus the play data's HUD screen and
+ * play.target). screen_view answers, for the latest slot frame, whether it shows one of the game's inventory screens a
+ * panel may sit beside (KUI_VIEW_BACKPACK: HUD 9, or HUD 4 the in-game menu while no crafting menu is built and slots are
+ * drawn; KUI_VIEW_CHEST: HUD 22 storage chest or 41 the chest-style transfer screen's mode 1), the container's entity on a
+ * chest screen (kiln.ui's screen_target: play.target, the entity the chest-style transfer screen 0xb9d0f0 finds the other
+ * inventory by; for a replicated chest the server's id), and the rectangles of the drawn slots in the target's pixels: all
+ * of them, the local player's (holder = local player) and the container's (holder = container; KUI_VIEW_HOLDER_MATCH when
+ * at least one slot's holder is the container, so the entity is seen twice). Every other screen, a stale frame, no
+ * viewport: ok = 0 with a reason; Kiln.Ui then draws no panel (fail closed). A picture: the server checks the container
+ * (the player may use it, is near it) before a mod acts on it.
+ *
  * Registrations share kiln.ui.values' budget (128 per stable mod id) and handles; unsubscribe here or there.
- * Every reader checks header.size and each record's size. The table is append-only. */
+ * Every reader checks header.size and each record's size. The table is append-only: v1 is 40 bytes (through
+ * unsubscribe), v2 48 (screen_view); a v1 reader of a v2 table works unchanged, a v2 reader checks header.size >=
+ * offsetof(KilnUiInventoryApi, screen_view) + sizeof(void*) before it calls screen_view. */
 #ifndef KILN_UI_INVENTORY_H
 #define KILN_UI_INVENTORY_H
 #include "../kiln_api.h"
@@ -39,14 +53,18 @@ extern "C" {
 #endif
 
 #define KILN_UI_INVENTORY_SERVICE "kiln.ui.inventory"
-#define KILN_UI_INVENTORY_VERSION 1u
+#define KILN_UI_INVENTORY_VERSION 2u
 
 /* KilnUiSlotClickFilter.flags */
 enum { KUI_CLICK_TAKE = 1u };
 /* KilnUiSlotMapping.flags */
 enum { KUI_MAP_SCALED = 1u, KUI_MAP_VERIFIED = 2u };
-/* reasons beyond KilnUiValueReason, for slot_at and mapping (ok = 0) */
-enum { KUI_NO_SLOT = 32, KUI_NO_POINTER_SCREEN = 33, KUI_NO_VIEWPORT = 34 };
+/* reasons beyond KilnUiValueReason, for slot_at, mapping and screen_view (ok = 0) */
+enum { KUI_NO_SLOT = 32, KUI_NO_POINTER_SCREEN = 33, KUI_NO_VIEWPORT = 34, KUI_NO_PANEL_SCREEN = 35 };
+/* KilnUiScreenView.kind (v2) */
+enum { KUI_VIEW_NONE = 0, KUI_VIEW_BACKPACK = 1, KUI_VIEW_CHEST = 2 };
+/* KilnUiScreenView.flags (v2) */
+enum { KUI_VIEW_HOLDER_MATCH = 1u, KUI_VIEW_SCALED = 2u };
 
 typedef struct KilnUiSlotClickFilter {
     uint32_t size;   /* sizeof(KilnUiSlotClickFilter) */
@@ -79,6 +97,17 @@ typedef struct KilnUiSlotHit {
     KilnUiVisibleSlot slot;
 } KilnUiSlotHit;
 
+/* v2: the inventory screen of the latest slot frame (see "Screen view" above). Rectangles are in the target's pixels
+ * (x, y, width, height); a rectangle whose count is 0 is all zero. kind, hud_screen, container, local_player, session and
+ * frame are filled whenever a frame was usable, also with ok = 0 for KUI_NO_VIEWPORT or KUI_NO_SLOT. */
+typedef struct KilnUiScreenView {
+    uint32_t size, ok, reason, kind;
+    uint32_t hud_screen, container, local_player, flags; /* container: 0 on the backpack or when play.target is not read */
+    uint64_t session, frame;
+    uint32_t slot_count, player_slots, container_slots, reserved;
+    KilnUiRect all_px, player_px, container_px;
+} KilnUiScreenView;
+
 typedef struct KilnUiInventoryApi {
     KilnServiceHeader header; /* { sizeof(KilnUiInventoryApi), KILN_UI_INVENTORY_VERSION }; append-only */
     /* fn(click) for presses matching filter. Any thread. KILN_OK with out->ok = 0: KUI_REGISTRATION_BUDGET.
@@ -96,6 +125,12 @@ typedef struct KilnUiInventoryApi {
     KilnResult(KILN_CALL* mapping)(KilnOwner owner, float target_width, float target_height, KilnUiSlotMapping* out);
     /* Removes a click subscription (any kiln.ui.values handle). */
     KilnResult(KILN_CALL* unsubscribe)(KilnHandle handle);
+    /* v2 (size-guarded): the inventory screen of the latest frame for a target of that size (the overlay's display or the
+     * window's client area). KILN_OK with out->ok = 0 and a reason: KUI_NO_FRAME, KUI_STALE_FRAME, KUI_NO_PANEL_SCREEN
+     * (any other screen), KUI_NO_VIEWPORT, KUI_NO_SLOT (no slot drawn; on HUD 4 no slot of the local player).
+     * KILN_ERR_UNAVAILABLE: a server, ui.inventory.panels off, or the slot hooks failed. INVALID_ARGUMENT: owner 0, out
+     * NULL or short. REVOKED: a retired owner. Any thread. */
+    KilnResult(KILN_CALL* screen_view)(KilnOwner owner, float target_width, float target_height, KilnUiScreenView* out);
 } KilnUiInventoryApi;
 
 #ifdef __cplusplus

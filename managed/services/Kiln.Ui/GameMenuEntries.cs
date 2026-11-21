@@ -187,6 +187,12 @@ internal static unsafe class GameMenuEntries
         return notDrawn == 0 ? how : KilnText.Plural("gamemenu.summary.not_drawn", notDrawn, ("how", how));
     }
 
+    /// <summary>The game's attention marker on Kiln's own Mods entry (pause menu; the entry is always drawn, whatever
+    /// modEntries says) while kiln-sfi warns that packages are off this start (SfiNotice.cs). Any thread.</summary>
+    internal static void SafetyAttention(bool on) => Ui.Menus.SetKilnEntryFlag(AttentionFlag, on);  // keeps a mod's hidden flag
+
+    internal const uint AttentionFlag = 2;  // KILN_UI_ENTRY_ATTENTION
+
     /// <summary>Does what choosing the entry in its menu does: its action runs after the next UI frame. False when kiln.ui
     /// refuses it (gone, hidden by its mod, or an entry of the other menu).</summary>
     internal static bool Activate(ulong handle)
