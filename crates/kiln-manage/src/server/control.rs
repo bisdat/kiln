@@ -231,20 +231,21 @@ pub fn mods(instance: &ServerInstance) -> Result<Vec<ServerMod>> {
                     state: None,
                     folder,
                     kind: Some(kind),
+                    steam_messages: false,
                 });
             }
             continue;
         }
         for d in kind_dirs(server, &r, kind) {
             let folder = d.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-            let (id, version, clients) = match kind {
+            let (id, version, clients, steam_messages) = match kind {
                 ModKind::Kiln => match crate::manifest::read_kiln(&d) {
-                    Ok(m) => (m.id, Some(m.version), Some(m.clients)),
-                    Err(_) => (folder.clone(), None, None),
+                    Ok(m) => (m.id, Some(m.version), Some(m.clients), m.steam_messages),
+                    Err(_) => (folder.clone(), None, None, false),
                 },
                 _ => match crate::manifest::read_native(&d) {
-                    Ok(m) => (m.id, Some(m.version), Some(m.clients.unwrap_or_else(|| Clients::default_for(m.side)))),
-                    Err(_) => (folder.clone(), None, None),
+                    Ok(m) => (m.id, Some(m.version), Some(m.clients.unwrap_or_else(|| Clients::default_for(m.side))), false),
+                    Err(_) => (folder.clone(), None, None, false),
                 },
             };
             let state = if kind == ModKind::Kiln { states.iter().find(|s| s.id == id).map(|s| s.state) } else { None };
@@ -257,6 +258,7 @@ pub fn mods(instance: &ServerInstance) -> Result<Vec<ServerMod>> {
                 state,
                 folder,
                 kind: Some(kind),
+                steam_messages,
             });
         }
     }
@@ -609,6 +611,37 @@ mod tests {
         assert_eq!(err.code, ErrorCode::Unsupported);
         assert!(err.message.contains("activate a profile") && err.message.contains("XHL-Core separately"));
         assert!(!server_kinds().any(|k| k == ModKind::Xhl));
+    }
+
+    #[test]
+    fn a_kiln_mods_steam_messages_opt_in_reaches_the_server_mod_list_and_is_written_only_when_true() {
+        let temp = crate::library::TempDir::new(&std::env::temp_dir(), "server-mods-steam").unwrap();
+        let server = temp.path().join("server");
+        let instance: ServerInstance = serde_json::from_value(serde_json::json!({
+            "id": "t", "name": "t", "kind": "local", "dir": server,
+            "port": 27140, "queryPort": 27140, "wine": null, "policy": "any",
+            "source": "launcher", "remote": null
+        })).unwrap();
+        for (folder, extra) in [("talker", ",\n  \"steamMessages\": true"), ("quiet", ",\n  \"steamMessages\": false"), ("plain", "")] {
+            let dir = server.join("kiln/mods").join(folder);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("kiln.mod.json"), format!(
+                "{{\n  \"id\": \"{folder}\",\n  \"version\": \"1.0.0\",\n  \"apiVersion\": \"0.2\",\n  \"entryAssembly\": \"M.dll\"{extra}\n}}\n")).unwrap();
+        }
+        let listed = mods(&instance).unwrap();
+        let of = |f: &str| listed.iter().find(|m| m.folder == f).unwrap_or_else(|| panic!("{f} listed: {listed:?}"));
+        assert!(of("talker").steam_messages);
+        assert!(!of("quiet").steam_messages && !of("plain").steam_messages);
+        // additive JSON: the key is there only for the mod that opts in, so an older launcher reads the list as before
+        assert_eq!(serde_json::to_value(of("talker")).unwrap()["steamMessages"], serde_json::json!(true));
+        for f in ["quiet", "plain"] {
+            assert!(serde_json::to_value(of(f)).unwrap().get("steamMessages").is_none(), "{f}");
+        }
+        // and a list written before the key existed still reads
+        let old: ServerMod = serde_json::from_value(serde_json::json!({
+            "id": "a", "version": null, "folder": "a", "enabled": true, "source": null, "clients": null, "state": null
+        })).unwrap();
+        assert!(!old.steam_messages);
     }
 
     #[test]

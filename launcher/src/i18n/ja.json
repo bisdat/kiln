@@ -2223,6 +2223,8 @@
       "byHand": "手動で配置",
       "folder": "フォルダー",
       "advanced": "上級（フックまたはパッチ）",
+      "steam": "Steam",
+      "steamMessages": "Steam で他のプレイヤーと通信します",
       "role": "役割",
       "servesLive": "ライブページを提供",
       "also": "ほかに {list}",

@@ -12,6 +12,7 @@ registration of new Impact programs, and playing the game's action sequences on 
 | Symbols | `sigdb/symbols/server.d/abilities.json` (features `abilities.natives`, `.programs`, `.instances`, `.attributes`, `.sequences`); resolves unchanged on the client (no `client.d` overlay needed) |
 | Managed | `managed/services/Kiln.Abilities/` → `kiln/host/Kiln.Abilities.dll` (static class `Kiln.Abilities` + events) |
 | Test | `mods/tests/abilities-test/` (83 PASS and one known FAIL, the bow shot, which `PlaySequence` refuses because its event consumes the used item; player-free; on a client, or with `kiln/data/abilities-test/session-only`, it only registers the `/abt` session commands) |
+| Item use | `Abilities.UseItem` (0.2.0-dev.30.3): `native/services/abilities/item_use.h`, tests `native/services/abilities/tests/item_use_test.cpp`, `managed/tests/Kiln.Abilities.Tests/ItemUseTests.cs`, lab steps in `mods/tests/playerstate-test` |
 | Sample | `mods/samples/FireNova/` (side both: a keybind ability + a per-cast tweak of the game's Fireball) |
 
 ## What the game does (one paragraph)
@@ -177,7 +178,8 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
     character for 92 steps (3.83 s) ... (NetworkActor.triggerType 22)`, `a melee attack ... plays on the player for 41
     steps`, `Fireball cast: 5 steps without the hold, 46 with it (replicated states seen 0x40000e000000)`. (A bow shot
     played the same way, `4 steps without the hold, 18 with it`, until Kiln began to refuse sequences that consume the
-    used item: `PlaySequence` gives the game none, and the lab now checks the refusal.)
+    used item: `PlaySequence` gives the game none, and the lab now checks the refusal.) For food, drinks and potions use
+    `UseItem` ([Using an item](#using-an-item-since-020-dev303-mod-api-0213)): it gives the game the used item.
   - C: `sequence_play(entity, id, trigger | 0x10000)` holds (the flag is a Kiln extension; older services answer
     `INVALID_ARGUMENT` and the managed API retries without it).
   - **In a vanilla client joined to a lab, the player's own character:** the Greet and Dance emotes (`queue`, trigger 22) animate on the player's own screen
@@ -223,6 +225,91 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
 - `Attributes.Get/Max/Add(entity, Health|Mana|Stamina|SpecialAbility)`: the attribute slots through the game's
   attribute code (AttrFind/AttrAdd, formulas re-run; Mana `0x4d7229a8`/`0x6aa2574e`, max `0x17536777`; Stamina
   `0x92410664`/`0x04b6aa8b`, max `0xf443c410`; SpecialAbility `0x9aec7fc4`/`0x046f1fb4`, max `0x9573465b`).
+
+## Using an item (since 0.2.0-dev.30.3, mod API 0.2.13)
+
+`Abilities.UseItem(player, slot)` makes a player use the consumable in one of their own slots the way the game does
+when they use it from the hotbar (GitHub issue #110, thanks Fuzen777). It is the answer to "eat this for the player":
+`PlaySequence` refuses every food and potion sequence (it has no used item to give), and `ApplyBuff` applies the bare
+buff type, while 148 foods and drinks share 16 buff types and the numbers (+40 max health for 20 minutes) are the
+item's own `impactValues`, which the game copies into the buff only when the buff knows the used item.
+
+```csharp
+// a mod that lists remote chests: move one mushroom into the backpack, then eat it
+var moved = await Items.Move(chest, chestSlot, player, count: 1);
+if (moved.Succeeded && moved.Changes.Count > 0)
+{
+    var r = Abilities.UseItem(player, moved.Changes[0].To);   // ItemUseResult.Started: the game eats it
+    if (r != ItemUseResult.Started) Log.Info($"not eaten: {r}");
+}
+```
+
+What happens is the game's own code from the trigger on (docs/re/player-state.md "Eating, drinking and other
+consumables"):
+
+1. Kiln.Abilities reads the slot (`Items.Read`), finds the item's own sequence in the game's data (`ItemInfo.sequences[]`
+   triggered by `Primary`, the one a hotbar use plays: `UseItem_Food_Buff`, `UseItem_Food_Liquid_Buff`,
+   `UseItem_Potion_Health`, ...) and checks that it has an event that uses up the item (`ApplyBuffEvent`,
+   `SpawnImpact`, `SpawnEntityEvent` with `consume`; `PayUsageCost` does not count).
+2. kiln.abilities' `item_use` checks the slot against the player's inventory tree (kiln.items), the item in it, and
+   the player's states (reflection: `Actor.currentState`, `Actor.sequenceRuntimeId`, and no trigger already waiting
+   in `ActorInput.triggerContext`), then calls the game's `TriggerSequence` (0x369d0) with the
+   sequence and trigger `Primary`, and writes the slot and the item into `ActorInput.triggerContext.usedItem`, as
+   `player_control_action_sequence` does for a hand use. `actor_simulation_start` takes it in the same step.
+3. The sequence plays (animation, VFX, sounds; `NetworkActor` replicates it like any sequence). At its consume event
+   (0.05 s for drinks, 0.4 s for food, 0.3 s for potions) the game's `actor_apply_buff` removes one item from that
+   slot in an inventory transaction and applies the buff with the used item, so the buff entity gets the item's values
+   and time; potions go through the spawn path the same way. A rollback leaves both the item and the buff.
+
+So everything that applies to a hand use applies: `PlayerConsumeEvent` fires and can cancel, a block's `CanEat`
+refuses, `PlayerConsumedEvent` says when the item went, creative mode's keep-consumables rule keeps it, and a heal
+some foods add (`UseItem_Food_Heal_Buff`) happens. Nothing is taken at the call.
+
+| `ItemUseResult` | When |
+|---|---|
+| `Started` | the sequence is triggered; the item goes at its consume event |
+| `NotConsumable` | the item has no Primary sequence, or that sequence uses up nothing (weapons, tools, materials) |
+| `NotOwnSlot` | the slot is not in the player's own inventories (backpack, hotbar, equipment), or they have none |
+| `EmptySlot` | the slot holds nothing |
+| `SlotChanged` | the slot held another item at the native check than at the managed read |
+| `NotAPlayer` | not a player character (its inventories are not a player's, or it has no Actor / ActorInput) |
+| `Dead` | `StateFlag.Dead` |
+| `NotReady` | not `StateFlag.IsReadyForGameplay` (joining, loading the terrain, respawning) |
+| `Busy` | a sequence plays (an attack, another use, an emote, a dodge), a trigger already waits for this step (a second `UseItem` or a `PlaySequence` on the same player in the same step, or one the game queued), or one of `Spawning`, `Sleeping`, `Sitting`, `PlayingInstrument`, `Climbing`, `ClimbingTransition`, `Attached`, `AttachedToHook`, `HangGliding`, `HeadDiving`, `IsFishing` |
+| `ServerOnly` | no server world in this process (a joined client) |
+
+- **No cooldown code.** The game has no cooldown system for players (docs/re/abilities.md: "No player cooldown system
+  exists"); what plays as a cooldown is the use's own sequence, so a second use while the first plays is `Busy`.
+- **No "full" code.** Whether a fifth food fits, or what a food of a buff the player already has does, is decided by the
+  game's own buff code after the trigger, exactly as for a hand use; Kiln does not guess it in advance.
+- **The busy states are Kiln's choice.** The gate the game's input path checks before a hand use (`0xb1410`) is not
+  traced, so Kiln refuses a running sequence and the states listed above, and lets the game decide the rest.
+- **Safety.** A consume event that runs with no used item takes the server down (the spawn path reads the item with
+  no check). `item_use` therefore checks, in the same call that triggers, that the slot is the player's and holds the
+  item, and Kiln.Abilities sends only the item's own Primary sequence. It runs only between steps (Pre or Post): inside
+  a native handler or attachment the world's step runs, and the game's programs run on other threads beside it, so
+  `actor_simulation_start` could take the trigger before the used item is in. If `TriggerSequence` or the write of the
+  used item faults, the trigger is taken back (the context cleared as `actor_clear_input` clears it) and the call
+  fails; a second use in the same step is `Busy` rather than replacing the first.
+- Server, tick thread, between steps (a tick handler, an event handler, a scheduled task). In a native handler or
+  attachment it throws `InvalidOperationException` (use `Scheduler.Post`). `KilnUnavailableException`: kiln.abilities older than 0.2.0-dev.30.3, kiln.items or
+  kiln.gamedata not here, the game's data not loaded yet, or the build's reflection lacks the trigger context's used
+  item or the state flags (`kiln.abilities: item_use is off: ...` in kiln.log, once). The test kit's kiln.abilities
+  answers `item_use` as unavailable, like `sequence_play` (its `abilities.sequences` row is offline).
+- C: `item_use(KilnItemUse*)`, appended at byte 312 (the table is 320 bytes; check `header.size`). `KilnItemUse`
+  (48 bytes) takes the entity, the slot, the item expected in it and the sequence id, and answers `status`
+  (`KILN_ITEM_USE_*`), the stack's `count` and the start's `trigger_time`. A C caller is responsible for passing
+  the item's own sequence. `KILN_ERR_WRONG_THREAD` inside a Kiln native call (a sync native, an attachment, a wrap).
+- Tests: `native/services/abilities/tests/item_use_test.cpp` (the reflection paths against a fake kiln.types, every
+  verdict, and `t_item_use` itself against a fake kiln.items, fake components and a fake `TriggerSequence`),
+  `managed/tests/Kiln.Abilities.Tests/ItemUseTests.cs` (layout, answers, the sequence pick, the consume check), and
+  `mods/tests/playerstate-test` (lab: `NotReady` before the character is ready, then a mushroom eaten through
+  `UseItem` with the count going down, `Busy` for a second use in the same step and during the use, the food buff, a health potion through the spawn path, `EmptySlot`, `NotConsumable` for a
+  sword, `NotOwnSlot`). Not run in a lab or a real game yet: see the client checklist.
+- Not added: `ApplyBuff(target, buff, usedItem)` (the issue's second shape). The game copies the item's values into the
+  buff in `applyBuffCore` from the trigger context's used item on the `actor_apply_buff` path; whether the `applyBuff`
+  native that Kiln's `ApplyBuff` program calls carries an item config into the buff entity was not traced, so a
+  `usedItem` parameter could not be promised to give the item's values, effect lines or time.
 
 ## Kiln natives and new programs
 - **Managed natives**: `Abilities.Natives.Register(name, argc, handler)` → `"<modid>.<name>"`. The handler runs on the
@@ -461,7 +548,8 @@ calls a typed declaration refused, retirements finished late, watchdog reports, 
 (one callback per attachment, `KilnNativeFilter`, stages `KILN_NATIVE_BEFORE / INSTEAD / AFTER`),
 `native_declare_typed` (`KilnNativeArg`), `native_state` (`KILN_NATIVE_STATE_*`), `native_attach_state`
 (`KILN_NATIVE_ATTACH_*`), `native_ecs_read` / `native_ecs_write` (the ECS bridge inside a call; state in
-`KilnNativeCounters.ecs_state`, `KILN_NATIVE_ECS_*`). `release_owner` must be called on the tick thread (else `KILN_ERR_WRONG_THREAD`): it closes
+`KilnNativeCounters.ecs_state`, `KILN_NATIVE_ECS_*`); appended in 0.2.0-dev.30.3 (check `header.size` >= 320):
+`item_use` (an item used from a player's slot, [Using an item](#using-an-item-since-020-dev303-mod-api-0213)). `release_owner` must be called on the tick thread (else `KILN_ERR_WRONG_THREAD`): it closes
 the owner's natives and attachments to new calls first, waits at most 2 ms for calls inside, and finishes the rest in
 a later Pre (`owner N retired K step(s) late: its last native call left`). At the server world's stop it waits up to
 the same bound for calls inside (`the server world stops with no Kiln native call inside`).
@@ -618,6 +706,14 @@ chat) and impactsample.
 5. A Kiln-spawned `Explosion_Player_Spell_Fireball_1` next to an enemy near the player (`/abt near`): damage, burn,
    kill credit to the root player.
 6. impact-asm's ImpactSample: chain_explosion credited to the player, heal_over_time, signal_projectile.
+7. `Abilities.UseItem` on a real player (0.2.0-dev.30.3, issue #110), compared with eating the same food by hand from the
+   hotbar, on a dedicated server and in a hosted game: the item count in that slot goes down by exactly one, at the
+   consume event and not at the call; the buff's values match a hand use (max health, regeneration and the rest of the
+   tooltip, `PlayerStates.BuffsOf` remaining time and level); the client's buff bar shows the buff's effect lines and
+   the full time (not half, as the issue saw with values written at `ImpactStartingEvent`); the player's own client
+   and a second client see the eating animation; a drink (liquid sequence), a health potion (`SpawnImpact`) and a
+   healing food (instant heal plus buff) behave as by hand; a use during an attack or while gliding is `Busy` and
+   leaves the player as they were; a use while the player presses a hotbar key in the same step (which one wins).
 
 ## The contract (dev.27)
 

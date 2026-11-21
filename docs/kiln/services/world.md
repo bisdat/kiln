@@ -469,6 +469,7 @@ through `kiln.internal.engine`'s guarded copy, so a page the game freed or prote
 | `ecs_snapshot` | one component's bytes, checked before and after the copy |
 | `ecs_snapshot_many` | several components, each with its own presence. Not one atomic read across components |
 | `ecs_template_uuid` | the template the entity was spawned from, 16 bytes, checked before and after |
+| `ecs_registration(world_kind, component, &detail)` | since 0.2.0-dev.30.3 (at 648; the table is 656 bytes with it, check `header.size`): the one registration whose hash is `component` in the catalog of `world_kind`'s world, as a 56-byte `KilnEcsRegistrationDetail` (index, registered size, flags, the entity storage type's and the template type's hash and size, the catalog's `layout_stamp`). It works wherever the reads above do (the `world.ecs_read` row) and needs a world of that kind; any thread, never waits. `KILN_OK`; `KILN_ERR_NOT_FOUND` (no registration has that hash); `KILN_ERR_UNAVAILABLE` (no reads on this build, no world of the kind, or a row that does not validate); `KILN_ECS_ERR_UNREADABLE` (the catalog moved during the read: read again); `KILN_ERR_INVALID_ARGUMENT` |
 | `kiln.types` `ecs_registry` | the component catalog: index, hash, size, type identity, and tracking flags only when they were actually read |
 
 **What works where.** Entity and component reads work on the two exact builds Kiln has profiles for, dedicated server
@@ -819,6 +820,56 @@ itself: a ref another mod opened is `Stale`, as is every ref after the mod reloa
 tracking bits, so a component is writable there only after the test says it is untracked:
 `kiln.Entities.Track("Charge", save: false, replication: false)`. `kiln.Entities.BusyWrites = 1` makes the next write meet
 a busy gate, for the retry loop; the event comes at the next `kiln.Step()`.
+
+### Named services from tasks
+
+Since 0.2.0-dev.30.3, four more members, appended after the compare-exchange writes (offsets 616 to 640; the table is 648
+bytes; version stays 4, so check `header.size` and `KILN_WORLD_CAP_NAMED_READ` / `KILN_WORLD_CAP_NAMED_WRITE`), read and
+change one of the game's **named services** from a task thread. A named service is one of the game's own plain-data
+services that the server world's service registry holds under its original name, for example `ecs::GameSettings` (the
+world's settings: durability on or off, production speed, and so on). The game's systems read such a service every time
+they need it, so a change takes effect at the next use. Kiln's interpreter for ShroudForge-format mods uses these members
+for `runtime.services.get` and the `service` override target.
+
+| Member | What it does |
+|---|---|
+| `named_service_open(owner, name, expected_session, &view, &type)` | a view of the service `name` ("ecs::GameSettings", without "keen::") in the live server session; `type` (optional) its kiln.types type |
+| `named_service_snapshot(owner, view, out, capacity, &required)` | the service's whole bytes, copied under the gate between frames |
+| `named_service_close(owner, view)` | ends the view |
+| `named_service_compare_exchange(owner, view, expected, mask, desired, bytes, confirmed, &reply)` | compare the whole service with `expected`; when equal, write `desired` under `mask` |
+
+**Which services.** Only those the build's exact engine profile names, each with its size, its type's hash, the one game
+system that writes it and where the registry keeps it; on both exact builds today that is `ecs::GameSettings` (144 bytes).
+Any other name answers `KILN_ERR_NOT_FOUND`. On a build without an exact profile, or whose profile names none, every member
+answers unavailable and the rows `world.named_read` and `world.named_write` say why.
+
+**A view holds no pointer.** It is the caller's own handle, bound to the service and the server session it was opened in.
+Every snapshot and compare-exchange finds the service again inside one hold of the engine's write gate, with the checks the
+game's own lookup does not make: the record by name through the registry's name map, no second record of that name, the
+record's two pointers equal, the type's size and hash at its metadata, exactly one system that writes the service, and both
+of that system's binding tables pointing at the same bytes, which must be committed private read-write memory. The copy,
+the compare and the write happen in that same hold, and the service is found again before the gate is released. A frame
+never sees a half-written service, and nothing waits: a call that cannot take the gate now answers busy at once.
+
+**The compare-exchange** follows the protocol and the outcomes of `ecs_compare_exchange` above (`KilnMutationReply`,
+`KILN_ECS_*`, the masked merge, the readback, the rollback that is read back too), with these differences:
+
+- `bytes` is the service's size; there is no write policy and no event.
+- `STALE`: the view's session or world is no longer the live one (open a new view), or the calling owner is unloading or
+  unloaded.
+- `ABSENT` (`KILN_ERR_NOT_FOUND`): no such view of the calling owner: never opened, closed, or another owner's
+  (`why_code` `NOT_OWNERS_REF`). Another owner's view can neither be read, written nor closed.
+- `UNREADABLE`: the service could not be found again or read (a changed binding, a fault) before any write, or a write was
+  rolled back and proven.
+- `UNCERTAIN` latches the service for the rest of its server session: every later compare-exchange of it answers uncertain
+  without taking the gate. Snapshots go on. A new session clears it.
+- `UNAVAILABLE`: off on this build, no server world now (a joined client has none), not the local authority, or the gate
+  closed while the server world stops.
+
+**Limits.** At most `KILN_NAMED_SERVICE_VIEWS` (64) views per owner are open at once (`open` answers
+`KILN_ERR_BUFFER_TOO_SMALL`); an owner's views end when it unloads or reloads. Any thread but a world's own: on the server
+tick every member that takes the gate answers busy (`IN_FRAME`). Only the gate's own busy refusal latches the owner for the
+rest of the server step, as for the compare-exchange writes. There is no C# layer for these members yet.
 
 ### Entities and teleport from native code
 Tick thread (Pre/Post) or inside your program: `component(e, hash, &size)`, `exists`, `transform`, `position`,

@@ -28,6 +28,7 @@ Kiln.TestKit.FakeOutlineSetting
 Kiln.TestKit.FakeOutlineSetting.GameFirst = 0 -> Kiln.TestKit.FakeOutlineSetting
 Kiln.TestKit.FakeOutlineSetting.ModsFirst = 1 -> Kiln.TestKit.FakeOutlineSetting
 Kiln.TestKit.FakeOutlineSetting.Off = 2 -> Kiln.TestKit.FakeOutlineSetting
+Kiln.TestKit.HarnessItems.ContainerName(Kiln.EntityId entity) -> string?
 Kiln.TestKit.HarnessOutlines
 Kiln.TestKit.HarnessOutlines.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeOutline!>!
 Kiln.TestKit.HarnessOutlines.Despawn(Kiln.EntityId entity) -> int
@@ -41,6 +42,8 @@ Kiln.TestKit.HarnessOutlines.Setting.get -> Kiln.TestKit.FakeOutlineSetting
 Kiln.TestKit.HarnessOutlines.Setting.set -> void
 Kiln.TestKit.HarnessOutlines.Showing(Kiln.EntityId entity) -> Kiln.TestKit.FakeOutline?
 Kiln.TestKit.KilnHarness.Outlines.get -> Kiln.TestKit.HarnessOutlines!
+Kiln.TestKit.ModManifest.SteamMessages.get -> bool
+Kiln.TestKit.ModManifest.SteamMessages.set -> void
 override Kiln.TestKit.FakeOutline.Equals(object? obj) -> bool
 override Kiln.TestKit.FakeOutline.GetHashCode() -> int
 override Kiln.TestKit.FakeOutline.ToString() -> string!

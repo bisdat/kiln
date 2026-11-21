@@ -2292,9 +2292,29 @@ void abi(const char* path) {
     }
     {
         // The compare-exchange members appended after the ECS reads, and their records.
-        auto& l = list("KilnWorldApiEcsWrites", sizeof(KilnWorldApi));
+        auto& l = list("KilnWorldApiEcsWrites", offsetof(KilnWorldApi, named_service_open));
         F(KilnWorldApi, ecs_write_policy); F(KilnWorldApi, ecs_compare_exchange); F(KilnWorldApi, ecs_write_subscribe);
         F(KilnWorldApi, ecs_write_unsubscribe);
+    }
+    {
+        // The named-service members appended after the compare-exchange writes (since 0.2.0-dev.30.3).
+        auto& l = list("KilnWorldApiNamedServices", offsetof(KilnWorldApi, ecs_registration));
+        F(KilnWorldApi, named_service_open); F(KilnWorldApi, named_service_snapshot); F(KilnWorldApi, named_service_close);
+        F(KilnWorldApi, named_service_compare_exchange);
+    }
+    {
+        // ecs_registration, appended after the named services (since 0.2.0-dev.30.3), and its record.
+        auto& l = list("KilnWorldApiEcsRegistration", sizeof(KilnWorldApi));
+        F(KilnWorldApi, ecs_registration);
+    }
+    {
+        auto& l = list("KilnEcsRegistrationDetail", sizeof(KilnEcsRegistrationDetail));
+        F(KilnEcsRegistrationDetail, size); F(KilnEcsRegistrationDetail, status); F(KilnEcsRegistrationDetail, index);
+        F(KilnEcsRegistrationDetail, component); F(KilnEcsRegistrationDetail, runtime_size); F(KilnEcsRegistrationDetail, flags);
+        F(KilnEcsRegistrationDetail, storage_flags); F(KilnEcsRegistrationDetail, storage_hash);
+        F(KilnEcsRegistrationDetail, storage_size); F(KilnEcsRegistrationDetail, template_hash);
+        F(KilnEcsRegistrationDetail, template_size); F(KilnEcsRegistrationDetail, reserved);
+        F(KilnEcsRegistrationDetail, layout_stamp);
     }
     {
         auto& l = list("KilnEcsWritePolicy", sizeof(KilnEcsWritePolicy));
@@ -2447,6 +2467,13 @@ void abi(const char* path) {
         std::map<std::string, long long> listed;
         for (const auto& v : fx.at("KilnEcsWriteConstants").at("values")) listed[v.at(0).get<std::string>()] = v.at(1).get<long long>();
         check(listed == header, "abi.json: the compare-exchange writes' constants by value");
+        const std::map<std::string, long long> named = {
+            {"KILN_WORLD_CAP_NAMED_READ", KILN_WORLD_CAP_NAMED_READ}, {"KILN_WORLD_CAP_NAMED_WRITE", KILN_WORLD_CAP_NAMED_WRITE},
+            {"KILN_NAMED_SERVICE_VIEWS", KILN_NAMED_SERVICE_VIEWS}};
+        std::map<std::string, long long> named_listed;
+        for (const auto& v : fx.at("KilnNamedServiceConstants").at("values"))
+            named_listed[v.at(0).get<std::string>()] = v.at(1).get<long long>();
+        check(named_listed == named, "abi.json: the named services' constants by value");
         const long long codes[] = {KILN_WORLD_ERR_CHANGED, KILN_ECS_ERR_STALE, KILN_ECS_ERR_UNREADABLE, KILN_ECS_ERR_BUSY,
                                    KILN_ECS_ERR_UNSUPPORTED, KILN_ECS_ERR_CONFLICT, KILN_ECS_ERR_NOT_WRITABLE, KILN_ECS_ERR_UNCERTAIN};
         bool distinct = true;

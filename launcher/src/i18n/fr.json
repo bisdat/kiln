@@ -2262,6 +2262,8 @@
       "byHand": "Mis là à la main",
       "folder": "Dossier",
       "advanced": "Avancé (hooks ou patchs)",
+      "steam": "Steam",
+      "steamMessages": "Communique avec d'autres joueurs via Steam",
       "role": "Rôle",
       "servesLive": "Fournit les pages en direct",
       "also": "Aussi {list}",

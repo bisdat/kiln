@@ -2,7 +2,9 @@
 // host tests of kiln.net's Steam peer-to-peer messages (steam_messages.cpp) over a fake steam_api64 export
 // table, under ASan/UBSan and TSan (test-steam-messages.sh). Numbered: 1 layout, 2 resolution
 // order, 3 the open gate, 4 maintain and registration, 5 the session callback and its policy race, 6 send, 7 receive,
-// 8 accept, 9 close, 10 exit. Faults (11) and the vtable slot (12) need Windows: steam_lease_test.cpp.
+// 8 accept, 9 close, 10 exit, 13 owners and handles (the owner on every lease member, random handles, forged and
+// guessed handles, a wrong owner, revoked owners, the open/revoke race), 14 a call in flight when its lease closes,
+// 15 no owner-retiring notification. Faults (11) and the vtable slot (12) need Windows: steam_lease_test.cpp.
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -227,6 +229,27 @@ constexpr KilnOwner kDialect = 77;
 std::atomic<KilnOwner> g_dialect{kDialect};
 KilnOwner KILN_CALL dialect_owner() { return g_dialect.load(); }
 
+// The core's kiln.internal.owners grants, faked: live owners and what the managed host admitted them to. An owner not
+// in the map is not alive (revoked, or never made).
+constexpr KilnOwner kAdmitted = 6;  // a C# mod's owner with "steamMessages": true
+constexpr KilnOwner kPlain = 5;     // a live owner without the grant
+std::mutex g_owners_mu;
+std::map<KilnOwner, uint32_t> g_owners;
+KilnResult KILN_CALL owner_grants(KilnOwner owner, uint32_t* out) {
+    std::lock_guard l(g_owners_mu);
+    const auto it = g_owners.find(owner);
+    if (it == g_owners.end()) return KILN_ERR_REVOKED;
+    *out = it->second;
+    return KILN_OK;
+}
+void set_owner(KilnOwner owner, bool alive, uint32_t grants = 0) {
+    std::lock_guard l(g_owners_mu);
+    if (alive)
+        g_owners[owner] = grants;
+    else
+        g_owners.erase(owner);
+}
+
 int total_calls(bool except_handles = false) {
     int n = 0;
     for (int i = 0; i < kExports; ++i)
@@ -238,7 +261,7 @@ void zero_calls() {
 }
 
 // A fresh fake and a fresh lease module. ready: the user handle is nonzero.
-void fresh(bool server = false, bool ready = true) {
+void fresh(bool server = false, bool ready = true, bool watched = true) {
     delete g_fake;
     g_fake = new Fake;
     g_fake->handle = ready ? (server ? 2 : 1) : 0;
@@ -248,10 +271,16 @@ void fresh(bool server = false, bool ready = true) {
         g_log.clear();
     }
     g_dialect = kDialect;
+    {
+        std::lock_guard l(g_owners_mu);
+        g_owners = {{kDialect, 0u}, {kPlain, 0u}, {kAdmitted, 1u /* KILN_OWNER_GRANT_STEAM_MESSAGES */}};
+    }
     st::Config c;
     c.server = server;
     c.lookup = &lookup;
     c.dialect_owner = &dialect_owner;
+    c.owner_grants = &owner_grants;
+    c.owners_watched = watched;
     c.log = &log;
     const char* missing = nullptr;
     const st::Presence p = st::init(c, &missing);
@@ -275,7 +304,7 @@ KilnHandle open_lease(uint32_t first, uint32_t last, bool sessions, KilnResult* 
 
 KilnResult maintain(KilnHandle lease, uint32_t mode, std::vector<uint64_t> ids = {}, KilnSteamMessagesStatus* out = nullptr) {
     KilnSteamAcceptPolicy p{sizeof p, mode, ids.empty() ? nullptr : ids.data(), static_cast<uint32_t>(ids.size()), 0};
-    return st::st_maintain(lease, &p, out);
+    return st::st_maintain(kDialect, lease, &p, out);
 }
 
 using RunFn = void (*)(void*);
@@ -321,6 +350,7 @@ void t2_resolution() {
     st::reset_for_tests();
     st::Config none;
     none.dialect_owner = &dialect_owner;
+    none.owners_watched = true;
     const char* missing = nullptr;
     CHECK(st::init(none, &missing) == st::Presence::NoModule && missing && !std::strcmp(missing, "steam_api64.dll"),
           "no module");
@@ -328,7 +358,7 @@ void t2_resolution() {
     CHECK(!(s.flags & KILN_STEAM_MSG_AVAILABLE) && total_calls() == 0, "no module: not available, nothing called");
     KilnHandle lease = open_lease(0, 10, true);
     int32_t er = -1;
-    CHECK(lease && st::st_send(lease, 5, "x", 1, 1, 8, &er) == KILN_ERR_UNAVAILABLE, "no module: send unavailable");
+    CHECK(lease && st::st_send(kDialect, lease, 5, "x", 1, 1, 8, &er) == KILN_ERR_UNAVAILABLE, "no module: send unavailable");
     // a missing export
     delete g_fake;
     g_fake = new Fake;
@@ -338,6 +368,7 @@ void t2_resolution() {
     st::Config c;
     c.lookup = &lookup;
     c.dialect_owner = &dialect_owner;
+    c.owners_watched = true;
     CHECK(st::init(c, &missing) == st::Presence::MissingExport && missing && !std::strcmp(missing, "SteamAPI_RegisterCallback"),
           "missing RegisterCallback named (%s)", missing ? missing : "-");
     s = status_now();
@@ -358,18 +389,18 @@ void t2_resolution() {
     s = status_now();
     CHECK(s.flags == KILN_STEAM_MSG_LEASED, "handle 0: status without AVAILABLE, only LEASED (%x)", s.flags);
     CHECK(maintain(lease, KILN_STEAM_ACCEPT_ANY) == KILN_OK, "handle 0: maintain OK");
-    CHECK(st::st_send(lease, 5, "x", 1, 1, 8, &er) == KILN_ERR_UNAVAILABLE, "handle 0: send unavailable");
+    CHECK(st::st_send(kDialect, lease, 5, "x", 1, 1, 8, &er) == KILN_ERR_UNAVAILABLE, "handle 0: send unavailable");
     KilnSteamMessageInfo info{sizeof info, 0, 0, 0, 0};
     uint32_t got = 9, acc = 9;
     uint8_t buf[8];
-    CHECK(st::st_receive(lease, 1, buf, sizeof buf, &info, &got) == KILN_ERR_UNAVAILABLE && got == 0, "handle 0: receive");
-    CHECK(st::st_accept(lease, 5, &acc) == KILN_ERR_UNAVAILABLE && acc == 0, "handle 0: accept");
+    CHECK(st::st_receive(kDialect, lease, 1, buf, sizeof buf, &info, &got) == KILN_ERR_UNAVAILABLE && got == 0, "handle 0: receive");
+    CHECK(st::st_accept(kDialect, lease, 5, &acc) == KILN_ERR_UNAVAILABLE && acc == 0, "handle 0: accept");
     CHECK(total_calls(true) == 0 && g_fake->calls[kUserHandle] == 5, "handle 0: only the user handle was asked (%d other, %d handle)",
           total_calls(true), g_fake->calls[kUserHandle].load());
     CHECK(g_fake->calls[kRegister] == 0, "handle 0: maintain registered nothing");
     // Steam comes up: the next call goes on to the interface
     g_fake->handle = 1;
-    CHECK(st::st_send(lease, 5, "x", 1, 1, 8, &er) == KILN_OK && er == 1, "handle 1: send OK");
+    CHECK(st::st_send(kDialect, lease, 5, "x", 1, 1, 8, &er) == KILN_OK && er == 1, "handle 1: send OK");
     CHECK(g_fake->calls[kUserMsgs] == 1 && g_fake->calls[kFindUser] == 0, "the accessor answered: no fallback");
     CHECK(st::ready_seen(), "ready seen");
 
@@ -389,10 +420,10 @@ void t2_resolution() {
     CHECK(g_fake->calls[kUserSockets] == 1 && g_fake->calls[kFindUser] == 2, "sockets: v013 accessor, then FindOrCreate");
     // never caching a null: both null, then both back
     g_fake->find_null = true;
-    CHECK(st::st_send(lease, 5, "x", 1, 1, 8, &er) == KILN_ERR_UNAVAILABLE, "no interface: unavailable");
+    CHECK(st::st_send(kDialect, lease, 5, "x", 1, 1, 8, &er) == KILN_ERR_UNAVAILABLE, "no interface: unavailable");
     g_fake->accessor_null = false;
     g_fake->find_null = false;
-    CHECK(st::st_send(lease, 5, "x", 1, 1, 8, &er) == KILN_OK && er == 1, "the interface is asked again: OK");
+    CHECK(st::st_send(kDialect, lease, 5, "x", 1, 1, 8, &er) == KILN_OK && er == 1, "the interface is asked again: OK");
     // the sockets interface missing: available, no identity
     g_fake->sockets_null = true;
     s = status_now();
@@ -415,8 +446,10 @@ void t3_open() {
     fresh();
     zero_calls();
     KilnResult rc;
-    CHECK(!open_lease(0, 10, true, &rc, 5) && rc == KILN_ERR_UNAVAILABLE, "wrong owner: unavailable");
-    CHECK(!open_lease(0, 10, true, &rc, 0) && rc == KILN_ERR_UNAVAILABLE, "owner 0: unavailable");
+    CHECK(!open_lease(0, 10, true, &rc, kPlain) && rc == KILN_ERR_UNAVAILABLE, "an owner without the grant: unavailable");
+    CHECK(!open_lease(0, 10, true, &rc, kPlain) && rc == KILN_ERR_UNAVAILABLE, "...again");
+    CHECK(!open_lease(0, 10, true, &rc, 0) && rc == KILN_ERR_INVALID_ARGUMENT, "owner 0: invalid argument");
+    CHECK(!open_lease(0, 10, true, &rc, 99) && rc == KILN_ERR_REVOKED, "an owner that is not alive: revoked");
     CHECK(log_count("steam-messages-owner") == 1, "the refusal is logged once");
     g_dialect = 0;
     CHECK(!open_lease(0, 10, true, &rc, kDialect) && rc == KILN_ERR_UNAVAILABLE, "no designated owner: unavailable");
@@ -442,7 +475,7 @@ void t3_open() {
     for (uint32_t c = 1000; opened < 16; c += 10, ++opened) CHECK(open_lease(c, c + 1, false), "lease %d", opened);
     CHECK(!open_lease(5000, 5001, false, &rc) && rc == KILN_ERR_INVALID_ARGUMENT, "the 17th lease refused");
     CHECK(total_calls() == 0, "open calls no Steam export (%d)", total_calls());
-    CHECK(st::st_close(b) == KILN_OK && open_lease(5000, 5001, false), "a closed slot is reused");
+    CHECK(st::st_close(kDialect, b) == KILN_OK && open_lease(5000, 5001, false), "a closed slot is reused");
 }
 
 // ---- 4. maintain ----
@@ -488,11 +521,11 @@ void t4_maintain(bool server) {
     many.resize(256);
     CHECK(maintain(lease, KILN_STEAM_ACCEPT_LISTED, {7, 0, 8}) == KILN_ERR_INVALID_ARGUMENT, "an id 0 refused");
     KilnSteamAcceptPolicy no_ids{sizeof no_ids, KILN_STEAM_ACCEPT_LISTED, nullptr, 3, 0};
-    CHECK(st::st_maintain(lease, &no_ids, nullptr) == KILN_ERR_INVALID_ARGUMENT, "ids NULL refused");
+    CHECK(st::st_maintain(kDialect, lease, &no_ids, nullptr) == KILN_ERR_INVALID_ARGUMENT, "ids NULL refused");
     KilnSteamAcceptPolicy bad_mode{sizeof bad_mode, 3, nullptr, 0, 0};
-    CHECK(st::st_maintain(lease, &bad_mode, nullptr) == KILN_ERR_INVALID_ARGUMENT, "mode 3 refused");
+    CHECK(st::st_maintain(kDialect, lease, &bad_mode, nullptr) == KILN_ERR_INVALID_ARGUMENT, "mode 3 refused");
     KilnSteamAcceptPolicy short_p{16, KILN_STEAM_ACCEPT_ANY, nullptr, 0, 0};
-    CHECK(st::st_maintain(lease, &short_p, nullptr) == KILN_ERR_INVALID_ARGUMENT, "a short record refused");
+    CHECK(st::st_maintain(kDialect, lease, &short_p, nullptr) == KILN_ERR_INVALID_ARGUMENT, "a short record refused");
     const KilnSteamMessagesStatus s = status_now();
     CHECK(s.accept_mode == KILN_STEAM_ACCEPT_LISTED && s.listed == 1, "refusals changed nothing (mode %u, %u ids)",
           s.accept_mode, s.listed);
@@ -537,7 +570,7 @@ void t5_callback() {
     CHECK(maintain(lease, KILN_STEAM_ACCEPT_NONE) == KILN_OK, "none");
     dispatch(steam(300));
     CHECK(g_fake->calls[kAccept] == 3, "NONE answers nothing");
-    CHECK(maintain(lease, KILN_STEAM_ACCEPT_ANY) == KILN_OK && st::st_close(lease) == KILN_OK, "any, then close");
+    CHECK(maintain(lease, KILN_STEAM_ACCEPT_ANY) == KILN_OK && st::st_close(kDialect, lease) == KILN_OK, "any, then close");
     dispatch(steam(300));
     CHECK(g_fake->calls[kAccept] == 3, "a closed session lease answers nothing");
     g_fake->handle = 0;
@@ -625,30 +658,30 @@ void t6_send() {
     std::vector<uint8_t> big(524289, 0x5a);
     int32_t er = -1;
     zero_calls();
-    CHECK(st::st_send(lease, 7, big.data(), 524288, 10, 40, &er) == KILN_OK && er == 1 && g_fake->last_send_len == 524288,
+    CHECK(st::st_send(kDialect, lease, 7, big.data(), 524288, 10, 40, &er) == KILN_OK && er == 1 && g_fake->last_send_len == 524288,
           "524,288 bytes go");
-    CHECK(st::st_send(lease, 7, big.data(), 524289, 10, 40, &er) == KILN_ERR_INVALID_ARGUMENT, "524,289 refused");
-    CHECK(st::st_send(lease, 7, nullptr, 0, 20, 0, &er) == KILN_OK && g_fake->last_send_len == 0 && g_fake->last_send_channel == 20,
+    CHECK(st::st_send(kDialect, lease, 7, big.data(), 524289, 10, 40, &er) == KILN_ERR_INVALID_ARGUMENT, "524,289 refused");
+    CHECK(st::st_send(kDialect, lease, 7, nullptr, 0, 20, 0, &er) == KILN_OK && g_fake->last_send_len == 0 && g_fake->last_send_channel == 20,
           "0 bytes go");
-    CHECK(st::st_send(lease, 7, nullptr, 3, 10, 8, &er) == KILN_ERR_INVALID_ARGUMENT, "bytes without data refused");
-    CHECK(st::st_send(lease, 7, "x", 1, 9, 8, &er) == KILN_ERR_INVALID_ARGUMENT, "channel 9 is outside 10..20");
-    CHECK(st::st_send(lease, 7, "x", 1, 21, 8, &er) == KILN_ERR_INVALID_ARGUMENT, "channel 21 is outside");
+    CHECK(st::st_send(kDialect, lease, 7, nullptr, 3, 10, 8, &er) == KILN_ERR_INVALID_ARGUMENT, "bytes without data refused");
+    CHECK(st::st_send(kDialect, lease, 7, "x", 1, 9, 8, &er) == KILN_ERR_INVALID_ARGUMENT, "channel 9 is outside 10..20");
+    CHECK(st::st_send(kDialect, lease, 7, "x", 1, 21, 8, &er) == KILN_ERR_INVALID_ARGUMENT, "channel 21 is outside");
     for (uint32_t f : {1u, 16u, 48u, 0xFFFFFFFFu})
-        CHECK(st::st_send(lease, 7, "x", 1, 10, f, &er) == KILN_ERR_INVALID_ARGUMENT, "flags %u refused", f);
-    CHECK(st::st_send(lease, 0, "x", 1, 10, 8, &er) == KILN_ERR_INVALID_ARGUMENT, "peer 0 refused");
-    CHECK(st::st_send(lease, 7, "x", 1, 10, 8, nullptr) == KILN_ERR_INVALID_ARGUMENT, "no result pointer refused");
+        CHECK(st::st_send(kDialect, lease, 7, "x", 1, 10, f, &er) == KILN_ERR_INVALID_ARGUMENT, "flags %u refused", f);
+    CHECK(st::st_send(kDialect, lease, 0, "x", 1, 10, 8, &er) == KILN_ERR_INVALID_ARGUMENT, "peer 0 refused");
+    CHECK(st::st_send(kDialect, lease, 7, "x", 1, 10, 8, nullptr) == KILN_ERR_INVALID_ARGUMENT, "no result pointer refused");
     CHECK(g_fake->calls[kSend] == 2, "the refusals called nothing (%d sends)", g_fake->calls[kSend].load());
     for (uint32_t f : {0u, 8u, 32u, 40u})
-        CHECK(st::st_send(lease, 7, "x", 1, 15, f, &er) == KILN_OK && g_fake->last_send_flags == static_cast<int32_t>(f),
+        CHECK(st::st_send(kDialect, lease, 7, "x", 1, 15, f, &er) == KILN_OK && g_fake->last_send_flags == static_cast<int32_t>(f),
               "flags %u passed through", f);
     CHECK(g_fake->last_send_peer.type == 16 && g_fake->last_send_peer.size == 8 && g_fake->last_send_peer.data.steam_id == 7,
           "the peer as a SteamID identity");
     g_fake->send_result = 3;
-    CHECK(st::st_send(lease, 7, "x", 1, 10, 8, &er) == KILN_OK && er == 3, "EResult passed through with OK");
+    CHECK(st::st_send(kDialect, lease, 7, "x", 1, 10, 8, &er) == KILN_OK && er == 3, "EResult passed through with OK");
     g_fake->handle = 0;
-    CHECK(st::st_send(lease, 7, "x", 1, 10, 8, &er) == KILN_ERR_UNAVAILABLE, "Steam not ready: unavailable");
+    CHECK(st::st_send(kDialect, lease, 7, "x", 1, 10, 8, &er) == KILN_ERR_UNAVAILABLE, "Steam not ready: unavailable");
     g_fake->handle = 1;
-    CHECK(st::st_send(0x5354000000000100ull, 7, "x", 1, 10, 8, &er) == KILN_ERR_NOT_FOUND, "an unknown lease: not found");
+    CHECK(st::st_send(kDialect, 0x5354000000000100ull, 7, "x", 1, 10, 8, &er) == KILN_ERR_NOT_FOUND, "an unknown lease: not found");
 }
 
 // ---- 7. receive ----
@@ -681,46 +714,46 @@ void t7_receive() {
     info.size = sizeof info;
     uint32_t got = 9;
     zero_calls();
-    CHECK(st::st_receive(lease, 3, buf, sizeof buf, &info, &got) == KILN_OK && got == 0 && g_fake->calls[kRelease] == 0,
+    CHECK(st::st_receive(kDialect, lease, 3, buf, sizeof buf, &info, &got) == KILN_OK && got == 0 && g_fake->calls[kRelease] == 0,
           "nothing queued: got 0, nothing released");
     push(3, {'h', 'i'}, 2, 900, 8);
-    CHECK(st::st_receive(lease, 3, buf, sizeof buf, &info, &got) == KILN_OK && got == 1 && info.length == 2 &&
+    CHECK(st::st_receive(kDialect, lease, 3, buf, sizeof buf, &info, &got) == KILN_OK && got == 1 && info.length == 2 &&
               !std::memcmp(buf, "hi", 2) && info.peer_steam_id == 900 && info.channel == 3 &&
               info.flags == KILN_STEAM_SEND_RELIABLE,
           "a reliable message");
     push(3, {'u'}, 1, 901, 0);
-    CHECK(st::st_receive(lease, 3, buf, sizeof buf, &info, &got) == KILN_OK && got == 1 && info.flags == 0, "unreliable");
+    CHECK(st::st_receive(kDialect, lease, 3, buf, sizeof buf, &info, &got) == KILN_OK && got == 1 && info.flags == 0, "unreliable");
     push(3, {}, 0, 902, 8);
-    CHECK(st::st_receive(lease, 3, nullptr, 0, &info, &got) == KILN_OK && got == 1 && info.length == 0, "empty into cap 0");
+    CHECK(st::st_receive(kDialect, lease, 3, nullptr, 0, &info, &got) == KILN_OK && got == 1 && info.length == 0, "empty into cap 0");
     push(3, std::vector<uint8_t>(17, 1), 17, 903, 8);
-    CHECK(st::st_receive(lease, 3, buf, sizeof buf, &info, &got) == KILN_STEAM_ERR_INVALID_DATA && got == 0,
+    CHECK(st::st_receive(kDialect, lease, 3, buf, sizeof buf, &info, &got) == KILN_STEAM_ERR_INVALID_DATA && got == 0,
           "bigger than the buffer: invalid data");
     push(3, {'x'}, 1, 904, 8, 1);
-    CHECK(st::st_receive(lease, 3, buf, sizeof buf, &info, &got) == KILN_STEAM_ERR_INVALID_DATA, "not a SteamID: invalid data");
+    CHECK(st::st_receive(kDialect, lease, 3, buf, sizeof buf, &info, &got) == KILN_STEAM_ERR_INVALID_DATA, "not a SteamID: invalid data");
     push(3, {'x'}, 1, 0, 8);
-    CHECK(st::st_receive(lease, 3, buf, sizeof buf, &info, &got) == KILN_STEAM_ERR_INVALID_DATA, "SteamID 0: invalid data");
+    CHECK(st::st_receive(kDialect, lease, 3, buf, sizeof buf, &info, &got) == KILN_STEAM_ERR_INVALID_DATA, "SteamID 0: invalid data");
     push(3, {}, 4, 905, 8, 16, true);
-    CHECK(st::st_receive(lease, 3, buf, sizeof buf, &info, &got) == KILN_STEAM_ERR_INVALID_DATA, "bytes without data");
+    CHECK(st::st_receive(kDialect, lease, 3, buf, sizeof buf, &info, &got) == KILN_STEAM_ERR_INVALID_DATA, "bytes without data");
     push(3, {}, -1, 906, 8);
-    CHECK(st::st_receive(lease, 3, buf, sizeof buf, &info, &got) == KILN_STEAM_ERR_INVALID_DATA, "a negative size");
+    CHECK(st::st_receive(kDialect, lease, 3, buf, sizeof buf, &info, &got) == KILN_STEAM_ERR_INVALID_DATA, "a negative size");
     {
         std::lock_guard l(g_fake->mu);
         g_fake->receive_count_override = 2;
     }
     push(3, {'x'}, 1, 907, 8);
-    CHECK(st::st_receive(lease, 3, buf, sizeof buf, &info, &got) == KILN_ERR_INTERNAL && got == 0,
+    CHECK(st::st_receive(kDialect, lease, 3, buf, sizeof buf, &info, &got) == KILN_ERR_INTERNAL && got == 0,
           "a count of 2: internal, released");
     {
         std::lock_guard l(g_fake->mu);
         g_fake->receive_count_override = -1;
     }
-    CHECK(st::st_receive(lease, 3, buf, sizeof buf, &info, &got) == KILN_ERR_INTERNAL, "a count of -1 with nothing: internal");
+    CHECK(st::st_receive(kDialect, lease, 3, buf, sizeof buf, &info, &got) == KILN_ERR_INTERNAL, "a count of -1 with nothing: internal");
     {
         std::lock_guard l(g_fake->mu);
         g_fake->receive_count_override = 0;
         g_fake->receive_null_message = true;
     }
-    CHECK(st::st_receive(lease, 3, buf, sizeof buf, &info, &got) == KILN_ERR_INTERNAL, "a count of 1 with no message");
+    CHECK(st::st_receive(kDialect, lease, 3, buf, sizeof buf, &info, &got) == KILN_ERR_INTERNAL, "a count of 1 with no message");
     {
         std::lock_guard l(g_fake->mu);
         g_fake->receive_null_message = false;
@@ -729,10 +762,10 @@ void t7_receive() {
     CHECK(each_released_once(&handed) && handed == 9, "each of the %zu messages released exactly once", handed);
     CHECK(g_fake->calls[kRelease] == 9, "nine releases (%d)", g_fake->calls[kRelease].load());
     free_handed();
-    CHECK(st::st_receive(lease, 51, buf, sizeof buf, &info, &got) == KILN_ERR_INVALID_ARGUMENT, "channel outside the lease");
+    CHECK(st::st_receive(kDialect, lease, 51, buf, sizeof buf, &info, &got) == KILN_ERR_INVALID_ARGUMENT, "channel outside the lease");
     KilnSteamMessageInfo short_info{8, 0, 0, 0, 0};
-    CHECK(st::st_receive(lease, 3, buf, sizeof buf, &short_info, &got) == KILN_ERR_INVALID_ARGUMENT, "a short info record");
-    CHECK(st::st_receive(lease, 3, nullptr, 4, &info, &got) == KILN_ERR_INVALID_ARGUMENT, "cap without a buffer");
+    CHECK(st::st_receive(kDialect, lease, 3, buf, sizeof buf, &short_info, &got) == KILN_ERR_INVALID_ARGUMENT, "a short info record");
+    CHECK(st::st_receive(kDialect, lease, 3, nullptr, 4, &info, &got) == KILN_ERR_INVALID_ARGUMENT, "cap without a buffer");
 }
 
 // ---- 8. accept ----
@@ -740,15 +773,15 @@ void t8_accept() {
     fresh();
     const KilnHandle lease = open_lease(0, 5, false);
     uint32_t acc = 9;
-    CHECK(st::st_accept(lease, 1234, &acc) == KILN_OK && acc == 1 && g_fake->last_accept_peer.data.steam_id == 1234 &&
+    CHECK(st::st_accept(kDialect, lease, 1234, &acc) == KILN_OK && acc == 1 && g_fake->last_accept_peer.data.steam_id == 1234 &&
               g_fake->last_accept_peer.type == 16,
           "accepted");
     g_fake->accept_result = false;
-    CHECK(st::st_accept(lease, 1234, &acc) == KILN_OK && acc == 0, "no pending session: 0");
-    CHECK(st::st_accept(lease, 0, &acc) == KILN_ERR_INVALID_ARGUMENT, "peer 0");
-    CHECK(st::st_accept(lease, 1, nullptr) == KILN_ERR_INVALID_ARGUMENT, "no result pointer");
+    CHECK(st::st_accept(kDialect, lease, 1234, &acc) == KILN_OK && acc == 0, "no pending session: 0");
+    CHECK(st::st_accept(kDialect, lease, 0, &acc) == KILN_ERR_INVALID_ARGUMENT, "peer 0");
+    CHECK(st::st_accept(kDialect, lease, 1, nullptr) == KILN_ERR_INVALID_ARGUMENT, "no result pointer");
     g_fake->handle = 0;
-    CHECK(st::st_accept(lease, 1234, &acc) == KILN_ERR_UNAVAILABLE, "not ready");
+    CHECK(st::st_accept(kDialect, lease, 1234, &acc) == KILN_ERR_UNAVAILABLE, "not ready");
 }
 
 // ---- 9. close ----
@@ -756,13 +789,13 @@ void t9_close() {
     fresh();
     const KilnHandle lease = open_lease(0, 5, true);
     CHECK(maintain(lease, KILN_STEAM_ACCEPT_ANY) == KILN_OK && (status_now().flags & KILN_STEAM_MSG_REGISTERED), "answering");
-    CHECK(st::st_close(lease) == KILN_OK && st::st_close(lease) == KILN_OK && st::st_close(0) == KILN_OK, "close is idempotent");
+    CHECK(st::st_close(kDialect, lease) == KILN_OK && st::st_close(kDialect, lease) == KILN_OK && st::st_close(kDialect, 0) == KILN_OK, "close is idempotent");
     const KilnSteamMessagesStatus s = status_now();
     CHECK(!(s.flags & KILN_STEAM_MSG_REGISTERED) && !(s.flags & KILN_STEAM_MSG_LEASED) && s.accept_mode == KILN_STEAM_ACCEPT_NONE,
           "closed: not answering, no lease, NONE (%x)", s.flags);
     CHECK(g_fake->calls[kUnregister] == 0, "close never unregisters");
     int32_t er = 0;
-    CHECK(st::st_send(lease, 5, "x", 1, 1, 8, &er) == KILN_ERR_NOT_FOUND, "a closed lease: not found");
+    CHECK(st::st_send(kDialect, lease, 5, "x", 1, 1, 8, &er) == KILN_ERR_NOT_FOUND, "a closed lease: not found");
     const KilnHandle again = open_lease(0, 5, true);
     CHECK(again && again != lease, "the range and the session role are free again, with a new handle");
 }
@@ -776,7 +809,7 @@ void t10_exit() {
     g_fake->block_send = true;
     std::thread sender([&] {
         int32_t er = 0;
-        st::st_send(lease, 5, "x", 1, 1, 8, &er);
+        st::st_send(kDialect, lease, 5, "x", 1, 1, 8, &er);
     });
     while (!g_fake->in_send.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     CHECK(!st::close_for_exit(30), "the exit waits for a member inside Steam and gives up after its bound");
@@ -796,10 +829,10 @@ void t10_exit() {
     info.size = sizeof info;
     KilnHandle h = 0;
     KilnSteamMessagesOpen req{sizeof req, 0, 100, 101};
-    CHECK(st::st_send(lease, 5, "x", 1, 1, 8, &er) == KILN_ERR_UNAVAILABLE &&
-              st::st_receive(lease, 1, buf, sizeof buf, &info, &got) == KILN_ERR_UNAVAILABLE &&
-              st::st_accept(lease, 5, &acc) == KILN_ERR_UNAVAILABLE && maintain(lease, KILN_STEAM_ACCEPT_ANY) == KILN_ERR_UNAVAILABLE &&
-              st::st_open(kDialect, &req, &h) == KILN_ERR_UNAVAILABLE && st::st_close(lease) == KILN_ERR_UNAVAILABLE,
+    CHECK(st::st_send(kDialect, lease, 5, "x", 1, 1, 8, &er) == KILN_ERR_UNAVAILABLE &&
+              st::st_receive(kDialect, lease, 1, buf, sizeof buf, &info, &got) == KILN_ERR_UNAVAILABLE &&
+              st::st_accept(kDialect, lease, 5, &acc) == KILN_ERR_UNAVAILABLE && maintain(lease, KILN_STEAM_ACCEPT_ANY) == KILN_ERR_UNAVAILABLE &&
+              st::st_open(kDialect, &req, &h) == KILN_ERR_UNAVAILABLE && st::st_close(kDialect, lease) == KILN_ERR_UNAVAILABLE,
           "every member: unavailable");
     dispatch(steam(300));
     CHECK(total_calls() == 0, "no Steam call after the exit flag (%d), no UnregisterCallback", total_calls());
@@ -809,7 +842,7 @@ void t10_exit() {
     std::atomic<bool> go{true};
     std::thread hammer([&] {
         int32_t r = 0;
-        while (go) st::st_send(l2, 5, "x", 1, 1, 8, &r);
+        while (go) st::st_send(kDialect, l2, 5, "x", 1, 1, 8, &r);
     });
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
     CHECK(st::close_for_exit(1000), "closed while sends run");
@@ -822,6 +855,237 @@ void t10_exit() {
 }
 
 }  // namespace
+
+
+// ---- 13. owners and handles ----
+uint64_t g_script[8];
+std::atomic<int> g_script_at{0};
+bool scripted_random(uint64_t* out) {
+    const int i = g_script_at.fetch_add(1);
+    if (i >= 8 || g_script[i] == ~0ull) return false;  // ~0: the generator fails
+    *out = g_script[i];
+    return true;
+}
+
+void t13_owners() {
+    KilnResult rc;
+    int32_t er = 0;
+    uint32_t got = 0, acc = 0;
+    uint8_t buf[16];
+    KilnSteamMessageInfo info{};
+    info.size = sizeof info;
+
+    // handles come from the system's generator, not from a counter: 16 open leases, 16 distinct nonzero handles
+    fresh();
+    std::vector<KilnHandle> handles;
+    for (uint32_t i = 0; i < 16; ++i) handles.push_back(open_lease(i * 10, i * 10 + 9, i == 0));
+    bool distinct = true;
+    for (size_t i = 0; i < handles.size(); ++i)
+        for (size_t j = 0; j < handles.size(); ++j) distinct = distinct && handles[i] && (i == j || handles[i] != handles[j]);
+    CHECK(distinct, "16 leases: 16 distinct nonzero handles");
+    // forged and guessed handles: the neighbours of a real handle, each slot's handle of the old counter scheme, and a
+    // handle with one bit flipped are no lease, for every member; nothing reaches Steam
+    zero_calls();
+    std::vector<KilnHandle> forged{handles[3] + 1, handles[3] - 1, handles[3] ^ 1, handles[3] ^ (1ull << 63), 1, ~0ull};
+    for (uint64_t gen = 1; gen <= 64; ++gen)
+        for (uint64_t slot = 0; slot < 16; ++slot) forged.push_back((0x5354ull << 48) | (gen << 8) | slot);
+    int answered = 0, candidates = 0;
+    for (const KilnHandle f : forged) {
+        bool real = false;
+        for (const KilnHandle h : handles) real = real || h == f;
+        if (real) continue;  // a random handle may (2^-64) equal a guess: then it is no guess
+        ++candidates;
+        answered += st::st_send(kDialect, f, 7, "x", 1, 30, 8, &er) == KILN_ERR_NOT_FOUND &&
+                    st::st_receive(kDialect, f, 30, buf, sizeof buf, &info, &got) == KILN_ERR_NOT_FOUND &&
+                    st::st_accept(kDialect, f, 7, &acc) == KILN_ERR_NOT_FOUND &&
+                    maintain(f, KILN_STEAM_ACCEPT_ANY) == KILN_ERR_NOT_FOUND;
+    }
+    CHECK(candidates > 1000 && answered == candidates, "forged and guessed handles: not found on every member (%d of %d)",
+          answered, candidates);
+    for (const KilnHandle f : forged) {
+        bool real = false;
+        for (const KilnHandle h : handles) real = real || h == f;
+        if (!real) st::st_close(kDialect, f);
+    }
+    CHECK(st::st_send(kDialect, handles[3], 7, "x", 1, 30, 8, &er) == KILN_OK && er == 1,
+          "closing forged handles closed nothing: the real lease still sends");
+    CHECK(g_fake->calls[kSend] == 1 && g_fake->calls[kReceive] == 0 && g_fake->calls[kAccept] == 0,
+          "no forged handle reached Steam (sends %d, receives %d, accepts %d)", g_fake->calls[kSend].load(),
+          g_fake->calls[kReceive].load(), g_fake->calls[kAccept].load());
+
+    // a scripted generator: the handle is what it drew; 0 and an open lease's handle are drawn again; a failing
+    // generator opens nothing
+    fresh();
+    const uint64_t scripted[8] = {0x1111222233334444ull, 0, 0x1111222233334444ull, 0x5555666677778888ull, ~0ull, ~0ull, ~0ull, ~0ull};
+    std::memcpy(g_script, scripted, sizeof g_script);
+    g_script_at = 0;
+    st::set_random_for_tests(&scripted_random);
+    CHECK(open_lease(0, 1, false) == 0x1111222233334444ull, "the handle is the generator's value");
+    CHECK(open_lease(2, 3, false) == 0x5555666677778888ull, "0 and the handle of an open lease are drawn again");
+    CHECK(!open_lease(4, 5, false, &rc) && rc == KILN_ERR_INTERNAL, "a failing generator: internal, no lease");
+    CHECK(log_count("no random lease handle") == 1, "...and logged");
+    st::set_random_for_tests(nullptr);
+    CHECK(open_lease(4, 5, false), "the range stayed free");
+
+    // owner 0: every member refuses it before anything else
+    fresh();
+    KilnHandle lease = open_lease(0, 9, true);
+    zero_calls();
+    KilnSteamAcceptPolicy any{sizeof any, KILN_STEAM_ACCEPT_ANY, nullptr, 0, 0};
+    CHECK(st::st_close(0, lease) == KILN_ERR_INVALID_ARGUMENT && st::st_maintain(0, lease, &any, nullptr) == KILN_ERR_INVALID_ARGUMENT &&
+              st::st_send(0, lease, 7, "x", 1, 1, 8, &er) == KILN_ERR_INVALID_ARGUMENT &&
+              st::st_receive(0, lease, 1, buf, sizeof buf, &info, &got) == KILN_ERR_INVALID_ARGUMENT &&
+              st::st_accept(0, lease, 7, &acc) == KILN_ERR_INVALID_ARGUMENT,
+          "owner 0: invalid argument on every lease member");
+    CHECK(total_calls() == 0, "owner 0 reaches no Steam export");
+
+    // a wrong owner: another live owner's calls on this lease answer as for a closed lease; its close closes nothing
+    CHECK(st::st_send(kAdmitted, lease, 7, "x", 1, 1, 8, &er) == KILN_ERR_NOT_FOUND &&
+              st::st_receive(kAdmitted, lease, 1, buf, sizeof buf, &info, &got) == KILN_ERR_NOT_FOUND &&
+              st::st_accept(kAdmitted, lease, 7, &acc) == KILN_ERR_NOT_FOUND &&
+              st::st_maintain(kAdmitted, lease, &any, nullptr) == KILN_ERR_NOT_FOUND &&
+              st::st_send(kPlain, lease, 7, "x", 1, 1, 8, &er) == KILN_ERR_NOT_FOUND,
+          "a wrong owner: not found on send, receive, accept and maintain");
+    CHECK(total_calls() == 0, "a wrong owner reaches no Steam export");
+    CHECK(st::st_close(kAdmitted, lease) == KILN_OK && st::st_send(kDialect, lease, 7, "x", 1, 1, 8, &er) == KILN_OK && er == 1,
+          "a wrong owner's close answers OK and closes nothing");
+    CHECK(maintain(lease, KILN_STEAM_ACCEPT_ANY) == KILN_OK && status_now().accept_mode == KILN_STEAM_ACCEPT_ANY,
+          "the owner still sets its policy");
+    st::st_close(kAdmitted, lease);
+    CHECK(status_now().accept_mode == KILN_STEAM_ACCEPT_ANY, "...and a wrong owner's close leaves the policy alone");
+
+    // the admitted owner (kiln.internal.owners' grant) opens leases of its own; they are its own
+    const KilnHandle mine = open_lease(100, 109, false, &rc, kAdmitted);
+    CHECK(mine && rc == KILN_OK, "an admitted owner opens a lease");
+    CHECK(st::st_send(kAdmitted, mine, 7, "x", 1, 100, 8, &er) == KILN_OK && er == 1 &&
+              st::st_send(kDialect, mine, 7, "x", 1, 100, 8, &er) == KILN_ERR_NOT_FOUND,
+          "its lease sends for it, and is not found for the designated owner");
+    CHECK(!open_lease(105, 120, false, &rc, kDialect) && rc == KILN_ERR_INVALID_ARGUMENT, "leases never overlap across owners");
+
+    // a revoked owner (the core's notification): its leases close, a session lease's policy goes to NONE, every member
+    // answers revoked, and its ranges are free for others
+    zero_calls();
+    set_owner(kDialect, false);
+    st::owner_retired(kDialect);
+    const KilnSteamMessagesStatus s = status_now();
+    CHECK(!(s.flags & KILN_STEAM_MSG_LEASED) && s.accept_mode == KILN_STEAM_ACCEPT_NONE && !(s.flags & KILN_STEAM_MSG_REGISTERED),
+          "revoked: its session lease is closed, the policy is NONE (%x, mode %u)", s.flags, s.accept_mode);
+    dispatch(steam(300));
+    CHECK(g_fake->calls[kAccept] == 0, "the callback answers nothing after the revoke");
+    CHECK(st::st_send(kDialect, lease, 7, "x", 1, 1, 8, &er) == KILN_ERR_REVOKED &&
+              st::st_receive(kDialect, lease, 1, buf, sizeof buf, &info, &got) == KILN_ERR_REVOKED &&
+              st::st_accept(kDialect, lease, 7, &acc) == KILN_ERR_REVOKED && maintain(lease, KILN_STEAM_ACCEPT_ANY) == KILN_ERR_REVOKED &&
+              st::st_close(kDialect, lease) == KILN_ERR_REVOKED,
+          "a revoked owner: revoked on every lease member");
+    CHECK(!open_lease(0, 9, true, &rc, kDialect) && rc == KILN_ERR_REVOKED, "a revoked owner opens nothing, also as the designated owner");
+    CHECK(st::st_send(kAdmitted, mine, 7, "x", 1, 100, 8, &er) == KILN_OK, "another owner's lease is untouched");
+    const KilnHandle reused = open_lease(0, 9, true, &rc, kAdmitted);
+    CHECK(reused && rc == KILN_OK, "the revoked owner's range and the session role are free again");
+
+    // revoked in the core before its notification reached kiln.net: refused already, and nothing reaches Steam
+    zero_calls();
+    set_owner(kAdmitted, false);
+    CHECK(st::st_send(kAdmitted, mine, 7, "x", 1, 100, 8, &er) == KILN_ERR_REVOKED &&
+              st::st_receive(kAdmitted, mine, 100, buf, sizeof buf, &info, &got) == KILN_ERR_REVOKED &&
+              !open_lease(200, 201, false, &rc, kAdmitted) && rc == KILN_ERR_REVOKED,
+          "an owner the core no longer knows: revoked before its notification");
+    CHECK(total_calls() == 0, "...with no Steam call");
+    st::owner_retired(kAdmitted);
+    st::owner_retired(kAdmitted);  // a second notification changes nothing
+    CHECK(open_lease(0, 9, true, &rc, kPlain) == 0 && rc == KILN_ERR_UNAVAILABLE, "the plain owner still has no grant");
+    set_owner(kPlain, true, 1u);
+    CHECK(open_lease(0, 9, true, &rc, kPlain) && rc == KILN_OK && open_lease(100, 109, false, &rc, kPlain) && rc == KILN_OK,
+          "after the notification every range of the revoked owner is free");
+
+    // the open/revoke race: an owner opening a lease while the core revokes it never leaves a lease behind
+    fresh();
+    int leaked = 0, opened = 0;
+    for (KilnOwner owner = 1000; owner < 1600; ++owner) {
+        set_owner(owner, true, 1u);
+        std::atomic<bool> start{false};
+        KilnResult open_rc = KILN_ERR_INTERNAL;
+        KilnHandle h = 0;
+        std::thread opener([&] {
+            while (!start) std::this_thread::yield();
+            KilnSteamMessagesOpen req{sizeof req, 0, 300, 301};
+            open_rc = st::st_open(owner, &req, &h);
+        });
+        std::thread revoker([&] {
+            while (!start) std::this_thread::yield();
+            set_owner(owner, false);  // the core marks it dead, then tells its observers
+            st::owner_retired(owner);
+        });
+        start = true;
+        opener.join();
+        revoker.join();
+        opened += open_rc == KILN_OK;
+        const KilnHandle probe = open_lease(300, 301, false, &rc, kAdmitted);
+        if (!probe) ++leaked;
+        else st::st_close(kAdmitted, probe);
+        if (open_rc == KILN_OK && st::st_send(owner, h, 7, "x", 1, 300, 8, &er) != KILN_ERR_REVOKED) ++leaked;
+    }
+    CHECK(leaked == 0, "open/revoke race: no lease outlives its owner (%d leaked, %d opens answered OK)", leaked, opened);
+}
+
+// ---- 14. a call in flight when its lease closes ----
+// A send already past its lease check when its owner retires (or its lease is closed) finishes its one Steam call.
+// Until it returns the lease's channels and its session role stay taken, so that call never lands on another owner's
+// lease.
+void t14_in_flight() {
+    KilnResult rc;
+    int32_t er = 0;
+    for (const bool by_revoke : {true, false}) {
+        const char* how = by_revoke ? "revoked" : "closed";
+        fresh();
+        set_owner(kPlain, true, 1u);
+        const KilnHandle busy = open_lease(400, 409, true, &rc, kAdmitted);
+        CHECK(busy && rc == KILN_OK, "%s in flight: the lease opens", how);
+        g_fake->block_send = true;
+        KilnResult send_rc = KILN_ERR_INTERNAL;
+        int32_t send_er = 0;
+        std::thread sender([&] { send_rc = st::st_send(kAdmitted, busy, 7, "x", 1, 405, 8, &send_er); });
+        while (!g_fake->in_send.load()) std::this_thread::yield();
+        if (by_revoke) {
+            set_owner(kAdmitted, false);
+            st::owner_retired(kAdmitted);
+        } else {
+            CHECK(st::st_close(kAdmitted, busy) == KILN_OK, "closed in flight: steam_close answers OK");
+        }
+        const KilnSteamMessagesStatus s = status_now();
+        CHECK(!(s.flags & KILN_STEAM_MSG_LEASED) && s.accept_mode == KILN_STEAM_ACCEPT_NONE,
+              "%s in flight: the session lease reads as closed at once (%x, mode %u)", how, s.flags, s.accept_mode);
+        const KilnResult again = st::st_send(kAdmitted, busy, 7, "x", 1, 405, 8, &er);
+        CHECK(again == (by_revoke ? KILN_ERR_REVOKED : KILN_ERR_NOT_FOUND), "%s in flight: a new call is refused", how);
+        CHECK(!open_lease(405, 405, false, &rc, kPlain) && rc == KILN_ERR_INVALID_ARGUMENT,
+              "%s in flight: its channels stay taken while the call runs", how);
+        CHECK(!open_lease(500, 501, true, &rc, kPlain) && rc == KILN_ERR_INVALID_ARGUMENT,
+              "%s in flight: and its session role", how);
+        g_fake->block_send = false;
+        sender.join();
+        CHECK(send_rc == KILN_OK && send_er == 1, "%s in flight: the call already past its check finished (%d)", how,
+              send_rc);
+        const KilnHandle next = open_lease(400, 409, true, &rc, kPlain);
+        CHECK(next && rc == KILN_OK, "%s in flight: once it returned, the channels and the session role are free", how);
+        CHECK(st::st_send(kPlain, next, 7, "x", 1, 405, 8, &er) == KILN_OK && er == 1,
+              "%s in flight: the new lease sends", how);
+    }
+}
+
+// ---- 15. no owner-retiring notification ----
+// Without it nothing would close a lease when its owner retires: steam_open opens nothing, for any owner.
+void t15_unwatched() {
+    KilnResult rc;
+    fresh(false, true, false);
+    zero_calls();
+    CHECK(!open_lease(0, 9, true, &rc, kDialect) && rc == KILN_ERR_INTERNAL, "unwatched: the designated owner: none");
+    CHECK(!open_lease(10, 19, false, &rc, kAdmitted) && rc == KILN_ERR_INTERNAL, "unwatched: an admitted owner: none");
+    CHECK(!open_lease(20, 29, false, &rc, kPlain) && rc == KILN_ERR_UNAVAILABLE, "unwatched: a plain owner: refused");
+    const int logged = log_count("steam-messages-unwatched");
+    CHECK(logged == 1, "unwatched: logged once (%d)", logged);
+    CHECK(total_calls() == 0, "unwatched: no Steam call");
+    fresh();
+    CHECK(open_lease(0, 9, true, &rc, kDialect) && rc == KILN_OK, "watched: the designated owner opens its lease");
+}
 
 int main(int argc, char** argv) {
     const int race = argc > 1 ? std::atoi(argv[1]) : 100000;
@@ -837,6 +1101,9 @@ int main(int argc, char** argv) {
     t8_accept();
     t9_close();
     t10_exit();
+    t13_owners();
+    t14_in_flight();
+    t15_unwatched();
     delete g_fake;
     std::printf("steam messages host: %s %d checks (race %d iterations)\n", g_failures ? "FAIL" : "PASS", g_checks, race);
     return g_failures ? 1 : 0;

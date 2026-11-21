@@ -2262,6 +2262,8 @@
       "byHand": "Messa lì a mano",
       "folder": "Cartella",
       "advanced": "Avanzata (hook o patch)",
+      "steam": "Steam",
+      "steamMessages": "Comunica con altri giocatori tramite Steam",
       "role": "Ruolo",
       "servesLive": "Serve le pagine live",
       "also": "Anche {list}",

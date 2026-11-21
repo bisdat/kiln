@@ -8,15 +8,16 @@ using static Kiln.Testing.ClientCheckTags;
 namespace ClientPass;
 
 // Kiln's interpreter (kiln mode: kiln.json "shroudforge.backend": "kiln", with "preview" naming
-// kiln-sfi.interpreter while it is held). The seven guided checks the client gate's row kiln-sfi.interpreter names
-// (native/core/gates/sfi.json): passing them all is what lets the row be removed. Each reads what the interpreter wrote
+// kiln-sfi.interpreter while it is held). The seven guided checks the client gate's row kiln-sfi.interpreter named
+// (native/core/gates/sfi.json) while kiln mode was held, and since 0.2.0-dev.30.3 the mod shortcuts (sfi-keybinds, with
+// the keys probe mods/tests/sf-keys-probe). Each reads what the interpreter wrote
 // for this start (kiln/state/sfi.json, kiln/logs/kiln.log) and asserts it, then asks one verdict. A start that is not a
 // kiln start (hosted ShroudForge, the interpreter refused or not installed, a record of an earlier start) is a skip with
 // its reason, never a pass. Checks over several starts keep their part in the mod's data folder and end each part but
-// the last with skip. docs/kiln/client-pass.md, "Kiln's interpreter". Orders 3900-3906.
+// the last with skip. docs/kiln/client-pass.md, "Kiln's interpreter". Orders 3900-3907.
 public sealed partial class ClientPassMod
 {
-    private const string SfiSince = "0.2.0-dev.30.2";
+    private const string SfiSince = "0.2.0-dev.30.2", SfiKeysSince = "0.2.0-dev.30.3";
     private const string SfiArea = "Kiln's interpreter";
     // Quiver & Spellbook 0.8.2: the save-sensitive package of the pass (its row in schema/sfi/sfi-safety-policy.json)
     private const string SfiQuiver = "ammo-slots";
@@ -25,6 +26,10 @@ public sealed partial class ClientPassMod
     private const string SfiSetupHelp = "docs/kiln/client-pass.md, \"Kiln's interpreter\"";
     // the files in the mod's data folder that keep the part a check over several starts has reached
     private const string SfiSettingsPart = "sfi-ui-settings", SfiRoundtripPart = "sfi-backend-roundtrip";
+    // the keys probe (mods/tests/sf-keys-probe): a ShroudForge-format package with one keybind setting, F4 by default
+    private const string SfiKeysProbe = "kiln-sf-keys-probe";
+    // the interpreter's kiln.log line once mod shortcuts read the game window's keys (crates/sfi/kiln-sfi runtime/input.rs)
+    private const string SfiKeysStarted = "keyboard shortcuts of ShroudForge-format mods read the game window's keys";
 
     // ------------------------------------------------------------------------------------- the interpreter's record ---
 
@@ -483,5 +488,56 @@ public sealed partial class ClientPassMod
                    "settings are as in part 1, (8) the mods do what they did in part 1. Otherwise fail with a note naming which " +
                    "one.");
         await c.Verdict();
+    }
+
+    /// <summary>The keys probe's lines in kiln.log (`[kiln-sf-keys-probe] probe ...`) that start with `what`.</summary>
+    private static int SfiProbeLines(CheckContext c, string what) =>
+        BootLog(c, "kiln.log")?.Count(l => l.Contains($"[{SfiKeysProbe}] probe {what}", StringComparison.Ordinal)) ?? 0;
+
+    [ClientCheck("sfi-keybinds", "A ShroudForge-format mod's shortcut in a kiln start: pressed, held, released, not while Kiln's menu is open",
+        Area = SfiArea, Since = SfiKeysSince, Tags = [Visual], Needs = ClientCheckNeeds.Hosted, Order = 3907)]
+    public async Task SfiKeybinds(CheckContext c)
+    {
+        if (await NeedKilnStart(c) is not { } s) return;
+        if (s.Package(SfiKeysProbe) is not { Intent: "selected", Skip: null })
+        {
+            var now = s.Package(SfiKeysProbe) is { } p ? "it is " + p.State + " in this start" : "this start's record does not list it";
+            c.Instruct("This check needs the keys probe running in this kiln start: copy the folder mods/tests/sf-keys-probe of " +
+                       $"the Kiln repository into <game>/mods, switch it on in the launcher and start again ({now}).");
+            await c.Skip("needs the keys probe (mods/tests/sf-keys-probe) running in a kiln start");
+            return;
+        }
+        var log = BootLog(c, "kiln.log");
+        var started = log?.LastOrDefault(l => l.Contains(SfiKeysStarted, StringComparison.Ordinal));
+        c.Expect(started is not null, $"kiln.log: \"kiln-sfi: {SfiKeysStarted}\"", started);
+        var loaded = log?.LastOrDefault(l => l.Contains($"[{SfiKeysProbe}] probe loaded: shortcut ", StringComparison.Ordinal));
+        c.Expect(loaded?.Contains("setting is not a declared keybind", StringComparison.Ordinal) == true,
+            "kiln.log: the probe loaded, and a key that is not one of its keybind settings raised \"setting is not a declared keybind\"", loaded);
+        var m = loaded is null ? null : Regex.Match(loaded, @"probe loaded: shortcut (.+?); undeclared");
+        var key = m is { Success: true } ? m.Groups[1].Value : "F4";
+        c.Expect(key is not ("none" or "") && !key.StartsWith("error", StringComparison.Ordinal),
+            "the probe's shortcut has a label (keybind_label)", key);
+
+        var pressed = SfiProbeLines(c, "pressed: ");
+        c.Instruct($"In the world, with no menu open, press {key} once (the keys probe's shortcut). A notice \"Keys probe: {key} " +
+                   $"pressed (1)\" should appear.");
+        await c.Until(() => SfiProbeLines(c, "pressed: ") > pressed, TimeSpan.FromSeconds(120), $"the probe saw {key} pressed");
+        var (held, released) = (SfiProbeLines(c, "held: "), SfiProbeLines(c, "released: "));
+        c.Instruct($"Now hold {key} for two seconds, then let go.");
+        await c.Until(() => SfiProbeLines(c, "released: ") > released && SfiProbeLines(c, "held: ") > held,
+            TimeSpan.FromSeconds(120), $"the probe saw {key} held, then released");
+        await c.Delay(TimeSpan.FromSeconds(1));
+        var beforeMenu = SfiProbeLines(c, "pressed: ");
+        c.Instruct($"Open Kiln's menu (Insert), press {key} twice while it is open, close the menu, then press {key} once more " +
+                   "in the world.");
+        await c.Until(() => SfiProbeLines(c, "pressed: ") > beforeMenu, TimeSpan.FromSeconds(180), $"the probe saw {key} pressed after the menu");
+        await c.Delay(TimeSpan.FromSeconds(2));
+        c.Instruct("Pass only if all of these held: (1) each press in the world showed the notice \"Keys probe: " + key +
+                   " pressed (n)\" with n counting up, (2) holding the key showed one notice, not one per repeat, (3) the " +
+                   "two presses while Kiln's menu was open showed no notice. Otherwise fail with a note naming which one.");
+        await c.Verdict();
+        c.Expect(SfiProbeLines(c, "pressed: ") == beforeMenu + 1,
+            "kiln.log: the presses while Kiln's menu was open did not count, the one after it did",
+            $"{SfiProbeLines(c, "pressed: ") - beforeMenu} presses counted from the menu step on");
     }
 }

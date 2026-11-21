@@ -92,6 +92,8 @@ public sealed unsafe class UiInventoryFakeTests
         Assert.Equal((new EntityId(900), new ItemId(0xAA), new EntityId(77), 2, new EntityId(0x5000)),
             (c.ItemEntity, c.Item, c.Holder, (int)c.Slot.SlotIndex, c.Slot.InventoryPage));
         Assert.Equal((SlotButton.Left, SlotModifiers.Ctrl, true, HudScreen.StorageChest), (c.Button, c.Modifiers, c.Taken, c.Screen.Hud));
+        // the press position (0.2.0-dev.30.3): the slot's centre at one pixel per UI unit (slot 0 is 10, 20, 80 x 80)
+        Assert.Equal(new System.Numerics.Vector2(50, 60), c.Pointer);
 
         // modifiers are exact; a plain left click matches nobody and reaches the game
         Assert.Equal(new FakeSlotClickResult(0, false), kiln.UiInventory.Click(0, SlotButton.Left, SlotModifiers.Ctrl | SlotModifiers.Shift));
@@ -99,6 +101,7 @@ public sealed unsafe class UiInventoryFakeTests
         // a watcher sees the click, the game keeps it
         Assert.Equal(new FakeSlotClickResult(1, false), kiln.UiInventory.Click(1, SlotButton.Right));
         Assert.Equal((new EntityId(0), new ItemId(0xBB), 60u, false), (watched[0].ItemEntity, watched[0].Item, watched[0].Slot.Count, watched[0].Taken));
+        Assert.Equal(new System.Numerics.Vector2(140, 60), watched[0].Pointer);  // slot 1: 100, 20, 80 x 80
         Assert.Single(taken);
     }
 

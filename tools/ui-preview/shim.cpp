@@ -470,6 +470,9 @@ KilnUiApi make_table() {
     t.set_texts = &t_set_texts;
     t.graphics_set = &t_graphics_set;
     t.graphics_status = &t_graphics_status;
+    t.pointer = &t_pointer;  // the pointer and drag and drop (0.2.0-dev.30.3)
+    t.drag_source = &t_drag_source;
+    t.drop_target = &t_drop_target;
     return t;
 }
 KilnUiApi g_table;

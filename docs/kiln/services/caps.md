@@ -65,6 +65,8 @@ A capability can be **held** until its guided client checks
 ([client-pass.md](../client-pass.md)) have passed in a real game. The list is empty in 0.2.0-dev.29:
 all 22 capabilities held in 0.2.0-dev.28 are on now, subject to their normal dependencies and side restrictions.
 Opening the remaining 20 is an owner decision, not a real-game confirmation; their guided checks remain unconfirmed.
+Since 0.2.0-dev.30.2 the list holds the release policy's `kiln-sfi.sf18`. `client.building_input` was held in
+0.2.0-dev.30.3's test builds and ships on ([client-building-input.md](client-building-input.md)).
 
 - **The list** is `native/core/gates/*.json` (one file per work area; `README.md` there has the format): a capability
   name, the ids of the checks that open it, optionally the one side it is held on. It is compiled into
@@ -78,7 +80,7 @@ Opening the remaining 20 is an owner decision, not a real-game confirmation; the
   no config key of a service's own, no sigdb overlay.
 - **Lifting it:** `"preview"` in `kiln.json`, at the top level or in a side section (which replaces the top-level
   one): `true` for every held capability, or a list of names. A name in the list that nothing holds is a warning in
-  `kiln.log`. No preview setting is needed for this release’s guided pass.
+  `kiln.log`. No check of this release's guided pass needs a preview setting.
   ```json
   { "preview": ["camera.fov"], "client": { "preview": true } }
   ```
@@ -152,8 +154,12 @@ naming one of them is refused, with the advice to check `Capabilities.Is` at run
 
 | `world.tracked_writes` | managed, session | Kiln.World, right before the mods load, then every 25 steps | `World.Write`, `World.Update`, `World.WriteField`, `World.WriteAt` work: kiln.world v3 with the game's tracked write path (`world.programs`, `world.read_other`, `world.names`, and `items.fuel`'s symbols; `symbol-missing` naming the first that is off, `service-older` for a kiln.world without v3). Pending while the write program waits for a server world; `faulted` when the game did not take the program or one of the game's calls faulted. Available with the note "no loaded mod lists a component" when nothing is listed: every write then answers `NotDeclared` |
 | `world.component_bits` | sigdb feature | core | the game's per-component save and replication bits can be read (`WorldWriteResult.SaveTracked`, `.ReplicationTracked`, `World.WriteInfo`); off: those answers are null, the writes work the same |
-| `world.ecs_read` | native, static | kiln.world, in its `on_ready` | task-thread entity and component reads (`entity_open`, `ecs_snapshot`, `ecs_query` and the other ECS-read members, stable-copy and frame-quiet; [world.md](world.md#world-reads-from-task-threads)). Available on the exact builds (dedicated server 26430253, client 26430625) when the profile's entity table agrees with kiln.world's own resolution on the running exe; the text names the profile. Unavailable, `symbol-missing`, on every other build, the text naming the check that failed (no exact profile, no `kiln.internal.engine`, an incomplete read section, or the field the profile and kiln.world disagree on); `ecs_context_snapshot` still answers |
+| `world.ecs_read` | native, static | kiln.world, in its `on_ready` | task-thread entity and component reads (`entity_open`, `ecs_snapshot`, `ecs_query` and the other ECS-read members, stable-copy and frame-quiet; [world.md](world.md#world-reads-from-task-threads)). Available on the exact builds (dedicated server 26430253, client 26430625) when the profile's entity table agrees with kiln.world's own resolution on the running exe; the text names the profile. Unavailable, `symbol-missing`, on every other build, the text naming the check that failed (no exact profile, no `kiln.internal.engine`, an incomplete read section, or the field the profile and kiln.world disagree on); `ecs_context_snapshot` still answers. Since 0.2.0-dev.30.3 it also covers `ecs_registration` (a world's component registration with its storage and template types) |
 | `world.ecs_write` | native, static | kiln.world, in its `on_ready` | task-thread compare-exchange writes of untracked plain server-world components (`ecs_write_policy`, `ecs_compare_exchange`, `ecs_write_subscribe`; [world.md](world.md#world-writes-from-task-threads)). Available when the reads are, the exact profile's write gate is enabled and locates the change-tracking bits, and kiln.types is here; the text names the profile. Unavailable, `symbol-missing`, otherwise, the text naming the check that failed; `ecs_write_policy` then answers unavailable |
+| `world.named_read` | native, static | kiln.world, in its `on_ready` | since 0.2.0-dev.30.3: named-service views and snapshots from task threads under the engine's write gate (`named_service_open`, `named_service_snapshot`; [world.md](world.md#named-services-from-tasks)). Available when kiln.internal.engine has the gate and the exact profile's write gate is enabled and names at least one named service; the text names the profile and the services. Unavailable, `symbol-missing`, otherwise, the text naming the check that failed |
+| `world.named_write` | native, static | kiln.world, in its `on_ready` | since 0.2.0-dev.30.3: `named_service_compare_exchange`. Today the same checks as `world.named_read`, reported apart so a build can have the reads without the writes |
+| `assets.loaded` | native, static | kiln.assets, in its `on_ready` | task-thread reads of the resources the game has loaded now (`loaded_snapshot`, `loaded_list`; [assets.md](assets.md#loaded-resources-from-tasks)). Available on the exact builds (dedicated server 26430253, client 26430625) when kiln.internal.engine gives the profile's layout; the text names the profile. Unavailable, `symbol-missing`, on every other build, the text naming the check that failed (no exact profile, no `kiln.internal.engine`); each read still answers its own `KILN_LOADED_NOT_READY` outside a world |
+| `assets.loaded_write` | native, static | kiln.assets, in its `on_ready` | the loaded-resource scalar compare-exchange (`loaded_scalar_compare_exchange`; [assets.md](assets.md#loaded-resources-from-tasks)): the loaded reads, kiln.internal.engine's write gate and content-worker lifetime guard, and the profile's write gate and content-worker layout on the exact builds; the text names the profile. Unavailable, `symbol-missing`, with the check that failed otherwise; each write still answers its own outcome (another session, a busy gate, a key kiln.assets serves) |
 
 They exist only once their service has started, after the manifests were checked: check `Capabilities.Is` at run time
 (`world.component_bits` is a sigdb feature and can be named in a manifest's `features`).
@@ -448,6 +454,11 @@ gear; client: the widened forge lists; [gems-sockets.md](gems-sockets.md)); Kiln
 kiln.gemcraft is not here and `gems.sockets` where neither kiln.items v7 nor kiln.ui.values' `gemforge_sockets` is. All four
 rows in one place: [gems.md](gems.md), "Capability rows".
 
+## Rows added in 0.2.0-dev.30.3
+| Row | Kind | Reported by | What it says |
+|---|---|---|---|
+| `items.rename` | sigdb feature | core; Kiln.Items lowers it at its start when its table is older than v9 (`service-older`) or kiln.items turned renames off (its reason, or `items.names`' when that is off) | renaming a container through the game's own rename (`Items.SetContainerName`; [items.md](items.md#renaming-a-container-v9-since-020-dev303)). The session is not in the row: `Items.ContainerRenameAvailable` is also false where no server world runs (a joined game client), where `SetContainerName` throws `InvalidOperationException` |
+
 ## Rows of the task pool and the engine profiles
 The core's row for Kiln's task pool ([tasks.md](tasks.md)), and kiln.engine's rows for the exact engine profiles
 ([engine.md](engine.md)) that the task-thread world reads build on.
@@ -458,9 +469,16 @@ The core's row for Kiln's task pool ([tasks.md](tasks.md)), and kiln.engine's ro
 | `engine.profile` | native, static | kiln.engine, at its start | one of Kiln's exact engine profiles matched the running game image; the text is the profile's id. Unavailable, `symbol-missing`, on every other build, the text saying why (no profile for this build, an image that could not be identified, more than one match) |
 | `engine.ecs_read` | native, static | kiln.engine, with `engine.profile` | that profile's owner and ECS read layouts are validated (`symbol-missing` "the profile has no validated ECS read layout", or `engine.profile`'s reason) |
 | `engine.ecs_write` | native, static | kiln.engine, with `engine.profile` | as `engine.ecs_read`, and the profile's original native-thread Scene write gate is enabled (`symbol-missing` "the profile has no enabled native-thread Scene write gate", or `engine.profile`'s reason) |
+| `engine.attribute_model` | native, static | kiln.engine, with `engine.profile` | that profile publishes an attribute calculation model (`attributeCalculationModel` with its evidence, [engine.md](engine.md)); the text is the model's name, `attribute-command-v1`. Kiln's interpreter for ShroudForge-format mods recalculates attribute writes with it and refuses them without it. Unavailable: `symbol-missing` "the profile publishes no attribute calculation model", or `engine.profile`'s reason |
 
 A mod asks `world.ecs_read` (`WorldConcurrent.IsAvailable`) for the task-thread world reads and `world.ecs_write`
 (`WorldConcurrent.CanWrite`; both experimental, opt in with [KILNX003](../modding/analyzers.md#kilnx003)) for the
 compare-exchange writes, not the `engine.*` rows: those say what the profile
 carries, the `world.*` rows say whether kiln.world reads or writes with it in this process (both are among the
 kiln.world rows above).
+
+## Rows added in 0.2.0-dev.30.3
+
+| Row | Kind | Reported by | What it says |
+|---|---|---|---|
+| `build.voxel_grid_tasks` | native, static | kiln.build, in its `on_ready` | the voxel grid's geometry from task threads (`grid_for_session`, experimental; [build.md](build.md#voxels-from-tasks-since-020-dev303)). Available when kiln.build's voxel reads are on (`build.read`), the running game matches an exact engine profile with its write gate (dedicated server 26430253, client 26430625) and kiln.world's `game_world_session` is there; the text names the profile. Unavailable, `symbol-missing`, otherwise, the text naming the check that failed |

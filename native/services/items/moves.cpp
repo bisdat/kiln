@@ -272,7 +272,8 @@ bool parse_name_record(const uint8_t* rec, size_t size, uintptr_t addr, uint64_t
         std::memcpy(&ptr, rec + o + 8, 8);
         std::memcpy(&n, rec + o + 0x10, 4);
         std::memcpy(&cap, rec + o + 0x18, 8);
-        if (ptr != static_cast<uint64_t>(addr + o + kText) || cap != kCap || n < 1 || n >= kCap) continue;
+        // 1..256 bytes: the game stores up to its record capacity (a 256-byte name fills it; the zeroed tail ends it)
+        if (ptr != static_cast<uint64_t>(addr + o + kText) || cap != kCap || n < 1 || n > kCap || o + kText + n + 1 > size) continue;
         const uint8_t* text = rec + o + kText;
         if (text[n] != 0) continue;
         if (fnv1a64(text, n) != key) continue;

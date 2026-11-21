@@ -17,6 +17,7 @@ pub type KilnItemsEquipDoneFn = Option<unsafe extern "C" fn(*const KilnItemsEqui
 pub type KilnSetDoneV1 = Option<unsafe extern "C" fn(*const KilnSetResultV1, *mut core::ffi::c_void)>;
 pub type KilnItemsGearDoneFn = Option<unsafe extern "C" fn(*const KilnItemsGearResult, *mut core::ffi::c_void)>;
 pub type KilnItemsUpgradeDoneFn = Option<unsafe extern "C" fn(*const KilnItemsUpgradeResult, *mut core::ffi::c_void)>;
+pub type KilnItemsRenameDoneFn = Option<unsafe extern "C" fn(*const KilnItemsRenameResult, *mut core::ffi::c_void)>;
 pub const KILN_ITEMS_ALL_OR_NOTHING: i32 = 8;
 pub const KILN_ITEMS_DONE: i32 = 0;
 pub const KILN_ITEMS_DROPPED: i32 = 9;
@@ -90,6 +91,9 @@ pub const KILN_ITEMS_MOVE_ACTIONBAR: i32 = 4;
 pub const KILN_ITEMS_MOVE_DRY_RUN: i32 = 1;
 pub const KILN_ITEMS_MOVE_EQUIPPED: i32 = 2;
 pub const KILN_ITEMS_MOVE_SILENT: i32 = 8;
+pub const KILN_ITEMS_NAME_CAPACITY: u32 = 256;
+pub const KILN_ITEMS_NAME_MAX_BYTES: u32 = 64;
+pub const KILN_ITEMS_NAME_MAX_CHARS: u32 = 48;
 pub const KILN_ITEMS_NOTIFY: i32 = 16;
 pub const KILN_ITEMS_NOT_ENOUGH: i32 = 3;
 pub const KILN_ITEMS_NO_INVENTORY: i32 = 4;
@@ -105,6 +109,15 @@ pub const KILN_ITEMS_RARITY: i32 = 2;
 pub const KILN_ITEMS_READ_LOCATION: i32 = 1;
 pub const KILN_ITEMS_RECIPE: i32 = 128;
 pub const KILN_ITEMS_REFUSED: i32 = 7;
+pub const KILN_ITEMS_RENAME_BAD_TEXT: i32 = 4;
+pub const KILN_ITEMS_RENAME_DONE: i32 = 0;
+pub const KILN_ITEMS_RENAME_DROPPED: i32 = 8;
+pub const KILN_ITEMS_RENAME_FULL: i32 = 6;
+pub const KILN_ITEMS_RENAME_GONE: i32 = 1;
+pub const KILN_ITEMS_RENAME_NOT_CONTAINER: i32 = 2;
+pub const KILN_ITEMS_RENAME_NOT_SERVER: i32 = 5;
+pub const KILN_ITEMS_RENAME_TOO_LONG: i32 = 3;
+pub const KILN_ITEMS_RENAME_UNAVAILABLE: i32 = 7;
 pub const KILN_ITEMS_REPLACE: i32 = 2048;
 pub const KILN_ITEMS_ROLL_CRAFT: i32 = 1;
 pub const KILN_ITEMS_ROLL_GIVE: i32 = 4;
@@ -130,7 +143,7 @@ pub const KILN_ITEMS_UPGRADE_MAX_COSTS: u32 = 8;
 pub const KILN_ITEMS_UPGRADE_MAX_COUNT: u32 = 100000;
 pub const KILN_ITEMS_UPGRADE_MAX_PAYERS: u32 = 8;
 pub const KILN_ITEMS_UPGRADE_WRITE: i32 = 1;
-pub const KILN_ITEMS_VERSION: u32 = 8;
+pub const KILN_ITEMS_VERSION: u32 = 9;
 pub const KILN_MOVE_ALL: i32 = 2;
 pub const KILN_MOVE_QUICK_STACK: i32 = 1;
 pub const KILN_MOVE_STACK: i32 = 0;
@@ -843,6 +856,46 @@ pub struct KilnItemsScaleStatus {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct KilnItemsRenameRequest {
+    pub size: u32,
+    pub entity: KilnEntity,
+    pub len: u32,
+    pub reserved: u32,
+    pub text: [core::ffi::c_char; 256],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnItemsRenameResult {
+    pub size: u32,
+    pub status: i32,
+    pub ticket: u64,
+    pub entity: KilnEntity,
+    pub game_error: u32,
+    pub steps: u32,
+    pub changed: u8,
+    pub cleared: u8,
+    pub reserved: u16,
+    pub message: [core::ffi::c_char; 160],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnItemsRenameStatus {
+    pub size: u32,
+    pub available: u8,
+    pub feature: u8,
+    pub server: u8,
+    pub reserved0: u8,
+    pub pending: u32,
+    pub done: u32,
+    pub refused: u32,
+    pub reserved1: u32,
+    pub detail: [core::ffi::c_char; 160],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct KilnItemsApi {
     pub header: KilnServiceHeader,
     pub give: Option<unsafe extern "C" fn(KilnOwner, *const KilnItemsRequest, KilnItemsDoneFn, *mut core::ffi::c_void, *mut u64) -> KilnResult>,
@@ -890,4 +943,6 @@ pub struct KilnItemsApi {
     pub gear_scale: Option<unsafe extern "C" fn(*const KilnItemsGearScale) -> KilnResult>,
     pub gear_scale_read: Option<unsafe extern "C" fn(KilnEntity, u32, *mut KilnItemsGearScale) -> KilnResult>,
     pub scale_status: Option<unsafe extern "C" fn(*mut KilnItemsScaleStatus) -> KilnResult>,
+    pub container_rename: Option<unsafe extern "C" fn(KilnOwner, *const KilnItemsRenameRequest, KilnItemsRenameDoneFn, *mut core::ffi::c_void, *mut u64, *mut KilnItemsRenameResult) -> KilnResult>,
+    pub rename_status: Option<unsafe extern "C" fn(*mut KilnItemsRenameStatus) -> KilnResult>,
 }

@@ -159,7 +159,29 @@ internal static unsafe class AbilitiesNative
         // the ECS bridge (06c S5): native_ecs_read, native_ecs_write
         public delegate* unmanaged[Cdecl]<NativeCall*, NativeStr, uint, void*, uint, int> NativeEcsRead;
         public delegate* unmanaged[Cdecl]<NativeCall*, NativeStr, uint, void*, uint, uint, void*, void*, int> NativeEcsWrite;
+        // since 0.2.0-dev.30.3 (mod API 0.2.13): item_use (a table without it ends at 312)
+        public delegate* unmanaged[Cdecl]<ItemUseRequest*, int> ItemUseFn;
     }
+
+    /// <summary>KilnItemUse (since 0.2.0-dev.30.3): one use of an item from a player's slot.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ItemUseRequest
+    {
+        public uint Size;
+        public uint Entity;
+        public ulong Slot;
+        public uint Item;
+        public uint Sequence;
+        public uint Flags;
+        public uint Status;
+        public uint Count;
+        public uint Reserved;
+        public long TriggerTime;
+    }
+
+    // KILN_ITEM_USE_* (KilnItemUse.status)
+    public const uint UseStarted = 0, UseNotOwnSlot = 1, UseEmptySlot = 2, UseOtherItem = 3, UseNotAPlayer = 4, UseDead = 5,
+        UseNotReady = 6, UseBusy = 7;
 
     // KILN_NATIVE_ECS_* (KilnNativeCounters.ecs_state / ecs_reason)
     public const uint EcsPending = 0, EcsOn = 1, EcsOff = 2;

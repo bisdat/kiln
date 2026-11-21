@@ -15,6 +15,8 @@
  *   engine.profile    an exact profile matched this image (UNAVAILABLE, policy: why not);
  *   engine.ecs_read   that profile's owner and ECS read layouts are validated;
  *   engine.ecs_write  ... and its original native-thread Scene write gate is enabled;
+ *   engine.attribute_model  that profile publishes an attribute calculation model; the text is its name
+ *                     ("attribute-command-v1", the model ShroudForge-format attribute writes are recalculated with);
  *   engine.gate_priority_raise  a write gate's holder is raised above normal priority while it holds the gate
  *                     (UNAVAILABLE, policy: the measurement switch kiln/data/kiln.engine/gate-priority-raise turned the
  *                     raise off for this run; docs/kiln/services/engine.md).

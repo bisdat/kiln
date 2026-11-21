@@ -63,7 +63,7 @@
        The headers are Kiln's public C ABI only: kiln.launch (the start's ShroudForge backend, which Kiln's own loaders
        read) and kiln-eml's startup seams (kiln.eml.archive, kiln.eml.values, kiln.eml.startup) stay out, and so does
        every "kiln-internal begin" ... "kiln-internal end" block of the others (members Kiln keeps to itself in this
-       release, such as kiln.client's building input and kiln.net's Steam messages): KilnStageAbiHeaders writes the
+       release, such as kiln.client's building input): KilnStageAbiHeaders writes the
        headers without those blocks into obj/ and packs that copy. native/core/tests/test-abi-headers.sh checks the
        stripped view of the headers that have such blocks. -->
   <ItemGroup>

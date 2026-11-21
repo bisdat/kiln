@@ -9,7 +9,7 @@ record that a script turns into a summary.
 
 The pass confirms behavior in the real game; it no longer opens capabilities. All 22 holds from 0.2.0-dev.28
 are gone in 0.2.0-dev.29, and the remaining 20 capabilities are on but unconfirmed. The gate mechanism remains
-([caps](services/caps.md#the-client-gate-dev28)); its list is empty, so no `"preview"` setting is needed.
+([caps](services/caps.md#the-client-gate-dev28)); no check of this release needs a `"preview"` setting.
 The pass covers the release’s "On, not yet confirmed in a real game" entries, the
 dev.22 and dev.21 client checklists (11 items each), and two lines new in 0.2.0-dev.26 (the achievement guard, and
 Kiln's unload when the game quits). `mods/tests/client-pass/rows.json` maps each line to its checks.
@@ -177,9 +177,12 @@ your answer.
 ## Kiln's interpreter
 
 Kiln's own interpreter of ShroudForge mods (kiln mode: `kiln.json` `"shroudforge.backend": "kiln"`, see
-[kiln mode](shroudforge-kiln-mode.md)) has seven guided checks. They are in `mods/tests/client-pass/Sfi.cs`
-(area "Kiln's interpreter", orders 3900 to 3906) and in `rows.json` under "Kiln's interpreter (kiln-sfi.interpreter)". Choose
-**Kiln's interpreter** on Settings' ShroudForge card for the pass's kiln starts; no other setting is needed.
+[kiln mode](shroudforge-kiln-mode.md)) has eight guided checks. They are in `mods/tests/client-pass/Sfi.cs`
+(area "Kiln's interpreter", orders 3900 to 3907) and in `rows.json` under "Kiln's interpreter (kiln-sfi.interpreter)";
+kiln mode's own checks since 0.2.0-dev.30.3 are [below](#kiln-modes-checks-since-020-dev303). Choose
+**Kiln's interpreter** on Settings' ShroudForge card for the pass's kiln starts; no other setting is needed. The mod
+shortcut check uses the keys probe, a small ShroudForge-format test mod: copy the folder `mods/tests/sf-keys-probe` into
+`<game>/mods` and switch it on in the launcher for that start.
 
 Each check first reads what the interpreter wrote for this start, `kiln/state/sfi.json` (it must be this game
 process's, backend `kiln`, phase `running`) and `kiln.log` (`kiln-sfi: Runtime initialized`), and asserts it. In a
@@ -195,10 +198,54 @@ start) a check ends with skip and says why: a skip never counts as a pass.
 | `sfi-three-surface-warning` | the same warning before Play, in the game (main-menu banner, footer line, DO NOT SAVE badge in Mods, marker on the pause menu's Mods entry, banner again in the world) and in `sfi.json` | 1 |
 | `sfi-warning-accessibility` | the dialog before Play with the keyboard alone (Cancel focused, Tab, Enter on Cancel, Escape, a click beside it, B on a Deck) and at large text size; the in-game banner readable | 1 |
 | `sfi-backend-roundtrip` | kiln with Quiver & Spellbook on, then hosted (its record carries the package, `shroudforge.json` written), then kiln with it off (still warned), then kiln with it on (no mod in two folders of `<game>/mods`) | 4 |
+| `sfi-keybinds` | with the keys probe: its shortcut (F4) pressed once, held and released, then pressed twice while Kiln's menu is open and once after it; a notice per press in the world, none in the menu; the check asserts the probe's lines in `kiln.log` (one press counted for the menu step) | 1 |
 
 Checks over several starts keep their part in the mod's data folder and end every part but the last with skip; a fail
 on a part that does not fit the start starts `sfi-backend-roundtrip` over. Never save in a start with the warning,
 and use a copied world. `kiln-sfi.sf18` stays held whatever the pass says.
+
+### Kiln mode's checks since 0.2.0-dev.30.3
+
+These guided checks cover what kiln mode gained in 0.2.0-dev.30.3. They are in `mods/tests/client-pass/SfiWorld.cs`,
+`SfiAttributes.cs`, `SfiNamedServices.cs`, `Sfi303Resources.cs`, `SfiVoxels.cs` and `SfiTemplates.cs` (area "Kiln's
+interpreter", orders 3908 to 3915), each with one row in `rows.json` under "Kiln's interpreter in 0.2.0-dev.30.3", and
+are not part of the interpreter's eight. They start as the eight do (a kiln start, asserted from `sfi.json` and
+`kiln.log`). Kiln mode applies a setting changed on Kiln's ShroudForge page at the next start, so a check that changes a
+mod's setting asks for a restart after each change. Most of them read the lines of the kiln-mode probe, a
+ShroudForge-format test mod: copy `mods/tests/sf-kiln-probe` into `<game>/mods` and switch it on. It logs one line per
+kiln-mode read (`sf-kiln-probe: <probe> run=<n> ok=<true|false|skip> ...`) at its first update, every 30 seconds, and
+when you press its shortcut (F5) or its **Run probes now** button on Kiln's ShroudForge page; its README lists every
+line.
+
+| Check | What you do and look at | Probe lines | Starts |
+|---|---|---|---|
+| `sfi.world-cursor` (3908) | aim with a building tool, hosting and joined: the sequence grows, the position follows the cursor and holds when it stops, `attachedToProp` only while a prop hangs on the cursor | `world.cursor` | 1 |
+| `sfi.world-props` (3909) | in a base, run the probe, place one prop inside the box and run it again, then one outside: the count matches the base's props in the box, one more, then unchanged; the transform lies inside the box | `world.props.before`, `world.props.recipes`, `world.props.query`, `world.props.transform` | 1 |
+| `sfi.world-ecs` (3910) | one probe run on a copied world you host (and joined, if you can): the catalog ready, entities found, a component read whole; with the probe's writes on (an earlier start), one write and its restore | `ecs.catalog`, `ecs.query`, `ecs.players`, `ecs.read_bytes` (`size=56`), `ecs.read_fields`, `ecs.resolve`, `ecs.get_template`; `ecs.write_fields`, `ecs.write_fields.restore` | 1 |
+| `sfi.attribute-writes` (3911) | on a copied world you host, sf-unlimited-flight with only "Unlimited Glider Stamina" on (set on Kiln's ShroudForge page in an earlier start): gliding does not drain stamina; the mod's line on the page shows no error or waiting reason | `attributes.list`, `attributes.read` (for the note) | 1 |
+| `sfi.named-services` (3912) | SF Survival running in a kiln start; the rows `world.named_read` and `world.named_write` available; its "Infinite Weapon Durability" switched on, a restart, a weapon's durability does not drop; switched off, a restart, it drops as before (the world's own setting is back); no failure on its line of Kiln's ShroudForge page | `services.get`, `services.read_fields` (`enableDurability`) | 3 |
+| `sfi.loaded-resources` (3913) | a copied world hosted in a kiln start with a mod that reads or changes loaded resources (sf-crafting-essentials, sf-unlimited-flight, sf-survival, skeleton-commander): no freeze or crash when the world loads, while playing or on entering it again, no mod says the ResourceService is missing, the mods' changes show (an "assets: loaded write" line each) and are gone after a start without them; the check asserts `kiln.log`'s "assets: loaded resources on" and "assets: loaded resource writes on" lines | `resources.by_type`, `resources.get`, `ecs.get_template` | 1 |
+| `sfi.voxel-grid` (3914) | the voxel probe (`mods/tests/sf-voxel-probe`, copied into `<game>/mods`; it only reads) on a hosted copied world: its `runtime.world.voxel.get_grid_spec` answers the current builds' grid in `kiln.log` (0.5 m cells, 20480 x 2^31-8 x 20480), its one-cell read still refuses with ShroudForge's reason, and the game runs as usual | `voxel.grid_spec` (the kiln-mode probe's, if it runs too) | 1 |
+| `sfi.template-components` (3915) | SF Survival running in a kiln start; its "No Fall Damage" switched on, a restart, a fall from a height costs no health; switched off, a restart, the same fall costs health as before (the template's own values are back); no failure on its line of Kiln's ShroudForge page | | 3 |
+
+## Building input
+
+kiln.client's building input (Kiln.Client's `BuildingInput`, [the service](services/client-building-input.md)) ships on
+in 0.2.0-dev.30.3, not yet checked in a real game; these five checks are that confirmation:
+`mods/tests/client-pass/BuildingInput.cs` (area "Building input", orders 3950 to 3954) and `rows.json` under "Building
+input (client.building_input)". They need no setting; on a game build without building input each check ends with skip
+and says why. Use a copied world, in your base, with Rough Wood Block and some Rough Wood.
+
+| Check | What you do and look at |
+|---|---|
+| `building-input.select` | in the building mode, Kiln selects Rough Wood Block for actionbar slot 1, as if you picked it in the build menu |
+| `building-input.place-remove` | Kiln places one block about 2.5 m ahead of where you look, then removes it 4 s later; the wood comes back |
+| `building-input.undo-dismantle` | Kiln's undo takes back the block you placed last; Kiln dismantles the one prop you placed (held 1.2 s) |
+| `building-input.own-input` | hold your own build button: Kiln's request stays queued (nothing emitted) until you let go, then one block appears to the right |
+| `building-input.joined` | joined to a server (your client with Kiln and this pack): Ctrl+Shift+F7 places one block ahead and removes it 4 s later; your kiln.log shows both as Dispatched |
+
+Each check asserts what kiln.client answers (queued, then dispatched) and asks what the world did: dispatched is "sent
+as your input", the server still decides.
 
 ## The ledger and the report
 

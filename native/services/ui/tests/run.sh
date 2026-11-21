@@ -148,6 +148,10 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined \
     -I"$here/stubs" -I"$here/../../../core/abi" -I"$imgui" \
     "$here/wheel_host_test.cpp" "${objs[@]}" -o "$out/wheel_host_test"
 "$out/wheel_host_test"
+# the pointer, held buttons and drag and drop between widgets (draw_slots_pointer.inl, 0.2.0-dev.30.3, GitHub issue 113)
+g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -fsanitize=address,undefined \
+    -I"$here/../../../core/abi" -I"$imgui" "$here/pointer_drag_test.cpp" "${objs[@]}" -o "$out/pointer_drag_test"
+"$out/pointer_drag_test"
 # the looks: the game's colours through reflection, the player's look, themes, mod fonts (style.cpp, look_palette.h, font_budget.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -pthread -fsanitize=address,undefined \
     -I"$here/stubs" -I"$here/.." -I"$here/../../../core/abi" -I"$imgui" -I"$here/../../../third_party" \

@@ -27,7 +27,8 @@ unavailable, and every engine-reading member of every service returns its own un
 new profile; nothing structural stands in.
 
 Capability rows: `engine.profile` (an exact profile matched; text: its id), `engine.ecs_read` (owner and ECS read layouts
-validated), `engine.ecs_write` (the original native-thread Scene write gate enabled). Unavailable rows carry
+validated), `engine.ecs_write` (the original native-thread Scene write gate enabled), `engine.attribute_model` (the
+profile publishes an attribute calculation model; text: its name, `attribute-command-v1`). Unavailable rows carry
 `symbol-missing` and the reason in their text. `engine.gate_priority_raise` says whether a gate holder's priority is
 raised (below, "Priority"): available normally, unavailable for `policy` while the measurement switch has turned the
 raise off. Per-call readiness (a world loading, the server thread stopping) stays

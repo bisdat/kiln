@@ -129,8 +129,8 @@ pub fn close_lease_after_fault(shared: &WorkerShared) -> bool {
     let Some(close) = (unsafe { core::ptr::addr_of!((*table).steam_close).read() }) else {
         return false;
     };
-    // SAFETY: kiln_net.h steam_close: any thread, idempotent, never waits.
-    let result = unsafe { close(lease) };
+    // SAFETY: kiln_net.h steam_close: any thread, idempotent, never waits; kiln-sfi's owner opened the lease.
+    let result = unsafe { close(shared.owner(), lease) };
     shared.host().log(
         shared.owner(),
         if result == KILN_OK {

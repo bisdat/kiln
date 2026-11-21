@@ -82,6 +82,7 @@
     "entryType": { "type": "string", "description": "Full name of the Kiln.Mod subclass (default: the only public one)." },
     "exports": { "type": "array", "items": { "$ref": "#/$defs/dll" }, "description": "Assemblies dependents compile against; at run time they get these copies (shared types and state)." },
     "advanced": { "type": "boolean", "default": false, "description": "Opt into the advanced tier (raw hooks, symbols, coremod-style patches); exposed as ModInfo.Advanced." },
+    "steamMessages": { "type": "boolean", "default": false, "description": "The mod talks to Steam users directly: it opens its own Steam peer message leases (Kiln.Network's SteamMessages, since 0.2.0-dev.30.3); exposed as ModInfo.SteamMessages. SteamMessages.Open refuses a mod without it." },
     "systems": {
       "type": "object",
       "additionalProperties": false,

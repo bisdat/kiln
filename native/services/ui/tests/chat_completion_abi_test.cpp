@@ -11,7 +11,12 @@ static_assert(offsetof(KilnUiApi, chat_completion) == 1032);
 // subscribe_pointer_press (0.2.0-dev.30) is appended after it: the table is 1048 bytes
 static_assert(offsetof(KilnUiApi, subscribe_pointer_press) == 1040);
 static_assert(offsetof(KilnUiApi, chat_search) == 1048);
-static_assert(sizeof(KilnUiApi) == 1056);
+// pointer, drag_source and drop_target (0.2.0-dev.30.3) are appended after it: the table is 1080 bytes
+static_assert(offsetof(KilnUiApi, pointer) == 1056);
+static_assert(offsetof(KilnUiApi, drag_source) == 1064);
+static_assert(offsetof(KilnUiApi, drop_target) == 1072);
+static_assert(sizeof(KilnUiApi) == 1080);
+static_assert(sizeof(KilnUiPointer) == 24);
 static_assert(offsetof(KilnUiChatSearch, query) == 64);
 static_assert(offsetof(KilnUiChatSearch, lines) == 321);
 static_assert(sizeof(KilnUiChatSearch) == 10572);

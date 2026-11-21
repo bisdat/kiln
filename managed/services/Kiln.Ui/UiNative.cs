@@ -751,6 +751,46 @@ internal static unsafe class UiNative
         return System.Text.Encoding.UTF8.GetString(p, n);
     }
 
+    /// <summary>KilnUiPointer (kiln_ui.h, 0.2.0-dev.30.3): the pointer in the overlay's pixels and the held mouse buttons.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Pointer
+    {
+        public uint Size, Flags;
+        public float X, Y;
+        public uint Held, Reserved;
+    }
+
+    /// <summary>KILN_UI_POINTER_VALID / _DRAGGING, KILN_UI_DRAG_KIND_MAX / _PAYLOAD_MAX (kiln_ui.h, 0.2.0-dev.30.3).</summary>
+    public const uint PointerValid = 1, PointerDragging = 2;
+    public const int DragKindMax = 32, DragPayloadMax = 4096;
+
+    /// <summary>The tail after chat_search (0.2.0-dev.30.3, GitHub issue 113): pointer, drag_source, drop_target, at
+    /// 1056, 1064 and 1072 (the table is 1080 bytes).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TableDrag
+    {
+        public TableSearch Base;
+        public delegate* unmanaged[Cdecl]<Pointer*, byte> PointerFn;
+        public delegate* unmanaged[Cdecl]<NativeStr, byte*, nuint, NativeStr, byte> DragSource;
+        public delegate* unmanaged[Cdecl]<NativeStr, byte*, nuint, nuint*, byte> DropTarget;
+    }
+
+    /// <summary>kiln.ui's pointer and drag and drop tail, or null on a table without it (a kiln-ui.dll older than
+    /// 0.2.0-dev.30.3). Each slot is still checked for null by its caller. Tests: <see cref="DragOverride"/>.</summary>
+    internal static TableDrag* Drag
+    {
+        get
+        {
+            if (DragOverride != null) return DragOverride;
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableDrag)) return null;
+            return (TableDrag*)t;
+        }
+    }
+
+    /// <summary>Tests: a table of the pointer tail in place of kiln.ui's.</summary>
+    internal static TableDrag* DragOverride;
+
     /// <summary>KILN_UI_GLYPHS_* (kiln_ui.h look_info): the overlay's glyphs of a Chinese, Japanese, Korean or Cyrillic language.</summary>
     public const byte GlyphsLatin = 0, GlyphsLoading = 1, GlyphsReady = 2, GlyphsFailed = 3;
 

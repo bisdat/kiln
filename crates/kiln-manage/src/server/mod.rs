@@ -84,6 +84,10 @@ pub struct ServerMod {
     /// kiln (kiln/mods) or native (kiln/native); None reads as kiln.
     #[serde(default)]
     pub kind: Option<crate::manifest::ModKind>,
+    /// A Kiln mod whose kiln.mod.json says `"steamMessages": true` (since 0.2.0-dev.30.3): it talks to other players
+    /// over Steam peer messages. Written only when true, so older launchers read the list as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub steam_messages: bool,
 }
 
 /// Kiln.Network's `kiln/config/network.json` keys the modpack flow adds (existing keys

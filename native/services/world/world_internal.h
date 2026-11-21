@@ -301,10 +301,25 @@ KilnResult KILN_CALL t_ecs_compare_exchange(KilnOwner owner, const KilnObjectRef
                                             void* confirmed, KilnMutationReply* reply);
 KilnResult KILN_CALL t_ecs_write_subscribe(KilnOwner owner, KilnEcsWriteEventFn fn, void* user, KilnHandle* out);
 KilnResult KILN_CALL t_ecs_write_unsubscribe(KilnHandle subscription);
+// since 0.2.0-dev.30.3: one registration of a world's component catalog (ecs_engine.h registration_detail)
+KilnResult KILN_CALL t_ecs_registration(uint32_t world_kind, uint32_t component, KilnEcsRegistrationDetail* out);
 // ecs_write_check.cpp: the opt-in in-game check of the writes on a named test world
 // (<kiln>/data/kiln.world/ecs-write-check)
 void ecs_write_check_init();                         // on_ready
 void ecs_write_check_pre(const KilnTickInfo* tick);  // server Pre
+// ---- named_prod.cpp: named services from task threads (named_services.cpp; since 0.2.0-dev.30.3) ----
+void named_services_init();   // kiln_plugin_main: the owner-retiring observer
+void named_services_ready();  // on_ready: the exact profile's serviceLayout, the gate, the world.named_* rows
+uint32_t named_capability();  // KILN_WORLD_CAP_NAMED_READ and KILN_WORLD_CAP_NAMED_WRITE, each when on
+bool region_writable(uintptr_t address, size_t bytes);  // region_win.cpp: committed private read-write memory (VirtualQuery)
+KilnResult KILN_CALL t_named_service_open(KilnOwner owner, KilnStr name, uint64_t expected_session, KilnHandle* view,
+                                          const KilnType** type);
+KilnResult KILN_CALL t_named_service_snapshot(KilnOwner owner, KilnHandle view, void* out, uint32_t capacity,
+                                              uint32_t* required);
+KilnResult KILN_CALL t_named_service_close(KilnOwner owner, KilnHandle view);
+KilnResult KILN_CALL t_named_service_compare_exchange(KilnOwner owner, KilnHandle view, const void* expected,
+                                                      const void* mask, const void* desired, uint32_t bytes,
+                                                      void* confirmed, KilnMutationReply* reply);
 
 // ---- entities.cpp ----
 bool may_touch_world();  // tick thread or inside a program

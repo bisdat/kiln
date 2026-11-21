@@ -3,13 +3,14 @@
 //! built from kiln-abi's generated types, so a runtime family can be coded and tested
 //! against Kiln's agreed signatures before (or without) the real core.
 //!
-//! - Tables: a kiln.world v4 subset, kiln.types (status, three types through
+//! - Tables: a kiln.world v4 subset (with the named services over a per-owner [`NamedServices`]), kiln.types (status, three types through
 //!   `type_count` / `type_at` / `type_info`: [`FAKE_TYPES`]; `ecs_registry` over a
 //!   per-owner [`EcsCatalog`], whose types `type_at` / `type_info` also answer), kiln.launch, kiln.hooks, kiln.client,
-//!   kiln.assets, kiln.build, kiln.caps (rows a test sets, read with `find`, `count`,
+//!   kiln.assets, kiln.build (with its task-thread grid `grid_for_session`: [`set_grid_spec`], [`grid_calls`]),
+//!   kiln.caps (rows a test sets, read with `find`, `count`,
 //!   `at` and `generation`; kiln.world's `game_world_session` answers per thread owner, and a
 //!   scripted sequence first),
-//!   kiln.net (kiln-abi's `KilnNetApi` with the private Steam-messages members
+//!   kiln.net (kiln-abi's `KilnNetApi` with the Steam-messages members
 //!   `steam_*` at 128..176, as kiln_net.h describes them; per-owner state [`NetFake`]),
 //!   plus `kiln.fake.timed`, a member whose reply carries
 //!   `source_wait_ns` (the shape the native rows with bounded waits report).
@@ -43,8 +44,6 @@ use kiln_abi::services::kiln_caps::*;
 use kiln_abi::services::kiln_client::*;
 use kiln_abi::services::kiln_hooks::*;
 use kiln_abi::services::kiln_launch::*;
-use kiln_abi::services::kiln_types::*;
-use kiln_abi::services::kiln_world::*;
 use kiln_abi::*;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
@@ -231,6 +230,25 @@ unsafe extern "C" fn entity_open(
     if knob != Knob::Ok {
         return knob.ecs_result();
     }
+    if let Some(answer) = ecs_world(owner, |world| {
+        if world_kind != world.world_kind {
+            return Err(KILN_ERR_UNAVAILABLE);
+        }
+        if expected_session != 0 && expected_session != world.session {
+            return Err(KILN_ECS_ERR_STALE);
+        }
+        let found = world.entities.get(&entity).ok_or(KILN_ERR_NOT_FOUND)?;
+        Ok(model_ref(world, entity, found.generation, reload_epoch))
+    }) {
+        return match answer {
+            // SAFETY: as above.
+            Ok(object) => unsafe {
+                *out = object;
+                KILN_OK
+            },
+            Err(code) => code,
+        };
+    }
     if expected_session != 0 && expected_session != FAKE_SESSION {
         return KILN_ECS_ERR_STALE;
     }
@@ -283,6 +301,22 @@ unsafe extern "C" fn entity_validate(
             reload_epoch: object.reload_epoch,
         };
     }
+    if knob == Knob::Ok
+        // SAFETY: checked above.
+        && let Some(result) = ecs_world(owner, |world| model_entity(world, unsafe { &*object }).map(|_| ()))
+    {
+        let code = result.err().unwrap_or(KILN_OK);
+        // SAFETY: checked above.
+        unsafe {
+            (*out).status = status_of(code);
+            (*out).flags = if code == KILN_OK {
+                KILN_OBJECT_ALIVE as u32
+            } else {
+                0
+            };
+        }
+        return code;
+    }
     knob.ecs_result()
 }
 /// `*out` (its size set) gets the status and, with `Knob::Ok`, a server world in
@@ -308,6 +342,14 @@ unsafe extern "C" fn ecs_context_snapshot(out: *mut KilnEcsContextInfo) -> KilnR
             (*out).exact_profile = 1;
             (*out).sessions[KILN_WORLD_SERVER as usize] = FAKE_SESSION;
             (*out).layout_stamp = 1;
+            if let Some((kind, session, exact)) = ecs_world(THREAD_OWNER.get(), |w| {
+                (w.world_kind, w.session, w.exact_profile)
+            }) {
+                (*out).present_mask = 1u32 << kind;
+                (*out).exact_profile = u32::from(exact);
+                (*out).sessions = [0; KILN_WORLD_KINDS as usize];
+                (*out).sessions[kind as usize] = session;
+            }
         }
     }
     knob.ecs_result()
@@ -341,6 +383,55 @@ unsafe extern "C" fn ecs_query(
     if knob != Knob::Busy || !quiet {
         knob = knob.read();
     }
+    if knob == Knob::Ok
+        && let Some(answer) = ecs_world(owner, |world| {
+            // SAFETY: checked above; the component list is the caller's.
+            let request = unsafe { &*request };
+            if request.world_kind != world.world_kind {
+                return (KILN_ERR_UNAVAILABLE, Vec::new());
+            }
+            if world.query_changed > 0 {
+                world.query_changed -= 1;
+                return (KILN_WORLD_ERR_CHANGED, Vec::new());
+            }
+            let wanted = unsafe {
+                std::slice::from_raw_parts(request.components, request.component_count as usize)
+            };
+            let matches = world
+                .entities
+                .iter()
+                .filter(|(_, e)| wanted.iter().all(|c| e.components.contains_key(c)))
+                .map(|(id, e)| model_ref(world, *id, e.generation, owner))
+                .collect::<Vec<_>>();
+            (KILN_OK, matches)
+        })
+    {
+        let (code, matches) = answer;
+        let code = if code == KILN_OK && (capacity as usize) < matches.len() {
+            KILN_ERR_BUFFER_TOO_SMALL
+        } else {
+            code
+        };
+        if !required.is_null() && (code == KILN_OK || code == KILN_ERR_BUFFER_TOO_SMALL) {
+            // SAFETY: live out pointer.
+            unsafe { *required = matches.len() as u32 };
+        }
+        if code == KILN_OK {
+            // SAFETY: `out` holds `capacity` refs.
+            unsafe { std::ptr::copy_nonoverlapping(matches.as_ptr(), out, matches.len()) };
+        }
+        if !state.is_null() {
+            // SAFETY: live out pointer.
+            unsafe {
+                *state = if code == KILN_ERR_BUFFER_TOO_SMALL {
+                    KILN_ECS_OK as u32
+                } else {
+                    status_of(code)
+                }
+            };
+        }
+        return code;
+    }
     if !state.is_null() {
         // SAFETY: live out pointer.
         unsafe { *state = knob.status() };
@@ -368,6 +459,35 @@ unsafe extern "C" fn ecs_snapshot(
     if knob != Knob::Ok {
         return knob.ecs_result();
     }
+    // SAFETY: checked above.
+    let object_ref = unsafe { *object };
+    if let Some(answer) = ecs_world(owner, |world| {
+        if world.unreadable {
+            return Err(KILN_ECS_ERR_UNREADABLE);
+        }
+        model_entity(world, &object_ref).and_then(|entity| {
+            entity
+                .components
+                .get(&component)
+                .cloned()
+                .ok_or(KILN_ERR_NOT_FOUND)
+        })
+    }) {
+        let bytes = match answer {
+            Ok(bytes) => bytes,
+            Err(code) => return code,
+        };
+        if !required.is_null() {
+            // SAFETY: live out pointer.
+            unsafe { *required = bytes.len() as u32 };
+        }
+        if (capacity as usize) < bytes.len() {
+            return KILN_ERR_BUFFER_TOO_SMALL;
+        }
+        // SAFETY: `out` holds `capacity` bytes.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out.cast::<u8>(), bytes.len()) };
+        return KILN_OK;
+    }
     if !required.is_null() {
         // SAFETY: live out pointer.
         unsafe { *required = FAKE_COMPONENT_SIZE };
@@ -381,6 +501,103 @@ unsafe extern "C" fn ecs_snapshot(
 }
 /// Every component of these fakes is this many bytes.
 pub const FAKE_COMPONENT_SIZE: u32 = 4;
+/// `ecs_snapshot_many` over an owner's [`EcsWorld`] as kiln_world.h describes it: the specs' components packed in
+/// spec order (an absent one takes no room, its presence says ABSENT), `*required` the packed size (0 on a refusal), a
+/// short capacity `KILN_ERR_BUFFER_TOO_SMALL` with nothing copied, every presence the refusal when the call fails. A
+/// spec flag other than `KILN_ECS_READ_FRAME_QUIET` is an invalid argument. Without a world: KILN_ERR_UNAVAILABLE.
+unsafe extern "C" fn ecs_snapshot_many(
+    owner: KilnOwner,
+    object: *const KilnObjectRef,
+    specs: *const KilnEcsSnapshotSpec,
+    count: u32,
+    out: *mut c_void,
+    capacity: u32,
+    required: *mut u32,
+    presence: *mut u32,
+) -> KilnResult {
+    let knob = enter(owner, "ecs_snapshot_many").read();
+    if !required.is_null() {
+        // SAFETY: live out pointer.
+        unsafe { *required = 0 };
+    }
+    if owner == 0
+        || bad_ref(object)
+        || count == 0
+        || specs.is_null()
+        || (capacity != 0 && out.is_null())
+    {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    // SAFETY: the caller's `count` specs.
+    let specs = unsafe { std::slice::from_raw_parts(specs, count as usize) };
+    if specs
+        .iter()
+        .any(|spec| spec.component == 0 || spec.flags & !(KILN_ECS_READ_FRAME_QUIET as u32) != 0)
+    {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    let mark = |status: u32| {
+        if !presence.is_null() {
+            for index in 0..count as usize {
+                // SAFETY: the caller's `count` presence slots.
+                unsafe { *presence.add(index) = status };
+            }
+        }
+    };
+    if knob != Knob::Ok {
+        mark(knob.status());
+        return knob.ecs_result();
+    }
+    // SAFETY: checked above.
+    let object_ref = unsafe { *object };
+    let answer = ecs_world(owner, |world| {
+        if world.unreadable {
+            return Err(KILN_ECS_ERR_UNREADABLE);
+        }
+        model_entity(world, &object_ref).map(|entity| {
+            specs
+                .iter()
+                .map(|spec| entity.components.get(&spec.component).cloned())
+                .collect::<Vec<_>>()
+        })
+    })
+    .unwrap_or(Err(KILN_ERR_UNAVAILABLE));
+    let parts = match answer {
+        Ok(parts) => parts,
+        Err(code) => {
+            mark(status_of(code));
+            return code;
+        }
+    };
+    let total: usize = parts.iter().flatten().map(Vec::len).sum();
+    if !required.is_null() {
+        // SAFETY: live out pointer.
+        unsafe { *required = total as u32 };
+    }
+    for (index, part) in parts.iter().enumerate() {
+        if !presence.is_null() {
+            let status = if part.is_some() {
+                KILN_ECS_OK
+            } else {
+                KILN_ECS_ABSENT
+            } as u32;
+            // SAFETY: the caller's `count` presence slots.
+            unsafe { *presence.add(index) = status };
+        }
+    }
+    if (capacity as usize) < total {
+        return KILN_ERR_BUFFER_TOO_SMALL;
+    }
+    let mut at = 0usize;
+    for part in parts.iter().flatten() {
+        // SAFETY: `out` holds `capacity` >= `total` bytes.
+        unsafe {
+            std::ptr::copy_nonoverlapping(part.as_ptr(), out.cast::<u8>().add(at), part.len())
+        };
+        at += part.len();
+    }
+    KILN_OK
+}
 /// KILN_OK with `out->status` OK (writable), or KILN_ERR_UNAVAILABLE with UNAVAILABLE; no
 /// other knob applies.
 unsafe extern "C" fn ecs_write_policy(
@@ -480,6 +697,161 @@ unsafe extern "C" fn ecs_compare_exchange(
     {
         return KILN_ERR_INVALID_ARGUMENT;
     }
+    let mut knob = knob;
+    if knob == Knob::Ok {
+        // SAFETY: checked above; the buffers are `bytes` long (the caller's contract).
+        let (object_ref, expected_bytes, desired_bytes, mask_bytes) = unsafe {
+            (
+                *object,
+                std::slice::from_raw_parts(expected.cast::<u8>(), bytes as usize).to_vec(),
+                std::slice::from_raw_parts(desired.cast::<u8>(), bytes as usize).to_vec(),
+                (!_mask.is_null()).then(|| {
+                    std::slice::from_raw_parts(_mask.cast::<u8>(), bytes as usize).to_vec()
+                }),
+            )
+        };
+        let policy = write_policy_override(_component);
+        let answer = ecs_world(owner, |world| -> Result<(u32, u32, u32, Vec<u8>), Knob> {
+            match world.cas.pop_front().unwrap_or(CasStep::Plain) {
+                CasStep::Foreign {
+                    entity,
+                    component,
+                    offset,
+                    bytes,
+                } => {
+                    if let Some(stored) = world
+                        .entities
+                        .get_mut(&entity)
+                        .and_then(|e| e.components.get_mut(&component))
+                    {
+                        stored[offset..offset + bytes.len()].copy_from_slice(&bytes);
+                    }
+                }
+                CasStep::Answer(knob) => return Err(knob),
+                CasStep::Plain => {}
+            }
+            let why = |w: i32| w as u32;
+            let entity = match model_entity(world, &object_ref) {
+                Ok(entity) => entity,
+                Err(KILN_ERR_NOT_FOUND) => {
+                    return Ok((
+                        KILN_ECS_ABSENT as u32,
+                        0,
+                        why(KILN_ECS_WRITE_WHY_REF),
+                        Vec::new(),
+                    ));
+                }
+                Err(_) => {
+                    return Ok((
+                        KILN_ECS_STALE as u32,
+                        0,
+                        why(KILN_ECS_WRITE_WHY_REF),
+                        Vec::new(),
+                    ));
+                }
+            };
+            if object_ref.reload_epoch != owner {
+                return Ok((
+                    KILN_ECS_STALE as u32,
+                    0,
+                    why(KILN_ECS_WRITE_WHY_NOT_OWNERS_REF),
+                    Vec::new(),
+                ));
+            }
+            if let Some((status, why_code)) = policy {
+                return Ok((status, 0, why_code, Vec::new()));
+            }
+            let Some(current) = entity.components.get(&_component).cloned() else {
+                return Ok((
+                    KILN_ECS_ABSENT as u32,
+                    0,
+                    why(KILN_ECS_WRITE_WHY_REF),
+                    Vec::new(),
+                ));
+            };
+            if current.len() != expected_bytes.len() {
+                return Ok((
+                    KILN_ECS_NOT_WRITABLE as u32,
+                    0,
+                    why(KILN_ECS_WRITE_WHY_SIZE),
+                    Vec::new(),
+                ));
+            }
+            world.masks.push(mask_bytes.clone());
+            if current != expected_bytes {
+                return Ok((
+                    KILN_ECS_CONFLICT as u32,
+                    KILN_MUTATION_CONFIRMED as u32,
+                    why(KILN_ECS_WRITE_WHY_COMPARE),
+                    current,
+                ));
+            }
+            let merged: Vec<u8> = current
+                .iter()
+                .zip(&desired_bytes)
+                .enumerate()
+                .map(|(i, (old, new))| match &mask_bytes {
+                    Some(mask) if mask[i] == 0 => *old,
+                    _ => *new,
+                })
+                .collect();
+            if merged == current {
+                return Ok((
+                    KILN_ECS_OK as u32,
+                    (KILN_MUTATION_NO_OP | KILN_MUTATION_CONFIRMED) as u32,
+                    why(KILN_ECS_WRITE_WHY_NONE),
+                    current,
+                ));
+            }
+            let id = object_ref.entity;
+            world
+                .entities
+                .get_mut(&id)
+                .unwrap()
+                .components
+                .insert(_component, merged.clone());
+            world.writes.push((id, _component, merged.clone()));
+            Ok((
+                KILN_ECS_OK as u32,
+                (KILN_MUTATION_WRITTEN | KILN_MUTATION_CONFIRMED | KILN_MUTATION_EVENT_QUEUED)
+                    as u32,
+                why(KILN_ECS_WRITE_WHY_NONE),
+                merged,
+            ))
+        });
+        match answer {
+            Some(Ok((status, flags, why_code, seen))) => {
+                // SAFETY: the caller's records, checked above.
+                unsafe {
+                    let size = (*reply).size;
+                    *reply = core::mem::zeroed();
+                    (*reply).size = size;
+                    (*reply).status = status;
+                    (*reply).flags = flags;
+                    (*reply).why_code = why_code;
+                    (*reply).generation = object_ref.generation;
+                    (*reply).session = object_ref.session;
+                    if !_confirmed.is_null() && seen.len() == bytes as usize {
+                        std::ptr::copy_nonoverlapping(
+                            seen.as_ptr(),
+                            _confirmed.cast::<u8>(),
+                            seen.len(),
+                        );
+                    }
+                }
+                return match status as i32 {
+                    KILN_ECS_OK => KILN_OK,
+                    KILN_ECS_ABSENT => KILN_ERR_NOT_FOUND,
+                    KILN_ECS_STALE => KILN_ECS_ERR_STALE,
+                    KILN_ECS_CONFLICT => KILN_ECS_ERR_CONFLICT,
+                    KILN_ECS_NOT_WRITABLE => KILN_ECS_ERR_NOT_WRITABLE,
+                    _ => KILN_ERR_UNAVAILABLE,
+                };
+            }
+            Some(Err(scripted)) => knob = scripted,
+            None => {}
+        }
+    }
     // SAFETY: the caller's reply record, checked above.
     unsafe {
         let size = (*reply).size;
@@ -554,6 +926,613 @@ pub fn fire_ecs_write(owner: KilnOwner, event: *const KilnEcsWriteEvent) -> usiz
     ran
 }
 
+// ---- an ECS world for the ECS members (opt-in per owner) ----
+
+/// One entity of an [`EcsWorld`]: its generation, its components' bytes (by component hash) and its template uuid.
+#[derive(Clone, Debug, Default)]
+pub struct EcsEntity {
+    pub generation: u32,
+    pub components: BTreeMap<u32, Vec<u8>>,
+    pub template: Option<[u8; 16]>,
+}
+
+/// What one `ecs_compare_exchange` call meets first (one step per call, front first; none left: [`CasStep::Plain`]).
+#[derive(Clone, Debug)]
+pub enum CasStep {
+    /// Another writer (a game frame) stores `bytes` at `offset` of the component, then the call runs as usual.
+    Foreign {
+        entity: KilnEntity,
+        component: u32,
+        offset: usize,
+        bytes: Vec<u8>,
+    },
+    /// The call answers this knob's outcome as `Knob` does (reply status and why_code), writing nothing.
+    Answer(Knob),
+    /// The compare and the write as kiln_world.h describes them.
+    Plain,
+}
+
+/// An owner's ECS world: with one, the ECS members answer from it (after the owner's knob, which still comes first):
+/// `entity_open`, `entity_validate`, `ecs_query` (no bounds), `ecs_snapshot`, `ecs_template_uuid` and
+/// `ecs_compare_exchange` as kiln_world.h describes them, `ecs_context_snapshot` (on a thread bound to the owner)
+/// with this world present. Refs carry the world's session and generation; a query's refs the owner as reload epoch.
+#[derive(Clone, Debug)]
+pub struct EcsWorld {
+    pub world_kind: u32,
+    pub session: u64,
+    pub exact_profile: bool,
+    pub entities: BTreeMap<KilnEntity, EcsEntity>,
+    pub cas: std::collections::VecDeque<CasStep>,
+    /// Every committed write: (entity, component, the bytes written).
+    pub writes: Vec<(KilnEntity, u32, Vec<u8>)>,
+    /// The mask of every compare-exchange that got as far as its compare (None for a NULL mask).
+    pub masks: Vec<Option<Vec<u8>>>,
+    /// The next this many queries answer KILN_WORLD_ERR_CHANGED.
+    pub query_changed: u32,
+    /// Every `ecs_snapshot` answers KILN_ECS_ERR_UNREADABLE (the copy changed under the read).
+    pub unreadable: bool,
+}
+impl EcsWorld {
+    /// A server world in session [`FAKE_SESSION`] with an exact profile and no entities.
+    pub fn server() -> Self {
+        Self {
+            world_kind: KILN_WORLD_SERVER as u32,
+            session: FAKE_SESSION,
+            exact_profile: true,
+            entities: BTreeMap::new(),
+            cas: Default::default(),
+            writes: Vec::new(),
+            masks: Vec::new(),
+            query_changed: 0,
+            unreadable: false,
+        }
+    }
+    /// The world with entity `id` (generation 1) holding `components`.
+    pub fn with(mut self, id: KilnEntity, components: &[(u32, Vec<u8>)]) -> Self {
+        self.entities.insert(
+            id,
+            EcsEntity {
+                generation: 1,
+                components: components.iter().cloned().collect(),
+                template: None,
+            },
+        );
+        self
+    }
+}
+static ECS_WORLDS: LazyLock<Mutex<HashMap<KilnOwner, EcsWorld>>> = LazyLock::new(Default::default);
+/// Sets (or, with None, removes) `owner`'s ECS world.
+pub fn set_ecs_world(owner: KilnOwner, world: Option<EcsWorld>) {
+    let mut all = ECS_WORLDS.lock().unwrap();
+    match world {
+        Some(world) => all.insert(owner, world),
+        None => all.remove(&owner),
+    };
+}
+/// Changes (or reads) `owner`'s ECS world; None without one.
+pub fn ecs_world<R>(owner: KilnOwner, f: impl FnOnce(&mut EcsWorld) -> R) -> Option<R> {
+    ECS_WORLDS.lock().unwrap().get_mut(&owner).map(f)
+}
+/// The `KILN_ECS_*` status a record carries for a member's result.
+fn status_of(result: KilnResult) -> u32 {
+    (match result {
+        KILN_OK => KILN_ECS_OK,
+        KILN_ERR_NOT_FOUND => KILN_ECS_ABSENT,
+        KILN_ECS_ERR_STALE => KILN_ECS_STALE,
+        KILN_ECS_ERR_UNREADABLE | KILN_WORLD_ERR_CHANGED => KILN_ECS_UNREADABLE,
+        KILN_ECS_ERR_BUSY => KILN_ECS_BUSY,
+        KILN_ECS_ERR_CONFLICT => KILN_ECS_CONFLICT,
+        KILN_ECS_ERR_NOT_WRITABLE => KILN_ECS_NOT_WRITABLE,
+        KILN_ECS_ERR_UNCERTAIN => KILN_ECS_UNCERTAIN,
+        _ => KILN_ECS_UNAVAILABLE,
+    }) as u32
+}
+/// The entity a ref names in `world`, or the member's refusal.
+fn model_entity<'w>(
+    world: &'w EcsWorld,
+    object: &KilnObjectRef,
+) -> Result<&'w EcsEntity, KilnResult> {
+    if object.world_kind != world.world_kind {
+        return Err(KILN_ERR_UNAVAILABLE);
+    }
+    if object.session != world.session {
+        return Err(KILN_ECS_ERR_STALE);
+    }
+    let entity = world
+        .entities
+        .get(&object.entity)
+        .ok_or(KILN_ERR_NOT_FOUND)?;
+    if entity.generation != object.generation {
+        return Err(KILN_ECS_ERR_STALE);
+    }
+    Ok(entity)
+}
+fn model_ref(world: &EcsWorld, id: KilnEntity, generation: u32, epoch: u64) -> KilnObjectRef {
+    KilnObjectRef {
+        size: core::mem::size_of::<KilnObjectRef>() as u32,
+        entity: id,
+        generation,
+        world_kind: world.world_kind,
+        session: world.session,
+        layout_stamp: 1,
+        reload_epoch: epoch,
+    }
+}
+unsafe extern "C" fn ecs_template_uuid(
+    owner: KilnOwner,
+    object: *const KilnObjectRef,
+    guid: *mut u8,
+) -> KilnResult {
+    let knob = enter(owner, "ecs_template_uuid").read();
+    if owner == 0 || bad_ref(object) || guid.is_null() {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    if knob != Knob::Ok {
+        return knob.ecs_result();
+    }
+    // SAFETY: checked above.
+    let object = unsafe { *object };
+    let answer = ecs_world(owner, |world| {
+        model_entity(world, &object).and_then(|entity| entity.template.ok_or(KILN_ERR_NOT_FOUND))
+    });
+    match answer {
+        Some(Ok(uuid)) => {
+            // SAFETY: the caller's 16 bytes.
+            unsafe { std::ptr::copy_nonoverlapping(uuid.as_ptr(), guid, 16) };
+            KILN_OK
+        }
+        Some(Err(code)) => code,
+        None => KILN_ERR_NOT_FOUND,
+    }
+}
+
+// ---- kiln.world's named services (since 0.2.0-dev.30.3) ----
+
+/// What one `named_service_snapshot` or `named_service_compare_exchange` meets first (one step per call, front first;
+/// none left: [`NamedStep::Plain`]).
+#[derive(Clone, Debug)]
+pub enum NamedStep {
+    /// Another writer (a game system) stores `bytes` at `offset` of the service, then the call runs as usual.
+    Foreign {
+        key: String,
+        offset: usize,
+        bytes: Vec<u8>,
+    },
+    /// The call answers this `KilnResult` (a compare-exchange: with the matching reply status), copying and writing
+    /// nothing.
+    Answer(KilnResult),
+    /// The snapshot or the compare-exchange as kiln_world.h describes them.
+    Plain,
+}
+
+/// An owner's named services: with them, `named_service_open`, `_snapshot`, `_close` and `_compare_exchange` answer
+/// as kiln_world.h describes them (after the owner's knob, which still comes first). Views are bound to the session
+/// they were opened in; `session` 0 is "no server world".
+#[derive(Clone, Debug)]
+pub struct NamedServices {
+    pub session: u64,
+    /// The services by key: their bytes (the size is their length).
+    pub services: BTreeMap<String, Vec<u8>>,
+    /// Open views: handle -> (key, session).
+    pub views: BTreeMap<KilnHandle, (String, u64)>,
+    pub next: KilnHandle,
+    pub steps: std::collections::VecDeque<NamedStep>,
+    /// Every committed write: (key, the bytes written).
+    pub writes: Vec<(String, Vec<u8>)>,
+    /// The mask of every compare-exchange that got as far as its compare (None for a NULL mask).
+    pub masks: Vec<Option<Vec<u8>>>,
+    pub closed: Vec<KilnHandle>,
+}
+impl NamedServices {
+    /// Session [`FAKE_SESSION`], no service.
+    pub fn new() -> Self {
+        Self {
+            session: FAKE_SESSION,
+            services: BTreeMap::new(),
+            views: BTreeMap::new(),
+            next: 0x5e00,
+            steps: Default::default(),
+            writes: Vec::new(),
+            masks: Vec::new(),
+            closed: Vec::new(),
+        }
+    }
+    /// With service `key` holding `bytes`.
+    pub fn with(mut self, key: &str, bytes: Vec<u8>) -> Self {
+        self.services.insert(key.to_owned(), bytes);
+        self
+    }
+}
+impl Default for NamedServices {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+static NAMED: LazyLock<Mutex<HashMap<KilnOwner, NamedServices>>> = LazyLock::new(Default::default);
+/// Sets (or, with None, removes) `owner`'s named services.
+pub fn set_named_services(owner: KilnOwner, named: Option<NamedServices>) {
+    let mut all = NAMED.lock().unwrap();
+    match named {
+        Some(named) => all.insert(owner, named),
+        None => all.remove(&owner),
+    };
+}
+/// Changes (or reads) `owner`'s named services; None without them.
+pub fn named_services<R>(owner: KilnOwner, f: impl FnOnce(&mut NamedServices) -> R) -> Option<R> {
+    NAMED.lock().unwrap().get_mut(&owner).map(f)
+}
+/// The `KILN_ECS_*` reply status of a compare-exchange's result.
+fn named_status(result: KilnResult) -> u32 {
+    status_of(result)
+}
+/// The view `handle` of `owner` in `named`: its key, or the member's refusal.
+fn named_view(named: &NamedServices, handle: KilnHandle) -> Result<String, KilnResult> {
+    let (key, session) = named.views.get(&handle).ok_or(KILN_ERR_NOT_FOUND)?;
+    if named.session == 0 {
+        return Err(KILN_ERR_UNAVAILABLE);
+    }
+    if *session != named.session {
+        return Err(KILN_ECS_ERR_STALE);
+    }
+    Ok(key.clone())
+}
+fn named_foreign(named: &mut NamedServices) -> Option<KilnResult> {
+    match named.steps.pop_front().unwrap_or(NamedStep::Plain) {
+        NamedStep::Foreign { key, offset, bytes } => {
+            if let Some(stored) = named.services.get_mut(&key) {
+                stored[offset..offset + bytes.len()].copy_from_slice(&bytes);
+            }
+            None
+        }
+        NamedStep::Answer(code) => Some(code),
+        NamedStep::Plain => None,
+    }
+}
+unsafe extern "C" fn named_service_open(
+    owner: KilnOwner,
+    name: KilnStr,
+    expected_session: u64,
+    view: *mut KilnHandle,
+    ty: *mut *const KilnType,
+) -> KilnResult {
+    let knob = enter(owner, "named_service_open").read();
+    if owner == 0 || view.is_null() || name.ptr.is_null() || name.len == 0 || name.len > 127 {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    // SAFETY: the caller's counted name.
+    let key = unsafe { std::slice::from_raw_parts(name.ptr.cast::<u8>(), name.len) };
+    let Ok(key) = std::str::from_utf8(key) else {
+        return KILN_ERR_INVALID_ARGUMENT;
+    };
+    if key.contains('\0') || key.starts_with("keen::") {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    // SAFETY: checked above; the type is optional.
+    unsafe {
+        *view = 0;
+        if !ty.is_null() {
+            *ty = std::ptr::null();
+        }
+    }
+    if knob != Knob::Ok {
+        return knob.ecs_result();
+    }
+    let answer = named_services(owner, |named| -> Result<KilnHandle, KilnResult> {
+        if !named.services.contains_key(key) {
+            return Err(KILN_ERR_NOT_FOUND);
+        }
+        if named.session == 0 {
+            return Err(KILN_ERR_UNAVAILABLE);
+        }
+        if expected_session != 0 && expected_session != named.session {
+            return Err(KILN_ECS_ERR_STALE);
+        }
+        named.next += 1;
+        let handle = named.next;
+        named.views.insert(handle, (key.to_owned(), named.session));
+        Ok(handle)
+    });
+    match answer {
+        Some(Ok(handle)) => {
+            // SAFETY: checked above.
+            unsafe { *view = handle };
+            KILN_OK
+        }
+        Some(Err(code)) => code,
+        None => KILN_ERR_UNAVAILABLE,
+    }
+}
+unsafe extern "C" fn named_service_snapshot(
+    owner: KilnOwner,
+    view: KilnHandle,
+    out: *mut c_void,
+    capacity: u32,
+    required: *mut u32,
+) -> KilnResult {
+    let knob = enter(owner, "named_service_snapshot").read();
+    if owner == 0 || (capacity != 0 && out.is_null()) {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    if knob != Knob::Ok {
+        return knob.ecs_result();
+    }
+    let answer = named_services(owner, |named| -> Result<Vec<u8>, (KilnResult, u32)> {
+        let key = named_view(named, view).map_err(|code| (code, 0))?;
+        let size = named.services[&key].len() as u32;
+        if capacity < size {
+            return Err((KILN_ERR_BUFFER_TOO_SMALL, size));
+        }
+        if let Some(code) = named_foreign(named) {
+            return Err((code, size));
+        }
+        Ok(named.services[&key].clone())
+    });
+    let (result, size, bytes) = match answer {
+        Some(Ok(bytes)) => (KILN_OK, bytes.len() as u32, Some(bytes)),
+        Some(Err((code, size))) => (code, size, None),
+        None => (KILN_ERR_NOT_FOUND, 0, None),
+    };
+    if !required.is_null() {
+        // SAFETY: the caller's optional out count.
+        unsafe { *required = size };
+    }
+    if let Some(bytes) = bytes {
+        // SAFETY: `capacity` >= the size, the caller's buffer.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out.cast::<u8>(), bytes.len()) };
+    }
+    result
+}
+unsafe extern "C" fn named_service_close(owner: KilnOwner, view: KilnHandle) -> KilnResult {
+    enter(owner, "named_service_close");
+    if owner == 0 {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    named_services(owner, |named| {
+        if named.views.remove(&view).is_some() {
+            named.closed.push(view);
+            KILN_OK
+        } else {
+            KILN_ERR_NOT_FOUND
+        }
+    })
+    .unwrap_or(KILN_ERR_NOT_FOUND)
+}
+unsafe extern "C" fn named_service_compare_exchange(
+    owner: KilnOwner,
+    view: KilnHandle,
+    expected: *const c_void,
+    mask: *const c_void,
+    desired: *const c_void,
+    bytes: u32,
+    confirmed: *mut c_void,
+    reply: *mut KilnMutationReply,
+) -> KilnResult {
+    let knob = enter(owner, "named_service_compare_exchange");
+    // SAFETY: `reply` read only when non-NULL.
+    if owner == 0
+        || expected.is_null()
+        || desired.is_null()
+        || bytes == 0
+        || reply.is_null()
+        || unsafe { (*reply).size } < core::mem::size_of::<KilnMutationReply>() as u32
+    {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    let n = bytes as usize;
+    // SAFETY: checked above; the buffers are `bytes` long (the caller's contract).
+    let (expected, desired, mask) = unsafe {
+        (
+            std::slice::from_raw_parts(expected.cast::<u8>(), n).to_vec(),
+            std::slice::from_raw_parts(desired.cast::<u8>(), n).to_vec(),
+            (!mask.is_null()).then(|| std::slice::from_raw_parts(mask.cast::<u8>(), n).to_vec()),
+        )
+    };
+    let (result, status, flags, why, session, seen) = if knob != Knob::Ok {
+        (
+            knob.ecs_result(),
+            knob.ecs_status(),
+            0u32,
+            0u32,
+            FAKE_SESSION,
+            None,
+        )
+    } else {
+        named_services(owner, |named| {
+            let session = named.session;
+            let key = match named_view(named, view) {
+                Ok(key) => key,
+                Err(code) => {
+                    return (
+                        code,
+                        named_status(code),
+                        0,
+                        KILN_ECS_WRITE_WHY_REF as u32,
+                        session,
+                        None,
+                    );
+                }
+            };
+            if let Some(code) = named_foreign(named) {
+                return (code, named_status(code), 0, 0, session, None);
+            }
+            let current = named.services[&key].clone();
+            if current.len() != n {
+                let code = KILN_ECS_ERR_NOT_WRITABLE;
+                return (
+                    code,
+                    named_status(code),
+                    0,
+                    KILN_ECS_WRITE_WHY_SIZE as u32,
+                    session,
+                    None,
+                );
+            }
+            named.masks.push(mask.clone());
+            if current != expected {
+                let code = KILN_ECS_ERR_CONFLICT;
+                return (
+                    code,
+                    named_status(code),
+                    KILN_MUTATION_CONFIRMED as u32,
+                    KILN_ECS_WRITE_WHY_COMPARE as u32,
+                    session,
+                    Some(current),
+                );
+            }
+            let merged: Vec<u8> = current
+                .iter()
+                .zip(&desired)
+                .enumerate()
+                .map(|(i, (old, new))| match &mask {
+                    Some(mask) if mask[i] == 0 => *old,
+                    _ => *new,
+                })
+                .collect();
+            if merged == current {
+                let flags = (KILN_MUTATION_NO_OP | KILN_MUTATION_CONFIRMED) as u32;
+                return (
+                    KILN_OK,
+                    KILN_ECS_OK as u32,
+                    flags,
+                    0,
+                    session,
+                    Some(current),
+                );
+            }
+            named.services.insert(key.clone(), merged.clone());
+            named.writes.push((key, merged.clone()));
+            let flags = (KILN_MUTATION_WRITTEN | KILN_MUTATION_CONFIRMED) as u32;
+            (KILN_OK, KILN_ECS_OK as u32, flags, 0, session, Some(merged))
+        })
+        .unwrap_or((KILN_ERR_NOT_FOUND, KILN_ECS_ABSENT as u32, 0, 0, 0, None))
+    };
+    // SAFETY: checked above; `confirmed` is optional and `bytes` long.
+    unsafe {
+        let size = (*reply).size;
+        std::ptr::write_bytes(reply, 0, 1);
+        (*reply).size = size;
+        (*reply).status = status;
+        (*reply).why_code = why;
+        (*reply).session = session;
+        match (&seen, confirmed.is_null()) {
+            (Some(bytes), false) if flags & KILN_MUTATION_CONFIRMED as u32 != 0 => {
+                (*reply).flags = flags;
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), confirmed.cast::<u8>(), n);
+            }
+            _ => (*reply).flags = flags & !(KILN_MUTATION_CONFIRMED as u32),
+        }
+    }
+    result
+}
+
+// ---- kiln.world's ecs_registration (since 0.2.0-dev.30.3) ----
+
+/// The registration rows one owner's kiln.world answers, and its scripted refusals.
+#[derive(Clone, Default)]
+pub struct RegistrationFake {
+    /// The catalog's rows, found by their `component` hash.
+    pub rows: Vec<KilnEcsRegistrationDetail>,
+    /// `Some(result)`: every call answers that result (status UNAVAILABLE), writing no row.
+    pub refuse: Option<KilnResult>,
+    /// The next this many calls answer KILN_ECS_ERR_UNREADABLE (a catalog that moved during the read).
+    pub unreadable: u32,
+}
+static REGISTRATIONS: LazyLock<Mutex<HashMap<KilnOwner, RegistrationFake>>> =
+    LazyLock::new(Default::default);
+pub fn set_registrations(owner: KilnOwner, fake: Option<RegistrationFake>) {
+    let mut map = REGISTRATIONS.lock().unwrap();
+    match fake {
+        Some(fake) => map.insert(owner, fake),
+        None => map.remove(&owner),
+    };
+}
+pub fn registrations<R>(owner: KilnOwner, f: impl FnOnce(&mut RegistrationFake) -> R) -> Option<R> {
+    REGISTRATIONS.lock().unwrap().get_mut(&owner).map(f)
+}
+/// One row of a template-capable registration: `name`'s own template type of `size` bytes, and a storage type
+/// (`storage`: its hash and size, (0, 0) for a template-only registration).
+pub fn template_row(
+    index: u32,
+    name: &str,
+    size: u32,
+    storage: (u32, u32),
+) -> KilnEcsRegistrationDetail {
+    // SAFETY: all-zero records are valid (integers only).
+    let mut row: KilnEcsRegistrationDetail = unsafe { std::mem::zeroed() };
+    row.size = std::mem::size_of::<KilnEcsRegistrationDetail>() as u32;
+    row.index = index;
+    row.component = fnv1a(name);
+    row.runtime_size = storage.1;
+    row.storage_hash = storage.0;
+    row.storage_size = storage.1;
+    row.template_hash = fnv1a(name);
+    row.template_size = size;
+    row.layout_stamp = 0x303e_c500_0001;
+    row
+}
+fn fnv1a(text: &str) -> u32 {
+    text.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+    })
+}
+unsafe extern "C" fn ecs_registration(
+    world_kind: u32,
+    component: u32,
+    out: *mut KilnEcsRegistrationDetail,
+) -> KilnResult {
+    let owner = THREAD_OWNER.get();
+    let knob = enter(owner, "ecs_registration");
+    // SAFETY: read only when non-NULL.
+    if out.is_null()
+        || unsafe { (*out).size } < core::mem::size_of::<KilnEcsRegistrationDetail>() as u32
+        || world_kind >= KILN_WORLD_KINDS as u32
+    {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    // SAFETY: checked above.
+    let out = unsafe { &mut *out };
+    let size = out.size;
+    // SAFETY: all-zero records are valid (integers only).
+    *out = unsafe { core::mem::zeroed() };
+    out.size = size;
+    out.component = component;
+    if knob != Knob::Ok {
+        out.status = KILN_ECS_UNAVAILABLE as u32;
+        return KILN_ERR_UNAVAILABLE;
+    }
+    let answer = registrations(owner, |fake| {
+        if let Some(result) = fake.refuse {
+            return Err(result);
+        }
+        if fake.unreadable > 0 {
+            fake.unreadable -= 1;
+            return Err(KILN_ECS_ERR_UNREADABLE);
+        }
+        Ok(fake
+            .rows
+            .iter()
+            .find(|row| row.component == component)
+            .copied())
+    })
+    .unwrap_or(Err(KILN_ERR_UNAVAILABLE));
+    match answer {
+        Ok(Some(row)) => {
+            *out = row;
+            out.size = size;
+            KILN_OK
+        }
+        Ok(None) => KILN_ERR_NOT_FOUND,
+        Err(result) => {
+            out.status = if result == KILN_ECS_ERR_UNREADABLE {
+                KILN_ECS_UNREADABLE
+            } else {
+                KILN_ECS_UNAVAILABLE
+            } as u32;
+            result
+        }
+    }
+}
+
 pub static WORLD: KilnWorldApi = {
     // SAFETY: every member is a nullable function pointer or plain data.
     let mut table: KilnWorldApi = unsafe { std::mem::zeroed() };
@@ -568,11 +1547,18 @@ pub static WORLD: KilnWorldApi = {
     table.ecs_context_snapshot = Some(ecs_context_snapshot);
     table.ecs_query = Some(ecs_query);
     table.ecs_snapshot = Some(ecs_snapshot);
+    table.ecs_snapshot_many = Some(ecs_snapshot_many);
+    table.ecs_template_uuid = Some(ecs_template_uuid);
     table.ecs_write_policy = Some(ecs_write_policy);
     table.ecs_compare_exchange = Some(ecs_compare_exchange);
     table.ecs_write_subscribe = Some(ecs_write_subscribe);
     table.ecs_write_unsubscribe = Some(ecs_write_unsubscribe);
     table.game_world_session = Some(game_world_session);
+    table.named_service_open = Some(named_service_open);
+    table.named_service_snapshot = Some(named_service_snapshot);
+    table.named_service_close = Some(named_service_close);
+    table.named_service_compare_exchange = Some(named_service_compare_exchange);
+    table.ecs_registration = Some(ecs_registration);
     table
 };
 
@@ -958,13 +1944,160 @@ pub static HOOKS: KilnHooksApi = {
     table
 };
 
+/// A test's kiln.client (opt-in per owner): `state` answers from it on a thread bound to that owner (the next scripted
+/// state first, then `state`), and the building input members model kiln_client.h's one request slot: ids from 1,
+/// QUEUED at submit, `status` and `cancel` answer only the latest id (UNKNOWN and not cancelled otherwise), a queued
+/// or pressed request makes the next submit BUSY, `refuse` (when set) answers every submit.
+#[derive(Clone, Default)]
+pub struct ClientModel {
+    pub state: Option<KilnClientState>,
+    pub scripted: std::collections::VecDeque<KilnClientState>,
+    pub refuse: Option<KilnResult>,
+    pub next_id: u32,
+    pub latest: u32,
+    pub states: HashMap<u32, u32>,
+    pub submitted: Vec<KilnBuildingInput>,
+    pub cancelled: Vec<u32>,
+}
+impl ClientModel {
+    /// A client hosting a world (session 1) whose local player is `player`.
+    pub fn local(player: KilnEntity) -> Self {
+        Self {
+            state: Some(KilnClientState {
+                size: std::mem::size_of::<KilnClientState>() as u32,
+                side: KILN_SIDE_CLIENT as u32,
+                session: KILN_SESSION_HOST as u32,
+                generation: 1,
+                local_player: player,
+                flags: (KILN_CLIENT_LOCAL_PLAYER | KILN_CLIENT_LIFECYCLE) as u32,
+                client_session: 1,
+                server_session: 1,
+                client_steps: 0,
+                server_steps: 0,
+            }),
+            ..Self::default()
+        }
+    }
+}
+static CLIENTS: LazyLock<Mutex<HashMap<KilnOwner, ClientModel>>> = LazyLock::new(Default::default);
+/// Sets (or, with None, removes) `owner`'s kiln.client model.
+pub fn set_client(owner: KilnOwner, model: Option<ClientModel>) {
+    let mut all = CLIENTS.lock().unwrap();
+    match model {
+        Some(model) => all.insert(owner, model),
+        None => all.remove(&owner),
+    };
+}
+/// Changes (or reads) `owner`'s kiln.client model; None without one.
+pub fn client<R>(owner: KilnOwner, f: impl FnOnce(&mut ClientModel) -> R) -> Option<R> {
+    CLIENTS.lock().unwrap().get_mut(&owner).map(f)
+}
+unsafe extern "C" fn building_input_submit(
+    owner: KilnOwner,
+    _expected_session: u64,
+    input: *const KilnBuildingInput,
+    request_id: *mut u32,
+) -> KilnResult {
+    enter(owner, "client.building_input_submit");
+    // SAFETY: read only when non-NULL.
+    if owner == 0
+        || input.is_null()
+        || request_id.is_null()
+        || unsafe { (*input).size } < std::mem::size_of::<KilnBuildingInput>() as u32
+    {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    // SAFETY: checked above.
+    let input = unsafe { *input };
+    client(owner, |model| {
+        model.submitted.push(input);
+        if let Some(code) = model.refuse {
+            return code;
+        }
+        if model.states.values().any(|s| {
+            *s == KILN_BUILDING_INPUT_QUEUED as u32 || *s == KILN_BUILDING_INPUT_PRESSED as u32
+        }) {
+            return KILN_CLIENT_ERR_BUILDING_BUSY;
+        }
+        model.next_id = model.next_id.wrapping_add(1).max(1);
+        model.latest = model.next_id;
+        model
+            .states
+            .insert(model.latest, KILN_BUILDING_INPUT_QUEUED as u32);
+        // SAFETY: checked above.
+        unsafe { *request_id = model.latest };
+        KILN_OK
+    })
+    .unwrap_or(KILN_ERR_UNAVAILABLE)
+}
+unsafe extern "C" fn building_input_status(
+    owner: KilnOwner,
+    id: u32,
+    state: *mut u32,
+) -> KilnResult {
+    enter(owner, "client.building_input_status");
+    if owner == 0 || state.is_null() {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    client(owner, |model| {
+        let answer = if id == model.latest {
+            model.states.get(&id).copied().unwrap_or(0)
+        } else {
+            0
+        };
+        // SAFETY: checked above.
+        unsafe { *state = answer };
+        KILN_OK
+    })
+    .unwrap_or(KILN_ERR_UNAVAILABLE)
+}
+unsafe extern "C" fn building_input_cancel(
+    owner: KilnOwner,
+    id: u32,
+    cancelled: *mut u32,
+) -> KilnResult {
+    enter(owner, "client.building_input_cancel");
+    if owner == 0 || cancelled.is_null() {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    client(owner, |model| {
+        let latest = id != 0 && id == model.latest;
+        if latest {
+            model.cancelled.push(id);
+            if let Some(state) = model.states.get_mut(&id)
+                && *state != KILN_BUILDING_INPUT_DISPATCHED as u32
+            {
+                *state = KILN_BUILDING_INPUT_CANCELLED as u32;
+            }
+        }
+        // SAFETY: checked above.
+        unsafe { *cancelled = u32::from(latest) };
+        KILN_OK
+    })
+    .unwrap_or(KILN_ERR_UNAVAILABLE)
+}
 unsafe extern "C" fn client_state(out: *mut KilnClientState) -> KilnResult {
     let knob = enter_thread("client.state");
     if out.is_null() {
-        KILN_ERR_INVALID_ARGUMENT
-    } else {
-        knob.plain_result()
+        return KILN_ERR_INVALID_ARGUMENT;
     }
+    if knob == Knob::Ok
+        && let Some(state) = client(THREAD_OWNER.get(), |model| {
+            model.scripted.pop_front().or(model.state)
+        })
+    {
+        let Some(state) = state else {
+            return KILN_ERR_UNAVAILABLE;
+        };
+        // SAFETY: the caller's record (its size was set by the caller).
+        unsafe {
+            let size = (*out).size;
+            *out = state;
+            (*out).size = size;
+        }
+        return KILN_OK;
+    }
+    knob.plain_result()
 }
 unsafe extern "C" fn on_client_thread() -> bool {
     enter_thread("client.on_client_thread");
@@ -978,6 +2111,9 @@ pub static CLIENT: KilnClientApi = {
     };
     table.state = Some(client_state);
     table.on_client_thread = Some(on_client_thread);
+    table.building_input_submit = Some(building_input_submit);
+    table.building_input_status = Some(building_input_status);
+    table.building_input_cancel = Some(building_input_cancel);
     table
 };
 
@@ -1009,6 +2145,326 @@ unsafe extern "C" fn resource_read(
     }
     knob.plain_result()
 }
+// ---- kiln.assets' loaded resources (loaded_snapshot, loaded_list) ----
+
+/// The loaded resources one owner's kiln.assets answers.
+#[derive(Clone, Default)]
+pub struct LoadedFake {
+    /// The loaded resources, in listing order.
+    pub resources: Vec<(KilnAssetKey, Vec<u8>)>,
+    /// `Some(status)`: every read answers KILN_ERR_UNAVAILABLE with that KilnLoadedInfo status.
+    pub refuse: Option<u32>,
+    /// The next this many answers report a size larger than the buffer they got (a resource or list that keeps
+    /// growing): KILN_ERR_BUFFER_TOO_SMALL.
+    pub growing: u32,
+    /// A size reported instead of the real one (the safety limits), with KILN_ERR_BUFFER_TOO_SMALL.
+    pub reported: Option<usize>,
+    /// `loaded_scalar_compare_exchange`'s server session (0: [`FAKE_SESSION`]).
+    pub session: u64,
+    /// `Some(status)`: the next compare-exchange answers that KILN_ECS_* status, writing nothing.
+    pub cas_answer: Option<u32>,
+    /// The reply's why_code of that answer (KILN_ECS_WRITE_WHY_*).
+    pub cas_why: u32,
+    /// `Some(result)`: the next compare-exchange returns that KilnResult without touching the reply.
+    pub cas_refuse: Option<KilnResult>,
+    /// The next this many reads with a buffer (capacity > 0) answer KILN_ERR_UNAVAILABLE with KILN_LOADED_CHANGED (a
+    /// copy that changed meanwhile), while a size query still finds the resource.
+    pub torn_reads: u32,
+    /// Every committed write: (key, offset, the scalar's bytes, session).
+    pub writes: Vec<(KilnAssetKey, usize, Vec<u8>, u64)>,
+}
+static LOADED: LazyLock<Mutex<HashMap<KilnOwner, LoadedFake>>> = LazyLock::new(Default::default);
+pub fn set_loaded(owner: KilnOwner, fake: Option<LoadedFake>) {
+    let mut map = LOADED.lock().unwrap();
+    match fake {
+        Some(fake) => map.insert(owner, fake),
+        None => map.remove(&owner),
+    };
+}
+pub fn loaded<R>(owner: KilnOwner, f: impl FnOnce(&mut LoadedFake) -> R) -> Option<R> {
+    LOADED.lock().unwrap().get_mut(&owner).map(f)
+}
+thread_local! {
+    /// Called inside every loaded read (a world session that moves between the caller's two samples).
+    static ON_LOADED: RefCell<Option<Box<dyn Fn()>>> = const { RefCell::new(None) };
+}
+pub fn on_loaded_call(f: Option<Box<dyn Fn()>>) {
+    ON_LOADED.with_borrow_mut(|slot| *slot = f);
+}
+fn same_key(a: &KilnAssetKey, b: &KilnAssetKey) -> bool {
+    a.guid == b.guid && a.r#type == b.r#type && a.part == b.part
+}
+/// One loaded answer: Ok(bytes or keys count), or the refusal (result, status).
+enum LoadedAnswer {
+    Grow(usize),
+    Refuse(KilnResult, u32),
+    Size(usize),
+}
+fn loaded_answer(
+    owner: KilnOwner,
+    size: impl FnOnce(&LoadedFake) -> Option<usize>,
+    capacity: usize,
+) -> LoadedAnswer {
+    ON_LOADED.with_borrow(|hook| {
+        if let Some(hook) = hook {
+            hook();
+        }
+    });
+    let mut map = LOADED.lock().unwrap();
+    let Some(fake) = map.get_mut(&owner) else {
+        return LoadedAnswer::Refuse(KILN_ERR_UNAVAILABLE, KILN_LOADED_NOT_READY as u32);
+    };
+    if let Some(status) = fake.refuse {
+        return LoadedAnswer::Refuse(KILN_ERR_UNAVAILABLE, status);
+    }
+    if let Some(reported) = fake.reported {
+        return LoadedAnswer::Grow(reported);
+    }
+    if fake.growing > 0 {
+        fake.growing -= 1;
+        return LoadedAnswer::Grow(capacity + 1);
+    }
+    match size(fake) {
+        Some(size) => LoadedAnswer::Size(size),
+        None => LoadedAnswer::Refuse(KILN_ERR_NOT_FOUND, KILN_LOADED_MISSING as u32),
+    }
+}
+unsafe extern "C" fn loaded_snapshot(
+    owner: KilnOwner,
+    key: *const KilnAssetKey,
+    bytes: *mut c_void,
+    capacity: usize,
+    required: *mut usize,
+    info: *mut KilnLoadedInfo,
+) -> KilnResult {
+    let knob = enter(owner, "loaded_snapshot");
+    // SAFETY: the caller's record, when not NULL.
+    if owner == 0
+        || key.is_null()
+        || required.is_null()
+        || info.is_null()
+        || unsafe { (*info).size } < 24
+    {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    if knob != Knob::Ok {
+        return knob.plain_result();
+    }
+    // SAFETY: checked above.
+    let (key, info) = unsafe { (*key, &mut *info) };
+    let torn = capacity > 0
+        && loaded(owner, |fake| {
+            let torn = fake.torn_reads > 0;
+            fake.torn_reads -= u32::from(torn);
+            torn
+        })
+        .unwrap_or(false);
+    if torn {
+        info.status = KILN_LOADED_CHANGED as u32;
+        // SAFETY: the caller's out pointer.
+        unsafe { *required = 0 };
+        return KILN_ERR_UNAVAILABLE;
+    }
+    let answer = loaded_answer(
+        owner,
+        |fake| {
+            fake.resources
+                .iter()
+                .find(|(k, _)| same_key(k, &key))
+                .map(|(_, b)| b.len())
+        },
+        capacity,
+    );
+    info.status = 0;
+    info.flags = 0;
+    info.handle = 0;
+    // SAFETY: the caller's out pointer.
+    unsafe { *required = 0 };
+    let size = match answer {
+        LoadedAnswer::Refuse(result, status) => {
+            info.status = status;
+            return result;
+        }
+        LoadedAnswer::Grow(size) => {
+            info.bytes = size as u64;
+            // SAFETY: as above.
+            unsafe { *required = size };
+            return KILN_ERR_BUFFER_TOO_SMALL;
+        }
+        LoadedAnswer::Size(size) => size,
+    };
+    info.bytes = size as u64;
+    info.handle = 1;
+    // SAFETY: as above.
+    unsafe { *required = size };
+    if capacity < size {
+        return KILN_ERR_BUFFER_TOO_SMALL;
+    }
+    let data = LOADED.lock().unwrap()[&owner]
+        .resources
+        .iter()
+        .find(|(k, _)| same_key(k, &key))
+        .map(|(_, b)| b.clone())
+        .unwrap_or_default();
+    // SAFETY: the caller's buffer of `capacity` bytes.
+    unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), bytes.cast::<u8>(), data.len()) };
+    KILN_OK
+}
+unsafe extern "C" fn loaded_list(
+    owner: KilnOwner,
+    type_hash: u32,
+    out: *mut KilnAssetKey,
+    capacity: usize,
+    required: *mut usize,
+    info: *mut KilnLoadedInfo,
+) -> KilnResult {
+    let knob = enter(owner, "loaded_list");
+    // SAFETY: the caller's record, when not NULL.
+    if owner == 0 || required.is_null() || info.is_null() || unsafe { (*info).size } < 24 {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    if knob != Knob::Ok {
+        return knob.plain_result();
+    }
+    // SAFETY: checked above.
+    let info = unsafe { &mut *info };
+    let answer = loaded_answer(
+        owner,
+        |fake| {
+            Some(
+                fake.resources
+                    .iter()
+                    .filter(|(k, _)| k.r#type == type_hash)
+                    .count(),
+            )
+        },
+        capacity,
+    );
+    // SAFETY: the caller's out pointer.
+    unsafe { *required = 0 };
+    let count = match answer {
+        LoadedAnswer::Refuse(result, status) => {
+            info.status = status;
+            return result;
+        }
+        LoadedAnswer::Grow(count) => {
+            // SAFETY: as above.
+            unsafe { *required = count };
+            return KILN_ERR_BUFFER_TOO_SMALL;
+        }
+        LoadedAnswer::Size(count) => count,
+    };
+    info.status = 0;
+    info.bytes = count as u64;
+    // SAFETY: as above.
+    unsafe { *required = count };
+    if capacity < count {
+        return KILN_ERR_BUFFER_TOO_SMALL;
+    }
+    let keys: Vec<KilnAssetKey> = LOADED.lock().unwrap()[&owner]
+        .resources
+        .iter()
+        .filter(|(k, _)| k.r#type == type_hash)
+        .map(|(k, _)| *k)
+        .collect();
+    // SAFETY: room for `capacity` keys.
+    unsafe { std::ptr::copy_nonoverlapping(keys.as_ptr(), out, keys.len()) };
+    KILN_OK
+}
+
+#[allow(clippy::too_many_arguments)]
+unsafe extern "C" fn loaded_scalar_compare_exchange(
+    owner: KilnOwner,
+    key: *const KilnAssetKey,
+    expected_session: u64,
+    expected_full: *const c_void,
+    resource_size: usize,
+    offset: usize,
+    desired: *const c_void,
+    width: u32,
+    reply: *mut KilnMutationReply,
+) -> KilnResult {
+    let knob = enter(owner, "loaded_scalar_compare_exchange");
+    let width = width as usize;
+    // SAFETY: the caller's record, when not NULL.
+    if owner == 0
+        || key.is_null()
+        || expected_full.is_null()
+        || desired.is_null()
+        || reply.is_null()
+        || unsafe { (*reply).size } < std::mem::size_of::<KilnMutationReply>() as u32
+        || expected_session == 0
+        || !matches!(width, 1 | 2 | 4 | 8)
+        || !offset.is_multiple_of(width)
+        || offset + width > resource_size
+    {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    if knob != Knob::Ok {
+        return knob.plain_result();
+    }
+    if let Some(result) = loaded(owner, |f| f.cas_refuse.take()).flatten() {
+        return result;
+    }
+    // SAFETY: checked above; the caller's buffers of those sizes.
+    let (key, reply, expected, desired) = unsafe {
+        (
+            *key,
+            &mut *reply,
+            std::slice::from_raw_parts(expected_full.cast::<u8>(), resource_size).to_vec(),
+            std::slice::from_raw_parts(desired.cast::<u8>(), width).to_vec(),
+        )
+    };
+    reply.session = expected_session;
+    let mut why = 0u32;
+    let status = {
+        let mut map = LOADED.lock().unwrap();
+        match map.get_mut(&owner) {
+            None => KILN_ECS_UNAVAILABLE,
+            Some(fake) => {
+                let session = if fake.session == 0 {
+                    FAKE_SESSION
+                } else {
+                    fake.session
+                };
+                if let Some(answer) = fake.cas_answer.take() {
+                    why = std::mem::take(&mut fake.cas_why);
+                    answer as i32
+                } else if session != expected_session {
+                    KILN_ECS_STALE
+                } else {
+                    match fake.resources.iter_mut().find(|(k, _)| same_key(k, &key)) {
+                        None => KILN_ECS_STALE,
+                        Some((_, bytes)) if bytes.len() != resource_size => KILN_ECS_STALE,
+                        Some((_, bytes)) if *bytes != expected => KILN_ECS_CONFLICT,
+                        Some((_, bytes)) => {
+                            bytes[offset..offset + width].copy_from_slice(&desired);
+                            fake.writes
+                                .push((key, offset, desired.clone(), expected_session));
+                            KILN_ECS_OK
+                        }
+                    }
+                }
+            }
+        }
+    };
+    reply.status = status as u32;
+    reply.why_code = why;
+    reply.flags = if status == KILN_ECS_OK {
+        (KILN_MUTATION_WRITTEN | KILN_MUTATION_CONFIRMED) as u32
+    } else {
+        0
+    };
+    match status {
+        KILN_ECS_OK => KILN_OK,
+        KILN_ECS_CONFLICT => KILN_ECS_ERR_CONFLICT,
+        KILN_ECS_STALE => KILN_ECS_ERR_STALE,
+        KILN_ECS_UNCERTAIN => KILN_ECS_ERR_UNCERTAIN,
+        KILN_ECS_BUSY => KILN_ECS_ERR_BUSY,
+        _ => KILN_ERR_UNAVAILABLE,
+    }
+}
+
 pub static ASSETS: KilnAssetsApi = {
     let mut table: KilnAssetsApi = unsafe { std::mem::zeroed() };
     table.header = KilnServiceHeader {
@@ -1017,6 +2473,9 @@ pub static ASSETS: KilnAssetsApi = {
     };
     table.status = Some(assets_status);
     table.resource_read = Some(resource_read);
+    table.loaded_snapshot = Some(loaded_snapshot);
+    table.loaded_list = Some(loaded_list);
+    table.loaded_scalar_compare_exchange = Some(loaded_scalar_compare_exchange);
     table
 };
 
@@ -1036,6 +2495,124 @@ unsafe extern "C" fn build_read(
 ) -> KilnResult {
     enter_thread("build.read").plain_result()
 }
+/// The grid `grid_for_session` answers on a thread bound to `owner` (its record, size aside); without one the current
+/// builds' grid ([`current_grid`]).
+static GRID_SPECS: LazyLock<Mutex<HashMap<KilnOwner, KilnBuildGridSpec>>> =
+    LazyLock::new(Default::default);
+/// Every `grid_for_session` call per owner: (expected session, id bytes).
+type GridCalls = HashMap<KilnOwner, Vec<(u64, Vec<u8>)>>;
+static GRID_CALLS: LazyLock<Mutex<GridCalls>> = LazyLock::new(Default::default);
+/// The caller owner each `grid_for_session` call named, per thread owner.
+static GRID_CALLERS: LazyLock<Mutex<HashMap<KilnOwner, Vec<KilnOwner>>>> =
+    LazyLock::new(Default::default);
+/// The current builds' grid: origin (0, -4, 0), 0.5 m cells, 20480 x (2^31 - 8) x 20480 cells.
+pub fn current_grid() -> KilnBuildGridSpec {
+    // SAFETY: plain C record; every field valid when zeroed.
+    let mut spec: KilnBuildGridSpec = unsafe { std::mem::zeroed() };
+    spec.size = std::mem::size_of::<KilnBuildGridSpec>() as u32;
+    for (slot, byte) in spec.id.iter_mut().zip(b"voxel") {
+        *slot = *byte as core::ffi::c_char;
+    }
+    spec.origin = [0.0, -4.0, 0.0];
+    spec.cell_size = [0.5; 3];
+    spec.maximum = [20480, 0x7fff_ffff - 7, 20480];
+    spec
+}
+pub fn set_grid_spec(owner: KilnOwner, spec: Option<KilnBuildGridSpec>) {
+    let mut specs = GRID_SPECS.lock().unwrap();
+    match spec {
+        Some(spec) => specs.insert(owner, spec),
+        None => specs.remove(&owner),
+    };
+}
+pub fn grid_callers(owner: KilnOwner) -> Vec<KilnOwner> {
+    GRID_CALLERS
+        .lock()
+        .unwrap()
+        .get(&owner)
+        .cloned()
+        .unwrap_or_default()
+}
+pub fn grid_calls(owner: KilnOwner) -> Vec<(u64, Vec<u8>)> {
+    GRID_CALLS
+        .lock()
+        .unwrap()
+        .get(&owner)
+        .cloned()
+        .unwrap_or_default()
+}
+/// kiln_build.h grid_for_session (the caller's owner recorded: [`grid_callers`]): the real member's argument checks first, then the knob (busy, stale, unreadable,
+/// unavailable; conflict and uncertain are not its outcomes and answer as ok), then the session: the owner's server
+/// world session (`game_world_session`'s fixed value) or stale. The record is written on KILN_OK only.
+unsafe extern "C" fn grid_for_session(
+    caller: KilnOwner,
+    session: u64,
+    id: KilnStr,
+    out: *mut KilnBuildGridSpec,
+) -> KilnResult {
+    let owner = THREAD_OWNER.get();
+    let knob = enter(owner, "build.grid_for_session");
+    // SAFETY: the caller's id, readable for len bytes when not NULL.
+    let bytes = if id.ptr.is_null() {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(id.ptr.cast::<u8>(), id.len) }.to_vec()
+    };
+    GRID_CALLS
+        .lock()
+        .unwrap()
+        .entry(owner)
+        .or_default()
+        .push((session, bytes.clone()));
+    GRID_CALLERS
+        .lock()
+        .unwrap()
+        .entry(owner)
+        .or_default()
+        .push(caller);
+    // SAFETY: a live record when not NULL (the caller's contract).
+    if out.is_null()
+        || unsafe { (*out).size } < std::mem::size_of::<KilnBuildGridSpec>() as u32
+        || session == 0
+        || caller == 0
+    {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    if bytes.is_empty() || bytes.len() >= 16 || bytes.contains(&0) {
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    if bytes != b"voxel" {
+        return KILN_ERR_NOT_FOUND;
+    }
+    match knob {
+        Knob::Busy | Knob::Stale | Knob::Unreadable | Knob::Unavailable => {
+            return knob.ecs_result();
+        }
+        _ => {}
+    }
+    let live = WORLD_SESSIONS
+        .lock()
+        .unwrap()
+        .get(&(owner, KILN_WORLD_SERVER as u32))
+        .copied()
+        .unwrap_or(FAKE_SESSION);
+    if session != live {
+        return KILN_ECS_ERR_STALE;
+    }
+    let spec = GRID_SPECS
+        .lock()
+        .unwrap()
+        .get(&owner)
+        .copied()
+        .unwrap_or_else(current_grid);
+    // SAFETY: as above; the caller's size is kept.
+    unsafe {
+        let size = (*out).size;
+        *out = spec;
+        (*out).size = size;
+    }
+    KILN_OK
+}
 pub static BUILD: KilnBuildApi = {
     let mut table: KilnBuildApi = unsafe { std::mem::zeroed() };
     table.header = KilnServiceHeader {
@@ -1044,6 +2621,7 @@ pub static BUILD: KilnBuildApi = {
     };
     table.status = Some(build_status);
     table.read = Some(build_read);
+    table.grid_for_session = Some(grid_for_session);
     table
 };
 
@@ -1211,7 +2789,7 @@ pub static TIMED: FakeTimedApi = FakeTimedApi {
     call: Some(timed_call),
 };
 
-// ---- kiln.net: v1 plus the internal Steam-messages block ----
+// ---- kiln.net: v1 plus the Steam-messages members ----
 
 use kiln_abi::services::kiln_net::KilnNetApi;
 use kiln_sfi::runtime::network::l16::*;
@@ -1272,6 +2850,9 @@ pub struct NetFake {
     pub registrations: u32,
     /// The callback's registration faults (`g_register_faulted`): REGISTERED never comes.
     pub register_fails: bool,
+    /// The owner every lease call (close, maintain, send, receive, accept) on this owner's leases passed, in order.
+    /// kiln.net answers a lease of another owner as a closed one (`KILN_ERR_NOT_FOUND`), and so does this fake.
+    pub lease_call_owners: Vec<(&'static str, KilnOwner)>,
 }
 impl Default for NetFake {
     fn default() -> Self {
@@ -1292,6 +2873,7 @@ impl Default for NetFake {
             policies: Vec::new(),
             registrations: 0,
             register_fails: false,
+            lease_call_owners: Vec::new(),
         }
     }
 }
@@ -1329,6 +2911,23 @@ pub fn queue(owner: KilnOwner, channel: u32, steps: impl IntoIterator<Item = Inb
 }
 fn lease_owner(lease: KilnHandle) -> (KilnOwner, usize) {
     (lease >> 16, (lease & 0xffff) as usize)
+}
+/// kiln.net's owner check of a lease member (steam_messages.cpp): owner 0 is an invalid argument, and a lease of another
+/// owner answers as a closed one. Records the owner passed under the lease's owner.
+fn lease_caller(
+    member: &'static str,
+    owner: KilnOwner,
+    lease: KilnHandle,
+) -> Result<(), KilnResult> {
+    if owner == 0 {
+        return Err(KILN_ERR_INVALID_ARGUMENT);
+    }
+    let (holder, _) = lease_owner(lease);
+    net(holder, |n| n.lease_call_owners.push((member, owner)));
+    if holder != owner {
+        return Err(KILN_ERR_NOT_FOUND);
+    }
+    Ok(())
 }
 /// The open lease `lease` names: (owner, first, last).
 fn open_lease(lease: KilnHandle) -> Option<(KilnOwner, u32, u32)> {
@@ -1421,9 +3020,14 @@ unsafe extern "C" fn steam_open(
         KILN_OK
     })
 }
-unsafe extern "C" fn steam_close(lease: KilnHandle) -> KilnResult {
+unsafe extern "C" fn steam_close(caller: KilnOwner, lease: KilnHandle) -> KilnResult {
     let (owner, index) = lease_owner(lease);
     enter(owner, "net.close");
+    match lease_caller("close", caller, lease) {
+        Err(KILN_ERR_NOT_FOUND) => return KILN_OK, // another owner's lease: nothing to close
+        Err(code) => return code,
+        Ok(()) => {}
+    }
     net(owner, |n| {
         if let Some(l) = n.leases.get_mut(index.wrapping_sub(1))
             && l.4
@@ -1439,12 +3043,16 @@ unsafe extern "C" fn steam_close(lease: KilnHandle) -> KilnResult {
     KILN_OK
 }
 unsafe extern "C" fn steam_maintain(
+    caller: KilnOwner,
     lease: KilnHandle,
     policy: *const KilnSteamAcceptPolicy,
     out: *mut KilnSteamMessagesStatus,
 ) -> KilnResult {
     let (owner, index) = lease_owner(lease);
     enter(owner, "net.maintain");
+    if let Err(code) = lease_caller("maintain", caller, lease) {
+        return code;
+    }
     // SAFETY: read only when non-NULL.
     if !out.is_null() && unsafe { (*out).size } < size_of::<KilnSteamMessagesStatus>() as u32 {
         return KILN_ERR_INVALID_ARGUMENT;
@@ -1522,6 +3130,7 @@ unsafe extern "C" fn steam_maintain(
 }
 #[allow(clippy::too_many_arguments)]
 unsafe extern "C" fn steam_send(
+    caller: KilnOwner,
     lease: KilnHandle,
     peer: u64,
     data: *const c_void,
@@ -1532,6 +3141,9 @@ unsafe extern "C" fn steam_send(
 ) -> KilnResult {
     let (owner, _) = lease_owner(lease);
     enter(owner, "net.send");
+    if let Err(code) = lease_caller("send", caller, lease) {
+        return code;
+    }
     let Some((_, first, last)) = open_lease(lease) else {
         return KILN_ERR_INVALID_ARGUMENT;
     };
@@ -1567,6 +3179,7 @@ unsafe extern "C" fn steam_send(
     })
 }
 unsafe extern "C" fn steam_receive(
+    caller: KilnOwner,
     lease: KilnHandle,
     channel: u32,
     buffer: *mut c_void,
@@ -1576,6 +3189,9 @@ unsafe extern "C" fn steam_receive(
 ) -> KilnResult {
     let (owner, _) = lease_owner(lease);
     enter(owner, "net.receive");
+    if let Err(code) = lease_caller("receive", caller, lease) {
+        return code;
+    }
     let Some((_, first, last)) = open_lease(lease) else {
         return KILN_ERR_INVALID_ARGUMENT;
     };
@@ -1622,9 +3238,17 @@ unsafe extern "C" fn steam_receive(
         }
     }
 }
-unsafe extern "C" fn steam_accept(lease: KilnHandle, peer: u64, accepted: *mut u32) -> KilnResult {
+unsafe extern "C" fn steam_accept(
+    caller: KilnOwner,
+    lease: KilnHandle,
+    peer: u64,
+    accepted: *mut u32,
+) -> KilnResult {
     let (owner, _) = lease_owner(lease);
     enter(owner, "net.accept");
+    if let Err(code) = lease_caller("accept", caller, lease) {
+        return code;
+    }
     if open_lease(lease).is_none() || peer == 0 || accepted.is_null() {
         return KILN_ERR_INVALID_ARGUMENT;
     }

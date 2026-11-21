@@ -11,4 +11,8 @@
   <ItemGroup>
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- BuildingInputTests: the binding's layout (BuildingInputNative) against kiln_client.h -->
+    <InternalsVisibleTo Include="Kiln.Api.Tests" />
+  </ItemGroup>
 </Project>
