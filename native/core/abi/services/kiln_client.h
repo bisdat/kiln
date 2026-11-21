@@ -33,7 +33,8 @@ typedef struct KilnClientState {
     uint64_t server_steps;    /* server-world steps since boot */
 } KilnClientState;
 
-/* kiln-internal begin: building input, Kiln's own in this release (no supported game build has its input producer yet).
+/* kiln-internal begin: building input, Kiln's own in this release (bound on game client 26430625 only, and held by the
+ * client gate there until its guided checks pass in a real game).
  * The SDK's headers leave out every line from here to "kiln-internal end" (managed/Kiln.Sdk/Kiln.Sdk.csproj).
  * One request at a time for the whole client, emitted through the local player's ordinary input path. See
  * docs/kiln/services/client-building-input.md. */

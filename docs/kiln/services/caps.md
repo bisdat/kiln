@@ -81,7 +81,8 @@ Since 0.2.0-dev.30.3 the list holds `client.building_input` on the game client
   no config key of a service's own, no sigdb overlay.
 - **Lifting it:** `"preview"` in `kiln.json`, at the top level or in a side section (which replaces the top-level
   one): `true` for every held capability, or a list of names. A name in the list that nothing holds is a warning in
-  `kiln.log`. No preview setting is needed for this release’s guided pass.
+  `kiln.log`. Since 0.2.0-dev.30.3 only `client.building_input`'s guided checks need a preview setting
+  ([client-pass.md](../client-pass.md#building-input)); every other check of the pass runs without one.
   ```json
   { "preview": ["camera.fov"], "client": { "preview": true } }
   ```
