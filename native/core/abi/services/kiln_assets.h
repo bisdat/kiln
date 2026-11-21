@@ -403,5 +403,16 @@ typedef struct KilnAssetsApi {
 
 #ifdef __cplusplus
 }
+static_assert(offsetof(KilnAssetsApi, blob_read_resident) == 224, "kiln.assets ends its dev.29 members at 232");
+static_assert(offsetof(KilnAssetsApi, loaded_snapshot) == 232 && offsetof(KilnAssetsApi, loaded_list) == 240 &&
+                  offsetof(KilnAssetsApi, loaded_scalar_compare_exchange) == 248 && sizeof(KilnAssetsApi) == 256,
+              "the loaded-resource members are appended at 232 (table 256 bytes, x64)");
+static_assert(sizeof(KilnLoadedInfo) == 24 && offsetof(KilnLoadedInfo, handle) == 12 && offsetof(KilnLoadedInfo, bytes) == 16,
+              "KilnLoadedInfo layout");
+#else
+_Static_assert(offsetof(KilnAssetsApi, loaded_snapshot) == 232 && offsetof(KilnAssetsApi, loaded_list) == 240 &&
+                   offsetof(KilnAssetsApi, loaded_scalar_compare_exchange) == 248 && sizeof(KilnAssetsApi) == 256,
+               "the loaded-resource members are appended at 232 (table 256 bytes, x64)");
+_Static_assert(sizeof(KilnLoadedInfo) == 24 && offsetof(KilnLoadedInfo, bytes) == 16, "KilnLoadedInfo layout");
 #endif
 #endif
