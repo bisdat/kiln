@@ -18,6 +18,14 @@ pub const KILN_IMPACT_TYPE_FLOAT32: u32 = 3902764048;
 pub const KILN_IMPACT_TYPE_SINT32: u32 = 2556031774;
 pub const KILN_IMPACT_TYPE_TIME: u32 = 3756319748;
 pub const KILN_IMPACT_TYPE_UINT32: u32 = 848563180;
+pub const KILN_ITEM_USE_BUSY: i32 = 7;
+pub const KILN_ITEM_USE_DEAD: i32 = 5;
+pub const KILN_ITEM_USE_EMPTY_SLOT: i32 = 2;
+pub const KILN_ITEM_USE_NOT_A_PLAYER: i32 = 4;
+pub const KILN_ITEM_USE_NOT_OWN_SLOT: i32 = 1;
+pub const KILN_ITEM_USE_NOT_READY: i32 = 6;
+pub const KILN_ITEM_USE_OTHER_ITEM: i32 = 3;
+pub const KILN_ITEM_USE_STARTED: i32 = 0;
 pub const KILN_NATIVE_AFTER: i32 = 2;
 pub const KILN_NATIVE_APPLY_BUFF: u32 = 2448624422;
 pub const KILN_NATIVE_APPLY_DAMAGE: u32 = 2957839994;
@@ -254,6 +262,21 @@ pub struct KilnNativeCounters {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct KilnItemUse {
+    pub size: u32,
+    pub entity: KilnEntity,
+    pub slot: u64,
+    pub item: u32,
+    pub sequence: u32,
+    pub flags: u32,
+    pub status: u32,
+    pub count: u32,
+    pub reserved: u32,
+    pub trigger_time: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct KilnAbilitiesApi {
     pub header: KilnServiceHeader,
     pub status: Option<unsafe extern "C" fn(*mut KilnAbilitiesStatus) -> KilnResult>,
@@ -294,4 +317,5 @@ pub struct KilnAbilitiesApi {
     pub native_attach_state: Option<unsafe extern "C" fn(KilnHandle, *mut u32) -> KilnResult>,
     pub native_ecs_read: Option<unsafe extern "C" fn(*const KilnNativeCall, KilnStr, u32, *mut core::ffi::c_void, u32) -> KilnResult>,
     pub native_ecs_write: Option<unsafe extern "C" fn(*mut KilnNativeCall, KilnStr, u32, *const core::ffi::c_void, u32, u32, *mut core::ffi::c_void, *mut core::ffi::c_void) -> KilnResult>,
+    pub item_use: Option<unsafe extern "C" fn(*mut KilnItemUse) -> KilnResult>,
 }

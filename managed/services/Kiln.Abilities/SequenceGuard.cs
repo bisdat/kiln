@@ -34,15 +34,22 @@ internal static class SequenceGuard
             }
             if (!_subs.TryGetValue(sequence, out var subs)) return null;
             foreach (var sub in subs)
-            {
-                if (sub.GetJson("events")?["value"] is not JsonArray events) continue;
-                foreach (var ev in events)
-                    if (ev?["consume"] is JsonValue v && v.TryGetValue<bool>(out var consume) && consume && (string?)ev["$type"] is { } type
-                        // the cost payer checks for no item (0x40d00), and staff attacks have it on
-                        && !type.EndsWith("PayUsageCost", StringComparison.Ordinal))
-                        return $"{sub.Name}: {type}";
-            }
+                if (ConsumingEventIn(sub.GetJson("events")?["value"]) is { } type)
+                    return $"{sub.Name}: {type}";
             return null;
         }
+    }
+
+    /// <summary>The type of the first event of one sub-sequence's events (kiln.gamedata's JSON array) that consumes the used
+    /// item, or null. PayUsageCost does not count: the cost payer checks for no item (0x40d00), and staff attacks have it
+    /// on.</summary>
+    internal static string? ConsumingEventIn(JsonNode? events)
+    {
+        if (events is not JsonArray list) return null;
+        foreach (var ev in list)
+            if (ev?["consume"] is JsonValue v && v.TryGetValue<bool>(out var consume) && consume && (string?)ev["$type"] is { } type
+                && !type.EndsWith("PayUsageCost", StringComparison.Ordinal))
+                return type;
+        return null;
     }
 }

@@ -187,6 +187,7 @@
             "instance_read": 40,
             "instance_vars": 32,
             "instance_write": 48,
+            "item_use": 312,
             "native_at": 120,
             "native_attach": 256,
             "native_attach_state": 288,
@@ -217,7 +218,7 @@
             "set_wrap_dispatcher": 184,
             "status": 8
           },
-          "size": 312
+          "size": 320
         },
         "KilnAbilitiesStatus": {
           "align": 8,
@@ -324,6 +325,22 @@
           },
           "size": 88
         },
+        "KilnItemUse": {
+          "align": 8,
+          "fields": {
+            "count": 32,
+            "entity": 4,
+            "flags": 24,
+            "item": 16,
+            "reserved": 36,
+            "sequence": 20,
+            "size": 0,
+            "slot": 8,
+            "status": 28,
+            "trigger_time": 40
+          },
+          "size": 48
+        },
         "KilnNativeArg": {
           "align": 4,
           "fields": {
@@ -409,7 +426,7 @@
           "size": 88
         }
       },
-      "sha256": "03ab9f018597d874b25c9b4908fa44c4d4fb3c82e271b09d1bf22a818f5d0683"
+      "sha256": "025befc80610ab5360a853042c90f8366dd224f5293966bdd0a50c761ea3ebc4"
     },
     "native/core/abi/services/kiln_assets.h": {
       "function_macros": [],
@@ -8273,8 +8290,8 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "0c42dbc5c2ea60e28bac1e7babc603fc6f36b9a2685932e3a752fe24d4928759",
-    "src/services/kiln_abilities.rs": "42fa3c6b0f9c1276be2af0990c616024d5ae924ccc58110ea9ca1b984d95071e",
+    "src/layout.rs": "50cc885d2ed16629c58d38b9e65487ba7aa54a838af6282975b82ffd199d4fb0",
+    "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
     "src/services/kiln_audio.rs": "52a49e9a14975f3abecbe7200bb2dce40c0af7fd54f50faf7890befe559d8d7c",
