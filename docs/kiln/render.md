@@ -210,6 +210,9 @@ A waiting outline takes over when the reason goes away (the winner ends, the mod
   takes a group it did not set, other than the building cursor's.
 - **No through-walls outline.** The game draws its highlight with the model, so what stands in front of the entity
   hides it.
+- **Many at once.** Kiln reads up to 64 entities' models per client step, so a batch of hundreds lights up over a few
+  steps. A model that is remade (or hidden) is noticed at the next step; one that appears later (streamed in, shown
+  again) is found within 16 steps.
 - **Models only.** Entities drawn through `ModelComponent` can be outlined: props, chests, stations, NPCs, creatures,
   dropped items. Voxel models and the terrain cannot (they wait with `NoModel`).
 - **Client only.** On a dedicated server `OutlinesAvailable` is false. Nothing is installed for a player whose mods
