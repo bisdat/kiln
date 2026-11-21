@@ -268,6 +268,24 @@ int main() {
     CHECK(saw_ms && saw_xp);
     const auto log = report_log(r);
     CHECK(!log.empty());
+
+    // ---- an element's value set over an old boot patch's value: "overridden" (D1), not "composedOn"
+    {
+        std::vector<Refusal> rf;
+        OldWrite ow;
+        ow.kind = WriterKind::OldPatch, ow.mod = "oldxp", ow.who = "oldxp/xp";
+        ow.field = {"balance", "game:balance", "xpPerLevel"};
+        ow.op.set = true, ow.op.value = ints({1500, 2000, 3000, 4000, 5000});
+        ModInput m;
+        m.id = "newxp";
+        m.batches.push_back(batch(s, "newxp", "alter", R"([{"registry": "balance", "select": {"id": "game:balance"}, "field": "xpPerLevel[0]", "op": 2222}])", &rf));
+        const Result x = compose(s, base(), {ow}, {m});
+        const FieldOutcome* fo = field(x, "balance", "game:balance", "xpPerLevel");
+        CHECK(fo && fo->result.list.size() == 5 && fo->result.list[0].i == 2222);
+        size_t over = 0, on = 0;
+        for (const Line& l : x.lines) over += l.kind == LineKind::Overridden, on += l.kind == LineKind::ComposedOn;
+        CHECK(over == 1 && on == 0);
+    }
     std::printf("registry-generated-test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

@@ -606,7 +606,7 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
                                        (e.exclusive ? "; the later edit is refused" : " exclusively; the later edit is refused"));
         }
         if (prev && other(*prev)) {  // a line when this edit follows another writer's (not after the mod's own)
-            if (absolute(t)) {
+            if (absolute(t) || (t.elem() && t.list == ListOp::None && t.op().set)) {  // an element's value set is a value too (D1)
                 st.line = !(st.next == cur);
                 st.kind = LineKind::Overridden;
             } else {
