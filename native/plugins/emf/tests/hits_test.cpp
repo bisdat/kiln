@@ -6,6 +6,8 @@
 //   hits_test no-mods    no EMF mod loaded: no relay is registered and on_hit says why
 //   hits_test no-relay   kiln.world refuses the relay: a registration made before on_ready is told, later ones refused
 //   hits_test mod-event  a mod's own on_event("HitEvent") keeps the relay reading while no on_hit callback listens
+//   hits_test bad-layout a game build whose HitEvent fields moved (sigdb combat/hit.flags) or whose reflected size
+//                        differs: no relay, a registration made before on_ready is told, later ones refused
 #include <cstdarg>
 #include <cstdio>
 #include <map>
@@ -90,7 +92,8 @@ uint32_t fnv1a(std::string_view s) {
     for (auto c : s) h = (h ^ static_cast<uint8_t>(c)) * 16777619u;
     return h;
 }
-uint32_t type_size(uint32_t hash) { return hash == fnv1a("keen::ecs::HitEvent") ? 248 : 0; }
+static uint32_t hit_event_size = 248;
+uint32_t type_size(uint32_t hash) { return hash == fnv1a("keen::ecs::HitEvent") ? hit_event_size : 0; }
 std::string format(const char*, ...) { return {}; }
 // ItemState of weapon entities: 900 holds item 0xABCD; 901's component is too small to be an ItemState
 static uint8_t item_state[20], short_state[8];
@@ -107,6 +110,7 @@ using namespace kemf;
 static uintptr_t worlds[3] = {0x1000, 0, 0x2000};
 static std::map<std::string, KilnProgramDesc> programs;
 static bool refuse_programs = false;
+static int64_t hit_flags_at = -1;  // sigdb combat/hit.flags on this "build" (-1: not resolved)
 static KilnCombatApi combat{};
 static int health_calls = 0;
 
@@ -198,7 +202,8 @@ static void setup(KilnApi& api, KilnWorldApi& world) {
     api.constant = [](KilnStr n, int64_t* v) -> KilnResult {
         const std::string s(n.ptr, n.len);
         *v = s == "combat/evq.first" ? 0 : s == "combat/evq.blocks" ? 8 : s == "combat/evq.count" ? 16 : s == "combat/evq.next" ? 0
-             : s == "combat/evq.block_shift" ? 8 : -1;
+             : s == "combat/evq.block_shift" ? 8 : s == "combat/hit.flags" ? hit_flags_at
+             : s == "combat/hit.health_change" ? 188 : -1;
         return *v < 0 ? KILN_ERR_NOT_FOUND : KILN_OK;
     };
     api.symbol = [](KilnStr, uintptr_t*) -> KilnResult { return KILN_ERR_NOT_FOUND; };
@@ -355,6 +360,21 @@ static void test_no_relay(EmfApi& t) {
     CHECK(!t.on_hit(&cb_a, nullptr) && unsupported_fns.count("on_hit") == 1);
 }
 
+static void test_bad_layout(EmfApi& t) {
+    CHECK(t.on_hit(&cb_a, nullptr));
+    hit_flags_at = 0x9C;  // the flags moved on this build
+    hits_on_ready(true);
+    events_on_ready();
+    hits_after_ready();
+    CHECK(programs.count("emf_ev_HitEvent") == 0);
+    int told = 0;
+    for (const auto& l : mod_lines[&mod_a]) told += l.find("no hits will arrive (the HitEvent layout differs") != std::string::npos;
+    CHECK(told == 1);
+    CHECK(!t.on_hit(&cb_a, nullptr) && unsupported_fns.count("on_hit") == 1);
+    // the reflected size alone, with the sigdb captures agreeing
+    CHECK(hits::HitEventLayout::flags == 152 && hits::HitEventLayout::health_change == 188);
+}
+
 static void test_mod_event(EmfApi& t) {
     // a mod's own HitEvent listener wants every copy; the on_hit gate cannot starve it
     CHECK(t.on_event(EMF_WORLD_SERVER, "HitEvent", 248, &mod_event_cb, nullptr));
@@ -381,7 +401,19 @@ int main(int argc, char** argv) {
     if (mode == "no-mods") test_no_mods(t);
     else if (mode == "no-relay") test_no_relay(t);
     else if (mode == "mod-event") test_mod_event(t);
-    else test_relay(t);
+    else if (mode == "bad-layout") test_bad_layout(t);
+    else if (mode == "bad-size") {
+        hit_event_size = 256;
+        CHECK(t.on_hit(&cb_a, nullptr));
+        hits_on_ready(true);
+        events_on_ready();
+        hits_after_ready();
+        CHECK(programs.count("emf_ev_HitEvent") == 0 && !t.on_hit(&cb_a, nullptr));
+    }
+    else {
+        hit_flags_at = 152;  // the sigdb captures of this build agree with EMF's layout
+        test_relay(t);
+    }
     std::printf("hits_test%s%s: %d checks, %d failures\n", mode.empty() ? "" : " ", mode.c_str(), checks, failures);
     return failures ? 1 : 0;
 }

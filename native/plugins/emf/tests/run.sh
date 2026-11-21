@@ -24,7 +24,7 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
     "$here/hits_test.cpp" "$here/../src/api_hits.cpp" "$here/../src/hits_model.cpp" "$here/../src/api_events.cpp" \
     -o "$out/hits_test"
-for mode in "" no-mods no-relay mod-event; do "$out/hits_test" $mode; done
+for mode in "" no-mods no-relay mod-event bad-layout bad-size; do "$out/hits_test" $mode; done
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread -DKEMF_NET_CLIENT_TEST \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
     "$here/net_test.cpp" "$here/../src/api_net.cpp" "$here/../src/api_net_client.cpp" \

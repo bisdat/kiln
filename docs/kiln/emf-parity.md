@@ -147,6 +147,11 @@ registered only when an EMF mod is loaded, and while no `on_hit` callback is on 
 queue (one call per server step). A game without EMF mods registers nothing. A joined player's game sees no hits, as
 on EMF (the relay is a host-only program).
 
+The record is read at EMF's offsets. At start kiln-emf checks them against the game build: the reflected size of
+`HitEvent` (248 bytes) and kiln.combat's sigdb captures `combat/hit.flags` and `combat/hit.health_change`. On a build
+where one differs, `on_hit` answers `false`, as on EMF where HitEvent is not usable. `kiln.log` says
+`on_hit: the HitEvent layout differs: ...`, and a mod that registered earlier gets `on_hit: no hits will arrive (...)`.
+
 Changing a hit before it lands (`on_hit_before`, the hit rules, and with them `emf.hit_rule`) stays "not yet".
 EMF does it inline in the game's applyHitToEntity, on the impact thread, before the health change. Kiln has two
 places near it, neither of which fits: `kiln.combat` holds hits for one listener (the managed `Kiln.Combat`; a second

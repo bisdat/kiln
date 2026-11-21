@@ -54,6 +54,43 @@ void set_off(const std::string& why) {
 
 bool hits_wanted() { return g_observers.live() > 0; }
 
+// The record is read at EMF's offsets (hits_model.h). The game's reflected size of HitEvent and kiln.combat's per-build
+// captures of the fields the game's own code reads (sigdb combat/hit.flags and combat/hit.health_change: a HitEvent is
+// the HitCandidate's first 248 bytes) must agree with them. Empty when they do or are not known on this build; else
+// why not (a game update moved the record: on_hit is then refused, as EMF refuses it where HitEvent is not usable).
+std::string layout_mismatch() {
+    using L = hits::HitEventLayout;
+    const uint32_t real = type_size(fnv1a("keen::ecs::HitEvent"));
+    if (real && real != L::size)
+        return "the game's HitEvent has " + std::to_string(real) + " bytes, kiln-emf reads " + std::to_string(L::size);
+    const struct {
+        const char* name;
+        size_t at;
+    } fields[] = {{"combat/hit.flags", L::flags}, {"combat/hit.health_change", L::health_change}};
+    for (const auto& f : fields) {
+        int64_t v = -1;
+        if (g_api && g_api->constant && g_api->constant(kstr(f.name), &v) == KILN_OK && v != static_cast<int64_t>(f.at))
+            return std::string(f.name) + " is " + std::to_string(v) + " on this game build, kiln-emf reads " + std::to_string(f.at);
+    }
+    return {};
+}
+
+// mods that registered before on_ready: their true stands (EMF's own answer cannot be taken back), no hit comes
+void tell_registered(const std::string& why) {
+    g_observers.each(
+        [&](hits::Observers::Entry& e) {
+            mod_logf(static_cast<Mod*>(e.mod), KILN_LOG_WARN, "on_hit: no hits will arrive (%s)", why.c_str());
+            return true;
+        },
+        [](hits::Observers::Entry&) {});
+}
+
+void switch_off(const std::string& why) {
+    set_off(why);
+    logf(KILN_LOG_WARN, "on_hit: %s; EMF mods get no hits", why.c_str());
+    tell_registered(why);
+}
+
 int32_t health_of(uint32_t entity) {
     if (!entity || !S.combat || S.combat->header.size < offsetof(KilnCombatApi, health) + sizeof(void*) || !S.combat->health)
         return -1;
@@ -127,10 +164,11 @@ bool api_on_hit(EmfHitCallback cb, void* user) {
 }  // namespace
 
 void hits_on_ready(bool any_mod_loaded) {
-    if (!any_mod_loaded && !g_observers.count()) return set_off("no EMF mod is loaded");
-    if (!S.world) return set_off("kiln.world is not available");
+    if (!any_mod_loaded && !g_observers.count()) return set_off("no EMF mod is loaded");  // nothing to tell, nothing paid
+    if (!S.world) return switch_off("kiln.world is not available");
+    if (const std::string bad = layout_mismatch(); !bad.empty()) return switch_off("the HitEvent layout differs: " + bad);
     if (!events_add_internal_gated("HitEvent", hits::HitEventLayout::size, &on_hit_event, nullptr, &hits_wanted))
-        return set_off("the HitEvent relay could not be registered");
+        return switch_off("the HitEvent relay could not be registered");
     g_relay.store(1, std::memory_order_release);
 }
 
@@ -140,15 +178,7 @@ void hits_after_ready() {
         logf(KILN_LOG_INFO, "on_hit: the server world's HitEvents are relayed (%u callback(s) so far)", g_observers.count());
         return;
     }
-    set_off("kiln.world did not register the HitEvent relay, or the event queue layout is not resolved on this build");
-    logf(KILN_LOG_WARN, "on_hit: %s; EMF mods get no hits", off_why().c_str());
-    // mods that registered before on_ready: their true stands (EMF's own answer cannot be taken back), no hit comes
-    g_observers.each(
-        [](hits::Observers::Entry& e) {
-            mod_logf(static_cast<Mod*>(e.mod), KILN_LOG_WARN, "on_hit: no hits will arrive (%s)", off_why().c_str());
-            return true;
-        },
-        [](hits::Observers::Entry&) {});
+    switch_off("kiln.world did not register the HitEvent relay, or the event queue layout is not resolved on this build");
 }
 
 void fill_hits(EmfApi* t) { t->on_hit = &api_on_hit; }
