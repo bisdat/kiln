@@ -883,6 +883,12 @@
       "no_picture": "(no picture: {reason})",
       "unavailable": "\u2014 ({reason})",
       "too_many_rows": "{count} rows: more than this table shows ({max})"
+    },
+    "ui_command": {
+      "unavailable": "This server cannot run UI commands (no Kiln, or an older Kiln): nothing was run.",
+      "busy": "The server refused: too many commands, try again.",
+      "expired": "The command was not run: it waited too long.",
+      "no_answer": "No answer from the server: the command may or may not have run."
     }
   },
   "abilities": {

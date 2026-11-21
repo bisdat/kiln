@@ -15,6 +15,70 @@ Kiln.RarityRollBlock.Sources.get -> Kiln.ItemSource
 Kiln.RarityRollBlock.Sources.init -> void
 Kiln.RarityRollBlock.Weights.get -> System.Collections.Generic.IReadOnlyDictionary<Kiln.Rarity, double>!
 Kiln.RarityRollBlock.Weights.init -> void
+Kiln.UiAction.CommandTarget.get -> Kiln.UiCommandTarget?
+Kiln.UiAction.CommandTarget.init -> void
+Kiln.UiCommandCode
+Kiln.UiCommandCode.AssociationChanged = 9 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.CanceledAfterStart = 16 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.CanceledBeforeSend = 15 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.CanceledBeforeStart = 7 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.CanceledByCommandEvent = 3 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.ExpiredBeforeStart = 6 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.HandlerFailure = 10 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.None = 0 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.ParseFailure = 2 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.PermissionDenied = 1 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.ProtocolConflict = 13 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.QueueFull = 4 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.RateLimited = 5 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.ReplayExpired = 12 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.RunningTimeout = 11 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.TimedOutUnknown = 17 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.TooLateToCancel = 8 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.UnknownRequest = 14 -> Kiln.UiCommandCode
+Kiln.UiCommandCompletedEvent
+Kiln.UiCommandCompletedEvent.Result.get -> Kiln.UiCommandResult!
+Kiln.UiCommandOutcome
+Kiln.UiCommandOutcome.Completed = 2 -> Kiln.UiCommandOutcome
+Kiln.UiCommandOutcome.NotSent = 0 -> Kiln.UiCommandOutcome
+Kiln.UiCommandOutcome.NotStarted = 1 -> Kiln.UiCommandOutcome
+Kiln.UiCommandOutcome.Unknown = 3 -> Kiln.UiCommandOutcome
+Kiln.UiCommandResult
+Kiln.UiCommandResult.<Clone>$() -> Kiln.UiCommandResult!
+Kiln.UiCommandResult.Code.get -> Kiln.UiCommandCode
+Kiln.UiCommandResult.Code.init -> void
+Kiln.UiCommandResult.Deconstruct(out bool Ok, out string? Reason, out System.Collections.Generic.IReadOnlyList<string!>! Output, out ulong RequestId, out string! Nonce, out Kiln.UiCommandState State, out Kiln.UiCommandOutcome Outcome, out Kiln.UiCommandCode Code, out bool Truncated) -> void
+Kiln.UiCommandResult.Equals(Kiln.UiCommandResult? other) -> bool
+Kiln.UiCommandResult.Nonce.get -> string!
+Kiln.UiCommandResult.Nonce.init -> void
+Kiln.UiCommandResult.Ok.get -> bool
+Kiln.UiCommandResult.Ok.init -> void
+Kiln.UiCommandResult.Outcome.get -> Kiln.UiCommandOutcome
+Kiln.UiCommandResult.Outcome.init -> void
+Kiln.UiCommandResult.Output.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.UiCommandResult.Output.init -> void
+Kiln.UiCommandResult.Reason.get -> string?
+Kiln.UiCommandResult.Reason.init -> void
+Kiln.UiCommandResult.RequestId.get -> ulong
+Kiln.UiCommandResult.RequestId.init -> void
+Kiln.UiCommandResult.State.get -> Kiln.UiCommandState
+Kiln.UiCommandResult.State.init -> void
+Kiln.UiCommandResult.Truncated.get -> bool
+Kiln.UiCommandResult.Truncated.init -> void
+Kiln.UiCommandResult.UiCommandResult(bool Ok, string? Reason, System.Collections.Generic.IReadOnlyList<string!>! Output, ulong RequestId, string! Nonce, Kiln.UiCommandState State, Kiln.UiCommandOutcome Outcome, Kiln.UiCommandCode Code, bool Truncated) -> void
+Kiln.UiCommandState
+Kiln.UiCommandState.Final = 3 -> Kiln.UiCommandState
+Kiln.UiCommandState.Queued = 0 -> Kiln.UiCommandState
+Kiln.UiCommandState.RunningOverBudget = 2 -> Kiln.UiCommandState
+Kiln.UiCommandState.Started = 1 -> Kiln.UiCommandState
+Kiln.UiCommandStatusChangedEvent
+Kiln.UiCommandStatusChangedEvent.Nonce.get -> string!
+Kiln.UiCommandStatusChangedEvent.RequestId.get -> ulong
+Kiln.UiCommandStatusChangedEvent.Result.get -> Kiln.UiCommandResult?
+Kiln.UiCommandStatusChangedEvent.State.get -> Kiln.UiCommandState
+Kiln.UiCommandTarget
+Kiln.UiCommandTarget.Local = 0 -> Kiln.UiCommandTarget
+Kiln.UiCommandTarget.Server = 1 -> Kiln.UiCommandTarget
 Kiln.UiDemandRegistration
 Kiln.UiDemandRegistration.Dispose() -> void
 Kiln.UiDemandRegistration.Handle.get -> ulong
@@ -110,6 +174,9 @@ Kiln.UiWorldSnapshot.ZFixed.init -> void
 override Kiln.RarityRollBlock.Equals(object? obj) -> bool
 override Kiln.RarityRollBlock.GetHashCode() -> int
 override Kiln.RarityRollBlock.ToString() -> string!
+override Kiln.UiCommandResult.Equals(object? obj) -> bool
+override Kiln.UiCommandResult.GetHashCode() -> int
+override Kiln.UiCommandResult.ToString() -> string!
 override Kiln.UiInventoryValue.Equals(object? obj) -> bool
 override Kiln.UiInventoryValue.GetHashCode() -> int
 override Kiln.UiInventoryValue.ToString() -> string!
@@ -123,6 +190,8 @@ override Kiln.UiWorldSnapshot.Equals(object? obj) -> bool
 override Kiln.UiWorldSnapshot.GetHashCode() -> int
 override Kiln.UiWorldSnapshot.ToString() -> string!
 static Kiln.Blocks.Define(string! name, Kiln.RarityRollBlock! block) -> Kiln.BlockHandle<Kiln.RarityRollBlock!>!
+static Kiln.BlockUi.CommandStatus(string! nonce, ulong requestId) -> System.Threading.Tasks.Task<Kiln.UiCommandResult!>!
+static Kiln.BlockUi.ExecuteOnServer(string! literalCommand, System.Threading.CancellationToken cancellation = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Kiln.UiCommandResult!>!
 static Kiln.RarityRollBlock.operator !=(Kiln.RarityRollBlock? left, Kiln.RarityRollBlock? right) -> bool
 static Kiln.RarityRollBlock.operator ==(Kiln.RarityRollBlock? left, Kiln.RarityRollBlock? right) -> bool
 Kiln.RarityUpgradeBlock
@@ -168,6 +237,8 @@ const Kiln.UpgradeStation.Capability = "blocks.upgrade_station" -> string!
 override Kiln.UpgradeAction.Equals(object? obj) -> bool
 override Kiln.UpgradeAction.GetHashCode() -> int
 override Kiln.UpgradeAction.ToString() -> string!
+static Kiln.UiCommandResult.operator !=(Kiln.UiCommandResult? left, Kiln.UiCommandResult? right) -> bool
+static Kiln.UiCommandResult.operator ==(Kiln.UiCommandResult? left, Kiln.UiCommandResult? right) -> bool
 static Kiln.UiInventoryValue.operator !=(Kiln.UiInventoryValue? left, Kiln.UiInventoryValue? right) -> bool
 static Kiln.UiInventoryValue.operator ==(Kiln.UiInventoryValue? left, Kiln.UiInventoryValue? right) -> bool
 static Kiln.UiSnapshotStamp.operator !=(Kiln.UiSnapshotStamp? left, Kiln.UiSnapshotStamp? right) -> bool

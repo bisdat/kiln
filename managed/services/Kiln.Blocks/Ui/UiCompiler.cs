@@ -28,9 +28,11 @@ internal abstract record ActionPlan
     public abstract JsonObject Describe();
 }
 
-internal sealed record CommandPlan(string Line) : ActionPlan
+internal sealed record CommandPlan(string Line, UiCommandTarget Target = UiCommandTarget.Local) : ActionPlan
 {
-    public override JsonObject Describe() => new() { ["command"] = Line };
+    public override JsonObject Describe() => Target == UiCommandTarget.Server
+        ? new JsonObject { ["command"] = Line, ["commandTarget"] = "server" }
+        : new JsonObject { ["command"] = Line };
 }
 
 internal sealed record TogglePlan(UiBinding Config) : ActionPlan
@@ -271,6 +273,11 @@ internal static class UiCompile
         if (a.OpenWindow != null) given.Add("openWindow");
         if (a.CloseWindow != null) given.Add("closeWindow");
         if (a.Toast != null) given.Add("toast");
+        if (a.CommandTarget is { } target)
+        {
+            if (a.Command == null) throw Fail(ctx, $"{path}.commandTarget", "goes with a command only: it says where the command runs (local or server)");
+            if (target is not (UiCommandTarget.Local or UiCommandTarget.Server)) throw Fail(ctx, $"{path}.commandTarget", "is local or server");
+        }
         if (given.Count == 0) throw Fail(ctx, path, "an action does something: give it one of command, toggle, set, castAbility, applyEffect, openWindow, closeWindow, toast");
         if (given.Count > 1) throw Fail(ctx, path, $"an action does one thing, and this has {string.Join(" and ", given)}: use one button or key for each");
 
@@ -279,7 +286,8 @@ internal static class UiCompile
             var line = command.Trim().TrimStart('/').Trim();
             if (line.Length == 0) throw Fail(ctx, $"{path}.command", "an empty command line");
             if (line.Length > 256 || line.Contains('\n') || line.Contains('\r')) throw Fail(ctx, $"{path}.command", "a command is one line of at most 256 characters");
-            return new CommandPlan(line);
+            if (a.CommandTarget == UiCommandTarget.Server && UiCommandWire.LineProblem(line) is { } problem) throw Fail(ctx, $"{path}.command", problem);
+            return new CommandPlan(line, a.CommandTarget ?? UiCommandTarget.Local);
         }
         if (a.Toggle is { } toggle)
         {
