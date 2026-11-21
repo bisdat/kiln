@@ -88,6 +88,7 @@ struct Seen {
 };
 std::unordered_map<KilnEntity, Seen> g_seen;
 uint64_t g_session = 0, g_pre = 0;
+bool g_reads_off = false;  // kiln.world answered UNAVAILABLE for a client-world read
 constexpr uint64_t kEpoch = 1;
 
 void set_detail(const std::string& s) {
@@ -109,6 +110,11 @@ void fail(const std::string& why) {
     g_slots[0].store(0);
     g_slots[1].store(0);
     g_book.end_all(KILN_RENDER_OUTLINE_FAILED);
+    if (g_wrap && g_world) {  // fail() runs on the main thread or in a caller's thread, never inside the stage
+        g_world->game_program_unwrap(g_wrap);
+        g_wrap = 0;
+        g_wrapped.store(false);
+    }
     if (const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(ks(KILN_CAPS_SERVICE), 1)))
         caps->report(g_owner, ks("ui.world_outline"), KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED, KilnStr{why.data(), why.size()});
 }
@@ -248,7 +254,7 @@ void install_step() {
             ++g_hooks_in;
             g_hook_tries = 0;
             if (g_hooks_in == 4) logf(KILN_LOG_INFO, "render: outlines: the palette of Kiln's highlight groups is hooked (4 checked mid hooks)");
-        } else if (++g_hook_tries >= 5) {
+        } else if (++g_hook_tries >= 20) {  // a thread inside the 5 bytes (the render thread converting) refuses one try
             fail(std::string("the palette hook ") + kSiteNames[i] + " could not be installed: " +
                  (g_hooks[i].error() ? g_hooks[i].error() : "unknown"));
         }
@@ -329,12 +335,16 @@ uint32_t model_of(KilnEntity e) {
     if (!s.open) {
         KilnObjectRef ref{};
         ref.size = sizeof ref;
-        if (g_world->entity_open(g_owner, kEpoch, KILN_WORLD_CLIENT, 0, e, &ref) != KILN_OK) return 0;  // not here (yet)
+        const KilnResult rc = g_world->entity_open(g_owner, kEpoch, KILN_WORLD_CLIENT, 0, e, &ref);
+        if (rc == KILN_ERR_UNAVAILABLE) g_reads_off = true;
+        if (rc != KILN_OK) return 0;  // not here (yet): not streamed to this client, or no client world
         s.ref = ref;
         s.open = true;
     }
     uint32_t model = 0, need = 0;
-    return g_world->ecs_snapshot(g_owner, &s.ref, g_model_hash, &model, sizeof model, &need) == KILN_OK && need == 4 ? model : 0;
+    const KilnResult rc = g_world->ecs_snapshot(g_owner, &s.ref, g_model_hash, &model, sizeof model, &need);
+    if (rc == KILN_ERR_UNAVAILABLE) g_reads_off = true;
+    return rc == KILN_OK && need == 4 ? model : 0;  // NOT_FOUND: no ModelComponent (a voxel model, an effect)
 }
 
 void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
@@ -368,6 +378,10 @@ void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
     if (live)
         for (KilnEntity e : g_book.entities())
             if (const uint32_t m = model_of(e)) models[e] = m;
+    if (g_reads_off) {
+        fail("kiln.world cannot read the client world's entities on this build (no exact engine profile for it)");
+        return;
+    }
     kout::Book::Slot slots[2];
     auto plan = std::make_shared<kout::Plan>(
         g_book.plan(models, static_cast<kout::Setting>(g_setting.load()), slots, session));
