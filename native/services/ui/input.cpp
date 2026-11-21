@@ -730,13 +730,16 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 consumed = on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, true, false, hold::prev_of_lparam(l));
             else {
                 consumed = g_consumed[vk];
-                // A previous raw keyboard event does not guarantee Proton
-                // delivers the current chat key as WM_INPUT. Route the few
-                // chat-only transitions even through the legacy message;
-                // Router deduplicates their raw twins while chat is focused.
-                if (!consumed && !cap &&
-                    (vk == VK_TAB || vk == 'R' || vk == VK_RETURN || vk == VK_ESCAPE ||
-                     vk == VK_BACK || vk == VK_UP || vk == VK_DOWN)) {
+                // Seeing one raw keyboard record never guarantees that Proton
+                // delivers the next key as WM_INPUT. While Ctrl+R search is
+                // open, printable keys also belong to chat's private query:
+                // sending only Tab/R/Enter/navigation here lets ordinary
+                // letters reach the game's underlying chat editor instead.
+                // Ask the scoped chat router about every missing legacy down.
+                // Outside focused chat/search it returns false; ordinary game
+                // keys and key releases still reach Enshrouded unchanged.
+                // The router deduplicates raw/legacy twins of control keys.
+                if (!consumed && !cap) {
                     if (const ChatInputSink* chat = g_chat_sink.load(std::memory_order_acquire))
                         consumed = chat->key(vk, current_mods(), true, false);
                     if (consumed) g_consumed[vk] = true;

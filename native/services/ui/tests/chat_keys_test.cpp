@@ -123,6 +123,24 @@ int main() {
     assert(q.search_character('a'));
     uint32_t cp = 0;
     assert(q.take(action, &cp) && action == kui::chat_keys::Action::SearchCharacter && cp == 'a');
+
+    // Proton may deliver printable keys only as legacy WM_KEYDOWN even after
+    // another key had WM_INPUT. input.cpp must route *all* such keydowns to
+    // this router: while search owns chat they are consumed rather than
+    // reaching the game's editor; WM_CHAR supplies the Unicode query text.
+    assert(q.key('P', 0, true));
+    assert(!q.key('P', 0, false)); // physical release must pass through
+    assert(q.search_character('p'));
+    assert(q.take(action, &cp) && action == kui::chat_keys::Action::SearchCharacter && cp == 'p');
+    assert(q.key('E', 0, true));
+    assert(!q.key('E', 0, false));
+    assert(q.search_character('e'));
+    assert(q.take(action, &cp) && action == kui::chat_keys::Action::SearchCharacter && cp == 'e');
+    // Normal characters remain available outside search, even with history on.
+    q.search(false);
+    assert(!q.key('P', 0, true));
+    assert(!q.key('P', 0, false));
+    q.search(true);
     assert(q.key(0x08, 0, true)); // Backspace changes the private query
     assert(q.key(0x26, 0, true)); // Up selects newer, not history
     assert(q.key(0x28, 0, true)); // Down selects older, not history
