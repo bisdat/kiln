@@ -1105,6 +1105,11 @@ pub fn pick(dirs: &DataDirs, dir: &Path, section: &str, query: &str, limit: usiz
     Ok(out)
 }
 
+/// The game's recipe input categories (the recipe editor's "Any of" ingredient), empty without a catalog.
+pub fn categories() -> Vec<crate::catalog::ItemCategory> {
+    load_catalog(None).map(|c| crate::catalog::item_categories(&c)).unwrap_or_default()
+}
+
 /// The fields of a catalog section (the typed editors), empty without a catalog.
 pub fn fields(section: &str) -> Vec<crate::catalog::FieldInfo> {
     load_catalog(None).and_then(|c| c.fields.get(section).cloned()).unwrap_or_default()

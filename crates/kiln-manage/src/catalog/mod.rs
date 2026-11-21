@@ -312,6 +312,96 @@ pub fn used_names(cat: &Catalog) -> std::collections::HashSet<String> {
     used
 }
 
+/// One recipe input category of the game (`itemCategories`; a recipe input `{"category": "0x..", "count": n}` takes
+/// any of its items): Pack Studio's "Any of" ingredient. The game gives categories no name, so the editor words one by its
+/// items. 22 on the 2026-11 catalog (the woods, the stones, the sands, fish...), used by 123 recipes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemCategory {
+    /// `0x%08x`, the form recipe inputs write.
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub items: Vec<CategoryItem>,
+    /// The game's recipes that take it, in catalog order.
+    pub recipes: Vec<CategoryRecipe>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoryItem {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// [`is_hidden_name`] and not used by the game's data ([`used_names`]), as the pickers mark it. Members of a category
+    /// count as used, so this stays false on the game's own catalogs; kept so the editor applies one rule everywhere.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoryRecipe {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+/// A `0x` id (or a decimal one) as a number, so `0x0D0D0001` and `0x0d0d0001` are one category.
+fn id_number(s: &str) -> Option<u32> {
+    let t = s.trim();
+    match t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        Some(h) => u32::from_str_radix(h, 16).ok(),
+        None => t.parse().ok(),
+    }
+}
+
+/// The catalog's item categories with their items' display names and the recipes that take each (Pack Studio's category
+/// picker). An entry without an id is left out (a recipe could not name it).
+pub fn item_categories(cat: &Catalog) -> Vec<ItemCategory> {
+    let used = used_names(cat);
+    let names: std::collections::HashMap<&str, Option<&str>> =
+        cat.sections.get("items").into_iter().flatten().filter_map(|e| Some((e.name.as_deref()?, e.display_name()))).collect();
+    let mut by_id: std::collections::HashMap<u32, Vec<CategoryRecipe>> = std::collections::HashMap::new();
+    for r in cat.sections.get("recipes").into_iter().flatten() {
+        let Some(name) = r.name.clone() else { continue };
+        let mut seen = Vec::new();
+        for i in r.get("inputs").and_then(Value::as_array).into_iter().flatten() {
+            let id = match i.get("category") {
+                Some(Value::String(s)) => id_number(s),
+                Some(Value::Number(n)) => n.as_u64().and_then(|n| u32::try_from(n).ok()),
+                _ => None,
+            };
+            if let Some(id) = id.filter(|id| !seen.contains(id)) {
+                seen.push(id);
+                by_id.entry(id).or_default().push(CategoryRecipe { name: name.clone(), display_name: r.display_name().map(str::to_string) });
+            }
+        }
+    }
+    cat.sections
+        .get("itemCategories")
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            let id = e.id.clone()?;
+            let items = e
+                .get("items")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(|n| CategoryItem {
+                    name: n.to_string(),
+                    display_name: names.get(n).copied().flatten().map(str::to_string),
+                    hidden: is_hidden_name(n) && !used.contains(n),
+                })
+                .collect();
+            let recipes = id_number(&id).and_then(|n| by_id.remove(&n)).unwrap_or_default();
+            Some(ItemCategory { id, name: e.name.clone(), items, recipes })
+        })
+        .collect()
+}
+
 pub fn search(cat: &Catalog, query: &str, section: Option<&str>, limit: usize) -> Vec<Hit> {
     let limit = if limit == 0 { 50 } else { limit };
     let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
