@@ -2,6 +2,8 @@
 // kiln.items: moves, transfer rules and container names without game memory. See moves.h.
 #include "moves.h"
 
+#include "equip_logic.h"
+
 #include <algorithm>
 #include <cstring>
 #include <vector>
@@ -49,6 +51,82 @@ bool find_destination(const Page* pages, size_t n, uint32_t item, uint32_t max_s
     }
     if (have_empty) *out = empty;
     return have_empty;
+}
+
+namespace {
+bool fits_stack(const Stack& s, uint32_t item, uint32_t max_stack, bool gear) {
+    if (is_empty(s)) return true;
+    return !gear && s.item == item && s.count < max_stack && pide_of(s) == 0;
+}
+bool on_actionbar(const DestRules& r, uint32_t entity) {
+    return entity != 0 && (entity == r.actionbar_pages[0] || entity == r.actionbar_pages[1]);
+}
+uint8_t category_at(const uint8_t* cats, size_t p) { return cats ? cats[p] : kLinkGeneric; }
+}  // namespace
+
+bool search_page(const DestRules& r, uint32_t entity, uint8_t category) {
+    if (entity == 0) return false;
+    if (!r.person) return true;
+    if (on_actionbar(r, entity)) return r.actionbar;
+    return category == kLinkGeneric;
+}
+
+DestKind choose_destination(const Page* pages, const uint8_t* cats, size_t n, uint32_t item, uint32_t max_stack, bool gear,
+                            const DestRules& r, uint64_t prefer, uint64_t* out, const char** why) {
+    *why = "";
+    if (!r.person) return find_destination(pages, n, item, max_stack, gear, nullptr, 0, prefer, out) ? DestKind::Found : DestKind::NoRoom;
+    if (n > KILN_ITEMS_MAX_INVENTORIES) return *why = "the target has more pages than kiln.items reads", DestKind::Refused;
+    if (prefer) {
+        size_t p = n;
+        if ((prefer >> 40) == 0 && KILN_SLOT_INDEX(prefer) < kSlotsPerPage)
+            for (size_t i = 0; i < n && p == n; ++i)
+                if (pages[i].entity != 0 && pages[i].entity == KILN_SLOT_INVENTORY(prefer)) p = i;
+        if (p == n) return *why = "toSlot is not one of the target's slots", DestKind::Refused;
+        const uint32_t entity = pages[p].entity;
+        const uint8_t cat = category_at(cats, p);
+        if (on_actionbar(r, entity)) {
+            if (!r.actionbar) return *why = "toSlot is on the player's action bar (MoveOptions.ActionBar allows it)", DestKind::Refused;
+        } else if (cat == kLinkEquipment) {
+            uint32_t idx = kSelectionEquipment;
+            for (uint32_t i = 0; i < kSelectionEquipment && idx == kSelectionEquipment; ++i)
+                if (r.equipment[i] == prefer) idx = i;
+            if (idx == kSelectionBackpack) return *why = "toSlot is the backpack slot: use Items.Equip", DestKind::Refused;
+            if (idx != kSelectionEquipment) {
+                const uint8_t want = slot_type_of(game_slot_of(static_cast<int>(idx)));
+                if (want == 0 || r.item_equip_type != want) return *why = "the item does not fit that equipment slot", DestKind::Refused;
+            }
+            // A slot transfer is no equip: the game's equip also writes SlotSelection.equipment (an empty slot's entry
+            // is 0 until then, docs/re/items.md section 16), so a stack put into an empty equipment slot is not worn
+            // and out of the player's sight, as issue #109's was. Only a worn stack is topped up (arrows, bait).
+            if (is_empty(pages[p].s[KILN_SLOT_INDEX(prefer)]))
+                return *why = "toSlot is an empty equipment slot: a move does not equip, use Items.Equip", DestKind::Refused;
+            if (idx == kSelectionEquipment)
+                return *why = "toSlot is an equipment page slot no equipment slot shows: the player cannot see it", DestKind::Refused;
+        } else if (cat == kLinkCurrency) {
+            if (r.item_category != kItemCategoryCurrency) return *why = "toSlot is on a currency page and the item is no currency", DestKind::Refused;
+        } else if (cat != kLinkGeneric) {
+            return *why = "toSlot is on a page the player cannot fill (customization or unknown)", DestKind::Refused;
+        }
+        if (fits_stack(pages[p].s[KILN_SLOT_INDEX(prefer)], item, max_stack, gear)) {
+            *out = prefer;
+            return DestKind::Found;
+        }
+    }
+    // the search: only the pages a person sees and fills (find_destination skips the others)
+    uint32_t skip[KILN_ITEMS_MAX_INVENTORIES];
+    size_t skip_n = 0;
+    for (size_t p = 0; p < n; ++p)
+        if (pages[p].entity != 0 && !search_page(r, pages[p].entity, category_at(cats, p)) && skip_n < KILN_ITEMS_MAX_INVENTORIES)
+            skip[skip_n++] = pages[p].entity;
+    return find_destination(pages, n, item, max_stack, gear, skip, skip_n, 0, out) ? DestKind::Found : DestKind::NoRoom;
+}
+
+bool may_land(const DestRules& r, const Page* pages, const uint8_t* cats, size_t n, uint64_t slot, uint64_t named) {
+    if (slot == 0) return false;
+    if (named != 0 && slot == named) return true;
+    for (size_t p = 0; p < n; ++p)
+        if (pages[p].entity != 0 && pages[p].entity == KILN_SLOT_INVENTORY(slot)) return search_page(r, pages[p].entity, category_at(cats, p));
+    return false;
 }
 
 namespace {

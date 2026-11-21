@@ -32,8 +32,26 @@ item entity is the same, `ItemState.containedInSlotId` and `OwnerRelationship` n
 players and the save follow, as after a drag and drop.
 
 - `Move(from, slot, to, count = 0, options, toSlot)`: `from` and `to` are inventory owners (a player, a chest, a villager);
-  `slot` is a slot of `from` as `Items.Read` lists it. `count` 0 is the whole stack, and gear is always 1. The game picks
+  `slot` is a slot of `from` as `Items.Read` lists it. `count` 0 is the whole stack, and gear is always 1. Kiln picks
   the destination unless you give `toSlot`: partial stacks of the item first, then the first empty slot.
+- **Where a move into a player lands** (issue #109). A player's inventory links its equipment pages first, and before this
+  fix a move without `toSlot` could put a stack into an empty equipment slot, where the player never sees it. Now, for a
+  player or an NPC (`InventorySetup` flags), the search only uses the **backpack**: the Generic pages of the player's own
+  inventory and the pages of the worn backpack (behind its Virtual link), in the order `Items.Read` lists them. It never
+  uses equipment, currency or customization pages, nor the action bar unless you pass `MoveOptions.ActionBar`. A backpack
+  that is not worn adds no pages. When nothing fits, the result is `NoRoom` ("no room in entity N's backpack") and nothing
+  moves.
+- **`toSlot` into a player** must be a slot the item may enter: a backpack slot (an action-bar slot only with
+  `MoveOptions.ActionBar`), a currency-page slot for a currency item, or a worn equipment slot (`SlotSelection`) whose
+  equipment type is the item's, to top up the worn stack (arrows onto the worn arrows, bait onto the worn bait). Anything
+  else is `Refused` with the reason in `Message`, and nothing moves: an **empty** equipment slot (a move is no equip: use
+  `Items.Equip`, the game's own path, which also marks the slot worn and moves a replaced backpack's contents), the
+  backpack slot, a material into a ring slot, an equipment-page slot no equipment slot shows, a slot that is not the
+  player's. A `toSlot` the item may enter but that is full or holds another item gives way to the backpack search.
+- **Checked after the move.** A stack move is rolled back and `Refused` when any of it arrived outside the slots above, or
+  left the slot without arriving anywhere, so `Done` always means the items are where the player can take them.
+- Chests and other containers keep the old rule: every page, and a `toSlot` that is not theirs or does not fit gives way to
+  the search.
 - `QuickStack(from, to)` moves the stacks of `from` that `to` already holds a stack of. `MoveAll(from, to)` moves every stack
   that fits. Both run the game's own function, so everything it does for a player, it does here.
 - **The ledger.** `MoveResult.Changes` says who gave what to whom (`From`, `To`, `Item`, `Amount`, and the `ItemEntity` of
@@ -351,6 +369,10 @@ items themselves (`InstanceData`), and build a fresh set from what the player ha
 5. `Items.Move` from a player's backpack to a chest, with the player's window open: the slot empties on the player's screen and the gear is in the chest with its level and upgrades.
 6. A move of equipped or held gear is refused (`Refused`) by default. With `MoveOptions.Equipped`, check the game's
    unequip behaviour and the resulting equipment and inventory on the player.
-7. `Items.Move` into a player's backpack never lands on the action bar.
+7. `Items.Move` into a player's backpack never lands on the action bar. With no `toSlot` and empty equipment slots (no
+   rings worn), the stack shows in the backpack, never in a ring or other equipment slot (issue #109); with the backpack's
+   own pages full and a backpack worn, in the worn backpack's pages; with no backpack worn and the backpack full, the
+   result is `NoRoom` and the chest keeps the stack. A ring moved with `toSlot` an empty ring slot is `Refused` ("use
+   Items.Equip") and stays in the chest; arrows with `toSlot` the worn arrow slot top up the worn arrows.
 8. Rename a chest "Ores" in the game; `Items.ContainerName` returns it within a step of the rename reaching the server.
 9. A player and kiln-shroudlink's own addon (`dinput8.dll`, MODS tab, slot locks) together: R still honours the addon's locks and Kiln's rules.

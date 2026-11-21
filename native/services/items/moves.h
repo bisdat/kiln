@@ -41,6 +41,50 @@ inline bool is_empty(const Stack& s) { return s.item == 0 || s.count == 0; }
 bool find_destination(const Page* pages, size_t n, uint32_t item, uint32_t max_stack, bool gear, const uint32_t* skip,
                       size_t skip_n, uint64_t prefer, uint64_t* out);
 
+// ---- where a stack move into a person may land (issue #109) ----
+// A player's InventorySetup links its Equipment pages first (the owner's client 2026-11-16: links 0-1 Equipment, 2-6
+// Generic, 7 a Virtual link to the worn backpack's own setup with its Generic pages, 8 Currency), so a search over every
+// page can put a material into an equipment slot, where the player never sees it (issue #109: 4 Active Mycelium). A
+// person's inventory (a player's or an NPC's) is therefore searched on its Generic pages only, in link order with the
+// worn backpack's pages where the walk puts them, and never on the action bars unless the caller allows them.
+constexpr uint8_t kLinkCustomization = 1, kLinkEquipment = 2, kLinkCurrency = 3, kLinkGeneric = 4;  // InventoryCategory
+constexpr uint8_t kItemCategoryCurrency = 11;  // ItemInfo category Currency
+constexpr uint32_t kSelectionEquipment = 20;   // SlotSelection.equipment entries
+constexpr uint32_t kSelectionBackpack = 19;    // SlotSelection.equipment index of the Backpack slot (EquipmentSlot 23)
+
+struct DestRules {
+    bool person = false;     // a player's or an NPC's inventory (InventorySetup flags bits 0-1, or a SlotSelection
+                             // with an action bar): the rules below; anyone else: every page, as find_destination
+    bool actionbar = false;  // MoveOptions.ActionBar: the action-bar pages are searched and may be named
+    uint32_t actionbar_pages[2] = {0, 0};
+    uint64_t equipment[kSelectionEquipment] = {};  // SlotSelection.equipment slot ids by index, 0 = none (or no selection)
+    uint8_t item_equip_type = 0;   // the item's ItemInfo EquipmentSlotType, 0 = not equipment
+    uint8_t item_category = 0xFF;  // the item's ItemInfo category, 0xFF = unknown
+};
+
+enum class DestKind { Found, NoRoom, Refused };
+
+// Whether the search (no named slot) may fill a page of the target: anyone but a person, every page; a person, a
+// Generic page that is not an action bar (or is one and the caller allows it).
+bool search_page(const DestRules& r, uint32_t entity, uint8_t category);
+
+// Where a stack goes among the target's `pages` (`cats[i]`: page i's InventoryCategory, Virtual links expanded; null =
+// all Generic). Not a person: find_destination, unchanged. A person: a named slot (`prefer`, 0 = none) first, and only
+// one the item may enter: a Generic page's slot (an action bar's only with r.actionbar); a worn slot of
+// SlotSelection.equipment on an Equipment page whose EquipmentSlotType is the item's, to top up the worn stack (arrows,
+// bait); never an empty equipment slot (a slot transfer is no equip: the game's equip also writes the selection) nor the
+// Backpack slot (Items.Equip also moves the old backpack's contents); a Currency page's slot for a Currency item. A named slot the item
+// may not enter, or one that is not a slot of the target, is Refused with the reason in *why (nothing moves); a named
+// slot it may enter that is full or holds another item gives way to the search. The search: a partial stack of the item,
+// else the first empty slot, on the pages search_page allows. NoRoom when nothing fits.
+DestKind choose_destination(const Page* pages, const uint8_t* cats, size_t n, uint32_t item, uint32_t max_stack, bool gear,
+                            const DestRules& r, uint64_t prefer, uint64_t* out, const char** why);
+
+// After a move: may a stack that arrived in `slot` stay there? Yes on a page the search may fill, or in `named` (the slot
+// the caller named and choose_destination accepted, 0 = none). Anywhere else a person's stack is out of the player's
+// reach.
+bool may_land(const DestRules& r, const Page* pages, const uint8_t* cats, size_t n, uint64_t slot, uint64_t named);
+
 // ---- the ledger: who gave what to whom ----
 struct Change {
     uint64_t from_slot = 0;
