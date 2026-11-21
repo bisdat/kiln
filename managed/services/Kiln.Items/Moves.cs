@@ -113,9 +113,9 @@ public static unsafe partial class Items
     /// <param name="options">See <see cref="MoveOptions"/>.</param>
     /// <param name="toSlot">A slot of <paramref name="to"/> to fill first; null = Kiln's choice (partial stacks of the
     /// item first, then the first empty slot). Into a player it must be a slot the item may enter: a backpack slot (an
-    /// action-bar slot only with <see cref="MoveOptions.ActionBar"/>), a currency-page slot for a currency item, or one of
-    /// the player's equipment slots whose equipment type is the item's (never the backpack slot: use
-    /// <see cref="Equip"/>). Any other slot is <see cref="ItemsStatus.Refused"/> with the reason in
+    /// action-bar slot only with <see cref="MoveOptions.ActionBar"/>), a currency-page slot for a currency item, or a worn
+    /// equipment slot whose equipment type is the item's, to top up the worn stack (arrows, bait). An empty equipment slot
+    /// or the backpack slot is refused: a move is no equip, use <see cref="Equip"/>. Any other slot is <see cref="ItemsStatus.Refused"/> with the reason in
     /// <see cref="MoveResult.Message"/>, and nothing moves. A slot the item may enter that is full, or holds another item,
     /// gives way to Kiln's choice.</param>
     /// <remarks>

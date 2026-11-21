@@ -362,9 +362,10 @@ typedef struct KilnItemsMoveRequest {
                             then the first empty slot). Into a player or an NPC (issue #109) the choice uses only the
                             Generic pages (the backpack, the worn backpack's too), never equipment, currency or
                             customization pages nor the action bar without KILN_ITEMS_MOVE_ACTIONBAR; a to_slot the
-                            item may not enter (an equipment slot of another type or one no SlotSelection entry shows,
-                            the backpack slot, a currency page for a non-currency, not a slot of `to`) is
-                            KILN_ITEMS_REFUSED; one it may enter that is full gives way to the choice. A stack that
+                            item may not enter (an empty equipment slot: a move is no equip, use equip; an equipment
+                            slot of another type or one no SlotSelection entry shows, the backpack slot, a currency page
+                            for a non-currency, not a slot of `to`) is KILN_ITEMS_REFUSED; a worn equipment slot of the
+                            item's type tops up the worn stack; one it may enter that is full gives way to the choice. A stack that
                             arrived anywhere else, or items lost on the way, roll the move back as REFUSED. */
 } KilnItemsMoveRequest;
 

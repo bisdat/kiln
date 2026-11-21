@@ -90,11 +90,18 @@ DestKind choose_destination(const Page* pages, const uint8_t* cats, size_t n, ui
             uint32_t idx = kSelectionEquipment;
             for (uint32_t i = 0; i < kSelectionEquipment && idx == kSelectionEquipment; ++i)
                 if (r.equipment[i] == prefer) idx = i;
+            if (idx == kSelectionBackpack) return *why = "toSlot is the backpack slot: use Items.Equip", DestKind::Refused;
+            if (idx != kSelectionEquipment) {
+                const uint8_t want = slot_type_of(game_slot_of(static_cast<int>(idx)));
+                if (want == 0 || r.item_equip_type != want) return *why = "the item does not fit that equipment slot", DestKind::Refused;
+            }
+            // A slot transfer is no equip: the game's equip also writes SlotSelection.equipment (an empty slot's entry
+            // is 0 until then, docs/re/items.md section 16), so a stack put into an empty equipment slot is not worn
+            // and out of the player's sight, as issue #109's was. Only a worn stack is topped up (arrows, bait).
+            if (is_empty(pages[p].s[KILN_SLOT_INDEX(prefer)]))
+                return *why = "toSlot is an empty equipment slot: a move does not equip, use Items.Equip", DestKind::Refused;
             if (idx == kSelectionEquipment)
                 return *why = "toSlot is an equipment page slot no equipment slot shows: the player cannot see it", DestKind::Refused;
-            if (idx == kSelectionBackpack) return *why = "toSlot is the backpack slot: use Items.Equip", DestKind::Refused;
-            const uint8_t want = slot_type_of(game_slot_of(static_cast<int>(idx)));
-            if (want == 0 || r.item_equip_type != want) return *why = "the item does not fit that equipment slot", DestKind::Refused;
         } else if (cat == kLinkCurrency) {
             if (r.item_category != kItemCategoryCurrency) return *why = "toSlot is on a currency page and the item is no currency", DestKind::Refused;
         } else if (cat != kLinkGeneric) {

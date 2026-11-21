@@ -42,12 +42,12 @@ players and the save follow, as after a drag and drop.
   that is not worn adds no pages. When nothing fits, the result is `NoRoom` ("no room in entity N's backpack") and nothing
   moves.
 - **`toSlot` into a player** must be a slot the item may enter: a backpack slot (an action-bar slot only with
-  `MoveOptions.ActionBar`), a currency-page slot for a currency item, or one of the player's equipment slots
-  (`SlotSelection`) whose equipment type is the item's (a ring into a ring slot, arrows into the arrow slot; never the
-  backpack slot). Anything else is `Refused` with the reason in `Message`, and nothing moves: a material into a ring slot, an
-  equipment-page slot no equipment slot shows, a slot that is not the player's. A `toSlot` the item may enter but that is
-  full or holds another item gives way to the backpack search. To equip, `Items.Equip` is the game's own path (it also
-  moves a replaced backpack's contents); a move into an equipment slot only places the stack.
+  `MoveOptions.ActionBar`), a currency-page slot for a currency item, or a worn equipment slot (`SlotSelection`) whose
+  equipment type is the item's, to top up the worn stack (arrows onto the worn arrows, bait onto the worn bait). Anything
+  else is `Refused` with the reason in `Message`, and nothing moves: an **empty** equipment slot (a move is no equip: use
+  `Items.Equip`, the game's own path, which also marks the slot worn and moves a replaced backpack's contents), the
+  backpack slot, a material into a ring slot, an equipment-page slot no equipment slot shows, a slot that is not the
+  player's. A `toSlot` the item may enter but that is full or holds another item gives way to the backpack search.
 - **Checked after the move.** A stack move is rolled back and `Refused` when any of it arrived outside the slots above, or
   left the slot without arriving anywhere, so `Done` always means the items are where the player can take them.
 - Chests and other containers keep the old rule: every page, and a `toSlot` that is not theirs or does not fit gives way to
@@ -372,6 +372,7 @@ items themselves (`InstanceData`), and build a fresh set from what the player ha
 7. `Items.Move` into a player's backpack never lands on the action bar. With no `toSlot` and empty equipment slots (no
    rings worn), the stack shows in the backpack, never in a ring or other equipment slot (issue #109); with the backpack's
    own pages full and a backpack worn, in the worn backpack's pages; with no backpack worn and the backpack full, the
-   result is `NoRoom` and the chest keeps the stack.
+   result is `NoRoom` and the chest keeps the stack. A ring moved with `toSlot` an empty ring slot is `Refused` ("use
+   Items.Equip") and stays in the chest; arrows with `toSlot` the worn arrow slot top up the worn arrows.
 8. Rename a chest "Ores" in the game; `Items.ContainerName` returns it within a step of the rename reaching the server.
 9. A player and kiln-shroudlink's own addon (`dinput8.dll`, MODS tab, slot locks) together: R still honours the addon's locks and Kiln's rules.

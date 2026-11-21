@@ -1314,8 +1314,8 @@ void issue109_logic() {
     // named equipment slots: the equipment type rules
     DestRules ring = r;
     ring.item_equip_type = 37;  // Armour_Ring
-    check(choose_destination(pg, cats, 11, RING, 1, true, ring, q_equip(10), &d, &why) == DestKind::Found && d == q_equip(10),
-          "#109 toSlot Ring0 for a ring: taken (the slot's EquipmentSlotType is the item's)");
+    check(choose_destination(pg, cats, 11, RING, 1, true, ring, q_equip(10), &d, &why) == DestKind::Refused && std::strstr(why, "Items.Equip"),
+          "#109 toSlot an empty Ring0 for a ring: refused (a move is no equip: use Items.Equip)");
     check(choose_destination(pg, cats, 11, RING, 1, true, ring, q_equip(5), &d, &why) == DestKind::Refused && std::strstr(why, "does not fit"),
           "#109 toSlot Armour_Head for a ring: refused (does not fit)");
     check(choose_destination(pg, cats, 11, MYC, 99, false, r, q_equip(10), &d, &why) == DestKind::Refused && std::strstr(why, "does not fit"),
@@ -1327,8 +1327,13 @@ void issue109_logic() {
     worn[1].s[2] = Stack{KILN_SLOT_ID(QEQ2, 2), RING, 1, 901};
     check(choose_destination(worn, cats, 11, RING, 1, true, ring, q_equip(10), &d, &why) == DestKind::Found && d == KILN_SLOT_ID(QG1, 1),
           "#109 toSlot Ring0 already worn: the ring goes to the backpack (a full named slot gives way to the search)");
-    check(choose_destination(pg, cats, 11, RING, 1, true, ring, KILN_SLOT_ID(QEQ3, 5), &d, &why) == DestKind::Refused && std::strstr(why, "cannot see"),
-          "#109 toSlot on an equipment page slot no equipment slot shows: refused");
+    check(choose_destination(pg, cats, 11, RING, 1, true, ring, KILN_SLOT_ID(QEQ3, 5), &d, &why) == DestKind::Refused && std::strstr(why, "Items.Equip"),
+          "#109 toSlot on an empty equipment page slot no equipment slot shows (a real empty slot's entry is 0): refused, Items.Equip");
+    Page odd[11];
+    std::memcpy(odd, pg, sizeof pg);
+    odd[2].s[5] = Stack{KILN_SLOT_ID(QEQ3, 5), MYC, 3, 0};
+    check(choose_destination(odd, cats, 11, MYC, 99, false, r, KILN_SLOT_ID(QEQ3, 5), &d, &why) == DestKind::Refused && std::strstr(why, "cannot see"),
+          "#109 toSlot on an occupied equipment page slot no equipment slot shows: refused, never topped up");
     DestRules bag = r;
     bag.item_equip_type = 38;
     check(choose_destination(pg, cats, 11, BAG, 1, true, bag, q_equip(19), &d, &why) == DestKind::Refused && std::strstr(why, "Items.Equip"),
@@ -1477,8 +1482,17 @@ void issue109_engine() {
     make_player_q(true);
     put(A, 3, RING, 1, 4001);
     r = move(A, KILN_SLOT_ID(A, 3), Q, 0, q_equip(10), 0);
-    check(r.status == KILN_ITEMS_DONE && pide_at(QEQ2, 2) == 4001 && r.changes[0].to_slot == q_equip(10),
-          "#109 engine: toSlot Ring0 for a ring: Done, in the ring slot");
+    check(r.status == KILN_ITEMS_REFUSED && r.done == 0 && r.change_count == 0 && pide_at(A, 3) == 4001 && page_empty(QEQ2) &&
+              std::strstr(r.message, "Items.Equip"),
+          "#109 engine: toSlot an empty Ring0 for a ring: Refused (use Items.Equip), the ring stays in the chest");
+    set_item(ARROW, 99, false, 6, 8);
+    put(QEQ2, 6, ARROW, 20);
+    put(A, 4, ARROW, 30);
+    r = move(A, KILN_SLOT_ID(A, 4), Q, 0, q_equip(14), 0);
+    check(r.status == KILN_ITEMS_DONE && r.done == 30 && count_at(QEQ2, 6) == 50 && r.change_count == 1 && r.changes[0].to_slot == q_equip(14) &&
+              count_at(A, 4) == 0,
+          "#109 engine: toSlot the Arrow slot holding arrows: the worn stack is topped up (the after-move check accepts it)");
+    put(QEQ2, 6, 0, 0);
     put(A, 0, MYC, 4);
     r = move(A, KILN_SLOT_ID(A, 0), Q, 0, q_equip(11), 0);
     check(r.status == KILN_ITEMS_REFUSED && r.done == 0 && count_at(A, 0) == 4 && item_at(QEQ2, 3) == 0 && std::strstr(r.message, "does not fit"),

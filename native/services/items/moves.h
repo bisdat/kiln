@@ -70,9 +70,10 @@ bool search_page(const DestRules& r, uint32_t entity, uint8_t category);
 
 // Where a stack goes among the target's `pages` (`cats[i]`: page i's InventoryCategory, Virtual links expanded; null =
 // all Generic). Not a person: find_destination, unchanged. A person: a named slot (`prefer`, 0 = none) first, and only
-// one the item may enter: a Generic page's slot (an action bar's only with r.actionbar); a slot of
-// SlotSelection.equipment on an Equipment page whose EquipmentSlotType is the item's (never the Backpack slot:
-// Items.Equip also moves the old backpack's contents); a Currency page's slot for a Currency item. A named slot the item
+// one the item may enter: a Generic page's slot (an action bar's only with r.actionbar); a worn slot of
+// SlotSelection.equipment on an Equipment page whose EquipmentSlotType is the item's, to top up the worn stack (arrows,
+// bait); never an empty equipment slot (a slot transfer is no equip: the game's equip also writes the selection) nor the
+// Backpack slot (Items.Equip also moves the old backpack's contents); a Currency page's slot for a Currency item. A named slot the item
 // may not enter, or one that is not a slot of the target, is Refused with the reason in *why (nothing moves); a named
 // slot it may enter that is full or holds another item gives way to the search. The search: a partial stack of the item,
 // else the first empty slot, on the pages search_page allows. NoRoom when nothing fits.
