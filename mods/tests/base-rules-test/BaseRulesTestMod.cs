@@ -139,17 +139,17 @@ public sealed class BaseRulesTestMod : Mod
     private async Task PlaceAltar(int run, BaseLimits limits)
     {
         var level1 = limits.EffectiveSizes.First(s => s.AltarLevel == 1).Size;
+        // the base limits are read as soon as the progress entity is there; a spawn needs the running world
+        for (var i = 0; i < 120 * 30 && !(Spawn.WorldRunning && Lifecycle.IsServerRunning); i++) await Context.Scheduler.NextTick();
         var at = new WorldPosition(3800 + 90 * run, 835, 1500);
         EntityId altar;
         try
         {
-            // a dedicated server without a player streams no tiles in: ask for the ones around the place first
-            var loaded = await Build.Load(Build.BoxAround(at, 8, 8, 8), TimeSpan.FromSeconds(90));
-            Info($"run {run}: the tiles around {at} {(loaded ? "are loaded" : "did not load within 90 s: placing without them")}");
-            var flags = BuildFlags.AllowAltars | BuildFlags.Transient | (loaded ? BuildFlags.None : BuildFlags.Unloaded);
-            altar = Build.PlaceProp("Home_Base_FlameAltar", at, options: new BuildOptions { Flags = flags, Journal = false });
+            // spawned, as the dossier's probe did: a dedicated server without a player has no loaded tiles for
+            // Build.PlaceProp (it answers "tile not loaded"); the zone comes from the game's base programs either way
+            altar = await Spawn.Entity("Home_Base_FlameAltar", at, 0, new SpawnOptions { Flags = SpawnFlags.Transient });
         }
-        catch (Exception e) when (e is BuildException or ArgumentException)
+        catch (Exception e) when (e is SpawnException or InvalidOperationException or ArgumentException or KilnUnavailableException)
         {
             Check(false, $"run {run}: a Flame Altar could not be placed at {at}: {e.Message}");
             return;
@@ -164,6 +164,7 @@ public sealed class BaseRulesTestMod : Mod
             if (zone is not null && zone.Half.X > 0) break;
             await Context.Scheduler.NextTick();
         }
+        Spawn.Destroy(altar);  // the zone is read by then (or never comes): the world keeps none of the test
         if (zone is null)
         {
             Check(false, $"run {run}: the new altar {altar} has no base zone within 60 s");
