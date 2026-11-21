@@ -2795,7 +2795,7 @@
       "noGpuArg": "Questo avvio disegna senza GPU: è stato dato {flag}, che ha la precedenza su questo interruttore.",
       "gpuArg": "Questo avvio disegna con la GPU: è stato dato {flag}, che ha la precedenza su questo interruttore.",
       "x11": "Passa a X11 quando il disegno è lento su Wayland",
-      "x11Intro": "Su Wayland, quando WebKit non può usare la GPU, il launcher si riavvia una volta tramite X11 (XWayland), cosa che spesso elimina i rallentamenti. Vale dal prossimo avvio.",
+      "x11Intro": "Su uno schermo HiDPI con Wayland, quando WebKit non può usare la GPU, il launcher si riavvia una volta tramite X11 (XWayland): disegna a risoluzione più bassa, quindi è molto più veloce ma meno nitido. Vale dal prossimo avvio.",
       "x11Wayland": "Questo avvio disegna su Wayland.",
       "x11On": "Questo avvio disegna tramite X11.",
       "x11Tried": "X11 è stato provato e non ha aiutato, quindi il launcher resta su Wayland. Disattiva e riattiva questa opzione per riprovare.",

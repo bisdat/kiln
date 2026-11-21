@@ -296,9 +296,13 @@ pub enum X11Step {
 
 /// `off`: WebKit turned hardware acceleration off by itself. `by_vars`: a variable explains it
 /// (`WEBKIT_DISABLE_COMPOSITING_MODE` / `WEBKIT_DISABLE_DMABUF_RENDERER`): X11 would not change that, so no switch.
-pub fn x11_step(x: &X11, off: bool, by_vars: bool) -> X11Step {
+/// `scale`: the screens' largest GDK scale factor. X11 does not bring the GPU back (Oryx593's X11 starts: policy Never,
+/// "WebKit composites: no" too); it is faster only because XWayland draws a HiDPI window at scale 1 (1024 x 640 at
+/// devicePixelRatio 1 against 1280 x 800 at 2: p50 16 ms against 43-73 ms a frame on Play), so only scale > 1 switches:
+/// at scale 1 it would paint as many pixels on the CPU and stick for nothing.
+pub fn x11_step(x: &X11, off: bool, by_vars: bool, scale: i32) -> X11Step {
     match x.why {
-        X11Why::Default if off && !by_vars => X11Step::Switch,
+        X11Why::Default if off && !by_vars && scale > 1 => X11Step::Switch,
         X11Why::Restart => X11Step::Keep,
         _ => X11Step::Nothing,
     }
@@ -1360,22 +1364,26 @@ pub fn window_created(app: &tauri::AppHandle) {
             log(&format!("the webview's hardware acceleration policy: {policy:?}, WebGL: {}", if s.enables_webgl() { "on" } else { "off" }));
             // with the GPU, Never is WebKit's own answer: it composites nothing (inbox 94); say which check failed
             let off = !software && policy == HardwareAccelerationPolicy::Never;
+            let scale = screen_scale(&wv);
             let env = |k: &str| std::env::var(k).ok();
             // a variable that turns compositing off explains it whatever the display server: X11 would not help
             let by_vars = [env("WEBKIT_DISABLE_COMPOSITING_MODE"), env(DMABUF_VAR)].iter().any(|v| v.as_deref().is_some_and(|v| v != "0"));
             let accel = if off {
-                let reasons = webkit_off_reasons(env("WEBKIT_DISABLE_COMPOSITING_MODE").as_deref(), env(DMABUF_VAR).as_deref(),
+                let mut reasons = webkit_off_reasons(env("WEBKIT_DISABLE_COMPOSITING_MODE").as_deref(), env(DMABUF_VAR).as_deref(),
                     egl_client_extensions().as_deref(), Some(gtk_gl_check()));
+                let (nodes, modeset) = drm_state();
+                reasons.extend(drm_reasons(&nodes, modeset.as_deref()));
                 let why = if reasons.is_empty() { "none of the checks the launcher knows failed here".to_string() } else { reasons.join("; ") };
-                log(&format!("PROBLEM: WebKit turned hardware acceleration off by itself: it composites nothing, every change of the \
-                    page is painted again on the CPU (slow in a large window). Why: {why}. With GDK_BACKEND=x11 GTK uses X11's GL instead"));
+                log(&format!("PROBLEM: WebKit turned hardware acceleration off by itself (the launcher did not ask for it): it composites \
+                    nothing, every change of the page is painted again on the CPU (slow in a large window). Why: {why}. {}; scale {scale}",
+                    says_drm(&nodes, modeset.as_deref())));
                 format!("off (WebKit's own choice): {why}")
             } else {
                 format!("{policy:?}")
             };
             let _ = ACCEL.set(accel);
             if let Some(x) = &x {
-                x11_after_policy(x, off, by_vars);
+                x11_after_policy(x, off, by_vars, scale);
             }
         }
         // what the web context itself says about its sandbox: crate::sandbox read the variables, this is WebKit's own
@@ -1398,11 +1406,12 @@ pub fn window_created(_app: &tauri::AppHandle) {}
 /// Linux, once the webview's acceleration policy is known (`off`: WebKit's own Never): the switch to X11, or what an X11
 /// start learned ([`x11_step`]); one line in launcher.log for each decision.
 #[cfg(target_os = "linux")]
-fn x11_after_policy(x: &X11, off: bool, by_vars: bool) {
-    match x11_step(x, off, by_vars) {
+fn x11_after_policy(x: &X11, off: bool, by_vars: bool, scale: i32) {
+    match x11_step(x, off, by_vars, scale) {
         X11Step::Switch => {
-            log("X11: WebKit draws without the GPU on Wayland; starting again once through X11 (XWayland, GDK_BACKEND=x11). \
-                Settings > Appearance > \"Switch to X11 when drawing is slow on Wayland\" turns this off");
+            log(&format!("X11: WebKit draws without the GPU on Wayland at scale {scale}; starting again once through X11 (XWayland, \
+                GDK_BACKEND=x11), which draws at scale 1: far fewer pixels to paint on the CPU, less sharp. \
+                Settings > Appearance > \"Switch to X11 when drawing is slow on Wayland\" turns this off"));
             eprintln!("Kiln Launcher: WebKit draws without the GPU on Wayland; starting again once through X11 (GDK_BACKEND=x11)");
             let err = restart(&Relaunch::x11_switch().keeping());
             log(&format!("PROBLEM: could not start again through X11: {err}; this start goes on on Wayland"));
@@ -1417,11 +1426,64 @@ fn x11_after_policy(x: &X11, off: bool, by_vars: bool) {
             x11_note(Some(X11Note::Helped), false);
         }
         X11Step::Nothing if off => {
-            let why = if by_vars && x.why == X11Why::Default { "a variable turns WebKit's compositing off, X11 would not change that".to_string() } else { says_x11(x) };
+            let why = match x.why {
+                X11Why::Default if by_vars => "a variable turns WebKit's compositing off, X11 would not change that".to_string(),
+                X11Why::Default => format!("scale {scale}: X11 would paint as many pixels on the CPU"),
+                _ => says_x11(x),
+            };
             log(&format!("X11: not switching ({why})"));
         }
         X11Step::Nothing => {}
     }
+}
+
+/// The largest GDK scale factor of the screens and the webview (GTK 3: whole numbers; KDE's 150 % reads 2).
+#[cfg(target_os = "linux")]
+fn screen_scale(wv: &webkit2gtk::WebView) -> i32 {
+    use gtk::prelude::*;
+    let own = wv.scale_factor();
+    let screens = gtk::gdk::Display::default()
+        .map(|d| (0..d.n_monitors()).filter_map(|i| d.monitor(i)).map(|m| m.scale_factor()).max().unwrap_or(1))
+        .unwrap_or(1);
+    own.max(screens).max(1)
+}
+
+/// The DRM render nodes (`/dev/dri/renderD*`, readable and writable by this process or not) and NVIDIA's
+/// `nvidia_drm modeset` parameter: WebKitGTK 2.50 hands its frames over as DMA-BUFs from a GBM device on a render
+/// node, a check the launcher cannot repeat from the outside (EGL's extension names alone pass on Oryx593's machine).
+#[cfg(target_os = "linux")]
+fn drm_state() -> (Vec<(String, bool)>, Option<String>) {
+    let mut nodes: Vec<(String, bool)> = std::fs::read_dir("/dev/dri").into_iter().flatten().flatten()
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| n.starts_with("renderD"))
+        .map(|n| {
+            let ok = std::fs::OpenOptions::new().read(true).write(true).open(format!("/dev/dri/{n}")).is_ok();
+            (n, ok)
+        })
+        .collect();
+    nodes.sort();
+    let modeset = std::fs::read_to_string("/sys/module/nvidia_drm/parameters/modeset").ok().map(|v| v.trim().to_string());
+    (nodes, modeset)
+}
+
+/// What [`drm_state`] found that explains WebKit's Never: no render node it can open, NVIDIA's DRM without modesetting.
+pub fn drm_reasons(nodes: &[(String, bool)], modeset: Option<&str>) -> Vec<String> {
+    let mut out = Vec::new();
+    if !nodes.iter().any(|(_, ok)| *ok) {
+        out.push(if nodes.is_empty() { "no DRM render node (/dev/dri/renderD*)".to_string() }
+            else { "no DRM render node this user can open (is the user in the render/video group?)".to_string() });
+    }
+    if modeset == Some("N") {
+        out.push("nvidia_drm modeset=N (NVIDIA's driver offers no GBM device without it: nvidia_drm.modeset=1)".into());
+    }
+    out
+}
+
+/// "DRM: renderD128 (opens), nvidia_drm modeset=Y", for the PROBLEM line.
+pub fn says_drm(nodes: &[(String, bool)], modeset: Option<&str>) -> String {
+    let n: Vec<String> = nodes.iter().map(|(n, ok)| format!("{n} ({})", if *ok { "opens" } else { "cannot open" })).collect();
+    format!("DRM: {}{}", if n.is_empty() { "no render node".to_string() } else { n.join(", ") },
+        modeset.map(|m| format!(", nvidia_drm modeset={m}")).unwrap_or_default())
 }
 
 /// The first line of `/proc/driver/nvidia/version`, without the driver build's `(user@host)` (a module built on the
@@ -1644,8 +1706,10 @@ mod tests {
         // a plain Wayland start: GTK's default, and WebKit's own Never there means one switch
         let first = x11_of(None, false, false, None, false, false);
         assert_eq!(first, X11 { on: false, why: X11Why::Default });
-        assert_eq!(x11_step(&first, true, false), X11Step::Switch);
-        assert_eq!(x11_step(&first, false, false), X11Step::Nothing, "WebKit composites: nothing to do");
+        assert_eq!(x11_step(&first, true, false, 2), X11Step::Switch);
+        assert_eq!(x11_step(&first, false, false, 2), X11Step::Nothing, "WebKit composites: nothing to do");
+        // scale 1: X11 paints as many pixels on the CPU (it never brings the GPU back): no switch, nothing sticks
+        assert_eq!(x11_step(&first, true, false, 1), X11Step::Nothing);
         // the switch's restart says which start it is: X11, without a marker yet
         let r = Relaunch::x11_switch();
         assert_eq!(r.set, vec![(X11_RESTARTED, "1".to_string())]);
@@ -1653,9 +1717,9 @@ mod tests {
         assert_eq!(second, X11 { on: true, why: X11Why::Restart });
         // X11 is remembered, with the GPU or still without it (X11's CPU painting beat Wayland's: Oryx593), and an X11
         // start never switches again
-        assert_eq!(x11_step(&second, false, false), X11Step::Keep);
-        assert_eq!(x11_step(&second, true, false), X11Step::Keep, "still without the GPU through X11: stays on X11");
-        assert_eq!(x11_step(&second, true, true), X11Step::Keep);
+        assert_eq!(x11_step(&second, false, false, 1), X11Step::Keep, "XWayland's own scale is 1");
+        assert_eq!(x11_step(&second, true, false, 1), X11Step::Keep, "still without the GPU through X11: stays on X11");
+        assert_eq!(x11_step(&second, true, true, 2), X11Step::Keep);
     }
 
     #[test]
@@ -1664,7 +1728,7 @@ mod tests {
             for (restarted, marker) in [(None, false), (Some("1"), false), (None, true)] {
                 let x = x11_of(Some(v), false, false, restarted, marker, false);
                 assert_eq!(x, X11 { on: false, why: X11Why::Yours }, "{v:?} {restarted:?} {marker}");
-                assert_eq!(x11_step(&x, true, false), X11Step::Nothing);
+                assert_eq!(x11_step(&x, true, false, 2), X11Step::Nothing);
             }
         }
     }
@@ -1673,8 +1737,8 @@ mod tests {
     fn the_remembered_choice_goes_straight_to_x11() {
         let x = x11_of(None, false, false, None, true, false);
         assert_eq!(x, X11 { on: true, why: X11Why::Marker });
-        assert_eq!(x11_step(&x, false, false), X11Step::Nothing, "already remembered: nothing to write");
-        assert_eq!(x11_step(&x, true, false), X11Step::Nothing, "without the GPU through X11 too: stays on X11, never a restart");
+        assert_eq!(x11_step(&x, false, false, 1), X11Step::Nothing, "already remembered: nothing to write");
+        assert_eq!(x11_step(&x, true, false, 2), X11Step::Nothing, "without the GPU through X11 too: stays on X11, never a restart");
         // Settings' switch off: the marker no longer counts (set_x11_auto removes it too)
         assert_eq!(x11_of(None, false, true, None, true, false), X11 { on: false, why: X11Why::Off });
         // no help beats an old X11 marker
@@ -1687,7 +1751,7 @@ mod tests {
         for (restarted, no_help) in [(None, true), (Some("0"), false), (Some("0"), true)] {
             let x = x11_of(None, false, false, restarted, false, no_help);
             assert_eq!(x, X11 { on: false, why: X11Why::Tried });
-            assert_eq!(x11_step(&x, true, false), X11Step::Nothing);
+            assert_eq!(x11_step(&x, true, false, 2), X11Step::Nothing);
         }
         // the way back's "0" beats even a stale X11 marker and Settings
         assert_eq!(x11_of(None, false, false, Some("0"), true, false).why, X11Why::Tried);
@@ -1725,7 +1789,20 @@ mod tests {
     #[test]
     fn a_variable_that_turns_compositing_off_is_no_reason_to_switch() {
         let x = x11_of(None, false, false, None, false, false);
-        assert_eq!(x11_step(&x, true, true), X11Step::Nothing);
+        assert_eq!(x11_step(&x, true, true, 2), X11Step::Nothing);
+    }
+
+    #[test]
+    fn the_drm_facts_name_what_webkit_needs() {
+        let ok = vec![("renderD128".to_string(), true)];
+        assert!(drm_reasons(&ok, Some("Y")).is_empty());
+        assert!(drm_reasons(&ok, None).is_empty(), "no NVIDIA module: nothing about it");
+        assert!(drm_reasons(&ok, Some("N"))[0].contains("nvidia_drm modeset=N"));
+        assert!(drm_reasons(&[], None)[0].contains("no DRM render node"));
+        assert!(drm_reasons(&[("renderD128".into(), false)], None)[0].contains("this user can open"));
+        assert_eq!(says_drm(&[("renderD128".into(), true), ("renderD129".into(), false)], Some("Y")),
+            "DRM: renderD128 (opens), renderD129 (cannot open), nvidia_drm modeset=Y");
+        assert_eq!(says_drm(&[], None), "DRM: no render node");
     }
 
     #[test]
