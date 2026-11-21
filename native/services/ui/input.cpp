@@ -758,10 +758,12 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             const uint32_t vk = static_cast<uint32_t>(w) & 0xFF;
             if (g_raw_keyboard_seen && !raw_input::registered_for(6, h)) g_raw_keyboard_seen = false;
             if (!g_raw_keyboard_seen) on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, false);
-            else if (vk == VK_TAB || vk == 'R' || vk == VK_RETURN ||
-                     vk == VK_ESCAPE || vk == VK_BACK || vk == VK_UP || vk == VK_DOWN) {
-                // Raw release may be absent. Clear chat's physical-press
-                // guards via the legacy release; the game always gets it.
+            else {
+                // The paired raw release may be missing even for a printable
+                // key routed by the legacy fallback above. Clear every key's
+                // consumed flag here, not just Tab/R/navigation: otherwise a
+                // typed search query can leave that VK stuck as consumed.
+                // Releases always pass through to Enshrouded.
                 if (const ChatInputSink* chat = g_chat_sink.load(std::memory_order_acquire))
                     chat->key(vk, current_mods(), false, cap);
                 g_consumed[vk] = false;
