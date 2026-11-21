@@ -205,7 +205,11 @@ public static unsafe class Survivors
     {
         Services.RequireTickThread(api);
         var t = SurvivorsNative.T;
-        if (t == null) throw new KilnUnavailableException(capability, "kiln.survivors is not loaded (update Kiln)");
+        if (t == null)
+        {
+            QuestsCaps.Rows.Ensure();
+            throw new KilnUnavailableException(capability, "kiln.survivors is not loaded (update Kiln)");
+        }
         if (!Capabilities.Is(capability)) throw new KilnUnavailableException(capability, Capabilities.Why(capability));
         SurvivorsPump.Start();
         return t;

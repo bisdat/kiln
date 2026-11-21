@@ -33,6 +33,10 @@ internal static unsafe class QuestsCaps
 
     private static readonly string[] RosterRows = [RosterRead, ClientRosterRead, RosterBudget, ExpandedRoster];
 
+    /// <summary>kiln.survivors' rows (native, reported by kiln-quests.dll with its table; Survivors.cs).</summary>
+    private static readonly string[] SurvivorRows =
+        [Survivors.ReadCapability, Survivors.RecruitCapability, Survivors.SummonCapability, Survivors.AssignCapability];
+
     internal static readonly ServiceCapRows Rows = new(Service, Report, everySteps: 25, refreshOnlyWithService: true);
 
     // kiln.knowledge's wrapper remembers a miss: forgotten when the refresh finds the table (docs/kiln/services/caps.md)
@@ -40,6 +44,10 @@ internal static unsafe class QuestsCaps
 
     private static void Report()
     {
+        // kiln.survivors reports its rows with its table (0.2.0-dev.31); without it nobody would: say why here
+        if (SurvivorsNative.T == null)
+            foreach (var row in SurvivorRows)
+                ServiceCaps.Static(row, false, CapabilityReason.ServiceMissing, "kiln.survivors is not loaded (a Kiln older than 0.2.0-dev.31, or kiln-quests.dll is off)", "kiln.survivors");
         var t = KnowledgeNative.T;
         // kiln.knowledge reports the roster's rows with its table; missing or older, nobody would: say why here
         if (KnowledgeNative.Roster(t) == null)
