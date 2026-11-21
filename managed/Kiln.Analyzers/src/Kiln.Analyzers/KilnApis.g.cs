@@ -616,6 +616,10 @@ internal static partial class KilnApis
         "M:Kiln.ReplicationLab.ForceRelevant(System.Int32,Kiln.EntityId)", // ReplicationLab.ForceRelevant(int, EntityId): Services.RequireTickThread
         "M:Kiln.ReplicationLab.LoopbackStats", // ReplicationLab.LoopbackStats(): Services.RequireTickThread
         "M:Kiln.ReplicationLab.RemoveFakePeers", // ReplicationLab.RemoveFakePeers(): Services.RequireTickThread
+        "M:Kiln.Routines.Assign(Kiln.Villager,Kiln.BlockHandle{Kiln.RoutineBlock})", // Routines.Assign(Villager, BlockHandle<RoutineBlock>): via Routines.Table(string)
+        "M:Kiln.Routines.Inspect(Kiln.Villager)", // Routines.Inspect(Villager): via Routines.Table(string)
+        "M:Kiln.Routines.Remove(Kiln.Villager)", // Routines.Remove(Villager): via Routines.Table(string)
+        "M:Kiln.Routines.Resume(Kiln.Villager)", // Routines.Resume(Villager): via Routines.Table(string)
         "M:Kiln.RuleSet.Update(Kiln.PlayerRules)", // RuleSet.Update(PlayerRules): Game.AssertTickThread
         "M:Kiln.Rules.Apply(Kiln.EntityId,Kiln.PlayerRules,System.Nullable{System.TimeSpan},System.String)", // Rules.Apply(EntityId, PlayerRules, TimeSpan?, string?): via Rules.Apply(RuleScope, PlayerRules, TimeSpan?, string?)
         "M:Kiln.Rules.Apply(Kiln.RuleScope,Kiln.PlayerRules,System.Nullable{System.TimeSpan},System.String)", // Rules.Apply(RuleScope, PlayerRules, TimeSpan?, string?): via Rules.Apply(RuleScope, PlayerRules, TimeSpan?, string?, Action<RuleSet>?)

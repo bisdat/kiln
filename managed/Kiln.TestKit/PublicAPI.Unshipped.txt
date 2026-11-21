@@ -34,3 +34,10 @@ Kiln.TestKit.HarnessModValues.World.get -> System.Guid
 Kiln.TestKit.HarnessModValues.World.set -> void
 Kiln.TestKit.KilnHarness.ModValues.get -> Kiln.TestKit.HarnessModValues!
 static Kiln.TestKit.HarnessModValues.Character(int n) -> Kiln.CharacterKey
+Kiln.TestKit.HarnessRoutines
+Kiln.TestKit.HarnessRoutines.Decide(uint npcId) -> string?
+Kiln.TestKit.HarnessRoutines.Finish(uint npcId, bool ok, string? reason = null) -> void
+Kiln.TestKit.HarnessRoutines.Queued.get -> int
+Kiln.TestKit.HarnessRoutines.SetClock(int hour, int minute = 0) -> void
+Kiln.TestKit.HarnessRoutines.SetSleepAllowed(uint npcId, bool allowed) -> void
+Kiln.TestKit.KilnHarness.Routines.get -> Kiln.TestKit.HarnessRoutines!
