@@ -56,6 +56,14 @@ public sealed partial class ItemsTestMod
         Check(World.Has(p, "PlayerInput") && Items.Read(p) is { Initialized: true },
             $"equip: spawned player character {p} at {at} has PlayerInput and an initialized inventory");
         if (!World.Has(p, "PlayerInput")) return;
+        // containers only (Items.SetContainerName, #112): a player character's inventory is not a container
+        if (Items.ContainerRenameAvailable)
+        {
+            var before = World.ReadBytes(p, "CustomPlayerString");
+            Check(Throws<ArgumentException>(() => _ = Items.SetContainerName(p, "Not a chest")) &&
+                  (World.ReadBytes(p, "CustomPlayerString")?.Length ?? -1) == (before?.Length ?? -1) && Items.ContainerName(p) == null,
+                $"rename: player character {p} (an inventory, not a container) is refused at the call and keeps no name");
+        }
         PlayerStates.Diagnostics.Watch(p);  // kiln.players follows the spawned character like a joined player
         using var sub = Events.On<PlayerEquipmentChangedEvent>(e => _equipEvents.Add(e));
         using var kiln = Events.On<EquipChangedEvent>(e => _kilnEquips.Add(e));
