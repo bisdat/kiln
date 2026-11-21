@@ -1396,6 +1396,9 @@ struct KProgram {
     uint8_t* blob;  // permanent copy (VirtualAlloc, never freed: running instances read it)
     size_t len;
     KilnOwner owner;
+    // The ImpactRegistry it was last put into: a note only (cleared when the server world goes). #108: a new world's
+    // registry can sit at the old one's address with fresh content, so whether the program is in the registry is
+    // always asked of the registry itself (get_program(reg, id) == blob), never answered from this pointer.
     uintptr_t inserted_in = 0;
     std::string source;
 };
@@ -1455,7 +1458,24 @@ uintptr_t prog_registry() {
 }
 
 
+// Queues a program until the registry or its natives are there; one entry per GUID (the latest bytes). g_mu held.
+void queue_waiting(PendingProgram&& w) {
+    for (auto& x : g_waiting)
+        if (x.bytes.size() >= 20 && w.bytes.size() >= 20 && std::memcmp(x.bytes.data() + 4, w.bytes.data() + 4, 16) == 0) {
+            // other bytes under the GUID (another mod's program with the same GUID, say): the latest goes in, said so
+            if (x.bytes != w.bytes)
+                logw("kiln.abilities: program %s from %s replaces the one from %s that waited with other bytes under its GUID",
+                     guid_text(w.bytes.data() + 4).c_str(), w.source.c_str(), x.source.c_str());
+            x = std::move(w);
+            return;
+        }
+    g_waiting.push_back(std::move(w));
+}
+
 // Verify + insert. Tick thread. Returns KILN_OK, or INVALID_ARGUMENT with err set; *waiting = queued for natives.
+// A program Kiln has already (g_programs, kept across worlds) is put back when this world's registry lacks it, and the
+// same bytes again in the world that holds it are a no-op: after a world change a second registration of the same GUID
+// (EnsureBuffProgram, a mod's world-start Register, kiln.assets' refresh) succeeds (#108).
 KilnResult add_program(const uint8_t* blob, size_t len, KilnOwner owner, const std::string& source, uint32_t* out_id,
                        std::string& err, bool* waiting) {
     *waiting = false;
@@ -1480,44 +1500,58 @@ KilnResult add_program(const uint8_t* blob, size_t len, KilnOwner owner, const s
     }
     if (!reg || !g_programs_ready.load()) {
         // the game fills its ImpactRegistry while the world loads: wait for it
-        PendingProgram w{std::vector<uint8_t>(blob, blob + len), owner, source, {}};
-        g_waiting.push_back(std::move(w));
+        queue_waiting(PendingProgram{std::vector<uint8_t>(blob, blob + len), owner, source, {}});
         *waiting = true;
         return KILN_OK;
     }
-    for (const auto& p : g_programs)
-        if (p.id == r.id) {
-            err = "a Kiln program with this GUID is registered already";
-            return KILN_ERR_INVALID_ARGUMENT;
+    KProgram* known = nullptr;
+    for (auto& p : g_programs)
+        if (p.id == r.id) known = &p;
+    const bool same = known && known->len == len && std::memcmp(known->blob, blob, len) == 0;
+    const uint8_t* live = get_program(reg, r.id);  // this world's registry, asked now (#108)
+    if (known && live == known->blob) {
+        if (same) {
+            known->inserted_in = reg;
+            return KILN_OK;  // in this world's registry already: the same program again changes nothing
         }
-    if (get_program(reg, r.id)) {
-        err = "the GUID belongs to a program the game has (clone it to a new GUID)";
+        err = "a Kiln program with this GUID is registered already (with other bytes: give the new one a GUID of its own)";
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    if (live) {
+        err = known ? "this world's ImpactRegistry holds another program with this GUID"
+                    : "the GUID belongs to a program the game has (clone it to a new GUID)";
         c_refused.fetch_add(1);
         return KILN_ERR_INVALID_ARGUMENT;
     }
     if (!r.unknown_natives.empty()) {
-        PendingProgram w{std::vector<uint8_t>(blob, blob + len), owner, source, r.unknown_natives};
-        for (auto& x : g_waiting)
-            if (x.bytes.size() >= 20 && std::memcmp(x.bytes.data() + 4, blob + 4, 16) == 0) {
-                x = std::move(w);
-                *waiting = true;
-                return KILN_OK;
-            }
-        g_waiting.push_back(std::move(w));
+        queue_waiting(PendingProgram{std::vector<uint8_t>(blob, blob + len), owner, source, r.unknown_natives});
         *waiting = true;
         return KILN_OK;
     }
-    auto* mem = static_cast<uint8_t*>(VirtualAlloc(nullptr, len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    uint8_t* mem = same ? known->blob : static_cast<uint8_t*>(VirtualAlloc(nullptr, len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
     if (!mem) {
         err = "out of memory";
         return KILN_ERR_INTERNAL;
     }
-    std::memcpy(mem, blob, len);
+    if (!same) std::memcpy(mem, blob, len);
     bool existed = false;
     if (!program_map_insert(reg, r.id, mem, &existed) || existed) {
-        VirtualFree(mem, 0, MEM_RELEASE);
+        if (!same) VirtualFree(mem, 0, MEM_RELEASE);
         err = existed ? "the GUID is in the registry already" : "the ImpactRegistry map is full or unreadable";
         return KILN_ERR_INTERNAL;
+    }
+    if (known) {  // a program of an earlier world, back in this one's registry
+        if (!same) {  // new bytes under its GUID: no instance of this world runs the old copy (it stays: never freed)
+            known->blob = mem;
+            known->len = len;
+            known->owner = owner;
+            known->source = source;
+        }
+        known->inserted_in = reg;
+        g_programs_added.store(true, std::memory_order_release);
+        logi("kiln.abilities: program %s (0x%08x) from %s put back into this world's ImpactRegistry%s",
+             guid_text(r.guid).c_str(), r.id, source.c_str(), same ? "" : " with new bytes");
+        return KILN_OK;
     }
     KProgram p{r.id, {}, mem, len, owner, reg, source};
     std::memcpy(p.guid, r.guid, 16);
@@ -1550,13 +1584,35 @@ void retry_waiting() {
 uint32_t refresh_programs() {  // tick thread
     const uintptr_t reg = g_prog_registry.load();
     if (!reg || !g_programs_ready.load()) return 0;
+    // first what waited for this registry: a program registered again while the world loaded (maybe with new bytes)
+    // goes in as it is now, before the copies below are put back
+    retry_waiting();
     {
         std::lock_guard lock(g_mu);
+        uint32_t back = 0;
         for (auto& p : g_programs) {
-            if (p.inserted_in == reg) continue;
+            // #108: ask the registry, not p.inserted_in: the next world's registry may have the same address
+            const uint8_t* live = get_program(reg, p.id);
+            if (live == p.blob) {
+                p.inserted_in = reg;
+                continue;
+            }
+            if (live) {
+                logw("kiln.abilities: program 0x%08x not re-inserted: this world's ImpactRegistry holds another program with "
+                     "its GUID", p.id);
+                continue;
+            }
             bool existed = false;
-            if (program_map_insert(reg, p.id, p.blob, &existed)) p.inserted_in = reg;
-            else logw("kiln.abilities: program 0x%08x could not be re-inserted", p.id);
+            if (program_map_insert(reg, p.id, p.blob, &existed) && !existed) {
+                p.inserted_in = reg;
+                ++back;
+            } else {
+                logw("kiln.abilities: program 0x%08x could not be re-inserted", p.id);
+            }
+        }
+        if (back) {
+            g_programs_added.store(true, std::memory_order_release);
+            logi("kiln.abilities: %u Kiln program(s) of an earlier world put back into ImpactRegistry %p", back, (void*)reg);
         }
     }
     uint32_t added = 0;
@@ -1590,7 +1646,6 @@ uint32_t refresh_programs() {  // tick thread
             }
         }
     }
-    retry_waiting();
     return added;
 }
 
@@ -1922,7 +1977,17 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
 
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_SERVER) return;
-    if (ev->event == KILN_WORLD_STOPPING) {
+    if (ev->event == KILN_WORLD_STARTED) {
+        // #108: a server world starts (tick thread, before its first Pre) while the last one's state is still here, so
+        // its stop was not seen (a build without the world.lifecycle hook). The new world's ImpactSystem and registries
+        // may sit at the old addresses: nothing of the old world may stay, or it would pass for the new one's.
+        if (!g_setup_world && !g_prog_registry.load()) return;
+        logi("kiln.abilities: server world session %u starts before the last one's stop was seen: that world's state goes now",
+             ev->session);
+    } else if (ev->event != KILN_WORLD_STOPPING) {
+        return;
+    }
+    {
         // review P1: the world's state goes only with no Kiln native call inside (bounded; reported when not)
         const int64_t end = now_ns() + kRetireWaitNs;
         while (g_inflight.load(std::memory_order_seq_cst) != 0 && now_ns() < end) SwitchToThread();
@@ -1958,6 +2023,7 @@ void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
         g_setup_registry = 0;
         g_programs_ready.store(false);
         for (auto& s : g_slots) s.registered_in = 0;
+        for (auto& p : g_programs) p.inserted_in = 0;  // #108: the next world's registry gets them again (refresh_programs)
     }
 }
 
