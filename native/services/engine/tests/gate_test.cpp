@@ -444,6 +444,18 @@ void release_measurements(const char* target) {
               t + "the holder's own release: a hold within the Scene CAS to the registry release");
     }
     {
+        // a thread already above normal: not raised, so nothing to restore; the hold is measured all the same
+        mem::test_priority = 1;
+        const std::uint64_t restores = s.restores.load(), hold_total = s.hold_ns_total.load();
+        GateState g = fresh();
+        check(acquire(g, v) == Reason::None && !g.boosted, t + "above normal already: held, not raised");
+        gate_release(g);
+        check(g.hold_ns > 0 && g.restore_ns == 0 && s.restores.load() == restores && mem::test_priority == 1 &&
+                  s.hold_ns_total.load() - hold_total == g.hold_ns,
+              t + "above normal already: a hold, no restore, the priority left as it was");
+        mem::test_priority = -1;
+    }
+    {
         // kiln.engine's measurement switch turned the raise off: nothing to restore
         gate_set_priority_raise(false);
         const std::uint64_t restores = s.restores.load();
