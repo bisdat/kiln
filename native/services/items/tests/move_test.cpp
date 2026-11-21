@@ -134,7 +134,10 @@ uint16_t* __fastcall fake_component_map_find(void*, const uint32_t* hash) {
         if (kAccHashes[i] == *hash) return &g_type[i + 1];
     return nullptr;
 }
-void* __fastcall fake_item_find(uint32_t id, void*) { return id == WOOD || id == IRON || id == SWORD ? g_item_bytes[id % 8] : nullptr; }
+void* __fastcall fake_item_find(uint32_t id, void*) {
+    const bool known = id == WOOD || id == IRON || id == SWORD || id == 12 || id == 13 || id == 14 || id == 8 || id == 9;  // + issue #109's items
+    return known ? g_item_bytes[id % 8] : nullptr;
+}
 
 // The game's slot transfer: mode 0 moves what fits of the whole stack (item entity and all), 2 moves one item.
 Result12* __fastcall fake_transfer(Result12* out, void*, uint64_t dst, uint64_t src, int32_t mode) {
@@ -1183,6 +1186,359 @@ void replace_test() {
           "replace guard: ordinary gear in a chest or on a player's action bar (not in hand) is still re-created");
 }
 
+// ---------------------------------------------------------------------------------------------- issue #109 ----
+// Items.Move into a player with no toSlot took the first empty slot of every page but the action bars, and a player's
+// InventorySetup links its Equipment pages first: 4 Active Mycelium went into an equipment slot and the move said Done.
+// The layout is the owner's client's (2026-11-16, gems_test.cpp backpack_room): Equipment pages first, the root's Generic
+// pages (two of them the action bars), a Virtual link to the worn backpack's own setup with its Generic pages, Currency.
+constexpr uint32_t RING = 12, MYC = 13, COIN = 14, ARROW = 8, BAG = 9;
+constexpr uint32_t Q = 50, QEQ1 = 51, QEQ2 = 52, QEQ3 = 57, QBAR1 = 53, QBAR2 = 54, QG1 = 55, QG2 = 56, QCUR = 58, QBAG = 60,
+                   QBP1 = 61, QBP2 = 62, QCUS = 59;
+constexpr uint32_t NPC = 70, NEQ = 71, NG = 72;
+
+// SlotSelection.equipment index i: 0-7 on the first Equipment page, 8-15 on the second, 16-19 on the third (Ring0 is
+// index 10 = QEQ2:2, Arrow index 14 = QEQ2:6, Backpack index 19 = QEQ3:3); QEQ3:4-7 are slots no equipment slot shows.
+uint64_t q_equip(uint32_t i) { return i < 8 ? KILN_SLOT_ID(QEQ1, i) : i < 16 ? KILN_SLOT_ID(QEQ2, i - 8) : KILN_SLOT_ID(QEQ3, i - 16); }
+
+void make_setup_cats(uint32_t entity, std::initializer_list<std::pair<uint32_t, uint8_t>> links, uint8_t flags) {
+    auto& s = comp(T_SETUP, entity, kSetupSize);
+    std::memset(s.data(), 0, s.size());
+    uint32_t i = 0;
+    for (auto [l, cat] : links) {
+        std::memcpy(s.data() + 4 * i, &l, 4);
+        s[0x40 + i] = cat;
+        if (cat != 5) comp(T_INV, l, 96);
+        ++i;
+    }
+    s[0x50] = flags;
+    s[0x53] = 1;
+}
+
+void make_player_q(bool backpack_worn) {
+    if (backpack_worn)
+        make_setup_cats(Q, {{QEQ1, 2}, {QEQ2, 2}, {QEQ3, 2}, {QBAR1, 4}, {QBAR2, 4}, {QG1, 4}, {QG2, 4}, {QBAG, 5}, {QCUR, 3}, {QCUS, 1}}, 0x01);
+    else
+        make_setup_cats(Q, {{QEQ1, 2}, {QEQ2, 2}, {QEQ3, 2}, {QBAR1, 4}, {QBAR2, 4}, {QG1, 4}, {QG2, 4}, {QCUR, 3}, {QCUS, 1}}, 0x01);
+    make_setup_cats(QBAG, {{QBP1, 4}, {QBP2, 4}}, 0);
+    auto& sel = comp(T_SEL, Q, 216);
+    std::memset(sel.data(), 0, sel.size());
+    for (uint32_t i = 0; i < 20; ++i) {
+        const uint64_t s = q_equip(i);
+        const uint32_t inv = KILN_SLOT_INVENTORY(s);
+        std::memcpy(sel.data() + i * 8, &inv, 4);
+        sel[i * 8 + 4] = static_cast<uint8_t>(KILN_SLOT_INDEX(s));
+    }
+    std::memcpy(sel.data() + 0xa0, &QBAR1, 4);
+    std::memcpy(sel.data() + 0xa4, &QBAR2, 4);
+}
+void fill_page(uint32_t inv, uint32_t item, uint32_t count) {
+    for (uint32_t k = 0; k < 8; ++k) put(inv, k, item, count);
+}
+void set_item(uint32_t id, uint16_t max_stack, bool gear, uint8_t equip_type, uint8_t category) {
+    uint8_t* b = g_item_bytes[id % 8];
+    std::memset(b, 0, 0x700);
+    std::memcpy(b + 0x14, &max_stack, 2);
+    const uint32_t flags = gear ? 2u : 0u;
+    std::memcpy(b + 0x5d8, &flags, 4);
+    b[0x104] = equip_type;
+    b[0xCC] = category;
+}
+bool page_empty(uint32_t inv) {
+    for (uint32_t k = 0; k < 8; ++k) if (count_at(inv, k) != 0) return false;
+    return true;
+}
+
+// The pure rules, on the reported layout.
+void issue109_logic() {
+    // pages in walk order: Equipment x3, the two action bars, two root Generic, the worn backpack's two, Currency, Customization
+    Page pg[11] = {page(QEQ1, {{RING, 1, 900}}), page(QEQ2, {}), page(QEQ3, {}), page(QBAR1, {}), page(QBAR2, {}),
+                   page(QG1, {{WOOD, 250, 0}}), page(QG2, {}), page(QBP1, {}), page(QBP2, {{MYC, 3, 0}}), page(QCUR, {}), page(QCUS, {})};
+    const uint8_t cats[11] = {2, 2, 2, 4, 4, 4, 4, 4, 4, 3, 1};
+    DestRules r;
+    r.person = true;
+    r.actionbar_pages[0] = QBAR1;
+    r.actionbar_pages[1] = QBAR2;
+    for (uint32_t i = 0; i < 20; ++i) r.equipment[i] = q_equip(i);
+    const uint32_t bars[2] = {QBAR1, QBAR2};
+    uint64_t d = 0;
+    const char* why = "";
+    // the reported bug: the old search over every page but the action bars takes an equipment slot
+    check(find_destination(pg, 11, WOOD + 100, 250, false, bars, 2, 0, &d) && d == KILN_SLOT_ID(QEQ1, 1),
+          "#109 before the fix: the search over every page puts a material into the first Equipment page (QEQ1:1)");
+    // no toSlot: the first empty Generic slot that is not an action bar
+    check(choose_destination(pg, cats, 11, WOOD + 100, 250, false, r, 0, &d, &why) == DestKind::Found && d == KILN_SLOT_ID(QG1, 1),
+          "#109 no toSlot: a new item goes to the first empty backpack slot (QG1:1), never an equipment slot");
+    // stacking: a partial stack in the worn backpack's page wins over an empty root slot
+    check(choose_destination(pg, cats, 11, MYC, 99, false, r, 0, &d, &why) == DestKind::Found && d == KILN_SLOT_ID(QBP2, 0),
+          "#109 stacking: a partial stack of the item on the worn backpack's page is topped up first");
+    // a partial stack on an equipment page (arrows worn) is not part of the search
+    Page arrows[11];
+    std::memcpy(arrows, pg, sizeof pg);
+    arrows[1].s[6] = Stack{KILN_SLOT_ID(QEQ2, 6), ARROW, 20, 0};
+    check(choose_destination(arrows, cats, 11, ARROW, 99, false, r, 0, &d, &why) == DestKind::Found && d == KILN_SLOT_ID(QG1, 1),
+          "#109 stacking: worn arrows are not topped up by a search; the arrows go to the backpack");
+    // full root Generic pages: the worn backpack's pages
+    Page full[11];
+    std::memcpy(full, pg, sizeof pg);
+    for (uint32_t k = 0; k < 8; ++k) {
+        full[5].s[k] = Stack{KILN_SLOT_ID(QG1, k), WOOD, 250, 0};
+        full[6].s[k] = Stack{KILN_SLOT_ID(QG2, k), WOOD, 250, 0};
+    }
+    check(choose_destination(full, cats, 11, IRON, 100, false, r, 0, &d, &why) == DestKind::Found && d == KILN_SLOT_ID(QBP1, 0),
+          "#109 full root pages: the worn backpack's first empty slot (QBP1:0)");
+    // the backpack not worn (no Virtual link, so its pages are not in the walk) and the root full: no room, although
+    // the equipment pages, the action bars and the currency page have empty slots
+    check(choose_destination(full, cats, 7, IRON, 100, false, r, 0, &d, &why) == DestKind::NoRoom,
+          "#109 full backpack, none worn: NoRoom; empty equipment, action-bar and currency slots are not room");
+    Page fullbp[11];
+    std::memcpy(fullbp, full, sizeof full);
+    for (uint32_t k = 0; k < 8; ++k) {
+        fullbp[7].s[k] = Stack{KILN_SLOT_ID(QBP1, k), WOOD, 250, 0};
+        fullbp[8].s[k] = Stack{KILN_SLOT_ID(QBP2, k), WOOD, 250, 0};
+    }
+    check(choose_destination(fullbp, cats, 11, IRON, 100, false, r, 0, &d, &why) == DestKind::NoRoom,
+          "#109 full backpack, worn backpack full too: NoRoom");
+    // gear: an empty slot only, never an equipment slot
+    check(choose_destination(pg, cats, 11, SWORD, 1, true, r, 0, &d, &why) == DestKind::Found && d == KILN_SLOT_ID(QG1, 1),
+          "#109 gear without toSlot: an empty backpack slot");
+    // the action bar: searched only with ActionBar
+    DestRules bar = r;
+    bar.actionbar = true;
+    check(choose_destination(pg, cats, 11, IRON, 100, false, bar, 0, &d, &why) == DestKind::Found && d == KILN_SLOT_ID(QBAR1, 0),
+          "#109 ActionBar: the action bar is searched (in link order)");
+    check(choose_destination(pg, cats, 11, IRON, 100, false, r, KILN_SLOT_ID(QBAR2, 3), &d, &why) == DestKind::Refused &&
+              std::strstr(why, "action bar"),
+          "#109 toSlot on the action bar without ActionBar: refused, with the reason");
+    check(choose_destination(pg, cats, 11, IRON, 100, false, bar, KILN_SLOT_ID(QBAR2, 3), &d, &why) == DestKind::Found && d == KILN_SLOT_ID(QBAR2, 3),
+          "#109 toSlot on the action bar with ActionBar: taken");
+    // named equipment slots: the equipment type rules
+    DestRules ring = r;
+    ring.item_equip_type = 37;  // Armour_Ring
+    check(choose_destination(pg, cats, 11, RING, 1, true, ring, q_equip(10), &d, &why) == DestKind::Found && d == q_equip(10),
+          "#109 toSlot Ring0 for a ring: taken (the slot's EquipmentSlotType is the item's)");
+    check(choose_destination(pg, cats, 11, RING, 1, true, ring, q_equip(5), &d, &why) == DestKind::Refused && std::strstr(why, "does not fit"),
+          "#109 toSlot Armour_Head for a ring: refused (does not fit)");
+    check(choose_destination(pg, cats, 11, MYC, 99, false, r, q_equip(10), &d, &why) == DestKind::Refused && std::strstr(why, "does not fit"),
+          "#109 toSlot Ring0 for a material: refused, nothing moves");
+    check(choose_destination(pg, cats, 11, RING, 1, true, ring, q_equip(0), &d, &why) == DestKind::Refused,
+          "#109 toSlot Vanity_Head (QEQ1:0) for a ring: refused");
+    Page worn[11];
+    std::memcpy(worn, pg, sizeof pg);
+    worn[1].s[2] = Stack{KILN_SLOT_ID(QEQ2, 2), RING, 1, 901};
+    check(choose_destination(worn, cats, 11, RING, 1, true, ring, q_equip(10), &d, &why) == DestKind::Found && d == KILN_SLOT_ID(QG1, 1),
+          "#109 toSlot Ring0 already worn: the ring goes to the backpack (a full named slot gives way to the search)");
+    check(choose_destination(pg, cats, 11, RING, 1, true, ring, KILN_SLOT_ID(QEQ3, 5), &d, &why) == DestKind::Refused && std::strstr(why, "cannot see"),
+          "#109 toSlot on an equipment page slot no equipment slot shows: refused");
+    DestRules bag = r;
+    bag.item_equip_type = 38;
+    check(choose_destination(pg, cats, 11, BAG, 1, true, bag, q_equip(19), &d, &why) == DestKind::Refused && std::strstr(why, "Items.Equip"),
+          "#109 toSlot the backpack slot: refused (Items.Equip)");
+    DestRules arrow = r;
+    arrow.item_equip_type = 6;
+    check(choose_destination(arrows, cats, 11, ARROW, 99, false, arrow, q_equip(14), &d, &why) == DestKind::Found && d == q_equip(14),
+          "#109 toSlot the Arrow slot for arrows: the worn arrows are topped up");
+    // currency and customization pages
+    DestRules coin = r;
+    coin.item_category = kItemCategoryCurrency;
+    check(choose_destination(pg, cats, 11, COIN, 999, false, coin, KILN_SLOT_ID(QCUR, 0), &d, &why) == DestKind::Found && d == KILN_SLOT_ID(QCUR, 0),
+          "#109 toSlot on the currency page for a currency item: taken");
+    check(choose_destination(pg, cats, 11, COIN, 999, false, coin, 0, &d, &why) == DestKind::Found && d == KILN_SLOT_ID(QG1, 1),
+          "#109 a currency item without toSlot: the backpack (the search never fills the currency page)");
+    check(choose_destination(pg, cats, 11, MYC, 99, false, r, KILN_SLOT_ID(QCUR, 0), &d, &why) == DestKind::Refused && std::strstr(why, "currency"),
+          "#109 toSlot on the currency page for a material: refused");
+    check(choose_destination(pg, cats, 11, MYC, 99, false, r, KILN_SLOT_ID(QCUS, 0), &d, &why) == DestKind::Refused,
+          "#109 toSlot on a customization page: refused");
+    // a toSlot that does not fit (full, or another item) falls back to the backpack search; one that is no slot of the player is refused
+    check(choose_destination(pg, cats, 11, IRON, 100, false, r, KILN_SLOT_ID(QG1, 0), &d, &why) == DestKind::Found && d == KILN_SLOT_ID(QG1, 1),
+          "#109 toSlot holding another item: the backpack search, never an equipment slot");
+    check(choose_destination(full, cats, 11, IRON, 100, false, r, KILN_SLOT_ID(QG2, 4), &d, &why) == DestKind::Found && d == KILN_SLOT_ID(QBP1, 0),
+          "#109 toSlot full: the worn backpack");
+    check(choose_destination(pg, cats, 11, IRON, 100, false, r, KILN_SLOT_ID(999, 0), &d, &why) == DestKind::Refused && std::strstr(why, "not one of"),
+          "#109 toSlot that is no slot of the player: refused");
+    check(choose_destination(pg, cats, 11, IRON, 100, false, r, KILN_SLOT_ID(QBP2, 5), &d, &why) == DestKind::Found && d == KILN_SLOT_ID(QBP2, 5),
+          "#109 toSlot on the worn backpack's page: taken");
+    // an NPC's inventory (flags bit 1, no SlotSelection): Generic pages only, equipment never even when named
+    DestRules npc;
+    npc.person = true;
+    Page np[2] = {page(NEQ, {}), page(NG, {})};
+    const uint8_t ncats[2] = {2, 4};
+    check(choose_destination(np, ncats, 2, IRON, 100, false, npc, 0, &d, &why) == DestKind::Found && d == KILN_SLOT_ID(NG, 0),
+          "#109 an NPC: the Generic page, not its equipment page");
+    check(choose_destination(np, ncats, 2, IRON, 100, false, npc, KILN_SLOT_ID(NEQ, 0), &d, &why) == DestKind::Refused,
+          "#109 an NPC, toSlot on its equipment page: refused (no SlotSelection names it)");
+    // not a person (a chest): unchanged, every page, and a toSlot that is not its own falls back as before
+    DestRules chest;
+    Page cp[2] = {page(A, {{WOOD, 250, 0}}), page(A2, {})};
+    const uint8_t ccats[2] = {4, 4};
+    check(choose_destination(cp, ccats, 2, IRON, 100, false, chest, 0, &d, &why) == DestKind::Found && d == KILN_SLOT_ID(A, 1) &&
+              find_destination(cp, 2, IRON, 100, false, nullptr, 0, 0, &d) && d == KILN_SLOT_ID(A, 1),
+          "#109 a chest: the same slot as before the fix");
+    check(choose_destination(cp, ccats, 2, IRON, 100, false, chest, KILN_SLOT_ID(999, 1), &d, &why) == DestKind::Found && d == KILN_SLOT_ID(A, 1),
+          "#109 a chest, a toSlot that is not its own: falls back to the search as before");
+    // may_land: where a stack may be after the move
+    check(may_land(r, pg, cats, 11, KILN_SLOT_ID(QBP1, 3), 0) && may_land(r, pg, cats, 11, KILN_SLOT_ID(QG2, 0), 0),
+          "#109 may_land: the root's Generic pages and the worn backpack's");
+    check(!may_land(r, pg, cats, 11, KILN_SLOT_ID(QEQ1, 1), 0) && !may_land(r, pg, cats, 11, KILN_SLOT_ID(QBAR1, 0), 0) &&
+              !may_land(r, pg, cats, 11, KILN_SLOT_ID(QCUR, 0), 0) && !may_land(r, pg, cats, 11, KILN_SLOT_ID(999, 0), 0),
+          "#109 may_land: never an equipment slot, the action bar (without ActionBar), the currency page or a foreign slot");
+    check(may_land(r, pg, cats, 11, q_equip(10), q_equip(10)) && may_land(bar, pg, cats, 11, KILN_SLOT_ID(QBAR1, 0), 0),
+          "#109 may_land: the accepted toSlot, and the action bar with ActionBar");
+    check(may_land(chest, cp, ccats, 2, KILN_SLOT_ID(A2, 7), 0), "#109 may_land: any page of a chest");
+}
+
+// Through the engine on the fake world: the move, its result and the rollback.
+Result12* __fastcall fake_transfer_astray(Result12* out, void* tx, uint64_t, uint64_t src, int32_t mode) {
+    return fake_transfer(out, tx, KILN_SLOT_ID(QEQ1, 7), src, mode);  // a game that puts the stack somewhere else
+}
+Result12* __fastcall fake_transfer_eats(Result12* out, void*, uint64_t, uint64_t src, int32_t) {
+    std::memset(out, 0, 12);  // a game that takes the stack and puts it nowhere
+    uint8_t* s = stack(static_cast<uint32_t>(src), static_cast<uint32_t>(src >> 32));
+    std::memcpy(&out->value, s + 4, 4);
+    std::memset(s, 0, 12);
+    return out;
+}
+
+void issue109_engine() {
+    E.tx_ctor = &fake_tx_ctor;
+    E.tx_init = &fake_tx_init;
+    E.commit = &fake_tx_noop;
+    E.rollback = &fake_tx_rollback;
+    E.free_arrays = &fake_tx_noop;
+    set_item(MYC, 99, false, 0, 9);
+    set_item(RING, 1, true, 37, 1);
+    set_item(COIN, 999, false, 0, 11);
+    FakeTx tx;
+    Access a;
+    check(access_from_tx(&tx, &a), "#109 engine: transaction accessors check out");
+    auto move = [&](uint32_t from, uint64_t slot, uint32_t to, uint32_t count, uint64_t to_slot, uint32_t flags) {
+        MoveJob job;
+        job.r.size = sizeof(KilnItemsMoveRequest);
+        job.r.kind = KILN_MOVE_STACK;
+        job.r.from = from;
+        job.r.to = to;
+        job.r.slot = slot;
+        job.r.count = count;
+        job.r.to_slot = to_slot;
+        job.r.flags = flags;
+        KilnItemsMoveResult res{};
+        unsigned long code = 0;
+        run_move(a, job, reinterpret_cast<uint8_t*>(&tx), &res, &code);
+        return res;
+    };
+    auto eq_untouched = [] { return page_empty(QEQ1) && page_empty(QEQ2) && page_empty(QEQ3) && page_empty(QCUR) && page_empty(QCUS); };
+
+    // the report: 4 Active Mycelium from a chest into a player, no toSlot
+    reset_world();
+    make_player_q(true);
+    PageSet ps;
+    bool init = false;
+    check(read_pages(a, Q, &ps, &init) && ps.n == 11 && ps.cat[0] == 2 && ps.cat[3] == 4 && ps.cat[7] == 4 && ps.p[7].entity == QBP1 &&
+              ps.cat[9] == 3 && ps.flags == 0x01,
+          "#109 engine: a player's pages carry their categories, the worn backpack's pages in the walk (Virtual expanded)");
+    put(A, 0, MYC, 4);
+    KilnItemsMoveResult r = move(A, KILN_SLOT_ID(A, 0), Q, 0, 0, 0);
+    check(r.status == KILN_ITEMS_DONE && r.done == 4 && r.change_count == 1 && r.changes[0].to_slot == KILN_SLOT_ID(QG1, 0) &&
+              item_at(QG1, 0) == MYC && count_at(QG1, 0) == 4 && eq_untouched(),
+          "#109 engine: 4 Active Mycelium land in the first backpack slot (QG1:0), the equipment pages stay empty");
+    // stacking into an existing stack in the worn backpack
+    put(A, 1, MYC, 5);
+    put(QG1, 0, 0, 0);
+    put(QBP2, 4, MYC, 90);
+    r = move(A, KILN_SLOT_ID(A, 1), Q, 0, 0, 0);
+    check(r.status == KILN_ITEMS_DONE && r.done == 5 && count_at(QBP2, 4) == 95 && eq_untouched(),
+          "#109 engine: a partial stack in the worn backpack is topped up");
+    // part of a stack that only partly fits on the partial stack: the rest goes to the first empty backpack slot
+    put(A, 2, MYC, 10);
+    r = move(A, KILN_SLOT_ID(A, 2), Q, 10, 0, 0);
+    check(r.status == KILN_ITEMS_DONE && r.done == 10 && count_at(QBP2, 4) == 99 && item_at(QG1, 0) == MYC && count_at(QG1, 0) == 6 &&
+              eq_untouched(),
+          "#109 engine: 10 more: 4 top the stack up to 99, 6 go to an empty backpack slot");
+    // full root pages: the worn backpack
+    reset_world();
+    make_player_q(true);
+    fill_page(QG1, WOOD, 250);
+    fill_page(QG2, WOOD, 250);
+    put(A, 0, MYC, 4);
+    r = move(A, KILN_SLOT_ID(A, 0), Q, 0, 0, 0);
+    check(r.status == KILN_ITEMS_DONE && item_at(QBP1, 0) == MYC && eq_untouched() && page_empty(QBAR1),
+          "#109 engine: root pages full: the worn backpack's page");
+    // the backpack not worn, the root full: NoRoom, the chest keeps the stack
+    reset_world();
+    make_player_q(false);
+    fill_page(QG1, WOOD, 250);
+    fill_page(QG2, WOOD, 250);
+    put(A, 0, MYC, 4);
+    r = move(A, KILN_SLOT_ID(A, 0), Q, 0, 0, 0);
+    check(r.status == KILN_ITEMS_NO_ROOM && r.done == 0 && count_at(A, 0) == 4 && eq_untouched() && page_empty(QBAR1) && page_empty(QBAR2) &&
+              std::strstr(r.message, "backpack"),
+          "#109 engine: full backpack, none worn: NoRoom ('no room in ... backpack'), the chest keeps all 4");
+    // a named equipment slot: a ring into Ring0 is fine, a material is refused
+    reset_world();
+    make_player_q(true);
+    put(A, 3, RING, 1, 4001);
+    r = move(A, KILN_SLOT_ID(A, 3), Q, 0, q_equip(10), 0);
+    check(r.status == KILN_ITEMS_DONE && pide_at(QEQ2, 2) == 4001 && r.changes[0].to_slot == q_equip(10),
+          "#109 engine: toSlot Ring0 for a ring: Done, in the ring slot");
+    put(A, 0, MYC, 4);
+    r = move(A, KILN_SLOT_ID(A, 0), Q, 0, q_equip(11), 0);
+    check(r.status == KILN_ITEMS_REFUSED && r.done == 0 && count_at(A, 0) == 4 && item_at(QEQ2, 3) == 0 && std::strstr(r.message, "does not fit"),
+          "#109 engine: toSlot Ring1 for a material: Refused with the reason, nothing moves");
+    r = move(A, KILN_SLOT_ID(A, 0), Q, 0, KILN_SLOT_ID(QBAR1, 2), 0);
+    check(r.status == KILN_ITEMS_REFUSED && count_at(A, 0) == 4 && page_empty(QBAR1),
+          "#109 engine: toSlot on the action bar without ActionBar: Refused");
+    r = move(A, KILN_SLOT_ID(A, 0), Q, 0, KILN_SLOT_ID(QBAR1, 2), KILN_ITEMS_MOVE_ACTIONBAR);
+    check(r.status == KILN_ITEMS_DONE && item_at(QBAR1, 2) == MYC, "#109 engine: ... with ActionBar: Done there");
+    // a toSlot that holds something else: the backpack, never the equipment
+    put(A, 0, MYC, 4);
+    put(QG1, 0, WOOD, 250);
+    r = move(A, KILN_SLOT_ID(A, 0), Q, 0, KILN_SLOT_ID(QG1, 0), 0);
+    check(r.status == KILN_ITEMS_DONE && item_at(QG1, 1) == MYC && page_empty(QEQ1) && page_empty(QEQ3),
+          "#109 engine: toSlot that does not fit: the first free backpack slot");
+    // a dry run says where it would go and leaves everything as it was
+    put(A, 0, MYC, 4);
+    r = move(A, KILN_SLOT_ID(A, 0), Q, 0, 0, KILN_ITEMS_MOVE_DRY_RUN);
+    check(r.status == KILN_ITEMS_DONE && r.changes[0].to_slot == KILN_SLOT_ID(QG1, 1) && count_at(A, 0) == 4 && count_at(QG1, 1) == 4,
+          "#109 engine: a dry run names the backpack slot (the partial stack QG1:1) and moves nothing");
+    // the hook side (a transfer handler's move into a player) goes through the same rules
+    reset_world();
+    make_player_q(true);
+    put(A, 0, MYC, 4);
+    MoveOutcome mo;
+    const uint32_t moved = move_stack_in(a, &tx, A, KILN_SLOT_ID(A, 0), Q, 0, 0, false, false, &mo);
+    check(moved == 4 && mo.status == KILN_ITEMS_DONE && item_at(QG1, 0) == MYC && eq_untouched(),
+          "#109 engine: move_stack_in (a transfer handler's move) lands in the backpack too");
+    // an NPC's inventory (flags bit 1, no SlotSelection)
+    make_setup_cats(NPC, {{NEQ, 2}, {NG, 4}}, 0x02);
+    put(A, 1, IRON, 3);
+    r = move(A, KILN_SLOT_ID(A, 1), NPC, 0, 0, 0);
+    check(r.status == KILN_ITEMS_DONE && item_at(NG, 0) == IRON && page_empty(NEQ), "#109 engine: an NPC: its Generic page, not its equipment");
+    // a chest is unchanged: its first empty slot
+    put(A, 2, IRON, 2);
+    r = move(A, KILN_SLOT_ID(A, 2), B, 0, 0, 0);
+    check(r.status == KILN_ITEMS_DONE && item_at(B, 0) == IRON, "#109 engine: a chest: its first empty slot, as before");
+
+    // never Done for a stack that did not land where the player can reach it: the result is checked and rolled back
+    reset_world();
+    make_player_q(true);
+    put(A, 0, MYC, 4);
+    E.slot_transfer = &fake_transfer_astray;
+    r = move(A, KILN_SLOT_ID(A, 0), Q, 0, 0, 0);
+    E.slot_transfer = &fake_transfer;
+    check(r.status == KILN_ITEMS_REFUSED && r.done == 0 && r.change_count == 0 && count_at(A, 0) == 4 && page_empty(QEQ1) &&
+              std::strstr(r.message, "rolled back"),
+          "#109 engine: a slot transfer that puts the stack into an equipment slot: Refused and rolled back, the chest keeps it");
+    E.slot_transfer = &fake_transfer_eats;
+    r = move(A, KILN_SLOT_ID(A, 0), Q, 0, 0, 0);
+    E.slot_transfer = &fake_transfer;
+    check(r.status == KILN_ITEMS_REFUSED && r.done == 0 && count_at(A, 0) == 4 && std::strstr(r.message, "without arriving"),
+          "#109 engine: items that leave the slot and arrive nowhere: Refused and rolled back");
+    E.slot_transfer = &fake_transfer_eats;
+    r = move(A, KILN_SLOT_ID(A, 0), B, 0, 0, 0);
+    E.slot_transfer = &fake_transfer;
+    check(r.status == KILN_ITEMS_REFUSED && count_at(A, 0) == 4, "#109 engine: ... into a chest too");
+    reset_world();
+}
+
 int main(int argc, char** argv) {
     setup_engine();
     const std::string mode = argc > 1 ? argv[1] : "all";
@@ -1222,8 +1578,11 @@ int main(int argc, char** argv) {
         return failures ? EXIT_FAILURE : EXIT_SUCCESS;
     }
     logic_tests();
+    issue109_logic();
     setup_engine();
     engine_tests();
+    setup_engine();
+    issue109_engine();
     setup_engine();
     hide_fault_test();
     setup_engine();

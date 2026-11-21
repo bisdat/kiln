@@ -276,6 +276,8 @@ constexpr uint32_t kHashCustomPlayerString = 0x0e699564u;  // keen::ecs::CustomP
 struct PageSet {
     Page p[KILN_ITEMS_MAX_INVENTORIES];
     uint32_t n = 0;
+    uint8_t cat[KILN_ITEMS_MAX_INVENTORIES] = {};  // each page's InventoryCategory (its link's; Virtual links expanded)
+    uint8_t flags = 0;                             // the root InventorySetup's flags (bit 0 a player's, bit 1 an NPC's)
 };
 bool read_pages(const Access& a, KilnEntity e, PageSet* out, bool* initialized);
 // Upgrades (v8, package P3, gear.cpp): opens a transaction of ours on `tx` (E.tx_size bytes, 16-aligned) with the
@@ -305,13 +307,20 @@ void player_guard(const Access& a, KilnEntity e, PlayerGuard* g);
 // Moves `count` items (0 = all) of the stack in `slot` of `from` into `to` through the game's slot transfer in the
 // transaction `tx` (the caller owns it: program side, a transaction of ours; hook side, the game's own). Never takes
 // a player's equipped or held stack unless `allow_equipped`, never fills a player's action bar unless `actionbar`.
+// Into a person (a player or an NPC) it lands only where choose_destination (moves.h) allows: the Generic pages, the
+// worn backpack's included, or a named `to_slot` the item may enter (issue #109).
 // Returns the items moved; *status is KILN_ITEMS_DONE, PARTIAL, NO_ROOM, NOT_ENOUGH, SLOT_CHANGED or REFUSED, *error the
 // game's error code of the last failing transfer, why a reason in words.
 struct MoveOutcome {
     int32_t status = KILN_ITEMS_DONE;
     uint32_t error = 0;
     char why[96] = "";
+    uint64_t named = 0;  // the caller's to_slot when choose_destination accepted it and something went there
 };
+
+// The destination rules for a stack of the item `info` (an ItemInfo, or null) moving into `to`, whose pages are `tp`
+// (moves.h DestRules): a person or not, the action bars, SlotSelection.equipment. Not guarded.
+void dest_rules_for(const Access& a, KilnEntity to, const PageSet& tp, bool actionbar, const uint8_t* info, DestRules* r);
 uint32_t move_stack_in(const Access& a, void* tx, KilnEntity from, uint64_t slot, KilnEntity to, uint32_t count,
                        uint64_t to_slot, bool allow_equipped, bool actionbar, MoveOutcome* out);
 

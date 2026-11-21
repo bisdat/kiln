@@ -149,6 +149,13 @@ MoveResult r = await Items.Move(player, sword.Slot, chest);     // same item ent
 string? name = Items.ContainerName(chest);                      // the Rename button's text, or null
 using var lockSlot = Items.Transfers.Keep(slot);                // R leaves this stack alone
 ```
+Where a stack move lands in a player's or an NPC's inventory (issue #109): only the Generic pages (the backpack, the worn
+backpack's pages included), never equipment, currency or customization pages, nor the action bar without `ActionBar`; a
+named `toSlot` must be one the item may enter (equipment type rules for an equipment slot), else `Refused`; a move that put
+anything elsewhere, or lost items, is rolled back and `Refused`. The rules: `native/services/items/moves.h`
+(`choose_destination`, `may_land`); the tests: `native/services/items/tests/move_test.cpp` (`issue109_logic`,
+`issue109_engine`); the guide: [modding/inventory.md](../modding/inventory.md#moving-items).
+
 C (header size >= `sizeof(KilnItemsApi)` of v3): `move` (a `KilnItemsMoveRequest`: STACK, QUICK_STACK or MOVE_ALL; callback with a
 `KilnItemsMoveResult` and its ledger, tick thread Pre), `container_name` (tick thread), `transfer_rule` / `transfer_listen` /
 `transfer_report` / `transfer_end` (the first registration installs the hooks), `status2`. A transfer handler runs inside the game's

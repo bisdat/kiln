@@ -358,8 +358,14 @@ typedef struct KilnItemsMoveRequest {
     KilnEntity to;       /* the inventory they enter; not the same entity as `from` */
     uint32_t count;      /* STACK: items to move, 0 = the whole stack; must not exceed the stack. Otherwise 0 */
     KilnSlotId slot;     /* STACK: the slot of `from` (KILN_SLOT_ID(inventory, index)) */
-    KilnSlotId to_slot;  /* STACK: a slot of `to` to fill first (0 = the game's choice: partial stacks of the item,
-                            then the first empty slot) */
+    KilnSlotId to_slot;  /* STACK: a slot of `to` to fill first (0 = Kiln's choice: partial stacks of the item,
+                            then the first empty slot). Into a player or an NPC (issue #109) the choice uses only the
+                            Generic pages (the backpack, the worn backpack's too), never equipment, currency or
+                            customization pages nor the action bar without KILN_ITEMS_MOVE_ACTIONBAR; a to_slot the
+                            item may not enter (an equipment slot of another type or one no SlotSelection entry shows,
+                            the backpack slot, a currency page for a non-currency, not a slot of `to`) is
+                            KILN_ITEMS_REFUSED; one it may enter that is full gives way to the choice. A stack that
+                            arrived anywhere else, or items lost on the way, roll the move back as REFUSED. */
 } KilnItemsMoveRequest;
 
 /* One piece of the ledger: `amount` of `item` left `from_slot` and arrived in `to_slot`. Gear (a stack with an item
