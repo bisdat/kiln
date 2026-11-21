@@ -3102,6 +3102,7 @@
             "cancel": 24,
             "cancel_owner": 32,
             "container_name": 144,
+            "container_rename": 368,
             "equip": 224,
             "equip_set": 272,
             "equip_status": 232,
@@ -3130,6 +3131,7 @@
             "read": 40,
             "read_holder": 208,
             "read_instances": 200,
+            "rename_status": 376,
             "roll_status": 328,
             "scale_status": 360,
             "set_cancel": 280,
@@ -3146,7 +3148,7 @@
             "transfer_report": 168,
             "transfer_rule": 152
           },
-          "size": 368
+          "size": 384
         },
         "KilnItemsChange": {
           "align": 8,
@@ -3467,6 +3469,49 @@
             "weights": 8
           },
           "size": 32
+        },
+        "KilnItemsRenameRequest": {
+          "align": 4,
+          "fields": {
+            "entity": 4,
+            "len": 8,
+            "reserved": 12,
+            "size": 0,
+            "text": 16
+          },
+          "size": 272
+        },
+        "KilnItemsRenameResult": {
+          "align": 8,
+          "fields": {
+            "changed": 28,
+            "cleared": 29,
+            "entity": 16,
+            "game_error": 20,
+            "message": 32,
+            "reserved": 30,
+            "size": 0,
+            "status": 4,
+            "steps": 24,
+            "ticket": 8
+          },
+          "size": 192
+        },
+        "KilnItemsRenameStatus": {
+          "align": 4,
+          "fields": {
+            "available": 4,
+            "detail": 24,
+            "done": 12,
+            "feature": 5,
+            "pending": 8,
+            "refused": 16,
+            "reserved0": 7,
+            "reserved1": 20,
+            "server": 6,
+            "size": 0
+          },
+          "size": 184
         },
         "KilnItemsRequest": {
           "align": 8,
@@ -3831,7 +3876,7 @@
           "size": 40
         }
       },
-      "sha256": "bacaaf184ff32960614d9194203c1329a662ca4eed7298c9f2d58284f4d9b04b"
+      "sha256": "c4e919679e9a659e3edb19ea224ec07c2dcf224f9bffec5679c2e0438ba7f599"
     },
     "native/core/abi/services/kiln_launch.h": {
       "function_macros": [
@@ -8290,7 +8335,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "50cc885d2ed16629c58d38b9e65487ba7aa54a838af6282975b82ffd199d4fb0",
+    "src/layout.rs": "a7d5675da452c6be36c32d2e51ff31c165abeeb79749204efa0ad7fa2be609f4",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8317,7 +8362,7 @@
     "src/services/kiln_gameplay.rs": "697b6e9a231122dd29e33b1b96bc050afd822950077bc1ca2d5d1caabf70fe43",
     "src/services/kiln_gemcraft.rs": "07cb3321ad95f3ec8b694f78a02d561a14002338c8ee536b2df6fe17c8f1a4e6",
     "src/services/kiln_hooks.rs": "d3ff34a15e0da4580df5ffcdd09dafd5d31d949e3cafcfc3924bf9d2c729c1b6",
-    "src/services/kiln_items.rs": "18728eec24bf6c732f4d28460d8d9917fbaf835a899207feba03b10d27fb8a31",
+    "src/services/kiln_items.rs": "aa910afb12948a34f118f62ca7979704f9f9487e38bd0e76ba6fb8dfba8ef707",
     "src/services/kiln_launch.rs": "ecd86b5c0fc8c0114eeec411fc3a657e78f803f83aabaace53d82142bd932bb7",
     "src/services/kiln_log.rs": "86b18decab13965acd7a5e9d0c3166a80ac5441359f928717b8f4a02cd395df1",
     "src/services/kiln_mod_values.rs": "b8ffa4c778b215cf6b6a9137e8b1ec0925ccdc0a9b23a916c352d9aeee00af90",
