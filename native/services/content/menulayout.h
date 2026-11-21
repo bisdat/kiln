@@ -115,7 +115,7 @@ std::string drain_applied_text(bool clear);
 struct MenuIo {
     virtual ~MenuIo() = default;
     virtual bool read(uintptr_t address, void* out, size_t n) = 0;               // game memory, guarded
-    virtual void* alloc(uintptr_t near, size_t n) = 0;                            // within rel32 reach of near; never freed
+    virtual void* alloc(uintptr_t anchor, size_t n) = 0;                            // within rel32 reach of anchor; never freed
     virtual size_t write(std::vector<Write>& writes, uintptr_t* failed) = 0;     // write_batch: how many landed
     virtual void guid(const std::string& key, uint8_t out[16]) = 0;              // newcontent's cm_guid
     virtual void texts(uint32_t tag, const TextMap& texts) = 0;                  // newcontent's set_texts: the loca hooks answer tag
@@ -178,7 +178,7 @@ OwnResult own_publish(uintptr_t coll, const std::vector<OwnWorkshop>& menus, con
 // The tree of one layout (tabs = groups copied from the base tree's tab iconFromTab, with the layout's ids and labels).
 enum class TreeOutcome { Ok, IconSourceMissing, LayoutUnknown, NoMemory, OutOfReach };
 TreeOutcome layout_tree(const Record& r, uintptr_t base_groups, uint32_t base_count, bool base_found, const Geometry& g,
-                        MenuIo& io, uintptr_t near, TreeRef* out, size_t* bytes, std::string* why);
+                        MenuIo& io, uintptr_t anchor, TreeRef* out, size_t* bytes, std::string* why);
 // The pending hold: the workshop id to ask the game's lookup for instead of `workshop` (one the live list proves absent),
 // or 0 (no hold). game: the game's own workshop list (before Kiln's); def_own: a definition names it its own workshop.
 uint32_t hold_workshop(uint32_t workshop, const std::vector<uint32_t>& game, const std::vector<uint32_t>& live, bool def_own);

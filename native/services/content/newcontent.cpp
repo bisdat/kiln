@@ -2933,7 +2933,7 @@ struct OwnIo final : ml::MenuIo {
     // sanitized build keeps this class's vtable even when own_build is dropped)
     size_t (*batch)(std::vector<Write>&, uintptr_t*) = nullptr;
     bool read(uintptr_t address, void* out, size_t n) override { return rd(address, out, n); }
-    void* alloc(uintptr_t near, size_t n) override { return near_alloc(near, n); }
+    void* alloc(uintptr_t anchor, size_t n) override { return near_alloc(anchor, n); }
     size_t write(std::vector<Write>& writes, uintptr_t* failed) override { return batch ? batch(writes, failed) : 0; }
     void guid(const std::string& key, uint8_t out[16]) override { cm_guid(key, out); }
     void texts(uint32_t tag, const ml::TextMap& texts) override { set_texts(tag, texts); }

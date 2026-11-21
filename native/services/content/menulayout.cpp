@@ -816,7 +816,7 @@ const char* word(TreeOutcome o) {
 }
 // The placements' tree (the way before layouts): the tabs and sets of the menu it takes, as many as its recipes use, each
 // listing only its recipes placed there; ids of their own, the game's labels and icons.
-bool placements_tree(const OwnWorkshop& m, Blob tabs, const Geometry& g, MenuIo& io, uintptr_t near, TreeRef* out, uint32_t* listed,
+bool placements_tree(const OwnWorkshop& m, Blob tabs, const Geometry& g, MenuIo& io, uintptr_t anchor, TreeRef* out, uint32_t* listed,
                      size_t* bytes) {
     if (!tabs.data || !tabs.count) return false;
     const uint32_t gs = g.gs, ss = g.ss;
@@ -830,7 +830,7 @@ bool placements_tree(const OwnWorkshop& m, Blob tabs, const Geometry& g, MenuIo&
         if (std::find(list.begin(), list.end(), p.id) == list.end()) list.push_back(p.id);
     }
     if (used.empty()) return false;
-    auto* groups = static_cast<uint8_t*>(io.alloc(near, used.size() * gs));
+    auto* groups = static_cast<uint8_t*>(io.alloc(anchor, used.size() * gs));
     if (!groups) return false;
     *bytes += used.size() * gs;
     const uintptr_t G = reinterpret_cast<uintptr_t>(groups);
@@ -845,14 +845,14 @@ bool placements_tree(const OwnWorkshop& m, Blob tabs, const Geometry& g, MenuIo&
             io.guid(key, tab + g.g_id);
         }
         const Blob os = blob(io, src + g.cat_subs);
-        auto* sets = static_cast<uint8_t*>(io.alloc(near, subs.size() * ss));
+        auto* sets = static_cast<uint8_t*>(io.alloc(anchor, subs.size() * ss));
         if (!sets) return false;
         *bytes += subs.size() * ss;
         const uintptr_t S = reinterpret_cast<uintptr_t>(sets);
         uint32_t si = 0;
         for (const auto& [s, rids] : subs) {
             uint8_t* set = sets + size_t(si) * ss;
-            auto* list = static_cast<uint32_t*>(io.alloc(near, rids.size() * 4));
+            auto* list = static_cast<uint32_t*>(io.alloc(anchor, rids.size() * 4));
             if (!list || !io.read(os.data + s * uintptr_t(ss), set, ss)) return false;
             *bytes += rids.size() * 4;
             if (g.labels()) {
@@ -880,7 +880,7 @@ std::string report_key(const OwnWorkshop& m, bool ok, const std::string& reason)
 }  // namespace
 
 TreeOutcome layout_tree(const Record& r, uintptr_t base_groups, uint32_t base_count, bool base_found, const Geometry& g, MenuIo& io,
-                        uintptr_t near, TreeRef* out, size_t* bytes, std::string* why) {
+                        uintptr_t anchor, TreeRef* out, size_t* bytes, std::string* why) {
     *out = TreeRef{};
     char b[256];
     if (!g.labels()) {
@@ -902,7 +902,7 @@ TreeOutcome layout_tree(const Record& r, uintptr_t base_groups, uint32_t base_co
     }
     if (r.tabs.empty()) return TreeOutcome::Ok;  // a menu of no tabs: an empty tree
     const uint32_t gs = g.gs, ss = g.ss;
-    auto* groups = static_cast<uint8_t*>(io.alloc(near, r.tabs.size() * gs));
+    auto* groups = static_cast<uint8_t*>(io.alloc(anchor, r.tabs.size() * gs));
     if (!groups) return *why = "no memory near the crafting menu", TreeOutcome::NoMemory;
     *bytes += r.tabs.size() * gs;
     const uintptr_t G = reinterpret_cast<uintptr_t>(groups);
@@ -922,7 +922,7 @@ TreeOutcome layout_tree(const Record& r, uintptr_t base_groups, uint32_t base_co
             point(tab + g.cat_subs, field, 0, 0);
             continue;
         }
-        auto* sets = static_cast<uint8_t*>(io.alloc(near, t.sets.size() * ss));
+        auto* sets = static_cast<uint8_t*>(io.alloc(anchor, t.sets.size() * ss));
         if (!sets) return *why = "no memory near the crafting menu", TreeOutcome::NoMemory;
         *bytes += t.sets.size() * ss;
         std::memset(sets, 0, t.sets.size() * ss);
@@ -937,7 +937,7 @@ TreeOutcome layout_tree(const Record& r, uintptr_t base_groups, uint32_t base_co
                 point(set + g.sub_recipes, entries, 0, 0);
                 continue;
             }
-            auto* ids = static_cast<uint32_t*>(io.alloc(near, s.recipes.size() * 4));
+            auto* ids = static_cast<uint32_t*>(io.alloc(anchor, s.recipes.size() * 4));
             if (!ids) return *why = "no memory near the crafting menu", TreeOutcome::NoMemory;
             *bytes += s.recipes.size() * 4;
             std::memcpy(ids, s.recipes.data(), s.recipes.size() * 4);
