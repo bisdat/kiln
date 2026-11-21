@@ -5284,6 +5284,16 @@
         "info": "Nota"
       },
       "noCatalog": "Nenhum catálogo de dados do jogo neste PC: os seletores listam só o que os mods do pack adicionam, e os campos são digitados à mão.",
+      "catalog": {
+        "reading": "Lendo os itens do jogo…",
+        "build": "Criar o catálogo do jogo",
+        "why": {
+          "noGame": "Nenhum cliente do Enshrouded encontrado. Adicione-o em Configurações → Jogos.",
+          "steamUpdating": "O Steam está atualizando o jogo. Tente de novo quando terminar.",
+          "conflict": "Os arquivos do jogo são de duas versões diferentes (o Steam pode estar no meio de uma atualização). Tente de novo quando o Steam terminar.",
+          "failed": "O Kiln não conseguiu ler os itens do jogo: {message}"
+        }
+      },
       "thisPack": "este pack",
       "save": "Salvar",
       "saved": "Salvo",

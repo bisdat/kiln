@@ -6,6 +6,8 @@
 .kd-lint-warn { color: #ffb066; }
 .kd-lint-err { color: #ff7a6b; }
 .kd-note { margin: 0; font-size: 14px; }
+.kd-catalog { display: flex; align-items: center; gap: 8px; }
+.kd-catalog-missing { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .kd-body { padding-top: 4px; }
 .kd-editor { display: flex; flex-direction: column; gap: 12px; max-width: 1080px; }
 

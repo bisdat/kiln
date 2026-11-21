@@ -299,6 +299,8 @@ pub const NAMES: &[&str] = &[
     "studio_layer_lint",
     "studio_pick",
     "studio_fields",
+    "studio_catalog_status",
+    "studio_catalog_ensure",
     "studio_analyze",
     "studio_test",
     "studio_test_report",

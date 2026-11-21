@@ -5284,6 +5284,16 @@
         "info": "Note"
       },
       "noCatalog": "No game-data catalog on this PC: the pickers list only what the pack's mods add, and fields are typed by hand.",
+      "catalog": {
+        "reading": "Reading the game's items…",
+        "build": "Build the game catalog",
+        "why": {
+          "noGame": "No Enshrouded client found. Add it in Settings → Games.",
+          "steamUpdating": "Steam is updating the game. Try again when it is done.",
+          "conflict": "The game's files are from two different versions (Steam may be in the middle of an update). Try again when Steam is done.",
+          "failed": "Kiln could not read the game's items: {message}"
+        }
+      },
       "thisPack": "this pack",
       "save": "Save",
       "saved": "Saved",

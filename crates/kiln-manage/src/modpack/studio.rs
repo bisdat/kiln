@@ -667,7 +667,11 @@ pub fn analyze(dirs: &DataDirs, dir: &Path, progress: &mut dyn Progress) -> Resu
     let out = dir.join("out").join("analyze");
     let built = build(dirs, dir, Some(&out), &mut Scaled { inner: progress, from: 0.0, to: 0.6 })?;
     progress.report(Some(0.65), "checking the pack");
-    let opts = super::check::CheckOptions { work: Some(dir.join("out")), ..Default::default() };
+    let opts = super::check::CheckOptions {
+        work: Some(dir.join("out")),
+        lint: crate::lint::LintOptions { no_catalog_hint: Some(crate::lint::LAUNCHER_CATALOG_HINT.into()), ..Default::default() },
+        ..Default::default()
+    };
     let r = super::check::check(super::check::Input::Pack(&built.file), &opts);
     let _ = std::fs::remove_file(&built.file);
     progress.report(Some(1.0), "checked");
@@ -996,6 +1000,7 @@ pub fn layer_lint(dirs: &DataDirs, dir: &Path, catalog: Option<PathBuf>) -> Resu
     let opts = crate::lint::LintOptions {
         catalog,
         profile: Some(dirs.profile(&s.profile)).filter(|p| p.is_dir()),
+        no_catalog_hint: Some(crate::lint::LAUNCHER_CATALOG_HINT.into()),
         ..Default::default()
     };
     Ok(crate::lint::lint_paths(&[layer], &opts))

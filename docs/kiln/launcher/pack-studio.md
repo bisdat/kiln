@@ -40,6 +40,18 @@ in the profile is optional, off, unless the source says otherwise.
 | Credits | a row per mod prefilled from the analysis' identification (crucible-checks: Kiln's own list, earlier credits, GitHub, Nexus, the manifest), confirmed or filled by the creator; public packs need an author and an https link for every mod | studio::analyze (modpack::check), set_credits |
 | Publish | version (proposed: the next patch), what changed, game build tested, link only / public (summary, the attestation), the checks of the analysis; Publish; the published versions with "Put on a server"; Save as file | crucible::publish; studio::build |
 
+**The game-data catalog.** The pickers, the fields and the lint read the client catalog
+(docs/kiln/modding/catalogs.md); players never run `kiln catalog` for it. Opening Pack Studio asks for it
+(`studio_catalog_ensure`, kiln_manage::catalog::auto): a check on a thread of its own makes
+`<data>/catalog/client.json` from the client Prepare game art reads when it is missing or not current (the game updated,
+or the catalog recipe changed), about a second, and leaves a current one alone (later openings only compare the
+`.kfc` version and the file's time). One check runs at a time; launcher.log says when one was made or why not.
+Refusals are reported, never retried by themselves: Steam updating the game (`steam_updating`), exe and data from two
+builds (`conflict`), a destination inside the game folder (`refused`), no client (`noGame`). The Data tab shows
+"Reading the game's items…" while it runs (`studio_catalog_status`, polled), and without a catalog the reason and a
+"Build the game catalog" button (a new check). Once one was made, the pickers, fields and lint read again. The lint's
+KL901 says the same in the launcher (`LintOptions.no_catalog_hint`), not the CLI's `kiln catalog`.
+
 The analysis (studio::analyze) is made again when Studio.revision changes (a hash of the source, the credits, the layer
 files and the profile). It is the source built into out/analyze, then modpack::check over it (the same checks
 Crucible runs on upload: format and zip safety, sizes, known-bad hashes, code scan, resolution, lint, data conflicts

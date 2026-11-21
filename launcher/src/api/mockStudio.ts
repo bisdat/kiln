@@ -3,14 +3,15 @@
 // missing. The URL picks extra cases:
 //   ?studio=empty       no pack sources yet
 //   ?studio=published   "Ember run" 1.0.0 is published (public, credits complete); the next version is 1.0.1
-//   ?studio=nocatalog   no game-data catalog on this PC: the pickers list only what the pack's mods add, no fields
+//   ?studio=nocatalog   no game-data catalog on this PC: the pickers list only what the pack's mods add, no fields; Kiln's
+//                       own build of it is refused once (Steam updating), and "Build the game catalog" then makes it
 //   ?studio=notready    Crucible does not take a pack public yet (its checks still run): publish answers needs, Make public
 //   ?studio=gone        the published pack was deleted on Crucible: publish refuses until "Publish as a new pack"
 // Tests and the console: __kilnStudioMock.requests() (every studio call with its arguments), .state().
 import type {
   BuiltPack, CatalogFieldInfo, CruciblePack, CrucibleVersion, Json, LibraryEntry, LintDiagnostic, LintReport, ModKind, PackCheckReport, PackCredit,
   PackEnv, PackSourceDoc, Profile, Studio, StudioCaptureChoice, StudioCaptureFile, StudioLayerFile, StudioMod, StudioNewPack, StudioOrder, StudioPickHit,
-  StudioPublishRequest, StudioPublishResult, StudioSummary, StudioTestReport,
+  StudioCatalogStatus, StudioPublishRequest, StudioPublishResult, StudioSummary, StudioTestReport,
 } from "./commands";
 import { MOD_KINDS, emptyMods } from "./kinds";
 
@@ -29,6 +30,11 @@ export interface StudioMockDeps {
 const q = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
 const FLAGS = new Set((q.get("studio") ?? "").split(",").map((s) => s.trim()).filter(Boolean));
 const now = () => new Date().toISOString();
+/** The game-data catalog is on this PC (studio_catalog_ensure makes it in ?studio=nocatalog after one refusal). */
+let catalogOk = !FLAGS.has("nocatalog");
+let catalogAttempts = 0;
+let catalog: StudioCatalogStatus = { state: "idle", exists: catalogOk };
+const CATALOG_PATH = "/home/player/.local/share/kiln/catalog/client.json";
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 function err(code: string, message: string, detail?: unknown): never {
   throw { code, message, ...(detail !== undefined ? { detail } : {}) };
@@ -226,7 +232,7 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
     }
     const errors = diagnostics.filter((x) => x.severity === "error").length;
     return { format: 1, tool: "kiln-lint", version: "mock", ok: errors === 0, checked: [...s.layer.keys()].map((p) => "layer/" + p),
-      summary: { errors, warnings: diagnostics.length - errors, infos: 0, hints: 0 }, catalog: FLAGS.has("nocatalog") ? null : { path: "catalog/client.json", side: "client", build: "26430253" }, diagnostics };
+      summary: { errors, warnings: diagnostics.length - errors, infos: 0, hints: 0 }, catalog: !catalogOk ? null : { path: "catalog/client.json", side: "client", build: "26430253" }, diagnostics };
   };
   const layerPathOk = (p: string) => /^content\/[A-Za-z0-9._-]+\.jsonc?$/.test(p) && !p.slice(8).startsWith(".");
   const of = (a: Record<string, unknown>) => studios.get(S(a.packId)) ?? err("not_found", "No pack '" + S(a.packId) + "'.");
@@ -387,10 +393,24 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
       }
       const match = (x: { name: string; displayName?: string; id?: string }) => !query || x.name.toLowerCase().includes(query) || !!x.displayName?.toLowerCase().includes(query) || x.id?.toLowerCase() === query;
       const own = added.filter((x) => x.section === section && match(x)).map((x) => ({ section, name: x.name, displayName: x.displayName, from: x.from }));
-      const game = FLAGS.has("nocatalog") ? [] : (GAME[section] ?? []).filter(match).map((x) => ({ section, name: x.name, id: x.id, displayName: x.displayName }));
+      const game = !catalogOk ? [] : (GAME[section] ?? []).filter(match).map((x) => ({ section, name: x.name, id: x.id, displayName: x.displayName }));
       return [...own, ...game.filter((g) => !own.some((o) => o.name === g.name))].slice(0, limit);
     },
-    studio_fields: (a) => (FLAGS.has("nocatalog") ? [] : FIELDS[S(a.section)] ?? []),
+    studio_fields: (a) => (!catalogOk ? [] : FIELDS[S(a.section)] ?? []),
+    studio_catalog_status: (): StudioCatalogStatus => clone(catalog),
+    // like catalog::auto: answers "building" at once; the first try without a catalog is refused (Steam updating), the
+    // next one (the button) makes it
+    studio_catalog_ensure: (): StudioCatalogStatus => {
+      if (catalog.state === "building") return clone(catalog);
+      const attempt = ++catalogAttempts;
+      catalog = { state: "building", exists: catalogOk };
+      setTimeout(() => {
+        if (catalogOk) catalog = { state: "ready", exists: true, path: CATALOG_PATH, built: false };
+        else if (attempt === 1) catalog = { state: "failed", exists: false, path: CATALOG_PATH, error: { code: "steam_updating", message: "Steam is updating the game. Try again when it is done." } };
+        else { catalogOk = true; catalog = { state: "ready", exists: true, path: CATALOG_PATH, built: true, seconds: 0.9 }; }
+      }, catalogOk ? 40 : 900);
+      return clone(catalog);
+    },
     studio_analyze: (a) => {
       const s = of(a);
       return d.startTask("studio_analyze", "Checking the pack", ["building", "checking the pack"], (): PackCheckReport => {
@@ -413,7 +433,7 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
         const code = mods.filter((m) => m.kind === "native" || m.kind === "plugin");
         return { format: 1, kind: "kiln.pack-check", tool: "kiln", version: "mock", ok: true, complete: true,
           pack: { id: s.source.id, name: s.source.name, version: s.source.version },
-          summary: { errors: 0, warnings: conflicts.length, notes: code.length }, catalog: !FLAGS.has("nocatalog"),
+          summary: { errors: 0, warnings: conflicts.length, notes: code.length }, catalog: !!catalogOk,
           findings: [...conflicts.map(() => ({ level: "warning" as const, code: "KL701", message: "items Material_T1_Wood_Logs.maxStackSize: big-stacks sets 1000, the pack layer sets 500 (the later mod wins: the pack layer)" })),
             ...code.map((m) => ({ level: "note" as const, code: "code-native", message: m.name + " carries native code", mod: m.id }))],
           mods: mods.map((m) => ({ kind: m.kind, id: m.id, version: m.version, hash: m.hash, name: m.name, code: { managed: [], native: m.kind === "native" ? [m.id + ".dll"] : [], scripts: [], touches: [] }, blocked: false })),

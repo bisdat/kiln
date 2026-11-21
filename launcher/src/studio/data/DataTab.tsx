@@ -2,8 +2,10 @@
 // icons in the pickers and the live lint (kiln lint over the layer, answered by every write). Each editor writes an
 // ordinary content/*.json section of the pack layer and keeps the rest of the file as the creator wrote it.
 import { useMemo, useState } from "react";
-import type { GameId, Studio } from "../../api/commands";
+import { useQueryClient } from "@tanstack/react-query";
+import type { GameId, Studio, StudioCatalogStatus } from "../../api/commands";
 import { useT } from "../../i18n";
+import { ensureCatalog, useStudioCatalog } from "../state";
 import { Button, Spinner, Tabs } from "../../ui";
 import { isObj, readDoc } from "./model";
 import { DataCtx, type DataCtxValue } from "./Picker";
@@ -17,6 +19,16 @@ import "./data.css";
 
 const SUBS = ["items", "recipes", "loot", "drops", "added", "raw"] as const;
 type Sub = (typeof SUBS)[number];
+/** Why Kiln could not read the game's items (catalog::auto's refusals), for the no-catalog note. */
+function catalogWhy(t: ReturnType<typeof useT>, s: StudioCatalogStatus | undefined): string | null {
+  if (!s || (s.state !== "failed" && s.state !== "noGame")) return null;
+  const code = s.error?.code;
+  if (s.state === "noGame" || code === "not_found") return t("studio.data.catalog.why.noGame");
+  if (code === "steam_updating") return t("studio.data.catalog.why.steamUpdating");
+  if (code === "conflict") return t("studio.data.catalog.why.conflict");
+  return t("studio.data.catalog.why.failed", { message: s.error?.message ?? "" });
+}
+
 /** The sub-tab each pack was left on. */
 const lastSub = new Map<string, Sub>();
 
@@ -27,6 +39,11 @@ export default function DataTab({ studio }: { studio: Studio; gameId: GameId | n
   const setSub = (s: Sub) => { lastSub.set(packId, s); setSubState(s); };
   const texts = useLayerTexts(packId);
   const lint = useLint(packId);
+  const qc = useQueryClient();
+  const cat = useStudioCatalog();
+  // shown while no catalog is in use (a rebuild after a game update keeps the older one until it is done)
+  const building = cat.data?.state === "building" && !!lint.data && !lint.data.catalog;
+  const why = catalogWhy(t, cat.data);
   const [showLint, setShowLint] = useState(false);
   const drafts = useDrafts((s) => s.by);
   const dirty = (k: string) => Object.entries(drafts).some(([key, d]) => d.dirty && (key === packId + ":" + k || (k === "raw" && key.startsWith(packId + ":raw:"))));
@@ -60,7 +77,14 @@ export default function DataTab({ studio }: { studio: Studio; gameId: GameId | n
           <span className={"kd-lint" + (sum?.errors ? " kd-lint-err" : sum?.warnings ? " kd-lint-warn" : "")} data-testid="data-lint">{lintLine}</span>
           {diags.length > 0 && <Button size="s" variant="ghost" onClick={() => setShowLint(!showLint)} aria-expanded={showLint} data-testid="data-lint-toggle">{showLint ? t("studio.data.lint.hide") : t("studio.data.lint.show")}</Button>}
         </div>
-        {lint.data && !lint.data.catalog && <p className="kst-dim kd-note" data-testid="data-nocatalog">{t("studio.data.noCatalog")}</p>}
+        {building && <p className="kst-dim kd-note kd-catalog" data-testid="data-catalog-building"><Spinner size={12} /> {t("studio.data.catalog.reading")}</p>}
+        {lint.data && !lint.data.catalog && !building && (
+          <div className="kd-catalog-missing" data-testid="data-nocatalog">
+            <p className="kst-dim kd-note">{t("studio.data.noCatalog")}</p>
+            {why && <p className="kd-note" data-testid="data-catalog-why">{why}</p>}
+            <Button size="s" onClick={() => void ensureCatalog(qc)} data-testid="data-catalog-build">{t("studio.data.catalog.build")}</Button>
+          </div>
+        )}
         {showLint && <DiagList diags={diags} testId="data-lint-list" />}
         {texts.isLoading ? <Spinner /> : (
           <div className="kd-body">

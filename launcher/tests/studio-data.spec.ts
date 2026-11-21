@@ -239,12 +239,29 @@ test("Raw JSON: make a file, break it (an error), fix it, rename it, delete it",
   expect((await requests(page)).some((r) => r.cmd === "studio_layer_delete" && r.args.path === "content/twigs.json")).toBe(true);
 });
 
-test("without the game-data catalog: the pickers list the pack's mods' items only; fields are typed by hand", async ({ page }) => {
+test("without the game-data catalog: Kiln reads the game's items when Pack Studio opens; a refusal says why, and the button builds it", async ({ page }) => {
   await goData(page, "&studio=nocatalog");
+  // opening Pack Studio started Kiln's own read; the mock refuses the first one (Steam updating): why, and the button
   await expect(page.getByTestId("data-nocatalog")).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByTestId("data-catalog-why")).toHaveText("Steam is updating the game. Try again when it is done.");
+  await expect(page.getByTestId("data-catalog-build")).toHaveText("Build the game catalog");
+  const ensures = async () => (await requests(page)).filter((r) => r.cmd === "studio_catalog_ensure").length;
+  const opened = await ensures();
+  expect(opened).toBeGreaterThanOrEqual(1); // React's StrictMode runs the opening effect twice in dev: the second finds it running
+  // until then the pickers list the pack's mods' items only
   await page.getByTestId("data-items-add").click();
   await page.getByTestId("data-items-1-sel-input").fill("a");
   await expect(page.getByTestId("data-items-1-sel-hit-Cinderbrand_Sword")).toBeVisible();
   await expect(page.getByTestId("data-items-1-sel-hit-Material_T1_Stone")).toHaveCount(0);
   await shot(page, "data-nocatalog");
+  await page.keyboard.press("Escape");
+  // the button: a short "reading" state, then the note is gone and the pickers list the game's items
+  await page.getByTestId("data-catalog-build").click();
+  await expect(page.getByTestId("data-catalog-building")).toHaveText("Reading the game's items…");
+  await shot(page, "data-catalog-building");
+  await expect(page.getByTestId("data-catalog-building")).toHaveCount(0);
+  await expect(page.getByTestId("data-nocatalog")).toHaveCount(0);
+  expect(await ensures()).toBe(opened + 1);
+  await page.getByTestId("data-items-1-sel-input").fill("stone");
+  await expect(page.getByTestId("data-items-1-sel-hit-Material_T1_Stone")).toBeVisible();
 });
