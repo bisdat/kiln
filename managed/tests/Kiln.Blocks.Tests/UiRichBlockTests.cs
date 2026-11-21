@@ -225,8 +225,8 @@ public sealed class UiRichBlockTests : IDisposable
                 { "type": "table", "id": "inv", "items": "world.local.inventory", "selected": "state.pick", "maxRows": 4,
                   "columns": [ { "id": "item", "label": "Item", "cell": "{row.item}" }, { "id": "n", "label": "Count", "cell": "{row.count}" } ] } ] },
               { "id": "map", "label": "Map", "when": "world.local.available", "rows": [
-                { "type": "tree", "id": "places", "expanded": "state.open", "fields": [ { "id": "depth", "type": "int64" } ],
-                  "roots": [ { "key": "a", "label": "A", "values": { "depth": 1 }, "children": [ { "key": "a1", "label": "A1", "values": { "depth": "2" } } ] } ] } ] } ] },
+                { "type": "tree", "id": "places", "expanded": "state.open", "fields": [ { "id": "level", "type": "int64" } ],
+                  "roots": [ { "key": "a", "label": "A", "values": { "level": 1 }, "children": [ { "key": "a1", "label": "A1", "values": { "level": "2" } } ] } ] } ] } ] },
             { "type": "value", "label": "Big", "bind": "state.big" }
           ]
         }
