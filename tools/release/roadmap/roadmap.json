@@ -2938,24 +2938,22 @@
     {
       "version": "0.2.0-dev.30.2",
       "status": "next",
-      "title": "ShroudForge mods on Kiln's own engine (preview) and Crucible polish",
-      "summary": "ShroudForge mods on Kiln's own engine as a preview, off by default (Kiln's bundled ShroudForge 1.8.1 stays the default); Crucible asks before a first share, installs a pack without playing and looks like Kiln; Kiln's overlay works next to ReShade; Pack Studio reads the game's items by itself.",
+      "title": "ShroudForge mods on Kiln's own engine and Crucible polish",
+      "summary": "ShroudForge mods on Kiln's own engine as a choice in Settings, off by default (Kiln's bundled ShroudForge 1.8.1 stays the default); Crucible asks before a first share, installs a pack without playing and looks like Kiln; Kiln's overlay works next to ReShade; Pack Studio reads the game's items by itself.",
       "patch": true,
       "note": "Comes as a dev.30 patch today.",
       "features": [
         {
-          "title": "ShroudForge mods on Kiln's own engine (preview)",
-          "text": "Kiln can run ShroudForge mods (Lua packages, EML packages that need ShroudForge's runtime, and package DLLs made for ShroudForge 1.7.9) on its own engine. It is a preview and off by default: Kiln's bundled ShroudForge (1.8.1 since dev.30) stays the default, and kiln mode is a choice on the ShroudForge card in Settings.",
+          "title": "ShroudForge mods on Kiln's own engine",
+          "text": "Kiln can run ShroudForge mods (Lua packages, EML packages that need ShroudForge's runtime, and package DLLs made for ShroudForge 1.7.9) on its own engine. It is off by default: Kiln's bundled ShroudForge (1.8.1 since dev.30) stays the default, and kiln mode is a choice on the ShroudForge card in Settings.",
           "area": "compat",
-          "gamePending": true,
-          "held": "all"
+          "gamePending": true
         },
         {
           "title": "EML packages and textures in kiln mode",
           "text": "In kiln mode, EML packages that need ShroudForge's runtime run on the same engine, and these packages can decode and encode game textures in Lua as ShroudForge's image functions do. Plain EML mods keep running on Kiln's EML engine as before.",
           "area": "compat",
-          "gamePending": true,
-          "held": "all"
+          "gamePending": true
         },
         {
           "title": "Share to Crucible asks first",
