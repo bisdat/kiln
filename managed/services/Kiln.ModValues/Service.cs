@@ -33,6 +33,7 @@ internal static class ModValuesService
         try
         {
             ModValuesCaps.Rows.Ensure();
+            Registry.Report = text => Log(LogLevel.Warn, text);
             _ledger = new Ledger(Registry, new SavesValueStore(), IsLive, new BusValueEvents());
             _ledger.Dirty += (c, k) => ModValuesStream.MarkDirty(c, k);
             CharacterData.EnsureStarted();

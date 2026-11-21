@@ -250,6 +250,24 @@ internal sealed class Registry
     /// <summary>Where refusals that name two owners are reported (Kiln's log in the service).</summary>
     public Action<string>? Report { get; set; }
 
+    /// <summary>Resume ruling (DECISIONS.md): an id belongs to the one owner of its namespace that described it; another
+    /// owner's description of it (another load of the namespace's mod still alive, a second native owner with the same
+    /// namespace) is refused for that id and reported naming both. Kiln's own read of a mod's files (no token) and the
+    /// mod's own code count as one owner.</summary>
+    private bool OtherOwner(Entry have, object? token, Def d)
+    {
+        if (have.Token is null || token is null || Equals(have.Token, token)) return false;
+        Report?.Invoke($"mod-values: {d.Qualified} is described by {Who(have.Token)}; the description by {Who(token)} is refused (one owner per id)");
+        return true;
+    }
+
+    private static string Who(object token) => token switch
+    {
+        ModContext m => $"mod {m.Info.Id} (owner {m.Owner})",
+        ulong h => $"native owner {h}",
+        _ => token.ToString() ?? "an owner",
+    };
+
     private static bool Stale(object? token) => token is ModContext m && !m.Alive;
 
     /// <summary>Retires what tokens of an earlier load generation registered (their mod unloaded, a reload).</summary>
@@ -280,6 +298,7 @@ internal sealed class Registry
             var o = OwnerOf(d.Owner);
             if (o.Described.TryGetValue(d.Id, out var have))
             {
+                if (OtherOwner(have, token, d)) return ModValueReasons.DefinitionConflict;
                 if (have.Def.Canonical != d.Canonical) return ModValueReasons.DefinitionConflict;
                 have.Token ??= token;  // the mod's own code took over what Kiln read from its files
                 return null;
@@ -303,6 +322,7 @@ internal sealed class Registry
             var o = _owners[d.Owner];
             if (o.Active.TryGetValue(d.Id, out var have))
             {
+                if (OtherOwner(have, token, d)) return ModValueReasons.DefinitionConflict;
                 if (have.Def.Canonical != d.Canonical) return ModValueReasons.DefinitionConflict;
                 have.Token ??= token;
                 return null;
