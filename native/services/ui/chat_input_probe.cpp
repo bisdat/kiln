@@ -125,7 +125,7 @@ chat_search::Search g_search;
 uint32_t g_search_field = 0, g_search_revision = 0, g_search_cursor = 0;
 std::string g_search_original;
 bool g_search_suppress_completion = false;
-struct SearchClick { uint32_t field, revision, index; };
+struct SearchClick { uint32_t field, revision, generation, index; };
 std::optional<SearchClick> g_search_click;
 chat_history::DraftCapture g_hud_draft, g_social_draft;
 chat_focus::Grace g_focus_grace;
@@ -531,19 +531,9 @@ void history_before(void* widget, bool hud) {
         if (was_browsing && g_trace_on.load(std::memory_order_relaxed))
             logf(KILN_LOG_INFO, "ui: chat history trace: navigation reset by user text edit");
     }
-    // Mouse selection is a queued index, never an edit on the render thread.
-    {
-        bool clicked = false;
-        {
-            std::lock_guard lock(g_search_mu);
-            const auto selection = g_search_click;
-            g_search_click.reset();
-            clicked = selection && g_search.active() && selection->field == (hud ? 1u : 2u) &&
-                selection->field == g_search_field && selection->revision == g_search_revision &&
-                g_search.select(selection->index);
-        }
-        if (clicked) search_event(chat_keys::Action::SearchAccept, 0, state, hud);
-    }
+    // Process input before a queued mouse click. If the player typed in the
+    // same frame, search's result generation changes and the stale click
+    // cannot select a different entry from the new result list.
     chat_keys::Action action{};
     uint32_t character = 0;
     while (g_keys.take(action, &character)) {
@@ -598,6 +588,18 @@ void history_before(void* widget, bool hud) {
         // Post-call check in history_after(): the game's TextInputProcess
         // first synchronizes its private edit with the outgoing widget string.
     }
+    // Mouse selection is a queued index, never an edit on the render thread.
+    // Both the clicked snapshot and the current result list must agree.
+    bool clicked = false;
+    {
+        std::lock_guard lock(g_search_mu);
+        const auto selection = g_search_click;
+        g_search_click.reset();
+        clicked = selection && g_search.active() && selection->field == (hud ? 1u : 2u) &&
+            selection->field == g_search_field && selection->revision == g_search_revision &&
+            g_search.select_at_generation(selection->index, selection->generation);
+    }
+    if (clicked) search_event(chat_keys::Action::SearchAccept, 0, state, hud);
 }
 
 // The submit result is set by TextInputProcess, before the caller sends and clears.
@@ -999,6 +1001,7 @@ KilnResult chat_search_io(KilnUiChatSearch* io) {
         std::memcpy(io->query, g_search.query().data(), io->query_len);
         const auto& matches = g_search.matches();
         io->total = static_cast<uint32_t>(matches.size());
+        io->index = g_search.generation(); // op 1: opaque match-list generation
         io->first = g_search.selected() >= KILN_UI_CHAT_SEARCH_ROWS ?
             static_cast<uint32_t>(g_search.selected() - KILN_UI_CHAT_SEARCH_ROWS + 1) : 0u;
         io->selected = static_cast<uint32_t>(g_search.selected());
@@ -1014,8 +1017,11 @@ KilnResult chat_search_io(KilnUiChatSearch* io) {
     if (io->operation == 2) {
         if (!g_search.active() || !g_keys.searching() ||
             io->field != g_search_field || io->revision != g_search_revision ||
+            io->selected != g_search.generation() ||
             !g_search.match(io->index)) return KILN_ERR_UNAVAILABLE;
-        g_search_click = SearchClick{io->field, io->revision, io->index};
+        // op 2: 'selected' echoes the generation from the rendered snapshot,
+        // while 'index' carries the clicked row; ABI layout is unchanged.
+        g_search_click = SearchClick{io->field, io->revision, io->selected, io->index};
         return KILN_OK;
     }
     return KILN_ERR_INVALID_ARGUMENT;

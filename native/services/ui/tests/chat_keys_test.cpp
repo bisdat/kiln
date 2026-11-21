@@ -206,4 +206,57 @@ int main() {
     q.history(false);
     q.search_enabled(true);
     assert(!q.key('R', 1, true)); // no reverse search when ui.chatHistory is off
+
+    // Review follow-up: a full search queue may drop an action but must NEVER
+    // send Enter/Tab/Escape (or printable keys) to Enshrouded. The native
+    // WM_CHAR paired with a dropped Enter must also be consumed.
+    kui::chat_keys::Router full;
+    full.focus(true);
+    full.history(true);
+    full.search_enabled(true);
+    assert(full.key('R', 1, true));
+    assert(!full.key('R', 1, false));
+    assert(full.take(action) && action == kui::chat_keys::Action::SearchStart);
+    for (int i = 0; i < 32; ++i) assert(full.search_character('x'));
+    assert(full.searching());
+    assert(full.key(0x0d, 0, true)); // Enter consumed with queue full
+    assert(full.key(0x09, 0, true)); // Tab consumed with queue full
+    assert(full.key(0x1b, 0, true)); // Esc consumed with queue full
+    assert(full.key('R', 1, true)); // Ctrl+R consumed with queue full
+    assert(full.search_character('\r')); // paired Enter WM_CHAR cannot send
+    assert(full.search_character('\t')); // paired Tab WM_CHAR cannot edit
+    assert(!full.key(0x0d, 0, false)); // all key releases reach the game
+    assert(!full.key(0x09, 0, false));
+    assert(!full.key(0x1b, 0, false));
+    assert(!full.key('R', 1, false));
+    int chars = 0;
+    while (full.take(action, &cp)) {
+        assert(action == kui::chat_keys::Action::SearchCharacter);
+        assert(cp == 'x');
+        ++chars;
+    }
+    assert(chars == 32); // no unexpected action was added at capacity
+    assert(full.searching());
+    full.search(false);
+    assert(!full.key(0x0d, 0, true));
+    assert(!full.key('P', 0, true)); // normal chat keys pass after search
+    assert(!full.key('P', 0, false));
+
+    // AltGr is Ctrl+Alt. Unlike Alt alone or Alt+Shift (system shortcuts),
+    // its printable keys/WM_CHAR must be routed to the search query.
+    kui::chat_keys::Router altgr;
+    altgr.focus(true);
+    altgr.search_enabled(true);
+    assert(altgr.key('R', 1, true));
+    assert(!altgr.key('R', 1, false));
+    assert(altgr.take(action) && action == kui::chat_keys::Action::SearchStart);
+    assert(!altgr.key('Q', 4, true)); // Alt only belongs to the OS
+    assert(!altgr.key('Q', 6, true)); // Alt+Shift belongs to the OS
+    assert(altgr.key('Q', 5, true));  // Ctrl+Alt / AltGr must be consumed
+    assert(altgr.search_character('@'));
+    assert(altgr.take(action, &cp) &&
+           action == kui::chat_keys::Action::SearchCharacter && cp == '@');
+    assert(!altgr.key('Q', 5, false));
+    altgr.search(false);
+    assert(!altgr.key('Q', 5, true)); // AltGr is normal input outside search
 }

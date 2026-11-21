@@ -92,4 +92,24 @@ int main() {
     assert(*s.chosen() == long_line);
     assert(s.append_utf16('L', long_lines.entries()));
     assert(s.matches().size() == 1);
+
+    // Review follow-up: render-thread clicked indices are only valid for the
+    // exact results generation that was displayed. A change of query (even
+    // when the editor revision is unchanged) invalidates a stale click.
+    Search click;
+    click.begin(h.entries());
+    const uint32_t shown = click.generation();
+    assert(click.select_at_generation(1, shown));
+    assert(click.append_utf16('H', h.entries()));
+    assert(click.generation() != shown);
+    assert(!click.select_at_generation(1, shown));
+    assert(click.select_at_generation(1, click.generation())); // current view
+    const uint32_t filtered = click.generation();
+    assert(click.backspace(h.entries()));
+    assert(!click.select_at_generation(1, filtered));
+    const uint32_t before_close = click.generation();
+    click.cancel();
+    assert(!click.select_at_generation(0, before_close));
+    click.begin(h.entries());
+    assert(!click.select_at_generation(0, before_close)); // new session
 }

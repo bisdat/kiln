@@ -726,7 +726,10 @@ internal static unsafe class UiNative
         if (slot == null || snapshot.Active == 0 || index >= snapshot.Total) return false;
         var request = new ChatSearch {
             Size = (uint)sizeof(ChatSearch), Operation = 2,
-            Field = snapshot.Field, Revision = snapshot.Revision, Index = index,
+            // Op 1 returns the result-list generation in Index. Op 2 echoes
+            // it in Selected; Index is now the clicked row. Same ABI layout.
+            Field = snapshot.Field, Revision = snapshot.Revision,
+            Selected = snapshot.Index, Index = index,
         };
         return slot(&request) == Ok;
     }

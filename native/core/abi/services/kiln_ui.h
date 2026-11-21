@@ -843,7 +843,10 @@ typedef uint32_t(KILN_CALL* KilnUiPointerFn)(const KilnUiPointerPress* press, vo
 /* Issue #44 Phase 1c: Kiln.Ui-only, read-only search panel snapshot and mouse selection.
  * Appended at byte 1048. Operation 1 returns active/suppressed state, the query,
  * up to ten visible rows and field rectangle; operation 2 queues a clicked
- * absolute match index, validated against field/revision on the native UI thread.
+ * absolute match index, validated against field/revision AND match-list
+ * generation on the native UI thread. For operation 1, index returns an
+ * opaque match-list generation; for operation 2, selected echoes that token
+ * while index supplies the clicked row. The struct/slot layout is unchanged.
  * The game text editor is changed only on a successful accept in the scoped UI hook.
  * The strings are UTF-8 with explicit lengths, NUL-padded for panel convenience.
  * No text is written to logs or persisted by the search.

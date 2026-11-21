@@ -40,6 +40,7 @@ public:
         rebuild(entries);
     }
     void cancel() {
+        ++generation_; // invalidate snapshots and mouse clicks from this session
         active_ = false;
         query_.clear();
         matches_.clear();
@@ -47,6 +48,11 @@ public:
         selected_ = 0;
     }
     bool active() const { return active_; }
+    uint32_t generation() const { return generation_; }
+    // The rendered row index is only valid for the exact result list shown.
+    bool select_at_generation(size_t index, uint32_t generation) {
+        return active_ && generation == generation_ && select(index);
+    }
     std::string_view query() const { return query_; }
     const std::vector<std::string>& matches() const { return matches_; }
     size_t selected() const { return selected_; }
@@ -114,6 +120,7 @@ public:
     }
 private:
     void rebuild(const std::vector<chat_history::Entry>& entries) {
+        ++generation_; // begin/query edit rebuilds the result list
         matches_.clear();
         std::unordered_set<std::string> seen;
         for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
@@ -123,6 +130,7 @@ private:
         selected_ = 0;
     }
     bool active_ = false;
+    uint32_t generation_ = 0;
     std::string query_;
     std::vector<std::string> matches_;
     size_t selected_ = 0;

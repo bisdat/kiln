@@ -140,7 +140,12 @@ public:
         if (can_search && vk == 'R' && (mods == kCtrl || mods == (kCtrl | kShift))) {
             if (!searching() && mods != kCtrl) return false;
             std::lock_guard lock(mu_);
-            if (pending_.size() >= 32) return false;
+            if (pending_.size() >= 32) {
+                // In an active search, a stalled UI thread must never let
+                // Ctrl+R escape to the game's editor. Drop only the action.
+                ctrl_r_down_.store(true, std::memory_order_release);
+                return searching();
+            }
             if (!ctrl_r_down_.exchange(true, std::memory_order_acq_rel)) {
                 const bool was_open = searching_.exchange(true, std::memory_order_acq_rel);
                 if (!was_open) pending_.clear(); // stale history/completion events must not run inside search
@@ -153,7 +158,10 @@ public:
         if (searching()) {
             // A search is its own text-entry mode: no typing or editing reaches
             // the underlying editor. Alt+Tab/system shortcuts stay with Windows.
-            if (mods & kAlt) return false;
+            // Alt-only shortcuts belong to Windows. AltGr is Ctrl+Alt on
+            // Windows/Proton, so its printable characters must stay in the
+            // private search query instead of leaking into the game editor.
+            if ((mods & kAlt) && !(mods & kCtrl)) return false;
             Action action{};
             if (mods == 0 && (vk == kReturn || vk == kTab)) action = Action::SearchAccept;
             else if (mods == 0 && vk == kEscape) action = Action::SearchCancel;
@@ -162,7 +170,22 @@ public:
             else if (mods == 0 && vk == kDown) action = Action::SearchOlder;
             if (action != Action{}) {
                 std::lock_guard lock(mu_);
-                if (pending_.size() >= 32) return false;
+                if (pending_.size() >= 32) {
+                    // Always swallow an active search's keydowns, even when
+                    // no more actions can be queued. In particular, Enter
+                    // must never reach Enshrouded and send the saved draft.
+                    // Keep paired WM_CHAR guards for these dropped presses.
+                    if (vk == kTab) {
+                        tab_down_.store(true, std::memory_order_release);
+                        tab_character_.store(true, std::memory_order_release);
+                    } else if (vk == kReturn) {
+                        enter_down_.store(true, std::memory_order_release);
+                        enter_char_pending_.store(true, std::memory_order_release);
+                    } else if (vk == kEscape) {
+                        escape_char_pending_.store(true, std::memory_order_release);
+                    }
+                    return true;
+                }
                 if (vk == kTab) {
                     if (!tab_down_.exchange(true, std::memory_order_acq_rel))
                         pending_.push_back({action, 0});
