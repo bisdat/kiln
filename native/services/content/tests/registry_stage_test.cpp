@@ -233,6 +233,27 @@ void host_order_and_code(const std::string& dir) {
     check(rep2.dump().find("\"result\":261") != std::string::npos, "its alter (+1) and its queued final (+100) compose on them: 261");
 }
 
+std::vector<stage::Env::DataFile> no_sections(const Schema&) { return {}; }
+
+void id_table_without_content(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Runner r(env_of(&view, &files, dir, &no_sections));
+    r.run({});
+    r.finish({});
+    const std::string rel = "ids-server-" + kExe + ".json";
+    check(files.data.count(rel) && json::parse(files.data[rel])["registries"]["items"][g(2)] == "game:plank" && !view.served.empty(),
+          "no registry content, no id table for this build yet: the id table is written");
+    check(json::parse(files.report)["fields"].empty(), "and registry.json holds nothing");
+    TreeView view2 = world();
+    Files files2;
+    files2.data = files.data;
+    stage::Runner r2(env_of(&view2, &files2, dir, &no_sections));
+    r2.run({});
+    r2.finish({});
+    check(view2.served.empty(), "the next start with no registry content reads nothing");
+}
+
 void bridge_write() {
     kc::rbtest::balance_type();
     std::vector<uint8_t> bytes(8, 0);
@@ -270,7 +291,7 @@ int main(int argc, char** argv) {
     const std::string dir = argc > 1 ? argv[1] : "regmap";
     int failed = 0;
     const std::pair<const char*, std::function<void()>> groups[] = {
-        {"one_start", [&] { one_start(dir); }}, {"host_order_and_code", [&] { host_order_and_code(dir); }}, {"bridge_write", [] { bridge_write(); }}};
+        {"one_start", [&] { one_start(dir); }}, {"host_order_and_code", [&] { host_order_and_code(dir); }}, {"id_table_without_content", [&] { id_table_without_content(dir); }}, {"bridge_write", [] { bridge_write(); }}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();

@@ -480,8 +480,11 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
     }
     // the base
     std::string why;
-    // no mod has registry content: nothing is read (an empty registry.json says so)
-    std::unique_ptr<model::Source> src = inputs.empty() ? nullptr : d.env.source ? d.env.source(&why) : nullptr;
+    // no mod has registry content: nothing is read (an empty registry.json says so), except once per game build, when the
+    // running exe has no id table yet (work-bb 2026-11-21: kilnctl update needs one for every build)
+    const std::string ids_rel = "ids-" + d.env.side + "-" + d.env.exe_sha256 + ".json";
+    const bool ids_missing = d.env.read_data && d.env.write_data && !d.env.exe_sha256.empty() && !d.env.read_data(ids_rel);
+    std::unique_ptr<model::Source> src = inputs.empty() && !ids_missing ? nullptr : d.env.source ? d.env.source(&why) : nullptr;
     d.meta.pid = d.env.pid;
     d.meta.kiln = d.env.kiln_version;
     d.meta.regmap = {d.env.side, d.env.exe_sha256, d.rm.has_build ? "regmap/" + d.env.side + "/" + d.env.exe_sha256 + ".json" : "", d.rm.has_build && d.rm.build.verified};
@@ -500,6 +503,21 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
     const model::Need need = model::needs_of(d.schema, inputs);
     bool hit = false;
     if (!src && inputs.empty()) {
+        d.meta.base.origin = "none";
+    } else if (inputs.empty()) {
+        // only the id table of this build
+        model::Model ids_model(*src, d.rm, d.schema);
+        for (const auto& [n, r] : d.schema.registries) {
+            std::string w;
+            ids_model.entries(n, &w);
+        }
+        ids_model.id_table(&d.ids, &d.nums);
+        d.env.write_data(ids_rel, ids_model.id_table_json().dump());
+        d.log(0, "registry: the id table of this game build (" + d.env.side + " " + d.env.exe_sha256.substr(0, 8) + ") is written to the data folder (" +
+                     std::to_string(d.ids.size()) + " entries); no mod has registry content");
+        for (const std::string& n : ids_model.take_notes()) d.log(0, "registry: " + n);
+        ids_model.release();
+        src.reset();
         d.meta.base.origin = "none";
     } else if (!src) {
         d.log(2, "registry: the stage has no base to read (" + why + "): nothing of the registry is applied in this start");
@@ -538,8 +556,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
         if (!hit) {
             m->fill(need, &base);
             // the id table of this build for kilnctl update: every R1 registry the first time this build starts with Kiln
-            const std::string ids_rel = "ids-" + d.env.side + "-" + d.env.exe_sha256 + ".json";
-            const bool want_all = d.env.read_data && !d.env.read_data(ids_rel);
+            const bool want_all = ids_missing;
             if (want_all)
                 for (const auto& [n, r] : d.schema.registries) {
                     std::string w;
