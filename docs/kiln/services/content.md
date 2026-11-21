@@ -401,7 +401,7 @@ public override void OnLoad()   // register early: the registries take them when
 - Recipe definitions: `BaseOn` (a recipe to copy: station, level, comfort, props, cooking, …) and/or `Station` (a
   recipe whose station to use, `"0x<workshop id>"`, `"hand"`: the player's own crafting menu, or `"workshop:<guid>"`: a
   workshop of the mod's own, id FNV-1a of the GUID, given a recipe list of its own when nothing has one yet; without
-  `BaseOn` the recipe has no level / comfort / prop / water requirement; a pack's `"water"` gives it its water), `Menu` (`"menu"` in a pack: the `"0x…"`
+  `BaseOn` the recipe has no level / comfort / prop / water requirement; `Water`, a pack's `"water"`, gives it its water), `Menu` (`"menu"` in a pack: the `"0x…"`
   workshop whose crafting menu lists it, when that is not its own; a station opens the menu of its
   `CraftingInteraction.workshopId` and runs the recipes of its `Crafting.workshopId`. At a `"workshop:<guid>"`, a
   player's game gives that workshop a menu of its own instead, listing only its recipes, under the tabs and subcategories
@@ -430,9 +430,9 @@ public override void OnLoad()   // register early: the registries take them when
   - a factory station **without** a tank never starts a recipe that asks water.
 
   `Water` is a whole number 0..1023 (`ArgumentException` otherwise); null keeps the template's (the `BaseOn` recipe's,
-  none with only a `Station`), 0 clears a base's. It travels as the definition's `"waterCharges"` field, applied after a
-  station-only recipe's requirements are cleared, so `Fields["waterCharges"]` keeps working as before; give one or the
-  other (both: `ArgumentException`). `CraftingWater` reads and sets a game recipe's (0..1023,
+  none with only a `Station`), 0 clears a base's. It travels as the definition's `"water"`, as a data pack's recipe gives it
+  (applied after a station-only recipe's requirements are cleared); `Fields["waterCharges"]` keeps working as before;
+  give one or the other (both: `ArgumentException`, since `"fields"` are applied after `"water"` and would win). `CraftingWater` reads and sets a game recipe's (0..1023,
   `ArgumentOutOfRangeException` otherwise; `Reset("waterCharges")` puts the game's back). Not the game's old "Water"
   canteen item (`Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED`): as an ingredient a craft takes that item, never
   tank water.
@@ -493,7 +493,7 @@ Delete `kiln/data/craftmatch-test/` for a fresh run.
 ### Data packs: "add"
 The same definitions in `content/*.json`, as `"add"` lists in the `items` / `recipes` sections (fields as in the C#
 form: `guid`, `name`, `base`, `displayName`, `description`, `lore`, `fields`, `rolledLoot`; recipes `station`, `inputs`,
-`outputs`, `duration`, `unlock`, and in a pack also `water`, which the C# form sets through `Fields["waterCharges"]`). Rules after the list (in the same pack, or later packs) can change the new entries
+`outputs`, `duration`, `water`, `unlock`). Rules after the list (in the same pack, or later packs) can change the new entries
 like any game entry:
 ```json
 { "format": 1,

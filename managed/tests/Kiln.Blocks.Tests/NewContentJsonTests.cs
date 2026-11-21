@@ -47,19 +47,21 @@ public sealed class NewContentJsonTests
     [Fact]
     public void A_recipes_Water_is_its_waterCharges()
     {
-        // 0.2.0-dev.30.3 (thanks netjunk): RecipeDefinition.Water is RecipeInfo.waterCharges, charges per craft, sent as one of
-        // the recipe's fields (kiln.content applies them after a station-only recipe's requirements are cleared)
+        // 0.2.0-dev.30.3 (thanks netjunk): RecipeDefinition.Water is RecipeInfo.waterCharges, charges per craft, sent as the
+        // definition's "water", the key a data pack's recipe uses (kiln.content's recipe_water.h writes it after a
+        // station-only recipe's requirements are cleared)
         var expected = """
-            {"guid":"1f0c8a52-3b7e-4d21-9a6c-2e5d8b4f7a10","name":"MyMod_Herb_Tea","station":"0x6b8247d6","inputs":[{"count":2,"item":"Food_T7_raw_herb_Thyme"}],"outputs":[{"count":1,"item":"Food_T7_dish_hydration_ThymeTea"}],"unlock":"always","fields":{"waterCharges":5}}
+            {"guid":"1f0c8a52-3b7e-4d21-9a6c-2e5d8b4f7a10","name":"MyMod_Herb_Tea","station":"0x6b8247d6","inputs":[{"count":2,"item":"Food_T7_raw_herb_Thyme"}],"outputs":[{"count":1,"item":"Food_T7_dish_hydration_ThymeTea"}],"water":5,"unlock":"always"}
             """;
         Assert.Equal(expected.Trim(), NewContent.ToJson(Tea(5)).ToJsonString());
-        // none: no field at all (the template's water stays); 0 clears a base's; the largest is 1023
-        Assert.Null(NewContent.ToJson(Tea(null))["fields"]);
-        Assert.Equal(0L, (long)NewContent.ToJson(Tea(0))["fields"]!["waterCharges"]!);
-        Assert.Equal(1023L, (long)NewContent.ToJson(Tea(1023))["fields"]!["waterCharges"]!);
-        // beside other fields
-        var both = NewContent.ToJson(Tea(2, new Dictionary<string, object> { ["level"] = 3 }))["fields"]!.AsObject();
-        Assert.Equal((3L, 2L), ((long)both["level"]!, (long)both["waterCharges"]!));
+        // none: no key at all (the template's water stays); 0 clears a base's; the largest is 1023
+        Assert.Null(NewContent.ToJson(Tea(null))["water"]);
+        Assert.Equal(0L, (long)NewContent.ToJson(Tea(0))["water"]!);
+        Assert.Equal(1023L, (long)NewContent.ToJson(Tea(1023))["water"]!);
+        // beside other fields, which stay fields
+        var both = NewContent.ToJson(Tea(2, new Dictionary<string, object> { ["level"] = 3 }));
+        Assert.Equal((3L, 2L), ((long)both["fields"]!["level"]!, (long)both["water"]!));
+        Assert.Null(both["fields"]!["waterCharges"]);
     }
 
     [Fact]
@@ -70,6 +72,8 @@ public sealed class NewContentJsonTests
         var twice = Assert.Throws<ArgumentException>(() => NewContent.ToJson(Tea(5, new Dictionary<string, object> { ["waterCharges"] = 5 })));
         Assert.Contains("not both", twice.Message);
         // the old way still works on its own
-        Assert.Equal(4L, (long)NewContent.ToJson(Tea(null, new Dictionary<string, object> { ["waterCharges"] = 4 }))["fields"]!["waterCharges"]!);
+        var old = NewContent.ToJson(Tea(null, new Dictionary<string, object> { ["waterCharges"] = 4 }));
+        Assert.Equal(4L, (long)old["fields"]!["waterCharges"]!);
+        Assert.Null(old["water"]);
     }
 }
