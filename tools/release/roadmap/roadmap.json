@@ -2984,6 +2984,11 @@
           "text": "Pack Studio reads the game's items when it opens, so the Items, Recipes and Loot pickers list them without a command-line step, and it hides the game's old and test entries unless you ask.",
           "area": "tools",
           "kind": "improved"
+        },
+        {
+          "title": "\"Any of a group\" recipe inputs",
+          "text": "Pack Studio's recipe inputs can be any item of a group of the game's items, like any wood or any stone, chosen by typing any item of the group.",
+          "area": "tools"
         }
       ]
     },
