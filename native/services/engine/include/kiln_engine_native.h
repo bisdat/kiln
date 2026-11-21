@@ -95,7 +95,10 @@ struct KilnEngineNativeApi {
      * KILN_ERR_INVALID_ARGUMENT: no held gate, or data NULL with bytes > 0. */
     KilnResult(KILN_CALL* ecs_gate_write)(const kiln::engine::EcsGate* gate, std::uintptr_t address, const void* data,
                                           std::size_t bytes);
-    /* EcsWriteGuard::Release: the Scene word, then the registry word. Idempotent; a no-op on a refused or zeroed gate. */
+    /* EcsWriteGuard::Release: the Scene word, then the registry word, then Kiln's holder flag and the priority restore.
+     * Idempotent; a no-op on a refused or zeroed gate. It leaves its measurements in gate->hold_ns (the Scene word's
+     * exclusive interval, ending at that word's release) and gate->restore_ns (the priority restore, timed apart), kept
+     * until the next acquire (kiln_engine_view.h EcsGate; GitHub #58). */
     void(KILN_CALL* ecs_gate_release)(kiln::engine::EcsGate* gate);
 
     /* ---- the content worker's lifetime (Kiln-internal; adapted from ShroudForge's

@@ -65,7 +65,10 @@ typedef struct KilnEngineIdentity {
 } KilnEngineIdentity;
 
 /* Counters of the engine gates since boot (Kiln-internal primitives), for diagnostics.
- * Each counter is read on its own (not one coherent snapshot): compare two copies, not fields of one. */
+ * Each counter is read on its own (not one coherent snapshot): compare two copies, not fields of one.
+ * Set size to sizeof(KilnEngineGateStats) before calling. gate_stats writes the first min(size, its own record's size)
+ * bytes and leaves that number in size: a caller built against v1's 96 bytes gets those, and a newer caller learns from
+ * size whether the fields appended after v1 were filled. */
 typedef struct KilnEngineGateStats {
     uint32_t size, reserved;
     uint64_t attempts;              /* write-gate acquisitions tried */
@@ -75,8 +78,15 @@ typedef struct KilnEngineGateStats {
     uint64_t refused_in_frame;      /* refused untouched: called inside the server world's update */
     uint64_t refused_world_thread;  /* refused untouched: called on a client or prediction world thread */
     uint64_t refused_other;         /* refused: no profile, owner changed, not authoritative, ... */
-    uint64_t hold_ns_total, hold_ns_max; /* time from acquisition to release */
+    uint64_t hold_ns_total, hold_ns_max; /* the Scene word's exclusive interval: from the moment its CAS won to the
+                                            moment it was released, holds that then refused included. A Kiln without
+                                            the restore fields below measured to the end of the gate's release
+                                            instead, the priority restore included (GitHub #58) */
     uint64_t views, view_failures;  /* owner/ECS view resolutions and how many were refused */
+    /* --- appended after v1's first release (96 bytes): filled when size covers them after the call --- */
+    uint64_t restores;              /* releases that put a raised holder's priority back (none with the raise off) */
+    uint64_t restore_ns_total, restore_ns_max; /* how long those restores took, after the Scene word's release
+                                                  (SetThreadPriority; under Proton a wineserver round trip) */
 } KilnEngineGateStats;
 
 typedef struct KilnEngineApi {
@@ -84,7 +94,7 @@ typedef struct KilnEngineApi {
     /* The image and the selected profile. Any thread, from kiln_plugin_main on; the value never changes after boot.
      * KILN_OK whatever the status; KILN_ERR_INVALID_ARGUMENT: out NULL or out->size too small. */
     KilnResult(KILN_CALL* identity)(KilnEngineIdentity* out);
-    /* A copy of the counters. Any thread. KILN_ERR_INVALID_ARGUMENT: out NULL or out->size too small. */
+    /* A copy of the counters. Any thread. KILN_ERR_INVALID_ARGUMENT: out NULL or out->size below v1's 96 bytes. */
     KilnResult(KILN_CALL* gate_stats)(KilnEngineGateStats* out);
 } KilnEngineApi;
 
@@ -99,14 +109,16 @@ static_assert(offsetof(KilnEngineIdentity, status) == 4 && offsetof(KilnEngineId
 static_assert(offsetof(KilnEngineIdentity, target) == 32, "identity strings");
 static_assert(offsetof(KilnEngineIdentity, sha256) == 64, "identity sha256");
 static_assert(offsetof(KilnEngineIdentity, profile_id) == 129, "identity profile id");
-static_assert(sizeof(KilnEngineGateStats) == 96, "KilnEngineGateStats v1");
+static_assert(sizeof(KilnEngineGateStats) == 120, "KilnEngineGateStats: v1's 96 bytes and the restore counters");
 static_assert(offsetof(KilnEngineGateStats, reserved) == 4 && offsetof(KilnEngineGateStats, attempts) == 8 &&
                   offsetof(KilnEngineGateStats, acquired) == 16 && offsetof(KilnEngineGateStats, busy_registry) == 24 &&
                   offsetof(KilnEngineGateStats, busy_scene) == 32 && offsetof(KilnEngineGateStats, refused_in_frame) == 40 &&
                   offsetof(KilnEngineGateStats, refused_world_thread) == 48 &&
                   offsetof(KilnEngineGateStats, refused_other) == 56 && offsetof(KilnEngineGateStats, hold_ns_total) == 64 &&
                   offsetof(KilnEngineGateStats, hold_ns_max) == 72 && offsetof(KilnEngineGateStats, views) == 80 &&
-                  offsetof(KilnEngineGateStats, view_failures) == 88,
+                  offsetof(KilnEngineGateStats, view_failures) == 88 && offsetof(KilnEngineGateStats, restores) == 96 &&
+                  offsetof(KilnEngineGateStats, restore_ns_total) == 104 &&
+                  offsetof(KilnEngineGateStats, restore_ns_max) == 112,
               "gate stats fields");
 static_assert(sizeof(KilnEngineApi) == 24, "kiln.engine v1 table");
 static_assert(offsetof(KilnEngineApi, identity) == 8 && offsetof(KilnEngineApi, gate_stats) == 16, "kiln.engine v1");
