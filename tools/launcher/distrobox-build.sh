@@ -245,9 +245,23 @@ else
   }
 fi
 commit="$(git -C "$repo" rev-parse --verify "$rev^{commit}")"
-out="$KILN_TEMP_DIR/$label"
+# On Bazzite /home may be an alias for /var/home. Git records worktrees
+# under the canonical physical path, so never compare that registration to
+# an uncanonicalized $HOME path.
+out="$(realpath -m -- "$KILN_TEMP_DIR/$label")"
 worktree="$out/src"
 mkdir -p "$out"
+# A prior interrupted archive or external move can leave Git holding a
+# registration for a path whose directory no longer exists. Fail closed:
+# the user must restore/migrate that checkout, not force-add or prune it.
+if [[ ! -e "$worktree" && ! -L "$worktree" ]] &&
+   git -C "$repo" worktree list --porcelain | grep -Fxq "worktree $worktree"; then
+  echo "Git still registers $worktree, but its checkout directory is missing." >&2
+  echo "Preserved candidates (if any):" >&2
+  find "$out" -maxdepth 1 -mindepth 1 -type d -name 'src-unregistered-*' -print >&2
+  echo "Restore the original checkout to src; do not prune or force-add." >&2
+  exit 1
+fi
 if [[ -e "$worktree" || -L "$worktree" ]]; then
   if git -C "$repo" worktree list --porcelain | grep -Fxq "worktree $worktree"; then
     [[ -z "$(git -C "$worktree" status --porcelain --untracked-files=all)" ]] || {
@@ -266,7 +280,7 @@ if [[ -e "$worktree" || -L "$worktree" ]]; then
     [[ -d "$worktree" && ! -L "$worktree" ]] || {
       echo "Cannot archive a non-directory or symlink: $worktree" >&2; exit 1;
     }
-    archive="$out/src-unregistered-$(date -u +%Y%m%dT%H%M%SZ)-$"
+    archive="$out/src-unregistered-$(date -u +%Y%m%dT%H%M%S.%NZ)"
     [[ ! -e "$archive" && ! -L "$archive" ]] || {
       echo "Archive path already exists: $archive" >&2; exit 1;
     }
