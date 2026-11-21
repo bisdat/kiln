@@ -143,6 +143,55 @@ bool key_parse(const std::string& s, KilnAssetKey* k) {
 
 }  // namespace
 
+// ---- the base cache's key (review finding 5) ----
+std::string keys_digest(const std::vector<KilnAssetKey>& keys) {
+    std::string s;
+    for (const KilnAssetKey& k : keys) s += key_text(k) + "\n";
+    return sha_hex(s);
+}
+// Every type the model lists, with a digest of its keys: a resource another archive writer adds (or removes) misses the cache.
+class Inventory final : public model::Source {
+   public:
+    explicit Inventory(model::Source& in) : in_(in) {}
+    const char* name() const override { return in_.name(); }
+    bool list(const std::string& type, std::vector<KilnAssetKey>* out, std::string* why) override {
+        const bool ok = in_.list(type, out, why);
+        if (ok) lists_[type] = keys_digest(*out);
+        return ok;
+    }
+    bool count(const model::Place& p, size_t* n, std::string* why) override { return in_.count(p, n, why); }
+    bool member(const model::Place& p, const std::string& path, json* out, std::string* why) override { return in_.member(p, path, out, why); }
+    std::string digest() override { return in_.digest(); }
+    std::vector<std::pair<KilnAssetKey, std::string>> keys_read() const override { return in_.keys_read(); }
+    bool touch(const KilnAssetKey& key, const std::string& type, std::string* why) override { return in_.touch(key, type, why); }
+    void release() override { in_.release(); }
+    const std::map<std::string, std::string>& lists() const { return lists_; }
+
+   private:
+    model::Source& in_;
+    std::map<std::string, std::string> lists_;
+};
+// The loaded regmap's content (common rows and the build's record): a regenerated record under the same version string misses.
+std::string regmap_digest(const map::RegMap& rm) {
+    json j = json::object();
+    for (const auto& [n, r] : rm.registries) {
+        const map::EntrySource& e = r.entries;
+        json rows = json::object();
+        for (const auto& [f, row] : r.rows)
+            rows[f] = {row.paths, row.conv, row.values, row.formula, row.config, static_cast<int>(row.read), static_cast<int>(row.backend),
+                       static_cast<int>(row.state), row.client_needs};
+        j["registries"][n] = {{"entries", {static_cast<int>(e.kind), e.resource_type, e.array, e.resource_guid, e.name, e.guid, e.id, e.unnamed, e.name_from, e.key}},
+                              {"rows", rows}};
+    }
+    if (rm.has_build) {
+        json rows = json::object();
+        for (const auto& [k, v] : rm.build.rows) rows[k] = static_cast<int>(v);
+        j["build"] = {{"side", rm.build.side}, {"exe", rm.build.exe_sha256}, {"gameBuild", rm.build.game_build}, {"verified", rm.build.verified},
+                      {"rows", rows}, {"layouts", rm.build.layouts}, {"pinned", rm.build.aliases.pinned}, {"removed", rm.build.aliases.removed}};
+    }
+    return sha_hex(j.dump());
+}
+
 // ---- inputs ----
 void refuse_unmapped(const map::RegMap& rm, const Schema& schema, Batch* b, std::vector<Refusal>* refused) {
     std::vector<Edit> kept;
@@ -528,6 +577,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
     }
     BaseModel base;
     std::vector<OldWrite> old;
+    std::unique_ptr<Inventory> inventory;  // before m: the model reads through it
     std::unique_ptr<model::Model> m;
     const model::Need need = model::needs_of(d.schema, inputs);
     bool hit = false;
@@ -553,16 +603,25 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
         std::lock_guard lk(d.mu);
         d.counts.failed = true;
     } else {
-        m = std::make_unique<model::Model>(*src, d.rm, d.schema);
+        inventory = std::make_unique<Inventory>(*src);
+        m = std::make_unique<model::Model>(*inventory, d.rm, d.schema);
         d.meta.base.origin = src->name();
         const std::string family = sha_hex(std::string(model::kDecoderVersion) + "\n" + d.env.kiln_version + "\n" + d.env.side + "\n" + d.env.exe_sha256 + "\n" +
-                                           (d.rm.has_build ? (d.rm.build.verified ? "verified" : "unverified") : "none") + "\n" + need_json(need).dump());
+                                           (d.rm.has_build ? (d.rm.build.verified ? "verified" : "unverified") : "none") + "\n" + regmap_digest(d.rm) + "\n" +
+                                           need_json(need).dump());
         const std::string cache_rel = "cache/" + family.substr(0, 32) + ".json";
         // the cache: the same keys read again give the same digest -> the same base
         if (!need.all && need.raw.empty() && !ids_missing && d.env.read_data)  // the id table is missing: decode, it is written below
             if (auto text = d.env.read_data(cache_rel)) {
                 const json c = json::parse(*text, nullptr, false);
-                bool ok = c.is_object() && c.value("family", std::string()) == family && c.contains("keys") && c["keys"].is_array();
+                bool ok = c.is_object() && c.value("family", std::string()) == family && c.contains("keys") && c["keys"].is_array() &&
+                          c.contains("lists") && c["lists"].is_object();
+                // every type the cached decode listed lists the same keys now (a resource added or taken away misses)
+                for (auto it = ok ? c["lists"].begin() : c["keys"].end(); ok && it != c["lists"].end(); ++it) {
+                    std::vector<KilnAssetKey> now;
+                    std::string w;
+                    ok = it.value().is_string() && src->list(it.key(), &now, &w) && keys_digest(now) == it.value().get<std::string>();
+                }
                 for (const auto& k : ok ? c["keys"] : json::array()) {
                     KilnAssetKey key{};
                     std::string w;
@@ -600,7 +659,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
                 json keys = json::array();
                 for (const auto& [k, t] : m->keys_read()) keys.push_back({key_text(k), t});
                 json ids = d.ids, nums = d.nums;
-                d.env.write_data(cache_rel, json{{"format", 1}, {"family", family}, {"digest", digest}, {"keys", keys}, {"base", base_out(base)},
+                d.env.write_data(cache_rel, json{{"format", 1}, {"family", family}, {"digest", digest}, {"keys", keys}, {"lists", inventory->lists()}, {"base", base_out(base)},
                                                  {"ids", ids}, {"nums", nums}, {"decoded", d.decoded}}
                                                 .dump());
             }
