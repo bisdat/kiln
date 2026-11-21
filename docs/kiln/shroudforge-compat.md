@@ -864,9 +864,31 @@ What upstream 1.8.1 adds that touches Kiln, checked when the bundled runtime mov
   (`E9` to a near trampoline that loads -1.57 rad, 3 `NOP`s). The site is rva `0x26f6fe` in the client
   (26430625) and `0x817fe` in the server (26430253): 0xF3 bytes before Kiln's glider steering mid hook
   (`rules/GlideSteer`, the roll-rate load, `0x26f7f1` / `0x818f1`), so the two never write the same bytes; no other
-  sigdb symbol is within 0x800 bytes. Static check: `glider_site_check.py` (dev30 wave, out/sf-181). SF reads the
-  procedure from live code and stops a path at Kiln's `E9`, which lies after the clamp. While Kiln steers a glider
-  (GLIDE_STEER), Kiln's step replaces the pitch change after SF's clamp, so Kiln's steering wins for that player.
+  sigdb symbol is within 0x800 bytes. Static check: `glider_site_check.py` (dev30 wave, out/sf-181). **In 0.2.0-dev.30 the
+  patch is unavailable under Kiln** (lab `dev30-sf181`, server 26430253, 2026-11-21): Kiln's glider steering mid hook
+  went into actor_rotation at boot, and SF's live code reader refuses a procedure with a relative jump out of the game
+  image (`target()` in `resolve_original_call_graph.cpp`), so `ResolveNamedSystemCode("actor_rotation")` failed
+  and `runtime.patch.available` answered false (nothing written). **Since 0.2.0-dev.30.1** the mid hook goes in only
+  when a rule set first asks for `GlideSteer`, on the tick after the first world (`steer.cpp` `tick()`); until then
+  actor_rotation stays unhooked and glider_pitch resolves (lab: `runtime.patch.glider_pitch resolved: the pitch clamp at
+  rva 0x817fe`, enable, disable and re-enable succeed with `kiln-rules.dll` loaded). Once a player steers with Kiln
+  (`GlideSteer`, also Kiln's Creative Mode glider), SF refuses its next enable cleanly
+  (`actor-rotation-code-changed`); a patch already enabled stays, the bytes are disjoint, and Kiln's step replaces the
+  pitch change after SF's clamp for that player. The fork logs why the patch is unavailable
+  (`runtime.patch.glider_pitch unavailable: ...`, branch `kiln-1.8.1-glider`).
+- **The fork's whole-file check under Kiln** (independent of glider_pitch): up to 0.2.0-dev.30 it refused the exe for
+  Kiln's entry hook on `content/LootItems` (a call-free leaf without unwind data, taken for code of the function
+  before it, rva 0x93d310), and the first read of a function holding one of Kiln's mid hooks (items/CreatePide) would
+  have refused it as well; ShroudForge then read every procedure live, where an entry-detoured one is unreadable (the
+  detoured call-graph walk needs the file). Since 0.2.0-dev.30.1 (fork `5bb133f0`) the check admits a leaf
+  function's entry detour (`admit_leaf`: 16-byte aligned, a boundary of the gap's linear decode after padding,
+  target outside the image) and refuses a mid-hooked function's file read without switching file reads off (lab:
+  `executable file accepted ... beside 54 entry detour(s), 17 interior jump(s)`, no refusal after it).
+- **Unified Tweaks 2.1.2 and its Glider Flight 1.0.1** (Nexus 185; lab boot above, their DLLs off): the packages load
+  under the bundled 1.8.1 (the startup pass with `unifiedemltweaks`, `unified-tweaks-live` and `glider-flight`
+  active, no ShroudForge error). They use no 1.8 DLL bridge, `runtime.patch` or player permissions. Glider Flight's own
+  DLL patches the same 5-degree clamp itself (and three diving sites, none within 0x40 bytes of a Kiln sigdb site), so
+  it and SF Unlimited Flight exclude each other.
 - **Steam P2P channels 65534 (Modloader server mirroring, server log mirror) and 65535 (health)**: ISteamNetworkingMessages,
   not the game's socket. Kiln's own frames use the game's channel 12 (`kiln.net`), so they do not meet. The server log
   and archive mirror answer only an admin session (a password checked against `userGroups` in
