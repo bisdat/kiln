@@ -4762,6 +4762,88 @@
       },
       "sha256": "637e4fe122ad37a3e770217275780aa814f257fb6a5d797ebb17d74b56b22adf"
     },
+    "native/core/abi/services/kiln_registry.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnRegistryApi": {
+          "align": 8,
+          "fields": {
+            "field_info": 24,
+            "header": 0,
+            "read": 48,
+            "report_json": 64,
+            "schema_json": 16,
+            "select": 56,
+            "status": 8,
+            "submit": 40,
+            "subscribe_ready": 72,
+            "subscribe_stage": 32,
+            "unsubscribe": 80
+          },
+          "size": 88
+        },
+        "KilnRegistryFieldInfo": {
+          "align": 4,
+          "fields": {
+            "applies": 4,
+            "flags": 16,
+            "mapping": 8,
+            "reason": 24,
+            "reserved": 20,
+            "size": 0,
+            "type": 12
+          },
+          "size": 192
+        },
+        "KilnRegistryReady": {
+          "align": 8,
+          "fields": {
+            "generation": 8,
+            "phase": 4,
+            "reserved": 20,
+            "size": 0,
+            "world": 16
+          },
+          "size": 24
+        },
+        "KilnRegistryStageInfo": {
+          "align": 8,
+          "fields": {
+            "mod": 8,
+            "size": 0,
+            "stage": 4
+          },
+          "size": 24
+        },
+        "KilnRegistryStatus": {
+          "align": 8,
+          "fields": {
+            "conflicts": 24,
+            "edits": 16,
+            "flags": 32,
+            "generation": 8,
+            "phase": 4,
+            "refused": 20,
+            "reserved": 36,
+            "size": 0,
+            "world": 28
+          },
+          "size": 40
+        },
+        "KilnRegistrySubmitResult": {
+          "align": 4,
+          "fields": {
+            "accepted": 4,
+            "refused": 8,
+            "reserved": 12,
+            "size": 0
+          },
+          "size": 16
+        }
+      },
+      "sha256": "28230415c08a182df2510043a06584bbf144a15719c9142a580480bd0f5e7987"
+    },
     "native/core/abi/services/kiln_render.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -8207,7 +8289,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "b6e164257a14dbf3ddaadfe5e17143bbf0759d63ae3fbe4644cd9e3eefabd51f",
+    "src/layout.rs": "0bb6105d90607141fc41946ef0d3919c7e3d02c1a1be48b3aa69c5952fd0f87c",
     "src/services/kiln_abilities.rs": "42fa3c6b0f9c1276be2af0990c616024d5ae924ccc58110ea9ca1b984d95071e",
     "src/services/kiln_assets.rs": "e251c8fe37ce4c9125c7b89b49499c70dd542f24370e75f468cf5f8a95658800",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8247,6 +8329,7 @@
     "src/services/kiln_profile.rs": "7ef9dd4e62ad6ba9c56a88be48c9eda6c26074a6a40405f38c609c8a77d6210c",
     "src/services/kiln_progress.rs": "c998158ce04361ac9ab67651855cb45c6386cfbcec6a28c57140710d14a50bc1",
     "src/services/kiln_queries.rs": "c4888b701b298033d8b9ad525a22b3eba46ceec57a77f900fa1d0ff9002ace19",
+    "src/services/kiln_registry.rs": "034e3e2035ab96e710860efd46b427b4c555d99916c7e8ae36ba8b36a250bd48",
     "src/services/kiln_render.rs": "b63b0058fa0adb038f3f7696a3735379e2462c3fc5222071e50be80a2173b512",
     "src/services/kiln_repl.rs": "7dae242863f97f710da29b767327fd5032e8b38336789c87d79cfeaaab177a6a",
     "src/services/kiln_routines.rs": "c8465a921ab6157d0e176802cfb3e6fa09c2ea2ecd23220ef2643309561b148b",
@@ -8270,7 +8353,7 @@
     "src/services/kiln_world.rs": "a0b05137cc80e7d49bf71a51fab0e2de557f2f50fa1e5eeea7eb81d5069fe25d",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "e03bd61d659453859339f9f8bba8607be9a2a97e18f7b3eccbd933848b3355b8"
+    "src/services/mod.rs": "2314077aa35cb6be4e1bceea8c646e286df291278061e35083722c1ede594627"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"
