@@ -437,7 +437,9 @@ bool edit_of(const json& e, const Batch& b, const Schema& schema, Edit* out, std
             const FieldSpec* leaf = lf->element_field(r.leaf);
             if (!leaf) return *err = out->registry + "." + r.list + "'s elements have no field \"" + r.leaf + "\"", false;
             if (leaf->read_only) return *err = out->registry + "." + r.list + "[]." + r.leaf + " is read-only", false;
-            return op_of(e["op"], *leaf, &out->op, err);
+            FieldSpec named = *leaf;  // messages name the place as the edit does ("outputs[0].item"), not the bare leaf
+            named.name = out->field;
+            return op_of(e["op"], named, &out->op, err);
         }
         if (lf->element == FieldType::Struct) {  // a whole element with fields: {"set": {...}} (a plain object would read as an op)
             const json& o = e["op"];
