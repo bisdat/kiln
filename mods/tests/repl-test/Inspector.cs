@@ -145,11 +145,15 @@ public sealed partial class ReplTestMod
             else if (a.AsSpan().SequenceEqual(b)) same++;
             else differ++;
         }
-        Result(same == fakes.Count && differ == 0 && missing == 0 && cost.CallbackCalls == 0 && cost.WriterCalls == 0 && cost.DeltaCalls == 0 && cost.TickCalls == 0,
+        // kiln.repl.net's sidecar tracking shares the send hooks (one SendCallback and EntityWriter link): while an extension
+        // is registered they stay in, the watch's delta hook and the stats' ack hooks must still go
+        var tracking = Sidecars.Registered().Length > 0;
+        Result(same == fakes.Count && differ == 0 && missing == 0 && (tracking || (cost.CallbackCalls == 0 && cost.WriterCalls == 0)) &&
+               cost.DeltaCalls == 0 && cost.TickCalls == 0,
             "hook removal",
             $"can create payloads with the stats and watch hooks on vs after their removal, per fake: {same} identical, {differ} differ, {missing} missing " +
             $"({string.Join(", ", on.Select(kv => $"{kv.Key}:{kv.Value.Length} B"))}); hook calls after the removal over {cost.Frames} send steps: " +
-            $"callback {cost.CallbackCalls}, writer {cost.WriterCalls}, delta {cost.DeltaCalls}, ack {cost.TickCalls}");
+            $"callback {cost.CallbackCalls}, writer {cost.WriterCalls}{(tracking ? " (sidecar tracking holds these)" : "")}, delta {cost.DeltaCalls}, ack {cost.TickCalls}");
         return fakes;
     }
 

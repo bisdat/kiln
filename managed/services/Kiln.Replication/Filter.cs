@@ -253,6 +253,7 @@ internal static unsafe class FilterHost
         for (var m = 0; m < ids.Length; m++)
         {
             if (ids[m] == 0) continue;
+            if (m == 0 && (flags[m] & ReplNative.PeerLocal) == 0) continue;  // a dedicated server's machine 0: itself, sent nothing
             if (selector.Matches(PeerFacts.Of(ids[m], flags[m], net))) list.Add(ids[m]);
         }
         return list.Count == 0 ? [0] : list.ToArray();

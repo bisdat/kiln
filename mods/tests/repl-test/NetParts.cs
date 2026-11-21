@@ -102,6 +102,16 @@ public sealed partial class ReplTestMod
 
     private async Task NetParts(EntityId chest, EntityId can, IReadOnlyList<(int Machine, int Slot)> fakes, int max)
     {
+        // the inspector's destroy part took the can out: a fresh one in the chest
+        if (World.ReadBytes(can, "NetworkFuel") is null)
+        {
+            var give = await Items.Give(chest, Items.Lookup(Can)!.Id, 1, options: GiveOptions.NoMerge);
+            await Steps(2);
+            var slot = give.Changes.Count > 0 ? Items.Read(chest)?.Slots.FirstOrDefault(s => s.Slot == give.Changes[0].Slot) : null;
+            can = slot?.ItemEntity ?? EntityId.None;
+            max = can.IsNone ? 0 : Items.Fuel.Read(can)?.Max ?? 0;
+            if (!Result(!can.IsNone && max > 0, "net setup", $"a fresh watering can {can} in chest {chest}, water max {max}")) return;
+        }
         Info($"kiln.repl.net capabilities 0x{ReplNetNative.Capabilities():x}; rows {Capabilities.Get("repl.filter").State} filter, " +
              $"{Capabilities.Get("repl.touch").State} touch, {Capabilities.Get("repl.itemremap").State} itemremap; NetworkFuel " +
              $"{Replication.Component("NetworkFuel")}");
