@@ -477,7 +477,8 @@ inline KilnResult KILN_CALL g_identity(KilnEngineIdentity* out) {
     return KILN_OK;
 }
 // kiln.engine's gate_stats over the real gate's counters, with its size rule (v1's 96 bytes and up; size says what was
-// written). Scenario.v1_stats: a Kiln before the restore counters (0.2.0-dev.30.1), which writes v1's 96 bytes only.
+// written). Scenario.v1_stats: a Kiln before the restore counters (0.2.0-dev.30.2 and earlier), which writes v1's 96
+// bytes only.
 inline std::atomic<bool> g_v1_stats{false};
 inline KilnResult KILN_CALL g_gate_stats(KilnEngineGateStats* out) {
     if (!out || out->size < offsetof(KilnEngineGateStats, restores)) return KILN_ERR_INVALID_ARGUMENT;

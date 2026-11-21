@@ -21,8 +21,9 @@ and 3's (kit 3 is kit 2's loop with the restore columns).
 
 Where a run's Kiln ended a hold is kept apart too (run.json "hold_ends", else the header's "hold="): kit 3 on a Kiln that
 ends it at the Scene word's release says "scene-release" and has the restore apart; every other run (kit 1 and 2, and
-kit 3 on an older Kiln such as 0.2.0-dev.30.1, "release-end") timed each hold to the end of the gate's release, the
-priority restore included, and is labelled "hold includes the release and restore" (GitHub #58)."""
+kit 3 on 0.2.0-dev.30.2 or earlier, "release-end") timed each hold to the end of the gate's release, the priority
+restore included, and is labelled "hold includes the release and restore" (GitHub #58). Kit 1 and 2 never say where:
+a kit 2 run on a Kiln with the change gets that label too, so run kit 3 there."""
 import argparse
 import csv
 import io

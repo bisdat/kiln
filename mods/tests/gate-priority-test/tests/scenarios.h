@@ -67,8 +67,8 @@ inline Scenario scenario(const std::string& name) {
         s.run_file = world + "seconds=2\nwarmup=1\nrate=50\n";
         s.restore_us = 3000;
     } else if (name == "v1-stats") {
-        // a Kiln before the restore counters (0.2.0-dev.30.1): its hold includes the release and the restore, and the
-        // files say so; the restore columns stay empty
+        // a Kiln before the restore counters (0.2.0-dev.30.2 and earlier): its hold includes the release and the
+        // restore, and the files say so; the restore columns stay empty
         s.run_file = world + "seconds=2\nwarmup=1\nrate=200\n";
         s.v1_stats = true;
     } else if (name == "noop") {
