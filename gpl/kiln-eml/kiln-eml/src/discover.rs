@@ -259,6 +259,81 @@ pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathB
     }).collect()
 }
 
+/// The extended.mod.json a dedicated server needs in an EML package of ShroudForge's mods folder: without it, or with
+/// `enabled` not true, ShroudForge keeps the package off, and a server has no in-game menu to switch it on.
+pub const SERVER_SWITCH_FILE: &str = r#"{"schemaVersion":1,"launcher":"EML","enabled":true,"targets":["client","server"],"settings":{}}"#;
+
+/// The EML mods of the drop-in folders while ShroudForge runs the EML mods and kiln-eml stands aside, with drop-ins on
+/// (no profile, or a profile whose drop-ins are on): what kiln-eml would have run from there itself, and nothing said
+/// so (a dedicated server from a server pack, 2026-11-21). `root`: ShroudForge's mods folder; ShroudForge runs an EML
+/// package there only while its switch is on ([`shroudforge_switch`]), and one it has off or refuses is listed as
+/// `off-in-shroudforge` (one it runs, or runs on the other side only, is not listed: that is ShroudForge's choice).
+/// `<kiln>/eml/mods`, kiln-eml's own drop-in folder, which no other loader reads: each EML mod there is `not-loaded`.
+/// A Kiln-managed copy (a profile's, or one with a matching install receipt) is no drop-in ([`without_profile_copies`]),
+/// and a folder `listed` already names is not listed twice. `server`: this process is a dedicated server. Listing only:
+/// nothing here changes what runs.
+pub fn aside_dropins(root: &Utf8Path, kiln_dir: &Utf8Path, profile: &[(String, bool)], listed: &[Entry], who: &str, server: bool) -> Vec<Entry> {
+    let mut out = Vec::new();
+    let named = |p: &Utf8Path| listed.iter().any(|e| is_root(p, Utf8Path::new(&e.path)));
+    let own = kiln_dir.join("eml").join("mods");
+    for (dir, source) in [(root.to_owned(), "game-mods"), (own.clone(), "kiln-dropin")] {
+        // the same folder twice (ShroudForge's paths.mods set to kiln/eml/mods): ShroudForge's reading
+        if source == "kiln-dropin" && is_root(&own, root) { continue; }
+        let (kept, _) = without_profile_copies(folder_candidates(&dir, source), profile, kiln_dir);
+        for c in kept {
+            if named(&c.path) || out.iter().any(|e: &Entry| is_root(&c.path, Utf8Path::new(&e.path))) { continue; }
+            // an EML mod (ShroudForge's own packages, Kiln mods and other folders are not kiln-eml's to report)
+            let Ok(m) = classify(&c.path) else { continue };
+            let (state, reason) = if source == "kiln-dropin" {
+                ("not-loaded", format!("{who} runs this start and reads only {root}; kiln-eml stands aside, so nothing runs \
+                    the EML mods of its own drop-in folder {own}. Move this mod to {root}{}", if server {
+                        format!(" with an extended.mod.json that says \"enabled\": true ({SERVER_SWITCH_FILE}), and restart the server")
+                    } else {
+                        " and switch it on in Kiln's in-game menu (Mods > ShroudForge)".to_string()
+                    }))
+            } else {
+                match shroudforge_switch(&c.path, server) {
+                    Ok(()) | Err(Off::Side(_)) => continue,
+                    Err(Off::Switch(why)) => ("off-in-shroudforge", format!("{who} runs this start, and ShroudForge has this EML \
+                        package at {} switched off: {why}. kiln-eml stands aside, so nothing runs it. {}", c.path, if server {
+                            format!("A server has no in-game menu: put an extended.mod.json into its folder that says \"enabled\": \
+                                true ({SERVER_SWITCH_FILE}), then restart the server")
+                        } else {
+                            "Switch it on in Kiln's in-game menu (Mods > ShroudForge)".to_string()
+                        })),
+                    Err(Off::Refused(why)) => ("off-in-shroudforge", format!("{who} runs this start, but ShroudForge does not run \
+                        the EML package at {}: {why}. kiln-eml stands aside, so nothing runs it, and no switch changes that: fix \
+                        or remove its extended.mod.json", c.path)),
+                }
+            };
+            out.push(Entry { id: Some(m.id), version: Some(m.version.to_string()), name: Some(m.name), source: source.into(),
+                path: c.path.to_string(), state: state.into(), reason: Some(reason), capabilities: Vec::new() });
+        }
+    }
+    out
+}
+
+/// The kiln.log line of [`aside_dropins`] (a warning), when there is anything to say: one line with the counts.
+pub fn aside_dropins_log(entries: &[Entry], root: &Utf8Path, server: bool) -> Option<String> {
+    let ids = |state: &str| entries.iter().filter(|e| e.state == state).map(|e| e.id.as_deref().unwrap_or("?")).collect::<Vec<_>>();
+    let (off, lost) = (ids("off-in-shroudforge"), ids("not-loaded"));
+    if off.is_empty() && lost.is_empty() { return None; }
+    let mut parts = Vec::new();
+    if !off.is_empty() {
+        parts.push(format!("{} EML package(s) in {root} are switched off in ShroudForge or refused by it, so nothing runs them ({}); {}",
+            off.len(), off.join(", "), if server {
+                "a server needs an extended.mod.json that says \"enabled\": true in each (docs/kiln/dedicated-servers.md, Mods on the server)"
+            } else {
+                "switch them on in Kiln's in-game menu (Mods > ShroudForge)"
+            }));
+    }
+    if !lost.is_empty() {
+        parts.push(format!("{} EML mod(s) in kiln/eml/mods do not load while ShroudForge runs the EML mods ({}): move them to {root}",
+            lost.len(), lost.join(", ")));
+    }
+    Some(format!("kiln-eml: {} (kiln/state/eml.json)", parts.join("; ")))
+}
+
 /// Is `dir` the loader's folder `root`, as the game's process names folders? On Windows (the game, also under Wine)
 /// by Windows' rules ([`windows_same_folder`]), elsewhere (kiln-eml-run on Linux) part by part.
 fn is_root(dir: &Utf8Path, root: &Utf8Path) -> bool {
@@ -988,6 +1063,59 @@ mod tests {
         }
         let summary = aside_log(&entries, who).last().unwrap().1.clone();
         assert!(summary.starts_with("kiln-eml: 0 of the profile's 3 EML mod(s) run under"), "{summary}");
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// A dedicated server without a profile (a server pack in Docker, 2026-11-21): ShroudForge is hosted, kiln-eml stands
+    /// aside, and the EML packages of ShroudForge's folder have no switched-on extended.mod.json. Each one ShroudForge has
+    /// off or refuses is listed with what a server needs; what it runs, or runs on the other side only, is not; neither are
+    /// ShroudForge's own packages, Kiln-managed copies or folders the profile's rows name. kiln/eml/mods: not loaded.
+    #[test]
+    fn aside_lists_the_dropins_shroudforge_has_off() {
+        let d = tmp("aside-dropins");
+        let kiln = d.join("kiln");
+        let bare = eml_mod(&d, "mods/bare", "bare");
+        let on = eml_mod(&d, "mods/on", "on");
+        std::fs::write(on.join("extended.mod.json"), SERVER_SWITCH_FILE).unwrap();
+        let client = eml_mod(&d, "mods/client", "client");
+        std::fs::write(client.join("extended.mod.json"), r#"{"schemaVersion":1,"launcher":"EML","enabled":true,"targets":["client"]}"#).unwrap();
+        let off = eml_mod(&d, "mods/off", "off");
+        std::fs::write(off.join("extended.mod.json"), r#"{"schemaVersion":1,"launcher":"EML","enabled":false}"#).unwrap();
+        let refused = eml_mod(&d, "mods/schema2", "schema2");
+        std::fs::write(refused.join("extended.mod.json"), r#"{"schemaVersion":2,"launcher":"EML","enabled":true}"#).unwrap();
+        let sf = eml_mod(&d, "mods/sf", "sf");
+        std::fs::write(sf.join("extended.mod.json"), r#"{"schemaVersion":1,"launcher":"SF","enabled":false}"#).unwrap();
+        let copy = eml_mod(&d, "mods/kept", "kept");
+        std::fs::write(copy.join(".kiln-library.json"), r#"{"format":1,"kind":"eml","id":"kept","version":"1.0.0","hash":"h"}"#).unwrap();
+        let named = eml_mod(&d, "mods/named", "named");
+        std::fs::create_dir_all(d.join("mods/not-a-mod")).unwrap();
+        eml_mod(&d, "kiln/eml/mods/drop", "drop");
+        let listed = [Entry { id: Some("named".into()), version: None, name: None, source: "profile".into(), path: named.to_string(),
+            state: "off-in-shroudforge".into(), reason: None, capabilities: Vec::new() }];
+        let who = "ShroudForge (hosted by Kiln)";
+        let rows = aside_dropins(&d.join("mods"), &kiln, &[("kept".into(), true)], &listed, who, true);
+        let got: Vec<_> = rows.iter().map(|e| (e.id.as_deref().unwrap(), e.state.as_str(), e.source.as_str())).collect();
+        assert_eq!(got, [("bare", "off-in-shroudforge", "game-mods"), ("off", "off-in-shroudforge", "game-mods"),
+            ("schema2", "off-in-shroudforge", "game-mods"), ("drop", "not-loaded", "kiln-dropin")], "{rows:?}");
+        let reason = |id: &str| rows.iter().find(|e| e.id.as_deref() == Some(id)).unwrap().reason.clone().unwrap();
+        assert!(reason("bare").contains("no extended.mod.json") && reason("bare").contains("A server has no in-game menu")
+            && reason("bare").contains(SERVER_SWITCH_FILE) && reason("bare").contains(bare.as_str()), "{}", reason("bare"));
+        assert!(reason("schema2").contains("refuses") && !reason("schema2").contains("in-game menu"), "{}", reason("schema2"));
+        assert!(reason("drop").contains("kiln-eml stands aside") && reason("drop").contains(SERVER_SWITCH_FILE), "{}", reason("drop"));
+        assert_eq!(rows[0].version.as_deref(), Some("1.0.0"));
+        // the file the docs tell a server to write is one ShroudForge runs, on the server too
+        assert!(shroudforge_switch(&on, true).is_ok() && shroudforge_switch(&on, false).is_ok());
+        let line = aside_dropins_log(&rows, &d.join("mods"), true).unwrap();
+        assert!(line.starts_with(&format!("kiln-eml: 3 EML package(s) in {} are switched off in ShroudForge or refused by it, so \
+            nothing runs them (bare, off, schema2); a server needs an extended.mod.json that says \"enabled\": true in each", d.join("mods"))), "{line}");
+        assert!(line.contains("1 EML mod(s) in kiln/eml/mods do not load") && line.ends_with("(kiln/state/eml.json)"), "{line}");
+        // a client: the in-game menu's words, the same rows
+        let rows = aside_dropins(&d.join("mods"), &kiln, &[("kept".into(), true)], &listed, who, false);
+        assert_eq!(rows.len(), 4, "{rows:?}");
+        assert!(reason("bare").contains("A server") && rows[0].reason.as_deref().unwrap().contains("Kiln's in-game menu (Mods > ShroudForge)"));
+        assert!(aside_dropins_log(&rows, &d.join("mods"), false).unwrap().contains("switch them on in Kiln's in-game menu"));
+        // nothing off: nothing to say
+        assert!(aside_dropins_log(&[], &d.join("mods"), true).is_none());
         std::fs::remove_dir_all(d).unwrap();
     }
 
