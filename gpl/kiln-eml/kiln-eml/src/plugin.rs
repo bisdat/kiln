@@ -565,7 +565,8 @@ fn shroudforge_mode(game: &Utf8Path) -> bool {
 /// switch is on, for this side (discover::shroudforge_switch). Under ShroudForge with drop-ins on (no profile, or the
 /// profile's drop-ins on), the drop-in folders' EML mods that nothing runs are listed too (discover::aside_dropins): one
 /// warning in kiln.log; their rows in the state file on a dedicated server only (a client's in-game menu already lists
-/// ShroudForge's folder as ShroudForge's rows) and for kiln/eml/mods. Listing only: what runs stays as it was.
+/// ShroudForge's folder as ShroudForge's rows) and for kiln/eml/mods. Under ShroudForge, one info line also counts the EML
+/// packages of its folder and names those it runs (discover::shroudforge_runs). Listing only: what runs stays as it was.
 fn aside_outcome(why: &str, who: &str, shroudforge: bool) -> Outcome {
     let mut out = Outcome::new(Phase::Aside, Vec::new());
     out.aside = Some(why.into());
@@ -583,6 +584,13 @@ fn aside_outcome(why: &str, who: &str, shroudforge: bool) -> Outcome {
         }
         for (level, line) in discover::apply_partial(json, &mut out.mods) {
             klog(level, &line);
+        }
+    }
+    // what ShroudForge does run from its folder, by name (info): a start that runs its mods says so too
+    if shroudforge {
+        let (runs, total) = discover::shroudforge_runs(&roots[0], server);
+        if let Some(line) = discover::shroudforge_runs_log(&runs, total, &roots[0]) {
+            klog(3, &line);
         }
     }
     // no profile (or the legacy layout): drop-ins on, as run_now reads them
