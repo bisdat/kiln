@@ -2973,6 +2973,12 @@
           "kind": "improved"
         },
         {
+          "title": "A missing EMF mod is named before Play",
+          "text": "An EMF mod whose required mod isn't installed says so on its row before you play, with how to get EMF's own mods such as lua.",
+          "area": "launcher",
+          "kind": "improved"
+        },
+        {
           "title": "Kiln's overlay next to ReShade",
           "text": "The overlay crash guard no longer turns Kiln's overlay off after ReShade's slow first frames, and an unseen Kiln menu falls back to the game's own Mods rows.",
           "area": "core",
