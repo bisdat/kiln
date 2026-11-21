@@ -4654,6 +4654,11 @@
             "header": 0,
             "image": 104,
             "line": 48,
+            "outline": 112,
+            "outline_clear": 136,
+            "outline_info": 120,
+            "outline_remove": 128,
+            "outline_status": 144,
             "polyline": 80,
             "rect": 56,
             "release": 24,
@@ -4663,7 +4668,7 @@
             "triangle": 72,
             "world_to_screen": 40
           },
-          "size": 112
+          "size": 152
         },
         "KilnRenderCamera": {
           "align": 8,
@@ -4686,6 +4691,49 @@
           },
           "size": 88
         },
+        "KilnRenderOutline": {
+          "align": 4,
+          "fields": {
+            "duration_ms": 16,
+            "flags": 12,
+            "priority": 8,
+            "reserved": 20,
+            "rgba": 4,
+            "size": 0
+          },
+          "size": 24
+        },
+        "KilnRenderOutlineInfo": {
+          "align": 4,
+          "fields": {
+            "entity": 12,
+            "group": 16,
+            "merged": 20,
+            "reason": 8,
+            "size": 0,
+            "state": 4
+          },
+          "size": 24
+        },
+        "KilnRenderOutlineStatus": {
+          "align": 8,
+          "fields": {
+            "available": 4,
+            "detail": 48,
+            "entities": 12,
+            "game": 20,
+            "installed": 5,
+            "no_model": 24,
+            "requests": 8,
+            "sets": 32,
+            "setting": 7,
+            "shown": 16,
+            "size": 0,
+            "staged": 6,
+            "steps": 40
+          },
+          "size": 208
+        },
         "KilnRenderStatus": {
           "align": 8,
           "fields": {
@@ -4700,7 +4748,7 @@
           "size": 32
         }
       },
-      "sha256": "e5b2fd40d44cd6f8e07dda9572df8b119292b587bcb08e0def580d7524c333b7"
+      "sha256": "5234c9db455b60dae363afcda94408c9dd0b1952c49cf801a9bff278630fbe34"
     },
     "native/core/abi/services/kiln_repl.h": {
       "function_macros": [],
@@ -8015,7 +8063,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "807737da54ef219e51d6252617ecf76805c51bbc35d5a4c9395b14e959a4d96d",
+    "src/layout.rs": "eb4151859373e05fe390aff805b553a645beaaab4382a55519977b5a39c37107",
     "src/services/kiln_abilities.rs": "42fa3c6b0f9c1276be2af0990c616024d5ae924ccc58110ea9ca1b984d95071e",
     "src/services/kiln_assets.rs": "e251c8fe37ce4c9125c7b89b49499c70dd542f24370e75f468cf5f8a95658800",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8054,7 +8102,7 @@
     "src/services/kiln_profile.rs": "7ef9dd4e62ad6ba9c56a88be48c9eda6c26074a6a40405f38c609c8a77d6210c",
     "src/services/kiln_progress.rs": "c998158ce04361ac9ab67651855cb45c6386cfbcec6a28c57140710d14a50bc1",
     "src/services/kiln_queries.rs": "c4888b701b298033d8b9ad525a22b3eba46ceec57a77f900fa1d0ff9002ace19",
-    "src/services/kiln_render.rs": "b63b0058fa0adb038f3f7696a3735379e2462c3fc5222071e50be80a2173b512",
+    "src/services/kiln_render.rs": "f0ecd0d1c1af455626438c8e0c40244b07621ce63cfc707856ee158716d54fd0",
     "src/services/kiln_repl.rs": "2b702986c7d8f2046dd230eecf12af08b5a10a93b94fa527c35627c9afe31d8e",
     "src/services/kiln_rules.rs": "074b85bf024b8c53bfa21e7744ff4005fe6ebfa78c7aa5ccb3bc077cff3bc37b",
     "src/services/kiln_saves.rs": "0922e2870dc677c62608ab13147e609e5ea9d5109c34ea271e2e569874a1576b",
