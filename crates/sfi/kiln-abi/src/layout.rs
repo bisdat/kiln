@@ -1728,7 +1728,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineIdentity, target) == 32);
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineIdentity, sha256) == 64);
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineIdentity, profile_id) == 129);
-    assert!(core::mem::size_of::<crate::services::kiln_engine::KilnEngineGateStats>() == 96);
+    assert!(core::mem::size_of::<crate::services::kiln_engine::KilnEngineGateStats>() == 120);
     assert!(core::mem::align_of::<crate::services::kiln_engine::KilnEngineGateStats>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, size) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, reserved) == 4);
@@ -1743,6 +1743,9 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, hold_ns_max) == 72);
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, views) == 80);
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, view_failures) == 88);
+    assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, restores) == 96);
+    assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, restore_ns_total) == 104);
+    assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, restore_ns_max) == 112);
     assert!(core::mem::size_of::<crate::services::kiln_engine::KilnEngineApi>() == 24);
     assert!(core::mem::align_of::<crate::services::kiln_engine::KilnEngineApi>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineApi, header) == 0);

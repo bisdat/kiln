@@ -700,6 +700,29 @@ void exact_build(const Profile& p) {
               id.sections == p.sections, std::string(p.id) + ": identity exact");
     KilnEngineGateStats st{}; st.size = sizeof st;
     check(t && t->gate_stats(&st) == KILN_OK && st.size == sizeof st, "stats copy (process-wide counters)");
+    {
+        // A caller built against v1's 96 bytes gets those and nothing past them (the restore counters were appended);
+        // one with a larger record gets this build's record and its size; one below v1's is refused.
+        constexpr std::uint64_t kUntouched = 0xa5a5a5a5a5a5a5a5ull;
+        KilnEngineGateStats v1{};
+        v1.size = 96;
+        v1.view_failures = v1.restores = v1.restore_ns_total = v1.restore_ns_max = kUntouched;
+        check(t && t->gate_stats(&v1) == KILN_OK && v1.size == 96 && v1.view_failures != kUntouched && v1.restores == kUntouched &&
+                  v1.restore_ns_total == kUntouched && v1.restore_ns_max == kUntouched,
+              "stats: a v1-sized record gets its 96 bytes, nothing written past them");
+        struct {
+            KilnEngineGateStats s;
+            std::uint64_t tail[4];
+        } big{};
+        big.s.size = sizeof big;
+        for (auto& v : big.tail) v = kUntouched;
+        check(t && t->gate_stats(&big.s) == KILN_OK && big.s.size == sizeof(KilnEngineGateStats) &&
+                  big.tail[0] == kUntouched && big.tail[3] == kUntouched,
+              "stats: a larger record gets this build's record, size says how much");
+        KilnEngineGateStats shorter{};
+        shorter.size = 95;
+        check(t && t->gate_stats(&shorter) == KILN_ERR_INVALID_ARGUMENT, "stats: a record below v1's refused");
+    }
     check(g_rows["engine.profile"].state == KILN_CAP_AVAILABLE && g_rows["engine.profile"].text == p.id, "engine.profile row");
     check(g_rows["engine.ecs_read"].state == KILN_CAP_AVAILABLE && g_rows["engine.ecs_write"].state == KILN_CAP_AVAILABLE,
           "ecs rows available on the exact build");

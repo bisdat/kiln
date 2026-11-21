@@ -52,6 +52,9 @@ pub struct KilnEngineGateStats {
     pub hold_ns_max: u64,
     pub views: u64,
     pub view_failures: u64,
+    pub restores: u64,
+    pub restore_ns_total: u64,
+    pub restore_ns_max: u64,
 }
 
 #[repr(C)]

@@ -2438,11 +2438,14 @@
             "refused_other": 56,
             "refused_world_thread": 48,
             "reserved": 4,
+            "restore_ns_max": 112,
+            "restore_ns_total": 104,
+            "restores": 96,
             "size": 0,
             "view_failures": 88,
             "views": 80
           },
-          "size": 96
+          "size": 120
         },
         "KilnEngineIdentity": {
           "align": 4,
@@ -2462,7 +2465,7 @@
           "size": 192
         }
       },
-      "sha256": "d1be63f127e42d9cc5da6b14bf0f41d13a4dd1db97f2a0ce1234deb0b16dc429"
+      "sha256": "7b688a991afb128d21dc7e85b7fdcb3356ee2f9cb9c68b06dec96e6eb31119ef"
     },
     "native/core/abi/services/kiln_example.h": {
       "function_macros": [],
@@ -7986,7 +7989,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "eb1f8769bd6ad6c7002d1a815855e7dcf99e0867632a037af4591d6feaf4972e",
+    "src/layout.rs": "99b0b3d1b0aa55d22034ccc9d7e75d96766fdcce201348f0ba441af93524ba12",
     "src/services/kiln_abilities.rs": "42fa3c6b0f9c1276be2af0990c616024d5ae924ccc58110ea9ca1b984d95071e",
     "src/services/kiln_assets.rs": "e251c8fe37ce4c9125c7b89b49499c70dd542f24370e75f468cf5f8a95658800",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8007,7 +8010,7 @@
     "src/services/kiln_eml_archive.rs": "60b3c01d20c6bfd91ed2c85f9e0fd5fcadf2564fc1e91204f93fb8387ba2970e",
     "src/services/kiln_eml_startup.rs": "4b30d9fddca79a242a14e364db7e38fdca9f41431b2aeaa3fc46c7380d1c3907",
     "src/services/kiln_eml_values.rs": "dcf5a3f4efc642a3ceb6e0daf67e61be8e4a07162091be18dced191e4fb836c6",
-    "src/services/kiln_engine.rs": "f3dfb5b9d129a230dae1ba4cf6f89751bdccef569118cdf70e0c216e5c452696",
+    "src/services/kiln_engine.rs": "37d16400af46fcb3866abc317887cd25cf0a79c49cc1b69b7beb6743011c65da",
     "src/services/kiln_example.rs": "952bfa78b3790d7dd2f5bd0c8f5eca58cb98e3678bdfc97c8e28b15bfdca0a05",
     "src/services/kiln_gamedata.rs": "360ad2a9d3415920e8811049fda81af8e695648887067c22ea4752b9f57df95c",
     "src/services/kiln_gameplay.rs": "697b6e9a231122dd29e33b1b96bc050afd822950077bc1ca2d5d1caabf70fe43",
