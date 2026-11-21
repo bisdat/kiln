@@ -74,7 +74,10 @@ bool server_here() {
     if (!api) return false;
     KilnSessionInfo si{};
     si.size = sizeof si;
-    return equip_here(api->session(&si), si.state) == EquipHere::Yes;
+    // the query first: in one call's arguments the compiler may read si.state before session() fills it (clang-cl did,
+    // so every rename was refused as "no server world")
+    const KilnResult rc = api->session(&si);
+    return equip_here(rc, si.state) == EquipHere::Yes;
 }
 
 const KilnWorldApi* world_api() {

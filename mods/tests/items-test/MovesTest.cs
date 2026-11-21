@@ -442,7 +442,9 @@ public sealed partial class ItemsTestMod
     {
         if (!Items.ContainerRenameAvailable)
         {
-            Check(false, $"container renames are not available: {Capabilities.Why("items.rename")}");
+            Check(false, Capabilities.Is("items.rename")
+                ? "container renames are not available: capability items.rename is on, but kiln.items says this process runs no server world"
+                : $"container renames are not available: {Capabilities.Why("items.rename")}");
             return;
         }
         if (other.IsNone)
