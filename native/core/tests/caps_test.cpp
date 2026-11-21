@@ -670,8 +670,8 @@ void core_rows(const std::filesystem::path& dir) {
         CHECK(is("client.building_input", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
                   get("client.building_input").text == "hooking the local input observation point failed (kiln.log says why)",
               "building input: unbound, the row says the binder's reason");
-        // held by the client gate (native/core/gates/client-input.json holds it on the client): the gate's row is what a
-        // reader sees, bound or not; kiln.json "preview" naming it lifts it
+        // held by a client gate row (the compiled list no longer holds it; the mechanism stays): the gate's row is what
+        // a reader sees, bound or not; kiln.json "preview" naming it lifts it
         static const kiln::gates::Gate building_gate[] = {
             {"client.building_input", "building-input.select, building-input.joined", kiln::gates::kClient}, {nullptr, nullptr, 0}};
         kiln::gates::use_list_for_tests(building_gate);
@@ -690,11 +690,11 @@ void core_rows(const std::filesystem::path& dir) {
               "building input: preview naming it lifts the hold");
         kiln::gates::configure(KILN_SIDE_SERVER, false, {});
         CHECK(!kiln::gates::is_held("client.building_input"), "building input: the gate holds it on the client only");
-        kiln::gates::use_list_for_tests(nullptr);  // the compiled list
+        kiln::gates::use_list_for_tests(nullptr);  // the compiled list: since the hold was lifted it holds it nowhere
         kiln::gates::configure(KILN_SIDE_CLIENT, false, {});
-        CHECK(kiln::gates::is_held("client.building_input"), "building input: the compiled list holds it on the client");
+        CHECK(!kiln::gates::is_held("client.building_input"), "building input: the compiled list does not hold it on the client");
         kiln::gates::configure(KILN_SIDE_SERVER, false, {});
-        CHECK(!kiln::gates::is_held("client.building_input"), "building input: and not on a dedicated server");
+        CHECK(!kiln::gates::is_held("client.building_input"), "building input: nor on a dedicated server");
         kiln::gates::use_list_for_tests(no_inspection_gate);
         kiln::gates::configure(KILN_SIDE_SERVER, false, {});
         kiln::building_input::reset_for_tests();

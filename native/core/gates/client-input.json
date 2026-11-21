@@ -1,7 +1,0 @@
-{ "gates": [
-    { "name": "client.building_input",
-      "checks": ["building-input.select", "building-input.place-remove", "building-input.undo-dismantle",
-                 "building-input.own-input", "building-input.joined"],
-      "side": "client",
-      "note": "kiln.client's building input on the game client: queued building actions emitted as the local player's own input. Held until its guided client checks pass in a real game (mods/tests/client-pass BuildingInput.cs); kiln.json \"preview\" lifts it for the pass. While held the producer is not installed." }
-] }
