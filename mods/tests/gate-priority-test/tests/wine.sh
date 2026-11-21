@@ -23,7 +23,7 @@ mkdir -p "$log"
 result=0
 for s in "${scenarios[@]}"; do
   if timeout 120s wine "$host" "$s" "$(win "$root/sigdb/types")" "$(win "$dll")" > "$log/$s.log" 2>&1; then
-    printf 'gate-priority-test [wine] %s\n' "$(grep -a -E '^[a-z-]+: [0-9]+ checks' "$log/$s.log" | tail -1)"
+    printf 'gate-priority-test [wine] %s\n' "$(grep -a -E '^[a-z0-9-]+: [0-9]+ checks' "$log/$s.log" | tail -1)"
   else
     grep -a -E '^FAIL' "$log/$s.log" | head -20 || true
     printf 'gate-priority-test [wine] %s: FAILED (log: %s)\n' "$s" "$log/$s.log"
