@@ -304,7 +304,7 @@ some foods add (`UseItem_Food_Heal_Buff`) happens. Nothing is taken at the call.
   verdict, and `t_item_use` itself against a fake kiln.items, fake components and a fake `TriggerSequence`),
   `managed/tests/Kiln.Abilities.Tests/ItemUseTests.cs` (layout, answers, the sequence pick, the consume check), and
   `mods/tests/playerstate-test` (lab: `NotReady` before the character is ready, then a mushroom eaten through
-  `UseItem` with the count going down, `Busy` for a second use in the same step and during the use, the food buff, `EmptySlot`, `NotConsumable` for a
+  `UseItem` with the count going down, `Busy` for a second use in the same step and during the use, the food buff, a health potion through the spawn path, `EmptySlot`, `NotConsumable` for a
   sword, `NotOwnSlot`). Not run in a lab or a real game yet: see the client checklist.
 - Not added: `ApplyBuff(target, buff, usedItem)` (the issue's second shape). The game copies the item's values into the
   buff in `applyBuffCore` from the trigger context's used item on the `actor_apply_buff` path; whether the `applyBuff`

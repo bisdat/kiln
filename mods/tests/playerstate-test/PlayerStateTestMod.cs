@@ -640,6 +640,19 @@ public sealed class PlayerStateTestMod : Mod
         Check(food.Count > 0, "UseItem: the food buff is on the character");
         await WaitIdle(e);
 
+        // a health potion: consumed by SpawnImpact, the spawn path that reads the used item with no check (a consume with
+        // none takes the server down), through the public API rather than LabUseItem
+        var potion = await Give(e, Potion, 2);
+        if (potion is not null)
+        {
+            _consumed.Clear();
+            var pr = Abilities.UseItem(e, potion.Slot);
+            Check(pr == ItemUseResult.Started, $"UseItem: a health potion: {pr}");
+            for (var i = 0; i < 60 && _consumed.Count == 0; i++) await Steps(1);
+            Check(_consumed.Any(c => c.Kind == PlayerConsumeKind.Potion), "UseItem: the potion went through the game's spawn path: PlayerConsumedEvent");
+            await WaitIdle(e);
+        }
+
         var empty = Items.Read(e)?.Slots.FirstOrDefault(s => s.IsEmpty);
         if (empty is not null) Check(Abilities.UseItem(e, empty.Slot) == ItemUseResult.EmptySlot, "UseItem on an empty slot: EmptySlot");
         var sword = await Give(e, Sword, 1);
