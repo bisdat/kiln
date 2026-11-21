@@ -11,6 +11,8 @@ using N = Kiln.UiWorldSnapshotNative;
 
 namespace Kiln.BlockTests;
 
+// with the other UI block tests: both set UiWorldSource and the runtime's statics
+[Collection("ui blocks")]
 public sealed unsafe class UiWorldSnapshotBindingTests : IDisposable
 {
     private sealed class FakeBackend(nint table) : IKilnBackend

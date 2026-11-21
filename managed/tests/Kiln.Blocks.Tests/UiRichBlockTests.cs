@@ -129,6 +129,10 @@ public sealed class UiRichBlockTests : IDisposable
     private readonly List<KilnEvent> _events = new();
     private readonly List<IDisposable> _subs = new();
 
+    private readonly Func<UiWorldReadResult> _read0 = UiWorldSource.Read;
+    private readonly Func<string, UiWorldFields, UiDemandRegistration> _demand0 = UiWorldSource.Demand;
+    private readonly Func<bool> _hosting0 = UiWorldSource.Hosting;
+
     public UiRichBlockTests()
     {
         UiRuntime.ResetForTests(_game);
@@ -161,9 +165,9 @@ public sealed class UiRichBlockTests : IDisposable
         UiConfigs.OfMod = static mod => [.. Config.All.Where(f => f.ModId == mod).Select(f => (IUiConfig)new RealConfig(f))];
         UiConfigs.Find = static id => Config.Find(id) is { } f ? new RealConfig(f) : null;
         UiCompile.Later = BlocksBridge.After;
-        UiWorldSource.Read = static () => new UiWorldReadResult(false, "no world snapshot service here", null);
-        UiWorldSource.Demand = static (_, _) => new UiDemandRegistration(false, "no world snapshot service here", 0, null);
-        UiWorldSource.Hosting = static () => false;
+        UiWorldSource.Read = _read0;
+        UiWorldSource.Demand = _demand0;
+        UiWorldSource.Hosting = _hosting0;
     }
 
     private sealed class Sub(Action a) : IDisposable { public void Dispose() => a(); }
