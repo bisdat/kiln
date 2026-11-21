@@ -40,6 +40,12 @@
 #include "service.h"
 #include "services/kiln_hooks.h"
 
+// kiln.caps (caps.cpp): a mod fragment's features are capability rows while it is loaded
+namespace kiln::caps {
+void fragment_rows(std::string_view id);
+void fragment_gone(std::string_view id);
+}  // namespace kiln::caps
+
 namespace kiln::hooks {
 namespace seh {
 bool copy(void* dst, const void* src, size_t n);
@@ -93,6 +99,31 @@ bool poke(uintptr_t addr, const void* bytes, size_t n) {
     return ok;
 }
 
+// write() has no owner: its refusals count as this requester's.
+constexpr uint64_t kNoOwner = ~uint64_t{0};
+
+// The code lock held. True when [addr, addr + n) overlaps code a Kiln service protected for its engine calls
+// (kiln.internal.hooks, ../hooks_protect_internal.h): the caller refuses with KILN_ERR_UNAVAILABLE before it reads the
+// old bytes or writes one. One kiln.log line at the 1st, 2nd, 4th, 8th, ... refusal of one requester over one protected
+// range; the requester's name is looked up only for that line.
+bool protected_refusal(const char* what, uint64_t requester, uintptr_t addr, size_t n) {
+    auto* p = code::registry().protected_overlap_locked(addr, n);
+    if (!p) return false;
+    const uint64_t count = code::Registry::count_refusal_locked(*p, requester);
+    if (!code::Registry::log_refusal(count)) return true;
+    const std::string who = requester == kNoOwner ? std::string() : reg::owner_name(requester);
+    char at[48];
+    if (addr >= image().base && addr - image().base < image().size)
+        std::snprintf(at, sizeof at, "rva 0x%llx", static_cast<unsigned long long>(addr - image().base));
+    else
+        std::snprintf(at, sizeof at, "0x%llx", static_cast<unsigned long long>(addr));
+    KLOG_W("hooks: %s of %zu byte(s) at %s%s%s refused, nothing written: it overlaps code that %s protected for an engine "
+           "call (%s)%s",
+           what, n, at, who.empty() ? "" : " by ", who.c_str(), reg::owner_name(p->owner).c_str(), p->reason.c_str(),
+           code::Registry::refusal_tail(count).c_str());
+    return true;
+}
+
 // ---- table functions ----
 uintptr_t KILN_CALL h_image_base(void) { return image().base; }
 size_t KILN_CALL h_image_size(void) { return image().size; }
@@ -143,6 +174,7 @@ KilnResult KILN_CALL h_load_symbols(KilnOwner owner, KilnStr modid, KilnStr json
            fs.symbols_ok, fs.symbols, fs.constants_ok, fs.constants, fs.features_ok, fs.features, fs.ms);
     for (const std::string& problem : fs.problems) KLOG_W("hooks: mod %s symbol %s", id.c_str(), problem.c_str());
     chain::refresh_symbols();  // hooked addresses may have a name now
+    caps::fragment_rows(id);   // "sig/<id>/<Name>" rows, as Kiln's own described symbols have (Capabilities.Is)
     if (summary && summary->size >= sizeof(KilnHooksSigSummary)) {
         summary->symbols = static_cast<uint32_t>(fs.symbols);
         summary->symbols_ok = static_cast<uint32_t>(fs.symbols_ok);
@@ -156,6 +188,7 @@ KilnResult KILN_CALL h_load_symbols(KilnOwner owner, KilnStr modid, KilnStr json
 }
 
 KilnResult KILN_CALL h_unload_symbols(KilnStr modid) {
+    caps::fragment_gone(sv(modid));
     if (!sigdb::unload_fragment(sv(modid))) return KILN_ERR_NOT_FOUND;
     chain::refresh_symbols();
     return KILN_OK;
@@ -170,6 +203,7 @@ KilnResult KILN_CALL h_write(uintptr_t addr, const void* src, size_t n) {
     if (!src || n == 0) return KILN_ERR_INVALID_ARGUMENT;
     KILN_GUARD("write", KILN_ERR_INTERNAL, {
         auto code_guard = code::registry().lock();
+        if (protected_refusal("write", kNoOwner, addr, n)) return KILN_ERR_UNAVAILABLE;
         const bool ok = poke(addr, src, n);
         code::registry().touch_locked();  // not a patch: its bytes stay unowned (FOREIGN); a failed copy may have changed some
         return ok ? KILN_OK : KILN_ERR_NOT_FOUND;
@@ -195,6 +229,7 @@ KilnResult KILN_CALL h_patch(KilnOwner owner, uintptr_t addr, const void* bytes,
         std::vector<uint8_t> original(n), installed(n);
         std::lock_guard lock(g_mutex);
         auto code_guard = code::registry().lock();
+        if (protected_refusal("patch", owner, addr, n)) return KILN_ERR_UNAVAILABLE;
         if (!seh::copy(original.data(), reinterpret_cast<const void*>(addr), n)) return KILN_ERR_NOT_FOUND;
         if (!seh::copy(installed.data(), bytes, n)) return KILN_ERR_INTERNAL;
         // Everything that can fail to allocate is done before the bytes change.

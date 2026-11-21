@@ -2737,7 +2737,16 @@
       "noGpuEnv": "이번 실행은 GPU 없이 그립니다: KILN_LAUNCHER_RENDER가 설정되어 이 스위치보다 우선합니다.",
       "gpuEnv": "이번 실행은 GPU로 그립니다: KILN_LAUNCHER_RENDER가 설정되어 이 스위치보다 우선합니다.",
       "noGpuArg": "이번 실행은 GPU 없이 그립니다: {flag}이(가) 지정되어 이 스위치보다 우선합니다.",
-      "gpuArg": "이번 실행은 GPU로 그립니다: {flag}이(가) 지정되어 이 스위치보다 우선합니다."
+      "gpuArg": "이번 실행은 GPU로 그립니다: {flag}이(가) 지정되어 이 스위치보다 우선합니다.",
+      "x11": "Wayland에서 그리기가 느릴 때 X11로 전환",
+      "x11Intro": "Wayland의 HiDPI 화면에서 WebKit이 GPU를 사용할 수 없으면 런처가 X11(XWayland)을 통해 한 번 더 시작합니다. 더 낮은 해상도로 그리므로 훨씬 빠르지만 덜 선명합니다. 다음 시작부터 적용됩니다.",
+      "x11Wayland": "이번 시작은 Wayland에서 그립니다.",
+      "x11On": "이번 시작은 X11을 통해 그립니다.",
+      "x11Tried": "X11을 시도했지만 도움이 되지 않아 런처는 Wayland를 유지합니다. 다시 시도하려면 이 설정을 껐다가 다시 켜세요.",
+      "x11Software": "런처가 GPU 없이 그리는 동안에는 사용되지 않습니다.",
+      "x11Yours": "사용자의 GDK_BACKEND={value} 설정이 우선합니다.",
+      "x11NextOn": "런처가 스스로 X11로 전환할 수 있습니다",
+      "x11NextOff": "다음 시작은 Wayland를 유지합니다"
     },
     "dev": {
       "mock": "개발자: 모의 데이터 대체",
@@ -3808,7 +3817,29 @@
       "countWontMany": "{names}은(는) 이 게임에서 실행되지 않습니다.",
       "bulkNoSwitch": "게임 폴더에 있어 스위치가 없습니다",
       "bulkOnlyKept": "라이브러리에 보관된 버전만 있습니다. 버전을 직접 고르세요",
-      "bulkNoVersion": "라이브러리에 이 모드의 버전이 없습니다"
+      "bulkNoVersion": "라이브러리에 이 모드의 버전이 없습니다",
+      "emfMissing": "{dep}이(가) 필요하지만 설치되어 있지 않습니다.",
+      "emfOff": "{dep}이(가) 필요하지만 꺼져 있습니다.",
+      "emfNotLoading": "{dep}이(가) 필요하지만 로드되지 않습니다.",
+      "emfTooOld": "{dep}이(가) 필요합니다. 현재 {found}은(는) 너무 오래되었습니다.",
+      "emfTooNew": "{dep}이(가) 필요합니다. 현재 {found}은(는) 너무 새롭습니다.",
+      "emfWithEmf": "EMF 릴리스에 포함되어 있습니다. 모드 추가로 EMF의 zip을 추가하세요.",
+      "emfUpdateWithEmf": "더 새로운 버전이 EMF 릴리스에 포함되어 있습니다. 모드 추가로 EMF의 zip을 추가하세요.",
+      "emfSwitchOn": "이 목록에서 켜세요.",
+      "emfNotLoadingTip": "그 모드의 행에 이유가 있습니다.",
+      "emfTooNewTip": "이 모드의 업데이트를 찾아보세요.",
+      "emfSays": "EMF 메시지: {reason}.",
+      "emfWhyMissing": "{dep}이(가) 필요하지만 설치되어 있지 않습니다",
+      "emfWhyOff": "{dep}이(가) 필요하지만 꺼져 있습니다",
+      "emfWhyNotLoading": "{dep}이(가) 필요하지만 로드되지 않습니다",
+      "emfWhyVersion": "{dep}이(가) 필요하지만 현재 {found}입니다",
+      "emfWhyWithEmf": "{why} (EMF 릴리스에 포함되어 있습니다. 모드 추가로 EMF의 zip을 추가하세요)",
+      "emfLua": "EMF의 lua 모드",
+      "emfGet": "EMF 받기",
+      "emfGetTip": "EMF 페이지를 엽니다. 릴리스 zip이 있습니다",
+      "emfModPage": "모드 페이지",
+      "emfModPageTip": "모드가 {dep}에 대해 알려 주는 페이지를 엽니다",
+      "emfRejectedLast": "지난 실행에서 로드되지 않음"
     },
     "modUpdates": {
       "found.other": "모드 {count}개에 업데이트가 있습니다",
@@ -3890,7 +3921,12 @@
       "leavesListed.other": "파일이 라이브러리에서 삭제됩니다. {others}에도 있으며, 없는 모드로 표시됩니다.",
       "leaves": "파일이 라이브러리에서 삭제됩니다.",
       "notSaved": "모드 목록을 저장하지 못해 아무것도 제거하지 않았습니다.",
-      "notRemovable": "게임 폴더에 있고 Kiln이 넣은 것이 아닙니다. 그곳에서 직접 지우세요"
+      "notRemovable": "게임 폴더에 있고 Kiln이 넣은 것이 아닙니다. 그곳에서 직접 지우세요",
+      "settingsToo": "설정도 함께 삭제",
+      "settingsTooHint": "이 게임과 프로필에 있는 이 모드의 설정도 삭제됩니다. Kiln은 백업에 사본을 남깁니다.",
+      "settingsTooMany": "설정도 함께 삭제",
+      "settingsTooManyHint": "이 게임과 프로필에 있는 이 모드들의 설정도 삭제됩니다. Kiln은 백업에 사본을 남깁니다.",
+      "settingsLeft": "일부 설정이 남았습니다"
     },
     "rollback": {
       "settingsBack.other": "업데이트 이전의 설정도 함께 돌아옵니다 (파일 {count}개).",
@@ -4814,6 +4850,18 @@
     }
   },
   "crucible": {
+    "checks": {
+      "running": "팩을 확인하는 중…",
+      "couldNot": "팩을 확인할 수 없습니다",
+      "passed": "확인: 통과",
+      "failed.other": "문제 {count}개로 설치할 수 없습니다",
+      "warnings.other": "살펴볼 항목 {count}개",
+      "failedBlock": "팩이 확인을 통과하지 못했습니다: 설치할 수 없습니다.",
+      "pending": "확인: Crucible에서 아직 진행 중",
+      "lineWarnings.other": "확인: 살펴볼 항목 {count}개",
+      "lineProblems.other": "확인: 문제 {count}개 발견",
+      "lineFailed": "확인: Crucible에서 실행하지 못했습니다"
+    },
     "banner": {
       "title": "팩 업데이트",
       "head": "{name} {change}",
@@ -4823,7 +4871,7 @@
       "seeChanges": "변경 사항 보기"
     },
     "change": {
-      "added.other": "+{count}개 추가",
+      "added.other": "{count}개 추가",
       "updated.other": "{count}개 업데이트",
       "removed.other": "{count}개 제거",
       "addedWord.other": "{count}개 추가됨",
@@ -4833,14 +4881,17 @@
     "code": {
       "link": "코드가 있나요?",
       "title": "코드로 팩 열기",
-      "hint": "친구가 보낸 코드나 링크를 붙여 넣으세요."
+      "hint": "친구가 보낸 코드나 링크를 붙여 넣으세요.",
+      "paste": "붙여넣기",
+      "pasteNone": "클립보드에 팩 코드가 없습니다."
     },
     "err": {
       "notFound": "그 코드를 찾을 수 없습니다. 코드는 H7QK-3MZP처럼 생겼습니다.",
       "offline": "Kiln이 Crucible에 연결할 수 없습니다. 친구에게 팩 파일을 받으세요(Crucible에 공유 > 파일로 저장).",
       "gone": "이 팩은 더 이상 Crucible에 없습니다.",
       "badDownload": "팩을 제대로 내려받지 못했습니다. 아무것도 설치되지 않았습니다. 다시 시도해 보세요.",
-      "gameRunning": "먼저 Enshrouded를 닫으세요."
+      "gameRunning": "먼저 Enshrouded를 닫으세요.",
+      "offlineShare": "Kiln이 Crucible에 연결할 수 없습니다. 인터넷 연결을 확인하고 다시 시도하거나, 파일로 저장을 사용해 친구에게 파일을 보내세요."
     },
     "install": {
       "done": "{name}을(를) 설치했습니다",
@@ -4849,7 +4900,9 @@
       "backTo": "{name}(으)로 되돌리기",
       "backToNone": "프로필 없음으로 되돌리기",
       "backDetail": "{name}은(는) 설정, 프로필에 남아 있습니다.",
-      "undoFailed": "되돌리지 못했습니다"
+      "undoFailed": "되돌리지 못했습니다",
+      "profileName": "{pack} ({creator}의 팩)",
+      "doneOnly": "프로필에 추가되었습니다. 플레이하고 싶을 때 불러오세요."
     },
     "preview": {
       "title": "팩",
@@ -4868,7 +4921,8 @@
       "kilnOld": "Kiln {version} 이상이 필요합니다.",
       "updateKiln": "Kiln 업데이트",
       "uploadingTitle": "아직 업로드 중",
-      "stillUploading": "{name}님의 팩이 아직 업로드 중입니다({pct}%). 준비되면 Kiln이 설치합니다.",
+      "stillUploading": "{name}님의 팩이 아직 업로드 중입니다({pct}%). 여기서 기다리면 준비되는 대로 설치할 수 있습니다.",
+      "resumed": "Kiln이 준비되었습니다. 찾던 팩 {name}입니다.",
       "wait": "기다리기",
       "waiting": "{name}님의 업로드를 기다리는 중({pct}%)…",
       "ownProfile": "별도의 프로필로 설치됩니다. 지금 쓰는 모드는 그대로입니다.",
@@ -4894,7 +4948,12 @@
       "installPlay": "설치하고 플레이",
       "cantOpen": "이 팩을 열 수 없습니다",
       "noGame": "Kiln이 아직 Enshrouded를 찾지 못했습니다.",
-      "installKiln": "먼저 게임에 Kiln을 설치하세요."
+      "installKiln": "먼저 게임에 Kiln을 설치하세요.",
+      "nameLabel": "프로필 이름",
+      "nameTaken": "같은 이름의 프로필이 이미 있습니다. 이 프로필은 {name}(으)로 저장됩니다.",
+      "runningHint": "Enshrouded가 실행 중입니다. 설치는 지금 팩을 추가합니다. 게임을 닫은 뒤 불러오세요.",
+      "installOnlyTip": "팩을 별도의 프로필로 추가합니다. 불러오거나 게임을 시작하지 않습니다.",
+      "warningFile": "이 팩 파일에는 다른 사람들이 만든 모드가 들어 있으며, 코드가 포함된 모드도 있습니다. Kiln이 파일을 검사했지만 사람이 검토하지는 않았습니다."
     },
     "profiles": {
       "tag": "Crucible 팩",
@@ -4952,7 +5011,22 @@
       "copyLink": "링크 복사",
       "noClipboard": "여기서는 복사할 수 없습니다. 대신 텍스트를 선택하세요.",
       "failed": "공유하지 못했습니다",
-      "versionLine": "버전 {number}"
+      "versionLine": "버전 {number}",
+      "what": "Crucible이란?",
+      "confirmTitle": "{name}을(를) Crucible에 공유할까요?",
+      "confirmWhat": "Crucible은 이 프로필을 링크로 만듭니다. 친구가 Kiln에서 열면 같은 모드를 받습니다.",
+      "confirmGoesSize.other": "올라가는 것: 모드 목록과 Crucible에 아직 없는 모드 {count}개의 파일 (최대 {size}).",
+      "confirmGoes.other": "올라가는 것: 모드 목록과 Crucible에 아직 없는 모드 {count}개의 파일.",
+      "confirmGoesAny": "올라가는 것: 모드 목록과 Crucible에 아직 없는 모드 파일.",
+      "confirmStays": "이 PC에 남는 것: 모드 설정과 직접 바꾼 데이터.",
+      "confirmNever": "보내지 않는 것: 저장 파일, 월드, 캐릭터, 그 밖의 개인 파일.",
+      "visibility": "열 수 있는 사람",
+      "linkOnly": "링크만:",
+      "linkOnlyText": "링크나 코드를 받은 사람만.",
+      "public": "공개:",
+      "publicText": "Crucible에서 누구나 볼 수 있습니다. 공개 팩은 Pack Studio에서 만듭니다 (크레딧과 요약이 필요합니다).",
+      "confirmShare": "공유",
+      "confirmSignIn": "로그인하고 공유"
     },
     "update": {
       "title": "{name}: {from} → {to}",
@@ -4961,7 +5035,12 @@
       "cantRead": "업데이트를 읽을 수 없습니다",
       "removedKept": "{name} (라이브러리에 남아 있음)",
       "packData": "팩 자체의 데이터가 바뀌었습니다",
-      "kept": "내 변경 사항은 유지됩니다: 설정 {settings}개, 모드 {mods}개.",
+      "renamed": "{from}이(가) 이제 {to}입니다: 내 설정도 함께 옮겨집니다.",
+      "stillWins.other": "내 변경이 계속 우선합니다 ({count})",
+      "dataChanged": "팩이 이제 {pack}(으)로 설정합니다. 내 값 {mine}이(가) 계속 적용됩니다.",
+      "dataSame": "팩은 {pack}(으)로 설정합니다. 내 값 {mine}이(가) 계속 적용됩니다.",
+      "dropMine": "내 변경 버리기 ({value} 사용)",
+      "savesFirst": "먼저 세이브를 백업합니다.",
       "download": "{size} 내려받기",
       "needsYou.other": "확인이 필요합니다 ({count})",
       "both": "팩에는 지금 {pack}(으)로 되어 있습니다. 내 설정은 {mine}이었습니다.",
@@ -4976,7 +5055,17 @@
       "doneDetail": "내 변경 사항은 그대로입니다.",
       "failed": "{name}을(를) 업데이트하지 못했습니다",
       "undone": "{name}을(를) {version}(으)로 되돌렸습니다",
-      "undoFailed": "업데이트를 취소하지 못했습니다"
+      "undoFailed": "업데이트를 취소하지 못했습니다",
+      "keptLine": "내 변경 사항은 유지됩니다: {list}.",
+      "keptSettings": {
+        "other": "설정 {count}개"
+      },
+      "keptData": {
+        "other": "데이터 변경 {count}개"
+      },
+      "keptMods": {
+        "other": "모드 {count}개"
+      }
     },
     "deck": {
       "shareTitle": "{name} 공유",
@@ -4989,6 +5078,932 @@
       "untick": "체크 해제",
       "turnOn": "켜기",
       "turnOff": "끄기"
+    }
+  },
+  "studio": {
+    "nav": "스튜디오",
+    "title": "Pack Studio",
+    "sub": "프로필로 Crucible 팩을 만드세요: 모드, 설정, 직접 만든 데이터, 크레딧, 그리고 게시.",
+    "new": "새 팩",
+    "newFrom": "기반",
+    "newEmpty": "빈 팩 (새 프로필)",
+    "newProfile": "{name} (모드 {count}개)",
+    "newName": "이름",
+    "newNamePh": "내 팩",
+    "create": "만들기",
+    "newFailed": "팩을 만들지 못했습니다",
+    "empty": {
+      "title": "아직 팩이 없습니다",
+      "hint": "플레이 중인 프로필로 시작하세요. 모드와 설정이 함께 들어갑니다."
+    },
+    "packLine": {
+      "other": "v{version} · 모드 {count}개 · {ago} 변경"
+    },
+    "packSub": {
+      "other": "버전 {version}, 프로필 {profile}에서 만듦 (모드 {count}개)."
+    },
+    "profileGone": "이 팩을 만든 프로필이 더 이상 없습니다.",
+    "missing": "이 팩은 여기 없습니다",
+    "back": "모든 팩",
+    "allPacks": "모든 팩",
+    "tabsAria": "Pack Studio",
+    "deleteTitle": "{name}을(를) 삭제할까요?",
+    "deleteText": "팩 초안은 Kiln 백업으로 이동합니다. 프로필은 남고, 게시한 것은 Crucible에 남습니다.",
+    "recheck": "다시 검사",
+    "state": {
+      "draft": "초안",
+      "link": "링크 전용",
+      "public": "공개"
+    },
+    "tab": {
+      "mods": "모드",
+      "settings": "설정",
+      "data": "데이터",
+      "order": "로드 순서",
+      "test": "테스트",
+      "credits": "크레딧",
+      "publish": "게시"
+    },
+    "mods": {
+      "lead": "프로필 {profile}의 모드입니다. 각각 라이브러리에 있는 버전 그대로입니다. 플레이어는 설치 전에 선택 모드를 켜거나 끕니다.",
+      "addLibrary": "내 라이브러리에서 추가",
+      "addFile": "파일 추가",
+      "pickFile": "팩에 모드 파일 추가",
+      "addFailed": "모드를 추가하지 못했습니다",
+      "removeFailed": "{name}을(를) 빼지 못했습니다",
+      "empty": "아직 모드가 없습니다. 라이브러리에서 추가하세요.",
+      "mod": "모드",
+      "version": "버전",
+      "need": "팩에서",
+      "sides": "실행 위치",
+      "source": "출처",
+      "needAria": "팩에서 {name}의 상태",
+      "sidesAria": "{name}의 실행 위치",
+      "required": "필수",
+      "optionalOn": "선택, 켜짐",
+      "optionalOff": "선택, 꺼짐",
+      "both": "플레이어와 서버",
+      "client": "플레이어만",
+      "server": "서버만",
+      "checking": "확인 중…",
+      "unknown": "식별 안 됨",
+      "filter": "필터",
+      "libraryEmpty": "라이브러리의 모든 모드가 이미 팩에 있습니다.",
+      "addN": {
+        "other": "모드 {count}개 추가"
+      }
+    },
+    "settings": {
+      "lead": "설정은 플레이 중인 프로필에서 고른 키로 전달됩니다. 모드 기본값과 같은 키는 빠지고, 단축키도 체크하지 않으면 빠집니다. 개인 정보로 보이는 것은 절대 전달되지 않습니다.",
+      "capture": "현재 설정에서 가져오기",
+      "captureFailed": "Kiln이 프로필 설정을 읽지 못했습니다",
+      "save": {
+        "other": "키 {count}개 사용"
+      },
+      "saved": {
+        "other": "설정 파일 {count}개가 팩에 들어갔습니다"
+      },
+      "saveFailed": "설정을 가져오지 못했습니다",
+      "none": "이 프로필에는 아직 설정 파일이 없습니다. 한 번 플레이하고 원하는 대로 바꾼 뒤 가져오세요.",
+      "refused": "전달할 수 없음: {why}",
+      "wholeOnly": "파일 전체로 전달됨",
+      "differs": {
+        "other": "모드 기본값과 키 {count}개가 다름"
+      },
+      "noDefaults": {
+        "other": "키 {count}개 (기본값 알 수 없음)"
+      },
+      "sideAria": "{file}을(를) 받는 쪽",
+      "whole": "파일 전체",
+      "default": "(기본값 {value})",
+      "personal": "개인용",
+      "secret": "비공개"
+    },
+    "server": {
+      "title": "서버 게임 설정",
+      "lead": "이 팩의 서버가 쓰는 게임 설정(체력, 적, 건축)입니다. 내 서버 중 하나에서 가져오며, 서버 이름, 비밀번호, 포트는 전달되지 않습니다.",
+      "none": "게임 설정을 가져오려면 서버 메뉴에서 서버를 추가하세요.",
+      "pick": "서버",
+      "take": "이 서버에서 가져오기",
+      "takeFailed": "Kiln이 서버 설정을 읽지 못했습니다",
+      "use": "체크한 설정 사용",
+      "saved": "서버 게임 설정이 팩에 들어갔습니다",
+      "clear": "제거"
+    },
+    "data": {
+      "tabsAria": "데이터 편집기",
+      "tab": {
+        "items": "아이템",
+        "recipes": "레시피",
+        "loot": "전리품",
+        "drops": "드롭",
+        "added": "새 아이템",
+        "raw": "Raw JSON"
+      },
+      "lint": {
+        "line": "데이터 검사: {errors}, {warnings}",
+        "errors": {
+          "other": "오류 {count}개"
+        },
+        "warnings": {
+          "other": "경고 {count}개"
+        },
+        "checking": "데이터 검사: 확인 중…",
+        "show": "문제 표시",
+        "hide": "문제 숨기기",
+        "error": "오류",
+        "warning": "경고",
+        "info": "참고",
+        "lineNotes": "데이터 검사: {errors}, {warnings}, {notes}",
+        "notes": {
+          "other": "메모 {count}건"
+        }
+      },
+      "noCatalog": "Kiln이 아직 게임 아이템을 읽지 않았습니다. 선택 목록에는 팩의 모드가 추가한 항목만 표시되고, 필드 이름은 직접 입력해야 합니다.",
+      "catalog": {
+        "reading": "게임 아이템을 읽는 중…",
+        "build": "게임 카탈로그 만들기",
+        "why": {
+          "noGame": "Enshrouded 클라이언트를 찾을 수 없습니다. 설정 → 게임에서 추가하세요.",
+          "steamUpdating": "Steam이 게임을 업데이트하는 중입니다. 끝나면 다시 시도하세요.",
+          "conflict": "게임 파일이 서로 다른 두 버전에서 왔습니다 (Steam이 업데이트 중일 수 있습니다). Steam이 끝나면 다시 시도하세요.",
+          "failed": "Kiln이 게임 아이템을 읽지 못했습니다: {message}"
+        }
+      },
+      "thisPack": "이 팩",
+      "save": "저장",
+      "saved": "저장됨",
+      "unsaved": "저장하지 않은 변경 사항",
+      "discard": "취소",
+      "remove": "제거",
+      "saveFailed": "{file} 파일을 저장하지 못했습니다",
+      "broken": "이 파일은 올바른 JSON이 아닙니다. 먼저 Raw JSON에서 고치세요.",
+      "alsoIn": "{files}에도 설정되어 있습니다 (Raw JSON).",
+      "name": "이름",
+      "guid": "고정 GUID (한 번만 만들고 절대 바꾸지 마세요)",
+      "badName": "이름은 영문자, 숫자, _ - 또는 . 1~200자입니다",
+      "dupName": "{name}이(가) 두 번 사용되었습니다",
+      "pick": {
+        "ph": "아이템 검색",
+        "selectorPh": "이름 또는 Material_T1_* 같은 패턴",
+        "glob": "일치하는 모든 항목",
+        "unknown": "게임과 팩의 모드에서 찾을 수 없음",
+        "none": "찾은 항목 없음",
+        "searching": "검색 중…"
+      },
+      "value": {
+        "set": "다음 값으로 설정",
+        "mul": "곱하기",
+        "add": "더하기",
+        "min": "최소",
+        "max": "최대",
+        "modeAria": "{field} 변경 방식",
+        "minAria": "{field} 최솟값",
+        "maxAria": "{field} 최댓값",
+        "raiseOnly": "증가만",
+        "lowerOnly": "감소만",
+        "on": "켜짐",
+        "off": "꺼짐"
+      },
+      "field": {
+        "add": "+ 필드",
+        "remove": "{field} 제거",
+        "nameAria": "필드"
+      },
+      "where": {
+        "add": "+ 조건",
+        "where": "조건:",
+        "and": "그리고",
+        "fieldAria": "조건 필드",
+        "fieldPh": "필드",
+        "valueAria": "{field} 조건",
+        "remove": "조건 제거"
+      },
+      "rules": {
+        "add": "+ 규칙",
+        "addAll": "+ 모든 아이템 규칙",
+        "remove": "규칙 제거",
+        "selectorAria": "대상 항목",
+        "noSelector": "모든 규칙에는 이름이나 패턴이 필요합니다",
+        "duplicate": "{selector}에 규칙이 두 개 있습니다. 하나로 합치세요"
+      },
+      "items": {
+        "lead": "게임의 아이템과 팩의 모드 아이템을 변경합니다. 아이템이나 패턴마다 규칙 하나를 만들고 게임 값에 조건을 걸 수 있습니다. 팩 레이어는 모든 모드 뒤에 로드되므로 팩의 값이 우선합니다.",
+        "empty": "아직 아이템 규칙이 없습니다.",
+        "selector": "아이템"
+      },
+      "loot": {
+        "lead": "상자와 월드 습득물의 무작위 전리품을 아이템별로 설정합니다. 한 스택에 들어가는 개수입니다.",
+        "empty": "아직 전리품 규칙이 없습니다.",
+        "selector": "아이템"
+      },
+      "recipes": {
+        "lead": "레시피가 요구하는 재료와 결과물, 소요 시간을 변경하거나 직접 만든 레시피를 추가합니다.",
+        "changes": "변경한 레시피",
+        "noChanges": "아직 레시피 변경이 없습니다.",
+        "add": "+ 레시피 변경",
+        "recipe": "레시피",
+        "noRecipe": "모든 변경에는 레시피가 필요합니다",
+        "changeInputs": "재료 변경",
+        "changeOutputs": "결과물 변경",
+        "inputs": "재료",
+        "outputs": "결과물",
+        "addInput": "+ 재료",
+        "addOutput": "+ 결과물",
+        "duration": "소요 시간",
+        "durationPh": "게임 기본값",
+        "seconds": "초",
+        "itemAria": "아이템",
+        "countAria": "개수",
+        "category": "카테고리 {id}의 모든 아이템",
+        "addCategory": "+ 그룹 중 아무거나",
+        "addCategoryTip": "그룹의 어떤 아이템으로도 낼 수 있는 재료 (예: 아무 목재)",
+        "anyOf": "다음 중 아무거나: {names}",
+        "anyOfMore": "다음 중 아무거나: {names} 외 {count}개",
+        "categoryAria": "아이템 그룹",
+        "categoryPh": "포함된 아이템으로 검색",
+        "categoryNone": "그 아이템이 든 그룹이 없습니다",
+        "categoryItems": {
+          "other": "아이템 {count}개"
+        },
+        "categoryUsed": {
+          "other": "게임 레시피 {count}개에서 사용"
+        },
+        "categoryUnused": "이 그룹을 쓰는 게임 레시피가 없습니다",
+        "categoryUsedBy": "이 그룹을 쓰는 게임 레시피: {names}",
+        "categoryUsedByMore": "이 그룹을 쓰는 게임 레시피: {names} 외 {count}개",
+        "categoryShow": "아이템 보기",
+        "categoryHide": "아이템 숨기기",
+        "categoryNoCatalog": "게임 아이템 정보가 필요합니다: Kiln이 먼저 읽습니다",
+        "removeCategory": "이 그룹 제거",
+        "offer": "그룹 중 아무거나 받을까요?",
+        "offerAria": "대신 그룹 중 아무거나 받기 ({anyOf})",
+        "modNote": "모드의 레시피를 변경합니다. 팩 레이어가 우선합니다 ({mod} 뒤에 로드됨).",
+        "stationNote": "게임의 레시피는 제작대가 그대로 유지되고, 새 레시피는 제작대를 직접 고릅니다.",
+        "new": "새 레시피",
+        "noNew": "아직 새 레시피가 없습니다.",
+        "addNew": "+ 새 레시피",
+        "removeNew": "새 레시피 제거",
+        "station": "제작대",
+        "stationPh": "제작대 검색",
+        "hand": "손으로 제작",
+        "noStation": "모든 새 레시피에는 제작대가 필요합니다",
+        "needStacks": "모든 새 레시피에는 재료와 결과물이 필요합니다",
+        "noCategory": "모든 \"아무거나\" 재료에 그룹을 고르세요"
+      },
+      "drops": {
+        "lead": "기본 인벤토리: 적 전리품과 고정 상자를 테이블별로 또는 모든 테이블(*)에 설정합니다.",
+        "empty": "아직 드롭 규칙이 없습니다.",
+        "table": "테이블",
+        "add": "+ 테이블",
+        "addAll": "+ 모든 테이블 규칙",
+        "count": "수량",
+        "chance": "확률",
+        "items": "개별 아이템",
+        "addItem": "+ 아이템",
+        "noTable": "모든 드롭 규칙에는 테이블이 필요합니다"
+      },
+      "added": {
+        "lead": "직접 만든 아이템: 각각 기본 아이템(모델, 아이콘, 동작)의 복사본이며 고유한 이름과 값을 가집니다.",
+        "empty": "아직 새 아이템이 없습니다.",
+        "add": "+ 새 아이템",
+        "remove": "새 아이템 제거",
+        "displayName": "표시 이름",
+        "base": "기본 아이템",
+        "description": "설명",
+        "rolledLoot": "전리품처럼 무작위 생성 (희귀도와 레벨이 달라짐)",
+        "fields": "값",
+        "noBase": "모든 새 아이템에는 기본 아이템이 필요합니다"
+      },
+      "raw": {
+        "none": "아직 파일이 없습니다.",
+        "newPh": "name.json",
+        "newAria": "새 파일 이름",
+        "new": "새 파일",
+        "rename": "이름 바꾸기",
+        "renameAria": "새 이름",
+        "renameOk": "변경",
+        "exists": "{file} 파일이 이미 있습니다",
+        "delete": "삭제",
+        "deleteTitle": "{file}을(를) 삭제할까요?",
+        "deleteText": "이 파일은 팩 레이어에서 빠집니다.",
+        "textAria": "{file} 텍스트",
+        "clean": "이 파일에는 문제가 없습니다.",
+        "pick": "파일을 고르거나 새로 만드세요."
+      },
+      "hidden": {
+        "toggle": "숨긴 게임 항목 표시",
+        "tag": "숨김",
+        "tip": "오래되었거나 테스트용이거나 쓰이지 않는 게임 항목입니다. 게임에서 아무 효과가 없을 수 있습니다.",
+        "tankWater": "제작대 탱크의 물"
+      }
+    },
+    "order": {
+      "title": "로드 순서",
+      "always": "(팩 레이어, 항상 마지막)",
+      "late": "늦게 로드되는 네이티브 DLL: {list}",
+      "conflicts": "충돌",
+      "none": "같은 항목을 다르게 설정한 모드 쌍이 없습니다.",
+      "noCatalog": "게임 데이터 카탈로그가 없으면 와일드카드 충돌은 추측일 뿐입니다.",
+      "maybe": "가능성",
+      "wins": "현재 적용",
+      "setIn": "팩에서 지정:",
+      "set": "지정",
+      "setAria": "팩에서 {field}의 값",
+      "setDone": "{field}을(를) 팩 레이어에 지정했습니다"
+    },
+    "test": {
+      "lead": "플레이어가 받는 그대로 팩을 시험해 보세요. Kiln이 팩을 만들어 별도의 프로필로 설치합니다.",
+      "backup": "먼저 세이브를 백업합니다.",
+      "world": "내 월드를 그대로 두려면 테스트용 새 월드를 시작하세요.",
+      "server": "서버 팩은 게시한 버전을 내 서버에 넣어 시험합니다 (게시).",
+      "make": "이 팩 테스트",
+      "again": "다시 테스트",
+      "play": "테스트 플레이",
+      "end": "테스트 종료",
+      "failed": "테스트 인스턴스를 만들지 못했습니다",
+      "ready": "{name} 준비 완료",
+      "readyDetail": "플레이를 눌러 시작하세요.",
+      "noGame": "먼저 게임을 추가하세요.",
+      "reported": "게임이 보고한 내용",
+      "notYet": "테스트를 플레이한 뒤 여기로 돌아오세요.",
+      "clean": "지난 실행에서 충돌이나 오류가 없었습니다.",
+      "conflicts": {
+        "other": "데이터 충돌 {count}건"
+      },
+      "problems": {
+        "other": "오류 또는 경고 {count}건"
+      }
+    },
+    "credits": {
+      "lead": "공개 팩은 모든 모드의 크레딧이 필요합니다: 작성자와 출처의 https 링크. Kiln이 알아본 것은 채워 두니 각 행을 확인하세요.",
+      "author": "작성자",
+      "source": "출처",
+      "matched": "찾은 경로",
+      "authorAria": "{name}의 작성자",
+      "sourceAria": "{name}의 출처",
+      "notIdentified": "식별 안 됨: 입력하거나 모드를 빼세요",
+      "missing": {
+        "other": "공개 팩에 아직 크레딧이 필요한 모드가 {count}개 있습니다"
+      },
+      "complete": "모든 모드에 크레딧이 있습니다",
+      "save": "크레딧 저장",
+      "saved": "크레딧을 저장했습니다",
+      "saveFailed": "크레딧을 저장하지 못했습니다"
+    },
+    "match": {
+      "kiln": "Kiln 자체",
+      "crucible": "Crucible",
+      "github": "GitHub 릴리스",
+      "nexus": "Nexus",
+      "manifest": "모드 자체 정보",
+      "manual": "직접 입력"
+    },
+    "confidence": {
+      "certain": "확실",
+      "likely": "가능성 높음",
+      "conflict": "이전 크레딧과 다름",
+      "unverified": "미검증",
+      "creator": "내 것",
+      "unconfirmed": "미확인",
+      "none": "없음"
+    },
+    "publish": {
+      "signInTitle": "게시하려면 로그인하세요",
+      "signIn": "게시에는 Discord 로그인을 씁니다. 플레이어는 설치에 로그인이 필요 없습니다.",
+      "version": "버전",
+      "changes": "변경 사항",
+      "changesPh": "전리품 조정, Busy Hands 추가",
+      "tested": "게임 빌드 {build}에서 테스트함",
+      "visibility": "공개 범위",
+      "public": "공개",
+      "link": "링크 전용",
+      "summary": "요약",
+      "summaryHint": "Crucible 목록에 보일 한 줄 (10자 이상).",
+      "attest": "모든 모드와 작성자를 표기했으며 이 파일을 공유할 권리가 있습니다.",
+      "checks": "검사",
+      "check": {
+        "format": "형식",
+        "sizes": "크기",
+        "blocked": "알려진 유해 파일",
+        "code": {
+          "other": "코드 검사 (참고 {count}건)"
+        },
+        "lint": {
+          "other": "데이터 검사 (경고 {count}건)"
+        }
+      },
+      "tone": {
+        "ok": "정상",
+        "warn": "확인",
+        "err": "오류",
+        "note": "참고"
+      },
+      "go": "게시",
+      "saveFile": "파일로 저장",
+      "failed": "팩을 게시하지 못했습니다",
+      "donePublic": "버전 {version}이(가) 공개되었습니다",
+      "doneLink": "버전 {version}을(를) 게시했습니다",
+      "copied": "링크를 복사했습니다.",
+      "isPublic": "Crucible에 공개됨",
+      "isLink": "게시됨, 링크 전용",
+      "history": "게시한 버전",
+      "toServer": "서버에 넣기",
+      "makePublic": "공개로 전환",
+      "makeLink": "링크 전용으로 전환",
+      "goFresh": "새 팩으로 게시",
+      "goneTitle": "이 팩은 더 이상 Crucible에 없습니다",
+      "gone": "Crucible에서 삭제되었거나 내려졌습니다. 게시하면 새 링크와 코드로 새 팩이 만들어집니다.",
+      "notYetPublic": "아직 공개되지 않음"
+    },
+    "serverPack": {
+      "title": "{name} {version}을(를) 서버에",
+      "lead": "이 버전의 서버 모드, 서버 설정, 게임 설정을 서버에 넣고, 거기서 플레이어가 받는 모드팩을 만듭니다. 먼저 서버를 멈추세요.",
+      "go": "서버에 넣기",
+      "done": "{version}이(가) 서버에 들어갔습니다",
+      "failed": "서버 팩을 만들지 못했습니다"
+    }
+  },
+  "editor": {
+    "page": {
+      "title": "편집기",
+      "lookingForSaves": "세이브를 찾는 중…",
+      "pickCharacter": "캐릭터를 고르세요.",
+      "noSaves": "캐릭터 세이브를 찾지 못했습니다.",
+      "cannotParse": "이 세이브는 편집용으로 읽을 수 없습니다.",
+      "readOnlyNoSave": "이 세이브는 읽기만 할 수 있습니다: 저장이 꺼져 있습니다.",
+      "gameOpen": "게임이 열려 있습니다. 저장하려면 게임을 닫으세요.",
+      "unsaved": "변경 사항이 아직 저장되지 않았습니다. Kiln은 쓰기 전에 세이브를 백업합니다.",
+      "levelBackup": "레벨 {n}. Kiln은 쓰기 전에 세이브를 백업합니다.",
+      "notSaved": "저장 안 됨",
+      "discard": "버리기",
+      "backups": "백업",
+      "save": "저장",
+      "saving": "저장 중…",
+      "saved": "저장함",
+      "savedHint": "이전 세이브는 백업에 있습니다.",
+      "gameOpenShort": "게임 실행 중: 저장하려면 닫으세요",
+      "error": "오류",
+      "note": "주의",
+      "readAgain": "다시 읽기",
+      "close": "닫기",
+      "parts": "세이브 구성",
+      "characters": "캐릭터",
+      "openFile": "파일 열기…",
+      "pickCharacterButton": "캐릭터 고르기",
+      "open": "열기",
+      "opened": "열림",
+      "discardTitle": "변경 사항을 버릴까요?",
+      "discardAndOpen": "버리고 열기",
+      "discardBody": "{nome}의 변경 사항이 아직 저장되지 않았습니다.",
+      "cancel": "취소",
+      "back": "뒤로",
+      "readOnlyError": "읽기 전용: {erro}",
+      "pointsRaised": "사용 중인 포인트를 올렸습니다 ({antes} → {depois}). 편집기가 확인할 수 있도록 스킬 탭에 포인트 총합을 입력하세요. 총합을 넘으면 게임이 트리 전체를 초기화합니다.",
+      "notWritten": "저장되지 않았습니다. {problemas}",
+      "gameWroteSince": "편집기가 읽은 뒤에 게임이 이 세이브를 썼습니다. 지금 상태의 세이브를 편집하려면 다시 읽으세요 (여기서 한 변경 사항은 사라집니다)."
+    },
+    "tabs": {
+      "equipment": "장비",
+      "inventory": "배낭",
+      "skills": "스킬",
+      "knowledge": "지식"
+    },
+    "backups": {
+      "title": "{nome}의 백업",
+      "openFolder": "폴더 열기",
+      "hint": "게임은 최근 세이브 10개를 자동으로 보관하고, 편집기도 쓸 때마다 먼저 세이브를 복사합니다.",
+      "dropsChanges": "복원하면 저장하지 않은 변경 사항이 사라집니다.",
+      "looking": "백업을 찾는 중…",
+      "none": "이 세이브의 백업이 없습니다.",
+      "restore": "복원",
+      "restored": "복원함",
+      "restoredBody": "{arquivo} ({quando}). 이전 세이브는 백업으로 보관했습니다.",
+      "restoreTitle": "이 백업을 복원할까요?",
+      "restoreBody": "현재 상태의 세이브는 백업으로 보관합니다.",
+      "kindGame": "게임 사본",
+      "kindKiln": "Kiln 백업",
+      "beforeSave": "저장 전"
+    },
+    "common": {
+      "level": "레벨",
+      "empty": "비어 있음",
+      "change": "변경",
+      "add": "추가",
+      "tierN": "티어 {n}",
+      "rarity": "희귀도",
+      "amount": "수량",
+      "aboveStack": "게임의 최대 스택 {n}개 초과: 스택 크기를 늘리는 모드가 있는 월드용",
+      "gameStack": "게임 스택 ({n})",
+      "maxAmount": "슬롯 최대 수량 ({n})",
+      "upgrades": "강화",
+      "remove": "제거",
+      "levelN": "레벨 {n}",
+      "pick": "선택",
+      "noMatch": "이 필터에 맞는 것이 없습니다.",
+      "all": "전체"
+    },
+    "equipment": {
+      "xp": "레벨 내 XP",
+      "attrsHint": "능력치는 스킬 트리 노드에서 옵니다 (스킬 탭에서 편집하세요).",
+      "attrsFlameHint": "게임은 불꽃 레벨에 따라 오르는 노드와 장비 보너스도 더합니다. 둘 다 캐릭터 세이브에 저장되지 않습니다.",
+      "emptyHint": "빈 슬롯입니다. 장비는 게임에서 착용하세요. 여기서는 이미 착용한 것을 편집하거나 벗을 수 있습니다.",
+      "backpackFull": {
+        "other": "{item}은(는) 벗기지 않습니다. 벗기면 그 보관함과 안에 든 슬롯 {count}개가 삭제됩니다. 먼저 게임에서 비우세요."
+      },
+      "groups": {
+        "armour": "방어구",
+        "appearance": "외형",
+        "accessories": "장신구"
+      },
+      "slots": {
+        "headVanity": "머리 (외형)",
+        "chestVanity": "가슴 (외형)",
+        "armsVanity": "팔 (외형)",
+        "legsVanity": "다리 (외형)",
+        "feetVanity": "발 (외형)",
+        "head": "머리",
+        "chest": "가슴",
+        "arms": "팔",
+        "legs": "다리",
+        "feet": "발",
+        "ring": "반지",
+        "shield": "방패",
+        "hook": "갈고리",
+        "glider": "글라이더",
+        "backpack": "배낭",
+        "slot": "슬롯 {n}"
+      }
+    },
+    "inventory": {
+      "move": "이동",
+      "slotEmpty": "슬롯 {n} 비어 있음",
+      "putHere": "여기에 놓기",
+      "slotsUsed": {
+        "other": "슬롯 {total}개 중 {n}개"
+      },
+      "addItem": "아이템 추가",
+      "swapBar": "바 교체",
+      "swapBarHint": "Alt로 액션 바와 교체합니다",
+      "actionBar": "액션 바",
+      "deckHint": "A 아이템 변경 · Y 이동 · 빈 슬롯에서 A 추가",
+      "hint": "드래그로 이동 · 빈 슬롯 더블클릭으로 추가 · Delete 제거 · Ctrl+D 복제",
+      "noneSelected": "선택한 아이템이 없습니다.",
+      "noneSelectedHint": "슬롯을 고르면 아이템을 보고 바꿀 수 있습니다.",
+      "emptyHint": "카탈로그에서 여기에 놓을 아이템을 고르세요.",
+      "pickItem": "아이템 고르기",
+      "notFound": "이 인벤토리에서 아이템을 찾지 못했고, 편집기가 이 세이브에서 인벤토리의 위치를 확실히 알 수 없습니다. 게임에서 여기에 아이템이 보인다면 읽지 못한 것입니다. 아무것도 추가할 수 없습니다. 이 세이브의 사본을 보내 주시면 수정에 도움이 됩니다.",
+      "modItem": "모드 아이템, 그대로 유지",
+      "hiddenModItem": "{place}에 다른 모드의 숨겨진 아이템(ID {id})이 있습니다. Kiln은 그대로 둡니다.",
+      "place": {
+        "backpack": "배낭 칸 {n}",
+        "swap": "교체 바 칸 {n}",
+        "action": "액션 바 칸 {n}"
+      }
+    },
+    "inspector": {
+      "item": "아이템",
+      "stacksTo": "최대 {n}개까지 쌓임",
+      "max": "최대",
+      "levelSplit": {
+        "other": "= 기본 {base} + 강화 {count}"
+      },
+      "aboveItemMax": "이 아이템의 최대값({max}) 초과: 모드가 범위를 넓히지 않았다면 서버가 불러올 때 값을 깎습니다",
+      "upgradesHint": "희귀도에 따라 아이템의 강화 횟수가 정해집니다: 최대 레벨 = 기본 레벨 + 희귀도.",
+      "gem": "장착한 보석",
+      "gemUnknown": "id {id}은(는) 카탈로그에 없습니다",
+      "noGem": "— 보석 없음 —",
+      "gemLevel": "보석 레벨",
+      "aboveGemMax": "이 보석의 최대값({max}) 초과: 모드가 범위를 넓히지 않았다면 서버가 불러올 때 값을 깎습니다",
+      "durability": "내구도",
+      "repair": "수리",
+      "water": "물",
+      "fill": "채우기",
+      "duplicateHint": "아이템을 첫 번째 빈 슬롯에 복사합니다",
+      "duplicate": "복제",
+      "attributes": "능력치",
+      "physicalArmour": "물리 방어력",
+      "magicalArmour": "마법 방어력",
+      "raisesSkill": "{no}의 스킬 레벨을 올립니다",
+      "unknownLines": "숫자가 없는 줄은 아직 측정하지 못한 공식에 따라 아이템 레벨과 함께 변합니다. 편집기는 확신할 수 없는 값은 보여 주지 않습니다."
+    },
+    "parts": {
+      "full": "가득 참",
+      "clickToSet": "클릭해서 설정"
+    },
+    "catalog": {
+      "items": "아이템",
+      "countLimited": {
+        "other": "아이템 {count}개 ({limite}개 표시 중, 검색 범위를 좁히세요)"
+      },
+      "count": {
+        "other": "아이템 {count}개"
+      },
+      "categories": "분류",
+      "searchDeck": "이름으로 검색 (Steam + X: 키보드)",
+      "search": "이름으로 검색…",
+      "searchLabel": "검색",
+      "type": "입력",
+      "allRarities": "전체",
+      "tier": "티어",
+      "targetFull": "대상: 인벤토리 가득 참",
+      "target": "대상: 슬롯 {n}",
+      "pickHint": "아이템을 고르세요.",
+      "deckHint": "A로 고르고, A를 한 번 더 누르면 추가합니다.",
+      "hint": "더블클릭하면 바로 추가합니다.",
+      "cat": {
+        "weapons": "무기",
+        "armour": "방어구",
+        "ammo": "탄약",
+        "magic": "주문과 보석",
+        "consumables": "소모품",
+        "materials": "재료",
+        "tools": "도구",
+        "building": "건축",
+        "cosmetics": "치장품과 수집품"
+      }
+    },
+    "knowledge": {
+      "noBlock": "이 세이브에는 지식 블록이 없습니다.",
+      "search": "이름이나 id로 검색",
+      "above": "레벨 이상",
+      "allLevels": "전체",
+      "show": "표시",
+      "filter": {
+        "itemsRecipes": "아이템과 레시피",
+        "items": "아이템만",
+        "recipes": "레시피만",
+        "everything": "전체"
+      },
+      "removeN": "{n}개 제거",
+      "kind": "종류",
+      "name": "이름",
+      "state": "상태",
+      "id": "id {id}",
+      "kinds": {
+        "item": "아이템",
+        "recipe": "레시피",
+        "misc": "기타"
+      },
+      "count": {
+        "other": "항목 {total}개 중 {n}개"
+      },
+      "unnamed": {
+        "other": "알려진 이름 없음 {count}개"
+      },
+      "shownLimit": "처음 400개만 표시합니다. 나머지를 보려면 검색이나 레벨 기준을 쓰세요.",
+      "hint": "높은 레벨의 재료를 제거하면 그 재료에 의존하는 레시피가 닫힙니다. 레시피는 세이브에 저장되지 않습니다. 게임이 여기서도 서버 월드에서도 지식을 바탕으로 다시 계산합니다."
+    },
+    "skills": {
+      "total": "총 포인트",
+      "minusLevel": "−1 레벨",
+      "plusLevel": "+1 레벨",
+      "tree": "스킬 트리",
+      "used": "사용 중",
+      "available": "사용 가능",
+      "enterTotal": "총합 입력…",
+      "changeTotal": "클릭해서 총합 변경",
+      "totalFromGame": "합계 {total}, 게임과 같은 방식으로 계산했습니다: 1레벨을 넘는 레벨마다 2포인트, 그리고 이 캐릭터가 파괴한 장막의 뿌리와 엘릭서 우물만큼. 게임은 이 값을 저장하지 않으므로 여기서 편집하지 않습니다.",
+      "totalHint": "포인트 총합 (게임에 표시되는 대로 사용 중 + 사용 가능):",
+      "zoomIn": "확대",
+      "zoomOut": "축소",
+      "centre": "가운데로",
+      "cost": "비용 {n}",
+      "maxN": "최대 {n}",
+      "deckHint": "A: +1 레벨 · Y: −1",
+      "hint": "클릭: +1 레벨 · 오른쪽 클릭: −1",
+      "class": {
+        "warrior": "전사",
+        "ranger": "레인저",
+        "mage": "마법사",
+        "neutral": "중립"
+      }
+    },
+    "deck": {
+      "delete": "지우기",
+      "range": "{min}~{max}",
+      "min": "최소",
+      "use": "사용",
+      "current": "현재"
+    },
+    "art": {
+      "preparing": "게임 아트를 준비하는 중…",
+      "needsClient": "게임 아트에는 Enshrouded 클라이언트가 필요합니다 (설정 → 게임).",
+      "notFound": "게임 아트를 찾지 못했습니다. {script}을(를) 실행하세요."
+    },
+    "game": {
+      "tree": {
+        "aboveMax": "{no}: 레벨 {nivel}이(가) 최대 {max}을(를) 넘습니다",
+        "orphans": "트리의 나머지와 연결되지 않은 노드: {nos}",
+        "overTotal": "사용 중인 포인트({usados})가 캐릭터 총합({total})을 넘습니다"
+      },
+      "unknownItem": "알 수 없는 아이템 (0x{h})",
+      "errors": {
+        "unknownItems": "이 세이브에 알 수 없는 아이템이 있습니다 (없어진 모드?): 읽기 전용",
+        "levelXp": "잘못된 레벨 또는 XP",
+        "skill": "잘못된 스킬",
+        "item": "알 수 없는 아이템: {id}",
+        "slotAmount": "잘못된 슬롯 또는 수량",
+        "sameSlot": "같은 인벤토리 슬롯에 아이템이 두 개 있습니다",
+        "knowledge": "잘못된 지식 항목",
+        "knowledgeRepeated": "id가 중복된 지식",
+        "closeGame": "저장하기 전에 Enshrouded를 닫으세요. 게임이 편집을 덮어씁니다.",
+        "notOpen": "편집용으로 연 세이브가 없습니다",
+        "noEquipment": "편집기가 이 세이브에서 장비와 인벤토리를 찾지 못합니다",
+        "skillList": "편집기가 이 세이브의 스킬 목록을 모릅니다",
+        "notSave": "Enshrouded 세이브가 아닙니다",
+        "inventoryUnsure": "편집기가 이 세이브의 인벤토리를 확실히 찾지 못했습니다. 아이템을 기록할 수 없습니다.",
+        "modData": "이 세이브에는 편집기가 기록할 수 없는 모드의 데이터({mods})가 들어 있습니다. 모드 데이터를 그대로 두기 위해 읽기 전용입니다.",
+        "inventoryUnread": "편집기가 이 캐릭터의 인벤토리(배낭, 교체 바, 액션 바)를 확실히 읽지 못했습니다. 그 위에 아무것도 기록하지 않도록 읽기 전용입니다."
+      },
+      "saveFileFilter": "Enshrouded 세이브",
+      "rarity": {
+        "none": "희귀도 없음",
+        "common": "일반",
+        "uncommon": "고급",
+        "rare": "희귀",
+        "epic": "영웅",
+        "legendary": "전설"
+      },
+      "category": {
+        "weapon": "무기",
+        "equipment": "장비",
+        "material": "재료",
+        "consumable": "소모품",
+        "ammunition": "탄약",
+        "tool": "도구",
+        "building": "건축",
+        "blueprint": "설계도",
+        "collectible": "수집품",
+        "cosmetic": "치장품",
+        "gem": "보석"
+      },
+      "attribute": {
+        "constitution": "체질",
+        "spirit": "정신력",
+        "endurance": "지구력",
+        "strength": "힘",
+        "dexterity": "민첩",
+        "intelligence": "지능"
+      },
+      "classes": {
+        "survivor": "생존자",
+        "beastmaster": "야수 조련사",
+        "ranger": "레인저",
+        "assassin": "암살자",
+        "trickster": "트릭스터",
+        "wizard": "위저드",
+        "healer": "치유사",
+        "battlemage": "전투 마법사",
+        "tank": "탱커",
+        "warrior": "전사",
+        "barbarian": "바바리안",
+        "athlete": "운동선수"
+      },
+      "knowledge": {
+        "pickedUp": "주움",
+        "used": "사용함",
+        "inspected": "살펴봄",
+        "seen": "봄",
+        "crafted": "제작함"
+      }
+    }
+  },
+  "sfBackend": {
+    "backend": {
+      "title": "ShroudForge",
+      "sub": "이 게임의 ShroudForge 모드를 어떤 ShroudForge가 실행할지 정합니다. kiln/kiln.json에 저장되며 다음 시작부터 적용됩니다.",
+      "label": "ShroudForge 백엔드",
+      "choice": {
+        "hosted": "Kiln에 포함된 ShroudForge",
+        "installed": "내가 설치한 ShroudForge",
+        "kiln": "Kiln 인터프리터"
+      },
+      "about": {
+        "hosted": "Kiln과 함께 제공되는 ShroudForge입니다.",
+        "installed": "게임의 shroudforge 폴더에 있는 ShroudForge입니다.",
+        "kiln": "Kiln이 ShroudForge 모드를 직접 실행합니다. 온전히 실행할 수 없는 모드는 플레이 전에 이유와 함께 건너뜁니다."
+      },
+      "none": "ShroudForge 없음",
+      "default": "기본값",
+      "held": "보류됨",
+      "heldWhy": "이 Kiln 빌드에서는 사용할 수 없습니다: {reason}",
+      "set": {
+        "default": "설정 없음: 기본값입니다.",
+        "explicit": "선택됨: {name}.",
+        "inherited": "이전 스위치 \"내가 설치한 ShroudForge 사용\"에서: {name}. 여기서 선택하면 대체됩니다.",
+        "invalid": "kiln.json에 Kiln이 모르는 백엔드({value})가 적혀 있습니다. 하나를 고를 때까지 이 게임의 ShroudForge 모드는 어떤 ShroudForge로도 실행되지 않습니다."
+      },
+      "next": "다음 시작: {name}",
+      "last": "마지막 시작: {name}",
+      "envRuntime": "런처가 실행되는 환경에 KILN_SHROUDFORGE_RUNTIME이 설정되어 있습니다. 런처에서의 시작은 이를 따릅니다.",
+      "envOff": "런처가 실행되는 환경에 KILN_SHROUDFORGE=0이 설정되어 있습니다. 런처에서 시작하면 ShroudForge가 실행되지 않습니다.",
+      "route": {
+        "missing": "Kiln 인터프리터가 아직 이 게임에 없습니다. Kiln을 다시 설치하면 추가됩니다.",
+        "ownLoader": "ShroudForge 자체 로더가 게임에 있습니다({file}). ShroudForge 모드는 그 로더가 실행하고 Kiln의 선택은 물러납니다."
+      },
+      "running": "변경하려면 게임을 닫으세요.",
+      "reset": "기본값으로 되돌리기",
+      "unreadable": "kiln.json을 읽을 수 없어 변경할 수 없습니다: {reason}",
+      "saved": "저장했습니다. 다음 시작: {name}.",
+      "ask": {
+        "title": "ShroudForge 백엔드를 변경할까요?",
+        "to": "다음 시작부터: {name}",
+        "replaces": "이전 스위치 \"내가 설치한 ShroudForge 사용\"을 대체합니다.",
+        "kiln": "Kiln 인터프리터가 온전히 실행할 수 없는 모드는 시작할 때 각각 이유와 함께 건너뛰며, 플레이 전 경고에 목록이 나옵니다. Kiln에 포함된 ShroudForge로 저절로 돌아가지 않습니다.",
+        "unchanged": "kiln.json이 이미 이렇게 되어 있습니다.",
+        "refused": "지금은 선택할 수 없습니다: {reason}",
+        "when": "저장하기 전에는 아무것도 바뀌지 않습니다. 게임은 다음 시작 때 읽습니다."
+      }
+    },
+    "startWarning": {
+      "title": "이번 실행에서 일부 모드가 실행되지 않습니다",
+      "continue": "이 모드 없이 계속",
+      "game": "게임: {path}",
+      "changedTitle": "변경됨",
+      "changed": "지난 경고 이후 이번 실행에서 실행되지 않는 항목이 바뀌었습니다. 계속하기 전에 다시 읽어 주세요.",
+      "otherGame": "이 경고는 다른 게임의 것입니다. 플레이를 다시 누르세요.",
+      "lead": {
+        "save": {
+          "title": "이 모드 없이 저장하지 마세요",
+          "text": "아래 모드는 세이브에 데이터를 남깁니다. 꺼진 상태로 월드를 저장하면 그 데이터가 바뀌거나 사라질 수 있습니다. 저장하지 않고 플레이하거나, 취소하고 먼저 해결하세요."
+        },
+        "check": {
+          "title": "모든 것을 확인하지 못했습니다",
+          "text": "Kiln이 이번 실행에 대해 모든 것을 확인하지 못해 이 모드들이 실행되지 않을 수 있습니다. 아래 이유를 읽어 주세요."
+        },
+        "plain": {
+          "title": "이 모드들은 실행되지 않습니다",
+          "text": "게임은 아래 모드 없이 시작됩니다. 나머지 모드는 평소처럼 실행됩니다."
+        }
+      },
+      "listAria": "실행되지 않는 항목 ({count})",
+      "notesAria": "참고",
+      "nothingChanged": "계속해도 아무것도 끄지 않으며 저장하거나 삭제하지 않습니다. 다음 플레이 때 다시 확인합니다.",
+      "partData": "시작 데이터",
+      "partLua": "Lua",
+      "partDlls": "DLL: {list}",
+      "parts": "구성: {list}",
+      "dataNotApplied": "이번 실행에서는 시작 데이터가 적용되지 않습니다.",
+      "chain": "원인: {chain}",
+      "folder": "폴더: {root}",
+      "wasActive": "이전 실행에서는 켜져 있었습니다 ({launch}).",
+      "unknownStart": "알 수 없는 실행",
+      "saveLine": "세이브에 데이터를 남깁니다. 꺼져 있는 동안 월드를 저장하지 마세요.",
+      "saveUnknown": "세이브에 데이터를 남길 수 있습니다. 꺼져 있는 동안 월드를 저장하지 마세요.",
+      "skipped": "{name} 실행 안 됨",
+      "refused": "이번 실행에서는 ShroudForge 모드가 실행되지 않습니다",
+      "notStarted": "시작되지 않음: {list}",
+      "previous": "{name} 지금 꺼짐",
+      "offNow": "이번 실행에서는 실행되지 않습니다.",
+      "basisPolicy": "세이브 데이터를 가진 모드에 대한 Kiln 목록에 있습니다.",
+      "basisUnknown": "게임 데이터와 코드를 모두 가지고 있어 세이브 데이터를 남길 수 있습니다.",
+      "about": "대상: {list}",
+      "inspector": "Kiln의 아카이브 검사기를 사용할 수 없습니다",
+      "planWarning": "실행 계획 경고",
+      "baseTitle": "이번 실행의 기준이 되는 게임 파일",
+      "baseRestore": "정확히 이 파일로 돌아가려면 게임 데이터를 바꾸는 모드를 끄고 Kiln으로 게임을 한 번 시작하세요(로그, 엔진: 게임 데이터 복원).",
+      "baseVerify": "Steam이 배포하는 그대로의 게임 파일이 필요하면 Steam에서 게임 파일 무결성 확인을 사용하세요.",
+      "costTitle": "느린 시작",
+      "noteTitle": "참고",
+      "keybindsTitle": "키보드 단축키",
+      "keybinds": "{name}: 키보드 단축키가 Kiln 인터프리터에서 아직 작동하지 않습니다. 모드의 나머지 부분은 작동합니다."
+    },
+    "engineRow": {
+      "plugin": "Kiln 인터프리터 (kiln-sfi)",
+      "packages": "ShroudForge 모드",
+      "phase": {
+        "starting": "시작 중",
+        "running": "실행 중",
+        "ended": "종료됨",
+        "aside": "물러남",
+        "refused": "시작 안 됨",
+        "unknown": "알 수 없음"
+      },
+      "package": {
+        "running": "실행 중",
+        "dataApplied": "데이터 적용됨",
+        "off": "꺼짐",
+        "skipped": "건너뜀"
+      },
+      "stale": {
+        "older-start": "이 기록은 이전 시작의 것입니다. 최신 시작에서 인터프리터가 무엇을 했는지는 알 수 없습니다.",
+        "not-running": "기록에는 {phase}(으)로 되어 있지만 게임이 실행 중이 아닙니다. 그 시작은 마지막 기록 없이 끝났습니다(충돌했을 수 있습니다).",
+        "other-process": "이 기록은 다른 게임 프로세스의 것입니다. 이번 시작의 것이 아닙니다."
+      },
+      "previous": {
+        "incomplete": "이전 시작이 기록을 마치지 못하고 끝났습니다(충돌했을 수 있습니다).",
+        "suspect": "Kiln이 이전 시작이 남긴 것을 읽지 못했습니다."
+      },
+      "unreadable": "Kiln 인터프리터가 Kiln이 읽을 수 없는 기록을 남겼습니다: {error}"
+    },
+    "restoreBase": {
+      "title": "게임 데이터 복원",
+      "base": "Kiln은 이 게임 파일에서 시작했습니다: {label}.",
+      "how": "정확히 이 파일로 돌아가려면 게임 데이터를 바꾸는 모드를 끄고 Kiln으로 게임을 한 번 시작하세요. Kiln은 자신이 썼다고 증명할 수 있는 데이터만 되돌리며, 다른 로더의 데이터는 그대로 둡니다.",
+      "save": "세이브에 데이터를 저장하는 모드: 꺼져 있는 동안에는 월드를 저장하지 마세요.",
+      "vanilla": "이 파일이 반드시 Steam이 배포하는 그대로의 파일은 아닙니다. 그런 파일이 필요하면 Steam에서 게임 파일 무결성 확인을 사용하세요(게임 속성, 설치된 파일).",
+      "unknown": "Kiln은 어떤 게임 파일을 되돌릴지 알 수 없습니다: {reason}."
     }
   }
 }

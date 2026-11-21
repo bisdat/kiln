@@ -269,6 +269,43 @@ pub fn play_with(dirs: &DataDirs, install: &GameInstall, request: &LaunchRequest
 /// The launch flow (contracts.md 7) with explicit save folders (None: the install's) and what starts the game.
 pub fn play_via(dirs: &DataDirs, install: &GameInstall, request: &LaunchRequest, saves: Option<&[crate::saves::SaveDir]>,
                 starter: Starter<'_>) -> Result<LaunchResult> {
+    // main's start is the gated one with no check
+    play_gated(dirs, install, request, saves, starter, &mut Ungated)
+}
+
+/// What a start asks right before its play-once flag, its save backup and Steam or the exe
+/// ([`crate::sfi_launch`]): under the game's lock and the lock of each mod folder the start loads, once the profile file of
+/// the start is as it should be (the active one written again, or the play-once one written).
+pub trait Gate {
+    /// Mode once: the play-once profile file this start boots ([`crate::profile::write_once`], or the one this start's
+    /// prepare wrote while nothing it was made from changed since).
+    fn once_file(&mut self, dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> Result<crate::profile::ProfileFile> {
+        crate::profile::write_once(dirs, profile_id, install)
+    }
+    /// An error refuses the start: nothing is opened or started, no save backup is made, no play-once flag is left.
+    fn check(&mut self, at: &GatePoint<'_>) -> Result<()>;
+}
+
+/// Where [`Gate::check`] is asked.
+pub struct GatePoint<'a> {
+    pub dirs: &'a DataDirs,
+    pub install: &'a GameInstall,
+    pub request: &'a LaunchRequest,
+    /// Mode profile: the activation when the active profile was written again for this start.
+    pub activation: Option<&'a crate::profile::Activation>,
+}
+
+/// No check: main's start.
+pub struct Ungated;
+impl Gate for Ungated {
+    fn check(&mut self, _: &GatePoint<'_>) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// [`play_via`] with `gate` asked right before the start's flag, backup and opener.
+pub fn play_gated(dirs: &DataDirs, install: &GameInstall, request: &LaunchRequest, saves: Option<&[crate::saves::SaveDir]>,
+                  starter: Starter<'_>, gate: &mut dyn Gate) -> Result<LaunchResult> {
     if let Some(p) = crate::proc::find_game(install)? {
         return Err(Error::new(ErrorCode::GameRunning, format!("{} is already running (pid {})", install.exe, p.pid))
             .with_detail(serde_json::json!({ "pid": p.pid })));
@@ -315,7 +352,8 @@ pub fn play_via(dirs: &DataDirs, install: &GameInstall, request: &LaunchRequest,
         }
     } else { Vec::new() };
     // what the re-apply kept in the game folder is the player's to see, also when the start then fails
-    let mut r = start(dirs, install, request, saves, starter).map_err(|e| match &activation {
+    // (the gate)
+    let mut r = start(dirs, install, request, saves, starter, activation.as_ref(), gate).map_err(|e| match &activation {
         Some(a) => with_activation(e, a),
         None => e,
     })?;
@@ -350,26 +388,28 @@ fn with_activation(mut e: Error, a: &crate::profile::Activation) -> Error {
 }
 
 /// The start itself (play-once flag, save backup, Steam or the exe), after the profile is as it should be.
+// (the gate, asked before the flag)
 fn start(dirs: &DataDirs, install: &GameInstall, request: &LaunchRequest, saves: Option<&[crate::saves::SaveDir]>,
-         starter: Starter<'_>) -> Result<LaunchResult> {
+         starter: Starter<'_>, activation: Option<&crate::profile::Activation>, gate: &mut dyn Gate) -> Result<LaunchResult> {
     let fingerprint = launch_fingerprint(dirs, install, request)?;
     // 1. the files the proxy reads at this start
     let now = crate::util::now_unix();
     // a start with another profile for once: the lock of each mod folder that profile loads, until Steam was asked (as
     // play_with holds them for the active profile)
     let mut _once_folders = Vec::new();
-    let nonce = match request.mode {
+    // (the flag's mode first, then the gate, then the flag)
+    let once_mode = match request.mode {
         LaunchMode::Profile => {
             crate::playonce::clear(&install.path)?; // a stale flag must not change Steam's Play-button start
             None
         }
         LaunchMode::Vanilla | LaunchMode::NoMods | LaunchMode::Once => {
-            let mode = match request.mode {
+            Some(match request.mode {
                 LaunchMode::Vanilla => crate::playonce::PlayOnceMode::Vanilla,
                 LaunchMode::NoMods => crate::playonce::PlayOnceMode::NoMods,
                 _ => {
                     let pid = request.profile_id.as_deref().ok_or_else(|| Error::invalid("launch mode once needs a profileId"))?;
-                    let file = crate::profile::write_once(dirs, pid, install)?;
+                    let file = gate.once_file(dirs, pid, install)?;
                     // before the flag below: without it no start reads that file. A flag an earlier request left would
                     // now name the file just written: it goes with this refusal
                     _once_folders = hold_folders(install, &file).inspect_err(|_| {
@@ -377,7 +417,18 @@ fn start(dirs: &DataDirs, install: &GameInstall, request: &LaunchRequest, saves:
                     })?;
                     crate::playonce::PlayOnceMode::Profile
                 }
-            };
+            })
+        }
+    };
+    // still under the locks, before anything of the start itself is written: a refusal leaves no flag (one an earlier
+    // request left would name the files just written) and makes no backup
+    if let Err(e) = gate.check(&GatePoint { dirs, install, request, activation }) {
+        let _ = crate::playonce::clear(&install.path);
+        return Err(e);
+    }
+    let nonce = match once_mode {
+        None => None,
+        Some(mode) => {
             let flag = crate::playonce::PlayOnce { mode, created: now, nonce: crate::playonce::new_nonce()?, profile: None };
             crate::playonce::write(&install.path, &flag)?;
             Some(flag.nonce)

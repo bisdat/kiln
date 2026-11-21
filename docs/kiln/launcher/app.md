@@ -97,7 +97,25 @@ text is about Kiln's own kind it says "Kiln mods".
   (`library_remove` past exactly the users `library_users` named; another profile that lists it is named in the
   confirmation and shows it as missing). One click with a plain confirmation; Settings "Type a mod's name to remove it"
   (off unless turned on) adds the typed name. Uninstalling Kiln, deleting a profile, a server or saves keep their own
-  typed confirmations. Refused while the game runs.
+  typed confirmations. Refused while the game runs. **"Remove its settings too"** (0.2.0-dev.30, owner 2026-11-20): a
+  checkbox in the dialog, unchecked each time it opens, with one line under it ("Its settings in this game and your
+  profiles go too. Kiln keeps a copy in backups."). Unchecked, the settings stay where Kiln keeps them, and adding the
+  mod again brings them back. Checked, `library_remove` gets `settings: true`, and with the mod's last Library version
+  its settings go too (`kiln_manage::mod_settings`): in every known client game the settings stash
+  `kiln/state/placed-settings/<kind>/<id>/` and the settings files in `kiln/kept-mod-files/<kind>/<id>/`; in every
+  config folder (each profile's `<data>/profiles/<pid>/config/`, a copied profile's `<game>/kiln/profiles/<pid>/config/`,
+  the game's `kiln/config/`) Kiln's config files of the mod (`<id>.json`, `<id>-server.json`, `<id>-client.json` and
+  every file a `.schema/` snapshot names as the mod's, with those snapshots; Kiln, native, plugin and Shroudtopia mods,
+  and not while a mod of another kind has the same id), an engine's values file and schema (`<kind>/<id>.<ext>`,
+  `.schema/<kind>/<id>.json`: EMF's `emf/<id>.ini`) and a Shroudtopia mod's entry in the shared
+  `shroudtopia/shroudtopia.json` (that entry only). Never another mod's file, Kiln's own files (`native.json`,
+  `keybinds.json`, ...), a folder of the player's own, servers or world data. Everything is first copied into
+  `<data>/backups/mod-settings/<kind>-<id>-<time>/` (`games/<install id>/...` and `profiles/<pid>/config/...`, as it
+  was laid out, and `removed.json` naming where each file came from), so a player can put it back by hand. The box
+  shows only when the whole mod goes (not for Remove <version> of one of several); a row whose files were gone from
+  the Library already uses `library_remove_settings`. What could not go is a notice ("Some settings stayed", with why).
+  Remove… of several selected mods has the same box ("Remove their settings too"), and the Deck's remove dialogs a row
+  above the buttons that A switches (Off by default).
 - **Above the list**: Filter (words in the name or id) and Kind (when more than one kind is present), shown with more
   than six rows; Notes (N) when the last activation said something about mod folders (below); Load order, Engines,
   Catalog (Nexus builds), Add mods (the file dialog: zip, 7z, rar and DLL files, `shell/modFiles.ts`; folders are
@@ -606,6 +624,28 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
   "The messages"). So the steps are: DMA-BUF on, then the GPU without DMA-BUF, then software; one restart per step at
   most, never a loop (each restart's variable says its step, so a marker that could not be written does not repeat it;
   the restart's own marker is then written once the gate opens).
+- **X11 on Wayland** (0.2.0-dev.30; a player on KDE Wayland + NVIDIA: WebKit turned hardware acceleration off by itself,
+  "PROBLEM: WebKit turned hardware acceleration off by itself", and with `GDK_BACKEND=x11` the lag was gone): on a
+  Wayland session with XWayland (`WAYLAND_DISPLAY` and `DISPLAY` set), when the webview's policy reads Never in a start
+  that draws with the GPU and no variable explains it (`WEBKIT_DISABLE_COMPOSITING_MODE` / `WEBKIT_DISABLE_DMABUF_RENDERER`),
+  on a screen whose GDK scale factor is above 1, the launcher starts again once with `KILN_LAUNCHER_X11_RESTARTED=1`; that start sets `GDK_BACKEND=x11` itself (named in
+  `KILN_LAUNCHER_RENDER_SET`: programs of the host, the game and the tools never get it).
+  - X11 does not bring the GPU back (Oryx593's `GDK_BACKEND=x11` starts read policy Never and "WebKit composites: no" too):
+    it is faster because XWayland draws a HiDPI window at scale 1 (1024 x 640 at devicePixelRatio 1 against 1280 x 800 at
+    2; p50 16 ms against 43-73 ms a frame on Play), less sharp. So at scale 1 the launcher does not switch (as many pixels
+    on the CPU; a marker would stick for nothing). The launcher never sets the policy Never itself with the GPU (only
+    software mode does); before 0.2.0-dev.29.22 the policy line was logged in software mode only. The PROBLEM line names
+    the DRM render nodes and `nvidia_drm modeset` (WebKitGTK 2.50 needs a GBM device on a render node);
+  - that X11 start writes `<data>/state/x11.json`, later starts go straight to X11; also when WebKit still composites
+    nothing through X11 (work-cm 2026-11-20: Oryx593's lag was gone under `GDK_BACKEND=x11` although the torch stood
+    still, so X11's painting on the CPU was far better than Wayland's);
+  - the page late through X11: `x11-no-help.json` and a restart on Wayland (`KILN_LAUNCHER_X11_RESTARTED=0`: X11 is not
+    tried again in that chain), whose own late page then takes the steps above (DMA-BUF, then software);
+  - precedence: the user's own `GDK_BACKEND` (any value, never changed), no Wayland session with XWayland, software mode,
+    the way back's `=0`, Settings off, the switch's `=1`, the no-help marker, the X11 marker, then GTK's default.
+    Settings > Appearance, "Switch to X11 when drawing is slow on Wayland" (`app_render_x11_set`, on by default): off
+    writes `state/x11-auto-off.json` and removes `x11.json`; on removes it and `x11-no-help.json` (try again). Markers
+    are written once the beta copy's gate opens. `launcher.log` has one `render: X11 ...` line per decision.
 - **Choosing the mode** (the DMA-BUF renderer has its own order, above): `--software-render` / `--gpu-render` (the last one given wins), then
   `KILN_LAUNCHER_RENDER=software|gpu`, then the marker, then the GPU. Settings > Appearance, "Draw the launcher without
   the GPU", sets or clears the marker (`app_render_set`) for the next start. A start with an nxm link takes no other

@@ -888,6 +888,93 @@ mod build {
         assert_eq!(e.code, crate::ErrorCode::Conflict, "{}", e.message);
     }
 
+
+    // ------------------------------------------------------------------ the launcher's upkeep (catalog::auto)
+
+    #[test]
+    fn auto_builds_when_missing_and_skips_when_current() {
+        use crate::catalog::auto::{AutoCatalog, AutoState};
+        let game = Tmp::new("auto-game");
+        let out = Tmp::new("auto-out");
+        fake_game(&game.0);
+        let a = AutoCatalog::new();
+        assert_eq!(a.status().state, AutoState::Idle);
+        // missing: made
+        let s = a.ensure(Some(&game.0), &out.0, &mut crate::task::NoProgress);
+        assert_eq!(s.state, AutoState::Ready, "{:?}", s.error);
+        assert_eq!(s.built, Some(true));
+        assert!(s.exists && out.0.join("client.json").is_file());
+        // current: left alone, the same process (nothing read) and a new one (status read)
+        let s = a.ensure(Some(&game.0), &out.0, &mut crate::task::NoProgress);
+        assert_eq!((s.state, s.built), (AutoState::Ready, Some(false)));
+        let s = AutoCatalog::new().ensure(Some(&game.0), &out.0, &mut crate::task::NoProgress);
+        assert_eq!((s.state, s.built), (AutoState::Ready, Some(false)));
+        // the game updated since (another data build): made again
+        let f = out.0.join("client.json");
+        let text = std::fs::read_to_string(&f).unwrap();
+        assert!(text.contains("4242|^/test"), "the fixture's kfc version");
+        std::fs::write(&f, text.replace("4242|^/test", "4241|^/test")).unwrap();
+        let s = AutoCatalog::new().ensure(Some(&game.0), &out.0, &mut crate::task::NoProgress);
+        assert_eq!((s.state, s.built), (AutoState::Ready, Some(true)), "an outdated game build is rebuilt");
+        assert!(std::fs::read_to_string(&f).unwrap().contains("4242|^/test"));
+        // Kiln's rules changed (an older recipe): made again, also by the process that found it current before
+        let text = std::fs::read_to_string(&f).unwrap();
+        let older = text.replacen(&format!("\"recipe\": {RECIPE}"), &format!("\"recipe\": {}", RECIPE - 1), 1);
+        assert_ne!(older, text, "the recipe is in the header");
+        std::fs::write(&f, older).unwrap();
+        let s = a.ensure(Some(&game.0), &out.0, &mut crate::task::NoProgress);
+        assert_eq!((s.state, s.built), (AutoState::Ready, Some(true)), "an older recipe is rebuilt");
+        assert_eq!(status(&out.0, Some(&game.0)).unwrap()[0].current, Some(true));
+        // a check that runs already is not started twice
+        assert!(a.begin());
+        assert!(!a.begin());
+        assert_eq!(a.status().state, AutoState::Building);
+        let s = a.run(Some(&game.0), &out.0, &mut crate::task::NoProgress);
+        assert_eq!(s.state, AutoState::Ready);
+        // no client: NoGame, the existing file still named
+        let s = AutoCatalog::new().ensure(None, &out.0, &mut crate::task::NoProgress);
+        assert_eq!(s.state, AutoState::NoGame);
+        assert!(s.exists);
+        assert_eq!(s.error.map(|e| e.code), Some(crate::ErrorCode::NotFound));
+    }
+
+    #[test]
+    fn auto_surfaces_the_refusals() {
+        use crate::catalog::auto::{AutoCatalog, AutoState};
+        // Steam is updating the game (<lib>/steamapps/common/<game>, StateFlags with the updating bit)
+        let lib = Tmp::new("auto-lib");
+        let game = lib.0.join("steamapps/common/Enshrouded");
+        std::fs::create_dir_all(&game).unwrap();
+        fake_game(&game);
+        let manifest = |flags: u32| format!("\"AppState\"\n{{\n\t\"appid\"\t\t\"{}\"\n\t\"name\"\t\t\"Enshrouded\"\n\t\"StateFlags\"\t\t\"{flags}\"\n\t\"installdir\"\t\t\"Enshrouded\"\n}}\n", crate::CLIENT_APP_ID);
+        std::fs::write(lib.0.join(format!("steamapps/appmanifest_{}.acf", crate::CLIENT_APP_ID)), manifest(6)).unwrap();
+        let out = Tmp::new("auto-refused-out");
+        let a = AutoCatalog::new();
+        let s = a.ensure(Some(&game), &out.0, &mut crate::task::NoProgress);
+        assert_eq!(s.state, AutoState::Failed);
+        assert_eq!(s.error.as_ref().map(|e| e.code), Some(crate::ErrorCode::SteamUpdating), "{:?}", s.error);
+        assert!(!s.exists && !out.0.join("client.json").exists(), "nothing written while Steam updates");
+        // Steam done: the next check (the button) makes it
+        std::fs::write(lib.0.join(format!("steamapps/appmanifest_{}.acf", crate::CLIENT_APP_ID)), manifest(4)).unwrap();
+        let s = a.ensure(Some(&game), &out.0, &mut crate::task::NoProgress);
+        assert_eq!((s.state, s.built), (AutoState::Ready, Some(true)), "{:?}", s.error);
+        // never inside the game folder
+        let s = AutoCatalog::new().ensure(Some(&game), &game.join("catalog"), &mut crate::task::NoProgress);
+        assert_eq!(s.error.as_ref().map(|e| e.code), Some(crate::ErrorCode::Refused));
+        assert!(!game.join("catalog").exists());
+        // exe and data from two builds (mid-update): conflict, and the stale file stays usable
+        let th = fnv1a32(b"keen::ItemInfo");
+        build_kfc(&game, "enshrouded", "4243|x", &[Res { guid: guid(1), type_hash: th, part: 0, data: vec![0; 0x40] }], &[], &[(th, 0xdead_beef)]);
+        let s = a.ensure(Some(&game), &out.0, &mut crate::task::NoProgress);
+        assert_eq!(s.state, AutoState::Failed);
+        assert_eq!(s.error.as_ref().map(|e| e.code), Some(crate::ErrorCode::Conflict), "{:?}", s.error);
+        assert!(s.exists, "the older catalog is still there for the pickers");
+        // a failure from before the run (the launcher's own checks)
+        assert!(a.begin());
+        let s = a.fail(crate::Error::new(crate::ErrorCode::SteamUpdating, "Steam is updating the game."), Some(&out.0));
+        assert_eq!((s.state, s.exists), (AutoState::Failed, true));
+    }
+
     #[test]
     fn typegen_port_matches_the_committed_generated_cs() {
         // the committed dump (game-derived, in sigdb/) through the Rust port == the committed Generated.cs
@@ -936,4 +1023,106 @@ fn real_exe_types() {
     let committed = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../managed/Kiln.Game/Generated.cs")).unwrap();
     let strip = |s: &str| s.lines().filter(|l| !l.starts_with("// Source:")).collect::<Vec<_>>().join("\n");
     eprintln!("same as the committed Generated.cs (apart from the Source line): {}", strip(&ours) == strip(&committed));
+}
+
+/// The game's old, test and unused entries (names from the 2026-11 catalog) and real entries whose names only look alike.
+#[test]
+fn hidden_names() {
+    for n in [
+        "Z_Material_Sand_DEPRECATED", "Z_Prop_NPC_Thermoscope_LATER", "Food_T6_common_Fish_Bait_TEST", "Armor_Tint_TEST", "TestItem_Football2",
+        "_Test_Ammo_pvp_tnt2_explosive_arrow", "_UNUSED_Food_T6_raw_herb_Basil", "VC_Body_Head_01_old", "Blueprint_Voxel_Whitebox_Wood_Foundation_4m_old",
+        "Consumable_Toy_Confetti_01_Blue_Mortar_WIP", "_Blueprint_Voxel_Debug_buildingmaterials", "Prop_Ancients_TrashhHeap_01_b_DONOTPLACE",
+        "Deco_Wetland_medium_Bamboo_DO_NOT_PLACE", "LootChest_CHEAT_Example", "Trap_Test_Prototype_Sawblade", "Attack_Player_2H_Heavy_Whirl01_CCW_TEST2",
+        "VFX_Tool_Projectile_Player_ChanneledWater_Impact_TO_BE_DELETED", "Prop_Decoration_T7_AncientAstronomy_TelescopeHuge_Base_deprecated",
+    ] {
+        assert!(super::is_hidden_name(n), "{n} is hidden");
+    }
+    for n in [
+        "Material_T1_Wood_Logs", "Prop_Decoration_T6_TempleVase_02", "Enemy_Skeleton_Heavy_Attack02_Swipe", "Prop_Mines_oldTools_free_4m_03",
+        "NonModalHint_05_TrainingDoll_TargetDummy", "Prop_NPC_barber_hairstyle_dummy_wigHead_02_cowlick", "BuildTool_Block_Remove",
+        "_Prop_Decoration_Boss_Trophy_Skeleton_Heavy_Hero_01_wood", "old_books_icon", "Consumable_Potion_Remove_All_Food_Buffs", "Material_T3_Iron_Bar",
+    ] {
+        assert!(!super::is_hidden_name(n), "{n} is not hidden");
+    }
+}
+
+/// Hiding keeps every entry the game's own data uses (names from the 2026-11 catalog): a recipe's input or output, a
+/// recipe's station, an input category's member, and station tank water, which no recipe names.
+#[test]
+fn hidden_names_keep_what_the_game_uses() {
+    let doc = serde_json::json!({
+        "format": 1, "kind": "kiln.catalog",
+        "sections": {
+            "items": [
+                { "name": "Vanity_TX_PartyHat_04_Tint_WIP" }, { "name": "Material_T5_MountainWoodlouse_FishingBait_WIP" },
+                { "name": "Consumable_Toy_Confetti_01_Blue_Mortar_WIP" }, { "name": "Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED", "displayName": "Water" },
+                { "name": "Z_Material_Sand_DEPRECATED", "displayName": "Sand" }, { "name": "Material_T1_Wood_Logs" }
+            ],
+            "workshops": [{ "name": "Z_Prop_Production_T5_Laboratory2_DEPRECATED" }],
+            "recipes": [
+                { "name": "Recipe_PartyHat", "inputs": [{ "item": "Material_T1_Wood_Logs", "count": 1 }], "outputs": [{ "item": "Vanity_TX_PartyHat_04_Tint_WIP", "count": 1 }],
+                  "workshopName": "Z_Prop_Production_T5_Laboratory2_DEPRECATED" },
+                { "name": "Recipe_Bait", "inputs": [{ "category": "0x00000001", "count": 2 }], "outputs": [{ "item": "Material_T1_Wood_Logs", "count": 1 }] }
+            ],
+            "itemCategories": [{ "id": "0x00000001", "items": ["Material_T5_MountainWoodlouse_FishingBait_WIP"] }]
+        }
+    });
+    let cat: Catalog = serde_json::from_value(doc.clone()).unwrap();
+    let used = super::used_names(&cat);
+    let shown = |n: &str| !super::is_hidden_name(n) || used.contains(n);
+    for n in ["Vanity_TX_PartyHat_04_Tint_WIP", "Material_T5_MountainWoodlouse_FishingBait_WIP", "Z_Prop_Production_T5_Laboratory2_DEPRECATED", super::STATION_WATER, "Material_T1_Wood_Logs"] {
+        assert!(shown(n), "{n} is in use: listed");
+    }
+    for n in ["Z_Material_Sand_DEPRECATED", "Consumable_Toy_Confetti_01_Blue_Mortar_WIP"] {
+        assert!(!shown(n), "{n} is unused: hidden");
+    }
+    // kiln lint's own catalog reads the same uses (no KL407 for them)
+    let lc = crate::lint::Catalog::from_json(Path::new("client.json"), &doc);
+    assert!(lc.used.contains("Material_T5_MountainWoodlouse_FishingBait_WIP") && lc.used.contains(super::STATION_WATER) && !lc.used.contains("Z_Material_Sand_DEPRECATED"));
+}
+
+/// Pack Studio's category picker: each category with its items' display names (a name the items section lacks keeps
+/// none), the recipes that take it (ids compared as numbers, once per recipe), hidden marks as the pickers' (a member
+/// counts as used), and the fixture's one category.
+#[test]
+fn item_categories_name_their_items_and_recipes() {
+    let doc = serde_json::json!({
+        "format": 1, "kind": "kiln.catalog",
+        "sections": {
+            "items": [{ "name": "Material_T1_Wood_Logs", "displayName": "Wood Logs" }, { "name": "Material_T5_Wood_Logs_Pine", "displayName": "Conifer Logs" },
+                      { "name": "Z_Material_Sand_DEPRECATED", "displayName": "Sand" }],
+            "recipes": [
+                { "name": "Recipe_Tool_Camera", "displayName": "Camera", "inputs": [{ "item": "Material_T1_Wood_Logs", "count": 1 }, { "category": "0xEE5AE93F", "count": 2 }, { "category": "0xee5ae93f", "count": 1 }] },
+                { "name": "Recipe_Charcoal", "inputs": [{ "category": 3998935359u32, "count": 1 }] },
+                { "name": "Recipe_Sandglass", "inputs": [{ "category": "0x00000002", "count": 1 }] }
+            ],
+            "itemCategories": [
+                { "id": "0xee5ae93f", "items": ["Material_T1_Wood_Logs", "Material_T5_Wood_Logs_Pine", "Material_Unknown_Wood"] },
+                { "id": "0x00000002", "items": ["Z_Material_Sand_DEPRECATED"] },
+                { "items": ["Material_T1_Wood_Logs"] }
+            ]
+        }
+    });
+    let cat: Catalog = serde_json::from_value(doc).unwrap();
+    let cats = super::item_categories(&cat);
+    assert_eq!(cats.len(), 2, "an entry without an id is left out");
+    let wood = &cats[0];
+    assert_eq!(wood.id, "0xee5ae93f");
+    let shown: Vec<(&str, Option<&str>)> = wood.items.iter().map(|i| (i.name.as_str(), i.display_name.as_deref())).collect();
+    assert_eq!(shown, [("Material_T1_Wood_Logs", Some("Wood Logs")), ("Material_T5_Wood_Logs_Pine", Some("Conifer Logs")), ("Material_Unknown_Wood", None)]);
+    let recipes: Vec<(&str, Option<&str>)> = wood.recipes.iter().map(|r| (r.name.as_str(), r.display_name.as_deref())).collect();
+    assert_eq!(recipes, [("Recipe_Tool_Camera", Some("Camera")), ("Recipe_Charcoal", None)]);
+    // a hidden-looking member is one the game uses: not hidden
+    assert_eq!(cats[1].items.len(), 1);
+    assert!(!cats[1].items[0].hidden);
+    assert_eq!(cats[1].recipes.len(), 1);
+    let v = serde_json::to_value(&cats[0]).unwrap();
+    assert_eq!(v["items"][0], serde_json::json!({ "name": "Material_T1_Wood_Logs", "displayName": "Wood Logs" }));
+    assert_eq!(v["recipes"][1], serde_json::json!({ "name": "Recipe_Charcoal" }));
+    assert!(v.get("name").is_none());
+
+    let fx = super::item_categories(&Catalog::load(&fixture().join("client.json")).unwrap());
+    assert_eq!(fx.len(), 1);
+    assert_eq!(fx[0].items[0].display_name.as_deref(), Some("Ice Shard"));
+    assert_eq!(fx[0].recipes.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["Test_Frost_Blade"]);
 }

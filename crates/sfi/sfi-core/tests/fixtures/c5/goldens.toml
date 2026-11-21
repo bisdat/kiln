@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: MIT
+# Captured with ShroudForge's own mod runtime (a local differential test, not published), 2026-11-15,
+# headless Wine. Both runs: 1 fixture, 24 records, 11 exact v2 failure messages; shared runner counterpart byte-identical.
+# Fixed seed: the differential test's seed package; fixture: common.lua.
+# No transcript edits or normalization outside the reviewed shared v2 prelude.
+[goldens]
+"sf179.golden.json" = "oracle sf-1.7.9 d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8; common.lua; sha256=e2b0b0ce137f73b35443388af9c7e0b5142be934dd49606155da671ab08a6277"
+"sf180.golden.json" = "oracle sf-1.8.0 38ef448dc5d4fc267b5f0928502a864a6b078865; common.lua; sha256=e2b0b0ce137f73b35443388af9c7e0b5142be934dd49606155da671ab08a6277"

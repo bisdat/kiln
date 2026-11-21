@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import * as api from "../api/commands";
-import { usePoll } from "../api/hooks";
+import { GAME_POLL_MS, usePoll } from "../api/hooks";
 import { useT } from "../i18n";
 import type { useMods } from "../shell/useMods";
 import { shroudlinkNoticeText } from "../shell/shroudlinkNotice";
@@ -15,7 +15,7 @@ export function ShroudlinkNotice({ game, mods, deck = false }: { game: api.GameI
   const enabled = game?.kind === "client" && !!owner && !!profile?.mods.shroudlink?.some((m) => m.enabled);
   const query = useQuery({
     queryKey: ["shroudlink_notice", game?.id, owner, profile, mods.rows.map((r) => r.lib)],
-    queryFn: () => api.shroudlinkNotice(profile!, game!.id), enabled, refetchInterval: usePoll(4000),
+    queryFn: () => api.shroudlinkNotice(profile!, game!.id), enabled, refetchInterval: usePoll(GAME_POLL_MS),
   });
   const text = shroudlinkNoticeText(game, mods.profileId, profile, query.data);
   if (!text) return null;

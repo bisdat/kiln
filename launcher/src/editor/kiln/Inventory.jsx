@@ -7,11 +7,15 @@ import { Button } from '../../ui';
 import { items, itemName } from '../src/gamedata.js';
 import capacities from '../data/backpack-capacities.json';
 import { inventoryLayout, entryAt, replaceSlots, keyOf } from '../shared/inventory.mjs';
-import { t } from '../src/i18n.js';
+import { t } from '../../i18n';
 import { Inspector } from './Inspector.jsx';
 import { Catalog } from './Catalog.jsx';
 import { Slot } from './parts.jsx';
 import { useDeckActions, useEditorEnv } from './env.jsx';
+
+/** An item no table has (another mod keeps it in the slot): shown locked, kept untouched (the save is read-only). */
+const isModItem = (e) => !!e && !items[e.itemId];
+const hexId = (id) => '0x' + ((Number(id) || 0) >>> 0).toString(16).padStart(8, '0');
 
 export default function Inventory({ model, setModel }) {
   const [sel, setSel] = useState(null);
@@ -42,10 +46,10 @@ export default function Inventory({ model, setModel }) {
   const intoPanel = () => insp.current?.querySelector('button:not(:disabled), input, select')?.focus();
   const [inPanel, setInPanel] = useState(false);
   useDeckActions(env.deck ? [
-    moving ? { button: 'y', label: t('Cancelar'), run: () => setMoving(null) }
-      : { button: 'y', label: t('Mover'), disabled: !entry, run: () => { if (entry) setMoving(sel); } },
-  ] : null, moving ? { label: t('Cancelar'), run: () => setMoving(null) }
-    : inPanel ? { label: t('Voltar'), run: () => slotEl(sel)?.focus() } : null);
+    moving ? { button: 'y', label: t('editor.page.cancel'), run: () => setMoving(null) }
+      : { button: 'y', label: t('editor.inventory.move'), disabled: !entry, run: () => { if (entry) setMoving(sel); } },
+  ] : null, moving ? { label: t('editor.page.cancel'), run: () => setMoving(null) }
+    : inPanel ? { label: t('editor.page.back'), run: () => slotEl(sel)?.focus() } : null);
   const press = (key, e) => {
     setSel(key);
     if (!env.deck) return;
@@ -67,13 +71,14 @@ export default function Inventory({ model, setModel }) {
 
   const cell = (key, n) => {
     const e = bySlot.get(key);
+    const mod = isModItem(e);
     return (
       <div key={key} className="ke-cell"
         onDragOver={(ev) => { ev.preventDefault(); ev.dataTransfer.dropEffect = 'move'; }}
         onDrop={(ev) => { ev.preventDefault(); const from = ev.dataTransfer.getData('text/plain') || dragFrom; if (from && bySlot.has(from)) move(from, key); setDragFrom(null); }}>
-        <Slot entry={e} n={n} selected={sel === key || moving === key} drop={(dragFrom !== null && dragFrom !== key) || (moving !== null && moving !== key)} title={e ? itemName(e.itemId) : undefined}
-          label={e ? `${itemName(e.itemId)}${e.count > 1 ? ` ×${e.count}` : ''}` : t('Espaço {n} vazio', { n: slotNo(key) })}
-          deckId={`slot-${key}`} deckA={moving ? t('Pôr aqui') : e ? t('Mudar') : t('Adicionar')}
+        <Slot entry={e} n={n} mod={mod} selected={sel === key || moving === key} drop={(dragFrom !== null && dragFrom !== key) || (moving !== null && moving !== key)} title={e ? itemName(e.itemId) : undefined}
+          label={mod ? `${placeOf(key)}: ${t('editor.inventory.modItem')}` : e ? `${itemName(e.itemId)}${e.count > 1 ? ` ×${e.count}` : ''}` : t('editor.inventory.slotEmpty', { n: slotNo(key) })}
+          deckId={`slot-${key}`} deckA={moving ? t('editor.inventory.putHere') : e ? t('editor.common.change') : t('editor.common.add')}
           onFocus={env.deck ? () => { setSel(key); setInPanel(false); } : undefined}
           onClick={() => press(key, e)} onDoubleClick={() => { if (!e && !env.deck) { setSel(key); setCatalog(true); } }}
           drag={e ? { draggable: true, onDragStart: (ev) => { ev.dataTransfer.setData('text/plain', key); ev.dataTransfer.effectAllowed = 'move'; setDragFrom(key); }, onDragEnd: () => setDragFrom(null) } : undefined} />
@@ -91,44 +96,56 @@ export default function Inventory({ model, setModel }) {
     if (scroller.current) ro.observe(scroller.current);
     return () => ro.disconnect();
   }, [layout.bag.length]);
+  // items no table has (another mod's, e.g. Hands-Free Lantern's hidden lantern in a bag slot): named by their place
+  const placeOf = (key) => {
+    const [c, s] = key.split(':'); const i = Number(s);
+    if (c === 'main' && i >= 16 && i < 24) return t('editor.inventory.place.swap', { n: i - 15 });
+    if (c === 'main' && i >= 24 && i < 32) return t('editor.inventory.place.action', { n: i - 23 });
+    return t('editor.inventory.place.backpack', { n: slotNo(key) });
+  };
+  const modItems = layout.all.filter((k) => isModItem(bySlot.get(k)));
   const slotNo = (key) => (layout.bag.indexOf(key) >= 0 ? layout.bag.indexOf(key) + 1 : Number(key.split(':')[1]) + 1);
 
   return (
     <div className="ke-split">
       <div className="ke-main">
+        {model.inventoryUnsure && !model.main.length && !model.extra.length && <p className="ke-note warn" role="alert">{t('editor.inventory.notFound')}</p>}
+        {modItems.map((k) => (
+          <p key={k} className="ke-note warn ke-mod-note">{t('editor.inventory.hiddenModItem', { place: placeOf(k), id: hexId(bySlot.get(k).itemId) })}</p>
+        ))}
         <section className="ke-group ke-group-grow">
           <header className="ke-group-head">
-            <h2 className="k-card-title">{t('Mochila')}</h2>
-            <span className="k-card-sub">{t('{n} de {total} espaços', { n: used, total: layout.bag.length })}</span>
+            <h2 className="k-card-title">{t('editor.tabs.inventory')}</h2>
+            <span className="k-card-sub">{t('editor.inventory.slotsUsed', { n: used, total: layout.bag.length, count: layout.bag.length })}</span>
             <span className="k-spacer" />
             {/* the Deck: A on an empty slot adds (a button above the grid would sit in the D-pad's way) */}
-            {!env.deck && <Button size="s" onClick={() => setCatalog(true)} title={t('Adicionar item') + ' (I)'}>{t('Adicionar item')}</Button>}
+            {!env.deck && <Button size="s" onClick={() => setCatalog(true)} title={t('editor.inventory.addItem') + ' (I)'}>{t('editor.inventory.addItem')}</Button>}
           </header>
           <div className={'ke-grid-scroll' + (more ? ' more' : '')} ref={scroller} onScroll={look}><div className="ke-grid">{layout.bag.map((k) => cell(k))}</div></div>
         </section>
         <section className="ke-group">
           <header className="ke-group-head">
-            <h2 className="k-card-title">{t('Barra alternativa')}</h2>
-            <span className="k-card-sub">{t('Alt troca com a barra atual')}</span>
+            <h2 className="k-card-title">{t('editor.inventory.swapBar')}</h2>
+            <span className="k-card-sub">{t('editor.inventory.swapBarHint')}</span>
           </header>
           <div className="ke-grid">{Array.from({ length: 8 }, (_, c) => cell(keyOf('main', 16 + c)))}</div>
         </section>
         <section className="ke-group">
-          <header className="ke-group-head"><h2 className="k-card-title">{t('Barra de ação')}</h2></header>
+          <header className="ke-group-head"><h2 className="k-card-title">{t('editor.inventory.actionBar')}</h2></header>
           <div className="ke-grid">{Array.from({ length: 8 }, (_, c) => cell(keyOf('main', 24 + c), c + 1))}</div>
         </section>
-        <p className="ke-note">{env.deck ? t('A muda o item · Y move · A num espaço vazio adiciona') : t('Arraste para mover · duplo clique em espaço vazio para adicionar · Delete remove · Ctrl+D duplica')}</p>
+        <p className="ke-note">{env.deck ? t('editor.inventory.deckHint') : t('editor.inventory.hint')}</p>
       </div>
       <div ref={insp} className="ke-insp-wrap" onFocus={env.deck ? () => setInPanel(true) : undefined} onBlur={env.deck ? (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setInPanel(false); } : undefined}>
       <Inspector entry={entry} onChange={(e) => change([[sel, e]])}
         onRemove={() => { remove(); if (env.deck) requestAnimationFrame(() => slotEl(sel)?.focus()); }} onDuplicate={firstFree !== null ? duplicate : null}
         empty={sel === null ? (
-          <div className="ke-empty"><span className="ke-empty-word">{t('Nenhum item selecionado.')}</span><span className="ke-note">{t('Escolha um espaço para ver e mudar o item.')}</span></div>
+          <div className="ke-empty"><span className="ke-empty-word">{t('editor.inventory.noneSelected')}</span><span className="ke-note">{t('editor.inventory.noneSelectedHint')}</span></div>
         ) : (
           <div className="ke-empty">
-            <span className="ke-empty-word">{t('Espaço {n} vazio', { n: slotNo(sel) })}</span>
-            <span className="ke-note">{t('Escolha um item no catálogo para colocar aqui.')}</span>
-            <Button onClick={() => setCatalog(true)}>{t('Escolher item')}</Button>
+            <span className="ke-empty-word">{t('editor.inventory.slotEmpty', { n: slotNo(sel) })}</span>
+            <span className="ke-note">{t('editor.inventory.emptyHint')}</span>
+            <Button onClick={() => setCatalog(true)}>{t('editor.inventory.pickItem')}</Button>
           </div>
         )} />
       </div>

@@ -12,7 +12,8 @@ import { DeckButton, Dialog, Row, Screen, Word } from '../../deck/ui';
 import { GameArtAuto } from '../../components/GameArt';
 import { toast } from '../../ui';
 import { api } from '../src/platform.js';
-import { t, dataHora } from '../src/i18n.js';
+import { t, useLanguage } from '../../i18n';
+import { dataHora } from '../src/i18n.js';
 import { EditorEnv } from '../kiln/env.jsx';
 import { useEditorArt } from '../kiln/art.js';
 import { canSave, discard, openSave, readOnly, restoreBackup, saveModel, setModel, startSession, useSession } from '../kiln/session.js';
@@ -26,6 +27,7 @@ import './deck-editor.css';
 
 export default function DeckEditor() {
   const root = useRef(null);
+  useLanguage();
   const art = useEditorArt(root);
   const s = useSession();
   const { model, saves, status, dirty, saving } = s;
@@ -52,7 +54,7 @@ export default function DeckEditor() {
 
   const env = useMemo(() => ({
     deck: true,
-    Dialog: ({ name, title, onClose, wide, children }) => <Dialog name={name} title={title} onClose={onClose} wide={wide} backLabel={t('Fechar')}>{children}</Dialog>,
+    Dialog: ({ name, title, onClose, wide, children }) => <Dialog name={name} title={title} onClose={onClose} wide={wide} backLabel={t('editor.page.close')}>{children}</Dialog>,
     askNumber: (o) => setPad(o),
     choose: (o) => setChoice(o),
     setActions: (v) => setView(v),
@@ -72,12 +74,12 @@ export default function DeckEditor() {
   const go = (d) => pickTab(TABS[(at + d + TABS.length) % TABS.length][0]);
   const save = useCallback(async () => {
     const r = await saveModel();
-    if (r === 'saved') toast.ok(t('Salvo'));
+    if (r === 'saved') toast.ok(t('editor.page.saved'));
     if (r === 'skills') setTab('skills');
   }, []);
   const edit = model && !model.readOnly;
   const actions = [
-    { button: 'x', label: t('Salvar'), run: () => void save(), disabled: !canSave(s) },
+    { button: 'x', label: t('editor.page.save'), run: () => void save(), disabled: !canSave(s) },
     ...(edit ? view?.actions ?? [] : []),
     ...(edit ? [{ button: 'lt', label: word(at - 1), run: () => go(-1) }, { button: 'rt', label: word(at + 1), run: () => go(1) }] : []),
   ];
@@ -91,29 +93,29 @@ export default function DeckEditor() {
         <div ref={root} className="kiln-editor-deck">
           <header className="dke-head">
             <div className="dke-who">
-              <h1 className="deck-title dke-name">{model?.name ?? t('Editor')}</h1>
+              <h1 className="deck-title dke-name">{model?.name ?? t('editor.page.title')}</h1>
               <p className="deck-say dke-say" data-testid="deck-editor-say">
-                {sayOf(s)}{dirty && <> <Word tone="warn">{t('Não salvo')}</Word></>}
+                {sayOf(s)}{dirty && <> <Word tone="warn">{t('editor.page.notSaved')}</Word></>}
               </p>
             </div>
             <div className="dke-buttons">
-              <DeckButton id="ed-characters" a={t('Abrir')} onClick={() => setDialog('characters')}>{t('Personagens')}</DeckButton>
-              <DeckButton id="ed-backups" a={t('Abrir')} disabled={!model} onClick={() => setDialog('backups')}>{t('Backups')}</DeckButton>
-              {dirty && <DeckButton id="ed-discard" onClick={() => setDialog('discard')}>{t('Descartar')}</DeckButton>}
-              <DeckButton id="ed-save" primary disabled={!canSave(s)} onClick={() => void save()}>{saving ? t('Salvando…') : t('Salvar')}</DeckButton>
+              <DeckButton id="ed-characters" a={t('editor.page.open')} onClick={() => setDialog('characters')}>{t('editor.page.characters')}</DeckButton>
+              <DeckButton id="ed-backups" a={t('editor.page.open')} disabled={!model} onClick={() => setDialog('backups')}>{t('editor.page.backups')}</DeckButton>
+              {dirty && <DeckButton id="ed-discard" onClick={() => setDialog('discard')}>{t('editor.page.discard')}</DeckButton>}
+              <DeckButton id="ed-save" primary disabled={!canSave(s)} onClick={() => void save()}>{saving ? t('editor.page.saving') : t('editor.page.save')}</DeckButton>
             </div>
           </header>
           {(status || art.hint) && (
             <p className="deck-line dke-status" role="status">
               {status && <Word tone={status.tone === 'err' ? 'err' : 'warn'}>{status.text}</Word>}
-              {stale && <DeckButton id="ed-reread" onClick={() => void openSave(model.path)}>{t('Ler de novo')}</DeckButton>}
+              {stale && <DeckButton id="ed-reread" onClick={() => void openSave(model.path)}>{t('editor.page.readAgain')}</DeckButton>}
               {!status && art.hint && <span className="deck-dim">{art.hint}</span>}
             </p>
           )}
           {edit && (
-            <nav className="dke-tabs" aria-label={t('Partes do save')}>
+            <nav className="dke-tabs" aria-label={t('editor.page.parts')}>
               {TABS.map(([id, label]) => (
-                <DeckButton key={id} id={`ed-tab-${id}`} className={tab === id ? 'on' : ''} a={t('Abrir')} onClick={() => setTab(id)}>
+                <DeckButton key={id} id={`ed-tab-${id}`} className={tab === id ? 'on' : ''} a={t('editor.page.open')} onClick={() => setTab(id)}>
                   {t(label)}{id === 'know' && model.knowledge ? <span className="dke-count">{model.knowledge.length}</span> : null}
                 </DeckButton>
               ))}
@@ -129,7 +131,7 @@ export default function DeckEditor() {
           )}
           {!edit && saves !== null && (
             <div className="dke-empty">
-              {saves.length > 0 && <DeckButton id="ed-pick" primary onClick={() => setDialog('characters')}>{t('Escolher personagem')}</DeckButton>}
+              {saves.length > 0 && <DeckButton id="ed-pick" primary onClick={() => setDialog('characters')}>{t('editor.page.pickCharacterButton')}</DeckButton>}
             </div>
           )}
         </div>
@@ -142,21 +144,21 @@ export default function DeckEditor() {
       )}
       {dialog === 'backups' && model && <Backups model={model} dirty={dirty} onClose={() => setDialog(null)} />}
       {dialog === 'discard' && (
-        <Dialog name="editor-discard" title={t('Descartar as mudanças?')} onClose={() => setDialog(null)}
+        <Dialog name="editor-discard" title={t('editor.page.discardTitle')} onClose={() => setDialog(null)}
           buttons={<>
-            <DeckButton onClick={() => setDialog(null)}>{t('Cancelar')}</DeckButton>
-            <DeckButton id="discard-confirm" primary onClick={() => { setDialog(null); discard(); }}>{t('Descartar')}</DeckButton>
+            <DeckButton onClick={() => setDialog(null)}>{t('editor.page.cancel')}</DeckButton>
+            <DeckButton id="discard-confirm" primary onClick={() => { setDialog(null); discard(); }}>{t('editor.page.discard')}</DeckButton>
           </>}>
-          <p className="deck-note">{t('As mudanças em {nome} ainda não foram salvas.', { nome: model?.name ?? '' })}</p>
+          <p className="deck-note">{t('editor.page.discardBody', { nome: model?.name ?? '' })}</p>
         </Dialog>
       )}
       {dialog?.open && (
-        <Dialog name="editor-switch" title={t('Descartar as mudanças?')} onClose={() => setDialog(null)}
+        <Dialog name="editor-switch" title={t('editor.page.discardTitle')} onClose={() => setDialog(null)}
           buttons={<>
-            <DeckButton onClick={() => setDialog(null)}>{t('Cancelar')}</DeckButton>
-            <DeckButton id="switch-confirm" primary onClick={() => { const p = dialog.open; setDialog(null); void openSave(p); }}>{t('Descartar e abrir')}</DeckButton>
+            <DeckButton onClick={() => setDialog(null)}>{t('editor.page.cancel')}</DeckButton>
+            <DeckButton id="switch-confirm" primary onClick={() => { const p = dialog.open; setDialog(null); void openSave(p); }}>{t('editor.page.discardAndOpen')}</DeckButton>
           </>}>
-          <p className="deck-note">{t('As mudanças em {nome} ainda não foram salvas.', { nome: model?.name ?? '' })}</p>
+          <p className="deck-note">{t('editor.page.discardBody', { nome: model?.name ?? '' })}</p>
         </Dialog>
       )}
     </EditorEnv.Provider>
@@ -204,23 +206,23 @@ export function NumberPad({ title, value, min = 0, max = 65535, presets = [], on
   const key = (d) => <DeckButton key={d} id={`pad-${d}`} autoFocus={d === '5'} a={d} className="dke-key" onClick={() => type(d)}>{d}</DeckButton>;
   return (
     <Dialog name="editor-number" title={title} onClose={onClose}
-      actions={[{ button: 'x', label: t('Apagar'), run: del }, { button: 'y', label: 'OK', disabled: !ok, run: () => { if (okRef.current) done(Number(cur.current)); } }]}
+      actions={[{ button: 'x', label: t('editor.deck.delete'), run: del }, { button: 'y', label: t('common.ok'), disabled: !ok, run: () => { if (okRef.current) done(Number(cur.current)); } }]}
       buttons={<>
-        <DeckButton onClick={onClose}>{t('Cancelar')}</DeckButton>
-        <DeckButton id="pad-ok" primary disabled={!ok} onClick={() => done()}>OK</DeckButton>
+        <DeckButton onClick={onClose}>{t('editor.page.cancel')}</DeckButton>
+        <DeckButton id="pad-ok" primary disabled={!ok} onClick={() => done()}>{t('common.ok')}</DeckButton>
       </>}>
       <div className="dke-pad">
         <div className="dke-pad-value deck-mono" data-testid="pad-value" aria-live="polite">{text || ' '}</div>
-        <p className="deck-note">{ok || text === '' ? t('De {min} a {max}', { min, max }) : <Word tone="err">{t('De {min} a {max}', { min, max })}</Word>}</p>
+        <p className="deck-note">{ok || text === '' ? t('editor.deck.range', { min, max }) : <Word tone="err">{t('editor.deck.range', { min, max })}</Word>}</p>
         <div className="dke-pad-keys">
           {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(key)}
-          <DeckButton id="pad-del" className="dke-key" a={t('Apagar')} onClick={del}>⌫</DeckButton>
+          <DeckButton id="pad-del" className="dke-key" a={t('editor.deck.delete')} onClick={del}>⌫</DeckButton>
           {key('0')}
-          <DeckButton id="pad-min" className="dke-key" a={String(min)} onClick={() => setText(String(min))}>{t('Mín')}</DeckButton>
+          <DeckButton id="pad-min" className="dke-key" a={String(min)} onClick={() => setText(String(min))}>{t('editor.deck.min')}</DeckButton>
         </div>
         {presets.length > 0 && (
           <div className="dke-pad-presets">
-            {presets.map((p) => <DeckButton key={p.label} id={`pad-preset-${p.value}`} a={t('Usar')} onClick={() => done(p.value)}>{p.label}</DeckButton>)}
+            {presets.map((p) => <DeckButton key={p.label} id={`pad-preset-${p.value}`} a={t('editor.deck.use')} onClick={() => done(p.value)}>{p.label}</DeckButton>)}
           </div>
         )}
       </div>
@@ -235,8 +237,8 @@ function Choice({ title, value, options, onDone, onClose }) {
     <Dialog name="editor-choice" title={title} onClose={onClose} wide>
       <div className="deck-list deck-scroll">
         {options.map((o) => (
-          <Row key={o.value} id={`choice-${o.value}`} title={o.label} sub={o.sub} a={t('Escolher')}
-            end={o.value === value ? <Word tone="ember">{t('Atual')}</Word> : undefined}
+          <Row key={o.value} id={`choice-${o.value}`} title={o.label} sub={o.sub} a={t('editor.common.pick')}
+            end={o.value === value ? <Word tone="ember">{t('editor.deck.current')}</Word> : undefined}
             onClick={() => { onClose(); onDone(o.value); }} />
         ))}
       </div>
@@ -247,15 +249,15 @@ function Choice({ title, value, options, onDone, onClose }) {
 /** The character saves: A opens one (a save the editor cannot read opens read-only, with why). */
 function Characters({ model, saves, onPick, onClose }) {
   return (
-    <Dialog name="editor-characters" title={t('Personagens')} onClose={onClose} wide>
+    <Dialog name="editor-characters" title={t('editor.page.characters')} onClose={onClose} wide>
       <div className="deck-list deck-scroll">
         {saves.map((x) => (
-          <Row key={x.path} id={`char-${x.file}`} title={x.name} a={t('Abrir')} dim={!!x.error}
-            sub={x.error ? x.error : `${x.file}${x.level !== undefined ? ` · ${t('nível {n}', { n: x.level })}` : ''}`}
-            end={model?.path === x.path ? <Word tone="ember">{t('Aberto')}</Word> : undefined}
+          <Row key={x.path} id={`char-${x.file}`} title={x.name} a={t('editor.page.open')} dim={!!x.error}
+            sub={x.error ? x.error : `${x.file}${x.level !== undefined ? ` · ${t('editor.common.levelN', { n: x.level })}` : ''}`}
+            end={model?.path === x.path ? <Word tone="ember">{t('editor.page.opened')}</Word> : undefined}
             onClick={() => onPick(x.path)} />
         ))}
-        {!saves.length && <p className="deck-note">{t('Nenhum save de personagem encontrado.')}</p>}
+        {!saves.length && <p className="deck-note">{t('editor.page.noSaves')}</p>}
       </div>
     </Dialog>
   );
@@ -272,30 +274,30 @@ function Backups({ model, dirty, onClose }) {
     setBusy(true);
     try {
       await restoreBackup(b);
-      toast.ok(t('Restaurado'));
+      toast.ok(t('editor.backups.restored'));
       setConfirm(null); onClose();
     } catch (e) { setErr(e.message); setConfirm(null); }
     setBusy(false);
   };
   if (confirm) {
     return (
-      <Dialog name="editor-restore" title={t('Restaurar este backup?')} onClose={() => setConfirm(null)} locked={busy}
+      <Dialog name="editor-restore" title={t('editor.backups.restoreTitle')} onClose={() => setConfirm(null)} locked={busy}
         buttons={<>
-          <DeckButton onClick={() => setConfirm(null)} disabled={busy}>{t('Cancelar')}</DeckButton>
-          <DeckButton id="restore-confirm" primary disabled={busy} onClick={() => void restore(confirm)}>{t('Restaurar')}</DeckButton>
+          <DeckButton onClick={() => setConfirm(null)} disabled={busy}>{t('editor.page.cancel')}</DeckButton>
+          <DeckButton id="restore-confirm" primary disabled={busy} onClick={() => void restore(confirm)}>{t('editor.backups.restore')}</DeckButton>
         </>}>
-        <p className="deck-note">{t(BACKUP_KIND[confirm.kind] || confirm.kind)} · {dataHora(confirm.modified)}. {t('O save de agora fica guardado como backup.')}{dirty ? ` ${t('Restaurar descarta as mudanças não salvas.')}` : ''}</p>
+        <p className="deck-note">{BACKUP_KIND[confirm.kind] ? t(BACKUP_KIND[confirm.kind]) : confirm.kind} · {dataHora(confirm.modified)}. {t('editor.backups.restoreBody')}{dirty ? ` ${t('editor.backups.dropsChanges')}` : ''}</p>
       </Dialog>
     );
   }
   return (
-    <Dialog name="editor-backups" title={t('Backups de {nome}', { nome: model.name })} onClose={onClose} wide backLabel={t('Fechar')}>
+    <Dialog name="editor-backups" title={t('editor.backups.title', { nome: model.name })} onClose={onClose} wide backLabel={t('editor.page.close')}>
       {err && <p className="deck-note"><Word tone="err">{err}</Word></p>}
       <div className="deck-list deck-scroll">
-        {list === null && <p className="deck-note">{t('Procurando backups…')}</p>}
-        {list?.length === 0 && !err && <p className="deck-note">{t('Nenhum backup encontrado para este save.')}</p>}
+        {list === null && <p className="deck-note">{t('editor.backups.looking')}</p>}
+        {list?.length === 0 && !err && <p className="deck-note">{t('editor.backups.none')}</p>}
         {list?.map((b) => (
-          <Row key={b.path} id={`bk-${b.path}`} title={dataHora(b.modified)} sub={`${t(BACKUP_KIND[b.kind] || b.kind)} · ${backupName(b)}`} a={t('Restaurar')}
+          <Row key={b.path} id={`bk-${b.path}`} title={dataHora(b.modified)} sub={`${BACKUP_KIND[b.kind] ? t(BACKUP_KIND[b.kind]) : b.kind} · ${backupName(b)}`} a={t('editor.backups.restore')}
             onClick={() => setConfirm(b)} />
         ))}
       </div>

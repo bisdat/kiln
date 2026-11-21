@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: MIT
+# Captured with ShroudForge's own mod runtime (a local differential test, not published),
+# release, headless Wine. Both pins and their core-host transcripts are byte-identical (4,879 records per pin; arguments
+# and tables: 1,924 more).
+# Known panic inputs live ONLY in support/linked/integer_safety.lua, not here.
+[goldens]
+"arithmetic.golden.json" = "oracle sf-1.7.9 d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8 and sf-1.8.0 38ef448dc5d4fc267b5f0928502a864a6b078865; transcript v2"
+"conversions.golden.json" = "oracle sf-1.7.9 d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8 and sf-1.8.0 38ef448dc5d4fc267b5f0928502a864a6b078865; transcript v2"
+"raw-values.golden.json" = "oracle sf-1.7.9 d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8 and sf-1.8.0 38ef448dc5d4fc267b5f0928502a864a6b078865; transcript v2"
+"arguments.golden.json" = "oracle sf-1.7.9 d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8 and sf-1.8.0 38ef448dc5d4fc267b5f0928502a864a6b078865; transcript v2"
+"tables.golden.json" = "oracle sf-1.7.9 d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8 and sf-1.8.0 38ef448dc5d4fc267b5f0928502a864a6b078865; transcript v2"

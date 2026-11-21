@@ -480,6 +480,8 @@ where
         data: &D,
         offset: usize,
     ) -> Result<Self, MappingError> {
+        // kiln-eml: the registry's count, checked as a stored one (a faulty registry can claim any)
+        check_count(r#type, data.borrow(), offset, r#type.field_count as usize)?;
         Ok(MappedArray::new(
             r#type.clone(),
             data.clone(),
@@ -496,6 +498,8 @@ where
     ) -> Result<Self, MappingError> {
         let blob_offset = get_u32(data.borrow(), offset)? as usize;
         let count = get_u32(data.borrow(), offset + 4)? as usize;
+        // kiln-eml: refused before any reader makes one entry per stored element
+        check_count(r#type, data.borrow(), offset + blob_offset, count)?;
 
         Ok(MappedArray::new(
             r#type.clone(),

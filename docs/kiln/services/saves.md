@@ -87,8 +87,11 @@ data (objects are serialized when the mod unloads and read into the new instance
   forced to disk and renamed, and bundles are content-addressed (`blobs/ab/<sha256>.json`, checked on load).
 - **Off the tick thread (since 0.2.0-dev.29.3, issue #39).** The tick thread only serializes the mod data, in memory, at
   both stagings; every file operation of a save (new blobs, the pending manifest, the confirmation and the pending
-  manifest's delete, pruning's reads and deletes) runs on Kiln.Saves' own writer thread, in order: stagings first, then
-  confirmations. The order on disk is the one the tick thread kept: kiln.saves holds the game's world write (on the
+  manifest's delete, pruning's reads and deletes) runs on Kiln.Saves' writer, in order: stagings first, then
+  confirmations. Since 0.2.0-dev.30 the writer is a task on Kiln's own pool ([tasks.md](tasks.md)), not a thread of its
+  own: one LongRunning task, owner `kiln.saves`, named `SaveWriter` (so the pool's watchdog, `tick-stats.jsonl` and
+  crash reports name it like any task), started with a save's first job, one at a time, and gone again as soon as
+  nothing is queued (its pool time is its file work). The order on disk is the one the tick thread kept: kiln.saves holds the game's world write (on the
   game's Save2Thread, not the server's step) until the writer has that generation's pending manifest on disk
   (`stage_progress`, below), so the world file of revision *R* normally never reaches the disk before generation *R*'s
   manifest. A staging whose write fails is tried 3 times (0.25 s and 0.5 s between the tries) while the world write
@@ -122,6 +125,19 @@ data (objects are serialized when the mod unloads and read into the new instance
   left before: no torn file (except the unforced files of an unchanged generation after a power loss, below), and a
   confirmation not written yet loads that generation as `Staged` with the same data when its staging was written, else
   the newest usable older generation, or none.
+- **The writer on the pool (0.2.0-dev.30).** At a normal exit the pool asks every task to stop (tasks.md, Exit): the
+  writer still writes every job it was handed, each one whole, and then ends; kiln.log says how many it had (`the
+  writer's task was asked to stop ... with N write(s) queued; it wrote N before it ended, in N ms`). The pool's exit
+  waits 500 ms for running tasks and then names the ones still running (`kiln.tasks: parked at exit; ...`): a writer
+  still busy then goes on until the process ends, and what it has not renamed into place by then is a temp file, never
+  a torn one. A save handed over after the exit began, or when Kiln's task pool cannot run the writer here (safe idle,
+  C# tasks off after a build mismatch), is written on the calling thread, after everything queued before it, as before
+  0.2.0-dev.29.3; kiln.log says so once per reason (`Kiln.Saves: the writer cannot run on Kiln's task pool here
+  (...)`, Info for the exit, Warn otherwise). A writer task the pool admitted but did not start within 1 s (every
+  LongRunning thread busy, or the pool parked at the exit) does not hold the queue: Kiln.Saves writes what is queued
+  itself, in order, from a timer (its line says `start check` instead of `writer`), well inside the world write's 6 s
+  wait, and the next saves are written on the calling thread until the task starts (logged once). For a lab or a
+  diagnosis, the environment variable `KILN_SAVES_WRITER=inline` keeps every save on the calling thread.
 - **Back-pressure.** A staging that comes while an earlier one of the same generation still waits for the writer (the
   save request's staging, then the snapshot staging one step later) replaces it; stagings of different generations are
   never merged. Pruning stops between two files when a staging waits, and runs again (with the save folder, so it still
@@ -565,11 +581,11 @@ Kiln.Saves: confirmed mod data generation 1777 (autosave), bundles as in generat
 
 (numbers made up; one line in the log). `tick thread` is what the server's step spent (serializing the mod data at a
 staging; handing the job over at a confirmation), `queued` the time the job waited behind other writes, `writer` the
-writer thread's file work, item by item: creating, writing (to the system), forcing to disk, closing and renaming each
+writer's file work (its pool task `kiln.saves/SaveWriter`), item by item: creating, writing (to the system), forcing to disk, closing and renaming each
 file written, then checks for existing files, reads (a pending manifest, a world file header), deletes, folder
 listings and folders made, the CPU part (hashing and JSON), and `else`, what none of them covers. A confirmation that
-prunes adds `; pruning N ms: ...` with the same items. Without the stage barrier the line says `tick thread N ms, all of
-it (...)` and `files N ms` instead of `writer`: the tick thread wrote them. kiln.saves logs, from the Save2Thread, how
+prunes adds `; pruning N ms: ...` with the same items. Without the stage barrier, or when the pool cannot run the writer, the line says
+`tick thread N ms, all of it (...)` (with the reason) and `files N ms` instead of `writer`: the tick thread wrote them. kiln.saves logs, from the Save2Thread, how
 long a world write waited for the writer (`saves: the world write of revision R waited N ms for Kiln.Saves' writer`,
 at Info over 250 ms), warns when it went ahead without it, and says when it saw the shutdown begin (`saves: shutdown
 begins (...)`, with how long before the line reached it the game logged it). A load or a backup that cannot read the

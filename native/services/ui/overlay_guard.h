@@ -3,9 +3,13 @@
 #include <string>
 #include <sstream>
 namespace kui::overlay_guard {
-enum class Stage { begun, hooks, instance, device, swapchain, frame };
+// drawing (since 0.2.0-dev.30.2): the overlay's first draw of the process began its own work (its Vulkan resources,
+// ImGui, the frame, the submit: vk.cpp draw()). Before, a start that died there read "swapchain created" too, and a
+// start that only waited after its swapchain (nothing of Kiln's drawn yet) could not be told from one that drew.
+enum class Stage { begun, hooks, instance, device, swapchain, drawing, frame };
 inline const char* stage_name(Stage s) {
-    static const char* names[] = {"before hooks", "hooks installed", "instance seen", "device seen", "swapchain created", "first frame presented"};
+    static const char* names[] = {"before hooks", "hooks installed", "instance seen", "device seen", "swapchain created",
+                                  "the overlay's first draw", "first frame presented"};
     return names[unsigned(s)];
 }
 enum class Phase { complete, trying, guarded, retry, locked };
@@ -20,7 +24,9 @@ struct Record {
 };
 struct Start { Record record; bool off; };
 // No record/complete -> trying. Unfinished trying -> guarded (one death), or locked
-// on a second death at the SAME stage. Guarded or retry -> trying, preserving the first death: the guarded start ran
+// on a second death at the SAME stage; a death at "swapchain created" (after the game's swapchain, before the overlay's
+// first draw: none of the overlay's own work had run) guards that one start and counts towards no lock (0.2.0-dev.30.2).
+// Guarded or retry -> trying, preserving the first death: the guarded start ran
 // with the overlay's drawing off (no Vulkan hook of Kiln's), so however it ended (a normal quit, a crash, the game
 // killed) it says nothing about the overlay, and the start after it tries again. A guarded start writes no new
 // attempt of its own. Until 0.2.0-dev.29.18 a guarded start earned that only by running a minute; one that ended
@@ -38,7 +44,13 @@ inline Start begin(Record r, const std::string& modules) {
         r.wrapper_retry = had_identity;
     }
     r.modules = modules;
-    if (r.phase == Phase::trying) {
+    if (r.phase == Phase::trying && r.stage == Stage::swapchain) {
+        // The start died after its swapchain was made and before the overlay's first draw: Kiln's overlay had done none
+        // of its own work. A game killed or crashed for another reason while its first frames stalled (ReShade's Vulkan
+        // layer compiles its effects there) reads so too; until 0.2.0-dev.30.2 two such ends locked the overlay off. Only
+        // this one start is guarded: the failure history stays as it was (failed stage and count), the next start tries.
+        r.phase = Phase::guarded;
+    } else if (r.phase == Phase::trying) {
         r.failures = r.failures && r.failed_stage == r.stage ? 2 : 1;
         r.failed_stage = r.stage;
         r.phase = r.failures == 2 ? Phase::locked : Phase::guarded;
@@ -81,10 +93,11 @@ inline Record idle(Record r) {
     if (r.phase == Phase::trying) r.phase = Phase::complete;
     return r;
 }
-// The first draw of a process whose start idle() completed: a death before that frame is presented is a death at
-// the overlay's start again (stage: swapchain created), so it arms the record once more until the frame is presented.
+// The first draw of a process whose start idle() completed (or the overlay's drawing failing after its start counted as
+// fine): a death before its frames are presented is a death at the overlay again (stage: the overlay's first draw), so it
+// arms the record once more until they are.
 inline Record rearm(Record r) {
-    if (r.phase == Phase::complete) { r.phase = Phase::trying; r.stage = Stage::swapchain; }
+    if (r.phase == Phase::complete) { r.phase = Phase::trying; r.stage = Stage::drawing; }
     return r;
 }
 // The process exits normally (code 0, Kiln's exit steps ran: overlay_guard_exit). A start still trying did not die
@@ -97,25 +110,32 @@ inline Record at_exit(Record r) {
     return r;
 }
 inline std::string encode(const Record& r) {
-    return "3 " + std::to_string(unsigned(r.phase)) + " " + std::to_string(unsigned(r.stage)) + " " +
+    return "4 " + std::to_string(unsigned(r.phase)) + " " + std::to_string(unsigned(r.stage)) + " " +
         std::to_string(unsigned(r.failed_stage)) + " " + std::to_string(r.failures) + " " +
         std::to_string(unsigned(r.wrapper_retry)) + " " + (r.kiln.empty() ? std::string("-") : r.kiln) + " " + r.modules + "\n";
 }
-// First field is the format version: 3 since 0.2.0-dev.29.19 (the Kiln version before the wrapper identity), 2 and 1
-// before. Reject partial, oversized, future or malformed records. A Kiln before 0.2.0-dev.29.19 rejects a version 3
-// record as one it cannot read and starts without it: it tries the overlay, it does not lock.
+// First field is the format version: 4 since 0.2.0-dev.30.2 (stage 5 the overlay's first draw, 6 its frames
+// presented), 3 since 0.2.0-dev.29.19 (the Kiln version before the wrapper identity), 2 and 1 before; in formats 1 to 3
+// stage 5 is the frames presented (read as Stage::frame). Reject partial, oversized, future or malformed records. A Kiln
+// before 0.2.0-dev.29.19 rejects a version 3 record, one before 0.2.0-dev.30.2 a version 4 record, as one it cannot read
+// and starts without it: it tries the overlay, it does not lock.
 inline bool parse(const std::string& text, Record& out) {
     out = {};
     if (text.size() > 512) return false;
     std::istringstream in(text);
     unsigned version, phase, stage, failed, count, wrapper_retry = 0;
     std::string modules, extra, kiln;
-    if (!(in >> version >> phase >> stage >> failed >> count) || version < 1 || version > 3) return false;
+    if (!(in >> version >> phase >> stage >> failed >> count) || version < 1 || version > 4) return false;
     if (version >= 2 && (!(in >> wrapper_retry) || wrapper_retry > 1)) return false;
-    if (version == 3 && (!(in >> kiln) || kiln.size() > 64)) return false;
+    if (version >= 3 && (!(in >> kiln) || kiln.size() > 64)) return false;
     if (kiln == "-") kiln.clear();
-    if (!(in >> modules) || (in >> extra) || phase > 4 || stage > 5 || failed > 5 || count > 2 || modules.size() > 128)
+    const unsigned last = version >= 4 ? unsigned(Stage::frame) : 5;
+    if (!(in >> modules) || (in >> extra) || phase > 4 || stage > last || failed > last || count > 2 || modules.size() > 128)
         return false;
+    if (version < 4) {  // no first-draw stage before format 4: its 5 is the frames presented
+        if (stage == 5) stage = unsigned(Stage::frame);
+        if (failed == 5) failed = unsigned(Stage::frame);
+    }
     out = {Phase(phase), Stage(stage), Stage(failed), count, modules, wrapper_retry != 0, kiln};
     return true;
 }

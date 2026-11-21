@@ -1,0 +1,443 @@
+{
+  "schemaVersion": 1,
+  "fixture": {
+    "id": "synthetic-tool-contract",
+    "sha256": "9d170b1c01b7b052676bdcba1867650ec43afa1a909df68b66e50099182db8d0"
+  },
+  "provenance": {
+    "engine": "synthetic",
+    "sourceRevision": "0000000000000000000000000000000000000000",
+    "dependencies": [
+      {
+        "name": "mlua",
+        "version": "0.11.6",
+        "sha256": "56bf3f9aa4ef93453c72a36e50f789a99a731f59460ad54ce4fc609959a7f664"
+      }
+    ],
+    "contracts": [
+      {
+        "family": "eml-assets-types",
+        "sha256": "a971be00093e71b389569d0048f3ba757a59ac6d8b32e46cc9868e897048b1be"
+      }
+    ],
+    "policy": {
+      "id": "synthetic-policy",
+      "sha256": "585be8baf92682c15da67e8c328a4eb8ddc8eec2f5555311539adc31c18e458c"
+    },
+    "preludeSha256": "5b2055722b23341c57eb5e5ee54aa6cd44daaee2ceb3abda7ae4cf2f100b1c2d",
+    "luaSchemaSha256": "a0876987d00e24847f5d67ef559d452ac7ba3cbdc8a18497bdd997ff3a53bfef"
+  },
+  "seed": "synthetic-1",
+  "planId": "00000000-0000-4000-8000-000000000001",
+  "launchId": "00000000-0000-4000-8000-000000000002",
+  "planDigest": "c75bccf4839e3bcb90317713e0b7f3062a0e099013ca5f784457bd2b9d8c3354",
+  "target": "server",
+  "dialect": "shroudforge",
+  "build": {
+    "id": "synthetic",
+    "executableSha256": "110a2dfc6452c9ca98122f9eb2ff9db94b51b127f537432baf82f2744fbb90d6",
+    "registrySha256": "0bb43341b63b7ab75d189ed43bfd1d827f7f3473d1d772235843abafebcf29a2"
+  },
+  "baseline": {
+    "setSha256": "9a5b038b289c630fcf58c973340d6f142b1e976b263cce4238c5cbad195b7e7c",
+    "manifestSha256": "99d35512273e0bf7ceb7a67b0ec97805a5c6cfb2b30a8852e5c452c6cf6a108f"
+  },
+  "generation": 7,
+  "packages": [
+    {
+      "id": "alpha",
+      "version": "1.0.0",
+      "sha256": "4147656dcb596934c83f7d0cca5d1767116a42c691937e7fd8cd400025fc44ba",
+      "executesStartup": true
+    },
+    {
+      "id": "beta",
+      "version": "1.0.0",
+      "sha256": "18538e073f5c174a6cea400c3abf450bf1a47f1180b7a04a9cf347cc04e571f7",
+      "executesStartup": true
+    }
+  ],
+  "records": [
+    {
+      "seq": 1,
+      "kind": "admission",
+      "phase": "host",
+      "attempt": 1,
+      "generation": 7,
+      "status": "admitted",
+      "reason": "synthetic-terminal-load",
+      "package": "alpha"
+    },
+    {
+      "seq": 2,
+      "kind": "admission",
+      "phase": "host",
+      "attempt": 1,
+      "generation": 7,
+      "status": "admitted",
+      "reason": "synthetic-terminal-load",
+      "package": "beta"
+    },
+    {
+      "seq": 3,
+      "kind": "package_begin",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "package": "alpha"
+    },
+    {
+      "seq": 4,
+      "kind": "value_lease",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "action": "grant",
+      "lease": "lease:1",
+      "node": "node:1",
+      "relation": "root",
+      "package": "alpha"
+    },
+    {
+      "seq": 5,
+      "kind": "value_lease",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "action": "grant",
+      "lease": "lease:2",
+      "node": "node:1",
+      "relation": "alias",
+      "source": "lease:1",
+      "package": "alpha"
+    },
+    {
+      "seq": 6,
+      "kind": "value_lease",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "action": "grant",
+      "lease": "lease:3",
+      "node": "node:2",
+      "relation": "clone",
+      "source": "lease:1",
+      "package": "alpha"
+    },
+    {
+      "seq": 7,
+      "kind": "value_edge",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "operation": "attach",
+      "parentLease": "lease:1",
+      "childLease": "lease:3",
+      "slot": "element:1",
+      "package": "alpha"
+    },
+    {
+      "seq": 8,
+      "kind": "effect",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "effect": "effect:1",
+      "scope": "local",
+      "operation": "remove",
+      "target": "node:1",
+      "lease": "lease:1",
+      "beforeRevision": 0,
+      "afterRevision": 1,
+      "package": "alpha"
+    },
+    {
+      "seq": 9,
+      "kind": "value_edge",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "operation": "detach",
+      "parentLease": "lease:1",
+      "childLease": "lease:3",
+      "slot": "element:1",
+      "package": "alpha"
+    },
+    {
+      "seq": 10,
+      "kind": "value_lease",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "action": "grant",
+      "lease": "lease:4",
+      "node": "node:2",
+      "relation": "retained",
+      "source": "lease:3",
+      "package": "alpha"
+    },
+    {
+      "seq": 11,
+      "kind": "value_lease",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "action": "release",
+      "lease": "lease:3",
+      "node": "node:2",
+      "package": "alpha"
+    },
+    {
+      "seq": 12,
+      "kind": "value_lease",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "action": "release",
+      "lease": "lease:1",
+      "node": "node:1",
+      "package": "alpha"
+    },
+    {
+      "seq": 13,
+      "kind": "api_call",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "moduleOwner": "beta",
+      "call": "call:1",
+      "api": "synthetic.probe",
+      "args": [
+        {
+          "t": "integer",
+          "width": 64,
+          "signed": true,
+          "value": "-1"
+        },
+        {
+          "t": "float",
+          "width": 64,
+          "bits": "8000000000000000"
+        },
+        {
+          "t": "binary",
+          "hex": "00ff"
+        },
+        {
+          "t": "node",
+          "node": "node:2",
+          "lease": "lease:4"
+        }
+      ],
+      "package": "alpha"
+    },
+    {
+      "seq": 14,
+      "kind": "api_result",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "call": "call:1",
+      "values": [
+        {
+          "t": "nil"
+        }
+      ],
+      "package": "alpha"
+    },
+    {
+      "seq": 15,
+      "kind": "api_call",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "moduleOwner": "alpha",
+      "call": "call:2",
+      "api": "synthetic.fail",
+      "args": [],
+      "package": "alpha"
+    },
+    {
+      "seq": 16,
+      "kind": "api_error",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "call": "call:2",
+      "transcript": {
+        "version": 2,
+        "records": [
+          {
+            "seq": 1,
+            "label": "call:2",
+            "kind": "call",
+            "ok": false,
+            "error": {
+              "t": "userdata",
+              "name": "?"
+            },
+            "message": "bad argument #2 (integer expected, got Buffer: <address>)"
+          }
+        ]
+      },
+      "package": "alpha"
+    },
+    {
+      "seq": 17,
+      "kind": "lua_transcript",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "transcript": {
+        "version": 2,
+        "records": [
+          {
+            "seq": 1,
+            "label": "call:2",
+            "kind": "call",
+            "ok": false,
+            "error": {
+              "t": "userdata",
+              "name": "?"
+            },
+            "message": "bad argument #2 (integer expected, got Buffer: <address>)"
+          }
+        ]
+      },
+      "links": [
+        {
+          "luaSeq": 1,
+          "call": "call:2"
+        }
+      ],
+      "package": "alpha"
+    },
+    {
+      "seq": 18,
+      "kind": "asset_stage",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "key": "resource:synthetic-1",
+      "type": "type:1",
+      "size": 8,
+      "afterSha256": "3d700980f74407dc8ff35d0c36198c126d1953f47ee32c54f0bd6ffcbc15b07f",
+      "created": true,
+      "dirty": true,
+      "package": "alpha"
+    },
+    {
+      "seq": 19,
+      "kind": "effect",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "effect": "effect:2",
+      "scope": "archive-write",
+      "operation": "stage-resource",
+      "target": "resource:synthetic-1",
+      "package": "alpha"
+    },
+    {
+      "seq": 20,
+      "kind": "package_end",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "outcome": "success",
+      "package": "alpha"
+    },
+    {
+      "seq": 21,
+      "kind": "package_begin",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "package": "beta"
+    },
+    {
+      "seq": 22,
+      "kind": "lua_transcript",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "transcript": {
+        "version": 2,
+        "records": [
+          {
+            "seq": 1,
+            "label": "synthetic",
+            "kind": "note",
+            "text": "independent tool fixture, not observed SF output"
+          }
+        ]
+      },
+      "package": "beta"
+    },
+    {
+      "seq": 23,
+      "kind": "package_end",
+      "phase": "startup",
+      "attempt": 1,
+      "generation": 7,
+      "outcome": "success",
+      "package": "beta"
+    },
+    {
+      "seq": 24,
+      "kind": "publication_step",
+      "phase": "host",
+      "attempt": 1,
+      "generation": 7,
+      "operation": "header-last",
+      "file": "synthetic.header",
+      "role": "header",
+      "expectedGeneration": 7,
+      "status": "success",
+      "changed": true,
+      "size": 16,
+      "sha256": "b59ee254e833f93fd34773945d5291323b99b7e812003d6d5f4a0ef8fbac10f7"
+    },
+    {
+      "seq": 25,
+      "kind": "archive_result",
+      "phase": "host",
+      "attempt": 1,
+      "generation": 7,
+      "outcome": "published",
+      "included": [
+        "alpha",
+        "beta"
+      ],
+      "excluded": [],
+      "files": [
+        {
+          "role": "data",
+          "name": "synthetic.dat",
+          "size": 8,
+          "sha256": "13fc162e2eb9ef54ddafdab5ce3d4de38a714b536860180741cbdb0b2e6a5b6b"
+        },
+        {
+          "role": "header",
+          "name": "synthetic.header",
+          "size": 16,
+          "sha256": "b59ee254e833f93fd34773945d5291323b99b7e812003d6d5f4a0ef8fbac10f7"
+        }
+      ],
+      "physicalDigest": "4a56a09c2355d623bd7b98ca1b9657b47f40caf717e18b6bcc256522927e47c6",
+      "semanticEntries": [
+        {
+          "kind": "content",
+          "key": "content:synthetic-1",
+          "sha256": "a04dc6c38580462e46df7968a7d91a006455989bb839a6c9c1cf5fb4c4551a47"
+        },
+        {
+          "kind": "resource",
+          "key": "resource:synthetic-1",
+          "sha256": "90f2e40137ef459528c934c006cd6af5291f9498fb5d3d8c2119b20338c7021c"
+        }
+      ],
+      "semanticDigest": "f6efc25fe5cf1d8a1f228f6868c097b28a23744723758bdae6f63eadcc3815bb"
+    }
+  ]
+}

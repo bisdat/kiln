@@ -59,24 +59,76 @@ pub fn create_writer(
     type_registry: &Rc<TypeRegistry>,
     ref_file: &Rc<KFCFile>,
 ) -> anyhow::Result<crate::transaction::PatchWriter> {
+    create_writer_over(dir, file_name, type_registry, ref_file, None)
+}
+
+/// kiln-eml: `create_writer` over inputs witnessed earlier (the startup host's): the witness is checked and
+/// taken over instead of capturing the inputs again, so a stage does not hash the working baseline's resource backup a
+/// second time.
+pub(crate) fn create_writer_over(
+    dir: &Path,
+    file_name: &str,
+    type_registry: &Rc<TypeRegistry>,
+    ref_file: &Rc<KFCFile>,
+    witnessed: Option<&crate::transaction::InputWitness>,
+) -> anyhow::Result<crate::transaction::PatchWriter> {
+    // kiln-eml: capture a canonical target and its input witness before recording/creating private scratch.
+    let canonical = std::fs::canonicalize(dir).with_context(|| format!("create_writer: could not resolve {dir}"))?;
+    let canonical = PathBuf::from_path_buf(canonical).map_err(|_| anyhow::anyhow!("create_writer: non UTF-8 target"))?;
+    let dir = canonical.as_path();
+    let target = match witnessed {
+        Some(witness) => {
+            if !witness.covers(dir.as_std_path(), file_name, ref_file.containers().len()) {
+                anyhow::bail!("create_writer: the input witness was captured for another archive than {dir}/{file_name}");
+            }
+            witness.check(dir.as_std_path()).with_context(|| format!("create_writer: archive inputs in {dir} changed since they were witnessed"))?;
+            crate::transaction::TargetSnapshot::witnessed(witness.clone(), ref_file.clone())
+        }
+        None => crate::transaction::TargetSnapshot::capture(dir.as_std_path(), file_name, ref_file.clone()),
+    }
+    .with_context(|| format!("create_writer: could not capture archive inputs in {dir}"))?;
     // kiln-eml: only the private staging directory is writable by the KFC writer.
     let stage = dir.join(format!(".kiln-eml-stage-{}", uuid::Uuid::new_v4()));
     crate::cleanup::record(dir.as_std_path(), file_name, stage.file_name().ok_or_else(|| anyhow::anyhow!("create_writer: invalid stage path {stage}"))?).with_context(|| format!("create_writer: could not prepare stage {stage}"))?;
+    failpoint!("stage.recorded", stage);
     std::fs::create_dir(&stage).with_context(|| format!("create_writer: could not create stage {stage}"))?;
-    let mut patch = crate::transaction::PatchWriter {
-        writer: None, stage: stage.clone().into_std_path_buf(), game: dir.into(), name: file_name.into(),
-    };
+    failpoint!("stage.created", stage);
+    #[cfg(test)]
+    crate::cleanup::test_point(&crate::cleanup::AFTER_STAGE_CREATED, stage.as_std_path());
+    // kiln-eml: hold the new stage and bind the write-ahead record to the HELD directory's identity, and only when it is
+    // still empty: a directory swapped in after create_dir is not Kiln's. Then the record stays unbound (kept and
+    // reported as eml-cleanup-unbound, never deletion authority) and no writer is built on it.
+    let stage_name = stage.file_name().ok_or_else(|| anyhow::anyhow!("create_writer: invalid stage path {stage}"))?;
+    let held = crate::transaction::HeldDir::open(stage.as_std_path())
+        .with_context(|| format!("create_writer: could not hold stage {stage}"))?;
+    if !held.children().with_context(|| format!("create_writer: could not list stage {stage}"))?.is_empty() {
+        anyhow::bail!("create_writer: stage {stage} was not empty right after it was created; it is not Kiln's, left unbound \
+                       ({}) and not used", crate::cleanup::CLEANUP_UNBOUND);
+    }
+    let identity = held.identity().with_context(|| format!("create_writer: could not capture stage identity {stage}"))?;
+    crate::cleanup::bind_stage(dir.as_std_path(), stage_name, &identity)
+        .with_context(|| format!("create_writer: could not bind cleanup proof to stage {stage}"))?;
+    failpoint!("stage.bound", stage);
+    #[cfg(test)]
+    crate::cleanup::test_point(&crate::cleanup::AFTER_STAGE_BOUND, stage.as_std_path());
+    // kiln-eml: the writer keeps holding the stage until it is dropped. Every staging copy, the archive writer, the checks,
+    // the publication's moves and the final clean-up reach it through the hold (PatchWriter::at), never by its path: a
+    // directory swapped in at the path after binding is never written, published or cleaned.
+    let mut patch = crate::transaction::PatchWriter::staged(
+        dir.into(), stage.clone().into_std_path_buf(), file_name.into(), target, held,
+    ).with_context(|| format!("create_writer: could not capture stage identity {stage}"))?;
+    let at = patch.at().to_path_buf();
     let backup = dir.join(format!("{file_name}.kfc.bak"));
-    crate::transaction::atomic_copy(backup.as_std_path(),
-        stage.join(crate::transaction::VANILLA_HEADER).as_std_path()).with_context(|| format!("create_writer: could not copy {backup} to {stage}"))?;
-    crate::transaction::atomic_copy(stage.join(crate::transaction::VANILLA_HEADER).as_std_path(),
-        stage.join(format!("{file_name}.kfc")).as_std_path()).with_context(|| format!("create_writer: could not copy staged header in {stage}"))?;
+    crate::transaction::stage_copy(backup.as_std_path(),
+        &at.join(crate::transaction::VANILLA_HEADER)).with_context(|| format!("create_writer: could not copy {backup} to {stage}"))?;
+    crate::transaction::stage_copy(&at.join(crate::transaction::VANILLA_HEADER),
+        &at.join(format!("{file_name}.kfc"))).with_context(|| format!("create_writer: could not copy staged header in {stage}"))?;
     let resources_backup = dir.join(format!("{file_name}.kfc_resources.bak"));
     let resources = if resources_backup.exists() { resources_backup } else { dir.join(format!("{file_name}.kfc_resources")) };
-    crate::transaction::atomic_copy(resources.as_std_path(),
-        stage.join(format!("{file_name}.kfc_resources")).as_std_path()).with_context(|| format!("create_writer: could not copy {resources} to {stage}"))?;
+    crate::transaction::stage_copy(resources.as_std_path(),
+        &at.join(format!("{file_name}.kfc_resources"))).with_context(|| format!("create_writer: could not copy {resources} to {stage}"))?;
     let writer = match KFCWriter::new_incremental_with_options(
-        &stage,
+        &at,
         file_name,
         ref_file.clone(),
         type_registry.clone(),
@@ -103,18 +155,28 @@ pub fn create_writer(
     };
 
     patch.writer = Some(writer);
+    failpoint!("stage.writer", stage);
     Ok(patch)
 }
 
 pub fn create_backup(
     kfc_path: impl AsRef<Path>
 ) -> anyhow::Result<PathBuf> {
+    create_backup_with(kfc_path, crate::ownership::SfHandoff::Live)
+}
+
+/// kiln-eml: `create_backup` in ShroudForge handoff mode `mode` (kiln mode: Deferred, which takes no
+/// ShroudForge lock; a baseline write changes no live archive, so it owes no handoff either).
+pub fn create_backup_with(
+    kfc_path: impl AsRef<Path>,
+    mode: crate::ownership::SfHandoff,
+) -> anyhow::Result<PathBuf> {
     let path = kfc_path.as_ref();
     // kiln-eml: baseline writes happen before final publication. SF's lock/status must protect this shared pair too,
     // or a refused handoff can already have replaced the backups an active SF preparation is using.
     let root = path.parent().ok_or_else(|| anyhow::anyhow!("create_backup: archive has no parent: {path}"))?;
     let stem = path.file_stem().ok_or_else(|| anyhow::anyhow!("create_backup: archive has no name: {path}"))?;
-    let _sf = crate::ownership::before_baseline(root.as_std_path(), stem).map_err(|error| {
+    let _sf = crate::ownership::before_baseline(root.as_std_path(), stem, mode).map_err(|error| {
         error!(%error, "Refusing vanilla backup changes while ShroudForge owns the archive writer");
         anyhow::Error::new(error).context("create_backup: ShroudForge owns the archive writer")
     })?;
@@ -185,6 +247,14 @@ pub fn create_backup(
 pub fn restore_backup(
     kfc_path: impl AsRef<Path>,
 ) -> Result<(), ()> {
+    restore_backup_with(kfc_path, crate::ownership::SfHandoff::Live)
+}
+
+/// kiln-eml: `restore_backup` in ShroudForge handoff mode `mode` (kiln mode: Deferred).
+pub fn restore_backup_with(
+    kfc_path: impl AsRef<Path>,
+    mode: crate::ownership::SfHandoff,
+) -> Result<(), ()> {
     let path = kfc_path.as_ref();
     let mut bak_path = path.to_string();
     bak_path.push_str(".bak");
@@ -219,7 +289,7 @@ pub fn restore_backup(
     let stem = path.file_stem().ok_or(())?;
     // Proof is rechecked under SF's lock. Hold it through both copies AND container cleanup: SF must not append
     // new containers between reading the restored header's range and removing the old generation's extras.
-    let _sf = crate::ownership::before_restore(root.as_std_path(), stem).map_err(|error| {
+    let _sf = crate::ownership::before_restore(root.as_std_path(), stem, mode).map_err(|error| {
         error!(%error, "Refusing archive restore: ownership or ShroudForge prepared-output state could not be safely checked");
     })?;
     let added = crate::ownership::live_containers(root.as_std_path(), stem).unwrap_or_else(|error| {
@@ -742,6 +812,8 @@ mod kiln_tests {
 
     #[test]
     fn preparation_cause_busy_writer_and_copy() {
+        // This test locks ShroudForge's file itself: no kill-matrix child is created meanwhile (test_gate.rs).
+        let _locks = crate::test_gate::lock_hold();
         let dir = fixture();
         let config = dir.join("shroudforge/config");
         std::fs::create_dir_all(&config).unwrap();

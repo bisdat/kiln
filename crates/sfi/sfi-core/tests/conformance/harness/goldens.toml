@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+# Newly captured v2 transcripts, reviewed against the prior hand-written value model.
+# Linux core host (mlua 0.11.6/Lua 5.4), independently matched on both pinned Windows
+# oracle builds and on the core runner using those same SF environments. The false
+# expectation in values and the fixture_error cases are intentional harness tests.
+[goldens]
+"integers.golden.json" = "oracle sf-1.7.9 d8a394bc; oracle sf-1.8.0 38ef448d; reviewed core v2 capture"
+"floats.golden.json" = "oracle sf-1.7.9 d8a394bc; oracle sf-1.8.0 38ef448d; reviewed core v2 capture"
+"errors.golden.json" = "oracle sf-1.7.9 d8a394bc; oracle sf-1.8.0 38ef448d; reviewed core v2 capture"
+"tables.golden.json" = "oracle sf-1.7.9 d8a394bc; oracle sf-1.8.0 38ef448d; reviewed core v2 capture"
+"returns.golden.json" = "oracle sf-1.7.9 d8a394bc; oracle sf-1.8.0 38ef448d; reviewed core v2 capture"
+"fixture_error.golden.json" = "oracle sf-1.7.9 d8a394bc; oracle sf-1.8.0 38ef448d; reviewed core v2 capture"
+"fixture_error_table.golden.json" = "oracle sf-1.7.9 d8a394bc; oracle sf-1.8.0 38ef448d; reviewed core v2 capture"
+"values.golden.json" = "oracle sf-1.7.9 d8a394bc; oracle sf-1.8.0 38ef448d; reviewed core v2 capture"

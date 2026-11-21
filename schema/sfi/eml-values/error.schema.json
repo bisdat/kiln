@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-values/error.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "description": "A SEMANTIC_ERROR reply's error lease: the Source error tree.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "packet": {
+      "const": "error"
+    },
+    "error": {
+      "$ref": "common.schema.json#/$defs/root"
+    }
+  },
+  "required": [
+    "schema_version",
+    "packet",
+    "error"
+  ],
+  "additionalProperties": false
+}

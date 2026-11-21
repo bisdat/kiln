@@ -8,6 +8,10 @@ import { mergeModded } from '../src/gamedata.js';
 import { useAssetsStatus, useExtractTask } from '../../components/GameArt';
 import { reopenIfClean } from './session.js';
 import { PLACEHOLDER } from './parts.jsx';
+import { t } from '../../i18n';
+
+/** The dev fallback that copies upstream's art (the browser dev server only). */
+export const FETCH_SCRIPT = 'tools/launcher/fetch-editor-assets.sh';
 
 async function loadOverlay(version) {
   if (!version) return null;
@@ -66,8 +70,10 @@ export function useEditorArt(root) {
     return () => document.removeEventListener('error', onError, true);
   }, [root]);
   const preparing = IS_TAURI && (task || (assets === false && e?.canExtract !== false));
-  const hint = preparing ? 'Preparing game art…'
-    : assets === false ? (IS_TAURI ? 'Game art needs the Enshrouded client (Settings → Games).' : 'Game art not found. Run tools/launcher/fetch-editor-assets.sh.')
+  // hintKey: the launcher key of the line (KilnEditor.jsx sets the dev script's name in code); hint: its text
+  const hintKey = preparing ? 'editor.art.preparing'
+    : assets === false ? (IS_TAURI ? 'editor.art.needsClient' : 'editor.art.notFound')
       : null;
-  return { ready, gen, assets, hint, preparing: !!preparing };
+  const hint = hintKey ? t(hintKey, { script: FETCH_SCRIPT }) : null;
+  return { ready, gen, assets, hint, hintKey, preparing: !!preparing };
 }

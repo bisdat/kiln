@@ -628,6 +628,14 @@ internal sealed class TaskRun
         if (Task.Publish(KilnTaskState.Faulted, fault, null)) LogFault(fault);
     }
 
+    /// <summary>The token, after asking the backend whether the lease was cancelled on the pool's side alone (a seal at the
+    /// process exit, a revoke) while a segment runs: then the token is signalled here.</summary>
+    internal bool PollCancelled()
+    {
+        if (!Token.IsCancellationRequested && Lease != 0 && _backend.IsCancelled(Lease)) CancelToken();
+        return Token.IsCancellationRequested;
+    }
+
     private void CancelToken()
     {
         if (_cts.IsCancellationRequested) return;

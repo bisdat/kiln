@@ -71,7 +71,8 @@ which only sizes the search for candidates; see [creatures.md](creatures.md), "S
   template's own fields (`family`, `farCulling`, ...) work too.
 - **Variant lists** (sequence events, collider shapes, arsenal constraints and actions): `[i]`, `[Type#k]` (the k-th
   element of type `Type`, counted in the list's current order), `[Type]` = `#0`; `[<guid>]` picks the element whose
-  `guid` field is that GUID (arsenal attacks); `[*]` = every element (fans out).
+  `guid` field is that GUID (arsenal attacks); `[*]` = every element (fans out; an empty list has none, which is no
+  error).
 - **Config values** (`keen::impact::Configurations`: `impactValues`, `configValues`, `ImpactConfiguration.configValues`,
   sequence events' `impactValues`): `.<alias>` or `.0x<config id>`, then optionally a field of the config
   (`.scaleFactor`, `.function`); without one, its value. Aliases:

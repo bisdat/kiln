@@ -1,0 +1,29 @@
+{
+  "SPDX-License-Identifier": "MIT",
+  "format_version": 1,
+  "transcript_version": 2,
+  "fixture": "hash-guid.lua",
+  "fixture_sha256": "e55423bdc45fa7c5ebeb6fe1dd4a0b61fe1d882425b17f8669459393a1f82538",
+  "construction": "captured with ShroudForge's own mod runtime (a local differential test, not published): actual pinned ShroudForge mod-runtime, game-free private copies, release Windows x64 builds under headless Wine. No source checkout was edited or built in. Each oracle output matched its shared sfi-core transcript host byte-for-byte.",
+  "pins": [
+    {
+      "label": "sf-1.7.9",
+      "commit": "d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8",
+      "golden": "sf-1.7.9.golden.json",
+      "sha256": "437788cd7ea3f4b4fa0141df20f41c65b9dfe84189f6873febd7b22656fd3d48"
+    },
+    {
+      "label": "sf-1.8.0",
+      "commit": "38ef448dc5d4fc267b5f0928502a864a6b078865",
+      "golden": "sf-1.8.0.golden.json",
+      "sha256": "437788cd7ea3f4b4fa0141df20f41c65b9dfe84189f6873febd7b22656fd3d48"
+    }
+  ],
+  "per_pin": {"records": 292, "expectations": 203, "captured_error_messages": 69},
+  "binding_sources_both_pins": [
+    "modules/mod-runtime/lua/bindings/hash_bytes.rs:9-52",
+    "modules/mod-runtime/lua/bindings/game/guid.rs:9-68",
+    "modules/mod-runtime/lua/bindings/mod.rs:66-115"
+  ],
+  "scope": "Independent standard FNV-1a32, permissive crc 3.4.0, GUID public mixed-endian byte contract and synthetic observations only. All four returned u32 fields, ordinary table identity/mutability, ignored trailing valid UTF-8, strict hexadecimal characters, binary hashing and v2 errors are observed on both pins. Arbitrary userdata field getters/borrow conflicts, read-only Buffer state and per-owner registrar coexistence are additionally source-derived host tests; not seeded-oracle observations. No engine, archive, native bridge or reflected Resource/Content semantics are claimed."
+}

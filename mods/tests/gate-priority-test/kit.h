@@ -22,7 +22,10 @@
 
 namespace gpt {
 
-inline constexpr const char* kKitVersion = "1";
+// The kit's format and timing (every file's header, run.json "kit"). 2: a pair starts only between two server updates
+// and a busy try is retried after the next Post edge past its step, counted in steps (GitHub #58); writes.csv adds
+// post_step and since_post_ns. 1: retried every millisecond, which locked onto the start of each update.
+inline constexpr const char* kKitVersion = "2";
 
 // <kiln data>/gate-priority-test/run.txt, one key=value per line ('#' starts a comment).
 struct RunConfig {

@@ -6,18 +6,20 @@
 // files: UPSTREAM.md.
 import React, { useRef } from 'react';
 import EditorApp from './kiln/EditorApp.jsx';
-import { useEditorArt } from './kiln/art.js';
+import { FETCH_SCRIPT, useEditorArt } from './kiln/art.js';
+import { rich, useLanguage } from '../i18n';
 import './kiln/editor.css';
 import './kiln-editor.css';
 
 export default function KilnEditor() {
+  useLanguage();
   const root = useRef(null);
   const art = useEditorArt(root);
   return (
     <div className={'kiln-editor' + (art.assets === false ? ' no-assets' : '')} ref={root}>
       {art.hint && (
         <div className="kiln-editor-hint" role="status">
-          {art.hint === 'Game art not found. Run tools/launcher/fetch-editor-assets.sh.' ? <>Game art not found. Run <code>tools/launcher/fetch-editor-assets.sh</code>.</> : art.hint}
+          {art.hintKey === 'editor.art.notFound' ? rich('editor.art.notFound', { script: <code>{FETCH_SCRIPT}</code> }) : art.hint}
         </div>
       )}
       {art.ready && <EditorApp key={art.gen} />}

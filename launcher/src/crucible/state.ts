@@ -53,8 +53,9 @@ export function useStatusFollowsSignIn() {
 
 // ---------------------------------------------------------------- what is open
 
-/** A pack to preview: one on Crucible (a code, a link, a version id) or a dropped .kilnpack file. */
-export type PreviewSource = { kind: "crucible"; target: string } | { kind: "file"; path: string };
+/** A pack to preview: one on Crucible (a code, a link, a version id) or a dropped .kilnpack file. `resume`: Kiln's first
+ *  start brought it ("come back after installing Kiln": the download or the clipboard named the pack). */
+export type PreviewSource = { kind: "crucible"; target: string; resume?: boolean } | { kind: "file"; path: string };
 interface CrucibleUi {
   preview: PreviewSource | null;
   /** The update screen of this instance. */
@@ -96,9 +97,11 @@ export async function copyText(text: string): Promise<boolean> {
   } catch { return false; }
 }
 
-/** What the clipboard holds now, if it can be read (a Got a code? prefill; never an error). */
+/** The clipboard's text when it may be a Crucible code or link (./prefill.ts says when it is read); null otherwise,
+ *  never an error. Read by the backend (crucible_clipboard), never navigator.clipboard: WebView2 asks the player for
+ *  clipboard access on every read ("tauri.localhost wants to see text and images in the clipboard"). */
 export async function readClipboard(): Promise<string | null> {
-  try { return navigator.clipboard?.readText ? await navigator.clipboard.readText() : null; } catch { return null; }
+  try { return await api.crucibleClipboard(); } catch { return null; }
 }
 
 /** The share link without its scheme, as the popover shows it. */
@@ -106,17 +109,18 @@ export const shortLink = (url: string) => url.replace(/^https?:\/\//, "");
 
 // ---------------------------------------------------------------- player wording
 
-/** Crucible's errors as a player reads them (DESIGN 1.6). */
-export function crucibleError(e: unknown): string {
+/** Crucible's errors as a player reads them (DESIGN 1.6). `share`: the player was sharing (offline means their own
+ *  connection, not a pack to ask a friend for). */
+export function crucibleError(e: unknown, share = false): string {
   const k = api.toKilnError(e);
   switch (k.code) {
     case "not_found": return t("crucible.err.notFound");
-    case "network": return t("crucible.err.offline");
+    case "network": return share ? t("crucible.err.offlineShare") : t("crucible.err.offline");
     case "refused": return k.message || t("crucible.err.gone");
     case "hash_mismatch": return t("crucible.err.badDownload");
     case "game_running": return t("crucible.err.gameRunning");
     case "auth_failed": return t("crucible.share.signInText");
-    case "timeout": return t("crucible.err.offline");
+    case "timeout": return share ? t("crucible.err.offlineShare") : t("crucible.err.offline");
     default: return k.message;
   }
 }

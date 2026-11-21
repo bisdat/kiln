@@ -66,20 +66,22 @@ public sealed partial class ClientPassMod
         if (blade.IsNone || anvil.IsNone) { await c.Verdict(); return; }
         c.Instruct("A Rarity Anvil stands in front of you and you have a Common Anvil Blade, 30 metal scraps and 15 metal sheets. " +
                    "Put the Anvil Blade on your action bar and hold it, look at the anvil: does the prompt read \"Upgrade held item\"? " +
-                   "Use it (E). Press continue when you have used it once.");
-        await c.Verdict();
-        c.Expect(await c.Until(() => upgraded.Count > 0, TimeSpan.FromSeconds(90), "an upgrade ran"), "the anvil ran an upgrade for you",
+                   "Remember the answer and use it (E). The check goes on by itself after the upgrade.");
+        c.Expect(await c.Until(() => upgraded.Count > 0, TimeSpan.FromMinutes(5), "an upgrade ran"), "the anvil ran an upgrade for you",
             upgraded.Count > 0 ? upgraded[0].Result.ToString() : "no GearUpgradedEvent");
         c.Expect(Items.GearOf(blade)?.Rarity == ItemRarity.Uncommon, "the blade is Uncommon on the server", Items.GearOf(blade)?.ToString());
-        c.Instruct("Did your character put a hand on the anvil, and did a toast say \"Anvil Blade is now Uncommon: unlock its new " +
-                   "enhancement at a workbench. Paid 10 x Metal Scraps.\"? Does the blade's tooltip now show the Uncommon colour " +
-                   "and two enhancement rows (one locked), without leaving and re-joining?");
+        c.Instruct("Remember: did your character put a hand on the anvil, and did a toast say \"Anvil Blade is now Uncommon: unlock its new " +
+                   "enhancement at a workbench. Paid 10 x Metal Scraps.\"? Look at the blade's tooltip: does it show the Uncommon colour " +
+                   "and two enhancement rows (one locked), without leaving and re-joining? Then use the anvil again with the blade in " +
+                   "hand (Uncommon to Rare costs 5 sheets, 90 % chance). The check goes on by itself after that second upgrade.");
+        c.Expect(await c.Until(() => upgraded.Count >= 2, TimeSpan.FromMinutes(5), "a second upgrade ran"), "a second upgrade ran",
+            string.Join("; ", upgraded.Select(u => u.Result.ToString())));
+        c.Instruct("Now hold nothing and use the anvil once more. Pass only if all held: (1) the prompt read \"Upgrade held item\"; " +
+                   "(2) after the first use, a hand on the anvil, the \"is now Uncommon ... Paid 10 x Metal Scraps.\" toast, and the " +
+                   "tooltip in the Uncommon colour with two enhancement rows (one locked); (3) the second toast read either " +
+                   "\"... is now Rare ...\" or \"The upgrade ... failed (90% chance) ...\"; (4) the empty hand got \"Hold the item you " +
+                   "want to upgrade in your hand, then use it again.\". Otherwise Fail with a note naming which part.");
         await c.Verdict();
-        c.Instruct("Use the anvil again with the blade in hand (Uncommon to Rare costs 5 sheets, 90 % chance). Then hold nothing " +
-                   "and use it once more. Is the second toast either \"... is now Rare ...\" or \"The upgrade ... failed (90% chance) ...\", " +
-                   "and the empty hand's \"Hold the item you want to upgrade in your hand, then use it again.\"?");
-        await c.Verdict();
-        c.Expect(upgraded.Count >= 2, "a second upgrade ran", string.Join("; ", upgraded.Select(u => u.Result.ToString())));
     }
 
     [ClientCheck("equip.c2", "The upgrade window lists your gear and upgrades the one you pick", Area = EquipArea, Since = EquipSince,
@@ -99,18 +101,16 @@ public sealed partial class ClientPassMod
         c.Instruct("A Rarity Forge stands in front of you; you have a Rare Warrior chest piece, an Epic Anvil Blade and 30 bronze bars. " +
                    "Use the forge (E, \"Upgrade gear\"). A Kiln window \"Rarity upgrade\" should open and list your gear: the chest piece " +
                    "Rare -> Epic for about 8 bronze bars (the price grows with the item's level) and a 75% chance, with an Upgrade button; " +
-                   "the blade Epic -> Legendary with \"Not enough to upgrade ...\" instead of a button. Is that what you see?");
-        await c.Verdict();
-        c.Instruct("Press Upgrade on the chest piece. Does a toast say what happened (Epic, or failed at 75 %), and does the window " +
-                   "come back with the chest piece's next step (or the same one after a failure)?");
-        await c.Verdict();
-        c.Expect(await c.Until(() => upgraded.Any(u => u.Item.Entity.Id == chest.Entity.Id), TimeSpan.FromSeconds(60), "the pick ran"),
+                   "the blade Epic -> Legendary with \"Not enough to upgrade ...\" instead of a button. Remember whether that is what " +
+                   "you see, then press Upgrade on the chest piece. The check goes on by itself after that upgrade.");
+        c.Expect(await c.Until(() => upgraded.Any(u => u.Item.Entity.Id == chest.Entity.Id), TimeSpan.FromMinutes(5), "the pick ran"),
             "the window's pick ran the upgrade of the chest piece", string.Join("; ", upgraded.Select(u => u.Result.ToString())));
-        c.Instruct("Walk more than 6 m away from the forge, then press an Upgrade button in the window. Does a toast say \"You are too " +
-                   "far from the station: go back and use it again.\", with nothing paid? Close the window with Close.");
-        await c.Verdict();
-        c.Instruct("Check the chest piece's tooltip in the inventory: does its rarity colour and its enhancement rows match the last " +
-                   "toast, without re-joining?");
+        c.Instruct("Look at the toast and the window. Then walk more than 6 m away from the forge and press an Upgrade button in the " +
+                   "window; close the window with Close and check the chest piece's tooltip in the inventory. Pass only if all held: " +
+                   "(1) the window listed the gear as described; (2) a toast said what the upgrade did (Epic, or failed at 75 %) and the " +
+                   "window came back with the chest piece's next step (or the same one after a failure); (3) from more than 6 m a toast " +
+                   "said \"You are too far from the station: go back and use it again.\", with nothing paid; (4) the chest piece's " +
+                   "rarity colour and enhancement rows match the last toast, without re-joining. Otherwise Fail with a note naming which part.");
         await c.Verdict();
     }
 
@@ -130,14 +130,15 @@ public sealed partial class ClientPassMod
         var before = Items.GearOf(blade);
         c.Expect(before is { Enhancements: 2, Unlocked: 0 }, "the blade has two enhancement slots, none unlocked", before?.ToString());
         c.Instruct("You have an Uncommon Anvil Blade with two enhancement slots, both locked. Go to a workbench and unlock both of " +
-                   "its enhancements (have the runes it asks for). Does the workbench offer the second slot, and does its cost look " +
-                   "like the game's for an Uncommon weapon? Press continue when both are unlocked.");
-        await c.Verdict();
-        c.Expect(await c.Until(() => Items.GearOf(blade) is { Unlocked: 2 }, TimeSpan.FromSeconds(30), "both unlocked"),
+                   "its enhancements (have the runes it asks for). Remember whether the workbench offers the second slot and whether its " +
+                   "cost looks like the game's for an Uncommon weapon. The check goes on by itself when both are unlocked.");
+        c.Expect(await c.Until(() => Items.GearOf(blade) is { Unlocked: 2 }, TimeSpan.FromMinutes(10), "both unlocked"),
             "the server has both enhancements unlocked", Items.GearOf(blade)?.ToString());
         c.Expect(enhanced.Any(e => e.Item.Entity.Id == blade.Entity.Id && e.Source == GearChangeSource.Game), "Kiln saw the game's unlock (GearEnhancedEvent, source Game)",
             string.Join("; ", enhanced.Select(e => e.ToString())));
-        c.Instruct($"Does the blade's tooltip read LEVEL {(before?.Level ?? 5) + 2}, with both perks listed as active, and is its damage higher than before the unlocks?");
+        c.Instruct($"Both are unlocked. Pass only if all held: (1) the workbench offered the second slot, at a cost like the game's for " +
+                   $"an Uncommon weapon; (2) the blade's tooltip now reads LEVEL {(before?.Level ?? 5) + 2}, with both perks listed as active; " +
+                   "(3) its damage is higher than before the unlocks. Otherwise Fail with a note naming which part.");
         await c.Verdict();
     }
 
@@ -148,9 +149,15 @@ public sealed partial class ClientPassMod
         if (!await NeedEquip(c, "items.gear.upgrade", "items.gear.durability")) return;
         var blade = await GiveGear(c, AnvilBlade, ItemRarity.Common);
         if (blade.IsNone) { await c.Verdict(); return; }
+        var watch = WatchDetail(c, Items.Lookup(AnvilBlade)?.Id ?? default);
         c.Instruct("Hold the new Common Anvil Blade and hit something (a tree, a rock) until its durability bar is visibly below full. " +
-                   "Note the bar and the tooltip's durability, then press continue.");
-        await c.Verdict();
+                   "The check goes on by itself when the blade has lost a twentieth of its durability.");
+        await c.Until(() => Items.GearOf(blade) is { Durability: { } d0, DurabilityMax: { } m0 } && m0 > 0 && d0 <= m0 * 0.95,
+            TimeSpan.FromMinutes(5), "the blade worn below 95 %");
+        var views = watch.Views;
+        c.Instruct("Stop hitting. Open the inventory and select the blade; note its durability bar and the durability in its detail view. " +
+                   Then(watch, "its detail view has shown for ten seconds", 60));
+        await UntilViews(c, watch, views + 1, "the blade's detail view shown", 50, linger: 10);
         var before = Items.GearOf(blade);
         c.Expect(before is { Durability: { } d, DurabilityMax: { } m } && d < m, "the blade is worn on the server", before?.ToString());
         var rule = new RarityUpgradeRule { Steps = { [ItemRarity.Uncommon] = new UpgradeStep() } };
@@ -162,7 +169,8 @@ public sealed partial class ClientPassMod
             $"{before?.Durability}/{before?.DurabilityMax} -> {after?.Durability}/{after?.DurabilityMax}");
         if (before is { Durability: { } bd, DurabilityMax: { } bmx } && after is { Durability: { } ad, DurabilityMax: { } amx } && bmx > 0 && amx > 0)
             c.Expect(Math.Abs((double)bd / bmx - (double)ad / amx) < 0.02, "the share is kept", $"{(double)bd / bmx:P1} -> {(double)ad / amx:P1}");
-        c.Instruct($"The blade is now Uncommon. Is its durability bar as full as before, and does the tooltip's durability read about {after?.Durability} / {after?.DurabilityMax}?");
+        c.Instruct($"The blade is now Uncommon. Select another item and the blade again. Pass only if its durability bar is as full as " +
+                   $"before and the tooltip's durability reads about {after?.Durability} / {after?.DurabilityMax}; otherwise Fail with a note saying what it shows.");
         await c.Verdict();
     }
 
@@ -176,17 +184,19 @@ public sealed partial class ClientPassMod
         c.Expect(blade != null, $"{AnvilBlade} is an item of this game");
         int Count() => blade == null ? 0 : Items.Read(c.Player)?.Slots.Count(s => s.Item == blade.Id) ?? 0;
         var start = Count();
-        c.Instruct("Open a workbench. The Anvil Blade's recipe (3 metal scraps) should show it as Common in its tooltip. Craft it ten " +
-                   "times, then press continue.");
-        await c.Verdict();
+        c.Instruct("Open a workbench. The Anvil Blade's recipe (3 metal scraps) should show it as Common in its tooltip: remember " +
+                   "whether it does before each craft. Craft it ten times. The check goes on by itself after the tenth blade.");
+        await c.Until(() => Count() - start >= 10, TimeSpan.FromMinutes(10), "ten blades crafted");
+        await c.Ticks(10);
         var made = Items.Read(c.Player)?.Slots.Where(s => blade != null && s.Item == blade.Id && !s.Ref.IsNone)
             .Select(s => Items.GearOf(s.Ref)?.Rarity).ToList() ?? [];
         c.Expect(Count() - start >= 10, "ten blades were crafted", $"{Count() - start} new");
         c.Log.Info($"client-pass: equip.c10 rarities: {string.Join(", ", made.GroupBy(r => r).Select(g => $"{g.Key} x {g.Count()}"))}");
         c.Expect(made.Distinct().Count() > 1, "the crafted blades are not all one rarity (50/30/15/4/1 weights)",
             string.Join(", ", made.GroupBy(r => r).Select(g => $"{g.Key} x {g.Count()}")));
-        c.Instruct("Look at the crafted blades in your inventory: do their rarity colours and enhancement rows differ (mostly Common and " +
-                   "Uncommon, some Rare)? Did the recipe's tooltip show Common before each craft?");
+        c.Instruct("Look at the crafted blades in your inventory. Pass only if both held: (1) their rarity colours and enhancement rows " +
+                   "differ (mostly Common and Uncommon, some Rare); (2) the recipe's tooltip showed Common before each craft. Otherwise " +
+                   "Fail with a note naming which part.");
         await c.Verdict();
     }
 
@@ -197,17 +207,22 @@ public sealed partial class ClientPassMod
         if (!await NeedEquip(c, "items.gear.write")) return;
         var chest = await GiveGear(c, FivePerkChest, ItemRarity.Rare);
         if (chest.IsNone) { await c.Verdict(); return; }
-        c.Instruct("Open your inventory and look at the new Rare Warrior chest piece's tooltip (three enhancement rows). Keep it open and press continue.");
-        await c.Verdict();
+        var watch = WatchDetail(c, Items.Lookup(FivePerkChest)?.Id ?? default);
+        c.Instruct("Open your inventory and look at the new Rare Warrior chest piece's tooltip (three enhancement rows) and keep it open. " +
+                   Then(watch, "its tooltip has shown for five seconds", 45));
+        await UntilViews(c, watch, 1, "the chest piece's tooltip shown", 40, linger: 5);
         var up = await Items.SetRarity(chest, ItemRarity.Legendary);
         c.Expect(up.Ok, "the chest piece was set to Legendary", up.ToString());
-        c.Instruct("Within a second, without closing anything: does the tooltip show the Legendary colour and five enhancement rows? " +
-                   "(Move the pointer off the item and back if the tooltip does not redraw by itself.)");
-        await c.Verdict();
+        c.Instruct("The chest piece is now Legendary. Without closing anything, remember whether within a second the tooltip shows the " +
+                   "Legendary colour and five enhancement rows (move the pointer off the item and back if it does not redraw by itself). " +
+                   "The check sets it to Common by itself in 20 seconds.");
+        await c.Delay(TimeSpan.FromSeconds(20));
         var down = await Items.SetRarity(chest, ItemRarity.Common);
         c.Expect(down.Ok && down.After is { Enhancements: 1 }, "the chest piece was set to Common", down.ToString());
-        c.Instruct("Does it now show the Common colour and one enhancement row, and does it still sit in the same slot (the same item, " +
-                   "not a new one)? Equip it and take it off once: is the armour value in the character screen what a Common piece gives?");
+        c.Instruct("The chest piece is now Common. Equip it and take it off once. Pass only if all held: (1) the Legendary colour and five " +
+                   "rows showed within a second; (2) it now shows the Common colour and one enhancement row and still sits in the same " +
+                   "slot (the same item, not a new one); (3) the armour value in the character screen is what a Common piece gives. " +
+                   "Otherwise Fail with a note naming which part.");
         await c.Verdict();
     }
 }
