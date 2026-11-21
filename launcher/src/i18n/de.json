@@ -2795,7 +2795,7 @@
       "noGpuArg": "Dieser Start zeichnet ohne GPU: {flag} wurde angegeben und hat Vorrang vor diesem Schalter.",
       "gpuArg": "Dieser Start zeichnet mit GPU: {flag} wurde angegeben und hat Vorrang vor diesem Schalter.",
       "x11": "Zu X11 wechseln, wenn das Zeichnen unter Wayland langsam ist",
-      "x11Intro": "Wenn WebKit unter Wayland die GPU nicht nutzen kann, startet der Launcher noch einmal über X11 (XWayland), was das Ruckeln oft beendet. Gilt ab dem nächsten Start.",
+      "x11Intro": "Wenn WebKit auf einem HiDPI-Bildschirm unter Wayland die GPU nicht nutzen kann, startet der Launcher noch einmal über X11 (XWayland): Er zeichnet dann in geringerer Auflösung, also viel schneller, aber weniger scharf. Gilt ab dem nächsten Start.",
       "x11Wayland": "Dieser Start zeichnet unter Wayland.",
       "x11On": "Dieser Start zeichnet über X11.",
       "x11Tried": "X11 wurde versucht und hat nicht geholfen, daher bleibt der Launcher bei Wayland. Schalte das aus und wieder an, um es noch einmal zu versuchen.",

@@ -2795,7 +2795,7 @@
       "noGpuArg": "Ce démarrage affiche sans le GPU : {flag} a été donné et l'emporte sur cet interrupteur.",
       "gpuArg": "Ce démarrage affiche avec le GPU : {flag} a été donné et l'emporte sur cet interrupteur.",
       "x11": "Passer à X11 quand l'affichage est lent sous Wayland",
-      "x11Intro": "Sous Wayland, quand WebKit ne peut pas utiliser le GPU, le launcher redémarre une fois via X11 (XWayland), ce qui supprime souvent les ralentissements. S'applique au prochain démarrage.",
+      "x11Intro": "Sur un écran HiDPI sous Wayland, quand WebKit ne peut pas utiliser le GPU, le launcher redémarre une fois via X11 (XWayland) : il dessine en plus basse résolution, donc bien plus vite mais moins net. S'applique au prochain démarrage.",
       "x11Wayland": "Ce démarrage dessine sous Wayland.",
       "x11On": "Ce démarrage dessine via X11.",
       "x11Tried": "X11 a été essayé sans résultat, le launcher reste donc sous Wayland. Désactive puis réactive cette option pour réessayer.",
