@@ -72,4 +72,3 @@
 .kst-section input[type="radio"], .kst-form input[type="radio"] { accent-color: var(--k-ember-500); width: 16px; height: 16px; }
 .kst-check { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; background: rgba(255, 255, 255, .04); box-shadow: inset 0 0 0 1px var(--k-line); }
 .kst-file .k-select { width: 220px; }
-.kst-form .kst-version { max-width: 220px; }
