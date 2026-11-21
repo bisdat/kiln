@@ -75,3 +75,16 @@
 /* dev.30.2 polish: hidden game entries (old, test, unused) and the no-catalog note */
 .kd-hidden-toggle { font-size: 14px; color: var(--k-text-2); }
 .kd-hidden-tag { font-size: 12px; padding: 1px 7px; border-radius: 999px; color: var(--k-text-2); box-shadow: inset 0 0 0 1px var(--k-line-strong); white-space: nowrap; }
+/* dev.30.2: the recipe editor's "Any of" ingredient (a category of the game: CategoryPicker.tsx), Hearth gold and ember */
+.kd-stack-adds { display: flex; gap: 6px; flex-wrap: wrap; }
+.kd-caticons { display: inline-flex; flex: none; }
+.kd-caticons .kd-icon { width: 22px; height: 22px; border-radius: 5px; box-shadow: 0 0 0 2px var(--k-bg-2); }
+.kd-caticons .kd-icon + .kd-icon { margin-left: -7px; }
+.kd-cat-list { min-width: 420px; }
+.kd-catchip { display: inline-flex; align-items: center; gap: 8px; max-width: 560px; padding: 2px 4px 2px 8px; border-radius: 999px; font-size: 14.5px;
+  color: var(--k-text-1); background: rgba(249, 199, 79, .08); box-shadow: inset 0 0 0 1px rgba(249, 199, 79, .4); }
+.kd-catchip-words { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kd-catpanel { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; margin: 2px 0 4px 10px; padding: 6px 10px; border-left: 2px solid rgba(255, 143, 69, .5); }
+.kd-catitems { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.kd-catitem { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.kd-cat-offer { color: var(--k-ember-300); }

@@ -5294,6 +5294,28 @@
         "itemAria": "アイテム",
         "countAria": "個数",
         "category": "カテゴリ {id} の任意のアイテム",
+        "addCategory": "+ グループのいずれか",
+        "addCategoryTip": "グループ内のどのアイテムでも支払える材料（例: どの木材でも）",
+        "anyOf": "いずれか: {names}",
+        "anyOfMore": "いずれか: {names} ほか {count} 件",
+        "categoryAria": "アイテムのグループ",
+        "categoryPh": "含まれるアイテムで検索",
+        "categoryNone": "そのアイテムを含むグループはありません",
+        "categoryItems": {
+          "other": "{count} 個のアイテム"
+        },
+        "categoryUsed": {
+          "other": "ゲームのレシピ {count} 件で使用"
+        },
+        "categoryUnused": "ゲームのレシピでは使われていません",
+        "categoryUsedBy": "これを使うゲームのレシピ: {names}",
+        "categoryUsedByMore": "これを使うゲームのレシピ: {names} ほか {count} 件",
+        "categoryShow": "アイテムを表示",
+        "categoryHide": "アイテムを隠す",
+        "categoryNoCatalog": "ゲームのアイテム情報が必要です: Kiln が先に読み込みます",
+        "removeCategory": "このグループを削除",
+        "offer": "グループのいずれかでも可にしますか？",
+        "offerAria": "代わりにグループのいずれかを受け付ける（{anyOf}）",
         "modNote": "MODのレシピを変更します。パックレイヤーが優先されます（{mod} の後に読み込まれます）。",
         "stationNote": "ゲームのレシピは作業台がそのままです。新規レシピは作業台を自分で選びます。",
         "new": "新規レシピ",
@@ -5304,7 +5326,8 @@
         "stationPh": "作業台を検索",
         "hand": "手作業で作成",
         "noStation": "新規レシピには作業台が必要です",
-        "needStacks": "新規レシピには材料と完成品が必要です"
+        "needStacks": "新規レシピには材料と完成品が必要です",
+        "noCategory": "「いずれか」の材料ごとにグループを選んでください"
       },
       "drops": {
         "lead": "デフォルトのインベントリ：敵のルートと固定チェストを、テーブルごと、またはすべてのテーブル（*）に設定します。",

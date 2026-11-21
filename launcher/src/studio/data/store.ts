@@ -50,6 +50,10 @@ export function useWriteLayer(packId: string) {
   };
 }
 
+/** The game's recipe input categories (the recipe editor's "Any of" ingredient; studio_categories), read again with the
+ *  catalog (useCatalogUpkeep). */
+export const useCategories = () => useQuery({ queryKey: ["studio_categories"] as const, queryFn: api.studioCategories, retry: false, staleTime: 5 * 60_000 });
+
 export const useFields = (section: string) => useQuery({ queryKey: dk.fields(section), queryFn: () => api.studioFields(section), retry: false, staleTime: Infinity });
 
 /** "Show hidden game entries" (dev.30.2, netjunk): the pickers leave out the game's old, test and unused entries

@@ -5427,6 +5427,30 @@
         "itemAria": "Objeto",
         "countAria": "Cantidad",
         "category": "cualquier objeto de la categoría {id}",
+        "addCategory": "+ Cualquiera de un grupo",
+        "addCategoryTip": "Un ingrediente que se paga con cualquier objeto de un grupo, como cualquier madera",
+        "anyOf": "Cualquiera de: {names}",
+        "anyOfMore": "Cualquiera de: {names}, +{count} más",
+        "categoryAria": "Grupo de objetos",
+        "categoryPh": "Busca por cualquier objeto del grupo",
+        "categoryNone": "Ningún grupo contiene ese objeto",
+        "categoryItems": {
+          "one": "{count} objeto",
+          "other": "{count} objetos"
+        },
+        "categoryUsed": {
+          "one": "lo usa {count} receta del juego",
+          "other": "lo usan {count} recetas del juego"
+        },
+        "categoryUnused": "Ninguna receta del juego lo usa",
+        "categoryUsedBy": "Recetas del juego que lo usan: {names}",
+        "categoryUsedByMore": "Recetas del juego que lo usan: {names}, +{count} más",
+        "categoryShow": "Ver sus objetos",
+        "categoryHide": "Ocultar sus objetos",
+        "categoryNoCatalog": "Necesita los objetos del juego: Kiln los lee primero",
+        "removeCategory": "Quitar este grupo",
+        "offer": "¿Aceptar cualquiera de su grupo?",
+        "offerAria": "Aceptar cualquiera de su grupo en su lugar ({anyOf})",
         "modNote": "Cambia la receta del mod; la capa del pack gana (se carga después de {mod}).",
         "stationNote": "Una receta del juego conserva su estación; las recetas nuevas eligen la suya.",
         "new": "Recetas nuevas",
@@ -5437,7 +5461,8 @@
         "stationPh": "Buscar estaciones",
         "hand": "Fabricada a mano",
         "noStation": "Cada receta nueva necesita una estación",
-        "needStacks": "Cada receta nueva necesita un ingrediente y un resultado"
+        "needStacks": "Cada receta nueva necesita un ingrediente y un resultado",
+        "noCategory": "Elige un grupo para cada ingrediente «Cualquiera de»"
       },
       "drops": {
         "lead": "Inventarios por defecto: botín de enemigos y cofres fijos, por tabla o para todas las tablas (*).",

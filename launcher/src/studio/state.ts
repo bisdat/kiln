@@ -41,7 +41,7 @@ export function useCatalogUpkeep() {
   useEffect(() => {
     const s = cat.data;
     if (prev.current === "building" && s?.state === "ready" && s.built) {
-      for (const k of [["studio_pick"], ["studio_fields"], ["studio_layer_lint"]]) void qc.invalidateQueries({ queryKey: k });
+      for (const k of [["studio_pick"], ["studio_categories"], ["studio_fields"], ["studio_layer_lint"]]) void qc.invalidateQueries({ queryKey: k });
     }
     prev.current = s?.state;
   }, [cat.data, qc]);

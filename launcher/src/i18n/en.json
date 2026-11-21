@@ -5427,6 +5427,30 @@
         "itemAria": "Item",
         "countAria": "Count",
         "category": "any item of category {id}",
+        "addCategory": "+ Any of a group",
+        "addCategoryTip": "An input the player can pay with any item of a group, such as any wood",
+        "anyOf": "Any of: {names}",
+        "anyOfMore": "Any of: {names}, +{count} more",
+        "categoryAria": "Group of items",
+        "categoryPh": "Search by any item in it",
+        "categoryNone": "No group holds that item",
+        "categoryItems": {
+          "one": "{count} item",
+          "other": "{count} items"
+        },
+        "categoryUsed": {
+          "one": "used by {count} game recipe",
+          "other": "used by {count} game recipes"
+        },
+        "categoryUnused": "No game recipe uses it",
+        "categoryUsedBy": "Game recipes that take it: {names}",
+        "categoryUsedByMore": "Game recipes that take it: {names}, +{count} more",
+        "categoryShow": "Show its items",
+        "categoryHide": "Hide its items",
+        "categoryNoCatalog": "Needs the game's items: Kiln reads them first",
+        "removeCategory": "Remove this group",
+        "offer": "Accept any of its group?",
+        "offerAria": "Accept any of its group instead ({anyOf})",
         "modNote": "Changes the mod's recipe; the pack layer wins (it loads after {mod}).",
         "stationNote": "A recipe of the game keeps its station; new recipes choose their own.",
         "new": "New recipes",
@@ -5437,7 +5461,8 @@
         "stationPh": "Search stations",
         "hand": "Crafted by hand",
         "noStation": "Every new recipe needs a station",
-        "needStacks": "Every new recipe needs an input and an output"
+        "needStacks": "Every new recipe needs an input and an output",
+        "noCategory": "Choose a group for every \"Any of\" input"
       },
       "drops": {
         "lead": "Default inventories: enemy loot and fixed chests, by table or for every table (*).",

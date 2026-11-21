@@ -5427,6 +5427,30 @@
         "itemAria": "Gegenstand",
         "countAria": "Anzahl",
         "category": "beliebiger Gegenstand der Kategorie {id}",
+        "addCategory": "+ Beliebiges aus einer Gruppe",
+        "addCategoryTip": "Eine Zutat, die mit jedem Gegenstand einer Gruppe bezahlt werden kann, etwa mit beliebigem Holz",
+        "anyOf": "Beliebig aus: {names}",
+        "anyOfMore": "Beliebig aus: {names}, +{count} weitere",
+        "categoryAria": "Gruppe von Gegenständen",
+        "categoryPh": "Nach einem Gegenstand darin suchen",
+        "categoryNone": "Keine Gruppe enthält diesen Gegenstand",
+        "categoryItems": {
+          "one": "{count} Gegenstand",
+          "other": "{count} Gegenstände"
+        },
+        "categoryUsed": {
+          "one": "in {count} Rezept des Spiels",
+          "other": "in {count} Rezepten des Spiels"
+        },
+        "categoryUnused": "Kein Rezept des Spiels nutzt sie",
+        "categoryUsedBy": "Rezepte des Spiels damit: {names}",
+        "categoryUsedByMore": "Rezepte des Spiels damit: {names}, +{count} weitere",
+        "categoryShow": "Gegenstände zeigen",
+        "categoryHide": "Gegenstände ausblenden",
+        "categoryNoCatalog": "Braucht die Gegenstände des Spiels: Kiln liest sie zuerst",
+        "removeCategory": "Gruppe entfernen",
+        "offer": "Beliebiges aus seiner Gruppe annehmen?",
+        "offerAria": "Stattdessen Beliebiges aus seiner Gruppe annehmen ({anyOf})",
         "modNote": "Ändert das Rezept der Mod; die Pack-Ebene gewinnt (sie lädt nach {mod}).",
         "stationNote": "Ein Rezept des Spiels behält seine Werkbank; neue Rezepte wählen ihre eigene.",
         "new": "Neue Rezepte",
@@ -5437,7 +5461,8 @@
         "stationPh": "Werkbänke suchen",
         "hand": "Von Hand hergestellt",
         "noStation": "Jedes neue Rezept braucht eine Werkbank",
-        "needStacks": "Jedes neue Rezept braucht eine Zutat und ein Ergebnis"
+        "needStacks": "Jedes neue Rezept braucht eine Zutat und ein Ergebnis",
+        "noCategory": "Wähle für jede „Beliebig aus“-Zutat eine Gruppe"
       },
       "drops": {
         "lead": "Standard-Inventare: Gegnerbeute und feste Truhen, pro Tabelle oder für jede Tabelle (*).",
