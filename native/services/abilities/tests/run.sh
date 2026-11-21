@@ -85,3 +85,21 @@ Path(sys.argv[2]).write_text(queue + "\nvoid deliver(uintptr_t world) {\n" + del
 PYCODE
 g++ "${flags[@]}" -I"$out" "$here/events_test.cpp" -o "$out/events_test"
 "$out/events_test"
+
+# #108: the program lifecycle across world changes (add_program, refresh_programs, check_programs_ready, on_world)
+# against a fake ImpactRegistry: the same registry address again, another one, a stop that is never seen. Twice: with
+# ASan/UBSan, and with TSan for the stop on the destroying thread against the tick thread's registrations.
+python3 - "$here/../abilities.cpp" "$out/programs_under_test.h" <<'PYCODE'
+from pathlib import Path
+import sys
+s = Path(sys.argv[1]).read_text()
+programs = s[s.index("// ---- programs ----"):s.index("// ------------------------------------------------------------------------------------------- Pre")]
+ready = s[s.index("void check_programs_ready()"):s.index("\nvoid expire()")]
+stop = s[s.index("void KILN_CALL on_world("):s.index("// ------------------------------------------------------------------------------------------- table")]
+Path(sys.argv[2]).write_text(programs + "\n" + ready + "\n" + stop)
+PYCODE
+g++ "${flags[@]}" -I"$out" "$here/programs_test.cpp" "$here/../verify.cpp" -o "$out/programs_test"
+"$out/programs_test"
+tsan=("${flags[@]/-fsanitize=address,undefined/-fsanitize=thread}")
+g++ "${tsan[@]}" -I"$out" "$here/programs_test.cpp" "$here/../verify.cpp" -o "$out/programs_test_tsan"
+TSAN_OPTIONS=halt_on_error=1 "$out/programs_test_tsan"

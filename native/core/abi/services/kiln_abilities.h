@@ -325,8 +325,11 @@ typedef struct KilnAbilitiesApi {
     KilnResult(KILN_CALL* program_info)(uint32_t program_id, KilnImpactProgramInfo* out);        /* tick */
     KilnResult(KILN_CALL* program_vars)(uint32_t program_id, KilnImpactVar* out, uint32_t cap, uint32_t* count); /* tick */
     /* tick. Verifies and inserts a keen::ImpactProgram blob (copied). *out_id = its id. INVALID_ARGUMENT: the
-     * verifier refused it (error says why, NUL-terminated) or the GUID is already in the registry; UNAVAILABLE: the
-     * registry is not reachable yet (before the first step). */
+     * verifier refused it (error says why, NUL-terminated), the GUID is a game program's, or this world's registry
+     * holds the GUID with other bytes; UNAVAILABLE: the registry is not reachable yet (before the first step).
+     * Kiln keeps registered programs across worlds and puts them back into each new world's registry; registering
+     * the same bytes again is KILN_OK (in a new world before that happened, it puts the program back), so a mod may
+     * register at every world start. Other bytes under a GUID go in only in a world that does not hold it yet. */
     KilnResult(KILN_CALL* program_register)(KilnOwner owner, const void* blob, size_t len, uint32_t* out_id,
                                             char* error, size_t error_cap);
     /* tick. Re-lists keen::ImpactProgram resources of kiln.assets and registers the new ones. *added = count. */

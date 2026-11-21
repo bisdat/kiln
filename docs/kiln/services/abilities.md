@@ -360,7 +360,11 @@ runtime verdict of each rule, and the C++ verifier matches all of them).
    At every server world start kiln.abilities lists the `keen::ImpactProgram` resources kiln.assets serves, verifies
    each GUID the game's ImpactRegistry does not hold yet, and inserts it. `Abilities.Programs.Register(byte[])` is the
    managed path for raw blobs (same verifier). Vanilla GUIDs are never replaced at run time (running instances read
-   their program's code live); a boot-time override is kiln.assets' business.
+   their program's code live); a boot-time override is kiln.assets' business. Kiln keeps every program it inserted
+   (kiln.assets' and registered ones) across worlds of a game session and puts them back into each new world's
+   registry once the game has loaded it, asking the registry itself, as a new world's registry can sit at the old one's
+   address (#108). Registering the same bytes again succeeds (in a new world it puts the program back), so a mod may
+   register at every world start; other bytes under a GUID are refused while a world's registry holds it.
 2. **Kiln natives.** Name = `"<modid>.<Name>"` (`modid` as in kiln.mod.json, `Name` = `[A-Za-z0-9_]+`); the ECALL hash
    is FNV-1a-32 over the full UTF-8 name. The engine's registry keeps a 32-byte display name (registerNative traps on
    longer names), so longer names are registered with a truncated display copy; the hash is always over the full name.
