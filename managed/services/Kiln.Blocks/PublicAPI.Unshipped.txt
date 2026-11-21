@@ -103,3 +103,201 @@ static Kiln.ModelClothBlock.operator ==(Kiln.ModelClothBlock? left, Kiln.ModelCl
 virtual Kiln.ClothColliderBlock.EqualityContract.get -> System.Type!
 virtual Kiln.ClothColliderBlock.Equals(Kiln.ClothColliderBlock? other) -> bool
 virtual Kiln.ClothColliderBlock.PrintMembers(System.Text.StringBuilder! builder) -> bool
+Kiln.IdleTask
+Kiln.IdleTask.Equals(Kiln.IdleTask? other) -> bool
+Kiln.IdleTask.IdleTask() -> void
+Kiln.InspectTask
+Kiln.InspectTask.Equals(Kiln.InspectTask? other) -> bool
+Kiln.InspectTask.InspectTask() -> void
+Kiln.RoamTask
+Kiln.RoamTask.Equals(Kiln.RoamTask? other) -> bool
+Kiln.RoamTask.RoamTask() -> void
+Kiln.RoutineAssignmentState
+Kiln.RoutineAssignmentState.Assigned = 0 -> Kiln.RoutineAssignmentState
+Kiln.RoutineAssignmentState.ManualSuspended = 1 -> Kiln.RoutineAssignmentState
+Kiln.RoutineAssignmentState.PendingSpawn = 2 -> Kiln.RoutineAssignmentState
+Kiln.RoutineAssignmentState.Removed = 4 -> Kiln.RoutineAssignmentState
+Kiln.RoutineAssignmentState.VersionMismatch = 3 -> Kiln.RoutineAssignmentState
+Kiln.RoutineBlock
+Kiln.RoutineBlock.<Clone>$() -> Kiln.RoutineBlock!
+Kiln.RoutineBlock.Equals(Kiln.RoutineBlock? other) -> bool
+Kiln.RoutineBlock.Fallback.get -> Kiln.RoutineTask!
+Kiln.RoutineBlock.Fallback.init -> void
+Kiln.RoutineBlock.RoutineBlock() -> void
+Kiln.RoutineBlock.Version.get -> uint
+Kiln.RoutineBlock.Version.init -> void
+Kiln.RoutineBlock.Was.get -> string?
+Kiln.RoutineBlock.Was.init -> void
+Kiln.RoutineBlock.Windows.get -> System.Collections.Generic.IReadOnlyList<Kiln.RoutineWindow!>!
+Kiln.RoutineBlock.Windows.init -> void
+Kiln.RoutineResult
+Kiln.RoutineResult.<Clone>$() -> Kiln.RoutineResult!
+Kiln.RoutineResult.Deconstruct(out bool Ok, out string? Reason, out uint NpcId, out ulong Revision) -> void
+Kiln.RoutineResult.Equals(Kiln.RoutineResult? other) -> bool
+Kiln.RoutineResult.NpcId.get -> uint
+Kiln.RoutineResult.NpcId.init -> void
+Kiln.RoutineResult.Ok.get -> bool
+Kiln.RoutineResult.Ok.init -> void
+Kiln.RoutineResult.Reason.get -> string?
+Kiln.RoutineResult.Reason.init -> void
+Kiln.RoutineResult.Revision.get -> ulong
+Kiln.RoutineResult.Revision.init -> void
+Kiln.RoutineResult.RoutineResult(bool Ok, string? Reason, uint NpcId, ulong Revision) -> void
+Kiln.RoutineSnapshot
+Kiln.RoutineSnapshot.<Clone>$() -> Kiln.RoutineSnapshot!
+Kiln.RoutineSnapshot.Assignment.get -> Kiln.RoutineAssignmentState
+Kiln.RoutineSnapshot.Assignment.init -> void
+Kiln.RoutineSnapshot.Deconstruct(out uint NpcId, out string! Owner, out string! Key, out uint PlanVersion, out ulong Revision, out Kiln.RoutineAssignmentState Assignment, out int WindowIndex, out ulong Invocation, out Kiln.RoutineTask? Task, out Kiln.RoutineTaskState TaskState, out Kiln.VillagerState NativeState, out string? LastReason) -> void
+Kiln.RoutineSnapshot.Equals(Kiln.RoutineSnapshot? other) -> bool
+Kiln.RoutineSnapshot.Invocation.get -> ulong
+Kiln.RoutineSnapshot.Invocation.init -> void
+Kiln.RoutineSnapshot.Key.get -> string!
+Kiln.RoutineSnapshot.Key.init -> void
+Kiln.RoutineSnapshot.LastReason.get -> string?
+Kiln.RoutineSnapshot.LastReason.init -> void
+Kiln.RoutineSnapshot.NativeState.get -> Kiln.VillagerState
+Kiln.RoutineSnapshot.NativeState.init -> void
+Kiln.RoutineSnapshot.NpcId.get -> uint
+Kiln.RoutineSnapshot.NpcId.init -> void
+Kiln.RoutineSnapshot.Owner.get -> string!
+Kiln.RoutineSnapshot.Owner.init -> void
+Kiln.RoutineSnapshot.PlanVersion.get -> uint
+Kiln.RoutineSnapshot.PlanVersion.init -> void
+Kiln.RoutineSnapshot.Revision.get -> ulong
+Kiln.RoutineSnapshot.Revision.init -> void
+Kiln.RoutineSnapshot.RoutineSnapshot(uint NpcId, string! Owner, string! Key, uint PlanVersion, ulong Revision, Kiln.RoutineAssignmentState Assignment, int WindowIndex, ulong Invocation, Kiln.RoutineTask? Task, Kiln.RoutineTaskState TaskState, Kiln.VillagerState NativeState, string? LastReason) -> void
+Kiln.RoutineSnapshot.Task.get -> Kiln.RoutineTask?
+Kiln.RoutineSnapshot.Task.init -> void
+Kiln.RoutineSnapshot.TaskState.get -> Kiln.RoutineTaskState
+Kiln.RoutineSnapshot.TaskState.init -> void
+Kiln.RoutineSnapshot.WindowIndex.get -> int
+Kiln.RoutineSnapshot.WindowIndex.init -> void
+Kiln.RoutineTask
+Kiln.RoutineTask.RoutineTask(Kiln.RoutineTask! original) -> void
+Kiln.RoutineTaskState
+Kiln.RoutineTaskState.Chosen = 1 -> Kiln.RoutineTaskState
+Kiln.RoutineTaskState.Completed = 3 -> Kiln.RoutineTaskState
+Kiln.RoutineTaskState.None = 0 -> Kiln.RoutineTaskState
+Kiln.RoutineTaskState.Refused = 4 -> Kiln.RoutineTaskState
+Kiln.RoutineTaskState.Started = 2 -> Kiln.RoutineTaskState
+Kiln.RoutineTaskState.Suspended = 5 -> Kiln.RoutineTaskState
+Kiln.RoutineWindow
+Kiln.RoutineWindow.<Clone>$() -> Kiln.RoutineWindow!
+Kiln.RoutineWindow.AllDay.get -> bool
+Kiln.RoutineWindow.AllDay.init -> void
+Kiln.RoutineWindow.Deconstruct(out int StartMinute, out int EndMinute, out Kiln.RoutineTask! Task, out int Priority, out bool AllDay) -> void
+Kiln.RoutineWindow.EndMinute.get -> int
+Kiln.RoutineWindow.EndMinute.init -> void
+Kiln.RoutineWindow.Equals(Kiln.RoutineWindow? other) -> bool
+Kiln.RoutineWindow.Priority.get -> int
+Kiln.RoutineWindow.Priority.init -> void
+Kiln.RoutineWindow.RoutineWindow(int StartMinute, int EndMinute, Kiln.RoutineTask! Task, int Priority = 0, bool AllDay = false) -> void
+Kiln.RoutineWindow.StartMinute.get -> int
+Kiln.RoutineWindow.StartMinute.init -> void
+Kiln.RoutineWindow.Task.get -> Kiln.RoutineTask!
+Kiln.RoutineWindow.Task.init -> void
+Kiln.SitTask
+Kiln.SitTask.Equals(Kiln.SitTask? other) -> bool
+Kiln.SitTask.SitTask() -> void
+Kiln.SleepTask
+Kiln.SleepTask.Equals(Kiln.SleepTask? other) -> bool
+Kiln.SleepTask.SleepTask() -> void
+Kiln.VanillaTask
+Kiln.VanillaTask.Equals(Kiln.VanillaTask? other) -> bool
+Kiln.VanillaTask.VanillaTask() -> void
+abstract Kiln.RoutineTask.<Clone>$() -> Kiln.RoutineTask!
+override Kiln.IdleTask.<Clone>$() -> Kiln.IdleTask!
+override Kiln.IdleTask.Equals(object? obj) -> bool
+override Kiln.IdleTask.GetHashCode() -> int
+override Kiln.IdleTask.ToString() -> string!
+override Kiln.InspectTask.<Clone>$() -> Kiln.InspectTask!
+override Kiln.InspectTask.Equals(object? obj) -> bool
+override Kiln.InspectTask.GetHashCode() -> int
+override Kiln.InspectTask.ToString() -> string!
+override Kiln.RoamTask.<Clone>$() -> Kiln.RoamTask!
+override Kiln.RoamTask.Equals(object? obj) -> bool
+override Kiln.RoamTask.GetHashCode() -> int
+override Kiln.RoamTask.ToString() -> string!
+override Kiln.RoutineBlock.Equals(object? obj) -> bool
+override Kiln.RoutineBlock.GetHashCode() -> int
+override Kiln.RoutineBlock.ToString() -> string!
+override Kiln.RoutineResult.Equals(object? obj) -> bool
+override Kiln.RoutineResult.GetHashCode() -> int
+override Kiln.RoutineResult.ToString() -> string!
+override Kiln.RoutineSnapshot.Equals(object? obj) -> bool
+override Kiln.RoutineSnapshot.GetHashCode() -> int
+override Kiln.RoutineSnapshot.ToString() -> string!
+override Kiln.RoutineTask.Equals(object? obj) -> bool
+override Kiln.RoutineTask.GetHashCode() -> int
+override Kiln.RoutineTask.ToString() -> string!
+override Kiln.RoutineWindow.Equals(object? obj) -> bool
+override Kiln.RoutineWindow.GetHashCode() -> int
+override Kiln.RoutineWindow.ToString() -> string!
+override Kiln.SitTask.<Clone>$() -> Kiln.SitTask!
+override Kiln.SitTask.Equals(object? obj) -> bool
+override Kiln.SitTask.GetHashCode() -> int
+override Kiln.SitTask.ToString() -> string!
+override Kiln.SleepTask.<Clone>$() -> Kiln.SleepTask!
+override Kiln.SleepTask.Equals(object? obj) -> bool
+override Kiln.SleepTask.GetHashCode() -> int
+override Kiln.SleepTask.ToString() -> string!
+override Kiln.VanillaTask.<Clone>$() -> Kiln.VanillaTask!
+override Kiln.VanillaTask.Equals(object? obj) -> bool
+override Kiln.VanillaTask.GetHashCode() -> int
+override Kiln.VanillaTask.ToString() -> string!
+override sealed Kiln.IdleTask.Equals(Kiln.RoutineTask? other) -> bool
+override sealed Kiln.InspectTask.Equals(Kiln.RoutineTask? other) -> bool
+override sealed Kiln.RoamTask.Equals(Kiln.RoutineTask? other) -> bool
+override sealed Kiln.SitTask.Equals(Kiln.RoutineTask? other) -> bool
+override sealed Kiln.SleepTask.Equals(Kiln.RoutineTask? other) -> bool
+override sealed Kiln.VanillaTask.Equals(Kiln.RoutineTask? other) -> bool
+static Kiln.IdleTask.operator !=(Kiln.IdleTask? left, Kiln.IdleTask? right) -> bool
+static Kiln.IdleTask.operator ==(Kiln.IdleTask? left, Kiln.IdleTask? right) -> bool
+static Kiln.InspectTask.operator !=(Kiln.InspectTask? left, Kiln.InspectTask? right) -> bool
+static Kiln.InspectTask.operator ==(Kiln.InspectTask? left, Kiln.InspectTask? right) -> bool
+static Kiln.RoamTask.operator !=(Kiln.RoamTask? left, Kiln.RoamTask? right) -> bool
+static Kiln.RoamTask.operator ==(Kiln.RoamTask? left, Kiln.RoamTask? right) -> bool
+static Kiln.RoutineBlock.operator !=(Kiln.RoutineBlock? left, Kiln.RoutineBlock? right) -> bool
+static Kiln.RoutineBlock.operator ==(Kiln.RoutineBlock? left, Kiln.RoutineBlock? right) -> bool
+static Kiln.RoutineResult.operator !=(Kiln.RoutineResult? left, Kiln.RoutineResult? right) -> bool
+static Kiln.RoutineResult.operator ==(Kiln.RoutineResult? left, Kiln.RoutineResult? right) -> bool
+static Kiln.RoutineSnapshot.operator !=(Kiln.RoutineSnapshot? left, Kiln.RoutineSnapshot? right) -> bool
+static Kiln.RoutineSnapshot.operator ==(Kiln.RoutineSnapshot? left, Kiln.RoutineSnapshot? right) -> bool
+static Kiln.RoutineTask.operator !=(Kiln.RoutineTask? left, Kiln.RoutineTask? right) -> bool
+static Kiln.RoutineTask.operator ==(Kiln.RoutineTask? left, Kiln.RoutineTask? right) -> bool
+static Kiln.RoutineWindow.operator !=(Kiln.RoutineWindow? left, Kiln.RoutineWindow? right) -> bool
+static Kiln.RoutineWindow.operator ==(Kiln.RoutineWindow? left, Kiln.RoutineWindow? right) -> bool
+static Kiln.SitTask.operator !=(Kiln.SitTask? left, Kiln.SitTask? right) -> bool
+static Kiln.SitTask.operator ==(Kiln.SitTask? left, Kiln.SitTask? right) -> bool
+static Kiln.SleepTask.operator !=(Kiln.SleepTask? left, Kiln.SleepTask? right) -> bool
+static Kiln.SleepTask.operator ==(Kiln.SleepTask? left, Kiln.SleepTask? right) -> bool
+static Kiln.VanillaTask.operator !=(Kiln.VanillaTask? left, Kiln.VanillaTask? right) -> bool
+static Kiln.VanillaTask.operator ==(Kiln.VanillaTask? left, Kiln.VanillaTask? right) -> bool
+virtual Kiln.RoutineTask.EqualityContract.get -> System.Type!
+virtual Kiln.RoutineTask.Equals(Kiln.RoutineTask? other) -> bool
+virtual Kiln.RoutineTask.PrintMembers(System.Text.StringBuilder! builder) -> bool
+Kiln.NpcBlock.Routine.get -> Kiln.PartRef<Kiln.RoutineBlock!>?
+Kiln.NpcBlock.Routine.init -> void
+Kiln.RoutineAssignmentChangedEvent
+Kiln.RoutineAssignmentChangedEvent.After.get -> Kiln.RoutineSnapshot!
+Kiln.RoutineAssignmentChangedEvent.Before.get -> Kiln.RoutineSnapshot?
+Kiln.RoutineAssignmentChangedEvent.Reason.get -> string!
+Kiln.RoutineAssignmentChangedEvent.Teardown.get -> bool
+Kiln.RoutineTaskChangedEvent
+Kiln.RoutineTaskChangedEvent.From.get -> Kiln.RoutineTaskState
+Kiln.RoutineTaskChangedEvent.Invocation.get -> ulong
+Kiln.RoutineTaskChangedEvent.Key.get -> string!
+Kiln.RoutineTaskChangedEvent.NpcId.get -> uint
+Kiln.RoutineTaskChangedEvent.PlanVersion.get -> uint
+Kiln.RoutineTaskChangedEvent.Reason.get -> string?
+Kiln.RoutineTaskChangedEvent.Revision.get -> ulong
+Kiln.RoutineTaskChangedEvent.Task.get -> Kiln.RoutineTask?
+Kiln.RoutineTaskChangedEvent.Teardown.get -> bool
+Kiln.RoutineTaskChangedEvent.To.get -> Kiln.RoutineTaskState
+Kiln.Routines
+override Kiln.RoutineAssignmentChangedEvent.ToString() -> string!
+override Kiln.RoutineTaskChangedEvent.ToString() -> string!
+static Kiln.Routines.Assign(Kiln.Villager! npc, Kiln.BlockHandle<Kiln.RoutineBlock!>! plan) -> System.Threading.Tasks.Task<Kiln.RoutineResult!>!
+static Kiln.Routines.Inspect(Kiln.Villager! npc) -> Kiln.RoutineSnapshot?
+static Kiln.Routines.Remove(Kiln.Villager! npc) -> System.Threading.Tasks.Task<Kiln.RoutineResult!>!
+static Kiln.Routines.Resume(Kiln.Villager! npc) -> System.Threading.Tasks.Task<Kiln.RoutineResult!>!

@@ -10,6 +10,11 @@ kiln-repl.dll). Engine facts: [../../re/network.md](../../re/network.md). Since 
 `managed/services/Kiln.Replication` with `Private="false" ExcludeAssets="runtime"`. The sample is
 `mods/samples/ReplWatch`.
 
+
+**Tier: Advanced (a diagnostic tool).** The inspector shows the game's own data as the game sends it: components by the
+game's names and registry indices, verified per game build. Names and indices may change with a game update; Kiln
+reads them from the running game, so nothing breaks, but a mod that stores or compares them across game builds should
+not. Mods that need stable names use Kiln's typed APIs and registries. (Owner's tiers, dev.31 decision D5.)
 ## What the game sends
 
 The game replicates its ECS world to each machine (a connection slot, 0..16) on two channels:
@@ -36,7 +41,7 @@ when another player takes a connection slot, that is a new peer and its rows sta
 
 | Row | Where | What |
 |---|---|---|
-| `repl.observe` | server, and a game client while it hosts | `Stats`, `Watch`, the commands, the capture |
+| `repl.observe` | server, and a game client (hosted or joined; a joined client sends nothing, so its rows stay empty) | `Stats`, `Watch`, the commands, the capture |
 | `repl.client` | game client | `WatchReceived`: what this client receives |
 | `repl.loopback` | lab servers only (kiln.json policy `any` and kiln.net's `labPort`) | `ReplicationLab` |
 
@@ -51,6 +56,7 @@ wrong side reads `wrong-side`. [caps.md](caps.md#rows-added-in-dev28) has the ro
 | `ReplComponentInfo? Replication.Component(string name)` | `[AnyThread]` | none | The component by its short name (as Kiln's world reads use). Null for an unknown name, or before a world was seen. `ArgumentException` for null or empty |
 | `ReplWatch Replication.Watch(EntityId entity, NetPeer? peer = null)` | `[ServerOnly]` `[TickThreadOnly]` | `repl.observe` | What `peer` (every peer when null) is sent of `entity`. `ArgumentException` for `EntityId.None` or a peer that is not connected; `InvalidOperationException` when 64 watches are on; `KilnUnavailableException("repl.observe")` when off or when kiln.repl could not hook the game for it |
 | `ReplWatch Replication.WatchReceived(EntityId entity)` | `[ClientOnly]` `[TickThreadOnly]` (the game's main thread) | `repl.client` | What this client receives of `entity`. `ArgumentException` for `EntityId.None`; `KilnUnavailableException("repl.client")` on a server or where the receive side is not supported; `InvalidOperationException` when no watch is free |
+| `IReadOnlyList<ReplPeerStats> Replication.ReceivedStats()` | `[ClientOnly]`, the game's main thread | `repl.client` | What this client received from its server, per channel (rows with `Received = true`): frames (server ticks seen), messages, bytes, creates, updates, destroy lists and ids. The first call by a mod turns these counters on for that mod until it unloads; they start over in each new world. `KilnUnavailableException("repl.client")` when off or when kiln.repl could not hook the game; `InvalidOperationException` off the main thread |
 | `ReplWatch`: `Entity`, `Peer` (null: every peer, and on a client), `IsActive` (not disposed, not ended), `HasEnded` | | | |
 | `event Action<ReplSent> ReplWatch.Sent` | tick thread | | a server's watch: one per message |
 | `event Action<ReplReceived> ReplWatch.Received` | main thread | | a client's watch: one per message |
@@ -126,8 +132,8 @@ watch.Dispose();
 
 Kiln hooks the game's send path only while something needs it: the counters' hooks (the send callback, the entity
 writer, the acknowledgement and reset handlers) while any mod or Kiln's own switch holds the stats, the watch hooks
-(the entity writer, the delta writer, the send callback) while a watch or a capture exists. With none of them the
-game's code runs as without Kiln. A watch copies only its own entity's components, into a fixed buffer per peer and
+(the entity writer, the delta writer, the send callback) while a watch or a capture exists. With none of them only the
+send step's own hook stays in (it notes the GameServer once per frame, since dev.28). A watch copies only its own entity's components, into a fixed buffer per peer and
 channel; the hooks allocate nothing. Measured on a lab server: see the 0.2.0-dev.31 release notes.
 
 A fault in kiln.repl's part of a hook turns that hook off for the session (the game's function still runs once, its
@@ -143,9 +149,9 @@ Kiln.Admin's `command` op.
 | `repl` | whether `repl.observe` is on, whether Kiln's counters are on, the commands |
 | `repl stats` | the first time turns Kiln's own counters on; then one line per peer and channel since they went on |
 | `repl stats off` | turns Kiln's own counters off (a mod that holds them keeps them on) |
-| `repl watch <entity> [peer]` | logs one kiln.log line per message about the entity (to every peer, or one) for 30 s: peer, channel, kind, tick, seq, baseline, bytes, and each component as hex (`~=` for a component the game packs) |
+| `repl watch <entity> [peer]` | writes one line per message about the entity (to every peer, or one) for 30 s into `kiln/logs/repl-watch-<entity>-<utc>.txt`: peer, channel, kind, tick, seq, baseline, bytes, and each component as hex (`~=` for a component the game packs). kiln.log gets only a start and an end line, without player names or bytes (its tail goes into support reports) |
 | `repl watch stop` | stops the watches these commands started |
-| `repl capture <peer> <seconds>` | writes everything one peer is sent for 1 to 600 s into `kiln/logs/repl-<peer>-<utc>.jsonl` |
+| `repl capture <peer> <seconds>` | writes everything one peer is sent for 1 to 600 s into `kiln/logs/repl-<peer>-<utc>.jsonl` (at most 256 MiB; a capture ends early when the peer leaves, the world stops or its owner goes) |
 | `repl component <name>` | the registry's facts about a component: index, size, hash, channels, codec |
 
 A peer is a player's name or a peer id as `repl stats` shows it (`0x81`, or a fake's `0x80000010`).
@@ -229,8 +235,13 @@ Players without Kiln (and Kiln players without a mod's content) must never be se
 
 ## Limits
 
-- 64 send watches at a time (all mods and the commands together), 16 receive watches on a client.
-- One capture at a time, 1 to 600 s.
+- 64 send watches at a time (all mods and the commands together), 16 receive watches on a client. An ended watch gives
+  its slot back by itself.
+- One capture at a time, 1 to 600 s, at most 256 MiB, into a file of its own in kiln/logs (a plain name; never a path).
+- A connection slot another player takes over within one frame: that frame is counted for neither player (the change is
+  seen at the next step); a watch for one peer does not get the new player's messages.
+- No public way to give back a mod's hold on the counters before it unloads (Kiln's own switch and `repl stats off` have
+  theirs); the cost of holding them is small (see Cost).
 - Components with the game's own codec (`PackedByGame`, `CustomCodec`; `CurrentTransform` and four more) are what the
   server coded; the client holds them rounded.
 - Fakes have no player entity, no session and no client world: their rows count what the game sent them, nothing

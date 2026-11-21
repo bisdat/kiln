@@ -1,0 +1,16 @@
+{
+  "$schema": "../../../../schema/kiln-blocks.schema.json",
+  "format": 1,
+  "routines": {
+    "day-json": {
+      "version": 1,
+      "windows": [
+        { "startMinute": 360, "endMinute": 720, "task": { "kind": "inspect" } },
+        { "startMinute": 720, "endMinute": 840, "task": { "kind": "sit" } },
+        { "startMinute": 840, "endMinute": 1260, "task": { "kind": "roam" } },
+        { "startMinute": 1260, "endMinute": 360, "priority": 5, "task": { "kind": "sleep" } }
+      ],
+      "fallback": { "kind": "idle" }
+    }
+  }
+}

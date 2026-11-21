@@ -1,0 +1,6 @@
+{
+  "format": 1,
+  "values": {
+    "shared": { "kind": "counter", "label": "H" }
+  }
+}

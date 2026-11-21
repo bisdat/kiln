@@ -289,3 +289,6 @@ static Kiln.ReplExtensionChanged<T>.operator !=(Kiln.ReplExtensionChanged<T>? le
 static Kiln.ReplExtensionChanged<T>.operator ==(Kiln.ReplExtensionChanged<T>? left, Kiln.ReplExtensionChanged<T>? right) -> bool
 static Kiln.Replication.Extension<T>(string! name, int version) -> Kiln.ReplicatedExtension<T>!
 virtual Kiln.ExtensionProvider<T>.Invoke(Kiln.EntityId entity, ref T value) -> bool
+Kiln.ReplPeerStats.Received.get -> bool
+Kiln.ReplPeerStats.Received.init -> void
+static Kiln.Replication.ReceivedStats() -> System.Collections.Generic.IReadOnlyList<Kiln.ReplPeerStats!>!

@@ -107,7 +107,7 @@ void cb_after(void* p) {
         add(s.destroy_lists, n.destroy_lists);
         add(s.destroyed_ids, n.destroyed_ids);
     }
-    if (watch_active()) watch_callback(b);
+    if (watch_active()) watch_callback(b, c->pair->gs);
     if (track_active()) track_callback(b);  // kiln.repl.net's sidecar tracking
     if (t0) {
         add(s.cb_calls);
@@ -214,11 +214,9 @@ bool install_all(const One* all, size_t n, const char* what) {
 
 }  // namespace
 
-// The send hooks (SendCallback, EntityWriter) are in now (tick thread): what a caller of the want-set asks after it.
-bool send_hooks_in() { return g_send_hooked; }
-
-// Tick thread: the hooks follow the owners (counting) and the watches (the writer and the callback serve both).
-void stats_apply_hooks() {
+// Tick thread: the hooks follow the owners (counting) and the watches (the writer and the callback serve both). True
+// when every hook wanted now is in (false: kiln.hooks refused one; it is asked again at the next call).
+bool stats_apply_hooks() {
     g_hooks_dirty.store(false, std::memory_order_relaxed);
     bool counting;
     {
@@ -259,13 +257,17 @@ void stats_apply_hooks() {
             logf(KILN_LOG_INFO, "repl: ack hooks removed (no owner holds the stats)");
         }
     }
+    return (!want_send || g_send_hooked) && (!want_tick || g_tick_hooked);
 }
+
+bool stats_send_hooked() { return g_send_hooked; }
 
 namespace {
 
 void clear_all_stats() {
     for (auto& m : g_slot)
         for (Slot& s : m) s.clear_stats();
+    watch_clear_dropped();  // the rows' dropped (the watch rings') starts at 0 with the others
 }
 
 // ---- owner revoked (any thread) ----
@@ -302,6 +304,11 @@ uint64_t median(const uint64_t* v, uint32_t n) {
 // ---- the service's side of the stats (repl.h) ----
 void stats_init() {
     for (Guard* g : {&g_cb_guard, &g_wr_guard, &g_ack_guard, &g_reset_guard}) add_guard(g);
+}
+
+// kiln_plugin_main, whatever repl.observe resolved to: a revoked owner's stats hold, send watches, capture and receive
+// watches all go (a receive watch works without repl.observe).
+void retiring_init() {
     const auto* hooks = static_cast<const KilnHooksApi*>(g_api->service(KilnStr{KILN_HOOKS_SERVICE, sizeof(KILN_HOOKS_SERVICE) - 1}, 2));
     KilnHandle h = 0;
     if (hooks && hooks->header.size >= offsetof(KilnHooksApi, subscribe_owner_retiring) + sizeof(hooks->subscribe_owner_retiring) &&
@@ -330,6 +337,7 @@ void note_send_step(uint64_t start, uint64_t end) {
 }
 
 KilnResult KILN_CALL t_stats_enable(KilnOwner owner, bool on) {
+    if (client_stats_thread()) return client_stats_enable(owner, on);  // a game client's main thread: what it receives
     if (!observe_on()) return KILN_ERR_UNAVAILABLE;
     if (!g_api->on_tick_thread()) return KILN_ERR_WRONG_THREAD;
     if (!owner) return KILN_ERR_INVALID_ARGUMENT;
@@ -345,12 +353,25 @@ KilnResult KILN_CALL t_stats_enable(KilnOwner owner, bool on) {
             g_owners[i] = g_owners[--g_owner_n];
         }
     }
-    stats_apply_hooks();
+    if (!stats_apply_hooks() && on) {
+        // kiln_repl.h: the hooks could not be installed. This owner does not hold the stats then.
+        {
+            std::lock_guard lock(g_owners_mu);
+            for (uint32_t i = 0; i < g_owner_n; ++i)
+                if (g_owners[i] == owner) {
+                    g_owners[i] = g_owners[--g_owner_n];
+                    break;
+                }
+        }
+        stats_apply_hooks();
+        return KILN_ERR_UNAVAILABLE;
+    }
     return KILN_OK;
 }
 
 KilnResult KILN_CALL t_peer_stats(KilnReplPeerStats* out, uint32_t cap, uint32_t* count) {
     if (count) *count = 0;
+    if (client_stats_thread()) return client_peer_stats(out, cap, count);
     if (!observe_on()) return KILN_ERR_UNAVAILABLE;
     if (!g_api->on_tick_thread()) return KILN_ERR_WRONG_THREAD;
     if (!count || (cap && !out)) return KILN_ERR_INVALID_ARGUMENT;

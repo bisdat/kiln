@@ -88,6 +88,9 @@ void add_guard(Guard* g);
 
 // The peer of machine m as the last Pre saw it (kiln_repl.h "Machines and peers"); flags KILN_REPL_PEER_*.
 uint32_t peer_of(uint32_t machine, uint8_t* flags);
+// The peer a record stamped with slot handle `raw` belongs to: peer_of(), unless the slot had another peer when the hook
+// ran (taken over within the frame): then `raw` itself, without flags.
+uint32_t peer_at(uint32_t machine, uint32_t raw, uint8_t* flags);
 
 uint32_t side();      // KILN_SIDE_* of this process
 bool observe_on();    // repl.observe resolved and the send step is hooked
@@ -100,13 +103,15 @@ int machine_of_ctx(uintptr_t world, uintptr_t ctx, uint8_t* pred);
 extern std::atomic<bool> g_measure;           // lab servers: time the hooks' own code (lab_hook_cost)
 extern std::atomic<uint64_t> g_observer_allocs; // allocations made inside observer code
 void stats_init();                            // kiln_plugin_main, after repl.observe resolved
+void retiring_init();                         // kiln_plugin_main, always: revoked owners lose their holds and watches
 void stats_pre();                             // tick thread, every Pre: an owner that went off the tick thread
 void stats_peer_changed(uint32_t machine);    // tick thread: machine's slot has another peer
 void snapshot_peers();                        // tick thread: which peer stands behind each machine, now
 void stats_world_stopping();
 void note_send_step(uint64_t start_tsc, uint64_t end_tsc);  // tick thread, lab: one send step
-void stats_apply_hooks();                     // tick thread: the hooks follow the stats' owners and the watches
-bool send_hooks_in();                         // tick thread: SendCallback and EntityWriter are installed now
+bool stats_apply_hooks();                     // tick thread: the hooks follow the stats' owners and the watches; false
+                                              // when a wanted hook could not be installed
+bool stats_send_hooked();                     // the SendCallback and EntityWriter hooks are in
 KilnResult KILN_CALL t_stats_enable(KilnOwner owner, bool on);
 KilnResult KILN_CALL t_peer_stats(KilnReplPeerStats* out, uint32_t cap, uint32_t* count);
 KilnResult KILN_CALL lab_hook_cost(KilnReplHookCost* out, bool reset);
@@ -122,13 +127,14 @@ bool watch_active();                          // any thread: a watch or a captur
 void watch_writer_before(const uint8_t* args, uintptr_t ctx, int32_t machine, uint8_t pred);
 void watch_writer_after(const WriterOut* out, uint64_t result);
 void watch_writer_done();
-void watch_callback(const Batch* b);
+void watch_callback(const Batch* b, uintptr_t gs);  // gs: the GameServer (the slot's handle is stamped)
 void watch_deliver();                         // tick thread, every Pre: the last frame's records to watches and capture
 void watch_apply();                           // tick thread: hot list, rings and the delta hook follow the watches
 void watch_peer_changed(uint32_t machine, uint32_t old_peer);  // tick thread
 void watch_world_stopping();                  // tick thread
 void watch_owner_retiring(KilnOwner owner);   // any thread
 uint64_t watch_dropped(uint32_t machine, uint32_t ch);
+void watch_clear_dropped();                   // tick thread, no producer running
 void watch_cost(WatchCost* out);
 void watch_cost_reset();
 KilnResult KILN_CALL t_watch(KilnOwner owner, KilnEntity e, uint32_t peer_or_all, uint32_t direction, KilnReplWatchFn fn,
@@ -141,6 +147,11 @@ bool client_on();                             // repl.client resolved here
 KilnResult client_watch(KilnOwner owner, KilnEntity e, KilnReplWatchFn fn, void* user, KilnHandle* out);
 KilnResult client_remove(KilnHandle h);
 void client_owner_retiring(KilnOwner owner);  // any thread
+// The client's own receive counters: stats_enable / peer_stats called on a game client's main thread (the client world's
+// thread, not the server world's) count what this client receives instead of what a server sends.
+bool client_stats_thread();
+KilnResult client_stats_enable(KilnOwner owner, bool on);
+KilnResult client_peer_stats(KilnReplPeerStats* out, uint32_t cap, uint32_t* count);
 
 // ---- the loopback harness (loopback.cpp) ----
 bool lab_init();                    // kiln_plugin_main, after the features resolved: what the harness needs

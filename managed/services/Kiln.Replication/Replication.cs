@@ -12,11 +12,14 @@ namespace Kiln;
 /// traffic.
 /// <para>The counters and watches cost a little on the server's network jobs while they are on: Kiln hooks the game's
 /// send path only while some mod holds the stats or a watch, and a watch copies only its own entity.</para>
+/// <para>A diagnostic tool of the Advanced tier: it names the game's own components (their names and registry indices,
+/// verified per game build) and may change with game updates. Mods that need stable names use Kiln's typed APIs.</para>
 /// </summary>
 public static partial class Replication
 {
     private static readonly object Gate = new();
     private static readonly HashSet<ulong> StatsOwners = [];
+    private static readonly HashSet<ulong> ReceiveOwners = [];  // ReceivedStats' holders (kiln.repl counts them apart)
     private static ulong _serviceOwner;
 
     /// <summary>
@@ -37,6 +40,59 @@ public static partial class Replication
         Services.RequireTickThread("Replication.Stats");
         RequireObserve();
         return StatsFor(OwnerOfCaller(), ModContext.CurrentMod);
+    }
+
+    /// <summary>
+    /// What this game client receives from its server, per channel: messages, bytes, creates, updates, destroy lists, and
+    /// the server ticks seen. The first call by a mod turns these counters on for that mod until it unloads (they count
+    /// from the moment the first holder turned them on, and start over in each new world). Rows have
+    /// <see cref="ReplPeerStats.Received"/> set. Call it on the game's main thread (a client mod's tick).
+    /// </summary>
+    /// <exception cref="KilnUnavailableException"><c>repl.client</c> is off: not a game client, or this game build's
+    /// receive side is not supported.</exception>
+    /// <exception cref="InvalidOperationException">Not on the game's main thread.</exception>
+    [ClientOnly]
+    [RequiresCapability(ReplicationCaps.Client)]
+    public static IReadOnlyList<ReplPeerStats> ReceivedStats()
+    {
+        ReplicationCaps.Rows.Ensure();
+        if ((ReplNative.Capabilities() & ReplNative.CapClient) == 0 || !Capabilities.Is(ReplicationCaps.Client))
+            throw ReplicationCaps.Off(ReplicationCaps.Client, "the receive side runs on a game client");
+        var owner = OwnerOfCaller();
+        var mod = ModContext.CurrentMod;
+        lock (Gate)
+        {
+            if (!ReceiveOwners.Contains(owner))
+            {
+                var rc = ReplNative.StatsEnable(owner, true);
+                if (rc == ReplNative.WrongThread) throw new InvalidOperationException("Replication.ReceivedStats must be called on the game's main thread");
+                if (rc == ReplNative.Unavailable) throw ReplicationCaps.Off(ReplicationCaps.Client, "kiln.repl could not hook the game's message store");
+                if (rc != ReplNative.Ok) throw new InvalidOperationException($"kiln.repl refused the counters ({rc})");
+                ReceiveOwners.Add(owner);
+                if (mod is not null && mod.Owner == owner) mod.Retiring += () => { lock (Gate) ReceiveOwners.Remove(owner); };
+            }
+        }
+        var rcRows = ReplNative.PeerStatsAll(out var rows);
+        if (rcRows == ReplNative.WrongThread) throw new InvalidOperationException("Replication.ReceivedStats must be called on the game's main thread");
+        if (rcRows != ReplNative.Ok) throw new InvalidOperationException($"kiln.repl could not list the counters ({rcRows})");
+        NetPeer? server = null;
+        try
+        {
+            server = Network.Server;
+        }
+        catch (Exception e) when (e is TypeLoadException or FileNotFoundException or MissingMethodException)
+        {
+            // no Kiln.Network: the rows name no peer
+        }
+        var list = new List<ReplPeerStats>(rows.Length);
+        foreach (var r in rows)
+        {
+            if ((r.Flags & ReplNative.PeerReceived) == 0) continue;
+            list.Add(new ReplPeerStats(server, (ReplChannel)r.Channel, (long)r.Frames, (long)r.Messages, (long)r.Bytes, (long)r.Refused,
+                (long)r.Creates, (long)r.Updates, (long)r.DestroyLists, (long)r.DestroyedIds, (long)r.Unchanged, (long)r.TooBig,
+                (long)r.Acks, (long)r.Resets, (long)r.Dropped) { PeerId = r.Peer, Received = true });
+        }
+        return list;
     }
 
     /// <summary>What the game's component registry says about the component called <paramref name="name"/> (its
@@ -192,22 +248,51 @@ public static partial class Replication
 
     // ---- component names (hash -> the game's short name), for watch events ----
     private static readonly ConcurrentDictionary<uint, string> Names = new();
+    private static HashSet<string>? _ambiguous;
 
+    private static string Short(string name)
+    {
+        var colon = name.LastIndexOf("::", StringComparison.Ordinal);
+        return colon >= 0 ? name[(colon + 2)..] : name;
+    }
+
+    // Short names two of the game's component types share: those components are named by their qualified name instead.
+    private static HashSet<string> Ambiguous()
+    {
+        if (_ambiguous is { } known) return known;
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var t in GameTypes.Components)
+            {
+                var s = Short(t.Name);
+                counts[s] = counts.GetValueOrDefault(s) + 1;
+            }
+        }
+        catch (Exception)
+        {
+            // kiln.types is not there: nothing is known to collide
+        }
+        return _ambiguous = counts.Where(kv => kv.Value > 1).Select(kv => kv.Key).ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>The key a component has in an event's Components: the game's short name, its qualified name when another
+    /// component type shares the short name, "#&lt;index&gt;" without kiln.types.</summary>
     internal static string NameOf(uint hash, ushort index)
     {
         if (Names.TryGetValue(hash, out var n)) return n;
-        string? name = null;
+        GameType? type = null;
         try
         {
-            name = GameTypes.ByHash(hash)?.Name;
+            type = GameTypes.ByHash(hash);
         }
         catch (Exception)
         {
             // kiln.types is not there: the registry index names it
         }
-        if (string.IsNullOrEmpty(name)) return "#" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var colon = name.LastIndexOf("::", StringComparison.Ordinal);
-        if (colon >= 0) name = name[(colon + 2)..];
+        if (type is null || string.IsNullOrEmpty(type.Name)) return "#" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var name = Short(type.Name);
+        if (Ambiguous().Contains(name) && !string.IsNullOrEmpty(type.QualifiedName)) name = type.QualifiedName;
         return Names[hash] = name;
     }
 }

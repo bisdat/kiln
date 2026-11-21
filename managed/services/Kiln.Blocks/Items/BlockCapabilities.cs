@@ -67,6 +67,7 @@ internal static class BlockCapabilities
             Report(WeaponMoves, MovesRow(gamedata));
             Report(MoveFollowUps, FollowUpsRow(gamedata));
             Report(AnimatedHeld, HeldRow(gamedata, Assets.Available));
+            ReportRoutines();
         }
         catch (Exception e) when (e is InvalidOperationException or ArgumentException or NotSupportedException or DllNotFoundException or EntryPointNotFoundException)
         {
@@ -77,4 +78,36 @@ internal static class BlockCapabilities
 
     /// <summary>For tests: report again at the next <see cref="Ensure"/>.</summary>
     internal static void Rearm() => Interlocked.Exchange(ref _reported, 0);
+
+    // ---- villager routines (0.2.0-dev.31; docs/kiln/services/routines.md) ------------------------------------------
+    // routines.decisions is a sigdb feature kiln.routines serves (the villager task chooser and its sleep check); nothing
+    // holds it (its guided check 16g-cc16g is the owner's game pass); Kiln.Blocks only lowers it where the service is not here (BlocksRows.Report:
+    // a rows report, never a mod's own call, asks for the table), as Kiln.Queries does for the voxel ray. routines.anchors (a task that walks to an authored place) and routines.jobs (work at a station)
+    // are names the wire format reserves: declared, and off in this version.
+    internal const string RoutinesService = "kiln.routines", RoutineDecisions = "routines.decisions",
+        RoutineAnchors = "routines.anchors", RoutineJobs = "routines.jobs";
+
+    /// <summary>The row of the two reserved names. Pure.</summary>
+    internal static Row RoutineLaterRow(string what) =>
+        new(CapabilityState.Unavailable, CapabilityReason.Policy, $"not in this version of Kiln: {what}");
+
+    /// <summary>Whether <see cref="RoutineDecisions"/> works here, from what the process has. Pure.
+    /// <paramref name="service"/>: kiln.routines' table is here; <paramref name="feature"/>: the row reads available
+    /// (the symbols resolved and the client gate does not hold it).</summary>
+    internal static bool RoutinesOn(bool service, bool feature) => service && feature;
+
+    private static void ReportRoutines()
+    {
+        Report(RoutineAnchors, RoutineLaterRow("a routine task that walks to an authored place"));
+        Report(RoutineJobs, RoutineLaterRow("a routine task that works at a station"));
+    }
+
+    /// <summary>Throws <see cref="KilnUnavailableException"/> naming routines.decisions unless kiln.routines is here and
+    /// the row is available.</summary>
+    internal static void RequireRoutines()
+    {
+        Ensure();
+        if (RoutinesOn(ServiceCaps.Probe(RoutinesService), Capabilities.Is(RoutineDecisions))) return;
+        throw ServiceCaps.Unavailable(RoutineDecisions, ServiceCaps.Probe(RoutinesService) ? null : "kiln.routines is not loaded");
+    }
 }

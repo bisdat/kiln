@@ -1,0 +1,20 @@
+<Project>
+  <!-- Sample: villager routines (docs/kiln/services/routines.md). A day plan for villagers, written twice: "day" in C# with
+       Blocks.Define (the handle form) and "day-json" in blocks/routines.json, the same plan in data; plus "awake", Idle all
+       day (the keep-awake plan). /routine assign gives a plan to the villager nearest to you (or one named by its id),
+       /routine resume ends the suspension a manual command (go to, teleport, stay, follow) put on it. The fixture of the
+       guided check 16g-cc16g. Server side only: players' games need nothing, so a game without Kiln can join. -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>villager-routine</KilnModId>
+    <KilnModName>Villager routine (sample)</KilnModName>
+    <Version>0.1.0</Version>
+    <Description>A day plan for villagers: inspect in the morning, sit at midday, roam in the afternoon, sleep at night. /routine assign, /routine resume.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <KilnServices>Blocks;Chat;Creatures;Time;World</KilnServices>
+    <!-- routines run on the server only and ask nothing of players' games -->
+    <KilnSide>server</KilnSide>
+    <KilnClients>none</KilnClients>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

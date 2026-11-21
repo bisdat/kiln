@@ -348,6 +348,8 @@ public sealed class ReplicationTests
         using var kiln = Started(out var mod);
         // the kit's mods run on the server side: the receive side is a game client's
         Assert.Equal("repl.client", Assert.Throws<KilnUnavailableException>(() => kiln.As(mod, () => Replication.WatchReceived(Entity))).Capability);
+        Assert.Equal("repl.client", Assert.Throws<KilnUnavailableException>(() => kiln.As(mod, Replication.ReceivedStats)).Capability);
+        Assert.Empty(kiln.Repl.StatsCalls);  // nothing held on the way
 
         kiln.Capabilities.Override("repl.observe", false);
         Assert.Equal("repl.observe", Assert.Throws<KilnUnavailableException>(() => kiln.As(mod, Replication.Stats)).Capability);

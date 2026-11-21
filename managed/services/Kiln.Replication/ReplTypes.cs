@@ -56,6 +56,12 @@ public sealed record ReplPeerStats(NetPeer? Peer, ReplChannel Channel, long Fram
 
     /// <summary>A lab's fake player (<see cref="ReplicationLab"/>).</summary>
     public bool Fake { get; init; }
+
+    /// <summary>A game client's own row (<see cref="Replication.ReceivedStats"/>): what this client received from its
+    /// server on <see cref="Channel"/>. <see cref="Peer"/> is the server's link when Kiln.Network knows it; only
+    /// <see cref="Frames"/> (server ticks seen), <see cref="Messages"/>, <see cref="Bytes"/>, <see cref="Creates"/>,
+    /// <see cref="Updates"/>, <see cref="DestroyLists"/>, <see cref="DestroyedIds"/> and <see cref="Dropped"/> count.</summary>
+    public bool Received { get; init; }
 }
 
 /// <summary>What the game's component registry says about one component (<see cref="Replication.Component"/>).</summary>
@@ -82,8 +88,9 @@ public sealed record ReplComponentInfo(string Name, int Index, int Size, uint Ha
 /// update against the entity's template.</param>
 /// <param name="PayloadBytes">The message's payload bytes as sent (the delta, after its header).</param>
 /// <param name="Gap">Kiln dropped records before this one (its buffer was full): an earlier message is missing.</param>
-/// <param name="Components">The full values of every component the message carried, by component name: the state the
-/// game coded the delta from, so a watch started mid-session shows full values at once.</param>
+/// <param name="Components">The full values of every component the message carried, by the game's component name (its
+/// qualified name when two component types share the short name): the state the game coded the delta from, so a watch
+/// started mid-session shows full values at once.</param>
 /// <param name="PackedByGame">The components among them that the game packs with a codec of its own: a client sees them
 /// rounded, so a difference from these bytes on the client is expected.</param>
 public sealed record ReplSent(NetPeer? Peer, ReplChannel Channel, ReplKind Kind, EntityId Entity, uint Tick, uint Seq,

@@ -265,7 +265,7 @@ KilnResult KILN_CALL t_track(KilnOwner owner, uint32_t direction, KilnReplTrackF
         const uint64_t h = g_tracks.add(owner, KILN_REPL_SEND, fn, user, kTrackTag);
         if (!h) return KILN_ERR_INVALID_ARGUMENT;  // 16 tracks
         apply_send();
-        if (!g_send_on.load(std::memory_order_relaxed) || !send_hooks_in()) {  // no rings, or the send hooks could not go in
+        if (!g_send_on.load(std::memory_order_relaxed) || !stats_send_hooked()) {  // no rings, or the send hooks could not go in
             g_tracks.remove(h);
             apply_send();
             return KILN_ERR_UNAVAILABLE;
