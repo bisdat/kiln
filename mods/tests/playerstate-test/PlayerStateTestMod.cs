@@ -183,10 +183,12 @@ public sealed class PlayerStateTestMod : Mod
                 await TestAim(p);
                 await TestStatesAndActions(p);
                 await TestConsume(p);
+                await TestUseItemNotReady(p);
                 await TestFakeInput(p);
                 await TestEquipment(p);
                 await TestClientTiming(p);
                 await TestRealInput(p);
+                await TestUseItem(p);
                 await TestCost(p);
                 await TestOtherThread(p);
             }
@@ -602,6 +604,46 @@ public sealed class PlayerStateTestMod : Mod
             Check(_consumed.Any(c => c.Kind == PlayerConsumeKind.Potion), "a potion: PlayerConsumedEvent");
             await WaitIdle(e);
         }
+    }
+
+    // ---- Abilities.UseItem (since 0.2.0-dev.30.3, GitHub issue #110): the public API on the game's own consume path ----
+    private async Task TestUseItemNotReady(EntityId e)
+    {
+        var slot = await Give(e, Mushroom, 1);
+        if (slot is null) return;
+        if (PlayerStates.Is(e, PlayerStateId.IsReadyForGameplay)) { Info("UseItem: the character is ready already: no NotReady check"); return; }
+        var r = Abilities.UseItem(e, slot.Slot);
+        Check(r == ItemUseResult.NotReady, $"UseItem before the character is ready for gameplay: {r}");
+    }
+
+    private async Task TestUseItem(EntityId e)
+    {
+        await WaitIdle(e);
+        var slot = await Give(e, Mushroom, 3);
+        if (slot is null) { Check(false, "UseItem: the character takes mushrooms"); return; }
+        int Count() => Items.Read(e)?.Slots.FirstOrDefault(s => s.Slot == slot.Slot)?.Count ?? 0;
+        var before = Count();
+        _consumed.Clear();
+        var r = Abilities.UseItem(e, slot.Slot);
+        Check(r == ItemUseResult.Started, $"UseItem: a mushroom from the character's own slot: {r}");
+        Check(Count() == before, $"UseItem: nothing is taken at the call ({Count()} of {before})");
+        await Steps(1);
+        var again = Abilities.UseItem(e, slot.Slot);
+        Check(again == ItemUseResult.Busy, $"UseItem again while the first use plays: {again}");
+        for (var i = 0; i < 60 && _consumed.Count == 0; i++) await Steps(1);
+        Check(_consumed.Count == 1 && Count() == before - 1, $"UseItem: the game's consume took one: {before} -> {Count()}, PlayerConsumedEvent {_consumed.Count}");
+        await Steps(4);
+        var food = PlayerStates.BuffsOf(e).Where(b => b.Slot == "Food").ToList();
+        Info("UseItem: food buffs " + string.Join(", ", food.Select(b => $"0x{b.Id:x8} left {b.Remaining?.TotalSeconds:F0} s level {b.Level}")));
+        Check(food.Count > 0, "UseItem: the food buff is on the character");
+        await WaitIdle(e);
+
+        var empty = Items.Read(e)?.Slots.FirstOrDefault(s => s.IsEmpty);
+        if (empty is not null) Check(Abilities.UseItem(e, empty.Slot) == ItemUseResult.EmptySlot, "UseItem on an empty slot: EmptySlot");
+        var sword = await Give(e, Sword, 1);
+        if (sword is not null) Check(Abilities.UseItem(e, sword.Slot) == ItemUseResult.NotConsumable, "UseItem on a sword: NotConsumable");
+        Check(Abilities.UseItem(e, SlotId.Of(new EntityId(0xFFFFF0), 0)) == ItemUseResult.NotOwnSlot, "UseItem on a slot of no inventory of the character: NotOwnSlot");
+        Check(Count() == before - 1, "UseItem: the refusals took nothing");
     }
 
     // ---- fake input: what the game itself does with PlayerInput on a character with no client ----

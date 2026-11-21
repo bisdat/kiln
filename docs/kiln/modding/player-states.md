@@ -482,4 +482,4 @@ Commands a client sends with a version number, by the game's field names. All ra
 | `SongState`, `SongSelection` | no | `PlayingInstrument` says that; the song is in `World.ReadBytes` |
 | `CombatStance` end time, `PlayerLowHealth`, `SafePlayerPosition`, `TeleportCount` | no | Timers and bookkeeping. `InCombat`, `Health`, `TeleportEvent` |
 | Hit reactions | as actions | `ActionHitReaction`; damage and knockback: `EntityHurtEvent`, `EntityKnockbackEvent` |
-| `ConsumeItemEvent`, `ItemActionType.Consume` | no | Nothing in the game sends or handles them. Eating goes through a sequence: `PlayerConsumeEvent` |
+| `ConsumeItemEvent`, `ItemActionType.Consume` | no | Nothing in the game sends or handles them. Eating goes through a sequence: `PlayerConsumeEvent`; a mod makes a player eat with `Abilities.UseItem` (0.2.0-dev.30.3) |
