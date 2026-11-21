@@ -6,7 +6,7 @@
 import * as kiln from '../../api/commands';
 import { pickPaths } from '../../ui/DropZone';
 import * as sv2c from '../shared/sv2c-web.mjs';
-import { parseCharacter, buildCharacter } from '../shared/character.mjs';
+import { parseCharacter, buildCharacter, readCharacter, modDataIn } from '../shared/character.mjs';
 import * as know from '../shared/knowledge.mjs';
 import items from '../data/items.json';
 import skills from '../data/skills.json';
@@ -49,15 +49,19 @@ async function load(path) {
   const save = await sv2c.parse(await readFile(path), decompress, ['character_data', 'player_character', 'player_knowledge']);
   const pc = save.blocks.find((b) => b.name === 'player_character');
   let character = null, error = null;
-  try { character = parseCharacter(pc.payload, isItem, isSkill, ehEquipavel); } catch (e) { error = e.message; }
-  // Kiln: a save that holds items nobody defines any more (a mod that is gone) is read again accepting any item id;
-  // those stacks show as "Unknown item (0x…)" and saving stays refused (checkModel), so nothing is written blindly
-  if (!character) {
-    try {
-      character = parseCharacter(pc.payload, (id) => id > 0xffff, isSkill, (id) => !isItem(id) || ehEquipavel(id));
-      error = t('Itens desconhecidos neste save (mod removido?): somente leitura');
-    } catch { /* keep the first error */ }
-  }
+  // Kiln: a save that holds items nobody defines any more (a mod that is gone) is read again accepting any item id
+  // (shared/character.mjs readCharacter); those stacks show as "Unknown item (0x…)". A character the editor cannot
+  // write whole stays read-only, with the reason: a mod's own data in the block (Belt Lantern's lantern record), items
+  // no table knows, or an inventory whose place in the save is a guess. Writing would put an empty inventory over the
+  // real one, or break the mod's record (player report 2026-11-20)
+  const mods = [...new Set([...modDataIn(pc.payload), ...(pc.raw ? modDataIn(pc.raw) : [])])];
+  try {
+    const r = readCharacter(pc.payload, isItem, isSkill, ehEquipavel);
+    character = r.character;
+    if (mods.length) error = t('Este save guarda dados de um mod que o editor não sabe gravar ({mods}): somente leitura', { mods: mods.join(', ') });
+    else if (r.unknownItems) error = t('Itens desconhecidos neste save (mod removido?): somente leitura');
+    else if (character._invUnsure) error = t('Inventário não lido com certeza neste save (mochila e barras): somente leitura');
+  } catch (e) { error = e.message; }
   let knowledge = null;
   const pk = save.blocks.find((b) => b.name === 'player_knowledge');
   try { if (pk?.payload) knowledge = know.parseBlock(pk.payload); } catch (e) { knowledge = null; }
@@ -71,6 +75,9 @@ function publicModel(path, modified, s) {
     level: c?.level, xp: c?.xp, skills: c?.skills ?? [], equipment: c?.equipment ?? [], main: c?.main ?? [], extra: c?.extra ?? [],
     knowledge: s.knowledge?.entries ?? null,
     equipMask: c?._equipMask ?? 0, // posiciona cada peça no espaço certo do boneco
+    // Kiln: the inventory's place in the save is a guess (shared/character.mjs): read-only, and the Inventory tab says
+    // so when it read empty
+    inventoryUnsure: !!c?._invUnsure,
     blocks: s.save.blocks.map((b) => ({ name: b.name, size: b.payload ? b.payload.length : b.size })),
   };
 }
@@ -127,7 +134,7 @@ export default {
   },
   async browseSave() {
     // Kiln: the launcher's dialog helper (plugin-dialog; null in a plain browser)
-    const r = await pickPaths({ filters: [{ name: t('Save do Enshrouded'), extensions: ['ksd'] }], multiple: false });
+    const r = await pickPaths({ filters: [{ name: t('Save do Enshrouded'), extensions: ['ksd'] }], multiple: false, kind: 'editorSave' });
     return r?.[0] ?? null;
   },
   async writeSave(path, model) {

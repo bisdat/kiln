@@ -27,6 +27,14 @@ image.workspace = true
 
 tracing.workspace = true
 
-mlua = { version = "0.11.2", features = ["lua54", "error-send", "vendored"] }
+# kiln-eml: use the exact shared version after the binding differential, without changing EML bindings.
+mlua.workspace = true
 once_cell = "1.21.3"
 ouroboros = "0.18.5"
+
+# (the test lock/spawn gate)
+[features]
+# kiln-eml: test-only. Builds the test lock/spawn gate (src/test_gate.rs) and its holds around this crate's file locks,
+# for kiln-eml's unit tests, whose [dev-dependencies] are the only place that enables it. Never a release feature: the
+# shipped kiln-eml.dll is built without it (`cargo tree -e no-dev,features -p kiln-eml` does not list it).
+test-gate = []

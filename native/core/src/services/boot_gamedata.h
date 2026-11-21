@@ -280,6 +280,7 @@ class Reader {
             has_resource_list_ = std::filesystem::is_regular_file(dir_ / kResources, ec) && std::filesystem::is_regular_file(dir_ / kResourcesData, ec);
         }
         open_ = true;
+        ++opens_;
         return true;
     }
 
@@ -312,6 +313,31 @@ class Reader {
     std::string key() const {
         std::lock_guard lk(mutex_);
         return key_;
+    }
+
+    // For a digest of what the snapshot serves (boot_archive_view.h): the files it serves and where they are.
+    /// index.json's checksums, file name -> SHA-256 hex, in index.json's order; empty for a snapshot written before them.
+    std::vector<std::pair<std::string, std::string>> checksums() const {
+        std::lock_guard lk(mutex_);
+        return checksums_;
+    }
+    /// The files a read can open: the eight of the four kinds, and the two of the resource list when it serves.
+    std::vector<std::string> files() const {
+        std::lock_guard lk(mutex_);
+        std::vector<std::string> out;
+        for (const char* kind : kKinds)
+            for (const char* ext : {".index.json", ".data"}) out.push_back(std::string(kind) + ext);
+        if (has_resource_list_) out.insert(out.end(), {kResources, kResourcesData});
+        return out;
+    }
+    std::filesystem::path dir() const {
+        std::lock_guard lk(mutex_);
+        return dir_;
+    }
+    /// How many times open() found a snapshot: a digest cached for one opening is stale after the next.
+    uint64_t opens() const {
+        std::lock_guard lk(mutex_);
+        return opens_;
     }
 
     /// One query of the grammar kiln.boot checked (item:, template:, skill:, material:, resource:, names:<kind>,
@@ -679,6 +705,7 @@ class Reader {
 
     mutable std::mutex mutex_;
     bool open_ = false;
+    uint64_t opens_ = 0;
     bool verified_ = false;
     std::string damaged_;                                      // why verify() closed the reader
     std::vector<std::pair<std::string, std::string>> checksums_;  // file name -> SHA-256 hex (empty: an older snapshot)

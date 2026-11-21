@@ -1,0 +1,1 @@
+{"version":2,"records":[{"seq":1,"label":"before failure","kind":"note","text":"still recorded"}],"fixture_error":{"t":"string","v":"\"fixture:3: fixture failed\""}}

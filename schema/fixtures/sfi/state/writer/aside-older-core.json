@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "writer": "kiln-sfi",
+  "kilnSfi": "0.1.0",
+  "launch": {
+    "launchId": null,
+    "planHash": null,
+    "pid": 4242,
+    "processStartMs": 1763520000000,
+    "side": "client",
+    "profile": null,
+    "backend": {
+      "selected": "none",
+      "source": "absent",
+      "reasonCode": "no-kiln-launch",
+      "text": "this core has no kiln.launch record kiln-sfi can read"
+    },
+    "frozenAtMs": null
+  },
+  "phase": "aside",
+  "reason": {
+    "code": "no-kiln-launch",
+    "text": "backend negotiation not integrated"
+  },
+  "incomplete": false,
+  "previousStart": {
+    "disposition": "suspect",
+    "launchId": null,
+    "pid": null
+  },
+  "startedMs": 1763520000200,
+  "updatedMs": 1763520004000,
+  "warningRevision": 0,
+  "packages": [],
+  "carriedSaveSensitive": []
+}

@@ -6,6 +6,9 @@ installed ShroudForge. If you have ShroudForge installed, you keep it: your mod 
 are, and with one switch Kiln can run your own ShroudForge copy instead of the bundled one. Design and API coverage:
 [shroudforge-compat.md](shroudforge-compat.md).
 
+Kiln can also run ShroudForge mods itself, without a ShroudForge runtime: see
+[kiln mode](shroudforge-kiln-mode.md) and the launcher's [ShroudForge card](launcher/shroudforge-backend.md).
+
 ## For players
 
 1. Install Kiln. Its `shroudforge` component (on by default) puts ShroudForge's runtime in `kiln/plugins/shroudforge/`.
@@ -26,7 +29,7 @@ are, and with one switch Kiln can run your own ShroudForge copy instead of the b
    → "Use my installed ShroudForge"** in the launcher (in the file: `"shroudforge": {"useInstalled": true}`), then
    restart the game. If your copy is missing or broken, Kiln uses its own and says so in `kiln.log`.
 5. Start the game or the server through Kiln. `kiln/logs/kiln.log` names the runtime that runs
-   (`ShroudForge runtime: bundled 1.7.9 ...` or `installed ...`) and shows ShroudForge's log as `[sf] ...` lines, with
+   (`ShroudForge runtime: bundled 1.8.1 ...` or `installed ...`) and shows ShroudForge's log as `[sf] ...` lines, with
    ShroudForge's own errors and warnings as kiln.log errors and warnings (0.2.0-dev.29.18; before, every `[sf]` line was
    logged as info, and the support report's count of errors left them out).
    `kiln/state/shroudforge.json` says how ShroudForge ran:

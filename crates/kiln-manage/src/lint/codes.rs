@@ -96,6 +96,7 @@ rules! {
     UNKNOWN_LANGUAGE = "KL404", "unknown-language", Info, "a language key no game language uses";
     ASSET_MODE = "KL405", "asset-mode", Error, "a resource \"override\" the game lacks, or a \"new\" one it has";
     CRAFTED_ROLLED = "KL406", "crafted-rolled", Warning, "a recipe makes an item that rolls its rarity or level, unlike its tooltip";
+    HIDDEN_ENTRY = "KL407", "hidden-entry", Info, "a game entry whose name marks it old, test or unused (DEPRECATED, DONOTPLACE, TEST...)";
 
     // KL5xx: files, assets and cook recipes
     FILE_MISSING = "KL501", "file-missing", Error, "a file the mod names is not there";
@@ -117,6 +118,9 @@ rules! {
     THIRD_PARTY = "KL603", "third-party-notice", Warning, "bundled third-party files without a licence notice";
     GAME_DATA = "KL604", "game-data", Error, "game files inside a mod (mods ship sources and a recipe)";
     COOKED_COMMITTED = "KL605", "cooked-committed", Warning, "cooked game-derived files not ignored by git";
+
+    // KL7xx: mods together
+    DATA_CONFLICT = "KL701", "data-conflict", Warning, "two mods' data packs give one field of one game entry different values (the later mod wins)";
 
     // KL9xx: the linter itself
     NO_CATALOG = "KL901", "no-catalog", Info, "no game-data catalog: references to the game are not checked";

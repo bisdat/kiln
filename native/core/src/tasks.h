@@ -205,6 +205,12 @@ private:
 
 // ---- kiln.tasks v1: the public table's behaviour over one Pool (services/tasks.cpp binds it to the core) ----
 
+// The hop lines (#83): the two worlds' session lines (world_line), and the main menu's (KILN_TASKS_WORLD_MENU), which
+// only takes the managed host's hops: no Post edges, no AFTER_STEP, no submit_in.
+constexpr bool hop_world(uint32_t world) { return session_world(world) || world == KILN_TASKS_WORLD_MENU; }
+constexpr std::size_t hop_line(uint32_t world) { return world == KILN_TASKS_WORLD_MENU ? 2 : world_line(world); }
+constexpr std::size_t kHopLines = 3;
+
 // What the binding needs from the core, injectable so host tests drive it without Windows or a game.
 class ServiceEnv {
 public:
@@ -315,11 +321,17 @@ public:
     std::size_t run_tick_hops(uint32_t world);
     std::size_t pending_tick_hops(uint32_t world) const;
     std::size_t run_tick_hops() { return run_tick_hops(KILN_WORLD_SERVER); }
+    // The game's UI frame while no world runs (#83; the host table's menu_frame): opens a menu session when none is
+    // live and neither world has a live session, then runs that session's hops (run_tick_hops(KILN_TASKS_WORLD_MENU),
+    // 1 ms per owner and 2 ms per frame). 0, and nothing opened, while a world runs. A world's start (session_started,
+    // either kind) ends the menu session: its pending hops are dispatched cancelled on the starting thread.
+    std::size_t menu_frame();
     std::size_t pending_tick_hops() const { return pending_tick_hops(KILN_WORLD_SERVER); }
 
     static constexpr std::size_t kHopsPerOwner = 64;
     static constexpr uint64_t kHopOwnerNs = 2ull * 1000 * 1000, kHopStepNs = 4ull * 1000 * 1000;
     static constexpr uint64_t kClientHopOwnerNs = 1ull * 1000 * 1000, kClientHopStepNs = 2ull * 1000 * 1000;
+    static constexpr uint64_t kMenuHopOwnerNs = 1ull * 1000 * 1000, kMenuHopStepNs = 2ull * 1000 * 1000;
 
     // Test seams (outside every lock): submit passed its owner_alive check / AFTER_STEP captured its snapshot.
     enum class Point : uint32_t { AfterAliveCheck, AfterCapture, HopBeforePush };
@@ -338,6 +350,7 @@ private:
     ServiceEnv& env_;
     mutable std::mutex mutex_;  // the session snapshots
     Snapshot snap_[kWorldLines];  // per world_line
+    Snapshot menu_;               // the menu's line (#83): its newest session, live while open (no edges)
     uint64_t refused_edges_[kWorldLines] = {};
     std::atomic<bool> exiting_{false};
     std::atomic<KilnHostDispatchFn> dispatch_{nullptr};  // the managed host's one dispatcher (host_bind)
@@ -356,7 +369,7 @@ private:
         bool open = false;
         uint32_t session = 0;
     };
-    HopQueue hops_[kWorldLines];
+    HopQueue hops_[kHopLines];  // per hop_line
     KilnResult push_hop(KilnLease lease, uint32_t world, uint32_t session, bool check_session);
     // `count_apply`: the dispatch is accounted in the window's apply stats here (the tick's
     // run_tick_hops accounts its whole round itself, so it passes false).

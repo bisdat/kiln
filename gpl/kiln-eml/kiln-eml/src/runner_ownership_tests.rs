@@ -63,7 +63,11 @@ impl Game {
 }
 
 impl Drop for Game {
-    fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.root); }
+    fn drop(&mut self) {
+        // A run keeps the install lock; the test gate creates no process while it is kept (release_game_lock).
+        release_game_lock(&self.cfg.game_dir);
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
 }
 
 #[test]
@@ -80,6 +84,15 @@ fn idle_reports_unrecorded_recovery_paths_and_their_sizes() {
     assert_eq!(std::fs::read(g.game().join(&temp)).unwrap(), b"12345");
 }
 
+// The identity token mod-loader-lua's FileIdentity writes into a bound cleanup record (unix: device and inode).
+#[cfg(unix)]
+fn identity_token(path: &Utf8Path) -> String {
+    use std::os::unix::fs::MetadataExt;
+    let m = std::fs::metadata(path).unwrap();
+    format!("unix:{:x}:{:x}", m.dev(), m.ino())
+}
+
+#[cfg(unix)]
 #[test]
 fn a_foreign_child_of_a_recorded_stage_is_retained_and_reported() {
     let g = Game::new("recorded-foreign", "");
@@ -92,12 +105,38 @@ fn a_foreign_child_of_a_recorded_stage_is_retained_and_reported() {
     let ownership = g.game().join("kiln/eml/ownership");
     std::fs::create_dir_all(&ownership).unwrap();
     let record = ownership.join(format!("cleanup-{id}.json"));
-    std::fs::write(&record, serde_json::to_vec(&serde_json::json!({"format":1,"stem":"enshrouded","name":name})).unwrap()).unwrap();
+    // a bound (format 2) record, as create_writer leaves it when a run dies after staging
+    let proof = serde_json::json!({"format":2,"stem":"enshrouded","name":name,
+        "root":identity_token(g.game()),"stage":identity_token(&stage)});
+    std::fs::write(&record, serde_json::to_vec(&proof).unwrap()).unwrap();
     let out = g.without_mods();
     assert!(!stage.join("enshrouded.kfc_resources").exists() && !record.exists());
     assert_eq!(std::fs::read(stage.join("notes.txt")).unwrap(), b"keep these");
     let reason = out.reason.as_deref().unwrap_or("");
     assert!(reason.contains("notes.txt") && reason.contains("10 bytes"), "foreign child not reported: {out:?}");
+}
+
+// dev.29 wrote unbound (format 1) records. Such a record is no proof that the folder at its path is the one it was
+// written for, so recovery keeps the folder and the record and reports them with a reason code.
+#[test]
+fn an_unbound_stage_record_keeps_its_folder_and_reports_a_reason_code() {
+    let g = Game::new("unbound-stage", "");
+    let id = "1f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+    let name = format!(".kiln-eml-stage-{id}");
+    let stage = g.game().join(&name);
+    std::fs::create_dir(&stage).unwrap();
+    std::fs::write(stage.join("enshrouded.kfc_resources"), b"staged").unwrap();
+    let ownership = g.game().join("kiln/eml/ownership");
+    std::fs::create_dir_all(&ownership).unwrap();
+    let record = ownership.join(format!("cleanup-{id}.json"));
+    std::fs::write(&record, serde_json::to_vec(&serde_json::json!({"format":1,"stem":"enshrouded","name":name})).unwrap()).unwrap();
+    for _ in 0..2 {
+        let out = g.without_mods();
+        assert_eq!(std::fs::read(stage.join("enshrouded.kfc_resources")).unwrap(), b"staged");
+        assert!(record.exists(), "the unbound record is kept");
+        let reason = out.reason.as_deref().unwrap_or("");
+        assert!(reason.contains(&format!("[eml-cleanup-unbound] {name}")), "no reason code for the kept folder: {out:?}");
+    }
 }
 
 const CONTENT: &str = r#"game.assets.create_content(buffer.wrap("kiln fixture content"))"#;
@@ -327,6 +366,21 @@ fn publishing_over_shroudforge_asset_mods_names_the_ones_this_start_lacks() {
     assert_eq!((unchanged.phase, unchanged.cached, unchanged.reason.as_deref()), (Phase::Done, true, None), "{unchanged:?}");
 }
 
+/// CRC-64/ECMA-182 (the change cache's content fingerprint, mod-loader-lua cache/prints.rs), bit by bit.
+fn crc64(bytes: &[u8]) -> u64 {
+    let mut crc = 0u64;
+    for &byte in bytes {
+        crc ^= u64::from(byte) << 56;
+        for _ in 0..8 { crc = if crc & (1 << 63) != 0 { (crc << 1) ^ 0x42F0_E1EB_A9EA_3693 } else { crc << 1 }; }
+    }
+    crc
+}
+
+#[test]
+fn the_test_crc64_is_the_change_cache_s() {
+    assert_eq!(crc64(b"123456789"), 0x6C40_DF5F_0B49_7347, "the catalogued check value of CRC-64/ECMA-182");
+}
+
 // R1: adoption lists only the containers the adopted header references. A container file above them (a leftover of a
 // bigger earlier output, or a player's own) that the old cache happens to name by content is not that run's output.
 #[test]
@@ -336,10 +390,17 @@ fn adoption_lists_only_the_containers_the_adopted_header_references() {
     std::fs::write(&extra, "not written by that run").unwrap();
     let out = g.with_mod();
     assert_eq!(out.phase, Phase::Done, "{out:?}");
-    let cache: serde_json::Value = serde_json::from_slice(&std::fs::read(g.cfg.cache_dir.join("files.json")).unwrap()).unwrap();
-    assert!(cache["files"].get(extra.as_str()).is_some() && !cache["unread"].as_array().is_some_and(|u| u.iter().any(|p| p == extra.as_str())),
-        "the old cache names it by content");
     g.as_released_before_receipts();
+    // The old cache names it by content. Whether the run read it or recorded it by its change stamp depends only on
+    // whether it was written in the last 3 s (the cache's racy window), which a loaded machine decides: so the entry
+    // is made a content entry here (length and last-write time as recorded, the CRC-64 of its bytes, not unread).
+    let path = g.cfg.cache_dir.join("files.json");
+    let mut cache: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let entry = cache["files"].get_mut(extra.as_str()).expect("the old cache names it");
+    entry[2] = crc64(&std::fs::read(&extra).unwrap()).into();
+    // (`get_mut`, not indexing: indexing a missing key would write "unread": null, which the cache cannot read)
+    if let Some(unread) = cache.get_mut("unread").and_then(|u| u.as_array_mut()) { unread.retain(|p| p != extra.as_str()); }
+    std::fs::write(&path, serde_json::to_vec(&cache).unwrap()).unwrap();
     let out = g.without_mods();
     assert_eq!((out.phase, out.restored), (Phase::Idle, true), "{out:?}");
     assert_eq!(std::fs::read(&extra).unwrap(), b"not written by that run", "a file that run did not write stays");

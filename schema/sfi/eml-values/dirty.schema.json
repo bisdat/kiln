@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-values/dirty.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "description": "value_read DIRTY: Source's recursive is_dirty.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "packet": {
+      "const": "dirty"
+    },
+    "value": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schema_version",
+    "packet",
+    "value"
+  ],
+  "additionalProperties": false
+}

@@ -14,6 +14,10 @@ public enum WorldKind
     Prediction = 1,
     /// <summary>The client's own world: local player, camera, presentation.</summary>
     Client = 2,
+    /// <summary>Not a world: the game client's main menu (and the stretch between two worlds) as a target of a Kiln
+    /// task's hops, <c>ctx.ToTick(WorldKind.Menu)</c> (since 0.2.0-dev.30). Its hops run on the game's UI frame while no
+    /// world runs; world APIs refuse there and do not take this value.</summary>
+    Menu = 3,
 }
 
 /// <summary>A server-world entity id. Ids can be reused after an entity is destroyed. On a dedicated server player

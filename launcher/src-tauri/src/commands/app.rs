@@ -113,6 +113,14 @@ pub struct LauncherSettings {
     /// adds names for one start. Left out while empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preview: Vec<String>,
+    /// (dev.30) "Count my installs" (Settings): a Crucible pack installed sends Crucible an anonymous install count
+    /// (`POST /versions/<id>/installed`, no account, once per network a day on the service's side). On by default.
+    #[serde(default = "yes")]
+    pub crucible_stats: bool,
+    /// (dev.30) The folder each kind of file dialog was last used in ("supportReport", "addMods"...; crate::dialog_folder).
+    /// Written only by `app_dialog_remember`: a settings save keeps the file's. Left out while empty.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub dialog_folders: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for LauncherSettings {
@@ -132,6 +140,8 @@ impl Default for LauncherSettings {
             keep_versions: kiln_manage::kept::KEEP_DEFAULT,
             language: None,
             preview: Vec::new(),
+            crucible_stats: true,
+            dialog_folders: Default::default(),
         }
     }
 }
@@ -398,11 +408,35 @@ pub async fn app_render_set(software: bool) -> Result<crate::render::RenderInfo,
     crate::state::blocking(move || crate::render::set_next(software)).await
 }
 
+/// Settings, "Switch to X11 when drawing is slow on Wayland": on lets the launcher switch by itself (and try X11 again),
+/// off keeps the next start on Wayland. Linux only (else `unsupported`).
+#[tauri::command]
+pub async fn app_render_x11_set(on: bool) -> Result<crate::render::RenderInfo, Error> {
+    crate::state::blocking(move || crate::render::set_x11_auto(on)).await
+}
+
 /// Settings, "WebKit's sandbox": on removes the marker, off writes it; applies at the next start. Linux only (else
 /// `unsupported`).
 #[tauri::command]
 pub async fn app_sandbox_set(on: bool) -> Result<crate::sandbox::SandboxInfo, Error> {
     crate::state::blocking(move || crate::sandbox::set_next(on)).await
+}
+
+/// The folder a file dialog of `kind` opens in, or `<folder>/<fileName>` for a Save dialog's suggestion
+/// (crate::dialog_folder): `preferred` when it exists, else the folder that kind was last used in, else Downloads, else
+/// home; never the working directory or an AppImage's mount. None: no folder fits (the dialog's own choice).
+#[tauri::command]
+pub async fn app_dialog_default(app: AppHandle, kind: String, file_name: Option<String>, preferred: Option<String>) -> Result<Option<String>, Error> {
+    crate::state::blocking(move || {
+        Ok(crate::dialog_folder::default_for(&app, &kind, file_name.as_deref(), preferred.as_deref()).map(|p| p.display().to_string()))
+    })
+    .await
+}
+
+/// Keeps the folder a file dialog of `kind` ended in: `path` itself when `folder` (a folder dialog), else its parent.
+#[tauri::command]
+pub async fn app_dialog_remember(kind: String, path: String, folder: bool) -> Result<(), Error> {
+    crate::state::blocking(move || crate::dialog_folder::remember(&kind, &path, folder)).await
 }
 
 /// Settings, "Kiln Launcher in the app menu" (Linux AppImage): on writes the entry and icons (replacing a
@@ -418,7 +452,7 @@ pub async fn app_settings_get() -> Result<LauncherSettings, Error> {
 }
 
 #[tauri::command]
-pub async fn app_settings_set(settings: LauncherSettings) -> Result<LauncherSettings, Error> {
+pub async fn app_settings_set(mut settings: LauncherSettings) -> Result<LauncherSettings, Error> {
     if settings.saves_keep == 0 || settings.saves_keep > 100 {
         return Err(Error::invalid("Keep between 1 and 100 save backups."));
     }
@@ -427,7 +461,11 @@ pub async fn app_settings_set(settings: LauncherSettings) -> Result<LauncherSett
     }
     crate::state::blocking(move || {
         let dirs = crate::state::dirs()?;
+        let write = crate::state::settings_write();
+        // the dialogs' folders are app_dialog_remember's: a page's settings may be older than the file's
+        settings.dialog_folders = crate::state::read_settings().map(|s| s.dialog_folders).unwrap_or_default();
         kiln_manage::util::write_json_atomic(&dirs.settings(), &settings)?;
+        drop(write);
         // a lower count: every mod keeps at most that many from now on
         if let Err(e) = kiln_manage::kept::apply_count(&dirs) {
             crate::commands::app::launcher_log("library", &format!("the kept versions could not follow the new count: {}", e.message));
@@ -1020,7 +1058,7 @@ fn extract_editor_task(app: &AppHandle) -> Result<super::TaskId, Error> {
     }))
 }
 
-fn refuse_steam_updating(game: &kiln_manage::game::GameInstall) -> Result<(), Error> {
+pub(crate) fn refuse_steam_updating(game: &kiln_manage::game::GameInstall) -> Result<(), Error> {
     let updating = game
         .library
         .as_deref()

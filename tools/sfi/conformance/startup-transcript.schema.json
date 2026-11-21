@@ -1,0 +1,1538 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frostdev.io/kiln/sfi/startup-transcript.schema.json",
+  "title": "Authorized sfi startup host transcript v1",
+  "description": "SPDX-License-Identifier: MIT. Host observations only; no runtime parity claim. Embedded Lua transcripts reference the unmodified shared schema. compare.py also checks state, identity, digests and explicit legacy accounting.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "fixture",
+    "provenance",
+    "seed",
+    "planId",
+    "launchId",
+    "planDigest",
+    "target",
+    "dialect",
+    "build",
+    "baseline",
+    "generation",
+    "packages",
+    "records"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "fixture": {
+      "type": "object",
+      "required": [
+        "id",
+        "sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    },
+    "seed": {
+      "type": "string",
+      "minLength": 1
+    },
+    "planId": {
+      "$ref": "#/$defs/uuid"
+    },
+    "launchId": {
+      "$ref": "#/$defs/uuid"
+    },
+    "planDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "target": {
+      "enum": [
+        "client",
+        "server"
+      ]
+    },
+    "dialect": {
+      "enum": [
+        "shroudforge",
+        "eml",
+        "none"
+      ]
+    },
+    "build": {
+      "type": "object",
+      "required": [
+        "id",
+        "executableSha256",
+        "registrySha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "executableSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "registrySha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "required": [
+        "setSha256",
+        "manifestSha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "setSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "manifestSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "generation": {
+      "$ref": "#/$defs/generation"
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/package"
+      },
+      "minItems": 0
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/record"
+      },
+      "minItems": 1
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "uuid": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "symbol": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z][a-z_-]*:[1-9][0-9]*$"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "packageId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,80}$",
+      "not": {
+        "enum": [
+          ".",
+          ".."
+        ]
+      }
+    },
+    "safeBasename": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "not": {
+        "enum": [
+          ".",
+          ".."
+        ]
+      }
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "value": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "t"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "t": {
+              "const": "nil"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "t",
+            "value"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "t": {
+              "const": "boolean"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "t",
+            "width",
+            "signed",
+            "value"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "t": {
+              "const": "integer"
+            },
+            "width": {
+              "enum": [
+                8,
+                16,
+                32,
+                64,
+                128,
+                256,
+                512
+              ]
+            },
+            "signed": {
+              "type": "boolean"
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(0|-?[1-9][0-9]*)$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "t",
+            "width",
+            "bits"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "t": {
+              "const": "float"
+            },
+            "width": {
+              "enum": [
+                32,
+                64
+              ]
+            },
+            "bits": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[0-9a-f]+$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "t",
+            "hex"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "t": {
+              "const": "binary"
+            },
+            "hex": {
+              "type": "string",
+              "pattern": "^([0-9a-f]{2})*$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "t",
+            "node",
+            "lease"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "t": {
+              "const": "node"
+            },
+            "node": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^node:[1-9][0-9]*$"
+            },
+            "lease": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^lease:[1-9][0-9]*$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "t",
+            "value"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "t": {
+              "const": "lua"
+            },
+            "value": {
+              "$ref": "transcript.schema.json#/$defs/value"
+            }
+          }
+        }
+      ]
+    },
+    "package": {
+      "type": "object",
+      "required": [
+        "id",
+        "version",
+        "sha256",
+        "executesStartup"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/packageId"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "executesStartup": {
+          "type": "boolean"
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "engine",
+        "sourceRevision",
+        "dependencies",
+        "contracts",
+        "policy",
+        "preludeSha256",
+        "luaSchemaSha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "engine": {
+          "enum": [
+            "synthetic",
+            "shroudforge",
+            "kiln",
+            "eml"
+          ]
+        },
+        "sourceRevision": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "version",
+              "sha256"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/id"
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          },
+          "minItems": 1
+        },
+        "contracts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "family",
+              "sha256"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "family": {
+                "$ref": "#/$defs/id"
+              },
+              "sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          },
+          "minItems": 1
+        },
+        "policy": {
+          "type": "object",
+          "required": [
+            "id",
+            "sha256"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        },
+        "preludeSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "luaSchemaSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "required": [
+        "role",
+        "name",
+        "size",
+        "sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "enum": [
+            "header",
+            "resources",
+            "data",
+            "padding"
+          ]
+        },
+        "name": {
+          "$ref": "#/$defs/safeBasename"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "semanticEntry": {
+      "type": "object",
+      "required": [
+        "kind",
+        "key",
+        "sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "resource",
+            "content"
+          ]
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "exclusion": {
+      "type": "object",
+      "required": [
+        "id",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/packageId"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "admission": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "package",
+        "status",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "admission"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "package": {
+          "$ref": "#/$defs/packageId"
+        },
+        "status": {
+          "enum": [
+            "admitted",
+            "skipped"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "package_begin": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "package"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "package_begin"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "package": {
+          "$ref": "#/$defs/packageId"
+        }
+      }
+    },
+    "package_end": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "package",
+        "outcome"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "package_end"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "package": {
+          "$ref": "#/$defs/packageId"
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "failed"
+          ]
+        }
+      }
+    },
+    "api_call": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "package",
+        "moduleOwner",
+        "call",
+        "api",
+        "args"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "api_call"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "package": {
+          "$ref": "#/$defs/packageId"
+        },
+        "moduleOwner": {
+          "$ref": "#/$defs/packageId"
+        },
+        "call": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^call:[1-9][0-9]*$"
+        },
+        "api": {
+          "type": "string",
+          "minLength": 1
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/value"
+          },
+          "minItems": 0
+        }
+      }
+    },
+    "api_result": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "package",
+        "call",
+        "values"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "api_result"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "package": {
+          "$ref": "#/$defs/packageId"
+        },
+        "call": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^call:[1-9][0-9]*$"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/value"
+          },
+          "minItems": 0
+        }
+      }
+    },
+    "api_error": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "package",
+        "call",
+        "transcript"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "api_error"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "package": {
+          "$ref": "#/$defs/packageId"
+        },
+        "call": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^call:[1-9][0-9]*$"
+        },
+        "transcript": {
+          "$ref": "transcript.schema.json"
+        }
+      }
+    },
+    "lua_transcript": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "package",
+        "transcript"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "lua_transcript"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "package": {
+          "$ref": "#/$defs/packageId"
+        },
+        "transcript": {
+          "$ref": "transcript.schema.json"
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "luaSeq",
+              "call"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "luaSeq": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "call": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^call:[1-9][0-9]*$"
+              }
+            }
+          },
+          "minItems": 0
+        }
+      }
+    },
+    "value_lease": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "package",
+        "action",
+        "lease",
+        "node"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "value_lease"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "package": {
+          "$ref": "#/$defs/packageId"
+        },
+        "action": {
+          "enum": [
+            "grant",
+            "release"
+          ]
+        },
+        "lease": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^lease:[1-9][0-9]*$"
+        },
+        "node": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^node:[1-9][0-9]*$"
+        },
+        "relation": {
+          "enum": [
+            "root",
+            "alias",
+            "clone",
+            "retained"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^lease:[1-9][0-9]*$"
+        }
+      }
+    },
+    "value_edge": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "package",
+        "operation",
+        "parentLease",
+        "childLease",
+        "slot"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "value_edge"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "package": {
+          "$ref": "#/$defs/packageId"
+        },
+        "operation": {
+          "enum": [
+            "attach",
+            "detach"
+          ]
+        },
+        "parentLease": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^lease:[1-9][0-9]*$"
+        },
+        "childLease": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^lease:[1-9][0-9]*$"
+        },
+        "slot": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "effect": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "package",
+        "effect",
+        "scope",
+        "operation",
+        "target"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "effect"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery",
+            "deferred-stage"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "package": {
+          "$ref": "#/$defs/packageId"
+        },
+        "effect": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^effect:[1-9][0-9]*$"
+        },
+        "scope": {
+          "enum": [
+            "local",
+            "archive-write",
+            "external"
+          ]
+        },
+        "operation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lease": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^lease:[1-9][0-9]*$"
+        },
+        "beforeRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "afterRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "asset_stage": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "package",
+        "key",
+        "type",
+        "size",
+        "afterSha256",
+        "created",
+        "dirty"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "asset_stage"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery",
+            "deferred-stage"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "package": {
+          "$ref": "#/$defs/packageId"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "beforeSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "afterSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "created": {
+          "type": "boolean"
+        },
+        "dirty": {
+          "type": "boolean"
+        }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "operation",
+        "file",
+        "role",
+        "expectedGeneration",
+        "status",
+        "changed",
+        "size",
+        "sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "checkpoint"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "operation": {
+          "$ref": "#/$defs/id"
+        },
+        "file": {
+          "$ref": "#/$defs/safeBasename"
+        },
+        "role": {
+          "enum": [
+            "baseline",
+            "seal",
+            "journal",
+            "receipt",
+            "header",
+            "resources",
+            "data",
+            "padding",
+            "handoff",
+            "cache",
+            "boot"
+          ]
+        },
+        "expectedGeneration": {
+          "$ref": "#/$defs/generation"
+        },
+        "status": {
+          "enum": [
+            "success",
+            "error"
+          ]
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "transcript": {
+          "$ref": "transcript.schema.json"
+        }
+      }
+    },
+    "publication_step": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "operation",
+        "file",
+        "role",
+        "expectedGeneration",
+        "status",
+        "changed",
+        "size",
+        "sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "publication_step"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "operation": {
+          "$ref": "#/$defs/id"
+        },
+        "file": {
+          "$ref": "#/$defs/safeBasename"
+        },
+        "role": {
+          "enum": [
+            "baseline",
+            "seal",
+            "journal",
+            "receipt",
+            "header",
+            "resources",
+            "data",
+            "padding",
+            "handoff",
+            "cache",
+            "boot"
+          ]
+        },
+        "expectedGeneration": {
+          "$ref": "#/$defs/generation"
+        },
+        "status": {
+          "enum": [
+            "success",
+            "error"
+          ]
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "transcript": {
+          "$ref": "transcript.schema.json"
+        }
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "operation",
+        "file",
+        "role",
+        "expectedGeneration",
+        "status",
+        "changed",
+        "size",
+        "sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "recovery"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "operation": {
+          "$ref": "#/$defs/id"
+        },
+        "file": {
+          "$ref": "#/$defs/safeBasename"
+        },
+        "role": {
+          "enum": [
+            "baseline",
+            "seal",
+            "journal",
+            "receipt",
+            "header",
+            "resources",
+            "data",
+            "padding",
+            "handoff",
+            "cache",
+            "boot"
+          ]
+        },
+        "expectedGeneration": {
+          "$ref": "#/$defs/generation"
+        },
+        "status": {
+          "enum": [
+            "success",
+            "error"
+          ]
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "transcript": {
+          "$ref": "transcript.schema.json"
+        }
+      }
+    },
+    "archive_result": {
+      "type": "object",
+      "required": [
+        "seq",
+        "kind",
+        "phase",
+        "attempt",
+        "generation",
+        "outcome",
+        "included",
+        "excluded",
+        "files",
+        "physicalDigest",
+        "semanticEntries",
+        "semanticDigest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "const": "archive_result"
+        },
+        "phase": {
+          "enum": [
+            "host",
+            "startup",
+            "recovery"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generation": {
+          "$ref": "#/$defs/generation"
+        },
+        "outcome": {
+          "enum": [
+            "prepared",
+            "published",
+            "restored",
+            "unchanged",
+            "refused"
+          ]
+        },
+        "included": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/packageId"
+          },
+          "minItems": 0
+        },
+        "excluded": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/exclusion"
+          },
+          "minItems": 0
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/file"
+          },
+          "minItems": 1
+        },
+        "physicalDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "semanticEntries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/semanticEntry"
+          },
+          "minItems": 0
+        },
+        "semanticDigest": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "record": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/admission"
+        },
+        {
+          "$ref": "#/$defs/package_begin"
+        },
+        {
+          "$ref": "#/$defs/package_end"
+        },
+        {
+          "$ref": "#/$defs/api_call"
+        },
+        {
+          "$ref": "#/$defs/api_result"
+        },
+        {
+          "$ref": "#/$defs/api_error"
+        },
+        {
+          "$ref": "#/$defs/lua_transcript"
+        },
+        {
+          "$ref": "#/$defs/value_lease"
+        },
+        {
+          "$ref": "#/$defs/value_edge"
+        },
+        {
+          "$ref": "#/$defs/effect"
+        },
+        {
+          "$ref": "#/$defs/asset_stage"
+        },
+        {
+          "$ref": "#/$defs/checkpoint"
+        },
+        {
+          "$ref": "#/$defs/publication_step"
+        },
+        {
+          "$ref": "#/$defs/recovery"
+        },
+        {
+          "$ref": "#/$defs/archive_result"
+        }
+      ]
+    }
+  }
+}

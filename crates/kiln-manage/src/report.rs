@@ -2040,12 +2040,15 @@ pub fn build(input: &ReportInput) -> Report {
     // the game data, and only ShroudForge's own log said so (player report 327). Its words are redacted whole, before
     // they are put on one line and cut (a cut name, or a home folder's collapsed spaces, would not match).
     let under_wine = install.as_ref().map(|i| i.platform != Platform::Windows).unwrap_or(cfg!(not(windows)));
-    if let Some(f) = crate::sf_startup::failure(&game, under_wine).map(|f| f.redacted(|t| redact(t, cx.red))) {
+    // in kiln mode that record belongs to a hosted start: it is not read (Kiln's interpreter has the
+    // start; its own record is kiln/state/sfi.json, in the raw state files)
+    let sf_record = !crate::sfi_routing::route_of(&game).interpreter();
+    if let Some(f) = sf_record.then(|| crate::sf_startup::failure(&game, under_wine)).flatten().map(|f| f.redacted(|t| redact(t, cx.red))) {
         let _ = writeln!(ls, "ShroudForge's record of its startup pass (state.json \"assets\"): {}", f.line());
         cx.find("sf-startup-failed", Level::Problem, format!("{}.", f.text()));
     }
     // Kiln's ShroudForge ran the pass once more without the mod it failed in: the others loaded, that one did not.
-    if let Some(s) = crate::sf_startup::skipped(game).map(|s| s.redacted(|t| redact(t, cx.red))) {
+    if let Some(s) = sf_record.then(|| crate::sf_startup::skipped(game)).flatten().map(|s| s.redacted(|t| redact(t, cx.red))) {
         let _ = writeln!(ls, "ShroudForge's record of its startup pass (state.json \"assets\"): {}", s.line());
         cx.find("sf-startup-skipped", Level::Warning, format!("{}.", s.text()));
     }
@@ -2168,6 +2171,26 @@ pub fn build(input: &ReportInput) -> Report {
     state_files.sort();
     for n in state_files {
         cx.add_file(&format!("kiln/state/{n}"));
+    }
+    // Kiln's interpreter: the launch plans kiln-manage pinned and kiln-eml's ownership and clean-up
+    // records (what its startup pass published or left to clean), the newest three of each, read like the state files
+    // (bounded, JSON redacted); no package bytes
+    for dir in ["kiln/launch-plans", "kiln/eml/ownership"] {
+        let mut files: Vec<(std::time::SystemTime, String)> = std::fs::read_dir(game.join(dir))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            .filter_map(|e| {
+                let n = e.file_name().to_string_lossy().into_owned();
+                (n.ends_with(".json") && !n.starts_with('.'))
+                    .then(|| (e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH), n))
+            })
+            .collect();
+        files.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        for (_, n) in files.into_iter().take(3) {
+            cx.add_file(&format!("{dir}/{n}"));
+        }
     }
     for f in [crate::paths::game::PROFILE, crate::paths::game::CHAIN, "kiln/kiln.json", crate::paths::game::RECEIPT, crate::paths::game::EMF_CHAIN] {
         cx.add_file(f);
@@ -2659,12 +2682,15 @@ Replaced in every file: your home folder (<home>), user name (<user>), computer 
 (<ip>, <mac>), mail addresses (<email>), and the values of fields named like passwords, tokens, keys, addresses, hosts,
 URLs or account names (<redacted>; the server you joined last keeps its name, not its address).";
 
-/// Writes the report as a zip (atomically). Returns its size in bytes.
+/// Writes the report as a zip (atomically: a temp file of its own next to `out`, `<out>.<pid>.<n>.tmp` created new,
+/// renamed to `out`). Returns its size in bytes, read back from `out`: a report that is not there is an error.
 #[cfg(feature = "zip")]
 pub fn write_zip(report: &Report, out: &Path) -> crate::Result<u64> {
     use std::io::Write;
-    let tmp = crate::util::with_suffix(out, ".tmp");
-    let f = std::fs::File::create(&tmp).map_err(crate::util::io_at(&tmp, "writing"))?;
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = crate::util::with_suffix(out, &format!(".{}.{n}.tmp", std::process::id()));
+    let f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp).map_err(crate::util::io_at(&tmp, "writing"))?;
     let zerr = |e: zip::result::ZipError| crate::Error::new(crate::ErrorCode::Io, format!("{}: {e}", out.display()));
     let mut w = zip::ZipWriter::new(std::io::BufWriter::new(f));
     let opts = zip_options();
@@ -2682,8 +2708,10 @@ pub fn write_zip(report: &Report, out: &Path) -> crate::Result<u64> {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
-    crate::util::rename_replace(&tmp, out)?;
-    Ok(std::fs::metadata(out)?.len())
+    crate::util::rename_replace(&tmp, out).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })?;
+    std::fs::metadata(out).map(|m| m.len()).map_err(crate::util::io_at(out, "reading back"))
 }
 
 /// Each file's options in a report zip: deflated, the time of writing.

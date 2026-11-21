@@ -6,7 +6,9 @@
 //   - what a translation is never to bring (it is a player's file, read as data): an HTML tag or entity, a Markdown
 //     link, a link or URL, an invisible or control character, a line break, where English has none at that key; an
 //     empty text; a text far longer than English's; a confirm word (common.confirmWord.*) that is not one short word,
-// and, with --source, that every t("key") in launcher/src (the save editor aside) is in en.json.
+// and, with --source, that every t("key") in launcher/src is in en.json (the save editor's own Kiln files, src/editor/kiln,
+// src/editor/deck and src/editor/*.jsx, too; not its vendored src/editor/src and shared, whose Portuguese keys go through
+// src/editor/src/i18n/launcher-keys.json, checked here as well).
 //
 //   bun scripts/i18n-check.ts                       every src/i18n/*.json, and the source
 //   bun scripts/i18n-check.ts ~/zh-CN.json          one file (a translation sent by mail, a PR's file)
@@ -146,7 +148,8 @@ export function pluralShapeProblems(enTable: Table): string[] {
   return out;
 }
 
-/** Every literal `t("key")`, `tr("key")` (t imported as tr) and `rich("key")` in the source files under `dir` (the save editor aside): key, file, line. */
+/** Every literal `t("key")`, `tr("key")` (t imported as tr) and `rich("key")` in the source files under `dir` (in the save editor: only
+ * Kiln's own files, not the vendored src/ and shared/): key, file, line. */
 export function sourceKeys(dir: string): { key: string; file: string; line: number }[] {
   const out: { key: string; file: string; line: number }[] = [];
   const re = /(?<![\w$.])(?:t|tr|rich)\(\s*(["'`])([A-Za-z0-9_.-]+)\1/g;
@@ -154,8 +157,8 @@ export function sourceKeys(dir: string): { key: string; file: string; line: numb
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const p = join(d, e.name);
       if (e.isDirectory()) {
-        if (e.name !== "editor" && e.name !== "node_modules") walk(p);
-      } else if (/\.(ts|tsx)$/.test(e.name)) {
+        if (e.name !== "node_modules" && !(/[\\/]editor$/.test(d) && (e.name === "src" || e.name === "shared" || e.name === "data"))) walk(p);
+      } else if (/\.(ts|tsx)$/.test(e.name) || (/[\\/]editor([\\/]|$)/.test(d) && /\.(js|jsx)$/.test(e.name))) {
         const lines = readFileSync(p, "utf8").split("\n");
         lines.forEach((l, i) => {
           if (/^\s*(\/\/|\/?\*)/.test(l)) return; // comments
@@ -198,6 +201,12 @@ function main(argv: string[]): number {
     for (const k of unknown) console.log(`  ${relative(root, k.file)}:${k.line}: t("${k.key}") is not in en.json`);
     console.log(`source: ${unknown.length ? `${unknown.length} key(s) not in en.json` : "ok"}`);
     wrong += unknown.length;
+    // the save editor's vendored texts: each Portuguese key's launcher key (src/editor/src/i18n/launcher-keys.json)
+    const bridge = JSON.parse(readFileSync(join(src, "editor", "src", "i18n", "launcher-keys.json"), "utf8")) as Record<string, string>;
+    const lost = Object.entries(bridge).filter(([, k]) => !hasKey(enTable, k));
+    for (const [pt, k] of lost) console.log(`  src/editor/src/i18n/launcher-keys.json: "${pt}" → "${k}" is not in en.json`);
+    console.log(`editor: ${lost.length ? `${lost.length} key(s) not in en.json` : "ok"}`);
+    wrong += lost.length;
   }
   return wrong ? 1 : 0;
 }
