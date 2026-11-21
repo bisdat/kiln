@@ -83,7 +83,10 @@ fresh challenge with the descriptor's session nonce. The whole tuple (install, p
 time, image hash, nonce) is checked again right before the debugger is started and right before the `attach` goes to it.
 Two servers with the same exe in other folders, a PID used again by another process, two prefixes with the same Windows
 PID: each is refused, never guessed. Descriptors that are proven stale (no such process, or another creation time) are
-removed by the next `kiln debug`.
+removed by the next `kiln debug`, but only when that same check also shows the install alive (its server runs in its
+prefix, the game's runner exists, or another descriptor is the live process): a helper that could have reached another
+wineserver proves nothing, and then the files are kept and named. While attached, a check that times out proves nothing
+either: the session goes on, and only the debuggee's exit or a field proven different ends it.
 
 Under Proton, Kiln reads `/proc` only to find the runner of the game: the processes whose `WINEPREFIX` is that
 install's prefix and whose image is that install's game. All of them must agree on the runner and on the allowed
@@ -135,7 +138,7 @@ environment (`WINEPREFIX`, `STEAM_COMPAT_DATA_PATH`, `STEAM_COMPAT_CLIENT_INSTAL
 
 ## Lab check (netcoredbg 3.2.0-1092, GE-Proton11-11)
 Run with `kiln debug --server <lab> --dap`, driven by a DAP test client, against the sample `mods/samples/DebugCounter`
-(Debug build) on a disposable lab with `"developer_debugging": true` (0.2.0-dev.31, server build 26430253). "Survives" means
+(Debug build) on a disposable lab with `"developer_debugging": true` (0.2.0-dev.31, server build 26430253; run again after the review fixes on 2026-11-21). "Survives" means
 the same process afterwards and the counter still counting in kiln.log.
 
 | Check | Result |
@@ -147,7 +150,11 @@ the same process afterwards and the counter still counting in kiln.log.
 | Continue, then disconnect with `terminateDebuggee: true` | Survives, proxy exits 0 |
 | Attach again, disconnect while stopped | Survives, proxy exits 0; `kiln reload` works again afterwards |
 | `--max-pause-ms 1000`, a breakpoint held without an answer | Continued by the proxy after 1.0 s (`kiln/debugState` reason `timeout_continue`); survives |
-| The earlier dev.27 matrix (signals, `kill -9` on the proxy, two labs with the same Windows PID, Steam libraries, reload rounds) | Unchanged code paths; see the fake adapter suite (`PASS debug.detach-policy`, `PASS debug.pause-watchdog`, protocol behaviour only) |
+| SIGTERM, SIGINT, SIGHUP to `kiln debug --dap` while stopped at the breakpoint | Each: a safe detach (`detaching`, `detached`), proxy exits 0; survives |
+| `kill -9` on `kiln debug --dap` while stopped | Survives (netcoredbg detaches when its input closes) |
+| Two labs running, the same Windows PID (252) in both | `--json` proves each lab's own prefix and creation time; while A is paused its counter stands still and B counts on; B untouched |
+| A server folder inside a `steamapps` library, by folder and through a symlink | Refused (`steam_library`) before anything runs |
+| netcoredbg with one changed file | At the default place (or vouched for by the extension): refused, `netcoredbg_unpinned`; named with `KILN_NETCOREDBG`: starts with a warning |
 | `kill -9` on netcoredbg while stopped (dev.27 lab) | **The server dies.** Nothing Kiln can do about it |
 
 ## When it says no
