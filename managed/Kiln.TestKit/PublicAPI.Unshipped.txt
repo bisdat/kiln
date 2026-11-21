@@ -1,1 +1,3 @@
 #nullable enable
+Kiln.TestKit.ModManifest.SteamMessages.get -> bool
+Kiln.TestKit.ModManifest.SteamMessages.set -> void

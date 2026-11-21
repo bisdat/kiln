@@ -990,7 +990,7 @@ fn drop_parked(game: &Path, p: &Publication, route: &Route) -> bool {
 /// A folder without a receipt is never adopted (a first placement stopped before its receipt stays the player's, as
 /// before). A receipt that moved on, or a copy that is neither, ends the
 /// record and nothing is touched: a mismatch is never resolved by trusting a receipt (`owned` still refuses it).
-fn recover_publications(game: &Path, receipts: &mut Vec<Placement>, route: &Route) -> Result<Vec<String>> {
+fn recover_journal(game: &Path, receipts: &mut Vec<Placement>, route: &Route) -> Result<Vec<String>> {
     let all = publications(game)?;
     // A moved install can retain completed records keyed by its old absolute root. Never inspect or mutate
     // those paths; retain the record and report it, as with its old delivery receipts.
@@ -1061,6 +1061,217 @@ fn recover_publications(game: &Path, receipts: &mut Vec<Placement>, route: &Rout
     }
     if changed { save_publications(game, &keep)?; }
     Ok(notes)
+}
+
+/// [`recover_journal`], then [`sweep_staging`]: what a stop inside a placement left, before anything looks at the copies.
+fn recover_publications(game: &Path, receipts: &mut Vec<Placement>, route: &Route) -> Result<Vec<String>> {
+    let mut notes = recover_journal(game, receipts, route)?;
+    notes.extend(sweep_staging(game, route));
+    Ok(notes)
+}
+
+// ---- the staging folders of a placement ----
+//
+// A placement stages its copy in a hidden folder beside it (`.kiln-place-<12 hex>`, [`copy_in_with`]). The publication
+// journal cannot name that folder for every stop: a first copy has no parked copy, and the journal is written only
+// after the copy is staged. So the folder is named in a record of its own, durably, before it is made, and the next
+// placement or uninstall takes out what a stop left of it. A file of its own: the journal's entries stay exactly as
+// older Kilns read them (they refuse a field they do not know), and older Kilns never read this one.
+
+/// `<game>/kiln/state/placement-staging.json`: the staging folders of the placements begun and not cleaned up yet.
+fn staging_file(game: &Path) -> PathBuf {
+    game.join("kiln/state/placement-staging.json")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StagingRecord {
+    format: u32,
+    #[serde(default)]
+    folders: Vec<Staging>,
+}
+
+/// One staging folder: the folder, the copy it stages (its sibling), and the marker that copy gets.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Staging {
+    folder: PathBuf,
+    path: PathBuf,
+    marker: Marker,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    game_folder: bool,
+}
+
+/// The largest staging record Kiln reads: far more entries than the folders a game ever keeps.
+const MAX_STAGING_RECORD: u64 = 1024 * 1024;
+
+/// The recorded staging folders. A record that cannot be read, of another format, or not a file of at most
+/// [`MAX_STAGING_RECORD`] bytes names none: their folders stay. Never more than that is read (nor a pipe opened), so
+/// the record cannot hold up a placement.
+fn stagings(game: &Path) -> Result<Vec<Staging>> {
+    use std::io::Read;
+    let file = staging_file(game);
+    refuse_symlink_path(game, &file)?;
+    if !std::fs::symlink_metadata(&file).is_ok_and(|m| m.is_file() && m.len() <= MAX_STAGING_RECORD) { return Ok(Vec::new()); }
+    let mut text = Vec::new();
+    if std::fs::File::open(&file).and_then(|f| f.take(MAX_STAGING_RECORD + 1).read_to_end(&mut text)).is_err()
+        || text.len() as u64 > MAX_STAGING_RECORD {
+        return Ok(Vec::new());
+    }
+    let text = text.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&text);
+    Ok(serde_json::from_slice::<StagingRecord>(text).ok().filter(|r| r.format == 1).map(|r| r.folders).unwrap_or_default())
+}
+
+/// Writes the record durably; with no folder left it goes.
+fn save_stagings(game: &Path, all: &[Staging]) -> Result<()> {
+    let file = staging_file(game);
+    refuse_symlink_path(game, &file)?;
+    if all.is_empty() {
+        return match std::fs::remove_file(&file) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(io_at(&file, "removing")(e)),
+            _ => Ok(()),
+        };
+    }
+    crate::durable::json(&file, &StagingRecord { format: 1, folders: all.to_vec() }, &[])
+}
+
+/// The entry of one staging folder in the record, from before the folder is made until it is gone. A stop leaves the
+/// entry (a crash runs no drop; a panic is one too); otherwise its drop ends the entry once the folder's removal is on
+/// disk (its parent folder flushed), and keeps it while the folder stays (a failed publication preserves it for
+/// recovery, or Windows did not let it be removed).
+struct StagingGuard {
+    game: PathBuf,
+    folder: PathBuf,
+}
+
+impl StagingGuard {
+    /// Names a new staging folder beside `dst` (the copy of `m` it stages) in the record, durably, before it is made.
+    fn begin(game: &Path, dst: &Path, m: &Marker, game_folder: bool) -> Result<StagingGuard> {
+        let parent = dst.parent().ok_or_else(|| Error::invalid("no mod parent"))?;
+        let folder = parent.join(format!(".kiln-place-{}", crate::hash::hex(&crate::util::random_bytes::<6>()?)));
+        let mut all = stagings(game)?;
+        all.retain(|s| s.folder != folder);
+        all.push(Staging { folder: folder.clone(), path: dst.to_path_buf(), marker: m.clone(), game_folder });
+        save_stagings(game, &all)?;
+        Ok(StagingGuard { game: game.to_path_buf(), folder })
+    }
+
+    /// Makes the folder (never one that is there already: then the entry goes, and the folder is not Kiln's).
+    fn create(&self) -> Result<crate::library::TempDir> {
+        crate::library::TempDir::create_new(self.folder.clone()).inspect_err(|_| { let _ = end_staging(&self.game, &self.folder); })
+    }
+}
+
+impl Drop for StagingGuard {
+    fn drop(&mut self) {
+        if std::thread::panicking() || std::fs::symlink_metadata(&self.folder).is_ok() { return; }
+        // the folder's removal on disk first: an entry never goes before its folder (a failed flush keeps it, and the
+        // next sweep finds the folder gone)
+        if self.folder.parent().is_some_and(|parent| crate::durable::flush_dir(parent).is_err()) { return; }
+        let _ = end_staging(&self.game, &self.folder);
+    }
+}
+
+fn end_staging(game: &Path, folder: &Path) -> Result<()> {
+    let mut all = stagings(game)?;
+    let n = all.len();
+    all.retain(|s| s.folder != folder);
+    if all.len() != n { save_stagings(game, &all)?; }
+    Ok(())
+}
+
+/// Is `s` a staging folder of the shape Kiln makes: `.kiln-place-<12 hex>`, directly beside the copy it stages, in that
+/// copy's engine mod folder (the one the copy's receipt would name), with no link on the way?
+fn staging_shape(game: &Path, s: &Staging, route: &Route) -> bool {
+    let tag = s.folder.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_prefix(".kiln-place-"));
+    if !tag.is_some_and(|t| t.len() == 12 && t.bytes().all(|b| b.is_ascii_hexdigit()))
+        || s.folder.parent().is_none() || s.folder.parent() != s.path.parent()
+        || !s.path.file_name().and_then(|n| n.to_str()).is_some_and(is_game_folder_name)
+        || s.marker.format != 1 || !crate::manifest::is_mod_id(&s.marker.id) {
+        return false;
+    }
+    let r = Placement { path: s.path.clone(), marker: s.marker.clone(), files: Default::default(), extension: None, game_folder: s.game_folder };
+    (check_placement_path(game, &r, route).is_ok() || other_route_folder(game, &r, route)) && refuse_symlink_path(game, &s.folder).is_ok()
+}
+
+/// A staged copy of the placement of `m`: a real folder with no link anywhere in it, and no marker yet (the stop came
+/// before it was written) or `m`'s.
+fn staged_copy(new: &Path, m: &Marker) -> bool {
+    let real_dir = |p: &Path| std::fs::symlink_metadata(p).is_ok_and(|meta| meta.is_dir() && !crate::quick::import_is_link(&meta));
+    if !real_dir(new) { return false; }
+    let mut stack = vec![new.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { return false };
+        for e in entries {
+            let Ok(meta) = e.and_then(|e| { let p = e.path(); std::fs::symlink_metadata(&p).map(|m| (p, m)) }) else { return false };
+            let (path, meta) = meta;
+            if crate::quick::import_is_link(&meta) { return false; }
+            if meta.is_dir() { stack.push(path); } else if !meta.is_file() { return false; }
+        }
+    }
+    match std::fs::symlink_metadata(new.join(MARKER)) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+        Ok(_) => marker(new).as_ref() == Some(m),
+        Err(_) => false,
+    }
+}
+
+/// Takes out one recorded staging folder: its staged copy (`new`, [`staged_copy`]), then the empty folder. -> whether
+/// the folder is gone. A folder that holds anything else (the parked old copy the journal still needs, a file that is
+/// not Kiln's) is left as it is.
+fn settle_staging(s: &Staging) -> std::io::Result<bool> {
+    let meta = match std::fs::symlink_metadata(&s.folder) {
+        // (gone: its removal on disk before the entry goes, as at the end of a placement)
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = s.folder.parent() { let _ = crate::durable::flush_dir(parent); }
+            return Ok(true);
+        }
+        Err(e) => return Err(e),
+        Ok(meta) => meta,
+    };
+    if !meta.is_dir() || crate::quick::import_is_link(&meta) { return Ok(false); }
+    let mut new = None;
+    for e in std::fs::read_dir(&s.folder)? {
+        let e = e?;
+        if e.file_name() != "new" { return Ok(false); }
+        new = Some(e.path());
+    }
+    if let Some(new) = new {
+        if !staged_copy(&new, &s.marker) { return Ok(false); }
+        std::fs::remove_dir_all(&new)?;
+    }
+    std::fs::remove_dir(&s.folder)?;
+    if let Some(parent) = s.folder.parent() { let _ = crate::durable::flush_dir(parent); }
+    Ok(true)
+}
+
+/// The staging folders a stop inside a placement left ([`staging_file`]), after the journal's recovery put back or
+/// finished what it names. Only a folder the record names, of the shape Kiln makes ([`staging_shape`]), is looked at,
+/// and only its staged copy and then the empty folder go ([`settle_staging`]); never a parked old copy, never a folder
+/// the record does not name. An entry whose folder stays is kept for the next time. Never fails the operation asking:
+/// the notes say what could not be removed.
+fn sweep_staging(game: &Path, route: &Route) -> Vec<String> {
+    if std::fs::symlink_metadata(staging_file(game)).is_err() { return Vec::new(); }
+    let all = match stagings(game) {
+        Ok(all) => all,
+        Err(e) => return vec![format!("the record of interrupted placements could not be read: {}", e.message)],
+    };
+    let (n, mut keep, mut notes) = (all.len(), Vec::new(), Vec::new());
+    for s in all {
+        if !staging_shape(game, &s, route) { keep.push(s); continue; }
+        match settle_staging(&s) {
+            Ok(true) => {}
+            Ok(false) => keep.push(s),
+            Err(e) => {
+                notes.push(format!("{}: the temporary folder of an interrupted placement could not be removed yet ({e}); Kiln tries \
+                    again next time", s.folder.display()));
+                keep.push(s);
+            }
+        }
+    }
+    if keep.len() != n && let Err(e) = save_stagings(game, &keep) {
+        notes.push(format!("the record of interrupted placements could not be updated: {}", e.message));
+    }
+    notes
 }
 
 // ---- a route change: Kiln's copies of ShroudForge-format mods follow the route ----
@@ -1282,7 +1493,8 @@ fn rename_dir_no_replace(from: &Path, to: &Path) -> Result<()> {
 /// Kiln placed no copy in.
 #[cfg(feature = "sfi-scan")]
 pub(crate) fn recover_placements(game_dir: &Path, route: &Route) -> Result<Vec<String>> {
-    if std::fs::symlink_metadata(placements_file(game_dir)).is_err() && std::fs::symlink_metadata(journal_file(game_dir)).is_err() {
+    if std::fs::symlink_metadata(placements_file(game_dir)).is_err() && std::fs::symlink_metadata(journal_file(game_dir)).is_err()
+        && std::fs::symlink_metadata(staging_file(game_dir)).is_err() {
         return Ok(Vec::new());
     }
     let _lock = engine_lock(game_dir, &game_dir.join("kiln/state"))?;
@@ -1910,9 +2122,15 @@ fn copy_in_with(roots: Roots, src: &Path, dst: &Path, m: &Marker, kept: &[(Strin
     let source_hash = crate::hash::dirhash(src)?;
     let parent = dst.parent().ok_or_else(|| Error::invalid("no mod parent"))?;
     crate::durable::ensure_dir(parent)?;
-    let tmp = crate::library::TempDir::new(parent, "kiln-place")?;
+    // the staging folder is named durably before it is made: a stop from here on leaves nothing Kiln cannot find again
+    // (sweep_staging). Declared before the folder, so its guard is dropped after it.
+    let staging = StagingGuard::begin(roots.game, dst, m, game_folder.is_some())?;
+    if crate::kept::stop_here(crate::kept::Step::StagingRecorded) { panic!("injected crash at StagingRecorded"); }
+    let tmp = staging.create()?;
+    if crate::kept::stop_here(crate::kept::Step::StagingMade) { std::mem::forget(tmp); panic!("injected crash at StagingMade"); }
     let staged = tmp.path().join("new");
     crate::library::copy_mod_tree(src, &staged)?;
+    if crate::kept::stop_here(crate::kept::Step::StagingCopied) { std::mem::forget(tmp); panic!("injected crash at StagingCopied"); }
     if crate::hash::dirhash(&staged)? != source_hash || crate::hash::dirhash(package)? != m.hash {
         return Err(Error::new(ErrorCode::HashMismatch, "mod changed while placing"));
     }
@@ -2114,12 +2332,16 @@ pub fn unplace(dirs: &DataDirs, game_dir: &Path) -> Result<PlacementCleanup> {
     refuse_symlink_path(game_dir, &file)?;
     // No delivery receipt means no ownership to undo. Do not create state (including a lock) in an otherwise
     // untouched installation; adopted pre-existing runtime files must still roundtrip byte-for-byte.
-    if !file.try_exists().map_err(io_at(&file, "inspecting"))? { return Ok(PlacementCleanup::default()); }
+    let staging = staging_file(game_dir);
+    let receipted = file.try_exists().map_err(io_at(&file, "inspecting"))?;
+    if !receipted && !staging.try_exists().map_err(io_at(&staging, "inspecting"))? { return Ok(PlacementCleanup::default()); }
     let _lock = engine_lock(game_dir, &game_dir.join("kiln/state"))?;
     let route = crate::sfi_routing::route_of(game_dir);
     let _scope = RouteScope::enter(&route);
     let mut receipts = placements(game_dir)?;
     let notes = recover_publications(game_dir, &mut receipts, &route)?;
+    // a first placement stopped before its receipt: only what it staged to take out
+    if !receipted { return Ok(PlacementCleanup { kept_files: notes, ..PlacementCleanup::default() }); }
     let mut report = PlacementCleanup { kept_files: notes, ..PlacementCleanup::default() };
     for receipt in receipts.clone() {
         let dst = &receipt.path;
@@ -4724,6 +4946,10 @@ mod route_scope_tests {
 }
 
 #[cfg(test)]
+#[path = "placement_staging_tests.rs"]
+mod staging_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -5628,7 +5854,7 @@ mod tests {
     }
 
     /// An EMF Lua mod (Beastmaster's mod.json keys, shortened) of `version` in a test Library; the profile entry for it.
-    fn emf_lua_mod(dirs: &DataDirs, root: &Path, version: &str) -> crate::profile::ProfileMod {
+    pub(super) fn emf_lua_mod(dirs: &DataDirs, root: &Path, version: &str) -> crate::profile::ProfileMod {
         let src = root.join(format!("pkg-{version}/beastmaster"));
         std::fs::create_dir_all(&src).unwrap();
         std::fs::write(src.join("mod.json"), format!(r#"{{"id":"beastmaster","name":"Beastmaster","version":"{version}","emf":14,"main":"main.lua"}}"#)).unwrap();

@@ -91,6 +91,16 @@ public static partial class Coverage
             "no fake: a true pair is a client hosting its world (a kiln.client fake, a client-side harness, a client tick) and " +
             "shares one channel registry, so no handshake refusal could be tested; Kiln.Network reports itself unavailable",
             "kiln.net");
+        Row("Building input (Kiln.Client)", CoverageKind.Unavailable,
+            "no fake: BuildingInput emits the local player's ordinary building input through a game client's input path; the " +
+            "kit's harness is a server with no client world, so every submit throws KilnUnavailableException (offline). " +
+            "Kiln.Api.Tests drive the managed side on a fake kiln.client table",
+            BuildingInput.Capability);
+        Row("Steam peer messages (Kiln.Network)", CoverageKind.Unavailable,
+            "no fake: SteamMessages moves a mod's own Steam networking messages through kiln.net and the game's Steam; the kit " +
+            "has neither, so Open throws KilnUnavailableException (offline) and Status answers not answered. " +
+            "Kiln.Network.Tests drive the managed side on a fake kiln.net table",
+            SteamMessages.Capability);
         Row("kiln.gemcraft", CoverageKind.Unavailable,
             "no fake: Gems.Socket, Unsocket, Upgrade and Recycle run the game's own forge transaction in a server world, and " +
             "GemCraftingEvent / GemCraftedEvent come from a hook on the game's gem handler; the kit has neither, so the calls " +

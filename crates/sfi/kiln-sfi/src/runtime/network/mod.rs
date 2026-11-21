@@ -20,7 +20,7 @@
 //!   `runtime_denial_reason` (phase, permission, lifecycle, static support), then the settings
 //!   snapshot (unreadable, disabled with one warning per mod id), then the lease's status
 //!   (not initialized, session callback not registered).
-//! - The lease is reached only through kiln-abi's `KilnNetApi` (its private `steam_*` members, [`l16`]):
+//! - The lease is reached only through kiln-abi's `KilnNetApi` (its `steam_*` members, [`l16`]):
 //!   every member read is checked against the table's size at its slot (128..176); a 128-byte
 //!   `kiln.net` has none of them ([`Unavailable`](super::services::Unavailable)).
 //!   A missing member, UNAVAILABLE and the other codes map to ShroudForge's texts per
@@ -97,7 +97,7 @@ pub mod text {
     pub const NO_PENDING_SESSION: &str = "no pending Steam P2P session for this peer";
 }
 
-/// The private Steam-messages block of `kiln.net` (`kiln_net.h`'s internal block, members
+/// The Steam-messages members of `kiln.net` (`kiln_net.h`, since 0.2.0-dev.30.3: members
 /// `steam_*` at 128..176 of a 184-byte `KilnNetApi`), from kiln-abi. The flag constants are
 /// generated as `i32` enums; the `u32` copies here are what the records' fields carry.
 pub mod l16 {
@@ -250,7 +250,8 @@ impl NetworkShared {
 
 /// The lease of `shared`, opened on first use: channels 0..65535, answering session requests
 /// (the interpreter is the one session owner; the maintenance sets its policy). Opening calls no
-/// Steam.
+/// Steam. The lease is `owner`'s: every later member call on it passes the same owner (kiln.net
+/// answers a lease of another owner as a closed one).
 pub fn open_lease(
     services: &ServiceAdapter,
     owner: KilnOwner,
@@ -283,7 +284,7 @@ pub fn open_lease(
 pub enum CallError {
     /// No `kiln.net`, a short table or a NULL member (the service adapter's `Unavailable`).
     Missing,
-    /// `KILN_ERR_UNAVAILABLE` (Steam not ready, closed for exit, not the lease's owner).
+    /// `KILN_ERR_UNAVAILABLE` (Steam not ready, closed for exit, an owner kiln.net does not admit).
     Unavailable,
     /// Any other code.
     Failed(i32),

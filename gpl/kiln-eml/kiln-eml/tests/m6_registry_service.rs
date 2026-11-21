@@ -167,8 +167,9 @@ fn the_early_table_has_only_the_metadata_subset_and_error_channel() {
     assert!(table.find_resource.is_some() && table.list_resources.is_some() && table.read_resource.is_some());
     assert!(table.content_read_range.is_some() && table.list_contents.is_some());
     assert!(table.value_decode.is_none() && table.value_encode.is_none() && table.loaded_field.is_none());
-    assert!(table.attribute_catalog.is_none() && table.attribute_resolve.is_none());
-    assert!(table.attribute_evaluate.is_none());
+    // The attribute group (m6_archive_attributes tests it)
+    assert!(table.attribute_catalog.is_some() && table.attribute_resolve.is_some());
+    assert!(table.attribute_evaluate.is_some());
     // A 48-byte metadata-only reader's view of the same table.
     assert!(table.header.size >= KILN_EML_ARCHIVE_REGISTRY_SUBSET_SIZE);
 }
@@ -867,16 +868,13 @@ fn publication_registers_the_same_table_and_truthful_capabilities() {
     }
     // The read group and its six member rows
     assert_eq!(rows.get("eml.archive.read"), Some(&available));
-    for name in ["eml.archive.codec", "eml.archive.attributes"] {
-        assert_eq!(rows.get(name).map(|r| r.0), Some(KILN_CAP_UNAVAILABLE), "{name}");
-    }
-    assert!(
-        !rows
-            .keys()
-            .any(|n| n.starts_with("eml.archive.codec.") || n.starts_with("eml.archive.attributes."))
-    );
+    // The attribute group and its three member rows
+    assert_eq!(rows.get("eml.archive.attributes"), Some(&available));
+    assert_eq!(rows.keys().filter(|n| n.starts_with("eml.archive.attributes.")).count(), 3);
+    assert_eq!(rows.get("eml.archive.codec").map(|r| r.0), Some(KILN_CAP_UNAVAILABLE));
+    assert!(!rows.keys().any(|n| n.starts_with("eml.archive.codec.")));
     assert_eq!(rows.keys().filter(|n| n.starts_with("eml.archive.read.")).count(), 6);
-    assert_eq!(rows.len(), 17);
+    assert_eq!(rows.len(), 20);
     // A refused registration reports no support.
     ROWS.lock().unwrap().clear();
     let rc = archive_service::publish(78, |_: &str, _: *const c_void| KILN_ERR_INVALID_ARGUMENT, Some(&caps));

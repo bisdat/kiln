@@ -305,7 +305,7 @@ fn a_direct_call_is_one_call_with_no_hop_wait_or_retry_whatever_it_answers() {
 #[test]
 fn every_fake_table_binds_and_answers_its_knobs() {
     use kiln_abi::services::{
-        kiln_assets::*, kiln_build::*, kiln_client::*, kiln_hooks::*, kiln_launch::*, kiln_types::*,
+        kiln_assets::*, kiln_build::*, kiln_client::*, kiln_hooks::*, kiln_launch::*,
     };
     let (services, _api) = adapter(true);
     let owner = next_owner();

@@ -593,7 +593,9 @@ The "Kiln equivalent" column is Kiln's own API (MIT). "port" means a new MIT por
 The others name the Kiln API that does that job; Kiln changes data in memory at run time rather than in files.
 The EML probe tests EML itself. A C# unit test checks the named helper, not its presentation or use in a running client.
 Remaining C# differences include Impact-name/hash lookup, enumeration of the game's content blobs, non-PNG image
-formats and a general block-compressed texture codec. These do not reduce kiln-eml's hosted coverage.
+formats. Game texture formats are `GameTexture` (Kiln.Api, since 0.2.0-dev.30.3), whose answers are kiln mode's
+`image.decode_texture` / `encode_texture`; where EML's own functions answer differently, a port follows kiln mode's.
+These do not reduce kiln-eml's hosted coverage.
 
 | EML function | kiln-eml | Kiln equivalent (MIT) | Tested |
 |---|---|---|---|
@@ -644,7 +646,7 @@ formats and a general block-compressed texture codec. These do not reduce kiln-e
 | `Buffer:read_resource(type)` / `write_resource(type, v)` | EML | `Kiln.Game` typed structs | probe |
 | `image.create(w, h)` | EML | `new DataImage(w, h)` (`Kiln.Eml`) | probe; C# unit tests |
 | `image.decode(buf, fmt)` / `encode(img, fmt)` | EML | `DataImage.DecodePng/EncodePng` (PNG only) | probe (png); C# unit tests |
-| `image.decode_texture` / `encode_texture` | EML | partial: `DataImage.FromRgba8/ToRgba8`; `Assets.OverrideTexture` encodes a PNG to an existing texture's format; no general texture decoder | probe (R8G8B8A8); C# raw-pixel unit tests |
+| `image.decode_texture` / `encode_texture` | EML | `GameTexture.Decode/DecodeMip/Encode` (Kiln.Api, since 0.2.0-dev.30.3; the rules of kiln mode's functions, [modding/textures.md](modding/textures.md)) with `DataImage.FromRgba8/ToRgba8` for the pixels; `Assets.OverrideTexture` encodes a PNG to an existing texture's format | probe (R8G8B8A8); C# tests on kiln mode's texture fixtures |
 | `Image:get_pixel/set_pixel/get_pixel_packed/set_pixel_packed` | EML | `DataImage.GetPixel/SetPixel/GetPixelPacked/SetPixelPacked` | probe; C# unit tests |
 | `io.read` / `read_to_string` | EML | `System.IO`, `ModContext` folders | probe |
 | `io.list_files` / `exists` / `is_file` / `is_directory` | EML | `System.IO` | probe |
@@ -671,7 +673,8 @@ written from EML's documentation and from what the probe observed, never from EM
   ports to C# line by line.
 - `GuidHash.Of` hashes GUID bytes; `IdOf` also preserves the game's zero-id convention.
 - `DataImage` creates RGBA8 images, reads/writes individual or packed pixels, and decodes/encodes PNGs.
-  `FromRgba8/ToRgba8` copy raw pixels; this is not a general block-compressed texture codec.
+  `FromRgba8/ToRgba8` copy raw pixels; game texture formats (BC1 to BC7 and the rest) are `GameTexture` in Kiln.Api
+  (since 0.2.0-dev.30.3, [modding/textures.md](modding/textures.md)).
 - `Eml.Status` / `Eml.IsLoaded(id)`: the current process's `state/eml.json`, checked by PID and write time so a missing
   or disabled plugin cannot report an old run. `Eml.Load(path)` can inspect a historical result. These are the port of
   `loader.has_mod`, plus the run's result for Kiln mods that build on an EML mod.

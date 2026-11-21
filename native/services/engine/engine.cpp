@@ -365,6 +365,13 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         report(caps, "engine.ecs_read", read, read ? "" : p ? "the profile has no validated ECS read layout" : unknown);
         report(caps, "engine.ecs_write", write,
                write ? "" : p ? "the profile has no enabled native-thread Scene write gate" : unknown);
+        // The profile's published attribute calculation model (publish_attribute_model, generate.py): its name, which
+        // the attribute writes of Kiln's interpreter for ShroudForge-format mods require; none on this profile, or no
+        // exact profile, is unavailable.
+        const bool model = p && p->attribute_calculation_model && *p->attribute_calculation_model;
+        report(caps, "engine.attribute_model", model,
+               model ? std::string(p->attribute_calculation_model)
+                     : p ? "the profile publishes no attribute calculation model" : unknown);
         apply_raise_switch(api, caps);
         gate_set_dialect_owner(resolve_dialect_owner(api));  // before any table is published, so before any acquire
         info->id = str(KILN_ENGINE_SERVICE);

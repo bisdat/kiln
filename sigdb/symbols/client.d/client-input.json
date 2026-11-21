@@ -1,0 +1,142 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "kiln.client's local input observation on the game client (docs/kiln/services/client-building-input.md, 'Where the producer runs'; docs/re/client.md, 'The local input path'). The client's local input writer runs once per client world step on the main thread, between the step's clock advance and the step's input message (which copies the whole ClientPlayerInputData) and before the client world's programs run; its input sample writes digitalInput with the step's version first. The observation goes on the instruction after the camera stores (also the target of the 'no camera object' branch), the same instruction kiln.rules' read-only camera check uses (rules/client.CameraInput): both are links of one kiln.hooks detour. Layout constants are keen::ecs::ClientPlayerInput's and keen::ecs::PlayerInputType's reflected values on client 26430625 (sigdb/types/client/5d9ef2f1...); digitalInput is also captured from the game's own store. Found on client 26430625 (5d9ef2f1...); every pattern is pinned to its function and every constant is fixed, so another build refuses the feature instead of hooking the wrong place.",
+  "symbols": {
+    "client/InputWriter": {
+      "comment": "the local input writer: rcx = the client game's input object (kept in rbp), its local player's entity at +input.entity (kept in ebx), the client world at +input.world; r14 = that entity's ClientPlayerInput; first the input sample (client/InputSample), then the camera",
+      "find": [
+        {
+          "pattern": "48 8B C4 48 89 58 10 48 89 68 18 48 89 70 20 57 41 54 41 57 48 81 EC B0 00 00 00 8B 99 {client/input.entity:d32} 4D 8B E1 49 8B F8 48 8B F2 48 8B E9 85 DB 0F 84 ?? ?? ?? ?? 48 8B 51 {client/input.world:d8} 44 8B CB 44 8B 05 ?? ?? ?? ?? 48 8D 48 88 4C 89 70 08 E8 ?? ?? ?? ?? 4C 8B 30 4D 85 F6 0F 84 ?? ?? ?? ?? 44 8B C3 0F 29 B4 24 ?? ?? ?? ?? 49 8B D4 48 8B CD E8 ?? ?? ?? ?? 0F B6 84 24 ?? ?? ?? ?? 48 8D 95 ?? ?? ?? ?? 88 44 24 28 4C 8B CE 45 33 C0 48 89 7C 24 20 48 8B CD E8 {client/InputSample:rel32}"
+        }
+      ]
+    },
+    "client/InputObserved": {
+      "comment": "the observation point: the instruction after the last camera store (r14 = the ClientPlayerInput, ebx = its entity, rbp = the input object; all three nonvolatile and unchanged since the writer's start), also the target of the 'no camera object' branch, whose rel32 the pattern fixes",
+      "find": [
+        {
+          "scope": {
+            "symbol": "client/InputWriter",
+            "size": 832
+          },
+          "pattern": "48 8B 8D ?? ?? ?? ?? 48 85 C9 0F 84 D3 00 00 00 41 0F B6 96 ?? ?? ?? ?? E8 ?? ?? ?? ?? 66 0F 6F 0D ?? ?? ?? ?? 48 8D 4C 24 ?? 48 8B 95 ?? ?? ?? ?? 0F 57 C0 F3 0F 7F 44 24 ?? 48 C7 44 24 ?? 00 00 00 00 0F 11 4C 24 ?? C7 84 24 ?? ?? ?? ?? 00 00 80 3F C7 84 24 ?? ?? ?? ?? 00 00 80 3F C7 84 24 ?? ?? ?? ?? 00 00 80 3F E8 ?? ?? ?? ?? 0F 10 44 24 ?? F2 0F 10 4C 24 ?? 41 0F 11 46 20 0F 10 44 24 ?? F2 41 0F 11 4E 30 41 0F 11 46 38 48 8B 85 ?? ?? ?? ?? 8B 88 ?? ?? ?? ?? 41 89 4E 48 48 8B 85 ?? ?? ?? ?? 8B 88 ?? ?? ?? ?? 41 89 4E 4C 48 8B 85 ?? ?? ?? ?? 8B 88 ?? ?? ?? ?? 41 89 4E 50 48 8B 85 ?? ?? ?? ?? 8B 88 ?? ?? ?? ?? 41 89 4E 54 48 8B 85 ?? ?? ?? ?? 8B 88 ?? ?? ?? ?? 41 89 4E 58 48 8B 8D",
+          "offset": 227
+        }
+      ]
+    },
+    "@client/InputSample.calls": {
+      "comment": "the input sample reads the step's version from the client world (client/WorldStepOf on [rbp + input.world]) and hands it, with rcx = the ClientPlayerInput (r14), to the digital input writer (client/InputDigital)",
+      "find": [
+        {
+          "scope": {
+            "symbol": "client/InputSample",
+            "size": 1312
+          },
+          "pattern": "48 8B 4D {client/input.world:d8} E8 {client/WorldStepOf:rel32} 48 8B 8C 24 ?? ?? ?? ?? 48 8D 55 ?? 48 89 4C 24 ?? 4D 8B CC 89 44 24 ?? 4C 8B C6 8B 84 24 ?? ?? ?? ?? 49 8B CE 48 89 5C 24 ?? 48 89 7C 24 ?? 89 44 24 ?? 48 8B 85 ?? ?? ?? ?? 48 89 44 24 ?? 48 8B 45 ?? 4C 89 6C 24 ?? 48 89 44 24 ?? E8 {client/InputDigital:rel32}"
+        }
+      ]
+    },
+    "@client/InputDigital.store": {
+      "comment": "the digital input writer: rsi = rcx = the ClientPlayerInput, the whole digitalInput word stored at +cpi.digital",
+      "find": [
+        {
+          "scope": {
+            "symbol": "client/InputDigital",
+            "size": 96
+          },
+          "pattern": "4C 89 4C 24 20 4C 89 44 24 18 48 89 54 24 10 55 56 57 41 55 41 56 41 57 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 4C 8B BD ?? ?? ?? ?? 48 8B F1 49 8B CF E8 ?? ?? ?? ?? 33 FF 84 C0 74 ?? 0F 57 C0 48 89 BE {client/cpi.digital:d32}"
+        }
+      ]
+    },
+    "@client/WorldStepOf.body": {
+      "comment": "the client world's step counter getter, the version the game stamps its own input actions with: mov eax, [rcx + input.step]; ret",
+      "find": [
+        {
+          "scope": {
+            "symbol": "client/WorldStepOf",
+            "size": 8
+          },
+          "pattern": "8B 81 {client/input.step:d32} C3"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "client/input.entity": {
+      "value": 1628
+    },
+    "client/input.world": {
+      "value": 8
+    },
+    "client/input.step": {
+      "value": 14778012
+    },
+    "client/cpi.cursor": {
+      "value": 760
+    },
+    "client/cpi.digital": {
+      "value": 936
+    },
+    "client/cpi.create": {
+      "value": 500
+    },
+    "client/cpi.stock": {
+      "value": 160
+    },
+    "client/pit.mainhand": {
+      "value": 0
+    },
+    "client/pit.mainhand_tap": {
+      "value": 1
+    },
+    "client/pit.mainhand_hold": {
+      "value": 2
+    },
+    "client/pit.mainhand_release": {
+      "value": 3
+    },
+    "client/pit.secondary": {
+      "value": 4
+    },
+    "client/pit.contextual": {
+      "value": 5
+    },
+    "client/pit.contextual_hold": {
+      "value": 7
+    },
+    "client/pit.undo": {
+      "value": 40
+    }
+  },
+  "features": {
+    "client.input_observation": {
+      "symbols": [
+        "client/InputWriter",
+        "client/InputObserved",
+        "client/InputSample",
+        "@client/InputSample.calls",
+        "client/InputDigital",
+        "@client/InputDigital.store",
+        "client/WorldStepOf",
+        "@client/WorldStepOf.body"
+      ],
+      "constants": [
+        "client/input.entity",
+        "client/input.world",
+        "client/input.step",
+        "client/cpi.cursor",
+        "client/cpi.digital",
+        "client/cpi.create",
+        "client/cpi.stock",
+        "client/pit.mainhand",
+        "client/pit.mainhand_tap",
+        "client/pit.mainhand_hold",
+        "client/pit.mainhand_release",
+        "client/pit.secondary",
+        "client/pit.contextual",
+        "client/pit.contextual_hold",
+        "client/pit.undo"
+      ]
+    }
+  }
+}

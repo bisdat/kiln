@@ -94,6 +94,20 @@ int main() {
     if (g_observer) g_observer(other, g_observer_user);
     check(kw::t_ecs_write_unsubscribe(late) == KILN_ERR_NOT_FOUND, "an owner revoked after on_ready ends its subscription");
     check(g_events == 0, "no event without a write");
+    // ecs_registration's arguments, and its answer where this fake core gives no engine (reads off).
+    KilnEcsRegistrationDetail d{};
+    d.size = sizeof d;
+    check(kw::t_ecs_registration(KILN_WORLD_SERVER, 1, nullptr) == KILN_ERR_INVALID_ARGUMENT &&
+              kw::t_ecs_registration(KILN_WORLD_KINDS, 1, &d) == KILN_ERR_INVALID_ARGUMENT,
+          "ecs_registration: no record or a world kind out of range is an argument error");
+    d.size = sizeof d - 8;
+    d.index = 77;
+    check(kw::t_ecs_registration(KILN_WORLD_SERVER, 1, &d) == KILN_ERR_INVALID_ARGUMENT && d.index == 77,
+          "ecs_registration: a short record is an argument error and stays untouched");
+    d.size = sizeof d;
+    check(kw::t_ecs_registration(KILN_WORLD_SERVER, 1, &d) == KILN_ERR_UNAVAILABLE && d.status != KILN_ECS_OK &&
+              d.template_hash == 0,
+          "ecs_registration: without entity reads it is unavailable and names no type");
     std::printf(g_failed ? "ecs_prod_test: %d FAILED\n" : "ecs_prod_test: all passed\n", g_failed);
     return g_failed ? 1 : 0;
 }

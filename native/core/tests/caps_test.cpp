@@ -627,6 +627,41 @@ void core_rows(const std::filesystem::path& dir) {
                   get("client.building_input").source == "core",
               "building input: no producer bound on this build: unavailable, symbol-missing, with the producer's reason");
         static const kiln::building_input::Layout layout{760, 936, 500, 160, 0, 1, 2, 3, 4, 5, 7, 40};
+        // the lazy producer: ready (an installer waits for the first request, nothing hooked) reads available
+        kiln::building_input::set_installer(
+            +[](kiln::building_input::Layout* l, const char**) { *l = layout; return kiln::building_input::Install::Bound; });
+        caps::core_rows(true, true, "");
+        CHECK(is("client.building_input", A, 0) &&
+                  get("client.building_input").text.find("hooked at the first request") != std::string::npos,
+              "building input: a ready producer on the client: available, hooked at the first request (%s)",
+              get("client.building_input").text.c_str());
+        // bound later (the first request's install): the row follows at the next registry call, no rebuild
+        kiln::building_input::bind(&layout);
+        CHECK(is("client.building_input", A, 0) &&
+                  get("client.building_input").text == "the input producer is bound to this game build",
+              "building input: bound after the rows were built: the row follows (%s)", get("client.building_input").text.c_str());
+        // a first install that failed for good, through a submit after the rows were built: the row follows, faulted
+        // (its hook could not be installed, not a symbol this build lacks), with the installer's reason
+        kiln::building_input::reset_for_tests();
+        kiln::building_input::set_installer(+[](kiln::building_input::Layout*, const char** why) {
+            *why = "the test install failed";
+            return kiln::building_input::Install::Failed;
+        });
+        caps::core_rows(true, true, "");
+        {
+            KilnBuildingInput undo{};
+            undo.size = sizeof undo;
+            undo.action = KILN_BUILDING_ACTION_UNDO;
+            undo.player = 1;
+            uint32_t id = 0;
+            const kiln::building_input::Env env{true, true, true, 1, nullptr};
+            CHECK(kiln::building_input::submit(env, 1, 0, &undo, &id) == KILN_ERR_UNAVAILABLE && id == 0,
+                  "building input: a first submit whose install fails answers unavailable");
+        }
+        CHECK(is("client.building_input", U, KILN_CAP_REASON_FAULTED) &&
+                  get("client.building_input").text == "the test install failed",
+              "building input: a failed first install after the rows were built: unavailable, faulted, with its reason (%s)",
+              get("client.building_input").text.c_str());
         kiln::building_input::bind(&layout);
         caps::core_rows(true, true, "");
         CHECK(is("client.building_input", A, 0), "building input: a bound producer on the client: available");
@@ -640,6 +675,41 @@ void core_rows(const std::filesystem::path& dir) {
         kiln::test_image.side = KILN_SIDE_SERVER;
         caps::core_rows(true, true, "");
         CHECK(is("client.building_input", U, KILN_CAP_REASON_WRONG_SIDE), "building input: a dedicated server says wrong side");
+        // the binder's reason (client.cpp: held, no local player, hooking failed) is the row's text while unbound
+        kiln::test_image.side = KILN_SIDE_CLIENT;
+        kiln::building_input::bind(nullptr);
+        kiln::building_input::unbound_reason("hooking the local input observation point failed (kiln.log says why)");
+        caps::core_rows(true, true, "");
+        CHECK(is("client.building_input", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
+                  get("client.building_input").text == "hooking the local input observation point failed (kiln.log says why)",
+              "building input: unbound, the row says the binder's reason");
+        // held by a client gate row (the compiled list no longer holds it; the mechanism stays): the gate's row is what
+        // a reader sees, bound or not; kiln.json "preview" naming it lifts it
+        static const kiln::gates::Gate building_gate[] = {
+            {"client.building_input", "building-input.select, building-input.joined", kiln::gates::kClient}, {nullptr, nullptr, 0}};
+        kiln::gates::use_list_for_tests(building_gate);
+        kiln::gates::configure(KILN_SIDE_CLIENT, false, {});
+        kiln::building_input::bind(&layout);
+        reset();
+        caps::core_rows(true, true, "");
+        CHECK(is("client.building_input", U, KILN_CAP_REASON_POLICY) &&
+                  get("client.building_input").text.find("building-input.joined") != std::string::npos &&
+                  kiln_caps_held(T, ks("client.building_input")) == 1,
+              "building input: held by the client gate even with a bound producer (%s)", get("client.building_input").text.c_str());
+        kiln::gates::configure(KILN_SIDE_CLIENT, false, {"client.building_input"});
+        reset();
+        caps::core_rows(true, true, "");
+        CHECK(is("client.building_input", A, 0) && kiln_caps_held(T, ks("client.building_input")) == 0,
+              "building input: preview naming it lifts the hold");
+        kiln::gates::configure(KILN_SIDE_SERVER, false, {});
+        CHECK(!kiln::gates::is_held("client.building_input"), "building input: the gate holds it on the client only");
+        kiln::gates::use_list_for_tests(nullptr);  // the compiled list: since the hold was lifted it holds it nowhere
+        kiln::gates::configure(KILN_SIDE_CLIENT, false, {});
+        CHECK(!kiln::gates::is_held("client.building_input"), "building input: the compiled list does not hold it on the client");
+        kiln::gates::configure(KILN_SIDE_SERVER, false, {});
+        CHECK(!kiln::gates::is_held("client.building_input"), "building input: nor on a dedicated server");
+        kiln::gates::use_list_for_tests(no_inspection_gate);
+        kiln::gates::configure(KILN_SIDE_SERVER, false, {});
         kiln::building_input::reset_for_tests();
         kiln::test_image.side = side;
         reset();

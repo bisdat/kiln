@@ -2262,6 +2262,8 @@
       "byHand": "Colocado à mão",
       "folder": "Pasta",
       "advanced": "Avançado (hooks ou patches)",
+      "steam": "Steam",
+      "steamMessages": "Conversa com outros jogadores pelo Steam",
       "role": "Papel",
       "servesLive": "Serve as páginas ao vivo",
       "also": "Também {list}",

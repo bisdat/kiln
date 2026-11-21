@@ -14,6 +14,7 @@
       KilnBoot           true | required: the mod has boot content (Mod.OnBoot; "boot" in kiln.mod.json); required: a failure of
                          it stops the start (default: none)
       KilnAdvanced       true: opt into the advanced tier (hooks, symbols)
+      KilnSteamMessages  true: the mod opens its own Steam peer message leases ("steamMessages", since 0.2.0-dev.30.3)
       KilnFeatures       ;-list of required Kiln features (Game.HasFeature), e.g. tick;log.mirror
       KilnExports        ;-list of assembly file names other mods compile against (e.g. MyMod.Api.dll)
       KilnServices       ;-list of Kiln service assemblies to reference: Players;Chat;World;Items;Spawn;Time;Settings;...
@@ -166,7 +167,7 @@
     <KilnManifest Source="$(KilnManifestSource)" Output="$(IntermediateOutputPath)kiln.mod.json"
                   Id="$(KilnModId)" Name="$(KilnModName)" Version="$(Version)" ApiVersion="$(KilnApiVersion)" Side="$(KilnSide)" Clients="$(KilnClients)" ClientsFallback="$(_KilnClientsFallback)" AssemblyPath="$(TargetPath)" BlocksDirectory="$(MSBuildProjectDirectory)/blocks"
                   Authors="$(_KilnAuthors)" Description="$(Description)" License="$(PackageLicenseExpression)" Url="$(PackageProjectUrl)"
-                  EntryAssembly="$(TargetFileName)" EntryType="$(KilnEntryType)" Boot="$(KilnBoot)" Advanced="$(KilnAdvanced)"
+                  EntryAssembly="$(TargetFileName)" EntryType="$(KilnEntryType)" Boot="$(KilnBoot)" Advanced="$(KilnAdvanced)" SteamMessages="$(KilnSteamMessages)"
                   Features="$(KilnFeatures)" Exports="$(KilnExports)" Dependencies="@(KilnDependency)"
                   LoadBefore="@(KilnLoadBefore)" LoadAfter="@(KilnLoadAfter)" Incompatible="@(KilnIncompatible)"
                   TestsAutoRun="$(KilnTestsAutoRun)" TestTimeoutSeconds="$(KilnTestTimeoutSeconds)"

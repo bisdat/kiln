@@ -624,7 +624,7 @@ pub fn runtime_build(dirs: &DataDirs, receipt: &crate::install::InstallReceipt) 
 }
 
 /// Kiln.Mods.ApiVersion of this Kiln (managed/Kiln.Api/Mods.cs; a test keeps them equal).
-pub const KILN_API: &str = "0.2.12";
+pub const KILN_API: &str = "0.2.13";
 pub const META: &str = "meta.json";
 
 use crate::library::LibraryRef;
@@ -957,6 +957,7 @@ fn native_as_manifest(n: &NativeManifest) -> KilnManifest {
         features: Vec::new(),
         exports: Vec::new(),
         advanced: false,
+        steam_messages: false,
         tests: None,
         kiln_build: None,
         boot: false,

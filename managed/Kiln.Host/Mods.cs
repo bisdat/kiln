@@ -488,6 +488,7 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         Exports = m.Exports,
         Features = m.Features,
         Advanced = m.Advanced,
+        SteamMessages = m.SteamMessages,
     };
 
     // LoadCore's last split, for the "loaded in" line: Kiln's checks before any of the mod's code loads (boot refusal,
@@ -528,6 +529,7 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         try
         {
             owner = _host.OwnerCreate("mod:" + manifest.Id);
+            if (manifest.SteamMessages) OwnerGrants.SteamMessages(_host, owner, manifest.Id);
             Kiln.Mod instance;
             if (!manifest.HasCode)
                 instance = new DataOnlyMod();  // no entryAssembly: a mod of data (content packs, assets), with nothing to run

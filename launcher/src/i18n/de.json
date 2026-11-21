@@ -2262,6 +2262,8 @@
       "byHand": "Von Hand dort abgelegt",
       "folder": "Ordner",
       "advanced": "Fortgeschritten (Hooks oder Patches)",
+      "steam": "Steam",
+      "steamMessages": "Spricht über Steam mit anderen Spielern",
       "role": "Rolle",
       "servesLive": "Liefert die Live-Seiten",
       "also": "Auch {list}",

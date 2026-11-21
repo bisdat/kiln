@@ -49,6 +49,10 @@ internal static class FakeTables
         KitBackend.Instance.RegisterTable(TimeAbi.Service, TimeTable.Create());
         Features(TimeFake.Features);
         foreach (var row in TimeFake.OfflineRows) Offline(row, "the weather is not modelled by the test kit's fake of kiln.time");
+        // 0.2.0-dev.30.3: kiln.client's building input and kiln.net's Steam peer messages. The kit's harness is a server with
+        // no client world and no Steam, and fakes neither table: their members throw KilnUnavailableException naming these
+        Offline(BuildingInput.Capability, "the test kit has no game client and no input path: building input is not modelled");
+        Offline(SteamMessages.Capability, "the test kit has no kiln.net and no Steam: Steam peer messages are not modelled");
         // dev.28 on: a fake in Fakes/<Service>/ registers itself (IKitFake, KitFake.cs)
         foreach (var fake in KitFakes.All) fake.Register();
     }

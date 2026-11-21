@@ -168,7 +168,7 @@ pub fn the_mod_message_fixture_matches_the_oracle_sf180() {
 
 // ---- a mod message between two packages over a loopback kiln.net ----
 
-/// A loopback kiln.net (the Steam-messages members only, per kiln_net.h's private block) and a
+/// A loopback kiln.net (the Steam-messages members only, per kiln_net.h) and a
 /// kiln.caps answering the lease's row: what one package sends with send_mod, the next
 /// receive on that channel takes. Other services come from support's table.
 mod loopback {
@@ -177,6 +177,7 @@ mod loopback {
     use kiln_abi::*;
     use std::collections::VecDeque;
     use std::ffi::c_void;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Mutex, OnceLock};
 
     pub const LOCAL: u64 = 76_561_198_000_000_007;
@@ -186,6 +187,11 @@ mod loopback {
     pub type Sent = (u32, u64, Vec<u8>, u32);
     /// The messages sent and not yet received, oldest first.
     pub static WIRE: Mutex<VecDeque<Sent>> = Mutex::new(VecDeque::new());
+    /// The owner that opened the lease: kiln.net answers the lease's other members only for it.
+    static OPENER: AtomicU64 = AtomicU64::new(0);
+    fn not_the_opener(owner: KilnOwner) -> bool {
+        owner == 0 || owner != OPENER.load(Ordering::Relaxed)
+    }
 
     unsafe extern "C" fn status(out: *mut KilnSteamMessagesStatus) -> KilnResult {
         // SAFETY: the caller's sized record.
@@ -198,15 +204,18 @@ mod loopback {
         KILN_OK
     }
     unsafe extern "C" fn open(
-        _: KilnOwner,
+        owner: KilnOwner,
         _: *const KilnSteamMessagesOpen,
         lease: *mut KilnHandle,
     ) -> KilnResult {
+        OPENER.store(owner, Ordering::Relaxed);
         // SAFETY: the caller's out handle.
         unsafe { *lease = 1 };
         KILN_OK
     }
+    #[allow(clippy::too_many_arguments)]
     unsafe extern "C" fn send(
+        owner: KilnOwner,
         _: KilnHandle,
         peer: u64,
         data: *const c_void,
@@ -215,6 +224,9 @@ mod loopback {
         flags: u32,
         steam_result: *mut i32,
     ) -> KilnResult {
+        if not_the_opener(owner) {
+            return KILN_ERR_NOT_FOUND;
+        }
         // SAFETY: the caller's bytes, readable for len.
         let bytes = unsafe { std::slice::from_raw_parts(data.cast::<u8>(), len as usize) };
         WIRE.lock()
@@ -225,6 +237,7 @@ mod loopback {
         KILN_OK
     }
     unsafe extern "C" fn receive(
+        owner: KilnOwner,
         _: KilnHandle,
         channel: u32,
         buffer: *mut c_void,
@@ -232,6 +245,9 @@ mod loopback {
         out: *mut KilnSteamMessageInfo,
         got: *mut u32,
     ) -> KilnResult {
+        if not_the_opener(owner) {
+            return KILN_ERR_NOT_FOUND;
+        }
         let mut wire = WIRE.lock().unwrap();
         // SAFETY: the caller's outs.
         unsafe { *got = 0 };

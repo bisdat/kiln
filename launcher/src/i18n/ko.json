@@ -2223,6 +2223,8 @@
       "byHand": "직접 넣음",
       "folder": "폴더",
       "advanced": "고급 (후크 또는 패치)",
+      "steam": "Steam",
+      "steamMessages": "Steam으로 다른 플레이어와 통신합니다",
       "role": "역할",
       "servesLive": "실시간 페이지 제공",
       "also": "그 밖에 {list}",

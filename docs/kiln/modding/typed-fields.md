@@ -201,7 +201,8 @@ for (var y = 0; y < 256; y++) for (var x = 0; x < 256; x++) img.SetPixel(x, y, (
 Assets.RegisterIcon(itemGuid, img.EncodePng());     // an icon drawn in code (client)
 ```
 `DataImage` reads every PNG (all colour types and bit depths, transparency, interlaced) and writes 8-bit RGBA. Other formats and the
-game's block-compressed textures are not in it: `Assets.OverrideTexture` takes a PNG and encodes it to the texture's format.
+game's texture formats are not in it: `GameTexture` (Kiln.Api, since 0.2.0-dev.30.3, [textures.md](textures.md)) decodes and
+encodes those (`image.decode_texture` / `encode_texture`), and `Assets.OverrideTexture` takes a PNG and encodes it to the texture's format.
 Types by Impact name (`get_by_impact_name`) are not here: kiln.types does not report them yet.
 
 ## Limits

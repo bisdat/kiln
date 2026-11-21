@@ -1195,17 +1195,43 @@ pub fn on_the_production_host_reads_and_writes_wait_for_their_slices_and_the_met
         query,
         format!("operation runtime.ecs.query has not been verified for game build {BUILD}")
     );
+    // with kiln.world's ECS reads available on this build, the reads are in the contract and the world is ready
+    fake_services::set_cap(
+        "world.ecs_read",
+        Some((
+            kiln_abi::services::kiln_caps::KILN_CAP_AVAILABLE,
+            kiln_abi::services::kiln_caps::KILN_CAP_REASON_NONE,
+        )),
+    );
+    let (ready, read_reason, listed): (bool, Option<String>, i64) = lua
+        .load(
+            "local c = ecs.get_catalog()
+             local e; for _, x in ipairs(c.entries) do if x.qualified_name == 'keen::ecs::Health' then e = x end end
+             return c.entity_access_ready, e.read_reason, #ecs.get_components()",
+        )
+        .eval()
+        .unwrap();
+    fake_services::set_cap("world.ecs_read", None);
+    assert!(ready);
+    assert_eq!(read_reason, None);
+    assert_eq!(listed, 4);
 }
 
 pub fn the_family_claims_its_four_names_inside_the_ecs_container() {
+    // the four registry names, then the entity queries and reads (tests/runtime_ecs_reads.rs)
     assert_eq!(
-        CLAIMS,
+        CLAIMS[..4],
         [
             "runtime.ecs.get_components",
             "runtime.ecs.get_catalog",
             "runtime.ecs.get_registry",
             "runtime.ecs.get_component",
         ]
+    );
+    assert!(
+        CLAIMS
+            .iter()
+            .all(|name| name.starts_with("runtime.ecs.") || name.starts_with("runtime.overrides."))
     );
     let wiring = types::wire(Port(archive_types()), |_, _| {});
     let families = Families::new(vec![ecs::family(
