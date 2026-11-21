@@ -60,6 +60,17 @@ inline Scenario scenario(const std::string& name) {
     } else if (name == "raise-off") {
         s.run_file = world + "seconds=2\nwarmup=1\nrate=200\n";
         s.raise = false;
+    } else if (name == "slow-restore") {
+        // every priority restore takes 3 ms (SetThreadPriority under Proton, or a preemption right after it; GitHub #58):
+        // the files show it in restore_ns, apart from hold_ns, which ends at the Scene word's release (host only: the
+        // restore is slowed through memory_host.cpp)
+        s.run_file = world + "seconds=2\nwarmup=1\nrate=50\n";
+        s.restore_us = 3000;
+    } else if (name == "v1-stats") {
+        // a Kiln before the restore counters (0.2.0-dev.30.1): its hold includes the release and the restore, and the
+        // files say so; the restore columns stay empty
+        s.run_file = world + "seconds=2\nwarmup=1\nrate=200\n";
+        s.v1_stats = true;
     } else if (name == "noop") {
         s.run_file = world + "seconds=2\nwarmup=1\nrate=200\nmode=noop\n";
     } else if (name == "named") {
@@ -111,7 +122,7 @@ inline Scenario scenario(const std::string& name) {
 struct Outcome {
     nlohmann::json run;
     std::vector<std::vector<std::string>> writes, steps, gate;
-    std::string writes_header, steps_header, gate_header;
+    std::string writes_header, steps_header, gate_header, writes_names, gate_names;
     bool has_run = false;
 };
 inline Outcome read_outcome(Rig& r) {
@@ -125,15 +136,16 @@ inline Outcome read_outcome(Rig& r) {
     } catch (...) {
         o.run = nlohmann::json::object();
     }
-    o.writes = csv(d / "writes.csv", &o.writes_header);
+    o.writes = csv(d / "writes.csv", &o.writes_header, &o.writes_names);
     o.steps = csv(d / "steps.csv", &o.steps_header);
-    o.gate = csv(d / "gate.csv", &o.gate_header);
+    o.gate = csv(d / "gate.csv", &o.gate_header, &o.gate_names);
     return o;
 }
 inline size_t rows_where(const Outcome& o, const std::function<bool(const std::vector<std::string>&)>& f) {
     return static_cast<size_t>(std::count_if(o.writes.begin(), o.writes.end(), f));
 }
-// writes.csv: utc_ms,op,attempt,status,result,why,engine_reason,flags,hold_ns,call_ns,step,priority,post_step,since_post_ns
+// writes.csv: utc_ms,op,attempt,status,result,why,engine_reason,flags,hold_ns,call_ns,step,priority,post_step,since_post_ns,
+// restore_ns (kit 3; empty when the Kiln's gate counters have no restore fields)
 inline bool written(const std::vector<std::string>& w) { return w.size() > 7 && w[3] == "ok" && (std::stoul(w[7], nullptr, 16) & KILN_MUTATION_WRITTEN); }
 
 // The whole component equals its initial bytes, except byte 0 of the game's target, which the game counted up.
@@ -166,10 +178,41 @@ inline void common_run_checks(Rig& r, const Scenario& sc, const Outcome& o, cons
     check(ok > 20, k + "more than 20 exchanges succeeded (" + std::to_string(ok) + ")");
     check(busy > 0, k + "the frames made some busy (" + std::to_string(busy) + ")");
     check(bad == 0, k + "no other outcome (" + std::to_string(bad) + ")");
-    check(o.writes_header.rfind("# gate-priority-test 2;", 0) == 0 && o.run.value("kit", "") == "2" &&
-              std::all_of(o.writes.begin(), o.writes.end(), [](const auto& w) { return w.size() == 14; }) &&
+    check(o.writes_header.rfind("# gate-priority-test 3;", 0) == 0 && o.run.value("kit", "") == "3" &&
+              std::all_of(o.writes.begin(), o.writes.end(), [](const auto& w) { return w.size() == 15; }) &&
               o.run.contains("post_edge_waits"),
-          k + "kit 2's files: the header, run.json, 14 columns in writes.csv");
+          k + "kit 3's files: the header, run.json, 15 columns in writes.csv");
+    // Where this Kiln ends a hold, from its gate counters (GitHub #58): at the Scene word's release with the priority
+    // restore apart, or (a Kiln before the restore counters) at the end of the release, the restore included.
+    const bool measured = !sc.v1_stats;
+    const std::string hold = measured ? "scene-release" : "release-end";
+    check(o.writes_header.find("; hold=" + hold) != std::string::npos && o.gate_header.find("; hold=" + hold) != std::string::npos &&
+              o.run.value("hold_ends", "") == hold,
+          k + "every file and run.json say hold=" + hold);
+    check(o.writes_names.size() > 11 && o.writes_names.substr(o.writes_names.size() - 11) == ",restore_ns" &&
+              o.gate_names.find(",view_failures,restores,restore_ns_total,restore_ns_max") != std::string::npos &&
+              std::all_of(o.gate.begin(), o.gate.end(), [](const auto& r) { return r.size() == 15; }),
+          k + "the restore columns: writes.csv's last, gate.csv's last three");
+    const auto number = [](const std::string& s) { return !s.empty() && s.find_first_not_of("0123456789") == std::string::npos; };
+    if (measured) {
+        check(rows_where(o, [&](const auto& w) { return w.size() == 15 && !number(w[14]); }) == 0 &&
+                  std::all_of(o.gate.begin(), o.gate.end(), [&](const auto& r) { return number(r[12]) && number(r[14]); }) &&
+                  o.run.contains("restore_ns") && o.run["restore_ns"].value("n", 0) > 20,
+              k + "restore_ns on every row and in run.json, the restore counters in gate.csv");
+        // the raise on: every gate release restored the priority; off: never
+        const size_t restored_rows = rows_where(o, [&](const auto& w) { return w.size() == 15 && w[3] == "ok" && w[14] != "0"; });
+        const size_t ok_rows = rows_where(o, [](const auto& w) { return w.size() > 3 && w[3] == "ok"; });
+        const uint64_t restores = o.gate.empty() ? 0 : std::stoull(o.gate.back()[12]);
+        check(sc.raise ? restores > 0 : restores == 0 && restored_rows == 0,
+              k + (sc.raise ? "the gate counted its restores (" + std::to_string(restores) + "; " +
+                                  std::to_string(restored_rows) + " of " + std::to_string(ok_rows) + " ok rows timed one above 0 ns)"
+                            : std::string("raise off: no restore, restore_ns 0 on every ok row")));
+    } else {
+        check(rows_where(o, [](const auto& w) { return w.size() == 15 && !w[14].empty(); }) == 0 &&
+                  std::all_of(o.gate.begin(), o.gate.end(), [](const auto& r) { return r[12].empty() && r[14].empty(); }) &&
+                  !o.run.contains("restore_ns"),
+              k + "the restore columns empty, no restore_ns in run.json: this Kiln does not measure it");
+    }
     // The busy latch (gate.cpp, keyed on the live step the server's Pre sets) answers this owner busy until the next
     // Pre, and that next update holds the gate until its Post: every retry after a busy answer must come in a later
     // server step, and almost none may meet the latch (engine reason 45, kiln-gate-busy-this-step).
@@ -272,6 +315,27 @@ inline int run_scenario(const std::string& name, const std::string& sigdb, KilnN
     } else if (name == "raise-off") {
         common_run_checks(r, sc, o, "keen::ecs::ClientFishing", 2, "write");
         check(logs_with("the priority raise is OFF for this run") == 1, k + "a warning says the raise is off");
+    } else if (name == "slow-restore") {
+        common_run_checks(r, sc, o, "keen::ecs::ClientFishing", 2, "write");
+        // each restore is 3 ms or more: in restore_ns on every ok row; hold_ns ends at the Scene word's release, so
+        // the median hold (microseconds of work) stays far below it
+        const size_t ok = rows_where(o, [](const auto& w) { return w.size() > 3 && w[3] == "ok"; });
+        const size_t slow = rows_where(o, [](const auto& w) { return w.size() == 15 && w[3] == "ok" && std::stoull(w[14]) >= 3'000'000; });
+        check(ok > 20 && slow == ok, k + "every ok row's restore_ns is the 3 ms restore (" + std::to_string(slow) + " of " +
+                                         std::to_string(ok) + ")");
+        const auto part = [&](const char* key) { return o.run.value(key, nlohmann::json::object()).value("p50", 0ull); };
+        const uint64_t restore_p50 = part("restore_ns"), hold_p50 = part("hold_ns");
+        check(restore_p50 >= 3'000'000 && hold_p50 < 1'500'000,
+              k + "run.json: restore p50 " + std::to_string(restore_p50) + " ns, hold p50 " + std::to_string(hold_p50) +
+                  " ns (not the restore)");
+        check(!o.gate.empty() && std::stoull(o.gate.back()[14]) >= 3'000'000 &&
+                  std::stoull(o.gate.back()[8]) < std::stoull(o.gate.back()[13]),
+              k + "gate.csv: the longest restore 3 ms or more, the hold total below the restore total");
+        check(logs_with("restore p50 ") == 1, k + "the summary line has the restore's percentiles");
+    } else if (name == "v1-stats") {
+        common_run_checks(r, sc, o, "keen::ecs::ClientFishing", 2, "write");
+        check(logs_with("restore not measured (this Kiln's hold includes the release and the restore)") == 1,
+              k + "the summary line says the restore is not measured");
     } else if (name == "noop") {
         check(o.has_run && o.run.value("mode", "") == "noop", k + "mode noop");
         const size_t ok = rows_where(o, [](const auto& w) { return w[3] == "ok"; });

@@ -59,6 +59,7 @@
 namespace kiln::engine::mem {
 extern std::atomic<std::uintptr_t> test_image;
 extern thread_local int test_priority;
+extern std::atomic<void (*)()> test_restore_hook;  // memory_host.cpp: called inside each priority restore
 }  // namespace kiln::engine::mem
 #endif
 
@@ -475,17 +476,30 @@ inline KilnResult KILN_CALL g_identity(KilnEngineIdentity* out) {
     std::snprintf(out->profile_id, sizeof out->profile_id, "%s", "test-profile");
     return KILN_OK;
 }
+// kiln.engine's gate_stats over the real gate's counters, with its size rule (v1's 96 bytes and up; size says what was
+// written). Scenario.v1_stats: a Kiln before the restore counters (0.2.0-dev.30.1), which writes v1's 96 bytes only.
+inline std::atomic<bool> g_v1_stats{false};
 inline KilnResult KILN_CALL g_gate_stats(KilnEngineGateStats* out) {
+    if (!out || out->size < offsetof(KilnEngineGateStats, restores)) return KILN_ERR_INVALID_ARGUMENT;
     const auto& c = kiln::engine::stats();
-    *out = KilnEngineGateStats{};
-    out->size = sizeof *out;
-    out->attempts = c.attempts.load();
-    out->acquired = c.acquired.load();
-    out->busy_scene = c.busy_scene.load();
-    out->hold_ns_total = c.hold_ns_total.load();
-    out->hold_ns_max = c.hold_ns_max.load();
+    KilnEngineGateStats s{};
+    s.size = g_v1_stats.load() ? static_cast<uint32_t>(offsetof(KilnEngineGateStats, restores))
+                               : static_cast<uint32_t>(std::min<size_t>(out->size, sizeof s));
+    s.attempts = c.attempts.load();
+    s.acquired = c.acquired.load();
+    s.busy_scene = c.busy_scene.load();
+    s.hold_ns_total = c.hold_ns_total.load();
+    s.hold_ns_max = c.hold_ns_max.load();
+    s.restores = c.restores.load();
+    s.restore_ns_total = c.restore_ns_total.load();
+    s.restore_ns_max = c.restore_ns_max.load();
+    std::memcpy(out, &s, s.size);
     return KILN_OK;
 }
+// Scenario.restore_us (host only, through memory_host.cpp's hook): every priority restore takes that long, as
+// SetThreadPriority's wineserver round trip under Proton, or a preemption right after it, can.
+inline std::atomic<int> g_restore_us{0};
+inline void slow_restore() { std::this_thread::sleep_for(std::chrono::microseconds(g_restore_us.load())); }
 
 struct Host {
     std::mutex log_mu;
@@ -548,6 +562,8 @@ struct Scenario {
     // update_us later Post, and keeps the word tail_us past Post (the rest of the engine's update), as the game does.
     int period_us = 4000, update_us = 800, tail_us = 300;
     int hang_after_write = 0, hang_ms = 0;  // after this gate write (1-based) the update hangs hang_ms (see e_release)
+    bool v1_stats = false;                  // kiln.engine's gate counters as a Kiln before the restore fields (g_gate_stats)
+    int restore_us = 0;                     // every priority restore takes this long (host only: g_restore_us)
 };
 
 struct Rig {
@@ -670,6 +686,11 @@ inline bool build(Rig& r, const Scenario& sc, const std::string& sigdb) {
     g_uncertain_write = sc.uncertain_write;
     g_hang_after_write = sc.hang_after_write;
     g_scene_word = r.engine->scene_word();
+    g_v1_stats = sc.v1_stats;
+    g_restore_us = sc.restore_us;
+#ifndef _WIN32
+    kiln::engine::mem::test_restore_hook = sc.restore_us ? &slow_restore : nullptr;
+#endif
 
     r.world_api.header = {sizeof(KilnWorldApi), KILN_WORLD_VERSION};
     r.world_api.capabilities = &w_caps;
@@ -823,24 +844,31 @@ inline fs::path run_dir(Rig& r) {
         if (e.is_directory() && e.path().filename().string().rfind("run-", 0) == 0) return e.path();
     return {};
 }
-inline std::vector<std::vector<std::string>> csv(const fs::path& file, std::string* header) {
+// A file's rows, every cell kept (an empty last cell too); `header` gets its '#' line, `names` its column names.
+inline std::vector<std::vector<std::string>> csv(const fs::path& file, std::string* header, std::string* names = nullptr) {
     std::ifstream in(file);
     std::vector<std::vector<std::string>> rows;
     std::string line;
     bool columns = false;
     while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
         if (!line.empty() && line[0] == '#') {
             if (header) *header = line;
             continue;
         }
         if (!columns) {
             columns = true;
+            if (names) *names = line;
             continue;
         }
         std::vector<std::string> cells;
-        std::stringstream ss(line);
-        std::string cell;
-        while (std::getline(ss, cell, ',')) cells.push_back(cell);
+        size_t at = 0;
+        for (;;) {
+            const size_t comma = line.find(',', at);
+            cells.push_back(line.substr(at, comma == std::string::npos ? std::string::npos : comma - at));
+            if (comma == std::string::npos) break;
+            at = comma + 1;
+        }
         rows.push_back(cells);
     }
     return rows;
