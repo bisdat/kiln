@@ -23,7 +23,7 @@ export type ChangeStep =
 /** The folder dialog (Tauri), or in a plain browser the mock's queued answer (tests: __kilnDataFolderMock.pick). */
 export async function pickFolder(defaultPath?: string): Promise<string | null> {
   if (!api.isTauri()) return (await api.loadMock()).mockPickFolder();
-  const r = await pickPaths({ directory: true, title: t("shell.dataFolderText.dataFolder"), defaultPath });
+  const r = await pickPaths({ directory: true, title: t("shell.dataFolderText.dataFolder"), defaultPath, kind: "dataFolder" });
   return r?.[0] ?? null;
 }
 

@@ -3,6 +3,11 @@
 //! Frostdev, and nothing at all while the switch is off. Never a server, world, character or mod name: the activity is
 //! built from the line texts, the mod count and the start time, and nothing else ([`activity`]).
 //!
+//! One opt-in more (Crucible, DESIGN.md 8; community.json `presencePack`, off by default): while the game runs a
+//! profile that is an instance of a Crucible pack, the state line names the pack ("Ember run (12 mods)") and the second
+//! button becomes "Get this modpack", opening the pack's page on frostdev.io ([`pack_for_game`], [`pack_page`]). Only
+//! packs from Crucible (their instance carries Crucible's code or slug): a pack made or opened locally is never named.
+//!
 //! The IPC (Discord's `discord-rpc` protocol, docs `topics/rpc`): frames of `u32 opcode, u32 length` (little endian)
 //! and a JSON payload; opcode 0 HANDSHAKE `{"v": 1, "client_id": ...}` answered by a READY dispatch, 1 FRAME (a
 //! command and its answer), 2 CLOSE, 3 PING (answered with 4 PONG). `SET_ACTIVITY {pid, activity}` sets it; an
@@ -13,6 +18,8 @@
 //! (`snap.discord`) folders, then `$TMPDIR`, `$TMP`, `$TEMP`, `/tmp` ([`socket_paths`]).
 
 use super::{CLIENT_ID, INVITE, KILN_PAGE};
+use crate::modpack::pack::CrucibleRef;
+use crate::paths::DataDirs;
 use crate::{Error, ErrorCode, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -44,9 +51,10 @@ pub struct PresenceStatus {
     pub showing: bool,
 }
 
-/// The lines in the launcher's language (en.json `community.presence.*`); the window sends them with the facts.
+/// The lines in the launcher's language (en.json `community.presence.*`); the window sends them with the facts. A field
+/// an older window does not send keeps its English.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct PresenceTexts {
     /// "Enshrouded with Kiln"
     pub details: String,
@@ -58,6 +66,12 @@ pub struct PresenceTexts {
     pub get_kiln: String,
     /// "Join the Discord"
     pub join_discord: String,
+    /// "{pack} ({count} mod)" (`community.presence.pack.state.one`)
+    pub pack_state_one: String,
+    /// "{pack} ({count} mods)"
+    pub pack_state_other: String,
+    /// "Get this modpack"
+    pub get_pack: String,
 }
 
 impl Default for PresenceTexts {
@@ -69,16 +83,66 @@ impl Default for PresenceTexts {
             state_other: "{count} mods on".into(),
             get_kiln: "Get Kiln".into(),
             join_discord: "Join the Discord".into(),
+            pack_state_one: "{pack} ({count} mod)".into(),
+            pack_state_other: "{pack} ({count} mods)".into(),
+            get_pack: "Get this modpack".into(),
         }
     }
 }
 
-/// What the activity says: how many mods are on (every kind; unknown: no state line) and when the game started.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What the activity says: how many mods are on (every kind; unknown: no state line), when the game started, and with
+/// "Show my Crucible pack" on, the Crucible pack being played.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Facts {
     pub mods: Option<u32>,
     /// Unix seconds.
     pub started: i64,
+    pub pack: Option<PackShown>,
+}
+
+/// A Crucible pack as the activity shows it: its name and its page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackShown {
+    pub name: String,
+    /// <https://frostdev.io/kiln/crucible/p/CODE> or <https://frostdev.io/kiln/crucible/slug> ([`pack_page`]).
+    pub url: String,
+}
+
+/// Crucible's pages (DESIGN.md 12: frostdev.io/kiln/crucible). A presence button opens only an address under it.
+pub const CRUCIBLE_PAGE: &str = "https://frostdev.io/kiln/crucible";
+/// A share code's alphabet (Crucible's src/ids.mjs: no 0/O, 1/I/L).
+const CODE_ALPHABET: &str = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+
+/// The pack's page from the Crucible block of its instance: by the share code (which every pack has, and which
+/// Crucible sends on to the slug page of a public pack), else the slug; None when neither is a proper one.
+pub fn pack_page(c: &CrucibleRef) -> Option<String> {
+    if let Some(code) = c.code.as_deref() {
+        let k: String = code.chars().filter(|ch| *ch != '-').map(|ch| ch.to_ascii_uppercase()).collect();
+        if k.len() == 8 && k.chars().all(|ch| CODE_ALPHABET.contains(ch)) {
+            return Some(format!("{CRUCIBLE_PAGE}/p/{}-{}", &k[..4], &k[4..]));
+        }
+    }
+    let slug = c.slug.as_deref()?;
+    let ok = (3..=48).contains(&slug.len())
+        && slug.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !slug.starts_with('-')
+        && !slug.ends_with('-');
+    ok.then(|| format!("{CRUCIBLE_PAGE}/{slug}"))
+}
+
+/// The Crucible pack a profile is an instance of (None: no pack, or a pack not from Crucible).
+pub fn pack_for_profile(dirs: &DataDirs, pid: &str) -> Option<PackShown> {
+    let inst = crate::modpack::pack::instance(dirs, pid).ok()??;
+    let url = pack_page(inst.crucible.as_ref()?)?;
+    let name = inst.name.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!name.is_empty()).then_some(PackShown { name, url })
+}
+
+/// The Crucible pack of the profile active on a game install (the watcher's game id).
+pub fn pack_for_game(dirs: &DataDirs, game_id: &str) -> Option<PackShown> {
+    let profiles = crate::profile::list(dirs).ok()?;
+    let p = profiles.iter().find(|p| p.active.iter().any(|g| g == game_id))?;
+    pack_for_profile(dirs, &p.id)
 }
 
 /// A text as Discord takes it: one line, 2 to `max` characters (cut with an ellipsis); None when too short.
@@ -91,7 +155,8 @@ fn line(s: &str, max: usize) -> Option<String> {
     Some(if n > max { s.chars().take(max - 1).collect::<String>() + "…" } else { s })
 }
 
-/// The activity: details, state (the mod count), the start time, two buttons, and the art when `art`.
+/// The activity: details, state (the mod count, or the pack and its count), the start time, two buttons (the second the
+/// pack's page when a pack is shown), and the art when `art`.
 pub fn activity(texts: &PresenceTexts, facts: &Facts, art: bool) -> Value {
     let details = line(&texts.details, 128).unwrap_or_else(|| "Enshrouded with Kiln".into());
     let mut a = json!({
@@ -100,13 +165,27 @@ pub fn activity(texts: &PresenceTexts, facts: &Facts, art: bool) -> Value {
         "timestamps": { "start": facts.started },
         "instance": false,
     });
-    if let Some(n) = facts.mods {
-        let tpl = if n == 1 { &texts.state_one } else { &texts.state_other };
-        if let Some(state) = line(&tpl.replace("{count}", &n.to_string()), 128) {
-            a["state"] = json!(state);
+    let pack = facts.pack.as_ref().filter(|p| p.url.starts_with(&format!("{CRUCIBLE_PAGE}/")));
+    let state = match (pack, facts.mods) {
+        (Some(p), Some(n)) => {
+            let tpl = if n == 1 { &texts.pack_state_one } else { &texts.pack_state_other };
+            line(&tpl.replace("{pack}", &p.name).replace("{count}", &n.to_string()), 128)
         }
+        (Some(p), None) => line(&p.name, 128),
+        (None, Some(n)) => {
+            let tpl = if n == 1 { &texts.state_one } else { &texts.state_other };
+            line(&tpl.replace("{count}", &n.to_string()), 128)
+        }
+        (None, None) => None,
+    };
+    if let Some(state) = state {
+        a["state"] = json!(state);
     }
-    let buttons: Vec<Value> = [(&texts.get_kiln, KILN_PAGE), (&texts.join_discord, INVITE)]
+    let second = match pack {
+        Some(p) => (&texts.get_pack, p.url.as_str()),
+        None => (&texts.join_discord, INVITE),
+    };
+    let buttons: Vec<Value> = [(&texts.get_kiln, KILN_PAGE), second]
         .iter()
         .filter_map(|(label, url)| line(label, 32).map(|l| json!({ "label": l, "url": url })))
         .collect();
@@ -303,7 +382,72 @@ mod tests {
     use super::*;
 
     fn facts(mods: Option<u32>) -> Facts {
-        Facts { mods, started: 1_763_480_000 }
+        Facts { mods, started: 1_763_480_000, pack: None }
+    }
+
+    fn ember() -> PackShown {
+        PackShown { name: "Ember run".into(), url: "https://frostdev.io/kiln/crucible/p/H7QK-3MZP".into() }
+    }
+
+    #[test]
+    fn with_a_crucible_pack_the_state_names_it_and_the_second_button_opens_its_page() {
+        let f = Facts { pack: Some(ember()), ..facts(Some(12)) };
+        let a = activity(&PresenceTexts::default(), &f, true);
+        assert_eq!(a["state"], "Ember run (12 mods)");
+        assert_eq!(a["details"], "Enshrouded with Kiln");
+        assert_eq!(a["buttons"], json!([{ "label": "Get Kiln", "url": "https://frostdev.io/kiln" }, { "label": "Get this modpack", "url": "https://frostdev.io/kiln/crucible/p/H7QK-3MZP" }]));
+        // still nothing else: no party, no secrets, no join
+        let mut keys: Vec<&str> = a.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort();
+        assert_eq!(keys, ["assets", "buttons", "details", "instance", "state", "status_display_type", "timestamps", "type"]);
+        assert_eq!(activity(&PresenceTexts::default(), &Facts { pack: Some(ember()), ..facts(Some(1)) }, false)["state"], "Ember run (1 mod)");
+        assert_eq!(activity(&PresenceTexts::default(), &Facts { pack: Some(ember()), ..facts(None) }, false)["state"], "Ember run");
+        // a long pack name is cut to Discord's limit
+        let long = PackShown { name: "n".repeat(300), ..ember() };
+        assert_eq!(activity(&PresenceTexts::default(), &Facts { pack: Some(long), ..facts(Some(3)) }, false)["state"].as_str().unwrap().chars().count(), 128);
+        // an address off Crucible's pages is never a button: the plain activity instead
+        let off = PackShown { url: "https://evil.example/p".into(), ..ember() };
+        let a = activity(&PresenceTexts::default(), &Facts { pack: Some(off), ..facts(Some(12)) }, false);
+        assert_eq!(a["state"], "12 mods on");
+        assert_eq!(a["buttons"][1]["url"], "https://discord.gg/7pjr8SMTfU");
+    }
+
+    #[test]
+    fn the_pack_page_comes_from_the_share_code_else_the_slug() {
+        let r = |code: Option<&str>, slug: Option<&str>| pack_page(&CrucibleRef { pack: None, version: None, slug: slug.map(Into::into), code: code.map(Into::into) });
+        assert_eq!(r(Some("H7QK-3MZP"), Some("ember-run")).as_deref(), Some("https://frostdev.io/kiln/crucible/p/H7QK-3MZP"));
+        assert_eq!(r(Some("h7qk3mzp"), None).as_deref(), Some("https://frostdev.io/kiln/crucible/p/H7QK-3MZP"));
+        assert_eq!(r(Some("H7QK-3MZO"), Some("ember-run")).as_deref(), Some("https://frostdev.io/kiln/crucible/ember-run"), "O is not in the alphabet");
+        assert_eq!(r(None, Some("ember-run")).as_deref(), Some("https://frostdev.io/kiln/crucible/ember-run"));
+        for bad in ["../admin", "Ember", "-x-", "ab", "a/b", "ember run"] {
+            assert_eq!(r(None, Some(bad)), None, "{bad}");
+        }
+        assert_eq!(r(Some("H7QK"), None), None);
+        assert_eq!(r(None, None), None);
+    }
+
+    #[test]
+    fn only_an_instance_of_a_crucible_pack_is_named() {
+        let tmp = crate::library::TempDir::new(&std::env::temp_dir(), "kiln-presence-pack").unwrap();
+        let dirs = DataDirs::at(tmp.path());
+        let plain = crate::profile::create(&dirs, "Plain", None).unwrap();
+        let local = crate::profile::create(&dirs, "Local pack", None).unwrap();
+        let from_crucible = crate::profile::create(&dirs, "Ember run", None).unwrap();
+        let write = |pid: &str, crucible: Value| {
+            let d = dirs.profile(pid).join(crate::modpack::pack::INSTANCE_DIR);
+            std::fs::create_dir_all(&d).unwrap();
+            let mut inst = json!({ "format": 1, "pack": "ember-run", "name": "  Ember   run ", "version": "1.0.0", "sha256": "0".repeat(64), "installed": "2026-11-20T10:00:00Z" });
+            if !crucible.is_null() {
+                inst["crucible"] = crucible;
+            }
+            std::fs::write(d.join(crate::modpack::pack::INSTANCE_FILE), inst.to_string()).unwrap();
+        };
+        write(&local.id, Value::Null);
+        write(&from_crucible.id, json!({ "pack": "pck_x", "version": "pv_y", "slug": "ember-run", "code": "H7QK-3MZP" }));
+        assert_eq!(pack_for_profile(&dirs, &plain.id), None, "not a pack's instance");
+        assert_eq!(pack_for_profile(&dirs, &local.id), None, "a pack not from Crucible is never named");
+        assert_eq!(pack_for_profile(&dirs, &from_crucible.id), Some(PackShown { name: "Ember run".into(), url: "https://frostdev.io/kiln/crucible/p/H7QK-3MZP".into() }));
+        assert_eq!(pack_for_game(&dirs, "no-such-game"), None);
     }
 
     #[test]
@@ -332,7 +476,7 @@ mod tests {
 
     #[test]
     fn texts_from_the_window_are_kept_to_discords_limits() {
-        let t = PresenceTexts { details: format!("  {}  ", "d".repeat(200)), state_one: "x".into(), state_other: "{count}".into(), get_kiln: "g".repeat(40), join_discord: "".into() };
+        let t = PresenceTexts { details: format!("  {}  ", "d".repeat(200)), state_one: "x".into(), state_other: "{count}".into(), get_kiln: "g".repeat(40), join_discord: "".into(), ..Default::default() };
         let a = activity(&t, &facts(Some(1)), false);
         assert_eq!(a["details"].as_str().unwrap().chars().count(), 128);
         assert!(a.get("state").is_none(), "a one-character state is not sent");
@@ -352,6 +496,12 @@ mod tests {
         assert_eq!(p["state"]["other"], d.state_other.as_str());
         assert_eq!(p["getKiln"], d.get_kiln.as_str());
         assert_eq!(p["joinDiscord"], d.join_discord.as_str());
+        assert_eq!(p["pack"]["state"]["one"], d.pack_state_one.as_str());
+        assert_eq!(p["pack"]["state"]["other"], d.pack_state_other.as_str());
+        assert_eq!(p["pack"]["getPack"], d.get_pack.as_str());
+        // an older window that sends only the first five keeps the English of the rest
+        let older: PresenceTexts = serde_json::from_value(json!({ "details": "D", "stateOne": "a", "stateOther": "b", "getKiln": "g", "joinDiscord": "j" })).unwrap();
+        assert_eq!(older.get_pack, "Get this modpack");
     }
 
     #[test]

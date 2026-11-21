@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "kind": "action",
+  "requestId": "6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+  "sequence": 0,
+  "launchId": "3f2b8c1e-5a7d-4e2f-9b1c-0d4e6f8a2b3c",
+  "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "ownerEpoch": 3,
+  "modId": "world-editor",
+  "action": "copy",
+  "value": "Block äß",
+  "createdMs": 1763520010000
+}

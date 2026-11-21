@@ -1,0 +1,428 @@
+[
+  {
+    "schema": "view",
+    "why": "schema_version 2",
+    "packet": {
+      "schema_version": 2,
+      "packet": "view",
+      "value": {
+        "tag": "nil"
+      }
+    }
+  },
+  {
+    "schema": "view",
+    "why": "unknown member",
+    "packet": {
+      "schema_version": 1,
+      "packet": "view",
+      "value": {
+        "tag": "nil"
+      },
+      "extra": true
+    }
+  },
+  {
+    "schema": "view",
+    "why": "the archive schema's tag names only: boolean",
+    "packet": {
+      "schema_version": 1,
+      "packet": "view",
+      "value": {
+        "tag": "boolean",
+        "value": true
+      }
+    }
+  },
+  {
+    "schema": "view",
+    "why": "the archive schema's tag names only: integer",
+    "packet": {
+      "schema_version": 1,
+      "packet": "view",
+      "value": {
+        "tag": "integer",
+        "value": "i64:0000000000000001"
+      }
+    }
+  },
+  {
+    "schema": "view",
+    "why": "the archive schema's tag names only: number",
+    "packet": {
+      "schema_version": 1,
+      "packet": "view",
+      "value": {
+        "tag": "number",
+        "value": "f64:0000000000000000"
+      }
+    }
+  },
+  {
+    "schema": "view",
+    "why": "a Lua string is string:, not bytes:",
+    "packet": {
+      "schema_version": 1,
+      "packet": "view",
+      "value": {
+        "tag": "string",
+        "value": "bytes:61"
+      }
+    }
+  },
+  {
+    "schema": "view",
+    "why": "no type key on a Lua scalar",
+    "packet": {
+      "schema_version": 1,
+      "packet": "view",
+      "value": {
+        "tag": "nil",
+        "type": "m6.Root"
+      }
+    }
+  },
+  {
+    "schema": "view",
+    "why": "i64 is 16 hex digits",
+    "packet": {
+      "schema_version": 1,
+      "packet": "view",
+      "value": {
+        "tag": "i64",
+        "value": "i64:-1"
+      }
+    }
+  },
+  {
+    "schema": "view",
+    "why": "a JSON number is no i64",
+    "packet": {
+      "schema_version": 1,
+      "packet": "view",
+      "value": {
+        "tag": "i64",
+        "value": -1
+      }
+    }
+  },
+  {
+    "schema": "view",
+    "why": "the type key is qualified_name, not name",
+    "packet": {
+      "schema_version": 1,
+      "packet": "view",
+      "value": {
+        "tag": "typed",
+        "class": "struct",
+        "storage": "owned",
+        "type": {
+          "index": "u64:0000000000000008",
+          "name": "Root"
+        }
+      }
+    }
+  },
+  {
+    "schema": "view",
+    "why": "a variant needs variant_type",
+    "packet": {
+      "schema_version": 1,
+      "packet": "view",
+      "value": {
+        "tag": "typed",
+        "class": "variant",
+        "storage": "owned",
+        "type": {
+          "index": "u64:0000000000000006",
+          "qualified_name": "m6.Choice"
+        }
+      }
+    }
+  },
+  {
+    "schema": "view",
+    "why": "only a variant has variant_type",
+    "packet": {
+      "schema_version": 1,
+      "packet": "view",
+      "value": {
+        "tag": "typed",
+        "class": "struct",
+        "storage": "owned",
+        "type": {
+          "index": "u64:0000000000000008",
+          "qualified_name": "m6.Root"
+        },
+        "variant_type": {
+          "index": "u64:0000000000000002",
+          "qualified_name": "m6.Child"
+        }
+      }
+    }
+  },
+  {
+    "schema": "view",
+    "why": "item is ITER_NEXT only",
+    "packet": {
+      "schema_version": 1,
+      "packet": "view",
+      "value": {
+        "tag": "item"
+      }
+    }
+  },
+  {
+    "schema": "length",
+    "why": "LEN is i64:",
+    "packet": {
+      "schema_version": 1,
+      "packet": "length",
+      "value": "u64:0000000000000002"
+    }
+  },
+  {
+    "schema": "dirty",
+    "why": "DIRTY is a boolean",
+    "packet": {
+      "schema_version": 1,
+      "packet": "dirty",
+      "value": "true"
+    }
+  },
+  {
+    "schema": "iter_next",
+    "why": "an item cannot be a key",
+    "packet": {
+      "schema_version": 1,
+      "packet": "iter_next",
+      "key": {
+        "tag": "item"
+      },
+      "value": {
+        "tag": "nil"
+      }
+    }
+  },
+  {
+    "schema": "error",
+    "why": "internal is root-only",
+    "packet": {
+      "schema_version": 1,
+      "packet": "error",
+      "error": {
+        "class": "validation",
+        "message": "bytes:78",
+        "path": ".",
+        "kind": "lua",
+        "cause": {
+          "class": "internal",
+          "message": "bytes:78"
+        }
+      }
+    }
+  },
+  {
+    "schema": "error",
+    "why": "value_kind only for typed_value",
+    "packet": {
+      "schema_version": 1,
+      "packet": "error",
+      "error": {
+        "class": "validation",
+        "message": "bytes:6174207265663a20657870656374656420606f626a656374207265666572656e6365602c20676f742060757365726461746120603c66726f6e74656e64205479706549643e6060",
+        "path": "ref",
+        "kind": "incompatible_type",
+        "expected": "object reference",
+        "found_userdata": {
+          "lua_kind": "known_userdata",
+          "adapter": "content",
+          "value_kind": "struct_owned"
+        }
+      }
+    }
+  },
+  {
+    "schema": "error",
+    "why": "a typed value names its value_kind",
+    "packet": {
+      "schema_version": 1,
+      "packet": "error",
+      "error": {
+        "class": "validation",
+        "message": "bytes:6174202e3a20657870656374656420606d362e4368696c6472656e602c20676f742060757365726461746120603c66726f6e74656e64205479706549643e6060",
+        "path": ".",
+        "kind": "incompatible_type",
+        "expected": "m6.Children",
+        "found_userdata": {
+          "lua_kind": "typed_value",
+          "adapter": "none"
+        }
+      }
+    }
+  },
+  {
+    "schema": "error",
+    "why": "found and found_userdata exclude each other",
+    "packet": {
+      "schema_version": 1,
+      "packet": "error",
+      "error": {
+        "class": "validation",
+        "message": "bytes:6174202e3a20657870656374656420606d362e4368696c6472656e602c20676f742060757365726461746120603c66726f6e74656e64205479706549643e6060",
+        "path": ".",
+        "kind": "incompatible_type",
+        "expected": "m6.Children",
+        "found_userdata": {
+          "lua_kind": "typed_value",
+          "adapter": "none",
+          "value_kind": "struct_owned"
+        },
+        "found": "bytes:78"
+      }
+    }
+  },
+  {
+    "schema": "error",
+    "why": "found_userdata is a descriptor, not true",
+    "packet": {
+      "schema_version": 1,
+      "packet": "error",
+      "error": {
+        "class": "validation",
+        "message": "bytes:6174202e3a20657870656374656420606d362e4368696c6472656e602c20676f742060757365726461746120603c66726f6e74656e64205479706549643e6060",
+        "path": ".",
+        "kind": "incompatible_type",
+        "expected": "m6.Children",
+        "found_userdata": true
+      }
+    }
+  },
+  {
+    "schema": "error",
+    "why": "conversion has no missing_field",
+    "packet": {
+      "schema_version": 1,
+      "packet": "error",
+      "error": {
+        "class": "conversion",
+        "message": "bytes:6174206368696c643a206d697373696e67206669656c642060626173656020696e2073747275637420606d362e4368696c6460",
+        "path": "child",
+        "kind": "missing_field",
+        "field": "base",
+        "type": "m6.Child"
+      }
+    }
+  },
+  {
+    "schema": "error",
+    "why": "conversion has no invalid_type",
+    "packet": {
+      "schema_version": 1,
+      "packet": "error",
+      "error": {
+        "class": "conversion",
+        "message": "bytes:617420747970653a20696e76616c6964207479706520606d362e4e6f706560",
+        "path": "type",
+        "kind": "invalid_type",
+        "name": "bytes:6d362e4e6f7065"
+      }
+    }
+  },
+  {
+    "schema": "error",
+    "why": "host_error is never 0",
+    "packet": {
+      "schema_version": 1,
+      "packet": "error",
+      "error": {
+        "class": "lua",
+        "message": "bytes:72756e74696d65206572726f723a205b737472696e6720223f225d3a313a20626f6f6d",
+        "host_error": "u64:0000000000000000"
+      }
+    }
+  },
+  {
+    "schema": "error",
+    "why": "messages are bytes:",
+    "packet": {
+      "schema_version": 1,
+      "packet": "error",
+      "error": {
+        "class": "runtime",
+        "message": "plain text"
+      }
+    }
+  },
+  {
+    "schema": "error",
+    "why": "closed class list",
+    "packet": {
+      "schema_version": 1,
+      "packet": "error",
+      "error": {
+        "class": "panic",
+        "message": "bytes:78"
+      }
+    }
+  },
+  {
+    "schema": "error",
+    "why": "borrow mode",
+    "packet": {
+      "schema_version": 1,
+      "packet": "error",
+      "error": {
+        "class": "borrow",
+        "message": "bytes:78",
+        "mode": "both"
+      }
+    }
+  },
+  {
+    "schema": "error",
+    "why": "schema_version 2",
+    "packet": {
+      "schema_version": 2,
+      "packet": "error",
+      "error": {
+        "class": "runtime",
+        "message": "bytes:72756e74696d65206572726f723a20657870656374656420612076616c6964206669656c6420696e20737472756374"
+      }
+    }
+  },
+  {
+    "schema": "error",
+    "why": "unknown member in a nested cause",
+    "packet": {
+      "schema_version": 1,
+      "packet": "error",
+      "error": {
+        "class": "validation",
+        "message": "bytes:617420747970653a2072756e74696d65206572726f723a205b737472696e6720223f225d3a313a206e6f2074797065",
+        "path": "type",
+        "kind": "lua",
+        "cause": {
+          "class": "lua",
+          "message": "bytes:72756e74696d65206572726f723a205b737472696e6720223f225d3a313a206e6f2074797065",
+          "host_error": "u64:000000000000002a",
+          "traceback": "x"
+        }
+      }
+    }
+  },
+  {
+    "schema": "error",
+    "why": "closed validation kind list",
+    "packet": {
+      "schema_version": 1,
+      "packet": "error",
+      "error": {
+        "class": "validation",
+        "message": "bytes:6174202e3a20756e657870656374656420656e64206f662064617461",
+        "path": ".",
+        "kind": "overflow"
+      }
+    }
+  }
+]

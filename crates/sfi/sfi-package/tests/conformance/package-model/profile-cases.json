@@ -1,0 +1,1208 @@
+[
+{
+"id": "ok.minimal",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "schemaVersion.ok.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "schemaVersion.ok.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1.0,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "schemaVersion.bad.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":2,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "schemaVersion.bad.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":0,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "schemaVersion.bad.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":\"1\",\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "schemaVersion.bad.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":null,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "schemaVersion.bad.4",
+"profiles": {
+"a.json": "{\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "schemaVersion.bad.5",
+"profiles": {
+"a.json": "{\"schemaVersion\":-1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "schemaVersion.bad.6",
+"profiles": {
+"a.json": "{\"schemaVersion\":1.5,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "id.ok.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"x\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "id.ok.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "id.ok.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "id.ok.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"nonE\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "id.ok.4",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"with space\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "id.ok.5",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"../x\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "id.bad.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "id.bad.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\" \",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "id.bad.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"none\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "id.bad.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "id.bad.4",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "id.bad.5",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":1,\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "id.bad.6",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":null,\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "id.bad.7",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "modId.ok.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modId\":\"\"}"
+}
+},
+{
+"id": "modId.ok.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modId\":\"example\"}"
+}
+},
+{
+"id": "modId.ok.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modId\":\"Example\"}"
+}
+},
+{
+"id": "modId.ok.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modId\":\"x y\"}"
+}
+},
+{
+"id": "modId.bad.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modId\":1}"
+}
+},
+{
+"id": "modId.bad.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modId\":null}"
+}
+},
+{
+"id": "packageDirectory.ok.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.ok.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"PKG\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.ok.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"a.b\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.ok.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"-\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.ok.4",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"dir name\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.bad.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.bad.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\".\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.bad.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"..\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.bad.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"a/b\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.bad.4",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"a\\\\b\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.bad.5",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"c:\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.bad.6",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"/abs\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.bad.7",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"a/\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.bad.8",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"./a\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.bad.9",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":1,\"name\":\"Profile\"}"
+}
+},
+{
+"id": "packageDirectory.bad.10",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "name.ok.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"N\"}"
+}
+},
+{
+"id": "name.ok.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"}"
+}
+},
+{
+"id": "name.ok.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"}"
+}
+},
+{
+"id": "name.bad.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"\"}"
+}
+},
+{
+"id": "name.bad.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"  \"}"
+}
+},
+{
+"id": "name.bad.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"}"
+}
+},
+{
+"id": "name.bad.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"}"
+}
+},
+{
+"id": "name.bad.4",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":1}"
+}
+},
+{
+"id": "name.bad.5",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\"}"
+}
+},
+{
+"id": "target.ok.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"target\":\"client\"}"
+}
+},
+{
+"id": "target.ok.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"target\":\"server\"}"
+}
+},
+{
+"id": "target.ok.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"target\":\"both\"}"
+}
+},
+{
+"id": "target.ok.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "target.bad.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"target\":\"Both\"}"
+}
+},
+{
+"id": "target.bad.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"target\":\"all\"}"
+}
+},
+{
+"id": "target.bad.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"target\":null}"
+}
+},
+{
+"id": "target.bad.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"target\":1}"
+}
+},
+{
+"id": "modJson.ok.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{}}"
+}
+},
+{
+"id": "modJson.ok.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"description\":\"x\"}}"
+}
+},
+{
+"id": "modJson.ok.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"capabilities\":[\"patch\"]}}"
+}
+},
+{
+"id": "modJson.ok.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":null}"
+}
+},
+{
+"id": "modJson.bad.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":[]}"
+}
+},
+{
+"id": "modJson.bad.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":\"x\"}"
+}
+},
+{
+"id": "modJson.bad.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":1}"
+}
+},
+{
+"id": "modJson.bad.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"id\":\"x\"}}"
+}
+},
+{
+"id": "modJson.bad.4",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"version\":\"2.0.0\"}}"
+}
+},
+{
+"id": "modJson.bad.5",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"capabilities\":[\"native\"]}}"
+}
+},
+{
+"id": "modJson.bad.6",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"capabilities\":\"runtime\"}}"
+}
+},
+{
+"id": "extendedModJson.ok.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"extendedModJson\":{}}"
+}
+},
+{
+"id": "extendedModJson.ok.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"extendedModJson\":{\"enabled\":true,\"targets\":[\"server\"]}}"
+}
+},
+{
+"id": "extendedModJson.ok.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"extendedModJson\":null}"
+}
+},
+{
+"id": "extendedModJson.bad.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"extendedModJson\":[]}"
+}
+},
+{
+"id": "extendedModJson.bad.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"extendedModJson\":\"x\"}"
+}
+},
+{
+"id": "extendedModJson.bad.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"extendedModJson\":true}"
+}
+},
+{
+"id": "packageFiles.ok.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{}}"
+}
+},
+{
+"id": "packageFiles.ok.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"locales/de.json\":\"{}\"}}"
+}
+},
+{
+"id": "packageFiles.ok.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"src/a.lua\":\"\"}}"
+}
+},
+{
+"id": "packageFiles.ok.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"f0.txt\":\"\",\"f1.txt\":\"\",\"f2.txt\":\"\",\"f3.txt\":\"\",\"f4.txt\":\"\",\"f5.txt\":\"\",\"f6.txt\":\"\",\"f7.txt\":\"\",\"f8.txt\":\"\",\"f9.txt\":\"\",\"f10.txt\":\"\",\"f11.txt\":\"\",\"f12.txt\":\"\",\"f13.txt\":\"\",\"f14.txt\":\"\",\"f15.txt\":\"\",\"f16.txt\":\"\",\"f17.txt\":\"\",\"f18.txt\":\"\",\"f19.txt\":\"\",\"f20.txt\":\"\",\"f21.txt\":\"\",\"f22.txt\":\"\",\"f23.txt\":\"\",\"f24.txt\":\"\",\"f25.txt\":\"\",\"f26.txt\":\"\",\"f27.txt\":\"\",\"f28.txt\":\"\",\"f29.txt\":\"\",\"f30.txt\":\"\",\"f31.txt\":\"\",\"f32.txt\":\"\",\"f33.txt\":\"\",\"f34.txt\":\"\",\"f35.txt\":\"\",\"f36.txt\":\"\",\"f37.txt\":\"\",\"f38.txt\":\"\",\"f39.txt\":\"\",\"f40.txt\":\"\",\"f41.txt\":\"\",\"f42.txt\":\"\",\"f43.txt\":\"\",\"f44.txt\":\"\",\"f45.txt\":\"\",\"f46.txt\":\"\",\"f47.txt\":\"\",\"f48.txt\":\"\",\"f49.txt\":\"\",\"f50.txt\":\"\",\"f51.txt\":\"\",\"f52.txt\":\"\",\"f53.txt\":\"\",\"f54.txt\":\"\",\"f55.txt\":\"\",\"f56.txt\":\"\",\"f57.txt\":\"\",\"f58.txt\":\"\",\"f59.txt\":\"\",\"f60.txt\":\"\",\"f61.txt\":\"\",\"f62.txt\":\"\",\"f63.txt\":\"\"}}"
+}
+},
+{
+"id": "packageFiles.bad.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"mod.json\":\"{}\"}}"
+}
+},
+{
+"id": "packageFiles.bad.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"extended.mod.json\":\"{}\"}}"
+}
+},
+{
+"id": "packageFiles.bad.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"../x\":\"\"}}"
+}
+},
+{
+"id": "packageFiles.bad.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"a\\\\b\":\"\"}}"
+}
+},
+{
+"id": "packageFiles.bad.4",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"\":\"\"}}"
+}
+},
+{
+"id": "packageFiles.bad.5",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"/abs\":\"\"}}"
+}
+},
+{
+"id": "packageFiles.bad.6",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"c:x\":\"\"}}"
+}
+},
+{
+"id": "packageFiles.bad.7",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"f0.txt\":\"\",\"f1.txt\":\"\",\"f2.txt\":\"\",\"f3.txt\":\"\",\"f4.txt\":\"\",\"f5.txt\":\"\",\"f6.txt\":\"\",\"f7.txt\":\"\",\"f8.txt\":\"\",\"f9.txt\":\"\",\"f10.txt\":\"\",\"f11.txt\":\"\",\"f12.txt\":\"\",\"f13.txt\":\"\",\"f14.txt\":\"\",\"f15.txt\":\"\",\"f16.txt\":\"\",\"f17.txt\":\"\",\"f18.txt\":\"\",\"f19.txt\":\"\",\"f20.txt\":\"\",\"f21.txt\":\"\",\"f22.txt\":\"\",\"f23.txt\":\"\",\"f24.txt\":\"\",\"f25.txt\":\"\",\"f26.txt\":\"\",\"f27.txt\":\"\",\"f28.txt\":\"\",\"f29.txt\":\"\",\"f30.txt\":\"\",\"f31.txt\":\"\",\"f32.txt\":\"\",\"f33.txt\":\"\",\"f34.txt\":\"\",\"f35.txt\":\"\",\"f36.txt\":\"\",\"f37.txt\":\"\",\"f38.txt\":\"\",\"f39.txt\":\"\",\"f40.txt\":\"\",\"f41.txt\":\"\",\"f42.txt\":\"\",\"f43.txt\":\"\",\"f44.txt\":\"\",\"f45.txt\":\"\",\"f46.txt\":\"\",\"f47.txt\":\"\",\"f48.txt\":\"\",\"f49.txt\":\"\",\"f50.txt\":\"\",\"f51.txt\":\"\",\"f52.txt\":\"\",\"f53.txt\":\"\",\"f54.txt\":\"\",\"f55.txt\":\"\",\"f56.txt\":\"\",\"f57.txt\":\"\",\"f58.txt\":\"\",\"f59.txt\":\"\",\"f60.txt\":\"\",\"f61.txt\":\"\",\"f62.txt\":\"\",\"f63.txt\":\"\",\"f64.txt\":\"\"}}"
+}
+},
+{
+"id": "packageFiles.bad.8",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"a\":1}}"
+}
+},
+{
+"id": "packageFiles.bad.9",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":[]}"
+}
+},
+{
+"id": "packageFiles.bad.10",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"./a\":\"\"}}"
+}
+},
+{
+"id": "packageFiles.size.ok-1mib",
+"profiles": {
+"a.json": {
+"template": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"big.txt\":\"@@\"}}",
+"fill": "x",
+"count": 1048576
+}
+}
+},
+{
+"id": "packageFiles.size.bad-1mib",
+"profiles": {
+"a.json": {
+"template": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"big.txt\":\"@@\"}}",
+"fill": "x",
+"count": 1048577
+}
+}
+},
+{
+"id": "packageFiles.size.ok-4mib",
+"profiles": {
+"a.json": {
+"template": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"f0\":\"@@\",\"f1\":\"@@\",\"f2\":\"@@\",\"f3\":\"@@\"}}",
+"fill": "x",
+"count": 1048576
+}
+}
+},
+{
+"id": "packageFiles.size.bad-4mib",
+"profiles": {
+"a.json": {
+"template": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"f0\":\"@@\",\"f1\":\"@@\",\"f2\":\"@@\",\"f3\":\"@@\",\"f4\":\"@@\"}}",
+"fill": "x",
+"count": 921600
+}
+}
+},
+{
+"id": "packageFiles.size.multibyte",
+"profiles": {
+"a.json": {
+"template": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"big.txt\":\"@@\"}}",
+"fill": "é",
+"count": 524289
+}
+}
+},
+{
+"id": "importFiles.ok.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"importFiles\":{}}"
+}
+},
+{
+"id": "importFiles.ok.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"importFiles\":{\"a.dll\":\"bin/a.dll\"}}"
+}
+},
+{
+"id": "importFiles.ok.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"importFiles\":{\"s0\":\"d0\",\"s1\":\"d1\",\"s2\":\"d2\",\"s3\":\"d3\",\"s4\":\"d4\",\"s5\":\"d5\",\"s6\":\"d6\",\"s7\":\"d7\",\"s8\":\"d8\",\"s9\":\"d9\",\"s10\":\"d10\",\"s11\":\"d11\",\"s12\":\"d12\",\"s13\":\"d13\",\"s14\":\"d14\",\"s15\":\"d15\",\"s16\":\"d16\",\"s17\":\"d17\",\"s18\":\"d18\",\"s19\":\"d19\",\"s20\":\"d20\",\"s21\":\"d21\",\"s22\":\"d22\",\"s23\":\"d23\",\"s24\":\"d24\",\"s25\":\"d25\",\"s26\":\"d26\",\"s27\":\"d27\",\"s28\":\"d28\",\"s29\":\"d29\",\"s30\":\"d30\",\"s31\":\"d31\",\"s32\":\"d32\",\"s33\":\"d33\",\"s34\":\"d34\",\"s35\":\"d35\",\"s36\":\"d36\",\"s37\":\"d37\",\"s38\":\"d38\",\"s39\":\"d39\",\"s40\":\"d40\",\"s41\":\"d41\",\"s42\":\"d42\",\"s43\":\"d43\",\"s44\":\"d44\",\"s45\":\"d45\",\"s46\":\"d46\",\"s47\":\"d47\",\"s48\":\"d48\",\"s49\":\"d49\",\"s50\":\"d50\",\"s51\":\"d51\",\"s52\":\"d52\",\"s53\":\"d53\",\"s54\":\"d54\",\"s55\":\"d55\",\"s56\":\"d56\",\"s57\":\"d57\",\"s58\":\"d58\",\"s59\":\"d59\",\"s60\":\"d60\",\"s61\":\"d61\",\"s62\":\"d62\",\"s63\":\"d63\"}}"
+}
+},
+{
+"id": "importFiles.bad.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"importFiles\":{\"../a\":\"b\"}}"
+}
+},
+{
+"id": "importFiles.bad.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"importFiles\":{\"a\":\"../b\"}}"
+}
+},
+{
+"id": "importFiles.bad.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"importFiles\":{\"a\":\"\"}}"
+}
+},
+{
+"id": "importFiles.bad.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"importFiles\":{\"a\\\\b\":\"c\"}}"
+}
+},
+{
+"id": "importFiles.bad.4",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"importFiles\":{\"s0\":\"d0\",\"s1\":\"d1\",\"s2\":\"d2\",\"s3\":\"d3\",\"s4\":\"d4\",\"s5\":\"d5\",\"s6\":\"d6\",\"s7\":\"d7\",\"s8\":\"d8\",\"s9\":\"d9\",\"s10\":\"d10\",\"s11\":\"d11\",\"s12\":\"d12\",\"s13\":\"d13\",\"s14\":\"d14\",\"s15\":\"d15\",\"s16\":\"d16\",\"s17\":\"d17\",\"s18\":\"d18\",\"s19\":\"d19\",\"s20\":\"d20\",\"s21\":\"d21\",\"s22\":\"d22\",\"s23\":\"d23\",\"s24\":\"d24\",\"s25\":\"d25\",\"s26\":\"d26\",\"s27\":\"d27\",\"s28\":\"d28\",\"s29\":\"d29\",\"s30\":\"d30\",\"s31\":\"d31\",\"s32\":\"d32\",\"s33\":\"d33\",\"s34\":\"d34\",\"s35\":\"d35\",\"s36\":\"d36\",\"s37\":\"d37\",\"s38\":\"d38\",\"s39\":\"d39\",\"s40\":\"d40\",\"s41\":\"d41\",\"s42\":\"d42\",\"s43\":\"d43\",\"s44\":\"d44\",\"s45\":\"d45\",\"s46\":\"d46\",\"s47\":\"d47\",\"s48\":\"d48\",\"s49\":\"d49\",\"s50\":\"d50\",\"s51\":\"d51\",\"s52\":\"d52\",\"s53\":\"d53\",\"s54\":\"d54\",\"s55\":\"d55\",\"s56\":\"d56\",\"s57\":\"d57\",\"s58\":\"d58\",\"s59\":\"d59\",\"s60\":\"d60\",\"s61\":\"d61\",\"s62\":\"d62\",\"s63\":\"d63\",\"s64\":\"d64\"}}"
+}
+},
+{
+"id": "importFiles.bad.5",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"importFiles\":{\"a\":1}}"
+}
+},
+{
+"id": "importFiles.bad.6",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"importFiles\":[]}"
+}
+},
+{
+"id": "files.ok.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[]}"
+}
+},
+{
+"id": "files.ok.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":\"a.dll\"}]}"
+}
+},
+{
+"id": "files.ok.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":\"bin/a.DLL\",\"mode\":\"dinput8\"}]}"
+}
+},
+{
+"id": "files.ok.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":\"a.dll\",\"mode\":\"library\"}]}"
+}
+},
+{
+"id": "files.ok.4",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":\"f0.dll\"},{\"path\":\"f1.dll\"},{\"path\":\"f2.dll\"},{\"path\":\"f3.dll\"},{\"path\":\"f4.dll\"},{\"path\":\"f5.dll\"},{\"path\":\"f6.dll\"},{\"path\":\"f7.dll\"},{\"path\":\"f8.dll\"},{\"path\":\"f9.dll\"},{\"path\":\"f10.dll\"},{\"path\":\"f11.dll\"},{\"path\":\"f12.dll\"},{\"path\":\"f13.dll\"},{\"path\":\"f14.dll\"},{\"path\":\"f15.dll\"}]}"
+}
+},
+{
+"id": "files.bad.0",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":\"a.txt\"}]}"
+}
+},
+{
+"id": "files.bad.1",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":\"a.dll\"},{\"path\":\"A.DLL\"}]}"
+}
+},
+{
+"id": "files.bad.2",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":\"../a.dll\"}]}"
+}
+},
+{
+"id": "files.bad.3",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":\"a\\\\b.dll\"}]}"
+}
+},
+{
+"id": "files.bad.4",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":\"f0.dll\"},{\"path\":\"f1.dll\"},{\"path\":\"f2.dll\"},{\"path\":\"f3.dll\"},{\"path\":\"f4.dll\"},{\"path\":\"f5.dll\"},{\"path\":\"f6.dll\"},{\"path\":\"f7.dll\"},{\"path\":\"f8.dll\"},{\"path\":\"f9.dll\"},{\"path\":\"f10.dll\"},{\"path\":\"f11.dll\"},{\"path\":\"f12.dll\"},{\"path\":\"f13.dll\"},{\"path\":\"f14.dll\"},{\"path\":\"f15.dll\"},{\"path\":\"f16.dll\"}]}"
+}
+},
+{
+"id": "files.bad.5",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":\"a.dll\",\"mode\":\"other\"}]}"
+}
+},
+{
+"id": "files.bad.6",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":\"a.dll\",\"extra\":1}]}"
+}
+},
+{
+"id": "files.bad.7",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"mode\":\"library\"}]}"
+}
+},
+{
+"id": "files.bad.8",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":1}]}"
+}
+},
+{
+"id": "files.bad.9",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":{}}"
+}
+},
+{
+"id": "files.bad.10",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":\".dll\"}]}"
+}
+},
+{
+"id": "files.bad.11",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":\"c:a.dll\"}]}"
+}
+},
+{
+"id": "files.bad.12",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"files\":[{\"path\":\"a.dll\",\"mode\":null}]}"
+}
+},
+{
+"id": "unknown-field",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"extra\":1}"
+}
+},
+{
+"id": "unknown-field-snake",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"schema_version\":1}"
+}
+},
+{
+"id": "json.invalid",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,"
+}
+},
+{
+"id": "json.trailing-comma",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",}"
+}
+},
+{
+"id": "json.duplicate-key",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"x\",\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"P\"}"
+}
+},
+{
+"id": "catalog.duplicate-id",
+"profiles": {
+"b.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"B\"}",
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"A\"}",
+"c.json": "{\"schemaVersion\":1,\"id\":\"p2\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "catalog.sorted",
+"profiles": {
+"z.json": "{\"schemaVersion\":1,\"id\":\"z\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}",
+"A.json": "{\"schemaVersion\":1,\"id\":\"A\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}",
+"m.json": "{\"schemaVersion\":1,\"id\":\"m\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "catalog.extension",
+"profiles": {
+"a.JSON": "{\"schemaVersion\":1,\"id\":\"upper\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}",
+"b.txt": "{\"schemaVersion\":1,\"id\":\"txt\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}",
+"c.json.bak": "{\"schemaVersion\":1,\"id\":\"bak\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}",
+"d.Json": "{\"schemaVersion\":1,\"id\":\"mixed\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "catalog.invalid-skipped",
+"profiles": {
+"a.json": "nope",
+"b.json": "{\"schemaVersion\":1,\"id\":\"good\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\"}"
+}
+},
+{
+"id": "overlay.none",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"other\",\"name\":\"Profile\"}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "overlay.directory-case",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"PKG\",\"name\":\"Profile\",\"modJson\":{\"description\":\"from profile\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "overlay.modid-match",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"other\",\"name\":\"Profile\",\"modId\":\"example\",\"modJson\":{\"description\":\"by id\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "overlay.modid-mismatch",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modId\":\"different\",\"modJson\":{\"description\":\"x\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "overlay.capabilities-union",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"capabilities\":[\"patch\",\"runtime\"]}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "overlay.capabilities-noncanonical",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"capabilities\":[\"runtime-register-dll\"]}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":\"bad\"}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "overlay.capabilities-missing",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"capabilities\":[\"export\"]}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\"}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "overlay.recursive",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"authors\":[\"x\"],\"description\":\"d\"},\"extendedModJson\":{\"settings\":{\"level\":{\"label\":\"Overlay\"},\"flag\":{\"label\":\"L\"},\"added\":3}}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "overlay.enabled-stripped",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"extendedModJson\":{\"enabled\":false,\"targets\":[\"server\"]}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "overlay.synthesized-extension",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"extendedModJson\":{\"targets\":[\"client\"]}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}"
+}
+},
+{
+"id": "overlay.synthesized-empty",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"extendedModJson\":{}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}"
+}
+},
+{
+"id": "overlay.no-extension-overlay",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"description\":\"d\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}"
+}
+},
+{
+"id": "overlay.package-files",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"locales/de.json\":\"{\\\"mod\\\":{\\\"name\\\":\\\"Deutsch\\\"}}\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "overlay.package-files-invalid-locale",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"locales/de.json\":\"{\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "overlay.package-files-override",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"packageFiles\":{\"locales/de.json\":\"{\\\"mod\\\":{\\\"name\\\":\\\"Virtual\\\"}}\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}",
+"locales/de.json": "{\"mod\":{\"name\":\"Disk\"}}"
+}
+},
+{
+"id": "overlay.makes-invalid",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"name\":\"\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "overlay.extension-makes-invalid",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"extendedModJson\":{\"schemaVersion\":2}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "overlay.null-modjson",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"p1\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":null}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "select.explicit",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"auto\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"description\":\"auto\"}}",
+"b.json": "{\"schemaVersion\":1,\"id\":\"chosen\",\"packageDirectory\":\"elsewhere\",\"name\":\"Profile\",\"modId\":\"nobody\",\"modJson\":{\"description\":\"chosen\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+},
+"selections": [
+{
+"id": "sel",
+"packageDirectory": "pkg",
+"name": "Sel",
+"target": "both",
+"enabled": false,
+"approved": false,
+"files": [],
+"compatibilityProfile": "chosen"
+}
+]
+},
+{
+"id": "select.explicit-missing",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"auto\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"description\":\"auto\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+},
+"selections": [
+{
+"id": "sel",
+"packageDirectory": "pkg",
+"name": "Sel",
+"target": "both",
+"enabled": false,
+"approved": false,
+"files": [],
+"compatibilityProfile": "absent"
+}
+]
+},
+{
+"id": "select.none",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"auto\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"description\":\"auto\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+},
+"selections": [
+{
+"id": "sel",
+"packageDirectory": "pkg",
+"name": "Sel",
+"target": "both",
+"enabled": false,
+"approved": false,
+"files": [],
+"compatibilityProfile": "none"
+}
+]
+},
+{
+"id": "select.empty-string",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"auto\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"description\":\"auto\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+},
+"selections": [
+{
+"id": "sel",
+"packageDirectory": "pkg",
+"name": "Sel",
+"target": "both",
+"enabled": false,
+"approved": false,
+"files": [],
+"compatibilityProfile": ""
+}
+]
+},
+{
+"id": "select.null",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"auto\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"description\":\"auto\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+},
+"selections": [
+{
+"id": "sel",
+"packageDirectory": "pkg",
+"name": "Sel",
+"target": "both",
+"enabled": false,
+"approved": false,
+"files": [],
+"compatibilityProfile": null
+}
+]
+},
+{
+"id": "select.other-directory",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"auto\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"description\":\"auto\"}}",
+"b.json": "{\"schemaVersion\":1,\"id\":\"chosen\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"description\":\"chosen\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+},
+"selections": [
+{
+"id": "sel",
+"packageDirectory": "other",
+"name": "Sel",
+"target": "both",
+"enabled": false,
+"approved": false,
+"files": [],
+"compatibilityProfile": "chosen"
+}
+]
+},
+{
+"id": "select.directory-case",
+"profiles": {
+"b.json": "{\"schemaVersion\":1,\"id\":\"chosen\",\"packageDirectory\":\"zzz\",\"name\":\"Profile\",\"modJson\":{\"description\":\"chosen\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+},
+"selections": [
+{
+"id": "sel",
+"packageDirectory": "PKG",
+"name": "Sel",
+"target": "both",
+"enabled": false,
+"approved": false,
+"files": [],
+"compatibilityProfile": "chosen"
+}
+]
+},
+{
+"id": "select.first-auto",
+"profiles": {
+"b.json": "{\"schemaVersion\":1,\"id\":\"second\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"description\":\"second\"}}",
+"a.json": "{\"schemaVersion\":1,\"id\":\"first\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"description\":\"first\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+},
+{
+"id": "select.invalid-skipped-auto",
+"profiles": {
+"a.json": "{\"schemaVersion\":1,\"id\":\"bad\",\"packageDirectory\":\"pkg\",\"name\":\"\"}",
+"b.json": "{\"schemaVersion\":1,\"id\":\"good\",\"packageDirectory\":\"pkg\",\"name\":\"Profile\",\"modJson\":{\"description\":\"good\"}}"
+},
+"package": {
+"mod.json": "{\"id\":\"example\",\"name\":\"Example\",\"version\":\"1.0.0\",\"capabilities\":[\"runtime\"]}",
+"extended.mod.json": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"flag\":true,\"level\":{\"value\":1,\"label\":\"Level\"}}}"
+}
+}
+]

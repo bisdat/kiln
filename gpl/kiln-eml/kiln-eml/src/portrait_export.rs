@@ -127,12 +127,29 @@ pub(crate) fn safe_item(path: &Path) -> Result<(), CacheError> {
     }
     Ok(())
 }
+// (the test lock/spawn gate's hold around the cache lock)
+/// The held cache lock: its file. In this crate's unit tests also its test-gate hold (mod-loader-lua's test_gate.rs),
+/// dropped after the file.
+#[cfg(not(test))]
+pub(crate) type CacheLock = File;
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct CacheLock {
+    _file: File,
+    _hold: mod_loader_lua::test_gate::LockHold,
+}
+
 /// Opens and takes the cache lock. Errors carry their status: CACHE_BUSY when another generator holds the lock,
 /// CACHE_IO for an I/O error, BAD_REQUEST for a path or entry it refuses.
-pub(crate) fn cache_lock(path: &Path) -> Result<File, (i32, String)> {
+pub(crate) fn cache_lock(path: &Path) -> Result<CacheLock, (i32, String)> {
+    // In this crate's unit tests the lock is taken under the test gate (mod-loader-lua's test_gate.rs).
+    #[cfg(test)]
+    let hold = mod_loader_lua::test_gate::lock_hold();
     let file = open_cache_lock(path).map_err(CacheError::status)?;
     file.try_lock()
         .map_err(|e| (crate::CACHE_BUSY, format!("another portrait generator owns this cache: {e}")))?;
+    #[cfg(test)]
+    let file = CacheLock { _file: file, _hold: hold };
     Ok(file)
 }
 fn open_cache_lock(path: &Path) -> Result<File, CacheError> {

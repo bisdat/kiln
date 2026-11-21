@@ -1,0 +1,5405 @@
+[
+  {
+    "schema": "startup-journal",
+    "why": "format 2",
+    "record": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "an unknown stem",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded_demo",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "generation in upper-case hex",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "generation too short",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "receiptSha256 null",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": null,
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "the EML dialect writes no journal",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "eml",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "attempt none",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "none",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "truncated not a boolean",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": "no",
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "packages not an array",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": {},
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "unattributed missing",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a package that is not an object",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        "charlie",
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a package id with a space",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "char lie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a package id of 81 characters",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "an empty version",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a version of 65 characters",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "11111111111111111111111111111111111111111111111111111111111111111",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a native-selection kind",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "native-selection",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "contentSha256 missing",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "settingsSha256 of 63 digits",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a package's truncated null",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": null,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "changed missing",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a changed GUID in upper case",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89AB-CDEF-0123-456789ABCDEF",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a changed GUID without hyphens",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "0123456789abcdef0123456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a type hash of 7 digits",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a negative part",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": -1,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a part over u32",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 4294967296,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a fractional part",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 1.5,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "createdBy missing",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "createdBy ordinal 0",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 0
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "createdBy without its package",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "createdBy naming a package with an invalid id",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "al/pha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "createdBy as a string",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": "alpha:1"
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a created ordinal 0",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 0,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a created entry without explicit",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a created ordinal as a string",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": "2",
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a created entry with a value",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true,
+              "value": 5
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a content without its size",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6"
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a negative content size",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": -10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a content GUID of the wrong shape",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a changed entry carrying a value",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null,
+              "value": 2
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "unattributed without truncated",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "unattributed changed not an array",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": null,
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "unattributed with a package id",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": [],
+        "id": "x"
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "contents as a map",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": {}
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a stem null",
+    "record": {
+      "format": 1,
+      "stem": null,
+      "generation": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "receiptSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "dialect": "shroudforge",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "reader",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a generation missing",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded_server",
+      "receiptSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "dialect": "shroudforge",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "reader",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "an unattributed created ordinal 0",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "0000000000000000000000000000000000000000000000000000000000000000",
+      "receiptSha256": "9999999999999999999999999999999999999999999999999999999999999999",
+      "dialect": "shroudforge",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "late-finalizer",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-aaaa-bbbb-cccc-dddddddddddd",
+              "size": 4
+            }
+          ]
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [
+          {
+            "guid": "01234567-89ab-cdef-0123-456789abcdef",
+            "typeHash": "8c3dbe3d",
+            "part": 9,
+            "createdBy": null
+          }
+        ],
+        "created": [
+          {
+            "ordinal": 0,
+            "guid": "11111111-2222-4333-8444-555555555555",
+            "typeHash": "8c3dbe3d",
+            "part": 2,
+            "explicit": true
+          }
+        ],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "an unattributed changed part as text",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "0000000000000000000000000000000000000000000000000000000000000000",
+      "receiptSha256": "9999999999999999999999999999999999999999999999999999999999999999",
+      "dialect": "shroudforge",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "late-finalizer",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-aaaa-bbbb-cccc-dddddddddddd",
+              "size": 4
+            }
+          ]
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [
+          {
+            "guid": "01234567-89ab-cdef-0123-456789abcdef",
+            "typeHash": "8c3dbe3d",
+            "part": "9",
+            "createdBy": null
+          }
+        ],
+        "created": [
+          {
+            "ordinal": 1,
+            "guid": "11111111-2222-4333-8444-555555555555",
+            "typeHash": "8c3dbe3d",
+            "part": 2,
+            "explicit": true
+          }
+        ],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a truncated package with created explicit null",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "receiptSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "dialect": "shroudforge",
+      "attempt": "first",
+      "truncated": true,
+      "packages": [
+        {
+          "id": "many",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": true,
+          "changed": [],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "00000001-0000-4000-8000-000000000001",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": null
+            },
+            {
+              "ordinal": 2,
+              "guid": "00000002-0000-4000-8000-000000000002",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 3,
+              "guid": "00000003-0000-4000-8000-000000000003",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "after",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "journal truncated as a number",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "receiptSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "dialect": "shroudforge",
+      "attempt": "first",
+      "truncated": 1,
+      "packages": [
+        {
+          "id": "many",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": true,
+          "changed": [],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "00000001-0000-4000-8000-000000000001",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "00000002-0000-4000-8000-000000000002",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 3,
+              "guid": "00000003-0000-4000-8000-000000000003",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "after",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "startup-journal",
+    "why": "a kind missing",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded_server",
+      "generation": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "receiptSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "dialect": "shroudforge",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "reader",
+          "version": "1.0.0",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  }
+]

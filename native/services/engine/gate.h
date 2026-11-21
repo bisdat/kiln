@@ -6,6 +6,7 @@
 
 #include "include/kiln_engine_layout.h"
 #include "include/kiln_engine_view.h"
+#include "kiln_api.h"  // KILN_CALL
 
 namespace kiln::engine {
 
@@ -33,7 +34,8 @@ enum class GateWrite { Ok, NotHeld, TooLarge, Faulted };
 GateWrite gate_write(const GateState& gate, std::uintptr_t address, const void* data, std::size_t bytes);
 void gate_release(GateState& gate) noexcept;
 
-// Closing: a stopping server world closes the gate until it starts again (world STOPPING/STARTED);
+// Closing: a stopping server world closes the gate until it starts again (world STOPPING/STARTED, which also begins
+// the next engine-call session: see gate_calls_latch);
 // process exit closes it for good and waits at most `wait_ns` for a Kiln holder to finish (true: none left). Both
 // make later acquires refuse kiln-gate-closed before any engine word.
 // gate_close_session(true, wait_ns) also waits at most `wait_ns` for a Kiln holder already in flight (false: one was
@@ -50,7 +52,26 @@ bool gate_holder_taken() noexcept;
 // the calling thread's priority, so a holder keeps the priority its thread had (a Kiln worker's is below normal).
 void gate_set_priority_raise(bool on) noexcept;
 bool gate_priority_raise() noexcept;
-void gate_reset_for_tests() noexcept;
+// The ShroudForge-dialect owner (Kiln-internal): kiln.internal.launch's dialect_owner, resolved
+// once at kiln.engine's init (engine.cpp) and read at each acquire, because the core designates that owner later, when
+// it loads the plugin. An acquire by that owner is admitted as GateAdmission::RetryKilnHolder whatever its record says
+// (the record is left as the caller set it): never latched, and a refusal caused only by another Kiln holder is
+// retried. nullptr (no accessor: an older core, or no Kiln-internal access) or a 0 answer (nobody designated) leaves
+// every acquire exactly as without this rule. The accessor must be any-thread and non-blocking.
+using DialectOwnerFn = std::uint64_t(KILN_CALL*)(void);
+void gate_set_dialect_owner(DialectOwnerFn accessor) noexcept;
+// Closed: the server world is stopping or the process exits (an acquire refuses kiln-gate-closed).
+bool gate_closed() noexcept;
+// The engine-call latch (Kiln-internal): after a call inside the gate faulted or could not be
+// proven, every engine call is refused for the rest of that server session. A session starts at 1 and each server
+// world STARTED (gate_close_session(false)) begins the next one before the gate reopens, which clears the latch.
+// gate_calls_latch() records the current session: a bounded compare-exchange that only ever raises the latched value,
+// and when it cannot be recorded in its bound it latches for the process (fail closed). Any thread, lock-free, no
+// allocation, callable inside a hold and from an exception filter. Plain gated writes are not affected.
+std::uint64_t gate_session() noexcept;
+bool gate_calls_latched() noexcept;
+void gate_calls_latch() noexcept;
+void gate_reset_for_tests() noexcept;  // also forgets the dialect owner's accessor and the engine-call latch
 
 #ifdef KILN_ENGINE_GATE_TEST_POINTS
 // Host tests only: called at fixed points of gate_acquire, before any engine word, to force the racy windows open.

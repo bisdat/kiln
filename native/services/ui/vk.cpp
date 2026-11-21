@@ -65,6 +65,9 @@ const char* vk_name(VkResult r) {
 // with its reason, written once under g_fail_mu; hk_present tells it once, outside g_mu (announce_failure).
 std::atomic<bool> g_failed{false};
 std::atomic<bool> g_fail_said{false};
+// draw() is making the overlay's frame (past its checks, until guarded_draw returns): vk_drawing, for overlay_menu_ask,
+// which waits for a frame still being made (the first of the process starts ImGui and the menu's code)
+std::atomic<bool> g_drawing{false};
 std::mutex g_fail_mu;
 bool g_fail_taken = false;
 int g_fail_level = KILN_LOG_ERROR;
@@ -519,12 +522,19 @@ bool draw(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* out_wait, ui
                                   : "the game presents with a queue Kiln did not see handed out and that is not one the game asked for when it "
                                     "made its device (a tool between the game and Vulkan added it), so its family is not known and a frame "
                                     "drawn for another family would fail on it");
-        case vk_present::QueueUse::tool:
+        case vk_present::QueueUse::tool: {
+            // the layer Kiln steps aside for, when it is one Kiln found next to the game at the start (overlay_guard_tools)
+            bool optiscaler = false, streamline = false;
+            overlay_guard_tools(&optiscaler, &streamline);
             return fail(KILN_LOG_WARN, "frame generation presents the game's frames from its own queue",
                         "the game's frames are presented from a queue a tool under Kiln added to the game's device while it was being "
                         "made (queue family %u%s): frame generation (OptiScaler's, or another tool's) presents the game's frames and its "
-                        "own from its own thread and queue, where Kiln's overlay does not draw", family,
-                        family < d.families.size() && !(d.families[family] & VK_QUEUE_GRAPHICS_BIT) ? ", which cannot draw" : "");
+                        "own from its own thread and queue, where Kiln's overlay does not draw%s", family,
+                        family < d.families.size() && !(d.families[family] & VK_QUEUE_GRAPHICS_BIT) ? ", which cannot draw" : "",
+                        optiscaler   ? "; OptiScaler is installed next to the game, and its frame generation presents so"
+                        : streamline ? "; NVIDIA Streamline is installed next to the game, and its frame generation presents so"
+                                     : "");
+        }
         case vk_present::QueueUse::no_graphics:
             return fail(KILN_LOG_WARN, "the game presents from a queue that cannot draw",
                         "the game's frames are presented from queue family %u, which has no graphics, so Kiln's overlay cannot draw there",
@@ -532,6 +542,13 @@ bool draw(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* out_wait, ui
         case vk_present::QueueUse::drawable:
             break;
     }
+    // From here on the overlay does work of its own (its resources, ImGui, the frame, the submit). The crash guard watches
+    // the first such draw of the process, also one whose frame turns out empty (one atomic read after that). A present Kiln
+    // got no further on than the checks above (no swapchain or device of its own seen, a queue it does not draw on) is no
+    // draw of the overlay: a start that dies with only those reads "swapchain created", which never locks (since
+    // 0.2.0-dev.30.2; before, the guard took any present that wanted a frame as the overlay's first draw).
+    overlay_guard_first_draw();
+    g_drawing.store(true, std::memory_order_relaxed);
     if (g_dev && g_dev != &d && g_dev->imgui_vk) {
         // the game draws with another device now: move ImGui's backend over
         g_dev->fn.vkDeviceWaitIdle(g_dev->device);
@@ -1103,6 +1120,7 @@ bool guarded_draw(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* wait
         *faulted = true;
     }
     g_mu.unlock();
+    g_drawing.store(false, std::memory_order_relaxed);
     return r;
 }
 
@@ -1140,9 +1158,8 @@ VkResult VKAPI_CALL hk_present(VkQueue queue, const VkPresentInfoKHR* info) {
         graphics_after_present();
         return result;
     }
-    // the crash guard watches the overlay's first draw attempt of this process (its resources and ImGui are made there,
-    // also when the frame turns out empty), also when the start already counted as fine; one atomic read after that
-    overlay_guard_first_draw();
+    // the crash guard watches the overlay's first draw of this process from inside draw(), once its checks found a
+    // swapchain, device and queue of its own to draw with (overlay_guard_first_draw)
     const uint64_t t0 = GetTickCount64();
     VkSemaphore wait = VK_NULL_HANDLE;
     bool faulted = false;
@@ -1549,6 +1566,7 @@ void vk_set_pre_overlay_demand(uint32_t count) { if (!overlay_drawing_on()) retu
 void vk_add_swapchain_usage(uint32_t usage) { if (!overlay_drawing_on()) return; g_extra_usage.fetch_or(usage); }
 
 uint64_t vk_presents() { return g_presents.load(std::memory_order_relaxed); }
+bool vk_drawing() { return g_drawing.load(std::memory_order_relaxed); }
 VkDevice vk_swapchain_device() { return g_swap_device.load(); }
 int vk_install_count() { return g_installs; }
 

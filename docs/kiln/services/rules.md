@@ -360,6 +360,13 @@ nose down. `GlideSteer` changes that one step for the player (`native/services/r
   `GlideSteer` (`GlideBoost`'s plane path, sink 0's altitude hold), in the server's world and the player's prediction
   alike (both read the same replicated mode byte). A glider whose `pitchAngleSpeed` another mod set to 0 or less (SF
   Unlimited Flight does that while it steers) keeps the game's step too: that mod steers, Kiln does not as well.
+- The hook itself goes into `actor_rotation` only when a rule set first asks for `GlideSteer` (Kiln's Creative Mode
+  glider included), on the tick after the first world (0.2.0-dev.30.1; before, at boot). Until then the code stays the
+  game's, so another loader that reads it can patch the same function: ShroudForge 1.8.1's `runtime.patch.glider_pitch`
+  (SF Unlimited Flight's "Upward Gliding") resolves only while actor_rotation holds no foreign jump. `Hooks` still
+  says `GlideSteer` (steering is available), and a game reports the steering hook to the server as before. kiln.log:
+  `glider steering: actor_rotation's pitch step at rva 0x... hooked (a rule set asked for GlideSteer)`; a hook that
+  fails then turns `GlideSteer` off in `Hooks` and `Detail`.
 - The game's own glide follows the real pitch: its thrust along the nose and its drag. With a sink above 0 a steep
   climb costs speed and a dive gives it, as in the game. Creative mode keeps `GlideSink` 0 (no gravity while gliding):
   level flight then holds its altitude with the nose at level, and the game's thrust keeps the glider at its own speed

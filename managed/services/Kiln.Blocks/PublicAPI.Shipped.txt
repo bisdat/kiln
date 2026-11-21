@@ -1764,6 +1764,8 @@ Kiln.InteractBlock.Requires.get -> Kiln.RequiresBlock?
 Kiln.InteractBlock.Requires.init -> void
 Kiln.InteractBlock.Toggle.get -> Kiln.ToggleBlock?
 Kiln.InteractBlock.Toggle.init -> void
+Kiln.InteractBlock.Upgrade.get -> Kiln.UpgradeAction?
+Kiln.InteractBlock.Upgrade.init -> void
 Kiln.InteractBlock.Verb.get -> Kiln.InteractVerb?
 Kiln.InteractBlock.Verb.init -> void
 Kiln.InteractPlay
@@ -1851,6 +1853,11 @@ Kiln.ItemRef.ItemRef() -> void
 Kiln.ItemRef.ItemRef(string! Value) -> void
 Kiln.ItemRef.Value.get -> string!
 Kiln.ItemRef.Value.init -> void
+Kiln.ItemSource
+Kiln.ItemSource.Craft = 1 -> Kiln.ItemSource
+Kiln.ItemSource.Give = 4 -> Kiln.ItemSource
+Kiln.ItemSource.Loot = 2 -> Kiln.ItemSource
+Kiln.ItemSource.None = 0 -> Kiln.ItemSource
 Kiln.KeyBindingBlock
 Kiln.KeyBindingBlock.<Clone>$() -> Kiln.KeyBindingBlock!
 Kiln.KeyBindingBlock.Category.get -> string?
@@ -2698,6 +2705,32 @@ Kiln.Rarity.Epic = 3 -> Kiln.Rarity
 Kiln.Rarity.Legendary = 4 -> Kiln.Rarity
 Kiln.Rarity.Rare = 2 -> Kiln.Rarity
 Kiln.Rarity.Uncommon = 1 -> Kiln.Rarity
+Kiln.RarityRollBlock
+Kiln.RarityRollBlock.<Clone>$() -> Kiln.RarityRollBlock!
+Kiln.RarityRollBlock.Equals(Kiln.RarityRollBlock? other) -> bool
+Kiln.RarityRollBlock.Items.get -> System.Collections.Generic.IReadOnlyList<Kiln.ItemRef>!
+Kiln.RarityRollBlock.Items.init -> void
+Kiln.RarityRollBlock.RarityRollBlock() -> void
+Kiln.RarityRollBlock.Sources.get -> Kiln.ItemSource
+Kiln.RarityRollBlock.Sources.init -> void
+Kiln.RarityRollBlock.Weights.get -> System.Collections.Generic.IReadOnlyDictionary<Kiln.Rarity, double>!
+Kiln.RarityRollBlock.Weights.init -> void
+Kiln.RarityUpgradeBlock
+Kiln.RarityUpgradeBlock.<Clone>$() -> Kiln.RarityUpgradeBlock!
+Kiln.RarityUpgradeBlock.AllowEmptySlot.get -> bool
+Kiln.RarityUpgradeBlock.AllowEmptySlot.init -> void
+Kiln.RarityUpgradeBlock.Durability.get -> Kiln.DurabilityRule
+Kiln.RarityUpgradeBlock.Durability.init -> void
+Kiln.RarityUpgradeBlock.Equals(Kiln.RarityUpgradeBlock? other) -> bool
+Kiln.RarityUpgradeBlock.Items.get -> System.Collections.Generic.IReadOnlyList<Kiln.ItemRef>?
+Kiln.RarityUpgradeBlock.Items.init -> void
+Kiln.RarityUpgradeBlock.Max.get -> Kiln.Rarity
+Kiln.RarityUpgradeBlock.Max.init -> void
+Kiln.RarityUpgradeBlock.RarityUpgradeBlock() -> void
+Kiln.RarityUpgradeBlock.Socket.get -> Kiln.SocketRule
+Kiln.RarityUpgradeBlock.Socket.init -> void
+Kiln.RarityUpgradeBlock.Steps.get -> System.Collections.Generic.IDictionary<Kiln.Rarity, Kiln.UpgradeStep!>!
+Kiln.RarityUpgradeBlock.Steps.init -> void
 Kiln.ReachGoal
 Kiln.ReachGoal.<Clone>$() -> Kiln.ReachGoal!
 Kiln.ReachGoal.At.get -> double[]?
@@ -3904,6 +3937,20 @@ Kiln.UiSet.Equals(Kiln.UiSet? other) -> bool
 Kiln.UiSet.To.get -> object!
 Kiln.UiSet.To.init -> void
 Kiln.UiSet.UiSet() -> void
+Kiln.UpgradeAction
+Kiln.UpgradeAction.<Clone>$() -> Kiln.UpgradeAction!
+Kiln.UpgradeAction.Equals(Kiln.UpgradeAction? other) -> bool
+Kiln.UpgradeAction.Range.get -> double
+Kiln.UpgradeAction.Range.init -> void
+Kiln.UpgradeAction.Rule.get -> string!
+Kiln.UpgradeAction.Rule.init -> void
+Kiln.UpgradeAction.Target.get -> Kiln.UpgradeTarget
+Kiln.UpgradeAction.Target.init -> void
+Kiln.UpgradeAction.UpgradeAction() -> void
+Kiln.UpgradeStation
+Kiln.UpgradeTarget
+Kiln.UpgradeTarget.Choose = 1 -> Kiln.UpgradeTarget
+Kiln.UpgradeTarget.Held = 0 -> Kiln.UpgradeTarget
 Kiln.ValueRow
 Kiln.ValueRow.Bind.get -> string!
 Kiln.ValueRow.Bind.init -> void
@@ -4324,6 +4371,8 @@ const Kiln.Stations.Hand = "hand" -> string!
 const Kiln.Stations.OutputSourcesCapability = "stations.output_sources" -> string!
 const Kiln.Stations.ReadCapability = "stations.read" -> string!
 const Kiln.StrengthBlock.OwnBlock = "block" -> string!
+const Kiln.UpgradeAction.DefaultRange = 6 -> double
+const Kiln.UpgradeStation.Capability = "blocks.upgrade_station" -> string!
 const Kiln.WornAttach.ArmLeft = "ArmL" -> string!
 const Kiln.WornAttach.Chest = "Chest" -> string!
 const Kiln.WornAttach.FootLeft = "FootL" -> string!
@@ -4743,6 +4792,12 @@ override Kiln.PropRef.ToString() -> string!
 override Kiln.QuestBlock.Equals(object? obj) -> bool
 override Kiln.QuestBlock.GetHashCode() -> int
 override Kiln.QuestBlock.ToString() -> string!
+override Kiln.RarityRollBlock.Equals(object? obj) -> bool
+override Kiln.RarityRollBlock.GetHashCode() -> int
+override Kiln.RarityRollBlock.ToString() -> string!
+override Kiln.RarityUpgradeBlock.Equals(object? obj) -> bool
+override Kiln.RarityUpgradeBlock.GetHashCode() -> int
+override Kiln.RarityUpgradeBlock.ToString() -> string!
 override Kiln.ReachGoal.Equals(object? obj) -> bool
 override Kiln.ReachGoal.GetHashCode() -> int
 override Kiln.ReachGoal.ToString() -> string!
@@ -4953,6 +5008,9 @@ override Kiln.UiRow.ToString() -> string!
 override Kiln.UiSet.Equals(object? obj) -> bool
 override Kiln.UiSet.GetHashCode() -> int
 override Kiln.UiSet.ToString() -> string!
+override Kiln.UpgradeAction.Equals(object? obj) -> bool
+override Kiln.UpgradeAction.GetHashCode() -> int
+override Kiln.UpgradeAction.ToString() -> string!
 override Kiln.ValueRow.<Clone>$() -> Kiln.ValueRow!
 override Kiln.ValueRow.Equals(object? obj) -> bool
 override Kiln.ValueRow.GetHashCode() -> int
@@ -5222,6 +5280,8 @@ static Kiln.Blocks.Define(string! name, Kiln.LootTableBlock! block) -> Kiln.Loot
 static Kiln.Blocks.Define(string! name, Kiln.MaterialBlock! block) -> Kiln.MaterialBlockHandle!
 static Kiln.Blocks.Define(string! name, Kiln.MaterialTweakBlock! block) -> Kiln.TableBlockHandle<Kiln.MaterialTweakBlock!>!
 static Kiln.Blocks.Define(string! name, Kiln.QuestBlock! block) -> Kiln.QuestHandle!
+static Kiln.Blocks.Define(string! name, Kiln.RarityRollBlock! block) -> Kiln.BlockHandle<Kiln.RarityRollBlock!>!
+static Kiln.Blocks.Define(string! name, Kiln.RarityUpgradeBlock! block) -> Kiln.BlockHandle<Kiln.RarityUpgradeBlock!>!
 static Kiln.Blocks.Define(string! name, Kiln.TerrainMaterialBlock! block) -> Kiln.TableBlockHandle<Kiln.TerrainMaterialBlock!>!
 static Kiln.Blocks.Define(string! name, Kiln.VfxBlock! block) -> Kiln.VfxBlockHandle!
 static Kiln.Blocks.Define(string! name, Kiln.VfxBlock! block, Kiln.DefinitionRegistrationOptions! options) -> Kiln.DefinitionRegistrationResult!
@@ -5541,6 +5601,10 @@ static Kiln.PropRef.operator !=(Kiln.PropRef left, Kiln.PropRef right) -> bool
 static Kiln.PropRef.operator ==(Kiln.PropRef left, Kiln.PropRef right) -> bool
 static Kiln.QuestBlock.operator !=(Kiln.QuestBlock? left, Kiln.QuestBlock? right) -> bool
 static Kiln.QuestBlock.operator ==(Kiln.QuestBlock? left, Kiln.QuestBlock? right) -> bool
+static Kiln.RarityRollBlock.operator !=(Kiln.RarityRollBlock? left, Kiln.RarityRollBlock? right) -> bool
+static Kiln.RarityRollBlock.operator ==(Kiln.RarityRollBlock? left, Kiln.RarityRollBlock? right) -> bool
+static Kiln.RarityUpgradeBlock.operator !=(Kiln.RarityUpgradeBlock? left, Kiln.RarityUpgradeBlock? right) -> bool
+static Kiln.RarityUpgradeBlock.operator ==(Kiln.RarityUpgradeBlock? left, Kiln.RarityUpgradeBlock? right) -> bool
 static Kiln.ReachGoal.operator !=(Kiln.ReachGoal? left, Kiln.ReachGoal? right) -> bool
 static Kiln.ReachGoal.operator ==(Kiln.ReachGoal? left, Kiln.ReachGoal? right) -> bool
 static Kiln.RecipeBlock.operator !=(Kiln.RecipeBlock? left, Kiln.RecipeBlock? right) -> bool
@@ -5755,6 +5819,11 @@ static Kiln.UiRow.operator !=(Kiln.UiRow? left, Kiln.UiRow? right) -> bool
 static Kiln.UiRow.operator ==(Kiln.UiRow? left, Kiln.UiRow? right) -> bool
 static Kiln.UiSet.operator !=(Kiln.UiSet? left, Kiln.UiSet? right) -> bool
 static Kiln.UiSet.operator ==(Kiln.UiSet? left, Kiln.UiSet? right) -> bool
+static Kiln.UpgradeAction.operator !=(Kiln.UpgradeAction? left, Kiln.UpgradeAction? right) -> bool
+static Kiln.UpgradeAction.operator ==(Kiln.UpgradeAction? left, Kiln.UpgradeAction? right) -> bool
+static Kiln.UpgradeStation.Available.get -> bool
+static Kiln.UpgradeStation.Offer(Kiln.EntityId entity, Kiln.UpgradeAction! action, out string! reason, Kiln.OfferOptions? options = null) -> bool
+static Kiln.UpgradeStation.Use(Kiln.EntityId player, Kiln.EntityId station, Kiln.UpgradeAction! action) -> System.Threading.Tasks.Task<Kiln.UpgradeResult?>!
 static Kiln.ValueRow.operator !=(Kiln.ValueRow? left, Kiln.ValueRow? right) -> bool
 static Kiln.ValueRow.operator ==(Kiln.ValueRow? left, Kiln.ValueRow? right) -> bool
 static Kiln.VendorBlock.operator !=(Kiln.VendorBlock? left, Kiln.VendorBlock? right) -> bool

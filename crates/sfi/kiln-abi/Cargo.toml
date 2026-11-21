@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "kiln-abi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Generated C ABI bindings for Kiln's MIT native services"
+
+[lib]
+path = "src/lib.rs"

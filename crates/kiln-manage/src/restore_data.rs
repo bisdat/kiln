@@ -64,22 +64,34 @@ fn guard(root: &Path) -> Result<fs::File> {
         .open(p)?;
     lock.try_lock()
         .map_err(|_| refuse("The game data writer is busy."))?;
-    if shroudforge_writes(root)? {
-        return Err(refuse(
+    match shroudforge_writes(root)? {
+        // (Kiln's interpreter: kiln-eml writes the game's data for it at start; whether this restore may
+        // run then is not decided yet, so it stays refused, in words about the interpreter)
+        Some(crate::own_loaders::Via::Interpreter) => return Err(refuse(INTERPRETER_WRITES)),
+        Some(_) => return Err(refuse(
             "ShroudForge prepares the game's data for this profile, so these files may be its own. Switch the profile's ShroudForge mods off (or remove ShroudForge's own loader), start the game through Kiln once, and come back.",
-        ));
+        )),
+        None => {}
     }
     Ok(lock)
 }
 /// ShroudForge is the archive writer of the game's loaded profile: its own loader is installed, or Kiln hosts it for
 /// that profile ([`crate::own_loaders::shroudforge_runs_eml`]). Its `shroudforge/` folder alone does not say so: a
 /// player who once had a ShroudForge mod keeps that folder, and kiln-eml is then the writer whose start failed.
-fn shroudforge_writes(root: &Path) -> Result<bool> {
+/// Some: how that loader gets in (one list, one route of the game's ShroudForge-format mods); None: it is not the writer.
+fn shroudforge_writes(root: &Path) -> Result<Option<crate::own_loaders::Via>> {
     checked(root, "kiln/profile.json")?;
     let profile = crate::profile::read_game_profile(root)?
         .map(|p| crate::own_loaders::ProfileView::of_file(&p));
-    Ok(crate::own_loaders::shroudforge_runs_eml(&crate::own_loaders::find(root, profile.as_ref())))
+    let loaders = crate::own_loaders::find(root, profile.as_ref());
+    // (shroudforge_runs_eml: the first of them)
+    Ok(loaders
+        .iter()
+        .find(|o| o.kind == crate::manifest::ModKind::Eml && o.engine == crate::engines::Engine::ShroudForge)
+        .map(|o| o.via))
 }
+/// [`guard`]'s refusal while Kiln's interpreter carries the loaded profile's EML mods.
+const INTERPRETER_WRITES: &str = "Kiln's interpreter runs this profile's ShroudForge mods (kiln.json selects it), and Kiln prepares the game's data for them when the game starts, so these files may be that start's. Switch the profile's ShroudForge mods off, start the game through Kiln once, and come back.";
 /// Whether there is anything for [`plan`] or [`latest`] to look at: the last start's state names unproven data, or a
 /// move is recorded. Read only: a game folder with neither is not touched (no lock file is made in it, nothing is
 /// hashed), because the launcher asks whenever it shows the engines.
@@ -541,7 +553,7 @@ mod tests {
         // ShroudForge's folder from an earlier profile: kiln-eml was the writer whose start failed
         fs::create_dir_all(r.join("shroudforge/config")).unwrap();
         fs::write(r.join("shroudforge/state.json"), b"{}").unwrap();
-        assert!(!shroudforge_writes(r).unwrap());
+        assert!(shroudforge_writes(r).unwrap().is_none());
         assert_eq!(plan(r).unwrap().files.len(), 11);
         // Kiln hosts ShroudForge for the loaded profile: the files may be ShroudForge's own
         fs::create_dir_all(r.join("kiln/plugins/shroudforge")).unwrap();
@@ -552,7 +564,7 @@ mod tests {
             br#"{"format": 1, "id": "p", "generation": 1, "mods": {"shroudforge": [{"id": "sfmod", "path": "lib/sfmod", "enabled": true}]}}"#,
         )
         .unwrap();
-        assert!(shroudforge_writes(r).unwrap());
+        assert_eq!(shroudforge_writes(r).unwrap(), Some(crate::own_loaders::Via::HostedShroudForge));
         assert!(plan(r).unwrap_err().message.contains("ShroudForge"));
         // the same profile with the mod switched off
         fs::write(
@@ -560,8 +572,41 @@ mod tests {
             br#"{"format": 1, "id": "p", "generation": 1, "mods": {"shroudforge": [{"id": "sfmod", "path": "lib/sfmod", "enabled": false}]}}"#,
         )
         .unwrap();
-        assert!(!shroudforge_writes(r).unwrap());
+        assert!(shroudforge_writes(r).unwrap().is_none());
         assert_eq!(plan(r).unwrap().files.len(), 11);
+    }
+    /// Kiln's interpreter carries the loaded profile's EML mods (kiln.json selects it): the refusal stays,
+    /// in words about the interpreter (Kiln prepares the game's data for it at start), never ShroudForge's own.
+    #[cfg(feature = "sfi-scan")]
+    #[test]
+    fn restore_data_refusal_under_kilns_interpreter_says_so() {
+        let d = fixture();
+        let r = d.path();
+        fs::write(
+            r.join("kiln/kiln.json"),
+            br#"{"preview": ["kiln-sfi.interpreter"], "shroudforge": {"backend": "kiln"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            r.join("kiln/profile.json"),
+            br#"{"format": 1, "id": "p", "generation": 1, "mods": {"shroudforge": [{"id": "sfmod", "path": "../mods/sfmod", "enabled": true}]}}"#,
+        )
+        .unwrap();
+        // without the interpreter nothing carries the EML mods: kiln-eml is the writer whose start failed
+        assert_eq!(plan(r).unwrap().files.len(), 11);
+        fs::create_dir_all(r.join("kiln/plugins")).unwrap();
+        fs::write(r.join("kiln/plugins/kiln-sfi.dll"), b"x").unwrap();
+        assert_eq!(shroudforge_writes(r).unwrap(), Some(crate::own_loaders::Via::Interpreter));
+        let e = plan(r).unwrap_err();
+        assert_eq!(e.code, crate::ErrorCode::Refused);
+        assert!(e.message.starts_with("Kiln's interpreter runs this profile's ShroudForge mods"), "{}", e.message);
+        assert!(!e.message.contains("ShroudForge prepares") && !e.message.contains("own loader"), "{}", e.message);
+        // hosted ShroudForge for the same profile: ShroudForge's words, as before
+        fs::write(r.join("kiln/kiln.json"), br#"{"shroudforge": {"backend": "hosted"}}"#).unwrap();
+        fs::create_dir_all(r.join("kiln/plugins/shroudforge")).unwrap();
+        fs::write(r.join("kiln/plugins/kiln-shroudforge.dll"), b"x").unwrap();
+        fs::write(r.join("kiln/plugins/shroudforge/shroudforge-runtime.dll"), b"x").unwrap();
+        assert!(plan(r).unwrap_err().message.starts_with("ShroudForge prepares the game's data"));
     }
     #[test]
     fn restore_data_leaves_a_game_with_nothing_to_restore_untouched() {
@@ -675,4 +720,115 @@ pub fn latest(root: &Path) -> Result<Option<Moved>> {
         }
     }
     Ok(None)
+}
+
+/// The BASE "Restore the game's data" takes a kiln-mode game back to: what kiln-eml's ownership receipt
+/// records as its origin (`baseOrigin`, written by a kiln-mode publication), kept only when it is keyed to exactly the
+/// backups in the game folder now. Read only; the restore itself is kiln-eml's at the next start with no mod that
+/// changes the game's data (its ownership-checked BASE restore), never a copy from here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BaseOrigin {
+    /// `recorded`: the receipt's origin, keyed to the backups present; `unrecorded`: backups are present but no origin
+    /// a receipt carries is keyed to them; `unknown`: Kiln cannot tell (`reason`).
+    pub state: String,
+    pub token: Option<String>,
+    /// The token's exact label (never "vanilla": integrity is not provenance).
+    pub label: Option<String>,
+    /// SHA-256 of the backup header (`enshrouded.kfc.bak`) the origin is keyed to.
+    pub baseline_sha256: Option<String>,
+    pub reason: Option<String>,
+}
+
+/// The backups a receipt's `baseOrigin.baseline` lists, in order.
+#[cfg(feature = "sfi-scan")]
+const BASELINE: [&str; 3] = ["enshrouded.kfc.bak", "enshrouded.kfc_resources.bak", "enshrouded.kfc.bak.integrity"];
+
+/// [`BaseOrigin`] of a game on the interpreter's route; None on any other route, or when Kiln has no record of game
+/// data it wrote (the game's data is as Kiln found it: nothing to go back to). Hashes the backups (on request only).
+pub fn base_origin(root: &Path) -> Result<Option<BaseOrigin>> {
+    #[cfg(feature = "sfi-scan")]
+    {
+        if !crate::sfi_routing::route_of(root).interpreter() {
+            return Ok(None);
+        }
+        Ok(read_base_origin(root).unwrap_or_else(|e| Some(unknown_base(&e.message))))
+    }
+    #[cfg(not(feature = "sfi-scan"))]
+    {
+        let _ = root;
+        Ok(None)
+    }
+}
+
+#[cfg(feature = "sfi-scan")]
+fn unknown_base(reason: &str) -> BaseOrigin {
+    BaseOrigin { state: "unknown".into(), token: None, label: None, baseline_sha256: None, reason: Some(reason.into()) }
+}
+
+#[cfg(feature = "sfi-scan")]
+fn read_base_origin(root: &Path) -> Result<Option<BaseOrigin>> {
+    use serde_json::Value;
+    let receipt = checked(root, "kiln/eml/ownership/enshrouded.json")?;
+    let meta = match fs::symlink_metadata(&receipt) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        r => r?,
+    };
+    if !meta.is_file() || meta.len() > 16 * 1024 * 1024 {
+        return Ok(Some(unknown_base("Kiln's record of the game data it wrote is not a file it can read")));
+    }
+    let Ok(v) = serde_json::from_slice::<Value>(&fs::read(&receipt)?) else {
+        return Ok(Some(unknown_base("Kiln's record of the game data it wrote cannot be read")));
+    };
+    // the backups in the game folder now, each with its size and SHA-256 (sizes first: the resources are large)
+    let mut present = Vec::new();
+    for name in BASELINE {
+        let p = checked(root, name)?;
+        present.push(match fs::symlink_metadata(&p) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e.into()),
+            Ok(m) if !m.is_file() => return Ok(Some(unknown_base(&format!("{name} is not a regular file")))),
+            Ok(m) => Some((p, m.len())),
+        });
+    }
+    if present[0].is_none() || present[1].is_none() {
+        return Ok(Some(unknown_base(
+            "the game data Kiln backed up is not in the game folder (all of it): Kiln cannot tell what it would put back",
+        )));
+    }
+    let header = || -> Result<String> { Ok(crate::hash::sha256_file(&present[0].as_ref().expect("checked").0)?.0) };
+    let unrecorded = |why: &str| -> Result<Option<BaseOrigin>> {
+        let (token, label) = crate::sfi_inspection::ORIGINS[2];
+        Ok(Some(BaseOrigin { state: "unrecorded".into(), token: Some(token.into()), label: Some(label.into()),
+            baseline_sha256: Some(header()?), reason: Some(why.into()) }))
+    };
+    let o = &v["baseOrigin"];
+    let Some(obj) = o.as_object().filter(|o| o.len() == 3) else {
+        return unrecorded("Kiln's record of the game data it wrote names no origin for these backups");
+    };
+    let (Some(token), Some(label), Some(baseline)) = (obj.get("token").and_then(Value::as_str), obj.get("label").and_then(Value::as_str),
+        obj.get("baseline").and_then(Value::as_object)) else {
+        return unrecorded("the origin in Kiln's record is not one it records");
+    };
+    // only the two unclassified tokens, each with its own exact label (sfi_inspection::ORIGINS, kiln-eml's RECORDED_ORIGINS)
+    if !crate::sfi_inspection::ORIGINS[..2].iter().any(|&(t, l)| t == token && l == label)
+        || baseline.len() != BASELINE.len()
+    {
+        return unrecorded("the origin in Kiln's record is not one it records");
+    }
+    for (name, now) in BASELINE.iter().zip(&present) {
+        let Some(want) = baseline.get(*name) else { return unrecorded("the origin in Kiln's record is not one it records") };
+        let keyed = match (want, now) {
+            (Value::Null, None) => true,
+            (Value::Object(d), Some((p, size))) if d.len() == 2 && d.get("size").and_then(Value::as_u64) == Some(*size) => {
+                d.get("sha256").and_then(Value::as_str) == Some(crate::hash::sha256_file(p)?.0.as_str())
+            }
+            _ => false,
+        };
+        if !keyed {
+            return unrecorded("the origin in Kiln's record is of other backups than the ones in the game folder now");
+        }
+    }
+    Ok(Some(BaseOrigin { state: "recorded".into(), token: Some(token.into()), label: Some(label.into()),
+        baseline_sha256: baseline[BASELINE[0]]["sha256"].as_str().map(str::to_owned), reason: None }))
 }

@@ -1180,6 +1180,7 @@ Kiln.WorldConfig<T>
 Kiln.WorldConfig<T>.Value.get -> T!
 Kiln.WorldKind
 Kiln.WorldKind.Client = 2 -> Kiln.WorldKind
+Kiln.WorldKind.Menu = 3 -> Kiln.WorldKind
 Kiln.WorldKind.Prediction = 1 -> Kiln.WorldKind
 Kiln.WorldKind.Server = 0 -> Kiln.WorldKind
 Kiln.WorldPosition

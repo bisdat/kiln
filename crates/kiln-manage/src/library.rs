@@ -2606,6 +2606,10 @@ impl Usage {
         for e in std::fs::read_dir(dirs.profiles()).into_iter().flatten().flatten() {
             let Ok(Some(p)) = crate::util::read_json::<crate::profile::Profile>(&e.path().join("meta.json")) else { continue };
             profiles.push((p.id, p.mods));
+            // a pack instance's undo copy (crate::modpack::pack::undo) still needs the entries it goes back to
+            if let Ok(Some(u)) = crate::util::read_json::<crate::profile::Profile>(&e.path().join("pack").join("undo").join("meta.json")) {
+                profiles.push((format!("{} (undo)", u.id), u.mods));
+            }
         }
         // A profile offered for restoration still needs its Library packages,
         // including switched-off entries. Pin until this snapshot is replaced.
@@ -2911,6 +2915,40 @@ pub fn remove_with(
     let guard = Guard::read(dirs, find)?;
     guard.refuse_while_running(dirs, r)?;
     guard.remove_checked(dirs, r, &folder, &force.into()).map(|_| ())
+}
+
+/// [`remove`], then with `settings` the mod's settings too ([`crate::mod_settings::remove`], the launcher's "Remove its
+/// settings too") once this was its last version in the Library. -> what the settings removal did; None without
+/// `settings`, or while other versions of the mod stay. The version is removed whatever the settings removal does: a
+/// failure there is a note in its result.
+pub fn remove_and_settings(dirs: &DataDirs, r: &LibraryRef, force: impl Into<Force>, settings: bool)
+    -> Result<Option<crate::mod_settings::SettingsRemoval>> {
+    let mut finder = crate::proc::Finder::default();
+    remove_and_settings_with(dirs, r, force, settings, &mut |dir, exe| finder.find(dir, exe))
+}
+
+/// [`remove_and_settings`] with the process lookup given, for tests.
+pub fn remove_and_settings_with(
+    dirs: &DataDirs,
+    r: &LibraryRef,
+    force: impl Into<Force>,
+    settings: bool,
+    find: &mut dyn FnMut(&Path, &str) -> Result<Option<crate::proc::ProcessInfo>>,
+) -> Result<Option<crate::mod_settings::SettingsRemoval>> {
+    // a Shroudtopia mod's entry in shroudtopia.json may be under its mod.json name: read before the folder goes
+    let keys: Vec<String> = match (settings, r.kind) {
+        (true, ModKind::Shroudtopia) => path_of(dirs, r).ok()
+            .and_then(|f| crate::util::read_json::<serde_json::Value>(&f.join("mod.json")).ok().flatten())
+            .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(str::to_owned)).into_iter().collect(),
+        _ => Vec::new(),
+    };
+    remove_with(dirs, r, force, &mut *find)?;
+    if !settings || list(dirs, Some(r.kind))?.iter().any(|e| e.id == r.id && !e.versions.is_empty()) {
+        return Ok(None);
+    }
+    Ok(Some(crate::mod_settings::remove_with(dirs, r.kind, &r.id, &keys, find).unwrap_or_else(|e| crate::mod_settings::SettingsRemoval {
+        notes: vec![format!("Its settings stay: {}", e.message)], ..Default::default()
+    })))
 }
 
 /// What [`remove_many`] did: the versions removed, and each one that was not with the reason (`Conflict` while

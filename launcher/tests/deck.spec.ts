@@ -107,8 +107,10 @@ test.describe("choosing the UI", () => {
 test.describe("controls", () => {
   test("focus moves predictably with the D-pad and stops at the edges", async ({ page }) => {
     await openDeck(page);
-    // Home has no control left of the mouth now (no profile switch in the main flow): focus stays at the edge
+    // (dev.30) left of the mouth: Crucible's Share and Enter a code (Home's text column); right goes back to the mouth
     await page.keyboard.press("ArrowLeft");
+    expect(["crucible-share", "crucible-code"]).toContain(await focused(page));
+    await page.keyboard.press("ArrowRight");
     expect(await focused(page)).toBe("mouth");
     await page.keyboard.press("ArrowUp");
     expect(await focused(page)).toBe("mouth");

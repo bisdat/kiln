@@ -115,6 +115,18 @@ fn stored(d: &DataDirs, s: &CommunitySettings) -> Option<Stored> {
     v
 }
 
+/// The Kiln session key (the Discord sign-in) for Crucible's API: None when signed out.
+pub(crate) fn session_key() -> Option<String> {
+    let (d, s) = settings().ok()?;
+    stored(&d, &s).map(|k| k.session)
+}
+
+/// The signed-in account as kept with the session (None when signed out).
+pub(crate) fn session_account() -> Option<kiln_manage::community::Account> {
+    let (d, s) = settings().ok()?;
+    stored(&d, &s).map(|k| k.account)
+}
+
 /// Keeps the session (keyring, else the owner-only file) and what [`stored`] answers.
 fn keep_session(d: &DataDirs, k: &Stored) -> Result<(), Error> {
     *KEPT.lock().unwrap() = None;

@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "kiln-sfi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Kiln's MIT interpreter of ShroudForge mods: plugin boundary, worker and runtime (inactive by default)"
+build = "build.rs"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+kiln-abi = { path = "../kiln-abi" }
+# The lifecycle host drives sfi-core's lifecycle runtime on the worker.
+sfi-core = { path = "../sfi-core" }
+mlua.workspace = true
+sfi-policy = { path = "../sfi-policy", features = ["os-binding"] }
+serde_json.workspace = true
+# KilnApi.version() against the release that added KILN_TASK_RESIDENT (already in the lock).
+semver = "=1.0.28"
+# sfi.json: the save-sensitive policy pins files by SHA-256 (already in the lock through sfi-policy).
+sha2 = "0.10"
+
+[build-dependencies]
+cc = "1"
+
+# The typed-value frontend over the real kiln.eml.values provider, as a C consumer library that kiln-eml's own
+# C-consumer test loads (M6_VALUES_CONSUMERS); MIT, reaching the provider through C calls only.
+[[example]]
+name = "values_consumer"
+crate-type = ["cdylib"]

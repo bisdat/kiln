@@ -381,7 +381,7 @@ pub fn check_index(ix: &PackIndex) -> Result<()> {
         if !path_ok {
             problems.push(format!("mod {}: path {:?} (must be {})", m.id, m.path, mod_path(m.kind, &m.id)));
         }
-        if !mod_id_ok(&m.id) || m.id.starts_with(LAYER_PREFIX) {
+        if !mod_id_ok(&m.id) || m.id.starts_with(LAYER_PREFIX) || m.id.starts_with(PLAYER_LAYER_PREFIX) {
             problems.push(format!("mod id {:?} is not valid", m.id));
         }
         if !semver_ok(&m.version) {
@@ -400,6 +400,9 @@ pub fn check_index(ix: &PackIndex) -> Result<()> {
         if let Some(f) = &m.file && !sha256_ok(&f.sha256) {
             problems.push(format!("mod {}: file.sha256", m.id));
         }
+        if let Some(f) = &m.file && f.size > MAX_FILE {
+            problems.push(format!("mod {}: file.size is over {MAX_FILE} bytes", m.id));
+        }
         if let Some(c) = &m.credit && (c.author.trim().is_empty() || !c.source.to_ascii_lowercase().starts_with("https://")) {
             problems.push(format!("mod {}: a credit needs an author and an https source", m.id));
         }
@@ -407,6 +410,10 @@ pub fn check_index(ix: &PackIndex) -> Result<()> {
     if let Some(l) = &ix.layer {
         if l.id != ix.layer_id() || l.path != LAYER_PATH || l.version != ix.version || !l.hash.starts_with("kdh1:") || crate::hash::hash8(&l.hash).is_none() {
             problems.push(format!("layer: id {}, path layer, the pack's version and a kdh1", ix.layer_id()));
+        }
+        // the layer's file.sha256 names its cache file (crucible::fetch): a sha256 and nothing else
+        if let Some(f) = &l.file && (!sha256_ok(&f.sha256) || f.size > MAX_FILE) {
+            problems.push(format!("layer: file.sha256 and a size of at most {MAX_FILE} bytes"));
         }
     }
     for id in &ix.order.kiln {
@@ -465,6 +472,9 @@ pub struct ReadPack {
     pub size: u64,
     /// Ids of the mods (and the layer) with code files in them (.dll, .exe, .so, .lua, scripts).
     pub code: BTreeSet<String>,
+    /// Mods the zip leaves out (a pack put together for one side lacks the mods the other side alone uses): only those
+    /// the reader allowed ([`read_partial`]).
+    pub absent: BTreeSet<String>,
 }
 
 /// A file of code by its name: what the install warning counts.
@@ -497,8 +507,26 @@ pub fn peek_format(zip_file: &Path) -> Result<u32> {
 /// or `..` paths, no two entries differing in case only), sizes (512 MiB a file, 4 GiB in all, 64 KiB an override, 1 MiB
 /// of overrides), each mod's and the layer's kdh1 from the entries, each override's sha256. A Kiln mod carrying cook
 /// outputs (assets/cooked/) is refused: they are made on each machine.
-#[cfg(feature = "zip")]
+/// Reads and checks a pack (every check of the docs' "Checks"); with `extract_to`, unpacks it there.
 pub fn read(zip_file: &Path, sha256: Option<&str>, extract_to: Option<&Path>) -> Result<ReadPack> {
+    read_partial(zip_file, sha256, extract_to, &|_| false)
+}
+
+/// The mods a client does not use: a pack put together for game clients may leave them out (Crucible's download skips
+/// them; the server part needs the whole pack).
+pub fn client_skips(m: &PackMod) -> bool {
+    m.env().client == Need::Unsupported
+}
+
+/// The mods a server does not use.
+pub fn server_skips(m: &PackMod) -> bool {
+    m.env().server == Need::Unsupported
+}
+
+/// [`read`] that lets the zip leave out the mods `absent_ok` names (listed in `ReadPack::absent`); every mod it does
+/// carry is checked as always.
+#[cfg(feature = "zip")]
+pub fn read_partial(zip_file: &Path, sha256: Option<&str>, extract_to: Option<&Path>, absent_ok: &dyn Fn(&PackMod) -> bool) -> Result<ReadPack> {
     use std::io::{Read, Write};
     let (have_sha, size) = crate::hash::sha256_file(zip_file).map_err(|e| e.with_detail(zip_file.display().to_string()))?;
     if let Some(want) = sha256 && !have_sha.eq_ignore_ascii_case(want) {
@@ -630,10 +658,15 @@ pub fn read(zip_file: &Path, sha256: Option<&str>, extract_to: Option<&Path>) ->
             }
         }
     }
+    let mut absent = BTreeSet::new();
     for (k, m) in index.mods.iter().enumerate() {
         let rs = recs.remove(&k).unwrap_or_default();
         if rs.is_empty() {
-            return Err(err(ErrorCode::Refused, format!("mod {} has no files in the pack", m.id)));
+            if absent_ok(m) {
+                absent.insert(m.id.clone());
+                continue;
+            }
+            return Err(err(ErrorCode::Refused, format!("mod {} has no files in the pack (a pack put together for game clients lacks the server's mods: use the whole .kilnpack)", m.id)));
         }
         if let Some(entry) = cooked.get(&k) && rs.iter().any(|r| crate::hash::key_of(&r.path).as_deref() == Some(crate::hash::MOD_MANIFEST)) {
             return Err(err(ErrorCode::Refused, format!("the pack carries cooked files of {} ({entry}): they are made on each machine from its own game", m.id)));
@@ -661,12 +694,12 @@ pub fn read(zip_file: &Path, sha256: Option<&str>, extract_to: Option<&Path>) ->
             merge::leaves(o.mode, &o.path, &text)?;
         }
     }
-    Ok(ReadPack { index, overrides, sha256: have_sha, size, code })
+    Ok(ReadPack { index, overrides, sha256: have_sha, size, code, absent })
 }
 
 #[cfg(not(feature = "zip"))]
-pub fn read(zip_file: &Path, sha256: Option<&str>, extract_to: Option<&Path>) -> Result<ReadPack> {
-    let _ = (zip_file, sha256, extract_to);
+pub fn read_partial(zip_file: &Path, sha256: Option<&str>, extract_to: Option<&Path>, absent_ok: &dyn Fn(&PackMod) -> bool) -> Result<ReadPack> {
+    let _ = (zip_file, sha256, extract_to, absent_ok);
     Err(err(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
 }
 
@@ -1074,6 +1107,12 @@ pub fn build(dirs: &DataDirs, req: &BuildRequest, out_dir: &Path, progress: &mut
             if progress.canceled() {
                 return Err(err(ErrorCode::Canceled, "canceled"));
             }
+            if kind == ModKind::Kiln && m.id.starts_with(PLAYER_LAYER_PREFIX) {
+                // a player layer belongs to one PC's instance: its id would meet the receiver's own (profile ids repeat)
+                notes.push(format!("{} (your own data changes to an installed pack) is not in the pack: copy what should travel into the pack layer", m.id));
+                done += 1;
+                continue;
+            }
             progress.report(Some(done as f32 / total as f32 * 0.5), &format!("hashing {}", m.id));
             done += 1;
             let r = LibraryRef { kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
@@ -1266,7 +1305,6 @@ pub fn build(dirs: &DataDirs, req: &BuildRequest, out_dir: &Path, progress: &mut
 /// more upload). kdh1 recomputed from the entries is the entry's hash (for a plugin, sha256 of its one file).
 #[cfg(feature = "zip")]
 pub fn mod_archive(dirs: &DataDirs, r: &LibraryRef, out: &Path) -> Result<StoredFile> {
-    use std::io::Write;
     let at = crate::library::path_of(dirs, r)?;
     let (files, hash) = if r.kind == ModKind::Plugin {
         let name = at.file_name().and_then(|n| n.to_str()).ok_or_else(|| Error::invalid(format!("plugin {}: no file name", r.id)))?.to_string();
@@ -1280,10 +1318,26 @@ pub fn mod_archive(dirs: &DataDirs, r: &LibraryRef, out: &Path) -> Result<Stored
     if hash != r.hash {
         return Err(err(ErrorCode::Refused, format!("{} {} changed in its Library folder since it was imported ({hash}, expected {})", r.kind.as_str(), r.id, r.hash)));
     }
+    archive_files(&files, &format!("{} {}", r.kind.as_str(), r.id), out)
+}
+
+/// [`mod_archive`] of a folder that is no Library entry (a pack layer unpacked from a built pack): the same bytes rules.
+/// Returns the archive and the folder's kdh1.
+#[cfg(feature = "zip")]
+pub fn folder_archive(kind: ModKind, dir: &Path, out: &Path) -> Result<(StoredFile, String)> {
+    let files = super::mod_files(kind, dir)?;
+    let hash = crate::hash::of_mod_records(kind, records(&files)?)?;
+    Ok((archive_files(&files, &dir.display().to_string(), out)?, hash))
+}
+
+/// The deterministic archive writer of [`mod_archive`] and [`folder_archive`].
+#[cfg(feature = "zip")]
+fn archive_files(files: &[(String, PathBuf)], what: &str, out: &Path) -> Result<StoredFile> {
+    use std::io::Write;
     let mut seen = BTreeSet::new();
-    for (rel, _) in &files {
+    for (rel, _) in files {
         if !valid_rel(rel) || rel.split('/').any(windows_device) || !seen.insert(fold_name(rel)) {
-            return Err(err(ErrorCode::Refused, format!("{} {}: {rel:?} cannot be a file on every system", r.kind.as_str(), r.id)));
+            return Err(err(ErrorCode::Refused, format!("{what}: {rel:?} cannot be a file on every system")));
         }
     }
     let time = zip::DateTime::from_date_and_time(1980, 1, 1, 0, 0, 0).map_err(|e| err(ErrorCode::Internal, format!("zip time: {e}")))?;
@@ -1302,7 +1356,7 @@ pub fn mod_archive(dirs: &DataDirs, r: &LibraryRef, out: &Path) -> Result<Stored
         let f = std::fs::File::create(&tmp).map_err(crate::util::io_at(&tmp, "writing"))?;
         let mut w = zip::ZipWriter::new(std::io::BufWriter::new(f));
         let zerr = |e: zip::result::ZipError| err(ErrorCode::Io, format!("writing {}: {e}", tmp.display()));
-        for (rel, p) in &files {
+        for (rel, p) in files {
             let data = std::fs::read(p).map_err(crate::util::io_at(p, "reading"))?;
             let o = if data.len() as u64 >= 0xFFFF_0000 { opts.large_file(true) } else { opts };
             w.start_file(rel.as_str(), o).map_err(zerr)?;
@@ -1320,6 +1374,210 @@ pub fn mod_archive(dirs: &DataDirs, r: &LibraryRef, out: &Path) -> Result<Stored
     crate::util::rename_replace(&tmp, out)?;
     let (sha256, size) = crate::hash::sha256_file(out)?;
     Ok(StoredFile { sha256, size, url: None })
+}
+
+#[cfg(not(feature = "zip"))]
+pub fn folder_archive(kind: ModKind, dir: &Path, out: &Path) -> Result<(StoredFile, String)> {
+    let _ = (kind, dir, out);
+    Err(err(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
+}
+
+// ================================================================================================= split storage
+
+/// Where an assembled pack took each part from (the Library or a downloaded archive): what the launcher reports.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Assembled {
+    pub file: PathBuf,
+    pub sha256: String,
+    pub size: u64,
+    /// Mods (and the layer, as its id) taken from the Library.
+    pub from_library: Vec<String>,
+    /// Mods (and the layer) taken from a downloaded archive.
+    pub from_archives: Vec<String>,
+    /// Mods left out (the other side's alone: [`assemble_for`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub left_out: Vec<String>,
+}
+
+/// The parts of a pack the Library lacks: (mod id or the layer id, the archive Crucible stores it as). A Library entry
+/// that no longer hashes to its name (edited in place) counts as lacking.
+pub fn lacking(dirs: &DataDirs, ix: &PackIndex) -> Result<Vec<(String, StoredFile)>> {
+    lacking_for(dirs, ix, &|_| false)
+}
+
+/// [`lacking`] without the mods `skip` names (`client_skips`: what a game client downloads).
+pub fn lacking_for(dirs: &DataDirs, ix: &PackIndex, skip: &dyn Fn(&PackMod) -> bool) -> Result<Vec<(String, StoredFile)>> {
+    let mut out = Vec::new();
+    for (id, lr, file) in parts(ix) {
+        if ix.mods.iter().any(|m| m.id == id && m.kind == lr.kind && skip(m)) {
+            continue;
+        }
+        if library_part(dirs, &lr).is_none() {
+            let f = file.ok_or_else(|| err(ErrorCode::Schema, format!("{id}: the index names no file for it")))?;
+            out.push((id, f));
+        }
+    }
+    Ok(out)
+}
+
+/// Every part of a pack as (id, its Library ref, its stored file).
+fn parts(ix: &PackIndex) -> Vec<(String, LibraryRef, Option<StoredFile>)> {
+    let mut v: Vec<(String, LibraryRef, Option<StoredFile>)> = ix.mods.iter().map(|m| (m.id.clone(), m.library_ref(), m.file.clone())).collect();
+    if let Some(l) = &ix.layer {
+        v.push((l.id.clone(), LibraryRef { kind: ModKind::Kiln, id: l.id.clone(), version: l.version.clone(), hash: l.hash.clone() }, l.file.clone()));
+    }
+    v
+}
+
+/// A Library entry's files when it is there and still hashes to its name: (zip-relative files).
+fn library_part(dirs: &DataDirs, r: &LibraryRef) -> Option<Vec<(String, PathBuf)>> {
+    let at = crate::library::path_of(dirs, r).ok()?;
+    if r.kind == ModKind::Plugin {
+        let name = at.file_name()?.to_str()?.to_string();
+        let ok = at.is_file() && crate::hash::sha256_file(&at).ok()?.0 == r.hash;
+        return ok.then(|| vec![(name, at)]);
+    }
+    if !at.is_dir() {
+        return None;
+    }
+    let files = super::mod_files(r.kind, &at).ok()?;
+    let hash = crate::hash::of_mod_records(r.kind, records(&files).ok()?).ok()?;
+    (hash == r.hash).then_some(files)
+}
+
+/// Puts a .kilnpack together from Crucible's split storage: the index as given (signed and checked by the caller), each
+/// mod and the layer from the Library when it has them (same kdh1) or else from its archive (`archives`: the stored
+/// file's sha256 -> the downloaded archive, already checked against that sha256), each override from `blobs` (sha256 ->
+/// bytes). Archive entries are copied as they are compressed; [`read`] then checks the whole result as for any pack
+/// (every kdh1, override hashes, entry names and sizes), so a part that does not match its index is refused there.
+pub fn assemble(dirs: &DataDirs, ix: &PackIndex, archives: &BTreeMap<String, PathBuf>, blobs: &BTreeMap<String, Vec<u8>>, out: &Path) -> Result<Assembled> {
+    assemble_for(dirs, ix, &|_| false, archives, blobs, out)
+}
+
+/// [`assemble`] leaving out the mods `skip` names (`client_skips`: a pack for a game client has no server-only mods;
+/// [`read_partial`] reads it, the server part refuses it).
+#[cfg(feature = "zip")]
+pub fn assemble_for(dirs: &DataDirs, ix: &PackIndex, skip: &dyn Fn(&PackMod) -> bool, archives: &BTreeMap<String, PathBuf>, blobs: &BTreeMap<String, Vec<u8>>, out: &Path)
+    -> Result<Assembled> {
+    use std::io::Write;
+    check_index(ix)?;
+    if let Some(d) = out.parent() {
+        std::fs::create_dir_all(d).map_err(crate::util::io_at(d, "creating"))?;
+    }
+    let tmp = crate::util::with_suffix(out, ".tmp");
+    let mut done = Assembled { file: out.to_path_buf(), ..Default::default() };
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Stored)
+        .last_modified_time(zip::DateTime::default_for_write())
+        .unix_permissions(0o644)
+        .system(zip::System::Unix);
+    let written = (|| -> Result<()> {
+        let f = std::fs::File::create(&tmp).map_err(crate::util::io_at(&tmp, "writing"))?;
+        let mut w = zip::ZipWriter::new(std::io::BufWriter::new(f));
+        let zerr = |e: zip::result::ZipError| err(ErrorCode::Io, format!("writing {}: {e}", tmp.display()));
+        let mut index_bytes = serde_json::to_vec_pretty(ix)?;
+        index_bytes.push(b'\n');
+        w.start_file(super::MANIFEST, opts).map_err(zerr)?;
+        w.write_all(&index_bytes)?;
+        let mut expanded = 0u64;
+        for (id, lr, file) in parts(ix) {
+            let zip_path = match ix.mods.iter().find(|m| m.id == id && m.kind == lr.kind) {
+                Some(m) if skip(m) => {
+                    done.left_out.push(id);
+                    continue;
+                }
+                Some(m) => m.path.clone(),
+                None => LAYER_PATH.to_string(),
+            };
+            let plugin = lr.kind == ModKind::Plugin;
+            if let Some(files) = library_part(dirs, &lr) {
+                for (rel, p) in files {
+                    let name = if plugin { zip_path.clone() } else { format!("{zip_path}/{rel}") };
+                    let len = std::fs::metadata(&p).map_err(crate::util::io_at(&p, "reading"))?.len();
+                    expanded += len;
+                    if len > MAX_FILE || expanded > MAX_EXPANDED {
+                        return Err(err(ErrorCode::Refused, "the pack unpacks to more than its limits (512 MiB a file, 4 GiB in all)"));
+                    }
+                    w.start_file(name.as_str(), opts.large_file(len >= 0xFFFF_0000)).map_err(zerr)?;
+                    let mut src = std::fs::File::open(&p).map_err(crate::util::io_at(&p, "reading"))?;
+                    std::io::copy(&mut src, &mut w).map_err(crate::util::io_at(&p, "copying"))?;
+                }
+                done.from_library.push(id);
+                continue;
+            }
+            let sha = file.as_ref().map(|f| f.sha256.clone()).ok_or_else(|| err(ErrorCode::Schema, format!("{id}: the index names no file for it")))?;
+            let arc = archives.get(&sha).ok_or_else(|| err(ErrorCode::NotFound, format!("{id}: its archive was not downloaded")))?;
+            let af = std::fs::File::open(arc).map_err(crate::util::io_at(arc, "opening"))?;
+            let mut a = zip::ZipArchive::new(af).map_err(|e| err(ErrorCode::Parse, format!("{id}: its archive is no zip ({e})")))?;
+            if a.len() > MAX_ENTRIES {
+                return Err(err(ErrorCode::Refused, format!("{id}: its archive has more than {MAX_ENTRIES} entries")));
+            }
+            let mut files = 0usize;
+            for i in 0..a.len() {
+                let e = a.by_index_raw(i).map_err(|e| err(ErrorCode::Parse, format!("{id}: {e}")))?;
+                let name = e.name().map_err(|e| err(ErrorCode::Parse, format!("{id}: {e}")))?.to_string();
+                if e.is_dir() {
+                    continue;
+                }
+                if e.is_symlink() || e.unix_mode().is_some_and(|m| m & 0o170000 == 0o120000) {
+                    return Err(err(ErrorCode::Refused, format!("{id}: its archive holds a symlink")));
+                }
+                if !valid_rel(&name) {
+                    return Err(err(ErrorCode::Refused, format!("{id}: its archive has an unsafe entry {name:?}")));
+                }
+                expanded += e.size();
+                if e.size() > MAX_FILE || expanded > MAX_EXPANDED {
+                    return Err(err(ErrorCode::Refused, "the pack unpacks to more than its limits (512 MiB a file, 4 GiB in all)"));
+                }
+                files += 1;
+                if plugin && files > 1 {
+                    return Err(err(ErrorCode::Refused, format!("{id}: a plugin's archive holds one file")));
+                }
+                let to = if plugin { zip_path.clone() } else { format!("{zip_path}/{name}") };
+                w.raw_copy_file_rename(e, to.as_str()).map_err(zerr)?;
+            }
+            if files == 0 {
+                return Err(err(ErrorCode::Refused, format!("{id}: its archive is empty")));
+            }
+            done.from_archives.push(id);
+        }
+        for o in &ix.overrides {
+            let b = blobs.get(&o.sha256).ok_or_else(|| err(ErrorCode::NotFound, format!("override {}: not downloaded", o.path)))?;
+            w.start_file(o.zip_path().as_str(), opts).map_err(zerr)?;
+            w.write_all(b)?;
+        }
+        let mut inner = w.finish().map_err(zerr)?;
+        inner.flush()?;
+        inner.into_inner().map_err(|e| Error::from(e.into_error()))?.sync_all()?;
+        Ok(())
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    crate::util::rename_replace(&tmp, out)?;
+    let checked = match read_partial(out, None, None, skip) {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = std::fs::remove_file(out);
+            return Err(e);
+        }
+    };
+    if checked.index != *ix {
+        let _ = std::fs::remove_file(out);
+        return Err(err(ErrorCode::Internal, "the assembled pack's index differs from the one given"));
+    }
+    done.sha256 = checked.sha256;
+    done.size = checked.size;
+    Ok(done)
+}
+
+#[cfg(not(feature = "zip"))]
+pub fn assemble_for(dirs: &DataDirs, ix: &PackIndex, skip: &dyn Fn(&PackMod) -> bool, archives: &BTreeMap<String, PathBuf>, blobs: &BTreeMap<String, Vec<u8>>, out: &Path)
+    -> Result<Assembled> {
+    let _ = (dirs, ix, skip, archives, blobs, out);
+    Err(err(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
 }
 
 #[cfg(not(feature = "zip"))]
@@ -1350,7 +1608,7 @@ pub struct PackPreview {
 
 /// What the install preview shows (nothing is imported).
 pub fn inspect(dirs: &DataDirs, zip_file: &Path, sha256: Option<&str>) -> Result<PackPreview> {
-    let r = read(zip_file, sha256, None)?;
+    let r = read_partial(zip_file, sha256, None, &client_skips)?;
     let mut missing = Vec::new();
     let mut present = Vec::new();
     let have: BTreeSet<(ModKind, String, String)> = crate::library::list(dirs, None)?.into_iter()
@@ -1465,7 +1723,8 @@ fn import_pack(dirs: &DataDirs, zip_file: &Path, sha256: Option<&str>, use_mod: 
     -> Result<(ReadPack, Vec<LibraryRef>)> {
     let staging = dirs.root.join("modpacks").join("staging").join(crate::hash::hex(&crate::util::random_bytes::<6>()?));
     let result = (|| {
-        let r = read(zip_file, sha256, Some(&staging))?;
+        // a mod this side does not take may be left out of the zip (a pack put together for game clients)
+        let r = read_partial(zip_file, sha256, Some(&staging), &|m| !use_mod(m))?;
         let mut paths = Vec::new();
         let mut want: Vec<LibraryRef> = Vec::new();
         for m in r.index.mods.iter().filter(|m| use_mod(m)) {
@@ -1530,7 +1789,7 @@ fn apply_overrides(config_dir: &Path, r: &ReadPack, side_ok: &dyn Fn(PartSide) -
 }
 
 /// `profiles/<pid>/pack/base/`: the index and the overrides of the version installed (the merge base of the next update).
-fn write_base(dirs: &DataDirs, pid: &str, r: &ReadPack) -> Result<()> {
+fn write_base(dirs: &DataDirs, pid: &str, r: &ReadPack, written: &Written) -> Result<()> {
     let base = pack_dir(dirs, pid).join("base");
     let tmp = pack_dir(dirs, pid).join("base.tmp");
     let _ = std::fs::remove_dir_all(&tmp);
@@ -1543,12 +1802,14 @@ fn write_base(dirs: &DataDirs, pid: &str, r: &ReadPack) -> Result<()> {
         }
         std::fs::write(&p, bytes).map_err(crate::util::io_at(&p, "writing"))?;
     }
+    // what Kiln has written into the config files: the next update tells the player's values from Kiln's by it
+    crate::util::write_json_atomic(&tmp.join(WRITTEN), written)?;
     swap_in(&tmp, &base)
 }
 
 /// Moves a staged folder into place: the old one moves aside to <dest>.old first and comes back if the new one cannot
 /// take its place, so there is always one (read_base falls back to base.old).
-fn swap_in(staged: &Path, dest: &Path) -> Result<()> {
+pub(crate) fn swap_in(staged: &Path, dest: &Path) -> Result<()> {
     let old = crate::util::with_suffix(dest, ".old");
     let _ = std::fs::remove_dir_all(&old);
     if dest.exists() {
@@ -1596,7 +1857,8 @@ pub fn install(dirs: &DataDirs, game: Option<&GameInstall>, req: &InstallRequest
         }
     }
     progress.report(Some(0.82), "making the instance");
-    let name = req.name.clone().unwrap_or_else(|| r.index.name.clone());
+    // never a name a profile has already ("My mods (2)"): the player tells the pack from their own profile
+    let name = crate::profile::unique_name(dirs, req.name.as_deref().filter(|n| !n.trim().is_empty()).unwrap_or(&r.index.name))?;
     let mut profile = crate::profile::create(dirs, &name, None)?;
     let pid = profile.id.clone();
     let made = (|| -> Result<(Profile, Instance, Vec<String>)> {
@@ -1606,8 +1868,9 @@ pub fn install(dirs: &DataDirs, game: Option<&GameInstall>, req: &InstallRequest
         profile.dropins_engines = true;
         profile.notes = format!("Crucible pack {} {}", r.index.name, r.index.version);
         let profile = crate::profile::save(dirs, &profile)?;
-        let written = apply_overrides(&dirs.profile(&pid).join("config"), &r, &|s| s.for_client())?;
-        write_base(dirs, &pid, &r)?;
+        let config_dir = dirs.profile(&pid).join("config");
+        let written = apply_overrides(&config_dir, &r, &|s| s.for_client())?;
+        write_base(dirs, &pid, &r, &written_now(&config_dir, &r.index, &r.overrides, None, &BTreeMap::new())?)?;
         let inst = Instance {
             format: 1,
             pack: r.index.id.clone(),
@@ -1651,6 +1914,9 @@ pub struct PlanMod {
     pub id: String,
     pub version: String,
     pub enabled: bool,
+    /// The mod's name as the pack names it (a mod an update adds is not in the Library yet).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1660,6 +1926,8 @@ pub struct PlanUpdate {
     pub id: String,
     pub from: String,
     pub to: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1695,6 +1963,23 @@ pub struct FileMerge {
     pub kept: Vec<String>,
     /// Keys both changed differently: the player picks (`resolve`).
     pub conflicts: Vec<KeyConflict>,
+    /// The pack renamed this settings file: the player's values come from the old name (kept there as it was).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renamed_from: Option<String>,
+}
+
+/// The player layer in an update: kept, still loading last.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalPlan {
+    /// `local.<pid>`
+    pub id: String,
+    /// Its data files.
+    pub files: usize,
+    /// The data fields it sets ("Your changes kept: ... data edits").
+    pub fields: usize,
+    /// Fields the new pack layer sets too ("your change still wins"; `drop` lets go of one).
+    pub overlaps: Vec<super::layers::DataOverlap>,
 }
 
 /// What an update does (the "See changes" view), before anything is written.
@@ -1711,6 +1996,9 @@ pub struct UpdatePlan {
     pub files: Vec<FileMerge>,
     /// How many conflicts need a choice.
     pub conflicts: usize,
+    /// The player layer (None: the player has no data changes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<LocalPlan>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1730,6 +2018,9 @@ pub struct UpdateRequest {
     /// Every conflict without its own choice.
     #[serde(default)]
     pub all: Option<Pick>,
+    /// Fields of the player layer to let go (`local.overlaps[].key`: "Drop my change"), so the pack's value counts.
+    #[serde(default)]
+    pub drop: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1739,13 +2030,32 @@ pub struct UpdateResult {
     pub profile: Profile,
     pub instance: Instance,
     pub imported: Vec<LibraryRef>,
+    /// Save backups taken first (one per game the instance is active on).
+    #[serde(default)]
+    pub backups: Vec<crate::saves::SaveBackup>,
+}
+
+/// One client-side config file of an update: what to write and what to ask.
+struct FileWork {
+    path: String,
+    mode: OverrideMode,
+    /// Keys to write with the pack's value.
+    take: Vec<(Key, Option<Value>)>,
+    conflicts: Vec<(Key, KeyConflict)>,
+    /// The file the pack renamed into this one: the player's values are read there.
+    from: Option<String>,
+    /// A renamed file new on this PC starts as a copy of the old one (the player's other keys come along).
+    start: Option<String>,
+    /// A renamed file that is there already: the player's values to carry over from the old one.
+    carry: Vec<(Key, Option<Value>)>,
 }
 
 struct Computed {
     plan: UpdatePlan,
     mods: crate::profile::ProfileMods,
-    /// (path, mode, take edits, conflicts) per client-side file.
-    files: Vec<(String, OverrideMode, Vec<(Key, Option<Value>)>, Vec<(Key, KeyConflict)>)>,
+    files: Vec<FileWork>,
+    /// new path -> old path
+    renamed: BTreeMap<String, String>,
 }
 
 fn side_leaves(ix: &PackIndex, ov: &BTreeMap<(PartSide, String), Vec<u8>>, path: &str) -> Result<Option<(OverrideMode, Leaves)>> {
@@ -1764,10 +2074,144 @@ fn side_leaves(ix: &PackIndex, ov: &BTreeMap<(PartSide, String), Vec<u8>>, path:
     Ok(out)
 }
 
-fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, new_choices: &BTreeMap<String, bool>) -> Result<Computed> {
+/// The config files a client instance takes from a version (both-sides and client overrides).
+fn client_paths(ix: &PackIndex) -> BTreeSet<String> {
+    ix.overrides.iter().filter(|o| o.side.for_client()).map(|o| o.path.clone()).collect()
+}
+
+fn base_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+/// Two settings paths of one mod, plausibly: the same file name, the same folder, or one's name (without its
+/// extension) a folder of the other (`alpha.json` -> `alpha/settings.json`).
+fn related(a: &str, b: &str) -> bool {
+    let dir = |p: &str| p.rsplit_once('/').map(|x| x.0.to_string()).unwrap_or_default();
+    let stem = |p: &str| base_name(p).rsplit_once('.').map(|x| x.0.to_ascii_lowercase()).unwrap_or_else(|| base_name(p).to_ascii_lowercase());
+    let in_dirs = |s: &str, p: &str| !s.is_empty() && dir(p).split('/').any(|c| c.eq_ignore_ascii_case(s));
+    base_name(a).eq_ignore_ascii_case(base_name(b)) || dir(a) == dir(b) || in_dirs(&stem(a), b) || in_dirs(&stem(b), a)
+}
+
+/// Override files the new version renamed: (new path -> old path). A file the old version had and the new one has not,
+/// matched with a file the new version adds: the same kind of file setting the same keys (a whole-file override: the
+/// same text, or the same file name in another folder).
+fn renames(base: &PackIndex, base_ov: &BTreeMap<(PartSide, String), Vec<u8>>, theirs: &PackIndex, theirs_ov: &BTreeMap<(PartSide, String), Vec<u8>>)
+    -> Result<BTreeMap<String, String>> {
+    let (bp, tp) = (client_paths(base), client_paths(theirs));
+    let gone: Vec<&String> = bp.difference(&tp).collect();
+    let mut out = BTreeMap::new();
+    for to in tp.difference(&bp) {
+        let Some((tm, tl)) = side_leaves(theirs, theirs_ov, to)? else { continue };
+        let mut best: Option<(&String, u8)> = None;
+        for from in &gone {
+            if out.values().any(|f| f == *from) {
+                continue;
+            }
+            let Some((bm, bl)) = side_leaves(base, base_ov, from)? else { continue };
+            if bm != tm {
+                continue;
+            }
+            // never two files of different mods that merely look alike: the paths must belong together
+            if !related(from, to) {
+                continue;
+            }
+            let same_keys = !bl.is_empty() && bl.keys().eq(tl.keys());
+            let score = match (bl == tl, same_keys, base_name(from).eq_ignore_ascii_case(base_name(to))) {
+                (true, _, true) => 4,
+                (true, _, false) => 3,
+                (_, true, true) => 2,
+                (_, true, false) if tm != OverrideMode::Replace => 1,
+                _ => 0,
+            };
+            if score > 0 && best.is_none_or(|(_, s)| score > s) {
+                best = Some((from, score));
+            }
+        }
+        if let Some((from, _)) = best {
+            out.insert(to.clone(), from.clone());
+        }
+    }
+    Ok(out)
+}
+
+/// `base/written.json`: per config file, each key Kiln wrote into it (installs and updates) and the value it left
+/// there (null: removed). The next update tells the player's values from Kiln's by it.
+const WRITTEN: &str = "written.json";
+
+type Written = BTreeMap<String, Vec<(Key, Option<Value>)>>;
+
+/// What Kiln has written now: `prev` (a renamed file's keys under the new name), then each client override key of `ix`
+/// as the config folder holds it after the install or update.
+fn written_now(config_dir: &Path, ix: &PackIndex, ov: &BTreeMap<(PartSide, String), Vec<u8>>, prev: Option<Written>, renamed: &BTreeMap<String, String>)
+    -> Result<Written> {
+    let mut out = prev.unwrap_or_default();
+    for (to, from) in renamed {
+        if let Some(v) = out.remove(from) {
+            out.insert(to.clone(), v);
+        }
+    }
+    for path in client_paths(ix) {
+        let Some((mode, leaves)) = side_leaves(ix, ov, &path)? else { continue };
+        let text = std::fs::read(config_dir.join(&path)).ok().map(|b| crate::manifest::decode_text(&b));
+        let list = out.entry(path.clone()).or_default();
+        for k in leaves.keys() {
+            let v = merge::value_at(mode, text.as_deref(), k);
+            match list.iter_mut().find(|(x, _)| x == k) {
+                Some(e) => e.1 = v,
+                None => list.push((k.clone(), v)),
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// What Kiln wrote (None: an instance from before Kiln kept it).
+fn read_written(dirs: &DataDirs, pid: &str) -> Option<Written> {
+    let pd = pack_dir(dirs, pid);
+    let base = if pd.join("base").join(super::MANIFEST).is_file() { pd.join("base") } else { pd.join("base.old") };
+    crate::util::read_json(&base.join(WRITTEN)).ok().flatten()
+}
+
+/// The data files of the layer in a pack zip (`layer/content/*.json`).
+#[cfg(feature = "zip")]
+pub fn layer_files_in(zip_file: &Path) -> Result<Vec<super::layers::LocalFile>> {
+    use std::io::Read;
+    let f = std::fs::File::open(zip_file).map_err(crate::util::io_at(zip_file, "opening"))?;
+    let mut a = zip::ZipArchive::new(f).map_err(|e| err(ErrorCode::Parse, format!("{}: {e}", zip_file.display())))?;
+    let mut out = Vec::new();
+    for i in 0..a.len() {
+        let e = a.by_index(i).map_err(|e| err(ErrorCode::Parse, format!("{}: {e}", zip_file.display())))?;
+        let Ok(name) = e.name() else { continue };
+        let Some(rel) = name.strip_prefix("layer/").map(str::to_string) else { continue };
+        if !super::layers::local_path_ok(&rel) || e.size() > super::layers::MAX_LOCAL_FILE as u64 {
+            continue;
+        }
+        let mut b = Vec::new();
+        e.take(super::layers::MAX_LOCAL_FILE as u64).read_to_end(&mut b)?;
+        out.push(super::layers::LocalFile { path: rel, text: crate::manifest::decode_text(&b) });
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(out)
+}
+
+#[cfg(not(feature = "zip"))]
+pub fn layer_files_in(zip_file: &Path) -> Result<Vec<super::layers::LocalFile>> {
+    let _ = zip_file;
+    Err(err(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
+}
+
+/// The data files of the installed version's layer (its Library entry).
+fn base_layer_files(dirs: &DataDirs, base: &PackIndex) -> Vec<super::layers::LocalFile> {
+    let Some(l) = &base.layer else { return Vec::new() };
+    let r = LibraryRef { kind: ModKind::Kiln, id: l.id.clone(), version: l.version.clone(), hash: l.hash.clone() };
+    crate::library::path_of(dirs, &r).ok().and_then(|p| super::layers::content_files(&p).ok()).unwrap_or_default()
+}
+
+fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, zip_file: &Path, new_choices: &BTreeMap<String, bool>) -> Result<Computed> {
     let (base, base_ov) = read_base(dirs, &profile.id)?;
     let theirs = &new.index;
     let mut changes = ModChanges::default();
+    let local = super::layers::local_id(&profile.id);
     // mods
     let in_base = |k: ModKind, id: &str| base.mods.iter().any(|m| m.kind == k && m.id == id && m.env().client != Need::Unsupported);
     let layer_ids: BTreeSet<String> = [base.layer.as_ref().map(|l| l.id.clone()), theirs.layer.as_ref().map(|l| l.id.clone())].into_iter().flatten().collect();
@@ -1776,6 +2220,8 @@ fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, 
         choices.insert(k.clone(), *v);
     }
     let mut mods = pack_mods(theirs, &choices);
+    let name_of = |k: ModKind, id: &str| theirs.find(k, id).or_else(|| base.find(k, id)).and_then(|m| m.name.clone());
+    let mut local_entry: Option<ProfileMod> = None;
     for kind in ModKind::ALL {
         let mine = profile.mods.list(kind);
         let list = mods.list_mut(kind);
@@ -1788,11 +2234,11 @@ fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, 
             match mine.iter().find(|m| m.id == e.id) {
                 Some(m) if m.version != e.version || m.hash != e.hash => {
                     if !layer_ids.contains(&e.id) {
-                        changes.updated.push(PlanUpdate { kind, id: e.id.clone(), from: m.version.clone(), to: e.version.clone() });
+                        changes.updated.push(PlanUpdate { kind, id: e.id.clone(), from: m.version.clone(), to: e.version.clone(), name: name_of(kind, &e.id) });
                     }
                 }
                 Some(_) => {}
-                None if !layer_ids.contains(&e.id) => changes.added.push(PlanMod { kind, id: e.id.clone(), version: e.version.clone(), enabled: e.enabled }),
+                None if !layer_ids.contains(&e.id) => changes.added.push(PlanMod { kind, id: e.id.clone(), version: e.version.clone(), enabled: e.enabled, name: name_of(kind, &e.id) }),
                 None => {}
             }
         }
@@ -1800,30 +2246,65 @@ fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, 
             if list.iter().any(|e| e.id == m.id) {
                 continue;
             }
+            if kind == ModKind::Kiln && m.id == local {
+                // the player layer: kept, last of all (after the pack layer and the player's own mods)
+                local_entry = Some(m.clone());
+                continue;
+            }
             if in_base(kind, &m.id) || layer_ids.contains(&m.id) {
                 if !layer_ids.contains(&m.id) {
-                    changes.removed.push(PlanMod { kind, id: m.id.clone(), version: m.version.clone(), enabled: m.enabled });
+                    changes.removed.push(PlanMod { kind, id: m.id.clone(), version: m.version.clone(), enabled: m.enabled, name: name_of(kind, &m.id) });
                 }
             } else {
                 // the player's own: kept, after the pack's
-                changes.yours.push(PlanMod { kind, id: m.id.clone(), version: m.version.clone(), enabled: m.enabled });
+                changes.yours.push(PlanMod { kind, id: m.id.clone(), version: m.version.clone(), enabled: m.enabled, name: None });
                 list.push(m.clone());
             }
         }
     }
-    // config files (client side), base U theirs
+    if let Some(e) = local_entry {
+        mods.kiln.push(e);
+    }
+    // config files (client side), base U theirs; a renamed file is merged into its new name
     let config_dir = dirs.profile(&profile.id).join("config");
-    let paths: BTreeSet<String> = base.overrides.iter().chain(&theirs.overrides).filter(|o| o.side.for_client()).map(|o| o.path.clone()).collect();
+    let renamed = renames(&base, &base_ov, theirs, &new.overrides)?;
+    let written = read_written(dirs, &profile.id);
+    let paths: BTreeSet<String> = client_paths(&base).union(&client_paths(theirs)).filter(|p| !renamed.values().any(|f| f == *p)).cloned().collect();
+    let read_live = |p: &str| std::fs::read(config_dir.join(p)).ok().map(|b| crate::manifest::decode_text(&b));
     let mut files = Vec::new();
     let mut merges = Vec::new();
     let mut conflicts = 0usize;
     for path in paths {
-        let b = side_leaves(&base, &base_ov, &path)?;
+        let from = renamed.get(&path).cloned();
+        let mine_path = from.clone().unwrap_or_else(|| path.clone());
+        let b = side_leaves(&base, &base_ov, &mine_path)?;
         let t = side_leaves(theirs, &new.overrides, &path)?;
         let mode = t.as_ref().or(b.as_ref()).map(|x| x.0).unwrap_or(OverrideMode::for_path(&path));
-        let live = std::fs::read(config_dir.join(&path)).ok().map(|b| crate::manifest::decode_text(&b));
+        let live = read_live(&mine_path);
         let mine = |k: &[String]| merge::value_at(mode, live.as_deref(), k);
-        let m = merge::three_way(b.as_ref().map(|x| &x.1), t.as_ref().map(|x| &x.1), &mine);
+        let empty = Vec::new();
+        let kiln_wrote = written.as_ref().map(|w| w.get(&mine_path).unwrap_or(&empty));
+        let wrote_at = |k: &[String]| kiln_wrote.and_then(|l| l.iter().find(|(x, _)| x.as_slice() == k).map(|(_, v)| v.clone()));
+        let written_fn: Option<&dyn Fn(&[String]) -> Option<Option<Value>>> = if kiln_wrote.is_some() { Some(&wrote_at) } else { None };
+        let m = merge::three_way_since(b.as_ref().map(|x| &x.1), t.as_ref().map(|x| &x.1), &mine, written_fn);
+        let (mut start, mut carry) = (None, Vec::new());
+        if from.is_some() {
+            let here = read_live(&path);
+            if here.is_none() && from.as_deref().map(base_name).is_some_and(|f| f.eq_ignore_ascii_case(base_name(&path))) {
+                // the same file moved: it starts as a copy of the player's (their other keys come along)
+                start = live.clone();
+            } else {
+                // the new file is there already: the player's values follow from the old one, key by key
+                let skip: BTreeSet<&Key> = m.take.iter().map(|(k, _)| k).chain(m.conflicts.iter().map(|(k, _)| k)).collect();
+                let keys: BTreeSet<&Key> = b.iter().flat_map(|x| x.1.keys()).chain(t.iter().flat_map(|x| x.1.keys())).collect();
+                for k in keys {
+                    let v = mine(k);
+                    if !skip.contains(k) && v.is_some() && v != merge::value_at(mode, here.as_deref(), k) {
+                        carry.push((k.clone(), v));
+                    }
+                }
+            }
+        }
         conflicts += m.conflicts.len();
         let fm = FileMerge {
             path: path.clone(),
@@ -1832,16 +2313,31 @@ fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, 
             taken: m.taken.clone(),
             kept: m.kept.clone(),
             conflicts: m.conflicts.iter().map(|(_, c)| c.clone()).collect(),
+            renamed_from: from.clone(),
         };
-        if !(fm.taken.is_empty() && fm.kept.is_empty() && fm.conflicts.is_empty()) {
+        if !(fm.taken.is_empty() && fm.kept.is_empty() && fm.conflicts.is_empty() && fm.renamed_from.is_none()) {
             merges.push(fm);
         }
-        files.push((path, mode, m.take, m.conflicts));
+        files.push(FileWork { path, mode, take: m.take, conflicts: m.conflicts, from, start, carry });
     }
     let layer = LayerChange {
         from: base.layer.as_ref().map(|l| l.hash.clone()),
         to: theirs.layer.as_ref().map(|l| l.hash.clone()),
         changed: base.layer.as_ref().map(|l| &l.hash) != theirs.layer.as_ref().map(|l| &l.hash),
+    };
+    // the player layer: kept; the fields the new pack layer sets too are listed (the player's value still wins)
+    let local_files = super::layers::content_files(&super::layers::local_dir(dirs, &profile.id))?;
+    // only a player layer the profile uses: edits never saved (pack_local_save) stay unsaved
+    let local_plan = if !mods.kiln.iter().any(|m| m.id == local) {
+        None
+    } else {
+        let theirs_files = if theirs.layer.is_some() { layer_files_in(zip_file)? } else { Vec::new() };
+        Some(LocalPlan {
+            id: local.clone(),
+            files: local_files.len(),
+            fields: super::layers::fields(&local_files).len(),
+            overlaps: super::layers::overlaps(&base_layer_files(dirs, &base), &theirs_files, &local_files),
+        })
     };
     let plan = UpdatePlan {
         profile: profile.id.clone(),
@@ -1853,8 +2349,9 @@ fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, 
         layer,
         files: merges,
         conflicts,
+        local: local_plan,
     };
-    Ok(Computed { plan, mods, files })
+    Ok(Computed { plan, mods, files, renamed })
 }
 
 fn same_pack(inst: &Instance, ix: &PackIndex) -> Result<()> {
@@ -1868,18 +2365,37 @@ fn same_pack(inst: &Instance, ix: &PackIndex) -> Result<()> {
 pub fn plan_update(dirs: &DataDirs, pid: &str, zip_file: &Path, sha256: Option<&str>, optional: &BTreeMap<String, bool>) -> Result<UpdatePlan> {
     let profile = crate::profile::get(dirs, pid)?;
     let inst = instance(dirs, pid)?.ok_or_else(|| Error::not_found(format!("profile {pid} is not a Crucible instance")))?;
-    let r = read(zip_file, sha256, None)?;
+    let r = read_partial(zip_file, sha256, None, &client_skips)?;
     same_pack(&inst, &r.index)?;
-    Ok(compute(dirs, &profile, &inst, &r, optional)?.plan)
+    Ok(compute(dirs, &profile, &inst, &r, zip_file, optional)?.plan)
 }
 
 fn conflict_key(path: &str, key: &str) -> String {
     format!("{path}#{key}")
 }
 
+/// A save backup of each game this profile is active on (before an update or undo changes what that game loads). A
+/// game whose save folder is not there yet has nothing to lose and is skipped.
+fn backup_active(dirs: &DataDirs, pid: &str, note: &str) -> Result<Vec<crate::saves::SaveBackup>> {
+    let active: Vec<String> = crate::profile::list(dirs)?.into_iter().find(|p| p.id == pid).map(|p| p.active).unwrap_or_default();
+    if active.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for g in crate::game::known(dirs)?.into_iter().filter(|g| active.contains(&g.id)) {
+        match crate::saves::backup(dirs, &g, crate::saves::BackupReason::Modpack, Some(note)) {
+            Ok(b) => out.push(b),
+            Err(e) if e.code == ErrorCode::NotFound => {}
+            Err(e) => return Err(Error::new(e.code, format!("backing up the saves first failed, nothing was changed: {}", e.message))),
+        }
+    }
+    Ok(out)
+}
+
 /// Updates an instance: the plan; refused (`conflict`, detail = the plan) while a conflict has no choice; then the new mods
-/// and layer into the Library, an undo snapshot (`pack/undo/`: meta.json, config/, instance.json, base/), the profile's
-/// mods (the pack's, the player's switches and own mods kept), each config file merged key by key, the new base.
+/// and layer into the Library, a save backup for each game the instance is active on, an undo snapshot (`pack/undo/`:
+/// meta.json, config/, instance.json, base/, local/), the profile's mods (the pack's, the player's switches and own mods
+/// kept, the player layer last), each config file merged key by key, the player layer's dropped fields, the new base.
 pub fn update(dirs: &DataDirs, req: &UpdateRequest, progress: &mut dyn Progress) -> Result<UpdateResult> {
     if !req.consent {
         return Err(err(ErrorCode::ConsentRequired, "a pack runs code from other people on this PC: the player must agree first"));
@@ -1888,15 +2404,15 @@ pub fn update(dirs: &DataDirs, req: &UpdateRequest, progress: &mut dyn Progress)
     let inst = instance(dirs, &req.profile)?.ok_or_else(|| Error::not_found(format!("profile {} is not a Crucible instance", req.profile)))?;
     let (zip_file, sha, url) = fetch(dirs, &req.source, req.allow_http, progress)?;
     progress.report(Some(0.5), "checking the pack");
-    let r = read(&zip_file, sha.as_deref(), None)?;
+    let r = read_partial(&zip_file, sha.as_deref(), None, &client_skips)?;
     same_pack(&inst, &r.index)?;
-    let c = compute(dirs, &profile, &inst, &r, &req.optional)?;
+    let c = compute(dirs, &profile, &inst, &r, &zip_file, &req.optional)?;
     // every conflict needs a choice before anything changes
     let mut unresolved = Vec::new();
-    for (path, _, _, conflicts) in &c.files {
-        for (_, k) in conflicts {
-            if req.resolve.get(&conflict_key(path, &k.key)).or(req.all.as_ref()).is_none() {
-                unresolved.push(conflict_key(path, &k.key));
+    for f in &c.files {
+        for (_, k) in &f.conflicts {
+            if req.resolve.get(&conflict_key(&f.path, &k.key)).or(req.all.as_ref()).is_none() {
+                unresolved.push(conflict_key(&f.path, &k.key));
             }
         }
     }
@@ -1904,26 +2420,40 @@ pub fn update(dirs: &DataDirs, req: &UpdateRequest, progress: &mut dyn Progress)
         return Err(err(ErrorCode::Conflict, format!("{} setting(s) changed by both the pack and you need a choice: {}", unresolved.len(), unresolved.join(", ")))
             .with_detail(serde_json::to_value(&c.plan).unwrap_or_default()));
     }
+    let known: BTreeSet<&str> = c.plan.local.iter().flat_map(|l| l.overlaps.iter().map(|o| o.key.as_str())).collect();
+    if let Some(k) = req.drop.iter().find(|k| !known.contains(k.as_str())) {
+        return Err(Error::invalid(format!("{k} is no field both the pack and your changes set")));
+    }
     // every merge first: a file that cannot be merged (a live file that does not parse) stops the update here, before
     // anything is imported or written
     let config_dir = dirs.profile(&profile.id).join("config");
     let mut writes: Vec<(PathBuf, String)> = Vec::new();
-    for (path, mode, take, conflicts) in &c.files {
-        let mut edits = take.clone();
-        for (key, k) in conflicts {
-            let pick = req.resolve.get(&conflict_key(path, &k.key)).or(req.all.as_ref()).copied().unwrap_or(Pick::Mine);
+    for f in &c.files {
+        let mut edits = f.take.clone();
+        for (key, k) in &f.conflicts {
+            let pick = req.resolve.get(&conflict_key(&f.path, &k.key)).or(req.all.as_ref()).copied().unwrap_or(Pick::Mine);
             if pick == Pick::Pack {
                 edits.push((key.clone(), k.pack.clone()));
+            } else if f.from.is_some() {
+                // a renamed file: the player's value moves to the new name
+                edits.push((key.clone(), k.mine.clone()));
             }
         }
-        if edits.is_empty() {
+        edits.extend(f.carry.iter().cloned());
+        if edits.is_empty() && f.start.is_none() {
             continue;
         }
-        let target = config_dir.join(path);
-        let live = std::fs::read(&target).ok().map(|b| crate::manifest::decode_text(&b));
-        writes.push((target, merge::apply(*mode, path, live.as_deref(), &edits)?));
+        let target = config_dir.join(&f.path);
+        let live = match &f.start {
+            Some(s) => Some(s.clone()),
+            None => std::fs::read(&target).ok().map(|b| crate::manifest::decode_text(&b)),
+        };
+        let out = if edits.is_empty() { live.unwrap_or_default() } else { merge::apply(f.mode, &f.path, live.as_deref(), &edits)? };
+        writes.push((target, out));
     }
     let (_, imported) = import_pack(dirs, &zip_file, sha.as_deref(), &|m| m.env().client != Need::Unsupported, progress)?;
+    progress.report(Some(0.82), "backing up saves");
+    let backups = backup_active(dirs, &profile.id, &format!("before updating pack {} to {}", r.index.name, r.index.version))?;
     progress.report(Some(0.85), "keeping an undo copy");
     // the instance as it is now, staged: it becomes the undo copy once the update stands, and puts the instance back if
     // a step fails (a profile changed meanwhile, a file that cannot be written), so a failed update changes nothing
@@ -1935,6 +2465,12 @@ pub fn update(dirs: &DataDirs, req: &UpdateRequest, progress: &mut dyn Progress)
         let mut p = profile.clone();
         p.mods = c.mods.clone();
         p.late = r.index.order.late.iter().cloned().chain(profile.late.iter().filter(|id| !r.index.order.late.contains(id)).cloned()).collect();
+        if c.plan.local.is_some() {
+            // the player layer: the fields the player let go, then a fresh Library entry naming the new mods to load after
+            mods_saved = true;
+            super::layers::drop(dirs, &profile.id, &req.drop)?;
+            super::layers::place(dirs, &mut p)?;
+        }
         let saved = crate::profile::save(dirs, &p)?;
         mods_saved = true;
         for (target, out) in &writes {
@@ -1944,7 +2480,7 @@ pub fn update(dirs: &DataDirs, req: &UpdateRequest, progress: &mut dyn Progress)
             config_written = true;
             crate::util::write_atomic(target, out.as_bytes())?;
         }
-        write_base(dirs, &profile.id, &r)?;
+        write_base(dirs, &profile.id, &r, &written_now(&config_dir, &r.index, &r.overrides, read_written(dirs, &profile.id).or_else(|| Some(Written::new())), &c.renamed)?)?;
         let mut optional = inst.optional.clone();
         for m in r.index.mods.iter().filter(|m| m.dep == Dep::Optional) {
             let on = saved.mods.list(m.kind).iter().find(|e| e.id == m.id).map(|e| e.enabled).unwrap_or(m.default.unwrap_or(true));
@@ -1985,10 +2521,10 @@ pub fn update(dirs: &DataDirs, req: &UpdateRequest, progress: &mut dyn Progress)
         progress.report(None, &format!("updated, but the undo copy could not be kept: {e}"));
     }
     progress.report(Some(1.0), &format!("pack {} updated {} -> {}", r.index.name, c.plan.from, c.plan.to));
-    Ok(UpdateResult { plan: c.plan, profile: saved, instance: new_inst, imported })
+    Ok(UpdateResult { plan: c.plan, profile: saved, instance: new_inst, imported, backups })
 }
 
-/// A copy of the instance as it is (profile meta.json, instance.json, config/, base/) in dest.
+/// A copy of the instance as it is (profile meta.json, instance.json, config/, base/, the player layer's local/) in dest.
 fn snapshot_undo(dirs: &DataDirs, pid: &str, dest: &Path) -> Result<()> {
     let pd = pack_dir(dirs, pid);
     let _ = std::fs::remove_dir_all(dest);
@@ -2000,11 +2536,15 @@ fn snapshot_undo(dirs: &DataDirs, pid: &str, dest: &Path) -> Result<()> {
         crate::util::copy_tree(&config, &dest.join("config"))?;
     }
     crate::util::copy_tree(&pd.join("base"), &dest.join("base"))?;
+    let local = super::layers::local_dir(dirs, pid);
+    if local.is_dir() {
+        crate::util::copy_tree(&local, &dest.join(super::layers::LOCAL_DIR))?;
+    }
     Ok(())
 }
 
-/// Puts an instance back as a copy holds it: its mods and late DLLs (with mods), its config folder (with config; the
-/// live one comes back if the copy cannot be laid down), the base and instance.json.
+/// Puts an instance back as a copy holds it: its mods and late DLLs and the player layer's working copy (with mods),
+/// its config folder (with config; the live one comes back if the copy cannot be laid down), the base and instance.json.
 fn restore_from(dirs: &DataDirs, pid: &str, snap: &Path, mods: bool, config: bool) -> Result<Profile> {
     let pd = pack_dir(dirs, pid);
     let mut p = crate::profile::get(dirs, pid)?;
@@ -2014,6 +2554,14 @@ fn restore_from(dirs: &DataDirs, pid: &str, snap: &Path, mods: bool, config: boo
         p.mods = before.mods;
         p.late = before.late;
         p = crate::profile::save(dirs, &p)?;
+        let local = super::layers::local_dir(dirs, pid);
+        let copy = snap.join(super::layers::LOCAL_DIR);
+        if copy.is_dir() {
+            let tmp = pd.join("local.tmp");
+            let _ = std::fs::remove_dir_all(&tmp);
+            crate::util::copy_tree(&copy, &tmp)?;
+            swap_in(&tmp, &local)?;
+        }
     }
     if config {
         let live = dirs.profile(pid).join("config");
@@ -2042,13 +2590,15 @@ fn restore_from(dirs: &DataDirs, pid: &str, snap: &Path, mods: bool, config: boo
     Ok(p)
 }
 
-/// Takes the last update back: the mods, the config folder, the base and instance.json as they were before it.
+/// Takes the last update back: the mods, the player layer, the config folder, the base and instance.json as they were
+/// before it (after a save backup of each game the instance is active on).
 pub fn undo(dirs: &DataDirs, pid: &str) -> Result<Profile> {
     let undo = pack_dir(dirs, pid).join("undo");
     if !undo.join(crate::profile::META).is_file() {
         crate::profile::get(dirs, pid)?;
         return Err(Error::not_found(format!("profile {pid} has no update to undo")));
     }
+    backup_active(dirs, pid, "before undoing a pack update")?;
     let p = restore_from(dirs, pid, &undo, true, true)?;
     let _ = std::fs::remove_dir_all(&undo);
     Ok(p)
@@ -2102,11 +2652,11 @@ pub struct PackDiff {
 /// What changed between two versions of a pack (the automatic change list).
 pub fn diff(old: &PackIndex, new: &PackIndex) -> PackDiff {
     let mut d = PackDiff { from: old.version.clone(), to: new.version.clone(), ..Default::default() };
-    let pm = |m: &PackMod| PlanMod { kind: m.kind, id: m.id.clone(), version: m.version.clone(), enabled: m.dep == Dep::Required || m.default.unwrap_or(true) };
+    let pm = |m: &PackMod| PlanMod { kind: m.kind, id: m.id.clone(), version: m.version.clone(), enabled: m.dep == Dep::Required || m.default.unwrap_or(true), name: m.name.clone() };
     for m in &new.mods {
         match old.find(m.kind, &m.id) {
             None => d.added.push(pm(m)),
-            Some(o) if o.hash != m.hash => d.updated.push(PlanUpdate { kind: m.kind, id: m.id.clone(), from: o.version.clone(), to: m.version.clone() }),
+            Some(o) if o.hash != m.hash => d.updated.push(PlanUpdate { kind: m.kind, id: m.id.clone(), from: o.version.clone(), to: m.version.clone(), name: m.name.clone() }),
             Some(_) => {}
         }
     }
@@ -2228,7 +2778,7 @@ mod tests {
             ("bot.json", r#"{ "owner": 76561198000000001 }"#),
             ("bot.json", r#"{ "admins": ["76561198000000001"] }"#),
             ("bot.json", r#"{ "x": "MTA4NjQ3NzQ0NjMwNjQ3NjA5Mg.GhK2aB.TOKENTAIL" }"#),
-            ("bot.json", r#"{ "gh": "ghp_abcdefghijklmnopqrstuvwxyz0123456789" }"#),
+            ("bot.json", r#"{ "gh": "ghp_GHTAIL" }"#),
             ("bot.json", r#"{ "rcon": { "pass": "hunter2" } }"#),
             ("bot.json", r#"{ "db": { "pwd": "hunter2" } }"#),
             ("bot.json", r#"{ "apiKey": "k-123" }"#),
@@ -2239,7 +2789,8 @@ mod tests {
             ("bot.txt", "STEAM_0:1:12345678\n"),
         ] {
             // a bot token's last part, made here: written out, it would be a secret to scanners
-            let t = &t.replace("TOKENTAIL", &"x".repeat(27));
+            // the same for a GitHub token's 36 characters: written out, the release's own secret scan stops on it
+            let t = &t.replace("TOKENTAIL", &"x".repeat(27)).replace("GHTAIL", &"a1".repeat(18));
             assert!(!secret_findings(f, t).is_empty(), "{f}: {t}");
         }
     }
@@ -2251,7 +2802,17 @@ mod tests {
             ix.overrides.push(PackOverride { path: "a.json".into(), mode: OverrideMode::MergePatch, side: *side, sha256: crate::hash::sha256_hex(text.as_bytes()), size: None });
             ov.insert((*side, "a.json".to_string()), text.as_bytes().to_vec());
         }
-        ReadPack { index: ix, overrides: ov, sha256: String::new(), size: 0, code: BTreeSet::new() }
+        ReadPack { index: ix, overrides: ov, sha256: String::new(), size: 0, code: BTreeSet::new(), absent: BTreeSet::new() }
+    }
+
+    #[test]
+    fn renames_only_between_paths_that_belong_together() {
+        assert!(related("alpha.json", "alpha/settings.json"));
+        assert!(related("kiln-auto-loot-keys.json", "kiln-auto-loot-keys/hotkeys.json"));
+        assert!(related("a/settings.json", "b/settings.json"));
+        assert!(related("mods/a.json", "mods/b.json"));
+        assert!(!related("alpha.json", "beta/settings.json"));
+        assert!(!related("alpha/x.json", "beta/y.json"));
     }
 
     #[test]

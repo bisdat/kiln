@@ -293,7 +293,7 @@ bool build_frame(float width, float height, float dpi) {
     // display on top of it bounds its own scale (ModManagerHost.PageScale), not this one.
     f.dpi_scale = dpi;
     f.delta_seconds = dt;
-    f.menu_open = g_menu_open.load() ? 1 : 0;
+    f.menu_open = menu_open_in_overlay() ? 1 : 0;  // not the Mods entry's caption after Kiln's menu fell back
     f.capturing = capturing() ? 1 : 0;
     f.frame = ++g_frame_no;
     std::vector<std::shared_ptr<FrameSub>> subs;
@@ -333,8 +333,12 @@ bool dispatch_key(const KilnUiKey& key, bool mouse) {
     // punctuation key is the key at its place on any layout (key_names.h), as for Kiln.Ui's bindings
     if (key.down && !key.repeat && !key.text_input && keys::matches(g_menu_vk.load(), key.vk, key.scan) &&
         key.mods == g_menu_mods.load()) {
-        if (overlay_draws() && page_menu_key()) return true;
-        g_menu_open = !g_menu_open.load();
+        if (menu_in_overlay() && page_menu_key()) return true;
+        const bool open = !g_menu_open.load();
+        // opened in the overlay: watched for a frame of it on the screen, as from the Mods entry (overlay_menu_ask); with the
+        // drawing off, or after Kiln's menu fell back, the key toggles the Mods entry's caption
+        if (open) overlay_menu_ask();
+        g_menu_open = open;
         logf(KILN_LOG_DEBUG, "ui: Kiln menu %s", g_menu_open ? "open" : "closed");
         return true;
     }
@@ -364,7 +368,7 @@ KilnResult KILN_CALL t_status(KilnUiStatus* out) {
     out->size = sizeof *out;
     if (overlay_drawing_on()) vk_status(out);
     out->window = input_attached() ? 1 : 0;
-    out->menu_open = g_menu_open.load() || page_active() ? 1 : 0;  // the Kiln menu shows, in either host
+    out->menu_open = menu_open_in_overlay() || page_active() ? 1 : 0;  // the Kiln menu shows, in either host
     out->capturing = capturing() ? 1 : 0;
     {
         std::lock_guard<std::mutex> lk(g_sub_mu);

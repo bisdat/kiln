@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sfi-activation.schema.json",
+  "title": "Activation journal of a kiln-mode activation (<game>/kiln/state/sfi-activation.json), format 1",
+  "description": "<game>/kiln/state/sfi-activation.json (kiln-manage sfi_activation): what an unfinished kiln-mode activation staged, written durably before its first change and removed when its profile commits. Kiln writes and reads it; no other program does.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "txn",
+    "state",
+    "profileId",
+    "generation",
+    "route",
+    "prior",
+    "stages"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "txn": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$",
+      "description": "A random id of the activation."
+    },
+    "state": {
+      "enum": [
+        "staging",
+        "refused"
+      ],
+      "description": "staging: running, or stopped (the next recovery settles it). refused: neither the earlier nor the new activation could be proven whole; the planned start of ShroudForge-format mods stays refused until the next activation."
+    },
+    "refused": {
+      "type": "string",
+      "description": "Why it is refused (state refused only)."
+    },
+    "profileId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The generation the new kiln/profile.json carries."
+    },
+    "route": {
+      "enum": [
+        "interpreter",
+        "legacy"
+      ],
+      "description": "The route of ShroudForge-format mods frozen at the activation's start; recovery uses it."
+    },
+    "mode": {
+      "enum": [
+        "once"
+      ],
+      "description": "The profile file the activation commits: kiln/profile.once.json for a play-once start (its plan's profile.mode is once). Absent: kiln/profile.json."
+    },
+    "prior": {
+      "$ref": "#/$defs/prior"
+    },
+    "stages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/stage"
+      },
+      "description": "The steps the activation began, in order, each recorded before its first change."
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "prior": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profileSha256",
+        "placementsSha256",
+        "gameFiles"
+      ],
+      "properties": {
+        "profileSha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The profile file before (kiln/profile.json, or kiln/profile.once.json with mode once; null: none)."
+        },
+        "placementsSha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "kiln/state/library-placements.json before (null: none)."
+        },
+        "gameFiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/package"
+          },
+          "description": "The packages placed in the game folder before (kiln/state/game-files.json)."
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "hash"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "hash": {
+          "type": "string"
+        }
+      }
+    },
+    "stage": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/stage-game-files"
+        },
+        {
+          "$ref": "#/$defs/stage-chain"
+        },
+        {
+          "$ref": "#/$defs/stage-placements"
+        },
+        {
+          "$ref": "#/$defs/stage-plan"
+        },
+        {
+          "$ref": "#/$defs/stage-profile"
+        }
+      ]
+    },
+    "stage-game-files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage"
+      ],
+      "properties": {
+        "stage": {
+          "const": "game-files"
+        }
+      }
+    },
+    "stage-chain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage",
+        "prior",
+        "sha256"
+      ],
+      "properties": {
+        "stage": {
+          "const": "chain"
+        },
+        "prior": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^([0-9a-f]{2})*$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "kiln/chain.ini's bytes before, hex (null: none)."
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "The bytes written."
+        }
+      }
+    },
+    "stage-placements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage"
+      ],
+      "properties": {
+        "stage": {
+          "const": "placements"
+        }
+      }
+    },
+    "stage-plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage",
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "stage": {
+          "const": "plan"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^launch-plans/[A-Za-z0-9_][A-Za-z0-9._-]*\\.json$",
+          "description": "Relative to <game>/kiln."
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "stage-profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage",
+        "sha256"
+      ],
+      "properties": {
+        "stage": {
+          "const": "profile"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "The new profile file (kiln/profile.json, or kiln/profile.once.json with mode once)."
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // kiln_boot: called by the dinput8 proxy on the main thread, at the game's entry point, before any game code ran.
-//   paths, log, kiln.json, profile (kiln.profile), image + side, build record, other loaders' byte scans
-//   (foreign_scan.h), native mods "early", sigdb, hooks,
+//   paths, log, kiln.json, profile (kiln.profile), image + side, build record, compat's early rules, the ShroudForge
+//   backend frozen (kiln.launch), other loaders' byte scans (foreign_scan.h), native mods "early", sigdb, hooks,
 //   in-core services, service DLLs + plugins, native mods "boot", native "world" armed, .NET host, chain DLLs named in
 //   chain.ini [late], state/boot.json, state/hooks.json.
 #include <atomic>
@@ -22,6 +22,7 @@
 #include "early_plugins.h"
 #include "foreign_scan.h"
 #include "gates.h"
+#include "launch.h"
 #include "nlohmann/json.hpp"
 #include "profile.h"
 #include "progress_state.h"
@@ -582,6 +583,8 @@ void boot() {
         KLOG_E("cannot parse the game image; staying idle");
         f.safe_idle = "the game image cannot be parsed";
         f.errors.push_back(f.safe_idle);
+        // kiln.launch: frozen in safe idle too (backend none, this reason), before the chain's [late] DLLs load
+        launch::freeze_at_boot(std::string_view(side_by_name()) == "server" ? KILN_SIDE_SERVER : KILN_SIDE_CLIENT, false, f.safe_idle);
         native_mods::run_late();  // the player's chain DLLs named in chain.ini [late] still load
         check_entry_patch(f);
         write_boot_json(f);
@@ -602,6 +605,14 @@ void boot() {
     // Native mods: discovered and resolved now; phase early runs before anything is hooked (also in safe idle).
     progress_state::step("native-early");
     compat::apply_early();  // rules that switch a listed mod off: before anything reads the profile
+    // kiln.launch (launch.h): the ShroudForge backend of this start, decided from the profile as compat's rules left it
+    // and frozen before any native mod, early plugin or service runs. A safe idle known now (an unverified build under
+    // policy verified-only, the same text as below) gives backend none. The record carries this `verified` too, so the
+    // early plugins have the answer build_info gives only from the plugin step on.
+    launch::freeze_at_boot(side, verified,
+                           verified || config().policy_any
+                               ? std::string()
+                               : "build " + image().sha256 + " is not verified (" + note + ") and policy is verified-only");
     native_mods::discover(verified);
     // Another loader that looks for game functions by their bytes on its own thread (shroudlink's client addon) gets to
     // finish looking before Kiln hooks anything and before the early native mods start: a hook over a prologue, Kiln's

@@ -578,6 +578,239 @@ void retry_holder_admission(const char* target) {
     gate_reset_for_tests();
 }
 
+// The dialect owner: the ShroudForge-dialect owner the core designates (kiln.internal.launch, resolved by
+// kiln.engine at init; here the gate's accessor directly) is admitted as RetryKilnHolder whatever its record says.
+std::atomic<std::uint64_t> g_designated{0};  // what the core's dialect_owner() answers
+std::atomic<int> g_designation_reads{0};
+std::uint64_t KILN_CALL designated() {
+    g_designation_reads.fetch_add(1, std::memory_order_relaxed);
+    return g_designated.load(std::memory_order_acquire);
+}
+void dialect_admission(const char* target) {
+    const Layout& L = layout_of(target);
+    const std::string t = std::string(target) + ": dialect owner: ";
+    fake::Engine e(L);
+    EcsView v{};
+    check(ecs_view(&L, ViewKind::Authority, v, e.image.at()) == Reason::None, t + "view");
+    const auto acquire = [&](GateState& g) { return gate_acquire(&L, v, g, CallerThread::Other, e.image.at()); };
+    const auto count_retries = [] {
+        g_point_calls = 0;
+        g_gate_test_point = +[](GatePoint p) { if (p == GatePoint::HolderRetry) ++g_point_calls; };
+    };
+    constexpr std::uint64_t kDialect = 70, kHolder = 71, kOther = 72, kRegistryMod = 73;
+    // As in the process: the accessor is resolved at kiln.engine's init, before the core designates anyone.
+    g_designated = 0;
+    gate_set_dialect_owner(&designated);
+    {
+        // nobody designated yet: the would-be dialect owner is latched like any Kiln mod (main's rule)
+        GateState h = gate_for(kHolder, 200), d = gate_for(kDialect, 200);
+        check(acquire(h) == Reason::None, t + "undesignated: a Kiln holder");
+        count_retries();
+        const Reason first = acquire(d);
+        g_gate_test_point = nullptr;
+        check(first == Reason::KilnHolderBusy && g_point_calls.load() == 0, t + "undesignated: kiln-gate-busy at once, no retry");
+        gate_release(h);
+        check(acquire(d) == Reason::KilnBusyLatched, t + "undesignated: latched for the step, as on main");
+    }
+    g_designated = kDialect;  // the core designates the owner later, when it loads the plugin
+    // step N: another Kiln holder. The dialect owner's refusal is retried (128 attempts, no engine word) and not latched.
+    GateState holder = gate_for(kHolder, 201), d = gate_for(kDialect, 201), o = gate_for(kOther, 201);
+    check(acquire(holder) == Reason::None, t + "a Kiln holder in step N");
+    count_retries();
+    std::uint64_t cas = mem::test_cas.load();
+    const Reason busy = acquire(d);
+    g_gate_test_point = nullptr;
+    check(busy == Reason::KilnHolderBusy && !d.held && mem::test_cas.load() == cas,
+          t + "refused kiln-gate-busy without an engine word (got " + std::string(reason_name(busy)) + ")");
+    check(g_point_calls.load() == 127, t + "its holder refusal was retried: 128 attempts in all (" +
+                                           std::to_string(g_point_calls.load()) + " retries)");
+    check(d.admission == static_cast<std::uint32_t>(GateAdmission::KilnMod), t + "its record's admission is left as set");
+    count_retries();
+    const Reason other_busy = acquire(o);
+    g_gate_test_point = nullptr;
+    check(other_busy == Reason::KilnHolderBusy && g_point_calls.load() == 0, t + "another owner: kiln-gate-busy, no retry");
+    gate_release(holder);
+    // still step N: the dialect owner is admitted again; the other owner is latched
+    check(acquire(d) == Reason::None && d.held, t + "admitted again in step N (not latched)");
+    check(d.admission == static_cast<std::uint32_t>(GateAdmission::KilnMod), t + "a held record's admission is unchanged");
+    gate_release(d);
+    check(d.admission == static_cast<std::uint32_t>(GateAdmission::KilnMod) && d.owner == kDialect && d.step == 201,
+          t + "release keeps the record's own admission, owner and step");
+    const Reason latched = acquire(o);
+    check(latched == Reason::KilnBusyLatched && std::string(reason_name(latched)) == "kiln-gate-busy-this-step",
+          t + "another owner in the same step gets kiln-gate-busy-this-step");
+    // the other holder leaves during the retries: the dialect owner wins in the same attempt
+    GateState k2 = gate_for(kHolder, 202);
+    check(acquire(k2) == Reason::None, t + "a second Kiln holder");
+    static GateState* leaving;
+    leaving = &k2;
+    g_gate_test_point = +[](GatePoint p) { if (p == GatePoint::HolderRetry && leaving) { gate_release(*leaving); leaving = nullptr; } };
+    GateState d2 = gate_for(kDialect, 202);
+    const Reason won = acquire(d2);
+    g_gate_test_point = nullptr;
+    check(won == Reason::None && d2.held, t + "acquired once the other Kiln holder left (got " + std::string(reason_name(won)) + ")");
+    leaving = nullptr;
+    gate_release(k2);  // a no-op once released (a failing run would otherwise strand the holder for the cases below)
+    gate_release(d2);
+    // an engine word (the update holds the Scene word): refused at once, the same engine tries as a Kiln mod's, and the
+    // dialect owner is not latched, so its next attempt in the same step tries the engine again
+    __atomic_store_n(fake::word(e.scene_word()), 1, __ATOMIC_SEQ_CST);
+    GateState m = gate_for(kOther, 203), d3 = gate_for(kDialect, 203);
+    cas = mem::test_cas.load();
+    check(acquire(m) == Reason::EcsSceneFrameBusy, t + "Scene busy for a Kiln mod");
+    const std::uint64_t mod_cas = mem::test_cas.load() - cas;
+    cas = mem::test_cas.load();
+    count_retries();
+    const Reason scene = acquire(d3);
+    g_gate_test_point = nullptr;
+    check(scene == Reason::EcsSceneFrameBusy && mem::test_cas.load() - cas == mod_cas && g_point_calls.load() == 0,
+          t + "Scene busy for the dialect owner: refused at once, never retried against the engine's word (" +
+              std::to_string(mem::test_cas.load() - cas) + " CAS, a Kiln mod's " + std::to_string(mod_cas) + ")");
+    __atomic_store_n(fake::word(e.scene_word()), 0, __ATOMIC_SEQ_CST);
+    check(acquire(m) == Reason::KilnBusyLatched, t + "the Kiln mod is latched for the step");
+    check(acquire(d3) == Reason::None, t + "the dialect owner tries the engine again in the same step and wins");
+    gate_release(d3);
+    // registry busy (an engine thread holds the registry word exclusively): the same, refused at once with a Kiln mod's
+    // engine tries, never retried against the engine's word
+    __atomic_store_n(fake::word(e.registry_word()), static_cast<std::int32_t>(0x80000000u), __ATOMIC_SEQ_CST);
+    GateState mr = gate_for(kRegistryMod, 204), d4 = gate_for(kDialect, 204);
+    cas = mem::test_cas.load();
+    check(acquire(mr) == Reason::EcsThreadRegistryBusy, t + "registry busy for a Kiln mod");
+    const std::uint64_t mod_registry_cas = mem::test_cas.load() - cas;
+    cas = mem::test_cas.load();
+    count_retries();
+    const Reason registry = acquire(d4);
+    g_gate_test_point = nullptr;
+    check(registry == Reason::EcsThreadRegistryBusy && mem::test_cas.load() - cas == mod_registry_cas &&
+              g_point_calls.load() == 0,
+          t + "registry busy for the dialect owner: refused at once, never retried against the engine's word (" +
+              std::to_string(mem::test_cas.load() - cas) + " CAS, a Kiln mod's " + std::to_string(mod_registry_cas) + ")");
+    __atomic_store_n(fake::word(e.registry_word()), 0, __ATOMIC_SEQ_CST);
+    check(acquire(d4) == Reason::None, t + "registry busy does not latch the dialect owner");
+    gate_release(d4);
+    // the live server step changes nothing for it
+    gate_set_server_step(900);
+    __atomic_store_n(fake::word(e.scene_word()), 1, __ATOMIC_SEQ_CST);
+    GateState d5 = gate_for(kDialect, 1);
+    check(acquire(d5) == Reason::EcsSceneFrameBusy, t + "busy at live step 900");
+    __atomic_store_n(fake::word(e.scene_word()), 0, __ATOMIC_SEQ_CST);
+    check(acquire(d5) == Reason::None, t + "not latched in the live step either");
+    gate_release(d5);
+    gate_set_server_step(0);
+    // an explicit RetryKilnHolder record of the dialect owner behaves the same
+    GateState k3 = gate_for(kHolder, 205), d6 = gate_for(kDialect, 205);
+    d6.admission = static_cast<std::uint32_t>(GateAdmission::RetryKilnHolder);
+    check(acquire(k3) == Reason::None && acquire(d6) == Reason::KilnHolderBusy, t + "RetryKilnHolder record: busy");
+    gate_release(k3);
+    check(acquire(d6) == Reason::None && d6.admission == static_cast<std::uint32_t>(GateAdmission::RetryKilnHolder),
+          t + "RetryKilnHolder record: admitted, its admission unchanged");
+    gate_release(d6);
+    // owner 0 never matches "nobody designated" (0): with no designation an owner-0 record gets no retry
+    g_designated = 0;
+    GateState k4 = gate_for(kHolder, 206), z = gate_for(0, 206);
+    check(acquire(k4) == Reason::None, t + "a holder");
+    count_retries();
+    const Reason zero = acquire(z);
+    g_gate_test_point = nullptr;
+    check(zero == Reason::KilnHolderBusy && g_point_calls.load() == 0, t + "owner 0 with nobody designated: no retry");
+    gate_release(k4);
+    // the accessor is read at each acquire: a designation made after it was set is seen, and so is "none"
+    GateState k5 = gate_for(kHolder, 207), d7 = gate_for(kDialect, 207);
+    check(acquire(k5) == Reason::None && acquire(d7) == Reason::KilnHolderBusy, t + "nobody designated again: busy");
+    gate_release(k5);
+    check(acquire(d7) == Reason::KilnBusyLatched, t + "...and latched like any Kiln mod");
+    // no accessor at all (an older core, or no Kiln-internal access): main's rule exactly, and the accessor is not read
+    g_designated = kDialect;
+    gate_set_dialect_owner(nullptr);
+    const int reads = g_designation_reads.load();
+    GateState k6 = gate_for(kHolder, 208), d8 = gate_for(kDialect, 208);
+    check(acquire(k6) == Reason::None, t + "no accessor: a holder");
+    count_retries();
+    const Reason none = acquire(d8);
+    g_gate_test_point = nullptr;
+    check(none == Reason::KilnHolderBusy && g_point_calls.load() == 0, t + "no accessor: kiln-gate-busy at once");
+    gate_release(k6);
+    check(acquire(d8) == Reason::KilnBusyLatched && g_designation_reads.load() == reads,
+          t + "no accessor: latched as on main, and nothing was asked");
+    // a reset forgets the accessor
+    gate_set_dialect_owner(&designated);
+    gate_reset_for_tests();
+    GateState k7 = gate_for(kHolder, 209), d9 = gate_for(kDialect, 209);
+    check(acquire(k7) == Reason::None && acquire(d9) == Reason::KilnHolderBusy, t + "after a reset: busy");
+    gate_release(k7);
+    check(acquire(d9) == Reason::KilnBusyLatched, t + "after a reset: latched (the accessor is forgotten)");
+    check(word(e.registry_word()) == 0 && word(e.scene_word()) == 0 && !gate_holder_taken(), t + "words free at the end");
+    g_designated = 0;
+    gate_reset_for_tests();
+}
+
+// Under ThreadSanitizer: the dialect owner, a Kiln mod and a third holder race on the gate in the same steps, while the
+// core designates the dialect owner from another thread. Once its designation is visible the dialect owner is never
+// latched; the Kiln mod still can be.
+void dialect_race(const char* target) {
+    const Layout& L = layout_of(target);
+    const std::string t = std::string(target) + ": dialect race: ";
+    fake::Engine e(L);
+    EcsView v{};
+    check(ecs_view(&L, ViewKind::Authority, v, e.image.at()) == Reason::None, t + "view");
+    g_designated = 0;
+    gate_set_dialect_owner(&designated);
+    constexpr std::uint64_t kDialect = 80, kOther = 81, kThird = 82;
+    std::atomic<bool> stop{false}, seen{false};
+    std::atomic<std::uint64_t> step{1};
+    std::atomic<long> dialect_latched{0}, dialect_holds{0}, other_latched{0}, other_holds{0};
+    const auto worker = [&](std::uint64_t owner, std::atomic<long>& latched, std::atomic<long>& holds) {
+        while (!stop.load()) {
+            const bool designated_now = g_designated.load(std::memory_order_acquire) == kDialect;
+            GateState g = gate_for(owner, step.load());
+            const Reason r = gate_acquire(&L, v, g, CallerThread::Other, e.image.at());
+            if (r == Reason::None) {
+                ++holds;
+                gate_release(g);
+            } else if (r == Reason::KilnBusyLatched && designated_now) {
+                ++latched;
+            }
+        }
+    };
+    std::thread designate([&] {
+        for (int i = 0; i < 200; ++i) std::this_thread::yield();
+        g_designated.store(kDialect, std::memory_order_release);
+        seen = true;
+    });
+    std::thread dialect(worker, kDialect, std::ref(dialect_latched), std::ref(dialect_holds));
+    std::thread other(worker, kOther, std::ref(other_latched), std::ref(other_holds));
+    std::thread third([&] {
+        while (!stop.load()) {
+            GateState g = gate_for(kThird, step.load());
+            if (gate_acquire(&L, v, g, CallerThread::Other, e.image.at()) == Reason::None) gate_release(g);
+        }
+    });
+    const auto begin = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - begin < std::chrono::milliseconds(300) ||
+           (dialect_holds.load() < 50 && std::chrono::steady_clock::now() - begin < std::chrono::seconds(10))) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        step.fetch_add(1);
+    }
+    stop = true;
+    designate.join();
+    dialect.join();
+    other.join();
+    third.join();
+    check(seen.load() && dialect_latched.load() == 0, t + "the designated owner was never latched (" +
+                                                         std::to_string(dialect_holds.load()) + " holds; the Kiln mod " +
+                                                         std::to_string(other_holds.load()) + " holds, " +
+                                                         std::to_string(other_latched.load()) + " latched)");
+    check(dialect_holds.load() > 0 && other_holds.load() + other_latched.load() > 0,
+          t + "the dialect owner held the gate and the Kiln mod ran (" + std::to_string(other_holds.load()) + " holds, " +
+              std::to_string(other_latched.load()) + " latched)");
+    check(word(e.registry_word()) == 0 && word(e.scene_word()) == 0 && !gate_holder_taken(), t + "words free at the end");
+    std::printf("  %s: dialect race: %ld holds, %ld latched; the Kiln mod %ld holds, %ld latched (steps %llu)\n", target,
+                dialect_holds.load(), dialect_latched.load(), other_holds.load(), other_latched.load(),
+                static_cast<unsigned long long>(step.load()));
+    g_designated = 0;
+    gate_reset_for_tests();
+}
+
 // The gate's own registry release is probed too, on a successful hold and on a
 // refusal that holds only the registry word (Scene busy); Kiln's holder is still taken at each.
 void holder_order(const char* target) {
@@ -667,6 +900,8 @@ int main() {
         exit_race(t);
         exit_window(t);
         retry_holder_admission(t);
+        dialect_admission(t);
+        dialect_race(t);
         live_step_latch(t);
         stopping_and_stats(t);
         holder_order(t);

@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import * as api from "../api/commands";
 import type { LogTarget } from "../api/commands";
-import { qk } from "../api/hooks";
+import { qk, usePoll } from "../api/hooks";
 import { useT, type TFunction } from "../i18n";
 import { EmptyState, KeyValue, Skeleton, Table, TickChart, errorText, type Column } from "../ui";
 
@@ -14,9 +14,9 @@ export interface Tick { time: string; steps: number; rate: number; step_ms: { p5
 
 /** The tick stats of a game or server (null while there is no file). */
 export function useTicks(target: LogTarget, poll = 30000) {
-  const files = useQuery({ queryKey: qk.logs(target), queryFn: () => api.logsList(target), refetchInterval: 15000 });
+  const files = useQuery({ queryKey: qk.logs(target), queryFn: () => api.logsList(target), refetchInterval: usePoll(15000) });
   const has = !!files.data?.some((f) => f.name === TICKS);
-  const q = useQuery({ queryKey: ["tick-stats", target], queryFn: () => api.logsRead(target, TICKS, null, 256 * 1024), enabled: has, refetchInterval: poll });
+  const q = useQuery({ queryKey: ["tick-stats", target], queryFn: () => api.logsRead(target, TICKS, null, 256 * 1024), enabled: has, refetchInterval: usePoll(poll) });
   const ticks = useMemo<Tick[]>(() => (q.data?.text ?? "").split("\n").flatMap((l) => { try { return l.trim() ? [JSON.parse(l) as Tick] : []; } catch { return []; } }), [q.data]);
   return { has, ticks, loading: files.isLoading || q.isLoading, error: files.error ?? q.error };
 }

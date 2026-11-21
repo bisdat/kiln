@@ -59,6 +59,8 @@ pub struct Catalog {
     pub vfx: HashMap<String, VfxInfo>,
     /// The number of game VFX, 0 without a `vfx` section.
     pub vfx_count: usize,
+    /// Names the game's own data still uses ([`crate::catalog::used_names`]'s rule): no KL407 for these.
+    pub used: std::collections::HashSet<String>,
 }
 
 pub fn parse_id(s: &str) -> Option<u32> {
@@ -170,6 +172,15 @@ impl Catalog {
                 }
                 c.sections.insert(name.clone(), s);
             }
+        }
+        c.used.insert(crate::catalog::STATION_WATER.to_string());
+        for e in doc["sections"]["recipes"].as_array().into_iter().flatten() {
+            for k in ["inputs", "outputs", "workshopName"] {
+                crate::catalog::note_used(&mut c.used, e.get(k));
+            }
+        }
+        for e in doc["sections"]["itemCategories"].as_array().into_iter().flatten() {
+            crate::catalog::note_used(&mut c.used, e.get("items"));
         }
         c.languages.extend(doc["languages"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)));
         if let Some(fs) = doc["fields"].as_object() {

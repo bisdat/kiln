@@ -27,6 +27,16 @@ internal static class TaskExecutionScope
     /// <summary>The world whose step runs that tick hop (meaningful only while <see cref="OnTick"/>).</summary>
     internal static WorldKind TickWorld => t_world;
 
+    /// <summary>True while this thread runs a task's menu hop (#83, <c>ToTick(WorldKind.Menu)</c>): the game's UI frame
+    /// with no world. <see cref="Game.IsTickThread"/> is false there and the tick-thread checks refuse with
+    /// <see cref="MenuHopRefusal"/>.</summary>
+    internal static bool InMenuHop => OnTick && t_world == WorldKind.Menu;
+
+    /// <summary>What a world API says when it is called in a menu hop.</summary>
+    internal static string MenuHopRefusal(string api) =>
+        $"{api} needs a world, and this is a menu hop (ToTick(WorldKind.Menu)): no world runs in the main menu. Only " +
+        "any-thread APIs and the game's main-thread UI APIs work there; world work goes to a world's hop once one runs.";
+
     /// <summary>"owner/task" of the task this code descends from, for diagnostics; null outside tasks. Not authority.</summary>
     internal static string? FlowedIdentity => Identity.Value;
 

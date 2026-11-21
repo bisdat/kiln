@@ -1,0 +1,1036 @@
+[
+{
+"id": "ok.empty",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.match",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"^1\"},\"second\":{\"id\":\"b\",\"version\":\">=2.0.0, <3\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.no-match-version",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"^2\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.disabled",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"c\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.missing-mod",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"zz\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.prerelease",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"d\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.prerelease-req",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"d\",\"version\":\">=0.9.0-alpha\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.later-reason-wins",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"first\"},{\"first\":{\"id\":\"b\",\"version\":\"*\"},\"second\":{\"id\":\"a\",\"version\":\"*\"},\"reason\":\"last\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.self",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"a\",\"version\":\"*\"},\"reason\":\"self\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.schemaVersion-float",
+"rules": "{\"schemaVersion\":1.0,\"conflicts\":[]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.duplicate-keys",
+"rules": "{\"schemaVersion\":2,\"schemaVersion\":1,\"conflicts\":[]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.$schema-unknown",
+"rules": "{\"$schema\":\"x\",\"schemaVersion\":1,\"conflicts\":[]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.reason-long",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.case-sensitive",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"A\",\"version\":\"*\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.req-exact",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"=1.2.0\"},\"second\":{\"id\":\"b\",\"version\":\"2\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "ok.req-tilde",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"~1.1\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.0",
+"rules": "[]",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.1",
+"rules": "null",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.2",
+"rules": "\"x\"",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.3",
+"rules": "{}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.4",
+"rules": "{\"schemaVersion\":1}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.5",
+"rules": "{\"conflicts\":[]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.6",
+"rules": "{\"schemaVersion\":2,\"conflicts\":[]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.7",
+"rules": "{\"schemaVersion\":\"1\",\"conflicts\":[]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.8",
+"rules": "{\"schemaVersion\":1,\"conflicts\":{}}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.9",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[],\"extra\":1}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.10",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[null]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.11",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"b\",\"version\":\"*\"}}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.12",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"reason\":\"r\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.13",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"second\":{\"id\":\"a\",\"version\":\"*\"},\"reason\":\"r\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.14",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.15",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":1}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.16",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\",\"extra\":1}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.17",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.18",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"version\":\"*\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.19",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\",\"extra\":1},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.20",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"bad id\",\"version\":\"*\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.21",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"\",\"version\":\"*\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.22",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":1},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.23",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"not semver\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.24",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"b\",\"version\":\"\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.25",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"zz\",\"version\":\"^1\"},\"second\":{\"id\":\"b\",\"version\":\">=1 <2\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.26",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\"},{\"first\":{\"id\":\"a\",\"version\":\"bad\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.27",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":1},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.28",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":\"a\",\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.json",
+"rules": "{\"schemaVersion\":1,\"conflicts\":[],}",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+},
+{
+"id": "bad.empty",
+"rules": "",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"d": [
+true,
+"0.9.0-beta"
+]
+}
+}
+]

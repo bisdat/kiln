@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "kind": "action",
+  "requestId": "7d2e3f4a-5b6c-4d7e-9f8a-0b1c2d3e4f5a",
+  "sequence": 1,
+  "launchId": "3f2b8c1e5a7d4e2f",
+  "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "ownerEpoch": 3,
+  "modId": "world-editor",
+  "action": "copy",
+  "createdMs": 1763520010000
+}
