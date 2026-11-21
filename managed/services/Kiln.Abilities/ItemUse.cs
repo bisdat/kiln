@@ -44,9 +44,10 @@ public enum ItemUseResult
     /// <summary>The player is not ready for gameplay yet (joining, loading the terrain, respawning).</summary>
     NotReady = 7,
 
-    /// <summary>The player is in another action (an attack, another item's use, an emote, a dodge) or in a state a use does
-    /// not start from (sleeping, sitting, climbing, gliding, fishing, an instrument). The game has no cooldown for
-    /// consumables: what plays as one is the use's own sequence, so a second use right after the first is
+    /// <summary>The player is in another action (an attack, another item's use, an emote, a dodge), already has one
+    /// waiting for this step (a second <c>UseItem</c> or a <c>PlaySequence</c> on the same player in the same step), or is
+    /// in a state a use does not start from (sleeping, sitting, climbing, gliding, fishing, an instrument). The game has no
+    /// cooldown for consumables: what plays as one is the use's own sequence, so a second use right after the first is
     /// <see cref="Busy"/> until it ends.</summary>
     Busy = 8,
 
@@ -63,11 +64,14 @@ public static unsafe partial class Abilities
     /// so the client shows the buff's effect lines and its time as for a hand use. <paramref name="slot"/> must be in the
     /// player's own inventories; move an item from a chest first. Nothing is taken at the call: the item goes when the
     /// sequence's consume event runs, a fraction of a second later (<see cref="ItemUseResult.Started"/>). Server, tick
-    /// thread. Since 0.2.0-dev.30.3 (mod API 0.2.13).</summary>
+    /// thread, between steps (a tick handler, an event handler, a scheduled task); not in a native handler or attachment,
+    /// which runs inside the world's step. Since 0.2.0-dev.30.3 (mod API 0.2.13).</summary>
     /// <param name="player">The player character (<c>Players.Get(..).Entity</c>).</param>
     /// <param name="slot">A slot of the player's inventories (<see cref="InventorySlot.Slot"/> of <see cref="Items.Read"/>).</param>
     /// <returns>What happened; every outcome but <see cref="ItemUseResult.Started"/> changes nothing.</returns>
     /// <exception cref="ArgumentException"><paramref name="player"/> or <paramref name="slot"/> is none.</exception>
+    /// <exception cref="InvalidOperationException">Not on the tick thread, or inside a native handler or attachment (the
+    /// world's step, where the game's own programs run beside it on other threads): post it to the next tick.</exception>
     /// <exception cref="KilnUnavailableException">kiln.abilities, kiln.items or kiln.gamedata is not here, or this build
     /// cannot start item uses (sequences, or the trigger context's used item in the game's reflection: kiln.log says
     /// which).</exception>
@@ -81,6 +85,11 @@ public static unsafe partial class Abilities
     {
         if (player.IsNone) throw new ArgumentException("no player", nameof(player));
         if (slot.IsNone) throw new ArgumentException("no slot", nameof(slot));
+        // a sync native's or an attachment's handler is on the world's thread, so the tick-thread check passes there; but
+        // it runs inside the step, where the game could start the sequence before its used item is in (kiln.abilities
+        // refuses it natively too)
+        if (AbilitiesDispatch.InsideHandler)
+            throw new InvalidOperationException("Abilities.UseItem cannot run in a native handler or attachment (it runs inside the world's step); use Scheduler.Post.");
         Game.AssertTickThread();
         var t = ItemUseTable("Abilities.UseItem");
         var inv = Items.Read(player);

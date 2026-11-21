@@ -161,6 +161,24 @@ public sealed unsafe class ItemUseTests
     }
 
     [Fact]
+    public void ANativeHandlerCannotUseAnItem()
+    {
+        // a sync native's or an attachment's handler runs inside the world's step: refused before anything is read
+        var inside = typeof(Abilities).Assembly.GetType("Kiln.AbilitiesDispatch")!
+            .GetField("_inside", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        inside.SetValue(null, 1);
+        try
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() => Abilities.UseItem(new EntityId(7), SlotId.Of(new EntityId(100), 2)));
+            Assert.Contains("native handler", ex.Message);
+        }
+        finally
+        {
+            inside.SetValue(null, 0);
+        }
+    }
+
+    [Fact]
     public void AnUnknownSequenceIsNotConsumableAndErrorsThrow()
     {
         Assert.Equal(ItemUseResult.NotConsumable, Run(AbilitiesNative.NotFound, 0, out _));

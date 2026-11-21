@@ -252,7 +252,8 @@ consumables"):
    `UseItem_Potion_Health`, ...) and checks that it has an event that uses up the item (`ApplyBuffEvent`,
    `SpawnImpact`, `SpawnEntityEvent` with `consume`; `PayUsageCost` does not count).
 2. kiln.abilities' `item_use` checks the slot against the player's inventory tree (kiln.items), the item in it, and
-   the player's states (reflection: `Actor.currentState`), then calls the game's `TriggerSequence` (0x369d0) with the
+   the player's states (reflection: `Actor.currentState`, `Actor.sequenceRuntimeId`, and no trigger already waiting
+   in `ActorInput.triggerContext`), then calls the game's `TriggerSequence` (0x369d0) with the
    sequence and trigger `Primary`, and writes the slot and the item into `ActorInput.triggerContext.usedItem`, as
    `player_control_action_sequence` does for a hand use. `actor_simulation_start` takes it in the same step.
 3. The sequence plays (animation, VFX, sounds; `NetworkActor` replicates it like any sequence). At its consume event
@@ -274,7 +275,7 @@ some foods add (`UseItem_Food_Heal_Buff`) happens. Nothing is taken at the call.
 | `NotAPlayer` | not a player character (its inventories are not a player's, or it has no Actor / ActorInput) |
 | `Dead` | `StateFlag.Dead` |
 | `NotReady` | not `StateFlag.IsReadyForGameplay` (joining, loading the terrain, respawning) |
-| `Busy` | a sequence plays (an attack, another use, an emote, a dodge), or one of `Spawning`, `Sleeping`, `Sitting`, `PlayingInstrument`, `Climbing`, `ClimbingTransition`, `Attached`, `AttachedToHook`, `HangGliding`, `HeadDiving`, `IsFishing` |
+| `Busy` | a sequence plays (an attack, another use, an emote, a dodge), a trigger already waits for this step (a second `UseItem` or a `PlaySequence` on the same player in the same step, or one the game queued), or one of `Spawning`, `Sleeping`, `Sitting`, `PlayingInstrument`, `Climbing`, `ClimbingTransition`, `Attached`, `AttachedToHook`, `HangGliding`, `HeadDiving`, `IsFishing` |
 | `ServerOnly` | no server world in this process (a joined client) |
 
 - **No cooldown code.** The game has no cooldown system for players (docs/re/abilities.md: "No player cooldown system
@@ -285,20 +286,25 @@ some foods add (`UseItem_Food_Heal_Buff`) happens. Nothing is taken at the call.
   traced, so Kiln refuses a running sequence and the states listed above, and lets the game decide the rest.
 - **Safety.** A consume event that runs with no used item takes the server down (the spawn path reads the item with
   no check). `item_use` therefore checks, in the same call that triggers, that the slot is the player's and holds the
-  item, and Kiln.Abilities sends only the item's own Primary sequence.
-- Server, tick thread. `KilnUnavailableException`: kiln.abilities older than 0.2.0-dev.30.3, kiln.items or
+  item, and Kiln.Abilities sends only the item's own Primary sequence. It runs only between steps (Pre or Post): inside
+  a native handler or attachment the world's step runs, and the game's programs run on other threads beside it, so
+  `actor_simulation_start` could take the trigger before the used item is in. If `TriggerSequence` or the write of the
+  used item faults, the trigger is taken back (the context cleared as `actor_clear_input` clears it) and the call
+  fails; a second use in the same step is `Busy` rather than replacing the first.
+- Server, tick thread, between steps (a tick handler, an event handler, a scheduled task). In a native handler or
+  attachment it throws `InvalidOperationException` (use `Scheduler.Post`). `KilnUnavailableException`: kiln.abilities older than 0.2.0-dev.30.3, kiln.items or
   kiln.gamedata not here, the game's data not loaded yet, or the build's reflection lacks the trigger context's used
   item or the state flags (`kiln.abilities: item_use is off: ...` in kiln.log, once). The test kit's kiln.abilities
   answers `item_use` as unavailable, like `sequence_play` (its `abilities.sequences` row is offline).
 - C: `item_use(KilnItemUse*)`, appended at byte 312 (the table is 320 bytes; check `header.size`). `KilnItemUse`
   (48 bytes) takes the entity, the slot, the item expected in it and the sequence id, and answers `status`
   (`KILN_ITEM_USE_*`), the stack's `count` and the start's `trigger_time`. A C caller is responsible for passing
-  the item's own sequence.
+  the item's own sequence. `KILN_ERR_WRONG_THREAD` inside a Kiln native call (a sync native, an attachment, a wrap).
 - Tests: `native/services/abilities/tests/item_use_test.cpp` (the reflection paths against a fake kiln.types, every
   verdict, and `t_item_use` itself against a fake kiln.items, fake components and a fake `TriggerSequence`),
   `managed/tests/Kiln.Abilities.Tests/ItemUseTests.cs` (layout, answers, the sequence pick, the consume check), and
   `mods/tests/playerstate-test` (lab: `NotReady` before the character is ready, then a mushroom eaten through
-  `UseItem` with the count going down, `Busy` during the use, the food buff, `EmptySlot`, `NotConsumable` for a
+  `UseItem` with the count going down, `Busy` for a second use in the same step and during the use, the food buff, `EmptySlot`, `NotConsumable` for a
   sword, `NotOwnSlot`). Not run in a lab or a real game yet: see the client checklist.
 - Not added: `ApplyBuff(target, buff, usedItem)` (the issue's second shape). The game copies the item's values into the
   buff in `applyBuffCore` from the trigger context's used item on the `actor_apply_buff` path; whether the `applyBuff`

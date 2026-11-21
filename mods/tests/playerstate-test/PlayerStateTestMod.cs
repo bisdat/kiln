@@ -627,6 +627,8 @@ public sealed class PlayerStateTestMod : Mod
         var r = Abilities.UseItem(e, slot.Slot);
         Check(r == ItemUseResult.Started, $"UseItem: a mushroom from the character's own slot: {r}");
         Check(Count() == before, $"UseItem: nothing is taken at the call ({Count()} of {before})");
+        var same = Abilities.UseItem(e, slot.Slot);
+        Check(same == ItemUseResult.Busy, $"UseItem twice in one step: the first one's trigger waits, the second is Busy: {same}");
         await Steps(1);
         var again = Abilities.UseItem(e, slot.Slot);
         Check(again == ItemUseResult.Busy, $"UseItem again while the first use plays: {again}");
