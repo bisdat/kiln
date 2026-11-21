@@ -22,9 +22,12 @@ the mod busy until the server's next Pre, and on a server whose update lasts lon
 second, 2.7 ms updates in the first Proton run) every retry landed at the start of the next update: 10 writes went
 through, 118,824 were busy, and the run stopped with "the restore stayed busy after 5000 tries". Kit r2 writes the way
 Kiln tells mods to ("after the step"): a pair starts only between two updates (one due during an update waits for its
-Post), and a busy answer is retried after the next Post whose step is past it, at once, then 1 to 7 ms later if it is
-busy there again. Busy tries count in server steps: 4 for a change, 300 for a restore (about 5 s). Results of r1 are
-not comparable with r2's: `analyze.py` shows r1 runs apart, as `<platform> kit 1`.
+Post), and a busy answer is retried after the next Post whose step is past it. The wait after that Post is learned:
+it grows when a try right after a Post finds the engine still in its update (`post_delay_ns` in `run.json`), and 1 to
+3 ms more are added when the gate is busy several times in a row. Busy tries count in server steps: a change gets 4
+(at most 1 s), a restore 300 (about 5 s at 60 steps a second, at most 10 s). While no server step runs at all, the
+mod makes no try, since the latch would only answer busy again. Results of r1 are not comparable with r2's:
+`analyze.py` shows r1 runs apart, as `<platform> kit 1`.
 
 ## What you need
 
@@ -191,7 +194,7 @@ Look for `gate-priority-test:` lines in `<game>\kiln\logs\kiln.log`:
 | `kiln.world's compare-exchange writes are off on this build` | The game has updated past the builds Kiln knows; say so in #58 with the line `kiln.engine: ...` above it |
 | `... it runs no-op exchanges instead` | No component of your character has a usable padding byte. The run still takes the gate (no write) and is still useful |
 | `done (...)` | The summary: outcome counts, hold times, whether the byte is back |
-| `done (the restore stayed busy after 300 tries, one per server step)` | The gate was busy for 300 steps in a row. Attach the zip in #58 |
+| `done (the restore stayed busy: ...)` | The gate stayed busy for 300 server steps or 10 s; the line says how many tries, steps and seconds, and how many waits saw no server step at all. Attach the zip in #58 |
 | `done (...)` with `the last change could not be put back` | A write could not be proven, or the world stopped between a change and its restore. The changed bit is in a padding byte of an untracked component, so it is only in memory and never saved: quit the game, and it's gone. Say so in #58 |
 
 If the game crashes, attach the crash report Kiln writes in `kiln\logs` together with the zip.
@@ -248,13 +251,14 @@ KILN_OUT=<out> tools/priority-kit/tests/run.sh                              # th
   profile. kiln.types serves sigdb's reflection of that build. A simulated server thread runs frames that hold the
   Scene word and now and then change a real field of the target. Each frame's Pre moves the live step the gate's busy
   latch keys on, and the word stays held a little past Post. One scenario per process: the run on time, a 60 Hz server
-  with 3 ms updates (GitHub #58's, where kit 1 got stuck), the raise off, no-op mode, a named component and byte, a
-  component without explained padding, a tracked one, no padding anywhere, another world, no world, no run file, a bad
-  run file, and a world that stops mid-run. They check the
-  target, every outcome, that every byte of every component ends as it was (the game's own changes kept), the raise
-  (every hold above normal, or none), the files and their headers, and that a retry after a busy answer always comes
-  in a later server step and almost never meets the latch. Scenario `padding` checks the padding rule against
-  an independent walk of sigdb's reflection of both exact builds: 687 components each, 201 with padding the
+  with 3 ms updates (GitHub #58's, where kit 1 got stuck), the same with the word held 3 ms past Post, an update that
+  hangs for 12 s right after a change (no step: the restore gives up after 10 s, the final restore puts the byte
+  back), the raise off, no-op mode, a named component and byte, a component without explained padding, a tracked one,
+  no padding anywhere, another world, no world, no run file, a bad run file, and a world that stops mid-run. They
+  check the target, every outcome, that every byte of every component ends as it was (the game's own changes kept),
+  the raise (every hold above normal, or none), the files and their headers, and that a retry after a busy answer
+  always comes in a later server step and almost never meets the latch. Scenario `padding` checks the padding rule
+  against an independent walk of sigdb's reflection of both exact builds: 687 components each, 201 with padding the
   reflection explains.
 - **The Wine host** (`tests/host_win.cpp`) loads the real DLL and runs the same scenarios over kiln.engine's real
   Windows primitives: the SEH copies and writes, the Interlocked words, `SetThreadPriority`.
