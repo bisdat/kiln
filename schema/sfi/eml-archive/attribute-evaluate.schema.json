@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-archive/attribute-evaluate.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "pin": {
+      "$ref": "common.schema.json#/$defs/pin"
+    },
+    "root_hash": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "input_bits": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295
+      }
+    },
+    "output_bits": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295
+      }
+    },
+    "trace": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/value"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "pin",
+    "root_hash",
+    "input_bits",
+    "output_bits",
+    "trace"
+  ],
+  "additionalProperties": false
+}

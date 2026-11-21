@@ -1,0 +1,328 @@
+{
+  "backend": {
+    "dataWriter": "kiln-eml",
+    "fallbackOrder": [],
+    "requested": "kiln",
+    "selected": "kiln",
+    "selectionReason": "kiln.json shroudforge.backend: \"kiln\""
+  },
+  "contract": {
+    "apiVersion": "1.7.9",
+    "inventory_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "parity_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "serviceContracts_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "sourceCommit": "d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8",
+    "upstream180Final": false
+  },
+  "fingerprints": {
+    "chain_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "compat_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "loaderInventory_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "packages_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "placementReceipts_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "releasePolicy_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "settings_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  "format": 1,
+  "game": {
+    "archiveBaseOrigin": "first-managed-unclassified",
+    "archiveBase_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "archiveInput_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "exe_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "side": "client"
+  },
+  "launch_id": null,
+  "loadOrder": [
+    "lib",
+    "mod",
+    "patch"
+  ],
+  "minReader": 1,
+  "packages": [
+    {
+      "capabilities": [
+        "runtime"
+      ],
+      "config_sha256": "50da94a002ef6e8d1547a1e5d2d4fa1e5fa43324919c6a48fbc9c7a7e28f1da6",
+      "content_sha256": "60b95c40d8bea718f09ec1b4ed0a2b60a67a6248a000e7ab3989ab88bfbb6f26",
+      "data": {
+        "admission": "not-needed",
+        "required": false
+      },
+      "decision": "other-side",
+      "dependencies": [],
+      "dlls": [],
+      "enabled": true,
+      "id": "far",
+      "kind": "shroudforge",
+      "lua": {
+        "admission": "refuse",
+        "required": true
+      },
+      "reasons": [],
+      "requiredApis": [],
+      "requires180": false,
+      "root": "mods/far",
+      "saveSensitive": false,
+      "services": [],
+      "targets": [
+        "server"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "capabilities": [
+        "runtime"
+      ],
+      "config_sha256": "4a43970cbe5f37d54ee79514a2b51c3303535a6a87bd78b7717fc44bbaed6b48",
+      "content_sha256": "4a98ebec1bf70fc06725104f840b3bde45b995b169a91a6ed78958f2b40f2877",
+      "data": {
+        "admission": "not-needed",
+        "required": false
+      },
+      "decision": "skip",
+      "dependencies": [
+        {
+          "id": "orphan",
+          "included": false,
+          "optional": false,
+          "range": "^1"
+        }
+      ],
+      "dlls": [],
+      "enabled": true,
+      "id": "leaf",
+      "kind": "shroudforge",
+      "lua": {
+        "admission": "refuse",
+        "required": true
+      },
+      "reasons": [
+        {
+          "causedBy": [],
+          "code": "plan:missing-dependency",
+          "message": "orphan: missing missing",
+          "severity": "warning"
+        }
+      ],
+      "requiredApis": [],
+      "requires180": false,
+      "root": "mods/leaf",
+      "saveSensitive": false,
+      "services": [],
+      "targets": [
+        "client",
+        "server"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "capabilities": [
+        "runtime"
+      ],
+      "config_sha256": "0f2c85ce658977fddfbd836d5e6a913859ca7be1ed205b7211cbc558a1af092b",
+      "content_sha256": "4ab67ddcd00153d61394ba8a1f8e9b842e006a21cdc8dbd9d1af9b9f355cbfe0",
+      "data": {
+        "admission": "not-needed",
+        "required": false
+      },
+      "decision": "candidate",
+      "dependencies": [],
+      "dlls": [],
+      "enabled": true,
+      "id": "lib",
+      "kind": "shroudforge",
+      "lua": {
+        "admission": "admit",
+        "required": true
+      },
+      "reasons": [],
+      "requiredApis": [],
+      "requires180": false,
+      "root": "mods/lib",
+      "saveSensitive": false,
+      "services": [],
+      "targets": [
+        "client",
+        "server"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "capabilities": [
+        "runtime"
+      ],
+      "config_sha256": "3fa777835c79c55fbe95777f08395018a832fe792a734acfed50eb41c05ea16f",
+      "content_sha256": "bdacbef18549cc1690c49b7d9cdf34e6cb2eb36bdb7fbb8e941a287711175e70",
+      "data": {
+        "admission": "not-needed",
+        "required": false
+      },
+      "decision": "candidate",
+      "dependencies": [
+        {
+          "id": "lib",
+          "included": true,
+          "optional": false,
+          "range": "^1.0.0"
+        }
+      ],
+      "dlls": [],
+      "enabled": true,
+      "id": "mod",
+      "kind": "shroudforge",
+      "lua": {
+        "admission": "admit",
+        "required": true
+      },
+      "reasons": [],
+      "requiredApis": [],
+      "requires180": false,
+      "root": "mods/mod",
+      "saveSensitive": false,
+      "services": [],
+      "targets": [
+        "client",
+        "server"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "capabilities": [
+        "runtime"
+      ],
+      "config_sha256": "0af67e23e3499b0a04bbf4162990501866070a3616d6ac28dc82ed98043e613f",
+      "content_sha256": "1f5d52df7620e06957cf0c54e0d2a4ba4e30ec699afc7b540bb4dac9584bee7b",
+      "data": {
+        "admission": "not-needed",
+        "required": false
+      },
+      "decision": "disabled",
+      "dependencies": [],
+      "dlls": [],
+      "enabled": false,
+      "id": "off",
+      "kind": "shroudforge",
+      "lua": {
+        "admission": "refuse",
+        "required": true
+      },
+      "reasons": [],
+      "requiredApis": [],
+      "requires180": false,
+      "root": "mods/off",
+      "saveSensitive": false,
+      "services": [],
+      "targets": [
+        "client"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "capabilities": [
+        "runtime"
+      ],
+      "config_sha256": "900fde34a1c6ffaddf060be031c54499ee7d7e6017d6ada49e7b0c4d3ca16563",
+      "content_sha256": "95ad2781767fe444caf3e7778f86c9e35ba12bc33f40842e0d91a7d813387462",
+      "data": {
+        "admission": "not-needed",
+        "required": false
+      },
+      "decision": "skip",
+      "dependencies": [
+        {
+          "id": "missing",
+          "included": false,
+          "optional": false,
+          "range": "^1"
+        }
+      ],
+      "dlls": [],
+      "enabled": true,
+      "id": "orphan",
+      "kind": "shroudforge",
+      "lua": {
+        "admission": "refuse",
+        "required": true
+      },
+      "reasons": [
+        {
+          "causedBy": [],
+          "code": "plan:missing-dependency",
+          "message": "orphan: missing missing",
+          "severity": "warning"
+        }
+      ],
+      "requiredApis": [],
+      "requires180": false,
+      "root": "mods/orphan",
+      "saveSensitive": false,
+      "services": [],
+      "targets": [
+        "client",
+        "server"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "capabilities": [
+        "patch"
+      ],
+      "config_sha256": "0f77b06dc0505a4f25e536155347e2d105340b497c2746367feea80e48e7a626",
+      "content_sha256": "c40106f779f0ea13c2b8b86a4395eb7adde6fe187c977425dd71d53dbed1fa29",
+      "data": {
+        "admission": "admit",
+        "required": true
+      },
+      "decision": "candidate",
+      "dependencies": [],
+      "dlls": [],
+      "enabled": true,
+      "id": "patch",
+      "kind": "shroudforge",
+      "lua": {
+        "admission": "not-needed",
+        "required": false
+      },
+      "reasons": [],
+      "requiredApis": [],
+      "requires180": false,
+      "root": "mods/patch",
+      "saveSensitive": false,
+      "services": [],
+      "targets": [
+        "client",
+        "server"
+      ],
+      "version": "1.0.0"
+    }
+  ],
+  "plan_id": "00000000-0000-4000-8000-000000000001",
+  "profile": {
+    "generation": 1,
+    "id": "vector",
+    "mode": "active",
+    "semantic_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "startupDialect": "shroudforge",
+  "warnings": [
+    {
+      "causedBy": [
+        "gone"
+      ],
+      "code": "save-sensitive-off",
+      "message": "off since the last activation; do not save",
+      "severity": "save-warning"
+    },
+    {
+      "causedBy": [],
+      "code": "inventory",
+      "message": "no parity catalog: API coverage is unknown",
+      "severity": "info"
+    }
+  ],
+  "writer": {
+    "component": "kiln-manage",
+    "version": "0.0.0-vector"
+  }
+}

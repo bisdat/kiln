@@ -1,0 +1,320 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sfi-state.schema.json",
+  "title": "kiln-sfi state (<game>/kiln/state/sfi.json), format 1",
+  "description": "What Kiln's interpreter (kiln-sfi) did this start, for the launcher, Kiln.Ui and support reports. kiln-sfi writes this file itself (crates/sfi/kiln-sfi/src/state), as every loader plugin writes its own kiln/state/<loader>.json (kiln-shroudforge shroudforge.json, kiln-eml eml.json). One writer, replaced whole and atomically (unique temp, flush, rename). The frozen backend selection is copied from the core's read-only kiln.launch table; kiln-sfi never decides it and never reads kiln/state/launch.json. Closed: an unknown field is refused, so a newer writer bumps format. Rules the schema says: committed data stays present (archivePresent true) whatever happens to the runtime later; unknown stays null and is never summarised as not applied; every unintended whole-package skip carries a warning; disabled and other-side rows are never skips. Rules only a reader can check: a package's warning.revision is at most warningRevision; launchId equals kiln.launch's; packages ids are unique.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "writer", "launch", "phase", "incomplete", "previousStart", "updatedMs", "warningRevision", "packages"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "format": { "const": 1 },
+    "writer": {
+      "enum": ["kiln-sfi", "kiln-core"],
+      "description": "kiln-sfi: the default; kiln-sfi writes the file and records only its own native surface in delivery. kiln-core: a core-owned notices registry mirrors the same record and can carry every surface's delivery: kept for a later generic follow-up, never written today (the core writes no sfi.json)."
+    },
+    "kilnSfi": { "type": "string", "minLength": 1, "maxLength": 64, "description": "The kiln-sfi build that wrote the file." },
+    "launch": { "$ref": "#/$defs/launch" },
+    "phase": {
+      "enum": ["starting", "running", "ended", "aside", "refused"],
+      "description": "starting: written before any package effect (incomplete true); kiln-sfi does not start packages if it cannot write this. running: the interpreter runs. ended: the final durable flush after the runtime stopped (incomplete false). aside: the frozen backend is not kiln, kiln-sfi does nothing this start. refused: the backend is kiln but kiln-sfi will not start (the held kiln-sfi.interpreter capability, a policy veto)."
+    },
+    "reason": { "$ref": "#/$defs/reason", "description": "Required with phase aside and refused: why kiln-sfi does not run." },
+    "incomplete": { "type": "boolean", "description": "True from the first write until the final durable flush. A file left true by a process that no longer runs is a start that died: the next start reports it as previousStart incomplete or suspect, never blaming the last mod logged." },
+    "previousStart": { "$ref": "#/$defs/previousStart" },
+    "startedMs": { "type": "integer", "minimum": 0, "description": "When kiln-sfi began, milliseconds since 1970." },
+    "updatedMs": { "type": "integer", "minimum": 0, "description": "When this file was written." },
+    "menu": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["by", "key"],
+      "description": "Who answers ShroudForge's mod-menu toggle (Local\\ShroudForge.ModMenu.Open.<pid>, owner decision D1) in kiln mode: Kiln.Ui's claim reader reads this as it reads shroudforge.json's menu/menuKey. Absent before kiln-sfi decides.",
+      "properties": {
+        "by": { "enum": ["kiln", "off", "unavailable"], "description": "kiln: Kiln.Ui's ShroudForge page answers it (the interpreter has no Modloader window). off / unavailable: nobody does this start (final)." },
+        "key": { "type": ["string", "null"], "maxLength": 64, "description": "The binding as SF writes it (\"SDL:66\"), or null for the default." }
+      }
+    },
+    "warningRevision": { "type": "integer", "minimum": 0, "description": "Raised whenever a warning is added or changes; surfaces show a warning again on a new revision. Never lowered within a launch." },
+    "packages": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/package" } },
+    "carriedSaveSensitive": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": { "$ref": "#/$defs/carried" },
+      "description": "aside and refused only: the save-sensitive packages active at the last kiln start, handed on unchanged from the file this start replaced (its active packages when it was a kiln record, its carriedSaveSensitive when it was aside, both when it was refused, each id once; empty when it was suspect or missing). The list written here is that list unchanged, never this start's own packages. This start ran none of them, so the next kiln start still compares against them: kiln, then hosted, then kiln with one switched off still warns. Package ids are unique."
+    },
+    "delivery": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/delivery" },
+      "description": "Which surfaces showed which warning revision. A surface records shown only after a frame drew it; initialised, queued or read is not shown."
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "phase": { "enum": ["starting", "running"] } }, "required": ["phase"] }, "then": { "properties": { "incomplete": { "const": true } } } },
+    { "if": { "properties": { "phase": { "enum": ["ended", "aside", "refused"] } }, "required": ["phase"] }, "then": { "properties": { "incomplete": { "const": false } } } },
+    { "if": { "properties": { "phase": { "enum": ["aside", "refused"] } }, "required": ["phase"] }, "then": { "required": ["reason"] } },
+    { "if": { "properties": { "phase": { "enum": ["ended", "aside", "refused"] } }, "required": ["phase"] }, "then": { "properties": { "packages": { "items": { "not": { "required": ["ownerEpoch"] } } } } } },
+    {
+      "if": { "properties": { "phase": { "const": "aside" } }, "required": ["phase"] },
+      "then": { "properties": { "launch": { "properties": { "backend": { "properties": { "selected": { "not": { "const": "kiln" } } } } } }, "packages": { "maxItems": 0 } } }
+    },
+    {
+      "if": { "properties": { "phase": { "enum": ["starting", "running", "ended", "refused"] } }, "required": ["phase"] },
+      "then": { "properties": { "launch": { "properties": { "backend": { "properties": { "selected": { "const": "kiln" } } } } } } }
+    },
+    {
+      "if": { "properties": { "phase": { "enum": ["starting", "running", "ended"] } }, "required": ["phase"] },
+      "then": { "not": { "required": ["carriedSaveSensitive"] } }
+    },
+    {
+      "if": { "properties": { "writer": { "const": "kiln-sfi" } }, "required": ["writer"] },
+      "then": { "properties": { "delivery": { "items": { "properties": { "surface": { "const": "native" } } } } } }
+    }
+  ],
+  "$defs": {
+    "sfId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,80}$",
+      "description": "A ShroudForge identifier: 1-80 ASCII letters, digits, '.', '-', '_' (SF 1.7.9 valid_identifier, create_mod_api.rs:383-389)."
+    },
+    "launchId": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "kiln.launch's launch id: its u64 as 16 lower-case hex digits, as kiln/state/launch.json writes it (a 64-bit id does not fit a JSON reader's double)." },
+    "code": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$", "description": "A stable machine word (kebab-case); the text beside it is for people." },
+    "reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "text"],
+      "properties": { "code": { "$ref": "#/$defs/code" }, "text": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+    },
+    "launch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["launchId", "planHash", "pid", "processStartMs", "side", "profile", "backend", "frozenAtMs"],
+      "properties": {
+        "launchId": { "oneOf": [{ "$ref": "#/$defs/launchId" }, { "type": "null" }], "description": "kiln.launch's launch id: correlates this file with launch.json, eml.json and the launcher's start. null only when source is absent (no kiln.launch, so no id)." },
+        "planHash": { "oneOf": [{ "$ref": "common.schema.json#/$defs/sha256" }, { "type": "null" }], "description": "The frozen launch plan's hash; null without a plan (no kiln.launch, legacy start)." },
+        "pid": { "type": "integer", "minimum": 0, "description": "The game process (the Windows pid under Wine and Proton)." },
+        "processStartMs": { "type": "integer", "minimum": 0, "description": "The process start time, milliseconds since 1970: with pid, the identity kiln-manage's StartIdentity pins (a reused pid is a different start)." },
+        "side": { "$ref": "common.schema.json#/$defs/runSide" },
+        "profile": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "generation"],
+              "properties": { "id": { "$ref": "common.schema.json#/$defs/profileId" }, "generation": { "type": "integer", "minimum": 0 } }
+            },
+            { "type": "null" }
+          ]
+        },
+        "backend": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["selected", "source", "reasonCode", "text"],
+          "description": "The frozen selection exactly as kiln.launch status() gave it.",
+          "properties": {
+            "selected": { "enum": ["hosted", "installed", "kiln", "none"] },
+            "source": { "enum": ["kiln.launch", "absent"], "description": "absent: this core has no kiln.launch table (an older core): the backend is none and kiln-sfi does nothing." },
+            "reasonCode": { "$ref": "#/$defs/code" },
+            "text": { "type": ["string", "null"], "maxLength": 4096 }
+          },
+          "if": { "properties": { "source": { "const": "absent" } }, "required": ["source"] },
+          "then": { "properties": { "selected": { "const": "none" } } }
+        },
+        "frozenAtMs": { "type": ["integer", "null"], "minimum": 0, "description": "kiln.launch's freeze stamp; null when source is absent." }
+      },
+      "if": { "properties": { "backend": { "properties": { "source": { "const": "absent" } }, "required": ["source"] } }, "required": ["backend"] },
+      "then": { "properties": { "launchId": { "type": "null" } } },
+      "else": { "properties": { "launchId": { "type": "string" } } }
+    },
+    "previousStart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["disposition", "launchId", "pid"],
+      "description": "What the file this start replaced said. clean: it ended. incomplete: it was left incomplete by a start that died. suspect: unreadable, corrupt, or a reused pid; nothing is concluded from it. none: no file.",
+      "properties": {
+        "disposition": { "enum": ["none", "clean", "incomplete", "suspect"] },
+        "launchId": { "oneOf": [{ "$ref": "#/$defs/launchId" }, { "type": "null" }], "description": "The replaced file's launch.launchId when it was readable; null for none, for a start without kiln.launch, and when nothing could be read." },
+        "pid": { "type": ["integer", "null"], "minimum": 0 }
+      },
+      "if": { "properties": { "disposition": { "const": "none" } }, "required": ["disposition"] },
+      "then": { "properties": { "launchId": { "type": "null" }, "pid": { "type": "null" } } }
+    },
+    "dll": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "state"],
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/dllName" },
+        "sha256": { "oneOf": [{ "$ref": "common.schema.json#/$defs/sha256" }, { "type": "null" }] },
+        "state": {
+          "enum": ["admitted", "loaded", "not-loaded", "refused", "failed", "retained", "foreign-owner"],
+          "description": "retained: loaded earlier this process and still mapped (a DLL is never unloaded). foreign-owner: another loader (XHL-Core, a standalone proxy) loaded these bytes."
+        }
+      }
+    },
+    "saveSensitive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "basis", "policyRow"],
+      "description": "Whether turning this package off can lose saved data. policy: an exact row of sfi-safety-policy.json (id, version and file hashes). unknown-mixed: data plus native code with no row, treated as save-sensitive while the policy's unknownMixedDataNative says so (owner decision D7).",
+      "properties": {
+        "value": { "type": "boolean" },
+        "basis": { "enum": ["policy", "unknown-mixed", "none"] },
+        "policyRow": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "version"],
+              "properties": { "id": { "$ref": "#/$defs/sfId" }, "version": { "type": "string", "minLength": 1, "maxLength": 64 } }
+            },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "basis": { "const": "policy" } }, "required": ["basis"] }, "then": { "properties": { "value": { "const": true }, "policyRow": { "type": "object" } } }, "else": { "properties": { "policyRow": { "type": "null" } } } },
+        { "if": { "properties": { "basis": { "const": "unknown-mixed" } }, "required": ["basis"] }, "then": { "properties": { "value": { "const": true } } } },
+        { "if": { "properties": { "basis": { "const": "none" } }, "required": ["basis"] }, "then": { "properties": { "value": { "const": false } } } }
+      ]
+    },
+    "carried": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "basis", "policyRow", "fromLaunchId"],
+      "description": "One save-sensitive package active at an earlier kiln start.",
+      "properties": {
+        "id": { "$ref": "#/$defs/sfId" },
+        "version": { "type": ["string", "null"], "minLength": 1, "maxLength": 64 },
+        "basis": { "enum": ["policy", "unknown-mixed"], "description": "As its saveSensitive.basis said; a carried package is save-sensitive, so never none." },
+        "policyRow": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "version"],
+              "properties": { "id": { "$ref": "#/$defs/sfId" }, "version": { "type": "string", "minLength": 1, "maxLength": 64 } }
+            },
+            { "type": "null" }
+          ]
+        },
+        "fromLaunchId": { "oneOf": [{ "$ref": "#/$defs/launchId" }, { "type": "null" }], "description": "The kiln start it was active in (that record's launch.launchId); null when it could not be read." }
+      },
+      "if": { "properties": { "basis": { "const": "policy" } }, "required": ["basis"] },
+      "then": { "properties": { "policyRow": { "type": "object" } } },
+      "else": { "properties": { "policyRow": { "type": "null" } } }
+    },
+    "skip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "text", "part", "chain", "late", "loader"],
+      "description": "Why a selected package does not run whole this start (a package that cannot run whole is skipped with its reason).",
+      "properties": {
+        "code": { "$ref": "#/$defs/code", "description": "dll-gate, missing-dependency, data-failure, authoritative-refusal, runtime-error, ..." },
+        "text": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "part": { "enum": ["package", "data", "lua", "dll"] },
+        "chain": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/sfId" }, "description": "The dependency chain that caused it, nearest first; empty for the package's own fault." },
+        "late": { "type": "boolean", "description": "Lost after it started (runtime error, watchdog), as opposed to skipped before." },
+        "loader": { "type": ["string", "null"], "pattern": "^[a-z0-9][a-z0-9.-]{0,31}$", "description": "Another loader that still runs part of it (\"xhl\": XHL-Core loads the DLL from native-plugin.ini); null when none." }
+      }
+    },
+    "warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "trigger", "presence", "saveSensitive", "text"],
+      "properties": {
+        "revision": { "type": "integer", "minimum": 1, "description": "The warningRevision that last changed this warning." },
+        "trigger": { "enum": ["skipped", "save-sensitive-off"], "description": "skipped: a selected package does not run whole. save-sensitive-off: a save-sensitive package active at the previous start is now disabled or absent." },
+        "presence": {
+          "enum": ["not-applied", "data-applied-runtime-stopped", "unknown"],
+          "description": "not-applied: proved absent from the game archive. data-applied-runtime-stopped: its startup data is still applied, its runtime stopped (cannot be undone until restart). unknown: could not be verified; never said as not applied."
+        },
+        "saveSensitive": { "type": "boolean", "description": "Equals the package's saveSensitive.value; adds the item/saved-data loss line." },
+        "text": { "type": "string", "minLength": 1, "maxLength": 8192, "description": "The whole warning for people: package, part, reason, chain; for a save-sensitive package \"Do not save while this mod is off; restore it and restart first.\" (a late loss with its data applied ends with \"... Do not save.\" whatever the package)" }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "name", "intent", "data", "lua", "dlls", "archivePresent", "runtimeActive", "saveSensitive", "skip", "warning"],
+      "properties": {
+        "id": { "$ref": "#/$defs/sfId" },
+        "version": { "type": ["string", "null"], "minLength": 1, "maxLength": 64 },
+        "name": { "type": ["string", "null"], "maxLength": 200, "description": "Display only; nothing matches on it." },
+        "intent": { "enum": ["selected", "disabled", "other-side", "absent"], "description": "What the profile asked for. absent: active at the previous start, gone from the profile now (listed only with a save-sensitive-off warning)." },
+        "data": { "enum": ["not-needed", "staged", "prepared", "committed", "cached-verified", "verified-restored", "excluded", "failed", "uncertain"] },
+        "lua": { "enum": ["not-needed", "admitted", "ready", "active", "failed", "excluded", "stopped"] },
+        "dlls": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/dll" } },
+        "archivePresent": { "type": ["boolean", "null"], "description": "Its data is in the game archive now: true, false, or null for unknown." },
+        "runtimeActive": { "type": ["boolean", "null"], "description": "Its Lua runtime runs now: true, false, or null for unknown." },
+        "saveSensitive": { "$ref": "#/$defs/saveSensitive" },
+        "skip": { "oneOf": [{ "$ref": "#/$defs/skip" }, { "type": "null" }] },
+        "warning": { "oneOf": [{ "$ref": "#/$defs/warning" }, { "type": "null" }] },
+        "ownerEpoch": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The reload epoch of the package's live runtime generation, the value the runtime expects in the UI envelope's ownerEpoch (sfi-ui-envelope.schema.json) of an action for this package. It changes on every live reload or unload and at every new runtime. Absent: the package has no live runtime now (never ran, failed, stopped, skipped, unloaded, or the record has ended), so a UI action for it is not sent. Only a row whose runtime is active holds one. A change is written at once (not after RUNNING_GAP), yet an action stamped with the old epoch just before a reload is still dropped: a reader that finds an action dropped as stale reads this file again."
+        }
+      },
+      "allOf": [
+        { "if": { "required": ["ownerEpoch"] }, "then": { "properties": { "lua": { "const": "active" }, "runtimeActive": { "const": true } } } },
+        { "if": { "properties": { "data": { "enum": ["committed", "cached-verified"] } }, "required": ["data"] }, "then": { "properties": { "archivePresent": { "const": true } } } },
+        { "if": { "properties": { "data": { "const": "uncertain" } }, "required": ["data"] }, "then": { "properties": { "archivePresent": { "type": "null" } } } },
+        { "if": { "properties": { "lua": { "const": "active" } }, "required": ["lua"] }, "then": { "properties": { "runtimeActive": { "const": true } } } },
+        { "if": { "properties": { "runtimeActive": { "const": true } }, "required": ["runtimeActive"] }, "then": { "properties": { "lua": { "const": "active" } } } },
+        {
+          "if": { "properties": { "intent": { "enum": ["disabled", "other-side", "absent"] } }, "required": ["intent"] },
+          "then": { "properties": { "skip": { "type": "null" }, "warning": { "anyOf": [{ "type": "null" }, { "properties": { "trigger": { "const": "save-sensitive-off" } } }] } } }
+        },
+        { "if": { "properties": { "intent": { "const": "other-side" } }, "required": ["intent"] }, "then": { "properties": { "warning": { "type": "null" } } } },
+        {
+          "if": { "properties": { "intent": { "const": "selected" } }, "required": ["intent"] },
+          "then": { "properties": { "warning": { "anyOf": [{ "type": "null" }, { "properties": { "trigger": { "const": "skipped" } } }] } } }
+        },
+        {
+          "if": { "properties": { "intent": { "const": "selected" }, "skip": { "type": "object" } }, "required": ["intent", "skip"] },
+          "then": { "properties": { "warning": { "type": "object" } } }
+        },
+        {
+          "if": { "properties": { "warning": { "type": "object", "properties": { "trigger": { "const": "skipped" } } } }, "required": ["warning"] },
+          "then": { "properties": { "skip": { "type": "object" } } }
+        },
+        {
+          "if": { "properties": { "warning": { "type": "object", "properties": { "trigger": { "const": "save-sensitive-off" } } } }, "required": ["warning"] },
+          "then": { "properties": { "saveSensitive": { "properties": { "value": { "const": true } } } } }
+        },
+        {
+          "if": { "properties": { "warning": { "type": "object", "properties": { "presence": { "const": "not-applied" } } } }, "required": ["warning"] },
+          "then": { "properties": { "archivePresent": { "const": false } } }
+        },
+        {
+          "if": { "properties": { "warning": { "type": "object", "properties": { "presence": { "const": "data-applied-runtime-stopped" } } } }, "required": ["warning"] },
+          "then": { "properties": { "archivePresent": { "const": true }, "runtimeActive": { "const": false } } }
+        },
+        {
+          "if": { "properties": { "warning": { "type": "object", "properties": { "presence": { "const": "unknown" } } } }, "required": ["warning"] },
+          "then": { "properties": { "archivePresent": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "warning": { "type": "object" }, "saveSensitive": { "properties": { "value": { "const": true } } } }, "required": ["warning", "saveSensitive"] },
+          "then": { "properties": { "warning": { "properties": { "saveSensitive": { "const": true } } } } },
+          "else": { "properties": { "warning": { "anyOf": [{ "type": "null" }, { "properties": { "saveSensitive": { "const": false } } }] } } }
+        }
+      ]
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surface", "revision", "state", "worldSession", "atMs"],
+      "properties": {
+        "surface": { "enum": ["native", "kiln-ui", "launcher"], "description": "native: kiln-sfi's own fallback banner through public kiln.ui (owner decision D9). kiln-ui and launcher: only a D2(b) core registry records these here; under D2(a) those surfaces keep their own records." },
+        "revision": { "type": "integer", "minimum": 0 },
+        "state": { "enum": ["pending", "shown", "not-shown"], "description": "not-shown: no usable overlay (ui.overlay off, crash guard); the next launcher Play repeats the warning." },
+        "worldSession": { "type": ["integer", "null"], "minimum": 0, "description": "The world session it was shown in; null at the main menu or when not shown." },
+        "atMs": { "type": ["integer", "null"], "minimum": 0 }
+      },
+      "if": { "properties": { "state": { "const": "shown" } }, "required": ["state"] },
+      "then": { "properties": { "atMs": { "type": "integer" } } }
+    }
+  }
+}
