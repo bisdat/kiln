@@ -47,6 +47,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "gamedata.h"
@@ -56,6 +57,7 @@
 #include "kiln_boot_collector.hpp"
 #include "refs.h"
 #include "registry/boot_hooks.h"
+#include "registry/claims.h"
 #include "services/kiln_assets.h"
 #include "services/kiln_caps.h"
 
@@ -777,7 +779,15 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
     // the mod, the value), components added or removed ("|<component, lower-case>": "+" / "-"), paths that start at a
     // component ("|<component>": the path, "set" / "append"), documents that add or remove components ("": which), paths
     // that name a component by its place in the list ("": the path)
-    std::map<std::string, std::vector<Claim>> fields, components, uses, structure, by_place;
+    std::map<std::string, std::vector<Claim>> components, uses, structure, by_place;
+    // fields set, by "<resource key>|<normalised path without indices>": per index the claims in order, and the claims with a
+    // "*" (they meet every index): a set asks its own index and the starred ones, not every earlier claim on those members
+    struct FieldClaims {
+        std::map<std::string, std::vector<std::pair<uint64_t, Claim>>> exact;
+        std::vector<std::pair<uint64_t, Claim>> starred, all;
+    };
+    std::unordered_map<std::string, FieldClaims> fields;
+    uint64_t field_order = 0;
     struct ListClaim {
         std::string res, mod, path;
         std::vector<Seg> place;  // normalised
@@ -785,6 +795,27 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
     };
     // lists appended to; lists set with [*] (the list's place); lists cleared or replaced; every set's place
     std::vector<ListClaim> appended, starred, reshaped, set_places;
+    // The same claims in the registry's claim index (registry/claims.h, P1-PLAN 5.3): per resource a trie of the places, so a
+    // question walks one path instead of every earlier claim. Its answer is the earliest claim that meets (the lowest seq,
+    // the order the vectors hold them in), so every refusal names the mod and path the scans named. A place deeper than the
+    // index keeps (kMaxSegs segments) turns the index off for this prepare: the vectors are scanned as before.
+    registry::ClaimIndex index;
+    bool deep = false;
+    using RClaim = registry::Claim;
+    using RKind = registry::ClaimKind;
+    auto rsegs = [&](const std::vector<Seg>& v) {
+        std::vector<registry::Seg> out;
+        out.reserve(v.size());
+        for (const Seg& s : v) out.push_back({s.s, s.index});
+        if (v.size() > registry::kMaxSegs) deep = true;
+        return out;
+    };
+    auto claim = [&](const std::string& res, const std::vector<Seg>& place, RKind kind, const std::string& mod, const std::string& path, const std::string& value) {
+        index.add(res, rsegs(place), RClaim{0, mod, kind, path, value});
+    };
+    auto what_of = [](const RClaim& c) { return std::string(c.kind == RKind::Clear ? "clear" : "replace"); };
+    // where each resource's patch is in plan->resources (the vector keeps the envelope's order)
+    std::unordered_map<std::string, size_t> res_at;
     // each mod's files first, then what its OnBoot staged; a key both have stays the file's
     std::vector<kiln::boot::Doc> docs;
     try {
@@ -1030,6 +1061,50 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
                 // two mods on one list
                 const std::vector<Seg> place = normalised(segs, rp.tmpl);
                 const std::string dump = clear ? std::string() : spec["values"].dump();
+                const std::vector<registry::Seg> P = rsegs(place);
+                if (!deep) {
+                    const std::string owner = d.owner;
+                    auto other = [&](std::initializer_list<RKind> kinds) {
+                        return [owner, kinds = std::vector<RKind>(kinds)](const RClaim& c) {
+                            return c.mod != owner && std::find(kinds.begin(), kinds.end(), c.kind) != kinds.end();
+                        };
+                    };
+                    const auto reshaping = other({RKind::Clear, RKind::Replace});
+                    const RClaim* best = nullptr;
+                    bool at_same = false;
+                    auto take = [&](const RClaim* c, bool same) {
+                        if (c && (!best || c->seq < best->seq)) best = c, at_same = same;
+                    };
+                    take(index.same_place(res_key, P, [&](const RClaim& c) {
+                        return reshaping(c) && (append || what_of(c) != w || (c.value != dump && nlohmann::json::parse(c.value) != spec["values"]));
+                    }), true);
+                    take(index.list_through(res_key, P, reshaping), false);
+                    if (!append) take(index.below_list(res_key, P, reshaping), false);
+                    if (best && at_same)
+                        return refused(path, "Conflict: mod " + best->mod + " " + verb_of(what_of(*best)) + " this list of " + res_key + " (\"" + best->path +
+                                                 "\"); two mods on one list are not combined (the same " + what_of(*best) + " from both is)");
+                    if (best)
+                        return refused(path, "Conflict: mod " + best->mod + " " + verb_of(what_of(*best)) + " \"" + best->path + "\" of " + res_key +
+                                                 ", which this path goes through or holds; the later mod is refused");
+                    if (append) {
+                        if (const RClaim* a = index.same_place(res_key, P, other({RKind::Append})))
+                            return refused(path, "Conflict: mod " + a->mod + " appends to this list of " + res_key + " too (\"" + a->path +
+                                                     "\"); two mods on one list are not combined");
+                        if (const RClaim* s = index.same_place(res_key, P, other({RKind::Starred})))
+                            return refused(path, "Conflict: mod " + s->mod + " sets every element of this list of " + res_key + " (\"" + s->path +
+                                                     "\"), which would change what is appended here too; the later mod is refused");
+                    } else {
+                        for (const RKind k : {RKind::Append, RKind::Set}) {
+                            best = nullptr;
+                            take(index.same_place(res_key, P, other({k})), true);
+                            take(index.below_list(res_key, P, other({k})), false);
+                            if (best)
+                                return refused(path, "Conflict: mod " + best->mod + (k == RKind::Append ? " appends to \"" : " sets \"") + best->path + "\" of " +
+                                                         res_key + ", and this patch " + verb_of(w) + " that list; the later mod is refused");
+                        }
+                    }
+                }
+                if (deep)
                 for (const ListClaim& r : reshaped) {
                     if (r.res != res_key || r.mod == d.owner) continue;
                     // the same values are the same replace however they are written (1 and 1.0)
@@ -1041,22 +1116,24 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
                                                  ", which this path goes through or holds; the later mod is refused");
                 }
                 if (append) {
-                    for (const ListClaim& a : appended)
+                    for (const ListClaim& a : deep ? appended : std::vector<ListClaim>())
                         if (a.res == res_key && a.mod != d.owner && same_place(a.place, place))
                             return refused(path, "Conflict: mod " + a.mod + " appends to this list of " + res_key + " too (\"" + a.path +
                                                      "\"); two mods on one list are not combined");
-                    for (const ListClaim& s : starred)
+                    for (const ListClaim& s : deep ? starred : std::vector<ListClaim>())
                         if (s.res == res_key && s.mod != d.owner && same_place(s.place, place))
                             return refused(path, "Conflict: mod " + s.mod + " sets every element of this list of " + res_key + " (\"" + s.path +
                                                      "\"), which would change what is appended here too; the later mod is refused");
                     appended.push_back({res_key, d.owner, path, place, "", ""});
+                    claim(res_key, place, RKind::Append, d.owner, path, "");
                 } else {
                     for (const auto* claims : {&appended, &set_places})
-                        for (const ListClaim& o : *claims)
+                        for (const ListClaim& o : deep ? *claims : std::vector<ListClaim>())
                             if (o.res == res_key && o.mod != d.owner && (same_place(o.place, place) || through(place, o.place)))
                                 return refused(path, "Conflict: mod " + o.mod + (claims == &appended ? " appends to \"" : " sets \"") + o.path + "\" of " +
                                                          res_key + ", and this patch " + verb_of(w) + " that list; the later mod is refused");
                     reshaped.push_back({res_key, d.owner, path, place, w, dump});
+                    claim(res_key, place, clear ? RKind::Clear : RKind::Replace, d.owner, path, dump);
                 }
                 dp.ops.push_back(std::move(op));
             }
@@ -1081,41 +1158,78 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
             if (unknown && is_op(value) && value.empty()) return refused(path, "an empty operation object");
             const std::vector<Seg> place = normalised(segs, rp.tmpl);
             const std::string norm = text_of(place);
-            // two mods, one field
-            auto& list = fields[res_key + "|" + base_of(norm)];
+            // two mods, one field: the earliest earlier claim on the same members whose indices meet this one's
+            FieldClaims& fc = fields[res_key + "|" + base_of(norm)];
             const std::string ix = index_of(norm), dump = value.dump();
-            for (const Claim& c : list)
-                if (c.mod != d.owner && overlap(c.index, ix) && (c.value != dump || c.index != ix || is_op(value)))
-                    return refused(path, "Conflict: mod " + c.mod + " sets this field of " + res_key + " too (" + c.value +
-                                             "); two mods on one field are not combined");
-            list.push_back({ix, d.owner, dump});
+            auto meets = [&](const Claim& c) { return c.mod != d.owner && overlap(c.index, ix) && (c.value != dump || c.index != ix || is_op(value)); };
+            const Claim* hit = nullptr;
+            uint64_t hit_at = 0;
+            if (ix.find('*') != std::string::npos) {  // a "*" meets every index: every claim on these members, in order
+                for (const auto& [at, c] : fc.all)
+                    if (meets(c)) {
+                        hit = &c;
+                        break;
+                    }
+            } else {
+                if (const auto ex = fc.exact.find(ix); ex != fc.exact.end())
+                    for (const auto& [at, c] : ex->second)
+                        if (meets(c)) {
+                            hit = &c, hit_at = at;
+                            break;
+                        }
+                for (const auto& [at, c] : fc.starred)
+                    if (meets(c)) {
+                        if (!hit || at < hit_at) hit = &c, hit_at = at;
+                        break;
+                    }
+            }
+            if (hit)
+                return refused(path, "Conflict: mod " + hit->mod + " sets this field of " + res_key + " too (" + hit->value +
+                                         "); two mods on one field are not combined");
+            fc.all.emplace_back(field_order, Claim{ix, d.owner, dump});
+            (ix.find('*') != std::string::npos ? fc.starred : fc.exact[ix]).emplace_back(field_order, Claim{ix, d.owner, dump});
+            ++field_order;
             // a list another mod clears or replaces: its elements are not the game's any more
-            for (const ListClaim& r : reshaped)
+            const std::vector<registry::Seg> P = rsegs(place);
+            if (!deep) {
+                const std::string owner = d.owner;
+                if (const RClaim* r = index.list_through(res_key, P, [&](const RClaim& c) { return c.mod != owner && (c.kind == RKind::Clear || c.kind == RKind::Replace); }))
+                    return refused(path, "Conflict: mod " + r->mod + " " + verb_of(what_of(*r)) + " the list \"" + r->path + "\" of " + res_key +
+                                             " this path goes through; the later mod is refused");
+            }
+            for (const ListClaim& r : deep ? reshaped : std::vector<ListClaim>())
                 if (r.res == res_key && r.mod != d.owner && through(r.place, place))
                     return refused(path, "Conflict: mod " + r.mod + " " + verb_of(r.what) + " the list \"" + r.path + "\" of " + res_key +
                                              " this path goes through; the later mod is refused");
             set_places.push_back({res_key, d.owner, path, place, "set", ""});
+            claim(res_key, place, RKind::Set, d.owner, path, "");
             // [*] over a list another mod appends to would change the appended values too: the later mod is refused
             // ([i] names the same element either way, and is not)
             for (size_t j = 0; j < place.size(); ++j) {
                 if (!place[j].index || place[j].s != "*") continue;
                 const std::vector<Seg> listp(place.begin(), place.begin() + static_cast<std::ptrdiff_t>(j));
-                for (const ListClaim& a : appended)
-                    if (a.res == res_key && a.mod != d.owner && same_place(a.place, listp))
-                        return refused(path, "Conflict: mod " + a.mod + " appends to this list of " + res_key + " (\"" + a.path +
+                const std::vector<registry::Seg> LP = rsegs(listp);
+                const std::string owner = d.owner;
+                const RClaim* a = deep ? nullptr : index.same_place(res_key, LP, [&](const RClaim& c) { return c.mod != owner && c.kind == RKind::Append; });
+                if (a)
+                    return refused(path, "Conflict: mod " + a->mod + " appends to this list of " + res_key + " (\"" + a->path +
+                                             "\"), and [*] would change the appended values too; the later mod is refused (name elements by index)");
+                for (const ListClaim& x : deep ? appended : std::vector<ListClaim>())
+                    if (x.res == res_key && x.mod != d.owner && same_place(x.place, listp))
+                        return refused(path, "Conflict: mod " + x.mod + " appends to this list of " + res_key + " (\"" + x.path +
                                                  "\"), and [*] would change the appended values too; the later mod is refused (name elements by index)");
                 starred.push_back({res_key, d.owner, path, listp, "", ""});
+                claim(res_key, listp, RKind::Starred, d.owner, path, "");
             }
             dp.sets.push_back({path, value});
         }
-        auto same = std::find_if(plan->resources.begin(), plan->resources.end(), [&](const ResPatch& o) {
-            return std::memcmp(&o.res, &rp.res, sizeof rp.res) == 0;
-        });
-        if (same == plan->resources.end()) {
+        const std::string res_bytes(reinterpret_cast<const char*>(&rp.res), sizeof rp.res);
+        if (const auto at = res_at.find(res_bytes); at != res_at.end()) {
+            plan->resources[at->second].docs.push_back(std::move(dp));
+        } else {
+            res_at.emplace(res_bytes, plan->resources.size());
             rp.docs.push_back(std::move(dp));
             plan->resources.push_back(std::move(rp));
-        } else {
-            same->docs.push_back(std::move(dp));
         }
     }
     // what only the game's data can say, against the base view of this start's data when it has one (none: the bytes say it)

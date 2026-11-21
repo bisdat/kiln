@@ -14,6 +14,7 @@ export KILN_OUT
 out=$KILN_OUT/content-tests
 mkdir -p "$out"
 bash "$here/bootpatch_test.sh"
+bash "$here/bootpatch_equiv_test.sh"
 bash "$here/bootstruct_test.sh"
 bash "$here/bootview_test.sh"
 # resource patches in a kiln-backend start (the committed archive generation)
