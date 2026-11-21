@@ -20,7 +20,9 @@ foreach (var t in GameTypes.Search("player input")) ...    // every word, any or
 GameTypes.Components; GameTypes.Events;                    // the game's ECS component and event types
 ```
 Any thread. Fail soft: `GameTypes.Available` is false and every query returns nothing when the table is not found;
-`GameTypes.Status` says why.
+`GameTypes.Status` says why. The game's type table does not change while the process runs, so `Find` remembers a name
+it found (a dictionary lookup afterwards; an unknown name asks kiln.types again), `All`, `Components` and `Events` are
+read-only lists built once, and a type's `AllFields`, `Field(name)` and `Resolved` are worked out once per type.
 
 ### Impact names (since 0.2.0-dev.28)
 The name Impact scripts use for a type (the name an Impact variable's type hash is made from): `ecs.Health` for
@@ -120,6 +122,19 @@ a registered ECS event, its complete reflected size, a matching world stream, va
 layout. Game-owned strings, dynamic arrays and variants are refused. Unknown hashes would crash the distributor.
 The C# API initializes unnamed fields to zero, including `timeStamp`; supply a timestamp explicitly when needed.
 The Lua adapter fills `timeStamp` from the supported game clock. A full queue returns false. Tick thread.
+
+What a call costs, so it can run every step:
+
+| Call | Per call |
+|---|---|
+| `GameEvents.Each("Name", h)` | a dictionary lookup for the name and a set lookup for "is an event", then one native `event_each`; a step without such events allocates nothing per event |
+| `GameEvents.Each(type, h)`, `GameEvents.Post(type, fields)` (since 0.2.0-dev.30.3, mod API 0.2.13) | the same without the name lookup: resolve the type once (`GameTypes.Find`) and keep it |
+| `e["field.path"]` on an event copy | a dictionary lookup per path part (the fields of a type are worked out once) |
+| `GameTypes.Find`, `Events`, `Components`, `All` | a dictionary lookup, or the list built once |
+
+Before 0.2.0-dev.30.3 every `Each` and `Post` by name read the whole list of event types again to check one name:
+48-67 ms a step on a hosted world (issue #114). A mod for older Kilns can listen through `Events.On<T>` instead, or
+call `Each` only every few steps.
 
 ## Commands (Kiln.DevTools)
 | Command | Permission | What |
