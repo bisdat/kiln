@@ -385,3 +385,58 @@ fn play_once_keeps_the_lua_mods_copies() {
     profile::save(&dirs, &same).unwrap();
     profile::write_once(&dirs, &same.id, &g).unwrap();
 }
+
+/// PepegaJedi's report (0.2.0-dev.30.1): Mage Skills 1.0.0, an EMF Lua mod that needs \`lua >=1.36\`, added without EMF's
+/// lua mod; kiln-emf rejected it at the start ("needs lua, which is not installed"). The preview says so before Play,
+/// from the mod.json, with what to get, and counts EMF's lua mod in the Library and in the game's emf/mods.
+#[test]
+fn the_preview_names_an_emf_mods_missing_dependency_before_play() {
+    use kiln_manage::emf_deps::{DepState, EMF_PAGE};
+    use kiln_manage::manifest::RunSide;
+    let t = tmp("deps");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let g = game(&t.0);
+    let src = t.0.join("src/mage_skills");
+    put(&src, "mod.json", br#"{"id": "mage_skills", "name": "Mage Skills", "version": "1.0.0", "emf": 43, "side": "both",
+        "main": "main.lua", "depends": {"lua": ">=1.36"}}"#);
+    put(&src, "main.lua", b"-- spells\n");
+    let mage = import_one(&dirs, &src, "mage_skills");
+    let mut p = profile::create(&dirs, "deps", None).unwrap();
+    p.mods.emf = vec![pm(&mage, true)];
+    let problems = |p: &profile::Profile| profile::resolve_preview_in(&dirs, p, RunSide::Client, Some(&g.path)).unwrap().emf;
+
+    let out = problems(&p);
+    assert_eq!(out.len(), 1, "{out:#?}");
+    assert_eq!((out[0].id.as_str(), out[0].dep.as_str(), out[0].range.as_str(), out[0].state), ("mage_skills", "lua", ">=1.36", DepState::Missing));
+    assert_eq!((out[0].dep_name.as_deref(), out[0].with_emf, out[0].url.as_deref()), (Some("EMF's lua mod"), true, Some(EMF_PAGE)));
+    assert_eq!(out[0].reason, "needs lua, which is not installed");
+    // without a game the Library alone counts (the studio's and tests' preview)
+    assert_eq!(profile::resolve_preview(&dirs, &p, RunSide::Client).unwrap().emf, out);
+    // switched off: nothing to say
+    p.mods.emf[0].enabled = false;
+    assert_eq!(problems(&p), vec![]);
+    p.mods.emf[0].enabled = true;
+
+    // EMF 0.6.8's lua 1.33 from the Library: too old; switched off: off
+    let host_src = t.0.join("src/lua");
+    lua_host(&host_src);
+    let host = import_one(&dirs, &host_src, "lua");
+    p.mods.emf.push(pm(&host, true));
+    let out = problems(&p);
+    assert_eq!((out[0].state, out[0].found.as_deref(), out[0].dep_name.as_deref()), (DepState::TooOld, Some("1.33.0"), Some("Lua Scripts")));
+    p.mods.emf[1].enabled = false;
+    assert_eq!(problems(&p)[0].state, DepState::Off);
+
+    // a newer lua in the game's emf/mods, with the profile's EMF drop-ins on: in range (the profile's switched-off entry
+    // still comes first, as kiln-emf takes it first)
+    p.mods.emf.truncate(1);
+    put(&g.path, "emf/mods/lua/mod.json", br#"{"id": "lua", "name": "Lua Scripts", "version": "1.39.0", "emf": 20}"#);
+    put(&g.path, "emf/mods/lua/lua.dll", &build_test_dll(&["emf_mod_load"], b""));
+    p.dropins = vec![ModKind::Emf];
+    p.dropins_engines = true;
+    assert_eq!(problems(&p), vec![]);
+    // drop-ins off: kiln-emf does not read emf/mods
+    p.dropins = vec![];
+    p.dropins_engines = true;
+    assert_eq!(problems(&p)[0].state, DepState::Missing);
+}

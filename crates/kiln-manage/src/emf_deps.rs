@@ -292,7 +292,12 @@ fn read_deps(j: &serde_json::Value) -> Result<Vec<Dep>, String> {
     };
     let mut out = Vec::new();
     match j {
-        serde_json::Value::Object(o) => for (k, v) in o { add(&mut out, k, v)?; },
+        // nlohmann's objects are ordered by key, as written (upper case before lower case): EMF checks them so
+        serde_json::Value::Object(o) => {
+            let mut keys: Vec<&String> = o.keys().collect();
+            keys.sort();
+            for k in keys { add(&mut out, k, &o[k.as_str()])?; }
+        }
         serde_json::Value::Array(a) => for e in a {
             match e {
                 serde_json::Value::String(s) => add(&mut out, s, &serde_json::Value::Null)?,

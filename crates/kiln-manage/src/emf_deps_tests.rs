@@ -145,9 +145,10 @@ fn mod_json_is_read_as_emf_reads_it() {
     let m = read_folder(&t.0.join("mage"), Some("mage-skills"), true).unwrap();
     assert_eq!((m.id.as_str(), m.name.as_str(), m.version.as_str(), m.entry.as_deref()), ("mage_skills", "Mage Skills", "1.0.0", Some("mage-skills")));
     assert_eq!(m.broken, None);
+    // in EMF's order: by the key as written ("LUA" before "beastmaster"), the id then in lower case
     assert_eq!(m.deps, vec![
-        Dep { id: "beastmaster".into(), range: "^1.2".into(), optional: true, url: Some("https://www.nexusmods.com/enshrouded/mods/1".into()) },
         Dep { id: "lua".into(), range: ">=1.36".into(), optional: false, url: None },
+        Dep { id: "beastmaster".into(), range: "^1.2".into(), optional: true, url: Some("https://www.nexusmods.com/enshrouded/mods/1".into()) },
     ]);
     // a list form, and a link that is no web page
     put(&t.0, "list/mod.json", r#"{"id": "l", "version": "1", "dependencies": ["lua", {"id": "x", "version": "~2", "url": "file:///c:/x"}]}"#);
