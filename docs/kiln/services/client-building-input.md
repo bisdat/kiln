@@ -5,11 +5,12 @@ own input: `building_input_submit`, `building_input_status` and `building_input_
 `native/core/abi/services/kiln_client.h`. Kiln's interpreter for ShroudForge mods uses them for a ShroudForge mod's
 `runtime.world.building.submit / status / cancel`, and Kiln.Client's `BuildingInput` is their C# layer.
 
-**Since 0.2.0-dev.30.3 the input producer is bound on game client 26430625**, and
-**held by the client gate until its guided checks pass in a real game**
-([why and how to lift it](#held-until-its-guided-checks-pass)). While it is held nothing is hooked and every call
-answers `KILN_ERR_UNAVAILABLE`, as on a build without the producer. The SDK's `kiln_client.h` still leaves the members
-out (they sit in its `kiln-internal` blocks), so a mod built on the SDK sees the 56-byte kiln.client table. Adapted from
+**Since 0.2.0-dev.30.3 this is a supported public API, bound on game client 26430625.** The SDK's `kiln_client.h`
+has the members and `KilnBuildingInput` (the 80-byte kiln.client table). Kiln hooks the input path only at the first
+request of the process ([the lazy producer](#the-lazy-producer)): a game without a mod that builds never has the hook.
+**Not checked in a real game yet:** host tests, C# tests over a stand-in table and Windows tests of the input path's
+copies cover it; its guided checks in the client pass ([client-pass.md](../client-pass.md#building-input)) are what a
+real game has not confirmed. Tell us what you see. Adapted from
 ShroudForge by bonsaibauer, MIT (1.7.9 `modules/game-runtime/native/player-input/apply_building_input.cpp`).
 
 ## Members
@@ -36,8 +37,9 @@ session) or `KilnClientState.client_session`.
 2. `KILN_ERR_REVOKED`: the owner was revoked. Also when the revoke lands while submit runs: the request it had
    queued is cancelled as for a revoked owner (asked again once the request is in the slot, so the owner-retiring
    callback cannot miss it).
-3. `KILN_ERR_UNAVAILABLE`: a dedicated server, safe idle, or no producer bound to this build. This comes before every
-   field rule, so on a build without a producer every request answers it.
+3. `KILN_ERR_UNAVAILABLE`: a dedicated server, safe idle, or no producer on this build (none bound and none ready
+   for its first request, or a first install that failed). This comes before every field rule, so on a build without
+   a producer every request answers it.
 4. `KILN_ERR_INVALID_ARGUMENT`: a field outside ShroudForge's rules:
    - player 0, action above 4, slot above 255, `reserved` not 0;
    - SELECT without an item;
@@ -48,7 +50,9 @@ session) or `KilnClientState.client_session`.
    SELECT and UNDO ignore the transform, as ShroudForge does.
 5. `KILN_CLIENT_ERR_BUILDING_STALE` (201): no client world is live, its session already stopped, or `expected_session`
    names another session.
-6. `KILN_CLIENT_ERR_BUILDING_BUSY` (200): a request of any owner is queued or pressed.
+6. Only now, on the process's first request that got this far: the producer is hooked
+   ([the lazy producer](#the-lazy-producer)). `KILN_ERR_UNAVAILABLE` when that install was refused or failed.
+7. `KILN_CLIENT_ERR_BUILDING_BUSY` (200): a request of any owner is queued or pressed.
 
 **status and cancel:** `KILN_ERR_INVALID_ARGUMENT` (no out, owner 0), `KILN_ERR_REVOKED`, then `KILN_ERR_UNAVAILABLE` (a
 dedicated server or safe idle). Otherwise `KILN_OK`; any id but the caller's latest answers `UNKNOWN` and is not cancelled.
@@ -84,7 +88,8 @@ There is one request slot for the whole client. Ids start at 1, grow by one and 
 
 ## Threads
 
-- **Callers.** submit, status and cancel hold the slot's mutex for a copy only.
+- **Callers.** submit, status and cancel hold the slot's mutex for a copy only. The process's first submit that passes
+  the checks above also installs the producer (below), a few milliseconds once.
 - **The producer** runs on the client's main thread inside the local input observation (`client_input.h`):
   - it only try-locks the slot, and skips the visit when a caller holds it (counted);
   - it allocates nothing, logs nothing, runs no mod code and no Lua, and touches game memory only through SEH-guarded
@@ -122,30 +127,42 @@ there is one visit per step, so a press goes out in one message and its release 
 - **The server decides.** This is input, not a server-side build: the server checks permissions, resources, range and
   placement exactly as for the player's own input. `DISPATCHED` means "sent as input", not "built".
 
-## Held until its guided checks pass
+## The lazy producer
 
-`client.building_input` is in the client gate's list (`native/core/gates/client-input.json`, client side only) with the
-checks `building-input.select`, `building-input.place-remove`, `building-input.undo-dismantle`, `building-input.own-input`
-and `building-input.joined` (`mods/tests/client-pass/BuildingInput.cs`). While it is held:
-- the local input observation is not installed and the producer stays unbound;
-- `client.building_input` reads `unavailable`, `policy`, "game test pending: ..." with those check ids;
-- C#'s `BuildingInput.Available` is false and kiln mode's `runtime.world.building.*` answer unavailable.
+At its start kiln.client only checks that this build has the observation point, the local player and the layout, and
+reads the layout; it hooks nothing. The producer's kiln.hooks mid link goes in at the first `building_input_submit`
+of the process that passes the argument, owner and session checks: Kiln.Client's `BuildingInput` and kiln mode's
+`runtime.world.building.submit` both come through it. A player without such a mod never gets the hook, and
+`building_input_status` and `_cancel` never install it.
 
-`"preview": ["client.building_input"]` (or `true`) in `kiln/kiln.json` (in the game folder) lifts it for one game, for the guided pass.
-The row is removed from the list in the commit that records the pass.
+- **Once.** Concurrent first submits wait for the one install (its own mutex, never the slot's), then go on; one of
+  them gets the slot and the others answer busy. Later submits never install again.
+- **Checked.** The install is a checked kiln.hooks installation. When kiln.rules' camera check already placed the
+  detour on the same instruction, only kiln.hooks' cells change. Otherwise the first detour is written with every other
+  thread of the game stopped and checked to stand outside the bytes it replaces; nothing is written when a thread could
+  not be checked.
+- **Refused or failed.** A refusal for threads it could not check answers that submit `KILN_ERR_UNAVAILABLE` and lets a
+  later submit try again, three attempts in all. Any other failure, or the third refusal, is final until the game
+  restarts: every later submit answers `KILN_ERR_UNAVAILABLE`, and `client.building_input` turns unavailable with
+  the reason (kiln.log has the details).
+
+A client gate row (`native/core/gates`) could still hold `client.building_input`; none does since 0.2.0-dev.30.3
+(`"preview"` in `kiln/kiln.json` would lift such a hold, and naming it now does nothing).
 
 ## Capability row
 
-`client.building_input` (core, static). The causes, in the order they are checked:
+`client.building_input` (core; built at the start, then it follows the producer at every registry call). The causes, in
+the order they are checked:
 
 | Cause | Row |
 |---|---|
-| held by the client gate (above) | `policy`, "game test pending: ..." |
 | safe idle | `policy`, "not started in safe idle: ..." |
 | a dedicated server | `wrong-side` |
 | kiln.client did not start | `service-missing` |
-| no producer bound | `symbol-missing`, with the reason: sigdb has no `client.input_observation` for this build, the local player is not known on it (`client.local_player`), or hooking the observation point failed |
-| otherwise | `available` |
+| no producer on this build | `symbol-missing`, with the reason: sigdb has no `client.input_observation` for this build, the local player is not known on it (`client.local_player`), or a layout constant is off |
+| a first install that failed (above) | `symbol-missing`, with the failure's reason |
+| ready, not hooked yet | `available`, "... it is hooked at the first request" |
+| bound | `available`, "the input producer is bound to this game build" |
 
 ## Tests
 
@@ -153,8 +170,9 @@ The row is removed from the list in the commit that records the pass.
 |---|---|
 | members, producer, the unbound reasons and threads | `native/core/tests/test-client-building-input.sh asan` and `tsan` (`client_building_input_test.cpp`) |
 | Windows guarded copies, the selection and the observation point's visit (the version read through the input object and the client world; faults skip the visit) | `client_input_windows_host.cpp`: `native/core/tests/test-client-input-wine.sh` under Wine, or built the same way and run on Windows |
-| the row, the gate's hold and preview | `native/core/tests/test-caps.sh` |
+| the row (ready, bound, a failed first install, the gate mechanism and preview) | `native/core/tests/test-caps.sh` |
+| the lazy producer: nothing installed before a submit that could be queued, one install for concurrent first submits, a refusal tried again, a failure final | `client_building_input_test.cpp` (asan, tsan); on Windows threads, `client_input_windows_host.cpp` |
 | the observation point, the version getter and the layout on the client exe | `tools/sigport/sigdb_check.py sigdb/symbols/client.json <enshrouded.exe>` (`client.input_observation` on), `tools/sigport/build_record.py check` |
-| the layout: the record (112 bytes) and the core's table (80 bytes); the SDK's header without its `kiln-internal` blocks (56 bytes, no building input name left), as C11 and C++20 | `native/core/tests/test-abi-headers.sh` |
+| the layout: the record (112 bytes) and the core's table (80 bytes); the SDK's header the same as the core's (80 bytes), as C11 and C++20 | `native/core/tests/test-abi-headers.sh` |
 | the guided checks are the gate row's, each in the pack and in rows.json | `tools/client-checks/test_report.py` |
 | in a real game: select, place and remove, undo and dismantle, nothing while your own building action is held, a joined client | the client pass, area "Building input" ([client-pass.md](../client-pass.md)) |

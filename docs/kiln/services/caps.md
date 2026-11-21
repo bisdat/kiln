@@ -65,9 +65,8 @@ A capability can be **held** until its guided client checks
 ([client-pass.md](../client-pass.md)) have passed in a real game. The list is empty in 0.2.0-dev.29:
 all 22 capabilities held in 0.2.0-dev.28 are on now, subject to their normal dependencies and side restrictions.
 Opening the remaining 20 is an owner decision, not a real-game confirmation; their guided checks remain unconfirmed.
-Since 0.2.0-dev.30.3 the list holds `client.building_input` on the game client
-([client-building-input.md](client-building-input.md#held-until-its-guided-checks-pass)), next to the release policy's
-`kiln-sfi.sf18`.
+Since 0.2.0-dev.30.2 the list holds the release policy's `kiln-sfi.sf18`. `client.building_input` was held in
+0.2.0-dev.30.3's test builds and ships on ([client-building-input.md](client-building-input.md)).
 
 - **The list** is `native/core/gates/*.json` (one file per work area; `README.md` there has the format): a capability
   name, the ids of the checks that open it, optionally the one side it is held on. It is compiled into
@@ -81,8 +80,7 @@ Since 0.2.0-dev.30.3 the list holds `client.building_input` on the game client
   no config key of a service's own, no sigdb overlay.
 - **Lifting it:** `"preview"` in `kiln.json`, at the top level or in a side section (which replaces the top-level
   one): `true` for every held capability, or a list of names. A name in the list that nothing holds is a warning in
-  `kiln.log`. Since 0.2.0-dev.30.3 only `client.building_input`'s guided checks need a preview setting
-  ([client-pass.md](../client-pass.md#building-input)); every other check of the pass runs without one.
+  `kiln.log`. No check of this release's guided pass needs a preview setting.
   ```json
   { "preview": ["camera.fov"], "client": { "preview": true } }
   ```

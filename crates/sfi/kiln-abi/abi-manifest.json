@@ -509,7 +509,7 @@
           "size": 24
         }
       },
-      "sha256": "6a9a1d00c11863a7d933a8f0ede48cd7ebfca436aa9aa08991799b74e707cac8"
+      "sha256": "d71f9b211dd4a0445be1771fc1b54c42d5d27651b532b700ad911228d9f71fa5"
     },
     "native/core/abi/services/kiln_assets_vfx.h": {
       "function_macros": [],
@@ -1102,7 +1102,7 @@
           "size": 48
         }
       },
-      "sha256": "aa50db6e84558f8351d4ab6675897d5e7c41e9fc7167abb3c115a6aad5f4c82b"
+      "sha256": "bb42fe79f184b04de9069b1cd85eef4c7a7cdb4318fb67e4a9041290f9999b10"
     },
     "native/core/abi/services/kiln_combat.h": {
       "function_macros": [

@@ -92,11 +92,10 @@ Kiln mode also stands aside (and no ShroudForge mod runs through Kiln) when:
   example): the index of a type and field builds in the background over a few frames, a lookup before it is complete
   answers that it is still scanning, and a match is read again before it is returned.
 - **Building input** sends a mod's building action (select, place, remove, undo, dismantle) as your own input on game
-  client 26430625. It is held until its checks in a real game pass: until then a submit answers ShroudForge's "building
-  input unavailable, busy, or request invalid", as on a game build without it. To try it, add
-  `"preview": ["client.building_input"]` to `kiln/kiln.json` in the game folder (see
-  [Testing kiln mode](shroudforge-kiln-mode-testing.md)). A dispatched request is sent as your input; the server still
-  decides what happens.
+  client 26430625 (not checked in a real game yet; [Testing kiln mode](shroudforge-kiln-mode-testing.md) says what to
+  look for). On a game build without it a submit answers ShroudForge's "building input unavailable, busy, or request
+  invalid". Kiln hooks the game's input path only at a mod's first request. A dispatched request is sent as your input;
+  the server still decides what happens.
 - **Mod DLLs** that a mod ships for ShroudForge's DLL loader are loaded by Kiln at the start, once. A DLL Kiln has no
   reviewed rule for is refused, and its mod is skipped with the reason.
 - **ShroudForge's menu key** (F9 by default) and `shroudforge.ui.toggle_modloader()` open Kiln's page for ShroudForge mods

@@ -57,9 +57,9 @@ fi
 # kiln.client and kiln.net in both forms. The core's view: the building input members appended at 56 (80 bytes in all)
 # and the Steam peer-to-peer messages members appended at 128 (184 bytes), with their records, as C11 and C++20. The SDK's
 # view (managed/Kiln.Sdk/Kiln.Sdk.csproj leaves out every "kiln-internal begin" ... "kiln-internal end" block of the ABI
-# headers): the blocks pair up, no internal name and no doubled blank line is left, and kiln.client's table is 56 bytes
-# with client_world its last member; kiln.net has no such block since 0.2.0-dev.30.3 (the Steam members are public), so
-# the SDK's kiln.net table is the core's 184 bytes with steam_accept its last member, as C11 and C++20.
+# headers): since 0.2.0-dev.30.3 neither header has such a block (building input and the Steam members are public), so
+# the SDK's kiln.client table is the core's 80 bytes with building_input_cancel its last member, and its kiln.net table
+# the core's 184 bytes with steam_accept its last member, each file the core's, as C11 and C++20.
 pub=$out/sdk-abi
 rm -rf "$pub" && cp -r "$here/../abi" "$pub"
 strip_internal() {  # the SDK's rule: a block from its begin line to its end line, both included; never nested
@@ -84,17 +84,21 @@ check_view() {  # header, the names only the core's view may hold, size test, C 
   printf '%s\n' "$probe" | "$cc" -std=c11 -Wall -Wextra -Werror -fsyntax-only -I"$pub" -x c -; n=$((n + 1))
   printf '%s\n' "$probe" | "$cxx" -std=c++20 -Wall -Wextra -Werror -fsyntax-only -I"$pub" -x c++ -; n=$((n + 1))
 }
-check_view kiln_client.h 'building_input|KilnBuildingInput|KILN_BUILDING|KILN_CLIENT_ERR_BUILDING' \
-  'KILN_TEST_ASSERT(sizeof(KilnClientApi) == 56, "the SDK kiln.client table is 56 bytes"); KILN_TEST_ASSERT(offsetof(KilnClientApi, client_world) == 48, "client_world is its last member");'
+check_view kiln_client.h '' \
+  'KILN_TEST_ASSERT(sizeof(KilnClientApi) == 80, "the SDK kiln.client table is 80 bytes"); KILN_TEST_ASSERT(offsetof(KilnClientApi, building_input_submit) == 56, "building input ships"); KILN_TEST_ASSERT(offsetof(KilnClientApi, building_input_cancel) == 72, "building_input_cancel is its last member"); KILN_TEST_ASSERT(sizeof(KilnBuildingInput) == 112, "with its record");'
+cmp -s "$here/../abi/services/kiln_client.h" "$pub/services/kiln_client.h" ||
+  { echo "abi headers: FAIL the SDK's kiln_client.h is not the core's (it has no kiln-internal block)" >&2; exit 1; }
+n=$((n + 1))
 check_view kiln_net.h '' \
   'KILN_TEST_ASSERT(sizeof(KilnNetApi) == 184, "the SDK kiln.net table is 184 bytes"); KILN_TEST_ASSERT(offsetof(KilnNetApi, steam_status) == 128, "the Steam members ship"); KILN_TEST_ASSERT(offsetof(KilnNetApi, steam_accept) == 176, "steam_accept is its last member"); KILN_TEST_ASSERT(sizeof(KilnSteamMessagesStatus) == 48 && sizeof(KilnSteamMessageInfo) == 24, "with their records");'
 cmp -s "$here/../abi/services/kiln_net.h" "$pub/services/kiln_net.h" ||
   { echo "abi headers: FAIL the SDK's kiln_net.h is not the core's (it has no kiln-internal block)" >&2; exit 1; }
 n=$((n + 1))
-# no other ABI header has a kiln-internal block (the SDK strips every header the same way; this test knows this one)
-if grep -l -E 'kiln-internal (begin|end)' "$here/../abi"/*.h "$here/../abi"/services/*.h | grep -v -E '/kiln_client\.h$'; then
-  echo "abi headers: FAIL a kiln-internal block outside kiln_client.h (add its SDK view check here)" >&2; exit 1
+# no ABI header has a kiln-internal block (the SDK would strip it from every header the same way; a new one needs its SDK
+# view check here)
+if grep -l -E 'kiln-internal (begin|end)' "$here/../abi"/*.h "$here/../abi"/services/*.h; then
+  echo "abi headers: FAIL a kiln-internal block in an ABI header (add its SDK view check here)" >&2; exit 1
 fi
 n=$((n + 1))
 rm -rf "$pub"
-echo "abi headers: PASS $n checks (kiln_world.h and kiln_abilities.h together in both orders, C and C++; each alone; kiln_tasks.h, tasks_host.h; kiln_launch.h, launch_internal.h; kiln_hooks.h, hooks_protect_internal.h; kiln_eml_startup.h run as C and C++, Windows x64 layout; kiln_build.h as C11 and C++20; kiln_client.h in the core's view and the SDK's, kiln_net.h whole in both)"
+echo "abi headers: PASS $n checks (kiln_world.h and kiln_abilities.h together in both orders, C and C++; each alone; kiln_tasks.h, tasks_host.h; kiln_launch.h, launch_internal.h; kiln_hooks.h, hooks_protect_internal.h; kiln_eml_startup.h run as C and C++, Windows x64 layout; kiln_build.h as C11 and C++20; kiln_client.h and kiln_net.h whole in the core's view and the SDK's)"

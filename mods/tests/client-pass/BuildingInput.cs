@@ -7,8 +7,7 @@ using static Kiln.Testing.ClientCheckTags;
 namespace ClientPass;
 
 // kiln.client's building input (Kiln.BuildingInput; docs/kiln/services/client-building-input.md): the five guided checks
-// that the client gate's row client.building_input names (native/core/gates/client-input.json). Passing them all is what
-// lets the row be removed. They run with kiln.json "preview" naming client.building_input (or true). Each submits through
+// that confirm it in a real game (it ships on since 0.2.0-dev.30.3, not yet confirmed). Each submits through
 // BuildingInput, follows the request to its end, asserts what kiln.client answers, and asks one verdict about what the
 // world did. A joined session runs a check's body on the server, so the joined check's input comes from the joining game
 // client itself: a key of this mod that exists only where building input is available (BuildingInputKey below).
@@ -20,15 +19,15 @@ public sealed partial class ClientPassMod
     private const string RoughWoodBlock = "Block_T1_Wood_Rough_CRAFTING";
     private const string BuildingKey = "Ctrl+Shift+F7";
 
-    /// <summary>True when building input works in this game. Otherwise says how to switch it on, asks for skip and returns
-    /// false: a game without the preview is not a failure of what the check covers.</summary>
+    /// <summary>True when building input works in this game. Otherwise says why, asks for skip and returns false: a game
+    /// build without building input is not a failure of what the check covers.</summary>
     private static async Task<bool> NeedBuildingInput(CheckContext c)
     {
         if (BuildingInput.Available) return true;
         var why = Capabilities.Why(BuildingInput.Capability);
         c.Log.Info($"client-pass: {c.Id} needs building input: {why}");
-        c.Instruct($"Building input is off in this game ({why}). Add \"preview\": [\"client.building_input\"] to " +
-                   "kiln/kiln.json in the game folder (or \"preview\": true), start the game again and run this check there.");
+        c.Instruct($"Building input is off in this game ({why}). It needs game client 26430625 and Kiln's kiln.client; " +
+                   "this check is skipped.");
         await c.Skip($"client.building_input is off: {why}");
         return false;
     }
@@ -174,8 +173,8 @@ public sealed partial class ClientPassMod
         Area = BuildingArea, Since = BuildingSince, Tags = [Visual], Needs = ClientCheckNeeds.Joined, Order = 3954)]
     public async Task BuildingInputJoined(CheckContext c)
     {
-        c.Instruct("Your game client needs \"preview\" naming client.building_input in its own kiln/kiln.json (then this " +
-                   $"mod gives it the key {BuildingKey}). On this server, stand where you may build, in the building mode with " +
+        c.Instruct($"Your game client needs Kiln and this pack (this mod gives it the key {BuildingKey} where building input " +
+                   "is available). On this server, stand where you may build, in the building mode with " +
                    $"Rough Wood Block selected and Rough Wood in your inventory. Look straight ahead and press {BuildingKey}: your " +
                    "game places one block about 2.5 m in front of you through Kiln's building input, removes it 4 seconds " +
                    "later, and writes each step to its own kiln/logs/kiln.log as 'client-pass: BUILDING-INPUT-JOINED'.");

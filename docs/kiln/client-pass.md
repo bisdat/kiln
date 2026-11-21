@@ -9,8 +9,7 @@ record that a script turns into a summary.
 
 The pass confirms behavior in the real game; it no longer opens capabilities. All 22 holds from 0.2.0-dev.28
 are gone in 0.2.0-dev.29, and the remaining 20 capabilities are on but unconfirmed. The gate mechanism remains
-([caps](services/caps.md#the-client-gate-dev28)). Since 0.2.0-dev.30.3 it holds one capability on the game client,
-`client.building_input`, until [its checks](#building-input) pass; only those checks need a `"preview"` setting.
+([caps](services/caps.md#the-client-gate-dev28)); no check of this release needs a `"preview"` setting.
 The pass covers the release’s "On, not yet confirmed in a real game" entries, the
 dev.22 and dev.21 client checklists (11 items each), and two lines new in 0.2.0-dev.26 (the achievement guard, and
 Kiln's unload when the game quits). `mods/tests/client-pass/rows.json` maps each line to its checks.
@@ -231,11 +230,11 @@ line.
 
 ## Building input
 
-kiln.client's building input (Kiln.Client's `BuildingInput`, [the service](services/client-building-input.md)) is held
-by the client gate until these five checks pass: `mods/tests/client-pass/BuildingInput.cs` (area "Building input",
-orders 3950 to 3954) and `rows.json` under "Building input (client.building_input)". Run them with
-`"preview": ["client.building_input"]` (or `true`) in `kiln/kiln.json` in the game folder; without it each check ends with skip and
-says so. Use a copied world, in your base, with Rough Wood Block and some Rough Wood.
+kiln.client's building input (Kiln.Client's `BuildingInput`, [the service](services/client-building-input.md)) ships on
+in 0.2.0-dev.30.3, not yet checked in a real game; these five checks are that confirmation:
+`mods/tests/client-pass/BuildingInput.cs` (area "Building input", orders 3950 to 3954) and `rows.json` under "Building
+input (client.building_input)". They need no setting; on a game build without building input each check ends with skip
+and says why. Use a copied world, in your base, with Rough Wood Block and some Rough Wood.
 
 | Check | What you do and look at |
 |---|---|
@@ -243,11 +242,10 @@ says so. Use a copied world, in your base, with Rough Wood Block and some Rough 
 | `building-input.place-remove` | Kiln places one block about 2.5 m ahead of where you look, then removes it 4 s later; the wood comes back |
 | `building-input.undo-dismantle` | Kiln's undo takes back the block you placed last; Kiln dismantles the one prop you placed (held 1.2 s) |
 | `building-input.own-input` | hold your own build button: Kiln's request stays queued (nothing emitted) until you let go, then one block appears to the right |
-| `building-input.joined` | joined to a server (your client with the preview): Ctrl+Shift+F7 places one block ahead and removes it 4 s later; your kiln.log shows both as Dispatched |
+| `building-input.joined` | joined to a server (your client with Kiln and this pack): Ctrl+Shift+F7 places one block ahead and removes it 4 s later; your kiln.log shows both as Dispatched |
 
 Each check asserts what kiln.client answers (queued, then dispatched) and asks what the world did: dispatched is "sent
-as your input", the server still decides. Remove `client.building_input` from `native/core/gates/client-input.json` in
-the commit that records the pass.
+as your input", the server still decides.
 
 ## The ledger and the report
 

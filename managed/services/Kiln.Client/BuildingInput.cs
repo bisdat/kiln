@@ -152,9 +152,11 @@ public sealed unsafe class BuildingInputRequest
 /// the game's own input path as if the player pressed it. Since 0.2.0-dev.30.3.
 /// </summary>
 /// <remarks>
-/// <para>Game client only, and only on a game build whose input producer Kiln has verified (capability
-/// <c>client.building_input</c>; <see cref="Available"/>). Elsewhere every submit throws
-/// <see cref="KilnUnavailableException"/> naming it. This is input, not a server-side build: the game's server checks
+/// <para>Game client only, and only on a game build whose input producer Kiln has verified (game client 26430625 in
+/// 0.2.0-dev.30.3; capability <c>client.building_input</c>; <see cref="Available"/>). Elsewhere every submit throws
+/// <see cref="KilnUnavailableException"/> naming it. Kiln hooks the game's input path at the first submit of the process,
+/// never before, so a game without a mod that builds never has the hook; that first submit takes a few milliseconds
+/// more. Not checked in a real game yet: tell us what you see. This is input, not a server-side build: the game's server checks
 /// permissions, resources, range and placement exactly as for the player's own input, so
 /// <see cref="BuildingInputState.Dispatched"/> is not the world's acknowledgement. For world edits the server makes
 /// itself, use Kiln.Build.</para>
@@ -178,7 +180,8 @@ public sealed unsafe class BuildingInputRequest
 [AnyThread]
 public static unsafe class BuildingInput
 {
-    /// <summary>The capability row: available only on a game client whose build has a verified input producer.</summary>
+    /// <summary>The capability row: available only on a game client whose build has a verified input producer (ready for
+    /// the first request, or already hooked).</summary>
     public const string Capability = "client.building_input";
 
     /// <summary>A queued request that the input path has not taken within this many milliseconds ends

@@ -565,9 +565,10 @@ placement. `BuildingInput.Select(item, slot, material)`, `Place(position, rotati
 `Rejected`; `Request`). `BuildingInputRequest.State` (`Queued`, `Pressed`, `Dispatched` = sent as input, not the
 server's answer, `TimedOut` after 5 s, `Cancelled`, `Unknown` = not your latest), `Cancel()`. One request slot for the
 whole client. Bad arguments throw `ArgumentException` (scale each in (0, 1024], a finite non-zero rotation).
-Capability `client.building_input`: mapped on game client 26430625 only, and **held by the client gate there** (`policy`,
-"game test pending") until its guided checks pass in a real game; `symbol-missing` on other builds. While it is off
-every call throws `KilnUnavailableException`; ask `BuildingInput.Available` first. Page:
+Capability `client.building_input`: a supported API on game client 26430625 (available; Kiln hooks the input path at
+the first request), `symbol-missing` on other builds, where every call throws `KilnUnavailableException`; ask
+`BuildingInput.Available` first. **Not checked in a real game yet.** Native: kiln.client `building_input_submit`,
+`_status`, `_cancel` and `KilnBuildingInput` are in the SDK's `kiln_client.h` (table 80 bytes; check `header.size`). Page:
 `docs/kiln/services/client-building-input.md`; wiki `building-input`.
 
 ## Hooks (advanced tier only) and other DLL mods
