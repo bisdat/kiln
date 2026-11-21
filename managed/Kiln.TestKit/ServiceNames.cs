@@ -37,6 +37,7 @@ internal static class ServiceNames
         "kiln.items",
         "kiln.knowledge",
         "kiln.log",
+        "kiln.mod-values",
         "kiln.net",
         "kiln.npcai",
         "kiln.pacing",

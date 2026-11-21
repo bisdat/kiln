@@ -95,6 +95,23 @@ internal static class CharacterSync
         }
     }
 
+    /// <summary>A character in game here: a player's session, a lab peer's, or a hosted game's own player.</summary>
+    internal readonly record struct LiveCharacter(CharacterKey Key, EntityId Entity, NetPeer? Peer, bool Lab, bool Local);
+
+    /// <summary>The characters with a session now (Kiln.ModValues: the live associations its writes and streams need).
+    /// Tick thread. A player's peer is looked up now (null for a hosted game's own player and before kiln.net knows it).</summary>
+    internal static IReadOnlyList<LiveCharacter> Live()
+    {
+        var list = new List<LiveCharacter>(Sessions.Count + LabSessions.Count);
+        foreach (var s in Sessions.Values)
+            list.Add(new LiveCharacter(s.Key, s.Entity, s.Local ? null : s.Peer ?? (Network.Available ? Network.PeerOf(s.Entity) : null), false, s.Local));
+        foreach (var s in LabSessions.Values) list.Add(new LiveCharacter(s.Key, EntityId.None, s.Local ? null : s.Peer, true, s.Local));
+        return list;
+    }
+
+    /// <summary>Client side: the character the server said this player joined with (empty before its hello).</summary>
+    internal static Guid ClientCharacter => _clientCharacter;
+
     // ---------------------------------------------------------------------------------------------- server side ----
     private static void Tick(in TickInfo tick)
     {

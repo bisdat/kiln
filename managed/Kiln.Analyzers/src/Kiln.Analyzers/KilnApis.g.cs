@@ -481,6 +481,12 @@ internal static partial class KilnApis
         "M:Kiln.KnowledgeScope.Revoke(System.String,System.Int32)", // KnowledgeScope.Revoke(string, int): via Knowledge.KnowledgeId(string, string)
         "M:Kiln.KnowledgeScope.Set(System.String,System.UInt32)", // KnowledgeScope.Set(string, uint): via Knowledge.KnowledgeId(string, string)
         "M:Kiln.Mod.WorldConfig``1(System.String)", // Mod.WorldConfig<T>(string?): Game.AssertTickThread
+        "M:Kiln.ModValues.Add(Kiln.CharacterKey,Kiln.ModValueKey,System.Int64,System.Nullable{Kiln.ModValueVersion})", // ModValues.Add(CharacterKey, ModValueKey, long, ModValueVersion?): via ModValues.Change(string, CharacterKey, ModValueKey, ChangeOp, long, ModValueVersion?)
+        "M:Kiln.ModValues.Define(System.String,Kiln.ModValueOptions)", // ModValues.Define(string, ModValueOptions): via ModValuesService.NeedLedger(string)
+        "M:Kiln.ModValues.Read(Kiln.CharacterKey,Kiln.ModValueKey)", // ModValues.Read(CharacterKey, ModValueKey): via ModValuesService.NeedLedger(string)
+        "M:Kiln.ModValues.Reset(Kiln.CharacterKey,Kiln.ModValueKey,System.Nullable{Kiln.ModValueVersion})", // ModValues.Reset(CharacterKey, ModValueKey, ModValueVersion?): via ModValues.Change(string, CharacterKey, ModValueKey, ChangeOp, long, ModValueVersion?)
+        "M:Kiln.ModValues.Set(Kiln.CharacterKey,Kiln.ModValueKey,System.Int64,System.Nullable{Kiln.ModValueVersion})", // ModValues.Set(CharacterKey, ModValueKey, long, ModValueVersion?): via ModValues.Change(string, CharacterKey, ModValueKey, ChangeOp, long, ModValueVersion?)
+        "M:Kiln.ModValues.Spend(Kiln.CharacterKey,Kiln.ModValueKey,System.Int64,System.Nullable{Kiln.ModValueVersion})", // ModValues.Spend(CharacterKey, ModValueKey, long, ModValueVersion?): via ModValues.Change(string, CharacterKey, ModValueKey, ChangeOp, long, ModValueVersion?)
         "M:Kiln.NativeQuests.Holds(Kiln.NativeComputed,Kiln.QuestHolder)", // NativeQuests.Holds(NativeComputed, QuestHolder): Game.AssertTickThread
         "M:Kiln.NativeQuests.Resync(Kiln.QuestHolder,System.Boolean)", // NativeQuests.Resync(QuestHolder, bool): Game.AssertTickThread
         "M:Kiln.NativeQuests.Wanted(System.String,Kiln.QuestHolder)", // NativeQuests.Wanted(string, QuestHolder): Game.AssertTickThread
@@ -934,6 +940,7 @@ internal static partial class KilnApis
         "Gameplay",
         "Hooks",
         "Items",
+        "ModValues",
         "Network",
         "Permissions",
         "PlayerAnim",

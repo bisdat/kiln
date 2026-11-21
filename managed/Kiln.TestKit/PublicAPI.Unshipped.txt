@@ -26,6 +26,14 @@ static Kiln.TestKit.FakePhysicsCookHost.ContentHashOf(byte[]! bytes) -> string!
 static Kiln.TestKit.FakePhysicsCookHost.Features.get -> System.Collections.Generic.IReadOnlyList<string!>!
 static Kiln.TestKit.PhysicsCookResult.operator !=(Kiln.TestKit.PhysicsCookResult? left, Kiln.TestKit.PhysicsCookResult? right) -> bool
 static Kiln.TestKit.PhysicsCookResult.operator ==(Kiln.TestKit.PhysicsCookResult? left, Kiln.TestKit.PhysicsCookResult? right) -> bool
+Kiln.TestKit.HarnessModValues
+Kiln.TestKit.HarnessModValues.Join(Kiln.CharacterKey character) -> void
+Kiln.TestKit.HarnessModValues.Leave(Kiln.CharacterKey character) -> void
+Kiln.TestKit.HarnessModValues.Record(Kiln.CharacterKey character, string! mod, string! partition = "world") -> string?
+Kiln.TestKit.HarnessModValues.World.get -> System.Guid
+Kiln.TestKit.HarnessModValues.World.set -> void
+Kiln.TestKit.KilnHarness.ModValues.get -> Kiln.TestKit.HarnessModValues!
+static Kiln.TestKit.HarnessModValues.Character(int n) -> Kiln.CharacterKey
 Kiln.TestKit.HarnessRoutines
 Kiln.TestKit.HarnessRoutines.Decide(uint npcId) -> string?
 Kiln.TestKit.HarnessRoutines.Finish(uint npcId, bool ok, string? reason = null) -> void

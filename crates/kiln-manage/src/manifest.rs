@@ -494,6 +494,9 @@ pub const ID_PATTERN: &str = "^[a-z0-9][a-z0-9._-]{0,63}$";
 /// The dependency id that is not a mod: the native core's version.
 pub const KILN_ID: &str = "kiln";
 const RESERVED: [&str; 6] = ["kiln", "kiln.api", "game", "enshrouded", "native", "permissions"];
+/// Manifest.NativeNamespacePrefix: kiln.mod-values gives every native owner "native." plus a hash of its name as its
+/// namespace, and a mod's manifest id is its namespace, so ids starting with it are refused.
+const NATIVE_NAMESPACE_PREFIX: &str = "native.";
 const KNOWN: [&str; 27] = [
     "$schema", "id", "name", "version", "authors", "author", "description", "license", "url", "apiVersion", "side",
     "clients", "dependencies", "loadBefore", "loadAfter", "incompatible", "features", "entryAssembly", "entryType", "exports",
@@ -702,6 +705,9 @@ pub fn parse_kiln(text: &str) -> Result<KilnManifest> {
     }
     if RESERVED.contains(&id.as_str()) {
         return Err(bad(format!("id '{id}' is reserved")));
+    }
+    if id.starts_with(NATIVE_NAMESPACE_PREFIX) {
+        return Err(bad(format!("id '{id}' is reserved: an id that starts with \"{NATIVE_NAMESPACE_PREFIX}\" is a native owner's mod-values namespace")));
     }
     let version = str_of(&root, "version")?.ok_or_else(|| bad("'version' is required"))?;
     let parsed = SemVersion::try_parse(&version)
