@@ -67,6 +67,27 @@ players and the save follow, as after a drag and drop.
 - It runs in the next sim step, in kiln.items' program, like give and take; the task completes on the tick thread one step
   later. A mod that unloads drops its callbacks. `Items.MovesAvailable` says whether this game build has it.
 
+## Using a consumable for a player (0.2.0-dev.30.3)
+
+To make a player eat, drink or use a potion from code, put the item in one of their own slots and call
+`Abilities.UseItem(player, slot)` (Kiln.Abilities, server, tick thread). The game then does what it does for a hotbar
+use: the item's own sequence plays, one item is taken from that slot at the sequence's consume event, and the buff is
+applied with the item's own values and time, so the player sees the same effect lines and timer as when eating by hand.
+A remote chest list moves the stack in first:
+
+```csharp
+var moved = await Items.Move(chest, chestSlot, player, count: 1);
+if (moved.Succeeded && moved.Changes.Count > 0)
+    Log.Info($"eat: {Abilities.UseItem(player, moved.Changes[0].To)}");
+```
+
+The answer is an `ItemUseResult`: `Started`, or why nothing happened (`NotConsumable`, `NotOwnSlot`, `EmptySlot`,
+`SlotChanged`, `NotAPlayer`, `Dead`, `NotReady`, `Busy` while another action or use plays, `ServerOnly` on a
+joined client). The item is not gone at the call: `PlayerConsumedEvent` says when it went, and a `PlayerConsumeEvent`
+handler or a block's `CanEat` can still refuse it, as for a hand use. Use it rather than `ApplyBuff` for food: a food's
+buff type holds no numbers (148 foods share 16 buff types). Details, the checks and what a real game still has to
+confirm: [kiln.abilities, Using an item](../services/abilities.md#using-an-item-since-020-dev303-mod-api-0213).
+
 ## Container names
 
 ```csharp
