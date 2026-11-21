@@ -464,7 +464,7 @@ Delete `kiln/data/craftmatch-test/` for a fresh run.
 ### Data packs: "add"
 The same definitions in `content/*.json`, as `"add"` lists in the `items` / `recipes` sections (fields as in the C#
 form: `guid`, `name`, `base`, `displayName`, `description`, `lore`, `fields`, `rolledLoot`; recipes `station`, `inputs`,
-`outputs`, `duration`, `unlock`, `water`). Rules after the list (in the same pack, or later packs) can change the new entries
+`outputs`, `duration`, `unlock`, and in a pack also `water`, which the C# form sets through `Fields["waterCharges"]`). Rules after the list (in the same pack, or later packs) can change the new entries
 like any game entry:
 ```json
 { "format": 1,

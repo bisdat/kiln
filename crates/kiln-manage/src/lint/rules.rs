@@ -453,7 +453,11 @@ fn recipe_water(out: &mut Out, m: &LMod, cat: Option<&Catalog>) {
         }
         for (recipe, inputs, water, key, ws) in recipes {
             for s in inputs.into_iter().flatten() {
-                let Some(item) = s.get("item").filter(|i| i.as_str() == Some(STATION_WATER)) else { continue };
+                // an item names it in any case (as crafted_rolled reads names); an item with a category picks the category, not the item
+                let Some(item) = s.get("item").filter(|i| i.as_str().is_some_and(|n| n.eq_ignore_ascii_case(STATION_WATER))) else { continue };
+                if s.get("category").is_some() {
+                    continue;
+                }
                 let count = s.get("count").and_then(Node::as_f64).unwrap_or(1.0);
                 out.push(Diagnostic::new(&f.display, codes::RECIPE_WATER, item.span, &format!(
                     "recipe \"{recipe}\" takes \"{STATION_WATER}\", the game's old Water canteen item, as an ingredient: a craft takes {count} of that item, never water from the station's tank. For the station's tank water, remove this input and give the recipe \"{key}\": {count} (water charges a craft)"
