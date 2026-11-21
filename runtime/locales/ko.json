@@ -3,6 +3,12 @@
     "completion": {
       "title": "명령어 추천",
       "hint": "Tab: 자동 완성 · Esc: 닫기"
+    },
+    "search": {
+      "title": "채팅 기록 검색",
+      "hint": "Ctrl+R: 더 이전 · Ctrl+Shift+R: 더 최근 · Enter/Tab: 사용 · Esc: 취소",
+      "query": "검색",
+      "none": "일치하는 기록이 없습니다"
     }
   },
   "language": {
