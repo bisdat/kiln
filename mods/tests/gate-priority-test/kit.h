@@ -22,10 +22,14 @@
 
 namespace gpt {
 
-// The kit's format and timing (every file's header, run.json "kit"). 2: a pair starts only between two server updates
-// and a busy try is retried after the next Post edge past its step, counted in steps (GitHub #58); writes.csv adds
-// post_step and since_post_ns. 1: retried every millisecond, which locked onto the start of each update.
-inline constexpr const char* kKitVersion = "2";
+// The kit's format and timing (every file's header, run.json "kit"). 3: kit 2's loop; writes.csv adds restore_ns (the
+// priority restore after the gate's release, KilnMutationReply.restore_ns), gate.csv kiln.engine's restore counters,
+// and every file's header and run.json say where this Kiln ends a hold ("hold=scene-release": at the Scene word's
+// release, the restore apart; "hold=release-end": an older Kiln, whose hold includes the release and the restore;
+// GitHub #58). 2: a pair starts only between two server updates and a busy try is retried after the next Post edge
+// past its step, counted in steps (GitHub #58); writes.csv adds post_step and since_post_ns. 1: retried every
+// millisecond, which locked onto the start of each update.
+inline constexpr const char* kKitVersion = "3";
 
 // <kiln data>/gate-priority-test/run.txt, one key=value per line ('#' starts a comment).
 struct RunConfig {

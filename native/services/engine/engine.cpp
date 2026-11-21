@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // kiln.engine: exact-build engine profile selection (public kiln.engine v1, data only) and the Kiln-internal
 // primitive table kiln.internal.engine. Portable: the Windows facts of the loaded image come from facts_win.cpp.
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdio>
@@ -57,9 +58,10 @@ KilnResult KILN_CALL identity(KilnEngineIdentity* out) {
 }
 
 KilnResult KILN_CALL gate_stats(KilnEngineGateStats* out) {
-    if (!out || out->size < sizeof(KilnEngineGateStats)) return KILN_ERR_INVALID_ARGUMENT;
+    // A caller built before the restore counters passes v1's 96 bytes and gets those; size says what was written.
+    if (!out || out->size < offsetof(KilnEngineGateStats, restores)) return KILN_ERR_INVALID_ARGUMENT;
     KilnEngineGateStats s{};
-    s.size = sizeof s;
+    s.size = static_cast<std::uint32_t>(std::min<std::size_t>(out->size, sizeof s));
     const Stats& c = stats();
     s.attempts = c.attempts.load(std::memory_order_relaxed);
     s.acquired = c.acquired.load(std::memory_order_relaxed);
@@ -72,7 +74,10 @@ KilnResult KILN_CALL gate_stats(KilnEngineGateStats* out) {
     s.hold_ns_max = c.hold_ns_max.load(std::memory_order_relaxed);
     s.views = c.views.load(std::memory_order_relaxed);
     s.view_failures = c.view_failures.load(std::memory_order_relaxed);
-    *out = s;
+    s.restores = c.restores.load(std::memory_order_relaxed);
+    s.restore_ns_total = c.restore_ns_total.load(std::memory_order_relaxed);
+    s.restore_ns_max = c.restore_ns_max.load(std::memory_order_relaxed);
+    std::memcpy(out, &s, s.size);
     return KILN_OK;
 }
 

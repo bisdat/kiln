@@ -116,7 +116,9 @@ sets `owner` (its `KilnOwner`) and `step` (the server step it observed, `KilnTic
 - **Priority.** While a thread may hold an engine word it runs at `THREAD_PRIORITY_ABOVE_NORMAL` at least (raised before
   the first word, restored after the last, both outside the hold), above the engine's normal-priority threads (the
   GameServer thread is created at `NORMAL`), so a holder is never preempted while the
-  GameServer thread spins on the word.
+  GameServer thread spins on the word. The restore is timed on its own (below): it is a syscall, under Proton a
+  wineserver round trip, and a thread back at its own priority can be preempted right after it, none of which keeps the
+  engine out.
 - **The measurement switch for the raise.** To measure what the raise buys ([../priority-kit.md](../priority-kit.md)),
   a file `<game>/kiln/data/kiln.engine/gate-priority-raise` holding exactly `off` turns it off for the whole process. It
   is read once, at kiln.engine's start, before any service can hold a gate. Surrounding whitespace and a UTF-8
@@ -138,10 +140,22 @@ sets `owner` (its `KilnOwner`) and `step` (the server step it observed, `KilnTic
   (`write_entity_components.cpp:143-146`, maps to `ecs-write-size-exceeds-gate-budget`). After a `KILN_ERR_UNAVAILABLE`
   (the copy faulted) a partial write may have happened: restore the original, read it back and latch "uncertain" when
   the readback does not prove it (`write_entity_components.cpp:87-98`).
+- **What a hold's time is** (GitHub #58). `ecs_gate_release` measures, and leaves in the caller's record until its next
+  acquire: `EcsGate.hold_ns`, the Scene word's exclusive interval, from the moment its CAS won (before revalidation, so
+  a hold that then refuses counts too) to the moment it was released, the clock read right after that release and
+  before the registry word, the holder flag and the priority restore; and `EcsGate.restore_ns`, the priority restore's
+  own time (0 when the priority was not raised). A release of a record that holds nothing (a second release, after a
+  refusal before any word) measures nothing and keeps them. kiln.world reports both in `KilnMutationReply`
+  ([world.md](world.md#world-writes-from-task-threads)). Before the fix (0.2.0-dev.30.2 and earlier) the hold was read
+  at the end of the release, after the restore: in bisdat's Proton runs with the raise on, about 10 µs more per hold at
+  the median and, under load, a preemption right after the restore counted as hold although the Scene word was free.
 - `gate_stats` counts attempts, holds, busy refusals by engine word (`kiln-gate-busy` and the latch count in
-  `refused_other`, never as Scene contention), in-frame and world-thread refusals, and the total and
-  longest hold; the hold time covers the whole Scene exclusive interval (from the Scene CAS to the release), including
-  a hold that then refuses.
+  `refused_other`, never as Scene contention), in-frame and world-thread refusals, the total and longest hold
+  (`hold_ns_total`, `hold_ns_max`: the Scene word's exclusive interval as above, holds that then refuse included), and,
+  appended to `KilnEngineGateStats` after v1's 96 bytes, the priority restores: `restores`, `restore_ns_total`,
+  `restore_ns_max`. `gate_stats` takes a record of 96 bytes or more, writes the first min(size, its own record's size)
+  bytes and leaves that number in `size`, so a caller built against v1 keeps working and a newer one sees whether the
+  restore fields were filled (a Kiln without them ended a hold after the restore).
 
 ## Kiln-internal tables
 

@@ -106,7 +106,8 @@ public sealed unsafe class WorldContractTests
         for (var i = 0; i < mine.Length; i++)
             Assert.True(members[i].Item2 == (int)Marshal.OffsetOf<EcsWritesTable>(mine[i]), $"{mine[i]} is not at {members[i].Item1}'s {members[i].Item2}");
         SameLayout(abi, "KilnEcsWritePolicy", typeof(EcsWritePolicyNative));
-        SameLayout(abi, "KilnMutationReply", typeof(MutationReplyNative));
+        // the first release's 48 bytes (Kiln.World passes that size and reads no field after hold_ns; restore_ns came after)
+        SameLayout(abi, "KilnMutationReply", typeof(MutationReplyNative), 9);
         SameLayout(abi, "KilnEcsWriteEvent", typeof(EcsWriteEventNative));
     }
 
