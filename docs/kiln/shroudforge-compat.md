@@ -25,6 +25,14 @@ dev.21's engine-hook host interface (`724a884`) and dev.20's archive-reader/publ
 `1.7.9 kiln.63b8862` (`version.json` build `kiln.63b8862`), and includes the component's notices and licenses. The dev.20 mixed-server
 evidence is separate from the older observations below; neither is a client rendering or player-interaction test.
 
+**ShroudForge 1.8.1 (0.2.0-dev.30, 2026-11-21).** The bundled runtime is upstream's 1.8.1 dev line (branch `1.8.1` at
+`d35cea18`, tag `v1.8.1-dev.44571709069`) merged into the fork's `kiln` (`2df1de68`, 1.7.9 with every Kiln patch) with
+`kiln/sync-upstream.sh 1.8.1`: fork branch `kiln-1.8.1` (a branch `kiln/1.8.1` cannot exist beside `kiln`), pin `f1b777b5`,
+`version.json` version `1.8.1`. Runtime ABI 12, the four bootstrap exports and the client (26430625) and server (26430253)
+profiles are unchanged. The merge's six conflicts and what each kept: the fork's `kiln/UPSTREAM-PATCHES.md`. The adapter
+accepts 1.8.0 and 1.8.1 beside 1.7.8 and 1.7.9, bundled and installed (`src/contract.h`). See section 11 for what 1.8.1
+adds next to Kiln.
+
 ## 1. How ShroudForge loads (source facts)
 
 | Step | Where (upstream source) | What happens |
@@ -178,9 +186,9 @@ raised through a real Lua call), `plan_mod_load_order.rs` (1) and `read_configur
 The runtime choice comes first. **Bundled**: `kiln/plugins/shroudforge/`, the default. **Installed**: `<game>/shroudforge/`,
 used when `kiln.json` has `"shroudforge": {"useInstalled": true}` (the launcher Settings toggle "Use my installed
 ShroudForge"; env `KILN_SHROUDFORGE_RUNTIME=installed|bundled` overrides). It logs which one runs
-(`ShroudForge runtime: bundled 1.7.9 kiln.63b8862 from ...` for the current pin). When both are present it says how to switch. A chosen
+(`ShroudForge runtime: bundled 1.8.1 kiln.<commit> from ...` since dev.30). When both are present it says how to switch. A chosen
 runtime that is missing, unsafe, fails to load, has an unsupported version or lacks compatible exports falls back to
-the other one with a warning. Supported unversioned bootstrap contracts are SF 1.7.8 and 1.7.9; the native DLL must
+the other one with a warning. Supported unversioned bootstrap contracts are SF 1.7.8, 1.7.9, 1.8.0 and 1.8.1; the native DLL must
 provide all five required exports and ABI 12. Missing `version.json` is incompatible. The runtime directory and its
 children cannot be reparse points; ancestors above that authorized root are the player's Steam/Wine layout and are
 not judged. Resolved paths must stay inside the root; Wine file links are excluded by the installer. DLL loads use
@@ -845,3 +853,29 @@ serial shutdown and the host key feed (`KILN_SF_ONLY=<prefix>` runs some cases o
 `enshrouded.exe` and archive and never runs them:
 `real_keys.py <tests bin> <kiln-shroudforge.dll> <out>/shroudforge-build/shroudforge <game client folder>`. A source-archive release also needs the reviewed fork's `kiln/build.sh`
 changes committed and its Kiln gitlink updated by the maintainer; the review itself does neither.
+
+## 11. ShroudForge 1.8.1 next to Kiln (dev.30)
+
+What upstream 1.8.1 adds that touches Kiln, checked when the bundled runtime moved to it:
+
+- **`runtime.patch.glider_pitch`** (native code patch, used by the bundled SF Unlimited Flight 1.3.0, off by default): on
+  the first `runtime.patch.available`/`set_enabled` call it finds the glider pitch clamp in actor_rotation's live code
+  (`movss xmm0,[rip+X]` loading 5 degrees, then the clamp to 80 degrees), and `set_enabled(true)` writes 8 bytes there
+  (`E9` to a near trampoline that loads -1.57 rad, 3 `NOP`s). The site is rva `0x26f6fe` in the client
+  (26430625) and `0x817fe` in the server (26430253): 0xF3 bytes before Kiln's glider steering mid hook
+  (`rules/GlideSteer`, the roll-rate load, `0x26f7f1` / `0x818f1`), so the two never write the same bytes; no other
+  sigdb symbol is within 0x800 bytes. Static check: `glider_site_check.py` (dev30 wave, out/sf-181). SF reads the
+  procedure from live code and stops a path at Kiln's `E9`, which lies after the clamp. While Kiln steers a glider
+  (GLIDE_STEER), Kiln's step replaces the pitch change after SF's clamp, so Kiln's steering wins for that player.
+- **Steam P2P channels 65534 (Modloader server mirroring, server log mirror) and 65535 (health)**: ISteamNetworkingMessages,
+  not the game's socket. Kiln's own frames use the game's channel 12 (`kiln.net`), so they do not meet. The server log
+  and archive mirror answer only an admin session (a password checked against `userGroups` in
+  `enshrouded_server.json`).
+- **Loader and mod version check between client and server**: the server compares each SF client's report (loader version
+  and mod versions) with its own and logs and shows the differences; it does not kick. A Kiln-hosted runtime reads its
+  version from SF's own `version.json` path, which a bundled component does not have, so both sides of a Kiln host and a
+  Kiln client report the same fallback version; a client with an installed SF of another version shows a
+  `loader-version` line in SF's log.
+- **Vanilla startup mode** (`vanillaClient`/`vanillaServer` in SF's Modloader settings): read only by SF's own
+  `winmm.dll` bootstrap (`shroudforge_prepare_vanilla`); Kiln's adapter never calls it, so the switch has no effect
+  when Kiln hosts SF.
