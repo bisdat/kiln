@@ -10,12 +10,25 @@
 //                    many threads they ran; kiln.repl logs the world's players mask beside it.
 //   lab gate         without kiln.json's policy "any" or without a lab port, every ReplicationLab member is refused
 //                    with KilnUnavailableException("repl.loopback").
+// The network inspector (Replication, dev.31) on the same fakes:
+//   stats            Replication.Stats() per fake and channel against what the harness captured in the same frames
+//                    (messages, destroy lists); a touch that changes nothing raises Unchanged; nothing too big or refused.
+//   watch            a watch started mid-session gives the next message's full component values, equal to the live
+//                    bytes and to what the fake's client decoded for the same tick.
+//   bind             (when a kiln.net lab peer is connected) kiln.net's BIND_MACHINE makes a fake show as that peer, and
+//                    a watch for that peer sees only its fake.
+//   hook removal     the can's create payloads with the stats and watch hooks on equal those after their removal, and
+//                    no hook runs once removed.
+//   cost             16 fakes, the stats and a watch on: kiln.repl's own hook code per frame against the frame
+//                    (< 2 %), and 0 allocations inside it.
+//   destroy          taking the can out of the chest sends each fake a destroy list naming it (list A); the watch
+//                    gets Destroyed then Ended("destroyed"); the counters count the lists.
 using System.Text.Json.Nodes;
 using Kiln;
 
 namespace ReplTest;
 
-public sealed class ReplTestMod : Mod
+public sealed partial class ReplTestMod : Mod
 {
     private const string Me = "repl-test";
     private const string Can = "Tool_T1_WateringCan";
@@ -161,7 +174,7 @@ public sealed class ReplTestMod : Mod
         await Steps(120);
         var before = threads.Take();
 
-        var fakes = ReplicationLab.AddFakePeers(4);
+        IReadOnlyList<(int Machine, int Slot)> fakes = ReplicationLab.AddFakePeers(4);
         Info($"fakes (machine/slot): {string.Join(", ", fakes.Select(f => $"{f.Machine}/{f.Slot}"))}");
         foreach (var f in fakes)
         {
@@ -202,6 +215,11 @@ public sealed class ReplTestMod : Mod
             $"{s.DecodeFaults} decode faults; no baseline {s.NoBaseline}, dropped {s.Dropped}, acked {s.Acked} of {s.Messages} messages");
         hook?.Dispose();
 
+        // the network inspector (dev.31) on the fakes
+        if (pending is not null) await pending;
+        await Steps(10);
+        fakes = await Inspector(chest, can, fakes, max);
+
         // release
         var fakeMachines = fakes.Aggregate(0, (m, f) => m | 1 << f.Machine);
         var fakeSlots = fakes.Aggregate(0, (m, f) => m | 1 << f.Slot);
@@ -213,6 +231,8 @@ public sealed class ReplTestMod : Mod
                (later.ActiveObjects & fakeMachines) == 0 && (later.SlotMask & fakeSlots) == 0, "release",
             $"objects of machines 0x{fakeMachines:x5} inactive: active now 0x{now.ActiveObjects:x5}, 10 steps later 0x{later.ActiveObjects:x5}; " +
             $"slot mask 0x{now.SlotMask:x4}, 10 steps later 0x{later.SlotMask:x4} (fake slots 0x{fakeSlots:x4})");
+
+        await Hold(chest);
     }
 
     // Chapter 11 §7.2: does a fake player put the sim's programs on the game's workers?

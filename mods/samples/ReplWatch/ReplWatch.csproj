@@ -1,0 +1,19 @@
+<Project>
+  <!-- Network inspector sample (docs/kiln/services/replication.md): /replwatch watches a chest with Replication.Watch and
+       logs, per player, the size of its Inventory component and its used slots as the chest is sent to that player.
+       A Kiln.Sdk mod (repository mode): its build writes kiln.mod.json.
+       Build: dotnet build mods/samples/ReplWatch -c Release -o $KILN_OUT/mods/repl-watch -artifacts-path $KILN_OUT/dotnet -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <AssemblyName>ReplWatch</AssemblyName>
+    <RootNamespace>ReplWatchSample</RootNamespace>
+    <KilnModId>repl-watch</KilnModId>
+    <KilnModName>Replication watch sample</KilnModName>
+    <Version>0.1.0</Version>
+    <Description>/replwatch [entity|stop]: watches the chest nearest to you (or the entity named) and logs its Inventory as the server sends it to each player.</Description>
+    <KilnSide>server</KilnSide>
+    <KilnServices>Replication;Network;Items;World;Players;Chat</KilnServices>
+    <KilnGameIds>None</KilnGameIds>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

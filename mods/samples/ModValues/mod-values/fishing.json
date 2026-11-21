@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "values": {
+    "xp": {
+      "kind": "experience",
+      "label": {"en": "Fishing XP", "de": "Angel-EP"},
+      "numberFormat": "N0",
+      "thresholds": ["0", "100", "400", "900", "1600"],
+      "readPolicy": "public",
+      "sync": "readers"
+    },
+    "mastery": {
+      "kind": "experience",
+      "label": {"en": "Fishing mastery", "de": "Angelmeisterschaft"},
+      "thresholds": ["0", "250", "1000"],
+      "max": "1000000000",
+      "persistence": "carried",
+      "trustClientImports": true,
+      "readPolicy": "public",
+      "sync": "readers"
+    },
+    "tokens": {
+      "kind": "currency",
+      "label": {"en": "Fishing tokens", "de": "Angelmarken"},
+      "numberFormat": "N0",
+      "min": "0",
+      "max": "1000000",
+      "initial": "10"
+    }
+  }
+}

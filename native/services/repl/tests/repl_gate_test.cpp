@@ -15,6 +15,7 @@
 
 #include "kiln_api.h"
 #include "services/kiln_caps.h"
+#include "services/kiln_hooks.h"
 #include "services/kiln_net.h"
 #include "services/kiln_repl.h"
 
@@ -37,6 +38,7 @@ std::string g_dir;           // <tmp>\repl-gate-test: the stand-in <game>\kiln
 uint32_t g_lab_port = 0;     // kiln.net's lab transport in this case
 bool g_tick_thread = true;
 const KilnReplApi* g_table = nullptr;
+const KilnReplLabApi* g_lab_table = nullptr;
 std::vector<std::string> g_log;
 struct Report {
     uint32_t state, reason;
@@ -87,6 +89,18 @@ KilnResult KILN_CALL net_status(KilnNetStatus* out) {
     return KILN_OK;
 }
 KilnResult KILN_CALL net_selftest(uint32_t, uint64_t, uint64_t, uint64_t*) { return KILN_ERR_INVALID_ARGUMENT; }
+// kiln.hooks: refuses every link (so repl.observe stays off: the send step cannot be hooked), and records the
+// owner-retiring subscription, which a receive watch needs whatever repl.observe is
+KilnOwnerRetiringFn g_retiring = nullptr;
+KilnResult KILN_CALL hooks_raw_detour(KilnOwner, uintptr_t, const KilnHookOrder*, void*, void**, KilnHandle*) {
+    return KILN_ERR_UNAVAILABLE;
+}
+KilnResult KILN_CALL hooks_revoke(KilnHandle) { return KILN_OK; }
+KilnResult KILN_CALL hooks_subscribe_retiring(KilnOwner, KilnOwnerRetiringFn fn, void*, KilnHandle* out) {
+    g_retiring = fn;
+    *out = 77;
+    return KILN_OK;
+}
 
 const void* KILN_CALL api_service(KilnStr name, uint32_t) {
     static KilnCapsApi caps = [] {
@@ -103,13 +117,25 @@ const void* KILN_CALL api_service(KilnStr name, uint32_t) {
         t.lab_selftest = &net_selftest;
         return t;
     }();
+    static KilnHooksApi hooks = [] {
+        KilnHooksApi t{};
+        t.header = {sizeof t, KILN_HOOKS_VERSION};
+        t.raw_detour = &hooks_raw_detour;
+        t.revoke = &hooks_revoke;
+        t.subscribe_owner_retiring = &hooks_subscribe_retiring;
+        return t;
+    }();
     const std::string n(name.ptr, name.len);
     if (n == KILN_CAPS_SERVICE) return &caps;
     if (n == KILN_NET_SERVICE) return &net;
-    return nullptr;  // no kiln.hooks: the send step stays unhooked (observe off), which this test does not look at
+    if (n == KILN_HOOKS_SERVICE) return &hooks;  // refuses every link: the send step stays unhooked (observe off)
+    return nullptr;
 }
-KilnResult KILN_CALL api_register(KilnOwner, KilnStr, const void* table) {
-    g_table = static_cast<const KilnReplApi*>(table);
+KilnResult KILN_CALL api_register(KilnOwner, KilnStr name, const void* table) {
+    const std::string n(name.ptr, name.len);
+    if (n == KILN_REPL_SERVICE) g_table = static_cast<const KilnReplApi*>(table);
+    else if (n == KILN_REPL_LAB_SERVICE) g_lab_table = static_cast<const KilnReplLabApi*>(table);
+    else return KILN_ERR_INVALID_ARGUMENT;
     return KILN_OK;
 }
 KilnResult KILN_CALL api_subscribe_tick(KilnOwner, int32_t, KilnTickFn, void*, KilnHandle* out) {
@@ -165,6 +191,11 @@ void refused(KilnResult rc) {
     CHECK(g_table->lab_stats(&s) == rc);
     uint32_t len = 0, tick = 0;
     CHECK(g_table->lab_decoded(16, 5, 0x1234, nullptr, 0, &len, &tick) == rc);
+    // kiln.repl.lab (dev.31) behind the same gate
+    CHECK(g_lab_table->payload(16, 5, KILN_REPL_KIND_CREATE, nullptr, 0, &len, &tick) == rc);
+    KilnReplHookCost cost{};
+    cost.size = sizeof cost;
+    CHECK(g_lab_table->hook_cost(&cost, true) == rc);
 }
 
 }  // namespace
@@ -181,8 +212,9 @@ int main() {
     g_lab_port = 28130;
     const KilnResult main_rc = kiln_plugin_main(&api, 7, &info);
     g_case = "start";
-    CHECK(main_rc == KILN_OK && g_table && info.on_ready);
-    if (!g_table || !info.on_ready) return 1;
+    CHECK(main_rc == KILN_OK && g_table && g_lab_table && info.on_ready);
+    if (!g_table || !g_lab_table || !info.on_ready) return 1;
+    CHECK(g_lab_table->header.size == sizeof(KilnReplLabApi) && g_lab_table->header.version == KILN_REPL_LAB_VERSION);
     CHECK(g_table->header.size >= offsetof(KilnReplApi, lab_decoded) + sizeof(g_table->lab_decoded));
 
     // policy "any" and a lab port: the harness answers (no world here, so it stops at that)
@@ -202,6 +234,14 @@ int main() {
     uint32_t added = 0;
     CHECK(g_table->lab_add_fakes(0, fakes, 4, &added) == KILN_ERR_INVALID_ARGUMENT);
     CHECK(g_table->lab_add_fakes(4, fakes, 4, &added) == KILN_ERR_UNAVAILABLE && added == 0);  // no server world
+    uint32_t plen = 7, ptick = 7;
+    CHECK(g_lab_table->payload(16, 5, KILN_REPL_KIND_CREATE, nullptr, 0, &plen, &ptick) == KILN_ERR_NOT_FOUND && plen == 0);
+    CHECK(g_lab_table->payload(16, 5, 9, nullptr, 0, &plen, &ptick) == KILN_ERR_INVALID_ARGUMENT);
+    KilnReplHookCost hc{};
+    hc.size = sizeof hc;
+    CHECK(g_lab_table->hook_cost(&hc, true) == KILN_OK && g_lab_table->hook_cost(&hc, false) == KILN_OK && hc.allocations == 0);
+    hc.size = 8;
+    CHECK(g_lab_table->hook_cost(&hc, false) == KILN_ERR_INVALID_ARGUMENT);
     // ... off the tick thread
     g_tick_thread = false;
     refused(KILN_ERR_WRONG_THREAD);
@@ -258,6 +298,22 @@ int main() {
     info.on_ready(info.user);
     refused(KILN_ERR_UNAVAILABLE);
     CHECK(g_reports.count("repl.loopback") && g_reports["repl.loopback"].text.find("policy \"any\" and kiln.net's lab port") != std::string::npos);
+
+    // kiln.hooks refused the send step: observe is off, and every observe function says so; revoked owners are still
+    // followed (a receive watch's owner, repl.observe or not)
+    g_case = "observe off";
+    CHECK((g_table->capabilities() & (KILN_REPL_CAP_OBSERVE | KILN_REPL_CAP_CLIENT)) == 0);
+    CHECK(g_retiring != nullptr);
+    KilnHandle wh = 99;
+    CHECK(g_table->watch(7, 5, KILN_REPL_ALL_MACHINES, KILN_REPL_SEND, [](const KilnReplWatchEvent*, void*) {}, nullptr, &wh) ==
+              KILN_ERR_UNAVAILABLE && wh == 0);
+    CHECK(g_table->watch(7, 5, KILN_REPL_ALL_MACHINES, KILN_REPL_RECEIVE, [](const KilnReplWatchEvent*, void*) {}, nullptr, &wh) ==
+          KILN_ERR_UNAVAILABLE);  // a server has no receive side
+    CHECK(g_table->capture(7, 0x81, 5, KilnStr{nullptr, 0}) == KILN_ERR_UNAVAILABLE);
+    CHECK(g_table->stats_enable(7, true) == KILN_ERR_UNAVAILABLE);
+    uint32_t rows = 9;
+    CHECK(g_table->peer_stats(nullptr, 0, &rows) == KILN_ERR_UNAVAILABLE && rows == 0);
+    CHECK(g_table->remove(0) == KILN_ERR_INVALID_ARGUMENT && g_table->remove(0x1234) == KILN_ERR_NOT_FOUND);
 
     DeleteFileA((g_dir + "\\kiln.json").c_str());
     RemoveDirectoryA(g_dir.c_str());

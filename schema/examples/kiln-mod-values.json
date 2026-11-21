@@ -1,0 +1,10 @@
+{"format":1,"values":{
+ "xp":{"kind":"experience","label":{"en":"Fishing XP","de":"Angel-EP"},
+       "numberFormat":{"*":"N0"},"min":"0","max":"9223372036854775807",
+       "initial":"0","scale":0,"thresholds":["0","100","400","900"],
+       "persistence":"world","trustClientImports":false,"version":1,
+       "carryEpoch":1,"readPolicy":"public","readMods":[],"sync":"readers",
+       "allowPartitionMove":false,"resetOnKindChange":false},
+ "tokens":{"kind":"currency","label":"Tokens","numberFormat":"N0",
+           "min":"0","max":"1000000","initial":"10","scale":0,
+           "persistence":"world","readPolicy":"ownerOnly","sync":"ownerMod"}}}

@@ -47,6 +47,7 @@ internal static class BlockJson
     private static readonly (string Section, Func<ModBlocks, string, JsonElement, BlockHandle> Make)[] Kinds =
     [
         ("statuses", Make<StatusBlock>), ("effects", Make<EffectBlock>), ("spells", Make<SpellBlock>), ("weapons", Make<WeaponBlock>), ("vfx", MakeVfx), ("materials", MakeMaterial), ("screenEffects", Make<ScreenEffectBlock>), ("sounds", Make<SoundBlock>), .. WorldJson.Kinds, .. ItemJson.Kinds, .. AbilityJson.Kinds, .. FurnitureJson.Kinds, .. NpcJson.Kinds, .. QuestBlockJson.Kinds, .. UiJson.Kinds,
+        .. RoutineJson.Kinds,
         ("affixes", Make<AffixBlock>), ("affixPools", Make<AffixPoolBlock>), ("rarityRolls", Make<RarityRollBlock>), ("rarityUpgrades", Make<RarityUpgradeBlock>),
     ];
 
@@ -366,6 +367,8 @@ internal static class BlocksStartup
         BlockRuntime.SubscribeSignals();
         AbilityRuntime.Subscribe();
         PlayerTriggers.Subscribe();
+        RoutineRuntime.Start(fromTick: true);
+        RoutineSaves.Tick();
         // An unloaded mod's data files compile again when it is loaded again (a reload clears it through ModReloadedEvent), and its material
         // replacements go (Vfx/Reskins.cs).
         foreach (var m in Mods.All)
@@ -378,6 +381,9 @@ internal static class BlocksStartup
             }
         CompileLoaded();
     }
+
+    /// <summary>A mod's data files are still to compile (the next data pass): its routine plans may not be defined yet.</summary>
+    internal static bool PassDue => Mods.All.Any(Due);
 
     private static bool Due(ModEntry m) =>
         m.IsLoaded && m.Directory.Length > 0 && !Done.Contains(m.Id) && Directory.Exists(Path.Combine(m.Directory, "blocks"));

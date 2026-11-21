@@ -217,6 +217,7 @@
     },
     "affixes": {"type": "object", "description": "Affix kinds: rolled modifiers on one item (\"+5 Strength\" on this sword), a stat with tiers and the range each rolls in. A pool rolls them onto an item, and Kiln applies them while it is worn or in hand. Server; asks nothing of players' games. Rolled items keep the id \"mod:name\", the same as Affixes.Define gives.", "propertyNames": {"$ref": "#/$defs/affixName"}, "additionalProperties": {"$ref": "#/$defs/affix"}},
     "affixPools": {"type": "object", "description": "Affix pools: which items roll which affixes, and how many. Code rolls one onto an item (AffixPoolHandle.Roll); its entries name affixes of this mod's code or blocks files, in either order.", "propertyNames": {"$ref": "#/$defs/affixName"}, "additionalProperties": {"$ref": "#/$defs/affixPool"}},
+    "routines": { "type": "object", "description": "Day plans for villagers: windows of the game day, each with one of the game's own villager tasks, and a fallback. Bound to a villager by code (Routines.Assign) or by an NPC block's routine. Server; asks nothing of players' games.", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/routine" } },
     "rarityUpgrades": {"type": "object", "description": "Rarity upgrades: which items an upgrade takes, up to which rarity, and what each step costs (items, a chance, what a failed roll costs). Items.UpgradeRarity(player, item, \"name\") runs one; an upgraded item gets its next enhancement slot in place, which the player unlocks at the workbench as usual. Server; asks nothing of players' games.", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/rarityUpgrade"}},
     "rarityRolls": {"type": "object", "description": "Rarity at creation: which item types roll which rarity (Common to Legendary, by weight) when the game crafts them, loot makes them or a Kiln give asks for none. The game then makes the item at that rarity. Server; asks nothing of players' games. A later definition wins an item type an earlier one also names.", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/rarityRoll"}},
     "resourcePatches": {
@@ -1894,6 +1895,7 @@
         "behaviour": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/behaviour" } ] },
         "talk": { "type": "string", "description": "A dialogue block or quests/*.json dialogue of this mod. Another mod's dialogue is not supported by the startup build." },
         "names": { "type": "object", "additionalProperties": { "type": "string" } },
+        "routine": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/routine" } ], "description": "Its day plan: a routines block of this mod by name, or a plan written here (it becomes the block <this block's name>.routine). Only the server follows it." },
         "vendor": {
           "type": "object",
           "additionalProperties": false,
@@ -4506,6 +4508,48 @@
       "properties": {
         "affix": { "type": "string", "minLength": 1, "pattern": "\\S", "x-kiln-message": "an affix's name, not only spaces", "description": "An affix of this mod by its name (defined in code or in any blocks file of the mod), or \"other-mod:name\"." },
         "weight": { "type": "number", "minimum": 0, "description": "How likely it is to come up, among the pool's (default 1)." }
+      },
+      "additionalProperties": false
+    },
+    "routine": {
+      "type": "object",
+      "description": "A villager's day plan (RoutineBlock). At each decision the villager takes the window with the highest priority that covers the game minute; equal priorities go to the window written first; no window: the fallback.",
+      "properties": {
+        "version": { "type": "integer", "minimum": 1, "maximum": 4294967295, "description": "The version of the plan's content (default 1). Raise it when the windows or the fallback change: a saved assignment follows a higher version, and refuses changed content of the same version." },
+        "was": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9._-]+$", "x-kiln-message": "a local name: letters, digits, '-', '_' and '.'", "description": "The block name this plan had before a rename: saved assignments still find it." },
+        "windows": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/routineWindow" }, "description": "The windows of the day." },
+        "fallback": { "$ref": "#/$defs/routineFallback" }
+      },
+      "additionalProperties": false
+    },
+    "routineWindow": {
+      "type": "object",
+      "required": ["task"],
+      "description": "One window: from startMinute up to, not including, endMinute, in minutes of the game day (0 is midnight). A start after the end runs over midnight. Equal start and end is refused, except 0 and 0 with allDay.",
+      "properties": {
+        "startMinute": { "type": "integer", "minimum": 0, "maximum": 1439, "description": "The first minute of the window (default 0)." },
+        "endMinute": { "type": "integer", "minimum": 0, "maximum": 1439, "description": "The first minute after the window (default 0; midnight is 0)." },
+        "task": { "$ref": "#/$defs/routineTask" },
+        "priority": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647, "description": "Among the windows that cover a minute the highest wins (default 0)." },
+        "allDay": { "type": "boolean", "description": "The whole day; then startMinute and endMinute are 0 or left out." }
+      },
+      "additionalProperties": false
+    },
+    "routineTask": {
+      "type": "object",
+      "required": ["kind"],
+      "description": "One of the game's own villager tasks. It takes no values in this version: how long an idle lasts and how far a roam goes are the villager's own.",
+      "properties": {
+        "kind": { "type": "string", "enum": ["vanilla", "idle", "roam", "sleep", "sit", "inspect"], "description": "vanilla: the game's own choice. idle: stand. roam: walk around home. sleep: go to the assigned bed, when the game lets this villager sleep now (else the fallback runs). sit: find a seat. inspect: find something to look at or work on." }
+      },
+      "additionalProperties": false
+    },
+    "routineFallback": {
+      "type": "object",
+      "required": ["kind"],
+      "description": "The task for a minute no window covers, and after a sleep the game does not allow now (default vanilla). A task that always can: vanilla, idle or roam.",
+      "properties": {
+        "kind": { "type": "string", "enum": ["vanilla", "idle", "roam"] }
       },
       "additionalProperties": false
     }

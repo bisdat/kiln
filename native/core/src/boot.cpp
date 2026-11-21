@@ -15,6 +15,7 @@
 #include "clr.h"
 #include "compat.h"
 #include "config.h"
+#include "debug_descriptor.h"
 #include "image.h"
 #include "log.h"
 #include "native_mods.h"
@@ -694,6 +695,7 @@ void boot() {
     // a published generation keeps the entry point held and ends the process (KILN_BOOT_EXIT_CODE): no save loads
     // without its mods' content. The commit sits before chain.ini [late] DLLs and before the game's entry point.
     if (!boot_svc::after_clr(f.clr_started, &hold_boot, &f)) return;  // the exit adapter returned (host tests only)
+    debug_descriptor::start(f.clr_started);  // kiln.json "developer_debugging": the descriptor and the control pipe
     native_mods::run_late();  // chain DLLs named in kiln/chain.ini [late]: after everything Kiln hosts hooked
     check_entry_patch(f);
     write_boot_json(f);
