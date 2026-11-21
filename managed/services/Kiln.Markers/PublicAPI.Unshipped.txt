@@ -159,3 +159,7 @@ static Kiln.MarkerSpec.operator !=(Kiln.MarkerSpec? left, Kiln.MarkerSpec? right
 static Kiln.MarkerSpec.operator ==(Kiln.MarkerSpec? left, Kiln.MarkerSpec? right) -> bool
 ~override Kiln.MarkerIcon.Equals(object obj) -> bool
 ~override Kiln.MarkerIcon.ToString() -> string
+static Kiln.Markers.ClearSent(Kiln.EntityId player = default(Kiln.EntityId)) -> Kiln.MarkerResult!
+static Kiln.Markers.Send(Kiln.EntityId player, Kiln.MarkerSpec! marker) -> Kiln.MarkerResult!
+static Kiln.Markers.SuppressSent(Kiln.EntityId player, string! id) -> Kiln.MarkerResult!
+static Kiln.Markers.Unsend(Kiln.EntityId player, string! id) -> Kiln.MarkerResult!

@@ -44,7 +44,11 @@ internal static class MarkersCaps
         var here = MarkersNative.T != null;
         if (!here) ServiceCaps.LowerFeatures(Service, Features);
         foreach (var row in ServiceRows)
-            ServiceCaps.Static(row, here, CapabilityReason.ServiceMissing, "kiln.markers is not loaded", Service);
+        {
+            // the built-in receiver could not open its channel (a network limit below 16384, no kiln.net): it says why
+            if (row == Send && here && MarkersBridge.Off is { } off) ServiceCaps.Report(row, CapabilityState.Unavailable, off.Reason, off.Text);
+            else ServiceCaps.Static(row, here, CapabilityReason.ServiceMissing, "kiln.markers is not loaded", Service);
+        }
     }
 
     /// <summary>Throws <see cref="KilnUnavailableException"/> naming <paramref name="capability"/> unless it is available
@@ -69,8 +73,13 @@ internal static class MarkersCaps
     }
 }
 
-/// <summary>Started by Kiln (ServiceTick.AutoStart) at its first service tick, so the rows are there before a mod asks.</summary>
+/// <summary>Started by Kiln (ServiceTick.AutoStart) at its first service tick, so the rows are there before a mod asks, and
+/// the built-in receiver (kiln:markers) runs without any author mod.</summary>
 internal static class MarkersStartup
 {
-    static MarkersStartup() => MarkersCaps.Rows.Ensure();
+    static MarkersStartup()
+    {
+        MarkersCaps.Rows.Ensure();
+        MarkersBridge.Start();
+    }
 }
