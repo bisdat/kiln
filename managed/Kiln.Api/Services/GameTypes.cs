@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // The game's own type registry, ECS systems, ECS events, and components by name, over kiln.types and kiln.world
 // (native/core/abi/services/kiln_types.h, kiln_world.h). Guide: docs/kiln/services/types.md.
+using System.Collections.Concurrent;
+using System.Collections.ObjectModel;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 
@@ -55,11 +57,13 @@ public sealed unsafe class GameType
     public GameType? Inner => _inner == null ? null : GameTypes.Of(_inner);
     /// <summary>A struct's base class, or null.</summary>
     public GameType? Base => Kind == GameTypeKind.Struct ? Inner : null;
-    /// <summary>The type a typedef names (followed to the end), else this type.</summary>
+    /// <summary>The type a typedef names (followed to the end), else this type. Worked out once per type.</summary>
     public GameType Resolved
     {
         get
         {
+            if (Kind != GameTypeKind.Typedef) return this;
+            if (Volatile.Read(ref _resolved) is { } known) return known;
             var t = this;
             var seen = new HashSet<GameType>();
             while (t.Kind == GameTypeKind.Typedef)
@@ -68,31 +72,45 @@ public sealed unsafe class GameType
                     throw new NotSupportedException($"invalid typedef chain in {QualifiedName}");
                 t = n;
             }
+            Volatile.Write(ref _resolved, t);
             return t;
         }
     }
+
+    private GameType? _resolved;
+    private ReadOnlyCollection<GameField>? _allFields;
+    private Dictionary<string, GameField>? _fieldsByName;
     /// <summary>The game's default value (<see cref="Size"/> bytes), or null when the type has none.</summary>
     public byte[]? Defaults => _defaults == null ? null : (byte[])_defaults.Clone();
 
     /// <summary>Own fields, in the game's order.</summary>
     public IReadOnlyList<GameField> Fields => _fields ??= LoadFields();
 
-    /// <summary>Every field, base classes first.</summary>
+    /// <summary>Every field, base classes first. Worked out once per type (#114: a field path read per event or per step
+    /// walked the base classes again at every access).</summary>
     public IEnumerable<GameField> AllFields
     {
         get
         {
-            var chain = new List<GameType>();
-            var seen = new HashSet<GameType>();
-            for (GameType? t = this; t is { Kind: GameTypeKind.Struct }; t = t.Base)
-            {
-                if (!seen.Add(t) || chain.Count == 64 || t.Size > Size)
-                    throw new NotSupportedException($"invalid base class chain in {QualifiedName}");
-                chain.Add(t);
-            }
-            return chain.AsEnumerable().Reverse().SelectMany(t => t.Fields)
-                .Where(f => f.Offset >= 0 && f.Offset <= Size && f.Type.Size <= Size - f.Offset).ToArray();
+            if (Volatile.Read(ref _allFields) is { } known) return known;
+            known = Array.AsReadOnly(LoadAllFields());
+            Volatile.Write(ref _allFields, known);
+            return known;
         }
+    }
+
+    private GameField[] LoadAllFields()
+    {
+        var chain = new List<GameType>();
+        var seen = new HashSet<GameType>();
+        for (GameType? t = this; t is { Kind: GameTypeKind.Struct }; t = t.Base)
+        {
+            if (!seen.Add(t) || chain.Count == 64 || t.Size > Size)
+                throw new NotSupportedException($"invalid base class chain in {QualifiedName}");
+            chain.Add(t);
+        }
+        return chain.AsEnumerable().Reverse().SelectMany(t => t.Fields)
+            .Where(f => f.Offset >= 0 && f.Offset <= Size && f.Type.Size <= Size - f.Offset).ToArray();
     }
 
     /// <summary>An enum's or bitmask's values (name, value).</summary>
@@ -130,10 +148,18 @@ public sealed unsafe class GameType
     /// <summary>A static array's element count (0 for other kinds).</summary>
     public int ArrayLength => Kind == GameTypeKind.StaticArray && Inner is { Size: > 0 } e ? Size / e.Size : 0;
 
-    /// <summary>A field by name, base classes included.</summary>
+    /// <summary>A field by name, base classes included (a derived class's field hides a base class's of the same name).
+    /// A dictionary built once per type.</summary>
     public GameField? Field(string name)
     {
-        return AllFields.Reverse().Cast<GameField?>().FirstOrDefault(f => f!.Value.Name == name);
+        var byName = Volatile.Read(ref _fieldsByName);
+        if (byName is null)
+        {
+            byName = new Dictionary<string, GameField>(StringComparer.Ordinal);
+            foreach (var f in AllFields) byName[f.Name] = f;  // in order, base classes first: the last one wins
+            Volatile.Write(ref _fieldsByName, byName);
+        }
+        return name is not null && byName.TryGetValue(name, out var found) ? found : null;
     }
 
     public override string ToString() => QualifiedName;
@@ -147,7 +173,7 @@ public sealed unsafe class GameType
         {
             TypesNative.TypeField f;
             if (t->TypeField(Handle, i, &f) != 0 || f.Type == null) continue;
-            if (GameTypes.Of(f.Type) is { } ft && f.Offset <= (ulong)Size && (ulong)ft.Size <= (ulong)Size - f.Offset)
+            if (GameTypes.Of(t, f.Type) is { } ft && f.Offset <= (ulong)Size && (ulong)ft.Size <= (ulong)Size - f.Offset)
                 list.Add(new GameField(f.Name.ToString(), ft, (int)f.Offset));
         }
         return list.ToArray();
@@ -182,9 +208,11 @@ public static unsafe class GameTypes
 
     public static int Count { get { var table = Table; return table == null ? 0 : (int)table->TypeCount(); } }
 
-    internal static GameType? Of(void* handle)
+    internal static GameType? Of(void* handle) => Of(Table, handle);
+
+    // The table asked once by the caller: a loop over the game's types asks Services.Get once, not once per type.
+    internal static GameType? Of(TypesNative.Table* table, void* handle)
     {
-        var table = Table;
         if (handle == null || table == null) return null;
         lock (Cache)
         {
@@ -196,14 +224,88 @@ public static unsafe class GameTypes
         }
     }
 
-    /// <summary>By name: "keen::ecs::Health" exactly, or a short name ("Health", "ItemInfo") that is unique.</summary>
+    /// <summary>By name: "keen::ecs::Health" exactly, or a short name ("Health", "ItemInfo") that is unique. A name
+    /// found once is remembered for the process (a dictionary lookup afterwards); an unknown name asks kiln.types again.</summary>
     public static GameType? Find(string name)
     {
         var t = Table;
-        if (t == null || string.IsNullOrEmpty(name)) return null;
-        var bytes = System.Text.Encoding.UTF8.GetBytes(name);
-        fixed (byte* p = bytes) return Of(t->TypeByName(new NativeStr { Ptr = p, Len = (nuint)bytes.Length }));
+        return t == null ? null : Find(t, name);
     }
+
+    internal static GameType? Find(TypesNative.Table* t, string name)
+    {
+        if (t == null || string.IsNullOrEmpty(name)) return null;
+        var lookups = LookupsOf(t);
+        if (lookups.Names.TryGetValue(name, out var known) && Of(t, (void*)known) is { } hit) return hit;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(name);
+        void* handle;
+        fixed (byte* p = bytes) handle = t->TypeByName(new NativeStr { Ptr = p, Len = (nuint)bytes.Length });
+        var found = Of(t, handle);
+        // Found names only: a test's table can gain a type after a miss, and a mod making up names stays bounded.
+        if (found is not null && lookups.Names.Count < MaxNames) lookups.Names.TryAdd(name, (nint)handle);
+        return found;
+    }
+
+    // ---- lookups kept per type table (#114) ----
+    // kiln.types finds the game's type table once at boot and never replaces it (kiln.types' ecs_registry note), so a
+    // name's type and the lists of all, component and event types hold for the process. Before #114 every
+    // GameEvents.Each rebuilt the event list (one Services.Get, one native call and one cache lock per event type) to
+    // check one name, every step. They are kept per (backend, table, type count): another backend or table (a test's),
+    // or a count that changed (a test kit table switched off answers 0), starts afresh; a list also holds its own count.
+
+    private const int MaxNames = 4096;
+
+    internal sealed class Lookups(object owner, nint table, uint count)
+    {
+        public readonly object Owner = owner;
+        public readonly nint Table = table;
+        public readonly uint Count = count;
+        public readonly ConcurrentDictionary<string, nint> Names = new(StringComparer.Ordinal);
+        public TypeList? All, Components, Events;
+    }
+
+    /// <summary>A list of the game's types as kiln.types listed them at <see cref="Count"/>, with their handles.</summary>
+    internal sealed record TypeList(uint Count, ReadOnlyCollection<GameType> Types, HashSet<nint> Handles);
+
+    private static Lookups? _lookups;
+
+    internal static Lookups LookupsOf(TypesNative.Table* table)
+    {
+        var owner = Backend.Current;
+        var count = table->TypeCount == null ? 0u : table->TypeCount();
+        var known = Volatile.Read(ref _lookups);
+        if (known is not null && ReferenceEquals(known.Owner, owner) && known.Table == (nint)table && known.Count == count) return known;
+        known = new Lookups(owner, (nint)table, count);
+        Volatile.Write(ref _lookups, known);
+        return known;
+    }
+
+    private static TypeList Listed(TypesNative.Table* table, ref TypeList? slot, uint count, delegate* unmanaged[Cdecl]<uint, void*> at)
+    {
+        var known = Volatile.Read(ref slot);
+        if (known is not null && known.Count == count) return known;
+        if (at == null) count = 0;
+        var list = new List<GameType>((int)Math.Min(count, 65536u));
+        var handles = new HashSet<nint>();
+        for (uint i = 0; i < count; i++)
+        {
+            if (Of(table, at(i)) is not { } g) continue;
+            list.Add(g);
+            handles.Add((nint)g.Handle);
+        }
+        known = new TypeList(count, list.AsReadOnly(), handles);
+        Volatile.Write(ref slot, known);
+        return known;
+    }
+
+    internal static TypeList EventList(TypesNative.Table* t)
+    {
+        var lookups = LookupsOf(t);
+        return Listed(t, ref lookups.Events, t->EventTypeCount == null ? 0u : t->EventTypeCount(), t->EventTypeAt);
+    }
+
+    /// <summary>Whether <paramref name="type"/> is one of the game's ECS event types (a set lookup).</summary>
+    internal static bool IsEvent(TypesNative.Table* t, GameType type) => EventList(t).Handles.Contains((nint)type.Handle);
 
     public static GameType? ByHash(uint hash)
     {
@@ -309,10 +411,11 @@ public static unsafe class GameTypes
         }
     }
 
-    /// <summary>Forgets the Impact-name index (tests that publish a new fake table at an old address).</summary>
+    /// <summary>Forgets the Impact-name index and the lookups (tests that publish a new fake table at an old address).</summary>
     internal static void ResetImpactIndex()
     {
         lock (ImpactGate) _impactIndex = null;
+        Volatile.Write(ref _lookups, null);
     }
 
     /// <summary>The reflected type of a value (EML's <c>types.of</c>): a <see cref="ReflectedValue"/> (a component or an event
@@ -327,17 +430,15 @@ public static unsafe class GameTypes
         _ => null,
     };
 
-    /// <summary>Every type, in the game's order.</summary>
+    /// <summary>Every type, in the game's order (read-only, built once per type table).</summary>
     public static IEnumerable<GameType> All
     {
         get
         {
             var tbl = Table;
-            var list = new List<GameType>(Count);
-            if (tbl == null) return list;
-            for (uint i = 0, n = tbl->TypeCount(); i < n; i++)
-                if (Of(tbl->TypeAt(i)) is { } t) list.Add(t);
-            return list;
+            if (tbl == null) return [];
+            var lookups = LookupsOf(tbl);
+            return Listed(tbl, ref lookups.All, lookups.Count, tbl->TypeAt).Types;
         }
     }
 
@@ -348,31 +449,25 @@ public static unsafe class GameTypes
         return All.Where(t => w.All(x => t.QualifiedName.Contains(x, StringComparison.OrdinalIgnoreCase)));
     }
 
-    /// <summary>The game's ECS component types.</summary>
+    /// <summary>The game's ECS component types (read-only, built once per type table).</summary>
     public static IReadOnlyList<GameType> Components
     {
         get
         {
             var t = Table;
-            var list = new List<GameType>();
-            if (t == null) return list;
-            for (uint i = 0, n = t->ComponentTypeCount(); i < n; i++)
-                if (Of(t->ComponentTypeAt(i)) is { } g) list.Add(g);
-            return list;
+            if (t == null) return [];
+            var lookups = LookupsOf(t);
+            return Listed(t, ref lookups.Components, t->ComponentTypeCount == null ? 0u : t->ComponentTypeCount(), t->ComponentTypeAt).Types;
         }
     }
 
-    /// <summary>The game's ECS event types.</summary>
+    /// <summary>The game's ECS event types (read-only, built once per type table).</summary>
     public static IReadOnlyList<GameType> Events
     {
         get
         {
             var t = Table;
-            var list = new List<GameType>();
-            if (t == null) return list;
-            for (uint i = 0, n = t->EventTypeCount(); i < n; i++)
-                if (Of(t->EventTypeAt(i)) is { } g) list.Add(g);
-            return list;
+            return t == null ? [] : EventList(t).Types;
         }
     }
 
@@ -611,16 +706,35 @@ public static unsafe class GameEvents
 {
     /// <summary>Every event of <paramref name="type"/> the server world produced in the step that just ended (call it
     /// in <c>Context.Tick.Post</c>). The handler gets a copy it may keep. Returns how many there were; -1 when the
-    /// world has no stream for the type or events are unavailable.</summary>
+    /// world has no stream for the type or events are unavailable. Cheap to call every step: the name is resolved once
+    /// per process (a dictionary lookup afterwards), and a step without such events costs one native call. Throws
+    /// <see cref="ArgumentException"/> for an unknown type or a type that is not an ECS event.</summary>
     public static int Each(string type, Action<ReflectedValue> handler)
     {
         Services.RequireTickThread("GameEvents.Each");
         ArgumentNullException.ThrowIfNull(handler);
         var tbl = GameTypes.Table;
         if (tbl == null) return -1;
-        var t = EventType(type);
+        return EachOf(tbl, EventType(tbl, type), handler);
+    }
+
+    /// <summary><see cref="Each(string, Action{ReflectedValue})"/> for a type resolved once (<see cref="GameTypes.Find"/>,
+    /// <see cref="GameTypes.Events"/>): no name lookup at all. Throws <see cref="ArgumentException"/> when
+    /// <paramref name="type"/> is not an ECS event type. Since 0.2.0-dev.30.3 (mod API 0.2.13).</summary>
+    public static int Each(GameType type, Action<ReflectedValue> handler)
+    {
+        Services.RequireTickThread("GameEvents.Each");
+        ArgumentNullException.ThrowIfNull(type);
+        ArgumentNullException.ThrowIfNull(handler);
+        var tbl = GameTypes.Table;
+        if (tbl == null) return -1;
+        return EachOf(tbl, RequireEvent(tbl, type, type.QualifiedName), handler);
+    }
+
+    private static int EachOf(TypesNative.Table* tbl, GameType t, Action<ReflectedValue> handler)
+    {
         var world = ReflectedValue.World is var w && w != null ? w->ServerWorld() : 0;
-        if (tbl == null || world == 0) return -1;
+        if (world == 0) return -1;
         var capture = new EventCopies(t.Size);
         var h = GCHandle.Alloc(capture);
         try
@@ -659,14 +773,31 @@ public static unsafe class GameEvents
 
     /// <summary>Posts an event with the named fields set (checked; unnamed fields, including timeStamp, are 0). The game
     /// handles it at the start of the next step. False when its queue is full this step. Throws for an unknown type,
-    /// a type the world has no stream for, or a value that does not fit.</summary>
+    /// a type the world has no stream for, or a value that does not fit. The name is resolved once per process.</summary>
     public static bool Post(string type, IReadOnlyDictionary<string, object?> fields)
     {
         Services.RequireTickThread("GameEvents.Post");
         ArgumentNullException.ThrowIfNull(fields);
         var tbl = GameTypes.Table;
         if (tbl == null) throw new NotSupportedException("kiln.types is not running");
-        var t = EventType(type);
+        return PostOf(tbl, EventType(tbl, type), fields);
+    }
+
+    /// <summary><see cref="Post(string, IReadOnlyDictionary{string, object})"/> for a type resolved once. Throws
+    /// <see cref="ArgumentException"/> when <paramref name="type"/> is not an ECS event type. Since 0.2.0-dev.30.3
+    /// (mod API 0.2.13).</summary>
+    public static bool Post(GameType type, IReadOnlyDictionary<string, object?> fields)
+    {
+        Services.RequireTickThread("GameEvents.Post");
+        ArgumentNullException.ThrowIfNull(type);
+        ArgumentNullException.ThrowIfNull(fields);
+        var tbl = GameTypes.Table;
+        if (tbl == null) throw new NotSupportedException("kiln.types is not running");
+        return PostOf(tbl, RequireEvent(tbl, type, type.QualifiedName), fields);
+    }
+
+    private static bool PostOf(TypesNative.Table* tbl, GameType t, IReadOnlyDictionary<string, object?> fields)
+    {
         if (t.Size <= 0 || t.Size >= 0x100) throw new ArgumentException($"{t} is too big to post");
         var v = ReflectedValue.Owned(t, new byte[t.Size]);
         foreach (var (k, val) in fields) v[k] = val;
@@ -686,12 +817,16 @@ public static unsafe class GameEvents
         };
     }
 
-    private static GameType EventType(string name)
+    // #114: a dictionary lookup and a set lookup. Before, every call rebuilt GameTypes.Events (a Services.Get, a native
+    // call and a cache lock per event type of the game) to search it once: 48-67 ms a step on a hosted world.
+    private static GameType EventType(TypesNative.Table* tbl, string name)
     {
-        var t = GameTypes.Find(name) ?? throw new ArgumentException($"unknown type '{name}'");
-        if (GameTypes.Events.Any(e => e.Handle == t.Handle)) return t;
-        throw new ArgumentException($"'{name}' is not an event type");
+        var t = GameTypes.Find(tbl, name) ?? throw new ArgumentException($"unknown type '{name}'");
+        return RequireEvent(tbl, t, name);
     }
+
+    private static GameType RequireEvent(TypesNative.Table* tbl, GameType t, string name) =>
+        GameTypes.IsEvent(tbl, t) ? t : throw new ArgumentException($"'{name}' is not an event type");
 }
 
 /// <summary>Components by name with the game's own field layout, and checked writes (kiln.world + kiln.types).</summary>

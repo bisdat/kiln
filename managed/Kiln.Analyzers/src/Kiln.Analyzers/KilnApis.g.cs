@@ -364,7 +364,9 @@ internal static partial class KilnApis
         "M:Kiln.GameDataRegistry.IsClone(System.Guid)", // GameDataRegistry.IsClone(Guid): via GameDataRegistry.Get(Guid)
         "M:Kiln.GameDataRegistry.get_Count", // GameDataRegistry.Count.get: via Content.RequireGD(string)
         "M:Kiln.GameDataRegistry.get_Item(System.Int32)", // GameDataRegistry.this[int].get: via Content.RequireGD(string)
+        "M:Kiln.GameEvents.Each(Kiln.GameType,System.Action{Kiln.ReflectedValue})", // GameEvents.Each(GameType, Action<ReflectedValue>): Services.RequireTickThread
         "M:Kiln.GameEvents.Each(System.String,System.Action{Kiln.ReflectedValue})", // GameEvents.Each(string, Action<ReflectedValue>): Services.RequireTickThread
+        "M:Kiln.GameEvents.Post(Kiln.GameType,System.Collections.Generic.IReadOnlyDictionary{System.String,System.Object})", // GameEvents.Post(GameType, IReadOnlyDictionary<string, object?>): Services.RequireTickThread
         "M:Kiln.GameEvents.Post(System.String,System.Collections.Generic.IReadOnlyDictionary{System.String,System.Object})", // GameEvents.Post(string, IReadOnlyDictionary<string, object?>): Services.RequireTickThread
         "M:Kiln.GameSystems.Hook(System.String,System.Action,System.Action)", // GameSystems.Hook(string, Action?, Action?): Services.RequireTickThread
         "M:Kiln.GameSystems.Profile(System.Boolean)", // GameSystems.Profile(bool): Services.RequireTickThread
