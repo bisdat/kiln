@@ -337,6 +337,12 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
                     {r.lib && <UpdateBadge status={statusOf(updates.data, r.kind, r.id)} />}
                     {r.found && <span className="k-mod-where">{t("mods.order.gameFolder")}</span>}
                     {r.note && <span className={`k-tone-${r.note.tone}`} title={r.note.title}>{r.note.text}</span>}
+                    {r.note?.link && (
+                      <button type="button" className="k-link" title={r.note.link.title}
+                        onClick={() => { const url = r.note?.link?.url; if (url) api.appOpenUrl(url).catch((e) => toast.error(e)); }}>
+                        {r.note.link.label}
+                      </button>
+                    )}
                     {r.changed && (
                       <button type="button" className="k-link" disabled={!!busy || running} onClick={() => void takeChanged(r)}
                         aria-label={t("mods.list.useChangedOf", { action: changedFilesLabel(), name: r.name })} title={t("mods.list.useChangedHint")}>

@@ -666,6 +666,30 @@ export interface ResolvePreview {
    *  `kiln.rejected`, skipped, with the reason "Starts with your own world, ...". Empty on a server and when the game's
    *  kiln.json has `"mods": {"hosted": false}` (then those mods say so). */
   withWorld: string[];
+  /** The profile's switched-on EMF mods a dependency keeps from loading, from their mod.json as kiln-emf checks them at
+   *  the start (kiln_manage::emf_deps): what is missing, off or out of range, and how to get it. With a game, its
+   *  emf/mods folder counts too. Absent from older backends. */
+  emf?: EmfDepProblem[];
+}
+/** One EMF mod that will not load because of a dependency (kiln_manage::emf_deps::EmfDepProblem). */
+export interface EmfDepProblem {
+  /** The profile entry's id (the row). */
+  id: string;
+  /** The dependency's id, as EMF reads it (lower case). */
+  dep: string;
+  /** Its name: its own mod.json's when it is there, else EMF's name for one of its own mods; null: unknown. */
+  depName: string | null;
+  /** The range as the mod.json writes it ("" for any version). */
+  range: string;
+  state: "missing" | "off" | "notLoading" | "tooOld" | "tooNew";
+  /** The version there (off, notLoading, tooOld, tooNew). */
+  found: string | null;
+  /** One of EMF's own mods, which come with EMF's release zip (its lua mod above all). */
+  withEmf: boolean;
+  /** Where to get it: the dependency entry's own link, else EMF's page for one of EMF's own mods. */
+  url: string | null;
+  /** kiln-emf's own words for it at the start (kiln/state/emf.json `reason`). */
+  reason: string;
 }
 
 // library
@@ -942,6 +966,8 @@ export interface BootJson {
   kiln: string;
   abi?: number;
   pid: number;
+  /** When the game started (the run's first moment), before `written`. */
+  started?: string;
   written: string;
   bootMs?: number;
   side: RunSide;
