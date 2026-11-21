@@ -325,6 +325,10 @@ Content.Items.Register(new ItemDefinition { Guid = ..., Name = "MyMod_FrostEdge"
 Content.Recipes.Register(new RecipeDefinition { Guid = ..., Name = "MyMod_FrostEdge_Recipe", Station = "hand",
     Inputs = [("Material_T1_Twigs", 2)], Outputs = [("MyMod_FrostEdge", 1)] });
 ```
+dev.30.3+ **a recipe's tank water:** `RecipeDefinition.Water` (new recipes) and `entry.CraftingWater` (game recipes) are
+`waterCharges`, charges per craft (1 charge = 64 water units), 0..1023: the six tank stations (Seedbed, Oven, Cooking
+Station, Laboratory, Coffee Brewer, Beehive) take it from their own tank, crafting menus (hand, Workbench, Kitchen, NPCs)
+from the player and the base's wells and barrels. Not the old "Water" canteen item. Replaces `Fields["waterCharges"]` (`Water` sends a pack's `"water"`; never both).
 Registries: `Content.Items`, `Recipes`, `Loot`, `Drops`; game data: `Content.Templates`, `Arsenals`, `Sequences`,
 `Buffs`, `Perks`, `Skills`. `entry.Get(path)`, `Original(path)`, `Set(path, value)`, `Reset(path)`.
 `Content.Dump()` writes every registry with its fields to `kiln/data/content/dump.json`: look names and paths up
@@ -471,6 +475,12 @@ before the game: keep it short, return true to keep the press from the game. Whe
 server) the listener is not `Ok`, with a `Reason`; it never throws for that. `KeyInput.PressCode(vk, scan)` and
 `p.Chord.ToString()` are what the Keys page stores. Don't read Kiln's internals (`KilnText`, `UiNative`, `KeyNames`) by
 reflection: `KilnLanguage` and `KeyInput` are the public members for them (`docs/kiln/ui.md`, the XHL-Core table).
+
+**The pointer and drag and drop (dev.30.3+, Kiln.Ui; not yet seen in a real game).** In a draw callback: `ui.Pointer`
+(`Vector2?`, overlay pixels, `DrawRect`'s space), `ui.ButtonHeld(UiMouseButton.Left)`, and ImGui's drag and drop:
+`ui.DragSource("stack", payload, preview)` right after a widget, `ui.DropTarget("stack")` right after another (the payload
+text once, on release; else null). Kinds are the mod's own; payloads are text up to 4096 bytes. `SlotClick.Pointer` is
+the press position in the same pixels (`Ui.Inventory.OnClick`). Page `docs/kiln/ui.md`.
 
 **Looks and themes (dev.29.16+; not yet seen in a real game).** `UiStyle.Player` (the look the player chose) is the
 default for `Ui.Window`, `Ui.Screen` and crafting panels; before, windows had Kiln's ember look. `ui.Palette` reads the

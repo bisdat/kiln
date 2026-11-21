@@ -349,7 +349,8 @@ false)`; the fake then answers as the native service does without it. The table 
   `Click(0, SlotButton.Left, SlotModifiers.Ctrl)` is the player's press: on a screen with a pointer (the in-game menu,
   player crafting, the backpack, a chest, a station, NPC crafting, a factory; never `HudScreen.InGame`, where the hotbar
   attacks) every `OnClick` handler whose button and exact modifiers match gets the `SlotClick` with the slot's item and
-  `ItemEntity`, at once on the calling thread, and the answer says how many got it and whether the game would have seen
+  `ItemEntity` (and, since 0.2.0-dev.30.3, `Pointer` at the slot's centre: the kit draws slot `i` at 10 + 90 * (i % 8),
+  20 + 90 * (i / 8), 80 x 80, one pixel per UI unit), at once on the calling thread, and the answer says how many got it and whether the game would have seen
   the press (`Taken`). Nothing drawn, another screen, or a row switched off: no handler runs. Marks stay Kiln.Ui's:
   `kiln.UiInventory.MarkOf(0)` is what Kiln would draw on a drawn slot (an item mark of any mod first, then the
   `MarkWhen` rules in order), so `Mark`, `Unmark`, `ClearMarks` and `MarkWhen` are checked by reading it after a

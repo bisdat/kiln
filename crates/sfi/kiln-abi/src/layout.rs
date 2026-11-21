@@ -4607,7 +4607,15 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiChatSearch, height) == 60);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiChatSearch, query) == 64);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiChatSearch, lines) == 321);
-    assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiApi>() == 1056);
+    assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiPointer>() == 24);
+    assert!(core::mem::align_of::<crate::services::kiln_ui::KilnUiPointer>() == 4);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPointer, size) == 0);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPointer, flags) == 4);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPointer, x) == 8);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPointer, y) == 12);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPointer, held) == 16);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPointer, reserved) == 20);
+    assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiApi>() == 1080);
     assert!(core::mem::align_of::<crate::services::kiln_ui::KilnUiApi>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, header) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, status) == 8);
@@ -4741,6 +4749,9 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, chat_completion) == 1032);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, subscribe_pointer_press) == 1040);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, chat_search) == 1048);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, pointer) == 1056);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, drag_source) == 1064);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, drop_target) == 1072);
     assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiTickApi>() == 32);
     assert!(core::mem::align_of::<crate::services::kiln_ui::KilnUiTickApi>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiTickApi, header) == 0);

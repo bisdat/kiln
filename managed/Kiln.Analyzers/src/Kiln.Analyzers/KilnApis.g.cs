@@ -202,11 +202,13 @@ internal static partial class KilnApis
         "M:Kiln.ContentEntry.SetRefJson(System.String,System.String,System.Boolean)", // ContentEntry.SetRefJson(string, string, bool): via Content.Require(string)
         "M:Kiln.ContentEntry.SetStacks(System.Collections.Generic.IEnumerable{Kiln.DropStack})", // ContentEntry.SetStacks(IEnumerable<DropStack>): via Content.Require(string)
         "M:Kiln.ContentEntry.get_CraftingDuration", // ContentEntry.CraftingDuration.get: via ContentEntry.Get(string)
+        "M:Kiln.ContentEntry.get_CraftingWater", // ContentEntry.CraftingWater.get: via ContentEntry.Get(string)
         "M:Kiln.ContentEntry.get_Inputs", // ContentEntry.Inputs.get: via ContentEntry.ReadStacks(uint)
         "M:Kiln.ContentEntry.get_MaxStack", // ContentEntry.MaxStack.get: via ContentEntry.Get(string)
         "M:Kiln.ContentEntry.get_Outputs", // ContentEntry.Outputs.get: via ContentEntry.ReadStacks(uint)
         "M:Kiln.ContentEntry.get_Stacks", // ContentEntry.Stacks.get: via ContentEntry.ReadStacks(uint)
         "M:Kiln.ContentEntry.set_CraftingDuration(System.TimeSpan)", // ContentEntry.CraftingDuration.set: via ContentEntry.Set(string, TimeSpan)
+        "M:Kiln.ContentEntry.set_CraftingWater(System.Int32)", // ContentEntry.CraftingWater.set: via ContentEntry.Set(string, int)
         "M:Kiln.ContentEntry.set_MaxStack(System.Int32)", // ContentEntry.MaxStack.set: via ContentEntry.Set(string, long)
         "M:Kiln.ContentRegistry.Field(System.String)", // ContentRegistry.Field(string): via ContentRegistry.Fields.get
         "M:Kiln.ContentRegistry.Get(Kiln.ItemId)", // ContentRegistry.Get(ItemId): via ContentRegistry.Get(uint)

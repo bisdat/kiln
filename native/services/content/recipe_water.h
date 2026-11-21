@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// A new recipe's water (a data pack's recipe definition, "water"; C# sets Fields["waterCharges"]): the game's own recipe water,
+// A new recipe's water (a recipe definition's "water": a data pack's, or C#'s RecipeDefinition.Water): the game's own recipe water,
 // RecipeInfo.waterCharges, in charges per craft. One charge is the game's water unit times 64 (BalancingRegistry
 // settings +0xFC); the recipe screen shows the charges as its "Water" row ("Water 92 / 2": 92 charges at hand, 2 a craft).
 // The game's recipe payment (rules/RecipeApply, server 0x19a1d0) takes charges x units x crafts after the inputs: a factory

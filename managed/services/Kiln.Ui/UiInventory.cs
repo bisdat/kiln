@@ -5,6 +5,7 @@
 // presses. Picture and wish only: a mod's server checks the item before it acts. docs/kiln/ui.md "The game's
 // inventory slots".
 using System.Collections.Concurrent;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -62,6 +63,16 @@ public sealed record SlotClick(SlotButton Button, SlotModifiers Modifiers, Visib
     public EntityId ItemEntity => Slot.ClientEntity;
     /// <summary>The entity whose inventory holds the slot (the player, a chest), when the game's models said.</summary>
     public EntityId Holder => Slot.Holder;
+
+    /// <summary>
+    /// Where the button went down, in the overlay's pixels: the space <see cref="UiDraw"/> draws in and
+    /// <see cref="UiDraw.Pointer"/> reports, with (0, 0) at the top left of the game's picture. Kiln reads the press in the
+    /// game window's client pixels, which are the overlay's pixels (the overlay is drawn at the window's size and Dear ImGui
+    /// reads its pointer the same way), so it can be compared with a mark's or a panel's rectangle, or checked against
+    /// <see cref="VisibleSlot"/>'s rectangles once mapped to pixels. Not UI units: <see cref="VisibleSlot.OuterUi"/> is in
+    /// the game's units. Null for a click Kiln did not deliver (one a test made). Since 0.2.0-dev.30.3 (mod API 0.2.13).
+    /// </summary>
+    public Vector2? Pointer { get; init; }
 }
 
 public static partial class Ui
@@ -306,7 +317,10 @@ internal static unsafe class UiInventoryBridge
     internal static SlotClick ToClick(UiInventoryNative.Click* c)
     {
         var screen = c->Screen.Size != 0 ? GameScreen.From(c->Screen) : GameScreen.None;
-        return new SlotClick((SlotButton)c->Button, (SlotModifiers)c->Mods, ToVisible(c->Slot), screen, c->Taken != 0);
+        return new SlotClick((SlotButton)c->Button, (SlotModifiers)c->Mods, ToVisible(c->Slot), screen, c->Taken != 0)
+        {
+            Pointer = new Vector2(c->X, c->Y),  // client pixels = the overlay's pixels (kiln_ui_inventory.h "the press in client pixels")
+        };
     }
 
     internal static VisibleSlot ToVisible(in UiValuesNative.VisibleSlot s)
