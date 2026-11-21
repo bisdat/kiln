@@ -45,7 +45,7 @@ public static partial class Coverage
             "enableTextChat, the account hash and connection state of a chat player",
             ChatAbi.Service, ChatFake.SendFeature, ChatFake.ReceiveFeature, ChatFake.PlayersFeature);
         Row("Items", CoverageKind.RecordingFake,
-            "Kiln.Items' own code on the kit's kiln.items (the v1 table and v8's gear functions): the items are the ones the test adds " +
+            "Kiln.Items' own code on the kit's kiln.items (the v1 table, v8's gear functions and v9's container renames): the items are the ones the test adds " +
             "(KilnHarness.Items.AddItem, with their stack size), an inventory per fake player in game (FakePlayer.Inventory, 5 generic " +
             "8-slot inventories unless the test says) and per container entity (AddContainer); Give and Take run as one transaction " +
             "at the start of the next step (stacks topped up first, gear one per slot with an item entity, Partial or NoRoom when it " +
@@ -57,7 +57,9 @@ public static partial class Coverage
             "code and the fake takes the cost from the payers' plain stacks and makes the write in the same step, all or nothing " +
             "(CantPay, payers, refusals as kiln.items); KilnHarness.Items.SetUpgradeRolls names the rolls. Per-instance values (package P7): " +
             "Items.SetPower, SetArmor and ValuesOf on the kit's scale table (no damage or armour is computed), SetDurabilityMax and " +
-            "SetLevel with AnyLevel with kiln.items' rules. Offline: water, moves, container names, transfer " +
+            "SetLevel with AnyLevel with kiln.items' rules. Container renames (v9): Items.SetContainerName with kiln.items' rules (the " +
+            "game's Rename field's limits and the entity at the call, the name stored at the next step, \"\" clears it; read with " +
+            "KilnHarness.Items.ContainerName). Offline: water, moves, reading container names, transfer " +
             "hooks, item instances, equip, recipe results, unlocked upgrades and gem slots at creation, the game's player inventory layout, max " +
             "durability computed again after a gear change",
             [ItemsAbi.Service, .. ItemsFake.Features, "items.gear.read", "items.gear.write", "items.gear.durability", "items.gear.upgrade", .. ItemsFake.OfflineRows]);

@@ -245,7 +245,7 @@ level, upgrades, gem slot and durability. A take followed by a give makes new ge
 bounded `Changes` ledger. Check `Items.MovesAvailable`; run on the tick thread and await completion there.
 
 `MoveOptions.DryRun` rolls back and emits no transfer event; `Equipped` and `ActionBar` opt into those slots; `Silent` skips
-transfer rules/events. `Items.ContainerName(chest)` reads a player's name, never renames; check `ContainerNamesAvailable`.
+transfer rules/events. `Items.ContainerName(chest)` reads a player's name; check `ContainerNamesAvailable`. `await Items.SetContainerName(chest, "Ores")` (since 0.2.0-dev.30.3, mod API 0.2.13, capability `items.rename`) renames through the game's own rename on the server (replicates, saves; "" clears; at most 48 characters / 64 bytes, no control characters; throws `ArgumentException` for a bad name or a non-container, `InvalidOperationException` on a joined client); check `ContainerRenameAvailable`.
 `Items.Transfers.Keep(slot)`, `KeepItem(item, owner)`, `Deny(container, TransferKinds.QuickStack)` return disposable rules.
 `InventoryTransferEvent` is a report after quick stack/move all, not cancelable. To cancel an incoming player request,
 first require `e.Name == "inventoryTransferAction"` and `e.CanCancel` on `PlayerClientActionEvent`; then parse `e.Payload`

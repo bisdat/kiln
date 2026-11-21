@@ -193,8 +193,13 @@ public sealed class FakeInventory
 /// (&lt;c&gt;items.gear.upgrade&lt;/c&gt;): &lt;see cref="global::Kiln.Items.UpgradeRarity(EntityId, ItemInstanceRef, RarityUpgradeRule, UpgradeOptions?)"/&gt;
 /// runs Kiln.Items' own code; the fake takes the cost from the payers' plain stacks and makes the write in the same step, all
 /// or nothing, with kiln.items' rules (&lt;see cref="SetUpgradeRolls"/&gt; names the rolls).</para>
+/// <para><b>Container renames</b> (kiln.items v9, <c>items.rename</c>): <see cref="global::Kiln.Items.SetContainerName"/> runs
+/// Kiln.Items' own code; the fake checks the name with kiln.items' rules (the game's Rename field: 48 characters, 64 bytes
+/// of UTF-8, no control character but tab) and the entity at the call, and stores the name at the start of the next step,
+/// when the task completes (the entity checked again: gone or no longer a container is false); "" clears it; at most 1024
+/// different names. Read them with <see cref="ContainerName"/>.</para>
 /// <para><b>Not modelled</b> (they report offline): water (<c>items.fuel</c>), moves between inventories
-/// (<c>items.move</c>: the v3 functions are not there), container names, transfer hooks, item instances (locations,
+/// (<c>items.move</c>: the v3 functions are not there), reading container names (<c>items.names</c>), transfer hooks, item instances (locations,
 /// save-record fields, <c>Items.Held</c>), equip and unequip, recipe results, upgrades and gem slots at creation; the
 /// game's player inventory layout (action bars, equipment, the backpack's size), the "+N" popup, and saving inventories
 /// with the world.</para>
@@ -259,6 +264,12 @@ public sealed class HarnessItems
             Fake.PlayerInventories = value;
         }
     }
+
+    /// <summary>The name a container carries in the fake: what <see cref="global::Kiln.Items.SetContainerName"/> stored (a mod's
+    /// rename runs at the start of the next step, as kiln.items runs it in the next Pre), or null when it has none. The kit
+    /// has no v3 table, so <see cref="global::Kiln.Items.ContainerName"/> stays offline: read names here. Since 0.2.0-dev.30.3
+    /// (mod API 0.2.13).</summary>
+    public string? ContainerName(EntityId entity) => _harness.Run(() => Fake.NameOf(entity.Value));
 
     /// <summary>Every give and take a mod asked for, in the order they ran, with what became of each.</summary>
     public IReadOnlyList<FakeItemsCall> Calls => _harness.Run(() => Fake.Calls);
