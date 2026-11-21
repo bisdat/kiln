@@ -141,9 +141,26 @@ internal static class ExtensionAdvert
     /// <summary>The value of the property for these extensions (empty: none).</summary>
     internal static string Join(IEnumerable<ReplicatedExtension> extensions) => string.Join(";", extensions.Select(e => e.Advertised));
 
-    /// <summary>What a peer advertised (parsed once per handshake).</summary>
+    private static readonly Dictionary<uint, IReadOnlyDictionary<string, AdvertisedExtension>> Announced = new();
+
+    /// <summary>A Kiln client's ANNOUNCE (kiln:repl message 4): its extensions now, in place of its handshake's.</summary>
+    internal static void Announce(uint peer, string value)
+    {
+        var parsed = Parse(value);
+        lock (Announced) Announced[peer] = parsed;
+    }
+
+    /// <summary>The peer is gone: its announcement with it.</summary>
+    internal static void Forget(uint peer)
+    {
+        lock (Announced) Announced.Remove(peer);
+    }
+
+    /// <summary>What a peer advertised (parsed once per handshake; a later ANNOUNCE replaces it).</summary>
     internal static IReadOnlyDictionary<string, AdvertisedExtension> Of(NetPeer peer)
     {
+        lock (Announced)
+            if (Announced.TryGetValue(peer.Id, out var announced)) return announced;
         var props = peer.Properties;
         if (!props.TryGetValue(ReplicatedExtension.Property, out var value) || string.IsNullOrEmpty(value)) return None;
         lock (Cache) return Cache.GetValue(props, _ => Parse(value));
