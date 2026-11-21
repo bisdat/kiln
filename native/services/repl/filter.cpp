@@ -27,10 +27,12 @@
 #include <cstring>
 #include <iterator>
 #include <new>
+#include <unordered_map>
 #include <vector>
 
 #include "filter.h"
 #include "kiln_hook.hpp"
+#include "rings.h"
 #include "snapcore.h"
 #include "wire.h"
 
@@ -101,6 +103,22 @@ struct alignas(64) Cost {
     std::atomic<uint64_t> calls{0}, cycles{0}, matched{0}, matched_cycles{0}, filtered{0}, unplaced{0};
 };
 Cost g_cost[KILN_REPL_MACHINES][2];
+
+// ---- sources (FilterOptions.Sources): which entities a filter with sources ran on (client channel), per machine; the
+// tick thread compares their source bytes every Pre and touches an entity whose sources changed ----
+struct SourceRec {
+    uint32_t entity;
+    uint32_t filter;  // index into g_f
+};
+Ring g_src_ring[KILN_REPL_MACHINES];
+std::atomic<bool> g_src_on{false};       // rings are there (tick thread sets it once)
+struct SourceSeen {
+    uint64_t digest = 0;
+    bool known = false;
+};
+std::unordered_map<uint64_t, SourceSeen> g_src_seen;  // (filter << 32) | entity; tick thread
+constexpr size_t kMaxSourceEntities = 16384;
+std::atomic<uint64_t> g_src_touches{0};
 
 // ---- the hook ----
 Guard g_guard{"filter-snapshot"};
@@ -199,6 +217,10 @@ void filter_after(void* p) {
                 copied = true;
             }
             ctx.component_hash = reg->at[idx].hash;
+            if (en.filter->source_count && !pred && g_src_on.load(std::memory_order_relaxed)) {
+                const SourceRec rec{ctx.entity, static_cast<uint32_t>(en.filter - g_f)};
+                g_src_ring[m].push(1, &rec, sizeof rec);  // full: dropped (the entity is seen again at its next send)
+            }
             uintptr_t where = 0;
             if (!call_filter(en.fn, t_scratch, size, &ctx, en.user, &where)) {
                 uintptr_t none = 0;
@@ -369,6 +391,64 @@ uint32_t seh_relevant(uintptr_t ctx, void (*fn)(uint32_t, void*), void* user) {
     return n;
 }
 
+// FNV-1a-64 over the bytes of the filter's source components of an entity, as the world holds them now (tick thread).
+// false when the entity has none of them any more (gone).
+bool source_digest(const Filter& f, uint32_t entity, uint64_t* out) {
+    uint64_t h = 1469598103934665603ull;
+    bool any = false;
+    for (uint32_t s = 0; s < f.source_count; ++s) {
+        uint32_t size = 0;
+        const auto* p = static_cast<const uint8_t*>(world_component(entity, f.sources[s], &size));
+        h = (h ^ (p ? 1u : 0u)) * 1099511628211ull;
+        if (!p) continue;
+        any = true;
+        for (uint32_t i = 0; i < size; ++i) h = (h ^ p[i]) * 1099511628211ull;
+    }
+    *out = h;
+    return any;
+}
+
+void sources_pre() {
+    if (!g_src_on.load(std::memory_order_relaxed)) return;
+    for (uint32_t m = 0; m < KILN_REPL_MACHINES; ++m)
+        g_src_ring[m].drain([](const RecordHeader& rh, const uint8_t* p) {
+            if (rh.len < sizeof(SourceRec)) return;
+            SourceRec r;
+            std::memcpy(&r, p, sizeof r);
+            if (r.filter >= kMaxFilters || !r.entity) return;
+            const uint64_t key = (uint64_t{r.filter} << 32) | r.entity;
+            if (g_src_seen.size() < kMaxSourceEntities || g_src_seen.count(key)) g_src_seen.try_emplace(key);
+        });
+    uint32_t touched = 0;
+    for (auto it = g_src_seen.begin(); it != g_src_seen.end();) {
+        const uint32_t fi = static_cast<uint32_t>(it->first >> 32), entity = static_cast<uint32_t>(it->first);
+        const Filter& f = g_f[fi];
+        uint64_t d = 0;
+        if (!f.handle.load(std::memory_order_relaxed) || !f.active || !source_digest(f, entity, &d)) {
+            it = g_src_seen.erase(it);
+            continue;
+        }
+        if (it->second.known && it->second.digest != d) {
+            uint32_t st = 0;
+            if (touch_entity(entity, &st) == KILN_OK && st == KILN_REPL_TOUCH_QUEUED) ++touched;
+        }
+        it->second.digest = d;
+        it->second.known = true;
+        ++it;
+    }
+    if (touched) g_src_touches.fetch_add(touched, std::memory_order_relaxed);
+}
+
+void sources_need() {
+    if (g_src_on.load(std::memory_order_relaxed)) return;
+    for (Ring& r : g_src_ring)
+        if (!r.ready() && !r.init(64u << 10, 4096)) {
+            logf(KILN_LOG_WARN, "repl: filter sources: out of memory; sources are not followed");
+            return;
+        }
+    g_src_on.store(true, std::memory_order_release);
+}
+
 }  // namespace
 
 // ---- filter.h ----
@@ -439,13 +519,14 @@ void lab_report() {
         if (calls && ghz > 0)
             logf(KILN_LOG_INFO,
                  "repl: filter cost %.0f s: %llu snapshots, mask test %.0f ns mean; %llu matched, %.0f ns mean each (filters and "
-                 "remap); %llu components filtered; %llu not placed; remap %llu remapped %llu zeroed %llu faults",
+                 "remap); %llu components filtered; %llu not placed; remap %llu remapped %llu zeroed %llu faults; %llu source touches",
                  secs, static_cast<unsigned long long>(calls), static_cast<double>(cycles) / calls / ghz,
                  static_cast<unsigned long long>(matched), matched ? static_cast<double>(matched_cycles) / matched / ghz : 0.0,
                  static_cast<unsigned long long>(filtered), static_cast<unsigned long long>(unplaced),
                  static_cast<unsigned long long>(g_remap_counters.remapped.load(std::memory_order_relaxed)),
                  static_cast<unsigned long long>(g_remap_counters.zeroed.load(std::memory_order_relaxed)),
-                 static_cast<unsigned long long>(g_remap_counters.faults.load(std::memory_order_relaxed)));
+                 static_cast<unsigned long long>(g_remap_counters.faults.load(std::memory_order_relaxed)),
+                 static_cast<unsigned long long>(g_src_touches.load(std::memory_order_relaxed)));
     }
     g_report_tsc = now;
     g_report_qpc = qpc;
@@ -482,6 +563,7 @@ void filter_pre(uintptr_t) {
     }
     if (remap_resolve_peers()) g_dirty.store(true, std::memory_order_relaxed);
     if (g_dirty.load(std::memory_order_relaxed)) rebuild();
+    sources_pre();
     touch_pre();
 }
 
@@ -553,6 +635,7 @@ KilnResult KILN_CALL t_filter_add(KilnOwner owner, uint32_t component_hash, cons
     slot->faulted.store(false, std::memory_order_relaxed);
     slot->fault_where.store(0, std::memory_order_relaxed);
     slot->removed.store(false, std::memory_order_relaxed);
+    if (source_count && (channels & KILN_REPL_CLIENT_CHANNEL)) sources_need();
     const KilnHandle h = kFilterTag | (++g_serial & ~kTagMask);
     slot->handle.store(h, std::memory_order_release);
     rebuild();
