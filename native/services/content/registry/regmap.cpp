@@ -221,8 +221,11 @@ bool load_dir(const std::string& dir, const std::string& side, const std::string
     out->side = side, out->exe_sha256 = exe_sha256;
     namespace fs = std::filesystem;
     std::error_code ec;
+    // dir is UTF-8 (kiln.content's paths): a path made from UTF-8 code units, so a game folder with letters outside the
+    // ANSI code page opens on Windows too (a narrow fs::path reads the bytes in that code page there)
+    const fs::path root(std::u8string(dir.begin(), dir.end()));
     std::vector<fs::path> files;
-    for (const auto& e : fs::directory_iterator(fs::path(dir) / "common", ec))
+    for (const auto& e : fs::directory_iterator(root / "common", ec))
         if (e.is_regular_file() && e.path().extension() == ".json") files.push_back(e.path());
     if (ec) return errs->push_back(dir + "/common: " + ec.message()), false;
     std::sort(files.begin(), files.end());
@@ -244,7 +247,7 @@ bool load_dir(const std::string& dir, const std::string& side, const std::string
         if (p.stem().string() != m.registry) errs->push_back(p.filename().string() + ": the file of registry \"" + m.registry + "\" is " + m.registry + ".json");
         out->registries[m.registry] = std::move(m);
     }
-    const fs::path rec = fs::path(dir) / side / (exe_sha256 + ".json");
+    const fs::path rec = root / side / (exe_sha256 + ".json");
     if (fs::exists(rec, ec)) {
         json doc;
         if (read_json(rec, &doc, errs) && load_record(doc, &out->build, errs)) {
