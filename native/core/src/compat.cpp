@@ -114,12 +114,17 @@ void add_unique(std::vector<std::string>& v, const std::string& s) {
 // folder. IPHLPAPI is a Windows DLL name, so the name proves nothing: Live Map is the one whose loaded image holds the name
 // of its config file, livemap.ini (its source reads L"\\livemap.ini"; the launcher's engine table knows it by the same
 // text). The running image is read, not the file: a Wine builtin under that name reports the game-folder path without
-// running the file there. Read once per module base, readable committed pages only.
+// running the file there. Read once per module base, readable committed pages only, with a reference held so that the
+// module cannot unload (another thread's FreeLibrary) while its pages are read.
 bool livemap_loaded() {
     static std::mutex mu;
     static std::vector<std::pair<HMODULE, bool>> seen;
-    const HMODULE h = GetModuleHandleW(L"iphlpapi.dll");
-    if (!h) return false;
+    HMODULE h = nullptr;
+    if (!GetModuleHandleExW(0, L"iphlpapi.dll", &h) || !h) return false;
+    struct Release {
+        HMODULE m;
+        ~Release() { FreeLibrary(m); }
+    } release{h};
     std::lock_guard lock(mu);
     for (const auto& s : seen)
         if (s.first == h) return s.second;
