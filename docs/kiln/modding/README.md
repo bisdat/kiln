@@ -31,6 +31,7 @@ generated [../status.generated.md](../status.generated.md); what has no API yet 
 | [impact.md](impact.md) | Impact programs: tools/impact (dis/asm/lint/clone/cook), Kiln natives, packaging into kiln.assets |
 | [ecs-programs.md](ecs-programs.md) | ECS programs in the game's scheduler (`kiln.programs.json`, `EcsPrograms.Bind`) and hooks on the game's systems |
 | [client-hooks.md](client-hooks.md) | Client hooks for mods (advanced tier, may break on game updates): typed hooks of the game client from a mod's own `sigdb/client.json`, what is allowed, what Kiln refuses; `mods/samples/ClientHookSample` |
+| [../render.md](../render.md) | Client drawing and the world: render events (pixels, markers and labels at world positions, the camera) and `Ui.World.Outline`, an entity's model outlined with the game's own highlight (since 0.2.0-dev.30.3) |
 | [sounds.md](sounds.md) | Sounds, cues, music, voice-over: tools/soundcook, cook.json sound steps, SoundSample |
 | [vfx.md](vfx.md) | Effects: particles, lights and the game's VFX by name, in `blocks/*.json` or C#, the budget, VfxSample |
 | [shaders.md](shaders.md) | Particle shaders (advanced): your own HLSL hooks for a particle, linked into Kiln's sprite; `kiln-vfxcook shader` |

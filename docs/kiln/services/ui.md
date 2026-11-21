@@ -278,3 +278,11 @@ No table change. Player side: [ui.md](../ui.md#frame-generation-mods-and-drawing
   tool added to the device while it was made, such as frame generation's present queue) whose family has graphics;
   `queue_family` is that queue's own family, never a guess. A queue Kiln did not see the game get is looked up among the
   queues the game asked for when it made its device, so the game's own counts wherever it got it.
+
+## kiln.render v2: outlines (0.2.0-dev.30.3)
+`kiln.render` (registered by kiln-ui.dll next to kiln.ui) appends five functions after `image`: `outline`,
+`outline_info`, `outline_remove`, `outline_clear`, `outline_status`; the version is 2. A reader checks
+`header.size >= offsetof(KilnRenderApi, outline_status) + sizeof(void*)`. They outline an entity's model with the
+game's highlight groups Group1 and Group2, which Kiln colours itself. Managed: `Ui.World.Outline`, `WorldOutline`,
+`OutlineOptions` (Kiln.Ui). Capability `ui.world_outline`. Usage and the C table: [../render.md](../render.md#outlines-since-020-dev303);
+RE: [../../re/client-render.md](../../re/client-render.md#highlight-groups-outlines).

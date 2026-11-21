@@ -372,6 +372,37 @@ public void CtrlClickAsksToMarkTheItem()
 }
 ```
 
+- **Outlines in the world** (`kiln.Outlines`, since 0.2.0-dev.30.3) <a id="outlines"></a>. `Ui.World.Outline`'s own code
+  runs on the kit's kiln.render, so what a mod outlines is tested offline. `kiln.Outlines.All` lists every request the
+  harness got (`FakeOutline`: entity, colour, pulse, priority, duration, state, reason, group, `ColorShared`, the mod
+  that asked), `Live` the ones not ended, `Of(outline)` the one behind a `WorldOutline`, `Showing(entity)` the one an
+  entity shows. A new request waits (`Pending`) until the next `Step()`, where kiln.render's rules run: on one entity
+  the highest priority, then the newest, shows and the others wait (`Outshone`); two colours show at once and a third
+  shares the nearest; a duration ends on the harness's virtual time. The test plays the game's side:
+  `GameHighlight(entity)` (the game's own highlight shows instead, unless `Setting = FakeOutlineSetting.ModsFirst`),
+  `Setting = FakeOutlineSetting.Off` (every request waits), `HideModel(entity)` (`NoModel`), `Despawn(entity)` and
+  `EndWorld()` (end requests at once), or pins one request's state with `SetState(outline, state, reason)`. Dispose,
+  `Ui.World.ClearOutlines` and the mod's unload end requests (`Removed`). `kiln.Capabilities.Override("ui.world_outline",
+  false)` makes `Outline` throw `KilnUnavailableException`. Not modelled: the game's highlight itself (nothing is
+  drawn), `RenderFrameEvent` and its drawing (the draw functions do nothing; `Render.Available` stays false), the
+  camera (`render.camera` is offline). Without the kit (a plain unit test, no Kiln core) `Ui.World.OutlinesAvailable`
+  is false and `Outline` throws `KilnUnavailableException`.
+
+```csharp
+[Fact]
+public void FilledChestsPulseGreen()
+{
+    using var kiln = new KilnHarness();
+    kiln.Load<MyMod>();   // outlines chests in green, pulsing, for 8 s, when its server half says they were filled
+    kiln.Step();
+    kiln.Run(() => MyMod.OnFilled([new EntityId(4100)]));
+    kiln.Step();          // the next client step: kiln.render applies it
+    var o = kiln.Outlines.Showing(new EntityId(4100));
+    Assert.Equal((Color.Green, true, OutlineState.Shown), (o!.Color, o.Pulse, o.State));
+    Assert.Equal(TimeSpan.FromSeconds(8), o.Duration);
+}
+```
+
 - **Quests and talent trees** need no fake: Kiln.Quests' quest engine and Kiln.Skills' talent trees are Kiln's own
   managed code, and they run on the fake players and saves. A quest a mod defines is started, advanced and completed
   for a fake player through `Quests.Start`, `Advance` and `Complete`, with `QuestStartedEvent`, `QuestStepEvent` and

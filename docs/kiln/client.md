@@ -100,6 +100,11 @@ default, read by kiln.ui at start (top level only), shown in the launcher's Sett
 `"ui": {"overlay": "off"}` (0.2.0-dev.29.18): Kiln's overlay drawing off, as `KILN_UI_OVERLAY=0` (which wins where it
 is set); `"auto"` by default; read by kiln.ui at start (top level only), shown in the launcher's Settings
 ([ui.md](ui.md#frame-generation-mods-and-drawing-off)).
+`"ui": {"outlines": "game-first"}` (0.2.0-dev.30.3): mods' outlines on entities (`Ui.World.Outline`) against the game's
+own highlight (the building cursor's). `"game-first"` (the default; also for a missing or unknown value): the game's
+highlight wins. `"mods-first"`: mods' outlines win. `"off"`: mods' outlines are accepted and wait (state `Waiting`,
+reason `SwitchedOff`). Read by kiln-ui.dll at the first outline request of the game's run (top level only), so a change
+applies at the next start ([render.md](render.md#outlines-since-020-dev303)).
 
 ## Symbol database per side
 - `sigdb/symbols/client.json` is the core set. It is the server's core set unchanged (all of its patterns match the
