@@ -33,6 +33,7 @@
 #include "services/service.h"
 #include "tasks_host.h"
 #include "hooks_protect_internal.h"
+#include "owners_internal.h"
 #include "mod_values_host.h"
 
 // kiln.caps, the capability registry (services/caps.cpp)
@@ -217,6 +218,21 @@ bool grant_internal(KilnOwner owner, std::string_view dll_stamp, std::string& wh
     return true;
 }
 
+// kiln.internal.owners v1 (owners_internal.h): an owner's id, for Kiln's services only (kiln.registry binds its callers).
+KilnResult KILN_CALL owners_owner_id(KilnOwner owner, char* buf, size_t cap, size_t* out_len) {
+    if (owner == 0 || (!buf && cap)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!reg::owner_alive(owner)) return KILN_ERR_NOT_FOUND;
+    const std::string id = reg::owner_name(owner);
+    if (out_len) *out_len = id.size();
+    if (cap) {
+        const size_t n = id.size() < cap - 1 ? id.size() : cap - 1;
+        std::memcpy(buf, id.data(), n);
+        buf[n] = 0;
+    }
+    return id.size() + 1 > cap ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+}
+const KilnOwnersInternalApi g_owners_internal{{sizeof(KilnOwnersInternalApi), KILN_OWNERS_INTERNAL_VERSION}, &owners_owner_id};
+
 const void* lookup_service(KilnStr name, uint32_t min_version, bool services) {
     // The core's own original-code table (compat.h) predates the internal-name rule and is resolved by the shroudtopia
     // plugin through the plugins' KilnApi: it stays reachable from every view, ahead of any published table.
@@ -230,6 +246,8 @@ const void* lookup_service(KilnStr name, uint32_t min_version, bool services) {
     // kiln.internal.hooks (hooks_protect_internal.h): the core's own, for Kiln's services only, like the one above.
     if (sv(name) == KILN_HOOKS_INTERNAL_SERVICE)
         return min_version <= KILN_HOOKS_INTERNAL_VERSION ? hooks::internal_table() : nullptr;
+    // kiln.internal.owners (owners_internal.h): the core's own, for Kiln's services only, like the two above.
+    if (sv(name) == KILN_OWNERS_INTERNAL_SERVICE) return min_version <= KILN_OWNERS_INTERNAL_VERSION ? &g_owners_internal : nullptr;
 
     // kiln.profile works in safe idle too: early native mods and the managed host read it to find their mods/configs.
     if (sv(name) == KILN_PROFILE_SERVICE) return min_version <= KILN_PROFILE_VERSION ? profile::table() : nullptr;
@@ -274,7 +292,7 @@ KilnResult register_published(KilnOwner owner, KilnStr name, const void* table, 
     // The managed host's tables (the task lease table, the mod-values backend), kiln.launch, kiln.internal.launch and
     // kiln.internal.hooks are the core's own: nobody publishes those names, not even a Kiln service.
     if (managed_host_name(sv(name)) || sv(name) == KILN_LAUNCH_SERVICE || sv(name) == KILN_LAUNCH_INTERNAL_SERVICE ||
-        sv(name) == KILN_HOOKS_INTERNAL_SERVICE) {
+        sv(name) == KILN_HOOKS_INTERNAL_SERVICE || sv(name) == KILN_OWNERS_INTERNAL_SERVICE) {
         KLOG_W("service %.*s: reserved for the core, refused for %s", static_cast<int>(name.len), name.ptr,
                reg::owner_name(owner).c_str());
         return KILN_ERR_INVALID_ARGUMENT;

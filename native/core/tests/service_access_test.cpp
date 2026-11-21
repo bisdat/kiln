@@ -23,6 +23,7 @@
 #include "services/kiln_progress.h"
 #include "../../plugins/compat/original_code_service.h"
 #include "../src/mod_values_host.h"  // KILN_MOD_VALUES_BACKEND_SERVICE (Kiln-internal)
+#include "../src/owners_internal.h"  // KILN_OWNERS_INTERNAL_SERVICE (Kiln-internal)
 
 namespace {
 int checks = 0, failures = 0;
@@ -41,7 +42,7 @@ bool g_hooks = true;
 std::set<KilnOwner> alive{1, 2, 3, 4, 5, 6};
 namespace reg {
 bool owner_alive(KilnOwner o) { return o == 0 || alive.count(o); }
-std::string owner_name(KilnOwner o) { return "owner:" + std::to_string(o); }
+std::string owner_name(KilnOwner o) { return o == 3 ? std::string("mod:Fishing-Plus") : "owner:" + std::to_string(o); }
 std::vector<std::string> host_created;  // the names owner_create_managed_host was given
 KilnOwner owner_create_managed_host(std::string_view id) {
     host_created.emplace_back(id);
@@ -238,8 +239,41 @@ void internal_hooks_views() {
     alive.erase(7);
 }
 
+// kiln.internal.owners (owners_internal.h): an owner's id for Kiln's services (kiln.registry binds its callers with it);
+// the core's own, through the services' view only; nobody publishes it.
+void internal_owners_views() {
+    using namespace kiln;
+    const KilnStr name{KILN_OWNERS_INTERNAL_SERVICE, std::strlen(KILN_OWNERS_INTERNAL_SERVICE)};
+    const auto* t = static_cast<const KilnOwnersInternalApi*>(api_service_services(name, 1));
+    check(t && t->header.version == 1 && t->header.size == sizeof(KilnOwnersInternalApi) && t->owner_id, "the services' view resolves kiln.internal.owners");
+    check(api_service(name, 1) == nullptr, "the plugins' view never resolves it (an unstamped or foreign DLL gets that view)");
+    check(api_service_managed_host(name, 1) == nullptr, "nor the managed host's view");
+    check(api_service_services(name, 2) == nullptr, "...not for a later version");
+    if (!t) return;
+    char buf[64];
+    size_t len = 0;
+    check(t->owner_id(3, buf, sizeof buf, &len) == KILN_OK && std::string(buf) == "mod:Fishing-Plus" && len == 16, "owner_id: the core's id of a live owner");
+    check(t->owner_id(3, buf, 4, &len) == KILN_ERR_BUFFER_TOO_SMALL && len == 16 && std::string(buf) == "mod", "a buffer too small: cut, NUL-terminated, the needed length");
+    check(t->owner_id(3, nullptr, 0, &len) == KILN_ERR_BUFFER_TOO_SMALL && len == 16, "a size query");
+    check(t->owner_id(99, buf, sizeof buf, &len) == KILN_ERR_NOT_FOUND, "an owner never created: not found");
+    alive.insert(8);
+    alive.erase(8);
+    check(t->owner_id(8, buf, sizeof buf, &len) == KILN_ERR_NOT_FOUND, "a revoked owner: not found");
+    check(t->owner_id(0, buf, sizeof buf, &len) == KILN_ERR_INVALID_ARGUMENT && t->owner_id(3, nullptr, 8, &len) == KILN_ERR_INVALID_ARGUMENT,
+          "owner 0 and a NULL buffer with a capacity: invalid");
+    const KilnOwnersInternalApi spoof{{sizeof(KilnOwnersInternalApi), 1}, nullptr};
+    alive.insert(7);
+    service_owner_add(7);
+    last_log.clear();
+    check(api_register_service_services(7, name, &spoof) == KILN_ERR_INVALID_ARGUMENT && last_log == "warn" && api_register_service(2, name, &spoof) == KILN_ERR_INVALID_ARGUMENT,
+          "nobody publishes kiln.internal.owners, not even a Kiln service");
+    check(api_service_services(name, 1) == t, "the services' view still resolves the core's table");
+    alive.erase(7);
+}
+
 int main() {
     using namespace kiln;
+    internal_owners_views();
     managed_host_view();
     launch_views();
     internal_launch_views();
