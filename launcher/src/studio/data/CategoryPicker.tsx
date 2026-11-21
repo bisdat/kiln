@@ -91,7 +91,7 @@ export function CategoryChip({ id, open, onToggle, testId }: { id: string | numb
       <Icons c={c} />
       <span className="kd-catchip-words">{anyOf(c)}</span>
       <IconButton size="s" label={open ? t("studio.data.recipes.categoryHide") : t("studio.data.recipes.categoryShow")} aria-expanded={open}
-        icon={open ? <ChevronUp size={15} /> : <ChevronDown size={15} />} onClick={onToggle} data-testid={testId + "-expand"} />
+        icon={open ? <ChevronUp size={15} /> : <ChevronDown size={15} />} onClick={onToggle} data-cat-expand="" data-testid={testId + "-expand"} />
     </span>
   );
 }

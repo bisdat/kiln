@@ -18,6 +18,7 @@ export function idNumber(id: string | number | undefined): number | null {
   if (typeof id === "number") return Number.isInteger(id) && id >= 0 ? id : null;
   const s = (id ?? "").trim();
   if (/^0[xX][0-9a-fA-F]{1,8}$/.test(s)) return parseInt(s.slice(2), 16);
+  // all digits: read as decimal (display only: the editor writes 0x ids; kiln lint reads them the same way)
   if (/^\d+$/.test(s)) return Number(s);
   // definition stacks may write the id without 0x (the schema reads it as hex)
   if (/^[0-9a-fA-F]{1,8}$/.test(s)) return parseInt(s, 16);
