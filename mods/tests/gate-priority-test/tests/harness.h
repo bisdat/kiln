@@ -6,7 +6,9 @@
 // the host, memory_win.cpp's SEH copies and Interlocked words on Windows), against the fake engine of the world tests
 // laid out from the dedicated server's exact profile. kiln.types serves sigdb's reflection of that build (offsets,
 // alignments). A simulated GameServer thread runs frames that hold the Scene word Shared, calls the mod's Pre and Post
-// inside them, and now and then changes a real field of the mod's target, as the game would.
+// inside them, and now and then changes a real field of the mod's target, as the game would. Each frame's Pre moves
+// kiln.engine's live server step, the key of the gate's busy latch, as kiln.engine's own server Pre does in the game;
+// Scenario sets the frames' rate and length (60 a second with 3 ms updates for GitHub #58's server).
 //
 // One scenario per process (the mod's state lives for the process, as in the game): <exe> <scenario> <sigdb/types dir>
 // [<mod dll>]. Prints PASS/FAIL lines and exits 1 on a failure.
@@ -518,6 +520,9 @@ struct Scenario {
     int game_writes_every = 0;       // every Nth frame the game changes byte 0 of `game_target`
     std::string game_target;
     int uncertain_write = 0;         // this write (1-based) of the gate cannot be proven: UNCERTAIN (0: none)
+    // The server's frames: one starts every period_us; it holds the Scene word Shared from before its Pre, runs Pre,
+    // update_us later Post, and keeps the word tail_us past Post (the rest of the engine's update), as the game does.
+    int period_us = 4000, update_us = 800, tail_us = 300;
 };
 
 struct Rig {
@@ -737,7 +742,8 @@ inline void frame_begin(Rig& r) {
     }
 }
 
-// Runs the server: STARTED, frames of about 1 ms with ~3 ms between them for sc.seconds, then STOPPING.
+// Runs the server: STARTED, frames as sc says (by default one every 4 ms, Pre to Post 0.8 ms) for sc.seconds, then
+// STOPPING. A frame that runs late is followed by at least 1 ms without one.
 inline void serve(Rig& r, const Scenario& sc) {
     world_event(r, KILN_WORLD_STARTED);
     const auto begin = std::chrono::steady_clock::now();
@@ -747,6 +753,7 @@ inline void serve(Rig& r, const Scenario& sc) {
         t_server_thread = true;
         uint64_t frame = 0;
         while (std::chrono::steady_clock::now() < stop_at) {
+            const auto start = std::chrono::steady_clock::now();
             frame_begin(r);
             const uint64_t step = r.worlds.steps.fetch_add(1) + 1;
             KilnTickInfo info{};
@@ -762,10 +769,12 @@ inline void serve(Rig& r, const Scenario& sc) {
                 fake::put<uint8_t>(at, static_cast<uint8_t>(fake::get<uint8_t>(at) + 1));
                 r.game_changes.fetch_add(1);
             }
-            std::this_thread::sleep_for(std::chrono::microseconds(800));
+            std::this_thread::sleep_for(std::chrono::microseconds(sc.update_us));
             for (auto& [fn, user] : r.host.post) fn(&info, user);
+            if (sc.tail_us) std::this_thread::sleep_for(std::chrono::microseconds(sc.tail_us));
             scene_shared(r, -1);
-            std::this_thread::sleep_for(std::chrono::microseconds(3000));
+            std::this_thread::sleep_until(std::max(start + std::chrono::microseconds(sc.period_us),
+                                                   std::chrono::steady_clock::now() + std::chrono::milliseconds(1)));
         }
         // the world stops inside a frame, as the game's does: the gate closes, then the services hear STOPPING
         frame_begin(r);

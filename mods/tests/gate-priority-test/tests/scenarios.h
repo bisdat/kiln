@@ -32,6 +32,13 @@ inline Scenario scenario(const std::string& name) {
         s.run_file = "# a short check\n" + world + "seconds=2\nwarmup=1\nrate=200\nlabel=host-check\n";
         s.game_writes_every = 4;
         s.game_target = "keen::ecs::ClientFishing";
+    } else if (name == "steps-60hz") {
+        // GitHub #58's server: 60 steps a second, each update (Pre to Post) 3 ms, longer than kit 1's 1 ms retry sleep.
+        // Kit 1 locked onto the start of every update there (busy, latched to the next Pre, busy again) and stopped.
+        s.run_file = world + "seconds=3\nwarmup=1\nrate=50\nlabel=steps-60hz\n";
+        s.period_us = 16667;
+        s.update_us = 3000;
+        s.seconds = 5.5;
     } else if (name == "raise-off") {
         s.run_file = world + "seconds=2\nwarmup=1\nrate=200\n";
         s.raise = false;
@@ -108,7 +115,7 @@ inline Outcome read_outcome(Rig& r) {
 inline size_t rows_where(const Outcome& o, const std::function<bool(const std::vector<std::string>&)>& f) {
     return static_cast<size_t>(std::count_if(o.writes.begin(), o.writes.end(), f));
 }
-// writes.csv: utc_ms,op,attempt,status,result,why,engine_reason,flags,hold_ns,call_ns,step,priority
+// writes.csv: utc_ms,op,attempt,status,result,why,engine_reason,flags,hold_ns,call_ns,step,priority,post_step,since_post_ns
 inline bool written(const std::vector<std::string>& w) { return w.size() > 7 && w[3] == "ok" && (std::stoul(w[7], nullptr, 16) & KILN_MUTATION_WRITTEN); }
 
 // The whole component equals its initial bytes, except byte 0 of the game's target, which the game counted up.
@@ -141,6 +148,23 @@ inline void common_run_checks(Rig& r, const Scenario& sc, const Outcome& o, cons
     check(ok > 20, k + "more than 20 exchanges succeeded (" + std::to_string(ok) + ")");
     check(busy > 0, k + "the frames made some busy (" + std::to_string(busy) + ")");
     check(bad == 0, k + "no other outcome (" + std::to_string(bad) + ")");
+    check(o.writes_header.rfind("# gate-priority-test 2;", 0) == 0 && o.run.value("kit", "") == "2" &&
+              std::all_of(o.writes.begin(), o.writes.end(), [](const auto& w) { return w.size() == 14; }) &&
+              o.run.contains("post_edge_waits"),
+          k + "kit 2's files: the header, run.json, 14 columns in writes.csv");
+    // The busy latch (gate.cpp, keyed on the live step the server's Pre sets) answers this owner busy until the next
+    // Pre, and that next update holds the gate until its Post: every retry after a busy answer must come in a later
+    // server step, and almost none may meet the latch (engine reason 45, kiln-gate-busy-this-step).
+    size_t same_step = 0;
+    for (size_t i = 0; i + 1 < o.writes.size(); ++i)
+        if (o.writes[i].size() > 10 && o.writes[i][3] == "busy" && o.writes[i + 1].size() > 10 &&
+            std::stoull(o.writes[i + 1][10]) <= std::stoull(o.writes[i][10]))
+            ++same_step;
+    check(same_step == 0, k + "every try after a busy answer came in a later server step (" + std::to_string(same_step) +
+                              " did not)");
+    const size_t latched = rows_where(o, [](const auto& w) { return w.size() > 6 && w[6] == "45"; });
+    check(latched <= 5, k + "at most 5 tries met the busy latch (" + std::to_string(latched) + " of " +
+                            std::to_string(busy) + " busy answers)");
     check(rows_where(o, [](const auto& w) { return w.size() > 11 && w[11] != "-1"; }) == 0,
           k + "every call came from a below-normal thread (priority -1)");
     check(rows_where(o, [](const auto& w) { return w.size() > 8 && w[3] == "ok" && w[8] == "0"; }) == 0,
@@ -193,6 +217,18 @@ inline int run_scenario(const std::string& name, const std::string& sigdb, KilnN
                         "keen::ecs::ClientInteractionQuery (8 bytes, byte 5), keen::ecs::CallFactionsForHelp (12 bytes, byte 6), "
                         "keen::ecs::BossDisplay (16 bytes, byte 10)") == 1,
               k + "the candidates: the union, the unexplained gaps, the empty type and the tracked one left out");
+    } else if (name == "steps-60hz") {
+        common_run_checks(r, sc, o, "keen::ecs::ClientFishing", 2, "write");
+        const size_t changes = rows_where(o, [](const auto& w) { return w[1] == "change" && written(w); });
+        check(changes >= 90, k + "at least 90 of the 150 pairs due changed the byte (" + std::to_string(changes) + ")");
+        // a pair's first try comes between two updates: in the step of the last Post edge (no Pre since)
+        const size_t firsts = rows_where(o, [](const auto& w) { return w[1] == "change" && w[2] == "0"; });
+        const size_t between = rows_where(o, [](const auto& w) {
+            return w.size() > 12 && w[1] == "change" && w[2] == "0" && w[10] == w[12];
+        });
+        check(firsts > 0 && between * 100 >= firsts * 95,
+              k + "at least 95% of the pairs' first tries came between two updates (" + std::to_string(between) + " of " +
+                  std::to_string(firsts) + ")");
     } else if (name == "raise-off") {
         common_run_checks(r, sc, o, "keen::ecs::ClientFishing", 2, "write");
         check(logs_with("the priority raise is OFF for this run") == 1, k + "a warning says the raise is off");

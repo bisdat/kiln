@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // gate-priority-test (kit.h): the run file, the padding rule, and the loop. Threads:
 //   - kiln_native_init: the game's main thread at phase boot;
-//   - on_pre / on_post: the server world's tick thread (records the step's times; never blocks, allocates or writes a
-//     file once the run is armed);
+//   - on_pre / on_post: the server world's tick thread (records the step's times and publishes its Pre and Post edges
+//     for the loop's timing; never blocks, allocates or writes a file once the run is armed);
 //   - on_world: the world's thread (STARTED) or the destroying thread (STOPPING);
 //   - batch_body / batch_done: a kiln.tasks long-running slot. One batch at a time: each batch's done submits the next,
 //     so everything of the loop (the target, the buffers, the files) is touched by one batch after another.
@@ -270,6 +270,13 @@ const char* status_name(uint32_t s) {
 }
 constexpr int kStatuses = 10;
 constexpr size_t kMaxHolds = 1 << 21;  // the summary's sample (16 MiB); a long, fast run keeps its first two million
+// Kit 2's timing (GitHub #58). An update holds the gate from before its Pre until after its Post, and the gate's busy
+// latch answers this owner busy for the rest of the server step of a busy answer: a try is only worth making between
+// two updates, after a Post edge whose step is past the latched one. Busy tries are counted in server steps.
+constexpr int kChangeTries = 4;        // a change (or a no-op) busy for this many steps is skipped; the next pair tries
+constexpr int kRestoreTries = 300;     // a restore busy for this many steps (about 5 s at 60 a second) stops the run
+constexpr uint64_t kPollNs = 500'000;  // a wait's poll (Windows sleeps in whole milliseconds: about 1 ms there)
+constexpr uint64_t kEdgeWaitNs = 250'000'000;  // no such Post edge this long (no step ran): try anyway
 
 // Steps recorded on the tick thread, taken by the loop: one producer, one consumer, fixed size, no lock.
 struct StepRow {
@@ -321,6 +328,9 @@ struct Mod {
     std::atomic<Phase> phase{Phase::Off};
     std::atomic<bool> recording{false}, world_stopping{false};
     std::atomic<uint32_t> server_session{0};
+    // The server's step edges as the tick thread last saw them: the step of the last Pre, the step and steady time of
+    // the last Post. The loop reads them to try the gate only between two updates (kit 2, GitHub #58).
+    std::atomic<uint64_t> edge_pre{0}, edge_post{0}, edge_post_ns{0};
     StepRing steps;
     // tick thread only
     uint64_t pre_step = 0, pre_ns = 0, next_look_ns = 0;
@@ -373,6 +383,8 @@ struct Loop {
     int64_t started_utc = 0, writes_utc = 0;
     uint64_t counts[kStatuses + 1] = {};  // by status; [kStatuses]: ok without a write (no-op)
     uint64_t verify_ok = 0, verify_bad = 0, reopened = 0;
+    uint64_t busy_step = 0;                      // the step the last answer may have latched (see exchange)
+    uint64_t edge_waits = 0, edge_timeouts = 0;  // waits for a Post edge, and those that gave up (run.json)
     std::vector<uint64_t> holds;          // hold_ns of every successful exchange (the summary's percentiles)
     fs::path dir;
     std::ofstream writes, steps, gate;
@@ -397,12 +409,14 @@ struct Loop {
     KilnResult read(std::vector<uint8_t>& out) { return snapshot(hash, out, size); }
     std::string choose();
     bool setup();
-    void row(const char* op, int attempt, KilnResult rc, const KilnMutationReply& r, uint64_t call_ns, int64_t at, int prio) {
-        char line[256];
-        const int n = std::snprintf(line, sizeof line, "%lld,%s,%d,%s,%d,%u,%u,0x%x,%llu,%llu,%llu,%d\n",
+    void row(const char* op, int attempt, KilnResult rc, const KilnMutationReply& r, uint64_t call_ns, int64_t at, int prio,
+             uint64_t post_step, uint64_t since_post_ns) {
+        char line[320];
+        const int n = std::snprintf(line, sizeof line, "%lld,%s,%d,%s,%d,%u,%u,0x%x,%llu,%llu,%llu,%d,%llu,%llu\n",
                                     static_cast<long long>(at), op, attempt, status_name(r.status), rc, r.why_code,
                                     r.engine_reason, r.flags, static_cast<unsigned long long>(r.hold_ns),
-                                    static_cast<unsigned long long>(call_ns), static_cast<unsigned long long>(r.step), prio);
+                                    static_cast<unsigned long long>(call_ns), static_cast<unsigned long long>(r.step), prio,
+                                    static_cast<unsigned long long>(post_step), static_cast<unsigned long long>(since_post_ns));
         if (n > 0) writes.write(line, std::min<int>(n, sizeof line - 1));
     }
     // One compare-exchange of the whole component: `want` is the target byte's new value (write mode), or none (no-op).
@@ -414,13 +428,18 @@ struct Loop {
         r.size = sizeof r;
         confirmed.assign(size, 0);
         const int prio = current_thread_priority();
+        const uint64_t post_step = g->edge_post.load(std::memory_order_acquire);
+        const uint64_t post_ns = g->edge_post_ns.load(std::memory_order_relaxed);
         const int64_t at = utc_ms();
         const uint64_t t0 = steady_ns();
         const KilnResult rc = g->world->ecs_compare_exchange(g->owner, &ref, hash, expected.data(), change ? mask.data() : nullptr,
                                                              desired.data(), size, confirmed.data(), &r);
         const uint64_t took = steady_ns() - t0;
+        // The step a busy answer latches (the gate's live step) is never later than the server step kiln.world saw in
+        // the call, nor than a Pre the tick thread saw since: their larger one, for after_busy.
+        busy_step = std::max<uint64_t>(r.step, g->edge_pre.load(std::memory_order_acquire));
         if (rc == KILN_ERR_INVALID_ARGUMENT) r.status = KILN_ECS_UNAVAILABLE;  // refused before the reply was filled
-        row(op, attempt, rc, r, took, at, prio);
+        row(op, attempt, rc, r, took, at, prio, post_step, post_step && t0 > post_ns ? t0 - post_ns : 0);
         counts[std::min<uint32_t>(r.status, kStatuses - 1)] += 1;
         if (r.status == KILN_ECS_OK && (r.flags & KILN_MUTATION_NO_OP)) counts[kStatuses] += 1;
         if (r.status == KILN_ECS_OK && holds.size() < kMaxHolds) holds.push_back(r.hold_ns);  // writes.csv has them all
@@ -431,8 +450,40 @@ struct Loop {
     bool stopping(const KilnTaskRun* run) const {
         return g->world_stopping.load() || (run && run->cancelled && run->cancelled(run));
     }
-    // Retries an exchange while the gate is busy or a read faulted (bounded). false: a refusal that ends the run.
+    // Between two updates, as far as the step edges show: the last Post edge is of the step whose Pre came last.
+    bool between_steps() const {
+        const uint64_t post = g->edge_post.load(std::memory_order_acquire);
+        return post && post >= g->edge_pre.load(std::memory_order_acquire);
+    }
+    // Waits until the update of a step past `after` is over (its Post edge) and `delay_ns` more have passed. false: the
+    // server world stops, the task is cancelled (when `cancellable`), or no such edge came within kEdgeWaitNs (no step
+    // ran; the caller tries anyway).
+    bool wait_edge(uint64_t after, uint64_t delay_ns, const KilnTaskRun* run, bool cancellable) {
+        ++edge_waits;
+        const uint64_t give_up = steady_ns() + kEdgeWaitNs;
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::nanoseconds(kPollNs));
+            if (g->world_stopping.load() || (cancellable && run && run->cancelled && run->cancelled(run))) return false;
+            const uint64_t now = steady_ns();
+            if (g->edge_post.load(std::memory_order_acquire) > after &&
+                now >= g->edge_post_ns.load(std::memory_order_relaxed) + delay_ns)
+                return true;
+            if (now >= give_up) {
+                ++edge_timeouts;
+                return false;
+            }
+        }
+    }
+    // After a busy (or unreadable) answer: the next Post edge past the step it latched. The first retry goes at once
+    // after that edge; one busy again there waits 1 ms more after the next edge, and so on up to 7 ms (then from 0
+    // again), so a retry never locks onto one moment of the step (kit 1 did: GitHub #58).
+    void after_busy(int busy_in_a_row, const KilnTaskRun* run, bool cancellable) {
+        wait_edge(busy_step, static_cast<uint64_t>((busy_in_a_row - 1) % 8) * 1'000'000ull, run, cancellable);
+    }
+    // Retries an exchange while the gate is busy or a read faulted, one try per server step (bounded). false: a refusal
+    // that ends the run.
     bool attempt(const char* op, bool change, int tries, const KilnTaskRun* run, KilnMutationReply& r) {
+        int busy = 0;
         for (int i = 0; i < tries; ++i) {
             const uint8_t want = flipped ? original : static_cast<uint8_t>(original ^ 1u);
             exchange(op, i, r, change, want);
@@ -448,7 +499,8 @@ struct Loop {
                 case KILN_ECS_BUSY:
                 case KILN_ECS_UNREADABLE:
                     if (stopping(run) && !flipped) return true;
-                    sleep_ms(1);
+                    // also after the last try: the next pair's first try must not meet the latch either
+                    after_busy(++busy, run, !flipped);  // a restore keeps trying through a cancellation
                     continue;
                 case KILN_ECS_STALE:
                 case KILN_ECS_ABSENT:
@@ -474,7 +526,8 @@ struct Loop {
             }
         }
         if (flipped) {
-            end_reason = std::string("the restore stayed ") + status_name(r.status) + " after " + std::to_string(tries) + " tries";
+            end_reason = std::string("the restore stayed ") + status_name(r.status) + " after " + std::to_string(tries) +
+                         " tries, one per server step";
             return false;
         }
         return true;  // the change stayed busy: try again at the next pair
@@ -482,11 +535,17 @@ struct Loop {
     bool pair(const KilnTaskRun* run) {
         KilnMutationReply r{};
         ++pairs;
-        if (mode == "noop") return attempt("noop", false, 50, run, r);
-        if (!attempt("change", true, 50, run, r)) return false;
+        // A pair starts between two updates: one due while an update runs waits for that update's Post edge (an update
+        // holds the gate throughout; a try inside one is only a busy answer and a latched step).
+        if (g->edge_post.load(std::memory_order_acquire) && !between_steps()) {
+            wait_edge(g->edge_pre.load(std::memory_order_acquire) - 1, 0, run, true);
+            if (stopping(run)) return true;  // run_for ends the run
+        }
+        if (mode == "noop") return attempt("noop", false, kChangeTries, run, r);
+        if (!attempt("change", true, kChangeTries, run, r)) return false;
         if (r.status == KILN_ECS_OK && (r.flags & KILN_MUTATION_WRITTEN)) flipped = true;
         if (flipped) {
-            if (!attempt("restore", true, 5000, run, r)) return false;
+            if (!attempt("restore", true, kRestoreTries, run, r)) return false;
             if (r.status == KILN_ECS_OK) flipped = false;  // written back (or already as it was: a no-op)
         }
         if (pairs % 64 == 0 && read(snap) == KILN_OK) {
@@ -719,7 +778,8 @@ bool Loop::setup() {
     mask.assign(size, 0);
     if (mode == "write") mask[offset] = 1;
     original = cur[offset];
-    writes << header() << "utc_ms,op,attempt,status,result,why,engine_reason,flags,hold_ns,call_ns,step,priority\n";
+    writes << header() << "utc_ms,op,attempt,status,result,why,engine_reason,flags,hold_ns,call_ns,step,priority,post_step,"
+                          "since_post_ns\n";
     steps << header() << "step,utc_ms,pre_ns,post_ns\n";
     gate << header()
          << "utc_ms,attempts,acquired,busy_registry,busy_scene,refused_in_frame,refused_world_thread,refused_other,"
@@ -776,7 +836,8 @@ void Loop::write_run_json(bool final) {
           << ", \"p99\": " << percentile(h, 0.99) << ", \"max\": " << (h.empty() ? 0 : *std::max_element(h.begin(), h.end())) << "}"
           << ",\n  \"restored\": " << (restored ? "true" : "false") << ",\n  \"verified\": " << (verified ? "true" : "false")
           << ",\n  \"verify_ok\": " << verify_ok << ",\n  \"verify_mismatches\": " << verify_bad << ",\n  \"reopened\": " << reopened
-          << ",\n  \"steps_dropped\": " << g->steps.dropped();
+          << ",\n  \"steps_dropped\": " << g->steps.dropped() << ",\n  \"post_edge_waits\": " << edge_waits
+          << ",\n  \"post_edge_timeouts\": " << edge_timeouts;
     }
     j << "\n}\n";
 }
@@ -791,15 +852,17 @@ void Loop::finish(const std::string& why, const KilnTaskRun* run) {
     }
     if (flipped && mode == "write") {
         KilnMutationReply r{};
-        // put the byte back: bounded, as long as the world is not stopping (the gate is closed then)
-        for (int i = 0; flipped && i < 5000 && !g->world_stopping.load(); ++i) {
+        // put the byte back: bounded (one busy try per server step, as a restore), as long as the world is not
+        // stopping (the gate is closed then); a cancellation does not stop it
+        int busy = 0;
+        for (int i = 0; flipped && i < kRestoreTries && !g->world_stopping.load(); ++i) {
             exchange("final-restore", i, r, true, original);
             if (r.status == KILN_ECS_OK) flipped = false;
             else if (r.status == KILN_ECS_CONFLICT && cur[offset] == original) flipped = false;
             else if (r.status == KILN_ECS_STALE || r.status == KILN_ECS_ABSENT) {
                 if (!open_ref() || read(cur) != KILN_OK) break;
-            } else if (r.status != KILN_ECS_BUSY && r.status != KILN_ECS_UNREADABLE && r.status != KILN_ECS_CONFLICT) break;
-            else sleep_ms(1);
+            } else if (r.status == KILN_ECS_BUSY || r.status == KILN_ECS_UNREADABLE) after_busy(++busy, run, false);
+            else if (r.status != KILN_ECS_CONFLICT) break;  // a conflict: again at once, from the new value
         }
     }
     // What a read shows: an unproven restore may have put the byte back, an unproven change may have left it changed.
@@ -811,7 +874,6 @@ void Loop::finish(const std::string& why, const KilnTaskRun* run) {
         restored = !flipped;
         verified = false;
     }
-    (void)run;
     take_steps();
     gate_row();
     writes.flush();
@@ -962,6 +1024,7 @@ void look(const KilnTickInfo* tick) {
 }
 void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     const uint64_t now = steady_ns();
+    if (tick) g->edge_pre.store(tick->step, std::memory_order_release);
     if (g->recording.load(std::memory_order_acquire) && tick) {
         if (g->have_pre) g->steps.push({g->pre_step, g->pre_ns, 0, g->pre_utc});  // a step without a Post
         g->pre_step = tick->step;
@@ -975,8 +1038,12 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     }
 }
 void KILN_CALL on_post(const KilnTickInfo* tick, void*) {
-    if (!g->recording.load(std::memory_order_acquire) || !g->have_pre || !tick) return;
-    g->steps.push({g->pre_step, g->pre_ns, tick->step == g->pre_step ? steady_ns() : 0, g->pre_utc});
+    if (!tick) return;
+    const uint64_t now = steady_ns();
+    g->edge_post_ns.store(now, std::memory_order_relaxed);  // before the step: a reader of the step sees this time
+    g->edge_post.store(tick->step, std::memory_order_release);
+    if (!g->recording.load(std::memory_order_acquire) || !g->have_pre) return;
+    g->steps.push({g->pre_step, g->pre_ns, tick->step == g->pre_step ? now : 0, g->pre_utc});
     g->have_pre = false;
 }
 void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
