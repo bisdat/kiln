@@ -97,10 +97,22 @@ pub fn code_in_name(name: &str) -> Option<String> {
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Resume {
-    /// The first start with this data folder (the UI then looks at the clipboard once: the pack page copies its link).
+    /// The first start of a Crucible launcher with this data folder (`<data>/crucible/started` was missing). Also true
+    /// at the first start after an update from a launcher without Crucible: it is not "a fresh install" and never a
+    /// reason to look at the clipboard on its own.
     pub first_start: bool,
     /// A pack code the download carried (the installer's note, or the AppImage's own name at the first start).
     pub code: Option<String>,
+    /// The download came from a pack page's Get Kiln (its name says `crucible`) but carries no readable code, at the
+    /// first start: the only case the UI reads the clipboard at start (the pack page copied the pack's link there). An
+    /// update, an ordinary download, a later start: false.
+    #[serde(default)]
+    pub pack_waiting: bool,
+}
+
+/// The download page's mark in a launcher file's name (`...setup.crucible-<CODE>.exe`): a pack page's Get Kiln.
+fn names_crucible(name: &str) -> bool {
+    name.to_ascii_lowercase().contains("crucible")
 }
 
 /// Once per start, asked by the UI: the first start (`<data>/crucible/started` is made), and the code the installer's
@@ -113,19 +125,25 @@ pub fn resume(dirs: &DataDirs, exe: Option<&Path>) -> Resume {
         let _ = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&marker, crate::util::now_rfc3339()));
     }
     let mut code = None;
+    let mut named = false;
     if let Some(exe) = exe {
         if let Some(note) = exe.parent().map(|p| p.join(RESUME_FILE)) {
             if let Ok(text) = std::fs::read_to_string(&note) {
                 let name = text.trim();
-                code = code_in_name(name.rsplit(['/', '\\']).next().unwrap_or(name));
+                let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
+                code = code_in_name(file);
+                named |= names_crucible(file);
                 let _ = std::fs::remove_file(&note);
             }
         }
         if code.is_none() && first_start {
-            code = exe.file_name().and_then(|n| n.to_str()).and_then(code_in_name);
+            let own = exe.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            code = code_in_name(own);
+            named |= names_crucible(own);
         }
     }
-    Resume { first_start, code }
+    let pack_waiting = first_start && code.is_none() && named;
+    Resume { first_start, code, pack_waiting }
 }
 
 /// Held by the launcher that shows the window: a second process started for a link hands it over and ends.
@@ -276,9 +294,9 @@ mod tests {
         std::fs::create_dir_all(&app).unwrap();
         let exe = app.join("kiln-launcher.exe");
         std::fs::write(app.join(RESUME_FILE), "C:\\Users\\a\\Downloads\\Kiln Launcher_0.2.0_x64-setup.crucible-H7QK3MZP.exe\r\n").unwrap();
-        assert_eq!(resume(&dirs, Some(&exe)), Resume { first_start: true, code: Some("H7QK3MZP".into()) });
+        assert_eq!(resume(&dirs, Some(&exe)), Resume { first_start: true, code: Some("H7QK3MZP".into()), pack_waiting: false });
         assert!(!app.join(RESUME_FILE).exists(), "read once");
-        assert_eq!(resume(&dirs, Some(&exe)), Resume { first_start: false, code: None });
+        assert_eq!(resume(&dirs, Some(&exe)), Resume { first_start: false, code: None, pack_waiting: false });
         // an AppImage named by the download: only at the first start
         let dirs2 = DataDirs::at(root.join("data2"));
         let img = app.join("Kiln_Launcher crucible-H7QK-3MZP.AppImage");
@@ -288,6 +306,36 @@ mod tests {
         std::fs::write(app.join(RESUME_FILE), "Kiln Launcher_0.2.0_x64-setup.exe").unwrap();
         assert_eq!(resume(&dirs, Some(&exe)).code, None);
         assert!(!app.join(RESUME_FILE).exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn only_a_get_kiln_download_without_its_code_leaves_a_pack_waiting() {
+        let root = std::env::temp_dir().join(format!("km-waiting-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let app = root.join("app");
+        std::fs::create_dir_all(&app).unwrap();
+        let exe = app.join("kiln-launcher.exe");
+        // the first start after an update (from a launcher without Crucible): the updater's note names no pack
+        let updated = DataDirs::at(root.join("updated"));
+        std::fs::write(app.join(RESUME_FILE), "Kiln Launcher_0.2.0-dev.30_x64-setup.exe").unwrap();
+        assert_eq!(resume(&updated, Some(&exe)), Resume { first_start: true, code: None, pack_waiting: false });
+        // a fresh install from a pack page whose code the name lost: the pack page's clipboard is the only handoff left
+        let fresh = DataDirs::at(root.join("fresh"));
+        std::fs::write(app.join(RESUME_FILE), "C:\\Downloads\\Kiln Launcher_0.2.0_x64-setup.crucible-H7QK.exe").unwrap();
+        assert_eq!(resume(&fresh, Some(&exe)), Resume { first_start: true, code: None, pack_waiting: true });
+        // its next start: nothing waits any more
+        assert_eq!(resume(&fresh, Some(&exe)), Resume { first_start: false, code: None, pack_waiting: false });
+        // a Get Kiln name at a later start (a reinstall over a used data folder) without its code: not the first start
+        std::fs::write(app.join(RESUME_FILE), "Kiln Launcher_0.2.0_x64-setup.crucible.exe").unwrap();
+        assert!(!resume(&fresh, Some(&exe)).pack_waiting);
+        // the AppImage's own name, at the first start only
+        let img = app.join("Kiln_Launcher crucible-H7Q.AppImage");
+        let linux = DataDirs::at(root.join("linux"));
+        assert!(resume(&linux, Some(&img)).pack_waiting);
+        assert!(!resume(&linux, Some(&img)).pack_waiting);
+        // a plain AppImage at the first start: nothing waits
+        assert!(!resume(&DataDirs::at(root.join("plain")), Some(&app.join("Kiln_Launcher.AppImage"))).pack_waiting);
         let _ = std::fs::remove_dir_all(&root);
     }
 

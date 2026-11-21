@@ -326,6 +326,7 @@ pub fn run() {
             commands::crucible::crucible_trust_set,
             commands::crucible::crucible_links,
             commands::crucible::crucible_resume,
+            commands::crucible::crucible_clipboard,
             commands::studio::studio_list,
             commands::studio::studio_create,
             commands::studio::studio_get,

@@ -6,7 +6,9 @@
 //   ?crucible=shared    "Ember run" was shared before and changed since (+1 added, 1 updated)
 //   ?crucible=packs     an instance "Ashen Frontier" (1.0.0, its 1.1.0 waiting with one conflict) is installed
 //   ?crucible=instance  the same, and it is the loaded profile (its update banner shows on Play)
-//   ?crucible=first     the launcher's first start (crucible_resume: the clipboard is looked at once)
+//   ?crucible=first     the first start of a Crucible launcher with no pack waiting (as after an update): the clipboard
+//                       is not read
+//   ?crucible=waiting   the first start after a pack page's Get Kiln whose name lost its code: the clipboard is read once
 //   ?crucible=resume    the download carried a pack code (Cinder Trails, K4TW-9XRB): its preview opens at start
 // Tests and the console: __kilnCrucibleMock.link(url) (a kiln://crucible link arrives), .setOnline(bool),
 // .requests() (every crucible/pack call with its arguments), .state().
@@ -452,8 +454,16 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       return null;
     },
     crucible_links: () => links.splice(0),
-    // ?crucible=first: the first start (the clipboard is looked at once); ?crucible=resume: the download carried Cinder Trails' code
-    crucible_resume: () => { const r = { firstStart: FLAGS.has("first") && !resumed, code: FLAGS.has("resume") && !resumed ? "K4TW9XRB" : null }; resumed = true; return r; },
+    // ?crucible=first: a first start with no pack waiting; ?crucible=waiting: a Get Kiln download without its code (the
+    // clipboard is read once); ?crucible=resume: the download carried Cinder Trails' code
+    crucible_resume: () => {
+      const first = (FLAGS.has("first") || FLAGS.has("waiting")) && !resumed;
+      const r = { firstStart: first, code: FLAGS.has("resume") && !resumed ? "K4TW9XRB" : null, packWaiting: FLAGS.has("waiting") && !resumed };
+      resumed = true;
+      return r;
+    },
+    // the backend reads the OS clipboard; in a browser the page's own (Playwright grants it), raw: the UI decides
+    crucible_clipboard: async () => { try { return (await navigator.clipboard?.readText?.()) || null; } catch { return null; } },
     pack_local_files: (a) => clone(localFiles.get(String(a.profileId)) ?? []),
     pack_local_write: (a) => {
       const pid = String(a.profileId), path = String(a.path);

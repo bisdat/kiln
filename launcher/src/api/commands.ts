@@ -2338,7 +2338,7 @@ export const COMMANDS = [
   "community_settings_get", "community_settings_set", "community_status", "community_feed", "community_check_member", "community_signout", "community_signin_start", "community_signin_poll", "community_signin_cancel",
   "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",
   "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
-  "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "pack_local_files", "pack_local_write", "pack_local_save", "pack_check", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links", "crucible_resume",
+  "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "pack_local_files", "pack_local_write", "pack_local_save", "pack_check", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links", "crucible_resume", "crucible_clipboard",
   "studio_list", "studio_create", "studio_get", "studio_save", "studio_delete", "studio_credits_set", "studio_capture", "studio_capture_set", "studio_order", "studio_layer_files", "studio_layer_read", "studio_layer_write", "studio_layer_delete", "studio_layer_set", "studio_layer_lint", "studio_pick", "studio_fields", "studio_analyze", "studio_test", "studio_test_report", "studio_test_end", "studio_build", "studio_publish_check", "studio_publish", "studio_set_visibility", "studio_server_pack",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
@@ -2734,7 +2734,9 @@ export interface CrucibleUpdateRequest {
 /** `backups`: the save backups taken first (one per game the instance is active on). */
 export interface CrucibleUpdateResult { plan: PackUpdatePlan; profile: Profile; instance: PackInstance; imported: LibraryRef[]; backups?: SaveBackup[] }
 /** "Come back after installing Kiln": the first start with this data folder, and a pack code the download carried. */
-export interface CrucibleResume { firstStart: boolean; code: string | null }
+/** links::Resume. firstStart is also true at the first start after an update from a launcher without Crucible: only
+ *  packWaiting (a Get Kiln download whose name lost its code, at the first start) lets the start read the clipboard. */
+export interface CrucibleResume { firstStart: boolean; code: string | null; packWaiting: boolean }
 /** Same profile again = a new version of its pack. */
 export interface CrucibleShareRequest { profile: string; title?: string }
 export interface CrucibleShareResult {
@@ -2769,8 +2771,12 @@ export const crucibleTrust = () => call<CrucibleTrust[]>("crucible_trust");
 export const crucibleTrustSet = (id: string, name: string, trusted: boolean) => call<null>("crucible_trust_set", { id, name, trusted });
 /** kiln:// links that arrived (drained); "kiln://crucible-link" {count} says one did. */
 export const crucibleLinks = () => call<string[]>("crucible_links");
-/** Asked once at start: the first start (the UI looks at the clipboard once) and a code the download carried. */
+/** Asked once at start: a code the download carried, else whether a pack page's download left a pack waiting (then
+ *  the UI looks at the clipboard once, through crucibleClipboard). */
 export const crucibleResume = () => call<CrucibleResume>("crucible_resume");
+/** The clipboard's text, read by the backend (never navigator.clipboard: WebView2 would ask the player), only when it
+ *  may be a Crucible code or link; null otherwise. Never log it. */
+export const crucibleClipboard = () => call<string | null>("crucible_clipboard");
 /** The player layer of an instance: its data files; write (null removes) and save (into the Library, last). */
 export const packLocalFiles = (profileId: ProfileId) => call<PackLocalFile[]>("pack_local_files", { profileId });
 export const packLocalWrite = (profileId: ProfileId, path: string, text: string | null) => call<null>("pack_local_write", { profileId, path, text });

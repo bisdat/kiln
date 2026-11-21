@@ -4965,7 +4965,9 @@
     "code": {
       "link": "Vous avez un code ?",
       "title": "Ouvrir un pack avec son code",
-      "hint": "Collez le code ou le lien que votre ami vous a envoyé."
+      "hint": "Collez le code ou le lien que votre ami vous a envoyé.",
+      "paste": "Coller",
+      "pasteNone": "Le presse-papiers ne contient pas de code de pack."
     },
     "err": {
       "notFound": "Nous n'avons pas trouvé ce code. Un code ressemble à H7QK-3MZP.",

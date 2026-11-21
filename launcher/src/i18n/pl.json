@@ -5185,7 +5185,9 @@
     "code": {
       "link": "Masz kod?",
       "title": "Otwórz paczkę po kodzie",
-      "hint": "Wklej kod lub link od znajomego."
+      "hint": "Wklej kod lub link od znajomego.",
+      "paste": "Wklej",
+      "pasteNone": "W schowku nie ma kodu paczki."
     },
     "err": {
       "notFound": "Nie znaleźliśmy takiego kodu. Kody wyglądają tak: H7QK-3MZP.",

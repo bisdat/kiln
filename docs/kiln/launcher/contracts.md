@@ -1647,7 +1647,8 @@ line, the last one wins, else `KILN_LAUNCHER_UI=deck|desktop`). The UI: `forced`
 | crucible | `crucible_trust` | - | `Trust[]` {id, name, since} |
 | crucible | `crucible_trust_set` | id, name, trusted | null |
 | crucible | `crucible_links` | - | string[] (kiln:// links that arrived; drained) |
-| crucible | `crucible_resume` | - | `{firstStart, code}` (asked once at start: come back after installing Kiln) |
+| crucible | `crucible_resume` | - | `{firstStart, code, packWaiting}` (asked once at start: come back after installing Kiln; only `packWaiting` lets the start read the clipboard) |
+| crucible | `crucible_clipboard` | - | `string \| null`: the clipboard's text, read by the backend (arboard; never `navigator.clipboard`, which makes WebView2 ask the player), only when it may be a Crucible code or link (Got a code?, its Paste, a waiting pack); never logged |
 | studio | `studio_list` | - | `StudioSummary[]` ([pack-studio.md](pack-studio.md)) |
 | studio | `studio_create` | request: {name, from?, id?} | `Studio` {dir, source, mods, credits, profileName, layerFiles} |
 | studio | `studio_get` / `studio_delete` | packId (, gameId? for delete: a loaded test instance goes back to the pack's profile) | `Studio` / null |

@@ -319,8 +319,15 @@ Code: `crates/kiln-manage/src/crucible/` (`mod.rs` client and flows, `sign.rs` t
   `code` the download carried: the Windows installer's note `crucible-resume.txt` beside the launcher (the NSIS
   post-install hook `launcher/src-tauri/nsis/hooks.nsh` writes the setup file's name; read once and removed) or, at the
   first start, the AppImage's own name, either holding `crucible-<CODE>` (`links::code_in_name`). A code opens that
-  pack's preview ("Kiln is ready. Here is <pack>, the pack you came for."); without one, the very first start reads the
-  clipboard once and opens a Crucible link or code found there. Nothing installs without the preview's clicks. The
+  pack's preview ("Kiln is ready. Here is <pack>, the pack you came for."). The clipboard is never read because the
+  launcher started or updated (`firstStart` is also true at the first start after an update from a launcher without
+  Crucible): only `packWaiting` (the first start, the download's name says `crucible` but its code could not be read)
+  reads it once and opens a Crucible link or code found there. Downloads whose name the launcher never sees (.deb,
+  .rpm) carry no handoff: the player opens Got a code?, which fills in the clipboard's code. Every clipboard read is
+  the backend's `crucible_clipboard` (arboard), never `navigator.clipboard`: WebView2 asks the player for clipboard
+  access on every page read ("tauri.localhost wants to see text and images in the clipboard", dev.30). Only text that
+  may be a Crucible code or link reaches the UI; Got a code? fills it in when it opens and from its Paste button
+  (src/crucible/prefill.ts). Nothing installs without the preview's clicks. The
   download page's part (name the Windows download `...setup.crucible-<CODE>.exe` and copy the pack link when
   `?crucible=` is set) is the site's: out/pack-layers/TO-CRUCIBLE-WEB.md.
 - **Trust**: "Always trust packs from <creator>" is kept in `<data>/crucible/trust.json` by Discord id; the warning shows
