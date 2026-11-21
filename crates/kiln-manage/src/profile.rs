@@ -558,6 +558,11 @@ pub struct ResolvePreview {
     /// and when kiln.json `mods.hosted` is false ([`HOSTED_OFF`]).
     #[serde(default)]
     pub with_world: Vec<String>,
+    /// The profile's switched-on EMF mods that a dependency keeps from loading, from their mod.json as kiln-emf checks
+    /// them at the start ([`crate::emf_deps`]): what is missing, off or out of range, and how to get it. Without a game
+    /// ([`resolve_preview_in`]) only the Library's mods count, not the game's emf/mods folder.
+    #[serde(default)]
+    pub emf: Vec<crate::emf_deps::EmfDepProblem>,
 }
 
 /// A client's `side: "server"` Kiln mod in the launcher: it starts with the player's own world, not in the menu, and
@@ -1038,6 +1043,16 @@ pub fn resolve_preview(dirs: &DataDirs, profile: &Profile, side: RunSide) -> Res
     resolve_preview_for(dirs, profile, side, true)
 }
 
+/// [`resolve_preview`] in a game (None: no game), as the launcher asks for it: whether a client's server mods start with
+/// the player's own world ([`hosted_server_mods`]), and EMF's dependencies over the game's emf/mods folder too.
+pub fn resolve_preview_in(dirs: &DataDirs, profile: &Profile, side: RunSide, game: Option<&Path>) -> Result<ResolvePreview> {
+    let mut p = resolve_preview_for(dirs, profile, side, game.is_none_or(hosted_server_mods))?;
+    if game.is_some() {
+        p.emf = crate::emf_deps::profile_problems(dirs, profile, side, game);
+    }
+    Ok(p)
+}
+
 /// [`resolve_preview`] for a game whose kiln.json says whether a client's server mods start with the player's own
 /// world (`hosted`: [`hosted_server_mods`]).
 pub fn resolve_preview_for(dirs: &DataDirs, profile: &Profile, side: RunSide, hosted: bool) -> Result<ResolvePreview> {
@@ -1168,7 +1183,8 @@ pub fn resolve_preview_for(dirs: &DataDirs, profile: &Profile, side: RunSide, ho
             }
         }
     }
-    Ok(ResolvePreview { side, kiln, native: ordered, warnings, with_world: starts_with_world })
+    let emf = crate::emf_deps::profile_problems(dirs, profile, side, None);
+    Ok(ResolvePreview { side, kiln, native: ordered, warnings, with_world: starts_with_world, emf })
 }
 
 fn game_or_copy(host: &Path, install: &GameInstall, mode: PathMode, rel: impl FnOnce() -> String) -> Result<String> {
