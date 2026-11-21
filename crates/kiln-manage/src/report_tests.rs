@@ -515,6 +515,26 @@ fn stop_state_files_are_in_the_report() {
     }
 }
 
+// the interpreter's launch plans and kiln-eml's ownership records (newest three of each) go in
+#[test]
+fn the_interpreters_launch_plans_and_ownership_records_are_in_the_report() {
+    let f = Fx::healthy("sfi-plans");
+    for i in 0..4 {
+        f.w(&format!("kiln/launch-plans/plan-{i}.json"), format!(r#"{{"format":1,"planId":"plan-{i}"}}"#).as_bytes());
+        let t = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000 + i * 60);
+        std::fs::File::options().write(true).open(f.game.join(format!("kiln/launch-plans/plan-{i}.json"))).unwrap().set_modified(t).unwrap();
+    }
+    f.w("kiln/launch-plans/.tmp-plan.json", b"{}");
+    f.w("kiln/eml/ownership/enshrouded.json", br#"{"format":1,"receipt":"r"}"#);
+    let r = build(&f.input());
+    for i in 1..4 {
+        assert!(file(&r, &format!("game/kiln/launch-plans/plan-{i}.json")).is_some_and(|t| t.contains(&format!("plan-{i}"))), "plan-{i} missing");
+    }
+    assert!(file(&r, "game/kiln/launch-plans/plan-0.json").is_none(), "only the newest three plans");
+    assert!(file(&r, "game/kiln/launch-plans/.tmp-plan.json").is_none());
+    assert!(file(&r, "game/kiln/eml/ownership/enshrouded.json").is_some());
+}
+
 #[test]
 fn a_test_build_names_its_channel_and_beta_number() {
     let f = Fx::healthy("channel");

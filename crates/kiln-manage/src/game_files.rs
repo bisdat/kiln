@@ -989,6 +989,9 @@ fn run(game: &Path, rc: &mut Receipts, job: Job, rep: &mut GameFilesReport) -> R
     if !intent.ops.is_empty() {
         rc.pending.push(intent.clone());
         save_receipts(game, rc)?;
+        // (a crash test's stop: the activation journal's boundary, crate::sfi_activation)
+        #[cfg(feature = "sfi-scan")]
+        crate::sfi_activation::boundary(crate::sfi_activation::Boundary::GameFilesIntent);
     }
     let mut ok = true;
     let mut files = keep;
@@ -1001,6 +1004,9 @@ fn run(game: &Path, rc: &mut Receipts, job: Job, rep: &mut GameFilesReport) -> R
             (Some(old), after) => swap(game, &op.rel, old, after.as_ref().map(|_| bytes[&op.rel].as_slice()), &intent.tag)?,
             (None, None) => Outcome::Done,
         };
+        // (a crash test's stop: the activation journal's boundary, crate::sfi_activation)
+        #[cfg(feature = "sfi-scan")]
+        crate::sfi_activation::boundary(crate::sfi_activation::Boundary::GameFilesOp);
         match outcome {
             Outcome::Done => if let Some(sha) = &op.after { files.insert(op.rel.clone(), sha.clone()); },
             Outcome::Changed if is_code(&op.rel) => {
@@ -1035,6 +1041,9 @@ fn run(game: &Path, rc: &mut Receipts, job: Job, rep: &mut GameFilesReport) -> R
     }
     rc.cleanup.extend(intent.ops.iter().map(|op| Cleanup { rel: op.rel.clone(), tag: intent.tag.clone() }));
     save_receipts(game, rc)?;
+    // (a crash test's stop: the activation journal's boundary, crate::sfi_activation)
+    #[cfg(feature = "sfi-scan")]
+    crate::sfi_activation::boundary(crate::sfi_activation::Boundary::GameFilesCommitted);
     finish_cleanup(game, rc)?;
     if let Some(d) = done.filter(|_| ok) { rep.notes.push(d); }
     Ok(ok)
