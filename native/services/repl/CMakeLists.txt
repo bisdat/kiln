@@ -29,3 +29,9 @@ set_target_properties(repl-watch-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMA
 add_executable(repl-client-test tests/repl_client_test.cpp repl.cpp loopback.cpp stats.cpp watch.cpp client.cpp)
 target_include_directories(repl-client-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
 set_target_properties(repl-client-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/repl-tests")
+
+# kiln.repl.net's message hooks and codec as data (msgcore.h): schema checks, channel rules, the dispatch site's register
+# edits, the handler chain
+add_executable(repl-msg-test tests/repl_msg_test.cpp)
+target_include_directories(repl-msg-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
+set_target_properties(repl-msg-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/repl-tests")
