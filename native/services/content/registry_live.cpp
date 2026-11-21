@@ -13,6 +13,8 @@
 
 namespace kc {
 
+uint32_t (*g_registry_type_size)(const char* qname) = &type_size;
+
 namespace {
 
 using registry::ChainRow;
@@ -26,6 +28,7 @@ struct LiveState {
     std::map<std::string, uint64_t> hashes;  // rel -> section hash, last application
     bool applied = false;                     // a first application happened since the install
     std::unordered_map<std::string, std::string> kiln_of;  // "<registry>|<32-bit id>" -> Kiln id (from nums)
+    std::unordered_map<std::string, std::string> kiln_by_guid;  // "<registry>|<guid, lower case>" -> Kiln id (from ids)
     std::vector<registry::Refusal> refused;        // this application's live refusals
     std::set<std::string> refused_keys;
     struct Pending {
@@ -185,6 +188,11 @@ std::string source_of(const Binding& b) {
 bool put(const std::shared_ptr<Binding>& b, int32_t field_index, int32_t sub, uintptr_t addr, uint8_t n, LayerEval ev) {
     LayerModScope scope(b->rows.back().mod);
     return store_put_eval(registry_owner(), registry_seq(++g.ordinal), b->kind, b->entry.id, field_index, sub, addr, n, std::move(ev), source_of(*b));
+}
+
+bool put_at(const std::shared_ptr<Binding>& b, uint32_t kind, uint32_t id, int32_t field_index, int32_t sub, uintptr_t addr, uint8_t n, LayerEval ev) {
+    LayerModScope scope(b->rows.back().mod);
+    return store_put_eval(registry_owner(), registry_seq(++g.ordinal), kind, id, field_index, sub, addr, n, std::move(ev), source_of(*b));
 }
 
 int32_t index_of(uint32_t kind, const Field* f) { return static_cast<int32_t>(f - reg(kind).schema.fields.data()); }
@@ -406,6 +414,136 @@ void bind_drops(const std::shared_ptr<Binding>& b) {
         }
 }
 
+// ---- perks (refList): five slots of a reference and an id, kept in step ----
+bool zero_bytes(const uint8_t* p, size_t n) {
+    for (size_t i = 0; i < n; ++i)
+        if (p[i]) return false;
+    return true;
+}
+Value perk_value(const uint8_t bytes[16]) {
+    const std::string guid = lower(guid_text(bytes));
+    auto it = g.kiln_by_guid.find("perks|" + guid);
+    return Value::text(it != g.kiln_by_guid.end() ? it->second : "#guid:" + guid);
+}
+bool perk_guid(const Value& v, uint8_t out[16]) {
+    if (v.kind != Value::Text) return false;
+    if (v.t.rfind("#guid:", 0) == 0) return guid_parse(v.t.substr(6), out);
+    auto it = g.in->ids.find("perks|" + v.t);
+    return it != g.in->ids.end() && guid_parse(it->second, out);
+}
+
+void bind_perks(const std::shared_ptr<Binding>& b) {
+    const Schema& sc = reg(KILN_CONTENT_ITEMS).schema;
+    std::vector<Field> refs, ids;
+    for (int i = 0; i < 5; ++i) {
+        const Field* r = sc.find("perkReferences[" + std::to_string(i) + "]");
+        const Field* d = sc.find("perkIds[" + std::to_string(i) + "]");
+        if (!r || !d || r->bytes != 16 || d->bytes != 4) return (void)fail(b, "this game build's items have no perkReferences / perkIds");
+        refs.push_back(*r), ids.push_back(*d);
+    }
+    const uintptr_t base = b->entry.addr;
+    // the perks below the registry, slot i's reference given as below when it is the slot evaluated
+    auto result = [b, refs, ids, base](int ref_slot, const uint8_t* below, std::vector<Value>* out, std::string* why) {
+        std::vector<Value> l;
+        for (int i = 0; i < 5; ++i) {
+            uint8_t gb[16] = {};
+            if (i == ref_slot) std::memcpy(gb, below, 16);
+            else store_below_registry(base + refs[i].offset, 16, gb);
+            if (!zero_bytes(gb, 16)) l.push_back(perk_value(gb));
+        }
+        const Value v = registry::evaluate(b->rows, Value::of_list(std::move(l)), b->spec);
+        if (v.kind != Value::List || v.list.size() > 5) return *why = "an item has 5 perk slots", false;
+        *out = v.list;
+        return true;
+    };
+    for (int i = 0; i < 5; ++i) {
+        LayerEval ref_ev = [b, result, i](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
+            std::vector<Value> l;
+            if (!result(i, below, &l, why)) return fail(b, *why);
+            uint8_t gb[16] = {};
+            if (static_cast<size_t>(i) < l.size() && !perk_guid(l[i], gb)) return fail(b, *why = "the perk " + l[i].t + " is not known on this game build");
+            std::memcpy(out, gb, 16);
+            return true;
+        };
+        const Field rf = refs[i];
+        LayerEval id_ev = [b, result, i, rf, base](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
+            uint8_t own[16] = {};
+            store_below_registry(base + rf.offset, 16, own);
+            std::vector<Value> l;
+            if (!result(i, own, &l, why)) return fail(b, *why);
+            uint32_t id = 0;
+            if (static_cast<size_t>(i) < l.size()) {
+                uint8_t gb[16] = {};
+                if (!perk_guid(l[i], gb)) return fail(b, *why = "the perk " + l[i].t + " is not known on this game build");
+                if (std::memcmp(gb, own, 16) == 0) std::memcpy(&id, below, 4);  // the same perk as below: its id as it is
+                else if (auto it = g.in->nums.find("perks|" + l[i].t); it != g.in->nums.end() && it->second) id = it->second;
+                else id = fnv1a(gb, 16);
+            }
+            std::memcpy(out, &id, 4);
+            return true;
+        };
+        put(b, index_of(KILN_CONTENT_ITEMS, sc.find(refs[i].path)), -1, base + refs[i].offset, 16, std::move(ref_ev));
+        put(b, index_of(KILN_CONTENT_ITEMS, sc.find(ids[i].path)), -1, base + ids[i].offset, 4, std::move(id_ev));
+    }
+}
+
+// ---- impactConfig (staminaCost, manaCost): kiln.gamedata's item config value, its tooltip row following ----
+std::string config_path(const std::string& config) {  // Kiln's config names as the game's config ids (as the model reads them)
+    static const std::map<std::string, std::string> ids = {{"StaminaCost", "0x727d7f78"}, {"ManaCost", "0xaf236ece"}};
+    const auto it = ids.find(config);
+    return it == ids.end() ? config : it->second;
+}
+
+void bind_impact(const std::shared_ptr<Binding>& b, const std::string& path) {
+    GdValueSlot s;
+    std::string why;
+    if (!gd_item_config_slot(b->entry, path, &s, &why)) return (void)fail(b, why);
+    const Field vf = s.f;
+    LayerEval ev = [b, vf](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
+        const Value v = registry::evaluate(b->rows, to_kiln(vf, nullptr, b->spec, below), b->spec);
+        if (!in_range(b->spec, v, why) || !to_game(vf, nullptr, b->spec, v, out, why)) return fail(b, *why);
+        return true;
+    };
+    if (!put_at(b, s.kind, s.id, s.field, -1, s.addr, vf.bytes, std::move(ev))) return (void)fail(b, "the config value is not readable");
+    if (!s.tip) return;
+    const uintptr_t at = s.addr;
+    const uint8_t format = s.tip_format;
+    LayerEval tip = [b, vf, at, format](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
+        uint8_t now[kSlotBytes] = {}, under[kSlotBytes] = {};
+        store_effective(at, vf.bytes, now);
+        store_below_registry(at, vf.bytes, under);
+        if (std::memcmp(now, under, vf.bytes) == 0) {  // the registry changes nothing here: the row as it is below
+            std::memcpy(out, below, 4);
+            return true;
+        }
+        int64_t shown = 0;
+        if (!gd_ui_scale(format, as_double(decode(vf, now)), &shown)) return *why = "the tooltip's format is unknown", false;
+        const int32_t v32 = static_cast<int32_t>(std::clamp<int64_t>(shown, INT32_MIN, INT32_MAX));
+        std::memcpy(out, &v32, 4);
+        return true;
+    };
+    put_at(b, s.kind, s.id, -1, -1, s.tip, 4, std::move(tip));
+}
+
+// ---- unlock: "always" clears the recipe's knowledge requirement, "game" keeps the game's ----
+void bind_unlock(const std::shared_ptr<Binding>& b) {
+    const Schema& sc = reg(KILN_CONTENT_RECIPES).schema;
+    const auto it = sc.special.find("knowledgeRequirement");
+    const uint32_t size = g_registry_type_size("keen::KnowledgeQueryData");
+    if (it == sc.special.end() || size == 0 || size > kSlotBytes) return (void)fail(b, "this game build's recipes have no knowledge requirement Kiln can write");
+    const uintptr_t at = b->entry.addr + it->second;
+    LayerEval ev = [b, at](const uint8_t* below, uint8_t n, uint8_t* out, std::string* why) {
+        uint8_t orig[kSlotBytes] = {};
+        if (!store_original(at, n, orig)) std::memcpy(orig, below, n);
+        const Value v = registry::evaluate(b->rows, Value::text(zero_bytes(below, n) ? "always" : "game"), b->spec);
+        if (v.kind != Value::Text || (v.t != "always" && v.t != "game")) return fail(b, *why = "unlock is game or always");
+        if (v.t == "always") std::memset(out, 0, n);
+        else std::memcpy(out, zero_bytes(below, n) ? orig : below, n);
+        return true;
+    };
+    if (!put(b, -1, kSubUnlock, at, static_cast<uint8_t>(size), std::move(ev))) fail(b, "the recipe is not readable");
+}
+
 // ---- one field ----
 void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
     const std::vector<const ChainRow*> rows = registry_rows(fo);
@@ -465,6 +603,9 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
     if (conv == "list" && b->kind == KILN_CONTENT_RECIPES && (fr.field == "inputs" || fr.field == "outputs"))
         return bind_recipe_list(b, fr.field == "inputs" ? KILN_CONTENT_INPUTS : KILN_CONTENT_OUTPUTS);
     if (conv == "inventoryWalk" && b->kind == KILN_CONTENT_DROPS) return bind_drops(b);
+    if (conv == "refList" && b->kind == KILN_CONTENT_ITEMS && fr.field == "perks") return bind_perks(b);
+    if (conv == "impactConfig" && b->kind == KILN_CONTENT_ITEMS && !rw.paths.empty()) return bind_impact(b, rw.paths[0] + "." + config_path(rw.config));
+    if (conv == "unlock" && b->kind == KILN_CONTENT_RECIPES) return bind_unlock(b);
     refuse(fr, rows, "the live back-end does not write " + conv + " fields yet");
 }
 
@@ -566,6 +707,11 @@ void registry_live_install(RegistryLive in) {
     if (!g.in->schema) g.in->schema = std::make_shared<const registry::Schema>(registry_schema());
     if (!g.in->regmap) g.in->regmap = std::make_shared<const rmap::RegMap>();
     g.kiln_of.clear();
+    g.kiln_by_guid.clear();
+    for (const auto& [key, guid] : g.in->ids) {
+        const size_t bar = key.find('|');
+        if (bar != std::string::npos && !guid.empty()) g.kiln_by_guid.emplace(key.substr(0, bar) + "|" + lower(guid), key.substr(bar + 1));
+    }
     for (const auto& [key, num] : g.in->nums) {
         const size_t bar = key.find('|');
         if (bar != std::string::npos) g.kiln_of.emplace(num_key(key.substr(0, bar), num), key.substr(bar + 1));

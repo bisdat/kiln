@@ -82,6 +82,30 @@ bool walk_drop_table(uintptr_t resource, std::vector<DropStackRef>* out) {
     return true;
 }
 bool patch_code_byte(uintptr_t, uint8_t, uint8_t) { return false; }
+uintptr_t type_by_hash(uint32_t) { return 0; }
+std::string read_text(uintptr_t, uint64_t) { return {}; }
+bool guid_parse(const std::string& s, uint8_t out[16]) {
+    std::string h;
+    for (char c : s)
+        if (c != '-') h += c;
+    if (h.size() != 32) return false;
+    for (int i = 0; i < 16; ++i) out[i] = static_cast<uint8_t>(std::stoul(h.substr(2 * i, 2), nullptr, 16));
+    return true;
+}
+uint32_t fnv1a(const void* data, size_t n) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; ++i) h = (h ^ static_cast<const uint8_t*>(data)[i]) * 16777619u;
+    return h;
+}
+// kiln.gamedata's item configs: the sword has a ManaCost config (float at +0x40) with a tooltip row (+0x44, Normal format)
+bool gd_item_config_slot(const Entry& e, const std::string& path, GdValueSlot* out, std::string* why) {
+    if (e.id != 0x222 || path != "impactValues.0xaf236ece") return *why = "the item has no such configuration (Kiln's live back-end does not add one)", false;
+    out->addr = e.addr + 0x40, out->kind = 1000, out->id = e.id, out->field = 7;
+    out->f.path = "impactValues.0xaf236ece.value", out->f.offset = 0, out->f.bytes = 4, out->f.vt = KILN_CV_FLOAT, out->f.writable = true;
+    out->tip = e.addr + 0x44, out->tip_format = 0;
+    return true;
+}
+bool gd_ui_scale(uint8_t, double v, int64_t* out) { return *out = std::llround(v), true; }
 const registry::Schema& registry_schema() {
     static const registry::Schema s = registry::generated_schema();
     return s;
@@ -113,6 +137,7 @@ constexpr KilnOwner PACK = 11, CODE = 44;
 constexpr uint64_t kPackSeq = (1ull << 44) | (1ull << 32) | 1;
 const uint8_t G1[16] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, G2[16] = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2},
               G3[16] = {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3}, G4[16] = {4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4};
+const uint8_t P1[16] = {9, 1, 9, 1, 9, 1, 9, 1, 9, 1, 9, 1, 9, 1, 9, 1}, P2[16] = {9, 2, 9, 2, 9, 2, 9, 2, 9, 2, 9, 2, 9, 2, 9, 2};
 constexpr uint32_t WOOD = 0x111, SWORD = 0x222, PLANK = 0x333, STONE = 0x555;
 constexpr size_t WOOD_AT = 0x10000, SWORD_AT = 0x10100, STONE_AT = 0x10200, PLANK_AT = 0x20000;
 
@@ -167,16 +192,32 @@ void world() {
     add_field(I.schema, fld("damageSetup.speedMod", 0x0C, 4, KILN_CV_FLOAT));
     add_field(I.schema, fld("itemLevelRange.minLevel", 0x10, 4, KILN_CV_INT));
     add_field(I.schema, fld("itemLevelRange.maxLevel", 0x14, 4, KILN_CV_INT));
+    for (int i = 0; i < 5; ++i) {
+        Field pr = fld(("perkReferences[" + std::to_string(i) + "]").c_str(), 0x30 + 16 * i, 16, KILN_CV_GUID);
+        pr.ref = true;
+        add_field(I.schema, pr);
+        add_field(I.schema, fld(("perkIds[" + std::to_string(i) + "]").c_str(), 0x80 + 4 * i, 4, KILN_CV_INT));
+    }
     add_entry(I, WOOD, "Material_T1_Wood_Logs", WOOD_AT, G1);
     add_entry(I, SWORD, "Sword_T2", SWORD_AT, G2);
     add_entry(I, STONE, "Material_Stone", STONE_AT, G4);
     mem<uint32_t>(WOOD_AT, 10);
+    std::memcpy(g_arena + WOOD_AT + 0x30, P1, 16), mem<uint32_t>(WOOD_AT + 0x80, 0x901);  // perk slot 0: perk_a
+    mem<float>(SWORD_AT + 0x40, 10.0f), mem<int32_t>(SWORD_AT + 0x44, 10);            // ManaCost 10, its tooltip 10
+    Registry& L = g_regs[KILN_CONTENT_LOOT];
+    L.kind = KILN_CONTENT_LOOT, L.label = "loot", L.available = true;
+    add_field(L.schema, fld("stackSizeMin", 0x00, 4, KILN_CV_INT));
+    add_field(L.schema, fld("stackSizeMax", 0x04, 4, KILN_CV_INT));
+    add_entry(L, WOOD, "Material_T1_Wood_Logs", 0x40000, G1);
+    mem<uint32_t>(0x40000, 1), mem<uint32_t>(0x40004, 5);
     mem<uint32_t>(STONE_AT, 50);
     mem<float>(SWORD_AT + 0x08, 1.0f), mem<float>(SWORD_AT + 0x0C, 1.0f), mem<uint32_t>(SWORD_AT + 0x10, 10), mem<uint32_t>(SWORD_AT + 0x14, 15);
     Registry& R = g_regs[KILN_CONTENT_RECIPES];
     R.kind = KILN_CONTENT_RECIPES, R.label = "recipes", R.available = true;
     add_field(R.schema, fld("craftingDuration", 0x00, 8, KILN_CV_TIME));
+    R.schema.special["knowledgeRequirement"] = 0x50;
     add_entry(R, PLANK, "Plank_Recipe", PLANK_AT, G3);
+    mem<uint32_t>(PLANK_AT + 0x50, 0x12345678), mem<uint32_t>(PLANK_AT + 0x58, 7);  // a knowledge requirement
     RL.input = 0x40, RL.output = 0x48;
     mem<int64_t>(PLANK_AT, 3'000'000'000ll);  // 3 s
     // inputs: 2 wood (one stack of 48 bytes at +0x100), outputs: 1 sword
@@ -204,6 +245,7 @@ registry::BaseModel base() {
     w.id = "game:material_t1_wood_logs";
     w.fields["maxStack"] = registry::Value::integer(10);
     w.fields["rarity"] = registry::Value::text("common");
+    w.fields["perks"] = registry::Value::of_list({registry::Value::text("game:perk_a")});
     items.push_back(w);
     registry::BaseModel::Entry s;
     s.id = "game:sword_t2";
@@ -211,6 +253,7 @@ registry::BaseModel base() {
     registry::formulas::read("gear.power", {1.0, 1.0, 10}, registry::formulas::constants_of({}), &power);
     s.fields["power"] = registry::Value::integer(std::llround(power));
     s.fields["maxStack"] = registry::Value::integer(1);
+    s.fields["manaCost"] = registry::Value::number(10);
     items.push_back(s);
     registry::BaseModel::Entry st;
     st.id = "game:material_stone";
@@ -219,6 +262,7 @@ registry::BaseModel base() {
     registry::BaseModel::Entry rc;
     rc.id = "game:plank_recipe";
     rc.fields["duration"] = registry::Value::number(3);
+    rc.fields["unlock"] = registry::Value::text("game");
     auto stru = [](std::vector<std::pair<std::string, registry::Value>> kv) {
         registry::Value x;
         x.kind = registry::Value::Struct;
@@ -237,6 +281,11 @@ registry::BaseModel base() {
                             {"item", registry::Value::text("game:material_t1_wood_logs")}, {"weight", registry::Value::number(1)}}));
     dt.fields["entries"] = registry::Value::of_list(st2);
     b.registries["drops"].push_back(dt);
+    registry::BaseModel::Entry lt;
+    lt.id = "game:material_t1_wood_logs";
+    lt.fields["stack.min"] = registry::Value::integer(1);
+    lt.fields["stack.max"] = registry::Value::integer(5);
+    b.registries["loot"].push_back(lt);
     return b;
 }
 
@@ -267,10 +316,12 @@ void stage(const std::vector<PackFile>& files) {
     in.mods = mods;
     in.result = registry::compose(sc, in.base, {}, mods);
     in.ids = {{"items|game:material_t1_wood_logs", guid_text(G1)}, {"items|game:sword_t2", guid_text(G2)}, {"items|game:material_stone", guid_text(G4)},
-              {"recipes|game:plank_recipe", guid_text(G3)}, {"drops|game:dt_wolf", guid_text(G3)}};
+              {"recipes|game:plank_recipe", guid_text(G3)}, {"drops|game:dt_wolf", guid_text(G3)},
+              {"loot|game:material_t1_wood_logs", guid_text(G1)}, {"perks|game:perk_a", guid_text(P1)}, {"perks|game:perk_b", guid_text(P2)}};
     in.nums = {{"items|game:material_t1_wood_logs", WOOD}, {"items|game:sword_t2", SWORD}, {"items|game:material_stone", STONE},
-               {"recipes|game:plank_recipe", PLANK}, {"drops|game:dt_wolf", 0x444}};
-    in.decoded = {"items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
+               {"recipes|game:plank_recipe", PLANK}, {"drops|game:dt_wolf", 0x444},
+               {"loot|game:material_t1_wood_logs", WOOD}, {"perks|game:perk_a", 0x901}, {"perks|game:perk_b", 0x902}};
+    in.decoded = {"items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
     in.report = [](const registry::Result& r) {
         g_last_report = r;
         ++g_reports;
@@ -359,6 +410,38 @@ void every_live_kind() {
     check(g_last_report.refused.empty(), "nothing refused");
 }
 
+// perks (refList: references and ids in step), manaCost (impactConfig, its tooltip follows), unlock ("always" clears the
+// knowledge requirement, "game" keeps it), loot stack sizes
+void perks_costs_unlock_loot() {
+    world();
+    g_registry_type_size = [](const char* q) -> uint32_t { return std::string(q) == "keen::KnowledgeQueryData" ? 12u : 0u; };
+    g_files = {{"m/content/a.json", R"({"registry": {"alter": [
+        {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "perks", "list": {"append": ["game:perk_b"]}},
+        {"registry": "items", "select": {"id": "game:sword_t2"}, "field": "manaCost", "op": {"mul": 1.5}},
+        {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "staminaCost", "op": 3},
+        {"registry": "recipes", "select": {"id": "game:plank_recipe"}, "field": "unlock", "op": "always"},
+        {"registry": "loot", "select": {"id": "game:material_t1_wood_logs"}, "field": "stack.max", "op": {"mul": 2}}
+    ]}})"}};
+    const auto files = files_of({{"m", "m/content/a.json"}});
+    stage(files);
+    registry_live_apply(files);
+    for (const auto& r : g_last_report.refused) std::fprintf(stderr, "  refused: %s\n", r.reason.c_str());
+    check(std::memcmp(g_arena + WOOD_AT + 0x30, P1, 16) == 0 && at<uint32_t>(WOOD_AT + 0x80) == 0x901, "perk slot 0 kept");
+    check(std::memcmp(g_arena + WOOD_AT + 0x40, P2, 16) == 0 && at<uint32_t>(WOOD_AT + 0x84) == 0x902, "perk_b appended into slot 1, its id with it");
+    check(at<float>(SWORD_AT + 0x40) == 15.0f, "manaCost x1.5: 15");
+    check(at<int32_t>(SWORD_AT + 0x44) == 15, "its tooltip row follows: 15");
+    check(reported("items[game:material_t1_wood_logs].staminaCost: the item has no such configuration"), "staminaCost on an item without the config: refused, loud");
+    check(at<uint32_t>(PLANK_AT + 0x50) == 0 && at<uint32_t>(PLANK_AT + 0x58) == 0, "unlock always: the knowledge requirement cleared");
+    check(at<uint32_t>(0x40004) == 10, "loot stack.max x2: 10");
+    // back to the game's: the section removed on a reload
+    g_files["m/content/a.json"] = R"({"registry": {"alter": [{"registry": "recipes", "select": {"id": "game:plank_recipe"}, "field": "unlock", "op": "game"}]}})";
+    registry_live_apply(files);
+    check(at<uint32_t>(PLANK_AT + 0x50) == 0x12345678 && at<uint32_t>(PLANK_AT + 0x58) == 7, "unlock game: the game's requirement again");
+    check(std::memcmp(g_arena + WOOD_AT + 0x40, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 16) == 0 && at<uint32_t>(WOOD_AT + 0x84) == 0, "perk slot 1 back to none");
+    check(at<float>(SWORD_AT + 0x40) == 10.0f && at<int32_t>(SWORD_AT + 0x44) == 10, "manaCost and its tooltip back");
+    check(at<uint32_t>(0x40004) == 5, "loot back");
+}
+
 // fields the live back-end does not take are refused loudly; restart fields are not touched and not refused
 void refusals_and_restart_fields() {
     world();
@@ -432,6 +515,7 @@ int main() {
     const std::pair<const char*, void (*)()> tests[] = {
         {"relative_over_packs_and_reload", relative_over_packs_and_reload},
         {"every_live_kind", every_live_kind},
+        {"perks_costs_unlock_loot", perks_costs_unlock_loot},
         {"refusals_and_restart_fields", refusals_and_restart_fields},
         {"hot_reload", hot_reload},
         {"another_writer_in_the_report", another_writer_in_the_report},

@@ -72,6 +72,8 @@ void registry_live_apply(const std::vector<PackFile>& files);
 void registry_live_table(const Entry& table);
 // The last application's result as reported (the stage's plus the live refusals); nullptr before any.
 const registry::Result* registry_live_result();
+// How the live back-end sizes a game type (type_size; tests replace it).
+extern uint32_t (*g_registry_type_size)(const char* qname);
 // The owner of the registry's layers (created on first use).
 KilnOwner registry_owner();
 

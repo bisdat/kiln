@@ -663,7 +663,7 @@ std::string slot_what(const Slot& s, std::string* field_out, const Field** f_out
         field = (*f_out)->path;
         if (s.kind == KILN_CONTENT_DROPS) field = "[" + std::to_string(s.sub) + "]." + field;
     } else {
-        field = s.sub == kSubBlob ? "list" : s.sub == KILN_CONTENT_OUTPUTS ? "outputs" : "inputs";
+        field = s.sub == kSubBlob ? "list" : s.sub == kSubUnlock ? "knowledgeRequirement" : s.sub == KILN_CONTENT_OUTPUTS ? "outputs" : "inputs";
     }
     *field_out = field;
     return what + "." + field;

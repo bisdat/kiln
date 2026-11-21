@@ -339,6 +339,22 @@ KilnResult set_drop_stacks(KilnOwner owner, uint64_t seq, const Entry& e, const 
 KilnContentValue original_value(const Entry& e, const Field& f);
 KilnContentValue current_value(const Entry& e, const Field& f);
 
+// ============================================================================================= registry hooks ===
+// The registry's live back-end (registry_live.cpp) and kiln.gamedata (gamedata_packs.cpp): one item config value
+// ("impactValues.0x727d7f78", StaminaCost) as a store slot, and the tooltip row that shows it when the item has one. false
+// + *why: the item has no such config (the live back-end never adds one) or the path is no value.
+struct GdValueSlot {
+    uintptr_t addr = 0;
+    Field f;
+    uint32_t kind = 0, id = 0;
+    int32_t field = -1;
+    uintptr_t tip = 0;  // the tooltip row's value (sint32), 0: none
+    uint8_t tip_format = 0;
+};
+bool gd_item_config_slot(const Entry& e, const std::string& path, GdValueSlot* out, std::string* why);
+bool gd_ui_scale(uint8_t format, double v, int64_t* out);  // a config value as its tooltip row shows it
+constexpr int32_t kSubUnlock = 101;  // Slot.sub of a recipe's knowledgeRequirement (registry recipes.unlock)
+
 // ============================================================================================= stack guard =====
 bool guard_on();
 bool guard_set(bool on, std::string* why);
