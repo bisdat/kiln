@@ -113,7 +113,8 @@ bool op_table(void* c, uint64_t id, bool* holds, uint32_t* used, uint32_t* limit
 bool op_set_string(void* c, uint64_t old_id, const char* text, uint32_t len, uint8_t* error, uint64_t* id) {
     return names_set_string(static_cast<GameCtx*>(c)->world, old_id, text, len, error, id);
 }
-bool op_write_id(void* c, KilnEntity e, uint64_t id) { return names_write_id(static_cast<GameCtx*>(c)->world, e, id); }
+bool op_track(void* c, KilnEntity e, void** slot) { return names_track(static_cast<GameCtx*>(c)->world, e, slot); }
+bool op_store(void*, void* slot, uint64_t id) { return names_store(slot, id); }
 bool op_add_id(void* c, KilnEntity e, uint64_t id) { return names_add_id(static_cast<GameCtx*>(c)->world, e, id); }
 
 rename::RenameOps game_ops(GameCtx* ctx) {
@@ -124,7 +125,8 @@ rename::RenameOps game_ops(GameCtx* ctx) {
     g.name_id = &op_name_id;
     g.table = &op_table;
     g.set_string = &op_set_string;
-    g.write_id = &op_write_id;
+    g.track = &op_track;
+    g.store = &op_store;
     g.add_id = &op_add_id;
     return g;
 }

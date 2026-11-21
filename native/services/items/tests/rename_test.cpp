@@ -41,6 +41,8 @@ struct Game {
     bool exists_known = true;
     // what the game's calls did
     int set_string_calls = 0, writes = 0, adds = 0;
+    int tracked_at = -1;             // set_string calls made when the tracked write ran
+    bool store_after_track = false;  // the last store came after exactly one set_string following the tracked write
     bool crashed = false;
     // fault injection
     bool fault_set_string = false, fault_write = false, wrong_id = false;
@@ -115,13 +117,21 @@ bool f_set_string(void* c, uint64_t old_id, const char* text, uint32_t len, uint
     *id = g.wrong_id ? want ^ 1 : want;
     return true;
 }
-bool f_write_id(void* c, KilnEntity e, uint64_t id) {
+// the handler's tracked write: marks the component written and hands out where its id is, before set_string
+bool f_track(void* c, KilnEntity e, void** slot) {
     Game& g = *G(c);
     if (g.fault_write) return false;
     auto& en = g.ents[e];
     if (!en.has) return false;
-    en.id = id;
+    g.tracked_at = g.set_string_calls;
+    *slot = &en.id;
+    return true;
+}
+bool f_store(void* c, void* slot, uint64_t id) {
+    Game& g = *G(c);
+    *static_cast<uint64_t*>(slot) = id;
     ++g.writes;
+    g.store_after_track = g.tracked_at >= 0 && g.set_string_calls == g.tracked_at + 1;
     return true;
 }
 bool f_add_id(void* c, KilnEntity e, uint64_t id) {
@@ -141,7 +151,8 @@ RenameOps ops(Game* g) {
     o.name_id = &f_name_id;
     o.table = &f_table;
     o.set_string = &f_set_string;
-    o.write_id = &f_write_id;
+    o.track = &f_track;
+    o.store = &f_store;
     o.add_id = &f_add_id;
     return o;
 }
@@ -204,6 +215,7 @@ void renames() {
         o = rn(g, 1026, "Wood");
         check(o.status == KILN_ITEMS_RENAME_DONE && o.changed && g.adds == 1 && g.writes == 1 && g.name(1026) == "Wood" && g.table.size() == 1,
               "a second name: the tracked write puts the new id in, and the old record is released (its last reference)");
+        check(g.store_after_track, "the handler's order: the tracked write, then set_string, then the id into the component");
         const int calls = g.set_string_calls;
         o = rn(g, 1026, "Wood");
         check(o.status == KILN_ITEMS_RENAME_DONE && !o.changed && g.writes == 1 && g.set_string_calls == calls,
@@ -282,7 +294,10 @@ void renames() {
         g.wrong_id = false;
         rn(g, 1, "A");
         g.fault_write = true;
-        check(rn(g, 1, "B").status == KILN_ITEMS_RENAME_UNAVAILABLE, "a failed tracked write ends UNAVAILABLE");
+        const int calls = g.set_string_calls;
+        check(rn(g, 1, "B").status == KILN_ITEMS_RENAME_UNAVAILABLE && g.set_string_calls == calls && g.name(1) == "A" &&
+                  g.table.size() == 1 && g.table[text_id("A", 1)].refs == 1 && !g.table.count(text_id("B", 1)),
+              "a failed tracked write ends UNAVAILABLE before set_string: the old name and its record are untouched");
     }
     {
         Game g;

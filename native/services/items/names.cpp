@@ -158,6 +158,11 @@ bool set_for_lab_impl(uintptr_t world, KilnEntity entity, const char* text, char
     }
     alignas(16) uint8_t out[32] = {};
     const TextView tv{text, std::strlen(text)};
+    if (tv.len > KILN_ITEMS_NAME_CAPACITY) {  // set_string stops the server past its 256-byte record
+        std::snprintf(msg, cap, "the text is %llu bytes; set_string takes at most %u", static_cast<unsigned long long>(tv.len),
+                      KILN_ITEMS_NAME_CAPACITY);
+        return false;
+    }
     reinterpret_cast<SetStringFn>(E.set_string)(out, strings, 0, &tv);
     if (out[0] != 0) {
         std::snprintf(msg, cap, "set_string refused the text (error 0x%02x)", out[0]);
@@ -238,8 +243,12 @@ bool names_table(uintptr_t world, uint64_t id, bool* holds, uint32_t* used, uint
         *holds = table_has_impl(base + (E.strings_bitmap - E.hmap_bits), id);
         *used = rdn<uint32_t>(base, E.strings_used);
         const uint32_t pool = rdn<uint32_t>(base, E.strings_pool_cap);
-        // the insert refuses at the fixed limit, and when the record pool's count reaches its capacity
-        *limit = static_cast<uint32_t>(E.strings_limit) < pool || pool == 0 ? static_cast<uint32_t>(E.strings_limit) : pool;
+        // the insert refuses at the fixed limit, when the record pool's count reaches its capacity, and when the map
+        // finds no free slot (it does not grow there: a full map refuses too)
+        uint32_t lim = static_cast<uint32_t>(E.strings_limit) < pool || pool == 0 ? static_cast<uint32_t>(E.strings_limit) : pool;
+        const uint64_t map_cap = rdn<uint64_t>(base + (E.strings_bitmap - E.hmap_bits), E.hmap_capacity);
+        if (map_cap != 0 && map_cap < lim) lim = static_cast<uint32_t>(map_cap);
+        *limit = lim;
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -265,13 +274,24 @@ bool names_set_string(uintptr_t world, uint64_t old_id, const char* text, uint32
     }
 }
 
-bool names_write_id(uintptr_t world, KilnEntity entity, uint64_t id) {
+bool names_track(uintptr_t world, KilnEntity entity, void** slot) {
+    *slot = nullptr;
     if (!E.rename_ok || !world || !E.write_component_tick) return false;
     __try {
         PtrSize ps{};
         reinterpret_cast<WriteTickFn>(E.write_component_tick)(&ps, world, kHashCustomPlayerString, entity);
         if (!ps.ptr || ps.size < 8) return false;
-        std::memcpy(ps.ptr, &id, 8);
+        *slot = ps.ptr;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool names_store(void* slot, uint64_t id) {
+    if (!slot) return false;
+    __try {
+        std::memcpy(slot, &id, 8);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;

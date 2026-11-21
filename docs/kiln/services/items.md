@@ -190,12 +190,14 @@ empty name.
 
 **What it does**, the steps of the game's rename handler (the message dispatcher's case for
 `CustomPlayerStringClientMessage`), in the next Pre on the tick thread: the entity is checked again (it exists, it has an
-initialized inventory that is neither a player's nor an NPC's); `set_string(old id, text)` stores the text in the world's
-string table, which releases the old name's record and queues the new one for every client; the id (FNV-1a 64 of the
-text) goes into the object's `CustomPlayerString` through the world's tracked write (replication, the save) or, for an
-object never named before, `AddComponent`. A name the object already has changes nothing. The string table holds at most
-1024 different names (its record pool); a rename that would need a new record past that is refused before `set_string`,
-which would otherwise release the old name first.
+initialized inventory that is neither a player's nor an NPC's); the world's tracked write of the object's
+`CustomPlayerString` (replication, the save) marks it written and gives its old id, as the handler's first call does;
+`set_string(old id, text)` stores the text in the world's string table, which releases the old name's record and queues
+the new one for every client; the id (FNV-1a 64 of the text) then goes into the component or, for an object never named
+before, a new component (`AddComponent`). Nothing that can fail runs between `set_string` and storing the id. A name the
+object already has changes nothing. The string table holds at most 1024 different names (its record pool, and its map
+when that is smaller); a rename that would need a new record past that is refused before `set_string`, which would
+otherwise release the old name first.
 
 **Outcomes**: refusals at the call throw: `ArgumentNullException` (null), `ArgumentException` (no entity, an entity that
 does not exist or is not a container, a name too long, not valid text or with a control character; the message names the

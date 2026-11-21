@@ -90,8 +90,11 @@ struct RenameOps {
     bool (*table)(void* ctx, uint64_t id, bool* holds, uint32_t* used, uint32_t* limit) = nullptr;
     // the game's set_string(out, strings, old_id, {text, len}): its error byte (0 = ok) and the id it returns
     bool (*set_string)(void* ctx, uint64_t old_id, const char* text, uint32_t len, uint8_t* error, uint64_t* id) = nullptr;
-    // the world's tracked write of the name component (replication, the save), then the id into it
-    bool (*write_id)(void* ctx, KilnEntity e, uint64_t id) = nullptr;
+    // the world's tracked write of the name component (replication, the save): marks it written and gives where its id
+    // is (*slot), as the handler's first call does; made before set_string, so a failure here leaves the table untouched
+    bool (*track)(void* ctx, KilnEntity e, void** slot) = nullptr;
+    // the id into the slot `track` gave (after set_string, as the handler does)
+    bool (*store)(void* ctx, void* slot, uint64_t id) = nullptr;
     // AddComponent(world, e, CustomPlayerString, {&id, 8}): an object named for the first time
     bool (*add_id)(void* ctx, KilnEntity e, uint64_t id) = nullptr;
 };
@@ -103,8 +106,11 @@ struct Outcome {
     char message[160] = "";
 };
 
-// The game's rename of `e` to `text` (already checked with check_text), as its handler does it: the component's id is
-// the old id set_string releases; set_string's id goes into the component (tracked write) or a new one. A name the
+// The game's rename of `e` to `text` (already checked with check_text), as its handler does it: the tracked write of
+// the component first (its id is the old id set_string releases), then set_string, then its id into the component, or a
+// new component for an object that never had one. The tracked write comes first so that nothing can fail between
+// set_string (which releases the old record) and storing the new id: a failure there would leave the component naming a
+// released record and the new record with a reference nobody holds. A name the
 // object already has changes nothing (set_string returns early for it, and nothing is written). An empty text on an
 // object without a name has nothing to clear. A full string table is refused before set_string, which would otherwise
 // release the old name first.
@@ -140,6 +146,9 @@ inline Outcome run(const RenameOps& g, KilnEntity e, const char* text, uint32_t 
         if (!holds && used >= limit)
             return fail(KILN_ITEMS_RENAME_FULL, "the game's string table holds its maximum of %llu different names (%llu in use)", limit, used);
     }
+    void* slot = nullptr;
+    if (has && (!g.track(g.ctx, e, &slot) || !slot))
+        return fail(KILN_ITEMS_RENAME_UNAVAILABLE, "the tracked write of entity %llu's name failed (nothing changed)", e);
     uint8_t err = 0;
     uint64_t id = 0;
     if (!g.set_string(g.ctx, old, text, len, &err, &id)) return fail(KILN_ITEMS_RENAME_UNAVAILABLE, "the game's set_string faulted");
@@ -149,7 +158,7 @@ inline Outcome run(const RenameOps& g, KilnEntity e, const char* text, uint32_t 
     }
     if (id != want) return fail(KILN_ITEMS_RENAME_UNAVAILABLE, "set_string returned id %016llx, not the text's (%016llx)", id, want);
     if (has) {
-        if (!g.write_id(g.ctx, e, id)) return fail(KILN_ITEMS_RENAME_UNAVAILABLE, "the tracked write of entity %llu's name failed", e);
+        if (!g.store(g.ctx, slot, id)) return fail(KILN_ITEMS_RENAME_UNAVAILABLE, "storing entity %llu's new name id faulted", e);
     } else if (!g.add_id(g.ctx, e, id)) {
         return fail(KILN_ITEMS_RENAME_UNAVAILABLE, "adding entity %llu's name component failed", e);
     }

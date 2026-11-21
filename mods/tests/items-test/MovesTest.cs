@@ -474,6 +474,18 @@ public sealed partial class ItemsTestMod
               Throws<ArgumentException>(() => _ = Items.SetContainerName(new EntityId(0x7FFFFFF0), "X")),
             "rename: too long, a control character and an entity that does not exist are refused at the call");
         Check(Items.ContainerName(other) == null, "rename: the refused calls changed nothing");
+        // containers only: an NPC's inventory is not a container, so it is refused at the call and keeps no name
+        var npc = Items.FindInventories(InventoryKinds.Npcs).FirstOrDefault();
+        if (npc.IsNone)
+        {
+            Log.Info("INFO rename: the lab world has no NPC inventory; the containers-only refusal is the host test's");
+        }
+        else
+        {
+            var npcKey = Key(npc);
+            Check(Throws<ArgumentException>(() => _ = Items.SetContainerName(npc, "Not a chest")) && Key(npc) == npcKey,
+                $"rename: NPC {npc} (an inventory, not a container) is refused at the call and its name component is unchanged ({npcKey:x16})");
+        }
     }
 
     private static bool Throws<T>(Action a) where T : Exception
