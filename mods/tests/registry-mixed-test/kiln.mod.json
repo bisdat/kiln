@@ -1,0 +1,12 @@
+{
+  "id": "registry-mixed-test",
+  "name": "registry stage with older paths: lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "RegistryMixedTest.dll",
+  "side": "server",
+  "clients": "none",
+  "boot": true,
+  "advanced": true,
+  "description": "PASS/FAIL lines: an old data pack, an old boot patch, a registry section and a C# registry edit on the same fields; live values read back after the world load and after pack hot reloads (an edited section, a removed one, restored). registry-compat-test dumps the same session."
+}

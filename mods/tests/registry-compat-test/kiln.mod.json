@@ -1,0 +1,11 @@
+{
+  "id": "registry-compat-test",
+  "name": "registry compatibility dump: lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "RegistryCompatTest.dll",
+  "side": "server",
+  "clients": "none",
+  "advanced": true,
+  "description": "Writes a dump at every content ready (world load, pack reload) to its data folder: the served bytes of every resource of the registries' types (SHA-256), the store's changed fields and conflicts (Content.Dump), registry.json. tools/registry-compat compares dumps with each other and with the game's archive."
+}

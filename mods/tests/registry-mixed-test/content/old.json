@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "comment": "an old data pack: below the registry (D1)",
+  "items": {
+    "Material_T1_Wood_Logs": {
+      "maxStackSize": {
+        "mul": 2
+      }
+    }
+  }
+}
