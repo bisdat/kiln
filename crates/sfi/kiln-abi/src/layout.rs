@@ -264,7 +264,19 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnNativeCounters, lock_bypass) == 112);
     assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnNativeCounters, ecs_state) == 120);
     assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnNativeCounters, ecs_reason) == 124);
-    assert!(core::mem::size_of::<crate::services::kiln_abilities::KilnAbilitiesApi>() == 312);
+    assert!(core::mem::size_of::<crate::services::kiln_abilities::KilnItemUse>() == 48);
+    assert!(core::mem::align_of::<crate::services::kiln_abilities::KilnItemUse>() == 8);
+    assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnItemUse, size) == 0);
+    assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnItemUse, entity) == 4);
+    assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnItemUse, slot) == 8);
+    assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnItemUse, item) == 16);
+    assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnItemUse, sequence) == 20);
+    assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnItemUse, flags) == 24);
+    assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnItemUse, status) == 28);
+    assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnItemUse, count) == 32);
+    assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnItemUse, reserved) == 36);
+    assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnItemUse, trigger_time) == 40);
+    assert!(core::mem::size_of::<crate::services::kiln_abilities::KilnAbilitiesApi>() == 320);
     assert!(core::mem::align_of::<crate::services::kiln_abilities::KilnAbilitiesApi>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnAbilitiesApi, header) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnAbilitiesApi, status) == 8);
@@ -305,6 +317,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnAbilitiesApi, native_attach_state) == 288);
     assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnAbilitiesApi, native_ecs_read) == 296);
     assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnAbilitiesApi, native_ecs_write) == 304);
+    assert!(core::mem::offset_of!(crate::services::kiln_abilities::KilnAbilitiesApi, item_use) == 312);
     assert!(core::mem::size_of::<crate::services::kiln_assets::KilnAssetKey>() == 24);
     assert!(core::mem::align_of::<crate::services::kiln_assets::KilnAssetKey>() == 4);
     assert!(core::mem::offset_of!(crate::services::kiln_assets::KilnAssetKey, guid) == 0);

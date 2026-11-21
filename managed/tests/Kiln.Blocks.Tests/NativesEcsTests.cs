@@ -13,7 +13,7 @@ public sealed unsafe class NativesEcsTests
     [Fact]
     public void The_bridge_tail_matches_the_native_contract_and_probes_only_its_extent()
     {
-        Assert.Equal(312, sizeof(AbilitiesNative.TableV2));
+        Assert.Equal(320, sizeof(AbilitiesNative.TableV2));  // since 0.2.0-dev.30.3: item_use after the bridge (ItemUseTests)
         Assert.Equal(296, (int)Marshal.OffsetOf<AbilitiesNative.TableV2>(nameof(AbilitiesNative.TableV2.NativeEcsRead)));
         Assert.Equal(304, (int)Marshal.OffsetOf<AbilitiesNative.TableV2>(nameof(AbilitiesNative.TableV2.NativeEcsWrite)));
         Assert.Equal(128, sizeof(AbilitiesNative.NativeCounters));
