@@ -1,0 +1,9 @@
+{
+  "id": "routines-test",
+  "name": "kiln.routines lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "RoutinesTest.dll",
+  "side": "server",
+  "advanced": true
+}

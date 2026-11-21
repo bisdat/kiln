@@ -299,26 +299,33 @@ int main(int argc, char** argv) {
         CHECK(range.refused.size() == 1 && refused_with(range, "a", "outside"), "a covered raw edit is checked against the Kiln field's range");
     }
 
-    // ---- a raw path behind a field Kiln converts: never composed with that field; the later one is refused ----
+    // ---- a raw path behind a field Kiln converts (one place, two scales; work-bb's D1 ruling): a value wins over the other
+    // scale's writers, reported; a relative change (no conversion known here) is refused ----
     {
         const std::string pw_edit = R"([{"registry": "items", "select": {"id": "game:weapon_t1_sword"}, "field": "power", "op": 50}])";
+        const FieldRef pw{"items", kSword, "power"}, dp{"items", kSword, raw_field("damagesetup.power")};
         const Result r = compose(s, b, {}, {mod("a", {batch(s, "a", "alter", pw_edit)}),
                                             mod("b", {batch(s, "b", "alter", alter_raw(kSword, R"({"damageSetup.power": 2})"))})});
-        CHECK(result(r, "items", kSword, "power").d == 50 && r.refused.size() == 1 && refused_with(r, "b", "converts") && lines(r, LineKind::Exclusive) == 1,
-              "a raw edit of a converted member after a field edit there is refused and reported");
+        const Line* ov = line(r, LineKind::Overridden);
+        CHECK(r.refused.empty() && result(r, "items", kSword, raw_field("damagesetup.power")).d == 2 && !r.fields.count(pw) && ov && ov->winner == "b" && ov->loser == "a",
+              "a raw value over a field edit of the converted place wins; the field's chain goes; reported");
+        const Result rel = compose(s, b, {}, {mod("a", {batch(s, "a", "alter", pw_edit)}),
+                                              mod("b", {batch(s, "b", "alter", alter_raw(kSword, R"({"damageSetup.power": {"mul": 2}})"))})});
+        CHECK(result(rel, "items", kSword, "power").d == 50 && rel.refused.size() == 1 && refused_with(rel, "b", "no conversion") && lines(rel, LineKind::Exclusive) == 1,
+              "a relative raw change over the converted field is refused and reported");
         const Result rev = compose(s, b, {}, {mod("a", {batch(s, "a", "alter", alter_raw(kSword, R"({"damageSetup.power": 2})"))}),
                                               mod("b", {batch(s, "b", "alter", pw_edit)})});
-        CHECK(result(rev, "items", kSword, raw_field("damagesetup.power")).d == 2 && result(rev, "items", kSword, "power").kind == Value::None &&
-                  refused_with(rev, "b", "converts"),
-              "...and the other way round: the later field edit is refused");
+        CHECK(result(rev, "items", kSword, "power").d == 50 && !rev.fields.count(dp) && rev.refused.empty(), "...and the other way round: the later field value wins");
         const Result own = compose(s, b, {}, {mod("a", {batch(s, "a", "alter", pw_edit), batch(s, "a", "alter", alter_raw(kSword, R"({"damageSetup.power": 2})"))})});
-        CHECK(own.refused.size() == 1, "one mod's own field and raw edit of one converted place are refused too");
+        CHECK(own.refused.empty() && result(own, "items", kSword, raw_field("damagesetup.power")).d == 2 && !own.fields.count(pw), "one mod's later value wins over its own");
         OldWrite pack;
-        pack.kind = WriterKind::OldPack, pack.mod = "old", pack.who = "old: content/a.json", pack.field = {"items", kSword, "power"};
+        pack.kind = WriterKind::OldPack, pack.mod = "old", pack.who = "old: content/a.json", pack.field = pw;
         pack.op.set = true, pack.op.value = Value::number(40);
         const Result old = compose(s, b, {pack}, {mod("a", {batch(s, "a", "alter", alter_raw(kSword, R"({"damageSetup.power": 2})"))})});
-        CHECK(result(old, "items", kSword, "power").d == 40 && old.refused.size() == 1 && old.refused[0].mod == "a",
-              "a raw edit over an old path's write of the converted field is refused; the old path stays");
+        CHECK(old.refused.empty() && result(old, "items", kSword, raw_field("damagesetup.power")).d == 2 && !old.fields.count(pw) && line(old, LineKind::Overridden),
+              "a raw value over an old path's write of the converted field wins, reported (D1)");
+        const Result oldrel = compose(s, b, {pack}, {mod("a", {batch(s, "a", "alter", alter_raw(kSword, R"({"damageSetup.power": {"add": 1}})"))})});
+        CHECK(oldrel.refused.size() == 1 && result(oldrel, "items", kSword, "power").d == 40, "a relative raw change over an old write of the converted field is refused; the old write stays");
         const Result alone = compose(s, b, {}, {mod("a", {batch(s, "a", "alter", alter_raw(kSword, R"({"damageSetup.power": 2})"))})});
         CHECK(alone.refused.empty() && result(alone, "items", kSword, raw_field("damagesetup.power")).d == 2,
               "with no writer of the field there, the raw edit applies (the Advanced tier works while the names hold)");

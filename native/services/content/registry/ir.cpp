@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <climits>
 #include <cmath>
 #include <set>
@@ -13,7 +14,6 @@ namespace kc::registry {
 namespace {
 
 constexpr int kMaxDepth = 32;              // nesting levels of an IR document (a real one has fewer than 8)
-constexpr size_t kMaxListValues = 4096;    // values in one list op or list value
 constexpr size_t kMaxIrBytes = 16u << 20;  // KILN_REGISTRY_MAX_IR_BYTES
 // The whole numbers an int64 holds, as doubles: [-2^63, 2^63).
 constexpr double kInt64Lo = -9223372036854775808.0, kInt64Hi = 9223372036854775808.0;
@@ -34,10 +34,6 @@ std::string brief(const json& j) {
     return j.is_array() ? "a list" : j.is_object() ? "an object" : "a value";
 }
 
-// Thrown by the parser's callback past kMaxDepth: the document is refused before anything nests deeper (nothing here recurses
-// on an untrusted document).
-struct TooDeep {};
-
 bool too_deep(const json& doc) {  // the same limit for a document handed over as JSON; iterative
     std::vector<std::pair<const json*, int>> stack{{&doc, 0}};
     while (!stack.empty()) {
@@ -53,6 +49,42 @@ bool too_deep(const json& doc) {  // the same limit for a document handed over a
 const char* const kReservedMods[] = {"kiln", "kiln.api", "game", "enshrouded", "native", "permissions"};
 
 }  // namespace
+
+namespace {
+// A value change of field (or leaf) f: relative or not. false + *err: its ops refuse it.
+bool value_ops(const FieldSpec& f, bool relative, std::string* err) {
+    if (f.ops == FieldOps::None || f.read_only) return *err = f.name + " is read-only", false;
+    if (f.ops == FieldOps::Set && relative) return *err = f.name + " takes a value only (its ops are set), not a relative change", false;
+    return true;
+}
+}  // namespace
+
+bool ops_allow(const FieldSpec& f, const Edit& e, std::string* err) {
+    const bool relative = e.list == ListOp::None && !e.op.set;
+    if (e.element.on) {  // f is the list; its element's (or leaf's) own ops, then the list's
+        if (f.ops == FieldOps::None || f.read_only) return *err = f.name + " is read-only", false;
+        if (!e.element.leaf.empty()) {
+            const FieldSpec* leaf = f.element_field(e.element.leaf);
+            if (!leaf) return *err = f.name + "'s elements have no field \"" + e.element.leaf + "\"", false;
+            FieldSpec named = *leaf;
+            named.name = f.name + "[]." + leaf->name;
+            return value_ops(named, relative, err);
+        }
+        return true;
+    }
+    switch (f.ops) {
+        case FieldOps::Any: return true;
+        case FieldOps::None: return *err = f.name + " is read-only", false;
+        case FieldOps::Set:
+        case FieldOps::Number:
+            if (e.list != ListOp::None) return *err = f.name + " is not a list", false;
+            return value_ops(f, relative, err);
+        case FieldOps::List: return true;
+        case FieldOps::Indexed:
+            return *err = f.name + " is a list of fixed length: edit one element at a time (" + f.name + "[n])", false;
+    }
+    return true;
+}
 
 bool mod_id_ok(const std::string& id, std::string* err) {
     const bool shape = !id.empty() && id.size() <= 64 && (std::islower(static_cast<unsigned char>(id[0])) || std::isdigit(static_cast<unsigned char>(id[0]))) &&
@@ -82,6 +114,22 @@ json Value::to_json() const {
             return o;
         }
         default: return nullptr;
+    }
+}
+
+std::string Value::text_of() const {
+    switch (kind) {
+        case Int: return std::to_string(i);
+        case Bool: return b ? "true" : "false";
+        case Num: {  // the shortest text that reads back as d, written as JSON writes a float ("2.0", "1.5", "1e+20")
+            if (!std::isfinite(d)) return "null";
+            char buf[64];
+            const auto r = std::to_chars(buf, buf + sizeof buf, d);
+            std::string s(buf, r.ptr);
+            if (s.find_first_of(".e") == std::string::npos) s += ".0";
+            return s;
+        }
+        default: return to_json().dump(-1, ' ', false, json::error_handler_t::replace);
     }
 }
 
@@ -258,7 +306,7 @@ bool struct_of(const json& j, const FieldSpec& list, Value* out, std::string* er
     for (const auto& [k, x] : j.items()) {  // nlohmann's object is ordered: keys come sorted
         const FieldSpec* leaf = list.element_field(k);
         if (!leaf) return *err = list.name + ": an element has no field \"" + k + "\"", false;
-        if (leaf->read_only) return *err = list.name + "[]." + k + " is read-only", false;
+        // a read-only leaf (an element's identity: a drop entry's item) is given when the element is made, never edited after
         Value y;
         if (!(leaf->type == FieldType::Flags ? flags_of(x, *leaf, &y, err) : scalar_of(x, leaf->type, *leaf, &y, err))) return false;
         v.keys.push_back(k);
@@ -427,7 +475,7 @@ bool edit_of(const json& e, const Batch& b, const Schema& schema, Edit* out, std
         const FieldSpec* lf = reg->field(r.list);
         if (!lf || lf->type != FieldType::List) return *err = out->registry + " has no list \"" + r.list + "\"", false;
         if (lf->read_only) return *err = out->registry + "." + r.list + " is read-only", false;
-        if (lf->indexed && lf->fixed_length && !r.all && r.index >= lf->fixed_length)
+        if (lf->ops == FieldOps::Indexed && lf->fixed_length && !r.all && r.index >= lf->fixed_length)
             return *err = out->registry + "." + r.list + " has a fixed length of " + std::to_string(lf->fixed_length) + " elements: no element " +
                           std::to_string(r.index), false;
         out->field = r.list + "[" + (r.all ? std::string("*") : std::to_string(r.index)) + "]" + (r.leaf.empty() ? "" : "." + r.leaf);
@@ -436,35 +484,41 @@ bool edit_of(const json& e, const Batch& b, const Schema& schema, Edit* out, std
             if (lf->element != FieldType::Struct) return *err = out->registry + "." + r.list + "'s elements have no fields", false;
             const FieldSpec* leaf = lf->element_field(r.leaf);
             if (!leaf) return *err = out->registry + "." + r.list + "'s elements have no field \"" + r.leaf + "\"", false;
-            if (leaf->read_only) return *err = out->registry + "." + r.list + "[]." + r.leaf + " is read-only", false;
             FieldSpec named = *leaf;  // messages name the place as the edit does ("outputs[0].item"), not the bare leaf
             named.name = out->field;
-            return op_of(e["op"], named, &out->op, err);
+            if (!op_of(e["op"], named, &out->op, err)) return false;
+            return ops_allow(*lf, *out, err);
         }
         if (lf->element == FieldType::Struct) {  // a whole element with fields: {"set": {...}} (a plain object would read as an op)
             const json& o = e["op"];
             if (!o.is_object() || o.size() != 1 || !o.contains("set")) return *err = out->field + ": a whole element is set with {\"set\": {<its fields>}}", false;
             out->op.set = true;
-            return struct_of(o["set"], *lf, &out->op.value, err);
+            if (!struct_of(o["set"], *lf, &out->op.value, err)) return false;
+            return ops_allow(*lf, *out, err);
         }
         FieldSpec el = *lf;  // a plain element: a value or a relative change, with the list's range for its elements
         el.type = lf->element;
         el.name = out->field;
-        return op_of(e["op"], el, &out->op, err);
+        if (!op_of(e["op"], el, &out->op, err)) return false;
+        return ops_allow(*lf, *out, err);
     }
     const FieldSpec* f = reg->field(out->field);
     if (!f) return *err = out->registry + " has no field \"" + out->field + "\"", false;
     if (f->read_only) return *err = out->registry + "." + out->field + " is read-only", false;
-    if (f->indexed)
-        return *err = out->registry + "." + out->field + " has a fixed length: edit one element (" + out->field +
-                      "[i]) with a value or a number op, not the whole list", false;
     const bool listish = f->type == FieldType::List || f->type == FieldType::Flags;
     if (e.contains("op")) {
         if (listish && !e["op"].is_array() && !(e["op"].is_object() && e["op"].contains("set")))
             return *err = out->registry + "." + out->field + " is a list: \"op\" sets the whole list ([...]); \"list\" changes it (clear, append, remove, replace)", false;
-        return op_of(e["op"], *f, &out->op, err);
+        if (!op_of(e["op"], *f, &out->op, err)) return false;
+        return ops_allow(*f, *out, err);
     }
     if (!listish) return *err = out->registry + "." + out->field + " is not a list", false;
+    if (f->ops == FieldOps::Indexed || f->ops == FieldOps::None || f->ops == FieldOps::Set || f->ops == FieldOps::Number) {
+        out->list = ListOp::Clear;  // only to ask: a list op of any kind
+        const bool ok = ops_allow(*f, *out, err);
+        out->list = ListOp::None;
+        if (!ok) return false;
+    }
     const json& l = e["list"];
     if (l == "clear") return out->list = ListOp::Clear, true;  // the section's short form
     if (!l.is_object() || l.size() != 1) return *err = "\"list\" is one of {\"clear\": true}, {\"append\": [...]}, {\"remove\": [...]}, {\"replace\": [...]}", false;
@@ -595,20 +649,10 @@ Value apply_op(const Op& op, const Value& base, const FieldSpec& f) {
 bool parse_batch(const std::string& text, const Schema& schema, Batch* out, std::vector<Refusal>* refused, std::string* err) {
     *out = Batch{};
     if (text.size() > kMaxIrBytes) return *err = "the IR document is larger than 16 MiB", false;
-    json doc;
-    try {
-        doc = json::parse(
-            text,
-            [](int depth, json::parse_event_t, json&) {
-                if (depth >= kMaxDepth) throw TooDeep{};
-                return true;
-            },
-            true, true);
-    } catch (const TooDeep&) {
-        return *err = "the IR document nests deeper than " + std::to_string(kMaxDepth) + " levels", false;
-    } catch (const std::exception&) {
-        return *err = "the IR document is not JSON", false;
-    }
+    // nlohmann's parser does not recurse and its values are destroyed without recursion; the document is at most 16 MiB.
+    // The nesting limit is then the JSON form's, one rule for both (too_deep).
+    const json doc = json::parse(text, nullptr, false, true);
+    if (doc.is_discarded()) return *err = "the IR document is not JSON", false;
     return parse_batch(doc, schema, out, refused, err);
 }
 
@@ -645,13 +689,13 @@ bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<
             if (e.is_object() && e.contains("n")) {
                 const json& n = e["n"];
                 if (!n.is_number_unsigned() || n.get<uint64_t>() > UINT32_MAX) {
-                    refused->push_back({out->mod, out->source, out->stage, at, "\"n\" is a whole number 0..4294967295, not " + brief(n), ""});
+                    refused->push_back({out->mod, out->source, out->stage, at, "\"n\" is a whole number 0..4294967295, not " + brief(n), "", "", "", ""});
                     continue;
                 }
                 x.n = static_cast<uint32_t>(n.get<uint64_t>());
             }
             if (!used.insert(x.n).second) {
-                refused->push_back({out->mod, out->source, out->stage, x.n, "the edit number " + std::to_string(x.n) + " is used twice in this batch", ""});
+                refused->push_back({out->mod, out->source, out->stage, x.n, "the edit number " + std::to_string(x.n) + " is used twice in this batch", "", "", "", ""});
                 continue;
             }
             ok = edit_of(e, *out, schema, &x, &why);
@@ -663,9 +707,17 @@ bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<
             out->edits.push_back(std::move(x));
             continue;
         }
-        Refusal r{out->mod, out->source, out->stage, x.n, why, ""};
-        if (e.is_object() && e.value("entry", json()) == "add" && e.contains("id") && e["id"].is_string() && e.contains("registry") && e["registry"].is_string())
-            r.entry = e["registry"].get<std::string>() + "|" + e["id"].get<std::string>();  // a reference to it names this as its cause
+        Refusal r{out->mod, out->source, out->stage, x.n, why, "", "", "", ""};
+        if (e.is_object()) {  // where, when the document says it
+            if (e.contains("registry") && e["registry"].is_string()) r.registry = e["registry"].get<std::string>();
+            if (e.contains("field") && e["field"].is_string()) r.field = e["field"].get<std::string>();
+            else if (e.contains("raw") && e["raw"].is_object() && !e["raw"].empty()) r.field = e["raw"].begin().key();
+            if (e.contains("id") && e["id"].is_string()) r.id = e["id"].get<std::string>();
+            else if (e.contains("select") && e["select"].is_string()) r.id = e["select"].get<std::string>();
+            else if (e.contains("select") && e["select"].is_object() && e["select"].contains("id") && e["select"]["id"].is_string()) r.id = e["select"]["id"].get<std::string>();
+            if (r.id.find_first_of("*?") != std::string::npos) r.id.clear();  // a glob names no one entry
+            if (e.value("entry", json()) == "add" && !r.registry.empty() && !r.id.empty()) r.entry = r.registry + "|" + r.id;  // a reference to it names this as its cause
+        }
         refused->push_back(std::move(r));
     }
     return true;

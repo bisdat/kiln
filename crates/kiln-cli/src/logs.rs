@@ -97,3 +97,45 @@ pub fn run(a: LogsArgs, json: bool) -> Result<i32> {
         std::thread::sleep(Duration::from_millis(250));
     }
 }
+
+/// `kiln debug --client <install> --observe`: a client's kiln.log as it grows (its last `lines` first; Kiln's
+/// counters and a counter sample's lines are log lines) and, between reads, whatever `tick` reports (the session mode).
+/// Read only: no debugger is involved and nothing can pause the game. `rounds`: how many reads (None: until stopped).
+pub fn observe(path: &std::path::Path, lines: usize, json: bool, out: &mut dyn std::io::Write, tick: &mut dyn FnMut() -> Option<String>, rounds: Option<usize>) -> Result<()> {
+    let show = |out: &mut dyn std::io::Write, line: &str| -> std::io::Result<()> {
+        if json {
+            let v = match kiln_manage::logs::parse_line(line) {
+                Some(l) => json!({"t": l.time, "level": l.level.to_string(), "tag": l.source, "text": l.message}),
+                None => json!({"t": null, "level": null, "tag": null, "text": line}),
+            };
+            writeln!(out, "{v}")
+        } else {
+            writeln!(out, "{line}")
+        }
+    };
+    if let Some(t) = tick() {
+        writeln!(out, "{t}")?;
+    }
+    let text = std::fs::read(path).map(|b| String::from_utf8_lossy(&b).replace('\r', "")).unwrap_or_default();
+    let all: Vec<&str> = text.lines().collect();
+    for l in &all[all.len().saturating_sub(lines)..] {
+        show(out, l)?;
+    }
+    out.flush()?;
+    let mut f = kiln_manage::logs::Follower::open(path)?;
+    let mut n = 0;
+    while rounds.is_none_or(|r| n < r) {
+        for l in f.poll()? {
+            show(out, &l)?;
+        }
+        if let Some(t) = tick() {
+            writeln!(out, "{t}")?;
+        }
+        out.flush()?;
+        n += 1;
+        if rounds.is_none_or(|r| n < r) {
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    }
+    Ok(())
+}

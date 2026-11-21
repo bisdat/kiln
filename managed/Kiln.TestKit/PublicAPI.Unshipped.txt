@@ -1,4 +1,79 @@
 #nullable enable
+Kiln.TestKit.FakeReplComponent
+Kiln.TestKit.FakeReplComponent.<Clone>$() -> Kiln.TestKit.FakeReplComponent!
+Kiln.TestKit.FakeReplComponent.ClientChannel.get -> bool
+Kiln.TestKit.FakeReplComponent.ClientChannel.init -> void
+Kiln.TestKit.FakeReplComponent.CustomCodec.get -> bool
+Kiln.TestKit.FakeReplComponent.CustomCodec.init -> void
+Kiln.TestKit.FakeReplComponent.Deconstruct(out string! Name, out ushort Index, out ushort Size, out bool Replicated, out bool Versioned, out bool CustomCodec, out bool ClientChannel, out bool PredictionChannel) -> void
+Kiln.TestKit.FakeReplComponent.Equals(Kiln.TestKit.FakeReplComponent? other) -> bool
+Kiln.TestKit.FakeReplComponent.FakeReplComponent(string! Name, ushort Index, ushort Size, bool Replicated = true, bool Versioned = false, bool CustomCodec = false, bool ClientChannel = true, bool PredictionChannel = false) -> void
+Kiln.TestKit.FakeReplComponent.Index.get -> ushort
+Kiln.TestKit.FakeReplComponent.Index.init -> void
+Kiln.TestKit.FakeReplComponent.Name.get -> string!
+Kiln.TestKit.FakeReplComponent.Name.init -> void
+Kiln.TestKit.FakeReplComponent.PredictionChannel.get -> bool
+Kiln.TestKit.FakeReplComponent.PredictionChannel.init -> void
+Kiln.TestKit.FakeReplComponent.Replicated.get -> bool
+Kiln.TestKit.FakeReplComponent.Replicated.init -> void
+Kiln.TestKit.FakeReplComponent.Size.get -> ushort
+Kiln.TestKit.FakeReplComponent.Size.init -> void
+Kiln.TestKit.FakeReplComponent.Versioned.get -> bool
+Kiln.TestKit.FakeReplComponent.Versioned.init -> void
+Kiln.TestKit.FakeReplKind
+Kiln.TestKit.FakeReplKind.Create = 2 -> Kiln.TestKit.FakeReplKind
+Kiln.TestKit.FakeReplKind.Update = 3 -> Kiln.TestKit.FakeReplKind
+Kiln.TestKit.FakeReplMessage
+Kiln.TestKit.FakeReplMessage.<Clone>$() -> Kiln.TestKit.FakeReplMessage!
+Kiln.TestKit.FakeReplMessage.BaselineTick.get -> uint
+Kiln.TestKit.FakeReplMessage.BaselineTick.init -> void
+Kiln.TestKit.FakeReplMessage.Channel.get -> byte
+Kiln.TestKit.FakeReplMessage.Channel.init -> void
+Kiln.TestKit.FakeReplMessage.Components.get -> System.Collections.Generic.IReadOnlyList<(string! Component, byte[]! Bytes)>!
+Kiln.TestKit.FakeReplMessage.Components.init -> void
+Kiln.TestKit.FakeReplMessage.Deconstruct(out Kiln.EntityId Entity, out Kiln.TestKit.FakeReplKind Kind, out uint Tick) -> void
+Kiln.TestKit.FakeReplMessage.Entity.get -> Kiln.EntityId
+Kiln.TestKit.FakeReplMessage.Entity.init -> void
+Kiln.TestKit.FakeReplMessage.Equals(Kiln.TestKit.FakeReplMessage? other) -> bool
+Kiln.TestKit.FakeReplMessage.FakeReplMessage(Kiln.EntityId Entity, Kiln.TestKit.FakeReplKind Kind, uint Tick) -> void
+Kiln.TestKit.FakeReplMessage.Gap.get -> bool
+Kiln.TestKit.FakeReplMessage.Gap.init -> void
+Kiln.TestKit.FakeReplMessage.Kind.get -> Kiln.TestKit.FakeReplKind
+Kiln.TestKit.FakeReplMessage.Kind.init -> void
+Kiln.TestKit.FakeReplMessage.PayloadBytes.get -> uint
+Kiln.TestKit.FakeReplMessage.PayloadBytes.init -> void
+Kiln.TestKit.FakeReplMessage.Seq.get -> uint
+Kiln.TestKit.FakeReplMessage.Seq.init -> void
+Kiln.TestKit.FakeReplMessage.Tick.get -> uint
+Kiln.TestKit.FakeReplMessage.Tick.init -> void
+Kiln.TestKit.HarnessRepl
+Kiln.TestKit.HarnessRepl.AddComponent(Kiln.TestKit.FakeReplComponent! component) -> void
+Kiln.TestKit.HarnessRepl.Connect(uint machine, uint peer) -> void
+Kiln.TestKit.HarnessRepl.ConnectFake(uint machine, uint? labPeer = null) -> uint
+Kiln.TestKit.HarnessRepl.ConnectLocal(uint peer) -> void
+Kiln.TestKit.HarnessRepl.Count(uint peer, byte channel = 4, long unchanged = 0, long tooBig = 0, long refused = 0, long acks = 0, long resets = 0) -> void
+Kiln.TestKit.HarnessRepl.Counting.get -> bool
+Kiln.TestKit.HarnessRepl.Destroy(uint peer, Kiln.EntityId entity, uint tick, uint seq = 0, byte channel = 4) -> void
+Kiln.TestKit.HarnessRepl.Drop(uint peer, byte channel = 4, int records = 1) -> void
+Kiln.TestKit.HarnessRepl.Leave(uint peer) -> void
+Kiln.TestKit.HarnessRepl.Receive(Kiln.TestKit.FakeReplMessage! message) -> void
+Kiln.TestKit.HarnessRepl.ReceiveDestroy(Kiln.EntityId entity, uint tick) -> void
+Kiln.TestKit.HarnessRepl.ReuseId(Kiln.EntityId entity) -> void
+Kiln.TestKit.HarnessRepl.Send(uint peer, Kiln.TestKit.FakeReplMessage! message) -> void
+Kiln.TestKit.HarnessRepl.StatsCalls.get -> System.Collections.Generic.IReadOnlyList<(string! Owner, bool On)>!
+Kiln.TestKit.HarnessRepl.StopWorld() -> void
+Kiln.TestKit.HarnessRepl.WatchSlots.get -> int
+Kiln.TestKit.KilnHarness.Repl.get -> Kiln.TestKit.HarnessRepl!
+override Kiln.TestKit.FakeReplComponent.Equals(object? obj) -> bool
+override Kiln.TestKit.FakeReplComponent.GetHashCode() -> int
+override Kiln.TestKit.FakeReplComponent.ToString() -> string!
+override Kiln.TestKit.FakeReplMessage.Equals(object? obj) -> bool
+override Kiln.TestKit.FakeReplMessage.GetHashCode() -> int
+override Kiln.TestKit.FakeReplMessage.ToString() -> string!
+static Kiln.TestKit.FakeReplComponent.operator !=(Kiln.TestKit.FakeReplComponent? left, Kiln.TestKit.FakeReplComponent? right) -> bool
+static Kiln.TestKit.FakeReplComponent.operator ==(Kiln.TestKit.FakeReplComponent? left, Kiln.TestKit.FakeReplComponent? right) -> bool
+static Kiln.TestKit.FakeReplMessage.operator !=(Kiln.TestKit.FakeReplMessage? left, Kiln.TestKit.FakeReplMessage? right) -> bool
+static Kiln.TestKit.FakeReplMessage.operator ==(Kiln.TestKit.FakeReplMessage? left, Kiln.TestKit.FakeReplMessage? right) -> bool
 const Kiln.TestKit.FakePhysicsCookHost.PendingReason = "game test pending: 16e-cc16e" -> string!
 Kiln.TestKit.FakePhysicsCookHost
 Kiln.TestKit.FakePhysicsCookHost.Cook(string! model, System.Collections.Generic.IEnumerable<string!>! needs, System.Collections.Generic.IReadOnlyDictionary<string!, byte[]!>! outputs, string? refusal = null) -> Kiln.TestKit.PhysicsCookResult!
@@ -26,3 +101,18 @@ static Kiln.TestKit.FakePhysicsCookHost.ContentHashOf(byte[]! bytes) -> string!
 static Kiln.TestKit.FakePhysicsCookHost.Features.get -> System.Collections.Generic.IReadOnlyList<string!>!
 static Kiln.TestKit.PhysicsCookResult.operator !=(Kiln.TestKit.PhysicsCookResult? left, Kiln.TestKit.PhysicsCookResult? right) -> bool
 static Kiln.TestKit.PhysicsCookResult.operator ==(Kiln.TestKit.PhysicsCookResult? left, Kiln.TestKit.PhysicsCookResult? right) -> bool
+Kiln.TestKit.HarnessModValues
+Kiln.TestKit.HarnessModValues.Join(Kiln.CharacterKey character) -> void
+Kiln.TestKit.HarnessModValues.Leave(Kiln.CharacterKey character) -> void
+Kiln.TestKit.HarnessModValues.Record(Kiln.CharacterKey character, string! mod, string! partition = "world") -> string?
+Kiln.TestKit.HarnessModValues.World.get -> System.Guid
+Kiln.TestKit.HarnessModValues.World.set -> void
+Kiln.TestKit.KilnHarness.ModValues.get -> Kiln.TestKit.HarnessModValues!
+static Kiln.TestKit.HarnessModValues.Character(int n) -> Kiln.CharacterKey
+Kiln.TestKit.HarnessRoutines
+Kiln.TestKit.HarnessRoutines.Decide(uint npcId) -> string?
+Kiln.TestKit.HarnessRoutines.Finish(uint npcId, bool ok, string? reason = null) -> void
+Kiln.TestKit.HarnessRoutines.Queued.get -> int
+Kiln.TestKit.HarnessRoutines.SetClock(int hour, int minute = 0) -> void
+Kiln.TestKit.HarnessRoutines.SetSleepAllowed(uint npcId, bool allowed) -> void
+Kiln.TestKit.KilnHarness.Routines.get -> Kiln.TestKit.HarnessRoutines!

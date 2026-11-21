@@ -523,10 +523,12 @@ internal static unsafe class UiEngine
                 var text = h.Text;
                 if (h.Provider is { } p)
                 {
-                    try { text = p() ?? ""; }
-                    catch (Exception e)
+                    // as the line's mod, like a window's draw: what it reads is read as that mod (05b review)
+                    var got = new string?[1];
+                    if (UiModCalls.Invoke(h.Owner, static a => a.Got[0] = a.P(), (P: p, Got: got), $"HUD line '{h.Id}'")) text = got[0] ?? "";
+                    else
                     {
-                        text = "!" + e.GetType().Name;
+                        text = "!error";
                         if (Fault(h, h.Owner, $"HUD line '{h.Id}'")) h.Provider = null;
                     }
                 }
@@ -851,6 +853,36 @@ internal static unsafe class UiEngine
                 ui.Text(ch.Required
                     ? KilnText.T("network.channels.required", ("name", ch.Name), ("version", ch.Version), ("in", ch.MessagesIn), ("out", ch.MessagesOut))
                     : KilnText.T("network.channels.line", ("name", ch.Name), ("version", ch.Version), ("in", ch.MessagesIn), ("out", ch.MessagesOut)));
+        ReplicationSection(ui);
+    }
+
+    /// <summary>The network inspector (Kiln.Replication): what this process's game sends each peer, per channel. Off
+    /// until switched on here (counting costs a little on the network jobs); a dedicated server shows the same with
+    /// the repl commands.</summary>
+    private static void ReplicationSection(UiDraw ui)
+    {
+        try
+        {
+            ReplicationLines(ui);
+        }
+        catch (Exception e) when (e is FileNotFoundException or FileLoadException or TypeLoadException or MissingMethodException)
+        {
+            // Kiln.Replication absent: no section
+        }
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void ReplicationLines(UiDraw ui)
+    {
+        if (!ReplicationView.Available || !ui.CollapsingHeader(KilnText.T("network.repl.caption") + "###kiln.net.repl")) return;
+        var on = ReplicationView.CountingOn;
+        if (ui.Checkbox(KilnText.T("network.repl.count") + "###kiln.net.repl.on", ref on)) ReplicationView.SetCounting(on);
+        if (!on)
+        {
+            ui.TextWrapped(KilnText.T("network.repl.off"));
+            return;
+        }
+        foreach (var line in ReplicationView.Lines) ui.TextWrapped(line);
     }
 
     /// <summary>Kiln's server-to-client sync, client side (docs/kiln/sync.md).</summary>

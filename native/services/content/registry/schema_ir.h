@@ -4,8 +4,9 @@
 // "inputs"), a leaf of a list's elements ("inputs[].count"); then link_elements() joins the leaves to their list (element
 // Struct). Kinds map as: int -> Int, float and time (seconds) -> Float, bool -> Bool, enum -> Enum, flags -> Flags,
 // ref -> Id (its registry in FieldSpec::ref, so references are checked), list -> List (its element's kind; Struct for
-// elements with fields). The schema's optional refs, indexed lists of fixed length, each registry's version and raw flag
-// and the schema format are carried over.
+// elements with fields). Each field's ops (none, set, number, list, indexed), the schema's optional refs, the lengths of
+// indexed lists (fixed, or another field's value plus an offset), each registry's version and raw flag and the schema
+// format are carried over.
 #pragma once
 #include <string>
 #include <vector>
@@ -43,6 +44,17 @@ inline FieldType type_of(gen::Kind k) {
     return FieldType::Int;
 }
 
+inline FieldOps ops_of(gen::Ops o) {
+    switch (o) {
+        case gen::Ops::None: return FieldOps::None;
+        case gen::Ops::Set: return FieldOps::Set;
+        case gen::Ops::Number: return FieldOps::Number;
+        case gen::Ops::List: return FieldOps::List;
+        case gen::Ops::Indexed: return FieldOps::Indexed;
+    }
+    return FieldOps::Any;
+}
+
 inline Applies applies_of(gen::Applies a) {
     return a == gen::Applies::Now ? Applies::Now : a == gen::Applies::WorldLoad ? Applies::WorldLoad : Applies::Restart;
 }
@@ -74,8 +86,10 @@ inline Schema generated_schema() {
             x.enum_values = split_names(f.values);
             x.ref = f.ref;
             x.optional = f.optional;
-            x.indexed = f.ops == gen::Ops::Indexed;
+            x.ops = ops_of(f.ops);  // the schema's ops: which edits the field takes (ir.h ops_allow)
             x.fixed_length = f.fixed_length;
+            x.length_field = f.length_field;
+            x.length_offset = f.length_offset;
             if (f.kind == gen::Kind::Flags) x.max_items = x.enum_values.size();
             reg.fields[x.name] = std::move(x);
         }

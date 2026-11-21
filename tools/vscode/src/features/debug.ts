@@ -1,22 +1,26 @@
 // SPDX-License-Identifier: MIT
-// Debugging mods in a running server: the "kiln" attach configuration. The .NET runtime runs inside Wine, so the
-// debugger (netcoredbg.exe, bundled in the .vsix) runs in the server's prefix and talks DAP. Adapter: `kiln debug --server <dir>
-// --dap` when the CLI has it, else the same job done by dist/dapProxy.js (src/dapProxy.ts). Both keep the server alive
-// across every way a session can end. Servers inside a Steam library are refused here, before anything starts.
-import * as fs from "node:fs";
+// Debugging mods: the "kiln" attach configuration, for a test server (`server`) or a game client (`client`, only with
+// `allowClientPause: true`). The target always comes from the shared resolver, `kiln debug … --json`, which proves it by
+// its Windows identity and refuses with a stable code; the adapter is `kiln debug … --dap` (consent, the whole identity
+// again before attaching, the pause watchdog, session states as `kiln/debugState` events). The built-in proxy
+// (dist/dapProxy.js) is only a transport for a target the CLI resolved, for a CLI without `--dap`; it never picks one.
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { sendControl } from "../core/control";
 import { staleContextsWarning } from "../core/dap";
-import { DebugRefused, debugRefusal, findNetcoredbg, netcoredbgCandidates, proxySpec, resolveTarget } from "../core/debugTarget";
-import { discoverLabs, expandHome, ServerDef, serverPids } from "../core/servers";
+import {
+  activeDebugTargets, adapterKind, CliResolution, DebugRefused, debugArgs, describeDebugState, describeResolution, findNetcoredbg, KilnDebugConfig,
+  netcoredbgCandidates, netcoredbgEnv, proxySpecFromCli, refusalMessage, resolveWithCli, selectTarget,
+} from "../core/debugTarget";
+import { discoverLabs, expandHome, ServerDef } from "../core/servers";
 import { Ctx } from "../ctx";
 import { Servers } from "./servers";
 
-const DOC = ["docs", "kiln", "modding", "vscode.md"];
+const DOC = ["docs", "kiln", "modding", "debugging.md"];
+/** The key a session is prepared and tracked under (`server:<dir>` or `client:<install>`). */
+const KEY = "kilnTarget";
 
 interface Prepared {
-  def: ServerDef;
   descriptor: vscode.DebugAdapterDescriptor;
 }
 
@@ -24,8 +28,6 @@ export class DebugFeature implements vscode.DebugConfigurationProvider, vscode.D
   private prepared = new Map<string, Prepared>();
   private active = new Map<string, vscode.DebugSession>();
   private disposables: vscode.Disposable[] = [];
-  /** The Linux pids of a server (the integration tests answer this with a stand-in process). */
-  hostPids: (def: ServerDef) => number[] = serverPids;
 
   constructor(
     private readonly ctx: Ctx,
@@ -35,10 +37,21 @@ export class DebugFeature implements vscode.DebugConfigurationProvider, vscode.D
       vscode.debug.registerDebugConfigurationProvider("kiln", this),
       vscode.debug.registerDebugAdapterDescriptorFactory("kiln", this),
       vscode.debug.onDidStartDebugSession((s) => {
-        if (s.type === "kiln" && s.configuration.server) this.active.set(s.configuration.server, s);
+        if (s.type !== "kiln" || !s.configuration[KEY]) return;
+        this.active.set(s.configuration[KEY], s);
+        if (s.configuration.server) activeDebugTargets.add(path.resolve(s.configuration.server));
       }),
       vscode.debug.onDidTerminateDebugSession((s) => {
-        if (s.type === "kiln" && this.active.get(s.configuration.server) === s) this.active.delete(s.configuration.server);
+        if (s.type !== "kiln" || this.active.get(s.configuration[KEY]) !== s) return;
+        this.active.delete(s.configuration[KEY]);
+        if (s.configuration.server) activeDebugTargets.delete(path.resolve(s.configuration.server));
+      }),
+      vscode.debug.onDidReceiveDebugSessionCustomEvent((e) => {
+        if (e.session.type !== "kiln" || e.event !== "kiln/debugState") return;
+        const d = describeDebugState(e.body);
+        this.ctx.out.info(d.text);
+        if (d.notify === "warn") void vscode.window.showWarningMessage(`Kiln ${d.text}`);
+        else if (d.notify === "info") void vscode.window.setStatusBarMessage(`Kiln ${d.text}`, 5000);
       }),
       vscode.commands.registerCommand("kiln.server.debug", (s?: ServerDef) => this.attach(s)),
     );
@@ -57,27 +70,39 @@ export class DebugFeature implements vscode.DebugConfigurationProvider, vscode.D
     return { ...config, type: config.type || "kiln", request: config.request || "attach", name: config.name || "Kiln: attach to server" };
   }
 
-  /** The checks, on the final value of `server`. Returning undefined aborts the session: nothing has started. */
+  /** The checks, on the final configuration. Returning undefined aborts the session: nothing has started. */
   async resolveDebugConfigurationWithSubstitutedVariables(_folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration): Promise<vscode.DebugConfiguration | undefined> {
     try {
-      const def = await this.server(config.server);
-      if (!def) return undefined;
-      if (this.active.has(def.dir)) throw new DebugRefused("refused", `a debugger is already attached to ${def.name}.`);
-      this.prepared.set(def.dir, { def, descriptor: await this.descriptor(def) });
-      return { ...config, server: def.dir };
+      const c = config as KilnDebugConfig;
+      const sel = selectTarget(c); // consent and the one-target rule: before any process runs
+      let key: string;
+      let args: string[];
+      let def: ServerDef | undefined;
+      if (sel.kind === "client") {
+        key = `client:${sel.client}`;
+        args = debugArgs({ kind: "client", client: sel.client }, c);
+      } else {
+        def = await this.server(sel.server);
+        if (!def) return undefined;
+        key = `server:${def.dir}`;
+        args = debugArgs({ kind: "server", dir: def.dir }, c);
+      }
+      if (this.active.has(key)) throw new DebugRefused("refused", `a debugger is already attached to ${def?.name ?? (c.client ?? "")}.`);
+      this.prepared.set(key, { descriptor: await this.descriptor(sel.kind, args, def) });
+      return { ...config, ...(def ? { server: def.dir } : {}), [KEY]: key };
     } catch (e) {
       if (!(e instanceof DebugRefused)) throw e;
-      this.ctx.out.warn(`debug: ${e.message}`);
+      this.ctx.out.warn(`debug: ${e.code}${e.reason ? ` (${e.reason})` : ""}: ${e.message}`);
       void this.explain(e);
       return undefined;
     }
   }
 
   async createDebugAdapterDescriptor(session: vscode.DebugSession): Promise<vscode.DebugAdapterDescriptor | undefined> {
-    const dir: string = session.configuration.server;
-    const p = this.prepared.get(dir);
-    this.prepared.delete(dir);
-    if (!p) throw new Error(`Kiln: session for an unprepared server (${dir})`);
+    const key: string = session.configuration[KEY];
+    const p = this.prepared.get(key);
+    this.prepared.delete(key);
+    if (!p) throw new Error(`Kiln: session for an unprepared target (${key})`);
     return p.descriptor;
   }
 
@@ -106,38 +131,40 @@ export class DebugFeature implements vscode.DebugConfigurationProvider, vscode.D
       all.find((s) => path.resolve(s.dir) === dir) ??
       discoverLabs().find((s) => s.name === v || path.resolve(s.dir) === dir);
     if (def) return def;
-    if (fs.existsSync(path.join(dir, "enshrouded_server.exe"))) return { name: path.basename(dir), dir, kind: "folder", source: "settings" };
-    throw new DebugRefused("not_running", `no test server "${v}" (a name from the Test Servers view, a lab name, or a server folder).`);
+    // any other folder: `kiln debug` decides whether it knows that server (a lab or a server instance) or refuses
+    return { name: path.basename(dir), dir, kind: "folder", source: "settings" };
   }
 
-  private async descriptor(def: ServerDef): Promise<vscode.DebugAdapterDescriptor> {
-    const why = debugRefusal(def);
-    if (why) throw new DebugRefused("refused", `will not attach a debugger to ${def.name}: ${why}`);
-    const dbg = findNetcoredbg(this.ctx.setting("debug.netcoredbg", ""), process.env, this.bundledNetcoredbg());
-    const wine = this.ctx.setting("debug.wine", "");
-    // `kiln debug` knows labs and server instances, and always uses the wine of the running server; a bare folder or an
-    // explicit kiln.debug.wine is the built-in proxy's job
-    if (def.kind !== "folder" && !wine && (await this.ctx.hasCli())) {
-      const help = await this.ctx.exec(this.ctx.cliPath(), ["debug", "--help"], { timeoutMs: 5000 });
-      if (!help.error && help.code === 0) {
-        const env = { KILN_NETCOREDBG: dbg }; // the CLI alone has no bundled copy to fall back on
-        await this.preflight(def, env);
-        this.ctx.out.info(`debug: kiln debug --server ${def.dir} --dap`);
-        return new vscode.DebugAdapterExecutable(this.ctx.cliPath(), ["debug", "--server", def.dir, "--dap"], { env });
-      }
+  /**
+   * The target from `kiln debug … --json` (refusals arrive here, before any adapter starts, with the CLI's code), then
+   * the adapter: `kiln debug … --dap`, or for a CLI without `--dap` the built-in proxy around the CLI's own command.
+   */
+  private async descriptor(kind: "server" | "client", args: string[], def: ServerDef | undefined): Promise<vscode.DebugAdapterDescriptor> {
+    if (!(await this.ctx.hasCli())) {
+      throw new DebugRefused("tool_missing", `debugging needs the kiln CLI (kiln.cli.path is ${this.ctx.cliPath()}): it proves which process the debugger attaches to.`);
     }
-    const target = await resolveTarget(def, { wine, hostPids: this.hostPids(def), log: (s) => this.ctx.out.warn(`debug: ${s}`) });
-    await this.collect(def);
-    this.ctx.out.info(`debug: ${dbg} in ${target.prefix ?? "(host)"} under ${target.wine ?? "(no wine)"}, server pid ${target.pid}`);
+    const setting = this.ctx.setting("debug.netcoredbg", "");
+    const dbg = findNetcoredbg(setting, process.env, this.bundledNetcoredbg());
+    // the CLI alone has no bundled copy to fall back on; it checks this one against the pinned release
+    const env = netcoredbgEnv(dbg, setting);
+    const cli = this.ctx.cliPath();
+    const r: CliResolution = await resolveWithCli(cli, args, env);
+    this.ctx.out.info(`debug: ${describeResolution(r)}`);
+    const help = await this.ctx.exec(cli, ["debug", "--help"], { timeoutMs: 5000 });
+    if (adapterKind(kind, !help.error && help.code === 0 && help.stdout.includes("--dap")) === "cli") {
+      this.ctx.out.info(`debug: ${cli} ${[...args, "--dap"].join(" ")}`);
+      return new vscode.DebugAdapterExecutable(cli, [...args, "--dap"], { env });
+    }
+    if (def) await this.collect(def);
     // "node": VS Code forks its own Node for this, no node on PATH needed
     return new vscode.DebugAdapterExecutable("node", [this.ctx.asset("dist", "dapProxy.js")], {
-      env: { KILN_DAP_SPEC: JSON.stringify(proxySpec(target, dbg)) },
+      env: { KILN_DAP_SPEC: JSON.stringify(proxySpecFromCli(r)) },
     });
   }
 
   /**
    * A reload leaves the old mod's module loaded until the next collection, and netcoredbg can bind a breakpoint to that
-   * dead copy (1 of 6 attaches stopped without this, 6 of 6 with it). `kiln debug --dap` does the same.
+   * dead copy (1 of 6 attaches stopped without this, 6 of 6 with it). `kiln debug --dap` does the same itself.
    */
   private async collect(def: ServerDef): Promise<void> {
     try {
@@ -149,28 +176,8 @@ export class DebugFeature implements vscode.DebugConfigurationProvider, vscode.D
     }
   }
 
-  /**
-   * `kiln debug --json` says whether the adapter could attach, and nothing has run in a prefix if it could not. Asking
-   * first gives the same notification as the built-in path. Without this, `--dap` still answers every request with the
-   * reason, but VS Code shows a failed initialize as a modal dialog.
-   */
-  private async preflight(def: ServerDef, env: Record<string, string>): Promise<void> {
-    const r = await this.ctx.exec(this.ctx.cliPath(), ["debug", "--server", def.dir, "--json"], { timeoutMs: 40_000, env: { ...process.env, ...env } });
-    let report: { ok?: boolean; error?: { code?: string; message?: string } } | undefined;
-    try {
-      report = JSON.parse(r.stdout);
-    } catch {
-      return; // not the expected answer: the adapter reports for itself
-    }
-    if (report?.ok === false) {
-      const code = report.error?.code;
-      const known = code === "refused" || code === "not_running" || code === "tool_missing" || code === "unsupported";
-      throw new DebugRefused(known ? code : "refused", report.error?.message ?? `kiln debug refused ${def.name}.`);
-    }
-  }
-
   private async explain(e: DebugRefused): Promise<void> {
-    const act = await vscode.window.showErrorMessage(`Kiln: ${e.message}`, ...(e.code === "tool_missing" ? ["Open docs"] : []));
+    const act = await vscode.window.showErrorMessage(`Kiln: ${refusalMessage(e)}`, ...(e.code === "tool_missing" || e.code === "pause_consent_required" ? ["Open docs"] : []));
     const root = this.ctx.kilnRoot();
     if (act && root) void vscode.window.showTextDocument(vscode.Uri.file(path.join(root, ...DOC)));
     else if (act) this.ctx.out.info(`netcoredbg goes to: ${netcoredbgCandidates(this.ctx.setting("debug.netcoredbg", ""), process.env, this.bundledNetcoredbg()).join(", ")}`);

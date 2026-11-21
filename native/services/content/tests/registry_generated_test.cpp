@@ -117,8 +117,8 @@ int main() {
     CHECK(s.registry("items")->field("perks")->ref == "perks" && s.registry("items")->field("perks")->element == FieldType::Id);
     CHECK(s.registry("loot")->field("rarities")->type == FieldType::Flags && s.registry("loot")->field("rarities")->enum_values.size() == 5);
     const FieldSpec* xp = s.registry("balance")->field("xpPerLevel");
-    CHECK(xp && xp->type == FieldType::List && xp->indexed && xp->fixed_length == 5);
-    CHECK(s.registry("balance")->field("altarsPerFlameLevel")->indexed && s.registry("balance")->field("flameLevelMax")->read_only);
+    CHECK(xp && xp->type == FieldType::List && xp->ops == FieldOps::Indexed && xp->fixed_length == 5);
+    CHECK(s.registry("balance")->field("altarsPerFlameLevel")->ops == FieldOps::Indexed && s.registry("balance")->field("flameLevelMax")->read_only);
     CHECK(s.registry("drops")->field("entries")->element == FieldType::Struct && s.registry("drops")->field("entries[0].count.min"));
 
     // ---- what the generated schema refuses
@@ -187,6 +187,70 @@ int main() {
         CHECK(in0.leaf("item") && in0.leaf("item")->kind == Value::None);   // cleared
         CHECK(in0.leaf("category") && in0.leaf("category")->t == "game:logs");
         CHECK(in0.leaf("count") && in0.leaf("count")->i == 2);
+    }
+
+    // ---- the second review's cases over the generated schema (dev31/registry-b round 2): ops, fixed lengths, read-only
+    // leaves given on a new element, references enforced through the generated "ref"s, the game-entry rule
+    {
+        BaseModel bb = base();
+        BaseModel::Entry table;
+        table.id = "game:table1";
+        Value w;
+        w.kind = Value::Struct, w.keys = {"chance", "item"}, w.list = {Value::number(0.5), Value::text("game:wood")};
+        Value f2 = w;
+        f2.list = {Value::number(0.5), Value::text("game:flint")};
+        table.fields["entries"] = Value::of_list({w, f2});
+        bb.registries["drops"] = {table};
+        std::vector<Refusal> rf;
+        const Batch d = batch(s, "dropper", "alter", R"([
+            {"registry": "drops", "select": {"id": "game:table1"}, "field": "entries", "list": {"append": [{"item": "game:plank", "chance": 0.25}]}},
+            {"registry": "drops", "select": {"id": "game:table1"}, "field": "entries[0].item", "op": "game:plank"},
+            {"registry": "drops", "select": {"id": "game:table1"}, "field": "entries[1].chance", "op": {"mul": 2}}
+        ])", &rf);
+        for (const Refusal& x : rf) std::printf("  refused #%u: %s\n", x.n, x.reason.c_str());
+        CHECK(d.edits.size() == 2 && rf.size() == 1 && refused_with(rf, 1, "read-only"));  // the item is given on append, never edited after
+        ModInput dm;
+        dm.id = "dropper", dm.batches = {d};
+        ModInput rm;
+        rm.id = "remover";
+        std::vector<Refusal> rr;
+        rm.batches = {batch(s, "remover", "alter", R"([{"registry": "items", "entry": "remove", "select": {"id": "game:wood"}}])", &rr)};
+        const Result dr = compose(s, bb, {}, {dm, rm});
+        const FieldOutcome* en = field(dr, "drops", "game:table1", "entries");
+        CHECK(en && en->result.list.size() == 2 && en->result.list[0].leaf("item")->t == "game:flint" && en->result.list[1].leaf("item")->t == "game:plank");
+        CHECK(en && en->result.list[0].leaf("chance")->d == 1.0);
+        CHECK(!has_ref(dr, dr.removed, "drops", "game:table1") && has_ref(dr, dr.removed, "recipes", "game:plank_recipe"));  // drops never removed: the element goes
+        // a mod's recipe whose output item was refused before the stage is refused, with the chain
+        Refusal pre;
+        pre.mod = "newstuff", pre.stage = Stage::Add, pre.entry = "items|newstuff:lantern", pre.reason = "Unmapped: items.power is not mapped for game build 1287369 yet";
+        ModInput nm;
+        nm.id = "newstuff";
+        std::vector<Refusal> nr;
+        nm.batches = {batch(s, "newstuff", "add", R"([{"registry": "recipes", "entry": "add", "id": "newstuff:lantern_recipe",
+                                                         "fields": {"inputs": [{"item": "game:wood", "count": 1}], "outputs": [{"item": "newstuff:lantern", "count": 1}]}}])", &nr)};
+        nm.refused = {pre};
+        const Result lr = compose(s, base(), {}, {nm});
+        bool chained = false;
+        for (const Refusal& x : lr.refused) chained = chained || x.reason.find("recipes newstuff:lantern_recipe refused: outputs[0].item newstuff:lantern refused: Unmapped") != std::string::npos;
+        CHECK(nr.empty() && chained && !has_ref(lr, lr.added, "recipes", "newstuff:lantern_recipe"));
+        // code edits are held to the generated ops too: a list op on a fixed-length list
+        ModInput code;
+        code.id = "coder";
+        code.code = [](Stage st, const View&, Batch* out) {
+            if (st != Stage::Alter) return;
+            Edit e;
+            e.registry = "balance", e.select.id = "game:balance", e.field = "xpPerLevel", e.list = ListOp::Clear;
+            out->edits.push_back(e);
+        };
+        const Result cr = compose(s, base(), {}, {code});
+        CHECK(cr.refused.size() == 1 && cr.refused[0].reason.find("fixed length") != std::string::npos && !field(cr, "balance", "game:balance", "xpPerLevel"));
+        // every list stays within its generated maxItems: perks hold at most 5
+        std::vector<Refusal> pr;
+        ModInput pm;
+        pm.id = "perky";
+        pm.batches = {batch(s, "perky", "alter", R"([{"registry": "items", "select": {"id": "game:sword"}, "field": "perks", "list": {"append": ["game:p1", "game:p2", "game:p3", "game:p4", "game:p5", "game:p6"]}}])", &pr)};
+        const Result pres = compose(s, base(), {}, {pm});
+        CHECK(pr.size() + pres.refused.size() == 1 && !field(pres, "items", "game:sword", "perks"));
     }
 
     // ---- registry.json over the generated schema

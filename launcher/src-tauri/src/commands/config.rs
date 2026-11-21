@@ -327,3 +327,36 @@ mod kiln_graphics_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[cfg(test)]
+mod developer_debugging_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// (dev.31) Settings, the kiln.json card: "Developer debugging" writes kiln.json "developer_debugging" (the core reads it
+    /// at the start: native/core/src/config.cpp read_debugging), off by default, a bool and nothing else.
+    #[test]
+    fn the_developer_debugging_switch_is_set_and_checked() {
+        let schema = kiln_snapshot();
+        let e = schema.entries.iter().find(|e| e.path == "developer_debugging").expect("developer_debugging in the snapshot");
+        assert_eq!(e.default, json!(false));
+        assert!(e.requires_restart, "the core reads it at the start");
+        let dir = std::env::temp_dir().join(format!("kiln-launcher-debugging-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("kiln.json");
+        std::fs::write(&path, "{\n  // keep me\n  \"policy\": \"verified-only\"\n}\n").unwrap();
+        let doc = kiln_set(&path, "developer_debugging", Some(&json!(true))).unwrap();
+        assert_eq!(doc.values["developer_debugging"], true);
+        assert!(doc.errors.is_empty() && doc.text.contains("// keep me"), "{:?}", doc.errors);
+        // the schema's text forms ("on", "true") are written as a JSON bool, which is all the core reads
+        assert_eq!(kiln_set(&path, "developer_debugging", Some(&json!("on"))).unwrap().values["developer_debugging"], json!(true));
+        for bad in [json!("maybe"), json!(1), json!(null), json!({"a": 1})] {
+            assert!(kiln_set(&path, "developer_debugging", Some(&bad)).is_err(), "{bad}");
+        }
+        assert_eq!(kiln_setting_line("g", "developer_debugging", Some(&json!(true))), "kiln.json of g: developer_debugging = true");
+        let doc = kiln_set(&path, "developer_debugging", None).unwrap();
+        assert!(doc.values.get("developer_debugging").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

@@ -14,6 +14,7 @@
 #           rows keep the routing rule (the schemas' "applies") and give reasons in Kiln words. Routing only in CI: the
 #           committed type dumps hold none of the registries' resource types, so no row resolves against them here; the
 #           full proof is regmap_check.py --exe against a copy of each game exe (regmap/README.md)
+#   pytests the Python rule tests of tools/replinspect (python3 -m unittest)
 #   build   every managed project with a PublicAPI.Shipped.txt (found by that file, so gate 1, the PublicApiAnalyzers
 #           record, runs), Kiln.Host and the unit test projects: one Release build of one generated solution
 #           ($KILN_OUT/check/check.slnx), so each project is built once
@@ -110,6 +111,16 @@ else
   result registry FAILED $((SECONDS - t)) "the registry schemas or the files made from them:"
   head -40 "$work/registry.log"
   failed+=(registry)
+fi
+
+# pytests
+t=$SECONDS
+if python3 -m unittest discover -s "$repo/tools/replinspect" -p 'test_*.py' >"$work/pytests.log" 2>&1; then
+  result pytests OK $((SECONDS - t)) "tools/replinspect: $(grep -oE '^Ran [0-9]+ tests' "$work/pytests.log" | sed 's/^Ran //')"
+else
+  result pytests FAILED $((SECONDS - t)) "tools/replinspect rule tests:"
+  grep -E -A8 '^(FAIL|ERROR):' "$work/pytests.log" | head -40
+  failed+=(pytests)
 fi
 
 # build

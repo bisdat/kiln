@@ -1,0 +1,388 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kiln-mod-values.schema.json",
+  "title": "Kiln mod values (mod-values/*.json), format 1",
+  "description": "A mod's own character values: counters, currencies and experience values with levels (dossier chapter 05b, section 4.1). Kiln.ModValues reads every mod-values/*.json of a mod when the mod loads: both sides describe the definitions (their names, labels and number formats are known before any handshake, and before the mod's UI blocks), and the server defines them, which makes the values live for each character. Strict JSON: no comments, no trailing commas, unknown keys and a key given twice are refused. Every 64-bit number (min, max, initial, thresholds) is a base-10 string, so no JSON reader rounds it. The same fields, in C#, are the options of Kiln.ModValues' Describe and Define. Beyond the schema, kiln lint checks the 64-bit range, min <= max, initial within [min, max], thresholds that strictly increase, the size limits of labels, number formats and a definition, and ids across all of a mod's mod-values files (at most 128), and it warns about a carried value with no max of its own.",
+  "type": "object",
+  "x-kiln-docs": "docs/kiln/modding/schemas/kiln-mod-values.md",
+  "required": [
+    "format",
+    "values"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "format": {
+      "const": 1
+    },
+    "values": {
+      "type": "object",
+      "description": "The mod's value definitions by id. An id is the value's name inside the mod; other mods and native code name it \"<mod>:<id>\". Ids are unique across all of a mod's mod-values files, at most 128 per mod.",
+      "maxProperties": 128,
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/definition"
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{0,63}$",
+      "x-kiln-message": "a value id: a lower-case letter, then up to 63 of a-z, 0-9, '.', '_' and '-'"
+    },
+    "int64": {
+      "type": "string",
+      "description": "A whole number as a base-10 string: an optional '-', no '+', no leading zeros, no spaces, within -9223372036854775808..9223372036854775807 (kiln lint checks the range). With \"scale\" s the value shown is this number / 10^s.",
+      "pattern": "^(0|-?[1-9][0-9]{0,18})$",
+      "x-kiln-message": "a whole number as a base-10 string (\"0\", \"250\", \"-12\"): no '+', no leading zeros, no spaces, at most 19 digits"
+    },
+    "notNegative": {
+      "pattern": "^(?!-)",
+      "description": "Not negative: no leading '-' (the form is int64's)."
+    },
+    "uint32": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "text": {
+      "description": "A string, or a text per language ({\"en\": \"...\", \"de\": \"...\"}, \"*\" for any other). At most 1024 bytes per definition as compact JSON in UTF-8 (kiln lint checks it).",
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ]
+    },
+    "numberFormatValue": {
+      "type": "string",
+      "pattern": "^(N[0-6]|F[0-6]|0|0\\.0{1,6})$",
+      "x-kiln-message": "a number format: N0..N6, F0..F6, \"0\", or \"0.\" followed by 1 to 6 zeros"
+    },
+    "numberFormat": {
+      "description": "How the value is shown: N0..N6 (with group separators), F0..F6, \"0\", or \"0.\" followed by 1 to 6 zeros; or one per language ({\"*\": \"N0\"}). The game's selected culture formats it, en-US when that fails. Default N0 for scale 0, N<scale> otherwise. At most 256 bytes per definition as compact JSON in UTF-8 (kiln lint checks it).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/numberFormatValue"
+        },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/numberFormatValue"
+          }
+        }
+      ]
+    },
+    "definition": {
+      "type": "object",
+      "description": "One value. Defaults: min \"0\", max \"9223372036854775807\", initial = min, scale 0, persistence world, readPolicy ownerOnly, sync ownerMod, version 1, carryEpoch 1. kiln lint also checks min <= max and that initial is within [min, max] (Kiln never clamps it), and that thresholds strictly increase.",
+      "required": [
+        "kind",
+        "label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "counter",
+            "currency",
+            "experience"
+          ],
+          "description": "counter: any whole number in [min, max]. currency: spent and earned, never below 0. experience: points with levels (\"thresholds\"), never below 0, scale 0."
+        },
+        "label": {
+          "$ref": "#/$defs/text",
+          "description": "The name players see."
+        },
+        "numberFormat": {
+          "$ref": "#/$defs/numberFormat"
+        },
+        "min": {
+          "$ref": "#/$defs/int64",
+          "description": "The lowest value. Default \"0\"; at least \"0\" for a currency, an experience value and a carried value."
+        },
+        "max": {
+          "$ref": "#/$defs/int64",
+          "description": "The highest value. Default \"9223372036854775807\". Give a carried value a real max: carried progress merges by maximum (Kiln keeps the higher of the world's value and the copy a player's client brings), so its max is as far as a player's own copy can raise it; kiln lint warns without one (KL356)."
+        },
+        "initial": {
+          "$ref": "#/$defs/int64",
+          "description": "A character's first value. Default: min. Must be within [min, max]: Kiln refuses it otherwise, it never clamps."
+        },
+        "scale": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6,
+          "default": 0,
+          "description": "Decimal places: the stored whole number is shown divided by 10^scale (scale 2: \"1250\" shows as 12.50). 0 for an experience value."
+        },
+        "thresholds": {
+          "type": "array",
+          "description": "kind experience only, and required there: the points at which each level starts, \"0\" first, strictly increasing. Level = 1 + the index of the greatest threshold reached.",
+          "minItems": 1,
+          "maxItems": 256,
+          "prefixItems": [
+            {
+              "const": "0",
+              "x-kiln-message": "the first threshold is \"0\" (level 1 starts at 0 points)"
+            }
+          ],
+          "items": {
+            "$ref": "#/$defs/int64"
+          }
+        },
+        "persistence": {
+          "enum": [
+            "world",
+            "carried"
+          ],
+          "default": "world",
+          "description": "world: kept in the world's save. carried: travels with the character to other worlds, taken from the player's client when they join; needs trustClientImports true, and only for a counter or an experience value with min at least 0 (a currency is never carried). Give it a real \"max\" (kiln lint KL356)."
+        },
+        "trustClientImports": {
+          "type": "boolean",
+          "default": false,
+          "description": "Accept a carried value a client brings. Required (true) for persistence carried."
+        },
+        "version": {
+          "$ref": "#/$defs/uint32",
+          "default": 1,
+          "description": "The definition's version: raise it when the meaning of the stored number changes."
+        },
+        "carryEpoch": {
+          "$ref": "#/$defs/uint32",
+          "default": 1,
+          "description": "Raise it to stop accepting carried values from before."
+        },
+        "readPolicy": {
+          "enum": [
+            "ownerOnly",
+            "public",
+            "allowList"
+          ],
+          "default": "ownerOnly",
+          "description": "Which mods may read the value: the defining mod only, every loaded mod, or the mods of readMods. No other mod can ever write it."
+        },
+        "readMods": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/modId"
+          },
+          "description": "The mod ids allowed to read the value, with readPolicy allowList only (empty otherwise)."
+        },
+        "sync": {
+          "enum": [
+            "none",
+            "ownerMod",
+            "readers"
+          ],
+          "default": "ownerMod",
+          "description": "What the character's own client gets: none (the value stays on the server), ownerMod (the defining mod's client code may read it), readers (also the mods readPolicy allows)."
+        },
+        "allowPartitionMove": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow a change of persistence (world <-> carried) between versions to move the stored values."
+        },
+        "resetOnKindChange": {
+          "type": "boolean",
+          "default": false,
+          "description": "When kind changes between versions, reset stored values to initial instead of refusing the definition."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "experience"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "thresholds"
+            ],
+            "properties": {
+              "scale": {
+                "const": 0,
+                "x-kiln-message": "an experience value counts whole points: \"scale\" is 0"
+              }
+            },
+            "x-kiln-message": "kind \"experience\" needs \"thresholds\" (the points each level starts at: \"0\", then strictly increasing)"
+          },
+          "else": {
+            "properties": {
+              "thresholds": {
+                "not": {},
+                "x-kiln-message": "\"thresholds\" are for kind \"experience\" only"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "currency",
+                  "experience"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "min": {
+                "$ref": "#/$defs/notNegative",
+                "x-kiln-message": "a currency or an experience value never goes below 0: \"min\" is \"0\" or more"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "persistence"
+            ],
+            "properties": {
+              "persistence": {
+                "const": "carried"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "trustClientImports"
+            ],
+            "properties": {
+              "trustClientImports": {
+                "const": true,
+                "x-kiln-message": "a carried value comes from the player's client: it needs \"trustClientImports\": true"
+              },
+              "kind": {
+                "enum": [
+                  "counter",
+                  "experience"
+                ],
+                "x-kiln-message": "only a counter or an experience value can be carried (a currency is never carried)"
+              },
+              "min": {
+                "$ref": "#/$defs/notNegative",
+                "x-kiln-message": "a carried value never goes below 0: \"min\" is \"0\" or more"
+              }
+            },
+            "x-kiln-message": "persistence \"carried\" needs \"trustClientImports\": true (a carried value comes from the player's client)"
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "readPolicy"
+            ],
+            "properties": {
+              "readPolicy": {
+                "const": "allowList"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "readMods": {
+                "maxItems": 0,
+                "x-kiln-message": "\"readMods\" is read with \"readPolicy\": \"allowList\" only: leave it empty, or use allowList"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "examples": [
+    {
+      "format": 1,
+      "values": {
+        "xp": {
+          "kind": "experience",
+          "label": {
+            "en": "Fishing XP",
+            "de": "Angel-EP"
+          },
+          "numberFormat": {
+            "*": "N0"
+          },
+          "min": "0",
+          "max": "9223372036854775807",
+          "initial": "0",
+          "scale": 0,
+          "thresholds": [
+            "0",
+            "100",
+            "400",
+            "900"
+          ],
+          "persistence": "world",
+          "trustClientImports": false,
+          "version": 1,
+          "carryEpoch": 1,
+          "readPolicy": "public",
+          "readMods": [],
+          "sync": "readers",
+          "allowPartitionMove": false,
+          "resetOnKindChange": false
+        },
+        "tokens": {
+          "kind": "currency",
+          "label": "Tokens",
+          "numberFormat": "N0",
+          "min": "0",
+          "max": "1000000",
+          "initial": "10",
+          "scale": 0,
+          "persistence": "world",
+          "readPolicy": "ownerOnly",
+          "sync": "ownerMod"
+        }
+      }
+    }
+  ],
+  "x-kiln-rules": [
+    "[KL350](../lint.md#kl350-mod-value-number): min, max, initial and every threshold fit a signed 64-bit integer (-9223372036854775808..9223372036854775807).",
+    "[KL351](../lint.md#kl351-mod-value-bounds): min <= max, and initial within [min, max], defaults included (min \"0\", max \"9223372036854775807\", initial = min). Kiln refuses a definition otherwise; it never clamps.",
+    "[KL352](../lint.md#kl352-mod-value-thresholds): thresholds strictly increase (compared as whole numbers, not as text or floating point).",
+    "[KL353](../lint.md#kl353-mod-value-size): a definition's label is at most 1024 bytes, its numberFormat at most 256 bytes and the whole definition at most 4096 bytes, each as compact JSON in UTF-8.",
+    "[KL354](../lint.md#kl354-mod-value-duplicate): an id is defined once per mod, across all its mod-values/*.json files (inside one file a key given twice is [KL004](../lint.md#kl004-duplicate-key), an error here).",
+    "[KL355](../lint.md#kl355-mod-value-count): at most 128 values per mod, across all its mod-values/*.json files (one file over 128 is [KL108](../lint.md#kl108-size)).",
+    "[KL356](../lint.md#kl356-mod-value-carried-max) (a warning): a carried value (persistence carried, trustClientImports true) has a max of its own. Carried progress merges by maximum, so without one a player's own copy can raise it as far as 9223372036854775807."
+  ]
+}

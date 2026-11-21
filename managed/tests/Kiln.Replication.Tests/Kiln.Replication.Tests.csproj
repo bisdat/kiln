@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Unit tests of Kiln.Replication (the network inspector) with no game: its own code on the test kit's fake of kiln.repl
+       (Fakes/Repl): the counters' hold per mod, rows as records, watches and their last event, the capability rows. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>ReplicationTests</RootNamespace>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit.v3" Version="3.1.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../services/Kiln.Replication/Kiln.Replication.csproj" />
+    <!-- Kiln.Replication references them without copying them: NetPeer, and the repl commands -->
+    <ProjectReference Include="../../services/Kiln.Network/Kiln.Network.csproj" />
+    <ProjectReference Include="../../services/Kiln.Chat/Kiln.Chat.csproj" />
+    <ProjectReference Include="../../Kiln.TestKit/Kiln.TestKit.csproj" />
+  </ItemGroup>
+</Project>

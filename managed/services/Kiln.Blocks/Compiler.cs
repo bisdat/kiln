@@ -173,6 +173,7 @@ internal static partial class Compiler
             SoundBlock s => DefineSound(ctx, low, name, s),
             AffixBlock a => DefineAffix(ctx, low, name, a),
             AffixPoolBlock p => DefineAffixPool(ctx, low, name, p),
+            RoutineBlock r => DefineRoutine(ctx, low, name, r),
             RarityRollBlock r => DefineRarityRoll(ctx, low, name, r),
             RarityUpgradeBlock u => DefineRarityUpgrade(ctx, low, name, u),
             _ => DefineItemBlock(ctx, low, name, block) ?? DefineAbilityBlock(ctx, low, name, block) ?? DefineScreenBlock(ctx, low, name, block) ?? DefineNpcBlock(ctx, low, name, block) ?? DefineQuestBlock(ctx, low, name, block) ?? DefineUiBlock(ctx, low, name, block) ?? throw new BlockError(label, null, $"{typeof(T).Name} is not a block Kiln can compile yet"),

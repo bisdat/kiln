@@ -22,6 +22,7 @@
 #include "services/kiln_profile.h"
 #include "services/kiln_progress.h"
 #include "../../plugins/compat/original_code_service.h"
+#include "../src/mod_values_host.h"  // KILN_MOD_VALUES_BACKEND_SERVICE (Kiln-internal)
 
 namespace {
 int checks = 0, failures = 0;
@@ -41,6 +42,11 @@ std::set<KilnOwner> alive{1, 2, 3, 4, 5, 6};
 namespace reg {
 bool owner_alive(KilnOwner o) { return o == 0 || alive.count(o); }
 std::string owner_name(KilnOwner o) { return "owner:" + std::to_string(o); }
+std::vector<std::string> host_created;  // the names owner_create_managed_host was given
+KilnOwner owner_create_managed_host(std::string_view id) {
+    host_created.emplace_back(id);
+    return 42;
+}
 }  // namespace reg
 namespace svc {
 const void* find(std::string_view, uint32_t) { return nullptr; }
@@ -66,6 +72,11 @@ namespace hooks {
 const KilnHooksInternalApi internal_own{{sizeof(KilnHooksInternalApi), KILN_HOOKS_INTERNAL_VERSION}, nullptr};
 const KilnHooksInternalApi* internal_table() { return &internal_own; }  // stands for hooks_protect.cpp's table
 }  // namespace hooks
+namespace mod_values {
+const KilnServiceHeader backend{sizeof(KilnServiceHeader), 1};  // stands for the core's kiln.internal.mod-values.backend
+bool running = true;
+const void* backend_table() { return running ? &backend : nullptr; }
+}  // namespace mod_values
 namespace caps {
 const void* table() { return nullptr; }
 int published = 0;
@@ -84,8 +95,9 @@ namespace {
 }  // namespace
 }  // namespace kiln
 
-// The managed host's view (api_for_managed_host): exactly the core's own kiln.internal.tasks.host on top of the
-// plugins' lookup; no other view resolves it and nobody publishes that name.
+// The managed host's view (api_for_managed_host): exactly the core's own kiln.internal.tasks.host and
+// kiln.internal.mod-values.backend on top of the plugins' lookup; no other view resolves them, nobody publishes those
+// names, and the owners the host creates through it are marked as the host's.
 void managed_host_view() {
     using namespace kiln;
     const KilnStr host{KILN_TASKS_HOST_SERVICE, std::strlen(KILN_TASKS_HOST_SERVICE)};
@@ -103,13 +115,40 @@ void managed_host_view() {
     check(api_service_managed_host(other, 1) == nullptr, "the host view resolves no other internal table");
     const KilnStr open{"kiln.example", 12};
     check(api_service_managed_host(open, 1) == api_service(open, 1), "public names resolve as for plugins");
-    const KilnApi plugins{};
+    KilnApi plugins{};
+    plugins.size = sizeof plugins;
+    plugins.service = &api_service;
+    plugins.register_service = &api_register_service;
+    plugins.log = &dummy_log;
     const KilnApi view = managed_host_api_from(plugins);
-    check(view.service == &api_service_managed_host && view.register_service == plugins.register_service,
-          "the host's KilnApi is the plugins' one with the host lookup only (it publishes like a plugin)");
+    KilnApi expected = plugins;
+    expected.service = &api_service_managed_host;
+    expected.owner_create = &api_owner_create_managed_host;
+    check(std::memcmp(&view, &expected, sizeof view) == 0,
+          "the host's KilnApi is the plugins' one with the host lookup and the host's owner_create only (it publishes like a plugin)");
+    check(view.owner_create(KilnStr{"mod:fishing", 11}) == 42 && reg::host_created == std::vector<std::string>{"mod:fishing"},
+          "an owner the host creates through its KilnApi is made as the managed host's (kiln.mod-values maps mod:<id> only for those)");
     tasks_svc::running = false;
     check(api_service_managed_host(host, 1) == nullptr, "while kiln.tasks is not running: nothing (the host reports it)");
     tasks_svc::running = true;
+
+    // kiln.internal.mod-values.backend: Kiln.ModValues binds the native facade's backend through it, nothing else
+    const KilnStr mv{KILN_MOD_VALUES_BACKEND_SERVICE, std::strlen(KILN_MOD_VALUES_BACKEND_SERVICE)};
+    check(std::string_view(KILN_MOD_VALUES_BACKEND_SERVICE) == "kiln.internal.mod-values.backend" && internal_name(sv(mv)),
+          "the mod-values backend has a Kiln-internal name");
+    check(api_service_managed_host(mv, 1) == &mod_values::backend, "the host view resolves the core's mod-values backend");
+    check(api_service_managed_host(mv, 2) == nullptr, "...not for a later version");
+    check(api_service(mv, 1) == nullptr && api_service_services(mv, 1) == nullptr, "the plugins' and the services' views never resolve it");
+    check(api_register_service_services(1, mv, &spoof) == KILN_ERR_INVALID_ARGUMENT &&
+              api_register_service(2, mv, &spoof) == KILN_ERR_INVALID_ARGUMENT,
+          "nobody publishes that name, not even a Kiln service owner");
+    check(api_service_managed_host(mv, 1) == &mod_values::backend && api_service_services(mv, 1) == nullptr,
+          "and the views still say the same after the attempts");
+    const KilnStr old{"kiln.mod-values.backend", 23};
+    check(api_service_managed_host(old, 1) == nullptr && api_service(old, 1) == nullptr, "the old public name resolves nowhere");
+    mod_values::running = false;
+    check(api_service_managed_host(mv, 1) == nullptr, "while kiln.mod-values is not running: nothing (Kiln.ModValues reports it)");
+    mod_values::running = true;
 }
 
 // kiln.launch (launch.h): the core's own table in every view, hooked or safe idle, and nobody publishes the name.
