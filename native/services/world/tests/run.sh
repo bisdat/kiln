@@ -43,7 +43,8 @@ for kind in asan tsan; do
   if [[ $kind == asan ]]; then san=(-fsanitize=address,undefined -fno-sanitize-recover=undefined); else san=(-fsanitize=thread); fi
   g++ -std=c++20 -O1 -g -pthread -Wall -Wextra -Werror "${san[@]}" -I"$engine" -I"$engine/include" -I"$engine/tests" \
       -I"$here/../../../core/abi" "$here/ecs_engine_test.cpp" "$here/../ecs_engine.cpp" "$here/../ecs_lookup.cpp" "$here/../ecs_reads.cpp" \
-      "$engine/engine.cpp" "$engine/identity.cpp" "$engine/resolve.cpp" "$engine/gate.cpp" "$engine/tests/host/memory_host.cpp" \
+      "$engine/engine.cpp" "$engine/identity.cpp" "$engine/resolve.cpp" "$engine/gate.cpp" "$engine/resource_guard.cpp" \
+      "$engine/invoke.cpp" "$engine/tests/host/memory_host.cpp" "$engine/tests/host/invoke_host.cpp" \
       -o "$out/ecs_engine_test_$kind"
   TSAN_OPTIONS=halt_on_error=1:exitcode=66 "$out/ecs_engine_test_$kind"
 done
@@ -59,7 +60,8 @@ for kind in asan tsan; do
       -DKILN_WORLD_HOLD_TEST_POINTS -I"$engine" -I"$engine/include" -I"$engine/tests" -I"$here/../../../core/abi" \
       -I"$here/../../../third_party" "$here/ecs_writes_test.cpp" "$here/../ecs_writes.cpp" "$here/../ecs_write_hold.cpp" \
       "$here/../ecs_write_policy.cpp" "$here/../ecs_engine.cpp" "$here/../ecs_lookup.cpp" "$here/../ecs_reads.cpp" \
-      "$engine/engine.cpp" "$engine/identity.cpp" "$engine/resolve.cpp" "$engine/gate.cpp" "$engine/tests/host/memory_host.cpp" \
+      "$engine/engine.cpp" "$engine/identity.cpp" "$engine/resolve.cpp" "$engine/gate.cpp" "$engine/resource_guard.cpp" \
+      "$engine/invoke.cpp" "$engine/tests/host/memory_host.cpp" "$engine/tests/host/invoke_host.cpp" \
       -o "$out/ecs_writes_test_$kind"
   TSAN_OPTIONS=halt_on_error=1:exitcode=66 "$out/ecs_writes_test_$kind" "$here/../../../../sigdb/types"
 done

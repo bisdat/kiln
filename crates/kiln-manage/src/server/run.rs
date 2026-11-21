@@ -186,6 +186,26 @@ fn wait_ready(instance: &ServerInstance, since: SystemTime, progress: &mut dyn P
 
 /// Returns when the world runs (or fails).
 pub fn start(instance: &ServerInstance, progress: &mut dyn Progress) -> Result<ServerStatus> {
+    // the start's preparation, then the runner
+    start_via(None, instance, progress, &mut |instance, since, notes, progress| match instance.runner {
+        ServerRunner::Kilnctl => start_kilnctl(instance, since, notes, progress),
+        ServerRunner::Steam if cfg!(windows) => start_windows(instance, since, notes, progress),
+        ServerRunner::Steam => start_steam(instance, since, notes, progress),
+        ServerRunner::Windows => start_windows(instance, since, notes, progress),
+        ServerRunner::Remote => unreachable!("a remote start runs kilnctl there"),
+    })
+}
+
+/// What starts a local server: its runner, given the start's time, the notes for the head of its capture and progress.
+pub type Spawn<'a> = dyn FnMut(&ServerInstance, SystemTime, &[String], &mut dyn Progress) -> Result<ServerStatus> + 'a;
+
+/// [`start`] with the data folder (None: located when a start needs it) and what starts the server (tests pass a fake
+/// runner). A local start of a folder whose kiln.json asks for Kiln's interpreter writes its active profile again first
+/// and says every warning the check before Play would show ([`prepare_local`]). A remote start stays `kilnctl start <name>`
+/// over SSH: the kilnctl on that machine prepares its own folder in its `kilnctl run` (a kilnctl older than this, or one
+/// built without its `sfi` feature, starts as before), and nothing here reads or writes the remote folder.
+pub fn start_via(dirs: Option<&crate::paths::DataDirs>, instance: &ServerInstance, progress: &mut dyn Progress,
+                 spawn: &mut Spawn<'_>) -> Result<ServerStatus> {
     if instance.runner != ServerRunner::Remote {
         if let Some(p) = pid(instance) {
             return Err(Error::new(ErrorCode::Conflict, format!("{} is running already (pid {p})", instance.id)));
@@ -195,18 +215,46 @@ pub fn start(instance: &ServerInstance, progress: &mut dyn Progress) -> Result<S
             return Err(Error::not_found(format!("{} has no {} (install it first)", dir.display(), super::game::EXE)));
         }
     }
-    let since = SystemTime::now() - Duration::from_secs(1);
-    match instance.runner {
-        ServerRunner::Kilnctl => start_kilnctl(instance, since, progress),
-        ServerRunner::Steam if cfg!(windows) => start_windows(instance, since, progress),
-        ServerRunner::Steam => start_steam(instance, since, progress),
-        ServerRunner::Windows => start_windows(instance, since, progress),
-        ServerRunner::Remote => remote_kilnctl(instance, "start").and_then(|_| status(instance)),
+    if instance.runner == ServerRunner::Remote {
+        return remote_kilnctl(instance, "start").and_then(|_| status(instance));
     }
+    let mut prepared = prepare_local(dirs, instance.local_dir()?)?;
+    let notes = prepared.as_ref().map(|h| h.lines()).unwrap_or_default();
+    for n in &notes {
+        progress.report(None, n);
+    }
+    // the game's cook lock goes before the runner: a runner makes the Wine prefix and waits for the world (minutes),
+    // which must not keep every cook of this folder refused (`kilnctl run`, which only spawns, keeps it until then)
+    if let Some(h) = prepared.as_mut() {
+        h.release();
+    }
+    let since = SystemTime::now() - Duration::from_secs(1);
+    spawn(instance, since, &notes, progress)
+}
+
+/// Before a local start of the server folder `dir`: None when its kiln.json asks for no Kiln interpreter
+/// (hosted, installed, no setting: nothing more is read or written). Otherwise the folder's install record is made
+/// (`game::inspect`) and [`crate::sfi_launch::prepare_headless`] writes the active profile again and answers the
+/// warnings; an error there (the lock, a profile that cannot be applied) refuses the start.
+pub fn prepare_local(dirs: Option<&crate::paths::DataDirs>, dir: &Path) -> Result<Option<crate::sfi_launch::Headless>> {
+    if !crate::sfi_launch::requests_interpreter(dir, crate::manifest::RunSide::Server) {
+        return Ok(None);
+    }
+    let located;
+    let dirs = match dirs {
+        Some(d) => d,
+        None => {
+            located = crate::paths::DataDirs::locate()?;
+            &located
+        }
+    };
+    let install = crate::game::inspect(dir)?;
+    crate::sfi_launch::prepare_headless(dirs, &install)
 }
 
 #[cfg(all(unix, feature = "server"))]
-fn start_kilnctl(instance: &ServerInstance, since: SystemTime, progress: &mut dyn Progress) -> Result<ServerStatus> {
+// the notes of the start's preparation
+fn start_kilnctl(instance: &ServerInstance, since: SystemTime, pre: &[String], progress: &mut dyn Progress) -> Result<ServerStatus> {
     let inst = instance.kilnctl_instance()?;
     let runner = crate::wine::resolve(&inst.wine, &crate::util::home())?;
     if !inst.prefix.join("system.reg").exists() {
@@ -214,7 +262,8 @@ fn start_kilnctl(instance: &ServerInstance, since: SystemTime, progress: &mut dy
         make_prefix(&inst)?;
     }
     let note = format!("{} ./{} in {} (prefix {}, wine {})", runner.wine.display(), super::game::EXE, inst.dir.display(), inst.prefix.display(), runner.label);
-    let (run_log, log) = super::console::open_capture(instance, &[note])?;
+    let notes: Vec<String> = std::iter::once(note).chain(pre.iter().cloned()).collect();
+    let (run_log, log) = super::console::open_capture(instance, &notes)?;
     std::fs::create_dir_all(inst.dir.join("logs")).ok();
     let mut cmd = runner.command(&inst);
     headless(&mut cmd);
@@ -239,7 +288,7 @@ fn start_kilnctl(instance: &ServerInstance, since: SystemTime, progress: &mut dy
 }
 
 #[cfg(not(all(unix, feature = "server")))]
-fn start_kilnctl(_instance: &ServerInstance, _since: SystemTime, _progress: &mut dyn Progress) -> Result<ServerStatus> {
+fn start_kilnctl(_instance: &ServerInstance, _since: SystemTime, _pre: &[String], _progress: &mut dyn Progress) -> Result<ServerStatus> {
     Err(Error::new(ErrorCode::Unsupported, "kilnctl instances run on Linux"))
 }
 
@@ -277,7 +326,7 @@ const STEAM_SCRUB: &[&str] = &[
 
 /// A Steam install started without Steam (proton.rs): the build's wine, Steam's prefix, the launch options.
 #[cfg(unix)]
-fn start_steam(instance: &ServerInstance, since: SystemTime, progress: &mut dyn Progress) -> Result<ServerStatus> {
+fn start_steam(instance: &ServerInstance, since: SystemTime, pre: &[String], progress: &mut dyn Progress) -> Result<ServerStatus> {
     let dir = instance.local_dir()?.to_path_buf();
     let plan = super::proton::plan(instance)?;
     let mut notes = vec![format!(
@@ -290,6 +339,7 @@ fn start_steam(instance: &ServerInstance, since: SystemTime, progress: &mut dyn 
         plan.prefix.display()
     )];
     notes.extend(plan.notes.iter().cloned());
+    notes.extend(pre.iter().cloned());
     let (cap, out) = super::console::open_capture(instance, &notes)?;
     std::fs::create_dir_all(dir.join("logs")).ok();
     let mut cmd = crate::hostenv::command(&plan.wine);
@@ -318,7 +368,7 @@ fn start_steam(instance: &ServerInstance, since: SystemTime, progress: &mut dyn 
 }
 
 #[cfg(not(unix))]
-fn start_steam(_instance: &ServerInstance, _since: SystemTime, _progress: &mut dyn Progress) -> Result<ServerStatus> {
+fn start_steam(_instance: &ServerInstance, _since: SystemTime, _pre: &[String], _progress: &mut dyn Progress) -> Result<ServerStatus> {
     Err(Error::new(ErrorCode::Unsupported, "a Steam install starts like a Windows server here"))
 }
 
@@ -346,17 +396,18 @@ pub fn spawn_windowless(exe: &Path, dir: &Path, args: &[String], output: std::fs
 }
 
 #[cfg(windows)]
-fn start_windows(instance: &ServerInstance, since: SystemTime, progress: &mut dyn Progress) -> Result<ServerStatus> {
+fn start_windows(instance: &ServerInstance, since: SystemTime, pre: &[String], progress: &mut dyn Progress) -> Result<ServerStatus> {
     let dir = instance.local_dir()?;
     let exe = dir.join(super::game::EXE);
-    let (cap, out) = super::console::open_capture(instance, &[format!("{} in {} (no window)", exe.display(), dir.display())])?;
+    let notes: Vec<String> = std::iter::once(format!("{} in {} (no window)", exe.display(), dir.display())).chain(pre.iter().cloned()).collect();
+    let (cap, out) = super::console::open_capture(instance, &notes)?;
     let mut child = spawn_windowless(&exe, dir, &[], out).map_err(|e| Error::new(ErrorCode::Io, format!("starting {}: {e}", super::game::EXE)))?;
     progress.report(Some(0.02), &format!("started {} (pid {}), output in {}", super::game::EXE, child.id(), cap.display()));
     wait_ready(instance, since, progress, &mut || child.try_wait().ok().flatten().map(|st| format!("exited ({st}); see the Console")))
 }
 
 #[cfg(not(windows))]
-fn start_windows(_instance: &ServerInstance, _since: SystemTime, _progress: &mut dyn Progress) -> Result<ServerStatus> {
+fn start_windows(_instance: &ServerInstance, _since: SystemTime, _pre: &[String], _progress: &mut dyn Progress) -> Result<ServerStatus> {
     Err(Error::new(ErrorCode::Unsupported, "a Windows server runs on Windows"))
 }
 
@@ -823,6 +874,14 @@ mod unix_runner {
     /// `kilnctl run`: the server in the foreground, the way systemd runs it (module docs). Returns the launcher's exit
     /// code.
     pub fn run_foreground(inst: &Instance) -> Result<i32> {
+        run_foreground_via(None, inst, &mut |runner, inst| spawn(runner, inst))
+    }
+
+    /// [`run_foreground`] with the data folder (None: located when the start needs it) and what starts Wine (tests pass a
+    /// fake runner). A folder whose kiln.json asks for Kiln's interpreter has its active profile written again first, and
+    /// every warning goes to the log (stderr, the journal under systemd) before Wine starts (super::prepare_local).
+    pub fn run_foreground_via(dirs: Option<&crate::paths::DataDirs>, inst: &Instance,
+                              spawn: &mut dyn FnMut(&Runner, &Instance) -> Result<Child>) -> Result<i32> {
         let runner = wine::resolve(&inst.wine, &util::home())?;
         if let Some(p) = procs::find_server(&inst.prefix) {
             return Err(Error::new(ErrorCode::Conflict, format!("{} is already running (pid {p})", inst.name)));
@@ -832,6 +891,11 @@ mod unix_runner {
         }
         if !inst.exe().exists() {
             return Err(Error::not_found(format!("{} missing (kilnctl install {})", inst.exe().display(), inst.name)));
+        }
+        // the cook lock is held until Wine was started
+        let prepared = super::prepare_local(dirs, &inst.dir)?;
+        for n in prepared.as_ref().map(|h| h.lines()).unwrap_or_default() {
+            log(n);
         }
         std::fs::create_dir_all(inst.dir.join("logs")).ok();
         install_handlers();
@@ -845,7 +909,9 @@ mod unix_runner {
             inst.query_port,
             runner.label
         ));
-        let mut child = spawn(&runner, inst)?;
+        let spawned = spawn(&runner, inst);
+        drop(prepared);
+        let mut child = spawned?;
         let t_start = Instant::now();
         let mut server: Option<u32> = None;
         let mut stop_at: Option<Instant> = None;

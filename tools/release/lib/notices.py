@@ -9,6 +9,7 @@
   - the .NET runtime Kiln ships (its LICENSE.txt and ThirdPartyNotices.txt);
   - vendored code (native/third_party), the fonts, licenses/ (CREDITS.md);
   - Enshwick's loader and its Windows crates (--enshwick-src: the pinned checkout the runtime's enshwick.dll is from);
+  - kiln-sfi.dll (crates/sfi, its own workspace) and the crates of its Windows build;
   - optionally the system libraries bundled into the Linux AppImage (--appimage-root: the unpacked AppImage; owners
     and licences from the system package manager, pacman or dpkg).
 
@@ -26,6 +27,22 @@ import sys
 LICENSE_FILE = re.compile(r"(?i)^(licen[cs]e|copying|notice|copyright|unlicense|authors)([-._].*)?(\.(md|txt|rst|mit|apache|bsd))?$")
 TARGETS = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 ROOTS = ["kiln-launcher", "kilnctl", "kiln-cli"]
+# Build dependencies whose C sources are compiled into the binary that uses them (mlua's "vendored" Lua): listed with
+# the normal dependencies, unlike other build tools.
+COMPILED_IN = {"lua-src", "luajit-src"}
+
+
+def shipped_deps(node):
+    """The dependencies of a resolve node that end up in the built binary: normal ones and COMPILED_IN build ones."""
+    return [d["pkg"] for d in node["deps"]
+            if any(k["kind"] is None for k in d["dep_kinds"])
+            or (d["name"].replace("_", "-") in COMPILED_IN and any(k["kind"] == "build" for k in d["dep_kinds"]))]
+
+
+def own_crate(src, pkg):
+    """A path crate of this repository outside the workspace in question (crates/sfi's, for kiln-manage's sfi-scan):
+    Kiln's own code under Kiln's licence, not a third party."""
+    return pkg.get("source") is None and os.path.commonpath([os.path.realpath(src), os.path.realpath(pkg["manifest_path"])]) == os.path.realpath(src)
 
 
 def read(p):
@@ -139,7 +156,7 @@ def cargo_crates(src):
                 if any(k["kind"] is None for k in d["dep_kinds"]):
                     stack.append(d["pkg"])
         for i in seen:
-            if i not in members:
+            if i not in members and not own_crate(src, by_id[i]):
                 pkgs[i] = by_id[i]
     entries = []
     for p in sorted(pkgs.values(), key=lambda p: (p["name"], p["version"])):
@@ -235,39 +252,86 @@ def nuget_entries(assets_files):
 def gpl_plugins(src):
     """GPL plugins: gpl/<name>/ is its own Cargo workspace with its own LICENSE and NOTICE.txt, shipped as
     kiln/plugins/<name>.dll (docs/kiln/eml.md). One entry for the plugin (its licence and notice: the plugin and the
-    vendored GPL crates it is built from), then the crates.io crates of its Windows build."""
+    vendored GPL crates it is built from), then the crates.io crates of its Windows build. kiln-eml's archive inspector
+    (kiln-eml-inspect, a separate program shipped for Windows and Linux in kiln/tools/eml-inspect/) is built from the
+    same crate: it is named in the entry, and the crates of its Linux build are listed too."""
     entries = []
     for ws in sorted(glob.glob(os.path.join(src, "gpl", "*", "Cargo.toml"))):
         d = os.path.dirname(ws)
         name = os.path.basename(d)
         texts = [(f, read(os.path.join(d, f))) for f in ("NOTICE.txt", "LICENSE") if os.path.isfile(os.path.join(d, f))]
-        entries.append((f"{name}.dll (gpl/{name}, built from its own source in that folder)", "", "GPL-3.0-or-later",
+        inspector = os.path.isfile(os.path.join(d, name, "src", "kiln_eml_inspect.rs"))
+        what = f"{name}.dll" + (" and its archive inspector kiln-eml-inspect (kiln/tools/eml-inspect/)" if inspector else "")
+        entries.append((f"{what} (gpl/{name}, built from its own source in that folder)", "", "GPL-3.0-or-later",
                         "https://github.com/frostdev-ops/kiln/tree/main/gpl/" + name, texts))
-        try:
-            meta = json.loads(subprocess.check_output(
-                ["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", "x86_64-pc-windows-msvc"],
-                cwd=d, stderr=subprocess.DEVNULL))
-        except (OSError, subprocess.CalledProcessError) as e:
-            raise RuntimeError(f"notices: cannot enumerate GPL component gpl/{name}") from e
-        by_id = {p["id"]: p for p in meta["packages"]}
-        nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
-        members = set(meta["workspace_members"])
-        seen, stack = set(), [i for i in members if by_id[i]["name"] == name]
-        while stack:
-            i = stack.pop()
-            if i in seen:
-                continue
-            seen.add(i)
-            for dep in nodes[i]["deps"]:
-                if any(k["kind"] is None for k in dep["dep_kinds"]):
-                    stack.append(dep["pkg"])
-        for p in sorted((by_id[i] for i in seen if i not in members), key=lambda p: (p["name"], p["version"])):
+        found = {}
+        for target in (TARGETS[1], TARGETS[0]) if inspector else (TARGETS[1],):
+            try:
+                meta = json.loads(subprocess.check_output(
+                    ["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", target],
+                    cwd=d, stderr=subprocess.DEVNULL))
+            except (OSError, subprocess.CalledProcessError) as e:
+                raise RuntimeError(f"notices: cannot enumerate GPL component gpl/{name}") from e
+            by_id = {p["id"]: p for p in meta["packages"]}
+            nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
+            members = set(meta["workspace_members"])
+            seen, stack = set(), [i for i in members if by_id[i]["name"] == name]
+            while stack:
+                i = stack.pop()
+                if i in seen:
+                    continue
+                seen.add(i)
+                stack += shipped_deps(nodes[i])
+            found.update((i, by_id[i]) for i in seen if i not in members and not own_crate(src, by_id[i]))
+        for p in sorted(found.values(), key=lambda p: (p["name"], p["version"])):
             pd = os.path.dirname(p["manifest_path"])
             files = license_files(pd)
             if p.get("license_file") and os.path.isfile(os.path.join(pd, p["license_file"])):
                 files.append(os.path.join(pd, p["license_file"]))
             entries.append((p["name"], p["version"], p.get("license") or "see the licence file", p.get("repository") or "",
                             [(os.path.basename(f), read(f)) for f in sorted(set(files))]))
+    return entries
+
+
+def sfi_crates(src):
+    """kiln-sfi.dll (component sfi, kiln/plugins/kiln-sfi.dll): Kiln's interpreter for ShroudForge mods, MIT, built from
+    crates/sfi (its own Cargo workspace and lock), with parts adapted from ShroudForge (bonsaibauer, MIT). One entry for
+    the DLL (Kiln's licence and ShroudForge's), then the crates of its Windows build (Lua included: mlua builds it in)."""
+    root = os.path.join(src, "crates", "sfi")
+    if not os.path.isfile(os.path.join(root, "kiln-sfi", "Cargo.toml")):
+        return []
+    texts = [("LICENSE", read(os.path.join(root, "LICENSE")))]
+    sf = os.path.join(src, "licenses", "ShroudForge-LICENSE.txt")
+    if os.path.isfile(sf):
+        texts.append(("ShroudForge-LICENSE.txt", read(sf)))
+    entries = [("kiln-sfi.dll (crates/sfi; Kiln's interpreter for ShroudForge mods. Adapted from ShroudForge by bonsaibauer, MIT)",
+                "", "MIT", "https://github.com/frostdev-ops/kiln/tree/main/crates/sfi", texts)]
+    try:
+        meta = json.loads(subprocess.check_output(
+            ["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", TARGETS[1]],
+            cwd=root, stderr=subprocess.DEVNULL))
+    except (OSError, subprocess.CalledProcessError) as e:
+        raise RuntimeError("notices: cannot enumerate kiln-sfi's crates (crates/sfi)") from e
+    by_id = {p["id"]: p for p in meta["packages"]}
+    nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
+    members = set(meta["workspace_members"])
+    seen, stack = set(), [i for i in members if by_id[i]["name"] == "kiln-sfi"]
+    if not stack:
+        raise RuntimeError("notices: kiln-sfi is not in crates/sfi's cargo metadata")
+    while stack:
+        i = stack.pop()
+        if i in seen:
+            continue
+        seen.add(i)
+        stack += shipped_deps(nodes[i])
+    for p in sorted((by_id[i] for i in seen if i not in members and not own_crate(src, by_id[i])),
+                    key=lambda p: (p["name"], p["version"])):
+        pd = os.path.dirname(p["manifest_path"])
+        files = license_files(pd)
+        if p.get("license_file") and os.path.isfile(os.path.join(pd, p["license_file"])):
+            files.append(os.path.join(pd, p["license_file"]))
+        entries.append((p["name"], p["version"], p.get("license") or "see the licence file", p.get("repository") or "",
+                        [(os.path.basename(f), read(f)) for f in sorted(set(files))]))
     return entries
 
 
@@ -458,6 +522,7 @@ def main():
     lic = os.path.join(src, "licenses")
     n.add("Credited projects (CREDITS.md; netcoredbg ships in the VS Code extension)", tree_entries(
         [(os.path.basename(p).rsplit(".", 1)[0], "", "", "", [p]) for p in sorted(glob.glob(os.path.join(lic, "*")))]))
+    n.add("Kiln's interpreter for ShroudForge mods (kiln-sfi.dll, component sfi; MIT) and its Rust dependencies (Windows)", sfi_crates(src))
     if glob.glob(os.path.join(src, "gpl", "*", "Cargo.toml")):
         n.add("GPL plugins (separate programs under GPL-3.0-or-later, source in gpl/: kiln-eml runs EML mods)", gpl_plugins(src))
     if a.enshwick_src:

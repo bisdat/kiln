@@ -6,6 +6,9 @@ installed ShroudForge. If you have ShroudForge installed, you keep it: your mod 
 are, and with one switch Kiln can run your own ShroudForge copy instead of the bundled one. Design and API coverage:
 [shroudforge-compat.md](shroudforge-compat.md).
 
+Kiln can also run ShroudForge mods itself, without a ShroudForge runtime: see
+[kiln mode](shroudforge-kiln-mode.md) and the launcher's [ShroudForge card](launcher/shroudforge-backend.md).
+
 ## For players
 
 1. Install Kiln. Its `shroudforge` component (on by default) puts ShroudForge's runtime in `kiln/plugins/shroudforge/`.

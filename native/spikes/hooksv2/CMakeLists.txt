@@ -4,6 +4,7 @@
 add_executable(hooks_v2_test
     ../../core/tests/hooks_v2_test.cpp
     ../../core/src/services/hooks.cpp
+    ../../core/src/services/hooks_protect.cpp
     ../../core/src/services/hooks_chain.cpp
     ../../core/src/services/hooks_chain_asm.cpp
     ../../core/src/services/hooks_fingerprint.cpp

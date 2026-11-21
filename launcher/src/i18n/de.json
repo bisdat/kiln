@@ -6015,5 +6015,142 @@
         "crafted": "hergestellt"
       }
     }
+  },
+  "sfBackend": {
+    "backend": {
+      "title": "ShroudForge",
+      "sub": "Welches ShroudForge die ShroudForge-Mods dieses Spiels ausführt. Gespeichert in kiln/kiln.json; gilt ab dem nächsten Start.",
+      "label": "ShroudForge-Backend",
+      "choice": {
+        "hosted": "Kilns mitgeliefertes ShroudForge",
+        "installed": "Mein installiertes ShroudForge",
+        "kiln": "Kilns Interpreter"
+      },
+      "about": {
+        "hosted": "Das ShroudForge, das mit Kiln kommt.",
+        "installed": "Das ShroudForge im Ordner shroudforge des Spiels.",
+        "kiln": "Kiln führt ShroudForge-Mods selbst aus. Ein Mod, den es nicht ganz ausführen kann, wird vor dem Spielen mit Grund übersprungen."
+      },
+      "none": "kein ShroudForge",
+      "default": "Standard",
+      "held": "Zurückgehalten",
+      "heldWhy": "In diesem Kiln-Build nicht verfügbar: {reason}",
+      "set": {
+        "default": "Nichts festgelegt: der Standard.",
+        "explicit": "Gewählt: {name}.",
+        "inherited": "Vom älteren Schalter „Mein installiertes ShroudForge verwenden“: {name}. Eine Wahl hier ersetzt ihn.",
+        "invalid": "kiln.json nennt ein Backend, das Kiln nicht kennt ({value}): Kein ShroudForge führt die ShroudForge-Mods dieses Spiels aus, bis du eines wählst."
+      },
+      "next": "Nächster Start: {name}",
+      "last": "Letzter Start: {name}",
+      "envRuntime": "KILN_SHROUDFORGE_RUNTIME ist dort gesetzt, wo der Launcher läuft: Ein Start aus dem Launcher folgt ihm.",
+      "envOff": "KILN_SHROUDFORGE=0 ist dort gesetzt, wo der Launcher läuft: Bei einem Start aus dem Launcher läuft kein ShroudForge.",
+      "route": {
+        "missing": "Kilns Interpreter ist noch nicht in diesem Spiel: Installiere Kiln erneut, um ihn hinzuzufügen.",
+        "ownLoader": "ShroudForges eigener Loader ist im Spiel ({file}): Er führt die ShroudForge-Mods aus, und Kilns Auswahl tritt zurück."
+      },
+      "running": "Schließe das Spiel, um dies zu ändern.",
+      "reset": "Zurück zum Standard",
+      "unreadable": "Das lässt sich nicht ändern, solange kiln.json nicht lesbar ist: {reason}",
+      "saved": "Gespeichert. Nächster Start: {name}.",
+      "ask": {
+        "title": "ShroudForge-Backend ändern?",
+        "to": "Ab dem nächsten Start: {name}",
+        "replaces": "Das ersetzt den älteren Schalter „Mein installiertes ShroudForge verwenden“.",
+        "kiln": "Mods, die Kilns Interpreter nicht ganz ausführen kann, werden beim Start mit Grund übersprungen, und die Warnung vor dem Spielen listet sie auf. Nichts wechselt von selbst zurück zu Kilns mitgeliefertem ShroudForge.",
+        "unchanged": "kiln.json sagt das bereits.",
+        "refused": "Das kann jetzt nicht gewählt werden: {reason}",
+        "when": "Nichts ändert sich, bis du speicherst. Das Spiel liest es beim nächsten Start."
+      }
+    },
+    "startWarning": {
+      "title": "Einige Mods laufen bei diesem Start nicht",
+      "continue": "Ohne diese Mods fortfahren",
+      "game": "Spiel: {path}",
+      "changedTitle": "Geändert",
+      "changed": "Was bei diesem Start nicht läuft, hat sich seit der letzten Warnung geändert. Lies es noch einmal, bevor du fortfährst.",
+      "otherGame": "Diese Warnung gehört zu einem anderen Spiel. Drücke erneut auf Spielen.",
+      "lead": {
+        "save": {
+          "title": "Nicht ohne sie speichern",
+          "text": "Ein Mod unten speichert Daten in deinen Spielständen. Wenn du eine Welt speicherst, während er aus ist, können seine Daten sich ändern oder verloren gehen. Spiele ohne zu speichern, oder brich ab und behebe es zuerst."
+        },
+        "check": {
+          "title": "Nicht alles konnte geprüft werden",
+          "text": "Kiln konnte für diesen Start nicht alles prüfen, daher laufen diese Mods vielleicht nicht. Lies die Gründe unten."
+        },
+        "plain": {
+          "title": "Diese Mods laufen nicht",
+          "text": "Das Spiel startet ohne die Mods unten. Deine übrigen Mods laufen wie gewohnt."
+        }
+      },
+      "listAria": "Was nicht läuft ({count})",
+      "notesAria": "Gut zu wissen",
+      "nothingChanged": "Fortfahren schaltet nichts aus und speichert oder löscht nichts. Beim nächsten Spielen wird erneut geprüft.",
+      "partData": "Startdaten",
+      "partLua": "Lua",
+      "partDlls": "DLLs: {list}",
+      "parts": "Teile: {list}",
+      "dataNotApplied": "Seine Startdaten werden bei diesem Start nicht angewendet.",
+      "chain": "Wegen: {chain}",
+      "folder": "Ordner: {root}",
+      "wasActive": "Er war bei einem früheren Start aktiv ({launch}).",
+      "unknownStart": "Start unbekannt",
+      "saveLine": "Er speichert Daten in deinen Spielständen: speichere keine Welt, solange er aus ist.",
+      "saveUnknown": "Er speichert vielleicht Daten in deinen Spielständen: speichere keine Welt, solange er aus ist.",
+      "skipped": "{name} läuft nicht",
+      "refused": "Kein ShroudForge-Mod läuft bei diesem Start",
+      "notStarted": "Nicht gestartet: {list}",
+      "previous": "{name} ist jetzt aus",
+      "offNow": "Er läuft bei diesem Start nicht.",
+      "basisPolicy": "Kilns Liste der Mods mit Spielstanddaten nennt ihn.",
+      "basisUnknown": "Er hat Spieldaten und Code, daher speichert er vielleicht Spielstanddaten.",
+      "about": "Betrifft: {list}",
+      "inspector": "Kilns Archivprüfer kann nicht verwendet werden",
+      "planWarning": "Warnung zum Startplan",
+      "baseTitle": "Spieldateien, auf denen dieser Start beruht",
+      "baseRestore": "Um genau zu diesen Dateien zurückzukehren, schalte die Mods aus, die die Spieldaten ändern, und starte das Spiel einmal über Kiln (Protokolle, Engines: Die Daten des Spiels wiederherstellen).",
+      "baseVerify": "Für die Spieldateien, wie Steam sie liefert, nutze in Steam „Spieldateien auf Fehler überprüfen“.",
+      "costTitle": "Langsamerer Start",
+      "noteTitle": "Hinweis",
+      "keybindsTitle": "Tastenkürzel",
+      "keybinds": "{name}: Seine Tastenkürzel funktionieren mit Kilns Interpreter noch nicht. Der Rest der Mod läuft."
+    },
+    "engineRow": {
+      "plugin": "Kilns Interpreter (kiln-sfi)",
+      "packages": "ShroudForge-Mods",
+      "phase": {
+        "starting": "startet",
+        "running": "läuft",
+        "ended": "beendet",
+        "aside": "zurückgetreten",
+        "refused": "nicht gestartet",
+        "unknown": "unbekannt"
+      },
+      "package": {
+        "running": "läuft",
+        "dataApplied": "Daten angewendet",
+        "off": "aus",
+        "skipped": "übersprungen"
+      },
+      "stale": {
+        "older-start": "Dieser Eintrag stammt von einem früheren Start: Was der Interpreter beim neuesten Start getan hat, ist nicht bekannt.",
+        "not-running": "Der Eintrag sagt {phase}, aber das Spiel läuft nicht: Dieser Start endete ohne seinen letzten Eintrag (vielleicht ist er abgestürzt).",
+        "other-process": "Der Eintrag stammt von einem anderen Spielprozess: Er gehört nicht zu diesem Start."
+      },
+      "previous": {
+        "incomplete": "Der Start davor endete, ohne seinen Eintrag abzuschließen (vielleicht ist er abgestürzt).",
+        "suspect": "Kiln konnte nicht lesen, was der Start davor hinterlassen hat."
+      },
+      "unreadable": "Kilns Interpreter hat einen Eintrag hinterlassen, den Kiln nicht lesen kann: {error}"
+    },
+    "restoreBase": {
+      "title": "Die Daten des Spiels wiederherstellen",
+      "base": "Kiln ging von diesen Spieldateien aus: {label}.",
+      "how": "Um genau zu diesen Dateien zurückzukehren, schalte die Mods aus, die die Spieldaten ändern, und starte das Spiel einmal über Kiln. Kiln setzt nur Daten zurück, von denen es beweisen kann, dass es sie geschrieben hat; Daten eines anderen Loaders bleiben.",
+      "save": "Mods, die Daten in deinen Spielständen ablegen: Speichere keine Welt, solange sie aus sind.",
+      "vanilla": "Das sind nicht unbedingt die Dateien, wie Steam sie liefert. Dafür nutze in Steam „Spieldateien auf Fehler überprüfen“ (Eigenschaften des Spiels, Installierte Dateien).",
+      "unknown": "Kiln kann nicht sagen, welche Spieldateien es zurücksetzen würde: {reason}."
+    }
   }
 }

@@ -11,6 +11,9 @@ import type {
   NativeJson, NativePlanEntry, NativeUserState, PreStart, Profile, ProfileChange, ProfileMod, ProfileSummary, ProxyClass, Rejection, RemoveReport, ResolvePreview, SettingsRemoval, RuntimeBundle, SaveBackup, SaveSlot,
   SchemaSnapshot, ServerInstance, ServerStatus, Task, TaskState, StartMode, StartSettings, StartSetup, RunnerInfo, BuildCheck,
 } from "./commands";
+import type { SfBackend, SfBackendCard, SfBackendPreview, SfResolution, SfSetting } from "./commands";
+import type { Preflight, StartWarning } from "./commands";
+import type { DataRestoreBase, EngineStatus } from "./commands";
 import { adminMockHandlers } from "../admin/mock";
 import { serverMockHandlers } from "../pages/servers/mockServers";
 import { updateMockHandlers } from "./mockUpdate";
@@ -711,6 +714,9 @@ function mockExternalStart(gameId: string, at = Date.now()) {
 }
 export function scriptStoppedStart(kind: StopScript) { stopScript = kind; }
 function launch(gameId: string, req: LaunchRequest): LaunchResult {
+  // launch_play never starts a start whose warnings nobody acknowledged
+  if (!sfConfirming) sfChecks.push(`play ${gameId} ${req.mode}`);
+  if (!sfConfirming && sfStart[gameId]?.warnings.length) sfPending(sfPreflight(gameId, req), "Some ShroudForge mods will not run this start. Read the warning and confirm it first; the game was not started.");
   const g = gameOf(gameId);
   stoppedStarts[gameId] = null;
   localStorage.setItem(stopStorage, JSON.stringify(stoppedStarts));
@@ -901,6 +907,141 @@ function kilnFile(gameId: string): MockFile {
     values: { policy: "verified-only", clr: true, plugins: true, log_level: "info" }, schema: kilnJsonSnapshot as unknown as SchemaSnapshot,
     mod: "kiln", kind: "other", modified: "2026-11-03T23:00:00Z",
   });
+}
+
+// kiln.json shroudforge.backend as kiln_manage::sfi_backend reads and writes it
+const SF_BACKENDS: SfBackend[] = ["hosted", "installed", "kiln"];
+/** Why Kiln's interpreter is held in the mock build (`__kilnMock.setSfHeld`; null: not held); kiln.json "preview" lifts it. */
+let sfHeld: string | null = "game test pending: sfi-backend-roundtrip, sfi-save-sensitive, sfi-three-surface-warning";
+let sfRoute: NonNullable<SfBackendCard["interpreterRoute"]> = "ready";
+const sfLast: Record<string, SfBackendCard["last"]> = {};
+const sfRevision = (values: Json) => hex(JSON.stringify(values ?? {}));
+const sfSection = (values: Json) => {
+  const sf = (values as Record<string, Json> | null)?.shroudforge;
+  return sf && typeof sf === "object" && !Array.isArray(sf) ? sf as Record<string, Json> : null;
+};
+function sfSetting(values: Json): SfSetting {
+  const sf = sfSection(values);
+  if (sf && "backend" in sf) {
+    const b = sf.backend;
+    return typeof b === "string" && (SF_BACKENDS as string[]).includes(b) ? { kind: "explicit", backend: b as SfBackend }
+      : { kind: "invalid", value: typeof b === "string" ? `"${b}"` : JSON.stringify(b) };
+  }
+  return sf?.useInstalled === true ? { kind: "inherited", backend: "installed" } : { kind: "default" };
+}
+function sfHeldNow(values: Json): string | null {
+  const p = (values as Record<string, Json> | null)?.preview;
+  const lifted = p === true || p === "all" || (Array.isArray(p) && p.includes("kiln-sfi.interpreter"));
+  return lifted ? null : sfHeld;
+}
+function sfResolve(values: Json): SfResolution {
+  const s = sfSetting(values);
+  const base = { refusal: null, envOffNote: null } as const;
+  if (s.kind === "invalid") return { ...base, requested: null, selected: null, source: "setting", refusal: "settingInvalid", reason: `kiln.json shroudforge.backend: ${s.value} is not "hosted", "installed" or "kiln"` };
+  if (s.kind === "default") return { ...base, requested: "hosted", selected: "hosted", source: "default", reason: "no kiln.json setting: hosted, the default" };
+  if (s.kind === "inherited") return { ...base, requested: "installed", selected: "installed", source: "useInstalled", reason: "kiln.json shroudforge.useInstalled: true (the older setting): installed" };
+  const held = s.backend === "kiln" ? sfHeldNow(values) : null;
+  if (held) return { ...base, requested: "kiln", selected: null, source: "setting", refusal: "interpreterHeld", reason: `kiln.json asks for Kiln's interpreter (shroudforge.backend: "kiln"), but the capability kiln-sfi.interpreter is held (${held})` };
+  return { ...base, requested: s.backend, selected: s.backend, source: "setting", reason: `kiln.json shroudforge.backend: "${s.backend}"` };
+}
+/** kiln.json's values with `backend` written (null: removed) and the older useInstalled removed. */
+function sfWritten(values: Json, backend: SfBackend | null): Json {
+  const v = clone(values ?? {}) as Record<string, Json>;
+  const sf = { ...(sfSection(v) ?? {}) };
+  delete sf.useInstalled;
+  if (backend) sf.backend = backend; else delete sf.backend;
+  if (Object.keys(sf).length) v.shroudforge = sf; else delete v.shroudforge;
+  return v;
+}
+function sfCard(gameId: string): SfBackendCard {
+  const v = kilnFile(gameId).values;
+  const next = sfResolve(v);
+  const held = sfHeldNow(v);
+  return { gameId, setting: sfSetting(v), next, revision: sfRevision(v), ...(held ? { interpreterHeld: held } : {}),
+    ...(next.selected === "kiln" ? { interpreterRoute: sfRoute, ...(sfRoute === "own-loader" ? { ownLoader: "dbghelp.dll" } : {}) } : {}),
+    ...(sfLast[gameId] ? { last: sfLast[gameId] } : {}) };
+}
+function sfPreview(gameId: string, backend: SfBackend | null): SfBackendPreview {
+  const v = kilnFile(gameId).values;
+  const revision = sfRevision(v);
+  const held = sfHeldNow(v);
+  if (backend === "kiln" && held) return { gameId, backend, revision, refused: `Kiln's interpreter cannot be chosen: the capability kiln-sfi.interpreter is held (${held})`, unchanged: false };
+  const after = sfWritten(v, backend);
+  return { gameId, backend, revision, next: sfResolve(after), unchanged: JSON.stringify(after) === JSON.stringify(v ?? {}) };
+}
+
+// the ShroudForge row in kiln mode, kiln_manage::sfi_state, and the restore's BASE
+const SFI_ROW = typeof location !== "undefined" ? new URLSearchParams(location.search).get("sfiRow") : null;
+const SFI_BASE = typeof location !== "undefined" ? new URLSearchParams(location.search).get("restoreBase") : null;
+const SFI_ROWS: Record<string, { state: Json | null; error?: string }> = {
+  running: { state: { mode: "kiln interpreter", status: "running", backend: "kiln", launchId: "00000000000000b2", pid: 4242, updatedMs: 1795000000000, previous: "incomplete", mods: [
+    { id: "skeleton-commander", version: "1.2.0", state: "running" },
+    { id: "sf-unlock-blueprints", version: "1.0.2", state: "data applied" },
+    { id: "combat_tweaks", version: "0.7.2", state: "skipped", reason: "it needs runtime.ui.draw_list, which Kiln's interpreter does not offer yet" },
+    { id: "sf-survival", version: "1.0.0", state: "off" }] } },
+  refused: { state: { mode: "kiln interpreter", status: "refused", backend: "kiln", launchId: "00000000000000b2", pid: 4242, updatedMs: 1795000000000,
+    reason: "kiln-eml's startup pass granted no archive generation",
+    mods: [{ id: "combat_tweaks", version: "0.7.2", state: "skipped", reason: "the startup pass failed" }] } },
+  stale: { state: { mode: "kiln interpreter", status: "unknown", recordPhase: "running", staleCode: "not-running", backend: "kiln", launchId: "00000000000000b2", pid: 4242,
+    updatedMs: 1795000000000, reason: "kiln-sfi's record says running, but the game is not running: that start ended without its last record (it may have crashed)", mods: [] } },
+  corrupt: { state: null, error: "/games/Enshrouded/kiln/state/sfi.json: expected value at line 1 column 3" },
+};
+function sfiEngineRows<T extends { kind: string }>(path: string, rows: T[]): (T | EngineStatus)[] {
+  const r = SFI_ROW ? SFI_ROWS[SFI_ROW] : undefined;
+  if (!r) return rows;
+  return rows.map((s) => s.kind !== "shroudforge" ? s : { kind: "shroudforge", plugin: "kiln-sfi", state: r.state, error: r.error ?? null, file: `${path}/kiln/state/sfi.json` });
+}
+const SFI_BASES: Record<string, DataRestoreBase> = {
+  recorded: { state: "recorded", token: "first-managed-unclassified", label: "unclassified: game files as found when Kiln first managed this install", baselineSha256: hex("base"), reason: null },
+  unrecorded: { state: "unrecorded", token: "unrecorded", label: "unrecorded: a working baseline from an earlier start; where its files came from was not recorded", baselineSha256: hex("base"),
+    reason: "the origin in Kiln's record is of other backups than the ones in the game folder now" },
+  unknown: { state: "unknown", token: null, label: null, baselineSha256: null, reason: "the game data Kiln backed up is not in the game folder (all of it): Kiln cannot tell what it would put back" },
+};
+const sfiRestoreBase = (): DataRestoreBase | null => (SFI_BASE ? SFI_BASES[SFI_BASE] ?? null : null);
+
+// the check before Play as kiln_manage::sfi_launch answers it: prepare, confirm, cancel
+/** What the next start of a game warns about (`__kilnMock.setStartWarnings`; none: no dialog). */
+const sfStart: Record<string, { warnings: StartWarning[]; advisories: StartWarning[] }> = {};
+/** The waiting tokens: one prepared start per game; any confirm takes its token, whatever comes of it. */
+const sfTokens = new Map<string, { gameId: string; request: LaunchRequest; warnings: string }>();
+/** Each launch_play / prepare / confirm / cancel as `<command> <gameId> <mode>` (`__kilnMock.startChecks`). */
+const sfChecks: string[] = [];
+let sfConfirming = false;
+function sfPreflight(gameId: string, request: LaunchRequest): Preflight {
+  const s = sfStart[gameId] ?? { warnings: [], advisories: [] };
+  for (const [k, v] of sfTokens) if (v.gameId === gameId) sfTokens.delete(k);
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const token = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const warnings = JSON.stringify(s.warnings);
+  sfTokens.set(token, { gameId, request: clone(request) as LaunchRequest, warnings });
+  return { gameId, request: clone(request) as LaunchRequest, token, expires: new Date(Date.now() + 600_000).toISOString(), warnings: clone(s.warnings) as StartWarning[],
+    warningsSha256: hex(warnings), ...(s.advisories.length ? { advisories: clone(s.advisories) as StartWarning[] } : {}), reinspectsEveryPlay: false };
+}
+function sfPending(p: Preflight, message: string): never {
+  reject("consent_required", message, { preflight: p });
+}
+const sfSame = (a: LaunchRequest, b: LaunchRequest) => a.mode === b.mode && (a.profileId ?? null) === (b.profileId ?? null) && !!a.skipBackup === !!b.skipBackup;
+function sfPrepare(gameId: string, req: LaunchRequest): Preflight {
+  sfChecks.push(`prepare ${gameId} ${req.mode}`);
+  gameOf(gameId);
+  if (running[gameId] && running[gameId]!.from !== Infinity) reject("game_running", "The game is already running.");
+  if (req.mode === "once" && !req.profileId) reject("invalid_argument", "Pick a profile to play once.");
+  if (!runtime[gameId]?.installed && req.mode !== "vanilla") reject("unsupported", "Kiln is not installed in this game.");
+  return sfPreflight(gameId, req);
+}
+function sfConfirm(gameId: string, token: string, req: LaunchRequest): LaunchResult {
+  sfChecks.push(`confirm ${gameId} ${req.mode}`);
+  const p = sfTokens.get(token);
+  sfTokens.delete(token);
+  const refused = (why: string, message: string) => reject("refused", message, { token: why });
+  if (!p) refused("unknown", "This start was already confirmed, canceled or replaced by a newer one, or the launcher restarted since: press Play again.");
+  if (p!.gameId !== gameId) refused("game", "This confirmation belongs to another game: press Play again.");
+  if (!sfSame(p!.request, req)) refused("request", "This confirmation belongs to another kind of start: press Play again.");
+  const now = sfStart[gameId]?.warnings ?? [];
+  if (now.length && JSON.stringify(now) !== p!.warnings)
+    sfPending(sfPreflight(gameId, req), "What will not run this start changed since the warning was shown. Read it again and confirm it; the game was not started.");
+  sfConfirming = true;
+  try { return launch(gameId, req); } finally { sfConfirming = false; }
 }
 
 const nativeStates = new Map<string, NativeUserState>();
@@ -1401,7 +1542,7 @@ const handlers: Record<string, Handler> = {
   engine_status: (a) => {
     const g = gameOf(S(a.gameId));
     const st = (k: ModKind, file: string, state: Json | null) => ({ kind: k, plugin: `kiln-${k}`, state, file: `${g.path}/kiln/state/${file}` });
-    return [
+    const rows = [
       st("emf", "emf.json", { mods: [{ id: "beastmaster", state: "loaded" }] }),
       st("eml", "eml.json", emlPatched
         ? { phase: "done", patched: 3, ms: 1263, mods: [{ id: "loot-tables-x", name: "Loot Tables X", state: "disabled", reason: "disabled in the profile" }] }
@@ -1426,8 +1567,12 @@ const handlers: Record<string, Handler> = {
       st("dllmod", "dllmod.json", { status: "waiting", reason: "the mods start when a world of your own starts", abi: 1, steppedAside: false,
         mods: [{ id: "carryon", package: "carryon/carryon.dll", version: "0.1.50-dev", status: "waiting", reason: "" }] }),
     ];
+    // ?sfiRow=<case>, kiln-sfi's row in place of ShroudForge's
+    return sfiEngineRows(g.path, rows);
   },
   eml_data_latest: () => null,
+  // ?restoreBase=recorded|unrecorded|unknown, as kiln_manage::restore_data::base_origin answers
+  eml_data_base: () => sfiRestoreBase(),
   eml_data_plan: () => {
     if (!new URLSearchParams(location.search).has("restoreData")) return reject("refused", "No unproven recovery state.");
     return { fingerprint: "mock-restore", files: ["enshrouded_055.dat", "enshrouded.kfc.bak", "enshrouded.kfc_resources.bak"].map(from => ({ from, size: 4096, sha256: "mock" })) };
@@ -1505,6 +1650,21 @@ const handlers: Record<string, Handler> = {
     Object.assign(f, { values, text: JSON.stringify(values, null, 2) + "\n", modified: now() });
     return doc("kiln.json", f);
   },
+  // Settings' ShroudForge card, as kiln_manage::sfi_backend answers
+  sfi_backend_read: (a) => sfCard(S(a.gameId)),
+  sfi_backend_preview: (a) => sfPreview(S(a.gameId), (a.backend ?? null) as SfBackend | null),
+  sfi_backend_set: (a) => {
+    const g = S(a.gameId);
+    gameOf(g);
+    if (live(g)) reject("game_running", "Close the game first.");
+    const f = kilnFile(g);
+    if (sfRevision(f.values) !== S(a.revision)) reject("conflict", "kiln.json changed since the ShroudForge card read it: nothing was written; look at the card again");
+    const p = sfPreview(g, (a.backend ?? null) as SfBackend | null);
+    if (p.refused) reject("refused", p.refused);
+    const values = sfWritten(f.values, p.backend);
+    Object.assign(f, { values, text: JSON.stringify(values, null, 2) + "\n", modified: now() });
+    return sfCard(g);
+  },
 
   // launch
   launch_play: (a) => launch(S(a.gameId), a.request as LaunchRequest),
@@ -1518,6 +1678,16 @@ const handlers: Record<string, Handler> = {
     return t;
   },
   launch_end: (a) => { mockStartEnded(S(a.gameId)); return null; },
+  // the check before Play
+  launch_prepare: (a) => sfPrepare(S(a.gameId), a.request as LaunchRequest),
+  launch_confirm: (a) => sfConfirm(S(a.gameId), S(a.token), a.request as LaunchRequest),
+  launch_cancel: (a) => {
+    const g = S(a.gameId), p = sfTokens.get(S(a.token));
+    sfChecks.push(`cancel ${g}`);
+    if (!p || p.gameId !== g) return false;
+    sfTokens.delete(S(a.token));
+    return true;
+  },
   launch_state: (a): BootState => {
     const boot = bootFor(S(a.gameId));
     const r = live(S(a.gameId));
@@ -1998,6 +2168,29 @@ export function mockEmit(name: string, payload: unknown): void {
 // Playwright and the dev console reach the fake game through this (mock mode only).
 if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { community: communityMockHooks(mockEmit), crash: mockCrash, scriptStoppedStart, externalStart: mockExternalStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
   calls: () => [...commandCalls],
+  // Settings' ShroudForge card
+  /** Why Kiln's interpreter is held (null: this mock build does not hold it). */
+  setSfHeld: (why: string | null) => { sfHeld = why; },
+  /** What a selected kiln meets in the game folder. */
+  setSfRoute: (route: NonNullable<SfBackendCard["interpreterRoute"]>) => { sfRoute = route; },
+  /** kiln/state/launch.json of the last start (null: none). */
+  setSfLast: (last: SfBackendCard["last"] | null, gameId = "client-steam") => { if (last) sfLast[gameId] = last; else delete sfLast[gameId]; },
+  /** A second client install (as Settings' "Add folder" adds one), Kiln in it: its id. */
+  addSfGame: (path: string) => {
+    const g: GameInstall = { ...steamGame, id: `client-${hex(path).slice(0, 8)}`, path, library: null, source: "manual", buildId: null, steamFlavor: null };
+    if (!games.some((x) => x.id === g.id)) games.push(g);
+    runtime[g.id] ??= { ...runtime["client-steam"] };
+    return g.id;
+  },
+  // the check before Play
+  /** What the next start of `gameId` warns about (empty: no dialog); advisories are shown, never acknowledged. */
+  setStartWarnings: (warnings: StartWarning[], advisories: StartWarning[] = [], gameId = "client-steam") => { sfStart[gameId] = { warnings, advisories }; },
+  /** Each prepare, confirm and cancel so far ("prepare client-steam profile"). */
+  startChecks: () => [...sfChecks],
+  /** How many prepared starts wait for their confirm. */
+  startTokens: () => sfTokens.size,
+  /** Whether the game runs (a start was opened). */
+  gameRunning: (gameId = "client-steam") => !!live(gameId),
   /** Each report_save's `exclude`, in order. */
   reportSaves: () => reportSaves.map((x) => [...x]),
   settingsRemoved: () => [...settingsRemoved],

@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "kind": "notice",
+  "key": "world-editor-saved",
+  "keySha256": "3f3fc8758a06f6a061e05fd2a83e9f1fba842e03ee43dfc3e20b77f1db3cd50f",
+  "launchId": "3f2b8c1e5a7d4e2f",
+  "ownerEpoch": 3,
+  "notice": {
+    "id": "saved",
+    "modId": "world-editor",
+    "title": "Saved",
+    "message": "Your layout was saved.",
+    "level": "info",
+    "actionUrl": null,
+    "updatedAt": 1763520011
+  }
+}

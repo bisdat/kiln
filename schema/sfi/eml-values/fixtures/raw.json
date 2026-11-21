@@ -1,0 +1,35 @@
+{
+  "$comment": "Raw packets (STRINGIFY, SOURCE_BYTES, value_export): counted bytes with no envelope, known by the query that made them and value_info kind RESULT. payload null means the reply's payload lease is 0 (Source's None); an empty string is a zero-length packet (Some(empty)).",
+  "cases": [
+    {
+      "name": "source_bytes_none",
+      "query": "SOURCE_BYTES",
+      "payload": null
+    },
+    {
+      "name": "source_bytes_empty",
+      "query": "SOURCE_BYTES",
+      "payload": ""
+    },
+    {
+      "name": "source_bytes",
+      "query": "SOURCE_BYTES",
+      "payload": "0700000011000000"
+    },
+    {
+      "name": "stringify_embedded_nul",
+      "query": "STRINGIFY",
+      "payload": "7b2274657874223a22610062227d"
+    },
+    {
+      "name": "stringify_utf8",
+      "query": "STRINGIFY",
+      "payload": "5b22c3a9225d"
+    },
+    {
+      "name": "export",
+      "query": "EXPORT",
+      "payload": "0100000002000000"
+    }
+  ]
+}

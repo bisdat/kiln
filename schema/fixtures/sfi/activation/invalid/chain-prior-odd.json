@@ -1,0 +1,41 @@
+{
+  "format": 1,
+  "txn": "0123456789abcdef",
+  "state": "staging",
+  "profileId": "kill",
+  "generation": 2,
+  "route": "interpreter",
+  "prior": {
+    "profileSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "placementsSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "gameFiles": [
+      {
+        "id": "autolootcoop",
+        "version": "0.0.0",
+        "hash": "kdh1:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    ]
+  },
+  "stages": [
+    {
+      "stage": "game-files"
+    },
+    {
+      "stage": "chain",
+      "prior": "abc",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    {
+      "stage": "placements"
+    },
+    {
+      "stage": "plan",
+      "path": "launch-plans/0b0e7c3e-6c55-4c4f-9a43-3f1f7c2d9e10.json",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    {
+      "stage": "profile",
+      "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  ]
+}

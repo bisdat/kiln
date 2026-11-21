@@ -485,6 +485,14 @@ step "kilnctl and kiln (Linux, Windows)"
 win=x86_64-pc-windows-msvc
 (cd "$src" && quiet low cargo xwin build --release --locked -p kilnctl -p kiln-cli --target $win)
 kilnctl=$lin_target/release/kilnctl
+# kiln-eml's archive inspector for Linux (component eml, kiln/tools/eml-inspect/linux-x86_64/) is built where the other
+# Linux files are, for their glibc; the stage takes it from KILN_EML_INSPECT_LINUX (its Windows .exe builds in the stage)
+if [[ -f $src/gpl/kiln-eml/kiln-eml/src/kiln_eml_inspect.rs ]]; then
+  step "kiln-eml's archive inspector (Linux)"
+  (cd "$src/gpl/kiln-eml" && quiet linux cargo build --release --locked -p kiln-eml --bin kiln-eml-inspect)
+  export KILN_EML_INSPECT_LINUX=$lin_target/release/kiln-eml-inspect
+  [[ -s $KILN_EML_INSPECT_LINUX ]] || die "no kiln-eml-inspect in $lin_target/release"
+fi
 
 # ---------------------------------------------------------------- 4. runtime
 step "runtime: native + managed build, stage"
@@ -536,7 +544,8 @@ if ((!skip_windows)); then nuget_args+=(--python-root "$src/.cache/python-win-x6
 python3 "$lib/notices.py" --src "$src" --out "$notices" --version "$version" --dotnet-root "$src/.cache/dotnet-win-x64/root" \
   "${nuget_args[@]}" | tee -a "$log"
 if [[ -f $stage/eml/kiln/plugins/kiln-eml.dll ]]; then
-  printf '\nkiln-eml corresponding source: source/kiln-%s-src.tar.gz, directory gpl/kiln-eml/.\n' "$version" >>"$notices"
+  what=kiln-eml; [[ -d $stage/eml/kiln/tools/eml-inspect ]] && what="kiln-eml and its archive inspector (kiln/tools/eml-inspect)"
+  printf '\n%s corresponding source: source/kiln-%s-src.tar.gz, directory gpl/kiln-eml/.\n' "$what" "$version" >>"$notices"
 fi
 if [[ -d $stage/shroudforge/kiln/plugins/shroudforge ]]; then
   # the GPL-3 component's notice; its own licences ship in kiln/plugins/shroudforge/LICENSES
@@ -554,6 +563,17 @@ if ((signing)); then
   mapfile -t pes < <(find "$stage" -type f \( -iname '*.dll' -o -iname '*.exe' \) -not -path '*/kiln/dotnet/*' | sort)
   step "Authenticode: ${#pes[@]} runtime files"
   sign_pe "${pes[@]}"
+fi
+# kiln-eml's archive inspector: each version.json binds its helper's SHA-256 (the launcher and kilnctl refuse a helper
+# that does not match), and signing changed the Windows one. Written again for the files as they ship, then the sfi
+# component and the inspector are checked once more.
+if [[ -d $stage/eml/kiln/tools/eml-inspect && -f $src/tools/sfi/sfi_stage.py ]]; then
+  for d in "$stage"/eml/kiln/tools/eml-inspect/*/; do
+    python3 -I "$src/tools/sfi/sfi_stage.py" version "$src" "${d%/}" "$(basename "$d")" || die "kiln-eml's archive inspector: cannot write $d/version.json"
+  done
+  if ! python3 -I "$src/tools/sfi/sfi_stage.py" check "$src" "$stage" 2>&1 | tee -a "$log"; then
+    die "the sfi component or kiln-eml's archive inspector is incomplete after signing (see above)"
+  fi
 fi
 step "runtime bundle"
 rm -rf "$work/dist" && mkdir -p "$work/dist"

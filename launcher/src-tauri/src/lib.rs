@@ -58,6 +58,10 @@ pub fn link_entry(url: &str) -> bool {
 
 pub fn run() {
     panic_to_log();
+    // (feature sfi: kiln-mode activations run the archive inspector the Kiln installed in each game
+    // folder brought, its version and SHA-256 from that install: kiln_manage::sfi_inspection::Installed)
+    #[cfg(feature = "sfi")]
+    kiln_manage::profile::sfi::use_installed_inspector();
     let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
     #[cfg(feature = "self-update")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
@@ -199,6 +203,10 @@ pub fn run() {
             commands::config::config_kiln_read,
             commands::config::config_kiln_set,
             commands::config::config_kiln_reset,
+            // Settings' ShroudForge card
+            commands::sfi_backend::sfi_backend_read,
+            commands::sfi_backend::sfi_backend_preview,
+            commands::sfi_backend::sfi_backend_set,
             commands::app::app_assets_status,
             commands::app::app_assets_import,
             commands::server::server_console_open,
@@ -355,7 +363,12 @@ pub fn run() {
             commands::studio::studio_publish_check,
             commands::studio::studio_publish,
             commands::studio::studio_set_visibility,
-            commands::studio::studio_server_pack
+            commands::studio::studio_server_pack,
+            // the check before Play
+            commands::sfi::launch_prepare,
+            commands::sfi::launch_confirm,
+            commands::sfi::launch_cancel,
+            commands::sfi::eml_data_base
         ]))
         .build(tauri::generate_context!())
         .expect("error while building the Kiln Launcher")

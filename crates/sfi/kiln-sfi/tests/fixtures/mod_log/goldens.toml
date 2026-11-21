@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT
+# Captured with ShroudForge's own mod runtime (a local differential test, not published), 2026-11-19,
+# headless Wine, fixture dir holding only default_level.lua. Both runs: 1 fixture, 12 records, 2 exact v2 failure messages;
+# the shared runner counterpart (out-dir/core/) was byte-identical, and the two pins'
+# transcripts are byte-identical to each other. The test's subscriber is INFO,
+# ShroudForge's default minimum level, and its seed is fixed.
+# No transcript edits or normalization outside the shared v2 prelude.
+[goldens]
+"default_level.sf179.golden.json" = "oracle sf-1.7.9 d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8; default_level.lua; sha256=dd9f074dba39405b58e374e100e17514e34b7b1580d76d985e160f2dab4d4dbc"
+"default_level.sf180.golden.json" = "oracle sf-1.8.0 38ef448dc5d4fc267b5f0928502a864a6b078865; default_level.lua; sha256=dd9f074dba39405b58e374e100e17514e34b7b1580d76d985e160f2dab4d4dbc"

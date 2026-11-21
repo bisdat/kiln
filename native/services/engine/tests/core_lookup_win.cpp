@@ -7,7 +7,9 @@
 // - the Release kiln-engine.dll boots through the services' KilnApi exactly as load_one boots a trusted service:
 //   kiln.internal.engine resolves for services only, the consumer helper accepts it, plugins see nothing;
 // - a copy of kiln-engine.dll with another build's stamp, one from a build without build metadata (version only), and
-//   a module without the export, are not trusted.
+//   a module without the export, are not trusted;
+// - kiln.internal.launch (the core's own) resolves for services only, and the Release kiln-engine.dll looks it up
+//   exactly once, at init, through the services' KilnApi.
 #include <windows.h>
 
 #include <algorithm>
@@ -27,9 +29,11 @@
 #include "services/kiln_caps.h"
 #include "services/kiln_engine.h"
 #include "services/kiln_hooks.h"
+#include "services/kiln_launch.h"
 #include "services/kiln_profile.h"
 #include "services/kiln_progress.h"
 #include "../../../core/src/tasks_host.h"  // the lookup block names the core's managed-host table (kiln.tasks)
+#include "../../../core/src/launch_internal.h"  // and the core's kiln.launch tables
 #include "../../../plugins/compat/original_code_service.h"  // and the core's original-code table
 
 namespace {
@@ -69,6 +73,16 @@ const void* host_table() { return nullptr; }  // kiln.tasks' managed-host table:
 namespace compat {
 const OriginalCodeApi* original_code_table() { return nullptr; }  // the core's original-code table: not part of this check
 }  // namespace compat
+namespace launch {
+const KilnLaunchApi* table() { return nullptr; }  // kiln.launch: not part of this check
+int internal_lookups = 0;                         // how often the block served kiln.internal.launch
+KilnOwner KILN_CALL nobody() { return 0; }
+const KilnLaunchInternalApi g_internal = {{sizeof(KilnLaunchInternalApi), KILN_LAUNCH_INTERNAL_VERSION}, &nobody};
+const KilnLaunchInternalApi* internal_table() {
+    ++internal_lookups;
+    return &g_internal;
+}
+}  // namespace launch
 namespace caps {
 const void* table() { return nullptr; }
 void service_published(KilnOwner, std::string_view, uint32_t) {}
@@ -176,10 +190,16 @@ int wmain(int argc, wchar_t** argv) {
     KilnPluginInfo info{};
     info.size = sizeof info;
     check(main_fn && main_fn(&services_api, owner, &info) == KILN_OK, "kiln_plugin_main through the services' KilnApi");
+    check(launch::internal_lookups == 1, "the Release kiln-engine.dll looked kiln.internal.launch up once, at init (" +
+                                             std::to_string(launch::internal_lookups) + ")");
     const KilnStr internal{KILN_ENGINE_NATIVE_SERVICE, sizeof KILN_ENGINE_NATIVE_SERVICE - 1};
     const KilnStr open{KILN_ENGINE_SERVICE, sizeof KILN_ENGINE_SERVICE - 1};
     check(api_service_services(internal, 1) != nullptr && api_service(internal, 1) == nullptr && api_service(open, 1) != nullptr,
           "kiln.internal.engine resolves for services only; kiln.engine for everyone");
+    const KilnStr launch_internal{KILN_LAUNCH_INTERNAL_SERVICE, sizeof KILN_LAUNCH_INTERNAL_SERVICE - 1};
+    check(api_service_services(launch_internal, 1) != nullptr && api_service(launch_internal, 1) == nullptr &&
+              api_service_services(launch_internal, KILN_LAUNCH_INTERNAL_VERSION + 1) == nullptr,
+          "kiln.internal.launch resolves for services only, and not as a newer version");
     char why[200]{};
     const KilnEngineNativeApi* n = kiln_engine_native(&services_api, owner, sizeof(KilnEngineNativeApi), why, sizeof why);
     check(n && n->header.size == sizeof(KilnEngineNativeApi), std::string("the consumer helper accepts the Release table ") + why);

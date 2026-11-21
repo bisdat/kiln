@@ -1,0 +1,26 @@
+{
+  "$schema": "sfi-safety-policy.schema.json",
+  "format": 1,
+  "revision": 1,
+  "scope": "interpreter-only",
+  "unknownMixedDataNative": "save-sensitive",
+  "packages": [
+    {
+      "id": "ammo-slots",
+      "version": "0.8.2",
+      "name": "Quiver & Spellbook",
+      "source": { "site": "nexus", "modId": 240 },
+      "risk": "save-data-loss",
+      "text": "The game drops the quiver and spellbook ammo at the next save while this mod is off.",
+      "evidence": "Nexus 240, QuiverAndSpellbook_V0.8.2_Beta (corpus nexus-x/240-quiver-and-spellbook, read 2026-11-19): README.txt line 42 \"Do not play with the mod switched off: the game drops the quiver and spellbook ammo at the next save.\"; M0 gate save_sensitive=True (m0-imports/nexus/gate-finalize.py). mod.json declares runtime-register-dll; native-plugin.ini names ammo-slots.dll.",
+      "variants": [
+        {
+          "files": [
+            { "path": "mod.json", "sha256": "f4f645892b374eb87f7fe223402bc301270122b7693d65182b37a0d9f478dc37", "size": 580 },
+            { "path": "ammo-slots.dll", "sha256": "40321287f8e4dd4787d0a5f5f778af030cd784b31107a340408c77fffd271fe2", "size": 396800 }
+          ]
+        }
+      ]
+    }
+  ]
+}

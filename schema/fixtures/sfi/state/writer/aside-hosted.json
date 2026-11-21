@@ -1,0 +1,39 @@
+{
+  "format": 1,
+  "writer": "kiln-sfi",
+  "kilnSfi": "0.1.0",
+  "launch": {
+    "launchId": "3f2b8c1e5a7d4e2f",
+    "planHash": null,
+    "pid": 4242,
+    "processStartMs": 1763520000000,
+    "side": "client",
+    "profile": {
+      "id": "main",
+      "generation": 7
+    },
+    "backend": {
+      "selected": "hosted",
+      "source": "kiln.launch",
+      "reasonCode": "hosted-default",
+      "text": null
+    },
+    "frozenAtMs": 1763520000100
+  },
+  "phase": "aside",
+  "reason": {
+    "code": "hosted-default",
+    "text": "backend hosted: kiln-shroudforge has this start (no setting)"
+  },
+  "incomplete": false,
+  "previousStart": {
+    "disposition": "none",
+    "launchId": null,
+    "pid": null
+  },
+  "startedMs": 1763520000200,
+  "updatedMs": 1763520004000,
+  "warningRevision": 0,
+  "packages": [],
+  "carriedSaveSensitive": []
+}

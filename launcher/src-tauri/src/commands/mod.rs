@@ -8,6 +8,8 @@ pub mod runtime;
 pub mod profile;
 pub mod library;
 pub mod config;
+// Settings' ShroudForge card
+pub mod sfi_backend;
 pub mod launch;
 pub mod logs;
 pub mod saves;
@@ -29,6 +31,8 @@ pub mod community;
 pub mod pack;
 pub mod crucible;
 pub mod studio;
+// the check before Play
+pub mod sfi;
 
 /// A background task id; the task reports through `kiln://task`.
 pub type TaskId = String;
@@ -154,6 +158,9 @@ pub const NAMES: &[&str] = &[
     "config_kiln_read",
     "config_kiln_set",
     "config_kiln_reset",
+    "sfi_backend_read",
+    "sfi_backend_preview",
+    "sfi_backend_set",
     "app_assets_status",
     "app_assets_import",
     "server_console_open",
@@ -311,6 +318,10 @@ pub const NAMES: &[&str] = &[
     "studio_publish",
     "studio_set_visibility",
     "studio_server_pack",
+    "launch_prepare",
+    "launch_confirm",
+    "launch_cancel",
+    "eml_data_base",
 ];
 
 #[cfg(test)]

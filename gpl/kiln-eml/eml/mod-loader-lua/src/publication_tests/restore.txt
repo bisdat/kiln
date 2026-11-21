@@ -1,0 +1,17 @@
+journal.removed ownership/enshrouded.change-journal.json
+temp.written ownership/cleanup-*.json
+temp.replaced ownership/cleanup-*.json
+temp.recorded game/enshrouded.kfc
+temp.written game/enshrouded.kfc
+temp.replaced game/enshrouded.kfc
+temp.record-removed game/enshrouded.kfc
+temp.written ownership/cleanup-*.json
+temp.replaced ownership/cleanup-*.json
+temp.recorded game/enshrouded.kfc_resources
+temp.written game/enshrouded.kfc_resources
+temp.replaced game/enshrouded.kfc_resources
+temp.record-removed game/enshrouded.kfc_resources
+cleanup.container-removed game/enshrouded_004.dat
+cleanup.container-removed game/enshrouded_005.dat
+cleanup.container-removed game/enshrouded_006.dat
+cleanup.container-removed game/enshrouded_007.dat

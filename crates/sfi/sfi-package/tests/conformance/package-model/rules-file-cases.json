@@ -1,0 +1,642 @@
+[
+{
+"id": "file.missing",
+"kind": "missing",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+}
+},
+{
+"id": "file.missing-parent",
+"kind": "missing-parent",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+}
+},
+{
+"id": "file.dangling-symlink",
+"kind": "dangling-symlink",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"unix": true
+},
+{
+"id": "file.directory",
+"kind": "directory",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+}
+},
+{
+"id": "file.parent-is-file",
+"kind": "parent-is-file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+}
+},
+{
+"id": "file.unreadable",
+"kind": "unreadable",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"^1\"},\"second\":{\"id\":\"b\",\"version\":\">=2.0.0, <3\"},\"reason\":\"clash\"}]}",
+"sha256": "bbfd18a31c3864408c354de3d3c07e36749ea905143021239f54569251c235dc",
+"unix": true
+},
+{
+"id": "file.empty",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "",
+"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+},
+{
+"id": "file.whitespace",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": " \n",
+"sha256": "e16f1596201850fd4a63680b27f603cb64e67176159be3d8ed78a4403fdb1700"
+},
+{
+"id": "file.invalid-json",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\"schemaVersion\":1,\"conflicts\":[],}",
+"sha256": "bd62a3f0ac4d0ae4f7b4a737d048350234aaa0b182fadfb98af0195de045af84"
+},
+{
+"id": "file.truncated",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\"schemaVersion\":1,\"conflicts\":[",
+"sha256": "da3a0a56c0115d0e641d6041390fdfe1bf3ed4e5b6681c8a24bff0c953c78e66"
+},
+{
+"id": "file.bom",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "\ufeff{\"schemaVersion\":1,\"conflicts\":[]}",
+"sha256": "b1a422cf7afbcd450d97c613b611370385d65498040413a4d009e0dffcee0bd2"
+},
+{
+"id": "file.invalid-utf8",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"hex": "7b22736368656d6156657273696f6e223a312c22636f6e666c69637473223a5b7b226669727374223a7b226964223a2261222c2276657273696f6e223a222a227d2c227365636f6e64223a7b226964223a2262222c2276657273696f6e223a222a227d2c22726561736f6e223a2278ff227d5d7d",
+"sha256": "6c95d738d34f849ab0e7bcfce5066131232d52060b80be5b4546f7a642be672b"
+},
+{
+"id": "file.invalid-utf8-lines",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"hex": "7b0a202022736368656d6156657273696f6e223a20312c0a202022636f6e666c69637473223a205b0a202020207b226669727374223a207b226964223a202261222c202276657273696f6e223a20222a227d2c20227365636f6e64223a207b226964223a202262222c202276657273696f6e223a20222a227d2c2022726561736f6e223a20226f6b20c3a9205c2220e282227d0a20205d0a7d0a",
+"sha256": "4596c69b301e605146186f5160f163dce0d4113fe630c68216acf6f54c07efb2"
+},
+{
+"id": "file.trailing-garbage",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\"schemaVersion\":1,\"conflicts\":[]} x",
+"sha256": "67b6b810ba83a52ce5d51699eabe6dfcbe86c5041b0eb63b4a2989ae37d0192e"
+},
+{
+"id": "file.schemaVersion-2",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\"schemaVersion\":2,\"conflicts\":[]}",
+"sha256": "a7b61062c77e07e3ca0965a7e0a187699ba6a3a8f01edb59fe87170f57f67aeb"
+},
+{
+"id": "file.unknown-key",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\"schemaVersion\":1,\"conflicts\":[],\"extra\":true}",
+"sha256": "71b7fa5f40458df550618bedebdce29f24b340a1f024cda81d46942c59ed3a80"
+},
+{
+"id": "file.unknown-rule-key",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\",\"note\":\"x\"}]}",
+"sha256": "49c1610beadd682d701ca4c9005e6c01494eebad06723eccc648b3456779be03"
+},
+{
+"id": "file.missing-conflicts",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\"schemaVersion\":1}",
+"sha256": "0e9561cfb83d50990a103b3896fe249a11fe27fa28985448187f93ec12116d72"
+},
+{
+"id": "file.$schema",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\"$schema\":\"rules.schema.json\",\"schemaVersion\":1,\"conflicts\":[]}",
+"sha256": "6731ebd4b9505afc55c2727be1bbb28e9f1df2e077f82d5e82f278d8b15fefe3"
+},
+{
+"id": "file.array",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "[]",
+"sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+},
+{
+"id": "file.bad-range",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"one\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"sha256": "9fca1fb581217ae068f61a75f6f64a841e9d857982753e78fa34f04a48bae025"
+},
+{
+"id": "file.valid-empty",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\"schemaVersion\":1,\"conflicts\":[]}",
+"sha256": "14fe824224e06d18e44a2493a4a3b910af2fc96f07cbb28a52049f35e3f98591"
+},
+{
+"id": "file.valid-default-bytes",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\n  \"schemaVersion\": 1,\n  \"conflicts\": []\n}\n",
+"sha256": "f4f31e2f9e8858dd31011d529024e3040709e91c3f81e79a47c33921aa92a17e"
+},
+{
+"id": "file.valid-match",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"^1\"},\"second\":{\"id\":\"b\",\"version\":\">=2.0.0, <3\"},\"reason\":\"clash\"}]}",
+"sha256": "bbfd18a31c3864408c354de3d3c07e36749ea905143021239f54569251c235dc"
+},
+{
+"id": "file.valid-match-crlf",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\r\n  \"schemaVersion\": 1,\r\n  \"conflicts\": [\r\n    {\r\n      \"first\": {\r\n        \"id\": \"a\",\r\n        \"version\": \"^1\"\r\n      },\r\n      \"second\": {\r\n        \"id\": \"b\",\r\n        \"version\": \">=2.0.0, <3\"\r\n      },\r\n      \"reason\": \"clash\"\r\n    }\r\n  ]\r\n}",
+"sha256": "1c7922e675c1c829e524c6093632b51a9f2edd0a8e72c087877f29c06c19cbd2"
+},
+{
+"id": "file.valid-disabled",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"c\",\"version\":\"*\"},\"reason\":\"clash\"}]}",
+"sha256": "6ac8a7f7c12ba3b221760fbb89c11073a7d71f2645ffbd08f2ae81666625d2e5"
+},
+{
+"id": "file.valid-later-reason",
+"kind": "file",
+"mods": {
+"a": [
+true,
+"1.2.0"
+],
+"b": [
+true,
+"2.0.0"
+],
+"c": [
+false,
+"1.0.0"
+],
+"z": [
+true,
+"1.0.0"
+]
+},
+"text": "{\"schemaVersion\":1,\"conflicts\":[{\"first\":{\"id\":\"a\",\"version\":\"*\"},\"second\":{\"id\":\"b\",\"version\":\"*\"},\"reason\":\"first\"},{\"first\":{\"id\":\"b\",\"version\":\"*\"},\"second\":{\"id\":\"a\",\"version\":\"*\"},\"reason\":\"last\"}]}",
+"sha256": "a16a6f4e9f8a23bec348fed74b72b52cb8edd30e247ce8b034784c1c0e060065"
+}
+]

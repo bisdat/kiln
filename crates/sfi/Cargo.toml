@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MIT
+# Independent of the repository's root workspace and the GPL startup workspace.
+[workspace]
+resolver = "3"
+members = ["sfi-core", "sfi-package", "sfi-policy", "kiln-abi", "kiln-sfi"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89.0"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+# SF 1.7.9 (d8a394bc) and 1.8.0 (38ef448d): features from
+# modules/mod-runtime/Cargo.toml:39; resolved mlua from Cargo.lock:2286-2287.
+mlua = { version = "=0.11.6", features = ["lua54", "vendored", "error-send"] }
+serde_json = "1.0"

@@ -26,11 +26,18 @@ win=x86_64-pc-windows-msvc
 # the game ships no VC runtime for us: link the CRT statically (as kiln-core does)
 flags=${CARGO_ENCODED_RUSTFLAGS:-}
 flags=${flags:+$flags$'\x1f'}-Ctarget-feature=+crt-static
-CARGO_ENCODED_RUSTFLAGS=$flags cargo xwin build --release --locked -p kiln-eml --lib --target $win
+CARGO_ENCODED_RUSTFLAGS=$flags cargo xwin build --release --locked -p kiln-eml --lib --bin kiln-eml-inspect --target $win
 mkdir -p "$KILN_OUT/cmake/bin/plugins"
 install -m 755 "$CARGO_TARGET_DIR/$win/release/kiln_eml.dll" "$KILN_OUT/cmake/bin/plugins/kiln-eml.dll"
 echo "kiln-eml: $KILN_OUT/cmake/bin/plugins/kiln-eml.dll"
+# The read-only archive inspector, a separate GPL process (README "Archive inspector"); staging it is not this script's.
+mkdir -p "$KILN_OUT/eml-inspect/windows-x86_64"
+install -m 755 "$CARGO_TARGET_DIR/$win/release/kiln-eml-inspect.exe" "$KILN_OUT/eml-inspect/windows-x86_64/kiln-eml-inspect.exe"
+echo "kiln-eml-inspect: $KILN_OUT/eml-inspect/windows-x86_64/kiln-eml-inspect.exe"
 if ((host)); then
-  cargo build --release --locked -p kiln-eml --bin kiln-eml-run
+  cargo build --release --locked -p kiln-eml --bin kiln-eml-run --bin kiln-eml-inspect
   echo "kiln-eml-run: $CARGO_TARGET_DIR/release/kiln-eml-run"
+  mkdir -p "$KILN_OUT/eml-inspect/linux-x86_64"
+  install -m 755 "$CARGO_TARGET_DIR/release/kiln-eml-inspect" "$KILN_OUT/eml-inspect/linux-x86_64/kiln-eml-inspect"
+  echo "kiln-eml-inspect: $KILN_OUT/eml-inspect/linux-x86_64/kiln-eml-inspect"
 fi

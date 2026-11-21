@@ -34,6 +34,8 @@ import { useShown } from "../community/state";
 import { watchCrashes } from "../community/crash";
 import { CrucibleHost } from "../crucible/Host";
 import { useCrucibleOn } from "../crucible/state";
+// the warning before Play
+import { SfiWarningHost } from "../components/SfiWarningDialog";
 
 const MOTION = "(prefers-reduced-motion: reduce)";
 const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.(MOTION).matches;
@@ -299,6 +301,7 @@ export function AppShell() {
       <CommunityDesktopHost />
       <CrucibleHost />
       <OwnFilesNotice />
+      <SfiWarningHost />
       <Toaster />
       <Splash done={ready} />
     </div>

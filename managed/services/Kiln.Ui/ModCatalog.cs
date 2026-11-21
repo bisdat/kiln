@@ -69,6 +69,9 @@ internal sealed record CatalogMod
     public IReadOnlyList<ModDependency> Dependencies { get; init; } = [];
     /// <summary>ShroudForge mods: its runtime runs it in this process now (its current state.json lists it active).</summary>
     public bool Active { get; init; }
+    // a kiln-backend start's ShroudForge row: the interpreter's part truth for the page
+    /// <summary>ShroudForge mods of a start Kiln's interpreter has (SfiCatalog): what the page draws beyond the state.</summary>
+    public SfiRow? Sfi { get; init; }
 
     public bool NeedsAttention => State == ModRunState.Failed || Missing;
 
@@ -133,6 +136,9 @@ internal sealed record CatalogSources
     public int Pid { get; init; } = Environment.ProcessId;
     public DateTime ProcessStartUtc { get; init; } = DateTime.MinValue;
     public string Side { get; init; } = "";
+    // which branch the ShroudForge group takes this start, decided once per read
+    /// <summary>Set by <see cref="ModCatalog.Read"/> (SfiCatalog.Decide) before any ShroudForge path; null until then.</summary>
+    public SfiBranch? Sfi { get; init; }
 }
 
 internal static class ModCatalog
@@ -591,6 +597,9 @@ internal static class ModCatalog
     public static CatalogSnapshot Read(CatalogSources src)
     {
         var generation = KilnText.Generation;  // a change while it reads: the next Snapshot reads again
+        // (the frozen ShroudForge backend of this start, before any ShroudForge folder, status,
+        // assets or actions path; in a kiln-backend start nothing below reads or writes <game>/shroudforge)
+        src = SfiCatalog.Decide(src);
         var boot = ReadState(src, "boot.json");
         var bootDoc = boot.Current ? boot.Doc : null;
         Profile profile;
@@ -1005,6 +1014,15 @@ internal static class ModCatalog
     // ---- ShroudForge: the profile and its mods folder for the list, the state file for the runtime ----
     private static void ShroudForge(Builder b, JsonElement? boot)
     {
+        // a start Kiln's interpreter has, or one whose state is not known: SfiCatalog's rows
+        if (b.Src.Sfi is { Kind: not SfiBranchKind.Legacy } sfi)
+        {
+            if (!b.Mods.TryGetValue("eml", out var eml)) eml = [];
+            SfiCatalog.Build(sfi, b.Src, b.Profile.Of("shroudforge"), b.FolderOf,
+                e => b.RunFolder(e) is null && (b.MissingPaths.Contains(e.Path) || !DirExists(e.Path)), eml, b.Add,
+                (word, health, note, reported) => b.Engine("shroudforge", word, health, note, reported));
+            return;
+        }
         var f = ReadState(b.Src, "shroudforge.json");
         string? mode = null, reason = null, modsDir = null, menu = null;
         if (f.Doc is { } d && f.Current)
@@ -1467,6 +1485,8 @@ internal static class ModCatalog
     /// other kind: its plugin loads the mod from the path the profile names.</summary>
     internal static string? PlacedRoot(CatalogSources src, string kind) => kind switch
     {
+        // a kiln-backend start's mods root is <game>/mods; ShroudForge's config is never read
+        "shroudforge" when SfiCatalog.ModsRoot(src) is { } kilnRoot => kilnRoot,
         "shroudforge" => PlainPath(SfFolder(src.GameDir, "mods")),
         "set" => Path.Combine(src.GameDir, "shrouded_engine_tweaks", "mods"),
         _ => null,

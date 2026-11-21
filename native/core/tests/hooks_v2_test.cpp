@@ -13,6 +13,7 @@
 #include <intrin.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -27,6 +28,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -41,6 +43,7 @@
 #include "services/hooks_code.h"
 #include "services/hooks_internal.h"
 #include "services/kiln_hooks.h"
+#include "hooks_protect_internal.h"
 #include "services/service.h"
 #include "sigdb.h"
 #include "tick.h"
@@ -98,7 +101,13 @@ std::map<KilnOwner, std::string> g_owner_names = {{0, "kiln"},
                                                   {5, "native:beta"},
                                                   {6, "test"},
                                                   {7, "shroudtopia:modx"},
-                                                  {8, "emf:mody"}};
+                                                  {8, "emf:mody"},
+                                                  {9, "service:kiln-world.dll"},
+                                                  {10, "service:kiln-abilities.dll"},
+                                                  {11, "service:kiln-engine.dll"}};
+// test_protected_ranges: the core's owner-retiring observers (kiln.internal.hooks subscribes one) and retired owners.
+std::vector<std::pair<void(KILN_CALL*)(KilnOwner, void*), void*>> g_retiring;
+std::set<KilnOwner> g_retired;
 }  // namespace
 
 namespace kiln {
@@ -164,7 +173,11 @@ std::string owner_name(KilnOwner o) {
     auto it = g_owner_names.find(o);
     return it == g_owner_names.end() ? "(revoked)" : it->second;
 }
-KilnResult add_owner_retiring(KilnOwner, OwnerRetiringFn, void*, KilnHandle*) { return KILN_ERR_UNAVAILABLE; }
+KilnResult add_owner_retiring(KilnOwner, OwnerRetiringFn fn, void* user, KilnHandle*) {
+    g_retiring.push_back({fn, user});
+    return KILN_OK;
+}
+bool owner_alive(KilnOwner o) { return !g_retired.count(o); }
 KilnResult remove_owner_retiring(KilnHandle) { return KILN_ERR_NOT_FOUND; }
 }  // namespace reg
 namespace tick {
@@ -2807,6 +2820,386 @@ void test_slots() {
 }  // namespace
 
 // ---------------------------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------
+// kiln.internal.hooks: code a Kiln service protects for its engine calls (hooks_protect_internal.h).
+extern "C" {
+int game_asm_pr_a(int);
+int game_asm_pr_b(int);
+int game_asm_pr_c(int);
+int game_asm_pr_d(int);
+int game_asm_pr_e(int);
+int game_asm_pr_f(int);
+int game_asm_pr_h(int);
+int game_asm_pr_g(int);
+int game_asm_pr_i(int);
+extern char game_prot_many[];
+}
+__asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n" GAME_ASM(game_asm_pr_a) GAME_ASM(game_asm_pr_b) GAME_ASM(game_asm_pr_c)
+            GAME_ASM(game_asm_pr_d) GAME_ASM(game_asm_pr_e) GAME_ASM(game_asm_pr_f) GAME_ASM(game_asm_pr_h)
+                GAME_ASM(game_asm_pr_g) GAME_ASM(game_asm_pr_i) ".text\n");
+// 16 more for the race of first installs against protect.
+__asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n.balign 32, 0xCC\n"
+        ".globl game_prot_many\n.def game_prot_many; .scl 2; .type 32; .endef\ngame_prot_many:\n"
+        ".rept 16\n  push rbx\n  sub rsp, 0x20\n  mov eax, ecx\n  add eax, 1\n  add rsp, 0x20\n  pop rbx\n  ret\n  .balign 32, 0xCC\n.endr\n"
+        ".text\n");
+
+// The core's owner-retiring notification for `o` (what owner_revoke does after marking it dead).
+void retire_owner(KilnOwner o) {
+    g_retired.insert(o);
+    for (auto& [fn, user] : g_retiring) fn(o, user);
+}
+
+void test_protected_ranges() {
+    std::puts("-- kiln.internal.hooks: code protected for engine calls refuses installs, patches and writes over it");
+    namespace code = kiln::hooks::code;
+    const KilnHooksInternalApi* I = kiln::hooks::internal_table();
+    check(I && I->header.size == sizeof(KilnHooksInternalApi) && I->header.size == 16 &&
+              I->header.version == KILN_HOOKS_INTERNAL_VERSION && I->protect_code_ranges,
+          "kiln.internal.hooks v1: 16 bytes, protect_code_ranges set");
+    const size_t base_count = code::registry().protected_count();
+    const KilnStr why{"engine call PropSpawnSubmit", 27};
+    auto protect = [&](KilnOwner o, uintptr_t at, size_t n) {
+        const KilnCodeRange r{at, n};
+        return I->protect_code_ranges(o, &r, 1, why);
+    };
+    auto bytes_of = [](uintptr_t at, uint8_t* out) { std::memcpy(out, reinterpret_cast<const void*>(at), 16); };
+    auto same_as = [](uintptr_t at, const uint8_t* bytes) { return !std::memcmp(reinterpret_cast<const void*>(at), bytes, 16); };
+    auto state_of = [](uintptr_t at, size_t n) {
+        uint32_t s = 99;
+        uint64_t g = 0;
+        return A->code_state(at, n, &s, &g) == KILN_OK ? s : 99u;
+    };
+    static int (*cont)(int) = nullptr;
+    static auto raw = +[](int x) { return cont(x); };
+    static auto v1 = +[](KilnHookCall* c, void*) -> uintptr_t { return A->call_original(c); };
+    static auto v2fn = +[](KilnHookCall2* c, void*) -> uintptr_t { return A->call_original2(c); };
+    static auto midfn = +[](KilnRegisters*, void*) {};
+    static auto typed = +[](KilnCallFrame*, void*) -> uintptr_t { return 0; };
+    const KilnHookOrder o = ord(0, "pr");
+    const std::string refused_line = "would write over code that service:kiln-world.dll protected for an engine call (engine call PropSpawnSubmit)";
+
+    // A protected function: every kind of link, at its entry and inside the range, refused; nothing written, no thread
+    // stopped, no target made.
+    const uintptr_t a = reinterpret_cast<uintptr_t>(&game_asm_pr_a);
+    snapshot_file(reinterpret_cast<void*>(a));
+    uint8_t a_file[16];
+    bytes_of(a, a_file);
+    check(protect(9, a, 16) == KILN_OK && code::registry().protected_count() == base_count + 1,
+          "an ORIGINAL function's first 16 bytes are protected");
+    check(log_has("service:kiln-world.dll protected 1 code range(s) (16 bytes) for an engine call (engine call PropSpawnSubmit)"),
+          "kiln.log says who protected how much, and why");
+    const size_t stops = log_count("hooks: detour on rva"), refusals = log_count(refused_line);
+    const uint32_t targets = chain::stats().targets;
+    KilnHandle h = 0;
+    uint32_t unchecked = 7;
+    const KilnResult r_raw = A->raw_detour(6, a, &o, reinterpret_cast<void*>(raw), reinterpret_cast<void**>(&cont), &h);
+    const KilnResult r_v1 = A->detour(6, a, 0, v1, nullptr, &h);
+    const KilnResult r_v2 = A->detour2(6, a, &o, 1, v2fn, nullptr, &h);
+    const KilnResult r_mid = A->mid(6, a, 0, midfn, nullptr, &h);
+    const KilnResult r_mid2 = A->mid2(6, a, &o, midfn, nullptr, &h);
+    const KilnResult r_checked = A->mid2_checked(6, a, &o, midfn, nullptr, &h, &unchecked);
+    const KilnResult r_typed = chain::install_typed(6, a, chain::Order{}, 0, typed, nullptr, &h);
+    const KilnResult r_inside = A->mid2(6, a + 5, &o, midfn, nullptr, &h);
+    check(r_raw == KILN_ERR_UNAVAILABLE && r_v1 == KILN_ERR_UNAVAILABLE && r_v2 == KILN_ERR_UNAVAILABLE &&
+              r_mid == KILN_ERR_UNAVAILABLE && r_mid2 == KILN_ERR_UNAVAILABLE && r_checked == KILN_ERR_UNAVAILABLE &&
+              unchecked == 0 && r_typed == KILN_ERR_UNAVAILABLE && r_inside == KILN_ERR_UNAVAILABLE,
+          "raw, v1, detour2, mid, mid2, mid2_checked and typed links on it, and a mid link inside it: KILN_ERR_UNAVAILABLE",
+          std::to_string(r_raw) + " " + std::to_string(r_v1) + " " + std::to_string(r_v2) + " " + std::to_string(r_mid) + " " +
+              std::to_string(r_mid2) + " " + std::to_string(r_checked) + "/" + std::to_string(unchecked) + " " +
+              std::to_string(r_typed) + " " + std::to_string(r_inside));
+    check(same_as(a, a_file) && state_of(a, 16) == KILN_CODE_ORIGINAL && game_asm_pr_a(41) == 42,
+          "...nothing was written: the bytes are the file's (ORIGINAL) and the function runs");
+    check(log_count("hooks: detour on rva") == stops && chain::stats().targets == targets,
+          "...no thread was stopped and no target was made");
+    check(log_count(refused_line) == refusals + 4 && log_has("raw hook on rva") && log_has("by test refused, nothing written") &&
+              log_has("[refusal 8 of this owner over this range"),
+          "...the 1st, 2nd, 4th and 8th of these 8 refusals are one kiln.log line each, naming the hook, its owner, the "
+          "protecting service and the reason",
+          std::to_string(log_count(refused_line) - refusals) + " lines");
+
+    // Patches and writes: refused over the range, allowed beside it.
+    const uint8_t x = 0xCC;
+    KilnHandle p = 0;
+    check(A->patch(5, a + 4, &x, 1, &p) == KILN_ERR_UNAVAILABLE && A->patch(5, a - 2, a_file, 3, &p) == KILN_ERR_UNAVAILABLE &&
+              A->patch(5, a + 15, a_file, 2, &p) == KILN_ERR_UNAVAILABLE,
+          "a patch inside it, or over either edge: KILN_ERR_UNAVAILABLE");
+    check(A->write(a + 15, &x, 1) == KILN_ERR_UNAVAILABLE && A->write(a - 1, a_file, 2) == KILN_ERR_UNAVAILABLE,
+          "a write inside it, or over its first byte: KILN_ERR_UNAVAILABLE");
+    check(same_as(a, a_file) && state_of(a, 16) == KILN_CODE_ORIGINAL, "...nothing was written");
+    check(log_has("patch of 1 byte(s) at rva 0x") &&
+              log_has("by native:beta refused, nothing written: it overlaps code that service:kiln-world.dll protected for an engine call (engine call PropSpawnSubmit)") &&
+              log_has("write of 1 byte(s) at rva 0x"),
+          "...kiln.log names the patch or write, its owner, the protecting service and the reason");
+    const uint8_t after = *reinterpret_cast<const uint8_t*>(a + 16), before = *reinterpret_cast<const uint8_t*>(a - 1);
+    const uint8_t flipped = after ^ 0x7f;
+    check(A->patch(6, a + 16, &flipped, 1, &p) == KILN_OK && *reinterpret_cast<const uint8_t*>(a + 16) == flipped &&
+              A->unpatch(p) == KILN_OK && *reinterpret_cast<const uint8_t*>(a + 16) == after,
+          "a patch right after the range (adjacent) is allowed");
+    check(A->write(a - 1, &before, 1) == KILN_OK, "a write right before the range (adjacent) is allowed");
+
+    // A mod retrying a refused hook every tick does not flood kiln.log: per requesting owner and protected range, the
+    // 1st, 2nd, 4th, 8th, ... refusal is logged.
+    {
+        const std::string by7 = "by shroudtopia:modx refused", by8 = "by emf:mody refused";
+        const size_t l7 = log_count(by7), l8 = log_count(by8);
+        bool all_refused = true;
+        for (int i = 0; i < 20; ++i) all_refused = all_refused && A->mid2(7, a, &o, midfn, nullptr, &h) == KILN_ERR_UNAVAILABLE;
+        check(all_refused && log_count(by7) == l7 + 5 && log_has("[refusal 16 of this owner over this range"),
+              "20 refused retries of one owner on one protected range: 5 kiln.log lines (1st, 2nd, 4th, 8th, 16th)",
+              std::to_string(log_count(by7) - l7) + " lines");
+        check(A->mid2(8, a, &o, midfn, nullptr, &h) == KILN_ERR_UNAVAILABLE && log_count(by8) == l8 + 1,
+              "...another owner's first refusal there is logged");
+        const uintptr_t g = reinterpret_cast<uintptr_t>(&game_asm_pr_g);
+        snapshot_file(reinterpret_cast<void*>(g));
+        check(protect(11, g, 16) == KILN_OK && A->mid2(7, g, &o, midfn, nullptr, &h) == KILN_ERR_UNAVAILABLE &&
+                  log_count(by7) == l7 + 6,
+              "...and so is the same owner's first refusal over another protected range");
+        bool writes_refused = true;
+        const size_t lw = log_count("write of 1 byte(s) at rva 0x");
+        for (int i = 0; i < 9; ++i) writes_refused = writes_refused && A->write(g + 3, &x, 1) == KILN_ERR_UNAVAILABLE;
+        check(writes_refused && log_count("write of 1 byte(s) at rva 0x") == lw + 4, "9 refused writes there: 4 lines",
+              std::to_string(log_count("write of 1 byte(s) at rva 0x") - lw) + " lines");
+    }
+
+    // A Kiln patch that put the file's bytes back over another patch still counts: unpatch is not checked, and undoing
+    // it would change the code. Such a range reads ORIGINAL but is not protected.
+    {
+        const uintptr_t i = reinterpret_cast<uintptr_t>(&game_asm_pr_i);
+        snapshot_file(reinterpret_cast<void*>(i));
+        uint8_t i_file[16];
+        bytes_of(i, i_file);
+        const uint8_t flip = i_file[8] ^ 0x7f;
+        KilnHandle lower = 0, upper = 0;
+        const size_t count_i = code::registry().protected_count();
+        check(A->patch(6, i + 8, &flip, 1, &lower) == KILN_OK && A->patch(6, i + 8, i_file + 8, 1, &upper) == KILN_OK &&
+                  same_as(i, i_file) && state_of(i, 16) == KILN_CODE_ORIGINAL,
+              "a patch, and a second one over it with the file's byte: the code reads ORIGINAL");
+        check(protect(11, i, 16) == KILN_ERR_UNAVAILABLE && code::registry().protected_count() == count_i,
+              "...but it is not protected: the patches are Kiln's (MANAGED)");
+        check(A->unpatch(upper) == KILN_OK && *reinterpret_cast<const uint8_t*>(i + 8) == flip && A->unpatch(lower) == KILN_OK &&
+                  same_as(i, i_file),
+              "...undoing the upper patch writes the lower one's byte back (what a protection would have let through)");
+        check(protect(11, i, 16) == KILN_OK && code::registry().protected_count() == count_i + 1,
+              "with both patches gone it is protected");
+    }
+
+    // The detour's whole extent counts: hooking B shows how many bytes a detour on this code writes (a 5-byte jump or a
+    // 14-byte one; GAME_ASM's instructions end at 1, 5, 7, 10 and 14).
+    const uintptr_t b = reinterpret_cast<uintptr_t>(&game_asm_pr_b), c = reinterpret_cast<uintptr_t>(&game_asm_pr_c),
+                    d = reinterpret_cast<uintptr_t>(&game_asm_pr_d);
+    for (uintptr_t f : {b, c, d}) snapshot_file(reinterpret_cast<void*>(f));
+    static int (*cont_b)(int) = nullptr;
+    static int (*cont_c)(int) = nullptr;
+    static auto raw_b = +[](int x) { return cont_b(x); };
+    static auto raw_c = +[](int x) { return cont_c(x); };
+    check(A->raw_detour(6, b, &o, reinterpret_cast<void*>(raw_b), reinterpret_cast<void**>(&cont_b), &h) == KILN_OK,
+          "an unprotected function takes a detour");
+    const uint8_t first = *reinterpret_cast<const uint8_t*>(b);
+    const size_t len = first == 0xE9 ? 5 : 14;
+    check(first == 0xE9 || first == 0xFF, "...a 5- or 14-byte jump", "first byte " + std::to_string(first) + ", " + std::to_string(len) + " bytes");
+    uint8_t c_file[16], d_file[16];
+    bytes_of(c, c_file);
+    bytes_of(d, d_file);
+    check(protect(11, c + len, 1) == KILN_OK && protect(11, d + len - 1, 1) == KILN_OK, "C and D protected right after, and at the end of, a detour's bytes");
+    const size_t stops_c = log_count("hooks: detour on rva");
+    check(A->raw_detour(6, c, &o, reinterpret_cast<void*>(raw_c), reinterpret_cast<void**>(&cont_c), &h) == KILN_OK &&
+              game_asm_pr_c(41) == 42 && state_of(c + len, 1) == KILN_CODE_ORIGINAL && log_count("hooks: detour on rva") == stops_c + 1,
+          "a detour whose bytes end right before protected code is placed (adjacent), with the threads stopped as usual");
+    check(A->raw_detour(6, d, &o, reinterpret_cast<void*>(raw), reinterpret_cast<void**>(&cont), &h) == KILN_ERR_UNAVAILABLE &&
+              same_as(d, d_file) && state_of(d, 16) == KILN_CODE_ORIGINAL && log_count("hooks: detour on rva") == stops_c + 1,
+          "a detour whose last byte would cover protected code is refused (its first byte is free): nothing written, no stop");
+
+    // MANAGED or FOREIGN first: nothing is protected.
+    const uintptr_t e = reinterpret_cast<uintptr_t>(&game_asm_pr_e), f = reinterpret_cast<uintptr_t>(&game_asm_pr_f);
+    snapshot_file(reinterpret_cast<void*>(e));
+    snapshot_file(reinterpret_cast<void*>(f));
+    static int (*cont_e)(int) = nullptr;
+    static auto raw_e = +[](int x) { return cont_e(x); };
+    const size_t count_e = code::registry().protected_count();
+    check(A->raw_detour(6, e, &o, reinterpret_cast<void*>(raw_e), reinterpret_cast<void**>(&cont_e), &h) == KILN_OK &&
+              protect(9, e, 16) == KILN_ERR_UNAVAILABLE && code::registry().protected_count() == count_e,
+          "a function a Kiln mod hooked first (MANAGED) is not protected: the engine call stays unavailable");
+    check(A->mid2(6, e, &o, midfn, nullptr, nullptr) == KILN_OK, "...and its target keeps taking links");
+    uint8_t f_file[16];
+    bytes_of(f, f_file);
+    const uint8_t fx = f_file[8] ^ 0x7f;
+    check(A->patch(6, f + 8, &fx, 1, &p) == KILN_OK && protect(9, f, 16) == KILN_ERR_UNAVAILABLE &&
+              code::registry().protected_count() == count_e,
+          "a patched function (MANAGED) is not protected");
+    check(A->unpatch(p) == KILN_OK && A->write(f + 8, &fx, 1) == KILN_OK && protect(9, f, 16) == KILN_ERR_UNAVAILABLE &&
+              code::registry().protected_count() == count_e,
+          "nor one another writer changed (FOREIGN)");
+    check(A->write(f + 8, f_file + 8, 1) == KILN_OK && protect(9, f, 16) == KILN_OK && code::registry().protected_count() == count_e + 1,
+          "with its bytes the file's again it is protected");
+
+    // Idempotent; several owners; arguments; a dead owner.
+    const size_t count = code::registry().protected_count();
+    check(protect(9, a, 16) == KILN_OK && code::registry().protected_count() == count, "protecting the same range again adds nothing");
+    check(protect(10, a, 16) == KILN_OK && code::registry().protected_count() == count + 1, "a second service protects it too");
+    const KilnCodeRange outside{reinterpret_cast<uintptr_t>(&raw), 4}, zero{a, 0};
+    check(I->protect_code_ranges(0, &outside, 1, why) == KILN_ERR_INVALID_ARGUMENT &&
+              I->protect_code_ranges(9, &outside, 1, why) == KILN_ERR_INVALID_ARGUMENT &&
+              I->protect_code_ranges(9, &zero, 1, why) == KILN_ERR_INVALID_ARGUMENT &&
+              I->protect_code_ranges(9, nullptr, 1, why) == KILN_ERR_INVALID_ARGUMENT &&
+              I->protect_code_ranges(9, &outside, 0, why) == KILN_ERR_INVALID_ARGUMENT &&
+              I->protect_code_ranges(9, &zero, 1, KilnStr{nullptr, 0}) == KILN_ERR_INVALID_ARGUMENT &&
+              code::registry().protected_count() == count + 1,
+          "owner 0, code outside the game's .text, 0 bytes, no ranges or no reason: KILN_ERR_INVALID_ARGUMENT");
+
+    // Retirement releases an owner's ranges, and only its own.
+    retire_owner(9);
+    check(code::registry().protected_count() == count + 1 - 2, "owner 9 retires: its 2 ranges are released");
+    check(log_has("protected code range(s) of owner 9 released (the owner retired)"), "...kiln.log says so");
+    check(A->raw_detour(6, a, &o, reinterpret_cast<void*>(raw), reinterpret_cast<void**>(&cont), &h) == KILN_ERR_UNAVAILABLE &&
+              same_as(a, a_file),
+          "owner 10 still protects A: still refused");
+    check(protect(9, f, 16) == KILN_ERR_REVOKED, "a retired owner protects nothing (KILN_ERR_REVOKED)");
+    retire_owner(10);
+    const size_t stops_a = log_count("hooks: detour on rva");
+    check(A->raw_detour(6, a, &o, reinterpret_cast<void*>(raw), reinterpret_cast<void**>(&cont), &h) == KILN_OK &&
+              game_asm_pr_a(41) == 42 && state_of(a, 16) == KILN_CODE_MANAGED && log_count("hooks: detour on rva") == stops_a + 1,
+          "owner 10 retires too: A takes its detour (threads stopped as usual), and reads MANAGED");
+    check(protect(11, a, 16) == KILN_ERR_UNAVAILABLE, "...so protecting it now is refused: first come wins");
+
+    // protect takes the code lock: it waits for a thread that holds it.
+    {
+        const uintptr_t at = reinterpret_cast<uintptr_t>(game_prot_many) + 32 * 15;
+        snapshot_file(reinterpret_cast<void*>(at));
+        std::atomic<int> phase{0};
+        std::thread holder([&] {
+            auto guard = code::registry().lock();
+            phase = 1;
+            while (phase.load() < 2) Sleep(1);
+        });
+        const bool holding = until([&] { return phase.load() >= 1; });
+        std::atomic<bool> returned{false};
+        KilnResult rc = KILN_ERR_INTERNAL;
+        g_lock_reached = false;
+        std::thread caller([&] {
+            g_lock_watch = GetCurrentThreadId();
+            rc = protect(11, at, 16);
+            returned = true;
+        });
+        // the caller is at the lock the holder has: it can only wait (a protect that never takes it fails here)
+        const bool waited = holding && until([] { return g_lock_reached.load(); }) && !returned.load();
+        phase = 2;
+        caller.join();
+        g_lock_watch = 0;
+        holder.join();
+        check(waited && rc == KILN_OK, "protect waits for a thread holding kiln.hooks' code lock, then protects");
+    }
+
+    // A first install that holds the code lock (paused inside it, before it stops the threads) lands first: a protect
+    // made meanwhile waits, then sees MANAGED and protects nothing.
+    {
+        const uintptr_t at = reinterpret_cast<uintptr_t>(&game_asm_pr_h);
+        snapshot_file(reinterpret_cast<void*>(at));
+        std::atomic<bool> done{false};
+        KilnResult rc = KILN_ERR_INTERNAL;
+        bool reached = false, done_in_pause = true;
+        std::thread caller;
+        g_pause_reader_read = false;
+        g_pause_fn = [&] {
+            g_lock_reached = false;
+            caller = std::thread([&] {
+                g_lock_watch = GetCurrentThreadId();
+                g_pause_reader = GetCurrentThreadId();
+                rc = protect(11, at, 16);
+                done = true;
+            });
+            reached = until([] { return g_pause_reader_read.load(); });
+            // its next step is the lock, which this install holds: once it is there, it can only wait
+            reached = until([] { return g_lock_reached.load(); }) && reached;
+            done_in_pause = done.load();
+        };
+        g_pause_at = at;
+        g_pause_installer = GetCurrentThreadId();
+        static int (*cont_h)(int) = nullptr;
+        static auto raw_h = +[](int x) { return cont_h(x); };
+        const size_t before_count = code::registry().protected_count();
+        const KilnResult installed =
+            A->raw_detour(6, at, &o, reinterpret_cast<void*>(raw_h), reinterpret_cast<void**>(&cont_h), &h);
+        if (caller.joinable()) caller.join();
+        g_pause_at = 0;
+        g_pause_installer = 0;
+        g_pause_reader = 0;
+        g_lock_watch = 0;
+        g_pause_fn = nullptr;
+        check(installed == KILN_OK && reached && !done_in_pause,
+              "a protect started while a first install holds the lock read the file's bytes, then waited");
+        check(done && rc == KILN_ERR_UNAVAILABLE && code::registry().protected_count() == before_count &&
+                  state_of(at, 16) == KILN_CODE_MANAGED && game_asm_pr_h(41) == 42,
+              "...the install landed first: protect saw MANAGED and protected nothing", "rc " + std::to_string(rc));
+    }
+
+    // First installs (each stops every other thread) racing protects of the same functions: for each one exactly one of
+    // the two wins, and a protected one never changes, while installs, patches and writes keep coming.
+    {
+        constexpr int kFns = 15;  // the 16th is the lock test's
+        int protected_first = 0, installed_first = 0, both_or_neither = 0;
+        std::vector<uintptr_t> guarded;
+        for (int i = 0; i < kFns; ++i) {
+            const uintptr_t at = reinterpret_cast<uintptr_t>(game_prot_many) + 32 * static_cast<uintptr_t>(i);
+            snapshot_file(reinterpret_cast<void*>(at));
+            uint8_t file[16];
+            bytes_of(at, file);
+            std::atomic<int> ready{0};
+            KilnResult ri = KILN_ERR_INTERNAL, rp = KILN_ERR_INTERNAL;
+            static auto many = +[](int x) { return x + 1; };
+            std::thread installer([&] {
+                ++ready;
+                while (ready.load() < 2) {}
+                ri = A->raw_detour(6, at, nullptr, reinterpret_cast<void*>(many), nullptr, nullptr);
+            });
+            std::thread protector([&] {
+                ++ready;
+                while (ready.load() < 2) {}
+                if (i % 2) Sleep(0);
+                rp = protect(11, at, 16);
+            });
+            installer.join();
+            protector.join();
+            const bool p_ok = rp == KILN_OK, i_ok = ri == KILN_OK;
+            if (p_ok == i_ok) ++both_or_neither;
+            else if (p_ok && same_as(at, file) && state_of(at, 16) == KILN_CODE_ORIGINAL) ++protected_first, guarded.push_back(at);
+            else if (i_ok && state_of(at, 16) == KILN_CODE_MANAGED) ++installed_first;
+            else ++both_or_neither;
+        }
+        check(both_or_neither == 0 && protected_first + installed_first == kFns,
+              "15 first installs racing protects: each time exactly one wins, and the loser changed nothing",
+              std::to_string(protected_first) + " protected first, " + std::to_string(installed_first) + " installed first");
+        // The lock test's function is protected too, so the hammer below always has one, whichever way the race went.
+        guarded.push_back(reinterpret_cast<uintptr_t>(game_prot_many) + 32 * 15);
+        std::vector<std::array<uint8_t, 16>> files(guarded.size());
+        for (size_t i = 0; i < guarded.size(); ++i) std::memcpy(files[i].data(), g_file.at(guarded[i]).data(), 16);
+        std::atomic<bool> stop{false};
+        std::atomic<unsigned> attempts{0}, landed{0};
+        std::thread writer([&] {
+            const uint8_t cc[2] = {0xCC, 0xCC};
+            while (!stop.load())
+                for (uintptr_t at : guarded) {
+                    KilnHandle hp = 0;
+                    if (A->raw_detour(6, at, nullptr, reinterpret_cast<void*>(raw), reinterpret_cast<void**>(&cont), nullptr) == KILN_OK) ++landed;
+                    if (A->patch(6, at + 3, cc, 2, &hp) == KILN_OK) ++landed, A->unpatch(hp);
+                    if (A->write(at + 9, cc, 1) == KILN_OK) ++landed;
+                    attempts += 3;
+                }
+        });
+        unsigned changed = 0;
+        // the "engine call" compares the live code with its capture, over and over, while the attempts come
+        while (!guarded.empty() && attempts.load() < 300)
+            for (size_t i = 0; i < guarded.size(); ++i)
+                if (!same_as(guarded[i], files[i].data())) ++changed;
+        stop = true;
+        writer.join();
+        check(changed == 0 && landed == 0, "detours, patches and writes hammering the protected ones: none lands, no byte changes",
+              std::to_string(attempts.load()) + " attempts on " + std::to_string(guarded.size()) + " function(s)");
+    }
+
+    retire_owner(11);
+    check(code::registry().protected_count() == base_count, "every test owner retired: nothing stays protected");
+}
+
 int main(int argc, char** argv) {
     // The game's section: the range the hooks service treats as the image.
     auto* base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
@@ -2867,6 +3260,14 @@ int main(int argc, char** argv) {
         std::puts(g_fail ? "FAILED" : "all passed");
         return g_fail ? 1 : 0;
     }
+    if (argc > 1 && !std::strcmp(argv[1], "protect")) {  // kiln.internal.hooks alone (quick repeats on real Windows)
+        g_service->init();
+        A = static_cast<const KilnHooksApi*>(g_service->table);
+        test_protected_ranges();
+        std::printf("%d passed, %d failed\n", g_pass, g_fail);
+        std::puts(g_fail ? "FAILED" : "all passed");
+        return g_fail ? 1 : 0;
+    }
     if (argc > 1 && !std::strcmp(argv[1], "tls64"))  // push the caller-table slot into TlsExpansionSlots
         for (int i = 0; i < 70; ++i) TlsAlloc();
     std::printf("hooks_v2_test: game section %p +0x%zx, tls %s\n", reinterpret_cast<void*>(kiln::g_image.base),
@@ -2921,6 +3322,7 @@ int main(int argc, char** argv) {
     test_refused_target();
     test_symbol_cache_and_counts();
     test_foreign_module();
+    test_protected_ranges();
 
     {
         std::lock_guard lock(g_log_mutex);

@@ -55,6 +55,7 @@
 #include "services/kiln_profile.h"
 #include "services/kiln_progress.h"
 #include "../../../plugins/compat/original_code_service.h"
+#include "client_building_input.h"
 #include "service.h"
 
 namespace kiln::caps {
@@ -909,6 +910,30 @@ void core_rows(bool hooks, bool verified, const std::string& safe_idle) {
             set_core_locked(name, kService, original_code ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE,
                             reason, text, "core", 0, ev);
         }
+        // kiln.client's building input (docs/kiln/services/client-building-input.md): the
+        // game client only, with kiln.client running and its input producer bound to this build. Static: the producer
+        // is bound while kiln.client starts, or not at all.
+        {
+            const bool client_service = std::any_of(services.begin(), services.end(), [](const Svc& s) {
+                return s.name == KILN_CLIENT_SERVICE && s.available;
+            });
+            const char* why = nullptr;
+            const bool producer = building_input::bound(&why);
+            const Verdict v =
+                !hooks ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, "not started in safe idle: " + safe_idle}
+                : image().side != KILN_SIDE_CLIENT
+                    ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE, "building input belongs to a connected game client"}
+                : !client_service ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING, "kiln.client did not start"}
+                : !producer       ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING, why}
+                                  : Verdict{KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "the input producer is bound to this game build"};
+            set_core_locked("client.building_input", kService, v.state, v.reason, v.text, "core", 0, ev);
+        }
+        // kiln.net's Steam peer-to-peer messages (docs/kiln/services/net-steam-messages.md). kiln-net.dll
+        // reports the row itself (pending, available, or why Steam is missing); in safe idle it does not load, so the
+        // core says why. Its "did not start" is service_dll's.
+        if (!hooks)
+            set_core_locked("net.steam_messages", kService, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
+                            "not started in safe idle: " + safe_idle, "core", 0, ev);
         for (const auto& file : idle_dlls) {
             const std::string name = dll_row_name(file);
             if (name.empty()) continue;
@@ -1056,6 +1081,10 @@ void service_dll(const std::filesystem::path& file, std::string_view status, con
             r.source = "core";
             g_dll_failed[name] = r;
             set_core_locked(name, kDll, r.state, r.reason, r.text, r.source, 0, ev);
+            // kiln.net's Steam peer-to-peer messages: without kiln-net.dll there are none
+            if (name == "kiln.net")
+                set_core_locked("net.steam_messages", kDll, r.state, r.reason, "kiln.net did not start: " + r.text,
+                                r.source, 0, ev);
             return 0;
         });
     } catch (...) {

@@ -18,6 +18,8 @@ import { ProfilesCard } from "../components/ProfilesSettings";
 import { LibraryCard } from "../components/LibrarySettings";
 import { LanguageCard } from "../components/LanguageSettings";
 import { GraphicsCard, isGraphicsPath } from "../components/GraphicsSettings";
+// Settings' ShroudForge card
+import { ShroudForgeCard, isShroudForgePath } from "../components/ShroudForgeSettings";
 import { StartModal, UnknownBuild, useStartWord } from "../components/GameStart";
 import { rich, t, useT } from "../i18n";
 import { CommunityToggle } from "../community/parts";
@@ -54,6 +56,7 @@ export default function SettingsPage() {
         {nexusEnabled && <NexusCard />}
       </div>
       <KilnJsonCard />
+      <ShroudForgeCard />
       <GraphicsCard />
       <AssetsCard />
     </Page>
@@ -290,13 +293,18 @@ function KilnJsonCard() {
   const reset = useMutation({ mutationFn: (path: string) => api.configKilnReset(game!.id, path), onSuccess: onDoc, onError: (e) => toast.error(e) });
   if (!game) return null;
   const installed = status.data?.runtime.installed;
+  // entries with a card of their own
+  const own = (path: string) => path === "ui.language" || isGraphicsPath(path)
+    // shroudforge.* is the ShroudForge card's
+    || isShroudForgePath(path)
+    ;
   return (
     <Card title={t("settings.kilnJson.title")} sub={rich("settings.kilnJson.sub", { file: <span className="k-mono">kiln/kiln.json</span> })}>
       {status.data && !installed ? <EmptyState title={t("settings.kilnJson.notInstalled")} hint={t("settings.kilnJson.notInstalledHint")} /> :
         doc.isLoading ? <Skeleton lines={5} /> : doc.error ? <EmptyState title={t("settings.kilnJson.unavailable")} hint={errorText(doc.error)} /> : doc.data?.schema && (
           // ui.language has its own control (Language: components/LanguageSettings.tsx), graphics.* its own card (Graphics:
           // components/GraphicsSettings.tsx)
-          <SchemaForm schema={{ ...doc.data.schema, entries: doc.data.schema.entries.filter((e) => e.path !== "ui.language" && !isGraphicsPath(e.path)) }} values={doc.data.values} errors={doc.data.errors} disabled={set.isPending}
+          <SchemaForm schema={{ ...doc.data.schema, entries: doc.data.schema.entries.filter((e) => !own(e.path)) }} values={doc.data.values} errors={doc.data.errors} disabled={set.isPending}
             onChange={(path, value) => set.mutate({ path, value })} onReset={(path) => reset.mutate(path)} />
         )}
       {doc.data && <span className="k-hint">{t("settings.kilnJson.overrides")}</span>}

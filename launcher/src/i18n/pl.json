@@ -6309,5 +6309,142 @@
         "crafted": "wytworzony"
       }
     }
+  },
+  "sfBackend": {
+    "backend": {
+      "title": "ShroudForge",
+      "sub": "Który ShroudForge uruchamia mody ShroudForge tej gry. Zapisywane w kiln/kiln.json; obowiązuje od następnego uruchomienia.",
+      "label": "Backend ShroudForge",
+      "choice": {
+        "hosted": "ShroudForge dołączony do Kiln",
+        "installed": "Mój zainstalowany ShroudForge",
+        "kiln": "Interpreter Kiln"
+      },
+      "about": {
+        "hosted": "ShroudForge dostarczany z Kiln.",
+        "installed": "ShroudForge w folderze shroudforge gry.",
+        "kiln": "Kiln sam uruchamia mody ShroudForge. Mod, którego nie może uruchomić w całości, jest pomijany z podaniem powodu przed grą."
+      },
+      "none": "brak ShroudForge",
+      "default": "Domyślny",
+      "held": "Wstrzymany",
+      "heldWhy": "Niedostępne w tej wersji Kiln: {reason}",
+      "set": {
+        "default": "Nic nie ustawiono: wartość domyślna.",
+        "explicit": "Wybrano: {name}.",
+        "inherited": "Ze starszego przełącznika „Używaj mojego zainstalowanego ShroudForge”: {name}. Wybór tutaj go zastępuje.",
+        "invalid": "kiln.json wskazuje backend, którego Kiln nie zna ({value}): żaden ShroudForge nie uruchomi modów ShroudForge tej gry, dopóki nie wybierzesz jednego."
+      },
+      "next": "Następne uruchomienie: {name}",
+      "last": "Ostatnie uruchomienie: {name}",
+      "envRuntime": "KILN_SHROUDFORGE_RUNTIME jest ustawione tam, gdzie działa launcher: uruchomienie z launchera się do niego stosuje.",
+      "envOff": "KILN_SHROUDFORGE=0 jest ustawione tam, gdzie działa launcher: przy uruchomieniu z launchera żaden ShroudForge nie działa.",
+      "route": {
+        "missing": "Interpretera Kiln nie ma jeszcze w tej grze: zainstaluj Kiln ponownie, aby go dodać.",
+        "ownLoader": "Własny loader ShroudForge jest w grze ({file}): to on uruchamia mody ShroudForge, a wybory Kiln ustępują."
+      },
+      "running": "Zamknij grę, aby to zmienić.",
+      "reset": "Przywróć domyślny",
+      "unreadable": "Nie można tego zmienić, dopóki kiln.json jest nieczytelny: {reason}",
+      "saved": "Zapisano. Następne uruchomienie: {name}.",
+      "ask": {
+        "title": "Zmienić backend ShroudForge?",
+        "to": "Od następnego uruchomienia: {name}",
+        "replaces": "To zastępuje starszy przełącznik „Używaj mojego zainstalowanego ShroudForge”.",
+        "kiln": "Mody, których interpreter Kiln nie może uruchomić w całości, są pomijane przy starcie, każdy z powodem, a ostrzeżenie przed grą je wymienia. Nic samo nie wraca do ShroudForge dołączonego do Kiln.",
+        "unchanged": "kiln.json już to zawiera.",
+        "refused": "Teraz nie można tego wybrać: {reason}",
+        "when": "Nic się nie zmieni, dopóki nie zapiszesz. Gra odczyta to przy następnym uruchomieniu."
+      }
+    },
+    "startWarning": {
+      "title": "Niektóre mody nie zadziałają przy tym uruchomieniu",
+      "continue": "Kontynuuj bez tych modów",
+      "game": "Gra: {path}",
+      "changedTitle": "Zmieniono",
+      "changed": "To, co nie zadziała przy tym uruchomieniu, zmieniło się od ostatniego ostrzeżenia. Przeczytaj je ponownie, zanim przejdziesz dalej.",
+      "otherGame": "To ostrzeżenie dotyczy innej gry. Naciśnij Graj ponownie.",
+      "lead": {
+        "save": {
+          "title": "Nie zapisuj bez nich",
+          "text": "Mod poniżej przechowuje dane w twoich zapisach. Jeśli zapiszesz świat, gdy jest wyłączony, jego dane mogą się zmienić lub przepaść. Graj bez zapisywania albo anuluj i najpierw to napraw."
+        },
+        "check": {
+          "title": "Nie wszystko udało się sprawdzić",
+          "text": "Kiln nie mógł sprawdzić wszystkiego dla tego uruchomienia, więc te mody mogą nie działać. Przeczytaj powody poniżej."
+        },
+        "plain": {
+          "title": "Te mody nie zadziałają",
+          "text": "Gra uruchomi się bez modów poniżej. Pozostałe mody działają jak zwykle."
+        }
+      },
+      "listAria": "Co nie zadziała ({count})",
+      "notesAria": "Warto wiedzieć",
+      "nothingChanged": "Kontynuacja niczego nie wyłącza, niczego nie zapisuje ani nie usuwa. Następne Graj sprawdzi ponownie.",
+      "partData": "dane startowe",
+      "partLua": "Lua",
+      "partDlls": "DLL: {list}",
+      "parts": "Części: {list}",
+      "dataNotApplied": "Jego dane startowe nie są stosowane przy tym uruchomieniu.",
+      "chain": "Z powodu: {chain}",
+      "folder": "Folder: {root}",
+      "wasActive": "Był aktywny przy wcześniejszym uruchomieniu ({launch}).",
+      "unknownStart": "nieznane uruchomienie",
+      "saveLine": "Przechowuje dane w twoich zapisach: nie zapisuj świata, gdy jest wyłączony.",
+      "saveUnknown": "Może przechowywać dane w twoich zapisach: nie zapisuj świata, gdy jest wyłączony.",
+      "skipped": "{name} nie działa",
+      "refused": "Żaden mod ShroudForge nie działa przy tym uruchomieniu",
+      "notStarted": "Nieuruchomione: {list}",
+      "previous": "{name} jest teraz wyłączony",
+      "offNow": "Nie działa przy tym uruchomieniu.",
+      "basisPolicy": "Lista Kiln modów z danymi zapisu go wymienia.",
+      "basisUnknown": "Ma dane gry i kod, więc może przechowywać dane zapisu.",
+      "about": "Dotyczy: {list}",
+      "inspector": "Nie można użyć inspektora archiwów Kiln",
+      "planWarning": "Ostrzeżenie planu uruchomienia",
+      "baseTitle": "Pliki gry, na których opiera się to uruchomienie",
+      "baseRestore": "Aby wrócić dokładnie do tych plików, wyłącz mody zmieniające dane gry i uruchom grę raz przez Kiln (Logi, Silniki: Przywróć dane gry).",
+      "baseVerify": "Aby mieć pliki gry takie, jakie dostarcza Steam, użyj w Steam opcji Zweryfikuj spójność plików gry.",
+      "costTitle": "Wolniejsze uruchomienie",
+      "noteTitle": "Uwaga",
+      "keybindsTitle": "Skróty klawiszowe",
+      "keybinds": "{name}: jego skróty klawiszowe nie działają jeszcze z interpreterem Kiln. Reszta moda działa."
+    },
+    "engineRow": {
+      "plugin": "Interpreter Kiln (kiln-sfi)",
+      "packages": "Mody ShroudForge",
+      "phase": {
+        "starting": "uruchamianie",
+        "running": "działa",
+        "ended": "zakończony",
+        "aside": "usunął się w cień",
+        "refused": "nie uruchomiony",
+        "unknown": "nieznany"
+      },
+      "package": {
+        "running": "działa",
+        "dataApplied": "dane zastosowane",
+        "off": "wyłączony",
+        "skipped": "pominięty"
+      },
+      "stale": {
+        "older-start": "Ten zapis pochodzi z wcześniejszego uruchomienia: nie wiadomo, co interpreter zrobił przy najnowszym.",
+        "not-running": "Zapis mówi {phase}, ale gra nie działa: to uruchomienie skończyło się bez ostatniego zapisu (mogło się zawiesić).",
+        "other-process": "Zapis pochodzi z innego procesu gry: nie należy do tego uruchomienia."
+      },
+      "previous": {
+        "incomplete": "Poprzednie uruchomienie skończyło się, nie kończąc zapisu (mogło się zawiesić).",
+        "suspect": "Kiln nie mógł odczytać tego, co zostawiło poprzednie uruchomienie."
+      },
+      "unreadable": "Interpreter Kiln zostawił zapis, którego Kiln nie może odczytać: {error}"
+    },
+    "restoreBase": {
+      "title": "Przywróć dane gry",
+      "base": "Kiln zaczął od tych plików gry: {label}.",
+      "how": "Aby wrócić dokładnie do tych plików, wyłącz mody zmieniające dane gry i uruchom grę raz przez Kiln. Kiln przywraca tylko dane, o których może udowodnić, że je zapisał; dane innego loadera zostają.",
+      "save": "Mody, które trzymają dane w twoich zapisach: nie zapisuj świata, gdy są wyłączone.",
+      "vanilla": "To niekoniecznie pliki takie, jakie dostarcza Steam. Do tego użyj w Steam opcji Zweryfikuj spójność plików gry (Właściwości gry, Zainstalowane pliki).",
+      "unknown": "Kiln nie potrafi określić, które pliki gry by przywrócił: {reason}."
+    }
   }
 }

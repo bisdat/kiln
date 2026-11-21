@@ -6015,5 +6015,142 @@
         "crafted": "fabriqué"
       }
     }
+  },
+  "sfBackend": {
+    "backend": {
+      "title": "ShroudForge",
+      "sub": "Quel ShroudForge exécute les mods ShroudForge de ce jeu. Enregistré dans kiln/kiln.json ; s'applique dès le prochain lancement.",
+      "label": "Backend ShroudForge",
+      "choice": {
+        "hosted": "ShroudForge fourni avec Kiln",
+        "installed": "Mon ShroudForge installé",
+        "kiln": "Interpréteur de Kiln"
+      },
+      "about": {
+        "hosted": "Le ShroudForge livré avec Kiln.",
+        "installed": "Le ShroudForge du dossier shroudforge du jeu.",
+        "kiln": "Kiln exécute lui-même les mods ShroudForge. Un mod qu'il ne peut pas exécuter en entier est ignoré, avec la raison, avant de jouer."
+      },
+      "none": "aucun ShroudForge",
+      "default": "Par défaut",
+      "held": "Retenu",
+      "heldWhy": "Indisponible dans cette version de Kiln : {reason}",
+      "set": {
+        "default": "Rien de choisi : le réglage par défaut.",
+        "explicit": "Choisi : {name}.",
+        "inherited": "Depuis l'ancien interrupteur « Utiliser mon ShroudForge installé » : {name}. Un choix ici le remplace.",
+        "invalid": "kiln.json nomme un backend que Kiln ne connaît pas ({value}) : aucun ShroudForge n'exécute les mods ShroudForge de ce jeu tant que vous n'en choisissez pas un."
+      },
+      "next": "Prochain lancement : {name}",
+      "last": "Dernier lancement : {name}",
+      "envRuntime": "KILN_SHROUDFORGE_RUNTIME est défini là où tourne le launcher : un lancement depuis le launcher le suit.",
+      "envOff": "KILN_SHROUDFORGE=0 est défini là où tourne le launcher : aucun ShroudForge ne tourne lors d'un lancement depuis le launcher.",
+      "route": {
+        "missing": "L'interpréteur de Kiln n'est pas encore dans ce jeu : réinstallez Kiln pour l'ajouter.",
+        "ownLoader": "Le chargeur propre de ShroudForge est dans le jeu ({file}) : il exécute les mods ShroudForge, et les choix de Kiln s'effacent."
+      },
+      "running": "Fermez le jeu pour changer cela.",
+      "reset": "Revenir au réglage par défaut",
+      "unreadable": "Impossible de changer cela tant que kiln.json est illisible : {reason}",
+      "saved": "Enregistré. Prochain lancement : {name}.",
+      "ask": {
+        "title": "Changer le backend ShroudForge ?",
+        "to": "Dès le prochain lancement : {name}",
+        "replaces": "Ceci remplace l'ancien interrupteur « Utiliser mon ShroudForge installé ».",
+        "kiln": "Les mods que l'interpréteur de Kiln ne peut pas exécuter en entier sont ignorés au lancement, chacun avec sa raison, et l'avertissement avant de jouer les liste. Rien ne revient de lui-même au ShroudForge fourni avec Kiln.",
+        "unchanged": "kiln.json indique déjà cela.",
+        "refused": "Impossible de choisir cela maintenant : {reason}",
+        "when": "Rien ne change avant l'enregistrement. Le jeu le lit à son prochain lancement."
+      }
+    },
+    "startWarning": {
+      "title": "Certains mods ne fonctionneront pas à ce lancement",
+      "continue": "Continuer sans ces mods",
+      "game": "Jeu : {path}",
+      "changedTitle": "Modifié",
+      "changed": "Ce qui ne fonctionnera pas à ce lancement a changé depuis le dernier avertissement. Relisez-le avant de continuer.",
+      "otherGame": "Cet avertissement concerne un autre jeu. Appuyez de nouveau sur Jouer.",
+      "lead": {
+        "save": {
+          "title": "Ne sauvegardez pas sans eux",
+          "text": "Un mod ci-dessous conserve des données dans vos sauvegardes. Si vous sauvegardez un monde pendant qu'il est désactivé, ses données peuvent changer ou être perdues. Jouez sans sauvegarder, ou annulez et corrigez d'abord."
+        },
+        "check": {
+          "title": "Tout n'a pas pu être vérifié",
+          "text": "Kiln n'a pas pu tout vérifier pour ce lancement, ces mods risquent donc de ne pas fonctionner. Lisez les raisons ci-dessous."
+        },
+        "plain": {
+          "title": "Ces mods ne fonctionneront pas",
+          "text": "Le jeu démarre sans les mods ci-dessous. Vos autres mods fonctionnent normalement."
+        }
+      },
+      "listAria": "Ce qui ne fonctionnera pas ({count})",
+      "notesAria": "Bon à savoir",
+      "nothingChanged": "Continuer ne désactive rien et ne sauvegarde ni ne supprime rien. Le prochain Jouer vérifie de nouveau.",
+      "partData": "données de démarrage",
+      "partLua": "Lua",
+      "partDlls": "DLL : {list}",
+      "parts": "Parties : {list}",
+      "dataNotApplied": "Ses données de démarrage ne sont pas appliquées à ce lancement.",
+      "chain": "À cause de : {chain}",
+      "folder": "Dossier : {root}",
+      "wasActive": "Il était actif lors d'un lancement précédent ({launch}).",
+      "unknownStart": "lancement inconnu",
+      "saveLine": "Il conserve des données dans vos sauvegardes : ne sauvegardez pas de monde tant qu'il est désactivé.",
+      "saveUnknown": "Il conserve peut-être des données dans vos sauvegardes : ne sauvegardez pas de monde tant qu'il est désactivé.",
+      "skipped": "{name} ne fonctionne pas",
+      "refused": "Aucun mod ShroudForge ne fonctionne à ce lancement",
+      "notStarted": "Non démarrés : {list}",
+      "previous": "{name} est désactivé maintenant",
+      "offNow": "Il ne fonctionne pas à ce lancement.",
+      "basisPolicy": "La liste Kiln des mods à données de sauvegarde le cite.",
+      "basisUnknown": "Il contient des données du jeu et du code, il peut donc conserver des données de sauvegarde.",
+      "about": "Concerne : {list}",
+      "inspector": "L'inspecteur d'archives de Kiln est inutilisable",
+      "planWarning": "Avertissement du plan de lancement",
+      "baseTitle": "Fichiers du jeu sur lesquels repose ce lancement",
+      "baseRestore": "Pour revenir exactement à ces fichiers, désactivez les mods qui modifient les données du jeu et lancez le jeu une fois via Kiln (Journaux, Moteurs : Restaurer les données du jeu).",
+      "baseVerify": "Pour les fichiers du jeu tels que Steam les fournit, utilisez Vérifier l'intégrité des fichiers du jeu dans Steam.",
+      "costTitle": "Lancement plus lent",
+      "noteTitle": "Remarque",
+      "keybindsTitle": "Raccourcis clavier",
+      "keybinds": "{name} : ses raccourcis clavier ne fonctionnent pas encore avec l'interpréteur de Kiln. Le reste du mod fonctionne."
+    },
+    "engineRow": {
+      "plugin": "Interpréteur de Kiln (kiln-sfi)",
+      "packages": "Mods ShroudForge",
+      "phase": {
+        "starting": "démarrage",
+        "running": "en cours",
+        "ended": "terminé",
+        "aside": "en retrait",
+        "refused": "non démarré",
+        "unknown": "inconnu"
+      },
+      "package": {
+        "running": "en cours",
+        "dataApplied": "données appliquées",
+        "off": "désactivé",
+        "skipped": "ignoré"
+      },
+      "stale": {
+        "older-start": "Cet enregistrement vient d'un démarrage précédent : on ne sait pas ce que l'interpréteur a fait au dernier démarrage.",
+        "not-running": "L'enregistrement indique {phase}, mais le jeu ne tourne pas : ce démarrage s'est terminé sans son dernier enregistrement (il a peut-être planté).",
+        "other-process": "L'enregistrement vient d'un autre processus du jeu : il n'est pas de ce démarrage."
+      },
+      "previous": {
+        "incomplete": "Le démarrage précédent s'est terminé sans finir son enregistrement (il a peut-être planté).",
+        "suspect": "Kiln n'a pas pu lire ce que le démarrage précédent a laissé."
+      },
+      "unreadable": "L'interpréteur de Kiln a laissé un enregistrement que Kiln ne peut pas lire : {error}"
+    },
+    "restoreBase": {
+      "title": "Restaurer les données du jeu",
+      "base": "Kiln est parti de ces fichiers du jeu : {label}.",
+      "how": "Pour revenir exactement à ces fichiers, désactivez les mods qui modifient les données du jeu et lancez le jeu une fois via Kiln. Kiln ne remet que les données dont il peut prouver qu'il les a écrites ; celles d'un autre chargeur restent.",
+      "save": "Mods qui gardent des données dans vos sauvegardes : ne sauvegardez pas un monde tant qu'ils sont désactivés.",
+      "vanilla": "Ce ne sont pas forcément les fichiers tels que Steam les fournit. Pour cela, utilisez Vérifier l'intégrité des fichiers du jeu dans Steam (Propriétés du jeu, Fichiers installés).",
+      "unknown": "Kiln ne peut pas dire quels fichiers du jeu il remettrait : {reason}."
+    }
   }
 }
