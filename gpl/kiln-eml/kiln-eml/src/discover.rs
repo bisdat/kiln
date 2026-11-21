@@ -282,6 +282,10 @@ pub fn aside_dropins(root: &Utf8Path, kiln_dir: &Utf8Path, profile: &[(String, b
         let (kept, _) = without_profile_copies(folder_candidates(&dir, source), profile, kiln_dir);
         for c in kept {
             if named(&c.path) || out.iter().any(|e: &Entry| is_root(&c.path, Utf8Path::new(&e.path))) { continue; }
+            // what ShroudForge runs, or runs on the other side only, is its choice: skipped before its manifest is read
+            let off = if source == "game-mods" {
+                match shroudforge_switch(&c.path, server) { Ok(()) | Err(Off::Side(_)) => continue, Err(off) => Some(off) }
+            } else { None };
             // an EML mod (ShroudForge's own packages, Kiln mods and other folders are not kiln-eml's to report)
             let Ok(m) = classify(&c.path) else { continue };
             let (state, reason) = if source == "kiln-dropin" {
@@ -292,16 +296,16 @@ pub fn aside_dropins(root: &Utf8Path, kiln_dir: &Utf8Path, profile: &[(String, b
                         " and switch it on in Kiln's in-game menu (Mods > ShroudForge)".to_string()
                     }))
             } else {
-                match shroudforge_switch(&c.path, server) {
-                    Ok(()) | Err(Off::Side(_)) => continue,
-                    Err(Off::Switch(why)) => ("off-in-shroudforge", format!("{who} runs this start, and ShroudForge has this EML \
+                match off {
+                    None | Some(Off::Side(_)) => continue,
+                    Some(Off::Switch(why)) => ("off-in-shroudforge", format!("{who} runs this start, and ShroudForge has this EML \
                         package at {} switched off: {why}. kiln-eml stands aside, so nothing runs it. {}", c.path, if server {
                             format!("A server has no in-game menu: put an extended.mod.json into its folder that says \"enabled\": \
                                 true ({SERVER_SWITCH_FILE}), then restart the server")
                         } else {
                             "Switch it on in Kiln's in-game menu (Mods > ShroudForge)".to_string()
                         })),
-                    Err(Off::Refused(why)) => ("off-in-shroudforge", format!("{who} runs this start, but ShroudForge does not run \
+                    Some(Off::Refused(why)) => ("off-in-shroudforge", format!("{who} runs this start, but ShroudForge does not run \
                         the EML package at {}: {why}. kiln-eml stands aside, so nothing runs it, and no switch changes that: fix \
                         or remove its extended.mod.json", c.path)),
                 }
