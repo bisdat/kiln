@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frostdev.io/kiln/sfi/transcript.schema.json",
+  "title": "sfi conformance transcript",
+  "description": "What tools/sfi/conformance/prelude.lua's T.transcript() returns. Written by Kiln's interpreter (crates/sfi) and by ShroudForge's own mod runtime (in a local differential test, not published) for the same fixture; two transcripts are compared as JSON text after parsing (key order is fixed by the prelude). SPDX-License-Identifier: MIT",
+  "type": "object",
+  "required": ["version", "records"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "enum": [1, 2] },
+    "records": { "type": "array", "items": { "$ref": "#/$defs/record" } },
+    "fixture_error": { "$ref": "#/$defs/value", "description": "Present when the fixture chunk itself raised." }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "version": { "const": 1 },
+        "records": { "items": { "not": { "required": ["message"] } } }
+      }
+    },
+    { "properties": { "version": { "const": 2 } } }
+  ],
+  "$defs": {
+    "record": {
+      "type": "object",
+      "required": ["seq", "label", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 },
+        "label": { "type": "string" },
+        "kind": { "enum": ["call", "value", "expect", "note"] },
+        "ok": { "type": "boolean", "description": "call: whether the function returned instead of raising." },
+        "values": { "type": "array", "items": { "$ref": "#/$defs/value" } },
+        "error": { "$ref": "#/$defs/value", "description": "call with ok=false: the original canonical error value, unchanged by message extraction." },
+        "message": { "type": "string", "description": "v2 failed calls only: directly available string or protected __tostring text, normalized by the shared prelude. Absent (not null) if there is no safe text or diagnostics fail. Never derived from the canonical error class." },
+        "expected": { "$ref": "#/$defs/value", "description": "expect: the expected value." },
+        "pass": { "type": "boolean", "description": "expect: whether the value equals the expected one." },
+        "text": { "type": "string", "description": "note: the note text." }
+      },
+      "oneOf": [
+        { "not": { "required": ["message"] } },
+        {
+          "required": ["message", "kind", "ok", "error"],
+          "properties": { "kind": { "const": "call" }, "ok": { "const": false } }
+        }
+      ]
+    },
+    "value": {
+      "type": "object",
+      "required": ["t"],
+      "additionalProperties": false,
+      "properties": {
+        "t": { "enum": ["nil", "boolean", "integer", "float", "string", "table", "cycle", "function", "userdata", "thread"] },
+        "v": {
+          "description": "boolean: the value; integer: decimal text; float: 16 hex digits of the big-endian IEEE-754 bits, or inf, -inf, nan; string: Lua %q text; table: [[key, value], ...] sorted by the JSON text of the key.",
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "string" },
+            { "type": "array", "items": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "$ref": "#/$defs/value" } } }
+          ]
+        },
+        "mt": { "type": "boolean", "description": "table: whether it has a metatable." },
+        "name": { "type": "string", "description": "userdata: its metatable's __name, or ? when it has none or it is protected." }
+      }
+    }
+  }
+}

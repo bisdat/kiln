@@ -1,0 +1,510 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frostdev.io/kiln/schema/eml/archive-inspection.schema.json",
+  "title": "kiln-eml-inspect archive inspection, schema_version 1",
+  "description": "One side's archive set as the read-only inspector found it. Closed: a reader refuses unknown keys and values. Integrity is not provenance: no token or label here means the game's own unmodified files.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "inspector": {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "kiln-eml-inspect"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "component",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "refused"
+      ]
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "side": {
+          "enum": [
+            "client",
+            "server"
+          ]
+        },
+        "stem": {
+          "enum": [
+            "enshrouded",
+            "enshrouded_server"
+          ]
+        },
+        "executable": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/fileDigest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "side",
+        "stem",
+        "executable"
+      ],
+      "additionalProperties": false
+    },
+    "proof": {
+      "type": "object",
+      "properties": {
+        "framing": {
+          "const": "kiln-eml-inspect archive-set v1"
+        },
+        "containers": {
+          "enum": [
+            "size",
+            "sha256"
+          ]
+        }
+      },
+      "required": [
+        "framing",
+        "containers"
+      ],
+      "additionalProperties": false
+    },
+    "input": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/input"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "base": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "receipt": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "enum": [
+            "absent",
+            "understood",
+            "unknown"
+          ]
+        },
+        "file": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "state",
+        "file"
+      ],
+      "additionalProperties": false
+    },
+    "inventory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "enum": [
+              "executable",
+              "header",
+              "resources",
+              "container",
+              "retained-container",
+              "container-unverified",
+              "base-header",
+              "base-resources",
+              "base-seal",
+              "receipt"
+            ]
+          },
+          "file": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "role",
+          "file",
+          "size"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/reason"
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/note"
+      }
+    },
+    "cost": {
+      "type": "object",
+      "properties": {
+        "bytesRead": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "filesRead": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "bytesRead",
+        "filesRead"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema_version",
+    "inspector",
+    "status",
+    "target",
+    "proof",
+    "input",
+    "base",
+    "receipt",
+    "inventory",
+    "reasons",
+    "notes",
+    "cost"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "fileDigest": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "file",
+        "size",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "hashed": {
+      "type": "object",
+      "properties": {
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "size",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "entry": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "enum": [
+            "header",
+            "resources",
+            "container"
+          ]
+        },
+        "member": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "proof": {
+          "enum": [
+            "sha256",
+            "size"
+          ]
+        },
+        "sha256": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "role",
+        "member",
+        "file",
+        "size",
+        "proof",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "input": {
+      "type": "object",
+      "properties": {
+        "class": {
+          "enum": [
+            "owned-output",
+            "base-copy",
+            "unclassified"
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/entry"
+          }
+        }
+      },
+      "required": [
+        "class",
+        "sha256",
+        "files"
+      ],
+      "additionalProperties": false
+    },
+    "base": {
+      "type": "object",
+      "properties": {
+        "evidence": {
+          "enum": [
+            "receipt-baseline",
+            "sealed-baseline",
+            "unsealed-baseline",
+            "current-set"
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "origin": {
+          "$ref": "#/$defs/origin"
+        },
+        "baseline": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/hashed"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/entry"
+          }
+        }
+      },
+      "required": [
+        "evidence",
+        "sha256",
+        "origin",
+        "baseline",
+        "files"
+      ],
+      "additionalProperties": false
+    },
+    "origin": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "token": {
+              "const": "first-managed-unclassified"
+            },
+            "label": {
+              "const": "unclassified: game files as found when Kiln first managed this install"
+            }
+          },
+          "required": [
+            "token",
+            "label"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "token": {
+              "const": "rebaselined-unclassified"
+            },
+            "label": {
+              "const": "unclassified: game files as found when Kiln took a new baseline after the game changed"
+            }
+          },
+          "required": [
+            "token",
+            "label"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "token": {
+              "const": "unrecorded"
+            },
+            "label": {
+              "const": "unrecorded: a working baseline from an earlier start; where its files came from was not recorded"
+            }
+          },
+          "required": [
+            "token",
+            "label"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "reason": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "enum": [
+            "missing",
+            "invalid",
+            "link",
+            "unreadable",
+            "changed",
+            "receipt-unknown",
+            "baseline-missing",
+            "baseline-incomplete",
+            "baseline-corrupt"
+          ]
+        },
+        "file": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "file",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "note": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "enum": [
+            "baseline-outdated",
+            "seal-outdated",
+            "receipt-baseline-mismatch",
+            "receipt-origin-ignored",
+            "receipt-stale",
+            "pending-generation",
+            "unreferenced-containers"
+          ]
+        },
+        "file": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "file",
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

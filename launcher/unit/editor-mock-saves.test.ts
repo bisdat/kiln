@@ -6,7 +6,7 @@ import { editorMockHandlers, UNKNOWN_ITEM } from "../src/api/mockEditor";
 // @ts-ignore: the editor is plain JavaScript
 import * as sv2c from "../src/editor/shared/sv2c-web.mjs";
 // @ts-ignore
-import { parseCharacter, buildCharacter } from "../src/editor/shared/character.mjs";
+import { parseCharacter, buildCharacter, readCharacter } from "../src/editor/shared/character.mjs";
 // @ts-ignore
 import * as know from "../src/editor/shared/knowledge.mjs";
 import items from "../src/editor/data/items.json";
@@ -54,8 +54,13 @@ describe("synthetic editor saves", () => {
     expect(Buffer.compare(buildCharacter(brienne), await block(1))).toBe(0);
 
     const mordredBlock = await block(2);
-    expect(() => parseCharacter(mordredBlock, isItem, isSkill, wearable)).toThrow();
-    const mordred = parseCharacter(mordredBlock, (id: number) => id > 0xffff, isSkill, (id: number) => !isItem(id) || wearable(id));
+    // the strict reading cannot take the real inventory: it throws, or what it finds further on is marked unsure
+    let strictMordred = null;
+    try { strictMordred = parseCharacter(mordredBlock, isItem, isSkill, wearable); } catch { /* not read */ }
+    expect(strictMordred === null || strictMordred._invUnsure).toBe(true);
+    const { character: mordred, unknownItems } = readCharacter(mordredBlock, isItem, isSkill, wearable);
+    expect(unknownItems).toBe(true);
+    expect(mordred.main.length).toBe(14);
     expect(mordred.main.some((e: { itemId: number }) => e.itemId === UNKNOWN_ITEM)).toBe(true);
     const cedric = await block(3);
     expect(() => parseCharacter(cedric, isItem, isSkill, wearable)).toThrow();

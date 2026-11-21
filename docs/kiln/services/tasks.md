@@ -261,6 +261,19 @@ the Windows code path under headless Wine, ending in a real `ExitProcess` with t
 The production pool lives for the whole process: it is never destroyed by a static destructor, and its shutdown comes
 from Kiln's own exit path. A worker that will not stop within the exit bound is detached, never terminated.
 
+## Kiln's own work on the pool
+
+Kiln's own components run their background work on the same pool, each under a Kiln-internal owner of its own (never a
+mod's), so the watchdog, `tick-stats.jsonl` and crash reports name it like a mod's task:
+
+| Owner/task | What | Since |
+|---|---|---|
+| `kiln.saves/SaveWriter` | Kiln.Saves' save files (blobs, manifests, confirmations, pruning), [saves.md](saves.md) | 0.2.0-dev.30 |
+
+A component's runner is one LongRunning task at a time, started with its first job and ended when it has nothing to
+do; it counts against the pool's global LongRunning limit like any other. It is not a resident task: one that runs
+longer than `watchdog_running_s` is really stuck on its work (a disk that does not answer), and the watchdog says so.
+
 ## Faults the pool cannot contain
 
 A stack overflow in a native body is not contained, on native Windows (checked on Windows 11 25H2 on 2026-11-20 with

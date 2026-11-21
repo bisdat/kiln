@@ -3,8 +3,8 @@
 #   tools/launcher/build-windows.sh [--debug] [--selftest] [--webview bootstrapper|skip] [--runtime ZIP|none] [--version V]
 #                                   [--python DIR|none] [--config JSON|FILE]... [--nexus]
 # --nexus: the Nexus Mods build: no self-update at all (cargo --no-default-features drops the self-update feature and
-#   tauri-plugin-updater; src-tauri/tauri.nexus.conf.json drops the updater key from the config). Output in
-#   bundles/windows-nexus/. docs/kiln/launcher/releasing.md, "The two builds".
+#   tauri-plugin-updater, and every other default feature is turned back on; src-tauri/tauri.nexus.conf.json drops the
+#   updater key from the config). Output in bundles/windows-nexus/. docs/kiln/launcher/releasing.md, "The two builds".
 # --version: the launcher's version (a release: tools/release/version.sh). --config: more Tauri config to merge, in order
 #   (a release passes bundle.windows.signCommand when it signs with Authenticode).
 # --runtime: the Kiln runtime to ship (shipped-runtime.sh). Default: built from this tree; --selftest ships none.
@@ -56,6 +56,8 @@ variant=windows
 if ((nexus)); then
   extra+=(--config "$repo/launcher/src-tauri/tauri.nexus.conf.json")
   runner_args=(-- --no-default-features)
+  keep=$(nexus_features)
+  [[ -n $keep ]] && runner_args+=(--features "$keep")
   variant=windows-nexus
 fi
 resources=$(shipped_runtime_resources "$runtime")
@@ -71,6 +73,16 @@ esac
 echo "WebView2 install mode: $webview"
 kind=release; ((${#profile[@]})) && kind=debug
 rm -rf "$CARGO_TARGET_DIR/$target/$kind/bundle"
+# A signed build (bundle.windows.signCommand) makes Tauri copy the system NSIS plugins into its own folder, from
+# $NSIS_PATH or else /usr/share/nsis/Plugins/x86-unicode (tauri-bundler nsis/mod.rs). A makensis that is not the
+# distribution's package (NSIS's own build on PATH) keeps them beside it: point NSIS_PATH there, or the signed
+# Windows bundle stops with "failed to copy system NSIS Plugins folder to local copy".
+if [[ -z ${NSIS_PATH:-} && ! -d /usr/share/nsis/Plugins/x86-unicode ]] && makensis=$(command -v makensis); then
+  nsis_root=$(dirname "$(dirname "$(readlink -f "$makensis")")")
+  for d in "$nsis_root/share/nsis" "$nsis_root"; do
+    if [[ -d $d/Plugins/x86-unicode ]]; then export NSIS_PATH=$d; echo "NSIS plugins: $d"; break; fi
+  done
+fi
 bun x tauri build "${profile[@]}" --runner cargo-xwin --target "$target" --bundles nsis --config "$config" "${extra[@]}" "${runner_args[@]}"
 out=$KILN_OUT/bundles/$variant
 mkdir -p "$out"

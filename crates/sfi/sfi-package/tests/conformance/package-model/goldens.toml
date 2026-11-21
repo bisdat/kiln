@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: MIT
+# Package-model differential goldens (2026-11-19). NOT Lua-oracle transcripts: the
+# Lua oracle cannot inject package documents, so ShroudForge's own package crate
+# (modules/modloader + loader-config + hotkeys + game-files, MIT, bonsaibauer) was built
+# natively (Linux, cargo --offline, the pins' Cargo.lock) from a scratch copy of each
+# pinned checkout (sf-1.7.9 d8a394bc, sf-1.8.0 38ef448d; the only change: the Windows-only
+# `zip` dependency made unconditional so the crate links on Linux) and driven by
+# harness/sf-reader-harness.rs.txt, identical for both pins. Cases come from
+# harness/gen_*.py. Reproduce: build the harness against each pin, run it with the case
+# file (and "profiles"/"rules" mode), compare with the files below.
+#
+# Platform note: the harness runs SF's non-Windows hotkey host (observe_keyboard.rs:
+# valid_scancode 1..512, primary_modifier 0). divergences.json marks the one case this
+# changes (set.keybind.18) as "harness-platform", not as a Kiln divergence.
+# SF serializes profile maps from a HashMap, so key order inside packageFiles/importFiles
+# varies between runs; tests compare serde_json Values, which ignore object order.
+# Profile packageFiles over 256 bytes are abbreviated to {len, sha256} in the goldens.
+[goldens]
+"cases.json" = { pins = ["1.7.9", "1.8.0"], count = 793, kind = "input", note = "package directories (mod.json, extended.mod.json, locales/*.json, src/*.lua) plus save/resolve/strings/enabled probes; the *.unknown-order.* cases pin the order SF's swap_remove of unknown top-level keys leaves (the first error)" }
+"sf-1.7.9.json" = { pin = "1.7.9", source = "read_mod_manifest.rs:15 read_manifest_path; validate_mod_settings.rs validate_settings, setting_is_enabled; resolve_mod_locale.rs localized_manifest, localized_string; config_revision, manifest_revision, revision(to_vec(manifest))" }
+"sf-1.8.0.json" = { pin = "1.8.0", source = "as for 1.7.9; differs from 1.7.9 in 8 cases (1.8 schema: options objects, group tab, optionGroups, inputReservations/presets)" }
+"divergences.json" = { pins = ["1.7.9", "1.8.0"], kind = "review", note = "only the harness-platform case set.keybind.18; the earlier divergences D1 document order, D2 JSON read errors, D3 version pattern display, D5 locale error prefix and D6 save-path keybind type message were fixed and their 145 rows removed" }
+"rules-cases.json" = { pins = ["1.7.9", "1.8.0"], count = 47, kind = "input" }
+"rules-sf-1.7.9.json" = { pin = "1.7.9", source = "check_mod_conflicts.rs:8-45 (validate_document RULES, VersionReq per rule) with an explicit {id: [enabled, version]} table for ModEnvironment" }
+"rules-sf-1.8.0.json" = { pin = "1.8.0", source = "as for 1.7.9; byte-identical" }
+"rules-file-cases.json" = { pins = ["1.7.9", "1.8.0"], count = 27, kind = "input", note = "the rules FILE (missing, missing folder, dangling link, a directory, a file as its folder, unreadable, invalid JSON and UTF-8, schema-invalid, valid); harness/gen_rules_file.py" }
+"rules-file-sf-1.7.9.json" = { pin = "1.7.9", source = "check_mod_conflicts.rs:5-45 compatibility::conflicts and plan_mod_load_order.rs:142-227 plan_report_detailed(client, API 1.0.0), unchanged, through ModEnvironment::load over a scratch game directory (harness \"rules-file\" mode, Linux; serde_json 1.0.151)" }
+"rules-file-sf-1.8.0.json" = { pin = "1.8.0", source = "as for 1.7.9; byte-identical" }
+"profile-cases.json" = { pins = ["1.7.9", "1.8.0"], count = 164, kind = "input" }
+"profile-sf-1.7.9.json" = { pin = "1.7.9", source = "mod_profiles.rs:34 read_profiles; skipped-file reason from serde + a copy of the private validate_profile (:78-147); read_manifest_path with the catalog and loader dllManager selections; manifest_revision on the raw package" }
+"profile-sf-1.8.0.json" = { pin = "1.8.0", source = "as for 1.7.9; equal as JSON values" }

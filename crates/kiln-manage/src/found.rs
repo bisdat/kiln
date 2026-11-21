@@ -163,7 +163,8 @@ fn rel_of(game: &Path, p: &Path) -> String {
     }
 }
 
-fn roots(game: &Path) -> Vec<Root> {
+// (route: where ShroudForge's mods folder is, [`crate::sfi_routing`])
+fn roots(game: &Path, route: &crate::sfi_routing::Route) -> Vec<Root> {
     use ModKind as K;
     let none = Files { dll: false, zip: false };
     let mut v = vec![
@@ -184,7 +185,8 @@ fn roots(game: &Path) -> Vec<Root> {
             folders: true },
     ];
     // ShroudForge's mods folder is `mods` unless its config names another
-    let sf = crate::shroudforge::mods_dir(game);
+    // (under Kiln's interpreter always `<game>/mods`: ShroudForge's config is not read)
+    let sf = route.sf_mods(game);
     let same = |a: &Path, b: &Path| a == b || (a.canonicalize().ok().is_some() && a.canonicalize().ok() == b.canonicalize().ok());
     match v.iter_mut().find(|r| same(&r.abs, &sf)) {
         Some(r) => r.kinds.push(K::ShroudForge),
@@ -580,11 +582,15 @@ pub fn scan(dirs: &DataDirs, install: &GameInstall, profile: &Profile) -> FoundR
     // Kiln's own files in kiln/plugins (kiln-*.dll, and anything its receipt lists)
     let shipped: Vec<String> = receipt.iter().flat_map(|r| r.files.iter().map(|f| f.path.replace('\\', "/").to_ascii_lowercase())).collect();
     // who runs the EML mods of ShroudForge's folder, as activation decides it (own_loaders), only when that folder is there
-    let sf_eml = crate::shroudforge::mods_dir(game).is_dir().then(|| {
+    // (the route decided once for the scan; Kiln's interpreter carries EML as Kiln's hosted ShroudForge
+    // does: Kiln runs them, not a loader of their own)
+    let route = crate::sfi_routing::route_of(game);
+    let sf_eml = route.sf_mods(game).is_dir().then(|| {
         let view = crate::own_loaders::ProfileView::of_profile(profile);
-        let mine = crate::own_loaders::find(game, Some(&view));
+        let mine = crate::own_loaders::find_routed(game, Some(&view), &route);
         crate::own_loaders::sf_eml_folder(game, &mine).map(|_| crate::own_loaders::of_kind(&mine, ModKind::Eml)
-            .is_some_and(|l| l.engine == Engine::ShroudForge && l.via != crate::own_loaders::Via::HostedShroudForge))
+            .is_some_and(|l| l.engine == Engine::ShroudForge
+                && !matches!(l.via, crate::own_loaders::Via::HostedShroudForge | crate::own_loaders::Via::Interpreter)))
     }).flatten();
     let cx = Ctx { dirs, game, profile, loaders: &loaders, kiln: kiln_installed, wine: install.platform != crate::game::Platform::Windows,
         sf_eml, server: install.kind == crate::game::GameKind::Server };
@@ -598,7 +604,7 @@ pub fn scan(dirs: &DataDirs, install: &GameInstall, profile: &Profile) -> FoundR
         truncated: false,
     };
     let mut seen: Vec<PathBuf> = Vec::new();
-    for root in roots(game) {
+    for root in roots(game, &route) {
         let rd = match std::fs::read_dir(&root.abs) {
             Ok(rd) => rd,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound || e.kind() == std::io::ErrorKind::NotADirectory => continue,

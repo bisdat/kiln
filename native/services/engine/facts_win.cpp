@@ -60,7 +60,14 @@ ImageFacts gather_facts(const KilnApi* api) {
     return facts;
 }
 
-// The process image the profile was matched against (layout RVAs are relative to it).
-std::uintptr_t mem::image_base() { return reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr)); }
+// The process image the profile was matched against (layout RVAs are relative to it). Read once while kiln-engine.dll
+// loads, before any member can run, so the gate path (ecs_gate_validate, ecs_gate_invoke's call-target check) reads a
+// constant inside a hold instead of calling into kernelbase there. GetModuleHandleW(nullptr) itself only reads the PEB
+// and does not wait for the loader lock (Wine and native Windows: it returns while another thread holds it), but a
+// constant runs no code another module could hook and cannot be rewritten afterwards. The exe's base never changes.
+namespace {
+const std::uintptr_t g_image_base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+}  // namespace
+std::uintptr_t mem::image_base() { return g_image_base; }
 
 }  // namespace kiln::engine

@@ -3,14 +3,19 @@
 // packs, and the trust list. The URL picks extra cases:
 //   ?crucible=off       crucible_status.enabled false: every Crucible surface hides
 //   ?crucible=dev       a dev override is in use ("Crucible (dev)")
-//   ?crucible=shared    "Ember run" was shared before and changed since (+1 added, 1 updated)
+//   ?crucible=shared    "Ember run" was shared before and changed since (1 added, 1 updated)
 //   ?crucible=packs     an instance "Ashen Frontier" (1.0.0, its 1.1.0 waiting with one conflict) is installed
 //   ?crucible=instance  the same, and it is the loaded profile (its update banner shows on Play)
+//   ?crucible=first     the first start of a Crucible launcher with no pack waiting (as after an update): the clipboard
+//                       is not read
+//   ?crucible=waiting   the first start after a pack page's Get Kiln whose name lost its code: the clipboard is read once
+//   ?crucible=resume    the download carried a pack code (Cinder Trails, K4TW-9XRB): its preview opens at start
 // Tests and the console: __kilnCrucibleMock.link(url) (a kiln://crucible link arrives), .setOnline(bool),
-// .requests() (every crucible/pack call with its arguments), .state().
+// .requests() (every crucible/pack call with its arguments), .state(), .setChecks(versionId, checks) (Crucible's check
+// of a version: Cinder Trails passed, Frost Hollow still running, Deep Shroud one warning, shared packs queued).
 import type {
   Activation, BuiltPack, CrucibleInstallRequest, CrucibleInstallResult, CruciblePack, CruciblePreview, CrucibleShareRequest, CrucibleShareResult,
-  CrucibleShared, CrucibleStatus, CrucibleTrust, CrucibleUpdate, CrucibleUpdatePlan, CrucibleUpdateRequest, CrucibleUpdateResult, CrucibleVersion,
+  CrucibleChecks, CrucibleShared, CrucibleStatus, CrucibleTrust, CrucibleUpdate, CrucibleUpdatePlan, CrucibleUpdateRequest, CrucibleUpdateResult, CrucibleVersion,
   ImportReport, KilnError, LibraryEntry, LibraryRef, ModKind, PackIndex, PackInstallRequest, PackInstallResult, PackInstance, PackMod, PackPreview,
   PackUpdatePlan, Profile, SaveBackup,
 } from "./commands";
@@ -125,6 +130,10 @@ interface Shared { pack: CruciblePack; version: CrucibleVersion; snapshot: strin
 const shared = new Map<string, Shared>();
 const instances = new Map<string, PackInstance>();
 const undos = new Map<string, { profile: Profile; instance: PackInstance }>();
+/** The player layers (local.<pid>) by profile. */
+const localFiles = new Map<string, { path: string; text: string }[]>();
+let resumed = false;
+const OVERLAP_KEY = '["items","Material_T1_Wood_Logs","maxStackSize"]';
 const trust: CrucibleTrust[] = [{ id: "318840225", name: "Stonewright", since: ago(9) }];
 const links: string[] = [];
 let online = true;
@@ -132,9 +141,15 @@ let codeSeq = 0;
 const requests: { cmd: string; args: unknown }[] = [];
 
 const latest = (p: MockPack) => p.versions.at(-1)!;
+const passed = (): CrucibleChecks => ({ state: "done", full: true, ok: true, errors: [], warnings: [], notes: [], summary: { errors: 0, warnings: 0, notes: 0 } });
+/** Crucible's check per version (GET /codes' version.checks); a version not named here: passed. */
+const checks = new Map<string, CrucibleChecks>([
+  ["pv_frost1", { state: "running", full: false, ok: true, errors: [], warnings: [], notes: [], summary: { errors: 0, warnings: 0, notes: 0 } }],
+  ["pv_deep1", { state: "done", full: true, ok: true, errors: [], warnings: ["shroud-everywhere: references networking (System.Net.Http)"], notes: [], summary: { errors: 0, warnings: 1, notes: 0 } }],
+]);
 const versionOf = (v: MockVersion): CrucibleVersion => ({
   id: v.id, number: v.number, version: v.version, changes: v.changes, size: Math.round(v.mods.reduce((s, x) => s + x.mb, 0) * MB),
-  published: v.published, status: v.status,
+  published: v.published, status: v.status, checks: clone(checks.get(v.id) ?? passed()),
 });
 const indexOf = (p: MockPack, v: MockVersion): PackIndex => ({
   format: 2, kind: "pack", id: p.pack.slug, name: p.pack.title, version: v.version, created: v.published, authors: p.pack.owner ? [p.pack.owner.name] : [],
@@ -165,6 +180,12 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
   };
   const fileName = (x: { kind: ModKind; id: string; version: string }) => (x.kind === "native" ? x.id + "-native-" : x.id + "-") + x.version + ".zip";
 
+  /** `name`, or "name (2)"... when a profile has it (the backend's profile::unique_name). */
+  const uniqueMockName = (name: string) => {
+    const taken = new Set([...d.profiles.values()].map((p) => p.name.trim().toLowerCase()));
+    if (!taken.has(name.toLowerCase())) return name;
+    for (let n = 2; ; n++) if (!taken.has((name + " (" + n + ")").toLowerCase())) return name + " (" + n + ")";
+  };
   /** The player's own shared packs as Crucible has them. */
   const ownPacks = (): MockPack[] => [...shared.entries()].map(([pid, s]) => {
     const prof = d.profiles.get(pid);
@@ -195,7 +216,7 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       const progress = v.progress ?? 0;
       // the creator's upload goes on while a friend waits
       v.progress = Math.min(100, progress + 19);
-      if (progress < 100) err("busy", (p.pack.owner?.name ?? p.pack.title) + "'s pack is still uploading (" + progress + "%). Kiln will install it when it's ready.",
+      if (progress < 100) err("busy", (p.pack.owner?.name ?? p.pack.title) + "'s pack is still uploading (" + progress + "%). Try again when it's ready.",
         { uploading: { version: v.id, progress: progress / 100 }, pack: clone(p.pack) });
       v.status = "ready";
     }
@@ -263,8 +284,13 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       },
       layer: { from: from.version, to: v.version, changed: from.version !== v.version },
       files: from === v ? [] : [{ path: "kiln-auto-loot.json", side: "both", mode: "merge-patch", taken: ["smash", "loot.chests"], kept: ["sound"],
-        conflicts: [{ key: "range", base: 15, pack: 12, mine: 20 }] }],
+        conflicts: [{ key: "range", base: 15, pack: 12, mine: 20 }] },
+        // the pack renamed the mod's hotkey file: the player's hotkey moves along
+        { path: "kiln-auto-loot/hotkeys.json", side: "both", mode: "merge-patch", taken: [], kept: ["hotkey"], conflicts: [], renamedFrom: "kiln-auto-loot-keys.json" }],
       conflicts: from === v ? 0 : 1,
+      // the player layer: two data edits, one the new pack layer sets too
+      local: from === v ? null : { id: "local." + pid, files: 1, fields: 2, overlaps: [{ key: OVERLAP_KEY, section: "items", target: "Material_T1_Wood_Logs",
+        field: "maxStackSize", pack: 800, base: 500, mine: 999, file: "content/mine.json", changed: true }] },
     };
     return { p, v, plan };
   };
@@ -282,6 +308,9 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
     p.mods = mods;
     const size = Math.round((12 + mods * 6) * MB);
     const ver: CrucibleVersion = { id: "pv_" + prof.id.replace(/-/g, "") + n, number: n, version: n + ".0.0", changes: was ? "Updated by the launcher." : null, size, published: now(), status: "ready" };
+    // the full check runs a few minutes after an upload
+    checks.set(ver.id, { state: "queued", full: false, ok: true, errors: [], warnings: [], notes: [], summary: { errors: 0, warnings: 0, notes: 0 } });
+    ver.checks = clone(checks.get(ver.id)!);
     shared.set(prof.id, { pack: p, version: ver, snapshot: snap(prof) });
     return { pack: clone(p), version: ver, files: mods + 1, uploaded: was ? Math.round(size / 9) : Math.round(size * 0.7), skipped: was ? size - Math.round(size / 9) : Math.round(size * 0.3), copied: false };
   };
@@ -350,17 +379,22 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       const { p, v } = find(req.target);
       if (p.kilnOk === false) err("refused", "Needs Kiln " + (p.kiln ?? "") + " or newer.");
       if (v.status === "uploading") err("refused", "The pack is still uploading. Try again in a minute.");
-      if (d.isRunning(gameId)) err("game_running", "Close Enshrouded first.");
+      // Install alone (play false) writes only the data folder: it may run while the game does
+      const play = req.play !== false;
+      if (play && d.isRunning(gameId)) err("game_running", "Close Enshrouded first.");
       const missing = v.mods.filter((x) => !inLibrary(x.kind, x.id, x.version));
       const total = missing.reduce((s, x) => s + x.mb, 0);
       return d.startTask("crucible_install", "Install " + p.pack.title, [
-        "Downloading " + missing.length + " mods (" + total.toFixed(0) + " MB)", "Checking the files", "Adding to your Library", "Making the profile", "Backing up your saves",
+        "Downloading " + missing.length + " mods (" + total.toFixed(0) + " MB)", "Checking the files", "Adding to your Library", "Making the profile", ...(play ? ["Backing up your saves"] : []),
       ], (): CrucibleInstallResult => {
         if (req.trustAlways && p.pack.owner && !trust.some((x) => x.id === p.pack.owner!.id)) trust.push({ id: p.pack.owner.id, name: p.pack.owner.name, since: now() });
         const opt = { ...Object.fromEntries(v.mods.filter((x) => x.optional).map((x) => [x.id, !!x.on])), ...(req.optional ?? {}) };
-        const r = makeInstance(gameId, { slug: p.pack.slug, title: p.pack.title, code: p.pack.code, packId: p.pack.id, versionId: v.id }, v.version, v.mods, opt, req.name);
+        const previous = d.activations[gameId]?.profileId ?? null;
+        // named after the pack and its creator by default, never a name a profile has (kiln_manage::profile::unique_name)
+        const r = makeInstance(play ? gameId : "", { slug: p.pack.slug, title: p.pack.title, code: p.pack.code, packId: p.pack.id, versionId: v.id }, v.version, v.mods, opt,
+          uniqueMockName(req.name?.trim() || (p.pack.owner ? p.pack.title + " (" + p.pack.owner.name + "'s pack)" : p.pack.title)));
         p.pack.installs++;
-        return { profile: clone(r.prof), instance: clone(r.inst), imported: r.imported, overrides: ["kiln-auto-loot.json"], previous: r.previous, downloaded: Math.round(total * MB) };
+        return { profile: clone(r.prof), instance: clone(r.inst), imported: r.imported, overrides: ["kiln-auto-loot.json"], previous: play ? r.previous : previous, downloaded: Math.round(total * MB) };
       }, 350);
     },
     crucible_updates: (): CrucibleUpdate[] => [...instances.entries()].filter(([pid]) => d.profiles.has(pid)).flatMap(([pid, i]) => {
@@ -386,6 +420,8 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       return d.startTask("crucible_update", "Update " + p.pack.title, ["Downloading what changed", "Merging your settings", "Updating the profile"], (): CrucibleUpdateResult => {
         const open = plan.files.flatMap((f) => f.conflicts.map((c) => f.path + "#" + c.key)).filter((k) => !req.resolve?.[k] && !req.all);
         if (open.length) err("conflict", open.length + " setting(s) need your choice.", plan);
+        const known = new Set(plan.local?.overlaps.map((o) => o.key) ?? []);
+        for (const k of req.drop ?? []) if (!known.has(k)) err("invalid_argument", k + " is no field both the pack and your changes set");
         const pid = req.profile;
         const prof = clone(d.profiles.get(pid)!);
         const inst = clone(instances.get(pid)!);
@@ -410,7 +446,8 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
           crucible: { ...inst.crucible, version: v.id } };
         instances.set(pid, next);
         for (const [g, act] of Object.entries(d.activations)) if (act?.profileId === pid && !d.isRunning(g)) { d.activate(pid, g); d.emitGame(g); }
-        return { plan, profile: clone(prof), instance: clone(next), imported: rep.imported };
+        const backups = Object.entries(d.activations).filter(([, act]) => act?.profileId === pid).map(([g]) => d.makeBackup(g, "modpack", "before updating pack " + p.pack.title, pid));
+        return { plan, profile: clone(prof), instance: clone(next), imported: rep.imported, backups };
       }, 300);
     },
     crucible_share: (a) => {
@@ -438,6 +475,34 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       return null;
     },
     crucible_links: () => links.splice(0),
+    // ?crucible=first: a first start with no pack waiting; ?crucible=waiting: a Get Kiln download without its code (the
+    // clipboard is read once); ?crucible=resume: the download carried Cinder Trails' code
+    crucible_resume: () => {
+      const first = (FLAGS.has("first") || FLAGS.has("waiting")) && !resumed;
+      const r = { firstStart: first, code: FLAGS.has("resume") && !resumed ? "K4TW9XRB" : null, packWaiting: FLAGS.has("waiting") && !resumed };
+      resumed = true;
+      return r;
+    },
+    // the backend reads the OS clipboard; in a browser the page's own (Playwright grants it), raw: the UI decides
+    crucible_clipboard: async () => { try { return (await navigator.clipboard?.readText?.()) || null; } catch { return null; } },
+    pack_local_files: (a) => clone(localFiles.get(String(a.profileId)) ?? []),
+    pack_local_write: (a) => {
+      const pid = String(a.profileId), path = String(a.path);
+      if (!/^content\/[^/\\.][^/\\]*\.json$/i.test(path)) err("invalid_argument", path + ": the player layer holds content/<name>.json files only");
+      const list = (localFiles.get(pid) ?? []).filter((f) => f.path !== path);
+      if (a.text != null) list.push({ path, text: String(a.text) });
+      localFiles.set(pid, list.sort((x, y) => x.path.localeCompare(y.path)));
+      return null;
+    },
+    pack_local_save: (a) => {
+      const pid = String(a.profileId);
+      const prof = clone(d.profiles.get(pid) ?? err("not_found", "No profile '" + pid + "'."));
+      prof.mods.kiln = prof.mods.kiln.filter((x) => x.id !== "local." + pid);
+      if ((localFiles.get(pid) ?? []).length) prof.mods.kiln.push({ id: "local." + pid, version: "1.0.0", hash: hex("local" + JSON.stringify(localFiles.get(pid))), enabled: true });
+      prof.generation++;
+      d.profiles.set(pid, prof);
+      return clone(prof);
+    },
     pack_instance: (a) => clone(instances.get(String(a.profileId)) ?? null),
     pack_instances: () => [...instances.entries()].filter(([pid]) => d.profiles.has(pid)).map(([pid, i]) => [pid, clone(i)]),
     pack_undo: (a) => {
@@ -461,6 +526,14 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       const unused = MOD_KINDS.flatMap((k) => (prof.mods[k] ?? []).filter((x) => !used.has(k + "/" + x.id + "@" + x.version)).map((x) => ({ kind: k, id: x.id, version: x.version, hash: x.hash })));
       return { profile: clone(prof), unused };
     },
+    // the pack analysis of a file: a path with "unsafe" in it fails, "warn" has a warning
+    pack_check: (a) => {
+      const p = String(a.path);
+      const findings = /unsafe/i.test(p) ? [{ level: "error", code: "zip", message: "entry \"../evil.dll\" has an unsafe path" }]
+        : /warn/i.test(p) ? [{ level: "warning", code: "code-network", message: "references networking (System.Net.Http)", mod: "fps-unlock" }] : [];
+      const errors = findings.filter((f) => f.level === "error").length;
+      return { format: 1, kind: "kiln.pack-check", ok: errors === 0, complete: true, summary: { errors, warnings: findings.length - errors, notes: 0 }, findings, mods: [], conflicts: [], credits: [], catalog: false };
+    },
     pack_peek_format: (a) => (/modpack/i.test(String(a.path)) && !/\.kilnpack$/i.test(String(a.path)) ? 1 : 2),
     pack_build: (a) => {
       const req = a.request as { profile: string; version: string; name?: string };
@@ -482,13 +555,13 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       const gameId = String(a.gameId);
       const req = a.request as PackInstallRequest;
       if (!req?.consent) err("consent_required", "Tick \"I trust this pack\" first.");
-      if (d.isRunning(gameId)) err("game_running", "Close Enshrouded first.");
+      if (req.activate !== false && d.isRunning(gameId)) err("game_running", "Close Enshrouded first.");
       const p = fromFile(req.source.path);
       const v = latest(p);
       return d.startTask("pack_install", "Install " + p.pack.title, ["Checking the file", "Adding to your Library", "Making the profile", "Backing up your saves"], (): PackInstallResult => {
         const opt = { ...Object.fromEntries(v.mods.filter((x) => x.optional).map((x) => [x.id, !!x.on])), ...(req.optional ?? {}) };
         const previous = d.activations[gameId]?.profileId ?? null;
-        const r = makeInstance(req.activate === false ? "" : gameId, { slug: p.pack.slug, title: p.pack.title }, v.version, v.mods, opt, req.name);
+        const r = makeInstance(req.activate === false ? "" : gameId, { slug: p.pack.slug, title: p.pack.title }, v.version, v.mods, opt, uniqueMockName(req.name?.trim() || p.pack.title));
         lastPrevious = previous;
         return { profile: clone(r.prof), instance: clone(r.inst), imported: r.imported, overrides: [], backup: null, activation: req.activate === false ? null : d.activations[gameId] ?? null };
       }, 300);
@@ -501,6 +574,7 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       /** A kiln://crucible link, as the OS hands it to the launcher. */
       link: (url: string) => { links.push(url); d.emit("kiln://crucible-link", { count: links.length }); },
       setOnline: (on: boolean) => { online = on; },
+      setChecks: (versionId: string, c: CrucibleChecks) => { checks.set(versionId, clone(c)); },
       requests: () => clone(requests),
       state: () => clone({ shared: [...shared.entries()], instances: [...instances.entries()], trust, undo: [...undos.keys()], lastPrevious }),
     };

@@ -1,0 +1,1591 @@
+{
+  "source": "ShroudForge 1.7.9 reflection/build_attribute_catalog.rs, evaluate_attribute_program.rs, traverse_reflected_types.rs and lua/ingame/ecs/attributes/format_attribute_root.rs, compiled unchanged by a harness outside the repository over archive.json written by ShroudForge's kfc-parser",
+  "get_attributes": {
+    "version": "g09c-attributes",
+    "count": 10,
+    "entries": [
+      {
+        "name": "Stamina",
+        "hash": 212913642,
+        "hash_domain": "attribute-id",
+        "name_source": "kfc-debugNames",
+        "root_hash": 212913642,
+        "index": 0,
+        "resource_ids": [
+          "f552f8bc-ada0-4a58-8739-4081ce0d3873"
+        ],
+        "container_ids": [
+          "c0ffee00-1234-4abc-9def-00112233aabb"
+        ],
+        "scalar_type_hash": 1509949442,
+        "scalar_type": "keen::sint32",
+        "components": [
+          {
+            "qualified_name": "keen::ecs::Stamina",
+            "qualified_hash": 2453735012,
+            "size": 36,
+            "storage_offset": 24,
+            "storage_size": 12,
+            "header": {
+              "rootId": {
+                "name": "rootId",
+                "offset": 0,
+                "size": 4
+              },
+              "storageOffset": {
+                "name": "storageOffset",
+                "offset": 4,
+                "size": 2
+              },
+              "storageCount": {
+                "name": "storageCount",
+                "offset": 7,
+                "size": 1
+              },
+              "flags": {
+                "name": "flags",
+                "offset": 6,
+                "size": 1,
+                "initialized_mask": 1
+              }
+            },
+            "storage_scalar_type": "keen::sint32",
+            "engine_server_only": false,
+            "association": "fnv1a-definition-guid-bytes-and-static-array",
+            "definition_offset": 8,
+            "definition_guid": "f552f8bc-ada0-4a58-8739-4081ce0d3873",
+            "scalar_type_matches": true,
+            "integer_representation_compatible": true
+          }
+        ],
+        "calculation_scalar_type": "keen::sint32",
+        "structure": {
+          "parentIndex": 65535,
+          "childIndex": 1,
+          "siblingIndex": 65535,
+          "calculation": [
+            131072,
+            131073,
+            131074,
+            851967
+          ]
+        },
+        "calculation_words": [
+          131072,
+          131073,
+          131074,
+          851967
+        ],
+        "calculation": {
+          "encoding": "attribute-command-v1",
+          "decoded": true,
+          "native_callable": false,
+          "evaluation_api": "runtime.ecs.evaluate_attributes",
+          "instructions": [
+            {
+              "word_offset": 0,
+              "word": 131072,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 0,
+              "attribute_hash": 212913642,
+              "attribute_name": "Stamina"
+            },
+            {
+              "word_offset": 1,
+              "word": 131073,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 1,
+              "attribute_hash": 212913643,
+              "attribute_name": "Stamina_Min"
+            },
+            {
+              "word_offset": 2,
+              "word": 131074,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 2,
+              "attribute_hash": 212913644,
+              "attribute_name": "Stamina_Max"
+            },
+            {
+              "word_offset": 3,
+              "word": 851967,
+              "opcode": 12,
+              "operation": "Clamp",
+              "operand": 65535
+            }
+          ]
+        },
+        "calculation_encoding_verified": true,
+        "calculation_sign_independent": false,
+        "storage_resolution": "reflected-definition-guid",
+        "literal_encoding": "32-bit integer word",
+        "calculation_execution": "attribute-command-v1, descending root index, guarded updates require exact build validation",
+        "effect_scope": "local process, network authority and publication remain engine-managed",
+        "storage_writable": true,
+        "write_value_domain": "declared-scalar",
+        "calculation_writable": true,
+        "calculation_reason": null,
+        "storage_reason": null
+      },
+      {
+        "name": "Stamina_Min",
+        "hash": 212913643,
+        "hash_domain": "attribute-id",
+        "name_source": "kfc-debugNames",
+        "root_hash": 212913642,
+        "index": 1,
+        "resource_ids": [
+          "f552f8bc-ada0-4a58-8739-4081ce0d3873"
+        ],
+        "container_ids": [
+          "c0ffee00-1234-4abc-9def-00112233aabb"
+        ],
+        "scalar_type_hash": 1509949442,
+        "scalar_type": "keen::sint32",
+        "components": [
+          {
+            "qualified_name": "keen::ecs::Stamina",
+            "qualified_hash": 2453735012,
+            "size": 36,
+            "storage_offset": 24,
+            "storage_size": 12,
+            "header": {
+              "rootId": {
+                "name": "rootId",
+                "offset": 0,
+                "size": 4
+              },
+              "storageOffset": {
+                "name": "storageOffset",
+                "offset": 4,
+                "size": 2
+              },
+              "storageCount": {
+                "name": "storageCount",
+                "offset": 7,
+                "size": 1
+              },
+              "flags": {
+                "name": "flags",
+                "offset": 6,
+                "size": 1,
+                "initialized_mask": 1
+              }
+            },
+            "storage_scalar_type": "keen::sint32",
+            "engine_server_only": false,
+            "association": "fnv1a-definition-guid-bytes-and-static-array",
+            "definition_offset": 8,
+            "definition_guid": "f552f8bc-ada0-4a58-8739-4081ce0d3873",
+            "scalar_type_matches": true,
+            "integer_representation_compatible": true
+          }
+        ],
+        "calculation_scalar_type": "keen::sint32",
+        "structure": {
+          "parentIndex": 0,
+          "childIndex": 65535,
+          "siblingIndex": 2,
+          "calculation": []
+        },
+        "calculation_words": [],
+        "calculation": {
+          "encoding": "attribute-command-v1",
+          "decoded": true,
+          "native_callable": false,
+          "evaluation_api": "runtime.ecs.evaluate_attributes",
+          "instructions": []
+        },
+        "calculation_encoding_verified": true,
+        "calculation_sign_independent": false,
+        "storage_resolution": "reflected-definition-guid",
+        "literal_encoding": "32-bit integer word",
+        "calculation_execution": "attribute-command-v1, descending root index, guarded updates require exact build validation",
+        "effect_scope": "local process, network authority and publication remain engine-managed",
+        "storage_writable": true,
+        "write_value_domain": "declared-scalar",
+        "calculation_writable": true,
+        "calculation_reason": null,
+        "storage_reason": null
+      },
+      {
+        "name": "Stamina_Max",
+        "hash": 212913644,
+        "hash_domain": "attribute-id",
+        "name_source": "kfc-debugNames",
+        "root_hash": 212913642,
+        "index": 2,
+        "resource_ids": [
+          "f552f8bc-ada0-4a58-8739-4081ce0d3873"
+        ],
+        "container_ids": [
+          "c0ffee00-1234-4abc-9def-00112233aabb"
+        ],
+        "scalar_type_hash": 1509949442,
+        "scalar_type": "keen::sint32",
+        "components": [
+          {
+            "qualified_name": "keen::ecs::Stamina",
+            "qualified_hash": 2453735012,
+            "size": 36,
+            "storage_offset": 24,
+            "storage_size": 12,
+            "header": {
+              "rootId": {
+                "name": "rootId",
+                "offset": 0,
+                "size": 4
+              },
+              "storageOffset": {
+                "name": "storageOffset",
+                "offset": 4,
+                "size": 2
+              },
+              "storageCount": {
+                "name": "storageCount",
+                "offset": 7,
+                "size": 1
+              },
+              "flags": {
+                "name": "flags",
+                "offset": 6,
+                "size": 1,
+                "initialized_mask": 1
+              }
+            },
+            "storage_scalar_type": "keen::sint32",
+            "engine_server_only": false,
+            "association": "fnv1a-definition-guid-bytes-and-static-array",
+            "definition_offset": 8,
+            "definition_guid": "f552f8bc-ada0-4a58-8739-4081ce0d3873",
+            "scalar_type_matches": true,
+            "integer_representation_compatible": true
+          }
+        ],
+        "calculation_scalar_type": "keen::sint32",
+        "structure": {
+          "parentIndex": 0,
+          "childIndex": 65535,
+          "siblingIndex": 65535,
+          "calculation": [
+            196608,
+            131073,
+            131074,
+            131074,
+            393215,
+            10,
+            458751,
+            917503
+          ]
+        },
+        "calculation_words": [
+          196608,
+          131073,
+          131074,
+          131074,
+          393215,
+          10,
+          458751,
+          917503
+        ],
+        "calculation": {
+          "encoding": "attribute-command-v1",
+          "decoded": true,
+          "native_callable": false,
+          "evaluation_api": "runtime.ecs.evaluate_attributes",
+          "instructions": [
+            {
+              "word_offset": 0,
+              "word": 196608,
+              "opcode": 3,
+              "operation": "LoadRef",
+              "operand": 0,
+              "attribute_hash": 212913642,
+              "attribute_name": "Stamina"
+            },
+            {
+              "word_offset": 1,
+              "word": 131073,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 1,
+              "attribute_hash": 212913643,
+              "attribute_name": "Stamina_Min"
+            },
+            {
+              "word_offset": 2,
+              "word": 131074,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 2,
+              "attribute_hash": 212913644,
+              "attribute_name": "Stamina_Max"
+            },
+            {
+              "word_offset": 3,
+              "word": 131074,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 2,
+              "attribute_hash": 212913644,
+              "attribute_name": "Stamina_Max"
+            },
+            {
+              "word_offset": 4,
+              "word": 393215,
+              "opcode": 5,
+              "operation": "Push",
+              "operand": 65535,
+              "immediate_bits": 10
+            },
+            {
+              "word_offset": 6,
+              "word": 458751,
+              "opcode": 6,
+              "operation": "Add",
+              "operand": 65535
+            },
+            {
+              "word_offset": 7,
+              "word": 917503,
+              "opcode": 13,
+              "operation": "ScaleToNewMax",
+              "operand": 65535
+            }
+          ]
+        },
+        "calculation_encoding_verified": true,
+        "calculation_sign_independent": false,
+        "storage_resolution": "reflected-definition-guid",
+        "literal_encoding": "32-bit integer word",
+        "calculation_execution": "attribute-command-v1, descending root index, guarded updates require exact build validation",
+        "effect_scope": "local process, network authority and publication remain engine-managed",
+        "storage_writable": true,
+        "write_value_domain": "declared-scalar",
+        "calculation_writable": true,
+        "calculation_reason": null,
+        "storage_reason": null
+      },
+      {
+        "name": "Revive_Delay",
+        "hash": 792708196,
+        "hash_domain": "attribute-id",
+        "name_source": "kfc-debugNames",
+        "root_hash": 792708196,
+        "index": 0,
+        "resource_ids": [
+          "2b7e1516-28ae-4d2a-8f6c-0a1b2c3d4e5f"
+        ],
+        "container_ids": [],
+        "scalar_type_hash": 1509949443,
+        "scalar_type": "keen::float32",
+        "components": [
+          {
+            "qualified_name": "keen::ecs::ReviveDelay",
+            "qualified_hash": 2062365329,
+            "size": 32,
+            "storage_offset": 24,
+            "storage_size": 8,
+            "header": {
+              "rootId": {
+                "name": "rootId",
+                "offset": 0,
+                "size": 4
+              },
+              "storageOffset": {
+                "name": "storageOffset",
+                "offset": 4,
+                "size": 2
+              },
+              "storageCount": {
+                "name": "storageCount",
+                "offset": 7,
+                "size": 1
+              },
+              "flags": {
+                "name": "flags",
+                "offset": 6,
+                "size": 1,
+                "initialized_mask": 1
+              }
+            },
+            "storage_scalar_type": "keen::float32",
+            "engine_server_only": false,
+            "association": "fnv1a-definition-guid-bytes-and-static-array",
+            "definition_offset": 8,
+            "definition_guid": "2b7e1516-28ae-4d2a-8f6c-0a1b2c3d4e5f",
+            "scalar_type_matches": true,
+            "integer_representation_compatible": false
+          }
+        ],
+        "calculation_scalar_type": "keen::float32",
+        "structure": {
+          "parentIndex": 65535,
+          "childIndex": 1,
+          "siblingIndex": 65535,
+          "calculation": [
+            131073,
+            393215,
+            2,
+            589823
+          ]
+        },
+        "calculation_words": [
+          131073,
+          393215,
+          2,
+          589823
+        ],
+        "calculation": {
+          "encoding": "attribute-command-v1",
+          "decoded": true,
+          "native_callable": false,
+          "evaluation_api": "runtime.ecs.evaluate_attributes",
+          "instructions": [
+            {
+              "word_offset": 0,
+              "word": 131073,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 1,
+              "attribute_hash": 792708197,
+              "attribute_name": "Revive_Base"
+            },
+            {
+              "word_offset": 1,
+              "word": 393215,
+              "opcode": 5,
+              "operation": "Push",
+              "operand": 65535,
+              "immediate_bits": 2
+            },
+            {
+              "word_offset": 3,
+              "word": 589823,
+              "opcode": 8,
+              "operation": "Multiply",
+              "operand": 65535
+            }
+          ]
+        },
+        "calculation_encoding_verified": true,
+        "calculation_sign_independent": true,
+        "storage_resolution": "reflected-definition-guid",
+        "literal_encoding": "uint32 converted to float32",
+        "calculation_execution": "attribute-command-v1, descending root index, guarded updates require exact build validation",
+        "effect_scope": "local process, network authority and publication remain engine-managed",
+        "storage_writable": true,
+        "write_value_domain": "declared-scalar",
+        "calculation_writable": true,
+        "calculation_reason": null,
+        "storage_reason": null
+      },
+      {
+        "name": "Revive_Base",
+        "hash": 792708197,
+        "hash_domain": "attribute-id",
+        "name_source": "kfc-debugNames",
+        "root_hash": 792708196,
+        "index": 1,
+        "resource_ids": [
+          "2b7e1516-28ae-4d2a-8f6c-0a1b2c3d4e5f"
+        ],
+        "container_ids": [],
+        "scalar_type_hash": 1509949443,
+        "scalar_type": "keen::float32",
+        "components": [
+          {
+            "qualified_name": "keen::ecs::ReviveDelay",
+            "qualified_hash": 2062365329,
+            "size": 32,
+            "storage_offset": 24,
+            "storage_size": 8,
+            "header": {
+              "rootId": {
+                "name": "rootId",
+                "offset": 0,
+                "size": 4
+              },
+              "storageOffset": {
+                "name": "storageOffset",
+                "offset": 4,
+                "size": 2
+              },
+              "storageCount": {
+                "name": "storageCount",
+                "offset": 7,
+                "size": 1
+              },
+              "flags": {
+                "name": "flags",
+                "offset": 6,
+                "size": 1,
+                "initialized_mask": 1
+              }
+            },
+            "storage_scalar_type": "keen::float32",
+            "engine_server_only": false,
+            "association": "fnv1a-definition-guid-bytes-and-static-array",
+            "definition_offset": 8,
+            "definition_guid": "2b7e1516-28ae-4d2a-8f6c-0a1b2c3d4e5f",
+            "scalar_type_matches": true,
+            "integer_representation_compatible": false
+          }
+        ],
+        "calculation_scalar_type": "keen::float32",
+        "structure": {
+          "parentIndex": 0,
+          "childIndex": 65535,
+          "siblingIndex": 65535,
+          "calculation": []
+        },
+        "calculation_words": [],
+        "calculation": {
+          "encoding": "attribute-command-v1",
+          "decoded": true,
+          "native_callable": false,
+          "evaluation_api": "runtime.ecs.evaluate_attributes",
+          "instructions": []
+        },
+        "calculation_encoding_verified": true,
+        "calculation_sign_independent": true,
+        "storage_resolution": "reflected-definition-guid",
+        "literal_encoding": "uint32 converted to float32",
+        "calculation_execution": "attribute-command-v1, descending root index, guarded updates require exact build validation",
+        "effect_scope": "local process, network authority and publication remain engine-managed",
+        "storage_writable": true,
+        "write_value_domain": "declared-scalar",
+        "calculation_writable": true,
+        "calculation_reason": null,
+        "storage_reason": null
+      },
+      {
+        "name": "Mana",
+        "hash": 1291845648,
+        "hash_domain": "attribute-id",
+        "name_source": "kfc-debugNames",
+        "root_hash": 1291845648,
+        "index": 0,
+        "resource_ids": [],
+        "container_ids": [
+          "c0ffee00-1234-4abc-9def-00112233aabb"
+        ],
+        "scalar_type_hash": 1509949441,
+        "scalar_type": "keen::uint32",
+        "components": [],
+        "calculation_scalar_type": "keen::uint32",
+        "structure": {
+          "parentIndex": 65535,
+          "childIndex": 1,
+          "siblingIndex": 65535,
+          "calculation": [
+            131072,
+            131073,
+            1048575
+          ]
+        },
+        "calculation_words": [
+          131072,
+          131073,
+          1048575
+        ],
+        "calculation": {
+          "encoding": "attribute-command-v1",
+          "decoded": true,
+          "native_callable": false,
+          "evaluation_api": "runtime.ecs.evaluate_attributes",
+          "instructions": [
+            {
+              "word_offset": 0,
+              "word": 131072,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 0,
+              "attribute_hash": 1291845648,
+              "attribute_name": "Mana"
+            },
+            {
+              "word_offset": 1,
+              "word": 131073,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 1,
+              "attribute_hash": 1291845649,
+              "attribute_name": "Mana_Max"
+            },
+            {
+              "word_offset": 2,
+              "word": 1048575,
+              "opcode": 15,
+              "operation": "Max",
+              "operand": 65535
+            }
+          ]
+        },
+        "calculation_encoding_verified": true,
+        "calculation_sign_independent": false,
+        "storage_resolution": "per-entity-initialized-root-id",
+        "literal_encoding": "32-bit integer word",
+        "calculation_execution": "attribute-command-v1, descending root index, guarded updates require exact build validation",
+        "effect_scope": "local process, network authority and publication remain engine-managed",
+        "storage_writable": false,
+        "write_value_domain": "declared-scalar",
+        "calculation_writable": false,
+        "calculation_reason": "calculation storage type requires an initialized entity root match",
+        "storage_reason": "no proven component/root association. Compact headers without a reflected definition GUID require an independently observed initialized root ID"
+      },
+      {
+        "name": "Mana_Max",
+        "hash": 1291845649,
+        "hash_domain": "attribute-id",
+        "name_source": "kfc-debugNames",
+        "root_hash": 1291845648,
+        "index": 1,
+        "resource_ids": [],
+        "container_ids": [
+          "c0ffee00-1234-4abc-9def-00112233aabb"
+        ],
+        "scalar_type_hash": 1509949441,
+        "scalar_type": "keen::uint32",
+        "components": [],
+        "calculation_scalar_type": "keen::uint32",
+        "structure": {
+          "parentIndex": 0,
+          "childIndex": 65535,
+          "siblingIndex": 2,
+          "calculation": []
+        },
+        "calculation_words": [],
+        "calculation": {
+          "encoding": "attribute-command-v1",
+          "decoded": true,
+          "native_callable": false,
+          "evaluation_api": "runtime.ecs.evaluate_attributes",
+          "instructions": []
+        },
+        "calculation_encoding_verified": true,
+        "calculation_sign_independent": false,
+        "storage_resolution": "per-entity-initialized-root-id",
+        "literal_encoding": "32-bit integer word",
+        "calculation_execution": "attribute-command-v1, descending root index, guarded updates require exact build validation",
+        "effect_scope": "local process, network authority and publication remain engine-managed",
+        "storage_writable": false,
+        "write_value_domain": "declared-scalar",
+        "calculation_writable": false,
+        "calculation_reason": "calculation storage type requires an initialized entity root match",
+        "storage_reason": "no proven component/root association. Compact headers without a reflected definition GUID require an independently observed initialized root ID"
+      },
+      {
+        "name": "Shared",
+        "hash": 1291845650,
+        "hash_domain": "attribute-id",
+        "name_source": "kfc-debugNames",
+        "root_hash": 1291845648,
+        "index": 2,
+        "resource_ids": [],
+        "container_ids": [
+          "c0ffee00-1234-4abc-9def-00112233aabb"
+        ],
+        "scalar_type_hash": 1509949441,
+        "scalar_type": "keen::uint32",
+        "components": [],
+        "calculation_scalar_type": "keen::uint32",
+        "structure": {
+          "parentIndex": 0,
+          "childIndex": 65535,
+          "siblingIndex": 65535,
+          "calculation": [
+            131073,
+            393215,
+            3,
+            524287
+          ]
+        },
+        "calculation_words": [
+          131073,
+          393215,
+          3,
+          524287
+        ],
+        "calculation": {
+          "encoding": "attribute-command-v1",
+          "decoded": true,
+          "native_callable": false,
+          "evaluation_api": "runtime.ecs.evaluate_attributes",
+          "instructions": [
+            {
+              "word_offset": 0,
+              "word": 131073,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 1,
+              "attribute_hash": 1291845649,
+              "attribute_name": "Mana_Max"
+            },
+            {
+              "word_offset": 1,
+              "word": 393215,
+              "opcode": 5,
+              "operation": "Push",
+              "operand": 65535,
+              "immediate_bits": 3
+            },
+            {
+              "word_offset": 3,
+              "word": 524287,
+              "opcode": 7,
+              "operation": "Substract",
+              "operand": 65535
+            }
+          ]
+        },
+        "calculation_encoding_verified": true,
+        "calculation_sign_independent": false,
+        "storage_resolution": "per-entity-initialized-root-id",
+        "literal_encoding": "32-bit integer word",
+        "calculation_execution": "attribute-command-v1, descending root index, guarded updates require exact build validation",
+        "effect_scope": "local process, network authority and publication remain engine-managed",
+        "storage_writable": false,
+        "write_value_domain": "declared-scalar",
+        "calculation_writable": false,
+        "calculation_reason": "calculation storage type requires an initialized entity root match",
+        "storage_reason": "no proven component/root association. Compact headers without a reflected definition GUID require an independently observed initialized root ID"
+      },
+      {
+        "name": "Broken",
+        "hash": 1291845664,
+        "hash_domain": "attribute-id",
+        "name_source": "kfc-debugNames",
+        "root_hash": 1291845664,
+        "index": 0,
+        "resource_ids": [],
+        "container_ids": [
+          "c0ffee00-1234-4abc-9def-00112233aabb"
+        ],
+        "scalar_type_hash": 1509949441,
+        "scalar_type": "keen::uint32",
+        "components": [],
+        "calculation_scalar_type": "keen::uint32",
+        "structure": {
+          "parentIndex": 65535,
+          "childIndex": 1,
+          "siblingIndex": 65535,
+          "calculation": [
+            589824
+          ]
+        },
+        "calculation_words": [
+          589824
+        ],
+        "calculation": {
+          "encoding": "attribute-command-v1",
+          "decoded": false,
+          "native_callable": false,
+          "evaluation_api": "runtime.ecs.evaluate_attributes",
+          "instructions": [
+            {
+              "word_offset": 0,
+              "word": 589824,
+              "opcode": 9,
+              "operation": null,
+              "operand": 0
+            }
+          ]
+        },
+        "calculation_encoding_verified": true,
+        "calculation_sign_independent": false,
+        "storage_resolution": "per-entity-initialized-root-id",
+        "literal_encoding": "32-bit integer word",
+        "calculation_execution": "attribute-command-v1, descending root index, guarded updates require exact build validation",
+        "effect_scope": "local process, network authority and publication remain engine-managed",
+        "storage_writable": false,
+        "write_value_domain": "declared-scalar",
+        "calculation_writable": false,
+        "calculation_reason": "calculation storage type requires an initialized entity root match",
+        "storage_reason": "no proven component/root association. Compact headers without a reflected definition GUID require an independently observed initialized root ID"
+      },
+      {
+        "name": "Shared",
+        "hash": 1291845665,
+        "hash_domain": "attribute-id",
+        "name_source": "kfc-debugNames",
+        "root_hash": 1291845664,
+        "index": 1,
+        "resource_ids": [],
+        "container_ids": [
+          "c0ffee00-1234-4abc-9def-00112233aabb"
+        ],
+        "scalar_type_hash": 1509949441,
+        "scalar_type": "keen::uint32",
+        "components": [],
+        "calculation_scalar_type": "keen::uint32",
+        "structure": {
+          "parentIndex": 0,
+          "childIndex": 65535,
+          "siblingIndex": 65535,
+          "calculation": []
+        },
+        "calculation_words": [],
+        "calculation": {
+          "encoding": "attribute-command-v1",
+          "decoded": true,
+          "native_callable": false,
+          "evaluation_api": "runtime.ecs.evaluate_attributes",
+          "instructions": []
+        },
+        "calculation_encoding_verified": true,
+        "calculation_sign_independent": false,
+        "storage_resolution": "per-entity-initialized-root-id",
+        "literal_encoding": "32-bit integer word",
+        "calculation_execution": "attribute-command-v1, descending root index, guarded updates require exact build validation",
+        "effect_scope": "local process, network authority and publication remain engine-managed",
+        "storage_writable": false,
+        "write_value_domain": "declared-scalar",
+        "calculation_writable": false,
+        "calculation_reason": "calculation storage type requires an initialized entity root match",
+        "storage_reason": "no proven component/root association. Compact headers without a reflected definition GUID require an independently observed initialized root ID"
+      }
+    ],
+    "component_layouts": [
+      {
+        "qualified_name": "keen::ecs::Stamina",
+        "qualified_hash": 2453735012,
+        "size": 36,
+        "storage_offset": 24,
+        "storage_size": 12,
+        "header": {
+          "rootId": {
+            "name": "rootId",
+            "offset": 0,
+            "size": 4
+          },
+          "storageOffset": {
+            "name": "storageOffset",
+            "offset": 4,
+            "size": 2
+          },
+          "storageCount": {
+            "name": "storageCount",
+            "offset": 7,
+            "size": 1
+          },
+          "flags": {
+            "name": "flags",
+            "offset": 6,
+            "size": 1,
+            "initialized_mask": 1
+          }
+        },
+        "storage_scalar_type": "keen::sint32",
+        "engine_server_only": false,
+        "association": "reflected-attribute-storage",
+        "definition_offset": 8,
+        "definition_guid": "f552f8bc-ada0-4a58-8739-4081ce0d3873"
+      },
+      {
+        "qualified_name": "keen::ecs::ReviveDelay",
+        "qualified_hash": 2062365329,
+        "size": 32,
+        "storage_offset": 24,
+        "storage_size": 8,
+        "header": {
+          "rootId": {
+            "name": "rootId",
+            "offset": 0,
+            "size": 4
+          },
+          "storageOffset": {
+            "name": "storageOffset",
+            "offset": 4,
+            "size": 2
+          },
+          "storageCount": {
+            "name": "storageCount",
+            "offset": 7,
+            "size": 1
+          },
+          "flags": {
+            "name": "flags",
+            "offset": 6,
+            "size": 1,
+            "initialized_mask": 1
+          }
+        },
+        "storage_scalar_type": "keen::float32",
+        "engine_server_only": false,
+        "association": "reflected-attribute-storage",
+        "definition_offset": 8,
+        "definition_guid": "2b7e1516-28ae-4d2a-8f6c-0a1b2c3d4e5f"
+      }
+    ],
+    "storage_resolution": "per-entity-initialized-root-id"
+  },
+  "get_attribute": {
+    "Stamina": {
+      "ok": {
+        "name": "Stamina",
+        "hash": 212913642,
+        "hash_domain": "attribute-id",
+        "name_source": "kfc-debugNames",
+        "root_hash": 212913642,
+        "index": 0,
+        "resource_ids": [
+          "f552f8bc-ada0-4a58-8739-4081ce0d3873"
+        ],
+        "container_ids": [
+          "c0ffee00-1234-4abc-9def-00112233aabb"
+        ],
+        "scalar_type_hash": 1509949442,
+        "scalar_type": "keen::sint32",
+        "components": [
+          {
+            "qualified_name": "keen::ecs::Stamina",
+            "qualified_hash": 2453735012,
+            "size": 36,
+            "storage_offset": 24,
+            "storage_size": 12,
+            "header": {
+              "rootId": {
+                "name": "rootId",
+                "offset": 0,
+                "size": 4
+              },
+              "storageOffset": {
+                "name": "storageOffset",
+                "offset": 4,
+                "size": 2
+              },
+              "storageCount": {
+                "name": "storageCount",
+                "offset": 7,
+                "size": 1
+              },
+              "flags": {
+                "name": "flags",
+                "offset": 6,
+                "size": 1,
+                "initialized_mask": 1
+              }
+            },
+            "storage_scalar_type": "keen::sint32",
+            "engine_server_only": false,
+            "association": "fnv1a-definition-guid-bytes-and-static-array",
+            "definition_offset": 8,
+            "definition_guid": "f552f8bc-ada0-4a58-8739-4081ce0d3873",
+            "scalar_type_matches": true,
+            "integer_representation_compatible": true
+          }
+        ],
+        "calculation_scalar_type": "keen::sint32",
+        "structure": {
+          "parentIndex": 65535,
+          "childIndex": 1,
+          "siblingIndex": 65535,
+          "calculation": [
+            131072,
+            131073,
+            131074,
+            851967
+          ]
+        },
+        "calculation_words": [
+          131072,
+          131073,
+          131074,
+          851967
+        ],
+        "calculation": {
+          "encoding": "attribute-command-v1",
+          "decoded": true,
+          "native_callable": false,
+          "evaluation_api": "runtime.ecs.evaluate_attributes",
+          "instructions": [
+            {
+              "word_offset": 0,
+              "word": 131072,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 0,
+              "attribute_hash": 212913642,
+              "attribute_name": "Stamina"
+            },
+            {
+              "word_offset": 1,
+              "word": 131073,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 1,
+              "attribute_hash": 212913643,
+              "attribute_name": "Stamina_Min"
+            },
+            {
+              "word_offset": 2,
+              "word": 131074,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 2,
+              "attribute_hash": 212913644,
+              "attribute_name": "Stamina_Max"
+            },
+            {
+              "word_offset": 3,
+              "word": 851967,
+              "opcode": 12,
+              "operation": "Clamp",
+              "operand": 65535
+            }
+          ]
+        },
+        "calculation_encoding_verified": true,
+        "calculation_sign_independent": false,
+        "storage_resolution": "reflected-definition-guid",
+        "literal_encoding": "32-bit integer word",
+        "calculation_execution": "attribute-command-v1, descending root index, guarded updates require exact build validation",
+        "effect_scope": "local process, network authority and publication remain engine-managed",
+        "storage_writable": true,
+        "write_value_domain": "declared-scalar",
+        "calculation_writable": true,
+        "calculation_reason": null,
+        "storage_reason": null
+      }
+    },
+    "Stamina_Min": {
+      "ok": {
+        "name": "Stamina_Min",
+        "hash": 212913643,
+        "hash_domain": "attribute-id",
+        "name_source": "kfc-debugNames",
+        "root_hash": 212913642,
+        "index": 1,
+        "resource_ids": [
+          "f552f8bc-ada0-4a58-8739-4081ce0d3873"
+        ],
+        "container_ids": [
+          "c0ffee00-1234-4abc-9def-00112233aabb"
+        ],
+        "scalar_type_hash": 1509949442,
+        "scalar_type": "keen::sint32",
+        "components": [
+          {
+            "qualified_name": "keen::ecs::Stamina",
+            "qualified_hash": 2453735012,
+            "size": 36,
+            "storage_offset": 24,
+            "storage_size": 12,
+            "header": {
+              "rootId": {
+                "name": "rootId",
+                "offset": 0,
+                "size": 4
+              },
+              "storageOffset": {
+                "name": "storageOffset",
+                "offset": 4,
+                "size": 2
+              },
+              "storageCount": {
+                "name": "storageCount",
+                "offset": 7,
+                "size": 1
+              },
+              "flags": {
+                "name": "flags",
+                "offset": 6,
+                "size": 1,
+                "initialized_mask": 1
+              }
+            },
+            "storage_scalar_type": "keen::sint32",
+            "engine_server_only": false,
+            "association": "fnv1a-definition-guid-bytes-and-static-array",
+            "definition_offset": 8,
+            "definition_guid": "f552f8bc-ada0-4a58-8739-4081ce0d3873",
+            "scalar_type_matches": true,
+            "integer_representation_compatible": true
+          }
+        ],
+        "calculation_scalar_type": "keen::sint32",
+        "structure": {
+          "parentIndex": 0,
+          "childIndex": 65535,
+          "siblingIndex": 2,
+          "calculation": []
+        },
+        "calculation_words": [],
+        "calculation": {
+          "encoding": "attribute-command-v1",
+          "decoded": true,
+          "native_callable": false,
+          "evaluation_api": "runtime.ecs.evaluate_attributes",
+          "instructions": []
+        },
+        "calculation_encoding_verified": true,
+        "calculation_sign_independent": false,
+        "storage_resolution": "reflected-definition-guid",
+        "literal_encoding": "32-bit integer word",
+        "calculation_execution": "attribute-command-v1, descending root index, guarded updates require exact build validation",
+        "effect_scope": "local process, network authority and publication remain engine-managed",
+        "storage_writable": true,
+        "write_value_domain": "declared-scalar",
+        "calculation_writable": true,
+        "calculation_reason": null,
+        "storage_reason": null
+      }
+    },
+    "Revive_Delay": {
+      "ok": {
+        "name": "Revive_Delay",
+        "hash": 792708196,
+        "hash_domain": "attribute-id",
+        "name_source": "kfc-debugNames",
+        "root_hash": 792708196,
+        "index": 0,
+        "resource_ids": [
+          "2b7e1516-28ae-4d2a-8f6c-0a1b2c3d4e5f"
+        ],
+        "container_ids": [],
+        "scalar_type_hash": 1509949443,
+        "scalar_type": "keen::float32",
+        "components": [
+          {
+            "qualified_name": "keen::ecs::ReviveDelay",
+            "qualified_hash": 2062365329,
+            "size": 32,
+            "storage_offset": 24,
+            "storage_size": 8,
+            "header": {
+              "rootId": {
+                "name": "rootId",
+                "offset": 0,
+                "size": 4
+              },
+              "storageOffset": {
+                "name": "storageOffset",
+                "offset": 4,
+                "size": 2
+              },
+              "storageCount": {
+                "name": "storageCount",
+                "offset": 7,
+                "size": 1
+              },
+              "flags": {
+                "name": "flags",
+                "offset": 6,
+                "size": 1,
+                "initialized_mask": 1
+              }
+            },
+            "storage_scalar_type": "keen::float32",
+            "engine_server_only": false,
+            "association": "fnv1a-definition-guid-bytes-and-static-array",
+            "definition_offset": 8,
+            "definition_guid": "2b7e1516-28ae-4d2a-8f6c-0a1b2c3d4e5f",
+            "scalar_type_matches": true,
+            "integer_representation_compatible": false
+          }
+        ],
+        "calculation_scalar_type": "keen::float32",
+        "structure": {
+          "parentIndex": 65535,
+          "childIndex": 1,
+          "siblingIndex": 65535,
+          "calculation": [
+            131073,
+            393215,
+            2,
+            589823
+          ]
+        },
+        "calculation_words": [
+          131073,
+          393215,
+          2,
+          589823
+        ],
+        "calculation": {
+          "encoding": "attribute-command-v1",
+          "decoded": true,
+          "native_callable": false,
+          "evaluation_api": "runtime.ecs.evaluate_attributes",
+          "instructions": [
+            {
+              "word_offset": 0,
+              "word": 131073,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 1,
+              "attribute_hash": 792708197,
+              "attribute_name": "Revive_Base"
+            },
+            {
+              "word_offset": 1,
+              "word": 393215,
+              "opcode": 5,
+              "operation": "Push",
+              "operand": 65535,
+              "immediate_bits": 2
+            },
+            {
+              "word_offset": 3,
+              "word": 589823,
+              "opcode": 8,
+              "operation": "Multiply",
+              "operand": 65535
+            }
+          ]
+        },
+        "calculation_encoding_verified": true,
+        "calculation_sign_independent": true,
+        "storage_resolution": "reflected-definition-guid",
+        "literal_encoding": "uint32 converted to float32",
+        "calculation_execution": "attribute-command-v1, descending root index, guarded updates require exact build validation",
+        "effect_scope": "local process, network authority and publication remain engine-managed",
+        "storage_writable": true,
+        "write_value_domain": "declared-scalar",
+        "calculation_writable": true,
+        "calculation_reason": null,
+        "storage_reason": null
+      }
+    },
+    "Mana": {
+      "ok": {
+        "name": "Mana",
+        "hash": 1291845648,
+        "hash_domain": "attribute-id",
+        "name_source": "kfc-debugNames",
+        "root_hash": 1291845648,
+        "index": 0,
+        "resource_ids": [],
+        "container_ids": [
+          "c0ffee00-1234-4abc-9def-00112233aabb"
+        ],
+        "scalar_type_hash": 1509949441,
+        "scalar_type": "keen::uint32",
+        "components": [],
+        "calculation_scalar_type": "keen::uint32",
+        "structure": {
+          "parentIndex": 65535,
+          "childIndex": 1,
+          "siblingIndex": 65535,
+          "calculation": [
+            131072,
+            131073,
+            1048575
+          ]
+        },
+        "calculation_words": [
+          131072,
+          131073,
+          1048575
+        ],
+        "calculation": {
+          "encoding": "attribute-command-v1",
+          "decoded": true,
+          "native_callable": false,
+          "evaluation_api": "runtime.ecs.evaluate_attributes",
+          "instructions": [
+            {
+              "word_offset": 0,
+              "word": 131072,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 0,
+              "attribute_hash": 1291845648,
+              "attribute_name": "Mana"
+            },
+            {
+              "word_offset": 1,
+              "word": 131073,
+              "opcode": 2,
+              "operation": "Load",
+              "operand": 1,
+              "attribute_hash": 1291845649,
+              "attribute_name": "Mana_Max"
+            },
+            {
+              "word_offset": 2,
+              "word": 1048575,
+              "opcode": 15,
+              "operation": "Max",
+              "operand": 65535
+            }
+          ]
+        },
+        "calculation_encoding_verified": true,
+        "calculation_sign_independent": false,
+        "storage_resolution": "per-entity-initialized-root-id",
+        "literal_encoding": "32-bit integer word",
+        "calculation_execution": "attribute-command-v1, descending root index, guarded updates require exact build validation",
+        "effect_scope": "local process, network authority and publication remain engine-managed",
+        "storage_writable": false,
+        "write_value_domain": "declared-scalar",
+        "calculation_writable": false,
+        "calculation_reason": "calculation storage type requires an initialized entity root match",
+        "storage_reason": "no proven component/root association. Compact headers without a reflected definition GUID require an independently observed initialized root ID"
+      }
+    },
+    "Shared": {
+      "err": "Ambiguous attribute name. Use its ID"
+    },
+    "Missing": {
+      "err": "attribute not found: Missing"
+    }
+  },
+  "evaluate": {
+    "0:Stamina": {
+      "selector": "Stamina",
+      "bits": {
+        "Stamina": 150,
+        "Stamina_Min": 0,
+        "Stamina_Max": 100
+      },
+      "result": {
+        "ok": {
+          "root_hash": 212913642,
+          "values": {
+            "Stamina": 110,
+            "Stamina_Min": 0,
+            "Stamina_Max": 110
+          },
+          "trace": [
+            {
+              "name": "Stamina_Max",
+              "hash": 212913644,
+              "index": 2,
+              "before_bits": [
+                150,
+                0,
+                100
+              ],
+              "after_bits": [
+                165,
+                0,
+                110
+              ]
+            },
+            {
+              "name": "Stamina",
+              "hash": 212913642,
+              "index": 0,
+              "before_bits": [
+                165,
+                0,
+                110
+              ],
+              "after_bits": [
+                110,
+                0,
+                110
+              ]
+            }
+          ],
+          "calculation_model": "attribute-command-v1",
+          "scalar_type": "keen::sint32"
+        }
+      }
+    },
+    "1:Stamina_Min": {
+      "selector": "Stamina_Min",
+      "bits": {
+        "Stamina": 40,
+        "Stamina_Min": 0,
+        "Stamina_Max": 50
+      },
+      "result": {
+        "ok": {
+          "root_hash": 212913642,
+          "values": {
+            "Stamina": 48,
+            "Stamina_Min": 0,
+            "Stamina_Max": 60
+          },
+          "trace": [
+            {
+              "name": "Stamina_Max",
+              "hash": 212913644,
+              "index": 2,
+              "before_bits": [
+                40,
+                0,
+                50
+              ],
+              "after_bits": [
+                48,
+                0,
+                60
+              ]
+            },
+            {
+              "name": "Stamina",
+              "hash": 212913642,
+              "index": 0,
+              "before_bits": [
+                48,
+                0,
+                60
+              ],
+              "after_bits": [
+                48,
+                0,
+                60
+              ]
+            }
+          ],
+          "calculation_model": "attribute-command-v1",
+          "scalar_type": "keen::sint32"
+        }
+      }
+    },
+    "2:Revive_Delay": {
+      "selector": "Revive_Delay",
+      "bits": {
+        "Revive_Delay": 0,
+        "Revive_Base": 1069547520
+      },
+      "result": {
+        "ok": {
+          "root_hash": 792708196,
+          "values": {
+            "Revive_Delay": 3.0,
+            "Revive_Base": 1.5
+          },
+          "trace": [
+            {
+              "name": "Revive_Delay",
+              "hash": 792708196,
+              "index": 0,
+              "before_bits": [
+                0,
+                1069547520
+              ],
+              "after_bits": [
+                1077936128,
+                1069547520
+              ]
+            }
+          ],
+          "calculation_model": "attribute-command-v1",
+          "scalar_type": "keen::float32"
+        }
+      }
+    },
+    "3:Mana": {
+      "selector": "Mana",
+      "bits": {
+        "Mana": 7,
+        "Mana_Max": 5,
+        "Shared": 2
+      },
+      "result": {
+        "ok": {
+          "root_hash": 1291845648,
+          "values": {
+            "Mana": 7,
+            "Mana_Max": 5,
+            "Shared": 2
+          },
+          "trace": [
+            {
+              "name": "Shared",
+              "hash": 1291845650,
+              "index": 2,
+              "before_bits": [
+                7,
+                5,
+                2
+              ],
+              "after_bits": [
+                7,
+                5,
+                2
+              ]
+            },
+            {
+              "name": "Mana",
+              "hash": 1291845648,
+              "index": 0,
+              "before_bits": [
+                7,
+                5,
+                2
+              ],
+              "after_bits": [
+                7,
+                5,
+                2
+              ]
+            }
+          ],
+          "calculation_model": "attribute-command-v1",
+          "scalar_type": "keen::uint32"
+        }
+      }
+    },
+    "4:Mana_Max": {
+      "selector": "Mana_Max",
+      "bits": {
+        "Mana": 1,
+        "Mana_Max": 1,
+        "Shared": 0
+      },
+      "result": {
+        "ok": {
+          "root_hash": 1291845648,
+          "values": {
+            "Mana": 1,
+            "Mana_Max": 1,
+            "Shared": 4294967294
+          },
+          "trace": [
+            {
+              "name": "Shared",
+              "hash": 1291845650,
+              "index": 2,
+              "before_bits": [
+                1,
+                1,
+                0
+              ],
+              "after_bits": [
+                1,
+                1,
+                4294967294
+              ]
+            },
+            {
+              "name": "Mana",
+              "hash": 1291845648,
+              "index": 0,
+              "before_bits": [
+                1,
+                1,
+                4294967294
+              ],
+              "after_bits": [
+                1,
+                1,
+                4294967294
+              ]
+            }
+          ],
+          "calculation_model": "attribute-command-v1",
+          "scalar_type": "keen::uint32"
+        }
+      }
+    },
+    "5:Broken": {
+      "selector": "Broken",
+      "bits": {
+        "Broken": 1,
+        "Shared": 1
+      },
+      "result": {
+        "err": "attribute root has an unverified calculation program"
+      }
+    }
+  }
+}

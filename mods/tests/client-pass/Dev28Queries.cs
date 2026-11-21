@@ -23,14 +23,35 @@ public sealed partial class ClientPassMod
         return ok;
     }
 
+    // Instead of a "press continue": gives the player at least `earliest` to get into place, then goes on once the player has
+    // stood still for 3 s (a failed assertion after 3 min).
+    private static async Task<bool> QueriesStandStill(CheckContext c, string what, int earliest = 15)
+    {
+        await c.Delay(TimeSpan.FromSeconds(earliest));
+        WorldPosition? last = null;
+        var since = DateTime.UtcNow;
+        return await c.Until(() =>
+        {
+            var player = Players.All.FirstOrDefault(p => !p.Entity.IsNone);
+            if (player == null || !World.TryGetPosition(player.Entity, out var at)) { last = null; return false; }
+            if (last is not { } l || Math.Abs(l.X - at.X) + Math.Abs(l.Y - at.Y) + Math.Abs(l.Z - at.Z) > 0.15)
+            {
+                last = at;
+                since = DateTime.UtcNow;
+                return false;
+            }
+            return DateTime.UtcNow - since >= TimeSpan.FromSeconds(3);
+        }, TimeSpan.FromMinutes(3), what);
+    }
+
     [ClientCheck("01-queries.voxel-ray-hosted", "Ground, wall and query-only safety", Area = QueriesArea, Since = Dev28,
         Tags = [Visual], Needs = ClientCheckNeeds.Hosted, Order = 2000)]
     public async Task QueriesVoxelRayHosted(CheckContext c)
     {
         if (!await NeedOpen(c, "queries.voxel_ray", "queries.ground", "queries.line_of_sight", "queries.overlap_origins")) return;
         c.Instruct("Host a disposable world and stand on flat, natural ground well away from any base (a Flame Altar's area " +
-                   "refuses the test wall). Stand still, then press continue.");
-        await c.Verdict();
+                   "refuses the test wall). Stand still: the check goes on by itself once you have stood still for 3 seconds (at the earliest 15 seconds from now).");
+        await QueriesStandStill(c, "you stood still on open ground");
         if (!QueriesPlayerAt(c, out var me, out var at)) return;
 
         // ground under the feet: asked again over a few steps while the ray's cells load
@@ -65,10 +86,10 @@ public sealed partial class ClientPassMod
             if (!(write.Changed && write.Verified)) return;
             var hit = await QueriesAsk(c, () => Queries.RaycastVoxels(a, b), r => r.Hit != null);
             c.Expect(hit is { Ok: true, Hit: not null }, $"the ray stops at the wall (ok={hit.Ok}, reason={hit.Reason}, at {hit.Hit?.Position})");
-            c.Instruct("A wall of earth, 1 m thick and 4 m high, now stands 4 m east of you (it is taken away again after this " +
-                       "check). Nothing else should have changed: no stutter, no effect, nothing drawn where the rays went. " +
-                       "Is the wall there, and is the game otherwise as before?");
-            await c.Verdict();
+            c.Instruct("A wall of earth, 1 m thick and 4 m high, now stands 4 m east of you. Look at it and remember whether it " +
+                       "is there and whether anything else changed (a stutter, an effect, something drawn where the rays went). " +
+                       "The check takes it away again by itself in 15 seconds.");
+            await c.Delay(TimeSpan.FromSeconds(15));
         }
         finally
         {
@@ -79,6 +100,10 @@ public sealed partial class ClientPassMod
         c.Expect(clear is { Ok: true, Hit: null }, $"after the wall is gone the same ray is clear (ok={clear.Ok}, hit={clear.Hit != null}, reason={clear.Reason})");
         var near = Queries.EntitiesInSphere(at, 0.5);
         c.Expect(near.Ok && near.Entities.Contains(me), $"EntitiesInSphere around the player finds the player (ok={near.Ok}, {near.Total} found)");
+        c.Instruct("The wall was taken away again. Pass only if all of these held: (1) the wall of earth stood 4 m east of you " +
+                   "while it was there, (2) it is gone now, (3) nothing else changed: no stutter, no effect, nothing drawn where " +
+                   "the rays went. Otherwise fail with a note naming which one.");
+        await c.Verdict();
     }
 
     // A ray asked again in later steps while it is refused for loading or budget, or until `done` (at most 10 s).
@@ -99,8 +124,8 @@ public sealed partial class ClientPassMod
     {
         if (!await NeedOpen(c, "queries.voxel_ray")) return;
         c.Instruct("Place a chest (or stand so that a large creature is) directly east of you, 2 to 4 m away, with nothing else " +
-                   "between you and it and open ground behind it. Stand still, then press continue.");
-        await c.Verdict();
+                   "between you and it and open ground behind it. Stand still: the check goes on by itself once you have stood still for 3 seconds (at the earliest 15 seconds from now).");
+        await QueriesStandStill(c, "you stood still facing the chest or creature");
         if (!QueriesPlayerAt(c, out _, out var at)) return;
         var a = new WorldPosition(at.X, at.Y + 0.6, at.Z);
         var b = new WorldPosition(at.X + 6, at.Y + 0.6, at.Z);
@@ -108,7 +133,7 @@ public sealed partial class ClientPassMod
         c.Log.Info($"client-pass: {c.Id}: voxel-only ray through the prop: ok={r.Ok} hit={r.Hit != null} reason={r.Reason}");
         c.Expect(r is { Ok: true, Hit: null }, $"the voxel ray passes the prop: a voxel ray never reports a prop or a creature (ok={r.Ok}, hit={r.Hit != null}, reason={r.Reason})");
         c.Instruct("The ray went from you 6 m east at knee height and reported no hit. Was the chest (or creature) really in that " +
-                   "line, with no terrain or building block in it?");
+                   "line, with no terrain or building block in it? Pass only if so; otherwise fail with a note saying what was in the line.");
         await c.Verdict();
     }
 
@@ -118,8 +143,8 @@ public sealed partial class ClientPassMod
     {
         if (!await NeedOpen(c, "queries.line_of_sight")) return;
         c.Instruct("Find a creature standing behind a low wall or ledge that hides its legs but not its head, 5 to 20 m from you, " +
-                   "and look at it. Stand still, then press continue. (This check records numbers; it opens no capability.)");
-        await c.Verdict();
+                   "and look at it. Stand still: the check goes on by itself once you have stood still for 3 seconds (at the earliest 15 seconds from now). (This check records numbers; it opens no capability.)");
+        await QueriesStandStill(c, "you stood still looking at the creature");
         if (!QueriesPlayerAt(c, out var me, out var at)) return;
         var target = Queries.EntitiesInSphere(at, 25, exclude: me).Entities.FirstOrDefault(e => Creatures.Available && Creatures.Of(e).Inspect() is { HealthMax: > 0 });
         c.Expect(!target.IsNone, "a creature is within 25 m");
@@ -131,7 +156,8 @@ public sealed partial class ClientPassMod
             await c.Delay(TimeSpan.FromMilliseconds(50));
         }
         c.Instruct("The log now has four lines for that creature: line of sight to 0.3, 0.8, 1.5 and 2.2 m above its origin. " +
-                   "Do the low ones read not visible and the ones at its head visible, as you see it?");
+                   "Pass only if the low ones read not visible and the ones at its head visible, as you see it; otherwise fail with a " +
+                   "note giving the four results.");
         await c.Verdict();
     }
 
@@ -163,8 +189,8 @@ public sealed partial class ClientPassMod
     {
         if (!await NeedOpen(c, "queries.path", "queries.reachability")) return;
         c.Instruct("Host a disposable world and stand on flat, open ground well away from any base, with 10 m of clear ground to " +
-                   "the east. Stand still, then press continue.");
-        await c.Verdict();
+                   "the east. Stand still: the check goes on by itself once you have stood still for 3 seconds (at the earliest 15 seconds from now).");
+        await QueriesStandStill(c, "you stood still on open ground");
         if (!QueriesPlayerAt(c, out _, out var at)) return;
         // the anchor: a pickup of the check's own (a player may have no spawn marker)
         var anchor = await Spawn.Entity("Base_LootPickup_Generic_Gravity", new WorldPosition(at.X + 1, at.Y + 0.5, at.Z));
@@ -197,10 +223,10 @@ public sealed partial class ClientPassMod
                 var through = round.Ok && round.Points.Any(p => Math.Abs(p.Position.X - (from.X + 4.5)) < 0.5 && Math.Abs(p.Position.Z - from.Z) < 3.0 && p.Position.Y < from.Y + 2.5);
                 c.Expect(!through, "no point of the route lies inside the wall");
                 c.Expect(!round.Ok || round.Length > open.Length + 1 || !round.ReachesTarget, $"with the wall the route is longer, ends short, or there is none ({round.Status}, {round.Length:F2} m against {open.Length:F2} m)");
-                c.Instruct("A wall of earth stands 4 m east of you across the line the first path took (it is taken away after this " +
-                           "check). Nothing moved and nothing else changed while the paths were asked for. Is the wall there, and is the " +
-                           "game otherwise as before?");
-                await c.Verdict();
+                c.Instruct("A wall of earth now stands 4 m east of you across the line the first path took. Look at it and " +
+                           "remember whether it is there and whether anything moved or changed while the paths were asked for. " +
+                           "The check takes it away again by itself in 15 seconds.");
+                await c.Delay(TimeSpan.FromSeconds(15));
             }
             finally
             {
@@ -212,9 +238,11 @@ public sealed partial class ClientPassMod
             foreach (var t in batch)
                 for (var i = 0; i < 400 && !t.Completion.IsCompleted; i++) await c.Delay(TimeSpan.FromMilliseconds(50));
             c.Expect(batch.All(t => t.Completion.IsCompleted), "all eight ended");
-            c.Instruct("Now leave to the main menu, host the same world again and run this check a second time. On the second run: " +
-                       "did the first path (open ground) come back found again, with no error in kiln.log about queries.path? " +
-                       "(On the first run answer yes to go on.)");
+            c.Instruct("The wall was taken away again. Pass only if all of these held: (1) the wall of earth stood 4 m east of you " +
+                       "while it was there, (2) nothing else moved or changed while the paths were asked for, (3) on a second run " +
+                       "of this check (leave to the main menu, host the same world again, run it again) the first path over open " +
+                       "ground is found again, with no error in kiln.log about queries.path (on the first run, pass on (1) and (2) " +
+                       "and then do the second run). Otherwise fail with a note naming which one.");
             await c.Verdict();
         }
         finally
@@ -229,9 +257,9 @@ public sealed partial class ClientPassMod
     {
         if (!await NeedOpen(c, "queries.path")) return;
         c.Instruct("Stand in front of a gap you can measure: a doorway or two walls about 1 m apart and at least 2 m high, with " +
-                   "open ground behind it, the gap straight to the east of you, 3 to 5 m away. Stand still, then press continue. " +
+                   "open ground behind it, the gap straight to the east of you, 3 to 5 m away. Stand still: the check goes on by itself once you have stood still for 3 seconds (at the earliest 15 seconds from now). " +
                    "(This check records numbers for the documentation; it opens no capability.)");
-        await c.Verdict();
+        await QueriesStandStill(c, "you stood still in front of the gap");
         if (!QueriesPlayerAt(c, out _, out var at)) return;
         var anchor = await Spawn.Entity("Base_LootPickup_Generic_Gravity", new WorldPosition(at.X + 1, at.Y + 0.5, at.Z));
         try
@@ -246,7 +274,8 @@ public sealed partial class ClientPassMod
             }
             c.Instruct("kiln.log now has seven lines, one per free-space setting, each saying whether a path through the gap was " +
                        "found. Write down the gap's width and height. Does the widest horizontal setting that still goes through " +
-                       "match the gap's width (as a full width, not a radius)? Answer yes or no; either is a result.");
+                       "match the gap's width (as a full width, not a radius)? Pass if it does, fail if it does not (either is a result); " +
+                       "put the gap's width and height in the note.");
             await c.Verdict();
         }
         finally

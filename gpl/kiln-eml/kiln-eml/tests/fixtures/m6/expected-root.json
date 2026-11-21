@@ -1,0 +1,8 @@
+{
+  "child": {"base": 7, "extra": 137},
+  "fixed": [2, 107],
+  "children": [{"base": 19, "extra": 23}, {"base": 127, "extra": 131}],
+  "maybe": {"base": 29, "extra": 109},
+  "choice": {"$type": 2, "$value": {"base": 37, "extra": 113}},
+  "text": "synthetic"
+}

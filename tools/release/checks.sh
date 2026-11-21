@@ -331,6 +331,10 @@ run_checks() {
   check "kilnctl bundle verify on the runtime zip" "$out/runtime/kilnctl" bundle verify "$out/runtime/kiln-runtime-$version.zip"
   check "the runtime manifest lists every plugin DLL (native/plugins/*, kiln-eml, ShroudForge runtime, Enshwick loader), default on both sides" \
     python3 -I "$lib/plugins.py" check --src "$src" "$out/runtime/kiln-runtime-$version.zip"
+  if [[ -f $src/tools/sfi/sfi_stage.py && -d $work/stage/sfi ]]; then
+    check "component sfi (kiln-sfi.dll) and kiln-eml's archive inspector for Linux and Windows: complete, each version.json naming the helper as it ships" \
+      python3 -I "$src/tools/sfi/sfi_stage.py" check "$src" "$work/stage"
+  fi
   check "kilnctl and kiln --version (Linux)" check_cli_versions
   check "kiln cooks a made-up game with the cook tools it carries (no checkout), soundcook's helper included" check_cook_shipped
   check "server pack: only the server components, the runtime's files, rebuilt byte-identically; systemd units" \

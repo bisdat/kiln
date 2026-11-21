@@ -8,7 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import * as api from "../api/commands";
 import type { BuildCheck, GameInstall, RunnerInfo, StartMode, StartSettings } from "../api/commands";
-import { qk } from "../api/hooks";
+import { qk, usePoll } from "../api/hooks";
 import { t, useT } from "../i18n";
 import { Banner, Button, Field, Modal, PathPicker, Segmented, Select, toast } from "../ui";
 
@@ -26,7 +26,7 @@ export function useStartWord(): (mode: StartMode | undefined) => string {
 }
 
 export function useStartSetup(gameId: string | null | undefined, enabled = true) {
-  return useQuery({ queryKey: qk.startSetup(gameId ?? ""), queryFn: () => api.gameStartGet(gameId!), enabled: !!gameId && enabled, refetchInterval: 15000 });
+  return useQuery({ queryKey: qk.startSetup(gameId ?? ""), queryFn: () => api.gameStartGet(gameId!), enabled: !!gameId && enabled, refetchInterval: usePoll(60_000) });
 }
 
 const AUTO = "";

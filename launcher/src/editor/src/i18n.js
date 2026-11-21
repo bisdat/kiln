@@ -3,6 +3,11 @@
 // chave. Como contribuir com um idioma está no README.
 
 import en from './i18n/en.json';
+// Kiln: the launcher's languages (launcher/src/i18n) word upstream's texts too: launcher-keys.json names the launcher key
+// of each upstream text the launcher shows (its Portuguese key → "editor.game.…"), and t() answers from the launcher's
+// tables in the launcher's language; a text without a key there falls back to en.json as before.
+import { t as launcherT, currentLocale as launcherLocale } from '../../i18n';
+import launcherKeys from './i18n/launcher-keys.json';
 
 export const IDIOMAS = [
   { codigo: 'pt-BR', nome: 'Português', locale: 'pt-BR', dicionario: null },
@@ -27,7 +32,8 @@ let atual = inicial();
 const ouvintes = new Set();
 
 export const idiomaAtual = () => atual;
-export const localeAtual = () => IDIOMAS.find((i) => i.codigo === atual)?.locale ?? 'pt-BR';
+// Kiln: outside Portuguese, dates, numbers and sorting follow the launcher's language
+export const localeAtual = () => (atual === 'pt-BR' ? 'pt-BR' : launcherLocale() === 'en' ? 'en-US' : launcherLocale());
 
 // Nome de item e de habilidade não é traduzido aqui: o jogo já traz os dois, e `data/items.json`
 // guarda `pt` e `en` por item. Isto diz de qual campo ler. Um idioma que não seja português cai no
@@ -55,6 +61,7 @@ export function assinarIdioma(f) {
 
 /** t('nível {n}', { n: 5 }). Sem tradução, devolve a própria chave. */
 export function t(texto, vars) {
+  if (atual !== 'pt-BR' && Object.prototype.hasOwnProperty.call(launcherKeys, texto)) return launcherT(launcherKeys[texto], vars ?? {});
   const dic = IDIOMAS.find((i) => i.codigo === atual)?.dicionario;
   let s = (dic && dic[texto]) || texto;
   if (vars) {
