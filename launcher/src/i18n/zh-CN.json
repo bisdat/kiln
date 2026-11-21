@@ -4303,7 +4303,11 @@
       "passed": "检查：通过",
       "failed.other": "{count} 个问题导致无法安装",
       "warnings.other": "{count} 项需要留意",
-      "failedBlock": "整合包未通过检查：无法安装。"
+      "failedBlock": "整合包未通过检查：无法安装。",
+      "pending": "检查：Crucible 仍在检查",
+      "lineWarnings.other": "检查：{count} 项需要留意",
+      "lineProblems.other": "检查：发现 {count} 个问题",
+      "lineFailed": "检查：无法在 Crucible 上运行"
     },
     "banner": {
       "title": "整合包更新",
@@ -4342,7 +4346,9 @@
       "backTo": "回到 {name}",
       "backToNone": "回到不用配置方案",
       "backDetail": "{name} 仍在「设置 → 配置方案」里。",
-      "undoFailed": "未能返回"
+      "undoFailed": "未能返回",
+      "profileName": "{pack}（{creator} 的整合包）",
+      "doneOnly": "它已在你的配置方案中。想玩时再加载它。"
     },
     "preview": {
       "title": "整合包",
@@ -4388,7 +4394,11 @@
       "installPlay": "安装并开始游戏",
       "cantOpen": "无法打开这个整合包",
       "noGame": "Kiln 还没有找到 Enshrouded。",
-      "installKiln": "请先把 Kiln 安装到游戏里。"
+      "installKiln": "请先把 Kiln 安装到游戏里。",
+      "nameLabel": "配置方案名称",
+      "nameTaken": "你已经有同名的配置方案。这个会叫做 {name}。",
+      "runningHint": "Enshrouded 正在运行。“安装”会立即添加整合包；关闭游戏后再加载它。",
+      "installOnlyTip": "把整合包添加为单独的配置方案，不会加载它，也不会启动游戏。"
     },
     "profiles": {
       "tag": "Crucible 整合包",
@@ -4446,7 +4456,22 @@
       "copyLink": "复制链接",
       "noClipboard": "这里无法复制，请手动选中文字。",
       "failed": "分享没有成功",
-      "versionLine": "第 {number} 版"
+      "versionLine": "第 {number} 版",
+      "what": "Crucible 是什么？",
+      "confirmTitle": "把 {name} 分享到 Crucible？",
+      "confirmWhat": "Crucible 会把这个配置方案变成一个链接。朋友在 Kiln 中打开就能得到同样的模组。",
+      "confirmGoesSize.other": "会上传：模组列表，以及 Crucible 还没有的 {count} 个模组的文件（最多 {size}）。",
+      "confirmGoes.other": "会上传：模组列表，以及 Crucible 还没有的 {count} 个模组的文件。",
+      "confirmGoesAny": "会上传：模组列表，以及 Crucible 还没有的模组文件。",
+      "confirmStays": "留在这台电脑上：你的模组设置和你自己的数据改动。",
+      "confirmNever": "永远不会上传：你的存档、世界、角色或任何其他个人文件。",
+      "visibility": "谁能打开",
+      "linkOnly": "仅限链接：",
+      "linkOnlyText": "只有拿到你的链接或代码的人。",
+      "public": "公开：",
+      "publicText": "在 Crucible 上对所有人可见。公开整合包要在 Pack Studio 中制作（需要署名和简介）。",
+      "confirmShare": "分享",
+      "confirmSignIn": "登录并分享"
     },
     "update": {
       "title": "{name}：{from} → {to}",

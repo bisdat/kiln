@@ -915,9 +915,12 @@ pub struct InstallRequest {
     pub trust_always: bool,
     #[serde(default)]
     pub optional: BTreeMap<String, bool>,
+    /// The new profile's name (the preview's name field). Default "<pack> (<creator>'s pack)"; either way a name a
+    /// profile has already gets " (2)" (profile::unique_name).
     #[serde(default)]
     pub name: Option<String>,
-    /// Activate the instance for the game (the launcher then starts it). Default true.
+    /// Activate the instance for the game (the launcher then starts it). Default true. False: "Install" (no save
+    /// backup, no activation, nothing written in the game folder: allowed while the game runs).
     #[serde(default)]
     pub play: Option<bool>,
 }
@@ -968,8 +971,12 @@ pub fn install(dirs: &DataDirs, c: &Crucible, game: Option<&GameInstall>, req: &
             source: ModpackSource::Path { path: done.file.clone(), sha256: Some(done.sha256.clone()) },
             consent: true,
             allow_http: false,
-            name: req.name.clone(),
+            // named after the pack and its creator ("My mods (Felup's pack)"), and never a name a profile has already
+            // (pack::install): the sharer's profile name alone is often the player's own ("My mods")
+            name: req.name.clone().filter(|n| !n.trim().is_empty()).or_else(|| owner.filter(|o| !o.name.trim().is_empty()).map(|o| format!("{} ({}'s pack)", ix.name, o.name.trim()))),
             optional: req.optional.clone(),
+            // false: Install without playing. Only the data folder changes (Library, the new profile): no save backup,
+            // no activation, nothing in the game folder, so it may run while the game does
             activate: Some(game.is_some() && req.play != Some(false)),
         },
         &mut Scaled { inner: progress, from: 0.6, to: 1.0 },

@@ -4938,7 +4938,13 @@
       "failed.other": "{count} problems stop the install",
       "warnings.one": "{count} thing to look at",
       "warnings.other": "{count} things to look at",
-      "failedBlock": "The pack failed its checks: it can't be installed."
+      "failedBlock": "The pack failed its checks: it can't be installed.",
+      "pending": "Checks: still running on Crucible",
+      "lineWarnings.one": "Checks: {count} thing to look at",
+      "lineWarnings.other": "Checks: {count} things to look at",
+      "lineProblems.one": "Checks: {count} problem found",
+      "lineProblems.other": "Checks: {count} problems found",
+      "lineFailed": "Checks: couldn't run on Crucible"
     },
     "banner": {
       "title": "Pack update",
@@ -4983,7 +4989,9 @@
       "backTo": "Back to {name}",
       "backToNone": "Back to no profile",
       "backDetail": "{name} stays in Settings > Profiles.",
-      "undoFailed": "Couldn't go back"
+      "undoFailed": "Couldn't go back",
+      "profileName": "{pack} ({creator}'s pack)",
+      "doneOnly": "It's in your profiles. Load it when you want to play."
     },
     "preview": {
       "title": "Pack",
@@ -5032,7 +5040,11 @@
       "installPlay": "Install and play",
       "cantOpen": "Can't open this pack",
       "noGame": "Kiln hasn't found Enshrouded yet.",
-      "installKiln": "Install Kiln in the game first."
+      "installKiln": "Install Kiln in the game first.",
+      "nameLabel": "Profile name",
+      "nameTaken": "You have a profile with this name. This one will be {name}.",
+      "runningHint": "Enshrouded is running. Install adds the pack now; load it once you close the game.",
+      "installOnlyTip": "Adds the pack as its own profile. Doesn't load it or start the game."
     },
     "profiles": {
       "tag": "Crucible pack",
@@ -5091,7 +5103,24 @@
       "copyLink": "Copy link",
       "noClipboard": "Copying isn't possible here. Select the text instead.",
       "failed": "Sharing didn't work",
-      "versionLine": "Version {number}"
+      "versionLine": "Version {number}",
+      "what": "What is Crucible?",
+      "confirmTitle": "Share {name} to Crucible?",
+      "confirmWhat": "Crucible turns this profile into a link. Friends open it in Kiln and get the same mods.",
+      "confirmGoesSize.one": "Goes up: the mod list, and the files of its {count} mod that Crucible doesn't have yet (up to {size}).",
+      "confirmGoesSize.other": "Goes up: the mod list, and the files of its {count} mods that Crucible doesn't have yet (up to {size}).",
+      "confirmGoes.one": "Goes up: the mod list, and the files of its {count} mod that Crucible doesn't have yet.",
+      "confirmGoes.other": "Goes up: the mod list, and the files of its {count} mods that Crucible doesn't have yet.",
+      "confirmGoesAny": "Goes up: the mod list, and the mods' files that Crucible doesn't have yet.",
+      "confirmStays": "Stays on this PC: your mod settings and your own data edits.",
+      "confirmNever": "Never sent: your saves, worlds, characters or any other personal file.",
+      "visibility": "Who can open it",
+      "linkOnly": "Link only:",
+      "linkOnlyText": "only people you give the link or code to.",
+      "public": "Public:",
+      "publicText": "listed on Crucible for everyone. Public packs are made in Pack Studio (they need credits and a summary).",
+      "confirmShare": "Share",
+      "confirmSignIn": "Sign in and share"
     },
     "update": {
       "title": "{name}: {from} → {to}",

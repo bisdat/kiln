@@ -5146,7 +5146,17 @@
       "warnings.few": "Есть на что посмотреть: {count}",
       "warnings.many": "Есть на что посмотреть: {count}",
       "warnings.other": "Есть на что посмотреть: {count}",
-      "failedBlock": "Сборка не прошла проверки: её нельзя установить."
+      "failedBlock": "Сборка не прошла проверки: её нельзя установить.",
+      "pending": "Проверки: ещё идут в Crucible",
+      "lineWarnings.one": "Проверки: есть на что посмотреть ({count})",
+      "lineWarnings.few": "Проверки: есть на что посмотреть ({count})",
+      "lineWarnings.many": "Проверки: есть на что посмотреть ({count})",
+      "lineWarnings.other": "Проверки: есть на что посмотреть ({count})",
+      "lineProblems.one": "Проверки: найдена {count} проблема",
+      "lineProblems.few": "Проверки: найдено проблем: {count}",
+      "lineProblems.many": "Проверки: найдено проблем: {count}",
+      "lineProblems.other": "Проверки: найдено проблем: {count}",
+      "lineFailed": "Проверки: не удалось запустить в Crucible"
     },
     "banner": {
       "title": "Обновление сборки",
@@ -5203,7 +5213,9 @@
       "backTo": "Вернуться к {name}",
       "backToNone": "Вернуться к состоянию без профиля",
       "backDetail": "{name} остаётся в разделе Настройки > Профили.",
-      "undoFailed": "Не удалось вернуться"
+      "undoFailed": "Не удалось вернуться",
+      "profileName": "{pack} (сборка {creator})",
+      "doneOnly": "Она в ваших профилях. Загрузите её, когда захотите играть."
     },
     "preview": {
       "title": "Сборка",
@@ -5258,7 +5270,11 @@
       "installPlay": "Установить и играть",
       "cantOpen": "Не удаётся открыть эту сборку",
       "noGame": "Kiln пока не нашёл Enshrouded.",
-      "installKiln": "Сначала установите Kiln в игру."
+      "installKiln": "Сначала установите Kiln в игру.",
+      "nameLabel": "Имя профиля",
+      "nameTaken": "У вас уже есть профиль с таким именем. Этот будет называться {name}.",
+      "runningHint": "Enshrouded запущен. «Установить» добавит сборку сейчас; загрузите её, когда закроете игру.",
+      "installOnlyTip": "Добавляет сборку как отдельный профиль. Не загружает её и не запускает игру."
     },
     "profiles": {
       "tag": "Сборка из Crucible",
@@ -5319,7 +5335,28 @@
       "copyLink": "Копировать ссылку",
       "noClipboard": "Здесь копирование недоступно. Выделите текст вручную.",
       "failed": "Не получилось поделиться",
-      "versionLine": "Версия {number}"
+      "versionLine": "Версия {number}",
+      "what": "Что такое Crucible?",
+      "confirmTitle": "Поделиться {name} в Crucible?",
+      "confirmWhat": "Crucible превращает этот профиль в ссылку. Друзья открывают её в Kiln и получают те же моды.",
+      "confirmGoesSize.one": "Загружается: список модов и файлы {count} мода, которых ещё нет в Crucible (до {size}).",
+      "confirmGoesSize.few": "Загружается: список модов и файлы {count} модов, которых ещё нет в Crucible (до {size}).",
+      "confirmGoesSize.many": "Загружается: список модов и файлы {count} модов, которых ещё нет в Crucible (до {size}).",
+      "confirmGoesSize.other": "Загружается: список модов и файлы {count} модов, которых ещё нет в Crucible (до {size}).",
+      "confirmGoes.one": "Загружается: список модов и файлы {count} мода, которых ещё нет в Crucible.",
+      "confirmGoes.few": "Загружается: список модов и файлы {count} модов, которых ещё нет в Crucible.",
+      "confirmGoes.many": "Загружается: список модов и файлы {count} модов, которых ещё нет в Crucible.",
+      "confirmGoes.other": "Загружается: список модов и файлы {count} модов, которых ещё нет в Crucible.",
+      "confirmGoesAny": "Загружается: список модов и файлы модов, которых ещё нет в Crucible.",
+      "confirmStays": "Остаётся на этом ПК: настройки ваших модов и ваши собственные правки данных.",
+      "confirmNever": "Никогда не отправляется: ваши сохранения, миры, персонажи и другие личные файлы.",
+      "visibility": "Кто может открыть",
+      "linkOnly": "Только по ссылке:",
+      "linkOnlyText": "только те, кому вы дадите ссылку или код.",
+      "public": "Публично:",
+      "publicText": "видна всем в Crucible. Публичные сборки делаются в Pack Studio (нужны авторы модов и описание).",
+      "confirmShare": "Поделиться",
+      "confirmSignIn": "Войти и поделиться"
     },
     "update": {
       "title": "{name}: {from} → {to}",

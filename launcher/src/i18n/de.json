@@ -4938,7 +4938,13 @@
       "failed.other": "{count} Probleme verhindern die Installation",
       "warnings.one": "{count} Hinweis zum Ansehen",
       "warnings.other": "{count} Hinweise zum Ansehen",
-      "failedBlock": "Das Pack hat die Prüfungen nicht bestanden: es kann nicht installiert werden."
+      "failedBlock": "Das Pack hat die Prüfungen nicht bestanden: es kann nicht installiert werden.",
+      "pending": "Prüfungen: laufen noch auf Crucible",
+      "lineWarnings.one": "Prüfungen: {count} Hinweis zum Ansehen",
+      "lineWarnings.other": "Prüfungen: {count} Hinweise zum Ansehen",
+      "lineProblems.one": "Prüfungen: {count} Problem gefunden",
+      "lineProblems.other": "Prüfungen: {count} Probleme gefunden",
+      "lineFailed": "Prüfungen: konnten auf Crucible nicht laufen"
     },
     "banner": {
       "title": "Pack-Update",
@@ -4983,7 +4989,9 @@
       "backTo": "Zurück zu {name}",
       "backToNone": "Zurück zu keinem Profil",
       "backDetail": "{name} bleibt unter Einstellungen > Profile.",
-      "undoFailed": "Zurückgehen hat nicht geklappt"
+      "undoFailed": "Zurückgehen hat nicht geklappt",
+      "profileName": "{pack} (Pack von {creator})",
+      "doneOnly": "Es ist bei deinen Profilen. Lade es, wenn du spielen willst."
     },
     "preview": {
       "title": "Pack",
@@ -5032,7 +5040,11 @@
       "installPlay": "Installieren und spielen",
       "cantOpen": "Dieses Pack lässt sich nicht öffnen",
       "noGame": "Kiln hat Enshrouded noch nicht gefunden.",
-      "installKiln": "Installiere zuerst Kiln im Spiel."
+      "installKiln": "Installiere zuerst Kiln im Spiel.",
+      "nameLabel": "Profilname",
+      "nameTaken": "Du hast schon ein Profil mit diesem Namen. Dieses heißt dann {name}.",
+      "runningHint": "Enshrouded läuft. Installieren fügt das Pack jetzt hinzu; lade es, sobald du das Spiel geschlossen hast.",
+      "installOnlyTip": "Fügt das Pack als eigenes Profil hinzu. Lädt es nicht und startet das Spiel nicht."
     },
     "profiles": {
       "tag": "Crucible-Pack",
@@ -5091,7 +5103,24 @@
       "copyLink": "Link kopieren",
       "noClipboard": "Kopieren geht hier nicht. Markier den Text stattdessen.",
       "failed": "Teilen hat nicht geklappt",
-      "versionLine": "Version {number}"
+      "versionLine": "Version {number}",
+      "what": "Was ist Crucible?",
+      "confirmTitle": "{name} auf Crucible teilen?",
+      "confirmWhat": "Crucible macht aus diesem Profil einen Link. Freunde öffnen ihn in Kiln und bekommen dieselben Mods.",
+      "confirmGoesSize.one": "Hochgeladen werden: die Modliste und die Dateien seiner {count} Mod, die Crucible noch nicht hat (bis zu {size}).",
+      "confirmGoesSize.other": "Hochgeladen werden: die Modliste und die Dateien seiner {count} Mods, die Crucible noch nicht hat (bis zu {size}).",
+      "confirmGoes.one": "Hochgeladen werden: die Modliste und die Dateien seiner {count} Mod, die Crucible noch nicht hat.",
+      "confirmGoes.other": "Hochgeladen werden: die Modliste und die Dateien seiner {count} Mods, die Crucible noch nicht hat.",
+      "confirmGoesAny": "Hochgeladen werden: die Modliste und die Dateien der Mods, die Crucible noch nicht hat.",
+      "confirmStays": "Bleibt auf diesem PC: deine Mod-Einstellungen und deine eigenen Datenänderungen.",
+      "confirmNever": "Nie gesendet: deine Spielstände, Welten, Charaktere oder andere persönliche Dateien.",
+      "visibility": "Wer es öffnen kann",
+      "linkOnly": "Nur per Link:",
+      "linkOnlyText": "nur Leute, denen du den Link oder Code gibst.",
+      "public": "Öffentlich:",
+      "publicText": "auf Crucible für alle gelistet. Öffentliche Packs entstehen im Pack Studio (sie brauchen Credits und eine Beschreibung).",
+      "confirmShare": "Teilen",
+      "confirmSignIn": "Anmelden und teilen"
     },
     "update": {
       "title": "{name}: {from} → {to}",

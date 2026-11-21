@@ -5146,7 +5146,17 @@
       "warnings.few": "Do obejrzenia: {count}",
       "warnings.many": "Do obejrzenia: {count}",
       "warnings.other": "Do obejrzenia: {count}",
-      "failedBlock": "Paczka nie przeszła sprawdzeń: nie można jej zainstalować."
+      "failedBlock": "Paczka nie przeszła sprawdzeń: nie można jej zainstalować.",
+      "pending": "Sprawdzenia: wciąż trwają w Crucible",
+      "lineWarnings.one": "Sprawdzenia: {count} do obejrzenia",
+      "lineWarnings.few": "Sprawdzenia: {count} do obejrzenia",
+      "lineWarnings.many": "Sprawdzenia: {count} do obejrzenia",
+      "lineWarnings.other": "Sprawdzenia: {count} do obejrzenia",
+      "lineProblems.one": "Sprawdzenia: znaleziono {count} problem",
+      "lineProblems.few": "Sprawdzenia: znaleziono {count} problemy",
+      "lineProblems.many": "Sprawdzenia: znaleziono {count} problemów",
+      "lineProblems.other": "Sprawdzenia: znaleziono {count} problemu",
+      "lineFailed": "Sprawdzenia: nie udało się ich uruchomić w Crucible"
     },
     "banner": {
       "title": "Aktualizacja paczki",
@@ -5203,7 +5213,9 @@
       "backTo": "Wróć do {name}",
       "backToNone": "Wróć do braku profilu",
       "backDetail": "{name} zostaje w Ustawienia > Profile.",
-      "undoFailed": "Nie udało się wrócić"
+      "undoFailed": "Nie udało się wrócić",
+      "profileName": "{pack} (paczka od {creator})",
+      "doneOnly": "Jest w Twoich profilach. Wczytaj ją, gdy zechcesz zagrać."
     },
     "preview": {
       "title": "Paczka",
@@ -5258,7 +5270,11 @@
       "installPlay": "Zainstaluj i graj",
       "cantOpen": "Nie można otworzyć tej paczki",
       "noGame": "Kiln jeszcze nie znalazł Enshrouded.",
-      "installKiln": "Najpierw zainstaluj Kiln w grze."
+      "installKiln": "Najpierw zainstaluj Kiln w grze.",
+      "nameLabel": "Nazwa profilu",
+      "nameTaken": "Masz już profil o tej nazwie. Ten będzie się nazywał {name}.",
+      "runningHint": "Enshrouded jest uruchomiony. „Zainstaluj” doda paczkę teraz; wczytaj ją po zamknięciu gry.",
+      "installOnlyTip": "Dodaje paczkę jako osobny profil. Nie wczytuje jej i nie uruchamia gry."
     },
     "profiles": {
       "tag": "Paczka z Crucible",
@@ -5319,7 +5335,28 @@
       "copyLink": "Kopiuj link",
       "noClipboard": "Kopiowanie tu nie działa. Zaznacz tekst ręcznie.",
       "failed": "Udostępnianie się nie udało",
-      "versionLine": "Wersja {number}"
+      "versionLine": "Wersja {number}",
+      "what": "Czym jest Crucible?",
+      "confirmTitle": "Udostępnić {name} w Crucible?",
+      "confirmWhat": "Crucible zamienia ten profil w link. Znajomi otwierają go w Kiln i dostają te same mody.",
+      "confirmGoesSize.one": "Wysyłane: lista modów i pliki {count} moda, których Crucible jeszcze nie ma (do {size}).",
+      "confirmGoesSize.few": "Wysyłane: lista modów i pliki {count} modów, których Crucible jeszcze nie ma (do {size}).",
+      "confirmGoesSize.many": "Wysyłane: lista modów i pliki {count} modów, których Crucible jeszcze nie ma (do {size}).",
+      "confirmGoesSize.other": "Wysyłane: lista modów i pliki {count} modów, których Crucible jeszcze nie ma (do {size}).",
+      "confirmGoes.one": "Wysyłane: lista modów i pliki {count} moda, których Crucible jeszcze nie ma.",
+      "confirmGoes.few": "Wysyłane: lista modów i pliki {count} modów, których Crucible jeszcze nie ma.",
+      "confirmGoes.many": "Wysyłane: lista modów i pliki {count} modów, których Crucible jeszcze nie ma.",
+      "confirmGoes.other": "Wysyłane: lista modów i pliki {count} modów, których Crucible jeszcze nie ma.",
+      "confirmGoesAny": "Wysyłane: lista modów i pliki modów, których Crucible jeszcze nie ma.",
+      "confirmStays": "Zostaje na tym PC: ustawienia Twoich modów i Twoje własne zmiany danych.",
+      "confirmNever": "Nigdy nie wysyłamy: Twoich zapisów, światów, postaci ani innych prywatnych plików.",
+      "visibility": "Kto może otworzyć",
+      "linkOnly": "Tylko przez link:",
+      "linkOnlyText": "tylko osoby, którym dasz link lub kod.",
+      "public": "Publiczna:",
+      "publicText": "widoczna w Crucible dla wszystkich. Publiczne paczki tworzy się w Pack Studio (potrzebują autorów i opisu).",
+      "confirmShare": "Udostępnij",
+      "confirmSignIn": "Zaloguj się i udostępnij"
     },
     "update": {
       "title": "{name}: {from} → {to}",

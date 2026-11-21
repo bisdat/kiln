@@ -16,6 +16,7 @@ test("the code the download carried opens its pack at start", async ({ page }) =
   await open(page, "/?mock=1&crucible=resume#/");
   await expect(page.getByTestId("crucible-resumed")).toHaveText("Kiln is ready. Here is Cinder Trails, the pack you came for.");
   await expect(page.getByTestId("crucible-install")).toBeDisabled();
+  await expect(page.getByTestId("crucible-install-only")).toBeDisabled();
   const cmds = await page.evaluate(() => (window as unknown as { __kilnCrucibleMock: { requests: () => { cmd: string }[] } }).__kilnCrucibleMock.requests().map((r) => r.cmd));
   expect(cmds).not.toContain("crucible_install");
 });

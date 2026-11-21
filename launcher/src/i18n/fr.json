@@ -4938,7 +4938,13 @@
       "failed.other": "{count} problèmes empêchent l'installation",
       "warnings.one": "{count} point à regarder",
       "warnings.other": "{count} points à regarder",
-      "failedBlock": "Le pack n'a pas passé les vérifications : il ne peut pas être installé."
+      "failedBlock": "Le pack n'a pas passé les vérifications : il ne peut pas être installé.",
+      "pending": "Vérifications : encore en cours sur Crucible",
+      "lineWarnings.one": "Vérifications : {count} point à regarder",
+      "lineWarnings.other": "Vérifications : {count} points à regarder",
+      "lineProblems.one": "Vérifications : {count} problème trouvé",
+      "lineProblems.other": "Vérifications : {count} problèmes trouvés",
+      "lineFailed": "Vérifications : impossibles sur Crucible"
     },
     "banner": {
       "title": "Mise à jour du pack",
@@ -4983,7 +4989,9 @@
       "backTo": "Revenir à {name}",
       "backToNone": "Revenir à aucun profil",
       "backDetail": "{name} reste dans Paramètres > Profils.",
-      "undoFailed": "Impossible de revenir en arrière"
+      "undoFailed": "Impossible de revenir en arrière",
+      "profileName": "{pack} (pack de {creator})",
+      "doneOnly": "Il est dans vos profils. Chargez-le quand vous voulez jouer."
     },
     "preview": {
       "title": "Pack",
@@ -5032,7 +5040,11 @@
       "installPlay": "Installer et jouer",
       "cantOpen": "Impossible d'ouvrir ce pack",
       "noGame": "Kiln n'a pas encore trouvé Enshrouded.",
-      "installKiln": "Installez d'abord Kiln dans le jeu."
+      "installKiln": "Installez d'abord Kiln dans le jeu.",
+      "nameLabel": "Nom du profil",
+      "nameTaken": "Vous avez déjà un profil de ce nom. Celui-ci s'appellera {name}.",
+      "runningHint": "Enshrouded est lancé. Installer ajoute le pack maintenant ; chargez-le une fois le jeu fermé.",
+      "installOnlyTip": "Ajoute le pack comme profil à part. Ne le charge pas et ne lance pas le jeu."
     },
     "profiles": {
       "tag": "Pack Crucible",
@@ -5091,7 +5103,24 @@
       "copyLink": "Copier le lien",
       "noClipboard": "La copie n'est pas possible ici. Sélectionnez plutôt le texte.",
       "failed": "Le partage n'a pas marché",
-      "versionLine": "Version {number}"
+      "versionLine": "Version {number}",
+      "what": "C'est quoi Crucible ?",
+      "confirmTitle": "Partager {name} sur Crucible ?",
+      "confirmWhat": "Crucible transforme ce profil en lien. Vos amis l'ouvrent dans Kiln et obtiennent les mêmes mods.",
+      "confirmGoesSize.one": "Envoyé : la liste des mods et les fichiers de son {count} mod que Crucible n'a pas encore (jusqu'à {size}).",
+      "confirmGoesSize.other": "Envoyé : la liste des mods et les fichiers de ses {count} mods que Crucible n'a pas encore (jusqu'à {size}).",
+      "confirmGoes.one": "Envoyé : la liste des mods et les fichiers de son {count} mod que Crucible n'a pas encore.",
+      "confirmGoes.other": "Envoyé : la liste des mods et les fichiers de ses {count} mods que Crucible n'a pas encore.",
+      "confirmGoesAny": "Envoyé : la liste des mods et les fichiers des mods que Crucible n'a pas encore.",
+      "confirmStays": "Reste sur ce PC : les réglages de vos mods et vos propres modifications de données.",
+      "confirmNever": "Jamais envoyé : vos sauvegardes, mondes, personnages ni aucun autre fichier personnel.",
+      "visibility": "Qui peut l'ouvrir",
+      "linkOnly": "Par lien seulement :",
+      "linkOnlyText": "seulement les personnes à qui vous donnez le lien ou le code.",
+      "public": "Public :",
+      "publicText": "affiché sur Crucible pour tout le monde. Les packs publics se font dans Pack Studio (ils demandent des crédits et un résumé).",
+      "confirmShare": "Partager",
+      "confirmSignIn": "Se connecter et partager"
     },
     "update": {
       "title": "{name} : {from} → {to}",

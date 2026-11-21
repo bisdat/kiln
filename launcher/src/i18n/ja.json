@@ -4834,7 +4834,11 @@
       "passed": "確認: 問題なし",
       "failed.other": "{count} 件の問題でインストールできません",
       "warnings.other": "{count} 件の確認事項",
-      "failedBlock": "パックが確認に通りませんでした: インストールできません。"
+      "failedBlock": "パックが確認に通りませんでした: インストールできません。",
+      "pending": "確認: Crucible でまだ実行中",
+      "lineWarnings.other": "確認: {count} 件の確認事項",
+      "lineProblems.other": "確認: {count} 件の問題",
+      "lineFailed": "確認: Crucible で実行できませんでした"
     },
     "banner": {
       "title": "パックの更新",
@@ -4873,7 +4877,9 @@
       "backTo": "{name} に戻す",
       "backToNone": "プロファイルなしに戻す",
       "backDetail": "{name} は「設定」の「プロファイル」に残ります。",
-      "undoFailed": "元に戻せませんでした"
+      "undoFailed": "元に戻せませんでした",
+      "profileName": "{pack} ({creator} のパック)",
+      "doneOnly": "プロファイルに追加されました。遊びたいときに読み込んでください。"
     },
     "preview": {
       "title": "パック",
@@ -4919,7 +4925,11 @@
       "installPlay": "インストールしてプレイ",
       "cantOpen": "このパックを開けません",
       "noGame": "Kiln はまだ Enshrouded を見つけていません。",
-      "installKiln": "先にゲームへ Kiln をインストールしてください。"
+      "installKiln": "先にゲームへ Kiln をインストールしてください。",
+      "nameLabel": "プロファイル名",
+      "nameTaken": "同じ名前のプロファイルがあります。これは {name} になります。",
+      "runningHint": "Enshrouded が起動中です。インストールはすぐにパックを追加します。ゲームを閉じてから読み込んでください。",
+      "installOnlyTip": "パックを専用のプロファイルとして追加します。読み込みやゲームの起動はしません。"
     },
     "profiles": {
       "tag": "Crucible パック",
@@ -4977,7 +4987,22 @@
       "copyLink": "リンクをコピー",
       "noClipboard": "ここではコピーできません。代わりにテキストを選択してください。",
       "failed": "共有できませんでした",
-      "versionLine": "バージョン {number}"
+      "versionLine": "バージョン {number}",
+      "what": "Crucible とは?",
+      "confirmTitle": "{name} を Crucible で共有しますか?",
+      "confirmWhat": "Crucible はこのプロファイルをリンクにします。友だちは Kiln で開くと同じモッドを受け取れます。",
+      "confirmGoesSize.other": "アップロードされるもの: モッドの一覧と、Crucible にまだない {count} 個のモッドのファイル (最大 {size})。",
+      "confirmGoes.other": "アップロードされるもの: モッドの一覧と、Crucible にまだない {count} 個のモッドのファイル。",
+      "confirmGoesAny": "アップロードされるもの: モッドの一覧と、Crucible にまだないモッドのファイル。",
+      "confirmStays": "この PC に残るもの: モッドの設定と、あなた自身のデータ変更。",
+      "confirmNever": "送信しないもの: セーブ、ワールド、キャラクター、そのほかの個人ファイル。",
+      "visibility": "開ける人",
+      "linkOnly": "リンクのみ:",
+      "linkOnlyText": "リンクかコードを渡した人だけ。",
+      "public": "公開:",
+      "publicText": "Crucible で誰でも見られます。公開パックは Pack Studio で作ります (クレジットと概要が必要です)。",
+      "confirmShare": "共有",
+      "confirmSignIn": "サインインして共有"
     },
     "update": {
       "title": "{name}: {from} → {to}",

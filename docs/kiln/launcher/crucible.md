@@ -293,11 +293,32 @@ Code: `crates/kiln-manage/src/crucible/` (`mod.rs` client and flows, `sign.rs` t
   when the CDN has none) -> `sign::open` (the key id must be a trusted key, the signature over the payload bytes, then
   `check_index`; a payload naming another version is refused) -> the preview: what the Library lacks (`pack::lacking`:
   entries that still hash to their kdh1 count as present), sizes, game build fit, the Kiln range, code, the trust
-  state. Install: the lacking archives download to `<data>/crucible/cache/` (size and sha256 checked; cached for later),
+  state, and Crucible's check of the version (`version.checks`, passed through as the service sends it: `{state:
+  queued|running|waiting|done|failed|off, ok, errors[], warnings[], notes[], summary}`; the preview's facts show
+  "Checks: passed", "N things to look at", "N problems found" (named, not blocking: Crucible keeps such a pack from going
+  public), "still running on Crucible" with Refresh (crucible_open again: the full check ends minutes after an upload),
+  or "couldn't run"; nothing from a service without checks; `launcher/src/crucible/code.ts` checksLine). Install: the lacking archives download to `<data>/crucible/cache/` (size and sha256 checked; cached for later),
   overrides by their sha256, then `pack::assemble` puts a .kilnpack together (Library folders + archive entries copied
   compressed) and `pack::read` checks every kdh1 as for any pack; `pack::install` makes the instance. A creator still
   uploading: `busy` with the progress. `count` (Settings "Count my installs", `crucibleStats`, on by default) sends the
   anonymous install count.
+- **The installed pack's profile name** (dev.30.2): `InstallRequest.name`, from the preview's name field, defaulting to
+  "<pack> (<creator>'s pack)" (the UI's translated form; the backend's English one when no name comes); either way
+  `profile::unique_name` adds " (2)", " (3)"... when a profile has the name already (trimmed, any case, at most 128
+  characters), in `pack::install` too: a friend's "My mods" never sits beside the player's own "My mods".
+- **Install alone** (dev.30.2): `play: false` (`pack_install`: `activate: false`) makes the instance without the save
+  backup and the activation: only the data folder changes (the Library, `profiles/<new id>`, the Crucible cache), never
+  the game folder, so the preview's **Install** stays enabled while the game runs (and without Kiln in the game); **Install
+  and play** still needs both. The toast has no Undo (the loaded profile did not change).
+- **Share to Crucible on Play** has **What is Crucible?** beside it (https://frostdev.io/kiln/wiki/crucible-share in the
+  browser). A profile's first share asks first (dev.30.2; players did not expect one click to upload ~20 MB): one screen
+  says what goes up (the mod list, load order and switches, and the files of its N mods Crucible doesn't have yet, "up
+  to" the Library entries' size: the archives are compressed and Crucible keeps files it has; `code.ts` shareEstimate),
+  what stays (mod settings, the player layer; the Play share sends no overrides, Pack Studio does) and what is never
+  sent (saves, worlds, characters, personal files), and that the pack is link-only (Public is shown off: public packs
+  come from Pack Studio, which has the credits, the summary and the finished checks the service asks for). Share or
+  Cancel; signed out, "Sign in and share" (the share starts after the sign-in). Update link for a pack shared before,
+  Retry and a share stopped midway need no confirm. The Deck's Share dialog shows the same confirm.
 - **Sharing** (the Discord sign-in, its relay session as Bearer): `pack::build` from the profile (version `1.0.0`, then
   the next patch; the change note "1 added, 1 updated" from the last share), `pack::mod_archive` per mod and
   `pack::folder_archive` for a layer (deterministic, cached by sha256), `POST /quickshare` (or `POST /packs/<id>/versions`
@@ -352,6 +373,14 @@ Code: `crates/kiln-manage/src/crucible/` (`mod.rs` client and flows, `sign.rs` t
   or public, Make public, server packs, kilnctl pack init/add/capture-settings/lint/credits/publish): [pack-studio.md](pack-studio.md).
 
 ## Checks done
+dev.30.2 Crucible UX: unit tests (`unit/crucible.test.ts`: uniqueName, shareEstimate, checksLine), kiln-manage
+`crucible::tests::an_installed_pack_is_named_after_the_pack_and_its_creator_and_never_twice` (the default name with the
+creator, " (2)" for a taken name and for a typed one, the service's `checks` reaching the preview, `play: false` with
+no game), `profile::review_tests::unique_names_add_a_number_when_a_profile_has_the_name`; Playwright crucible-share (What
+is Crucible?, the confirm and Cancel, signed out: confirm then sign-in, Update link without a confirm), crucible-receive
+(the check line passed / one warning / still running then Refresh, the name field and a taken name, Install alone while
+the game runs), crucible-deck (the confirm on the Deck, the check line), crucible-resume (both install buttons stay off).
+
 Player layer and update merge (dev.30 pack-layers): `tests/pack_layers.rs` (the player layer last across an update,
 its data overlap with a renamed layer file, a drop refused for no overlap, Drop my change keeping comments, undo of
 both; a renamed settings file new and already there with a conflict; a key new to the pack changed by the player since

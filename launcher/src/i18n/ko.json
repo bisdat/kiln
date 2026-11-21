@@ -4834,7 +4834,11 @@
       "passed": "확인: 통과",
       "failed.other": "문제 {count}개로 설치할 수 없습니다",
       "warnings.other": "살펴볼 항목 {count}개",
-      "failedBlock": "팩이 확인을 통과하지 못했습니다: 설치할 수 없습니다."
+      "failedBlock": "팩이 확인을 통과하지 못했습니다: 설치할 수 없습니다.",
+      "pending": "확인: Crucible에서 아직 진행 중",
+      "lineWarnings.other": "확인: 살펴볼 항목 {count}개",
+      "lineProblems.other": "확인: 문제 {count}개 발견",
+      "lineFailed": "확인: Crucible에서 실행하지 못했습니다"
     },
     "banner": {
       "title": "팩 업데이트",
@@ -4873,7 +4877,9 @@
       "backTo": "{name}(으)로 되돌리기",
       "backToNone": "프로필 없음으로 되돌리기",
       "backDetail": "{name}은(는) 설정, 프로필에 남아 있습니다.",
-      "undoFailed": "되돌리지 못했습니다"
+      "undoFailed": "되돌리지 못했습니다",
+      "profileName": "{pack} ({creator}의 팩)",
+      "doneOnly": "프로필에 추가되었습니다. 플레이하고 싶을 때 불러오세요."
     },
     "preview": {
       "title": "팩",
@@ -4919,7 +4925,11 @@
       "installPlay": "설치하고 플레이",
       "cantOpen": "이 팩을 열 수 없습니다",
       "noGame": "Kiln이 아직 Enshrouded를 찾지 못했습니다.",
-      "installKiln": "먼저 게임에 Kiln을 설치하세요."
+      "installKiln": "먼저 게임에 Kiln을 설치하세요.",
+      "nameLabel": "프로필 이름",
+      "nameTaken": "같은 이름의 프로필이 이미 있습니다. 이 프로필은 {name}(으)로 저장됩니다.",
+      "runningHint": "Enshrouded가 실행 중입니다. 설치는 지금 팩을 추가합니다. 게임을 닫은 뒤 불러오세요.",
+      "installOnlyTip": "팩을 별도의 프로필로 추가합니다. 불러오거나 게임을 시작하지 않습니다."
     },
     "profiles": {
       "tag": "Crucible 팩",
@@ -4977,7 +4987,22 @@
       "copyLink": "링크 복사",
       "noClipboard": "여기서는 복사할 수 없습니다. 대신 텍스트를 선택하세요.",
       "failed": "공유하지 못했습니다",
-      "versionLine": "버전 {number}"
+      "versionLine": "버전 {number}",
+      "what": "Crucible이란?",
+      "confirmTitle": "{name}을(를) Crucible에 공유할까요?",
+      "confirmWhat": "Crucible은 이 프로필을 링크로 만듭니다. 친구가 Kiln에서 열면 같은 모드를 받습니다.",
+      "confirmGoesSize.other": "올라가는 것: 모드 목록과 Crucible에 아직 없는 모드 {count}개의 파일 (최대 {size}).",
+      "confirmGoes.other": "올라가는 것: 모드 목록과 Crucible에 아직 없는 모드 {count}개의 파일.",
+      "confirmGoesAny": "올라가는 것: 모드 목록과 Crucible에 아직 없는 모드 파일.",
+      "confirmStays": "이 PC에 남는 것: 모드 설정과 직접 바꾼 데이터.",
+      "confirmNever": "보내지 않는 것: 저장 파일, 월드, 캐릭터, 그 밖의 개인 파일.",
+      "visibility": "열 수 있는 사람",
+      "linkOnly": "링크만:",
+      "linkOnlyText": "링크나 코드를 받은 사람만.",
+      "public": "공개:",
+      "publicText": "Crucible에서 누구나 볼 수 있습니다. 공개 팩은 Pack Studio에서 만듭니다 (크레딧과 요약이 필요합니다).",
+      "confirmShare": "공유",
+      "confirmSignIn": "로그인하고 공유"
     },
     "update": {
       "title": "{name}: {from} → {to}",
