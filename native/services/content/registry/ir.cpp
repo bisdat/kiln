@@ -8,7 +8,7 @@
 #include <cmath>
 #include <set>
 
-namespace kc::reg {
+namespace kc::registry {
 
 namespace {
 
@@ -696,4 +696,4 @@ bool lower_section(const json& section, const std::string& mod, const std::strin
     return true;
 }
 
-}  // namespace kc::reg
+}  // namespace kc::registry

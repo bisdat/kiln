@@ -13,7 +13,7 @@
 #include "ir.h"
 #include "schema.g.h"
 
-namespace kc::reg {
+namespace kc::registry {
 
 namespace schema_detail {
 
@@ -84,4 +84,4 @@ inline Schema generated_schema() {
     return s;
 }
 
-}  // namespace kc::reg
+}  // namespace kc::registry

@@ -13,7 +13,7 @@
 #include "../registry/report.h"
 #include "../registry/schema_ir.h"
 
-using namespace kc::reg;
+using namespace kc::registry;
 
 static int g_fail = 0, g_pass = 0;
 #define CHECK(c)                                                                  \

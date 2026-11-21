@@ -46,51 +46,51 @@ int main(int argc, char** argv) {
     for (int level = 1; level <= 55; ++level) {
         CHECK(gear::base_power(level, game) == gear::base_power(level));
         for (int power : {0, 1, 17, 30, 250, 999}) {
-            const double dm = reg::formulas::power_write(power, level, 1.25, game);
+            const double dm = registry::formulas::power_write(power, level, 1.25, game);
             CHECK(dm == gear::dmg_mod_for(power, level, 1.25));
-            CHECK(reg::formulas::power_read(dm, 1.25, level, game) == gear::power_of(dm, 1.25, level));
-            CHECK(reg::formulas::power_read(dm, 1.25, level, game) == power);  // written, read back
+            CHECK(registry::formulas::power_read(dm, 1.25, level, game) == gear::power_of(dm, 1.25, level));
+            CHECK(registry::formulas::power_read(dm, 1.25, level, game) == power);  // written, read back
         }
         for (int armor : {0, 3, 40, 777}) {
-            const double share = reg::formulas::armor_write(armor, level, game);
+            const double share = registry::formulas::armor_write(armor, level, game);
             CHECK(share == gear::armor_share_for(armor, level));
-            CHECK(reg::formulas::armor_read(share, level, game) == armor);
+            CHECK(registry::formulas::armor_read(share, level, game) == armor);
         }
     }
     // ---- other constants move the numbers as the game's formula does
     gear::Constants twice = game;
     twice.seed = 20.0f;
     CHECK(gear::base_power(10, twice) == 2 * gear::base_power(10, game));  // int(20 * 0.15 * 10 + 20) = 50 = 2 * 25
-    CHECK(reg::formulas::power_read(1.0, 1.0, 10, twice) == static_cast<int>(static_cast<float>(int(20.0f * 0.15f * 10 + 20.0f))));
+    CHECK(registry::formulas::power_read(1.0, 1.0, 10, twice) == static_cast<int>(static_cast<float>(int(20.0f * 0.15f * 10 + 20.0f))));
     gear::Constants steep = game;
     steep.armor_gradient = 30.0f;
-    CHECK(reg::formulas::armor_read(1.0, 2, steep) == 83);  // round(30 * 2 + 23)
-    CHECK(reg::formulas::armor_read(1.0, 2, game) == 53);   // round(15 * 2 + 23)
+    CHECK(registry::formulas::armor_read(1.0, 2, steep) == 83);  // round(30 * 2 + 23)
+    CHECK(registry::formulas::armor_read(1.0, 2, game) == 53);   // round(15 * 2 + 23)
     // ---- the balance registry's read-only gear fields carry the constants
     {
-        const auto c = reg::formulas::constants_of({{"gear.seed", 12.0}, {"gear.creep", 0.2}, {"gear.armorOffset", 20.0}, {"gear.armorGradient", 16.0}});
+        const auto c = registry::formulas::constants_of({{"gear.seed", 12.0}, {"gear.creep", 0.2}, {"gear.armorOffset", 20.0}, {"gear.armorGradient", 16.0}});
         CHECK(c.seed == 12.0f && c.creep == 0.2f && c.armor_offset == 20.0f && c.armor_gradient == 16.0f);
-        const auto d = reg::formulas::constants_of({});
+        const auto d = registry::formulas::constants_of({});
         CHECK(d.seed == game.seed && d.creep == game.creep && d.armor_offset == game.armor_offset && d.armor_gradient == game.armor_gradient);
     }
     // ---- by the regmap's formula names, the inputs in the row's path order
     {
         double v = 0;
-        CHECK(reg::formulas::known("gear.power") && reg::formulas::known("gear.armor") && !reg::formulas::known("gear.other"));
+        CHECK(registry::formulas::known("gear.power") && registry::formulas::known("gear.armor") && !registry::formulas::known("gear.other"));
         // power: paths [dmgMod, speedMod, minLevel]
-        CHECK(reg::formulas::read("gear.power", {gear::dmg_mod_for(42, 5, 1.0), 1.0, 5}, game, &v) && v == 42);
-        CHECK(reg::formulas::write("gear.power", 42, {0, 1.0, 5}, game, &v) && v == gear::dmg_mod_for(42, 5, 1.0));
+        CHECK(registry::formulas::read("gear.power", {gear::dmg_mod_for(42, 5, 1.0), 1.0, 5}, game, &v) && v == 42);
+        CHECK(registry::formulas::write("gear.power", 42, {0, 1.0, 5}, game, &v) && v == gear::dmg_mod_for(42, 5, 1.0));
         // armor: paths [share, minLevel]
-        CHECK(reg::formulas::write("gear.armor", 60, {0, 3}, game, &v) && v == gear::armor_share_for(60, 3));
-        CHECK(reg::formulas::read("gear.armor", {v, 3}, game, &v) && v == 60);
-        CHECK(!reg::formulas::read("gear.power", {1.0}, game, &v));            // too few inputs
-        CHECK(!reg::formulas::write("gear.power", 42, {0, 0.0, 5}, game, &v)); // speed 0: no dmgMod gives a power
-        CHECK(!reg::formulas::write("gear.power", 42, {0, 1.0, 0}, game, &v)); // level outside the field's 1..105
-        CHECK(!reg::formulas::write("gear.power", 42, {0, 1.0, 106}, game, &v));
+        CHECK(registry::formulas::write("gear.armor", 60, {0, 3}, game, &v) && v == gear::armor_share_for(60, 3));
+        CHECK(registry::formulas::read("gear.armor", {v, 3}, game, &v) && v == 60);
+        CHECK(!registry::formulas::read("gear.power", {1.0}, game, &v));            // too few inputs
+        CHECK(!registry::formulas::write("gear.power", 42, {0, 0.0, 5}, game, &v)); // speed 0: no dmgMod gives a power
+        CHECK(!registry::formulas::write("gear.power", 42, {0, 1.0, 0}, game, &v)); // level outside the field's 1..105
+        CHECK(!registry::formulas::write("gear.power", 42, {0, 1.0, 106}, game, &v));
         // the game's items go up to level 105 (gems): the formula takes the field's whole range
-        CHECK(reg::formulas::write("gear.power", 900, {0, 1.0, 105}, game, &v) && reg::formulas::read("gear.power", {v, 1.0, 105}, game, &v) && v == 900);
-        CHECK(reg::formulas::write("gear.armor", 400, {0, 80}, game, &v) && reg::formulas::read("gear.armor", {v, 80}, game, &v) && v == 400);
-        CHECK(!reg::formulas::read("gear.nothing", {1, 1, 1}, game, &v));
+        CHECK(registry::formulas::write("gear.power", 900, {0, 1.0, 105}, game, &v) && registry::formulas::read("gear.power", {v, 1.0, 105}, game, &v) && v == 900);
+        CHECK(registry::formulas::write("gear.armor", 400, {0, 80}, game, &v) && registry::formulas::read("gear.armor", {v, 80}, game, &v) && v == 400);
+        CHECK(!registry::formulas::read("gear.nothing", {1, 1, 1}, game, &v));
     }
     // ---- 10,000 generated inputs: the numbers GearMath (C#) must give as well
     {

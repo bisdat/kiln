@@ -27,7 +27,7 @@
 
 #include "ir.h"
 
-namespace kc::reg {
+namespace kc::registry {
 
 struct EntryRef {
     std::string registry, id;
@@ -156,4 +156,4 @@ Result compose(const Schema& schema, const BaseModel& base, const std::vector<Ol
 // The registry rows of a chain over another value below them (the live back-end: a pack's value under a relative layer).
 Value evaluate(const std::vector<ChainRow>& rows, const Value& below, const FieldSpec& f);
 
-}  // namespace kc::reg
+}  // namespace kc::registry

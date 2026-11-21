@@ -17,7 +17,7 @@
 
 #include "compose.h"
 
-namespace kc::reg {
+namespace kc::registry {
 
 struct ReportMeta {
     uint32_t pid = 0;
@@ -61,4 +61,4 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
 // line ("registry: 3 conflicts, 1 refused edit; state/registry.json has them all"). Empty when there is nothing to say.
 std::vector<std::string> report_log(const Result& r, const ReportCaps& caps = {});
 
-}  // namespace kc::reg
+}  // namespace kc::registry

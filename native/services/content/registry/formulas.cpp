@@ -6,7 +6,7 @@
 
 #include "schema.g.h"
 
-namespace kc::reg::formulas {
+namespace kc::registry::formulas {
 
 gear::Constants constants_of(const std::map<std::string, double>& balance) {
     gear::Constants c;
@@ -77,4 +77,4 @@ bool write(const std::string& f, double kiln, const std::vector<double>& in, con
     return false;
 }
 
-}  // namespace kc::reg::formulas
+}  // namespace kc::registry::formulas

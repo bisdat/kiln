@@ -8,7 +8,7 @@
 #include <cstdio>
 #include <unordered_set>
 
-namespace kc::reg {
+namespace kc::registry {
 
 const char* writer_kind_name(WriterKind k) {
     switch (k) {
@@ -1080,4 +1080,4 @@ Result compose(const Schema& schema, const BaseModel& base, const std::vector<Ol
     return out;
 }
 
-}  // namespace kc::reg
+}  // namespace kc::registry
