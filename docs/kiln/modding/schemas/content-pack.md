@@ -27,6 +27,7 @@ kiln.content's and kiln.gamedata's data packs: rules over the game's registries 
 | `options` | [options](#options) |  |  |
 | `perks` | [perksSection](#perkssection) |  |  |
 | `recipes` | [recipesSection](#recipessection) |  |  |
+| `registry` | `registry-section.schema.json` |  | Edits of Kiln registries (experimental, KILNX031): every mod's add, then alter, then final, by Kiln ids and Kiln fields (docs/kiln/modding/registries/README.md). Read by the registry stage at start, not applied with the pack's other sections; fields that apply now or at world load follow a pack's hot reload. |
 | `sequences` | [sequencesSection](#sequencessection) |  |  |
 | `skills` | [skillsSection](#skillssection) |  |  |
 | `templates` | [templatesSection](#templatessection) |  |  |

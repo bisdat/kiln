@@ -29,6 +29,49 @@ void mark(uintptr_t addr, Slot& s) {
     s.dirty = true;
     g_dirty.push_back(addr);
 }
+// Registry writes compare-before-write skipped (store_skipped): what is needed to name them later, one per slot.
+struct SkippedRaw {
+    uintptr_t addr;
+    uint32_t kind, id;
+    int32_t field, sub;
+    std::string mod, source;
+    bool revert;
+};
+std::vector<SkippedRaw> g_skipped;
+
+bool excluded(const Slot& s, const Layer& l) { return s.foreign && is_registry_seq(l.seq); }
+
+// The bytes the layers give, in seq order: a plain layer's bytes replace the value, an evaluated layer computes it from the
+// value below (and keeps the result in its bytes, for conflicts and reports). Registry layers of a foreign slot are left out.
+// below_registry: only the layers under the registry band (what a registry layer's value is computed over).
+thread_local int t_fold_depth = 0;  // an evaluated layer reading another slot's value (formulas): never in a cycle
+void fold(Slot& s, uint8_t* out, bool below_registry = false) {
+    uint8_t v[kSlotBytes] = {};
+    std::memcpy(v, s.original, s.n);
+    struct Depth {
+        Depth() { ++t_fold_depth; }
+        ~Depth() { --t_fold_depth; }
+    } depth;
+    for (Layer& l : s.layers) {
+        if (excluded(s, l)) continue;
+        if (below_registry && l.seq >= kRegistrySeq) break;
+        if (l.eval && t_fold_depth > 4) continue;  // a cycle of evaluated layers: the value below stands
+        if (l.eval) {
+            uint8_t r[kSlotBytes] = {};
+            std::string why;
+            if ((*l.eval)(v, s.n, r, &why)) std::memcpy(v, r, s.n);
+            std::memcpy(l.bytes, v, s.n);
+        } else {
+            std::memcpy(v, l.bytes, s.n);
+        }
+    }
+    std::memcpy(out, v, s.n);
+}
+bool has_registry_layer(const Slot& s) {
+    for (const Layer& l : s.layers)
+        if (is_registry_seq(l.seq)) return true;
+    return false;
+}
 std::unordered_map<KilnOwner, std::string> g_labels;
 std::atomic<uint64_t> g_code_seq{0};
 bool g_guard = false;
@@ -194,8 +237,9 @@ thread_local std::string t_layer_mod;  // LayerModScope
 LayerModScope::LayerModScope(const std::string& mod) : prev_(std::exchange(t_layer_mod, mod)) {}
 LayerModScope::~LayerModScope() { t_layer_mod = std::move(prev_); }
 
-bool store_put(KilnOwner owner, uint64_t seq, uint32_t kind, uint32_t id, int32_t field, int32_t sub, uintptr_t addr,
-               uint8_t n, const uint8_t* bytes, const std::string& source) {
+namespace {
+bool put_layer(KilnOwner owner, uint64_t seq, uint32_t kind, uint32_t id, int32_t field, int32_t sub, uintptr_t addr, uint8_t n,
+               const uint8_t* bytes, std::shared_ptr<const LayerEval> eval, const std::string& source) {
     if (n == 0 || n > kSlotBytes) return false;
     std::lock_guard lock(g_mu);
     auto [it, fresh] = g_slots.try_emplace(addr);
@@ -219,16 +263,64 @@ bool store_put(KilnOwner owner, uint64_t seq, uint32_t kind, uint32_t id, int32_
     }
     auto l = std::find_if(s.layers.begin(), s.layers.end(), [&](const Layer& x) { return x.owner == owner; });
     if (l == s.layers.end()) {
-        s.layers.push_back(Layer{owner, seq, {}, source});
+        s.layers.push_back(Layer{owner, seq, {}, source, {}, nullptr});
         l = s.layers.end() - 1;
     }
     l->seq = seq;
     l->source = source;
     l->mod = t_layer_mod;
-    std::memcpy(l->bytes, bytes, n);
+    l->eval = std::move(eval);
+    if (bytes) std::memcpy(l->bytes, bytes, n);
     std::sort(s.layers.begin(), s.layers.end(), [](const Layer& a, const Layer& b) { return a.seq < b.seq; });
+    if (is_registry_seq(seq)) s.registry = true;
+    else s.old_changed = true;
     mark(addr, s);
     return true;
+}
+}  // namespace
+
+bool store_put(KilnOwner owner, uint64_t seq, uint32_t kind, uint32_t id, int32_t field, int32_t sub, uintptr_t addr,
+               uint8_t n, const uint8_t* bytes, const std::string& source) {
+    return put_layer(owner, seq, kind, id, field, sub, addr, n, bytes, nullptr, source);
+}
+
+bool store_put_eval(KilnOwner owner, uint64_t seq, uint32_t kind, uint32_t id, int32_t field, int32_t sub, uintptr_t addr,
+                    uint8_t n, LayerEval eval, const std::string& source) {
+    if (!eval) return false;
+    return put_layer(owner, seq, kind, id, field, sub, addr, n, nullptr, std::make_shared<const LayerEval>(std::move(eval)), source);
+}
+
+bool store_effective(uintptr_t addr, uint8_t n, uint8_t* out) {
+    if (n == 0 || n > kSlotBytes) return false;
+    std::lock_guard lock(g_mu);
+    auto it = g_slots.find(addr);
+    if (it == g_slots.end()) return rd(addr, out, n);
+    if (it->second.n != n) return false;
+    fold(it->second, out);
+    return true;
+}
+
+bool store_below_registry(uintptr_t addr, uint8_t n, uint8_t* out) {
+    if (n == 0 || n > kSlotBytes) return false;
+    std::lock_guard lock(g_mu);
+    auto it = g_slots.find(addr);
+    if (it == g_slots.end()) return rd(addr, out, n);
+    if (it->second.n != n) return false;
+    fold(it->second, out, true);
+    return true;
+}
+
+uint32_t store_mark_evals() {
+    std::lock_guard lock(g_mu);
+    uint32_t n = 0;
+    for (auto& [addr, s] : g_slots)
+        for (const Layer& l : s.layers)
+            if (l.eval) {
+                mark(addr, s);
+                ++n;
+                break;
+            }
+    return n;
 }
 
 bool store_drop(KilnOwner owner, uintptr_t addr) {
@@ -237,6 +329,8 @@ bool store_drop(KilnOwner owner, uintptr_t addr) {
     if (it == g_slots.end()) return false;
     auto& ls = it->second.layers;
     const size_t before = ls.size();
+    for (const Layer& x : ls)
+        if (x.owner == owner && !is_registry_seq(x.seq)) it->second.old_changed = true;
     std::erase_if(ls, [&](const Layer& x) { return x.owner == owner; });
     if (ls.size() == before) return false;
     mark(addr, it->second);
@@ -249,6 +343,8 @@ uint32_t store_drop_owner(KilnOwner owner) {
     uint32_t n = 0;
     for (auto& [addr, s] : g_slots) {
         const size_t before = s.layers.size();
+        for (const Layer& x : s.layers)
+            if (x.owner == owner && !is_registry_seq(x.seq)) s.old_changed = true;
         std::erase_if(s.layers, [&](const Layer& x) { return x.owner == owner; });
         if (s.layers.size() != before) {
             mark(addr, s);
@@ -286,6 +382,7 @@ uint32_t store_reset(bool revert, std::string* error) {
     g_slots.clear();
     g_dirty.clear();
     g_txns.clear();
+    g_skipped.clear();
     return n;
 }
 
@@ -321,8 +418,30 @@ size_t store_flush(std::string* error) {
     for (auto& d : dirty) {
         const uintptr_t addr = d->first;
         Slot& s = d->second;
-        const uint8_t* want = s.layers.empty() ? s.original : s.layers.back().bytes;
-        if (std::memcmp(want, s.current, s.n) != 0) {
+        uint8_t want[kSlotBytes] = {};
+        fold(s, want);
+        // compare-before-write: a registry write (or a registry layer's revert) is made only over what Kiln last wrote there
+        if ((s.registry || has_registry_layer(s)) && !s.foreign) {
+            uint8_t now[kSlotBytes] = {};
+            if (rd(addr, now, s.n) && std::memcmp(now, s.current, s.n) != 0) {
+                std::string mod, source;
+                bool revert = true;
+                for (const Layer& l : s.layers)
+                    if (is_registry_seq(l.seq)) mod = l.mod, source = l.source, revert = false;
+                if (revert)  // the dropped layer is gone: name the slot only
+                    mod.clear();
+                g_skipped.push_back(SkippedRaw{addr, s.kind, s.id, s.field, s.sub, mod, source, revert});
+                s.foreign = true;
+                s.old_changed = false;
+                std::memcpy(s.current, now, s.n);
+                continue;  // not written; the slot stays with the other writer for this world
+            }
+        }
+        s.registry = has_registry_layer(s);
+        // a slot that stays with another writer is written only for a change of an older path's layer (today's behaviour)
+        const bool skip_foreign = s.foreign && !s.old_changed;
+        s.old_changed = false;
+        if (!skip_foreign && std::memcmp(want, s.current, s.n) != 0) {
             Write w{addr, s.n, {}};
             std::memcpy(w.bytes, want, s.n);
             writes.push_back(w);
@@ -500,7 +619,9 @@ TxnOutcome store_txn_rollback(uint64_t id, const std::function<void()>& settle, 
             bad(addr, "a layer written in the transaction is still there");
             continue;
         }
-        const uint8_t* want = sl == g_slots.end() ? x.original : sl->second.layers.empty() ? sl->second.original : sl->second.layers.back().bytes;
+        uint8_t folded[kSlotBytes] = {};
+        if (sl != g_slots.end()) fold(sl->second, folded);
+        const uint8_t* want = sl == g_slots.end() ? x.original : folded;
         uint8_t now[kSlotBytes] = {};
         if (!rd(addr, now, x.n)) bad(addr, "not readable");
         else if (std::memcmp(now, want, x.n) != 0) bad(addr, "memory does not hold what its layers say");
@@ -580,18 +701,42 @@ std::vector<Conflict> store_conflicts() {
     std::vector<Conflict> out;
     for (auto& [addr, s] : g_slots) {
         if (s.layers.size() < 2) continue;
-        const Layer& win = s.layers.back();
+        uint8_t scratch[kSlotBytes];
+        fold(s, scratch);  // evaluated layers' bytes as they are now
+        size_t top = s.layers.size();
+        while (top > 0 && excluded(s, s.layers[top - 1])) --top;
+        if (top < 2) continue;
+        const Layer& win = s.layers[top - 1];
         const std::string win_mod = layer_mod(win);
         std::string field;
         const Field* f = nullptr;
         std::string what;
-        for (size_t i = 0; i + 1 < s.layers.size(); ++i) {
+        for (size_t i = 0; i + 1 < top; ++i) {
             const Layer& l = s.layers[i];
+            if (excluded(s, l)) continue;
             if (l.owner == win.owner || std::memcmp(l.bytes, win.bytes, s.n) == 0) continue;
             if ((!l.mod.empty() || !win.mod.empty()) && !win_mod.empty() && layer_mod(l) == win_mod) continue;
             if (what.empty()) what = slot_what(s, &field, &f);
             out.push_back(Conflict{what, win.source, l.source, layer_value(s, f, win.bytes), layer_value(s, f, l.bytes)});
         }
+    }
+    return out;
+}
+
+std::vector<StoreSkipped> store_skipped() {
+    std::lock_guard lock(g_mu);
+    std::vector<StoreSkipped> out;
+    for (const SkippedRaw& r : g_skipped) {
+        Slot s;
+        s.kind = r.kind, s.id = r.id, s.field = r.field, s.sub = r.sub;
+        std::string field;
+        const Field* f = nullptr;
+        StoreSkipped x;
+        x.addr = r.addr, x.kind = r.kind, x.id = r.id, x.mod = r.mod, x.source = r.source, x.revert = r.revert;
+        x.what = slot_what(s, &field, &f);
+        x.text = x.what + " was written by another writer after Kiln's layer: Kiln's " + (r.revert ? "revert" : "edit") + " not applied";
+        if (!r.mod.empty()) x.text += " (" + r.mod + ")";
+        out.push_back(std::move(x));
     }
     return out;
 }
@@ -623,8 +768,8 @@ KilnResult set_field(KilnOwner owner, uint64_t seq, uint32_t kind, const Entry& 
     return KILN_OK;
 }
 
-KilnResult set_recipe_stacks(KilnOwner owner, uint64_t seq, const Entry& e, uint32_t which,
-                             const std::vector<KilnContentStack>& stacks, const std::string& source, std::string* why) {
+KilnResult recipe_list_header(const Entry& e, uint32_t which, const std::vector<KilnContentStack>& stacks, uint8_t* hb,
+                              std::string* why) {
     if (which > KILN_CONTENT_OUTPUTS || stacks.empty() || stacks.size() > 32) {
         *why = "a recipe list has 1..32 entries";
         return KILN_ERR_INVALID_ARGUMENT;
@@ -679,11 +824,18 @@ KilnResult set_recipe_stacks(KilnOwner owner, uint64_t seq, const Entry& e, uint
         *why = "recipe data out of reach";
         return KILN_ERR_INTERNAL;
     }
-    uint8_t hb[8];
     const int32_t off = static_cast<int32_t>(rel);
     const uint32_t n = static_cast<uint32_t>(stacks.size());
     std::memcpy(hb, &off, 4);
     std::memcpy(hb + 4, &n, 4);
+    return KILN_OK;
+}
+
+KilnResult set_recipe_stacks(KilnOwner owner, uint64_t seq, const Entry& e, uint32_t which,
+                             const std::vector<KilnContentStack>& stacks, const std::string& source, std::string* why) {
+    uint8_t hb[8];
+    if (const KilnResult r = recipe_list_header(e, which, stacks, hb, why); r != KILN_OK) return r;
+    const uintptr_t header = e.addr + (which == KILN_CONTENT_INPUTS ? RL.input : RL.output);
     if (!store_put(owner, seq, KILN_CONTENT_RECIPES, e.id, -1, static_cast<int32_t>(which), header, 8, hb, source)) {
         *why = "the recipe is not readable";
         return KILN_ERR_INTERNAL;
