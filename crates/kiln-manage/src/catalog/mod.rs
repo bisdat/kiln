@@ -15,6 +15,8 @@
 //! and reflection and needs feature `gameart` ([`build`], [`build_default`], [`types`]).
 
 #[cfg(feature = "gameart")]
+pub mod auto;
+#[cfg(feature = "gameart")]
 mod decode;
 #[cfg(feature = "gameart")]
 mod extract;

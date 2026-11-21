@@ -5,6 +5,7 @@
 use super::TaskId;
 use super::app::{launcher_log, spawn_task, to_value};
 use crate::state::{blocking, dirs, game};
+use kiln_manage::catalog::auto::{AutoCatalog, AutoState, AutoStatus};
 use kiln_manage::crucible::{Crucible, publish};
 use kiln_manage::lint::LintReport;
 use kiln_manage::modpack::pack::{self, Credit};
@@ -250,9 +251,167 @@ pub async fn studio_server_pack(app: AppHandle, pack_id: String, version: String
     }))
 }
 
+// ================================================================================================= the game-data catalog
+
+/// The client catalog's upkeep for the pickers, fields and lint (kiln_manage::catalog::auto): one per process.
+static CATALOG: AutoCatalog = AutoCatalog::new();
+
+/// Where the catalog's upkeep is (the Data tab polls it while it builds).
+#[tauri::command]
+pub async fn studio_catalog_status() -> Result<AutoStatus, Error> {
+    Ok(CATALOG.status())
+}
+
+/// Pack Studio opening, and its "Build the game catalog" button: checks the client catalog on a thread of its own and
+/// makes it when it is missing or not current (about a second). Answers at once: building, or the status of the check
+/// that runs already. Refusals (Steam updating, exe and data of two builds, the game folder) come back as `failed`.
+#[tauri::command]
+pub async fn studio_catalog_ensure() -> Result<AutoStatus, Error> {
+    Ok(start_catalog(&CATALOG, catalog_inputs, launcher_log))
+}
+
+/// The client to read (the one Prepare game art reads) and the folder the catalog's readers look in.
+fn catalog_inputs() -> CatalogFound {
+    dirs()?; // the data folder is not held (a move, the beta copy's gate)
+    Ok((super::app::art_game(), kiln_manage::catalog::catalog_dir()?))
+}
+
+type CatalogFound = Result<(Option<kiln_manage::game::GameInstall>, PathBuf), Error>;
+
+/// Starts one check in the background unless one runs; `log` gets its outcome (launcher.log).
+fn start_catalog(auto: &'static AutoCatalog, inputs: impl FnOnce() -> CatalogFound + Send + 'static, log: fn(&str, &str)) -> AutoStatus {
+    if !auto.begin() {
+        return auto.status();
+    }
+    let started = auto.status();
+    std::thread::spawn(move || {
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| catalog_round(auto, inputs)));
+        let s = r.unwrap_or_else(|_| auto.fail(Error::new(ErrorCode::Internal, "reading the game's items panicked (a bug; see launcher.log)"), None));
+        if let Some(line) = catalog_log_line(&s) {
+            log("catalog", &line);
+        }
+    });
+    started
+}
+
+/// One begun check, on this thread: the launcher's own Steam check (any library layout), then kiln-manage's.
+fn catalog_round(auto: &AutoCatalog, inputs: impl FnOnce() -> CatalogFound) -> AutoStatus {
+    // a data folder move waits for this round (it writes <data>/catalog); taken before dirs(), as state::writing says
+    let _writing = crate::state::writing();
+    let (game, dest) = match inputs() {
+        Ok(v) => v,
+        Err(e) => return auto.fail(e, None),
+    };
+    if let Some(g) = &game
+        && let Err(e) = super::app::refuse_steam_updating(g)
+    {
+        return auto.fail(e, Some(&dest));
+    }
+    auto.run(game.as_ref().map(|g| g.path.as_path()), &dest, &mut kiln_manage::task::NoProgress)
+}
+
+/// What launcher.log says about a check: a catalog made, or why not (the same refusal only once in a row). A current
+/// catalog says nothing (every Pack Studio opening checks).
+fn catalog_log_line(s: &AutoStatus) -> Option<String> {
+    static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let path = s.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "-".into());
+    let line = match (s.state, &s.error) {
+        (AutoState::Ready, _) if s.built == Some(true) => format!("game-data catalog made for Pack Studio: {path} ({:.1} s)", s.seconds.unwrap_or(0.0)),
+        (AutoState::Ready, _) => {
+            last.clear();
+            return None;
+        }
+        (_, Some(e)) => format!("game-data catalog not made: [{}] {}{}", e.code.as_str(), e.message, if s.exists { " (the older one stays in use)" } else { "" }),
+        _ => return None,
+    };
+    if s.state != AutoState::Ready && *last == line {
+        return None;
+    }
+    *last = line.clone();
+    Some(line)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kiln_manage::game::{GameInstall, GameKind, PathMode, Platform};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn client(path: PathBuf, library: Option<PathBuf>) -> GameInstall {
+        GameInstall {
+            id: "g".into(), kind: GameKind::Client, path, exe: "enshrouded.exe".into(), app_id: kiln_manage::CLIENT_APP_ID,
+            library, platform: Platform::Proton, prefix: None, build_id: None, exe_sha256: None, steam_flavor: None, path_mode: PathMode::Copy,
+            source: "steam".into(),
+        }
+    }
+    fn tmp(tag: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("kiln-studio-catalog-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+    fn wait_done(auto: &AutoCatalog) -> AutoStatus {
+        for _ in 0..500 {
+            let s = auto.status();
+            if s.state != AutoState::Building {
+                return s;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("the catalog check never ended");
+    }
+    fn no_log(_: &str, _: &str) {}
+
+    #[test]
+    fn catalog_check_runs_in_the_background_once_at_a_time() {
+        static AUTO: AutoCatalog = AutoCatalog::new();
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        let slow_no_game = || -> CatalogFound {
+            CALLS.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            Ok((None, tmp("none")))
+        };
+        // answers at once with "building"; a second opening while it runs starts nothing
+        let s = start_catalog(&AUTO, slow_no_game, no_log);
+        assert_eq!(s.state, AutoState::Building);
+        assert_eq!(start_catalog(&AUTO, slow_no_game, no_log).state, AutoState::Building);
+        let s = wait_done(&AUTO);
+        assert_eq!(s.state, AutoState::NoGame);
+        assert_eq!(s.error.as_ref().map(|e| e.code), Some(ErrorCode::NotFound));
+        assert_eq!(CALLS.load(Ordering::SeqCst), 1);
+        // the button: a new check
+        start_catalog(&AUTO, slow_no_game, no_log);
+        wait_done(&AUTO);
+        assert_eq!(CALLS.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn catalog_refusals_are_surfaced_and_nothing_is_written() {
+        // Steam updating, seen in the game's own library (the launcher's check)
+        let lib = tmp("lib");
+        let game = lib.join("steamapps/common/Enshrouded");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(game.join("enshrouded.kfc"), b"not read").unwrap();
+        std::fs::write(lib.join(format!("steamapps/appmanifest_{}.acf", kiln_manage::CLIENT_APP_ID)),
+            format!("\"AppState\"\n{{\n\t\"appid\"\t\t\"{}\"\n\t\"StateFlags\"\t\t\"6\"\n\t\"installdir\"\t\t\"Enshrouded\"\n}}\n", kiln_manage::CLIENT_APP_ID)).unwrap();
+        let dest = tmp("dest");
+        let auto = AutoCatalog::new();
+        assert!(auto.begin());
+        let s = catalog_round(&auto, || Ok((Some(client(game.clone(), Some(lib.clone()))), dest.clone())));
+        assert_eq!(s.state, AutoState::Failed);
+        assert_eq!(s.error.as_ref().map(|e| e.code), Some(ErrorCode::SteamUpdating));
+        assert!(!s.exists && !dest.join("client.json").exists());
+        let line = catalog_log_line(&s).expect("a refusal is logged");
+        assert!(line.contains("[steam_updating]"), "{line}");
+        assert_eq!(catalog_log_line(&s), None, "the same refusal is logged once in a row");
+        // the data folder held (or anything before the run): failed with that error
+        assert!(auto.begin());
+        let s = catalog_round(&auto, || Err(Error::new(ErrorCode::Refused, "The data folder is being moved.")));
+        assert_eq!((s.state, s.error.as_ref().map(|e| e.code)), (AutoState::Failed, Some(ErrorCode::Refused)));
+        let _ = std::fs::remove_dir_all(&lib);
+        let _ = std::fs::remove_dir_all(&dest);
+    }
 
     /// Pack Studio's publish end to end against a Crucible running on this machine (launcher/scripts/crucible-e2e.mjs
     /// starts it and runs this with KILN_CRUCIBLE_DEV and KILN_CRUCIBLE_E2E_SESSION; plain cargo test skips it): a pack

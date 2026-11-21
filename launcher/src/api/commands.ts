@@ -2339,7 +2339,7 @@ export const COMMANDS = [
   "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",
   "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
   "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "pack_local_files", "pack_local_write", "pack_local_save", "pack_check", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links", "crucible_resume", "crucible_clipboard",
-  "studio_list", "studio_create", "studio_get", "studio_save", "studio_delete", "studio_credits_set", "studio_capture", "studio_capture_set", "studio_order", "studio_layer_files", "studio_layer_read", "studio_layer_write", "studio_layer_delete", "studio_layer_set", "studio_layer_lint", "studio_pick", "studio_fields", "studio_analyze", "studio_test", "studio_test_report", "studio_test_end", "studio_build", "studio_publish_check", "studio_publish", "studio_set_visibility", "studio_server_pack",
+  "studio_list", "studio_create", "studio_get", "studio_save", "studio_delete", "studio_credits_set", "studio_capture", "studio_capture_set", "studio_order", "studio_layer_files", "studio_layer_read", "studio_layer_write", "studio_layer_delete", "studio_layer_set", "studio_layer_lint", "studio_pick", "studio_fields", "studio_catalog_status", "studio_catalog_ensure", "studio_analyze", "studio_test", "studio_test_report", "studio_test_end", "studio_build", "studio_publish_check", "studio_publish", "studio_set_visibility", "studio_server_pack",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -2833,6 +2833,9 @@ export interface StudioOrder { kiln: StudioOrderRow[]; late: string[]; warnings:
 export interface StudioLayerFile { path: string; size: number }
 export interface StudioPickHit { section: string; name: string; id?: string; displayName?: string; from?: string }
 /** A catalog section's field (kiln_manage::catalog::FieldInfo). */
+/** Pack Studio's game-data catalog upkeep (kiln_manage::catalog::auto): made by Kiln when it is missing or not current. */
+export type StudioCatalogState = "idle" | "building" | "ready" | "failed" | "noGame";
+export interface StudioCatalogStatus { state: StudioCatalogState; exists: boolean; path?: string; built?: boolean; seconds?: number; error?: KilnError }
 export interface CatalogFieldInfo { path: string; type: string; writable?: boolean; enum?: string[]; enumNumbers?: number[]; kind?: string }
 /** kiln_manage::modpack::check::CheckReport (kilnctl pack check --json). */
 export interface PackCheckFinding { level: "error" | "warning" | "note"; code: string; message: string; mod?: string; file?: string }
@@ -2894,6 +2897,10 @@ export const studioLayerLint = (packId: string) => call<LintReport>("studio_laye
 /** Game entries (the catalog) and what the pack's mods add, for the data editors' pickers. */
 export const studioPick = (packId: string, section: string, query: string, limit = 50) => call<StudioPickHit[]>("studio_pick", { packId, section, query, limit });
 export const studioFields = (section: string) => call<CatalogFieldInfo[]>("studio_fields", { section });
+/** Where the catalog's upkeep is (polled while it builds). */
+export const studioCatalogStatus = () => call<StudioCatalogStatus>("studio_catalog_status");
+/** Pack Studio opening and "Build the game catalog": a check in the background, the catalog made when missing or not current. */
+export const studioCatalogEnsure = () => call<StudioCatalogStatus>("studio_catalog_ensure");
 /** The pack analysis (a task; result PackCheckReport): checks, code scan, data conflicts, prefilled credits. */
 export const studioAnalyze = (packId: string) => call<TaskId>("studio_analyze", { packId });
 /** A task (result PackInstallResult): "<name> (test)" built, installed and activated; then Play. */

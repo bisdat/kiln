@@ -888,6 +888,93 @@ mod build {
         assert_eq!(e.code, crate::ErrorCode::Conflict, "{}", e.message);
     }
 
+
+    // ------------------------------------------------------------------ the launcher's upkeep (catalog::auto)
+
+    #[test]
+    fn auto_builds_when_missing_and_skips_when_current() {
+        use crate::catalog::auto::{AutoCatalog, AutoState};
+        let game = Tmp::new("auto-game");
+        let out = Tmp::new("auto-out");
+        fake_game(&game.0);
+        let a = AutoCatalog::new();
+        assert_eq!(a.status().state, AutoState::Idle);
+        // missing: made
+        let s = a.ensure(Some(&game.0), &out.0, &mut crate::task::NoProgress);
+        assert_eq!(s.state, AutoState::Ready, "{:?}", s.error);
+        assert_eq!(s.built, Some(true));
+        assert!(s.exists && out.0.join("client.json").is_file());
+        // current: left alone, the same process (nothing read) and a new one (status read)
+        let s = a.ensure(Some(&game.0), &out.0, &mut crate::task::NoProgress);
+        assert_eq!((s.state, s.built), (AutoState::Ready, Some(false)));
+        let s = AutoCatalog::new().ensure(Some(&game.0), &out.0, &mut crate::task::NoProgress);
+        assert_eq!((s.state, s.built), (AutoState::Ready, Some(false)));
+        // the game updated since (another data build): made again
+        let f = out.0.join("client.json");
+        let text = std::fs::read_to_string(&f).unwrap();
+        assert!(text.contains("4242|^/test"), "the fixture's kfc version");
+        std::fs::write(&f, text.replace("4242|^/test", "4241|^/test")).unwrap();
+        let s = AutoCatalog::new().ensure(Some(&game.0), &out.0, &mut crate::task::NoProgress);
+        assert_eq!((s.state, s.built), (AutoState::Ready, Some(true)), "an outdated game build is rebuilt");
+        assert!(std::fs::read_to_string(&f).unwrap().contains("4242|^/test"));
+        // Kiln's rules changed (an older recipe): made again, also by the process that found it current before
+        let text = std::fs::read_to_string(&f).unwrap();
+        let older = text.replacen(&format!("\"recipe\": {RECIPE}"), &format!("\"recipe\": {}", RECIPE - 1), 1);
+        assert_ne!(older, text, "the recipe is in the header");
+        std::fs::write(&f, older).unwrap();
+        let s = a.ensure(Some(&game.0), &out.0, &mut crate::task::NoProgress);
+        assert_eq!((s.state, s.built), (AutoState::Ready, Some(true)), "an older recipe is rebuilt");
+        assert_eq!(status(&out.0, Some(&game.0)).unwrap()[0].current, Some(true));
+        // a check that runs already is not started twice
+        assert!(a.begin());
+        assert!(!a.begin());
+        assert_eq!(a.status().state, AutoState::Building);
+        let s = a.run(Some(&game.0), &out.0, &mut crate::task::NoProgress);
+        assert_eq!(s.state, AutoState::Ready);
+        // no client: NoGame, the existing file still named
+        let s = AutoCatalog::new().ensure(None, &out.0, &mut crate::task::NoProgress);
+        assert_eq!(s.state, AutoState::NoGame);
+        assert!(s.exists);
+        assert_eq!(s.error.map(|e| e.code), Some(crate::ErrorCode::NotFound));
+    }
+
+    #[test]
+    fn auto_surfaces_the_refusals() {
+        use crate::catalog::auto::{AutoCatalog, AutoState};
+        // Steam is updating the game (<lib>/steamapps/common/<game>, StateFlags with the updating bit)
+        let lib = Tmp::new("auto-lib");
+        let game = lib.0.join("steamapps/common/Enshrouded");
+        std::fs::create_dir_all(&game).unwrap();
+        fake_game(&game);
+        let manifest = |flags: u32| format!("\"AppState\"\n{{\n\t\"appid\"\t\t\"{}\"\n\t\"name\"\t\t\"Enshrouded\"\n\t\"StateFlags\"\t\t\"{flags}\"\n\t\"installdir\"\t\t\"Enshrouded\"\n}}\n", crate::CLIENT_APP_ID);
+        std::fs::write(lib.0.join(format!("steamapps/appmanifest_{}.acf", crate::CLIENT_APP_ID)), manifest(6)).unwrap();
+        let out = Tmp::new("auto-refused-out");
+        let a = AutoCatalog::new();
+        let s = a.ensure(Some(&game), &out.0, &mut crate::task::NoProgress);
+        assert_eq!(s.state, AutoState::Failed);
+        assert_eq!(s.error.as_ref().map(|e| e.code), Some(crate::ErrorCode::SteamUpdating), "{:?}", s.error);
+        assert!(!s.exists && !out.0.join("client.json").exists(), "nothing written while Steam updates");
+        // Steam done: the next check (the button) makes it
+        std::fs::write(lib.0.join(format!("steamapps/appmanifest_{}.acf", crate::CLIENT_APP_ID)), manifest(4)).unwrap();
+        let s = a.ensure(Some(&game), &out.0, &mut crate::task::NoProgress);
+        assert_eq!((s.state, s.built), (AutoState::Ready, Some(true)), "{:?}", s.error);
+        // never inside the game folder
+        let s = AutoCatalog::new().ensure(Some(&game), &game.join("catalog"), &mut crate::task::NoProgress);
+        assert_eq!(s.error.as_ref().map(|e| e.code), Some(crate::ErrorCode::Refused));
+        assert!(!game.join("catalog").exists());
+        // exe and data from two builds (mid-update): conflict, and the stale file stays usable
+        let th = fnv1a32(b"keen::ItemInfo");
+        build_kfc(&game, "enshrouded", "4243|x", &[Res { guid: guid(1), type_hash: th, part: 0, data: vec![0; 0x40] }], &[], &[(th, 0xdead_beef)]);
+        let s = a.ensure(Some(&game), &out.0, &mut crate::task::NoProgress);
+        assert_eq!(s.state, AutoState::Failed);
+        assert_eq!(s.error.as_ref().map(|e| e.code), Some(crate::ErrorCode::Conflict), "{:?}", s.error);
+        assert!(s.exists, "the older catalog is still there for the pickers");
+        // a failure from before the run (the launcher's own checks)
+        assert!(a.begin());
+        let s = a.fail(crate::Error::new(crate::ErrorCode::SteamUpdating, "Steam is updating the game."), Some(&out.0));
+        assert_eq!((s.state, s.exists), (AutoState::Failed, true));
+    }
+
     #[test]
     fn typegen_port_matches_the_committed_generated_cs() {
         // the committed dump (game-derived, in sigdb/) through the Rust port == the committed Generated.cs

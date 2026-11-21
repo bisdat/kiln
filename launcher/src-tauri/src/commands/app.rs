@@ -1058,7 +1058,7 @@ fn extract_editor_task(app: &AppHandle) -> Result<super::TaskId, Error> {
     }))
 }
 
-fn refuse_steam_updating(game: &kiln_manage::game::GameInstall) -> Result<(), Error> {
+pub(crate) fn refuse_steam_updating(game: &kiln_manage::game::GameInstall) -> Result<(), Error> {
     let updating = game
         .library
         .as_deref()

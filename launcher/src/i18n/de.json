@@ -5284,6 +5284,16 @@
         "info": "Hinweis"
       },
       "noCatalog": "Kein Spieldaten-Katalog auf diesem PC: Die Auswahllisten zeigen nur, was die Mods des Packs hinzufügen, und Felder werden von Hand eingetippt.",
+      "catalog": {
+        "reading": "Kiln liest die Gegenstände des Spiels…",
+        "build": "Spielkatalog erstellen",
+        "why": {
+          "noGame": "Kein Enshrouded-Client gefunden. Füge ihn unter Einstellungen → Spiele hinzu.",
+          "steamUpdating": "Steam aktualisiert gerade das Spiel. Versuche es erneut, wenn es fertig ist.",
+          "conflict": "Die Spieldateien stammen aus zwei verschiedenen Versionen (Steam ist vielleicht mitten in einem Update). Versuche es erneut, wenn Steam fertig ist.",
+          "failed": "Kiln konnte die Gegenstände des Spiels nicht lesen: {message}"
+        }
+      },
       "thisPack": "dieses Pack",
       "save": "Speichern",
       "saved": "Gespeichert",

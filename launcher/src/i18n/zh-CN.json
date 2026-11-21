@@ -4628,6 +4628,16 @@
         "info": "提示"
       },
       "noCatalog": "此电脑上没有游戏数据目录：选择列表只显示整合包的模组添加的内容，字段需要手动输入。",
+      "catalog": {
+        "reading": "正在读取游戏物品…",
+        "build": "生成游戏目录",
+        "why": {
+          "noGame": "未找到 Enshrouded 客户端。请在“设置 → 游戏”中添加。",
+          "steamUpdating": "Steam 正在更新游戏。完成后请重试。",
+          "conflict": "游戏文件来自两个不同的版本（Steam 可能正在更新）。Steam 完成后请重试。",
+          "failed": "Kiln 无法读取游戏物品：{message}"
+        }
+      },
       "thisPack": "此整合包",
       "save": "保存",
       "saved": "已保存",

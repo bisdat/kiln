@@ -13,7 +13,7 @@ import { useCrucibleStatus } from "../crucible/state";
 import COVER from "../assets/crucible/cover-forge.webp";
 import EMPTY from "../assets/crucible/empty.webp";
 import MARK from "../assets/crucible/mark-64.png";
-import { TABS, refreshStudio, sk, useStudio, useStudioList, type StudioTab } from "./state";
+import { TABS, refreshStudio, sk, useCatalogUpkeep, useStudio, useStudioList, type StudioTab } from "./state";
 import ModsTab from "./ModsTab";
 import SettingsTab from "./SettingsTab";
 import OrderTab from "./OrderTab";
@@ -30,9 +30,20 @@ export default function StudioPage() {
   // a deep link waits for Crucible's status: only a known "off" leaves the Studio
   if (status.isLoading) return <Page><Spinner /></Page>;
   if (status.data?.enabled !== true) return <Navigate to="/" replace />;
-  if (!packId) return <StudioIndex />;
-  if (!tab || !(TABS as readonly string[]).includes(tab)) return <Navigate to={"/studio/" + encodeURIComponent(packId) + "/mods"} replace />;
-  return <StudioPack packId={packId} tab={tab as StudioTab} />;
+  return (
+    <>
+      <CatalogUpkeep />
+      {!packId ? <StudioIndex />
+        : !tab || !(TABS as readonly string[]).includes(tab) ? <Navigate to={"/studio/" + encodeURIComponent(packId) + "/mods"} replace />
+        : <StudioPack packId={packId} tab={tab as StudioTab} />}
+    </>
+  );
+}
+
+/** Kiln reads the game's items for the pickers when Pack Studio opens (in the background; the Data tab shows it). */
+function CatalogUpkeep() {
+  useCatalogUpkeep();
+  return null;
 }
 
 function StudioIndex() {

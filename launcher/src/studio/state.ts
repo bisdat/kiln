@@ -1,5 +1,6 @@
 // Pack Studio's shared state: the queries of a pack source and the save that follows the creator's edits.
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import * as api from "../api/commands";
 import type { PackCheckReport, PackSourceDoc, Studio } from "../api/commands";
@@ -12,7 +13,39 @@ export const sk = {
   order: (id: string) => ["studio_order", id] as const,
   layer: (id: string) => ["studio_layer_files", id] as const,
   lint: (id: string) => ["studio_layer_lint", id] as const,
+  catalog: ["studio_catalog_status"] as const,
 };
+
+/** The game-data catalog's upkeep (kiln_manage::catalog::auto), polled while Kiln reads the game's items. */
+export const useStudioCatalog = () => useQuery({
+  queryKey: sk.catalog, queryFn: api.studioCatalogStatus, retry: false,
+  refetchInterval: (q) => (q.state.data?.state === "building" ? 400 : false),
+});
+
+/** Pack Studio opening and "Build the game catalog": Kiln reads the game's items in the background when its catalog is
+ *  missing or not current. The answer ("building") replaces a status read that was still on its way. */
+export async function ensureCatalog(qc: QueryClient) {
+  try {
+    const s = await api.studioCatalogEnsure();
+    await qc.cancelQueries({ queryKey: sk.catalog });
+    qc.setQueryData(sk.catalog, s);
+  } catch { /* the Data tab says what is missing */ }
+}
+
+/** One check when Pack Studio opens; once Kiln made a catalog, the pickers, fields and lint read again. */
+export function useCatalogUpkeep() {
+  const qc = useQueryClient();
+  const cat = useStudioCatalog();
+  useEffect(() => { void ensureCatalog(qc); }, [qc]);
+  const prev = useRef(cat.data?.state);
+  useEffect(() => {
+    const s = cat.data;
+    if (prev.current === "building" && s?.state === "ready" && s.built) {
+      for (const k of [["studio_pick"], ["studio_fields"], ["studio_layer_lint"]]) void qc.invalidateQueries({ queryKey: k });
+    }
+    prev.current = s?.state;
+  }, [cat.data, qc]);
+}
 
 export const useStudioList = () => useQuery({ queryKey: sk.list, queryFn: api.studioList, retry: false });
 export const useStudio = (id: string | undefined) => useQuery({ queryKey: sk.get(id ?? ""), queryFn: () => api.studioGet(id!), enabled: !!id, retry: false });

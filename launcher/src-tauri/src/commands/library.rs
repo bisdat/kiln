@@ -218,7 +218,7 @@ pub async fn library_users(entry: LibraryRef) -> Result<Vec<String>, Error> {
 pub async fn library_lint(entry: Option<LibraryRef>, profile_id: Option<String>) -> Result<LintReport, Error> {
     blocking(move || {
         let dirs = dirs()?;
-        let options = LintOptions::default();
+        let options = LintOptions { no_catalog_hint: Some(kiln_manage::lint::LAUNCHER_CATALOG_HINT.into()), ..Default::default() };
         match entry {
             Some(e) => lint::lint_library_entry(&dirs, &e, profile_id.as_deref(), &options),
             None => {

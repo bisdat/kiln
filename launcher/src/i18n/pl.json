@@ -5534,6 +5534,16 @@
         "info": "Uwaga"
       },
       "noCatalog": "Brak katalogu danych gry na tym komputerze: listy wyboru pokazują tylko to, co dodają mody paczki, a pola wpisuje się ręcznie.",
+      "catalog": {
+        "reading": "Odczytywanie przedmiotów gry…",
+        "build": "Utwórz katalog gry",
+        "why": {
+          "noGame": "Nie znaleziono klienta Enshrouded. Dodaj go w Ustawienia → Gry.",
+          "steamUpdating": "Steam aktualizuje grę. Spróbuj ponownie, gdy skończy.",
+          "conflict": "Pliki gry pochodzą z dwóch różnych wersji (Steam może być w trakcie aktualizacji). Spróbuj ponownie, gdy Steam skończy.",
+          "failed": "Kiln nie mógł odczytać przedmiotów gry: {message}"
+        }
+      },
       "thisPack": "ta paczka",
       "save": "Zapisz",
       "saved": "Zapisano",
