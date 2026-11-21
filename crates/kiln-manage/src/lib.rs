@@ -111,6 +111,7 @@ pub mod settings_files;
 pub mod mod_settings;
 pub(crate) mod durable;
 pub mod engine_mods;
+pub mod emf_deps;
 pub mod game_files;
 pub mod restore_data;
 pub mod found;

@@ -221,11 +221,8 @@ pub async fn profile_resolve(profile_id: String, side: RunSide, game_id: Option<
     blocking(move || {
         let d = dirs()?;
         let p = profile::get(&d, &profile_id)?;
-        let hosted = match game_id {
-            Some(g) => profile::hosted_server_mods(&crate::state::game(&g)?.path),
-            None => true,
-        };
-        profile::resolve_preview_for(&d, &p, side, hosted)
+        let game = game_id.map(|g| crate::state::game(&g)).transpose()?;
+        profile::resolve_preview_in(&d, &p, side, game.as_ref().map(|g| g.path.as_path()))
     })
     .await
 }
