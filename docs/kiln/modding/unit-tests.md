@@ -533,7 +533,7 @@ time with them sees almost none pass between steps, and an `await Task.Delay(...
 | kiln.tasks | unavailable | `kiln.tasks` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.toolwear | unavailable | `kiln.toolwear` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.ui | unavailable | `kiln.ui` | no fake: the service finds no native table, so its own Available is false and its row says offline |
-| kiln.ui.blocks | unavailable | `kiln.ui.blocks`, `ui.blocks.tabs`, `ui.blocks.trees` | no fake: UiDraw's selected tab, a tree node's open state and a text field's edit state fall back to the plain kiln.ui calls; window blocks are tested through Kiln.Blocks' recording canvas |
+| kiln.ui.blocks | unavailable | `kiln.ui.blocks` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.ui.snapshot | unavailable | `kiln.ui.snapshot` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.ui.tick | unavailable | `kiln.ui.tick` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.vfx | unavailable | `kiln.vfx` | no fake: the service finds no native table, so its own Available is false and its row says offline |
