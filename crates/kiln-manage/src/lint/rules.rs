@@ -2975,9 +2975,6 @@ fn looks_like_action_start(dialogues: &Node, v: &Node) -> bool {
     !dialogues.as_object().into_iter().flatten().any(|d| d.value.get("start").is_some_and(|s| s.span.start == v.span.start))
 }
 
-// --------------------------------------------------------------------------------------------- skills ----
-
-/// What Kiln.Skills' Validate (TreeRuntime.cs) refuses beyond the schema: the whole tree fails to register.
 // ------------------------------------------------------------------------------------------------ mod values ----
 
 /// A whole number in the form mod-values/*.json writes it (an optional '-', no '+', no leading zeros, not "-0", at most
@@ -3017,7 +3014,8 @@ fn compact_len(n: &Node) -> usize {
 
 /// mod-values/*.json beyond its schema (kiln-mod-values.schema.json): numbers in the 64-bit range, min <= max, initial
 /// within them, thresholds that strictly increase (as whole numbers), the size limits, and with `root` (the files are
-/// one mod's, in name order) ids across the files and the 128 values a mod may have. What Kiln.ModValues refuses at load.
+/// one mod's, in name order) ids across the files and the 128 values a mod may have: what Kiln.ModValues refuses at
+/// load. And one warning: a carried value with no explicit max (KL356).
 fn mod_values(out: &mut Out, files: &[&LFile], root: Option<&Path>) {
     for f in files {
         let Some(defs) = f.root.as_ref().and_then(|r| r.get("values")).and_then(Node::as_object) else { continue };
@@ -3074,6 +3072,18 @@ fn mod_values(out: &mut Out, files: &[&LFile], root: Option<&Path>) {
                     }
                 }
             }
+            // a carried value merges by maximum: the higher of the world's value and the copy a player's client brings wins,
+            // so without a max of its own a client can raise it to the top of the 64-bit range (counters and experience
+            // values are the kinds that can be carried; the rest is the schema's finding)
+            if d.str_of("persistence") == Some("carried")
+                && d.get("trustClientImports").and_then(Node::as_bool) == Some(true)
+                && matches!(d.str_of("kind"), Some("counter" | "experience"))
+                && d.get("max").is_none()
+            {
+                out.push(Diagnostic::new(&f.display, codes::MOD_VALUE_CARRIED_MAX, m.key_span, &format!(
+                    "value {}: a carried value without \"max\" can be raised as far as {} by a player's own copy (Kiln keeps the higher of the world's value and the copy a client brings); give it a real max", m.key, i64::MAX))
+                    .pointer(&base));
+            }
             let len = compact_len(d);
             if len > MOD_VALUE_DEFINITION_BYTES {
                 out.push(Diagnostic::new(&f.display, codes::MOD_VALUE_SIZE, m.key_span, &format!(
@@ -3113,6 +3123,9 @@ fn mod_values(out: &mut Out, files: &[&LFile], root: Option<&Path>) {
     }
 }
 
+// --------------------------------------------------------------------------------------------- skills ----
+
+/// What Kiln.Skills' Validate (TreeRuntime.cs) refuses beyond the schema: the whole tree fails to register.
 fn skills(out: &mut Out, f: &LFile) {
     let Some(r) = &f.root else { return };
     for t in r.get("trees").and_then(Node::as_array).into_iter().flatten() {

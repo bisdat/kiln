@@ -1,6 +1,6 @@
 {
   "catalog": false,
-  "description": "mod-values/*.json: the dossier's example and every field in clean files (good); what the schema refuses: experience without thresholds or with a scale, thresholds not from 0 or on another kind, a negative currency, a carried currency or untrusted carried value, readMods without allowList, a number format outside the list, numbers not in their string form, unknown keys and ids (schema); what kiln lint adds: the 64-bit range, min above max, initial outside them, thresholds that do not increase, a label over 1024 bytes, an id in two files (rules)",
+  "description": "mod-values/*.json: the dossier's example and every field in clean files (good); what the schema refuses: experience without thresholds or with a scale, thresholds not from 0 or on another kind, a negative currency, a carried currency or untrusted carried value, readMods without allowList, a number format outside the list, numbers not in their string form, unknown keys and ids (schema); what kiln lint adds: the 64-bit range, min above max, initial outside them, thresholds that do not increase, a label over 1024 bytes, an id in two files, a carried value with no max (a warning) (rules)",
   "diagnostics": [
     {
       "code": "KL350",
@@ -67,6 +67,14 @@
       "severity": "error"
     },
     {
+      "code": "KL356",
+      "col": 5,
+      "file": "rules/mod-values/a.json",
+      "line": 12,
+      "message": "value open-carried: a carried value without \"max\" can be raised as far as 9223372036854775807 by a player's own copy (Kiln keeps the higher of the world's value and the copy a client brings); give it a real max",
+      "severity": "warning"
+    },
+    {
       "code": "KL354",
       "col": 5,
       "file": "rules/mod-values/b.json",
@@ -129,6 +137,14 @@
       "line": 10,
       "message": "persistence \"carried\" needs \"trustClientImports\": true (a carried value comes from the player's client)",
       "severity": "error"
+    },
+    {
+      "code": "KL356",
+      "col": 5,
+      "file": "schema/mod-values/kinds.json",
+      "line": 11,
+      "message": "value carried-negative: a carried value without \"max\" can be raised as far as 9223372036854775807 by a player's own copy (Kiln keeps the higher of the world's value and the copy a client brings); give it a real max",
+      "severity": "warning"
     },
     {
       "code": "KL106",
