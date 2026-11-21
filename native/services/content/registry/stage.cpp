@@ -156,7 +156,14 @@ void refuse_unmapped(const map::RegMap& rm, const Schema& schema, Batch* b, std:
             return rm.mapping(e.registry, generic_path(field), &reason) != map::Mapping::Mapped;
         };
         bool bad = false;
-        if (e.entry == EntryOp::Add) {
+        // review finding 1 (ruling 2026-11-21): no back-end removes a game entry or creates a mod's in this release (P2 builds it):
+        // every entry add and remove is refused here, before composition, so nothing is reported as done and nothing is removed
+        // with it (a recipe needing a removed item stays); a reference to a refused add names this refusal
+        if (e.entry != EntryOp::None) {
+            bad = true;
+            reason = e.registry + " " + (e.entry == EntryOp::Add ? "add " + e.add_id : "remove " + e.select.id) +
+                     ": entry add and remove have no back-end in this release (no game entry is removed and no new entry is created); this edit was not applied";
+        } else if (e.entry == EntryOp::Add) {
             for (const auto& [k, v] : e.add_fields) bad = bad || unmapped(k);
         } else if (e.raw.empty() && e.entry != EntryOp::Remove) {
             bad = unmapped(e.element.on ? (e.element.leaf.empty() ? e.element.list : e.element.list + "[]." + e.element.leaf) : e.field);

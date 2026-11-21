@@ -170,7 +170,17 @@ void one_start(const std::string& dir) {
     bool loud = false;
     for (const std::string& l : files.log) loud = loud || (l.rfind("1 ", 0) == 0 && l.find("block") != std::string::npos);
     check(loud, "and said in the log as a warning");
-    check(text.find("recipes game:craft_planks removed") != std::string::npos, "the game recipe that needs the removed item is removed with it, reported");
+    // review finding 1 (ruling 2026-11-21): entry add and remove have no back-end in this release: refused per edit, loud, and
+    // nothing is removed with them (a game recipe needing the item stays)
+    check(text.find("entry add and remove have no back-end in this release") != std::string::npos, "the entry remove is refused with its reason");
+    check(rep["removed"].empty() && text.find("recipes game:craft_planks removed") == std::string::npos, "nothing is removed: " + rep["removed"].dump());
+    bool warned = false;
+    for (const std::string& l : files.log) warned = warned || (l.rfind("1 ", 0) == 0 && l.find("no back-end in this release") != std::string::npos);
+    check(warned, "the refused entry edit is a warning in kiln.log");
+    bool no_adds = false;
+    for (const auto& [k, v] : files.data)
+        if (k.rfind("plans/", 0) == 0) no_adds = json::parse(v)["adds"].empty();
+    check(no_adds, "the plan adds no entry");
     check(text.find("\"oldPatch\"") != std::string::npos && text.find("oldmod/cap") != std::string::npos, "the old boot patch is a writer of levelCap below the registry");
     bool over = false;
     for (const auto& c : rep["conflicts"]) over = over || (c["kind"] == "overridden" && c["winner"] == "bigmod" && c["field"].get<std::string>().find("levelCap") != std::string::npos);
@@ -184,7 +194,7 @@ void one_start(const std::string& dir) {
     std::string out;
     check(r.read(2, "balance", "game:balance", "levelCap", &out) == KILN_OK && out == "60", "read resolved");
     check(r.read(0, "items", "game:plank", "maxStack", &out) == KILN_OK && out == "20", "read base");
-    check(r.select(2, "items", "\"game:*\"", &out) == KILN_OK && out == "[\"game:plank\"]", "select resolved: the removed item is gone: " + out);
+    check(r.select(2, "items", "\"game:*\"", &out) == KILN_OK && out == "[\"game:material_t1_wood_logs\",\"game:plank\"]", "select resolved: the item whose removal was refused is still there: " + out);
     uint32_t a = 0, b = 0;
     std::string rp;
     check(r.submit(1, "x", R"({"ir":1,"mod":"x","stage":"alter","edits":[]})", &a, &b, &rp) == KILN_ERR_UNAVAILABLE, "no submit after the stage");
