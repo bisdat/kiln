@@ -295,8 +295,9 @@ void renames() {
         rn(g, 1, "A");
         g.fault_write = true;
         const int calls = g.set_string_calls;
+        const uint32_t refs_a = g.table[text_id("A", 1)].refs;
         check(rn(g, 1, "B").status == KILN_ITEMS_RENAME_UNAVAILABLE && g.set_string_calls == calls && g.name(1) == "A" &&
-                  g.table.size() == 1 && g.table[text_id("A", 1)].refs == 1 && !g.table.count(text_id("B", 1)),
+                  g.table.size() == 1 && g.table[text_id("A", 1)].refs == refs_a && !g.table.count(text_id("B", 1)),
               "a failed tracked write ends UNAVAILABLE before set_string: the old name and its record are untouched");
     }
     {
