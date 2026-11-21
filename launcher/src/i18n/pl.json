@@ -5167,10 +5167,10 @@
       "seeChanges": "Zobacz zmiany"
     },
     "change": {
-      "added.one": "+{count} dodany",
-      "added.few": "+{count} dodane",
-      "added.many": "+{count} dodanych",
-      "added.other": "+{count} dodanych",
+      "added.one": "{count} dodany",
+      "added.few": "{count} dodane",
+      "added.many": "{count} dodanych",
+      "added.other": "{count} dodanych",
       "updated.one": "{count} zaktualizowany",
       "updated.few": "{count} zaktualizowane",
       "updated.many": "{count} zaktualizowanych",
@@ -5204,7 +5204,8 @@
       "offline": "Kiln nie może połączyć się z Crucible. Poproś znajomego o plik paczki (Udostępnij w Crucible > Zapisz jako plik).",
       "gone": "Tej paczki nie ma już w Crucible.",
       "badDownload": "Paczka nie pobrała się poprawnie. Nic nie zostało zainstalowane. Spróbuj jeszcze raz.",
-      "gameRunning": "Najpierw zamknij Enshrouded."
+      "gameRunning": "Najpierw zamknij Enshrouded.",
+      "offlineShare": "Kiln nie może połączyć się z Crucible. Sprawdź połączenie z internetem i spróbuj ponownie albo użyj Zapisz jako plik i wyślij plik znajomym."
     },
     "install": {
       "done": "{name} jest zainstalowana",
@@ -5240,7 +5241,7 @@
       "kilnOld": "Wymaga Kiln {version} lub nowszego.",
       "updateKiln": "Zaktualizuj Kiln",
       "uploadingTitle": "Wciąż się wysyła",
-      "stillUploading": "Paczka od {name} wciąż się wysyła ({pct}%). Kiln zainstaluje ją, gdy będzie gotowa.",
+      "stillUploading": "Paczka od {name} wciąż się wysyła ({pct}%). Poczekaj tutaj: instalacja będzie możliwa, gdy będzie gotowa.",
       "resumed": "Kiln jest gotowy. Oto {name}, paczka, po którą przyszedłeś.",
       "wait": "Poczekaj",
       "waiting": "Czekamy na przesyłanie od {name} ({pct}%)…",
@@ -5274,7 +5275,8 @@
       "nameLabel": "Nazwa profilu",
       "nameTaken": "Masz już profil o tej nazwie. Ten będzie się nazywał {name}.",
       "runningHint": "Enshrouded jest uruchomiony. „Zainstaluj” doda paczkę teraz; wczytaj ją po zamknięciu gry.",
-      "installOnlyTip": "Dodaje paczkę jako osobny profil. Nie wczytuje jej i nie uruchamia gry."
+      "installOnlyTip": "Dodaje paczkę jako osobny profil. Nie wczytuje jej i nie uruchamia gry.",
+      "warningFile": "Ten plik paczki zawiera mody innych osób, także z kodem. Kiln sprawdził plik, ale nikt go nie recenzował."
     },
     "profiles": {
       "tag": "Paczka z Crucible",
@@ -5365,8 +5367,6 @@
       "cantRead": "Nie można odczytać aktualizacji",
       "removedKept": "{name} (zostaje w Twojej Bibliotece)",
       "packData": "Zmieniły się własne dane paczki",
-      "kept": "Twoje zmiany zostają: ustawienia: {settings}, mody: {mods}.",
-      "keptData": "Twoje zmiany zostają: ustawienia: {settings}, zmiany danych: {data}, mody: {mods}.",
       "renamed": "{from} to teraz {to}: Twoje ustawienia przechodzą razem z nim.",
       "stillWins.one": "Twoja zmiana nadal wygrywa ({count})",
       "stillWins.few": "Twoje zmiany nadal wygrywają ({count})",
@@ -5393,7 +5393,26 @@
       "doneDetail": "Twoje zmiany zostały.",
       "failed": "Nie zaktualizowano {name}",
       "undone": "{name} wróciła do {version}",
-      "undoFailed": "Nie udało się cofnąć aktualizacji"
+      "undoFailed": "Nie udało się cofnąć aktualizacji",
+      "keptLine": "Twoje zmiany zostają: {list}.",
+      "keptSettings": {
+        "one": "{count} ustawienie",
+        "few": "{count} ustawienia",
+        "many": "{count} ustawień",
+        "other": "{count} ustawienia"
+      },
+      "keptData": {
+        "one": "{count} zmiana danych",
+        "few": "{count} zmiany danych",
+        "many": "{count} zmian danych",
+        "other": "{count} zmiany danych"
+      },
+      "keptMods": {
+        "one": "{count} mod",
+        "few": "{count} mody",
+        "many": "{count} modów",
+        "other": "{count} modu"
+      }
     },
     "deck": {
       "shareTitle": "Udostępnij {name}",
@@ -5550,7 +5569,7 @@
         "raw": "Raw JSON"
       },
       "lint": {
-        "line": "Lint: {errors}, {warnings}",
+        "line": "Sprawdzanie danych: {errors}, {warnings}",
         "errors": {
           "one": "{count} błąd",
           "few": "{count} błędy",
@@ -5563,14 +5582,21 @@
           "many": "{count} ostrzeżeń",
           "other": "{count} ostrzeżenia"
         },
-        "checking": "Lint: sprawdzanie…",
+        "checking": "Sprawdzanie danych: trwa…",
         "show": "Pokaż problemy",
         "hide": "Ukryj problemy",
         "error": "Błąd",
         "warning": "Ostrzeżenie",
-        "info": "Uwaga"
+        "info": "Uwaga",
+        "lineNotes": "Sprawdzanie danych: {errors}, {warnings}, {notes}",
+        "notes": {
+          "one": "{count} uwaga",
+          "few": "{count} uwagi",
+          "many": "{count} uwag",
+          "other": "{count} uwagi"
+        }
       },
-      "noCatalog": "Brak katalogu danych gry na tym komputerze: listy wyboru pokazują tylko to, co dodają mody paczki, a pola wpisuje się ręcznie.",
+      "noCatalog": "Kiln nie odczytał jeszcze przedmiotów gry: listy wyboru pokazują tylko to, co dodają mody paczki, a nazwy pól wpisuje się ręcznie.",
       "catalog": {
         "reading": "Odczytywanie przedmiotów gry…",
         "build": "Utwórz katalog gry",
@@ -5718,6 +5744,12 @@
         "textAria": "Tekst pliku {file}",
         "clean": "Brak problemów w tym pliku.",
         "pick": "Wybierz plik albo utwórz nowy."
+      },
+      "hidden": {
+        "toggle": "Pokaż ukryte wpisy gry",
+        "tag": "ukryty",
+        "tip": "Stare, testowe lub nieużywane wpisy gry: w grze mogą nic nie robić.",
+        "tankWater": "woda ze zbiornika stanowiska"
       }
     },
     "order": {
@@ -5787,7 +5819,7 @@
       "crucible": "Crucible",
       "github": "wydanie GitHub",
       "nexus": "Nexus",
-      "manifest": "manifest moda",
+      "manifest": "informacje z moda",
       "manual": "ty"
     },
     "confidence": {
@@ -5824,10 +5856,10 @@
           "other": "skan kodu ({count} uwag)"
         },
         "lint": {
-          "one": "lint ({count} ostrzeżenie)",
-          "few": "lint ({count} ostrzeżenia)",
-          "many": "lint ({count} ostrzeżeń)",
-          "other": "lint ({count} ostrzeżeń)"
+          "one": "sprawdzanie danych ({count} ostrzeżenie)",
+          "few": "sprawdzanie danych ({count} ostrzeżenia)",
+          "many": "sprawdzanie danych ({count} ostrzeżeń)",
+          "other": "sprawdzanie danych ({count} ostrzeżeń)"
         }
       },
       "tone": {

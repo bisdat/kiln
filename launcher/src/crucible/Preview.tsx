@@ -108,12 +108,15 @@ export function usePreview(source: PreviewSource | null, wait = false) {
   return q;
 }
 
+/** The Kiln version a pack needs, as a player reads it: "0.2.0-dev.31" for ">=0.2.0-dev.31" (the line says "or newer"). */
+export const neededKiln = (m: PreviewModel) => (m.kiln.needs ?? "").replace(/^[\s>=~^v]+/, "");
+
 /** Why Install can't go now (null: it can): no game, Kiln missing, the game running, Kiln too old, still uploading.
  *  `play` false (Install alone): the game running and Kiln missing from it don't matter, since the install writes only
  *  the data folder (the Library and the new profile; kiln_manage::crucible::install with play false). */
 export function installBlock(m: PreviewModel | undefined, game: GameInstall | null, status: api.GameStatus | undefined, play = true): string | null {
   if (!m) return null;
-  if (!m.kiln.ok) return t("crucible.preview.kilnOld", { version: m.kiln.needs ?? "" });
+  if (!m.kiln.ok) return t("crucible.preview.kilnOld", { version: neededKiln(m) });
   if (m.uploading != null) return t("crucible.preview.stillUploading", { name: m.creator?.name ?? m.title, pct: m.uploading });
   if (!game) return t("crucible.preview.noGame");
   if (!play) return null;
@@ -266,11 +269,11 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
           <>
             {source.kind === "crucible" && source.resume && <p className="kcr-p" data-testid="crucible-resumed">{t("crucible.preview.resumed", { name: m.title })}</p>}
             <div className="kcr-cover" style={{ backgroundImage: "url(" + m.cover + ")" }}>
+              {/* the dialog's title names the pack: the cover says by whom, which version and its votes */}
               <div className="kcr-cover-text">
-                <span className="kcr-cover-title">{m.title}</span>
                 <span className="kcr-cover-sub">
                   {m.creator ? t("crucible.preview.by", { name: m.creator.name }) : t("crucible.preview.fromFile")}
-                  {" · "}{m.number != null ? t("crucible.preview.versionN", { version: m.version, number: m.number }) : "v" + m.version}
+                  {m.version && <>{" · "}{m.number != null ? t("crucible.preview.versionN", { version: m.version, number: m.number }) : "v" + m.version}</>}
                   {m.upvotes != null && <> · <span title={t("crucible.preview.upvotes")}>▲ {m.upvotes}</span></>}
                 </span>
               </div>
@@ -280,13 +283,13 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
               <li data-testid="crucible-fit" className={m.fits ? "" : "k-tone-warn"}>{m.fits
                 ? (m.current ? t("crucible.preview.fits", { build: m.current }) : t("crucible.preview.fitsAny"))
                 : t("crucible.preview.otherBuild", { build: m.builds[0] ?? "", current: m.current ?? "" })}</li>
-              <li data-testid="crucible-size">{sizeWord}</li>
+              {m.uploading == null && <li data-testid="crucible-size">{sizeWord}</li>}
               {source.kind === "crucible" && <ChecksFact checks={m.checks} busy={q.isFetching} onRefresh={() => void q.refetch()} />}
               {m.code && <li className="k-muted">{t("crucible.preview.code", { code: m.code })}</li>}
             </ul>
             {!m.kiln.ok && (
               <div data-testid="crucible-kiln-old"><Banner tone="err" title={t("crucible.preview.kilnOldTitle")} actions={<Button size="s" onClick={() => { close(); nav("/runtime"); }}>{t("crucible.preview.updateKiln")}</Button>}>
-                {t("crucible.preview.kilnOld", { version: m.kiln.needs ?? "" })}
+                {t("crucible.preview.kilnOld", { version: neededKiln(m) })}
               </Banner></div>
             )}
             {m.uploading != null && (
@@ -306,9 +309,11 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
                 ))}
               </div>
             )}
-            <button type="button" className="k-link" aria-expanded={showMods} onClick={() => setShowMods((s) => !s)} data-testid="crucible-mods-toggle">
-              {showMods ? t("crucible.preview.hideMods") : t("crucible.preview.seeMods", { count: m.mods.length })}
-            </button>
+            {m.mods.length > 0 && (
+              <button type="button" className="k-link" aria-expanded={showMods} onClick={() => setShowMods((s) => !s)} data-testid="crucible-mods-toggle">
+                {showMods ? t("crucible.preview.hideMods") : t("crucible.preview.seeMods", { count: m.mods.length })}
+              </button>
+            )}
             {showMods && <ModList mods={m.mods} />}
             {!m.instance && (
               <div className="kcr-name">
@@ -320,7 +325,7 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
             )}
             {!m.instance && (
               <div className="kcr-trust">
-                <div className="kcr-warn" data-testid="crucible-warning"><ShieldAlert size={18} aria-hidden /><span>{t("crucible.preview.warning")}</span></div>
+                <div className="kcr-warn" data-testid="crucible-warning"><ShieldAlert size={18} aria-hidden /><span>{source.kind === "file" ? t("crucible.preview.warningFile") : t("crucible.preview.warning")}</span></div>
                 {trusted ? (
                   <p className="kcr-p k-muted" data-testid="crucible-trusted">{t("crucible.preview.trustedAlready", { name: m.creator?.name ?? "" })}</p>
                 ) : (
@@ -334,6 +339,8 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
                   </>
                 )}
                 {hint && m.kiln.ok && m.uploading == null && <p className="k-hint" data-testid="crucible-block">{hint}</p>}
+                {/* why Install waits, said where the eye is (the disabled buttons' tooltips are out of reach for the keyboard) */}
+                {!hint && !trusted && !trust && <p className="k-hint kcr-tick-hint" data-testid="crucible-tick-first">{t("crucible.preview.tickFirst")}</p>}
               </div>
             )}
           </>

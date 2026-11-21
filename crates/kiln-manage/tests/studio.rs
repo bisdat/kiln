@@ -229,11 +229,11 @@ fn the_order_puts_the_layer_last_and_picks_include_what_mods_add() {
     assert_eq!(loads, ["alpha", "pack.ember-run"], "beta is off: not in the order");
     assert!(o.kiln.iter().find(|r| r.id == "pack.ember-run").unwrap().layer);
     studio::layer_write(&st.dir, "content/new.json", r#"{ "format": 1, "items": { "add": [ { "name": "Cinderbrand_Sword", "displayName": "Cinderbrand", "base": "Weapon_T1_1H_Sword_Craft" } ] } }"#).unwrap();
-    let picks = studio::pick(&dirs, &st.dir, "items", "cinder", 10).unwrap();
+    let picks = studio::pick(&dirs, &st.dir, "items", "cinder", 10, false).unwrap();
     // the pack's own first; the rest (if this PC has a game-data catalog) are the game's
     assert_eq!((picks[0].name.as_str(), picks[0].from.as_deref()), ("Cinderbrand_Sword", Some("pack.ember-run")));
     assert!(picks[1..].iter().all(|p| p.from.is_none()));
-    assert!(studio::pick(&dirs, &st.dir, "recipes", "cinder", 10).unwrap().iter().all(|p| p.from.is_none()));
+    assert!(studio::pick(&dirs, &st.dir, "recipes", "cinder", 10, false).unwrap().iter().all(|p| p.from.is_none()));
     // lint runs over the layer with the profile as the other mods
     let r = studio::layer_lint(&dirs, &st.dir, None).unwrap();
     let _ = r.summary;

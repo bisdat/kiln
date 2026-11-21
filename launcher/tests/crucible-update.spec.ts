@@ -16,14 +16,14 @@ async function open(page: Page, url: string) {
 test("the banner on Play, the update screen with a conflict, Update and play", async ({ page }) => {
   await open(page, "/?mock=1&crucible=instance#/");
   const banner = page.getByTestId("crucible-update-banner");
-  await expect(banner).toContainText("Ashen Frontier 1 → 2 by Stonewright: 1 added, 2 updated, 1 removed.");
+  await expect(banner).toContainText("Ashen Frontier 1.0.0 → 1.1.0 by Stonewright: 1 added, 2 updated, 1 removed.");
   await shot(page, "desktop-update-banner");
   await page.getByTestId("crucible-see-changes").click();
   const screen = page.getByTestId("crucible-update");
   await expect(page.getByTestId("crucible-diff")).toContainText("Busy Hands 0.2.8");
   await expect(page.getByTestId("crucible-diff")).toContainText("0.1.7 → 0.1.8");
   await expect(page.getByTestId("crucible-diff")).toContainText("(kept in your Library)");
-  await expect(page.getByTestId("crucible-kept")).toHaveText("Your changes kept: 2 settings, 2 data edits, 1 mods.");
+  await expect(page.getByTestId("crucible-kept")).toHaveText("Your changes kept: 2 settings, 2 data edits, 1 mod.");
   await expect(page.getByTestId("crucible-renamed")).toHaveText("kiln-auto-loot-keys.json is kiln-auto-loot/hotkeys.json now: your settings move with it.");
   await expect(page.getByTestId("crucible-overlaps")).toContainText("Your change still wins (1)");
   await expect(page.getByTestId("crucible-overlaps")).toContainText("The pack now sets 800. Yours, 999, still counts.");
@@ -31,6 +31,7 @@ test("the banner on Play, the update screen with a conflict, Update and play", a
   await expect(page.getByTestId("crucible-conflicts")).toContainText("The pack now says 12. You had 20.");
   await expect(page.getByTestId("crucible-update-go")).toHaveText("Update and play");
   await expect(page.getByTestId("crucible-update-go")).toBeDisabled();
+  await expect(page.getByTestId("crucible-choose-first")).toHaveText("Choose for each setting first.");
   await page.getByTestId("crucible-keep-mine").check();
   await shot(page, "desktop-update-screen");
   // the backend refuses with "conflict" (the pack changed meanwhile): the plan comes back, nothing is lost

@@ -25,7 +25,7 @@ async function open(page: Page, sub?: string) {
   await goData(page);
   // the Data tab is a lazy chunk: a fresh dev server compiles it at the first visit (slow on a cold runner)
   await expect(page.getByTestId("studio-data")).toBeVisible({ timeout: 45_000 });
-  await expect(page.getByTestId("data-lint")).toHaveText("Lint: 0 errors, 0 warnings");
+  await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 0 warnings");
   if (sub) await page.getByTestId("data-sub-" + sub).click();
 }
 /** Types into a picker and chooses the hit with that name. */
@@ -64,13 +64,13 @@ test("Items: a rule for every material (x4, max 9999, raise only) next to the cr
       Material_T2_Shroud_Spores: { rarity: "Epic" },
     },
   });
-  await expect(page.getByTestId("data-lint")).toHaveText("Lint: 0 errors, 0 warnings");
+  await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 0 warnings");
   // a name that is neither the game's nor a mod's: a warning, listed
   await page.getByTestId("data-items-add").click();
   await page.getByTestId("data-items-3-sel-input").fill("Not_A_Real_Item");
   await page.getByTestId("data-items-3-sel-input").press("Enter");
   await page.getByTestId("data-items-save").click();
-  await expect(page.getByTestId("data-lint")).toHaveText("Lint: 0 errors, 1 warning");
+  await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 1 warning");
   await page.getByTestId("data-lint-toggle").click();
   await expect(page.getByTestId("data-lint-list")).toContainText("no entry Not_A_Real_Item");
   await shot(page, "data-items-lint");
@@ -126,7 +126,7 @@ test("Recipes: change the mod's recipe (game and pack-mod items, station, durati
     name: "Ember_Run_Sword_Recipe", station: "0x0c0c0001", inputs: [{ item: "Material_T3_Iron_Bar", count: 3 }], outputs: [{ item: "Cinderbrand_Sword", count: 1 }], duration: 45,
   });
   expect(doc.recipes.add[0].guid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-  await expect(page.getByTestId("data-lint")).toHaveText("Lint: 0 errors, 0 warnings");
+  await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 0 warnings");
 });
 
 test("Loot and Drops: stack sizes per item; a drop table by its GUID with chance and one item's counts", async ({ page }) => {
@@ -162,7 +162,7 @@ test("Loot and Drops: stack sizes per item; a drop table by its GUID with chance
       "*": { count: { mul: 2 } },
     },
   });
-  await expect(page.getByTestId("data-lint")).toHaveText("Lint: 0 errors, 0 warnings");
+  await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 0 warnings");
 });
 
 test("New items: an add clone of a game item, kept beside the item rules; the pickers then offer it as the pack's own", async ({ page }) => {
@@ -194,7 +194,7 @@ test("New items: an add clone of a game item, kept beside the item rules; the pi
   const after = await fileOf(page, "content/items.json");
   expect(after.items.add[0].name).toBe("Ember_Frost_Blade");
   expect(after.items.Ember_Frost_Blade).toEqual({ maxStackSize: 999 });
-  await expect(page.getByTestId("data-lint")).toHaveText("Lint: 0 errors, 0 warnings");
+  await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 0 warnings");
 });
 
 test("Raw JSON: make a file, break it (an error), fix it, rename it, delete it", async ({ page }) => {
@@ -206,12 +206,12 @@ test("Raw JSON: make a file, break it (an error), fix it, rename it, delete it",
   expect(JSON.parse((await layer(page))["content/extras.json"])).toEqual({ format: 1 });
   await page.getByTestId("data-raw-text").fill('{ "format": 1, "items": { "Material_T1_Twigs": { "maxStackSize": 50 } ');
   await page.getByTestId("data-raw-save").click();
-  await expect(page.getByTestId("data-lint")).toHaveText("Lint: 1 error, 0 warnings");
+  await expect(page.getByTestId("data-lint")).toHaveText("Data check: 1 error, 0 warnings");
   await expect(page.getByTestId("data-raw-lint")).toContainText("Not valid JSON");
   await shot(page, "data-raw-error");
   await page.getByTestId("data-raw-text").fill('{ "format": 1, "items": { "Material_T1_Twigs": { "maxStackSize": 50 } } }\n');
   await page.getByTestId("data-raw-save").click();
-  await expect(page.getByTestId("data-lint")).toHaveText("Lint: 0 errors, 0 warnings");
+  await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 0 warnings");
   await expect(page.getByTestId("data-raw-lint")).toHaveText("No problems in this file.");
   // the Items editor says the section is also set there
   await page.getByTestId("data-sub-items").click();
@@ -264,4 +264,41 @@ test("without the game-data catalog: Kiln reads the game's items when Pack Studi
   expect(await ensures()).toBe(opened + 1);
   await page.getByTestId("data-items-1-sel-input").fill("stone");
   await expect(page.getByTestId("data-items-1-sel-hit-Material_T1_Stone")).toBeVisible();
+});
+
+test("hidden game entries (old, test, unused): left out of the pickers until Show hidden game entries; one typed by name works and gets a note", async ({ page }) => {
+  await open(page);
+  await page.getByTestId("data-items-add").click();
+  const input = page.getByTestId("data-items-1-sel-input");
+  await input.fill("sand");
+  await expect(page.getByTestId("data-items-1-sel-list")).toBeVisible();
+  await expect(page.getByTestId("data-items-1-sel-hit-Z_Material_Sand_DEPRECATED")).toHaveCount(0);
+  await input.fill("stone");
+  await expect(page.getByTestId("data-items-1-sel-hit-Material_T1_Stone")).toBeVisible();
+  await expect(page.getByTestId("data-items-1-sel-hit-Material_T1_Stone_TEST")).toHaveCount(0);
+  // a deprecated-looking name the game still uses stays listed: the game's Water (station tank water)
+  await input.fill("water");
+  const water = page.getByTestId("data-items-1-sel-hit-Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED");
+  await expect(water).toBeVisible();
+  await expect(water).toContainText("Water");
+  await expect(water).toContainText("station tank water");
+  await expect(water).not.toContainText("hidden");
+  await page.keyboard.press("Escape");
+  // the switch: the hidden entries show, tagged
+  await page.getByTestId("data-show-hidden").check();
+  await input.fill("sand");
+  const hit = page.getByTestId("data-items-1-sel-hit-Z_Material_Sand_DEPRECATED");
+  await expect(hit).toBeVisible();
+  await expect(hit).toContainText("hidden");
+  await page.keyboard.press("Escape");
+  await page.getByTestId("data-show-hidden").uncheck();
+  // typed by its exact name it is taken, named, tagged, and the data check notes it (not a warning)
+  await input.fill("Z_Material_Sand_DEPRECATED");
+  await input.press("Enter");
+  await expect(page.getByTestId("data-items-1-sel-name")).toContainText("Sand");
+  await expect(page.getByTestId("data-items-1-sel-hidden")).toHaveText("hidden");
+  await page.getByTestId("data-items-save").click();
+  await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 0 warnings, 1 note");
+  await page.getByTestId("data-lint-toggle").click();
+  await expect(page.getByTestId("data-lint-list")).toContainText("Z_Material_Sand_DEPRECATED");
 });

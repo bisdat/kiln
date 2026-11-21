@@ -12,8 +12,15 @@ import { Banner, Button, Modal, Skeleton, Spinner, fmtBytes, runTask, toast } fr
 import { usePlayControl } from "../shell/play";
 import { crk, crucibleError, refreshCrucible, useCrucibleOn, useCrucibleUi, useUpdates } from "./state";
 
-/** "3 -> 4" when the numbers are known, else the versions. */
-export const fromTo = (u: CrucibleUpdate) => (u.from.number != null ? u.from.number + " → " + u.to.number : u.from.version + " → " + u.to.version);
+/** "1.0.0 → 1.1.0": the versions, as the update screen's title and Settings > Profiles say them (dev.30.2: the banner said
+ *  "1 → 2", the version numbers, which no other screen shows); the numbers when a version string is missing. */
+export const fromTo = (u: CrucibleUpdate) => (u.from.version && u.to.version ? u.from.version + " → " + u.to.version : (u.from.number ?? "") + " → " + (u.to.number ?? ""));
+
+/** "2 settings, 2 data edits, 1 mod": what of the player's own an update keeps (the parts that are not zero). */
+export function keptWords(settings: number, data: number, mods: number): string {
+  return [settings ? t("crucible.update.keptSettings", { count: settings }) : "", data ? t("crucible.update.keptData", { count: data }) : "",
+    mods ? t("crucible.update.keptMods", { count: mods }) : ""].filter(Boolean).join(", ");
+}
 
 /** The banner's sentence. */
 export function updateLine(u: CrucibleUpdate): string {
@@ -119,7 +126,7 @@ export function UpdateModal({ profileId }: { profileId: ProfileId }) {
                 {plan.layer.changed && <li className="upd"><b>~</b> {t("crucible.update.packData")}</li>}
               </ul>
               {(keptKeys > 0 || yours > 0 || dataEdits > 0) && <p className="kcr-p k-muted" data-testid="crucible-kept">
-                {dataEdits > 0 ? t("crucible.update.keptData", { settings: keptKeys, data: dataEdits, mods: yours }) : t("crucible.update.kept", { settings: keptKeys, mods: yours })}</p>}
+                {t("crucible.update.keptLine", { list: keptWords(keptKeys, dataEdits, yours) })}</p>}
               {renamed.map((f) => <p key={"rn" + f.path} className="k-hint" data-testid="crucible-renamed">{t("crucible.update.renamed", { from: f.renamedFrom!, to: f.path })}</p>)}
               {overlaps.length > 0 && (
                 <div className="kcr-conflicts" data-testid="crucible-overlaps">
@@ -153,6 +160,7 @@ export function UpdateModal({ profileId }: { profileId: ProfileId }) {
                 </div>
               )}
               {running && <p className="k-hint">{t("crucible.err.gameRunning")}</p>}
+              {!running && open.length > 0 && <p className="k-hint" data-testid="crucible-choose-first">{t("crucible.update.chooseFirst")}</p>}
             </>
           )}
         {q.isLoading && <Skeleton lines={3} />}

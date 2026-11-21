@@ -4955,8 +4955,8 @@
       "seeChanges": "Voir les changements"
     },
     "change": {
-      "added.one": "+{count} ajouté",
-      "added.other": "+{count} ajoutés",
+      "added.one": "{count} ajouté",
+      "added.other": "{count} ajoutés",
       "updated.one": "{count} mis à jour",
       "updated.other": "{count} mis à jour",
       "removed.one": "{count} retiré",
@@ -4980,7 +4980,8 @@
       "offline": "Kiln n'arrive pas à joindre Crucible. Demandez le fichier du pack à votre ami (Partager sur Crucible > Enregistrer en fichier).",
       "gone": "Ce pack n'est plus sur Crucible.",
       "badDownload": "Le pack ne s'est pas téléchargé correctement. Rien n'a été installé. Réessayez.",
-      "gameRunning": "Fermez d'abord Enshrouded."
+      "gameRunning": "Fermez d'abord Enshrouded.",
+      "offlineShare": "Kiln n'arrive pas à joindre Crucible. Vérifiez votre connexion internet et réessayez, ou utilisez Enregistrer en fichier et envoyez le fichier à vos amis."
     },
     "install": {
       "done": "{name} est installé",
@@ -5012,7 +5013,7 @@
       "kilnOld": "Nécessite Kiln {version} ou plus récent.",
       "updateKiln": "Mettre Kiln à jour",
       "uploadingTitle": "Envoi en cours",
-      "stillUploading": "Le pack de {name} est encore en cours d'envoi ({pct} %). Kiln l'installera quand il sera prêt.",
+      "stillUploading": "Le pack de {name} est encore en cours d'envoi ({pct} %). Patientez ici : l'installation sera possible dès qu'il sera prêt.",
       "resumed": "Kiln est prêt. Voici {name}, le pack pour lequel vous êtes venu.",
       "wait": "Attendre",
       "waiting": "En attente de l'envoi de {name} ({pct} %)…",
@@ -5044,7 +5045,8 @@
       "nameLabel": "Nom du profil",
       "nameTaken": "Vous avez déjà un profil de ce nom. Celui-ci s'appellera {name}.",
       "runningHint": "Enshrouded est lancé. Installer ajoute le pack maintenant ; chargez-le une fois le jeu fermé.",
-      "installOnlyTip": "Ajoute le pack comme profil à part. Ne le charge pas et ne lance pas le jeu."
+      "installOnlyTip": "Ajoute le pack comme profil à part. Ne le charge pas et ne lance pas le jeu.",
+      "warningFile": "Ce fichier de pack contient des mods d'autres personnes, dont du code. Kiln a vérifié le fichier, mais personne ne l'a examiné à la main."
     },
     "profiles": {
       "tag": "Pack Crucible",
@@ -5129,8 +5131,6 @@
       "cantRead": "Impossible de lire la mise à jour",
       "removedKept": "{name} (gardé dans votre bibliothèque)",
       "packData": "Les données propres au pack ont changé",
-      "kept": "Vos changements sont gardés : {settings} réglages, {mods} mods.",
-      "keptData": "Vos changements sont gardés : {settings} réglages, {data} modifications de données, {mods} mods.",
       "renamed": "{from} s'appelle maintenant {to} : vos réglages suivent.",
       "stillWins.one": "Votre changement reste prioritaire ({count})",
       "stillWins.other": "Vos changements restent prioritaires ({count})",
@@ -5153,7 +5153,20 @@
       "doneDetail": "Vos propres changements sont restés.",
       "failed": "{name} n'a pas été mis à jour",
       "undone": "{name} est revenu à {version}",
-      "undoFailed": "Impossible d'annuler la mise à jour"
+      "undoFailed": "Impossible d'annuler la mise à jour",
+      "keptLine": "Vos changements sont gardés : {list}.",
+      "keptSettings": {
+        "one": "{count} réglage",
+        "other": "{count} réglages"
+      },
+      "keptData": {
+        "one": "{count} modification de données",
+        "other": "{count} modifications de données"
+      },
+      "keptMods": {
+        "one": "{count} mod",
+        "other": "{count} mods"
+      }
     },
     "deck": {
       "shareTitle": "Partager {name}",
@@ -5296,7 +5309,7 @@
         "raw": "JSON brut"
       },
       "lint": {
-        "line": "Lint : {errors}, {warnings}",
+        "line": "Vérification des données : {errors}, {warnings}",
         "errors": {
           "one": "{count} erreur",
           "other": "{count} erreurs"
@@ -5305,14 +5318,19 @@
           "one": "{count} avertissement",
           "other": "{count} avertissements"
         },
-        "checking": "Lint : vérification…",
+        "checking": "Vérification des données : en cours…",
         "show": "Afficher les problèmes",
         "hide": "Masquer les problèmes",
         "error": "Erreur",
         "warning": "Avertissement",
-        "info": "Remarque"
+        "info": "Remarque",
+        "lineNotes": "Vérification des données : {errors}, {warnings}, {notes}",
+        "notes": {
+          "one": "{count} remarque",
+          "other": "{count} remarques"
+        }
       },
-      "noCatalog": "Aucun catalogue de données du jeu sur ce PC : les sélecteurs listent seulement ce qu'ajoutent les mods du pack, et les champs se saisissent à la main.",
+      "noCatalog": "Kiln n'a pas encore lu les objets du jeu : les sélecteurs listent seulement ce qu'ajoutent les mods du pack, et les noms de champ se saisissent à la main.",
       "catalog": {
         "reading": "Lecture des objets du jeu…",
         "build": "Créer le catalogue du jeu",
@@ -5460,6 +5478,12 @@
         "textAria": "Texte de {file}",
         "clean": "Aucun problème dans ce fichier.",
         "pick": "Choisissez un fichier ou créez-en un."
+      },
+      "hidden": {
+        "toggle": "Afficher les entrées cachées du jeu",
+        "tag": "cachée",
+        "tip": "Entrées anciennes, de test ou inutilisées du jeu : elles peuvent ne rien faire en jeu.",
+        "tankWater": "eau du réservoir de l'atelier"
       }
     },
     "order": {
@@ -5523,7 +5547,7 @@
       "crucible": "Crucible",
       "github": "release GitHub",
       "nexus": "Nexus",
-      "manifest": "le manifeste du mod",
+      "manifest": "les infos du mod",
       "manual": "toi"
     },
     "confidence": {
@@ -5558,8 +5582,8 @@
           "other": "analyse du code ({count} notes)"
         },
         "lint": {
-          "one": "lint ({count} avertissement)",
-          "other": "lint ({count} avertissements)"
+          "one": "vérification des données ({count} avertissement)",
+          "other": "vérification des données ({count} avertissements)"
         }
       },
       "tone": {

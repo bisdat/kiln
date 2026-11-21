@@ -1024,3 +1024,59 @@ fn real_exe_types() {
     let strip = |s: &str| s.lines().filter(|l| !l.starts_with("// Source:")).collect::<Vec<_>>().join("\n");
     eprintln!("same as the committed Generated.cs (apart from the Source line): {}", strip(&ours) == strip(&committed));
 }
+
+/// The game's old, test and unused entries (names from the 2026-11 catalog) and real entries whose names only look alike.
+#[test]
+fn hidden_names() {
+    for n in [
+        "Z_Material_Sand_DEPRECATED", "Z_Prop_NPC_Thermoscope_LATER", "Food_T6_common_Fish_Bait_TEST", "Armor_Tint_TEST", "TestItem_Football2",
+        "_Test_Ammo_pvp_tnt2_explosive_arrow", "_UNUSED_Food_T6_raw_herb_Basil", "VC_Body_Head_01_old", "Blueprint_Voxel_Whitebox_Wood_Foundation_4m_old",
+        "Consumable_Toy_Confetti_01_Blue_Mortar_WIP", "_Blueprint_Voxel_Debug_buildingmaterials", "Prop_Ancients_TrashhHeap_01_b_DONOTPLACE",
+        "Deco_Wetland_medium_Bamboo_DO_NOT_PLACE", "LootChest_CHEAT_Example", "Trap_Test_Prototype_Sawblade", "Attack_Player_2H_Heavy_Whirl01_CCW_TEST2",
+        "VFX_Tool_Projectile_Player_ChanneledWater_Impact_TO_BE_DELETED", "Prop_Decoration_T7_AncientAstronomy_TelescopeHuge_Base_deprecated",
+    ] {
+        assert!(super::is_hidden_name(n), "{n} is hidden");
+    }
+    for n in [
+        "Material_T1_Wood_Logs", "Prop_Decoration_T6_TempleVase_02", "Enemy_Skeleton_Heavy_Attack02_Swipe", "Prop_Mines_oldTools_free_4m_03",
+        "NonModalHint_05_TrainingDoll_TargetDummy", "Prop_NPC_barber_hairstyle_dummy_wigHead_02_cowlick", "BuildTool_Block_Remove",
+        "_Prop_Decoration_Boss_Trophy_Skeleton_Heavy_Hero_01_wood", "old_books_icon", "Consumable_Potion_Remove_All_Food_Buffs", "Material_T3_Iron_Bar",
+    ] {
+        assert!(!super::is_hidden_name(n), "{n} is not hidden");
+    }
+}
+
+/// Hiding keeps every entry the game's own data uses (names from the 2026-11 catalog): a recipe's input or output, a
+/// recipe's station, an input category's member, and station tank water, which no recipe names.
+#[test]
+fn hidden_names_keep_what_the_game_uses() {
+    let doc = serde_json::json!({
+        "format": 1, "kind": "kiln.catalog",
+        "sections": {
+            "items": [
+                { "name": "Vanity_TX_PartyHat_04_Tint_WIP" }, { "name": "Material_T5_MountainWoodlouse_FishingBait_WIP" },
+                { "name": "Consumable_Toy_Confetti_01_Blue_Mortar_WIP" }, { "name": "Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED", "displayName": "Water" },
+                { "name": "Z_Material_Sand_DEPRECATED", "displayName": "Sand" }, { "name": "Material_T1_Wood_Logs" }
+            ],
+            "workshops": [{ "name": "Z_Prop_Production_T5_Laboratory2_DEPRECATED" }],
+            "recipes": [
+                { "name": "Recipe_PartyHat", "inputs": [{ "item": "Material_T1_Wood_Logs", "count": 1 }], "outputs": [{ "item": "Vanity_TX_PartyHat_04_Tint_WIP", "count": 1 }],
+                  "workshopName": "Z_Prop_Production_T5_Laboratory2_DEPRECATED" },
+                { "name": "Recipe_Bait", "inputs": [{ "category": "0x00000001", "count": 2 }], "outputs": [{ "item": "Material_T1_Wood_Logs", "count": 1 }] }
+            ],
+            "itemCategories": [{ "id": "0x00000001", "items": ["Material_T5_MountainWoodlouse_FishingBait_WIP"] }]
+        }
+    });
+    let cat: Catalog = serde_json::from_value(doc.clone()).unwrap();
+    let used = super::used_names(&cat);
+    let shown = |n: &str| !super::is_hidden_name(n) || used.contains(n);
+    for n in ["Vanity_TX_PartyHat_04_Tint_WIP", "Material_T5_MountainWoodlouse_FishingBait_WIP", "Z_Prop_Production_T5_Laboratory2_DEPRECATED", super::STATION_WATER, "Material_T1_Wood_Logs"] {
+        assert!(shown(n), "{n} is in use: listed");
+    }
+    for n in ["Z_Material_Sand_DEPRECATED", "Consumable_Toy_Confetti_01_Blue_Mortar_WIP"] {
+        assert!(!shown(n), "{n} is unused: hidden");
+    }
+    // kiln lint's own catalog reads the same uses (no KL407 for them)
+    let lc = crate::lint::Catalog::from_json(Path::new("client.json"), &doc);
+    assert!(lc.used.contains("Material_T5_MountainWoodlouse_FishingBait_WIP") && lc.used.contains(super::STATION_WATER) && !lc.used.contains("Z_Material_Sand_DEPRECATED"));
+}

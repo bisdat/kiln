@@ -3,7 +3,7 @@
 // packs, and the trust list. The URL picks extra cases:
 //   ?crucible=off       crucible_status.enabled false: every Crucible surface hides
 //   ?crucible=dev       a dev override is in use ("Crucible (dev)")
-//   ?crucible=shared    "Ember run" was shared before and changed since (+1 added, 1 updated)
+//   ?crucible=shared    "Ember run" was shared before and changed since (1 added, 1 updated)
 //   ?crucible=packs     an instance "Ashen Frontier" (1.0.0, its 1.1.0 waiting with one conflict) is installed
 //   ?crucible=instance  the same, and it is the loaded profile (its update banner shows on Play)
 //   ?crucible=first     the first start of a Crucible launcher with no pack waiting (as after an update): the clipboard
@@ -216,7 +216,7 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       const progress = v.progress ?? 0;
       // the creator's upload goes on while a friend waits
       v.progress = Math.min(100, progress + 19);
-      if (progress < 100) err("busy", (p.pack.owner?.name ?? p.pack.title) + "'s pack is still uploading (" + progress + "%). Kiln will install it when it's ready.",
+      if (progress < 100) err("busy", (p.pack.owner?.name ?? p.pack.title) + "'s pack is still uploading (" + progress + "%). Try again when it's ready.",
         { uploading: { version: v.id, progress: progress / 100 }, pack: clone(p.pack) });
       v.status = "ready";
     }

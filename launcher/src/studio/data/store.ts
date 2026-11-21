@@ -9,7 +9,7 @@ import { sk } from "../state";
 
 export const dk = {
   texts: (id: string) => ["studio_layer_texts", id] as const,
-  pick: (id: string, section: string, q: string) => ["studio_pick", id, section, q] as const,
+  pick: (id: string, section: string, q: string, hidden = false) => ["studio_pick", id, section, q, hidden] as const,
   fields: (section: string) => ["studio_fields", section] as const,
 };
 
@@ -52,17 +52,27 @@ export function useWriteLayer(packId: string) {
 
 export const useFields = (section: string) => useQuery({ queryKey: dk.fields(section), queryFn: () => api.studioFields(section), retry: false, staleTime: Infinity });
 
-/** The picker's hits for a query (debounced). */
+/** "Show hidden game entries" (dev.30.2, netjunk): the pickers leave out the game's old, test and unused entries
+ *  (kiln_manage::catalog::is_hidden_name) unless this is on; remembered on this PC. */
+const HIDDEN_KEY = "kiln.studio.showHidden";
+export const useShowHidden = create<{ on: boolean; set: (on: boolean) => void }>((set) => ({
+  on: (() => { try { return localStorage.getItem(HIDDEN_KEY) === "1"; } catch { return false; } })(),
+  set: (on) => { try { localStorage.setItem(HIDDEN_KEY, on ? "1" : "0"); } catch { /* private mode: this run only */ } set({ on }); },
+}));
+
+/** The picker's hits for a query (debounced); hidden game entries only while "Show hidden game entries" is on. */
 export function usePick(packId: string, section: string, query: string, on = true) {
   const [q, setQ] = useState(query);
+  const hidden = useShowHidden((s) => s.on);
   useEffect(() => { const h = setTimeout(() => setQ(query), 160); return () => clearTimeout(h); }, [query]);
-  return useQuery({ queryKey: dk.pick(packId, section, q.trim()), queryFn: () => api.studioPick(packId, section, q.trim(), 40), enabled: on, retry: false, staleTime: 30_000 });
+  return useQuery({ queryKey: dk.pick(packId, section, q.trim(), hidden), queryFn: () => api.studioPick(packId, section, q.trim(), 40, hidden), enabled: on, retry: false, staleTime: 30_000 });
 }
-/** One entry by its exact name (the icon and display name of a chosen reference). */
+/** One entry by its exact name (the icon and display name of a chosen reference; a hidden game entry typed or pasted
+ *  is found too). */
 export function useEntry(packId: string, section: string, name: string): StudioPickHit | undefined {
   const n = name.trim();
   const plain = !!n && !/[*?]/.test(n);
-  const q = useQuery({ queryKey: dk.pick(packId, section, n), queryFn: () => api.studioPick(packId, section, n, 40), enabled: plain, retry: false, staleTime: 30_000 });
+  const q = useQuery({ queryKey: dk.pick(packId, section, n, true), queryFn: () => api.studioPick(packId, section, n, 40, true), enabled: plain, retry: false, staleTime: 30_000 });
   return q.data?.find((h) => h.name === n || h.id === n);
 }
 

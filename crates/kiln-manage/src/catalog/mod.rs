@@ -245,6 +245,73 @@ pub struct Hit {
 /// Entries whose name, display name, id or GUID contain `query` (case-insensitive; every whitespace-separated word
 /// must match). Exact matches first, then prefix matches, then the rest; within a rank in section and file order.
 /// `section`: only that one (else every section but `loca`, unless the query starts with `loca:`). `limit` 0 = 50.
+/// One of the game's old, test or unused entries, by the markers in its name (the catalog has no flag for them): a `Z_`
+/// prefix; a `_`-separated word DEPRECATED, DONOTPLACE, DONOTUSE, UNUSED, NOTFINISHED, NORECIPE, WIP, DEBUG, CHEAT,
+/// PROTOTYPE, PROTO, PLACEHOLDER or TEST (TEST2; a first word starting with Test, as TestItem); OLD after the first word;
+/// or DO_NOT_PLACE, DO_NOT_USE, TO_BE_DELETED; in any case. Pack Studio's pickers leave these out unless the creator asks
+/// for them, and kiln lint notes a reference to one (KL407), unless the game's own data still uses it ([`used_names`]). On the 2026-11 catalog: 63 of 4268 items (Z_Material_Sand_DEPRECATED,
+/// Food_T6_common_Fish_Bait_TEST, VC_Body_Head_01_old...), 40 loot entries, 1 workshop, no recipes, perks or buffs. Words
+/// inside a longer word do not count (Temple, Swipe, oldTools, TargetDummy, the barber's dummy wig heads).
+pub fn is_hidden_name(name: &str) -> bool {
+    const WORDS: &[&str] = &["deprecated", "donotplace", "donotuse", "unused", "notfinished", "norecipe", "wip", "debug", "cheat", "prototype", "proto", "placeholder"];
+    let lower = name.to_ascii_lowercase();
+    if lower.starts_with("z_") || ["do_not_place", "do_not_use", "to_be_deleted"].iter().any(|p| lower.contains(p)) {
+        return true;
+    }
+    lower.split('_').filter(|w| !w.is_empty()).enumerate().any(|(i, w)| {
+        WORDS.contains(&w)
+            || w.strip_prefix("test").is_some_and(|rest| rest.bytes().all(|b| b.is_ascii_digit()) || i == 0)
+            || (i > 0 && w == "old")
+    })
+}
+
+/// Station tank water: the game's "Water" item is named Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED (item id
+/// 4066550441), and the game still shows it as a crafting station's tank water ("Water 92 / 2", owner pass 2026-11-20)
+/// although the 2026-11 catalog's recipes never name it (their inputs are items and categories only). Never hidden.
+pub const STATION_WATER: &str = "Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED";
+
+/// Adds the names a catalog field holds to `used`: a name, a list of names, or a list of stacks (`{"item": name}`).
+pub fn note_used(used: &mut std::collections::HashSet<String>, field: Option<&Value>) {
+    match field {
+        Some(Value::String(s)) => {
+            used.insert(s.clone());
+        }
+        Some(Value::Array(list)) => {
+            for x in list {
+                match x {
+                    Value::String(s) => {
+                        used.insert(s.clone());
+                    }
+                    Value::Object(o) => {
+                        if let Some(Value::String(s)) = o.get("item") {
+                            used.insert(s.clone());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The names the game's own data still uses, so a hidden-looking name among them stays listed (and gets no KL407):
+/// recipe inputs, outputs and stations, the members of recipe input categories, and [`STATION_WATER`]. On the 2026-11
+/// catalog this keeps 7 of the 63 hidden-looking items (the WIP party hats, confetti mortars and Pillbug bait, the
+/// Improved Laboratory) plus the water.
+pub fn used_names(cat: &Catalog) -> std::collections::HashSet<String> {
+    let mut used = std::collections::HashSet::from([STATION_WATER.to_string()]);
+    for e in cat.sections.get("recipes").into_iter().flatten() {
+        for k in ["inputs", "outputs", "workshopName"] {
+            note_used(&mut used, e.get(k));
+        }
+    }
+    for e in cat.sections.get("itemCategories").into_iter().flatten() {
+        note_used(&mut used, e.get("items"));
+    }
+    used
+}
+
 pub fn search(cat: &Catalog, query: &str, section: Option<&str>, limit: usize) -> Vec<Hit> {
     let limit = if limit == 0 { 50 } else { limit };
     let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();

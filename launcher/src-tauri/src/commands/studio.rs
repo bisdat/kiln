@@ -134,8 +134,8 @@ pub async fn studio_layer_lint(pack_id: String) -> Result<LintReport, Error> {
 }
 
 #[tauri::command]
-pub async fn studio_pick(pack_id: String, section: String, query: String, limit: Option<usize>) -> Result<Vec<PickHit>, Error> {
-    blocking(move || studio::pick(&dirs()?, &dir(&pack_id)?, &section, &query, limit.unwrap_or(50))).await
+pub async fn studio_pick(pack_id: String, section: String, query: String, limit: Option<usize>, hidden: Option<bool>) -> Result<Vec<PickHit>, Error> {
+    blocking(move || studio::pick(&dirs()?, &dir(&pack_id)?, &section, &query, limit.unwrap_or(50), hidden.unwrap_or(false))).await
 }
 
 #[tauri::command]

@@ -124,7 +124,7 @@ export default function PublishTab({ studio: st, gameId }: { studio: Studio; gam
       <div className="kst-checks" data-testid="studio-checks">
         <span className="kst-label">{t("studio.publish.checks")}</span>
         {an.running && !report ? <span className="kst-dim">{t("studio.mods.checking")}</span> : an.error ? <span className="kst-warn-text">{an.error}</span>
-          : checks.map(([label, tone]) => <span key={label} className={"kst-check kst-check-" + tone}>{label} [{t(toneWord(tone))}]</span>)}
+          : checks.map(([label, tone]) => <span key={label} className={"kst-check kst-check-" + tone}>{label}<span className="kst-dim">· {t(toneWord(tone))}</span></span>)}
         <Button size="s" variant="ghost" loading={an.running} onClick={() => void analyze(s.id, st.revision)}>{t("studio.recheck")}</Button>
       </div>
       {blocking.filter((n) => !(summaryDirty && n.includes("summary"))).length > 0 && (

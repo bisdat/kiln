@@ -109,17 +109,18 @@ export const shortLink = (url: string) => url.replace(/^https?:\/\//, "");
 
 // ---------------------------------------------------------------- player wording
 
-/** Crucible's errors as a player reads them (DESIGN 1.6). */
-export function crucibleError(e: unknown): string {
+/** Crucible's errors as a player reads them (DESIGN 1.6). `share`: the player was sharing (offline means their own
+ *  connection, not a pack to ask a friend for). */
+export function crucibleError(e: unknown, share = false): string {
   const k = api.toKilnError(e);
   switch (k.code) {
     case "not_found": return t("crucible.err.notFound");
-    case "network": return t("crucible.err.offline");
+    case "network": return share ? t("crucible.err.offlineShare") : t("crucible.err.offline");
     case "refused": return k.message || t("crucible.err.gone");
     case "hash_mismatch": return t("crucible.err.badDownload");
     case "game_running": return t("crucible.err.gameRunning");
     case "auth_failed": return t("crucible.share.signInText");
-    case "timeout": return t("crucible.err.offline");
+    case "timeout": return share ? t("crucible.err.offlineShare") : t("crucible.err.offline");
     default: return k.message;
   }
 }
