@@ -116,7 +116,8 @@ struct Engine {
     MoveAllFn move_all = nullptr;
     uintptr_t area_deposit = 0;        // feature items.transfer: only checked, never called or hooked
     uintptr_t set_string = 0;          // feature items.names
-    uintptr_t add_component = 0;       // feature items.names (lab only: the rename handler's AddComponent)
+    uintptr_t add_component = 0;       // features items.names (the lab's self-test) and items.rename: the rename handler's AddComponent
+    uintptr_t write_component_tick = 0;  // feature items.rename: the rename handler's tracked write (WriteOther, the world's tracker)
     EquipFn equip_item = nullptr;      // feature items.equip (v5)
     EquipFn unequip_item = nullptr;
     // feature items.equip_sets (v6): the commit's own rollback conditions, captured from InventoryCommit's first bytes
@@ -138,6 +139,8 @@ struct Engine {
     int64_t hmap_bits = 0, hmap_capacity = 0, hmap_keys = 0, hmap_values = 0, hmap_count = 0;
     int64_t program_count = 0;      // world: u16 registered programs
     int64_t strings_bitmap = 0;     // CustomPlayerStringsSystem: its HashMap's bitmap pointer (the map starts hmap_bits before it)
+    // feature items.rename (v9): the string table's record count, the insert's fixed limit, its record pool's capacity
+    int64_t strings_used = 0, strings_limit = 0, strings_pool_cap = 0;
     int64_t storage_next_id = 0;    // feature items.instances: entity storage: the u32 counter new entity ids come from
     // feature items.instances: the attribute ids the save record builder reads (durability, fuel, level)
     uint32_t attr_durability = 0, attr_durability_max = 0, attr_fuel = 0, attr_fuel_max = 0, attr_level = 0;
@@ -151,6 +154,7 @@ struct Engine {
     bool move_ok = false;     // feature items.move: moves by the game's slot transfer, inside the program
     bool transfer_ok = false; // feature items.transfer: the quick-stack / move-all hooks can be installed
     bool names_ok = false;    // feature items.names: container names
+    bool rename_ok = false;   // feature items.rename (v9): renaming a container through the game's rename
     bool instances_ok = false;  // feature items.instances: stamps, locations, records (v4)
     bool equip_ok = false;      // feature items.equip: the game's equip / unequip resolved (v5; also needs kiln.world)
     bool sets_ok = false;       // feature items.equip_sets: equip plus the commit's guards (v6; also needs kiln.decisions)

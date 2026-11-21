@@ -68,6 +68,7 @@ public static unsafe partial class Items
     /// <see cref="ContainerNamesAvailable"/> is false (an older Kiln, or a game build the string table is unknown on).
     /// </summary>
     /// <example><code>if (Items.ContainerName(chest) == "Ores") { /* deposit ore here */ }</code></example>
+    /// <seealso cref="SetContainerName"/>
     [RequiresCapability(Caps.Names)]
     [TickThreadOnly]
     public static string? ContainerName(EntityId entity)
