@@ -5968,5 +5968,142 @@
         "crafted": "crafted"
       }
     }
+  },
+  "sfBackend": {
+    "backend": {
+      "title": "ShroudForge",
+      "sub": "Which ShroudForge runs this game's ShroudForge mods. Saved in kiln/kiln.json; it applies from the next start.",
+      "label": "ShroudForge backend",
+      "choice": {
+        "hosted": "Kiln's bundled ShroudForge",
+        "installed": "My installed ShroudForge",
+        "kiln": "Kiln's interpreter"
+      },
+      "about": {
+        "hosted": "The ShroudForge that comes with Kiln.",
+        "installed": "The ShroudForge in the game's shroudforge folder.",
+        "kiln": "Kiln runs ShroudForge mods itself. A mod it cannot run whole is skipped, with the reason, before Play."
+      },
+      "none": "no ShroudForge",
+      "default": "Default",
+      "held": "Held",
+      "heldWhy": "Not available in this Kiln build: {reason}",
+      "set": {
+        "default": "Nothing set: the default.",
+        "explicit": "Chosen: {name}.",
+        "inherited": "From the older switch \"Use my installed ShroudForge\": {name}. A choice here replaces it.",
+        "invalid": "kiln.json names a backend Kiln does not know ({value}): no ShroudForge runs this game's ShroudForge mods until you choose one."
+      },
+      "next": "Next start: {name}",
+      "last": "Last start: {name}",
+      "envRuntime": "KILN_SHROUDFORGE_RUNTIME is set where the launcher runs: a start from the launcher follows it.",
+      "envOff": "KILN_SHROUDFORGE=0 is set where the launcher runs: no ShroudForge runs at a start from the launcher.",
+      "route": {
+        "missing": "Kiln's interpreter is not in this game yet: install Kiln again to add it.",
+        "ownLoader": "ShroudForge's own loader is in the game ({file}): it runs the ShroudForge mods, and Kiln's choices stand aside."
+      },
+      "running": "Close the game to change this.",
+      "reset": "Back to the default",
+      "unreadable": "This cannot be changed while kiln.json cannot be read: {reason}",
+      "saved": "Saved. Next start: {name}.",
+      "ask": {
+        "title": "Change the ShroudForge backend?",
+        "to": "From the next start: {name}",
+        "replaces": "This replaces the older switch \"Use my installed ShroudForge\".",
+        "kiln": "Mods Kiln's interpreter cannot run whole are skipped at the start, each with its reason, and the warning before Play lists them. Nothing switches back to Kiln's bundled ShroudForge on its own.",
+        "unchanged": "kiln.json already says this.",
+        "refused": "This cannot be chosen now: {reason}",
+        "when": "Nothing changes until you save. The game reads it at its next start."
+      }
+    },
+    "startWarning": {
+      "title": "Some mods will not run this start",
+      "continue": "Continue without these mods",
+      "game": "Game: {path}",
+      "changedTitle": "Changed",
+      "changed": "What will not run this start changed since the last warning. Read it again before you continue.",
+      "otherGame": "This warning belongs to another game. Press Play again.",
+      "lead": {
+        "save": {
+          "title": "Do not save without them",
+          "text": "A mod below keeps data in your saves. If you save a world while it is off, its data may change or be lost. Play without saving, or cancel and fix it first."
+        },
+        "check": {
+          "title": "Not everything could be checked",
+          "text": "Kiln could not check everything for this start, so these mods may not run. Read the reasons below."
+        },
+        "plain": {
+          "title": "These mods will not run",
+          "text": "The game starts without the mods below. The rest of your mods run as usual."
+        }
+      },
+      "listAria": "What will not run ({count})",
+      "notesAria": "Good to know",
+      "nothingChanged": "Continuing switches nothing off and saves or deletes nothing. The next Play checks again.",
+      "partData": "startup data",
+      "partLua": "Lua",
+      "partDlls": "DLLs: {list}",
+      "parts": "Parts: {list}",
+      "dataNotApplied": "Its startup data is not applied this start.",
+      "chain": "Because of: {chain}",
+      "folder": "Folder: {root}",
+      "wasActive": "It was active at an earlier start ({launch}).",
+      "unknownStart": "start unknown",
+      "saveLine": "It keeps data in your saves: do not save a world while it is off.",
+      "saveUnknown": "It may keep data in your saves: do not save a world while it is off.",
+      "skipped": "{name} does not run",
+      "refused": "No ShroudForge mod runs this start",
+      "notStarted": "Not started: {list}",
+      "previous": "{name} is off now",
+      "offNow": "It does not run this start.",
+      "basisPolicy": "Kiln's list of mods that keep save data names it.",
+      "basisUnknown": "It has both game data and code, so it may keep save data.",
+      "about": "About: {list}",
+      "inspector": "Kiln's archive inspector cannot be used",
+      "planWarning": "Launch plan warning",
+      "baseTitle": "Game files this start is based on",
+      "baseRestore": "To go back to exactly these files, switch off the mods that change the game's data and start the game through Kiln once (Logs, Engines: Restore the game's data).",
+      "baseVerify": "For the game's files as Steam ships them, use Verify integrity of game files in Steam.",
+      "costTitle": "Slower start",
+      "noteTitle": "Note",
+      "keybindsTitle": "Keyboard shortcuts",
+      "keybinds": "{name}: its keyboard shortcuts do not work with Kiln's interpreter yet. The rest of the mod runs."
+    },
+    "engineRow": {
+      "plugin": "Kiln's interpreter (kiln-sfi)",
+      "packages": "ShroudForge mods",
+      "phase": {
+        "starting": "starting",
+        "running": "running",
+        "ended": "ended",
+        "aside": "stood aside",
+        "refused": "not started",
+        "unknown": "unknown"
+      },
+      "package": {
+        "running": "running",
+        "dataApplied": "data applied",
+        "off": "off",
+        "skipped": "skipped"
+      },
+      "stale": {
+        "older-start": "This record is from an earlier start: what the interpreter did in the newest start is not known.",
+        "not-running": "The record says {phase}, but the game is not running: that start ended without its last record (it may have crashed).",
+        "other-process": "The record is from another game process: it is not this start's."
+      },
+      "previous": {
+        "incomplete": "The start before this one ended without finishing its record (it may have crashed).",
+        "suspect": "Kiln could not read what the start before this one left."
+      },
+      "unreadable": "Kiln's interpreter left a record Kiln cannot read: {error}"
+    },
+    "restoreBase": {
+      "title": "Restore the game's data",
+      "base": "Kiln started from these game files: {label}.",
+      "how": "To go back to exactly these files, switch off the mods that change the game's data and start the game through Kiln once. Kiln puts back only data it can prove it wrote; another loader's data stays.",
+      "save": "Mods that keep data in your saves: do not save a world while they are off.",
+      "vanilla": "These are not necessarily the files as Steam ships them. For those, use Verify integrity of game files in Steam (the game's Properties, Installed Files).",
+      "unknown": "Kiln cannot tell which game files it would put back: {reason}."
+    }
   }
 }

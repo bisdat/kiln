@@ -14,7 +14,11 @@
 //   (kiln-gate-busy-this-step), closing at a stopping server world and at process exit (kiln-gate-closed), and the
 //   holder raised above normal priority so the engine's normal-priority threads cannot preempt it while the
 //   GameServer thread spins on the word (kiln.engine's measurement switch can turn the raise off for a run, to
-//   measure what it buys).
+//   measure what it buys);
+// - Kiln-internal: the ShroudForge-dialect owner the core designates (kiln.internal.launch) is admitted as
+//   RetryKilnHolder whatever its record says, so a Kiln-made busy never latches it;
+// - Kiln-internal: the engine-call latch for the server session (gate_calls_latch), cleared
+//   by the server world's next STARTED.
 #include "gate.h"
 
 #include <atomic>
@@ -63,6 +67,18 @@ void latch(std::uint64_t owner, std::uint64_t step) {
 }
 std::atomic<std::uint64_t> g_server_step{0};
 std::atomic<bool> g_priority_raise{true};  // kiln.engine's measurement switch (engine.cpp) may turn it off at boot
+// The engine-call latch (gate.h gate_calls_latch): the current server session (1 until the first server world
+// STARTED, then one more at each) and the latest session whose engine calls are latched (0: none).
+std::atomic<std::uint64_t> g_session{1}, g_calls_latched{0};
+// kiln.internal.launch's dialect_owner, set once at kiln.engine's init (engine.cpp); nullptr: no such owner here.
+std::atomic<DialectOwnerFn> g_dialect_owner{nullptr};
+// Whether `owner` is the designated dialect owner. Read at each acquire: the core designates it after kiln.engine's
+// init, when it loads the plugin, and never changes it afterwards. Owner 0 never matches ("nobody designated").
+bool dialect_owner(std::uint64_t owner) {
+    if (!owner) return false;
+    const DialectOwnerFn accessor = g_dialect_owner.load(std::memory_order_acquire);
+    return accessor && accessor() == owner;
+}
 }  // namespace
 
 #ifdef KILN_ENGINE_GATE_TEST_POINTS
@@ -88,6 +104,8 @@ void (*g_gate_release_point)(bool) = nullptr;
 bool gate_close_session(bool stopping, std::uint64_t wait_ns) noexcept {
     // Same Dekker as exit: the flag first, then the holder. STOPPING normally runs while the engine holds the Scene word
     // Shared, so no Kiln holder can be inside; if one is, this bounded look says so.
+    // STARTED begins the next engine-call session (clearing the engine-call latch) before the gate reopens.
+    if (!stopping) g_session.fetch_add(1, std::memory_order_seq_cst);
     g_session_closed.store(stopping, std::memory_order_seq_cst);
     if (!stopping) return true;
     const std::uint64_t deadline = now_ns() + wait_ns;
@@ -99,6 +117,25 @@ void gate_set_server_step(std::uint64_t step) noexcept { g_server_step.store(ste
 bool gate_holder_taken() noexcept { return g_holder.load(std::memory_order_seq_cst) != 0; }
 void gate_set_priority_raise(bool on) noexcept { g_priority_raise.store(on, std::memory_order_relaxed); }
 bool gate_priority_raise() noexcept { return g_priority_raise.load(std::memory_order_relaxed); }
+void gate_set_dialect_owner(DialectOwnerFn accessor) noexcept {
+    g_dialect_owner.store(accessor, std::memory_order_release);
+}
+bool gate_closed() noexcept { return closed(); }
+std::uint64_t gate_session() noexcept { return g_session.load(std::memory_order_seq_cst); }
+bool gate_calls_latched() noexcept {
+    return g_calls_latched.load(std::memory_order_seq_cst) >= g_session.load(std::memory_order_seq_cst);
+}
+void gate_calls_latch() noexcept {
+    // Raise the latched session to the current one; a STARTED between the two loads leaves the earlier session latched,
+    // which is the session the call ran in. Contention on the word beyond the bound latches for the process instead.
+    const std::uint64_t session = g_session.load(std::memory_order_seq_cst);
+    std::uint64_t seen = g_calls_latched.load(std::memory_order_seq_cst);
+    for (int i = 0; i < 16; ++i) {
+        if (seen >= session) return;
+        if (g_calls_latched.compare_exchange_weak(seen, session, std::memory_order_seq_cst)) return;
+    }
+    g_calls_latched.store(UINT64_MAX, std::memory_order_seq_cst);
+}
 
 bool gate_close_for_exit(std::uint64_t wait_ns) noexcept {
     // Dekker with gate_acquire: it takes g_holder and then reads the flags; this sets the flag and then reads g_holder
@@ -116,6 +153,9 @@ void gate_reset_for_tests() noexcept {
     g_exit_closed.store(false);
     g_server_step.store(0);
     g_priority_raise.store(true);
+    g_dialect_owner.store(nullptr);
+    g_session.store(1);
+    g_calls_latched.store(0);
     for (Latch& l : g_latch) {
         l.owner.store(0);
         l.step.store(0);
@@ -172,8 +212,10 @@ Reason gate_acquire(const Layout* layout, const EcsView& expected, GateState& ga
     // Kiln's admission, still before any engine word: closed, latched, another Kiln holder.
     if (closed()) return other(Reason::KilnGateClosed);
     // The latch keys on the live server step when kiln.engine knows it (its server Pre), else on the caller's step.
-    // A RetryKilnHolder caller is never latched (it schedules its own retries).
-    const bool retry_holder = gate.admission == static_cast<std::uint32_t>(GateAdmission::RetryKilnHolder);
+    // A RetryKilnHolder caller is never latched (it schedules its own retries). Neither is the designated dialect owner
+    // (the dialect owner), whatever admission its record names; the record itself is left as the caller set it.
+    const bool retry_holder =
+        gate.admission == static_cast<std::uint32_t>(GateAdmission::RetryKilnHolder) || dialect_owner(gate.owner);
     const std::uint64_t live = g_server_step.load(std::memory_order_relaxed);
     const std::uint64_t step = live ? live : gate.step;
     const bool keyed = !retry_holder && gate.owner && step;

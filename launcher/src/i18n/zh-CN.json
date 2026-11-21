@@ -5292,5 +5292,142 @@
         "crafted": "已制作"
       }
     }
+  },
+  "sfBackend": {
+    "backend": {
+      "title": "ShroudForge",
+      "sub": "由哪个 ShroudForge 运行本游戏的 ShroudForge 模组。保存在 kiln/kiln.json 中，从下次启动起生效。",
+      "label": "ShroudForge 后端",
+      "choice": {
+        "hosted": "Kiln 自带的 ShroudForge",
+        "installed": "我安装的 ShroudForge",
+        "kiln": "Kiln 解释器"
+      },
+      "about": {
+        "hosted": "随 Kiln 提供的 ShroudForge。",
+        "installed": "游戏 shroudforge 文件夹中的 ShroudForge。",
+        "kiln": "由 Kiln 自己运行 ShroudForge 模组。无法完整运行的模组会在开始游戏前跳过，并说明原因。"
+      },
+      "none": "无 ShroudForge",
+      "default": "默认",
+      "held": "暂缓",
+      "heldWhy": "此 Kiln 版本中不可用：{reason}",
+      "set": {
+        "default": "未设置：使用默认。",
+        "explicit": "已选择：{name}。",
+        "inherited": "来自旧开关“使用我安装的 ShroudForge”：{name}。在此选择会替换它。",
+        "invalid": "kiln.json 写了一个 Kiln 不认识的后端（{value}）：在你重新选择之前，本游戏的 ShroudForge 模组不会由任何 ShroudForge 运行。"
+      },
+      "next": "下次启动：{name}",
+      "last": "上次启动：{name}",
+      "envRuntime": "启动器所在环境设置了 KILN_SHROUDFORGE_RUNTIME：从启动器启动时以它为准。",
+      "envOff": "启动器所在环境设置了 KILN_SHROUDFORGE=0：从启动器启动时不运行任何 ShroudForge。",
+      "route": {
+        "missing": "本游戏中还没有 Kiln 解释器：重新安装 Kiln 即可加入。",
+        "ownLoader": "游戏中有 ShroudForge 自己的加载器（{file}）：由它运行 ShroudForge 模组，Kiln 的选择让位。"
+      },
+      "running": "请先关闭游戏再更改。",
+      "reset": "恢复默认",
+      "unreadable": "kiln.json 无法读取，暂时不能更改：{reason}",
+      "saved": "已保存。下次启动：{name}。",
+      "ask": {
+        "title": "更改 ShroudForge 后端？",
+        "to": "从下次启动起：{name}",
+        "replaces": "这会替换旧开关“使用我安装的 ShroudForge”。",
+        "kiln": "Kiln 解释器无法完整运行的模组会在启动时跳过，各附原因，开始游戏前的警告会列出它们。不会自动切回 Kiln 自带的 ShroudForge。",
+        "unchanged": "kiln.json 已经是这样。",
+        "refused": "现在无法选择：{reason}",
+        "when": "保存前不会有任何改变。游戏在下次启动时读取。"
+      }
+    },
+    "startWarning": {
+      "title": "本次启动有些模组不会运行",
+      "continue": "不带这些模组继续",
+      "game": "游戏：{path}",
+      "changedTitle": "已变化",
+      "changed": "自上次警告以来，本次启动不会运行的内容有变化。继续之前请再读一遍。",
+      "otherGame": "此警告属于另一个游戏。请再次按“开始游戏”。",
+      "lead": {
+        "save": {
+          "title": "不要在没有它们时保存",
+          "text": "下面的模组会在存档中保存数据。如果在它关闭时保存世界，它的数据可能会改变或丢失。请不保存地游玩，或取消并先解决问题。"
+        },
+        "check": {
+          "title": "无法检查所有内容",
+          "text": "Kiln 无法为本次启动检查所有内容，因此这些模组可能不会运行。请阅读下面的原因。"
+        },
+        "plain": {
+          "title": "这些模组不会运行",
+          "text": "游戏将在没有下面这些模组的情况下启动。其他模组照常运行。"
+        }
+      },
+      "listAria": "不会运行的内容（{count}）",
+      "notesAria": "须知",
+      "nothingChanged": "继续不会关闭任何东西，也不会保存或删除任何东西。下次开始游戏时会再次检查。",
+      "partData": "启动数据",
+      "partLua": "Lua",
+      "partDlls": "DLL：{list}",
+      "parts": "组成：{list}",
+      "dataNotApplied": "本次启动不会应用它的启动数据。",
+      "chain": "原因：{chain}",
+      "folder": "文件夹：{root}",
+      "wasActive": "它在之前的一次启动中处于启用状态（{launch}）。",
+      "unknownStart": "启动未知",
+      "saveLine": "它会在存档中保存数据：在它关闭期间不要保存世界。",
+      "saveUnknown": "它可能会在存档中保存数据：在它关闭期间不要保存世界。",
+      "skipped": "{name} 不会运行",
+      "refused": "本次启动没有 ShroudForge 模组运行",
+      "notStarted": "未启动：{list}",
+      "previous": "{name} 现已关闭",
+      "offNow": "它在本次启动中不会运行。",
+      "basisPolicy": "Kiln 的存档数据模组列表中有它。",
+      "basisUnknown": "它同时包含游戏数据和代码，因此可能会保存存档数据。",
+      "about": "涉及：{list}",
+      "inspector": "无法使用 Kiln 的归档检查器",
+      "planWarning": "启动计划警告",
+      "baseTitle": "本次启动所基于的游戏文件",
+      "baseRestore": "要回到正是这些文件，请关闭会改动游戏数据的模组，并通过 Kiln 启动一次游戏（日志，引擎：还原游戏数据）。",
+      "baseVerify": "如需 Steam 发布时的游戏文件，请在 Steam 中使用“验证游戏文件的完整性”。",
+      "costTitle": "启动较慢",
+      "noteTitle": "说明",
+      "keybindsTitle": "键盘快捷键",
+      "keybinds": "{name}：它的键盘快捷键暂时无法在 Kiln 解释器中使用。模组的其余部分正常运行。"
+    },
+    "engineRow": {
+      "plugin": "Kiln 的解释器 (kiln-sfi)",
+      "packages": "ShroudForge 模组",
+      "phase": {
+        "starting": "正在启动",
+        "running": "运行中",
+        "ended": "已结束",
+        "aside": "已让开",
+        "refused": "未启动",
+        "unknown": "未知"
+      },
+      "package": {
+        "running": "运行中",
+        "dataApplied": "数据已应用",
+        "off": "已关闭",
+        "skipped": "已跳过"
+      },
+      "stale": {
+        "older-start": "这条记录来自更早的一次启动：不知道解释器在最近一次启动中做了什么。",
+        "not-running": "记录显示{phase}，但游戏没有在运行：那次启动结束时没有写下最后的记录（可能已崩溃）。",
+        "other-process": "这条记录来自另一个游戏进程：不是这次启动的。"
+      },
+      "previous": {
+        "incomplete": "上一次启动没有写完记录就结束了（可能已崩溃）。",
+        "suspect": "Kiln 无法读取上一次启动留下的内容。"
+      },
+      "unreadable": "Kiln 的解释器留下了 Kiln 无法读取的记录：{error}"
+    },
+    "restoreBase": {
+      "title": "还原游戏数据",
+      "base": "Kiln 是从这些游戏文件开始的：{label}。",
+      "how": "要回到正是这些文件，请关闭会改动游戏数据的模组，并通过 Kiln 启动一次游戏。Kiln 只会还原它能证明是自己写入的数据；其他加载器的数据会保留。",
+      "save": "会在存档中保存数据的模组：关闭期间请不要保存世界。",
+      "vanilla": "这些不一定是 Steam 发布时的文件。如需那些文件，请在 Steam 中使用“验证游戏文件的完整性”（游戏属性，已安装文件）。",
+      "unknown": "Kiln 无法判断它会还原哪些游戏文件：{reason}。"
+    }
   }
 }

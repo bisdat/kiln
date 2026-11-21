@@ -401,6 +401,33 @@ class LinuxReleaseTests(unittest.TestCase):
         self.assertTrue(p.read_text().startswith("host NuGet licenses\n"))
         self.assertIn("lib:amd64", p.read_text())
 
+    def test_notices_list_compiled_in_build_dependencies_and_not_kiln_own_path_crates(self):
+        # kiln-sfi.dll and kiln-eml.dll compile Lua in (mlua "vendored": the lua-src build dependency); cc only builds
+        node = {"deps": [{"pkg": "a", "name": "serde_json", "dep_kinds": [{"kind": None, "target": None}]},
+                         {"pkg": "b", "name": "lua_src", "dep_kinds": [{"kind": "build", "target": None}]},
+                         {"pkg": "c", "name": "cc", "dep_kinds": [{"kind": "build", "target": None}]},
+                         {"pkg": "d", "name": "tempfile", "dep_kinds": [{"kind": "dev", "target": None}]}]}
+        self.assertEqual(notices.shipped_deps(node), ["a", "b"])
+        src = self.dir / "src"
+        own = {"source": None, "manifest_path": str(src / "crates/sfi/sfi-package/Cargo.toml")}
+        self.assertTrue(notices.own_crate(str(src), own))
+        self.assertFalse(notices.own_crate(str(src), dict(own, source="registry+https://github.com/rust-lang/crates.io-index")))
+        self.assertFalse(notices.own_crate(str(src), {"source": None, "manifest_path": str(self.dir / "elsewhere/Cargo.toml")}))
+        # no crates/sfi in the tree: no kiln-sfi section
+        self.assertEqual(notices.sfi_crates(str(src)), [])
+
+    def test_nexus_build_keeps_every_default_feature_but_self_update(self):
+        toml = self.dir / "launcher/src-tauri/Cargo.toml"
+        toml.parent.mkdir(parents=True)
+        script = HERE.parent / "launcher" / "shipped-runtime.sh"
+        for default, want in (('["self-update"]', ""), ('["self-update", "sfi"]', "sfi"),
+                              ('["a", "self-update", "b"]  # c', "a,b"), ("[]", "")):
+            toml.write_text(f'[package]\nname = "x"\n\n[features]\ndefault = {default}\nself-update = []\n\n'
+                            '[dependencies]\ndefault = 1\n')
+            r = subprocess.run(["bash", "-c", 'set -euo pipefail; repo=$1; source "$2"; nexus_features', "-", str(self.dir), str(script)],
+                               capture_output=True, text=True, timeout=60)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, want), default + r.stderr)
+
     def test_scan_home_path_context_redacts_secrets(self):
         secret = b"private-password-value"
         scanner = release.Scanner([secret], str(self.dir))

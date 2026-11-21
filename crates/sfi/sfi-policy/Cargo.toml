@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "sfi-policy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Pure ShroudForge-interpreter policy: launch-plan reader, read-only PE gate, native review registry (no loader, Lua or plugin)."
+
+[features]
+# kiln-sfi's OS-bound resolver only: evaluation against loader-verified system images and
+# the native-subsystem parser. A host-side inventory (kiln-manage) never enables it.
+os-binding = []
+
+[dependencies]
+serde_json.workspace = true
+sha2 = "0.10"

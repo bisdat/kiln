@@ -1,0 +1,720 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-archive/common.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "$defs": {
+    "u64": {
+      "type": "string",
+      "pattern": "^u64:[0-9a-f]{16}$"
+    },
+    "i64": {
+      "type": "string",
+      "pattern": "^i64:[0-9a-f]{16}$"
+    },
+    "bytes": {
+      "type": "string",
+      "pattern": "^bytes:(?:[0-9a-f]{2})*$"
+    },
+    "guid": {
+      "type": "string",
+      "pattern": "^guid:[0-9a-f]{32}$"
+    },
+    "pin": {
+      "type": "object",
+      "properties": {
+        "launch_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "plan_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^u64:[0-9a-f]{16}$"
+        },
+        "reload_epoch": {
+          "type": "string",
+          "pattern": "^u64:[0-9a-f]{16}$"
+        },
+        "plan_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "archive_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "registry_id": {
+          "type": "string",
+          "pattern": "^u64:[0-9a-f]{16}$"
+        },
+        "registry_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "launch_id",
+        "plan_id",
+        "generation",
+        "reload_epoch",
+        "plan_sha256",
+        "archive_sha256",
+        "registry_id",
+        "registry_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "value": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "nil"
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tag"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "bool"
+            },
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "tag",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "i64"
+            },
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^i64:[0-9a-f]{16}$"
+            }
+          },
+          "required": [
+            "tag",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "u64"
+            },
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^u64:[0-9a-f]{16}$"
+            }
+          },
+          "required": [
+            "tag",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "f32"
+            },
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^f32:[0-9a-f]{8}$"
+            }
+          },
+          "required": [
+            "tag",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "f64"
+            },
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^f64:[0-9a-f]{16}$"
+            }
+          },
+          "required": [
+            "tag",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "guid"
+            },
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^guid:[0-9a-f]{32}$"
+            }
+          },
+          "required": [
+            "tag",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "bytes"
+            },
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^bytes:(?:[0-9a-f]{2})*$"
+            }
+          },
+          "required": [
+            "tag",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^string:(?:[0-9a-f]{2})*$"
+            }
+          },
+          "required": [
+            "tag",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "reference"
+            },
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^guid:[0-9a-f]{32}$"
+            }
+          },
+          "required": [
+            "tag",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "array"
+            },
+            "type": {
+              "type": "string"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/value"
+              }
+            }
+          },
+          "required": [
+            "tag",
+            "items"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "map"
+            },
+            "type": {
+              "type": "string"
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "$ref": "#/$defs/value"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/value"
+                  }
+                },
+                "required": [
+                  "key",
+                  "value"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "tag",
+            "entries"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "variant"
+            },
+            "type": {
+              "type": "string"
+            },
+            "discriminant": {
+              "type": "string",
+              "pattern": "^u64:[0-9a-f]{16}$"
+            },
+            "value": {
+              "$ref": "#/$defs/value"
+            }
+          },
+          "required": [
+            "tag",
+            "discriminant",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "optional"
+            },
+            "type": {
+              "type": "string"
+            },
+            "present": {
+              "const": false
+            }
+          },
+          "required": [
+            "tag",
+            "present"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "optional"
+            },
+            "type": {
+              "type": "string"
+            },
+            "present": {
+              "const": true
+            },
+            "value": {
+              "$ref": "#/$defs/value"
+            }
+          },
+          "required": [
+            "tag",
+            "present",
+            "value"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "attribute": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "type_index": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^u64:[0-9a-f]{16}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "name",
+        "namespace",
+        "type_index",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "type": {
+      "type": "object",
+      "properties": {
+        "index": {
+          "type": "string",
+          "pattern": "^u64:[0-9a-f]{16}$"
+        },
+        "name": {
+          "type": "string"
+        },
+        "qualified_name": {
+          "type": "string"
+        },
+        "impact_name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hashes": {
+          "type": "object",
+          "properties": {
+            "qualified": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "internal": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "name": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "impact": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          },
+          "required": [
+            "qualified",
+            "internal",
+            "name",
+            "impact"
+          ],
+          "additionalProperties": false
+        },
+        "inner_type": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^u64:[0-9a-f]{16}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "alignment": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "element_alignment": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "field_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "primitive_type": {
+          "type": "string"
+        },
+        "flags_bits": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "has_ds": {
+          "type": "boolean"
+        },
+        "default_bytes": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^bytes:(?:[0-9a-f]{2})*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "struct_fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type_index": {
+                "type": "string",
+                "pattern": "^u64:[0-9a-f]{16}$"
+              },
+              "data_offset": {
+                "type": "string",
+                "pattern": "^u64:[0-9a-f]{16}$"
+              },
+              "attributes": {
+                "type": "array",
+                "items": {
+                  "$ref": "common.schema.json#/$defs/attribute"
+                }
+              }
+            },
+            "required": [
+              "name",
+              "type_index",
+              "data_offset",
+              "attributes"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type_index": {
+                "type": "string",
+                "pattern": "^u64:[0-9a-f]{16}$"
+              },
+              "data_offset": {
+                "type": "string",
+                "pattern": "^u64:[0-9a-f]{16}$"
+              },
+              "attributes": {
+                "type": "array",
+                "items": {
+                  "$ref": "common.schema.json#/$defs/attribute"
+                }
+              },
+              "declaring_type": {
+                "type": "string",
+                "pattern": "^u64:[0-9a-f]{16}$"
+              }
+            },
+            "required": [
+              "name",
+              "type_index",
+              "data_offset",
+              "attributes",
+              "declaring_type"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "enum_fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string",
+                "pattern": "^u64:[0-9a-f]{16}$"
+              },
+              "value_hex": {
+                "type": "string",
+                "pattern": "^0x[0-9a-f]{16}$"
+              }
+            },
+            "required": [
+              "name",
+              "value",
+              "value_hex"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "attributes": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/attribute"
+          }
+        }
+      },
+      "required": [
+        "index",
+        "name",
+        "qualified_name",
+        "impact_name",
+        "namespace",
+        "hashes",
+        "inner_type",
+        "size",
+        "alignment",
+        "element_alignment",
+        "field_count",
+        "primitive_type",
+        "flags_bits",
+        "flags",
+        "has_ds",
+        "default_bytes",
+        "struct_fields",
+        "fields",
+        "enum_fields",
+        "attributes"
+      ],
+      "additionalProperties": false
+    },
+    "attribute_entry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "name": {
+          "type": "string"
+        },
+        "root_hash": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "definition_guid": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^guid:[0-9a-f]{32}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scalar_type": {
+          "type": ["string", "null"],
+          "description": "Mirrors the descriptor's resolved scalar type; null when no unique supported scalar is resolved. Metadata lookup still succeeds."
+        },
+        "descriptor": {
+          "$ref": "common.schema.json#/$defs/value"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "root_hash",
+        "index",
+        "definition_guid",
+        "scalar_type",
+        "descriptor"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

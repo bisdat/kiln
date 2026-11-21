@@ -2091,6 +2091,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sevenz-rust2",
+ "sfi-package",
+ "sfi-policy",
  "sha2 0.11.1",
  "toml 1.2.0+spec-1.1.0",
  "unicode-normalization",
@@ -3497,6 +3499,25 @@ dependencies = [
  "lzma-rust2",
  "ppmd-rust",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "sfi-package"
+version = "0.1.0"
+dependencies = [
+ "indexmap 2.14.2",
+ "regex",
+ "semver",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "sfi-policy"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]

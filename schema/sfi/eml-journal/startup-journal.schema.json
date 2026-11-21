@@ -1,0 +1,286 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-journal/startup-journal.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "description": "kiln-eml's startup change journal, <game>/kiln/eml/ownership/<stem>.change-journal.json: per package of the committed attempt of a kiln-mode ShroudForge-dialect startup pass, the archive resources its entrypoint wrote, the ones it created and the contents it created, never a value. Separate from the startup outcome (whose strict reader it never touches). Bound to one generation: written only after that generation was published whole, beside the ownership receipt it names, removed before any publication or restore changes the receipt or the live files (kiln-eml's verified BASE and EML's own no-mod restore alike); a startup-cache hit keeps it byte for byte. A reader uses it only when 'generation' is the start's live generation (the startup outcome's archiveSha256). A typed serializer writes the fields in this order. Attribution: a resource is listed for the package whose entrypoint was running when its value was written (any assignment, insertion, removal or clear through its typed values, a copy assigned into it, or its data replaced); code that runs inside an entrypoint is that entrypoint's, whoever wrote it (another package's module function, a finalizer the collector runs then); a write made outside every entrypoint is unattributed; a write into a value detached from its resource still names that resource (a writer may be over-named, never missed). Bounds: at most 4096 entries (changed, created, contents) per package and in 'unattributed', 32768 in all; over that, entries are left out and 'truncated' is true on the package and the journal.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "stem",
+    "generation",
+    "receiptSha256",
+    "dialect",
+    "attempt",
+    "truncated",
+    "packages",
+    "unattributed"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "stem": {
+      "enum": [
+        "enshrouded",
+        "enshrouded_server"
+      ],
+      "description": "The archive (the side)."
+    },
+    "generation": {
+      "$ref": "#/$defs/sha256",
+      "description": "kiln-eml's generation digest of the published generation (the startup outcome's and the archive identity's archiveSha256)."
+    },
+    "receiptSha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "SHA-256 of the ownership receipt listing that generation (the outcome's receiptSha256)."
+    },
+    "dialect": {
+      "enum": [
+        "shroudforge"
+      ],
+      "description": "The startup dialect whose pass the journal records. The EML dialect writes no journal (its publication removes the previous one)."
+    },
+    "attempt": {
+      "enum": [
+        "first",
+        "retry"
+      ],
+      "description": "The committed attempt: only its changes are recorded (a failed first attempt's never)."
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "Some package's or the unattributed bucket's entries were left out (exactly when one of them is truncated)."
+    },
+    "packages": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/package"
+      },
+      "description": "Every package whose entrypoint ran in the committed attempt, in the order they ran (the admitted load order), with nothing listed for one that changed nothing. One entry per id."
+    },
+    "unattributed": {
+      "$ref": "#/$defs/changes",
+      "description": "What was written or created while no entrypoint ran; normally empty (the pass runs no Lua between entrypoints)."
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Lower-case hex SHA-256."
+    },
+    "sfId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,80}$",
+      "description": "A ShroudForge identifier, as sfi-state.schema.json's sfId."
+    },
+    "guid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "A GUID as the game's archive and ShroudForge's Resource.guid write it (lower-case)."
+    },
+    "u32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "kind",
+        "contentSha256",
+        "settingsSha256",
+        "truncated",
+        "changed",
+        "created",
+        "contents"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/sfId"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "The plan's version of the package (null when empty)."
+        },
+        "kind": {
+          "enum": [
+            "shroudforge",
+            "eml"
+          ],
+          "description": "The plan's kind: a ShroudForge package or an EML package that ShroudForge's pass runs."
+        },
+        "contentSha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "The package folder's content digest the launch plan froze (with id and version: the package identity effect replay keys on)."
+        },
+        "settingsSha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "Its settings document's digest the launch plan froze."
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "changed": {
+          "$ref": "#/$defs/changedList"
+        },
+        "created": {
+          "$ref": "#/$defs/createdList"
+        },
+        "contents": {
+          "$ref": "#/$defs/contentList"
+        }
+      }
+    },
+    "changes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "truncated",
+        "changed",
+        "created",
+        "contents"
+      ],
+      "properties": {
+        "truncated": {
+          "type": "boolean"
+        },
+        "changed": {
+          "$ref": "#/$defs/changedList"
+        },
+        "created": {
+          "$ref": "#/$defs/createdList"
+        },
+        "contents": {
+          "$ref": "#/$defs/contentList"
+        }
+      }
+    },
+    "changedList": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "guid",
+          "typeHash",
+          "part",
+          "createdBy"
+        ],
+        "properties": {
+          "guid": {
+            "$ref": "#/$defs/guid"
+          },
+          "typeHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}$",
+            "description": "The resource's type hash (the qualified type name's FNV-1a), 8 lower-case hex digits."
+          },
+          "part": {
+            "$ref": "#/$defs/u32"
+          },
+          "createdBy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "package",
+                  "ordinal"
+                ],
+                "properties": {
+                  "package": {
+                    "$ref": "#/$defs/sfId"
+                  },
+                  "ordinal": {
+                    "$ref": "#/$defs/ordinal"
+                  }
+                }
+              }
+            ],
+            "description": "For a resource another package created in this pass: that package and its ordinal (the created resource's name across runs); null for an archive resource."
+          }
+        }
+      },
+      "description": "The resources the entrypoint wrote, in resource-key order (GUID bytes, type hash, part), each once; never one the package created itself."
+    },
+    "createdList": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ordinal",
+          "guid",
+          "typeHash",
+          "part",
+          "explicit"
+        ],
+        "properties": {
+          "ordinal": {
+            "$ref": "#/$defs/ordinal"
+          },
+          "guid": {
+            "$ref": "#/$defs/guid"
+          },
+          "typeHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}$",
+            "description": "The resource's type hash (the qualified type name's FNV-1a), 8 lower-case hex digits."
+          },
+          "part": {
+            "$ref": "#/$defs/u32"
+          },
+          "explicit": {
+            "type": "boolean",
+            "description": "The package gave the GUID and part (stable across runs); false: drawn at random (differs per publication; the ordinal names it)."
+          }
+        }
+      },
+      "description": "The resources the entrypoint created, in creation order, ordinals 1, 2, ... (the ones over the bound are the last, left out). A created resource is named <package id>:<ordinal> across runs, which holds while the package creates in the same order: the Lua runtime seeds its string hashing anew for every run, so creations made while walking a table with string keys (pairs, next) can be numbered differently from run to run. A consumer matches a created resource by (package id, version, contentSha256, typeHash, part, ordinal) and expects such a mismatch; an explicit GUID is always stable."
+    },
+    "contentList": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "guid",
+          "size"
+        ],
+        "properties": {
+          "guid": {
+            "$ref": "#/$defs/guid",
+            "description": "The content's hash as a GUID (Content.guid): content-derived, the same for the same bytes."
+          },
+          "size": {
+            "$ref": "#/$defs/u32",
+            "description": "Its size in bytes (also the GUID's first group, little-endian)."
+          }
+        }
+      },
+      "description": "The contents the entrypoint created (create_content), each once, in the order first created."
+    },
+    "ordinal": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    }
+  }
+}

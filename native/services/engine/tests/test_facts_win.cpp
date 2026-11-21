@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
 // Test-only facts for kiln-engine-test.dll (headless Wine; never shipped, never built by default): the host names the
 // exact identity and the fake engine image it built, so the real primitives (SEH copy, Interlocked words, SEH tracker
-// call, the gate) run against it. The production DLL takes them from the loaded image (facts_win.cpp).
+// call, the gate, the engine call inside it) run against it. The production DLL takes them from the loaded image
+// (facts_win.cpp).
 #include <windows.h>
 
 #include <atomic>
 #include <cstring>
 
 #include "engine_state.h"
+#include "invoke.h"
 #include "memory.h"
 
 namespace {
@@ -27,6 +29,16 @@ extern "C" __declspec(dllexport) void KILN_CALL kiln_engine_test_set(const char*
     g_facts.archive_format = 4;
     g_facts.side = std::strcmp(target, "enshrouded.exe") == 0 ? KILN_SIDE_CLIENT : KILN_SIDE_SERVER;
     g_image.store(image);
+}
+
+// The engine-call recipes to use instead of the profile's (NULL: the profile's, which carry none), and the call's
+// exception filter decision for a code, so the host checks codes it cannot raise (WOW64's). Both exist only in this
+// test DLL: the shipped kiln-engine.dll has neither export nor the recipe seam (KILN_ENGINE_TEST_RECIPES).
+extern "C" __declspec(dllexport) void KILN_CALL kiln_engine_test_set_recipes(const kiln::engine::CallRecipes* recipes) {
+    kiln::engine::gate_invoke_set_test_recipes(recipes);
+}
+extern "C" __declspec(dllexport) int KILN_CALL kiln_engine_test_invoke_filter(unsigned long code) {
+    return kiln::engine::call::filter_decision(code);
 }
 
 namespace kiln::engine {

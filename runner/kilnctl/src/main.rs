@@ -588,6 +588,10 @@ fn data_use(cmd: &Cmd) -> lock::Use {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // (feature sfi: kiln-mode activations run the archive inspector the Kiln installed in each game
+    // folder brought, its version and SHA-256 from that install: kiln_manage::sfi_inspection::Installed)
+    #[cfg(feature = "sfi")]
+    kiln_manage::profile::sfi::use_installed_inspector();
     // the data folder's lock, before the command does anything, for as long as it runs (dropped after dispatch)
     let _held = match data_use(&cli.cmd) {
         lock::Use::Whole => match lock::hold() {

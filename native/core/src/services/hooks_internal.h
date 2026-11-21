@@ -4,6 +4,7 @@
 #pragma once
 #include <vector>
 
+#include "../hooks_protect_internal.h"
 #include "hooks_chain.h"
 
 namespace kiln::hooks {
@@ -38,5 +39,9 @@ void mark_map_dirty();
 // the registry lock, after the base sections are built. Register once, before boot_complete() writes the first file
 // (core boot code, service init); call write_map("...") yourself if you register later.
 void add_map_extension(void (*fn)(void* json, const char* phase));
+
+// kiln.internal.hooks v1 (hooks_protect_internal.h; hooks_protect.cpp): the code ranges Kiln's own services protect for
+// their engine calls. api.cpp serves it through the services' KilnApi only.
+const KilnHooksInternalApi* internal_table();
 
 }  // namespace kiln::hooks

@@ -1,0 +1,90 @@
+{
+  "page-record.json": {
+    "path": "/kind",
+    "why": "no page records"
+  },
+  "action-number-value.json": {
+    "path": "/value",
+    "why": "values are strings"
+  },
+  "action-bad-identifier.json": {
+    "path": "/action",
+    "why": "SF identifier"
+  },
+  "action-mod-id-81.json": {
+    "path": "/modId",
+    "why": "SF identifier <= 80"
+  },
+  "action-no-launch.json": {
+    "path": "",
+    "why": "launch-scoped"
+  },
+  "action-epoch-zero.json": {
+    "path": "/ownerEpoch",
+    "why": "epochs start at 1"
+  },
+  "action-extra-field.json": {
+    "path": "",
+    "why": "closed, no pointers"
+  },
+  "action-with-notice.json": {
+    "path": "",
+    "why": "one record kind per file"
+  },
+  "notice-http-url.json": {
+    "path": "/notice/actionUrl",
+    "why": "HTTPS only"
+  },
+  "notice-title-121.json": {
+    "path": "/notice/title",
+    "why": "title <= 120"
+  },
+  "notice-message-2001.json": {
+    "path": "/notice/message",
+    "why": "message <= 2000"
+  },
+  "notice-level-debug.json": {
+    "path": "/notice/level",
+    "why": "1.7.9 stores info or error only (debug fails publish's own check)"
+  },
+  "notice-undotted-id.json": {
+    "path": "/notice/id",
+    "why": "namespaced id"
+  },
+  "notice-bad-key-hash.json": {
+    "path": "/keySha256",
+    "why": "lower-case hex"
+  },
+  "notice-extra-field.json": {
+    "path": "/notice",
+    "why": "1.7.9 publish writes these fields only"
+  },
+  "notice-format-2.json": {
+    "path": "/format",
+    "why": "format is 1"
+  },
+  "notice-level-warning.json": {
+    "path": "/notice/level",
+    "why": "1.7.9 publish accepts warning, then event-schema.json refuses it: the call errors, nothing is written"
+  },
+  "notice-record-extra-field.json": {
+    "path": "",
+    "why": "closed notice record"
+  },
+  "action-launch-id-uuid.json": {
+    "path": "/launchId",
+    "why": "the launch id is sfi.json launch.launchId: 16 lower-case hex digits, not a uuid"
+  },
+  "launch-receipt-extra-field.json": {
+    "path": "",
+    "why": "closed receipt"
+  },
+  "launch-receipt-pid-zero.json": {
+    "path": "/pid",
+    "why": "a receipt names a real process"
+  },
+  "launch-receipt-no-start.json": {
+    "path": "",
+    "why": "pid alone does not identify a start (a reused pid)"
+  }
+}

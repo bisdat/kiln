@@ -16,6 +16,8 @@ mkdir -p "$out"
 bash "$here/bootpatch_test.sh"
 bash "$here/bootstruct_test.sh"
 bash "$here/bootview_test.sh"
+# resource patches in a kiln-backend start (the committed archive generation)
+bash "$here/bootview_eml_test.sh"
 bash "$here/refs_test.sh"
 echo "== txn-test (host)"
 bash "$here/txn_test.sh"

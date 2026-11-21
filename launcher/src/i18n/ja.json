@@ -5823,5 +5823,142 @@
         "crafted": "クラフト済み"
       }
     }
+  },
+  "sfBackend": {
+    "backend": {
+      "title": "ShroudForge",
+      "sub": "このゲームの ShroudForge MOD をどの ShroudForge で動かすか。kiln/kiln.json に保存され、次回の起動から適用されます。",
+      "label": "ShroudForge バックエンド",
+      "choice": {
+        "hosted": "Kiln 同梱の ShroudForge",
+        "installed": "インストール済みの ShroudForge",
+        "kiln": "Kiln のインタープリター"
+      },
+      "about": {
+        "hosted": "Kiln に付属する ShroudForge です。",
+        "installed": "ゲームの shroudforge フォルダーにある ShroudForge です。",
+        "kiln": "Kiln が ShroudForge MOD を自分で動かします。完全に動かせない MOD は、プレイ前に理由付きでスキップされます。"
+      },
+      "none": "ShroudForge なし",
+      "default": "既定",
+      "held": "保留中",
+      "heldWhy": "この Kiln ビルドでは使えません: {reason}",
+      "set": {
+        "default": "未設定: 既定のままです。",
+        "explicit": "選択済み: {name}。",
+        "inherited": "以前のスイッチ「インストール済みの ShroudForge を使う」から: {name}。ここで選ぶと置き換わります。",
+        "invalid": "kiln.json に Kiln の知らないバックエンド ({value}) が書かれています。選び直すまで、このゲームの ShroudForge MOD はどの ShroudForge でも動きません。"
+      },
+      "next": "次回の起動: {name}",
+      "last": "前回の起動: {name}",
+      "envRuntime": "ランチャーの環境に KILN_SHROUDFORGE_RUNTIME が設定されています。ランチャーからの起動はそれに従います。",
+      "envOff": "ランチャーの環境に KILN_SHROUDFORGE=0 が設定されています。ランチャーからの起動では ShroudForge は動きません。",
+      "route": {
+        "missing": "Kiln のインタープリターはまだこのゲームにありません。Kiln を再インストールすると追加されます。",
+        "ownLoader": "ShroudForge 自身のローダーがゲームにあります ({file})。ShroudForge MOD はそれが動かし、Kiln の選択は使われません。"
+      },
+      "running": "変更するにはゲームを閉じてください。",
+      "reset": "既定に戻す",
+      "unreadable": "kiln.json を読めないため変更できません: {reason}",
+      "saved": "保存しました。次回の起動: {name}。",
+      "ask": {
+        "title": "ShroudForge バックエンドを変更しますか?",
+        "to": "次回の起動から: {name}",
+        "replaces": "以前のスイッチ「インストール済みの ShroudForge を使う」を置き換えます。",
+        "kiln": "Kiln のインタープリターで完全に動かせない MOD は起動時にそれぞれ理由付きでスキップされ、プレイ前の警告に一覧が出ます。Kiln 同梱の ShroudForge へ自動で戻ることはありません。",
+        "unchanged": "kiln.json はすでにこの設定です。",
+        "refused": "今は選べません: {reason}",
+        "when": "保存するまで何も変わりません。ゲームは次回の起動時に読み込みます。"
+      }
+    },
+    "startWarning": {
+      "title": "今回の起動で動かない Mod があります",
+      "continue": "これらの Mod なしで続行",
+      "game": "ゲーム: {path}",
+      "changedTitle": "変更あり",
+      "changed": "前回の警告から、今回の起動で動かないものが変わりました。続行する前にもう一度お読みください。",
+      "otherGame": "この警告は別のゲームのものです。もう一度「プレイ」を押してください。",
+      "lead": {
+        "save": {
+          "title": "これらなしで保存しないでください",
+          "text": "下の Mod はセーブデータにデータを残します。オフのままワールドを保存すると、そのデータが変わったり失われたりすることがあります。保存せずに遊ぶか、キャンセルして先に直してください。"
+        },
+        "check": {
+          "title": "すべてを確認できませんでした",
+          "text": "Kiln は今回の起動についてすべてを確認できなかったため、これらの Mod は動かないかもしれません。下の理由をお読みください。"
+        },
+        "plain": {
+          "title": "これらの Mod は動きません",
+          "text": "ゲームは下の Mod なしで起動します。ほかの Mod はいつもどおり動きます。"
+        }
+      },
+      "listAria": "動かないもの ({count})",
+      "notesAria": "参考情報",
+      "nothingChanged": "続行しても何もオフにせず、何も保存・削除しません。次の「プレイ」で再び確認します。",
+      "partData": "起動データ",
+      "partLua": "Lua",
+      "partDlls": "DLL: {list}",
+      "parts": "構成: {list}",
+      "dataNotApplied": "今回の起動ではその起動データは適用されません。",
+      "chain": "原因: {chain}",
+      "folder": "フォルダー: {root}",
+      "wasActive": "以前の起動では有効でした ({launch})。",
+      "unknownStart": "起動不明",
+      "saveLine": "セーブデータにデータを残します。オフの間はワールドを保存しないでください。",
+      "saveUnknown": "セーブデータにデータを残す可能性があります。オフの間はワールドを保存しないでください。",
+      "skipped": "{name} は動きません",
+      "refused": "今回の起動では ShroudForge の Mod は動きません",
+      "notStarted": "起動されないもの: {list}",
+      "previous": "{name} は今オフです",
+      "offNow": "今回の起動では動きません。",
+      "basisPolicy": "セーブデータを持つ Mod の Kiln のリストに載っています。",
+      "basisUnknown": "ゲームデータとコードの両方を持つため、セーブデータを残す可能性があります。",
+      "about": "対象: {list}",
+      "inspector": "Kiln のアーカイブ検査ツールを使えません",
+      "planWarning": "起動プランの警告",
+      "baseTitle": "今回の起動のもとになるゲームファイル",
+      "baseRestore": "ちょうどこのファイルに戻すには、ゲームのデータを変える Mod をオフにして、Kiln からゲームを一度起動してください（ログ、エンジン:「ゲームのデータを復元」）。",
+      "baseVerify": "Steam が配布するとおりのゲームファイルにするには、Steam で「ゲームファイルの整合性を確認」を使ってください。",
+      "costTitle": "起動が遅くなります",
+      "noteTitle": "メモ",
+      "keybindsTitle": "キーボードショートカット",
+      "keybinds": "{name}: キーボードショートカットは Kiln のインタープリターではまだ動きません。MOD のほかの部分は動きます。"
+    },
+    "engineRow": {
+      "plugin": "Kiln のインタープリター (kiln-sfi)",
+      "packages": "ShroudForge の Mod",
+      "phase": {
+        "starting": "起動中",
+        "running": "実行中",
+        "ended": "終了",
+        "aside": "待機",
+        "refused": "未起動",
+        "unknown": "不明"
+      },
+      "package": {
+        "running": "実行中",
+        "dataApplied": "データ適用済み",
+        "off": "オフ",
+        "skipped": "スキップ"
+      },
+      "stale": {
+        "older-start": "この記録は以前の起動のものです。最新の起動でインタープリターが何をしたかは分かりません。",
+        "not-running": "記録は{phase}となっていますが、ゲームは実行されていません。その起動は最後の記録を残さずに終わりました（クラッシュした可能性があります）。",
+        "other-process": "この記録は別のゲームプロセスのものです。今回の起動のものではありません。"
+      },
+      "previous": {
+        "incomplete": "前回の起動は記録を書き終えずに終わりました（クラッシュした可能性があります）。",
+        "suspect": "前回の起動が残したものを Kiln は読めませんでした。"
+      },
+      "unreadable": "Kiln のインタープリターが残した記録を Kiln は読めません: {error}"
+    },
+    "restoreBase": {
+      "title": "ゲームのデータを復元",
+      "base": "Kiln はこのゲームファイルから始めました: {label}。",
+      "how": "ちょうどこのファイルに戻すには、ゲームのデータを変える Mod をオフにして、Kiln からゲームを一度起動してください。Kiln は自分が書いたと証明できるデータだけを戻します。ほかのローダーのデータはそのままです。",
+      "save": "セーブにデータを保存する Mod: オフの間はワールドを保存しないでください。",
+      "vanilla": "これは Steam が配布するとおりのファイルとは限りません。そのためには Steam で「ゲームファイルの整合性を確認」を使ってください（ゲームのプロパティ、インストール済みファイル）。",
+      "unknown": "Kiln はどのゲームファイルを戻すことになるか判断できません: {reason}。"
+    }
   }
 }

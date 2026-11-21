@@ -935,6 +935,46 @@ export interface LaunchResult {
   /** (dev.29.17) How the game was started; `uri` is empty for a direct start. */
   via?: StartMode;
 }
+// kiln_manage::sfi_launch
+/** What a start will do to the ShroudForge family, before Play, and the token that confirms it. */
+export interface Preflight {
+  gameId: GameId;
+  request: LaunchRequest;
+  /** One confirm (or cancel) of this start, in this launcher process. */
+  token: string;
+  expires: string;
+  /** What the player reads and acknowledges before the game starts; empty: no dialog, confirm at once. */
+  warnings: StartWarning[];
+  warningsSha256: string;
+  /** Shown, never acknowledged (info findings, the cost note). */
+  advisories?: StartWarning[];
+  /** profile::sfi::status of the start's profile file. */
+  shroudforge?: Json;
+  /** The plan could not be written (write-failed): every Play tries again and reads the game's archive again. Another
+   *  refusal is tried again only when the game, the mods or Kiln change, or the profile is activated. */
+  reinspectsEveryPlay: boolean;
+  /** Mode profile: the activation when the active profile was written again for this start. */
+  activation?: Activation;
+}
+export interface StartWarning {
+  /** previously-active-off: a save-sensitive package active at an earlier start is off now; base-origin
+   *  (advisories only): the archive base the start's plan was made from, in its exact label. */
+  kind: "start-refused" | "package-skipped" | "plan-warning" | "cost" | "previously-active-off" | "base-origin";
+  code: string;
+  message: string;
+  severity: "info" | "warning" | "save-warning" | "infrastructure-error";
+  causedBy?: string[];
+  /** package-skipped: the package. */
+  package?: {
+    id: string; version: string; root: string; saveSensitive: boolean; data: boolean; lua: boolean; dlls: string[];
+    reasons: { code: string; message: string; causedBy?: string[]; severity: string }[];
+  };
+  /** start-refused: the ShroudForge mods the profile switches on, none of which runs; keybinds-unsupported (advisories
+   *  only): the package whose keyboard shortcuts do not work in kiln mode yet. */
+  packages?: string[];
+  /** previously-active-off, or a package-skipped one that was active before: kiln/state/sfi.json's row. */
+  previous?: { id: string; version?: string; name?: string; basis: string; fromLaunchId?: string };
+}
 export type ChainStatus = "loaded" | "failed" | "missing" | "refused" | "duplicate" | "skipped";
 export type RefusalDetail = "self" | "system" | "kiln" | "shroudforge" | "not-dll" | "outside" | "too-many";
 export interface BootJson {
@@ -1722,6 +1762,19 @@ export const emlDataApply = (gameId: GameId, fingerprint: string, verified: bool
 export const emlDataUndo = (gameId: GameId, folder: string) => call<DataRestoreMoved>("eml_data_undo", { gameId, folder });
 /** The newest move that was not undone (kept across launcher starts, so Undo stays), or null. */
 export const emlDataLatest = (gameId: GameId) => call<DataRestoreMoved | null>("eml_data_latest", { gameId });
+// kiln_manage::restore_data::base_origin, commands/sfi.rs
+/** The BASE "Restore the game's data" takes a kiln-mode game back to. recorded: the exact label kiln-eml's receipt
+ *  records, keyed to the backups in the game folder; unrecorded: backups with no recorded origin; unknown: Kiln cannot
+ *  tell (`reason`). Never "vanilla". */
+export interface DataRestoreBase {
+  state: "recorded" | "unrecorded" | "unknown";
+  token: string | null;
+  label: string | null;
+  baselineSha256: string | null;
+  reason: string | null;
+}
+/** null: not kiln mode, or Kiln wrote none of the game's data. Hashes the backups: ask once, not on a poll. */
+export const emlDataBase = (gameId: GameId) => call<DataRestoreBase | null>("eml_data_base", { gameId });
 /** Legacy command: refuses direct shared-backup restores; updated Kiln's archive writer verifies ownership on launch. */
 export const emlRestore = (gameId: GameId) => call<string[]>("eml_restore", { gameId });
 
@@ -1968,6 +2021,57 @@ export const configNativeSet = (target: ConfigTarget, modId: string, enabled: bo
 export const configKilnRead = (gameId: GameId) => call<ConfigDocument>("config_kiln_read", { gameId });
 export const configKilnSet = (gameId: GameId, path: string, value: Json) => call<ConfigDocument>("config_kiln_set", { gameId, path, value });
 export const configKilnReset = (gameId: GameId, path: string) => call<ConfigDocument>("config_kiln_reset", { gameId, path });
+// Settings' ShroudForge card; kiln_manage::sfi_backend, commands/sfi_backend.rs
+/** kiln.json `shroudforge.backend`: Kiln's bundled ShroudForge (the default), the player's own, or Kiln's interpreter. */
+export type SfBackend = "hosted" | "installed" | "kiln";
+/** What kiln.json says: nothing (the default), a choice, the older useInstalled switch, or a value no reader takes. */
+export type SfSetting = { kind: "default" } | { kind: "explicit"; backend: SfBackend } | { kind: "inherited"; backend: SfBackend }
+  | { kind: "invalid"; value: string };
+/** What a start gets from kiln.json and the launcher's environment (sfi_backend::Resolution). */
+export interface SfResolution {
+  requested: SfBackend | null;
+  /** null: refused, every ShroudForge backend stands aside that start. */
+  selected: SfBackend | null;
+  source: "default" | "setting" | "useInstalled" | "envRuntime";
+  refusal: "settingInvalid" | "interpreterHeld" | null;
+  /** One line in the core's words. */
+  reason: string;
+  /** KILN_SHROUDFORGE=0: main's note. */
+  envOffNote: string | null;
+}
+export interface SfBackendCard {
+  gameId: GameId;
+  setting: SfSetting;
+  next: SfResolution;
+  /** Why Kiln's interpreter cannot be chosen now; absent: it can. */
+  interpreterHeld?: string;
+  /** With kiln selected for the next start: what it meets in the game folder. */
+  interpreterRoute?: "ready" | "env-off" | "missing" | "own-loader";
+  ownLoader?: string;
+  /** kiln.json cannot be read: why (nothing is written until it is fixed). */
+  unreadable?: string;
+  /** The kiln.json bytes this card was read from; a choice is written only over them. */
+  revision: string;
+  /** kiln/state/launch.json: the last start as the core froze it. */
+  last?: { backend: string | null; reasonClass: string | null; reason: string | null; pid: number | null };
+}
+export interface SfBackendPreview {
+  gameId: GameId;
+  backend: SfBackend | null;
+  revision: string;
+  /** The next start with the choice written; absent: it cannot be written (`refused`). */
+  next?: SfResolution;
+  refused?: string;
+  /** kiln.json would stay as it is. */
+  unchanged: boolean;
+}
+export const sfiBackendRead = (gameId: GameId) => call<SfBackendCard>("sfi_backend_read", { gameId });
+/** Writes nothing. `backend` null: back to the default. */
+export const sfiBackendPreview = (gameId: GameId, backend: SfBackend | null) => call<SfBackendPreview>("sfi_backend_preview", { gameId, backend });
+/** Rejects with `conflict` when kiln.json changed since `revision`, `game_running` while the game runs, `refused` for kiln
+ *  while it is held; nothing is written then. */
+export const sfiBackendSet = (gameId: GameId, backend: SfBackend | null, revision: string) =>
+  call<SfBackendCard>("sfi_backend_set", { gameId, backend, revision });
 
 // launch.rs
 /** Through the activation guard (./oneActivation.ts): the start applies the active profile again (refresh_active). */
@@ -1980,6 +2084,17 @@ export const launchBegin = (gameId: GameId, mode: LaunchMode) => call<void>("lau
 export const launchProgress = (gameId: GameId) => call<StartTimeline | null>("launch_progress", { gameId });
 /** Play ended before the game existed: the start the launcher was timing is over. */
 export const launchEnd = (gameId: GameId) => call<void>("launch_end", { gameId });
+// the check before Play and its dialog
+/** The start run up to its check before Play (the profile written again or the play-once one written; nothing opened, no
+ *  flag, no backup): the warnings to show (none: no dialog) and the token launchConfirm takes from this window only.
+ *  launchPlay and launchConfirm reject a start with warnings nobody acknowledged as `consent_required` with the
+ *  preflight to show in `detail.preflight`. */
+export const launchPrepare = (gameId: GameId, request: LaunchRequest) =>
+  oneActivation(gameId, () => call<Preflight>("launch_prepare", { gameId, request }), { play: true });
+export const launchConfirm = (gameId: GameId, token: string, request: LaunchRequest) =>
+  oneActivation(gameId, () => call<LaunchResult>("launch_confirm", { gameId, token, request }), { play: true });
+/** The dialog was closed: the token goes. */
+export const launchCancel = (gameId: GameId, token: string) => call<boolean>("launch_cancel", { gameId, token });
 
 // logs.rs
 export const logsList = (target: LogTarget) => call<LogFile[]>("logs_list", { target });
@@ -2315,6 +2430,8 @@ export const COMMANDS = [
   "admin_connect", "admin_disconnect", "admin_sessions", "admin_call", "admin_subscribe", "admin_unsubscribe",
   "modpack_pending", "modpack_inspect", "modpack_install", "modpack_dismiss",
   "config_kiln_read", "config_kiln_set", "config_kiln_reset",
+  // Settings' ShroudForge card
+  "sfi_backend_read", "sfi_backend_preview", "sfi_backend_set",
   "app_assets_status", "app_assets_import",
   "server_console_open", "server_console_close",
   "update_status", "update_check", "update_install", "update_switch", "update_restart", "update_skip", "update_ack",
@@ -2340,6 +2457,8 @@ export const COMMANDS = [
   "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
   "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "pack_local_files", "pack_local_write", "pack_local_save", "pack_check", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links", "crucible_resume", "crucible_clipboard",
   "studio_list", "studio_create", "studio_get", "studio_save", "studio_delete", "studio_credits_set", "studio_capture", "studio_capture_set", "studio_order", "studio_layer_files", "studio_layer_read", "studio_layer_write", "studio_layer_delete", "studio_layer_set", "studio_layer_lint", "studio_pick", "studio_fields", "studio_catalog_status", "studio_catalog_ensure", "studio_analyze", "studio_test", "studio_test_report", "studio_test_end", "studio_build", "studio_publish_check", "studio_publish", "studio_set_visibility", "studio_server_pack",
+  // the check before Play and the restore's BASE
+  "launch_prepare", "launch_confirm", "launch_cancel", "eml_data_base",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 

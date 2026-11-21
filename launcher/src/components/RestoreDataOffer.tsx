@@ -34,7 +34,8 @@ export function RestoreDataOffer({ gameId }: { gameId: api.GameId }) {
     // no plan: say why only when the last start reported unproven data (the index changed since, the game runs, …)
     const state = engines.data?.find((e) => e.kind === "eml")?.state;
     if (plan.error && hasUnprovenRecovery(state)) return <Banner tone="warn" title={TITLE}>{errorText(plan.error)}</Banner>;
-    return null;
+    // in kiln mode, the BASE a restore goes back to
+    return <SfiRestoreBase gameId={gameId} />;
   }
   return <>
     <Banner tone="warn" title={TITLE}>
@@ -64,4 +65,29 @@ export function hasUnprovenRecovery(state: unknown): boolean {
   if (!state || typeof state !== "object" || !("recovery" in state)) return false;
   const r = state.recovery;
   return !!r && typeof r === "object" && "unproven" in r && r.unproven === true;
+}
+
+// kiln_manage::restore_data::base_origin
+/** In kiln mode, where "Restore the game's data" takes the game: the BASE kiln-eml's receipt records, by its exact label
+ *  (never "vanilla"), and how to get there (no mod that changes the game's data, one start through Kiln: kiln-eml's
+ *  ownership-checked restore). An offer, not a restore that happened. Asked once: it hashes the backups. */
+export function SfiRestoreBase({ gameId }: { gameId: api.GameId }) {
+  const t = useT();
+  const q = useQuery({ queryKey: ["eml_data_base", gameId], queryFn: () => api.emlDataBase(gameId), retry: false, refetchOnWindowFocus: false, staleTime: 5 * 60_000 });
+  const b = q.data;
+  if (!b) return null;
+  const title = t("sfBackend.restoreBase.title");
+  if (b.state === "unknown" || !b.label) {
+    return <Banner tone="warn" title={title}><div data-base-origin="unknown">
+      <p>{t("sfBackend.restoreBase.unknown", { reason: b.reason ?? "?" })}</p>
+      <p>{t("sfBackend.restoreBase.vanilla")}</p>
+    </div></Banner>;
+  }
+  return <Banner tone="info" title={title}><div data-base-origin={b.token ?? ""} data-baseline={b.baselineSha256 ?? ""}>
+    <p>{t("sfBackend.restoreBase.base", { label: b.label })}</p>
+    {b.reason && <p className="k-hint">{b.reason}</p>}
+    <p>{t("sfBackend.restoreBase.how")}</p>
+    <p>{t("sfBackend.restoreBase.save")}</p>
+    <p>{t("sfBackend.restoreBase.vanilla")}</p>
+  </div></Banner>;
 }

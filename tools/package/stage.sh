@@ -37,6 +37,19 @@ export KILN_OUT=$out
 warn() { echo "stage: WARNING: $*" >&2; }
 die() { echo "stage: $*" >&2; exit 1; }
 if ((allow_missing)) && [[ ${KILN_RELEASE_BUILD:-} == 1 ]]; then die "--allow-missing is for local dev staging, never a release (KILN_RELEASE_BUILD=1)"; fi
+# The stage guard (tools/sfi/public_cut.py): a file of a private build in the tree stops the stage before anything
+# is built, and so does a missing guard.
+cut_guard=$repo/tools/sfi/public_cut.py
+[[ -f $cut_guard ]] || die "missing $cut_guard"
+python3 -I "$cut_guard" source "$repo" || die "this tree holds files of a private build (see above)"
+# Component sfi (MIT): kiln-sfi.dll, Kiln's interpreter for ShroudForge mods (crates/sfi), at kiln/plugins/kiln-sfi.dll,
+# installed by default on both sides, requires core and eml; Settings' ShroudForge card chooses it per game
+# (kiln.json shroudforge.backend), and ShroudForge's runtime (component shroudforge) stays the default backend. kiln-eml's read-only
+# archive inspector (GPL-3) is part of component eml, never sfi: kiln/tools/eml-inspect/<linux-x86_64|windows-x86_64>/
+# with its licence, notice, schema and version.json (its version and SHA-256, which the launcher and kilnctl check);
+# the Linux helper is the one file packed and installed executable (crates/kiln-manage/src/bundle.rs). The stage of
+# both is checked by tools/sfi/sfi_stage.py.
+sfi_stage=$repo/tools/sfi/sfi_stage.py
 # a required part is missing: stop, unless --allow-missing
 missing=()
 miss() { if ((allow_missing)); then warn "$* (--allow-missing: left out)"; missing+=("$1"); else die "$*"; fi; }
@@ -168,6 +181,23 @@ if ((build)); then
   built Kiln.Admin dn "$repo/mods/Kiln.Admin/Kiln.Admin.csproj" -o "$out/mods/kiln-admin" || miss "Kiln.Admin failed to build (log: $logs/Kiln.Admin.log)"
   collect kiln-eml "$bg_eml" || miss "plugin kiln-eml failed to build (log: $logs/kiln-eml.log)"
   bg_eml=""
+  # kiln-sfi.dll (crates/sfi, its own workspace and lock) into bin/plugins, and kiln-eml's archive
+  # inspector for Linux (build.sh --host; its Windows .exe came with the build above)
+  if [[ -f $repo/crates/sfi/kiln-sfi/Cargo.toml ]]; then
+    built kiln-sfi env CARGO_TARGET_DIR="$out/cargo-sfi" "$repo/crates/sfi/kiln-sfi/build.sh" \
+      || miss "plugin kiln-sfi failed to build (log: $logs/kiln-sfi.log)"
+  fi
+  # KILN_EML_INSPECT_LINUX=FILE: that Linux inspector instead (tools/release/release.sh builds it where the other
+  # Linux files are built, for their glibc)
+  if [[ -f $repo/gpl/kiln-eml/kiln-eml/src/kiln_eml_inspect.rs ]]; then
+    if [[ -n ${KILN_EML_INSPECT_LINUX:-} ]]; then
+      [[ -s $KILN_EML_INSPECT_LINUX && ! -L $KILN_EML_INSPECT_LINUX ]] || die "KILN_EML_INSPECT_LINUX=$KILN_EML_INSPECT_LINUX: no such file"
+      install -D -m 755 "$KILN_EML_INSPECT_LINUX" "$out/eml-inspect/linux-x86_64/kiln-eml-inspect"
+    else
+      built kiln-eml-inspect "$repo/gpl/kiln-eml/build.sh" --host \
+        || miss "kiln-eml's archive inspector for Linux failed to build (log: $logs/kiln-eml-inspect.log)"
+    fi
+  fi
   collect enshwick-loader "$bg_enshwick" \
     || miss "Enshwick loader (enshwick.dll for kiln-enshwick) failed to build (log: $logs/enshwick-loader.log)"
   bg_enshwick=""
@@ -229,7 +259,13 @@ install -m 644 "$repo"/runtime/locales/*.json "$k/locales/"
 if [[ -d $bin/plugins ]]; then
   for f in "$bin"/plugins/*.dll "$bin"/plugins/*.pdb; do
     [[ -f $f ]] || continue
-    case $(basename "$f") in kiln-emf.*) comp=emf ;; kiln-eml.*) comp=eml ;; *) comp=core ;; esac
+    case $(basename "$f") in
+      kiln-emf.*) comp=emf ;;
+      kiln-eml.*) comp=eml ;;
+      # kiln-sfi (Kiln's interpreter) is its own component, never core's
+      kiln-sfi.*) comp=sfi ;;
+      *) comp=core ;;
+    esac
     mkdir -p "$stage/$comp/kiln/plugins"
     install -m 644 "$f" "$stage/$comp/kiln/plugins/"
   done
@@ -238,6 +274,24 @@ fi
 if [[ -f $stage/eml/kiln/plugins/kiln-eml.dll ]]; then
   install -m 644 "$repo/gpl/kiln-eml/LICENSE" "$stage/eml/kiln/plugins/kiln-eml.LICENSE.txt"
   install -m 644 "$repo/gpl/kiln-eml/NOTICE.txt" "$stage/eml/kiln/plugins/kiln-eml.NOTICE.txt"
+fi
+# kiln-eml's archive inspector (component eml, GPL-3) in its own folder per platform, with its licence,
+# notice, schema and version.json (tools/sfi/sfi_stage.py version: its version, protocol and SHA-256); the Linux one 0755
+if [[ -f $repo/gpl/kiln-eml/kiln-eml/src/kiln_eml_inspect.rs ]]; then
+  for pair in linux-x86_64:kiln-eml-inspect windows-x86_64:kiln-eml-inspect.exe; do
+    plat=${pair%%:*} exe=${pair#*:}
+    if [[ -s $out/eml-inspect/$plat/$exe ]]; then
+      d=$stage/eml/kiln/tools/eml-inspect/$plat
+      mkdir -p "$d"
+      if [[ $plat == linux-* ]]; then install -m 755 "$out/eml-inspect/$plat/$exe" "$d/$exe"; else install -m 644 "$out/eml-inspect/$plat/$exe" "$d/$exe"; fi
+      install -m 644 "$repo/gpl/kiln-eml/LICENSE" "$d/LICENSE.txt"
+      install -m 644 "$repo/gpl/kiln-eml/NOTICE.txt" "$d/NOTICE.txt"
+      install -m 644 "$repo/gpl/kiln-eml/kiln-eml/schema/archive-inspection.schema.json" "$d/archive-inspection.schema.json"
+      python3 -I "$sfi_stage" version "$repo" "$d" "$plat" || die "kiln-eml's archive inspector for $plat: no version.json"
+    else
+      miss "kiln-eml's archive inspector for $plat: no $out/eml-inspect/$plat/$exe (gpl/kiln-eml/build.sh --host)"
+    fi
+  done
 fi
 # ShroudForge runtime: a separate GPL-3 component built from the frostdev-ops/shroudforge fork (third_party/shroudforge,
 # or KILN_SHROUDFORGE_SRC); kiln-shroudforge.dll (MIT, core) drives it. docs/kiln/shroudforge-compat.md
@@ -339,6 +393,9 @@ known = {
                     "description": "ShroudForge's runtime (frostdev-ops/shroudforge fork, GPL-3.0): runs ShroudForge mods through kiln-shroudforge"},
     "enshwick": {"sides": ["server", "client"], "default": True, "requires": ["core"],
                  "description": "Enshwick's own loader (enshwick/enshwick, MIT), built from its pinned tag: runs Enshwick mods through kiln-enshwick"},
+    # kiln-sfi (Kiln's interpreter, MIT); kiln-eml's archive inspector it needs is the eml component's
+    "sfi": {"sides": ["server", "client"], "default": True, "requires": ["core", "eml"],
+            "description": "kiln-sfi (MIT): runs ShroudForge mods in Kiln itself when Settings chooses it; ShroudForge's runtime stays the default"},
 }
 present = {d for d in os.listdir(stage) if os.path.isdir(os.path.join(stage, d))}
 unknown = present - set(known)
@@ -368,4 +425,14 @@ if ((allow_missing)); then
 else
   python3 -I "$repo/tools/release/lib/plugins.py" check --src "$repo" "$stage" >&2 || die "the stage misses required plugins (see above)"
 fi
+# the sfi component and kiln-eml's archive inspector are complete and where they belong
+if [[ -f $repo/crates/sfi/kiln-sfi/Cargo.toml ]]; then
+  if ((allow_missing)); then
+    python3 -I "$sfi_stage" check "$repo" "$stage" || warn "the sfi component or the archive inspector is incomplete (--allow-missing)"
+  else
+    python3 -I "$sfi_stage" check "$repo" "$stage" || die "the sfi component or the archive inspector is incomplete (see above)"
+  fi
+fi
+# never a developer test build in the stage, and nothing of a private build in a public one
+python3 -I "$cut_guard" stage "$repo" "$stage" || { rm -rf "$stage"; die "the stage is refused (see above) and removed"; }
 echo "staged Kiln $(cat "$repo/VERSION") in $stage: $(cd "$stage" && find . -type f -not -name kiln-runtime.json | wc -l) files in $(cd "$stage" && ls -d */ | tr -d / | tr '\n' ' ')"

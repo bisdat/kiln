@@ -633,6 +633,17 @@ internal sealed class ModManagerPage
                 if (verW > 0)
                     ui.DrawText(UiLayer.Window, chipCol - 18 * s - verW, it.MinY + (rowH - 15 * s) / 2 - 1 * s, m.Version, GameColors.Muted, 15 * s);
                 Chip(ui, chipX, it.MinY + (rowH - 24 * s) / 2, m.Chip, GameColors.Of(m.State, m.Missing), s);
+                // the do-not-save badge of a package kiln-sfi warns about (SfiNotice.cs), left of the state chip
+                if (SfiSafetyNotice.Badge(m) is { } sw)
+                {
+                    var badge = SfiSafetyNotice.BadgeFor(sw);
+                    var bw = ChipWidth(ui, badge, s);
+                    var bx = chipX - 8 * s - bw;
+                    var by = it.MinY + (rowH - 24 * s) / 2;
+                    ui.DrawRect(UiLayer.Window, it.MinX, it.MinY, it.MinX + 3 * s, it.MaxY, GameColors.Warning);
+                    ui.DrawRect(UiLayer.Window, bx, by, bx + bw, by + 24 * s, GameColors.Night, 3 * s);
+                    Chip(ui, bx, by, badge, GameColors.Warning, s);
+                }
             }
         }
         ui.EndChild();
@@ -724,6 +735,7 @@ internal sealed class ModManagerPage
         x += Chip(ui, x, c.ScreenY, ModCatalog.EngineName(m.Engine), GameColors.Gold, s) + 8 * s;
         if (m.Side.Length > 0) Chip(ui, x, c.ScreenY, ModManagerLogic.SideText(m.Side, _snap.Side, m.Engine), GameColors.Idle, s);
         ui.Space(1, 26 * s);
+        SfiSafetyNotice.DrawDetails(ui, m, s, Label);  // the whole do-not-save text and the banner's Hide button
 
         if (m.Reason is not null || m.Help is not null)
         {

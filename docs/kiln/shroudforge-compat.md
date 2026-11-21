@@ -901,3 +901,38 @@ What upstream 1.8.1 adds that touches Kiln, checked when the bundled runtime mov
 - **Vanilla startup mode** (`vanillaClient`/`vanillaServer` in SF's Modloader settings): read only by SF's own
   `winmm.dll` bootstrap (`shroudforge_prepare_vanilla`); Kiln's adapter never calls it, so the switch has no effect
   when Kiln hosts SF.
+
+## 12. Kiln's interpreter (kiln mode): the release hold and its guided checks
+
+A ShroudForge mod runs one of three ways: hosted (Kiln starts the bundled runtime, the default), installed (Kiln starts
+the player's own ShroudForge copy) or kiln mode (Kiln's own interpreter, `kiln.json` `"shroudforge.backend": "kiln"`;
+players' page [kiln mode](shroudforge-kiln-mode.md)). The backend is frozen once per start (`kiln/state/launch.json`);
+a package that cannot run whole in kiln mode is skipped with its reason and the loud warning.
+ShroudForge's own loader in the game folder sets both Kiln backends aside.
+
+Kiln mode ships held: the client gate's row `kiln-sfi.interpreter` (`native/core/gates/sfi.json`)
+keeps it off until its seven guided checks have passed in a real game; `"preview"` in `kiln.json` lifts it for the
+pass. `kiln-sfi.sf18` (anything that needs ShroudForge 1.8) stays held in every build by the release policy's veto,
+whatever `"preview"` says. kiln-manage reads the same list (`crates/kiln-manage/src/sfi_release.rs`) for the
+launcher's ShroudForge card and the launch plan's warnings; neither reads the verdicts: the row goes when a commit that
+records the pass removes it.
+
+The checks are `mods/tests/client-pass/Sfi.cs` (area "Kiln's interpreter", how to play them:
+[client pass](client-pass.md#kilns-interpreter)). Each asserts what the interpreter wrote for this start
+(`kiln/state/sfi.json`: this game process, backend `kiln`, phase `running`; `kiln-sfi: Runtime initialized` in
+`kiln.log`) before it asks its question, and ends with skip in any other start. Verdicts go to
+`kiln/state/client-checks.json` like every guided check's; `tools/client-checks/report.py --rows` shows them under
+"Kiln's interpreter (kiln-sfi.interpreter)".
+
+| Check | Confirms |
+|---|---|
+| `sfi-ui-page` | ShroudForge's mod-menu key (F9) opens Kiln's ShroudForge page (`sfi.json` `menu.by`: `kiln`), listing this start's mods with the interpreter's state; it closes again; no Modloader window |
+| `sfi-ui-settings` | a setting changed on the page is kept, applies at the next start, and the mod uses it after a restart |
+| `sfi-ui-actions-notices` | an action button's "Requested" and one reaction; a mod's notification readable; nothing written to `<game>/shroudforge` |
+| `sfi-save-sensitive` | a save-sensitive package (Quiver & Spellbook 0.8.2) off after a start with it on: its `save-sensitive-off` warning, named before Play |
+| `sfi-three-surface-warning` | the same warning before Play, in the game (banner, footer, DO NOT SAVE badge, pause-menu marker) and in `sfi.json` |
+| `sfi-warning-accessibility` | the dialog before Play with the keyboard alone and at large text size; the in-game banner readable |
+| `sfi-backend-roundtrip` | kiln, hosted, kiln on one game: hosted runs every mod again, settings kept, the save-sensitive package carried through the hosted start, no mod in two folders of `<game>/mods` |
+
+What these checks do not cover: native Windows (the pass is played under Proton), a joined or dedicated server in kiln
+mode, mod shortcuts (not wired in kiln mode yet) and the ECS/world calls that answer unavailable in this build.
