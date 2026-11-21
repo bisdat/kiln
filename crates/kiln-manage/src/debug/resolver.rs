@@ -282,7 +282,8 @@ fn inspect_checked(source: &mut dyn ProcessSource, probe: &Probe) -> Result<Seen
 
 /// Whether a refusal proves the descriptor stale: the Windows side found no running process of that PID, or the
 /// process of that PID was created at another time. Nothing else is proof (a pipe that did not answer, a transport
-/// error, another nonce, rights, an unsupported query).
+/// error, another nonce, rights, an unsupported query). Even these two count only from the target's namespace (see
+/// [`resolve`]).
 fn proves_stale(e: &DebugError) -> bool {
     e.code == DebugCode::NotRunning || (e.code == DebugCode::IdentityChanged && e.reason.as_deref() == Some("creation_time"))
 }
@@ -297,6 +298,13 @@ fn remove_stale(path: &Path, d: &Descriptor) -> bool {
 /// The install's one live, matching descriptor as a target. The source holds that process afterwards. Descriptors
 /// this call proved stale (a crashed start leaves its file behind) are removed afterwards, whatever the outcome, and
 /// named in `notes`; no other descriptor is ever removed.
+///
+/// "No process of that PID" and "another creation time" are proof only from the target's namespace: when this call
+/// proved another descriptor of the install live, or the host side's facts hold (a process of this install runs in
+/// its prefix, so the helper under that runner joined its wineserver; the client prefix's runner context exists;
+/// native Windows has one namespace). A helper in another wineserver (wrong prefix or runner) sees an empty or
+/// unrelated process table, where a fresh wineserver hands out the same low PIDs again: neither answer means anything
+/// there, and then nothing is removed.
 pub fn resolve(
     host: &mut dyn HostSide,
     source: &mut dyn ProcessSource,
@@ -381,13 +389,22 @@ fn resolve_inner(
     }
     notes.extend(stale.iter().cloned());
     notes.extend(unchecked.iter().map(|(n, _)| n.clone()));
+    // no descriptor proved the namespace: the host side must (see resolve), or the stale answers prove nothing
+    let mut kept = String::new();
+    if !proven.is_empty()
+        && live.is_empty()
+        && let Err(e) = host.facts()
+    {
+        proven.clear();
+        kept = format!("; their files are kept: nothing shows the {}'s Windows side alive ({}), so these answers prove nothing", what(kind), e.message);
+    }
     let (path, d, mut seen) = match live.len() {
         // the first descriptor that could not be checked says why nothing could be proven ("not running" could be wrong)
         0 if !unchecked.is_empty() => return Err(unchecked.swap_remove(0).1),
         0 => {
             return Err(DebugError::new(
                 DebugCode::NotRunning,
-                format!("the {} is not running: the debug descriptors in {} belong to processes that ended or whose PID is another process now ({})", what(kind), dir.display(), stale.join("; ")),
+                format!("the {} is not running: the debug descriptors in {} belong to processes that ended or whose PID is another process now ({}){kept}", what(kind), dir.display(), stale.join("; ")),
             )
             .because("stale_descriptor"));
         }
@@ -989,7 +1006,9 @@ mod tests {
         assert!(!file(32).exists() && !file(40).exists(), "the proven-stale descriptors are gone");
         assert!(file(48).exists(), "the live one stays");
         assert_eq!(r.notes.iter().filter(|n| n.contains("removed")).count(), 2, "{:?}", r.notes);
-        // also when the resolve itself fails: all stale
+        // also when the resolve itself fails (all stale) while a process of this install runs in its prefix (the host
+        // facts hold): a crashed start's descriptor goes; with nothing running nothing is removed (see
+        // a_no_process_answer_is_proof_only_while_the_targets_namespace_is_alive)
         std::fs::remove_file(file(48)).unwrap();
         w.put("a", &d32);
         let e = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::default()).unwrap_err();
@@ -1300,6 +1319,51 @@ mod tests {
         }];
         let e = run(&mut host, &mut src).unwrap_err();
         assert_eq!(e.code, DebugCode::PrivilegeMismatch, "{}", e.message);
+    }
+
+    /// A host side whose facts fail: nothing shows the target's namespace alive (no process of this install runs in its
+    /// prefix, no runner context of the client's prefix).
+    struct Down(FakeHost);
+
+    impl HostSide for Down {
+        fn spec(&self) -> &HostSpec {
+            &self.0.spec
+        }
+        fn facts(&mut self) -> Result<HostFacts, DebugError> {
+            Err(DebugError::new(DebugCode::NotRunning, "no process of this install runs in its prefix"))
+        }
+    }
+
+    /// Review nit (item C): a Windows side in another wineserver (wrong prefix or runner) sees no process of that PID,
+    /// or another process under it. Such answers prove a descriptor stale only while the host side shows the target's
+    /// namespace alive in the same resolve, or another descriptor of this install was proven live there.
+    #[test]
+    fn a_no_process_answer_is_proof_only_while_the_targets_namespace_is_alive() {
+        let w = World::new("namespace");
+        let file = |pid: u32| w.root.join("a/kiln/state/debug").join(format!("{pid}.json"));
+        // no process 32, and PID 40 is another process (another creation time), as a fresh wineserver would show them
+        let (_, d32) = w.kiln("a", 32, 100, N1);
+        let (mut p40, d40) = w.kiln("a", 40, 200, N1);
+        p40.creation_time_100ns = "7".into();
+        w.put("a", &d32);
+        w.put("a", &d40);
+        let mut down = Down(w.host("a", TargetKind::Server));
+        let e = resolve(&mut down, &mut FakeSource::new(vec![p40.clone()]), &mut counter()).unwrap_err();
+        assert_eq!((e.code, e.reason.as_deref()), (DebugCode::NotRunning, Some("stale_descriptor")));
+        assert!(file(32).exists() && file(40).exists(), "nothing shows the namespace alive: nothing is removed");
+        assert!(e.message.contains("kept"), "{}", e.message);
+        // the same answers while a process of this install runs in that prefix (the host facts hold): a crashed start's
+        // descriptors go
+        let e = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::new(vec![p40.clone()])).unwrap_err();
+        assert_eq!(e.code, DebugCode::NotRunning);
+        assert!(!file(32).exists() && !file(40).exists(), "removed while the namespace is alive");
+        // or when the same source proved another descriptor of this install live (here the host facts fail afterwards)
+        w.put("a", &d32);
+        let (p48, d48) = w.kiln("a", 48, 300, N2);
+        w.put("a", &d48);
+        assert!(resolve(&mut down, &mut FakeSource::new(vec![p48]), &mut counter()).is_err(), "the facts of the live one fail");
+        assert!(!file(32).exists(), "48 proved the namespace: 32 is removed");
+        assert!(file(48).exists(), "the live one stays");
     }
 
     /// The answer lines exactly as native/core/src/debug_descriptor.cpp writes them.
