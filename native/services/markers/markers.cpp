@@ -398,6 +398,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     KilnHandle sp = 0;
     g_server_post = api->subscribe_world_tick(owner, KILN_WORLD_SERVER, KILN_TICK_POST, &on_server_post, nullptr, &sp) == KILN_OK;
     if (!g_server_post) logf(KILN_LOG_WARN, "markers: the server world's step could not be subscribed: markers.send is off");
+    g.server_post = g_server_post;
     g_switches.local = g.side == KILN_SIDE_CLIENT && g.lifecycle && g_client_post;
     kmk::anchors_start();
     KilnResult rc = api->register_service(owner, KM_STR(KILN_MARKERS_SERVICE), &kTable);

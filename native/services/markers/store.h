@@ -31,6 +31,7 @@ constexpr uint32_t kClientRecords = 1024;       // local + received on a client
 constexpr uint32_t kNamespaces = 64;            // distinct namespaces ever bound in the process (the ledger)
 constexpr uint32_t kPendingPerPublisher = 64;   // accepted changes of one publisher waiting for its dispatch
 constexpr uint32_t kPendingPerRole = 256;       // ... of all publishers of a role
+constexpr uint32_t kLocalFollows = 128;         // local records that follow an entity
 
 // What may be offered now; written by the glue (rows built, the client gate, sigdb), read without the lock.
 struct Switches {
@@ -45,6 +46,13 @@ struct Switches {
 // The icon catalog's answer for a map icon (catalog.h implements it).
 enum class IconAnswer { NotReady, Unknown, NotForMap, Ok };
 using IconCheck = IconAnswer (*)(uint32_t id, void* ctx);
+
+// The anchors' answer for a spec's follow lease (anchors.h, Watches::retain/drop; registered by anchors_ready): the
+// caller's live lease of that world kind resolved to its incarnation's serial with one stored reference taken
+// (KILN_MARKER_ACCEPTED), or KILN_MARKER_INVALID_ANCHOR with the words in why; and that reference given back.
+using FollowAcquire = uint32_t (*)(KilnOwner owner, uint32_t world_kind, KilnMarkerAnchor lease, uint64_t* serial, char* why, size_t cap,
+                                   void* ctx);
+using FollowRelease = void (*)(uint64_t serial, void* ctx);
 
 // One record, as compared: two specs that normalize to equal records are the same logical value.
 struct Record {
@@ -83,6 +91,13 @@ public:
         icon_check_ = fn;
         icon_ctx_ = ctx;
     }
+    // Followed records (spec.follow): before set_local can take one (on_ready). A record holds one reference to its
+    // incarnation until it is removed, cleared, released or its world stops.
+    void set_follow(FollowAcquire acquire, FollowRelease release, void* ctx) {
+        follow_acquire_ = acquire;
+        follow_release_ = release;
+        follow_ctx_ = ctx;
+    }
 
     // ---- publishers ----
     KilnResult bind(KilnOwner owner, KilnStr ns);
@@ -107,6 +122,7 @@ public:
     void snapshot_client(std::vector<ClientRow>* out) const;
 
     uint32_t local_count() const;
+    uint32_t local_follows() const;
     uint32_t pending(uint32_t role) const;
     uint64_t text_charged(std::string_view ns) const;
 
@@ -127,11 +143,15 @@ private:
     Binding* bound(KilnOwner owner);
     void enqueue_change(uint32_t role, const Binding& b, uint32_t kind, std::string_view key, uint32_t affected, uint32_t cause, bool counted);
     void clear_world(uint32_t kind);  // under mu_
+    void unfollow(const Record& rec);  // under mu_: the record's reference to its incarnation goes
 
     Arena& arena_;
     const Switches& sw_;
     IconCheck icon_check_ = nullptr;
     void* icon_ctx_ = nullptr;
+    FollowAcquire follow_acquire_ = nullptr;
+    FollowRelease follow_release_ = nullptr;
+    void* follow_ctx_ = nullptr;
 
     mutable std::mutex mu_;
     std::map<KilnOwner, Binding> bindings_;
@@ -140,6 +160,7 @@ private:
     uint64_t next_generation_ = 0;
     uint32_t local_total_ = 0;
     uint32_t received_total_ = 0;  // the receiver's records (wire v1)
+    uint32_t local_follows_ = 0;   // local records with follow != 0
     uint32_t pending_[2] = {0, 0};
     uint64_t sequence_[2] = {0, 0};
     std::vector<Note> queue_[2];

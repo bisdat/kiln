@@ -198,11 +198,17 @@ public sealed partial record MarkerSpec
         throw Bad("icon", $"'{name}': {r.Reason}");
     }
 
-    // A capture lease named in runtime JSON (the anchor slice keeps the registry of live leases); until it is built the
-    // anchors' row is off.
+    // A capture lease named in runtime JSON: the same MarkerAnchor object from the calling mod's registry of live leases
+    // (never a second, independently disposable lease of that handle). Unknown, foreign, disposed and ended-world handles
+    // are refused; an entity id is never accepted here.
     private static MarkerAnchor FollowLease(string handle)
     {
-        MarkersCaps.Require(MarkersCaps.AnchorsClient);
-        throw new ArgumentException($"marker JSON: 'follow' names the lease {handle}, which is not a live lease of this mod");
+        if (!Capabilities.Is(MarkersCaps.AnchorsServer)) MarkersCaps.Require(MarkersCaps.AnchorsClient);
+        if (handle.Length != 16 || !ulong.TryParse(handle, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var h) || h == 0)
+            throw Bad("follow", "must be {\"anchor\":\"<16 hex digits>\"} (a capture lease of this process)");
+        var mod = ModContext.CurrentMod ?? throw new InvalidOperationException("marker JSON with a follow lease must be read in a mod's code");
+        return MarkerAnchors.Find(mod, h)
+               ?? throw new ArgumentException($"marker JSON: 'follow' names the lease {handle}, which is not a live lease of this mod (unknown, " +
+                                              "another mod's, disposed, or of a world that ended)");
     }
 }
