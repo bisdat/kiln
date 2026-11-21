@@ -519,4 +519,34 @@ public sealed unsafe class RoutinesBindingTests : IDisposable
         RoutineSaves.Tick();
         Assert.Equal(7u, Assert.Single(Calls, c => c.Function == "assign").NpcId);
     }
+
+    [Fact]
+    public void A_mod_reloaded_while_the_world_runs_gets_its_saved_routines_bound_again_under_its_new_owner()
+    {
+        // review: hot-reload rebinding. The reload revokes the old owner (kiln.routines removes the running routine,
+        // reason OwnerUnloaded); the saved row stays, and once the mod is back with its plan it is bound again.
+        var book = UseBook();
+        var plan = RoutineRegistry.Find(_day)!.Plan;
+        book.LastRevision = 5;
+        book.Assignments.Add(new SavedRoutine { NpcId = 7, Owner = ModId, Key = plan.Key, PlanVersion = plan.Version, ContentHash = plan.ContentHash, Revision = 5 });
+        Routines.Assign(_villager, _day);                                         // the world's restore, and the events subscribed
+        Assert.Single(Restores);
+        Restores.Clear();
+        Claims.Clear();
+        Send(Event(Snapshot.Replace("\"revision\":1", "\"revision\":6").Replace("\"Assigned\"", "\"Removed\""), "OwnerUnloaded"));
+        Assert.Single(book.Assignments);                                         // the save keeps it
+        // the mod is not back yet: nothing is bound
+        RoutineSaves.OwnerLoaded = _ => false;
+        RoutineSaves.Tick();
+        Assert.Empty(Restores);
+        // back, with a new owner: bound again at its saved revision under that owner, which is claimed first
+        RoutineSaves.OwnerLoaded = id => id == ModId;
+        RoutineSaves.OwnerOf = id => id == ModId ? 99ul : 0;
+        RoutineSaves.Tick();
+        Assert.Equal(new Restored(99, 7, RoutineTests.GoldenWire, 5, 0, ""), Assert.Single(Restores));
+        Assert.Contains((99ul, ModId), Claims);
+        // once: the next tick binds nothing again
+        RoutineSaves.Tick();
+        Assert.Single(Restores);
+    }
 }

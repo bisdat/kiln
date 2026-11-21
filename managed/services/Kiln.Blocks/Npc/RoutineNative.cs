@@ -38,6 +38,14 @@ internal static unsafe class RoutineNative
         public delegate* unmanaged[Cdecl]<ulong, NativeStr, int> ClaimMod;
     }
 
+    /// <summary>The table without the framework members (what the test kit's fake serves), for the lookup.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct V1Table
+    {
+        public ServiceHeader Header;
+        public nint Assign, Remove, Resume, Inspect, RevokeOwner, SubscribeEvents, UnsubscribeEvents;
+    }
+
     /// <summary>The size of the table without the framework members (what the test kit's fake serves).</summary>
     public static readonly uint V1Size = (uint)(sizeof(ServiceHeader) + 7 * sizeof(nint));
 
@@ -63,7 +71,9 @@ internal static unsafe class RoutineNative
         get
         {
             if (_table != null) return _table;
-            var t = Services.Get<Table>(Service, Version);
+            // looked up by the members every kiln.routines has (the test kit's fake serves those seven): asking for the whole
+            // Table would refuse a table without the framework members, which HasRestore checks before any use of them
+            var t = (Table*)Services.Get<V1Table>(Service, Version);
             return t != null && t->Header.Size >= V1Size ? _table = t : null;
         }
     }
