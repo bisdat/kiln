@@ -7,8 +7,11 @@
 //          once per client step on the main thread, the plan: per entity its winning request (priority, then newest),
 //          and Kiln's two groups (4, 5) given to the (colour, pulse) pairs the winners use.
 //  apply   the stage's step (the world's thread, inside dynamic_render_model, which holds the RenderScene): sets each
-//          planned model's group through the renderer, takes only an instance whose group is 0 or Kiln's (unless the
-//          player put mods first), and gives the instances Kiln no longer wants back to 0 when nobody changed them.
+//          planned model's group through the renderer, takes only an instance whose group is 0 or Kiln's (or one of the
+//          game's own 1..3 when the player put mods first; another tool's group never), and gives the instances Kiln no
+//          longer wants back to 0 when nobody changed them.
+//  ModelCache  which entities' model handles the client Pre reads again this step (kiln.world's verified reads are
+//          not free): new ones, stale ones, and each one once per kModelRefreshSteps steps, within a budget per step.
 //  palette the colour the renderer gets for one of Kiln's groups this frame (the render thread).
 // No windows.h, no game memory.
 #pragma once
@@ -17,6 +20,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <iterator>
 #include <mutex>
 #include <string_view>
 #include <unordered_map>
@@ -32,6 +36,13 @@ inline constexpr uint8_t kGroups[2] = {4, 5};  // keen::HighlightColorIndex Grou
 inline constexpr uint32_t kMaxPerOwner = 1024;
 inline constexpr size_t kEndedKeep = 4096;
 inline constexpr uint32_t kPulseMs = 1200;
+inline constexpr uint32_t kModelRefreshSteps = 16;  // ModelCache: every handle is read again once per this many steps
+inline constexpr uint32_t kModelReadsPerStep = 64;  // ModelCache: kiln.world reads at most per client step
+
+// The game's own highlight groups: the building cursor's InvalidState 1, ValidState 2, MutedState 3. The player's
+// "mods-first" lets Kiln cover these and nothing else: another tool's group (Greeneye's Quick Deposit uses 6, Find and
+// The Worst Map Mod use 7) is never taken, whatever the setting.
+inline bool game_group(int g) { return g >= 1 && g <= 3; }
 
 enum Setting : uint8_t { kGameFirst = 0, kModsFirst = 1, kOff = 2 };
 
@@ -103,7 +114,20 @@ struct Plan {
     uint64_t session = 0;  // the client world's session (kiln.world game_world_session) the models belong to
     Setting setting = kGameFirst;
     std::vector<Target> targets;
+    std::unordered_map<KilnEntity, size_t> index;  // entity -> its position in targets (one target per entity)
 };
+
+// The plan's targets among one slice's entities (ids: the slice's first id, the next one 'stride' bytes further), in
+// 'which'. A hash lookup per entity: a slice of thousands with hundreds of outlines stays far inside the stage's budget.
+inline void slice_targets(const Plan& plan, const void* ids, uint32_t count, uint32_t stride, std::vector<size_t>& which) {
+    which.clear();
+    if (!ids || plan.index.empty()) return;
+    for (uint32_t r = 0; r < count; ++r) {
+        uint32_t id = 0;
+        std::memcpy(&id, static_cast<const uint8_t*>(ids) + size_t(r) * stride, sizeof id);
+        if (const auto it = plan.index.find(id); it != plan.index.end()) which.push_back(it->second);
+    }
+}
 
 // What the stage found for plan.targets[i].
 enum Result : uint8_t { kNone = 0, kShown = 1, kGame = 2, kNoModel = 3 };
@@ -154,12 +178,12 @@ inline uint64_t apply(RendererIo& io, uintptr_t renderer, const Plan& plan, Appl
         if (g == t.group) {
             applied.groups[t.model] = t.group;
             results[i] = kShown;
-        } else if (g == 0 || ours || mods_first) {
+        } else if (g == 0 || ours || (mods_first && game_group(g))) {
             models.push_back(t.model);
             groups.push_back(t.group);
             applied.groups[t.model] = t.group;
             results[i] = kShown;
-        } else {  // the game's own highlight (the building cursor) or another tool's group: it goes first
+        } else {  // the game's own highlight (the building cursor), or another tool's group under any setting: it goes first
             applied.groups.erase(t.model);
             results[i] = kGame;
         }
@@ -366,6 +390,7 @@ public:
             r.merged = pf->merged ? 1 : 0;
             const auto m = models.find(e);
             const uint32_t model = m == models.end() ? 0 : m->second;
+            p.index.emplace(e, p.targets.size());
             p.targets.push_back({e, model, kGroups[pf->slot]});
             plan_entities_.push_back(e);
             if (!model) set_state(r, KILN_RENDER_OUTLINE_WAITING, KILN_RENDER_OUTLINE_NO_MODEL);
@@ -384,13 +409,17 @@ public:
     void results(uint64_t generation, const std::vector<uint8_t>& res) {
         std::lock_guard lk(mu_);
         if (generation != plan_generation_) return;  // an older plan's: the next one decides
-        for (size_t i = 0; i < res.size() && i < plan_entities_.size(); ++i)
-            for (Request& r : live_) {
-                if (r.entity != plan_entities_[i] || r.reason == KILN_RENDER_OUTLINE_OUTSHONE) continue;
-                if (res[i] == kShown) set_state(r, KILN_RENDER_OUTLINE_SHOWN, KILN_RENDER_OUTLINE_OK);
-                else if (res[i] == kGame) set_state(r, KILN_RENDER_OUTLINE_GAME, KILN_RENDER_OUTLINE_OK);
-                else if (res[i] == kNoModel) set_state(r, KILN_RENDER_OUTLINE_WAITING, KILN_RENDER_OUTLINE_NO_MODEL);
-            }
+        std::unordered_map<KilnEntity, uint8_t> by;  // one pass over the requests, not one per target
+        by.reserve(plan_entities_.size());
+        for (size_t i = 0; i < res.size() && i < plan_entities_.size(); ++i) by.emplace(plan_entities_[i], res[i]);
+        for (Request& r : live_) {
+            if (r.reason == KILN_RENDER_OUTLINE_OUTSHONE) continue;
+            const auto it = by.find(r.entity);
+            if (it == by.end()) continue;
+            if (it->second == kShown) set_state(r, KILN_RENDER_OUTLINE_SHOWN, KILN_RENDER_OUTLINE_OK);
+            else if (it->second == kGame) set_state(r, KILN_RENDER_OUTLINE_GAME, KILN_RENDER_OUTLINE_OK);
+            else if (it->second == kNoModel) set_state(r, KILN_RENDER_OUTLINE_WAITING, KILN_RENDER_OUTLINE_NO_MODEL);
+        }
     }
 
     struct Counts {
@@ -465,6 +494,64 @@ private:
     std::vector<KilnEntity> plan_entities_;
     uint64_t seq_ = 0, generation_ = 0, plan_generation_ = 0;
     Setting setting_ = kGameFirst;
+};
+
+// The entities' model handles between steps (main thread only). kiln.world's verified ECS reads resolve the engine's
+// owners several times per read (tens of microseconds for entity_validate + ecs_snapshot), so reading every outlined
+// entity every step would cost the main thread milliseconds with a few hundred outlines. A handle is read when it is
+// due: a new entity, one whose handle the stage found naming no instance (stale: the model was destroyed or remade),
+// and every entity once per kModelRefreshSteps steps (spread over the steps by entity id), at most kModelReadsPerStep
+// reads a step, stale ones first. Between reads the stage's own check (Instance with the handle's generation) catches a
+// destroyed model at once. A component that still names an instance the stage found destroyed (a hidden entity) is
+// remembered as dead and planned as no model until it names another one.
+class ModelCache {
+public:
+    // entities: the book's (sorted, unique). read(e) -> the entity's model handle now (0: none), called for those due.
+    // Fills 'out' with every known live handle; returns how many were read.
+    template <class Read>
+    uint32_t update(const std::vector<KilnEntity>& entities, uint64_t step, Read&& read,
+                    std::unordered_map<KilnEntity, uint32_t>& out) {
+        for (auto it = map_.begin(); it != map_.end();)  // entities without a live request any more
+            it = std::binary_search(entities.begin(), entities.end(), it->first) ? std::next(it) : map_.erase(it);
+        for (KilnEntity e : entities) {
+            auto [it, fresh] = map_.try_emplace(e);
+            if (!fresh && it->second.due == kNotDue && (e + step) % kModelRefreshSteps == 0) it->second.due = kDue;
+        }
+        uint32_t reads = 0;
+        for (const uint8_t pass : {kStale, kDue})
+            for (KilnEntity e : entities) {
+                if (reads >= kModelReadsPerStep) break;
+                Entry& en = map_[e];
+                if (en.due != pass) continue;
+                const uint32_t m = read(e);
+                ++reads;
+                if (pass == kStale && m && m == en.model) en.dead = m;  // the component still names the destroyed one
+                en.model = m;
+                en.due = kNotDue;
+            }
+        for (KilnEntity e : entities) {
+            const auto it = map_.find(e);
+            if (it != map_.end() && it->second.model && it->second.model != it->second.dead) out[e] = it->second.model;
+        }
+        return reads;
+    }
+    // The stage found no instance for 'model', the handle planned for 'e': read it again first thing next step.
+    void stale(KilnEntity e, uint32_t model) {
+        const auto it = map_.find(e);
+        if (it == map_.end() || !model || it->second.model != model || it->second.dead == model) return;
+        it->second.due = kStale;
+    }
+    void clear() { map_.clear(); }
+    size_t size() const { return map_.size(); }
+
+private:
+    enum : uint8_t { kNotDue = 0, kDue = 1, kStale = 2 };
+    struct Entry {
+        uint32_t model = 0;
+        uint32_t dead = 0;  // a handle the stage found destroyed that the component still named at the next read
+        uint8_t due = kDue;
+    };
+    std::unordered_map<KilnEntity, Entry> map_;
 };
 
 }  // namespace kout

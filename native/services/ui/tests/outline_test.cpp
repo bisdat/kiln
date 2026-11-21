@@ -182,6 +182,121 @@ int main() {
         std::vector<size_t> which{0};
         kout::apply(w.r, w.renderer, w.last, w.applied, res, &which, false);
         check(w.r.at(chest) == 4 && res[0] == kout::kShown, "mods-first: a later slice takes it back");
+        // another tool's group is never taken, mods first or not (Greeneye's Quick Deposit 6, Find and TWMM 7)
+        const uint32_t qd = w.r.make(6), find = w.r.make(7);
+        w.models[6] = qd;
+        w.models[7] = find;
+        w.r.inst[6].group = 6;
+        w.r.inst[7].group = 7;
+        w.book.add(1, 6, opts(gold), 0, 2);
+        w.book.add(1, 7, opts(gold), 0, 3);
+        w.step();
+        check(w.r.at(qd) == 6 && w.r.at(find) == 7, "mods-first: Quick Deposit's 6 and Find's 7 are left alone");
+        check(info(w.book, 2).state == KILN_RENDER_OUTLINE_GAME && info(w.book, 3).state == KILN_RENDER_OUTLINE_GAME,
+              "mods-first: another tool's group shows instead (GAME)");
+        res.clear();
+        which = {w.last.index.at(6), w.last.index.at(7)};
+        kout::apply(w.r, w.renderer, w.last, w.applied, res, &which, false);
+        check(w.r.at(qd) == 6 && w.r.at(find) == 7, "mods-first: a later slice leaves them alone too");
+        w.book.remove(2);
+        w.book.remove(3);
+        w.step();
+        check(w.r.at(qd) == 6 && w.r.at(find) == 7, "ending the outlines leaves another tool's groups as they were");
+        w.r.inst[6].group = 0;  // Quick Deposit let go
+        w.book.add(1, 6, opts(gold), 0, 4);
+        w.step();
+        check(w.r.at(qd) == 4, "then the model is Kiln's to take");
+    }
+    // ---- the slice's targets (the stage's later slices) ----
+    {
+        kout::Plan p;
+        p.targets = {{100, 1, 4}, {205, 2, 4}, {300, 3, 5}};
+        p.index = {{100, 0}, {205, 1}, {300, 2}};
+        struct Row {
+            uint32_t id;
+            uint32_t pad[3];
+        };
+        const Row rows[5] = {{7, {}}, {300, {}}, {205, {}}, {9, {}}, {100, {}}};
+        std::vector<size_t> which{42};
+        kout::slice_targets(p, rows, 5, sizeof(Row), which);
+        check((which == std::vector<size_t>{2, 1, 0}), "slice_targets: the plan's targets in the slice's row order (stride 16)");
+        kout::slice_targets(p, rows, 1, sizeof(Row), which);
+        check(which.empty(), "slice_targets: none in the slice");
+        kout::slice_targets(p, nullptr, 0, sizeof(Row), which);
+        check(which.empty(), "slice_targets: an empty slice");
+    }
+    // ---- the model handles between steps (ModelCache) ----
+    {
+        kout::ModelCache c;
+        std::map<KilnEntity, uint32_t> world;  // the entities' ModelComponent handles
+        std::map<KilnEntity, int> reads;
+        auto read = [&](KilnEntity e) {
+            ++reads[e];
+            return world.count(e) ? world[e] : 0u;
+        };
+        std::vector<KilnEntity> ents;
+        for (KilnEntity e = 1000; e < 1100; ++e) ents.push_back(e), world[e] = 0x01000000u | e;
+        std::unordered_map<KilnEntity, uint32_t> out;
+        uint64_t step = 1;
+        check(c.update(ents, step++, read, out) == kout::kModelReadsPerStep, "a step reads at most 64 handles");
+        check(out.size() == kout::kModelReadsPerStep, "the ones read are planned");
+        out.clear();
+        check(c.update(ents, step++, read, out) <= kout::kModelReadsPerStep, "the rest the next step");
+        check(out.size() == 100 && out.at(1099) == (0x01000000u | 1099), "every handle known");
+        reads.clear();
+        uint32_t total = 0;
+        for (int s = 0; s < int(kout::kModelRefreshSteps); ++s) {
+            out.clear();
+            total += c.update(ents, step++, read, out);
+            if (out.size() != 100) check(false, "every known handle is planned at every step");
+        }
+        bool once = reads.size() == 100;
+        for (const auto& [e, n] : reads) once = once && n == 1;
+        check(total == 100 && once, "then each handle is read once per 16 steps");
+        // the stage found 1005's handle destroyed: the component names a new model now
+        world[1005] = 0x02000000u | 1005;
+        c.stale(1005, 0x01000000u | 1005);
+        out.clear();
+        reads.clear();
+        c.update(ents, step, read, out);
+        check(reads[1005] == 1 && out.at(1005) == (0x02000000u | 1005), "a stale handle is read again at once");
+        // hidden: the component still names the destroyed instance
+        c.stale(1006, 0x01000000u | 1006);
+        out.clear();
+        c.update(ents, ++step, read, out);
+        check(!out.count(1006), "a handle still named after the stage found it destroyed is planned as no model");
+        c.stale(1006, 0x01000000u | 1006);
+        reads.clear();
+        out.clear();
+        c.update(ents, ++step, read, out);
+        check(reads[1006] == 0, "and is not read every step for it");
+        world[1006] = 0x03000000u | 1006;  // shown again: a new model
+        out.clear();
+        for (int s = 0; s < int(kout::kModelRefreshSteps) && !out.count(1006); ++s) {
+            out.clear();
+            c.update(ents, ++step, read, out);
+        }
+        check(out.count(1006) && out.at(1006) == (0x03000000u | 1006), "its new model is found by the refresh round");
+        // stale ones go first when the budget is short
+        kout::ModelCache d;
+        std::vector<KilnEntity> high;
+        for (KilnEntity e = 500; e < 564; ++e) high.push_back(e), world[e] = 0x01000000u | e;
+        out.clear();
+        check(d.update(high, 1, read, out) == 64 && out.size() == 64, "64 handles read");
+        std::vector<KilnEntity> many;
+        for (KilnEntity e = 1; e <= 200; ++e) many.push_back(e), world[e] = 0x01000000u | e;
+        many.insert(many.end(), high.begin(), high.end());  // sorted: 200 new ones before them
+        world[563] = 0x05000000u | 563;
+        d.stale(563, 0x01000000u | 563);
+        d.stale(500, 0);  // a handle 0 is never stale
+        reads.clear();
+        out.clear();
+        check(d.update(many, 2, read, out) == kout::kModelReadsPerStep, "a full step");
+        check(reads[563] == 1 && out.at(563) == (0x05000000u | 563), "a stale handle is read before 200 new ones");
+        check(reads[500] == 0 && out.at(500) == (0x01000000u | 500), "the others keep their handles");
+        // entities without a request any more are forgotten
+        d.update({1, 2}, 3, read, out);
+        check(d.size() == 2, "entities the book dropped are forgotten");
     }
     // ---- off ----
     {

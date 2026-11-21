@@ -7,7 +7,7 @@
 //    which hand the renderer Kiln's colour for its groups; then an After stage on the client world's
 //    dynamic_render_model (kiln.world game_program_wrap), removed again when nothing is left to show or give back;
 //  - each client Pre: ends (world, owner, expiry, despawn), the entities' model handles (kiln.world's verified ECS reads
-//    of keen::ecs::ModelComponent), the plan and the palette words;
+//    of keen::ecs::ModelComponent, kept between steps by outline_core's ModelCache), the plan and the palette words;
 //  - the stage (the world's thread, inside dynamic_render_model, which holds the RenderScene): outline_core's apply with
 //    the game's Instance and SetGroups, once per client step (and, with mods first, again in each slice that holds an
 //    outlined entity).
@@ -81,15 +81,22 @@ std::atomic<uint64_t> g_sets{0}, g_steps{0}, g_last_step{~uint64_t{0}};
 std::atomic<uint32_t> g_applied_count{0};
 std::atomic<bool> g_stage_fault{false};
 kout::Applied g_applied;  // the world's thread only
+std::atomic<uint64_t> g_off_thread{0};  // slices the stage left because they ran off the world's thread
 // the client world's entities (main thread)
 struct Seen {
     KilnObjectRef ref{};
     bool open = false;
 };
 std::unordered_map<KilnEntity, Seen> g_seen;
+kout::ModelCache g_models;
 uint64_t g_session = 0, g_pre = 0;
-bool g_reads_off = false;  // kiln.world answered UNAVAILABLE for a client-world read
+// kiln.world's client-world reads this Pre: one answered UNAVAILABLE / one worked. UNAVAILABLE is also what a world
+// that is not there yet (or no longer) answers, so outlines fail only after every read answered it for kReadsOffMs.
+bool g_read_unavailable = false, g_read_ok = false;
+uint64_t g_unavailable_since = 0;
+constexpr uint64_t kReadsOffMs = 10000;
 constexpr uint64_t kEpoch = 1;
+bool g_logged_off_thread = false;
 
 void set_detail(const std::string& s) {
     std::lock_guard lk(g_detail_mu);
@@ -196,22 +203,27 @@ uint32_t KILN_CALL grab_scene(uint64_t* iter, uint32_t, KilnEntity, void* user) 
 
 void KILN_CALL stage(KilnGameSlice* slice, void*) {
     if (!slice || slice->world_kind != KILN_WORLD_CLIENT || !slice->count || g_phase.load() != kReady) return;
+    // g_applied is the world thread's alone. dynamic_render_model is PINNED (descriptor flag 0x400: its slices run one
+    // after another on the client world's thread, docs/re/world.md), so this holds on 26430625; a build that ran its
+    // slices on the workers gets no outlines (Pre logs it) instead of two slices in g_applied at once.
+    if (!slice->thread_is_world) {
+        g_off_thread.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
     std::shared_ptr<const kout::Plan> plan;
     {
         std::lock_guard lk(g_plan_mu);
         plan = g_plan;
     }
     if (!plan || (plan->targets.empty() && g_applied_count.load() == 0)) return;
+    // the plan's models are the client world's of its session: never applied in another world's renderer (one at the
+    // old address included) should a step ever run before its Pre published a new plan
+    if (plan->session != g_world->game_world_session(KILN_WORLD_CLIENT)) return;
     const bool first = g_last_step.load(std::memory_order_relaxed) != slice->step;
     if (!first && plan->setting != kout::kModsFirst) return;
     std::vector<size_t> which;
     if (!first) {  // mods first: the outlined entities of this slice, after the game set their groups in it
-        for (uint32_t r = 0; r < slice->count; ++r) {
-            uint32_t id = 0;
-            std::memcpy(&id, reinterpret_cast<const uint8_t*>(slice->entity_ids) + size_t(r) * slice->entity_stride, 4);
-            for (size_t i = 0; i < plan->targets.size(); ++i)
-                if (plan->targets[i].entity == id) which.push_back(i);
-        }
+        kout::slice_targets(*plan, slice->entity_ids, slice->count, slice->entity_stride, which);
         if (which.empty()) return;
     }
     Grab g{slice, nullptr};
@@ -322,6 +334,8 @@ uint32_t model_of(KilnEntity e) {
         KilnObjectInfo info{};
         info.size = sizeof info;
         const KilnResult v = g_world->entity_validate(g_owner, &s.ref, &info);
+        if (v == KILN_OK) g_read_ok = true;
+        else if (v == KILN_ERR_UNAVAILABLE) g_read_unavailable = true;
         if (v != KILN_OK) {
             const bool alive = (info.flags & KILN_OBJECT_ALIVE) != 0;
             if (info.status == KILN_ECS_ABSENT || (info.status == KILN_ECS_STALE && !alive && info.session == s.ref.session)) {
@@ -336,14 +350,16 @@ uint32_t model_of(KilnEntity e) {
         KilnObjectRef ref{};
         ref.size = sizeof ref;
         const KilnResult rc = g_world->entity_open(g_owner, kEpoch, KILN_WORLD_CLIENT, 0, e, &ref);
-        if (rc == KILN_ERR_UNAVAILABLE) g_reads_off = true;
+        if (rc == KILN_ERR_UNAVAILABLE) g_read_unavailable = true;
         if (rc != KILN_OK) return 0;  // not here (yet): not streamed to this client, or no client world
+        g_read_ok = true;
         s.ref = ref;
         s.open = true;
     }
     uint32_t model = 0, need = 0;
     const KilnResult rc = g_world->ecs_snapshot(g_owner, &s.ref, g_model_hash, &model, sizeof model, &need);
-    if (rc == KILN_ERR_UNAVAILABLE) g_reads_off = true;
+    if (rc == KILN_ERR_UNAVAILABLE) g_read_unavailable = true;
+    else if (rc == KILN_OK || rc == KILN_ERR_NOT_FOUND) g_read_ok = true;
     return rc == KILN_OK && need == 4 ? model : 0;  // NOT_FOUND: no ModelComponent (a voxel model, an effect)
 }
 
@@ -354,7 +370,14 @@ void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
     if (session != g_session) {
         if (g_session) g_book.end_all(KILN_RENDER_OUTLINE_WORLD);
         g_seen.clear();
+        g_models.clear();
+        g_unavailable_since = 0;
         g_session = session;
+    }
+    if (!g_logged_off_thread && g_off_thread.load(std::memory_order_relaxed)) {
+        g_logged_off_thread = true;
+        logf(KILN_LOG_WARN, "render: outlines: dynamic_render_model ran off the client world's thread on this build; "
+                            "the stage leaves those slices (no outlines there)");
     }
     g_book.expire(GetTickCount64());
     if (g_pre % 60 == 0)  // a mod's owner that was revoked (the mod unloaded without clearing)
@@ -368,6 +391,15 @@ void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
         std::lock_guard lk(g_res_mu);
         if (g_res_new) {
             g_book.results(g_res_gen, g_res);
+            // a planned handle that named no instance (the model was destroyed or remade): read it again first
+            std::shared_ptr<const kout::Plan> last;
+            {
+                std::lock_guard pk(g_plan_mu);
+                last = g_plan;
+            }
+            if (last && last->generation == g_res_gen)
+                for (size_t i = 0; i < g_res.size() && i < last->targets.size(); ++i)
+                    if (g_res[i] == kout::kNoModel) g_models.stale(last->targets[i].entity, last->targets[i].model);
             g_res_new = false;
         }
     }
@@ -375,12 +407,22 @@ void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
     if (live && g_phase.load() == kHooking) install_step();
     if (g_phase.load() == kFailed) return;
     std::unordered_map<KilnEntity, uint32_t> models;
-    if (live)
-        for (KilnEntity e : g_book.entities())
-            if (const uint32_t m = model_of(e)) models[e] = m;
-    if (g_reads_off) {
-        fail("kiln.world cannot read the client world's entities on this build (no exact engine profile for it)");
-        return;
+    g_read_unavailable = g_read_ok = false;
+    if (live) {
+        g_models.update(g_book.entities(), g_pre, &model_of, models);
+    } else {
+        g_models.clear();
+        g_seen.clear();
+    }
+    if (g_read_ok) {
+        g_unavailable_since = 0;
+    } else if (g_read_unavailable) {  // every read this step answered UNAVAILABLE
+        const uint64_t now = GetTickCount64();
+        if (!g_unavailable_since) g_unavailable_since = now;
+        else if (now - g_unavailable_since >= kReadsOffMs) {
+            fail("kiln.world cannot read the client world's entities on this build (no exact engine profile for it)");
+            return;
+        }
     }
     kout::Book::Slot slots[2];
     auto plan = std::make_shared<kout::Plan>(
@@ -470,8 +512,13 @@ KilnResult KILN_CALL outline_add(KilnOwner owner, KilnEntity entity, const KilnR
     if (g_phase.load() == kFailed) return KILN_ERR_UNAVAILABLE;
     const KilnHandle h = next_handle();
     const KilnResult rc = g_book.add(owner, entity, *o, GetTickCount64(), h);
-    if (rc == KILN_OK) *out = h;
-    return rc;
+    if (rc != KILN_OK) return rc;
+    if (g_phase.load() == kFailed) {  // the mechanism failed while this was added: it would wait for nothing
+        g_book.end_all(KILN_RENDER_OUTLINE_FAILED);
+        return KILN_ERR_UNAVAILABLE;
+    }
+    *out = h;
+    return KILN_OK;
 }
 
 KilnResult KILN_CALL outline_info(KilnHandle h, KilnRenderOutlineInfo* out) {
