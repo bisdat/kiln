@@ -59,6 +59,7 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `rarityUpgrades` | object |  | Rarity upgrades: which items an upgrade takes, up to which rarity, and what each step costs (items, a chance, what a failed roll costs). Items.UpgradeRarity(player, item, "name") runs one; an upgraded item gets its next enhancement slot in place, which the player unlocks at the workbench as usual. Server; asks nothing of players' games. |
 | `recipes` | object |  | Recipes of their own: one more way to make any item at a station, such as a game item at the game's workbench. |
 | `resourcePatches` | object |  | Changes to the game's own resources, made before the game reads them: fields, a template's components, a list's length (a mod with "boot": true; docs/kiln/modding/resource-patches.md). Not blocks: kiln.content applies them. |
+| `routines` | object |  | Day plans for villagers: windows of the game day, each with one of the game's own villager tasks, and a fallback. Bound to a villager by code (Routines.Assign) or by an NPC block's routine. Server; asks nothing of players' games. |
 | `rules` | object |  | Rules, for behaviours to name. |
 | `screenEffects` | object |  | Full-screen effects: colour grading, a tint, a vignette, fades and flashes. Drawn by each Kiln client; players' games need nothing for them. |
 | `seats` | object |  | Seats: the game's sitting, comfort of the chair category. |
@@ -1057,6 +1058,7 @@ A friendly NPC on a game NPC's body: talk, wares, a place in the roster.
 | `names` | object |  |  |
 | `place` | object |  |  |
 | `roster` | object |  |  |
+| `routine` | [ref](#ref) or [routine](#routine) |  | Its day plan: a routines block of this mod by name, or a plan written here (it becomes the block <this block's name>.routine). Only the server follows it. |
 | `talk` | string |  | A dialogue block or quests/*.json dialogue of this mod. Another mod's dialogue is not supported by the startup build. |
 | `vendor` | object |  |  |
 | `was` | string |  |  |
@@ -1445,6 +1447,45 @@ One resource and what to change in it: fields to set, a template's components, l
 | `resource` | string | yes | The resource's GUID. |
 | `set` | object |  | Member path to value. A path: members by name, [i] an element of a list, [*] every element. |
 | `type` | string | yes | The resource's qualified type name, as keen::BalancingTable. min length 1 |
+
+## routine
+
+A villager's day plan (RoutineBlock). At each decision the villager takes the window with the highest priority that covers the game minute; equal priorities go to the window written first; no window: the fallback.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `fallback` | [routineFallback](#routinefallback) |  |  |
+| `version` | integer |  | The version of the plan's content (default 1). Raise it when the windows or the fallback change: a saved assignment follows a higher version, and refuses changed content of the same version. min 1 max 4294967295 |
+| `was` | string |  | The block name this plan had before a rename: saved assignments still find it. min length 1 |
+| `windows` | array of [routineWindow](#routinewindow) |  | The windows of the day. max items 64 |
+
+## routineFallback
+
+The task for a minute no window covers, and after a sleep the game does not allow now (default vanilla). A task that always can: vanilla, idle or roam.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `kind` | `"vanilla"` \| `"idle"` \| `"roam"` | yes |  |
+
+## routineTask
+
+One of the game's own villager tasks. It takes no values in this version: how long an idle lasts and how far a roam goes are the villager's own.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `kind` | `"vanilla"` \| `"idle"` \| `"roam"` \| `"sleep"` \| `"sit"` \| `"inspect"` | yes | vanilla: the game's own choice. idle: stand. roam: walk around home. sleep: go to the assigned bed, when the game lets this villager sleep now (else the fallback runs). sit: find a seat. inspect: find something to look at or work on. |
+
+## routineWindow
+
+One window: from startMinute up to, not including, endMinute, in minutes of the game day (0 is midnight). A start after the end runs over midnight. Equal start and end is refused, except 0 and 0 with allDay.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `allDay` | boolean |  | The whole day; then startMinute and endMinute are 0 or left out. |
+| `endMinute` | integer |  | The first minute after the window (default 0; midnight is 0). min 0 max 1439 |
+| `priority` | integer |  | Among the windows that cover a minute the highest wins (default 0). min -2147483648 max 2147483647 |
+| `startMinute` | integer |  | The first minute of the window (default 0). min 0 max 1439 |
+| `task` | [routineTask](#routinetask) | yes |  |
 
 ## rule
 

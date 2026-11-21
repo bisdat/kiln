@@ -14,6 +14,10 @@
     <InternalsVisibleTo Include="Kiln.World.Tests" />
     <InternalsVisibleTo Include="Kiln.Terrain" />
     <InternalsVisibleTo Include="Kiln.TestKit" />
+    <!-- Kiln.ModValues: its ledger's explicit-owner records (CharacterStore), the live character sessions and the
+         sidecar's reserved projection (CharacterSync). Kiln.Saves never references it. -->
+    <InternalsVisibleTo Include="Kiln.ModValues" />
+    <InternalsVisibleTo Include="Kiln.ModValues.Tests" />
     <!-- the contract tests: the rows' names -->
     <InternalsVisibleTo Include="Kiln.Contract.Tests" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />

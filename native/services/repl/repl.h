@@ -63,6 +63,11 @@ struct Registry {
     std::string names[kMaxComponents];
 };
 const Registry* registry();  // tick thread; nullptr until a world's registry was read
+// The registry facts of any world (the client world's too); allocates, so never inside a hook. nullptr when unreadable.
+Registry* build_registry(uintptr_t world);
+// The same for the game's job threads during the send step (no lock: the registry is replaced only on the tick thread,
+// in Pre, while no replication job runs).
+const Registry* registry_hot();
 
 // Guarded copies of game memory (false on a bad address).
 bool read_mem(uintptr_t address, void* out, size_t n);
@@ -78,11 +83,75 @@ void describe(uintptr_t where, char* out, size_t cap);
 // Calls the game's StateIndex into `index` (kIndexBytes, zeroed here first). False when it faulted.
 bool state_index(uint8_t* index, const uint8_t* state, uintptr_t registry_address);
 
-// A guard the tick thread's flush must look at.
+// A guard the tick thread's flush must look at (at the service's start: the list is fixed after it).
 void add_guard(Guard* g);
 
 // The peer of machine m as the last Pre saw it (kiln_repl.h "Machines and peers"); flags KILN_REPL_PEER_*.
 uint32_t peer_of(uint32_t machine, uint8_t* flags);
+// The peer a record stamped with slot handle `raw` belongs to: peer_of(), unless the slot had another peer when the hook
+// ran (taken over within the frame): then `raw` itself, without flags.
+uint32_t peer_at(uint32_t machine, uint32_t raw, uint8_t* flags);
+
+uint32_t side();      // KILN_SIDE_* of this process
+bool observe_on();    // repl.observe resolved and the send step is hooked
+
+// The machine and channel (pred: 0 client, 1 prediction) of a replication context of `world`, or -1. Reads the world's
+// object table: call it inside a guard.
+int machine_of_ctx(uintptr_t world, uintptr_t ctx, uint8_t* pred);
+
+// ---- per-peer stats (stats.cpp) ----
+extern std::atomic<bool> g_measure;           // lab servers: time the hooks' own code (lab_hook_cost)
+extern std::atomic<uint64_t> g_observer_allocs; // allocations made inside observer code
+void stats_init();                            // kiln_plugin_main, after repl.observe resolved
+void retiring_init();                         // kiln_plugin_main, always: revoked owners lose their holds and watches
+void stats_pre();                             // tick thread, every Pre: an owner that went off the tick thread
+void stats_peer_changed(uint32_t machine);    // tick thread: machine's slot has another peer
+void snapshot_peers();                        // tick thread: which peer stands behind each machine, now
+void stats_world_stopping();
+void note_send_step(uint64_t start_tsc, uint64_t end_tsc);  // tick thread, lab: one send step
+bool stats_apply_hooks();                     // tick thread: the hooks follow the stats' owners and the watches; false
+                                              // when a wanted hook could not be installed
+bool stats_send_hooked();                     // the SendCallback and EntityWriter hooks are in
+KilnResult KILN_CALL t_stats_enable(KilnOwner owner, bool on);
+KilnResult KILN_CALL t_peer_stats(KilnReplPeerStats* out, uint32_t cap, uint32_t* count);
+KilnResult KILN_CALL lab_hook_cost(KilnReplHookCost* out, bool reset);
+
+// ---- the send watch and the capture (watch.cpp) ----
+struct WatchCost {
+    uint64_t delta_calls = 0, delta_cycles = 0, records = 0, dropped = 0;
+};
+void watch_init();                            // kiln_plugin_main
+bool watch_active();                          // any thread: a watch or a capture needs the writer and callback hooks
+// The EntityWriter and SendCallback hooks' watch part (stats.cpp, inside their guards); watch_writer_done after every
+// writer call, outside the guard.
+void watch_writer_before(const uint8_t* args, uintptr_t ctx, int32_t machine, uint8_t pred);
+void watch_writer_after(const WriterOut* out, uint64_t result);
+void watch_writer_done();
+void watch_callback(const Batch* b, uintptr_t gs);  // gs: the GameServer (the slot's handle is stamped)
+void watch_deliver();                         // tick thread, every Pre: the last frame's records to watches and capture
+void watch_apply();                           // tick thread: hot list, rings and the delta hook follow the watches
+void watch_peer_changed(uint32_t machine, uint32_t old_peer);  // tick thread
+void watch_world_stopping();                  // tick thread
+void watch_owner_retiring(KilnOwner owner);   // any thread
+uint64_t watch_dropped(uint32_t machine, uint32_t ch);
+void watch_clear_dropped();                   // tick thread, no producer running
+void watch_cost(WatchCost* out);
+void watch_cost_reset();
+KilnResult KILN_CALL t_watch(KilnOwner owner, KilnEntity e, uint32_t peer_or_all, uint32_t direction, KilnReplWatchFn fn,
+                             void* user, KilnHandle* out);
+KilnResult KILN_CALL t_remove(KilnHandle h);
+KilnResult KILN_CALL t_capture(KilnOwner owner, uint32_t peer, uint32_t seconds, KilnStr path);
+// ---- a client's receive side (client.cpp: KILN_REPL_RECEIVE watches) ----
+bool client_init();                           // kiln_plugin_main on a game client: repl.client's symbols, the client Pre
+bool client_on();                             // repl.client resolved here
+KilnResult client_watch(KilnOwner owner, KilnEntity e, KilnReplWatchFn fn, void* user, KilnHandle* out);
+KilnResult client_remove(KilnHandle h);
+void client_owner_retiring(KilnOwner owner);  // any thread
+// The client's own receive counters: stats_enable / peer_stats called on a game client's main thread (the client world's
+// thread, not the server world's) count what this client receives instead of what a server sends.
+bool client_stats_thread();
+KilnResult client_stats_enable(KilnOwner owner, bool on);
+KilnResult client_peer_stats(KilnReplPeerStats* out, uint32_t cap, uint32_t* count);
 
 // ---- the loopback harness (loopback.cpp) ----
 bool lab_init();                    // kiln_plugin_main, after the features resolved: what the harness needs
@@ -97,6 +166,8 @@ KilnResult KILN_CALL lab_force_relevant(uint32_t machine, KilnEntity entity);
 KilnResult KILN_CALL lab_remove_fakes();
 KilnResult KILN_CALL lab_stats(KilnReplLoopbackStats* out);
 KilnResult KILN_CALL lab_decoded(uint32_t machine, KilnEntity entity, uint32_t hash, uint8_t* out, uint32_t cap, uint32_t* len,
+                                 uint32_t* tick);
+KilnResult KILN_CALL lab_payload(uint32_t machine, KilnEntity entity, uint32_t kind, uint8_t* out, uint32_t cap, uint32_t* len,
                                  uint32_t* tick);
 
 }  // namespace repl

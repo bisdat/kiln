@@ -37,5 +37,7 @@
     <ProjectReference Include="../Kiln.Content/Kiln.Content.csproj" Private="false" />
     <!-- Ui.Values' item views (ItemRarity) -->
     <ProjectReference Include="../Kiln.Items/Kiln.Items.csproj" Private="false" />
+    <!-- the Network page's Replication section (ReplicationView) -->
+    <ProjectReference Include="../Kiln.Replication/Kiln.Replication.csproj" Private="false" />
   </ItemGroup>
 </Project>

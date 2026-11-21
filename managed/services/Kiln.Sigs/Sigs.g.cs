@@ -474,6 +474,475 @@ namespace Kiln.Sigs.Items
 
 }
 
+namespace Kiln.Sigs.Routines
+{
+    /// <summary>The game function <c>routines/DecideTask</c> as a typed hook and call: <c>void (ptr ctx, u8 phase)</c> (sigdb descriptor;
+    /// its code reads [rcx, rdx]). It has no direct call (its descriptor says <c>invoke: none</c>): hook it only. Advanced mods only. Its capability row <c>sig/routines/DecideTask</c> is on when the symbol resolved
+    /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
+    public static unsafe class DecideTask
+    {
+        /// <summary>The sigdb symbol.</summary>
+        public const string Symbol = "routines/DecideTask";
+
+        /// <summary>The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.</summary>
+        public const string Capability = "sig/routines/DecideTask";
+
+        /// <summary>The descriptor as kiln.hooks takes it.</summary>
+        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+        public static readonly global::Kiln.SigDescriptor Descriptor = new(Symbol, global::Kiln.SigKind.Void, 0, false, global::Kiln.SigInvoke.None,
+            new global::Kiln.SigArg("ctx", global::Kiln.SigKind.Ptr, 8),
+            new global::Kiln.SigArg("phase", global::Kiln.SigKind.U8, 1));
+
+        /// <summary>One call of the function in flight, inside a <see cref="Handler"/>: its arguments (read and write; a
+        /// narrow integer is masked to its type), <see cref="CallOriginal"/> and <see cref="Skip"/>. Valid during
+        /// the handler only.</summary>
+        public readonly ref struct Call
+        {
+            private readonly global::Kiln.SigCall _c;
+
+            internal Call(global::Kiln.SigCall c) => _c = c;
+
+            /// <summary>Argument 1 <c>ctx</c> (ptr, rcx).</summary>
+            public nint Ctx { get => unchecked((nint)(long)_c.Int(0)); set => _c.SetInt(0, unchecked((ulong)(long)value)); }
+
+            /// <summary>Argument 2 <c>phase</c> (u8, rdx).</summary>
+            public byte Phase { get => unchecked((byte)_c.Int(1)); set => _c.SetInt(1, (ulong)value); }
+
+            /// <summary>Runs the rest of the hook chain and the game's function once, with the arguments as they are now;
+            /// a second call does nothing. Without it (and without <see cref="Skip"/>) the function runs after the handler.</summary>
+            public void CallOriginal() => _c.CallOriginal();
+
+            /// <summary>Whether <see cref="CallOriginal"/> ran.</summary>
+            public bool OriginalCalled => _c.OriginalCalled;
+
+            /// <summary>Ends the call without the game's function: the caller gets nothing. After
+            /// <see cref="CallOriginal"/> it changes nothing.</summary>
+            public void Skip() => _c.Skip();
+        }
+
+        /// <summary>A handler of the function: it gets the call in flight by reference.</summary>
+        public delegate void Handler(ref Call call);
+
+        /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
+        /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
+        /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
+        /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
+        /// <exception cref="global::Kiln.KilnUnavailableException"><c>hooks.typed</c> is off (a core without typed links).</exception>
+        /// <exception cref="global::System.InvalidOperationException">The calling mod is not advanced, or has unloaded.</exception>
+        [global::Kiln.AdvancedApi, global::Kiln.AnyThread, global::Kiln.RequiresCapability("hooks.typed")]
+        public static global::Kiln.HookResult Detour(Handler handler, int priority = 0)
+        {
+            if (handler is null) throw new global::System.ArgumentNullException(nameof(handler));
+            return global::Kiln.TypedHooks.Detour(Descriptor, c => { var call = new Call(c); handler(ref call); }, priority);
+        }
+    }
+
+    /// <summary>The game function <c>routines/FinishState</c> as a typed hook and call: <c>bool (ptr ctx, u8 condition)</c> (sigdb descriptor;
+    /// its code reads [rcx, rdx]). It has no direct call (its descriptor says <c>invoke: none</c>): hook it only. Advanced mods only. Its capability row <c>sig/routines/FinishState</c> is on when the symbol resolved
+    /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
+    public static unsafe class FinishState
+    {
+        /// <summary>The sigdb symbol.</summary>
+        public const string Symbol = "routines/FinishState";
+
+        /// <summary>The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.</summary>
+        public const string Capability = "sig/routines/FinishState";
+
+        /// <summary>The descriptor as kiln.hooks takes it.</summary>
+        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+        public static readonly global::Kiln.SigDescriptor Descriptor = new(Symbol, global::Kiln.SigKind.Bool, 1, false, global::Kiln.SigInvoke.None,
+            new global::Kiln.SigArg("ctx", global::Kiln.SigKind.Ptr, 8),
+            new global::Kiln.SigArg("condition", global::Kiln.SigKind.U8, 1));
+
+        /// <summary>One call of the function in flight, inside a <see cref="Handler"/>: its arguments (read and write; a
+        /// narrow integer is masked to its type), its <see cref="Result"/>, <see cref="CallOriginal"/> and <see cref="Skip"/>. Valid during
+        /// the handler only.</summary>
+        public readonly ref struct Call
+        {
+            private readonly global::Kiln.SigCall _c;
+
+            internal Call(global::Kiln.SigCall c) => _c = c;
+
+            /// <summary>Argument 1 <c>ctx</c> (ptr, rcx).</summary>
+            public nint Ctx { get => unchecked((nint)(long)_c.Int(0)); set => _c.SetInt(0, unchecked((ulong)(long)value)); }
+
+            /// <summary>Argument 2 <c>condition</c> (u8, rdx).</summary>
+            public byte Condition { get => unchecked((byte)_c.Int(1)); set => _c.SetInt(1, (ulong)value); }
+
+            /// <summary>The return value (bool, rax): zero until the original ran or the handler set it; what the
+            /// caller gets.</summary>
+            public bool Result { get => (unchecked((byte)_c.RetInt) != 0); set => _c.SetRetInt((value ? 1UL : 0UL)); }
+
+            /// <summary>Runs the rest of the hook chain and the game's function once, with the arguments as they are now;
+            /// a second call does nothing. Without it (and without <see cref="Skip"/>) the function runs after the handler.</summary>
+            public void CallOriginal() => _c.CallOriginal();
+
+            /// <summary>Whether <see cref="CallOriginal"/> ran.</summary>
+            public bool OriginalCalled => _c.OriginalCalled;
+
+            /// <summary>Ends the call without the game's function: the caller gets <see cref="Result"/> as the handler set it. After
+            /// <see cref="CallOriginal"/> it changes nothing.</summary>
+            public void Skip() => _c.Skip();
+        }
+
+        /// <summary>A handler of the function: it gets the call in flight by reference.</summary>
+        public delegate void Handler(ref Call call);
+
+        /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
+        /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
+        /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
+        /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
+        /// <exception cref="global::Kiln.KilnUnavailableException"><c>hooks.typed</c> is off (a core without typed links).</exception>
+        /// <exception cref="global::System.InvalidOperationException">The calling mod is not advanced, or has unloaded.</exception>
+        [global::Kiln.AdvancedApi, global::Kiln.AnyThread, global::Kiln.RequiresCapability("hooks.typed")]
+        public static global::Kiln.HookResult Detour(Handler handler, int priority = 0)
+        {
+            if (handler is null) throw new global::System.ArgumentNullException(nameof(handler));
+            return global::Kiln.TypedHooks.Detour(Descriptor, c => { var call = new Call(c); handler(ref call); }, priority);
+        }
+    }
+
+    /// <summary>The game function <c>routines/ProcessCommands</c> as a typed hook and call: <c>void (ptr ctx)</c> (sigdb descriptor;
+    /// its code reads [rcx]). It has no direct call (its descriptor says <c>invoke: none</c>): hook it only. Advanced mods only. Its capability row <c>sig/routines/ProcessCommands</c> is on when the symbol resolved
+    /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
+    public static unsafe class ProcessCommands
+    {
+        /// <summary>The sigdb symbol.</summary>
+        public const string Symbol = "routines/ProcessCommands";
+
+        /// <summary>The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.</summary>
+        public const string Capability = "sig/routines/ProcessCommands";
+
+        /// <summary>The descriptor as kiln.hooks takes it.</summary>
+        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+        public static readonly global::Kiln.SigDescriptor Descriptor = new(Symbol, global::Kiln.SigKind.Void, 0, false, global::Kiln.SigInvoke.None,
+            new global::Kiln.SigArg("ctx", global::Kiln.SigKind.Ptr, 8));
+
+        /// <summary>One call of the function in flight, inside a <see cref="Handler"/>: its arguments (read and write; a
+        /// narrow integer is masked to its type), <see cref="CallOriginal"/> and <see cref="Skip"/>. Valid during
+        /// the handler only.</summary>
+        public readonly ref struct Call
+        {
+            private readonly global::Kiln.SigCall _c;
+
+            internal Call(global::Kiln.SigCall c) => _c = c;
+
+            /// <summary>Argument 1 <c>ctx</c> (ptr, rcx).</summary>
+            public nint Ctx { get => unchecked((nint)(long)_c.Int(0)); set => _c.SetInt(0, unchecked((ulong)(long)value)); }
+
+            /// <summary>Runs the rest of the hook chain and the game's function once, with the arguments as they are now;
+            /// a second call does nothing. Without it (and without <see cref="Skip"/>) the function runs after the handler.</summary>
+            public void CallOriginal() => _c.CallOriginal();
+
+            /// <summary>Whether <see cref="CallOriginal"/> ran.</summary>
+            public bool OriginalCalled => _c.OriginalCalled;
+
+            /// <summary>Ends the call without the game's function: the caller gets nothing. After
+            /// <see cref="CallOriginal"/> it changes nothing.</summary>
+            public void Skip() => _c.Skip();
+        }
+
+        /// <summary>A handler of the function: it gets the call in flight by reference.</summary>
+        public delegate void Handler(ref Call call);
+
+        /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
+        /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
+        /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
+        /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
+        /// <exception cref="global::Kiln.KilnUnavailableException"><c>hooks.typed</c> is off (a core without typed links).</exception>
+        /// <exception cref="global::System.InvalidOperationException">The calling mod is not advanced, or has unloaded.</exception>
+        [global::Kiln.AdvancedApi, global::Kiln.AnyThread, global::Kiln.RequiresCapability("hooks.typed")]
+        public static global::Kiln.HookResult Detour(Handler handler, int priority = 0)
+        {
+            if (handler is null) throw new global::System.ArgumentNullException(nameof(handler));
+            return global::Kiln.TypedHooks.Detour(Descriptor, c => { var call = new Call(c); handler(ref call); }, priority);
+        }
+    }
+
+    /// <summary>The game function <c>routines/SetDecision</c> as a typed hook and call: <c>void (ptr ctx, u8 decision)</c> (sigdb descriptor;
+    /// its code reads [rcx, rdx]). It has no direct call (its descriptor says <c>invoke: none</c>): hook it only. Advanced mods only. Its capability row <c>sig/routines/SetDecision</c> is on when the symbol resolved
+    /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
+    public static unsafe class SetDecision
+    {
+        /// <summary>The sigdb symbol.</summary>
+        public const string Symbol = "routines/SetDecision";
+
+        /// <summary>The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.</summary>
+        public const string Capability = "sig/routines/SetDecision";
+
+        /// <summary>The descriptor as kiln.hooks takes it.</summary>
+        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+        public static readonly global::Kiln.SigDescriptor Descriptor = new(Symbol, global::Kiln.SigKind.Void, 0, false, global::Kiln.SigInvoke.None,
+            new global::Kiln.SigArg("ctx", global::Kiln.SigKind.Ptr, 8),
+            new global::Kiln.SigArg("decision", global::Kiln.SigKind.U8, 1));
+
+        /// <summary>One call of the function in flight, inside a <see cref="Handler"/>: its arguments (read and write; a
+        /// narrow integer is masked to its type), <see cref="CallOriginal"/> and <see cref="Skip"/>. Valid during
+        /// the handler only.</summary>
+        public readonly ref struct Call
+        {
+            private readonly global::Kiln.SigCall _c;
+
+            internal Call(global::Kiln.SigCall c) => _c = c;
+
+            /// <summary>Argument 1 <c>ctx</c> (ptr, rcx).</summary>
+            public nint Ctx { get => unchecked((nint)(long)_c.Int(0)); set => _c.SetInt(0, unchecked((ulong)(long)value)); }
+
+            /// <summary>Argument 2 <c>decision</c> (u8, rdx).</summary>
+            public byte Decision { get => unchecked((byte)_c.Int(1)); set => _c.SetInt(1, (ulong)value); }
+
+            /// <summary>Runs the rest of the hook chain and the game's function once, with the arguments as they are now;
+            /// a second call does nothing. Without it (and without <see cref="Skip"/>) the function runs after the handler.</summary>
+            public void CallOriginal() => _c.CallOriginal();
+
+            /// <summary>Whether <see cref="CallOriginal"/> ran.</summary>
+            public bool OriginalCalled => _c.OriginalCalled;
+
+            /// <summary>Ends the call without the game's function: the caller gets nothing. After
+            /// <see cref="CallOriginal"/> it changes nothing.</summary>
+            public void Skip() => _c.Skip();
+        }
+
+        /// <summary>A handler of the function: it gets the call in flight by reference.</summary>
+        public delegate void Handler(ref Call call);
+
+        /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
+        /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
+        /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
+        /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
+        /// <exception cref="global::Kiln.KilnUnavailableException"><c>hooks.typed</c> is off (a core without typed links).</exception>
+        /// <exception cref="global::System.InvalidOperationException">The calling mod is not advanced, or has unloaded.</exception>
+        [global::Kiln.AdvancedApi, global::Kiln.AnyThread, global::Kiln.RequiresCapability("hooks.typed")]
+        public static global::Kiln.HookResult Detour(Handler handler, int priority = 0)
+        {
+            if (handler is null) throw new global::System.ArgumentNullException(nameof(handler));
+            return global::Kiln.TypedHooks.Detour(Descriptor, c => { var call = new Call(c); handler(ref call); }, priority);
+        }
+    }
+
+    /// <summary>The game function <c>routines/SetState</c> as a typed hook and call: <c>void (ptr ctx, u8 state)</c> (sigdb descriptor;
+    /// its code reads [rcx, rdx]). It has no direct call (its descriptor says <c>invoke: none</c>): hook it only. Advanced mods only. Its capability row <c>sig/routines/SetState</c> is on when the symbol resolved
+    /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
+    public static unsafe class SetState
+    {
+        /// <summary>The sigdb symbol.</summary>
+        public const string Symbol = "routines/SetState";
+
+        /// <summary>The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.</summary>
+        public const string Capability = "sig/routines/SetState";
+
+        /// <summary>The descriptor as kiln.hooks takes it.</summary>
+        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+        public static readonly global::Kiln.SigDescriptor Descriptor = new(Symbol, global::Kiln.SigKind.Void, 0, false, global::Kiln.SigInvoke.None,
+            new global::Kiln.SigArg("ctx", global::Kiln.SigKind.Ptr, 8),
+            new global::Kiln.SigArg("state", global::Kiln.SigKind.U8, 1));
+
+        /// <summary>One call of the function in flight, inside a <see cref="Handler"/>: its arguments (read and write; a
+        /// narrow integer is masked to its type), <see cref="CallOriginal"/> and <see cref="Skip"/>. Valid during
+        /// the handler only.</summary>
+        public readonly ref struct Call
+        {
+            private readonly global::Kiln.SigCall _c;
+
+            internal Call(global::Kiln.SigCall c) => _c = c;
+
+            /// <summary>Argument 1 <c>ctx</c> (ptr, rcx).</summary>
+            public nint Ctx { get => unchecked((nint)(long)_c.Int(0)); set => _c.SetInt(0, unchecked((ulong)(long)value)); }
+
+            /// <summary>Argument 2 <c>state</c> (u8, rdx).</summary>
+            public byte State { get => unchecked((byte)_c.Int(1)); set => _c.SetInt(1, (ulong)value); }
+
+            /// <summary>Runs the rest of the hook chain and the game's function once, with the arguments as they are now;
+            /// a second call does nothing. Without it (and without <see cref="Skip"/>) the function runs after the handler.</summary>
+            public void CallOriginal() => _c.CallOriginal();
+
+            /// <summary>Whether <see cref="CallOriginal"/> ran.</summary>
+            public bool OriginalCalled => _c.OriginalCalled;
+
+            /// <summary>Ends the call without the game's function: the caller gets nothing. After
+            /// <see cref="CallOriginal"/> it changes nothing.</summary>
+            public void Skip() => _c.Skip();
+        }
+
+        /// <summary>A handler of the function: it gets the call in flight by reference.</summary>
+        public delegate void Handler(ref Call call);
+
+        /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
+        /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
+        /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
+        /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
+        /// <exception cref="global::Kiln.KilnUnavailableException"><c>hooks.typed</c> is off (a core without typed links).</exception>
+        /// <exception cref="global::System.InvalidOperationException">The calling mod is not advanced, or has unloaded.</exception>
+        [global::Kiln.AdvancedApi, global::Kiln.AnyThread, global::Kiln.RequiresCapability("hooks.typed")]
+        public static global::Kiln.HookResult Detour(Handler handler, int priority = 0)
+        {
+            if (handler is null) throw new global::System.ArgumentNullException(nameof(handler));
+            return global::Kiln.TypedHooks.Detour(Descriptor, c => { var call = new Call(c); handler(ref call); }, priority);
+        }
+    }
+
+    /// <summary>The game function <c>routines/SleepCheck</c> as a typed hook and call: <c>bool (ptr ctx)</c> (sigdb descriptor;
+    /// its code reads [rcx]). It has no direct call (its descriptor says <c>invoke: none</c>): hook it only. Advanced mods only. Its capability row <c>sig/routines/SleepCheck</c> is on when the symbol resolved
+    /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
+    public static unsafe class SleepCheck
+    {
+        /// <summary>The sigdb symbol.</summary>
+        public const string Symbol = "routines/SleepCheck";
+
+        /// <summary>The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.</summary>
+        public const string Capability = "sig/routines/SleepCheck";
+
+        /// <summary>The descriptor as kiln.hooks takes it.</summary>
+        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+        public static readonly global::Kiln.SigDescriptor Descriptor = new(Symbol, global::Kiln.SigKind.Bool, 1, false, global::Kiln.SigInvoke.None,
+            new global::Kiln.SigArg("ctx", global::Kiln.SigKind.Ptr, 8));
+
+        /// <summary>One call of the function in flight, inside a <see cref="Handler"/>: its arguments (read and write; a
+        /// narrow integer is masked to its type), its <see cref="Result"/>, <see cref="CallOriginal"/> and <see cref="Skip"/>. Valid during
+        /// the handler only.</summary>
+        public readonly ref struct Call
+        {
+            private readonly global::Kiln.SigCall _c;
+
+            internal Call(global::Kiln.SigCall c) => _c = c;
+
+            /// <summary>Argument 1 <c>ctx</c> (ptr, rcx).</summary>
+            public nint Ctx { get => unchecked((nint)(long)_c.Int(0)); set => _c.SetInt(0, unchecked((ulong)(long)value)); }
+
+            /// <summary>The return value (bool, rax): zero until the original ran or the handler set it; what the
+            /// caller gets.</summary>
+            public bool Result { get => (unchecked((byte)_c.RetInt) != 0); set => _c.SetRetInt((value ? 1UL : 0UL)); }
+
+            /// <summary>Runs the rest of the hook chain and the game's function once, with the arguments as they are now;
+            /// a second call does nothing. Without it (and without <see cref="Skip"/>) the function runs after the handler.</summary>
+            public void CallOriginal() => _c.CallOriginal();
+
+            /// <summary>Whether <see cref="CallOriginal"/> ran.</summary>
+            public bool OriginalCalled => _c.OriginalCalled;
+
+            /// <summary>Ends the call without the game's function: the caller gets <see cref="Result"/> as the handler set it. After
+            /// <see cref="CallOriginal"/> it changes nothing.</summary>
+            public void Skip() => _c.Skip();
+        }
+
+        /// <summary>A handler of the function: it gets the call in flight by reference.</summary>
+        public delegate void Handler(ref Call call);
+
+        /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
+        /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
+        /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
+        /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
+        /// <exception cref="global::Kiln.KilnUnavailableException"><c>hooks.typed</c> is off (a core without typed links).</exception>
+        /// <exception cref="global::System.InvalidOperationException">The calling mod is not advanced, or has unloaded.</exception>
+        [global::Kiln.AdvancedApi, global::Kiln.AnyThread, global::Kiln.RequiresCapability("hooks.typed")]
+        public static global::Kiln.HookResult Detour(Handler handler, int priority = 0)
+        {
+            if (handler is null) throw new global::System.ArgumentNullException(nameof(handler));
+            return global::Kiln.TypedHooks.Detour(Descriptor, c => { var call = new Call(c); handler(ref call); }, priority);
+        }
+    }
+
+    /// <summary>The game function <c>routines/VillagerWorker</c> as a typed hook and call: <c>void (ptr ctx)</c> (sigdb descriptor;
+    /// its code reads [rcx]). It has no direct call (its descriptor says <c>invoke: none</c>): hook it only. Advanced mods only. Its capability row <c>sig/routines/VillagerWorker</c> is on when the symbol resolved
+    /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
+    public static unsafe class VillagerWorker
+    {
+        /// <summary>The sigdb symbol.</summary>
+        public const string Symbol = "routines/VillagerWorker";
+
+        /// <summary>The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.</summary>
+        public const string Capability = "sig/routines/VillagerWorker";
+
+        /// <summary>The descriptor as kiln.hooks takes it.</summary>
+        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+        public static readonly global::Kiln.SigDescriptor Descriptor = new(Symbol, global::Kiln.SigKind.Void, 0, false, global::Kiln.SigInvoke.None,
+            new global::Kiln.SigArg("ctx", global::Kiln.SigKind.Ptr, 8));
+
+        /// <summary>One call of the function in flight, inside a <see cref="Handler"/>: its arguments (read and write; a
+        /// narrow integer is masked to its type), <see cref="CallOriginal"/> and <see cref="Skip"/>. Valid during
+        /// the handler only.</summary>
+        public readonly ref struct Call
+        {
+            private readonly global::Kiln.SigCall _c;
+
+            internal Call(global::Kiln.SigCall c) => _c = c;
+
+            /// <summary>Argument 1 <c>ctx</c> (ptr, rcx).</summary>
+            public nint Ctx { get => unchecked((nint)(long)_c.Int(0)); set => _c.SetInt(0, unchecked((ulong)(long)value)); }
+
+            /// <summary>Runs the rest of the hook chain and the game's function once, with the arguments as they are now;
+            /// a second call does nothing. Without it (and without <see cref="Skip"/>) the function runs after the handler.</summary>
+            public void CallOriginal() => _c.CallOriginal();
+
+            /// <summary>Whether <see cref="CallOriginal"/> ran.</summary>
+            public bool OriginalCalled => _c.OriginalCalled;
+
+            /// <summary>Ends the call without the game's function: the caller gets nothing. After
+            /// <see cref="CallOriginal"/> it changes nothing.</summary>
+            public void Skip() => _c.Skip();
+        }
+
+        /// <summary>A handler of the function: it gets the call in flight by reference.</summary>
+        public delegate void Handler(ref Call call);
+
+        /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
+        /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
+        /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
+        /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
+        /// <exception cref="global::Kiln.KilnUnavailableException"><c>hooks.typed</c> is off (a core without typed links).</exception>
+        /// <exception cref="global::System.InvalidOperationException">The calling mod is not advanced, or has unloaded.</exception>
+        [global::Kiln.AdvancedApi, global::Kiln.AnyThread, global::Kiln.RequiresCapability("hooks.typed")]
+        public static global::Kiln.HookResult Detour(Handler handler, int priority = 0)
+        {
+            if (handler is null) throw new global::System.ArgumentNullException(nameof(handler));
+            return global::Kiln.TypedHooks.Detour(Descriptor, c => { var call = new Call(c); handler(ref call); }, priority);
+        }
+    }
+
+}
+
 namespace Kiln.Sigs.Rules
 {
     /// <summary>The game function <c>rules/QuatRotate</c> as a typed hook and call: <c>ptr (ptr output, ptr rotation, ptr vector)</c> (sigdb descriptor;

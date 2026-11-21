@@ -181,6 +181,12 @@
       },
       {
         "fileMatch": [
+          "**/mod-values/*.json"
+        ],
+        "url": "./data/schemas/kiln-mod-values.schema.json"
+      },
+      {
+        "fileMatch": [
           "**/kiln/config/native.json"
         ],
         "url": "./data/schemas/native-state.schema.json"
