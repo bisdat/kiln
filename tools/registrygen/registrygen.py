@@ -774,7 +774,7 @@ def render_native(model, lock):
            "#include <cstddef>",
            "#include <cstdint>",
            "",
-           "namespace kc::reg::gen {",
+           "namespace kc::registry::gen {",
            "",
            "enum class Kind : uint8_t { Int, Float, Bool, Enum, Flags, Ref, Time, List, Struct };",
            "enum class Applies : uint8_t { Now = 1, WorldLoad = 2, Restart = 3 };  // KILN_REGISTRY_APPLIES_*",
@@ -843,7 +843,7 @@ def render_native(model, lock):
     out += ["};", "", "// Field ids by name: <registry>_<path> with '.' as '_' and '[]' left out.", "namespace field {"]
     for reg, r in rows:
         out.append(f"inline constexpr uint32_t {r.registry}_{ident(r.path)} = 0x{field_id(lock, r):08x}u;")
-    out += ["}  // namespace field", "", "}  // namespace kc::reg::gen"]
+    out += ["}  // namespace field", "", "}  // namespace kc::registry::gen"]
     return "\n".join(out) + "\n"
 
 

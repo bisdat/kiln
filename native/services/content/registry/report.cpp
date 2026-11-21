@@ -4,7 +4,7 @@
 
 #include <set>
 
-namespace kc::reg {
+namespace kc::registry {
 
 namespace {
 
@@ -161,4 +161,4 @@ std::vector<std::string> report_log(const Result& r, const ReportCaps& caps) {
     return out;
 }
 
-}  // namespace kc::reg
+}  // namespace kc::registry

@@ -29,7 +29,7 @@
 
 #include "nlohmann/json.hpp"
 
-namespace kc::reg {
+namespace kc::registry {
 
 using json = nlohmann::json;
 
@@ -233,4 +233,4 @@ inline bool is_raw_field(const std::string& field) { return field.rfind("raw:", 
 // Case-insensitive glob ('*' any run, '?' one character), as packs' selectors.
 bool glob_ci(const std::string& pattern, const std::string& text);
 
-}  // namespace kc::reg
+}  // namespace kc::registry

@@ -19,7 +19,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace kc::reg {
+namespace kc::registry {
 
 struct Seg {
     std::string s;  // a member name (lower-case), an index ("3"), or "*"
@@ -81,4 +81,4 @@ private:
     size_t count_ = 0;
 };
 
-}  // namespace kc::reg
+}  // namespace kc::registry

@@ -21,7 +21,7 @@
 
 #include "nlohmann/json.hpp"
 
-namespace kc::reg::map {
+namespace kc::registry::map {
 
 using json = nlohmann::json;
 
@@ -125,4 +125,4 @@ std::vector<std::string> assign_ids(const std::string& registry, const EntrySour
 // [a-z0-9][a-z0-9_.-]*, name [a-z0-9_.-]+, then optionally a clash suffix "~" and 8 to 32 lower-case hex digits.
 bool is_kiln_id(const std::string& id);
 
-}  // namespace kc::reg::map
+}  // namespace kc::registry::map

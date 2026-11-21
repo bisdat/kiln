@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-namespace kc::reg {
+namespace kc::registry {
 
 bool parse_path(const std::string& path, std::vector<Seg>* out, std::string* err, bool tmpl) {
     out->clear();
@@ -165,4 +165,4 @@ const Claim* ClaimIndex::overlap(const std::string& res, const std::vector<Seg>&
     return nullptr;
 }
 
-}  // namespace kc::reg
+}  // namespace kc::registry

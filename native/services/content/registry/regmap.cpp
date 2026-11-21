@@ -12,7 +12,7 @@
 
 #include "schema.g.h"
 
-namespace kc::reg::map {
+namespace kc::registry::map {
 
 namespace {
 
@@ -394,4 +394,4 @@ std::vector<std::string> assign_ids(const std::string& registry, const EntrySour
     return ids;
 }
 
-}  // namespace kc::reg::map
+}  // namespace kc::registry::map
