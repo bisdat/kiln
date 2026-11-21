@@ -2795,7 +2795,7 @@
       "noGpuArg": "Este início desenha sem a GPU: {flag} foi passado e vale mais que esta chave.",
       "gpuArg": "Este início desenha com a GPU: {flag} foi passado e vale mais que esta chave.",
       "x11": "Mudar para X11 quando o desenho estiver lento no Wayland",
-      "x11Intro": "No Wayland, quando o WebKit não consegue usar a GPU, o launcher inicia mais uma vez pelo X11 (XWayland), o que costuma acabar com o travamento. Vale a partir do próximo início.",
+      "x11Intro": "Em uma tela HiDPI no Wayland, quando o WebKit não consegue usar a GPU, o launcher inicia mais uma vez pelo X11 (XWayland): ele desenha em resolução menor, então fica bem mais rápido, mas menos nítido. Vale a partir do próximo início.",
       "x11Wayland": "Este início desenha no Wayland.",
       "x11On": "Este início desenha pelo X11.",
       "x11Tried": "O X11 foi testado e não ajudou, então o launcher fica no Wayland. Desligue e ligue isto de novo para tentar outra vez.",

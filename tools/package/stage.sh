@@ -13,6 +13,9 @@
 # Kiln.Admin, Kiln.Game or the samples that fails to build stops the stage, naming it, and the staged tree must hold
 # every plugin DLL (tools/release/lib/plugins.py). --allow-missing (local dev only; refused when KILN_RELEASE_BUILD=1,
 # as in release.sh) warns and leaves such a part out instead.
+# KILN_SF_CACHE=DIR: keep ShroudForge's built runtime by the hash of its inputs and reuse it (verified by sha256).
+# KILN_NATIVE_PREBUILT=DIR: the native CMake targets' bin/ built elsewhere with the same toolchain (release.sh,
+# KILN_BUILD_REMOTE=win1): copied in, and only what it lacks builds here.
 # KILN_OUT (default <repo>/.out/package) holds the build; the .NET runtime comes from tools/package/fetch-dotnet.sh.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
@@ -49,17 +52,109 @@ built() { # name command...
 }
 
 "$repo/tools/package/fetch-dotnet.sh" >/dev/null
+# the ShroudForge cache (KILN_SF_CACHE, below): key, restore (verified), store
+sf_cache_key() {
+  local sfroot=${KILN_SHROUDFORGE_SRC:-$repo/third_party/shroudforge} xw=${XWIN_ROOT:-$HOME/.cache/cargo-xwin/xwin} work
+  work=$(dirname "$out")
+  {
+    echo "sf-cache 1"
+    (cd "$sfroot" && find . -type f -not -path './.git/*' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+    rustc -vV; cargo xwin --version; clang-cl --version | head -1; cmake --version | head -1; ninja --version
+    node --version; npm --version
+    (cd "$xw" && find crt sdk -type f -not -path '*/aarch64/*' -not -path '*/arm64/*' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+    printf '%s' "${CARGO_ENCODED_RUSTFLAGS:-}" | sed -e "s|$work|<work>|g" -e "s|$HOME|<home>|g" -e "s|$repo|<src>|g"
+  } 2>&1 | sha256sum | cut -c1-24
+}
+sf_cache_restore() { # key: 0 when the cached component is complete and every file matches its recorded sha256
+  local c=$KILN_SF_CACHE/$1
+  [[ -s $c/MANIFEST.sha256 && -d $c/shroudforge ]] || return 1
+  [[ $(cd "$c/shroudforge" && find . -type f | wc -l) == $(wc -l <"$c/MANIFEST.sha256") ]] || return 1
+  (cd "$c/shroudforge" && sha256sum --quiet -c ../MANIFEST.sha256) >/dev/null 2>&1 || return 1
+  rm -rf -- "$out/shroudforge-build/shroudforge"
+  mkdir -p "$out/shroudforge-build"
+  cp -a "$c/shroudforge" "$out/shroudforge-build/shroudforge"
+  (cd "$out/shroudforge-build/shroudforge" && sha256sum --quiet -c "$c/MANIFEST.sha256") >/dev/null 2>&1 || return 1
+  if [[ -n ${SOURCE_DATE_EPOCH:-} ]]; then find "$out/shroudforge-build/shroudforge" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +; fi
+}
+sf_cache_store() { # key
+  local c=$KILN_SF_CACHE/$1 tmp
+  [[ -d $out/shroudforge-build/shroudforge ]] || return 1
+  [[ -d $c ]] && return 0
+  mkdir -p "$KILN_SF_CACHE"
+  tmp=$(mktemp -d "$KILN_SF_CACHE/.store.XXXXXX")
+  cp -a "$out/shroudforge-build/shroudforge" "$tmp/shroudforge"
+  (cd "$tmp/shroudforge" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) >"$tmp/MANIFEST.sha256"
+  mv -T -- "$tmp" "$c" 2>/dev/null || rm -rf -- "$tmp"
+}
 if ((build)); then
-  "$repo/native/build.sh" kiln-core kiln-proxy kiln-native-hello >/dev/null
-  for dir in "$repo"/native/services/*/; do
-    svc=$(basename "$dir"); [[ -f $dir/CMakeLists.txt ]] || continue
-    built "kiln-$svc" "$repo/native/build.sh" "kiln-$svc" || miss "native service kiln-$svc failed to build (log: $logs/kiln-$svc.log)"
+  # The Rust parts that need nothing from the native or managed builds (kiln-eml, Enshwick's loader, ShroudForge's
+  # runtime) build in the background meanwhile, each into its own log; their results are collected below, with the same
+  # messages and the same stop on a failure as when they built one after the other. (They share Cargo's build
+  # directory with kiln-shroudlink: Cargo's lock lets one at a time into it.)
+  [[ -x $repo/gpl/kiln-eml/build.sh ]] || die "missing kiln-eml build source"
+  sfsrc=${KILN_SHROUDFORGE_SRC:-$repo/third_party/shroudforge}
+  [[ -x $sfsrc/kiln/build.sh ]] || die "missing ShroudForge source: $sfsrc/kiln/build.sh"
+  bg_eml="" bg_enshwick="" bg_sf=""
+  kill_bg() { local p; for p in $bg_eml $bg_enshwick $bg_sf; do kill "$p" 2>/dev/null || true; done; }
+  trap kill_bg EXIT
+  # kiln-eml: the GPL-3 EML plugin, its own Cargo workspace in gpl/kiln-eml (docs/kiln/eml.md); lands in bin/plugins
+  "$repo/gpl/kiln-eml/build.sh" >"$logs/kiln-eml.log" 2>&1 & bg_eml=$!
+  # Enshwick's own loader (MIT), which kiln-enshwick hosts: built from the pinned upstream tag + commit
+  env CARGO_TARGET_DIR="$out/cargo-enshwick" "$repo/native/plugins/enshwick/tools/build-runtime.sh" --out "$out/enshwick-runtime" \
+    >"$logs/enshwick-loader.log" 2>&1 & bg_enshwick=$!
+  # ShroudForge runtime: a separate GPL-3 component built from the frostdev-ops/shroudforge fork (staged below).
+  # KILN_SF_CACHE=DIR: its staged output is kept in DIR/<key>, the key a hash of everything the build reads (the fork's
+  # whole source tree as exported, the Rust, cargo-xwin, clang, CMake, Ninja, Node and npm versions, the xwin CRT/SDK's
+  # content, the Rust flags with this build's folders taken out); a hit is used only when every file still matches the
+  # sha256 recorded when it was stored, and gets this build's file times, as the build gives them.
+  sf_key="" sf_hit=0
+  if [[ -n ${KILN_SF_CACHE:-} ]]; then
+    sf_key=$(sf_cache_key) || sf_key=""
+    if [[ -n $sf_key ]] && sf_cache_restore "$sf_key"; then
+      sf_hit=1
+      echo "stage: ShroudForge runtime from the cache ($KILN_SF_CACHE/$sf_key)" >&2
+    fi
+  fi
+  if ((!sf_hit)); then
+    "$sfsrc/kiln/build.sh" "$out/shroudforge-build" >"$logs/shroudforge.log" 2>&1 & bg_sf=$!
+  fi
+  collect() { # name pid: 0 when the background build succeeded, else its log's tail and 1
+    if wait "$2"; then return 0; fi
+    tail -25 "$logs/$1.log" >&2
+    return 1
+  }
+  # Every native target in one CMake build (Ninja runs the services and plugins side by side); when that fails, each
+  # target builds alone, as before, so the failing ones are named (and left out with --allow-missing).
+  targets=(kiln-core kiln-proxy kiln-native-hello)
+  for dir in "$repo"/native/services/*/ "$repo"/native/plugins/*/; do
+    [[ -f $dir/CMakeLists.txt ]] && targets+=("kiln-$(basename "$dir")")
   done
-  # Kiln's compatibility plugins: each native/plugins/<p> is the target kiln-<p> (kiln-shroudlink needs cargo xwin)
-  for dir in "$repo"/native/plugins/*/; do
-    p=$(basename "$dir"); [[ -f $dir/CMakeLists.txt ]] || continue
-    built "kiln-$p" "$repo/native/build.sh" "kiln-$p" || miss "native plugin kiln-$p failed to build (log: $logs/kiln-$p.log)"
-  done
+  if [[ -n ${KILN_NATIVE_PREBUILT:-} ]]; then
+    # KILN_NATIVE_PREBUILT (tools/release/release.sh with KILN_BUILD_REMOTE=win1): the native targets' bin/ as
+    # tools/release/lib/remote-win1-native.sh built it on kiln-win1 with this toolchain; a target it does not hold
+    # (kiln-shroudlink: Rust, cargo xwin) builds here, alone.
+    [[ -s $KILN_NATIVE_PREBUILT/kiln-core.dll && -s $KILN_NATIVE_PREBUILT/dinput8.dll ]] || die "KILN_NATIVE_PREBUILT=$KILN_NATIVE_PREBUILT holds no native build"
+    mkdir -p "$out/cmake/bin"
+    cp -a "$KILN_NATIVE_PREBUILT"/. "$out/cmake/bin"/
+    for dir in "$repo"/native/plugins/*/; do
+      p=$(basename "$dir"); [[ -f $dir/CMakeLists.txt ]] || continue
+      grep -q "Builds no plugin" "$dir/CMakeLists.txt" && continue
+      [[ -s $out/cmake/bin/plugins/kiln-$p.dll ]] && continue
+      built "kiln-$p" "$repo/native/build.sh" "kiln-$p" || miss "native plugin kiln-$p failed to build (log: $logs/kiln-$p.log)"
+    done
+  elif ! built native-all "$repo/native/build.sh" "${targets[@]}" 2>/dev/null; then
+    echo "stage: the one native build failed (log: $logs/native-all.log): building each target alone" >&2
+    "$repo/native/build.sh" kiln-core kiln-proxy kiln-native-hello >/dev/null
+    for dir in "$repo"/native/services/*/; do
+      svc=$(basename "$dir"); [[ -f $dir/CMakeLists.txt ]] || continue
+      built "kiln-$svc" "$repo/native/build.sh" "kiln-$svc" || miss "native service kiln-$svc failed to build (log: $logs/kiln-$svc.log)"
+    done
+    # Kiln's compatibility plugins: each native/plugins/<p> is the target kiln-<p> (kiln-shroudlink needs cargo xwin)
+    for dir in "$repo"/native/plugins/*/; do
+      p=$(basename "$dir"); [[ -f $dir/CMakeLists.txt ]] || continue
+      built "kiln-$p" "$repo/native/build.sh" "kiln-$p" || miss "native plugin kiln-$p failed to build (log: $logs/kiln-$p.log)"
+    done
+  fi
   dn "$repo/managed/Kiln.Host/Kiln.Host.csproj" -o "$out/host" >/dev/null
   for proj in "$repo"/managed/services/*/*.csproj; do
     [[ -f $proj ]] || continue
@@ -71,13 +166,17 @@ if ((build)); then
   built build-game "$repo/tools/typegen/build-game.sh" "$out/host" || miss "Kiln.Game per game build failed (tools/typegen/build-game.sh; log: $logs/build-game.log)"
   built Hello dn "$repo/mods/samples/Hello/Hello.csproj" -o "$out/mods/hello" || miss "Hello sample failed to build (log: $logs/Hello.log)"
   built Kiln.Admin dn "$repo/mods/Kiln.Admin/Kiln.Admin.csproj" -o "$out/mods/kiln-admin" || miss "Kiln.Admin failed to build (log: $logs/Kiln.Admin.log)"
-  # kiln-eml: the GPL-3 EML plugin, its own Cargo workspace in gpl/kiln-eml (docs/kiln/eml.md); lands in bin/plugins
-  [[ -x $repo/gpl/kiln-eml/build.sh ]] || die "missing kiln-eml build source"
-  built kiln-eml "$repo/gpl/kiln-eml/build.sh" || miss "plugin kiln-eml failed to build (log: $logs/kiln-eml.log)"
-  # Enshwick's own loader (MIT), which kiln-enshwick hosts: built from the pinned upstream tag + commit
-  built enshwick-loader env CARGO_TARGET_DIR="$out/cargo-enshwick" \
-    "$repo/native/plugins/enshwick/tools/build-runtime.sh" --out "$out/enshwick-runtime" \
+  collect kiln-eml "$bg_eml" || miss "plugin kiln-eml failed to build (log: $logs/kiln-eml.log)"
+  bg_eml=""
+  collect enshwick-loader "$bg_enshwick" \
     || miss "Enshwick loader (enshwick.dll for kiln-enshwick) failed to build (log: $logs/enshwick-loader.log)"
+  bg_enshwick=""
+  sf_rc=0
+  if [[ -n $bg_sf ]]; then collect shroudforge "$bg_sf" || sf_rc=1; fi
+  bg_sf=""
+  trap - EXIT
+  ((sf_rc == 0)) || die "ShroudForge runtime build failed (log: $logs/shroudforge.log)"
+  if ((!sf_hit)) && [[ -n $sf_key ]]; then sf_cache_store "$sf_key" || warn "could not store the ShroudForge runtime in $KILN_SF_CACHE"; fi
 fi
 bin=$out/cmake/bin
 [[ -f $bin/dinput8.dll && -f $bin/kiln-core.dll && -f $out/host/Kiln.Host.dll ]] || die "no Kiln build in $out (run without --no-build)"
@@ -143,10 +242,7 @@ fi
 # ShroudForge runtime: a separate GPL-3 component built from the frostdev-ops/shroudforge fork (third_party/shroudforge,
 # or KILN_SHROUDFORGE_SRC); kiln-shroudforge.dll (MIT, core) drives it. docs/kiln/shroudforge-compat.md
 sfsrc=${KILN_SHROUDFORGE_SRC:-$repo/third_party/shroudforge}
-if ((build)); then
-  [[ -x $sfsrc/kiln/build.sh ]] || die "missing ShroudForge source: $sfsrc/kiln/build.sh"
-  "$sfsrc/kiln/build.sh" "$out/shroudforge-build" || die "ShroudForge runtime build failed"
-fi
+# (built above, in the background, with the other Rust parts)
 if [[ -d $out/shroudforge-build/shroudforge ]]; then
   for required in shroudforge-runtime.dll kfc-runtime.dll NOTICE.txt SOURCE.txt version.json LICENSES/kfc-parser-GPL-3.0.txt LICENSES/ShroudForge-MIT.txt; do
     [[ -s $out/shroudforge-build/shroudforge/$required ]] || die "incomplete ShroudForge component: $required"

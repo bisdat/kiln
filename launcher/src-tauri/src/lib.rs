@@ -13,6 +13,7 @@ pub mod deck;
 /// The launcher's own messages when its page cannot start (Linux: GTK, else the desktop's tools).
 #[cfg(target_os = "linux")]
 pub mod dialog;
+pub mod dialog_folder;
 /// The window's app id and icon on Linux, the AppImage's app menu entry.
 pub mod desktop;
 pub mod distribution;
@@ -268,6 +269,8 @@ pub fn run() {
             commands::app::app_desktop_set,
             commands::app::app_locales,
             commands::app::app_sandbox_set,
+            commands::app::app_dialog_default,
+            commands::app::app_dialog_remember,
             commands::vendor::vendor_status,
             commands::vendor::vendor_license,
             commands::vendor::vendor_download,

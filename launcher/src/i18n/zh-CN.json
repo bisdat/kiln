@@ -2718,7 +2718,7 @@
       "noGpuArg": "本次使用软件渲染，启动参数 {flag} 优先于此设置。",
       "gpuArg": "本次使用 GPU 渲染，启动参数 {flag} 优先于此设置。",
       "x11": "Wayland 下绘制缓慢时切换到 X11",
-      "x11Intro": "在 Wayland 下，如果 WebKit 无法使用 GPU，启动器会通过 X11（XWayland）再启动一次，这通常能消除卡顿。下次启动时生效。",
+      "x11Intro": "在 Wayland 的高分辨率屏幕上，如果 WebKit 无法使用 GPU，启动器会通过 X11（XWayland）再启动一次：它以较低分辨率绘制，因此会快很多，但没那么清晰。下次启动时生效。",
       "x11Wayland": "本次启动在 Wayland 下绘制。",
       "x11On": "本次启动通过 X11 绘制。",
       "x11Tried": "已尝试 X11 但没有改善，因此启动器继续使用 Wayland。关闭再打开此选项可再试一次。",

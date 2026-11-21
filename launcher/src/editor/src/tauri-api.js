@@ -134,7 +134,7 @@ export default {
   },
   async browseSave() {
     // Kiln: the launcher's dialog helper (plugin-dialog; null in a plain browser)
-    const r = await pickPaths({ filters: [{ name: t('Save do Enshrouded'), extensions: ['ksd'] }], multiple: false });
+    const r = await pickPaths({ filters: [{ name: t('Save do Enshrouded'), extensions: ['ksd'] }], multiple: false, kind: 'editorSave' });
     return r?.[0] ?? null;
   },
   async writeSave(path, model) {

@@ -1,0 +1,15 @@
+<Project>
+  <!-- Each sample project's output folder (OutDir), in one MSBuild run (tools/release/release.sh, "sample mods"):
+         dotnet msbuild sample-outdirs.proj -t:Show -nologo -p:KilnSampleList=FILE -p:ArtifactsPath=DIR
+       FILE: one project path per line. Prints KILN-OUTDIR|<project>|<output folder> per project. -->
+  <Target Name="Show">
+    <ReadLinesFromFile File="$(KilnSampleList)">
+      <Output TaskParameter="Lines" ItemName="_KilnSampleProject" />
+    </ReadLinesFromFile>
+    <MSBuild Projects="@(_KilnSampleProject)" Targets="GetTargetPath" BuildInParallel="true"
+             Properties="Configuration=Release;ArtifactsPath=$(ArtifactsPath)">
+      <Output TaskParameter="TargetOutputs" ItemName="_KilnTarget" />
+    </MSBuild>
+    <Message Importance="high" Text="KILN-OUTDIR|%(_KilnTarget.MSBuildSourceProjectFile)|%(_KilnTarget.RootDir)%(_KilnTarget.Directory)" />
+  </Target>
+</Project>

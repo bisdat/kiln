@@ -628,8 +628,14 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
   "PROBLEM: WebKit turned hardware acceleration off by itself", and with `GDK_BACKEND=x11` the lag was gone): on a
   Wayland session with XWayland (`WAYLAND_DISPLAY` and `DISPLAY` set), when the webview's policy reads Never in a start
   that draws with the GPU and no variable explains it (`WEBKIT_DISABLE_COMPOSITING_MODE` / `WEBKIT_DISABLE_DMABUF_RENDERER`),
-  the launcher starts again once with `KILN_LAUNCHER_X11_RESTARTED=1`; that start sets `GDK_BACKEND=x11` itself (named in
+  on a screen whose GDK scale factor is above 1, the launcher starts again once with `KILN_LAUNCHER_X11_RESTARTED=1`; that start sets `GDK_BACKEND=x11` itself (named in
   `KILN_LAUNCHER_RENDER_SET`: programs of the host, the game and the tools never get it).
+  - X11 does not bring the GPU back (Oryx593's `GDK_BACKEND=x11` starts read policy Never and "WebKit composites: no" too):
+    it is faster because XWayland draws a HiDPI window at scale 1 (1024 x 640 at devicePixelRatio 1 against 1280 x 800 at
+    2; p50 16 ms against 43-73 ms a frame on Play), less sharp. So at scale 1 the launcher does not switch (as many pixels
+    on the CPU; a marker would stick for nothing). The launcher never sets the policy Never itself with the GPU (only
+    software mode does); before 0.2.0-dev.29.22 the policy line was logged in software mode only. The PROBLEM line names
+    the DRM render nodes and `nvidia_drm modeset` (WebKitGTK 2.50 needs a GBM device on a render node);
   - that X11 start writes `<data>/state/x11.json`, later starts go straight to X11; also when WebKit still composites
     nothing through X11 (work-cm 2026-11-20: Oryx593's lag was gone under `GDK_BACKEND=x11` although the torch stood
     still, so X11's painting on the CPU was far better than Wayland's);
