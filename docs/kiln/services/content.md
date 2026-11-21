@@ -212,7 +212,8 @@ public override void OnLoad()
   values), `Field(path)`.
 - `ContentEntry`: `Id`, `Name`, `Guid`, `Modified`; `Get(path)` / `Original(path)` → `ContentValue` (type, integer,
   number, GUID, enum / flag names); `Set(path, long|double|bool|TimeSpan|string)`; `Reset(path)` (drops this mod's
-  layer); items: `MaxStack`; recipes: `Inputs`, `Outputs`, `SetInputs`, `SetOutputs`, `CraftingDuration`; drops:
+  layer); items: `MaxStack`; recipes: `Inputs`, `Outputs`, `SetInputs`, `SetOutputs`, `CraftingDuration`, `CraftingWater`
+  (since 0.2.0-dev.30.3: `waterCharges`, see "A recipe's water in code"); drops:
   `Stacks`, `SetStacks` (same stacks, counts / chances / weights), field paths `"[3].countMax"`.
 - `Content.Apply(json)` / `ApplyFile(path)` (the pack format, as this mod's code layers) → `ContentReport` (applied,
   errors, warnings, conflicts); `Revert()`; `ReloadPacks()`; `PackReport()` (JSON); `Dump(path?)` (every registry with
@@ -416,6 +417,34 @@ public override void OnLoad()   // register early: the registries take them when
   - `LikeBase`: the base recipe's requirement (EMF saw a copied requirement keep a recipe hidden: some unlocks are
     tied to the original recipe).
   The server never checks knowledge (EMF), so unlocking is only about what the client lists.
+- **A recipe's water in code** (`RecipeDefinition.Water`, `ContentEntry.CraftingWater`; since 0.2.0-dev.30.3, mod API
+  0.2.13; thanks netjunk). Typed forms of `Fields["waterCharges"]` / `Set("waterCharges", n)`, the game's own recipe
+  water: **charges per craft** (one charge is 64 of the game's water units), what the recipe screen shows as its
+  "Water" row ("Water 92 / 2": 92 charges at hand, 2 a craft). The game takes it when a craft starts, after the
+  ingredients:
+  - at one of the **six stations with a tank**, from the station's own tank, which the player fills with a watering can
+    or the station's Fill: the Seedbed (150 charges), the Oven, the Cooking Station, the Laboratory and the Coffee Brewer
+    (100 each) and the Beehive (50). A recipe that asks more than its station's tank holds never starts;
+  - in a **crafting menu** (`"hand"`, the Workbench, the Kitchen, an NPC's crafting), from **the player and the base**:
+    the crafter's water containers, then the base's wells and barrels;
+  - a factory station **without** a tank never starts a recipe that asks water.
+
+  `Water` is a whole number 0..1023 (`ArgumentException` otherwise); null keeps the template's (the `BaseOn` recipe's,
+  none with only a `Station`), 0 clears a base's. It travels as the definition's `"waterCharges"` field, applied after a
+  station-only recipe's requirements are cleared, so `Fields["waterCharges"]` keeps working as before; give one or the
+  other (both: `ArgumentException`). `CraftingWater` reads and sets a game recipe's (0..1023,
+  `ArgumentOutOfRangeException` otherwise; `Reset("waterCharges")` puts the game's back). Not the game's old "Water"
+  canteen item (`Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED`): as an ingredient a craft takes that item, never
+  tank water.
+  ```csharp
+  Content.Recipes.Register(new RecipeDefinition
+  {
+      Guid = Guid.Parse("1f0c8a52-3b7e-4d21-9a6c-2e5d8b4f7a10"), Name = "MyMod_Herb_Tea", Station = "0x6b8247d6",
+      Inputs = [("Food_T7_raw_herb_Thyme", 2)], Outputs = [("Food_T7_dish_hydration_ThymeTea", 1)],
+      Water = 5,                                                   // 5 charges from the station's tank each craft
+  });
+  Content.OnReady(_ => Content.Recipes.Get("Food_T3_Meat_Chicken_Soup")!.CraftingWater = 3);
+  ```
 
 ### Rarity, level and perks of new gear
 **A new item is what its recipe tooltip shows.** The game does not guarantee that by itself: the tooltip reads `rarity` and
