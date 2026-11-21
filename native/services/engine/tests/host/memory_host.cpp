@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 
 #include "memory.h"
@@ -25,6 +26,16 @@ bool read_span(std::uintptr_t address, void* out, std::size_t size) {
     return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == static_cast<ssize_t>(size);
 }
 
+// Steady-clock times (the gate's own clock) of this thread's last engine-word events, so a test can place the gate's
+// measurements (EcsGate.hold_ns, restore_ns) against them: the last winning exclusive CAS, the start of the last
+// exclusive and shared releases, and the start of the last priority restore.
+thread_local std::uint64_t test_exclusive_won_ns = 0, test_exclusive_release_ns = 0, test_shared_release_ns = 0,
+                           test_restore_begin_ns = 0;
+std::uint64_t test_clock_ns() {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
 std::atomic<std::uint64_t> test_cas{0};
 bool try_shared(std::uintptr_t address) {
     if (!address || address % alignof(std::int32_t)) return false;
@@ -42,8 +53,11 @@ bool try_exclusive(std::uintptr_t address) {
     if (!address || address % alignof(std::int32_t)) return false;
     test_cas.fetch_add(1, std::memory_order_relaxed);
     std::int32_t expected = 0;
-    return __atomic_compare_exchange_n(reinterpret_cast<std::int32_t*>(address), &expected,
-                                       static_cast<std::int32_t>(0x80000000u), false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    const bool won = __atomic_compare_exchange_n(reinterpret_cast<std::int32_t*>(address), &expected,
+                                                 static_cast<std::int32_t>(0x80000000u), false, __ATOMIC_SEQ_CST,
+                                                 __ATOMIC_SEQ_CST);
+    if (won) test_exclusive_won_ns = test_clock_ns();
+    return won;
 }
 
 std::atomic<std::uint64_t> test_releases{0};
@@ -54,6 +68,7 @@ bool (*test_holder_probe)() = nullptr;
 std::atomic<std::uint64_t> test_releases_without_holder{0}, test_gate_shared_releases{0};
 thread_local bool test_in_gate_release = false;
 void release_shared(std::uintptr_t address) noexcept {
+    test_shared_release_ns = test_clock_ns();
     test_releases.fetch_add(1, std::memory_order_relaxed);
     if (test_holder_probe && test_in_gate_release) {
         test_gate_shared_releases.fetch_add(1, std::memory_order_relaxed);
@@ -63,6 +78,7 @@ void release_shared(std::uintptr_t address) noexcept {
 }
 
 void release_exclusive(std::uintptr_t address) noexcept {
+    test_exclusive_release_ns = test_clock_ns();
     test_releases.fetch_add(1, std::memory_order_relaxed);
     if (test_holder_probe && !test_holder_probe()) test_releases_without_holder.fetch_add(1, std::memory_order_relaxed);
     __atomic_store_n(reinterpret_cast<std::int32_t*>(address), 0, __ATOMIC_SEQ_CST);
@@ -81,10 +97,15 @@ bool boost_priority(int* saved) {
     ++test_boosts;
     return true;
 }
+// Called inside restore_priority, after test_restore_begin_ns is taken: a test makes the restore slow, as
+// SetThreadPriority's wineserver round trip under Proton (and a preemption right after it) can be (GitHub #58).
+std::atomic<void (*)()> test_restore_hook{nullptr};
 void restore_priority(int saved) noexcept {
+    test_restore_begin_ns = test_clock_ns();
     test_priority = saved;
     test_restore_releases = test_releases.load();
     ++test_restores;
+    if (const auto hook = test_restore_hook.load(std::memory_order_relaxed)) hook();
 }
 
 // Writes go through process_vm_writev: an unmapped or read-only page fails the write as SEH does on Windows.

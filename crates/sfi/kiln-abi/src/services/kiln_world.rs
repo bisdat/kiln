@@ -520,6 +520,7 @@ pub struct KilnMutationReply {
     pub session: u64,
     pub step: u64,
     pub hold_ns: u64,
+    pub restore_ns: u64,
 }
 
 #[repr(C)]

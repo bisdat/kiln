@@ -1728,7 +1728,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineIdentity, target) == 32);
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineIdentity, sha256) == 64);
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineIdentity, profile_id) == 129);
-    assert!(core::mem::size_of::<crate::services::kiln_engine::KilnEngineGateStats>() == 96);
+    assert!(core::mem::size_of::<crate::services::kiln_engine::KilnEngineGateStats>() == 120);
     assert!(core::mem::align_of::<crate::services::kiln_engine::KilnEngineGateStats>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, size) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, reserved) == 4);
@@ -1743,6 +1743,9 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, hold_ns_max) == 72);
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, views) == 80);
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, view_failures) == 88);
+    assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, restores) == 96);
+    assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, restore_ns_total) == 104);
+    assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineGateStats, restore_ns_max) == 112);
     assert!(core::mem::size_of::<crate::services::kiln_engine::KilnEngineApi>() == 24);
     assert!(core::mem::align_of::<crate::services::kiln_engine::KilnEngineApi>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_engine::KilnEngineApi, header) == 0);
@@ -5423,7 +5426,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_world::KilnEcsWritePolicy, flags) == 24);
     assert!(core::mem::offset_of!(crate::services::kiln_world::KilnEcsWritePolicy, why_code) == 28);
     assert!(core::mem::offset_of!(crate::services::kiln_world::KilnEcsWritePolicy, why) == 32);
-    assert!(core::mem::size_of::<crate::services::kiln_world::KilnMutationReply>() == 48);
+    assert!(core::mem::size_of::<crate::services::kiln_world::KilnMutationReply>() == 56);
     assert!(core::mem::align_of::<crate::services::kiln_world::KilnMutationReply>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_world::KilnMutationReply, size) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_world::KilnMutationReply, status) == 4);
@@ -5434,6 +5437,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_world::KilnMutationReply, session) == 24);
     assert!(core::mem::offset_of!(crate::services::kiln_world::KilnMutationReply, step) == 32);
     assert!(core::mem::offset_of!(crate::services::kiln_world::KilnMutationReply, hold_ns) == 40);
+    assert!(core::mem::offset_of!(crate::services::kiln_world::KilnMutationReply, restore_ns) == 48);
     assert!(core::mem::size_of::<crate::services::kiln_world::KilnEcsWriteEvent>() == 48);
     assert!(core::mem::align_of::<crate::services::kiln_world::KilnEcsWriteEvent>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_world::KilnEcsWriteEvent, size) == 0);

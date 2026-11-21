@@ -27,14 +27,16 @@ import collect  # noqa: E402
 T0 = 1_800_000_000_000  # a fixed UTC time in ms
 
 
-def writes_csv(raise_, rows, kit='2'):
-    """writes.csv as the kit writes it: kit 2 adds post_step and since_post_ns to kit 1's columns."""
+def writes_csv(raise_, rows, kit='3', hold=None):
+    """writes.csv as the kit writes it: kit 2 adds post_step and since_post_ns to kit 1's columns, kit 3 restore_ns (empty
+    where the Kiln does not time it) and '; hold=' in the header."""
     out = io.StringIO()
-    out.write('# gate-priority-test %s; raise=%s; label=; mode=write; profile=p\n' % (kit, raise_))
+    out.write('# gate-priority-test %s; raise=%s; label=; mode=write; profile=p%s\n' % (kit, raise_, '; hold=' + hold if hold else ''))
     out.write('utc_ms,op,attempt,status,result,why,engine_reason,flags,hold_ns,call_ns,step,priority' +
-              (',post_step,since_post_ns\n' if kit != '1' else '\n'))
-    for t, status, hold in rows:
-        out.write('%d,change,0,%s,0,0,0,0x5,%d,%d,1,-1' % (t, status, hold, hold + 1000) + (',1,500000\n' if kit != '1' else '\n'))
+              {'1': '\n', '2': ',post_step,since_post_ns\n'}.get(kit, ',post_step,since_post_ns,restore_ns\n'))
+    for t, status, hold_ns, restore_ns in rows:
+        out.write('%d,change,0,%s,0,0,0,0x5,%d,%d,1,-1' % (t, status, hold_ns, hold_ns + 1000) +
+                  {'1': '\n', '2': ',1,500000\n'}.get(kit, ',1,500000,%s\n' % ('' if restore_ns is None else restore_ns)))
     return out.getvalue()
 
 
@@ -47,16 +49,21 @@ def steps_csv(raise_, steps, kit='2'):
     return out.getvalue()
 
 
-def make_zip(path, platform='windows', raise_='on', wine=False, proton=None, header_raise=None, offset_min=60, kit='2'):
-    """Phases: idle 120 s, load 120 s, idle 120 s from T0. Idle holds 10 us, loaded holds 2 ms; idle steps every 16 ms,
-    loaded every 20 ms; tick-stats windows fully inside each phase."""
+def make_zip(path, platform='windows', raise_='on', wine=False, proton=None, header_raise=None, offset_min=60, kit='3',
+             hold='scene-release', in_run_json=True):
+    """Phases: idle 120 s, load 120 s, idle 120 s from T0. Idle holds 10 us, loaded holds 2 ms; restores (kit 3 on a Kiln
+    that times them, hold 'scene-release') 3 us idle, 1.5 ms loaded; idle steps every 16 ms, loaded every 20 ms;
+    tick-stats windows fully inside each phase. hold=None: the run says nothing (kit 1 and 2); in_run_json=False: only
+    the header says it."""
     phases = [('idle', T0, T0 + 120_000), ('load', T0 + 120_000, T0 + 240_000), ('idle', T0 + 240_000, T0 + 360_000)]
+    timed = kit not in ('1', '2') and hold == 'scene-release'
     writes = []
     for name, a, b in phases:
         for t in range(a + 5000, b - 5000, 1000):
-            writes.append((t, 'ok', 2_000_000 if name == 'load' else 10_000))
-            writes.append((t + 1, 'busy', 0))
-    writes.append((T0 + 120_000 + 500, 'ok', 99_000_000))  # inside the margin around the change: dropped
+            restore = (1_500_000 if name == 'load' else 3_000) if timed else None
+            writes.append((t, 'ok', 2_000_000 if name == 'load' else 10_000, restore))
+            writes.append((t + 1, 'busy', 0, 2_000 if timed else None))
+    writes.append((T0 + 120_000 + 500, 'ok', 99_000_000, 99_000_000 if timed else None))  # inside the margin: dropped
     steps, step, pre = [], 1, 0
     for name, a, b in phases:
         t = a + 3000
@@ -81,8 +88,10 @@ def make_zip(path, platform='windows', raise_='on', wine=False, proton=None, hea
                'verified': True, 'end': 'done', 'writes_from_utc_ms': T0, 'ended_utc_ms': T0 + 360_000}
         if kit != '1':
             run['kit'] = kit  # kit 1's run.json said "kit": "1" too; its header alone must also do
+        if hold and in_run_json:
+            run['hold_ends'] = hold
         z.writestr('runs/run-1/run.json', json.dumps(run))
-        z.writestr('runs/run-1/writes.csv', writes_csv(header_raise or raise_, writes, kit))
+        z.writestr('runs/run-1/writes.csv', writes_csv(header_raise or raise_, writes, kit, hold))
         z.writestr('runs/run-1/steps.csv', steps_csv(raise_, steps, kit))
         z.writestr('logs/tick-stats.jsonl', '\n'.join(tick) + '\n')
 
@@ -118,27 +127,83 @@ class Analyze(unittest.TestCase):
         self.assertEqual(loaded['tick_stats']['windows'], 1)
         self.assertEqual((loaded['tick_stats']['step_p50_ms'], loaded['tick_stats']['step_max_ms']), (9.0, 30.0))
         self.assertEqual(len(r['runs']), 2)
+        # the priority restore of the same calls, apart from the hold
+        self.assertEqual((idle['restore_us']['n'], idle['restore_us']['p50'], idle['restore_us']['over_1ms']), (220, 3.0, 0))
+        self.assertEqual((loaded['restore_us']['p99'], loaded['restore_us']['over_1ms']), (1500.0, 110))
+        self.assertTrue(all(x['hold'] == 'scene-release' for x in r['groups']))
         md = analyze.markdown(r)
         self.assertIn('| windows | on | loaded | 110 | 2000.0 |', md)
         self.assertIn('| proton | off | idle |', md)
+        self.assertIn('### Priority restore after the gate\'s release', md)
+        self.assertIn('| windows | on | loaded | 110 | 1500.0 |', md)
+        self.assertNotIn('hold includes the release and restore', md)
+        self.assertEqual(r['notes'], [])
 
     def test_kit_1_runs_are_read_and_kept_apart(self):
-        make_zip(self.dir / 'r2.zip', platform='linux', proton='proton-11')
-        make_zip(self.dir / 'r1.zip', platform='linux', proton='proton-11', kit='1')
-        r = analyze.analyze([self.dir / 'r2.zip', self.dir / 'r1.zip'])
+        make_zip(self.dir / 'r3.zip', platform='linux', proton='proton-11')
+        make_zip(self.dir / 'r1.zip', platform='linux', proton='proton-11', kit='1', hold=None)
+        r = analyze.analyze([self.dir / 'r3.zip', self.dir / 'r1.zip'])
         g = {(x['platform'], x['kit'], x['load']): x for x in r['groups']}
         self.assertEqual(sorted(g), [('proton', '1', 'idle'), ('proton', '1', 'loaded'),
-                                     ('proton', '2', 'idle'), ('proton', '2', 'loaded')])
-        for kit in ('1', '2'):  # kit 1's 12 columns and kit 2's 14 give the same numbers
+                                     ('proton', '3', 'idle'), ('proton', '3', 'loaded')])
+        for kit in ('1', '3'):  # kit 1's 12 columns and kit 3's 15 give the same hold numbers
             self.assertEqual(g[('proton', kit, 'idle')]['hold_us']['n'], 220)
             self.assertEqual(g[('proton', kit, 'loaded')]['late_steps'], 0)
-        self.assertEqual(sorted(x['kit'] for x in r['runs']), ['1', '2'])
+        self.assertEqual(sorted(x['kit'] for x in r['runs']), ['1', '3'])
         self.assertTrue(any('r1.zip (kit 1)' in n and 'not comparable' in n for n in r['notes']))
+        self.assertIsNone(g[('proton', '1', 'idle')]['restore_us'])
         md = analyze.markdown(r)
-        self.assertIn('| proton kit 1 | on | loaded | 110 |', md)
+        self.assertIn('| proton kit 1 (hold includes the release and restore) | on | loaded | 110 |', md)
         self.assertIn('| proton | on | loaded | 110 |', md)
-        only2 = analyze.analyze([self.dir / 'r2.zip'])
-        self.assertFalse(any('kit' in n for n in only2['notes']))
+        only3 = analyze.analyze([self.dir / 'r3.zip'])
+        self.assertFalse(any('kit' in n for n in only3['notes']))
+
+    def test_kit_2_runs_say_their_hold_includes_the_release_and_restore(self):
+        # bisdat's r2 runs (#58): kit 2 on 0.2.0-dev.30.1, no restore column and no hold marker
+        make_zip(self.dir / 'k2.zip', platform='linux', proton='proton-11', kit='2', hold=None)
+        make_zip(self.dir / 'k3.zip', platform='linux', proton='proton-11')
+        r = analyze.analyze([self.dir / 'k2.zip', self.dir / 'k3.zip'])
+        g = {(x['kit'], x['hold'], x['load']): x for x in r['groups']}
+        self.assertEqual(sorted(g), [('2', 'release-end', 'idle'), ('2', 'release-end', 'loaded'),
+                                     ('3', 'scene-release', 'idle'), ('3', 'scene-release', 'loaded')])
+        self.assertEqual(g[('2', 'release-end', 'loaded')]['hold_us']['over_1ms'], 110)  # its numbers, read as before
+        self.assertIsNone(g[('2', 'release-end', 'idle')]['restore_us'])
+        self.assertEqual(g[('3', 'scene-release', 'idle')]['restore_us']['p50'], 3.0)
+        md = analyze.markdown(r)
+        self.assertIn('| proton kit 2 (hold includes the release and restore) | on | loaded | 110 | 2000.0 |', md)
+        restore_table = md.split('### Priority restore')[1].split('###')[0]
+        self.assertNotIn('kit 2', restore_table)  # no restore numbers for kit 2
+        self.assertIn('| proton | on | idle | 220 | 3.0 |', restore_table)
+        self.assertTrue(any(n.startswith('"hold includes the release and restore"') and 'k2.zip (kit 2)' in n and
+                            'k3.zip' not in n for n in r['notes']))
+        self.assertTrue(any('k2.zip (kit 2)' in n and 'compare with kit 3' in n and 'not comparable' not in n
+                            for n in r['notes']))
+        runs = {x['source']: x for x in r['runs']}
+        self.assertEqual((runs['k2.zip']['hold'], runs['k3.zip']['hold']), ('release-end', 'scene-release'))
+        self.assertIn('| after the release and restore |', md)
+        self.assertIn('| at the Scene word\'s release |', md)
+
+    def test_kit_3_on_an_older_kiln_is_labelled_too(self):
+        # kit 3 on a Kiln whose gate counters lack the restore fields: hold=release-end, empty restore cells
+        make_zip(self.dir / 'old.zip', platform='linux', proton='proton-11', hold='release-end')
+        r = analyze.analyze([self.dir / 'old.zip'])
+        self.assertEqual({x['hold'] for x in r['groups']}, {'release-end'})
+        self.assertTrue(all(x['restore_us'] is None for x in r['groups']))
+        md = analyze.markdown(r)
+        self.assertIn('| proton (hold includes the release and restore) | on | loaded | 110 |', md)
+        self.assertNotIn('### Priority restore', md)
+        self.assertTrue(any('old.zip (kit 3)' in n for n in r['notes']))
+
+    def test_the_header_alone_says_where_the_hold_ends(self):
+        make_zip(self.dir / 'h.zip', platform='linux', proton='proton-11', in_run_json=False)
+        r = analyze.analyze([self.dir / 'h.zip'])
+        self.assertEqual({x['hold'] for x in r['groups']}, {'scene-release'})
+        self.assertEqual(analyze.hold_of({}, '# gate-priority-test 3; raise=on; label=; mode=write; profile=p; hold=scene-release'),
+                         'scene-release')
+        self.assertEqual(analyze.hold_of({}, '# gate-priority-test 2; raise=on; label=; mode=write; profile=p'), 'release-end')
+        self.assertEqual(analyze.hold_of({'hold_ends': 'unknown'}, ''), 'release-end')
+        self.assertEqual(analyze.hold_of({'hold_ends': 'scene-release'}, '# gate-priority-test 3; hold=release-end'),
+                         'scene-release')  # run.json wins
 
     def test_backslash_entry_names(self):
         make_zip(self.dir / 'w.zip')
