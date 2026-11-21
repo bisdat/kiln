@@ -246,7 +246,13 @@ It fails soft:
   profile's EML mods as `own-loader` (SF's switch for it is on), `off-in-shroudforge` (in SF's folder, switched off
   there: no `extended.mod.json`, or `enabled` not true; the reason says what to do. A file SF refuses, such as another
   `schemaVersion`, is listed so too, and its reason says that no switch helps), `other-side` (its `targets`
-  leave out this side), or `not-loaded` when they are not in SF's folder. kiln-eml patches only in a start where SF does not run: its mods are off in the active profile,
+  leave out this side), or `not-loaded` when they are not in SF's folder. With kiln-eml's drop-ins on (no profile,
+  or the profile's drop-ins on), the EML packages of SF's folder that no profile entry names and that SF has off or
+  refuses are listed too (`source` `game-mods`, `off-in-shroudforge`; in `eml.json` on a dedicated server only, where
+  no in-game menu lists them), and the EML mods of `kiln/eml/mods`, which SF never reads (`kiln-dropin`,
+  `not-loaded`); kiln.log says both in one warning (dev.30.3: a server without a profile said nothing). On a server,
+  SF needs an `extended.mod.json` with `"enabled": true` in each EML package
+  ([dedicated-servers.md](dedicated-servers.md#mods-on-the-server)). kiln-eml patches only in a start where SF does not run: its mods are off in the active profile,
   `KILN_SHROUDFORGE=0`, or SF could not start (its runtime is missing, or it failed before reserving the writer). If
   SF's state still says it prepared asset mods in an earlier start, that start's game data drops them: kiln-eml builds
   from the vanilla backup with the EML mods only, sets SF's state to `failed` and says which SF mods are missing (a
@@ -542,7 +548,7 @@ A ShroudForge writer refusal carries its own lock or handoff explanation; let th
   `{ pid, phase: done|failed|aside|idle|running, file, patched, cached, restored, ms, fingerprint, error, aside, reason, mods: [{ id, version, name, source, path, state, reason, capabilities }], progress }`
   ([schema](../../schema/state-eml.schema.json)). With phase `aside`, `mods` holds the profile's EML entries with state
   `own-loader`, `not-loaded` or `disabled` (dev.22; before, it was empty), under ShroudForge also `off-in-shroudforge`
-  or `other-side` (dev.24). `reason` (dev.24, absent otherwise), one
+  or `other-side` (dev.24), and under ShroudForge with drop-ins on the drop-ins nothing runs (dev.30.3, section above). `reason` (dev.24, absent otherwise), one
   sentence for the player: with phase `idle`, the game data differs from the vanilla backup and kiln-eml could not
   prove it wrote it, so it left it, and what to do (see "It fails soft"); with phase `done`, the ShroudForge asset
   mods an earlier start prepared that this start's game data does not have, because ShroudForge did not run this
