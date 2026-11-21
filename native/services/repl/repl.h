@@ -106,6 +106,7 @@ void snapshot_peers();                        // tick thread: which peer stands 
 void stats_world_stopping();
 void note_send_step(uint64_t start_tsc, uint64_t end_tsc);  // tick thread, lab: one send step
 void stats_apply_hooks();                     // tick thread: the hooks follow the stats' owners and the watches
+bool send_hooks_in();                         // tick thread: SendCallback and EntityWriter are installed now
 KilnResult KILN_CALL t_stats_enable(KilnOwner owner, bool on);
 KilnResult KILN_CALL t_peer_stats(KilnReplPeerStats* out, uint32_t cap, uint32_t* count);
 KilnResult KILN_CALL lab_hook_cost(KilnReplHookCost* out, bool reset);

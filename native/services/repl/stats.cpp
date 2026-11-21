@@ -214,6 +214,9 @@ bool install_all(const One* all, size_t n, const char* what) {
 
 }  // namespace
 
+// The send hooks (SendCallback, EntityWriter) are in now (tick thread): what a caller of the want-set asks after it.
+bool send_hooks_in() { return g_send_hooked; }
+
 // Tick thread: the hooks follow the owners (counting) and the watches (the writer and the callback serve both).
 void stats_apply_hooks() {
     g_hooks_dirty.store(false, std::memory_order_relaxed);
