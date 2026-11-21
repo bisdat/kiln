@@ -70,11 +70,11 @@ std::string guid_text(const uint8_t g[16]) {
                   g[6], g[7], g[8], g[9], g[10], g[11], g[12], g[13], g[14], g[15]);
     return b;
 }
+std::vector<size_t> g_stack_at = {0x31000, 0x31040};  // where the table's stacks are (newcontent may move them)
 bool walk_drop_table(uintptr_t resource, std::vector<DropStackRef>* out) {
     out->clear();
     if (resource != A(0x30000)) return false;
-    out->push_back({A(0x31000), 0});
-    out->push_back({A(0x31040), 0});
+    for (size_t s : g_stack_at) out->push_back({A(s), 0});
     return true;
 }
 bool patch_code_byte(uintptr_t, uint8_t, uint8_t) { return false; }
@@ -340,17 +340,32 @@ void put_pack(size_t off, uint32_t v) {
 
 }  // namespace
 
-// packs.cpp:430-448 and content.cpp:465-476 as they stand (packs.cpp is not linked in the host test): with no old data
-// pack holding drop rules, g_rules is empty.
+// packs.cpp's drop rules (not linked in the host test) and newcontent.cpp's stacks, as they behave: with no old data pack
+// holding drop rules g_rules is empty; drops_apply_rules ends in registry_live_table (packs.cpp); nc_drops_table, when new
+// content adds to a selector group, copies the group's stacks to near memory, repoints them and applies the rules again.
 namespace kc {
 std::vector<int> g_rules_stub;
+bool g_repoint = false;
 bool drops_have_rules() { return !g_rules_stub.empty(); }
 void drops_apply_rules(const Entry& table) {
     /* the old packs' rules: none */
-    registry_live_table(table);  // the registry's live layers of a table the world just loaded
+    registry_live_table(table);
 }
+void nc_drops_table(const Entry& table) {
+    if (!g_repoint) return;
+    g_repoint = false;
+    std::vector<size_t> moved;
+    for (size_t s : g_stack_at) {
+        std::memcpy(g_arena + s + 0x1000, g_arena + s, 0x40);
+        store_originals(A(s), 0x40, g_arena + s + 0x1000);  // as newcontent copies a group: the game's values, not Kiln's layers
+        moved.push_back(s + 0x1000);
+    }
+    g_stack_at = moved;
+    drops_apply_rules(table);
+}
+// content.cpp note_table: the acquire path
 void note_table_as_content_cpp(const Entry& t) {
-    if (drops_have_rules()) drops_apply_rules(t);
+    drops_table_loaded(t);
     std::string err;
     store_flush(&err);
 }
@@ -370,6 +385,27 @@ void drop_table_without_old_rules() {
     add_drop_table();
     note_table_as_content_cpp(g_regs[KILN_CONTENT_DROPS].entries.back());
     check(at<uint32_t>(0x31018) == 6, "count.max x2 once the table is acquired (now " + std::to_string(at<uint32_t>(0x31018)) + ")");
+}
+
+// L1b: newcontent repoints the table's stacks when the table loads: the registry's layers follow them to the new stacks.
+void drop_table_repointed_by_newcontent() {
+    world();
+    g_stack_at = {0x31000, 0x31040};
+    g_files = {{"m/content/a.json", R"({"registry": {"alter": [{"registry": "drops", "select": {"id": "game:dt_wolf"}, "field": "entries[*].count.max", "op": {"mul": 2}}]}})"}};
+    const auto files = files_of({{"m", "m/content/a.json"}});
+    stage(files);
+    registry_live_apply(files);
+    add_drop_table();
+    note_table_as_content_cpp(g_regs[KILN_CONTENT_DROPS].entries.back());
+    check(at<uint32_t>(0x31018) == 6, "bound when the table loads");
+    // definitions change later (newcontent drops_sync): the group's stacks are copied and repointed, the rules applied again
+    g_repoint = true;
+    nc_drops_table(g_regs[KILN_CONTENT_DROPS].entries.back());
+    std::string ferr;
+    store_flush(&ferr);
+    check(at<uint32_t>(0x32018) == 6 && at<uint32_t>(0x32058) == 6, "the stacks the game reads now have count.max x2 (now " + std::to_string(at<uint32_t>(0x32018)) + ")");
+    check(at<uint32_t>(0x31018) == 3, "the stacks it no longer reads keep no registry layer (now " + std::to_string(at<uint32_t>(0x31018)) + ")");
+    g_stack_at = {0x31000, 0x31040};
 }
 
 // L2: a hot reload that recomposes (registry_live.cpp recompose) replaces the handed-over result with a fresh compose():
@@ -428,6 +464,7 @@ int main() {
     }
     int failed = 0;
     const std::pair<const char*, void (*)()> groups[] = {{"L1 drop_table_without_old_rules", &drop_table_without_old_rules},
+                                                         {"L1b drop_table_repointed_by_newcontent", &drop_table_repointed_by_newcontent},
                                                          {"L2 reload_loses_stage_refusals", &reload_loses_stage_refusals},
                                                          {"L3 pack_write_lost_on_detection", &pack_write_lost_on_detection}};
     for (const auto& [name, fn] : groups) {

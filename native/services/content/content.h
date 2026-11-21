@@ -373,6 +373,9 @@ bool apply_pack(KilnOwner owner, uint64_t seq_base, const std::string& text, con
 // Drop-table rules: (re)apply every rule to one table (hook / reload).
 void drops_apply_rules(const Entry& table);
 void drops_drop_owner(KilnOwner owner);
+// content.cpp's drop-table acquire path (registry_live.cpp; store_mutex held): the old packs' rules when there are any,
+// newcontent's stacks, then the registry's layers over the stacks the table has now, whether or not a pack has rules.
+void drops_table_loaded(const Entry& table);
 bool drops_have_rules();
 void drops_clear_rules();  // every owner's drop rules (world reset)
 // Data packs on disk.

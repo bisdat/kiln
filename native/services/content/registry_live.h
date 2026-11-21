@@ -68,7 +68,8 @@ bool registry_live_installed();
 // apply_all_packs, after the packs (store_mutex held): puts the live layers, flushes, reports. files: the pack files of this
 // application (a reload compares their registry sections with the last ones).
 void registry_live_apply(const std::vector<PackFile>& files);
-// A drop table seen for the first time (drops_apply_rules): its registry layers.
+// A drop table seen for the first time, or whose stacks moved (drops_apply_rules after newcontent repointed them): its
+// registry layers come off the stacks they were on and go on the stacks the table has now.
 void registry_live_table(const Entry& table);
 // The last application's result as reported (the stage's plus the live refusals); nullptr before any.
 const registry::Result* registry_live_result();

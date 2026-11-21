@@ -36,6 +36,10 @@ struct LiveState {
         std::string guid;
     };
     std::vector<Pending> pending_tables;  // drop-table fields whose table the world has not loaded yet
+    // drop tables bound: the fields and the stack slots their layers are on, by the table's GUID (lower case), so a table
+    // newcontent repoints (selector stacks copied to near memory) is bound again over the stacks the game reads now
+    std::map<std::string, std::vector<registry::FieldRef>> table_fields;
+    std::map<std::string, std::vector<uintptr_t>> table_addrs;
     // scalar fields put this application: registry.json at world load shows the packs and code around them and the live result
     struct Scalar {
         registry::FieldRef ref;
@@ -420,8 +424,15 @@ void bind_drops(const std::shared_ptr<Binding>& b) {
                 if (!encode(fk, kv, out, why)) return fail(b, *why);
                 return true;
             };
-            put(b, index_of(KILN_CONTENT_DROPS, fields[k]), static_cast<int32_t>(i), refs[i].addr + fields[k]->offset, fields[k]->bytes, std::move(ev));
+            const uintptr_t at = refs[i].addr + fields[k]->offset;
+            if (!put(b, index_of(KILN_CONTENT_DROPS, fields[k]), static_cast<int32_t>(i), at, fields[k]->bytes, std::move(ev)))
+                fail(b, "a stack of the table is not readable");
+            else
+                g.table_addrs[lower(guid_text(b->entry.guid))].push_back(at);
         }
+    const std::string tg = lower(guid_text(b->entry.guid));
+    auto& tf = g.table_fields[tg];
+    if (std::find(tf.begin(), tf.end(), b->ref) == tf.end()) tf.push_back(b->ref);
 }
 
 // ---- perks (refList): five slots of a reference and an id, kept in step ----
@@ -623,6 +634,7 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
 void put_all() {
     store_drop_owner(registry_owner());
     g.pending_tables.clear();
+    g.table_fields.clear(), g.table_addrs.clear();
     g.scalars.clear();
     g.ordinal = 0;
     for (const auto& [fr, fo] : g.in->result.fields) bind(fr, fo);
@@ -832,16 +844,33 @@ void registry_live_apply(const std::vector<PackFile>& files) {
 
 void registry_live_table(const Entry& table) {
     std::lock_guard lock(store_mutex());
-    if (!g.in || g.pending_tables.empty()) return;
+    if (!g.in) return;
     const std::string guid = lower(guid_text(table.guid));
-    std::vector<LiveState::Pending> now;
+    std::vector<registry::FieldRef> fields;
     std::erase_if(g.pending_tables, [&](const LiveState::Pending& p) {
         if (lower(p.guid) != guid) return false;
-        now.push_back(p);
+        fields.push_back(p.field);
         return true;
     });
-    for (const LiveState::Pending& p : now)
-        if (auto it = g.in->result.fields.find(p.field); it != g.in->result.fields.end()) bind(p.field, it->second);
+    // bound before: its layers come off the stacks they are on (the game may read other stacks now) and go on again
+    if (auto it = g.table_fields.find(guid); it != g.table_fields.end()) {
+        for (const registry::FieldRef& f : it->second)
+            if (std::find(fields.begin(), fields.end(), f) == fields.end()) fields.push_back(f);
+        g.table_fields.erase(it);
+    }
+    if (auto it = g.table_addrs.find(guid); it != g.table_addrs.end()) {
+        for (uintptr_t a : it->second) store_drop(registry_owner(), a);
+        g.table_addrs.erase(it);
+    }
+    for (const registry::FieldRef& f : fields)
+        if (auto it = g.in->result.fields.find(f); it != g.in->result.fields.end()) bind(f, it->second);
+}
+
+void drops_table_loaded(const Entry& table) {
+    std::lock_guard lock(store_mutex());
+    if (drops_have_rules()) drops_apply_rules(table);  // the old packs' drop rules (they rebind the registry's too)
+    nc_drops_table(table);                             // new items' stacks; a repointed table gets the rules (and the registry) again
+    registry_live_table(table);                        // the registry's layers over the stacks the game reads now, rules or not
 }
 
 const registry::Result* registry_live_result() {

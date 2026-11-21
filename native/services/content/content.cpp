@@ -470,8 +470,7 @@ void note_table(const uint8_t guid[16], uintptr_t data) {
     e.name = guid_text(guid);
     if (D.get(e.id)) return;
     D.add(e);
-    if (drops_have_rules()) drops_apply_rules(D.entries.back());
-    nc_drops_table(D.entries.back());  // new items' stacks (definitions with "drops")
+    drops_table_loaded(D.entries.back());  // old packs' drop rules, new items' stacks, the registry's layers (registry_live.cpp)
     std::string err;
     store_flush(&err);
     g_modified_stale = true;
