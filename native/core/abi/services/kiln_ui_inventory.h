@@ -13,7 +13,7 @@
  * picture is the viewport's size (w + 2x by h + 2y, a box taken as centred; x and y are 0 in the game today), and Kiln
  * scales that picture to the target (the window's client area, or the overlay's display) when their sizes differ
  * (KUI_MAP_SCALED / KUI_VIEW_SCALED). Target 0 x 0 = the picture's own pixels. Through 0.2.0-dev.30.2 Kiln scaled by the
- * canvas's size in units instead: everything landed at ppu times its place on any screen above 1 px per unit (issue 107).
+ * canvas's size in units instead: everything landed at ppu times its place whenever ppu was not 1 (issue 107).
  * KUI_MAP_VERIFIED is never set in v1: the mapping waits for the client check ui-hooks.c1 (05a-c5).
  *
  * Clicks (fail closed). A left or right press over the game window, while Kiln does not capture input and the cursor is
