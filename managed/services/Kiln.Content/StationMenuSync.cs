@@ -210,7 +210,8 @@ internal static class StationMenuSync
     internal static string? CheckPublish(bool first)
     {
         if (TestPublishCheck is { } test) return test(first);
-        if (!ServerRole) return null;
+        // a process without kiln.net serves nobody (a unit test, a tool): its layers are local
+        if (!ServerRole || (!NetNative.Available && NetEngine.TestServerRole is null)) return null;
         if (!SyncSettings.Current.SendContent)
             return $"{StationMenuStore.ContentSyncDisabled}: this server does not send its content (sendContent is off in kiln/config/sync.json), so clients would not have the recipes a menu lists";
         if (NetNative.Available && !NetAdmission.CanHoldKilnPeers)
