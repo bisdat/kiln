@@ -50,12 +50,14 @@ AgeTable<16384, 64> g_ages;  // 256 KiB, constant-initialised
 
 struct World {
     uintptr_t world = 0, sys = 0;
+    uint32_t session = 0;  // KilnWorldEvent.session of the world this state is for (0: no start seen)
     bool announced = false, layout_bad = false, oldest_done = false;
     Thresholds th;
     uint64_t next_ms = 0;
     uint32_t dump_seen = 0;
 };
 World g_world[KILN_WORLD_KINDS];
+std::atomic<uint32_t> g_session[KILN_WORLD_KINDS] = {};  // each kind's last KilnWorldEvent.session at its start
 
 ProgramCounts<2048> g_counts;  // tick-thread work areas (one dump at a time: see g_dump_busy)
 OldestK<20> g_oldest;
@@ -313,12 +315,15 @@ void step(uint32_t kind) {
     World& w = g_world[kind];
     const uintptr_t world = g_api->world(kind);
     if (!world) return;
-    if (world != w.world) {  // a new session of this world kind
+    // a new session of this world kind: by its session number, as a new world can sit at the old one's address (#108)
+    const uint32_t session = g_session[kind].load(std::memory_order_relaxed);
+    if (world != w.world || session != w.session) {
         const uint32_t idx = index_of(kind);
         g_sys[idx - 1].store(0);
         g_ages.clear_system(idx);
         w = World{};
         w.world = world;
+        w.session = session;
         w.dump_seen = g_dump_gen.load();
     }
     if (w.layout_bad) return;
@@ -379,6 +384,12 @@ int64_t cst(const char* name) {
     return g_api->constant(KilnStr{name, std::strlen(name)}, &v) == KILN_OK ? v : -1;
 }
 
+// World starts (on that world's thread, before its first Pre): the session step() keys its per-world state by.
+void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
+    if (ev && ev->event == KILN_WORLD_STARTED && ev->kind < KILN_WORLD_KINDS)
+        g_session[ev->kind].store(ev->session, std::memory_order_relaxed);
+}
+
 }  // namespace
 
 void init(const KilnApi* api, KilnOwner owner, VanillaFn is_vanilla) {
@@ -418,6 +429,7 @@ void init(const KilnApi* api, KilnOwner owner, VanillaFn is_vanilla) {
     if (api->path(KILN_PATH_CONTROL, path, sizeof path, &n) == KILN_OK && n < sizeof path)
         g_control_file = (std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(path), n)) / L"impacts").wstring();
     KilnHandle h = 0;
+    api->subscribe_world(owner, &on_world, nullptr, &h);
     api->subscribe_tick(owner, KILN_TICK_PRE, &on_pre, nullptr, &h);
     if (api->size >= offsetof(KilnApi, subscribe_world_tick) + sizeof(void*) && api->subscribe_world_tick)
         api->subscribe_world_tick(owner, KILN_WORLD_CLIENT, KILN_TICK_PRE, &on_pre, nullptr, &h);
