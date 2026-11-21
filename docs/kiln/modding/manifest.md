@@ -65,6 +65,8 @@ without git has no stamp, and nothing is compared before the load.
 - **With it** Kiln.Host admits the mod's native owner to kiln.net's Steam leases when it loads the mod. The leases are
   that owner's alone and close when the mod unloads ([../services/net-steam-messages.md](../services/net-steam-messages.md)).
 - **In the launcher** a server's Mods page says "Talks to other players over Steam" on the facts of such a mod.
+- The opt-in is a declaration for trusted mods, not a sandbox: it says which mods use the public API for Steam
+  messages, and does not stop other code in the game's process.
 - Steam peer messages reach players by Steam id, outside the game's connection and its admission: treat every message
   as untrusted, and prefer Kiln.Network's channels when the players are on the same server.
 

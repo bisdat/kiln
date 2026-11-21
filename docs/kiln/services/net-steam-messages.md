@@ -14,7 +14,11 @@ Interface resolution and the session-request callback are adapted from ShroudFor
   admits the native owner it makes for such a mod when it loads it; the grant goes with the owner when the mod unloads,
   and a reloaded mod's new owner is admitted again. kiln.net asks the core which owners are admitted (a Kiln-internal
   table, [README.md](README.md#kiln-internal-tables)).
-- **Every other owner** gets `KILN_ERR_UNAVAILABLE` from `steam_open`, logged once as `steam-messages-owner`.
+- **Every other owner** gets `KILN_ERR_UNAVAILABLE` from `steam_open`, logged once as `steam-messages-owner`. That
+  includes every native plugin: the members are in the SDK's `kiln_net.h`, but a native mod cannot open a lease.
+- **The opt-in is a declaration, not a sandbox.** Mods run with full trust in the game's process: `"steamMessages"`
+  keeps the public API honest about which mods talk over Steam, and does not stop code in the same process that
+  works around it.
 
 ## Owners and handles
 
