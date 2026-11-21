@@ -62,7 +62,7 @@ export default function PublishTab({ studio: st, gameId }: { studio: Studio; gam
     } finally { setBusy(false); }
   };
   const saveFile = async () => {
-    const dir = api.isTauri() ? (await pickPaths({ directory: true, title: t("crucible.save.pick") }))?.[0] : (await api.loadMock()).mockPickFolder();
+    const dir = api.isTauri() ? (await pickPaths({ directory: true, title: t("crucible.save.pick"), kind: "studioPackSave" }))?.[0] : (await api.loadMock()).mockPickFolder();
     if (!dir) return;
     try {
       const r = await runTask<api.BuiltPack>(() => api.studioBuild(s.id, dir), { failed: t("crucible.save.failed", { name: s.name }) });

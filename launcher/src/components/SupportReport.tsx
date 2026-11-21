@@ -11,6 +11,7 @@ import { t, useT } from "../i18n";
 import { Button, errorText, fmtBytes, toast } from "../ui";
 import { SendToSupport } from "../community/parts";
 import { ReportContentsDialog } from "./ReportContents";
+import { saveDialog } from "../ui/dialogFolder";
 
 /** `kiln-report-2026-11-10.zip` (the crate's report::file_name, in local time). */
 export function reportFileName(d = new Date()): string {
@@ -20,8 +21,8 @@ export function reportFileName(d = new Date()): string {
 
 async function choosePath(): Promise<string | null> {
   if (!isTauri()) return reportFileName(); // mock mode: no dialog
-  const { save } = await import("@tauri-apps/plugin-dialog");
-  return save({ title: t("supportReport.dialogTitle"), defaultPath: reportFileName(), filters: [{ name: "Zip", extensions: ["zip"] }] });
+  // "<Downloads>/kiln-report-....zip" (or the folder the last report went to), never the AppImage's own mount
+  return saveDialog({ kind: "supportReport", title: t("supportReport.dialogTitle"), fileName: reportFileName(), filters: [{ name: "Zip", extensions: ["zip"] }] });
 }
 
 /** The block: one sentence, "Save report...", "Copy summary". `target` null: the system and the launcher only. */

@@ -69,7 +69,7 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
   const replaceDll = async (r: ModRow) => {
     if (!pid || !r.kind || !r.entry) return;
     try {
-      const paths = await pickPaths({ multiple: false, filters: [{ name: t("mods.list.windowsDll"), extensions: ["dll"] }], title: t("mods.list.replaceDllTitle") });
+      const paths = await pickPaths({ multiple: false, filters: [{ name: t("mods.list.windowsDll"), extensions: ["dll"] }], title: t("mods.list.replaceDllTitle"), kind: "replaceDll" });
       if (!paths?.length || !(await mods.edit.flush())) return;
       const entry = { kind: r.kind, id: r.id, version: r.entry.version, hash: r.entry.hash };
       const run = async (confirmed: boolean) => {
@@ -191,7 +191,7 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
 
   const pick = async () => {
     try {
-      const paths = await pickPaths({ multiple: true, filters: MOD_FILE_FILTERS, title: t("mods.list.addMods") });
+      const paths = await pickPaths({ multiple: true, filters: MOD_FILE_FILTERS, title: t("mods.list.addMods"), kind: "addMods" });
       if (paths?.length) await addMods(paths, game);
     } catch (e) { toast.error(e, t("mods.list.openFilesFailed")); }
   };

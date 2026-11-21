@@ -61,6 +61,12 @@ pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, Error> + 
     r.await.map_err(|e| Error::new(ErrorCode::Internal, format!("worker failed: {e}")))?
 }
 
+/// Held while settings.json is read, changed and written (app_settings_set, crate::dialog_folder::remember).
+pub fn settings_write() -> std::sync::MutexGuard<'static, ()> {
+    static WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    WRITE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 pub fn read_settings() -> Result<crate::commands::app::LauncherSettings, Error> {
     let d = dirs()?;
     Ok(kiln_manage::util::read_json(&d.settings())?.unwrap_or_default())

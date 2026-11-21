@@ -991,6 +991,9 @@ const handlers: Record<string, Handler> = {
     sandbox = { ...sandbox, marker: !a.on, markerWhy: a.on ? undefined : `Turned off in Settings (${new Date().toISOString()})` };
     return { ...sandbox };
   },
+  // a plain browser has no dialogs; Downloads stands in (ui/dialogFolder.ts)
+  app_dialog_default: (a) => (a.preferred ? S(a.preferred) : a.fileName ? `/home/player/Downloads/${S(a.fileName)}` : "/home/player/Downloads"),
+  app_dialog_remember: () => null,
   app_desktop_set: (a) => (desktop = { ...desktop, on: !!a.on, installed: !!a.on, foreign: false }),
   app_locales: () => ({ dir: `${mockDataDir()}/locales`, files: [], errors: [] }),
   app_settings_get: () => settings,
