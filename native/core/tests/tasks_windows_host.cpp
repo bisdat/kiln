@@ -79,6 +79,36 @@ void KILN_CALL spin_body(const KilnTaskRun*, void*) {
     (void)sink;
 }
 void KILN_CALL spin_done(KilnHandle, uint32_t, void*) { InterlockedIncrement(&g_cpu_done); }
+
+// #83: menu hops through the managed host's lease table (kiln::tasks::Service) over the real Windows platform. The
+// "host" here is this exe: its dispatcher arms the lease's first segment, counts the menu hops and finishes the lease.
+class MenuEnv final : public ServiceEnv {
+public:
+    bool on_tick_or_world_thread() override { return false; }
+    bool owner_alive(KilnOwner owner) override { return owner != 0; }
+    std::string owner_name(KilnOwner owner) override { return "mod." + std::to_string(owner); }
+};
+Service* g_menu_service = nullptr;
+volatile long g_menu_hops = 0, g_menu_cancelled = 0, g_menu_finish = 0;
+volatile uint64_t g_menu_reg = 0;
+volatile DWORD g_menu_thread = 0;
+void KILN_CALL menu_dispatch(KilnLease lease, uint32_t what, uint32_t cancelled, void*) {
+    if (what == KILN_LEASE_SEGMENT) {
+        if (g_menu_finish) {
+            g_menu_service->host_finish(lease, 0);
+            return;
+        }
+        uint64_t r = 0;
+        g_menu_service->host_arm(lease, &r);
+        g_menu_reg = r;
+        return;
+    }
+    if (what == KILN_LEASE_MENU_HOP) {
+        g_menu_thread = GetCurrentThreadId();
+        InterlockedIncrement(&g_menu_hops);
+        if (cancelled) InterlockedIncrement(&g_menu_cancelled);
+    }
+}
 }  // namespace
 
 int main() {
@@ -216,6 +246,40 @@ int main() {
     std::printf("cpu clocks: GetThreadTimes advanced %llu times, smallest step %.3f ms; QueryThreadCycleTime advanced %llu cycles\n",
                 static_cast<unsigned long long>(g_times_steps), static_cast<double>(g_times_step_100ns) / 1e4,
                 static_cast<unsigned long long>(g_cycles));
+
+    // #83: the main menu's session line and its hops, on the real Windows platform
+    {
+        MenuEnv env;
+        Service service(pool, env);
+        g_menu_service = &service;
+        check(service.host_bind(&menu_dispatch) == KILN_OK, "menu: the host's dispatcher binds");
+        KilnTaskInfo info{};
+        info.size = sizeof(KilnTaskInfo);
+        info.name = {"menu", 4};
+        KilnLease lease = 0;
+        check(service.host_admit(7, &info, nullptr, &lease, nullptr) == KILN_OK, "menu: a lease is admitted");
+        check(until([&] { return g_menu_reg != 0; }), "menu: its first segment armed (suspended)");
+        check(service.host_tick_hop_in(lease, KILN_TASKS_WORLD_MENU, 1) == KILN_ERR_UNAVAILABLE,
+              "menu: no menu session before a UI frame");
+        check(service.menu_frame() == 0, "menu: the first UI frame opens menu session 1");
+        check(service.host_tick_hop_in(lease, KILN_TASKS_WORLD_MENU, 1) == KILN_OK, "menu: a menu hop is queued");
+        check(service.menu_frame() == 1 && g_menu_hops == 1 && g_menu_cancelled == 0 &&
+                  g_menu_thread == GetCurrentThreadId(),
+              "menu: the next UI frame ran it on the UI thread, not cancelled");
+        check(service.host_tick_hop_in(lease, KILN_TASKS_WORLD_MENU, 1) == KILN_OK, "menu: another menu hop waits");
+        service.session_started(KILN_WORLD_CLIENT, 1);
+        check(g_menu_hops == 2 && g_menu_cancelled == 1, "menu: the client world's start dispatched it cancelled");
+        check(service.menu_frame() == 0 && service.host_tick_hop_in(lease, KILN_TASKS_WORLD_MENU, 1) == KILN_ERR_UNAVAILABLE,
+              "menu: no menu while a world runs");
+        service.session_stopping(KILN_WORLD_CLIENT, 1);
+        InterlockedExchange(&g_menu_finish, 1);
+        check(service.host_resume(lease, g_menu_reg) == KILN_OK, "menu: the lease resumes to finish");
+        check(until([&] {
+            uint32_t left = 1;
+            pool.drain_owner(7, 0, &left);
+            return left == 0;
+        }), "menu: the lease ended and is quiescent");
+    }
 
     std::printf("tasks windows host: %d failure(s)\n", failures);
     return failures ? 1 : 0;

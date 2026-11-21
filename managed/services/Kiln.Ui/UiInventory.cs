@@ -57,7 +57,8 @@ public sealed record SlotClickOptions
 public sealed record SlotClick(SlotButton Button, SlotModifiers Modifiers, VisibleSlot Slot, GameScreen Screen, bool Taken)
 {
     public ItemId Item => Slot.Item;
-    /// <summary>The item entity (EntityId 0 for an empty slot or a stack the game drew without an entity).</summary>
+    /// <summary>The item entity (weapons, tools, armour, cans). EntityId 0 for an empty slot and for a plain stack
+    /// (materials, consumables), which the game keeps without an item entity: name it by Holder, slot and Item.</summary>
     public EntityId ItemEntity => Slot.ClientEntity;
     /// <summary>The entity whose inventory holds the slot (the player, a chest), when the game's models said.</summary>
     public EntityId Holder => Slot.Holder;

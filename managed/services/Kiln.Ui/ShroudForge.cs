@@ -811,6 +811,8 @@ internal static class ShroudForgePackages
     /// <c>&lt;game&gt;/shroudforge/config/modloader-config.json</c>.</summary>
     public static string Folder(string gameDir, string key)
     {
+        // the tripwire of a kiln-backend start, which never reaches ShroudForge's folders
+        OnSfRoot?.Invoke(gameDir, key);
         try
         {
             var cfg = Path.Combine(gameDir, "shroudforge", "config", "modloader-config.json");
@@ -825,6 +827,10 @@ internal static class ShroudForgePackages
             _ => Path.Combine(gameDir, "shroudforge", key),
         };
     }
+
+    /// <summary>Tests: called with the game folder and key each time ShroudForge's folders are looked up (every read of
+    /// &lt;game&gt;/shroudforge and the hosted action hand-off go through <see cref="Folder"/>).</summary>
+    internal static Action<string, string>? OnSfRoot;
 
     /// <summary>Asks the running mod to run one of its declared actions, as ShroudForge's Modloader window does: a
     /// request file in <c>&lt;ui&gt;/actions/</c> that its runtime picks up (and removes) on its next turn.</summary>

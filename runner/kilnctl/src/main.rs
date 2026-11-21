@@ -588,6 +588,10 @@ fn data_use(cmd: &Cmd) -> lock::Use {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // (feature sfi: kiln-mode activations run the archive inspector the Kiln installed in each game
+    // folder brought, its version and SHA-256 from that install: kiln_manage::sfi_inspection::Installed)
+    #[cfg(feature = "sfi")]
+    kiln_manage::profile::sfi::use_installed_inspector();
     // the data folder's lock, before the command does anything, for as long as it runs (dropped after dispatch)
     let _held = match data_use(&cli.cmd) {
         lock::Use::Whole => match lock::hold() {
@@ -626,6 +630,10 @@ mod data_use_tests {
             &["client", "status"], &["deploy", "s", "--bundle", "k.zip"], &["bundle", "install", "k.zip", "--dir", "/g"],
             &["bundle", "uninstall", "--dir", "/g"], &["backup", "s"], &["report"],
             &["pack", "install", "p.kilnpack", "--yes"], &["pack", "update", "p", "p.kilnpack"], &["pack", "build", "p", "--version", "1.0.0"], &["pack", "list"],
+            // Pack Studio's pack source commands (they read and write the source's profile)
+            &["pack", "init", "dir", "--name", "Ember run", "--profile", "p"], &["pack", "add", "dir", "eml:loot@1.0.0", "mod.zip"],
+            &["pack", "capture-settings", "dir", "--take", "a.json:range@client"], &["pack", "lint", "dir"], &["pack", "credits", "dir", "--set", "a=Me,https://x.y"],
+            &["pack", "publish", "dir", "--public", "--yes"], &["pack", "build", "./dir"],
         ] {
             assert_eq!(use_of(args), Use::Whole, "{args:?}");
         }
@@ -633,6 +641,7 @@ mod data_use_tests {
             &["run", "s"][..], &["start", "s"], &["stop", "s"], &["logs", "s", "--follow"], &["port", "s"], &["gate", "s"],
             &["install", "s"], &["prefix", "s"], &["status", "s"], &["list"], &["deploy", "s"], &["bundle", "verify", "k.zip"],
             &["cmd", "s", "help"], &["tick-compare", "a.jsonl", "b.jsonl"], &["pack", "verify", "p.kilnpack"],
+            &["pack", "check", "p.kilnpack"], &["pack", "check", "--index", "i.json", "--files", "f"],
         ] {
             assert_eq!(use_of(args), Use::None, "{args:?}");
         }

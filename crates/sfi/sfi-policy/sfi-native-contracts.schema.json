@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Kiln native review registry v1 (host-owned, not player acknowledgements)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "minReader", "contracts"],
+  "properties": {
+    "format": {"const": 1},
+    "minReader": {"const": 1},
+    "contracts": {
+      "type": "object",
+      "maxProperties": 4096,
+      "propertyNames": {"pattern": "^[0-9a-f]{64}$"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["verdict", "evidence", "reviewer", "date", "absentPath"],
+        "properties": {
+          "verdict": {"enum": ["pass", "presence-probe", "banned-export-resolution", "unknown-dynamic", "refused"]},
+          "evidence": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+          "reviewer": {"type": "string", "minLength": 1, "maxLength": 256},
+          "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "format": "date"},
+          "absentPath": {"enum": ["supported", "feature-disabled", "not-reviewed", "not-applicable"]}
+        }
+      }
+    }
+  },
+  "$comment": "The Rust reader also rejects duplicate keys, validates actual calendar dates, requires an applicable absentPath for probe/export classes, and imposes a 1 MiB/depth-64 bound. Ordinary/delay banned imports are never overridden. A guarded dynamic-export exception requires supported absent behavior. Presence feature-disabled is partial and needs a launcher warning. Runtime checks/loader notifications remain required for every admitted DLL. No corpus review records ship here."
+}

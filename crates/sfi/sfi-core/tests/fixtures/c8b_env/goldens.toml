@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: MIT
+# Captured with ShroudForge's own mod runtime (a local differential test, not published), 2026-11-19,
+# headless Wine, shared transcript v2. Both runs: 1 fixture, 25 records, 10 exact v2 failure messages; the core-runner rerun on
+# SF's own VM was byte-identical, and the two pins' transcripts are byte-identical.
+# require.lua (same captures, rerun 2026-11-19): 11 records, 8 exact v2 failure messages,
+# byte-identical across pins and with the core-runner rerun.
+# Fixed seed: the differential test's seed package; fixtures: env.lua, require.lua.
+# No transcript edits or normalization outside the reviewed shared v2 prelude.
+[goldens]
+"sf179.golden.json" = "oracle sf-1.7.9 d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8; env.lua; sha256=f4f3ce8ea918622554f6b125e43a591988ac30735f8b5a5803a674904ee2199a"
+"sf180.golden.json" = "oracle sf-1.8.0 38ef448dc5d4fc267b5f0928502a864a6b078865; env.lua; sha256=f4f3ce8ea918622554f6b125e43a591988ac30735f8b5a5803a674904ee2199a"
+"require.sf179.golden.json" = "oracle sf-1.7.9 d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8; require.lua; sha256=c7763133e27e023c41e9aa93b93e8b80a7caa6ec534063e61f55fe6eac76b7ca"
+"require.sf180.golden.json" = "oracle sf-1.8.0 38ef448dc5d4fc267b5f0928502a864a6b078865; require.lua; sha256=c7763133e27e023c41e9aa93b93e8b80a7caa6ec534063e61f55fe6eac76b7ca"

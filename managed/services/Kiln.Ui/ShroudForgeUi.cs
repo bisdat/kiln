@@ -323,6 +323,8 @@ internal static class ShroudForgeUi
 
     private static string Saved(SfPackage p, string? key)
     {
+        // a kiln-backend start's change applies at the next start
+        if (NextStartOnly(p.Folder)) p = p with { SwitchLive = false, Settings = p.Settings.Select(x => x with { Live = false }).ToList() };
         if (key is null)
             return p.SwitchLive
                 ? KilnText.T(p.Enabled ? "shroudforge.save.switch_live_on" : "shroudforge.save.switch_live_off", ("mod", p.Name))
@@ -637,7 +639,11 @@ internal static class ShroudForgeUi
     /// <summary>The ShroudForge part of a mod's details: its switch, its settings by group, its buttons.</summary>
     public static void Draw(UiDraw ui, CatalogMod m, float s, float k, Action<UiDraw, string, float> label)
     {
+        // a start Kiln's interpreter has: its part truth, requested against current
+        if (m.Sfi is { } sfiRow) SfiLines(ui, sfiRow, s, k, label);
         if (m.Folder is not { } folder) return;
+        // the writer's words for this folder follow the row it was drawn for
+        NextStart[folder] = m.Sfi is { NextStartOnly: true };
         if (WaitingFor(m) is { } waits)
         {
             label(ui, KilnText.T("shroudforge.labels.waits"), s);
@@ -661,10 +667,13 @@ internal static class ShroudForgeUi
         var on = view.SwitchOn;
         var was = on;
         if (ui.Checkbox((on ? KilnText.T("shroudforge.on") : KilnText.T("shroudforge.off")) + "###sf.switch", ref on) && on != was) Edit(folder, null, JsonValue.Create(on));
+        // (until the interpreter observes package files while the game runs, every change in a
+        // kiln-backend start applies at the next start)
+        var switchLive = p.SwitchLive && !NextStartOnly(folder);
         using (ui.FontSize(14 * k))
         using (ui.PushColor(UiColorSlot.Text, GameColors.Muted))
         {
-            ui.TextWrapped(p.SwitchLive ? KilnText.T("shroudforge.switch_live") : KilnText.T("shroudforge.switch_next"));
+            ui.TextWrapped(switchLive ? KilnText.T("shroudforge.switch_live") : KilnText.T("shroudforge.switch_next"));
             if (m.Source == "profile")
                 ui.TextWrapped(KilnText.T("shroudforge.switch_profile"));
         }
@@ -715,6 +724,30 @@ internal static class ShroudForgeUi
         using (ui.FontSize(13 * k))
         using (ui.PushColor(UiColorSlot.Text, GameColors.Faint))
             ui.TextWrapped(KilnText.T("shroudforge.saved_to"));
+        if (m.Sfi is not null)
+            using (ui.FontSize(13 * k))
+            using (ui.PushColor(UiColorSlot.Text, GameColors.Faint))
+                ui.TextWrapped(SfiNextStartNote);
+    }
+
+    // Kiln's interpreter's rows
+    // per package folder: the row last drawn for it was a kiln-backend start's (render thread writes, the writer reads)
+    private static readonly ConcurrentDictionary<string, bool> NextStart = new(StringComparer.OrdinalIgnoreCase);
+
+    internal const string SfiNextStartNote =
+        "Kiln's interpreter reads this file when the game starts: switch and setting changes apply at the next start.";
+
+    /// <summary>The row last drawn for <paramref name="folder"/> was a kiln-backend start's: its changes apply at the next
+    /// start, whatever the package declares (no IO: the render thread and the writer ask).</summary>
+    internal static bool NextStartOnly(string folder) => NextStart.TryGetValue(folder, out var v) && v;
+
+    private static void SfiLines(UiDraw ui, SfiRow row, float s, float k, Action<UiDraw, string, float> label)
+    {
+        label(ui, row.Branch == SfiBranchKind.External ? "SHROUDFORGE'S OWN LOADER" : "KILN'S INTERPRETER", s);
+        using (ui.FontSize(14 * k))
+            foreach (var (text, warn) in row.Lines)
+                using (ui.PushColor(UiColorSlot.Text, warn ? GameColors.Warning : GameColors.Muted))
+                    ui.TextWrapped(Clip(text, MaxDrawnText));
     }
 
     // ShroudForge's runtime runs it in this process now (its state.json lists it active), whatever its effect reports
@@ -748,7 +781,9 @@ internal static class ShroudForgeUi
         {
             if (item.Description is { } desc)
                 using (ui.PushColor(UiColorSlot.Text, GameColors.Muted)) ui.TextWrapped(desc);
-            if (!d.Live)
+            // in a kiln-backend start a live setting applies at the next start too
+            var nextStart = !d.Live || NextStartOnly(folder);
+            if (nextStart)
                 using (ui.PushColor(UiColorSlot.Text, GameColors.Attention)) ui.TextWrapped(KilnText.T("shroudforge.next_start"));
             if (item.Error is { } err)
                 using (ui.PushColor(UiColorSlot.Text, GameColors.Warning)) ui.TextWrapped(err);
@@ -914,6 +949,8 @@ internal static class ShroudForgeUi
     private static void Action(UiDraw ui, string folder, SfPackage p, SfAction a, string label, string? confirm, bool running, float s, float k)
     {
         using var _ = ui.Id("act." + a.Id);
+        // a kiln-backend start prunes ended launches' bridge folders once, on a worker
+        SfiBridge.Start();
         ui.Space(1, 6 * s);
         var armed = _armed is { } x && x.Folder == folder && x.Action == a.Id && Environment.TickCount64 - x.AtMs < 6000;
         bool clicked;
@@ -934,6 +971,13 @@ internal static class ShroudForgeUi
                 {
                     lock (ActionGate)
                     {
+                        // (in a kiln-backend start Kiln's interpreter takes the request through
+                        // its UI bridge, never ShroudForge's folder; SfiBridge.Send is null for any other start)
+                        if (SfiBridge.Send(p, a.Id, label) is { } kiln)
+                        {
+                            lock (Lock) Results[folder] = kiln;
+                            return;
+                        }
                         Func<string> text;
                         var ok = true;
                         try
@@ -998,6 +1042,7 @@ internal static class ShroudForgeUi
         }
         _activeFrame = 0;
         Packages.Clear();
+        NextStart.Clear();
     }
 }
 
@@ -1088,6 +1133,14 @@ internal static class ShroudForgeMenu
             // kiln-shroudforge decides early; a ShroudForge window that closes later hands its shortcut over then
             for (var i = 0; ; i++)
             {
+                // a kiln-backend start runs no ShroudForge runtime to make the menu's event: Kiln.Ui
+                // makes it, and keeps the key for the whole start (the page also says why mods did
+                // not run when the interpreter refused)
+                if (OperatingSystem.IsWindows() && SfiBridge.ReadClaim(src).Mode == SfiMode.Kiln)
+                {
+                    TakeKiln();
+                    return;
+                }
                 var f = ModCatalog.ReadState(src, "shroudforge.json");
                 var c = Read(f.Current ? f.Doc : null);
                 if (c.MenuBy == "kiln")
@@ -1105,15 +1158,55 @@ internal static class ShroudForgeMenu
         }
     }
 
+    internal static string EventName => $"Local\\ShroudForge.ModMenu.Open.{Environment.ProcessId}";
+
     private static void Take(string? sfKey)
     {
-        var name = $"Local\\ShroudForge.ModMenu.Open.{Environment.ProcessId}";
-        var h = OpenEventW(SYNCHRONIZE, false, name);
+        var h = OpenEventW(SYNCHRONIZE, false, EventName);
         if (h == 0)
         {
             UiEngine.Log(LogLevel.Warn, $"ShroudForge's menu event is missing (error {Marshal.GetLastPInvokeError()}): use Kiln's Mods entry");
             return;
         }
+        var src = ModCatalog.Sources();
+        Serve(sfKey, h, () =>
+        {
+            var f = ModCatalog.ReadState(src, "shroudforge.json");
+            var claim = Read(f.Current ? f.Doc : null);
+            return !(claim.Final || claim.MenuBy == "helper");
+        });
+    }
+
+    /// <summary>A kiln-backend start: Kiln.Ui makes ShroudForge's menu event (auto-reset: presses that come before a wait
+    /// are one toggle) that kiln-sfi's shroudforge.ui.toggle_modloader() signals, and ShroudForge's key (F9 unless the
+    /// player remaps it in Keys) toggles Kiln's ShroudForge page.</summary>
+    private static void TakeKiln()
+    {
+        var h = CreateKilnEvent(out var existed);
+        if (h == 0)
+        {
+            UiEngine.Log(LogLevel.Warn, $"Kiln's interpreter: ShroudForge's menu event could not be made (error {Marshal.GetLastPInvokeError()}): use Kiln's Mods entry");
+            return;
+        }
+        if (existed)
+            UiEngine.Log(LogLevel.Warn, "Kiln's interpreter: ShroudForge's menu event already existed in this process; Kiln.Ui uses it");
+        Serve(null, h, () => true);
+    }
+
+    /// <summary>The kiln-mode menu event: auto-reset, not signalled. <paramref name="existed"/>: another owner made it first.</summary>
+    internal static nint CreateKilnEvent(out bool existed)
+    {
+        var h = CreateEventW(0, false, false, EventName);
+        existed = h != 0 && Marshal.GetLastPInvokeError() == ERROR_ALREADY_EXISTS;
+        return h;
+    }
+
+    internal static uint WaitForTests(nint h, uint ms) => WaitForSingleObject(h, ms);
+    internal static void CloseForTests(nint h) => CloseHandle(h);
+
+    /// <summary>Holds ShroudForge's menu key while <paramref name="keep"/> says so, toggling the page at each signal.</summary>
+    private static void Serve(string? sfKey, nint h, Func<bool> keep)
+    {
         try
         {
             var mod = ModContext.CurrentMod;
@@ -1129,14 +1222,11 @@ internal static class ShroudForgeMenu
                 UiEngine.Log(LogLevel.Info, $"ShroudForge has no Modloader window: key {_binding.Key} and shroudforge.ui.toggle_modloader() toggle Kiln's ShroudForge page (remap in Keys; Mods is always available)");
             }
             finally { ModContext.CurrentMod = mod; }
-            var src = ModCatalog.Sources();
             while (true)
             {
                 var wait = WaitForSingleObject(h, 2000);
                 if (wait != 0 && wait != 258) break;  // WAIT_TIMEOUT: check runtime lifecycle too
-                var f = ModCatalog.ReadState(src, "shroudforge.json");
-                var claim = Read(f.Current ? f.Doc : null);
-                if (claim.Final || claim.MenuBy == "helper") break;
+                if (!keep()) break;
                 if (wait == 0) Toggle();
             }
         }
@@ -1169,6 +1259,10 @@ internal static class ShroudForgeMenu
     }
 
     private const uint SYNCHRONIZE = 0x00100000;
+    private const int ERROR_ALREADY_EXISTS = 183;
+
+    [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern nint CreateEventW(nint attributes, bool manualReset, bool initialState, string name);
 
     [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern nint OpenEventW(uint access, bool inherit, string name);

@@ -8,6 +8,7 @@ use kiln_manage::Error;
 use kiln_manage::library::{self, Detected, LibraryEntry, LibraryRef, RemoveReport, TakenOver};
 use kiln_manage::lint::{self, LintOptions, LintReport};
 use kiln_manage::manifest::ModKind;
+use kiln_manage::mod_settings::SettingsRemoval;
 use kiln_manage::quick::AddReport;
 use std::path::PathBuf;
 use tauri::AppHandle;
@@ -37,6 +38,8 @@ pub async fn library_import(app: AppHandle, paths: Vec<String>) -> Result<TaskId
     };
     let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
     Ok(spawn_task(&app, "library_import", title, move |p| {
+        // a file still downloading or being scanned: waited for a few seconds, then said so (as library_add does)
+        kiln_manage::quick::wait_until_ready(&paths, p)?;
         for path in &paths { kiln_manage::quick::validate_import_path(path)?; }
         let r = library::import(&dirs()?, &paths, p)?;
         log_import("library_import", &r);
@@ -106,13 +109,43 @@ pub async fn library_add_to_profile(app: AppHandle, game_id: String, profile_id:
 /// Refuses (game_running) while a game runs, or a server whose profile file points into the library, whatever `force`
 /// says (it may be reading the mod). With `shown` (the `library_users` answer a confirmation named), it goes past
 /// exactly those users: anything else that lists the version now is a conflict, whatever `force` says.
+/// `settings` (the remove dialog's "Remove its settings too"): once this was the mod's last version, its settings go too
+/// (kiln_manage::mod_settings, after a copy into the launcher's backups folder); the answer says what went. Null
+/// without it, or while other versions of the mod stay.
 #[tauri::command]
-pub async fn library_remove(entry: LibraryRef, force: bool, shown: Option<Vec<String>>) -> Result<(), Error> {
+pub async fn library_remove(entry: LibraryRef, force: bool, shown: Option<Vec<String>>, settings: Option<bool>)
+    -> Result<Option<SettingsRemoval>, Error> {
     let force = match shown {
         Some(shown) => library::Force::Past(shown),
         None => library::Force::from(force),
     };
-    blocking(move || library::remove(&dirs()?, &entry, force)).await
+    let r = blocking(move || library::remove_and_settings(&dirs()?, &entry, force, settings.unwrap_or(false))).await?;
+    if let Some(s) = &r {
+        log_settings_removal(s);
+    }
+    Ok(r)
+}
+
+/// "Remove its settings too" for a mod whose files are gone from the Library already (the remove dialog of a row
+/// without a Library entry): kiln_manage::mod_settings::remove. Refused (conflict) while the Library holds a version of
+/// it, (game_running) while a game runs.
+#[tauri::command]
+pub async fn library_remove_settings(kind: ModKind, id: String) -> Result<SettingsRemoval, Error> {
+    let r = blocking(move || kiln_manage::mod_settings::remove(&dirs()?, kind, &id, &[])).await?;
+    log_settings_removal(&r);
+    Ok(r)
+}
+
+fn log_settings_removal(s: &SettingsRemoval) {
+    for p in &s.removed {
+        launcher_log("library", &format!("removed settings: {p}"));
+    }
+    if let Some(b) = &s.backup {
+        launcher_log("library", &format!("the removed settings are copied in {b}"));
+    }
+    for n in &s.notes {
+        launcher_log("library", n);
+    }
 }
 
 /// "Use the changed files": a Library entry whose files the player changed in its folder (`LibraryVersion.changed`, or
@@ -185,7 +218,7 @@ pub async fn library_users(entry: LibraryRef) -> Result<Vec<String>, Error> {
 pub async fn library_lint(entry: Option<LibraryRef>, profile_id: Option<String>) -> Result<LintReport, Error> {
     blocking(move || {
         let dirs = dirs()?;
-        let options = LintOptions::default();
+        let options = LintOptions { no_catalog_hint: Some(kiln_manage::lint::LAUNCHER_CATALOG_HINT.into()), ..Default::default() };
         match entry {
             Some(e) => lint::lint_library_entry(&dirs, &e, profile_id.as_deref(), &options),
             None => {

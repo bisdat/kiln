@@ -20,6 +20,10 @@ name = "kiln-eml-run"
 path = "src/kiln_eml_run.rs"
 
 [[bin]]
+name = "kiln-eml-inspect"
+path = "src/kiln_eml_inspect.rs"
+
+[[bin]]
 name = "kiln-portraits"
 path = "src/kiln_portraits.rs"
 
@@ -31,10 +35,29 @@ png = "0.17.16"
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# kiln_mode: the launch plan is used only when its SHA-256 is kiln.launch's (already in the graph via mod-loader-lua)
+sha2 = "0.10"
 camino.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 zip = "4.2.0"
+# The SF-dialect startup pass (the type session on): the shared Lua/core layer (MIT) under the GPL session. Its serde_json
+# preserve_order reaches this whole graph; JSON this plugin writes sorts its keys explicitly (ownership.rs).
+mlua.workspace = true
+sfi-core = { path = "../../../crates/sfi/sfi-core" }
+# (the frozen launch plan read by the interpreter's own reader, MIT, serde_json + sha2 only)
+sfi-policy = { path = "../../../crates/sfi/sfi-policy" }
+# kiln.eml.archive v1: the provider table is the generated binding of the MIT header
+# native/core/abi/services/kiln_eml_archive.h (no_std, no dependencies), so its layout is the header's.
+kiln-abi = { path = "../../../crates/sfi/kiln-abi" }
+# The archive service's registry digest; already in this graph through mod-loader-lua.
+
+# (the test lock/spawn gate)
+[dev-dependencies]
+# Test-only: the test lock/spawn gate (eml/mod-loader-lua/src/test_gate.rs) for this crate's unit tests, around
+# mod-loader-lua's file locks and this crate's own. Dev-dependencies never reach a normal build, so the shipped
+# kiln-eml.dll has no gate (`cargo tree -e no-dev,features -p kiln-eml` lists no test-gate).
+mod-loader-lua = { path = "../eml/mod-loader-lua", features = ["test-gate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61.3", features = [

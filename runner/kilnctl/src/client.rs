@@ -125,7 +125,17 @@ pub fn activate(profile: Option<String>, deactivate: bool, dir: Option<PathBuf>,
         println!("  note: {line}");
     }
     print_retained(&a.retained);
+    // what the check before Play would show for this profile
+    print_start_warnings(&dirs, &g, &kiln_manage::launch::LaunchRequest { mode: kiln_manage::launch::LaunchMode::Profile, profile_id: None, skip_backup: true });
     Ok(0)
+}
+
+/// The warnings the check before Play would show for a start of `request` (kiln_manage::sfi_launch): printed, never
+/// asked. Nothing when kiln.json asks for no Kiln interpreter.
+fn print_start_warnings(dirs: &kiln_manage::paths::DataDirs, g: &GameInstall, request: &kiln_manage::launch::LaunchRequest) {
+    for line in kiln_manage::sfi_launch::headless_warnings(dirs, g, request).lines() {
+        println!("  {line}");
+    }
 }
 
 /// Mod folders Kiln left in the game folder: their own loader may still run them, whatever the profile says.
@@ -157,6 +167,18 @@ pub fn play_once(mode: &str, profile: Option<String>, dir: Option<PathBuf>, real
         kiln_manage::profile::write_once(&dirs, pid, &g).km()?;
     } else if profile.is_some() {
         bail!("--profile only goes with mode profile");
+    }
+    // what the check before Play would show for this start, before its flag
+    {
+        use kiln_manage::launch::{LaunchMode, LaunchRequest};
+        let request = LaunchRequest {
+            mode: match mode { PlayOnceMode::Vanilla => LaunchMode::Vanilla, PlayOnceMode::NoMods => LaunchMode::NoMods, PlayOnceMode::Profile => LaunchMode::Once },
+            profile_id: profile.clone(),
+            skip_backup: true,
+        };
+        if let Ok(dirs) = data_dirs() {
+            print_start_warnings(&dirs, &g, &request);
+        }
     }
     let p = PlayOnce { mode, created: kiln_manage::util::now_unix(), nonce: kiln_manage::playonce::new_nonce().km()?, profile: None };
     kiln_manage::playonce::write(&g.path, &p).km()?;

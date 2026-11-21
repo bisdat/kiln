@@ -165,27 +165,47 @@ fn safe_rel(file: &str) -> Result<PathBuf> {
     Ok(file.split('/').collect())
 }
 
-/// Writes `<path>.tmp` next to the file, flushes it, renames it over the file.
+/// Writes `<path>.<pid>.<n>.tmp` next to the file (created new: a name of its own for every write), flushes it, renames
+/// it over the file. Two writers of one file at once (the launcher's profile watcher and an add, both writing
+/// native.json) each rename their own temp file: with one shared `<path>.tmp` the second rename found the first one's
+/// file gone ("The system cannot find the file specified", a player's report 2026-11-20). The error names the file.
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let failed = |e: std::io::Error| {
+        let base = Error::from(e);
+        Error::new(base.code, format!("Kiln could not write its file {}: {}", path.display(), base.message))
+            .with_detail(path.display().to_string())
+    };
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
+        std::fs::create_dir_all(dir).map_err(failed)?;
     }
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    let tmp = PathBuf::from(tmp);
-    let res = (|| -> std::io::Result<()> {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-        drop(f);
-        std::fs::rename(&tmp, path)
-    })();
-    if let Err(e) = res {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(Error::from(e).with_detail(path.display().to_string()));
+    let mut last = None;
+    for _ in 0..8 {
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut tmp = path.as_os_str().to_owned();
+        tmp.push(format!(".{}.{n}.tmp", std::process::id()));
+        let tmp = PathBuf::from(tmp);
+        let mut f = match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(f) => f,
+            // a leftover of an earlier process with this pid: the next number
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                last = Some(e);
+                continue;
+            }
+            Err(e) => return Err(failed(e)),
+        };
+        let res = f.write_all(bytes).and_then(|()| f.sync_all()).and_then(|()| {
+            drop(f);
+            std::fs::rename(&tmp, path)
+        });
+        if let Err(e) = res {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(failed(e));
+        }
+        return Ok(());
     }
-    Ok(())
+    Err(failed(last.unwrap_or_else(|| std::io::Error::other("no free temporary file name"))))
 }
 
 fn read_json_file(path: &Path) -> Result<Option<serde_json::Value>> {
@@ -1197,5 +1217,53 @@ pub mod ini {
         let mut out = text.to_string();
         out.replace_range(start..e, "");
         out
+    }
+}
+
+#[cfg(test)]
+mod atomic_write_tests {
+    use super::*;
+
+    /// Two writers of one config file at once (the launcher's watcher and an add, both writing native.json): every
+    /// write succeeds and the file holds one writer's whole content. With one shared `<file>.tmp` the second rename
+    /// failed with "not found" (a player's report 2026-11-20).
+    #[test]
+    fn writers_of_one_file_at_once_all_succeed() {
+        let root = std::env::temp_dir().join(format!("km-atomic-race-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("native.json");
+        let errors: Vec<String> = std::thread::scope(|s| {
+            let workers: Vec<_> = (0..6u8).map(|i| {
+                let file = &file;
+                s.spawn(move || {
+                    let body = vec![b'a' + i; 64 * 1024];
+                    (0..60).filter_map(|_| atomic_write(file, &body).err().map(|e| e.message)).collect::<Vec<_>>()
+                })
+            }).collect();
+            workers.into_iter().flat_map(|w| w.join().unwrap()).collect()
+        });
+        assert!(errors.is_empty(), "{} of 360 writes failed, first: {:?}", errors.len(), errors.first());
+        let now = std::fs::read(&file).unwrap();
+        assert!(now.len() == 64 * 1024 && now.iter().all(|b| *b == now[0]), "one writer's whole content");
+        let left: Vec<_> = std::fs::read_dir(&root).unwrap().flatten().map(|e| e.file_name()).filter(|n| n != "native.json").collect();
+        assert!(left.is_empty(), "no temp files left: {left:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A failed write names Kiln's own file, not only the OS's words.
+    #[test]
+    fn a_failed_write_names_the_file() {
+        let root = std::env::temp_dir().join(format!("km-atomic-name-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        // the file's place is taken by a folder: the rename fails
+        let file = root.join("native.json");
+        std::fs::create_dir_all(file.join("inside")).unwrap();
+        let e = atomic_write(&file, b"{}").unwrap_err();
+        assert!(e.message.contains(&file.display().to_string()), "{}", e.message);
+        let left: Vec<_> = std::fs::read_dir(&root).unwrap().flatten().map(|e| e.file_name()).filter(|n| n != "native.json").collect();
+        assert!(left.is_empty(), "the temp file is removed: {left:?}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

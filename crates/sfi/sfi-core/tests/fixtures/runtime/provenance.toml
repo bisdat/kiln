@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+# Catalog data and registrar semantics adapted from ShroudForge (MIT,
+# Copyright (c) 2026 bonsaibauer).
+# Catalog source (both pins): modules/mod-runtime/lua/shroudforge/v1/runtime-operations.json:5-35
+# Binding sources (both pins): modules/mod-runtime/lua/ingame/check_ingame_access.rs:12-414,
+# lua/ingame/mod.rs:45-62,84-113; lua/bindings/mod.rs:71-75.
+# Observed with ShroudForge's own mod runtime (a local differential test, not published) on 2026-11-15.
+# Game-free pregame/server/export-only seed, no native providers or real archive/type data.
+# Each golden is transcript v2, 30 records; compared in the production LuaVm by
+# runtime_registrar::oracle_messages via run_fixture_in_vm/compare_golden.
+[goldens]
+"sf179.golden.json" = "oracle sf-1.7.9 d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8"
+"sf180.golden.json" = "oracle sf-1.8.0 38ef448dc5d4fc267b5f0928502a864a6b078865"
+
+[catalogs]
+"sf179-operations.json" = "sf-1.7.9 d8a394bc modules/mod-runtime/lua/shroudforge/v1/runtime-operations.json"
+"sf180-operations.json" = "sf-1.8.0 38ef448d modules/mod-runtime/lua/shroudforge/v1/runtime-operations.json"

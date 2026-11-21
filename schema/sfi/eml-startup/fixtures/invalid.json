@@ -1,0 +1,4327 @@
+[
+  {
+    "schema": "startup-outcome",
+    "why": "grant false in a granting state",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": false,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "grant true in a refused state",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "refused",
+      "grant": true,
+      "receiptSha256": null,
+      "archiveSha256": null,
+      "baseOrigin": null,
+      "native": {
+        "received": false,
+        "coherent": false,
+        "text": "no native terminal: the witness was refused"
+      },
+      "attempt": "none",
+      "error": null,
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": null,
+          "code": "plan-stale",
+          "text": "the game files changed since the launcher made this plan; start again from the launcher",
+          "chain": []
+        }
+      ],
+      "warnings": []
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "a granting state without archiveSha256",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": null,
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "no grant but an archiveSha256",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "refused",
+      "grant": false,
+      "receiptSha256": null,
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": null,
+      "native": {
+        "received": false,
+        "coherent": false,
+        "text": "no native terminal: the witness was refused"
+      },
+      "attempt": "none",
+      "error": null,
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": null,
+          "code": "plan-stale",
+          "text": "the game files changed since the launcher made this plan; start again from the launcher",
+          "chain": []
+        }
+      ],
+      "warnings": []
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "no grant but a receiptSha256",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "refused",
+      "grant": false,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": null,
+      "baseOrigin": null,
+      "native": {
+        "received": false,
+        "coherent": false,
+        "text": "no native terminal: the witness was refused"
+      },
+      "attempt": "none",
+      "error": null,
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": null,
+          "code": "plan-stale",
+          "text": "the game files changed since the launcher made this plan; start again from the launcher",
+          "chain": []
+        }
+      ],
+      "warnings": []
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "no grant but a row claims archivePresent false",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "refused",
+      "grant": false,
+      "receiptSha256": null,
+      "archiveSha256": null,
+      "baseOrigin": null,
+      "native": {
+        "received": false,
+        "coherent": false,
+        "text": "no native terminal: the witness was refused"
+      },
+      "attempt": "none",
+      "error": null,
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "plan-stale",
+          "text": "the game files changed since the launcher made this plan; start again from the launcher",
+          "chain": []
+        }
+      ],
+      "warnings": []
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "a verified restore keeps no receipt",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "restored",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": null,
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "first attempt: a error",
+      "retryError": "retry: b error",
+      "packages": [
+        {
+          "id": "a",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "startup-retry-failed",
+          "text": "the startup pass failed twice: a error / b error",
+          "chain": []
+        },
+        {
+          "id": "b",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "startup-retry-failed",
+          "text": "the startup pass failed twice: a error / b error",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retry-failed",
+          "text": "The game starts without the startup data of these mods."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "a verified restore keeps no baseOrigin",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "restored",
+      "grant": true,
+      "receiptSha256": null,
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "first attempt: a error",
+      "retryError": "retry: b error",
+      "packages": [
+        {
+          "id": "a",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "startup-retry-failed",
+          "text": "the startup pass failed twice: a error / b error",
+          "chain": []
+        },
+        {
+          "id": "b",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "startup-retry-failed",
+          "text": "the startup pass failed twice: a error / b error",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retry-failed",
+          "text": "The game starts without the startup data of these mods."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "baseOrigin label differs from inspection.rs",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "first managed"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "baseOrigin vanilla is never written",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "vanilla",
+        "label": "vanilla"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "baseOrigin unrecorded is null, not a token",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "unrecorded",
+        "label": "unrecorded: a working baseline from an earlier start; where its files came from was not recorded"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "a retry without the first error",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": null,
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "a retry outside the shroudforge dialect",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "eml",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "x",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "eml-mod",
+          "version": "1.0.0",
+          "pass": "eml",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        }
+      ],
+      "warnings": []
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "a first attempt with a retryError",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "cached",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "rebaselined-unclassified",
+        "label": "unclassified: game files as found when Kiln took a new baseline after the game changed"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "first",
+      "error": null,
+      "retryError": "x",
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "cached-verified",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "second",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "cached-verified",
+          "archivePresent": true,
+          "chain": []
+        }
+      ],
+      "warnings": []
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "attempt none with an error",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "none",
+      "state": "unchanged",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "none",
+      "error": "x",
+      "retryError": null,
+      "packages": [],
+      "warnings": []
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "dialect none lists rows",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "none",
+      "state": "unchanged",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "none",
+      "error": null,
+      "retryError": null,
+      "packages": [
+        {
+          "id": "x",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        }
+      ],
+      "warnings": []
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "an eml dialect row in the shroudforge pass",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "eml",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "first",
+      "error": null,
+      "retryError": null,
+      "packages": [
+        {
+          "id": "eml-mod",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        }
+      ],
+      "warnings": []
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "a shroudforge dialect row in the eml pass",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "eml",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "native coherent false without text",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": false
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "native coherent true with text",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true,
+        "text": "x"
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "coherent claimed without a terminal",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "refused",
+      "grant": false,
+      "receiptSha256": null,
+      "archiveSha256": null,
+      "baseOrigin": null,
+      "native": {
+        "received": false,
+        "coherent": true
+      },
+      "attempt": "none",
+      "error": null,
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": null,
+          "code": "plan-stale",
+          "text": "the game files changed since the launcher made this plan; start again from the launcher",
+          "chain": []
+        }
+      ],
+      "warnings": []
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "launchId as a decimal number",
+    "record": {
+      "format": 1,
+      "launchId": 1234,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "launchId upper case",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004D2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "planId upper case",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "FEDCBA98-7654-4321-8FED-CBA987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "unknown state",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "published",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "committed row not present",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": false,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "export-only committed row with archivePresent null",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": null,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "committed row with a code",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": [],
+          "code": "startup-failed",
+          "text": "x"
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "committed row with a chain",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "cached-verified row not present",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "cached",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "rebaselined-unclassified",
+        "label": "unclassified: game files as found when Kiln took a new baseline after the game changed"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "first",
+      "error": null,
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "cached-verified",
+          "archivePresent": null,
+          "chain": []
+        },
+        {
+          "id": "second",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "cached-verified",
+          "archivePresent": true,
+          "chain": []
+        }
+      ],
+      "warnings": []
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "failed row present",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": true,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "failed row with another code",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "failed row without code",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "excluded row without code",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "excluded row present",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": true,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "dependency-skipped with an empty chain",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": []
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "dependency-skipped with archivePresent null",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": null,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "code without text",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "text without code",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "a sfi-state data value the outcome never writes",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "staged",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "a row id that is not a ShroudForge id",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "has space",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "startup-retry-failed with a chain",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "restored",
+      "grant": true,
+      "receiptSha256": null,
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": null,
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "first attempt: a error",
+      "retryError": "retry: b error",
+      "packages": [
+        {
+          "id": "a",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "startup-retry-failed",
+          "text": "the startup pass failed twice: a error / b error",
+          "chain": [
+            "b"
+          ]
+        },
+        {
+          "id": "b",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "startup-retry-failed",
+          "text": "the startup pass failed twice: a error / b error",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retry-failed",
+          "text": "The game starts without the startup data of these mods."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "a code in upper case",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "Native-Refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "format 2",
+    "record": {
+      "format": 2,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "a granting state with a failed row of unknown presence",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": null,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "a granting state with a transitive dependency-skipped row of unknown presence",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "committed",
+      "grant": true,
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "export-only",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "committed",
+          "archivePresent": true,
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": null,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        },
+        {
+          "id": "native-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "native-refused",
+          "text": "native-pack: its DLL faulted during load",
+          "chain": []
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-retried",
+          "text": "The startup pass ran again without broken."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "no grant but a failed row claims archivePresent false",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "failed",
+      "grant": false,
+      "receiptSha256": null,
+      "archiveSha256": null,
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": null,
+          "code": "startup-publish-failed",
+          "text": "publishing the startup archive failed: No space left on device (os error 28)",
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": false,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": null,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": null,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-publish-failed",
+          "text": "The startup pass ran again without broken, but its archive could not be published: the game starts without the mods of the startup pass."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "no grant but a dependency-skipped row claims archivePresent false",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "failed",
+      "grant": false,
+      "receiptSha256": null,
+      "archiveSha256": null,
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": null,
+          "code": "startup-publish-failed",
+          "text": "publishing the startup archive failed: No space left on device (os error 28)",
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": null,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": false,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": null,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-publish-failed",
+          "text": "The startup pass ran again without broken, but its archive could not be published: the game starts without the mods of the startup pass."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "startup-outcome",
+    "why": "a failed row present without a grant",
+    "record": {
+      "format": 1,
+      "launchId": "00000000000004d2",
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dialect": "shroudforge",
+      "state": "failed",
+      "grant": false,
+      "receiptSha256": null,
+      "archiveSha256": null,
+      "baseOrigin": {
+        "token": "first-managed-unclassified",
+        "label": "unclassified: game files as found when Kiln first managed this install"
+      },
+      "native": {
+        "received": true,
+        "coherent": true
+      },
+      "attempt": "retry",
+      "error": "Traceback (most recent call last):\n  mods/broken/startup.lua:3: attempt to index a nil value",
+      "retryError": null,
+      "packages": [
+        {
+          "id": "base-pack",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": null,
+          "code": "startup-publish-failed",
+          "text": "publishing the startup archive failed: No space left on device (os error 28)",
+          "chain": []
+        },
+        {
+          "id": "broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "failed",
+          "archivePresent": true,
+          "code": "startup-failed",
+          "text": "broken: startup.lua:3: attempt to index a nil value",
+          "chain": []
+        },
+        {
+          "id": "needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": null,
+          "code": "dependency-skipped",
+          "text": "needs-broken depends on broken, which failed",
+          "chain": [
+            "broken"
+          ]
+        },
+        {
+          "id": "needs-needs-broken",
+          "version": "1.0.0",
+          "pass": "shroudforge",
+          "data": "excluded",
+          "archivePresent": null,
+          "code": "dependency-skipped",
+          "text": "needs-needs-broken depends on needs-broken, which depends on broken, which failed",
+          "chain": [
+            "needs-broken",
+            "broken"
+          ]
+        }
+      ],
+      "warnings": [
+        {
+          "code": "startup-publish-failed",
+          "text": "The startup pass ran again without broken, but its archive could not be published: the game starts without the mods of the startup pass."
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "format 2",
+    "record": {
+      "format": 2,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "notArmed": false,
+      "deadlinePassed": false,
+      "coherent": {
+        "ok": true
+      },
+      "withdrawn": [],
+      "dlls": [
+        {
+          "statusId": "dll:native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "loaded"
+        },
+        {
+          "statusId": "dll:shared:bin/shared.dll",
+          "modId": "shared",
+          "outcome": "foreign-owned"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "coherent false without text",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "notArmed": false,
+      "deadlinePassed": false,
+      "coherent": {
+        "ok": false
+      },
+      "withdrawn": [],
+      "dlls": [
+        {
+          "statusId": "dll:native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "loaded"
+        },
+        {
+          "statusId": "dll:shared:bin/shared.dll",
+          "modId": "shared",
+          "outcome": "foreign-owned"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "coherent true with text",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "notArmed": false,
+      "deadlinePassed": false,
+      "coherent": {
+        "ok": true,
+        "text": "x"
+      },
+      "withdrawn": [],
+      "dlls": [
+        {
+          "statusId": "dll:native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "loaded"
+        },
+        {
+          "statusId": "dll:shared:bin/shared.dll",
+          "modId": "shared",
+          "outcome": "foreign-owned"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "loaded while not armed",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "notArmed": true,
+      "deadlinePassed": false,
+      "coherent": {
+        "ok": true
+      },
+      "withdrawn": [
+        {
+          "id": "native-pack",
+          "code": "native-policy-refused",
+          "text": "Kiln's native policy (never) loads no package DLL",
+          "chain": []
+        }
+      ],
+      "dlls": [
+        {
+          "statusId": "dll:native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "loaded"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "timed out before the deadline passed",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "notArmed": false,
+      "deadlinePassed": false,
+      "coherent": {
+        "ok": true
+      },
+      "withdrawn": [],
+      "dlls": [
+        {
+          "statusId": "dll:native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "timed-out"
+        },
+        {
+          "statusId": "dll:shared:bin/shared.dll",
+          "modId": "shared",
+          "outcome": "foreign-owned"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "unknown outcome",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "notArmed": false,
+      "deadlinePassed": false,
+      "coherent": {
+        "ok": true
+      },
+      "withdrawn": [],
+      "dlls": [
+        {
+          "statusId": "dll:native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "admitted"
+        },
+        {
+          "statusId": "dll:shared:bin/shared.dll",
+          "modId": "shared",
+          "outcome": "foreign-owned"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "statusId with upper case",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "notArmed": false,
+      "deadlinePassed": false,
+      "coherent": {
+        "ok": true
+      },
+      "withdrawn": [],
+      "dlls": [
+        {
+          "statusId": "dll:Native-Pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "loaded"
+        },
+        {
+          "statusId": "dll:shared:bin/shared.dll",
+          "modId": "shared",
+          "outcome": "foreign-owned"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "statusId without the dll: prefix",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "notArmed": false,
+      "deadlinePassed": false,
+      "coherent": {
+        "ok": true
+      },
+      "withdrawn": [],
+      "dlls": [
+        {
+          "statusId": "native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "loaded"
+        },
+        {
+          "statusId": "dll:shared:bin/shared.dll",
+          "modId": "shared",
+          "outcome": "foreign-owned"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "withdrawn without a chain",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "notArmed": false,
+      "deadlinePassed": true,
+      "coherent": {
+        "ok": false,
+        "text": "game files changed after the DLLs loaded"
+      },
+      "withdrawn": [
+        {
+          "id": "native-pack",
+          "code": "dll-faulted",
+          "text": "bin/native.dll faulted in DllMain"
+        },
+        {
+          "id": "needs-native",
+          "code": "dependency-withdrawn",
+          "text": "needs-native depends on native-pack",
+          "chain": [
+            "native-pack"
+          ]
+        },
+        {
+          "id": "slow",
+          "code": "dll-timed-out",
+          "text": "bin/slow.dll did not finish before the startup deadline",
+          "chain": []
+        }
+      ],
+      "dlls": [
+        {
+          "statusId": "dll:native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "faulted"
+        },
+        {
+          "statusId": "dll:needs-native:bin/needs.dll",
+          "modId": "needs-native",
+          "outcome": "withdrawn"
+        },
+        {
+          "statusId": "dll:slow:bin/slow.dll",
+          "modId": "slow",
+          "outcome": "timed-out"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "withdrawn with an empty text",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "notArmed": false,
+      "deadlinePassed": true,
+      "coherent": {
+        "ok": false,
+        "text": "game files changed after the DLLs loaded"
+      },
+      "withdrawn": [
+        {
+          "id": "native-pack",
+          "code": "dll-faulted",
+          "text": "",
+          "chain": []
+        },
+        {
+          "id": "needs-native",
+          "code": "dependency-withdrawn",
+          "text": "needs-native depends on native-pack",
+          "chain": [
+            "native-pack"
+          ]
+        },
+        {
+          "id": "slow",
+          "code": "dll-timed-out",
+          "text": "bin/slow.dll did not finish before the startup deadline",
+          "chain": []
+        }
+      ],
+      "dlls": [
+        {
+          "statusId": "dll:native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "faulted"
+        },
+        {
+          "statusId": "dll:needs-native:bin/needs.dll",
+          "modId": "needs-native",
+          "outcome": "withdrawn"
+        },
+        {
+          "statusId": "dll:slow:bin/slow.dll",
+          "modId": "slow",
+          "outcome": "timed-out"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "planId not a UUID",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98765443218fedcba987654321",
+      "notArmed": false,
+      "deadlinePassed": false,
+      "coherent": {
+        "ok": true
+      },
+      "withdrawn": [],
+      "dlls": [
+        {
+          "statusId": "dll:native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "loaded"
+        },
+        {
+          "statusId": "dll:shared:bin/shared.dll",
+          "modId": "shared",
+          "outcome": "foreign-owned"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "notArmed missing",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "deadlinePassed": false,
+      "coherent": {
+        "ok": true
+      },
+      "withdrawn": [],
+      "dlls": [
+        {
+          "statusId": "dll:native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "loaded"
+        },
+        {
+          "statusId": "dll:shared:bin/shared.dll",
+          "modId": "shared",
+          "outcome": "foreign-owned"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "notArmed with deadlinePassed",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "notArmed": true,
+      "deadlinePassed": true,
+      "coherent": {
+        "ok": true
+      },
+      "withdrawn": [
+        {
+          "id": "native-pack",
+          "code": "native-policy-refused",
+          "text": "Kiln's native policy (never) loads no package DLL",
+          "chain": []
+        }
+      ],
+      "dlls": [
+        {
+          "statusId": "dll:native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "refused"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "notArmed with a foreign-owned DLL",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "notArmed": true,
+      "deadlinePassed": false,
+      "coherent": {
+        "ok": true
+      },
+      "withdrawn": [
+        {
+          "id": "native-pack",
+          "code": "native-policy-refused",
+          "text": "Kiln's native policy (never) loads no package DLL",
+          "chain": []
+        }
+      ],
+      "dlls": [
+        {
+          "statusId": "dll:native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "foreign-owned"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "notArmed with a faulted DLL",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "notArmed": true,
+      "deadlinePassed": false,
+      "coherent": {
+        "ok": true
+      },
+      "withdrawn": [
+        {
+          "id": "native-pack",
+          "code": "native-policy-refused",
+          "text": "Kiln's native policy (never) loads no package DLL",
+          "chain": []
+        }
+      ],
+      "dlls": [
+        {
+          "statusId": "dll:native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "faulted"
+        }
+      ]
+    }
+  },
+  {
+    "schema": "native-terminal",
+    "why": "notArmed with coherent false",
+    "record": {
+      "format": 1,
+      "planId": "fedcba98-7654-4321-8fed-cba987654321",
+      "notArmed": true,
+      "deadlinePassed": false,
+      "coherent": {
+        "ok": false,
+        "text": "no witness"
+      },
+      "withdrawn": [
+        {
+          "id": "native-pack",
+          "code": "native-policy-refused",
+          "text": "Kiln's native policy (never) loads no package DLL",
+          "chain": []
+        }
+      ],
+      "dlls": [
+        {
+          "statusId": "dll:native-pack:bin/native.dll",
+          "modId": "native-pack",
+          "outcome": "refused"
+        }
+      ]
+    }
+  }
+]

@@ -253,3 +253,29 @@ fn a_struct_field_write_error_names_the_field_type() {
         "{err}"
     );
 }
+
+// kiln-eml (eml-array-count): MappedArrayValue made one entry per stored element when Lua read the field, so bytes
+// claiming 2^32-1 recipes asked for ~100 GiB at once (the process aborted). kfc now refuses a count the bytes after
+// the array cannot hold, and the read is a Lua error.
+#[test]
+fn a_mapped_array_count_beyond_its_bytes_is_a_lua_error_not_an_allocation() {
+    let registry = recipe_fixture();
+    for count in [1_000_000, u32::MAX] {
+        let mut bytes = vec![0u8; 16];
+        bytes[0..4].copy_from_slice(&8u32.to_le_bytes());
+        bytes[4..8].copy_from_slice(&count.to_le_bytes());
+        let bytes: Rc<[u8]> = bytes.into();
+        let mapped =
+            MappedValue::from_bytes(&registry, registry.get(TypeIndex::new(REGISTRY)).unwrap(), &bytes).unwrap();
+        let lua = mlua::Lua::new();
+        lua.globals()
+            .set("game", convert_value_to_lua(&mapped, &lua).unwrap())
+            .unwrap();
+        let err = match lua.load("return #game.recipes").eval::<i64>() {
+            Ok(length) => panic!("the recipes array was made, length {length}"),
+            Err(err) => err.to_string(),
+        };
+        let want = format!("array of {count} elements (element size 8) at offset 8 does not fit in 16 bytes of data");
+        assert!(err.contains(&want), "{err}");
+    }
+}

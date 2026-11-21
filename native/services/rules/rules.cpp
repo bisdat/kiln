@@ -1201,6 +1201,12 @@ void resolve_build_programs() {
 }
 
 void KILN_CALL on_pre(const KilnTickInfo* t, void*) {
+    if (kiln_rules_steer::tick() < 0) {
+        g_hooks &= ~KILN_RULES_HOOK_GLIDE_STEER;
+        std::lock_guard lock(g_detail_mu);
+        g_detail = g_detail == "every hook installed" ? "off on this build: glider steering (hook failed)"
+                                                      : g_detail + ", glider steering (hook failed)";
+    }
     kiln_rules_flight::refresh();
     kiln_rules_noclip::tick();
     resolve_build_programs();
@@ -1227,7 +1233,10 @@ void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     kiln_rules_flight::world(ev->event, ev->kind, ev->session, stops_seen);
     if (ev->event == KILN_WORLD_STOPPING) kiln_rules_noclip::reset();
     if (ev->kind == KILN_WORLD_CLIENT && ev->event == KILN_WORLD_STOPPING) store(g_local, nullptr);
-    if (ev->event == KILN_WORLD_STARTED) arm_payments();
+    if (ev->event == KILN_WORLD_STARTED) {
+        arm_payments();
+        kiln_rules_steer::world_started();
+    }
     if (ev->kind == KILN_WORLD_CLIENT && (ev->event == KILN_WORLD_STARTED || ev->event == KILN_WORLD_STOPPING))
         kiln_rules_creative::reset_map();
     if (ev->kind == KILN_WORLD_CLIENT && ev->event == KILN_WORLD_STARTED) {

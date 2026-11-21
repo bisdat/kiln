@@ -53,30 +53,63 @@ public sealed partial class ClientPassMod
                     $"{phase}: the ordinary lookup found {guid} in both hosted registries");
         }
         CheckLookups("before rejoin");
-        foreach (var d in new[] { first!, last! })
+        // the player of the world now (a new world has a new player entity), with both boundary buffs for 60 seconds
+        EntityId Me() => Players.All.FirstOrDefault(p => !p.Entity.IsNone)?.Entity ?? c.Player;
+        async Task ShowBuffs(string phase)
         {
-            try
+            foreach (var d in new[] { first!, last! })
             {
-                await Abilities.ApplyBuff(c.Player, d.Guid, TimeSpan.FromSeconds(60));
-            }
-            catch (Exception e) when (e is InvalidOperationException or KilnUnavailableException)
-            {
-                c.Expect(false, $"{d.Name} applied to your character", e.Message);
+                try
+                {
+                    await Abilities.ApplyBuff(Me(), d.Guid, TimeSpan.FromSeconds(60));
+                }
+                catch (Exception e) when (e is InvalidOperationException or KilnUnavailableException)
+                {
+                    c.Expect(false, $"{phase}: {d.Name} applied to your character", e.Message);
+                }
             }
         }
-        c.Instruct($"Two buffs of a mod were put on your character: {first!.Name} and {last!.Name}, both copies of the game's " +
-                   "poison debuff, for 60 seconds. Look at your buff bar: two poison icons with their time running down. " +
-                   "Then leave the world and host it again (or save and reload), and run the check list's next step; " +
-                   "finally host a second world with the same mods and look at a buff of the mod there too. Pass when " +
-                   "the icons and their times showed each time and nothing looked out of place.");
+        // a new world: its generation differs from the one before, a player stands in it, the clones are registered
+        async Task<bool> NewWorld(CapacityWorldToken? was, string what)
+        {
+            var ok = await c.Until(() => World.GetProgramBudget().World is { } now && now != was &&
+                                         Players.All.Any(p => !p.Entity.IsNone) &&
+                                         Content.Buffs.Definitions().Count(d => (d.Guid == firstGuid || d.Guid == lastGuid) && d.State == "registered") == 2,
+                TimeSpan.FromMinutes(10), what);
+            if (ok) await c.Delay(TimeSpan.FromSeconds(5));   // the character settles in the loaded world
+            return ok;
+        }
+
+        // 1) this world
+        await ShowBuffs("before rejoin");
         var generation = World.GetProgramBudget().World;
-        await c.Verdict();
-        c.Instruct("Leave and host the world again, then press continue. The next checks require a new world generation and repeat both boundary lookups.");
-        await c.Verdict();
+        c.Instruct($"Step 1 of 3. Two buffs of a mod were put on your character: {first!.Name} and {last!.Name}, both copies of " +
+                   "the game's poison debuff, for 60 seconds. Look at your buff bar: two poison icons with their time running " +
+                   "down; remember whether they showed. Then leave the world and host it again (or save and reload): the check " +
+                   "goes on by itself when the world is loaded again.");
+
+        // 2) the same world, rejoined
+        var rejoined = await NewWorld(generation, "you left the world and hosted it again");
         c.Expect(World.GetProgramBudget().World is { } after && after != generation, "the world was actually rejoined");
         c.Expect(Content.Buffs.Definitions().Any(d => d.Guid == firstGuid && d.State == "registered") &&
                  Content.Buffs.Definitions().Any(d => d.Guid == lastGuid && d.State == "registered"), "both exact boundary GUIDs registered after rejoin");
         CheckLookups("after rejoin");
+        if (rejoined) await ShowBuffs("after rejoin");
+        var second = World.GetProgramBudget().World;
+        c.Instruct($"Step 2 of 3. The world was loaded again and the same two buffs ({first!.Name} and {last!.Name}) were put on " +
+                   "your character for 60 seconds: look at the buff bar again and remember whether both icons and their times " +
+                   "showed. Then host a SECOND world with the same mods: the check goes on by itself when it is loaded.");
+
+        // 3) a second world with the same mods
+        if (await NewWorld(second, "you hosted a second world with the same mods"))
+        {
+            CheckLookups("second world");
+            await ShowBuffs("second world");
+        }
+        c.Instruct($"Step 3 of 3. In this second world the same two buffs ({first!.Name} and {last!.Name}) were put on your character " +
+                   "for 60 seconds; look at the buff bar. Pass only if all of these held: (1) both poison icons with their time " +
+                   "running down showed in the first world, (2) again after you hosted it again, (3) again in the second world, " +
+                   "and nothing looked out of place. Otherwise fail with a note naming which one.");
         await c.Verdict();
     }
 

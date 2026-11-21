@@ -81,7 +81,7 @@ internal unsafe struct KilnTaskStatsRunningRow
     public ulong StartedNs;
     public ulong ElapsedNs;
     public uint State;  // 1 running, 2 suspended, 3 on-tick
-    public uint World;  // on-tick: the world whose hop runs (0 server, 2 client); else 0
+    public uint World;  // on-tick: the world whose hop runs (0 server, 2 client, 3 the menu); else 0
     public fixed byte OwnerName[129];
     public fixed byte TaskName[129];
     public fixed byte Reserved2[6];
@@ -108,8 +108,9 @@ internal struct KilnTaskStatsTotals
     public ulong Queued, Running, Completed, Faulted, Cancelled, RunningTasks, Faults;
 }
 
-/// <summary>kiln.internal.tasks.host v1 (native/core/src/tasks_host.h), 192 bytes: field order is the table's.
-/// The five diagnostics members were appended for issue #49, the three world members for #82 (client-world hops); a
+/// <summary>kiln.internal.tasks.host v1 (native/core/src/tasks_host.h), 200 bytes: field order is the table's.
+/// The five diagnostics members were appended for issue #49, the three world members for #82 (client-world hops),
+/// menu_frame for #83 (menu hops); a
 /// shorter table (an older core of another build) is refused by the size check before any of them is read.</summary>
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct KilnTasksHostApi
@@ -139,6 +140,7 @@ internal unsafe struct KilnTasksHostApi
     public delegate* unmanaged[Cdecl]<uint, uint*, uint> WorldSession;
     public delegate* unmanaged[Cdecl]<ulong, uint, uint, int> TickHopIn;
     public delegate* unmanaged[Cdecl]<ulong, ulong, uint, uint, uint*, int> ResumeAfterStepWorld;
+    public delegate* unmanaged[Cdecl]<uint> MenuFrame;  // appended for menu hops (#83)
 
     public const string Name = "kiln.internal.tasks.host";
     public const uint Version1 = 1;
@@ -177,6 +179,10 @@ internal sealed class HostTasksEnvironment
     /// <summary>Runs one client-world hop of <c>owner</c> on the client world's step (the game's main thread); null runs it
     /// bare.</summary>
     public Action<ulong, Action>? ClientHop { get; init; }
+
+    /// <summary>Runs one menu hop of <c>owner</c> (#83) on the game's UI frame while no world runs (the main thread); null
+    /// runs it bare.</summary>
+    public Action<ulong, Action>? MenuHop { get; init; }
 }
 
 /// <summary>
@@ -377,6 +383,8 @@ internal sealed unsafe class HostTasks : TaskBackend
             frame(pin.Owner, () => dispatch(lease, LeaseWork.TickHop, cancelled, pin.State));  // on the server tick, before Pre
         else if (what == (uint)LeaseWork.ClientHop && _env.ClientHop is { } client && OnWorldThread(WorldKind.Client))
             client(pin.Owner, () => dispatch(lease, LeaseWork.ClientHop, cancelled, pin.State));  // the client world's step
+        else if (what == (uint)LeaseWork.MenuHop && _env.MenuHop is { } menu && OnWorldThread(WorldKind.Menu))
+            menu(pin.Owner, () => dispatch(lease, LeaseWork.MenuHop, cancelled, pin.State));  // the menu's UI frame
         else
             dispatch(lease, (LeaseWork)what, cancelled, pin.State);  // a segment; or a world's end flushing its hops
     }
@@ -391,22 +399,31 @@ internal sealed unsafe class HostTasks : TaskBackend
 
     public override ulong ServerSession => _unavailable is null ? _host->ServerSession() : 0;
 
+    /// <summary>The game's UI frame while no world runs (#83; the table's <c>menu_frame</c>): opens a menu session when
+    /// none is live, then runs its hops through <see cref="HostTasksEnvironment.MenuHop"/>. The UI thread only. Returns
+    /// the hops dispatched; 0 while a world runs, or with tasks off.</summary>
+    public uint MenuFrame() => _unavailable is null && _host->MenuFrame != null ? _host->MenuFrame() : 0;
+
     public override bool OnClientMainThread => _unavailable is null && (_env.OnClientMainThread?.Invoke() ?? false);
 
-    public override bool OnWorldThread(WorldKind world) =>
-        world == WorldKind.Server ? OnServerTick : _unavailable is null && (_env.OnWorldThread?.Invoke((uint)world) ?? false);
+    public override bool OnWorldThread(WorldKind world) => world switch
+    {
+        WorldKind.Server => OnServerTick,
+        WorldKind.Menu => OnClientMainThread,  // the game's UI frame runs on the client's main thread (#83)
+        _ => _unavailable is null && (_env.OnWorldThread?.Invoke((uint)world) ?? false),
+    };
 
     public override ulong WorldSession(WorldKind world, out WorldSessionState state)
     {
         state = WorldSessionState.None;
-        if (_unavailable is not null || world is not (WorldKind.Server or WorldKind.Client)) return 0;
+        if (_unavailable is not null || world is not (WorldKind.Server or WorldKind.Client or WorldKind.Menu)) return 0;
         uint raw = 0;
         var session = _host->WorldSession((uint)world, &raw);
         state = raw switch
         {
             1 => WorldSessionState.Live,
             // its STOPPING came: still in its handlers while the world exists (KilnApi.world(kind) is cleared after them)
-            2 => _env.WorldExists?.Invoke((uint)world) == true ? WorldSessionState.Stopping : WorldSessionState.Ended,
+            2 => world != WorldKind.Menu && _env.WorldExists?.Invoke((uint)world) == true ? WorldSessionState.Stopping : WorldSessionState.Ended,
             _ => WorldSessionState.None,
         };
         return session;
@@ -415,7 +432,7 @@ internal sealed unsafe class HostTasks : TaskBackend
     public override TaskRefusal TickHop(ulong lease, WorldKind world, ulong session)
     {
         var refused = world == WorldKind.Server ? TaskRefusal.NoServerWorld : TaskRefusal.NoWorld;
-        if (_unavailable is not null || session is 0 or > uint.MaxValue || world is not (WorldKind.Server or WorldKind.Client))
+        if (_unavailable is not null || session is 0 or > uint.MaxValue || world is not (WorldKind.Server or WorldKind.Client or WorldKind.Menu))
             return refused;
         // the core compares the session with the live one and queues in one step: never into another session
         var rc = _host->TickHopIn(lease, (uint)world, (uint)session);
@@ -600,7 +617,7 @@ internal sealed unsafe class HostTasks : TaskBackend
             {
                 1 => "running",
                 2 => "suspended",
-                3 => row.World == 2 ? "on-tick-client" : "on-tick",  // a client-world hop (#82)
+                3 => row.World switch { 2 => "on-tick-client", 3 => "on-tick-menu", _ => "on-tick" },  // a client-world hop (#82), a menu hop (#83)
                 _ => "queued",
             };
             sb.Append($"  running thread={row.ThreadId} owner=\"{ownerName}\" task=\"{taskName}\" " +

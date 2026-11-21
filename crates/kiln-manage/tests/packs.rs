@@ -249,7 +249,7 @@ fn install_update_undo_uninstall_an_instance() {
     assert_eq!(f.conflicts[0].mine, Some(serde_json::json!(30)));
 
     let mut up = UpdateRequest { profile: ip.clone(), source: source(&v2), consent: true, allow_http: false, optional: BTreeMap::new(),
-        resolve: BTreeMap::new(), all: None };
+        resolve: BTreeMap::new(), all: None, drop: vec![] };
     let e = pack::update(&dirs, &up, &mut NoProgress).unwrap_err();
     assert_eq!(e.code, ErrorCode::Conflict);
     assert!(e.message.contains("alpha.json#range"), "{}", e.message);
@@ -426,7 +426,7 @@ fn an_update_that_cannot_merge_a_file_changes_nothing() {
     let cfg = dirs.profile(&ip).join("config");
     put(&cfg, "alpha.json", b"{ \"range\": 30, oops");
     let up = UpdateRequest { profile: ip.clone(), source: ModpackSource::Path { path: v2.file.clone(), sha256: None }, consent: true,
-        allow_http: false, optional: BTreeMap::new(), resolve: BTreeMap::new(), all: Some(Pick::Pack) };
+        allow_http: false, optional: BTreeMap::new(), resolve: BTreeMap::new(), all: Some(Pick::Pack), drop: vec![] };
     assert!(pack::update(&dirs, &up, &mut NoProgress).is_err());
     assert_still_v1(&dirs, &ip, b"{ \"range\": 30, oops");
     assert_eq!(pack::plan_update(&dirs, &ip, &v2.file, None, &BTreeMap::new()).unwrap().from, "1.0.0");
@@ -442,7 +442,7 @@ fn an_update_that_fails_while_writing_is_rolled_back() {
     std::fs::remove_file(cfg.join("beta/settings.ini")).unwrap();
     std::fs::create_dir_all(cfg.join("beta/settings.ini/x")).unwrap();
     let up = UpdateRequest { profile: ip.clone(), source: ModpackSource::Path { path: v2.file.clone(), sha256: None }, consent: true,
-        allow_http: false, optional: BTreeMap::new(), resolve: BTreeMap::new(), all: Some(Pick::Pack) };
+        allow_http: false, optional: BTreeMap::new(), resolve: BTreeMap::new(), all: Some(Pick::Pack), drop: vec![] };
     assert!(pack::update(&dirs, &up, &mut NoProgress).is_err());
     assert_still_v1(&dirs, &ip, &alpha);
     assert!(cfg.join("beta/settings.ini/x").is_dir());

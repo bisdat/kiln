@@ -89,18 +89,36 @@ if (typeof window !== "undefined") {
   document.addEventListener("visibilitychange", update);
 }
 
-/** How often an unfocused launcher polls at most. */
-export const UNFOCUSED_POLL_MS = 30_000;
-
-/** A poll interval: `ms` while the window is active, at most every UNFOCUSED_POLL_MS while it is not (focusing the
- *  window again restarts the timer at `ms`). Hidden windows do not poll at all (TanStack Query's default). */
-export function usePoll(ms: number): number {
+/** A poll interval: `ms` while the window is active; no polling at all while it is minimized, hidden or unfocused
+ *  (a player's report 2026-11-20: the launcher's game-folder checks every few seconds, minimized, kept a slow drive
+ *  busy enough that Explorer took a minute). Backend events (kiln://game: start, stop, the game's state files, a
+ *  profile written again) still refresh at once, and focusing the window again refetches what it shows
+ *  (`useRefetchOnFocus`). */
+export function usePoll(ms: number): number | false {
   const active = useWindowActive((s) => s.active);
-  return active ? ms : Math.max(ms, UNFOCUSED_POLL_MS);
+  return active ? ms : false;
+}
+
+/** How often a focused window looks at the game folder (game_status, the engine and found-mod checks): the backend's
+ *  events say what changes in between. */
+export const GAME_POLL_MS = 30_000;
+
+/** Mount once (the shell): the window coming back to the front refetches the queries on screen once (at most every
+ *  5 s), since nothing polled while it was away. */
+export function useRefetchOnFocus() {
+  const qc = useQueryClient();
+  useEffect(() => {
+    let last = 0;
+    return useWindowActive.subscribe((s, prev) => {
+      if (!s.active || prev.active || Date.now() - last < 5000) return;
+      last = Date.now();
+      void qc.refetchQueries({ type: "active", stale: true });
+    });
+  }, [qc]);
 }
 
 export const useGameStatus = (g: GameId | null | undefined) =>
-  useQuery({ queryKey: qk.gameStatus(g ?? ""), queryFn: () => api.gameStatus(g!), enabled: !!g, refetchInterval: usePoll(4000) });
+  useQuery({ queryKey: qk.gameStatus(g ?? ""), queryFn: () => api.gameStatus(g!), enabled: !!g, refetchInterval: usePoll(GAME_POLL_MS) });
 
 /** launch_state polls only while the game runs (or is not known to be stopped): kiln.log's error count grows then.
  *  A game that is not running writes none of its files, and its start, stop and state files arrive as kiln://game,
@@ -190,6 +208,7 @@ export function invalidateGame(qc: QueryClient, g: GameId) {
 /** Mount once (the shell): backend events refresh queries. */
 export function useBackendEvents() {
   const qc = useQueryClient();
+  useRefetchOnFocus();
   useEffect(() => {
     const offs: (() => void)[] = [];
     let live = true;

@@ -2,13 +2,22 @@
 # SPDX-License-Identifier: MIT
 """The gate path's sources must not reach a wait, a lock, an allocation, a log or the KilnApi (the GameServer thread spins unbounded behind a held Scene word, so any of these inside the hold can freeze the server).
 Checks the code (comments and string literals stripped) of every file a gate member runs: gate, resolve and the
-Windows memory bodies. Run by tests/run.sh."""
+Windows memory bodies, the content worker's lifetime guard, which runs inside a gate's hold when it borrows
+the gate's share and blocks thread registration while it owns one, and the engine call inside the hold. The
+guard's and the engine call's files must also have no loop without a fixed bound (`while`, `for (;;)`): their loops
+run over the registry rows (bounded by the profile's capacity) and over a recipe's ranges and arguments.
+Run by tests/run.sh."""
 import re
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-FILES = ['gate.cpp', 'gate.h', 'resolve.cpp', 'resolve.h', 'memory.h', 'memory_win.cpp']
+FILES = ['gate.cpp', 'gate.h', 'resolve.cpp', 'resolve.h', 'memory.h', 'memory_win.cpp', 'resource_guard.cpp',
+         'resource_guard.h', 'invoke.cpp', 'invoke.h', 'invoke_win.cpp']
+# Only for the guard and the engine call (the gate's exit/stop closing loops are time-bounded by design).
+BOUNDED = {'resource_guard.cpp', 'resource_guard.h', 'invoke.cpp', 'invoke.h', 'invoke_win.cpp'}
+UNBOUNDED = r'\bwhile\s*\((?!\s*0\s*\))|\bfor\s*\(\s*;\s*;'
+
 FORBIDDEN = {
     r'\bSleep(Ex)?\b|\bSwitchToThread\b|\bYieldProcessor\b|\bWaitFor\w*\b|\bWaitOnAddress\b|\bthis_thread\b': 'a wait',
     r'\bEnterCriticalSection\b|\bAcquireSRWLock\w*\b|\bstd::(recursive_|timed_|shared_)?mutex\b|\block_guard\b|'
@@ -36,6 +45,8 @@ def main():
             for pattern, what in FORBIDDEN.items():
                 if re.search(pattern, line):
                     problems.append('%s:%d: %s: %s' % (name, number, what, line.strip()))
+            if name in BOUNDED and re.search(UNBOUNDED, line):
+                problems.append('%s:%d: an unbounded loop: %s' % (name, number, line.strip()))
     for problem in problems:
         print(problem, file=sys.stderr)
     print('gate path lint: %d files, %d problems' % (len(FILES), len(problems)))
