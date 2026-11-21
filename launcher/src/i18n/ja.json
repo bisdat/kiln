@@ -4849,7 +4849,7 @@
       "seeChanges": "変更を見る"
     },
     "change": {
-      "added.other": "+{count} 追加",
+      "added.other": "{count} 追加",
       "updated.other": "{count} 更新",
       "removed.other": "{count} 削除",
       "addedWord.other": "{count} 個追加",
@@ -4868,7 +4868,8 @@
       "offline": "Kiln が Crucible に接続できません。友だちにパックのファイルをもらってください（Crucible で共有 > ファイルとして保存）。",
       "gone": "このパックはもう Crucible にありません。",
       "badDownload": "パックを正しくダウンロードできませんでした。何もインストールされていません。もう一度お試しください。",
-      "gameRunning": "先に Enshrouded を閉じてください。"
+      "gameRunning": "先に Enshrouded を閉じてください。",
+      "offlineShare": "Kiln が Crucible に接続できません。インターネット接続を確認してもう一度試すか、「ファイルとして保存」で作ったファイルを友だちに送ってください。"
     },
     "install": {
       "done": "{name} をインストールしました",
@@ -4898,7 +4899,7 @@
       "kilnOld": "Kiln {version} 以降が必要です。",
       "updateKiln": "Kiln を更新",
       "uploadingTitle": "アップロード中",
-      "stillUploading": "{name} さんのパックはまだアップロード中です（{pct}%）。準備ができたら Kiln がインストールします。",
+      "stillUploading": "{name} さんのパックはまだアップロード中です（{pct}%）。ここで待つと、準備ができ次第インストールできます。",
       "resumed": "Kiln の準備ができました。お目当てのパック {name} です。",
       "wait": "待つ",
       "waiting": "{name} さんのアップロードを待っています（{pct}%）…",
@@ -4929,7 +4930,8 @@
       "nameLabel": "プロファイル名",
       "nameTaken": "同じ名前のプロファイルがあります。これは {name} になります。",
       "runningHint": "Enshrouded が起動中です。インストールはすぐにパックを追加します。ゲームを閉じてから読み込んでください。",
-      "installOnlyTip": "パックを専用のプロファイルとして追加します。読み込みやゲームの起動はしません。"
+      "installOnlyTip": "パックを専用のプロファイルとして追加します。読み込みやゲームの起動はしません。",
+      "warningFile": "このパックファイルには、ほかの人が作ったモッド（コードを含むもの）が入っています。Kiln はファイルをチェックしましたが、人の目での審査はされていません。"
     },
     "profiles": {
       "tag": "Crucible パック",
@@ -5011,8 +5013,6 @@
       "cantRead": "更新を読み取れません",
       "removedKept": "{name}（ライブラリに残ります）",
       "packData": "パック自体のデータが変更されました",
-      "kept": "あなたの変更は保持されます: 設定 {settings} 件、モッド {mods} 個。",
-      "keptData": "あなたの変更は保持されます: 設定 {settings} 件、データ変更 {data} 件、モッド {mods} 個。",
       "renamed": "{from} は {to} になりました: あなたの設定も移ります。",
       "stillWins.other": "あなたの変更が引き続き優先されます（{count}）",
       "dataChanged": "パックは {pack} に変わりました。あなたの {mine} が引き続き有効です。",
@@ -5033,7 +5033,17 @@
       "doneDetail": "あなた自身の変更はそのままです。",
       "failed": "{name} を更新できませんでした",
       "undone": "{name} を {version} に戻しました",
-      "undoFailed": "更新を取り消せませんでした"
+      "undoFailed": "更新を取り消せませんでした",
+      "keptLine": "あなたの変更は保持されます: {list}。",
+      "keptSettings": {
+        "other": "設定 {count} 件"
+      },
+      "keptData": {
+        "other": "データ変更 {count} 件"
+      },
+      "keptMods": {
+        "other": "モッド {count} 個"
+      }
     },
     "deck": {
       "shareTitle": "{name} を共有",
@@ -5169,21 +5179,25 @@
         "raw": "Raw JSON"
       },
       "lint": {
-        "line": "Lint: {errors}、{warnings}",
+        "line": "データチェック: {errors}、{warnings}",
         "errors": {
           "other": "{count} 件のエラー"
         },
         "warnings": {
           "other": "{count} 件の警告"
         },
-        "checking": "Lint: チェック中…",
+        "checking": "データチェック: 確認中…",
         "show": "問題を表示",
         "hide": "問題を隠す",
         "error": "エラー",
         "warning": "警告",
-        "info": "メモ"
+        "info": "メモ",
+        "lineNotes": "データチェック: {errors}、{warnings}、{notes}",
+        "notes": {
+          "other": "メモ {count} 件"
+        }
       },
-      "noCatalog": "このPCにゲームデータのカタログがありません。選択リストにはパックのMODが追加するものだけが表示され、フィールドは手入力になります。",
+      "noCatalog": "Kiln はまだゲームのアイテムを読み込んでいません。選択リストにはパックのMODが追加するものだけが表示され、フィールド名は手入力になります。",
       "catalog": {
         "reading": "ゲームのアイテムを読み込んでいます…",
         "build": "ゲームカタログを作成",
@@ -5331,6 +5345,11 @@
         "textAria": "{file} のテキスト",
         "clean": "このファイルに問題はありません。",
         "pick": "ファイルを選ぶか、新しく作成してください。"
+      },
+      "hidden": {
+        "toggle": "非表示のゲーム項目を表示",
+        "tag": "非表示",
+        "tip": "古い・テスト用・未使用のゲーム項目です。ゲーム内では何も起きないことがあります。"
       }
     },
     "order": {
@@ -5391,7 +5410,7 @@
       "crucible": "Crucible",
       "github": "GitHub リリース",
       "nexus": "Nexus",
-      "manifest": "MOD のマニフェスト",
+      "manifest": "MOD自身の情報",
       "manual": "あなた"
     },
     "confidence": {
@@ -5425,7 +5444,7 @@
           "other": "コード検査（注記 {count} 件）"
         },
         "lint": {
-          "other": "lint（警告 {count} 件）"
+          "other": "データチェック（警告 {count} 件）"
         }
       },
       "tone": {

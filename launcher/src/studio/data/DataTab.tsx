@@ -14,7 +14,7 @@ import RecipesEditor from "./RecipesEditor";
 import DropsEditor from "./DropsEditor";
 import NewItemsEditor from "./NewItemsEditor";
 import RawEditor, { DiagList } from "./RawEditor";
-import { useDrafts, useLayerTexts, useLint } from "./store";
+import { useDrafts, useLayerTexts, useLint, useShowHidden } from "./store";
 import "./data.css";
 
 const SUBS = ["items", "recipes", "loot", "drops", "added", "raw"] as const;
@@ -65,7 +65,11 @@ export default function DataTab({ studio }: { studio: Studio; gameId: GameId | n
     };
   }, [packId, texts.data, studio.mods, t]);
   const sum = lint.data?.summary;
-  const lintLine = sum ? t("studio.data.lint.line", { errors: t("studio.data.lint.errors", { count: sum.errors }), warnings: t("studio.data.lint.warnings", { count: sum.warnings }) }) : t("studio.data.lint.checking");
+  const showHidden = useShowHidden();
+  // notes (a hidden game entry, a language no game language uses...) are counted once there are any
+  const notes = (sum?.infos ?? 0) + (sum?.hints ?? 0);
+  const counts = sum ? { errors: t("studio.data.lint.errors", { count: sum.errors }), warnings: t("studio.data.lint.warnings", { count: sum.warnings }) } : null;
+  const lintLine = !counts ? t("studio.data.lint.checking") : notes ? t("studio.data.lint.lineNotes", { ...counts, notes: t("studio.data.lint.notes", { count: notes }) }) : t("studio.data.lint.line", counts);
   const diags = lint.data?.diagnostics ?? [];
   return (
     <DataCtx.Provider value={ctx}>
@@ -74,12 +78,16 @@ export default function DataTab({ studio }: { studio: Studio; gameId: GameId | n
           <Tabs aria-label={t("studio.data.tabsAria")} value={sub} onChange={setSub}
             items={SUBS.map((id) => ({ id, label: <span data-testid={"data-sub-" + id}>{label[id]}{dirty(id) ? " •" : ""}</span> }))} />
           <span className="kd-grow" />
+          <label className="kst-tick kd-hidden-toggle" title={t("studio.data.hidden.tip")}>
+            <input type="checkbox" className="k-check" checked={showHidden.on} onChange={(e) => showHidden.set(e.target.checked)} data-testid="data-show-hidden" />
+            <span>{t("studio.data.hidden.toggle")}</span>
+          </label>
           <span className={"kd-lint" + (sum?.errors ? " kd-lint-err" : sum?.warnings ? " kd-lint-warn" : "")} data-testid="data-lint">{lintLine}</span>
           {diags.length > 0 && <Button size="s" variant="ghost" onClick={() => setShowLint(!showLint)} aria-expanded={showLint} data-testid="data-lint-toggle">{showLint ? t("studio.data.lint.hide") : t("studio.data.lint.show")}</Button>}
         </div>
         {building && <p className="kst-dim kd-note kd-catalog" data-testid="data-catalog-building"><Spinner size={12} /> {t("studio.data.catalog.reading")}</p>}
         {lint.data && !lint.data.catalog && !building && (
-          <div className="kd-catalog-missing" data-testid="data-nocatalog">
+          <div className="kd-catalog-missing" role="status" data-testid="data-nocatalog">
             <p className="kst-dim kd-note">{t("studio.data.noCatalog")}</p>
             {why && <p className="kd-note" data-testid="data-catalog-why">{why}</p>}
             <Button size="s" onClick={() => void ensureCatalog(qc)} data-testid="data-catalog-build">{t("studio.data.catalog.build")}</Button>

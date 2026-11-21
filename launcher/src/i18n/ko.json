@@ -4849,7 +4849,7 @@
       "seeChanges": "변경 사항 보기"
     },
     "change": {
-      "added.other": "+{count}개 추가",
+      "added.other": "{count}개 추가",
       "updated.other": "{count}개 업데이트",
       "removed.other": "{count}개 제거",
       "addedWord.other": "{count}개 추가됨",
@@ -4868,7 +4868,8 @@
       "offline": "Kiln이 Crucible에 연결할 수 없습니다. 친구에게 팩 파일을 받으세요(Crucible에 공유 > 파일로 저장).",
       "gone": "이 팩은 더 이상 Crucible에 없습니다.",
       "badDownload": "팩을 제대로 내려받지 못했습니다. 아무것도 설치되지 않았습니다. 다시 시도해 보세요.",
-      "gameRunning": "먼저 Enshrouded를 닫으세요."
+      "gameRunning": "먼저 Enshrouded를 닫으세요.",
+      "offlineShare": "Kiln이 Crucible에 연결할 수 없습니다. 인터넷 연결을 확인하고 다시 시도하거나, 파일로 저장을 사용해 친구에게 파일을 보내세요."
     },
     "install": {
       "done": "{name}을(를) 설치했습니다",
@@ -4898,7 +4899,7 @@
       "kilnOld": "Kiln {version} 이상이 필요합니다.",
       "updateKiln": "Kiln 업데이트",
       "uploadingTitle": "아직 업로드 중",
-      "stillUploading": "{name}님의 팩이 아직 업로드 중입니다({pct}%). 준비되면 Kiln이 설치합니다.",
+      "stillUploading": "{name}님의 팩이 아직 업로드 중입니다({pct}%). 여기서 기다리면 준비되는 대로 설치할 수 있습니다.",
       "resumed": "Kiln이 준비되었습니다. 찾던 팩 {name}입니다.",
       "wait": "기다리기",
       "waiting": "{name}님의 업로드를 기다리는 중({pct}%)…",
@@ -4929,7 +4930,8 @@
       "nameLabel": "프로필 이름",
       "nameTaken": "같은 이름의 프로필이 이미 있습니다. 이 프로필은 {name}(으)로 저장됩니다.",
       "runningHint": "Enshrouded가 실행 중입니다. 설치는 지금 팩을 추가합니다. 게임을 닫은 뒤 불러오세요.",
-      "installOnlyTip": "팩을 별도의 프로필로 추가합니다. 불러오거나 게임을 시작하지 않습니다."
+      "installOnlyTip": "팩을 별도의 프로필로 추가합니다. 불러오거나 게임을 시작하지 않습니다.",
+      "warningFile": "이 팩 파일에는 다른 사람들이 만든 모드가 들어 있으며, 코드가 포함된 모드도 있습니다. Kiln이 파일을 검사했지만 사람이 검토하지는 않았습니다."
     },
     "profiles": {
       "tag": "Crucible 팩",
@@ -5011,8 +5013,6 @@
       "cantRead": "업데이트를 읽을 수 없습니다",
       "removedKept": "{name} (라이브러리에 남아 있음)",
       "packData": "팩 자체의 데이터가 바뀌었습니다",
-      "kept": "내 변경 사항은 유지됩니다: 설정 {settings}개, 모드 {mods}개.",
-      "keptData": "내 변경 사항은 유지됩니다: 설정 {settings}개, 데이터 변경 {data}개, 모드 {mods}개.",
       "renamed": "{from}이(가) 이제 {to}입니다: 내 설정도 함께 옮겨집니다.",
       "stillWins.other": "내 변경이 계속 우선합니다 ({count})",
       "dataChanged": "팩이 이제 {pack}(으)로 설정합니다. 내 값 {mine}이(가) 계속 적용됩니다.",
@@ -5033,7 +5033,17 @@
       "doneDetail": "내 변경 사항은 그대로입니다.",
       "failed": "{name}을(를) 업데이트하지 못했습니다",
       "undone": "{name}을(를) {version}(으)로 되돌렸습니다",
-      "undoFailed": "업데이트를 취소하지 못했습니다"
+      "undoFailed": "업데이트를 취소하지 못했습니다",
+      "keptLine": "내 변경 사항은 유지됩니다: {list}.",
+      "keptSettings": {
+        "other": "설정 {count}개"
+      },
+      "keptData": {
+        "other": "데이터 변경 {count}개"
+      },
+      "keptMods": {
+        "other": "모드 {count}개"
+      }
     },
     "deck": {
       "shareTitle": "{name} 공유",
@@ -5169,21 +5179,25 @@
         "raw": "Raw JSON"
       },
       "lint": {
-        "line": "Lint: {errors}, {warnings}",
+        "line": "데이터 검사: {errors}, {warnings}",
         "errors": {
           "other": "오류 {count}개"
         },
         "warnings": {
           "other": "경고 {count}개"
         },
-        "checking": "Lint: 검사 중…",
+        "checking": "데이터 검사: 확인 중…",
         "show": "문제 표시",
         "hide": "문제 숨기기",
         "error": "오류",
         "warning": "경고",
-        "info": "참고"
+        "info": "참고",
+        "lineNotes": "데이터 검사: {errors}, {warnings}, {notes}",
+        "notes": {
+          "other": "메모 {count}건"
+        }
       },
-      "noCatalog": "이 PC에 게임 데이터 카탈로그가 없습니다. 선택 목록에는 팩의 모드가 추가한 항목만 표시되고, 필드는 직접 입력해야 합니다.",
+      "noCatalog": "Kiln이 아직 게임 아이템을 읽지 않았습니다. 선택 목록에는 팩의 모드가 추가한 항목만 표시되고, 필드 이름은 직접 입력해야 합니다.",
       "catalog": {
         "reading": "게임 아이템을 읽는 중…",
         "build": "게임 카탈로그 만들기",
@@ -5331,6 +5345,11 @@
         "textAria": "{file} 텍스트",
         "clean": "이 파일에는 문제가 없습니다.",
         "pick": "파일을 고르거나 새로 만드세요."
+      },
+      "hidden": {
+        "toggle": "숨긴 게임 항목 표시",
+        "tag": "숨김",
+        "tip": "오래되었거나 테스트용이거나 쓰이지 않는 게임 항목입니다. 게임에서 아무 효과가 없을 수 있습니다."
       }
     },
     "order": {
@@ -5391,7 +5410,7 @@
       "crucible": "Crucible",
       "github": "GitHub 릴리스",
       "nexus": "Nexus",
-      "manifest": "모드 매니페스트",
+      "manifest": "모드 자체 정보",
       "manual": "직접 입력"
     },
     "confidence": {
@@ -5425,7 +5444,7 @@
           "other": "코드 검사 (참고 {count}건)"
         },
         "lint": {
-          "other": "lint (경고 {count}건)"
+          "other": "데이터 검사 (경고 {count}건)"
         }
       },
       "tone": {

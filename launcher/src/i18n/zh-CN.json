@@ -4337,7 +4337,8 @@
       "offline": "Kiln 连不上 Crucible。请向朋友要整合包文件（分享到 Crucible → 另存为文件）。",
       "gone": "这个整合包已不在 Crucible 上了。",
       "badDownload": "整合包没有下载完整，什么都没有安装。请再试一次。",
-      "gameRunning": "请先关闭 Enshrouded。"
+      "gameRunning": "请先关闭 Enshrouded。",
+      "offlineShare": "Kiln 连不上 Crucible。请检查网络后重试，或使用“另存为文件”，把文件发给朋友。"
     },
     "install": {
       "done": "已安装 {name}",
@@ -4367,7 +4368,7 @@
       "kilnOld": "需要 Kiln {version} 或更新版本。",
       "updateKiln": "更新 Kiln",
       "uploadingTitle": "仍在上传",
-      "stillUploading": "{name} 的整合包还在上传（{pct}%）。准备好后 Kiln 会自动安装。",
+      "stillUploading": "{name} 的整合包还在上传（{pct}%）。在这里稍等，准备好后就能安装。",
       "resumed": "Kiln 已就绪。这就是你要找的整合包 {name}。",
       "wait": "等待",
       "waiting": "正在等待 {name} 上传完成（{pct}%）…",
@@ -4398,7 +4399,8 @@
       "nameLabel": "配置方案名称",
       "nameTaken": "你已经有同名的配置方案。这个会叫做 {name}。",
       "runningHint": "Enshrouded 正在运行。“安装”会立即添加整合包；关闭游戏后再加载它。",
-      "installOnlyTip": "把整合包添加为单独的配置方案，不会加载它，也不会启动游戏。"
+      "installOnlyTip": "把整合包添加为单独的配置方案，不会加载它，也不会启动游戏。",
+      "warningFile": "这个整合包文件含有其他人制作的模组，其中包括代码。Kiln 已检查该文件，但没有经过人工审核。"
     },
     "profiles": {
       "tag": "Crucible 整合包",
@@ -4480,8 +4482,6 @@
       "cantRead": "无法读取这次更新",
       "removedKept": "{name}（保留在你的模组库中）",
       "packData": "整合包自带的数据有变化",
-      "kept": "你的改动已保留：{settings} 项设置，{mods} 个模组。",
-      "keptData": "你的改动已保留：{settings} 项设置，{data} 项数据改动，{mods} 个模组。",
       "renamed": "{from} 现在是 {to}：你的设置会一起迁移。",
       "stillWins.other": "你的改动仍然优先（{count}）",
       "dataChanged": "整合包现在设为 {pack}。你的 {mine} 仍然生效。",
@@ -4502,7 +4502,17 @@
       "doneDetail": "你自己的改动都还在。",
       "failed": "未能更新 {name}",
       "undone": "{name} 已回到 {version}",
-      "undoFailed": "未能撤销这次更新"
+      "undoFailed": "未能撤销这次更新",
+      "keptLine": "你的改动已保留：{list}。",
+      "keptSettings": {
+        "other": "{count} 项设置"
+      },
+      "keptData": {
+        "other": "{count} 项数据改动"
+      },
+      "keptMods": {
+        "other": "{count} 个模组"
+      }
     },
     "deck": {
       "shareTitle": "分享 {name}",
@@ -4638,21 +4648,25 @@
         "raw": "Raw JSON"
       },
       "lint": {
-        "line": "Lint：{errors}，{warnings}",
+        "line": "数据检查：{errors}，{warnings}",
         "errors": {
           "other": "{count} 个错误"
         },
         "warnings": {
           "other": "{count} 个警告"
         },
-        "checking": "Lint：检查中…",
+        "checking": "数据检查：检查中…",
         "show": "显示问题",
         "hide": "隐藏问题",
         "error": "错误",
         "warning": "警告",
-        "info": "提示"
+        "info": "提示",
+        "lineNotes": "数据检查：{errors}，{warnings}，{notes}",
+        "notes": {
+          "other": "{count} 条提示"
+        }
       },
-      "noCatalog": "此电脑上没有游戏数据目录：选择列表只显示整合包的模组添加的内容，字段需要手动输入。",
+      "noCatalog": "Kiln 还没有读取游戏物品：选择列表只显示整合包的模组添加的内容，字段名需要手动输入。",
       "catalog": {
         "reading": "正在读取游戏物品…",
         "build": "生成游戏目录",
@@ -4800,6 +4814,11 @@
         "textAria": "{file} 的文本",
         "clean": "此文件没有问题。",
         "pick": "选择一个文件或新建一个。"
+      },
+      "hidden": {
+        "toggle": "显示隐藏的游戏条目",
+        "tag": "已隐藏",
+        "tip": "旧的、测试用或未使用的游戏条目：在游戏中可能没有任何效果。"
       }
     },
     "order": {
@@ -4860,7 +4879,7 @@
       "crucible": "Crucible",
       "github": "GitHub 发行版",
       "nexus": "Nexus",
-      "manifest": "模组清单",
+      "manifest": "模组自带的信息",
       "manual": "你"
     },
     "confidence": {
@@ -4894,7 +4913,7 @@
           "other": "代码扫描（{count} 条提示）"
         },
         "lint": {
-          "other": "lint（{count} 条警告）"
+          "other": "数据检查（{count} 条警告）"
         }
       },
       "tone": {

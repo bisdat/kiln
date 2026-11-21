@@ -2843,7 +2843,8 @@ export interface StudioCaptureChoice { path: string; side: PackSide; keys: strin
 export interface StudioOrderRow { id: string; name: string; loads: boolean; reason?: string; layer: boolean }
 export interface StudioOrder { kiln: StudioOrderRow[]; late: string[]; warnings: string[] }
 export interface StudioLayerFile { path: string; size: number }
-export interface StudioPickHit { section: string; name: string; id?: string; displayName?: string; from?: string }
+/** `hidden`: one of the game's old, test or unused entries (kiln_manage::catalog::is_hidden_name), listed only when asked. */
+export interface StudioPickHit { section: string; name: string; id?: string; displayName?: string; from?: string; hidden?: boolean }
 /** A catalog section's field (kiln_manage::catalog::FieldInfo). */
 /** Pack Studio's game-data catalog upkeep (kiln_manage::catalog::auto): made by Kiln when it is missing or not current. */
 export type StudioCatalogState = "idle" | "building" | "ready" | "failed" | "noGame";
@@ -2907,7 +2908,7 @@ export const studioLayerSet = (packId: string, section: string, selector: string
   call<LintReport>("studio_layer_set", { packId, section, selector, field, value });
 export const studioLayerLint = (packId: string) => call<LintReport>("studio_layer_lint", { packId });
 /** Game entries (the catalog) and what the pack's mods add, for the data editors' pickers. */
-export const studioPick = (packId: string, section: string, query: string, limit = 50) => call<StudioPickHit[]>("studio_pick", { packId, section, query, limit });
+export const studioPick = (packId: string, section: string, query: string, limit = 50, hidden = false) => call<StudioPickHit[]>("studio_pick", { packId, section, query, limit, hidden });
 export const studioFields = (section: string) => call<CatalogFieldInfo[]>("studio_fields", { section });
 /** Where the catalog's upkeep is (polled while it builds). */
 export const studioCatalogStatus = () => call<StudioCatalogStatus>("studio_catalog_status");

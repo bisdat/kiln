@@ -245,6 +245,26 @@ pub struct Hit {
 /// Entries whose name, display name, id or GUID contain `query` (case-insensitive; every whitespace-separated word
 /// must match). Exact matches first, then prefix matches, then the rest; within a rank in section and file order.
 /// `section`: only that one (else every section but `loca`, unless the query starts with `loca:`). `limit` 0 = 50.
+/// One of the game's old, test or unused entries, by the markers in its name (the catalog has no flag for them): a `Z_`
+/// prefix; a `_`-separated word DEPRECATED, DONOTPLACE, DONOTUSE, UNUSED, NOTFINISHED, NORECIPE, WIP, DEBUG, CHEAT,
+/// PROTOTYPE, PROTO, PLACEHOLDER or TEST (TEST2; a first word starting with Test, as TestItem); OLD after the first word;
+/// or DO_NOT_PLACE, DO_NOT_USE, TO_BE_DELETED; in any case. Pack Studio's pickers leave these out unless the creator asks
+/// for them, and kiln lint notes a reference to one (KL407). On the 2026-11 catalog: 63 of 4268 items (Z_Material_Sand_DEPRECATED,
+/// Food_T6_common_Fish_Bait_TEST, VC_Body_Head_01_old...), 40 loot entries, 1 workshop, no recipes, perks or buffs. Words
+/// inside a longer word do not count (Temple, Swipe, oldTools, TargetDummy, the barber's dummy wig heads).
+pub fn is_hidden_name(name: &str) -> bool {
+    const WORDS: &[&str] = &["deprecated", "donotplace", "donotuse", "unused", "notfinished", "norecipe", "wip", "debug", "cheat", "prototype", "proto", "placeholder"];
+    let lower = name.to_ascii_lowercase();
+    if lower.starts_with("z_") || ["do_not_place", "do_not_use", "to_be_deleted"].iter().any(|p| lower.contains(p)) {
+        return true;
+    }
+    lower.split('_').filter(|w| !w.is_empty()).enumerate().any(|(i, w)| {
+        WORDS.contains(&w)
+            || w.strip_prefix("test").is_some_and(|rest| rest.bytes().all(|b| b.is_ascii_digit()) || i == 0)
+            || (i > 0 && w == "old")
+    })
+}
+
 pub fn search(cat: &Catalog, query: &str, section: Option<&str>, limit: usize) -> Vec<Hit> {
     let limit = if limit == 0 { 50 } else { limit };
     let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();

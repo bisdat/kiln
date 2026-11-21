@@ -111,6 +111,7 @@ export function Picker({ section, value, onChange, free, icons, pickValue, place
         <span className="kd-pick-name" data-testid={testId ? testId + "-name" : undefined}>
           {glob ? t("studio.data.pick.glob") : entry ? (entry.displayName ?? entry.name) : free ? "" : t("studio.data.pick.unknown")}
           {entry && <FromBadge from={entry.from} />}
+          {entry?.hidden && <span className="kd-hidden-tag" title={t("studio.data.hidden.tip")} data-testid={testId ? testId + "-hidden" : undefined}>{t("studio.data.hidden.tag")}</span>}
         </span>
       )}
       {open && (
@@ -125,6 +126,7 @@ export function Picker({ section, value, onChange, free, icons, pickValue, place
                   <span className="kd-hit-name">{h.displayName ?? h.name}</span>
                   <span className="kd-hit-id">{h.name}</span>
                 </span>
+                {h.hidden && <span className="kd-hidden-tag" title={t("studio.data.hidden.tip")}>{t("studio.data.hidden.tag")}</span>}
                 <FromBadge from={h.from} />
               </button>
             </li>

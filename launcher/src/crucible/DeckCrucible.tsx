@@ -14,7 +14,7 @@ import { QrCode } from "../community/parts";
 import { DeckSignIn } from "../community/SignIn";
 import { DeckButton, Dialog, Row, Word } from "../deck/ui";
 import { anyChange, checksLine, codeInput, countsOf, crucibleTarget } from "./code";
-import { installBlock, openCrucible, sizeLine, useInstallPack, usePreview, type PreviewModel } from "./Preview";
+import { installBlock, neededKiln, openCrucible, sizeLine, useInstallPack, usePreview, type PreviewModel } from "./Preview";
 import { ShareConfirm, changeWords, startShare, useProfileShare } from "./Share";
 import { useCrucibleLinks } from "./Host";
 import { crk, crucibleError, useCrucibleStatus, useCrucibleUi, useShareRun, useStatusFollowsSignIn } from "./state";
@@ -158,7 +158,7 @@ export function DeckPreviewDialog({ source, onClose }: { source: NonNullable<Ret
         ))}
         {m && !m.instance && (
           <>
-            <p className="deck-line" data-testid="deck-crucible-warning"><Word tone="warn">{t("crucible.preview.warning")}</Word></p>
+            <p className="deck-line" data-testid="deck-crucible-warning"><Word tone="warn">{m.source.kind === "file" ? t("crucible.preview.warningFile") : t("crucible.preview.warning")}</Word></p>
             {m.trusted ? <p className="deck-note">{t("crucible.preview.trustedAlready", { name: m.creator?.name ?? "" })}</p> : (
               <>
                 <Row id="crucible-trust" title={m.creator ? t("crucible.preview.trust", { name: m.creator.name }) : t("crucible.preview.trustFile")} lit={trust}
@@ -182,7 +182,7 @@ function DeckPreviewBody({ m }: { m: PreviewModel }) {
     <>
       <p className="deck-line">{m.creator ? t("crucible.preview.by", { name: m.creator.name }) : t("crucible.preview.fromFile")}{m.version && " · v" + m.version}{m.upvotes != null && " · ▲ " + m.upvotes}</p>
       <p className="deck-line"><Word tone={m.fits ? "ok" : "warn"}>{m.fits ? (m.current ? t("crucible.preview.fits", { build: m.current }) : t("crucible.preview.fitsAny")) : t("crucible.preview.otherBuild", { build: m.builds[0] ?? "", current: m.current ?? "" })}</Word></p>
-      {!m.kiln.ok && <p className="deck-line"><Word tone="err">{t("crucible.preview.kilnOld", { version: m.kiln.needs ?? "" })}</Word></p>}
+      {!m.kiln.ok && <p className="deck-line"><Word tone="err">{t("crucible.preview.kilnOld", { version: neededKiln(m) })}</Word></p>}
       {m.uploading == null && <p className="deck-line">{sizeLine(m)}</p>}
       {checks && <p className="deck-line" data-testid="deck-crucible-checks"><Word tone={checks.kind === "problems" ? "err" : checks.kind === "warnings" ? "warn" : checks.kind === "passed" ? "ok" : "idle"}>
         {checks.kind === "passed" ? t("crucible.checks.passed") : checks.kind === "warnings" ? t("crucible.checks.lineWarnings", { count: checks.count })

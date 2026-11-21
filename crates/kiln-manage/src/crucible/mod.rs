@@ -768,7 +768,7 @@ pub fn preview(dirs: &DataDirs, c: &Crucible, target: &str, game: Option<&GameIn
     let Some(version) = at.version.clone() else {
         if let Some((vid, p)) = at.uploading.clone() {
             let owner = at.pack.owner.as_ref().map(|o| o.name.clone()).unwrap_or_else(|| "The creator".into());
-            return Err(err(ErrorCode::Busy, format!("{owner}'s pack is still uploading ({}%). Kiln will install it when it's ready.", (p * 100.0).round() as u64))
+            return Err(err(ErrorCode::Busy, format!("{owner}'s pack is still uploading ({}%). Try again when it's ready.", (p * 100.0).round() as u64))
                 .with_detail(serde_json::json!({ "uploading": { "version": vid, "progress": p }, "pack": at.pack })));
         }
         return Err(err(ErrorCode::NotFound, "This pack is no longer on Crucible."));

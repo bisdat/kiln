@@ -63,7 +63,7 @@ export async function startShare(qc: QueryClient, profileId: ProfileId) {
   } catch (e) {
     const err = api.toKilnError(e);
     useShareRun.getState().set({ ...useShareRun.getState().runs[profileId], error: err, pendingSignIn: err.code === "auth_failed" ? useShareRun.getState().runs[profileId]?.pendingSignIn ?? false : false });
-    if (err.code !== "auth_failed" && useDock.getState().open !== "share") toast.error(crucibleError(err), t("crucible.share.failed"));
+    if (err.code !== "auth_failed" && useDock.getState().open !== "share") toast.error(crucibleError(err, true), t("crucible.share.failed"));
   }
 }
 
@@ -85,7 +85,7 @@ export async function saveAsFile(profileId: ProfileId, name: string, version = "
   } catch { return null; }
 }
 
-/** "+1 added, 1 updated": what changed since the share. */
+/** "1 added, 1 updated": what changed since the share. */
 export function changeWords(c: CrucibleShared["changed"]): string {
   const n = countsOf(c);
   return [n.added ? t("crucible.change.added", { count: n.added }) : "", n.updated ? t("crucible.change.updated", { count: n.updated }) : "",
@@ -184,7 +184,7 @@ function SharePanel({ profileId, profileName }: { game: GameInstall; profileId: 
   if (run?.error && run.error.code !== "auth_failed") {
     return (
       <Panel title={t("crucible.share.failed")} testid="crucible-share-pop">
-        <p className="kcr-p k-tone-err" data-testid="crucible-share-error">{crucibleError(run.error)}</p>
+        <p className="kcr-p k-tone-err" data-testid="crucible-share-error">{crucibleError(run.error, true)}</p>
         <div className="kcr-pop-actions">
           <Button size="s" variant="primary" onClick={() => void startShare(qc, profileId)}>{t("common.retry")}</Button>
           {saveButton}
@@ -253,7 +253,7 @@ export function ShareConfirm({ profileId, signedIn, deck = false }: { profileId:
   const est = useShareEstimate(profileId);
   const line = deck ? "deck-line" : "kcr-p";
   return (
-    <div className="kcr-confirm" data-testid="crucible-share-confirm-text">
+    <div className={"kcr-confirm" + (deck ? " kcr-confirm-deck" : "")} data-testid="crucible-share-confirm-text">
       <p className={line}>{t("crucible.share.confirmWhat")}</p>
       <ul className="kcr-confirm-list">
         <li data-testid="crucible-share-goes">{est

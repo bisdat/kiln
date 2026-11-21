@@ -4955,8 +4955,8 @@
       "seeChanges": "Änderungen ansehen"
     },
     "change": {
-      "added.one": "+{count} hinzugefügt",
-      "added.other": "+{count} hinzugefügt",
+      "added.one": "{count} hinzugefügt",
+      "added.other": "{count} hinzugefügt",
       "updated.one": "{count} aktualisiert",
       "updated.other": "{count} aktualisiert",
       "removed.one": "{count} entfernt",
@@ -4980,7 +4980,8 @@
       "offline": "Kiln erreicht Crucible nicht. Bitte deinen Freund um die Pack-Datei (Auf Crucible teilen > Als Datei speichern).",
       "gone": "Dieses Pack ist nicht mehr auf Crucible.",
       "badDownload": "Das Pack wurde nicht richtig heruntergeladen. Es wurde nichts installiert. Versuch es noch einmal.",
-      "gameRunning": "Schließ zuerst Enshrouded."
+      "gameRunning": "Schließ zuerst Enshrouded.",
+      "offlineShare": "Kiln erreicht Crucible nicht. Prüfe deine Internetverbindung und versuche es noch einmal, oder nutze „Als Datei speichern“ und schick deinen Freunden die Datei."
     },
     "install": {
       "done": "{name} ist installiert",
@@ -5012,7 +5013,7 @@
       "kilnOld": "Braucht Kiln {version} oder neuer.",
       "updateKiln": "Kiln aktualisieren",
       "uploadingTitle": "Lädt noch hoch",
-      "stillUploading": "Das Pack von {name} lädt noch hoch ({pct} %). Kiln installiert es, sobald es fertig ist.",
+      "stillUploading": "Das Pack von {name} lädt noch hoch ({pct} %). Warte hier: Installieren geht, sobald es fertig ist.",
       "resumed": "Kiln ist bereit. Hier ist {name}, das Pack, wegen dem du gekommen bist.",
       "wait": "Warten",
       "waiting": "Warte auf den Upload von {name} ({pct} %)…",
@@ -5044,7 +5045,8 @@
       "nameLabel": "Profilname",
       "nameTaken": "Du hast schon ein Profil mit diesem Namen. Dieses heißt dann {name}.",
       "runningHint": "Enshrouded läuft. Installieren fügt das Pack jetzt hinzu; lade es, sobald du das Spiel geschlossen hast.",
-      "installOnlyTip": "Fügt das Pack als eigenes Profil hinzu. Lädt es nicht und startet das Spiel nicht."
+      "installOnlyTip": "Fügt das Pack als eigenes Profil hinzu. Lädt es nicht und startet das Spiel nicht.",
+      "warningFile": "Diese Pack-Datei enthält Mods von anderen Leuten, auch mit Code. Kiln hat die Datei geprüft, aber niemand hat sie von Hand angesehen."
     },
     "profiles": {
       "tag": "Crucible-Pack",
@@ -5129,8 +5131,6 @@
       "cantRead": "Das Update lässt sich nicht lesen",
       "removedKept": "{name} (bleibt in deiner Bibliothek)",
       "packData": "Die eigenen Daten des Packs haben sich geändert",
-      "kept": "Deine Änderungen bleiben: {settings} Einstellungen, {mods} Mods.",
-      "keptData": "Deine Änderungen bleiben: {settings} Einstellungen, {data} Datenänderungen, {mods} Mods.",
       "renamed": "{from} heißt jetzt {to}: deine Einstellungen ziehen mit um.",
       "stillWins.one": "Deine Änderung gilt weiter ({count})",
       "stillWins.other": "Deine Änderungen gelten weiter ({count})",
@@ -5153,7 +5153,20 @@
       "doneDetail": "Deine eigenen Änderungen sind geblieben.",
       "failed": "{name} wurde nicht aktualisiert",
       "undone": "{name} ist zurück auf {version}",
-      "undoFailed": "Das Update ließ sich nicht rückgängig machen"
+      "undoFailed": "Das Update ließ sich nicht rückgängig machen",
+      "keptLine": "Deine Änderungen bleiben: {list}.",
+      "keptSettings": {
+        "one": "{count} Einstellung",
+        "other": "{count} Einstellungen"
+      },
+      "keptData": {
+        "one": "{count} Datenänderung",
+        "other": "{count} Datenänderungen"
+      },
+      "keptMods": {
+        "one": "{count} Mod",
+        "other": "{count} Mods"
+      }
     },
     "deck": {
       "shareTitle": "{name} teilen",
@@ -5296,7 +5309,7 @@
         "raw": "Roh-JSON"
       },
       "lint": {
-        "line": "Lint: {errors}, {warnings}",
+        "line": "Datenprüfung: {errors}, {warnings}",
         "errors": {
           "one": "{count} Fehler",
           "other": "{count} Fehler"
@@ -5305,14 +5318,19 @@
           "one": "{count} Warnung",
           "other": "{count} Warnungen"
         },
-        "checking": "Lint: Prüfung läuft…",
+        "checking": "Datenprüfung: läuft…",
         "show": "Probleme anzeigen",
         "hide": "Probleme ausblenden",
         "error": "Fehler",
         "warning": "Warnung",
-        "info": "Hinweis"
+        "info": "Hinweis",
+        "lineNotes": "Datenprüfung: {errors}, {warnings}, {notes}",
+        "notes": {
+          "one": "{count} Hinweis",
+          "other": "{count} Hinweise"
+        }
       },
-      "noCatalog": "Kein Spieldaten-Katalog auf diesem PC: Die Auswahllisten zeigen nur, was die Mods des Packs hinzufügen, und Felder werden von Hand eingetippt.",
+      "noCatalog": "Kiln hat die Gegenstände des Spiels noch nicht gelesen: Die Auswahllisten zeigen nur, was die Mods des Packs hinzufügen, und Feldnamen tippst du von Hand.",
       "catalog": {
         "reading": "Kiln liest die Gegenstände des Spiels…",
         "build": "Spielkatalog erstellen",
@@ -5460,6 +5478,11 @@
         "textAria": "Text von {file}",
         "clean": "Keine Probleme in dieser Datei.",
         "pick": "Wähle eine Datei oder erstelle eine neue."
+      },
+      "hidden": {
+        "toggle": "Versteckte Spieleinträge zeigen",
+        "tag": "versteckt",
+        "tip": "Alte, Test- oder ungenutzte Einträge des Spiels: Sie bewirken im Spiel womöglich nichts."
       }
     },
     "order": {
@@ -5523,7 +5546,7 @@
       "crucible": "Crucible",
       "github": "GitHub-Release",
       "nexus": "Nexus",
-      "manifest": "das Manifest der Mod",
+      "manifest": "die Angaben der Mod",
       "manual": "du"
     },
     "confidence": {
@@ -5558,8 +5581,8 @@
           "other": "Code-Scan ({count} Hinweise)"
         },
         "lint": {
-          "one": "Lint ({count} Warnung)",
-          "other": "Lint ({count} Warnungen)"
+          "one": "Datenprüfung ({count} Warnung)",
+          "other": "Datenprüfung ({count} Warnungen)"
         }
       },
       "tone": {

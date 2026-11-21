@@ -1019,6 +1019,9 @@ pub struct PickHit {
     /// The mod that adds it (None: the game).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
+    /// One of the game's old, test or unused entries ([`crate::catalog::is_hidden_name`]); listed only when asked.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 
 /// The game-data catalog, loaded once per file and change (it is large).
@@ -1063,7 +1066,7 @@ pub fn added_names(dirs: &DataDirs, dir: &Path) -> Result<Vec<PickHit>> {
             for (section, body) in obj {
                 for a in body.get("add").and_then(Value::as_array).into_iter().flatten() {
                     if let Some(name) = a.get("name").and_then(Value::as_str) {
-                        out.push(PickHit { section: section.clone(), name: name.to_string(), id: None, display_name: a.get("displayName").and_then(Value::as_str).map(str::to_string), from: Some(mod_id.clone()) });
+                        out.push(PickHit { section: section.clone(), name: name.to_string(), id: None, display_name: a.get("displayName").and_then(Value::as_str).map(str::to_string), from: Some(mod_id.clone()), hidden: false });
                     }
                 }
             }
@@ -1072,8 +1075,10 @@ pub fn added_names(dirs: &DataDirs, dir: &Path) -> Result<Vec<PickHit>> {
     Ok(out)
 }
 
-/// The data editors' picker: entries of a section whose name or display name holds the query, the pack's own first.
-pub fn pick(dirs: &DataDirs, dir: &Path, section: &str, query: &str, limit: usize) -> Result<Vec<PickHit>> {
+/// The data editors' picker: entries of a section whose name or display name holds the query, the pack's own first. The
+/// game's old, test and unused entries ([`crate::catalog::is_hidden_name`]) only with `hidden` ("Show hidden game entries");
+/// an exact name finds one either way (a creator typed or pasted it), marked `hidden`.
+pub fn pick(dirs: &DataDirs, dir: &Path, section: &str, query: &str, limit: usize, hidden: bool) -> Result<Vec<PickHit>> {
     let limit = if limit == 0 { 50 } else { limit.min(500) };
     let q = query.trim().to_lowercase();
     let mut out: Vec<PickHit> = added_names(dirs, dir)?
@@ -1081,12 +1086,18 @@ pub fn pick(dirs: &DataDirs, dir: &Path, section: &str, query: &str, limit: usiz
         .filter(|h| h.section == section && (q.is_empty() || h.name.to_lowercase().contains(&q) || h.display_name.as_deref().is_some_and(|d| d.to_lowercase().contains(&q))))
         .collect();
     if let Some(cat) = load_catalog(None) {
-        for h in crate::catalog::search(&cat, query, Some(section), limit) {
+        // room for the hidden entries the search ranks among the first (63 of 4268 items: a page never needs more)
+        let wide = if hidden { limit } else { limit + 200 };
+        for h in crate::catalog::search(&cat, query, Some(section), wide) {
             let Some(name) = h.name.clone() else { continue };
             if out.iter().any(|o| o.name == name) {
                 continue;
             }
-            out.push(PickHit { section: h.section, name, id: h.id, display_name: h.display_name, from: None });
+            let is_hidden = crate::catalog::is_hidden_name(&name);
+            if is_hidden && !hidden && !name.eq_ignore_ascii_case(query.trim()) {
+                continue;
+            }
+            out.push(PickHit { section: h.section, name, id: h.id, display_name: h.display_name, from: None, hidden: is_hidden });
         }
     }
     out.truncate(limit);

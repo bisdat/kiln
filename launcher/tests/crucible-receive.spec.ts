@@ -41,6 +41,8 @@ test("a code: the preview, trust, optional mods, Install and play, then Undo", a
   await expect(page.getByTestId("crucible-warning")).toHaveText("This pack contains mods, including code, from other people. Crucible checks packs automatically but does not review them.");
   await expect(page.getByTestId("crucible-trust")).not.toBeChecked();
   await expect(page.getByTestId("crucible-install")).toBeDisabled();
+  // why Install waits is said under the boxes, not only in the disabled buttons' tooltips
+  await expect(page.getByTestId("crucible-tick-first")).toHaveText('Tick "I trust" first.');
   await page.getByTestId("crucible-mods-toggle").click();
   await expect(page.getByTestId("crucible-mods")).toContainText("Lantern Glow");
   await expect(page.getByTestId("crucible-mods")).toContainText("by emberwright");
@@ -49,6 +51,7 @@ test("a code: the preview, trust, optional mods, Install and play, then Undo", a
   await page.getByTestId("crucible-trust").check();
   await page.getByTestId("crucible-trust-always").check();
   await expect(page.getByTestId("crucible-install-only")).toBeEnabled();
+  await expect(page.getByTestId("crucible-tick-first")).toHaveCount(0);
   await shot(page, "desktop-preview");
   await page.getByTestId("crucible-install").click();
   const toast = page.locator(".k-toast").filter({ hasText: "Cinder Trails (Cinderhawk's pack) is installed" });
@@ -102,7 +105,7 @@ test("a kiln:// link opens the preview; a trusted creator's pack already install
 test("still uploading: Wait, then Install once it is ready; another game build is a yellow note", async ({ page }) => {
   await open(page);
   await code(page, "M2PD-7FJC");
-  await expect(page.getByTestId("crucible-uploading")).toContainText("Wren's pack is still uploading (62%). Kiln will install it when it's ready.");
+  await expect(page.getByTestId("crucible-uploading")).toContainText("Wren's pack is still uploading (62%). Wait here, and Install opens up when it's ready.");
   await shot(page, "desktop-preview-uploading");
   await page.getByRole("button", { name: "Wait" }).click();
   await expect(page.getByTestId("crucible-uploading")).toHaveCount(0, { timeout: 15_000 });
@@ -120,7 +123,7 @@ test("still uploading: Wait, then Install once it is ready; another game build i
 test("Kiln too old blocks; a pack taken down and offline say so", async ({ page }) => {
   await open(page);
   await code(page, "Q8NV-4KMA");
-  await expect(page.getByTestId("crucible-kiln-old")).toContainText("Needs Kiln >=0.2.0-dev.31 or newer.");
+  await expect(page.getByTestId("crucible-kiln-old")).toContainText("Needs Kiln 0.2.0-dev.31 or newer.");
   await expect(page.getByTestId("crucible-checks")).toContainText("Checks: 1 thing to look at");
   await expect(page.getByTestId("crucible-checks")).toContainText("shroud-everywhere: references networking (System.Net.Http)");
   await page.getByTestId("crucible-trust").check();

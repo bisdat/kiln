@@ -724,6 +724,17 @@ fn refs(out: &mut Out, m: &LMod, mi: usize, f: &LFile, cat: Option<&Catalog>, de
         {
             continue;
         }
+        // the game's own old, test or unused entry: it works, but may do nothing in the game (Pack Studio hides these)
+        if in_game == Some(true)
+            && let Form::Name(n) = &form
+            && crate::catalog::is_hidden_name(n)
+        {
+            let what = singular(&section);
+            out.push(
+                Diagnostic::new(&f.display, codes::HIDDEN_ENTRY, *span, &format!("\"{n}\" is one of the game's old, test or unused {what} entries (its name says so): it may do nothing in the game"))
+                    .pointer(pointer),
+            );
+        }
         match in_game {
             Some(true) => continue,
             None if !local_only(&section) => {
