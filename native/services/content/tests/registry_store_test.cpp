@@ -269,6 +269,34 @@ void mark_evals_re_evaluates() {
     check(at(F1) == 40, "x4 after the mark");
 }
 
+// store_below_registry gives the value under the registry band; evaluated layers reading each other do not recurse forever
+void below_registry_and_cycles() {
+    fresh();
+    put(PACK, kPackSeq, F1, 30);
+    put_mul(F1, 2);
+    uint8_t b[4];
+    check(store_below_registry(F1, 4, b) && b[0] == 30, "below the registry: the pack's 30");
+    check(store_effective(F1, 4, b) && b[0] == 60, "effective: 60");
+    LayerEval a = [](const uint8_t* below, uint8_t n, uint8_t* out, std::string*) {
+        uint8_t o[4];
+        store_effective(F3, 4, o);
+        std::memcpy(out, below, n);
+        out[0] = static_cast<uint8_t>(out[0] + o[0]);
+        return true;
+    };
+    LayerEval c = [](const uint8_t* below, uint8_t n, uint8_t* out, std::string*) {
+        uint8_t o[4];
+        store_effective(F2, 4, o);
+        std::memcpy(out, below, n);
+        out[0] = static_cast<uint8_t>(out[0] + o[0]);
+        return true;
+    };
+    store_put_eval(REG, registry_seq(2), 1, 1, 0, -1, F2, 4, std::move(a), "x");
+    store_put_eval(REG, registry_seq(3), 1, 1, 0, -1, F3, 4, std::move(c), "x");
+    flush();
+    check(at(F2) != 0 && at(F3) != 0, "a cycle ends (bounded depth)");
+}
+
 // a world reset forgets skipped writes and other writers
 void reset_forgets() {
     fresh();
@@ -313,6 +341,7 @@ int main() {
         {"a_revert_is_compared_too", a_revert_is_compared_too},
         {"old_paths_unchanged", old_paths_unchanged},
         {"mark_evals_re_evaluates", mark_evals_re_evaluates},
+        {"below_registry_and_cycles", below_registry_and_cycles},
         {"reset_forgets", reset_forgets},
         {"rollback_reads_folded_values", rollback_reads_folded_values},
     };

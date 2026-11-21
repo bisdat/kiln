@@ -282,6 +282,8 @@ bool store_put_eval(KilnOwner owner, uint64_t seq, uint32_t kind, uint32_t id, i
 // The bytes the slot's layers give now (evaluated layers computed, registry layers of a foreign slot left out), before any
 // flush; memory when there is no slot. false: unreadable, or a slot of another size.
 bool store_effective(uintptr_t addr, uint8_t n, uint8_t* out);
+// The same, with only the layers below the registry band (packs, the original): the value registry layers are computed over.
+bool store_below_registry(uintptr_t addr, uint8_t n, uint8_t* out);
 uint32_t store_mark_evals();  // every slot holding an evaluated layer is flushed (evaluated) again; returns how many
 // Compare-before-write (sfi R3, owner decision D1): a registry write, or a registry layer's revert, on a slot whose memory is
 // not what Kiln last wrote there is not made: another writer (a ShroudForge run-time write in kiln mode, or any other) wrote

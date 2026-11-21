@@ -43,11 +43,19 @@ bool excluded(const Slot& s, const Layer& l) { return s.foreign && is_registry_s
 
 // The bytes the layers give, in seq order: a plain layer's bytes replace the value, an evaluated layer computes it from the
 // value below (and keeps the result in its bytes, for conflicts and reports). Registry layers of a foreign slot are left out.
-void fold(Slot& s, uint8_t* out) {
+// below_registry: only the layers under the registry band (what a registry layer's value is computed over).
+thread_local int t_fold_depth = 0;  // an evaluated layer reading another slot's value (formulas): never in a cycle
+void fold(Slot& s, uint8_t* out, bool below_registry = false) {
     uint8_t v[kSlotBytes] = {};
     std::memcpy(v, s.original, s.n);
+    struct Depth {
+        Depth() { ++t_fold_depth; }
+        ~Depth() { --t_fold_depth; }
+    } depth;
     for (Layer& l : s.layers) {
         if (excluded(s, l)) continue;
+        if (below_registry && l.seq >= kRegistrySeq) break;
+        if (l.eval && t_fold_depth > 4) continue;  // a cycle of evaluated layers: the value below stands
         if (l.eval) {
             uint8_t r[kSlotBytes] = {};
             std::string why;
@@ -289,6 +297,16 @@ bool store_effective(uintptr_t addr, uint8_t n, uint8_t* out) {
     if (it == g_slots.end()) return rd(addr, out, n);
     if (it->second.n != n) return false;
     fold(it->second, out);
+    return true;
+}
+
+bool store_below_registry(uintptr_t addr, uint8_t n, uint8_t* out) {
+    if (n == 0 || n > kSlotBytes) return false;
+    std::lock_guard lock(g_mu);
+    auto it = g_slots.find(addr);
+    if (it == g_slots.end()) return rd(addr, out, n);
+    if (it->second.n != n) return false;
+    fold(it->second, out, true);
     return true;
 }
 

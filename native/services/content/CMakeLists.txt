@@ -1,7 +1,10 @@
 # kiln.content. The gamedata worker's sections (gamedata*.cpp: templates, arsenals, sequences, buffs, perks, skills)
 # are picked up when present; content.cpp / packs.cpp / store.cpp call them under __has_include("gamedata.h").
 file(GLOB KILN_CONTENT_GAMEDATA CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/gamedata*.cpp")
-kiln_service(content content.cpp game.cpp nearmem.cpp refl.cpp registries.cpp store.cpp packs.cpp newcontent.cpp refs.cpp barber.cpp gear.cpp ${KILN_CONTENT_GAMEDATA})
+# The registry stage (registry/): the live back-end (registry_live.cpp, S9) and the files it uses; the stage runner's files
+# (regmap, model, stage, claims, report) are listed with it.
+set(KILN_CONTENT_REGISTRY registry_live.cpp registry/ir.cpp registry/compose.cpp registry/formulas.cpp registry/regmap.cpp)
+kiln_service(content content.cpp game.cpp nearmem.cpp refl.cpp registries.cpp store.cpp packs.cpp newcontent.cpp refs.cpp barber.cpp gear.cpp ${KILN_CONTENT_REGISTRY} ${KILN_CONTENT_GAMEDATA})
 if(KILN_CONTENT_GAMEDATA)
     target_compile_definitions(kiln-content PRIVATE KILN_CONTENT_GAMEDATA=1)
 endif()
