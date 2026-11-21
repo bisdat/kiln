@@ -875,9 +875,15 @@ What upstream 1.8.1 adds that touches Kiln, checked when the bundled runtime mov
   (`GlideSteer`, also Kiln's Creative Mode glider), SF refuses its next enable cleanly
   (`actor-rotation-code-changed`); a patch already enabled stays, the bytes are disjoint, and Kiln's step replaces the
   pitch change after SF's clamp for that player. The fork logs why the patch is unavailable
-  (`runtime.patch.glider_pitch unavailable: ...`, branch `kiln-1.8.1-glider`). Separately, SF's whole-file check
-  refuses the exe for Kiln's entry hook on `content/LootItems` (a leaf function without unwind data, which the check
-  takes for code of the function before it, rva 0x93d310) and falls back to live-only resolution.
+  (`runtime.patch.glider_pitch unavailable: ...`, branch `kiln-1.8.1-glider`).
+- **The fork's whole-file check under Kiln** (independent of glider_pitch): up to 0.2.0-dev.30 it refused the exe for
+  Kiln's entry hook on `content/LootItems` (a call-free leaf without unwind data, taken for code of the function
+  before it, rva 0x93d310), and the first read of a function holding one of Kiln's mid hooks (items/CreatePide) would
+  have refused it as well; ShroudForge then read every procedure live, where an entry-detoured one is unreadable (the
+  detoured call-graph walk needs the file). Since 0.2.0-dev.30.1 (fork `5bb133f0`) the check admits a leaf
+  function's entry detour (`admit_leaf`: 16-byte aligned, a boundary of the gap's linear decode after padding,
+  target outside the image) and refuses a mid-hooked function's file read without switching file reads off (lab:
+  `executable file accepted ... beside 54 entry detour(s), 17 interior jump(s)`, no refusal after it).
 - **Unified Tweaks 2.1.2 and its Glider Flight 1.0.1** (Nexus 185; lab boot above, their DLLs off): the packages load
   under the bundled 1.8.1 (the startup pass with `unifiedemltweaks`, `unified-tweaks-live` and `glider-flight`
   active, no ShroudForge error). They use no 1.8 DLL bridge, `runtime.patch` or player permissions. Glider Flight's own
