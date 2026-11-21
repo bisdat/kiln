@@ -21,5 +21,10 @@
     <ProjectReference Include="../../services/Kiln.Network/Kiln.Network.csproj" />
     <ProjectReference Include="../../services/Kiln.Chat/Kiln.Chat.csproj" />
     <ProjectReference Include="../../Kiln.TestKit/Kiln.TestKit.csproj" />
+    <!-- the sidecars' references (Kiln.Replication takes them without copying them) -->
+    <ProjectReference Include="../../services/Kiln.World/Kiln.World.csproj" />
+    <ProjectReference Include="../../services/Kiln.Client/Kiln.Client.csproj" />
+    <ProjectReference Include="../../services/Kiln.Content/Kiln.Content.csproj" />
+    <ProjectReference Include="../../services/Kiln.Items/Kiln.Items.csproj" />
   </ItemGroup>
 </Project>

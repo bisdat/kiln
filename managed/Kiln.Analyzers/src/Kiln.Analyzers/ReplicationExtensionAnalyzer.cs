@@ -72,7 +72,7 @@ public sealed class ReplicationExtensionAnalyzer : DiagnosticAnalyzer
                 continue;
             }
             if (ft.TypeKind == TypeKind.Enum) return $"field {p} is an enum of {leaf.ToDisplayString()}";
-            if (ft.SpecialType != SpecialType.None || ft.TypeKind != TypeKind.Struct)
+            if (ft.SpecialType != SpecialType.None || ft.TypeKind != TypeKind.Struct || ft.ContainingNamespace?.ToDisplayString() == "System")
                 return $"field {p} is {ft.ToDisplayString()}; allowed: byte, sbyte, short, ushort, int, uint, long, ulong, float, double, their enums and structs of them";
             var inner = Check(ft, p, depth + 1, out var innerSize);
             if (inner is not null) return inner;

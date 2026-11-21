@@ -98,6 +98,7 @@ public struct Exactly1024 { public Kb A; }
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct HasHalf { public Half H; }
 
+[Collection("sidecars")]
 public sealed class ExtensionTests
 {
     private static uint Fnv(string s)

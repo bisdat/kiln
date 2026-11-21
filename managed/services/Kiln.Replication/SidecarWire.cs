@@ -6,6 +6,8 @@
 //   1 UPDATE  S->C  u32 serverTick, varint n, n x [u32 entity, u32 createTick, u16 extId, size bytes]   n <= 4,096
 //   2 CLEAR   S->C  u32 serverTick, varint n, n x [u32 entity, u32 createTick, u16 extId]               n <= 4,096
 //   3 RESYNC  C->S  varint n, n x [u32 entity, u32 createTick]                                         n <= 256, 1/s
+//   4 ANNOUNCE C->S str repl.ext (the client's extensions, as its handshake property; sent when they change, e.g. a hot
+//                   reload; added in dev.31 under v1's rule that new ids are added and none changes)
 // createTick is the entity's generation for that peer: the server tick of the create message the peer got (0: the
 // entity was created before the server began tracking; the client applies it to the generation it has).
 namespace Kiln;
@@ -13,7 +15,7 @@ namespace Kiln;
 internal static class SidecarWire
 {
     public const string Channel = "kiln:repl", ChannelVersion = "1";
-    public const ushort Defs = 0, Update = 1, Clear = 2, Resync = 3;
+    public const ushort Defs = 0, Update = 1, Clear = 2, Resync = 3, Announce = 4;
     public const int MaxDefs = 1024, MaxItems = 4096, MaxResync = 256, MaxName = 64;
 
     /// <summary>One extension as the server numbers it.</summary>

@@ -119,9 +119,21 @@ public sealed class PeersTests
         var vanilla = Peer(1, NetPeerState.Vanilla);
         var loading = Peer(2, NetPeerState.Ready, cleared: false);
         var current = Peer(3, NetPeerState.Ready, cleared: true);
-        Assert.True(Peers.LackingContent.Matches(vanilla));
-        Assert.True(Peers.LackingContent.Matches(loading));
-        Assert.False(Peers.LackingContent.Matches(current));
+        var serving = Peers.ServingContent;
+        try
+        {
+            Peers.ServingContent = () => true;  // the server serves a content state: a Kiln client must have acked it
+            Assert.True(Peers.LackingContent.Matches(vanilla));
+            Assert.True(Peers.LackingContent.Matches(loading));
+            Assert.False(Peers.LackingContent.Matches(current));
+            Peers.ServingContent = () => false;  // no content state, no Kiln-only template: nothing to lack, nothing to ack
+            Assert.False(Peers.LackingContent.Matches(loading));
+            Assert.True(Peers.LackingContent.Matches(vanilla));  // a vanilla peer still counts (it has no Kiln at all)
+        }
+        finally
+        {
+            Peers.ServingContent = serving;
+        }
         Assert.False(Peers.LackingContent.Matches(new PeerFacts(0x0001_0000, null, true, false)));  // the host's own client
         Assert.True(Peers.LackingContent.Matches(new PeerFacts(0x8000_0010, null, false, true)));   // an unbound lab fake
         var saved = Peers.ContentCurrent;
