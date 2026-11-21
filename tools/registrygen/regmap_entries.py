@@ -72,6 +72,7 @@ def main(argv=None):
                 ref = str(comp.get("defaultInventory") or "").lower()
                 if ref:
                     users.setdefault(ref, []).append(tid.split(":", 1)[1])
+        out["registries"]["templates"] = [{"guid": r.key.guid, "name": r.name, "id": 0} for r in trows]
         out["registries"]["drops"] = [{"guid": k.guid, "name": "", "id": 0, "namedBy": sorted(users.get(k.guid.lower(), []))}
                                       for k in src.keys("keen::ecs::DefaultInventoryResource")]
         out["registries"]["balance"] = [{"guid": k.guid, "name": "", "id": 0} for k in src.keys("keen::BalancingTable")]

@@ -376,10 +376,13 @@ def compute_aliases(root, entries, previous, previous_table, game_build):
     prev = regmap_ids.aliases_from_json((previous or {}).get("aliases", {}))
     per, table = {}, {}
     item_ids = {}
-    for name in ("items", "recipes", "loot", "drops", "balance"):
-        if name not in maps or name not in entries.get("registries", {}):
+    # templates have no regmap file (the model's builtin source names them: debug name, else template_<guid8>); their
+    # clashes and names outside the grammar are pinned here like any registry's
+    builtin = {"templates": {"unnamed": "template_%.8s"}}
+    for name in ("templates", "items", "recipes", "loot", "drops", "balance"):
+        if (name not in maps and name not in builtin) or name not in entries.get("registries", {}):
             continue
-        src = maps[name].get("entries", {})
+        src = maps[name].get("entries", {}) if name in maps else builtin[name]
         es = entries["registries"][name]
         al, ids, t = regmap_ids.record_aliases(name, src, prev.get(name, {}), (previous_table or {}).get(name, {}), es,
                                                game_build, item_ids if src.get("key") == "items" else None)

@@ -197,6 +197,21 @@ class Checks(unittest.TestCase):
         finally:
             t.close()
 
+    def test_record_pins_template_names_outside_the_grammar(self):
+        # templates have no regmap file of their own (the model's builtin source names them); their pins ride in the record
+        t = Tree()
+        try:
+            db = rc.TypeDb.from_refl(dict(TYPES, exe_sha256="ab" * 32))
+            G = "9a0ade54-4473-4eca-9fd4-e2b01051f2e0"
+            e = {"registries": {"templates": [{"guid": G, "name": "VFX_Ball flower_deflected", "id": 0},
+                                              {"guid": "11111111-0000-0000-0000-000000000001", "name": "Plain", "id": 0}]}}
+            rec, table = rc.record(t.root, db, "server", "1", "", e, None, None)
+            self.assertIn({"registry": "templates", "guid": G, "id": "game:vfx_ball_flower_deflected"}, rec["aliases"]["renames"])
+            self.assertEqual(len(rec["aliases"]["renames"]), 1)  # only the name outside the grammar: no full name list
+            self.assertEqual(table["templates"][G], "game:vfx_ball_flower_deflected")
+        finally:
+            t.close()
+
     def test_missing_rows_are_unmapped_not_errors(self):
         rows = copy.deepcopy(ROWS)
         del rows["on"]
