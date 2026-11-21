@@ -10,6 +10,7 @@
 
 #include "kiln_api.h"
 #include "overlay_mode.h"
+#include "services/kiln_render.h"
 #include "services/kiln_ui.h"
 
 namespace kui {
@@ -276,6 +277,14 @@ bool image_texture(KilnHandle h, ImTextureRef* out);  // render thread
 // ---- render.cpp (kiln.render: drawing for mods, the game's camera) ----
 bool render_install();                 // plugin main: the camera hook (feature render.camera)
 const void* render_table();            // the KilnRenderApi
+
+// ---- outline.cpp (kiln.render v2's outlines: the game's highlight on an entity's model; outline_core.h) ----
+bool outline_init();                   // plugin main: what sigdb found (feature ui.world_outline); nothing is hooked here
+KilnResult KILN_CALL outline_add(KilnOwner owner, KilnEntity entity, const KilnRenderOutline* opts, KilnHandle* out);
+KilnResult KILN_CALL outline_info(KilnHandle handle, KilnRenderOutlineInfo* out);
+KilnResult KILN_CALL outline_remove(KilnHandle handle);
+KilnResult KILN_CALL outline_clear(KilnOwner owner);
+KilnResult KILN_CALL outline_status(KilnRenderOutlineStatus* out);
 
 // ---- graphics.cpp (Kiln's own graphics tools: the frame cap, DLSS settings, the readout; docs/kiln/graphics.md) ----
 void graphics_start(bool optiscaler, bool streamline);  // plugin main, after overlay_guard_start: kiln.json, what steps aside
