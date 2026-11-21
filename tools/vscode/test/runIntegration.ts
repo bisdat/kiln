@@ -68,8 +68,9 @@ process.exit(0);
 `,
     { mode: 0o755 },
   );
-  // the debugger's stand-ins: a wine that answers tasklist and "runs" a mock netcoredbg (test/fixtures/dap), and a
-  // `kiln` with a debug command. Everything they do goes to one log the tests read.
+  // the debugger's stand-ins: a wine that "runs" a mock netcoredbg (test/fixtures/dap), and a `kiln` with a debug
+  // command that resolves targets as the real one answers (`--json`) and is the adapter (`--dap`). What the wine and the
+  // debugger do goes to one log the tests read.
   const dapLog = path.join(scratch, "mock-dap.log");
   fs.rmSync(dapLog, { force: true });
   const mockDbg = path.join(EXT, "test", "fixtures", "dap", "mock-netcoredbg.js");
@@ -81,10 +82,6 @@ process.exit(0);
     `#!${process.execPath}
 const fs = require("fs"), a = process.argv.slice(2), log = ${JSON.stringify(dapLog)};
 fs.appendFileSync(log, JSON.stringify({ kind: "wine", argv: a, prefix: process.env.WINEPREFIX ?? null }) + "\\n");
-if (/tasklist/i.test(a[0] ?? "")) {
-  process.stdout.write('"svchost.exe","20","Console","1","1,000 K"\\r\\n"enshrouded_server.exe","4242","Console","1","9,000,000 K"\\r\\n');
-  process.exit(0);
-}
 if (a[0] !== ${JSON.stringify(mockNetcoredbg)}) { console.error("mock wine: unexpected " + a.join(" ")); process.exit(3); }
 process.env.KILN_MOCK_DAP_LOG = log;
 require(${JSON.stringify(mockDbg)});
@@ -95,15 +92,29 @@ require(${JSON.stringify(mockDbg)});
   fs.writeFileSync(
     fakeKilnDebug,
     `#!${process.execPath}
-const a = process.argv.slice(2);
+const fs = require("fs"), path = require("path"), a = process.argv.slice(2);
 if (a[0] === "--version") { console.log("kiln 0.0.0-fake-debug"); process.exit(0); }
 if (a[0] !== "debug") process.exit(2);
-if (a.includes("--help")) process.exit(0);
+// a CLI without --dap (the marker file): the extension then uses its built-in proxy as the transport
+if (a.includes("--help")) { if (!fs.existsSync(${JSON.stringify(path.join(scratch, "fake-kiln-no-dap"))})) console.log("  --dap  speak DAP"); process.exit(0); }
 if (a.includes("--json")) {
-  // like the real one: {ok:false,...} and exit 1 when it would refuse (here: when the server folder has this marker)
-  const refuse = require("fs").existsSync(require("path").join(a[a.indexOf("--server") + 1], "fake-refuse"));
-  console.log(JSON.stringify(refuse ? { ok: false, error: { code: "tool_missing", message: "fake: no netcoredbg" } } : { ok: true, pid: 4242 }));
-  process.exit(refuse ? 1 : 0);
+  // like the real one: {ok:false,...} and exit 1 when it would refuse
+  const server = a.includes("--server") ? a[a.indexOf("--server") + 1] : undefined;
+  const client = a.includes("--client") ? a[a.indexOf("--client") + 1] : undefined;
+  const no = (code, message, reason) => { console.log(JSON.stringify({ ok: false, error: { code, message, ...(reason ? { detail: { reason } } : {}) } })); process.exit(1); };
+  if (client && !a.includes("--allow-client-pause")) no("pause_consent_required", "fake: no consent");
+  if (server && /steamapps/.test(fs.realpathSync(server))) no("refused", "fake: a server in a Steam library", "steam_library");
+  if (server && fs.existsSync(path.join(server, "fake-refuse"))) no("tool_missing", "fake: no netcoredbg");
+  if (server && fs.existsSync(path.join(server, "fake-stopped"))) no("not_running", "fake: the server is not running");
+  const dir = server ?? "/fake/client";
+  const identity = { installId: "fake", prefixIdentity: null, runnerSha256: null, windowsPid: 4242, creationTime100ns: "134390977514834040", imageSha256: "ab".repeat(32), sessionNonce: "cd".repeat(16) };
+  console.log(JSON.stringify({
+    ok: true, kind: server ? "server" : "client", server: server ?? null, install: dir, pid: 4242, hostPid: null, wine: ${JSON.stringify(mockWine)}, prefix: dir + ".pfx",
+    netcoredbg: process.env.KILN_NETCOREDBG, env: { WINEPREFIX: dir + ".pfx", WINEDEBUG: "-all", DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1" },
+    command: [${JSON.stringify(mockWine)}, process.env.KILN_NETCOREDBG, "--interpreter=vscode"], maxPauseMs: server ? null : 5000, notes: [],
+    target: { identity, image: "Z:/fake/enshrouded.exe", runtimeVersion: "10.0.14", managedReady: true, sessionMode: server ? "hosted" : "menu", runnerContext: null, hostPid: null },
+  }));
+  process.exit(0);
 }
 process.env.KILN_MOCK_DAP_LOG = ${JSON.stringify(dapLog)};
 require(${JSON.stringify(mockDbg)});
@@ -183,7 +194,7 @@ require(${JSON.stringify(mockDbg)});
       "--disable-gpu",
       "--no-sandbox",
     ],
-    extensionTestsEnv: { KILN_IT_SUITE: suite, KILN_IT_WS: ws, KILN_IT_SERVER: server, KILN_IT_REPO: REPO, KILN_IT_CLI: cli, KILN_IT_LAB: lab ?? "", KILN_IT_DAP_LOG: dapLog, KILN_IT_MOCK_WINE: mockWine, KILN_IT_MOCK_NETCOREDBG: mockNetcoredbg, KILN_IT_FAKE_KILN_DEBUG: fakeKilnDebug },
+    extensionTestsEnv: { KILN_IT_SUITE: suite, KILN_IT_WS: ws, KILN_IT_SERVER: server, KILN_IT_REPO: REPO, KILN_IT_CLI: cli, KILN_IT_LAB: lab ?? "", KILN_IT_DAP_LOG: dapLog, KILN_IT_MOCK_WINE: mockWine, KILN_IT_MOCK_NETCOREDBG: mockNetcoredbg, KILN_IT_FAKE_KILN_DEBUG: fakeKilnDebug, KILN_IT_FAKE_NO_DAP: path.join(scratch, "fake-kiln-no-dap") },
   });
   process.exit(code);
 }

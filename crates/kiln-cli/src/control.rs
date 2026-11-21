@@ -68,10 +68,31 @@ pub(crate) fn send(dir: &std::path::Path, command: &str, timeout: u64) -> Result
     }
 }
 
+/// A reload under an attached debugger leaves its breakpoints on the old copy of the mod, and sessions in that state
+/// have ended the server (docs/kiln/modding/debugging.md): while `kiln debug --dap` holds a session on this server
+/// (kiln/state/debug/session.json, written by a proxy that still runs), reloading is refused.
+pub(crate) fn refuse_while_attached(dir: &std::path::Path) -> Result<()> {
+    if let Some(s) = kiln_manage::debug::attached_session(dir) {
+        return Err(CliError::new(
+            "refused",
+            format!(
+                "a debugger is attached to {} (kiln debug, pid {}, {}): disconnect it before reloading, then attach again",
+                dir.display(),
+                s.proxy_pid,
+                json!(s.state.state).as_str().unwrap_or("attached")
+            ),
+        )
+        .with_detail(json!({ "reason": "debugger_attached" }))
+        .into());
+    }
+    Ok(())
+}
+
 pub fn reload(a: ReloadArgs, json: bool) -> Result<i32> {
     let project = Project::find(None).ok();
     let id = mod_id(a.id, project.as_ref())?;
     let srv = server::resolve(a.server.as_deref(), project.as_ref())?;
+    refuse_while_attached(&srv.dir)?;
     let r = send(&srv.dir, &format!("reload {id}"), a.timeout)?;
     let ok = r["ok"].as_bool().unwrap_or(false);
     if json {
@@ -152,4 +173,41 @@ pub fn test(a: TestArgs, json: bool) -> Result<i32> {
         );
     }
     Ok(if ok { 0 } else { 1 })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reload_is_refused_while_a_debugger_is_attached() {
+        let t = std::env::temp_dir().join(format!("kiln-cli-reload-attached-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        assert!(refuse_while_attached(&t).is_ok());
+        let mut s = kiln_manage::debug::DebugSessionState {
+            identity: kiln_manage::debug::DebugIdentity {
+                install_id: "i".into(),
+                prefix_identity: None,
+                runner_sha256: None,
+                windows_pid: 32,
+                creation_time_100ns: "5".into(),
+                image_sha256: "a".repeat(64),
+                session_nonce: "n".repeat(32),
+            },
+            state: kiln_manage::debug::SessionState::Paused,
+            session_mode: kiln_manage::debug::SessionMode::Hosted,
+            reason: None,
+            paused_since: None,
+            max_pause_ms: None,
+        };
+        // this test process plays the proxy
+        kiln_manage::debug::write_session(&t, &s).unwrap();
+        let e = refuse_while_attached(&t).unwrap_err();
+        let c = e.downcast_ref::<CliError>().unwrap();
+        assert_eq!((c.code.as_str(), &c.detail.as_ref().unwrap()["reason"]), ("refused", &json!("debugger_attached")));
+        s.state = kiln_manage::debug::SessionState::Detached;
+        kiln_manage::debug::write_session(&t, &s).unwrap();
+        assert!(refuse_while_attached(&t).is_ok(), "a detached session does not hold reloads");
+        std::fs::remove_dir_all(&t).unwrap();
+    }
 }

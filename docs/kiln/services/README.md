@@ -41,6 +41,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [players.md](players.md) | kiln.players: who is on the server |
 | [progression.md](progression.md) | kiln.progression: levels, experience, skill tree, skill points |
 | [quests.md](quests.md) | Kiln.Quests: the quest engine behind the game's own quest UI |
+| [replication.md](replication.md) | kiln.repl / Kiln.Replication: the network inspector: what the server sends each player (counters, watches on one entity, captures), read only |
 | [rules.md](rules.md) | Kiln.Rules: what players may do, and what it costs them |
 | [saves.md](saves.md) | kiln.saves: save events and persistent mod data |
 | [screen.md](screen.md) | kiln.screen / ScreenEffects: full-screen effects |
@@ -77,6 +78,13 @@ row above and grows its own page.
 |---|---|
 | [decisions.md](decisions.md) | kiln.decisions / kiln.window_clock: refusing a death (`EntityDyingEvent`), a walk-over pickup (`ItemPickingUpEvent`) and an equipment input (`PlayerEquippingEvent`), each ending in one `DecisionCompletedEvent`; the native death guard and the native adapters' verdict route |
 | [stations.md](stations.md) | kiln.stations / `Stations`, `Bases` (Kiln.Blocks): the production stations of a base, its Magic chests, and the game's own fill from chests, stop, resume and select for code; station events |
+
+### Service pages added in dev.31
+
+| Page | What |
+|---|---|
+| [mod-values.md](mod-values.md) | `Kiln.ModValues` / kiln.mod-values: mods' own per-character counters, currencies and experience with levels; server ledger saved with the character, the owner's synced copy, carried progress |
+| [routines.md](routines.md) | kiln.routines / `Routines`, `RoutineBlock` (Kiln.Blocks): villager day plans (windows of the game day with the game's own idle, roam, sit, inspect and sleep tasks), keep-awake, manual commands that suspend a plan until `Resume`, assignments saved with the world |
 
 ## Native rules
 - `kiln_plugin_main(api, owner, info)`: check `api->abi_version == KILN_ABI_VERSION`, resolve symbols with
@@ -128,11 +136,15 @@ A service name that starts with `kiln.internal.` is Kiln-internal:
   their own row unavailable with that reason;
 - Kiln-internal tables get no public capability row and do not appear in `capabilities.json`.
 
-One table is the core's own and is named for one consumer: `kiln.internal.tasks.host`, the managed host's task lease
-table ([tasks.md](tasks.md)). Nobody may publish that name, and only the `KilnApi` the core hands to the managed host
-resolves it. Two more are the core's own and resolve through the services' `KilnApi` only, and nobody may publish them
-either: `kiln.internal.launch` ([launch.md](launch.md)) and `kiln.internal.hooks`, the code ranges Kiln's services
-protect for their engine calls ([hooks.md](hooks.md#protected-code-ranges-kilninternalhooks-kiln-internal)).
+Two tables are the core's own and named for one consumer each: `kiln.internal.tasks.host`, the managed host's task lease
+table ([tasks.md](tasks.md)), and `kiln.internal.mod-values.backend`, through which Kiln.ModValues binds the native
+facade's backend once ([mod-values.md](mod-values.md); `native/core/src/mod_values_host.h`, taken only at exactly its
+version and size). Nobody may publish those names, and only the `KilnApi` the core hands to the managed host resolves
+them. Owners the managed host creates through that `KilnApi` are marked as the host's: kiln.mod-values gives an owner
+named `mod:<manifest id>` that id as its namespace only then. Two more are the core's own and resolve through the
+services' `KilnApi` only, and nobody may publish them either: `kiln.internal.launch` ([launch.md](launch.md)) and
+`kiln.internal.hooks`, the code ranges Kiln's services protect for their engine calls
+([hooks.md](hooks.md#protected-code-ranges-kilninternalhooks-kiln-internal)).
 
 This is a reach rule, not a sandbox: it keeps tables that hand out game addresses or Kiln's own lock primitives away from
 plugins and from stale or foreign service DLLs. It is no defence against arbitrary native code already in the process,

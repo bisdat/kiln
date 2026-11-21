@@ -152,7 +152,8 @@ public sealed class PlayerAnimLookupTests : IDisposable
             BlockCapabilities.Rearm();
             BlockCapabilities.Ensure();
             BlockCapabilities.Ensure();
-            Assert.Equal(["blocks.animated_held", "blocks.move_followups", "blocks.weapon_moves"], got.Order());
+            // the item blocks' rows, and the two names villager routines reserve (routines.decisions is the core's row: only lowered)
+            Assert.Equal(["blocks.animated_held", "blocks.move_followups", "blocks.weapon_moves", "routines.anchors", "routines.jobs"], got.Order());
         }
         finally
         {

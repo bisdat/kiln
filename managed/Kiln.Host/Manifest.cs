@@ -67,6 +67,10 @@ internal sealed class Manifest
     // "native" and "permissions" would collide with <configDir>/native.json and permissions.json.
     private static readonly HashSet<string> Reserved = ["kiln", "kiln.api", "game", "enshrouded", "native", "permissions"];
 
+    /// <summary>Ids starting with this are refused: Kiln's mod values give every native owner the namespace "native." plus
+    /// a hash of its name (kiln.mod-values), and a mod's manifest id is its namespace, so the two never meet.</summary>
+    public const string NativeNamespacePrefix = "native.";
+
     private static readonly HashSet<string> Known =
     [
         "$schema", "id", "name", "version", "authors", "author", "description", "license", "url", "apiVersion", "side",
@@ -165,6 +169,8 @@ internal sealed class Manifest
             var id = Str(root, "id") ?? throw Bad("'id' is required");
             if (!IdPattern.IsMatch(id)) throw Bad($"id '{id}' must match {IdPattern}");
             if (Reserved.Contains(id)) throw Bad($"id '{id}' is reserved");
+            if (id.StartsWith(NativeNamespacePrefix, StringComparison.Ordinal))
+                throw Bad($"id '{id}' is reserved: an id that starts with \"{NativeNamespacePrefix}\" is a native owner's mod-values namespace");
 
             var version = Str(root, "version") ?? throw Bad("'version' is required");
             if (!SemVersion.TryParse(version, out var parsed))

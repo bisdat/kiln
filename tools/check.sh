@@ -8,6 +8,7 @@
 #           in <Assembly>)" line (a type moved, recorded by <Assembly>), and no merge conflict marker in a PublicAPI file
 #   records tools/sigport/build_record.py check: the newest build record of each side lists every name sigdb declares,
 #           once, with a level (sigdb/builds/README.md); a sigdb name added without a refresh fails here
+#   pytests the Python rule tests of tools/replinspect (python3 -m unittest)
 #   build   every managed project with a PublicAPI.Shipped.txt (found by that file, so gate 1, the PublicApiAnalyzers
 #           record, runs), Kiln.Host and the unit test projects: one Release build of one generated solution
 #           ($KILN_OUT/check/check.slnx), so each project is built once
@@ -93,6 +94,16 @@ else
   result records FAILED $((SECONDS - t)) "a build record does not list what sigdb declares:"
   grep -vE '^ +(server|client) [0-9a-f]+… .*superseded' "$work/records.log" | head -40
   failed+=(records)
+fi
+
+# pytests
+t=$SECONDS
+if python3 -m unittest discover -s "$repo/tools/replinspect" -p 'test_*.py' >"$work/pytests.log" 2>&1; then
+  result pytests OK $((SECONDS - t)) "tools/replinspect: $(grep -oE '^Ran [0-9]+ tests' "$work/pytests.log" | sed 's/^Ran //')"
+else
+  result pytests FAILED $((SECONDS - t)) "tools/replinspect rule tests:"
+  grep -E -A8 '^(FAIL|ERROR):' "$work/pytests.log" | head -40
+  failed+=(pytests)
 fi
 
 # build

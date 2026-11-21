@@ -11,7 +11,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { ControlResult, sendControl } from "../../src/core/control";
 import { DapMessage, DapReader, encodeDap } from "../../src/core/dap";
-import { proxySpec, resolveTarget } from "../../src/core/debugTarget";
+import { debugArgs, describeResolution, proxySpecFromCli, resolveWithCli } from "../../src/core/debugTarget";
 import { serverPids } from "../../src/core/servers";
 import type { KilnApi } from "../../src/extension";
 import { ConsoleTerminal } from "../../src/features/console";
@@ -160,14 +160,16 @@ suite("Kiln extension against a lab", function () {
     assert.ok(tests.length >= 9);
   });
 
-  test("debug target: the lab's own wine, prefix and Windows pid (tasklist only, no debugger)", async () => {
+  test("debug target: kiln debug --json proves the lab's Windows identity (no debugger)", async function () {
+    if (!(await api.ctx.hasCli())) this.skip();
     const pids = serverPids(server());
-    const t = await resolveTarget(server(), { log: say });
-    say(`target: Windows pid ${t.pid} (Linux ${pids.join(",")}), wine ${t.wine}, prefix ${t.prefix}`);
+    const t = await resolveWithCli(api.ctx.cliPath(), debugArgs({ kind: "server", dir: LAB }, {}), { KILN_NETCOREDBG: NETCOREDBG && !BUNDLED ? NETCOREDBG : api.ctx.asset("dist", "netcoredbg", "netcoredbg.exe") });
+    say(`target: ${describeResolution(t)} (Linux ${pids.join(",")}), wine ${t.wine}, prefix ${t.prefix}`);
     assert.equal(t.prefix, `${LAB}.pfx`);
     assert.match(t.wine!, /\/bin\/wine$/);
     assert.ok(t.pid > 0);
-    await assertAlive("after tasklist", pids);
+    assert.equal(t.target.identity.windowsPid, t.pid);
+    await assertAlive("after the identity check", pids);
   });
 
   test("debug: no netcoredbg: nothing attaches, the reason is shown, the server keeps running", async () => {
@@ -274,7 +276,7 @@ suite("Kiln extension against a lab", function () {
     const proc: ChildProcess = useCli
       ? spawn(api.ctx.cliPath(), ["debug", "--server", LAB, "--dap"], { env: { ...process.env, KILN_NETCOREDBG: dbg }, stdio: ["pipe", "pipe", "pipe"] })
       : spawn(process.execPath, [api.ctx.asset("dist", "dapProxy.js")], {
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", KILN_DAP_SPEC: JSON.stringify(proxySpec(await resolveTarget(server()), dbg)) },
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", KILN_DAP_SPEC: JSON.stringify(proxySpecFromCli(await resolveWithCli(api.ctx.cliPath(), debugArgs({ kind: "server", dir: LAB }, {}), { KILN_NETCOREDBG: dbg }))) },
           stdio: ["pipe", "pipe", "pipe"],
         });
     say(`adapter: ${useCli ? "kiln debug --dap" : "built-in proxy"}`);
