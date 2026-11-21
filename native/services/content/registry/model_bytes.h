@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 // kiln.content registry stage: the game's bytes through its reflection, for the model (model.cpp) and the boot back-end.
 //
-// The registry's own headers (namespace kc::reg) cannot share a translation unit with content.h, whose kc::reg() looks an
-// entry up by its 32-bit id: so the model reaches gamedata's walker (gd::resolve, gd::node_json) through these plain
-// functions, implemented in model_bytes.cpp next to the walker. A node is an opaque type and an address inside bytes the
+// The model reaches gamedata's walker (gd::resolve, gd::node_json) through these plain functions, implemented in
+// model_bytes.cpp next to the walker, so model.cpp and its host test stay free of gamedata's headers and of the game's
+// types. A node is an opaque type and an address inside bytes the
 // caller holds (a copy of a resource: every offset in it is self-relative).
 #pragma once
 #include <cstddef>

@@ -24,7 +24,7 @@ void item_type();  // keen::ItemInfo {itemId u32 +0, objectId Guid +4, maxStackS
 }  // namespace kc
 
 namespace {
-using namespace kc::reg;
+using namespace kc::registry;
 using json = nlohmann::json;
 int checks = 0;
 void check(bool ok, const std::string& why) {

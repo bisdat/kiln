@@ -16,7 +16,7 @@ std::string guid_text(const uint8_t g[16]);
 uint32_t fnv1a(const void* data, size_t n);
 }  // namespace kc
 
-namespace kc::reg::model {
+namespace kc::registry::model {
 
 namespace {
 
@@ -1004,4 +1004,4 @@ std::string added_guid(const std::string& registry, const std::string& kiln_id) 
     return s;
 }
 
-}  // namespace kc::reg::model
+}  // namespace kc::registry::model

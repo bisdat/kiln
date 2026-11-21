@@ -28,7 +28,7 @@
 #include "compose.h"
 #include "regmap.h"
 
-namespace kc::reg::model {
+namespace kc::registry::model {
 
 // Bumped whenever the model or its reading of the regmap could give other Kiln values for the same bytes: part of every
 // cache key next to the base digest (P1-PLAN section 6: the digest names the data, not the decoder).
@@ -154,4 +154,4 @@ using RefFn = std::function<std::optional<std::string>(const std::string& regist
 std::optional<Value> decode(const map::RegistryMap& reg, const map::Row& row, const FieldSpec& f, const MemberFn& get, const RefFn& refs,
                             const std::map<std::string, double>& balance, std::string* why);
 
-}  // namespace kc::reg::model
+}  // namespace kc::registry::model
