@@ -48,6 +48,12 @@ void read_preview(const nlohmann::json& sec, const char* where) {
         KLOG_W("config: %s \"preview\" is not true, false or a list of capability names; ignored", where);
     }
 }
+// "developer_debugging": true | false. Present in a section, it replaces what an earlier section said.
+void read_debugging(const nlohmann::json& sec, const char* where) {
+    if (!sec.contains("developer_debugging")) return;
+    if (sec["developer_debugging"].is_boolean()) g_config.developer_debugging = sec["developer_debugging"].get<bool>();
+    else KLOG_W("config: %s \"developer_debugging\" is not true or false; ignored", where);
+}
 // "boot": {"testRefuse" | "testFault": {"<mod>": "<collector>"}}: kiln.boot honours them only with policy any (labs).
 void read_boot(const nlohmann::json& doc) {
     if (!doc.contains("boot") || !doc["boot"].is_object()) return;
@@ -130,6 +136,7 @@ void load_config() {
         read_boot(doc);
         read_tasks(doc, "kiln.json");
         read_tooltip_probe(doc, "kiln.json");
+        read_debugging(doc, "kiln.json");
         KLOG_I("config: policy=%s clr=%d plugins=%d native.policy=%s", g_config.policy_any ? "any" : "verified-only",
                g_config.clr, g_config.plugins, native_policy_name(g_config.native_policy));
     } catch (const std::exception& e) {
@@ -145,6 +152,7 @@ void apply_side(uint32_t side) {
         // Apply the gate override even if another side option has the wrong type. In particular, preview:false
         // must not inherit a top-level preview:true because e.g. clr could not be read.
         read_preview(sec, name);
+        read_debugging(sec, name);
         read_tooltip_probe(sec, name);
         if (sec.contains("policy")) g_config.policy_any = sec.value("policy", "verified-only") == "any";
         g_config.clr = sec.value("clr", g_config.clr);

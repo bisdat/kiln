@@ -22,6 +22,7 @@
     { "path": "clr", "type": "bool", "comment": "Start .NET and managed mods", "default": true, "requiresRestart": false, "synced": false },
     { "path": "plugins", "type": "bool", "comment": "Load Kiln plugins", "default": true, "requiresRestart": false, "synced": false },
     { "path": "native.policy", "type": "enum", "comment": "When native mods load", "default": "always", "options": ["always", "verified-only", "never"], "requiresRestart": false, "synced": false },
+    { "path": "developer_debugging", "type": "bool", "comment": "Developer debugging: lets a mod author attach a debugger (kiln debug, VS Code) to this game or server. A debugger can pause the whole game. Leave off unless you debug mods. Applies from the next start", "default": false, "requiresRestart": true, "synced": false },
     { "path": "mods.fault_limit", "type": "int", "comment": "Faults before a mod is switched off", "default": 5, "min": 1, "max": 100, "requiresRestart": false, "synced": false },
     { "path": "mods.fault_window_s", "type": "float", "comment": "Fault window in seconds (0 = ever)", "default": 60, "min": 0, "max": 3600, "requiresRestart": false, "synced": false },
     { "path": "mods.stop_timeout_ms", "type": "int", "comment": "Time a mod gets to stop", "default": 5000, "min": 0, "max": 60000, "requiresRestart": false, "synced": false },

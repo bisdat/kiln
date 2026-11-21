@@ -19,6 +19,7 @@
 //! | [`pe`] | PE exports, `classify_proxy` |
 //! | [`engines`] | every mod engine Kiln knows: proxy names, markers, Library detection of their mods, loaders |
 //! | [`proc`] | process list (Linux /proc, Windows Toolhelp) |
+//! | [`debug`] | debugger targets: the core's descriptor, the checked Windows identity, the resolver, session state (`kiln debug`) |
 //! | [`launch`] | steam:// URIs, the launch flow |
 //! | [`direct`] | starting the client directly (a folder no Steam library knows): per-install start mode, Proton/Wine and prefix on Linux, the command, whether Kiln knows the exe's build |
 //! | [`start_progress`] | what a start is doing (`kiln/state/progress.json` and the launcher's own steps), the history of starts, the time left |
@@ -95,6 +96,7 @@ pub mod engines;
 pub mod dllmod;
 pub mod pe;
 pub mod proc;
+pub mod debug;
 pub mod steam;
 pub mod vdf;
 pub mod winpath;

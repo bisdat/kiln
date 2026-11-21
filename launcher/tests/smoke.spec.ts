@@ -557,6 +557,18 @@ test("Settings, Graphics edits kiln.json's graphics section and says which tools
   ]);
 });
 
+test("Settings, kiln.json: the Developer debugging switch writes developer_debugging, off by default", async ({ page }) => {
+  type Mock = { __kilnMock: { kilnJsonValues: () => { developer_debugging?: boolean } } };
+  await open(page, "/settings");
+  const row = page.locator("label.k-toggle[for=\"sf-developer-debugging\"]");
+  await expect(page.locator("label[for=\"sf-developer-debugging\"]").first()).toHaveText("Developer debugging");
+  await expect(page.locator("#sf-developer-debugging")).not.toBeChecked();
+  await row.click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as Mock).__kilnMock.kilnJsonValues().developer_debugging)).toBe(true);
+  await page.getByRole("button", { name: "Reset Developer debugging to its default" }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as Mock).__kilnMock.kilnJsonValues().developer_debugging)).toBeUndefined();
+});
+
 test("destructive actions need the typed word, in the arch", async ({ page }) => {
   // a profile's Delete (Settings, Profiles) keeps its typed word whatever "Type a mod's name to remove it" says
   await open(page, "/settings");

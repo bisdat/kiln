@@ -1,0 +1,15 @@
+<Project>
+  <!-- The debugger's sample (docs/kiln/modding/debugging.md): a harmless counter with one line to break on. It changes
+       nothing in the game. Every 2 s of game time it counts up and logs the count, so `kiln debug` in observe mode shows it
+       without a debugger; the guided checks 12-debug.client-windows and 12-debug.client-proton break on Count(). -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>debug-counter</KilnModId>
+    <KilnModName>Debug counter (debugger sample)</KilnModName>
+    <Version>0.1.0</Version>
+    <KilnSide>both</KilnSide>
+    <!-- portable PDBs next to the DLL, so a breakpoint binds (Debug builds bind best: -c Debug) -->
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

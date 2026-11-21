@@ -199,53 +199,45 @@ Commands:
 - **FNV-1a Hash**: of a name, or the program id of a GUID.
 
 ## Debugging
-The `kiln` debug type attaches a .NET debugger to a running test server: breakpoints in your mod's C#, stack, locals,
-evaluate. Start it from the Test Servers view (right-click a running server: **Attach Debugger to Test Server**) or from
-`launch.json`:
+The `kiln` debug type attaches a .NET debugger (netcoredbg) to the mods in a running test server or game client:
+breakpoints in your mod's C#, stack, locals, evaluate. Start it from the Test Servers view (right-click a running server:
+**Attach Debugger to Test Server**) or from `launch.json` (Run and Debug, "Add Configuration…" offers four: Wine test
+server, Windows dedicated server, Windows game client, Proton game client):
 
 ```json
 { "type": "kiln", "request": "attach", "name": "Kiln: attach to server", "server": "my-lab" }
+{ "type": "kiln", "request": "attach", "name": "Kiln: attach to Proton client", "client": "steam-client", "allowClientPause": true }
 ```
 
-- `server` is a name from the Test Servers view, a lab name or a server folder. Leave it out to use the selected server.
-- **Deploy a Debug build of your mod.** Breakpoints in a Release build never bound in testing, with `justMyCode` on or off:
-  they stay hollow. The default `dotnet build` and `kiln deploy` configuration is Debug; check `kiln.dotnet.buildArgs` if
-  you set one.
-- The Debug Console lists "You are debugging a Release build of ..." for Kiln's own assemblies. That is expected. It only
-  matters when it names your mod.
-- Breakpoints use the Linux paths in your mod's PDBs. They show as hollow until the debugger has read the modules, which
-  took about 2 s in testing.
-- **Reattach after a reload.** Breakpoints stay on the old copy of a reloaded mod, so they no longer stop. The adapter says
-  so in a notification. Before attaching it asks the server to collect old copies; if some stay loaded it warns you to
-  restart the server first.
-- While the server is stopped at a breakpoint it is paused for everyone on it.
+| Property | |
+|---|---|
+| `server` | a name from the Test Servers view, a lab name or a server folder. Leave it (and `client`) out to use the selected server |
+| `client` | a game install: the launcher's install id or the game folder. Not together with `server` |
+| `allowClientPause` | required for `client`: every breakpoint stops the whole game. Without it nothing starts and the editor shows why |
+| `maxPauseMs` | 100 to 60000: a breakpoint holds the game at most this long, then the debugger continues it (best effort). A client defaults to 5000 |
+| `sourceFileMap` | netcoredbg: PDB source paths to local folders |
+| `justMyCode` | netcoredbg: stop and step only in your own, unoptimized code (default true) |
 
-**netcoredbg comes with the extension.** The `.vsix` bundles the win64 build of netcoredbg 3.2.0-1092, so there is nothing
-to install. To use another copy, set `kiln.debug.netcoredbg` or `$KILN_NETCOREDBG`, or put one at
-`tools/netcoredbg/netcoredbg.exe` in the Kiln data folder (`~/.local/share/kiln` on Linux). An explicit path that does not
-exist is an error; it never falls back to the bundled copy. The extension passes the copy it found to `kiln debug` as
-`KILN_NETCOREDBG`.
+- The game or server needs kiln.json `"developer_debugging": true` (launcher: Settings, the Kiln card). Without it the
+  attach is refused with that hint.
+- **The target always comes from `kiln debug … --json`**, which proves the process by its Windows identity; the extension
+  never lists processes or picks a PID of its own. The adapter is `kiln debug … --dap`; with a CLI that has no `--dap`,
+  `dist/dapProxy.js` carries the session to the target the CLI proved. So debugging needs the `kiln` CLI
+  (`kiln.cli.path`). `kiln.debug.wine` is no longer used.
+- The editor shows Kiln's session states (`kiln/debugState`): a warning when the pause limit continued the game or the
+  session ended, a status bar note when the game changed between menu, hosted and joined.
+- **Deploy a Debug build of your mod.** Breakpoints in a Release build never bound in testing.
+- **Reattach after a reload.** `kiln reload` and Deploy and Reload refuse while a debugger is attached.
+- While stopped at a breakpoint the whole game is paused: for everyone on a server; a client can lose its connection.
 
-**How it runs.** The .NET runtime runs inside Wine, so netcoredbg must too. It uses the server's prefix and the wine of
-the running server, so it joins the same wineserver; attach uses the Windows pid from `wine tasklist.exe` in that prefix.
-The adapter is `kiln debug --server <dir> --dap` when the CLI has that command (the extension asks `kiln debug --json`
-first, so a refusal is an ordinary notification), and otherwise the same job done by `dist/dapProxy.js`. A bare folder, or
-a set `kiln.debug.wine`, always uses `dist/dapProxy.js`.
+**netcoredbg comes with the extension.** The `.vsix` bundles the win64 build of netcoredbg 3.2.0-1092 (pinned). To use
+another copy, set `kiln.debug.netcoredbg` or `$KILN_NETCOREDBG`, or put one at `tools/netcoredbg/netcoredbg.exe` in the
+Kiln data folder. An explicit path that does not exist is an error; it never falls back to the bundled copy. The
+extension passes the copy it found to `kiln debug` as `KILN_NETCOREDBG`.
 
-**What keeps the server alive.** A debugger that goes away without detaching takes the server down with it, so both
-adapters:
-- send every `disconnect` with `terminateDebuggee: false`, and answer `launch`, `terminate` and `restart` with an error;
-- detach on their own when the client goes away (window reload, extension host crash) or on SIGINT, SIGTERM or SIGHUP,
-  and wait for the answer;
-- run netcoredbg in its own process group and never signal it.
-
-**What it cannot protect against.** netcoredbg dying while attached takes the server down (measured with
-SIGKILL). Don't `kill -9` it, or a process tree that contains it. Watch expressions also run in the server, so one can end it
-like any other call ([debugging.md](debugging.md)).
-
-**What it refuses, before anything runs:** servers inside a Steam library (folder, prefix or running process, also through
-a symlink), a stopped server, several server processes in one prefix, a process started from another folder, and a second
-debugger on the same server.
+**What keeps the game alive:** every `disconnect` goes out with `terminateDebuggee: false`; `launch`, `terminate` and
+`restart` are refused; the adapter detaches on its own when the editor goes away; netcoredbg is never signalled. Killing
+netcoredbg while attached still ends the game. Details, refusal codes and the lab results: [debugging.md](debugging.md).
 
 Other tools for looking into a mod: Kiln.Testing, kiln.log and `kiln/crash-reports/`.
 
