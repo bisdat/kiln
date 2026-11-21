@@ -301,8 +301,8 @@ suite("Kiln extension", () => {
     }
   });
 
-  // debug: the adapter wiring against a mock netcoredbg under a mock wine (test/fixtures/dap). A stand-in process plays
-  // the running server (api.debug.hostPids), so nothing here ever looks like a real server to other tools.
+  // debug: the adapter wiring against a mock netcoredbg under a mock wine (test/fixtures/dap). The target comes from a
+  // stand-in `kiln debug --json` (KILN_IT_FAKE_KILN_DEBUG), so nothing here ever looks like a real server to other tools.
   const DAP_LOG = process.env.KILN_IT_DAP_LOG!;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const dapLog = (from = 0): any[] => {
@@ -322,23 +322,20 @@ suite("Kiln extension", () => {
     fs.writeFileSync(path.join(lab, "enshrouded_server.exe"), "");
     const control: string[] = [];
     const kilnHost = fakeKilnHost(lab, control);
-    const host = spawn("sleep", ["300"], { cwd: lab, env: { ...process.env, WINEPREFIX: `${lab}.pfx` }, stdio: "ignore" });
-    const hostPids = api.debug.hostPids;
     const servers = kilnCfg().get("servers");
+    const cli = kilnCfg().get<string>("cli.path");
     const target = vscode.ConfigurationTarget.Workspace;
-    api.debug.hostPids = (d) => (d.dir === lab ? [host.pid!] : []);
     await kilnCfg().update("servers", [{ name: "fake", dir: SERVER }, { name: "mocklab", dir: lab, kind: "lab" }], target);
-    await kilnCfg().update("debug.wine", process.env.KILN_IT_MOCK_WINE, target);
+    await kilnCfg().update("cli.path", process.env.KILN_IT_FAKE_KILN_DEBUG, target);
     await kilnCfg().update("debug.netcoredbg", process.env.KILN_IT_MOCK_NETCOREDBG, target);
     try {
       await fn(lab, control);
     } finally {
       kilnHost.dispose();
-      api.debug.hostPids = hostPids;
+      fs.rmSync(process.env.KILN_IT_FAKE_NO_DAP!, { force: true });
       await kilnCfg().update("servers", servers, target);
-      await kilnCfg().update("debug.wine", undefined, target);
+      await kilnCfg().update("cli.path", cli, target);
       await kilnCfg().update("debug.netcoredbg", undefined, target);
-      host.kill("SIGTERM");
     }
   }
 
@@ -347,8 +344,9 @@ suite("Kiln extension", () => {
     await until("the session to end", () => !vscode.debug.activeDebugSession);
   }
 
-  test("debug: attach through the built-in proxy: breakpoint, stack, evaluate, Stop detaches", async () => {
+  test("debug: the built-in proxy as transport for the CLI's target: breakpoint, stack, evaluate, Stop detaches", async () => {
     await withMockLab(async (lab, control) => {
+      fs.writeFileSync(process.env.KILN_IT_FAKE_NO_DAP!, ""); // a CLI without --dap
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const seen: any[] = [];
       const tracker = vscode.debug.registerDebugAdapterTrackerFactory("kiln", { createDebugAdapterTracker: () => ({ onDidSendMessage: (m) => seen.push(m) }) });
@@ -377,8 +375,7 @@ suite("Kiln extension", () => {
       }
       assert.ok(control.includes("gc"), "old copies of reloaded mods are collected before attaching");
       const log = dapLog(mark);
-      const tasklist = log.find((l) => l.kind === "wine" && /tasklist/.test(l.argv[0]));
-      assert.equal(tasklist.prefix, `${lab}.pfx`);
+      assert.ok(!log.some((l) => l.kind === "wine" && l.argv[0] !== process.env.KILN_IT_MOCK_NETCOREDBG), "wine ran nothing but the debugger");
       const start = log.find((l) => l.kind === "start");
       assert.deepEqual(start.argv.slice(-1), ["--interpreter=vscode"]);
       assert.equal(start.env.WINEPREFIX, `${lab}.pfx`);
@@ -387,14 +384,14 @@ suite("Kiln extension", () => {
       assert.equal(start.env.DISPLAY, null, "no window on any desktop");
       assert.equal(start.env.ELECTRON_RUN_AS_NODE, null);
       assert.equal(start.pgidIsOwn, true, "netcoredbg in its own process group");
-      assert.equal(log.find((l) => l.command === "attach").arguments.processId, 4242, "the Windows pid from tasklist");
+      assert.equal(log.find((l) => l.command === "attach").arguments.processId, 4242, "the Windows pid the CLI proved");
       assert.equal(log.find((l) => l.command === "disconnect").arguments.terminateDebuggee, false);
       assert.deepEqual(log.filter((l) => l.kind === "debuggee-killed"), []);
       assert.ok(log.some((l) => l.kind === "detached"));
     });
   });
 
-  test("debug: Steam library server, stopped server and missing netcoredbg are refused before anything starts", async () => {
+  test("debug: the CLI's refusals (Steam library, not running) and a missing netcoredbg: nothing starts", async () => {
     await withMockLab(async () => {
       const steam = path.join(WS, "steamapps", "common", "EnshroudedServer");
       fs.mkdirSync(path.join(steam, "kiln"), { recursive: true });
@@ -406,14 +403,14 @@ suite("Kiln extension", () => {
       const servers = kilnCfg().get<object[]>("servers")!;
       await kilnCfg().update("servers", [...servers, { name: "steam", dir: steam }, { name: "steam-link", dir: link }], target);
       const mark = dapLog().length;
-      const pids = api.debug.hostPids;
-      api.debug.hostPids = () => [];
+      const stopped = path.join(WS, "labs", "mocklab", "fake-stopped");
+      fs.writeFileSync(stopped, "");
       assert.equal(await attachTo("steam"), false, "by name");
       assert.equal(await attachTo(steam), false, "by folder");
       assert.equal(await attachTo("steam-link"), false, "through a symlink");
       assert.equal(await attachTo("mocklab"), false, "not running");
+      fs.rmSync(stopped);
       assert.deepEqual(dapLog(mark), [], "no wine ran for any of them");
-      api.debug.hostPids = pids;
       await kilnCfg().update("debug.netcoredbg", path.join(WS, "no-such-netcoredbg.exe"), target);
       assert.equal(await attachTo("mocklab"), false, "no netcoredbg");
       assert.ok(!dapLog(mark).some((l) => l.kind === "start"), "no debugger started");
@@ -423,26 +420,34 @@ suite("Kiln extension", () => {
 
   test("debug: the kiln CLI is the adapter when it has `kiln debug`", async () => {
     await withMockLab(async (lab) => {
-      const target = vscode.ConfigurationTarget.Workspace;
-      const cli = kilnCfg().get<string>("cli.path");
-      await kilnCfg().update("debug.wine", undefined, target); // an explicit wine stays with the built-in proxy
-      await kilnCfg().update("cli.path", process.env.KILN_IT_FAKE_KILN_DEBUG, target);
       const mark = dapLog().length;
-      try {
-        const marker = path.join(lab, "fake-refuse");
-        fs.writeFileSync(marker, "");
-        assert.equal(await attachTo("mocklab"), false, "kiln debug --json refused: no adapter starts");
-        assert.deepEqual(dapLog(mark), []);
-        fs.rmSync(marker);
-        assert.equal(await attachTo("mocklab"), true);
-        const start = await until("the CLI adapter", () => dapLog(mark).find((l) => l.kind === "start"));
-        assert.deepEqual(start.argv, ["debug", "--server", lab, "--dap"]);
-        assert.equal(start.env.KILN_NETCOREDBG, process.env.KILN_IT_MOCK_NETCOREDBG, "the CLI gets the debugger the extension found");
-        await stopAndWait(vscode.debug.activeDebugSession!);
-        assert.ok(!dapLog(mark).some((l) => l.kind === "wine"), "the CLI resolves the target itself");
-      } finally {
-        await kilnCfg().update("cli.path", cli, target);
-      }
+      const marker = path.join(lab, "fake-refuse");
+      fs.writeFileSync(marker, "");
+      assert.equal(await attachTo("mocklab"), false, "kiln debug --json refused: no adapter starts");
+      assert.deepEqual(dapLog(mark), []);
+      fs.rmSync(marker);
+      assert.equal(await attachTo("mocklab"), true);
+      const start = await until("the CLI adapter", () => dapLog(mark).find((l) => l.kind === "start"));
+      assert.deepEqual(start.argv, ["debug", "--server", lab, "--dap"]);
+      assert.equal(start.env.KILN_NETCOREDBG, process.env.KILN_IT_MOCK_NETCOREDBG, "the CLI gets the debugger the extension found");
+      await stopAndWait(vscode.debug.activeDebugSession!);
+      assert.ok(!dapLog(mark).some((l) => l.kind === "wine"), "the CLI resolves the target itself");
+    });
+  });
+
+  test("debug: a client needs allowClientPause; with it the CLI is the adapter with --allow-client-pause", async () => {
+    await withMockLab(async () => {
+      const mark = dapLog().length;
+      const client = (more: object) =>
+        vscode.debug.startDebugging(vscode.workspace.workspaceFolders![0], { type: "kiln", request: "attach", name: "client", client: "steam-client", ...more });
+      assert.equal(await client({}), false, "no consent: refused before anything runs");
+      assert.equal(await client({ allowClientPause: false }), false);
+      assert.equal(await client({ server: "mocklab", allowClientPause: true }), false, "server and client: refused");
+      assert.deepEqual(dapLog(mark), []);
+      assert.equal(await client({ allowClientPause: true, maxPauseMs: 2000 }), true);
+      const start = await until("the CLI adapter", () => dapLog(mark).find((l) => l.kind === "start"));
+      assert.deepEqual(start.argv, ["debug", "--client", "steam-client", "--allow-client-pause", "--max-pause-ms", "2000", "--dap"]);
+      await stopAndWait(vscode.debug.activeDebugSession!);
     });
   });
 

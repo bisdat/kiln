@@ -51,6 +51,7 @@ struct ReportMeta {
 
 struct ReportCaps {
     size_t fields = 20000, conflicts = 2000, refused = 2000, entries = 20000;  // rows in registry.json
+    size_t writers = 64;  // writers kept per field row: the last ones (the result's); the earlier ones are counted ("writersLeftOut")
     size_t log = 50;                                                          // kiln.log lines per start, plus one total
 };
 

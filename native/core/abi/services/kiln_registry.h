@@ -4,8 +4,14 @@
  * (<game>/kiln/state/registry.json, schema/state-registry.schema.json). Mods name only Kiln ids ("game:<stable name>",
  * "<mod id>:<name>") and Kiln fields ("maxStack", "damage.fire"); Kiln maps them onto this game build and refuses, per
  * edit, what it cannot map there. This table's layout and the meaning of its members are kept from now on (append-only,
- * as every table); the registry schemas themselves (registries, fields, ids) are experimental until API 1.0.0 (C#:
- * KILNX031) and change only with an id migration.
+ * as every table: the live-change members of registry P2 will be appended at its tail, check header.size); the registry
+ * schemas themselves (registries, fields, ids) are experimental until API 1.0.0 (C#: KILNX031) and change only with an id
+ * migration.
+ *
+ * Mods: Kiln binds each owner to one mod id, the one it was made for (a Kiln mod's owner from Kiln.Host: its manifest id; a
+ * native mod's: its native.json id; a plugin's: the id it was loaded under), the owner's id without its kind prefix, folded
+ * to lower case (as a:CRATE selects a:crate). A batch runs at that mod's place in the order; a batch that names another mod
+ * (compared in lower case too) is refused.
  *
  * Capability rows: kiln.registry (the service), registry.<registry> and registry.<registry>.<field> (per game build, from
  * Kiln's verified mapping of that build). Side: both (a dedicated server and a game client each run their own stage).
@@ -40,7 +46,7 @@
  *    (at most cap - 1 bytes of text); *out_len (out_len may be NULL) = the whole text's length in bytes, without the NUL.
  *    KILN_ERR_BUFFER_TOO_SMALL when it did not fit: call again with cap >= *out_len + 1. buf may be NULL only when cap is
  *    0 (a size query). The text can grow between two calls (a later phase): loop on BUFFER_TOO_SMALL.
- *  - A report out of a member that changes something (submit, live_submit): optional (NULL with cap 0 for none), the
+ *  - A report out of a member that changes something (submit): optional (NULL with cap 0 for none), the
  *    same copy rule, but its result is about the change, never KILN_ERR_BUFFER_TOO_SMALL (as kiln.content's apply_json).
  *  - Records: size is the caller's sizeof on the way in. A size below v1's is refused (KILN_ERR_INVALID_ARGUMENT); a
  *    larger one is accepted, Kiln fills the members it knows and sets size to the bytes it filled (a newer caller on an
@@ -53,7 +59,7 @@
  *    removed; a stage callback's edits submitted before the fault are dropped and reported.
  *  - Results: KILN_OK; KILN_ERR_INVALID_ARGUMENT (a NULL required pointer, a bad size, owner 0, a malformed document,
  *    an unknown registry, field or view); KILN_ERR_NOT_FOUND (no such entry or handle); KILN_ERR_UNAVAILABLE (not now:
- *    the phase does not allow it, the field is not mapped on this game build, a P2 member); KILN_ERR_WRONG_THREAD;
+ *    the phase does not allow it, the field is not mapped on this game build); KILN_ERR_WRONG_THREAD;
  *    KILN_ERR_BUFFER_TOO_SMALL (reading members only); KILN_ERR_REVOKED.
  */
 #ifndef KILN_REGISTRY_H
@@ -90,9 +96,10 @@ enum {
 enum {
     KILN_REGISTRY_VIEW_BASE = 0,    /* what the stage read: the game's data as the archive writer published it, before
                                        Kiln's older paths and the registry. From the stage's start. */
-    KILN_REGISTRY_VIEW_STAGE = 1,   /* the stage's view during the caller's own turn (the base, every add, earlier
-                                       alters; in final: add + alter and this mod's own final edits). Only inside the
-                                       caller's stage callback. */
+    KILN_REGISTRY_VIEW_STAGE = 1,   /* the resolved view as of the end of the previous stage (in add: the base with Kiln's
+                                       older paths; in alter: after every add; in final: after every alter), never this
+                                       stage's pending edits, the caller's own included: every mod's callback of one stage
+                                       reads the same values, whatever the order. Only inside the caller's stage callback. */
     KILN_REGISTRY_VIEW_RESOLVED = 2 /* the registry's result: restart fields as baked; live fields as last applied (before
                                        the first world load: as the stage composed them). From START. */
 };
@@ -128,7 +135,7 @@ typedef struct KilnRegistryStatus {
     uint32_t size;        /* in: sizeof(KilnRegistryStatus) of the caller (v1: 40); out: the bytes Kiln filled */
     uint32_t phase;       /* KILN_REGISTRY_PHASE_* */
     uint64_t generation;  /* 0 until the stage ended; +1 at START, at each WORLDLOAD, each time the live fields are
-                             applied again (a data-pack reload), when a world stops, and at each live commit */
+                             applied again (a data-pack reload), and when a world stops */
     uint32_t edits;       /* edits the stage applied (every mod, every stage) */
     uint32_t refused;     /* edits refused (registry.json "refused") */
     uint32_t conflicts;   /* conflict lines (registry.json "conflicts") */
@@ -155,18 +162,11 @@ typedef struct KilnRegistrySubmitResult {
     uint32_t reserved; /* 0 */
 } KilnRegistrySubmitResult;
 
-typedef struct KilnRegistryCommitResult {
-    uint32_t size;    /* in: sizeof(KilnRegistryCommitResult) of the caller (v1: 16); out: the bytes Kiln filled */
-    uint32_t applied; /* edits in effect now */
-    uint32_t refused; /* edits refused at the commit (registry.json "refused" says why) */
-    uint32_t restart; /* edits of restart fields: taken, but in effect only from the next start */
-} KilnRegistryCommitResult;
-
 /* What a stage callback receives (valid only during the call). */
 typedef struct KilnRegistryStageInfo {
     uint32_t size;  /* what Kiln filled (v1: 24) */
     uint32_t stage; /* KILN_REGISTRY_PHASE_ADD, ALTER or FINAL */
-    KilnStr mod;    /* the mod whose turn it is (the one subscribe_stage named); Kiln's copy */
+    KilnStr mod;    /* the mod whose turn it is (the subscribing owner's bound mod id); Kiln's copy */
 } KilnRegistryStageInfo;
 
 /* What a ready callback receives (valid only during the call). */
@@ -196,23 +196,24 @@ typedef struct KilnRegistryApi {
      * field in the schema. Any thread. */
     KilnResult(KILN_CALL* field_info)(KilnStr qualified_field, KilnRegistryFieldInfo* out);
 
-    /* A native mod's turn in each stage (the native form of C#'s Mod.OnRegistry): fn runs on the stage thread once in
-     * each of add, alter and final, at mod's place in the order (see the stage above), after the mod's data files and
-     * queued batches. Inside fn: read/select with VIEW_STAGE, and submit batches of that stage for that mod. fn delays the
-     * game's start while it runs: keep it short. One stage callback per mod: a second one for the same mod is
+    /* A mod's turn in each stage (the native form of C#'s Mod.OnRegistry; Kiln.Host uses it for every Kiln mod that
+     * overrides OnRegistry): fn runs on the stage thread once in each of add, alter and final, at the owner's bound mod's
+     * place in the order (see the stage above), after that mod's data files and queued batches. Inside fn: read/select with
+     * VIEW_STAGE (the previous stage's resolved view), and submit batches of that stage for that mod. fn delays the game's
+     * start while it runs: keep it short. One stage callback per mod: a second one for the same mod is
      * KILN_ERR_INVALID_ARGUMENT. Only before the stage (KILN_REGISTRY_PHASE_NONE: kiln_plugin_main or on_ready), else
      * KILN_ERR_UNAVAILABLE. Remove with unsubscribe. Any thread. */
-    KilnResult(KILN_CALL* subscribe_stage)(KilnOwner owner, KilnStr mod, KilnRegistryStageFn fn, void* user,
-                                           KilnHandle* out);
+    KilnResult(KILN_CALL* subscribe_stage)(KilnOwner owner, KilnRegistryStageFn fn, void* user, KilnHandle* out);
 
-    /* One IR batch (schema/registry-ir.schema.json) of owner's. "mod" names the mod the batch belongs to: the caller's own
-     * mod id. When:
+    /* One IR batch (schema/registry-ir.schema.json) of owner's. "mod" must be the owner's bound mod id: a batch naming
+     * another mod is KILN_ERR_INVALID_ARGUMENT (nothing taken; the report and kiln.log name both; kiln_api.h has no separate
+     * permission code). When:
      *  - before the stage (KILN_REGISTRY_PHASE_NONE), any thread: queued for its stage, at its mod's place;
      *  - during the stage, only inside the stage callback of the batch's mod, on the stage thread, and only a batch of
      *    the stage that runs: taken at once (applied when the callback returns). Anywhere else during the stage:
      *    KILN_ERR_WRONG_THREAD on another thread, KILN_ERR_UNAVAILABLE on the stage thread; a batch of another stage or
      *    mod: KILN_ERR_INVALID_ARGUMENT;
-     *  - after the stage: KILN_ERR_UNAVAILABLE (a change at run time is a live change: live_begin).
+     *  - after the stage: KILN_ERR_UNAVAILABLE (a change at run time is a live change: registry P2's members, appended later).
      * KILN_OK: the document was read; out (optional) counts the edits taken and those refused by their own checks, the
      * report (optional) is {"accepted": n, "refused": [{"n", "reason"}]}. KILN_ERR_INVALID_ARGUMENT: the document is
      * unusable (not JSON, "ir" is not 1, no mod or stage, over KILN_REGISTRY_MAX_IR_BYTES): nothing of it is taken, the
@@ -239,8 +240,8 @@ typedef struct KilnRegistryApi {
     KilnResult(KILN_CALL* report_json)(char* buf, size_t cap, size_t* out_len);
 
     /* fn runs at START, on the stage thread right after the stage, and at each WORLDLOAD, on the thread of the world whose
-     * load applied the live fields (the tick thread for a server world, the game's main thread for a client world), and
-     * again after each live commit. Events are not replayed: subscribe before the stage (kiln_plugin_main, on_ready) to
+     * load applied the live fields (the tick thread for a server world, the game's main thread for a client world). Events
+     * are not replayed: subscribe before the stage (kiln_plugin_main, on_ready) to
      * see START; a later subscriber reads status() after subscribing (an event between the two may reach fn too: treat a
      * generation seen twice as one). Remove with unsubscribe. Any thread. */
     KilnResult(KILN_CALL* subscribe_ready)(KilnOwner owner, KilnRegistryReadyFn fn, void* user, KilnHandle* out);
@@ -250,17 +251,6 @@ typedef struct KilnRegistryApi {
      * already removed. */
     KilnResult(KILN_CALL* unsubscribe)(KilnHandle handle);
 
-    /* ---- live changes (registry P2): KILN_ERR_UNAVAILABLE until a Kiln that has them (check status first) ----
-     * An explicit transaction of owner's, on the thread of the registry's world (the tick thread for a server world, the
-     * game's main thread for a client world); one open per owner. live_submit takes alter batches of the owner's mod,
-     * composed after the stage's result in the same rules; live_commit applies them at once (a restart field only from
-     * the next start: counted in restart), raises the generation and runs the ready callbacks; live_cancel drops them.
-     * A live change never silently overwrites another loader's run-time write: such an edit is refused and reported. */
-    KilnResult(KILN_CALL* live_begin)(KilnOwner owner, uint64_t* txn);
-    KilnResult(KILN_CALL* live_submit)(uint64_t txn, KilnStr ir_json, KilnRegistrySubmitResult* out, char* report,
-                                       size_t cap, size_t* out_len);
-    KilnResult(KILN_CALL* live_commit)(uint64_t txn, KilnRegistryCommitResult* out);
-    KilnResult(KILN_CALL* live_cancel)(uint64_t txn);
 } KilnRegistryApi;
 
 #ifdef __cplusplus
@@ -286,9 +276,6 @@ KILN_REGISTRY_ASSERT(sizeof(KilnRegistryFieldInfo) == 192 && offsetof(KilnRegist
 KILN_REGISTRY_ASSERT(sizeof(KilnRegistrySubmitResult) == 16 && offsetof(KilnRegistrySubmitResult, accepted) == 4 &&
                          offsetof(KilnRegistrySubmitResult, refused) == 8 && offsetof(KilnRegistrySubmitResult, reserved) == 12,
                      "KilnRegistrySubmitResult v1 layout");
-KILN_REGISTRY_ASSERT(sizeof(KilnRegistryCommitResult) == 16 && offsetof(KilnRegistryCommitResult, applied) == 4 &&
-                         offsetof(KilnRegistryCommitResult, refused) == 8 && offsetof(KilnRegistryCommitResult, restart) == 12,
-                     "KilnRegistryCommitResult v1 layout");
 KILN_REGISTRY_ASSERT(sizeof(KilnRegistryStageInfo) == 24 && offsetof(KilnRegistryStageInfo, stage) == 4 &&
                          offsetof(KilnRegistryStageInfo, mod) == 8,
                      "KilnRegistryStageInfo v1 layout");
@@ -296,15 +283,13 @@ KILN_REGISTRY_ASSERT(sizeof(KilnRegistryReady) == 24 && offsetof(KilnRegistryRea
                          offsetof(KilnRegistryReady, generation) == 8 && offsetof(KilnRegistryReady, world) == 16 &&
                          offsetof(KilnRegistryReady, reserved) == 20,
                      "KilnRegistryReady v1 layout");
-KILN_REGISTRY_ASSERT(sizeof(KilnRegistryApi) == 120 && offsetof(KilnRegistryApi, status) == 8 &&
+KILN_REGISTRY_ASSERT(sizeof(KilnRegistryApi) == 88 && offsetof(KilnRegistryApi, status) == 8 &&
                          offsetof(KilnRegistryApi, schema_json) == 16 && offsetof(KilnRegistryApi, field_info) == 24 &&
                          offsetof(KilnRegistryApi, subscribe_stage) == 32 && offsetof(KilnRegistryApi, submit) == 40 &&
                          offsetof(KilnRegistryApi, read) == 48 && offsetof(KilnRegistryApi, select) == 56 &&
                          offsetof(KilnRegistryApi, report_json) == 64 && offsetof(KilnRegistryApi, subscribe_ready) == 72 &&
-                         offsetof(KilnRegistryApi, unsubscribe) == 80 && offsetof(KilnRegistryApi, live_begin) == 88 &&
-                         offsetof(KilnRegistryApi, live_submit) == 96 && offsetof(KilnRegistryApi, live_commit) == 104 &&
-                         offsetof(KilnRegistryApi, live_cancel) == 112,
-                     "KilnRegistryApi v1 layout (120 bytes, x64)");
+                         offsetof(KilnRegistryApi, unsubscribe) == 80,
+                     "KilnRegistryApi v1 layout (88 bytes, x64; P2 appends at the tail)");
 #undef KILN_REGISTRY_ASSERT
 
 #endif /* KILN_REGISTRY_H */

@@ -36,6 +36,9 @@ struct Guard {
 
 using ObserveFn = void (*)(void* ctx);
 
+// > 0 while this thread runs observer code (kiln-repl.dll's operator new counts allocations made then: stats.cpp).
+inline thread_local int t_in_observer = 0;
+
 namespace guard_detail {
 inline int note(EXCEPTION_POINTERS* e, uintptr_t* where) {
     *where = reinterpret_cast<uintptr_t>(e->ExceptionRecord->ExceptionAddress);
@@ -56,7 +59,9 @@ inline uintptr_t run(ObserveFn fn, void* ctx) {
 // Runs fn(ctx) unless `g` is disabled; a fault in it disables `g` for the session. True when fn ran to its end.
 inline bool observe(Guard& g, ObserveFn fn, void* ctx) {
     if (!fn || g.disabled.load(std::memory_order_acquire)) return false;
+    ++t_in_observer;
     const uintptr_t where = guard_detail::run(fn, ctx);
+    --t_in_observer;
     if (!where) return true;
     uintptr_t none = 0;
     g.where.compare_exchange_strong(none, where, std::memory_order_relaxed);

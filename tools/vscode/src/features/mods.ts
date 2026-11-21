@@ -5,6 +5,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { sendControl } from "../core/control";
+import { reloadBlockedBy, unloadsModCode } from "../core/debugTarget";
 import { ModInfo, modForFile, modFromDir } from "../core/project";
 import { Ctx } from "../ctx";
 import { Servers } from "./servers";
@@ -284,6 +285,11 @@ export class Mods implements vscode.TreeDataProvider<ModInfo>, vscode.TaskProvid
     if (!mod) return false;
     const s = await this.servers.require("reload");
     if (!s) return false;
+    const blocked = reloadBlockedBy(s.dir);
+    if (blocked) {
+      vscode.window.showErrorMessage(`Kiln: reload ${mod.id}: ${blocked}`);
+      return false;
+    }
     return vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `Kiln: reload ${mod.id}` }, async () => {
       try {
         let ok: boolean;
@@ -327,6 +333,11 @@ export class Mods implements vscode.TreeDataProvider<ModInfo>, vscode.TaskProvid
     if (!pick) return;
     const command = pick.label === "Other…" ? await vscode.window.showInputBox({ title: "Control command" }) : pick.label;
     if (!command) return;
+    const blocked = unloadsModCode(command) ? reloadBlockedBy(s.dir) : undefined;
+    if (blocked) {
+      vscode.window.showErrorMessage(`Kiln: ${command}: ${blocked}`);
+      return;
+    }
     try {
       const r = await sendControl(s.dir, command, { timeoutMs: /^reload-test|^test/.test(command) ? 240_000 : 30_000 });
       const doc = await vscode.workspace.openTextDocument({ language: "json", content: JSON.stringify(r, null, 2) });

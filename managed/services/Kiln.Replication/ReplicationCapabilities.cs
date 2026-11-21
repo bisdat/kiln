@@ -11,8 +11,8 @@ internal static class ReplicationCaps
     /// <summary>sigdb: what the server sends each peer (server side, also a hosted world).</summary>
     public const string Observe = "repl.observe";
 
-    /// <summary>sigdb (client exe): what a Kiln client receives. Unavailable because kiln.repl has no receive side
-    /// yet in this version; a later implementation must pass guided check 11-repl.receive-watch.</summary>
+    /// <summary>sigdb (client exe): what a Kiln client receives (Replication.WatchReceived). Its in-game check is
+    /// 11-repl.receive-watch.</summary>
     public const string Client = "repl.client";
 
     /// <summary>sigdb: the loopback harness (<see cref="ReplicationLab"/>); lab servers only: kiln.json's policy "any"
@@ -57,5 +57,10 @@ internal static class ReplicationCaps
 /// asks for them, not from Kiln.Replication's first use.</summary>
 internal static class ReplicationStartup
 {
-    static ReplicationStartup() => ReplicationCaps.Rows.Ensure();
+    static ReplicationStartup()
+    {
+        ReplicationCaps.Rows.Ensure();
+        ReplCommands.RegisterSafe();  // repl stats | watch | capture | component
+        ReplicationView.Start();      // the Kiln menu's Replication section
+    }
 }

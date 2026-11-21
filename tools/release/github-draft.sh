@@ -8,7 +8,8 @@
 #   the AppImage, deb, rpm, setup.exe and their .sig files, latest.json (the update manifest with GitHub URLs),
 #   kiln-runtime-<v>.zip, kiln-server-<v>.zip (the server pack), kiln-systemd-units-<v>.tar.gz (kilnctl's systemd
 #   units: GitHub would rename kiln@.service, so they go up as one tarball), kilnctl-<v>-linux-x86_64, kilnctl-<v>-windows-x86_64.exe, kiln-<v>-linux-x86_64,
-#   kiln-<v>-windows-x86_64.exe, the nupkgs, the vsix, kiln-samples-<v>.zip, the source tarball, README.txt,
+#   kiln-<v>-windows-x86_64.exe, kiln-debug-inspect-<v>.zip (kiln debug's Windows helper for that kiln), the nupkgs,
+#   the vsix, kiln-samples-<v>.zip, the source tarball, README.txt,
 #   INSTALL-RUNTIME.txt, THIRD-PARTY-NOTICES.txt, SHA256SUMS.
 # Never nexus/: the Nexus Mods build of the launcher (no self-update) goes only to Nexus Mods (nexus.py). GitHub gets
 # the direct build, which updates itself.
@@ -74,6 +75,8 @@ put "$dir/runtime/kilnctl" "kilnctl-$name-linux-x86_64"
 if [[ -z $beta && -d $dir/sdk ]]; then
   put "$dir/sdk/kiln" "kiln-$version-linux-x86_64"
   [[ -f $dir/sdk/kiln.exe ]] && put "$dir/sdk/kiln.exe" "kiln-$version-windows-x86_64.exe"
+  # kiln debug's Windows helper for a kiln downloaded on its own: unpacked into the Kiln data folder (lib/debug-inspect.sh)
+  [[ -f $dir/sdk/kiln-debug-inspect-$version.zip ]] && put "$dir/sdk/kiln-debug-inspect-$version.zip" "kiln-debug-inspect-$version.zip"
   for f in "$dir"/sdk/*.nupkg "$dir"/sdk/*.vsix; do put "$f" "$(basename "$f")"; done
   reserve_asset "kiln-samples-$version.zip"
   (cd "$dir" && zip -qr -X "$stage/kiln-samples-$version.zip" samples)

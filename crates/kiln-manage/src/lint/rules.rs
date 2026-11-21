@@ -151,6 +151,7 @@ pub(crate) fn run(l: &mut Linter) {
         skipped_refs += vfx(&mut out, m, cat);
         surfaces(&mut out, m);
         quests_native(&mut out, m);
+        mod_values(&mut out, &m.files.iter().filter(|f| f.kind == "mod-values").collect::<Vec<_>>(), Some(&m.root));
         licences(&mut out, m);
         locale_keys(&mut out, &mut l.texts, m);
     }
@@ -163,6 +164,7 @@ pub(crate) fn run(l: &mut Linter) {
             "natives" => natives(&mut out, &alone, f),
             "schematic" => schematic(&mut out, f),
             "skills" => skills(&mut out, f),
+            "mod-values" => mod_values(&mut out, &[f], None),
             _ => {}
         }
     }
@@ -1918,6 +1920,7 @@ fn blocks(out: &mut Out, m: &LMod, code: &Code, cat: Option<&Catalog>) {
         ("lootTables", "loot table"), ("recipes", "recipe"),
         ("quests", "quest"), ("dialogues", "dialogue"),
         ("windows", "window"), ("hudLines", "HUD line"), ("keyBindings", "key binding"),
+        ("routines", "routine"),
         ("affixes", "affix"), ("affixPools", "affix pool"), ("rarityRolls", "rarity roll"), ("rarityUpgrades", "rarity upgrade"),
         ("buildingMaterialPools", "building material pool"),
     ];
@@ -2971,6 +2974,154 @@ fn quests_native(out: &mut Out, m: &LMod) {
 /// object): an action's value is what this looks at, so a dialogue's own "start" is left out.
 fn looks_like_action_start(dialogues: &Node, v: &Node) -> bool {
     !dialogues.as_object().into_iter().flatten().any(|d| d.value.get("start").is_some_and(|s| s.span.start == v.span.start))
+}
+
+// ------------------------------------------------------------------------------------------------ mod values ----
+
+/// A whole number in the form mod-values/*.json writes it (an optional '-', no '+', no leading zeros, not "-0", at most
+/// 19 digits) as an i128; None for any other form, which the schema reports (KL106).
+fn mod_value_number(s: &str) -> Option<i128> {
+    let digits = s.strip_prefix('-').unwrap_or(s);
+    if digits.is_empty() || digits.len() > 19 || !digits.bytes().all(|b| b.is_ascii_digit()) || (digits.len() > 1 && digits.starts_with('0')) || s == "-0" {
+        return None;
+    }
+    s.parse::<i128>().ok()
+}
+
+/// The size limits of one definition, in bytes of compact JSON (UTF-8): dossier 05b section 4.1.
+const MOD_VALUE_LABEL_BYTES: usize = 1024;
+const MOD_VALUE_FORMAT_BYTES: usize = 256;
+const MOD_VALUE_DEFINITION_BYTES: usize = 4096;
+const MOD_VALUES_PER_MOD: usize = 128;
+
+/// A number field of a definition as an i64: None when it is not in the file's number form (the schema's finding) or
+/// outside the 64-bit range (KL350, said here).
+fn mod_value_int(out: &mut Out, f: &LFile, id: &str, key: &str, n: &Node, ptr: &str) -> Option<i64> {
+    let s = n.as_str()?;
+    let v = mod_value_number(s)?;
+    match i64::try_from(v) {
+        Ok(v) => Some(v),
+        Err(_) => {
+            out.push(Diagnostic::new(&f.display, codes::MOD_VALUE_NUMBER, n.span, &format!(
+                "value {id}: {key} \"{s}\" is outside the 64-bit range Kiln stores (-9223372036854775808 to 9223372036854775807)")).pointer(ptr));
+            None
+        }
+    }
+}
+
+fn compact_len(n: &Node) -> usize {
+    serde_json::to_string(&n.to_json()).map(|s| s.len()).unwrap_or(0)
+}
+
+/// mod-values/*.json beyond its schema (kiln-mod-values.schema.json): numbers in the 64-bit range, min <= max, initial
+/// within them, thresholds that strictly increase (as whole numbers), the size limits, and with `root` (the files are
+/// one mod's, in name order) ids across the files and the 128 values a mod may have: what Kiln.ModValues refuses at
+/// load. And one warning: a carried value with no explicit max (KL356).
+fn mod_values(out: &mut Out, files: &[&LFile], root: Option<&Path>) {
+    for f in files {
+        let Some(defs) = f.root.as_ref().and_then(|r| r.get("values")).and_then(Node::as_object) else { continue };
+        for m in defs {
+            let d = &m.value;
+            if d.as_object().is_none() {
+                continue;
+            }
+            let base = format!("/values/{}", ptr_seg(&m.key));
+            // a field written wrong is the schema's finding: the bounds are compared only when every one involved is a number
+            let field = |out: &mut Out, key: &str| -> Option<(bool, i64)> {
+                match d.get(key) {
+                    None => Some((false, 0)),
+                    Some(n) => mod_value_int(out, f, &m.key, key, n, &format!("{base}/{key}")).map(|v| (true, v)),
+                }
+            };
+            let (min, max, initial) = (field(out, "min"), field(out, "max"), field(out, "initial"));
+            if let (Some((min_set, min_v)), Some((max_set, max_v))) = (min, max) {
+                let lo = if min_set { min_v } else { 0 };
+                let hi = if max_set { max_v } else { i64::MAX };
+                let said = |set: bool, v: i64| if set { format!("\"{v}\"") } else { format!("\"{v}\" (the default)") };
+                let span_of = |key: &str| d.get(key).map_or(m.key_span, |n| n.span);
+                if lo > hi {
+                    let key = if min_set { "min" } else { "max" };
+                    out.push(Diagnostic::new(&f.display, codes::MOD_VALUE_BOUNDS, span_of(key), &format!(
+                        "value {}: min {} is above max {}: Kiln refuses the definition", m.key, said(min_set, lo), said(max_set, hi))).pointer(&format!("{base}/{key}")));
+                } else if let Some((true, v)) = initial
+                    && (v < lo || v > hi)
+                {
+                    out.push(Diagnostic::new(&f.display, codes::MOD_VALUE_BOUNDS, span_of("initial"), &format!(
+                        "value {}: initial \"{v}\" is outside min {} and max {}: Kiln refuses the definition (it never clamps)", m.key, said(min_set, lo), said(max_set, hi))).pointer(&format!("{base}/initial")));
+                }
+            }
+            if let Some(steps) = d.get("thresholds").and_then(Node::as_array) {
+                let mut prev: Option<i64> = None;
+                for (i, s) in steps.iter().enumerate() {
+                    let v = mod_value_int(out, f, &m.key, &format!("thresholds[{i}]"), s, &format!("{base}/thresholds/{i}"));
+                    if let (Some(p), Some(v)) = (prev, v)
+                        && v <= p
+                    {
+                        out.push(Diagnostic::new(&f.display, codes::MOD_VALUE_THRESHOLDS, s.span, &format!(
+                            "value {}: thresholds[{i}] \"{v}\" is not above thresholds[{}] \"{p}\": thresholds strictly increase (Kiln refuses the definition)", m.key, i - 1))
+                            .pointer(&format!("{base}/thresholds/{i}")));
+                    }
+                    prev = v;
+                }
+            }
+            for (key, limit) in [("label", MOD_VALUE_LABEL_BYTES), ("numberFormat", MOD_VALUE_FORMAT_BYTES)] {
+                if let Some(n) = d.get(key) {
+                    let len = compact_len(n);
+                    if len > limit {
+                        out.push(Diagnostic::new(&f.display, codes::MOD_VALUE_SIZE, n.span, &format!(
+                            "value {}: {key} is {len} bytes as compact JSON, and Kiln takes at most {limit} per definition (all its languages together)", m.key)).pointer(&format!("{base}/{key}")));
+                    }
+                }
+            }
+            // a carried value merges by maximum: the higher of the world's value and the copy a player's client brings wins,
+            // so without a max of its own a client can raise it to the top of the 64-bit range (counters and experience
+            // values are the kinds that can be carried; the rest is the schema's finding)
+            if d.str_of("persistence") == Some("carried")
+                && d.get("trustClientImports").and_then(Node::as_bool) == Some(true)
+                && matches!(d.str_of("kind"), Some("counter" | "experience"))
+                && d.get("max").is_none()
+            {
+                out.push(Diagnostic::new(&f.display, codes::MOD_VALUE_CARRIED_MAX, m.key_span, &format!(
+                    "value {}: a carried value without \"max\" can be raised as far as {} by a player's own copy (Kiln keeps the higher of the world's value and the copy a client brings); give it a real max", m.key, i64::MAX))
+                    .pointer(&base));
+            }
+            let len = compact_len(d);
+            if len > MOD_VALUE_DEFINITION_BYTES {
+                out.push(Diagnostic::new(&f.display, codes::MOD_VALUE_SIZE, m.key_span, &format!(
+                    "value {}: the definition is {len} bytes as compact JSON, and Kiln takes at most {MOD_VALUE_DEFINITION_BYTES}", m.key)).pointer(&base));
+            }
+        }
+    }
+    let Some(root) = root else { return };
+    // ids across the mod's files (a key twice inside one file is KL004), and the count: one file over the limit is the schema's KL108
+    fn of(f: &LFile) -> &[super::json::Member] {
+        f.root.as_ref().and_then(|r| r.get("values")).and_then(Node::as_object).unwrap_or(&[])
+    }
+    let one_file_over = files.iter().any(|f| of(f).len() > MOD_VALUES_PER_MOD);
+    let mut seen: HashMap<&str, (&LFile, Span)> = HashMap::new();
+    let mut count = 0usize;
+    let total: HashSet<&str> = files.iter().flat_map(|f| of(f).iter().map(|m| m.key.as_str())).collect();
+    for f in files {
+        for m in of(f) {
+            if let Some((first, span)) = seen.get(m.key.as_str()) {
+                if first.path != f.path {
+                    let there = display_rel(&first.path, root);
+                    out.push(Diagnostic::new(&f.display, codes::MOD_VALUE_DUPLICATE, m.key_span, &format!(
+                        "value {} is also defined in {there}: an id is defined once per mod, across all its mod-values files (Kiln refuses the second definition)", m.key))
+                        .pointer(&format!("/values/{}", ptr_seg(&m.key)))
+                        .with_related(&first.display, *span, "defined here first"));
+                }
+                continue;
+            }
+            seen.insert(&m.key, (*f, m.key_span));
+            count += 1;
+            if count == MOD_VALUES_PER_MOD + 1 && !one_file_over {
+                out.push(Diagnostic::new(&f.display, codes::MOD_VALUE_COUNT, m.key_span, &format!(
+                    "value {} is this mod's value number {count} of {}: Kiln takes at most {MOD_VALUES_PER_MOD} per mod, across all its mod-values files", m.key, total.len()))
+                    .pointer(&format!("/values/{}", ptr_seg(&m.key))));
+            }
+        }
+    }
 }
 
 // --------------------------------------------------------------------------------------------- skills ----

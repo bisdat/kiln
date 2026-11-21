@@ -152,10 +152,11 @@ int main() {
             {"registry": "recipes", "select": {"id": "game:arrow"}, "field": "inputs", "list": {"append": [{"category": 3}]}},
             {"registry": "recipes", "select": {"id": "game:arrow"}, "field": "inputs", "list": {"append": [5]}}
         ])", &rf);
-        CHECK(x.edits.size() == 1 && rf.size() == 4, "an element is {leaf: value}: unknown leaves, out-of-range values, read-only leaves and plain values refused");
+        CHECK(x.edits.size() == 2 && rf.size() == 3, "an element is {leaf: value}: unknown leaves, out-of-range values and plain values refused; a read-only leaf is given in a new element");
         const Result r = compose(s, b, {}, {mod("a", {x})});
         const Value v = result(r, "recipes", "game:arrow", "inputs");
-        CHECK(v.list.size() == 3 && counts(v) == "2,3,4" && v.list[2].leaf("item")->t == "game:stone", "an appended element with fields");
+        CHECK(v.list.size() == 4 && counts(v) == "2,3,4" && v.list[2].leaf("item")->t == "game:stone" && v.list[3].leaf("category") && v.list[3].leaf("category")->i == 3,
+              "appended elements with fields (a read-only leaf set when the element is made)");
     }
 
     // ---- element paths: inside the list's own chain ----

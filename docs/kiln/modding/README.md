@@ -57,7 +57,8 @@ generated [../status.generated.md](../status.generated.md); what has no API yet 
 | [resource-patches.md](resource-patches.md) | Change a field of the game's data before the game reads it (the balancing table and the like): `resourcePatches` in a boot mod |
 | [player-states.md](player-states.md) | Every state and action a player can be in: `player.Is(...)`, `PlayerStateChangedEvent`, `PlayerActionEvent`, and what is left out |
 | [../services/steamguard.md](../services/steamguard.md) | The achievement guard (experimental, game client only): keep tests and admin commands from unlocking Steam achievements |
-| [debugging.md](debugging.md) | Breakpoints in a running server: `kiln debug` and netcoredbg |
+| [debugging.md](debugging.md) | Breakpoints in a running server or game client: `kiln debug` and netcoredbg |
+| [debugging-windows-matrix.md](debugging-windows-matrix.md) | The debugger's acceptance matrix for Windows servers, Windows and Proton clients |
 | [../native-mods.md](../native-mods.md) | Native mods (DLL mods): `native.json`, load phases, `kiln_native_init` and the Kiln API from C or C++ |
 | [native-asi.md](native-asi.md) | One DLL that runs as a Kiln native mod and as an `.asi` under Ultimate ASI Loader, and starts once |
 
@@ -96,6 +97,7 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `Schematics` | kiln.build: `/build` admin commands (selection, capture, paste with rotation, shapes, props, undo) and outposts placed once per world |
 | `RulesSample` | Kiln.Rules: `/flight` for 60 s of the building fly mode, no stamina drain inside bases, a half-cost building weekend from a config switch |
 | `NetSample` | Kiln.Network: F9 on a client pings the server over `netsample:main`; the server answers and announces Kiln clients |
+| `ReplWatch` | The network inspector (`Kiln.Replication`, since 0.2.0-dev.31): `/replwatch` watches the chest nearest to you with `Replication.Watch` and logs, per player, the size of its Inventory component as sent and its used slots when they change; `Local` and `Fake` peers; `/replwatch stop` and the unload dispose the watch ([services/replication.md](../services/replication.md)) |
 | `BigStacks` | a server config (x4 stack sizes, at most 9999) that Kiln clients get through the content sync |
 | `NewItems` | kiln.content's new items and recipes from code and a data pack, plus a perk and a buff of its own (kiln.gamedata clones) |
 | `AffixSword` | Affix blocks: a sword that rolls one of three affixes defined in `blocks/affixes.json` (`/affix-sword`); the bonus acts while it is in hand; `/affixes` lists what the held item carries; in the player's game a notice shows the roll |

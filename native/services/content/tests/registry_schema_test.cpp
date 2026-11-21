@@ -52,7 +52,7 @@ int main() {
     const FieldSpec* cap = s.registry("balance")->field("levelCap");
     CHECK(cap && cap->applies == Applies::Restart);
     const FieldSpec* alt = s.registry("balance")->field("altarsPerFlameLevel");
-    CHECK(alt && alt->type == FieldType::List && alt->element == FieldType::Int && alt->max && *alt->max == 16.0 && alt->indexed);
+    CHECK(alt && alt->type == FieldType::List && alt->element == FieldType::Int && alt->max && *alt->max == 16.0 && alt->ops == FieldOps::Indexed);
     const FieldSpec* rarities = s.registry("loot")->field("rarities");
     CHECK(rarities && rarities->type == FieldType::Flags && rarities->max_items == 5);
     const FieldSpec* cnt = s.registry("recipes")->field("inputs[].count");

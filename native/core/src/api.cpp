@@ -33,6 +33,7 @@
 #include "services/service.h"
 #include "tasks_host.h"
 #include "hooks_protect_internal.h"
+#include "mod_values_host.h"
 
 // kiln.caps, the capability registry (services/caps.cpp)
 namespace kiln::caps {
@@ -65,6 +66,11 @@ const void* host_table();  // kiln.internal.tasks.host v1 (tasks_host.h); nullpt
 namespace kiln::hooks {
 const KilnHooksInternalApi* internal_table();  // kiln.internal.hooks v1 (hooks_protect_internal.h; services/hooks_protect.cpp)
 }  // namespace kiln::hooks
+namespace kiln::mod_values {
+// kiln.internal.mod-values.backend v1 (mod_values_host.h, services/mod_values.cpp); nullptr while kiln.mod-values is not
+// running
+const void* backend_table();
+}  // namespace kiln::mod_values
 
 namespace kiln {
 namespace {
@@ -253,15 +259,21 @@ const void* KILN_CALL api_service_services(KilnStr name, uint32_t min_version) {
     return lookup_service(name, min_version, true);
 }
 
+// The core's own tables for the managed host (api_service_managed_host): the task lease table and the mod-values
+// backend. Nobody publishes these names, not even a Kiln service.
+bool managed_host_name(std::string_view name) {
+    return name == KILN_TASKS_HOST_SERVICE || name == KILN_MOD_VALUES_BACKEND_SERVICE;
+}
+
 // Registration is split like lookup. The owner is whatever the caller passes (owner IDs are small sequential integers),
 // so it cannot tell a service from a plugin; the KilnApi the call came through can. The plugins' register_service
 // refuses every internal name, whatever the owner; the services' one also requires an owner load_one made for a
 // kiln/services DLL.
 KilnResult register_published(KilnOwner owner, KilnStr name, const void* table, bool services) {
     if (!table || !name.ptr || name.len == 0) return KILN_ERR_INVALID_ARGUMENT;
-    // The managed host's lease table, kiln.launch, kiln.internal.launch and kiln.internal.hooks are the core's own: nobody
-    // publishes those names, not even a Kiln service.
-    if (sv(name) == KILN_TASKS_HOST_SERVICE || sv(name) == KILN_LAUNCH_SERVICE || sv(name) == KILN_LAUNCH_INTERNAL_SERVICE ||
+    // The managed host's tables (the task lease table, the mod-values backend), kiln.launch, kiln.internal.launch and
+    // kiln.internal.hooks are the core's own: nobody publishes those names, not even a Kiln service.
+    if (managed_host_name(sv(name)) || sv(name) == KILN_LAUNCH_SERVICE || sv(name) == KILN_LAUNCH_INTERNAL_SERVICE ||
         sv(name) == KILN_HOOKS_INTERNAL_SERVICE) {
         KLOG_W("service %.*s: reserved for the core, refused for %s", static_cast<int>(name.len), name.ptr,
                reg::owner_name(owner).c_str());
@@ -297,16 +309,23 @@ KilnResult KILN_CALL api_register_service_services(KilnOwner owner, KilnStr name
 }
 
 // The managed host's KilnApi (api_for_managed_host, tasks_host.h): the plugins' lookup, plus exactly the core's own
-// kiln.internal.tasks.host table (never a published one: nobody may publish that name); every other internal name
-// stays unresolved, and registration is the plugins' (the host publishes no internal table either).
+// kiln.internal.tasks.host and kiln.internal.mod-values.backend tables (never published ones: nobody may publish those
+// names); every other internal name stays unresolved, and registration is the plugins' (the host publishes no internal
+// table either).
 const void* KILN_CALL api_service_managed_host(KilnStr name, uint32_t min_version) {
     if (sv(name) == KILN_TASKS_HOST_SERVICE)
         return min_version <= KILN_TASKS_HOST_VERSION ? tasks_svc::host_table() : nullptr;
+    if (sv(name) == KILN_MOD_VALUES_BACKEND_SERVICE)
+        return min_version <= KILN_MOD_VALUES_BACKEND_VERSION ? mod_values::backend_table() : nullptr;
     return lookup_service(name, min_version, false);
 }
+// Its owner_create marks the owner as the managed host's (reg::owner_managed_host): kiln.mod-values gives an owner named
+// "mod:<manifest id>" that id as namespace only then, never to a native owner that names itself so.
+KilnOwner KILN_CALL api_owner_create_managed_host(KilnStr id) { return reg::owner_create_managed_host(sv(id)); }
 KilnApi managed_host_api_from(const KilnApi& plugins) {
     KilnApi host = plugins;
     host.service = &api_service_managed_host;
+    host.owner_create = &api_owner_create_managed_host;
     return host;
 }
 

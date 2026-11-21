@@ -40,6 +40,11 @@ enum class Applies : uint8_t { Now = 1, WorldLoad = 2, Restart = 3 };  // KILN_R
 // drops.entries), its leaves in element_fields; the schema names each leaf "<list>[].<leaf>" ("inputs[].count").
 enum class FieldType : uint8_t { Int, Float, Bool, Enum, Id, List, Flags, Struct };
 
+// The schema's "ops" for a field: which edits it takes. Any: a hand-filled descriptor that says nothing (every edit its type
+// allows). None: read-only. Set: a value only. Number: a value and the relative ops. List: clear, append, remove, replace (and
+// a whole list through op). Indexed: a list of fixed length, edited one element at a time ("xpPerLevel[2]").
+enum class FieldOps : uint8_t { Any, None, Set, Number, List, Indexed };
+
 struct FieldSpec {
     std::string name;  // the Kiln field path, as edits name it ("maxStack", "damage.fire", "inputs", "inputs[].count")
     FieldType type = FieldType::Int;
@@ -50,11 +55,12 @@ struct FieldSpec {
     bool read_only = false;
     Applies applies = Applies::Restart;
     std::string ref;  // an id (or a list of ids): the registry its ids name (the schema's "ref"); a reference the stage checks
+    FieldOps ops = FieldOps::Any;
+    size_t fixed_length = 0;   // ops Indexed: exactly this many elements (0: as long as length_field says, or not fixed)
+    std::string length_field;  // ops Indexed: as long as this read-only whole-number field of the entry, plus length_offset
+    int64_t length_offset = 0;
     std::vector<FieldSpec> element_fields;  // element Struct: its leaves by their own name ("item", "count"); link_elements()
     bool optional = false;   // an id that may be absent: null clears it (the schema's "optional")
-    bool indexed = false;    // a list of fixed length (ops "indexed"): only its elements are edited ("xpPerLevel[2]"), never the
-                             // whole list and no list op
-    size_t fixed_length = 0; // indexed: exactly this many elements (0: the length follows another field, checked at composition)
     const FieldSpec* element_field(const std::string& leaf) const {
         for (const FieldSpec& f : element_fields)
             if (f.name == leaf) return &f;
@@ -115,7 +121,7 @@ struct Value {
     bool numeric() const { return kind == Int || kind == Num; }
     double as_double() const { return kind == Int ? static_cast<double>(i) : kind == Num ? d : kind == Bool ? (b ? 1.0 : 0.0) : 0.0; }
     json to_json() const;
-    std::string text_of() const { return to_json().dump(); }
+    std::string text_of() const;  // for messages: a scalar as JSON writes it, a list or element as JSON
     friend bool operator==(const Value& a, const Value& b);
 };
 
@@ -191,6 +197,7 @@ struct Refusal {
     uint32_t n = 0;
     std::string reason;
     std::string entry;  // a refused add: the "<registry>|<id>" it would have made (a reference to it names this refusal as its cause)
+    std::string registry, id, field;  // where it was refused, when known: the registry, the entry, the Kiln field or raw path
 };
 
 // One IR document. false: the document itself is unusable (*err: why; nothing of it is taken): not JSON, nested deeper than
@@ -213,6 +220,13 @@ bool op_result(const Op& op, const Value& base, const FieldSpec& f, Value* out, 
 // The same, total: a result op_result refuses leaves the value as it was (for back-ends re-evaluating a chain over another
 // value; the stage itself refuses such an edit through op_result).
 Value apply_op(const Op& op, const Value& base, const FieldSpec& f);
+
+// Whether a field's schema ops take this edit (op / list / element path). false + *err: why not. The IR reader asks it for
+// every field edit; composition asks again for edits made by code.
+bool ops_allow(const FieldSpec& f, const Edit& e, std::string* err);
+
+// Values in one list op, one list value, and in any list the stage composes (a list field without maxItems included).
+constexpr size_t kMaxListValues = 4096;
 
 // A Kiln mod id ("^[a-z0-9][a-z0-9._-]{0,63}$", kiln.mod.schema.json) that is not reserved ("game", "kiln", ...): a batch of
 // any other "mod" is refused whole, so no mod mints game: or kiln: ids. false + *err: why not.
