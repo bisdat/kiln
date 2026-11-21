@@ -105,14 +105,15 @@ void touch_pre() {
 KilnResult touch_entity(uint32_t entity, uint32_t* status) {
     if (status) *status = KILN_REPL_TOUCH_GONE;
     if (!g_on) return KILN_ERR_UNAVAILABLE;
-    if (!entity || !g_world_api->exists(entity)) return KILN_OK;
+    if (!entity) return KILN_OK;
+    // carriers first: kiln.world's exists() asks for a transform, which an item inside an inventory does not have
     bool carrier = false;
     for (uint32_t c = 0; c < kCarriers && !carrier; ++c) {
         uint32_t size = 0;
         carrier = g_slot[c] >= 0 && g_world_api->component(entity, g_carrier_hash[c], &size) != nullptr;
     }
     if (!carrier) {
-        if (status) *status = KILN_REPL_TOUCH_NO_CARRIER;
+        if (status) *status = g_world_api->exists(entity) ? KILN_REPL_TOUCH_NO_CARRIER : KILN_REPL_TOUCH_GONE;
         return KILN_OK;
     }
     if (g_pending.size() < (1u << 20)) g_pending.push_back(entity);
