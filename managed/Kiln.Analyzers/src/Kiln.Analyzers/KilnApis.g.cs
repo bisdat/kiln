@@ -128,6 +128,7 @@ internal static partial class KilnApis
         "M:Kiln.Build.Write(Kiln.CellBox,System.ReadOnlySpan{Kiln.Voxel},Kiln.BuildOptions,System.ReadOnlySpan{System.Boolean})", // Build.Write(CellBox, ReadOnlySpan<Voxel>, BuildOptions?, ReadOnlySpan<bool>): via Build.Ensure(string)
         "M:Kiln.Build.WriteAsync(Kiln.CellBox,Kiln.Voxel[],Kiln.BuildOptions,System.Boolean[])", // Build.WriteAsync(CellBox, Voxel[], BuildOptions?, bool[]?): via Build.Load(CellBox, TimeSpan?)
         "M:Kiln.Build.WriteIfUnchanged(Kiln.CellBox,System.ReadOnlySpan{Kiln.Voxel},System.ReadOnlySpan{Kiln.Voxel},Kiln.BuildOptions,System.ReadOnlySpan{System.Boolean})", // Build.WriteIfUnchanged(CellBox, ReadOnlySpan<Voxel>, ReadOnlySpan<Voxel>, BuildOptions?, ReadOnlySpan<bool>): via Build.Ensure(string)
+        "M:Kiln.Build.get_BaseLimits", // Build.BaseLimits.get: Services.RequireTickThread
         "M:Kiln.Build.get_Bases", // Build.Bases.get: via Build.Require(string)
         "M:Kiln.Build.get_Grid", // Build.Grid.get: via Build.Require(string)
         "M:Kiln.CharacterData.Carried.Contains(Kiln.CharacterKey,System.String)", // CharacterData.Carried.Contains(CharacterKey, string): via CharacterStore.Contains(string, CharacterKey, string, string)
@@ -482,7 +483,7 @@ internal static partial class KilnApis
         "M:Kiln.KnowledgeScope.Set(System.String,System.UInt32)", // KnowledgeScope.Set(string, uint): via Knowledge.KnowledgeId(string, string)
         "M:Kiln.Mod.WorldConfig``1(System.String)", // Mod.WorldConfig<T>(string?): Game.AssertTickThread
         "M:Kiln.ModValues.Add(Kiln.CharacterKey,Kiln.ModValueKey,System.Int64,System.Nullable{Kiln.ModValueVersion})", // ModValues.Add(CharacterKey, ModValueKey, long, ModValueVersion?): via ModValues.Change(string, CharacterKey, ModValueKey, ChangeOp, long, ModValueVersion?)
-        "M:Kiln.ModValues.Define(System.String,Kiln.ModValueOptions)", // ModValues.Define(string, ModValueOptions): via ModValuesService.NeedLedger(string)
+        "M:Kiln.ModValues.Define(System.String,Kiln.ModValueOptions)", // ModValues.Define(string, ModValueOptions): Services.RequireTickThread
         "M:Kiln.ModValues.Read(Kiln.CharacterKey,Kiln.ModValueKey)", // ModValues.Read(CharacterKey, ModValueKey): via ModValuesService.NeedLedger(string)
         "M:Kiln.ModValues.Reset(Kiln.CharacterKey,Kiln.ModValueKey,System.Nullable{Kiln.ModValueVersion})", // ModValues.Reset(CharacterKey, ModValueKey, ModValueVersion?): via ModValues.Change(string, CharacterKey, ModValueKey, ChangeOp, long, ModValueVersion?)
         "M:Kiln.ModValues.Set(Kiln.CharacterKey,Kiln.ModValueKey,System.Int64,System.Nullable{Kiln.ModValueVersion})", // ModValues.Set(CharacterKey, ModValueKey, long, ModValueVersion?): via ModValues.Change(string, CharacterKey, ModValueKey, ChangeOp, long, ModValueVersion?)
@@ -710,6 +711,15 @@ internal static partial class KilnApis
         "M:Kiln.Stations.get_Categories", // Stations.Categories.get: via StationsCore.CheckRead(string)
         "M:Kiln.Survivor.RescuedFor(Kiln.Player)", // Survivor.RescuedFor(Player): via ProgressFact.Holds(EntityId)
         "M:Kiln.Survivor.get_Rescued", // Survivor.Rescued.get: via ProgressFact.Holds(EntityId)
+        "M:Kiln.Survivors.AssignBed(Kiln.SurvivorId,Kiln.EntityId,Kiln.SurvivorAssignmentOptions)", // Survivors.AssignBed(SurvivorId, EntityId, SurvivorAssignmentOptions): via Survivors.Submit(string, string, SurvivorsNative.Request)
+        "M:Kiln.Survivors.BaseAt(Kiln.WorldPosition)", // Survivors.BaseAt(WorldPosition): via Survivors.Use(string, string)
+        "M:Kiln.Survivors.BedOccupant(Kiln.EntityId)", // Survivors.BedOccupant(EntityId): via Survivors.Use(string, string)
+        "M:Kiln.Survivors.Find(Kiln.SurvivorId)", // Survivors.Find(SurvivorId): via Survivors.Use(string, string)
+        "M:Kiln.Survivors.List", // Survivors.List(): via Survivors.Use(string, string)
+        "M:Kiln.Survivors.Of(Kiln.EntityId)", // Survivors.Of(EntityId): via Survivors.Use(string, string)
+        "M:Kiln.Survivors.RecruitWorld(Kiln.SurvivorId,Kiln.SurvivorRecruitOptions)", // Survivors.RecruitWorld(SurvivorId, SurvivorRecruitOptions?): via Survivors.Submit(string, string, SurvivorsNative.Request)
+        "M:Kiln.Survivors.Summon(Kiln.SurvivorId,System.Guid,Kiln.WorldPosition,System.Single)", // Survivors.Summon(SurvivorId, Guid, WorldPosition, float): via Survivors.Submit(string, string, SurvivorsNative.Request)
+        "M:Kiln.Survivors.UnassignBed(Kiln.SurvivorId,Kiln.SurvivorAssignmentOptions)", // Survivors.UnassignBed(SurvivorId, SurvivorAssignmentOptions): via Survivors.Submit(string, string, SurvivorsNative.Request)
         "M:Kiln.Systems.Define``1(System.String,Kiln.ProgramOptions,Kiln.EntityHandler{``0})", // Systems.Define<T>(string, ProgramOptions, EntityHandler<T>): Services.RequireTickThread
         "M:Kiln.Systems.Wrap(System.String,Kiln.WrapOptions)", // Systems.Wrap(string, WrapOptions?): via Systems.Check(string, WrapOptions, string, out SystemsNative.Table*, out int)
         "M:Kiln.Systems.Wrap``1(Kiln.WrapOptions)", // Systems.Wrap<T>(WrapOptions?): via Systems.Check(string, WrapOptions, string, out SystemsNative.Table*, out int)
