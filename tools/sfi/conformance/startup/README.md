@@ -1,11 +1,11 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Startup host transcript v1
 
-This is the **one authorized startup host envelope** (the API contract's rulings, item 6), not
+This is the **one startup host envelope**, not
 another Lua transcript protocol. It is MIT, has no engine/parser dependency,
 and runs no game, native DLL, oracle or interpreter. Schema validity and a
 synthetic tool-test match establish **no runtime/API parity**. Actual dual-pin SF
-observation is O02's separate GPL test-driver work.
+observation is the separate GPL test driver's work.
 
 ## Consumer interface
 
@@ -58,7 +58,7 @@ recoverable. Difference entries retain `path`, `expected`, `actual`.
 | --- | --- |
 | the publication kill matrix | Observe every publication/checkpoint/recovery boundary and its final reopened manifest; an operation error uses a shared failed-call transcript. Kill/restore scenarios must still terminate in a parent-observed coherent `archive_result`. An incomplete capture is not a passing golden. |
 | the startup controller | Copy frozen ordered package/admission facts; retain attempts, invocation owner versus dependency-module owner, whole-package failure and final inclusion/exclusion reasons. Copy `executesStartup` from the plan/actual phase rule, not from whether a trace happened to be collected. A nonexecuting admitted runtime-only participant has no invented empty Lua transcript. |
-| O02 | Emit actual pinned-source/dependency/contract provenance; use controlled UUIDs, clock/seed and opaque encounter-order node/lease/call/effect symbols. Run the real SF code and unchanged shared prelude. Record raw deviations rather than blessing them as new expected behavior. |
+| the GPL test driver | Emit actual pinned-source/dependency/contract provenance; use controlled UUIDs, clock/seed and opaque encounter-order node/lease/call/effect symbols. Run the real SF code and unchanged shared prelude. Record raw deviations rather than blessing them as new expected behavior. |
 | the parity comparison | Require the exact fixture/contract/policy/baseline/plan identity, compare meaningful order/arguments/results, and inspect explicit physical/provenance/legacy accounting. Missing cases are failures in the caller's fixture inventory, not permission to compare an empty set. |
 
 ## Required envelope and provenance

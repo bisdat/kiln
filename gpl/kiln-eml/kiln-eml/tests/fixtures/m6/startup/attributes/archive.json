@@ -1,5 +1,5 @@
 {
- "comment": "Synthetic attribute archive (no game data): the registry and the resources both sides build the same archive from. Kiln's m6_startup_vm builds it with EML's writer; the ShroudForge-source harness (out/v2-g09c/tools/sf-attr-oracle) builds it with ShroudForge 1.7.9's kfc-parser and runs ShroudForge's own catalog and program code over it to make golden.json.",
+ "comment": "Synthetic attribute archive (no game data): the registry and the resources both sides build the same archive from. Kiln's m6_startup_vm builds it with EML's writer; a ShroudForge-source harness outside the repository builds it with ShroudForge 1.7.9's kfc-parser and runs ShroudForge's own catalog and program code over it to make golden.json.",
  "registry": {
   "version": "g09c-attributes",
   "types": [

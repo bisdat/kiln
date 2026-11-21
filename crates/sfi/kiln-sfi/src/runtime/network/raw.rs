@@ -221,7 +221,7 @@ pub(super) fn receive_loop(
     Ok((Some(messages), None))
 }
 
-/// `receive(options)` (network.rs:305-348): the raw messages of R1's loop.
+/// `receive(options)` (network.rs:305-348): the raw messages of the receive loop.
 pub fn receive(lua: &Lua, network: Rc<Network>) -> mlua::Result<Function> {
     lua.create_function(move |lua, options: Option<Table>| {
         if let Some(reason) = network.denied(Op::NetworkReceive) {

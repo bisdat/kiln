@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! Versioned host-owned native reviews and ruling 10/11 admission policy.
+//! Versioned host-owned native reviews and their admission policy.
 //! Registry records are exact-file SHA-256 reviews, never inferred from string
 //! co-occurrence. Generic dynamic loading without banned-name evidence requires
 //! actual runtime enforcement; it is not a proof of safe future behavior.

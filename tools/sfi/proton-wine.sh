@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # source this in a Wine test script so it runs under the Wine the game itself runs under.
 # GE-Proton11's Wine 11.0 refused what PATH's Wine 11.20 allowed (listing a held directory, the first kiln-mode start,
 # 2026-11-20), so a test that passes only under PATH's Wine proves little. Order: KILN_WINE (a wine binary; its

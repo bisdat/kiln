@@ -16,7 +16,7 @@
     },
     "unknownMixedDataNative": {
       "enum": ["save-sensitive", "listed-only"],
-      "description": "Owner decision D7. save-sensitive: a package with both data and native code and no row is treated as save-sensitive (conservative, the recommendation). listed-only: only rows here are."
+      "description": "save-sensitive: a package with both data and native code and no row is treated as save-sensitive (conservative, the recommendation). listed-only: only rows here are."
     },
     "packages": { "type": "array", "maxItems": 1024, "items": { "$ref": "#/$defs/row" } }
   },

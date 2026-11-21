@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! kiln-eml: the admission set of a kiln-mode start's pass, decided once before the pass and never widened:
 //! the plan's pass members (`PlanFacts::pass_members`), minus
-//! - every one when kiln-sfi never attached to the seam (ShroudForge dialect: `backend-unavailable`, K5): without the
+//! - every one when kiln-sfi never attached to the seam (ShroudForge dialect: `backend-unavailable`): without the
 //!   interpreter no ShroudForge Lua runs, so none of its data may either;
 //! - the packages the native terminal withdrew (`native-refused`, with the terminal's text and chain), or, when kiln-sfi
-//!   attached but no terminal arrived, every package with native code (`native-terminal-missing`, K6);
+//!   attached but no terminal arrived, every package with native code (`native-terminal-missing`);
 //! - in the ShroudForge dialect, a package the discovery does not have as the plan lists it (not found, switched off,
 //!   for the other side) and, in every dialect, one whose folder's content digest is no longer the plan's
 //!   (`package-changed`);

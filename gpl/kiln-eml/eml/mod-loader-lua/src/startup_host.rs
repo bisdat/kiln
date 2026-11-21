@@ -409,7 +409,7 @@ impl<'guard> StartupHost<'guard> {
         self.started = true;
         self.guard.check()?;
         self.witness.check_inputs(&self.game)?;
-        // kiln-eml (R1): the change journal of the receipt's generation goes before the live files change (it never
+        // kiln-eml: the change journal of the receipt's generation goes before the live files change (it never
         // names a generation that is not the live one)
         crate::ownership::forget_journal(&self.game, &self.name)?;
         let owned = crate::ownership::owns_output(&self.game, &self.name)?;
@@ -537,7 +537,7 @@ impl<'guard> StartupRecord<'guard> {
     }
 }
 
-/// kiln-eml (R1): the startup change journal of one archive, beside its ownership receipt
+/// kiln-eml: the startup change journal of one archive, beside its ownership receipt
 /// (`<game>/kiln/eml/ownership/<stem>.change-journal.json`): read freely; written and removed only while the install
 /// guard is held, written by an atomic replace as the receipts are. The bytes are kiln-eml's (startup-journal.schema.json);
 /// here only where they may be written: `write_for` refuses unless the receipt is still the one the journal is bound

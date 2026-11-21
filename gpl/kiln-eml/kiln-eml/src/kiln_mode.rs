@@ -17,7 +17,7 @@
 //!   skipped package, for one). The reason names the plan and its decision.
 //! - A package that needs ShroudForge's runtime and that the plan does not admit is skipped; the reason names the plan.
 //! - An EML package the plan does not list (an add_mod handover, a drop-in: an unrelated EML contributor) follows
-//!   [`unlisted_rule`] (owner question Q1): skipped with a reason in the ShroudForge and EML dialects (one pass per
+//!   [`unlisted_rule`]: skipped with a reason in the ShroudForge and EML dialects (one pass per
 //!   start, the plan's), the EML pass's own selection when the plan has no startup pass.
 //! - A plan that cannot be read again (changed or gone since the freeze, or not a plan kiln-sfi would read: see
 //!   [`parse_plan`]) runs nothing: kiln-eml cannot tell which package belongs to which pass.

@@ -51,7 +51,7 @@ fn factory_key(owner: &str) -> String {
 }
 
 /// The world whose `game_world_session` is ShroudForge's `world_session_id` for a runtime of
-/// `side` (the ruling every family reuses).
+/// `side` (the rule every family reuses).
 pub fn session_world_kind(side: Side) -> u32 {
     match side {
         Side::Server => KILN_WORLD_SERVER as u32,

@@ -1614,7 +1614,7 @@ fn an_eml_dialect_outcome_that_names_kiln_emls_package_lets_its_dependents_run()
     b.stop();
 }
 
-// ---- 6. K17: refused at the plugin step after kiln-eml applied the data ----
+// ---- 6. refused at the plugin step after kiln-eml applied the data ----
 
 #[test]
 fn a_start_refused_after_its_data_was_applied_says_the_data_stays() {

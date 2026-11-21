@@ -230,7 +230,7 @@ pub fn prune(root: &Path, stem: &str) {
         } else if temp_of(&name).is_some_and(|base| ["enshrouded", "enshrouded_server", stem].contains(&base)
             // kiln-eml: the owed ShroudForge handoff's marker
             || base == format!("{stem}.sf-handoff-owed")
-            // kiln-eml (R1): the startup change journal
+            // kiln-eml: the startup change journal
             || base == format!("{stem}.change-journal")
             || ["sf-handoff-", "cleanup-"].iter().any(|prefix| base.strip_prefix(prefix).is_some_and(is_uuid))) {
             if let Err(error) = fs::remove_file(&path) { tracing::warn!(%error, "Could not remove EML state temp"); }

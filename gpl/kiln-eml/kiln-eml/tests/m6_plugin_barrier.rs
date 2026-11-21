@@ -3,9 +3,9 @@
 //! kiln-eml's wiring of kiln.eml.startup v1 on the synthetic m6 archive, game-free: the early phase
 //! (`startup_seam::early`: the plan read as kiln-sfi reads it, the install lock, the startup controller's witness), the five members of the
 //! real C table driven as kiln-sfi drives them, the on_ready barrier through the runner (kiln mode goes to the startup
-//! pass), the grant (a PUBLISHED view acquired through kiln.eml.archive), and kiln/state/eml.json's rows. The K-cases of
-//! that belong here: K1 (lock busy), K5 (no attach), K6 (no terminal: the 20 s wait), K7 (a DLL
-//! changes the input), K14 (panics), K15 (the outcome before the barrier). Each start runs in a child process (the seam
+//! pass), the grant (a PUBLISHED view acquired through kiln.eml.archive), and kiln/state/eml.json's rows. The cases
+//! that belong here: lock busy, no attach, no terminal (the 20 s wait), a DLL changes the
+//! input, panics, and the outcome before the barrier. Each start runs in a child process (the seam
 //! is process-wide, one start per process). The full two-DLL integration is tested elsewhere.
 #[path = "support/m6_barrier/mod.rs"]
 mod barrier;
@@ -128,10 +128,10 @@ fn the_early_export_serves_one_table_and_grants_nothing() {
     });
 }
 
-// A kiln start end to end (K15 on the way): the witness is READY before any DLL could load; the outcome is UNAVAILABLE
+// A kiln start end to end: the witness is READY before any DLL could load; the outcome is UNAVAILABLE
 // until the barrier; the recheck confirms the input; the terminal is taken once; the barrier publishes once and grants
 // the published generation; the identity's pins are the launch's and acquire a PUBLISHED view; the state file shows the
-// pass's rows (source shroudforge) and an unlisted EML drop-in skipped (owner question Q1); after the barrier attach and
+// pass's rows (source shroudforge) and an unlisted EML drop-in skipped; after the barrier attach and
 // recheck are UNAVAILABLE; the record is the same at every read.
 #[test]
 fn a_kiln_start_is_witnessed_before_its_dlls_and_granted_once() {
@@ -196,7 +196,7 @@ fn a_kiln_start_is_witnessed_before_its_dlls_and_granted_once() {
         assert_eq!((rc, state, plan_id, reason), (KILN_OK, 1, plan_id_bytes(), None));
         assert_ne!(revision, 0);
         assert_eq!(sfi.witness(0).3, revision, "the state never changes once decided");
-        // K15: no outcome before the barrier
+        // no outcome before the barrier
         assert_eq!(sfi.outcome().0, KILN_ERR_UNAVAILABLE);
         // the recheck after the DLLs: the input unchanged; another witness is refused
         assert_eq!(sfi.recheck(plan_id, revision), (KILN_OK, None));
@@ -299,7 +299,7 @@ fn a_kiln_start_is_witnessed_before_its_dlls_and_granted_once() {
     });
 }
 
-// K5: kiln-sfi never attached (absent, refused early, its state not writable): the barrier does not wait; the
+// kiln-sfi never attached (absent, refused early, its state not writable): the barrier does not wait; the
 // ShroudForge dialect's packages are left out (backend-unavailable) and the BASE stays live.
 #[test]
 fn without_an_attach_the_barrier_does_not_wait() {
@@ -325,7 +325,7 @@ fn without_an_attach_the_barrier_does_not_wait() {
     });
 }
 
-// K6: kiln-sfi attached but pushed no terminal: the barrier waits 20 s from the attach (TERMINAL_WAIT), then the
+// kiln-sfi attached but pushed no terminal: the barrier waits 20 s from the attach (TERMINAL_WAIT), then the
 // packages with native code and what needs them are left out (native-terminal-missing); a terminal after the wait is
 // UNAVAILABLE and only noted for kiln.log.
 #[test]
@@ -381,7 +381,7 @@ fn an_attach_without_a_terminal_waits_twenty_seconds_from_the_attach() {
     );
 }
 
-// K1: the install lock is busy at the early witness (another process publishing game data): the witness is REFUSED
+// The install lock is busy at the early witness (another process publishing game data): the witness is REFUSED
 // (no DLL may load), the reason reaches kiln-sfi whole (BUFFER_TOO_SMALL gives the complete size and writes nothing
 // else), and on_ready blocks the start (the existing stop before the game's entry point); nothing is granted.
 #[test]
@@ -439,7 +439,7 @@ fn a_busy_install_lock_refuses_the_witness_and_blocks_the_start() {
     });
 }
 
-// K7 (owner question Q3): a package DLL changed the witnessed input: the recheck says how, the terminal carries it,
+// A package DLL changed the witnessed input: the recheck says how, the terminal carries it,
 // the pass publishes nothing and grants nothing, the record is failed without a BASE origin (carried note c: a start
 // without a grant records none), and kiln.log names the DLL packages that loaded; the start goes on.
 #[test]
@@ -560,7 +560,7 @@ fn unanswered(loaded: bool) {
 
 // The EML dialect through the wiring: the plan's EML package runs in the EML pass (the production port builds its
 // environment from the plan's root), publishes once, and its row is the pass's (pass "eml"); an unlisted EML drop-in is
-// skipped (owner question Q1: one pass per start, the plan's).
+// skipped (one pass per start, the plan's).
 #[test]
 fn the_eml_dialect_runs_the_plans_eml_package_and_no_unlisted_one() {
     in_child("the_eml_dialect_runs_the_plans_eml_package_and_no_unlisted_one", || {
@@ -723,7 +723,7 @@ fn a_refused_terminal_is_no_terminal() {
     });
 }
 
-// K14: a panic in the startup controller's witness is contained in the early phase: the witness is REFUSED, the start's
+// A panic in the startup controller's witness is contained in the early phase: the witness is REFUSED, the start's
 // outcome is refused and grants nothing.
 #[test]
 fn a_panic_in_the_witness_is_a_refused_witness() {
@@ -769,7 +769,7 @@ fn a_panic_in_the_witness_is_a_refused_witness() {
     });
 }
 
-// K14: a panic in the early phase before the witness (here taking the lock) installs no launch: attach is UNAVAILABLE
+// A panic in the early phase before the witness (here taking the lock) installs no launch: attach is UNAVAILABLE
 // (kiln-sfi loads no DLL and has no outcome), and on_ready runs nothing.
 #[test]
 fn a_panic_in_the_early_phase_installs_no_launch() {
@@ -792,7 +792,7 @@ fn a_panic_in_the_early_phase_installs_no_launch() {
     });
 }
 
-// K14 on_ready: a panic inside the pass is contained by the startup controller: the outcome is failed and grants nothing.
+// on_ready: a panic inside the pass is contained by the startup controller: the outcome is failed and grants nothing.
 #[test]
 fn a_panic_in_the_pass_grants_nothing() {
     in_child("a_panic_in_the_pass_grants_nothing", || {

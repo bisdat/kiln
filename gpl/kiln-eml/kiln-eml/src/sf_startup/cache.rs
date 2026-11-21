@@ -10,7 +10,7 @@
 //!   build (the runtime registrar's static answers).
 //! - **Value**: the outcome rows of the admitted packages (committed, failed, dependency-skipped), the receipt's
 //!   SHA-256, the attempt, the first and the retry's error, and the warnings. A retried success is cached with the full
-//!   key (the accepted set before the retry), so its warning repeats every start. Format 2 (R1): the
+//!   key (the accepted set before the retry), so its warning repeats every start. Format 2: the
 //!   SHA-256 of the generation's startup change journal (`sf_startup::journal`), written before this record.
 //! - **Hit**: the key is equal, nothing exports (an export cannot be replayed), and the generation the value names is
 //!   still live: the receipt's bytes are the recorded ones, its header is the one the start witnessed and every file
@@ -31,7 +31,7 @@ use crate::{
     startup::{Attempt, Data, PlanPackage, Row, Warning, dialect_word, hex},
 };
 
-/// The record's format; a new key or value shape gets a new number (2: the change journal's SHA-256, R1).
+/// The record's format; a new key or value shape gets a new number (2: the change journal's SHA-256).
 const FORMAT: u64 = 2;
 /// The SF pass's own schema: what one pass over the same key produces.
 const PASS_SCHEMA: u64 = 1;
@@ -119,7 +119,7 @@ pub fn lookup(
     let value = doc.get("value")?;
     let text = |v: &Value| v.as_str().map(str::to_owned);
     let receipt = text(value.get("receiptSha256")?)?;
-    // the generation keeps its change journal: the very bytes recorded with it (R1)
+    // the generation keeps its change journal: the very bytes recorded with it
     let journaled = journal.read().ok()??;
     if format!("{:x}", Sha256::digest(&journaled)) != value.get("journalSha256")?.as_str()? {
         return None;

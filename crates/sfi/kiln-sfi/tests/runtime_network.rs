@@ -1838,7 +1838,7 @@ fn send_mod_checks_the_size_after_serialization_and_maps_each_result() {
         call(&format!("string.rep('z', {}) .. '\"'", fits - 2)),
         (true, None)
     );
-    // R1's result texts.
+    // The raw family's result texts.
     for (send_result, eresult, expected) in [
         (
             KILN_OK,

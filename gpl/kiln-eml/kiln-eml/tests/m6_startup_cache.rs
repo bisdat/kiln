@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The startup cache of the ShroudForge dialect (`kiln/eml/cache/sf-startup-<stem>.json`) and the startup controller's
-//! kill points (K8, K12, K13, with real process kills): a hit replays the outcome, the skip rows of a retried success
+//! kill points (with real process kills): a hit replays the outcome, the skip rows of a retried success
 //! included; every key part misses on its own; a kill between the publication and the cache record means a miss and
 //! the same rows next start, one after the record a hit; a kill in either attempt or between them publishes nothing and
 //! the next start recovers.
@@ -40,7 +40,7 @@ fn rows(out: &StartupOutcome) -> Vec<(String, Data, Option<String>, Vec<String>)
         .collect()
 }
 
-// A hit (K13's next start without a kill): the same key and the generation it recorded still live: no attempt runs,
+// A hit: the same key and the generation it recorded still live: no attempt runs,
 // and the outcome is the recorded one (attempt, both errors, warnings, the failed and dependency-skipped rows), the
 // committed rows cached-verified, the same receipt granted.
 #[test]
@@ -411,7 +411,7 @@ fn reference(packages: fn(&Start)) -> StartupOutcome {
     s.start(&s.plan(StartupDialect::Shroudforge, &[]), &native()).1
 }
 
-// K12: killed after the one publication, before the cache record: next start the cache misses (no record of this
+// Killed after the one publication, before the cache record: next start the cache misses (no record of this
 // receipt), the pass runs again and the rows are the uninterrupted start's.
 #[test]
 fn a_kill_between_publication_and_cache_record_misses_next_start_with_the_same_rows() {
@@ -439,7 +439,7 @@ fn a_kill_between_publication_and_cache_record_misses_next_start_with_the_same_r
     );
 }
 
-// K13: killed after the cache record (before kiln-sfi could read the outcome): next start hits, with the identical
+// Killed after the cache record (before kiln-sfi could read the outcome): next start hits, with the identical
 // outcome (the skip rows included).
 #[test]
 fn a_kill_after_the_cache_record_hits_next_start_with_the_identical_outcome() {
@@ -469,7 +469,7 @@ fn a_kill_after_the_cache_record_hits_next_start_with_the_identical_outcome() {
     assert_eq!((out.attempt, &out.warnings), (expected.attempt, &expected.warnings));
 }
 
-// K8: killed in the first attempt, between the attempts, or in the retry (after its stage was prepared): nothing of
+// Killed in the first attempt, between the attempts, or in the retry (after its stage was prepared): nothing of
 // the start is live (the old set), the recorded stage is reclaimed by the next start's clean-up, which then runs the
 // whole pass and publishes; the install lock was never released in between (the child held it until it died).
 #[test]

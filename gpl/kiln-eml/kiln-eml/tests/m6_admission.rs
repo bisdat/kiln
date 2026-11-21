@@ -157,8 +157,8 @@ fn a_withdrawn_package_outside_the_pass_still_takes_its_dependents_out() {
     );
 }
 
-// No kiln-sfi (K5): every member of the ShroudForge pass is backend-unavailable; the EML dialect does not need it. No
-// terminal (K6): the packages with native code and what needs them are native-terminal-missing.
+// No kiln-sfi: every member of the ShroudForge pass is backend-unavailable; the EML dialect does not need it. No
+// terminal: the packages with native code and what needs them are native-terminal-missing.
 #[test]
 fn without_kiln_sfi_or_its_terminal_the_native_side_decides_nothing_it_did_not_report() {
     let members = || {

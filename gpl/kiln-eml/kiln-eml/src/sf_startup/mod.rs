@@ -84,7 +84,7 @@ pub mod cache;
 pub mod common;
 pub mod format_adapter;
 pub mod game;
-// R1: the startup change journal (what each package's entrypoint changed), recorded by the asset session.
+// The startup change journal (what each package's entrypoint changed), recorded by the asset session.
 pub mod journal;
 // One attempt's frozen host selections.
 pub mod plan;

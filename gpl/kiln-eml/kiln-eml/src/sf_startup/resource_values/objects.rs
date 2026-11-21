@@ -35,7 +35,7 @@ pub trait AssetUserdata {
     fn content_hash(&self, ud: &AnyUserData) -> mlua::Result<Option<ContentHash>>;
 }
 
-/// kiln-eml (R1, the startup change journal): what a typed value belongs to. Every wrapper made for a resource's value
+/// kiln-eml (the startup change journal): what a typed value belongs to. Every wrapper made for a resource's value
 /// (decoded from it, validated into it, cloned into it) carries its resource's owner, and each write through such a
 /// wrapper (an assignment, insertion, removal or clear) tells it, so the journal knows exactly which resources a
 /// package's entrypoint wrote, without walking any value. A value without an owner (a Buffer's, `runtime.values`') tells
@@ -48,7 +48,7 @@ pub trait WriteOwner {
 #[derive(Clone, Default)]
 pub struct ValueObjects {
     assets: Option<Rc<dyn AssetUserdata>>,
-    /// kiln-eml (R1): the resource the wrappers made from this belong to (`owned_by`), None for the session's own.
+    /// kiln-eml: the resource the wrappers made from this belong to (`owned_by`), None for the session's own.
     owner: Option<Rc<dyn WriteOwner>>,
 }
 
@@ -68,7 +68,7 @@ impl ValueObjects {
         }
     }
 
-    /// kiln-eml (R1): the same seam for the values of one resource: every wrapper made from it (decoded, validated or
+    /// kiln-eml: the same seam for the values of one resource: every wrapper made from it (decoded, validated or
     /// cloned into it, and their children) reports its writes to `owner`.
     pub fn owned_by(&self, owner: Rc<dyn WriteOwner>) -> Self {
         Self {
@@ -77,7 +77,7 @@ impl ValueObjects {
         }
     }
 
-    /// kiln-eml (R1): a wrapper made from this seam was written (after the write took effect).
+    /// kiln-eml: a wrapper made from this seam was written (after the write took effect).
     pub(crate) fn wrote(&self) {
         if let Some(owner) = &self.owner {
             owner.wrote();
@@ -140,7 +140,7 @@ impl TypedObjects for ValueObjects {
     fn clone_object(&self, ud: &AnyUserData, lua: &Lua) -> mlua::Result<LuaValue> {
         let _level = Level::enter()?;
         let id = type_id(ud)?;
-        // kiln-eml (R1): the copy belongs to this seam's resource (where it is assigned), not to its source's
+        // kiln-eml: the copy belongs to this seam's resource (where it is assigned), not to its source's
         let created = if id == TypeId::of::<StructValue>() {
             lua.create_userdata(ud.borrow::<StructValue>()?.try_clone_lua(lua, self)?)
         } else if id == TypeId::of::<MappedStructValue>() {

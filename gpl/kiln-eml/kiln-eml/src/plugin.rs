@@ -997,7 +997,6 @@ unsafe extern "C" fn eml_stand_aside(reason: KilnStr) -> i32 {
         if RAN.load(Ordering::Acquire) { return KILN_ERR_UNAVAILABLE; }
         if let Some(game) = kpath(KILN_PATH_GAME) {
             if runner::lock_game(&game).is_err() { return KILN_ERR_UNAVAILABLE; }
-            // (owner question Q2)
             settle_owed_handoff_under_hosted(&game);
         } else { return KILN_ERR_UNAVAILABLE; }
         RAN.store(true, Ordering::Release);
@@ -1432,7 +1431,7 @@ mod tests {
     /// The game's executable stem in a child process (`exe_stem`): the test binary's own name is not a game's.
     pub(super) static EXE_STEM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
-    /// Owner question Q2: a hosted start's stand_aside makes the handoff an earlier kiln-mode start owes ShroudForge. With
+    /// A hosted start's stand_aside makes the handoff an earlier kiln-mode start owes ShroudForge. With
     /// the marker there and ShroudForge's record `applied` for this archive, the record is marked stale (`failed`, Kiln's
     /// text) and the marker goes, and kiln.log says so. ShroudForge busy (its write lock held) keeps both and kiln.log says
     /// the next start tries again; the hosted start goes on either way. In child processes: the API pointer, RAN and the

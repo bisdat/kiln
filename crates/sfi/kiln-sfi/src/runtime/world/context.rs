@@ -28,7 +28,7 @@
 //!
 //! **The live context** ([`WorldContext::read`], one coherent sample) comes from Kiln's own world facts only, with
 //! no ECS read and no engine memory:
-//! - the session world is the plan side's (`session_world_kind`, the ruling every family reuses: the server world
+//! - the session world is the plan side's (`session_world_kind`, the rule every family reuses: the server world
 //!   on a server, the client world on a client), and the session is its `kiln.world.game_world_session`;
 //! - that generation is sampled before and after two reads of the core's `session` record; any change between them
 //!   is no session, as in kiln.world's own world facts;

@@ -7,7 +7,7 @@
 //! - [`digest`]: a package folder's content digest, the `content_sha256` a plan pins (the
 //!   plan's writer and kiln-sfi compute it with this one function).
 //! - [`pe_gate`]: the read-only PE32+ import gate. It never calls the Windows loader.
-//! - [`native_contracts`]: the host-owned exact-hash review registry and the ruling 10/11
+//! - [`native_contracts`]: the host-owned exact-hash review registry and the admission
 //!   verdicts, plus [`native_contracts::AdvisoryInventory`] for host-side inventories.
 //! - [`same_folder`]: one folder by any of its names (a Windows name key and a file identity).
 //! - [`native_selection`]: ShroudForge's DLL Manager selection over Kiln-owned inputs,

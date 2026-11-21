@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //!
 //! The ShroudForge row of the launcher's engine status while a game's ShroudForge-format mods go to Kiln's interpreter
 //! ([`crate::sfi_routing::Route::Interpreter`]): read from kiln-sfi's own `kiln/state/sfi.json` (format 1, writer

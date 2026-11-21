@@ -1756,7 +1756,7 @@ fn lua_is_json(lua: &mlua::Value, json: &serde_json::Value, path: &str) -> Resul
 /// catalog (it has no archive reader and panics there), so fixtures/m6/startup/attributes/golden.json was made by
 /// compiling ShroudForge 1.7.9's reflection/build_attribute_catalog.rs, evaluate_attribute_program.rs,
 /// traverse_reflected_types.rs and attributes/format_attribute_root.rs unchanged over archive.json written with
-/// ShroudForge's own kfc-parser (out/v2-g09c/tools/sf-attr-oracle; a few lines of glue copy the Lua bindings' code
+/// ShroudForge's own kfc-parser (a small oracle tool outside the repository; a few lines of glue copy the Lua bindings' code
 /// between the catalog and Lua). Kiln's startup VM, over the same archive written by EML's writer, answers
 /// runtime.ecs.get_attributes, get_attribute (every descriptor field, layout and program decode) and
 /// evaluate_attributes (values, trace, model, scalar type, and the unverified-program refusal) exactly as that JSON

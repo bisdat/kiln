@@ -59,7 +59,7 @@ never a load permit.
 package-local dependencies with cycle tracking, rejects ambiguous/case-colliding
 inventory, and reports banned module names regardless of case or path spelling.
 The low-level `pe_gate` reports structural inspection separately from effective
-admission. `native_contracts` applies rulings 10/11: malformed/opaque graphs and
+admission. `native_contracts` applies the admission rules: malformed/opaque graphs and
 static banned imports are refused; banned-name/prefix evidence without an exact
 SHA-256 contract needs a contract; generic unknown dynamic behavior with no banned
 name is admitted only with runtime enforcement. String evidence is never a proof

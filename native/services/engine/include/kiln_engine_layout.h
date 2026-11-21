@@ -103,8 +103,8 @@ inline constexpr std::size_t kCallRecipes = 8, kCallRanges = 32, kCallArguments 
 // The recipe ids, frozen: the same id names the same kind of call on every build, and an engineCalls entry is keyed by
 // its name (generate.py CALL_RECIPE_IDS, compared with this enum by test_generate.py). New ids are appended.
 enum class CallRecipeId : std::uint32_t {
-    PropSpawnSubmit = 1,    // the building-prop spawn's engine submit (L9a)
-    PropDestroySubmit = 2,  // the building-prop destroy's engine submit (L9b)
+    PropSpawnSubmit = 1,    // the building-prop spawn's engine submit
+    PropDestroySubmit = 2,  // the building-prop destroy's engine submit
     ImpactSameEntity = 3,   // the Impact registered operation on its own entity
 };
 static_assert(static_cast<std::size_t>(CallRecipeId::ImpactSameEntity) <= kCallRecipes, "every id has a slot");

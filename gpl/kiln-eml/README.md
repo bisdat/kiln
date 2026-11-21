@@ -409,7 +409,7 @@ Each is marked `kiln-eml:` in the source.
     `Mutex` and a `Condvar`, nothing that needs the loader lock). Its early on_ready is the barrier: at most 20 s after
     kiln-sfi's attach for the native terminal (read strictly), then the startup controller's pass, one publication, and the grant
     (`authorize_with_archive`, PUBLISHED, once). Kiln mode never runs an EML mod on its own: the plan decides every
-    package, an unlisted EML contributor is skipped in the ShroudForge and EML dialects (owner question Q1), and
+    package, an unlisted EML contributor is skipped in the ShroudForge and EML dialects, and
     kiln/state/eml.json shows the pass's rows (`source: "shroudforge"`). A hosted start's `stand_aside` settles the handoff
     a kiln-mode start owed ShroudForge. No new write boundary (the pass's are the startup controller's); one new `Mutex` (in MUTEXES).
     The early step also makes the process's first Lua state, so the barrier's pass loads no library and resolves no
@@ -432,8 +432,8 @@ Each is marked `kiln-eml:` in the source.
     after each assignment, insertion, removal, clear and variant `value` of the six wrappers; a deep copy belongs to the
     seam it is copied into, not to its source), `sf_startup/runner.rs`, `sf_startup/cache.rs` (record format 2),
     `startup.rs` (`Point::Journaled`) and `mod-loader-lua` `ownership.rs` (`journal_path`, `forget_journal`,
-    `before_restore`), `startup_host.rs` (`StartupJournal`, `restore_base`), `cleanup.rs` (the journal's temps) (R1,
-    kiln-eml's own code): the startup change journal of a kiln-mode ShroudForge-dialect start,
+    `before_restore`), `startup_host.rs` (`StartupJournal`, `restore_base`), `cleanup.rs` (the journal's temps) (kiln-eml's
+    own code): the startup change journal of a kiln-mode ShroudForge-dialect start,
     `kiln/eml/ownership/<stem>.change-journal.json` (`schema/sfi/eml-journal/startup-journal.schema.json`), a record of
     its own beside the receipt, never part of the startup outcome. Per package of the committed attempt, in the order
     the entrypoints ran, with its plan identity (id, version, kind, content and settings digests): the resources its

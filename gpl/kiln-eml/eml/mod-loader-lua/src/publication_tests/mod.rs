@@ -147,7 +147,7 @@ struct Case {
     old_owned: bool,
     /// Every file below `<game>/shroudforge` (name and bytes) before the step: kiln mode must leave it as it is.
     sf_tree: Vec<(String, Vec<u8>)>,
-    /// R1: the receipt the setup's change journal names (kiln-mode scenarios over a journaled generation).
+    /// The receipt the setup's change journal names (kiln-mode scenarios over a journaled generation).
     journal: Option<String>,
 }
 
@@ -266,7 +266,7 @@ fn lent_with(root: &Utf8Path, handoff: crate::ownership::SfHandoff) -> anyhow::R
     drop(reader);
     let published = prepared.publish()?;
     if handoff == crate::ownership::SfHandoff::Deferred {
-        // kiln mode (R1): the generation's change journal, bound to the receipt the publication left, as kiln-eml's
+        // kiln mode: the generation's change journal, bound to the receipt the publication left, as kiln-eml's
         // startup controller writes it after its one publication
         let receipt = published
             .receipt_sha256()
@@ -306,7 +306,7 @@ fn plant_journal(f: &ArchiveFixture) -> String {
     receipt
 }
 
-/// R1: a change journal on disk names the receipt beside it, whose generation is live and owned, published whole: the
+/// A change journal on disk names the receipt beside it, whose generation is live and owned, published whole: the
 /// setup's (the old set still live) or the step's (the new set).
 fn journal_bound(case: &Case, state: &str, label: &str) {
     let f = &case.f;
@@ -418,7 +418,7 @@ fn setup(scenario: Scenario) -> Case {
     let old = f.semantics();
     let old_owned = crate::owns_output(f.game.as_std_path(), STEM).unwrap();
     let sf_tree = sf_tree(&f);
-    // R1: the kiln-mode scenarios and EML's own no-mod restore start over a journaled generation (a kiln-mode start
+    // The kiln-mode scenarios and EML's own no-mod restore start over a journaled generation (a kiln-mode start
     // journaled it; the restore runs when the player left kiln mode)
     let journal = (scenario.deferred() || scenario == Scenario::Restore).then(|| plant_journal(&f));
     Case {
@@ -606,7 +606,7 @@ fn recover(case: &Case, scenario: Scenario, new: &SemanticSet, label: &str) {
             }
         }
     }
-    // R1: kiln mode's recovery never leaves a change journal for another generation than the live one: the redone
+    // Kiln mode's recovery never leaves a change journal for another generation than the live one: the redone
     // publication's, bound to its receipt, or none after the verified BASE
     match scenario {
         Scenario::Deferred => {
@@ -631,7 +631,7 @@ fn recover(case: &Case, scenario: Scenario, new: &SemanticSet, label: &str) {
             "{label}: final restore {round}"
         );
     }
-    // R1: no change journal outlives the no-mod restore that took its generation away (EML's own restore removes it
+    // No change journal outlives the no-mod restore that took its generation away (EML's own restore removes it
     // before the first live file changes)
     assert_eq!(journal_names(f), None, "{label}: a change journal outlived the final restore");
     for path in &planted_child {
@@ -1046,7 +1046,7 @@ fn every_file_lock_and_process_of_this_crate_goes_through_the_gate() {
     assert!(bypass.is_empty(), "outside the test gate (test_gate.rs):\n{}", bypass.join("\n"));
 }
 
-/// R1: the change journal is written only for the receipt that is live now and only under the held install guard; an
+/// The change journal is written only for the receipt that is live now and only under the held install guard; an
 /// EML-mode (Live) publication over a journaled generation removes it before its receipt changes, and so does EML's own
 /// no-mod restore before the live files change; the next start's clean-up removes a journal temp a crash left.
 #[test]
@@ -1193,7 +1193,7 @@ fn required(scenario: Scenario) -> Vec<&'static str> {
             points.push("cleanup.container-removed game/enshrouded_004.dat");
         }
         Scenario::Restore => points.extend([
-            // R1: the setup's change journal goes before the restore changes a live file
+            // The setup's change journal goes before the restore changes a live file
             "journal.removed ownership/enshrouded.change-journal.json",
             "temp.replaced game/enshrouded.kfc",
             "temp.replaced game/enshrouded.kfc_resources",
@@ -1213,7 +1213,7 @@ fn required(scenario: Scenario) -> Vec<&'static str> {
                 "stage.lent-taken-back stage/writer",
                 "stage.serialized-resource-written stage/resource",
                 "temp.replaced ownership/enshrouded.sf-handoff-owed.json",
-                // R1: the setup's change journal goes before the receipt is replaced; the step's is written last
+                // The setup's change journal goes before the receipt is replaced; the step's is written last
                 "journal.removed ownership/enshrouded.change-journal.json",
                 "temp.replaced ownership/enshrouded.change-journal.json",
             ]);

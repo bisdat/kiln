@@ -89,7 +89,7 @@
   },
   "d2a-foreign-surface.json": {
     "path": "/delivery/0/surface",
-    "why": "under D2(a) kiln-sfi records only its own native surface"
+    "why": "kiln-sfi records only its own native surface"
   },
   "shown-without-time.json": {
     "path": "/delivery/0",

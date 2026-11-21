@@ -256,7 +256,7 @@ Row mapping (data values are sfi-state's):
 
 Codes are the sfi-state code grammar, not a closed list (the witness refusal reasons come from kiln-eml's inspector).
 
-## The startup change journal (R1)
+## The startup change journal
 
 A kiln-mode start in the ShroudForge dialect that publishes a generation also writes its change journal beside the
 ownership receipt: `<game>/kiln/eml/ownership/<stem>.change-journal.json` (`schema/sfi/eml-journal/startup-journal.schema.json`,

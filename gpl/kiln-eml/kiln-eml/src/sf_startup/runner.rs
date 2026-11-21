@@ -112,7 +112,7 @@ impl<'guard> PreparedStartup<'guard> {
     pub fn ran(&self) -> &[String] {
         &self.ran
     }
-    /// kiln-eml (R1): what each package's entrypoint changed in this attempt (`sf_startup::journal`), recorded by its
+    /// kiln-eml: what each package's entrypoint changed in this attempt (`sf_startup::journal`), recorded by its
     /// asset session from before the first entrypoint until the stage was prepared.
     pub fn journal(&self) -> &Journal {
         &self.journal
@@ -215,7 +215,7 @@ pub fn run_attempt<'guard>(
         if plan.features().export {
             effects.exporting.push(id.to_owned());
         }
-        // kiln-eml (R1): what the session is asked to change while this entrypoint runs is this package's
+        // kiln-eml: what the session is asked to change while this entrypoint runs is this package's
         shared.assets.begin_package(id);
         let entered = vm.entrypoint(id);
         shared.assets.end_package();
@@ -230,7 +230,7 @@ pub fn run_attempt<'guard>(
         step(Step::EntryRan(id))?;
     }
 
-    // 7: the commit into the stage, with the VM alive. The journal is taken first (R1): no Lua runs from here until the
+    // 7: the commit into the stage, with the VM alive. The journal is taken first: no Lua runs from here until the
     // resources are serialized (`LentStage::prepare_with`), so it holds everything the stage will.
     let journal = shared.assets.take_journal();
     let (archive, applied) = match lent {

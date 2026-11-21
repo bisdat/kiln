@@ -878,7 +878,7 @@ pub fn incoherent(terminal: &NativeTerminal) -> Option<String> {
     ))
 }
 
-/// K17: Kiln's interpreter will not run this start after kiln-eml's startup outcome was read. sfi.json gets the
+/// Kiln's interpreter will not run this start after kiln-eml's startup outcome was read. sfi.json gets the
 /// outcome's rows, and every package whose data is in the live generation and whose Lua part now does not run a skip
 /// (`code`, part lua): its warning says the data is applied and its runtime stopped
 /// (presence `data-applied-runtime-stopped`). In memory only; the refused record that follows writes it.

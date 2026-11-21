@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! R1: the startup change journal of a kiln-mode ShroudForge-dialect start (`kiln/eml/ownership/<stem>.change-journal.json`,
+//! The startup change journal of a kiln-mode ShroudForge-dialect start (`kiln/eml/ownership/<stem>.change-journal.json`,
 //! sf_startup/journal.rs, startup.rs): per package of the committed attempt the resources its entrypoint wrote, the
 //! ones it created (by ordinal) and the contents it created, bound to the published generation; a cache hit keeps it
 //! byte for byte; a verified BASE removes it; an injected failure and a real kill at each new step never leave a
@@ -171,7 +171,7 @@ fn mixed_plan(s: &Start) -> PlanFacts {
     plan
 }
 
-// Red test (R1): a mixed ShroudForge/EML pass with a retry journals only the committed attempt's changes, each named
+// A mixed ShroudForge/EML pass with a retry journals only the committed attempt's changes, each named
 // for the package whose entrypoint made it: two packages editing one resource are both named, a package that only
 // read is named with nothing, writes through references kept from another package name the writer (and the creator's
 // ordinal for a created resource), a package's writes into its own creations are not listed again, the failed
@@ -576,7 +576,7 @@ fn spawn_child(game: &Path, park: &str, nth: usize, marker: &Path) -> std::proce
 /// The kill tests' child process: one kiln-mode start (ShroudForge dialect, every discovered package) over the
 /// parent's game folder, stopped at the `nth` point `park` until it is killed.
 #[test]
-#[ignore = "child process of the R1 kill tests; does nothing without KILN_R1_CHILD"]
+#[ignore = "child process of the change-journal kill tests; does nothing without KILN_R1_CHILD"]
 fn journal_kill_child() {
     let Ok(spec) = std::env::var("KILN_R1_CHILD") else {
         return;

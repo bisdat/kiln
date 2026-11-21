@@ -95,7 +95,7 @@ pub(crate) struct AssetInner {
     /// The reference archive's attribute catalog, built on first use and kept for the VM's life, its failure included
     /// (SF `AppState::attribute_catalog`'s OnceCell).
     attributes: OnceCell<Result<Rc<Catalog>, String>>,
-    /// kiln-eml (R1): the startup change journal's recorder: every resource value this session decodes, validates or
+    /// kiln-eml: the startup change journal's recorder: every resource value this session decodes, validates or
     /// copies carries its resource as owner (`resource_objects`), creations and contents are noted here.
     journal: Rc<Recorder>,
 }
@@ -145,17 +145,17 @@ impl AssetSession {
         }))
     }
 
-    /// kiln-eml (R1): `package`'s entrypoint begins; what the session is asked to change from now on is its own.
+    /// kiln-eml: `package`'s entrypoint begins; what the session is asked to change from now on is its own.
     pub fn begin_package(&self, package: &str) {
         self.0.journal.begin(package);
     }
 
-    /// kiln-eml (R1): the running entrypoint returned (or failed).
+    /// kiln-eml: the running entrypoint returned (or failed).
     pub fn end_package(&self) {
         self.0.journal.end();
     }
 
-    /// kiln-eml (R1): what each package's entrypoint changed; nothing is noted afterwards.
+    /// kiln-eml: what each package's entrypoint changed; nothing is noted afterwards.
     pub fn take_journal(&self) -> Journal {
         self.0.journal.take()
     }
@@ -268,7 +268,7 @@ impl AssetInner {
         Resource::new(info, Rc::downgrade(this))
     }
 
-    /// kiln-eml (R1): the typed-object seam of resource `id`'s values: everything made from it reports its writes to
+    /// kiln-eml: the typed-object seam of resource `id`'s values: everything made from it reports its writes to
     /// the journal as writes of `id`.
     fn resource_objects(&self, id: ResourceId) -> ValueObjects {
         self.objects

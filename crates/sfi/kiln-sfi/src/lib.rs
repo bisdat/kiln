@@ -900,7 +900,7 @@ impl Boundary {
         plan_source::follow_startup(owner, read);
     }
 
-    /// K17: kiln-sfi refuses a start after kiln-eml's startup outcome could be read: sfi.json gets the outcome's rows,
+    /// kiln-sfi refuses a start after kiln-eml's startup outcome could be read: sfi.json gets the outcome's rows,
     /// and each package whose data kiln-eml applied and whose Lua now does not run a warning that its data stays applied
     /// with its runtime stopped. Before the refused record is written (it is final).
     fn record_after_outcome(&self, code: &str, text: &str) {

@@ -206,7 +206,7 @@ fn receipt_path(root: &Path, stem: &str) -> io::Result<PathBuf> {
     Ok(path)
 }
 
-/// kiln-eml (R1): the startup change journal kiln-eml's startup controller writes beside the receipt
+/// kiln-eml: the startup change journal kiln-eml's startup controller writes beside the receipt
 /// (`kiln/eml/ownership/<stem>.change-journal.json`), bound to the generation the receipt lists. It is written only
 /// after a publication's last receipt write (`StartupJournal::write_for`, which checks the receipt is still that one)
 /// and removed before any write that replaces or removes the receipt or changes the live files (`prepare_from`, ahead of
@@ -222,7 +222,7 @@ pub(crate) fn journal_path(root: &Path, stem: &str) -> io::Result<PathBuf> {
     Ok(path)
 }
 
-/// kiln-eml (R1): removes the change journal (none is fine) and syncs the folder; Ok(true) when there was one.
+/// kiln-eml: removes the change journal (none is fine) and syncs the folder; Ok(true) when there was one.
 pub(crate) fn forget_journal(root: &Path, stem: &str) -> io::Result<bool> {
     let path = journal_path(root, stem)?;
     match fs::remove_file(&path) {
@@ -504,7 +504,7 @@ pub(crate) fn prepare_from(root: &Path, from: &Path, stem: &str, files: &[PathBu
         _ => None,
     };
     let unproven = collisions.keys().cloned().collect();
-    // kiln-eml (R1): the change journal names the generation of the receipt this publication replaces: it goes before
+    // kiln-eml: the change journal names the generation of the receipt this publication replaces: it goes before
     // the publication writes anything (one that cannot be removed refuses the publication with nothing changed)
     forget_journal(root, stem)?;
     let moves = if collisions.is_empty() { None } else { Some(crate::displacement::Plan::record(root, stem, vanilla.flatten().unwrap(), collisions)?) };
@@ -782,7 +782,7 @@ pub(crate) fn before_restore(root: &Path, stem: &str, mode: SfHandoff) -> io::Re
     if !owns_output(root, stem)? {
         return Err(invalid("the live archives or backups no longer match kiln-eml's ownership receipt; retained without restoring"));
     }
-    // kiln-eml (R1): the change journal names the generation this restore takes away (EML's own no-mod restore too): it
+    // kiln-eml: the change journal names the generation this restore takes away (EML's own no-mod restore too): it
     // goes before any live file changes (one that cannot be removed refuses the restore with nothing changed)
     forget_journal(root, stem)?;
     let mut live = Live::new(root);
@@ -859,7 +859,7 @@ pub fn settle_owed_handoff(root: &Path, stem: &str) -> io::Result<bool> {
 pub(crate) fn forget_receipt(root: &Path, stem: &str) -> io::Result<bool> {
     let path = receipt_path(root, stem)?;
     let receipt = read_receipt(root, stem)?;
-    // kiln-eml (R1): the change journal goes before the receipt it is bound to (and a stray one without a receipt too)
+    // kiln-eml: the change journal goes before the receipt it is bound to (and a stray one without a receipt too)
     forget_journal(root, stem)?;
     if receipt.is_none() { return Ok(false); }
     fs::remove_file(&path)?;

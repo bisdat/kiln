@@ -13,12 +13,12 @@
 //! - [`envelope`]: compact JSON with ShroudForge's key order (`protocol`, `from_mod`,
 //!   `to_mod`, `payload`; its workspace builds serde_json with `preserve_order`), written here
 //!   key by key so the bytes do not depend on this build's serde_json features. The size cap is
-//!   checked on the serialized bytes, by R1's [`Network::send_bytes`].
+//!   checked on the serialized bytes, by the raw family's [`Network::send_bytes`].
 //! - [`open`]: what `receive_mod` keeps of a message. Anything else is dropped silently: not
 //!   JSON, another protocol, a `to_mod` other than the local id, a `from_mod` or `payload`
 //!   that is not a string. Extra keys are ignored. The sender is not verified beyond that.
-//! - Both functions use R1's denial chain under `runtime.network.send` / `receive` (not their
-//!   own operation names), R1's send ([`Network::send_bytes`]) and R1's receive loop
+//! - Both functions use the raw family's denial chain under `runtime.network.send` / `receive` (not their
+//!   own operation names), its send ([`Network::send_bytes`]) and its receive loop
 //!   ([`super::raw::receive_loop`]): no second receive path, no requeue, no buffering.
 
 use super::Network;
@@ -112,7 +112,7 @@ pub fn send_mod(lua: &Lua, network: Rc<Network>) -> mlua::Result<Function> {
     )
 }
 
-/// `receive_mod(limit)` (network.rs:350-409): R1's receive loop on the local mod's channel; a
+/// `receive_mod(limit)` (network.rs:350-409): the raw receive loop on the local mod's channel; a
 /// kept message is `{peer_steam_id, from_mod, to_mod = the local id, payload, reliable}`.
 pub fn receive_mod(lua: &Lua, network: Rc<Network>) -> mlua::Result<Function> {
     lua.create_function(move |lua, limit: Option<usize>| {

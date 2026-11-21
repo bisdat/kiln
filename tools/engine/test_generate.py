@@ -329,8 +329,7 @@ class TypedResourceLayout(unittest.TestCase):
 
 class CallRecipes(unittest.TestCase):
     """Ported profiles carry no reviewed engine call. Every Profile row's Layout ends with an empty CallRecipes{}
-    record, and that record is the only thing the row gained (out/v2-li3/scripts/profiles_bytes_proof.py compares the
-    rest with the parent's file byte for byte)."""
+    record, and that record is the only thing the row gained (the rest is byte for byte the parent's file)."""
 
     def test_each_profile_row_ends_with_empty_call_recipes(self):
         generated = (ROOT / g.OUTPUT).read_text(encoding='utf-8')

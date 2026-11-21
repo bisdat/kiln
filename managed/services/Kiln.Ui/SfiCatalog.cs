@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// The ShroudForge group of the Kiln menu's mod list in a kiln-backend start (Kiln's interpreter runs ShroudForge's mods):
+// The ShroudForge group of the Kiln menu's mod list in a kiln-backend start (Kiln's interpreter runs the ShroudForge mods):
 // ModCatalog.Read decides once per snapshot, before any ShroudForge folder, status, assets or actions path, which branch
 // this start takes (Decide), and in every branch but Legacy builds the group here instead of ModCatalog.ShroudForge.
 //
@@ -238,13 +238,13 @@ internal static class SfiCatalog
         return b.Kind switch
         {
             SfiBranchKind.External => ("external", EngineHealth.Idle,
-                "ShroudForge's own loader runs ShroudForge's mods this start, so Kiln's interpreter did not start" +
+                "ShroudForge's own loader runs the ShroudForge mods this start, so Kiln's interpreter did not start" +
                 (b.SfReason is { Length: > 0 } r ? $" ({Clip(r, 300)})." : ".")),
             SfiBranchKind.Unknown => ("unknown", EngineHealth.Problem, $"{Interpreter}'s state cannot be read ({Clip(b.Why ?? "", 300)}): nothing is shown as running until it can."),
-            _ when record is null => ("pending", EngineHealth.Idle, $"{Interpreter} runs ShroudForge's mods this start; it has not reported yet."),
+            _ when record is null => ("pending", EngineHealth.Idle, $"{Interpreter} runs the ShroudForge mods this start; it has not reported yet."),
             _ => record.Phase switch
             {
-                "running" => ("running", EngineHealth.Ok, $"{Interpreter} runs ShroudForge's mods this start. Pick a mod to see what runs and change its settings (changes apply at the next start)."),
+                "running" => ("running", EngineHealth.Ok, $"{Interpreter} runs the ShroudForge mods this start. Pick a mod to see what runs and change its settings (changes apply at the next start)."),
                 "starting" => ("starting", EngineHealth.Ok, $"{Interpreter} is starting ShroudForge's mods."),
                 "ended" => ("ended", EngineHealth.Idle, $"{Interpreter} has stopped for this start."),
                 _ => ("refused", EngineHealth.Problem, $"{Interpreter} did not start this start: {Clip(record.ReasonText ?? "", 500)}"),
@@ -256,7 +256,7 @@ internal static class SfiCatalog
     private static (ModRunState, string, string, string?) Default(SfiBranch b) => b.Kind switch
     {
         SfiBranchKind.External => (ModRunState.NotLoaded, "external",
-            "ShroudForge's own loader runs ShroudForge's mods this start, not Kiln's interpreter: Kiln cannot confirm this mod.", null),
+            "ShroudForge's own loader runs the ShroudForge mods this start, not Kiln's interpreter: Kiln cannot confirm this mod.", null),
         SfiBranchKind.Unknown => (ModRunState.Waiting, "unknown", $"{Interpreter}'s state cannot be read, so whether it runs this mod is not known.", null),
         _ when b.State.Record is null => (ModRunState.Waiting, "unconfirmed", $"{Interpreter} has not reported this start yet.", null),
         _ when b.State.Record.Phase == "refused" => (ModRunState.NotLoaded, "refused", $"{Interpreter} did not start this start: {Clip(b.State.Record.ReasonText ?? "", 500)}", null),

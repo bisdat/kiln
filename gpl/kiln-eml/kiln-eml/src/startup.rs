@@ -10,7 +10,7 @@
 //! - [`run`], in kiln-eml's early on_ready once the native side concluded: the admission set, the dialect's pass (the
 //!   ShroudForge dialect with its one retry, the EML dialect, or no pass), ONE publication through the sole publisher
 //!   (or a verified restore of the BASE when no plan contribution was committed), the published generation's change
-//!   journal (R1), the startup cache, and the [`StartupOutcome`] with the live generation's grant inputs
+//!   journal, the startup cache, and the [`StartupOutcome`] with the live generation's grant inputs
 //!   ([`LiveGeneration`]).
 //!
 //! Every attempt opens its host with `StartupHost::open_matching` over the start's witness: an input changed since the
@@ -163,7 +163,7 @@ pub struct Refusal {
 /// What kiln-eml knows of the native side when its pass begins (the plugin wiring fills it from the seam).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeFacts {
-    /// kiln-sfi attached to the seam (false: kiln-sfi is absent, refused early or could not write its state; K5).
+    /// kiln-sfi attached to the seam (false: kiln-sfi is absent, refused early or could not write its state).
     pub attached: bool,
     /// Its native terminal arrived (and was valid) before kiln-eml's wait ended.
     pub received: bool,
@@ -256,7 +256,7 @@ pub enum Point<'s> {
     Step(Step<'s>),
     /// The one publication returned.
     Published,
-    /// The published generation's change journal is written beside its receipt (R1).
+    /// The published generation's change journal is written beside its receipt.
     Journaled,
     /// The startup cache recorded this start's generation.
     CacheWritten,
@@ -908,7 +908,7 @@ struct Ctx<'a, 'g> {
 ///    host over the witness, `open_matching`; the retry in the fork's re-planned order); `eml` runs EML's pass on the
 ///    witnessed host; `none` runs the EML pass for unlisted contributors only.
 /// 4. One publication (Deferred) of what the pass prepared, then (SF dialect) the generation's change journal beside its
-///    receipt (R1, `sf_startup::journal`: per package, the resources its entrypoint wrote or created and the contents
+///    receipt (`sf_startup::journal`: per package, the resources its entrypoint wrote or created and the contents
 ///    it created) and the startup cache naming it, or EML's change cache (no journal: the EML dialect's publication
 ///    removes the previous one), still under the guard; or, when no plan contribution was committed (a failed pass,
 ///    nothing admitted), the verified BASE (F9). A failed publication grants nothing.
@@ -972,7 +972,7 @@ pub fn run(w: &Witnessed, plan: &PlanFacts, native: &NativeFacts, guard: &File, 
     out
 }
 
-/// The outcome of a refused witness: no pass ran, nothing is granted, every row carries the refusal (K3, K4).
+/// The outcome of a refused witness: no pass ran, nothing is granted, every row carries the refusal.
 pub fn refused(plan: &PlanFacts, key: LaunchKey, native: &NativeFacts, refusal: &Refused) -> StartupOutcome {
     let row = Refusal {
         code: refusal.code.clone(),
@@ -1343,7 +1343,7 @@ impl<'g> Ctx<'_, 'g> {
         // names the error it retried after: startup-outcome.schema.json)
         out.attempt = attempt;
         out.error = if attempt == Attempt::Retry { first_error } else { None };
-        // the committed attempt's change journal (R1): a failed first attempt's changes are never in it
+        // the committed attempt's change journal: a failed first attempt's changes are never in it
         let journal = prepared.journal().clone();
         // the one publication
         let published = prepared.publish();
@@ -1382,7 +1382,7 @@ impl<'g> Ctx<'_, 'g> {
         let journal_sha256 = match self.live_published(&receipt) {
             Ok(live) => {
                 // the change journal of this generation, under the guard, bound to its receipt, before the cache
-                // record that names it (R1)
+                // record that names it
                 let written = self.write_journal(&journal_file, &journal, &live, attempt);
                 out.state = State::Committed;
                 out.live = Some(live);
@@ -1433,7 +1433,7 @@ impl<'g> Ctx<'_, 'g> {
         }
     }
 
-    /// The change journal (R1) of the generation `live` just published from `journal`, the committed attempt's: written
+    /// The change journal of the generation `live` just published from `journal`, the committed attempt's: written
     /// beside its receipt under the guard, only while that receipt is still the one listing it. Returns the record's
     /// SHA-256 (the startup cache keeps it).
     fn write_journal(

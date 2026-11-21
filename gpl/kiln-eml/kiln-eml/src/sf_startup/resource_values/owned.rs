@@ -62,7 +62,7 @@ impl StructValue {
         converter.struct_fields(&self.r#type, fields.iter().map(|(k, v)| (k.as_str(), v)))
     }
 
-    /// A deep copy whose wrappers belong to `objects` (kiln-eml R1: the seam of the value it is copied into).
+    /// A deep copy whose wrappers belong to `objects` (kiln-eml: the seam of the value it is copied into).
     pub fn try_clone_lua(&self, lua: &mlua::Lua, objects: &ValueObjects) -> mlua::Result<Self> {
         let table = self.fields.borrow();
         let mut fields = HashMap::with_capacity(table.len());
@@ -206,7 +206,7 @@ impl ArrayValue {
         converter.array_items(&self.r#type, values.iter())
     }
 
-    /// A deep copy whose wrappers belong to `objects` (kiln-eml R1).
+    /// A deep copy whose wrappers belong to `objects`.
     pub fn try_clone_lua(&self, lua: &mlua::Lua, objects: &ValueObjects) -> mlua::Result<Self> {
         let values = self.values.borrow();
         let mut result = Vec::with_capacity(values.len());
@@ -396,7 +396,7 @@ impl VariantValue {
         converter.variant(&self.variant_type, &self.value)
     }
 
-    /// A deep copy whose wrappers belong to `objects` (kiln-eml R1).
+    /// A deep copy whose wrappers belong to `objects`.
     pub fn try_clone_lua(&self, lua: &mlua::Lua, objects: &ValueObjects) -> mlua::Result<Self> {
         Ok(Self {
             r#type: self.r#type.clone(),

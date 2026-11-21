@@ -130,7 +130,7 @@ impl MappedStructValue {
         Ok(Value::Struct(Box::new(result.into_iter().collect())))
     }
 
-    /// A deep copy whose wrappers belong to `objects` (kiln-eml R1: the seam of the value it is copied into).
+    /// A deep copy whose wrappers belong to `objects` (kiln-eml: the seam of the value it is copied into).
     pub fn try_clone_lua(&self, lua: &mlua::Lua, objects: &ValueObjects) -> mlua::Result<Self> {
         let mut cache = HashMap::with_capacity(self.cache.borrow().len());
         for (key, value) in self.cache.borrow().iter() {
@@ -357,7 +357,7 @@ impl MappedArrayValue {
         Ok(result.into())
     }
 
-    /// A deep copy whose wrappers belong to `objects` (kiln-eml R1: the seam of the value it is copied into).
+    /// A deep copy whose wrappers belong to `objects` (kiln-eml: the seam of the value it is copied into).
     pub fn try_clone_lua(&self, lua: &mlua::Lua, objects: &ValueObjects) -> mlua::Result<Self> {
         let values = self.values.borrow();
         let mut cloned = Vec::with_capacity(values.len());
@@ -606,7 +606,7 @@ impl MappedVariantValue {
         }
     }
 
-    /// A deep copy whose wrappers belong to `objects` (kiln-eml R1: the seam of the value it is copied into).
+    /// A deep copy whose wrappers belong to `objects` (kiln-eml: the seam of the value it is copied into).
     pub fn try_clone_lua(&self, lua: &mlua::Lua, objects: &ValueObjects) -> mlua::Result<Self> {
         Ok(Self {
             data: self.data.clone(),

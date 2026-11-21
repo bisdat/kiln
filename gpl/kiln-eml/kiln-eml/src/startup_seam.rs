@@ -149,7 +149,7 @@ struct Start {
     stem: String,
     guard: Option<Arc<File>>,
     witness: Result<Arc<Witnessed>, Refused>,
-    /// The install lock could not be taken: the existing stop before the game's entry point follows (K1).
+    /// The install lock could not be taken: the existing stop before the game's entry point follows.
     start_blocked: bool,
 }
 
@@ -426,7 +426,7 @@ pub struct Finished {
     pub json: String,
     /// How long the barrier waited for the terminal.
     pub waited: Duration,
-    /// The install lock could not be taken (K1).
+    /// The install lock could not be taken.
     pub start_blocked: bool,
 }
 
@@ -629,7 +629,7 @@ fn pass(
             types,
             registry: pass_registry(game, plan),
             catalog,
-            // owner question Q-C: the start's UI locale is not in the plan yet; None answers "en", as ShroudForge does
+            // the start's UI locale is not in the plan yet; None answers "en", as ShroudForge does
             locale: None,
             vm: pass_runner::Ports {
                 clock: Rc::new(ProcessClock(process_origin())),

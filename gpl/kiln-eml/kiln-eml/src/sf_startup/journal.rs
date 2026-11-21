@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! kiln-eml (R1, the registry map's ruling): the startup change journal of the ShroudForge-dialect pass, kiln-eml's own
+//! kiln-eml: the startup change journal of the ShroudForge-dialect pass, kiln-eml's own
 //! code. Per package of the committed attempt, which archive resources its entrypoint wrote, which it created (each
 //! with a per-package ordinal) and which contents it created; never a value. A later Kiln registry stage diffs the base
-//! against the published archive field by field and names each change's writer from this record; effect replay (dev.31
-//! D6) names a package's changes by the same keys after a game update.
+//! against the published archive field by field and names each change's writer from this record; a later effect
+//! replay can name a package's changes by the same keys after a game update.
 //!
 //! **What counts, exactly.** The pass runs one package's entrypoint at a time ([`Recorder::begin`] / [`Recorder::end`]).
 //! Every typed value of a resource carries that resource as its owner (`ValueObjects::owned_by`: the decoded value of

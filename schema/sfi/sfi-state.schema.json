@@ -28,7 +28,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["by", "key"],
-      "description": "Who answers ShroudForge's mod-menu toggle (Local\\ShroudForge.ModMenu.Open.<pid>, owner decision D1) in kiln mode: Kiln.Ui's claim reader reads this as it reads shroudforge.json's menu/menuKey. Absent before kiln-sfi decides.",
+      "description": "Who answers ShroudForge's mod-menu toggle (Local\\ShroudForge.ModMenu.Open.<pid>) in kiln mode: Kiln.Ui's claim reader reads this as it reads shroudforge.json's menu/menuKey. Absent before kiln-sfi decides.",
       "properties": {
         "by": { "enum": ["kiln", "off", "unavailable"], "description": "kiln: Kiln.Ui's ShroudForge page answers it (the interpreter has no Modloader window). off / unavailable: nobody does this start (final)." },
         "key": { "type": ["string", "null"], "maxLength": 64, "description": "The binding as SF writes it (\"SDL:66\"), or null for the default." }
@@ -307,7 +307,7 @@
       "additionalProperties": false,
       "required": ["surface", "revision", "state", "worldSession", "atMs"],
       "properties": {
-        "surface": { "enum": ["native", "kiln-ui", "launcher"], "description": "native: kiln-sfi's own fallback banner through public kiln.ui (owner decision D9). kiln-ui and launcher: only a D2(b) core registry records these here; under D2(a) those surfaces keep their own records." },
+        "surface": { "enum": ["native", "kiln-ui", "launcher"], "description": "native: kiln-sfi's own fallback banner through public kiln.ui. kiln-ui and launcher: recorded here only by a shared core registry; without one, as in this release, those surfaces keep their own records." },
         "revision": { "type": "integer", "minimum": 0 },
         "state": { "enum": ["pending", "shown", "not-shown"], "description": "not-shown: no usable overlay (ui.overlay off, crash guard); the next launcher Play repeats the warning." },
         "worldSession": { "type": ["integer", "null"], "minimum": 0, "description": "The world session it was shown in; null at the main menu or when not shown." },

@@ -1,5 +1,5 @@
 {
-  "source": "ShroudForge 1.7.9 reflection/build_attribute_catalog.rs, evaluate_attribute_program.rs, traverse_reflected_types.rs and lua/ingame/ecs/attributes/format_attribute_root.rs, compiled unchanged by out/v2-g09c/tools/sf-attr-oracle over archive.json written by ShroudForge's kfc-parser",
+  "source": "ShroudForge 1.7.9 reflection/build_attribute_catalog.rs, evaluate_attribute_program.rs, traverse_reflected_types.rs and lua/ingame/ecs/attributes/format_attribute_root.rs, compiled unchanged by a harness outside the repository over archive.json written by ShroudForge's kfc-parser",
   "get_attributes": {
     "version": "g09c-attributes",
     "count": 10,

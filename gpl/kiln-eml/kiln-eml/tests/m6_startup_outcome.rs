@@ -545,7 +545,7 @@ fn a_malformed_resource_type_index_is_refused_by_the_witness() {
     assert!(refused.text.contains("resource type index"), "{}", refused.text);
 }
 
-// A changed input (K7, K9; owner Q3): the terminal says a DLL changed the witnessed files, or the witness's own check
+// A changed input: the terminal says a DLL changed the witnessed files, or the witness's own check
 // sees it; nothing is published, retried or granted, every row says so and the warning names the DLL packages that
 // loaded; the live archive and the receipt are as before.
 #[test]
@@ -759,8 +759,8 @@ fn no_pass_restores_owned_output_then_is_unchanged() {
     outcome_json(&out, "none-unchanged");
 }
 
-// kiln-sfi never attached (K5): every package of the ShroudForge pass is left out (backend-unavailable) and the BASE is
-// what is live; attached without a terminal (K6): the packages with native code and what needs them are left out.
+// kiln-sfi never attached: every package of the ShroudForge pass is left out (backend-unavailable) and the BASE is
+// what is live; attached without a terminal: the packages with native code and what needs them are left out.
 #[test]
 fn without_kiln_sfi_or_its_terminal_the_affected_packages_are_left_out() {
     let s = Start::new("g13-native");
