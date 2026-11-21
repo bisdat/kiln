@@ -343,7 +343,12 @@ KilnResult Runner::submit(uint64_t owner, const std::string& owner_mod, const st
         std::lock_guard lk(d_->mu);
         if (!parse_batch(ir, d_->schema, &b, &refused, &err)) return say(KILN_ERR_INVALID_ARGUMENT);
     }
-    if (!owner_mod.empty() && lc(b.mod) != lc(owner_mod)) {
+    if (owner_mod.empty()) {  // review finding 8: Kiln binds every batch to its owner's mod; an owner it cannot bind has none
+        err = "the caller's owner has no mod Kiln can bind it to (revoked, or not a mod's owner): the batch is refused";
+        b.edits.clear();
+        return say(KILN_ERR_INVALID_ARGUMENT);
+    }
+    if (lc(b.mod) != lc(owner_mod)) {
         err = "the batch names mod " + b.mod + ", not the caller's own mod " + owner_mod;
         b.edits.clear();
         return say(KILN_ERR_INVALID_ARGUMENT);

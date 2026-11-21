@@ -207,13 +207,16 @@ bool guarded_ready(KilnRegistryReadyFn fn, const KilnRegistryReady* r, void* use
 
 // The mod id Kiln binds an owner to (kiln_registry.h "Mods"): the core's id of the owner (kiln.internal.owners) without its
 // kind prefix ("mod:", "native:", ...), folded to lower case. Empty: no such owner, or an id that is no mod id.
-std::string bound_mod(KilnOwner owner) {
+std::string bound_mod(KilnOwner owner, bool* revoked = nullptr) {
+    if (revoked) *revoked = false;
     static const auto* t = g_api ? static_cast<const KilnOwnersInternalApi*>(g_api->service(KilnStr{KILN_OWNERS_INTERNAL_SERVICE, sizeof(KILN_OWNERS_INTERNAL_SERVICE) - 1}, 1))
                                  : nullptr;
     if (!t || t->header.size < sizeof(KilnOwnersInternalApi) || !t->owner_id) return {};
     char buf[256];
     size_t len = 0;
-    if (t->owner_id(owner, buf, sizeof buf, &len) != KILN_OK) return {};
+    const KilnResult rc = t->owner_id(owner, buf, sizeof buf, &len);
+    if (rc == KILN_ERR_NOT_FOUND && revoked) *revoked = true;  // never created, or revoked
+    if (rc != KILN_OK) return {};
     std::string id(buf, len);
     if (const size_t colon = id.find(':'); colon != std::string::npos) id = id.substr(colon + 1);
     for (char& c : id)
@@ -250,7 +253,9 @@ KilnResult KILN_CALL t_field_info(KilnStr q, KilnRegistryFieldInfo* out) {
 }
 KilnResult KILN_CALL t_subscribe_stage(KilnOwner owner, KilnRegistryStageFn fn, void* user, KilnHandle* out) {
     if (!owner || !fn || !out) return KILN_ERR_INVALID_ARGUMENT;
-    const std::string m = bound_mod(owner);
+    bool revoked = false;
+    const std::string m = bound_mod(owner, &revoked);
+    if (revoked) return KILN_ERR_REVOKED;
     if (m.empty()) {
         LOGW("registry: owner %llu has no mod id Kiln can bind it to: its stage callback is refused", static_cast<unsigned long long>(owner));
         return KILN_ERR_INVALID_ARGUMENT;
@@ -267,7 +272,14 @@ KilnResult KILN_CALL t_submit(KilnOwner owner, KilnStr ir, KilnRegistrySubmitRes
     if (!owner || !str_ok(ir, KILN_REGISTRY_MAX_IR_BYTES) || (out && out->size < 16) || (!report && cap)) return KILN_ERR_INVALID_ARGUMENT;
     uint32_t acc = 0, ref = 0;
     std::string rep;
-    const KilnResult rc = runner().submit(owner, bound_mod(owner), str(ir), &acc, &ref, &rep);
+    bool revoked = false;
+    const std::string m = bound_mod(owner, &revoked);
+    if (revoked) {  // kiln_registry.h: a revoked owner is KILN_ERR_REVOKED
+        if (out) out->size = 16, out->accepted = 0, out->refused = 0, out->reserved = 0;
+        report_out("{\"accepted\":0,\"refused\":[],\"error\":\"the owner is revoked\"}", report, cap, out_len);
+        return KILN_ERR_REVOKED;
+    }
+    const KilnResult rc = runner().submit(owner, m, str(ir), &acc, &ref, &rep);
     if (out) out->size = 16, out->accepted = acc, out->refused = ref, out->reserved = 0;
     report_out(rep, report, cap, out_len);
     return rc;

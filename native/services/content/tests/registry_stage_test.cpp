@@ -187,7 +187,7 @@ void one_start(const std::string& dir) {
     check(r.select(2, "items", "\"game:*\"", &out) == KILN_OK && out == "[\"game:plank\"]", "select resolved: the removed item is gone: " + out);
     uint32_t a = 0, b = 0;
     std::string rp;
-    check(r.submit(1, "", R"({"ir":1,"mod":"x","stage":"alter","edits":[]})", &a, &b, &rp) == KILN_ERR_UNAVAILABLE, "no submit after the stage");
+    check(r.submit(1, "x", R"({"ir":1,"mod":"x","stage":"alter","edits":[]})", &a, &b, &rp) == KILN_ERR_UNAVAILABLE, "no submit after the stage");
     check(live_report != nullptr, "the live back-end got its handoff with a report callback");
     const std::string start_report = files.report;
     live_report(*live_result);
