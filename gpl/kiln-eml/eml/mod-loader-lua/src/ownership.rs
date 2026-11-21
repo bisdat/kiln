@@ -6,6 +6,64 @@ use sha2::{Digest as _, Sha256};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Digest { pub(crate) size: u64, sha256: String }
+impl Digest {
+    /// SHA-256, lower-case hex.
+    pub(crate) fn sha256(&self) -> &str { &self.sha256 }
+}
+
+/// kiln-eml: whether a publication, a restore or a baseline write may touch ShroudForge's folder.
+/// - `Live` (EML mode: backend none, hosted, installed): as before, under ShroudForge's write lock, handing its
+///   prepared-output state over when the live pair changes.
+/// - `Deferred` (kiln mode: Kiln's interpreter has the start): nothing under `<game>/shroudforge` is opened, locked,
+///   created or written, and ShroudForge's startup lease is never taken. ShroudForge's own unfinished publication (its
+///   journal is in the game folder) still refuses. Every write that changes the live pair records the handoff it owes
+///   first (`kiln/eml/ownership/<stem>.sf-handoff-owed.json`); the next start that may touch ShroudForge's folder makes
+///   it (`settle_owed_handoff`, or a Live write, which runs the handoff anyway) and removes the marker.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SfHandoff {
+    #[default]
+    Live,
+    Deferred,
+}
+
+/// kiln-eml: the BASE origin tokens a receipt may record, with their exact labels (kiln-eml's
+/// inspection.rs ORIGINS; a kiln-eml test pins them equal). `unrecorded` is never written, `vanilla` never exists.
+pub const RECORDED_ORIGINS: [(&str, &str); 2] = [
+    ("first-managed-unclassified", "unclassified: game files as found when Kiln first managed this install"),
+    ("rebaselined-unclassified", "unclassified: game files as found when Kiln took a new baseline after the game changed"),
+];
+
+/// kiln-eml: a receipt's `baseOrigin`: one of `RECORDED_ORIGINS`, keyed to the backups it describes (every
+/// backup file's size and SHA-256 by name, an absent one null), as kiln-eml's inspector reads it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RecordedOrigin { token: String, label: String, baseline: BTreeMap<String, Option<Digest>> }
+impl RecordedOrigin {
+    pub(crate) fn new(token: &str, label: &str, baseline: BTreeMap<String, Option<Digest>>) -> Option<Self> {
+        RECORDED_ORIGINS.iter().any(|&(t, l)| t == token && l == label)
+            .then(|| Self { token: token.to_owned(), label: label.to_owned(), baseline })
+    }
+    /// A recorded `baseOrigin` value read back: exactly its three members, a known token with its own label.
+    fn from_value(value: &serde_json::Value) -> Option<Self> {
+        let o = value.as_object().filter(|o| o.len() == 3)?;
+        let baseline = serde_json::from_value(o.get("baseline")?.clone()).ok()?;
+        Self::new(o.get("token")?.as_str()?, o.get("label")?.as_str()?, baseline)
+    }
+    fn value(&self) -> serde_json::Value {
+        let mut value = serde_json::json!({"baseline": self.baseline, "label": self.label, "token": self.token});
+        value.sort_all_objects();
+        value
+    }
+    /// Keyed to exactly the backups `backups` lists (the three backup names, absent ones null).
+    fn keyed_to(&self, stem: &str, backups: &BTreeMap<String, Digest>) -> bool {
+        let expected: BTreeMap<String, Option<Digest>> = ["kfc.bak", "kfc_resources.bak", "kfc.bak.integrity"].iter()
+            .map(|e| { let name = format!("{stem}.{e}"); let digest = backups.get(&name).cloned(); (name, digest) }).collect();
+        self.baseline == expected
+    }
+}
+
+/// kiln-eml: how a publication treats ShroudForge's folder and which BASE origin its receipt records.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Publication { pub(crate) handoff: SfHandoff, pub(crate) origin: Option<RecordedOrigin> }
 
 thread_local! { static READ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
 #[cfg(test)]
@@ -129,6 +187,11 @@ struct Receipt {
     // especially). Clear only after every recorded displacement has been durably moved, before publishing any data.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     unproven: Vec<String>,
+    /// kiln-eml: the BASE origin, written only by a Deferred (kiln-mode) publication and only keyed to the
+    /// backups this receipt lists (`RecordedOrigin`). Kept as read: a value that is not one is never this build's to
+    /// judge here (the inspector ignores it, and a publication carries over only a valid one).
+    #[serde(rename = "baseOrigin", default, skip_serializing_if = "Option::is_none")]
+    base_origin: Option<serde_json::Value>,
 }
 
 fn output_set(stem: &str, files: &BTreeMap<String, Digest>) -> bool {
@@ -143,16 +206,115 @@ fn receipt_path(root: &Path, stem: &str) -> io::Result<PathBuf> {
     Ok(path)
 }
 
+/// kiln-eml (R1): the startup change journal kiln-eml's startup controller writes beside the receipt
+/// (`kiln/eml/ownership/<stem>.change-journal.json`), bound to the generation the receipt lists. It is written only
+/// after a publication's last receipt write (`StartupJournal::write_for`, which checks the receipt is still that one)
+/// and removed before any write that replaces or removes the receipt or changes the live files (`prepare_from`, ahead of
+/// the publication's receipt write; `StartupHost::restore_base`, ahead of the restore; `before_restore`, ahead of every
+/// restore of owned output, EML's own no-mod restore included; `forget_receipt`), so whatever step a crash stops, a
+/// journal on disk names the generation the receipt beside it lists, published whole. A writer that ignores the receipt
+/// (hosted ShroudForge, another loader) can make that generation stale: a reader uses a journal only when its
+/// generation is the start's live one (kiln-eml's outcome).
+pub(crate) fn journal_path(root: &Path, stem: &str) -> io::Result<PathBuf> {
+    check_stem(stem)?;
+    let path = root.join("kiln/eml/ownership").join(format!("{stem}.change-journal.json"));
+    checked_path(root, &path)?;
+    Ok(path)
+}
+
+/// kiln-eml (R1): removes the change journal (none is fine) and syncs the folder; Ok(true) when there was one.
+pub(crate) fn forget_journal(root: &Path, stem: &str) -> io::Result<bool> {
+    let path = journal_path(root, stem)?;
+    match fs::remove_file(&path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        other => other?,
+    }
+    super::transaction::sync_dir(&root.join("kiln/eml/ownership"))?;
+    failpoint!("journal.removed", path);
+    Ok(true)
+}
+
 /// The receipt of `stem`, None when there is none. Err: a receipt Kiln does not understand (kept for recovery).
 fn read_receipt(root: &Path, stem: &str) -> io::Result<Option<Receipt>> {
     let path = receipt_path(root, stem)?;
     if !path.try_exists()? { return Ok(None); }
     let receipt: Receipt = serde_json::from_slice(&bounded(root, &path)?).map_err(|_| invalid("invalid EML ownership receipt"))?;
-    if receipt.format != 1 || receipt.stem != stem || !output_set(stem, &receipt.files)
-        || receipt.previous.as_ref().is_some_and(|p| !output_set(stem, p)) {
-        return Err(invalid("unknown EML ownership receipt"));
-    }
+    if !understood(stem, &receipt) { return Err(invalid("unknown EML ownership receipt")); }
     Ok(Some(receipt))
+}
+
+fn understood(stem: &str, receipt: &Receipt) -> bool {
+    receipt.format == 1 && receipt.stem == stem && output_set(stem, &receipt.files)
+        && receipt.previous.as_ref().is_none_or(|p| output_set(stem, p))
+}
+
+/// kiln-eml: read-only views for the archive inspector (kiln-eml's `inspection`). Nothing here opens,
+/// creates, locks, repairs, adopts or writes anything: `receipt` and `seal` only parse bytes the inspector read
+/// itself (so the bytes and the file identity it checks come from one open), `checked` only looks at metadata.
+pub mod readonly {
+    use super::*;
+
+    /// The largest receipt `read_receipt` reads (`bounded`'s cap); a larger one is a receipt Kiln does not understand.
+    pub const RECEIPT_LIMIT: u64 = 16 << 20;
+
+    /// Size and SHA-256 (hex) per file name, as a receipt lists them.
+    pub type Listed = BTreeMap<String, (u64, String)>;
+
+    /// A receipt this build understands (the same rules `read_receipt` applies).
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ReceiptView {
+        /// SHA-256 (hex) and length of the receipt's bytes.
+        pub sha256: String,
+        pub size: u64,
+        pub files: Listed,
+        pub backups: Listed,
+        pub previous: Option<Listed>,
+        pub unproven: Vec<String>,
+        /// The receipt's `baseOrigin` object as written, if any (kiln mode writes it; read rules are the reader's).
+        pub base_origin: Option<serde_json::Value>,
+    }
+
+    fn listed(files: &BTreeMap<String, Digest>) -> Listed {
+        files.iter().map(|(n, d)| (n.clone(), (d.size, d.sha256.clone()))).collect()
+    }
+
+    /// The receipt of `stem` in `bytes` (the whole file), when it is one `read_receipt` accepts; None: a receipt this
+    /// build does not understand (`read_receipt` errs on it). The caller reads at most `RECEIPT_LIMIT` bytes.
+    pub fn receipt(stem: &str, bytes: &[u8]) -> Option<ReceiptView> {
+        if bytes.len() as u64 > RECEIPT_LIMIT { return None; }
+        let receipt = serde_json::from_slice::<Receipt>(bytes).ok()?;
+        if !understood(stem, &receipt) { return None; }
+        let base_origin = serde_json::from_slice::<serde_json::Value>(bytes).ok().and_then(|v| v.get("baseOrigin").cloned());
+        Some(ReceiptView {
+            sha256: format!("{:x}", Sha256::digest(bytes)),
+            size: bytes.len() as u64,
+            files: listed(&receipt.files),
+            backups: listed(&receipt.backups),
+            previous: receipt.previous.as_ref().map(listed),
+            unproven: receipt.unproven.clone(),
+            base_origin,
+        })
+    }
+
+    /// No link or reparse point below `root` on the way to `path` (metadata only).
+    pub fn checked(root: &Path, path: &Path) -> io::Result<()> { checked_path(root, path) }
+
+    /// The CRC-64 the backup seal records (`<stem>.kfc.bak.integrity`), fed in pieces.
+    pub struct SealCrc(crc::Digest<'static, u64, crc::Table<16>>);
+    impl SealCrc {
+        pub fn new() -> Self { Self(crate::cache::CRC64.digest()) }
+        pub fn update(&mut self, bytes: &[u8]) { self.0.update(bytes) }
+        pub fn finalize(self) -> u64 { self.0.finalize() }
+    }
+    impl Default for SealCrc { fn default() -> Self { Self::new() } }
+
+    /// A seal's recorded (length, CRC-64) of the header backup and the resource backup; None when it is not one.
+    pub fn seal(bytes: &[u8]) -> Option<((u64, u64), (u64, u64))> {
+        #[derive(Deserialize)]
+        struct Seal { header: (u64, u64), resources: (u64, u64) }
+        if bytes.len() > 1024 { return None; }
+        serde_json::from_slice::<Seal>(bytes).ok().map(|s| (s.header, s.resources))
+    }
 }
 
 /// The files of the game folder, each read (SHA-256) at most once per check, and only once its size matches.
@@ -280,10 +442,24 @@ impl Prepared {
     }
 }
 
-pub(crate) fn prepare(root: &Path, stem: &str, files: &[PathBuf]) -> io::Result<Prepared> {
+// The tests' form: output files checked from the game folder itself.
+#[cfg(test)]
+pub(crate) fn prepare(root: &Path, stem: &str, files: &[PathBuf]) -> io::Result<Prepared> { prepare_from(root, root, stem, files, &Publication::default()) }
+
+/// `prepare` for output files read from `from`: the held stage (`PatchWriter::at`), whose children are checked below it
+/// (on Linux it is reached through /proc/self/fd, a link the game folder's own check would refuse). Every file must be
+/// a direct child of `from` unless `from` is the game folder itself.
+///
+/// kiln-eml: `publication` says how ShroudForge's folder is treated (`SfHandoff`) and which BASE origin a
+/// Deferred publication records: the one given, else the earlier receipt's, each only while it is keyed to the backups
+/// present (never written in Live mode, never upgraded).
+pub(crate) fn prepare_from(root: &Path, from: &Path, stem: &str, files: &[PathBuf], publication: &Publication) -> io::Result<Prepared> {
     check_stem(stem)?;
-    let guard = sf_lock(root)?;
-    handoff_locked(root, stem, false, false, &guard)?;
+    if from != root && files.iter().any(|f| f.parent() != Some(from)) { return Err(invalid("EML output outside its stage")); }
+    let deferred = publication.handoff == SfHandoff::Deferred;
+    let guard = if deferred { None } else { sf_lock(root)? };
+    failpoint!(if guard.is_some(), "handoff.locked", root.join("shroudforge/config/.shroudforge-write.lock"));
+    if deferred { sf_publication_pending(root, stem)?; } else { handoff_locked(root, stem, false, false, &guard)?; }
     let path = directory(root)?.join(format!("{stem}.json"));
     let earlier = if path.try_exists()? {
         let earlier: Receipt = serde_json::from_slice(&bounded(root, &path)?)?;
@@ -300,7 +476,7 @@ pub(crate) fn prepare(root: &Path, stem: &str, files: &[PathBuf]) -> io::Result<
     for path in files {
         let name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| invalid("invalid output name"))?;
         if !valid_name(stem, name) { return Err(invalid("unexpected EML output file")); }
-        let expected = digest(root, path)?;
+        let expected = digest(from, path)?;
         // Appended and padding DATs may already be a player's or another loader's files. Their index/name (or even
         // equality to the new output) grants no permission to replace them and then claim ownership in our receipt.
         // Per-file proof survives a partial publication or an updated baseline; restoring still needs the whole set.
@@ -310,7 +486,7 @@ pub(crate) fn prepare(root: &Path, stem: &str, files: &[PathBuf]) -> io::Result<
                 && ((!r.unproven.iter().any(|n| n == name) && r.files.get(name).is_some_and(|d| Some(d) == current.as_ref()))
                     || r.previous.as_ref().and_then(|p| p.get(name)).is_some_and(|d| Some(d) == current.as_ref())));
             if !proven {
-                let count = *vanilla.get_or_insert_with(|| path.parent().and_then(|p| containers_at(root, &p.join(super::transaction::VANILLA_HEADER))));
+                let count = *vanilla.get_or_insert_with(|| path.parent().and_then(|p| containers_at(from, &p.join(super::transaction::VANILLA_HEADER))));
                 if count.is_none_or(|count| container_index(stem, name).is_none_or(|i| i < count)) {
                     return Err(invalid(&format!("existing container {name} retained: cannot prove it lies beyond the vanilla header's container range")));
                 }
@@ -328,10 +504,28 @@ pub(crate) fn prepare(root: &Path, stem: &str, files: &[PathBuf]) -> io::Result<
         _ => None,
     };
     let unproven = collisions.keys().cloned().collect();
+    // kiln-eml (R1): the change journal names the generation of the receipt this publication replaces: it goes before
+    // the publication writes anything (one that cannot be removed refuses the publication with nothing changed)
+    forget_journal(root, stem)?;
     let moves = if collisions.is_empty() { None } else { Some(crate::displacement::Plan::record(root, stem, vanilla.flatten().unwrap(), collisions)?) };
-    let receipt = Receipt { format: 1, stem: stem.into(), files: output, backups: live.backups(stem)?, previous, unproven };
+    let backups = live.backups(stem)?;
+    let base_origin = if deferred {
+        let earlier = earlier.as_ref().and_then(|e| e.base_origin.as_ref()).and_then(RecordedOrigin::from_value);
+        publication.origin.clone().filter(|o| o.keyed_to(stem, &backups))
+            .or_else(|| earlier.filter(|o| o.keyed_to(stem, &backups)))
+            .map(|o| o.value())
+    } else { None };
+    let receipt = Receipt { format: 1, stem: stem.into(), files: output, backups, previous, unproven, base_origin };
     // Even identical final bytes pass through the vanilla-header barrier and rewrite the live pair.
-    handoff_locked(root, stem, true, changed, &guard)?;
+    if deferred {
+        sf_publication_pending(root, stem)?;
+        owe_handoff(root, stem)?;
+    } else {
+        // a handoff an earlier kiln-mode write owes is made now (SF's record is stale whatever this publication writes)
+        let owed = handoff_owed(root, stem)?;
+        handoff_locked(root, stem, true, changed || owed, &guard)?;
+        if owed { settle_marker(root, stem)?; }
+    }
     super::transaction::atomic_write(&path, &serde_json::to_vec(&receipt)?)?;
     Ok(Prepared { _sf: guard, moves, receipt, path })
 }
@@ -447,7 +641,7 @@ pub fn adopt(root: &Path, stem: &str, cache_dir: &Path) -> io::Result<Adoption> 
         let (digest, crc) = digest_and_crc(root, &path)?;
         if cache.describes(&path, (digest.size, crc), &mut volume).is_ok() { files.insert(name, digest); }
     }
-    let receipt = Receipt { format: 1, stem: stem.into(), files, backups: sealed, previous: None, unproven: Vec::new() };
+    let receipt = Receipt { format: 1, stem: stem.into(), files, backups: sealed, previous: None, unproven: Vec::new(), base_origin: None };
     super::transaction::atomic_write(&directory(root)?.join(format!("{stem}.json")), &serde_json::to_vec(&receipt)?)?;
     tracing::info!("Adopted the {stem} game data an earlier kiln-eml published (its change cache names exactly these files and backups): it now has an ownership receipt");
     Ok(Adoption::Adopted)
@@ -517,8 +711,11 @@ pub fn recovery_inventory(root: &Path, stem: &str) -> io::Result<serde_json::Val
     let hash = digest(root, &header)?;
     let count = kfc::container::KFCFile::get_container_count(&header).map_err(|e| invalid(&e.to_string()))?;
     if digest(root, &header)? != hash { return Err(invalid("game index changed while recording recovery evidence")); }
-    Ok(serde_json::json!({"stem": stem, "headerSha256": hash.sha256, "containers": count,
-        "unproven": !owns_output(root, stem)?}))
+    let mut evidence = serde_json::json!({"stem": stem, "headerSha256": hash.sha256, "containers": count,
+        "unproven": !owns_output(root, stem)?});
+    // kiln-eml: sorted keys whatever serde_json features the DLL graph unifies (sfi-core: preserve_order).
+    evidence.sort_all_objects();
+    Ok(evidence)
 }
 
 /// The containers (`<stem>_NNN.dat`) of the owned output that is live now, as its receipt lists them: what a restore
@@ -549,6 +746,7 @@ pub(crate) fn remove_unreferenced(root: &Path, stem: &str, files: &BTreeMap<Stri
             continue;
         }
         fs::remove_file(root.join(name))?;
+        failpoint!("cleanup.container-removed", root.join(name));
         removed.push(name.as_str());
     }
     if !removed.is_empty() {
@@ -559,36 +757,144 @@ pub(crate) fn remove_unreferenced(root: &Path, stem: &str, files: &BTreeMap<Stri
 
 /// Capture or reseal shared vanilla backups only while SF cannot begin preparing or replace the pair itself.
 /// Taking the lock is not a handoff: no live archive changes here, so leave an applied SF state unchanged.
-pub(crate) fn before_baseline(root: &Path, stem: &str) -> io::Result<Option<SfGuard>> {
+/// kiln-eml: a handoff an earlier kiln-mode write owes is made here (Live) and its marker removed; Deferred
+/// takes no SF lock (no live archive changes, so nothing is owed).
+pub(crate) fn before_baseline(root: &Path, stem: &str, mode: SfHandoff) -> io::Result<Option<SfGuard>> {
     check_stem(stem)?;
-    handoff(root, stem, false, false)
+    if mode == SfHandoff::Deferred {
+        sf_publication_pending(root, stem)?;
+        return Ok(None);
+    }
+    let owed = handoff_owed(root, stem)?;
+    let guard = handoff(root, stem, false, owed)?;
+    if owed { settle_marker(root, stem)?; }
+    Ok(guard)
 }
 
 /// Recheck ownership and hand the archives over from SF while locked; retain the guard through restore cleanup.
-pub(crate) fn before_restore(root: &Path, stem: &str) -> io::Result<Option<SfGuard>> {
+/// kiln-eml: Deferred takes no SF lock and, when the restore changes the live pair, records the handoff it
+/// owes before any change; Live also makes a handoff an earlier kiln-mode write owes.
+pub(crate) fn before_restore(root: &Path, stem: &str, mode: SfHandoff) -> io::Result<Option<SfGuard>> {
     check_stem(stem)?;
-    let guard = sf_lock(root)?;
-    handoff_locked(root, stem, false, false, &guard)?;
+    let deferred = mode == SfHandoff::Deferred;
+    let guard = if deferred { None } else { sf_lock(root)? };
+    if deferred { sf_publication_pending(root, stem)?; } else { handoff_locked(root, stem, false, false, &guard)?; }
     if !owns_output(root, stem)? {
         return Err(invalid("the live archives or backups no longer match kiln-eml's ownership receipt; retained without restoring"));
     }
+    // kiln-eml (R1): the change journal names the generation this restore takes away (EML's own no-mod restore too): it
+    // goes before any live file changes (one that cannot be removed refuses the restore with nothing changed)
+    forget_journal(root, stem)?;
     let mut live = Live::new(root);
+    let mut changes = false;
     for extension in ["kfc", "kfc_resources"] {
         let (backup, current) = (format!("{stem}.{extension}.bak"), format!("{stem}.{extension}"));
         let Some(size) = live.size(&backup)? else { continue };
         if live.size(&current)? != Some(size) || live.digest(&backup)? != live.digest(&current)? {
-            handoff_locked(root, stem, false, true, &guard)?;
+            changes = true;
             break;
         }
     }
+    if deferred {
+        if changes { owe_handoff(root, stem)?; }
+    } else {
+        let owed = handoff_owed(root, stem)?;
+        if changes || owed { handoff_locked(root, stem, false, true, &guard)?; }
+        if owed { settle_marker(root, stem)?; }
+    }
     Ok(guard)
+}
+
+/// kiln-eml: where a Deferred write records the ShroudForge handoff it owes.
+fn owed_path(root: &Path, stem: &str) -> io::Result<PathBuf> {
+    check_stem(stem)?;
+    let path = root.join("kiln/eml/ownership").join(format!("{stem}.sf-handoff-owed.json"));
+    checked_path(root, &path)?;
+    Ok(path)
+}
+
+/// kiln-eml: a Deferred (kiln-mode) write changed, or is about to change, the live pair without handing
+/// ShroudForge's prepared-output state over: ShroudForge's `applied` record may now be stale.
+pub fn handoff_owed(root: &Path, stem: &str) -> io::Result<bool> {
+    owed_path(root, stem)?.try_exists()
+}
+
+/// Records the owed handoff, written ahead of the first live change (kept when it is there already).
+fn owe_handoff(root: &Path, stem: &str) -> io::Result<()> {
+    if handoff_owed(root, stem)? { return Ok(()); }
+    let mut marker = serde_json::json!({"format": 1, "stem": stem, "text": "Kiln's interpreter changed this \
+        game data without updating ShroudForge's record of its prepared asset mods: the next start that may use \
+        ShroudForge's folder marks that record stale before anything else"});
+    marker.sort_all_objects();
+    super::transaction::atomic_write(&directory(root)?.join(format!("{stem}.sf-handoff-owed.json")), &serde_json::to_vec(&marker)?)
+}
+
+/// The owed handoff was made: its marker goes.
+fn settle_marker(root: &Path, stem: &str) -> io::Result<()> {
+    let path = owed_path(root, stem)?;
+    match fs::remove_file(&path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        other => other?,
+    }
+    super::transaction::sync_dir(&root.join("kiln/eml/ownership"))?;
+    failpoint!("handoff.owed-settled", path);
+    Ok(())
+}
+
+/// kiln-eml: makes a handoff a kiln-mode write owes (kiln-eml's `stand_aside` under hosted
+/// ShroudForge, under the install lock): under ShroudForge's write lock its prepared-output state is marked stale
+/// exactly as a Live publication does, then the marker goes. Ok(false): nothing was owed. Refused (and the marker kept)
+/// whenever the handoff is (ShroudForge busy or preparing, an unknown state).
+pub fn settle_owed_handoff(root: &Path, stem: &str) -> io::Result<bool> {
+    if !handoff_owed(root, stem)? { return Ok(false); }
+    let guard = sf_lock(root)?;
+    handoff_locked(root, stem, false, true, &guard)?;
+    settle_marker(root, stem)?;
+    Ok(true)
+}
+
+/// kiln-eml: after a verified restore of the BASE, the receipt goes with the output it listed (and its
+/// `baseOrigin` with it: the BASE is unrecorded from then on, the safe direction). A receipt this build does not
+/// understand is kept for recovery (Err). Ok(false): there was none.
+pub(crate) fn forget_receipt(root: &Path, stem: &str) -> io::Result<bool> {
+    let path = receipt_path(root, stem)?;
+    let receipt = read_receipt(root, stem)?;
+    // kiln-eml (R1): the change journal goes before the receipt it is bound to (and a stray one without a receipt too)
+    forget_journal(root, stem)?;
+    if receipt.is_none() { return Ok(false); }
+    fs::remove_file(&path)?;
+    super::transaction::sync_dir(&root.join("kiln/eml/ownership"))?;
+    failpoint!("restore.receipt-removed", path);
+    Ok(true)
+}
+
+/// kiln-eml: the startup cache's proof that the generation its record names is still the live one, from one
+/// read of the receipt: its bytes hash to `receipt_sha256`, its current generation (nothing unproven) lists exactly
+/// `header` (the start's witnessed SHA-256 of `<stem>.kfc`), and every file it lists and every backup has its listed
+/// size (metadata only; the backups' bytes are the witness's).
+pub(crate) fn vouched_header(root: &Path, stem: &str, receipt_sha256: &str, header: (u64, &str)) -> io::Result<bool> {
+    let path = receipt_path(root, stem)?;
+    if !path.try_exists()? { return Ok(false); }
+    let bytes = bounded(root, &path)?;
+    if format!("{:x}", Sha256::digest(&bytes)) != receipt_sha256 { return Ok(false); }
+    let Ok(receipt) = serde_json::from_slice::<Receipt>(&bytes) else { return Ok(false) };
+    if !understood(stem, &receipt) || !receipt.unproven.is_empty()
+        || !receipt.files.get(&format!("{stem}.kfc")).is_some_and(|d| (d.size, d.sha256.as_str()) == header) { return Ok(false); }
+    let live = Live::new(root);
+    Ok(live.backup_sizes(stem, &receipt.backups)? && live.sizes(&receipt.files)?)
 }
 
 /// SF's write lock, held from ownership checking until the last archive write/removal is done. Every SF state write (the
 /// `preparing` an SF preparation writes before it touches an archive included) waits for it, so no SF preparation
 /// can start in between. SF's startup lease (`<runtime>/startup-assets.lock`) is never taken: SF opens it once,
 /// exclusively and without waiting, and a held lease fails both its preparation and its recovery.
-pub(crate) struct SfGuard { _write: fs::File }
+pub(crate) struct SfGuard {
+    _write: fs::File,
+    // kiln-eml: in this crate's and kiln-eml's unit tests (test_gate.rs), dropped after the file: no test creates a
+    // process meanwhile.
+    #[cfg(any(test, feature = "test-gate"))]
+    _hold: crate::test_gate::LockHold,
+}
 
 /// The folder SF's path helpers use for `key` (resolve_installation_paths.rs): they read the config with serde_json
 /// and SF's schema (`paths.*`: a non-empty string or null) and use the defaults when that fails, so a BOM, a damaged
@@ -639,9 +945,15 @@ fn sf_lock(root: &Path) -> io::Result<Option<SfGuard>> {
     fs::create_dir_all(&config_dir)?;
     let lock_path = config_dir.join(".shroudforge-write.lock");
     checked_path(root, &lock_path)?;
+    #[cfg(any(test, feature = "test-gate"))]
+    let hold = crate::test_gate::lock_hold();
     let lock = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(&lock_path)?;
     lock.try_lock().map_err(|e| invalid(&format!("ShroudForge state is in use: {e}")))?;
-    Ok(Some(SfGuard { _write: lock }))
+    Ok(Some(SfGuard {
+        _write: lock,
+        #[cfg(any(test, feature = "test-gate"))]
+        _hold: hold,
+    }))
 }
 
 fn handoff(root: &Path, stem: &str, publishing: bool, changed: bool) -> io::Result<Option<SfGuard>> {
@@ -697,9 +1009,12 @@ fn handoff_locked(root: &Path, stem: &str, publishing: bool, changed: bool, guar
     }).collect();
     assets["status"] = "failed".into();
     assets["error"] = "Kiln's EML writer changed game data; ShroudForge must prepare its asset mods again".into();
+    // kiln-eml: main's sorted key order, not the order SF wrote, under serde_json's preserve_order too.
+    value.sort_all_objects();
     let replacement = serde_json::to_vec_pretty(&value)?;
     let recovery = directory(root)?.join(format!("sf-handoff-{}.json", uuid::Uuid::new_v4()));
-    let journal = serde_json::json!({"format":1,"target":stem,"statePath":state,"original":String::from_utf8(original.clone()).map_err(|_| invalid("non UTF-8 SF state"))?,"replacement":String::from_utf8(replacement.clone()).unwrap()});
+    let mut journal = serde_json::json!({"format":1,"target":stem,"statePath":state,"original":String::from_utf8(original.clone()).map_err(|_| invalid("non UTF-8 SF state"))?,"replacement":String::from_utf8(replacement.clone()).unwrap()});
+    journal.sort_all_objects();
     super::transaction::atomic_write(&recovery, &serde_json::to_vec(&journal)?)?;
     if bounded(root, &state)? != original { return Err(invalid("ShroudForge state changed during handoff; original retained")); }
     super::transaction::atomic_write(&state, &replacement)?;
@@ -835,6 +1150,8 @@ pub(crate) mod tests {
     }
     #[test]
     fn publication_checks_ownership_after_the_sf_lock_not_before_it() {
+        // This test locks ShroudForge's file itself: no kill-matrix child is created meanwhile (test_gate.rs).
+        let _locks = crate::test_gate::lock_hold();
         let (root, files) = fixture();
         install_sf(&root);
         prepare(&root, "g", &files).unwrap();
@@ -855,6 +1172,8 @@ pub(crate) mod tests {
     }
     #[test]
     fn restore_rechecks_ownership_under_the_sf_lock_after_the_runners_earlier_proof() {
+        // This test locks ShroudForge's file itself: no kill-matrix child is created meanwhile (test_gate.rs).
+        let _locks = crate::test_gate::lock_hold();
         let (root, _, _) = real_published();
         install_sf(&root);
         assert!(owns_output(&root, "g").unwrap(), "the runner's initial authorization");
@@ -873,6 +1192,8 @@ pub(crate) mod tests {
     }
     #[test]
     fn baseline_refresh_cannot_replace_shared_backups_while_sf_is_busy_or_preparing() {
+        // This test locks ShroudForge's file itself: no kill-matrix child is created meanwhile (test_gate.rs).
+        let _locks = crate::test_gate::lock_hold();
         for busy in [true, false] {
             let (root, _, _) = real_published();
             install_sf(&root);
@@ -1119,6 +1440,8 @@ pub(crate) mod tests {
     // back; a busy SF, an SF preparation in progress or a state Kiln does not know refuses, and nothing is copied.
     #[test]
     fn restore_hands_over_a_recognized_sf_state_and_refuses_a_busy_or_unknown_one() {
+        // This test locks ShroudForge's file itself: no kill-matrix child is created meanwhile (test_gate.rs).
+        let _locks = crate::test_gate::lock_hold();
         for case in ["applied", "busy", "unknown", "preparing"] {
             let (root, header, resources) = real_published();
             let patched = (fs::read(root.join("g.kfc")).unwrap(), fs::read(root.join("g.kfc_resources")).unwrap());
@@ -1234,21 +1557,23 @@ pub(crate) mod tests {
             let id = uuid::Uuid::new_v4();
             let name = format!(".kiln-eml-stage-{id}");
             let stage = root.join(&name);
-            let record = directory(&root).unwrap().join(format!("cleanup-{id}.json"));
-            fs::write(&record, serde_json::to_vec(&serde_json::json!({"format":1,"stem":"g","name":name})).unwrap()).unwrap();
+            // bound format-2 proof, as create_writer writes it: recorded before the stage, bound right after creating it
+            let record = crate::cleanup::record(&root, "g", &name).unwrap();
+            assert_eq!(record, directory(&root).unwrap().join(format!("cleanup-{id}.json")));
             if point > 0 {
                 fs::create_dir(&stage).unwrap();
+                crate::cleanup::bind_stage(&root, &name, &crate::transaction::FileIdentity::directory(&stage).unwrap()).unwrap();
                 fs::write(stage.join("g.kfc_resources"), "partial or complete resources").unwrap();
                 if point > 1 { fs::write(stage.join("g_010.dat"), "staged container").unwrap(); }
                 if point > 2 { fs::rename(stage.join("g_010.dat"), root.join("g_010.dat")).unwrap(); }
             }
             let temp_id = uuid::Uuid::new_v4();
             let temp = format!("g.kfc_resources.kiln-{temp_id}");
-            let temp_record = directory(&root).unwrap().join(format!("cleanup-{temp_id}.json"));
-            fs::write(&temp_record, serde_json::to_vec(&serde_json::json!({"format":1,"stem":"g","name":temp})).unwrap()).unwrap();
+            let temp_record = crate::cleanup::record(&root, "g", &temp).unwrap();
+            assert_eq!(temp_record, directory(&root).unwrap().join(format!("cleanup-{temp_id}.json")));
             fs::write(root.join(&temp), "partial copy").unwrap();
             prune(&root, "g");
-            assert!(!stage.exists() && !record.exists() && !root.join(temp).exists() && !temp_record.exists(), "recorded scratch survived restart at point {point}");
+            assert!(crate::cleanup::tests::reclaimed(&stage) && !record.exists() && !root.join(temp).exists() && !temp_record.exists(), "recorded scratch survived restart at point {point}");
             if point > 2 { assert_eq!(fs::read(root.join("g_010.dat")).unwrap(), b"staged container"); }
             fs::remove_dir_all(root).unwrap();
         }
@@ -1267,12 +1592,169 @@ pub(crate) mod tests {
         let stage = patch.stage.clone();
         // a killed process holds no handles any more: close the writer's files, then skip the stage's own clean-up
         drop(patch.writer.take());
+        drop(patch.held.take());
         std::mem::forget(patch);
         assert!(stage.is_dir() && fs::read_dir(&stage).unwrap().count() >= 3);
         prune(&root, "g");
-        assert!(!stage.exists(), "recorded real staging files were not reclaimed after restart");
+        assert!(crate::cleanup::tests::reclaimed(&stage), "recorded real staging files were not reclaimed after restart");
         assert_eq!(dats(&root), live, "the live game files are untouched");
         assert!(owns_output(&root, "g").unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+    // Review of b53862f0 (race a, Drop): the writer's stage is replaced after Drop's own checks; Drop and later starts
+    // never delete the replacement's files.
+    #[test]
+    fn drop_never_cleans_a_stage_replaced_while_it_cleans() {
+        use std::rc::Rc;
+        use kfc::{container::KFCFile, guid::ContentHash, reflection::TypeRegistry};
+        let root = real_patch(2, &[]);
+        let path = camino::Utf8Path::from_path(&root).unwrap();
+        let base = Rc::new(KFCFile::from_path(root.join("g.kfc.bak"), false).unwrap());
+        let mut patch = crate::load::create_writer(path, "g", &Rc::new(TypeRegistry::default()), &base).unwrap();
+        patch.write_content(&ContentHash::from_data(b"half way"), b"half way").unwrap();
+        let stage = patch.stage.clone();
+        crate::cleanup::AFTER_STAGE_AUTHORITY.with(|h| h.set(Some(crate::cleanup::tests::replace_hook)));
+        drop(patch);
+        crate::cleanup::AFTER_STAGE_AUTHORITY.with(|h| h.set(None));
+        if crate::cleanup::tests::replaced() {
+            for _ in 0..3 {
+                assert_eq!(fs::read(stage.join("g.kfc")).unwrap(), b"foreign data", "the replacement's file was deleted");
+                prune(&root, "g");
+            }
+            // round 3: Drop cleaned its own held stage wherever it was moved
+            assert!(crate::cleanup::tests::reclaimed(&PathBuf::from(format!("{}-moved", stage.display()))), "Kiln's own stage kept its staged files");
+        } else {
+            assert!(crate::cleanup::tests::reclaimed(&stage), "the held stage was not cleaned");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+    /// The stage directories in `root`, not a test's "-moved" copies. Non-Windows builds keep each emptied stage, so a
+    /// fixture that published already holds one: tests take this list before create_writer and pick the new one.
+    fn stages(root: &Path) -> std::collections::BTreeSet<PathBuf> {
+        fs::read_dir(root).unwrap().flatten().map(|e| e.path())
+            .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with(".kiln-eml-stage-") && !p.to_string_lossy().ends_with("-moved"))
+            .collect()
+    }
+    /// The one stage directory create_writer made in `root` since `before` (whatever the directory order).
+    fn stage_in(root: &Path, before: &std::collections::BTreeSet<PathBuf>) -> PathBuf {
+        let new: Vec<_> = stages(root).difference(before).cloned().collect();
+        assert_eq!(new.len(), 1, "exactly one new stage directory: {new:?}");
+        new[0].clone()
+    }
+    // Round 3 (review of a07c2624, high): the stage is replaced after its record was bound and before the first staging
+    // copy, by a directory holding a foreign pair. Kiln's bytes go only into the directory it created and holds: the
+    // replacement's files are never overwritten, published or cleaned. (Windows refuses the rename: held, no
+    // FILE_SHARE_DELETE.)
+    #[test]
+    fn a_stage_replaced_after_binding_never_receives_kiln_bytes() {
+        use std::rc::Rc;
+        use kfc::{container::KFCFile, guid::ContentHash, reflection::TypeRegistry};
+        let root = real_patch(2, &[]);
+        let (live, header) = (dats(&root), fs::read(root.join("g.kfc")).unwrap());
+        let path = camino::Utf8Path::from_path(&root).unwrap();
+        let base = Rc::new(KFCFile::from_path(root.join("g.kfc.bak"), false).unwrap());
+        let before = stages(&root);
+        crate::cleanup::AFTER_STAGE_BOUND.with(|h| h.set(Some(crate::cleanup::tests::replace_pair_hook)));
+        let made = crate::load::create_writer(path, "g", &Rc::new(TypeRegistry::default()), &base);
+        crate::cleanup::AFTER_STAGE_BOUND.with(|h| h.set(None));
+        let replaced = crate::cleanup::tests::replaced();
+        let stage = stage_in(&root, &before);
+        let check = |stage: &Path| {
+            assert!(fs::read(stage.join("g.kfc")).unwrap() == b"foreign data", "a staging copy overwrote the replacement's g.kfc");
+            assert!(fs::read(stage.join("g.kfc_resources")).unwrap() == b"foreign resources", "a staging copy overwrote the replacement's g.kfc_resources");
+            assert_eq!(fs::read_dir(stage).unwrap().count(), 2, "Kiln wrote into the swapped-in directory");
+        };
+        if replaced { check(&stage); }
+        if let Ok(mut patch) = made {
+            patch.write_content(&ContentHash::from_data(b"kiln bytes"), b"kiln bytes").unwrap();
+            if replaced { check(&stage); }
+            assert_eq!(patch.finalize().is_ok(), !replaced, "published from a stage whose path names another directory");
+        }
+        if !replaced { assert!(crate::cleanup::tests::reclaimed(&stage), "the published stage was not cleaned"); }
+        if replaced {
+            // Kiln's own stage (moved away by the test) was cleaned through its hold
+            assert!(crate::cleanup::tests::reclaimed(&PathBuf::from(format!("{}-moved", stage.display()))), "Kiln's own stage kept its staged files");
+            for _ in 0..2 {
+                check(&stage);
+                assert_eq!((dats(&root), fs::read(root.join("g.kfc")).unwrap()), (live.clone(), header.clone()), "live files changed");
+                prune(&root, "g");
+            }
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+    // Round 3: holding the stage is not authority by itself. Drop cleans it only while its record is still bound to that
+    // very directory; otherwise the stage and the record stay, reported with their reason code.
+    #[test]
+    fn drop_keeps_a_held_stage_whose_record_names_another_directory() {
+        use std::rc::Rc;
+        use kfc::{container::KFCFile, guid::ContentHash, reflection::TypeRegistry};
+        let root = real_patch(2, &[]);
+        let path = camino::Utf8Path::from_path(&root).unwrap();
+        let base = Rc::new(KFCFile::from_path(root.join("g.kfc.bak"), false).unwrap());
+        let mut patch = crate::load::create_writer(path, "g", &Rc::new(TypeRegistry::default()), &base).unwrap();
+        patch.write_content(&ContentHash::from_data(b"half way"), b"half way").unwrap();
+        let stage = patch.stage.clone();
+        let name = stage.file_name().unwrap().to_string_lossy().into_owned();
+        let record = root.join(format!("kiln/eml/ownership/cleanup-{}.json", name.strip_prefix(".kiln-eml-stage-").unwrap()));
+        let mut bound: serde_json::Value = serde_json::from_slice(&fs::read(&record).unwrap()).unwrap();
+        fs::create_dir(root.join("other")).unwrap();
+        bound["stage"] = crate::transaction::FileIdentity::directory(&root.join("other")).unwrap().token().into();
+        fs::write(&record, serde_json::to_vec(&bound).unwrap()).unwrap();
+        drop(patch);
+        assert!(record.exists(), "a record bound to another directory was consumed");
+        assert!(fs::read_dir(&stage).unwrap().count() >= 3, "a held stage was cleaned without its record's authority");
+        assert!(recovery_guidance(&root, "g").unwrap().join(" ").contains(&format!("[eml-cleanup-identity-changed] {name}")));
+        fs::remove_dir_all(root).unwrap();
+    }
+    // Round 3 (review of a07c2624, medium, Drop): after Drop emptied the writer's stage and checked it last, the stage is
+    // moved away and a foreign EMPTY directory takes its path; Drop and later starts never remove the foreign directory.
+    #[test]
+    fn drop_never_removes_a_stage_replaced_before_its_removal() {
+        use std::rc::Rc;
+        use kfc::{container::KFCFile, guid::ContentHash, reflection::TypeRegistry};
+        let root = real_patch(2, &[]);
+        let path = camino::Utf8Path::from_path(&root).unwrap();
+        let base = Rc::new(KFCFile::from_path(root.join("g.kfc.bak"), false).unwrap());
+        let mut patch = crate::load::create_writer(path, "g", &Rc::new(TypeRegistry::default()), &base).unwrap();
+        patch.write_content(&ContentHash::from_data(b"half way"), b"half way").unwrap();
+        let stage = patch.stage.clone();
+        crate::cleanup::BEFORE_STAGE_REMOVAL.with(|h| h.set(Some(crate::cleanup::tests::replace_empty_hook)));
+        drop(patch);
+        crate::cleanup::BEFORE_STAGE_REMOVAL.with(|h| h.set(None));
+        if crate::cleanup::tests::replaced() {
+            for _ in 0..2 {
+                assert!(stage.is_dir(), "the foreign directory swapped in at the stage's path was removed");
+                prune(&root, "g");
+            }
+        } else {
+            assert!(!stage.exists(), "the held stage was not removed through its handle");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+    // Review of b53862f0 (race b): a directory swapped in between create_dir and the identity capture is never bound
+    // as Kiln's, never written into, and never cleaned; it is kept and reported.
+    #[test]
+    fn a_stage_replaced_right_after_creation_is_never_bound() {
+        use std::rc::Rc;
+        use kfc::{container::KFCFile, reflection::TypeRegistry};
+        let root = real_patch(2, &[]);
+        let path = camino::Utf8Path::from_path(&root).unwrap();
+        let base = Rc::new(KFCFile::from_path(root.join("g.kfc.bak"), false).unwrap());
+        let before = stages(&root);
+        crate::cleanup::AFTER_STAGE_CREATED.with(|h| h.set(Some(crate::cleanup::tests::replace_hook)));
+        let made = crate::load::create_writer(path, "g", &Rc::new(TypeRegistry::default()), &base);
+        crate::cleanup::AFTER_STAGE_CREATED.with(|h| h.set(None));
+        assert!(crate::cleanup::tests::replaced(), "the test could not replace a just-created directory");
+        assert!(made.is_err(), "a writer was built on a directory that is not the one Kiln created");
+        drop(made);
+        let stage = stage_in(&root, &before);
+        for _ in 0..2 {
+            prune(&root, "g");
+            assert_eq!(fs::read(stage.join("g.kfc")).unwrap(), b"foreign data", "the swapped-in directory was cleaned or written");
+            assert_eq!(fs::read_dir(&stage).unwrap().count(), 1, "Kiln wrote into the swapped-in directory");
+        }
+        let name = stage.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(recovery_guidance(&root, "g").unwrap().join(" ").contains(&format!("[eml-cleanup-unbound] {name}")));
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
@@ -1316,6 +1798,56 @@ pub(crate) mod tests {
             fs::remove_dir_all(root).unwrap();
         }
     }
+    /// kiln-eml: true when every object in `bytes` lists its keys in sorted order, as main's serde_json (no
+    /// `preserve_order`) writes them. Holds whichever serde_json features the build unifies.
+    pub(crate) fn keys_sorted(bytes: &[u8], pretty: bool) -> bool {
+        let mut value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        value.sort_all_objects();
+        let again = if pretty { serde_json::to_vec_pretty(&value) } else { serde_json::to_vec(&value) }.unwrap();
+        again == bytes
+    }
+    // sfi-core gives the DLL serde_json's preserve_order. The rewritten SF state must keep
+    // main's sorted key order, not the order of the file ShroudForge wrote.
+    #[test]
+    fn sf_handoff_state_and_journal_keeps_sorted_key_order() {
+        let (root, files) = fixture();
+        let (state, _) = sf(&root, false);
+        let fingerprint = "a".repeat(64);
+        let original = format!(concat!(r#"{{"windows":{{"favorite":"cyan"}},"schemaVersion":1,"assets":{{"status":"applied","#,
+            r#""target":"g","schemaVersion":1,"phase":"startup","mods":[{{"version":"1.0.0","id":"player-sf"}}],"#,
+            r#""fingerprint":"{}","completedAt":42}}}}"#), fingerprint);
+        fs::write(&state, &original).unwrap();
+        prepare(&root, "g", &files).unwrap();
+        let expected = format!(concat!("{{\n  \"assets\": {{\n    \"completedAt\": 42,\n",
+            "    \"error\": \"Kiln's EML writer changed game data; ShroudForge must prepare its asset mods again\",\n",
+            "    \"fingerprint\": \"{}\",\n    \"mods\": [\n      {{\n        \"id\": \"player-sf\",\n",
+            "        \"version\": \"1.0.0\"\n      }}\n    ],\n    \"phase\": \"startup\",\n    \"schemaVersion\": 1,\n",
+            "    \"status\": \"failed\",\n    \"target\": \"g\"\n  }},\n  \"schemaVersion\": 1,\n",
+            "  \"windows\": {{\n    \"favorite\": \"cyan\"\n  }}\n}}"), fingerprint);
+        assert_eq!(String::from_utf8(fs::read(&state).unwrap()).unwrap(), expected);
+        let journal = fs::read_dir(root.join("kiln/eml/ownership")).unwrap().flatten()
+            .find(|e| e.file_name().to_string_lossy().starts_with("sf-handoff-")).unwrap();
+        let journal = fs::read(journal.path()).unwrap();
+        assert!(journal.starts_with(br#"{"format":1,"original":"#), "{}", String::from_utf8_lossy(&journal));
+        assert!(keys_sorted(&journal, false));
+        let value: serde_json::Value = serde_json::from_slice(&journal).unwrap();
+        assert_eq!(value["original"].as_str().unwrap(), original, "the journal keeps SF's own bytes for recovery");
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn recovery_evidence_keeps_sorted_key_order() {
+        use std::rc::Rc;
+        use kfc::{container::KFCWriter, reflection::TypeRegistry};
+        let root = std::env::temp_dir().join(format!("kiln-recovery-order-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        fs::File::create(root.join("g.kfc")).unwrap();
+        fs::File::create(root.join("g.kfc_resources")).unwrap();
+        let writer: crate::transaction::Writer = KFCWriter::new(&root, "g", Rc::new(TypeRegistry::default()), "fixture").unwrap();
+        writer.finalize().unwrap();
+        let text = serde_json::to_string(&super::recovery_inventory(&root, "g").unwrap()).unwrap();
+        assert!(text.starts_with(r#"{"containers":"#) && keys_sorted(text.as_bytes(), false), "{text}");
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn unchanged_output_never_mutates_sf_state() {
         let (root, files) = fixture();
@@ -1356,7 +1888,7 @@ pub(crate) mod tests {
         for stem in ["", "../g", "g/other", r"g\other", "."] {
             assert!(owns_output(&root, stem).is_err());
             assert!(prepare(&root, stem, &files).is_err());
-            assert!(before_restore(&root, stem).is_err());
+            assert!(before_restore(&root, stem, SfHandoff::Live).is_err());
         }
         assert!(!root.join("kiln").exists());
         fs::remove_dir_all(root).unwrap();
@@ -1426,7 +1958,7 @@ pub(crate) mod tests {
         let (state, _) = sf(&root, false);
         let bytes = edit_sf(&state, |v| v["assets"] = serde_json::json!({"schemaVersion":1,"status":"preparing","target":"g"}));
         assert!(prepare(&root, "g", &files).is_err());
-        assert!(before_restore(&root, "g").is_err());
+        assert!(before_restore(&root, "g", SfHandoff::Live).is_err());
         assert_eq!(fs::read(&state).unwrap(), bytes);
         fs::remove_dir_all(root).unwrap();
     }
@@ -1438,7 +1970,7 @@ pub(crate) mod tests {
         fs::create_dir_all(root.join(".g.shroudforge-stage")).unwrap();
         fs::write(root.join(".g.shroudforge-stage/pending.json"), "[]").unwrap();
         assert!(prepare(&root, "g", &files).is_err());
-        assert!(before_restore(&root, "g").is_err());
+        assert!(before_restore(&root, "g", SfHandoff::Live).is_err());
         assert_eq!(fs::read(&state).unwrap(), original);
         // the same without any SF state: the journal alone still means SF will roll back
         fs::remove_file(&state).unwrap();
@@ -1452,6 +1984,8 @@ pub(crate) mod tests {
     // it once without waiting, and a held lease would fail its preparation and its recovery.
     #[test]
     fn sf_write_lock_is_held_until_the_archives_are_written_and_the_startup_lease_never_taken() {
+        // This test locks ShroudForge's file itself: no kill-matrix child is created meanwhile (test_gate.rs).
+        let _locks = crate::test_gate::lock_hold();
         let (root, _) = fixture();
         let (state, _) = sf(&root, false);
         fs::create_dir_all(root.join("shroudforge/runtime")).unwrap();
@@ -1472,6 +2006,8 @@ pub(crate) mod tests {
     }
     #[test]
     fn busy_sf_writer_blocks_archive_handoff() {
+        // This test locks ShroudForge's file itself: no kill-matrix child is created meanwhile (test_gate.rs).
+        let _locks = crate::test_gate::lock_hold();
         let (root, files) = fixture();
         let (state, original) = sf(&root, false);
         let lock = fs::File::create(root.join("shroudforge/config/.shroudforge-write.lock")).unwrap();
@@ -1505,7 +2041,7 @@ pub(crate) mod tests {
         prepare(&game, "g", &files).unwrap();
         publish(&game, &files);
         assert!(owns_output(&game, "g").unwrap());
-        before_restore(&game, "g").unwrap();
+        before_restore(&game, "g", SfHandoff::Live).unwrap();
         // a link below the trusted location is still refused
         std::os::unix::fs::symlink(real.join("victim"), game.join("kiln/eml/linked")).unwrap();
         assert!(checked_path(&game, &game.join("kiln/eml/linked/g.json")).is_err());
@@ -1575,5 +2111,83 @@ pub(crate) mod tests {
             assert_eq!(fs::read(&state).unwrap(), original);
             fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    /// `read_receipt` still applies exactly its old rule (written out here as it was before `understood` was
+    /// split out of it), with the same error texts, and `readonly::receipt` accepts exactly the receipts it accepts,
+    /// reporting their contents and the SHA-256 of their bytes.
+    #[test]
+    fn readonly_receipt_agrees_with_read_receipt_on_every_fixture() {
+        fn old_rule(stem: &str, r: &Receipt) -> bool {
+            !(r.format != 1 || r.stem != stem || !output_set(stem, &r.files)
+                || r.previous.as_ref().is_some_and(|p| !output_set(stem, p)))
+        }
+        let d = |n: u64| serde_json::json!({"size": n, "sha256": "ab".repeat(32)});
+        let files = serde_json::json!({"g.kfc": d(1), "g.kfc_resources": d(2), "g_001.dat": d(3)});
+        let base = serde_json::json!({"format": 1, "stem": "g", "files": files, "backups": {"g.kfc.bak": d(4), "g.kfc_resources.bak": d(5)}});
+        let with = |key: &str, value: serde_json::Value| { let mut v = base.clone(); v[key] = value; serde_json::to_vec(&v).unwrap() };
+        let mut cases: Vec<Vec<u8>> = vec![
+            serde_json::to_vec(&base).unwrap(),
+            serde_json::to_vec_pretty(&base).unwrap(),
+            with("format", serde_json::json!(2)), with("format", serde_json::json!(0)), with("format", serde_json::json!("1")),
+            with("stem", serde_json::json!("h")), with("stem", serde_json::json!("G")),
+            with("files", serde_json::json!({"g.kfc": d(1)})),
+            with("files", serde_json::json!({"g.kfc": d(1), "g.kfc_resources": d(2), "../g.kfc": d(3)})),
+            with("files", serde_json::json!({"g.kfc": d(1), "g.kfc_resources": d(2), "g_.dat": d(3)})),
+            with("files", serde_json::json!({"g.kfc": d(1), "g.kfc_resources": d(2), "g_01a.dat": d(3)})),
+            with("files", serde_json::json!({"g.kfc": d(1), "g.kfc_resources": d(2), "h_001.dat": d(3)})),
+            with("files", serde_json::json!({"g.kfc": {"size": 1}, "g.kfc_resources": d(2)})),
+            with("previous", files.clone()), with("previous", serde_json::json!({"g.kfc": d(1)})),
+            with("previous", serde_json::json!({})), with("previous", serde_json::Value::Null),
+            with("unproven", serde_json::json!(["g.kfc"])), with("unproven", serde_json::json!("g.kfc")),
+            with("baseOrigin", serde_json::json!({"token": "first-managed-unclassified", "label": "x", "baseline": {}})),
+            with("somethingNew", serde_json::json!(1)),
+            with("backups", serde_json::json!({"../../elsewhere": d(1)})),
+            br#"{"format":1,"format":1,"stem":"g","files":{},"backups":{}}"#.to_vec(),
+            b"".to_vec(), b"null".to_vec(), b"[]".to_vec(), b"{".to_vec(), vec![0xff, 0xfe],
+        ];
+        let mut no_backups = base.clone();
+        no_backups.as_object_mut().unwrap().remove("backups");
+        cases.push(serde_json::to_vec(&no_backups).unwrap());
+        let root = std::env::temp_dir().join(format!("kiln-g17-receipts-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join("kiln/eml/ownership")).unwrap();
+        let (mut accepted, mut refused) = (0, 0);
+        for bytes in &cases {
+            fs::write(root.join("kiln/eml/ownership/g.json"), bytes).unwrap();
+            let read = read_receipt(&root, "g");
+            let parsed = serde_json::from_slice::<Receipt>(bytes).ok();
+            let reference = parsed.as_ref().is_some_and(|r| old_rule("g", r));
+            assert_eq!(parsed.as_ref().map(|r| understood("g", r)), parsed.as_ref().map(|r| old_rule("g", r)));
+            let view = readonly::receipt("g", bytes);
+            match (&read, &view) {
+                (Ok(Some(r)), Some(v)) => {
+                    assert!(reference);
+                    accepted += 1;
+                    assert_eq!(v.sha256, format!("{:x}", Sha256::digest(bytes)));
+                    assert_eq!(v.size, bytes.len() as u64);
+                    let listed = |m: &BTreeMap<String, Digest>| m.iter().map(|(n, d)| (n.clone(), (d.size, d.sha256.clone()))).collect::<readonly::Listed>();
+                    assert_eq!((&v.files, &v.backups), (&listed(&r.files), &listed(&r.backups)));
+                    assert_eq!(v.previous, r.previous.as_ref().map(listed));
+                    assert_eq!(v.unproven, r.unproven);
+                }
+                (Err(e), None) => {
+                    assert!(!reference);
+                    refused += 1;
+                    let want = if parsed.is_some() { "unknown EML ownership receipt" } else { "invalid EML ownership receipt" };
+                    assert_eq!(e.to_string(), want, "{}", String::from_utf8_lossy(bytes));
+                }
+                (read, view) => panic!("disagree on {}: read_receipt ok {}, view {}", String::from_utf8_lossy(bytes), read.is_ok(), view.is_some()),
+            }
+        }
+        assert!(accepted >= 6 && refused >= 15, "{accepted} accepted, {refused} refused");
+        // over the cap: read_receipt refuses it, and so does the view
+        let mut big = serde_json::to_vec(&base).unwrap();
+        big.resize((readonly::RECEIPT_LIMIT + 1) as usize, b' ');
+        fs::write(root.join("kiln/eml/ownership/g.json"), &big).unwrap();
+        assert!(read_receipt(&root, "g").is_err() && readonly::receipt("g", &big).is_none());
+        big.truncate(readonly::RECEIPT_LIMIT as usize);
+        fs::write(root.join("kiln/eml/ownership/g.json"), &big).unwrap();
+        assert!(read_receipt(&root, "g").unwrap().is_some() && readonly::receipt("g", &big).is_some());
+        fs::remove_dir_all(root).unwrap();
     }
 }

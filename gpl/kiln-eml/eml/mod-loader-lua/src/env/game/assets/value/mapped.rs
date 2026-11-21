@@ -354,6 +354,7 @@ enum MappedArrayValueEntry {
 impl MappedArrayValue {
 
     pub fn new(data: MappedArray) -> Self {
+        // kiln-eml: one entry per element; kfc refused a stored count the bytes cannot hold before mapping it
         let mut cache = Vec::with_capacity(data.len());
 
         for i in 0..data.len() {

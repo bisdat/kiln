@@ -10,6 +10,8 @@
 //! - `kiln_plugin_main`: the normal plugin step later in the same boot; runs everything then if no early step did
 //!   (an older kiln-core).
 //! - `kiln_eml_service`: the kiln.eml table for early plugins (services are not served before hooks are on).
+//! - kiln.eml.archive (archive_service.rs): published in `start` with its capability rows; its early export lives there.
+//! - kiln.eml.values (archive_values/abi.rs): published in `start` right after it, with its rows; no early export.
 
 use std::ffi::c_void;
 use std::io::Write as _;
@@ -22,6 +24,7 @@ use tracing::Level;
 use tracing_subscriber::prelude::*;
 
 use crate::discover::{self, Candidate};
+use crate::kiln_mode::{self, KilnMode, Launch};
 use crate::logging::LineLayer;
 use crate::runner::{self, Outcome, Phase, RunConfig};
 
@@ -137,6 +140,172 @@ pub struct KilnEmlApi {
 
 // Function pointers are plain addresses; the table is immutable.
 unsafe impl Sync for KilnEmlApi {}
+
+// ---- kiln.launch (kiln_launch.h; it ships with Kiln's interpreter) ----
+
+const KILN_LAUNCH_BACKEND_NONE: u32 = 0;
+const KILN_LAUNCH_BACKEND_HOSTED: u32 = 1;
+const KILN_LAUNCH_BACKEND_INSTALLED: u32 = 2;
+const KILN_LAUNCH_BACKEND_KILN: u32 = 3;
+
+/// kiln_launch.h KilnLaunchStatus v1 (the whole record; kiln-eml reads backend, frozen, reason_code and plan_hash)
+#[repr(C)]
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+struct KilnLaunchStatus {
+    size: u32,
+    backend: u32,
+    frozen: u32,
+    reason_code: u32,
+    launch_id: u64,
+    plan_hash: [u8; 32],
+    freeze_stamp: u64,
+    reason: [u8; 128],
+}
+const _: () = assert!(std::mem::size_of::<KilnLaunchStatus>() == 192 && std::mem::offset_of!(KilnLaunchStatus, plan_hash) == 24
+    && std::mem::offset_of!(KilnLaunchStatus, reason) == 64);
+
+/// kiln_launch.h KilnLaunchApi v1 (`notice_copy` is not used here)
+#[repr(C)]
+#[allow(dead_code)]
+struct KilnLaunchApi {
+    header: KilnServiceHeader,
+    status: Option<unsafe extern "C" fn(*mut KilnLaunchStatus) -> i32>,
+    notice_copy: *const c_void,
+}
+
+/// The core's frozen ShroudForge backend for this start, classified as kiln-sfi and kiln-shroudforge classify it: every
+/// member is checked against the table's declared size and version before use, and the record against its own; anything
+/// else (no table: an older core) is [`Launch::Absent`].
+///
+/// # Safety
+/// `service` is the core's `KilnApi.service`; a table it returns is readable for its declared size.
+unsafe fn read_launch(service: unsafe extern "C" fn(KilnStr, u32) -> *const c_void) -> Launch {
+    let table = unsafe { service(KilnStr::lit("kiln.launch"), 1) }.cast::<KilnLaunchApi>();
+    if table.is_null() || !table.is_aligned() { return Launch::Absent; }
+    // SAFETY: the table starts with its header; `status` is read only when the declared size covers it
+    let header = unsafe { table.cast::<KilnServiceHeader>().read() };
+    if header.version < 1 || (header.size as usize) < std::mem::offset_of!(KilnLaunchApi, status) + std::mem::size_of::<usize>() {
+        return Launch::Absent;
+    }
+    let Some(status) = (unsafe { std::ptr::addr_of!((*table).status).read() }) else { return Launch::Absent };
+    // SAFETY: an all-zero record is valid; the core fills it during the call
+    let mut record: KilnLaunchStatus = unsafe { std::mem::zeroed() };
+    record.size = std::mem::size_of::<KilnLaunchStatus>() as u32;
+    if unsafe { status(&mut record) } != KILN_OK || record.frozen != 1
+        || (record.size as usize) < std::mem::size_of::<KilnLaunchStatus>() {
+        return Launch::Absent;
+    }
+    match record.backend {
+        KILN_LAUNCH_BACKEND_HOSTED | KILN_LAUNCH_BACKEND_INSTALLED => Launch::Shroudforge,
+        KILN_LAUNCH_BACKEND_KILN => Launch::Kiln { plan_hash: record.plan_hash, launch_id: record.launch_id },
+        KILN_LAUNCH_BACKEND_NONE if (0x100..0x200).contains(&record.reason_code) => Launch::Refused,
+        KILN_LAUNCH_BACKEND_NONE if (0x200..0x300).contains(&record.reason_code) => Launch::Idle,
+        _ => Launch::Absent,
+    }
+}
+
+/// kiln-eml's route this start (kiln_mode.rs): Some when kiln.launch froze backend `kiln` (and `KILN_SHROUDFORGE=0`
+/// does not stand it aside); None keeps the rules from before kiln.launch, and logs nothing new. The plan is the one
+/// kiln-eml's early phase read (startup_seam.rs), read here only when no early phase ran.
+fn kiln_route(game: &Utf8Path, kiln: &Utf8Path) -> Option<std::sync::Arc<KilnMode>> {
+    let launch = api().map_or(Launch::Absent, |a| unsafe { read_launch(a.service) });
+    let env = std::env::var("KILN_SHROUDFORGE").ok();
+    let mode = kiln_mode::select(&launch, env.as_deref(), game, |hash| {
+        crate::startup_seam::early_plan().unwrap_or_else(|| {
+            let json = profile().map(|p| unsafe { (p.json)().to_string() });
+            let (exe_sha256, side) = build_identity().ok_or("the core does not say which game executable runs")?;
+            let context = sfi_policy::launch_plan::ValidationContext { exe_sha256, side: side.into(), upstream_180_final: false };
+            kiln_mode::read_plan(json.as_deref(), kiln, game, hash, &context)
+        })
+    })?;
+    klog(if mode.plan_read() { 3 } else { 2 }, &mode.summary());
+    Some(std::sync::Arc::new(mode))
+}
+
+/// `build_info`'s executable SHA-256 (64 lower-case hex digits) and side (kiln_api.h KilnBuildInfo), as kiln-sfi reads
+/// them for the launch plan's checks; None when the core does not say. Served in the early step too.
+fn build_identity() -> Option<(String, &'static str)> {
+    use kiln_abi::{KILN_SIDE_SERVER, KilnBuildInfo};
+    let a = api()?;
+    if a.build_info.is_null() { return None; }
+    // SAFETY: kiln_api.h declares the member with this signature; valid_api checked the table covers it.
+    let build_info: unsafe extern "C" fn(*mut KilnBuildInfo) -> i32 = unsafe { std::mem::transmute(a.build_info) };
+    // SAFETY: an all-zero record is valid; the core fills it during the call.
+    let mut info: KilnBuildInfo = unsafe { std::mem::zeroed() };
+    info.size = std::mem::size_of::<KilnBuildInfo>() as u32;
+    if unsafe { build_info(&mut info) } != KILN_OK { return None; }
+    let exe: String = info.exe_sha256.iter().take_while(|&&c| c != 0).map(|&c| c as u8 as char).collect();
+    if exe.len() != 64 || !exe.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) { return None; }
+    Some((exe, if info.side == KILN_SIDE_SERVER as u32 { "server" } else { "client" }))
+}
+
+// (kiln mode's early phase)
+/// kiln-eml's early phase of a kiln-backend start (startup_seam.rs `early`): the plan read again, the install lock taken
+/// for the process (`other_game_running` with it), the startup controller's witness before any package DLL loads, and the launch installed for
+/// kiln-sfi's attach. `loaders`: another EML loader that patched the game files in this process refuses the witness (no
+/// stand-aside outcome in kiln mode: ShroudForge's config is never read here). False: not a kiln start, the rules from
+/// before kiln.launch apply.
+fn kiln_early(loaders: Option<&LoadedLoaders>) -> bool {
+    let launch = api().map_or(Launch::Absent, |a| unsafe { read_launch(a.service) });
+    let Launch::Kiln { plan_hash, launch_id } = launch else { return false };
+    if !kiln_mode::active(&launch, std::env::var("KILN_SHROUDFORGE").ok().as_deref()) { return false; }
+    // what kiln mode's on_ready asks the system through the loader, asked now, on the boot thread before any package
+    // DLL loads: on_ready may run while a package DLL's initializer holds the loader lock, which Wine's
+    // GetModuleFileNameW, GetModuleHandleW and GetProcAddress take
+    let _ = exe_stem();
+    crate::discover::prime_dos_name();
+    let (Some(game), Some(kiln)) = (kpath(KILN_PATH_GAME), kpath(KILN_PATH_KILN)) else {
+        klog(1, "kiln-eml: Kiln gave no game/kiln path; Kiln's ShroudForge startup pass does not run");
+        return true;
+    };
+    let stem = exe_stem().unwrap_or_default();
+    let json = profile().map(|p| unsafe { (p.json)().to_string() });
+    let read = crate::startup_seam::early(&crate::startup_seam::EarlyInputs {
+        game: &game,
+        kiln: &kiln,
+        stem: &stem,
+        launch_id,
+        plan_sha256: plan_hash,
+        build: build_identity(),
+        profile_json: json.as_deref(),
+        foreign_loader: loaders.map(|l| l.why.clone()),
+        lock: &crate::startup_seam::install_lock,
+        witness: &crate::startup::witness,
+    });
+    if let Err(why) = read {
+        klog(2, &format!("kiln-eml: Kiln's interpreter has this start (kiln.launch), but its launch plan cannot \
+            be read again ({why}): no startup pass runs this start"));
+    }
+    true
+}
+
+/// The chosen rule, in this one place: a start of hosted
+/// ShroudForge (`stand_aside`, under the install lock) clears the handoff an earlier kiln-mode start owes ShroudForge
+/// (`<stem>.sf-handoff-owed.json`): ShroudForge's applied record is marked stale before ShroudForge reads it, so it never
+/// reuses a record of game data Kiln changed since. Nothing happens when no handoff is owed. A failure is logged and the
+/// start goes on (the marker stays for the next start that may use ShroudForge's folder).
+fn settle_owed_handoff_under_hosted(game: &Utf8Path) {
+    let Some(stem) = exe_stem().filter(|s| s == "enshrouded" || s == "enshrouded_server") else { return };
+    match mod_loader::lua::settle_owed_handoff(game.as_std_path(), &stem) {
+        Ok(true) => klog(3, "kiln-eml: marked ShroudForge's record of its prepared asset mods stale: Kiln's \
+            interpreter changed the game data since ShroudForge last ran"),
+        Ok(false) => {}
+        Err(e) => klog(2, &format!("kiln-eml: could not mark ShroudForge's record of its prepared asset mods stale ({e}); \
+            the next start that may use ShroudForge's folder tries again")),
+    }
+}
+
+/// The file stem of this process's executable, lower case (`enshrouded`, `enshrouded_server` in the game); a unit test
+/// names the game's in its child process. Asked once per process: Wine's GetModuleFileNameW takes the loader lock, and
+/// kiln mode's on_ready may run while a package DLL's initializer holds it (the first call is kiln-eml's early phase).
+fn exe_stem() -> Option<String> {
+    #[cfg(test)]
+    if let Some(stem) = tests::EXE_STEM.get() { return Some(stem.clone()); }
+    static STEM: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    STEM.get_or_init(|| std::env::current_exe().ok().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_lowercase())))
+        .clone()
+}
 
 static TABLE: KilnEmlApi = KilnEmlApi {
     header: KilnServiceHeader { size: std::mem::size_of::<KilnEmlApi>() as u32, version: 2 },
@@ -447,6 +616,19 @@ fn profile() -> Option<&'static KilnProfileApi> {
     }
 }
 
+/// kiln.caps v1, when the core serves it in full (it does in the early step and in safe idle).
+fn caps_table() -> Option<&'static kiln_abi::services::kiln_caps::KilnCapsApi> {
+    use kiln_abi::services::kiln_caps::KilnCapsApi;
+    let a = api()?;
+    let p = unsafe { (a.service)(KilnStr::lit("kiln.caps"), 1) } as *const KilnCapsApi;
+    if p.is_null() { return None; }
+    unsafe {
+        let h = &*p.cast::<KilnServiceHeader>();
+        if h.version < 1 || (h.size as usize) < std::mem::size_of::<KilnCapsApi>() { return None; }
+        Some(&*p)
+    }
+}
+
 fn eml_json(game: &Utf8Path) -> (bool, Option<std::path::PathBuf>) {
     // EML's eml.json (read only; kiln-eml never creates it): use_export_flag, export_directory
     let Ok(text) = std::fs::read_to_string(game.join("eml.json")) else { return (false, None) };
@@ -521,19 +703,31 @@ fn run_now() {
     }
     // the core's progress window (kiln.progress; none on a server, with KILN_UI_DISABLE=1 or in an older kiln-core)
     let table = api().map_or(std::ptr::null(), |a| unsafe { (a.service)(KilnStr::lit("kiln.progress"), 1) });
+    let route = kiln_route(&game, &kiln);
+    // (none in a kiln-mode start either. Its on_ready may run while a package DLL's initializer
+    // holds the loader lock, and the core's first begin asks user32 for the screen size, which can load Wine's display
+    // driver (Proton would wait for that initializer); the window would show EML's title and never the startup pass.
+    // The state file's progress stays, for the launcher.)
+    let table = if route.is_some() { std::ptr::null() } else { table };
     let progress = Some(std::sync::Arc::new(unsafe { crate::progress::Display::new(state.clone(), table) }));
     let cfg = RunConfig {
         progress,
         game_dir: game.clone(),
-        file_name: std::env::current_exe().ok().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_lowercase())),
+        // (asked once per process, in a kiln start's early phase, never under a package DLL's
+        // loader lock; public: `std::env::current_exe()`'s file stem in lower case, asked here)
+        file_name: exe_stem(),
         cache_dir: kiln.join("eml").join("cache"),
         patch: true,
         export,
         export_dir,
         skip_cache: false,
+        kiln: route,
     };
     if let Some(p) = profile() {
-        discover::apply_runtime_blocks(&unsafe { (p.json)().to_string() }, &kiln, &mut entries, &runner::runtime_skip_reason(&cfg));
+        match &cfg.kiln {
+            Some(mode) => discover::apply_runtime_blocks_with(&unsafe { (p.json)().to_string() }, &kiln, &mut entries, |e| mode.delegated(e)),
+            None => discover::apply_runtime_blocks(&unsafe { (p.json)().to_string() }, &kiln, &mut entries, &runner::runtime_skip_reason(&cfg)),
+        }
     }
     tracing::debug!(candidates = candidates.len(), run = mods.len(), dropins, profile_note, "kiln-eml discovery");
     let mut out = runner::run(&cfg, mods, entries);
@@ -558,6 +752,8 @@ fn run_now() {
         }
     }
     let summary = match out.phase {
+        // (a kiln-mode start's line)
+        _ if cfg.kiln.is_some() => kiln_summary(&out),
         Phase::Idle if out.restored => "kiln-eml: no EML mods; the game data was restored to vanilla (EML's .kfc.bak)".to_string(),
         Phase::Idle => match &out.reason {
             Some(reason) => format!("kiln-eml: no EML mods; game files untouched. {reason}"),
@@ -593,6 +789,22 @@ fn run_now() {
     }
     publish(&out, state.as_deref());
     enforce_startup_safety(&out);
+}
+
+/// kiln.log's line for a kiln-mode start (its startup pass, runner.rs `run_kiln`).
+fn kiln_summary(out: &Outcome) -> String {
+    let applied = out.mods.iter().filter(|m| m.source == "shroudforge" && m.state == "loaded").count();
+    let error = out.error.as_deref().unwrap_or("no reason was given");
+    match out.phase {
+        Phase::Failed if out.start_blocked => format!("kiln-eml: {error}; stopping this start before the game entry point"),
+        Phase::Failed => format!("kiln-eml: Kiln's ShroudForge startup pass applied nothing this start ({error}); the game \
+            and other mods run on"),
+        Phase::Done if out.cached => format!("kiln-eml: Kiln's ShroudForge startup pass: {applied} package(s) applied, \
+            nothing changed since the last start ({:.0} ms)", out.ms),
+        Phase::Done => format!("kiln-eml: Kiln's ShroudForge startup pass: {applied} package(s) applied ({:.0} ms)", out.ms),
+        _ if out.restored => "kiln-eml: Kiln's ShroudForge startup pass applied no package; the game's own data was put back".into(),
+        _ => "kiln-eml: Kiln's ShroudForge startup pass applied no package; game files untouched".into(),
+    }
 }
 
 /// `; hashed 0 B, reused 57 file(s)`: what reading the game's files for the change cache cost this start.
@@ -646,7 +858,29 @@ fn start(api: *const KilnApi, owner: u64, info: *mut KilnPluginInfo, with_ready:
     if rc != KILN_OK {
         tracing::debug!(rc, "kiln.eml not published");
     }
-    if let Some(found) = eml_loader_loaded() {
+    // kiln.eml.archive v1: the same table as the early export kiln_eml_archive_service, and its rows.
+    let rc = crate::archive_service::publish(
+        owner,
+        |name, table| unsafe { (a.register_service)(owner, KilnStr::of(name), table) },
+        caps_table(),
+    );
+    if rc != KILN_OK {
+        tracing::debug!(rc, "kiln.eml.archive not published");
+    }
+    // kiln.eml.values v1: normal lookup only (no early export), and its rows.
+    let rc = crate::archive_values::abi::publish(
+        owner,
+        |name, table| unsafe { (a.register_service)(owner, KilnStr::of(name), table) },
+        caps_table(),
+    );
+    if rc != KILN_OK {
+        tracing::debug!(rc, "kiln.eml.values not published");
+    }
+    let loaders = eml_loader_loaded();
+    // (a kiln-backend start's early phase; no stand-aside outcome in kiln mode)
+    let kiln = with_ready && kiln_early(loaders.as_ref());
+    let loaders = loaders.filter(|_| !kiln);
+    if let Some(found) = loaders {
         RAN.store(true, Ordering::Release);
         let LoadedLoaders { why, who, paths, several } = found;
         if several.is_some() {
@@ -689,6 +923,10 @@ pub unsafe extern "C" fn kiln_plugin_main(api: *const KilnApi, owner: u64, info:
             let info = unsafe { &mut *info };
             info.id = KilnStr::lit(ID);
             info.version = KilnStr::lit(crate::VERSION);
+            // (what the startup seam's members noted, logged here on the boot thread)
+            for line in crate::startup_seam::late_notes() {
+                klog(2, &line);
+            }
             return KILN_OK;
         }
         let rc = start(api, owner, info, false);
@@ -748,10 +986,19 @@ unsafe extern "C" fn eml_stand_aside(reason: KilnStr) -> i32 {
         let bytes = unsafe { std::slice::from_raw_parts(reason.ptr, reason.len) };
         let Ok(reason) = std::str::from_utf8(bytes) else { return KILN_ERR_INVALID_ARGUMENT; };
         if reason.contains('\0') { return KILN_ERR_INVALID_ARGUMENT; }
+        // Kiln's interpreter has this start: kiln-eml is its launch plan's data writer, and no runtime reserves the run
+        // (kiln-shroudforge stands aside before it would ask). Nothing changes; collection stays open.
+        if kiln_mode::active(&api().map_or(Launch::Absent, |a| unsafe { read_launch(a.service) }), std::env::var("KILN_SHROUDFORGE").ok().as_deref()) {
+            klog(2, &format!("kiln-eml: refused a request to stand aside (\"{reason}\"): Kiln's interpreter has \
+                this start (kiln.launch), and kiln-eml is its launch plan's data writer"));
+            return KILN_ERR_UNAVAILABLE;
+        }
         let _added = ADDED.lock().unwrap_or_else(|e| e.into_inner());
         if RAN.load(Ordering::Acquire) { return KILN_ERR_UNAVAILABLE; }
         if let Some(game) = kpath(KILN_PATH_GAME) {
             if runner::lock_game(&game).is_err() { return KILN_ERR_UNAVAILABLE; }
+            // (owner question Q2)
+            settle_owed_handoff_under_hosted(&game);
         } else { return KILN_ERR_UNAVAILABLE; }
         RAN.store(true, Ordering::Release);
         let out = aside_outcome(reason, "ShroudForge (hosted by Kiln)", true);
@@ -775,6 +1022,11 @@ unsafe extern "C" fn eml_state_json(buffer: *mut u8, capacity: usize, out_len: *
     unsafe { std::ptr::copy_nonoverlapping(s.as_ptr(), buffer, s.len()) };
     KILN_OK
 }
+
+// Every kiln.launch record but kiln leaves the whole start as without the table
+#[cfg(test)]
+#[path = "plugin_records_tests.rs"]
+mod records_tests;
 
 #[cfg(test)]
 mod tests {
@@ -855,6 +1107,8 @@ mod tests {
         const CHILD: &str = "KILN_EML_BUSY_START_TEST";
         if let Ok(game) = std::env::var(CHILD) {
             let game = Utf8PathBuf::from(game);
+            let mut go = [0u8];
+            std::io::Read::read_exact(&mut std::io::stdin(), &mut go).unwrap();
             let out = runner::run(&RunConfig { game_dir: game.clone(), cache_dir: game.join("cache"),
                 file_name: Some("enshrouded".into()), patch: true, ..Default::default() }, Vec::new(), Vec::new());
             enforce_startup_safety(&out);
@@ -862,10 +1116,16 @@ mod tests {
         }
         let game = Utf8PathBuf::from_path_buf(std::env::temp_dir()).unwrap().join(format!("kiln-busy-start-{}", std::process::id()));
         std::fs::create_dir_all(&game).unwrap();
-        runner::lock_game(&game).unwrap();
-        let result = std::process::Command::new(std::env::current_exe().unwrap())
+        // The second process is created before this one takes the lock, and starts only once told to: a process created
+        // while the lock is held would share its file description (the test gate never creates one then).
+        let mut child = mod_loader_lua::test_gate::spawn(std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "plugin::tests::a_busy_install_cannot_return_to_the_game_entry_point"])
-            .env(CHILD, game.as_str()).status().unwrap();
+            .env(CHILD, game.as_str()).stdin(std::process::Stdio::piped())).unwrap();
+        let _release = runner::GameLockRelease(game.clone());
+        runner::lock_game(&game).unwrap();
+        std::io::Write::write_all(&mut child.stdin.take().unwrap(), b"g").unwrap();
+        let result = child.wait().unwrap();
+        runner::release_game_lock(&game);
         assert_eq!(result.code(), Some(1));
         let _ = std::fs::remove_dir_all(game);
     }
@@ -916,6 +1176,395 @@ mod tests {
         let mut text = vec![0u8; needed];
         assert_eq!(unsafe { (reader.state_json)(text.as_mut_ptr(), text.len(), &mut needed) }, KILN_OK);
         assert_eq!(unsafe { (reader.add_mod)(KilnStr { ptr: std::ptr::null(), len: 1 }, KilnStr::lit("v1-reader")) }, KILN_ERR_INVALID_ARGUMENT);
+    }
+
+    // ---- kiln.launch: fakes of the core's tables, per thread ----
+
+    /// The fake core's game folder (KilnApi.path), set only in a child process.
+    static GAME_DIR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+    std::thread_local! {
+        /// What the fake kiln.launch serves: None, no table; Some((header, status's result, record)).
+        static LAUNCH: std::cell::RefCell<Option<(KilnServiceHeader, Option<i32>, KilnLaunchStatus)>> = const { std::cell::RefCell::new(None) };
+        static LAUNCH_TABLE: std::cell::RefCell<Option<Box<KilnLaunchApi>>> = const { std::cell::RefCell::new(None) };
+        static ASKED: std::cell::RefCell<Vec<(String, u32)>> = const { std::cell::RefCell::new(Vec::new()) };
+        static PROFILE_JSON: std::cell::Cell<&'static str> = const { std::cell::Cell::new("") };
+        static LOGGED: std::cell::RefCell<Vec<(i32, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    fn record(backend: u32, code: u32) -> KilnLaunchStatus {
+        let mut r: KilnLaunchStatus = unsafe { std::mem::zeroed() };
+        (r.size, r.backend, r.frozen, r.reason_code, r.launch_id) = (192, backend, 1, code, 0x1234);
+        r.plan_hash = [7; 32];
+        r
+    }
+
+    unsafe extern "C" fn fake_status(out: *mut KilnLaunchStatus) -> i32 {
+        LAUNCH.with_borrow(|l| {
+            let (_, rc, r) = l.as_ref().unwrap();
+            assert_eq!(unsafe { (*out).size }, 192, "the caller asks for the v1 record");
+            unsafe { *out = *r };
+            rc.unwrap_or(KILN_OK)
+        })
+    }
+
+    unsafe extern "C" fn fake_service(name: KilnStr, version: u32) -> *const c_void {
+        let name = unsafe { name.to_string() };
+        ASKED.with_borrow_mut(|a| a.push((name.clone(), version)));
+        if name == "kiln.profile" { return fake_profile_table(); }
+        if name != "kiln.launch" { return std::ptr::null(); }
+        LAUNCH.with_borrow(|l| {
+            let Some((header, rc, _)) = l else { return std::ptr::null() };
+            let table = Box::new(KilnLaunchApi {
+                header: KilnServiceHeader { size: header.size, version: header.version },
+                status: if *rc == Some(-1) { None } else { Some(fake_status) },
+                notice_copy: std::ptr::null(),
+            });
+            let ptr = &*table as *const KilnLaunchApi as *const c_void;
+            LAUNCH_TABLE.with_borrow_mut(|t| *t = Some(table));
+            ptr
+        })
+    }
+
+    fn serve(header: (u32, u32), rc: Option<i32>, r: Option<KilnLaunchStatus>) {
+        LAUNCH.with_borrow_mut(|l| *l = r.map(|r| (KilnServiceHeader { size: header.0, version: header.1 }, rc, r)));
+    }
+
+    /// Every record shape and how kiln-eml classifies it: as kiln-sfi's read_launch and kiln-shroudforge's read_frozen do.
+    #[test]
+    fn the_frozen_record_is_classified_as_the_other_loaders_classify_it() {
+        let read = || unsafe { read_launch(fake_service) };
+        let full = (std::mem::size_of::<KilnLaunchApi>() as u32, 1);
+        serve(full, None, None);
+        assert_eq!(read(), Launch::Absent, "no table: an older core");
+        assert_eq!(ASKED.with_borrow(|a| a.last().cloned()), Some(("kiln.launch".to_owned(), 1)));
+        for (code, want) in [(0x001, Launch::Absent), (0x0ff, Launch::Absent), (0x100, Launch::Refused), (0x106, Launch::Refused),
+                             (0x1ff, Launch::Refused), (0x200, Launch::Idle), (0x204, Launch::Idle), (0x2ff, Launch::Idle),
+                             (0x300, Launch::Absent)] {
+            serve(full, None, Some(record(KILN_LAUNCH_BACKEND_NONE, code)));
+            assert_eq!(read(), want, "none, {code:#x}");
+        }
+        for backend in [KILN_LAUNCH_BACKEND_HOSTED, KILN_LAUNCH_BACKEND_INSTALLED] {
+            serve(full, None, Some(record(backend, 0x002)));
+            assert_eq!(read(), Launch::Shroudforge);
+        }
+        serve(full, None, Some(record(KILN_LAUNCH_BACKEND_KILN, 0x005)));
+        assert_eq!(read(), Launch::Kiln { plan_hash: [7; 32], launch_id: 0x1234 });
+        serve(full, None, Some(record(4, 0x005)));
+        assert_eq!(read(), Launch::Absent, "an unknown backend");
+        // a table or record that cannot be read: the rules from before the table
+        let kiln = record(KILN_LAUNCH_BACKEND_KILN, 0x005);
+        for (header, rc, r, what) in [
+            ((full.0, 0), None, kiln, "table version 0"),
+            ((8, 1), None, kiln, "a table without status"),
+            ((15, 1), None, kiln, "a table that ends inside status"),
+            (full, Some(-1), kiln, "a null status"),
+            (full, Some(KILN_ERR_UNAVAILABLE), kiln, "not frozen"),
+            (full, None, KilnLaunchStatus { frozen: 0, ..kiln }, "frozen 0"),
+            (full, None, KilnLaunchStatus { frozen: 2, ..kiln }, "frozen 2"),
+            (full, None, KilnLaunchStatus { size: 188, ..kiln }, "a shorter record"),
+        ] {
+            serve(header, rc, Some(r));
+            assert_eq!(read(), Launch::Absent, "{what}");
+        }
+        serve((16, 1), None, Some(kiln));
+        assert_eq!(read(), Launch::Kiln { plan_hash: [7; 32], launch_id: 0x1234 }, "a v1 table without notice_copy still has status");
+    }
+
+    fn fake_profile_table() -> *const c_void {
+        unsafe extern "C" fn mode() -> u32 { KILN_PROFILE_ACTIVE }
+        unsafe extern "C" fn text() -> KilnStr { KilnStr::of(PROFILE_JSON.get()) }
+        unsafe extern "C" fn zero() -> u64 { 0 }
+        unsafe extern "C" fn count(_: u32) -> u32 { 0 }
+        unsafe extern "C" fn none() -> u32 { 0 }
+        let table = Box::leak(Box::new(KilnProfileApi {
+            header: KilnServiceHeader { size: std::mem::size_of::<KilnProfileApi>() as u32, version: 1 },
+            mode, id: text, name: text, generation: zero, count, get: std::ptr::null(), dropins: none, config_dir: text,
+            data_dir: text, json: text,
+        }));
+        table as *const KilnProfileApi as *const c_void
+    }
+
+    fn fake_api() -> *mut KilnApi {
+        unsafe extern "C" fn version() -> KilnStr { KilnStr::lit("test") }
+        unsafe extern "C" fn log(_: u64, level: i32, text: KilnStr) { LOGGED.with_borrow_mut(|l| l.push((level, unsafe { text.to_string() }))); }
+        unsafe extern "C" fn path(kind: i32, buf: *mut u8, cap: usize, len: *mut usize) -> i32 {
+            let Some(game) = GAME_DIR.get() else { return KILN_ERR_UNAVAILABLE };
+            let p = match kind {
+                KILN_PATH_GAME => game.clone(),
+                KILN_PATH_KILN => format!("{game}/kiln"),
+                KILN_PATH_LOGS => format!("{game}/kiln/logs"),
+                KILN_PATH_STATE => format!("{game}/kiln/state"),
+                _ => return KILN_ERR_UNAVAILABLE,
+            };
+            unsafe { *len = p.len() };
+            if cap < p.len() { return KILN_ERR_BUFFER_TOO_SMALL; }
+            unsafe { std::ptr::copy_nonoverlapping(p.as_ptr(), buf, p.len()) };
+            KILN_OK
+        }
+        unsafe extern "C" fn register(_: u64, _: KilnStr, _: *const c_void) -> i32 { KILN_OK }
+        // build_info: the executable the strict test plans are made for (kiln_mode tests' EXE), a client
+        unsafe extern "C" fn build_info(out: *mut kiln_abi::KilnBuildInfo) -> i32 {
+            let exe = crate::kiln_mode::tests::EXE.as_bytes();
+            unsafe {
+                (*out).side = kiln_abi::KILN_SIDE_CLIENT as u32;
+                for (i, b) in exe.iter().enumerate() { (*out).exe_sha256[i] = *b as _; }
+                (*out).exe_sha256[64] = 0;
+            }
+            KILN_OK
+        }
+        let null = std::ptr::null();
+        Box::leak(Box::new(KilnApi {
+            size: std::mem::size_of::<KilnApi>() as u32, abi_version: 1, version, log, build_info: build_info as *const c_void, feature: null, path,
+            owner_create: null, owner_revoke: null, subscribe_tick: null, unsubscribe: null, post: null, on_tick_thread: null,
+            tick_info: null, subscribe_log: null, symbol: null, constant: null, service: fake_service, register_service: register,
+        }))
+    }
+
+    /// run_now's route (kiln_route): the frozen record through the core's lookup, the profile's plan reference, the
+    /// environment, and the kiln.log line. In child processes: the API pointer and the environment are process-wide.
+    #[test]
+    fn the_route_follows_the_record_the_plan_and_the_environment() {
+        const CHILD: &str = "KILN_EML_ROUTE_TEST_CHILD";
+        if let Ok(game) = std::env::var(CHILD) {
+            let game = Utf8PathBuf::from(game);
+            let kiln = game.join("kiln");
+            API.store(fake_api(), Ordering::Release);
+            use crate::kiln_mode::tests::{p, strict_plan};
+            let text = strict_plan(&[p("a", "mods/a", "shroudforge", &["patch"], "candidate")]);
+            let text = text.as_str();
+            let id = crate::kiln_mode::tests::PLAN;
+            std::fs::create_dir_all(kiln.join("launch-plans")).unwrap();
+            std::fs::write(kiln.join(format!("launch-plans/{id}.json")), text).unwrap();
+            use sha2::Digest as _;
+            let hash: [u8; 32] = sha2::Sha256::digest(text).as_slice().try_into().unwrap();
+            PROFILE_JSON.set(Box::leak(serde_json::json!({"sfLaunchPlan": {"path": format!("launch-plans/{id}.json"), "sha256": "x"}}).to_string().into_boxed_str()));
+            let full = (std::mem::size_of::<KilnLaunchApi>() as u32, 1);
+            let route = |r: Option<KilnLaunchStatus>| {
+                serve(full, None, r);
+                LOGGED.with_borrow_mut(|l| l.clear());
+                let mode = kiln_route(&game, &kiln);
+                (mode.map(|m| m.plan_read()), LOGGED.with_borrow(|l| l.clone()))
+            };
+            let kiln_record = KilnLaunchStatus { plan_hash: hash, ..record(KILN_LAUNCH_BACKEND_KILN, 0x005) };
+            if std::env::var("KILN_SHROUDFORGE").as_deref() == Ok("0") {
+                // KILN_SHROUDFORGE=0 stands Kiln's interpreter aside too: the rules from before, nothing new logged
+                assert_eq!(route(Some(kiln_record)), (None, Vec::new()));
+                return;
+            }
+            let (mode, log) = route(Some(kiln_record));
+            assert_eq!(mode, Some(true));
+            assert_eq!(log, [(3, format!("kiln-eml: Kiln's interpreter has this start (kiln.launch); kiln-eml \
+                follows its launch plan launch-plans/{id}.json (startup dialect ShroudForge)"))]);
+            // the record froze another plan than the file now: kiln mode, nothing runs, and kiln.log says why
+            let (mode, log) = route(Some(KilnLaunchStatus { plan_hash: [9; 32], ..kiln_record }));
+            assert_eq!(mode, Some(false));
+            assert_eq!(log, [(2, format!("kiln-eml: Kiln's interpreter has this start (kiln.launch), but its \
+                launch plan cannot be read again (launch-plans/{id}.json changed since this start froze it): no EML mod runs \
+                this start"))]);
+            // every other record, and no table: the rules from before, nothing new logged
+            for r in [None, Some(record(KILN_LAUNCH_BACKEND_HOSTED, 1)), Some(record(KILN_LAUNCH_BACKEND_INSTALLED, 3)),
+                      Some(record(KILN_LAUNCH_BACKEND_NONE, 0x101)), Some(record(KILN_LAUNCH_BACKEND_NONE, 0x204))] {
+                assert_eq!(route(r), (None, Vec::new()));
+            }
+            return;
+        }
+        let game = Utf8PathBuf::from_path_buf(std::env::temp_dir()).unwrap().join(format!("kiln-eml-route-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&game);
+        for env in [None, Some("1"), Some("0")] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "plugin::tests::the_route_follows_the_record_the_plan_and_the_environment"]).env(CHILD, game.as_str());
+            match env {
+                Some(v) => child.env("KILN_SHROUDFORGE", v),
+                None => child.env_remove("KILN_SHROUDFORGE"),
+            };
+            let out = mod_loader_lua::test_gate::output(&mut child).unwrap();
+            assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"), "KILN_SHROUDFORGE={env:?}: {}{}",
+                String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        }
+        let _ = std::fs::remove_dir_all(&game);
+    }
+
+    /// Under Kiln's interpreter kiln-eml is the launch plan's data writer: a request to stand aside is refused, nothing is
+    /// locked or published and collection stays open. KILN_SHROUDFORGE=0, hosted and no table keep the rule from before.
+    /// In child processes: the API pointer and RAN are process-wide.
+    #[test]
+    fn stand_aside_is_refused_under_kiln() {
+        const CHILD: &str = "KILN_EML_ASIDE_TEST_CHILD";
+        if let Ok(case) = std::env::var(CHILD) {
+            let game = Utf8PathBuf::from(std::env::var("KILN_EML_ASIDE_GAME").unwrap());
+            let _ = std::fs::remove_dir_all(&game);
+            std::fs::create_dir_all(game.join("mods/a/src")).unwrap();
+            GAME_DIR.set(game.to_string()).unwrap();
+            API.store(fake_api(), Ordering::Release);
+            match case.as_str() {
+                "none" => serve((24, 1), None, None),
+                "hosted" => serve((24, 1), None, Some(record(KILN_LAUNCH_BACKEND_HOSTED, 0x001))),
+                _ => serve((24, 1), None, Some(record(KILN_LAUNCH_BACKEND_KILN, 0x005))),
+            }
+            let rc = unsafe { eml_stand_aside(KilnStr::lit("hosted ShroudForge runs EML")) };
+            let published = game.join("kiln/state/eml.json").exists();
+            let locked = game.join(".kiln-eml.lock").exists();
+            let added = unsafe { eml_add_mod(KilnStr::of(game.join("mods/a").as_str()), KilnStr::lit("plugin")) };
+            let refused = LOGGED.with_borrow(|l| l.iter().any(|(level, t)| *level == 2 && t.starts_with("kiln-eml: refused a request to stand aside")));
+            if case == "kiln" && std::env::var("KILN_SHROUDFORGE").as_deref() != Ok("0") {
+                assert_eq!((rc, published, locked, added, refused), (KILN_ERR_UNAVAILABLE, false, false, KILN_OK, true), "kiln");
+            } else {
+                assert_eq!((rc, published, locked, added, refused), (KILN_OK, true, true, KILN_ERR_UNAVAILABLE, false), "{case}");
+            }
+            let _ = std::fs::remove_dir_all(&game);
+            return;
+        }
+        for (case, env) in [("kiln", None), ("kiln", Some("0")), ("hosted", None), ("none", None)] {
+            let game = std::env::temp_dir().join(format!("kiln-eml-aside-{case}-{}", std::process::id()));
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "plugin::tests::stand_aside_is_refused_under_kiln"]).env(CHILD, case).env("KILN_EML_ASIDE_GAME", &game);
+            match env {
+                Some(v) => child.env("KILN_SHROUDFORGE", v),
+                None => child.env_remove("KILN_SHROUDFORGE"),
+            };
+            let out = mod_loader_lua::test_gate::output(&mut child).unwrap();
+            assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"), "{case} {env:?}: {}{}",
+                String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        }
+    }
+
+    /// The game's executable stem in a child process (`exe_stem`): the test binary's own name is not a game's.
+    pub(super) static EXE_STEM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+    /// Owner question Q2: a hosted start's stand_aside makes the handoff an earlier kiln-mode start owes ShroudForge. With
+    /// the marker there and ShroudForge's record `applied` for this archive, the record is marked stale (`failed`, Kiln's
+    /// text) and the marker goes, and kiln.log says so. ShroudForge busy (its write lock held) keeps both and kiln.log says
+    /// the next start tries again; the hosted start goes on either way. In child processes: the API pointer, RAN and the
+    /// stem are process-wide.
+    #[test]
+    fn a_hosted_stand_aside_settles_the_handoff_a_kiln_start_owes() {
+        const CHILD: &str = "KILN_EML_OWED_TEST_CHILD";
+        if let Ok(case) = std::env::var(CHILD) {
+            let game = Utf8PathBuf::from(std::env::var("KILN_EML_OWED_GAME").unwrap());
+            let _ = std::fs::remove_dir_all(&game);
+            std::fs::create_dir_all(game.join("shroudforge/config")).unwrap();
+            std::fs::create_dir_all(game.join("kiln/eml/ownership")).unwrap();
+            let state = game.join("shroudforge/state.json");
+            std::fs::write(&state, serde_json::json!({"schemaVersion": 1, "windows": {"favorite": "cyan"}, "assets": {
+                "schemaVersion": 1, "status": "applied", "phase": "startup", "target": "enshrouded", "fingerprint": "a".repeat(64),
+                "completedAt": 42, "mods": [{"id": "player-sf", "version": "1.0.0"}]}}).to_string()).unwrap();
+            let marker = game.join("kiln/eml/ownership/enshrouded.sf-handoff-owed.json");
+            std::fs::write(&marker, br#"{"format":1,"stem":"enshrouded","text":"owed"}"#).unwrap();
+            GAME_DIR.set(game.to_string()).unwrap();
+            EXE_STEM.set("enshrouded".into()).unwrap();
+            API.store(fake_api(), Ordering::Release);
+            serve((24, 1), None, Some(record(KILN_LAUNCH_BACKEND_HOSTED, 0x001)));
+            // this test locks ShroudForge's file itself: under the test gate (no process is created meanwhile)
+            let _hold = mod_loader_lua::test_gate::lock_hold();
+            let busy = (case == "busy").then(|| {
+                let f = std::fs::File::create(game.join("shroudforge/config/.shroudforge-write.lock")).unwrap();
+                f.lock().unwrap();
+                f
+            });
+            let rc = unsafe { eml_stand_aside(KilnStr::lit("hosted ShroudForge runs EML")) };
+            let sf: serde_json::Value = serde_json::from_slice(&std::fs::read(&state).unwrap()).unwrap();
+            let logged = LOGGED.with_borrow(|l| l.clone());
+            assert_eq!(rc, KILN_OK, "the hosted start goes on: {logged:?}");
+            assert_eq!(sf["windows"]["favorite"], "cyan", "ShroudForge's other state is kept");
+            if busy.is_some() {
+                assert!(marker.exists(), "the marker stays for the next start");
+                assert_eq!(sf["assets"]["status"], "applied");
+                assert!(logged.iter().any(|(level, t)| *level == 2
+                    && t.starts_with("kiln-eml: could not mark ShroudForge's record of its prepared asset mods stale")), "{logged:?}");
+            } else {
+                assert!(!marker.exists(), "the owed handoff was made");
+                assert_eq!(sf["assets"]["status"], "failed", "{sf}");
+                assert!(logged.contains(&(3, "kiln-eml: marked ShroudForge's record of its prepared asset mods stale: Kiln's \
+                    interpreter changed the game data since ShroudForge last ran".to_owned())), "{logged:?}");
+            }
+            drop(busy);
+            crate::runner::release_game_lock(&game);
+            let _ = std::fs::remove_dir_all(&game);
+            return;
+        }
+        for case in ["owed", "busy"] {
+            let game = std::env::temp_dir().join(format!("kiln-eml-owed-{case}-{}", std::process::id()));
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "plugin::tests::a_hosted_stand_aside_settles_the_handoff_a_kiln_start_owes"])
+                .env(CHILD, case).env("KILN_EML_OWED_GAME", &game).env_remove("KILN_SHROUDFORGE");
+            let out = mod_loader_lua::test_gate::output(&mut child).unwrap();
+            assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"), "{case}: {}{}",
+                String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        }
+    }
+
+    /// run_now end to end (kiln_plugin_main without an early step): the route, the launcher's delegated entries and the
+    /// runner reach kiln/state/eml.json. Kiln mode never reads kiln-shroudforge's state file; a hosted record keeps the
+    /// rule from before (it does). In child processes: the API pointer and the run's statics are process-wide.
+    #[test]
+    fn kiln_mode_reaches_the_state_file_through_the_plugin() {
+        const CHILD: &str = "KILN_EML_PRESTART_TEST_CHILD";
+        const SENTINEL: &str = "SF-STATE-REASON-sentinel";
+        if let Ok(case) = std::env::var(CHILD) {
+            let game = Utf8PathBuf::from(std::env::var("KILN_EML_PRESTART_GAME").unwrap());
+            let _ = std::fs::remove_dir_all(&game);
+            GAME_DIR.set(game.to_string()).unwrap();
+            let kiln = game.join("kiln");
+            std::fs::create_dir_all(kiln.join("state")).unwrap();
+            std::fs::write(kiln.join("state/shroudforge.json"), serde_json::json!({
+                "pid": std::process::id(), "mode": "off", "reason": SENTINEL }).to_string()).unwrap();
+            for (id, caps) in [("quiver", serde_json::json!(["runtime"])), ("stacks", serde_json::json!(["patch"]))] {
+                std::fs::create_dir_all(game.join(format!("mods/{id}/src"))).unwrap();
+                std::fs::write(game.join(format!("mods/{id}/mod.json")), serde_json::json!({
+                    "id": id, "name": id, "version": "1.0.0", "capabilities": caps }).to_string()).unwrap();
+                std::fs::write(game.join(format!("mods/{id}/src/mod.lua")), "-- fixture").unwrap();
+            }
+            use crate::kiln_mode::tests::{p, strict_plan};
+            let plan = strict_plan(&[p("quiver", "mods/quiver", "eml", &["runtime"], "candidate"),
+                p("stacks", "mods/stacks", "eml", &["patch"], "candidate")]);
+            let id = crate::kiln_mode::tests::PLAN;
+            std::fs::create_dir_all(kiln.join("launch-plans")).unwrap();
+            std::fs::write(kiln.join(format!("launch-plans/{id}.json")), &plan).unwrap();
+            use sha2::Digest as _;
+            let hash: [u8; 32] = sha2::Sha256::digest(&plan).as_slice().try_into().unwrap();
+            PROFILE_JSON.set(Box::leak(serde_json::json!({
+                "mods": {"eml": [{"id": "quiver", "path": "../mods/quiver", "enabled": false},
+                                 {"id": "stacks", "path": "../mods/stacks", "enabled": true}]},
+                "emlRuntime": ["quiver"],
+                "sfLaunchPlan": {"path": format!("launch-plans/{id}.json"), "sha256": "x"},
+            }).to_string().into_boxed_str()));
+            let r = match case.as_str() {
+                "kiln" => KilnLaunchStatus { plan_hash: hash, ..record(KILN_LAUNCH_BACKEND_KILN, 0x005) },
+                _ => record(KILN_LAUNCH_BACKEND_HOSTED, 0x001),
+            };
+            serve((std::mem::size_of::<KilnLaunchApi>() as u32, 1), None, Some(r));
+            let mut info = KilnPluginInfo { size: std::mem::size_of::<KilnPluginInfo>() as u32, id: KilnStr::lit(""),
+                version: KilnStr::lit(""), on_unload: None, user: std::ptr::null_mut(), on_ready: None };
+            assert_eq!(unsafe { kiln_plugin_main(fake_api(), 1, &mut info) }, KILN_OK);
+            let text = std::fs::read_to_string(kiln.join("state/eml.json")).unwrap();
+            let state: serde_json::Value = serde_json::from_str(&text).unwrap();
+            let row = |id: &str| {
+                let m = state["mods"].as_array().unwrap().iter().find(|m| m["id"] == id).unwrap_or_else(|| panic!("{id}: {text}"));
+                (m["state"].as_str().unwrap().to_owned(), m["reason"].as_str().unwrap_or("").to_owned())
+            };
+            let plan_name = format!("launch-plans/{id}.json");
+            if case == "kiln" {
+                assert!(!text.contains(SENTINEL), "kiln mode read shroudforge.json: {text}");
+                assert_eq!(row("quiver"), ("skipped".into(), format!("this start's launch plan ({plan_name}) gives this package \
+                    to Kiln's interpreter, with no startup data to apply this start, so kiln-eml has nothing to run for it")));
+                // a participant of the startup pass: no early phase ran here (kiln_plugin_main), so no start and nothing runs
+                assert_eq!(row("stacks"), ("skipped".into(), crate::startup_seam::NO_START.into()), "{text}");
+            } else {
+                assert!(row("quiver").1.contains(SENTINEL), "the rule from before: {text}");
+                assert_eq!(row("stacks"), ("pending".into(), String::new()), "the run took it (and found no game data here)");
+            }
+            let _ = std::fs::remove_dir_all(&game);
+            return;
+        }
+        for case in ["kiln", "hosted"] {
+            let game = std::env::temp_dir().join(format!("kiln-eml-prestart-{case}-{}", std::process::id()));
+            let out = mod_loader_lua::test_gate::output(std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "plugin::tests::kiln_mode_reaches_the_state_file_through_the_plugin"])
+                .env(CHILD, case).env("KILN_EML_PRESTART_GAME", &game).env_remove("KILN_SHROUDFORGE")).unwrap();
+            assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"), "{case}: {}{}",
+                String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        }
     }
 
 }

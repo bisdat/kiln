@@ -1,0 +1,938 @@
+{
+ "comment": "Synthetic attribute archive (no game data): the registry and the resources both sides build the same archive from. Kiln's m6_startup_vm builds it with EML's writer; the ShroudForge-source harness (out/v2-g09c/tools/sf-attr-oracle) builds it with ShroudForge 1.7.9's kfc-parser and runs ShroudForge's own catalog and program code over it to make golden.json.",
+ "registry": {
+  "version": "g09c-attributes",
+  "types": [
+   {
+    "index": 0,
+    "name": "uint32",
+    "impactName": "uint32",
+    "qualifiedName": "keen::uint32",
+    "size": 4,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 0,
+    "primitiveType": "UINT32",
+    "flags": "",
+    "nameHash": 848563180,
+    "impactHash": 848563180,
+    "qualifiedHash": 2194793467,
+    "internalHash": 1509949441
+   },
+   {
+    "index": 1,
+    "name": "sint32",
+    "impactName": "sint32",
+    "qualifiedName": "keen::sint32",
+    "size": 4,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 0,
+    "primitiveType": "SINT32",
+    "flags": "",
+    "nameHash": 2556031774,
+    "impactHash": 2556031774,
+    "qualifiedHash": 1487479105,
+    "internalHash": 1509949442
+   },
+   {
+    "index": 2,
+    "name": "float32",
+    "impactName": "float32",
+    "qualifiedName": "keen::float32",
+    "size": 4,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 0,
+    "primitiveType": "FLOAT32",
+    "flags": "",
+    "nameHash": 3902764048,
+    "impactHash": 3902764048,
+    "qualifiedHash": 1911297837,
+    "internalHash": 1509949443
+   },
+   {
+    "index": 3,
+    "name": "uint16",
+    "impactName": "uint16",
+    "qualifiedName": "keen::uint16",
+    "size": 2,
+    "alignment": 2,
+    "elementAlignment": 2,
+    "fieldCount": 0,
+    "primitiveType": "UINT16",
+    "flags": "",
+    "nameHash": 2928590578,
+    "impactHash": 2928590578,
+    "qualifiedHash": 1993756229,
+    "internalHash": 1509949699
+   },
+   {
+    "index": 4,
+    "name": "uint8",
+    "impactName": "uint8",
+    "qualifiedName": "keen::uint8",
+    "size": 1,
+    "alignment": 1,
+    "elementAlignment": 1,
+    "fieldCount": 0,
+    "primitiveType": "UINT8",
+    "flags": "",
+    "nameHash": 429781723,
+    "impactHash": 429781723,
+    "qualifiedHash": 3533154758,
+    "internalHash": 1509949700
+   },
+   {
+    "index": 5,
+    "name": "HashKey32",
+    "impactName": "HashKey32",
+    "qualifiedName": "keen::HashKey32",
+    "size": 4,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 1,
+    "primitiveType": "STRUCT",
+    "flags": "",
+    "nameHash": 1687875449,
+    "impactHash": 1687875449,
+    "qualifiedHash": 3462721580,
+    "internalHash": 1509949701,
+    "structFields": {
+     "value": {
+      "name": "value",
+      "type": 0,
+      "dataOffset": 0
+     }
+    }
+   },
+   {
+    "index": 6,
+    "name": "Guid",
+    "impactName": "Guid",
+    "qualifiedName": "keen::Guid",
+    "size": 16,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 0,
+    "primitiveType": "GUID",
+    "flags": "",
+    "nameHash": 2898774828,
+    "impactHash": 2898774828,
+    "qualifiedHash": 2155730591,
+    "internalHash": 1509949702
+   },
+   {
+    "index": 7,
+    "name": "AttributeFlagsEnum",
+    "impactName": "AttributeFlagsEnum",
+    "qualifiedName": "keen::AttributeFlagsEnum",
+    "size": 1,
+    "alignment": 1,
+    "elementAlignment": 1,
+    "fieldCount": 1,
+    "primitiveType": "ENUM",
+    "flags": "",
+    "nameHash": 3115222487,
+    "impactHash": 3115222487,
+    "qualifiedHash": 2824789352,
+    "internalHash": 1509949703,
+    "innerType": 4,
+    "enumFields": {
+     "Initialized": {
+      "name": "Initialized",
+      "value": 0
+     }
+    }
+   },
+   {
+    "index": 8,
+    "name": "AttributeFlags",
+    "impactName": "AttributeFlags",
+    "qualifiedName": "keen::AttributeFlags",
+    "size": 1,
+    "alignment": 1,
+    "elementAlignment": 1,
+    "fieldCount": 0,
+    "primitiveType": "BITMASK8",
+    "flags": "",
+    "nameHash": 4140063366,
+    "impactHash": 4140063366,
+    "qualifiedHash": 4044510797,
+    "internalHash": 1509949704,
+    "innerType": 7
+   },
+   {
+    "index": 9,
+    "name": "AttributeComponent",
+    "impactName": "ecs::AttributeComponent",
+    "qualifiedName": "keen::ecs::AttributeComponent",
+    "size": 24,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 5,
+    "primitiveType": "STRUCT",
+    "flags": "",
+    "nameHash": 1804176298,
+    "impactHash": 3152148349,
+    "qualifiedHash": 2169541464,
+    "internalHash": 1509949705,
+    "structFields": {
+     "rootId": {
+      "name": "rootId",
+      "type": 5,
+      "dataOffset": 0
+     },
+     "storageOffset": {
+      "name": "storageOffset",
+      "type": 3,
+      "dataOffset": 4
+     },
+     "flags": {
+      "name": "flags",
+      "type": 8,
+      "dataOffset": 6
+     },
+     "storageCount": {
+      "name": "storageCount",
+      "type": 4,
+      "dataOffset": 7
+     },
+     "definition": {
+      "name": "definition",
+      "type": 6,
+      "dataOffset": 8
+     }
+    }
+   },
+   {
+    "index": 10,
+    "name": "AttributeStorage3",
+    "impactName": "AttributeStorage3",
+    "qualifiedName": "keen::AttributeStorage3",
+    "size": 12,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 3,
+    "primitiveType": "STATIC_ARRAY",
+    "flags": "",
+    "nameHash": 1069872341,
+    "impactHash": 1069872341,
+    "qualifiedHash": 3158452172,
+    "internalHash": 1509949706,
+    "innerType": 1
+   },
+   {
+    "index": 11,
+    "name": "Stamina",
+    "impactName": "ecs::Stamina",
+    "qualifiedName": "keen::ecs::Stamina",
+    "size": 36,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 1,
+    "primitiveType": "STRUCT",
+    "flags": "",
+    "nameHash": 396409046,
+    "impactHash": 1955335555,
+    "qualifiedHash": 2453735012,
+    "internalHash": 1509949707,
+    "innerType": 9,
+    "structFields": {
+     "dataStorage": {
+      "name": "dataStorage",
+      "type": 10,
+      "dataOffset": 24
+     }
+    },
+    "defaultValue": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     188,
+     248,
+     82,
+     245,
+     160,
+     173,
+     88,
+     74,
+     135,
+     57,
+     64,
+     129,
+     206,
+     13,
+     56,
+     115,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   {
+    "index": 12,
+    "name": "AttributeStorageF2",
+    "impactName": "AttributeStorageF2",
+    "qualifiedName": "keen::AttributeStorageF2",
+    "size": 8,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 2,
+    "primitiveType": "STATIC_ARRAY",
+    "flags": "",
+    "nameHash": 3337313532,
+    "impactHash": 3337313532,
+    "qualifiedHash": 1160947843,
+    "internalHash": 1509949708,
+    "innerType": 2
+   },
+   {
+    "index": 13,
+    "name": "ReviveDelay",
+    "impactName": "ecs::ReviveDelay",
+    "qualifiedName": "keen::ecs::ReviveDelay",
+    "size": 32,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 1,
+    "primitiveType": "STRUCT",
+    "flags": "",
+    "nameHash": 5690559,
+    "impactHash": 1018458238,
+    "qualifiedHash": 2062365329,
+    "internalHash": 1509949709,
+    "innerType": 9,
+    "structFields": {
+     "dataStorage": {
+      "name": "dataStorage",
+      "type": 12,
+      "dataOffset": 24
+     }
+    },
+    "defaultValue": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     22,
+     21,
+     126,
+     43,
+     174,
+     40,
+     42,
+     77,
+     143,
+     108,
+     10,
+     27,
+     44,
+     61,
+     78,
+     95,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   {
+    "index": 14,
+    "name": "AttributeOps",
+    "impactName": "AttributeOps",
+    "qualifiedName": "keen::AttributeOps",
+    "size": 4,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 11,
+    "primitiveType": "ENUM",
+    "flags": "",
+    "nameHash": 3885096025,
+    "impactHash": 3885096025,
+    "qualifiedHash": 2859482482,
+    "internalHash": 1509949710,
+    "innerType": 0,
+    "enumFields": {
+     "Load0": {
+      "name": "Load0",
+      "value": 1
+     },
+     "Load": {
+      "name": "Load",
+      "value": 2
+     },
+     "LoadRef": {
+      "name": "LoadRef",
+      "value": 3
+     },
+     "Store": {
+      "name": "Store",
+      "value": 4
+     },
+     "Push": {
+      "name": "Push",
+      "value": 5
+     },
+     "Add": {
+      "name": "Add",
+      "value": 6
+     },
+     "Substract": {
+      "name": "Substract",
+      "value": 7
+     },
+     "Multiply": {
+      "name": "Multiply",
+      "value": 8
+     },
+     "Clamp": {
+      "name": "Clamp",
+      "value": 12
+     },
+     "ScaleToNewMax": {
+      "name": "ScaleToNewMax",
+      "value": 13
+     },
+     "Max": {
+      "name": "Max",
+      "value": 15
+     }
+    }
+   },
+   {
+    "index": 15,
+    "name": "HashKey32Array",
+    "impactName": "HashKey32Array",
+    "qualifiedName": "keen::HashKey32Array",
+    "size": 8,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 0,
+    "primitiveType": "BLOB_ARRAY",
+    "flags": "",
+    "nameHash": 4205832610,
+    "impactHash": 4205832610,
+    "qualifiedHash": 393983425,
+    "internalHash": 1509949711,
+    "innerType": 5
+   },
+   {
+    "index": 16,
+    "name": "BlobString",
+    "impactName": "BlobString",
+    "qualifiedName": "keen::BlobString",
+    "size": 8,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 0,
+    "primitiveType": "BLOB_STRING",
+    "flags": "",
+    "nameHash": 1700479683,
+    "impactHash": 1700479683,
+    "qualifiedHash": 2086352384,
+    "internalHash": 1509949712
+   },
+   {
+    "index": 17,
+    "name": "DebugNameArray",
+    "impactName": "DebugNameArray",
+    "qualifiedName": "keen::DebugNameArray",
+    "size": 8,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 0,
+    "primitiveType": "BLOB_ARRAY",
+    "flags": "",
+    "nameHash": 335854512,
+    "impactHash": 335854512,
+    "qualifiedHash": 2551502235,
+    "internalHash": 1509949713,
+    "innerType": 16
+   },
+   {
+    "index": 18,
+    "name": "uint32Array",
+    "impactName": "uint32Array",
+    "qualifiedName": "keen::uint32Array",
+    "size": 8,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 0,
+    "primitiveType": "BLOB_ARRAY",
+    "flags": "",
+    "nameHash": 2636300161,
+    "impactHash": 2636300161,
+    "qualifiedHash": 674601520,
+    "internalHash": 1509949714,
+    "innerType": 0
+   },
+   {
+    "index": 19,
+    "name": "AttributeNode",
+    "impactName": "AttributeNode",
+    "qualifiedName": "keen::AttributeNode",
+    "size": 16,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 4,
+    "primitiveType": "STRUCT",
+    "flags": "",
+    "nameHash": 1958080847,
+    "impactHash": 1958080847,
+    "qualifiedHash": 578935310,
+    "internalHash": 1509949715,
+    "structFields": {
+     "parentIndex": {
+      "name": "parentIndex",
+      "type": 3,
+      "dataOffset": 0
+     },
+     "childIndex": {
+      "name": "childIndex",
+      "type": 3,
+      "dataOffset": 2
+     },
+     "siblingIndex": {
+      "name": "siblingIndex",
+      "type": 3,
+      "dataOffset": 4
+     },
+     "calculation": {
+      "name": "calculation",
+      "type": 18,
+      "dataOffset": 8
+     }
+    }
+   },
+   {
+    "index": 20,
+    "name": "AttributeNodeArray",
+    "impactName": "AttributeNodeArray",
+    "qualifiedName": "keen::AttributeNodeArray",
+    "size": 8,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 0,
+    "primitiveType": "BLOB_ARRAY",
+    "flags": "",
+    "nameHash": 3848338156,
+    "impactHash": 3848338156,
+    "qualifiedHash": 349530167,
+    "internalHash": 1509949716,
+    "innerType": 19
+   },
+   {
+    "index": 21,
+    "name": "BaseAttributeResource",
+    "impactName": "BaseAttributeResource",
+    "qualifiedName": "keen::BaseAttributeResource",
+    "size": 28,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 4,
+    "primitiveType": "STRUCT",
+    "flags": "",
+    "nameHash": 3383246140,
+    "impactHash": 3383246140,
+    "qualifiedHash": 2490401649,
+    "internalHash": 1509949717,
+    "structFields": {
+     "ids": {
+      "name": "ids",
+      "type": 15,
+      "dataOffset": 0
+     },
+     "debugNames": {
+      "name": "debugNames",
+      "type": 17,
+      "dataOffset": 8
+     },
+     "structure": {
+      "name": "structure",
+      "type": 20,
+      "dataOffset": 16
+     },
+     "type": {
+      "name": "type",
+      "type": 5,
+      "dataOffset": 24
+     }
+    }
+   },
+   {
+    "index": 22,
+    "name": "BaseAttributeResourceArray",
+    "impactName": "BaseAttributeResourceArray",
+    "qualifiedName": "keen::BaseAttributeResourceArray",
+    "size": 8,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 0,
+    "primitiveType": "BLOB_ARRAY",
+    "flags": "",
+    "nameHash": 2030738961,
+    "impactHash": 2030738961,
+    "qualifiedHash": 420331098,
+    "internalHash": 1509949718,
+    "innerType": 21
+   },
+   {
+    "index": 23,
+    "name": "AttributeContainerResource",
+    "impactName": "AttributeContainerResource",
+    "qualifiedName": "keen::AttributeContainerResource",
+    "size": 8,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 1,
+    "primitiveType": "STRUCT",
+    "flags": "",
+    "nameHash": 2760207714,
+    "impactHash": 2760207714,
+    "qualifiedHash": 369220241,
+    "internalHash": 1509949719,
+    "structFields": {
+     "attributes": {
+      "name": "attributes",
+      "type": 22,
+      "dataOffset": 0
+     }
+    }
+   },
+   {
+    "index": 24,
+    "name": "Unrelated",
+    "impactName": "ecs::Unrelated",
+    "qualifiedName": "keen::ecs::Unrelated",
+    "size": 4,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 1,
+    "primitiveType": "STRUCT",
+    "flags": "",
+    "nameHash": 2409765949,
+    "impactHash": 1304589444,
+    "qualifiedHash": 2536564835,
+    "internalHash": 1509949720,
+    "structFields": {
+     "value": {
+      "name": "value",
+      "type": 0,
+      "dataOffset": 0
+     }
+    }
+   },
+   {
+    "index": 25,
+    "name": "Storage16",
+    "impactName": "Storage16",
+    "qualifiedName": "keen::Storage16",
+    "size": 4,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 2,
+    "primitiveType": "STATIC_ARRAY",
+    "flags": "",
+    "nameHash": 140433817,
+    "impactHash": 140433817,
+    "qualifiedHash": 3896101136,
+    "internalHash": 1509949721,
+    "innerType": 3
+   },
+   {
+    "index": 26,
+    "name": "NarrowStorage",
+    "impactName": "ecs::NarrowStorage",
+    "qualifiedName": "keen::ecs::NarrowStorage",
+    "size": 28,
+    "alignment": 4,
+    "elementAlignment": 4,
+    "fieldCount": 1,
+    "primitiveType": "STRUCT",
+    "flags": "",
+    "nameHash": 1689162335,
+    "impactHash": 1433121798,
+    "qualifiedHash": 2412002753,
+    "internalHash": 1509949722,
+    "innerType": 9,
+    "structFields": {
+     "dataStorage": {
+      "name": "dataStorage",
+      "type": 25,
+      "dataOffset": 24
+     }
+    }
+   }
+  ]
+ },
+ "resources": [
+  {
+   "guid": "c0ffee00-1234-4abc-9def-00112233aabb",
+   "type": "keen::AttributeContainerResource",
+   "value": {
+    "attributes": [
+     {
+      "ids": [
+       {
+        "value": 212913642
+       },
+       {
+        "value": 212913643
+       },
+       {
+        "value": 212913644
+       }
+      ],
+      "debugNames": [
+       "Stamina",
+       "Stamina_Min",
+       "Stamina_Max"
+      ],
+      "structure": [
+       {
+        "parentIndex": 65535,
+        "childIndex": 1,
+        "siblingIndex": 65535,
+        "calculation": [
+         131072,
+         131073,
+         131074,
+         851967
+        ]
+       },
+       {
+        "parentIndex": 0,
+        "childIndex": 65535,
+        "siblingIndex": 2,
+        "calculation": []
+       },
+       {
+        "parentIndex": 0,
+        "childIndex": 65535,
+        "siblingIndex": 65535,
+        "calculation": [
+         196608,
+         131073,
+         131074,
+         131074,
+         393215,
+         10,
+         458751,
+         917503
+        ]
+       }
+      ],
+      "type": {
+       "value": 1509949442
+      }
+     },
+     {
+      "ids": [
+       {
+        "value": 1291845648
+       },
+       {
+        "value": 1291845649
+       },
+       {
+        "value": 1291845650
+       }
+      ],
+      "debugNames": [
+       "Mana",
+       "Mana_Max",
+       "Shared"
+      ],
+      "structure": [
+       {
+        "parentIndex": 65535,
+        "childIndex": 1,
+        "siblingIndex": 65535,
+        "calculation": [
+         131072,
+         131073,
+         1048575
+        ]
+       },
+       {
+        "parentIndex": 0,
+        "childIndex": 65535,
+        "siblingIndex": 2,
+        "calculation": []
+       },
+       {
+        "parentIndex": 0,
+        "childIndex": 65535,
+        "siblingIndex": 65535,
+        "calculation": [
+         131073,
+         393215,
+         3,
+         524287
+        ]
+       }
+      ],
+      "type": {
+       "value": 1509949441
+      }
+     },
+     {
+      "ids": [
+       {
+        "value": 1291845664
+       },
+       {
+        "value": 1291845665
+       }
+      ],
+      "debugNames": [
+       "Broken",
+       "Shared"
+      ],
+      "structure": [
+       {
+        "parentIndex": 65535,
+        "childIndex": 1,
+        "siblingIndex": 65535,
+        "calculation": [
+         589824
+        ]
+       },
+       {
+        "parentIndex": 0,
+        "childIndex": 65535,
+        "siblingIndex": 65535,
+        "calculation": []
+       }
+      ],
+      "type": {
+       "value": 1509949441
+      }
+     }
+    ]
+   }
+  },
+  {
+   "guid": "f552f8bc-ada0-4a58-8739-4081ce0d3873",
+   "type": "keen::BaseAttributeResource",
+   "value": {
+    "ids": [
+     {
+      "value": 212913642
+     },
+     {
+      "value": 212913643
+     },
+     {
+      "value": 212913644
+     }
+    ],
+    "debugNames": [
+     "Stamina",
+     "Stamina_Min",
+     "Stamina_Max"
+    ],
+    "structure": [
+     {
+      "parentIndex": 65535,
+      "childIndex": 1,
+      "siblingIndex": 65535,
+      "calculation": [
+       131072,
+       131073,
+       131074,
+       851967
+      ]
+     },
+     {
+      "parentIndex": 0,
+      "childIndex": 65535,
+      "siblingIndex": 2,
+      "calculation": []
+     },
+     {
+      "parentIndex": 0,
+      "childIndex": 65535,
+      "siblingIndex": 65535,
+      "calculation": [
+       196608,
+       131073,
+       131074,
+       131074,
+       393215,
+       10,
+       458751,
+       917503
+      ]
+     }
+    ],
+    "type": {
+     "value": 1509949442
+    }
+   }
+  },
+  {
+   "guid": "2b7e1516-28ae-4d2a-8f6c-0a1b2c3d4e5f",
+   "type": "keen::BaseAttributeResource",
+   "value": {
+    "ids": [
+     {
+      "value": 792708196
+     },
+     {
+      "value": 792708197
+     }
+    ],
+    "debugNames": [
+     "Revive_Delay",
+     "Revive_Base"
+    ],
+    "structure": [
+     {
+      "parentIndex": 65535,
+      "childIndex": 1,
+      "siblingIndex": 65535,
+      "calculation": [
+       131073,
+       393215,
+       2,
+       589823
+      ]
+     },
+     {
+      "parentIndex": 0,
+      "childIndex": 65535,
+      "siblingIndex": 65535,
+      "calculation": []
+     }
+    ],
+    "type": {
+     "value": 1509949443
+    }
+   }
+  }
+ ]
+}
