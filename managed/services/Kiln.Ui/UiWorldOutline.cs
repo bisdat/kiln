@@ -21,7 +21,9 @@ public sealed record OutlineOptions
     public bool Pulse { get; init; }
 
     /// <summary>Among mods' outlines on the same entity the highest priority shows; on a tie the newest. The others wait
-    /// (<see cref="OutlineReason.Outshone"/>) and take over when it ends. Default 0. Since 0.2.0-dev.30.3 (mod API 0.2.13).</summary>
+    /// (<see cref="OutlineReason.Outshone"/>) and take over when it ends. When more than two colours are in use, the
+    /// colours of the highest-priority outlines keep the game's two highlight groups and the others share them
+    /// (<see cref="WorldOutline.ColorShared"/>). Default 0. Since 0.2.0-dev.30.3 (mod API 0.2.13).</summary>
     public int Priority { get; init; }
 
     /// <summary>How long the outline lasts; null (the default) = until you dispose it, your mod unloads, the entity
@@ -234,7 +236,8 @@ public static partial class Ui
         /// <para>Two colours (colour and pulse) show at once; a third shares the nearest one's (<see cref="WorldOutline.ColorShared"/>).
         /// On one entity the highest <see cref="OutlineOptions.Priority"/> wins, then the newest. The game's own highlight
         /// (the building cursor's) wins over mods unless the player's kiln.json says <c>"ui": {"outlines": "mods-first"}</c>;
-        /// <c>"off"</c> keeps every mod outline waiting. It shows from the next client step.</para>
+        /// <c>"off"</c> keeps every mod outline waiting. Another tool's highlight (Greeneye's Quick Deposit and Find) always
+        /// shows instead. It shows from the next client step.</para>
         /// </remarks>
         /// <param name="entity">The entity to outline (not <see cref="EntityId.None"/>).</param>
         /// <param name="options">Colour, pulse, priority and duration; null = gold, steady, priority 0, until disposed.</param>

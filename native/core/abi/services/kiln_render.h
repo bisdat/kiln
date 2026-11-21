@@ -34,8 +34,10 @@
  *  - outline(owner, entity, opts, out): asks for an outline of the client-world entity (a replicated entity has the
  *    server's id) until outline_remove, outline_clear, duration_ms, the entity's despawn or the end of the client world.
  *    Requests on one entity: the highest priority wins, then the newest; the others wait (state WAITING, reason
- *    OUTSHONE) and take over when it goes. The game's own highlight wins over every mod unless the player's kiln.json
- *    "ui": {"outlines": "mods-first"} says otherwise; "off" turns mod outlines off (requests are accepted and wait).
+ *    OUTSHONE) and take over when it goes. When more than two (colour, pulse) pairs are in use, the pairs of the highest
+ *    priority winners (then the newest) keep the two groups. The game's own highlight wins over every mod unless the
+ *    player's kiln.json "ui": {"outlines": "mods-first"} says otherwise; "off" turns mod outlines off (requests are
+ *    accepted and wait). Mods-first covers only the game's groups 1 to 3: another tool's group (6, 7) is never taken.
  *  - Mechanism: the first request installs, on the game's main thread at a safe point, a checked mid hook on each of the
  *    renderer's two palette reads of Group1 and Group2 (feature ui.world_outline) and an After stage on the client
  *    world's dynamic_render_model program (kiln.world game_program_wrap). That stage, once per client step on the world's
@@ -123,7 +125,8 @@ enum {
 typedef struct KilnRenderOutline {
     uint32_t size;        /* set to sizeof(KilnRenderOutline) */
     uint32_t rgba;        /* 0xRRGGBBAA; alpha 0 is refused */
-    int32_t priority;     /* among mods' requests on the same entity: higher wins; ties: the newest */
+    int32_t priority;     /* among mods' requests on the same entity: higher wins; ties: the newest. Also which colours
+                             keep the two groups when more than two are in use */
     uint32_t flags;       /* KILN_RENDER_OUTLINE_* */
     uint32_t duration_ms; /* 0 = until removed */
     uint32_t reserved;    /* 0 */
@@ -140,7 +143,8 @@ typedef struct KilnRenderOutlineInfo {
 
 typedef struct KilnRenderOutlineStatus {
     uint32_t size;      /* set to sizeof(KilnRenderOutlineStatus) before calling */
-    uint8_t available;  /* feature ui.world_outline resolved and kiln.world can wrap the client world's programs */
+    uint8_t available;  /* feature ui.world_outline resolved and the mechanism has not failed (kiln.world's wrap of
+                           the client world's programs is asked for at the first request) */
     uint8_t installed;  /* the palette hooks are in */
     uint8_t staged;     /* the After stage on dynamic_render_model is active */
     uint8_t setting;    /* the player's kiln.json ui.outlines: 0 game-first (default), 1 mods-first, 2 off */

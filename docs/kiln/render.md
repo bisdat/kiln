@@ -182,7 +182,7 @@ if (_found is { State: OutlineState.Waiting, Reason: OutlineReason.NoModel }) Hu
 |---|---|
 | `Color` | the colour; alpha must be above 0. Default `Ui.World.DefaultOutlineColor`, gold (255, 196, 64) |
 | `Pulse` | the colour breathes (1.2 s period, 40 % to 100 % brightness) |
-| `Priority` | among mods' outlines on the same entity: the highest wins; on a tie, the newest |
+| `Priority` | among mods' outlines on the same entity: the highest wins; on a tie, the newest. When more than two colours are in use, the colours of the highest-priority outlines keep the two groups |
 | `Duration` | null (the default): until disposed. Otherwise above zero and at most `uint.MaxValue` ms (`ArgumentOutOfRangeException`) |
 
 ### States
@@ -205,7 +205,9 @@ A waiting outline takes over when the reason goes away (the winner ends, the mod
   [../re/client-render.md](../re/client-render.md#highlight-groups-outlines).
 - **The game's highlight wins** over every mod outline, unless the player's kiln.json says
   `"ui": {"outlines": "mods-first"}`. `"off"` turns mod outlines off: requests are accepted and wait
-  (`SwitchedOff`). The default is `"game-first"` ([client.md](client.md#kilnjson-per-side)).
+  (`SwitchedOff`). The default is `"game-first"` ([client.md](client.md#kilnjson-per-side)). Another tool's highlight
+  (Greeneye's Quick Deposit and Find, The Worst Map Mod) always shows instead, `"mods-first"` included: Kiln never
+  takes a group it did not set, other than the building cursor's.
 - **No through-walls outline.** The game draws its highlight with the model, so what stands in front of the entity
   hides it.
 - **Models only.** Entities drawn through `ModelComponent` can be outlined: props, chests, stations, NPCs, creatures,

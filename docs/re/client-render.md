@@ -332,3 +332,7 @@ silhouettes in the UI for that; Kiln offers no through-walls mode.
 - Hover an outlined dynamic entity (a chest) with the building cursor, then move away: does Kiln's outline come back, or
   does the cursor leave a stale ValidState on it (a zero `HighlightColor` does not reset the group, above)?
 - Two palette functions: which passes they feed (both are hooked).
+- A model with a non-zero `Transparency` (a prop the camera fades) goes through the setter every step (above; the group
+  it is given then was not read: presumably its `HighlightColor` index or 0). With "game-first" Kiln applies its groups
+  in the first slice of the step only, so such a model, when it lies in a later slice, may show no outline while it
+  fades ("mods-first" applies again in each slice). Seen in the game: not yet.
