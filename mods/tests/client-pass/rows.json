@@ -89,6 +89,20 @@
     { "section": "Kiln's interpreter (kiln-sfi.interpreter)", "key": "A save-sensitive mod switched off after a start with it on is named before Play", "checks": ["sfi-save-sensitive"]},
     { "section": "Kiln's interpreter (kiln-sfi.interpreter)", "key": "The do-not-save warning in all three places: before Play, in the game, in kiln/state/sfi.json", "checks": ["sfi-three-surface-warning"]},
     { "section": "Kiln's interpreter (kiln-sfi.interpreter)", "key": "The warning before Play with the keyboard alone and at large text size; the in-game banner readable", "checks": ["sfi-warning-accessibility"]},
-    { "section": "Kiln's interpreter (kiln-sfi.interpreter)", "key": "kiln, hosted, kiln on one game: every mod runs, settings and the save warning kept, no duplicate mod folders", "checks": ["sfi-backend-roundtrip"]}
+    { "section": "Kiln's interpreter (kiln-sfi.interpreter)", "key": "kiln, hosted, kiln on one game: every mod runs, settings and the save warning kept, no duplicate mod folders", "checks": ["sfi-backend-roundtrip"]},
+    { "section": "Kiln's interpreter (kiln-sfi.interpreter)", "key": "A ShroudForge-format mod's shortcut (the keys probe) works in a kiln start: each press once, held and released, nothing while Kiln's menu is open", "checks": ["sfi-keybinds"]},
+    { "section": "Kiln's interpreter in 0.2.0-dev.30.3", "key": "A ShroudForge-format mod reads the building cursor in a kiln start: the sequence grows, the position follows the cursor, attachedToProp while a prop hangs on it", "checks": ["sfi.world-cursor"]},
+    { "section": "Kiln's interpreter in 0.2.0-dev.30.3", "key": "A ShroudForge-format mod finds the props of an area of a base in a kiln start, one more after placing one inside, with their transforms", "checks": ["sfi.world-props"]},
+    { "section": "Kiln's interpreter in 0.2.0-dev.30.3", "key": "A ShroudForge-format mod queries entities and reads their components in a kiln start (the kiln-mode probe's ecs lines)", "checks": ["sfi.world-ecs"]},
+    { "section": "Kiln's interpreter in 0.2.0-dev.30.3", "key": "sf-unlimited-flight's Unlimited Glider Stamina in a kiln start: no stamina drain while gliding", "checks": ["sfi.attribute-writes"]},
+    { "section": "Kiln's interpreter in 0.2.0-dev.30.3", "key": "A ShroudForge-format mod changes a world setting through a named service in a kiln start and puts it back (SF Survival's Infinite Weapon Durability)", "checks": ["sfi.named-services"]},
+    { "section": "Kiln's interpreter in 0.2.0-dev.30.3", "key": "Mods that read and change the game's loaded resources play on in a kiln start: no freeze, no missing ResourceService, their changes show and go again", "checks": ["sfi.loaded-resources"]},
+    { "section": "Kiln's interpreter in 0.2.0-dev.30.3", "key": "A ShroudForge-format mod reads the voxel grid (the voxel probe) in a hosted kiln start; a cell read still refuses with ShroudForge's reason", "checks": ["sfi.voxel-grid"]},
+    { "section": "Kiln's interpreter in 0.2.0-dev.30.3", "key": "A ShroudForge-format mod changes a template component and puts it back (SF Survival's No Fall Damage, on then off, a restart after each change)", "checks": ["sfi.template-components"]},
+    { "section": "Building input (client.building_input)", "key": "A building item selected through Kiln's building input, as if picked in the build menu", "checks": ["building-input.select"]},
+    { "section": "Building input (client.building_input)", "key": "One block placed in front of the player, then removed, as the player's own input (hosted)", "checks": ["building-input.place-remove"]},
+    { "section": "Building input (client.building_input)", "key": "The game's building undo and the dismantle of one exact prop (hosted)", "checks": ["building-input.undo-dismantle"]},
+    { "section": "Building input (client.building_input)", "key": "Nothing is emitted while the player's own building action is held", "checks": ["building-input.own-input"]},
+    { "section": "Building input (client.building_input)", "key": "A joined game client places and removes one block on the server", "checks": ["building-input.joined"]}
   ]
 }

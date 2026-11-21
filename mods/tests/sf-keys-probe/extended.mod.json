@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "enabled": true,
+  "targets": ["client"],
+  "settings": {
+    "probeKey": {
+      "value": "SDL:61",
+      "control": "keybind",
+      "label": "Probe shortcut",
+      "description": "Each press posts a notice and a log line; holding it logs held and released. Default F4."
+    }
+  },
+  "groups": [{"label": "Probe", "settings": ["probeKey"]}]
+}

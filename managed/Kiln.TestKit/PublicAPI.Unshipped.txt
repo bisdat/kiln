@@ -116,3 +116,5 @@ Kiln.TestKit.HarnessRoutines.Queued.get -> int
 Kiln.TestKit.HarnessRoutines.SetClock(int hour, int minute = 0) -> void
 Kiln.TestKit.HarnessRoutines.SetSleepAllowed(uint npcId, bool allowed) -> void
 Kiln.TestKit.KilnHarness.Routines.get -> Kiln.TestKit.HarnessRoutines!
+Kiln.TestKit.ModManifest.SteamMessages.get -> bool
+Kiln.TestKit.ModManifest.SteamMessages.set -> void

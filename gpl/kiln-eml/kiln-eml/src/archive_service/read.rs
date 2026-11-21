@@ -330,6 +330,16 @@ impl ArchiveBacking {
         self.reference.file()
     }
 
+    /// A resource's bytes in the REFERENCE catalog only (None: not there), as ShroudForge's session catalogs read the
+    /// reference index (the attribute group's catalog): a Source read through the reference reader, checked as every
+    /// reference read is.
+    pub(super) fn reference_bytes(&self, id: &ResourceId) -> Result<Option<Vec<u8>>, String> {
+        match self.reference.resource_size(id) {
+            None => Ok(None),
+            Some(size) => self.read_file(&self.reference, &self.checked, id, size).map(Some),
+        }
+    }
+
     /// Where a resource is in this generation and its complete length (index metadata, no IO).
     fn find(&self, id: &ResourceId) -> Option<Found> {
         if let Some(bytes) = self.transaction.get(id) {
@@ -926,14 +936,14 @@ fn parse_query(q: &[u8]) -> Option<Query> {
 
 type Span = (usize, usize);
 
-fn span<T>(ptr: *const T, bytes: usize) -> Span {
+pub(super) fn span<T>(ptr: *const T, bytes: usize) -> Span {
     (ptr as usize, if ptr.is_null() { 0 } else { bytes })
 }
 
 /// The caller's error record and the call's spans, checked before any lookup or IO. An invalid record, or one that
 /// overlaps another span, is not written (INVALID_ARGUMENT). Otherwise other overlaps are INVALID_ARGUMENT with the
 /// record initialized.
-fn checked(error: *mut KilnArchiveErrorV1, inputs: &[Span], outputs: &[Span]) -> Result<ErrorOut, KilnResult> {
+pub(super) fn checked(error: *mut KilnArchiveErrorV1, inputs: &[Span], outputs: &[Span]) -> Result<ErrorOut, KilnResult> {
     let Ok(record) = (unsafe { ErrorOut::check(error) }) else {
         return Err(KILN_ERR_INVALID_ARGUMENT);
     };
@@ -964,7 +974,7 @@ unsafe fn declared<T>(record: *const T) -> u32 {
 
 /// A genuine provider failure: `cause` retained once behind a fresh token of the view's owner. A view closed meanwhile
 /// has had its diagnostics reclaimed already; this call's token is reclaimed here then.
-fn failed(
+pub(super) fn failed(
     record: &ErrorOut,
     result: KilnResult,
     owner: KilnOwner,
@@ -978,13 +988,13 @@ fn failed(
     rc
 }
 
-fn cause(text: String) -> Arc<[u8]> {
+pub(super) fn cause(text: String) -> Arc<[u8]> {
     Arc::from(text.into_bytes())
 }
 
 /// The live view's generation and archive for an owner-taking member: unknown view INVALID_ARGUMENT, closed REVOKED,
 /// another owner's REVOKED, no archive UNAVAILABLE.
-fn target(owner: KilnOwner, view: KilnEmlArchiveView) -> Result<(Arc<Generation>, Arc<ArchiveBacking>), KilnResult> {
+pub(super) fn target(owner: KilnOwner, view: KilnEmlArchiveView) -> Result<(Arc<Generation>, Arc<ArchiveBacking>), KilnResult> {
     let (holder, generation) = view::live(view)?;
     if holder != owner {
         return Err(KILN_ERR_REVOKED);
@@ -994,7 +1004,7 @@ fn target(owner: KilnOwner, view: KilnEmlArchiveView) -> Result<(Arc<Generation>
 }
 
 /// Runs a member's work with any panic contained: INTERNAL, the record initialized (no retained cause).
-fn contained(record: &ErrorOut, work: impl FnOnce() -> KilnResult) -> KilnResult {
+pub(super) fn contained(record: &ErrorOut, work: impl FnOnce() -> KilnResult) -> KilnResult {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
         .unwrap_or_else(|_| record.finish(KILN_ERR_INTERNAL, 0, 0))
 }

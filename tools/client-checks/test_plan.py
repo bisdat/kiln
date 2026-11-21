@@ -94,6 +94,27 @@ const string Example = """[ClientCheck("04-string", "Not compiled", Since = Dev2
         checks = plan.read_pack(os.path.join(f.root, "mods", "tests", "client-pass"))
         self.assertEqual(len(checks), 7)
 
+    def test_an_apostrophe_in_a_string_inside_an_interpolation_hides_no_check(self):
+        # the string ends where C# ends it: an apostrophe in a hole's own string is no character literal that runs on
+        # over the next [ClientCheck]
+        holes = (
+            '$"{(c is null ? "this start\'s" : "")} it\'s {{x}} {c,4:0}"',
+            '$@"{(c is null ? "this start\'s" : "")} ""it\'s"""',
+            '@$"{(c is null ? "this start\'s" : "")}"',
+            '$"""{(c is null ? "this start\'s" : "")} "it\'s" """',
+            '$$"""{{(c is null ? "this start\'s" : "")}} {it\'s}"""',
+            '$"{Say($"inner {(c is null ? "start\'s" : "")}")} [ClientCheck(\\"04-string\\")"',
+            '$"{c /* it\'s */}"',
+        )
+        for literal in holes:
+            with self.subTest(literal=literal):
+                f = Fixture(SOURCE.replace(
+                    'Outside(c, "text with [ClientCheck( inside a string is not an attribute")',
+                    f"Outside(c, {literal})"))
+                checks = plan.read_pack(os.path.join(f.root, "mods", "tests", "client-pass"))
+                self.assertEqual({c["id"] for c in checks},
+                                 {"03-c11", "03-c7", "03-c10", "11-join", "12-debug", "13-set", "old.check"})
+
     def test_unsupported_order_is_reported_instead_of_becoming_zero(self):
         f = Fixture(SOURCE.replace("Order = 2201", "Order = MissingOrder"))
         with self.assertRaises(plan.PlanError):

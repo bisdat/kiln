@@ -726,6 +726,10 @@ void exact_build(const Profile& p) {
     check(g_rows["engine.profile"].state == KILN_CAP_AVAILABLE && g_rows["engine.profile"].text == p.id, "engine.profile row");
     check(g_rows["engine.ecs_read"].state == KILN_CAP_AVAILABLE && g_rows["engine.ecs_write"].state == KILN_CAP_AVAILABLE,
           "ecs rows available on the exact build");
+    check(g_rows["engine.attribute_model"].state == KILN_CAP_AVAILABLE &&
+              g_rows["engine.attribute_model"].text == p.attribute_calculation_model &&
+              g_rows["engine.attribute_model"].text == "attribute-command-v1",
+          std::string(p.id) + ": engine.attribute_model names the profile's published model");
     char why[160]{};
     const KilnEngineNativeApi* native = kiln_engine_native(&api, 7, sizeof(KilnEngineNativeApi), why, sizeof why);
     check(native && native->layout && native->layout() == &p.layout, "internal table hands out the selected layout");
@@ -782,7 +786,7 @@ void unknown_build() {
     KilnEngineIdentity id{}; id.size = sizeof id;
     check(t && t->identity(&id) == KILN_OK && id.status == KILN_ENGINE_UNKNOWN_BUILD && !id.profile_id[0] && !id.sections,
           "identity unknown build");
-    for (const char* row : {"engine.profile", "engine.ecs_read", "engine.ecs_write"})
+    for (const char* row : {"engine.profile", "engine.ecs_read", "engine.ecs_write", "engine.attribute_model"})
         check(g_rows[row].state == KILN_CAP_UNAVAILABLE && g_rows[row].reason == KILN_CAP_REASON_SYMBOL_MISSING &&
                   !g_rows[row].text.empty(), std::string(row) + " unavailable with a reason");
     check(g_last_log.find("unavailable on this build") != std::string::npos, "unknown build logged");

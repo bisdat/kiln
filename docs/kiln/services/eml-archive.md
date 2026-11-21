@@ -98,6 +98,26 @@ The following paths are under `modules/mod-runtime/` in **both** SF pins d8a394b
 
 The authority is FINAL `eml-assets-types` (202 inventory rows, not test count), with delegated runtime attributes supplied by the attribute provider. Header tests promote **no** API parity rows. GPL/runtime providers must test their actual shape, semantic, error, owner/revoke and concurrent-copy/retirement implementations; source-derived claims are not differential-oracle observations.
 
+## kiln-eml's attribute group
+
+kiln-eml's provider implements the metadata, read, attribute and error groups; the codec slots are null and
+`eml.archive.codec` is reported unavailable. Its attribute group answers from ShroudForge's attribute catalog of the
+generation's **reference** archive (the same catalog the startup pass's `runtime.ecs.get_attributes` reads), built once
+per generation on the first attribute call and kept with it, its failure too:
+
+- `attribute_catalog`: every entry in attribute-ID order, then the reflected component layouts. An entry's
+  `descriptor` is the whole source descriptor as a tagged tree (its keys in source order); `definition_guid` is the
+  definition GUID of the entry's one associated component, null without exactly one.
+- `attribute_resolve`: one entry for `{"schema_version":1,"name":...}` or `{"schema_version":1,"id":...}`. A missing ID
+  or name is NOT_FOUND, an ambiguous name UNAVAILABLE, each with the source's text; any other selector is
+  INVALID_ARGUMENT before any lookup.
+- `attribute_evaluate`: the source's recalculation of one complete root (`count` must be the root's length): the output
+  bits and the ordered trace. An incomplete root is NOT_FOUND, another count INVALID_ARGUMENT, an unverified operation
+  enum or unsupported scalar UNAVAILABLE, a program that fails on the given bits INVALID_ARGUMENT, each with the
+  source's text.
+
+A catalog that cannot be built answers UNAVAILABLE with its source text to all three members.
+
 ## Checks
 
 Run each command with its own output, temp and target folders:

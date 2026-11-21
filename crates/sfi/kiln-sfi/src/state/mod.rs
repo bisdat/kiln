@@ -37,9 +37,10 @@ pub mod safety;
 pub mod writer;
 
 pub use reducer::{
-    Backend, Basis, Change, Data, Disposition, Dll, DllState, Identity, Intent, Lua, MenuBy,
-    OutcomePackage, Package, PackageInit, Part, Phase, Presence, PreviousStart, Reason, Reducer,
-    SaveSensitive, Side, Skip, StartupOutcome, Trigger, TurnedOff, Warning,
+    Backend, Basis, Change, Data, Delivery, DeliveryState, Disposition, Dll, DllState, Identity,
+    Intent, Lua, MenuBy, OutcomePackage, Package, PackageInit, Part, Phase, Presence,
+    PreviousStart, Reason, Reducer, SaveSensitive, Side, Skip, StartupOutcome, Trigger, TurnedOff,
+    Warning,
 };
 pub use writer::{Previous, PreviouslyActive, WriteOps};
 
@@ -220,6 +221,11 @@ impl StateHub {
     /// A copy of the record (tests, support).
     pub fn record(&self) -> Option<Reducer> {
         lock(&self.model).clone()
+    }
+    /// Reads the record under its lock without copying it, in memory only (no serializing, no IO): `None` before
+    /// [`begin`](Self::begin). Keep `f` short; producers take the same lock (the native banner polls with it).
+    pub fn read<T>(&self, f: impl FnOnce(&Reducer) -> T) -> Option<T> {
+        guard(None, || lock(&self.model).as_ref().map(f))
     }
     /// The save-sensitive packages the file this start replaced listed as selected and active, or carried forward when
     /// it was an aside or refused record (empty before [`begin`](Self::begin), without a state folder, and for a

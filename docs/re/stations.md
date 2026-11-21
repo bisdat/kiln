@@ -165,7 +165,7 @@ Access: read `Crafting`, `CurrentTransform`; read-opt `DynamicIsInWaterCheck`, `
 | the craft in progress | `runningRecipe`, its selections, `recipeStart` |
 | progress | `(now − recipeStart) / (craftingDuration × f(speed))`, clamped 0..1, while Running; `now` = the world's program time (`gameplay/ProgramTime`); the speed function read from `FactorySpeed` or kiln.settings (`factoryProductionSpeedFactor`, live) |
 | powered / water | `missingRequirements` bits EnergySourceInRange, EnergyAmount, AboveWater; state Paused |
-| inputs / fuel / outputs | the station's `Inventory` (Items.Read): **no slot is typed**; Kiln classifies a stack as output when its item is an output and not an input of the running or selected recipe; "loaded crafts" = `min over inputs (have_i / count_i)`, exactly as the fill computes it (§3.2). Water: `Fuel` of the station (the 7 templates with water) |
+| inputs / fuel / outputs | the station's `Inventory` (Items.Read): **no slot is typed**; Kiln classifies a stack as output when its item is an output and not an input of the running or selected recipe; "loaded crafts" = `min over inputs (have_i / count_i)`, exactly as the fill computes it (§3.2). Water: `Fuel` of the station (the 6 templates with water, §3.6) |
 | loaded? | on a dedicated server every entity simulates; `factory_station` has no player-in-range filter, and the lab already saw a rack cycling with no player (docs/re/building.md §5). Not a v1 field; lab check L6 |
 
 ### 2.3 `PlayerCraftingAction` and how the server handles it [refl][dis][cmp][sig]
@@ -302,6 +302,39 @@ The category map offsets are captured from `FindInputCategory` (`@stations/FindI
 2,542 recipes counted in `RecipeRegistryResource` (`5e57de0f-…`) with `tools/kfc decode`. [data][sig]
 
 ---------------------------------------------------------------------------------------------------------------------
+
+### 3.6 A recipe's water at craft time (server 26430253, exe `f0d824be…`) [dis][data]
+
+Why a pack's "station tank water" input did nothing of the kind (netjunk, 0.2.0-dev.30.2), and what a recipe's water is.
+
+- **The field.** `RecipeInfo` has two u32s: `waterAmount` `+0x94` and `waterCharges` `+0x98` (reflection, 168-byte
+  struct). In the game's data (`RecipeRegistryResource` `5e57de0f-…`, decoded with `tools/kfc`) **all 2,542 recipes have
+  `waterAmount` 0**; 107 have `waterCharges` 1, 2, 5 or 10. Seedbed 62 (1 or 2), Alchemist 16 (1, 2, 10), Kitchen 16 (5),
+  Coffee Brewer 3, Cooking Station 2, Beehive 2, hand 3, Oven 1, Laboratory 1, Collector 1. No recipe names an item for
+  water: `Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED` ("Water", a canteen) is in no recipe's inputs. [data]
+- **The payment.** `rules/RecipeApply` (S `0x19a1d0`) pays the inputs (`InventoryPay` S `0x199c80`, or `RecipePayAlt`
+  with flag `0x40`), then `if (recipe+0x98 > 0)`: units = `0x946c80(balancing)` (`settings+0xFC`, 1 without settings;
+  64 measured: §7 L3) × `waterCharges` × crafts (S `0x19a2b3`, `0x19a2bb`), and takes them through `0x199f10` (or the
+  operator alone in the `0x40` path, `0x1b09e0`). `0x199f10` by the transaction's stock mode (`tx+0xb1`): mode 0 takes from
+  the operator only (`0x1b09e0`); mode 2 (a player's craft, §10.1) the operator first, then `BaseStockForPlayer`'s lists
+  (`0x1b0bf0` over one list, `0x1b09e0` over the other); mode 1 the operator last. Not enough → 4 (missing materials).
+  Nothing in `RecipeApply` reads `+0x94`. [dis]
+- **So at a factory station** (`TryStart`, flag `0x08`, stock mode 0) the water leaves **the station's own tank** (its
+  `Fuel`), with the inputs, at the start of the craft; without enough the station stays in MissingMaterials. **At a
+  crafting menu** (a player's craft) it comes from the crafter, then the base's water sources (list B: wells, barrels,
+  §1.2) — how the game's Kitchen soups and Alchemist potions get theirs. The fill (§3.1) pours `waterCharges` per craft into
+  the station from list B. The recipe screen shows the charges as an ingredient row named and drawn after the "Water" item
+  ("Water 92 / 2", owner pass 2026-11-20): that row is `waterCharges`, not the item. [dis][rt]
+- **Tanks.** 33 templates carry `FactoryStation`; **six** have `Fuel` + `FuelSetup` (§1.1; the "7" of §2.2 is
+  corrected), by `Crafting.workshopId` and `maxFuelCharges`: T1_Seedling_Factory Seedbed `0xba67134f` 150,
+  T3_Oven_Factory Oven `0x1ee9f0bf` 100, T2_Fireplace_Factory Cooking Station `0x39fbd98f` 100, T4_Laboratory_Factory
+  Laboratory `0x20b86c20` 100, T6_coffeemaker_brewer_Factory Coffee Brewer `0x6b8247d6` 100, T4_Honey_Factory Beehive
+  `0x269a27a7` 50. The other factory stations have no tank, so a recipe with water there never starts.
+  `kiln_manage::catalog::TANK_STATIONS` / `DRY_STATIONS` hold both lists (kiln lint KL408, Pack Studio). [data]
+- **Kiln.** A new recipe's `"water"` writes `waterCharges` (native/services/content/recipe_water.h), after a station-only
+  recipe's requirements are cleared; `waterAmount` is left as copied or cleared. A rule changes a game recipe's
+  `waterCharges` like any field. Not checked in a real game yet (0.2.0-dev.30.3): the craft-time take at a tank station
+  and at a crafting menu, and the screen's Water row for a new recipe.
 
 ## 4. Events (task item 4)
 

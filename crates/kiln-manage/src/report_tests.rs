@@ -670,8 +670,8 @@ fn xhl_cores_own_log_is_collected_where_it_runs_from() {
         let secret = f.root.join("secret.log");
         std::fs::write(&secret, "SECRET\n").unwrap();
         f.rm("XHL-Native-Plugin-Host.log");
-        std::os::unix::fs::symlink(&secret, f.game.join("XHL-Native-Plugin-Host.log")).unwrap();
-        std::os::unix::fs::symlink(f.root.join("elsewhere"), f.game.join("kiln/chain/linked")).unwrap();
+        #[cfg(unix)] std::os::unix::fs::symlink(&secret, f.game.join("XHL-Native-Plugin-Host.log")).unwrap();
+        #[cfg(unix)] std::os::unix::fs::symlink(f.root.join("elsewhere"), f.game.join("kiln/chain/linked")).unwrap();
         std::fs::create_dir_all(f.root.join("elsewhere")).unwrap();
         std::fs::write(f.root.join("elsewhere/XHL-Native-Plugin-Host.log"), "SECRET\n").unwrap();
         let r = build(&f.input());
@@ -733,7 +733,7 @@ fn a_link_at_the_addon_log_is_not_followed() {
     let secret = f.root.join("outside/id_ed25519");
     std::fs::create_dir_all(secret.parent().unwrap()).unwrap();
     std::fs::write(&secret, "-----BEGIN OPENSSH PRIVATE KEY-----\nSECRETKEYBYTES\n-----END OPENSSH PRIVATE KEY-----\n").unwrap();
-    std::os::unix::fs::symlink(&secret, f.game.join("shroudlink_client.log")).unwrap();
+    #[cfg(unix)] std::os::unix::fs::symlink(&secret, f.game.join("shroudlink_client.log")).unwrap();
     let r = build(&f.input());
     for (name, bytes) in &r.files {
         assert!(!String::from_utf8_lossy(bytes).contains("SECRETKEYBYTES"), "{name} holds the link's target");
@@ -1054,7 +1054,7 @@ fn greeneye_logs_come_only_from_greeneyes_folders() {
     std::fs::write(outside.join("mod.json"), r#"{"id":"x"}"#).unwrap();
     // a folder in greeneye/ that is a link to the same place
     std::fs::create_dir_all(f.game.join("greeneye")).unwrap();
-    std::os::unix::fs::symlink(&outside, f.game.join("greeneye/linked")).unwrap();
+    #[cfg(unix)] std::os::unix::fs::symlink(&outside, f.game.join("greeneye/linked")).unwrap();
     // and a Library path that climbs out of the Library
     std::fs::create_dir_all(f.root.join("data/library/greeneye")).unwrap();
     let climb = f.root.join("data/library/greeneye/../../../elsewhere/private");
@@ -1102,7 +1102,7 @@ fn a_linked_game_file_is_not_followed() {
     let target = f.root.join("elsewhere/private.txt");
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     std::fs::write(&target, "[Chain]\nnot the game's chain file, private text\n").unwrap();
-    std::os::unix::fs::symlink(&target, f.game.join("dinput8-chain.ini")).unwrap();
+    #[cfg(unix)] std::os::unix::fs::symlink(&target, f.game.join("dinput8-chain.ini")).unwrap();
     let r = build(&f.input());
     assert!(!r.files.iter().any(|(_, b)| String::from_utf8_lossy(b).contains("private text")), "the target is not in the report");
     assert!(r.errors.iter().any(|e| e.contains("dinput8-chain.ini") && e.contains("link")), "{:?}", r.errors);

@@ -63,7 +63,7 @@
       "col": 5,
       "file": "content/refs.json",
       "line": 7,
-      "message": "\"Food_*\" matches no item (Kiln warns \"matches nothing\")",
+      "message": "\"Fruit_*\" matches no item (Kiln warns \"matches nothing\")",
       "severity": "warning"
     },
     {

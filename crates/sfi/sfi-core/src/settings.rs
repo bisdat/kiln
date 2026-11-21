@@ -2,17 +2,40 @@
 // Adapted from ShroudForge (MIT, Copyright (c) 2026 bonsaibauer)
 // Source (both pins): modules/mod-runtime/lua/shroudforge/v1/set_mod_settings.rs:2-38;
 // create_mod_api.rs:95-115 (1.7.9), :96-116 (1.8.0);
-// modules/mod-runtime/ingame/refresh_runtime_configuration.rs:43-75 (1.7.9), :52-84 (1.8.0).
-use crate::package::{Manifest, manifest::Capability};
+// modules/mod-runtime/ingame/refresh_runtime_configuration.rs:43-75 (1.7.9), :52-84 (1.8.0);
+// create_mod_api.rs:273-311 (1.7.9: read_keybind's registry read, read_setting_value).
+use crate::package::{
+    Manifest,
+    manifest::{Capability, SettingDefinition},
+};
 use mlua::{Lua, Table, Value};
 use serde_json::Value as Json;
+use std::sync::Arc;
 
 /// Worker-local, owner-bound registry replacement for the lifecycle. Never exposed to Lua.
+///
+/// It also carries the package's declared settings as the registrar saw them: ShroudForge's input members capture
+/// `r#mod.info().settings` when the package's API is made, and a live settings change replaces the values, never
+/// those declarations.
 #[derive(Clone, Debug)]
 pub struct Settings {
     owner: String,
+    definitions: Arc<[SettingDefinition]>,
 }
 impl Settings {
+    /// The package the registry belongs to.
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+    /// The package's declared settings, captured at install.
+    pub fn definitions(&self) -> &[SettingDefinition] {
+        &self.definitions
+    }
+    /// The current values: the registry table `settings.get` reads (`shroudforge.settings.<id>`). A live settings
+    /// change replaces it whole, so read it at each use rather than keeping it.
+    pub fn current(&self, lua: &Lua) -> mlua::Result<Table> {
+        lua.named_registry_value(&self.key())
+    }
     /// Build before publishing. Returned array tables remain stale references after
     /// replacement, and a conversion error leaves the previous registry untouched.
     pub fn replace(&self, lua: &Lua, values: &Json) -> mlua::Result<()> {
@@ -73,14 +96,31 @@ impl Settings {
     }
 }
 
-pub(crate) fn install(
+/// ShroudForge's `read_setting_value` (create_mod_api.rs:303-311, 1.7.9): a current value as the keybind reader sees
+/// it. Booleans, integers, numbers and strings keep their value (a number with no JSON form is null); anything else
+/// (nil, a table, a function) is null. A string that is not UTF-8 raises mlua's error.
+pub fn read_value(current: &Table, key: &str) -> mlua::Result<Json> {
+    Ok(match current.raw_get::<Value>(key)? {
+        Value::Boolean(value) => Json::Bool(value),
+        Value::Integer(value) => Json::from(value),
+        Value::Number(value) => Json::from(value),
+        Value::String(value) => Json::String(value.to_str()?.to_string()),
+        _ => Json::Null,
+    })
+}
+
+/// `shroudforge.settings` for one package: its registry filled from `values` and `get` in `api`'s `settings`
+/// table. `definitions` are the package's declared settings (the manifest's).
+pub fn install(
     lua: &Lua,
     api: &Table,
     owner: &str,
     values: &Json,
+    definitions: &[SettingDefinition],
 ) -> mlua::Result<Settings> {
     let settings = Settings {
         owner: owner.to_owned(),
+        definitions: definitions.into(),
     };
     settings.replace(lua, values)?;
     let bound = settings.clone();

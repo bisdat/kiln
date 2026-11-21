@@ -473,6 +473,10 @@ pub struct KilnManifest {
     pub features: Vec<String>,
     pub exports: Vec<String>,
     pub advanced: bool,
+    /// `"steamMessages": true`: the mod opens its own Steam peer message leases (Kiln.Network's SteamMessages, since
+    /// 0.2.0-dev.30.3); Kiln.Host admits the native owner it makes for the mod to kiln.net's leases.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub steam_messages: bool,
     pub tests: Option<TestsSpec>,
     /// The Kiln build the mod was compiled against (`"kilnBuild"`); None when unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -497,10 +501,10 @@ const RESERVED: [&str; 6] = ["kiln", "kiln.api", "game", "enshrouded", "native",
 /// Manifest.NativeNamespacePrefix: kiln.mod-values gives every native owner "native." plus a hash of its name as its
 /// namespace, and a mod's manifest id is its namespace, so ids starting with it are refused.
 const NATIVE_NAMESPACE_PREFIX: &str = "native.";
-const KNOWN: [&str; 27] = [
+const KNOWN: [&str; 28] = [
     "$schema", "id", "name", "version", "authors", "author", "description", "license", "url", "apiVersion", "side",
     "clients", "dependencies", "loadBefore", "loadAfter", "incompatible", "features", "entryAssembly", "entryType", "exports",
-    "advanced", "tests", "kilnBuild", "writes", "boot", "updates", "systems",
+    "advanced", "tests", "kilnBuild", "writes", "boot", "updates", "steamMessages", "systems",
 ];
 
 fn id_rule(s: &str) -> bool {
@@ -772,6 +776,10 @@ pub fn parse_kiln(text: &str) -> Result<KilnManifest> {
         None => false,
         Some(a) => a.as_bool().ok_or_else(|| bad("advanced must be true or false"))?,
     };
+    let steam_messages = match root.get("steamMessages") {
+        None => false,
+        Some(s) => s.as_bool().ok_or_else(|| bad("steamMessages must be true or false"))?,
+    };
     // never a reason to refuse a mod either: before update checks "updates" was a key nobody read
     let (updates, updates_error) = parse_updates(&root);
     if let Some(why) = updates_error {
@@ -809,6 +817,7 @@ pub fn parse_kiln(text: &str) -> Result<KilnManifest> {
         features,
         exports,
         advanced,
+        steam_messages,
         tests,
         kiln_build,
         boot,

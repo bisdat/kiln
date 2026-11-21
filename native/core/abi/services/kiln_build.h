@@ -6,12 +6,15 @@
  *      flatten, smooth, paint, replace in a box, sphere or cylinder).
  *   2. Props: place entities with the components the game's own building helper gives a placed prop (CurrentTransform,
  *      DisableRandomLootOnDestroy, UsedItem = the item dismantling gives back), list and remove them.
+ *   3. Voxels from task threads (since 0.2.0-dev.30.3, at the end of the table): the voxel grid's geometry
+ *      (grid_for_session), from any thread but a world's own, under the engine's own write gate between frames. Nothing
+ *      here keeps Kiln save regions; see "Voxels from task threads" above the table.
  * Schematics (.kschem), the paste journal, PlaceOnce and the commands live in the managed layer (Kiln.Build).
  * Evidence and engine notes: docs/re/build.md. Usage: docs/kiln/services/build.md.
  *
  * Threads: every function that touches the world runs on the tick thread (Pre/Post or a posted task) and returns
- * KILN_ERR_WRONG_THREAD elsewhere; status and the cell math helpers are thread-safe. Managed mods always call from
- * the tick thread.
+ * KILN_ERR_WRONG_THREAD elsewhere, except the task-thread members at the end of the table; status and the cell math
+ * helpers are thread-safe. Managed mods always call from the tick thread.
  *
  * Cells. A KilnVoxel is the engine's own u16: low byte = material (0 = air), high byte = fill 0..255 (255 = solid;
  * partial values place the surface inside the cell). Arrays of cells are x fastest, then y, then z:
@@ -210,6 +213,38 @@ typedef struct KilnBuildStatus {
     uint64_t boxes_added;   /* region boxes appended over all saves */
 } KilnBuildStatus;
 
+/* ======================================================================= Voxels from task threads ====== */
+/* Since 0.2.0-dev.30.3 (the version stays 1): check header.size for each member and the kiln.caps row
+ * build.voxel_grid_tasks (it says why not). These members read the SERVER world's voxel grid (a dedicated server, or a
+ * client while it hosts) from any thread but a world's own, the way the game's own systems see it between frames: the
+ * caller passes its own KilnOwner (the engine gate's busy latch is per owner) and names the server world session it
+ * expects (kiln.world's game_world_session(KILN_WORLD_SERVER)), Kiln takes the
+ * engine's own write gate without waiting (kiln.internal.engine), copies what it needs twice and compares, releases the
+ * gate and checks the session again. Nothing waits, posts work to a tick or keeps Kiln save regions.
+ * Results (the KILN_ECS_ERR_* codes are kiln_world.h's; include it to name them):
+ *   KILN_OK                    done
+ *   KILN_ERR_INVALID_ARGUMENT  a NULL or short record, owner 0, expected_session 0, an id that is empty, has a NUL or is
+ *                              over 15 bytes
+ *   KILN_ERR_NOT_FOUND         no grid of that id (the only one is "voxel")
+ *   KILN_ERR_UNAVAILABLE       off on this build (build.voxel_grid_tasks says why), no server world in this process, not
+ *                              the local authority (a client joined to another machine's world), or the server world is
+ *                              stopping
+ *   KILN_ECS_ERR_STALE         expected_session is not the live server world session, or it changed during the call
+ *   KILN_ECS_ERR_BUSY          the engine holds its gate (every frame does), another Kiln thread holds it, this owner's
+ *                              busy refusal earlier in the same server step, a call from the server tick, or the voxel
+ *                              world is not ready yet (starting, streaming, or it moved between the two copies): try
+ *                              again later
+ *   KILN_ECS_ERR_UNREADABLE    a copy of the voxel world faulted */
+typedef struct KilnBuildGridSpec {
+    uint32_t size;         /* in: sizeof(KilnBuildGridSpec) */
+    uint32_t reserved;
+    char id[16];           /* the grid's id, NUL-terminated: "voxel" */
+    double origin[3];      /* world position (metres) of cell (0, 0, 0)'s low corner */
+    double cell_size[3];   /* metres per cell edge, per axis (0.5) */
+    uint64_t maximum[3];   /* cells per axis, [0, maximum): x and z the streaming grid's extent (20480 on the current
+                              builds), y 2^31 - 8 (the engine has no y bound; KilnBuildGrid's 8192 is Kiln's own) */
+} KilnBuildGridSpec;
+
 typedef struct KilnBuildApi {
     KilnServiceHeader header; /* { sizeof(KilnBuildApi), KILN_BUILD_VERSION } */
 
@@ -265,9 +300,28 @@ typedef struct KilnBuildApi {
      * These are used by Kiln.Terrain and native transient recovery; keep/release metadata has no voxel cell cost. */
     KilnResult(KILN_CALL* terrain_budget_reserve)(uint32_t read_cells, uint32_t write_cells);
     void(KILN_CALL* terrain_budget_charge)(double milliseconds);
+
+    /* ---- voxels from task threads: appended since 0.2.0-dev.30.3 at offset 152 (the table is 160 bytes with it).
+     * Check header.size and build.voxel_grid_tasks; see "Voxels from task threads" above the table. ---- */
+    /* The grid `id` ("voxel") of server world session `expected_session`: its origin, cell size and extent in cells.
+     * `owner`: the caller's own KilnOwner (its plugin's, or the one its host gives it). out->size set by the caller;
+     * every other field is written on KILN_OK only. Any thread but a world's own. */
+    KilnResult(KILN_CALL* grid_for_session)(KilnOwner owner, uint64_t expected_session, KilnStr id,
+                                            KilnBuildGridSpec* out);
 } KilnBuildApi;
 
 #ifdef __cplusplus
 }
+static_assert(offsetof(KilnBuildApi, terrain_budget_charge) == 144, "kiln.build v1 ends its dev.29 members at 152");
+static_assert(offsetof(KilnBuildApi, grid_for_session) == 152 && sizeof(KilnBuildApi) == 160,
+              "grid_for_session is appended at 152 (table 160 bytes, x64)");
+static_assert(sizeof(KilnBuildGridSpec) == 96 && offsetof(KilnBuildGridSpec, id) == 8 &&
+                  offsetof(KilnBuildGridSpec, origin) == 24 && offsetof(KilnBuildGridSpec, cell_size) == 48 &&
+                  offsetof(KilnBuildGridSpec, maximum) == 72,
+              "KilnBuildGridSpec layout");
+#else
+_Static_assert(offsetof(KilnBuildApi, grid_for_session) == 152 && sizeof(KilnBuildApi) == 160,
+               "grid_for_session is appended at 152 (table 160 bytes, x64)");
+_Static_assert(sizeof(KilnBuildGridSpec) == 96 && offsetof(KilnBuildGridSpec, maximum) == 72, "KilnBuildGridSpec layout");
 #endif
 #endif

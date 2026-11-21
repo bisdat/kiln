@@ -284,7 +284,7 @@ Program `factory_station` (`0xf5980`, every step, both exes): `FactoryStationSta
 ### 2.3 Fuel and energy **[data] [dec]**
 There are three different things:
 - **Burning fuel in a forge isn't a system.** Recipes list charcoal as an input: `Material_T1_Factory_Metal_Sheets`: 2 charcoal + 2 scrap → 1 sheet, 90 s. Every smelter recipe is the same.
-- `Fuel` + `FuelSetup {automaticRefill, rainRefill, maxFuelCharges}` + `NetworkFuel` is really **water**: wells, watering cans, 24 templates. `actor::TransferFuelEvent`, `RecipeInfo.waterAmount`, `waterCharges` use it. Units (charges × 64), the 16-bit limit and the fill rate: docs/re/items.md section 11. `ItemInfo.fuelSetup {burnTime, energyOutput}` is set on only 3 items (logs, hardwood, twigs).
+- `Fuel` + `FuelSetup {automaticRefill, rainRefill, maxFuelCharges}` + `NetworkFuel` is really **water**: wells, watering cans, 24 templates. `actor::TransferFuelEvent` and `RecipeInfo.waterCharges` (a recipe's water, charges a craft; `waterAmount` is 0 in every recipe and unread: docs/re/stations.md 3.6) use it. Units (charges × 64), the 16-bit limit and the fill rate: docs/re/items.md section 11. `ItemInfo.fuelSetup {burnTime, energyOutput}` is set on only 3 items (logs, hardwood, twigs).
 - **Energy**: `EnergyProvider {energyPerSecond}` (fireplace, 15 templates), `RotationalEnergySource` and `RotationalEnergyConsumer {requiredEnergy, searchRadius}` (mills, 10). 68 recipes have `requiredEnergy`.
 
 So a modder's "fuel" is a recipe input, which the data already supports. Anything else (a burn timer in a slot) is a program of ours over the same inventory.
@@ -295,7 +295,7 @@ So a modder's "fuel" is a recipe input, which the data already supports. Anythin
 - `RecipeRegistry` workshop map: 46 workshops have recipes; capacity 0x40, 512 recipes per workshop. Reserved at load.
 - `CraftingPropMask` is a u64: 64 props, 51 used.
 - World budget: the cursor reports `FactoriesBudgetExhausted`; `IsFactoryEntity` items count, `ServerProgressSystem.usedFactoryBudget` holds the use. The amount wasn't read.
-- `RecipeInfo`: inputs, outputs, `craftingDuration`, `requiredProps`, `comfortLevel`, `serverProgressLevel`, `requiredHappyNpcCount`, `requiredEnergy`, `waterAmount`, `requiresSheltered`, `isCookingRecipe`, `level`. All data, all on both sides.
+- `RecipeInfo`: inputs, outputs, `craftingDuration`, `requiredProps`, `comfortLevel`, `serverProgressLevel`, `requiredHappyNpcCount`, `requiredEnergy`, `waterAmount` (unused), `waterCharges` (the recipe's water), `requiresSheltered`, `isCookingRecipe`, `level`. All data, all on both sides.
 
 ### 2.5 Other placed things **[data]**
 | Object | Template | What it needs |

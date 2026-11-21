@@ -254,10 +254,10 @@ impl Maintenance {
         let mut health = self.health.borrow_mut();
         for _ in 0..health::DRAIN {
             let mut buffer = [0u8; health::MAX_PAYLOAD];
-            match receive(services, lease, &mut buffer) {
+            match receive(services, self.owner.get(), lease, &mut buffer) {
                 Received::Message(peer, length) => {
                     if let Some(answer) = health.on_message(server, peer, &buffer[..length], now) {
-                        let result = send(services, lease, peer, &answer);
+                        let result = send(services, self.owner.get(), lease, peer, &answer);
                         health.sent(result);
                     }
                 }
@@ -270,7 +270,7 @@ impl Maintenance {
             for &peer in &peers {
                 let nonce = health.next_nonce();
                 let ping = [health::PING, nonce.to_string().as_bytes()].concat();
-                let result = send(services, lease, peer, &ping);
+                let result = send(services, self.owner.get(), lease, peer, &ping);
                 health.probed(nonce, peer, now, result);
             }
         }
@@ -296,7 +296,12 @@ impl Maintenance {
         policy.count = ids.len() as u32;
         let mut out: KilnSteamMessagesStatus = record();
         // SAFETY: kiln_net.h steam_maintain: a sized policy whose ids live for the call, a sized out record.
-        let result = unsafe { services.call(maintain, (lease, &raw const policy, &raw mut out)) };
+        let result = unsafe {
+            services.call(
+                maintain,
+                (self.owner.get(), lease, &raw const policy, &raw mut out),
+            )
+        };
         (result == KILN_OK).then_some(out)
     }
 
@@ -317,8 +322,8 @@ impl Maintenance {
         if let Ok(table) = bind(&services)
             && let Ok(close) = service_member!(table, KilnNetApi, steam_close)
         {
-            // SAFETY: kiln_net.h steam_close: a lease handle (idempotent).
-            let _ = unsafe { services.call(close, (lease,)) };
+            // SAFETY: kiln_net.h steam_close: kiln-sfi's owner and its lease handle (idempotent).
+            let _ = unsafe { services.call(close, (self.owner.get(), lease)) };
         }
     }
 }
@@ -360,7 +365,12 @@ enum Received {
     Nothing,
 }
 
-fn receive(services: &ServiceAdapter, lease: KilnHandle, buffer: &mut [u8]) -> Received {
+fn receive(
+    services: &ServiceAdapter,
+    owner: KilnOwner,
+    lease: KilnHandle,
+    buffer: &mut [u8],
+) -> Received {
     let Ok(table) = bind(services) else {
         return Received::Nothing;
     };
@@ -374,6 +384,7 @@ fn receive(services: &ServiceAdapter, lease: KilnHandle, buffer: &mut [u8]) -> R
         services.call(
             receive,
             (
+                owner,
                 lease,
                 health::CHANNEL,
                 buffer.as_mut_ptr().cast(),
@@ -397,7 +408,13 @@ fn receive(services: &ServiceAdapter, lease: KilnHandle, buffer: &mut [u8]) -> R
 }
 
 /// One health message, reliable (ShroudForge's flags 40); Steam's EResult, -1 when the lease refused it.
-fn send(services: &ServiceAdapter, lease: KilnHandle, peer: u64, bytes: &[u8]) -> i32 {
+fn send(
+    services: &ServiceAdapter,
+    owner: KilnOwner,
+    lease: KilnHandle,
+    peer: u64,
+    bytes: &[u8],
+) -> i32 {
     let Ok(table) = bind(services) else {
         return -1;
     };
@@ -410,6 +427,7 @@ fn send(services: &ServiceAdapter, lease: KilnHandle, peer: u64, bytes: &[u8]) -
         services.call(
             send,
             (
+                owner,
                 lease,
                 peer,
                 bytes.as_ptr().cast(),

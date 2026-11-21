@@ -1257,6 +1257,11 @@ impl TempDir {
         std::fs::create_dir_all(&p).map_err(io(&p, "creating"))?;
         Ok(TempDir(p))
     }
+    /// A new folder at `path`, made exclusively (never one that is there already), removed on drop.
+    pub(crate) fn create_new(path: PathBuf) -> Result<TempDir> {
+        std::fs::create_dir(&path).map_err(io(&path, "creating"))?;
+        Ok(TempDir(path))
+    }
     pub fn path(&self) -> &Path {
         &self.0
     }

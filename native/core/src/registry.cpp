@@ -33,6 +33,7 @@ struct Task {
 std::mutex g_mutex;
 std::unordered_map<KilnOwner, std::string> g_owners;  // live owners
 std::unordered_set<KilnOwner> g_host_owners;          // the live ones owner_create_managed_host made
+std::unordered_map<KilnOwner, uint32_t> g_grants;     // KILN_OWNER_GRANT_* of live owners that hold any
 KilnOwner g_next_owner = 1;
 KilnHandle g_next_handle = 1;
 std::vector<std::shared_ptr<TickSub>> g_tick[2];
@@ -89,6 +90,7 @@ void owner_revoke(KilnOwner owner) {
         std::lock_guard lock(g_mutex);
         const bool was_alive = g_owners.erase(owner) != 0;
         g_host_owners.erase(owner);
+        g_grants.erase(owner);  // grants go with the owner
         std::erase_if(g_retiring, [&](const std::shared_ptr<RetiringSub>& s) {
             if (s->owner != owner) return false;
             s->live.store(false, std::memory_order_release);
@@ -127,6 +129,33 @@ void owner_revoke(KilnOwner owner) {
         remove_owner_retiring(s->handle);
     }
 }
+
+KilnResult owner_grant(KilnOwner owner, uint32_t grants) {
+    if (owner == 0 || grants == 0 || (grants & ~static_cast<uint32_t>(KILN_OWNER_GRANTS_KNOWN)) != 0)
+        return KILN_ERR_INVALID_ARGUMENT;
+    std::lock_guard lock(g_mutex);
+    if (!g_owners.count(owner)) return KILN_ERR_REVOKED;
+    g_grants[owner] |= grants;
+    return KILN_OK;
+}
+
+KilnResult owner_grants(KilnOwner owner, uint32_t* out) {
+    if (owner == 0 || !out) return KILN_ERR_INVALID_ARGUMENT;
+    std::lock_guard lock(g_mutex);
+    if (!g_owners.count(owner)) return KILN_ERR_REVOKED;
+    const auto it = g_grants.find(owner);
+    *out = it == g_grants.end() ? 0u : it->second;
+    return KILN_OK;
+}
+
+namespace {
+KilnResult KILN_CALL api_owner_grant(KilnOwner owner, uint32_t grants) { return owner_grant(owner, grants); }
+KilnResult KILN_CALL api_owner_grants(KilnOwner owner, uint32_t* out) { return owner_grants(owner, out); }
+const KilnOwnersInternalApi g_owners_internal = {
+    {sizeof(KilnOwnersInternalApi), KILN_OWNERS_INTERNAL_VERSION}, &api_owner_grant, &api_owner_grants};
+}  // namespace
+
+const KilnOwnersInternalApi* owners_internal_table() { return &g_owners_internal; }
 
 KilnResult add_owner_retiring(KilnOwner observer, OwnerRetiringFn fn, void* user, KilnHandle* out) {
     if (!fn) return KILN_ERR_INVALID_ARGUMENT;

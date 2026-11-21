@@ -1,0 +1,62 @@
+{
+  "catalog": true,
+  "description": "recipe-water: KL408 on a recipe input naming the game's old Water canteen item (a definition and a rule), on water at a factory station without a tank (by its id, by a base recipe's workshop, a rule on a game recipe), and above a tank; none at a tank station within its tank, by hand, or for water 0. A negative water is the schema's.",
+  "diagnostics": [
+    {
+      "code": "KL408",
+      "col": 119,
+      "file": "content/recipes.json",
+      "line": 6,
+      "message": "recipe \"Fx_Smelter_Water\" needs 2 water a craft at the Smelter, which has no water tank: the station never starts it (it takes a recipe's water from its own tank only). Stations with a tank: Seedbed, Oven, Cooking Station, Laboratory, Coffee Brewer, Beehive; or leave the water out",
+      "severity": "warning"
+    },
+    {
+      "code": "KL408",
+      "col": 119,
+      "file": "content/recipes.json",
+      "line": 7,
+      "message": "recipe \"Fx_Beehive_Flood\" needs 60 water a craft, more than the Beehive's tank holds (50): the station never starts it",
+      "severity": "warning"
+    },
+    {
+      "code": "KL408",
+      "col": 175,
+      "file": "content/recipes.json",
+      "line": 9,
+      "message": "recipe \"Fx_Canteen\" takes \"Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED\", the game's old Water canteen item, as an ingredient: a craft takes 2 of that item, never water from the station's tank. For the station's tank water, remove this input and give the recipe \"water\": 2 (water charges a craft)",
+      "severity": "warning"
+    },
+    {
+      "code": "KL408",
+      "col": 135,
+      "file": "content/recipes.json",
+      "line": 10,
+      "message": "recipe \"Fx_Based_On_Smelter\" needs 1 water a craft at the Smelter, which has no water tank: the station never starts it (it takes a recipe's water from its own tank only). Stations with a tank: Seedbed, Oven, Cooking Station, Laboratory, Coffee Brewer, Beehive; or leave the water out",
+      "severity": "warning"
+    },
+    {
+      "code": "KL107",
+      "col": 109,
+      "file": "content/recipes.json",
+      "line": 12,
+      "message": "-1 is below the minimum 0",
+      "severity": "error"
+    },
+    {
+      "code": "KL408",
+      "col": 53,
+      "file": "content/recipes.json",
+      "line": 14,
+      "message": "recipe \"Recipe_Fixture_Smelter_Bar\" needs 4 water a craft at the Smelter, which has no water tank: the station never starts it (it takes a recipe's water from its own tank only). Stations with a tank: Seedbed, Oven, Cooking Station, Laboratory, Coffee Brewer, Beehive; or leave the water out",
+      "severity": "warning"
+    },
+    {
+      "code": "KL408",
+      "col": 77,
+      "file": "content/recipes.json",
+      "line": 15,
+      "message": "recipe \"Recipe_Fixture_Oven_Bread\" takes \"Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED\", the game's old Water canteen item, as an ingredient: a craft takes 1 of that item, never water from the station's tank. For the station's tank water, remove this input and give the recipe \"waterCharges\": 1 (water charges a craft)",
+      "severity": "warning"
+    }
+  ]
+}

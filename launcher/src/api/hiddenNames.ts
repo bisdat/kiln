@@ -1,11 +1,8 @@
 // The game's old, test and unused entries by the markers in their names: kiln_manage::catalog::is_hidden_name, for the
 // browser mock's pickers and lint (the launcher itself gets the backend's `hidden` flag). Tested in unit/hidden-names.test.ts
-// against the Rust test's names. Entries the game's own data uses stay listed (catalog::used_names); the mock knows one:
-// station tank water.
+// against the Rust test's names. Entries the game's own data uses stay listed (catalog::used_names). The game's old Water
+// canteen item (stationWater.ts OLD_WATER_ITEM) is hidden like the rest since 0.2.0-dev.30.3: it is not a station's tank.
 const WORDS = new Set(["deprecated", "donotplace", "donotuse", "unused", "notfinished", "norecipe", "wip", "debug", "cheat", "prototype", "proto", "placeholder"]);
-
-/** The game's "Water" item: station tank water in native recipes, never hidden (catalog::STATION_WATER). */
-export const STATION_WATER = "Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED";
 
 export function isHiddenGameName(name: string): boolean {
   const lower = name.toLowerCase();

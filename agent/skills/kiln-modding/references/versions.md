@@ -20,6 +20,7 @@ been seen in a game.
 | dev.29.17 | 0.2.9 | dev.29.17 | station outputs as stock, ordinary chests in a fill, patches `copyComponents`, `clear`, `replace`, boot reads of any resource, `kilnctl tick-compare`; unknown slash commands pass through |
 | dev.29.18 | 0.2.10 | dev.29.18 | Kiln tasks, `WorldConcurrent` (KILNX003), `Content.Text` / `TooltipValues`, wraps in the prediction storage, `TryReadWritable`, KILN105 on commands, `graphics.json` |
 | dev.29.19 | 0.2.11 | dev.29.19 | `KilnLanguage`, `KeyInput.Listen`, `Hooks.Module` (hooks inside another mod's DLL), `KilnHarness.LogFile` / `ReadLogFile`; native: kiln.hooks `read_original`, `code_state`, `open_module`, `module_scan`, `KILN_TASK_RESIDENT`; station outputs on Kiln clients' station screens; the impact memory watch |
+| dev.30.3 | 0.2.13 | dev.30.3 | `BuildingInput` (Kiln.Client: the local player's building input, on game client 26430625), `SteamMessages` (Kiln.Network: Steam peer-to-peer messages on leased channels; a mod opts in with `"steamMessages": true` in kiln.mod.json), `GameTexture` and `GamePixelFormat` (decode and encode the game's texture formats); native: kiln.world `named_service_*` and `ecs_registration`, kiln.assets `loaded_snapshot`, `loaded_list`, `loaded_scalar_compare_exchange`, kiln.build `grid_for_session`, kiln.client `building_input_*` and `KilnBuildingInput`, kiln.net `steam_*` (in the SDK now; they open no lease for a native plugin) |
 
 Every API bump since dev.27 was additive: no public member was removed or changed.
 
@@ -55,6 +56,8 @@ do not prove what a player sees, hears or does.
 - **dev.29.19:** host tests; the hook tests under Wine and natively on Windows. Not seen in a real game: `KilnLanguage`
   and `KeyInput` in a mod, a mod's hooks inside another mod's DLL, the station screens' counts and fill buttons with
   station outputs, the impact memory warning, mods for Enshrouded ModLoader run by Kiln.
+- **dev.30.3:** host tests and C# tests over stand-in native services; Steam messages also between two processes over a
+  stand-in Steam library (Wine, Windows). Not seen in a real game: building input, Steam messages with real Steam, `GameTexture` on the game's own textures, anything of kiln mode.
 
 The official launcher has Nexus integration switched off: import downloaded archives by hand (no Catalog, no account
 sign-in, no `nxm://` handler).

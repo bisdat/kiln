@@ -202,11 +202,13 @@ internal static partial class KilnApis
         "M:Kiln.ContentEntry.SetRefJson(System.String,System.String,System.Boolean)", // ContentEntry.SetRefJson(string, string, bool): via Content.Require(string)
         "M:Kiln.ContentEntry.SetStacks(System.Collections.Generic.IEnumerable{Kiln.DropStack})", // ContentEntry.SetStacks(IEnumerable<DropStack>): via Content.Require(string)
         "M:Kiln.ContentEntry.get_CraftingDuration", // ContentEntry.CraftingDuration.get: via ContentEntry.Get(string)
+        "M:Kiln.ContentEntry.get_CraftingWater", // ContentEntry.CraftingWater.get: via ContentEntry.Get(string)
         "M:Kiln.ContentEntry.get_Inputs", // ContentEntry.Inputs.get: via ContentEntry.ReadStacks(uint)
         "M:Kiln.ContentEntry.get_MaxStack", // ContentEntry.MaxStack.get: via ContentEntry.Get(string)
         "M:Kiln.ContentEntry.get_Outputs", // ContentEntry.Outputs.get: via ContentEntry.ReadStacks(uint)
         "M:Kiln.ContentEntry.get_Stacks", // ContentEntry.Stacks.get: via ContentEntry.ReadStacks(uint)
         "M:Kiln.ContentEntry.set_CraftingDuration(System.TimeSpan)", // ContentEntry.CraftingDuration.set: via ContentEntry.Set(string, TimeSpan)
+        "M:Kiln.ContentEntry.set_CraftingWater(System.Int32)", // ContentEntry.CraftingWater.set: via ContentEntry.Set(string, int)
         "M:Kiln.ContentEntry.set_MaxStack(System.Int32)", // ContentEntry.MaxStack.set: via ContentEntry.Set(string, long)
         "M:Kiln.ContentRegistry.Field(System.String)", // ContentRegistry.Field(string): via ContentRegistry.Fields.get
         "M:Kiln.ContentRegistry.Get(Kiln.ItemId)", // ContentRegistry.Get(ItemId): via ContentRegistry.Get(uint)
@@ -364,7 +366,9 @@ internal static partial class KilnApis
         "M:Kiln.GameDataRegistry.IsClone(System.Guid)", // GameDataRegistry.IsClone(Guid): via GameDataRegistry.Get(Guid)
         "M:Kiln.GameDataRegistry.get_Count", // GameDataRegistry.Count.get: via Content.RequireGD(string)
         "M:Kiln.GameDataRegistry.get_Item(System.Int32)", // GameDataRegistry.this[int].get: via Content.RequireGD(string)
+        "M:Kiln.GameEvents.Each(Kiln.GameType,System.Action{Kiln.ReflectedValue})", // GameEvents.Each(GameType, Action<ReflectedValue>): Services.RequireTickThread
         "M:Kiln.GameEvents.Each(System.String,System.Action{Kiln.ReflectedValue})", // GameEvents.Each(string, Action<ReflectedValue>): Services.RequireTickThread
+        "M:Kiln.GameEvents.Post(Kiln.GameType,System.Collections.Generic.IReadOnlyDictionary{System.String,System.Object})", // GameEvents.Post(GameType, IReadOnlyDictionary<string, object?>): Services.RequireTickThread
         "M:Kiln.GameEvents.Post(System.String,System.Collections.Generic.IReadOnlyDictionary{System.String,System.Object})", // GameEvents.Post(string, IReadOnlyDictionary<string, object?>): Services.RequireTickThread
         "M:Kiln.GameSystems.Hook(System.String,System.Action,System.Action)", // GameSystems.Hook(string, Action?, Action?): Services.RequireTickThread
         "M:Kiln.GameSystems.Profile(System.Boolean)", // GameSystems.Profile(bool): Services.RequireTickThread
@@ -482,7 +486,7 @@ internal static partial class KilnApis
         "M:Kiln.KnowledgeScope.Set(System.String,System.UInt32)", // KnowledgeScope.Set(string, uint): via Knowledge.KnowledgeId(string, string)
         "M:Kiln.Mod.WorldConfig``1(System.String)", // Mod.WorldConfig<T>(string?): Game.AssertTickThread
         "M:Kiln.ModValues.Add(Kiln.CharacterKey,Kiln.ModValueKey,System.Int64,System.Nullable{Kiln.ModValueVersion})", // ModValues.Add(CharacterKey, ModValueKey, long, ModValueVersion?): via ModValues.Change(string, CharacterKey, ModValueKey, ChangeOp, long, ModValueVersion?)
-        "M:Kiln.ModValues.Define(System.String,Kiln.ModValueOptions)", // ModValues.Define(string, ModValueOptions): via ModValuesService.NeedLedger(string)
+        "M:Kiln.ModValues.Define(System.String,Kiln.ModValueOptions)", // ModValues.Define(string, ModValueOptions): Services.RequireTickThread
         "M:Kiln.ModValues.Read(Kiln.CharacterKey,Kiln.ModValueKey)", // ModValues.Read(CharacterKey, ModValueKey): via ModValuesService.NeedLedger(string)
         "M:Kiln.ModValues.Reset(Kiln.CharacterKey,Kiln.ModValueKey,System.Nullable{Kiln.ModValueVersion})", // ModValues.Reset(CharacterKey, ModValueKey, ModValueVersion?): via ModValues.Change(string, CharacterKey, ModValueKey, ChangeOp, long, ModValueVersion?)
         "M:Kiln.ModValues.Set(Kiln.CharacterKey,Kiln.ModValueKey,System.Int64,System.Nullable{Kiln.ModValueVersion})", // ModValues.Set(CharacterKey, ModValueKey, long, ModValueVersion?): via ModValues.Change(string, CharacterKey, ModValueKey, ChangeOp, long, ModValueVersion?)
@@ -859,6 +863,7 @@ internal static partial class KilnApis
         "P:Kiln.Assets.Available=kiln.assets", // T != null: Services.Get("kiln.assets")
         "P:Kiln.Blocks.Available=kiln.assets,kiln.gamedata", // via Kiln.Assets.Available; via Kiln.Content.GameDataAvailable
         "P:Kiln.Build.Available=kiln.build", // T != null: Services.Get("kiln.build")
+        "P:Kiln.BuildingInput.Available=client.building_input,kiln.client", // BuildingInputNative.Members != null: Services.Get("kiln.client"); Is("client.building_input")
         "P:Kiln.Chat.Available=kiln.chat", // T != null: Services.Get("kiln.chat")
         "P:Kiln.Client.Available=kiln.client", // T != null: Services.Get("kiln.client")
         "P:Kiln.Client.IsClientThread=kiln.client", // T != null: Services.Get("kiln.client")
@@ -980,5 +985,6 @@ internal static partial class KilnApis
         "M:Kiln.ConfigFile.Set(System.String,System.Object)", // ConfigFile.Set(string, object?): if (Game.InBoot) throw
         "M:Kiln.ConfigFile.TrySet(System.String,System.Object,System.String@)", // ConfigFile.TrySet(string, object?, out string): if (Game.InBoot) throw
         "M:Kiln.ConfigFile.add_Changed(System.Action{Kiln.ConfigChangedEvent})", // ConfigFile.Changed.add: if (Game.InBoot) throw
+        "M:Kiln.SteamMessages.Open(System.UInt16,System.UInt16,System.Boolean)", // SteamMessages.Open(ushort, ushort, bool): if (Game.InBoot) throw
     };
 }

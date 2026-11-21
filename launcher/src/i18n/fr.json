@@ -2262,6 +2262,8 @@
       "byHand": "Mis là à la main",
       "folder": "Dossier",
       "advanced": "Avancé (hooks ou patchs)",
+      "steam": "Steam",
+      "steamMessages": "Communique avec d'autres joueurs via Steam",
       "role": "Rôle",
       "servesLive": "Fournit les pages en direct",
       "also": "Aussi {list}",
@@ -5446,6 +5448,19 @@
         "duration": "Durée",
         "durationPh": "du jeu",
         "seconds": "secondes",
+        "water": "Eau du réservoir",
+        "waterTip": "L'eau propre à la recette, en charges par fabrication (64 unités d'eau chacune), comme l'affiche la ligne Eau de l'écran des recettes. Le jeu la prend au début de chaque fabrication.",
+        "waterPh": "aucune",
+        "waterPhBase": "celle de la base",
+        "waterPhGame": "celle du jeu",
+        "waterUnit": "charges par fabrication",
+        "waterTank": "Le réservoir de {station} contient {max} charges : gardez-le plein pour fabriquer.",
+        "waterOver": "Plus que ce que contient le réservoir de {station} ({max}) : le poste ne lance jamais cette recette.",
+        "waterNoTank": "{station} n'a pas de réservoir d'eau : il ne lance jamais une recette qui demande de l'eau.",
+        "waterMenu": "Fabriqué depuis un menu : le jeu prend l'eau dans les récipients du joueur et dans les puits et tonneaux de la base.",
+        "oldWater": "Un ingrédient est l'ancien objet Eau du jeu, une gourde : chaque fabrication prend {count} de cet objet, pas l'eau du réservoir du poste.",
+        "useTank": "Utiliser l'eau du réservoir",
+        "useTankTip": "Retire les ingrédients objet Eau et demande la même quantité d'eau du réservoir",
         "itemAria": "Objet",
         "countAria": "Quantité",
         "category": "n'importe quel objet de la catégorie {id}",
@@ -5530,7 +5545,8 @@
         "toggle": "Afficher les entrées cachées du jeu",
         "tag": "cachée",
         "tip": "Entrées anciennes, de test ou inutilisées du jeu : elles peuvent ne rien faire en jeu.",
-        "tankWater": "eau du réservoir de l'atelier"
+        "oldWater": "ancienne gourde, pas l'eau du réservoir",
+        "oldWaterTip": "L'ancien objet Eau du jeu. L'écran des recettes reprend son nom pour l'eau d'une recette, mais comme ingrédient c'est l'objet lui-même. Pour l'eau du réservoir, utilisez Eau du réservoir sur la recette."
       }
     },
     "order": {

@@ -1,0 +1,7 @@
+{
+  "raw": "{\"id\":\"ok\",\"version\":\"1\",\"apiVersion\":\"0.1\",\"entryAssembly\":\"a.dll\",\"steamMessages\":\"yes\"}",
+  "expect": {
+    "ok": false,
+    "error": "kiln.mod.json: steamMessages must be true or false"
+  }
+}
