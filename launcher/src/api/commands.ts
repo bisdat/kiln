@@ -217,6 +217,9 @@ export interface LauncherSettings {
   language?: string | null;
   /** (dev.29) Previews of unfinished features, set by hand in settings.json; kept as it is by every save. */
   preview?: string[];
+  /** (dev.30) The folder each kind of file dialog was last used in (ui/dialogFolder.ts); only app_dialog_remember
+   *  changes it (a settings save keeps the file's). */
+  dialogFolders?: Record<string, string>;
 }
 /** The most `keepVersions` may be (kiln_manage::kept::KEEP_MAX). */
 export const KEEP_MAX = 5;
@@ -1362,6 +1365,12 @@ export const appRenderSet = (software: boolean) => call<RenderInfo>("app_render_
 export const appRenderX11Set = (on: boolean) => call<RenderInfo>("app_render_x11_set", { on });
 /** Settings, "WebKit's sandbox": on removes the marker, off writes it, for the next start (Linux). */
 export const appSandboxSet = (on: boolean) => call<SandboxInfo>("app_sandbox_set", { on });
+/** (dev.30) The folder a file dialog of `kind` opens in, or "<folder>/<fileName>" (src-tauri/src/dialog_folder.rs; ui/dialogFolder.ts):
+ *  `preferred` when it exists, else the kind's last folder, else Downloads, else home; never an AppImage's mount. null: none fits. */
+export const appDialogDefault = (kind: string, fileName: string | null, preferred: string | null) =>
+  call<string | null>("app_dialog_default", { kind, fileName, preferred });
+/** Keeps the folder a dialog of `kind` ended in (`path` itself when `folder`, else its parent). */
+export const appDialogRemember = (kind: string, path: string, folder: boolean) => call<null>("app_dialog_remember", { kind, path, folder });
 /** Settings, "Kiln Launcher in the app menu" (Linux AppImage): writes or removes the entry and its icons. */
 export const appDesktopSet = (on: boolean) => call<DesktopInfo>("app_desktop_set", { on });
 /** Translation files a player put in the data folder's `locales/` (docs/kiln/translating.md): `<tag>.json` each, read
@@ -2324,6 +2333,7 @@ export const COMMANDS = [
   "app_desktop_set",
   "app_locales",
   "app_sandbox_set",
+  "app_dialog_default", "app_dialog_remember",
   "vendor_status", "vendor_license", "vendor_download", "vendor_remove",
   "community_settings_get", "community_settings_set", "community_status", "community_feed", "community_check_member", "community_signout", "community_signin_start", "community_signin_poll", "community_signin_cancel",
   "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",

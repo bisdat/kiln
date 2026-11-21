@@ -46,7 +46,7 @@ export async function startShare(qc: QueryClient, profileId: ProfileId) {
 /** A folder the player picks (the browser mock answers itself). */
 async function pickFolder(): Promise<string | null> {
   if (!api.isTauri()) return (await api.loadMock()).mockPickFolder();
-  const r = await pickPaths({ directory: true, title: t("crucible.save.pick") });
+  const r = await pickPaths({ directory: true, title: t("crucible.save.pick"), kind: "packSave" });
   return r?.[0] ?? null;
 }
 

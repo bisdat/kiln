@@ -224,6 +224,8 @@ pub const NAMES: &[&str] = &[
     "app_desktop_set",
     "app_locales",
     "app_sandbox_set",
+    "app_dialog_default",
+    "app_dialog_remember",
     "vendor_status",
     "vendor_license",
     "vendor_download",

@@ -43,7 +43,7 @@ export default function ModsTab({ studio: st, gameId }: { studio: Studio; gameId
   };
   const addFile = async () => {
     if (!gameId) return;
-    const paths = await pickPaths({ multiple: true, title: t("studio.mods.pickFile") });
+    const paths = await pickPaths({ multiple: true, title: t("studio.mods.pickFile"), kind: "studioMods" });
     if (!paths?.length) return;
     try {
       const r = await runTask<ImportReport>(() => api.libraryImport(paths), { failed: t("studio.mods.addFailed") });

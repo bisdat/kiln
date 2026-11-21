@@ -1338,6 +1338,8 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | app | `app_started` | - | null (the page's first screen is up; once per start; ends the Linux render watchdog) |
 | app | `app_render_set` | software: boolean | `RenderInfo` (sets or clears `state/software-render.json` for the next start; `unsupported` off Linux) |
 | app | `app_sandbox_set` | on: boolean | `SandboxInfo` (dev.29.18; on removes `state/webkit-sandbox.json`, off writes it, for the next start; `unsupported` off Linux) |
+| app | `app_dialog_default` | kind: string, fileName: string \| null, preferred: string \| null | `string \| null` (dev.30; the folder a file dialog opens in, or `<folder>/<fileName>`: `preferred` when it exists, else the kind's last folder, else Downloads, else home; never the working directory, `$APPDIR` or an AppImage mount; src-tauri/src/dialog_folder.rs) |
+| app | `app_dialog_remember` | kind: string, path: string, folder: boolean | `null` (dev.30; keeps the folder the dialog ended in, `path` or its parent, in settings.json `dialogFolders`) |
 | app | `app_desktop_set` | on: boolean | `DesktopInfo` (on: writes `kiln-launcher.desktop` and the icons, replacing a file of that name Kiln did not write; off: removes Kiln's, and `state/desktop-entry.json` keeps it off; `unsupported` outside a Linux AppImage) |
 | app | `app_settings_get` | - | `LauncherSettings` |
 | app | `app_settings_set` | settings: LauncherSettings | `LauncherSettings` |
