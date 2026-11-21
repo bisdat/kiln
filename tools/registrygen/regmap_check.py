@@ -369,10 +369,23 @@ def previous_record(root, side, game_build):
     return best
 
 
+def load_id_table(path):
+    """A previous build's id table: as --ids-out writes it ({<registry>: {<guid>: <id>}}), or as kiln.content writes it at run
+    time (<data>/content/registry/ids-<side>-<exe sha256>.json: {"format", "side", "exeSha256", ..., "registries": {...}})."""
+    return id_table_of(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def id_table_of(doc):
+    if isinstance(doc, dict) and isinstance(doc.get("registries"), dict) and "format" in doc:
+        return doc["registries"]
+    return doc
+
+
 def compute_aliases(root, entries, previous, previous_table, game_build):
     """The record's aliases and this build's id table from its entries (regmap_entries.py), the previous record and the
     previous build's id table. Registries in load order: loot takes the items' ids."""
     maps = load_regmap(root)
+    previous_table = id_table_of(previous_table) if previous_table is not None else None
     prev = regmap_ids.aliases_from_json((previous or {}).get("aliases", {}))
     per, table = {}, {}
     item_ids = {}
@@ -452,7 +465,7 @@ def main(argv=None):
             entries = json.loads(Path(a.entries).read_text()) if a.entries else None
             if entries is None:
                 print("regmap_check: no --entries: the previous record's aliases are carried as they are", file=sys.stderr)
-            prev_table = json.loads(Path(a.ids_in).read_text()) if a.ids_in else None
+            prev_table = load_id_table(Path(a.ids_in)) if a.ids_in else None
             rec, table = record(root, db, a.side, a.game_build, a.steam_build, entries, prev, prev_table)
             if a.ids_out and table is not None:
                 Path(a.ids_out).write_text(json.dumps(table), encoding="utf-8")

@@ -559,7 +559,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
                                            (d.rm.has_build ? (d.rm.build.verified ? "verified" : "unverified") : "none") + "\n" + need_json(need).dump());
         const std::string cache_rel = "cache/" + family.substr(0, 32) + ".json";
         // the cache: the same keys read again give the same digest -> the same base
-        if (!need.all && need.raw.empty() && d.env.read_data)
+        if (!need.all && need.raw.empty() && !ids_missing && d.env.read_data)  // the id table is missing: decode, it is written below
             if (auto text = d.env.read_data(cache_rel)) {
                 const json c = json::parse(*text, nullptr, false);
                 bool ok = c.is_object() && c.value("family", std::string()) == family && c.contains("keys") && c["keys"].is_array();
@@ -593,7 +593,8 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
                 }
             m->id_table(&d.ids, &d.nums);
             d.decoded = m->decoded();
-            if (d.env.write_data && (want_all || !base.registries.empty())) d.env.write_data(ids_rel, m->id_table_json().dump());
+            // review finding 4 (ruling 2026-11-21 19:11): written once per build, when missing, always with every registry
+            if (d.env.write_data && want_all) d.env.write_data(ids_rel, m->id_table_json().dump());
             const std::string digest = m->digest();
             if (!need.all && need.raw.empty() && d.env.write_data && !digest.empty()) {
                 json keys = json::array();

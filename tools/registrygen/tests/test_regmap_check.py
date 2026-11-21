@@ -212,6 +212,25 @@ class Checks(unittest.TestCase):
         finally:
             t.close()
 
+    def test_the_run_time_id_table_is_read_as_the_previous_table(self):
+        # review finding 4: kiln.content's table ({"format", ..., "registries": {...}}) feeds --ids-in as the tool's own does
+        G = "30000000-0000-0000-0000-000000000003"
+        for wrap in (lambda tb: tb, lambda tb: {"format": 1, "side": "server", "exeSha256": "ab" * 32, "decoder": "x", "registries": tb}):
+            t = Tree()
+            try:
+                db = rc.TypeDb.from_refl(dict(TYPES, exe_sha256="ab" * 32))
+                maps = t.root / "regmap" / "common"
+                d = json.loads((maps / "things.json").read_text())
+                d["registry"] = "items"
+                (maps / "things.json").rename(maps / "items.json")
+                (maps / "items.json").write_text(json.dumps(d))
+                rec1, table1 = rc.record(t.root, db, "server", "1", "", {"registries": {"items": [{"guid": G, "name": "Axe", "id": 3}]}}, None, None)
+                # build 2: the game renamed the entry's debug name; the previous build's table keeps its Kiln id
+                _, table2 = rc.record(t.root, db, "server", "2", "", {"registries": {"items": [{"guid": G, "name": "Axe_Renamed", "id": 3}]}}, rec1, wrap(table1))
+                self.assertEqual(table2["items"][G], "game:axe")
+            finally:
+                t.close()
+
     def test_missing_rows_are_unmapped_not_errors(self):
         rows = copy.deepcopy(ROWS)
         del rows["on"]
