@@ -9,6 +9,8 @@ import { KIND_NAME, KIND_SHORT, KIND_TONE, MOD_KINDS } from "../api/kinds";
 import { Badge, Banner, EmptyState, Skeleton, errorText, type Tone } from "../ui";
 import { RestoreDataOffer } from "./RestoreDataOffer";
 import { SendToSupport } from "../community/parts";
+// the ShroudForge row in kiln mode
+import { SfiEngineRow, isSfiRow } from "./SfiEngineRow";
 
 type Obj = Record<string, Json>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
@@ -94,6 +96,8 @@ export function EngineStatusList({ gameId }: { gameId: GameId }) {
 
 export function EngineRow({ s, gameId }: { s: EngineStatus; gameId?: GameId }) {
   const t = useT();
+  // kiln-sfi's sfi.json, kiln_manage::sfi_state
+  if (isSfiRow(s)) return <SfiEngineRow s={s} />;
   const selfFile = s.kind === "shroudforge" ? s.ownLoader?.file : null;
   const selfHosted = !selfFile && s.kind === "shroudforge" && isObj(s.state) && s.state.mode === "self-hosted";
   const raw = selfFile || selfHosted ? null : headlineWord(s.state);

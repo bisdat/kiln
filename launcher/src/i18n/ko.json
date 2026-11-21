@@ -5823,5 +5823,142 @@
         "crafted": "제작함"
       }
     }
+  },
+  "sfBackend": {
+    "backend": {
+      "title": "ShroudForge",
+      "sub": "이 게임의 ShroudForge 모드를 어떤 ShroudForge가 실행할지 정합니다. kiln/kiln.json에 저장되며 다음 시작부터 적용됩니다.",
+      "label": "ShroudForge 백엔드",
+      "choice": {
+        "hosted": "Kiln에 포함된 ShroudForge",
+        "installed": "내가 설치한 ShroudForge",
+        "kiln": "Kiln 인터프리터"
+      },
+      "about": {
+        "hosted": "Kiln과 함께 제공되는 ShroudForge입니다.",
+        "installed": "게임의 shroudforge 폴더에 있는 ShroudForge입니다.",
+        "kiln": "Kiln이 ShroudForge 모드를 직접 실행합니다. 온전히 실행할 수 없는 모드는 플레이 전에 이유와 함께 건너뜁니다."
+      },
+      "none": "ShroudForge 없음",
+      "default": "기본값",
+      "held": "보류됨",
+      "heldWhy": "이 Kiln 빌드에서는 사용할 수 없습니다: {reason}",
+      "set": {
+        "default": "설정 없음: 기본값입니다.",
+        "explicit": "선택됨: {name}.",
+        "inherited": "이전 스위치 \"내가 설치한 ShroudForge 사용\"에서: {name}. 여기서 선택하면 대체됩니다.",
+        "invalid": "kiln.json에 Kiln이 모르는 백엔드({value})가 적혀 있습니다. 하나를 고를 때까지 이 게임의 ShroudForge 모드는 어떤 ShroudForge로도 실행되지 않습니다."
+      },
+      "next": "다음 시작: {name}",
+      "last": "마지막 시작: {name}",
+      "envRuntime": "런처가 실행되는 환경에 KILN_SHROUDFORGE_RUNTIME이 설정되어 있습니다. 런처에서의 시작은 이를 따릅니다.",
+      "envOff": "런처가 실행되는 환경에 KILN_SHROUDFORGE=0이 설정되어 있습니다. 런처에서 시작하면 ShroudForge가 실행되지 않습니다.",
+      "route": {
+        "missing": "Kiln 인터프리터가 아직 이 게임에 없습니다. Kiln을 다시 설치하면 추가됩니다.",
+        "ownLoader": "ShroudForge 자체 로더가 게임에 있습니다({file}). ShroudForge 모드는 그 로더가 실행하고 Kiln의 선택은 물러납니다."
+      },
+      "running": "변경하려면 게임을 닫으세요.",
+      "reset": "기본값으로 되돌리기",
+      "unreadable": "kiln.json을 읽을 수 없어 변경할 수 없습니다: {reason}",
+      "saved": "저장했습니다. 다음 시작: {name}.",
+      "ask": {
+        "title": "ShroudForge 백엔드를 변경할까요?",
+        "to": "다음 시작부터: {name}",
+        "replaces": "이전 스위치 \"내가 설치한 ShroudForge 사용\"을 대체합니다.",
+        "kiln": "Kiln 인터프리터가 온전히 실행할 수 없는 모드는 시작할 때 각각 이유와 함께 건너뛰며, 플레이 전 경고에 목록이 나옵니다. Kiln에 포함된 ShroudForge로 저절로 돌아가지 않습니다.",
+        "unchanged": "kiln.json이 이미 이렇게 되어 있습니다.",
+        "refused": "지금은 선택할 수 없습니다: {reason}",
+        "when": "저장하기 전에는 아무것도 바뀌지 않습니다. 게임은 다음 시작 때 읽습니다."
+      }
+    },
+    "startWarning": {
+      "title": "이번 실행에서 일부 모드가 실행되지 않습니다",
+      "continue": "이 모드 없이 계속",
+      "game": "게임: {path}",
+      "changedTitle": "변경됨",
+      "changed": "지난 경고 이후 이번 실행에서 실행되지 않는 항목이 바뀌었습니다. 계속하기 전에 다시 읽어 주세요.",
+      "otherGame": "이 경고는 다른 게임의 것입니다. 플레이를 다시 누르세요.",
+      "lead": {
+        "save": {
+          "title": "이 모드 없이 저장하지 마세요",
+          "text": "아래 모드는 세이브에 데이터를 남깁니다. 꺼진 상태로 월드를 저장하면 그 데이터가 바뀌거나 사라질 수 있습니다. 저장하지 않고 플레이하거나, 취소하고 먼저 해결하세요."
+        },
+        "check": {
+          "title": "모든 것을 확인하지 못했습니다",
+          "text": "Kiln이 이번 실행에 대해 모든 것을 확인하지 못해 이 모드들이 실행되지 않을 수 있습니다. 아래 이유를 읽어 주세요."
+        },
+        "plain": {
+          "title": "이 모드들은 실행되지 않습니다",
+          "text": "게임은 아래 모드 없이 시작됩니다. 나머지 모드는 평소처럼 실행됩니다."
+        }
+      },
+      "listAria": "실행되지 않는 항목 ({count})",
+      "notesAria": "참고",
+      "nothingChanged": "계속해도 아무것도 끄지 않으며 저장하거나 삭제하지 않습니다. 다음 플레이 때 다시 확인합니다.",
+      "partData": "시작 데이터",
+      "partLua": "Lua",
+      "partDlls": "DLL: {list}",
+      "parts": "구성: {list}",
+      "dataNotApplied": "이번 실행에서는 시작 데이터가 적용되지 않습니다.",
+      "chain": "원인: {chain}",
+      "folder": "폴더: {root}",
+      "wasActive": "이전 실행에서는 켜져 있었습니다 ({launch}).",
+      "unknownStart": "알 수 없는 실행",
+      "saveLine": "세이브에 데이터를 남깁니다. 꺼져 있는 동안 월드를 저장하지 마세요.",
+      "saveUnknown": "세이브에 데이터를 남길 수 있습니다. 꺼져 있는 동안 월드를 저장하지 마세요.",
+      "skipped": "{name} 실행 안 됨",
+      "refused": "이번 실행에서는 ShroudForge 모드가 실행되지 않습니다",
+      "notStarted": "시작되지 않음: {list}",
+      "previous": "{name} 지금 꺼짐",
+      "offNow": "이번 실행에서는 실행되지 않습니다.",
+      "basisPolicy": "세이브 데이터를 가진 모드에 대한 Kiln 목록에 있습니다.",
+      "basisUnknown": "게임 데이터와 코드를 모두 가지고 있어 세이브 데이터를 남길 수 있습니다.",
+      "about": "대상: {list}",
+      "inspector": "Kiln의 아카이브 검사기를 사용할 수 없습니다",
+      "planWarning": "실행 계획 경고",
+      "baseTitle": "이번 실행의 기준이 되는 게임 파일",
+      "baseRestore": "정확히 이 파일로 돌아가려면 게임 데이터를 바꾸는 모드를 끄고 Kiln으로 게임을 한 번 시작하세요(로그, 엔진: 게임 데이터 복원).",
+      "baseVerify": "Steam이 배포하는 그대로의 게임 파일이 필요하면 Steam에서 게임 파일 무결성 확인을 사용하세요.",
+      "costTitle": "느린 시작",
+      "noteTitle": "참고",
+      "keybindsTitle": "키보드 단축키",
+      "keybinds": "{name}: 키보드 단축키가 Kiln 인터프리터에서 아직 작동하지 않습니다. 모드의 나머지 부분은 작동합니다."
+    },
+    "engineRow": {
+      "plugin": "Kiln 인터프리터 (kiln-sfi)",
+      "packages": "ShroudForge 모드",
+      "phase": {
+        "starting": "시작 중",
+        "running": "실행 중",
+        "ended": "종료됨",
+        "aside": "물러남",
+        "refused": "시작 안 됨",
+        "unknown": "알 수 없음"
+      },
+      "package": {
+        "running": "실행 중",
+        "dataApplied": "데이터 적용됨",
+        "off": "꺼짐",
+        "skipped": "건너뜀"
+      },
+      "stale": {
+        "older-start": "이 기록은 이전 시작의 것입니다. 최신 시작에서 인터프리터가 무엇을 했는지는 알 수 없습니다.",
+        "not-running": "기록에는 {phase}(으)로 되어 있지만 게임이 실행 중이 아닙니다. 그 시작은 마지막 기록 없이 끝났습니다(충돌했을 수 있습니다).",
+        "other-process": "이 기록은 다른 게임 프로세스의 것입니다. 이번 시작의 것이 아닙니다."
+      },
+      "previous": {
+        "incomplete": "이전 시작이 기록을 마치지 못하고 끝났습니다(충돌했을 수 있습니다).",
+        "suspect": "Kiln이 이전 시작이 남긴 것을 읽지 못했습니다."
+      },
+      "unreadable": "Kiln 인터프리터가 Kiln이 읽을 수 없는 기록을 남겼습니다: {error}"
+    },
+    "restoreBase": {
+      "title": "게임 데이터 복원",
+      "base": "Kiln은 이 게임 파일에서 시작했습니다: {label}.",
+      "how": "정확히 이 파일로 돌아가려면 게임 데이터를 바꾸는 모드를 끄고 Kiln으로 게임을 한 번 시작하세요. Kiln은 자신이 썼다고 증명할 수 있는 데이터만 되돌리며, 다른 로더의 데이터는 그대로 둡니다.",
+      "save": "세이브에 데이터를 저장하는 모드: 꺼져 있는 동안에는 월드를 저장하지 마세요.",
+      "vanilla": "이 파일이 반드시 Steam이 배포하는 그대로의 파일은 아닙니다. 그런 파일이 필요하면 Steam에서 게임 파일 무결성 확인을 사용하세요(게임 속성, 설치된 파일).",
+      "unknown": "Kiln은 어떤 게임 파일을 되돌릴지 알 수 없습니다: {reason}."
+    }
   }
 }
