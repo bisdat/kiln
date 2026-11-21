@@ -121,6 +121,8 @@ public sealed class ManifestTests
     [Theory]
     [InlineData("""{"id":"Bad Id","version":"1","apiVersion":"0.1","entryAssembly":"a.dll"}""", "id")]
     [InlineData("""{"id":"kiln","version":"1","apiVersion":"0.1","entryAssembly":"a.dll"}""", "reserved")]
+    [InlineData("""{"id":"native.tools","version":"1","apiVersion":"0.1","entryAssembly":"a.dll"}""", "\"native.\"")]
+    [InlineData("""{"id":"native.0123456789abcdef0123456789abcdef","version":"1","apiVersion":"0.1"}""", "reserved")]
     [InlineData("""{"id":"ok","version":"one","apiVersion":"0.1","entryAssembly":"a.dll"}""", "version")]
     [InlineData("""{"id":"ok","version":"1","apiVersion":"^^1","entryAssembly":"a.dll"}""", "apiVersion")]
     [InlineData("""{"id":"ok","version":"1","apiVersion":"0.1","entryAssembly":"../a.dll"}""", "entryAssembly")]

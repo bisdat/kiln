@@ -108,6 +108,11 @@ internal sealed unsafe class WorldStore
     }
 
     public string? WorldId { get; private set; }
+
+    /// <summary>A new world the game has loaded but not saved yet (no id until its first save; its mod data is kept in
+    /// memory and goes to the world's folder with that save): an id for this session that readers of "which world" use
+    /// until <see cref="AdoptWorld"/> gives the real one (Kiln.ModValues' revisions are scoped by it). Empty otherwise.</summary>
+    internal Guid ProvisionalWorld { get; private set; }
     public string? Root { get; private set; }
     public uint Generation { get; private set; }
     public DataMatch Match { get; private set; }
@@ -159,6 +164,7 @@ internal sealed unsafe class WorldStore
         {
             SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: new world (no file yet); mod data is kept in memory until the first save");
             _deferred = null;
+            if (WorldId == null && ProvisionalWorld == Guid.Empty) ProvisionalWorld = Guid.NewGuid();
             Entities.StartMatching();
             Instances.StartMatching();
             return;
@@ -192,6 +198,7 @@ internal sealed unsafe class WorldStore
         var root = SavesNative.GetPath(SavesNative.PathData);
         if (root == null) return;
         WorldId = id;
+        ProvisionalWorld = Guid.Empty;
         Root = Path.Combine(root, id);
         Directory.CreateDirectory(Path.Combine(Root, "manifests"));
         Directory.CreateDirectory(Path.Combine(Root, "blobs"));
@@ -212,6 +219,7 @@ internal sealed unsafe class WorldStore
         Writer.Release();  // the writer's pool task need not wait for the next world's jobs
         DetachAll();
         WorldId = null;
+        ProvisionalWorld = Guid.Empty;
         Root = null;
         Generation = 0;
         Match = DataMatch.None;

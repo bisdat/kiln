@@ -82,6 +82,13 @@ rules! {
     MATERIAL_POOL = "KL334", "material-pool", Error, "a building material pool, or a blueprint's materialPool, that kiln.worldtables refuses";
     SURFACE_TEXTURE = "KL333", "surface-texture", Error, "a building surface's PNG that kiln.surfaces refuses, or reads otherwise than it looks";
     RUN_BINDING = "KL340", "run-binding", Error, "an effect's run native with a parameter Blocks cannot bind, or a required one with nothing to bind in that effect";
+    MOD_VALUE_NUMBER = "KL350", "mod-value-number", Error, "a mod value's number (min, max, initial, a threshold) outside the 64-bit range";
+    MOD_VALUE_BOUNDS = "KL351", "mod-value-bounds", Error, "a mod value whose min is above its max, or whose initial is outside them";
+    MOD_VALUE_THRESHOLDS = "KL352", "mod-value-thresholds", Error, "experience thresholds that do not strictly increase";
+    MOD_VALUE_SIZE = "KL353", "mod-value-size", Error, "a mod value's label, number format or whole definition over its size limit";
+    MOD_VALUE_DUPLICATE = "KL354", "mod-value-duplicate", Error, "a mod value id defined in two of a mod's mod-values files";
+    MOD_VALUE_COUNT = "KL355", "mod-value-count", Error, "more than 128 mod values in one mod";
+    MOD_VALUE_CARRIED_MAX = "KL356", "mod-value-carried-max", Warning, "a carried mod value with no max: a player's own copy can raise it to the 64-bit limit";
 
     // KL4xx: references to the game's data (needs the game-data catalog)
     UNKNOWN_REF = "KL401", "unknown-reference", Warning, "a name, id or GUID the game (and the mods) do not have";
