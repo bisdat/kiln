@@ -171,4 +171,23 @@ mod tests {
         let newer = serde_json::json!({ "format": 3, "kind": "pack" }).to_string();
         assert_eq!(open(s.envelope(newer.as_bytes()).as_bytes(), std::slice::from_ref(&s.key)).unwrap_err().code, ErrorCode::Unsupported);
     }
+
+    #[test]
+    fn a_signed_index_with_a_bad_layer_file_or_a_huge_file_is_refused() {
+        // review: the layer's file.sha256 becomes a cache path; a file over Crucible's per-file limit could wrap a sum
+        let s = Signer::new(7);
+        let mut v: serde_json::Value = serde_json::from_slice(&index_json()).unwrap();
+        v["layer"] = serde_json::json!({ "id": "pack.ember-run", "version": "1.0.0", "path": "layer", "hash": format!("kdh1:{}", "c".repeat(64)),
+            "file": { "sha256": "d".repeat(64), "size": 10, "url": "https://cdn.frostdev.io/l/x.zip" } });
+        assert!(open(s.envelope(v.to_string().as_bytes()).as_bytes(), std::slice::from_ref(&s.key)).is_ok(), "a good layer opens");
+        let mut bad = v.clone();
+        bad["layer"]["file"]["sha256"] = "../../../../../home/u/.config/autostart/evil".into();
+        assert!(open(s.envelope(bad.to_string().as_bytes()).as_bytes(), std::slice::from_ref(&s.key)).is_err(), "a layer file that is no sha256");
+        let mut huge = v.clone();
+        huge["mods"][0]["file"]["size"] = (u64::MAX / 2 + 1).into();
+        assert!(open(s.envelope(huge.to_string().as_bytes()).as_bytes(), std::slice::from_ref(&s.key)).is_err(), "a mod file over the per-file limit");
+        let mut huge_layer = v.clone();
+        huge_layer["layer"]["file"]["size"] = (u64::MAX / 2 + 1).into();
+        assert!(open(s.envelope(huge_layer.to_string().as_bytes()).as_bytes(), std::slice::from_ref(&s.key)).is_err(), "a layer file over the per-file limit");
+    }
 }

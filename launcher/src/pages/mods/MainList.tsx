@@ -24,7 +24,7 @@ import { MOD_FILE_FILTERS, modFileWords } from "../../shell/modFiles";
 import { bulkPlan, filterRows, kindsOf, type ModRow } from "../../shell/mods";
 import { notifyAdd } from "../../shell/notices";
 import { checkNow, noticeable, statusOf, UpdateBadge, UpdateSourceModal, useModUpdates } from "../../shell/modUpdates";
-import { notRemovableText, removable, removeMany, removeMod, useRemoveCheck, useRemoveMany, withoutRows, type RemoveTarget } from "../../shell/removeMod";
+import { notRemovableText, removable, removeMany, removeMod, settingsNotes, useRemoveCheck, useRemoveMany, wholeMod, withoutRows, type RemoveTarget } from "../../shell/removeMod";
 import { canReplaceDll, replacementLabel } from "../../shell/replaceDll";
 import { otherVersions, rollBack, rollbackTargets } from "../../shell/rollback";
 import { NONE, all as selectAll, ownerOf, pick as pickSelected, pruneSelection, range as selectRange, setSelection, toggle as toggleSelected, useOwnedSelection } from "../../shell/selection";
@@ -69,7 +69,7 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
   const replaceDll = async (r: ModRow) => {
     if (!pid || !r.kind || !r.entry) return;
     try {
-      const paths = await pickPaths({ multiple: false, filters: [{ name: t("mods.list.windowsDll"), extensions: ["dll"] }], title: t("mods.list.replaceDllTitle") });
+      const paths = await pickPaths({ multiple: false, filters: [{ name: t("mods.list.windowsDll"), extensions: ["dll"] }], title: t("mods.list.replaceDllTitle"), kind: "replaceDll" });
       if (!paths?.length || !(await mods.edit.flush())) return;
       const entry = { kind: r.kind, id: r.id, version: r.entry.version, hash: r.entry.hash };
       const run = async (confirmed: boolean) => {
@@ -170,6 +170,9 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
   const skipRemove = picked.length - toRemove.length;
   const [removing, setRemoving] = useState<ModRow[] | null>(null);
   const check2 = useRemoveMany(removing ?? [], pid, !!removing);
+  // "Remove its settings too": unchecked each time the dialog opens (the settings stay by default)
+  const [rmSettings, setRmSettings] = useState(false);
+  useEffect(() => { setRmSettings(false); }, [rm, removing]);
   // Profile-local controls end at the identity change, never at a later data refresh.
   useLayoutEffect(() => {
     setText(params.get("filter") ?? ""); setKind("");
@@ -188,7 +191,7 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
 
   const pick = async () => {
     try {
-      const paths = await pickPaths({ multiple: true, filters: MOD_FILE_FILTERS, title: t("mods.list.addMods") });
+      const paths = await pickPaths({ multiple: true, filters: MOD_FILE_FILTERS, title: t("mods.list.addMods"), kind: "addMods" });
       if (paths?.length) await addMods(paths, game);
     } catch (e) { toast.error(e, t("mods.list.openFilesFailed")); }
   };
@@ -334,6 +337,12 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
                     {r.lib && <UpdateBadge status={statusOf(updates.data, r.kind, r.id)} />}
                     {r.found && <span className="k-mod-where">{t("mods.order.gameFolder")}</span>}
                     {r.note && <span className={`k-tone-${r.note.tone}`} title={r.note.title}>{r.note.text}</span>}
+                    {r.note?.link && (
+                      <button type="button" className="k-link" title={r.note.link.title}
+                        onClick={() => { const url = r.note?.link?.url; if (url) api.appOpenUrl(url).catch((e) => toast.error(e)); }}>
+                        {r.note.link.label}
+                      </button>
+                    )}
                     {r.changed && (
                       <button type="button" className="k-link" disabled={!!busy || running} onClick={() => void takeChanged(r)}
                         aria-label={t("mods.list.useChangedOf", { action: changedFilesLabel(), name: r.name })} title={t("mods.list.useChangedHint")}>
@@ -377,27 +386,46 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
                 );
               })}
             </ul>
+            <SettingsCheck many checked={rmSettings} onChange={setRmSettings} />
           </>
         )}
         onConfirm={async () => {
           const rows = removing!;
           try {
-            const r = await removeMany(qc, rows, check2.users, async () => { mods.edit.update((p) => withoutRows(p, rows)); return mods.edit.flush(); });
+            const r = await removeMany(qc, rows, check2.users, async () => { mods.edit.update((p) => withoutRows(p, rows)); return mods.edit.flush(); }, rmSettings);
             clearSel();
+            if (r.settingsNotes.length) toast.info(t("shell.removeMod.settingsLeft"), r.settingsNotes.join(" "), { ms: 0 });
             if (!r.left.length) toast.ok(t("mods.list.removedMany", { count: r.removed.length }));
             else toast.info(r.removed.length ? t("mods.list.removedSome", { removed: r.removed.length, left: r.left.length }) : t("mods.list.nothingRemoved"),
               t("mods.list.leftInLibrary", { count: r.left.length, list: r.left.map((l) => t("mods.list.leftItem", { name: l.name, why: l.why })).join(" ") }), { ms: 0 });
           } catch (e) { toast.error(e); throw e; }
         }} />
       <ConfirmDanger open={!!rm} onClose={() => setRm(null)} relaxable word={rm?.row.id ?? ""} action={t("common.remove")}
-        title={rm ? (rm.version ? t("mods.list.removeVersionTitle", { name: rm.row.name, version: rm.version }) : t("mods.list.removeTitle", { name: rm.row.name })) : ""} message={check.message} disabled={!check.ready || check.users.isFetching}
+        title={rm ? (rm.version ? t("mods.list.removeVersionTitle", { name: rm.row.name, version: rm.version }) : t("mods.list.removeTitle", { name: rm.row.name })) : ""} disabled={!check.ready || check.users.isFetching}
+        message={<>{check.message}{wholeMod(rm) && <SettingsCheck checked={rmSettings} onChange={setRmSettings} />}</>}
         onConfirm={async () => {
           const target = rm!;
           try {
-            await removeMod(qc, target, check.users.data, async () => { mods.drop(target.row); return mods.edit.flush(); });
+            const s = await removeMod(qc, target, check.users.data, async () => { mods.drop(target.row); return mods.edit.flush(); }, rmSettings);
             toast.ok(target.version ? t("mods.list.removedVersion", { name: target.row.name, version: target.version }) : t("mods.list.removed", { name: target.row.name }));
+            const notes = settingsNotes(s);
+            if (notes) toast.info(t("shell.removeMod.settingsLeft"), notes, { ms: 0 });
           } catch (e) { toast.error(e); void check.users.refetch(); throw e; }
         }} />
     </div>
+  );
+}
+
+/** The remove dialog's "Remove its settings too" (unchecked: the settings stay, and come back with the mod). */
+function SettingsCheck({ checked, onChange, many }: { checked: boolean; onChange: (on: boolean) => void; many?: boolean }) {
+  const t = useT();
+  return (
+    <label className="k-remove-settings">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span>
+        {t(many ? "shell.removeMod.settingsTooMany" : "shell.removeMod.settingsToo")}
+        <small>{t(many ? "shell.removeMod.settingsTooManyHint" : "shell.removeMod.settingsTooHint")}</small>
+      </span>
+    </label>
   );
 }

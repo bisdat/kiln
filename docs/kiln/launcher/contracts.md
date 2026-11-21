@@ -136,7 +136,7 @@ Root: `$KILN_DATA_DIR`, else the folder the pointer `data-folder.json` in the de
 | `installs/<installId>.notices-seen.lock` | (dev.27) an empty file two launchers lock while one of them reads, changes and writes the memory above, so neither drops what the other remembered (`kiln_manage::notices::mark_seen`). Never read; safe to delete while no launcher runs |
 | `runtime/kiln-runtime-<version>.zip` | runtime bundles (import, rollback) |
 | `schema-cache/<modid>/<version>+<hash8>/<file>.json` | config schema snapshots cached per mod version |
-| `backups/` | `saves/<gameId>/` (save backups without a profile), `install/<installId>/` (mirror of install backups), `profiles/` (deleted profiles) |
+| `backups/` | `saves/<gameId>/` (save backups without a profile), `install/<installId>/` (mirror of install backups), `profiles/` (deleted profiles), `mod-settings/<kind>-<id>-<ts>/` (a removed mod's settings, "Remove its settings too": the files as they were laid out under `games/<installId>/` and `profiles/<pid>/config/`, and `removed.json` = `{format, kind, id, removed, items: [{from, backup, entry?}]}`) |
 | `logs/launcher.log` | the launcher's own log |
 | `logs/game-start-<installId>.log` | (dev.29.17) the umu-run, Proton or Wine output of the last direct start of that install (written again at every one; the support report carries it) |
 | `state/software-render.json` | Linux: there, a start without an override draws without the GPU (`{format, why, at, version}`; written by the launcher when its page did not start, or by Settings; [app.md](app.md), "Drawing without the GPU") |
@@ -1350,6 +1350,8 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | app | `app_started` | - | null (the page's first screen is up; once per start; ends the Linux render watchdog) |
 | app | `app_render_set` | software: boolean | `RenderInfo` (sets or clears `state/software-render.json` for the next start; `unsupported` off Linux) |
 | app | `app_sandbox_set` | on: boolean | `SandboxInfo` (dev.29.18; on removes `state/webkit-sandbox.json`, off writes it, for the next start; `unsupported` off Linux) |
+| app | `app_dialog_default` | kind: string, fileName: string \| null, preferred: string \| null | `string \| null` (dev.30; the folder a file dialog opens in, or `<folder>/<fileName>`: `preferred` when it exists, else the kind's last folder, else Downloads, else home; never the working directory, `$APPDIR` or an AppImage mount; src-tauri/src/dialog_folder.rs) |
+| app | `app_dialog_remember` | kind: string, path: string, folder: boolean | `null` (dev.30; keeps the folder the dialog ended in, `path` or its parent, in settings.json `dialogFolders`) |
 | app | `app_desktop_set` | on: boolean | `DesktopInfo` (on: writes `kiln-launcher.desktop` and the icons, replacing a file of that name Kiln did not write; off: removes Kiln's, and `state/desktop-entry.json` keeps it off; `unsupported` outside a Linux AppImage) |
 | app | `app_settings_get` | - | `LauncherSettings` |
 | app | `app_settings_set` | settings: LauncherSettings | `LauncherSettings` |
@@ -1391,7 +1393,8 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | library | `library_detect` | path: string | `Detected` |
 | library | `library_import` | paths: string[] | `TaskId` -> `ImportReport` |
 | library | `library_add_to_profile` | gameId, profileId, entries: LibraryRef[] | `AddReport` (the entries into the profile the player picked after an add said `libraryOnly`; Undo is `profile_revert`) |
-| library | `library_remove` | entry: LibraryRef, force: boolean, shown?: string[] \| null | null (`game_running` while a game runs, or a server whose `profile.json` points into the library, even with `force`; `conflict` while `library_users` lists it, unless `force`. With `shown` (the `library_users` answer a dialog named): `conflict` when it lists anything not in `shown`, whatever `force` says) |
+| library | `library_remove` | entry: LibraryRef, force: boolean, shown?: string[] \| null, settings?: boolean | `SettingsRemoval \| null` (null unless `settings` (dev.30, "Remove its settings too") and this was the mod's last version: then `{removed: string[], backup: string \| null, notes: string[]}`, what `kiln_manage::mod_settings` took out after its copy into `backups/mod-settings/`; a failure there is a note, the version is removed all the same. `game_running` while a game runs, or a server whose `profile.json` points into the library, even with `force`; `conflict` while `library_users` lists it, unless `force`. With `shown` (the `library_users` answer a dialog named): `conflict` when it lists anything not in `shown`, whatever `force` says) |
+| library | `library_remove_settings` | kind: ModKind, id: string | `SettingsRemoval` (dev.30: a removed mod's settings, for a mod whose files were gone from the Library already; `conflict` while the Library holds a version of it, `game_running` while a known game runs) |
 | library | `library_remove_many` | entries: LibraryRef[], force: boolean | `RemoveReport` {removed: LibraryRef[], failed: {entry: LibraryRef, error: KilnError}[]} (Clean up: one look at the running processes and the profiles for the batch; `game_running` for the whole batch, nothing removed, as `library_remove`; otherwise each version not removed is in `failed`) |
 | library | `library_unused` | | `LibraryRef[]` (in no profile, no known game's `profile.json`, and no `profile.once.json` while the game's `play-once.ini` asks for it; never a version kept for a roll back (dev.29): it is removed on its own, `library_remove`) |
 | library | `library_users` | entry: LibraryRef | `string[]` (profile ids, then `<profile> (active in <game folder>)` / `(play-once in <game folder>)`: what `library_remove` refuses over without `force`) |
@@ -1641,6 +1644,10 @@ line, the last one wins, else `KILN_LAUNCHER_UI=deck|desktop`). The UI: `forced`
 | pack | `pack_diff` | oldPath, newPath | `PackDiff` |
 | pack | `pack_secret_scan` | file, text | string[] |
 | pack | `pack_peek_format` | path | 1 (server modpack) \| 2 (Crucible pack) |
+| pack | `pack_local_files` | profileId | `LocalFile[]` `{path, text}` (the player layer's data files) |
+| pack | `pack_local_write` | profileId, path (`content/<name>.json`), text \| null (removes) | null |
+| pack | `pack_local_save` | profileId | `Profile` (the player layer into the Library, last; out when empty) |
+| pack | `pack_check` | path | `CheckReport` (the pack analysis of a file; the preview shows it) |
 | crucible | `crucible_status` | - | `{enabled, dev, api, signedIn, account: {id, name} \| null}` (enabled false: no Crucible surface) |
 | crucible | `crucible_open` | gameId?, target (code, share link, pack link, kiln:// link, version id) | `crucible::Preview`; a pack still uploading: `busy` with `{uploading: {version, progress}, pack}` |
 | crucible | `crucible_install` | gameId?, request: {target (version id), consent, trustAlways?, optional?, name?, play?} | TaskId -> `crucible::InstallResult` {profile, instance, imported, overrides, previous, downloaded} |
@@ -1652,6 +1659,29 @@ line, the last one wins, else `KILN_LAUNCHER_UI=deck|desktop`). The UI: `forced`
 | crucible | `crucible_trust` | - | `Trust[]` {id, name, since} |
 | crucible | `crucible_trust_set` | id, name, trusted | null |
 | crucible | `crucible_links` | - | string[] (kiln:// links that arrived; drained) |
+| crucible | `crucible_resume` | - | `{firstStart, code, packWaiting}` (asked once at start: come back after installing Kiln; only `packWaiting` lets the start read the clipboard) |
+| crucible | `crucible_clipboard` | - | `string \| null`: the clipboard's text, read by the backend (arboard; never `navigator.clipboard`, which makes WebView2 ask the player), only when it may be a Crucible code or link (Got a code?, its Paste, a waiting pack); never logged |
+| studio | `studio_list` | - | `StudioSummary[]` ([pack-studio.md](pack-studio.md)) |
+| studio | `studio_create` | request: {name, from?, id?} | `Studio` {dir, source, mods, credits, profileName, layerFiles} |
+| studio | `studio_get` / `studio_delete` | packId (, gameId? for delete: a loaded test instance goes back to the pack's profile) | `Studio` / null |
+| studio | `studio_save` | packId, source: `PackSource` | `Studio` |
+| studio | `studio_credits_set` | packId, credits: {id: {author, source, match?}} | `Studio` |
+| studio | `studio_capture` | packId, gameId? | `CaptureFile[]` {path, mod?, mode, defaults, keys: {key, value, default?, chosen, personal, secret?}[], whole, side, size, refused?} |
+| studio | `studio_capture_set` | packId, choices: {path, side, keys, whole?}[] | `Studio` |
+| studio | `studio_order` | packId | `StudioOrder` {kiln: {id, name, loads, reason?, layer}[], late, warnings} |
+| studio | `studio_layer_files` / `studio_layer_read` | packId (, path) | `LayerFile[]` / string |
+| studio | `studio_layer_write` / `studio_layer_delete` / `studio_layer_set` / `studio_layer_lint` | packId, path, text / path / section, selector, field, value | `LintReport` of the layer |
+| studio | `studio_pick` | packId, section, query, limit? | `PickHit[]` {section, name, id?, displayName?, from?} |
+| studio | `studio_fields` | section | catalog `FieldInfo[]` |
+| studio | `studio_categories` | - | `ItemCategory[]` {id, name?, items: {name, displayName?, hidden?}[], recipes: {name, displayName?}[]}: the catalog's recipe input categories, their items' display names and the game's recipes that take each (the recipe editor's "Any of" input); empty without a catalog |
+| studio | `studio_analyze` | packId | TaskId -> `CheckReport` (modpack::check) |
+| studio | `studio_test` | packId, gameId? | TaskId -> `pack::InstallResult` ("<name> (test)") |
+| studio | `studio_test_report` / `studio_test_end` | packId (, gameId?) | `TestReport` {profile?, ran, conflicts, problems} / null |
+| studio | `studio_build` | packId, outDir (absolute) | TaskId -> `BuiltPack` |
+| studio | `studio_publish_check` | packId, request: `PublishRequest` | string[] (what is missing; sends nothing) |
+| studio | `studio_publish` | packId, request: {version, changes?, visibility, attest, gameBuilds?, fresh?}, gameId? | TaskId -> `PublishResult` {pack, version, files, uploaded, skipped, public, needs, file}; signed out: `auth_failed`; a pack gone on Crucible: `refused` with detail.gone |
+| studio | `studio_set_visibility` | packId, visibility, attest | `{pack, public, needs}` (Make public / link only, no new version) |
+| studio | `studio_server_pack` | packId, version, serverId | TaskId -> `ServerInstallResult` (the version's server part + the player modpack) |
 
 The community commands ([discord.md](discord.md)) refuse every request that would leave the PC while
 `community.json`'s `shown` is false (`refused`, `detail.kind` "hidden"); their errors carry `detail.kind` (`offline`,
@@ -1793,6 +1823,8 @@ default; the launcher uses `full`. Builds for Linux and `x86_64-pc-windows-msvc`
 | `gameart` (feature `gameart`) | `extract_editor`, `extract_map`, `status`, `game_build`, `build_of`, `read_source`, `write_source`, `recipe_of`, `GameData::open`; `SourceInfo`, `GameSource`, `ArtStatus`, `GameBuild`, `EditorOptions`, `MapOptions`, `LayoutSource`; `kfc::Kfc`, `refl::{PeFile, TypeDb}`, `res`, `texture`, `image`, `work` ([gameart.md](gameart.md)) |
 | `modpack` | `inspect`, `download`, `verify`, `extract`, `check_against`, `install`, `build`, `publish`, `publish_state`, `client_mods`, `required`, `server_identity`; `ModpackManifest`, `ModpackMod`, `ModpackServer`, `ModpackSource`, `ModpackPreview`, `ModpackInstallRequest`, `ModpackInstallResult`, `BuiltModpack`, `ModpackPublishState`, `ClientMod` |
 | `modpack::pack` | Crucible packs ([crucible.md](crucible.md)): `build`, `read`, `verify`, `peek_format`, `inspect`, `install`, `instance`, `instances`, `plan_update`, `update`, `undo`, `uninstall`, `diff`, `install_server`, `check_index`, `secret_findings`, `override_path_ok`; `PackIndex`, `PackMod`, `PackLayer`, `PackOverride`, `BuildRequest`, `BuiltPack`, `PackPreview`, `Instance`, `InstallRequest`, `InstallResult`, `UpdatePlan`, `UpdateRequest`, `UpdateResult`, `PackDiff`, `ServerInstallRequest`, `ServerInstallResult` |
+| `modpack::studio` | Pack Studio's pack source ([pack-studio.md](pack-studio.md)): `init`, `create`, `open`, `list`, `save`, `delete`, `set_credits`, `public_needs`, `build_request`, `build`, `analyze`, `keep_version`, `version_file`, `record_published`, `capture`, `set_capture`, `layer_files`, `layer_read`, `layer_write`, `layer_delete`, `layer_set`, `layer_lint`, `pick`, `fields`, `order`, `test`, `test_report`, `test_end`; `PackSource`, `Studio`, `StudioMod`, `NewPack`, `CaptureFile`, `CaptureChoice`, `StudioOrder`, `PickHit`, `TestReport`, `Published` |
+| `crucible::publish` | `publish(&DataDirs, &Crucible, &Path, &PublishRequest, Option<&GameInstall>, &mut dyn Progress) -> Result<PublishResult>`, `set_visibility`, `precheck`, `pack_state` |
 | `modpack::merge` | the three-way merge of config overrides: `leaves`, `value_at`, `apply`, `three_way`; `OverrideMode`, `Pick`, `KeyConflict` |
 | `lint` | `lint_paths`, `lint_text`, `lint_profile`, `lint_library_entry`, `rules`, `schema_for`, `docs::{idrefs, schema_markdown}`; `LintOptions`, `LintReport`, `Diagnostic`, `Severity`, `Span`, `Fix`, `TextEdit`, `Related` |
 | `vendor` (`manifest agreements store download`; 0.2.0-dev.29) | `builtin()`, `manifest::{parse, check_url, license_text, license_sha256, vendor_orgs, redirect_hosts, file_name_ok, BUILTIN, LICENSE_TEXTS, HOSTS, NOT_PINNED, MAX_FILE, VendorManifest, Component, License, VendorFile}`, `agreements::{Agreements::{load, agreed, agreed_at}, record, path, Agreement}`, `store::{Store::{at, for_game, root, folder, rel, lock, receipts, problems, partial, status, component_status, remove}, version_cmp, Receipt, ReceiptFile, ReceiptLicense, VendorState, ComponentStatus, LicenseInfo, FileInfo, Installed, RemoveReport, DIR, RECEIPT, PART_SUFFIX, LOCK}`, `download::{download, policy, user_agent, DownloadReport}` (section 5.15) |

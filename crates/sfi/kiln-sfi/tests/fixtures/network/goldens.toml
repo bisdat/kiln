@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT
+# raw.lua: captured with ShroudForge's own mod runtime (a local differential test, not published),
+# 2026-11-20, headless Wine, fixture dir holding only raw.lua. Both runs: 1 fixture, 39
+# records, PASS; the shared runner counterpart (out-dir/core/) was byte-identical, and the two
+# pins' transcripts are byte-identical to each other. The test's state is pregame/server with
+# readable default settings, so every admitted-type call answers the phase denial. No transcript
+# edits or normalization outside the shared v2 prelude.
+# mod_messages.lua: captured the same way, 2026-11-20,
+# fixture dir holding only mod_messages.lua. Both runs: 1 fixture,
+# 39 records, PASS; the shared runner counterpart (out-dir/core/) was byte-identical, and the two
+# pins' transcripts are byte-identical to each other. Same pregame/server state as raw.lua: every
+# admitted-type call answers the phase denial, so peer, target length and limit are never reached
+# there. No transcript edits or normalization outside the shared v2 prelude.
+[goldens]
+"raw.sf179.golden.json" = "oracle sf-1.7.9 d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8; raw.lua; sha256=a521a6fa7ccc6e2b94c7f4f484d57df0bcfc5216f0940950a69392bbcaaf8f78"
+"raw.sf180.golden.json" = "oracle sf-1.8.0 38ef448dc5d4fc267b5f0928502a864a6b078865; raw.lua; sha256=a521a6fa7ccc6e2b94c7f4f484d57df0bcfc5216f0940950a69392bbcaaf8f78"
+"mod_messages.sf179.golden.json" = "oracle sf-1.7.9 d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8; mod_messages.lua; sha256=c0b62eb833091f61546d34ac62f59be55308eebfd66769f0473813e443b78636"
+"mod_messages.sf180.golden.json" = "oracle sf-1.8.0 38ef448dc5d4fc267b5f0928502a864a6b078865; mod_messages.lua; sha256=c0b62eb833091f61546d34ac62f59be55308eebfd66769f0473813e443b78636"
+# peers.lua: captured the same way, 2026-11-20, fixture
+# dir holding only peers.lua. Both runs: 1 fixture, 3 records, PASS; the shared runner counterpart (out-dir/core/) was
+# byte-identical, and the two pins' transcripts are byte-identical to each other (the pregame denial). No edits.
+"peers.sf179.golden.json" = "oracle sf-1.7.9 d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8; peers.lua; sha256=6fc053d1076b8bea2e816718d479ed50a2f845b462ed689d23f3e34a705a80f5"
+"peers.sf180.golden.json" = "oracle sf-1.8.0 38ef448dc5d4fc267b5f0928502a864a6b078865; peers.lua; sha256=6fc053d1076b8bea2e816718d479ed50a2f845b462ed689d23f3e34a705a80f5"

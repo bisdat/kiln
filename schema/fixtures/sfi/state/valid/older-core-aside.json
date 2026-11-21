@@ -1,0 +1,34 @@
+{
+  "format": 1,
+  "writer": "kiln-sfi",
+  "launch": {
+    "launchId": null,
+    "planHash": null,
+    "pid": 4242,
+    "processStartMs": 1763520000000,
+    "side": "client",
+    "profile": null,
+    "backend": {
+      "selected": "none",
+      "source": "absent",
+      "reasonCode": "no-kiln-launch",
+      "text": "this core has no kiln.launch table"
+    },
+    "frozenAtMs": null
+  },
+  "phase": "aside",
+  "reason": {
+    "code": "no-kiln-launch",
+    "text": "kiln-sfi does nothing without a frozen selection."
+  },
+  "incomplete": false,
+  "previousStart": {
+    "disposition": "none",
+    "launchId": null,
+    "pid": null
+  },
+  "startedMs": 1763520000200,
+  "updatedMs": 1763520000300,
+  "warningRevision": 0,
+  "packages": []
+}

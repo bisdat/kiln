@@ -17,9 +17,12 @@ public sealed class CoverageTests
         var all = Directory.GetFiles(headers, "*.h", SearchOption.AllDirectories).SelectMany(f => define.Matches(File.ReadAllText(f)).Select(m => m.Groups[1].Value))
             .Distinct().Order(StringComparer.Ordinal).ToList();
         // Kiln-internal tables ("kiln.internal.*") are build-stamped and never reachable by mods: the kit must not know
-        // them. At least one is seen and skipped, so this filter cannot silently hide a renamed public table.
+        // them. At least one is seen and skipped, so this filter cannot silently hide a renamed public table. The tables
+        // between Kiln's own DLLs that the SDK leaves out (kiln.launch, kiln.eml.*: Kiln.Sdk.csproj) are internal too.
         Assert.Contains(all, n => n.StartsWith("kiln.internal.", StringComparison.Ordinal));
-        var names = all.Where(n => !n.StartsWith("kiln.internal.", StringComparison.Ordinal)).ToList();
+        static bool Internal(string n) => n.StartsWith("kiln.internal.", StringComparison.Ordinal) ||
+            n.StartsWith("kiln.eml.", StringComparison.Ordinal) || n == "kiln.launch";
+        var names = all.Where(n => !Internal(n)).ToList();
         Assert.Equal(names, ServiceNames.All.Order(StringComparer.Ordinal));
     }
 

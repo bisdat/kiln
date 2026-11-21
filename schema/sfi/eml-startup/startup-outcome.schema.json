@@ -1,0 +1,753 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-startup/startup-outcome.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "description": "kiln.eml.startup v1 outcome: kiln-eml's startup outcome for this launch, read by kiln-sfi after kiln-eml's startup barrier. A typed serializer writes the fields in this order. Rows are the plan-listed packages only, one per package; their data values are sfi-state.schema.json's package data values. launchId, planId and planSha256 name the same launch as the key and the identity outcome() fills; with a grant, archiveSha256 is that identity's archive_sha256. Writers clamp free text to its maxLength at a character boundary and keep the first entries of a capped list of causes (chain, warnings); rows and ids are never clamped (their bounds cover the plan reader's).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "launchId",
+    "planId",
+    "planSha256",
+    "dialect",
+    "state",
+    "grant",
+    "receiptSha256",
+    "archiveSha256",
+    "baseOrigin",
+    "native",
+    "attempt",
+    "error",
+    "retryError",
+    "packages",
+    "warnings"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "launchId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$",
+      "description": "kiln.launch's launch id: its u64 as 16 lower-case hex digits (sfi-state.schema.json's launchId)."
+    },
+    "planId": {
+      "$ref": "#/$defs/uuid"
+    },
+    "planSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "dialect": {
+      "enum": [
+        "shroudforge",
+        "eml",
+        "none"
+      ],
+      "description": "The startup pass that ran: the plan's ShroudForge pass, the EML pass, or none (only unlisted EML contributors, so no rows)."
+    },
+    "state": {
+      "enum": [
+        "committed",
+        "cached",
+        "unchanged",
+        "restored",
+        "refused",
+        "failed"
+      ],
+      "description": "committed: one publish this start. cached: the startup cache vouched for the live generation. unchanged: nothing to change and the live generation is proven. restored: the verified base after no plan contribution was committed. refused: the witness or admission refused the pass. failed: preparation or publication failed."
+    },
+    "grant": {
+      "type": "boolean",
+      "description": "true exactly when the live generation is proven (committed, cached, unchanged, restored); outcome() then returns its PUBLISHED identity."
+    },
+    "receiptSha256": {
+      "description": "The receipt of the proven live generation, or null (no grant, a verified restore, or a live generation without a receipt).",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "archiveSha256": {
+      "description": "With a grant: the PUBLISHED identity's archive_sha256 (lower-case hex). Without a grant: null.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "baseOrigin": {
+      "description": "The base origin recorded with the receipt; null is unrecorded. Tokens and labels are inspection.rs ORIGINS.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "token",
+            "label"
+          ],
+          "properties": {
+            "token": {
+              "const": "first-managed-unclassified"
+            },
+            "label": {
+              "const": "unclassified: game files as found when Kiln first managed this install"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "token",
+            "label"
+          ],
+          "properties": {
+            "token": {
+              "const": "rebaselined-unclassified"
+            },
+            "label": {
+              "const": "unclassified: game files as found when Kiln took a new baseline after the game changed"
+            }
+          }
+        }
+      ]
+    },
+    "native": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "received",
+        "coherent"
+      ],
+      "description": "What kiln-eml knew of the native side: a terminal arrived, and the witnessed input was unchanged after it.",
+      "properties": {
+        "received": {
+          "type": "boolean"
+        },
+        "coherent": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "coherent": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "text"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "text"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "received": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "coherent": {
+                "const": false
+              }
+            }
+          }
+        }
+      ]
+    },
+    "attempt": {
+      "enum": [
+        "first",
+        "retry",
+        "none"
+      ]
+    },
+    "error": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536,
+          "description": "The first attempt's error, whole (the fork's text, with its traceback), clamped to maxLength."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "retryError": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536,
+          "description": "The retry's error, whole, clamped to maxLength."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "packages": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/row"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "text"
+        ],
+        "properties": {
+          "code": {
+            "$ref": "#/$defs/code"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "enum": [
+              "committed",
+              "cached",
+              "unchanged",
+              "restored"
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "grant": {
+            "const": true
+          },
+          "archiveSha256": {
+            "$ref": "#/$defs/sha256"
+          },
+          "packages": {
+            "items": {
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "data": {
+                        "const": "failed"
+                      }
+                    },
+                    "required": [
+                      "data"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "archivePresent": {
+                        "const": false
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "code": {
+                        "const": "dependency-skipped"
+                      }
+                    },
+                    "required": [
+                      "code"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "archivePresent": {
+                        "const": false
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "grant": {
+            "const": false
+          },
+          "receiptSha256": {
+            "type": "null"
+          },
+          "archiveSha256": {
+            "type": "null"
+          },
+          "packages": {
+            "items": {
+              "properties": {
+                "archivePresent": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "restored"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "receiptSha256": {
+            "type": "null"
+          },
+          "baseOrigin": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "attempt": {
+            "const": "retry"
+          }
+        },
+        "required": [
+          "attempt"
+        ]
+      },
+      "then": {
+        "properties": {
+          "dialect": {
+            "const": "shroudforge"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "attempt": {
+            "const": "first"
+          }
+        },
+        "required": [
+          "attempt"
+        ]
+      },
+      "then": {
+        "properties": {
+          "retryError": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "attempt": {
+            "const": "none"
+          }
+        },
+        "required": [
+          "attempt"
+        ]
+      },
+      "then": {
+        "properties": {
+          "error": {
+            "type": "null"
+          },
+          "retryError": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "dialect": {
+            "const": "none"
+          }
+        },
+        "required": [
+          "dialect"
+        ]
+      },
+      "then": {
+        "properties": {
+          "packages": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "dialect": {
+            "const": "shroudforge"
+          }
+        },
+        "required": [
+          "dialect"
+        ]
+      },
+      "then": {
+        "properties": {
+          "packages": {
+            "items": {
+              "properties": {
+                "pass": {
+                  "const": "shroudforge"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "dialect": {
+            "const": "eml"
+          }
+        },
+        "required": [
+          "dialect"
+        ]
+      },
+      "then": {
+        "properties": {
+          "packages": {
+            "items": {
+              "properties": {
+                "pass": {
+                  "const": "eml"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sfId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,80}$",
+      "description": "A ShroudForge identifier, as sfi-state.schema.json's sfId."
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$",
+      "description": "A stable machine word (kebab-case), as sfi-state.schema.json's code."
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "The launch plan's plan_id, canonical lower-case UUID text."
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Lower-case hex SHA-256."
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "pass",
+        "data",
+        "archivePresent",
+        "chain"
+      ],
+      "dependentRequired": {
+        "code": [
+          "text"
+        ],
+        "text": [
+          "code"
+        ]
+      },
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/sfId"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "pass": {
+          "enum": [
+            "shroudforge",
+            "eml"
+          ]
+        },
+        "data": {
+          "enum": [
+            "committed",
+            "cached-verified",
+            "failed",
+            "excluded"
+          ],
+          "description": "sfi-state.schema.json package data values."
+        },
+        "archivePresent": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Its data is in the live generation: true, false (proven absent), or null (unknown). Without a grant every row is null; with a grant failed and dependency-skipped rows are false."
+        },
+        "code": {
+          "$ref": "#/$defs/code",
+          "description": "startup-failed, dependency-skipped, startup-retry-failed, native-refused (a package the native terminal withdrew; text and chain are the terminal's), package-changed, plan-stale, startup-input-changed, backend-unavailable, native-terminal-missing, or the witness refusal's own code. After a failed retry every row of the pass is excluded with startup-retry-failed, the first attempt's failing package too."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "chain": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/sfId"
+          },
+          "description": "The cause chain, nearest first as sfi-state's skip chain and the native terminal's: the dependency this package needed first, the failed package last; empty for the package's own fault; never the row's own id. A longer chain keeps its first 64 entries."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "data": {
+                "enum": [
+                  "committed",
+                  "cached-verified"
+                ]
+              }
+            },
+            "required": [
+              "data"
+            ]
+          },
+          "then": {
+            "properties": {
+              "archivePresent": {
+                "const": true
+              },
+              "chain": {
+                "maxItems": 0
+              }
+            },
+            "not": {
+              "required": [
+                "code"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "data": {
+                "const": "failed"
+              }
+            },
+            "required": [
+              "data"
+            ]
+          },
+          "then": {
+            "required": [
+              "code"
+            ],
+            "properties": {
+              "code": {
+                "const": "startup-failed"
+              },
+              "archivePresent": {
+                "enum": [
+                  false,
+                  null
+                ]
+              },
+              "chain": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "data": {
+                "const": "excluded"
+              }
+            },
+            "required": [
+              "data"
+            ]
+          },
+          "then": {
+            "required": [
+              "code"
+            ],
+            "properties": {
+              "archivePresent": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "not": {
+                  "const": true
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "dependency-skipped"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "const": "excluded"
+              },
+              "archivePresent": {
+                "enum": [
+                  false,
+                  null
+                ]
+              },
+              "chain": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "startup-retry-failed"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "const": "excluded"
+              },
+              "chain": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "startup-failed"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "const": "failed"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

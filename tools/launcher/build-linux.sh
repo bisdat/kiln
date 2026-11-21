@@ -6,8 +6,8 @@
 # --version: the launcher's version (a release: tools/release/version.sh); default the crate's (VERSION).
 # --features: cargo features (QA builds: dev-eval, update-test-feeds). --config: more Tauri config to merge, in order.
 # --nexus: the Nexus Mods build: no self-update at all (cargo --no-default-features drops the self-update feature and
-#   tauri-plugin-updater; src-tauri/tauri.nexus.conf.json drops the updater key from the config). Output in
-#   bundles/linux-nexus/. docs/kiln/launcher/releasing.md, "The two builds".
+#   tauri-plugin-updater, and every other default feature is turned back on; src-tauri/tauri.nexus.conf.json drops the
+#   updater key from the config). Output in bundles/linux-nexus/. docs/kiln/launcher/releasing.md, "The two builds".
 # Output: $KILN_OUT/bundles/linux/ (KILN_OUT defaults to .out/launcher; cargo target $KILN_OUT/cargo).
 # Needs: bun, cargo, the WebKitGTK dev packages; Tauri's AppImage tools (linuxdeploy) are cached in ~/.cache/tauri.
 set -euo pipefail
@@ -42,6 +42,8 @@ if ((nexus)); then
   [[ $features == *update-test-feeds* || $features == *self-update* || $features == *tauri-plugin-updater* ]] && { echo "--nexus has no self-update: drop --features $features" >&2; exit 2; }
   extra+=(--config "$repo/launcher/src-tauri/tauri.nexus.conf.json")
   runner_args=(-- --no-default-features)
+  keep=$(nexus_features)
+  [[ -n $keep ]] && runner_args+=(--features "$keep")
   variant=linux-nexus
 fi
 resources=$(shipped_runtime_resources "$runtime")

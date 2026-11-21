@@ -141,13 +141,18 @@ public sealed partial class ClientPassMod
             await c.Verdict();
             return;
         }
-        c.Instruct("Place a wooden chest (or any chest) on open ground two or three metres in front of you, step back so you see " +
-                   "all of it, and press continue.");
-        await c.Verdict();
+        // the chests near the player now: the check goes on when a new one is placed
+        List<EntityId> Near() => World.Position(c.Player) is { } here
+            ? World.Find("UsedItem").Where(e => World.Position(e) is { } p && p.DistanceTo(here) < 8).ToList()
+            : [];
+        var already = Near().ToHashSet();
+        c.Instruct("Place a wooden chest (or any chest) on open ground two or three metres in front of you and step back so you " +
+                   "see all of it. The check sees the new chest and goes on by itself 10 seconds after you placed it.");
+        var placed = await c.Until(() => Near().Any(e => !already.Contains(e)), TimeSpan.FromMinutes(5), "you placed a chest within 8 m");
+        if (placed) await c.Delay(TimeSpan.FromSeconds(10));
         var me = World.Position(c.Player);
         var prop = me is null ? EntityId.None
-            : World.Find("UsedItem").Where(e => World.Position(e) is { } p && p.DistanceTo(me.Value) < 8)
-                .OrderBy(e => World.Position(e)!.Value.DistanceTo(me.Value)).FirstOrDefault();
+            : Near().OrderBy(e => already.Contains(e) ? 1 : 0).ThenBy(e => World.Position(e)!.Value.DistanceTo(me.Value)).FirstOrDefault();
         if (!c.Expect(!prop.IsNone, "a chest within 8 m")) { await c.Verdict(); return; }
         // where the scale is, read through the public reflection API (the service finds it the same way)
         var ct = GameTypes.Find("keen::ecs::CurrentTransform");
@@ -160,20 +165,23 @@ public sealed partial class ClientPassMod
         var changed = Enumerable.Range(0, Math.Min(before.Length, after.Length)).Where(i => before[i] != after[i]).ToArray();
         c.Expect(r is { Ok: true, WorldWriteStatus: WorldWriteStatus.Written } && r.Now == asked, "the scale was written", r.ToString());
         c.Expect(changed.Length > 0 && changed.All(i => i >= at && i < at + 12), $"only the 12 scale bytes (+{at}) changed", string.Join(",", changed));
-        c.Instruct("The chest is now drawn 1.25 times as wide (X), 0.75 times as tall and 1.5 times as deep. 1) Is it drawn at that " +
-                   "size, in place, without flicker? 2) Walk into it and jump on it: does its collision follow the new size or the " +
-                   "old one (say which; Kiln does not promise collision)? 3) Open it: does it still open? Answer in the note. If a " +
-                   "player without Kiln is joined, add what that player sees (not required: the scale reaches every game " +
-                   "through the game's own replication of the transform).");
-        await c.Verdict();
+        c.Instruct("The chest is now drawn 1.25 times as wide (X), 0.75 times as tall and 1.5 times as deep. You have 60 seconds; " +
+                   "then the check puts it back to its size by itself. Remember: 1) is it drawn at that size, in place, without " +
+                   "flicker? 2) walk into it and jump on it: does its collision follow the new size or the old one (Kiln does not " +
+                   "promise collision)? 3) open it: does it still open? If a player without Kiln is joined, note what that player " +
+                   "sees (not required: the scale reaches every game through the game's own replication of the transform).");
+        await c.Delay(TimeSpan.FromSeconds(60));
         var original = before.Length >= at + 12 ? MemoryMarshal.Read<Scale3>(before.AsSpan(at)) : Scale3.One;
         var back = await World.SetTransformScale(prop, original.IsValid ? original : Scale3.One);
         await c.Ticks(1);
         c.Expect(back.Ok && (World.ReadBytes(prop, "CurrentTransform") ?? []).AsSpan().SequenceEqual(before), "restored: every byte as before", back.ToString());
-        c.Instruct("The chest is back at its size. Is it drawn as before? Then set it once more with the transform-scale sample " +
-                   "(/tscale <id> 1.25 0.75 1.5; the id is in kiln.log), save, quit to the menu, load the world again: Kiln sets the " +
-                   "kept scale again as the world loads, so the chest should come back scaled, with no moment at its old size. Say what " +
-                   $"you saw (chest {prop}). A player without Kiln, if one is joined: what does that player see?");
+        c.Instruct("The chest is back at its size. Now set it once more with the transform-scale sample " +
+                   "(/tscale <id> 1.25 0.75 1.5; the id is in kiln.log), save, quit to the menu and load the world again: Kiln sets " +
+                   "the kept scale again as the world loads. Pass only if all of these held: (1) while scaled the chest was drawn " +
+                   "at the new size, in place, without flicker, (2) it still opened, (3) back at its size it was drawn as before, " +
+                   "(4) after the reload it came back scaled, with no moment at its old size. Otherwise fail with a note naming " +
+                   "which one. Either way, say in the note whether its collision followed the new size or the old one, and what a " +
+                   $"player without Kiln saw if one was joined (chest {prop}).");
         await c.Verdict();
     }
 }

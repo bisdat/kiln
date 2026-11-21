@@ -403,6 +403,11 @@ def run(argv=None):
             if a.only:
                 raise Fail(f"{folder} has no server pack (runtime/kiln-server-{version}.zip)")
             kinds = [k for k in kinds if k != "server"]  # a release from before the server pack
+        if "sdk" in kinds and not os.path.isdir(os.path.join(folder, "sdk")):
+            if a.only:
+                raise Fail(f"{folder} has no sdk/ (a --launcher-only release): its SDK file stays at the previous release")
+            kinds = [k for k in kinds if k != "sdk"]  # a --launcher-only release: the SDK file keeps its last version
+            log("no sdk/ (a --launcher-only release): the SDK file on the page keeps its previous version")
         if a.sync_description:
             # the page text comes from the checkout nexus.py runs in, not from the release folder: 0.2.0-dev.29.2's
             # first sync, run from a checkout behind the release commit, put 0.2.0-dev.29.1's text up

@@ -1,0 +1,18 @@
+<Project>
+  <!-- Roger de R'lyeh's mod as a fixture (Kiln 0.2.0-dev.29.18 report, #mod-dev 2026-11-20): two StatusBlocks on a server,
+       "clients": "kiln". With it on a dedicated server (or, removed again, with only its buffs' placeholders left in the
+       world), the server checks each joining Kiln client's added-buff room before it lets it in (ContentSync's kiln.content
+       join check): docs/kiln/sync.md "The added-buff check at the join". Lines in kiln.log start with "statusblock-join:".
+       Build: dotnet build mods/tests/statusblock-join-test/StatusblockJoinTest.csproj -t:KilnDeploy -p:KilnModsDir=<kiln/mods> -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>statusblock-join-test</KilnModId>
+    <KilnModName>StatusBlock join test</KilnModName>
+    <Version>0.1.0</Version>
+    <Description>Two statuses from blocks on a server (a buff and a debuff, each with its program); joining Kiln players get them through the content sync. Test servers only.</Description>
+    <KilnServices>Blocks</KilnServices>
+    <KilnSide>server</KilnSide>
+    <KilnClients>kiln</KilnClients>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

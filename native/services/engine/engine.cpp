@@ -13,10 +13,13 @@
 #include "gate.h"
 #include "identity.h"
 #include "include/kiln_engine_native.h"
+#include "invoke.h"
 #include "memory.h"
 #include "profiles.g.h"
 #include "resolve.h"
+#include "resource_guard.h"
 #include "services/kiln_caps.h"
+#include "../../core/src/launch_internal.h"  // kiln.internal.launch (Kiln-internal, the core's own)
 
 namespace kiln::engine {
 
@@ -141,8 +144,55 @@ KilnResult KILN_CALL gate_write_member(const EcsGate* gate, std::uintptr_t addre
         default: return KILN_ERR_UNAVAILABLE;                        // faulted: a partial write may have happened
     }
 }
+// An engine call that faulted or could not be proven inside this hold is logged here, once, after both words are
+// released (nothing inside a hold logs).
+void log_call_latch() {
+    CallNote note{};
+    if (!gate_invoke_take_note(note)) return;
+    char line[320];
+    std::snprintf(line, sizeof line,
+                  "kiln.engine: engine call %u inside the write gate ended uncertain (%s, exception 0x%08x); every engine "
+                  "call is refused until the next server world starts",
+                  note.recipe, reason_name(note.reason), note.exception);
+    log(KILN_LOG_ERROR, line);
+}
 void KILN_CALL gate_release_member(EcsGate* gate) {
-    if (gate_record(gate)) gate_release(*gate);
+    if (!gate_record(gate)) return;
+    gate_release(*gate);
+    log_call_latch();
+}
+
+// The engine call (invoke.cpp): no KilnApi call, as for every gate member; the log of a latch waits for the release above.
+bool call_record(const KilnEngineCall* call) { return call && call->size == sizeof(KilnEngineCall); }
+KilnResult KILN_CALL gate_invoke_member(const EcsGate* gate, const KilnEngineCall* call, KilnEngineCallResult* out) {
+    if (!call_record(call) || !out || out->size != sizeof(KilnEngineCallResult) ||
+        call->op > static_cast<std::uint32_t>(CallOp::Status) || (gate && !gate_record(gate)) ||
+        (!gate && call->op != static_cast<std::uint32_t>(CallOp::Status)))
+        return KILN_ERR_INVALID_ARGUMENT;
+    gate_invoke(layout(), gate, *call, *out);
+    return out->outcome == static_cast<std::uint32_t>(CallOutcome::Returned) ? KILN_OK : KILN_ERR_UNAVAILABLE;
+}
+
+// The content worker's lifetime guard (resource_guard.cpp). Borrowed (a held gate): the caller is inside that
+// gate's hold, so no KilnApi call here; the gate's acquire already refused a world thread. Owned: the core names the
+// caller's thread first, before any engine read, as for the gate.
+bool guard_record(const ResourceGuard* guard) { return guard && guard->size == sizeof(ResourceGuard); }
+KilnResult KILN_CALL guard_acquire_member(const EcsGate* gate, std::uintptr_t service, std::uintptr_t reader,
+                                          ResourceGuard* out, std::uint32_t* reason) {
+    if (!guard_record(out) || !reason || !service || !reader || (gate && !gate_record(gate))) return KILN_ERR_INVALID_ARGUMENT;
+    const CallerThread caller = gate ? CallerThread::Other : caller_thread();
+    const Reason r = guard_acquire(layout(), gate, service, reader, *out, caller, mem::image_base());
+    *reason = static_cast<std::uint32_t>(r);
+    return r == Reason::None ? KILN_OK : KILN_ERR_UNAVAILABLE;
+}
+std::int32_t KILN_CALL guard_validate_member(const ResourceGuard* guard) {
+    return guard_record(guard) && guard_validate(layout(), *guard) ? 1 : 0;
+}
+std::int32_t KILN_CALL guard_contains_member(const ResourceGuard* guard, std::uintptr_t address, std::size_t size) {
+    return guard_record(guard) && guard_contains(*guard, address, size) ? 1 : 0;
+}
+void KILN_CALL guard_release_member(ResourceGuard* guard) {
+    if (guard_record(guard)) guard_release(*guard);
 }
 
 // The gate closes while the server world is stopping (a later acquire would only ever see a dying world) and opens at
@@ -224,6 +274,20 @@ void apply_raise_switch(const KilnApi* api, const KilnCapsApi* caps) {
                      sw == RaiseSwitch::Off ? KILN_CAP_REASON_POLICY : KILN_CAP_REASON_NONE, {text.data(), text.size()});
 }
 
+// The dialect owner: the ShroudForge-dialect owner's accessor, kiln.internal.launch's dialect_owner, resolved
+// once here at init through the services' KilnApi (no other KilnApi resolves the name). The core designates the owner
+// later, when it loads the plugin, so the gate reads the accessor at each acquire. Absent (an older core, or a
+// kiln-engine.dll without Kiln-internal access), of another version, too short or without the member: no accessor, and
+// the gate is exactly as without the rule. Nothing is logged either way.
+DialectOwnerFn resolve_dialect_owner(const KilnApi* api) {
+    const auto* t = static_cast<const KilnLaunchInternalApi*>(
+        api->service(str(KILN_LAUNCH_INTERNAL_SERVICE), KILN_LAUNCH_INTERNAL_VERSION));
+    if (!t || t->header.version != KILN_LAUNCH_INTERNAL_VERSION ||
+        t->header.size < offsetof(KilnLaunchInternalApi, dialect_owner) + sizeof t->dialect_owner)
+        return nullptr;
+    return t->dialect_owner;
+}
+
 const KilnEngineApi g_table = {{sizeof(KilnEngineApi), KILN_ENGINE_VERSION}, &identity, &gate_stats};
 const KilnEngineNativeApi g_native = {{sizeof(KilnEngineNativeApi), KILN_ENGINE_NATIVE_VERSION},
                                       sizeof(Layout),
@@ -238,7 +302,12 @@ const KilnEngineNativeApi g_native = {{sizeof(KilnEngineNativeApi), KILN_ENGINE_
                                       &gate_component_member,
                                       &gate_track_member,
                                       &gate_write_member,
-                                      &gate_release_member};
+                                      &gate_release_member,
+                                      &guard_acquire_member,
+                                      &guard_validate_member,
+                                      &guard_contains_member,
+                                      &guard_release_member,
+                                      &gate_invoke_member};
 }  // namespace
 
 const Layout* selected_layout() { return layout(); }
@@ -292,6 +361,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         report(caps, "engine.ecs_write", write,
                write ? "" : p ? "the profile has no enabled native-thread Scene write gate" : unknown);
         apply_raise_switch(api, caps);
+        gate_set_dialect_owner(resolve_dialect_owner(api));  // before any table is published, so before any acquire
         info->id = str(KILN_ENGINE_SERVICE);
         info->version = str("1");
         info->on_unload = &on_exit;

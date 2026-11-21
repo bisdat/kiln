@@ -3,16 +3,42 @@
 //!
 //! - `discover`: which EML mods this start runs (Kiln profile, engine plugins, drop-in folders).
 //! - `runner`: one EML run over them, failing soft (bad mods are switched off, a failed run restores vanilla data).
+//! - `sf_pass`: the ShroudForge-dialect startup pass driver: one retry without the package that made it fail.
+//! - `kiln_mode`: under Kiln's interpreter (kiln.launch backend `kiln`), its launch plan decides the
+//!   packages that need ShroudForge's runtime or belong to its startup pass.
 //! - `logging`: EML's tracing events as plain lines (kiln.log, kiln/logs/eml.log, stderr).
 //! - `plugin` (Windows): the DLL's exports (kiln_plugin_early, kiln_plugin_main, kiln_eml_service).
+//! - `archive_service`: kiln.eml.archive v1 (its export kiln_eml_archive_service), the metadata subset.
+//! - `archive_values`: kiln.eml.values v1, the typed graph and its C table (normal service lookup only).
 //!
 //! GPL-3.0-or-later. Kiln (MIT) talks to it only through its exports and native/core/abi/services/kiln_eml.h.
 
 pub mod discover;
+// kiln-eml when kiln.launch froze backend `kiln` (kiln mode, with Kiln's interpreter).
+pub mod kiln_mode;
 pub mod logging;
 pub mod modified;
 pub mod progress;
 pub mod runner;
+// (one file or folder by any of its names, for the export root, the install lock and the
+// running-game check)
+mod same_path;
+// The SF-dialect startup pass driver (one retry without a failing package), wired by kiln mode.
+pub mod sf_pass;
+// The SF-dialect startup pass's Lua state (type session, game.types); composed into the pass.
+pub mod sf_startup;
+// (the startup controller of a kiln-mode start: witness, admission, pass and retry, one
+// publication, cache, outcome; a library, wired by the plugin wiring)
+pub mod startup;
+// kiln.eml.startup v1's provider (early export kiln_eml_startup_service), the early witness, the barrier, the
+// grant
+pub mod startup_seam;
+// kiln.eml.archive v1's provider (early getter, metadata subset, error channel).
+pub mod archive_service;
+// kiln.eml.values v1's typed graph and its C table.
+pub mod archive_values;
+// The read-only archive inspector behind kiln-eml-inspect (never the patch runner).
+pub mod inspection;
 pub mod portraits;
 pub mod portrait_export;
 
@@ -32,6 +58,10 @@ pub const CACHE_IO: i32 = 7;
 
 #[cfg(any(windows, test))]
 mod plugin;
+
+// The test lock/spawn gate in this crate's unit tests (mod-loader-lua's test_gate.rs, a dev-dependency feature).
+#[cfg(test)]
+mod gate_tests;
 
 /// kiln-eml's own version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

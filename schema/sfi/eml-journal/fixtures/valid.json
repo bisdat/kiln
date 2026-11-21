@@ -1,0 +1,265 @@
+{
+  "startup-journal": {
+    "mixed_retry": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receiptSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dialect": "shroudforge",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "fedcba98-7654-3210-fedc-ba9876543210",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": true
+            }
+          ],
+          "contents": [
+            {
+              "guid": "0000000a-1b2c-3d4e-5f60-718293a4b5c6",
+              "size": 10
+            }
+          ]
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "charlie",
+          "version": null,
+          "kind": "shroudforge",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "delta",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": null
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              }
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    },
+    "first_unchanged_server": {
+      "format": 1,
+      "stem": "enshrouded_server",
+      "generation": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "receiptSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "dialect": "shroudforge",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "reader",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    },
+    "truncated": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "receiptSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "dialect": "shroudforge",
+      "attempt": "first",
+      "truncated": true,
+      "packages": [
+        {
+          "id": "many",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": true,
+          "changed": [],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "00000001-0000-4000-8000-000000000001",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 2,
+              "guid": "00000002-0000-4000-8000-000000000002",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            },
+            {
+              "ordinal": 3,
+              "guid": "00000003-0000-4000-8000-000000000003",
+              "typeHash": "8c3dbe3d",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "after",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8c3dbe3d",
+              "part": 3,
+              "createdBy": null
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    },
+    "unattributed": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "0000000000000000000000000000000000000000000000000000000000000000",
+      "receiptSha256": "9999999999999999999999999999999999999999999999999999999999999999",
+      "dialect": "shroudforge",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "late-finalizer",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "settingsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-aaaa-bbbb-cccc-dddddddddddd",
+              "size": 4
+            }
+          ]
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [
+          {
+            "guid": "01234567-89ab-cdef-0123-456789abcdef",
+            "typeHash": "8c3dbe3d",
+            "part": 9,
+            "createdBy": null
+          }
+        ],
+        "created": [
+          {
+            "ordinal": 1,
+            "guid": "11111111-2222-4333-8444-555555555555",
+            "typeHash": "8c3dbe3d",
+            "part": 2,
+            "explicit": true
+          }
+        ],
+        "contents": []
+      }
+    }
+  }
+}

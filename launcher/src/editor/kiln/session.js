@@ -7,12 +7,14 @@ import { create } from 'zustand';
 import { api } from '../src/platform.js';
 import { editorFileInfo } from '../../api/commands';
 import { checkTree, pointsUsed } from '../src/treecheck.js';
-import { t } from '../src/i18n.js';
+import { t } from '../../i18n';
+import { t as tv } from '../src/i18n.js';
 import { usePendingEdits } from './pending.ts';
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
-// upstream's own messages for a save it cannot read are Portuguese keys; en.json words them
-const said = (msg) => t(msg);
+// upstream's own messages for a save it cannot read are Portuguese keys; the launcher's tables word them
+// (src/i18n/launcher-keys.json), an unknown one stays as it came
+const said = (msg) => tv(msg);
 
 export const useSession = create(() => ({
   /** null: still looking */
@@ -56,7 +58,7 @@ export async function openSave(path) {
     const json = JSON.stringify(m);
     set({ model: m, orig: clone(m), origJson: json, dirty: false, readAt: m.modified ?? 0,
       // a save read with unknown items says "read-only" by itself; one that could not be read at all gets the word
-      status: m.error ? { tone: 'warn', text: m.readOnly ? t('Somente leitura: {erro}', { erro: said(m.error) }) : said(m.error) } : null });
+      status: m.error ? { tone: 'warn', text: m.readOnly ? t('editor.page.readOnlyError', { erro: said(m.error) }) : said(m.error) } : null });
     return true;
   } catch (e) {
     set({ status: { tone: 'err', text: e.message } });
@@ -133,9 +135,9 @@ export async function saveModel() {
   if (JSON.stringify(model.skills) !== JSON.stringify(orig.skills)) {
     const { problems, used, total } = checkTree(model);
     if (total === null && used > pointsUsed(orig.skills)) {
-      problems.push(t('Você aumentou os pontos em uso ({antes} → {depois}). Informe o total de pontos na aba Habilidades para o editor conferir; acima do total, o jogo zera a árvore.', { antes: pointsUsed(orig.skills), depois: used }));
+      problems.push(t('editor.page.pointsRaised', { antes: pointsUsed(orig.skills), depois: used }));
     }
-    if (problems.length) { set({ status: { tone: 'err', text: t('Não gravado. {problemas}', { problemas: problems.join(' · ') }) } }); return 'skills'; }
+    if (problems.length) { set({ status: { tone: 'err', text: t('editor.page.notWritten', { problemas: problems.join(' · ') }) } }); return 'skills'; }
   }
   set({ saving: true });
   try {
@@ -143,7 +145,7 @@ export async function saveModel() {
     // character over it would lose that play
     const { modified } = await editorFileInfo(model.path);
     if (s.readAt && modified && modified !== s.readAt) {
-      set({ saving: false, status: { tone: 'err', again: true, text: t('O jogo gravou este save depois que o editor o leu. Leia de novo para editar a versão atual (as mudanças daqui se perdem).') } });
+      set({ saving: false, status: { tone: 'err', again: true, text: t('editor.page.gameWroteSince') } });
       return 'changed';
     }
     const { model: m } = await api.writeSave(model.path, model);

@@ -39,6 +39,19 @@ fn fixtures() -> PathBuf {
     repo().join("schema/fixtures/lint")
 }
 
+/// KL901 says what to do where the user is: the CLI's command, or the launcher's own way (Pack Studio reads the game's
+/// items itself; the "Build the game catalog" button).
+#[test]
+fn no_catalog_hint_follows_the_context() {
+    let case = fixtures().join("cases/skills");
+    let kl901 = |o: &LintOptions| run(&[case.clone()], o).diagnostics.into_iter().find(|d| d.code == "KL901").map(|d| d.message).expect("KL901 in cases/skills");
+    let cli = kl901(&opts());
+    assert!(cli.contains("make one with `kiln catalog`, or pass --catalog"), "{cli}");
+    let launcher = kl901(&LintOptions { no_catalog_hint: Some(lint::LAUNCHER_CATALOG_HINT.into()), ..opts() });
+    assert!(launcher.contains("Kiln will read the game's items when Pack Studio opens") && launcher.contains("'Build the game catalog' button"), "{launcher}");
+    assert!(!launcher.contains("kiln catalog") && !launcher.contains("--catalog"), "no CLI wording in the launcher: {launcher}");
+}
+
 fn rel(p: &str, base: &Path) -> String {
     Path::new(p).strip_prefix(base).map(|x| x.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| p.to_string())
 }

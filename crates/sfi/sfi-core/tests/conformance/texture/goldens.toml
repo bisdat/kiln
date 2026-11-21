@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MIT
+[goldens]
+"encode.golden.json" = "oracle sf-1.7.9 d8a394bc and sf-1.8.0 38ef448d; captured with ShroudForge's own mod runtime (a local differential test, not published); transcript v2; independently captured byte-identical on both pins; 571 records, 58 messages; sha256 1dcc9ffba5ace52c359e10194ffd59afa4fd81d4e785fccd488161c4523d573f"
+"decode.golden.json" = "oracle sf-1.7.9 d8a394bc and sf-1.8.0 38ef448d; captured with ShroudForge's own mod runtime (a local differential test, not published); transcript v2; independently captured byte-identical on both pins; 577 records, 0 messages; sha256 c3a206930770e98d410dec0afed2b069b54544ff74d9d00cd5d67efcf9aae49b"
+"arguments.golden.json" = "oracle sf-1.7.9 d8a394bc and sf-1.8.0 38ef448d; captured with ShroudForge's own mod runtime (a local differential test, not published); transcript v2; independently captured byte-identical on both pins; 61 records, 32 messages; sha256 741b1c3e25c7d8c6932d86c46d9a46ddfeb9caf603b90af95be8a18900f079b6"

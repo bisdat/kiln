@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: MIT
+# Facts about ShroudForge (MIT, Copyright (c) 2026 bonsaibauer) build profiles; no code adapted.
+# Which profiles carry the sections ShroudForge's world operations and profile patches
+# need (native/profiles/read_game_profile.cpp:144,208 read "worldOperations" and
+# "runtimePatches"). Each key is <pin>/<side>/<build>.json under
+# modules/game-runtime/profiles/enshrouded/; the value is the file's sha256 and the number of
+# entries in each section (0 = absent), counted with python3 -I over every nested object on
+# 2026-11-20. Pins: sf-1.7.9 d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8,
+# sf-1.8.0 38ef448dc5d4fc267b5f0928502a864a6b078865.
+[profiles]
+"sf-1.7.9/client/1076226.json" = "f93f490e60ec13f3b229a509e43507179db23b4062fe974e210ad4c1aa6329d3 worldOperations=9 runtimePatches=6"
+"sf-1.7.9/client/25966634.json" = "50f440fb8c45b6b0b3eb1c0881b56ce081c369b348993c468ca9b5459298ae27 worldOperations=0 runtimePatches=0"
+"sf-1.7.9/client/25988036.json" = "6cfda238cfdf956867db17c83de5a5d3699f396c09a49f204a1bacfbb52775b7 worldOperations=0 runtimePatches=0"
+"sf-1.7.9/client/26082781.json" = "53d043a2b6f7382bbf2d8cc5cb141165d1415fb04014b5073fa885ec146f4435 worldOperations=0 runtimePatches=0"
+"sf-1.7.9/client/26320373.json" = "c80975527d39695fc9b7119a921df5cab52290b8b8ee12a0598216bc9cf2c095 worldOperations=0 runtimePatches=0"
+"sf-1.7.9/client/26404966.json" = "1a09adbb9599261ec5d240de90bb31008785d89005b710863e17985f0b45d681 worldOperations=0 runtimePatches=0"
+"sf-1.7.9/client/26430625.json" = "e6d2afca2636e7ea89f9a3548c1c93ccb97cac78b5cd234522e2c4546bc9ddf7 worldOperations=0 runtimePatches=0"
+"sf-1.7.9/server/1024233.json" = "9023de901a332f32024016398a34adb6b9cdb283f23ea6a4acfe64935a500c1b worldOperations=7 runtimePatches=6"
+"sf-1.7.9/server/25988414.json" = "da171a6e7e730c7c489a02092bd242fe3f7ce97f814258b925b9e9c1d353e4b0 worldOperations=0 runtimePatches=0"
+"sf-1.7.9/server/26083076.json" = "8c9739620a783ceae80e556115ad4443eaa226d0e08a02063bf9df2c9bea55f8 worldOperations=0 runtimePatches=0"
+"sf-1.7.9/server/26319703.json" = "a820864cb75caaf2a18959a83d6a0953ef6a5645de6735055a3ee2295950bb2f worldOperations=0 runtimePatches=0"
+"sf-1.7.9/server/26404334.json" = "741cab0a2e7fbad2e63c365138e43f44f8d575a5e76e57dcf8ec7ef36b39fd53 worldOperations=0 runtimePatches=0"
+"sf-1.7.9/server/26430253.json" = "08a4a910b7e26e8a1d4cfd1b7ff5a8b76f4a72914eeeee3bd6e0f8707b6c87f0 worldOperations=0 runtimePatches=0"
+"sf-1.8.0/client/1076226.json" = "f93f490e60ec13f3b229a509e43507179db23b4062fe974e210ad4c1aa6329d3 worldOperations=9 runtimePatches=6"
+"sf-1.8.0/client/25966634.json" = "50f440fb8c45b6b0b3eb1c0881b56ce081c369b348993c468ca9b5459298ae27 worldOperations=0 runtimePatches=0"
+"sf-1.8.0/client/25988036.json" = "6cfda238cfdf956867db17c83de5a5d3699f396c09a49f204a1bacfbb52775b7 worldOperations=0 runtimePatches=0"
+"sf-1.8.0/client/26082781.json" = "53d043a2b6f7382bbf2d8cc5cb141165d1415fb04014b5073fa885ec146f4435 worldOperations=0 runtimePatches=0"
+"sf-1.8.0/client/26320373.json" = "c80975527d39695fc9b7119a921df5cab52290b8b8ee12a0598216bc9cf2c095 worldOperations=0 runtimePatches=0"
+"sf-1.8.0/client/26404966.json" = "1a09adbb9599261ec5d240de90bb31008785d89005b710863e17985f0b45d681 worldOperations=0 runtimePatches=0"
+"sf-1.8.0/client/26430625.json" = "e6d2afca2636e7ea89f9a3548c1c93ccb97cac78b5cd234522e2c4546bc9ddf7 worldOperations=0 runtimePatches=0"
+"sf-1.8.0/server/1024233.json" = "9023de901a332f32024016398a34adb6b9cdb283f23ea6a4acfe64935a500c1b worldOperations=7 runtimePatches=6"
+"sf-1.8.0/server/25988414.json" = "da171a6e7e730c7c489a02092bd242fe3f7ce97f814258b925b9e9c1d353e4b0 worldOperations=0 runtimePatches=0"
+"sf-1.8.0/server/26083076.json" = "8c9739620a783ceae80e556115ad4443eaa226d0e08a02063bf9df2c9bea55f8 worldOperations=0 runtimePatches=0"
+"sf-1.8.0/server/26319703.json" = "a820864cb75caaf2a18959a83d6a0953ef6a5645de6735055a3ee2295950bb2f worldOperations=0 runtimePatches=0"
+"sf-1.8.0/server/26404334.json" = "741cab0a2e7fbad2e63c365138e43f44f8d575a5e76e57dcf8ec7ef36b39fd53 worldOperations=0 runtimePatches=0"
+"sf-1.8.0/server/26430253.json" = "08a4a910b7e26e8a1d4cfd1b7ff5a8b76f4a72914eeeee3bd6e0f8707b6c87f0 worldOperations=0 runtimePatches=0"

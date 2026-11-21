@@ -245,6 +245,9 @@ test.describe("the save editor in Deck mode", () => {
     // walk to an unlit node next to a lit one, A raises it, Y lowers it again
     const used = page.locator(".ke-tree-points b");
     const was = Number(await used.textContent());
+    // Available is the game's own count (level 25: 48, plus the mock's skill-point knowledge), not a total to type
+    await expect(page.locator(".ke-tree-from-game")).toContainText("Total 65");
+    await expect(page.locator(".ke-tree-points .ke-tree-avail")).toHaveText(String(65 - was));
     let raised = false;
     for (let i = 0; i < 24 && !raised; i++) {
       const a = await page.evaluate(() => (document.activeElement as HTMLElement).dataset.deckA);

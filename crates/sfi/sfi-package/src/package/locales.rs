@@ -1,0 +1,215 @@
+// SPDX-License-Identifier: MIT
+// Adapted from ShroudForge (MIT, Copyright (c) 2026 bonsaibauer)
+// Source: modules/modloader/resolve_mod_locale.rs:8-199
+// Source: modules/modloader/read_mod_locale_catalogs.rs:65-74
+// Contract pins: 1.7.9 d8a394bc; 1.8.0 38ef448d (1.8 additions are version-gated).
+use super::manifest::*;
+use serde_json::Value;
+use std::collections::BTreeMap;
+
+/// Applies the best matching mod catalog to the source manifest.
+/// Regional catalogs override the language catalog, and missing values keep
+/// the source text from mod.json or extended.mod.json.
+pub fn localized_manifest(manifest: &Manifest, locale: &str) -> Manifest {
+    let mut localized = manifest.clone();
+    for code in locale_candidates(locale).into_iter().rev() {
+        if let Some(catalog) = manifest.locales.get(&code) {
+            apply_catalog(&mut localized, manifest, catalog);
+        }
+    }
+    localized
+}
+
+/// Looks up a Lua-facing string in the same catalog used to localize the
+/// Modloader manifest.
+pub fn localized_string(
+    catalogs: &BTreeMap<String, ModLocaleCatalog>,
+    key: &str,
+    locale: &str,
+    fallback: Option<&str>,
+) -> String {
+    for code in locale_candidates(locale) {
+        if let Some(value) = catalogs
+            .get(&code)
+            .and_then(|catalog| catalog.strings.get(key))
+        {
+            return value.clone();
+        }
+    }
+    fallback.unwrap_or(key).to_owned()
+}
+
+/// Ensures translations only refer to controls and actions declared by the
+/// source manifest. Group translations follow the source group's array order.
+pub fn validate_mod_locale_catalogs(manifest: &Manifest) -> Result<(), String> {
+    for (locale, catalog) in &manifest.locales {
+        for (key, translated) in &catalog.settings {
+            let setting = manifest
+                .settings
+                .iter()
+                .find(|setting| setting.key == *key)
+                .ok_or_else(|| format!("locales/{locale}.json: unknown setting '{key}'"))?;
+            for option in translated.options.keys() {
+                if !setting
+                    .options
+                    .iter()
+                    .any(|candidate| option_key(&candidate.value) == *option)
+                {
+                    return Err(format!(
+                        "locales/{locale}.json: unknown option '{option}' for setting '{key}'"
+                    ));
+                }
+            }
+            for group in translated.option_groups.keys() {
+                if !setting
+                    .options
+                    .iter()
+                    .any(|candidate| candidate.group.as_deref() == Some(group))
+                {
+                    return Err(format!(
+                        "locales/{locale}.json: unknown option group '{group}' for setting '{key}'"
+                    ));
+                }
+            }
+        }
+        for (index, translated) in catalog.groups.iter().enumerate() {
+            let group = manifest.groups.get(index).ok_or_else(|| {
+                format!(
+                    "locales/{locale}.json: group {} has no matching group",
+                    index + 1
+                )
+            })?;
+            for action in translated.actions.keys() {
+                if !group
+                    .actions
+                    .iter()
+                    .any(|candidate| candidate.id == *action)
+                {
+                    return Err(format!(
+                        "locales/{locale}.json: unknown action '{action}' in group {}",
+                        index + 1
+                    ));
+                }
+            }
+        }
+        if catalog
+            .changelog
+            .as_ref()
+            .is_some_and(|items| items.len() > manifest.changelog.len())
+        {
+            return Err(format!(
+                "locales/{locale}.json: changelog has more entries than extended.mod.json"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn locale_candidates(locale: &str) -> Vec<String> {
+    if locale == "en" {
+        return vec!["en-GB".to_owned(), "en".to_owned()];
+    }
+    match locale.split_once('-') {
+        Some((language, _)) if language != locale => {
+            vec![locale.to_owned(), language.to_owned()]
+        }
+        _ => vec![locale.to_owned()],
+    }
+}
+
+fn apply_catalog(manifest: &mut Manifest, source: &Manifest, catalog: &ModLocaleCatalog) {
+    if let Some(name) = &catalog.mod_info.name {
+        manifest.name.clone_from(name);
+    }
+    if let Some(description) = &catalog.mod_info.description {
+        manifest.description = Some(description.clone());
+    }
+    for (key, translated) in &catalog.settings {
+        if let Some(setting) = manifest
+            .settings
+            .iter_mut()
+            .find(|setting| setting.key == *key)
+        {
+            let source_groups: BTreeMap<_, _> = source
+                .settings
+                .iter()
+                .find(|source_setting| source_setting.key == *key)
+                .into_iter()
+                .flat_map(|source_setting| &source_setting.options)
+                .filter_map(|option| {
+                    option
+                        .group
+                        .as_ref()
+                        .map(|group| (option_key(&option.value), group.clone()))
+                })
+                .collect();
+            if let Some(label) = &translated.label {
+                setting.label.clone_from(label);
+            }
+            if let Some(description) = &translated.description {
+                setting.description = Some(description.clone());
+            }
+            for option in &mut setting.options {
+                if let Some(label) = translated.options.get(&option_key(&option.value)) {
+                    option.label.clone_from(label);
+                }
+                if let Some(source_group) = source_groups.get(&option_key(&option.value))
+                    && let Some(label) = translated.option_groups.get(source_group)
+                {
+                    option.group = Some(label.clone());
+                }
+            }
+        }
+    }
+    for (index, translated) in catalog.groups.iter().enumerate() {
+        if let Some(group) = manifest.groups.get_mut(index) {
+            apply_group(group, translated);
+        }
+    }
+    if let Some(changelog) = &catalog.changelog {
+        for (target, translated) in manifest.changelog.iter_mut().zip(changelog) {
+            target.clone_from(translated);
+        }
+    }
+}
+
+fn apply_group(group: &mut SettingGroup, translated: &ModGroupLocale) {
+    if let Some(label) = &translated.label {
+        group.label.clone_from(label);
+    }
+    if let Some(description) = &translated.description {
+        group.description = Some(description.clone());
+    }
+    for action in &mut group.actions {
+        apply_action(action, translated);
+    }
+}
+
+fn apply_action(action: &mut ModAction, translated: &ModGroupLocale) {
+    if let Some(localized) = translated.actions.get(&action.id) {
+        if let Some(label) = &localized.label {
+            action.label.clone_from(label);
+        }
+        if let Some(confirm) = &localized.confirm {
+            action.confirm = Some(confirm.clone());
+        }
+    }
+}
+
+fn option_key(value: &Value) -> String {
+    match value {
+        Value::String(value) => value.clone(),
+        value => value.to_string(),
+    }
+}
+
+pub fn valid_locale_code(locale: &str) -> bool {
+    (2..=35).contains(&locale.len())
+        && !locale.starts_with('-')
+        && !locale.ends_with('-')
+        && !locale.contains("--")
+        && locale
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        && locale.split('-').all(|part| !part.is_empty())
+}

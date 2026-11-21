@@ -105,6 +105,9 @@ target_sources(kiln-core PRIVATE ${KILN_SERVICE_SOURCES})
 # Native mod loader and profiles.
 target_sources(kiln-core PRIVATE core/src/native_mods.cpp core/src/profile.cpp)
 target_sources(kiln-core PRIVATE core/src/early_plugins.cpp)  # plugins exporting kiln_plugin_early
+target_sources(kiln-core PRIVATE core/src/launch.cpp core/src/launch_boot.cpp)  # kiln.launch: the ShroudForge backend, frozen at boot
+# the release hold of Kiln's interpreter for ShroudForge mods (core/src/sfi_release_policy.h)
+target_sources(kiln-core PRIVATE core/src/sfi_release_policy.cpp)
 target_sources(kiln-core PRIVATE core/src/tasks_model.cpp core/src/tasks.cpp core/src/tasks_stats.cpp core/src/tasks_win.cpp core/src/tasks_seh.cpp)  # kiln.tasks' pool
 target_sources(kiln-core PRIVATE core/src/compat.cpp core/src/compat_overlaps.cpp core/src/compat_rules.cpp)  # closed-DLL report and rules
 target_include_directories(kiln-core PRIVATE core/abi core/src third_party "${KILN_GENERATED_DIR}")

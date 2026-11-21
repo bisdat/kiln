@@ -63,9 +63,14 @@ KilnResult KILN_CALL state(KilnEntity entity, KilnRulesNoClip* out);
 }  // namespace kiln_rules_noclip
 
 namespace kiln_rules_steer {
-// Glider steering's mid hook (steer.cpp; feature rules.glide_steer). Returns KILN_RULES_HOOK_GLIDE_STEER or 0 (`off`
-// says why). Called at boot with the other gliding hooks.
+// Glider steering's mid hook (steer.cpp; feature rules.glide_steer). Returns KILN_RULES_HOOK_GLIDE_STEER (steering is
+// available) or 0 (`off` says why). Called at boot with the other gliding hooks; it resolves and checks everything but
+// places nothing.
 uint32_t install(const KilnApi* api, KilnOwner owner, std::string& off);
+void world_started();  // the first world started (on_world)
+// On the tick thread (on_pre): places the hook once, after the first world, when a rule set has asked for GlideSteer.
+// 1 placed now, -1 placing failed (steering stays off), 0 nothing to do.
+int tick();
 bool active();  // the hook is installed: GLIDE_STEER steers
 // The glide wrap's steering form (rules.cpp glide_pre: GLIDE_BOOST along the nose, no altitude hold at sink 0) for a
 // player's rules and PlayerInput: GLIDE_STEER, the hook installed, and the input mode the hook steers (0).
