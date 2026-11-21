@@ -157,6 +157,8 @@ test("Recipes: an input that takes any of a group, found by any of its items; sa
   await shot(page, "data-recipes-category-picker");
   await input.press("ArrowDown");
   await input.press("Enter");
+  // the chosen group replaces the picker: focus moves to its chip's expand button, not to the top of the page
+  await expect(page.getByTestId("data-recipes-new-0-in-1-category-expand")).toBeFocused();
   const chip = page.getByTestId("data-recipes-new-0-in-1-category-chip");
   await expect(chip).toContainText("Any of: Stone, Limestone");
   await expect(chip).toHaveAttribute("title", "Stone, Limestone");
@@ -164,6 +166,7 @@ test("Recipes: an input that takes any of a group, found by any of its items; sa
   await page.getByTestId("data-recipes-new-0-in-1-count").press("Enter");
   // the offer: the first input becomes the woods, its count kept
   await offer.click();
+  await expect(page.getByTestId("data-recipes-new-0-in-0-category-expand")).toBeFocused();
   const woods = page.getByTestId("data-recipes-new-0-in-0-category-chip");
   await expect(woods).toContainText("Any of: Wood Logs, Hardwood, Palm Wood Logs, +2 more");
   await expect(woods).toHaveAttribute("title", "Wood Logs, Hardwood, Palm Wood Logs, Conifer Logs, Bamboo Logs");
@@ -214,6 +217,20 @@ test("Recipes: an input that takes any of a group, found by any of its items; sa
   await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 1 warning");
   await page.getByTestId("data-sub-recipes").click();
   await expect(page.getByTestId("data-recipes-new-0-in-1-category-chip")).toHaveText("any item of category 0x0badf00d");
+  // an expanded row keeps its own state when a row above it goes (rows have stable keys): woods first, stones second,
+  // stones expanded, the woods removed: the stones, now first, are still the expanded one
+  await page.getByTestId("data-recipes-new-0-in-1-remove").click();
+  await page.getByTestId("data-recipes-new-0-in-add-category").click();
+  await page.getByTestId("data-recipes-new-0-in-1-category-input").fill("limest");
+  await page.getByTestId("data-recipes-new-0-in-1-category-hit-0xb053f0f1").click();
+  await expect(page.getByTestId("data-recipes-new-0-in-1-category-expand")).toBeFocused();
+  await page.getByTestId("data-recipes-new-0-in-1-category-expand").click();
+  await expect(page.getByTestId("data-recipes-new-0-in-1-category-panel")).toBeVisible();
+  await expect(page.getByTestId("data-recipes-new-0-in-0-category-panel")).toHaveCount(0);
+  await page.getByTestId("data-recipes-new-0-in-0-remove").click();
+  await expect(page.getByTestId("data-recipes-new-0-in-0-category-chip")).toContainText("Any of: Stone, Limestone");
+  await expect(page.getByTestId("data-recipes-new-0-in-0-category-panel")).toBeVisible();
+  await expect(page.getByTestId("data-recipes-new-0-in-0-category-expand")).toHaveAttribute("aria-expanded", "true");
 });
 
 test("Loot and Drops: stack sizes per item; a drop table by its GUID with chance and one item's counts", async ({ page }) => {
