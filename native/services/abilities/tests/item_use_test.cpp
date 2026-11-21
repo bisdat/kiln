@@ -75,7 +75,7 @@ static KilnResult KILN_CALL f_type_enum(const KilnType* type, uint32_t i, KilnSt
 }
 
 static KilnTypesApi g_types_api;
-static FakeType *g_item_id_field_owner, *g_state_flag, *g_trigger_enum, *g_slot_id;
+static FakeType *g_item_id_field_owner, *g_state_flag, *g_trigger_enum, *g_slot_id, *g_runtime_id;
 
 // This build's shapes, as the server's reflection has them (docs/re/player-state.md, docs/re/abilities.md section 4).
 static void build_types() {
@@ -94,17 +94,21 @@ static void build_types() {
     auto* iii = add_type("keen::ItemInstanceInfo", KILN_TYPE_STRUCT, 20);
     iii->fields = {{"slotId", g_slot_id, 0}, {"itemId", item_id, 8}, {"pide", u32, 12}};
     g_item_id_field_owner = iii;
+    auto* seq_id = add_type("keen::actor::SequenceResourceId", KILN_TYPE_TYPEDEF, 4, u32);
+    g_runtime_id = add_type("keen::actor::SequenceRuntimeId", KILN_TYPE_STRUCT, 24);
+    g_runtime_id->fields = {{"sequenceId", seq_id, 0}, {"triggerTime", u64, 8}, {"actorEntityId", u32, 0x10}, {"callIndex", u8, 0x14}};
     auto* ctx = add_type("keen::actor::ActionSequenceTriggerContext", KILN_TYPE_STRUCT, 0x170);
-    ctx->fields = {{"sequenceRuntimeId", u64, 0}, {"triggerType", u32, 0x18}, {"costItem", iii, 0x1C}, {"usedItem", iii, 0x30},
-                   {"usedAmmunition", iii, 0x44}};
+    ctx->fields = {{"sequenceRuntimeId", g_runtime_id, 0}, {"triggerType", u32, 0x18}, {"costItem", iii, 0x1C},
+                   {"usedItem", iii, 0x30}, {"usedAmmunition", iii, 0x44}};
     auto* ctx_td = add_type("keen::actor::TriggerContextAlias", KILN_TYPE_TYPEDEF, 0x170, ctx);
     auto* ai = add_type("keen::ecs::ActorInput", KILN_TYPE_STRUCT, 0x1C8);
     ai->fields = {{"triggerContext", ctx_td, 8}, {"triggerCallCounter", u8, 0x178}};
     auto* mask = add_type("keen::actor::StateMask", KILN_TYPE_TYPEDEF, 8, u64);
     auto* base = add_type("keen::ecs::BaseActor", KILN_TYPE_STRUCT, 0xC08);
     base->fields = {{"currentAction", u64, 0}, {"currentState", mask, 0xBF8}};
+    base->fields.push_back({"sequenceRuntimeId", g_runtime_id, 0xC08});  // BaseActor holds it, as in the reflection
     auto* actor = add_type("keen::ecs::Actor", KILN_TYPE_STRUCT, 0xC20, base);
-    actor->fields = {{"sequenceRuntimeId", u64, 0xC08}};
+    actor->fields = {{"currentColliderMode", u8, 0xC20 - 8}};
     g_state_flag = add_type("keen::actor::StateFlag", KILN_TYPE_ENUM, 1);
     g_state_flag->values = {{"Grounded", 0}, {"Dead", 7}, {"Sitting", 9}, {"Sleeping", 11}, {"Spawning", 12},
                             {"Climbing", 34}, {"HangGliding", 37}, {"IsReadyForGameplay", 50}};
@@ -123,6 +127,9 @@ static void test_resolve() {
     CHECK(L.used_slot == 8 + 0x30);       // through a typedef'd struct field
     CHECK(L.used_item == 8 + 0x30 + 8);   // a typedef'd u32
     CHECK(L.state == 0xBF8);              // in the base class
+    CHECK(L.running == 0xC08);            // Actor.sequenceRuntimeId.sequenceId, in the base class, a typedef'd u32
+    CHECK(L.pending == 8);                // ActorInput.triggerContext.sequenceRuntimeId.sequenceId
+    CHECK(L.context == 8 && L.context_size == 0x170);  // through the typedef
     CHECK(L.dead == 7 && L.ready == 50 && L.primary == 1);
     CHECK(L.busy == ((1ull << 9) | (1ull << 11) | (1ull << 12) | (1ull << 34) | (1ull << 37)));  // names not here: skipped
 
@@ -136,6 +143,17 @@ static void test_resolve() {
     g_slot_id->size = 4;
     CHECK(!kab::use::resolve(&g_types_api, &L, why, sizeof why) && std::strstr(why, "slotId"));
     g_slot_id->size = 8;
+    // no runtime id's sequence (the pending trigger and the running sequence both read it): refused
+    auto rid = g_runtime_id->fields;
+    g_runtime_id->fields.erase(g_runtime_id->fields.begin());
+    CHECK(!kab::use::resolve(&g_types_api, &L, why, sizeof why) && std::strstr(why, "sequenceRuntimeId"));
+    g_runtime_id->fields = rid;
+    // a context too small to hold the used item it is said to hold: refused
+    for (auto* t : g_types)
+        if (t->qname == "keen::actor::ActionSequenceTriggerContext") t->size = 0x38;  // ends inside usedItem.itemId
+    CHECK(!kab::use::resolve(&g_types_api, &L, why, sizeof why) && std::strstr(why, "triggerContext"));
+    for (auto* t : g_types)
+        if (t->qname == "keen::actor::ActionSequenceTriggerContext") t->size = 0x170;
     // no Dead
     auto flags = g_state_flag->values;
     g_state_flag->values.erase(g_state_flag->values.begin() + 1);
@@ -184,6 +202,8 @@ static void test_verdict() {
     CHECK(kab::use::verdict(f, L) == KILN_ITEM_USE_NOT_READY);
     f = ok; f.running = 0xdeadbeef;
     CHECK(kab::use::verdict(f, L) == KILN_ITEM_USE_BUSY);
+    f = ok; f.pending = 0xabc;  // a trigger already waits for this step
+    CHECK(kab::use::verdict(f, L) == KILN_ITEM_USE_BUSY);
     f = ok; f.state = ready | (1ull << 37);  // HangGliding
     CHECK(kab::use::verdict(f, L) == KILN_ITEM_USE_BUSY);
     f = ok; f.state = ready | (1ull << 0);  // Grounded is no reason
@@ -219,6 +239,11 @@ static void test_request() {
     std::memcpy(&item, ai + 0x40, 4);
     CHECK(slot == KILN_SLOT_ID(100, 2) && item == 0x1234);
     CHECK(ai[0x37] == 0xEE && ai[0x44] == 0xEE);
+    // abort_trigger clears the whole context, as actor_clear_input does, and nothing around it
+    kab::use::abort_trigger(ai, L);
+    bool cleared = true;
+    for (size_t i = 8; i < 8 + 0x170; ++i) cleared = cleared && ai[i] == 0;
+    CHECK(cleared && ai[7] == 0xEE && ai[8 + 0x170] == 0xEE);
 }
 
 // ------------------------------------------------------------------------------- abilities.cpp's t_item_use ----
@@ -256,10 +281,16 @@ static int64_t ecs_now(uintptr_t) { return 123456789; }
 struct TriggerCall { uint32_t entity, sequence; int64_t now; uint16_t trigger; };
 static std::vector<TriggerCall> g_triggers;
 static bool g_trigger_ok = true;
+static bool g_trigger_half = false;  // a fault after the runtime id is written (the guarded call returns false)
 // as the game's 0x369d0: clears the context (0x170 bytes at +8), writes the runtime id and the trigger type
 static bool trigger_sequence(void* ai, uint32_t e, uint32_t seq, int64_t now, uint16_t trigger) {
     if (!g_trigger_ok) return false;
     auto* p = static_cast<uint8_t*>(ai);
+    if (g_trigger_half) {
+        std::memset(p + 8, 0, 0x170);
+        std::memcpy(p + 8, &seq, 4);
+        return false;
+    }
     std::memset(p + 8, 0, 0x170);
     std::memcpy(p + 8, &seq, 4);
     std::memcpy(p + 0x10, &now, 8);
@@ -284,6 +315,10 @@ static const void* f_service(KilnStr n, uint32_t) {
 static uintptr_t f_server_world() { return g_server_world; }
 static FakeKilnApi g_fake_api{&f_service, &f_server_world};
 static FakeKilnApi* g_api = &g_fake_api;
+// abilities.cpp's thread-locals of a Kiln native call (the thunk sets them while a native, attachment or wrap runs)
+struct NativeCtx;
+static thread_local int t_slot = -1;
+static thread_local NativeCtx* t_ctx = nullptr;
 
 // The fake player's inventories as kiln.items reads them.
 static std::vector<KilnItemsSlot> g_slots;
@@ -311,6 +346,7 @@ static uint64_t g_ready_state = 1ull << 50;
 static void reset_world() {
     g_comps.clear();
     g_comps[{kActorInput, kPlayer}] = std::vector<uint8_t>(0x1C8, 0xEE);
+    std::memset(g_comps[{kActorInput, kPlayer}].data() + 8, 0, 0x170);  // no trigger waits: actor_clear_input cleared it
     std::vector<uint8_t> actor(0xC20, 0);
     std::memcpy(actor.data() + 0xBF8, &g_ready_state, 8);
     g_comps[{kActor, kPlayer}] = actor;
@@ -324,8 +360,12 @@ static void reset_world() {
     }
     g_setup_flags = 0x01;
     g_read_rc = KILN_OK;
+    g_read_entity = 0;
     g_triggers.clear();
     g_trigger_ok = true;
+    g_trigger_half = false;
+    t_slot = -1;
+    t_ctx = nullptr;
     g_have_sequences = true;
     g_tick = true;
     g_server_world = 0x1000;
@@ -387,6 +427,10 @@ static void test_service() {
         {"not ready", [] { set_state(0); }, req(), KILN_ITEM_USE_NOT_READY},
         {"in a sequence", [] { set_running(0xbbb); }, req(), KILN_ITEM_USE_BUSY},
         {"sleeping", [] { set_state((1ull << 50) | (1ull << 11)); }, req(), KILN_ITEM_USE_BUSY},
+        {"a trigger waits for this step", [] {
+             const uint32_t other = 0xbbb;
+             std::memcpy(g_comps[{kActorInput, kPlayer}].data() + 8, &other, 4);
+         }, req(), KILN_ITEM_USE_BUSY},
     };
     for (const Case& c : cases) {
         reset_world();
@@ -397,6 +441,40 @@ static void test_service() {
             ++g_fail;
             std::printf("FAIL %s: rc %d status %u triggers %zu\n", c.name, rc, r.status, g_triggers.size());
         }
+    }
+
+    // a second use in the same step: the first one's trigger waits, so the second is BUSY and the first is kept
+    reset_world();
+    u = req();
+    CHECK(t_item_use(&u) == KILN_OK && u.status == KILN_ITEM_USE_STARTED);
+    KilnItemUse again = req();
+    CHECK(t_item_use(&again) == KILN_OK && again.status == KILN_ITEM_USE_BUSY && g_triggers.size() == 1);
+    {
+        uint32_t item;
+        std::memcpy(&item, g_comps[{kActorInput, kPlayer}].data() + 0x40, 4);
+        CHECK(item == kMushroom);
+    }
+
+    // inside a Kiln native call (the world's step): refused before anything is read or written
+    reset_world();
+    t_slot = 3;
+    u = req();
+    CHECK(t_item_use(&u) == KILN_ERR_WRONG_THREAD && g_triggers.empty() && g_read_entity == 0);
+    reset_world();
+    t_ctx = reinterpret_cast<NativeCtx*>(&g_key_marker);
+    CHECK(t_item_use(&u) == KILN_ERR_WRONG_THREAD && g_triggers.empty());
+
+    // TriggerSequence faults half way (its runtime id written, no used item): the trigger is taken back
+    reset_world();
+    g_trigger_half = true;
+    u = req();
+    CHECK(t_item_use(&u) == KILN_ERR_INTERNAL);
+    {
+        const uint8_t* ai = g_comps[{kActorInput, kPlayer}].data();
+        bool cleared = true;
+        for (size_t i = 8; i < 8 + 0x170; ++i) cleared = cleared && ai[i] == 0;
+        CHECK(cleared && ai[7] == 0xEE);
+        CHECK(g_use_state == 1);  // taken back: item_use stays on
     }
 
     // errors

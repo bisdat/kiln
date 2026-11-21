@@ -3003,9 +3003,12 @@ bool use_ready() {
     else ok = kab::use::resolve(types, &g_use, why, sizeof why);
     g_use_state = ok ? 1 : -1;
     if (ok)
-        logi("kiln.abilities: item_use on (used item at ActorInput+0x%llx/+0x%llx, Actor.currentState +0x%llx, trigger Primary %lld)",
+        logi("kiln.abilities: item_use on (used item at ActorInput+0x%llx/+0x%llx, pending trigger +0x%llx, context +0x%llx "
+             "(%u bytes), Actor.currentState +0x%llx, sequenceRuntimeId +0x%llx, trigger Primary %lld)",
              static_cast<unsigned long long>(g_use.used_slot), static_cast<unsigned long long>(g_use.used_item),
-             static_cast<unsigned long long>(g_use.state), static_cast<long long>(g_use.primary));
+             static_cast<unsigned long long>(g_use.pending), static_cast<unsigned long long>(g_use.context), g_use.context_size,
+             static_cast<unsigned long long>(g_use.state), static_cast<unsigned long long>(g_use.running),
+             static_cast<long long>(g_use.primary));
     else
         logw("kiln.abilities: item_use is off: %s", why);
     return ok;
@@ -3013,7 +3016,8 @@ bool use_ready() {
 
 // TriggerSequence, then the used item. A fault in the second write would leave a consuming sequence with no item (the
 // server's spawn path reads one without a check): the component was just written by the game through the same pointer
-// and its size checked against the offsets, so the write is not expected to fault; it is guarded all the same.
+// and its size checked against the offsets, so the write is not expected to fault; it is guarded all the same, and a
+// trigger that did not get its item (or a TriggerSequence that faulted half way) is taken back (guarded_abort).
 bool guarded_used(void* ai, uint64_t slot, uint32_t item) {
     __try {
         kab::use::write_used(static_cast<uint8_t*>(ai), g_use, slot, item);
@@ -3023,9 +3027,31 @@ bool guarded_used(void* ai, uint64_t slot, uint32_t item) {
     }
 }
 
+bool guarded_abort(void* ai) {
+    __try {
+        kab::use::abort_trigger(static_cast<uint8_t*>(ai), g_use);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// A trigger with no used item could not be taken back: item_use stays off for the process from here on.
+KilnResult use_failed(void* ai, KilnEntity e, uint32_t sequence, const char* what) {
+    const bool cleared = guarded_abort(ai);
+    if (!cleared) g_use_state = -1;
+    logw("kiln.abilities: item_use: %s (entity %u, sequence 0x%08x); the trigger %s", what, e, sequence,
+         cleared ? "is taken back" : "could NOT be taken back: item_use is off for this process");
+    return KILN_ERR_INTERNAL;
+}
+
 KilnResult KILN_CALL t_item_use(KilnItemUse* u) {
     if (const KilnResult rc = kab::use::check_request(u); rc != KILN_OK) return rc;
     if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    // Pre or Post only. Inside a Kiln native (a sync native, an attachment, a wrap: impact_simulation, pinned to the
+    // world's thread) the world's step runs, and the game's programs run on workers beside it: actor_simulation_start
+    // could take the trigger between TriggerSequence and the used item.
+    if (t_slot >= 0 || t_ctx) return KILN_ERR_WRONG_THREAD;
     const uintptr_t world = g_api->server_world();
     if (!world) return KILN_ERR_WRONG_THREAD;  // no server world in this process: a joined client, or none started yet
     if (!g_have_sequences || !use_ready()) return KILN_ERR_UNAVAILABLE;
@@ -3034,8 +3060,10 @@ KilnResult KILN_CALL t_item_use(KilnItemUse* u) {
     uint64_t ai_size = 0, a_size = 0;
     void* ai = component(world, kActorInput, e, &ai_size);
     auto* a = static_cast<const uint8_t*>(component(world, kActor, e, &a_size));
-    const uint64_t ai_need = static_cast<uint64_t>(std::max({g_use.used_slot + 8, g_use.used_item + 4, E.trigger_counter + 1}));
-    const uint64_t a_need = static_cast<uint64_t>(std::max<int64_t>(g_use.state + 8, Engine::actor_sequence + 4));
+    const uint64_t ai_need = static_cast<uint64_t>(std::max({g_use.used_slot + 8, g_use.used_item + 4, g_use.pending + 4,
+                                                             g_use.context + static_cast<int64_t>(g_use.context_size),
+                                                             E.trigger_counter + 1}));
+    const uint64_t a_need = static_cast<uint64_t>(std::max<int64_t>(g_use.state + 8, g_use.running + 4));
     if (!ai || !a || ai_size < ai_need || a_size < a_need) {
         u->status = KILN_ITEM_USE_NOT_A_PLAYER;  // not a character the game can trigger a sequence on
         return KILN_OK;
@@ -3060,19 +3088,17 @@ KilnResult KILN_CALL t_item_use(KilnItemUse* u) {
     } else if (rr != KILN_ERR_NOT_FOUND) {
         return rr;  // kiln.items off or not on its thread: the slot cannot be checked
     }
-    if (!read_bytes(a + g_use.state, &f.state, 8) || !read_bytes(a + Engine::actor_sequence, &f.running, 4))
+    if (!read_bytes(a + g_use.state, &f.state, 8) || !read_bytes(a + g_use.running, &f.running, 4) ||
+        !read_bytes(static_cast<const uint8_t*>(ai) + g_use.pending, &f.pending, 4))
         return KILN_ERR_INTERNAL;
     u->count = f.count;
     u->status = kab::use::verdict(f, g_use);
     if (u->status != KILN_ITEM_USE_STARTED) return KILN_OK;
 
     const int64_t now = ecs_now(world);
-    if (!trigger_sequence(ai, e, u->sequence, now, static_cast<uint16_t>(g_use.primary))) return KILN_ERR_INTERNAL;
-    if (!guarded_used(ai, u->slot, u->item)) {
-        logw("kiln.abilities: item_use: writing the used item faulted after the trigger (entity %u, sequence 0x%08x)", e,
-             u->sequence);
-        return KILN_ERR_INTERNAL;
-    }
+    if (!trigger_sequence(ai, e, u->sequence, now, static_cast<uint16_t>(g_use.primary)))
+        return use_failed(ai, e, u->sequence, "TriggerSequence faulted");
+    if (!guarded_used(ai, u->slot, u->item)) return use_failed(ai, e, u->sequence, "writing the used item faulted after the trigger");
     // a new sequence replaces a held one (sequence_play's rule); the game's consumables have no keep-alive gates
     g_seq_holds.erase(std::remove_if(g_seq_holds.begin(), g_seq_holds.end(), [&](const SeqHold& h) { return h.entity == e; }),
                       g_seq_holds.end());

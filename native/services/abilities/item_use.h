@@ -32,12 +32,17 @@ inline constexpr const char* kBusyStates[] = {"Spawning",           "Sleeping", 
 struct Layout {
     int64_t used_slot = -1;  // ActorInput.triggerContext.usedItem.slotId (InventorySlotId, 8 bytes)
     int64_t used_item = -1;  // ActorInput.triggerContext.usedItem.itemId (4 bytes)
+    int64_t pending = -1;    // ActorInput.triggerContext.sequenceRuntimeId.sequenceId (4 bytes): a trigger waiting for the step
+    int64_t context = -1;    // ActorInput.triggerContext, and its size: what actor_clear_input clears (abort())
+    uint32_t context_size = 0;
     int64_t state = -1;      // Actor.currentState (8 bytes; BaseActor holds it)
+    int64_t running = -1;    // Actor.sequenceRuntimeId.sequenceId (4 bytes): the sequence playing (0: none)
     int dead = -1, ready = -1;  // StateFlag.Dead, StateFlag.IsReadyForGameplay (bit numbers)
     uint64_t busy = 0;          // the kBusyStates bits
     int64_t primary = -1;       // ActionSequenceTrigger.Primary
     bool ok() const {
-        return used_slot >= 0 && used_item >= 0 && state >= 0 && dead >= 0 && ready >= 0 && primary >= 0;
+        return used_slot >= 0 && used_item >= 0 && pending >= 0 && context >= 0 && context_size > 0 && state >= 0 &&
+               running >= 0 && dead >= 0 && ready >= 0 && primary >= 0;
     }
 };
 
@@ -119,8 +124,20 @@ inline bool resolve(const KilnTypesApi* t, Layout* L, char* why, size_t cap) {
     if (L->used_slot < 0 || n != 8) return std::snprintf(why, cap, "ActorInput.triggerContext.usedItem.slotId is not in this build's reflection"), false;
     L->used_item = field_path(t, "keen::ecs::ActorInput", "triggerContext.usedItem.itemId", &n);
     if (L->used_item < 0 || n != 4) return std::snprintf(why, cap, "ActorInput.triggerContext.usedItem.itemId is not in this build's reflection"), false;
+    L->pending = field_path(t, "keen::ecs::ActorInput", "triggerContext.sequenceRuntimeId.sequenceId", &n);
+    if (L->pending < 0 || n != 4)
+        return std::snprintf(why, cap, "ActorInput.triggerContext.sequenceRuntimeId.sequenceId is not in this build's reflection"), false;
+    L->context = field_path(t, "keen::ecs::ActorInput", "triggerContext", &L->context_size);
+    // the used item and the pending id must lie inside the context abort_trigger() clears
+    const auto inside = [&](int64_t off, int64_t size) {
+        return off >= L->context && off + size <= L->context + static_cast<int64_t>(L->context_size);
+    };
+    if (L->context < 0 || L->context_size == 0 || !inside(L->used_slot, 8) || !inside(L->used_item, 4) || !inside(L->pending, 4))
+        return std::snprintf(why, cap, "ActorInput.triggerContext is not in this build's reflection"), false;
     L->state = field_path(t, "keen::ecs::Actor", "currentState", &n);
     if (L->state < 0 || n != 8) return std::snprintf(why, cap, "Actor.currentState is not in this build's reflection"), false;
+    L->running = field_path(t, "keen::ecs::Actor", "sequenceRuntimeId.sequenceId", &n);
+    if (L->running < 0 || n != 4) return std::snprintf(why, cap, "Actor.sequenceRuntimeId.sequenceId is not in this build's reflection"), false;
     const int64_t dead = enum_value(t, "keen::actor::StateFlag", "Dead");
     const int64_t ready = enum_value(t, "keen::actor::StateFlag", "IsReadyForGameplay");
     if (dead < 0 || dead > 63 || ready < 0 || ready > 63)
@@ -147,6 +164,7 @@ struct Facts {
     uint32_t expected = 0;   // KilnItemUse.item
     uint64_t state = 0;      // Actor.currentState
     uint32_t running = 0;    // Actor.sequenceRuntimeId.sequenceId (0: none)
+    uint32_t pending = 0;    // ActorInput.triggerContext.sequenceRuntimeId.sequenceId (0: no trigger waits for the step)
 };
 
 // KILN_ITEM_USE_*: the slot first (the caller's mistakes), then the player (what changes from step to step).
@@ -157,7 +175,9 @@ inline uint32_t verdict(const Facts& f, const Layout& L) {
     if (!f.player) return KILN_ITEM_USE_NOT_A_PLAYER;
     if (f.state & (1ull << L.dead)) return KILN_ITEM_USE_DEAD;
     if (!(f.state & (1ull << L.ready))) return KILN_ITEM_USE_NOT_READY;
-    if (f.running != 0 || (f.state & L.busy)) return KILN_ITEM_USE_BUSY;
+    // a trigger already waiting (another item_use or sequence_play this step, or one the game queued after
+    // actor_clear_input) would be replaced by this one: the first caller was told STARTED
+    if (f.running != 0 || f.pending != 0 || (f.state & L.busy)) return KILN_ITEM_USE_BUSY;
     return KILN_ITEM_USE_STARTED;
 }
 
@@ -176,6 +196,13 @@ inline KilnResult check_request(KilnItemUse* u) {
 inline void write_used(uint8_t* actor_input, const Layout& L, uint64_t slot, uint32_t item) {
     std::memcpy(actor_input + L.used_slot, &slot, sizeof slot);
     std::memcpy(actor_input + L.used_item, &item, sizeof item);
+}
+
+// Takes back a trigger that did not get its used item: the context cleared as actor_clear_input clears it, so
+// actor_simulation_start finds nothing to start (a consuming sequence with no used item takes the server down). Only
+// called when no trigger waited before the call (verdict), so nothing of anyone else's is cleared. The caller guards it.
+inline void abort_trigger(uint8_t* actor_input, const Layout& L) {
+    std::memset(actor_input + L.context, 0, L.context_size);
 }
 
 }  // namespace kab::use
