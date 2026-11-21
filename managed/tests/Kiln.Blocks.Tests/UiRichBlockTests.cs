@@ -662,6 +662,29 @@ public sealed class UiRichBlockTests : IDisposable
         Assert.Equal("not a PNG", UiImages.HeaderOf(Encoding.ASCII.GetBytes("GIF89a.........................xx"), out _, out _));
     }
 
+    // ---- the sample ----------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void The_UiBlocks_samples_camp_window_compiles_with_its_data_its_stat_and_its_picture()
+    {
+        var dir = Path.Combine(Repo(), "mods", "samples", "UiBlocks");
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "blocks", "camp.json")));
+        var camp = Json<WindowBlock>(doc.RootElement.GetProperty("windows").GetProperty("camp").GetRawText());
+        const string sample = "ui-blocks";
+        UiStats.Metadata = key => key == new ModValueKey(sample, "rests") ? Def(key) : null;
+        using var quests = UiDataRegistry.Define(sample, "quests", new UiDataSchema(UiDataShape.Rows,
+            Fields: [new("name", UiScalarType.String), new("reward", UiScalarType.Decimal), new("done", UiScalarType.Bool)]));
+        using var places = UiDataRegistry.Define(sample, "places", new UiDataSchema(UiDataShape.Tree, Fields: [new("danger", UiScalarType.Int64)]));
+        var mod = new ModBlocks(sample, 1) { ManifestClients = "mod", BootDirectory = dir };
+        var (_, low, _) = Compiler.Lower(mod, "camp", camp);
+        var rows = low.Json["window"]!["rows"]!.AsArray();
+        Assert.Contains(rows, r => (string?)r!["type"] == "tabs");
+        Assert.Contains(rows, r => (string?)r!["does"]?["command"] == "uiblocks-rest");
+        var reads = low.Json["window"]!["reads"]!.AsArray().Select(x => (string?)x).ToHashSet();
+        foreach (var name in new[] { "world.local.inventory", "world.local.health", "world.local.position.x", "world.server.hours", "stats.ui-blocks/rests", "mod.quests", "mod.places", "state.note" })
+            Assert.Contains(name, reads);
+    }
+
     // ---- the boundary: the block runtime never reads a world itself ----------------------------------------------------
 
     [Fact]
