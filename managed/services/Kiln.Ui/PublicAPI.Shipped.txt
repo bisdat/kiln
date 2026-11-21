@@ -82,6 +82,8 @@ Kiln.GameScreen.State.get -> Kiln.GameUiState
 Kiln.GameScreen.State.init -> void
 Kiln.GameScreen.StationWorkshop.get -> uint
 Kiln.GameScreen.StationWorkshop.init -> void
+Kiln.GameScreen.Target.get -> Kiln.EntityId
+Kiln.GameScreen.Target.init -> void
 Kiln.GameUiState
 Kiln.GameUiState.Credits = 6 -> Kiln.GameUiState
 Kiln.GameUiState.Load = 3 -> Kiln.GameUiState
@@ -219,6 +221,50 @@ Kiln.HudValue
 Kiln.HudValue.Health = 3 -> Kiln.HudValue
 Kiln.HudValue.Mana = 5 -> Kiln.HudValue
 Kiln.HudValue.Stamina = 4 -> Kiln.HudValue
+Kiln.InventoryPanelOptions
+Kiln.InventoryPanelOptions.<Clone>$() -> Kiln.InventoryPanelOptions!
+Kiln.InventoryPanelOptions.Equals(Kiln.InventoryPanelOptions? other) -> bool
+Kiln.InventoryPanelOptions.Interactive.get -> bool
+Kiln.InventoryPanelOptions.Interactive.init -> void
+Kiln.InventoryPanelOptions.InventoryPanelOptions() -> void
+Kiln.InventoryPanelOptions.Screens.get -> Kiln.InventoryScreens
+Kiln.InventoryPanelOptions.Screens.init -> void
+Kiln.InventoryPanelOptions.Side.get -> Kiln.InventoryPanelSide
+Kiln.InventoryPanelOptions.Side.init -> void
+Kiln.InventoryPanelOptions.Style.get -> Kiln.UiStyle
+Kiln.InventoryPanelOptions.Style.init -> void
+Kiln.InventoryPanelOptions.Theme.get -> Kiln.UiTheme?
+Kiln.InventoryPanelOptions.Theme.init -> void
+Kiln.InventoryPanelOptions.When.get -> System.Func<Kiln.InventoryScreen, bool>?
+Kiln.InventoryPanelOptions.When.init -> void
+Kiln.InventoryPanelOptions.Width.get -> float
+Kiln.InventoryPanelOptions.Width.init -> void
+Kiln.InventoryPanelSide
+Kiln.InventoryPanelSide.Below = 2 -> Kiln.InventoryPanelSide
+Kiln.InventoryPanelSide.Left = 1 -> Kiln.InventoryPanelSide
+Kiln.InventoryPanelSide.Right = 0 -> Kiln.InventoryPanelSide
+Kiln.InventoryScreen
+Kiln.InventoryScreen.Container.get -> Kiln.EntityId
+Kiln.InventoryScreen.Container.init -> void
+Kiln.InventoryScreen.Deconstruct(out Kiln.InventoryScreenKind Kind, out Kiln.HudScreen Hud, out Kiln.EntityId Container) -> void
+Kiln.InventoryScreen.Equals(Kiln.InventoryScreen other) -> bool
+Kiln.InventoryScreen.Hud.get -> Kiln.HudScreen
+Kiln.InventoryScreen.Hud.init -> void
+Kiln.InventoryScreen.InventoryScreen() -> void
+Kiln.InventoryScreen.InventoryScreen(Kiln.InventoryScreenKind Kind, Kiln.HudScreen Hud, Kiln.EntityId Container) -> void
+Kiln.InventoryScreen.Kind.get -> Kiln.InventoryScreenKind
+Kiln.InventoryScreen.Kind.init -> void
+Kiln.InventoryScreenChangedEvent
+Kiln.InventoryScreenChangedEvent.Current.get -> Kiln.InventoryScreen?
+Kiln.InventoryScreenChangedEvent.InventoryScreenChangedEvent(Kiln.InventoryScreen? previous, Kiln.InventoryScreen? current) -> void
+Kiln.InventoryScreenChangedEvent.Previous.get -> Kiln.InventoryScreen?
+Kiln.InventoryScreenKind
+Kiln.InventoryScreenKind.Backpack = 1 -> Kiln.InventoryScreenKind
+Kiln.InventoryScreenKind.Chest = 2 -> Kiln.InventoryScreenKind
+Kiln.InventoryScreens
+Kiln.InventoryScreens.All = Kiln.InventoryScreens.Backpack | Kiln.InventoryScreens.Chest -> Kiln.InventoryScreens
+Kiln.InventoryScreens.Backpack = 1 -> Kiln.InventoryScreens
+Kiln.InventoryScreens.Chest = 2 -> Kiln.InventoryScreens
 Kiln.KeyBinding
 Kiln.KeyBinding.Category.get -> string!
 Kiln.KeyBinding.Consume.get -> bool
@@ -420,6 +466,57 @@ Kiln.ScreenKind.Settings = 8 -> Kiln.ScreenKind
 Kiln.ScreenKind.SkillTree = 14 -> Kiln.ScreenKind
 Kiln.ScreenKind.Storage = 15 -> Kiln.ScreenKind
 Kiln.ScreenKind.Title = 1 -> Kiln.ScreenKind
+Kiln.SlotButton
+Kiln.SlotButton.Left = 1 -> Kiln.SlotButton
+Kiln.SlotButton.Right = 3 -> Kiln.SlotButton
+Kiln.SlotClick
+Kiln.SlotClick.<Clone>$() -> Kiln.SlotClick!
+Kiln.SlotClick.Button.get -> Kiln.SlotButton
+Kiln.SlotClick.Button.init -> void
+Kiln.SlotClick.Deconstruct(out Kiln.SlotButton Button, out Kiln.SlotModifiers Modifiers, out Kiln.VisibleSlot! Slot, out Kiln.GameScreen Screen, out bool Taken) -> void
+Kiln.SlotClick.Equals(Kiln.SlotClick? other) -> bool
+Kiln.SlotClick.Holder.get -> Kiln.EntityId
+Kiln.SlotClick.Item.get -> Kiln.ItemId
+Kiln.SlotClick.ItemEntity.get -> Kiln.EntityId
+Kiln.SlotClick.Modifiers.get -> Kiln.SlotModifiers
+Kiln.SlotClick.Modifiers.init -> void
+Kiln.SlotClick.Screen.get -> Kiln.GameScreen
+Kiln.SlotClick.Screen.init -> void
+Kiln.SlotClick.Slot.get -> Kiln.VisibleSlot!
+Kiln.SlotClick.Slot.init -> void
+Kiln.SlotClick.SlotClick(Kiln.SlotButton Button, Kiln.SlotModifiers Modifiers, Kiln.VisibleSlot! Slot, Kiln.GameScreen Screen, bool Taken) -> void
+Kiln.SlotClick.Taken.get -> bool
+Kiln.SlotClick.Taken.init -> void
+Kiln.SlotClickOptions
+Kiln.SlotClickOptions.<Clone>$() -> Kiln.SlotClickOptions!
+Kiln.SlotClickOptions.Button.get -> Kiln.SlotButton
+Kiln.SlotClickOptions.Button.init -> void
+Kiln.SlotClickOptions.Equals(Kiln.SlotClickOptions? other) -> bool
+Kiln.SlotClickOptions.Modifiers.get -> Kiln.SlotModifiers
+Kiln.SlotClickOptions.Modifiers.init -> void
+Kiln.SlotClickOptions.SlotClickOptions() -> void
+Kiln.SlotClickOptions.Take.get -> bool
+Kiln.SlotClickOptions.Take.init -> void
+Kiln.SlotMark
+Kiln.SlotMark.Color.get -> Kiln.Color
+Kiln.SlotMark.Color.init -> void
+Kiln.SlotMark.Deconstruct(out Kiln.Color Color, out Kiln.SlotMarkStyle Style, out float Thickness) -> void
+Kiln.SlotMark.Equals(Kiln.SlotMark other) -> bool
+Kiln.SlotMark.SlotMark() -> void
+Kiln.SlotMark.SlotMark(Kiln.Color Color, Kiln.SlotMarkStyle Style = Kiln.SlotMarkStyle.Border, float Thickness = 3) -> void
+Kiln.SlotMark.Style.get -> Kiln.SlotMarkStyle
+Kiln.SlotMark.Style.init -> void
+Kiln.SlotMark.Thickness.get -> float
+Kiln.SlotMark.Thickness.init -> void
+Kiln.SlotMarkStyle
+Kiln.SlotMarkStyle.Border = 0 -> Kiln.SlotMarkStyle
+Kiln.SlotMarkStyle.Corner = 2 -> Kiln.SlotMarkStyle
+Kiln.SlotMarkStyle.Fill = 1 -> Kiln.SlotMarkStyle
+Kiln.SlotModifiers
+Kiln.SlotModifiers.Alt = 4 -> Kiln.SlotModifiers
+Kiln.SlotModifiers.Ctrl = 1 -> Kiln.SlotModifiers
+Kiln.SlotModifiers.None = 0 -> Kiln.SlotModifiers
+Kiln.SlotModifiers.Shift = 2 -> Kiln.SlotModifiers
 Kiln.StatusLine
 Kiln.StatusLine.Dispose() -> void
 Kiln.StatusLine.Id.get -> string!
@@ -439,11 +536,38 @@ Kiln.ToastKind.Error = 3 -> Kiln.ToastKind
 Kiln.ToastKind.Info = 0 -> Kiln.ToastKind
 Kiln.ToastKind.Success = 1 -> Kiln.ToastKind
 Kiln.ToastKind.Warning = 2 -> Kiln.ToastKind
+Kiln.TooltipColor
+Kiln.TooltipColor.Common = 3 -> Kiln.TooltipColor
+Kiln.TooltipColor.Default = 0 -> Kiln.TooltipColor
+Kiln.TooltipColor.Epic = 6 -> Kiln.TooltipColor
+Kiln.TooltipColor.Legendary = 7 -> Kiln.TooltipColor
+Kiln.TooltipColor.Muted = 9 -> Kiln.TooltipColor
+Kiln.TooltipColor.Negative = 2 -> Kiln.TooltipColor
+Kiln.TooltipColor.Positive = 1 -> Kiln.TooltipColor
+Kiln.TooltipColor.Rare = 5 -> Kiln.TooltipColor
+Kiln.TooltipColor.Uncommon = 4 -> Kiln.TooltipColor
+Kiln.TooltipColor.Unique = 8 -> Kiln.TooltipColor
+Kiln.TooltipLine
+Kiln.TooltipLine.Color.get -> Kiln.TooltipColor
+Kiln.TooltipLine.Color.init -> void
+Kiln.TooltipLine.Deconstruct(out Kiln.UiText! Text, out Kiln.TooltipColor Color, out bool Small) -> void
+Kiln.TooltipLine.Equals(Kiln.TooltipLine other) -> bool
+Kiln.TooltipLine.Small.get -> bool
+Kiln.TooltipLine.Small.init -> void
+Kiln.TooltipLine.Text.get -> Kiln.UiText!
+Kiln.TooltipLine.Text.init -> void
+Kiln.TooltipLine.TooltipLine() -> void
+Kiln.TooltipLine.TooltipLine(Kiln.UiText! Text, Kiln.TooltipColor Color = Kiln.TooltipColor.Default, bool Small = false) -> void
+Kiln.TooltipPlace
+Kiln.TooltipPlace.AfterStats = 1 -> Kiln.TooltipPlace
+Kiln.TooltipPlace.End = 0 -> Kiln.TooltipPlace
 Kiln.Ui
 Kiln.Ui.Crafting
+Kiln.Ui.Inventory
 Kiln.Ui.Menus
 Kiln.Ui.Screens
 Kiln.Ui.Themes
+Kiln.Ui.Tooltip
 Kiln.Ui.Values
 Kiln.UiBarEdit
 Kiln.UiBarEdit.<Clone>$() -> Kiln.UiBarEdit!
@@ -998,6 +1122,18 @@ Kiln.UiTooltipDecision.Ok.init -> void
 Kiln.UiTooltipDecision.Reason.get -> string?
 Kiln.UiTooltipDecision.Reason.init -> void
 Kiln.UiTooltipDecision.UiTooltipDecision(bool Ok, string? Reason, System.Collections.Generic.IReadOnlyList<Kiln.UiText!>! Lines) -> void
+Kiln.UiTooltipLines
+Kiln.UiTooltipLines.<Clone>$() -> Kiln.UiTooltipLines!
+Kiln.UiTooltipLines.Deconstruct(out bool Ok, out string? Reason, out System.Collections.Generic.IReadOnlyList<Kiln.TooltipLine>! Lines) -> void
+Kiln.UiTooltipLines.Equals(Kiln.UiTooltipLines? other) -> bool
+Kiln.UiTooltipLines.Lines.get -> System.Collections.Generic.IReadOnlyList<Kiln.TooltipLine>!
+Kiln.UiTooltipLines.Lines.init -> void
+Kiln.UiTooltipLines.Ok.get -> bool
+Kiln.UiTooltipLines.Ok.init -> void
+Kiln.UiTooltipLines.Reason.get -> string?
+Kiln.UiTooltipLines.Reason.init -> void
+Kiln.UiTooltipLines.UiTooltipLines(bool Ok, string? Reason, System.Collections.Generic.IReadOnlyList<Kiln.TooltipLine>! Lines) -> void
+Kiln.UiTooltipLinesProvider
 Kiln.UiTooltipOpenResult
 Kiln.UiTooltipOpenResult.<Clone>$() -> Kiln.UiTooltipOpenResult!
 Kiln.UiTooltipOpenResult.Deconstruct(out bool Ok, out string? Reason, out ulong Session, out ulong SourceFrame) -> void
@@ -1019,6 +1155,18 @@ Kiln.UiTooltipPanelChangedEvent.Session.get -> ulong
 Kiln.UiTooltipPanelChangedEvent.SourceFrame.get -> ulong
 Kiln.UiTooltipPanelChangedEvent.UiTooltipPanelChangedEvent(bool open, ulong session, ulong sourceFrame, Kiln.ItemId item, string? reason) -> void
 Kiln.UiTooltipProvider
+Kiln.UiTooltipScale
+Kiln.UiTooltipScale.<Clone>$() -> Kiln.UiTooltipScale!
+Kiln.UiTooltipScale.Deconstruct(out bool Ok, out string? Reason, out float Factor) -> void
+Kiln.UiTooltipScale.Equals(Kiln.UiTooltipScale? other) -> bool
+Kiln.UiTooltipScale.Factor.get -> float
+Kiln.UiTooltipScale.Factor.init -> void
+Kiln.UiTooltipScale.Ok.get -> bool
+Kiln.UiTooltipScale.Ok.init -> void
+Kiln.UiTooltipScale.Reason.get -> string?
+Kiln.UiTooltipScale.Reason.init -> void
+Kiln.UiTooltipScale.UiTooltipScale(bool Ok, string? Reason, float Factor) -> void
+Kiln.UiTooltipValuesProvider
 Kiln.UiValueChangeKind
 Kiln.UiValueChangeKind.Added = 0 -> Kiln.UiValueChangeKind
 Kiln.UiValueChangeKind.Evicted = 3 -> Kiln.UiValueChangeKind
@@ -1246,6 +1394,11 @@ Kiln.WorldDraw.Marker(Kiln.WorldPosition p, Kiln.Color color, float size = 10, K
 Kiln.WorldDraw.Ready.get -> bool
 Kiln.WorldDraw.ToScreen(Kiln.WorldPosition p, out System.Numerics.Vector2 screen) -> bool
 Kiln.WorldDraw.ToScreenClamped(Kiln.WorldPosition p, float margin, out System.Numerics.Vector2 screen, out float angle) -> bool
+const Kiln.Ui.Inventory.ClickCapability = "ui.slots.click" -> string!
+const Kiln.Ui.Inventory.MarkCapability = "ui.slots.inspect" -> string!
+const Kiln.Ui.Inventory.PanelCapability = "ui.inventory.panels" -> string!
+const Kiln.Ui.Tooltip.LinesCapability = "ui.tooltip.lines" -> string!
+const Kiln.Ui.Tooltip.ValuesCapability = "ui.tooltip.values" -> string!
 const Kiln.Ui.Values.DetailCapability = "ui.values.detail" -> string!
 const Kiln.Ui.Values.GemForgeCandidatesCapability = "ui.gemforge.inspect" -> string!
 const Kiln.Ui.Values.HeldCapability = "ui.values.held" -> string!
@@ -1274,6 +1427,10 @@ override Kiln.GemForgeCandidatesResult.ToString() -> string!
 override Kiln.GemForgeCandidatesSnapshot.Equals(object? obj) -> bool
 override Kiln.GemForgeCandidatesSnapshot.GetHashCode() -> int
 override Kiln.GemForgeCandidatesSnapshot.ToString() -> string!
+override Kiln.InventoryPanelOptions.Equals(object? obj) -> bool
+override Kiln.InventoryPanelOptions.GetHashCode() -> int
+override Kiln.InventoryPanelOptions.ToString() -> string!
+override Kiln.InventoryScreen.GetHashCode() -> int
 override Kiln.KeyBinding.ToString() -> string!
 override Kiln.KeyChord.GetHashCode() -> int
 override Kiln.KeyChord.ToString() -> string!
@@ -1282,6 +1439,14 @@ override Kiln.ModStatus.Equals(object? obj) -> bool
 override Kiln.ModStatus.GetHashCode() -> int
 override Kiln.ModStatus.ToString() -> string!
 override Kiln.RenderStats.GetHashCode() -> int
+override Kiln.SlotClick.Equals(object? obj) -> bool
+override Kiln.SlotClick.GetHashCode() -> int
+override Kiln.SlotClick.ToString() -> string!
+override Kiln.SlotClickOptions.Equals(object? obj) -> bool
+override Kiln.SlotClickOptions.GetHashCode() -> int
+override Kiln.SlotClickOptions.ToString() -> string!
+override Kiln.SlotMark.GetHashCode() -> int
+override Kiln.TooltipLine.GetHashCode() -> int
 override Kiln.UiBarEdit.Equals(object? obj) -> bool
 override Kiln.UiBarEdit.GetHashCode() -> int
 override Kiln.UiBarEdit.ToString() -> string!
@@ -1312,9 +1477,15 @@ override Kiln.UiThemeSpec.ToString() -> string!
 override Kiln.UiTooltipDecision.Equals(object? obj) -> bool
 override Kiln.UiTooltipDecision.GetHashCode() -> int
 override Kiln.UiTooltipDecision.ToString() -> string!
+override Kiln.UiTooltipLines.Equals(object? obj) -> bool
+override Kiln.UiTooltipLines.GetHashCode() -> int
+override Kiln.UiTooltipLines.ToString() -> string!
 override Kiln.UiTooltipOpenResult.Equals(object? obj) -> bool
 override Kiln.UiTooltipOpenResult.GetHashCode() -> int
 override Kiln.UiTooltipOpenResult.ToString() -> string!
+override Kiln.UiTooltipScale.Equals(object? obj) -> bool
+override Kiln.UiTooltipScale.GetHashCode() -> int
+override Kiln.UiTooltipScale.ToString() -> string!
 override Kiln.UiValueContext.GetHashCode() -> int
 override Kiln.UiValueIdentity.GetHashCode() -> int
 override Kiln.UiWheelOptions.Equals(object? obj) -> bool
@@ -1354,6 +1525,11 @@ static Kiln.Hud.Remove(string! id) -> void
 static Kiln.Hud.Show(string! id, System.Func<string!>! text, Kiln.HudAnchor anchor = Kiln.HudAnchor.TopLeft, Kiln.Color? color = null) -> Kiln.HudLine!
 static Kiln.Hud.Show(string! id, string! text = "", Kiln.HudAnchor anchor = Kiln.HudAnchor.TopLeft, Kiln.Color? color = null) -> Kiln.HudLine!
 static Kiln.Hud.Toast(string! text, Kiln.ToastKind kind = Kiln.ToastKind.Info, double seconds = 4) -> void
+static Kiln.InventoryPanelOptions.operator !=(Kiln.InventoryPanelOptions? left, Kiln.InventoryPanelOptions? right) -> bool
+static Kiln.InventoryPanelOptions.operator ==(Kiln.InventoryPanelOptions? left, Kiln.InventoryPanelOptions? right) -> bool
+static Kiln.InventoryScreen.Of(Kiln.GameScreen screen) -> Kiln.InventoryScreen?
+static Kiln.InventoryScreen.operator !=(Kiln.InventoryScreen left, Kiln.InventoryScreen right) -> bool
+static Kiln.InventoryScreen.operator ==(Kiln.InventoryScreen left, Kiln.InventoryScreen right) -> bool
 static Kiln.KeyBindings.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.KeyBinding!>!
 static Kiln.KeyBindings.FilePath.get -> string?
 static Kiln.KeyBindings.Find(string! id) -> Kiln.KeyBinding?
@@ -1381,6 +1557,12 @@ static Kiln.Render.HandlerBudgetMs.set -> void
 static Kiln.Render.Stats.get -> Kiln.RenderStats
 static Kiln.RenderStats.operator !=(Kiln.RenderStats left, Kiln.RenderStats right) -> bool
 static Kiln.RenderStats.operator ==(Kiln.RenderStats left, Kiln.RenderStats right) -> bool
+static Kiln.SlotClick.operator !=(Kiln.SlotClick? left, Kiln.SlotClick? right) -> bool
+static Kiln.SlotClick.operator ==(Kiln.SlotClick? left, Kiln.SlotClick? right) -> bool
+static Kiln.SlotClickOptions.operator !=(Kiln.SlotClickOptions? left, Kiln.SlotClickOptions? right) -> bool
+static Kiln.SlotClickOptions.operator ==(Kiln.SlotClickOptions? left, Kiln.SlotClickOptions? right) -> bool
+static Kiln.SlotMark.operator !=(Kiln.SlotMark left, Kiln.SlotMark right) -> bool
+static Kiln.SlotMark.operator ==(Kiln.SlotMark left, Kiln.SlotMark right) -> bool
 static Kiln.StatusLines.Add(System.Func<string?>! source, string? id = null) -> Kiln.StatusLine!
 static Kiln.StatusLines.All() -> System.Collections.Generic.IReadOnlyList<Kiln.ModStatus!>!
 static Kiln.StatusLines.Lines(string! modId) -> System.Collections.Generic.IReadOnlyList<string!>!
@@ -1388,6 +1570,8 @@ static Kiln.StatusLines.Remove(string! id) -> bool
 static Kiln.StatusLines.Set(string! id, string? text) -> Kiln.StatusLine?
 static Kiln.StatusLines.Summary() -> string!
 static Kiln.StatusLines.WriteToLog(Kiln.Logger? log = null) -> void
+static Kiln.TooltipLine.operator !=(Kiln.TooltipLine left, Kiln.TooltipLine right) -> bool
+static Kiln.TooltipLine.operator ==(Kiln.TooltipLine left, Kiln.TooltipLine right) -> bool
 static Kiln.Ui.AddConfigPage(string! modId, System.Action<Kiln.UiDraw!>! draw) -> System.IDisposable!
 static Kiln.Ui.Available.get -> bool
 static Kiln.Ui.Crafting.AddPanel(Kiln.UiText! title, System.Action<Kiln.UiDraw!, Kiln.CraftingScreen>! draw, Kiln.CraftingPanelOptions? options = null) -> System.IDisposable!
@@ -1397,6 +1581,15 @@ static Kiln.Ui.Crafting.Current.get -> Kiln.CraftingScreen?
 static Kiln.Ui.Crafting.Describe(uint workshop = 0) -> string!
 static Kiln.Ui.Crafting.MenuAvailable.get -> bool
 static Kiln.Ui.Frame -> System.Action<Kiln.UiDraw!>?
+static Kiln.Ui.Inventory.AddPanel(Kiln.UiText! title, System.Action<Kiln.UiDraw!, Kiln.InventoryScreen>! draw, Kiln.InventoryPanelOptions? options = null) -> System.IDisposable!
+static Kiln.Ui.Inventory.ClearMarks() -> void
+static Kiln.Ui.Inventory.Hovered.get -> Kiln.VisibleSlot?
+static Kiln.Ui.Inventory.Mark(Kiln.EntityId item, Kiln.SlotMark mark) -> void
+static Kiln.Ui.Inventory.MarkWhen(System.Func<Kiln.VisibleSlot!, Kiln.SlotMark?>! rule) -> System.IDisposable!
+static Kiln.Ui.Inventory.OnClick(Kiln.SlotClickOptions! options, System.Action<Kiln.SlotClick!>! handler) -> System.IDisposable!
+static Kiln.Ui.Inventory.Screen.get -> Kiln.InventoryScreen?
+static Kiln.Ui.Inventory.ScreenChanged -> System.Action<Kiln.InventoryScreen?, Kiln.InventoryScreen?>?
+static Kiln.Ui.Inventory.Unmark(Kiln.EntityId item) -> void
 static Kiln.Ui.ItemIconsAvailable.get -> bool
 static Kiln.Ui.ItemImage(Kiln.ItemId item) -> Kiln.UiImage?
 static Kiln.Ui.LoadFont(byte[]! ttf) -> Kiln.UiFontFile?
@@ -1420,6 +1613,11 @@ static Kiln.Ui.Status.get -> Kiln.UiStatus
 static Kiln.Ui.Themes.Define(string! name, Kiln.UiThemeSpec! spec) -> Kiln.UiTheme!
 static Kiln.Ui.Themes.Offered.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiTheme!>!
 static Kiln.Ui.Themes.Player.get -> Kiln.UiPlayerLook
+static Kiln.Ui.Tooltip.AddLines(Kiln.ItemId item, Kiln.UiTooltipLinesProvider! provider, Kiln.TooltipPlace place = Kiln.TooltipPlace.End) -> Kiln.UiValueRegistration!
+static Kiln.Ui.Tooltip.AddLines(Kiln.UiTooltipLinesProvider! provider, Kiln.TooltipPlace place = Kiln.TooltipPlace.End) -> Kiln.UiValueRegistration!
+static Kiln.Ui.Tooltip.AddValues(Kiln.ItemId item, Kiln.UiTooltipValuesProvider! provider) -> Kiln.UiValueRegistration!
+static Kiln.Ui.Tooltip.AddValues(Kiln.UiTooltipValuesProvider! provider) -> Kiln.UiValueRegistration!
+static Kiln.Ui.Tooltip.InGame.get -> bool
 static Kiln.Ui.Values.CloseTooltipDetails() -> void
 static Kiln.Ui.Values.GemForgeCandidates() -> Kiln.GemForgeCandidatesResult!
 static Kiln.Ui.Values.HeldBar(Kiln.UiBarProvider! provider) -> Kiln.UiValueRegistration!
@@ -1468,8 +1666,16 @@ static Kiln.UiTooltipDecision.Refuse(string! reason) -> Kiln.UiTooltipDecision!
 static Kiln.UiTooltipDecision.With(params Kiln.UiText![]! lines) -> Kiln.UiTooltipDecision!
 static Kiln.UiTooltipDecision.operator !=(Kiln.UiTooltipDecision? left, Kiln.UiTooltipDecision? right) -> bool
 static Kiln.UiTooltipDecision.operator ==(Kiln.UiTooltipDecision? left, Kiln.UiTooltipDecision? right) -> bool
+static Kiln.UiTooltipLines.Refuse(string! reason) -> Kiln.UiTooltipLines!
+static Kiln.UiTooltipLines.With(params Kiln.TooltipLine[]! lines) -> Kiln.UiTooltipLines!
+static Kiln.UiTooltipLines.operator !=(Kiln.UiTooltipLines? left, Kiln.UiTooltipLines? right) -> bool
+static Kiln.UiTooltipLines.operator ==(Kiln.UiTooltipLines? left, Kiln.UiTooltipLines? right) -> bool
 static Kiln.UiTooltipOpenResult.operator !=(Kiln.UiTooltipOpenResult? left, Kiln.UiTooltipOpenResult? right) -> bool
 static Kiln.UiTooltipOpenResult.operator ==(Kiln.UiTooltipOpenResult? left, Kiln.UiTooltipOpenResult? right) -> bool
+static Kiln.UiTooltipScale.By(float factor) -> Kiln.UiTooltipScale!
+static Kiln.UiTooltipScale.Refuse(string! reason) -> Kiln.UiTooltipScale!
+static Kiln.UiTooltipScale.operator !=(Kiln.UiTooltipScale? left, Kiln.UiTooltipScale? right) -> bool
+static Kiln.UiTooltipScale.operator ==(Kiln.UiTooltipScale? left, Kiln.UiTooltipScale? right) -> bool
 static Kiln.UiValueContext.operator !=(Kiln.UiValueContext left, Kiln.UiValueContext right) -> bool
 static Kiln.UiValueContext.operator ==(Kiln.UiValueContext left, Kiln.UiValueContext right) -> bool
 static Kiln.UiValueIdentity.operator !=(Kiln.UiValueIdentity left, Kiln.UiValueIdentity right) -> bool
@@ -1501,19 +1707,29 @@ static readonly Kiln.KeyChord.None -> Kiln.KeyChord
 static readonly Kiln.UiBarEdit.None -> Kiln.UiBarEdit!
 static readonly Kiln.UiProviderDecision.Pass -> Kiln.UiProviderDecision!
 static readonly Kiln.UiTooltipDecision.None -> Kiln.UiTooltipDecision!
+static readonly Kiln.UiTooltipLines.None -> Kiln.UiTooltipLines!
+static readonly Kiln.UiTooltipScale.None -> Kiln.UiTooltipScale!
 virtual Kiln.UiBarProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItemView item, Kiln.UiBarValue! accumulated) -> Kiln.UiProviderDecision!
+virtual Kiln.UiTooltipLinesProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItemView item) -> Kiln.UiTooltipLines!
 virtual Kiln.UiTooltipProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItemView item) -> Kiln.UiTooltipDecision!
+virtual Kiln.UiTooltipValuesProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItemView item) -> Kiln.UiTooltipScale!
 ~override Kiln.Color.Equals(object obj) -> bool
 ~override Kiln.Color.ToString() -> string
 ~override Kiln.CraftingScreen.Equals(object obj) -> bool
 ~override Kiln.CraftingScreen.ToString() -> string
 ~override Kiln.GameScreen.Equals(object obj) -> bool
 ~override Kiln.GameScreen.ToString() -> string
+~override Kiln.InventoryScreen.Equals(object obj) -> bool
+~override Kiln.InventoryScreen.ToString() -> string
 ~override Kiln.KeyChord.Equals(object obj) -> bool
 ~override Kiln.KeyPress.Equals(object obj) -> bool
 ~override Kiln.KeyPress.ToString() -> string
 ~override Kiln.RenderStats.Equals(object obj) -> bool
 ~override Kiln.RenderStats.ToString() -> string
+~override Kiln.SlotMark.Equals(object obj) -> bool
+~override Kiln.SlotMark.ToString() -> string
+~override Kiln.TooltipLine.Equals(object obj) -> bool
+~override Kiln.TooltipLine.ToString() -> string
 ~override Kiln.UiCursor.Equals(object obj) -> bool
 ~override Kiln.UiCursor.ToString() -> string
 ~override Kiln.UiItem.Equals(object obj) -> bool
