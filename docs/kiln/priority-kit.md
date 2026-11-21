@@ -17,6 +17,15 @@ Windows, and Wine may ignore thread priorities. The kit answers three questions 
 It also runs the write path's fault test once on real Windows, which shows that faulting reads and writes are
 contained (SEH).
 
+**Kit r2 (2026-11-21, files say kit 2).** Kit r1 retried a busy answer every millisecond. The gate's busy latch keeps
+the mod busy until the server's next Pre, and on a server whose update lasts longer than that millisecond (60 steps a
+second, 2.7 ms updates in the first Proton run) every retry landed at the start of the next update: 10 writes went
+through, 118,824 were busy, and the run stopped with "the restore stayed busy after 5000 tries". Kit r2 writes the way
+Kiln tells mods to ("after the step"): a pair starts only between two updates (one due during an update waits for its
+Post), and a busy answer is retried after the next Post whose step is past it, at once, then 1 to 7 ms later if it is
+busy there again. Busy tries count in server steps: 4 for a change, 300 for a restore (about 5 s). Results of r1 are
+not comparable with r2's: `analyze.py` shows r1 runs apart, as `<platform> kit 1`.
+
 ## What you need
 
 - A Windows 10 or 11 PC with Enshrouded on Steam, playing natively (not through Proton). A Linux PC with Proton is
@@ -156,7 +165,8 @@ decide whether Wine passes thread priorities on.
 - `kiln\logs\tick-stats.jsonl` and `kiln\state\capabilities.json`.
 - The test mod's runs (`kiln\logs\gate-priority-test\run-*`):
   - `run.json`: the target, the mode, the raise and a summary;
-  - `writes.csv`: every compare-exchange: its outcome, the gate's hold time, the calling thread's priority;
+  - `writes.csv`: every compare-exchange: its outcome, the gate's hold time, the calling thread's priority, the
+    server step, and the step and time since the last Post (`post_step`, `since_post_ns`, kit 2);
   - `steps.csv`: every server step's Pre and Post times;
   - `gate.csv`: `kiln.engine`'s gate counters every 10 seconds.
 
@@ -181,6 +191,7 @@ Look for `gate-priority-test:` lines in `<game>\kiln\logs\kiln.log`:
 | `kiln.world's compare-exchange writes are off on this build` | The game has updated past the builds Kiln knows; say so in #58 with the line `kiln.engine: ...` above it |
 | `... it runs no-op exchanges instead` | No component of your character has a usable padding byte. The run still takes the gate (no write) and is still useful |
 | `done (...)` | The summary: outcome counts, hold times, whether the byte is back |
+| `done (the restore stayed busy after 300 tries, one per server step)` | The gate was busy for 300 steps in a row. Attach the zip in #58 |
 | `done (...)` with `the last change could not be put back` | A write could not be proven, or the world stopped between a change and its restore. The changed bit is in a padding byte of an untracked component, so it is only in memory and never saved: quit the game, and it's gone. Say so in #58 |
 
 If the game crashes, attach the crash report Kiln writes in `kiln\logs` together with the zip.
@@ -211,7 +222,8 @@ The CPU-load phase files sort every row into idle or loaded. Two seconds around 
 `loaded`):
 
 - **Hold time:** every call that took the gate. The percentiles, the maximum, how many held 1 ms or more, and the
-  busy share (calls that found the gate held by a frame), with a histogram from 10 µs to over 20 ms.
+  busy share, with a histogram from 10 µs to over 20 ms. Kit 2 tries only between updates, so its busy share counts
+  calls that met the end of an update or another holder, not tries inside one (kit 1's were mostly those).
 - **Server step from the mod's rows:** Pre to Pre is the step's interval. A spin at the start of a frame lengthens it,
   so "late" counts intervals over 1.5 times the idle median. Pre to Post is the step itself.
 - **Server step from tick-stats.jsonl:** Kiln's own minute windows that lie inside one phase.
@@ -234,11 +246,13 @@ KILN_OUT=<out> tools/priority-kit/tests/run.sh                              # th
 - **The mod's host test** (`tests/kit_test.cpp`) runs the mod's own code against a fake Kiln whose kiln.world is the
   real compare-exchange code, over the fake engine of the world tests, laid out from the dedicated server's exact
   profile. kiln.types serves sigdb's reflection of that build. A simulated server thread runs frames that hold the
-  Scene word and now and then change a real field of the target. One scenario per process: the run on time, the raise
-  off, no-op mode, a named component and byte, a component without explained padding, a tracked one, no padding
+  Scene word and now and then change a real field of the target. Each frame's Pre moves the live step the gate's busy
+  latch keys on, and the word stays held a little past Post. One scenario per process: the run on time, a 60 Hz server
+  with 3 ms updates (GitHub #58's, where kit 1 got stuck), the raise off, no-op mode, a named component and byte, a component without explained padding, a tracked one, no padding
   anywhere, another world, no world, no run file, a bad run file, and a world that stops mid-run. They check the
   target, every outcome, that every byte of every component ends as it was (the game's own changes kept), the raise
-  (every hold above normal, or none), the files and their headers. Scenario `padding` checks the padding rule against
+  (every hold above normal, or none), the files and their headers, and that a retry after a busy answer always comes
+  in a later server step and almost never meets the latch. Scenario `padding` checks the padding rule against
   an independent walk of sigdb's reflection of both exact builds: 687 components each, 201 with padding the
   reflection explains.
 - **The Wine host** (`tests/host_win.cpp`) loads the real DLL and runs the same scenarios over kiln.engine's real
