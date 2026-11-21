@@ -2945,7 +2945,7 @@
       "features": [
         {
           "title": "ShroudForge mods on Kiln's own engine (preview)",
-          "text": "Kiln can run ShroudForge mods (Lua packages, EML packages that need ShroudForge's runtime, and package DLLs made for ShroudForge 1.7.9) on its own engine. It is a preview and off by default: Kiln's bundled ShroudForge (1.8.1 since dev.30) stays the default, and kiln mode is turned on in kiln.json.",
+          "text": "Kiln can run ShroudForge mods (Lua packages, EML packages that need ShroudForge's runtime, and package DLLs made for ShroudForge 1.7.9) on its own engine. It is a preview and off by default: Kiln's bundled ShroudForge (1.8.1 since dev.30) stays the default, and kiln mode is a choice on the ShroudForge card in Settings.",
           "area": "compat",
           "gamePending": true,
           "held": "all"
