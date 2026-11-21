@@ -149,3 +149,5 @@ Kiln aims to behave as ShroudForge does. Where it deliberately does not, the dif
 **Multiplayer**
 - On a dedicated server running in kiln mode, the connected-player list comes from the server's log and starts empty: on a server with a long
   log it can take a few seconds to fill. At most 256 players are accepted automatically; the rest need a manual accept.
+
+To help test kiln mode, see [Testing kiln mode](shroudforge-kiln-mode-testing.md).
