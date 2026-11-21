@@ -344,6 +344,7 @@ pub fn run() {
             commands::studio::studio_layer_lint,
             commands::studio::studio_pick,
             commands::studio::studio_fields,
+            commands::studio::studio_categories,
             commands::studio::studio_catalog_status,
             commands::studio::studio_catalog_ensure,
             commands::studio::studio_analyze,

@@ -9,7 +9,7 @@
 //   ?studio=gone        the published pack was deleted on Crucible: publish refuses until "Publish as a new pack"
 // Tests and the console: __kilnStudioMock.requests() (every studio call with its arguments), .state().
 import type {
-  BuiltPack, CatalogFieldInfo, CruciblePack, CrucibleVersion, Json, LibraryEntry, LintDiagnostic, LintReport, ModKind, PackCheckReport, PackCredit,
+  BuiltPack, CatalogFieldInfo, StudioItemCategory, CruciblePack, CrucibleVersion, Json, LibraryEntry, LintDiagnostic, LintReport, ModKind, PackCheckReport, PackCredit,
   PackEnv, PackSourceDoc, Profile, Studio, StudioCaptureChoice, StudioCaptureFile, StudioLayerFile, StudioMod, StudioNewPack, StudioOrder, StudioPickHit,
   StudioCatalogStatus, StudioPublishRequest, StudioPublishResult, StudioSummary, StudioTestReport,
 } from "./commands";
@@ -53,6 +53,11 @@ export const GAME: Record<string, { name: string; displayName?: string; id?: str
     { name: "Material_T1_Wood_Logs", displayName: "Wood Logs", id: "0x0000a1b2" },
     { name: "Material_T1_Twigs", displayName: "Twigs", id: "0x0000a1b3" },
     { name: "Material_T1_Stone", displayName: "Stone", id: "0x0000a1b4" },
+    { name: "Material_T2_Wood_Hardwood", displayName: "Hardwood", id: "0x0000a1b5" },
+    { name: "Material_T4_Wood_Logs_Palm", displayName: "Palm Wood Logs", id: "0x0000a1b6" },
+    { name: "Material_T5_Wood_Logs_Pine", displayName: "Conifer Logs", id: "0x0000a1b7" },
+    { name: "Material_T6_Wood_Logs_Bamboo", displayName: "Bamboo Logs", id: "0x0000a1b8" },
+    { name: "Material_T3_Limestone", displayName: "Limestone", id: "0x0000a1b9" },
     { name: "Material_T2_Shroud_Spores", displayName: "Shroud Spores", id: "0x0000a1c0" },
     { name: "Material_T2_Metal_Scraps", displayName: "Metal Scraps", id: "0x0000a1c1" },
     { name: "Material_T3_Iron_Bar", displayName: "Iron Bar", id: "0x0000a1d0" },
@@ -91,6 +96,15 @@ export const GAME: Record<string, { name: string; displayName?: string; id?: str
     { name: "Workshop_Workbench", displayName: "Workbench", id: "0x0c0c0004" },
   ],
 };
+
+/** The game's recipe input categories (studio_categories: catalog itemCategories with their items' display names and the
+ *  recipes that take them; no names, as the game's). Members count as used by the game: never hidden. */
+export const CATEGORIES: StudioItemCategory[] = [
+  { id: "0xee5ae93f", items: ["Material_T1_Wood_Logs", "Material_T2_Wood_Hardwood", "Material_T4_Wood_Logs_Palm", "Material_T5_Wood_Logs_Pine", "Material_T6_Wood_Logs_Bamboo"].map(itemOf),
+    recipes: [{ name: "Recipe_Tool_Camera", displayName: "Camera" }, { name: "Recipe_Material_Charcoal", displayName: "Charcoal" }, { name: "Recipe_Building_Wood_Block", displayName: "Wood Block" }] },
+  { id: "0xb053f0f1", items: ["Material_T1_Stone", "Material_T3_Limestone"].map(itemOf), recipes: [{ name: "Recipe_Blueprint_Tool_Quickbuilder", displayName: "Block Blueprints" }] },
+];
+function itemOf(name: string) { const g = GAME.items.find((x) => x.name === name); return g?.displayName ? { name, displayName: g.displayName } : { name }; }
 
 export const FIELDS: Record<string, CatalogFieldInfo[]> = {
   items: [
@@ -215,6 +229,10 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
       for (const st of Array.isArray(list) ? list : []) {
         const item = typeof st === "string" ? st : (st as { item?: unknown })?.item;
         if (typeof item === "string" && item && !known.has(item)) diagnostics.push(diag("KL104", "unknown-ref", "warning", where + ": no item " + item + " in the game or the pack's mods", "layer/" + path));
+        // a category input: one of the catalog's itemCategories (by id, as a number: 0xEE.. = 0xee..)
+        const category = typeof st === "object" && st ? (st as { category?: unknown }).category : undefined;
+        const num = (v: unknown) => (typeof v === "number" ? v : typeof v === "string" && /^(0[xX])?[0-9a-fA-F]+$/.test(v.trim()) ? parseInt(v.trim().replace(/^0[xX]/, ""), 16) : NaN);
+        if (category !== undefined && catalogOk && !CATEGORIES.some((c) => num(c.id) === num(category))) diagnostics.push(diag("KL104", "unknown-ref", "warning", where + ": no item category " + String(category) + " in the game", "layer/" + path));
       }
     };
     for (const [path, text] of s.layer) {
@@ -408,6 +426,7 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
         .map((x) => ({ section, name: x.name, id: x.id, displayName: x.displayName, ...(hiddenEntry(x.name) ? { hidden: true } : {}) }));
       return [...own, ...game.filter((g) => !own.some((o) => o.name === g.name))].slice(0, limit);
     },
+    studio_categories: (): StudioItemCategory[] => (!catalogOk ? [] : clone(CATEGORIES)),
     studio_fields: (a) => (!catalogOk ? [] : FIELDS[S(a.section)] ?? []),
     studio_catalog_status: (): StudioCatalogStatus => clone(catalog),
     // like catalog::auto: answers "building" at once; the first try without a catalog is refused (Steam updating), the

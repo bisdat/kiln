@@ -138,6 +138,12 @@ pub async fn studio_pick(pack_id: String, section: String, query: String, limit:
     blocking(move || studio::pick(&dirs()?, &dir(&pack_id)?, &section, &query, limit.unwrap_or(50), hidden.unwrap_or(false))).await
 }
 
+/// The game's recipe input categories with their items and the recipes that take them (empty without a catalog).
+#[tauri::command]
+pub async fn studio_categories() -> Result<Vec<kiln_manage::catalog::ItemCategory>, Error> {
+    blocking(move || Ok(studio::categories())).await
+}
+
 #[tauri::command]
 pub async fn studio_fields(section: String) -> Result<Vec<kiln_manage::catalog::FieldInfo>, Error> {
     blocking(move || Ok(studio::fields(&section))).await
