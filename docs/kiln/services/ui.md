@@ -45,7 +45,9 @@ and `UiNative.TableImageState`.
   image draws. 0 when the overlay does not draw or the size is out of range. Kiln.Ui loads the game's item icons with it
   (kiln.assets' `texture_rgba` decodes them; [the guide](../ui.md#item-icons-and-names)).
 - `screen_target()`: while the open screen is a factory screen (`hud_screen` 28, FactoryCrafting), the entity it is about
-  (play data `+play.target`, 0x2c50 on client 26430625: the station's entity id), else 0; also 0 when the constant
+  (play data `+play.target`, 0x2c50 on client 26430625: the station's entity id), else 0. Since 0.2.0-dev.30 also on the
+  two other screens PlayStateUi draws with the chest-style transfer screen `0xb9d0f0`: a storage chest (22) and 41
+  (CommerceProductChest), where it is the chest's entity (kiln.ui.inventory v2's `screen_view`, `GameScreen.Target`); also 0 when the constant
   `ui/play.target` did not resolve (kiln.log says so once at start). Any thread. A factory screen runs no crafting builder, so
   `KilnUiScreen.crafting` stays 0 there; its workshop is `KilnUiScreen.interaction` (play data +0x2e48). `KilnUiScreen`
   itself does not grow: kiln.ui.values' structs embed it. A change of the target while the screen stays open counts as a

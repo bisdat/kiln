@@ -1,0 +1,66 @@
+{
+  "format": 1,
+  "props": {
+    "physics-banner": {
+      "name": "Physics Banner",
+      "description": "Guided check 16e-cc16e: a banner whose cloth the cook wrote.",
+      "visual": {
+        "model": "models/banner.gltf"
+      },
+      "recipe": {
+        "needs": {
+          "Material_T1_Twigs": 1
+        }
+      }
+    }
+  },
+  "wornLooks": {
+    "physics-cape-look": {
+      "model": "models/cape.gltf",
+      "attach": "Chest"
+    }
+  },
+  "cosmetics": {
+    "physics-cape": {
+      "name": "Physics Cape",
+      "slot": "upperBody",
+      "look": "physics-cape-look",
+      "recipe": {
+        "needs": {
+          "Material_T1_Plant_Fibre": 1
+        }
+      }
+    }
+  },
+  "bodies": {
+    "pendant-body": {
+      "model": "models/pendant.gltf",
+      "chains": [
+        {
+          "rootJoint": "link_0",
+          "tipJoint": "link_2",
+          "particleMassKg": 0.2,
+          "particleRadius": 0.02
+        }
+      ]
+    }
+  },
+  "animations": {
+    "pendant-moves": {
+      "clips": "models/pendant.gltf",
+      "idle": "Idle"
+    }
+  },
+  "creatures": {
+    "pendant-stand": {
+      "name": "Pendant Stand",
+      "body": "pendant-body",
+      "animation": "pendant-moves",
+      "ai": {
+        "like": "still",
+        "moves": false,
+        "fights": false
+      }
+    }
+  }
+}

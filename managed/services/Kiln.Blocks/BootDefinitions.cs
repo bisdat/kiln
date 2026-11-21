@@ -83,10 +83,19 @@ public sealed class BootDefinitions
         [typeof(TalentBlock)] = "talents",
         // not a block Kiln.Blocks compiles: the staged record is the document kiln.content's patches collector reads
         [typeof(ResourcePatchBlock)] = ResourcePatches,
+        // not compiled either: kiln.content composes every mod's base rules into one change of the balancing table (since 0.2.0-dev.31)
+        [typeof(BaseRulesBlock)] = BaseRules,
     };
 
     /// <summary>The kind of <see cref="ResourcePatchBlock"/>: fields of a game resource, set before the game reads it.</summary>
     internal const string ResourcePatches = "resourcePatches";
+
+    /// <summary>The kind of <see cref="BaseRulesBlock"/>: Kiln's base rules, composed by kiln.content (since 0.2.0-dev.31).</summary>
+    internal const string BaseRules = "baseRules";
+
+    /// <summary>A staged base rule's document key in the patches collector: <c>baseRules@&lt;name&gt;</c> (a blocks file's rule
+    /// gets the same key from kiln.content, so a name both have stays the file's).</summary>
+    internal static string BaseRulesKey(string name) => BaseRules + "@" + name;
 
     /// <summary>The kinds of chapter 08 §4.1 that this build does not lower yet (they need id reservations or a pack the boot lowering does
     /// not build): staging them answers <c>NotInBootKinds</c>.</summary>
@@ -125,6 +134,8 @@ public sealed class BootDefinitions
         PlainData(definition, definition.GetType().Name, 0, new HashSet<object>(ReferenceEqualityComparer.Instance));
         if (definition is ResourcePatchBlock { } patch && patch.Problem() is { } problem)
             throw new ArgumentException($"{kind}/{name}: {problem}", nameof(definition));
+        if (definition is BaseRulesBlock { } rules && rules.Problem() is { } rulesProblem)
+            throw new ArgumentException($"{kind}/{name}: {rulesProblem}", nameof(definition));
         var json = Canonical(JsonSerializer.SerializeToNode(definition, definition.GetType(), BlockJson.SharedOptions));
         var (ok, reason) = Stage(kind, name, json);
         return new BootDefinitionResult<T>(ok, reason, ok ? new BootBlockId<T>(_boot.ModId, kind, name) : null);
@@ -151,6 +162,8 @@ public sealed class BootDefinitions
         if (block == null) throw new ArgumentException($"{kind}/{name}: null is not a {type.Name}", nameof(json));
         if (block is ResourcePatchBlock { } patch && patch.Problem() is { } problem)
             throw new ArgumentException($"{kind}/{name}: {problem}", nameof(json));
+        if (block is BaseRulesBlock { } rules && rules.Problem() is { } rulesProblem)
+            throw new ArgumentException($"{kind}/{name}: {rulesProblem}", nameof(json));
         var canonical = Canonical(JsonSerializer.SerializeToNode(block, type, BlockJson.SharedOptions));
         var (ok, reason) = Stage(kind, name, canonical);
         return new BootJsonDefinitionResult(ok, reason, kind, name);

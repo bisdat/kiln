@@ -23,6 +23,7 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `armorSlots` | object |  | Parts: your own slot, starting from a premade. |
 | `armorStats` | object |  | Parts: a piece of armor's numbers. |
 | `attacks` | object |  | Attacks, for behaviours to name. |
+| `baseRules` | object |  | Base rules (since 0.2.0-dev.31): room for more Flame Altars and larger build zones, in Kiln's own names (a mod with "boot": true; docs/kiln/services/build.md, Base rules and base limits). Kiln combines every mod's rules (the largest count per Flame level, the largest size per altar level and axis) and applies them after every resource patch, raising only: two mods with base rules never conflict. Not blocks: kiln.content applies them. |
 | `beards` | object |  | Beards: worn looks on the jaw. A look with files of the mod's own needs "clients": "mod". |
 | `beds` | object |  | Beds: the game's sleep and rest, comfort of the bed category; with Kiln a spawn point and a night slept through. |
 | `behaviours` | object |  | Behaviours: attacks, rules, a brain. |
@@ -351,6 +352,18 @@ What a piece of armor gives. A number left out: what its slot has at that level.
 
 Type: [ref](#ref) or [armorStats](#armorstats)
 
+## baseRule
+
+One base rule. Every member is optional; a rule never lowers the game's numbers.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `buildAreaPercent` | integer \| null |  | Every altar level's build zone at this share of the game's own size, at most 256 metres on an axis. min 100 max 200 |
+| `extraAltars` | integer |  | This many more Flame Altars than the game's own number at every Flame level; the result is at most 16. min 0 max 15 |
+| `format` | `1` |  |  |
+| `minimumAltars` | integer \| null |  | At least this many Flame Altars at every Flame level. Above 16 is refused: the game counts no more. min 1 max 16 |
+| `sizes` | array \| null |  | At least this full size for an altar of a level, one entry per level. |
+
 ## beard
 
 A beard: a worn look on the jaw. A morph target named Female is its shape on a female head.
@@ -424,6 +437,8 @@ What a creature is: a skinned glTF of the mod, or a game creature's body ("like"
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
+| `chains` | array of [modelChain](#modelchain) |  | Joint chains of the model's skeleton the game swings, cooked into it when the mod builds. Needs the cook feature modelcook.chains2 (on) and scale 1. |
+| `cloth` | array of [modelCloth](#modelcloth) |  | Primitives of the model the game simulates as cloth, cooked into it when the mod builds (assets/physics.json's form). Needs the cook feature modelcook.cloth (on) and scale 1. max items 255 |
 | `colliders` | array of [collider](#collider) |  | max items 2 |
 | `like` | `"vukah"` \| `"scavenger"` \| `"fisher"` \| `"villager"` |  |  |
 | `model` | string |  | Pattern `\.([gG][lL][bB]\|[gG][lL][tT][fF])$`. |
@@ -504,6 +519,22 @@ How a spell or an ability is cast: animation, timing, costs.
 | `releaseAt` | number |  | Seconds into the animation the spell leaves the staff. |
 | `staminaCost` | integer |  | min 0 |
 | `vfx` | [vfx](#vfx) |  |  |
+
+## clothCollider
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `type` | `"sphere"` \| `"capsule"` | yes |  |
+
+## clothSphere
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `joint` | string \| null |  | The joint it follows (name or j<index>); null: rigid, on a model without a skeleton. min length 1 |
+| `radius` | number | yes | Metres. max 8 |
+| `x` | number | yes |  |
+| `y` | number | yes |  |
+| `z` | number | yes |  |
 
 ## collider
 
@@ -954,6 +985,36 @@ The crafting menu a station opens: an existing station's, which lists the statio
 | Key | Type | Required | Notes |
 |---|---|---|---|
 | `like` | `"workbench"` \| `"carpenter"` \| `"kitchen"` \| `"forge"` \| `"oven"` \| `"alchemy"` \| `"drying-rack"` \| `"charcoal-kiln"` \| `"kiln"` \| `"smelter"` \| `"fireplace"` \| `"grinder"` \| `"tannery"` \| `"table-saw"` |  | Default: the station's kind. |
+
+## modelChain
+
+A chain of 2 to 8 joints the game swings (Kiln.Blocks ModelChainBlock).
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `bendStiffness` | number |  | Default `5`. min 0 max 1000000 |
+| `damping` | number |  | Default `0.01`. min 0 max 0.99 |
+| `particleMassKg` | number |  | One moving joint's mass. Default `1`. min 0.001 max 100 |
+| `particleRadius` | number |  | Metres. Default `0`. min 0 max 1 |
+| `rootJoint` | string | yes | The first joint that swings; its parent stays animated. min length 1 |
+| `stiffness` | number |  | Default `10000`. min 1 max 1000000 |
+| `tipJoint` | string | yes | The last joint, below the root along one branch. min length 1 |
+
+## modelCloth
+
+One glTF primitive simulated as cloth (Kiln.Blocks ModelClothBlock).
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `colliders` | array of [clothCollider](#clothcollider) |  | What it does not pass through, in bind pose (metres, glTF axes). All cloth of a model: at most 32 spheres, a capsule counting two. |
+| `damping` | number |  | Default `0.4`. min 0 max 0.99 |
+| `gravity` | number |  | m/s², downwards. Default `9.81`. min 0 max 50 |
+| `massKg` | number |  | The whole cloth's mass. Default `1`. min 0.001 max 100 |
+| `mesh` | integer | yes | The glTF mesh, by its index in the file. min 0 |
+| `particleIds` | array \| null |  | One id per POSITION element; equal ids weld seam copies (within 1e-6 m, same skin). Absent: every vertex its own particle. min items 1 max items 65535 |
+| `pin` | array of number | yes | One value per particle: 1 held on the model, 0 hangs. Every connected piece needs a 1. min items 1 max items 65535 |
+| `primitive` | integer | yes | The primitive of that mesh, by its index. min 0 |
+| `stiffness` | number |  | Default `0.8`. max 1 |
 
 ## move
 

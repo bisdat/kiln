@@ -70,8 +70,9 @@ defs.DefineJson("items", "frost-token", """{ "name": "Frost Token", "stack": 50 
   - `NotInBootKinds`: a kind this build does not stage (below). Define it in `OnLoad` or a data file instead.
 - `Ok` means staged, not committed. `Mods.BootState` tells you later whether it made it in.
 
-**The kinds this build stages:** statuses, effects, items, spells, talents, and resource patches
-([resource-patches.md](resource-patches.md)). Every other kind (creatures, NPCs, materials, props, stations, quests,
+**The kinds this build stages:** statuses, effects, items, spells, talents, resource patches
+([resource-patches.md](resource-patches.md)), and base rules (`BaseRulesBlock`, since 0.2.0-dev.31:
+[../services/build.md](../services/build.md#base-rules-and-base-limits-since-020-dev31)). Every other kind (creatures, NPCs, materials, props, stations, quests,
 VFX, ...) answers `NotInBootKinds`.
 
 **Names and limits:** a name is `^[a-z][a-z0-9_.-]{0,95}$`, without `..`. One mod stages at most 4096 definitions; one

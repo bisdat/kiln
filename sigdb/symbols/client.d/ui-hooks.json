@@ -1,7 +1,7 @@
 {
   "format": 1,
   "side": "client",
-  "comment": "dev.30 ui-hooks (client 26430625, enshrouded.exe 5d9ef2f1; static, no new address): ui.slots.click is kiln.ui.inventory's slot clicks (kiln_ui_inventory.h). It reuses ui.slots.inspect's slot sites (ItemSlot raw link, SlotGeometry mid at 0xc05433, GameUiFrame) and needs the HUD screen (play+play.hud_screen while state+state.ui_state is Play, read by kiln.ui) to tell screens with a pointer (backpack, chest, stations) from the play view, where the hotbar is drawn but a click attacks. The press itself comes from kiln.ui's window procedure (subscribe_pointer_press), not from the game. Evidence: docs/re/game-ui.md 'Native value, slot and text sites' and 'Inventory slots: clicks and marks (dev.30)'. The units-to-pixels mapping (05a-c5) is unverified: client check ui-hooks.c1.",
+  "comment": "dev.30 ui-hooks (client 26430625, enshrouded.exe 5d9ef2f1; static, no new address): ui.slots.click is kiln.ui.inventory's slot clicks (kiln_ui_inventory.h). It reuses ui.slots.inspect's slot sites (ItemSlot raw link, SlotGeometry mid at 0xc05433, GameUiFrame) and needs the HUD screen (play+play.hud_screen while state+state.ui_state is Play, read by kiln.ui) to tell screens with a pointer (backpack, chest, stations) from the play view, where the hotbar is drawn but a click attacks. The press itself comes from kiln.ui's window procedure (subscribe_pointer_press), not from the game. Evidence: docs/re/game-ui.md 'Native value, slot and text sites' and 'Inventory slots: clicks and marks (dev.30)'. The units-to-pixels mapping (05a-c5) is unverified: client check ui-hooks.c1. ui.inventory.panels (dev.30 slice 2, static, no new address) is kiln.ui.inventory v2's screen_view: the same slot sites and HUD screen, plus play+play.target (the entity the chest-style transfer screen 0xb9d0f0 reads its other inventory by, kiln.ui's screen_target) for a chest's entity; a mod's panel beside the backpack and chest screens (Ui.Inventory.AddPanel). Client check ui-hooks.c5/c6.",
   "symbols": {},
   "constants": {},
   "features": {
@@ -27,6 +27,31 @@
         "ui/sys.px_per_unit",
         "ui/state.ui_state",
         "ui/play.hud_screen"
+      ]
+    },
+    "ui.inventory.panels": {
+      "symbols": [
+        "ui/ItemSlot",
+        "ui/SlotGeometry",
+        "ui/GameUiFrame"
+      ],
+      "constants": [
+        "ui/slot.resultBytes",
+        "ui/slot.hoverCandidate",
+        "ui/view.stride",
+        "ui/view.inventoryPage",
+        "ui/view.slotIndex",
+        "ui/view.item",
+        "ui/view.count",
+        "ui/view.pide",
+        "ui/sys.frame_arg",
+        "ui/sys.canvas_w",
+        "ui/sys.canvas_h",
+        "ui/sys.viewport",
+        "ui/sys.px_per_unit",
+        "ui/state.ui_state",
+        "ui/play.hud_screen",
+        "ui/play.target"
       ]
     }
   }

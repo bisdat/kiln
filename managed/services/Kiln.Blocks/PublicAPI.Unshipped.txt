@@ -68,3 +68,123 @@ static Kiln.UpgradeAction.operator ==(Kiln.UpgradeAction? left, Kiln.UpgradeActi
 static Kiln.UpgradeStation.Available.get -> bool
 static Kiln.UpgradeStation.Offer(Kiln.EntityId entity, Kiln.UpgradeAction! action, out string! reason, Kiln.OfferOptions? options = null) -> bool
 static Kiln.UpgradeStation.Use(Kiln.EntityId player, Kiln.EntityId station, Kiln.UpgradeAction! action) -> System.Threading.Tasks.Task<Kiln.UpgradeResult?>!
+abstract Kiln.ClothColliderBlock.<Clone>$() -> Kiln.ClothColliderBlock!
+Kiln.BodyBlock.Chains.get -> System.Collections.Generic.IReadOnlyList<Kiln.ModelChainBlock!>?
+Kiln.BodyBlock.Chains.init -> void
+Kiln.BodyBlock.Cloth.get -> System.Collections.Generic.IReadOnlyList<Kiln.ModelClothBlock!>?
+Kiln.BodyBlock.Cloth.init -> void
+Kiln.ClothCapsuleBlock
+Kiln.ClothCapsuleBlock.A.get -> Kiln.ClothSphereBlock!
+Kiln.ClothCapsuleBlock.A.init -> void
+Kiln.ClothCapsuleBlock.B.get -> Kiln.ClothSphereBlock!
+Kiln.ClothCapsuleBlock.B.init -> void
+Kiln.ClothCapsuleBlock.ClothCapsuleBlock(Kiln.ClothSphereBlock! A, Kiln.ClothSphereBlock! B) -> void
+Kiln.ClothCapsuleBlock.Deconstruct(out Kiln.ClothSphereBlock! A, out Kiln.ClothSphereBlock! B) -> void
+Kiln.ClothCapsuleBlock.Equals(Kiln.ClothCapsuleBlock? other) -> bool
+Kiln.ClothColliderBlock
+Kiln.ClothColliderBlock.ClothColliderBlock(Kiln.ClothColliderBlock! original) -> void
+Kiln.ClothColliderBlock.ClothColliderBlock() -> void
+Kiln.ClothSphereBlock
+Kiln.ClothSphereBlock.ClothSphereBlock(double X, double Y, double Z, double Radius, string? Joint = null) -> void
+Kiln.ClothSphereBlock.Deconstruct(out double X, out double Y, out double Z, out double Radius, out string? Joint) -> void
+Kiln.ClothSphereBlock.Equals(Kiln.ClothSphereBlock? other) -> bool
+Kiln.ClothSphereBlock.Joint.get -> string?
+Kiln.ClothSphereBlock.Joint.init -> void
+Kiln.ClothSphereBlock.Radius.get -> double
+Kiln.ClothSphereBlock.Radius.init -> void
+Kiln.ClothSphereBlock.X.get -> double
+Kiln.ClothSphereBlock.X.init -> void
+Kiln.ClothSphereBlock.Y.get -> double
+Kiln.ClothSphereBlock.Y.init -> void
+Kiln.ClothSphereBlock.Z.get -> double
+Kiln.ClothSphereBlock.Z.init -> void
+Kiln.ModelChainBlock
+Kiln.ModelChainBlock.BendStiffness.get -> double
+Kiln.ModelChainBlock.BendStiffness.init -> void
+Kiln.ModelChainBlock.<Clone>$() -> Kiln.ModelChainBlock!
+Kiln.ModelChainBlock.Damping.get -> double
+Kiln.ModelChainBlock.Damping.init -> void
+Kiln.ModelChainBlock.Equals(Kiln.ModelChainBlock? other) -> bool
+Kiln.ModelChainBlock.ModelChainBlock() -> void
+Kiln.ModelChainBlock.ParticleMassKg.get -> double
+Kiln.ModelChainBlock.ParticleMassKg.init -> void
+Kiln.ModelChainBlock.ParticleRadius.get -> double
+Kiln.ModelChainBlock.ParticleRadius.init -> void
+Kiln.ModelChainBlock.RootJoint.get -> string!
+Kiln.ModelChainBlock.RootJoint.init -> void
+Kiln.ModelChainBlock.Stiffness.get -> double
+Kiln.ModelChainBlock.Stiffness.init -> void
+Kiln.ModelChainBlock.TipJoint.get -> string!
+Kiln.ModelChainBlock.TipJoint.init -> void
+Kiln.ModelClothBlock
+Kiln.ModelClothBlock.<Clone>$() -> Kiln.ModelClothBlock!
+Kiln.ModelClothBlock.Colliders.get -> System.Collections.Generic.IReadOnlyList<Kiln.ClothColliderBlock!>!
+Kiln.ModelClothBlock.Colliders.init -> void
+Kiln.ModelClothBlock.Damping.get -> double
+Kiln.ModelClothBlock.Damping.init -> void
+Kiln.ModelClothBlock.Equals(Kiln.ModelClothBlock? other) -> bool
+Kiln.ModelClothBlock.Gravity.get -> double
+Kiln.ModelClothBlock.Gravity.init -> void
+Kiln.ModelClothBlock.MassKg.get -> double
+Kiln.ModelClothBlock.MassKg.init -> void
+Kiln.ModelClothBlock.Mesh.get -> int
+Kiln.ModelClothBlock.Mesh.init -> void
+Kiln.ModelClothBlock.ModelClothBlock() -> void
+Kiln.ModelClothBlock.ParticleIds.get -> System.Collections.Generic.IReadOnlyList<int>?
+Kiln.ModelClothBlock.ParticleIds.init -> void
+Kiln.ModelClothBlock.Pin.get -> System.Collections.Generic.IReadOnlyList<double>!
+Kiln.ModelClothBlock.Pin.init -> void
+Kiln.ModelClothBlock.Primitive.get -> int
+Kiln.ModelClothBlock.Primitive.init -> void
+Kiln.ModelClothBlock.Stiffness.get -> double
+Kiln.ModelClothBlock.Stiffness.init -> void
+override Kiln.ClothCapsuleBlock.<Clone>$() -> Kiln.ClothCapsuleBlock!
+override Kiln.ClothCapsuleBlock.Equals(object? obj) -> bool
+override Kiln.ClothCapsuleBlock.GetHashCode() -> int
+override Kiln.ClothCapsuleBlock.ToString() -> string!
+override Kiln.ClothColliderBlock.Equals(object? obj) -> bool
+override Kiln.ClothColliderBlock.GetHashCode() -> int
+override Kiln.ClothColliderBlock.ToString() -> string!
+override Kiln.ClothSphereBlock.<Clone>$() -> Kiln.ClothSphereBlock!
+override Kiln.ClothSphereBlock.Equals(object? obj) -> bool
+override Kiln.ClothSphereBlock.GetHashCode() -> int
+override Kiln.ClothSphereBlock.ToString() -> string!
+override Kiln.ModelChainBlock.Equals(object? obj) -> bool
+override Kiln.ModelChainBlock.GetHashCode() -> int
+override Kiln.ModelChainBlock.ToString() -> string!
+override Kiln.ModelClothBlock.Equals(object? obj) -> bool
+override Kiln.ModelClothBlock.GetHashCode() -> int
+override Kiln.ModelClothBlock.ToString() -> string!
+override sealed Kiln.ClothCapsuleBlock.Equals(Kiln.ClothColliderBlock? other) -> bool
+override sealed Kiln.ClothSphereBlock.Equals(Kiln.ClothColliderBlock? other) -> bool
+static Kiln.ClothCapsuleBlock.operator !=(Kiln.ClothCapsuleBlock? left, Kiln.ClothCapsuleBlock? right) -> bool
+static Kiln.ClothCapsuleBlock.operator ==(Kiln.ClothCapsuleBlock? left, Kiln.ClothCapsuleBlock? right) -> bool
+static Kiln.ClothColliderBlock.operator !=(Kiln.ClothColliderBlock? left, Kiln.ClothColliderBlock? right) -> bool
+static Kiln.ClothColliderBlock.operator ==(Kiln.ClothColliderBlock? left, Kiln.ClothColliderBlock? right) -> bool
+static Kiln.ClothSphereBlock.operator !=(Kiln.ClothSphereBlock? left, Kiln.ClothSphereBlock? right) -> bool
+static Kiln.ClothSphereBlock.operator ==(Kiln.ClothSphereBlock? left, Kiln.ClothSphereBlock? right) -> bool
+static Kiln.ModelChainBlock.operator !=(Kiln.ModelChainBlock? left, Kiln.ModelChainBlock? right) -> bool
+static Kiln.ModelChainBlock.operator ==(Kiln.ModelChainBlock? left, Kiln.ModelChainBlock? right) -> bool
+static Kiln.ModelClothBlock.operator !=(Kiln.ModelClothBlock? left, Kiln.ModelClothBlock? right) -> bool
+static Kiln.ModelClothBlock.operator ==(Kiln.ModelClothBlock? left, Kiln.ModelClothBlock? right) -> bool
+virtual Kiln.ClothColliderBlock.EqualityContract.get -> System.Type!
+virtual Kiln.ClothColliderBlock.Equals(Kiln.ClothColliderBlock? other) -> bool
+virtual Kiln.ClothColliderBlock.PrintMembers(System.Text.StringBuilder! builder) -> bool
+const Kiln.BaseRulesBlock.MaxAltars = 16 -> int
+Kiln.BaseRulesBlock
+Kiln.BaseRulesBlock.<Clone>$() -> Kiln.BaseRulesBlock!
+Kiln.BaseRulesBlock.BaseRulesBlock() -> void
+Kiln.BaseRulesBlock.BuildAreaPercent.get -> int?
+Kiln.BaseRulesBlock.BuildAreaPercent.init -> void
+Kiln.BaseRulesBlock.Equals(Kiln.BaseRulesBlock? other) -> bool
+Kiln.BaseRulesBlock.ExtraAltars.get -> int
+Kiln.BaseRulesBlock.ExtraAltars.init -> void
+Kiln.BaseRulesBlock.MinimumAltars.get -> int?
+Kiln.BaseRulesBlock.MinimumAltars.init -> void
+Kiln.BaseRulesBlock.Sizes.get -> System.Collections.Generic.IReadOnlyList<Kiln.AltarSize!>?
+Kiln.BaseRulesBlock.Sizes.init -> void
+override Kiln.BaseRulesBlock.Equals(object? obj) -> bool
+override Kiln.BaseRulesBlock.GetHashCode() -> int
+override Kiln.BaseRulesBlock.ToString() -> string!
+static Kiln.BaseRulesBlock.operator !=(Kiln.BaseRulesBlock? left, Kiln.BaseRulesBlock? right) -> bool
+static Kiln.BaseRulesBlock.operator ==(Kiln.BaseRulesBlock? left, Kiln.BaseRulesBlock? right) -> bool
