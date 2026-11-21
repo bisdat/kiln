@@ -376,6 +376,13 @@ station's inventory) the entity is the server's own id of it: the game creates r
 there that the item is in the sender's inventory or a container they may use (Kiln.Items) before acting: a click is a wish,
 never authority. Kiln Auto Loot's salvage marks work this way.
 
+**Where the press was** (`SlotClick.Pointer`, since 0.2.0-dev.30.3, GitHub issue 107, thanks Fuzen777): the button's
+position, in the overlay's pixels, the space `UiDraw` draws in and `ui.Pointer` reports (top left of the game's
+picture is 0, 0). Kiln reads the press in the game window's client pixels, which are the overlay's pixels: the overlay
+is drawn at the window's size, and Dear ImGui reads its own pointer the same way. It is not in UI units, as
+`VisibleSlot.OuterUi` is. A mod that maps slots itself (the coordinates paragraph below) can check a click against its
+own picture with it. `null` only for a `SlotClick` a test made with the constructor.
+
 **Where clicks count (fail closed).** Only on screens with a pointer: the in-game menu (inventory tab), the backpack, the
 player's crafting, a storage chest, a station, an NPC's crafting, a factory. Never in the play view: the hotbar is drawn
 there but a click attacks. Only while Kiln does not have the input (no Kiln menu or screen open) and the cursor is not over

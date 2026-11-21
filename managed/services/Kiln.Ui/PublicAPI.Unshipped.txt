@@ -1,1 +1,3 @@
 #nullable enable
+Kiln.SlotClick.Pointer.get -> System.Numerics.Vector2?
+Kiln.SlotClick.Pointer.init -> void
