@@ -656,6 +656,7 @@ pub fn unique_name(dirs: &DataDirs, name: &str) -> Result<String> {
 
 /// [`unique_name`] against names already lower-cased.
 pub(crate) fn unique_among(name: &str, taken: &std::collections::BTreeSet<String>) -> String {
+    let name = name.trim();
     let fit = |base: &str, suffix: &str| -> String {
         let room = 128usize.saturating_sub(suffix.chars().count());
         let base: String = base.chars().take(room).collect();
