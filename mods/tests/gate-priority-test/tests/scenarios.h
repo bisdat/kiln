@@ -39,6 +39,24 @@ inline Scenario scenario(const std::string& name) {
         s.period_us = 16667;
         s.update_us = 3000;
         s.seconds = 5.5;
+    } else if (name == "tail-3ms") {
+        // the same server, the engine keeping the Scene word 3 ms past Kiln's Post: a try right after the Post edge
+        // is busy, so the kit must learn to wait longer after it
+        s.run_file = world + "seconds=3\nwarmup=1\nrate=50\n";
+        s.period_us = 16667;
+        s.update_us = 3000;
+        s.tail_us = 3000;
+        s.seconds = 5.5;
+    } else if (name == "hang") {
+        // the update hangs in the Scene word for 12 s right after the first change (no Pre, no Post, no step): the
+        // restore must not keep trying into the latch and must give up after its 10 s; the final restore then puts the
+        // byte back once the steps run again
+        s.run_file = world + "seconds=30\nwarmup=1\nrate=50\n";
+        s.period_us = 16667;
+        s.update_us = 3000;
+        s.hang_after_write = 1;
+        s.hang_ms = 12000;
+        s.seconds = 16;
     } else if (name == "raise-off") {
         s.run_file = world + "seconds=2\nwarmup=1\nrate=200\n";
         s.raise = false;
@@ -229,6 +247,28 @@ inline int run_scenario(const std::string& name, const std::string& sigdb, KilnN
         check(firsts > 0 && between * 100 >= firsts * 95,
               k + "at least 95% of the pairs' first tries came between two updates (" + std::to_string(between) + " of " +
                   std::to_string(firsts) + ")");
+    } else if (name == "tail-3ms") {
+        common_run_checks(r, sc, o, "keen::ecs::ClientFishing", 2, "write");
+        const size_t changes = rows_where(o, [](const auto& w) { return w[1] == "change" && written(w); });
+        check(changes >= 90, k + "at least 90 of the 150 pairs due changed the byte (" + std::to_string(changes) + ")");
+        check(o.run.value("post_delay_ns", 0ull) >= 2'000'000ull,
+              k + "the wait after a Post edge was learned: " + std::to_string(o.run.value("post_delay_ns", 0ull)) + " ns");
+    } else if (name == "hang") {
+        const std::string end = o.run.value("end", "?");
+        check(o.has_run && o.run.value("final", false) && end.rfind("the restore stayed busy: ", 0) == 0 &&
+                  end.find("waits saw no server step for 250 ms (post_edge_timeouts)") != std::string::npos,
+              k + "the restore gave up and says why: " + end);
+        check(o.run.value("restored", false) && o.run.value("verified", false) && untouched(r, sc, "keen::ecs::ClientFishing"),
+              k + "the final restore put the byte back once the steps ran again");
+        const size_t restores = rows_where(o, [](const auto& w) { return w[1] == "restore" || w[1] == "final-restore"; });
+        check(restores <= 4, k + "no tries into the latch while no step ran (" + std::to_string(restores) + " restore rows)");
+        check(rows_where(o, [](const auto& w) { return w.size() > 6 && w[6] == "45"; }) <= 1, k + "at most one try met the latch");
+        check(o.run.value("post_edge_timeouts", 0ull) >= 30, k + "the waits that saw no step are counted (" +
+                                                                  std::to_string(o.run.value("post_edge_timeouts", 0ull)) + ")");
+        const int64_t took = o.run.value("ended_utc_ms", int64_t{0}) - o.run.value("writes_from_utc_ms", int64_t{0});
+        check(took >= 10'000 && took <= 25'000,
+              k + "the restore's 10 s, then the final restore: " + std::to_string(took) + " ms (kiln.tasks' watchdog: 30 s)");
+        check(logs_with("gate-priority-test: done (the restore stayed busy: ") == 1, k + "the summary line");
     } else if (name == "raise-off") {
         common_run_checks(r, sc, o, "keen::ecs::ClientFishing", 2, "write");
         check(logs_with("the priority raise is OFF for this run") == 1, k + "a warning says the raise is off");

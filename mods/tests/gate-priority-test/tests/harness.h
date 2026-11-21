@@ -249,10 +249,27 @@ inline std::int32_t KILN_CALL e_validate(const kiln::engine::EcsGate* gate) {
 inline std::int32_t KILN_CALL e_component(const kiln::engine::EcsGate* gate, std::uint16_t c) {
     return kiln::engine::gate_component_supported(*gate, c) ? 1 : 0;
 }
+// Scenario.hang_after_write: the hold that made that write (1-based) ends, and at once the engine's update takes the
+// Scene word Shared and hangs in it for Scenario.hang_ms: no Pre, no Post, no step (a paused tick, a hook gone).
+inline std::atomic<int> g_hang_after_write{0};
+inline std::atomic<bool> g_hang_pending{false}, g_hung{false};
+inline std::atomic<std::uintptr_t> g_scene_word{0};
+inline std::atomic<int64_t> g_hang_since_ns{0};
+inline void scene_add(std::uintptr_t word, int delta) {
+#ifdef _WIN32
+    if (delta > 0) InterlockedIncrement(reinterpret_cast<volatile LONG*>(word));
+    else InterlockedDecrement(reinterpret_cast<volatile LONG*>(word));
+#else
+    __atomic_fetch_add(fake::word(word), delta, __ATOMIC_SEQ_CST);
+#endif
+}
 inline KilnResult KILN_CALL e_write(const kiln::engine::EcsGate* gate, std::uintptr_t address, const void* data, std::size_t bytes) {
     const auto written = kiln::engine::gate_write(*gate, address, data, bytes);
-    if (written == kiln::engine::GateWrite::Ok && g_uncertain_write.load() && ++g_gate_writes == g_uncertain_write.load())
-        g_fail_next_validate.store(true);
+    if (written == kiln::engine::GateWrite::Ok) {
+        const int n = ++g_gate_writes;
+        if (g_uncertain_write.load() && n == g_uncertain_write.load()) g_fail_next_validate.store(true);
+        if (g_hang_after_write.load() && n == g_hang_after_write.load()) g_hang_pending.store(true);
+    }
     switch (written) {
         case kiln::engine::GateWrite::Ok: return KILN_OK;
         case kiln::engine::GateWrite::TooLarge: return KILN_ERR_BUFFER_TOO_SMALL;
@@ -260,7 +277,14 @@ inline KilnResult KILN_CALL e_write(const kiln::engine::EcsGate* gate, std::uint
         default: return KILN_ERR_UNAVAILABLE;
     }
 }
-inline void KILN_CALL e_release(kiln::engine::EcsGate* gate) { kiln::engine::gate_release(*gate); }
+inline void KILN_CALL e_release(kiln::engine::EcsGate* gate) {
+    kiln::engine::gate_release(*gate);
+    if (g_hang_pending.exchange(false)) {
+        scene_add(g_scene_word.load(), +1);
+        g_hang_since_ns.store(std::chrono::steady_clock::now().time_since_epoch().count());
+        g_hung.store(true);
+    }
+}
 
 struct Worlds {
     std::atomic<uintptr_t> world{0};
@@ -523,6 +547,7 @@ struct Scenario {
     // The server's frames: one starts every period_us; it holds the Scene word Shared from before its Pre, runs Pre,
     // update_us later Post, and keeps the word tail_us past Post (the rest of the engine's update), as the game does.
     int period_us = 4000, update_us = 800, tail_us = 300;
+    int hang_after_write = 0, hang_ms = 0;  // after this gate write (1-based) the update hangs hang_ms (see e_release)
 };
 
 struct Rig {
@@ -643,6 +668,8 @@ inline bool build(Rig& r, const Scenario& sc, const std::string& sigdb) {
     kiln::engine::gate_set_priority_raise(sc.raise);
     g_raise_on = sc.raise;
     g_uncertain_write = sc.uncertain_write;
+    g_hang_after_write = sc.hang_after_write;
+    g_scene_word = r.engine->scene_word();
 
     r.world_api.header = {sizeof(KilnWorldApi), KILN_WORLD_VERSION};
     r.world_api.capabilities = &w_caps;
@@ -723,14 +750,7 @@ inline void world_event(Rig& r, uint32_t event) {
     for (auto& [fn, user] : r.host.world_events) fn(&ev, user);
 }
 
-inline void scene_shared(Rig& r, int delta) {
-#ifdef _WIN32
-    if (delta > 0) InterlockedIncrement(reinterpret_cast<volatile LONG*>(r.engine->scene_word()));
-    else InterlockedDecrement(reinterpret_cast<volatile LONG*>(r.engine->scene_word()));
-#else
-    __atomic_fetch_add(fake::word(r.engine->scene_word()), delta, __ATOMIC_SEQ_CST);
-#endif
-}
+inline void scene_shared(Rig& r, int delta) { scene_add(r.engine->scene_word(), delta); }
 // The engine's update takes the Scene word Shared; a Kiln holder has it exclusively between frames (the update waits).
 inline void frame_begin(Rig& r) {
     for (;;) {
@@ -753,6 +773,14 @@ inline void serve(Rig& r, const Scenario& sc) {
         t_server_thread = true;
         uint64_t frame = 0;
         while (std::chrono::steady_clock::now() < stop_at) {
+            if (g_hung.load()) {
+                // the update hangs in the Scene word (Scenario.hang_ms): no frame, no step, until it lets go
+                const auto since = std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(g_hang_since_ns.load()));
+                std::this_thread::sleep_until(std::min(stop_at, since + std::chrono::milliseconds(sc.hang_ms)));
+                scene_shared(r, -1);
+                g_hung.store(false);
+                continue;
+            }
             const auto start = std::chrono::steady_clock::now();
             frame_begin(r);
             const uint64_t step = r.worlds.steps.fetch_add(1) + 1;
