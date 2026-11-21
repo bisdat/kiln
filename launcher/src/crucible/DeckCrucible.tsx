@@ -1,9 +1,10 @@
-// Crucible on the Deck (DESIGN 2): Home's "Share to Crucible" (A shares the loaded profile, then the link's QR code and
-// the big code, with the upload's progress) and "Enter a code" (8 symbols with the Steam keyboard, Open), and the pack
-// preview with gamepad focus starting on Install and play: the same warning, trust boxes and optional mods as on the
-// desktop (src/crucible/Preview.tsx's model). kiln://crucible links open the same preview.
+// Crucible on the Deck (DESIGN 2): Home's "Share to Crucible" (a profile's first share asks first, as on the desktop:
+// what goes up, then A shares the loaded profile; then the link's QR code and the big code, with the upload's progress)
+// and "Enter a code" (8 symbols with the Steam keyboard, Open), and the pack preview with gamepad focus starting on
+// Install and play: the same warning, trust boxes, optional mods and check line as on the desktop
+// (src/crucible/Preview.tsx's model). kiln://crucible links open the same preview.
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import * as api from "../api/commands";
 import type { ProfileId } from "../api/commands";
 import { useGame, useGameStatus } from "../api/hooks";
@@ -12,9 +13,9 @@ import { ProgressBar, useTasks } from "../ui";
 import { QrCode } from "../community/parts";
 import { DeckSignIn } from "../community/SignIn";
 import { DeckButton, Dialog, Row, Word } from "../deck/ui";
-import { anyChange, codeInput, countsOf, crucibleTarget } from "./code";
+import { anyChange, checksLine, codeInput, countsOf, crucibleTarget } from "./code";
 import { installBlock, openCrucible, sizeLine, useInstallPack, usePreview, type PreviewModel } from "./Preview";
-import { changeWords, startShare, useProfileShare } from "./Share";
+import { ShareConfirm, changeWords, startShare, useProfileShare } from "./Share";
 import { useCrucibleLinks } from "./Host";
 import { crk, crucibleError, useCrucibleStatus, useCrucibleUi, useShareRun, useStatusFollowsSignIn } from "./state";
 import "./crucible.css";
@@ -31,15 +32,13 @@ export function DeckShareDialog({ profileId, profileName, onClose }: { profileId
   const s = shared.data;
   const changed = s?.changed && anyChange(countsOf(s.changed)) ? s.changed : null;
   const uploading = !!run && !run.result && !run.error && !run.pendingSignIn;
-  const begun = useRef(false);
-  // one press: Share on Home starts it when signed in and nothing is shared yet
-  useEffect(() => {
-    if (begun.current || !status.data || shared.isLoading) return;
-    if (signedIn && !s && !run) { begun.current = true; void startShare(qc, profileId); }
-  }, [status.data, shared.isLoading, signedIn, s, run, qc, profileId]);
+  // a first share asks first (what goes up); A then shares, or signs in and shares
+  const confirm = !!status.data && !shared.isLoading && !s && !run;
   const pack = run?.result?.pack ?? s?.pack ?? null;
   let body;
-  if (uploading) {
+  if (confirm) {
+    body = <div className="deck-list" data-testid="deck-crucible-confirm"><ShareConfirm profileId={profileId} signedIn={signedIn} deck /></div>;
+  } else if (uploading) {
     body = (
       <div className="deck-list" data-testid="deck-crucible-uploading">
         <p className="deck-line" role="status">{task?.message ?? t("crucible.share.starting")}{task?.progress != null && " · " + Math.round(task.progress * 100) + "%"}</p>
@@ -65,6 +64,8 @@ export function DeckShareDialog({ profileId, profileName, onClose }: { profileId
     );
   } else body = <p className="deck-line">{t("crucible.share.starting")}</p>;
   const buttons = uploading ? undefined
+    : confirm && signedIn ? <DeckButton primary onClick={() => void startShare(qc, profileId)} id="crucible-share-confirm" autoFocus>{t("crucible.share.confirmShare")}</DeckButton>
+    : confirm ? <DeckButton primary onClick={() => setSignIn(true)} id="crucible-share-confirm" autoFocus>{t("crucible.share.confirmSignIn")}</DeckButton>
     : !signedIn && (!s || changed) ? <DeckButton primary onClick={() => setSignIn(true)}>{t("crucible.share.signIn")}</DeckButton>
     : changed ? <DeckButton primary onClick={() => void startShare(qc, profileId)}>{t("crucible.share.updateLink")}</DeckButton>
     : run?.error && run.error.code !== "auth_failed" ? <DeckButton primary onClick={() => void startShare(qc, profileId)}>{t("common.retry")}</DeckButton>
@@ -176,12 +177,17 @@ export function DeckPreviewDialog({ source, onClose }: { source: NonNullable<Ret
 
 function DeckPreviewBody({ m }: { m: PreviewModel }) {
   const t = useT();
+  const checks = checksLine(m.checks);
   return (
     <>
       <p className="deck-line">{m.creator ? t("crucible.preview.by", { name: m.creator.name }) : t("crucible.preview.fromFile")}{m.version && " · v" + m.version}{m.upvotes != null && " · ▲ " + m.upvotes}</p>
       <p className="deck-line"><Word tone={m.fits ? "ok" : "warn"}>{m.fits ? (m.current ? t("crucible.preview.fits", { build: m.current }) : t("crucible.preview.fitsAny")) : t("crucible.preview.otherBuild", { build: m.builds[0] ?? "", current: m.current ?? "" })}</Word></p>
       {!m.kiln.ok && <p className="deck-line"><Word tone="err">{t("crucible.preview.kilnOld", { version: m.kiln.needs ?? "" })}</Word></p>}
       {m.uploading == null && <p className="deck-line">{sizeLine(m)}</p>}
+      {checks && <p className="deck-line" data-testid="deck-crucible-checks"><Word tone={checks.kind === "problems" ? "err" : checks.kind === "warnings" ? "warn" : checks.kind === "passed" ? "ok" : "idle"}>
+        {checks.kind === "passed" ? t("crucible.checks.passed") : checks.kind === "warnings" ? t("crucible.checks.lineWarnings", { count: checks.count })
+          : checks.kind === "problems" ? t("crucible.checks.lineProblems", { count: checks.count }) : checks.kind === "pending" ? t("crucible.checks.pending") : t("crucible.checks.lineFailed")}
+      </Word></p>}
       <p className="deck-note">{m.instance ? t("crucible.preview.have") : t("crucible.preview.ownProfile")}</p>
       {m.mods.length > 0 && <p className="deck-note">{m.mods.map((x) => x.name + (x.author ? " (" + x.author + ")" : "")).join(", ")}</p>}
     </>

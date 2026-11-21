@@ -1,23 +1,45 @@
-// Share to Crucible on Play (DESIGN 1.2): one click when signed in turns the loaded profile into an unlisted pack and
-// copies its link; the popover shows the upload, then "Link copied. Paste it to your friends." with the link and the code.
-// Not signed in: "Sign in with Discord to share. Your friends don't need to." with the community sign-in, or Save as
-// file. A profile that changed since it was shared carries a "Pack changed" pill, and the popover offers Update link
-// (same link, a new version). "Got a code?" opens a pack by its code (the clipboard's code is filled in when it opens,
-// and by its Paste button; the backend reads the clipboard: ./prefill.ts).
+// Share to Crucible on Play (DESIGN 1.2), with "What is Crucible?" beside it (the wiki page in the browser). A profile's
+// first share asks first (dev.30.2, players did not expect one click to upload ~20 MB): one screen says what goes up (the
+// mod list and the mods' files Crucible doesn't have yet, about how much), what stays (settings, saves, personal files),
+// and that the pack is link-only; Share turns the loaded profile into an unlisted pack and copies its link (signed out:
+// the Discord sign-in first, then the share goes on by itself), and the popover shows the upload, then "Link copied.
+// Paste it to your friends." with the link and the code. Save as file is the way without an account. A profile that
+// changed since it was shared carries a "Pack changed" pill, and the popover offers Update link (same link, a new
+// version, no confirm). "Got a code?" opens a pack by its code (the clipboard's code is filled in when it opens, and by
+// its Paste button; the backend reads the clipboard: ./prefill.ts).
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as api from "../api/commands";
 import type { BuiltPack, CrucibleShared, GameInstall, ProfileId } from "../api/commands";
-import { useGame, useGameSel, useProfiles } from "../api/hooks";
+import { useGame, useGameSel, useLibrary, useProfile, useProfiles } from "../api/hooks";
 import { t, useT } from "../i18n";
-import { Button, ProgressBar, Spinner, TextInput, pickPaths, runTask, toast, useTasks, waitTask } from "../ui";
+import { Button, ProgressBar, Spinner, TextInput, fmtBytes, pickPaths, runTask, toast, useTasks, waitTask } from "../ui";
 import { create } from "zustand";
 import MARK from "../assets/crucible/mark-64.png";
 import { useCommunityUi } from "../community/state";
-import { anyChange, codeInput, countsOf, crucibleTarget } from "./code";
+import { anyChange, codeInput, countsOf, crucibleTarget, shareEstimate } from "./code";
 import { clipboardPrefill } from "./prefill";
 import { openCrucible } from "./Preview";
 import { copyText, crk, crucibleError, readClipboard, shortLink, useCrucibleStatus, useCrucibleUi, useShareRun, useShared } from "./state";
+
+/** The wiki page "What is Crucible?" opens (in the browser). */
+export const CRUCIBLE_WIKI = "https://frostdev.io/kiln/wiki/crucible-share";
+export const openCrucibleWiki = () => void api.appOpenUrl(CRUCIBLE_WIKI).catch((e) => toast.error(e));
+
+/** Starts the first share after its confirm: signed in, at once; signed out, after the Discord sign-in (Host.tsx's
+ *  useShareAfterSignIn starts it then). */
+export function confirmShare(qc: QueryClient, profileId: ProfileId, signedIn: boolean, openSignIn: () => void) {
+  if (signedIn) { void startShare(qc, profileId); return; }
+  useShareRun.getState().set({ profileId, taskId: null, result: null, error: null, copied: null, seen: false, pendingSignIn: true });
+  openSignIn();
+}
+
+/** What a profile's first share sends at most (code.ts shareEstimate over the profile and the Library). */
+export function useShareEstimate(profileId: ProfileId) {
+  const profile = useProfile(profileId);
+  const library = useLibrary();
+  return shareEstimate(profile.data, library.data);
+}
 
 /** Which popover of the dock is open (one at a time). */
 export const useDock = create<{ open: "share" | "code" | null; set: (o: "share" | "code" | null) => void }>((set) => ({ open: null, set: (open) => set({ open }) }));
@@ -115,6 +137,7 @@ export function ShareDock({ game, profileId, profileName }: { game: GameInstall;
         <button type="button" className="k-link kcr-code-link" aria-expanded={open === "code"} data-testid="crucible-got-code" onClick={() => setOpen(open === "code" ? null : "code")}>
           {t("crucible.code.link")}
         </button>
+        <button type="button" className="k-link kcr-what-link" data-testid="crucible-what" onClick={openCrucibleWiki}>{t("crucible.share.what")}</button>
       </div>
       {open === "share" && <SharePanel game={game} profileId={profileId} profileName={profileName} />}
       {open === "code" && <CodePanel onDone={() => setOpen(null)} />}
@@ -143,12 +166,6 @@ function SharePanel({ profileId, profileName }: { game: GameInstall; profileId: 
   const [saving, setSaving] = useState(false);
   const s = shared.data;
   const changed = s?.changed && anyChange(countsOf(s.changed)) ? s.changed : null;
-  // one click: opening the popover signed in, with nothing shared yet, starts the share
-  const started = useRef(false);
-  useEffect(() => {
-    if (started.current || !status.data || shared.isLoading || shared.error) return;
-    if (signedIn && !s && !run) { started.current = true; void startShare(qc, profileId); }
-  }, [status.data, shared.isLoading, shared.error, signedIn, s, run, qc, profileId]);
   // the result has been seen here
   useEffect(() => { if (run?.result && !run.seen) useShareRun.getState().set({ ...run, seen: true }); }, [run]);
   const save = async () => { setSaving(true); await saveAsFile(profileId, profileName, s?.version.version); setSaving(false); };
@@ -177,6 +194,22 @@ function SharePanel({ profileId, profileName }: { game: GameInstall; profileId: 
   }
   const needSignIn = !signedIn && (!s || !!changed || run?.error?.code === "auth_failed");
   if (status.isLoading || shared.isLoading) return <Panel title={t("crucible.share.button")} testid="crucible-share-pop"><Spinner /></Panel>;
+  // never shared and nothing started: say what goes up first (the confirm), then Share or Cancel
+  if (!s && !run && !shared.error) {
+    return (
+      <Panel title={t("crucible.share.confirmTitle", { name: profileName })} testid="crucible-share-pop">
+        <ShareConfirm profileId={profileId} signedIn={signedIn} />
+        <div className="kcr-pop-actions">
+          <Button size="s" variant="primary" data-testid="crucible-share-confirm"
+            onClick={() => confirmShare(qc, profileId, signedIn, () => useCommunityUi.getState().openSignIn(false))}>
+            {signedIn ? t("crucible.share.confirmShare") : t("crucible.share.confirmSignIn")}
+          </Button>
+          <Button size="s" variant="ghost" onClick={() => useDock.getState().set(null)} data-testid="crucible-share-cancel">{t("common.cancel")}</Button>
+          {!signedIn && <Button size="s" variant="ghost" loading={saving} onClick={() => void save()} data-testid="crucible-save-file">{t("crucible.share.saveInstead")}</Button>}
+        </div>
+      </Panel>
+    );
+  }
   if (needSignIn && !s) {
     return (
       <Panel title={t("crucible.share.button")} testid="crucible-share-pop">
@@ -209,6 +242,34 @@ function SharePanel({ profileId, profileName }: { game: GameInstall; profileId: 
       <LinkRows url={pack.url} code={pack.code} />
       <div className="kcr-pop-actions">{saveButton}{just && result && <span className="k-hint">{t("crucible.share.versionLine", { number: result.version.number })}</span>}</div>
     </Panel>
+  );
+}
+
+/** The first share's confirm (dev.30.2): what Crucible is, what goes up and about how much, what never does, and that
+ *  the pack is link-only (public packs are made in Pack Studio: they need credits, a summary and finished checks).
+ *  Shared by the desktop popover and the Deck's dialog. */
+export function ShareConfirm({ profileId, signedIn, deck = false }: { profileId: ProfileId; signedIn: boolean; deck?: boolean }) {
+  const t = useT();
+  const est = useShareEstimate(profileId);
+  const line = deck ? "deck-line" : "kcr-p";
+  return (
+    <div className="kcr-confirm" data-testid="crucible-share-confirm-text">
+      <p className={line}>{t("crucible.share.confirmWhat")}</p>
+      <ul className="kcr-confirm-list">
+        <li data-testid="crucible-share-goes">{est
+          ? (est.bytes > 0 ? t("crucible.share.confirmGoesSize", { count: est.mods, size: fmtBytes(est.bytes) }) : t("crucible.share.confirmGoes", { count: est.mods }))
+          : t("crucible.share.confirmGoesAny")}</li>
+        <li>{t("crucible.share.confirmStays")}</li>
+        <li data-testid="crucible-share-never">{t("crucible.share.confirmNever")}</li>
+      </ul>
+      <div className="kcr-vis" role="radiogroup" aria-label={t("crucible.share.visibility")} data-testid="crucible-share-visibility">
+        <label className="kcr-tick"><input type="radio" name={"kcr-vis-" + profileId} checked readOnly className="k-check" data-testid="crucible-share-link-only" />
+          <span><b>{t("crucible.share.linkOnly")}</b> {t("crucible.share.linkOnlyText")}</span></label>
+        <label className="kcr-tick k-muted"><input type="radio" name={"kcr-vis-" + profileId} checked={false} disabled readOnly className="k-check" data-testid="crucible-share-public" />
+          <span><b>{t("crucible.share.public")}</b> {t("crucible.share.publicText")}</span></label>
+      </div>
+      {!signedIn && <p className={deck ? "deck-note" : "k-hint"} data-testid="crucible-share-signin-first">{t("crucible.share.signInText")}</p>}
+    </div>
   );
 }
 

@@ -11,10 +11,11 @@
 //   ?crucible=waiting   the first start after a pack page's Get Kiln whose name lost its code: the clipboard is read once
 //   ?crucible=resume    the download carried a pack code (Cinder Trails, K4TW-9XRB): its preview opens at start
 // Tests and the console: __kilnCrucibleMock.link(url) (a kiln://crucible link arrives), .setOnline(bool),
-// .requests() (every crucible/pack call with its arguments), .state().
+// .requests() (every crucible/pack call with its arguments), .state(), .setChecks(versionId, checks) (Crucible's check
+// of a version: Cinder Trails passed, Frost Hollow still running, Deep Shroud one warning, shared packs queued).
 import type {
   Activation, BuiltPack, CrucibleInstallRequest, CrucibleInstallResult, CruciblePack, CruciblePreview, CrucibleShareRequest, CrucibleShareResult,
-  CrucibleShared, CrucibleStatus, CrucibleTrust, CrucibleUpdate, CrucibleUpdatePlan, CrucibleUpdateRequest, CrucibleUpdateResult, CrucibleVersion,
+  CrucibleChecks, CrucibleShared, CrucibleStatus, CrucibleTrust, CrucibleUpdate, CrucibleUpdatePlan, CrucibleUpdateRequest, CrucibleUpdateResult, CrucibleVersion,
   ImportReport, KilnError, LibraryEntry, LibraryRef, ModKind, PackIndex, PackInstallRequest, PackInstallResult, PackInstance, PackMod, PackPreview,
   PackUpdatePlan, Profile, SaveBackup,
 } from "./commands";
@@ -140,9 +141,15 @@ let codeSeq = 0;
 const requests: { cmd: string; args: unknown }[] = [];
 
 const latest = (p: MockPack) => p.versions.at(-1)!;
+const passed = (): CrucibleChecks => ({ state: "done", full: true, ok: true, errors: [], warnings: [], notes: [], summary: { errors: 0, warnings: 0, notes: 0 } });
+/** Crucible's check per version (GET /codes' version.checks); a version not named here: passed. */
+const checks = new Map<string, CrucibleChecks>([
+  ["pv_frost1", { state: "running", full: false, ok: true, errors: [], warnings: [], notes: [], summary: { errors: 0, warnings: 0, notes: 0 } }],
+  ["pv_deep1", { state: "done", full: true, ok: true, errors: [], warnings: ["shroud-everywhere: references networking (System.Net.Http)"], notes: [], summary: { errors: 0, warnings: 1, notes: 0 } }],
+]);
 const versionOf = (v: MockVersion): CrucibleVersion => ({
   id: v.id, number: v.number, version: v.version, changes: v.changes, size: Math.round(v.mods.reduce((s, x) => s + x.mb, 0) * MB),
-  published: v.published, status: v.status,
+  published: v.published, status: v.status, checks: clone(checks.get(v.id) ?? passed()),
 });
 const indexOf = (p: MockPack, v: MockVersion): PackIndex => ({
   format: 2, kind: "pack", id: p.pack.slug, name: p.pack.title, version: v.version, created: v.published, authors: p.pack.owner ? [p.pack.owner.name] : [],
@@ -173,6 +180,12 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
   };
   const fileName = (x: { kind: ModKind; id: string; version: string }) => (x.kind === "native" ? x.id + "-native-" : x.id + "-") + x.version + ".zip";
 
+  /** `name`, or "name (2)"... when a profile has it (the backend's profile::unique_name). */
+  const uniqueMockName = (name: string) => {
+    const taken = new Set([...d.profiles.values()].map((p) => p.name.trim().toLowerCase()));
+    if (!taken.has(name.toLowerCase())) return name;
+    for (let n = 2; ; n++) if (!taken.has((name + " (" + n + ")").toLowerCase())) return name + " (" + n + ")";
+  };
   /** The player's own shared packs as Crucible has them. */
   const ownPacks = (): MockPack[] => [...shared.entries()].map(([pid, s]) => {
     const prof = d.profiles.get(pid);
@@ -295,6 +308,9 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
     p.mods = mods;
     const size = Math.round((12 + mods * 6) * MB);
     const ver: CrucibleVersion = { id: "pv_" + prof.id.replace(/-/g, "") + n, number: n, version: n + ".0.0", changes: was ? "Updated by the launcher." : null, size, published: now(), status: "ready" };
+    // the full check runs a few minutes after an upload
+    checks.set(ver.id, { state: "queued", full: false, ok: true, errors: [], warnings: [], notes: [], summary: { errors: 0, warnings: 0, notes: 0 } });
+    ver.checks = clone(checks.get(ver.id)!);
     shared.set(prof.id, { pack: p, version: ver, snapshot: snap(prof) });
     return { pack: clone(p), version: ver, files: mods + 1, uploaded: was ? Math.round(size / 9) : Math.round(size * 0.7), skipped: was ? size - Math.round(size / 9) : Math.round(size * 0.3), copied: false };
   };
@@ -363,17 +379,22 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       const { p, v } = find(req.target);
       if (p.kilnOk === false) err("refused", "Needs Kiln " + (p.kiln ?? "") + " or newer.");
       if (v.status === "uploading") err("refused", "The pack is still uploading. Try again in a minute.");
-      if (d.isRunning(gameId)) err("game_running", "Close Enshrouded first.");
+      // Install alone (play false) writes only the data folder: it may run while the game does
+      const play = req.play !== false;
+      if (play && d.isRunning(gameId)) err("game_running", "Close Enshrouded first.");
       const missing = v.mods.filter((x) => !inLibrary(x.kind, x.id, x.version));
       const total = missing.reduce((s, x) => s + x.mb, 0);
       return d.startTask("crucible_install", "Install " + p.pack.title, [
-        "Downloading " + missing.length + " mods (" + total.toFixed(0) + " MB)", "Checking the files", "Adding to your Library", "Making the profile", "Backing up your saves",
+        "Downloading " + missing.length + " mods (" + total.toFixed(0) + " MB)", "Checking the files", "Adding to your Library", "Making the profile", ...(play ? ["Backing up your saves"] : []),
       ], (): CrucibleInstallResult => {
         if (req.trustAlways && p.pack.owner && !trust.some((x) => x.id === p.pack.owner!.id)) trust.push({ id: p.pack.owner.id, name: p.pack.owner.name, since: now() });
         const opt = { ...Object.fromEntries(v.mods.filter((x) => x.optional).map((x) => [x.id, !!x.on])), ...(req.optional ?? {}) };
-        const r = makeInstance(gameId, { slug: p.pack.slug, title: p.pack.title, code: p.pack.code, packId: p.pack.id, versionId: v.id }, v.version, v.mods, opt, req.name);
+        const previous = d.activations[gameId]?.profileId ?? null;
+        // named after the pack and its creator by default, never a name a profile has (kiln_manage::profile::unique_name)
+        const r = makeInstance(play ? gameId : "", { slug: p.pack.slug, title: p.pack.title, code: p.pack.code, packId: p.pack.id, versionId: v.id }, v.version, v.mods, opt,
+          uniqueMockName(req.name?.trim() || (p.pack.owner ? p.pack.title + " (" + p.pack.owner.name + "'s pack)" : p.pack.title)));
         p.pack.installs++;
-        return { profile: clone(r.prof), instance: clone(r.inst), imported: r.imported, overrides: ["kiln-auto-loot.json"], previous: r.previous, downloaded: Math.round(total * MB) };
+        return { profile: clone(r.prof), instance: clone(r.inst), imported: r.imported, overrides: ["kiln-auto-loot.json"], previous: play ? r.previous : previous, downloaded: Math.round(total * MB) };
       }, 350);
     },
     crucible_updates: (): CrucibleUpdate[] => [...instances.entries()].filter(([pid]) => d.profiles.has(pid)).flatMap(([pid, i]) => {
@@ -534,13 +555,13 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       const gameId = String(a.gameId);
       const req = a.request as PackInstallRequest;
       if (!req?.consent) err("consent_required", "Tick \"I trust this pack\" first.");
-      if (d.isRunning(gameId)) err("game_running", "Close Enshrouded first.");
+      if (req.activate !== false && d.isRunning(gameId)) err("game_running", "Close Enshrouded first.");
       const p = fromFile(req.source.path);
       const v = latest(p);
       return d.startTask("pack_install", "Install " + p.pack.title, ["Checking the file", "Adding to your Library", "Making the profile", "Backing up your saves"], (): PackInstallResult => {
         const opt = { ...Object.fromEntries(v.mods.filter((x) => x.optional).map((x) => [x.id, !!x.on])), ...(req.optional ?? {}) };
         const previous = d.activations[gameId]?.profileId ?? null;
-        const r = makeInstance(req.activate === false ? "" : gameId, { slug: p.pack.slug, title: p.pack.title }, v.version, v.mods, opt, req.name);
+        const r = makeInstance(req.activate === false ? "" : gameId, { slug: p.pack.slug, title: p.pack.title }, v.version, v.mods, opt, uniqueMockName(req.name?.trim() || p.pack.title));
         lastPrevious = previous;
         return { profile: clone(r.prof), instance: clone(r.inst), imported: r.imported, overrides: [], backup: null, activation: req.activate === false ? null : d.activations[gameId] ?? null };
       }, 300);
@@ -553,6 +574,7 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       /** A kiln://crucible link, as the OS hands it to the launcher. */
       link: (url: string) => { links.push(url); d.emit("kiln://crucible-link", { count: links.length }); },
       setOnline: (on: boolean) => { online = on; },
+      setChecks: (versionId: string, c: CrucibleChecks) => { checks.set(versionId, clone(c)); },
       requests: () => clone(requests),
       state: () => clone({ shared: [...shared.entries()], instances: [...instances.entries()], trust, undo: [...undos.keys()], lastPrevious }),
     };

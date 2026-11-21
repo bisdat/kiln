@@ -88,7 +88,9 @@ impl Fake {
     fn version_view(s: &State, id: &str) -> Value {
         let (_, number, index, status) = &s.versions[id];
         serde_json::json!({ "id": id, "number": number, "version": index["version"], "changes": index.get("changes"), "status": status,
-            "size": Self::files_of(index).iter().map(|f| f.2).sum::<u64>(), "published": null })
+            "size": Self::files_of(index).iter().map(|f| f.2).sum::<u64>(), "published": null,
+            "checks": { "state": "done", "full": true, "ok": true, "errors": [], "warnings": ["beta: references networking"], "notes": [],
+                "summary": { "errors": 0, "warnings": 1, "notes": 0 } } })
     }
 
     fn plan(s: &mut State, files: &[(String, String, u64)]) -> (Vec<Value>, Vec<String>) {
@@ -675,4 +677,36 @@ fn an_update_from_another_crucible_pack_with_the_same_index_id_is_refused() {
     // and the preview of the other pack does not call the friend's instance its own
     let (p, _) = preview(&b, &cb, &r2.pack.url, None).unwrap();
     assert_eq!(p.instance, None);
+}
+
+#[test]
+fn an_installed_pack_is_named_after_the_pack_and_its_creator_and_never_twice() {
+    let t = tmp("naming");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (a, pid) = creator(&t);
+    let ca = Crucible::new(&ep, &fake, "0.2.0-dev").with_session(Some(KEY.into()));
+    let r = share(&a, &ca, &ShareRequest { profile: pid, ..Default::default() }, None, &mut NoProgress).unwrap();
+    // the friend has a profile of the same name as the sharer's ("My mods" twice was the dev.30 report)
+    let b = DataDirs::at(t.0.join("friend"));
+    crate::profile::create(&b, "Ember run", None).unwrap();
+    let cb = Crucible::new(&ep, &fake, "0.2.0-dev");
+    let (p, _) = preview(&b, &cb, &r.pack.code, None).unwrap();
+    // the service's check result reaches the preview (the launcher's "Checks: ..." line)
+    let checks = p.version.checks.clone().expect("checks");
+    assert_eq!((checks["state"].as_str(), checks["warnings"].as_array().map(Vec::len)), (Some("done"), Some(1)));
+    assert_eq!(serde_json::to_value(&p).unwrap()["version"]["checks"]["state"], "done");
+    let req = InstallRequest { target: p.version.id.clone(), consent: true, play: Some(false), ..Default::default() };
+    let one = install(&b, &cb, None, &req, p.pack.owner.as_ref(), false, &mut NoProgress).unwrap();
+    assert_eq!(one.profile.name, "Ember run (Emberfox's pack)");
+    let two = install(&b, &cb, None, &req, p.pack.owner.as_ref(), false, &mut NoProgress).unwrap();
+    assert_eq!(two.profile.name, "Ember run (Emberfox's pack) (2)");
+    // a name typed in the install step that a profile has already gets a number too; no owner: the pack's own name
+    let typed = install(&b, &cb, None, &InstallRequest { name: Some("ember RUN".into()), ..req.clone() }, None, false, &mut NoProgress).unwrap();
+    assert_eq!(typed.profile.name, "ember RUN (2)");
+    let bare = install(&b, &cb, None, &req, None, false, &mut NoProgress).unwrap();
+    assert_eq!(bare.profile.name, "Ember run (3)");
+    let names: Vec<String> = crate::profile::list(&b).unwrap().into_iter().map(|s| s.name.to_lowercase()).collect();
+    let unique: std::collections::BTreeSet<&String> = names.iter().collect();
+    assert_eq!(unique.len(), names.len(), "{names:?}");
 }

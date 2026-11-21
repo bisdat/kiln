@@ -1857,7 +1857,8 @@ pub fn install(dirs: &DataDirs, game: Option<&GameInstall>, req: &InstallRequest
         }
     }
     progress.report(Some(0.82), "making the instance");
-    let name = req.name.clone().unwrap_or_else(|| r.index.name.clone());
+    // never a name a profile has already ("My mods (2)"): the player tells the pack from their own profile
+    let name = crate::profile::unique_name(dirs, req.name.as_deref().filter(|n| !n.trim().is_empty()).unwrap_or(&r.index.name))?;
     let mut profile = crate::profile::create(dirs, &name, None)?;
     let pid = profile.id.clone();
     let made = (|| -> Result<(Profile, Instance, Vec<String>)> {

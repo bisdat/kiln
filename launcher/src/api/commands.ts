@@ -2672,6 +2672,18 @@ export interface CruciblePack {
 export interface CrucibleVersion {
   id: string; number: number; version: string; changes: string | null; size: number; published: string | null;
   status: "uploading" | "ready" | "withdrawn";
+  /** Crucible's check of this version (its checks.mjs report as GET /codes and /versions show it; passed through by
+   *  kiln_manage's CrucibleVersion.checks). Absent from an older service. */
+  checks?: CrucibleChecks | null;
+}
+/** Crucible's pack check (the sandboxed worker's `kilnctl pack check`, or only the quick index checks while it runs).
+ *  `state`: queued/running/waiting = the worker's report is still to come; done = the full report; failed = the
+ *  worker could not check it; off = this Crucible has no worker (the quick checks are all there is). */
+export interface CrucibleChecks {
+  state: "queued" | "running" | "waiting" | "done" | "failed" | "off";
+  full?: boolean; ok?: boolean;
+  errors?: string[]; warnings?: string[]; notes?: string[];
+  summary?: { errors: number; warnings: number; notes: number };
 }
 export interface CruciblePreview {
   pack: CruciblePack;

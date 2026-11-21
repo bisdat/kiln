@@ -640,6 +640,37 @@ fn check_id(id: &str) -> Result<()> {
     if is_profile_id(id) { Ok(()) } else { Err(Error::invalid(format!("not a profile id: {id:?} (a-z, 0-9, -; at most 48)"))) }
 }
 
+/// `name`, or `name (2)`, `name (3)`... when a profile has that name already (trimmed, any case): an installed pack
+/// never takes the name of a profile the player has (dev.30.2: a friend's "My mods" beside the player's own "My mods").
+/// At most 128 characters, as [`create`] takes; the UI's `uniqueName` (launcher/src/crucible/code.ts) is the same rule.
+pub fn unique_name(dirs: &DataDirs, name: &str) -> Result<String> {
+    let name = name.trim();
+    let mut taken = std::collections::BTreeSet::new();
+    for e in std::fs::read_dir(dirs.profiles()).into_iter().flatten().flatten() {
+        if let Ok(p) = get(dirs, &e.file_name().to_string_lossy()) {
+            taken.insert(p.name.trim().to_lowercase());
+        }
+    }
+    Ok(unique_among(name, &taken))
+}
+
+/// [`unique_name`] against names already lower-cased.
+pub(crate) fn unique_among(name: &str, taken: &std::collections::BTreeSet<String>) -> String {
+    let fit = |base: &str, suffix: &str| -> String {
+        let room = 128usize.saturating_sub(suffix.chars().count());
+        let base: String = base.chars().take(room).collect();
+        format!("{}{suffix}", base.trim_end())
+    };
+    let first = fit(name, "");
+    if first.is_empty() || !taken.contains(&first.to_lowercase()) {
+        return first;
+    }
+    (2u32..)
+        .map(|n| fit(name, &format!(" ({n})")))
+        .find(|c| !taken.contains(&c.to_lowercase()))
+        .unwrap_or(first)
+}
+
 /// `Server: Ember Isles` -> `server-ember-isles`.
 pub fn id_from_name(name: &str) -> String {
     let mut s = String::new();
@@ -2385,6 +2416,21 @@ fn save_pause(root: &Path) {
 #[cfg(test)]
 mod review_tests {
     use super::*;
+
+    /// An installed pack never takes a name a profile has: "My mods (2)", "(3)"..., any case, at most 128 characters.
+    #[test]
+    fn unique_names_add_a_number_when_a_profile_has_the_name() {
+        let taken: std::collections::BTreeSet<String> = ["my mods", "my mods (2)", "ember run (emberfox's pack)"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(unique_among("My mods", &taken), "My mods (3)");
+        assert_eq!(unique_among("  MY MODS ", &taken), "MY MODS (3)");
+        assert_eq!(unique_among("Ember run (Emberfox's pack)", &taken), "Ember run (Emberfox's pack) (2)");
+        assert_eq!(unique_among("Cinder Trails", &taken), "Cinder Trails");
+        let long = "x".repeat(130);
+        let taken: std::collections::BTreeSet<String> = [long[..128].to_string()].into_iter().collect();
+        let n = unique_among(&long, &taken);
+        assert_eq!(n.chars().count(), 128);
+        assert!(n.ends_with(" (2)"), "{n}");
+    }
 
     /// More than three changed copies of one mod set aside within one second: the pruning frees the oldest names, and
     /// the next copy never takes one of them back (it would sort as the oldest and be deleted at once).
