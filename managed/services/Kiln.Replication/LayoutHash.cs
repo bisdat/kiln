@@ -82,7 +82,8 @@ internal static class LayoutHash
                 continue;
             }
             if (ft.IsEnum) throw Bad(root, $"field {p} is an enum of {leaf.Name}");
-            if (ft == typeof(bool) || ft == typeof(char) || ft == typeof(nint) || ft == typeof(nuint) || !ft.IsValueType || ft.IsPrimitive)
+            if (ft == typeof(bool) || ft == typeof(char) || ft == typeof(nint) || ft == typeof(nuint) || !ft.IsValueType || ft.IsPrimitive ||
+                ft.Assembly == typeof(object).Assembly)  // the runtime's own structs (Half, decimal, Guid, Int128 ...) are no leaves
                 throw Bad(root, $"field {p} is {Pretty(ft)}; allowed: byte, sbyte, short, ushort, int, uint, long, ulong, float, double, their enums and structs of them");
             offset = Walk(ft, p, offset, lines, depth + 1, root);
         }

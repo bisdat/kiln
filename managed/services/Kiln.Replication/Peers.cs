@@ -111,7 +111,29 @@ public static class Peers
 
     private static bool HasContent(in PeerFacts p) => p.Kiln && ContentCurrent(p.Peer!);
 
-    /// <summary>A Kiln client acknowledged the content state served now: kiln.net cleared it for every Kiln-only template
-    /// there is (Kiln.Network's PeerHasDefinitions).</summary>
-    private static bool DefaultContentCurrent(NetPeer peer) => peer.Cleared && peer.ClearedTemplates >= NetNative.ReadGate().KilnTemplates;
+    /// <summary>A Kiln client is current when it acknowledged the content state served now (kiln.net cleared it for every
+    /// Kiln-only template there is: Kiln.Network's PeerHasDefinitions), or when the server serves no content state and has
+    /// no Kiln-only template: then there is nothing it could lack and nothing to acknowledge.</summary>
+    private static bool DefaultContentCurrent(NetPeer peer)
+    {
+        var templates = NetNative.ReadGate().KilnTemplates;
+        if (peer.Cleared && peer.ClearedTemplates >= templates) return true;
+        return templates == 0 && !ServingContent();
+    }
+
+    /// <summary>Whether this server serves a content state (Kiln.Content's export); replaced by tests.</summary>
+    internal static Func<bool> ServingContent = static () =>
+    {
+        try
+        {
+            return Serving();
+        }
+        catch (Exception e) when (e is TypeLoadException or FileNotFoundException or TypeInitializationException)
+        {
+            return false;  // no Kiln.Content: no content state either
+        }
+    };
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static bool Serving() => ContentSync.Serving is not null;
 }
