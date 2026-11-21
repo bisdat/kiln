@@ -860,8 +860,9 @@ std::vector<PackFile> discover_packs(std::string* signature) {
         const std::string mt = read_file(d / "kiln.mod.json", &ok);
         json m = json::parse(mt, nullptr, false, true);
         if (!m.is_discarded() && m.is_object() && m.contains("id") && m["id"].is_string()) id = m["id"].get<std::string>();
-        std::string version;
+        std::string version, side = "server";
         if (!m.is_discarded() && m.is_object() && m.contains("version") && m["version"].is_string()) version = m["version"].get<std::string>();
+        if (!m.is_discarded() && m.is_object() && m.contains("side") && m["side"].is_string()) side = m["side"].get<std::string>();
         if (std::any_of(out.begin(), out.end(), [&](const PackFile& f) { return f.mod == id && f.dir != reinterpret_cast<const char*>(d.u8string().c_str()); }))
             continue;  // the same mod id twice (profile + drop-in): the first wins, as in Kiln.Host
         std::vector<fs::path> files;
@@ -875,6 +876,7 @@ std::vector<PackFile> discover_packs(std::string* signature) {
             PackFile p;
             p.mod = id;
             p.version = version;
+            p.side = side;
             p.dir = reinterpret_cast<const char*>(d.u8string().c_str());
             p.path = reinterpret_cast<const char*>(f.u8string().c_str());
             p.rel = folder + "/content/" + reinterpret_cast<const char*>(f.filename().u8string().c_str());
@@ -958,7 +960,7 @@ std::vector<RegistrySection> registry_sections(const std::vector<PackFile>& file
         const registry::json doc = registry::json::parse(text, nullptr, false, true);
         if (doc.is_discarded() || !doc.is_object() || !doc.contains("registry")) continue;
         RegistrySection s;
-        s.mod = f.mod, s.version = f.version, s.rel = f.rel, s.source = section_source(f.rel);
+        s.mod = f.mod, s.version = f.version, s.rel = f.rel, s.source = section_source(f.rel), s.side = f.side;
         const std::string dumped = doc["registry"].dump();
         s.hash = std::hash<std::string>{}(dumped);
         if (!registry::lower_section(doc["registry"], f.mod, f.version, s.source, schema, &s.batches, &s.refused, &s.error)) s.batches.clear();

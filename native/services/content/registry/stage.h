@@ -47,6 +47,7 @@ struct Env {
         std::vector<Batch> batches;
         std::vector<Refusal> refused;
         std::string error;  // the section is unusable (nothing of it is taken)
+        std::string side;   // kiln.mod.json's "side" ("server", "client", "both"; empty: not known)
     };
     std::function<std::vector<DataFile>(const Schema&)> data;
     // The mod folders' order (without .NET: orderSource "folders"): ids with versions.

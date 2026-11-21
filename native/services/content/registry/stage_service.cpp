@@ -145,7 +145,7 @@ Env make_env() {
         std::vector<Env::DataFile> out;
         std::string signature;
         for (RegistrySection& s : registry_sections(discover_packs(&signature), schema))
-            out.push_back({s.mod, s.version, s.rel, std::move(s.batches), std::move(s.refused), s.error});
+            out.push_back({s.mod, s.version, s.rel, std::move(s.batches), std::move(s.refused), s.error, s.side});
         return out;
     };
     e.write_report = [](const std::string& text) { return write_whole(u8(api_path(KILN_PATH_STATE)) / u8"registry.json", text); };

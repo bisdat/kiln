@@ -425,8 +425,21 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
     std::vector<Env::DataFile> files = d.env.data ? d.env.data(d.schema) : std::vector<Env::DataFile>();
     std::map<std::string, ModInput> by_mod;
     std::map<std::string, std::string> versions;
-    for (const auto& [m, v] : order) versions[m] = v;
+    std::set<std::string> loaded;
+    for (const auto& [m, v] : order) versions[m] = v, loaded.insert(m);
+    std::vector<Refusal> skipped;
     for (Env::DataFile& f : files) {
+        // review finding 3 (ruling 2026-11-21): only mods Kiln.Host loaded on this side, in its order; the others are skipped
+        // and named (without .NET: the folders' order, and a mod for the other side is skipped)
+        const bool side_ok = f.side.empty() || f.side == "both" || f.side == d.env.side;
+        std::string why;
+        if (!side_ok) why = "the mod is for the " + f.side + " side, this is the " + d.env.side;
+        else if (d.meta.order_source == "kiln.host" && !loaded.count(f.mod)) why = "Kiln.Host did not load the mod on this side (not in its load order)";
+        if (!why.empty()) {
+            skipped.push_back({f.mod, f.rel, Stage::Alter, 0, f.rel + ": " + why + "; its registry section was not applied", ""});
+            d.log(1, "registry: mod " + f.mod + ": " + f.rel + ": " + why + "; its registry section was not applied");
+            continue;
+        }
         ModInput& in = by_mod[f.mod];
         in.id = f.mod;
         if (versions[f.mod].empty()) versions[f.mod] = f.version;
@@ -446,6 +459,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
         }
         for (auto& [mod, rs] : d.queued_refused) by_mod[mod].refused.insert(by_mod[mod].refused.end(), rs.begin(), rs.end());
         d.queued.clear(), d.queued_refused.clear();
+        d.pre_refused.insert(d.pre_refused.end(), skipped.begin(), skipped.end());
         for (const auto& [h, s] : d.stage_subs) {
             ModInput& in = by_mod[s.mod];
             in.id = s.mod;

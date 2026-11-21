@@ -161,6 +161,24 @@ void skipped_mod_data_applied(const std::string& dir) {
     for (const auto& o : rep["order"]) late = late || o["mod"] == "late";
     check(!late, "a mod Kiln.Host did not load is not in the stage: order = " + rep["order"].dump());
     check(rep.dump().find("\"result\":80") != std::string::npos, "maxStack is bigmod's x4 only (80), not x4 then late's x2 (160)");
+    check(rep.dump().find("Kiln.Host did not load the mod on this side") != std::string::npos, "the skipped mod's file is named with the reason");
+}
+
+std::vector<stage::Env::DataFile> client_side(const Schema& schema) {
+    auto out = items_only(schema);
+    for (auto& f : out) f.side = "client";
+    return out;
+}
+// R1b: without Kiln.Host's order (the folders'), a data mod for the other side is skipped and named
+void other_side_mod_skipped(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Runner r(env_of(&view, &files, dir, &client_side));
+    r.run({});
+    r.finish({});
+    const json rep = json::parse(files.report);
+    check(rep.dump().find("the mod is for the client side, this is the server") != std::string::npos, "the client mod is skipped with its reason");
+    check(rep.dump().find("\"result\":40") == std::string::npos, "its maxStack edit is not applied");
 }
 
 // R2: the id table of a build is written once, when it is missing; a later start with registry content (cache miss)
@@ -242,6 +260,7 @@ int main(int argc, char** argv) {
     int failed = 0;
     const std::pair<const char*, std::function<void()>> groups[] = {
         {"R1 skipped_mod_data_applied", [&] { skipped_mod_data_applied(dir); }},
+        {"R1b other_side_mod_skipped", [&] { other_side_mod_skipped(dir); }},
         {"R2 id_table_overwritten", [&] { id_table_overwritten(dir); }},
         {"R3 submit_unbound_owner", [&] { submit_unbound_owner(dir); }},
         {"R4 worldload_ready_event", [&] { worldload_ready_event(dir); }},

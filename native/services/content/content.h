@@ -382,6 +382,7 @@ void drops_clear_rules();  // every owner's drop rules (world reset)
 struct PackFile {
     std::string mod, path, rel, dir;  // dir: the mod's folder
     std::string version;               // kiln.mod.json's (the registry stage names it)
+    std::string side;                  // kiln.mod.json's "side" (default "server"): the registry stage skips another side's mods
     uint64_t size = 0, mtime = 0;
 };
 std::vector<PackFile> discover_packs(std::string* signature);  // kiln.profile's mods when there is one (A6), else kiln/mods

@@ -52,6 +52,7 @@ struct RegistryLive {
 // One pack file's "registry" section, lowered (packs.cpp registry_sections).
 struct RegistrySection {
     std::string mod, version, rel, source;  // source: "content/<file>.json" (the batches' source)
+    std::string side;                       // the mod's kiln.mod.json "side"
     uint64_t hash = 0;                     // of the section's text: what a reload compares
     std::vector<registry::Batch> batches;       // add, alter, final (those present)
     std::vector<registry::Refusal> refused;
