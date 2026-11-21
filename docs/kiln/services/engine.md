@@ -146,9 +146,9 @@ sets `owner` (its `KilnOwner`) and `step` (the server step it observed, `KilnTic
   before the registry word, the holder flag and the priority restore; and `EcsGate.restore_ns`, the priority restore's
   own time (0 when the priority was not raised). A release of a record that holds nothing (a second release, after a
   refusal before any word) measures nothing and keeps them. kiln.world reports both in `KilnMutationReply`
-  ([world.md](world.md#world-writes-from-task-threads)). Before the fix (0.2.0-dev.30.1, for one) the
-  hold was read at the end of the release, after the restore: on Proton with the raise on, about 10 µs more per hold and,
-  under load, a preemption right after the restore counted as hold although the Scene word was free.
+  ([world.md](world.md#world-writes-from-task-threads)). Before the fix (0.2.0-dev.30.2 and earlier) the hold was read
+  at the end of the release, after the restore: in bisdat's Proton runs with the raise on, about 10 µs more per hold at
+  the median and, under load, a preemption right after the restore counted as hold although the Scene word was free.
 - `gate_stats` counts attempts, holds, busy refusals by engine word (`kiln-gate-busy` and the latch count in
   `refused_other`, never as Scene contention), in-frame and world-thread refusals, the total and longest hold
   (`hold_ns_total`, `hold_ns_max`: the Scene word's exclusive interval as above, holds that then refuse included), and,

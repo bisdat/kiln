@@ -715,21 +715,24 @@ profile, 1,000 writes each, three runs): the largest plain component (4,328 byte
 median and 24 to 92 µs at worst; a 64 KiB component 44 to 48 µs at the median and 93 to 176 µs at worst. The GameServer thread that wants its next frame meanwhile spins (pause, then `SwitchToThread`); the
 holder runs above normal priority. On a heavily loaded host (load average about 45, the test at the lowest CPU
 priority, three runs under Wine) the medians stayed the same (15 to 18 µs for 4,328 bytes, 68 to 72 µs for 64 KiB) and
-the worst holds reached 0.5 to 2.5 ms: the host's scheduler preempting the holder inside the hold. How long a hold can
+the worst holds reached 0.5 to 2.5 ms: the host's scheduler preempting the holder inside the hold or, since these were
+timed to the end of the release (below), right after the priority restore. How long a hold can
 last on native Windows under load, with the priority raise, is measured by the tester kit (#58). The 64 KiB cap stays.
 
-**What the reply's times mean.** `KilnMutationReply.hold_ns` is the Scene word's exclusive interval: from the moment
-the gate's CAS on it won to the moment it was released, the clock read right after that release and before the rest of
-the gate's release (the thread-registry word, Kiln's holder flag, the priority restore). That is the time the engine was
+**What the reply's times mean.** `KilnMutationReply.hold_ns` is the Scene word's exclusive interval: from the moment the
+gate's CAS on it won to the moment it was released, the clock read right after that release and before the rest of the
+gate's release (the thread-registry word, Kiln's holder flag, the priority restore). That is the time the engine was
 kept out of its next update. `restore_ns` (appended to the reply: 56 bytes; a caller built before it passes 48 and gets
-the fields it knows, nothing written past them) is how long putting the calling thread's priority back took after the
-Scene word was free (`SetThreadPriority`, under Proton a wineserver round trip), with any preemption of the thread right
-after it dropped back to its own priority; it is also filled for a gate refusal after the raise, and 0 when the priority
-was not raised (the measurement switch, a thread already above normal, a refusal before the raise). Both come from the
-gate's own record (`EcsGate.hold_ns`, `restore_ns`). Before GitHub #58's fix (0.2.0-dev.30.1, for one)
-`hold_ns` was read after the whole release, the restore included: on Proton with the raise on that added about 10 µs to
-every hold and, under CPU load, a preemption of up to milliseconds right after the restore, while the Scene word was long
-free. The Wine figures above were measured that way.
+the fields it knows, nothing written past them; on return `size` is the bytes this Kiln filled) is how long putting the
+calling thread's priority back took after the Scene word was free (`SetThreadPriority`, under Proton a wineserver round
+trip), with any preemption of the thread right after it dropped back to its own priority; it is also filled for a gate
+refusal after the raise, and 0 when the priority was not raised (the measurement switch, a thread already above normal,
+a refusal before the raise). Both come from the gate's own record (`EcsGate.hold_ns`, `restore_ns`). A Kiln before
+`restore_ns` (0.2.0-dev.30.2 and earlier) gives back the size passed and leaves `restore_ns` as the caller set it: zero
+the reply, and tell such a Kiln by kiln.engine's `gate_stats` (its `size` comes back 96, not 120). Before GitHub #58's
+fix `hold_ns` was read after the whole release, the restore included: on Proton with the raise on that added about 10 µs
+to every hold and, under CPU load, a preemption of up to milliseconds right after the restore, while the Scene word was
+long free. The Wine figures above were measured that way.
 
 **Relies on, per build.** For the components the policy admits, the engine's change recorder only reads and returns on
 both exact builds (docs/re/world.md, "The change recorder for untracked components"), so the write does not call it and

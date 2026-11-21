@@ -30,18 +30,19 @@ mod makes no try, since the latch would only answer busy again. Results of r1 ar
 `analyze.py` shows r1 runs apart, as `<platform> kit 1`.
 
 **Kit 3 and where a hold ends (2026-11-21, files say kit 3).** bisdat's r2 runs on Proton (0.2.0-dev.30.1) showed the
-raise on idle at a median hold of 12.6 µs against 2.5 µs off, and under load 1,437 holds of 1 ms or more against 2.
-That Kiln read the hold's clock at the end of the gate's release: after the Scene word, the registry word, Kiln's holder
-flag and the priority restore (`SetThreadPriority`, a wineserver round trip under Proton). The 10 µs were the restore,
-and the long holds a thread preempted right after it dropped back to its own priority, before it read the clock. The
-Scene word was free in both. Kiln now ends a hold at the Scene word's release and times the restore apart
-([engine.md](services/engine.md#the-engines-write-gate-kilninternalengine)): `hold_ns` is the time the engine was kept
-out, `restore_ns` what the raise costs after it. Kit 3 is kit 2's loop with that second number: `restore_ns` in
-`writes.csv`, the restore counters in `gate.csv`, and `hold=scene-release` in every file's header and `run.json`
-(`hold_ends`). On a Kiln without the restore counters (one from before this change, such as 0.2.0-dev.30.1) kit 3
-writes `hold=release-end` and leaves the restore columns empty. `analyze.py` labels those runs, and every kit 1 and 2
-run, "hold includes the release and restore": compare their holds with kit 3's hold plus restore, not with its hold
-alone.
+raise on idle at a median hold of 12.6 µs against 2.5 µs off, and under load 1,437 holds of 1 ms or more against 2. That
+Kiln read the hold's clock at the end of the gate's release: after the Scene word, the registry word, Kiln's holder flag
+and the priority restore (`SetThreadPriority`, a wineserver round trip under Proton). By the code, the 10 µs were the
+restore, and the long holds a thread preempted right after it dropped back to its own priority, before it read the
+clock; the Scene word was free in both. Kit 3 measures it. Kiln now ends a hold at the Scene word's release and times
+the restore apart ([engine.md](services/engine.md#the-engines-write-gate-kilninternalengine)): `hold_ns` is the time the
+engine was kept out, `restore_ns` what the raise costs after it. Kit 3 is kit 2's loop with that second number:
+`restore_ns` in `writes.csv`, the restore counters in `gate.csv`, and `hold=scene-release` in every file's header and
+`run.json` (`hold_ends`). On a Kiln without the restore counters (0.2.0-dev.30.2 and earlier) kit 3 writes
+`hold=release-end` and leaves the restore columns empty. `analyze.py` labels those runs, and every kit 1 and 2 run,
+"hold includes the release and restore": compare their holds with kit 3's hold plus restore, not with its hold alone.
+Kit 2 writes no `hold=`, so on a Kiln with this change use kit 3 (mod 1.2.0 in kiln.log's `gate-priority-test:` lines,
+`run.json` kit 3): a kit 2 run there would be labelled the same way although its holds end at the Scene word's release.
 
 ## What you need
 
@@ -246,8 +247,7 @@ The CPU-load phase files sort every row into idle or loaded. Two seconds around 
   percentiles, the maximum, how many held 1 ms or more, and the busy share, with a histogram from 10 µs to over 20 ms.
   Kit 2 tries only between updates, so its busy share counts calls that met the end of an update or another holder, not
   tries inside one (kit 1's were mostly those). Runs whose Kiln timed a hold to the end of the release (kit 1 and 2, and
-  kit 3 on a Kiln from before this change, such as 0.2.0-dev.30.1) are rows of their own, labelled "hold includes the
-  release and restore".
+  kit 3 on 0.2.0-dev.30.2 or earlier) are rows of their own, labelled "hold includes the release and restore".
 - **Priority restore:** the same calls' `restore_ns` (kit 3 on a Kiln that times it): how long putting the thread's
   priority back took after the Scene word was free, a preemption right after it included. 0 with the raise off.
 - **Server step from the mod's rows:** Pre to Pre is the step's interval. A spin at the start of a frame lengthens it,
