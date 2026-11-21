@@ -33,6 +33,7 @@
 #include "services/kiln_profile.h"
 #include "services/kiln_progress.h"
 #include "../../../core/src/tasks_host.h"  // the lookup block names the core's managed-host table (kiln.tasks)
+#include "../../../core/src/hooks_protect_internal.h"  // and the core's kiln.internal.hooks table
 #include "../../../core/src/launch_internal.h"  // and the core's kiln.launch tables
 #include "../../../plugins/compat/original_code_service.h"  // and the core's original-code table
 
@@ -83,6 +84,9 @@ const KilnLaunchInternalApi* internal_table() {
     return &g_internal;
 }
 }  // namespace launch
+namespace hooks {
+const KilnHooksInternalApi* internal_table() { return nullptr; }  // kiln.internal.hooks: not part of this check
+}  // namespace hooks
 namespace caps {
 const void* table() { return nullptr; }
 void service_published(KilnOwner, std::string_view, uint32_t) {}
