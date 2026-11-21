@@ -77,6 +77,25 @@ void bind(const Layout* layout);
 bool bound(const char** why);
 // What bound() answers while unbound: a static string (nullptr: the default, no observation point on this build).
 void unbound_reason(const char* why);
+
+// The lazy producer. On a build where the producer can be bound, client.cpp gives an installer at its start instead of
+// installing anything: the first submit that passes its own checks (arguments, owner, a live client session) calls it,
+// once, on the submitting thread, and binds the layout it fills. A player without a mod that submits never gets the
+// hook. The installer runs under its own mutex (never the slot's), so concurrent first submits wait for the one install
+// and then go on. An install refused for a reason that may pass (Again: kiln.hooks could not check every thread while it
+// wrote the first detour, and wrote nothing) answers that submit KILN_ERR_UNAVAILABLE and lets a later submit try again,
+// up to kInstallAttempts in all. Any other failure, or the last attempt, is final for the process: the installer is
+// dropped, its reason (a static string; nullptr: a generic one) becomes bound()'s answer, and every later submit answers
+// KILN_ERR_UNAVAILABLE.
+enum class Install { Bound, Again, Failed };
+constexpr uint32_t kInstallAttempts = 3;
+using Installer = Install (*)(Layout* layout, const char** why);
+void set_installer(Installer install);  // nullptr: none (the default)
+// Whether a submit can succeed on this build: bound, or an installer waits for the first submit. While neither, *why
+// says why (bound()'s answer). *installed: bound now.
+bool usable(const char** why, bool* installed);
+// Grows at every change of usable()'s answer (bind, an installer given or dropped, an unbound reason), for kiln.caps.
+uint64_t generation();
 // The producer: one visit (client main thread).
 void observe(const Observation& o, const Memory& m);
 
@@ -87,14 +106,16 @@ void session_ended(uint32_t session);
 void owner_gone(KilnOwner owner);
 
 struct Stats {
-    uint64_t skipped;  // producer visits skipped because a caller held the slot
-    uint64_t faults;   // guarded copies that faulted (the request ended cancelled)
+    uint64_t skipped;   // producer visits skipped because a caller held the slot
+    uint64_t faults;    // guarded copies that faulted (the request ended cancelled)
+    uint64_t installs;  // installer calls (at most one succeeds, and a failed one is the last)
 };
 Stats stats();
 
 // Host tests.
 void set_clock_for_tests(uint64_t (*ms)());  // nullptr: the steady clock
-void reset_for_tests();                      // empty slot, ids from 1, unbound (default reason), no session ended, zero stats
+void reset_for_tests();                      // empty slot, ids from 1, unbound (default reason), no installer, no session
+                                             // ended, zero stats
 void set_next_id_for_tests(uint32_t last);   // the next id is last + 1 (skipping 0)
 std::mutex& mutex_for_tests();               // the slot's mutex, to hold it from a test
 

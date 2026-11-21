@@ -8,8 +8,10 @@
 // pages too: an unreadable input object or world skips the visit and is counted, never a crash.
 #include <windows.h>
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <thread>
 
 #include "crash.h"
 #include "services/client_input.h"
@@ -171,6 +173,52 @@ int main() {
         ci::visit(reinterpret_cast<uintptr_t>(input), reinterpret_cast<uintptr_t>(rec), kPlayer, site);
         check(cancelled == 1 && state(id) == KILN_BUILDING_INPUT_CANCELLED && digital(rec) == 8,
               "visit: a cancelled press is still released at the next step");
+    }
+
+    // The lazy producer on Windows threads: a stand-in game thread observes the input only once the installer has
+    // hooked it (a link runs only once placed), all the time; a mod thread's first submit installs, binds, and its
+    // request is pressed and released by that thread's visits.
+    {
+        static std::atomic<bool> hooked{false};
+        static std::atomic<int> calls{0};
+        bi::reset_for_tests();
+        ci::publish(kPlayer, kSession);
+        bi::set_installer(+[](bi::Layout* l, const char**) {
+            calls.fetch_add(1);
+            Sleep(20);  // an install takes a while: the game thread runs on meanwhile
+            *l = kLayout;
+            hooked.store(true);
+            return bi::Install::Bound;
+        });
+        uint8_t* rec = page(PAGE_READWRITE);
+        std::atomic<bool> stop{false};
+        std::atomic<uint32_t> version{100};
+        std::atomic<uint64_t> visits{0};
+        std::thread game([&] {
+            while (!stop.load()) {
+                if (hooked.load()) {
+                    ci::observe(reinterpret_cast<uintptr_t>(rec), kPlayer, version.load());
+                    visits.fetch_add(1);
+                }
+                Sleep(0);
+            }
+        });
+        Sleep(30);
+        check(calls.load() == 0 && !bi::bound(nullptr) && visits.load() == 0, "lazy: nothing hooked before the first submit");
+        id = submit(KILN_BUILDING_ACTION_PLACE);
+        auto wait_for = [&](uint32_t want) {
+            for (int i = 0; i < 2000 && state(id) != want; ++i) Sleep(1);
+            return state(id) == want;
+        };
+        const bool pressed = id != 0 && wait_for(KILN_BUILDING_INPUT_PRESSED);
+        version.store(101);
+        const bool released = wait_for(KILN_BUILDING_INPUT_DISPATCHED);
+        check(pressed && released && calls.load() == 1 && bi::bound(nullptr) && digital(rec) == 8,
+              "lazy: the first submit installs once; the game thread's visits press and release it");
+        check(submit(KILN_BUILDING_ACTION_UNDO) != 0 && calls.load() == 1, "lazy: a later submit installs nothing");
+        stop.store(true);
+        game.join();
+        bi::set_installer(nullptr);
     }
 
     ci::publish(0, 0);

@@ -137,6 +137,8 @@ std::vector<std::string> g_feature_names;
 // Mod fragments' rows (fragment_rows): a fragment's id -> the names its last load reported, as the core's feature rows.
 std::map<std::string, std::vector<std::string>, std::less<>> g_fragment_rows;
 std::atomic<uint8_t> g_tick_seen{0};  // bit 0 tick::installed(), bit 1 tick::lifecycle()
+std::atomic<bool> g_client_service{false};  // kiln.client was available when the rows were built
+std::atomic<uint64_t> g_building_seen{0};   // building_input::generation() the row was last built from
 
 // ---- small helpers ----
 bool name_ok(std::string_view n) {
@@ -474,9 +476,39 @@ void refresh_tasks_pool() {
     });
 }
 
+// kiln.client's building input (docs/kiln/services/client-building-input.md): the game client only, with
+// kiln.client running and its input producer ready (hooked at the first request) or bound. The producer's state is
+// read lock-free at every registry call, so a first request's install, or its final failure, reaches the row.
+void set_building_input_locked(std::vector<Event>& ev) {
+    g_building_seen.store(building_input::generation(), std::memory_order_release);  // before the state it describes
+    const char* why = nullptr;
+    bool installed = false;
+    const bool producer = building_input::usable(&why, &installed);
+    const Verdict v =
+        !g_hooks ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, "not started in safe idle: " + g_safe_idle}
+        : image().side != KILN_SIDE_CLIENT
+            ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE, "building input belongs to a connected game client"}
+        : !g_client_service.load(std::memory_order_acquire)
+            ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING, "kiln.client did not start"}
+        : !producer ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING, why ? why : ""}
+        : installed ? Verdict{KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "the input producer is bound to this game build"}
+                    : Verdict{KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                              "the input producer is ready for this game build; it is hooked at the first request"};
+    set_core_locked("client.building_input", kService, v.state, v.reason, v.text, "core", 0, ev);
+}
+void refresh_building_input() {
+    if (!g_rows_built.load(std::memory_order_acquire)) return;
+    if (building_input::generation() == g_building_seen.load(std::memory_order_acquire)) return;
+    op([&](std::vector<Event>& ev) {
+        set_building_input_locked(ev);
+        return 0;
+    });
+}
+
 // The tick hook faulted (or came back) since the rows were built: its rows follow.
 void refresh_tick() {
     refresh_tasks_pool();
+    refresh_building_input();
     if (!g_rows_built.load(std::memory_order_acquire) || !g_hooks) return;
     const uint8_t bits = tick_bits();
     if (bits == g_tick_seen.load(std::memory_order_acquire)) return;
@@ -910,24 +942,11 @@ void core_rows(bool hooks, bool verified, const std::string& safe_idle) {
             set_core_locked(name, kService, original_code ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE,
                             reason, text, "core", 0, ev);
         }
-        // kiln.client's building input (docs/kiln/services/client-building-input.md): the
-        // game client only, with kiln.client running and its input producer bound to this build. Static: the producer
-        // is bound while kiln.client starts, or not at all.
-        {
-            const bool client_service = std::any_of(services.begin(), services.end(), [](const Svc& s) {
-                return s.name == KILN_CLIENT_SERVICE && s.available;
-            });
-            const char* why = nullptr;
-            const bool producer = building_input::bound(&why);
-            const Verdict v =
-                !hooks ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, "not started in safe idle: " + safe_idle}
-                : image().side != KILN_SIDE_CLIENT
-                    ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE, "building input belongs to a connected game client"}
-                : !client_service ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING, "kiln.client did not start"}
-                : !producer       ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING, why}
-                                  : Verdict{KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "the input producer is bound to this game build"};
-            set_core_locked("client.building_input", kService, v.state, v.reason, v.text, "core", 0, ev);
-        }
+        // kiln.client's building input (set_building_input_locked; refresh_building_input follows the producer)
+        g_client_service.store(std::any_of(services.begin(), services.end(), [](const Svc& s) {
+            return s.name == KILN_CLIENT_SERVICE && s.available;
+        }), std::memory_order_release);
+        set_building_input_locked(ev);
         // kiln.net's Steam peer-to-peer messages (docs/kiln/services/net-steam-messages.md). kiln-net.dll
         // reports the row itself (pending, available, or why Steam is missing); in safe idle it does not load, so the
         // core says why. Its "did not start" is service_dll's.

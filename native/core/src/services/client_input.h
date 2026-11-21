@@ -9,8 +9,8 @@
 // client-building-input.md): the client's local input writer, right after it filled the frame's ClientPlayerInput
 // (digitalInput for this client world step, the camera) and before the step's input message copies it; the client
 // world's programs (the cursor among them) run after that message. client.cpp installs it as one kiln.hooks mid link,
-// which shares its detour with kiln.rules' read-only camera check, and binds the producer with the build's layout when
-// the point resolves and the client gate does not hold client.building_input. The link calls visit().
+// which shares its detour with kiln.rules' read-only camera check, at the first building input request (never at the
+// start), and binds the producer with the build's layout read when the point resolved. The link calls visit().
 #pragma once
 #include <cstdint>
 

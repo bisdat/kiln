@@ -5,9 +5,10 @@
 // client build in docs/re/client.md). Read on the main thread at each client-world Pre and cached for any thread; it is
 // also the local input selection (client_input.h).
 // The building input members are client_building_input.cpp's; this file gives them the
-// live facts and the world and owner ends, and installs their producer: the local input observation (client_input.h)
-// as one kiln.hooks mid link at the sigdb point client/InputObserved, bound with the build's layout, unless the client
-// gate holds client.building_input.
+// live facts and the world and owner ends, and their producer: the local input observation (client_input.h) as one
+// kiln.hooks mid link at the sigdb point client/InputObserved, bound with the build's layout. The link goes in at the
+// first submit (client_building_input.h, the lazy producer), never at the start: a game without a mod that builds never
+// has it. A held client gate row (native/core/gates) would still keep it out entirely.
 #include <atomic>
 
 #include "../api.h"
@@ -114,11 +115,53 @@ const char* read_layout(building_input::Layout* l) {
     return nullptr;
 }
 
-// Once, from init() on the game client: binds the producer, or leaves it unbound with the reason kiln.caps shows.
+uintptr_t g_observation = 0;           // client/InputObserved, when the producer can be installed
+building_input::Layout g_layout_ready{};  // the build's layout, read at the start
+
+// The lazy producer's installer: the first submit's thread, under building_input's install mutex (once at a time; a
+// refusal for threads that could not be checked is tried again by later submits, up to building_input::kInstallAttempts,
+// any other failure is final). The link is a checked installation: when it is the first link on the instruction (kiln.rules'
+// camera check, at the same instruction, may already have placed the detour; then only kiln.hooks' cells change),
+// the detour is written with every other thread stopped and checked to stand outside the replaced bytes, and refused,
+// nothing written, when any thread could not be checked. Its handler reads registers only, so kiln.rules' link sees
+// them unchanged before and after.
+building_input::Install install_producer(building_input::Layout* layout, const char** why) {
+    hooks::chain::Order o;
+    o.label = "kiln.client/InputObserved";
+    KilnHandle h = 0;
+    uint32_t unchecked = 0;
+    const KilnResult rc = hooks::ensure_ready()
+        ? hooks::chain::install_mid(0, g_observation, o, &on_input_observed, nullptr, &h, &unchecked)
+        : KILN_ERR_UNAVAILABLE;
+    if (rc != KILN_OK && unchecked) {
+        // nothing written: kiln.hooks could not check every thread (it names them above); a later request tries again
+        KLOG_W("client: hooking the local input observation point (client/InputObserved) was refused: %u thread(s) "
+               "could not be checked; a later building input request tries again",
+               static_cast<unsigned>(unchecked));
+        *why = "hooking the local input observation point was refused on every attempt: threads that could not be "
+               "checked (kiln.log says which)";
+        return building_input::Install::Again;
+    }
+    if (rc != KILN_OK) {
+        KLOG_E("client: hooking the local input observation point (client/InputObserved) at the first building input "
+               "request failed (%d); building input stays off until the game restarts", rc);
+        *why = "hooking the local input observation point failed at the first request (kiln.log says why)";
+        return building_input::Install::Failed;
+    }
+    *layout = g_layout_ready;
+    KLOG_I("client: building input bound at its first request (observation +0x%llx; cursorInput %u, digitalInput %u, "
+           "createBuildingItemAction %u, buildingStockCycleAction %u; undo bit %u)",
+           static_cast<unsigned long long>(g_observation - image().base), layout->cursor, layout->digital,
+           layout->create, layout->stock, static_cast<unsigned>(layout->undo));
+    return building_input::Install::Bound;
+}
+
+// Once, from init() on the game client: readies the lazy producer (nothing is hooked here), or leaves it unbound with
+// the reason kiln.caps shows.
 void install_building_input() {
     building_input::Layout layout{};
     uintptr_t site = 0;
-    const char* why = nullptr;  // still nullptr after the checks: install and bind
+    const char* why = nullptr;  // still nullptr after the checks: ready for the first submit
     if (!hooks_enabled()) {
         why = "hooks are off (safe idle)";
     } else if (g_lpd_entity < 0) {
@@ -132,27 +175,16 @@ void install_building_input() {
     } else {
         why = read_layout(&layout);
     }
-    if (!why) {
-        hooks::chain::Order o;
-        o.label = "kiln.client/InputObserved";
-        KilnHandle h = 0;
-        const KilnResult rc = hooks::ensure_ready() ? hooks::chain::install_mid(0, site, o, &on_input_observed, nullptr, &h)
-                                                     : KILN_ERR_UNAVAILABLE;
-        if (rc != KILN_OK) {
-            KLOG_E("client: hooking the local input observation point (client/InputObserved) failed (%d)", rc);
-            why = "hooking the local input observation point failed (kiln.log says why)";
-        }
-    }
     if (why) {
         building_input::unbound_reason(why);
         KLOG_I("client: building input not bound: %s", why);
         return;
     }
-    building_input::bind(&layout);
-    KLOG_I("client: building input bound (observation +0x%llx; cursorInput %u, digitalInput %u, createBuildingItemAction "
-           "%u, buildingStockCycleAction %u; undo bit %u)",
-           static_cast<unsigned long long>(site - image().base), layout.cursor, layout.digital, layout.create,
-           layout.stock, static_cast<unsigned>(layout.undo));
+    g_observation = site;
+    g_layout_ready = layout;
+    building_input::set_installer(&install_producer);
+    KLOG_I("client: building input ready on this build (observation +0x%llx); hooked at the first request",
+           static_cast<unsigned long long>(site - image().base));
 }
 
 building_input::Env env_for(KilnOwner owner) {

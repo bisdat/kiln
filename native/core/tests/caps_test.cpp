@@ -627,6 +627,28 @@ void core_rows(const std::filesystem::path& dir) {
                   get("client.building_input").source == "core",
               "building input: no producer bound on this build: unavailable, symbol-missing, with the producer's reason");
         static const kiln::building_input::Layout layout{760, 936, 500, 160, 0, 1, 2, 3, 4, 5, 7, 40};
+        // the lazy producer: ready (an installer waits for the first request, nothing hooked) reads available
+        kiln::building_input::set_installer(
+            +[](kiln::building_input::Layout* l, const char**) { *l = layout; return kiln::building_input::Install::Bound; });
+        caps::core_rows(true, true, "");
+        CHECK(is("client.building_input", A, 0) &&
+                  get("client.building_input").text.find("hooked at the first request") != std::string::npos,
+              "building input: a ready producer on the client: available, hooked at the first request (%s)",
+              get("client.building_input").text.c_str());
+        // bound later (the first request's install): the row follows at the next registry call, no rebuild
+        kiln::building_input::bind(&layout);
+        CHECK(is("client.building_input", A, 0) &&
+                  get("client.building_input").text == "the input producer is bound to this game build",
+              "building input: bound after the rows were built: the row follows (%s)", get("client.building_input").text.c_str());
+        // a final install failure after the rows were built: the row follows with the failure's reason
+        kiln::building_input::reset_for_tests();
+        kiln::building_input::set_installer(+[](kiln::building_input::Layout*, const char**) { return kiln::building_input::Install::Again; });
+        caps::core_rows(true, true, "");
+        kiln::building_input::set_installer(nullptr);
+        kiln::building_input::unbound_reason("hooking the local input observation point failed at the first request (kiln.log says why)");
+        CHECK(is("client.building_input", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
+                  get("client.building_input").text.find("at the first request") != std::string::npos,
+              "building input: a failed first install after the rows were built: unavailable with its reason");
         kiln::building_input::bind(&layout);
         caps::core_rows(true, true, "");
         CHECK(is("client.building_input", A, 0), "building input: a bound producer on the client: available");
