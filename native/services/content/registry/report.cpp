@@ -153,14 +153,15 @@ std::vector<std::string> report_log(const Result& r, const ReportCaps& caps) {
     std::vector<std::string> out;
     const size_t all = r.lines.size() + r.refused.size();
     if (all == 0) return out;
-    for (const Line& l : r.lines) {
-        if (out.size() >= caps.log) break;
-        out.push_back("registry: " + std::string(line_kind_name(l.kind)) + ": " + l.text);
-    }
+    // refusals first: an edit that did not apply is what an author needs to see, even behind many conflicts
     for (const Refusal& x : r.refused) {
         if (out.size() >= caps.log) break;
         out.push_back("registry: refused " + x.mod + " " + (x.source.empty() ? std::string("(no source)") : x.source) + " #" + std::to_string(x.n) + " (" +
                       stage_name(x.stage) + "): " + x.reason);
+    }
+    for (const Line& l : r.lines) {
+        if (out.size() >= caps.log) break;
+        out.push_back("registry: " + std::string(line_kind_name(l.kind)) + ": " + l.text);
     }
     const size_t left = all - out.size();
     std::string total = "registry: " + std::to_string(r.lines.size()) + (r.lines.size() == 1 ? " conflict, " : " conflicts, ") + std::to_string(r.refused.size()) +

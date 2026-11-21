@@ -58,7 +58,7 @@ struct ReportCaps {
 // The registry.json document (format 1).
 json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, const ReportCaps& caps = {});
 
-// kiln.log's lines for the stage: one per conflict line, then one per refused edit, at most caps.log in all, then one total
+// kiln.log's lines for the stage: one per refused edit, then one per conflict line, at most caps.log in all, then one total
 // line ("registry: 3 conflicts, 1 refused edit; state/registry.json has them all"). Empty when there is nothing to say.
 std::vector<std::string> report_log(const Result& r, const ReportCaps& caps = {});
 

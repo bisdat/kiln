@@ -202,7 +202,7 @@ int main(int argc, char** argv) {
               "caps: rows cut, counted under truncated, totals kept");
     }
 
-    // ---- kiln.log: one line per conflict, then refusals, at most caps.log, then a total ----
+    // ---- kiln.log: one line per refused edit, then one per conflict, at most caps.log, then a total ----
     {
         const std::vector<std::string> log = report_log(r);
         CHECK(log.size() == 6 && log.back().find("3 conflicts") != std::string::npos && log.back().find("2 refused") != std::string::npos,
@@ -227,6 +227,13 @@ int main(int argc, char** argv) {
         const Result many = compose(s, big, {}, {mod("a", {batch(s, "a", "alter", R"([{"registry": "items", "select": {"id": "game:thing_*"}, "field": "maxStack", "op": 7}])")}),
                                                  mod("b", {batch(s, "b", "alter", R"([{"registry": "items", "select": {"id": "game:thing_*"}, "field": "maxStack", "op": 8}])")})});
         CHECK(many.lines.size() == 120 && report_log(many).size() == 51, "120 conflicts: 50 lines and the total");
+        Result with_refusal = many;
+        Refusal x;
+        x.mod = "c", x.source = "content/c.json", x.n = 3, x.reason = "Unmapped: items.block is not mapped";
+        with_refusal.refused.push_back(x);
+        const std::vector<std::string> log = report_log(with_refusal);
+        CHECK(log.size() == 51 && log[0].find("refused c content/c.json #3") != std::string::npos && log.back().find("1 refused edit") != std::string::npos,
+              "a refusal is in kiln.log even behind 120 conflicts: refusals come first within the cap");
     }
 
     if (argc > 1) {

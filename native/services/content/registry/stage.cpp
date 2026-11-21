@@ -688,15 +688,11 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
         d.report = doc.dump();
         if (d.env.write_report && !d.env.write_report(doc.dump(1))) d.log(1, "registry: state/registry.json could not be written");
         // refusals first (warnings, never crowded out by conflict lines), then the conflict lines, then one total
-        Result refusals, lines;
-        refusals.refused = d.result.refused;
-        lines.lines = d.result.lines;
-        std::vector<std::string> rl = report_log(refusals), ll = report_log(lines), all = report_log(d.result);
-        if (!rl.empty()) rl.pop_back();
-        if (!ll.empty()) ll.pop_back();
-        for (const std::string& line : rl) d.log(1, line);
-        for (size_t i = 0; i < ll.size() && i + rl.size() < 50; ++i) d.log(0, ll[i]);
-        if (!all.empty()) d.log(d.result.refused.empty() ? 0 : 1, all.back());
+        const std::vector<std::string> all = report_log(d.result);  // refusals first (warnings), then conflicts, then the total
+        for (size_t i = 0; i < all.size(); ++i) {
+            const bool refusal = all[i].rfind("registry: refused ", 0) == 0, total = i + 1 == all.size();
+            d.log(refusal || (total && !d.result.refused.empty()) ? 1 : 0, all[i]);
+        }
         d.log(0, "registry: the stage ran (" + d.meta.order_source + " order, " + std::to_string(d.meta.order.size()) + " mod(s)): " + std::to_string(d.counts.edits) +
                      " edit(s) in effect or waiting for the world, " + std::to_string(d.counts.refused) + " refused, " + std::to_string(d.counts.conflicts) +
                      " conflict line(s); restart fields are final (phase start)");
