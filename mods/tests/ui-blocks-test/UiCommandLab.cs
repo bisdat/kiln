@@ -47,6 +47,14 @@ internal static class UiCommandLab
         _ctl = Network.Channel("ui-blocks-test:ctl", "1", required: false, maxMessageBytes: 4096)
             .RegisterJson<UiCtl>(Receive, NetDirection.ToServer)
             .RegisterJson<UiCtlReply>(null, NetDirection.ToClient);
+        // Kiln starts the receiver with its services at the first service tick, after the mods' OnLoad: look then
+        _ = ReceiverCheck(channel, check, info);
+    }
+
+    private static async Task ReceiverCheck(Type channel, Action<bool, string> check, Action<string> info)
+    {
+        await _nextTick();
+        await _nextTick();
         var started = (bool)channel.GetProperty("Started", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
         check(started && !Ui.Available && Network.Channels.Any(c => c.Name == "kiln:ui-command" && !c.Required),
             $"ui-command: dedicated server without Ui receives (receiver started {started}, overlay {(Ui.Available ? "present" : "absent")}, kiln:ui-command optional)");

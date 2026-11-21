@@ -72,7 +72,7 @@ class Peer(nt.Client):
         return None if r is None else r["Count"]
 
     # kiln:ui-command
-    def send(self, msg, obj):
+    def sendui(self, msg, obj):
         if isinstance(obj, dict) and "id" in obj:
             self.replies = [r for r in self.replies if r["id"] != obj["id"]]
         if isinstance(obj, (bytes, bytearray)):
@@ -81,7 +81,7 @@ class Peer(nt.Client):
             self.js(UI, msg, obj)
 
     def request(self, nonce, rid, line):
-        self.send(REQUEST, {"nonce": nonce, "id": str(rid), "line": line})
+        self.sendui(REQUEST, {"nonce": nonce, "id": str(rid), "line": line})
 
     def reply(self, rid, final=True, seconds=10.0, state=None):
         end = time.time() + seconds
@@ -157,7 +157,7 @@ def main():
     time.sleep(0.3)
     raw = json.dumps({"nonce": n, "id": "4", "line": "uicmd-echo t4", "player": "1", "entity": 1, "account": "76561198000000001",
                       "admin": True, "mod": "ui-blocks-test", "source": "console", "steamId": "76561198000000001"}).encode()
-    A.send(REQUEST, raw)
+    A.sendui(REQUEST, raw)
     r = A.reply(4)
     t.check("claimed identity ignored", r is not None and r["ok"] and r["output"] == ["source=Player player=900 tag=t4"], r)
     time.sleep(0.3)
@@ -166,11 +166,11 @@ def main():
     time.sleep(0.3)
     r = A.run(n, 1, "uicmd-echo t5")
     t.check("conflict never executes", r is not None and r["code"] == "protocolConflict" and not r["ok"] and A.count("t5") == 0, r)
-    A.send(STATUS, {"nonce": n, "id": "1"})
+    A.sendui(STATUS, {"nonce": n, "id": "1"})
     s1 = A.reply(1)
-    A.send(STATUS, {"nonce": n, "id": "99"})
+    A.sendui(STATUS, {"nonce": n, "id": "99"})
     s99 = A.reply(99)
-    A.send(CANCEL, {"nonce": n, "id": "98"})
+    A.sendui(CANCEL, {"nonce": n, "id": "98"})
     c98 = A.reply(98)
     t.check("status request answers and runs nothing", s1 is not None and s1["ok"] and s99 is not None and s99["code"] == "unknownRequest" and A.count("t1") == 1, (s1, s99))
     t.check("cancel of an unknown id is UnknownRequest", c98 is not None and c98["code"] == "unknownRequest", c98)
@@ -202,9 +202,9 @@ def main():
     q = A.reply(18, final=False, state="queued", seconds=5)
     A.request(n, 19, "uicmd-echo q2")
     A.reply(19, final=False, state="queued", seconds=5)
-    A.send(CANCEL, {"nonce": n, "id": "19"})
+    A.sendui(CANCEL, {"nonce": n, "id": "19"})
     c19 = A.reply(19, seconds=5)
-    A.send(CANCEL, {"nonce": n, "id": "16"})
+    A.sendui(CANCEL, {"nonce": n, "id": "16"})
     c16 = A.reply(16, final=False, seconds=5)
     r = A.reply(18, seconds=10)
     t.check("queue expired not started", q is not None and r is not None and r["code"] == "expiredBeforeStart" and A.count("q1") == 0, (q, r))
