@@ -3,6 +3,7 @@
 
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "guard.h"
 #include "log.h"
@@ -31,6 +32,7 @@ struct Task {
 
 std::mutex g_mutex;
 std::unordered_map<KilnOwner, std::string> g_owners;  // live owners
+std::unordered_set<KilnOwner> g_host_owners;          // the live ones owner_create_managed_host made
 KilnOwner g_next_owner = 1;
 KilnHandle g_next_handle = 1;
 std::vector<std::shared_ptr<TickSub>> g_tick[2];
@@ -53,6 +55,19 @@ KilnOwner owner_create(std::string_view id) {
     return o;
 }
 
+KilnOwner owner_create_managed_host(std::string_view id) {
+    std::lock_guard lock(g_mutex);
+    const KilnOwner o = g_next_owner++;
+    g_owners.emplace(o, std::string(id));
+    g_host_owners.insert(o);
+    return o;
+}
+
+bool owner_managed_host(KilnOwner owner) {
+    std::lock_guard lock(g_mutex);
+    return g_host_owners.count(owner) != 0;
+}
+
 std::string owner_name(KilnOwner owner) {
     if (owner == 0) return "kiln";
     std::lock_guard lock(g_mutex);
@@ -73,6 +88,7 @@ void owner_revoke(KilnOwner owner) {
     {
         std::lock_guard lock(g_mutex);
         const bool was_alive = g_owners.erase(owner) != 0;
+        g_host_owners.erase(owner);
         std::erase_if(g_retiring, [&](const std::shared_ptr<RetiringSub>& s) {
             if (s->owner != owner) return false;
             s->live.store(false, std::memory_order_release);

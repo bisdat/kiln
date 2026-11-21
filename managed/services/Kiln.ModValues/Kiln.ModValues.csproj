@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Mods' own per-character values (counters, currencies, experience with levels): a server-owned ledger saved with
+       the character through Kiln.Saves' CharacterData, an owner-only copy for the player's Kiln client over channel
+       kiln:mod-values, and the in-core native facade kiln.mod-values (native/core/abi/services/kiln_mod_values.h).
+       Started by Kiln (ServiceTick.AutoStart: Kiln.ModValuesStartup). Deployed to kiln/host/ and shared by every mod
+       (mods reference it with Private="false" ExcludeAssets="runtime"). Usage: docs/kiln/services/mod-values.md. -->
+  <PropertyGroup>
+    <RootNamespace>Kiln</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kiln.ModValues.Tests" />
+    <InternalsVisibleTo Include="Kiln.TestKit" />
+    <!-- 09-ui-blocks binds stats.<mod>/<id> to the internal stat source (StatSource.cs) -->
+    <InternalsVisibleTo Include="Kiln.Blocks" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
+    <!-- CharacterData's explicit-owner records, the character sessions and the sidecar's reserved projection -->
+    <ProjectReference Include="../Kiln.Saves/Kiln.Saves.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Network/Kiln.Network.csproj" Private="false" />
+    <!-- UiText (labels, number formats) and the game's text language -->
+    <ProjectReference Include="../Kiln.Ui/Kiln.Ui.csproj" Private="false" />
+  </ItemGroup>
+</Project>

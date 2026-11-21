@@ -319,6 +319,10 @@ The seven `ui.values.*` / `ui.slots.inspect` / `ui.gemforge.inspect` rows below 
 | `terrain.biomes` | managed | Kiln.Terrain | - | Always off in this version: biome changes are not built |
 | `blocks.move_followups` | managed | Kiln.Blocks, with the item blocks' rows | — | A weapon's moves with `FollowUps`, applied as one generation: `MoveBlock.FollowUps`, `Blocks.MovesStatus`, `WeaponMovesApplicationChangedEvent`. Both sides; the query on any thread, application and events on the tick. Needs kiln.gamedata (sequence clones, their rules, item data); a move that names a state (by name, GUID or `0x` id) also needs `anim.player_states`. Publication waits for all consuming worlds' sequence registration; a refused definition or sync route does not turn this row off |
 | `creature_control` | static (lowered when the broker's world program does not run) | kiln.creature_control | not held | the creature control broker takes new leases: its layout guard matched through kiln.types, its world program is registered (kiln.world with `write_other`), kiln.creatures has the AI switch ([creature-control.md](creature-control.md)); the table row `kiln.creature_control` serves queries, waits and releases |
+| `kiln.routines` | service | core | - | kiln.routines' table is here (villager routines: `Routines` in Kiln.Blocks) |
+| `routines.decisions` | sigdb feature (server and client exe; since 0.2.0-dev.31) | core (sigdb); kiln.routines lowers it (`service-missing` without kiln.hooks v2, kiln.world or world stops; `faulted` when the layout check or a link fails); Kiln.Blocks lowers it (`service-missing`) where kiln.routines is not loaded | - (not held; its guided check `16g-cc16g` is unconfirmed until the owner's game pass) | the villager worker, its task chooser, SetState, FinishState, SetDecision, SleepCheck and ProcessCommands resolved with their descriptors (`sig/routines/<symbol>`), MarkWritten captured, and the context offsets fit (the keep-awake prefix's trackers, NpcCommon's flags, sleep and wake hours): `Routines.Assign`, `Remove`, `Resume`, `Inspect` work. No hook is installed while it is off |
+| `routines.anchors` | managed, static | Kiln.Blocks | - | always unavailable (`policy`) in this version: a routine task that walks to an authored place |
+| `routines.jobs` | managed, static | Kiln.Blocks | - | always unavailable (`policy`) in this version: a routine task that works at a station |
 | `mods.boot` | sigdb feature (both exes), static | core (sigdb: `assets/ResourceInit`, `content/ItemRegistryUpdate`, `RegisterSingleton`); kiln.boot lowers it (`service-missing`) when a collector did not register in a boot process | — | Mod.OnBoot's phase can run in this process (on a game client it also needs `mods.boot.client`) ([../modding/onboot.md](../modding/onboot.md)); off: boot mods are refused (`RestartRequiredBoot`) |
 | `mods.boot.phase` | service row (session) | kiln.boot | - | Informational: `available` while a boot mod's OnBoot frame is open (the text names it), `pending` while the generation collects, `unavailable` (`policy`) once the phase is over or when this process has none (the text says why: safe idle, .NET off, no boot mod, or a configured client hold; this release holds none) |
 | `mods.boot.game_data` | service row | kiln.boot, at its start | - | `BootContext.GameData.Read` has a game-data snapshot of exactly this game build ([../modding/boot-gamedata.md](../modding/boot-gamedata.md)); `service-missing` with the command that makes one otherwise, `policy` in safe idle |
@@ -464,3 +468,15 @@ A mod asks `world.ecs_read` (`WorldConcurrent.IsAvailable`) for the task-thread 
 compare-exchange writes, not the `engine.*` rows: those say what the profile
 carries, the `world.*` rows say whether kiln.world reads or writes with it in this process (both are among the
 kiln.world rows above).
+
+## Rows added in dev.31
+Kiln.ModValues ([mod-values.md](mod-values.md)), managed rows reported at its start (the first service tick) and every 25
+steps.
+
+| Row | Kind | Reported by | What it says |
+|---|---|---|---|
+| `stats.definitions` | managed, static | Kiln.ModValues | `ModValues.Describe` and `Definition`: always available where the library is |
+| `stats.own` | managed; static on a dedicated server, session on a client | Kiln.ModValues | the server ledger (`Define`, `Read`, `Add`, `Spend`, `Set`, `Reset`): needs kiln.saves (`service-missing`); on a client pending until it hosts a world |
+| `stats.sync` | managed, static | Kiln.ModValues | `ModValues.Synced`: client only (`wrong-side` on a server), needs kiln.net |
+| `stats.ui` | managed, static | Kiln.ModValues | the stat source of UI blocks: client only (`wrong-side` on a server), needs kiln.ui |
+| `kiln.mod-values` | core (in-core service) | core | the native facade's table is here; its calls answer `unavailable` until Kiln.ModValues has bound the backend (through the Kiln-internal `kiln.internal.mod-values.backend`, which has no row) |
