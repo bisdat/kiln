@@ -901,6 +901,7 @@ internal static partial class KilnApis
         "P:Kiln.Ui.Available=kiln.ui", // via Kiln.UiNative.Available
         "P:Kiln.Ui.Crafting.MenuAvailable=kiln.craftmenu", // UiNative.Craft != null: Services.Get("kiln.craftmenu")
         "P:Kiln.Ui.ItemIconsAvailable=kiln.assets", // via Kiln.ResourceStore.HasTextureRgba
+        "P:Kiln.Ui.World.OutlinesAvailable=ui.world_outline", // Is("ui.world_outline")
         "P:Kiln.UiWheel.Available=kiln.ui", // UiNative.T2 != null: Services.Get("kiln.ui")
         "P:Kiln.UiWheel.IsAnyOpen=kiln.ui", // t != null: Services.Get("kiln.ui")
         "P:Kiln.UpgradeStation.Available=blocks.upgrade_station", // Is("blocks.upgrade_station")
