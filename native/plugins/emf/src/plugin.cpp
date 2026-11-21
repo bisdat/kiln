@@ -241,16 +241,20 @@ void KILN_CALL on_ready(void*) {
     discover_mods();
     load_mods(table);
 
-    // 5. what the mods registered (components first: its E-prompt listener is an event registration)
+    size_t loaded = 0;
+    for (const auto& m : g_mods) loaded += m->status == EMF_MOD_LOADED;
+    g_any_loaded = loaded > 0;
+
+    // 5. what the mods registered (components first: its E-prompt listener is an event registration; the on_hit
+    // relay only when an EMF mod is loaded, v31)
     components_on_ready();
+    hits_on_ready(loaded > 0);
     events_on_ready();
+    hits_after_ready();
     game_on_ready();
     hud_on_ready();
     install_ticks();
 
-    size_t loaded = 0;
-    for (const auto& m : g_mods) loaded += m->status == EMF_MOD_LOADED;
-    g_any_loaded = loaded > 0;
     logf(KILN_LOG_INFO, "kiln-emf: %zu of %zu EMF mod(s) loaded", loaded, g_mods.size());
     write_status();
 }
