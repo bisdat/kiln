@@ -15,5 +15,14 @@
       "refs": {}
     }
   ],
+  "itemParts": {
+    "perks": [
+      null,
+      "item:Weapon_T1_2H_Staff_01",
+      "item:Weapon_T1_2H_Staff_01",
+      "item:Weapon_T1_2H_Staff_01",
+      "item:Weapon_T1_2H_Staff_01"
+    ]
+  },
   "itemRules": {}
 }
