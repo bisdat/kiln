@@ -1403,6 +1403,13 @@ fn eml_under_hosted_shroudforge(kind: ModKind, state: &serde_json::Value, sf_hos
         && jstr(state.get("aside")).is_some_and(|a| a.starts_with("ShroudForge "))
 }
 
+/// kiln-emf stood aside because EMF's own loader or core runs in the game (kiln-emf's `steppedAsideReason`, plugin.cpp
+/// emf_in_process): the reason, for the finding. EMF then runs the EMF mods of emf\mods itself.
+fn emf_runs_its_own(kind: ModKind, state: &serde_json::Value) -> Option<String> {
+    if kind != ModKind::Emf { return None; }
+    jstr(state.get("steppedAsideReason")).filter(|r| r.starts_with("EMF's loader is loaded") || r.starts_with("EMF's core is loaded"))
+}
+
 fn failed_word(w: &str) -> bool {
     let w = w.to_ascii_lowercase();
     w.contains("fail") || w.contains("error") || w.contains("refus")
@@ -2032,6 +2039,25 @@ pub fn build(input: &ReportInput) -> Report {
                 "{} stood aside at the last start for shroudlink's own core ({core}). That core runs only the mods in shroudlink_mods, \
                  so the shroudlink mods in the profile did not load through Kiln. Remove {core}: Kiln then runs them, and the client \
                  addon keeps its MODS tab.", e.plugin));
+        } else if stood_aside(st) && let Some(why) = emf_runs_its_own(e.kind, st) {
+            // EMF's own loader (or core) chained on purpose: EMF runs its mods, which is how that setup works. A problem
+            // only when it ran none (its core went idle) or a profile mod is not where it reads (PepegaJedi, 2026-11-21).
+            let lost: Vec<String> = engine_mod_lines(st).into_iter()
+                .filter(|(_, state, _)| state.as_deref() == Some("not-loaded")).map(|(id, _, _)| id).collect();
+            if let Some(idle) = jstr(st.get("emfIdle")).filter(|s| !s.is_empty()) {
+                cx.find("own-loader", Level::Problem, format!(
+                    "{} stood aside at the last start for EMF's own loader ({why}), and {idle}. To let Kiln run the EMF mods instead, \
+                     switch EMF's loader off: put ';' in front of its line in kiln/chain.ini, then start again.", e.plugin));
+            } else if !lost.is_empty() {
+                cx.find("own-loader", Level::Problem, format!(
+                    "{} stood aside at the last start: EMF runs its own mods ({why}), but {} not in emf\\mods, where EMF reads: {}. \
+                     The lines under {} in \"The last start\" say what to do for each.",
+                    e.plugin, plural(lost.len(), "EMF mod of the profile is", "EMF mods of the profile are"), lost.join(", "), e.plugin));
+            } else {
+                cx.find("own-loader", Level::Info, format!(
+                    "EMF runs its own mods; that's how this setup works. {} stood aside at the last start for EMF's own loader ({why}), \
+                     which runs the EMF mods in emf\\mods.", e.plugin));
+            }
         } else if stood_aside(st) {
             let n = kind_name(e.kind);
             cx.find("own-loader", Level::Problem, format!(
