@@ -311,6 +311,7 @@ LOADED = {
     CORE: [r"\] boot complete"],
     "emf": [r"\] plugin kiln-emf\.dll loaded"],
     "quests": [r"\] service kiln\.knowledge v\d+ published", r"\] service kiln\.quests v\d+ published"],
+    "dev28-16g-villager-routines": [r"\] service kiln\.routines v\d+ published"],
 }
 SUMMARY = [re.compile(r"(\d+) PASS, (\d+) FAIL"), re.compile(r"(\d+) passed, (\d+) failed"),
            re.compile(r"\bPASS (\d+),? FAIL (\d+)")]

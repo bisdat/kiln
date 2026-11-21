@@ -26,3 +26,10 @@ static Kiln.TestKit.FakePhysicsCookHost.ContentHashOf(byte[]! bytes) -> string!
 static Kiln.TestKit.FakePhysicsCookHost.Features.get -> System.Collections.Generic.IReadOnlyList<string!>!
 static Kiln.TestKit.PhysicsCookResult.operator !=(Kiln.TestKit.PhysicsCookResult? left, Kiln.TestKit.PhysicsCookResult? right) -> bool
 static Kiln.TestKit.PhysicsCookResult.operator ==(Kiln.TestKit.PhysicsCookResult? left, Kiln.TestKit.PhysicsCookResult? right) -> bool
+Kiln.TestKit.HarnessRoutines
+Kiln.TestKit.HarnessRoutines.Decide(uint npcId) -> string?
+Kiln.TestKit.HarnessRoutines.Finish(uint npcId, bool ok, string? reason = null) -> void
+Kiln.TestKit.HarnessRoutines.Queued.get -> int
+Kiln.TestKit.HarnessRoutines.SetClock(int hour, int minute = 0) -> void
+Kiln.TestKit.HarnessRoutines.SetSleepAllowed(uint npcId, bool allowed) -> void
+Kiln.TestKit.KilnHarness.Routines.get -> Kiln.TestKit.HarnessRoutines!
