@@ -439,4 +439,17 @@ fn the_preview_names_an_emf_mods_missing_dependency_before_play() {
     p.dropins = vec![];
     p.dropins_engines = true;
     assert_eq!(problems(&p)[0].state, DepState::Missing);
+
+    // EMF's own loader in the game: kiln-emf steps aside and the real EMF loads emf/mods by its own switches, so the
+    // preview says nothing (it could be wrong), whatever the drop-in switch, with lua there or not
+    put(&g.path, "dinput8.dll", &build_test_dll(&["DirectInput8Create", "emf_loader_identity"], b""));
+    assert!(kiln_manage::emf_deps::own_loader(&g.path));
+    assert_eq!(problems(&p), vec![]);
+    std::fs::remove_dir_all(g.path.join("emf/mods/lua")).unwrap();
+    assert_eq!(problems(&p), vec![]);
+    // the Library-only preview (no game) still says it
+    assert_eq!(profile::resolve_preview(&dirs, &p, RunSide::Client).unwrap().emf[0].state, DepState::Missing);
+    std::fs::remove_file(g.path.join("dinput8.dll")).unwrap();
+    assert!(!kiln_manage::emf_deps::own_loader(&g.path));
+    assert_eq!(problems(&p)[0].state, DepState::Missing);
 }

@@ -465,7 +465,8 @@ pub fn check(mods: &[EmfMod], side: RunSide) -> Vec<EmfDepProblem> {
                     id: list[i].entry.clone().unwrap_or_else(|| list[i].id.clone()), dep: d.id.clone(),
                     dep_name: at.map(|j| list[j].name.clone()).or_else(|| release.map(|(_, n)| n.to_string())),
                     range: d.range.clone(), state: DepState::Missing, found: at.map(|j| list[j].version.clone()),
-                    with_emf: release.is_some(), url: d.url.clone().or_else(|| release.map(|_| EMF_PAGE.to_string())), reason: String::new(),
+                    // EMF's own mods come from EMF's page whatever link a mod.json gives for them
+                    with_emf: release.is_some(), url: if release.is_some() { Some(EMF_PAGE.to_string()) } else { d.url.clone() }, reason: String::new(),
                 };
                 match at {
                     None if d.optional => continue,
@@ -499,9 +500,21 @@ pub fn check(mods: &[EmfMod], side: RunSide) -> Vec<EmfDepProblem> {
     list.iter().zip(found).filter(|(m, _)| m.entry.is_some()).filter_map(|(_, p)| p).collect()
 }
 
+/// Is EMF's own loader installed for this game ([`crate::own_loaders::find`]: next to the game, in chain.ini or EMF's
+/// dinput8-chain.ini)? Then kiln-emf steps aside at the start (native/plugins/emf/src/plugin.cpp `emf_in_process`) and
+/// the real EMF loads whatever is in `<game>/emf/mods`, switched by its own `emf/config/<id>.ini`, which Kiln does not
+/// read. A loader found on a path Wine may not load without a DLL override counts as well.
+pub fn own_loader(game: &Path) -> bool {
+    crate::own_loaders::find(game, None).iter().any(|l| l.kind == ModKind::Emf)
+}
+
 /// [`check`] over a profile's EMF entries, read from the Library, and, with `game` and EMF drop-ins on in the profile,
-/// the mods in `<game>/emf/mods`: the enabled entries a dependency keeps from loading.
+/// the mods in `<game>/emf/mods`: the enabled entries a dependency keeps from loading. Nothing while EMF's own loader is
+/// installed in `game` ([`own_loader`]): EMF decides then, by its own switches, so any word here could be wrong.
 pub fn profile_problems(dirs: &DataDirs, profile: &Profile, side: RunSide, game: Option<&Path>) -> Vec<EmfDepProblem> {
+    if profile.mods.emf.iter().all(|m| !m.enabled) || game.is_some_and(own_loader) {
+        return Vec::new();
+    }
     let mut mods = Vec::new();
     for m in &profile.mods.emf {
         let r = crate::library::LibraryRef { kind: ModKind::Emf, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };

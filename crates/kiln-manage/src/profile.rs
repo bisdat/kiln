@@ -1046,16 +1046,17 @@ pub fn resolve_preview(dirs: &DataDirs, profile: &Profile, side: RunSide) -> Res
 /// [`resolve_preview`] in a game (None: no game), as the launcher asks for it: whether a client's server mods start with
 /// the player's own world ([`hosted_server_mods`]), and EMF's dependencies over the game's emf/mods folder too.
 pub fn resolve_preview_in(dirs: &DataDirs, profile: &Profile, side: RunSide, game: Option<&Path>) -> Result<ResolvePreview> {
-    let mut p = resolve_preview_for(dirs, profile, side, game.is_none_or(hosted_server_mods))?;
-    if game.is_some() {
-        p.emf = crate::emf_deps::profile_problems(dirs, profile, side, game);
-    }
-    Ok(p)
+    preview_with(dirs, profile, side, game.is_none_or(hosted_server_mods), game)
 }
 
 /// [`resolve_preview`] for a game whose kiln.json says whether a client's server mods start with the player's own
 /// world (`hosted`: [`hosted_server_mods`]).
 pub fn resolve_preview_for(dirs: &DataDirs, profile: &Profile, side: RunSide, hosted: bool) -> Result<ResolvePreview> {
+    preview_with(dirs, profile, side, hosted, None)
+}
+
+/// The preview; EMF's dependencies (checked once) over the Library's mods, and with `game` its emf/mods folder too.
+fn preview_with(dirs: &DataDirs, profile: &Profile, side: RunSide, hosted: bool, game: Option<&Path>) -> Result<ResolvePreview> {
     let mut warnings = Vec::new();
     // managed mods
     let mut candidates = Vec::new();
@@ -1183,7 +1184,7 @@ pub fn resolve_preview_for(dirs: &DataDirs, profile: &Profile, side: RunSide, ho
             }
         }
     }
-    let emf = crate::emf_deps::profile_problems(dirs, profile, side, None);
+    let emf = crate::emf_deps::profile_problems(dirs, profile, side, game);
     Ok(ResolvePreview { side, kiln, native: ordered, warnings, with_world: starts_with_world, emf })
 }
 

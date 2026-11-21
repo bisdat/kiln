@@ -53,6 +53,19 @@ fn a_missing_required_dependency_is_reported_with_emfs_words_and_how_to_get_it()
 }
 
 #[test]
+fn emfs_own_mods_always_link_emfs_page_and_another_mods_link_is_its_entrys() {
+    // a mod.json that names some other page for lua: "Get EMF" still opens EMF's page
+    let odd = Dep { url: Some("https://example.com/not-emf".into()), ..dep("lua", ">=1.36", false) };
+    let pet = Dep { url: Some("https://www.nexusmods.com/enshrouded/mods/9001".into()), ..dep("pet-core", "^2.0", false) };
+    let m = emf(Some("mage_skills"), "mage_skills", "1.0.0", true, vec![odd]);
+    let p = emf(Some("pets"), "pets", "1.0.0", true, vec![pet]);
+    let out = check(&[m, p], RunSide::Client);
+    let by = |id: &str| out.iter().find(|x| x.id == id).unwrap();
+    assert_eq!((by("mage_skills").with_emf, by("mage_skills").url.as_deref()), (true, Some(EMF_PAGE)));
+    assert_eq!((by("pets").with_emf, by("pets").url.as_deref()), (false, Some("https://www.nexusmods.com/enshrouded/mods/9001")));
+}
+
+#[test]
 fn a_dependency_in_range_is_no_problem() {
     let lua = emf(Some("lua"), "lua", "1.39.0", true, vec![]);
     assert_eq!(check(&[mage_skills(), lua.clone()], RunSide::Client), vec![]);
