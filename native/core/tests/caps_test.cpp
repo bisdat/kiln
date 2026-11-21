@@ -15,8 +15,10 @@ inline unsigned long GetCurrentProcessId() { return 4242; }
 #include "../src/sigdb.cpp"
 #include "../src/services/service.cpp"
 #include "../src/gates.cpp"  // kiln_gates.g.h: test-caps.sh generates it from native/core/gates
+#include "../src/sfi_release_policy.cpp"  // the release policy's rows gates.cpp adds
 #include "../src/config.cpp"
 #include "../src/services/caps.cpp"
+#include "../src/services/client_building_input.cpp"  // the building input row asks it whether its producer is bound
 
 #include <cstdarg>
 #include <barrier>
@@ -156,6 +158,7 @@ bool init_no() { return false; }
 KILN_SERVICE(fakeok, "kiln.fakeok", 3, &kFakeTable, &init_yes);
 KILN_SERVICE(fakeno, "kiln.fakeno", 2, &kFakeTable, &init_no);
 KILN_SERVICE(fakehooks, "kiln.hooks", 2, &kFakeTable, &init_yes);
+KILN_SERVICE(fakeclient, "kiln.client", 1, &kFakeTable, &init_yes);
 
 namespace {
 namespace caps = kiln::caps;
@@ -612,6 +615,36 @@ void core_rows(const std::filesystem::path& dir) {
     kiln::gates::configure(KILN_SIDE_SERVER, false, {});
     reset();
     caps::core_rows(true, true, "");
+    // kiln.client's building input: the client only, kiln.client running, its producer bound
+    {
+        const uint32_t side = kiln::test_image.side;
+        kiln::test_image.side = KILN_SIDE_CLIENT;
+        kiln::building_input::reset_for_tests();
+        caps::core_rows(true, true, "");
+        const char* why = nullptr;
+        kiln::building_input::bound(&why);
+        CHECK(is("client.building_input", U, KILN_CAP_REASON_SYMBOL_MISSING) && get("client.building_input").text == why &&
+                  get("client.building_input").source == "core",
+              "building input: no producer bound on this build: unavailable, symbol-missing, with the producer's reason");
+        static const kiln::building_input::Layout layout{760, 936, 500, 160, 0, 1, 2, 3, 4, 5, 7, 40};
+        kiln::building_input::bind(&layout);
+        caps::core_rows(true, true, "");
+        CHECK(is("client.building_input", A, 0), "building input: a bound producer on the client: available");
+        kiln_service_fakeclient.available = false;
+        caps::core_rows(true, true, "");
+        CHECK(is("client.building_input", U, KILN_CAP_REASON_SERVICE_MISSING), "building input: kiln.client missing refuses");
+        kiln_service_fakeclient.available = true;
+        caps::core_rows(false, false, "test idle");
+        CHECK(is("client.building_input", U, KILN_CAP_REASON_POLICY) && get("client.building_input").text == "not started in safe idle: test idle",
+              "building input: safe idle says policy");
+        kiln::test_image.side = KILN_SIDE_SERVER;
+        caps::core_rows(true, true, "");
+        CHECK(is("client.building_input", U, KILN_CAP_REASON_WRONG_SIDE), "building input: a dedicated server says wrong side");
+        kiln::building_input::reset_for_tests();
+        kiln::test_image.side = side;
+        reset();
+        caps::core_rows(true, true, "");
+    }
     // kiln.tasks' pool: tasks.pool follows the pool's health (read at every registry call, outside the pool's locks)
     {
         static std::atomic<int> health{0};
@@ -780,6 +813,36 @@ void core_rows(const std::filesystem::path& dir) {
               caps::dll_row_name("kiln-a b.dll") == "kiln.a_b" && caps::dll_row_name("kiln-.dll").empty(),
           "service DLL: row names from file names");
     sigdb::g_core = sigdb::Resolver();
+}
+
+// kiln.net's Steam peer-to-peer messages row: the core says why in safe idle and when kiln-net.dll did
+// not start; otherwise kiln-net.dll reports it (pending until Steam is resolved, then available).
+void steam_messages_row(const std::filesystem::path& dir) {
+    reset();
+    t_paths.kiln = dir / "kiln-none";
+    caps::core_rows(false, false, "test idle");
+    CHECK(is("net.steam_messages", U, KILN_CAP_REASON_POLICY) &&
+              get("net.steam_messages").text == "not started in safe idle: test idle" &&
+              get("net.steam_messages").source == "core",
+          "steam messages: safe idle is policy, with the reason (%s)", get("net.steam_messages").text.c_str());
+    reset();
+    caps::core_rows(true, true, "");
+    CHECK(get("net.steam_messages").rc == KILN_ERR_NOT_FOUND, "steam messages: hooks on, no core row (kiln-net.dll reports it)");
+    const KilnOwner net = owner("service:kiln-net.dll");
+    CHECK(rep(net, "net.steam_messages", P, KILN_CAP_REASON_SESSION, "waits for Steam") == KILN_OK &&
+              is("net.steam_messages", P, KILN_CAP_REASON_SESSION) && get("net.steam_messages").source == "service:kiln-net.dll",
+          "steam messages: kiln-net.dll may report it pending");
+    CHECK(rep(net, "net.steam_messages", A, KILN_CAP_REASON_NONE, "resolved") == KILN_OK && is("net.steam_messages", A, 0) &&
+              (get("net.steam_messages").flags & KILN_CAP_FLAG_SESSION),
+          "steam messages: then available, a session row");
+    revoke(net);
+    caps::service_dll("kiln-net.dll", "skipped", "kiln_plugin_main returned 3 (unavailable)");
+    const Got missing = get("net.steam_messages");
+    CHECK(missing.state == U && missing.reason == KILN_CAP_REASON_SERVICE_MISSING &&
+              missing.text.rfind("kiln.net did not start: kiln-net.dll skipped", 0) == 0 && missing.source == "core",
+          "steam messages: kiln-net.dll did not start: service-missing (%s)", missing.text.c_str());
+    caps::service_dll("kiln-items.dll", "failed", "LoadLibrary failed (126)");
+    CHECK(get("net.steam_messages").text == missing.text, "steam messages: another DLL's failure leaves it alone");
 }
 
 void json_file() {
@@ -1228,6 +1291,55 @@ void client_gate(const std::filesystem::path& dir) {
     CHECK(good, "gate: the compiled list holds %zu well-formed, distinct names", gates::held().size());
     gates::configure(KILN_SIDE_SERVER, false, {});
     reset();
+
+    // the release hold of Kiln's interpreter for ShroudForge mods (sfi_release_policy.h) as kiln.caps shows it
+    {
+        namespace sfi = kiln::sfi_release_policy;
+        const auto sfi_boot = [&](bool all, std::vector<std::string> names) {
+            reset();
+            resolve_with(dir, "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E8 {helper:rel32}");
+            gates::use_list_for_tests(nullptr);  // the compiled list: native/core/gates/sfi.json and the policy
+            gates::configure(KILN_SIDE_CLIENT, all, names);
+            caps::core_rows(true, true, "");
+        };
+        // the compiled list holds kiln-sfi.interpreter while it is a preview; without that row it is a normal choice
+        bool listed = false;
+        for (const gates::Gate* g = gates::kBuiltIn; g->name; ++g)
+            listed = listed || (std::string_view(g->name) == sfi::kInterpreter && g->side == gates::kBoth);
+        sfi_boot(false, {});
+        if (listed)
+            CHECK(is("kiln-sfi.interpreter", U, KILN_CAP_REASON_POLICY) && kiln_caps_held(T, ks("kiln-sfi.interpreter")) == 1 &&
+                      get("kiln-sfi.interpreter").text.find("sfi-ui-page") != std::string::npos,
+                  "sfi: kiln-sfi.interpreter reads held, with its guided checks, and kiln_caps_held is true");
+        else
+            CHECK(get("kiln-sfi.interpreter").rc == KILN_ERR_NOT_FOUND && kiln_caps_held(T, ks("kiln-sfi.interpreter")) == 0 &&
+                      !gates::is_held("kiln-sfi.interpreter"),
+                  "sfi: without its row kiln-sfi.interpreter is not held, with no preview (a name nobody reports has no row)");
+        CHECK(is("kiln-sfi.sf18", U, KILN_CAP_REASON_POLICY) && get("kiln-sfi.sf18").text == std::string(sfi::kVetoText),
+              "sfi: kiln-sfi.sf18 reads held by the release policy's veto");
+        const KilnOwner plugin = owner("plugin:kiln-sfi.dll");
+        rep(plugin, "kiln-sfi.interpreter", A, KILN_CAP_REASON_NONE);
+        rep(plugin, "kiln-sfi.sf18", A, KILN_CAP_REASON_NONE);
+        if (listed)
+            CHECK(is("kiln-sfi.interpreter", U, KILN_CAP_REASON_POLICY) && is("kiln-sfi.sf18", U, KILN_CAP_REASON_POLICY),
+                  "sfi: a plugin's 'available' does not open either held row");
+        else
+            CHECK(is("kiln-sfi.interpreter", A, KILN_CAP_REASON_NONE) && is("kiln-sfi.sf18", U, KILN_CAP_REASON_POLICY),
+                  "sfi: a plugin's 'available' reads as reported for the open interpreter, never for the sf18 veto");
+        revoke(plugin);
+        sfi_boot(true, {});
+        CHECK(get("kiln-sfi.interpreter").rc == KILN_ERR_NOT_FOUND && !gates::is_held("kiln-sfi.interpreter"),
+              "sfi: preview true lifts kiln-sfi.interpreter (a name nobody reports has no row)");
+        CHECK(is("kiln-sfi.sf18", U, KILN_CAP_REASON_POLICY) && get("kiln-sfi.sf18").text == std::string(sfi::kVetoText) &&
+                  kiln_caps_held(T, ks("kiln-sfi.sf18")) == 1 && gates::is_held("kiln-sfi.sf18"),
+              "sfi: preview true does not lift kiln-sfi.sf18 (veto), and kiln_caps_held is true for it");
+        sfi_boot(false, {"kiln-sfi.sf18", "kiln-sfi.interpreter"});
+        CHECK(is("kiln-sfi.sf18", U, KILN_CAP_REASON_POLICY) && get("kiln-sfi.interpreter").rc == KILN_ERR_NOT_FOUND,
+              "sfi: preview naming both rows lifts the interpreter only");
+        gates::use_list_for_tests(nullptr);
+        gates::configure(KILN_SIDE_SERVER, false, {});
+        reset();
+    }
 }
 
 // kiln.json "tasks": the four global knobs, their defaults, bounds, wrong types and side overrides (config.cpp).
@@ -1418,6 +1530,8 @@ int main(int argc, char** argv) {
     client_gate_threads();
     client_preview(dir);
     tasks_config(dir);
+    // kiln.net's Steam peer-to-peer messages row
+    steam_messages_row(dir);
     json_file();
     writer();
     writer_retry();

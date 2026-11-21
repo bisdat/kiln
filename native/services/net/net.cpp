@@ -51,6 +51,10 @@
 #include "safetyhook.hpp"  // safetyhook::Context: the mid handlers' register view
 #include "services/kiln_assets.h"
 #include "services/kiln_net.h"
+// Steam peer-to-peer messages (kiln_net.h, steam_messages.h)
+#include "../../core/src/launch_internal.h"  // kiln.internal.launch (Kiln-internal, the core's own)
+#include "services/kiln_caps.h"
+#include "steam_messages.h"
 
 namespace {
 
@@ -1765,10 +1769,14 @@ KilnResult KILN_CALL t_lab_selftest(uint32_t op, uint64_t a, uint64_t b, uint64_
     }
 }
 
+// The table, the Steam peer-to-peer messages members appended (kiln_net.h)
 const KilnNetApi kTable = {{sizeof(KilnNetApi), KILN_NET_VERSION}, &t_status, &t_subscribe, &t_unsubscribe,
                            &t_send, &t_peers, &t_peer_info, &t_kick, &t_peer_of_entity,
                            &t_gate_set, &t_gate_info, &t_gate_release, &t_entity_withheld, &t_template_kiln_only,
-                           &t_withhold_set, &t_lab_selftest};
+                           &t_withhold_set, &t_lab_selftest,
+                           &knet::steam::st_status, &knet::steam::st_open, &knet::steam::st_close,
+                           &knet::steam::st_maintain, &knet::steam::st_send, &knet::steam::st_receive,
+                           &knet::steam::st_accept};
 
 // ---------------------------------------------------------------------------------------------------------------
 // Boot
@@ -1911,6 +1919,79 @@ bool init_client_role() {
     return true;
 }
 
+// Steam peer-to-peer messages (kiln_net.h, steam_messages.h): exports, the designated owner, the
+// capability row net.steam_messages and the exit flag
+void* steam_lookup(const char* name, void* module) {
+    return reinterpret_cast<void*>(GetProcAddress(static_cast<HMODULE>(module), name));
+}
+void steam_log(int level, const char* text) { logf(level, "%s", text); }
+
+const KilnCapsApi* g_steam_caps = nullptr;
+std::atomic<bool> g_steam_row_available{false};
+void report_steam_row(uint32_t state, uint32_t reason, const char* text) {
+    if (!g_steam_caps) return;
+    static const char kName[] = "net.steam_messages";
+    g_steam_caps->report(g_owner, KilnStr{kName, sizeof(kName) - 1}, state, reason, KilnStr{text, std::strlen(text)});
+}
+// On kiln.net's own ticks (server step, client world): the row turns available once a member found Steam ready. No
+// Steam call here; the members never touch kiln.caps (its subscribers run on the reporting thread).
+void KILN_CALL steam_row_tick(const KilnTickInfo*, void*) {
+    if (g_steam_row_available.load(std::memory_order_relaxed) || !knet::steam::ready_seen()) return;
+    if (g_steam_row_available.exchange(true)) return;
+    report_steam_row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                     g_side == KILN_SIDE_SERVER ? "Steam networking messages resolved (GameServer interfaces)"
+                                                : "Steam networking messages resolved (user interfaces)");
+}
+
+void init_steam_messages() {
+    // steam_api64.dll is a static import of both game executables: it is loaded before Kiln, or not at all. Looked up
+    // once, here; no member calls GetModuleHandle or GetProcAddress.
+    const HMODULE module = GetModuleHandleW(L"steam_api64.dll");
+    knet::steam::Config config;
+    config.server = g_side == KILN_SIDE_SERVER;
+    config.lookup = module ? &steam_lookup : nullptr;
+    config.lookup_user = module;
+    config.log = &steam_log;
+    // kiln.internal.launch: the services' KilnApi resolves it for a kiln-net.dll of this core's build only; without it
+    // no lease opens.
+    const auto* launch = static_cast<const KilnLaunchInternalApi*>(
+        g_api->service(KilnStr{KILN_LAUNCH_INTERNAL_SERVICE, sizeof(KILN_LAUNCH_INTERNAL_SERVICE) - 1},
+                       KILN_LAUNCH_INTERNAL_VERSION));
+    if (launch && launch->header.version == KILN_LAUNCH_INTERNAL_VERSION &&
+        launch->header.size >= offsetof(KilnLaunchInternalApi, dialect_owner) + sizeof launch->dialect_owner)
+        config.dialect_owner = launch->dialect_owner;
+    const char* missing = nullptr;
+    const knet::steam::Presence presence = knet::steam::init(config, &missing);
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(KilnStr{KILN_CAPS_SERVICE, sizeof(KILN_CAPS_SERVICE) - 1}, 1));
+    if (caps && caps->header.size >= offsetof(KilnCapsApi, report) + sizeof caps->report && caps->report) g_steam_caps = caps;
+    char text[160];
+    if (presence == knet::steam::Presence::NoModule) {
+        report_steam_row(KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING, "steam_api64.dll is not loaded in this process");
+        logf(KILN_LOG_INFO, "net: steam messages: steam_api64.dll is not loaded in this process; no Steam messages");
+        return;
+    }
+    if (presence == knet::steam::Presence::MissingExport) {
+        std::snprintf(text, sizeof text, "steam_api64.dll has no %s", missing);
+        report_steam_row(KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING, text);
+        logf(KILN_LOG_WARN, "net: steam messages: %s; no Steam messages", text);
+        return;
+    }
+    report_steam_row(KILN_CAP_PENDING, KILN_CAP_REASON_SESSION,
+                     "waits for Steam: available once a lease member finds it initialised");
+    KilnHandle h = 0;
+    g_api->subscribe_tick(g_owner, KILN_TICK_PRE, &steam_row_tick, nullptr, &h);
+    if (g_world_api && g_side == KILN_SIDE_CLIENT)
+        g_api->subscribe_world_tick(g_owner, KILN_WORLD_CLIENT, KILN_TICK_PRE, &steam_row_tick, nullptr, &h);
+    logf(KILN_LOG_INFO, "net: steam messages: %s exports found; a lease opens for the designated owner only (%s)",
+         config.server ? "GameServer" : "user", config.dialect_owner ? "kiln.internal.launch resolved" : "none here");
+}
+
+// Kiln's own exit step: every Steam messages member answers unavailable from now on and calls nothing. No
+// UnregisterCallback (the game's SteamAPI_Shutdown may have run); the static callback object stays valid.
+void KILN_CALL on_exit_steam(void*) {
+    if (!knet::steam::close_for_exit(200))
+        logf(KILN_LOG_WARN, "net: steam messages: a member call was still inside Steam at exit (gave up after 200 ms)");
+}
 }  // namespace
 
 extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api, KilnOwner owner, KilnPluginInfo* info) {
@@ -1962,5 +2043,8 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         KilnHandle h = 0;
         g_api->subscribe_world(g_owner, &on_world_event, nullptr, &h);
     }
+    // Steam peer-to-peer messages: exports, owner and capability row now; the exit flag at exit
+    init_steam_messages();
+    if (info->size >= offsetof(KilnPluginInfo, on_unload) + sizeof(info->on_unload)) info->on_unload = &on_exit_steam;
     return api->register_service(owner, KilnStr{KILN_NET_SERVICE, sizeof(KILN_NET_SERVICE) - 1}, &kTable);
 }
