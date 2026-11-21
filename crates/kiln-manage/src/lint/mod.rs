@@ -295,6 +295,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("native.schema.json", include_str!("../../../../schema/native.schema.json")),
     ("kiln-modpack.schema.json", include_str!("../../../../schema/kiln-modpack.schema.json")),
     ("content-pack.schema.json", include_str!("../../../../schema/content-pack.schema.json")),
+    ("registry-section.schema.json", include_str!("../../../../schema/registry-section.schema.json")),
     ("assets.schema.json", include_str!("../../../../schema/assets.schema.json")),
     ("cook.schema.json", include_str!("../../../../schema/cook.schema.json")),
     ("physics.schema.json", include_str!("../../../../schema/physics.schema.json")),

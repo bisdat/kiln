@@ -22,6 +22,10 @@
     "itemdata": { "$ref": "#/$defs/itemdataSection" },
     "creatures": { "$ref": "#/$defs/creaturesSection" },
     "gear": { "$ref": "#/$defs/gearSection" },
+    "registry": {
+      "$ref": "registry-section.schema.json",
+      "description": "Edits of Kiln registries (experimental, KILNX031): every mod's add, then alter, then final, by Kiln ids and Kiln fields (docs/kiln/modding/registries/README.md). Read by the registry stage at start, not applied with the pack's other sections; fields that apply now or at world load follow a pack's hot reload."
+    },
     "gearRules": { "$ref": "#/$defs/gearRules" },
     "abilities": { "description": "Reserved for Kiln.Abilities (a known section name; no service reads it yet).", "x-kiln-docs": "docs/kiln/services/gamedata.md#pack-sections-of-other-services" }
   },
