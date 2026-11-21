@@ -12,6 +12,7 @@ usage() {
   cat <<'USAGE'
 Usage: bash tools/launcher/distrobox-build.sh REF [--mode launcher|ui|native|managed]
              [--tests-only] [--native-tests targeted|full] [--target kiln-ui]
+             [--archive-unregistered]
 
 REF:
   3                 fork PR #3 (alias for pr/3; preserves old behaviour)
@@ -28,6 +29,10 @@ Modes (default: launcher):
 --tests-only omits the target build or AppImage, but runs that mode's tests.
 --native-tests full uses native/services/ui/tests/run.sh (incl. TSan);
                      targeted is the six portable chat/UI checks (default).
+--archive-unregistered preserves an existing checkout at <ref>/src that is
+                     not registered to the Git management clone by moving it
+                     into a timestamped <ref>/src-unregistered-* archive.
+                     No directories are deleted; explicit opt-in required.
 
 No game installation or runtime deployment. Artifacts are NOT a full Kiln runtime.
 All ephemeral files: ~/Downloads/kiln-builds/<ref>/
@@ -173,7 +178,7 @@ if [[ "${1:-}" == "--inside-build" ]]; then
 fi
 
 if [[ $# == 0 ]]; then usage >&2; exit 2; fi
-ref='' mode=launcher tests_only=0 native_tests=targeted target=kiln-ui
+ref='' mode=launcher tests_only=0 native_tests=targeted target=kiln-ui archive_unregistered=0
 while (($#)); do
   case "$1" in
     -h|--help) usage; exit 0 ;;
@@ -181,6 +186,7 @@ while (($#)); do
       (($# >= 2)) || { echo 'Missing value for --mode' >&2; exit 2; }
       mode="$2"; shift 2 ;;
     --tests-only) tests_only=1; shift ;;
+    --archive-unregistered) archive_unregistered=1; shift ;;
     --native-tests)
       (($# >= 2)) || { echo 'Missing value for --native-tests' >&2; exit 2; }
       native_tests="$2"; shift 2 ;;
@@ -242,14 +248,32 @@ commit="$(git -C "$repo" rev-parse --verify "$rev^{commit}")"
 out="$KILN_TEMP_DIR/$label"
 worktree="$out/src"
 mkdir -p "$out"
-if [[ -e "$worktree" ]]; then
-  git -C "$repo" worktree list --porcelain | grep -Fxq "worktree $worktree" || {
-    echo "$worktree exists but is not a registered worktree of $repo; refusing to touch it" >&2; exit 1;
-  }
-  [[ -z "$(git -C "$worktree" status --porcelain --untracked-files=all)" ]] || {
-    echo "Worktree $worktree has uncommitted changes; refusing to overwrite them" >&2; exit 1;
-  }
-  git -C "$worktree" switch --detach "$commit"
+if [[ -e "$worktree" || -L "$worktree" ]]; then
+  if git -C "$repo" worktree list --porcelain | grep -Fxq "worktree $worktree"; then
+    [[ -z "$(git -C "$worktree" status --porcelain --untracked-files=all)" ]] || {
+      echo "Worktree $worktree has uncommitted changes; refusing to overwrite them" >&2; exit 1;
+    }
+    git -C "$worktree" switch --detach "$commit"
+  else
+    if (( ! archive_unregistered )); then
+      echo "$worktree exists but is not a registered worktree of $repo; refusing to touch it" >&2
+      echo "To preserve it under an archive name, rerun with --archive-unregistered" >&2
+      exit 1
+    fi
+    # Never follow a symlink or remove a pre-existing checkout. Move it to a
+    # unique sibling name, then create a fresh managed worktree at src so
+    # artifact installers keep a stable source path.
+    [[ -d "$worktree" && ! -L "$worktree" ]] || {
+      echo "Cannot archive a non-directory or symlink: $worktree" >&2; exit 1;
+    }
+    archive="$out/src-unregistered-$(date -u +%Y%m%dT%H%M%SZ)-$"
+    [[ ! -e "$archive" && ! -L "$archive" ]] || {
+      echo "Archive path already exists: $archive" >&2; exit 1;
+    }
+    mv -- "$worktree" "$archive"
+    echo "Preserved unregistered checkout (including changes) at: $archive"
+    git -C "$repo" worktree add --detach "$worktree" "$commit"
+  fi
 else
   git -C "$repo" worktree add --detach "$worktree" "$commit"
 fi
