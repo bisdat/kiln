@@ -252,16 +252,22 @@
   "plan": null,
   "refused": [
     {
+      "field": "levelCap",
+      "id": "game:balance",
       "mod": "caps",
       "n": 0,
       "reason": "Conflict (exclusive): bigstacks wrote balance[game:balance].levelCap exclusively; the later edit is refused",
+      "registry": "balance",
       "source": "content/caps.json",
       "stage": "alter"
     },
     {
+      "field": "maxStack",
+      "id": "game:nothing",
       "mod": "caps",
       "n": 1,
       "reason": "no entry game:nothing in items",
+      "registry": "items",
       "source": "content/caps.json",
       "stage": "alter"
     }
@@ -285,7 +291,8 @@
     "conflicts": 0,
     "fields": 0,
     "refused": 0,
-    "removed": 0
+    "removed": 0,
+    "writers": 0
   },
   "written": "2026-11-20T16:00:00Z"
 }

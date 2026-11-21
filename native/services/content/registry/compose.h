@@ -23,11 +23,12 @@
 // memory, no service table, no lock, no clock.
 #pragma once
 #include <functional>
+#include <memory>
 #include <set>
 
 #include "ir.h"
 
-namespace kc::reg {
+namespace kc::registry {
 
 struct EntryRef {
     std::string registry, id;
@@ -69,7 +70,9 @@ struct BaseModel {
     std::map<std::string, std::map<std::string, Cover>> raw_cover;
 };
 
-enum class WriterKind : uint8_t { ArchiveWriter, OldPatch, OldPack, Code, Registry };
+// Check: the stage's reference check itself (a list element naming an entry the stage removed, taken out of an entry of a
+// registry whose entries are not removed).
+enum class WriterKind : uint8_t { ArchiveWriter, OldPatch, OldPack, Code, Registry, Check };
 const char* writer_kind_name(WriterKind k);
 
 // A write below the registry: an old Kiln path, or an archive-writer package the journal names (D1).
@@ -86,8 +89,8 @@ struct OldWrite {
 struct ChainRow {
     WriterKind kind = WriterKind::Registry;
     std::string raw;  // the raw member path as written, when this row came from an Advanced-tier edit
-    ElementRef element;                     // an element edit of this list ("inputs[2].count"): op applies to that element
-    std::optional<FieldSpec> element_spec;  // ...typed by its leaf's (or the element's) spec
+    ElementRef element;                             // an element edit of this list ("inputs[2].count"): op applies to that element
+    std::shared_ptr<const FieldSpec> element_spec;  // ...typed by its leaf's (or the element's) spec (shared by the edit's rows)
     std::string mod;  // the Kiln mod (empty: an archive-writer package)
     std::string who;  // what the report names: the mod, or the old writer
     Stage stage = Stage::Alter;
@@ -108,7 +111,12 @@ struct FieldOutcome {
     // A raw member's own chain (FieldRef::field "raw:<key>"): the path as first written, and the member's spec on this build
     // (a Kiln field's spec is the schema's). Back-ends evaluate the chain with it.
     std::string raw;
-    std::optional<FieldSpec> raw_spec;
+    std::shared_ptr<const FieldSpec> raw_spec;
+    // compose's bookkeeping, not part of the result's meaning: the chain's last rows that are not the archive writer's (all,
+    // exclusive ones), and for each the latest row of another mod before it, so "who else wrote here" is answered at once
+    struct Summary {
+        int last = -1, prev_other = -1, last_excl = -1, prev_excl_other = -1;
+    } summary;
 };
 
 enum class LineKind : uint8_t { Overridden, Composed, ComposedOn, Exclusive, Dropped, Yielded };
@@ -156,4 +164,4 @@ Result compose(const Schema& schema, const BaseModel& base, const std::vector<Ol
 // The registry rows of a chain over another value below them (the live back-end: a pack's value under a relative layer).
 Value evaluate(const std::vector<ChainRow>& rows, const Value& below, const FieldSpec& f);
 
-}  // namespace kc::reg
+}  // namespace kc::registry

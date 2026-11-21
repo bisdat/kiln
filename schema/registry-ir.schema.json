@@ -173,8 +173,8 @@
             },
             "id": {
               "type": "string",
-              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}:[^*?]+$",
-              "description": "\"<this mod>:<name>\". Ids are never reused: an id taken (or retired) refuses the add."
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}:[^*?A-Z]+$",
+              "description": "\"<this mod>:<name>\", lower case (Kiln ids are). Ids are never reused: an id taken (or retired) refuses the add."
             },
             "like": {
               "$ref": "#/$defs/id",
@@ -193,7 +193,15 @@
                   {
                     "type": "array",
                     "items": {
-                      "$ref": "#/$defs/scalar"
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/scalar"
+                        },
+                        {
+                          "type": "object",
+                          "description": "An element with fields of its own."
+                        }
+                      ]
                     }
                   }
                 ]
@@ -292,8 +300,17 @@
         {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/scalar"
-          }
+            "anyOf": [
+              {
+                "$ref": "#/$defs/scalar"
+              },
+              {
+                "type": "object",
+                "description": "An element with fields of its own."
+              }
+            ]
+          },
+          "description": "A list or flags field's whole value."
         },
         {
           "type": "object",

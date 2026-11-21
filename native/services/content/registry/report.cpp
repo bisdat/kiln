@@ -4,7 +4,7 @@
 
 #include <set>
 
-namespace kc::reg {
+namespace kc::registry {
 
 namespace {
 
@@ -38,7 +38,7 @@ json writer_json(const ChainRow& r) {
     if (r.list == ListOp::None) w["op"] = r.op.to_json();
     else w["list"] = list_op_json(r);
     w["value"] = r.after.to_json();
-    w["certainty"] = r.kind == WriterKind::ArchiveWriter ? "named" : "certain";
+    w["certainty"] = r.kind == WriterKind::ArchiveWriter ? "named" : "certain";  // the check's own rows too: Kiln's
     return w;
 }
 
@@ -78,19 +78,23 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
     }
 
     std::set<EntryRef> added(r.added.begin(), r.added.end());
+    size_t writers_cut = 0;
     json fields = json::array();
     for (const auto& [ref, fo] : r.fields) {
         if (fields.size() >= caps.fields) break;
         const RegistrySpec* reg = schema.registry(ref.registry);
-        const FieldSpec* spec = is_raw_field(ref.field) ? (fo.raw_spec ? &*fo.raw_spec : nullptr) : (reg ? reg->field(ref.field) : nullptr);
+        const FieldSpec* spec = is_raw_field(ref.field) ? fo.raw_spec.get() : (reg ? reg->field(ref.field) : nullptr);
         json row = {{"registry", ref.registry}, {"id", ref.id}, {"field", field_name(ref, &fo)}};
         if (is_raw_field(ref.field)) row["raw"] = true;
         row["applies"] = applies_name(spec ? spec->applies : Applies::Restart);
         const std::string origin = added.count({ref.registry, ref.id}) ? "added" : meta.origin ? meta.origin(ref) : "archive";
         row["base"] = {{"value", fo.base.to_json()}, {"origin", origin}};
         json writers = json::array();
-        for (const ChainRow& c : fo.chain) writers.push_back(writer_json(c));
+        const size_t skip = fo.chain.size() > caps.writers ? fo.chain.size() - caps.writers : 0;  // the last ones decide the result
+        for (size_t k = skip; k < fo.chain.size(); ++k) writers.push_back(writer_json(fo.chain[k]));
         row["writers"] = std::move(writers);
+        if (skip) row["writersLeftOut"] = skip;
+        writers_cut += skip;
         row["result"] = fo.result.to_json();
         row["winner"] = fo.winner.empty() ? json(nullptr) : json(fo.winner);
         fields.push_back(std::move(row));
@@ -116,7 +120,11 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
     json refused = json::array();
     for (const Refusal& x : r.refused) {
         if (refused.size() >= caps.refused) break;
-        refused.push_back({{"mod", x.mod}, {"source", x.source}, {"stage", stage_name(x.stage)}, {"n", x.n}, {"reason", x.reason}});
+        json row = {{"mod", x.mod}, {"source", x.source}, {"stage", stage_name(x.stage)}, {"n", x.n}, {"reason", x.reason}};
+        if (!x.registry.empty()) row["registry"] = x.registry;
+        if (!x.id.empty()) row["id"] = x.id;
+        if (!x.field.empty()) row["field"] = x.field;
+        refused.push_back(std::move(row));
     }
     doc["refused"] = std::move(refused);
 
@@ -136,7 +144,8 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
                         {"conflicts", r.lines.size() - doc["conflicts"].size()},
                         {"refused", r.refused.size() - doc["refused"].size()},
                         {"added", r.added.size() - doc["added"].size()},
-                        {"removed", r.removed.size() - doc["removed"].size()}};
+                        {"removed", r.removed.size() - doc["removed"].size()},
+                        {"writers", writers_cut}};
     return doc;
 }
 
@@ -161,4 +170,4 @@ std::vector<std::string> report_log(const Result& r, const ReportCaps& caps) {
     return out;
 }
 
-}  // namespace kc::reg
+}  // namespace kc::registry

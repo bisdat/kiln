@@ -17,7 +17,7 @@
 
 #include "compose.h"
 
-namespace kc::reg {
+namespace kc::registry {
 
 struct ReportMeta {
     uint32_t pid = 0;
@@ -51,6 +51,7 @@ struct ReportMeta {
 
 struct ReportCaps {
     size_t fields = 20000, conflicts = 2000, refused = 2000, entries = 20000;  // rows in registry.json
+    size_t writers = 64;  // writers kept per field row: the last ones (the result's); the earlier ones are counted ("writersLeftOut")
     size_t log = 50;                                                          // kiln.log lines per start, plus one total
 };
 
@@ -61,4 +62,4 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
 // line ("registry: 3 conflicts, 1 refused edit; state/registry.json has them all"). Empty when there is nothing to say.
 std::vector<std::string> report_log(const Result& r, const ReportCaps& caps = {});
 
-}  // namespace kc::reg
+}  // namespace kc::registry

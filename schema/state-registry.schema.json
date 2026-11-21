@@ -240,6 +240,18 @@
           },
           "reason": {
             "type": "string"
+          },
+          "registry": {
+            "type": "string",
+            "description": "The registry the edit named."
+          },
+          "id": {
+            "type": "string",
+            "description": "The entry it was refused on (the one that failed, an exact selector's, an add's), when there is one."
+          },
+          "field": {
+            "type": "string",
+            "description": "The Kiln field (or element path, or raw path) it named."
           }
         },
         "additionalProperties": false
@@ -322,6 +334,11 @@
         "removed": {
           "type": "integer",
           "minimum": 0
+        },
+        "writers": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Writers left out of field rows (each row keeps its last 64; writersLeftOut counts the rest per row)."
         }
       },
       "additionalProperties": false
@@ -424,6 +441,11 @@
             "null"
           ],
           "description": "The writer whose row decided the result last; null: the base."
+        },
+        "writersLeftOut": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The earliest writers of this field left out of writers (only its last 64 are listed: the ones that decide the result)."
         }
       },
       "additionalProperties": false
@@ -442,9 +464,10 @@
             "oldPatch",
             "oldPack",
             "code",
-            "registry"
+            "registry",
+            "check"
           ],
-          "description": "archiveWriter: a ShroudForge or EML package's pregame value (named from the archive writer's journal); oldPatch: an older Kiln boot resource patch; oldPack: an older Kiln data pack; code: a Content.* change made by code; registry: a registry edit."
+          "description": "archiveWriter: a ShroudForge or EML package's pregame value (named from the archive writer's journal); oldPatch: an older Kiln boot resource patch; oldPack: an older Kiln data pack; code: a Content.* change made by code; registry: a registry edit. check: the stage's reference check (list elements naming an entry the stage removed, taken out of an entry of a registry whose entries are not removed)."
         },
         "mod": {
           "type": "string",

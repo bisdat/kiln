@@ -10,7 +10,7 @@
 
 #include "../registry/compose.h"
 
-using namespace kc::reg;
+using namespace kc::registry;
 
 static int g_fail = 0, g_pass = 0;
 #define CHECK(cond, what)                                                       \
@@ -194,15 +194,26 @@ int main() {
         CHECK(it != r.fields.end() && it->second.chain.size() == 1 && it->second.chain[0].mod == "d", "the chain keeps only the rows that stand");
     }
 
-    // ---- a game entry whose own data names an entry a mod removed goes with it ----
+    // ---- a game entry acts only on what the stage took away (review of ee378645, work-bb's rulings): in a registry whose
+    // entries are removed it goes with the entry a mod removed; a refused mod entry never takes a game entry with it ----
     {
         const Result r = compose(s, b, {}, {mod("b", {batch(s, "b", "alter", R"([{"registry": "items", "entry": "remove", "select": {"id": "game:wood"}}])")})});
         CHECK(removed(r, "items", "game:wood") && removed(r, "recipes", "game:plank_recipe") && !removed(r, "recipes", "game:arrow"), "the plank recipe is removed with its input");
         bool line = false;
         for (const Line& l : r.lines) line = line || (l.kind == LineKind::Dropped && l.text.find("recipes game:plank_recipe removed: inputs[0].item game:wood was removed by b") != std::string::npos);
-        CHECK(line, "...and reported with its cause");
+        CHECK(line && r.refused.empty(), "...and reported with its cause, nothing refused");
         const Result two = compose(s, b, {}, {mod("b", {batch(s, "b", "alter", R"([{"registry": "items", "entry": "remove", "select": {"id": "game:plank"}}])")})});
         CHECK(removed(two, "recipes", "game:plank_recipe") && removed(two, "recipes", "game:arrow"), "every recipe naming the removed item, as input or output");
+        const Result mine = compose(s, b, {}, {mod("b", {batch(s, "b", "alter", R"([{"registry": "items", "entry": "remove", "select": {"id": "game:wood"}}])")}),
+                                               mod("a", {batch(s, "a", "add", R"([{"registry": "recipes", "entry": "add", "id": "a:board", "fields": {"inputs": [{"item": "game:wood", "count": 1}]}}])")})});
+        CHECK(refusal(mine, "recipes a:board refused: inputs[0].item game:wood was removed by b") && !added(mine, "recipes", "a:board"),
+              "a mod's new recipe naming a removed item is refused, with the cause");
+        Refusal pre;
+        pre.mod = "a", pre.stage = Stage::Add, pre.entry = "items|a:lantern", pre.reason = "Unmapped: items.power";
+        ModInput a = mod("a", {batch(s, "a", "alter", R"([{"registry": "recipes", "select": {"id": "game:arrow"}, "field": "outputs", "list": {"replace": [{"item": "a:lantern", "count": 1}]}}])")}, {pre});
+        const Result kept = compose(s, b, {}, {a});
+        CHECK(!removed(kept, "recipes", "game:arrow") && kept.fields.find({"recipes", "game:arrow", "outputs"}) == kept.fields.end() && refusal(kept, "a:lantern refused: Unmapped"),
+              "a game recipe given a refused mod item keeps its own output: only the edit is taken out");
     }
 
     std::printf("registry-refs-test: %d passed, %d failed\n", g_pass, g_fail);
