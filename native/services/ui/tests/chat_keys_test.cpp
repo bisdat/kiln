@@ -108,4 +108,84 @@ int main() {
     assert(!q.key(0x26, 0, true));
     assert(!q.key(0x09, 0, true));
     q.history(true);
+
+    // Phase 1c: search is gated by history, verified chat focus and its
+    // independent feature switch; it never steals gameplay or key releases.
+    q.search_enabled(true);
+    q.focus(true);
+    q.completion(true, true, true);
+    assert(q.key('R', 1, true)); // Ctrl+R opens search, even over completion
+    assert(q.searching());
+    assert(q.key('R', 1, true)); // raw + legacy duplicate, no second action
+    assert(!q.key('R', 1, false));
+    assert(q.take(action) && action == kui::chat_keys::Action::SearchStart);
+    assert(!q.take(action));
+    assert(q.search_character('a'));
+    uint32_t cp = 0;
+    assert(q.take(action, &cp) && action == kui::chat_keys::Action::SearchCharacter && cp == 'a');
+    assert(q.key(0x08, 0, true)); // Backspace changes the private query
+    assert(q.key(0x26, 0, true)); // Up selects newer, not history
+    assert(q.key(0x28, 0, true)); // Down selects older, not history
+    assert(q.take(action) && action == kui::chat_keys::Action::SearchBackspace);
+    assert(q.take(action) && action == kui::chat_keys::Action::SearchNewer);
+    assert(q.take(action) && action == kui::chat_keys::Action::SearchOlder);
+    assert(q.key('R', 1, true));
+    assert(!q.key('R', 1, false));
+    assert(q.key('R', 3, true)); // Ctrl+Shift+R moves newer
+    assert(!q.key('R', 3, false));
+    assert(q.take(action) && action == kui::chat_keys::Action::SearchOlder);
+    assert(q.take(action) && action == kui::chat_keys::Action::SearchNewer);
+    assert(q.key(0x09, 0, true)); // Tab accepts, not completion
+    assert(q.key(0x09, 0, true)); // duplicate press still only one action
+    assert(q.take_tab_character()); // paired WM_CHAR Tab swallowed
+    assert(!q.key(0x09, 0, false));
+    assert(q.take(action) && action == kui::chat_keys::Action::SearchAccept);
+    assert(!q.take(action));
+
+    // Enter's paired WM_CHAR must be swallowed even if UI accepted and closed
+    // search before that char arrived. Otherwise the game could send a command.
+    assert(q.key(0x0d, 0, true));
+    assert(q.take(action) && action == kui::chat_keys::Action::SearchAccept);
+    q.search(false);
+    assert(!q.key(0x0d, 0, false)); // Proton may deliver the character after key-up
+    assert(q.search_character(0x0d)); // the accepted Enter must not send
+    assert(!q.search_character(0x0d));
+    assert(!q.key(0x0d, 0, true)); // a new ordinary Enter remains native
+    assert(!q.search_character(0x0d));
+    assert(!q.key(0x0d, 0, false));
+    assert(!q.key(0x1b, 0, true)); // native chat still owns Esc
+
+    assert(q.key('R', 1, true));
+    assert(!q.key('R', 1, false));
+    assert(q.take(action) && action == kui::chat_keys::Action::SearchStart);
+    assert(q.key(0x1b, 0, true)); // Esc cancels search
+    assert(q.take(action) && action == kui::chat_keys::Action::SearchCancel);
+    q.search(false);
+    assert(!q.key(0x1b, 0, false)); // paired WM_CHAR may arrive after key-up
+    assert(q.search_character(0x1b)); // must not close the game's chat
+    assert(!q.search_character(0x1b));
+    assert(!q.key(0x1b, 0, true)); // a subsequent native Escape is untouched
+    assert(!q.search_character(0x1b));
+    assert(!q.key(0x1b, 0, false));
+
+    assert(q.key('R', 1, true));
+    assert(!q.key('R', 1, false));
+    assert(q.take(action) && action == kui::chat_keys::Action::SearchStart);
+    q.ime_started(); // fail closed, IME owns Enter/Escape
+    assert(!q.searching());
+    assert(q.take(action) && action == kui::chat_keys::Action::SearchCancel);
+    assert(!q.key(0x0d, 0, true));
+    assert(!q.key(0x1b, 0, true));
+    assert(q.key('R', 1, true));
+    assert(!q.key('R', 1, false));
+    assert(q.take(action) && action == kui::chat_keys::Action::SearchStart);
+    q.focus(false);
+    assert(!q.searching() && !q.take(action));
+    assert(!q.key('R', 1, true));
+    q.focus(true);
+    q.search_enabled(false);
+    assert(!q.key('R', 1, true));
+    q.history(false);
+    q.search_enabled(true);
+    assert(!q.key('R', 1, true)); // no reverse search when ui.chatHistory is off
 }
