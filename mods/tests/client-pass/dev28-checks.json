@@ -1888,6 +1888,46 @@
    ],
    "state": "open",
    "added": "dev30-ui-hooks slice 3"
+  },
+  {
+   "id": "ui-outline.c1",
+   "title": "A chest lights up with the game's outline in gold, and goes back when the mod lets go",
+   "chapter": "dev30-api-outline",
+   "packages": [
+    "dev30-api-outline"
+   ],
+   "state": "open",
+   "added": "0.2.0-dev.30.3 (issue #111)"
+  },
+  {
+   "id": "ui-outline.c2",
+   "title": "Two colours at once, one pulsing; a higher priority on the same chest wins, then hands back",
+   "chapter": "dev30-api-outline",
+   "packages": [
+    "dev30-api-outline"
+   ],
+   "state": "open",
+   "added": "0.2.0-dev.30.3 (issue #111)"
+  },
+  {
+   "id": "ui-outline.c3",
+   "title": "The game's building highlight goes first, Kiln's outline comes back after it",
+   "chapter": "dev30-api-outline",
+   "packages": [
+    "dev30-api-outline"
+   ],
+   "state": "open",
+   "added": "0.2.0-dev.30.3 (issue #111)"
+  },
+  {
+   "id": "ui-outline.c4",
+   "title": "Leaving the world ends every outline; nothing stays on the chest in the next game",
+   "chapter": "dev30-api-outline",
+   "packages": [
+    "dev30-api-outline"
+   ],
+   "state": "open",
+   "added": "0.2.0-dev.30.3 (issue #111)"
   }
  ]
 }
