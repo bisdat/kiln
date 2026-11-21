@@ -129,6 +129,66 @@ test("Recipes: change the mod's recipe (game and pack-mod items, station, durati
   await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 0 warnings");
 });
 
+test("Recipes: water from the station's tank (a new recipe's \"water\", a change's \"waterCharges\"); the old Water canteen item gets a note and becomes tank water only on request (thanks netjunk)", async ({ page }) => {
+  await open(page, "recipes");
+  await page.getByTestId("data-recipes-new").click();
+  await page.getByTestId("data-recipes-new-0-name").fill("Ember_Run_Tea");
+  // by hand: the player's and the base's water
+  await expect(page.getByTestId("data-recipes-new-0-water-hint")).toContainText("the player's water containers and the base's wells and barrels");
+  await pick(page, "data-recipes-new-0-station", "seed", "Prop_Production_T1_Seedbed");
+  await expect(page.getByTestId("data-recipes-new-0-water-hint")).toHaveText("The Seedbed's tank holds 150 charges: keep it filled to craft.");
+  await pick(page, "data-recipes-new-0-in-0-item", "iron", "Material_T3_Iron_Bar");
+  // a recipe that takes the old Water item (typed by name, as a 30.2 pack has it): a note, nothing rewritten yet
+  await page.getByTestId("data-recipes-new-0-in-add").click();
+  await page.getByTestId("data-recipes-new-0-in-1-item-input").fill("Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED");
+  await page.getByTestId("data-recipes-new-0-in-1-item-input").press("Enter");
+  await expect(page.getByTestId("data-recipes-new-0-in-1-item-note")).toHaveText("old canteen item, not tank water");
+  await page.getByTestId("data-recipes-new-0-in-1-count").fill("2");
+  await page.getByTestId("data-recipes-new-0-in-1-count").press("Enter");
+  await expect(page.getByTestId("data-recipes-new-0-oldwater")).toContainText("each craft takes 2 of that item, not water from the station's tank");
+  await pick(page, "data-recipes-new-0-out-0-item", "pie", "Consumable_Food_Berry_Pie");
+  await page.getByTestId("data-recipes-save").click();
+  await expect(page.getByTestId("data-recipes-state")).toHaveText("Saved");
+  let doc = await fileOf(page, "content/recipes.json");
+  expect(doc.recipes.add[0].inputs).toEqual([{ item: "Material_T3_Iron_Bar", count: 1 }, { item: "Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED", count: 2 }]);
+  expect(doc.recipes.add[0].water).toBeUndefined();
+  await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 1 warning");
+  // the creator's choice: the canteen inputs go, their count becomes the recipe's tank water
+  await page.getByTestId("data-recipes-new-0-oldwater-use").click();
+  await expect(page.getByTestId("data-recipes-new-0-oldwater")).toHaveCount(0);
+  await expect(page.getByTestId("data-recipes-new-0-water")).toHaveValue("2");
+  await expect(page.getByTestId("data-recipes-new-0-in-1-item-input")).toHaveCount(0);
+  // more than the tank holds: said at once
+  await page.getByTestId("data-recipes-new-0-water").fill("200");
+  await page.getByTestId("data-recipes-new-0-water").press("Enter");
+  await expect(page.getByTestId("data-recipes-new-0-water-hint")).toHaveText("More than the Seedbed's tank holds (150): the station never starts this recipe.");
+  await page.getByTestId("data-recipes-new-0-water").fill("3");
+  await page.getByTestId("data-recipes-new-0-water").press("Enter");
+  // a station without a tank
+  await page.getByTestId("data-recipes-new").click();
+  await page.getByTestId("data-recipes-new-1-name").fill("Ember_Run_Wet_Bar");
+  await pick(page, "data-recipes-new-1-station", "smelt", "Prop_Production_T2_Smelter");
+  await pick(page, "data-recipes-new-1-in-0-item", "iron", "Material_T3_Iron_Bar");
+  await pick(page, "data-recipes-new-1-out-0-item", "iron", "Material_T3_Iron_Bar");
+  await page.getByTestId("data-recipes-new-1-water").fill("1");
+  await page.getByTestId("data-recipes-new-1-water").press("Enter");
+  await expect(page.getByTestId("data-recipes-new-1-water-hint")).toHaveText("The Smelter has no water tank: it never starts a recipe that needs water.");
+  await page.getByTestId("data-recipes-new-1-remove").click();
+  // a change to a game recipe: waterCharges
+  await page.getByTestId("data-recipes-add").click();
+  await pick(page, "data-recipes-rule-0-sel", "pie", "Recipe_Consumable_Food_Berry_Pie");
+  await page.getByTestId("data-recipes-rule-0-water").fill("5");
+  await page.getByTestId("data-recipes-rule-0-water").press("Enter");
+  await shot(page, "data-recipes-water");
+  await page.getByTestId("data-recipes-save").click();
+  await expect(page.getByTestId("data-recipes-state")).toHaveText("Saved");
+  doc = await fileOf(page, "content/recipes.json");
+  expect(doc.recipes.add).toHaveLength(1);
+  expect(doc.recipes.add[0]).toMatchObject({ name: "Ember_Run_Tea", station: "0xba67134f", inputs: [{ item: "Material_T3_Iron_Bar", count: 1 }], water: 3 });
+  expect(doc.recipes.Recipe_Consumable_Food_Berry_Pie).toEqual({ waterCharges: 5 });
+  await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 0 warnings");
+});
+
 test("Recipes: an input that takes any of a group, found by any of its items; saved as {category, count} and read back; outputs offer none", async ({ page }) => {
   await open(page, "recipes");
   await page.getByTestId("data-recipes-new").click();
@@ -380,16 +440,18 @@ test("hidden game entries (old, test, unused): left out of the pickers until Sho
   await input.fill("stone");
   await expect(page.getByTestId("data-items-1-sel-hit-Material_T1_Stone")).toBeVisible();
   await expect(page.getByTestId("data-items-1-sel-hit-Material_T1_Stone_TEST")).toHaveCount(0);
-  // a deprecated-looking name the game still uses stays listed: the game's Water (station tank water)
+  // the game's old Water item (a canteen, not a station's tank water) is hidden like the others since 0.2.0-dev.30.3
   await input.fill("water");
-  const water = page.getByTestId("data-items-1-sel-hit-Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED");
-  await expect(water).toBeVisible();
-  await expect(water).toContainText("Water");
-  await expect(water).toContainText("station tank water");
-  await expect(water).not.toContainText("hidden");
+  await expect(page.getByTestId("data-items-1-sel-hit-Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED")).toHaveCount(0);
   await page.keyboard.press("Escape");
   // the switch: the hidden entries show, tagged
   await page.getByTestId("data-show-hidden").check();
+  await input.fill("water");
+  const water = page.getByTestId("data-items-1-sel-hit-Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED");
+  await expect(water).toBeVisible();
+  await expect(water).toContainText("old canteen item, not tank water");
+  await expect(water).toContainText("hidden");
+  await page.keyboard.press("Escape");
   await input.fill("sand");
   const hit = page.getByTestId("data-items-1-sel-hit-Z_Material_Sand_DEPRECATED");
   await expect(hit).toBeVisible();

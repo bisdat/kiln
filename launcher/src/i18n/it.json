@@ -5446,6 +5446,19 @@
         "duration": "Durata",
         "durationPh": "del gioco",
         "seconds": "secondi",
+        "water": "Acqua dal serbatoio",
+        "waterTip": "L'acqua propria della ricetta, in cariche per creazione (64 unità d'acqua ciascuna), come la mostra la riga Acqua della schermata delle ricette. Il gioco la preleva all'inizio di ogni creazione.",
+        "waterPh": "nessuna",
+        "waterPhBase": "quella della base",
+        "waterPhGame": "quella del gioco",
+        "waterUnit": "cariche per creazione",
+        "waterTank": "Il serbatoio di {station} contiene {max} cariche: tienilo pieno per creare.",
+        "waterOver": "Più di quanto contiene il serbatoio di {station} ({max}): la postazione non avvia mai questa ricetta.",
+        "waterNoTank": "{station} non ha un serbatoio d'acqua: non avvia mai una ricetta che richiede acqua.",
+        "waterMenu": "Creato da un menu: il gioco preleva l'acqua dai contenitori del giocatore e dai pozzi e barili della base.",
+        "oldWater": "Un ingrediente è il vecchio oggetto Acqua del gioco, una borraccia: ogni creazione consuma {count} di quell'oggetto, non acqua dal serbatoio della postazione.",
+        "useTank": "Usa invece l'acqua del serbatoio",
+        "useTankTip": "Rimuove gli ingredienti oggetto Acqua e chiede la stessa quantità di acqua del serbatoio",
         "itemAria": "Oggetto",
         "countAria": "Quantità",
         "category": "qualsiasi oggetto della categoria {id}",
@@ -5530,7 +5543,8 @@
         "toggle": "Mostra le voci nascoste del gioco",
         "tag": "nascosta",
         "tip": "Voci vecchie, di prova o inutilizzate del gioco: potrebbero non fare nulla in gioco.",
-        "tankWater": "acqua del serbatoio della stazione"
+        "oldWater": "vecchia borraccia, non acqua del serbatoio",
+        "oldWaterTip": "Il vecchio oggetto Acqua del gioco. La schermata delle ricette usa il suo nome per l'acqua di una ricetta, ma come ingrediente è l'oggetto stesso. Per l'acqua del serbatoio, usa Acqua dal serbatoio sulla ricetta."
       }
     },
     "order": {
