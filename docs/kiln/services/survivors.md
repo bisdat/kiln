@@ -97,8 +97,8 @@ authorization. A mod that offers them to players does its own permission check.
    any stale bed that still names it. The task completes one update after the write, after a readback of both ends.
    The write runs in Kiln's program `kiln_survivors_beds` (a barrier: alone, after the step's earlier programs, never in
    the game's villager job) and changes only the two relation fields, never the NPC's sleep hours, flags or state.
-   `Summon` moves an NPC with the game's Reset (the same command as `Villager.Teleport`), which suspends a villager routine
-   until `Routines.Resume`.
+   `Summon` moves an NPC with the game's Reset (the same command as `Villager.Teleport`): a mod's Summon is a mod-issued
+   command, so it suspends a villager routine on that survivor until `Routines.Resume` (the ruling for villager routines).
 2. **Persistence.** The bed side is saved by the game; the NPC side is rebuilt from it when the world loads. After a
    restart `Find(id).Bed` is the same bed with a new entity id.
 3. **Game-origin changes are events.** A player assigning with the summon tool, a destroyed bed or the game's bed upkeep

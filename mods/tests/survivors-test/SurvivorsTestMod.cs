@@ -19,10 +19,11 @@ public sealed class SurvivorsTestMod : Mod
     private bool _running, _done;
     private ulong _start;
     private readonly List<SurvivorEvent> _events = [];
+    private BlockHandle<RoutineBlock>? _awake;
 
     private void Pass(string what) { _pass++; Log.Info($"survivors-test: PASS {what}"); }
     private void Fail(string what, string why) { _fail++; Log.Error($"survivors-test: FAIL {what}: {why}"); }
-    private void Check(bool ok, string what, string why = "") { if (ok) Pass(what); else Fail(what, why); }
+    private bool Check(bool ok, string what, string why = "") { if (ok) Pass(what); else Fail(what, why); return ok; }
     private void Note(string s) => Log.Info($"survivors-test: {s}");
     private string StateFile => Path.Combine(Context.DataDirectory, "run1.json");
 
@@ -39,6 +40,9 @@ public sealed class SurvivorsTestMod : Mod
         Events.On<SurvivorToolGivenEvent>(Record);
         Events.On<SurvivorSummonedEvent>(Record);
         Events.On<SurvivorAssignmentChangedEvent>(Record);
+        // a villager routine for the Summon check (DECISIONS.md, villager routines: a mod's Summon is mod-issued and suspends it)
+        try { _awake = Blocks.Define("survivors-awake", new RoutineBlock { Windows = [new RoutineWindow(0, 0, new IdleTask(), AllDay: true)], Fallback = new RoamTask() }); }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException) { Note($"no routine block: {e.Message}"); }
         Context.Tick.Pre += OnPre;
     }
 
@@ -143,6 +147,7 @@ public sealed class SurvivorsTestMod : Mod
         Check(move.Ok && move.Effects.HasFlag(SurvivorEffects.HomeMoved) && !move.Effects.HasFlag(SurvivorEffects.EntityCreated) &&
               move.After.Entity == sum.After.Entity, "summon again: the same entity moved (Reset), home moved", R(move));
         Check(move.After.Home is { } h2 && Dist(h2, home2) <= 0.05, $"move: home within 0.05 m ({move.After.Home})");
+        await SummonSuspendsRoutine(a.Id, baseId.Value, move.After.Entity);
 
         // ---- beds
         var bed1 = await Spawn.Entity("Prop_Furniture_Comfort3_T1_Bed", new WorldPosition(3808, 835, 1504));
@@ -256,6 +261,31 @@ public sealed class SurvivorsTestMod : Mod
         foreach (var e in Spawn.FindByName("Prop_Furniture_Comfort3_T1_Bed", new WorldPosition(3808, 835, 1504), 20)) Spawn.Destroy(e);
         File.Delete(StateFile);
         Note("run 2 over: the lab world is put back");
+    }
+
+    // A mod's Summon sends the game's Reset (a mod-issued command): a villager routine on that survivor is suspended until
+    // Routines.Resume (16g's ruling). Observable only where the villager's own worker runs.
+    private async Task SummonSuspendsRoutine(SurvivorId id, Guid baseId, EntityId npc)
+    {
+        if (_awake is null || !Capabilities.Is("routines.decisions") || Villagers.Of(npc) is not { } v)
+        {
+            Note($"summon vs routine: skipped (routines.decisions {Capabilities.Is("routines.decisions")}: {Capabilities.Why("routines.decisions")})");
+            return;
+        }
+        var assign = await Routines.Assign(v, _awake);
+        if (!Check(assign.Ok, "summon vs routine: a routine assigned to the survivor", assign.Reason ?? "")) return;
+        await Steps(100);
+        var s0 = Routines.Inspect(v);
+        var sum = await Survivors.Summon(id, baseId, new WorldPosition(3804, 835, 1502));
+        RoutineSnapshot? s1 = null;
+        for (var i = 0; i < 300 && (s1 = Routines.Inspect(v))?.Assignment != RoutineAssignmentState.ManualSuspended; i++) await Steps(1);
+        Note($"summon vs routine: before {s0?.Assignment} invocation {s0?.Invocation} state {s0?.NativeState}; summon {R(sum)}; after {s1?.Assignment} {s1?.LastReason}");
+        if (s1?.Assignment == RoutineAssignmentState.ManualSuspended) Pass("summon vs routine: a mod's Summon suspends the survivor's routine (ManualCommand)");
+        else if (s0 is { Invocation: 0 }) Note("summon vs routine: the villager's worker never ran in this lab (no player near), so the suspension cannot show here");
+        else Fail("summon vs routine: a mod's Summon suspends the survivor's routine", $"{s1?.Assignment}");
+        var res = await Routines.Resume(v);
+        Check(res.Ok, "summon vs routine: Routines.Resume after the Summon", res.Reason ?? "");
+        await Routines.Remove(v);
     }
 
     private static double Dist(WorldPosition a, WorldPosition b)
