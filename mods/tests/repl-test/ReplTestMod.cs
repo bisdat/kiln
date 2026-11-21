@@ -48,11 +48,15 @@ public sealed partial class ReplTestMod : Mod
         for (var i = 0; i < n; i++) await Context.Scheduler.NextTick();
     }
 
-    public override void OnLoad() => _ = Run().ContinueWith(t =>
+    public override void OnLoad()
     {
-        if (t.Exception != null) Result(false, "run", $"the test threw: {t.Exception.InnerException}");
-        Log.Info($"{Me} done: {_pass} PASS, {_fail} FAIL");
-    });
+        RegisterRemapItems();  // kiln.repl.net's remap part (NetParts.cs)
+        _ = Run().ContinueWith(t =>
+        {
+            if (t.Exception != null) Result(false, "run", $"the test threw: {t.Exception.InnerException}");
+            Log.Info($"{Me} done: {_pass} PASS, {_fail} FAIL");
+        });
+    }
 
     private async Task Run()
     {
@@ -219,6 +223,7 @@ public sealed partial class ReplTestMod : Mod
         if (pending is not null) await pending;
         await Steps(10);
         fakes = await Inspector(chest, can, fakes, max);
+        await NetParts(chest, can, fakes, max);  // kiln.repl.net: filters, touch, the item remap
 
         // release
         var fakeMachines = fakes.Aggregate(0, (m, f) => m | 1 << f.Machine);

@@ -182,6 +182,51 @@ players whose replication the game runs as for a real one: [../modding/testing.m
 `Stats` and `Watch` work on them. `mods/tests/repl-test` is the service's lab test. Package 15 (the second half of
 replication) builds its filters and its own messages on this service and this harness later.
 
+## Filters (since 0.2.0-dev.31, package 15)
+`Replication.Filter<TComponent>(PeerSelector, ComponentFilter<TComponent>, FilterOptions?)` edits one component as the
+server sends it to the selected peers (`Peers.All`, `Peers.Vanilla`, `Peers.With(ext)`, `Peers.Without(ext)`,
+`Peers.LackingContent`). The filter gets that peer's copy of the component in its own snapshot; the game codes the delta
+from it and keeps it as that peer's baseline, so the client has exactly the edited value and later deltas stay right.
+- **Where it runs:** on the game's replication job threads, in parallel per peer and channel (kiln.repl.net's raw detour
+  on the game's per-player Snapshot). A filter body must not allocate, lock or call a Kiln API; `FilterContext` gives the
+  peer, channel, entity, tick and `TryRead<TC>` for other components (read only; the world is quiet during the send).
+- **Order:** higher `Priority` first, then registration order. The item remap always runs after every filter.
+- **Faults fail open:** an exception (or a native fault) keeps the game's bytes for that send and removes the filter,
+  logged once (`repl: filter of owner 0x... on <component> faulted at ...; removed` /
+  `repl: a filter on <component> threw ...; it was removed`).
+- **Channels:** the client channel by default; the prediction channel only with `AllowPrediction` (the client predicts
+  from the edited value).
+- **Staleness:** the client channel re-sends an entity only when the game changes it. Kiln re-sends the affected entities
+  (a touch) when a filter is added or removed and when its peers change; `Sources` names components of the same entity
+  whose change also re-sends it; anything else (another entity, a setting) calls `Replication.Touch`.
+- **Cost:** when no filter or remapped peer exists the Snapshot hook is not installed. With one, a snapshot without a
+  matching component costs one pass over its component list (lab: `repl: filter cost` lines).
+
+## Touch
+`Replication.Touch(EntityId)` re-sends an entity on the client channel without changing a byte: the touch program
+`kiln_repl_touch` (a SYSTEM + HOST_ONLY kiln.world program with other-write access to CurrentTransform, ItemState,
+Inventory and NetworkServerProgress) marks it in the next sim step, and that frame's send snapshots it again for every
+peer. `TouchResult.Ok = false`: "entity gone", or "no carrier component" (none of the four). Side effect: the entity is
+also re-saved once. `Replication.Touched` is raised for every call.
+
+## Vanilla safety
+Players without Kiln (and Kiln players without a mod's content) must never be sent what their game does not know.
+- A vanilla client never gets a frame on Kiln's channel (kiln.net) and never an entity of a Kiln-only template (kiln.net's
+  withholding).
+- **Kiln-only item ids:** Kiln runs the item remap by itself on every server and hosted world while Kiln-only items exist.
+  To every peer in `Peers.LackingContent` each Kiln-only item id in a component's item fields (inventories, item states,
+  equipment, pickups: every `keen::ItemId` field of a component that can travel, found from the game's reflected types)
+  becomes the item's look-alike (`ItemDefinition.VanillaLook`, `ItemBlock.VanillaLook`, JSON `"vanillaLook"`: a game item
+  of the same kind) or 0, an empty slot (owner decision 2026-11-20: no declared look-alike = an empty slot).
+- **Fails closed:** an id that is neither a game item nor a known Kiln-only item becomes 0; a fault in the remap zeroes
+  every item field of that component; while Kiln-only items exist and the remap is not working (an unsupported game
+  build), clients without Kiln are refused at the door (NetAdmission requirement `repl.itemremap`).
+- `Replication.RemapItems(PeerSelector)` hides Kiln-only items from more peers; `Replication.RemapStats()` and the
+  sample `mods/samples/ItemFallback` (`/fallback`) show what it did.
+- **Not covered yet:** item ids in the game's other messages (a character's save slice, factories, traders, knowledge),
+  and items other loaders add (they count as the game's). A vanilla player who picks up a remapped item gets the real item
+  on the server: their own inventory shows its look-alike or an empty slot.
+
 ## Limits
 
 - 64 send watches at a time (all mods and the commands together), 16 receive watches on a client.
