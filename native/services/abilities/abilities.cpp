@@ -1462,6 +1462,10 @@ uintptr_t prog_registry() {
 void queue_waiting(PendingProgram&& w) {
     for (auto& x : g_waiting)
         if (x.bytes.size() >= 20 && w.bytes.size() >= 20 && std::memcmp(x.bytes.data() + 4, w.bytes.data() + 4, 16) == 0) {
+            // other bytes under the GUID (another mod's program with the same GUID, say): the latest goes in, said so
+            if (x.bytes != w.bytes)
+                logw("kiln.abilities: program %s from %s replaces the one from %s that waited with other bytes under its GUID",
+                     guid_text(w.bytes.data() + 4).c_str(), w.source.c_str(), x.source.c_str());
             x = std::move(w);
             return;
         }

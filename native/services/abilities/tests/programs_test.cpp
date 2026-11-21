@@ -376,7 +376,12 @@ int main() {
         CHECK(mod_register(changed, &waiting) == KILN_ERR_INVALID_ARGUMENT);  // live now: refused as in any world
         stop_world(0xE000);
         start_world(other, 0xF000, false);
-        CHECK(mod_register(changed, &waiting) == KILN_OK && waiting);  // the registry is loading: it waits
+        CHECK(mod_register(kMod, &waiting) == KILN_OK && waiting);  // the registry is loading: it waits
+        const size_t replaced = warnings_with("replaces the one from");
+        CHECK(mod_register(changed, &waiting) == KILN_OK && waiting);  // other bytes queued under the GUID: the latest
+        CHECK(warnings_with("replaces the one from") == replaced + 1);  // ... and the log says the first was replaced
+        CHECK(mod_register(changed, &waiting) == KILN_OK && waiting);  // the same bytes again: one entry, nothing said
+        CHECK(warnings_with("replaces the one from") == replaced + 1);
         check_programs_ready();  // the queued new bytes go in first, then the other programs come back
         CHECK(live(changed) && live(kBuff) && live(kRemove) && live(kAsset));
         CHECK(warnings_with("registered already") == 0);
