@@ -28,7 +28,7 @@ public sealed partial class ClientPassMod
         var why = Capabilities.Why(BuildingInput.Capability);
         c.Log.Info($"client-pass: {c.Id} needs building input: {why}");
         c.Instruct($"Building input is off in this game ({why}). Add \"preview\": [\"client.building_input\"] to " +
-                   "kiln/config/kiln.json (or \"preview\": true), start the game again and run this check there.");
+                   "kiln/kiln.json in the game folder (or \"preview\": true), start the game again and run this check there.");
         await c.Skip($"client.building_input is off: {why}");
         return false;
     }
@@ -174,7 +174,7 @@ public sealed partial class ClientPassMod
         Area = BuildingArea, Since = BuildingSince, Tags = [Visual], Needs = ClientCheckNeeds.Joined, Order = 3954)]
     public async Task BuildingInputJoined(CheckContext c)
     {
-        c.Instruct("Your game client needs \"preview\" naming client.building_input in its own kiln/config/kiln.json (then this " +
+        c.Instruct("Your game client needs \"preview\" naming client.building_input in its own kiln/kiln.json (then this " +
                    $"mod gives it the key {BuildingKey}). On this server, stand where you may build, in the building mode with " +
                    $"Rough Wood Block selected and Rough Wood in your inventory. Look straight ahead and press {BuildingKey}: your " +
                    "game places one block about 2.5 m in front of you through Kiln's building input, removes it 4 seconds " +

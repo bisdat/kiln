@@ -131,7 +131,7 @@ and `building-input.joined` (`mods/tests/client-pass/BuildingInput.cs`). While i
 - `client.building_input` reads `unavailable`, `policy`, "game test pending: ..." with those check ids;
 - C#'s `BuildingInput.Available` is false and kiln mode's `runtime.world.building.*` answer unavailable.
 
-`"preview": ["client.building_input"]` (or `true`) in `kiln/config/kiln.json` lifts it for one game, for the guided pass.
+`"preview": ["client.building_input"]` (or `true`) in `kiln/kiln.json` (in the game folder) lifts it for one game, for the guided pass.
 The row is removed from the list in the commit that records the pass.
 
 ## Capability row

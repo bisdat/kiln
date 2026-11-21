@@ -40,7 +40,7 @@ Background: [ShroudForge mods in kiln mode](shroudforge-kiln-mode.md).
    world, each press works once, holding the key works once, and with Kiln's menu open the key does nothing. Its
    settings on Kiln's ShroudForge page show the shortcut; change it there, restart, and the new key works.
 10. **Building input (a preview).** Mods that build for you through `runtime.world.building` need building input, which
-   is held until its own checks pass: add `"preview": ["client.building_input"]` to `kiln/config/kiln.json` to try it.
+   is held until its own checks pass: add `"preview": ["client.building_input"]` to `kiln/kiln.json` to try it.
    Use a copied world: a selected block, a placed and removed block, an undo and a dismantle should each happen once, as
    if you did them, and nothing should happen while you hold your own build button. The checks are in
    [the client pass](client-pass.md#building-input).

@@ -234,7 +234,7 @@ line.
 kiln.client's building input (Kiln.Client's `BuildingInput`, [the service](services/client-building-input.md)) is held
 by the client gate until these five checks pass: `mods/tests/client-pass/BuildingInput.cs` (area "Building input",
 orders 3950 to 3954) and `rows.json` under "Building input (client.building_input)". Run them with
-`"preview": ["client.building_input"]` (or `true`) in `kiln/config/kiln.json`; without it each check ends with skip and
+`"preview": ["client.building_input"]` (or `true`) in `kiln/kiln.json` in the game folder; without it each check ends with skip and
 says so. Use a copied world, in your base, with Rough Wood Block and some Rough Wood.
 
 | Check | What you do and look at |
