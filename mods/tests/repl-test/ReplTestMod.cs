@@ -51,6 +51,7 @@ public sealed partial class ReplTestMod : Mod
     public override void OnLoad()
     {
         RegisterRemapItems();  // kiln.repl.net's remap part (NetParts.cs)
+        RegisterSidecar();     // kiln.repl.net's sidecar part (SidecarPart.cs): kiln:repl before the lab peers' handshakes
         _ = Run().ContinueWith(t =>
         {
             if (t.Exception != null) Result(false, "run", $"the test threw: {t.Exception.InnerException}");
@@ -224,6 +225,7 @@ public sealed partial class ReplTestMod : Mod
         await Steps(10);
         fakes = await Inspector(chest, can, fakes, max);
         await NetParts(chest, can, fakes, max);  // kiln.repl.net: filters, touch, the item remap
+        fakes = await SidecarPart(chest, fakes);  // kiln.repl.net: sidecars (Replication.Extension) to bound lab peers
 
         // release
         var fakeMachines = fakes.Aggregate(0, (m, f) => m | 1 << f.Machine);
