@@ -257,7 +257,7 @@ public sealed class UiBindingValueChangedEvent(string mod, string id, ulong oldV
     public ulong NewVersion { get; } = newVersion;
 }
 
-/// <summary>A declared dependency on another mod's stat for UI blocks (<see cref="Blocks.ImportStat"/>): it names the
+/// <summary>A declared dependency on another mod's stat for UI blocks (<see cref="Blocks.ImportStat(ModValueKey)"/>): it names the
 /// stat's type for the blocks that show it; whether this game may read it is still the stat's own read policy.</summary>
 public sealed class UiStatImportRegistration : IKilnResult, IDisposable
 {

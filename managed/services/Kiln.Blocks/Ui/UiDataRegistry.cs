@@ -195,7 +195,7 @@ internal static partial class UiDataRegistry
                 return Rows(schema.Fields ?? [], r.Values ?? throw new ArgumentException("rows: Values is null"));
             case (UiDataShape.Tree, UiDataSnapshot.Tree t):
                 var nodes = t.Values ?? throw new ArgumentException("tree: Values is null");
-                return Tree(schema.Fields ?? [], nodes.Select(n => n == null ? throw new ArgumentException("a null node") : (n.Key, n.ParentKey, n.Label, n.Values)).ToList());
+                return Tree(schema.Fields ?? [], nodes.Select(n => n == null ? throw new ArgumentException("a null node") : (n.Key, (string?)n.ParentKey, n.Label, (IReadOnlyDictionary<string, UiScalar>?)n.Values)).ToList());
             default:
                 throw new ArgumentException($"the source is a {schema.Shape} source; a {snapshot.GetType().Name} publication does not fit it");
         }
