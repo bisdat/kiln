@@ -1045,3 +1045,38 @@ fn hidden_names() {
         assert!(!super::is_hidden_name(n), "{n} is not hidden");
     }
 }
+
+/// Hiding keeps every entry the game's own data uses (names from the 2026-11 catalog): a recipe's input or output, a
+/// recipe's station, an input category's member, and station tank water, which no recipe names.
+#[test]
+fn hidden_names_keep_what_the_game_uses() {
+    let doc = serde_json::json!({
+        "format": 1, "kind": "kiln.catalog",
+        "sections": {
+            "items": [
+                { "name": "Vanity_TX_PartyHat_04_Tint_WIP" }, { "name": "Material_T5_MountainWoodlouse_FishingBait_WIP" },
+                { "name": "Consumable_Toy_Confetti_01_Blue_Mortar_WIP" }, { "name": "Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED", "displayName": "Water" },
+                { "name": "Z_Material_Sand_DEPRECATED", "displayName": "Sand" }, { "name": "Material_T1_Wood_Logs" }
+            ],
+            "workshops": [{ "name": "Z_Prop_Production_T5_Laboratory2_DEPRECATED" }],
+            "recipes": [
+                { "name": "Recipe_PartyHat", "inputs": [{ "item": "Material_T1_Wood_Logs", "count": 1 }], "outputs": [{ "item": "Vanity_TX_PartyHat_04_Tint_WIP", "count": 1 }],
+                  "workshopName": "Z_Prop_Production_T5_Laboratory2_DEPRECATED" },
+                { "name": "Recipe_Bait", "inputs": [{ "category": "0x00000001", "count": 2 }], "outputs": [{ "item": "Material_T1_Wood_Logs", "count": 1 }] }
+            ],
+            "itemCategories": [{ "id": "0x00000001", "items": ["Material_T5_MountainWoodlouse_FishingBait_WIP"] }]
+        }
+    });
+    let cat: Catalog = serde_json::from_value(doc.clone()).unwrap();
+    let used = super::used_names(&cat);
+    let shown = |n: &str| !super::is_hidden_name(n) || used.contains(n);
+    for n in ["Vanity_TX_PartyHat_04_Tint_WIP", "Material_T5_MountainWoodlouse_FishingBait_WIP", "Z_Prop_Production_T5_Laboratory2_DEPRECATED", super::STATION_WATER, "Material_T1_Wood_Logs"] {
+        assert!(shown(n), "{n} is in use: listed");
+    }
+    for n in ["Z_Material_Sand_DEPRECATED", "Consumable_Toy_Confetti_01_Blue_Mortar_WIP"] {
+        assert!(!shown(n), "{n} is unused: hidden");
+    }
+    // kiln lint's own catalog reads the same uses (no KL407 for them)
+    let lc = crate::lint::Catalog::from_json(Path::new("client.json"), &doc);
+    assert!(lc.used.contains("Material_T5_MountainWoodlouse_FishingBait_WIP") && lc.used.contains(super::STATION_WATER) && !lc.used.contains("Z_Material_Sand_DEPRECATED"));
+}

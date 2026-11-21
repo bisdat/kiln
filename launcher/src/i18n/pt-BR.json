@@ -5482,7 +5482,8 @@
       "hidden": {
         "toggle": "Mostrar entradas ocultas do jogo",
         "tag": "oculta",
-        "tip": "Entradas antigas, de teste ou sem uso do jogo: podem não fazer nada no jogo."
+        "tip": "Entradas antigas, de teste ou sem uso do jogo: podem não fazer nada no jogo.",
+        "tankWater": "água do tanque da estação"
       }
     },
     "order": {

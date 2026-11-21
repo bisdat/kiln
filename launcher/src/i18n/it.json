@@ -5482,7 +5482,8 @@
       "hidden": {
         "toggle": "Mostra le voci nascoste del gioco",
         "tag": "nascosta",
-        "tip": "Voci vecchie, di prova o inutilizzate del gioco: potrebbero non fare nulla in gioco."
+        "tip": "Voci vecchie, di prova o inutilizzate del gioco: potrebbero non fare nulla in gioco.",
+        "tankWater": "acqua del serbatoio della stazione"
       }
     },
     "order": {

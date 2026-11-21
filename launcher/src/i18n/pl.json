@@ -5748,7 +5748,8 @@
       "hidden": {
         "toggle": "Pokaż ukryte wpisy gry",
         "tag": "ukryty",
-        "tip": "Stare, testowe lub nieużywane wpisy gry: w grze mogą nic nie robić."
+        "tip": "Stare, testowe lub nieużywane wpisy gry: w grze mogą nic nie robić.",
+        "tankWater": "woda ze zbiornika stanowiska"
       }
     },
     "order": {

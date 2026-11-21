@@ -728,6 +728,7 @@ fn refs(out: &mut Out, m: &LMod, mi: usize, f: &LFile, cat: Option<&Catalog>, de
         if in_game == Some(true)
             && let Form::Name(n) = &form
             && crate::catalog::is_hidden_name(n)
+            && !cat.is_some_and(|c| c.used.contains(n))
         {
             let what = singular(&section);
             out.push(

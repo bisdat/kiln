@@ -14,7 +14,9 @@ import type {
   StudioCatalogStatus, StudioPublishRequest, StudioPublishResult, StudioSummary, StudioTestReport,
 } from "./commands";
 import { MOD_KINDS, emptyMods } from "./kinds";
-import { isHiddenGameName } from "./hiddenNames";
+import { STATION_WATER, isHiddenGameName } from "./hiddenNames";
+/** Hidden in the pickers: an old, test or unused name the game's own data does not use (catalog::used_names; here: the water). */
+const hiddenEntry = (name: string) => isHiddenGameName(name) && name !== STATION_WATER;
 
 type Handler = (args: Record<string, unknown>) => unknown;
 type StartTask = (kind: string, title: string, steps: string[], finish: () => unknown, stepMs?: number) => string;
@@ -62,6 +64,8 @@ export const GAME: Record<string, { name: string; displayName?: string; id?: str
     // the game's old and test entries (catalog::is_hidden_name): the pickers hide them unless "Show hidden game entries"
     { name: "Z_Material_Sand_DEPRECATED", displayName: "Sand", id: "0x0000a1e0" },
     { name: "Material_T1_Stone_TEST", displayName: "Stone", id: "0x0000a1e1" },
+    // a deprecated-looking name the game still uses (station tank water): always listed
+    { name: STATION_WATER, displayName: "Water", id: "0xf262a2a9" },
   ],
   recipes: [
     { name: "Recipe_Weapon_T1_1H_Sword_Craft", displayName: "Crafted Sword" },
@@ -224,7 +228,7 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
         for (const sel of Object.keys(o[section] ?? {})) {
           if (sel === "add" || sel.includes("*") || sel.startsWith("@")) continue;
           if (!known.has(sel)) diagnostics.push(diag("KL103", "unknown-name", "warning", section + ": no entry " + sel + " in the game or the pack's mods", "layer/" + path));
-          else if (isHiddenGameName(sel)) diagnostics.push(diag("KL407", "hidden-entry", "info", "\"" + sel + "\" is one of the game's old, test or unused entries (its name says so): it may do nothing in the game", "layer/" + path));
+          else if (hiddenEntry(sel)) diagnostics.push(diag("KL407", "hidden-entry", "info", "\"" + sel + "\" is one of the game's old, test or unused entries (its name says so): it may do nothing in the game", "layer/" + path));
         }
       }
       for (const [sel, body] of Object.entries(o.recipes ?? {})) {
@@ -399,9 +403,9 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
       const match = (x: { name: string; displayName?: string; id?: string }) => !query || x.name.toLowerCase().includes(query) || !!x.displayName?.toLowerCase().includes(query) || x.id?.toLowerCase() === query;
       const own = added.filter((x) => x.section === section && match(x)).map((x) => ({ section, name: x.name, displayName: x.displayName, from: x.from }));
       // hidden game entries only when asked, or by their exact name (typed or pasted)
-      const shown = (x: { name: string }) => !isHiddenGameName(x.name) || a.hidden === true || x.name.toLowerCase() === query;
+      const shown = (x: { name: string }) => !hiddenEntry(x.name) || a.hidden === true || x.name.toLowerCase() === query;
       const game = !catalogOk ? [] : (GAME[section] ?? []).filter((x) => match(x) && shown(x))
-        .map((x) => ({ section, name: x.name, id: x.id, displayName: x.displayName, ...(isHiddenGameName(x.name) ? { hidden: true } : {}) }));
+        .map((x) => ({ section, name: x.name, id: x.id, displayName: x.displayName, ...(hiddenEntry(x.name) ? { hidden: true } : {}) }));
       return [...own, ...game.filter((g) => !own.some((o) => o.name === g.name))].slice(0, limit);
     },
     studio_fields: (a) => (!catalogOk ? [] : FIELDS[S(a.section)] ?? []),

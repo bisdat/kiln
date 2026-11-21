@@ -3,6 +3,7 @@
 // the art is missing, as the save editor shows).
 import { createContext, useContext, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { isTauri, type StudioPickHit } from "../../api/commands";
+import { STATION_WATER } from "../../api/hiddenNames";
 import { useT } from "../../i18n";
 import { useEntry, usePick } from "./store";
 
@@ -111,6 +112,7 @@ export function Picker({ section, value, onChange, free, icons, pickValue, place
         <span className="kd-pick-name" data-testid={testId ? testId + "-name" : undefined}>
           {glob ? t("studio.data.pick.glob") : entry ? (entry.displayName ?? entry.name) : free ? "" : t("studio.data.pick.unknown")}
           {entry && <FromBadge from={entry.from} />}
+          {value === STATION_WATER && <span className="kd-hidden-tag" data-testid={testId ? testId + "-note" : undefined}>{t("studio.data.hidden.tankWater")}</span>}
           {entry?.hidden && <span className="kd-hidden-tag" title={t("studio.data.hidden.tip")} data-testid={testId ? testId + "-hidden" : undefined}>{t("studio.data.hidden.tag")}</span>}
         </span>
       )}
@@ -126,6 +128,7 @@ export function Picker({ section, value, onChange, free, icons, pickValue, place
                   <span className="kd-hit-name">{h.displayName ?? h.name}</span>
                   <span className="kd-hit-id">{h.name}</span>
                 </span>
+                {h.name === STATION_WATER && <span className="kd-hidden-tag" data-testid={testId ? testId + "-hit-note" : undefined}>{t("studio.data.hidden.tankWater")}</span>}
                 {h.hidden && <span className="kd-hidden-tag" title={t("studio.data.hidden.tip")}>{t("studio.data.hidden.tag")}</span>}
                 <FromBadge from={h.from} />
               </button>

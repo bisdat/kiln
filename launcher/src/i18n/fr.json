@@ -5482,7 +5482,8 @@
       "hidden": {
         "toggle": "Afficher les entrées cachées du jeu",
         "tag": "cachée",
-        "tip": "Entrées anciennes, de test ou inutilisées du jeu : elles peuvent ne rien faire en jeu."
+        "tip": "Entrées anciennes, de test ou inutilisées du jeu : elles peuvent ne rien faire en jeu.",
+        "tankWater": "eau du réservoir de l'atelier"
       }
     },
     "order": {

@@ -12,6 +12,9 @@ const shot = async (page: Page, name: string) => { if (SHOTS) { mkdirSync(SHOTS,
 type Hooks = { requests: () => { cmd: string; args: Record<string, unknown> }[]; link: (u: string) => void; setOnline: (on: boolean) => void };
 const crucible = <T,>(page: Page, f: (h: Hooks) => T) => page.evaluate((src) => (new Function("h", `return (${src})(h)`))((window as unknown as { __kilnCrucibleMock: Hooks }).__kilnCrucibleMock), f.toString()) as Promise<T>;
 
+/** The preview's dialog (its title is the pack's name). */
+const dialogOf = (page: Page) => page.getByRole("dialog").filter({ has: page.getByTestId("crucible-preview") });
+
 async function open(page: Page, url = "/?mock=1#/") {
   await page.goto(url);
   await page.locator(".k-splash").waitFor({ state: "detached" });
@@ -31,7 +34,7 @@ test("a code: the preview, trust, optional mods, Install and play, then Undo", a
   await expect(page.getByTestId("crucible-code-input")).toHaveValue("K4TW-9XRB");
   await page.getByTestId("crucible-code-open").click();
   const pv = page.getByTestId("crucible-preview");
-  await expect(pv).toContainText("Cinder Trails");
+  await expect(dialogOf(page)).toContainText("Cinder Trails"); // the dialog's title names the pack
   await expect(pv).toContainText("by Cinderhawk");
   await expect(page.getByTestId("crucible-fit")).toHaveText("Fits your game (build 26404966)");
   await expect(page.getByTestId("crucible-size")).toContainText("Download");
@@ -96,7 +99,7 @@ test("Paste fills in a code copied after the box opened; other text is not paste
 test("a kiln:// link opens the preview; a trusted creator's pack already installed offers its update", async ({ page }) => {
   await open(page, "/?mock=1&crucible=packs#/");
   await crucible(page, (h) => h.link("kiln://crucible/R7MX-2HNQ"));
-  await expect(page.getByTestId("crucible-preview")).toContainText("Ashen Frontier");
+  await expect(dialogOf(page)).toContainText("Ashen Frontier");
   await expect(page.getByTestId("crucible-has-instance")).toHaveText("You have this pack. Version 1.1.0 is ready.");
   await page.getByTestId("crucible-preview-see-update").click();
   await expect(page.getByTestId("crucible-update")).toBeVisible();
@@ -145,7 +148,7 @@ test("a dropped .kilnpack opens the same preview and installs from the file", as
     dt.items.add(new File(["x"], "cinder-trails-1.2.0.kilnpack"));
     document.body.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
   });
-  await expect(page.getByTestId("crucible-preview")).toContainText("Cinder Trails");
+  await expect(dialogOf(page)).toContainText("Cinder Trails");
   await expect(page.getByTestId("crucible-warning")).toBeVisible();
   await expect(page.getByTestId("crucible-checks")).toHaveText("Checks: passed");
   await page.getByTestId("crucible-trust").check();
@@ -184,7 +187,7 @@ test("Install alone while the game runs: the profile is made, nothing is loaded 
   await open(page);
   await page.evaluate(() => (window as unknown as { __kilnMock: { externalStart: (id: string) => void } }).__kilnMock.externalStart("client-steam"));
   await code(page, "K4TW-9XRB");
-  await expect(page.getByTestId("crucible-preview")).toContainText("Cinder Trails");
+  await expect(dialogOf(page)).toContainText("Cinder Trails");
   await page.getByTestId("crucible-trust").check();
   await expect(page.getByTestId("crucible-install")).toBeDisabled();
   await expect(page.getByTestId("crucible-install-only")).toBeEnabled();
@@ -208,7 +211,7 @@ test("the new profile's name: a friend's pack named like a profile of mine gets 
   await open(page, "/?mock=1&discord=in&crucible=shared#/");
   // the pack shared from the profile "Ember run" (by emberfox), opened where a profile "Ember run" exists too
   await code(page, "H7QK-3MZP");
-  await expect(page.getByTestId("crucible-preview")).toContainText("Ember run");
+  await expect(dialogOf(page)).toContainText("Ember run");
   const name = page.getByTestId("crucible-profile-name");
   await expect(name).toHaveValue("Ember run (emberfox's pack)");
   await expect(page.getByTestId("crucible-name-taken")).toHaveCount(0);

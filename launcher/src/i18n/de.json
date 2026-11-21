@@ -5482,7 +5482,8 @@
       "hidden": {
         "toggle": "Versteckte Spieleinträge zeigen",
         "tag": "versteckt",
-        "tip": "Alte, Test- oder ungenutzte Einträge des Spiels: Sie bewirken im Spiel womöglich nichts."
+        "tip": "Alte, Test- oder ungenutzte Einträge des Spiels: Sie bewirken im Spiel womöglich nichts.",
+        "tankWater": "Wasser aus dem Stationstank"
       }
     },
     "order": {

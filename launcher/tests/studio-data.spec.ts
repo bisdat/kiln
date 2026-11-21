@@ -276,6 +276,13 @@ test("hidden game entries (old, test, unused): left out of the pickers until Sho
   await input.fill("stone");
   await expect(page.getByTestId("data-items-1-sel-hit-Material_T1_Stone")).toBeVisible();
   await expect(page.getByTestId("data-items-1-sel-hit-Material_T1_Stone_TEST")).toHaveCount(0);
+  // a deprecated-looking name the game still uses stays listed: the game's Water (station tank water)
+  await input.fill("water");
+  const water = page.getByTestId("data-items-1-sel-hit-Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED");
+  await expect(water).toBeVisible();
+  await expect(water).toContainText("Water");
+  await expect(water).toContainText("station tank water");
+  await expect(water).not.toContainText("hidden");
   await page.keyboard.press("Escape");
   // the switch: the hidden entries show, tagged
   await page.getByTestId("data-show-hidden").check();

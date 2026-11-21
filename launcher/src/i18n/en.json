@@ -5482,7 +5482,8 @@
       "hidden": {
         "toggle": "Show hidden game entries",
         "tag": "hidden",
-        "tip": "Old, test or unused game entries: they may do nothing in the game."
+        "tip": "Old, test or unused game entries: they may do nothing in the game.",
+        "tankWater": "station tank water"
       }
     },
     "order": {

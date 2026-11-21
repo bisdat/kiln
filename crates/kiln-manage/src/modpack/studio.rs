@@ -1088,12 +1088,13 @@ pub fn pick(dirs: &DataDirs, dir: &Path, section: &str, query: &str, limit: usiz
     if let Some(cat) = load_catalog(None) {
         // room for the hidden entries the search ranks among the first (63 of 4268 items: a page never needs more)
         let wide = if hidden { limit } else { limit + 200 };
+        let used = crate::catalog::used_names(&cat);
         for h in crate::catalog::search(&cat, query, Some(section), wide) {
             let Some(name) = h.name.clone() else { continue };
             if out.iter().any(|o| o.name == name) {
                 continue;
             }
-            let is_hidden = crate::catalog::is_hidden_name(&name);
+            let is_hidden = crate::catalog::is_hidden_name(&name) && !used.contains(&name);
             if is_hidden && !hidden && !name.eq_ignore_ascii_case(query.trim()) {
                 continue;
             }
