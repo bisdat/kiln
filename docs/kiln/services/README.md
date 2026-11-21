@@ -144,7 +144,20 @@ them. Owners the managed host creates through that `KilnApi` are marked as the h
 named `mod:<manifest id>` that id as its namespace only then. Two more are the core's own and resolve through the
 services' `KilnApi` only, and nobody may publish them either: `kiln.internal.launch` ([launch.md](launch.md)) and
 `kiln.internal.hooks`, the code ranges Kiln's services protect for their engine calls
-([hooks.md](hooks.md#protected-code-ranges-kilninternalhooks-kiln-internal)).
+([hooks.md](hooks.md#protected-code-ranges-kilninternalhooks-kiln-internal)), and `kiln.internal.owners`
+(`native/core/src/owners_internal.h`): `owner_id(owner, buf, cap, out_len)` gives an owner's id as the core keeps it
+(`mod:<manifest id>` for a Kiln mod's owner from Kiln.Host, a native mod's or a plugin's own id); kiln.registry binds a
+caller to its mod with it (the id without its kind prefix, lower case). A revoked owner is `KILN_ERR_NOT_FOUND`, a buffer
+too small `KILN_ERR_BUFFER_TOO_SMALL` with the needed length.
+
+One table is a service's and has one consumer, the managed host: `kiln.internal.registry`
+(`native/services/content/include/kiln_registry_host.h`), published by kiln-content.dll. Kiln.Host calls
+`set_order` with its runtime load order (`[{"mod", "version"}]`, the order players see in the launcher profile) before the
+boot phase, and `set_mode` when kiln.json says `"registry": {"stage": "onBoot"}` (`managed/Kiln.Host/RegistryHost.cs`). The
+registry stage runs every mod's registry edits in that order; without the table (an older kiln-content.dll) it runs in the mod
+folders' order and registry.json says `"orderSource": "folders"`. Kiln.Host checks `header.version == 1` and
+`header.size == 24` and logs a mismatch. Besides the core's own two, it is the one internal name the managed host's
+`KilnApi` resolves, and only the published table of a Kiln service owner.
 
 This is a reach rule, not a sandbox: it keeps tables that hand out game addresses or Kiln's own lock primitives away from
 plugins and from stale or foreign service DLLs. It is no defence against arbitrary native code already in the process,
