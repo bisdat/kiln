@@ -35,6 +35,7 @@ struct Glue {
     KilnOwner owner = 0;                // kiln-markers.dll's own owner (process-owned work: the receiver's virtual publishers)
     uint32_t side = KILN_SIDE_SERVER;   // KILN_SIDE_CLIENT on a game client (hosted or joined)
     bool lifecycle = false;             // world STARTED / STOPPING are seen
+    bool server_post = false;           // the server world's Post is subscribed (the anchors' follow reads there)
     Store* store = nullptr;
     Subscribers* subs = nullptr;
     CatalogHolder* catalog = nullptr;
@@ -47,18 +48,27 @@ void logf(int32_t level, const char* fmt, ...);
 // One capability row (kiln.caps report); a no-op before on_ready found kiln.caps.
 void report(const char* name, uint32_t state, uint32_t reason, const char* text);
 
-// ---- S3: anchors (anchors.cpp) ------------------------------------------------------------------------------------------
-void anchors_start();                         // kiln_plugin_main: resolve symbols, install the observers (no game reads)
-void anchors_ready();                         // on_ready: report markers.anchors.client / .server, set Switches::anchors_client
+// ---- S3: anchors (anchors.cpp; the watch table anchors.h, the reader world_read.h) --------------------------------------
+void anchors_start();                         // kiln_plugin_main: resolve symbols (no game reads); kiln.markers.lab on a lab
+void anchors_ready();                         // on_ready: the layout check through kiln.types, the observers, the store's
+                                              // follow callbacks; report markers.anchors.client / .server, set Switches::anchors_client
 void anchors_world(const KilnWorldEvent& e);  // STARTED / STOPPING of the server and client worlds
 void anchors_post(uint32_t world_kind);       // a completed Post of that world: follow reads for the stored records
 KilnResult anchors_capture(KilnOwner owner, uint32_t world_kind, uint64_t expected_epoch, KilnEntity entity, KilnMarkerAnchorResult* out);
 KilnResult anchors_release(KilnOwner owner, KilnMarkerAnchor anchor);
 void anchors_release_owner(KilnOwner owner);  // release_owner: the owner's leases
 // The follow state of a stored record's incarnation (Record::follow) as of that world's last Post: READY with its position,
-// FOLLOW_MISSING (no transform now; the same serial may recover) or ANCHOR_ENDED (destroyed, recreated or its world
-// stopped: terminal). Any thread; false for serial 0 or an unknown serial (treat as ANCHOR_ENDED).
+// FOLLOW_MISSING (no transform now; the same serial may recover), BAD_POSITION (read, but not finite or outside the world;
+// may recover) or ANCHOR_ENDED (destroyed, recreated or its world stopped: terminal). Any thread; false for serial 0 or an
+// unknown serial (treat as ANCHOR_ENDED).
 bool anchors_follow(uint64_t serial, KilnVec3* position, uint32_t* reason);
+// A stored reference for a record that follows (the local store takes its own through Store::set_follow; the link's sent
+// records use these): the owner's live lease of that world kind and its current world, resolved to its incarnation's
+// serial with one reference taken (KILN_MARKER_ACCEPTED), else KILN_MARKER_INVALID_ANCHOR with the words in why. Drop the
+// reference when the record goes (removed, cleared, released, its world stopped). Any thread; it takes only the anchors'
+// leaf lock, which never calls out, so a store may call it under its own lock.
+uint32_t anchors_retain(KilnOwner owner, uint32_t world_kind, KilnMarkerAnchor lease, uint64_t* serial, char* why, size_t cap);
+void anchors_drop(uint64_t serial);
 
 // ---- S5, S6: surfaces (surfaces.cpp) ------------------------------------------------------------------------------------
 void surfaces_ready();                        // on_ready: kiln.render / kiln.ui, report markers.map, .compass, .world, .nameplates

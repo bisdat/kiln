@@ -12,6 +12,9 @@ mkdir -p "$out"
 printf '#include "services/kiln_markers.h"\n_Static_assert(KILN_MARKER_WORLD == 4, "surfaces");\n' |
   gcc -std=c11 -Wall -Wextra -pedantic -fsyntax-only -I"$abi" -x c -
 echo "PASS kiln_markers.h compiles as C11"
+printf '#include "services/kiln_markers_lab.h"\n_Static_assert(sizeof(KilnMarkersLabApi) == 32, "lab table");\n' |
+  gcc -std=c11 -Wall -Wextra -pedantic -fsyntax-only -I"$abi" -x c -
+echo "PASS kiln_markers_lab.h compiles as C11"
 
 g++ -std=c++20 -O1 -g -Wall -Wextra -I"$abi" "$here/abi_test.cpp" -o "$out/abi_test"
 "$out/abi_test"
@@ -36,3 +39,12 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-s
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-sanitize-recover=undefined -I"$src" -I"$abi" \
   "$here/surfaces_test.cpp" "$src/select.cpp" "$src/visibility.cpp" "$src/map_list.cpp" -o "$out/surfaces_test"
 "$out/surfaces_test"
+
+# S3, following an entity (M05/M06 mechanics): the watch table on a fake world and storage (serials, leases, same-id
+# recreation, a missing transform and its recovery, destroy terminal, quotas, epochs, world stop), the explicit-world reader
+# and its layout check against a fake kiln.types, the local store following an entity, and the observers on four threads
+# against a Post reader and a capturer.
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-sanitize-recover=undefined -I"$src" -I"$abi" \
+  "$here/anchors_test.cpp" "$src/watch.cpp" "$src/world_read.cpp" "$src/store.cpp" "$src/events.cpp" "$src/arena.cpp" "$src/text.cpp" \
+  "$src/guard.cpp" -o "$out/anchors_test"
+"$out/anchors_test"

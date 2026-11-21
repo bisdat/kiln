@@ -141,6 +141,7 @@ KilnResult Store::release(KilnOwner owner) {
     if (!b) return KILN_OK;
     if (const uint32_t n = static_cast<uint32_t>(b->local.size())) {
         local_total_ -= n;
+        for (const auto& [key, rec] : b->local) unfollow(rec);
         b->local.clear();
         enqueue_change(kRoleClient, *b, KILN_MARKER_CLEARED, {}, n, KILN_MARKER_OWNER_RETIRED, false);
     }
@@ -223,15 +224,34 @@ KilnResult Store::set_local(KilnOwner owner, const KilnMarkerSpec* spec, KilnMar
                 return bad(r, "icon_type 0x%08x is listed without the MAP surface (fast-travel types are refused on the map)", rec.icon);
         }
     }
-    if (spec->follow) return off(r, "markers.anchors.client");  // anchors are not built in this kiln.markers yet
 
     std::lock_guard g(mu_);
     Binding* b = bound(owner);
     if (!b) return bad(r, "owner %llu is not bound (bind_owner)", static_cast<unsigned long long>(owner));
     if (!epochs_[KILN_WORLD_CLIENT].load()) return refuse(r, KILN_MARKER_NOT_READY, "NotReady: there is no client world");
+    // The follow lease, resolved to its incarnation with one reference taken (anchors, under their own leaf lock): the
+    // record keeps it on commit, every other way out gives it back. Two leases of one incarnation are the same value.
+    struct Held {
+        Store* store;
+        uint64_t serial = 0;
+        ~Held() {
+            if (serial && store->follow_release_) store->follow_release_(serial, store->follow_ctx_);
+        }
+    } held{this};
+    if (spec->follow) {
+        if (!follow_acquire_) return off(r, "markers.anchors.client");
+        char why[200] = {};
+        uint64_t serial = 0;
+        if (follow_acquire_(owner, KILN_WORLD_CLIENT, spec->follow, &serial, why, sizeof why, follow_ctx_) != KILN_MARKER_ACCEPTED || !serial)
+            return refuse(r, KILN_MARKER_INVALID_ANCHOR, "%s", why[0] ? why : "InvalidAnchor: the follow lease is not live");
+        held.serial = serial;
+        rec.follow = serial;
+    }
     LedgerEntry& ledger = ledger_[b->ledger];
     auto it = b->local.find(key);
     if (it != b->local.end() && it->second.same(rec)) return accepted(r, 0);  // identical: nothing to do, no event
+    if (rec.follow && (it == b->local.end() || !it->second.follow) && local_follows_ >= kLocalFollows)
+        return refuse(r, KILN_MARKER_FULL, "Full: %u local markers follow an entity (the most)", kLocalFollows);
     if (it == b->local.end()) {
         if (b->local.size() >= kPerNamespace)
             return refuse(r, KILN_MARKER_FULL, "Full: namespace '%s' has %u local markers (the most)", ledger.ns.c_str(), kPerNamespace);
@@ -254,8 +274,11 @@ KilnResult Store::set_local(KilnOwner owner, const KilnMarkerSpec* spec, KilnMar
         ++local_total_;
         kind = KILN_MARKER_ADDED;
     } else {
+        unfollow(it->second);
         it->second = rec;
     }
+    if (rec.follow) ++local_follows_;
+    held.serial = 0;  // the record holds it now
     ++b->pending;
     ++pending_[kRoleClient];
     enqueue_change(kRoleClient, *b, kind, key, 1, KILN_MARKER_API, true);
@@ -279,6 +302,7 @@ KilnResult Store::remove_local(KilnOwner owner, KilnStr key, KilnMarkerResult* r
         return refuse(r, KILN_MARKER_FULL, "Full: %u changes of '%s' wait for the next client step", kPendingPerPublisher, ledger_[b->ledger].ns.c_str());
     if (pending_[kRoleClient] >= kPendingPerRole)
         return refuse(r, KILN_MARKER_FULL, "Full: %u marker changes wait for the next client step", kPendingPerRole);
+    unfollow(it->second);
     b->local.erase(it);
     --local_total_;
     ++b->pending;
@@ -301,6 +325,7 @@ KilnResult Store::clear_local(KilnOwner owner, KilnMarkerResult* r) {
         return refuse(r, KILN_MARKER_FULL, "Full: %u changes of '%s' wait for the next client step", kPendingPerPublisher, ledger_[b->ledger].ns.c_str());
     if (pending_[kRoleClient] >= kPendingPerRole)
         return refuse(r, KILN_MARKER_FULL, "Full: %u marker changes wait for the next client step", kPendingPerRole);
+    for (const auto& [k, rec] : b->local) unfollow(rec);
     b->local.clear();
     local_total_ -= n;
     ++b->pending;
@@ -317,6 +342,7 @@ void Store::clear_world(uint32_t kind) {
         const uint32_t n = static_cast<uint32_t>(b.local.size());
         if (!n) continue;
         local_total_ -= n;
+        for (const auto& [key, rec] : b.local) unfollow(rec);
         b.local.clear();
         enqueue_change(kRoleClient, b, KILN_MARKER_CLEARED, {}, n, KILN_MARKER_WORLD_STOPPED, false);
     }
@@ -363,6 +389,17 @@ void Store::snapshot_client(std::vector<ClientRow>* out) const {
 uint32_t Store::local_count() const {
     std::lock_guard g(mu_);
     return local_total_;
+}
+
+uint32_t Store::local_follows() const {
+    std::lock_guard g(mu_);
+    return local_follows_;
+}
+
+void Store::unfollow(const Record& rec) {
+    if (!rec.follow) return;
+    if (local_follows_) --local_follows_;
+    if (follow_release_) follow_release_(rec.follow, follow_ctx_);
 }
 
 uint32_t Store::pending(uint32_t role) const {

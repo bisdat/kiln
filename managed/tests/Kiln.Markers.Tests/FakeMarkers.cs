@@ -31,6 +31,13 @@ internal static unsafe class FakeMarkers
     public static nint VisibilityFn;
     public static ulong SubscribedOwner;
     public static int Subscribes;
+    // anchors: kiln.markers' world epochs, the captures asked for, a scripted next capture, work done during a capture
+    public static ulong ServerEpoch, ClientEpoch;
+    public static readonly List<(ulong Owner, uint Kind, ulong Epoch, uint Entity)> Captures = new();
+    public static readonly HashSet<uint> Missing = new();
+    public static (int Rc, uint Status, string Reason)? NextCapture;
+    public static Action? DuringCapture;
+    private static ulong _handles;
     private static readonly List<MarkersNative.Change> Queue = new();
     private static ulong _sequence;
 
@@ -48,6 +55,14 @@ internal static unsafe class FakeMarkers
         Table->Subscribe = &Subscribe;
         Table->Unsubscribe = &Unsubscribe;
         Table->ReleaseAnchor = &ReleaseAnchor;
+        Table->WorldEpoch = &WorldEpoch;
+        Table->CaptureAnchor = &CaptureAnchor;
+        ServerEpoch = ClientEpoch = 0;
+        Captures.Clear();
+        Missing.Clear();
+        NextCapture = null;
+        DuringCapture = null;
+        _handles = 0x100;
         Calls.Clear();
         Specs.Clear();
         Records.Clear();
@@ -211,6 +226,53 @@ internal static unsafe class FakeMarkers
         Calls.Add($"release_anchor {owner} {anchor}");
         return 0;
     }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int WorldEpoch(uint kind, ulong* epoch)
+    {
+        if (kind != 0 && kind != 2) return 1;
+        *epoch = kind == 2 ? ClientEpoch : ServerEpoch;
+        return 0;
+    }
+
+    // capture_anchor as the service answers it: the epoch first, then the entity; a lease handle per accepted capture.
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int CaptureAnchor(ulong owner, uint kind, ulong epoch, uint entity, MarkersNative.AnchorResult* r)
+    {
+        Captures.Add((owner, kind, epoch, entity));
+        DuringCapture?.Invoke();
+        var size = r->Size;
+        *r = default;
+        r->Size = size;
+        r->WorldKind = kind;
+        r->Entity = entity;
+        if (NextCapture is { } n)
+        {
+            NextCapture = null;
+            r->Status = n.Status;
+            var bytes = Encoding.UTF8.GetBytes(n.Reason);
+            for (var i = 0; i < Math.Min(bytes.Length, 255); i++) r->Reason[i] = bytes[i];
+            return n.Rc;
+        }
+        var current = kind == 2 ? ClientEpoch : ServerEpoch;
+        r->WorldEpoch = current;
+        if (current == 0 || current != epoch)
+        {
+            r->Status = 4;
+            return 0;
+        }
+        if (Missing.Contains(entity))
+        {
+            r->Status = 1;
+            var bytes = Encoding.UTF8.GetBytes($"NotFound: no entity {entity}");
+            for (var i = 0; i < bytes.Length; i++) r->Reason[i] = bytes[i];
+            return 0;
+        }
+        r->Anchor = ++_handles;
+        r->Incarnation = entity * 10ul;
+        r->Position = new MarkersNative.Vec3 { X = 1, Y = 2, Z = 3 };
+        return 0;
+    }
 }
 
 internal sealed class FakeBackend : IKilnBackend
@@ -244,6 +306,7 @@ public abstract class MarkersFixture : IDisposable
         else FakeMarkers.Free();
         MarkersNative.Forget();
         Markers.ForgetSubscription();
+        MarkerAnchors.ForgetAll();
         _dir = Path.Combine(Path.GetTempPath(), "kiln-markers-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
     }
@@ -278,6 +341,7 @@ public abstract class MarkersFixture : IDisposable
     public void Dispose()
     {
         foreach (var m in _mods) m.Retire();
+        MarkerAnchors.ForgetAll();
         FakeMarkers.Free();
         MarkersNative.Forget();
         Markers.ForgetSubscription();

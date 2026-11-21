@@ -480,6 +480,8 @@ internal static partial class KilnApis
         "M:Kiln.KnowledgeScope.List", // KnowledgeScope.List(): via Knowledge.List(EntityId)
         "M:Kiln.KnowledgeScope.Revoke(System.String,System.Int32)", // KnowledgeScope.Revoke(string, int): via Knowledge.KnowledgeId(string, string)
         "M:Kiln.KnowledgeScope.Set(System.String,System.UInt32)", // KnowledgeScope.Set(string, uint): via Knowledge.KnowledgeId(string, string)
+        "M:Kiln.Markers.CaptureServerAnchor(Kiln.EntityId)", // Markers.CaptureServerAnchor(EntityId): Services.RequireTickThread
+        "M:Kiln.MarkersLab.CreateRaw(System.UInt32,System.Guid,Kiln.WorldPosition)", // MarkersLab.CreateRaw(uint, Guid, WorldPosition): Services.RequireTickThread
         "M:Kiln.Mod.WorldConfig``1(System.String)", // Mod.WorldConfig<T>(string?): Game.AssertTickThread
         "M:Kiln.NativeQuests.Holds(Kiln.NativeComputed,Kiln.QuestHolder)", // NativeQuests.Holds(NativeComputed, QuestHolder): Game.AssertTickThread
         "M:Kiln.NativeQuests.Resync(Kiln.QuestHolder,System.Boolean)", // NativeQuests.Resync(QuestHolder, bool): Game.AssertTickThread
@@ -878,6 +880,7 @@ internal static partial class KilnApis
         "P:Kiln.Items.Transfers.Available=items.transfer", // Can("items.transfer")
         "P:Kiln.Items.UpgradeAvailable=items.gear.upgrade", // Can("items.gear.upgrade")
         "P:Kiln.Knowledge.Available=kiln.knowledge", // KnowledgeNative.T != null: Services.Get("kiln.knowledge")
+        "P:Kiln.MarkersLab.Available=kiln.markers.lab", // T != null: Services.Get("kiln.markers.lab")
         "P:Kiln.NoClip.Available=rules.noclip", // Is("rules.noclip")
         "P:Kiln.PlayerAnimStates.Available=kiln.playeranim", // T != null: Services.Get("kiln.playeranim")
         "P:Kiln.PlayerCharacters.Available=kiln.characters", // T != null: Services.Get("kiln.characters")
