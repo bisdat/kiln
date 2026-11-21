@@ -1,0 +1,16 @@
+{
+  // Registry P1 lab fixture (KILNX031, registry schemas 0.1.0). The ids are Kiln ids of the server build 1287369.
+  "registry": {
+    "alter": [
+      { "registry": "items", "select": { "id": "game:material_t1_*" }, "field": "maxStack", "op": { "mul": 2, "max": 9999 } },
+      { "registry": "items", "entry": "remove", "select": { "id": "game:material_t2_wood_hardwood" } },
+      { "registry": "items", "select": { "id": "game:ammo_t4_arrow_bone_lvl27" }, "field": "block", "op": 0.5 },
+      { "registry": "recipes", "select": { "id": "game:ammo_arrow_t3_bronze" }, "field": "duration", "op": { "mul": 0.5 } },
+      { "registry": "loot", "select": { "id": "game:material_t1_*" }, "field": "stack.max", "op": { "add": 1 } },
+      { "registry": "drops", "select": { "id": "game:lootcontainer_enemy_skeleton_elite" }, "field": "entries[*].chance", "op": { "mul": 0.5 } },
+      { "registry": "balance", "select": { "id": "game:balance" }, "field": "xpPerLevel[0]", "op": 2222 },
+      { "registry": "balance", "select": { "id": "game:balance" }, "field": "xpPerLevel[2]", "op": { "add": 100 } },
+      { "registry": "balance", "select": { "id": "game:balance" }, "field": "levelCap", "op": 60 }
+    ]
+  }
+}

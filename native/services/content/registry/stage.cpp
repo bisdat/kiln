@@ -399,6 +399,9 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
         phase_.store(Phase::Add);
     }
     d.load_regmap();
+    if (mode_.load() == Mode::OnBoot)
+        d.log(1, "registry: stage mode onBoot was asked (option A); this build runs the stage at resources-ready: a kiln-backend start's committed "
+                 "view lists no resources and the boot snapshot is older than the start, so the base cannot be read before the entry point yet");
     // the order: Kiln.Host's runtime load order, else the mod folders'
     std::vector<std::pair<std::string, std::string>> order;
     {
