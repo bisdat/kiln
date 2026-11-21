@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 852,
-    "constants": 965,
-    "features": 244
+    "symbols": 863,
+    "constants": 969,
+    "features": 245
   },
   "features": {
     "abilities.attributes": true,
@@ -239,6 +239,7 @@
     "ui.values.hud": true,
     "ui.values.slot": true,
     "ui.values.tooltip_lines": true,
+    "ui.world_outline": true,
     "upscale.swap": true,
     "vfx.guard": true,
     "vfx.play": true,
@@ -525,6 +526,17 @@
     "npcai/FactionFriendValue": "0xea34a0",
     "npcai/FactionHostile": "0xea2e50",
     "npcai/FactionHostileValue": "0xea2f10",
+    "outline/ColorConvert": "0x125b80",
+    "outline/DynamicModelSet": "0x309975",
+    "outline/Instance": "0xf8420",
+    "outline/Palette0.Group1": "0x124999",
+    "outline/Palette0.Group2": "0x1249f7",
+    "outline/Palette1.Group1": "0x140ad6",
+    "outline/Palette1.Group2": "0x140b36",
+    "outline/SceneForward": "0xf6e90",
+    "outline/SceneSetGroups": "0xf6e90",
+    "outline/SetGroups": "0x112ad0",
+    "outline/StaticModelReset": "0x319e24",
     "pacing/BackgroundWorkers": "0x8ea850",
     "pacing/DefaultWorkers": "0x8ea833",
     "pacing/LoopWait": "0xf5b3ee",
@@ -1206,6 +1218,10 @@
     "net/rec.state": "0xa",
     "net/rec.stride": "0x148",
     "net/sockets.machines": "0x28",
+    "outline/inst.group": "0x78",
+    "outline/pal.group1": "0x58",
+    "outline/pal.group2": "0x5c",
+    "outline/scene.renderer": "0x98",
     "players/attr.level": "0x724bf568",
     "players/attr.need": "0x4723f62",
     "players/attr.pending": "0x1d7dd102",
@@ -3378,6 +3394,33 @@
       },
       "constants": {},
       "features": {}
+    },
+    "outline": {
+      "level": "static",
+      "date": "2026-11-21",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "outline/ColorConvert": "static",
+        "outline/DynamicModelSet": "static",
+        "outline/Instance": "static",
+        "outline/Palette0.Group1": "static",
+        "outline/Palette0.Group2": "static",
+        "outline/Palette1.Group1": "static",
+        "outline/Palette1.Group2": "static",
+        "outline/SceneForward": "static",
+        "outline/SceneSetGroups": "static",
+        "outline/SetGroups": "static",
+        "outline/StaticModelReset": "static"
+      },
+      "constants": {
+        "outline/inst.group": "static",
+        "outline/pal.group1": "static",
+        "outline/pal.group2": "static",
+        "outline/scene.renderer": "static"
+      },
+      "features": {
+        "ui.world_outline": "static"
+      }
     },
     "pacing": {
       "level": "static",

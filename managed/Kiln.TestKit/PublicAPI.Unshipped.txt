@@ -1,4 +1,51 @@
 #nullable enable
+Kiln.TestKit.FakeOutline
+Kiln.TestKit.FakeOutline.<Clone>$() -> Kiln.TestKit.FakeOutline!
+Kiln.TestKit.FakeOutline.Color.get -> Kiln.Color
+Kiln.TestKit.FakeOutline.Color.init -> void
+Kiln.TestKit.FakeOutline.ColorShared.get -> bool
+Kiln.TestKit.FakeOutline.ColorShared.init -> void
+Kiln.TestKit.FakeOutline.Deconstruct(out Kiln.EntityId Entity, out Kiln.Color Color, out bool Pulse, out int Priority, out System.TimeSpan? Duration, out Kiln.OutlineState State, out Kiln.OutlineReason Reason, out int Group, out bool ColorShared, out string! Owner) -> void
+Kiln.TestKit.FakeOutline.Duration.get -> System.TimeSpan?
+Kiln.TestKit.FakeOutline.Duration.init -> void
+Kiln.TestKit.FakeOutline.Entity.get -> Kiln.EntityId
+Kiln.TestKit.FakeOutline.Entity.init -> void
+Kiln.TestKit.FakeOutline.Equals(Kiln.TestKit.FakeOutline? other) -> bool
+Kiln.TestKit.FakeOutline.FakeOutline(Kiln.EntityId Entity, Kiln.Color Color, bool Pulse, int Priority, System.TimeSpan? Duration, Kiln.OutlineState State, Kiln.OutlineReason Reason, int Group, bool ColorShared, string! Owner) -> void
+Kiln.TestKit.FakeOutline.Group.get -> int
+Kiln.TestKit.FakeOutline.Group.init -> void
+Kiln.TestKit.FakeOutline.Owner.get -> string!
+Kiln.TestKit.FakeOutline.Owner.init -> void
+Kiln.TestKit.FakeOutline.Priority.get -> int
+Kiln.TestKit.FakeOutline.Priority.init -> void
+Kiln.TestKit.FakeOutline.Pulse.get -> bool
+Kiln.TestKit.FakeOutline.Pulse.init -> void
+Kiln.TestKit.FakeOutline.Reason.get -> Kiln.OutlineReason
+Kiln.TestKit.FakeOutline.Reason.init -> void
+Kiln.TestKit.FakeOutline.State.get -> Kiln.OutlineState
+Kiln.TestKit.FakeOutline.State.init -> void
+Kiln.TestKit.FakeOutlineSetting
+Kiln.TestKit.FakeOutlineSetting.GameFirst = 0 -> Kiln.TestKit.FakeOutlineSetting
+Kiln.TestKit.FakeOutlineSetting.ModsFirst = 1 -> Kiln.TestKit.FakeOutlineSetting
+Kiln.TestKit.FakeOutlineSetting.Off = 2 -> Kiln.TestKit.FakeOutlineSetting
 Kiln.TestKit.HarnessItems.ContainerName(Kiln.EntityId entity) -> string?
+Kiln.TestKit.HarnessOutlines
+Kiln.TestKit.HarnessOutlines.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeOutline!>!
+Kiln.TestKit.HarnessOutlines.Despawn(Kiln.EntityId entity) -> int
+Kiln.TestKit.HarnessOutlines.EndWorld() -> void
+Kiln.TestKit.HarnessOutlines.GameHighlight(Kiln.EntityId entity, bool on = true) -> void
+Kiln.TestKit.HarnessOutlines.HideModel(Kiln.EntityId entity, bool hidden = true) -> void
+Kiln.TestKit.HarnessOutlines.Live.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeOutline!>!
+Kiln.TestKit.HarnessOutlines.Of(Kiln.WorldOutline! outline) -> Kiln.TestKit.FakeOutline?
+Kiln.TestKit.HarnessOutlines.SetState(Kiln.WorldOutline! outline, Kiln.OutlineState state, Kiln.OutlineReason reason = Kiln.OutlineReason.None) -> void
+Kiln.TestKit.HarnessOutlines.Setting.get -> Kiln.TestKit.FakeOutlineSetting
+Kiln.TestKit.HarnessOutlines.Setting.set -> void
+Kiln.TestKit.HarnessOutlines.Showing(Kiln.EntityId entity) -> Kiln.TestKit.FakeOutline?
+Kiln.TestKit.KilnHarness.Outlines.get -> Kiln.TestKit.HarnessOutlines!
 Kiln.TestKit.ModManifest.SteamMessages.get -> bool
 Kiln.TestKit.ModManifest.SteamMessages.set -> void
+override Kiln.TestKit.FakeOutline.Equals(object? obj) -> bool
+override Kiln.TestKit.FakeOutline.GetHashCode() -> int
+override Kiln.TestKit.FakeOutline.ToString() -> string!
+static Kiln.TestKit.FakeOutline.operator !=(Kiln.TestKit.FakeOutline? left, Kiln.TestKit.FakeOutline? right) -> bool
+static Kiln.TestKit.FakeOutline.operator ==(Kiln.TestKit.FakeOutline? left, Kiln.TestKit.FakeOutline? right) -> bool
