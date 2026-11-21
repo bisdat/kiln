@@ -19,7 +19,9 @@
 #include "../../../core/src/services/boot_archive_view.h"
 #include "../content.h"
 #include "../refs.h"
+#include "../registry_live.h"
 #include "../include/kiln_registry_host.h"
+#include "../../../core/src/owners_internal.h"
 #include "kiln_boot_collector.hpp"
 #include "services/kiln_assets.h"
 #include "services/kiln_launch.h"
@@ -81,22 +83,6 @@ std::string version_of(const fs::path& dir) {
     return j.is_object() && j.contains("version") && j["version"].is_string() ? j["version"].get<std::string>() : std::string();
 }
 
-std::vector<std::pair<std::string, std::string>> content_files(const fs::path& dir) {
-    std::vector<std::pair<std::string, std::string>> out;
-    std::error_code ec;
-    if (!fs::is_directory(dir / L"content", ec)) return out;
-    for (auto it = fs::directory_iterator(dir / L"content", ec); !ec && it != fs::directory_iterator(); it.increment(ec)) {
-        std::wstring ext = it->path().extension().wstring();
-        for (wchar_t& c : ext) c = static_cast<wchar_t>(std::towlower(c));
-        if (ext != L".json") continue;
-        auto text = read_whole(it->path());
-        if (!text) continue;
-        const std::u8string n = it->path().filename().u8string();
-        out.emplace_back("content/" + std::string(n.begin(), n.end()), std::move(*text));
-    }
-    return out;
-}
-
 std::string utc_now() {
     const std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     std::tm tm{};
@@ -154,14 +140,12 @@ Env make_env() {
         }
         return out;
     };
+    // the data sections as kiln.content's packs read them (packs.cpp registry_sections over the enabled mods' pack files)
     e.data = [](const Schema& schema) {
         std::vector<Env::DataFile> out;
-        for (const fs::path& dir : mod_folder_list()) {
-            const std::string id = kiln::boot::mod_id_of(dir);
-            if (id.empty()) continue;
-            auto rows = read_sections(id, version_of(dir), content_files(dir), schema);
-            for (auto& r : rows) out.push_back(std::move(r));
-        }
+        std::string signature;
+        for (RegistrySection& s : registry_sections(discover_packs(&signature), schema))
+            out.push_back({s.mod, s.version, s.rel, std::move(s.batches), std::move(s.refused), s.error});
         return out;
     };
     e.write_report = [](const std::string& text) { return write_whole(u8(api_path(KILN_PATH_STATE)) / u8"registry.json", text); };
@@ -221,6 +205,23 @@ bool guarded_stage(KilnRegistryStageFn fn, const KilnRegistryStageInfo* info, vo
 bool guarded_ready(KilnRegistryReadyFn fn, const KilnRegistryReady* r, void* user) { return fn(r, user), true; }
 #endif
 
+// The mod id Kiln binds an owner to (kiln_registry.h "Mods"): the core's id of the owner (kiln.internal.owners) without its
+// kind prefix ("mod:", "native:", ...), folded to lower case. Empty: no such owner, or an id that is no mod id.
+std::string bound_mod(KilnOwner owner) {
+    static const auto* t = g_api ? static_cast<const KilnOwnersInternalApi*>(g_api->service(KilnStr{KILN_OWNERS_INTERNAL_SERVICE, sizeof(KILN_OWNERS_INTERNAL_SERVICE) - 1}, 1))
+                                 : nullptr;
+    if (!t || t->header.size < sizeof(KilnOwnersInternalApi) || !t->owner_id) return {};
+    char buf[256];
+    size_t len = 0;
+    if (t->owner_id(owner, buf, sizeof buf, &len) != KILN_OK) return {};
+    std::string id(buf, len);
+    if (const size_t colon = id.find(':'); colon != std::string::npos) id = id.substr(colon + 1);
+    for (char& c : id)
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    std::string err;
+    return mod_id_ok(id, &err) ? id : std::string();
+}
+
 KilnResult KILN_CALL t_status(KilnRegistryStatus* out) {
     if (!out || out->size < 40) return KILN_ERR_INVALID_ARGUMENT;
     const Runner::Counts c = runner().counts();
@@ -247,9 +248,13 @@ KilnResult KILN_CALL t_field_info(KilnStr q, KilnRegistryFieldInfo* out) {
     out->reason[n] = 0;
     return KILN_OK;
 }
-KilnResult KILN_CALL t_subscribe_stage(KilnOwner owner, KilnStr mod, KilnRegistryStageFn fn, void* user, KilnHandle* out) {
-    if (!owner || !fn || !out || !str_ok(mod, 1024)) return KILN_ERR_INVALID_ARGUMENT;
-    const std::string m = str(mod);
+KilnResult KILN_CALL t_subscribe_stage(KilnOwner owner, KilnRegistryStageFn fn, void* user, KilnHandle* out) {
+    if (!owner || !fn || !out) return KILN_ERR_INVALID_ARGUMENT;
+    const std::string m = bound_mod(owner);
+    if (m.empty()) {
+        LOGW("registry: owner %llu has no mod id Kiln can bind it to: its stage callback is refused", static_cast<unsigned long long>(owner));
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
     return runner().subscribe_stage(owner, m, [fn, user, m](Stage s, const View&) {
         KilnRegistryStageInfo info{};
         info.size = sizeof info;
@@ -262,12 +267,7 @@ KilnResult KILN_CALL t_submit(KilnOwner owner, KilnStr ir, KilnRegistrySubmitRes
     if (!owner || !str_ok(ir, KILN_REGISTRY_MAX_IR_BYTES) || (out && out->size < 16) || (!report && cap)) return KILN_ERR_INVALID_ARGUMENT;
     uint32_t acc = 0, ref = 0;
     std::string rep;
-    // the caller's mod id is bound by Kiln: kiln.content knows an owner's mod by its label (boot owners "boot:<mod>")
-    std::string label = owner_label(owner);
-    if (label.rfind("boot:", 0) == 0) label = label.substr(5);
-    std::string err;
-    const std::string bound = mod_id_ok(label, &err) ? label : std::string();
-    const KilnResult rc = runner().submit(owner, bound, str(ir), &acc, &ref, &rep);
+    const KilnResult rc = runner().submit(owner, bound_mod(owner), str(ir), &acc, &ref, &rep);
     if (out) out->size = 16, out->accepted = acc, out->refused = ref, out->reserved = 0;
     report_out(rep, report, cap, out_len);
     return rc;
@@ -301,15 +301,10 @@ KilnResult KILN_CALL t_subscribe_ready(KilnOwner owner, KilnRegistryReadyFn fn, 
     }, out);
 }
 KilnResult KILN_CALL t_unsubscribe(KilnHandle h) { return runner().unsubscribe(h); }
-KilnResult KILN_CALL t_live_begin(KilnOwner, uint64_t*) { return KILN_ERR_UNAVAILABLE; }
-KilnResult KILN_CALL t_live_submit(uint64_t, KilnStr, KilnRegistrySubmitResult*, char*, size_t, size_t*) { return KILN_ERR_UNAVAILABLE; }
-KilnResult KILN_CALL t_live_commit(uint64_t, KilnRegistryCommitResult*) { return KILN_ERR_UNAVAILABLE; }
-KilnResult KILN_CALL t_live_cancel(uint64_t) { return KILN_ERR_UNAVAILABLE; }
 
 const KilnRegistryApi kTable = {
     {sizeof(KilnRegistryApi), KILN_REGISTRY_VERSION},
     &t_status, &t_schema, &t_field_info, &t_subscribe_stage, &t_submit, &t_read, &t_select, &t_report, &t_subscribe_ready, &t_unsubscribe,
-    &t_live_begin, &t_live_submit, &t_live_commit, &t_live_cancel,
 };
 
 KilnResult KILN_CALL h_set_order(KilnStr order) {
@@ -334,6 +329,22 @@ void bind_service() {
         [](const std::vector<boothook::OldDoc>& docs) { return runner().run([&docs](model::Model& m) { return boothook::old_writes(docs, m); }); },
         &boothook::write, [](const std::vector<BootOutcome>& o) { runner().finish(o); }};
     boothook::set(&hooks);
+    // the live back-end (registry_live.cpp, S9): now and worldLoad fields as store layers at each world load
+    runner().set_live([](const LiveHandoff& h) {
+        RegistryLive in;
+        in.schema = std::make_shared<const Schema>(*h.schema);
+        in.regmap = std::make_shared<const map::RegMap>(*h.regmap);
+        in.result = *h.result;
+        in.ids = *h.ids;
+        in.nums = *h.nums;
+        in.base = *h.base;
+        in.old = *h.old;
+        in.mods = *h.inputs;
+        in.decoded = *h.decoded;
+        in.added_guid = &model::added_guid;
+        in.report = h.report;
+        registry_live_install(std::move(in));
+    });
     const KilnResult a = g_api->register_service(g_owner, KilnStr{KILN_REGISTRY_SERVICE, sizeof(KILN_REGISTRY_SERVICE) - 1}, &kTable);
     const KilnResult b = g_api->register_service(g_owner, KilnStr{KILN_REGISTRY_HOST_SERVICE, sizeof(KILN_REGISTRY_HOST_SERVICE) - 1}, &kHostTable);
     if (a != KILN_OK || b != KILN_OK) LOGW("registry: kiln.registry rc %d, kiln.internal.registry rc %d", a, b);

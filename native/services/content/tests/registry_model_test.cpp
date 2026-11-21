@@ -227,7 +227,9 @@ void needs_and_compose(const std::string& dir) {
     check(fo != r.fields.end() && fo->second.result == Value::integer(4), "the edit composed over the decoded base (1 x 4)");
     bool drop_gone = false;
     for (const EntryRef& x : r.removed) drop_gone = drop_gone || (x.registry == "drops" && x.id == "game:lootcontainer_enemy_a");
-    check(drop_gone, "and the drop table naming it");
+    const auto drops = r.fields.find(FieldRef{"drops", "game:lootcontainer_enemy_a", "entries"});
+    check(!drop_gone && drops != r.fields.end() && drops->second.result.list.size() == 1 && drops->second.result.list[0].leaf("item")->t == "game:sword_t1",
+          "the drop table naming it stays and only loses that element");
 }
 
 void encode_writes(const std::string& dir) {

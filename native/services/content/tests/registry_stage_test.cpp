@@ -229,7 +229,7 @@ void host_order_and_code(const std::string& dir) {
     const json rep2 = json::parse(files.report);
     check(rep2["orderSource"] == "kiln.host" && rep2["order"][0]["mod"] == "late" && rep2["order"][1]["mod"] == "bigmod" && rep2["order"][2]["mod"] == "codemod",
           "Kiln.Host's order; a mod it does not name runs after: " + rep2["order"].dump());
-    check(seen == "160", "the callback's stage view: the alters of the mods before it (20 x2 x4): " + seen);
+    check(seen == "20", "the callback's stage view in alter: the previous stage's resolved view (add: the base 20), never the alters running: " + seen);
     check(rep2.dump().find("\"result\":261") != std::string::npos, "its alter (+1) and its queued final (+100) compose on them: 261");
 }
 

@@ -1285,7 +1285,7 @@ std::vector<registry::boothook::OldDoc> old_docs(const BootPlan* plan) {
 // kiln.assets when_resources_ready: the game's resource service is up, nothing has read through it yet.
 void KILN_CALL apply(void*) {
     const auto* plan = static_cast<const BootPlan*>(kiln::boot::published(g_api, "patches"));
-    if (!plan && g_bound) g_ready_before_publication.store(true);  // no prepare after this one may write anything
+    if (!plan) g_ready_before_publication.store(true);  // no prepare after this one may write anything
     bootview::finished();  // the generation is published (or none comes) and the resources are up: no check reads the base view any more
     // the registry stage: the base as kiln.assets serves it now, before any patch of this start is written, composed over
     // the old documents (they lie below it); its boot fields are written below, after the old documents, in the same copy
