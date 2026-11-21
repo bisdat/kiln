@@ -60,6 +60,14 @@ public sealed class UiBlocksTestMod : Mod
             Check(false, $"defining the C# twin: {e.Message}");
         }
         if (!Client.IsDedicatedServer) return;
+        try
+        {
+            UiCommandLab.Start(async () => await Context.Scheduler.NextTick(), (ok, what) => Check(ok, what), Info);
+        }
+        catch (Exception e)
+        {
+            Check(false, $"ui-command: the lab part did not start: {e}");
+        }
         Events.On<ImpactNativeEvent>(e => { if (e is ImpactBuffEvent b) _buffs.Add(b); });
         _ = Run();
     }
