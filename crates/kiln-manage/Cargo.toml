@@ -20,6 +20,9 @@ server = ["dep:toml"]                   # server::instance: kilnctl instance fil
 gameart = ["dep:zstd", "dep:bcdec_rs", "dep:image-webp", "dep:png", "dep:flate2"]  # gameart: read the game's KFC4 data, decode BCn, write WebP, read PNG
 cooktools = []                          # cooktools: carries the cook tools (build.rs embeds tools/{animcook,impact,kfc,modelcook,soundcook})
 full = ["zip", "sevenz", "http", "admin", "jsonc", "saves", "server", "gameart", "cooktools"]
+# sfi_scan: the pre-select inventory of ShroudForge packages for Kiln's interpreter. Kept
+# out of `full`: sfi-package turns on serde_json's preserve_order for the whole graph.
+sfi-scan = ["dep:sfi-package", "dep:sfi-policy"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -45,6 +48,63 @@ image-webp = { version = "0.2", optional = true }
 # gameart: PNG icons of mods (MIT OR Apache-2.0), gzip of the admin map's base height (MIT OR Apache-2.0, zlib-rs backend)
 png = { version = "0.18", optional = true }
 flate2 = { version = "1", optional = true, default-features = false, features = ["zlib-rs"] }
+# sfi-scan: the pure ShroudForge package facade and interpreter policy (MIT, crates/sfi; no Lua VM, no loader)
+sfi-package = { path = "../sfi/sfi-package", optional = true }
+sfi-policy = { path = "../sfi/sfi-policy", optional = true }
+
+[[test]]
+name = "sfi_scan"
+required-features = ["sfi-scan"]
+
+[[test]]
+name = "sfi_scan_native"
+required-features = ["sfi-scan"]
+
+[[test]]
+name = "sfi_plan"
+required-features = ["sfi-scan"]
+
+[[test]]
+name = "sfi_placement"
+required-features = ["sfi-scan"]
+
+[[test]]
+name = "sfi_routing"
+required-features = ["sfi-scan"]
+
+[[test]]
+name = "sfi_activation"
+required-features = ["sfi-scan"]
+
+[[test]]
+name = "sfi_profile_activation"
+required-features = ["sfi-scan"]
+
+[[test]]
+name = "sfi_once"
+required-features = ["sfi-scan"]
+
+# the check before Play
+[[test]]
+name = "sfi_launch"
+required-features = ["sfi-scan"]
+
+# backend transitions and coexistence
+[[test]]
+name = "sfi_transition"
+required-features = ["sfi-scan"]
+
+[[test]]
+name = "sfi_coexistence"
+required-features = ["sfi-scan"]
+
+[[test]]
+name = "sfi_headless"
+required-features = ["sfi-scan", "server"]
+
+[[test]]
+name = "sfi_state"
+required-features = ["sfi-scan"]
 
 [dev-dependencies]
 # tests write a 7z fixture

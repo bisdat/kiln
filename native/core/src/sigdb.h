@@ -58,6 +58,16 @@ struct FragmentSummary {
 bool load_fragment(std::string_view id, const std::filesystem::path& file, const std::filesystem::path& report,
                    FragmentSummary* summary, std::string* error);
 bool unload_fragment(std::string_view id);
+// The features of fragment `id` as capability rows (kiln.caps, caps::fragment_rows): "sig/<symbol>" for every symbol
+// the fragment describes, then its own features. `ok` as feature() answers; when off, `problem` is the first piece that
+// failed as feature_problem() words it ("symbol <name>: <reason>", "constant <name>: <reason>"). Empty when no
+// fragment `id` is loaded.
+struct FeatureRow {
+    std::string name;
+    bool ok = false;
+    std::string problem;
+};
+std::vector<FeatureRow> fragment_features(std::string_view id);
 // Core first, then the fragment named by the part before the first '/'.
 bool any_symbol(std::string_view name, uintptr_t* out);
 bool any_constant(std::string_view name, int64_t* out);

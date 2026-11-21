@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "kind": "notice",
+  "key": "my.mod-a.b-c_d",
+  "keySha256": "6a369464043a2dc904e888d3ef5b640f37ee229fe078b1bff161798947315f47",
+  "launchId": "3f2b8c1e5a7d4e2f",
+  "ownerEpoch": 3,
+  "notice": {
+    "id": "my.mod.a.b-c_d",
+    "modId": "my.mod",
+    "title": "Saved",
+    "message": "Your layout was saved.",
+    "level": "error",
+    "actionUrl": null,
+    "updatedAt": 1763520011
+  }
+}

@@ -6,7 +6,8 @@ use std::path::Path;
 use crate::hash::fnv;
 use crate::reflection::{PrimitiveType, ReflectionParseError, TypeFlags, TypeMetadata};
 
-#[derive(Debug, Default)]
+// kiln-eml: Clone, so kiln.eml.values gives each arena its own Rc copy of an authorized generation's registry.
+#[derive(Debug, Default, Clone)]
 pub struct TypeRegistry {
     pub version: String,
     pub(super) types: Vec<TypeMetadata>,

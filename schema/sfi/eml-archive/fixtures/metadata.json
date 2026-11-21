@@ -1,0 +1,41 @@
+{
+  "registry_versions": [
+    { "game_version": "2.0.0-preview+archive", "registry_version": "registry/revision B" },
+    { "game_version": "26430625", "registry_version": "000026430625" },
+    { "game_version": "", "registry_version": "révision\u0000β" }
+  ],
+  "unresolved_attributes": [
+    {
+      "id": 17, "name": "Unresolved", "root_hash": 19, "index": 0,
+      "definition_guid": null, "scalar_type": null,
+      "descriptor": {
+        "tag": "map",
+        "entries": [
+          { "key": { "tag": "string", "value": "string:68617368" }, "value": { "tag": "u64", "value": "u64:0000000000000011" } },
+          { "key": { "tag": "string", "value": "string:7363616c61725f747970655f68617368" }, "value": { "tag": "u64", "value": "u64:0000000011223344" } },
+          { "key": { "tag": "string", "value": "string:7363616c61725f74797065" }, "value": { "tag": "nil" } },
+          { "key": { "tag": "string", "value": "string:73746f726167655f7772697461626c65" }, "value": { "tag": "bool", "value": false } },
+          { "key": { "tag": "string", "value": "string:63616c63756c6174696f6e5f7772697461626c65" }, "value": { "tag": "bool", "value": false } },
+          { "key": { "tag": "string", "value": "string:73746f726167655f726561736f6e" }, "value": { "tag": "string", "value": "string:756e7265736f6c766564" } },
+          { "key": { "tag": "string", "value": "string:63616c63756c6174696f6e5f726561736f6e" }, "value": { "tag": "string", "value": "string:756e7265736f6c766564" } }
+        ]
+      }
+    },
+    {
+      "id": 18, "name": "Ambiguous", "root_hash": 20, "index": 0,
+      "definition_guid": null, "scalar_type": null,
+      "descriptor": {
+        "tag": "map",
+        "entries": [
+          { "key": { "tag": "string", "value": "string:68617368" }, "value": { "tag": "u64", "value": "u64:0000000000000012" } },
+          { "key": { "tag": "string", "value": "string:7363616c61725f747970655f68617368" }, "value": { "tag": "u64", "value": "u64:0000000055667788" } },
+          { "key": { "tag": "string", "value": "string:7363616c61725f74797065" }, "value": { "tag": "nil" } },
+          { "key": { "tag": "string", "value": "string:73746f726167655f7772697461626c65" }, "value": { "tag": "bool", "value": false } },
+          { "key": { "tag": "string", "value": "string:63616c63756c6174696f6e5f7772697461626c65" }, "value": { "tag": "bool", "value": false } },
+          { "key": { "tag": "string", "value": "string:73746f726167655f726561736f6e" }, "value": { "tag": "string", "value": "string:616d626967756f7573" } },
+          { "key": { "tag": "string", "value": "string:63616c63756c6174696f6e5f726561736f6e" }, "value": { "tag": "string", "value": "string:616d626967756f7573" } }
+        ]
+      }
+    }
+  ]
+}

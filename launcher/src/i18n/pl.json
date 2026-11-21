@@ -2905,7 +2905,16 @@
       "noGpuEnv": "To uruchomienie rysuje bez GPU: ustawiono KILN_LAUNCHER_RENDER, co ma pierwszeństwo przed tym przełącznikiem.",
       "gpuEnv": "To uruchomienie rysuje z GPU: ustawiono KILN_LAUNCHER_RENDER, co ma pierwszeństwo przed tym przełącznikiem.",
       "noGpuArg": "To uruchomienie rysuje bez GPU: podano {flag}, co ma pierwszeństwo przed tym przełącznikiem.",
-      "gpuArg": "To uruchomienie rysuje z GPU: podano {flag}, co ma pierwszeństwo przed tym przełącznikiem."
+      "gpuArg": "To uruchomienie rysuje z GPU: podano {flag}, co ma pierwszeństwo przed tym przełącznikiem.",
+      "x11": "Przełącz na X11, gdy rysowanie w Wayland jest wolne",
+      "x11Intro": "Na ekranie HiDPI w Wayland, gdy WebKit nie może użyć GPU, launcher uruchamia się jeszcze raz przez X11 (XWayland): rysuje w niższej rozdzielczości, więc działa dużo szybciej, ale mniej ostro. Działa od następnego uruchomienia.",
+      "x11Wayland": "To uruchomienie rysuje w Wayland.",
+      "x11On": "To uruchomienie rysuje przez X11.",
+      "x11Tried": "X11 został wypróbowany i nie pomógł, więc launcher zostaje przy Wayland. Wyłącz i włącz tę opcję, aby spróbować ponownie.",
+      "x11Software": "Nieużywane, gdy launcher rysuje bez GPU.",
+      "x11Yours": "Decyduje twoja zmienna GDK_BACKEND={value}.",
+      "x11NextOn": "Launcher może sam przełączyć się na X11",
+      "x11NextOff": "Następne uruchomienie zostaje przy Wayland"
     },
     "dev": {
       "mock": "Deweloper: zastępcze dane testowe",
@@ -4057,7 +4066,29 @@
       "countWontMany": "{names} nie zadziałają w tej grze.",
       "bulkNoSwitch": "jest w folderze gry, nie ma przełącznika",
       "bulkOnlyKept": "w bibliotece są tylko zachowane wersje; wybierz wersję jawnie",
-      "bulkNoVersion": "żadnej jego wersji nie ma w bibliotece"
+      "bulkNoVersion": "żadnej jego wersji nie ma w bibliotece",
+      "emfMissing": "Wymaga {dep}, którego nie zainstalowano.",
+      "emfOff": "Wymaga {dep}, który jest wyłączony.",
+      "emfNotLoading": "Wymaga {dep}, który się nie wczyta.",
+      "emfTooOld": "Wymaga {dep}; masz {found}, za stary.",
+      "emfTooNew": "Wymaga {dep}; masz {found}, za nowy.",
+      "emfWithEmf": "Jest w wydaniu EMF: dodaj zip EMF przez Dodaj mody.",
+      "emfUpdateWithEmf": "Nowsza wersja jest w wydaniu EMF: dodaj zip EMF przez Dodaj mody.",
+      "emfSwitchOn": "Włącz go na tej liście.",
+      "emfNotLoadingTip": "Jego własny wiersz mówi dlaczego.",
+      "emfTooNewTip": "Poszukaj aktualizacji tego moda.",
+      "emfSays": "EMF mówi: {reason}.",
+      "emfWhyMissing": "wymaga {dep}, którego nie zainstalowano",
+      "emfWhyOff": "wymaga {dep}, który jest wyłączony",
+      "emfWhyNotLoading": "wymaga {dep}, który się nie wczyta",
+      "emfWhyVersion": "wymaga {dep}, a masz {found}",
+      "emfWhyWithEmf": "{why} (jest w wydaniu EMF: dodaj zip EMF przez Dodaj mody)",
+      "emfLua": "mod lua z EMF",
+      "emfGet": "Pobierz EMF",
+      "emfGetTip": "Otwiera stronę EMF, gdzie jest jego zip",
+      "emfModPage": "Strona moda",
+      "emfModPageTip": "Otwiera stronę, którą mod podaje dla {dep}",
+      "emfRejectedLast": "Nie wczytał się przy ostatnim uruchomieniu"
     },
     "modUpdates": {
       "found.one": "{count} mod ma aktualizację",
@@ -4148,7 +4179,12 @@
       "leavesListed.other": "Jego pliki znikną z biblioteki. {others} też go wymieniają i pokażą go jako brakujący.",
       "leaves": "Jego pliki znikną z biblioteki.",
       "notSaved": "Nie udało się zapisać twojej listy modów; nic nie usunięto.",
-      "notRemovable": "jest w folderze gry, nie umieścił go tam Kiln: usuń go stamtąd"
+      "notRemovable": "jest w folderze gry, nie umieścił go tam Kiln: usuń go stamtąd",
+      "settingsToo": "Usuń też jego ustawienia",
+      "settingsTooHint": "Jego ustawienia w tej grze i w twoich profilach też znikną. Kiln zachowa kopię w kopiach zapasowych.",
+      "settingsTooMany": "Usuń też ich ustawienia",
+      "settingsTooManyHint": "Ich ustawienia w tej grze i w twoich profilach też znikną. Kiln zachowa kopię w kopiach zapasowych.",
+      "settingsLeft": "Część ustawień została"
     },
     "rollback": {
       "settingsBack.one": "Jego ustawienia sprzed aktualizacji wracają razem z nim ({count} plik).",
@@ -5120,6 +5156,30 @@
     }
   },
   "crucible": {
+    "checks": {
+      "running": "Sprawdzanie paczki…",
+      "couldNot": "Nie udało się sprawdzić paczki",
+      "passed": "Sprawdzenia: zaliczone",
+      "failed.one": "{count} problem blokuje instalację",
+      "failed.few": "Problemy blokujące instalację: {count}",
+      "failed.many": "Problemy blokujące instalację: {count}",
+      "failed.other": "Problemy blokujące instalację: {count}",
+      "warnings.one": "Do obejrzenia: {count}",
+      "warnings.few": "Do obejrzenia: {count}",
+      "warnings.many": "Do obejrzenia: {count}",
+      "warnings.other": "Do obejrzenia: {count}",
+      "failedBlock": "Paczka nie przeszła sprawdzeń: nie można jej zainstalować.",
+      "pending": "Sprawdzenia: wciąż trwają w Crucible",
+      "lineWarnings.one": "Sprawdzenia: {count} do obejrzenia",
+      "lineWarnings.few": "Sprawdzenia: {count} do obejrzenia",
+      "lineWarnings.many": "Sprawdzenia: {count} do obejrzenia",
+      "lineWarnings.other": "Sprawdzenia: {count} do obejrzenia",
+      "lineProblems.one": "Sprawdzenia: znaleziono {count} problem",
+      "lineProblems.few": "Sprawdzenia: znaleziono {count} problemy",
+      "lineProblems.many": "Sprawdzenia: znaleziono {count} problemów",
+      "lineProblems.other": "Sprawdzenia: znaleziono {count} problemu",
+      "lineFailed": "Sprawdzenia: nie udało się ich uruchomić w Crucible"
+    },
     "banner": {
       "title": "Aktualizacja paczki",
       "head": "{name} {change}",
@@ -5129,10 +5189,10 @@
       "seeChanges": "Zobacz zmiany"
     },
     "change": {
-      "added.one": "+{count} dodany",
-      "added.few": "+{count} dodane",
-      "added.many": "+{count} dodanych",
-      "added.other": "+{count} dodanych",
+      "added.one": "{count} dodany",
+      "added.few": "{count} dodane",
+      "added.many": "{count} dodanych",
+      "added.other": "{count} dodanych",
       "updated.one": "{count} zaktualizowany",
       "updated.few": "{count} zaktualizowane",
       "updated.many": "{count} zaktualizowanych",
@@ -5157,14 +5217,17 @@
     "code": {
       "link": "Masz kod?",
       "title": "Otwórz paczkę po kodzie",
-      "hint": "Wklej kod lub link od znajomego."
+      "hint": "Wklej kod lub link od znajomego.",
+      "paste": "Wklej",
+      "pasteNone": "W schowku nie ma kodu paczki."
     },
     "err": {
       "notFound": "Nie znaleźliśmy takiego kodu. Kody wyglądają tak: H7QK-3MZP.",
       "offline": "Kiln nie może połączyć się z Crucible. Poproś znajomego o plik paczki (Udostępnij w Crucible > Zapisz jako plik).",
       "gone": "Tej paczki nie ma już w Crucible.",
       "badDownload": "Paczka nie pobrała się poprawnie. Nic nie zostało zainstalowane. Spróbuj jeszcze raz.",
-      "gameRunning": "Najpierw zamknij Enshrouded."
+      "gameRunning": "Najpierw zamknij Enshrouded.",
+      "offlineShare": "Kiln nie może połączyć się z Crucible. Sprawdź połączenie z internetem i spróbuj ponownie albo użyj Zapisz jako plik i wyślij plik znajomym."
     },
     "install": {
       "done": "{name} jest zainstalowana",
@@ -5173,7 +5236,9 @@
       "backTo": "Wróć do {name}",
       "backToNone": "Wróć do braku profilu",
       "backDetail": "{name} zostaje w Ustawienia > Profile.",
-      "undoFailed": "Nie udało się wrócić"
+      "undoFailed": "Nie udało się wrócić",
+      "profileName": "{pack} (paczka od {creator})",
+      "doneOnly": "Jest w Twoich profilach. Wczytaj ją, gdy zechcesz zagrać."
     },
     "preview": {
       "title": "Paczka",
@@ -5198,7 +5263,8 @@
       "kilnOld": "Wymaga Kiln {version} lub nowszego.",
       "updateKiln": "Zaktualizuj Kiln",
       "uploadingTitle": "Wciąż się wysyła",
-      "stillUploading": "Paczka od {name} wciąż się wysyła ({pct}%). Kiln zainstaluje ją, gdy będzie gotowa.",
+      "stillUploading": "Paczka od {name} wciąż się wysyła ({pct}%). Poczekaj tutaj: instalacja będzie możliwa, gdy będzie gotowa.",
+      "resumed": "Kiln jest gotowy. Oto {name}, paczka, po którą przyszedłeś.",
       "wait": "Poczekaj",
       "waiting": "Czekamy na przesyłanie od {name} ({pct}%)…",
       "ownProfile": "Instaluje się jako osobny profil. Twoje obecne mody zostają bez zmian.",
@@ -5227,7 +5293,12 @@
       "installPlay": "Zainstaluj i graj",
       "cantOpen": "Nie można otworzyć tej paczki",
       "noGame": "Kiln jeszcze nie znalazł Enshrouded.",
-      "installKiln": "Najpierw zainstaluj Kiln w grze."
+      "installKiln": "Najpierw zainstaluj Kiln w grze.",
+      "nameLabel": "Nazwa profilu",
+      "nameTaken": "Masz już profil o tej nazwie. Ten będzie się nazywał {name}.",
+      "runningHint": "Enshrouded jest uruchomiony. „Zainstaluj” doda paczkę teraz; wczytaj ją po zamknięciu gry.",
+      "installOnlyTip": "Dodaje paczkę jako osobny profil. Nie wczytuje jej i nie uruchamia gry.",
+      "warningFile": "Ten plik paczki zawiera mody innych osób, także z kodem. Kiln sprawdził plik, ale nikt go nie recenzował."
     },
     "profiles": {
       "tag": "Paczka z Crucible",
@@ -5288,7 +5359,28 @@
       "copyLink": "Kopiuj link",
       "noClipboard": "Kopiowanie tu nie działa. Zaznacz tekst ręcznie.",
       "failed": "Udostępnianie się nie udało",
-      "versionLine": "Wersja {number}"
+      "versionLine": "Wersja {number}",
+      "what": "Czym jest Crucible?",
+      "confirmTitle": "Udostępnić {name} w Crucible?",
+      "confirmWhat": "Crucible zamienia ten profil w link. Znajomi otwierają go w Kiln i dostają te same mody.",
+      "confirmGoesSize.one": "Wysyłane: lista modów i pliki {count} moda, których Crucible jeszcze nie ma (do {size}).",
+      "confirmGoesSize.few": "Wysyłane: lista modów i pliki {count} modów, których Crucible jeszcze nie ma (do {size}).",
+      "confirmGoesSize.many": "Wysyłane: lista modów i pliki {count} modów, których Crucible jeszcze nie ma (do {size}).",
+      "confirmGoesSize.other": "Wysyłane: lista modów i pliki {count} modów, których Crucible jeszcze nie ma (do {size}).",
+      "confirmGoes.one": "Wysyłane: lista modów i pliki {count} moda, których Crucible jeszcze nie ma.",
+      "confirmGoes.few": "Wysyłane: lista modów i pliki {count} modów, których Crucible jeszcze nie ma.",
+      "confirmGoes.many": "Wysyłane: lista modów i pliki {count} modów, których Crucible jeszcze nie ma.",
+      "confirmGoes.other": "Wysyłane: lista modów i pliki {count} modów, których Crucible jeszcze nie ma.",
+      "confirmGoesAny": "Wysyłane: lista modów i pliki modów, których Crucible jeszcze nie ma.",
+      "confirmStays": "Zostaje na tym PC: ustawienia Twoich modów i Twoje własne zmiany danych.",
+      "confirmNever": "Nigdy nie wysyłamy: Twoich zapisów, światów, postaci ani innych prywatnych plików.",
+      "visibility": "Kto może otworzyć",
+      "linkOnly": "Tylko przez link:",
+      "linkOnlyText": "tylko osoby, którym dasz link lub kod.",
+      "public": "Publiczna:",
+      "publicText": "widoczna w Crucible dla wszystkich. Publiczne paczki tworzy się w Pack Studio (potrzebują autorów i opisu).",
+      "confirmShare": "Udostępnij",
+      "confirmSignIn": "Zaloguj się i udostępnij"
     },
     "update": {
       "title": "{name}: {from} → {to}",
@@ -5297,7 +5389,15 @@
       "cantRead": "Nie można odczytać aktualizacji",
       "removedKept": "{name} (zostaje w Twojej Bibliotece)",
       "packData": "Zmieniły się własne dane paczki",
-      "kept": "Twoje zmiany zostają: ustawienia: {settings}, mody: {mods}.",
+      "renamed": "{from} to teraz {to}: Twoje ustawienia przechodzą razem z nim.",
+      "stillWins.one": "Twoja zmiana nadal wygrywa ({count})",
+      "stillWins.few": "Twoje zmiany nadal wygrywają ({count})",
+      "stillWins.many": "Twoje zmiany nadal wygrywają ({count})",
+      "stillWins.other": "Twoje zmiany nadal wygrywają ({count})",
+      "dataChanged": "Paczka ustawia teraz {pack}. Twoje {mine} nadal się liczy.",
+      "dataSame": "Paczka ustawia {pack}. Twoje {mine} nadal się liczy.",
+      "dropMine": "Porzuć moją zmianę (użyj {value})",
+      "savesFirst": "Najpierw zapisy gry trafiają do kopii.",
       "download": "Pobierz {size}",
       "needsYou.one": "Wymaga Ciebie ({count})",
       "needsYou.few": "Wymaga Ciebie ({count})",
@@ -5315,7 +5415,26 @@
       "doneDetail": "Twoje zmiany zostały.",
       "failed": "Nie zaktualizowano {name}",
       "undone": "{name} wróciła do {version}",
-      "undoFailed": "Nie udało się cofnąć aktualizacji"
+      "undoFailed": "Nie udało się cofnąć aktualizacji",
+      "keptLine": "Twoje zmiany zostają: {list}.",
+      "keptSettings": {
+        "one": "{count} ustawienie",
+        "few": "{count} ustawienia",
+        "many": "{count} ustawień",
+        "other": "{count} ustawienia"
+      },
+      "keptData": {
+        "one": "{count} zmiana danych",
+        "few": "{count} zmiany danych",
+        "many": "{count} zmian danych",
+        "other": "{count} zmiany danych"
+      },
+      "keptMods": {
+        "one": "{count} mod",
+        "few": "{count} mody",
+        "many": "{count} modów",
+        "other": "{count} modu"
+      }
     },
     "deck": {
       "shareTitle": "Udostępnij {name}",
@@ -5328,6 +5447,1004 @@
       "untick": "Odznacz",
       "turnOn": "Włącz",
       "turnOff": "Wyłącz"
+    }
+  },
+  "studio": {
+    "nav": "Studio",
+    "title": "Pack Studio",
+    "sub": "Twórz paczki Crucible ze swoich profili: mody, ustawienia, własne dane, autorzy, a potem publikacja.",
+    "new": "Nowa paczka",
+    "newFrom": "Na podstawie",
+    "newEmpty": "Pusta (nowy profil)",
+    "newProfile": "{name} (modów: {count})",
+    "newName": "Nazwa",
+    "newNamePh": "Moja paczka",
+    "create": "Utwórz",
+    "newFailed": "Paczka nie powstała",
+    "empty": {
+      "title": "Nie ma jeszcze paczek",
+      "hint": "Zacznij od profilu, w który grasz: jego mody i ustawienia przejdą razem z nim."
+    },
+    "packLine": {
+      "one": "v{version} · {count} mod · zmieniono {ago}",
+      "few": "v{version} · {count} mody · zmieniono {ago}",
+      "many": "v{version} · {count} modów · zmieniono {ago}",
+      "other": "v{version} · {count} modów · zmieniono {ago}"
+    },
+    "packSub": {
+      "one": "Wersja {version} z profilu {profile} ({count} mod).",
+      "few": "Wersja {version} z profilu {profile} ({count} mody).",
+      "many": "Wersja {version} z profilu {profile} ({count} modów).",
+      "other": "Wersja {version} z profilu {profile} ({count} modów)."
+    },
+    "profileGone": "Profilu, z którego powstała ta paczka, już nie ma.",
+    "missing": "Tej paczki tu nie ma",
+    "back": "Wszystkie paczki",
+    "allPacks": "Wszystkie paczki",
+    "tabsAria": "Pack Studio",
+    "deleteTitle": "Usunąć {name}?",
+    "deleteText": "Szkic paczki trafi do kopii zapasowych Kilna. Jej profil zostaje, a to, co opublikowano, zostaje na Crucible.",
+    "recheck": "Sprawdź ponownie",
+    "state": {
+      "draft": "Szkic",
+      "link": "Tylko przez link",
+      "public": "Publiczna"
+    },
+    "tab": {
+      "mods": "Mody",
+      "settings": "Ustawienia",
+      "data": "Dane",
+      "order": "Kolejność ładowania",
+      "test": "Test",
+      "credits": "Autorzy",
+      "publish": "Publikacja"
+    },
+    "mods": {
+      "lead": "Mody profilu {profile}, każdy w wersji z twojej Biblioteki. Gracze włączają lub wyłączają mody opcjonalne przed instalacją.",
+      "addLibrary": "Dodaj z mojej Biblioteki",
+      "addFile": "Dodaj plik",
+      "pickFile": "Dodaj plik moda do paczki",
+      "addFailed": "Mod nie został dodany",
+      "removeFailed": "Nie usunięto {name}",
+      "empty": "Nie ma jeszcze modów. Dodaj je z Biblioteki.",
+      "mod": "Mod",
+      "version": "Wersja",
+      "need": "W paczce",
+      "sides": "Działa u",
+      "source": "Źródło",
+      "needAria": "Jak {name} jest w paczce",
+      "sidesAria": "Gdzie działa {name}",
+      "required": "Wymagany",
+      "optionalOn": "Opcjonalny, włączony",
+      "optionalOff": "Opcjonalny, wyłączony",
+      "both": "Gracze i serwery",
+      "client": "Tylko gracze",
+      "server": "Tylko serwery",
+      "checking": "Sprawdzanie…",
+      "unknown": "Nierozpoznany",
+      "filter": "Filtr",
+      "libraryEmpty": "Wszystkie mody z twojej Biblioteki są już w paczce.",
+      "addN": {
+        "one": "Dodaj {count} mod",
+        "few": "Dodaj {count} mody",
+        "many": "Dodaj {count} modów",
+        "other": "Dodaj {count} modów"
+      }
+    },
+    "settings": {
+      "lead": "Ustawienia przechodzą jako wybrane klucze, wzięte z profilu, w który grasz. Klucze równe domyślnym modu zostają pominięte, podobnie skróty klawiszowe, chyba że je zaznaczysz. Nic, co wygląda na prywatne, nie przechodzi.",
+      "capture": "Weź z moich obecnych ustawień",
+      "captureFailed": "Kiln nie mógł odczytać ustawień profilu",
+      "save": {
+        "one": "Użyj {count} klucza",
+        "few": "Użyj {count} kluczy",
+        "many": "Użyj {count} kluczy",
+        "other": "Użyj {count} kluczy"
+      },
+      "saved": {
+        "one": "{count} plik ustawień jest w paczce",
+        "few": "{count} pliki ustawień są w paczce",
+        "many": "{count} plików ustawień jest w paczce",
+        "other": "{count} plików ustawień jest w paczce"
+      },
+      "saveFailed": "Ustawienia nie zostały wzięte",
+      "none": "Ten profil nie ma jeszcze plików ustawień. Zagraj raz, zmień, co chcesz, potem je weź.",
+      "refused": "nie może przejść: {why}",
+      "wholeOnly": "przechodzi jako cały plik",
+      "differs": {
+        "one": "różni się od domyślnych modu w {count} kluczu",
+        "few": "różni się od domyślnych modu w {count} kluczach",
+        "many": "różni się od domyślnych modu w {count} kluczach",
+        "other": "różni się od domyślnych modu w {count} kluczach"
+      },
+      "noDefaults": {
+        "one": "{count} klucz (nieznane wartości domyślne)",
+        "few": "{count} klucze (nieznane wartości domyślne)",
+        "many": "{count} kluczy (nieznane wartości domyślne)",
+        "other": "{count} kluczy (nieznane wartości domyślne)"
+      },
+      "sideAria": "Kto dostaje {file}",
+      "whole": "Cały plik",
+      "default": "(domyślnie {value})",
+      "personal": "osobiste",
+      "secret": "prywatne"
+    },
+    "server": {
+      "title": "Ustawienia gry serwera",
+      "lead": "Ustawienia gry, których używa serwer tej paczki (zdrowie, wrogowie, budowanie). Wzięte z jednego z twoich serwerów; jego nazwa, hasło i porty nigdy nie przechodzą.",
+      "none": "Dodaj serwer w zakładce Serwery, aby wziąć jego ustawienia gry.",
+      "pick": "Serwer",
+      "take": "Weź z tego serwera",
+      "takeFailed": "Kiln nie mógł odczytać ustawień serwera",
+      "use": "Użyj zaznaczonych ustawień",
+      "saved": "Ustawienia gry serwera są w paczce",
+      "clear": "Usuń je"
+    },
+    "data": {
+      "tabsAria": "Edytory danych",
+      "tab": {
+        "items": "Przedmioty",
+        "recipes": "Receptury",
+        "loot": "Łup",
+        "drops": "Dropy",
+        "added": "Nowe przedmioty",
+        "raw": "Raw JSON"
+      },
+      "lint": {
+        "line": "Sprawdzanie danych: {errors}, {warnings}",
+        "errors": {
+          "one": "{count} błąd",
+          "few": "{count} błędy",
+          "many": "{count} błędów",
+          "other": "{count} błędu"
+        },
+        "warnings": {
+          "one": "{count} ostrzeżenie",
+          "few": "{count} ostrzeżenia",
+          "many": "{count} ostrzeżeń",
+          "other": "{count} ostrzeżenia"
+        },
+        "checking": "Sprawdzanie danych: trwa…",
+        "show": "Pokaż problemy",
+        "hide": "Ukryj problemy",
+        "error": "Błąd",
+        "warning": "Ostrzeżenie",
+        "info": "Uwaga",
+        "lineNotes": "Sprawdzanie danych: {errors}, {warnings}, {notes}",
+        "notes": {
+          "one": "{count} uwaga",
+          "few": "{count} uwagi",
+          "many": "{count} uwag",
+          "other": "{count} uwagi"
+        }
+      },
+      "noCatalog": "Kiln nie odczytał jeszcze przedmiotów gry: listy wyboru pokazują tylko to, co dodają mody paczki, a nazwy pól wpisuje się ręcznie.",
+      "catalog": {
+        "reading": "Odczytywanie przedmiotów gry…",
+        "build": "Utwórz katalog gry",
+        "why": {
+          "noGame": "Nie znaleziono klienta Enshrouded. Dodaj go w Ustawienia → Gry.",
+          "steamUpdating": "Steam aktualizuje grę. Spróbuj ponownie, gdy skończy.",
+          "conflict": "Pliki gry pochodzą z dwóch różnych wersji (Steam może być w trakcie aktualizacji). Spróbuj ponownie, gdy Steam skończy.",
+          "failed": "Kiln nie mógł odczytać przedmiotów gry: {message}"
+        }
+      },
+      "thisPack": "ta paczka",
+      "save": "Zapisz",
+      "saved": "Zapisano",
+      "unsaved": "Niezapisane zmiany",
+      "discard": "Odrzuć",
+      "remove": "Usuń",
+      "saveFailed": "Nie zapisano {file}",
+      "broken": "Ten plik nie jest poprawnym JSON-em. Najpierw popraw go w Raw JSON.",
+      "alsoIn": "Ustawione także w {files} (Raw JSON).",
+      "name": "Nazwa",
+      "guid": "Stały GUID (tworzony raz, nigdy go nie zmieniaj)",
+      "badName": "Nazwa ma od 1 do 200 liter, cyfr, _ - lub .",
+      "dupName": "{name} występuje dwa razy",
+      "pick": {
+        "ph": "Szukaj przedmiotów",
+        "selectorPh": "Nazwa lub wzorzec, np. Material_T1_*",
+        "glob": "każde dopasowanie",
+        "unknown": "nie znaleziono w grze ani w modach paczki",
+        "none": "Nic nie znaleziono",
+        "searching": "Szukanie…"
+      },
+      "value": {
+        "set": "ustaw na",
+        "mul": "razy",
+        "add": "plus",
+        "min": "min.",
+        "max": "maks.",
+        "modeAria": "Jak zmienia się {field}",
+        "minAria": "Najniższa wartość: {field}",
+        "maxAria": "Najwyższa wartość: {field}",
+        "raiseOnly": "tylko zwiększ",
+        "lowerOnly": "tylko zmniejsz",
+        "on": "wł.",
+        "off": "wył."
+      },
+      "field": {
+        "add": "+ Pole",
+        "remove": "Usuń {field}",
+        "nameAria": "Pole"
+      },
+      "where": {
+        "add": "+ Warunek",
+        "where": "gdzie",
+        "and": "i",
+        "fieldAria": "Pole warunku",
+        "fieldPh": "pole",
+        "valueAria": "Warunek dla {field}",
+        "remove": "Usuń warunek"
+      },
+      "rules": {
+        "add": "+ Reguła",
+        "addAll": "+ Reguła dla każdego przedmiotu",
+        "remove": "Usuń regułę",
+        "selectorAria": "Które wpisy",
+        "noSelector": "Każda reguła potrzebuje nazwy lub wzorca",
+        "duplicate": "{selector} ma dwie reguły: połącz je w jedną"
+      },
+      "items": {
+        "lead": "Zmieniaj przedmioty gry i przedmioty modów paczki: jedna reguła na przedmiot lub wzorzec, z warunkami na wartości gry. Warstwa paczki ładuje się po wszystkich modach, więc jej wartości wygrywają.",
+        "empty": "Brak reguł przedmiotów.",
+        "selector": "Przedmioty"
+      },
+      "loot": {
+        "lead": "Losowy łup ze skrzyń i przedmiotów w świecie, według przedmiotu: ile trafia do jednego stosu.",
+        "empty": "Brak reguł łupu.",
+        "selector": "Przedmiot"
+      },
+      "recipes": {
+        "lead": "Zmieniaj, co receptury zużywają i wytwarzają oraz ile trwają, albo dodaj własne receptury.",
+        "changes": "Zmienione receptury",
+        "noChanges": "Brak zmian receptur.",
+        "add": "+ Zmień recepturę",
+        "recipe": "Receptura",
+        "noRecipe": "Każda zmiana potrzebuje receptury",
+        "changeInputs": "Zmień składniki",
+        "changeOutputs": "Zmień wyniki",
+        "inputs": "Składniki",
+        "outputs": "Wyniki",
+        "addInput": "+ Składnik",
+        "addOutput": "+ Wynik",
+        "duration": "Czas trwania",
+        "durationPh": "jak w grze",
+        "seconds": "sekund",
+        "itemAria": "Przedmiot",
+        "countAria": "Liczba",
+        "category": "dowolny przedmiot z kategorii {id}",
+        "addCategory": "+ Dowolny z grupy",
+        "addCategoryTip": "Składnik, który można opłacić dowolnym przedmiotem z grupy, np. dowolnym drewnem",
+        "anyOf": "Dowolny z: {names}",
+        "anyOfMore": "Dowolny z: {names}, +{count} więcej",
+        "categoryAria": "Grupa przedmiotów",
+        "categoryPh": "Szukaj po dowolnym przedmiocie z grupy",
+        "categoryNone": "Żadna grupa nie zawiera tego przedmiotu",
+        "categoryItems": {
+          "one": "{count} przedmiot",
+          "few": "{count} przedmioty",
+          "many": "{count} przedmiotów",
+          "other": "{count} przedmiotu"
+        },
+        "categoryUsed": {
+          "one": "używa jej {count} receptura gry",
+          "few": "używają jej {count} receptury gry",
+          "many": "używa jej {count} receptur gry",
+          "other": "używa jej {count} receptury gry"
+        },
+        "categoryUnused": "Żadna receptura gry jej nie używa",
+        "categoryUsedBy": "Receptury gry, które jej używają: {names}",
+        "categoryUsedByMore": "Receptury gry, które jej używają: {names}, +{count} więcej",
+        "categoryShow": "Pokaż przedmioty",
+        "categoryHide": "Ukryj przedmioty",
+        "categoryNoCatalog": "Potrzebne są przedmioty gry: Kiln najpierw je odczyta",
+        "removeCategory": "Usuń tę grupę",
+        "offer": "Przyjąć dowolny z jego grupy?",
+        "offerAria": "Przyjmij zamiast tego dowolny z jego grupy ({anyOf})",
+        "modNote": "Zmienia recepturę moda; warstwa paczki wygrywa (ładuje się po {mod}).",
+        "stationNote": "Receptura z gry zachowuje swoją stację; nowe receptury wybierają własną.",
+        "new": "Nowe receptury",
+        "noNew": "Brak nowych receptur.",
+        "addNew": "+ Nowa receptura",
+        "removeNew": "Usuń nową recepturę",
+        "station": "Stacja",
+        "stationPh": "Szukaj stacji",
+        "hand": "Wytwarzane ręcznie",
+        "noStation": "Każda nowa receptura potrzebuje stacji",
+        "needStacks": "Każda nowa receptura potrzebuje składnika i wyniku",
+        "noCategory": "Wybierz grupę dla każdego składnika „Dowolny z”"
+      },
+      "drops": {
+        "lead": "Domyślne ekwipunki: łup z wrogów i stałe skrzynie, według tabeli lub dla każdej tabeli (*).",
+        "empty": "Brak reguł dropu.",
+        "table": "Tabela",
+        "add": "+ Tabela",
+        "addAll": "+ Reguła dla każdej tabeli",
+        "count": "Ilości",
+        "chance": "Szansa",
+        "items": "Pojedyncze przedmioty",
+        "addItem": "+ Przedmiot",
+        "noTable": "Każda reguła dropu potrzebuje tabeli"
+      },
+      "added": {
+        "lead": "Własne przedmioty: każdy jest kopią przedmiotu bazowego (jego modelu, ikony i zachowania) z własną nazwą i wartościami.",
+        "empty": "Brak nowych przedmiotów.",
+        "add": "+ Nowy przedmiot",
+        "remove": "Usuń nowy przedmiot",
+        "displayName": "Wyświetlany jako",
+        "base": "Przedmiot bazowy",
+        "description": "Opis",
+        "rolledLoot": "Losowany jak łup (rzadkość i poziom się różnią)",
+        "fields": "Wartości",
+        "noBase": "Każdy nowy przedmiot potrzebuje przedmiotu bazowego"
+      },
+      "raw": {
+        "none": "Brak plików.",
+        "newPh": "name.json",
+        "newAria": "Nazwa nowego pliku",
+        "new": "Nowy plik",
+        "rename": "Zmień nazwę",
+        "renameAria": "Nowa nazwa",
+        "renameOk": "Zmień nazwę",
+        "exists": "{file} już istnieje",
+        "delete": "Usuń",
+        "deleteTitle": "Usunąć {file}?",
+        "deleteText": "Plik opuszcza warstwę paczki.",
+        "textAria": "Tekst pliku {file}",
+        "clean": "Brak problemów w tym pliku.",
+        "pick": "Wybierz plik albo utwórz nowy."
+      },
+      "hidden": {
+        "toggle": "Pokaż ukryte wpisy gry",
+        "tag": "ukryty",
+        "tip": "Stare, testowe lub nieużywane wpisy gry: w grze mogą nic nie robić.",
+        "tankWater": "woda ze zbiornika stanowiska"
+      }
+    },
+    "order": {
+      "title": "Kolejność ładowania",
+      "always": "(warstwa paczki, zawsze ostatnia)",
+      "late": "Późne natywne DLL: {list}",
+      "conflicts": "Konflikty",
+      "none": "Żadne dwa mody nie ustawiają tego samego pola inaczej.",
+      "noCatalog": "Bez katalogu danych gry konflikty z symbolami wieloznacznymi to tylko przypuszczenia.",
+      "maybe": "może",
+      "wins": "teraz wygrywa",
+      "setIn": "Ustaw w paczce:",
+      "set": "Ustaw",
+      "setAria": "Wartość {field} w paczce",
+      "setDone": "{field} jest ustawione w warstwie paczki"
+    },
+    "test": {
+      "lead": "Wypróbuj paczkę dokładnie tak, jak dostaną ją gracze: Kiln buduje ją i instaluje jako osobny profil.",
+      "backup": "Twoje zapisy są najpierw kopiowane.",
+      "world": "Do testu zacznij nowy świat, aby twoje światy zostały bez zmian.",
+      "server": "Dla paczki serwerowej umieść opublikowaną wersję na jednym ze swoich serwerów (Publikacja).",
+      "make": "Testuj tę paczkę",
+      "again": "Testuj ponownie",
+      "play": "Graj w test",
+      "end": "Zakończ test",
+      "failed": "Instancja testowa nie powstała",
+      "ready": "{name} jest gotowa",
+      "readyDetail": "Naciśnij Graj, aby ją uruchomić.",
+      "noGame": "Najpierw dodaj grę.",
+      "reported": "Co zgłosiła gra",
+      "notYet": "Zagraj w test i wróć tutaj.",
+      "clean": "Brak konfliktów i błędów w ostatniej rozgrywce.",
+      "conflicts": {
+        "one": "{count} konflikt danych",
+        "few": "{count} konflikty danych",
+        "many": "{count} konfliktów danych",
+        "other": "{count} konfliktów danych"
+      },
+      "problems": {
+        "one": "{count} błąd lub ostrzeżenie",
+        "few": "{count} błędy lub ostrzeżenia",
+        "many": "{count} błędów lub ostrzeżeń",
+        "other": "{count} błędów lub ostrzeżeń"
+      }
+    },
+    "credits": {
+      "lead": "Paczki publiczne podają każdy mod: autora i link https do źródła. Kiln wypełnia to, co rozpoznaje; sprawdź każdy wiersz.",
+      "author": "Autor",
+      "source": "Źródło",
+      "matched": "Znaleziono przez",
+      "authorAria": "Autor {name}",
+      "sourceAria": "Skąd pochodzi {name}",
+      "notIdentified": "Nierozpoznany: uzupełnij lub usuń moda",
+      "missing": {
+        "one": "{count} mod wciąż potrzebuje autora dla paczki publicznej",
+        "few": "{count} mody wciąż potrzebują autora dla paczki publicznej",
+        "many": "{count} modów wciąż potrzebuje autora dla paczki publicznej",
+        "other": "{count} modów wciąż potrzebuje autora dla paczki publicznej"
+      },
+      "complete": "Każdy mod ma autora",
+      "save": "Zapisz autorów",
+      "saved": "Autorzy zapisani",
+      "saveFailed": "Autorzy nie zostali zapisani"
+    },
+    "match": {
+      "kiln": "własne Kilna",
+      "crucible": "Crucible",
+      "github": "wydanie GitHub",
+      "nexus": "Nexus",
+      "manifest": "informacje z moda",
+      "manual": "ty"
+    },
+    "confidence": {
+      "certain": "pewne",
+      "likely": "prawdopodobne",
+      "conflict": "różni się od wcześniejszego wpisu",
+      "unverified": "niezweryfikowane",
+      "creator": "twoje",
+      "unconfirmed": "niepotwierdzone",
+      "none": "brak"
+    },
+    "publish": {
+      "signInTitle": "Zaloguj się, aby publikować",
+      "signIn": "Publikacja używa logowania przez Discord. Gracze nie potrzebują go do instalacji.",
+      "version": "Wersja",
+      "changes": "Co się zmieniło",
+      "changesPh": "Zbalansowane łupy; dodano Busy Hands",
+      "tested": "Przetestowano na buildzie gry {build}",
+      "visibility": "Widoczność",
+      "public": "Publiczna",
+      "link": "Tylko przez link",
+      "summary": "Podsumowanie",
+      "summaryHint": "Jedna linia do list Crucible (co najmniej 10 znaków).",
+      "attest": "Podałem każdy mod i jego autora i mogę udostępniać te pliki.",
+      "checks": "Sprawdzenia",
+      "check": {
+        "format": "format",
+        "sizes": "rozmiary",
+        "blocked": "znane szkodliwe pliki",
+        "code": {
+          "one": "skan kodu ({count} uwaga)",
+          "few": "skan kodu ({count} uwagi)",
+          "many": "skan kodu ({count} uwag)",
+          "other": "skan kodu ({count} uwag)"
+        },
+        "lint": {
+          "one": "sprawdzanie danych ({count} ostrzeżenie)",
+          "few": "sprawdzanie danych ({count} ostrzeżenia)",
+          "many": "sprawdzanie danych ({count} ostrzeżeń)",
+          "other": "sprawdzanie danych ({count} ostrzeżeń)"
+        }
+      },
+      "tone": {
+        "ok": "ok",
+        "warn": "sprawdź",
+        "err": "błąd",
+        "note": "uwaga"
+      },
+      "go": "Opublikuj",
+      "saveFile": "Zapisz jako plik",
+      "failed": "Paczka nie została opublikowana",
+      "donePublic": "Wersja {version} jest publiczna",
+      "doneLink": "Wersja {version} jest opublikowana",
+      "copied": "Skopiowano link.",
+      "isPublic": "Publiczna na Crucible",
+      "isLink": "Opublikowana, tylko przez link",
+      "history": "Opublikowane wersje",
+      "toServer": "Na serwer",
+      "makePublic": "Upublicznij",
+      "makeLink": "Ustaw tylko przez link",
+      "goFresh": "Opublikuj jako nową paczkę",
+      "goneTitle": "Tej paczki nie ma już na Crucible",
+      "gone": "Została tam usunięta lub zdjęta. Publikacja utworzy nową paczkę z nowym linkiem i kodem.",
+      "notYetPublic": "Jeszcze nie publiczna"
+    },
+    "serverPack": {
+      "title": "{name} {version} na serwerze",
+      "lead": "Mody serwerowe tej wersji, jej ustawienia serwera i gry trafiają na serwer, a z niego powstaje modpack pobierany przez graczy. Najpierw zatrzymaj serwer.",
+      "go": "Umieść na serwerze",
+      "done": "{version} jest na serwerze",
+      "failed": "Paczka serwerowa nie powstała"
+    }
+  },
+  "editor": {
+    "page": {
+      "title": "Edytor",
+      "lookingForSaves": "Szukanie zapisów…",
+      "pickCharacter": "Wybierz postać.",
+      "noSaves": "Nie znaleziono zapisów postaci.",
+      "cannotParse": "Nie udało się odczytać tego zapisu do edycji.",
+      "readOnlyNoSave": "Ten zapis można tylko odczytać: zapisywanie jest wyłączone.",
+      "gameOpen": "Gra jest otwarta: zamknij ją, aby zapisać.",
+      "unsaved": "Zmiany nie są jeszcze zapisane. Kiln robi kopię zapasową zapisu, zanim go nadpisze.",
+      "levelBackup": "Poziom {n}. Kiln robi kopię zapasową zapisu, zanim go nadpisze.",
+      "notSaved": "Nie zapisano",
+      "discard": "Odrzuć",
+      "backups": "Kopie zapasowe",
+      "save": "Zapisz",
+      "saving": "Zapisywanie…",
+      "saved": "Zapisano",
+      "savedHint": "Poprzedni zapis jest w kopiach zapasowych.",
+      "gameOpenShort": "Gra działa: zamknij ją, aby zapisać",
+      "error": "Błąd",
+      "note": "Uwaga",
+      "readAgain": "Wczytaj ponownie",
+      "close": "Zamknij",
+      "parts": "Części zapisu",
+      "characters": "Postacie",
+      "openFile": "Otwórz plik…",
+      "pickCharacterButton": "Wybierz postać",
+      "open": "Otwórz",
+      "opened": "Otwarta",
+      "discardTitle": "Odrzucić zmiany?",
+      "discardAndOpen": "Odrzuć i otwórz",
+      "discardBody": "Zmiany w {nome} nie są jeszcze zapisane.",
+      "cancel": "Anuluj",
+      "back": "Wstecz",
+      "readOnlyError": "Tylko do odczytu: {erro}",
+      "pointsRaised": "Zwiększono liczbę używanych punktów ({antes} → {depois}). Wpisz sumę swoich punktów na karcie Umiejętności, aby edytor mógł ją sprawdzić; powyżej sumy gra resetuje całe drzewko.",
+      "notWritten": "Nie zapisano. {problemas}",
+      "gameWroteSince": "Gra zapisała ten plik po tym, jak edytor go odczytał. Wczytaj go ponownie, aby edytować obecny stan zapisu (zmiany wprowadzone tutaj przepadną)."
+    },
+    "tabs": {
+      "equipment": "Ekwipunek",
+      "inventory": "Plecak",
+      "skills": "Umiejętności",
+      "knowledge": "Wiedza"
+    },
+    "backups": {
+      "title": "Kopie zapasowe: {nome}",
+      "openFolder": "Otwórz folder",
+      "hint": "Gra sama trzyma 10 ostatnich zapisów; edytor dodatkowo kopiuje zapis przed każdym nadpisaniem.",
+      "dropsChanges": "Przywrócenie odrzuca niezapisane zmiany.",
+      "looking": "Szukanie kopii zapasowych…",
+      "none": "Nie znaleziono kopii zapasowej tego zapisu.",
+      "restore": "Przywróć",
+      "restored": "Przywrócono",
+      "restoredBody": "{arquivo} ({quando}). Poprzedni zapis zachowano jako kopię zapasową.",
+      "restoreTitle": "Przywrócić tę kopię zapasową?",
+      "restoreBody": "Obecny stan zapisu zostanie zachowany jako kopia zapasowa.",
+      "kindGame": "Kopia gry",
+      "kindKiln": "Kopia Kiln",
+      "beforeSave": "przed zapisem"
+    },
+    "common": {
+      "level": "Poziom",
+      "empty": "Puste",
+      "change": "Zmień",
+      "add": "Dodaj",
+      "tierN": "Tier {n}",
+      "rarity": "Rzadkość",
+      "amount": "Ilość",
+      "aboveStack": "więcej niż stos gry ({n}): dla światów z modem zwiększającym rozmiar stosów",
+      "gameStack": "Stos gry ({n})",
+      "maxAmount": "Najwięcej na miejsce ({n})",
+      "upgrades": "Ulepszenia",
+      "remove": "Usuń",
+      "levelN": "poziom {n}",
+      "pick": "Wybierz",
+      "noMatch": "Nic nie pasuje do tych filtrów.",
+      "all": "Wszystkie"
+    },
+    "equipment": {
+      "xp": "PD na poziomie",
+      "attrsHint": "Atrybuty pochodzą z węzłów drzewka umiejętności (edytuj je na karcie Umiejętności).",
+      "attrsFlameHint": "Gra dodaje też węzły rosnące z poziomem Płomienia i premie z ekwipunku; żadne z nich nie są przechowywane w zapisie postaci.",
+      "emptyHint": "Puste miejsce. Załóż przedmiot w grze; tutaj możesz edytować lub zdjąć to, co już jest założone.",
+      "backpackFull": {
+        "one": "Nie zdejmę przedmiotu {item}: usunęłoby to jego pojemnik i {count} zapisane w nim miejsce. Najpierw opróżnij go w grze.",
+        "few": "Nie zdejmę przedmiotu {item}: usunęłoby to jego pojemnik i {count} zapisane w nim miejsca. Najpierw opróżnij go w grze.",
+        "many": "Nie zdejmę przedmiotu {item}: usunęłoby to jego pojemnik i {count} zapisanych w nim miejsc. Najpierw opróżnij go w grze.",
+        "other": "Nie zdejmę przedmiotu {item}: usunęłoby to jego pojemnik i {count} zapisanych w nim miejsc. Najpierw opróżnij go w grze."
+      },
+      "groups": {
+        "armour": "Pancerz",
+        "appearance": "Wygląd",
+        "accessories": "Akcesoria"
+      },
+      "slots": {
+        "headVanity": "Głowa (wygląd)",
+        "chestVanity": "Tułów (wygląd)",
+        "armsVanity": "Ręce (wygląd)",
+        "legsVanity": "Nogi (wygląd)",
+        "feetVanity": "Stopy (wygląd)",
+        "head": "Głowa",
+        "chest": "Tułów",
+        "arms": "Ręce",
+        "legs": "Nogi",
+        "feet": "Stopy",
+        "ring": "Pierścień",
+        "shield": "Tarcza",
+        "hook": "Kotwiczka",
+        "glider": "Lotnia",
+        "backpack": "Plecak",
+        "slot": "Miejsce {n}"
+      }
+    },
+    "inventory": {
+      "move": "Przenieś",
+      "slotEmpty": "Miejsce {n} puste",
+      "putHere": "Umieść tutaj",
+      "slotsUsed": {
+        "one": "{n} z {total} miejsca",
+        "few": "{n} z {total} miejsc",
+        "many": "{n} z {total} miejsc",
+        "other": "{n} z {total} miejsc"
+      },
+      "addItem": "Dodaj przedmiot",
+      "swapBar": "Zamień pasek",
+      "swapBarHint": "Alt zamienia go z paskiem akcji",
+      "actionBar": "Pasek akcji",
+      "deckHint": "A zmienia przedmiot · Y go przenosi · A na pustym miejscu dodaje nowy",
+      "hint": "Przeciągnij, aby przenieść · kliknij dwukrotnie puste miejsce, aby dodać · Delete usuwa · Ctrl+D duplikuje",
+      "noneSelected": "Nie wybrano przedmiotu.",
+      "noneSelectedHint": "Wybierz miejsce, aby zobaczyć i zmienić jego przedmiot.",
+      "emptyHint": "Wybierz przedmiot z katalogu, aby go tu umieścić.",
+      "pickItem": "Wybierz przedmiot",
+      "notFound": "W tym ekwipunku nie znaleziono przedmiotów, a edytor nie wie na pewno, gdzie leży on w tym zapisie. Jeśli gra pokazuje tu przedmioty, nie udało się ich odczytać: nie można niczego dodać. Kopia tego zapisu przesłana do nas pomoże to naprawić.",
+      "modItem": "Przedmiot moda, pozostawiony bez zmian",
+      "hiddenModItem": "{place} zawiera ukryty przedmiot innego moda (id {id}); Kiln zostawia go bez zmian.",
+      "place": {
+        "backpack": "Miejsce {n} w plecaku",
+        "swap": "Miejsce {n} na pasku zamiany",
+        "action": "Miejsce {n} na pasku akcji"
+      }
+    },
+    "inspector": {
+      "item": "Przedmiot",
+      "stacksTo": "stos do {n}",
+      "max": "Maks.",
+      "levelSplit": {
+        "one": "= podstawa {base} + {count} ulepszenie",
+        "few": "= podstawa {base} + {count} ulepszenia",
+        "many": "= podstawa {base} + {count} ulepszeń",
+        "other": "= podstawa {base} + {count} ulepszeń"
+      },
+      "aboveItemMax": "powyżej maksimum tego przedmiotu ({max}): serwer obetnie to przy wczytaniu, chyba że mod poszerzył jego zakres",
+      "upgradesHint": "Rzadkość określa, ile ulepszeń przyjmuje przedmiot: maks. poziom = poziom bazowy + rzadkość.",
+      "gem": "Osadzony klejnot",
+      "gemUnknown": "id {id} nie ma w katalogu",
+      "noGem": "— brak klejnotu —",
+      "gemLevel": "Poziom klejnotu",
+      "aboveGemMax": "powyżej maksimum tego klejnotu ({max}): serwer obetnie to przy wczytaniu, chyba że mod poszerzył jego zakres",
+      "durability": "Wytrzymałość",
+      "repair": "Napraw",
+      "water": "Woda",
+      "fill": "Napełnij",
+      "duplicateHint": "Kopiuje przedmiot do pierwszego wolnego miejsca",
+      "duplicate": "Duplikuj",
+      "attributes": "Atrybuty",
+      "physicalArmour": "Pancerz fizyczny",
+      "magicalArmour": "Pancerz magiczny",
+      "raisesSkill": "podnosi poziom umiejętności {no}",
+      "unknownLines": "Wiersze bez liczby rosną z poziomem przedmiotu według wzoru, którego jeszcze nie zmierzono; edytor nie pokazuje wartości, której nie jest pewien."
+    },
+    "parts": {
+      "full": "Pełne",
+      "clickToSet": "Kliknij, aby ustawić"
+    },
+    "catalog": {
+      "items": "Przedmioty",
+      "countLimited": {
+        "one": "{count} przedmiot (pokazano {limite}; zawęź wyszukiwanie)",
+        "few": "{count} przedmioty (pokazano {limite}; zawęź wyszukiwanie)",
+        "many": "{count} przedmiotów (pokazano {limite}; zawęź wyszukiwanie)",
+        "other": "{count} przedmiotów (pokazano {limite}; zawęź wyszukiwanie)"
+      },
+      "count": {
+        "one": "{count} przedmiot",
+        "few": "{count} przedmioty",
+        "many": "{count} przedmiotów",
+        "other": "{count} przedmiotów"
+      },
+      "categories": "Kategorie",
+      "searchDeck": "Szukaj po nazwie (Steam + X: klawiatura)",
+      "search": "Szukaj po nazwie…",
+      "searchLabel": "Szukaj",
+      "type": "Pisz",
+      "allRarities": "Wszystkie",
+      "tier": "Tier",
+      "targetFull": "Cel: ekwipunek pełny",
+      "target": "Cel: miejsce {n}",
+      "pickHint": "Wybierz przedmiot.",
+      "deckHint": "A wybiera, ponowne A dodaje.",
+      "hint": "Dwukrotne kliknięcie od razu dodaje.",
+      "cat": {
+        "weapons": "Broń",
+        "armour": "Pancerz",
+        "ammo": "Amunicja",
+        "magic": "Zaklęcia i klejnoty",
+        "consumables": "Zużywalne",
+        "materials": "Materiały",
+        "tools": "Narzędzia",
+        "building": "Budowanie",
+        "cosmetics": "Kosmetyczne i kolekcjonerskie"
+      }
+    },
+    "knowledge": {
+      "noBlock": "Ten zapis nie ma bloku wiedzy.",
+      "search": "Szukaj po nazwie lub id",
+      "above": "Powyżej poziomu",
+      "allLevels": "wszystkie",
+      "show": "Pokaż",
+      "filter": {
+        "itemsRecipes": "Przedmioty i przepisy",
+        "items": "Tylko przedmioty",
+        "recipes": "Tylko przepisy",
+        "everything": "Wszystko"
+      },
+      "removeN": "Usuń ({n})",
+      "kind": "Rodzaj",
+      "name": "Nazwa",
+      "state": "Stan",
+      "id": "id {id}",
+      "kinds": {
+        "item": "przedmiot",
+        "recipe": "przepis",
+        "misc": "inne"
+      },
+      "count": {
+        "one": "{n} z {total} wpisu",
+        "few": "{n} z {total} wpisów",
+        "many": "{n} z {total} wpisów",
+        "other": "{n} z {total} wpisów"
+      },
+      "unnamed": {
+        "one": "{count} bez znanej nazwy",
+        "few": "{count} bez znanej nazwy",
+        "many": "{count} bez znanej nazwy",
+        "other": "{count} bez znanej nazwy"
+      },
+      "shownLimit": "Pokazano pierwsze 400; użyj wyszukiwania lub progu poziomu, aby zobaczyć resztę.",
+      "hint": "Usunięcie materiału wysokiego poziomu zamyka zależne od niego przepisy. Przepisy nie są przechowywane w zapisie: gra wylicza je od nowa z wiedzy, zarówno tutaj, jak i w świecie na serwerze."
+    },
+    "skills": {
+      "total": "Suma punktów",
+      "minusLevel": "−1 poziom",
+      "plusLevel": "+1 poziom",
+      "tree": "Drzewko umiejętności",
+      "used": "Użyte",
+      "available": "Dostępne",
+      "enterTotal": "wpisz sumę…",
+      "changeTotal": "Kliknij, aby zmienić sumę",
+      "totalFromGame": "Łącznie {total}, liczone tak jak w grze: 2 punkty za każdy poziom powyżej 1 oraz korzenie Całunu i studnie eliksiru zniszczone przez tę postać. Gra tego nie zapisuje, więc nie edytuje się tego tutaj.",
+      "totalHint": "Suma punktów (użyte + dostępne, tak jak pokazuje gra):",
+      "zoomIn": "Przybliż",
+      "zoomOut": "Oddal",
+      "centre": "Wyśrodkuj",
+      "cost": "koszt {n}",
+      "maxN": "maks. {n}",
+      "deckHint": "A: +1 poziom · Y: −1",
+      "hint": "Kliknięcie: +1 poziom · prawy przycisk: −1",
+      "class": {
+        "warrior": "Wojownik",
+        "ranger": "Tropiciel",
+        "mage": "Mag",
+        "neutral": "Neutralne"
+      }
+    },
+    "deck": {
+      "delete": "Usuń",
+      "range": "Od {min} do {max}",
+      "min": "Min.",
+      "use": "Użyj",
+      "current": "Obecne"
+    },
+    "art": {
+      "preparing": "Przygotowywanie grafik gry…",
+      "needsClient": "Grafiki gry wymagają klienta Enshrouded (Ustawienia → Gry).",
+      "notFound": "Nie znaleziono grafik gry. Uruchom {script}."
+    },
+    "game": {
+      "tree": {
+        "aboveMax": "{no}: poziom {nivel} powyżej maksimum {max}",
+        "orphans": "Węzły bez połączenia z resztą drzewka: {nos}",
+        "overTotal": "Użyte punkty ({usados}) przekraczają sumę postaci ({total})"
+      },
+      "unknownItem": "Nieznany przedmiot (0x{h})",
+      "errors": {
+        "unknownItems": "Nieznane przedmioty w tym zapisie (usunięty mod?): tylko do odczytu",
+        "levelXp": "Nieprawidłowy poziom lub PD",
+        "skill": "Nieprawidłowa umiejętność",
+        "item": "Nieznany przedmiot: {id}",
+        "slotAmount": "Nieprawidłowe miejsce lub ilość",
+        "sameSlot": "Dwa przedmioty w tym samym miejscu ekwipunku",
+        "knowledge": "Nieprawidłowy wpis wiedzy",
+        "knowledgeRepeated": "Wiedza z powtórzonym id",
+        "closeGame": "Zamknij Enshrouded przed zapisaniem: gra nadpisałaby zmiany.",
+        "notOpen": "Zapis nie jest otwarty do edycji",
+        "noEquipment": "Edytor nie może znaleźć ekwipunku i plecaka w tym zapisie",
+        "skillList": "Edytor nie zna listy umiejętności tego zapisu",
+        "notSave": "To nie jest zapis Enshrouded",
+        "inventoryUnsure": "Edytor nie znalazł na pewno ekwipunku w tym zapisie: nie można w nim zapisać przedmiotów.",
+        "modData": "Ten zapis zawiera dane moda, których edytor nie umie zapisać ({mods}): tylko do odczytu, aby dane moda zostały bez zmian.",
+        "inventoryUnread": "Edytor nie odczytał na pewno ekwipunku tej postaci (plecak, pasek zamiany i pasek akcji): tylko do odczytu, aby nic go nie nadpisało."
+      },
+      "saveFileFilter": "Zapis Enshrouded",
+      "rarity": {
+        "none": "Bez rzadkości",
+        "common": "Pospolity",
+        "uncommon": "Niepospolity",
+        "rare": "Rzadki",
+        "epic": "Epicki",
+        "legendary": "Legendarny"
+      },
+      "category": {
+        "weapon": "Broń",
+        "equipment": "Ekwipunek",
+        "material": "Materiał",
+        "consumable": "Zużywalny",
+        "ammunition": "Amunicja",
+        "tool": "Narzędzie",
+        "building": "Budowanie",
+        "blueprint": "Schemat",
+        "collectible": "Kolekcjonerski",
+        "cosmetic": "Kosmetyczny",
+        "gem": "Klejnot"
+      },
+      "attribute": {
+        "constitution": "Kondycja",
+        "spirit": "Duch",
+        "endurance": "Wytrzymałość",
+        "strength": "Siła",
+        "dexterity": "Zręczność",
+        "intelligence": "Inteligencja"
+      },
+      "classes": {
+        "survivor": "Ocalały",
+        "beastmaster": "Władca bestii",
+        "ranger": "Tropiciel",
+        "assassin": "Zabójca",
+        "trickster": "Szelma",
+        "wizard": "Czarodziej",
+        "healer": "Uzdrowiciel",
+        "battlemage": "Mag bojowy",
+        "tank": "Obrońca",
+        "warrior": "Wojownik",
+        "barbarian": "Barbarzyńca",
+        "athlete": "Atleta"
+      },
+      "knowledge": {
+        "pickedUp": "podniesiony",
+        "used": "użyty",
+        "inspected": "zbadany",
+        "seen": "widziany",
+        "crafted": "wytworzony"
+      }
+    }
+  },
+  "sfBackend": {
+    "backend": {
+      "title": "ShroudForge",
+      "sub": "Który ShroudForge uruchamia mody ShroudForge tej gry. Zapisywane w kiln/kiln.json; obowiązuje od następnego uruchomienia.",
+      "label": "Backend ShroudForge",
+      "choice": {
+        "hosted": "ShroudForge dołączony do Kiln",
+        "installed": "Mój zainstalowany ShroudForge",
+        "kiln": "Interpreter Kiln"
+      },
+      "about": {
+        "hosted": "ShroudForge dostarczany z Kiln.",
+        "installed": "ShroudForge w folderze shroudforge gry.",
+        "kiln": "Kiln sam uruchamia mody ShroudForge. Mod, którego nie może uruchomić w całości, jest pomijany z podaniem powodu przed grą."
+      },
+      "none": "brak ShroudForge",
+      "default": "Domyślny",
+      "held": "Wstrzymany",
+      "heldWhy": "Niedostępne w tej wersji Kiln: {reason}",
+      "set": {
+        "default": "Nic nie ustawiono: wartość domyślna.",
+        "explicit": "Wybrano: {name}.",
+        "inherited": "Ze starszego przełącznika „Używaj mojego zainstalowanego ShroudForge”: {name}. Wybór tutaj go zastępuje.",
+        "invalid": "kiln.json wskazuje backend, którego Kiln nie zna ({value}): żaden ShroudForge nie uruchomi modów ShroudForge tej gry, dopóki nie wybierzesz jednego."
+      },
+      "next": "Następne uruchomienie: {name}",
+      "last": "Ostatnie uruchomienie: {name}",
+      "envRuntime": "KILN_SHROUDFORGE_RUNTIME jest ustawione tam, gdzie działa launcher: uruchomienie z launchera się do niego stosuje.",
+      "envOff": "KILN_SHROUDFORGE=0 jest ustawione tam, gdzie działa launcher: przy uruchomieniu z launchera żaden ShroudForge nie działa.",
+      "route": {
+        "missing": "Interpretera Kiln nie ma jeszcze w tej grze: zainstaluj Kiln ponownie, aby go dodać.",
+        "ownLoader": "Własny loader ShroudForge jest w grze ({file}): to on uruchamia mody ShroudForge, a wybory Kiln ustępują."
+      },
+      "running": "Zamknij grę, aby to zmienić.",
+      "reset": "Przywróć domyślny",
+      "unreadable": "Nie można tego zmienić, dopóki kiln.json jest nieczytelny: {reason}",
+      "saved": "Zapisano. Następne uruchomienie: {name}.",
+      "ask": {
+        "title": "Zmienić backend ShroudForge?",
+        "to": "Od następnego uruchomienia: {name}",
+        "replaces": "To zastępuje starszy przełącznik „Używaj mojego zainstalowanego ShroudForge”.",
+        "kiln": "Mody, których interpreter Kiln nie może uruchomić w całości, są pomijane przy starcie, każdy z powodem, a ostrzeżenie przed grą je wymienia. Nic samo nie wraca do ShroudForge dołączonego do Kiln.",
+        "unchanged": "kiln.json już to zawiera.",
+        "refused": "Teraz nie można tego wybrać: {reason}",
+        "when": "Nic się nie zmieni, dopóki nie zapiszesz. Gra odczyta to przy następnym uruchomieniu."
+      }
+    },
+    "startWarning": {
+      "title": "Niektóre mody nie zadziałają przy tym uruchomieniu",
+      "continue": "Kontynuuj bez tych modów",
+      "game": "Gra: {path}",
+      "changedTitle": "Zmieniono",
+      "changed": "To, co nie zadziała przy tym uruchomieniu, zmieniło się od ostatniego ostrzeżenia. Przeczytaj je ponownie, zanim przejdziesz dalej.",
+      "otherGame": "To ostrzeżenie dotyczy innej gry. Naciśnij Graj ponownie.",
+      "lead": {
+        "save": {
+          "title": "Nie zapisuj bez nich",
+          "text": "Mod poniżej przechowuje dane w twoich zapisach. Jeśli zapiszesz świat, gdy jest wyłączony, jego dane mogą się zmienić lub przepaść. Graj bez zapisywania albo anuluj i najpierw to napraw."
+        },
+        "check": {
+          "title": "Nie wszystko udało się sprawdzić",
+          "text": "Kiln nie mógł sprawdzić wszystkiego dla tego uruchomienia, więc te mody mogą nie działać. Przeczytaj powody poniżej."
+        },
+        "plain": {
+          "title": "Te mody nie zadziałają",
+          "text": "Gra uruchomi się bez modów poniżej. Pozostałe mody działają jak zwykle."
+        }
+      },
+      "listAria": "Co nie zadziała ({count})",
+      "notesAria": "Warto wiedzieć",
+      "nothingChanged": "Kontynuacja niczego nie wyłącza, niczego nie zapisuje ani nie usuwa. Następne Graj sprawdzi ponownie.",
+      "partData": "dane startowe",
+      "partLua": "Lua",
+      "partDlls": "DLL: {list}",
+      "parts": "Części: {list}",
+      "dataNotApplied": "Jego dane startowe nie są stosowane przy tym uruchomieniu.",
+      "chain": "Z powodu: {chain}",
+      "folder": "Folder: {root}",
+      "wasActive": "Był aktywny przy wcześniejszym uruchomieniu ({launch}).",
+      "unknownStart": "nieznane uruchomienie",
+      "saveLine": "Przechowuje dane w twoich zapisach: nie zapisuj świata, gdy jest wyłączony.",
+      "saveUnknown": "Może przechowywać dane w twoich zapisach: nie zapisuj świata, gdy jest wyłączony.",
+      "skipped": "{name} nie działa",
+      "refused": "Żaden mod ShroudForge nie działa przy tym uruchomieniu",
+      "notStarted": "Nieuruchomione: {list}",
+      "previous": "{name} jest teraz wyłączony",
+      "offNow": "Nie działa przy tym uruchomieniu.",
+      "basisPolicy": "Lista Kiln modów z danymi zapisu go wymienia.",
+      "basisUnknown": "Ma dane gry i kod, więc może przechowywać dane zapisu.",
+      "about": "Dotyczy: {list}",
+      "inspector": "Nie można użyć inspektora archiwów Kiln",
+      "planWarning": "Ostrzeżenie planu uruchomienia",
+      "baseTitle": "Pliki gry, na których opiera się to uruchomienie",
+      "baseRestore": "Aby wrócić dokładnie do tych plików, wyłącz mody zmieniające dane gry i uruchom grę raz przez Kiln (Logi, Silniki: Przywróć dane gry).",
+      "baseVerify": "Aby mieć pliki gry takie, jakie dostarcza Steam, użyj w Steam opcji Zweryfikuj spójność plików gry.",
+      "costTitle": "Wolniejsze uruchomienie",
+      "noteTitle": "Uwaga",
+      "keybindsTitle": "Skróty klawiszowe",
+      "keybinds": "{name}: jego skróty klawiszowe nie działają jeszcze z interpreterem Kiln. Reszta moda działa."
+    },
+    "engineRow": {
+      "plugin": "Interpreter Kiln (kiln-sfi)",
+      "packages": "Mody ShroudForge",
+      "phase": {
+        "starting": "uruchamianie",
+        "running": "działa",
+        "ended": "zakończony",
+        "aside": "usunął się w cień",
+        "refused": "nie uruchomiony",
+        "unknown": "nieznany"
+      },
+      "package": {
+        "running": "działa",
+        "dataApplied": "dane zastosowane",
+        "off": "wyłączony",
+        "skipped": "pominięty"
+      },
+      "stale": {
+        "older-start": "Ten zapis pochodzi z wcześniejszego uruchomienia: nie wiadomo, co interpreter zrobił przy najnowszym.",
+        "not-running": "Zapis mówi {phase}, ale gra nie działa: to uruchomienie skończyło się bez ostatniego zapisu (mogło się zawiesić).",
+        "other-process": "Zapis pochodzi z innego procesu gry: nie należy do tego uruchomienia."
+      },
+      "previous": {
+        "incomplete": "Poprzednie uruchomienie skończyło się, nie kończąc zapisu (mogło się zawiesić).",
+        "suspect": "Kiln nie mógł odczytać tego, co zostawiło poprzednie uruchomienie."
+      },
+      "unreadable": "Interpreter Kiln zostawił zapis, którego Kiln nie może odczytać: {error}"
+    },
+    "restoreBase": {
+      "title": "Przywróć dane gry",
+      "base": "Kiln zaczął od tych plików gry: {label}.",
+      "how": "Aby wrócić dokładnie do tych plików, wyłącz mody zmieniające dane gry i uruchom grę raz przez Kiln. Kiln przywraca tylko dane, o których może udowodnić, że je zapisał; dane innego loadera zostają.",
+      "save": "Mody, które trzymają dane w twoich zapisach: nie zapisuj świata, gdy są wyłączone.",
+      "vanilla": "To niekoniecznie pliki takie, jakie dostarcza Steam. Do tego użyj w Steam opcji Zweryfikuj spójność plików gry (Właściwości gry, Zainstalowane pliki).",
+      "unknown": "Kiln nie potrafi określić, które pliki gry by przywrócił: {reason}."
     }
   }
 }

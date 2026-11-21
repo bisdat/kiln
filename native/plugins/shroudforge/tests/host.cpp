@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Fake runtime host only: never launches or loads Enshrouded.
 #include <windows.h>
+#include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -13,7 +15,9 @@
 #include <thread>
 #include <vector>
 #include "kiln_api.h"
+#include "services/kiln_caps.h"
 #include "services/kiln_hooks.h"
+#include "services/kiln_launch.h"
 #include "services/kiln_profile.h"
 #include "services/kiln_ui.h"
 static std::filesystem::path game;
@@ -327,7 +331,64 @@ static void* ui_table() {
     if (!wcscmp(v, L"short")) fake_ui.header.size = static_cast<uint32_t>(offsetof(KilnUiApi, subscribe_window_input));
     return &fake_ui;
 }
+// A fake kiln.launch (KILN_SF_LAUNCH, tests/launch.py): "<backend>,<reason code>" (numbers, 0x allowed) is a frozen
+// record with that backend and code and the reason text of KILN_SF_LAUNCH_REASON (default "fake kiln.launch <code>").
+// Tables an older or broken core could hand out: "short" (8-byte table), "v0" (version 0, served anyway), "nostatus"
+// (no status member), "unfrozen" (status answers KILN_ERR_UNAVAILABLE). Unset: no table, an older core.
+static std::string env_a(const char* name) {
+    char v[512] = "";
+    const DWORD n = GetEnvironmentVariableA(name, v, sizeof v);
+    return n && n < sizeof v ? std::string(v, n) : std::string();
+}
+static KilnLaunchApi fake_launch{};
+static uint32_t launch_backend = 0, launch_code = 0;
+static std::string launch_reason;
+static KilnResult l_status(KilnLaunchStatus* out) {
+    if (!out || out->size < sizeof(KilnLaunchStatus)) return KILN_ERR_INVALID_ARGUMENT;
+    if (env_a("KILN_SF_LAUNCH") == "unfrozen") { out->frozen = 0; return KILN_ERR_UNAVAILABLE; }
+    std::memset(reinterpret_cast<char*>(out) + sizeof out->size, 0, sizeof *out - sizeof out->size);
+    out->size = sizeof *out;
+    out->backend = launch_backend;
+    out->frozen = 1;
+    out->reason_code = launch_code;
+    out->launch_id = 0x0123456789abcdefull;
+    out->freeze_stamp = 1763500000000ull;
+    std::memcpy(out->reason, launch_reason.data(), (std::min)(launch_reason.size(), sizeof out->reason - 1));
+    return KILN_OK;
+}
+static KilnResult l_notice(char*, size_t, size_t* len) { if (len) *len = 0; return KILN_OK; }
+static const void* launch_table() {
+    const std::string mode = env_a("KILN_SF_LAUNCH");
+    if (mode.empty()) return nullptr;
+    const char* v = mode.c_str();
+    fake_launch = {{sizeof fake_launch, KILN_LAUNCH_VERSION}, l_status, l_notice};
+    if (mode == "short") fake_launch.header.size = sizeof(KilnServiceHeader);
+    else if (mode == "v0") fake_launch.header.version = 0;
+    else if (mode == "nostatus") fake_launch.status = nullptr;
+    else if (mode != "unfrozen") {
+        char* end = nullptr;
+        launch_backend = static_cast<uint32_t>(std::strtoul(v, &end, 0));
+        launch_code = end && *end == ',' ? static_cast<uint32_t>(std::strtoul(end + 1, nullptr, 0)) : 0;
+        launch_reason = env_a("KILN_SF_LAUNCH_REASON");
+        if (launch_reason.empty()) launch_reason = "fake kiln.launch " + std::to_string(launch_code);
+    }
+    return &fake_launch;
+}
+// A fake kiln.caps (with KILN_SF_SFI): report() prints the row kiln-sfi reports.
+static KilnResult c_report(KilnOwner owner, KilnStr name, uint32_t state, uint32_t reason, KilnStr words) {
+    std::printf("[fake kiln.caps] report owner=%llu %.*s state=%u reason=%u: %.*s\n", (unsigned long long)owner,
+                int(name.len), name.ptr, state, reason, int(words.len), words.ptr);
+    return KILN_OK;
+}
+static KilnCapsApi fake_caps{};
 static const void* service(KilnStr name, uint32_t min) {
+    if (text(name) == KILN_LAUNCH_SERVICE) return launch_table();  // like the core, in every view
+    if (text(name) == KILN_CAPS_SERVICE) {
+        if (!GetEnvironmentVariableW(L"KILN_SF_SFI", nullptr, 0) || min > KILN_CAPS_VERSION) return nullptr;
+        fake_caps.header = {sizeof fake_caps, KILN_CAPS_VERSION};
+        fake_caps.report = c_report;
+        return &fake_caps;
+    }
     if (text(name) == KILN_UI_SERVICE) {
         if (!ui_published) return nullptr;
         const auto* t = static_cast<const KilnUiApi*>(ui_table());
@@ -476,6 +537,13 @@ int main(int argc, char** argv) {
     if (GetEnvironmentVariableW(L"KILN_SF_SELF_HOSTED", nullptr, 0)) LoadLibraryW((game / L"bootstrap.dll").c_str());
     auto dll = std::filesystem::absolute(argv[2]);
     if (argc > 3 && std::string(argv[3]) == "early") LoadLibraryW((game / L"kiln/plugins/kiln-eml.dll").c_str());
+    // KILN_SF_SFI=<kiln-sfi.dll> (tests/launch.py): Kiln's interpreter plugin too, in a real start's file order
+    // (kiln-sfi before kiln-shroudforge): its kiln_plugin_early before the adapter's, its kiln_plugin_main and on_ready
+    // at Kiln's plugin step. It reads the same fake kiln.launch and reports to the fake kiln.caps.
+    HMODULE sfi = nullptr;
+    if (wchar_t sfi_path[32768]{}; GetEnvironmentVariableW(L"KILN_SF_SFI", sfi_path, 32768)) {
+        if (!(sfi = LoadLibraryW(sfi_path))) return 17;
+    }
     HMODULE h = LoadLibraryW(dll.c_str()); if (!h) return 3;
     const bool delayed = GetEnvironmentVariableW(L"KILN_SF_SLOW_HEARTBEAT", nullptr, 0) != 0;
     const bool stop_during_write = GetEnvironmentVariableW(L"KILN_SF_STOP_DURING_HEARTBEAT", nullptr, 0) != 0;
@@ -499,6 +567,20 @@ int main(int argc, char** argv) {
     if (real_order) ui_published = false;
     KilnApi api{}; api.size = sizeof api; api.abi_version = KILN_ABI_VERSION;
     api.path = path; api.log = log; api.service = service; api.side = side;
+    KilnPluginInfo sfi_info{}; sfi_info.size = sizeof sfi_info;
+    // the plugin step of kiln-sfi: its main (owner 12) and on_ready, right before the adapter's
+    auto sfi_step = [&]() -> bool {
+        auto main_fn = reinterpret_cast<KilnPluginMainFn>(GetProcAddress(sfi, "kiln_plugin_main"));
+        sfi_info = {}; sfi_info.size = sizeof sfi_info;
+        if (!main_fn || main_fn(&api, 12, &sfi_info) != KILN_OK) return false;
+        if (sfi_info.on_ready) sfi_info.on_ready(sfi_info.user);
+        return true;
+    };
+    if (sfi && argc > 3) {
+        auto early_fn = reinterpret_cast<KilnPluginMainFn>(GetProcAddress(sfi, "kiln_plugin_early"));
+        if (!early_fn || early_fn(&api, 11, &sfi_info) != KILN_OK) return 18;
+        if (sfi_info.on_ready) sfi_info.on_ready(sfi_info.user);
+    } else if (sfi && !sfi_step()) return 18;
     KilnPluginInfo info{}; info.size = sizeof info;
     if (fn(&api, 1, &info) != KILN_OK) return 5;
     const bool real = GetEnvironmentVariableW(L"KILN_SF_REAL_KEYS", nullptr, 0) != 0;
@@ -509,6 +591,7 @@ int main(int argc, char** argv) {
             for (int i = 0; i < 400 && !marked("shutdown"); ++i) Sleep(25);
         auto normal = reinterpret_cast<KilnPluginMainFn>(GetProcAddress(h, "kiln_plugin_main"));
         if (!no_plugin_step) ui_published = true;
+        if (sfi && !no_plugin_step && !sfi_step()) return 18;
         info = {}; info.size = sizeof info;
         if (normal(&api, 2, &info) != KILN_OK) return 6;
         if (!no_plugin_step && info.on_ready) info.on_ready(info.user);

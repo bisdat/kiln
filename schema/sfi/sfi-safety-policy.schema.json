@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sfi-safety-policy.schema.json",
+  "title": "Save-sensitive package policy (schema/sfi/sfi-safety-policy.json), format 1",
+  "description": "Kiln's shipped list of packages whose absence loses saved data: switching one off (or skipping it) and then saving can drop items. A row matches a package only by its exact id, its exact version and the byte identity (sha256 and size) of every file of one of its variants; never by a display name, a substring, a pattern or a version range. Rules only a reader can check: one row per id+version; a path at most once per variant (compared case-insensitively, as on Windows). The file holds identities and hashes only, never a third-party mod's files.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "revision", "scope", "unknownMixedDataNative", "packages"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "format": { "const": 1 },
+    "revision": { "type": "integer", "minimum": 1, "description": "Raised with every change to the rows; support reports name it." },
+    "scope": {
+      "enum": ["interpreter-only", "every-backend"],
+      "description": "interpreter-only: only kiln-sfi warns from this policy (the shipped value). every-backend: kiln-manage's activation also warns when a save-sensitive package active at the previous start is now off or absent, whatever backend runs it (hosted ShroudForge too)."
+    },
+    "unknownMixedDataNative": {
+      "enum": ["save-sensitive", "listed-only"],
+      "description": "save-sensitive: a package with both data and native code and no row is treated as save-sensitive (conservative, the recommendation). listed-only: only rows here are."
+    },
+    "packages": { "type": "array", "maxItems": 1024, "items": { "$ref": "#/$defs/row" } }
+  },
+  "$defs": {
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "name", "risk", "text", "evidence", "variants"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,80}$", "description": "The package's manifest id, compared byte for byte (SF identifier rule)." },
+        "version": { "type": "string", "pattern": "^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$", "description": "The manifest's version string, compared byte for byte: no range, no wildcard, no v prefix normalisation." },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200, "description": "For people and warnings only; never matched." },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["site", "modId"],
+          "properties": { "site": { "const": "nexus" }, "modId": { "type": "integer", "minimum": 1 } },
+          "description": "Where the evidenced copy came from (Nexus Mods, Enshrouded). Informational."
+        },
+        "risk": { "enum": ["save-data-loss"], "description": "What saving with it off can do." },
+        "text": { "type": "string", "minLength": 1, "maxLength": 1000, "description": "The package-specific line every warning about it adds." },
+        "evidence": { "type": "string", "minLength": 1, "maxLength": 1000, "description": "Where the identity and the risk were established." },
+        "variants": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "description": "Byte-identical builds this row covers; one fully matching variant is enough.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["files"],
+            "properties": {
+              "files": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "items": { "$ref": "#/$defs/file" },
+                "contains": { "properties": { "path": { "const": "mod.json" } }, "required": ["path"] },
+                "description": "Package-relative files that must all be present with these bytes. Always the manifest mod.json; then the native code. Files a player or a loader edits (extended.mod.json's enabled switch, settings, native-plugin.ini) are not pinned."
+              }
+            }
+          }
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "size"],
+      "properties": {
+        "path": { "type": "string", "maxLength": 260, "pattern": "^(?!.*(^|/)\\.\\.?(/|$))[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$", "description": "Relative to the package folder, '/' separators, no '.' or '..' parts." },
+        "sha256": { "$ref": "common.schema.json#/$defs/sha256" },
+        "size": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

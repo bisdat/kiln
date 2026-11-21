@@ -1,0 +1,99 @@
+{
+  "format": 1,
+  "writer": "kiln-sfi",
+  "kilnSfi": "0.1.0",
+  "launch": {
+    "launchId": "3f2b8c1e5a7d4e2f",
+    "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "pid": 4242,
+    "processStartMs": 1763520000000,
+    "side": "client",
+    "profile": {
+      "id": "main",
+      "generation": 7
+    },
+    "backend": {
+      "selected": "kiln",
+      "source": "kiln.launch",
+      "reasonCode": "plan",
+      "text": "kiln.json shroudforge.backend = kiln"
+    },
+    "frozenAtMs": 1763520000100
+  },
+  "phase": "starting",
+  "incomplete": true,
+  "previousStart": {
+    "disposition": "clean",
+    "launchId": "9a1c7e5b2d3f4a6b",
+    "pid": 4100
+  },
+  "startedMs": 1763520000200,
+  "updatedMs": 1763520004000,
+  "warningRevision": 2,
+  "packages": [
+    {
+      "id": "base",
+      "version": "1.2.0",
+      "name": "Mod base",
+      "intent": "selected",
+      "data": "failed",
+      "lua": "excluded",
+      "dlls": [],
+      "archivePresent": false,
+      "runtimeActive": false,
+      "saveSensitive": {
+        "value": false,
+        "basis": "none",
+        "policyRow": null
+      },
+      "skip": {
+        "code": "startup-failed",
+        "text": "pregame phase failed: base/init.lua:3: attempt to index nil",
+        "part": "data",
+        "chain": [],
+        "late": false,
+        "loader": null
+      },
+      "warning": {
+        "revision": 1,
+        "trigger": "skipped",
+        "presence": "not-applied",
+        "saveSensitive": false,
+        "text": "Mod base (base 1.2.0) was skipped this start (its startup data): pregame phase failed: base/init.lua:3: attempt to index nil. The game and the other mods go on without it. Its data is not in the game."
+      }
+    },
+    {
+      "id": "addon",
+      "version": "2.0.0",
+      "name": null,
+      "intent": "selected",
+      "data": "excluded",
+      "lua": "excluded",
+      "dlls": [],
+      "archivePresent": null,
+      "runtimeActive": false,
+      "saveSensitive": {
+        "value": false,
+        "basis": "none",
+        "policyRow": null
+      },
+      "skip": {
+        "code": "dependency-skipped",
+        "text": "needs base, which failed in the pregame pass",
+        "part": "package",
+        "chain": [
+          "base"
+        ],
+        "late": false,
+        "loader": null
+      },
+      "warning": {
+        "revision": 2,
+        "trigger": "skipped",
+        "presence": "unknown",
+        "saveSensitive": false,
+        "text": "addon 2.0.0 was skipped this start: needs base, which failed in the pregame pass. It needs base. The game and the other mods go on without it. Whether its data is in the game could not be verified."
+      }
+    }
+  ]
+}

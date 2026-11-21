@@ -1,0 +1,18 @@
+{
+ "1.7.9/set.keybind.18": {
+  "kiln": {
+   "err": "a: Use the canonical hotkey 'SDL:224'",
+   "id": "set.keybind.18"
+  },
+  "kind": "harness-platform",
+  "reason": "SF's non-Windows primary_modifier returns 0 (hotkeys/observe_keyboard.rs:122-130), so the Linux-built SF golden accepts Ctrl+SDL:224; Windows SF and Kiln mask the primary Ctrl modifier of LCtrl (224) and require the canonical 'SDL:224'. Not a Kiln divergence"
+ },
+ "1.8.0/set.keybind.18": {
+  "kiln": {
+   "err": "a: Use the canonical hotkey 'SDL:224'",
+   "id": "set.keybind.18"
+  },
+  "kind": "harness-platform",
+  "reason": "SF's non-Windows primary_modifier returns 0 (hotkeys/observe_keyboard.rs:122-130), so the Linux-built SF golden accepts Ctrl+SDL:224; Windows SF and Kiln mask the primary Ctrl modifier of LCtrl (224) and require the canonical 'SDL:224'. Not a Kiln divergence"
+ }
+}

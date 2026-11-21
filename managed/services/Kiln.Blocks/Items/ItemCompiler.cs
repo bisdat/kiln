@@ -144,7 +144,9 @@ internal static partial class Compiler
         d.Fields["itemLevelRange.maxLevel"] = level;
     }
 
-    /// <summary>Enhancement slots. An item's rarity is its perk count less one, so the slot its rarity needs must be filled, or it comes out a rank lower.</summary>
+    /// <summary>Enhancement slots. An item's rarity is its perk count less one, so the slot its rarity needs must be filled, or it comes out a rank lower.
+    /// With a class's perk source (<paramref name="perksFrom"/>) every slot is filled, up to legendary's, whatever the item's own rarity: a rarity roll
+    /// at creation, an anvil or a forge can raise it, and the game reads the slot of the rarity it ends up with. The item itself still shows its own rarity.</summary>
     private static void PerkSlots(Draft d, IReadOnlyList<PerkRef>? perks, Rarity rarity, int starterSlots, string? perksFrom, string path, string rarityPath)
     {
         var slots = new string?[5];
@@ -167,8 +169,12 @@ internal static partial class Compiler
         var top = (int)rarity;
         for (var i = 0; perks != null && i < perks.Count && i <= top; i++)
             if (perks[i].Value == "none") throw new BlockError(d.Ctx.Block, $"{path}[{i}]", $"{rarity} has {top + 1} enhancements, so slot {i} can't be empty: it would come out a rank lower");
-        for (var i = starterSlots; i <= top; i++)
+        // without a perk source only the item's own rarity can be filled; with one, every rarity it can be raised to
+        var fill = perksFrom != null ? (int)Rarity.Legendary : top;
+        for (var i = starterSlots; i <= fill; i++)
         {
+            // a slot above the item's own rarity left empty on purpose stays empty
+            if (i > top && perks != null && i < perks.Count && perks[i].Value == "none") continue;
             var mine = perks != null && i < perks.Count && perks[i].Value is { Length: > 0 } v && v != "none";
             if (mine)
             {
@@ -353,7 +359,7 @@ internal static partial class Compiler
             d.Rules[$"impactValues.{ConfigStamina}"] = stamina;
         }
         d.Held = cls.Key == WeaponClass.Daggers.Key ? HeldIn.BothHands : HeldIn.OneHand;
-        // a roll can give it any rarity, so every slot has to be filled
+        // a roll can give it any rarity, so every slot has to be filled (a class with a perk source fills them all anyway)
         PerkSlots(d, perks ?? cls.Perks, loot is { Rolled: true } ? Rarity.Legendary : stats.Rarity, cls.PerksFrom != null ? 1 : 5, cls.PerksFrom, "perks", "stats.rarity");
         ApplyVisual(d, visual ?? cls.Visual, visual != null ? "visual" : "class.visual");
         ApplyLoot(d, loot);

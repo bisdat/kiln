@@ -50,6 +50,7 @@ KilnOwner g_owner = 0;
 std::atomic<uint32_t> g_demand{0}, g_interactive{0}, g_render_demand{0}, g_hover_panels{0}, g_footer_demand{0}, g_graphics_demand{0};
 std::atomic<bool> g_menu_open{false}, g_text_input{false}, g_want_mouse{false}, g_wheel_active{false}, g_page_capture{false};
 std::atomic<bool> g_overlay_failed{false};  // ui.cpp: the overlay turned off during the session (never here)
+std::atomic<bool> g_menu_fell_back{false};  // overlay_guard.cpp: Kiln's menu fell back to the game's own rows (never here)
 std::atomic<uint32_t> g_chat_completion_demand{0};  // chat_input_probe.cpp: chat Tab completion's overlay demand (never here)
 std::atomic<HWND> g_hwnd{nullptr};  // input_poll_window's (drawing off); never called here
 thread_local CallbackLifetime* t_callback = nullptr;

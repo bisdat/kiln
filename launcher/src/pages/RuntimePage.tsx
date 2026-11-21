@@ -149,7 +149,7 @@ export default function RuntimePage() {
           <Table aria-label={t("runtime.bundlesLabel")} columns={cols} rows={bundles.data ?? []} rowKey={(b) => b.version} rowHeight={50}
             empty={<EmptyState title={t("runtime.noBundles")} />} />
         )}
-        <DropZone variant="row" onPaths={(p) => p.forEach((x) => importB.mutate(x))} title={t("runtime.addBundle")} hint={importB.isPending ? t("runtime.readingBundle") : "kiln-runtime-<version>.zip"} pick={{ filters: [{ name: t("runtime.bundleFilter"), extensions: ["zip"] }] }} />
+        <DropZone variant="row" onPaths={(p) => p.forEach((x) => importB.mutate(x))} title={t("runtime.addBundle")} hint={importB.isPending ? t("runtime.readingBundle") : "kiln-runtime-<version>.zip"} pick={{ filters: [{ name: t("runtime.bundleFilter"), extensions: ["zip"] }], kind: "runtimeBundle" }} />
       </Card>
 
       <InstallModal bundle={pick} side={game.kind} receipt={st?.receipt ?? null} onClose={() => setPick(null)}

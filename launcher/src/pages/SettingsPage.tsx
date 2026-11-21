@@ -7,7 +7,7 @@ import { FolderPlus, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import * as api from "../api/commands";
-import { KEEP_MAX, type ConfigDocument, type DesktopInfo, type Json, type LauncherSettings, type RenderInfo, type SandboxInfo } from "../api/commands";
+import { KEEP_MAX, type ConfigDocument, type DesktopInfo, type Json, type LauncherSettings, type RenderInfo, type SandboxInfo, type X11Info } from "../api/commands";
 import { qk, useAppInfo, useGame, useGameStatus, useNexusEnabled, useSettings } from "../api/hooks";
 import { fallbackEnabled } from "../api/fallback";
 import { useAssetsStatus, useExtractTask } from "../components/GameArt";
@@ -18,6 +18,8 @@ import { ProfilesCard } from "../components/ProfilesSettings";
 import { LibraryCard } from "../components/LibrarySettings";
 import { LanguageCard } from "../components/LanguageSettings";
 import { GraphicsCard, isGraphicsPath } from "../components/GraphicsSettings";
+// Settings' ShroudForge card
+import { ShroudForgeCard, isShroudForgePath } from "../components/ShroudForgeSettings";
 import { StartModal, UnknownBuild, useStartWord } from "../components/GameStart";
 import { rich, t, useT } from "../i18n";
 import { CommunityToggle } from "../community/parts";
@@ -54,6 +56,7 @@ export default function SettingsPage() {
         {nexusEnabled && <NexusCard />}
       </div>
       <KilnJsonCard />
+      <ShroudForgeCard />
       <GraphicsCard />
       <AssetsCard />
     </Page>
@@ -120,7 +123,8 @@ function LauncherCard() {
 }
 
 /** Appearance: the fire on Play. Off (or KILN_LAUNCHER_NO_WEBGL=1 for one start) draws the plain Play button, the same
- *  one a machine without WebGL gets. On Linux also "Draw the launcher without the GPU" (the render marker, render.rs),
+ *  one a machine without WebGL gets. On Linux also "Draw the launcher without the GPU" (the render marker, render.rs), on Wayland
+ *  "Switch to X11 when drawing is slow on Wayland" (render.rs' X11 switch),
  *  "WebKit's sandbox" (the sandbox marker, sandbox.rs) and, in the AppImage, "Kiln Launcher in the app menu"
  *  (desktop.rs). */
 function AppearanceCard() {
@@ -140,6 +144,10 @@ function AppearanceCard() {
     qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, render: next } : cur));
     toast.ok(on ? t("settings.appearance.nextNoGpu") : t("settings.appearance.nextGpu"));
   }).catch((e) => toast.error(e));
+  const setX11 = (on: boolean) => api.appRenderX11Set(on).then((next) => {
+    qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, render: next } : cur));
+    toast.ok(on ? t("settings.render.x11NextOn") : t("settings.render.x11NextOff"));
+  }).catch((e) => toast.error(e));
   const sandbox = info.data?.sandbox;
   const setSandbox = (on: boolean) => api.appSandboxSet(on).then((next) => {
     qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, sandbox: next } : cur));
@@ -150,6 +158,8 @@ function AppearanceCard() {
       <Toggle checked={!forced && s.data.animatedFire !== false} disabled={forced} onChange={(on) => void saveSettings(qc, () => ({ animatedFire: on }))}
         label={t("settings.appearance.fire")} hint={forced ? fireOff(info.data) : t("settings.appearance.fireHint")} />
       {render && <Toggle checked={render.marker} onChange={(on) => void setRender(on)} label={t("settings.appearance.noGpu")} hint={renderHint(render)} />}
+      {render?.x11 && <Toggle checked={render.x11.auto} disabled={render.x11.why === "yours"} onChange={(on) => void setX11(on)}
+        label={t("settings.render.x11")} hint={x11Hint(render.x11)} />}
       {sandbox && <Toggle checked={!sandbox.marker} onChange={(on) => void setSandbox(on)} label={t("settings.sandbox.label")} hint={sandboxHint(sandbox)} />}
       {desktop && <Toggle checked={desktop.on && desktop.installed} onChange={(on) => void setDesktop(on)} label={t("settings.appearance.desktop")} hint={desktopHint(desktop)} />}
     </Card>
@@ -176,6 +186,16 @@ function renderHint(r: RenderInfo): string {
     : sw ? t("settings.render.noGpu") : t("settings.render.gpu");
   // markerWhy: the backend's sentence, as it is
   return `${t("settings.render.intro")} ${now}${r.marker && r.markerWhy ? ` ${r.markerWhy}.` : ""}`;
+}
+
+/** What the X11 switch says (Linux, a Wayland session with XWayland): what it does, and how this start draws. */
+function x11Hint(x: X11Info): string {
+  const now = x.why === "yours" ? t("settings.render.x11Yours", { value: x.yours ?? "" })
+    : x.on ? t("settings.render.x11On")
+    : x.why === "tried" ? t("settings.render.x11Tried")
+    : x.why === "software" ? t("settings.render.x11Software")
+    : t("settings.render.x11Wayland");
+  return `${t("settings.render.x11Intro")} ${now}`;
 }
 
 /** What the sandbox switch says: what off means and when it applies, what WebKit does in this start and why, who turned
@@ -273,13 +293,18 @@ function KilnJsonCard() {
   const reset = useMutation({ mutationFn: (path: string) => api.configKilnReset(game!.id, path), onSuccess: onDoc, onError: (e) => toast.error(e) });
   if (!game) return null;
   const installed = status.data?.runtime.installed;
+  // entries with a card of their own
+  const own = (path: string) => path === "ui.language" || isGraphicsPath(path)
+    // shroudforge.* is the ShroudForge card's
+    || isShroudForgePath(path)
+    ;
   return (
     <Card title={t("settings.kilnJson.title")} sub={rich("settings.kilnJson.sub", { file: <span className="k-mono">kiln/kiln.json</span> })}>
       {status.data && !installed ? <EmptyState title={t("settings.kilnJson.notInstalled")} hint={t("settings.kilnJson.notInstalledHint")} /> :
         doc.isLoading ? <Skeleton lines={5} /> : doc.error ? <EmptyState title={t("settings.kilnJson.unavailable")} hint={errorText(doc.error)} /> : doc.data?.schema && (
           // ui.language has its own control (Language: components/LanguageSettings.tsx), graphics.* its own card (Graphics:
           // components/GraphicsSettings.tsx)
-          <SchemaForm schema={{ ...doc.data.schema, entries: doc.data.schema.entries.filter((e) => e.path !== "ui.language" && !isGraphicsPath(e.path)) }} values={doc.data.values} errors={doc.data.errors} disabled={set.isPending}
+          <SchemaForm schema={{ ...doc.data.schema, entries: doc.data.schema.entries.filter((e) => !own(e.path)) }} values={doc.data.values} errors={doc.data.errors} disabled={set.isPending}
             onChange={(path, value) => set.mutate({ path, value })} onReset={(path) => reset.mutate(path)} />
         )}
       {doc.data && <span className="k-hint">{t("settings.kilnJson.overrides")}</span>}

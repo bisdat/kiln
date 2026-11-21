@@ -17,6 +17,7 @@ std::atomic<uint32_t> g_interactive{0};
 std::atomic<bool> g_menu_open{false};
 std::atomic<bool> g_page_capture{false};
 std::atomic<bool> g_overlay_failed{false};  // ui.cpp: the overlay turned off during the session
+std::atomic<bool> g_menu_fell_back{false};  // overlay_guard.cpp: Kiln's menu fell back to the game's own Mods rows
 std::atomic<bool> g_text_input{false};      // ui.cpp: ImGui's text field flag of the last frame
 static uint64_t g_now = 1000;
 static bool g_attached = true, g_swapchain = true;

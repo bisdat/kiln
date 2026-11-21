@@ -1,57 +1,4 @@
 #nullable enable
-Kiln.TestKit.FakeSlot.Ref.get -> Kiln.ItemInstanceRef
-Kiln.TestKit.HarnessItems.SetGear(Kiln.ItemInstanceRef item, int? enhancements = null, int? unlocked = null, int? level = null, int? durability = null) -> void
-Kiln.TestKit.HarnessItems.SetPerkSlots(Kiln.ItemId item, int slots) -> void
-Kiln.TestKit.HarnessItems.SetUpgradeRolls(params double[]! rolls) -> void
-Kiln.TestKit.FakeInventorySlot
-Kiln.TestKit.FakeInventorySlot.Count.get -> uint
-Kiln.TestKit.FakeInventorySlot.Count.init -> void
-Kiln.TestKit.FakeInventorySlot.Deconstruct(out uint Item, out uint Count, out uint ItemEntity, out uint Holder, out uint InventoryPage, out byte SlotIndex) -> void
-Kiln.TestKit.FakeInventorySlot.Equals(Kiln.TestKit.FakeInventorySlot other) -> bool
-Kiln.TestKit.FakeInventorySlot.FakeInventorySlot(uint Item, uint Count = 1, uint ItemEntity = 0, uint Holder = 0, uint InventoryPage = 0, byte SlotIndex = 0) -> void
-Kiln.TestKit.FakeInventorySlot.FakeInventorySlot() -> void
-Kiln.TestKit.FakeInventorySlot.Holder.get -> uint
-Kiln.TestKit.FakeInventorySlot.Holder.init -> void
-Kiln.TestKit.FakeInventorySlot.InventoryPage.get -> uint
-Kiln.TestKit.FakeInventorySlot.InventoryPage.init -> void
-Kiln.TestKit.FakeInventorySlot.ItemEntity.get -> uint
-Kiln.TestKit.FakeInventorySlot.ItemEntity.init -> void
-Kiln.TestKit.FakeInventorySlot.Item.get -> uint
-Kiln.TestKit.FakeInventorySlot.Item.init -> void
-Kiln.TestKit.FakeInventorySlot.SlotIndex.get -> byte
-Kiln.TestKit.FakeInventorySlot.SlotIndex.init -> void
-Kiln.TestKit.FakeSlotClickResult
-Kiln.TestKit.FakeSlotClickResult.Deconstruct(out int Delivered, out bool Taken) -> void
-Kiln.TestKit.FakeSlotClickResult.Delivered.get -> int
-Kiln.TestKit.FakeSlotClickResult.Delivered.init -> void
-Kiln.TestKit.FakeSlotClickResult.Equals(Kiln.TestKit.FakeSlotClickResult other) -> bool
-Kiln.TestKit.FakeSlotClickResult.FakeSlotClickResult(int Delivered, bool Taken) -> void
-Kiln.TestKit.FakeSlotClickResult.FakeSlotClickResult() -> void
-Kiln.TestKit.FakeSlotClickResult.Taken.get -> bool
-Kiln.TestKit.FakeSlotClickResult.Taken.init -> void
-Kiln.TestKit.HarnessUiInventory
-Kiln.TestKit.HarnessUiInventory.Click(int index, Kiln.SlotButton button = Kiln.SlotButton.Left, Kiln.SlotModifiers modifiers = Kiln.SlotModifiers.None) -> Kiln.TestKit.FakeSlotClickResult
-Kiln.TestKit.HarnessUiInventory.ClickSubscriptions.get -> int
-Kiln.TestKit.HarnessUiInventory.Draw(Kiln.HudScreen screen, params Kiln.TestKit.FakeInventorySlot[]! slots) -> void
-Kiln.TestKit.HarnessUiInventory.Drawn.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeInventorySlot>!
-Kiln.TestKit.HarnessUiInventory.Hover(int? index) -> void
-Kiln.TestKit.HarnessUiInventory.MarkOf(int index) -> Kiln.SlotMark?
-Kiln.TestKit.KilnHarness.UiInventory.get -> Kiln.TestKit.HarnessUiInventory!
-~override Kiln.TestKit.FakeInventorySlot.Equals(object obj) -> bool
-override Kiln.TestKit.FakeInventorySlot.GetHashCode() -> int
-~override Kiln.TestKit.FakeInventorySlot.ToString() -> string
-~override Kiln.TestKit.FakeSlotClickResult.Equals(object obj) -> bool
-override Kiln.TestKit.FakeSlotClickResult.GetHashCode() -> int
-~override Kiln.TestKit.FakeSlotClickResult.ToString() -> string
-static Kiln.TestKit.FakeInventorySlot.operator !=(Kiln.TestKit.FakeInventorySlot left, Kiln.TestKit.FakeInventorySlot right) -> bool
-static Kiln.TestKit.FakeInventorySlot.operator ==(Kiln.TestKit.FakeInventorySlot left, Kiln.TestKit.FakeInventorySlot right) -> bool
-static Kiln.TestKit.FakeSlotClickResult.operator !=(Kiln.TestKit.FakeSlotClickResult left, Kiln.TestKit.FakeSlotClickResult right) -> bool
-static Kiln.TestKit.FakeSlotClickResult.operator ==(Kiln.TestKit.FakeSlotClickResult left, Kiln.TestKit.FakeSlotClickResult right) -> bool
-Kiln.TestKit.HarnessUiInventory.CloseScreen() -> void
-Kiln.TestKit.HarnessUiInventory.OpenBackpack(params Kiln.TestKit.FakeInventorySlot[]! slots) -> void
-Kiln.TestKit.HarnessUiInventory.OpenChest(Kiln.EntityId chest, params Kiln.TestKit.FakeInventorySlot[]! slots) -> void
-Kiln.TestKit.HarnessUiInventory.PanelsShown.get -> System.Collections.Generic.IReadOnlyList<string!>!
-Kiln.TestKit.HarnessUiInventory.Screen.get -> Kiln.InventoryScreen?
 const Kiln.TestKit.FakePhysicsCookHost.PendingReason = "game test pending: 16e-cc16e" -> string!
 Kiln.TestKit.FakePhysicsCookHost
 Kiln.TestKit.FakePhysicsCookHost.Cook(string! model, System.Collections.Generic.IEnumerable<string!>! needs, System.Collections.Generic.IReadOnlyDictionary<string!, byte[]!>! outputs, string? refusal = null) -> Kiln.TestKit.PhysicsCookResult!
@@ -79,4 +26,3 @@ static Kiln.TestKit.FakePhysicsCookHost.ContentHashOf(byte[]! bytes) -> string!
 static Kiln.TestKit.FakePhysicsCookHost.Features.get -> System.Collections.Generic.IReadOnlyList<string!>!
 static Kiln.TestKit.PhysicsCookResult.operator !=(Kiln.TestKit.PhysicsCookResult? left, Kiln.TestKit.PhysicsCookResult? right) -> bool
 static Kiln.TestKit.PhysicsCookResult.operator ==(Kiln.TestKit.PhysicsCookResult? left, Kiln.TestKit.PhysicsCookResult? right) -> bool
-Kiln.TestKit.KilnHarness.MenuFrame() -> int

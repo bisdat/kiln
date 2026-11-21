@@ -16,7 +16,7 @@ import { cookAgain } from "../../shell/cook";
 import { useEnsureProfile } from "../../shell/firstRun";
 import { filterRows, bulkPlan, type ModRow } from "../../shell/mods";
 import { notifyAdd } from "../../shell/notices";
-import { notRemovableText, removable, removeMany, removeMod, useRemoveCheck, useRemoveMany, withoutRows, type RemoveTarget } from "../../shell/removeMod";
+import { notRemovableText, removable, removeMany, removeMod, settingsNotes, useRemoveCheck, useRemoveMany, wholeMod, withoutRows, type RemoveTarget } from "../../shell/removeMod";
 import { NONE, ownerOf, pick as pickSelected, pruneSelection, setSelection, toggle as toggleSelected, useOwnedSelection } from "../../shell/selection";
 import { useMods } from "../../shell/useMods";
 import { withDropin } from "../../pages/profiles/dropins";
@@ -87,6 +87,16 @@ export default function Mods() {
   const [selMenu, setSelMenu] = useState(false);
   const [removingMany, setRemovingMany] = useState<ModRow[] | null>(null);
   const many = useRemoveMany(removingMany ?? [], mods.profileId, !!removingMany);
+  // "Remove its settings too": off each time a remove dialog opens (the settings stay by default)
+  const [rmSettings, setRmSettings] = useState(false);
+  useEffect(() => { setRmSettings(false); }, [removing, removingMany]);
+  const settingsRow = (many: boolean) => (
+    <Row id="remove-settings" title={t(many ? "shell.removeMod.settingsTooMany" : "shell.removeMod.settingsToo")}
+      sub={t(many ? "shell.removeMod.settingsTooManyHint" : "shell.removeMod.settingsTooHint")} a={t("deck.shared.change")}
+      aria-label={`${t(many ? "shell.removeMod.settingsTooMany" : "shell.removeMod.settingsToo")}: ${rmSettings ? t("deck.shared.on") : t("deck.shared.off")}`}
+      end={<Word tone={rmSettings ? "warn" : "idle"}>{rmSettings ? t("deck.shared.on") : t("deck.shared.off")}</Word>}
+      onClick={() => setRmSettings((on) => !on)} />
+  );
   useLayoutEffect(() => {
     setFocus(null); setSelMenu(false); setRemoving(null); setRemovingMany(null);
   }, [gid, mods.profileId]);
@@ -192,8 +202,9 @@ export default function Mods() {
               setRemovingMany(null);
               setFocus(null);
               try {
-                const r = await removeMany(qc, rows, many.users, async () => { mods.edit.update((p) => withoutRows(p, rows)); return mods.edit.flush(); });
+                const r = await removeMany(qc, rows, many.users, async () => { mods.edit.update((p) => withoutRows(p, rows)); return mods.edit.flush(); }, rmSettings);
                 setSelection(gid, owner, NONE);
+                if (r.settingsNotes.length) toast.info(t("shell.removeMod.settingsLeft"), r.settingsNotes.join(" "), { ms: 0 });
                 if (!r.left.length) toast.ok(t("deck.mods.removedMany", { count: r.removed.length }));
                 else toast.info(r.removed.length ? t("deck.mods.removedLeft", { removed: r.removed.length, left: r.left.length }) : t("deck.mods.nothingRemoved"),
                   t("deck.mods.leftDetail", { count: r.left.length, lines: r.left.map((l) => `${l.name}: ${l.why}`).join(" ") }), { ms: 0 });
@@ -207,6 +218,7 @@ export default function Mods() {
               return <li key={r.key}>{r.name}{o.length ? <span className="deck-dim"> {t("deck.mods.listsItToo", { count: o.length, names: o.join(", ") })}</span> : null}</li>;
             })}
           </ul>
+          {settingsRow(true)}
         </Dialog>
       )}
       {removing && (
@@ -218,12 +230,15 @@ export default function Mods() {
               setRemoving(null);
               setFocus(null);
               try {
-                await removeMod(qc, target, check.users.data, async () => { mods.drop(target.row); return mods.edit.flush(); });
+                const s = await removeMod(qc, target, check.users.data, async () => { mods.drop(target.row); return mods.edit.flush(); }, rmSettings);
                 toast.ok(t("deck.mods.removed", { name: target.row.name }));
+                const notes = settingsNotes(s);
+                if (notes) toast.info(t("shell.removeMod.settingsLeft"), notes, { ms: 0 });
               } catch (e) { toast.error(e); }
             }}>{t("common.remove")}</DeckButton>
           </>}>
           <p className="deck-note">{check.message}</p>
+          {wholeMod(removing) && settingsRow(false)}
         </Dialog>
       )}
     </Screen>

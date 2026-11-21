@@ -70,7 +70,8 @@ FLAGS = ['g++', '-std=c++20', '-O1', '-g', '-pthread', '-w', '-fsanitize=address
          '-I%s' % (ROOT / 'third_party')]
 WORLD_SOURCES = ['tests/ecs_writes_test.cpp', 'ecs_writes.cpp', 'ecs_write_hold.cpp', 'ecs_write_policy.cpp',
                  'ecs_engine.cpp', 'ecs_lookup.cpp', 'ecs_reads.cpp']
-ENGINE_SOURCES = ['engine.cpp', 'identity.cpp', 'resolve.cpp', 'gate.cpp', 'tests/host/memory_host.cpp']
+ENGINE_SOURCES = ['engine.cpp', 'identity.cpp', 'resolve.cpp', 'gate.cpp', 'resource_guard.cpp', 'invoke.cpp',
+                  'tests/host/memory_host.cpp', 'tests/host/invoke_host.cpp']
 
 
 def compile_one(source, obj):

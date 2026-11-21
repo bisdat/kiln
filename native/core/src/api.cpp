@@ -16,6 +16,7 @@
 #include "gates.h"
 #include "guard.h"
 #include "image.h"
+#include "launch.h"
 #include "log.h"
 #include "profile.h"
 #include "progress.h"
@@ -31,6 +32,7 @@
 #include "services/kiln_hooks.h"
 #include "services/service.h"
 #include "tasks_host.h"
+#include "hooks_protect_internal.h"
 
 // kiln.caps, the capability registry (services/caps.cpp)
 namespace kiln::caps {
@@ -59,6 +61,10 @@ void exiting();      // a normal exit: kiln.tasks seals every owner too (no wait
 void park(uint32_t wait_ms);  // a normal exit, later: no task body or done starts any more; bounded wait for the running
 const void* host_table();  // kiln.internal.tasks.host v1 (tasks_host.h); nullptr while kiln.tasks is not running
 }  // namespace kiln::tasks_svc
+
+namespace kiln::hooks {
+const KilnHooksInternalApi* internal_table();  // kiln.internal.hooks v1 (hooks_protect_internal.h; services/hooks_protect.cpp)
+}  // namespace kiln::hooks
 
 namespace kiln {
 namespace {
@@ -211,6 +217,13 @@ const void* lookup_service(KilnStr name, uint32_t min_version, bool services) {
     if (sv(name) == compat::kOriginalCodeService)
         return min_version <= compat::kOriginalCodeVersion ? compat::original_code_table() : nullptr;
     if (internal_name(sv(name)) && !services) return nullptr;
+    // kiln.internal.launch (launch_internal.h): the core's own, for Kiln's services only (the line above keeps it from
+    // every other view); nobody publishes the name (register_published).
+    if (sv(name) == KILN_LAUNCH_INTERNAL_SERVICE)
+        return min_version <= KILN_LAUNCH_INTERNAL_VERSION ? launch::internal_table() : nullptr;
+    // kiln.internal.hooks (hooks_protect_internal.h): the core's own, for Kiln's services only, like the one above.
+    if (sv(name) == KILN_HOOKS_INTERNAL_SERVICE)
+        return min_version <= KILN_HOOKS_INTERNAL_VERSION ? hooks::internal_table() : nullptr;
 
     // kiln.profile works in safe idle too: early native mods and the managed host read it to find their mods/configs.
     if (sv(name) == KILN_PROFILE_SERVICE) return min_version <= KILN_PROFILE_VERSION ? profile::table() : nullptr;
@@ -218,6 +231,9 @@ const void* lookup_service(KilnStr name, uint32_t min_version, bool services) {
     if (sv(name) == KILN_PROGRESS_SERVICE) return min_version <= KILN_PROGRESS_VERSION ? progress::table() : nullptr;
     // kiln.caps too: in safe idle it says why everything is off.
     if (sv(name) == KILN_CAPS_SERVICE) return min_version <= KILN_CAPS_VERSION ? caps::table() : nullptr;
+    // kiln.launch too (launch.h): the loaders read the frozen ShroudForge backend in their early phase, and in safe idle
+    // it says why there is none. Only the core's own table: nobody publishes the name (register_published).
+    if (sv(name) == KILN_LAUNCH_SERVICE) return min_version <= KILN_LAUNCH_VERSION ? launch::table() : nullptr;
     // kiln.hooks is the one service early plugins may use before hooks are decided (hooks::serve_early; its `available`
     // flag says whether it is on, and boot clears it again in safe idle).
     // Only the core's own table, never a published one of the same name.
@@ -243,9 +259,12 @@ const void* KILN_CALL api_service_services(KilnStr name, uint32_t min_version) {
 // kiln/services DLL.
 KilnResult register_published(KilnOwner owner, KilnStr name, const void* table, bool services) {
     if (!table || !name.ptr || name.len == 0) return KILN_ERR_INVALID_ARGUMENT;
-    // The managed host's lease table is the core's own: nobody publishes that name, not even a Kiln service.
-    if (sv(name) == KILN_TASKS_HOST_SERVICE) {
-        KLOG_W("service %s: reserved for the core, refused for %s", KILN_TASKS_HOST_SERVICE, reg::owner_name(owner).c_str());
+    // The managed host's lease table, kiln.launch, kiln.internal.launch and kiln.internal.hooks are the core's own: nobody
+    // publishes those names, not even a Kiln service.
+    if (sv(name) == KILN_TASKS_HOST_SERVICE || sv(name) == KILN_LAUNCH_SERVICE || sv(name) == KILN_LAUNCH_INTERNAL_SERVICE ||
+        sv(name) == KILN_HOOKS_INTERNAL_SERVICE) {
+        KLOG_W("service %.*s: reserved for the core, refused for %s", static_cast<int>(name.len), name.ptr,
+               reg::owner_name(owner).c_str());
         return KILN_ERR_INVALID_ARGUMENT;
     }
     const auto* h = static_cast<const KilnServiceHeader*>(table);
@@ -479,6 +498,16 @@ void load_one(const std::filesystem::path& file, const char* kind) {
             KLOG_W("service %s", text.c_str());
             caps::service_internal_refused(file, text);
         }
+    }
+    // The ShroudForge-dialect owner (launch_internal.h): kiln/plugins/kiln-sfi.dll of this very build
+    // (the stamp test grant_internal uses), when the frozen backend is kiln. Fixed before its kiln_plugin_main runs, so
+    // before the first tick; never moved, also when that main fails.
+    if (std::string_view(kind) == "plugin" && launch::wants_dialect_owner() && launch::is_dialect_dll(file, paths().plugins)) {
+        std::string why;
+        if (launch::designate(owner, service_stamp_trusted(dll_build_stamp(h)), why))
+            KLOG_I("plugin %s: the ShroudForge-dialect owner (%s)", name.c_str(), reg::owner_name(owner).c_str());
+        else
+            KLOG_W("plugin %s: not the ShroudForge-dialect owner: %s", name.c_str(), why.c_str());
     }
     KilnPluginInfo info{};
     info.size = sizeof info;

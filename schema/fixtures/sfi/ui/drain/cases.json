@@ -1,0 +1,1277 @@
+{
+  "format": 1,
+  "about": "How kiln-sfi's runtime drains <game>/kiln/sfi/ui/<launchId>/actions/ (kiln-sfi tests/runtime_ui_transport.rs) and Kiln.Ui's tests model it (managed/tests/Kiln.Ui.Tests/SfiBridgeFilesTests.cs): one copy of the cases for both. The launch is launch.json's launchId and planHash in wire/.",
+  "rules": [
+    "The runtime reads its own launch folder's actions/ only: it ignores launch.json (Kiln.Ui's receipt) and staging/, creates and writes nothing in the launch folder, and its one change there is removing entries of actions/ (the receipt contract: Kiln.Ui alone writes the receipt; Kiln.Ui's cleanup alone removes a launch folder).",
+    "A turn examines the first entriesPerTurn (bounds.json) entries the folder lists, whatever their names and whether they are valid (SF take(32)).",
+    "An entry is opened sharing read, write and delete (Rust's std default on Windows), so a writer's rename still in flight or its own read never makes it unreadable. An entry whose open fails with a sharing or lock violation (Windows ERROR_SHARING_VIOLATION 32 or ERROR_LOCK_VIOLATION 33: another program, an antivirus scan or a backup, holds it without sharing) stays, unread and not removed, for a later turn (a recorded difference: SF removes it). Any other entry that cannot be read (a folder, a vanished file, a removal already pending) is removed if it can be (SF); a folder stays.",
+    "An entry larger than recordBytes is removed unread (Kiln's bound; SF has none).",
+    "Not a JSON object, format not 1, kind not action, launchId or planHash not this launch's, ownerEpoch not an integer: removed, never called (Kiln's identity check before SF's).",
+    "modId or action not a string: removed (SF). value: a string is the callback's argument; anything else, or no value, is nil (SF as_str). Other fields are ignored (SF).",
+    "Owner not active, or ownerEpoch not that owner's current epoch: removed, never called. modId or action not an SF identifier: removed (SF).",
+    "No callback registered for modId and action: the entry stays for a later turn (SF).",
+    "Otherwise the callback runs with the value; an error is logged, not retried; then the entry is removed, best effort: if the removal fails it runs again next turn (SF)."
+  ],
+  "entryForms": {
+    "wire": "the bytes of wire/<file>; with set (members replaced or added, in place) and drop (members removed), the record is re-serialized as JSON; padTo: spaces appended until the file has that many bytes",
+    "text": "these UTF-8 bytes",
+    "folder": "an empty folder with this name"
+  },
+  "turnForms": {
+    "before": "register (add 'modId action' callbacks), deactivate (owners no longer active), epochs (owners' new epochs), removeFails (entries whose removal fails this turn), locked (entries another program holds open without sharing for the whole turn)",
+    "expect": "calls: the callbacks run this turn, in any order; remaining: the entries left, sorted; remainingCount when the order of the folder decides which; allCalls on the case: every call of every turn, in any order"
+  },
+  "cases": [
+    {
+      "name": "source-parity",
+      "why": "ShroudForge's own queue test (dispatch_mod_ui_actions.rs ui_queue_retains_only_requests_waiting_for_callback_registration) on Kiln records",
+      "owners": {
+        "world-editor": 3
+      },
+      "registered": [
+        "world-editor copy",
+        "world-editor failure"
+      ],
+      "failing": [
+        "world-editor failure"
+      ],
+      "entries": [
+        {
+          "name": "success",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "from UI"
+          }
+        },
+        {
+          "name": "failure",
+          "wire": "action-with-value.json",
+          "set": {
+            "action": "failure",
+            "value": "from UI"
+          }
+        },
+        {
+          "name": "waiting",
+          "wire": "action-with-value.json",
+          "set": {
+            "action": "later",
+            "value": "from UI"
+          }
+        },
+        {
+          "name": "inactive",
+          "wire": "action-with-value.json",
+          "set": {
+            "modId": "disabled-editor",
+            "value": "from UI"
+          }
+        },
+        {
+          "name": "invalid",
+          "wire": "action-with-value.json",
+          "set": {
+            "action": "../copy",
+            "value": "from UI"
+          }
+        },
+        {
+          "name": "malformed",
+          "text": "not JSON"
+        }
+      ],
+      "turns": [
+        {
+          "calls": [
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "from UI"
+            },
+            {
+              "modId": "world-editor",
+              "action": "failure",
+              "value": "from UI"
+            }
+          ],
+          "remaining": [
+            "waiting"
+          ]
+        },
+        {
+          "register": [
+            "world-editor later"
+          ],
+          "calls": [
+            {
+              "modId": "world-editor",
+              "action": "later",
+              "value": "from UI"
+            }
+          ],
+          "remaining": []
+        }
+      ]
+    },
+    {
+      "name": "stale-launch-plan-epoch",
+      "why": "another launch, another plan, an old or unknown epoch, a missing Kiln field: removed unread, never called",
+      "owners": {
+        "world-editor": 3
+      },
+      "registered": [
+        "world-editor copy"
+      ],
+      "entries": [
+        {
+          "name": "other-launch.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "launchId": "0000000000000001"
+          }
+        },
+        {
+          "name": "other-plan.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "planHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        },
+        {
+          "name": "old-epoch.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "ownerEpoch": 2
+          }
+        },
+        {
+          "name": "newer-epoch.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "ownerEpoch": 4
+          }
+        },
+        {
+          "name": "no-epoch.json",
+          "wire": "action-with-value.json",
+          "drop": [
+            "ownerEpoch"
+          ]
+        },
+        {
+          "name": "no-launch.json",
+          "wire": "action-with-value.json",
+          "drop": [
+            "launchId"
+          ]
+        },
+        {
+          "name": "format-2.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "format": 2
+          }
+        },
+        {
+          "name": "a-notice.json",
+          "wire": "notice.json"
+        },
+        {
+          "name": "sf-shaped.json",
+          "text": "{\"modId\":\"world-editor\",\"action\":\"copy\",\"value\":\"from UI\"}"
+        },
+        {
+          "name": "current.json",
+          "wire": "action-with-value.json"
+        }
+      ],
+      "turns": [
+        {
+          "calls": [
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "Block äß"
+            }
+          ],
+          "remaining": []
+        }
+      ]
+    },
+    {
+      "name": "values",
+      "why": "the optional value: a string is passed as it is, anything else or nothing is nil (SF reads value with as_str); unknown fields are ignored as SF ignores them",
+      "owners": {
+        "world-editor": 3,
+        "my.mod_2": 1
+      },
+      "registered": [
+        "world-editor copy",
+        "world-editor paste.v2_x-y",
+        "my.mod_2 copy"
+      ],
+      "entries": [
+        {
+          "name": "none.json",
+          "wire": "action-without-value.json"
+        },
+        {
+          "name": "number.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": 5
+          }
+        },
+        {
+          "name": "object.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": {
+              "a": 1
+            }
+          }
+        },
+        {
+          "name": "null.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": null
+          }
+        },
+        {
+          "name": "empty.json",
+          "wire": "action-empty-value.json"
+        },
+        {
+          "name": "escapes.json",
+          "wire": "action-escapes.json"
+        },
+        {
+          "name": "extra.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "callback": "0x7ff6"
+          }
+        }
+      ],
+      "turns": [
+        {
+          "calls": [
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": null
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": null
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": null
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": null
+            },
+            {
+              "modId": "my.mod_2",
+              "action": "copy",
+              "value": ""
+            },
+            {
+              "modId": "world-editor",
+              "action": "paste.v2_x-y",
+              "value": "q\"b\\s/ n\n r\r t\t b\b f\f c\u0001\u001f del </script>    😀 äß 中"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "Block äß"
+            }
+          ],
+          "remaining": []
+        }
+      ]
+    },
+    {
+      "name": "every-entry-and-the-record-bound",
+      "why": "SF reads every directory entry whatever its name; a folder cannot be read or removed and stays (it still counts toward the 32); an entry over recordBytes is removed unread (Kiln's bound), one of exactly recordBytes is read",
+      "owners": {
+        "world-editor": 3
+      },
+      "registered": [
+        "world-editor copy"
+      ],
+      "entries": [
+        {
+          "name": "note.txt",
+          "wire": "action-with-value.json"
+        },
+        {
+          "name": "noext",
+          "wire": "action-with-value.json"
+        },
+        {
+          "name": ".hidden.json",
+          "wire": "action-with-value.json"
+        },
+        {
+          "name": "x.tmp",
+          "wire": "action-with-value.json"
+        },
+        {
+          "name": "sub",
+          "folder": true
+        },
+        {
+          "name": "over.json",
+          "wire": "action-with-value.json",
+          "padTo": 2097153
+        },
+        {
+          "name": "at-bound.json",
+          "wire": "action-with-value.json",
+          "padTo": 2097152
+        }
+      ],
+      "turns": [
+        {
+          "calls": [
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "Block äß"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "Block äß"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "Block äß"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "Block äß"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "Block äß"
+            }
+          ],
+          "remaining": [
+            "sub"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "thirty-two-entries-per-turn",
+      "why": "a turn examines at most entriesPerTurn directory entries, valid or not, in the order the folder gives them",
+      "owners": {
+        "world-editor": 3
+      },
+      "registered": [
+        "world-editor copy"
+      ],
+      "entries": [
+        {
+          "name": "bad-0.json",
+          "text": "{\"format\":1,"
+        },
+        {
+          "name": "bad-1.json",
+          "text": "{\"format\":1,"
+        },
+        {
+          "name": "bad-2.json",
+          "text": "{\"format\":1,"
+        },
+        {
+          "name": "bad-3.json",
+          "text": "{\"format\":1,"
+        },
+        {
+          "name": "bad-4.json",
+          "text": "{\"format\":1,"
+        },
+        {
+          "name": "bad-5.json",
+          "text": "{\"format\":1,"
+        },
+        {
+          "name": "bad-6.json",
+          "text": "{\"format\":1,"
+        },
+        {
+          "name": "bad-7.json",
+          "text": "{\"format\":1,"
+        },
+        {
+          "name": "ok-00.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v00"
+          }
+        },
+        {
+          "name": "ok-01.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v01"
+          }
+        },
+        {
+          "name": "ok-02.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v02"
+          }
+        },
+        {
+          "name": "ok-03.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v03"
+          }
+        },
+        {
+          "name": "ok-04.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v04"
+          }
+        },
+        {
+          "name": "ok-05.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v05"
+          }
+        },
+        {
+          "name": "ok-06.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v06"
+          }
+        },
+        {
+          "name": "ok-07.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v07"
+          }
+        },
+        {
+          "name": "ok-08.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v08"
+          }
+        },
+        {
+          "name": "ok-09.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v09"
+          }
+        },
+        {
+          "name": "ok-10.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v10"
+          }
+        },
+        {
+          "name": "ok-11.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v11"
+          }
+        },
+        {
+          "name": "ok-12.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v12"
+          }
+        },
+        {
+          "name": "ok-13.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v13"
+          }
+        },
+        {
+          "name": "ok-14.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v14"
+          }
+        },
+        {
+          "name": "ok-15.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v15"
+          }
+        },
+        {
+          "name": "ok-16.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v16"
+          }
+        },
+        {
+          "name": "ok-17.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v17"
+          }
+        },
+        {
+          "name": "ok-18.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v18"
+          }
+        },
+        {
+          "name": "ok-19.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v19"
+          }
+        },
+        {
+          "name": "ok-20.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v20"
+          }
+        },
+        {
+          "name": "ok-21.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v21"
+          }
+        },
+        {
+          "name": "ok-22.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v22"
+          }
+        },
+        {
+          "name": "ok-23.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v23"
+          }
+        },
+        {
+          "name": "ok-24.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v24"
+          }
+        },
+        {
+          "name": "ok-25.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v25"
+          }
+        },
+        {
+          "name": "ok-26.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v26"
+          }
+        },
+        {
+          "name": "ok-27.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v27"
+          }
+        },
+        {
+          "name": "ok-28.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v28"
+          }
+        },
+        {
+          "name": "ok-29.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v29"
+          }
+        },
+        {
+          "name": "ok-30.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v30"
+          }
+        },
+        {
+          "name": "ok-31.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "v31"
+          }
+        }
+      ],
+      "turns": [
+        {
+          "remainingCount": 8
+        },
+        {
+          "remainingCount": 0
+        }
+      ],
+      "allCalls": [
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v00"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v01"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v02"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v03"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v04"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v05"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v06"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v07"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v08"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v09"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v10"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v11"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v12"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v13"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v14"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v15"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v16"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v17"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v18"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v19"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v20"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v21"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v22"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v23"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v24"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v25"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v26"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v27"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v28"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v29"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v30"
+        },
+        {
+          "modId": "world-editor",
+          "action": "copy",
+          "value": "v31"
+        }
+      ]
+    },
+    {
+      "name": "thirty-two-including-invalid",
+      "why": "exactly 32 entries, half of them malformed or stale: one turn handles all of them",
+      "owners": {
+        "world-editor": 3
+      },
+      "registered": [
+        "world-editor copy"
+      ],
+      "entries": [
+        {
+          "name": "bad-0.json",
+          "text": "[1,2"
+        },
+        {
+          "name": "bad-1.json",
+          "text": ""
+        },
+        {
+          "name": "bad-2.json",
+          "text": "[1,2"
+        },
+        {
+          "name": "bad-3.json",
+          "text": ""
+        },
+        {
+          "name": "bad-4.json",
+          "text": "[1,2"
+        },
+        {
+          "name": "bad-5.json",
+          "text": ""
+        },
+        {
+          "name": "bad-6.json",
+          "text": "[1,2"
+        },
+        {
+          "name": "bad-7.json",
+          "text": ""
+        },
+        {
+          "name": "stale-0.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "ownerEpoch": 1
+          }
+        },
+        {
+          "name": "stale-1.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "ownerEpoch": 1
+          }
+        },
+        {
+          "name": "stale-2.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "ownerEpoch": 1
+          }
+        },
+        {
+          "name": "stale-3.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "ownerEpoch": 1
+          }
+        },
+        {
+          "name": "stale-4.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "ownerEpoch": 1
+          }
+        },
+        {
+          "name": "stale-5.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "ownerEpoch": 1
+          }
+        },
+        {
+          "name": "stale-6.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "ownerEpoch": 1
+          }
+        },
+        {
+          "name": "stale-7.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "ownerEpoch": 1
+          }
+        },
+        {
+          "name": "ok-00.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w00"
+          }
+        },
+        {
+          "name": "ok-01.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w01"
+          }
+        },
+        {
+          "name": "ok-02.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w02"
+          }
+        },
+        {
+          "name": "ok-03.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w03"
+          }
+        },
+        {
+          "name": "ok-04.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w04"
+          }
+        },
+        {
+          "name": "ok-05.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w05"
+          }
+        },
+        {
+          "name": "ok-06.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w06"
+          }
+        },
+        {
+          "name": "ok-07.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w07"
+          }
+        },
+        {
+          "name": "ok-08.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w08"
+          }
+        },
+        {
+          "name": "ok-09.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w09"
+          }
+        },
+        {
+          "name": "ok-10.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w10"
+          }
+        },
+        {
+          "name": "ok-11.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w11"
+          }
+        },
+        {
+          "name": "ok-12.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w12"
+          }
+        },
+        {
+          "name": "ok-13.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w13"
+          }
+        },
+        {
+          "name": "ok-14.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "w14"
+          }
+        },
+        {
+          "name": "waiting.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "action": "later"
+          }
+        }
+      ],
+      "turns": [
+        {
+          "calls": [
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w00"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w01"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w02"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w03"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w04"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w05"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w06"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w07"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w08"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w09"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w10"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w11"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w12"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w13"
+            },
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "w14"
+            }
+          ],
+          "remaining": [
+            "waiting.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "delete-failure-replays",
+      "why": "removal is best effort, as in SF: a called request whose removal failed is called again next turn; no hidden exactly-once dedup",
+      "owners": {
+        "world-editor": 3
+      },
+      "registered": [
+        "world-editor copy"
+      ],
+      "entries": [
+        {
+          "name": "r.json",
+          "wire": "action-with-value.json"
+        },
+        {
+          "name": "m.json",
+          "text": "not JSON"
+        }
+      ],
+      "turns": [
+        {
+          "removeFails": [
+            "r.json",
+            "m.json"
+          ],
+          "calls": [
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "Block äß"
+            }
+          ],
+          "remaining": [
+            "m.json",
+            "r.json"
+          ]
+        },
+        {
+          "calls": [
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "Block äß"
+            }
+          ],
+          "remaining": []
+        }
+      ]
+    },
+    {
+      "name": "waiting-then-disabled",
+      "why": "a request waiting for its callback is removed, never called, once its owner is no longer active",
+      "owners": {
+        "world-editor": 3
+      },
+      "registered": [],
+      "entries": [
+        {
+          "name": "w.json",
+          "wire": "action-with-value.json"
+        }
+      ],
+      "turns": [
+        {
+          "calls": [],
+          "remaining": [
+            "w.json"
+          ]
+        },
+        {
+          "deactivate": [
+            "world-editor"
+          ],
+          "calls": [],
+          "remaining": []
+        }
+      ]
+    },
+    {
+      "name": "waiting-then-reloaded",
+      "why": "a request waiting for its callback is removed, never called, once its owner's epoch moves on (a live reload re-registers callbacks)",
+      "owners": {
+        "world-editor": 3
+      },
+      "registered": [],
+      "entries": [
+        {
+          "name": "w.json",
+          "wire": "action-with-value.json"
+        }
+      ],
+      "turns": [
+        {
+          "calls": [],
+          "remaining": [
+            "w.json"
+          ]
+        },
+        {
+          "epochs": {
+            "world-editor": 4
+          },
+          "register": [
+            "world-editor copy"
+          ],
+          "calls": [],
+          "remaining": []
+        }
+      ]
+    },
+    {
+      "name": "locked-entry-waits",
+      "why": "an entry another program holds open without sharing (an antivirus scan, a backup) fails to open with a sharing or lock violation: it stays, unread and never removed, and runs on a later turn once it is free (SF would remove it and lose the request)",
+      "owners": {
+        "world-editor": 3
+      },
+      "registered": [
+        "world-editor copy"
+      ],
+      "entries": [
+        {
+          "name": "held.json",
+          "wire": "action-with-value.json"
+        },
+        {
+          "name": "held-malformed.json",
+          "text": "not JSON"
+        },
+        {
+          "name": "free.json",
+          "wire": "action-with-value.json",
+          "set": {
+            "value": "free"
+          }
+        }
+      ],
+      "turns": [
+        {
+          "locked": [
+            "held.json",
+            "held-malformed.json"
+          ],
+          "calls": [
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "free"
+            }
+          ],
+          "remaining": [
+            "held-malformed.json",
+            "held.json"
+          ]
+        },
+        {
+          "calls": [
+            {
+              "modId": "world-editor",
+              "action": "copy",
+              "value": "Block äß"
+            }
+          ],
+          "remaining": []
+        }
+      ]
+    }
+  ]
+}
