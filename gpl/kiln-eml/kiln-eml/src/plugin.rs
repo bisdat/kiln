@@ -590,7 +590,10 @@ fn aside_outcome(why: &str, who: &str, shroudforge: bool) -> Outcome {
         let ids = json.as_deref().map(discover::profile_ids).unwrap_or_default();
         let mut extra = discover::aside_dropins(&roots[0], &kiln, &ids, &out.mods, who, server);
         if let Some(line) = discover::aside_dropins_log(&extra, &roots[0], server) {
-            klog(2, &line);
+            // on a client a package switched off in ShroudForge's own menu is usually the player's choice: info there.
+            // A server (nothing switches it on), or EML mods in kiln/eml/mods (ShroudForge never reads them): a warning.
+            let warn = server || extra.iter().any(|e| e.source == "kiln-dropin");
+            klog(if warn { 2 } else { 3 }, &line);
         }
         extra.retain(|e| server || e.source == "kiln-dropin");
         out.mods.extend(extra);
