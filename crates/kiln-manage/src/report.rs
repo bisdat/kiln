@@ -2007,6 +2007,12 @@ pub fn build(input: &ReportInput) -> Report {
             let off: Vec<String> = engine_mod_lines(st).into_iter()
                 .filter(|(_, state, _)| matches!(state.as_deref(), Some("off-in-shroudforge" | "not-loaded")))
                 .map(|(id, _, _)| id).collect();
+            // dev.30.3: also the drop-ins nothing runs (source game-mods or kiln-dropin), which no profile names
+            let dropins = st.get("mods").and_then(|m| m.as_array()).is_some_and(|mods| mods.iter().any(|m| {
+                matches!(jstr(m.get("state")).as_deref(), Some("off-in-shroudforge" | "not-loaded"))
+                    && jstr(m.get("source")).is_some_and(|s| s != "profile")
+            }));
+            let (one, many) = if dropins { ("EML mod", "EML mods") } else { ("EML mod of the profile", "EML mods of the profile") };
             if off.is_empty() {
                 cx.find("eml-under-shroudforge", Level::Info, format!(
                     "{} stood aside at the last start for ShroudForge, which Kiln hosted: ShroudForge alone writes the game data then, \
@@ -2015,7 +2021,7 @@ pub fn build(input: &ReportInput) -> Report {
                 cx.find("eml-under-shroudforge", Level::Warning, format!(
                     "{} did not run at the last start: Kiln hosted ShroudForge, which runs the EML mods then, and {} switched off in \
                      ShroudForge or missing from its mods folder: {}. The lines under {} in \"The last start\" say what to do for each.",
-                    plural(off.len(), "EML mod of the profile", "EML mods of the profile"), if off.len() == 1 { "this one is" } else { "these are" },
+                    plural(off.len(), one, many), if off.len() == 1 { "this one is" } else { "these are" },
                     off.join(", "), e.plugin));
             }
         } else if stood_aside(st) && e.kind == ModKind::Shroudlink

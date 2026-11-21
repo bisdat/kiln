@@ -222,12 +222,41 @@ only gets copies:
   revision and the expected text still match.
 Game evidence: [docs/re/chat-input.md](../../re/chat-input.md#tab-completion-cursor-node-and-rectangle).
 
-After them: byte 1032 is `chat_completion` (Kiln.Ui's own chat Tab completion, refused from native plugins), and
-`subscribe_pointer_press` at 1040 (0.2.0-dev.30; the table is 1048 bytes; check `header.size` and the pointer):
+After them: byte 1032 is `chat_completion` (Kiln.Ui's own chat Tab completion, refused from native plugins),
+`subscribe_pointer_press` at 1040 (0.2.0-dev.30; check `header.size` and the pointer) and `chat_search` at 1048
+(0.2.0-dev.30.3, Kiln.Ui's own Ctrl+R search, refused from native plugins: [below](#chat-searchs-slot-internal-github-issue-44);
+the table is 1056 bytes). `subscribe_pointer_press`:
 `fn(const KilnUiPointerPress*)` once per left or right press over the game window (its raw record and its window message
 are paired), on the window thread, only while Kiln does not capture input and the cursor is not over a Kiln panel; an
 answer of `KILN_UI_POINTER_TAKE` keeps the press from the game, its release always reaches it. A fault in `fn` removes the
 subscription. The core's `kiln.ui.inventory` (slot clicks, `kiln_ui_inventory.h`) is its first user.
+
+## Chat search's slot (internal, GitHub issue 44)
+
+One slot after `subscribe_pointer_press`: `chat_search` at byte offset 1048 (0.2.0-dev.30.3; the table is 1056 bytes,
+1048 before). First built by bisdat (pull request 106). It is Kiln.Ui's transport for Ctrl+R reverse search of the chat
+history ([chat-history.md](../chat-history.md#ctrlr-reverse-search-issue-44-phase-1c)), **not** an API: a call from a
+native plugin is refused (`KILN_ERR_UNAVAILABLE`), and `KilnUiChatSearch`'s layout (10572 bytes) may change with
+Kiln.Ui; a call whose `size` is smaller is refused (`KILN_ERR_INVALID_ARGUMENT`). It answers only while
+`ui.chatHistory` is on and the chat field's rectangle is verified (the sigdb feature `chat.ui.completion` and the
+rectangle constants resolved); otherwise `KILN_ERR_UNAVAILABLE` and Ctrl+R stays the game's. The game's UI thread owns
+the search and the one replace of the editor; the window thread only queues keys and characters, and the render thread
+only gets copies:
+- operation 1: a snapshot. `active` (search is open), `suppressed` (Tab completion held off after an accepted line),
+  the query (`query`, `query_len`, at most 256 bytes), the `field` and the editor `revision` the search started on,
+  the field's rectangle (`x`, `y`, `width`, `height`), the number of matches (`total`), the selected match
+  (`selected`), up to ten rows from match `first` (`count`, `lines`, NUL-padded UTF-8), and in `index` an opaque
+  token for this list of matches: it changes with every query edit and every new search. Refused while the field or
+  its rectangle no longer matches the search;
+- operation 2: a clicked row. `index` is the absolute match, `field` and `revision` come from the snapshot and
+  `selected` carries the snapshot's token. A stale field, revision or token is refused, and the click is checked again
+  on the UI thread after that frame's queued keys, so it never picks a line from a list the player no longer sees. An
+  accepted row goes into the editor with `EditSetText`, unsent, as Enter does;
+- operation 3: Kiln.Ui's handshake that turns on Ctrl+R. Without it (an older Kiln.Ui.dll) Ctrl+R stays the game's.
+
+No text is logged or kept: the search reads the history already in memory (which never holds the lines the
+sensitive-command filter drops), the query lives only while the search is open, and the one log line (an accept refused
+by the editor checks) names no text.
 
 ## The overlay's drawing off: kiln.json and a session that turned it off (0.2.0-dev.29.18)
 

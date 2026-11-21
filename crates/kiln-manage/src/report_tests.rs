@@ -969,6 +969,12 @@ fn eml_aside_for_hosted_shroudforge_is_no_own_loader() {
     assert_eq!(n.level, Level::Warning);
     assert!(n.text.starts_with("2 EML mods of the profile did not run") && n.text.contains(": b, c. "), "{}", n.text);
     assert!(!ids(&r).contains(&"own-loader"));
+    // a server without a profile (dev.30.3): the drop-ins nothing runs are no mods of the profile
+    let dropins = r#"{"id":"e","source":"game-mods","state":"off-in-shroudforge","reason":"x"},{"id":"f","source":"kiln-dropin","state":"not-loaded","reason":"y"}"#;
+    f.w("kiln/state/eml.json", eml(BOOT, WHY, dropins).as_bytes());
+    let r = build(&f.input());
+    let n = finding(&r, "eml-under-shroudforge");
+    assert!(n.level == Level::Warning && n.text.starts_with("2 EML mods did not run") && n.text.contains(": e, f. "), "{}", n.text);
     // EML's own loader in a start where Kiln hosts ShroudForge too: still the own-loader problem
     f.w("kiln/state/eml.json", eml(BOOT, "dbghelp.dll is loaded", on).as_bytes());
     assert!(ids(&build(&f.input())).contains(&"own-loader"));
