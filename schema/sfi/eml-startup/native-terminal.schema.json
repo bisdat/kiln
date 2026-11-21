@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-startup/native-terminal.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "description": "kiln.eml.startup v1 native_terminal: kiln-sfi's native terminal for this launch, pushed once after every planned DLL reached its outcome (or the startup deadline passed, or the loader was never armed). kiln-eml reads it before its startup pass: a withdrawn package and its dependents get no startup data. kiln-eml refuses a record that fails this schema, whose planId is not the plan's, whose dlls are not attach's planned_dlls in number, or that names a package the plan does not list. Fields in this order. Writers clamp free text to its maxLength at a character boundary and chains to their first 64 entries; dlls and ids are never clamped (their bounds cover the plan reader's).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "planId",
+    "notArmed",
+    "deadlinePassed",
+    "coherent",
+    "withdrawn",
+    "dlls"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "planId": {
+      "$ref": "#/$defs/uuid"
+    },
+    "notArmed": {
+      "type": "boolean",
+      "description": "The loader was never armed (conclude_without_loader: the native policy refuses, the plan has no DLL, the plan's native part cannot be read, or the loader thread could not start): no DLL reached the loader, every DLL is refused, the deadline did not pass and the run is coherent; withdrawn names every candidate that ships native code (a package that only registers DLLs from its Lua too) and their dependents. A run made at Kiln's plugin step (kiln-sfi's early phase did not run) has no attach, so it pushes no terminal. A refused or missing witness is an armed run whose DLLs are all refused, with coherent false."
+    },
+    "deadlinePassed": {
+      "type": "boolean",
+      "description": "The startup deadline passed before every planned DLL finished."
+    },
+    "coherent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ok"
+      ],
+      "description": "witness_recheck after the terminals. ok false carries the reason; kiln-eml's own check before its pass stays the authority.",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "if": {
+        "properties": {
+          "ok": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "text"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    "withdrawn": {
+      "type": "array",
+      "maxItems": 4096,
+      "description": "Packages that will not run, in plan order: a DLL of the package did not load (refused, faulted, timed out or withdrawn), or a dependency was withdrawn (Lua-only packages too). A package can be withdrawn while an earlier DLL of it stays loaded. code is kiln-sfi's word (sfi-state's code grammar); kiln-eml writes such a package's outcome row as native-refused with this text and chain.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "code",
+          "text",
+          "chain"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/sfId"
+          },
+          "code": {
+            "$ref": "#/$defs/code"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "chain": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/$defs/sfId"
+            },
+            "description": "The dependency chain from this package to the package that failed, nearest first (the failed package last); empty for that package itself; never its own id. A longer chain keeps its first 64 entries."
+          }
+        }
+      }
+    },
+    "dlls": {
+      "type": "array",
+      "maxItems": 16384,
+      "description": "Exactly one per planned DLL (attach's planned_dlls), in plan order.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "statusId",
+          "modId",
+          "outcome"
+        ],
+        "properties": {
+          "statusId": {
+            "type": "string",
+            "maxLength": 65536,
+            "pattern": "^dll:[^:A-Z\\u0000-\\u001f]+:[^A-Z\\u0000-\\u001f]+$",
+            "description": "dll:<package folder>:<path>, lower case, as kiln-sfi's native plan names it."
+          },
+          "modId": {
+            "$ref": "#/$defs/sfId"
+          },
+          "outcome": {
+            "enum": [
+              "loaded",
+              "foreign-owned",
+              "refused",
+              "faulted",
+              "timed-out",
+              "withdrawn"
+            ],
+            "description": "loaded: this run loaded it. foreign-owned: another loader already had the same file (never initialized again). refused: refused before it could run. faulted: the load or its initializer failed. timed-out: not finished at the deadline. withdrawn: not attempted (an earlier DLL of its package or a dependency failed)."
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "notArmed": {
+            "const": true
+          }
+        },
+        "required": [
+          "notArmed"
+        ]
+      },
+      "then": {
+        "properties": {
+          "deadlinePassed": {
+            "const": false
+          },
+          "coherent": {
+            "properties": {
+              "ok": {
+                "const": true
+              }
+            }
+          },
+          "dlls": {
+            "items": {
+              "properties": {
+                "outcome": {
+                  "const": "refused"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "deadlinePassed": {
+            "const": false
+          }
+        },
+        "required": [
+          "deadlinePassed"
+        ]
+      },
+      "then": {
+        "properties": {
+          "dlls": {
+            "items": {
+              "properties": {
+                "outcome": {
+                  "not": {
+                    "const": "timed-out"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sfId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,80}$",
+      "description": "A ShroudForge identifier, as sfi-state.schema.json's sfId."
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$",
+      "description": "A stable machine word (kebab-case), as sfi-state.schema.json's code."
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "The launch plan's plan_id, canonical lower-case UUID text."
+    }
+  }
+}

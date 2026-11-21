@@ -7,11 +7,19 @@
 
 pub mod assets;
 pub mod commands;
+/// The optional Discord features beside their commands: Rich Presence, the posts' refresh, reports, testers.
+pub mod community;
 pub mod deck;
+/// The launcher's own messages when its page cannot start (Linux: GTK, else the desktop's tools).
+#[cfg(target_os = "linux")]
+pub mod dialog;
+pub mod dialog_folder;
 /// The window's app id and icon on Linux, the AppImage's app menu entry.
 pub mod desktop;
 pub mod distribution;
 pub mod events;
+/// The launcher's own files next to it (a Windows install's exe and uninstaller), looked at once per start (dev.29.18).
+pub mod own_files;
 /// The process's data folder: found once, its lock, and the hold while a move runs (dev.26).
 pub mod folder;
 /// The backend timing harness (ignored tests; tools/launcher/perf.sh).
@@ -21,6 +29,8 @@ mod perf;
 pub mod render;
 /// "Open folder": a path made safe for Explorer / the file manager, a file shown selected (app_open_path).
 pub mod reveal;
+/// WebKit's process sandbox on Linux: the player's choice, the probe of bwrap (dev.29.18).
+pub mod sandbox;
 pub mod selftest;
 /// The self-update: only in direct builds (feature `self-update`); the Nexus Mods build compiles none of it.
 #[cfg(feature = "self-update")]
@@ -41,13 +51,25 @@ pub fn nxm_entry(url: &str) -> bool {
     commands::nexus::nxm_entry(url)
 }
 
+/// The launcher was started with a kiln:// link (Crucible): queue it. False: exit, the running launcher takes it.
+pub fn link_entry(url: &str) -> bool {
+    commands::crucible::link_entry(url)
+}
+
 pub fn run() {
+    panic_to_log();
+    // (feature sfi: kiln-mode activations run the archive inspector the Kiln installed in each game
+    // folder brought, its version and SHA-256 from that install: kiln_manage::sfi_inspection::Installed)
+    #[cfg(feature = "sfi")]
+    kiln_manage::profile::sfi::use_installed_inspector();
     let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
     #[cfg(feature = "self-update")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder
         .register_uri_scheme_protocol("kiln-asset", |_ctx, req| assets::serve(req.uri().path()))
         .setup(|app| {
+            // the release version the relay hears, as About shows it (commands/community.rs)
+            commands::community::set_version(app.handle());
             // the window exists: the render watchdog's clock starts, software mode reaches the webview (render.rs)
             render::window_created(app.handle());
             // the data folder first (commands/data_folder.rs): found once, its lock, an unfinished move. The start-up
@@ -69,6 +91,7 @@ pub fn run() {
             commands::app::app_settings_set,
             commands::app::app_open_path,
             commands::app::app_open_url,
+            commands::app::app_open_discord,
             commands::app::task_list,
             commands::app::task_get,
             commands::app::task_cancel,
@@ -103,6 +126,7 @@ pub fn run() {
             commands::library::library_import,
             commands::library::library_remove,
             commands::library::library_remove_many,
+            commands::library::library_remove_settings,
             commands::library::library_unused,
             commands::library::library_users,
             commands::library::library_lint,
@@ -179,6 +203,10 @@ pub fn run() {
             commands::config::config_kiln_read,
             commands::config::config_kiln_set,
             commands::config::config_kiln_reset,
+            // Settings' ShroudForge card
+            commands::sfi_backend::sfi_backend_read,
+            commands::sfi_backend::sfi_backend_preview,
+            commands::sfi_backend::sfi_backend_set,
             commands::app::app_assets_status,
             commands::app::app_assets_import,
             commands::server::server_console_open,
@@ -231,6 +259,8 @@ pub fn run() {
             commands::cook::boot_snapshot_run,
             commands::logs::report_save,
             commands::logs::report_summary,
+            commands::logs::report_preview,
+            commands::logs::report_note,
             commands::data_folder::data_folder_get,
             commands::data_folder::data_folder_size,
             commands::data_folder::data_folder_check,
@@ -241,14 +271,111 @@ pub fn run() {
             commands::data_folder::data_folder_restart,
             commands::app::app_started,
             commands::app::app_render_set,
+            commands::app::app_render_x11_set,
+            commands::app::app_render_report,
             commands::updates::updates_check,
             commands::app::app_desktop_set,
-            commands::app::app_locales
+            commands::app::app_locales,
+            commands::app::app_sandbox_set,
+            commands::app::app_dialog_default,
+            commands::app::app_dialog_remember,
+            commands::vendor::vendor_status,
+            commands::vendor::vendor_license,
+            commands::vendor::vendor_download,
+            commands::vendor::vendor_remove,
+            commands::community::community_settings_get,
+            commands::community::community_settings_set,
+            commands::community::community_status,
+            commands::community::community_feed,
+            commands::community::community_check_member,
+            commands::community::community_signout,
+            commands::community::community_signin_start,
+            commands::community::community_signin_poll,
+            commands::community::community_signin_cancel,
+            commands::community::community_posts,
+            commands::community::community_post_seen,
+            commands::community::community_post_solved,
+            commands::community::community_post_delete,
+            commands::community::community_presence_facts,
+            commands::community::community_report_prepare,
+            commands::community::community_report_send,
+            commands::community::tester_status,
+            commands::community::tester_join,
+            commands::community::tester_leave,
+            commands::community::tester_result_set,
+            commands::community::tester_results_send,
+            commands::community::community_steam_keyboard,
+            commands::pack::pack_inspect,
+            commands::pack::pack_install,
+            commands::pack::pack_instance,
+            commands::pack::pack_instances,
+            commands::pack::pack_update_plan,
+            commands::pack::pack_update,
+            commands::pack::pack_undo,
+            commands::pack::pack_uninstall,
+            commands::pack::pack_build,
+            commands::pack::pack_verify,
+            commands::pack::pack_diff,
+            commands::pack::pack_secret_scan,
+            commands::pack::pack_peek_format,
+            commands::pack::pack_local_files,
+            commands::pack::pack_local_write,
+            commands::pack::pack_local_save,
+            commands::pack::pack_check,
+            commands::crucible::crucible_status,
+            commands::crucible::crucible_open,
+            commands::crucible::crucible_install,
+            commands::crucible::crucible_updates,
+            commands::crucible::crucible_update_plan,
+            commands::crucible::crucible_update,
+            commands::crucible::crucible_share,
+            commands::crucible::crucible_shared,
+            commands::crucible::crucible_trust,
+            commands::crucible::crucible_trust_set,
+            commands::crucible::crucible_links,
+            commands::crucible::crucible_resume,
+            commands::crucible::crucible_clipboard,
+            commands::studio::studio_list,
+            commands::studio::studio_create,
+            commands::studio::studio_get,
+            commands::studio::studio_save,
+            commands::studio::studio_delete,
+            commands::studio::studio_credits_set,
+            commands::studio::studio_capture,
+            commands::studio::studio_capture_set,
+            commands::studio::studio_order,
+            commands::studio::studio_layer_files,
+            commands::studio::studio_layer_read,
+            commands::studio::studio_layer_write,
+            commands::studio::studio_layer_delete,
+            commands::studio::studio_layer_set,
+            commands::studio::studio_layer_lint,
+            commands::studio::studio_pick,
+            commands::studio::studio_fields,
+            commands::studio::studio_categories,
+            commands::studio::studio_catalog_status,
+            commands::studio::studio_catalog_ensure,
+            commands::studio::studio_analyze,
+            commands::studio::studio_test,
+            commands::studio::studio_test_report,
+            commands::studio::studio_test_end,
+            commands::studio::studio_build,
+            commands::studio::studio_publish_check,
+            commands::studio::studio_publish,
+            commands::studio::studio_set_visibility,
+            commands::studio::studio_server_pack,
+            // the check before Play
+            commands::sfi::launch_prepare,
+            commands::sfi::launch_confirm,
+            commands::sfi::launch_cancel,
+            commands::sfi::eml_data_base
         ]))
         .build(tauri::generate_context!())
         .expect("error while building the Kiln Launcher")
         .run(|_, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                // a clean exit after the page started is no DMA-BUF crash: its start guard goes (render.rs)
+                render::leaving();
                 watch::leaving();
                 leave_for_sure();
                 deck::gamepad::stop();
@@ -276,6 +403,14 @@ pub(crate) fn snapshot_channel(version: &str) -> &str {
 }
 
 pub(crate) fn after_snapshot(app: &tauri::AppHandle) {
+    // the start's own lines (how the window is drawn, WebKit's sandbox) came before the gate opened
+    commands::app::flush_early_log();
+    // a message's "off" from the start before, when its marker could not be written then
+    sandbox::after_gate();
+    // WebKit's DMA-BUF renderer: the sticky marker for a start that died with it, or for the watchdog's restart (render.rs)
+    render::after_gate();
+    // an antivirus that took the launcher's uninstaller (or its exe while it ran): launcher.log says it (own_files.rs)
+    own_files::start();
     // the installed runtime's and the bundles' sha256s from the last run (a start does not hash 1.5 GB again)
     if let Ok(d) = state::dirs() {
         kiln_manage::filecache::persist_at(&state::file_hashes(&d));
@@ -291,6 +426,8 @@ pub(crate) fn after_snapshot(app: &tauri::AppHandle) {
     commands::modpack::watch_last_server(app);
     // nxm:// links (Nexus Mods' Mod Manager Download): the instance lock and the link inbox (commands/nexus.rs)
     commands::nexus::start(app);
+    // kiln:// links (Crucible packs): the instance lock, the registration while Crucible is on, the inbox (commands/crucible.rs)
+    commands::crucible::start(app);
     // the AppImage's app menu entry and icons, so taskbars and docks show Kiln's icon (desktop.rs)
     std::thread::spawn(desktop::start);
     // self-update: the state for this start, then a check after 8 s and every 6 hours (crate::selfupdate)
@@ -306,6 +443,26 @@ pub(crate) fn after_snapshot(app: &tauri::AppHandle) {
 /// Every command passes the data folder's gate first (folder.rs): while the pointer is broken, another launcher moves
 /// the folder, or this one moves it, only the commands that do not reach the folder answer; the others are refused
 /// with the reason before they run.
+/// A panic in any of the launcher's threads goes into launcher.log too (a support report holds it), after the default
+/// hook's stderr line. Once per thread at a time: a panic while logging one is not logged again.
+fn panic_to_log() {
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        prev(info);
+        thread_local! { static LOGGING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+        if LOGGING.with(|l| l.replace(true)) {
+            return;
+        }
+        let thread = std::thread::current();
+        let msg = info.payload().downcast_ref::<&str>().map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "(no message)".into());
+        let at = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_else(|| "?".into());
+        commands::app::launcher_log("panic", &format!("thread '{}' panicked at {at}: {msg}", thread.name().unwrap_or("unnamed")));
+        LOGGING.with(|l| l.set(false));
+    }));
+}
+
 fn gated<R: tauri::Runtime>(handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     move |invoke| {
         if let Some(e) = folder::current().command_refusal(invoke.message.command()) {

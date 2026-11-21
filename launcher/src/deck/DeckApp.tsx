@@ -31,6 +31,14 @@ import Kiln from "./screens/Kiln";
 import Help from "./screens/Help";
 import Settings from "./screens/Settings";
 import { t, useT } from "../i18n";
+import DeckCommunity from "../community/DeckCommunity";
+import { CommunityDeckHost } from "../community/Host";
+import { NavCount } from "../community/parts";
+import { useShown } from "../community/state";
+import { watchCrashes } from "../community/crash";
+import { DeckCrucibleHost } from "../crucible/DeckCrucible";
+// the warning before Play
+import { DeckSfiWarningHost } from "../components/SfiWarningDialog";
 import "./deck.css";
 
 // the save editor carries its item data (about 2 MB): loaded on the first visit to its tab, as on the desktop
@@ -43,6 +51,8 @@ export const TABS = [
   { to: "/deck/catalog" },
   { to: "/deck/kiln" },
   { to: "/deck/editor" },
+  // Kiln's Discord (src/community/): hidden with Settings' "Show the Community page" off
+  { to: "/deck/community" },
   { to: "/deck/help" },
   { to: "/deck/settings" },
 ] as const;
@@ -57,12 +67,14 @@ export function tabLabel(tab: Tab): string {
     case "/deck/catalog": return t("deck.app.tabs.catalog");
     case "/deck/kiln": return t("deck.app.tabs.kiln");
     case "/deck/editor": return t("deck.app.tabs.editor");
+    case "/deck/community": return t("community.deck.tab");
     case "/deck/help": return t("deck.app.tabs.help");
     case "/deck/settings": return t("deck.app.tabs.settings");
   }
 }
-const WITHOUT_NEXUS = TABS.filter((x) => x.to !== "/deck/catalog");
-const tabsFor = (enabled: boolean): readonly Tab[] => enabled ? TABS : WITHOUT_NEXUS;
+/** The tabs this launcher shows: Catalog only with Nexus, Community only while it is shown. */
+const tabsFor = (nexus: boolean, community: boolean): readonly Tab[] =>
+  TABS.filter((x) => (nexus || x.to !== "/deck/catalog") && (community || x.to !== "/deck/community"));
 const tabOf = (path: string, tabs: readonly Tab[] = TABS) => Math.max(0, tabs.findIndex((x) => x.to === path.replace(/\/+$/, "")));
 
 /** 1 rem = 16 px at 1280×800; other window sizes scale the whole frame. */
@@ -155,6 +167,8 @@ function DeckBetaMark() {
 
 export default function DeckApp() {
   const t = useT();
+  // the crash notice follows every run from the launcher's start, whichever tab is open (community/crash.ts)
+  useEffect(() => watchCrashes(), []);
   useTaskFeed();
   useBackendEvents();
   useAutoDetect();
@@ -171,7 +185,7 @@ export default function DeckApp() {
   const settings = useSettings();
   // the Hearth fire, as on the desktop: unless Settings' Animated fire is off or KILN_LAUNCHER_NO_WEBGL=1
   const fire = info.isFetched && settings.isFetched && !info.data?.noWebgl && settings.data?.animatedFire !== false;
-  const tabs = tabsFor(useNexusEnabled());
+  const tabs = tabsFor(useNexusEnabled(), useShown());
   const tab = tabOf(loc.pathname, tabs);
   const tabRef = useRef(tab);
   tabRef.current = tab;
@@ -251,6 +265,7 @@ export default function DeckApp() {
           <Route path="catalog" element={<NexusRoute home="/deck"><Catalog /></NexusRoute>} />
           <Route path="kiln" element={<Kiln />} />
           <Route path="editor" element={<Suspense fallback={<p className="deck-note">{t("deck.app.openingEditor")}</p>}><DeckEditor /></Suspense>} />
+          <Route path="community" element={<DeckCommunity />} />
           <Route path="help" element={<Help />} />
           <Route path="settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/deck" replace />} />
@@ -259,7 +274,10 @@ export default function DeckApp() {
       <HintBar press={press} />
       {menu && <MenuDialog onClose={() => setMenu(false)} />}
       <div className="deck-overlays" />
+      <CommunityDeckHost />
       <DeckNxm />
+      <DeckCrucibleHost />
+      <DeckSfiWarningHost />
       <DeckToaster />
       <DeckDataFolderNotice />
     </div>
@@ -298,7 +316,7 @@ function TopBar({ tab, tabs, goTab }: { tab: number; tabs: readonly Tab[]; goTab
         <span className="deck-tab-dia" aria-hidden><i /></span>
         <button type="button" tabIndex={-1} className="deck-tab-glyph" aria-label={t("deck.app.previousTab")} onClick={() => goTab(tab - 1)}><Glyph button="lb" style={style} size={1.6} /></button>
         {tabs.map((x, i) => (
-          <button key={x.to} type="button" tabIndex={-1} className={"deck-tab" + (i === tab ? " on" : "")} aria-current={i === tab ? "page" : undefined} onClick={() => goTab(i)}>{tabLabel(x)}</button>
+          <button key={x.to} type="button" tabIndex={-1} className={"deck-tab" + (i === tab ? " on" : "")} aria-current={i === tab ? "page" : undefined} onClick={() => goTab(i)}>{tabLabel(x)}{x.to === "/deck/community" && <NavCount />}</button>
         ))}
         <button type="button" tabIndex={-1} className="deck-tab-glyph" aria-label={t("deck.app.nextTab")} onClick={() => goTab(tab + 1)}><Glyph button="rb" style={style} size={1.6} /></button>
       </nav>
@@ -344,7 +362,7 @@ function MenuDialog({ onClose }: { onClose: () => void }) {
   const nav = useNavigate();
   const loc = useLocation();
   const [quit, setQuit] = useState(false);
-  const tabs = tabsFor(useNexusEnabled());
+  const tabs = tabsFor(useNexusEnabled(), useShown());
   const cur = tabOf(loc.pathname, tabs);
   if (quit) return <QuitDialog onClose={() => { setQuit(false); onClose(); }} />;
   return (

@@ -16,6 +16,7 @@
 #include "gates.h"
 #include "guard.h"
 #include "image.h"
+#include "launch.h"
 #include "log.h"
 #include "profile.h"
 #include "progress.h"
@@ -30,6 +31,8 @@
 #include "services/kiln_caps.h"
 #include "services/kiln_hooks.h"
 #include "services/service.h"
+#include "tasks_host.h"
+#include "hooks_protect_internal.h"
 
 // kiln.caps, the capability registry (services/caps.cpp)
 namespace kiln::caps {
@@ -38,8 +41,30 @@ void owner_gone(KilnOwner owner);
 void feature_off(std::string_view name);
 void service_published(KilnOwner owner, std::string_view name, uint32_t version);
 void service_dll(const std::filesystem::path& file, std::string_view status, const std::string& error);
+void service_internal_refused(const std::filesystem::path& file, const std::string& text);
 bool flush();  // a last write of capabilities.json when something is dirty; waits about 2 s at most
 }  // namespace kiln::caps
+
+#include "kiln_version.h"
+// The build metadata native/cmake/kiln_build_stamp.sh writes for every build ("+<yyyymmdd>.<git>", or "+nogit.<nonce>"
+// in a source export without git); absent, no DLL gets Kiln-internal access (build_stamp() below).
+#if __has_include("kiln_build.h")
+#include "kiln_build.h"
+#endif
+#ifndef KILN_BUILD
+#define KILN_BUILD ""
+#endif
+
+namespace kiln::tasks_svc {
+void exit_begins();  // services/tasks.cpp: any exit: kiln.tasks refuses new tasks (one atomic store, no lock)
+void exiting();      // a normal exit: kiln.tasks seals every owner too (no wait)
+void park(uint32_t wait_ms);  // a normal exit, later: no task body or done starts any more; bounded wait for the running
+const void* host_table();  // kiln.internal.tasks.host v1 (tasks_host.h); nullptr while kiln.tasks is not running
+}  // namespace kiln::tasks_svc
+
+namespace kiln::hooks {
+const KilnHooksInternalApi* internal_table();  // kiln.internal.hooks v1 (hooks_protect_internal.h; services/hooks_protect.cpp)
+}  // namespace kiln::hooks
 
 namespace kiln {
 namespace {
@@ -129,6 +154,7 @@ KilnResult KILN_CALL api_constant(KilnStr name, int64_t* out) {
     return sigdb::constant(sv(name), out) ? KILN_OK : KILN_ERR_NOT_FOUND;
 }
 
+// ---- service lookup (begin)
 struct Published {
     KilnOwner owner;
     std::string name;
@@ -137,15 +163,77 @@ struct Published {
 std::mutex g_published_mutex;
 std::vector<Published> g_published;
 
-const void* KILN_CALL api_service(KilnStr name, uint32_t min_version) {
+// Kiln-internal tables (docs/kiln/services/README.md "Kiln-internal tables"): a name under "kiln.internal." is
+// published and resolved only through the KilnApi the service loader hands the DLLs of kiln/services (Kiln's own, same
+// build), and published only for an owner that loader created for one. Plugins, managed mods and foreign DLLs get the
+// other KilnApi, which neither publishes nor resolves such a name. Not a sandbox: it keeps a table that hands out game
+// addresses or lock primitives out of every other caller's reach.
+constexpr std::string_view kInternalPrefix = "kiln.internal.";
+bool internal_name(std::string_view name) { return name.size() > kInternalPrefix.size() && name.starts_with(kInternalPrefix); }
+std::vector<KilnOwner> g_service_owners;  // under g_published_mutex: owners load_one created for kiln/services DLLs
+
+// This core's build identity, the stamp every kiln_service/kiln_plugin DLL of the same build exports as
+// kiln_build_stamp() (native/cmake/kiln_build_stamp.cpp): "<version><build metadata>", e.g.
+// "0.2.0-dev+20261115.ddb9bd4". Without build metadata it is "": a matching version alone is not a build, so such a
+// core grants no DLL internal access (fail closed).
+std::string build_stamp() {
+    constexpr std::string_view build = KILN_BUILD;
+    return build.empty() ? std::string() : std::string(KILN_VERSION).append(build);
+}
+
+// A kiln/services DLL gets internal access only when it was built with this core: its kiln_build_stamp() equals the
+// core's build identity. It keeps a stale or foreign service DLL out; it is no defence against native code already in
+// the process.
+bool service_stamp_trusted(std::string_view dll_stamp) {
+    const std::string core = build_stamp();
+    return !core.empty() && dll_stamp == core;
+}
+
+void service_owner_add(KilnOwner owner) {
+    std::lock_guard lock(g_published_mutex);
+    g_service_owners.push_back(owner);
+}
+
+// load_one's choice for a kiln/services DLL: a service owner (and the services' KilnApi) only for a DLL of this very
+// build; every other DLL loads with the plugins' KilnApi and no internal access. `why` says which case refused.
+bool grant_internal(KilnOwner owner, std::string_view dll_stamp, std::string& why) {
+    const std::string core = build_stamp();
+    if (core.empty()) {
+        why = "this core was built without build metadata (no KILN_BUILD), so no service DLL gets Kiln-internal tables";
+        return false;
+    }
+    if (dll_stamp != core) {
+        why = "build stamp '" + (dll_stamp.empty() ? std::string("none") : std::string(dll_stamp)) + "' is not this core's '" +
+              core + "' (a stale or foreign service DLL)";
+        return false;
+    }
+    service_owner_add(owner);
+    return true;
+}
+
+const void* lookup_service(KilnStr name, uint32_t min_version, bool services) {
+    // The core's own original-code table (compat.h) predates the internal-name rule and is resolved by the shroudtopia
+    // plugin through the plugins' KilnApi: it stays reachable from every view, ahead of any published table.
     if (sv(name) == compat::kOriginalCodeService)
         return min_version <= compat::kOriginalCodeVersion ? compat::original_code_table() : nullptr;
+    if (internal_name(sv(name)) && !services) return nullptr;
+    // kiln.internal.launch (launch_internal.h): the core's own, for Kiln's services only (the line above keeps it from
+    // every other view); nobody publishes the name (register_published).
+    if (sv(name) == KILN_LAUNCH_INTERNAL_SERVICE)
+        return min_version <= KILN_LAUNCH_INTERNAL_VERSION ? launch::internal_table() : nullptr;
+    // kiln.internal.hooks (hooks_protect_internal.h): the core's own, for Kiln's services only, like the one above.
+    if (sv(name) == KILN_HOOKS_INTERNAL_SERVICE)
+        return min_version <= KILN_HOOKS_INTERNAL_VERSION ? hooks::internal_table() : nullptr;
+
     // kiln.profile works in safe idle too: early native mods and the managed host read it to find their mods/configs.
     if (sv(name) == KILN_PROFILE_SERVICE) return min_version <= KILN_PROFILE_VERSION ? profile::table() : nullptr;
     // kiln.progress too: the early plugins show their long work with it, before hooks are decided (and in safe idle).
     if (sv(name) == KILN_PROGRESS_SERVICE) return min_version <= KILN_PROGRESS_VERSION ? progress::table() : nullptr;
     // kiln.caps too: in safe idle it says why everything is off.
     if (sv(name) == KILN_CAPS_SERVICE) return min_version <= KILN_CAPS_VERSION ? caps::table() : nullptr;
+    // kiln.launch too (launch.h): the loaders read the frozen ShroudForge backend in their early phase, and in safe idle
+    // it says why there is none. Only the core's own table: nobody publishes the name (register_published).
+    if (sv(name) == KILN_LAUNCH_SERVICE) return min_version <= KILN_LAUNCH_VERSION ? launch::table() : nullptr;
     // kiln.hooks is the one service early plugins may use before hooks are decided (hooks::serve_early; its `available`
     // flag says whether it is on, and boot clears it again in safe idle).
     // Only the core's own table, never a published one of the same name.
@@ -160,21 +248,76 @@ const void* KILN_CALL api_service(KilnStr name, uint32_t min_version) {
     return nullptr;
 }
 
-KilnResult KILN_CALL api_register_service(KilnOwner owner, KilnStr name, const void* table) {
+const void* KILN_CALL api_service(KilnStr name, uint32_t min_version) { return lookup_service(name, min_version, false); }
+const void* KILN_CALL api_service_services(KilnStr name, uint32_t min_version) {
+    return lookup_service(name, min_version, true);
+}
+
+// Registration is split like lookup. The owner is whatever the caller passes (owner IDs are small sequential integers),
+// so it cannot tell a service from a plugin; the KilnApi the call came through can. The plugins' register_service
+// refuses every internal name, whatever the owner; the services' one also requires an owner load_one made for a
+// kiln/services DLL.
+KilnResult register_published(KilnOwner owner, KilnStr name, const void* table, bool services) {
     if (!table || !name.ptr || name.len == 0) return KILN_ERR_INVALID_ARGUMENT;
+    // The managed host's lease table, kiln.launch, kiln.internal.launch and kiln.internal.hooks are the core's own: nobody
+    // publishes those names, not even a Kiln service.
+    if (sv(name) == KILN_TASKS_HOST_SERVICE || sv(name) == KILN_LAUNCH_SERVICE || sv(name) == KILN_LAUNCH_INTERNAL_SERVICE ||
+        sv(name) == KILN_HOOKS_INTERNAL_SERVICE) {
+        KLOG_W("service %.*s: reserved for the core, refused for %s", static_cast<int>(name.len), name.ptr,
+               reg::owner_name(owner).c_str());
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
     const auto* h = static_cast<const KilnServiceHeader*>(table);
     if (h->size < sizeof(KilnServiceHeader)) return KILN_ERR_INVALID_ARGUMENT;
     {
         std::lock_guard lock(g_published_mutex);
+        if (internal_name(sv(name)) &&
+            (!services ||
+             std::find(g_service_owners.begin(), g_service_owners.end(), owner) == g_service_owners.end())) {
+            KLOG_W("service %.*s: a Kiln-internal name, refused for %s (only Kiln's own services publish one)",
+                   static_cast<int>(name.len), name.ptr, reg::owner_name(owner).c_str());
+            return KILN_ERR_INVALID_ARGUMENT;
+        }
         for (const auto& p : g_published)
             if (p.name == sv(name)) return KILN_ERR_INVALID_ARGUMENT;
         g_published.push_back({owner, std::string(sv(name)), table});
     }
     KLOG_I("service %.*s v%u published by %s", static_cast<int>(name.len), name.ptr, h->version,
            reg::owner_name(owner).c_str());
-    caps::service_published(owner, sv(name), h->version);  // unlocked: its subscribers may call api_service
+    // Kiln-internal tables stay out of the public capability rows and capabilities.json.
+    if (!internal_name(sv(name))) caps::service_published(owner, sv(name), h->version);  // unlocked: subscribers may call api_service
     return KILN_OK;
 }
+
+KilnResult KILN_CALL api_register_service(KilnOwner owner, KilnStr name, const void* table) {
+    return register_published(owner, name, table, false);
+}
+KilnResult KILN_CALL api_register_service_services(KilnOwner owner, KilnStr name, const void* table) {
+    return register_published(owner, name, table, true);
+}
+
+// The managed host's KilnApi (api_for_managed_host, tasks_host.h): the plugins' lookup, plus exactly the core's own
+// kiln.internal.tasks.host table (never a published one: nobody may publish that name); every other internal name
+// stays unresolved, and registration is the plugins' (the host publishes no internal table either).
+const void* KILN_CALL api_service_managed_host(KilnStr name, uint32_t min_version) {
+    if (sv(name) == KILN_TASKS_HOST_SERVICE)
+        return min_version <= KILN_TASKS_HOST_VERSION ? tasks_svc::host_table() : nullptr;
+    return lookup_service(name, min_version, false);
+}
+KilnApi managed_host_api_from(const KilnApi& plugins) {
+    KilnApi host = plugins;
+    host.service = &api_service_managed_host;
+    return host;
+}
+
+// The services' KilnApi: the plugins' one with the lookup and the registration that also take Kiln-internal tables.
+KilnApi services_api_from(const KilnApi& plugins) {
+    KilnApi services = plugins;
+    services.service = &api_service_services;
+    services.register_service = &api_register_service_services;
+    return services;
+}
+// ---- service lookup (end)
 
 uintptr_t KILN_CALL api_server_world() { return g_hooks ? worldinfo::server_world() : 0; }
 uintptr_t KILN_CALL api_singleton(uintptr_t world, KilnStr name) {
@@ -242,9 +385,18 @@ const KilnApi g_api = {
     &api_session,
 };
 
+const KilnApi g_service_api = services_api_from(g_api);
+const KilnApi g_managed_host_api = managed_host_api_from(g_api);
+
 }  // namespace
 
 const KilnApi* api() { return &g_api; }
+const KilnApi* api_for_managed_host() { return &g_managed_host_api; }
+// This core's build identity for the managed host (KilnTasksHostApi.build_stamp): "" without build metadata.
+const char* core_build_stamp() {
+    static const std::string stamp = build_stamp();
+    return stamp.c_str();
+}
 
 void set_runtime_state(bool verified, bool hooks_enabled) {
     g_verified = verified;
@@ -258,6 +410,7 @@ struct LoadedModule {
     std::string name;
     KilnPluginInfo info;
     HMODULE module;
+    bool own_service = false;  // a kiln/services DLL of this very build (Kiln-internal access): its on_unload is Kiln's
 };
 std::vector<LoadedModule> g_modules;
 std::vector<PluginRecord> g_plugin_records;
@@ -285,6 +438,29 @@ void record(const char* kind, const std::filesystem::path& file, const char* sta
     g_plugin_records.push_back(std::move(r));
 }
 
+// ---- service stamp (begin)
+// A DLL's kiln_build_stamp() string (empty without the export), called and copied under the fault guard.
+struct StampCall {
+    const char*(KILN_CALL* fn)(void);
+    const char* text;
+};
+void KILN_CALL call_stamp(void* user) {
+    auto* c = static_cast<StampCall*>(user);
+    c->text = c->fn();
+}
+std::string dll_build_stamp(HMODULE h) {
+    StampCall call{reinterpret_cast<const char*(KILN_CALL*)(void)>(GetProcAddress(h, "kiln_build_stamp")), nullptr};
+    unsigned long code = 0;
+    if (!call.fn || !guard::task(&call_stamp, &call, &code) || !call.text) return {};
+    char text[129]{};
+    for (size_t i = 0; i < sizeof text - 1; ++i) {
+        if (!guard::copy(&text[i], reinterpret_cast<uintptr_t>(call.text + i), 1)) return {};
+        if (!text[i]) break;
+    }
+    return text;
+}
+// ---- service stamp (end)
+
 void load_one(const std::filesystem::path& file, const char* kind) {
     const std::string name = to_utf8(file.filename().wstring());
     const std::wstring key = lower_path(file);
@@ -311,11 +487,33 @@ void load_one(const std::filesystem::path& file, const char* kind) {
         return;
     }
     const KilnOwner owner = reg::owner_create(std::string(kind) + ":" + name);
+    // kiln/services DLLs of this very build are Kiln's own: their owner may publish Kiln-internal tables and their
+    // KilnApi resolves them. Another build's DLL loads as before, without that access.
+    bool service = false;
+    if (std::string_view(kind) == "service") {
+        std::string why;
+        service = grant_internal(owner, dll_build_stamp(h), why);
+        if (!service) {
+            const std::string text = name + ": " + why + ": loaded without Kiln-internal tables";
+            KLOG_W("service %s", text.c_str());
+            caps::service_internal_refused(file, text);
+        }
+    }
+    // The ShroudForge-dialect owner (launch_internal.h): kiln/plugins/kiln-sfi.dll of this very build
+    // (the stamp test grant_internal uses), when the frozen backend is kiln. Fixed before its kiln_plugin_main runs, so
+    // before the first tick; never moved, also when that main fails.
+    if (std::string_view(kind) == "plugin" && launch::wants_dialect_owner() && launch::is_dialect_dll(file, paths().plugins)) {
+        std::string why;
+        if (launch::designate(owner, service_stamp_trusted(dll_build_stamp(h)), why))
+            KLOG_I("plugin %s: the ShroudForge-dialect owner (%s)", name.c_str(), reg::owner_name(owner).c_str());
+        else
+            KLOG_W("plugin %s: not the ShroudForge-dialect owner: %s", name.c_str(), why.c_str());
+    }
     KilnPluginInfo info{};
     info.size = sizeof info;
     KilnResult rc = KILN_ERR_INTERNAL;
     unsigned long code = 0;
-    if (!guard::plugin_main(main, &g_api, owner, &info, &rc, &code)) {
+    if (!guard::plugin_main(main, service ? &g_service_api : &g_api, owner, &info, &rc, &code)) {
         KLOG_E("%s %s: kiln_plugin_main faulted (0x%08lx); its registrations were revoked", kind, name.c_str(), code);
         char text[64];
         std::snprintf(text, sizeof text, "kiln_plugin_main faulted (0x%08lx)", code);
@@ -340,7 +538,7 @@ void load_one(const std::filesystem::path& file, const char* kind) {
     KLOG_I("%s %s loaded: %.*s %.*s", kind, name.c_str(), static_cast<int>(info.id.len),
            info.id.ptr ? info.id.ptr : "", static_cast<int>(info.version.len), info.version.ptr ? info.version.ptr : "");
     record(kind, file, "loaded", {}, &info);
-    g_modules.push_back({name, info, h});
+    g_modules.push_back({name, info, h, service});
 }
 
 // The DLLs of `dir` in file-name order. `which`: 0 every DLL, 1 Kiln's own (kiln-*.dll), 2 the others (drop-ins).
@@ -443,10 +641,15 @@ void load_plugins() {
 
 // ---- on_unload at process exit (kiln_api.h, KilnPluginInfo.on_unload) ----
 // boot.cpp puts the trigger on the process's exit call (ntdll!RtlExitUserProcess) and calls unload_run there, on the
-// way in: before the loader lock is taken, while every thread still runs. Every module of g_modules with an on_unload
-// is called once, last loaded first, each on a thread of its own while the exiting thread waits: a handler that faults
-// is caught (crash report) and one that blocks is given up after its limit, and the next one runs either way. Nothing
+// way in: before the loader lock is taken, while every thread still runs. Each module of g_modules whose on_unload the
+// exit calls is called once, each on a thread of its own while the exiting thread waits: a handler that faults is
+// caught (crash report) and one that blocks is given up after its limit, and the next one runs either way. Nothing
 // else is torn down (no FreeLibrary, no owner revoke, no hook removed): the process is ending.
+//
+// Kiln's own exit steps come first, on every platform (on native Windows they are all the link does by default):
+// kiln.tasks refuses new tasks and seals its owners, Kiln's own services' handlers run (kiln.engine closes its write
+// gate for good), then the task pool parks (no body or done starts any more; a bounded wait for the running ones), and
+// only then the plugins' handlers, last loaded first.
 namespace {
 
 constexpr DWORD kUnloadHandlerMs = 3000;  // kiln-shroudtopia's own handler waits up to 1 s for its worker
@@ -454,12 +657,14 @@ constexpr DWORD kUnloadTotalMs = 10000;
 constexpr DWORD kUnloadLogWaitMs = 500;   // for the log thread to write the last line (it has no flush)
 constexpr DWORD kUnloadFlushMs = 2000;   // includes the last file write, even if the file system stalls
 constexpr DWORD kUnloadMarginMs = 1000;
+constexpr DWORD kUnloadParkMs = 500;     // the task pool's wait for its running bodies and dones (kiln.tasks)
 
 enum : LONG { kJobIdle, kJobRunning, kJobReturned, kJobFaulted, kJobExited };
 
 // One per handler, for the life of the process: a handler thread that was given up on still points at its job.
 struct UnloadJob {
     const char* name;        // g_modules' file name (g_modules is not changed after load_plugins)
+    bool own_service;        // Kiln's own service: called with Kiln's exit steps, before the pool parks
     void(KILN_CALL* fn)(void*);
     void* user;
     HANDLE done;             // manual-reset: the handler returned, faulted, or called the exit itself
@@ -567,21 +772,36 @@ void unload_finish(int level, const std::string& last) {
 
 }  // namespace
 
-// Called by boot.cpp before it arms the trigger: one job per module with an on_unload, last loaded first.
-size_t unload_prepare() {
-    if (g_unload_jobs) return g_unload_count;
+namespace {
+bool has_unload(const LoadedModule& m) {
+    return m.info.size >= offsetof(KilnPluginInfo, on_unload) + sizeof(void*) && m.info.on_unload;
+}
+}  // namespace
+
+// The modules with an on_unload: Kiln's own services (`own_services`) or the others.
+size_t unload_handlers(bool own_services) {
+    return static_cast<size_t>(std::count_if(g_modules.begin(), g_modules.end(), [&](const LoadedModule& m) {
+        return has_unload(m) && m.own_service == own_services;
+    }));
+}
+
+// Called by boot.cpp before it arms the trigger: one job per module whose on_unload the exit calls, last loaded first:
+// Kiln's own services always, the plugins only with `plugins`. Returns the number of jobs; unload_prepared() says
+// whether the sequence exists (it may have no job: Kiln's own steps still run).
+size_t unload_prepare(bool plugins) {
+    if (g_unload_over) return g_unload_count;
     size_t n = 0;
     for (const auto& m : g_modules)
-        if (m.info.size >= offsetof(KilnPluginInfo, on_unload) + sizeof(void*) && m.info.on_unload) ++n;
-    if (!n) return 0;
+        if (has_unload(m) && (plugins || m.own_service)) ++n;
     g_unload_over = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!g_unload_over) return 0;
-    g_unload_jobs = new UnloadJob[n]{};
+    g_unload_jobs = new UnloadJob[n ? n : 1]{};
     for (size_t i = g_modules.size(); i-- > 0;) {
         const auto& m = g_modules[i];
-        if (m.info.size < offsetof(KilnPluginInfo, on_unload) + sizeof(void*) || !m.info.on_unload) continue;
+        if (!has_unload(m) || (!plugins && !m.own_service)) continue;
         UnloadJob& j = g_unload_jobs[g_unload_count];
         j.name = m.name.c_str();
+        j.own_service = m.own_service;
         j.fn = m.info.on_unload;
         j.user = m.info.user;
         j.done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -601,10 +821,85 @@ void unload_abandon() noexcept {
     if (g_unload_state.compare_exchange_strong(running, 2)) SetEvent(g_unload_over);
 }
 
+namespace {
+// One run of the handlers: their time, what was called, and how each ended.
+struct UnloadCalls {
+    double t0 = 0;  // the handlers' clock: the sequence's start, moved on by the time the task pool's park took
+    std::string calls;
+    unsigned faulted = 0, given_up = 0, skipped = 0;
+};
+enum class Pick { OwnServices, Plugins };
+bool picked(const UnloadJob& j, Pick pick) { return (pick == Pick::OwnServices) == j.own_service; }
+size_t own_service_jobs() {
+    size_t n = 0;
+    for (size_t i = 0; i < g_unload_count; ++i) n += g_unload_jobs[i].own_service;
+    return n;
+}
+
+// Calls the jobs that `pick` selects, in list order (last loaded first), each on its own thread within the limits.
+void call_jobs(UnloadCalls& c, Pick pick) {
+    char part[160];
+    for (size_t i = 0; i < g_unload_count; ++i) {
+        UnloadJob& j = g_unload_jobs[i];
+        if (!picked(j, pick)) continue;
+        const double used = now_ms() - c.t0;
+        if (used >= g_unload_total_ms) {
+            std::string rest;
+            unsigned n = 0;
+            for (size_t k = i; k < g_unload_count; ++k)
+                if (picked(g_unload_jobs[k], pick)) {
+                    rest += std::string(rest.empty() ? "" : ", ") + g_unload_jobs[k].name;
+                    ++n;
+                }
+            KLOG_W("unload: the %lu ms for all handlers are used up; not called: %s", g_unload_total_ms, rest.c_str());
+            c.skipped += n;
+            break;
+        }
+        const DWORD wait = std::min<DWORD>(g_unload_handler_ms, static_cast<DWORD>(g_unload_total_ms - used));
+        InterlockedExchange(&j.state, kJobRunning);
+        HANDLE th = CreateThread(nullptr, 0, &unload_thread, &j, 0, nullptr);
+        if (!th) {
+            InterlockedExchange(&j.state, kJobIdle);
+            KLOG_E("unload: %s: no thread for its on_unload (error %lu); not called", j.name, GetLastError());
+            ++c.skipped;
+            continue;
+        }
+        const DWORD w = WaitForSingleObject(j.done, wait);
+        CloseHandle(th);
+        const LONG state = j.state;
+        if (w == WAIT_OBJECT_0 && state == kJobReturned) {
+            std::snprintf(part, sizeof part, "%s%s %.1f ms", c.calls.empty() ? "" : ", ", j.name, j.ms);
+        } else if (w == WAIT_OBJECT_0 && state == kJobFaulted) {
+            KLOG_E("unload: %s: on_unload faulted (0x%08lx); crash report in kiln/crash-reports; the next one runs",
+                   j.name, j.code);
+            ++c.faulted;
+            std::snprintf(part, sizeof part, "%s%s faulted", c.calls.empty() ? "" : ", ", j.name);
+        } else if (w == WAIT_OBJECT_0 && state == kJobExited) {
+            KLOG_W("unload: %s: its on_unload ended the process itself; the sequence goes on first", j.name);
+            std::snprintf(part, sizeof part, "%s%s exited", c.calls.empty() ? "" : ", ", j.name);
+        } else {
+            KLOG_E("unload: %s: on_unload has not returned after %lu ms; given up (its thread ends with the process), "
+                   "the next one runs",
+                   j.name, wait);
+            ++c.given_up;
+            std::snprintf(part, sizeof part, "%s%s given up", c.calls.empty() ? "" : ", ", j.name);
+        }
+        c.calls += part;
+    }
+}
+}  // namespace
+
+bool unload_prepared() { return g_unload_over != nullptr; }
+
 // The trigger: the process is exiting with `exit_code` (through `via`). Returns when the caller may go on into the
 // real exit.
 void unload_run(uint32_t exit_code, const char* via) {
-    if (!g_unload_count) return;
+    // kiln.tasks first. Every exit closes its admission with one lock-free store (also a crash's: a stranded lock or
+    // heap is never touched); a normal exit also cancels the queued tasks and signals the running ones (model lock).
+    // Neither waits; the pool's park, later in the sequence, is the one bounded wait for its running callbacks.
+    tasks_svc::exit_begins();
+    if (exit_code == 0) tasks_svc::exiting();
+    if (!g_unload_over) return;
     if (exit_code != 0) {
         // A crash may have stranded the heap or the logger's mutex. Do not allocate, log, poll, or wait, even when
         // another thread is already running the normal sequence. The game's non-zero exits must reach the OS now.
@@ -627,7 +922,8 @@ void unload_run(uint32_t exit_code, const char* via) {
             }
         }
         if (was == 1) {
-            const double bound = g_unload_total_ms + kUnloadFlushMs + kUnloadLogWaitMs + kUnloadMarginMs;
+            const double bound =
+                g_unload_total_ms + kUnloadParkMs + kUnloadFlushMs + kUnloadLogWaitMs + kUnloadMarginMs;
             const double left = bound - (now_ms() - g_unload_started_ms.load());
             WaitForSingleObject(g_unload_over, static_cast<DWORD>(std::max(0.0, left)));
         }
@@ -637,68 +933,32 @@ void unload_run(uint32_t exit_code, const char* via) {
     if (holds_loader_lock()) {
         std::snprintf(line, sizeof line,
                       "unload: the process exits from under the loader lock (%s, thread %lu: a DllMain called it): no "
-                      "on_unload handler is called (their threads could not start)",
+                      "on_unload handler is called (their threads could not start) and the task pool is not parked "
+                      "(nothing waits under the loader lock)",
                       via, GetCurrentThreadId());
         unload_finish(KILN_LOG_WARN, line);
         return;
     }
-    const double t0 = g_unload_started_ms.load();
-    KLOG_I("unload: the process is exiting (%s, exit code 0, thread %lu): %zu on_unload handler(s), last loaded first, "
-           "each on its own thread, up to %lu ms each and %lu ms in all",
-           via, GetCurrentThreadId(), g_unload_count, g_unload_handler_ms, g_unload_total_ms);
-    std::string calls;
-    unsigned faulted = 0, given_up = 0, skipped = 0;
-    char part[160];
-    for (size_t i = 0; i < g_unload_count; ++i) {
-        UnloadJob& j = g_unload_jobs[i];
-        const double used = now_ms() - t0;
-        if (used >= g_unload_total_ms) {
-            std::string rest;
-            for (size_t k = i; k < g_unload_count; ++k)
-                rest += std::string(rest.empty() ? "" : ", ") + g_unload_jobs[k].name;
-            KLOG_W("unload: the %lu ms for all handlers are used up; not called: %s", g_unload_total_ms, rest.c_str());
-            skipped += static_cast<unsigned>(g_unload_count - i);
-            break;
-        }
-        const DWORD wait = std::min<DWORD>(g_unload_handler_ms, static_cast<DWORD>(g_unload_total_ms - used));
-        InterlockedExchange(&j.state, kJobRunning);
-        HANDLE th = CreateThread(nullptr, 0, &unload_thread, &j, 0, nullptr);
-        if (!th) {
-            InterlockedExchange(&j.state, kJobIdle);
-            KLOG_E("unload: %s: no thread for its on_unload (error %lu); not called", j.name, GetLastError());
-            ++skipped;
-            continue;
-        }
-        const DWORD w = WaitForSingleObject(j.done, wait);
-        CloseHandle(th);
-        const LONG state = j.state;
-        if (w == WAIT_OBJECT_0 && state == kJobReturned) {
-            std::snprintf(part, sizeof part, "%s%s %.1f ms", calls.empty() ? "" : ", ", j.name, j.ms);
-        } else if (w == WAIT_OBJECT_0 && state == kJobFaulted) {
-            KLOG_E("unload: %s: on_unload faulted (0x%08lx); crash report in kiln/crash-reports; the next one runs",
-                   j.name, j.code);
-            ++faulted;
-            std::snprintf(part, sizeof part, "%s%s faulted", calls.empty() ? "" : ", ", j.name);
-        } else if (w == WAIT_OBJECT_0 && state == kJobExited) {
-            KLOG_W("unload: %s: its on_unload ended the process itself; the sequence goes on first", j.name);
-            std::snprintf(part, sizeof part, "%s%s exited", calls.empty() ? "" : ", ", j.name);
-        } else {
-            KLOG_E("unload: %s: on_unload has not returned after %lu ms; given up (its thread ends with the process), "
-                   "the next one runs",
-                   j.name, wait);
-            ++given_up;
-            std::snprintf(part, sizeof part, "%s%s given up", calls.empty() ? "" : ", ", j.name);
-        }
-        calls += part;
-    }
+    UnloadCalls c;
+    c.t0 = g_unload_started_ms.load();
+    KLOG_I("unload: the process is exiting (%s, exit code 0, thread %lu): Kiln's own exit steps (%zu service "
+           "handler(s), then the task pool parks within %lu ms), then %zu plugin on_unload handler(s), last loaded "
+           "first, each on its own thread, up to %lu ms each and %lu ms in all",
+           via, GetCurrentThreadId(), own_service_jobs(), kUnloadParkMs, g_unload_count - own_service_jobs(),
+           g_unload_handler_ms, g_unload_total_ms);
+    call_jobs(c, Pick::OwnServices);  // kiln.engine closes its write gate for good: no task can take it any more
+    const double park0 = now_ms();
+    tasks_svc::park(kUnloadParkMs);   // no task body or done runs from here; the plugins' handlers come after
+    c.t0 += now_ms() - park0;         // the park's wait is not the handlers' time
+    call_jobs(c, Pick::Plugins);
     // The handlers may have reported rows (kiln.caps): capabilities.json is written a last time when something is
     // dirty. Its worker's whole wait is bounded at 2 s, outside the handlers' limits.
     if (!unload_flush()) KLOG_W("unload: capabilities.json could not be written a last time");
     std::snprintf(line, sizeof line,
-                  "unload: done in %.0f ms (%u faulted, %u given up, %u not called); the process exits", now_ms() - t0,
-                  faulted, given_up, skipped);
-    KLOG_I("unload: called in this order: %s", calls.c_str());
-    unload_finish(faulted || given_up || skipped ? KILN_LOG_WARN : KILN_LOG_INFO, line);
+                  "unload: done in %.0f ms (%u faulted, %u given up, %u not called); the process exits",
+                  now_ms() - g_unload_started_ms.load(), c.faulted, c.given_up, c.skipped);
+    KLOG_I("unload: called in this order: %s", c.calls.c_str());
+    unload_finish(c.faulted || c.given_up || c.skipped ? KILN_LOG_WARN : KILN_LOG_INFO, line);
 }
 
 }  // namespace kiln

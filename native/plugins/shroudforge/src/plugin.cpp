@@ -6,14 +6,19 @@
 // Two runtimes, one adapter:
 //   bundled    <game>/kiln/plugins/shroudforge/ : Kiln's build of the frostdev-ops/shroudforge fork (third_party/
 //              shroudforge, a separate GPL-3 component because it links kfc-parser). The default.
-//   installed  <game>/shroudforge/ : the player's own ShroudForge. Used when kiln.json "shroudforge": {"useInstalled":
-//              true} (launcher Settings "Use my installed ShroudForge"; env KILN_SHROUDFORGE_RUNTIME overrides).
+//   installed  <game>/shroudforge/ : the player's own ShroudForge. Used when kiln.json "shroudforge": {"backend":
+//              "installed"}, or the older {"useInstalled": true} (launcher Settings "Use my installed ShroudForge"; env
+//              KILN_SHROUDFORGE_RUNTIME overrides). "backend": "kiln" (Kiln's interpreter) or any other value: this
+//              plugin stands aside (prefer_installed).
 // A missing or broken chosen runtime falls back to the other one with a warning. Either way the data folder is
 // ShroudForge's own (<game>/shroudforge/: config, logs, state, profiles) and mods come from its mods folder.
 //
 // ShroudForge normally starts from its own winmm.dll bootstrap (loaded by its dbghelp.dll or dinput8.dll proxy). Kiln
 // owns dinput8.dll, so this plugin does what that bootstrap does, with Kiln providing the start, paths, profile, log:
 //   on_ready (main thread, the game's entry point is still held by Kiln's gate, like ShroudForge's own startup gate):
+//     0. the core's frozen ShroudForge backend (kiln.launch, docs/kiln/services/launch.md): hosted or installed picks
+//        the runtime below; kiln (Kiln's interpreter) or a refusal: step aside; no table, one that cannot be read, or
+//        the idle class: the rules from before the table (kiln.json, prefer_installed), byte for byte;
 //     1. step aside when ShroudForge's bootstrap already runs in this process (its dbghelp.dll loaded it);
 //     2. decide: the profile (no-mods/invalid: off; an active profile: on when it lists ShroudForge mods; no profile:
 //        on), KILN_SHROUDFORGE=0/1 overrides;
@@ -46,10 +51,12 @@
 
 #include "nlohmann/json.hpp"
 #include "services/kiln_profile.h"
+#include "log_level.h"
 #include "sf_internal.h"
 #include "contract.h"
 #include "kfc_host.h"
 #include "services/kiln_eml.h"
+#include "services/kiln_launch.h"
 
 #include <psapi.h>
 
@@ -346,12 +353,7 @@ struct LogTail {
             start = nl + 1;
             while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
             if (line.empty()) continue;
-            const int32_t level = line.find("[E]") != std::string::npos || line.find(" ERROR ") != std::string::npos
-                                      ? KILN_LOG_ERROR
-                                  : line.find("[W]") != std::string::npos || line.find(" WARN ") != std::string::npos
-                                      ? KILN_LOG_WARN
-                                      : KILN_LOG_INFO;
-            logf(level, "[sf] %s", line.c_str());
+            logf(sf_line_level(line), "[sf] %s", line.c_str());
         }
         partial.erase(0, start);
         if (partial.size() > 65536) partial.erase(0, partial.size() - 65536);
@@ -546,20 +548,109 @@ struct Candidate {
     std::string version, build;
 };
 
-// kiln.json "shroudforge": {"useInstalled": true}; KILN_SHROUDFORGE_RUNTIME=installed|bundled overrides it.
-bool prefer_installed(const std::filesystem::path& kiln_dir) {
-    wchar_t env[16] = L"";
-    const DWORD n = GetEnvironmentVariableW(L"KILN_SHROUDFORGE_RUNTIME", env, 16);
-    if (n > 0 && n < 16) return std::wstring(env) == L"installed";
+// Which runtime this plugin prefers, from kiln.json "shroudforge" (game level), read as the core reads it at boot
+// (native/core/src/launch.cpp read_setting): "backend": "hosted" | "installed" | "kiln" wins; without it the older
+// "useInstalled": true means installed; with neither, the bundled runtime (hosted). KILN_SHROUDFORGE_RUNTIME=installed|
+// bundled chooses between those two over kiln.json, never over "kiln". `aside` (not empty): kiln.json leaves this start
+// to no runtime of this plugin ("kiln", or a value that is none of the three), and says why.
+struct Preference {
+    bool installed = false;
+    std::string aside;
+    int32_t level = KILN_LOG_WARN;  // of the stand-aside line: a setting to fix or a refusal warns
+};
+// A kiln.json value for a log line and the status, as the core's launch.cpp brief() writes it: a string in quotes, cut
+// to 64 bytes at a character boundary; a number, boolean or null as it is; an array or an object by its kind only.
+// Never a copy or a dump() of a container: both recurse, and kiln.json is not depth-checked (a value nested a few
+// thousand levels deep would overflow the boot thread's stack), and a wide value would go whole into shroudforge.json.
+std::string brief(const nlohmann::json& v) {
+    if (v.is_array()) return "an array";
+    if (v.is_object()) return "an object";
+    if (!v.is_string()) return v.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    const auto& s = v.get_ref<const std::string&>();
+    if (s.size() <= 64) return v.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    size_t n = 64;
+    while (n > 0 && (static_cast<unsigned char>(s[n]) & 0xC0) == 0x80) --n;
+    return "a long string " + nlohmann::json(s.substr(0, n)).dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+Preference prefer_installed(const std::filesystem::path& kiln_dir) {
+    Preference p;
+    enum class Asked { None, Hosted, Installed, Kiln, Other } backend = Asked::None;
+    bool use_installed = false;
+    std::string shown;  // Other: the value, brief()
     try {
         const std::string t = read_text(kiln_dir / L"kiln.json");
-        if (t.empty()) return false;
-        const auto j = nlohmann::json::parse(t, nullptr, true, true);
-        const auto it = j.find("shroudforge");
-        if (it != j.end() && it->is_object()) return it->value("useInstalled", false);
+        if (!t.empty()) {
+            const auto j = nlohmann::json::parse(t, nullptr, true, true);
+            const auto it = j.find("shroudforge");
+            if (it != j.end() && it->is_object()) {
+                if (const auto b = it->find("backend"); b != it->end()) {
+                    backend = *b == "hosted" ? Asked::Hosted : *b == "installed" ? Asked::Installed
+                            : *b == "kiln" ? Asked::Kiln : Asked::Other;
+                    if (backend == Asked::Other) shown = brief(*b);
+                }
+                // true means installed; any other value leaves the default (a value that is not true/false always did)
+                if (const auto u = it->find("useInstalled"); u != it->end() && u->is_boolean()) use_installed = u->get<bool>();
+            }
+        }
     } catch (...) {
+        backend = Asked::None;
+        use_installed = false;
     }
-    return false;
+    if (backend == Asked::Kiln) {
+        p.aside = "kiln.json shroudforge.backend is \"kiln\" (Kiln's interpreter), and Kiln's core made no launch "
+                  "decision for this start: ShroudForge mods do not run this start";
+        return p;
+    }
+    if (backend == Asked::Other) {
+        // a typo must never look like ShroudForge mods gone missing: say which value
+        p.aside = "kiln.json shroudforge.backend " + shown +
+                  " is not hosted, installed or kiln: ShroudForge mods do not run this start (fix or remove the "
+                  "value in kiln.json)";
+        return p;
+    }
+    wchar_t env[16] = L"";
+    const DWORD n = GetEnvironmentVariableW(L"KILN_SHROUDFORGE_RUNTIME", env, 16);
+    if (n > 0 && n < 16) p.installed = std::wstring(env) == L"installed";
+    else p.installed = backend != Asked::None ? backend == Asked::Installed : use_installed;
+    return p;
+}
+
+// The core's frozen ShroudForge backend for this start (kiln.launch v1). `decided` is false for no table (an older
+// core), a table or record that cannot be read, and the idle class (the core did not decide): this plugin then keeps
+// its rules from before the table. Read once per process: the record never changes after the freeze.
+struct Frozen {
+    bool decided = false;
+    uint32_t backend = KILN_LAUNCH_BACKEND_NONE, code = 0;
+    uint64_t launch_id = 0;
+    std::string reason;
+};
+Frozen read_frozen() {
+    Frozen f;
+    const auto* t = static_cast<const KilnLaunchApi*>(
+        g_api->service(KilnStr{KILN_LAUNCH_SERVICE, sizeof(KILN_LAUNCH_SERVICE) - 1}, KILN_LAUNCH_VERSION));
+    if (!t || t->header.version < KILN_LAUNCH_VERSION ||
+        t->header.size < offsetof(KilnLaunchApi, status) + sizeof t->status || !t->status)
+        return f;
+    KilnLaunchStatus st{};
+    st.size = sizeof st;
+    KilnResult r = KILN_ERR_INTERNAL;
+    if (!invoke(t->status, &r, &st) || r != KILN_OK || st.frozen != 1 || st.size < sizeof st) return f;
+    const bool chosen = st.backend == KILN_LAUNCH_BACKEND_HOSTED || st.backend == KILN_LAUNCH_BACKEND_INSTALLED ||
+                        st.backend == KILN_LAUNCH_BACKEND_KILN;
+    if (!chosen && !(st.backend == KILN_LAUNCH_BACKEND_NONE && KILN_LAUNCH_REASON_REFUSED(st.reason_code))) return f;
+    f.decided = true;
+    f.backend = st.backend;
+    f.code = st.reason_code;
+    f.launch_id = st.launch_id;
+    f.reason.assign(st.reason, strnlen(st.reason, sizeof st.reason));
+    return f;
+}
+
+const char* backend_word(uint32_t backend) {
+    return backend == KILN_LAUNCH_BACKEND_HOSTED      ? "hosted"
+           : backend == KILN_LAUNCH_BACKEND_INSTALLED ? "installed"
+           : backend == KILN_LAUNCH_BACKEND_KILN      ? "kiln"
+                                                      : "none";
 }
 
 // The bundled runtime reads game-build profiles from ShroudForge's runtime folder (<game>/shroudforge/runtime/profiles,
@@ -732,7 +823,33 @@ void KILN_CALL on_ready(void*) {
     }
     set_status("bundled", bundled.present ? nlohmann::json{{"version", bundled.version}, {"build", bundled.build}} : nlohmann::json());
     set_status("installed", installed.present ? nlohmann::json{{"version", installed.version}} : nlohmann::json());
-    const bool use_installed = prefer_installed(kiln_dir);
+    // The core's frozen selection decides when it decided; otherwise kiln.json, as before the table.
+    static const Frozen frozen = read_frozen();
+    Preference preference;
+    if (frozen.decided) {
+        char id[17];
+        std::snprintf(id, sizeof id, "%016llx", static_cast<unsigned long long>(frozen.launch_id));
+        set_status("launch", nlohmann::json{{"backend", backend_word(frozen.backend)},
+                                            {"reasonCode", frozen.code},
+                                            {"reasonClass", frozen.backend == KILN_LAUNCH_BACKEND_NONE ? "refused" : "selected"},
+                                            {"reason", frozen.reason},
+                                            {"launchId", id}});
+        static std::atomic<bool> told{false};
+        if (!told.exchange(true))
+            logf(KILN_LOG_INFO, "ShroudForge backend for this start (kiln.launch): %s: %s", backend_word(frozen.backend),
+                 frozen.reason.c_str());
+        preference.installed = frozen.backend == KILN_LAUNCH_BACKEND_INSTALLED;
+        if (frozen.backend == KILN_LAUNCH_BACKEND_KILN) {
+            preference.aside = "Kiln's interpreter has this start (kiln.launch: " + frozen.reason +
+                               "): kiln-shroudforge stands aside";
+            preference.level = KILN_LOG_INFO;  // the selection working as asked
+        }
+        else if (frozen.backend == KILN_LAUNCH_BACKEND_NONE)
+            preference.aside = "Kiln's core refused every ShroudForge backend this start (kiln.launch: " + frozen.reason + ")";
+    } else {
+        preference = prefer_installed(kiln_dir);
+    }
+    const bool use_installed = preference.installed;
     set_status("useInstalled", use_installed);
     if (const std::string other = sf_in_process(); !other.empty()) {
         static std::atomic<bool> reported{false};
@@ -741,6 +858,19 @@ void KILN_CALL on_ready(void*) {
         set_status("loaderFile", other);
         set_status("source", "installed");
         return finish("self-hosted", "ShroudForge's own loader (" + other + ") runs it. Kiln's adapter steps aside. Managed package switches still apply.");
+    }
+    if (!preference.aside.empty()) {
+        // Before wanted(): KILN_SHROUDFORGE=1 never starts a runtime kiln.json or the core did not leave to this plugin.
+        // KILN_SHROUDFORGE=0 stands every ShroudForge backend aside, Kiln's interpreter included, with main's one word
+        // for it (wanted() says the same when this plugin has the start). Once per process (the plugin step runs this
+        // again after the early pass).
+        wchar_t env[8] = L"";
+        const bool env_off = GetEnvironmentVariableW(L"KILN_SHROUDFORGE", env, 8) == 1 && env[0] == L'0';
+        const std::string why = env_off ? "KILN_SHROUDFORGE=0" : preference.aside;
+        static std::atomic<bool> reported{false};
+        if (!reported.exchange(true))
+            logf(env_off ? KILN_LOG_INFO : preference.level, "ShroudForge mods are off for this start: %s", why.c_str());
+        return finish("off", why);
     }
     if (!bundled.present && !installed.present) {
         logf(KILN_LOG_INFO, "no ShroudForge runtime: neither Kiln's bundled one (kiln/plugins/shroudforge/) nor an "

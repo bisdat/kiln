@@ -16,12 +16,16 @@ int main() {
     unsigned checks = 0;
     auto check = [&](bool b) { ++checks; assert(b); };
     check(!begin({}, "none").off);
-    for (unsigned s = 0; s <= unsigned(Stage::swapchain); ++s) {
+    // every stage of the overlay's start but "swapchain created" (below): one death guards, a second at it locks
+    for (unsigned s = 0; s <= unsigned(Stage::drawing); ++s) {
+        if (Stage(s) == Stage::swapchain) continue;
         auto first = begin({}, "sl");
         first.record.stage = Stage(s);
         auto off = begin(first.record, "sl");
         check(off.off && off.record.failures == 1);
-        check(begin(off.record, "sl").off); // killed guarded start must not earn a retry
+        // a guarded start that ended any way at all (no Vulkan hook of Kiln's in it) earns the retry: 0.2.0-dev.29.18
+        auto after_guarded = begin(off.record, "sl");
+        check(!after_guarded.off && after_guarded.record.phase == Phase::trying && after_guarded.record.failures == 1);
         auto retry = begin(finish(off.record), "sl");
         check(!retry.off);
         retry.record.stage = Stage(s);
@@ -43,9 +47,9 @@ int main() {
         check(!begin(fine, "m").off);
         // the first draw arms it again: a death before that frame is presented guards the next start
         auto armed = rearm(fine);
-        check(armed.phase == Phase::trying && armed.stage == Stage::swapchain);
+        check(armed.phase == Phase::trying && armed.stage == Stage::drawing);
         auto died = begin(armed, "m");
-        check(died.off && died.record.phase == Phase::guarded && died.record.failed_stage == Stage::swapchain);
+        check(died.off && died.record.phase == Phase::guarded && died.record.failed_stage == Stage::drawing);
         // the frame presented after the re-arm completes it as before
         auto drawn = armed; drawn.stage = Stage::frame;
         check(!begin(finish(drawn), "m").off);
@@ -54,6 +58,45 @@ int main() {
         check(retry.phase == Phase::trying);
         retry.stage = Stage::swapchain;
         check(begin(rearm(idle(retry)), "m").record.phase == Phase::locked);
+    }
+    // Inbox 80 (0.2.0-dev.29.18): the game died right after the overlay's first submit failed. The record of that start
+    // (kiln/state/overlay-start.guard in the player's report: 32 bytes, trying at "swapchain created") guards the next
+    // start; overlay_guard_failed keeps a start that turned the drawing off armed for a while, overlay_guard_drawn keeps
+    // it armed through the overlay's first drawn frames.
+    {
+        // the player's start: swapchain, a draw attempt that failed (no frame presented), the game died
+        auto start = begin({}, "w2-x").record;
+        start.stage = Stage::drawing;  // "swapchain created" before 0.2.0-dev.30.2
+        auto next = begin(start, "w2-x");
+        check(next.off && next.record.phase == Phase::guarded && next.record.failed_stage == Stage::drawing);
+        // the same, but OptiScaler's DLL replaced in between (0.9.5 <-> a nightly): one fresh attempt, by design
+        auto other = begin(start, "w2-y");
+        check(!other.off && other.record.wrapper_retry);
+        other.record.stage = Stage::drawing;
+        check(begin(other.record, "w2-y").off);  // and the start after a second death is guarded again
+        // drawn frames presented, but fewer than the guard waits for: still trying, a death guards the next start
+        auto drawn = begin({}, "m").record;
+        drawn.stage = Stage::drawing;  // overlay_guard_drawn changes nothing before kDrawnFrames or its timer
+        check(begin(drawn, "m").off);
+        // the drawing went off after the start had counted as fine (a failed submit an hour in): armed again, a death in
+        // the window guards the next start, a game that went on counts as fine and keeps no new failure
+        auto fine = begin({}, "m").record;
+        fine.stage = Stage::frame;
+        fine = finish(fine);
+        auto armed = rearm(fine);
+        check(armed.phase == Phase::trying && armed.stage == Stage::drawing);
+        check(begin(armed, "m").off);
+        auto went_on = idle(armed);
+        check(went_on.phase == Phase::complete && went_on.failures == 0 && !begin(went_on, "m").off);
+        // a start that turned the drawing off and went on, after an earlier death at the same stage: the history stays,
+        // so a second death there would still lock
+        auto retry = begin(finish(next.record), "w2-x").record;
+        retry.stage = Stage::drawing;
+        auto survived = idle(retry);
+        check(survived.failures == 1 && !begin(survived, "w2-x").off);
+        auto again = begin(survived, "w2-x").record;
+        again.stage = Stage::drawing;
+        check(begin(again, "w2-x").record.phase == Phase::locked);
     }
     // the owner's record after the false alarm (retry, one failure at the swapchain): a start that idles, or exits
     // normally (idle() too), is fine
@@ -69,7 +112,195 @@ int main() {
         auto again = begin(fine, "mb").record;
         again.stage = Stage::swapchain;
         check(!begin(idle(again), "mb").off); // a second quiet start does not lock
-        check(begin(again, "mb").off);        // a real death while trying still guards
+        check(begin(again, "mb").off);        // a death while trying still guards ...
+        // ... and never locks at the swapchain, before the overlay's first draw, even after an earlier death recorded there
+        check(begin(again, "mb").record.phase == Phase::guarded && begin(again, "mb").record.failures == 1);
+        auto drew = again;
+        drew.stage = Stage::drawing;
+        check(begin(drew, "mb").off && begin(drew, "mb").record.phase == Phase::guarded);  // another stage: guarded
+    }
+    // 0.2.0-dev.30.2 (ReShade's Vulkan layer kept, the overlay's start watched for a whole session): a start that died after
+    // its swapchain, before the overlay's first draw, guards that one start and counts towards no lock. Before, a second
+    // such end (the game killed, a crash of something else) kept the overlay off until the record was deleted.
+    {
+        auto died = begin({}, "r").record;
+        died.stage = Stage::swapchain;
+        const auto guarded = begin(died, "r");
+        check(guarded.off && guarded.record.phase == Phase::guarded && guarded.record.failures == 0 &&
+              guarded.record.stage == Stage::swapchain);
+        Record x = guarded.record;
+        for (int i = 0; i < 8; ++i) {  // start after start: tried, the same end, guarded once, never locked
+            auto tried = begin(x, "r");
+            check(!tried.off && tried.record.phase == Phase::trying && tried.record.failures == 0);
+            tried.record.stage = Stage::swapchain;
+            const auto again = begin(tried.record, "r");
+            check(again.off && again.record.phase == Phase::guarded && again.record.failures == 0);
+            x = again.record;
+        }
+        check(!begin(at_exit(x), "r").off);  // a normal exit of the guarded start: retry, the next start tries
+        // the history stays: a death at the first draw, one at the swapchain (uncounted), a second at the first draw locks
+        auto a = begin({}, "r").record;
+        a.stage = Stage::drawing;
+        const auto ga = begin(a, "r");
+        check(ga.off && ga.record.failures == 1 && ga.record.failed_stage == Stage::drawing);
+        auto b = begin(ga.record, "r").record;
+        b.stage = Stage::swapchain;
+        const auto gb = begin(b, "r");
+        check(gb.off && gb.record.phase == Phase::guarded && gb.record.failures == 1 && gb.record.failed_stage == Stage::drawing &&
+              gb.record.stage == Stage::swapchain);
+        Record disk;
+        check(parse(encode(gb.record), disk) && disk.phase == Phase::guarded && disk.stage == Stage::swapchain &&
+              disk.failed_stage == Stage::drawing && disk.failures == 1);
+        auto c = begin(disk, "r").record;
+        c.stage = Stage::drawing;
+        check(begin(c, "r").record.phase == Phase::locked);
+        // and at an earlier stage too (the hooks): two deaths there lock, an uncounted one between them changes nothing
+        auto h = begin({}, "r").record;
+        h.stage = Stage::hooks;
+        auto h2 = begin(begin(h, "r").record, "r").record;
+        h2.stage = Stage::swapchain;
+        auto h3 = begin(begin(h2, "r").record, "r").record;
+        h3.stage = Stage::hooks;
+        check(begin(h3, "r").record.phase == Phase::locked);
+        check(std::string(stage_name(Stage::drawing)) == "the overlay's first draw" &&
+              std::string(stage_name(Stage::frame)) == "first frame presented");
+    }
+    // The owner's 0.2.0-dev.29.18 candidate, 2026-11-19 (Proton): the game died while the overlay was starting (stage:
+    // hooks installed), the next start ran guarded and quit normally from the main menu after 26 s, and the start after
+    // it was guarded again, and again: a guarded start earned the retry only by running a minute, and the exit left a
+    // guarded record alone. kiln/state/overlay-start.guard after the second guarded quit: "2 2 1 1 1 0 w2-a8c7f832281a39c5".
+    {
+        const std::string m = "w2-a8c7f832281a39c5";
+        // the start that died: trying at "hooks installed" on the disk
+        auto died = begin({}, m).record;
+        died.stage = Stage::hooks;
+        Record disk;
+        check(parse(encode(died), disk) && disk.phase == Phase::trying);
+        // the guarded start: drawing off, its record written at once (overlay_guard_start's save)
+        auto guarded = begin(disk, m);
+        check(guarded.off && guarded.record.phase == Phase::guarded && guarded.record.failed_stage == Stage::hooks &&
+              guarded.record.failures == 1);
+        check(parse(encode(guarded.record), disk));
+        check(encode(disk) == "4 2 1 1 1 0 - " + m + "\n");  // the owner's file in today's format (no Kiln version given)
+        // its normal quit (code 0, Kiln's exit steps ran: overlay_guard_exit): the record no longer reads guarded
+        const auto quit = at_exit(disk);
+        check(quit.phase == Phase::retry && quit.failures == 1 && quit.failed_stage == Stage::hooks);
+        check(parse(encode(quit), disk));
+        // the start after it tries the overlay again, keeping the first death
+        auto next = begin(disk, m);
+        check(!next.off && next.record.phase == Phase::trying && next.record.stage == Stage::begun &&
+              next.record.failures == 1 && next.record.failed_stage == Stage::hooks);
+        // the owner's record as it is on the disk tonight (written by the candidate) heals at the next start too
+        Record owner;
+        check(parse("2 2 1 1 1 0 " + m + "\n", owner) && owner.phase == Phase::guarded);
+        check(!begin(owner, m).off && begin(owner, m).record.phase == Phase::trying);
+        // a guarded start whose quit Kiln did not see (a quit on Windows without code 0, the game killed): the record
+        // still reads guarded, and the start after tries all the same
+        check(!begin(guarded.record, m).off);
+        // that try dies at the same stage again: locked, the drawing stays off until the record is deleted
+        auto again = next.record;
+        again.stage = Stage::hooks;
+        const auto locked = begin(again, m);
+        check(locked.off && locked.record.phase == Phase::locked && locked.record.failures == 2);
+        check(at_exit(locked.record).phase == Phase::locked);  // a normal exit of the locked start keeps it locked
+        check(begin(at_exit(locked.record), m).off && begin(begin(locked.record, m).record, m).off);
+        // that try draws: the history clears
+        auto drawn = next.record;
+        drawn.stage = Stage::frame;
+        check(finish(drawn).phase == Phase::complete && finish(drawn).failures == 0);
+        // that try quits normally before it draws anything (the main menu, nothing of Kiln's open): fine, history kept
+        auto quiet = next.record;
+        quiet.stage = Stage::swapchain;
+        check(at_exit(quiet).phase == Phase::complete && at_exit(quiet).failures == 1 && !begin(at_exit(quiet), m).off);
+    }
+    // A guarded start that crashes too (chosen behaviour, 0.2.0-dev.29.18): it ran with no Vulkan hook of Kiln's, so its
+    // death is not one at the overlay's start. The record it wrote stays guarded, the start after tries the overlay
+    // again with the first death kept, and a second death at that stage locks. A death at another stage guards one
+    // start again (as before: each death at a new stage costs one start without the overlay).
+    {
+        auto died = begin({}, "g").record;
+        died.stage = Stage::device;
+        const auto guarded = begin(died, "g");                 // drawing off, "2 2 ..." written
+        check(guarded.off && guarded.record.phase == Phase::guarded);
+        const auto after_crash = begin(guarded.record, "g");   // the guarded start crashed: its record is unchanged
+        check(!after_crash.off && after_crash.record.phase == Phase::trying && after_crash.record.failures == 1);
+        auto same = after_crash.record;
+        same.stage = Stage::device;
+        check(begin(same, "g").record.phase == Phase::locked);
+        auto other = after_crash.record;
+        other.stage = Stage::drawing;
+        const auto guarded_again = begin(other, "g");
+        check(guarded_again.off && guarded_again.record.phase == Phase::guarded &&
+              guarded_again.record.failed_stage == Stage::drawing && guarded_again.record.failures == 1);
+        // at the swapchain, before the overlay's first draw: guarded too, the first death (device) kept
+        other.stage = Stage::swapchain;
+        const auto before_draw = begin(other, "g");
+        check(before_draw.off && before_draw.record.phase == Phase::guarded &&
+              before_draw.record.failed_stage == Stage::device && before_draw.record.failures == 1);
+        // a guarded start never writes trying: the guarded record itself is what the next start reads
+        check(guarded.record.phase != Phase::trying && guarded_again.record.phase != Phase::trying);
+        // KILN_UI_OVERLAY=1 in a guarded start is an attempt of its own (overlay_guard_start sets trying): a death in it
+        // guards, or locks at the same stage, as any other attempt
+        auto forced = guarded.record;
+        forced.phase = Phase::trying;
+        forced.stage = Stage::device;
+        check(begin(forced, "g").record.phase == Phase::locked);
+    }
+    // at_exit() changes only trying (idle) and guarded (retry)
+    for (Phase p : {Phase::complete, Phase::retry, Phase::locked}) {
+        Record x{p, Stage::swapchain, Stage::device, 1, "m"};
+        check(at_exit(x).phase == p && at_exit(x).stage == Stage::swapchain && at_exit(x).failures == 1);
+    }
+    // Inbox 97: the lock 0.2.0-dev.29.17 wrote ("failed twice at this stage", from bugs a later Kiln fixed) stayed after
+    // the update, and the overlay stayed off. The record carries the Kiln version since 0.2.0-dev.29.19; a record of
+    // another Kiln (an update, a downgrade) or one without the version (every older Kiln's) starts fresh.
+    {
+        const std::string m = "w2-a8c7f832281a39c5", now = "0.2.0-dev.29.19";
+        Record old;
+        check(parse("2 4 1 1 2 0 " + m + "\n", old) && old.phase == Phase::locked && old.kiln.empty());
+        check(begin(old, m).off);  // without the Kiln's version the lock holds, as it did
+        const auto cleared = for_kiln(old, now, m);
+        check(cleared.phase == Phase::complete && cleared.failures == 0 && !cleared.wrapper_retry && cleared.kiln == now &&
+              cleared.modules == m && cleared.stage == Stage::begun);
+        const auto next = begin(cleared, m);
+        check(!next.off && next.record.phase == Phase::trying && next.record.kiln == now);
+        check(encode(next.record) == "4 1 0 0 0 0 " + now + " " + m + "\n");
+        Record disk;
+        check(parse(encode(next.record), disk) && disk.kiln == now && disk.modules == m && disk.phase == Phase::trying);
+        // a wrapper recovery and a guarded record of an old Kiln are cleared too
+        Record wrapped{Phase::guarded, Stage::device, Stage::device, 1, "w2-old", true, "0.2.0-dev.29.17"};
+        const auto fresh = for_kiln(wrapped, now, m);
+        check(fresh.phase == Phase::complete && fresh.failures == 0 && !fresh.wrapper_retry && fresh.modules == m);
+        // the same Kiln: nothing changes, a lock holds until the record is deleted
+        Record locked{Phase::locked, Stage::hooks, Stage::hooks, 2, m, false, now};
+        const auto same = for_kiln(locked, now, m);
+        check(same.phase == Phase::locked && same.failures == 2 && same.kiln == now);
+        check(begin(same, m).off && begin(same, m).record.kiln == now);
+        check(parse(encode(locked), disk) && begin(for_kiln(disk, now, m), m).off);
+        // another Kiln, a downgrade as well: cleared
+        check(!begin(for_kiln(locked, "0.2.0-dev.29.18", m), m).off);
+        // a wrapper change within one Kiln keeps its version in the record
+        check(begin(locked, "w2-other").record.kiln == now && begin(locked, "w2-other").record.wrapper_retry);
+        // malformed records of the new format are rejected (a rejected record starts fresh, never locked)
+        check(!parse("3 4 1 1 2 0 " + m + "\n", disk));  // no version field
+        check(!parse("3 4 1 1 2 0 " + std::string(65, 'v') + " " + m + "\n", disk));
+        check(!parse("3 4 1 1 2 2 " + now + " " + m + "\n", disk));
+        check(!parse("3 4 1 1 2 0 " + now + " " + m + " extra\n", disk));
+        check(!parse("5 4 1 1 2 0 " + now + " " + m + "\n", disk));
+        check(!parse("4 4 1 1 2 0 " + m + "\n", disk));                   // format 4 without the version field
+        check(!parse("4 0 7 0 0 0 " + now + " " + m + "\n", disk));       // no stage 7
+        check(!parse("3 0 6 0 0 0 " + now + " " + m + "\n", disk));       // format 3 had no stage 6
+        // format 3 and older: stage 5 is the frames presented; format 4: 5 is the overlay's first draw, 6 the frames
+        check(parse("3 0 5 5 0 0 " + now + " " + m + "\n", disk) && disk.stage == Stage::frame && disk.failed_stage == Stage::frame);
+        check(parse("2 0 5 0 0 0 " + m + "\n", disk) && disk.stage == Stage::frame);
+        check(parse("3 2 4 4 1 0 " + now + " " + m + "\n", disk) && disk.stage == Stage::swapchain);
+        check(parse("4 1 5 0 0 0 " + now + " " + m + "\n", disk) && disk.stage == Stage::drawing);
+        check(parse("4 0 6 5 0 0 " + now + " " + m + "\n", disk) && disk.stage == Stage::frame && disk.failed_stage == Stage::drawing);
+        check(encode(disk) == "4 0 6 5 0 0 " + now + " " + m + "\n");
+        // the version as one bounded token
+        check(kiln_token("0.2.0-dev.29.19+20261119.c370680") == "0.2.0-dev.29.19+20261119.c370680");
+        check(kiln_token("") == "unknown" && kiln_token("a b\tc\n") == "a_b_c_" && kiln_token(std::string(100, 'x')).size() == 64);
+        check(kiln_token("-") == "unknown");  // "-" stands for no version in the record
     }
     // idle() and rearm() change nothing outside their phases
     for (Phase p : {Phase::complete, Phase::guarded, Phase::retry, Phase::locked}) {

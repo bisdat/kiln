@@ -34,9 +34,15 @@ html[data-covered] .k-app *, html[data-covered] [data-deck-screen] * { scrollbar
 html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-screen] ::-webkit-scrollbar { display: none; }
 
 /* ---------------------------------------------------------------- frame */
-/* --fire: the flicker (shell/Stage.tsx sets it about 11 times a second on the two elements that use it, .k-title and
-   .k-sheet). Not inherited: a change restyles only those two, not the whole page under the sheet. */
+/* Properties written while things move go only onto leaves (elements with no children) that read them: --fire, the
+   flicker (shell/Stage.tsx, about 11 times a second: .k-title and .k-sheet-rim), --mx/--my, the pointer (the torch,
+   .k-torch), --k, the mouth's spring (.k-door-lab). On an element with the page under it each write restyled and
+   repainted the whole page (inbox 94: a launcher that lagged on every page but Play). Not inherited either, where the
+   engine knows @property: a second guard. */
 @property --fire { syntax: "<number>"; inherits: false; initial-value: .5; }
+@property --mx { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --my { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --k { syntax: "<number>"; inherits: false; initial-value: 0; }
 .k-app { position: relative; height: 100%; min-height: 640px; min-width: 1024px; overflow: hidden; background: var(--k-bg-0);
   /* the kiln's mouth on Play: 40% of the width, 62.5% of the height, at most 800 px (shell/Stage.tsx draws the same) */
   --kiln: min(800px, calc(max(1024px, 100vw) * .4), calc(max(640px, 100vh) * .625)); }
@@ -51,6 +57,9 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
 /* the fire (shell/Stage.tsx): a WebGL canvas under everything; .k-app gets data-gl once it draws */
 .k-stage-gl { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
 .k-app[data-gl] .k-stage-gl { display: block; }
+/* behind a sheet the canvas is only the header band (shell/Stage.tsx stageCanvas): below it, in the sheet's side margins,
+   the wall the shader draws there, its dark ambient */
+.k-app[data-gl] .k-stage { background: #020201; }
 .k-app[data-gl] .k-fall, .k-app[data-gl] .k-stage::after { display: none; }
 
 /* ---------------------------------------------------------------- header */
@@ -114,7 +123,7 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
 .k-title { display: inline-block; padding: 0 0 12px; border: 0; background: none; cursor: pointer; text-align: left; text-wrap: balance;
   font-family: var(--k-font-display); font-weight: 600; line-height: .95; font-size: clamp(64px, calc((100vw - var(--kiln) - 90px) / 5.2), 148px);
   background-image: linear-gradient(90deg, #c5ae99 0%, #f8e8d4 55%, #fff5e4 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
-  filter: brightness(calc(.94 + var(--fire) * .1)); }
+  filter: brightness(calc(.94 + var(--fire, .5) * .1)); }
 .k-title.static { cursor: default; }
 .k-title svg { display: inline-block; width: 26px; height: 26px; margin-left: 14px; vertical-align: .06em; fill: none; stroke: var(--k-text-2); stroke-width: 2;
   stroke-linecap: round; stroke-linejoin: round; transition: transform .35s var(--k-spring), stroke .15s; }
@@ -149,6 +158,9 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
   background: linear-gradient(90deg, var(--k-ember-700), var(--k-ember-500) 60%, var(--k-ember-300)); box-shadow: 0 0 12px rgba(255, 120, 40, .55); }
 .k-start-bar.by-steps > i { background: linear-gradient(90deg, var(--k-gold-600), var(--k-gold-400)); box-shadow: 0 0 10px rgba(249, 199, 79, .35); }
 .k-start-left { margin: 0; font-size: 18px; color: var(--k-text-0); }
+/* the time left, and Play's "Stop waiting" after it on the same line while there is room */
+.k-start-leftrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 18px; }
+.k-start-leftrow .k-link, .k-hero-stop .k-link { font-size: 17px; white-space: nowrap; }
 .k-start-basis { color: var(--k-text-2); font-size: 16px; }
 .k-start-steps { list-style: none; margin: 2px 0 0; padding: 6px 4px; flex: 1 1 0; min-height: 0; max-width: 640px; overflow-y: auto; scrollbar-width: thin;
   border-radius: var(--k-radius-m); background: linear-gradient(rgba(14, 9, 7, .72), rgba(10, 7, 5, .64)); box-shadow: inset 0 0 0 1px var(--k-line); }
@@ -201,11 +213,25 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
 .k-remove-list { max-height: 240px; overflow-y: auto; margin: 8px 0 0; padding: 0 0 0 18px; text-align: left; }
 .k-remove-list li { margin: 2px 0; }
 .k-remove-list .k-muted { font-size: 14.5px; }
+.k-remove-settings { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0 0; text-align: left; cursor: pointer; }
+.k-remove-settings input { margin: 4px 0 0; flex: none; }
+.k-remove-settings small { display: block; margin-top: 2px; font-size: 14.5px; color: var(--k-text-2); }
 /* Settings > Library: the earlier versions kept for a roll back (components/LibrarySettings.tsx) */
 .k-kept-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 240px; overflow-y: auto; }
 .k-kept-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
 .k-kept-row .k-kept-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .k-kept-row .k-muted { flex: 1 1 auto; font-size: 14.5px; }
+/* Settings, Graphics: the upscaler files (components/UpscalerSettings.tsx) */
+.k-upscalers { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.k-upscaler { display: flex; flex-direction: column; gap: 4px; }
+.k-upscaler-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.k-upscaler-name { flex: 0 1 auto; min-width: 0; font-size: 17.5px; color: var(--k-text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-upscaler-actions { margin-left: auto; display: flex; gap: 6px; flex: 0 0 auto; }
+.k-upscaler-enables, .k-upscaler-detail { font-size: 14.5px; line-height: 1.35; color: var(--k-text-2); }
+.k-upscaler-progress { display: flex; align-items: center; gap: 10px; }
+.k-upscaler-progress .k-progress { flex: 1 1 auto; }
+.k-upscaler-license-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.k-upscaler-license { margin: 0; max-height: 240px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--k-font-mono); font-size: 13px; line-height: 1.45; color: var(--k-text-1); background: var(--k-bg-1); border: 1px solid var(--k-line); padding: 10px 12px; }
 .k-mod:hover { background: rgba(255, 150, 80, .05); }
 .k-mod.first-found { margin-top: 6px; border-top: 1px solid var(--k-line); padding-top: 8px; }
 .k-mod-text { display: flex; flex-direction: column; min-width: 0; gap: 0; }
@@ -247,9 +273,23 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
 /* ---------------------------------------------------------------- the sheet */
 .k-sheet { position: absolute; left: 24px; right: 24px; top: 76px; bottom: 0; z-index: 3; display: flex; overflow: hidden;
   background: linear-gradient(#1c130e, var(--k-bg-1) 170px); border-radius: 20px 20px 0 0;
-  box-shadow: inset 0 1px 0 rgba(255, 190, 140, calc(.14 + var(--fire) * .18)), 0 -24px 70px rgba(0, 0, 0, .6); }
-.k-sheet::before { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 0;
-  background: radial-gradient(440px 340px at calc(var(--mx, 50%) - 24px) calc(var(--my, 30%) - 76px), rgba(255, 150, 80, .075), transparent 72%); }
+  box-shadow: 0 -24px 70px rgba(0, 0, 0, .6); }
+/* WebKit without compositing ("flat": shell/Stage.tsx flatDrawing) or without the GPU ("software"): no blurred shadow
+   round the sheet. There each scroll step and each frame of the sheet's slide painted it again on the CPU: about half
+   the frames in a scroll (inbox 94: 30 a second with it, 50 without, in a 1280 x 694 window; a larger one loses more) */
+.k-app[data-render] .k-sheet { box-shadow: none; }
+/* the sheet's lit top edge, flickering with the fire: a strip as tall as the corners' curve, so a --fire write repaints
+   only the strip */
+.k-sheet-rim { position: absolute; left: 0; right: 0; top: 0; height: 24px; z-index: 0; pointer-events: none; border-radius: inherit;
+  box-shadow: inset 0 1px 0 rgba(255, 190, 140, calc(.14 + var(--fire, .5) * .18)); }
+/* the torch: the soft warm light round the pointer (shell/AppShell.tsx), on its own leaf just the size of the lit part
+   (the gradient is clear from 72% of its 440 x 340 px radii), moved with a transform: a move repaints only where the
+   light was and is. Centred at the pointer (viewport px: the sheet is 24 px in, 76 px down), at 50% / 30% until the
+   pointer moves. No will-change: a layer of its own would put the page above it on a layer of its own too, and text
+   on a layer without a background loses its subpixel smoothing (WebView2). */
+.k-torch { position: absolute; left: calc(50% - 341px); top: calc(30% - 321px); width: 634px; height: 490px; z-index: 0; pointer-events: none;
+  background: radial-gradient(440px 340px at 50% 50%, rgba(255, 150, 80, .075), transparent 72%); }
+.k-torch[data-at] { left: -341px; top: -321px; transform: translate(var(--mx), var(--my)); }
 .k-sheet.up { transform: none; visibility: visible; transition: transform .66s var(--k-out), visibility 0s; }
 .k-sheet.down { transform: translateY(calc(100% + 30px)); visibility: hidden; transition: transform .46s cubic-bezier(.5, 0, .8, .4), visibility 0s linear .46s; }
 .k-sheet-in { position: relative; z-index: 1; flex: 1; min-width: 0; display: flex; }

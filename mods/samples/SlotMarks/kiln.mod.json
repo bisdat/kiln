@@ -1,0 +1,9 @@
+{
+  "id": "slotmarks",
+  "name": "Slot marks sample",
+  "version": "1.0.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "SlotMarks.dll",
+  "side": "both",
+  "description": "Ui.Inventory sample: Ctrl+click a slot in the backpack or a chest to ask the server to mark the item red (the game does not pick it up; the server checks the item is yours), Alt+right-click to list it, a tint on every stack of 50 or more, and a 'Count this chest' panel beside storage chests that the server answers after checking the chest is near you."
+}

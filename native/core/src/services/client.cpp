@@ -2,15 +2,22 @@
 // kiln.client: side, session state and the local player for mods; the client world's tick and task queue.
 // The local player: the client world's "LocalPlayerData" singleton holds the local player's entity id at
 // client.local_player.entity (EMF ENGINE_MAP 1.5: isLocalPlayer(id, lpd) = *(u32*)(lpd+4) == id; re-derived for the
-// client build in docs/re/client.md). Read on the main thread at each client-world Pre and cached for any thread.
+// client build in docs/re/client.md). Read on the main thread at each client-world Pre and cached for any thread; it is
+// also the local input selection (client_input.h).
+// The building input members are client_building_input.cpp's; this file gives them the
+// live facts and the world and owner ends.
 #include <atomic>
 
+#include "../api.h"
 #include "../guard.h"
 #include "../image.h"
 #include "../log.h"
+#include "../registry.h"
 #include "../sigdb.h"
 #include "../tick.h"
 #include "../worldinfo.h"
+#include "client_building_input.h"
+#include "client_input.h"
 #include "services/kiln_client.h"
 #include "service.h"
 
@@ -21,6 +28,14 @@ int64_t g_lpd_entity = -1;               // offset of the entity id in LocalPlay
 std::atomic<uint32_t> g_local{0};        // cached local player entity
 uintptr_t g_lpd_world = 0, g_lpd = 0;    // main thread
 bool g_lpd_logged = false;
+
+uint32_t live_client_session() {
+    KilnSessionInfo s{};
+    s.size = sizeof s;
+    tick::session(&s);
+    const bool in_game = s.state == KILN_SESSION_HOST || s.state == KILN_SESSION_REMOTE;
+    return in_game && s.worlds[KILN_WORLD_CLIENT] ? s.sessions[KILN_WORLD_CLIENT] : 0;
+}
 
 void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
     const uintptr_t world = worldinfo::world(KILN_WORLD_CLIENT);
@@ -39,13 +54,34 @@ void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
         g_local.store(id, std::memory_order_release);
         KLOG_I("client: local player entity %u", id);
     }
+    client_input::publish(id, id ? live_client_session() : 0);
 }
 
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind == KILN_WORLD_CLIENT && ev->event == KILN_WORLD_STOPPING) {
         g_local.store(0, std::memory_order_release);
         g_lpd_world = g_lpd = 0;  // main thread: the client world is destroyed there
+        client_input::publish(0, 0);
+        building_input::session_ended(ev->session);
     }
+}
+
+void KILN_CALL on_owner_retiring(KilnOwner owner, void*) { building_input::owner_gone(owner); }
+
+building_input::Env env_for(KilnOwner owner) {
+    return {image().side == KILN_SIDE_CLIENT, hooks_enabled(), reg::owner_alive(owner), live_client_session(),
+            &reg::owner_alive};
+}
+
+KilnResult KILN_CALL c_building_input_submit(KilnOwner owner, uint64_t expected_session, const KilnBuildingInput* input,
+                                             uint32_t* request_id) {
+    return building_input::submit(env_for(owner), owner, expected_session, input, request_id);
+}
+KilnResult KILN_CALL c_building_input_status(KilnOwner owner, uint32_t request_id, uint32_t* state) {
+    return building_input::status(env_for(owner), owner, request_id, state);
+}
+KilnResult KILN_CALL c_building_input_cancel(KilnOwner owner, uint32_t request_id, uint32_t* cancelled) {
+    return building_input::cancel(env_for(owner), owner, request_id, cancelled);
 }
 
 KilnResult KILN_CALL c_state(KilnClientState* out) {
@@ -91,6 +127,9 @@ const KilnClientApi kTable = {
     &c_post,
     &c_on_client_thread,
     &c_client_world,
+    &c_building_input_submit,
+    &c_building_input_status,
+    &c_building_input_cancel,
 };
 
 bool init() {
@@ -98,6 +137,7 @@ bool init() {
     if (image().side != KILN_SIDE_CLIENT) return true;  // state() still answers: dedicated server
     KilnHandle h = 0;
     tick::subscribe_world(0, &on_world, nullptr, &h);
+    reg::add_owner_retiring(0, &on_owner_retiring, nullptr, &h);  // a revoked owner's building input request ends
     if (sigdb::feature("client.local_player") && sigdb::feature("singletons") &&
         sigdb::constant("client.local_player.entity", &g_lpd_entity)) {
         tick::subscribe_world_tick(0, KILN_WORLD_CLIENT, KILN_TICK_PRE, &on_client_pre, nullptr, &h);

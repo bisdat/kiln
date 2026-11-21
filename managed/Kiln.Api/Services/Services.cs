@@ -94,6 +94,7 @@ internal static unsafe class Services
     {
         if (SliceGuard.Depth > 0)
             throw new InvalidOperationException($"{api} cannot be called from a program wrap's handler (it runs inside the world's step, maybe on a worker); use slice.Post");
+        if (TaskExecutionScope.InMenuHop) throw new InvalidOperationException(TaskExecutionScope.MenuHopRefusal(api));
         if (Backend.Current.IsTickThread) return;
         throw new InvalidOperationException(Game.InBoot ? Game.NotInBoot(api) : $"{api} must be called on the tick thread (use Scheduler.Post)");
     }

@@ -65,6 +65,18 @@ export function placeholders(template: string): string[] {
   return out;
 }
 
+/** The placeholders of a text with their formats, once per use: "{0} of {total:N0} {0}" gives ["0", "total:N0", "0"]. */
+export function placeholderTokens(template: string): string[] {
+  const out: string[] = [];
+  scan(template, (token) => {
+    const colon = token.indexOf(":");
+    const name = (colon >= 0 ? token.slice(0, colon) : token).trim();
+    if (name) out.push(colon >= 0 ? `${name}:${token.slice(colon + 1).trim()}` : name);
+    return undefined;
+  });
+  return out;
+}
+
 /** Walks a template; calls `onToken` with each `{...}` body and returns the text with `{{`/`}}` made braces and each
  * token replaced by what `onToken` returns (undefined: the token stays as written). */
 function scan(template: string, onToken: (token: string) => string | undefined): string {

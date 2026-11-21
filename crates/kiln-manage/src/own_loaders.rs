@@ -32,6 +32,13 @@ pub enum Via {
     /// Kiln hosts ShroudForge for this profile (it lists enabled ShroudForge mods); ShroudForge then owns startup
     /// patching and writes the EML packages of its mods folder whose `extended.mod.json` says `enabled: true`.
     HostedShroudForge,
+    /// A Kiln native mod: Enshrouded ModLoader 0.6.15+ installs itself next to Kiln as
+    /// `kiln/native/enshrouded-modloader/modloader.dll` (phase boot), a drop-in the profile reads, or the profile's native
+    /// entry holding that DLL.
+    NativeModule,
+    /// Kiln's interpreter (kiln-sfi): kiln.json selects it ([`crate::sfi_routing`]), and it runs the EML
+    /// packages of `<game>/mods` whose ShroudForge switch is on, as Kiln's hosted ShroudForge does from its folder.
+    Interpreter,
 }
 
 /// How the profile's mods of a kind reach the own loader.
@@ -66,7 +73,8 @@ pub struct OwnLoader {
 impl OwnLoader {
     /// The host folder the loader reads.
     pub fn root(&self, game_dir: &Path) -> PathBuf {
-        if self.kind == ModKind::Eml && self.engine == Engine::ShroudForge {
+        // (Kiln's interpreter reads its own folder, never the one ShroudForge's config names)
+        if self.kind == ModKind::Eml && self.engine == Engine::ShroudForge && self.via != Via::Interpreter {
             return crate::shroudforge::mods_dir(game_dir);
         }
         game_dir.join(&self.folder)
@@ -96,6 +104,8 @@ fn kinds_of(kind: ProxyKind, game_dir: &Path) -> Vec<(ModKind, String, Delivery)
         ProxyKind::Enshwick => vec![(ModKind::Enshwick, "mods".into(), Delivery::Plugin)],
         ProxyKind::Shroudlink => vec![(ModKind::Shroudlink, crate::engine_mods::SHROUDLINK_MODS.into(), Delivery::None)],
         ProxyKind::Ember => vec![(ModKind::Ember, crate::engine_mods::EMBER_MODS.into(), Delivery::None)],
+        // Enshrouded ModLoader reads Mods/EnshroudedModLoader, where Kiln's copies of the profile's packages always are
+        ProxyKind::Dllmod => vec![(ModKind::Dllmod, crate::dllmod::RUN_FOLDER.into(), Delivery::Placed)],
         _ => Vec::new(),
     }
 }
@@ -155,6 +165,14 @@ fn emf_chained(game_dir: &Path) -> Vec<(String, PathBuf)> {
 /// dinput8-chain.ini, a hosted ShroudForge). One entry per (kind, file). `profile`: the profile being activated or
 /// active (only its ShroudForge list matters here); None for none.
 pub fn find(game_dir: &Path, profile: Option<&ProfileView>) -> Vec<OwnLoader> {
+    find_routed(game_dir, profile, &crate::sfi_routing::route_of(game_dir))
+}
+
+/// [`find`] on the route of the game's ShroudForge-format mods ([`crate::sfi_routing`]), decided once by the caller.
+/// Main's list, except under Kiln's interpreter: the interpreter takes the place of Kiln's hosted ShroudForge
+/// ([`Via::Interpreter`], while it runs and the profile makes it run the EML mods), and nothing below
+/// `<game>/shroudforge` is read. (That route is decided only when ShroudForge's own loader is not in the game.)
+pub fn find_routed(game_dir: &Path, profile: Option<&ProfileView>, route: &crate::sfi_routing::Route) -> Vec<OwnLoader> {
     let mut out: Vec<OwnLoader> = Vec::new();
     let mut add = |class: ProxyKind, file: String, via: Via| {
         let Some(engine) = Engine::of_proxy(class) else { return };
@@ -187,6 +205,28 @@ pub fn find(game_dir: &Path, profile: Option<&ProfileView>) -> Vec<OwnLoader> {
     for (file, host) in emf_chained(game_dir) {
         if let Ok(c) = crate::pe::classify_proxy(&host) { add(c.kind, file, Via::EmfChain); }
     }
+    // Enshrouded ModLoader 0.6.15+ as a Kiln native mod (its installer: kiln/native/enshrouded-modloader/modloader.dll):
+    // a native drop-in folder the profile reads (no profile: every drop-in folder), or a switched-on native entry of the
+    // profile holding its DLL. kiln-dllmod steps aside for it the same way (native/plugins/dllmod, loader_native_module).
+    let mut native_dirs: Vec<PathBuf> = Vec::new();
+    if profile.is_none_or(|p| p.dropins_native) {
+        let root = game_dir.join(crate::paths::game::DROPIN_NATIVE);
+        let mut dirs: Vec<PathBuf> = std::fs::read_dir(&root).into_iter().flatten().flatten().map(|e| e.path())
+            .filter(|p| p.is_dir() && !p.is_symlink() && p.join(crate::manifest::NATIVE_MANIFEST).is_file()).collect();
+        dirs.sort();
+        native_dirs.extend(dirs);
+    }
+    if let Some(p) = profile {
+        native_dirs.extend(p.sources.iter().filter(|(k, _, _)| *k == ModKind::Native).map(|(_, _, path)| path.clone()));
+    }
+    for dir in native_dirs {
+        for dll in crate::engines::dlls_in(&dir) {
+            if crate::pe::classify_proxy(&dll).is_ok_and(|c| c.kind == ProxyKind::Dllmod) {
+                let shown = dll.strip_prefix(game_dir).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| dll.display().to_string());
+                add(ProxyKind::Dllmod, shown, Via::NativeModule);
+            }
+        }
+    }
     // kiln-shroudforge hosts ShroudForge when the profile lists an enabled ShroudForge mod, or has ShroudForge drop-ins
     // on and ShroudForge's mods folder holds a ShroudForge package, and a ShroudForge runtime is there. ShroudForge then
     // owns the startup patch, runs the EML mods of its mods folder itself (those its switch has on: Kiln's copies there
@@ -195,6 +235,15 @@ pub fn find(game_dir: &Path, profile: Option<&ProfileView>) -> Vec<OwnLoader> {
     // Listed after a proxy loader of EML's too: the adapter looks at no proxy file (its `wanted()`), and under Wine or
     // Proton a proxy without a DLL override is not loaded, so kiln-eml does not stand aside for it and ShroudForge runs
     // the EML mods ([`shroudforge_runs_eml`]). The proxy, listed first, still decides the folder they are placed in.
+    // Under Kiln's interpreter kiln-shroudforge stands aside (KILN_SHROUDFORGE=1 cannot bring it back) and Kiln's
+    // interpreter carries the EML mods in its place, on the same rule but from <game>/mods.
+    if route.interpreter() {
+        if route.runs() && profile.is_some_and(|p| interpreter_carries_eml(game_dir, p)) {
+            out.push(OwnLoader { kind: ModKind::Eml, engine: Engine::ShroudForge, file: crate::sfi_routing::INTERPRETER_PLUGIN.into(),
+                via: Via::Interpreter, folder: crate::sfi_routing::INTERPRETER_MODS.into(), delivery: Delivery::Placed });
+        }
+        return out;
+    }
     let plugin = "kiln/plugins/kiln-shroudforge.dll";
     let runtime = game_dir.join("kiln/plugins/shroudforge/shroudforge-runtime.dll").is_file()
         || game_dir.join(crate::shroudforge::RUNTIME_DLL).is_file();
@@ -208,6 +257,40 @@ pub fn find(game_dir: &Path, profile: Option<&ProfileView>) -> Vec<OwnLoader> {
             delivery: Delivery::Placed });
     }
     out
+}
+
+/// Kiln's interpreter runs the profile's EML mods (as Kiln's hosted ShroudForge would, [`find`]): the profile has a
+/// ShroudForge mod switched on, an EML package that needs ShroudForge's runtime, or ShroudForge drop-ins and
+/// `<game>/mods` holds a package whose switch is on (the adapter's `legacy_wanted` rule on the interpreter's folder,
+/// without ShroudForge's own state file).
+fn interpreter_carries_eml(game_dir: &Path, p: &ProfileView) -> bool {
+    use crate::sf_paths::{ci_child, scan, Field, Scan};
+    if p.enabled(ModKind::ShroudForge).next().is_some() || !p.eml_runtime.is_empty() {
+        return true;
+    }
+    p.dropins_shroudforge && std::fs::read_dir(game_dir.join(crate::sfi_routing::INTERPRETER_MODS)).into_iter().flatten().flatten().any(|e| {
+        let ext = ci_child(&e.path(), "extended.mod.json");
+        if !std::fs::metadata(&ext).is_ok_and(|m| m.is_file()) { return false; }
+        let Scan::Doc(d @ Field::Obj(_)) = scan(&ext, &["enabled", "launcher"], &[]) else { return true };
+        match d.get("enabled") {
+            Some(Field::Bool(false)) => false,
+            None | Some(Field::Bool(true)) => !matches!(d.get("launcher"), Some(Field::Str(s)) if s == "EML"),
+            Some(_) => true,
+        }
+    })
+}
+
+/// ShroudForge's own loader that may run in `game_dir`: the first ShroudForge file [`find`] lists (a proxy next to the
+/// game, a `kiln/chain.ini` or `dinput8-chain.ini` line), as find names it; None: none. Reads none of ShroudForge's
+/// own files.
+#[cfg(feature = "sfi-scan")]
+pub(crate) fn shroudforge_loader(game_dir: &Path) -> Option<String> {
+    if let Some(s) = crate::engines::scan_proxies(game_dir).into_iter().find(|s| s.class.kind == ProxyKind::ShroudForge) {
+        return Some(s.name);
+    }
+    chained(game_dir).into_iter().chain(emf_chained(game_dir))
+        .find(|(_, host)| crate::pe::classify_proxy(host).is_ok_and(|c| c.kind == ProxyKind::ShroudForge))
+        .map(|(file, _)| file)
 }
 
 /// The own loader of a kind that decides where its mods are placed (the first found), if any.
@@ -253,9 +336,10 @@ pub(crate) fn check_runtime_eml_loader(loaders: &[OwnLoader], ids: &[String]) ->
 }
 
 /// The kinds whose own loader reads a fixed folder of the game. EML, EMF and Shroudtopia mods are copied there only
-/// while that loader is installed; Greeneye and Flame mods always run from Kiln's copy there
-/// (engine_mods::run_folder), and SF and SET are always placed as well (their Kiln plugins read only their own folder).
-pub const PLACED_FOR_LOADER: [ModKind; 5] = [ModKind::Eml, ModKind::Emf, ModKind::Greeneye, ModKind::Flame, ModKind::Shroudtopia];
+/// while that loader is installed (EMF's Lua mods always: EMF's lua mod reads them only there, engine_mods::EMF_MODS);
+/// Greeneye, Flame and Enshrouded ModLoader's packages always run from Kiln's copy there (engine_mods::run_folder), and SF
+/// and SET are always placed as well (their Kiln plugins read only their own folder).
+pub const PLACED_FOR_LOADER: [ModKind; 6] = [ModKind::Eml, ModKind::Emf, ModKind::Greeneye, ModKind::Flame, ModKind::Shroudtopia, ModKind::Dllmod];
 
 /// The (id, enabled) lists of a profile, from a launcher profile or from the game's `kiln/profile.json`.
 #[derive(Debug, Clone, Default)]
@@ -268,6 +352,8 @@ pub struct ProfileView {
     /// folder of a mod by that entry's manifest id ([`own_folder_of`]).
     pub sources: Vec<(ModKind, String, PathBuf)>,
     pub eml_runtime: Vec<String>,
+    /// The profile reads the `kiln/native` drop-in folder (`dropins` true or naming native), as kiln-core does.
+    pub dropins_native: bool,
 }
 
 fn names_shroudforge(d: &crate::profile::Dropins) -> bool {
@@ -283,7 +369,8 @@ impl ProfileView {
         for k in ModKind::ALL {
             for m in p.mods.list(k) { mods.push((k, m.id.clone(), m.enabled)); }
         }
-        ProfileView { mods, dropins_shroudforge: names_shroudforge(&p.dropins_file()), sources: Vec::new(), eml_runtime: Vec::new() }
+        let d = p.dropins_file();
+        ProfileView { mods, dropins_shroudforge: names_shroudforge(&d), sources: Vec::new(), eml_runtime: Vec::new(), dropins_native: d.names(ModKind::Native) }
     }
 
     pub fn of_file(f: &crate::profile::ProfileFile) -> Self {
@@ -291,11 +378,17 @@ impl ProfileView {
         for k in ModKind::ALL {
             for m in f.mods.folders(k).into_iter().flatten() { mods.push((k, m.id.clone(), m.enabled)); }
         }
-        ProfileView { mods, dropins_shroudforge: names_shroudforge(&f.dropins), sources: Vec::new(), eml_runtime: f.eml_runtime.clone() }
+        ProfileView { mods, dropins_shroudforge: names_shroudforge(&f.dropins), sources: Vec::new(), eml_runtime: f.eml_runtime.clone(),
+            dropins_native: f.dropins.names(ModKind::Native) }
     }
 
     /// [`ProfileView::sources`] of a launcher profile's EML mods, from the Library.
     pub fn with_library(mut self, dirs: &crate::paths::DataDirs, p: &crate::profile::Profile) -> Self {
+        // switched-on native mods: one may be Enshrouded ModLoader's DLL (find, Via::NativeModule)
+        for m in p.mods.list(ModKind::Native).iter().filter(|m| m.enabled) {
+            let r = crate::library::LibraryRef { kind: ModKind::Native, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
+            if let Ok(path) = crate::library::path_of(dirs, &r) { self.sources.push((ModKind::Native, m.id.clone(), path)); }
+        }
         for m in p.mods.list(ModKind::Eml) {
             let r = crate::library::LibraryRef { kind: ModKind::Eml, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
             if let Ok(path) = crate::library::path_of(dirs, &r) {
@@ -309,7 +402,8 @@ impl ProfileView {
     /// [`ProfileView::sources`] of the game's `kiln/profile.json` EML mods: their game-side paths on this system (a `Z:`
     /// path, a path relative to `<game>/kiln`, or a host path).
     pub fn with_file_sources(mut self, f: &crate::profile::ProfileFile, game_dir: &Path) -> Self {
-        for m in f.mods.folders(ModKind::Eml).into_iter().flatten() {
+        let natives = f.mods.folders(ModKind::Native).into_iter().flatten().filter(|m| m.enabled).map(|m| (ModKind::Native, m));
+        for (kind, m) in f.mods.folders(ModKind::Eml).into_iter().flatten().map(|m| (ModKind::Eml, m)).chain(natives) {
             let p = m.path.trim();
             let host = crate::winpath::z_to_unix(p).or_else(|| {
                 let h = PathBuf::from(p);
@@ -317,7 +411,7 @@ impl ProfileView {
                 else if crate::winpath::is_absolute_game_path(p) { None }
                 else { Some(p.split(['\\', '/']).filter(|c| !c.is_empty()).fold(game_dir.join("kiln"), |d, c| if c == ".." { d.parent().map(Path::to_path_buf).unwrap_or(d) } else { d.join(c) })) }
             });
-            if let Some(h) = host { self.sources.push((ModKind::Eml, m.id.clone(), h)); }
+            if let Some(h) = host { self.sources.push((kind, m.id.clone(), h)); }
         }
         self
     }
@@ -492,7 +586,8 @@ pub fn notes(game_dir: &Path, loaders: &[OwnLoader], profile: Option<&ProfileVie
         // ShroudForge runs an EML package of its folder only while the package's switch is on, for this side: when it may
         // run the EML mods (its own loader, or Kiln hosting it, beside EML's proxy file too) from the folder they are in
         let server = game_dir.join(crate::game::SERVER_EXE).is_file();
-        let hosted = loaders.iter().find(|o| o.kind == kind && o.via == Via::HostedShroudForge);
+        // (Kiln's interpreter carries EML as Kiln's hosted ShroudForge does)
+        let hosted = loaders.iter().find(|o| o.kind == kind && matches!(o.via, Via::HostedShroudForge | Via::Interpreter));
         let unloaded = proxy_unloaded(l);
         let sf_reads = kind == ModKind::Eml && sf_eml_folder(game_dir, loaders).is_some();
         let (mut off, mut other_side, mut unreadable, mut refused) = (Vec::new(), Vec::new(), Vec::new(), None);
@@ -541,6 +636,11 @@ pub fn notes(game_dir: &Path, loaders: &[OwnLoader], profile: Option<&ProfileVie
                 "Kiln hosts ShroudForge because the EML package {} needs ShroudForge's runtime: ShroudForge then runs the {label} mods in {folder}",
                 profile.and_then(|p| p.eml_runtime.first()).expect("runtime requirement")),
             (Via::HostedShroudForge, _) => format!("Kiln hosts ShroudForge for this profile's ShroudForge mods: ShroudForge then runs the {label} mods in {folder}"),
+            (Via::Interpreter, _) if profile.is_some_and(|p| !p.eml_runtime.is_empty()) => format!(
+                "Kiln's interpreter (kiln.json selects it) runs the EML package {} that needs ShroudForge's runtime: it then \
+                runs the {label} mods in {folder}", profile.and_then(|p| p.eml_runtime.first()).expect("runtime requirement")),
+            (Via::Interpreter, _) => format!("Kiln's interpreter (kiln.json selects it) runs this profile's ShroudForge mods: it \
+                then runs the {label} mods in {folder}"),
             (_, Engine::ShroudForge) if kind == ModKind::Eml => format!("{who} ({}) is installed: it carries EML and runs the {label} mods in {folder}", l.file),
             _ => format!("{who} ({}) is installed: it runs the {label} mods in {folder}", l.file),
         };
@@ -583,6 +683,10 @@ pub fn notes(game_dir: &Path, loaders: &[OwnLoader], profile: Option<&ProfileVie
         if unloaded {
             text.push_str(". Under Wine or Proton it runs only with a DLL override; ");
             text.push_str(&match hosted {
+                Some(h) if h.via == Via::Interpreter && sf_reads => "without one, Kiln's interpreter runs them, each while its \
+                    ShroudForge switch is on (Kiln switches it on in its copies)".to_string(),
+                Some(h) if h.via == Via::Interpreter => format!("without one, Kiln's interpreter runs only the {label} mods in \
+                    {}/, and Kiln's copies are not there", h.folder.trim_end_matches('/')),
                 Some(_) if sf_reads => "without one, ShroudForge (hosted by Kiln for this profile's ShroudForge mods) runs them, each while its \
                     ShroudForge switch is on (Kiln switches it on in its copies)".to_string(),
                 Some(h) => format!("without one, ShroudForge (hosted by Kiln for this profile's ShroudForge mods) runs only the {label} mods in \
@@ -646,15 +750,25 @@ fn proxy_unloaded(l: &OwnLoader) -> bool {
 /// hosts ([`proxy_unloaded`]). None when EML's own loader runs them, or nothing but kiln-eml does.
 pub fn sf_eml_folder(game_dir: &Path, loaders: &[OwnLoader]) -> Option<PathBuf> {
     let l = of_kind(loaders, ModKind::Eml)?;
-    let hosted = loaders.iter().any(|o| o.kind == ModKind::Eml && o.via == Via::HostedShroudForge);
+    // (Kiln's interpreter carries EML from its own folder, as Kiln's hosted ShroudForge does from
+    // ShroudForge's: no folder is asked of ShroudForge's config unless one of them may run the EML mods)
+    let hosted = loaders.iter().any(|o| o.kind == ModKind::Eml && matches!(o.via, Via::HostedShroudForge | Via::Interpreter));
+    if !(l.engine == Engine::ShroudForge || (hosted && proxy_unloaded(l))) {
+        return None;
+    }
+    let sf = match loaders.iter().find(|o| o.via == Via::Interpreter) {
+        Some(i) => i.root(game_dir),
+        None => crate::shroudforge::mods_dir(game_dir),
+    };
     let root = l.root(game_dir);
-    (root == crate::shroudforge::mods_dir(game_dir) && (l.engine == Engine::ShroudForge || (hosted && proxy_unloaded(l)))).then_some(root)
+    (root == sf).then_some(root)
 }
 
 /// "EML's own loader", "ShroudForge's loader (it runs EML mods too)".
 pub fn loader_name(l: &OwnLoader) -> String {
     match (l.kind, l.engine, l.via) {
         (ModKind::Eml, Engine::ShroudForge, Via::HostedShroudForge) => "ShroudForge, hosted by Kiln for this profile,".into(),
+        (ModKind::Eml, Engine::ShroudForge, Via::Interpreter) => "Kiln's interpreter".into(),
         (_, Engine::ShroudForge, _) => "ShroudForge's loader".into(),
         (k, _, _) => format!("{}'s own loader", short(k)),
     }
@@ -673,6 +787,7 @@ pub fn short(kind: ModKind) -> &'static str {
         ModKind::Enshwick => "Enshwick",
         ModKind::Shroudlink => "shroudlink",
         ModKind::Ember => "Ember",
+        ModKind::Dllmod => "Enshrouded ModLoader",
         k => k.label(),
     }
 }

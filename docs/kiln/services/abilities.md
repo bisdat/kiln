@@ -473,6 +473,41 @@ How it hooks (all fail soft; `kiln.abilities: natives on, programs on, instances
 - The ImpactRegistry map (`*(ImpactSystem+8)`, identity hash, linear probing) for program lookups and inserts; the
   instance pool lookup (0x9932f0); `TriggerSequence` (0x369d0); kiln.combat's AttrFind/AttrAdd.
 
+## Impact memory watch
+Since 0.2.0-dev.29.19 (inbox 116: a 2 h session ended in slow motion, teleporting and a crash after the game's impact
+memory filled up). Each world's `impact::ImpactSystem` takes every impact's stack, hit memory and collision arrays
+from one 16 MiB pool. When it is full, every new hit or attack fails (the game logs "[impact] Impact System could not
+allocate impact (collisions)" once per lost hit), the world crawls and the game can crash. kiln.abilities watches the
+pool read-only (it changes nothing in the game); on a hosting client the server world and the client world are watched
+apart and named in each line. Layout and evidence: [docs/re/impact.md](../../re/impact.md) section 10.
+
+What `kiln.log` says:
+- Once per world session: `kiln.abilities: impact pool watch on for the server world: 16 MiB, 0.4% used (peak 0.4%),
+  3 live impact instances (peak 9); kiln.log warns at 50/75/90%`. A layout check that fails says so in one line and the
+  watch stays off for that world; a read that faults switches it off for the process in one line.
+- A warning the first time the pool reaches **50 %**, **75 %** and **90 %** in a session: `WARNING: the server world's
+  impact memory is 75% full (...; 900 live impact instances, peak 901) ...`, followed by the **top 5 programs** by live
+  instances: `top programs by live instances: 734 x 0c3a7176-9336-47a3-ae98-d9433ac5ffbb (the game's generic melee
+  hit: weapons, tools, most enemies); ...`. A program that is not in the game's own list is marked "a mod's program".
+- At the first 75 % (or 90 %) warning of a session, once: **the 20 oldest live instances of the top program**, one line
+  each: the impact id, its age (Kiln notes when each instance was created), the hit entity (on the server world: whether
+  it still exists and its template), its `LifeTime` (length, time left, and the enforce/prevent/triggered destroy flags)
+  and the attacker/owner (the impact's hierarchy root) with its template. A hit should live about 0.15 s; instances
+  hundreds of seconds old with a LifeTime long past its end are the leak.
+- `the server world's impact memory is back under 40%` (info) when it falls under 40 % after a 75 % warning.
+
+`kiln/logs/tick-stats.jsonl`: each world's minute line ends with
+`"impact":{"used_pct":6.69,"peak_pct":9.37,"capacity_mib":16,"live":23,"live_peak":140}` (bytes in use and their peak
+as % of the pool, its size, live impact instances and their peak), absent when the pool could not be read.
+
+`<game>/kiln/control/impacts` (a text file): `dump` logs the top programs and the oldest instances once, while the
+game runs (Kiln deletes the file after reading it; checked every 2 s); `off` switches the watch off (no warnings, no
+creation times, no `impact` in tick-stats) until the file is removed or says something else.
+
+Costs: createImpactInstance's detour adds one clock read and one lock-free table write (a fixed 256 KiB table, keyed by
+the instance's slot so it never grows); each world reads five numbers every 0.5 s; the instance walk runs only at a
+warning or a dump.
+
 ## Costs and limits
 - Without subscribers the hot paths are one atomic load each (createImpactInstance, runImpact, the three wrapped
   natives); since 0.2.0-dev.29 every native thunk also counts itself in and out (two atomic adds).

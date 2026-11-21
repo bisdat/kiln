@@ -12,14 +12,15 @@ namespace Kiln;
 internal static partial class Compiler
 {
     // The game's armour: round((gradient * level + offset) * distribution[kind]) (client 0xe6dfe0, keen::BalancingTable +0x2a0 armorSetup). Checked at ready (ItemChecks).
-    internal static float ArmorOffset = 23, ArmorGradient = 15;
+    internal static float ArmorOffset => GearMath.ArmorOffset;  // Kiln.Content's GearMath, shared with the gear values
+    internal static float ArmorGradient => GearMath.ArmorGradient;
     private const uint ConfigLevel = 0x17147b63, RowDuration = 0x86a75e07, RowHealth = 0xf38b388c, RowItemLevel = 0x88fbd16d;
     // A food item's own time for the status it gives (PrimerBuffDuration, a Time in seconds). Eaten, the game gives the status for this long, not for the
     // status's defaultLifeTime; the tooltip's Duration row follows it. Every food starter has one (Honey: 60 s).
     private const uint ConfigFoodDuration = 0xbee6d4a9;
     private const string ConfigStamina = "StaminaCost";
 
-    internal static double ArmorShare(int armor, int level) => armor / (ArmorGradient * level + ArmorOffset);
+    internal static double ArmorShare(int armor, int level) => GearMath.ArmorShare(armor, level);
 
     /// <summary>The blocks of this file. Null: not one of them.</summary>
     private static BlockHandle? DefineItemBlock<T>(BlockContext ctx, Lowered low, string name, T block) where T : class, IBlock
@@ -143,7 +144,9 @@ internal static partial class Compiler
         d.Fields["itemLevelRange.maxLevel"] = level;
     }
 
-    /// <summary>Enhancement slots. An item's rarity is its perk count less one, so the slot its rarity needs must be filled, or it comes out a rank lower.</summary>
+    /// <summary>Enhancement slots. An item's rarity is its perk count less one, so the slot its rarity needs must be filled, or it comes out a rank lower.
+    /// With a class's perk source (<paramref name="perksFrom"/>) every slot is filled, up to legendary's, whatever the item's own rarity: a rarity roll
+    /// at creation, an anvil or a forge can raise it, and the game reads the slot of the rarity it ends up with. The item itself still shows its own rarity.</summary>
     private static void PerkSlots(Draft d, IReadOnlyList<PerkRef>? perks, Rarity rarity, int starterSlots, string? perksFrom, string path, string rarityPath)
     {
         var slots = new string?[5];
@@ -166,8 +169,12 @@ internal static partial class Compiler
         var top = (int)rarity;
         for (var i = 0; perks != null && i < perks.Count && i <= top; i++)
             if (perks[i].Value == "none") throw new BlockError(d.Ctx.Block, $"{path}[{i}]", $"{rarity} has {top + 1} enhancements, so slot {i} can't be empty: it would come out a rank lower");
-        for (var i = starterSlots; i <= top; i++)
+        // without a perk source only the item's own rarity can be filled; with one, every rarity it can be raised to
+        var fill = perksFrom != null ? (int)Rarity.Legendary : top;
+        for (var i = starterSlots; i <= fill; i++)
         {
+            // a slot above the item's own rarity left empty on purpose stays empty
+            if (i > top && perks != null && i < perks.Count && perks[i].Value == "none") continue;
             var mine = perks != null && i < perks.Count && perks[i].Value is { Length: > 0 } v && v != "none";
             if (mine)
             {
@@ -352,7 +359,7 @@ internal static partial class Compiler
             d.Rules[$"impactValues.{ConfigStamina}"] = stamina;
         }
         d.Held = cls.Key == WeaponClass.Daggers.Key ? HeldIn.BothHands : HeldIn.OneHand;
-        // a roll can give it any rarity, so every slot has to be filled
+        // a roll can give it any rarity, so every slot has to be filled (a class with a perk source fills them all anyway)
         PerkSlots(d, perks ?? cls.Perks, loot is { Rolled: true } ? Rarity.Legendary : stats.Rarity, cls.PerksFrom != null ? 1 : 5, cls.PerksFrom, "perks", "stats.rarity");
         ApplyVisual(d, visual ?? cls.Visual, visual != null ? "visual" : "class.visual");
         ApplyLoot(d, loot);

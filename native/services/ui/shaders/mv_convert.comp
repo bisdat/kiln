@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: MIT
+// kiln.ui upscaler swap (upscale_mv.cpp): the game's motion vectors (R16G16_SNORM, UV units) copied into Kiln's own
+// R16G16_SFLOAT image, the format AMD's FSR takes. Values are unchanged. Compiled by gen_mv_convert.sh into
+// mv_convert_spv.h (glslc; the generated header is committed, so a build needs no shader compiler).
+#version 450
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(set = 0, binding = 0) uniform sampler2D src;
+layout(set = 0, binding = 1) uniform writeonly image2D dst;  // shaderStorageImageWriteWithoutFormat (the game enables it)
+layout(push_constant) uniform Size { uvec2 size; } p;
+void main() {
+    uvec2 id = gl_GlobalInvocationID.xy;
+    if (id.x >= p.size.x || id.y >= p.size.y) return;
+    imageStore(dst, ivec2(id), vec4(texelFetch(src, ivec2(id), 0).xy, 0.0, 0.0));
+}

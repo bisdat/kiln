@@ -278,6 +278,12 @@ struct PageSet {
     uint32_t n = 0;
 };
 bool read_pages(const Access& a, KilnEntity e, PageSet* out, bool* initialized);
+// Upgrades (v8, package P3, gear.cpp): opens a transaction of ours on `tx` (E.tx_size bytes, 16-aligned) with the
+// accessors of `a` and `entity` as its operator, no flags (the caller commits or rolls back, then frees its arrays);
+// and whether every op queued on it takes a plain stack (op 1 without an item entity). Not guarded: call them inside
+// the caller's structured-exception guard.
+void tx_begin(const Access& a, KilnEntity entity, uint8_t* tx);
+bool tx_takes_plain_only(const uint8_t* tx);
 // InventorySetup's flags byte (kSetupFlags) through the accessors of `a`. False: no setup (or a fault).
 bool setup_flags(const Access& a, KilnEntity e, uint8_t* flags);
 

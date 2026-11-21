@@ -1,7 +1,11 @@
-// Deck Settings: the desktop UI (now, and which UI to start in), button glyphs, launcher updates, fullscreen, the loaded
-// profile (a background feature: the Mods screen shows its switches), the notes about mod folders (the switch, and
-// the last activation's notes to read again: components/FolderNotes.tsx), the data folder (../DataFolder.tsx), Quit.
+// Deck Settings: the desktop UI (now, and which UI to start in), button glyphs, the launcher's language (A steps
+// through System and every language the launcher has a file for, as Settings, Language does on the desktop), launcher
+// updates, fullscreen, the loaded profile (a background feature: the Mods screen shows its switches), the notes about
+// mod folders (the switch, and the last activation's notes to read again: components/FolderNotes.tsx), the data folder
+// (../DataFolder.tsx), Quit.
 // The last line names what the Deck detection saw (for testers' reports).
+// (dev.29.18) For a client with Kiln in it: the upscaler behind the game's FSR 3 option, what runs, and the vendor
+// files with their licence screen, progress and Remove (../Upscaler.tsx).
 // (dev.29) Channel: Release or Beta (test builds); A on it switches (DeckSwitchDialog: what happens, the build installed
 // now, Restart now), both ways; a test build says so in the row.
 // The Nexus Mods build (api/distribution.ts) has no launcher updates: its row is "New versions: Nexus Mods" (A opens
@@ -19,6 +23,7 @@ import * as nx from "../../api/nexus";
 import { useNexusAccount } from "../../shell/catalogInstall";
 import { runTask, toast } from "../../ui";
 import { DeckDataFolderRow } from "../DataFolder";
+import { DeckUpscalerRows } from "../Upscaler";
 import { otherFolderProfile } from "../../shell/dataFolderText";
 import { ProfileDialog, QuitDialog } from "../dialogs";
 import { useGlyphPref, type GlyphPref } from "../glyphs";
@@ -27,7 +32,9 @@ import { saveSettings, saveUiMode, switchUi } from "../mode";
 import { DeckButton, Dialog, Row, Screen, Word } from "../ui";
 import { FolderNotesList, useGameFolderNotes } from "../../components/FolderNotes";
 import { folderNotesCount } from "../../shell/notices";
-import { t, useT } from "../../i18n";
+import { languageName, languages, t, useT } from "../../i18n";
+import { applyLanguage } from "../../i18n/LanguageSync";
+import { DeckCommunityRow } from "../../community/parts";
 
 const MODES: { id: UiMode }[] = [{ id: "auto" }, { id: "deck" }, { id: "desktop" }];
 const GLYPHS: { id: GlyphPref }[] = [{ id: "auto" }, { id: "deck" }, { id: "xbox" }];
@@ -121,6 +128,10 @@ export default function Settings() {
     else if (u.checked) { upWord = t("deck.settings.upToDate"); upTone = "ok"; }
   }
   const pad = Object.values(pads.native)[0]?.name ?? pads.browser[0] ?? null;
+  // the launcher's language: System, then each language with a file (a saved one without a file goes back to System)
+  const language = settings.data?.language || "system";
+  const languageChoices = ["system", ...languages().map((l) => l.tag)];
+  const nextLanguage = languageChoices[(languageChoices.findIndex((x) => x.toLowerCase() === language.toLowerCase()) + 1) % languageChoices.length];
   // the channel row: a test build goes back to the release; a release build to the beta (or, following the beta
   // already, back to following the release)
   const onBeta = u?.buildChannel === "beta";
@@ -143,6 +154,12 @@ export default function Settings() {
           onClick={() => void saveSettings(qc, (cur) => ({ animatedFire: cur.animatedFire === false }))} />
         <Row id="set-glyphs" title={t("deck.settings.glyphs")} a={t("deck.shared.change")} end={<Word tone="ember">{GLYPHS.some((g) => g.id === glyph.pref) ? glyphWord(glyph.pref) : undefined}</Word>}
           onClick={() => glyph.set(next(GLYPHS, glyph.pref))} />
+        <Row id="set-language" title={t("languageSettings.title")} a={t("deck.shared.change")} disabled={!settings.data}
+          end={<Word tone="ember">{language === "system" ? t("languageSettings.system") : languageName(language)}</Word>}
+          onClick={() => {
+            applyLanguage(nextLanguage);
+            void saveSettings(qc, () => ({ language: nextLanguage === "system" ? null : nextLanguage }));
+          }} />
         {api.isTauri() && !d?.gamescope && (
           <Row id="set-full" title={t("deck.settings.fullscreen")} a={t("deck.shared.change")} end={<Word tone="ember">{full === false ? t("deck.shared.off") : t("deck.shared.on")}</Word>}
             onClick={() => api.deckFullscreen(full === false).then(setFull).catch((e) => toast.error(e))} />
@@ -181,10 +198,12 @@ export default function Settings() {
           sub={t("deck.settings.notesSwitchSub")}
           end={<Word tone="ember">{settings.data?.modFolderNotes !== false ? t("deck.shared.on") : t("deck.shared.off")}</Word>}
           onClick={() => void saveSettings(qc, (cur) => ({ modFolderNotes: cur.modFolderNotes === false }))} />
+        <DeckCommunityRow />
         {game && (
           <Row id="set-notes" title={t("deck.settings.modNotes")} a={t("deck.shared.read")} disabled={!noteCount} sub={t("deck.settings.modNotesSub")}
             end={<Word tone={noteCount ? "info" : "idle"}>{String(noteCount)}</Word>} onClick={() => setNotesOpen(true)} />
         )}
+        {game && <DeckUpscalerRows game={game} />}
         <DeckDataFolderRow />
         <Row id="set-quit" title={t("deck.dialogs.quit")} a={t("deck.dialogs.quit")} onClick={() => setQuit(true)} />
       </div>

@@ -50,16 +50,20 @@ internal static class ContentNames
     /// <see cref="Stale"/>) and looks again.</summary>
     public static Def? FindNow(uint id)
     {
-        if (Find(id) is { } d) return d;
-        Task? running;
-        lock (Gate) running = _reading;
-        if (running != null) running.Wait(TimeSpan.FromSeconds(5));
-        else
+        Task running;
+        // one look under the lock: a read that ended between a miss and a second look would leave no read to wait for
+        // and a fresh read time, and the item that read found would be answered as missing
+        lock (Gate)
         {
-            lock (Gate)
+            if (_defs.TryGetValue(id, out var d)) return d;
+            if (_reading == null)
+            {
                 if (_readAt != 0 && Clock() - _readAt < Stale) return null;
-            Read();
+                _reading = Task.Run(Read);
+            }
+            running = _reading;
         }
+        running.Wait(TimeSpan.FromSeconds(5));
         lock (Gate) return _defs.GetValueOrDefault(id);
     }
 

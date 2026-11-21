@@ -1,6 +1,6 @@
 # The client gate's list
 
-**0.2.0-dev.29 ships with this list empty.** The owner decided on 2026-11-14 that nothing ships held: every capability
+**0.2.0-dev.30 ships with this list empty too** (owner, 2026-11-20: "nothing held, I will test before release"; the equipment tooltips' `equip-tooltips.json` was removed). **0.2.0-dev.29 ships with this list empty.** The owner decided on 2026-11-14 that nothing ships held: every capability
 0.2.0-dev.28 held (22 rows: world queries and paths, terrain overlays, tool wear, values in the game's UI, the client
 asset catalog, a mod's OnBoot, resource patches and boot VFX on a client, program wraps and replication watching on a
 client, weapon follow-ups, transform scale) is on
@@ -8,6 +8,13 @@ for every player, and the guided checks stay as the list of what a real game has
 (`tools/client-checks/plan.py`, the release notes' "On, not yet confirmed in a real game"). The mechanism below stays
 for a capability the owner decides to hold; a held default is the owner's decision at each release, asked as its own
 question.
+
+**Since 0.2.0-dev.30.2 one row ships held:** `kiln-sfi.sf18` in `sfi.json` (anything that needs ShroudForge 1.8). It
+stays held whatever `"preview"` says: the release policy holds it in every build
+([docs/kiln/services/launch.md](../../../docs/kiln/services/launch.md#the-held-row-and-the-kiln-sfisf18-veto)). Kiln's
+interpreter for ShroudForge mods has no row: it is a normal choice in Settings > ShroudForge (kiln.json
+`shroudforge.backend: "kiln"`), and hosted ShroudForge stays the default. A `kiln-sfi.interpreter` row on both sides
+would hold it as a preview until kiln.json `"preview"` lifts it; a row on one side only holds it on both.
 
 Kiln ships some capabilities switched off because only a real game client can confirm them: nobody but a player
 can say that a camera does not clip, that a marker shows on the compass, that a joined vanilla player still sees a

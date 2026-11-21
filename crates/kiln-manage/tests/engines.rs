@@ -354,6 +354,22 @@ fn optiscaler_in_the_game_folder_is_found_by_its_contents() {
     let notes = kiln_manage::game::graphics_tools(g);
     assert!(notes[0].kiln_overlay && notes[0].text.contains("draws next to it"), "{}", notes[0].text);
     assert_eq!(serde_json::to_value(&notes[0]).unwrap()["kilnOverlay"], true);
+    // Inbox 80: OptiScaler's real DLL carries ReShade's texts (it can load ReShade) long before its own (0.9.5's
+    // OptiScaler.dll: "reshade" at 24.59 MB, "optiscaler.ini" at 24.88 MB in UTF-16 and 24.95 MB in ASCII). Under winmm.dll
+    // it is OptiScaler, whatever comes first in the file; 29.17's report named it "ReShade (text reshade)".
+    for own in [utf16("OptiScaler.ini"), utf16("OptiScaler.log"), b"OptiScaler.ini".to_vec()] {
+        let mut text = b"ReShade 6.4 reshade64.dll ReShade.ini ".to_vec();
+        text.extend(utf16("ReShade"));
+        text.extend(std::iter::repeat_n(0u8, 4096));
+        text.extend(&own);
+        put(g, "winmm.dll", &build_test_dll(&["timeGetTime", "PlaySoundW"], &text));
+        assert_eq!(kinds(g)[0], ("winmm.dll".to_string(), ProxyKind::OptiScaler));
+        assert_eq!(optiscaler_in(g).as_deref(), Some("winmm.dll"));
+    }
+    // ReShade's texts alone under winmm.dll stay ReShade's
+    put(g, "winmm.dll", &build_test_dll(&["timeGetTime"], b"ReShade 6.4 reshade64.dll"));
+    assert_eq!(kinds(g)[0], ("winmm.dll".to_string(), ProxyKind::ReShade));
+    assert_eq!(optiscaler_in(g), None);
     // its .asi build, loaded by Ultimate ASI Loader
     std::fs::remove_file(g.join("winmm.dll")).unwrap();
     put(g, "OptiScaler.asi", &build_test_dll(&["x"], b"OptiScaler.log"));
@@ -373,6 +389,24 @@ fn optiscaler_ini_decides_kilns_overlay() {
     let fg = OptiScalerIni::parse("[Menu]\nOverlayMenu=false\n[FrameGen]\nFGInput=upscaler\nFGOutput=fsrfg\n");
     assert!(fg.frame_gen && !fg.kiln_overlay_draws(), "frame generation: Kiln steps aside");
     assert!(!OptiScalerIni::parse("[FrameGen]\nFGInput=upscaler\nFGOutput=nofg\n").frame_gen);
+    // Inbox 80: its menu off, frame generation set as a nightly's ini has it (CRLF, [FrameGen] before [Menu], Enabled
+    // off: the stand-in swapchain and the own present queue are made with Enabled=false too). Every Vulkan output its
+    // master knows, with either input, makes frame generation; an output alone or an input alone does not.
+    for (input, output) in [("upscaler", "fsrfg"), ("dlssg", "fsrfg"), ("upscaler", "dlssg"), ("Upscaler", "Reprojection")] {
+        let ini = format!("[FrameGen]\r\nEnabled=false\r\nFGInput={input}\r\nFGOutput={output}\r\n[Menu]\r\nOverlayMenu=false\r\n");
+        let parsed = OptiScalerIni::parse(&ini);
+        assert!(parsed.overlay_menu == Some(false) && parsed.frame_gen && !parsed.kiln_overlay_draws(), "{input} -> {output}");
+        let note = kiln_manage::engines::optiscaler_overlay_note(&parsed);
+        assert!(note.contains("frame generation is set") && note.contains("own queue") && note.contains("FGInput and FGOutput to auto"), "{note}");
+    }
+    for ini in ["[FrameGen]\nFGInput=auto\nFGOutput=fsrfg\n[Menu]\nOverlayMenu=false\n", "[FrameGen]\nFGInput=upscaler\n[Menu]\nOverlayMenu=false\n",
+                "[FrameGen]\nEnabled=true\n[Menu]\nOverlayMenu=false\n"] {
+        assert!(OptiScalerIni::parse(ini).kiln_overlay_draws(), "{ini}");
+    }
+    // the menu-on note says to leave frame generation off too; the drawing note says both are off
+    let menu_on = kiln_manage::engines::optiscaler_overlay_note(&stock);
+    assert!(menu_on.contains("OverlayMenu=false") && menu_on.contains("FGInput and FGOutput") && !menu_on.contains("go off with it"), "{menu_on}");
+    assert!(kiln_manage::engines::optiscaler_overlay_note(&off).contains("no frame generation is set"));
     assert_eq!(OptiScalerIni::parse("[Menu]\nOverlayMenu=false\nOverlayMenu=true\n").overlay_menu, Some(true));
     // no ini: the defaults
     let t = tmp("optiscaler-ini");
@@ -388,4 +422,48 @@ fn optiscaler_ini_decides_kilns_overlay() {
     text.truncate(kiln_manage::engines::OPTISCALER_INI_MAX as usize);
     put(&big.0, "OptiScaler.ini", &text);
     assert!(OptiScalerIni::read(&big.0).kiln_overlay_draws(), "up to the limit it is read");
+}
+
+/// Enshrouded ModLoader's packages (AndyPimms' loader, SDK ABI 1; github.com/aebischer/Enshrouded-ModLoader) are never
+/// plain DLLs: loaded early, their EnshroudedModInitialize would never run, and that loader refuses every world with the
+/// mod switched on (it never starts a DLL already in the process). Since 0.2.0-dev.29.19 they are the Library kind
+/// `dllmod` that kiln-dllmod runs at a world's start (tests/engine_dllmod.rs); its own dinput8.dll stays a DLL mod Kiln
+/// chain-loads.
+#[test]
+fn enshrouded_modloader_packages_are_never_plain_dlls() {
+    let t = tmp("modloader");
+    let r = &t.0;
+    // a kind=mod package as its zip lays it out, a loose mod DLL (its export alone says it, without its manifest), and
+    // a kind=library package (no SDK export: only its manifest says it)
+    let carry = put(r, "CarryOn/CarryOn.dll", &build_test_dll(&["EnshroudedModInitialize", "EnshroudedModConfigure"], b""));
+    put(r, "CarryOn/CarryOn.dll.mod", b"\xef\xbb\xbfENSHROUDED_PACKAGE_V1\r\nkind=mod\r\nversion=1.0.0\r\nabi=1\r\n");
+    let lantern = put(r, "loose/BeltLantern.dll", &build_test_dll(&["EnshroudedModInitialize"], b""));
+    let lib = put(r, "libs/shared.dll", &build_test_dll(&["SharedThing"], b""));
+    put(r, "libs/shared.dll.mod", b"ENSHROUDED_PACKAGE_V1\nkind=library\nversion=1.0.0\nabi=1\n");
+    for p in [&carry, &lib] {
+        let d = detect(p);
+        assert_eq!((d.kind, d.engine), (DetectKind::Dllmod, Some(Engine::Dllmod)), "{}: {}", p.display(), d.reason);
+        assert!(d.reason.contains("Enshrouded ModLoader") && d.reason.contains("kiln-dllmod"), "{}", d.reason);
+        assert!(d.kind.importable());
+    }
+    let d = detect(&lantern);
+    assert_eq!((d.kind, d.engine), (DetectKind::Unknown, None), "{}", d.reason);
+    assert!(d.reason.contains("a mod for Enshrouded ModLoader") && d.reason.contains("without its manifest"), "{}", d.reason);
+    assert!(!d.reason.ends_with('.'), "the launcher adds the period: {:?}", d.reason);
+    assert!(!d.kind.importable());
+    // another .mod file beside a plain DLL changes nothing
+    let fps = put(r, "other/fps.dll", &build_test_dll(&["x"], b""));
+    put(r, "other/fps.dll.mod", b"[settings]\n");
+    assert_eq!(detect(&fps).kind, DetectKind::BareDll);
+    // its loader as its release ships it (dist/dinput8.dll): a DLL mod chain-loaded at dllmain, as before
+    let loader = put(r, "Enshrouded-ModLoader/dist/dinput8.dll", &build_test_dll(&["DirectInput8Create", "GetdfDIJoystick"], &utf16("mod-loader.log")));
+    assert_eq!(detect(&loader).kind, DetectKind::BareDll);
+    // importing the mod's folder imports it as dllmod; the loose DLL is left out and says why
+    let dirs = DataDirs::at(r.join("data"));
+    let rep = library::import(&dirs, &[r.join("CarryOn"), lantern.clone()], &mut NoProgress).unwrap();
+    let got: Vec<_> = rep.imported.iter().map(|x| (x.kind, x.id.as_str())).collect();
+    assert_eq!(got, [(kiln_manage::manifest::ModKind::Dllmod, "carryon")], "{rep:?}");
+    assert_eq!(rep.skipped.len(), 1, "{rep:?}");
+    assert!(format!("{rep:?}").contains("without its manifest"), "{rep:?}");
+    assert!(library::list(&dirs, None).unwrap().iter().all(|e| e.kind == kiln_manage::manifest::ModKind::Dllmod));
 }

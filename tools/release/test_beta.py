@@ -210,7 +210,7 @@ class Scripts(unittest.TestCase):
         self.assertIn("gh release edit v0.2.0-dev.29-beta.3 --repo frostdev-ops/kiln --draft=false --prerelease", out)
         self.assertIn("gh release upload updates-beta", out)
         self.assertIn("--exclude /sdk/", out)
-        for never in ("updates/dev", "updates/stable", "updates-dev", "--latest", "nexus.py"):
+        for never in ("updates/dev", "updates/stable", "updates-dev", "--latest", "nexus.py", "roadmap.py"):
             self.assertNotIn(never, out, never)
         # never Nexus Mods, never a folder that holds another channel's manifest
         r = self.script("publish.sh", d, "--host", "example-host", "--dry-run", "--nexus")
@@ -231,6 +231,11 @@ class Scripts(unittest.TestCase):
         self.assertIn("gh release upload updates-dev", r.stdout)
         self.assertIn("gh release upload updates-beta", r.stdout)
         self.assertNotIn("--exclude /sdk/ ", r.stdout)
+        # the roadmap after GitHub (tools/release/roadmap.py): shown, not run
+        self.assertIn("== Roadmap", r.stdout)
+        self.assertIn("roadmap.py ship 0.2.0-dev.29", r.stdout)
+        self.assertIn("roadmap.py deploy", r.stdout)
+        self.assertLess(r.stdout.index("gh release edit v0.2.0-dev.29"), r.stdout.index("roadmap.py ship"))
         r = self.script("publish.sh", d, "--host", "example-host", "--dry-run", "--no-beta-channel")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("channels to move: dev", r.stdout)

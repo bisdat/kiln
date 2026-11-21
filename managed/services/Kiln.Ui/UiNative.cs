@@ -506,7 +506,171 @@ internal static unsafe class UiNative
 
     internal static delegate* unmanaged[Cdecl]<Texts*, int> SetTextsOverride;
 
-    /// <summary>KILN_UI_GLYPHS_* (kiln_ui.h look_info): the overlay's glyphs of a Chinese, Japanese or Korean language.</summary>
+    /// <summary>KilnUiGraphics (kiln_ui.h, 0.2.0-dev.29.18): the player's graphics settings (graphics_set).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Graphics
+    {
+        public uint Size, FpsCap, DlssPreset, DlssScale;
+        public float CustomScale;
+        public fixed float ModeScale[4];
+        public uint Readout;
+        /// <summary>(phase B) KILN_UI_UPSCALER_* and KILN_UI_AMD_UPSCALER_* (were reserved; 0: the game's own, AMD's auto).</summary>
+        public uint Upscaler, AmdUpscaler;
+    }
+
+    /// <summary>KilnUiGraphicsStatus (kiln_ui.h, 0.2.0-dev.29.18): what Kiln's graphics tools do now (graphics_status). 248
+    /// bytes with phase B's upscaler fields from offset 72; kiln.ui fills them when the size says they are there.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphicsStatus
+    {
+        public uint Size, Flags, AsideCap, AsideDlss, FpsCap;
+        public float RenderedFps, OutputFps, FrameMs;
+        public uint OutputWidth, OutputHeight;
+        public int DlssQuality;
+        public uint DlssPreset, RenderWidth, RenderHeight, DlssOutputWidth, DlssOutputHeight;
+        public fixed uint Reserved[2];
+        // ---- phase B (KILN_UI_GRAPHICS_STATUS_SIZE_V2): the upscaler behind the game's FSR 3 option ----
+        public uint Upscaler, AmdUpscaler, UpscaleRunning, UpscaleReason, UpscaleFlags, AsideUpscale, UpscaleVersion;
+        public uint UpscaleRenderWidth, UpscaleRenderHeight, UpscaleOutputWidth, UpscaleOutputHeight;
+        public uint Reserved2;
+        /// <summary>The reason in English words, UTF-8, NUL-terminated (for logs and tooltips).</summary>
+        public fixed byte UpscaleDetail[UpscaleDetailBytes];
+    }
+
+    /// <summary>KILN_UI_GRAPHICS_STATUS_SIZE_V1 / _V2: phase A's status, and with phase B's fields.</summary>
+    public const uint GraphicsStatusSizeV1 = 72, GraphicsStatusSizeV2 = 248;
+
+    /// <summary>KilnUiGraphicsStatus.upscale_detail's size.</summary>
+    public const int UpscaleDetailBytes = 128;
+
+    /// <summary>The tail after set_texts (0.2.0-dev.29.18): graphics_set, graphics_status.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableGraphics
+    {
+        public TableTexts Base;
+        public delegate* unmanaged[Cdecl]<Graphics*, int> GraphicsSet;
+        public delegate* unmanaged[Cdecl]<GraphicsStatus*, int> GraphicsStatusFn;
+    }
+
+    /// <summary>The tail after chat_completion (<see cref="TableChat"/>, bisdat's PR #73, Kiln.Ui's own):
+    /// subscribe_pointer_press (0.2.0-dev.30: presses on the game's own UI, used by the core's kiln.ui.inventory). Pinned
+    /// here so the offsets cannot drift; Kiln.Ui does not call it.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TablePointer
+    {
+        public TableChat Base;
+        public delegate* unmanaged[Cdecl]<ulong, void*, void*, ulong*, int> SubscribePointerPress;
+    }
+
+    /// <summary>kiln.ui's graphics tail, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.29.18). Tests:
+    /// <see cref="GraphicsOverride"/>.</summary>
+    public static TableGraphics* GraphicsTable
+    {
+        get
+        {
+            if (GraphicsOverride != null) return GraphicsOverride;
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableGraphics)) return null;
+            return (TableGraphics*)t;
+        }
+    }
+
+    /// <summary>Tests: a table of the graphics tail in place of kiln.ui's.</summary>
+    internal static TableGraphics* GraphicsOverride;
+
+    /// <summary>Issue #44: internal completion handoff at kiln.ui offset 1032, after the graphics tail.</summary>
+    /// <remarks>Native writes text and the native-chat rectangle on its UI
+    /// thread. Only managed Kiln.Ui may use this slot. No game pointers cross
+    /// threads. Layout: 44-byte header, 16-byte rect, two 257-byte buffers;
+    /// total 576 bytes after 2-byte padding.</remarks>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ChatCompletion
+    {
+        public uint Size, Operation;
+        public uint Focused, Action, Cursor, TextLen, ReplacementLen;
+        public uint Suggestions, ListOpen, Field, Revision;
+        public float X, Y, Width, Height;
+        public fixed byte Text[257];
+        public fixed byte Replacement[257];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TableChat
+    {
+        public TableGraphics Base;
+        public delegate* unmanaged[Cdecl]<ChatCompletion*, int> ChatCompletion;
+    }
+
+    private static delegate* unmanaged[Cdecl]<ChatCompletion*, int> ChatCompletionSlot
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableChat)) return null;
+            return ((TableChat*)t)->ChatCompletion;
+        }
+    }
+
+    /// <summary>Native read: 1 (snapshot). Null when chat is not focused,
+    /// disabled, unsupported or the input rectangle could not be validated.</summary>
+    internal static ChatCompletion? ChatInput()
+    {
+        var slot = ChatCompletionSlot;
+        if (slot == null) return null;
+        var result = new ChatCompletion { Size = (uint)sizeof(ChatCompletion), Operation = 1 };
+        return slot(&result) == Ok && result.Focused != 0 ? result : null;
+    }
+
+    // One stable native call site: kiln.ui's hover capture is per caller.
+    // Always clear it when suggestions disappear or focus changes.
+    internal static void ChatHover(bool hovering)
+    {
+        var t = T;
+        if (t != null) t->SetHoverCapture(hovering ? 1u : 0u);
+    }
+
+    // Turning suggestions on names the snapshot (field, revision) they belong to: native refuses a stale one, so a
+    // focus loss on the game's UI thread is never undone by this render frame. Turning them off needs no snapshot.
+    internal static bool ChatCandidates(bool hasSuggestions, bool active, uint field = 0, uint revision = 0)
+    {
+        var slot = ChatCompletionSlot;
+        if (slot == null) return false;
+        var request = new ChatCompletion {
+            Size = (uint)sizeof(ChatCompletion), Operation = 2,
+            Suggestions = hasSuggestions ? 1u : 0u, ListOpen = active ? 1u : 0u,
+            Field = field, Revision = revision,
+        };
+        return slot(&request) == Ok;
+    }
+
+    internal static bool ChatReplace(in ChatCompletion snapshot, string expected, string replacement)
+    {
+        var slot = ChatCompletionSlot;
+        if (slot == null || System.Text.Encoding.UTF8.GetByteCount(expected) > 256 ||
+            System.Text.Encoding.UTF8.GetByteCount(replacement) > 256) return false;
+        var request = new ChatCompletion {
+            Size = (uint)sizeof(ChatCompletion), Operation = 3,
+            Field = snapshot.Field, Revision = snapshot.Revision,
+        };
+        var left = System.Text.Encoding.UTF8.GetBytes(expected);
+        var right = System.Text.Encoding.UTF8.GetBytes(replacement);
+        request.TextLen = (uint)left.Length;
+        request.ReplacementLen = (uint)right.Length;
+        for (var i = 0; i < left.Length; ++i) request.Text[i] = left[i];
+        for (var i = 0; i < right.Length; ++i) request.Replacement[i] = right[i];
+        return slot(&request) == Ok;
+    }
+
+    internal static string ChatText(in ChatCompletion snapshot)
+    {
+        if (snapshot.TextLen > 256) return "";
+        // A fixed buffer cannot be used from an unfixed in parameter: copy
+        // the blittable value to a local before pinning.
+        var copy = snapshot;
+        return System.Text.Encoding.UTF8.GetString(copy.Text, (int)copy.TextLen);
+    }
+
+    /// <summary>KILN_UI_GLYPHS_* (kiln_ui.h look_info): the overlay's glyphs of a Chinese, Japanese, Korean or Cyrillic language.</summary>
     public const byte GlyphsLatin = 0, GlyphsLoading = 1, GlyphsReady = 2, GlyphsFailed = 3;
 
     /// <summary>KILN_UI_IMAGE_WAITING / READY / FAILED (kiln_ui.h image_state).</summary>
@@ -635,6 +799,7 @@ internal static unsafe class UiNative
         ImageExOverride = null;
 
         SetTextsOverride = null;
+        GraphicsOverride = null;
         MouseKeysAvailable = false;
     }
 

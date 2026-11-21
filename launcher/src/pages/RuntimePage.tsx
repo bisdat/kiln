@@ -9,6 +9,8 @@ import type { BootJson, InstallReceipt, InstallState, RunSide, RuntimeBundle } f
 import { qk, useGame, useGameStatus, useLaunchState, useRuntimeChanges, type RuntimeChange } from "../api/hooks";
 import { partRows, partsFor, resolveParts, selectParts, type PartState } from "../shell/parts";
 import { installBundle, isOlder, runRuntimeChange } from "../shell/runtimeChange";
+import { ANTIVIRUS_DOCS, fewPaths, fileProblems } from "../shell/runtimeFiles";
+import { RuntimeFailure } from "../shell/RuntimeFailure";
 import { rich, t, useT } from "../i18n";
 import {
   Banner, Button, Card, ConfirmDanger, DropZone, EmptyState, Modal, Page, PageHeader, Skeleton, Table,
@@ -57,6 +59,8 @@ export default function RuntimePage() {
   const newest = bundles.data?.[0];
   // default parts of the installed bundle that are not in the game (an update that kept an old list skipped them)
   const missing = st?.missingParts ?? [];
+  // receipt files that are gone (an antivirus took one) apart from files there with other bytes (29.18, inbox 85)
+  const files = fileProblems(st);
   const installedBundle = bundles.data?.find((b) => b.version === current) ?? null;
 
   // the change is kept per game (useRuntimeChanges): its outcome outlives this page, and Play shows a failure
@@ -76,8 +80,8 @@ export default function RuntimePage() {
     { key: "comp", header: t("runtime.parts"), width: "minmax(0, 1.4fr)", render: (b) => <span style={{ fontSize: 16, color: "#d0beac" }} title={b.components.join(", ")}>{b.components.join(", ")}</span> },
     { key: "act", header: <span className="k-sr-only">{t("runtime.action")}</span>, width: "112px", align: "right", render: (b) => {
       const older = !!current && isOlder(b.version, current, bundles.data ?? []);
-      // the installed bundle can be installed again when parts of it are missing (that adds them)
-      const repair = b.version === current && missing.length > 0;
+      // the installed bundle can be installed again when parts or files of it are missing (that puts them in)
+      const repair = b.version === current && (missing.length > 0 || files.missing.length > 0);
       const word = repair ? t("runtime.reinstall") : b.version === current ? t("runtime.installed") : !current ? t("common.install") : older ? t("runtime.rollBack") : t("common.update");
       return (
         <Button size="s" disabled={(b.version === current && !repair) || running || busy || !!status.data?.steamUpdating} onClick={() => (sf ? setSwitchSf(b) : setPick(b))}>{word}</Button>
@@ -85,11 +89,11 @@ export default function RuntimePage() {
     } },
   ];
 
-  const files = st?.receipt?.files.length ?? 0;
+  const fileCount = st?.receipt?.files.length ?? 0;
   // the whole version (the build date is what tells two dev builds apart) and when it last changed
   const inGame = st?.receipt?.updated
-    ? t("runtime.inGameUpdated", { version: current ?? "", files, ago: fmtAgo(st.receipt.updated) })
-    : t("runtime.inGameInstalled", { version: current ?? "", files, ago: fmtAgo(st?.receipt?.installed) });
+    ? t("runtime.inGameUpdated", { version: current ?? "", files: fileCount, ago: fmtAgo(st.receipt.updated) })
+    : t("runtime.inGameInstalled", { version: current ?? "", files: fileCount, ago: fmtAgo(st?.receipt?.installed) });
   const say = !st ? t("runtime.reading") : st.installed
     ? (st.upgradeAvailable ? `${inGame} ${t("runtime.readyToInstall", { version: st.upgradeAvailable })}` : inGame)
     : sf ? t("runtime.shroudforge") : t("runtime.notInstalled");
@@ -108,8 +112,20 @@ export default function RuntimePage() {
           {t("runtime.sfText")}
         </Banner>
       )}
-      {!!st?.modified.length && <Banner tone="warn" title={t("runtime.changed")}>{rich("runtime.changedText", { count: st.modified.length, files: <span className="k-mono">{st.modified.slice(0, 3).join(", ")}{st.modified.length > 3 ? " …" : ""}</span> })}</Banner>}
-      {change && <ChangeOutcome change={change} installed={current} onDismiss={() => clear(game.id)} />}
+      {files.missing.length > 0 && change?.state !== "running" && (
+        <Banner tone="err" title={t("runtime.filesMissing")} actions={installedBundle && (
+          <Button size="s" disabled={running || busy || !!status.data?.steamUpdating} onClick={() => (sf ? setSwitchSf(installedBundle) : setPick(installedBundle))}>{t("runtime.repair")}</Button>
+        )}>
+          <div data-testid="runtime-missing-files">{rich("runtime.filesMissingText", { count: files.missing.length, files: <span className="k-mono">{fewPaths(files.missing, game.platform)}</span> })}</div>
+          <div>
+            {files.dll && <>{t("runtime.filesMissingAntivirus", { count: files.missing.length })} </>}
+            {installedBundle ? t("runtime.filesMissingRepair", { count: files.missing.length }) : t("runtime.filesMissingNoBundle", { count: files.missing.length, version: current ?? "" })}
+            {files.dll && <> <button type="button" className="k-link" onClick={() => void api.appOpenUrl(ANTIVIRUS_DOCS).catch((e) => toast.error(e))}>{t("runtime.antivirusHelp")}</button></>}
+          </div>
+        </Banner>
+      )}
+      {files.changed.length > 0 && <Banner tone="warn" title={t("runtime.changed")}>{rich("runtime.changedText", { count: files.changed.length, files: <span className="k-mono">{fewPaths(files.changed, game.platform)}</span> })}</Banner>}
+      {change && <ChangeOutcome change={change} installed={current} platform={game.platform} onDismiss={() => clear(game.id)} />}
       {missing.length > 0 && change?.state !== "running" && (
         <Banner tone="warn" title={t("runtime.partsMissing")} actions={installedBundle && (
           <Button size="s" disabled={running || busy || !!status.data?.steamUpdating} onClick={() => setPick(installedBundle)}>{t("runtime.reinstall")}</Button>
@@ -133,7 +149,7 @@ export default function RuntimePage() {
           <Table aria-label={t("runtime.bundlesLabel")} columns={cols} rows={bundles.data ?? []} rowKey={(b) => b.version} rowHeight={50}
             empty={<EmptyState title={t("runtime.noBundles")} />} />
         )}
-        <DropZone variant="row" onPaths={(p) => p.forEach((x) => importB.mutate(x))} title={t("runtime.addBundle")} hint={importB.isPending ? t("runtime.readingBundle") : "kiln-runtime-<version>.zip"} pick={{ filters: [{ name: t("runtime.bundleFilter"), extensions: ["zip"] }] }} />
+        <DropZone variant="row" onPaths={(p) => p.forEach((x) => importB.mutate(x))} title={t("runtime.addBundle")} hint={importB.isPending ? t("runtime.readingBundle") : "kiln-runtime-<version>.zip"} pick={{ filters: [{ name: t("runtime.bundleFilter"), extensions: ["zip"] }], kind: "runtimeBundle" }} />
       </Card>
 
       <InstallModal bundle={pick} side={game.kind} receipt={st?.receipt ?? null} onClose={() => setPick(null)}
@@ -257,15 +273,17 @@ function InstallModal({ bundle, side, receipt, onClose, onInstall }: {
 
 /** The last change on this page and how it ended: the task while it runs and when done (its last line says what is
  *  in the game folder now), a plain failure otherwise. Stays until dismissed. */
-function ChangeOutcome({ change, installed, onDismiss }: { change: RuntimeChange; installed: string | null; onDismiss: () => void }) {
+function ChangeOutcome({ change, installed, platform, onDismiss }: { change: RuntimeChange; installed: string | null; platform: api.Platform | undefined; onDismiss: () => void }) {
   const t = useT();
   const task = useTasks((s) => (change.taskId ? s.tasks[change.taskId] : undefined));
   const dismiss = <button type="button" className="k-link" onClick={onDismiss}>{t("common.dismiss")}</button>;
   if (change.state === "failed") {
     return (
       <Banner tone="err" title={t("runtime.changeFailed", { what: change.what })} actions={dismiss}>
-        <span style={{ overflowWrap: "anywhere" }}>{change.error?.message ?? t("runtime.noReason")}</span>{" "}
-        {installed ? rich("runtime.keeps", { version: <span className="k-mono">{installed}</span> }) : t("runtime.notInGame")}
+        {/* a file Windows refused (an antivirus, inbox 92) is said in plain words, with the raw error under them */}
+        <RuntimeFailure error={change.error} platform={platform} fallback={t("runtime.noReason")}>
+          {installed ? rich("runtime.keeps", { version: <span className="k-mono">{installed}</span> }) : t("runtime.notInGame")}
+        </RuntimeFailure>
       </Banner>
     );
   }

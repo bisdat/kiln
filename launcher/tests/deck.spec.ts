@@ -63,7 +63,7 @@ test.describe("choosing the UI", () => {
   test("the setting wins over detection, and both UIs switch to each other", async ({ page }) => {
     await openDeck(page);
     // Deck Settings: Start in Auto -> Deck mode -> Desktop
-    for (let i = 0; i < 7; i++) await pad(page, "rb");
+    for (let i = 0; i < 8; i++) await pad(page, "rb");
     await expect.poll(() => screen(page)).toBe("settings");
     await expect.poll(() => focused(page)).toBe("set-desktop");
     await page.keyboard.press("ArrowDown");
@@ -95,7 +95,7 @@ test.describe("choosing the UI", () => {
     await expect(page.locator(".deck")).toBeVisible();
     // and Deck Settings' first row goes to the desktop UI now (the screen remembers its last focus: "Start in")
     // one tab at a time: the Editor tab draws a whole inventory on the way (the session from the first visit)
-    for (const n of ["mods", "add", "catalog", "kiln", "editor", "help", "settings"]) { await pad(page, "rb"); await expect.poll(() => screen(page)).toBe(n); }
+    for (const n of ["mods", "add", "catalog", "kiln", "editor", "community", "help", "settings"]) { await pad(page, "rb"); await expect.poll(() => screen(page)).toBe(n); }
     await expect.poll(() => focused(page)).toBe("set-start");
     await pad(page, "up");
     expect(await focused(page)).toBe("set-desktop");
@@ -107,8 +107,10 @@ test.describe("choosing the UI", () => {
 test.describe("controls", () => {
   test("focus moves predictably with the D-pad and stops at the edges", async ({ page }) => {
     await openDeck(page);
-    // Home has no control left of the mouth now (no profile switch in the main flow): focus stays at the edge
+    // (dev.30) left of the mouth: Crucible's Share and Enter a code (Home's text column); right goes back to the mouth
     await page.keyboard.press("ArrowLeft");
+    expect(["crucible-share", "crucible-code"]).toContain(await focused(page));
+    await page.keyboard.press("ArrowRight");
     expect(await focused(page)).toBe("mouth");
     await page.keyboard.press("ArrowUp");
     expect(await focused(page)).toBe("mouth");
@@ -131,7 +133,7 @@ test.describe("controls", () => {
 
   test("every screen is reachable with L1/R1 and the menu, and B goes back to Home", async ({ page }) => {
     await openDeck(page);
-    const names = ["home", "mods", "add", "catalog", "kiln", "editor", "help", "settings"];
+    const names = ["home", "mods", "add", "catalog", "kiln", "editor", "community", "help", "settings"];
     for (const n of names.slice(1)) {
       await pad(page, "rb");
       await expect.poll(() => screen(page)).toBe(n);
@@ -146,13 +148,13 @@ test.describe("controls", () => {
       const emit = (window as unknown as { __kilnMock: { emit: (n: string, v: unknown) => void } }).__kilnMock.emit;
       for (let i = 0; i < n; i++) for (const pressed of [true, false]) emit("kiln://gamepad", { kind: "button", button: b, pressed, repeat: false, device: "event9" });
     }, [button, times] as const);
-    await burst("lb", 7);
+    await burst("lb", 8);
     await expect.poll(() => screen(page)).toBe("home");
     await burst("rb", 5);
     await expect.poll(() => screen(page)).toBe("editor");
     await burst("lb", 2);
     await expect.poll(() => screen(page)).toBe("catalog");
-    await burst("rb", 4);
+    await burst("rb", 5);
     await expect.poll(() => screen(page)).toBe("settings");
     for (const n of names.slice(1)) {
       await page.goto(`/?deck=steamdeck#/deck/${n === "add" ? "add" : n}`);
@@ -167,7 +169,7 @@ test.describe("controls", () => {
     await pad(page, "b");
     await expect(page.locator('[data-deck-dialog="menu"]')).toHaveCount(0);
     await pad(page, "start");
-    for (let i = 0; i < 6; i++) await pad(page, "down");
+    for (let i = 0; i < 7; i++) await pad(page, "down");
     await pad(page, "a");
     await expect.poll(() => screen(page)).toBe("help");
     // View opens Help from anywhere

@@ -5,6 +5,24 @@ Kiln has two sets of texts a player reads: the **Kiln Launcher** (the desktop ap
 `locales/*.json` ([modding/lifecycle.md](modding/lifecycle.md#mod-texts-locales)). English is the source; a text a
 translation does not have yet shows in English, so a translation can be partial and grow.
 
+## Languages
+
+| Language | Tag | State |
+|---|---|---|
+| Simplified Chinese (简体中文) | `zh-CN` | by XiaoHuLi666 (XHL), since 0.2.0-dev.29.18 |
+| German (Deutsch) | `de` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/de.md), [review issue](https://github.com/frostdev-ops/kiln/issues/90) |
+| Russian (Русский) | `ru` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/ru.md), [review issue](https://github.com/frostdev-ops/kiln/issues/91) |
+| French (Français) | `fr` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/fr.md), [review issue](https://github.com/frostdev-ops/kiln/issues/92) |
+| Spanish (Español) | `es` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/es.md), [review issue](https://github.com/frostdev-ops/kiln/issues/93) |
+| Brazilian Portuguese (Português (Brasil)) | `pt-BR` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/pt-BR.md), [review issue](https://github.com/frostdev-ops/kiln/issues/94) |
+| Japanese (日本語) | `ja` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/ja.md), [review issue](https://github.com/frostdev-ops/kiln/issues/95) |
+| Polish (Polski) | `pl` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/pl.md), [review issue](https://github.com/frostdev-ops/kiln/issues/96) |
+| Italian (Italiano) | `it` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/it.md), [review issue](https://github.com/frostdev-ops/kiln/issues/97) |
+| Korean (한국어) | `ko` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/ko.md), [review issue](https://github.com/frostdev-ops/kiln/issues/98) |
+
+A machine translation is complete but not yet read by a native speaker: if your language is one of them, the review
+issue says what to look at first, and a comment there or a pull request is all it takes.
+
 ## Where the files live
 
 | What | English (the source) | Your language |
@@ -15,7 +33,8 @@ translation does not have yet shows in English, so a translation can be partial 
 Name the file by its language tag: `zh-CN.json` (Simplified Chinese), `zh-TW.json`, `de.json`, `pt-BR.json`, `es-419.json`.
 A main language (`de.json`) serves all its regions; a regional file (`pt-BR.json`) wins over it for that region.
 
-The save editor inside the launcher (Saves, Edit) has its own texts and is not covered here.
+The save editor inside the launcher (Saves, Edit; the Deck's Editor tab) is covered: its texts are the `editor` keys of the
+same files. Item and skill names in it are the game's own and are not translated here.
 
 ## The format
 
@@ -59,6 +78,9 @@ Where English changes with a number it has a pair of keys:
 Fill the forms your language uses (the CLDR plural categories: `zero`, `one`, `two`, `few`, `many`, `other`).
 Chinese, Japanese and Korean have one form: write only `other`.
 
+Where a language's `one` covers more than 1 (Russian's is also 21, 31, ...; French and Brazilian Portuguese's also 0),
+its `.one` may carry the `{count}` English's `.one` leaves out ("one mod left out" becomes `"{count} мод пропущен"`).
+
 ```json
 "filesRead": { "other": "已读取 {count} 个翻译文件" }
 ```
@@ -97,9 +119,14 @@ the game.
 bun scripts/i18n-check.ts path/to/zh-CN.json
 ```
 
-It lists keys `en.json` does not have (a typo, or a text the launcher no longer shows), values that are not text, and
-placeholders that differ from English, and counts the texts not translated yet. The launcher's unit tests run the same
-check over every file in `launcher/src/i18n/`.
+It lists keys `en.json` does not have (a typo, or a text the launcher no longer shows), values that are not text,
+placeholders and number formats that differ from English (`{count}` where English has `{count:N0}`), and what a
+translation never needs where English has none at that key: an HTML tag or entity, a Markdown link, a link or URL, an
+invisible or control character (a line break, a tab, a zero-width or right-to-left mark); also an empty text (leave the
+key out instead: English shows), a text over four times as long as English's, and a confirm word that is not one short
+word. It counts the texts not translated yet. The launcher's unit tests run the same check over every file in
+`launcher/src/i18n/`; for the game, `KilnTextKeysTests` checks `runtime/locales/` the same way (and refuses `##`, which
+starts an ImGui id, and `%`).
 
 ## Send it
 
@@ -109,6 +136,32 @@ check over every file in `launcher/src/i18n/`.
 
 When English gains texts, they show in English in your language until you add them; the check script lists what is
 missing.
+
+## Adding a translation to Kiln
+
+What happens to a file that arrives (the first one, Simplified Chinese by XiaoHuLi666 (XHL), in 0.2.0-dev.29.18):
+
+1. **It is data from outside.** The archive and its sha256 are kept with the wave's notes, it is unpacked into an empty
+   folder of its own, and the files go in byte for byte (`launcher/src/i18n/<tag>.json`, `runtime/locales/<tag>.json`),
+   so their hashes still match the archive.
+2. **The checks**, before the commit: `bun scripts/i18n-check.ts` (from `launcher/`, every file beside `en.json`) and
+   Kiln.Ui.Tests' `KilnTextKeysTests` (keys, placeholders, number formats and the data checks above). Nothing they flag
+   goes in: the translator fixes it, or the key is left out and English shows. Where a text appears matters: the
+   launcher shows texts as plain text (React; the admin map escapes them for its tooltips), the game draws them with
+   ImGui and its own menus.
+3. **Nothing to wire.** The launcher takes every file in `src/i18n/` (`locales.ts`): Settings, Language and the Deck's
+   Settings, Language list it by its `language.name`; plurals follow the language's CLDR rules; dates and numbers follow
+   it (`formatLocale()`); a key it lacks shows English. The game lists every file in `kiln/locales` (packaging copies
+   `runtime/locales/*.json`).
+4. **Look at it.** `KILN_LANG_SHOTS=<dir> bun x playwright test tests/language.spec.ts` (from `launcher/`; it covers
+   the shipped zh-CN on the desktop and the Deck: copy its tests for another language) saves screenshots; for the game,
+   `tools/ui-preview/preview.sh --language <tag> --locales runtime/locales`.
+5. **Fonts.** The launcher's own fonts are Latin: Chinese, Japanese and Korean come from the system's fonts (the
+   page's `lang` is the file's tag, so the system picks that language's glyph shapes). In game, a CJK language uses the
+   game's own font of that language group ([translating-game.md](translating-game.md#chinese-japanese-and-korean)), a
+   Cyrillic one the game's Cyrillic font of its default group
+   ([translating-game.md](translating-game.md#cyrillic-and-the-other-scripts-of-the-games-default-font-group)); until it
+   is in the overlay, Kiln's texts there are English and a language's name in the Language entry is its tag.
 
 ## Credit
 

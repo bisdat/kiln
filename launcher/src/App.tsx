@@ -23,6 +23,7 @@ import LogsPage from "./pages/LogsPage";
 import SavesPage from "./pages/SavesPage";
 import SettingsPage from "./pages/SettingsPage";
 import AboutPage from "./pages/AboutPage";
+import { CommunityRoute } from "./community/CommunityPage";
 
 // Server and admin pages load lazily: a page that is mid-edit (or broken) fails alone, inside the shell's error
 // boundary, instead of blanking the launcher.
@@ -35,6 +36,9 @@ const ServerLogsPage = lazy(() => import("./pages/servers/ServerLogsPage"));
 const ServerModpackPage = lazy(() => import("./pages/servers/ServerModpackPage"));
 const ServerTicksPage = lazy(() => import("./pages/servers/ServerTicksPage"));
 const AdminRoutes = lazy(() => import("./admin").then((m) => ({ default: m.AdminRoutes })));
+
+// Pack Studio (src/studio/, DESIGN 3): desktop only, behind Crucible's switch; loaded on first visit.
+const StudioPage = lazy(() => import("./studio/StudioPage"));
 
 // The save editor is big (its game data): loaded on first visit.
 const EditorPage = lazy(() => import("./pages/EditorPage"));
@@ -78,8 +82,12 @@ export default function App() {
         <Route path="logs" element={<LogsPage />} />
         <Route path="saves" element={<SavesPage />} />
         <Route path="editor" element={<EditorPage />} />
+        <Route path="studio" element={<StudioPage />} />
+        <Route path="studio/:packId" element={<StudioPage />} />
+        <Route path="studio/:packId/:tab" element={<StudioPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="about" element={<AboutPage />} />
+        <Route path="community" element={<CommunityRoute />} />
         <Route path="servers" element={<ServersPage />} />
         {/* outside the server's layout and the lazy admin pages: the redirect is the router's alone */}
         {ADMIN_MERGED.map(([from, to]) => <Route key={from} path={`servers/:id/admin/${from}`} element={<ServerRedirect to={to} />} />)}

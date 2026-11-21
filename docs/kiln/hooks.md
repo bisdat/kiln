@@ -13,7 +13,7 @@ background thread, a raw native job handler), even for an advanced mod: read wha
 mod that has unloaded cannot install hooks. Every hook, patch and symbol load a mod installs is logged to `kiln.log`
 with the mod id.
 
-Behind the same gate: `Hooks.Detour`/`Mid`, `Memory.*`, `Symbols.*`, `Constants.Get`, `OriginalCode.FindUnique`,
+Behind the same gate: `Hooks.Detour`/`Mid`, `Hooks.Module`/`TryModule`/`FindInModule`, `Memory.*`, `Symbols.*`, `Constants.Get`, `OriginalCode.FindUnique`,
 `TryFindUnique` and `Read`, `Keep.Block` and `Keep.Span<T>` (Kiln.Hooks); `Abilities.Programs.Register` and
 `NativeCall.Bytes` (Kiln.Abilities); `Arsenals.JobHandler`, `Is.Job` and `Act.Job` (Kiln.Creatures). Kiln's own code
 calls internal paths behind them, so an ordinary mod that uses buffs or typed natives is never refused. An
@@ -54,6 +54,44 @@ instruction returns early with `r.Rax = value; r.TrampolineRsp = r.Rsp;`.
 ```csharp
 Hooks.Mid("GetEntityTransform", (ref Registers r) => Log.Info($"entity arg r8 = {r.R8}"));
 ```
+
+## Hooks inside another mod's DLL (since 0.2.0-dev.29.19)
+Every hook goes into the game's own code unless you say otherwise: an address anywhere else (another mod's DLL, a
+loader's DLL) is refused with "invalid argument". To hook inside another loaded module, open it first:
+
+```csharp
+// Creative Mode's creative.dll (a Flame mod that kiln-flame loads): open it, then hook by offset or by pattern
+var creative = Hooks.Module("creative.dll");             // KeyNotFoundException while it is not loaded
+Hooks.Mid(creative.At(0x15F5F7), (ref Registers r) => { /* ... */ });
+var at = creative.Find("48 8B ?? ?? 41 B8");            // survives an update of the DLL that moves its code
+```
+
+- `Hooks.Module(name)` finds the loaded module by its file name (any case) and never loads it: when the DLL loads
+  later than your mod, use `Hooks.TryModule(name, out var m)` and try again from a later tick. `Hooks.FindInModule(name,
+  pattern)` is `Hooks.Module(name).Find(pattern)`.
+- After that, addresses inside the module's **executable code** are hook targets for `Hooks.Detour` and `Hooks.Mid`
+  (and the native kinds: `detour`, `mid`, `raw_detour`, `detour2`, `mid2`, `mid2_checked`), exactly like the game's
+  code. Its headers, data and anything past its image stay refused. `HookModule.At(offset)` turns an offset from the
+  module's base (the RVA a disassembler shows for the DLL) into an address and checks it is in the module's code.
+- `HookModule.Find(pattern)` / `FindAll` search the module's code with sigdb pattern syntax. They read the live bytes
+  (unlike `Symbols.Find`, which reads the exe file), so another engine's hook in that DLL can hide a match. A pattern
+  keeps working when the DLL is updated and its code moves; a fixed offset does not.
+- Kiln **pins** the module: it stays loaded until the game exits, even if its loader frees it, because a detour's
+  bytes and trampoline must never outlive the code they were written into (Kiln never removes a physical detour).
+  kiln-flame never unloads a Flame mod, so for Creative Mode nothing changes. Kiln's own modules (`kiln-core.dll`,
+  `kiln-*.dll`) are not opened: use their APIs.
+- Typed hooks (`Kiln.Sigs`) stay the game's: their descriptor is checked against the game's code, so one inside
+  another module is refused with a reason.
+- kiln.log names the module once ("hooks: creative.dll opened for hooks by mod:..., pinned") and every link in it as
+  `creative.dll+0x15f5f7 [mods/creative/creative.dll]` (the module's file in brackets, as in the overlap lines); `state/hooks.json` lists such a target with `"module"`, `"offset"` and `"rva": null`.
+- The capability row is `hooks.foreign_modules` (off on a Kiln runtime older than 0.2.0-dev.29.19, where
+  `Hooks.Module` throws `KilnUnavailableException`). Check it, or catch that exception and `MissingMethodException`,
+  when your mod should also load on an older Kiln.
+
+**For XHL-Creative-Mode-Fix.** Its search patch called `Hooks.Mid(creativeBase + 0x15F5F7, ...)` with an absolute
+address inside `creative.dll`, which Kiln refused. Use `Hooks.Mid(Hooks.Module("creative.dll").At(0x15F5F7), ...)`
+instead, or better a pattern: `Hooks.Mid(Hooks.FindInModule("creative.dll", "<bytes at that instruction>"), ...)`, so
+a Creative Mode update that moves the code does not break the search patch.
 
 ## Memory and patches (access transformers)
 - `Memory.Read<T>(addr)` / `TryRead` / `ReadBytes(addr, n)` — SEH-guarded reads (a bad address throws, never crashes).
@@ -133,6 +171,7 @@ priority and need no change.
 
 ## C table (`kiln_hooks.h`, v1 + v2)
 `image_base/image_size`, `symbol/constant`, `scan/scan_hole`, `load_symbols/unload_symbols`, `read/write/patch/
-unpatch`, `detour/mid/call_original/revoke/revoke_owner`, `stats`; v2 adds `raw_detour/caller/detour2/call_original2/mid2/map_json`. Detour handler:
+unpatch`, `detour/mid/call_original/revoke/revoke_owner`, `stats`; v2 adds `raw_detour/caller/detour2/call_original2/mid2/map_json`;
+0.2.0-dev.29.19 adds `open_module/module_scan` (hooks inside another module). Detour handler:
 `uintptr_t(KilnHookCall*, void*)`; mid handler: `void(KilnRegisters*, void*)` (`KilnRegisters` mirrors safetyhook's
 Context64). See the header for the full contract.

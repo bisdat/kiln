@@ -4,7 +4,7 @@
 //! kiln_plugin_main), a modpack (kiln-modpack.json), a runtime bundle (kiln-runtime.json), a bare DLL (wrapped into a
 //! native mod with a generated native.json), or nothing usable. Zips are unpacked first.
 
-use crate::manifest::{Clients, ModKind, Side};
+use crate::manifest::{Clients, ModKind, RunSide, Side};
 use crate::paths::DataDirs;
 use crate::task::Progress;
 use crate::{Error, ErrorCode, Result};
@@ -28,6 +28,11 @@ pub struct ImportSource {
     #[serde(rename = "type")]
     pub kind: String,
     pub from: String,
+    /// The side the drop packed this copy for, by a `client` or `server` folder around it in the archive or folder
+    /// ([`packaged_for`]): one download can hold a game copy and a dedicated-server copy of one mod with the same id
+    /// and version (Town Portals 2.0.3). None: no such folder (or the same files came in both).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub packaged_for: Option<RunSide>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -103,6 +108,8 @@ pub enum DetectKind {
     Shroudlink,
     /// An Ember server mod.
     Ember,
+    /// A package for Enshrouded ModLoader: a DLL with a `<file>.dll.mod` manifest beside it (`ENSHROUDED_PACKAGE_V1`).
+    Dllmod,
     /// Another engine's loader or a tool under a proxy name (`engine` says which): never a mod to import.
     Proxy,
     /// Patched game data files (`.kfc`).
@@ -195,6 +202,10 @@ pub struct ImportReport {
     /// The display name of every mod in `imported` and `existing`, by `<kind>/<id>`.
     #[serde(default)]
     pub names: std::collections::BTreeMap<String, String>,
+    /// Every entry of `imported` and `existing` in the order the drop holds them (folders sorted by name): a repeated
+    /// drop has the same order, however it divides into the two lists. Not sent to the launcher.
+    #[serde(skip)]
+    pub order: Vec<LibraryRef>,
 }
 
 impl ImportReport {
@@ -294,6 +305,27 @@ fn detect_dll(path: &Path) -> Detected {
     if has(crate::pe::EMF_MOD_EXPORT) {
         return d(DetectKind::Emf, "an EMF mod DLL (exports emf_mod_load); a mod.json is generated");
     }
+    // a package for Enshrouded ModLoader (AndyPimms' loader): never a plain DLL (its EnshroudedModInitialize must run
+    // at a world's start, and that loader refuses a world whose mod's DLL is already loaded). With its .dll.mod beside it,
+    // a Library entry kiln-dllmod runs; without it there is nothing to run it by.
+    if crate::dllmod::has_header(path) {
+        let mut x = d(DetectKind::Dllmod, &crate::engines::mod_reason(crate::engines::Engine::Dllmod, &file_name(path)));
+        x.engine = Some(crate::engines::Engine::Dllmod);
+        match crate::dllmod::read(path) {
+            Ok(m) => x.version = Some(m.version),
+            Err(e) => {
+                x.kind = DetectKind::Unknown;
+                x.reason = format!("{}: a package for Enshrouded ModLoader that Kiln cannot run: {e}", file_name(path));
+            }
+        }
+        return x;
+    }
+    if is_modloader_package(path, &exports) {
+        return d(DetectKind::Unknown, &format!(
+            "{}: a mod for Enshrouded ModLoader (AndyPimms' loader) without its manifest ({}.mod) beside it. Add the mod's \
+             folder, or the DLL together with its .dll.mod",
+            file_name(path), file_name(path)));
+    }
     // another engine's mod DLL or loader: never imported as a plain DLL. A DLL that reads dinput8-chain.ini is not only
     // a chain loader: Auto Loot Plus's dinput8.dll is the mod itself (its looting, its F8 menu), XHL-Core's is the host
     // of the XHL mods. Kiln chain-loads it like any dinput8 mod; the DLLs it chains are the same files Kiln reads from
@@ -336,6 +368,17 @@ fn detect_dll(path: &Path) -> Detected {
 
 fn file_name(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
+/// A mod DLL of Enshrouded ModLoader (github.com/aebischer/Enshrouded-ModLoader, SDK ABI 1) by its exports alone: a
+/// `kind=mod` DLL exports `EnshroudedModInitialize` (and `EnshroudedModConfigure` when it has settings). With its
+/// `<file>.dll.mod` manifest beside it (`crate::dllmod::has_header`) it is a Library entry kiln-dllmod runs at a world's
+/// start; never a plain DLL, whose Initialize would never run (and that loader refuses to start a world with a mod whose
+/// DLL is already in the process, `err.dll_external`).
+const MODLOADER_EXPORTS: [&str; 2] = [crate::dllmod::INITIALIZE, crate::dllmod::CONFIGURE];
+
+fn is_modloader_package(path: &Path, exports: &[String]) -> bool {
+    MODLOADER_EXPORTS.iter().any(|e| exports.iter().any(|x| x == e)) || crate::dllmod::has_header(path)
 }
 
 /// A mod id from a file or folder name: lower case, other characters as '-', at most 64.
@@ -464,6 +507,90 @@ fn emf_manifest(dir: &Path) -> Option<(serde_json::Value, String)> {
     let id = v.get("id")?.as_str()?.to_string();
     let dll = v.get("dll").and_then(|d| d.as_str()).map(str::to_string).unwrap_or_else(|| format!("{id}.dll"));
     dir.join(&dll).is_file().then_some((v, dll))
+}
+
+/// The id an EMF DLL mod's mod.json gives (its DLL beside it), as [`detect`] reads it. found.rs looks for EMF's `lua`
+/// mod with it.
+pub(crate) fn emf_dll_mod_id(dir: &Path) -> Option<String> {
+    emf_manifest(dir).and_then(|(v, _)| v.get("id").and_then(|x| x.as_str()).map(str::to_string))
+}
+
+/// An EMF Lua mod, which EMF's `lua` mod runs (EMF's core takes a `main` as a script for a script host, and its `lua`
+/// mod hosts the `.lua` ones): mod.json gives an `id`, a `version` and a `main` naming a `.lua` file in the folder, and
+/// no `dll` (EMF refuses both); an `emf` it gives is a whole number. The manifest and the main file as mod.json names
+/// it. EMF's own release zip has nine (beastmaster, bounty, champion, grave, handover, kill_counter, life_skills,
+/// minimap, necromancer) in `game/emf/mods/`.
+pub(crate) fn emf_lua_manifest(dir: &Path) -> Option<(serde_json::Value, String)> {
+    // another engine's folder stays that engine's, as before (SET's init.lua, Flame, Enshwick, ShroudForge, XHL-Core)
+    if MOD_MANIFESTS.iter().any(|m| *m != EMF_MANIFEST && dir.join(m).is_file()) || crate::engine_mods::has_xhl_plugin_ini(dir) {
+        return None;
+    }
+    let text = crate::manifest::read_text(&dir.join(EMF_MANIFEST)).ok()?;
+    let v = crate::jsonc::parse(text.trim_start_matches('\u{feff}')).ok()?;
+    if !v.is_object() || v.get("dll").is_some() {
+        return None;
+    }
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str());
+    if !s("id").is_some_and(emf_id) || !s("version").is_some_and(emf_version) || v.get("emf").is_some_and(|e| !e.is_i64() && !e.is_u64()) {
+        return None;
+    }
+    let main = v.get("main")?.as_str()?.to_string();
+    let rel = main.replace('\\', "/");
+    if !rel.to_ascii_lowercase().ends_with(".lua") || crate::bundle::safe_rel_path(&rel).is_err() {
+        return None;
+    }
+    // Windows (and EMF) find the file whatever the case of its name
+    rel_ignoring_case(dir, &rel).is_some().then_some((v, main))
+}
+
+/// An id EMF takes (EMF src/core/manifest.cpp `valid_mod_id`, kiln-emf the same): 1 to 48 of a-z 0-9 _ . -, and not
+/// `emf`, EMF's own.
+fn emf_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 48 && id != "emf" && id.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'_' | b'.' | b'-'))
+}
+
+/// A version EMF takes (EMF `parse_version`, kiln-emf the same): "1", "1.2" or "1.2.3", numbers only.
+fn emf_version(v: &str) -> bool {
+    let parts: Vec<&str> = v.split('.').collect();
+    parts.len() <= 3 && parts.iter().all(|p| !p.is_empty() && p.len() <= 7 && p.bytes().all(|c| c.is_ascii_digit())
+        && p.parse::<u32>().is_ok_and(|n| n <= 1_000_000))
+}
+
+/// Is `dir` an EMF Lua mod ([`emf_lua_manifest`])? Its Library entry is placed in `<game>/emf/mods/<id>/`, where EMF's
+/// `lua` mod reads its files (engine_mods::place).
+pub fn is_emf_lua(dir: &Path) -> bool {
+    emf_lua_manifest(dir).is_some()
+}
+
+/// Why a folder whose mod.json is EMF's (it gives `emf` or `main`; a `dll` alone is Greeneye's too) is no EMF mod Kiln
+/// can add, in plain words. None for any other mod.json.
+fn emf_problem(dir: &Path) -> Option<String> {
+    let text = crate::manifest::read_text(&dir.join(EMF_MANIFEST)).ok()?;
+    let v = crate::jsonc::parse(text.trim_start_matches('\u{feff}')).ok()?;
+    if v.get("emf").is_none() && v.get("main").is_none() {
+        return None;
+    }
+    let raw = |k: &str| v.get(k).and_then(|x| x.as_str());
+    let s = |k: &str| raw(k).map(str::trim).filter(|x| !x.is_empty());
+    let main = s("main");
+    Some(if v.get("dll").is_some() && v.get("main").is_some() {
+        "an EMF mod whose mod.json names both a DLL and a main file, which EMF refuses".into()
+    } else if s("id").is_none() || s("version").is_none() {
+        "an EMF mod whose mod.json has no id or no version, which EMF needs".into()
+    } else if let Some(id) = raw("id").filter(|id| !emf_id(id)) {
+        format!("an EMF mod whose id ({id}) EMF does not take: it needs 1 to 48 of a-z 0-9 _ . -")
+    } else if let Some(version) = raw("version").filter(|v| !emf_version(v)) {
+        format!("an EMF mod whose version ({version}) EMF does not take: it needs numbers like 1.2.3")
+    } else if v.get("emf").is_some_and(|e| !e.is_i64() && !e.is_u64()) {
+        "an EMF mod whose mod.json gives \"emf\" as something other than a whole number, which EMF refuses".into()
+    } else if let Some(main) = main.filter(|m| !m.to_ascii_lowercase().ends_with(".lua")) {
+        format!("an EMF script mod whose main file ({main}) is not Lua: Kiln knows only EMF's Lua mods, so it cannot tell whether a host runs it")
+    } else if let Some(main) = main {
+        format!("an EMF Lua mod without its main file ({main})")
+    } else {
+        let dll = s("dll").map(str::to_string).unwrap_or_else(|| format!("{}.dll", s("id").unwrap_or_default()));
+        format!("an EMF mod without its DLL ({dll}): the source files of an EMF mod, or a copy missing its DLL")
+    })
 }
 
 /// Why a Kiln or native manifest can't be used, for the player: an id that is not a Kiln id gets its own sentence.
@@ -733,12 +860,20 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
     if let Some(d) = crate::engines::detect_folder(dir) {
         return d;
     }
+    // after every other engine's folder rule, so a folder one of them takes (its mod DLL beside a mod.json naming a
+    // main file, shroudtopia.json) stays that engine's: only a folder that was left out before is an EMF Lua mod
+    if let Some((v, main)) = emf_lua_manifest(dir) {
+        let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+        let api = v.get("emf").map(|e| format!(", EMF API {e}")).unwrap_or_default();
+        return mk(DetectKind::Emf, s("id"), s("version"), s("name"), format!("an EMF Lua mod (mod.json, {main}{api}): EMF's lua mod runs it"));
+    }
     let has_lua = dir.join("src/mod.lua").is_file()
         || std::fs::read_dir(dir).into_iter().flatten().flatten().any(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("lua")));
     // An XHL mod without an EML part: a plugin XHL-Core loads from the game's mods folder, never a DLL to load on its own.
     // XHL's mods since 2026-11 also carry a mod.json that only names the mod (id, name, version, no src/mod.lua): it is
     // no EML package, and the folder is still XHL-Core's plugin.
-    if crate::engine_mods::has_xhl_plugin_ini(dir) && !has_lua {
+    // (a native-plugin.ini of ShroudForge's own form is no XHL-Core plugin: engine_mods::is_xhl_plugin)
+    if crate::engine_mods::is_xhl_plugin(dir) && !has_lua {
         // XHL-Core loads every folder that holds the ini: a copy suffix, or a version in an archive's name, would make
         // a second companion beside the first
         let name = match top_name.filter(|_| depth == 0) {
@@ -767,7 +902,7 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
     }
     // A package with an unknown/broken manifest is one item, never a bag of helper DLLs to execute.
     if dir.join(EMF_MANIFEST).is_file() || has_lua {
-        return mk(DetectKind::Unknown, None, None, None, crate::shroudforge::skip_reason(dir));
+        return mk(DetectKind::Unknown, None, None, None, emf_problem(dir).unwrap_or_else(|| crate::shroudforge::skip_reason(dir)));
     }
     // `mods/<name>/` with nothing but settings files: the settings of a DLL that reads them in the game folder
     // (Auto Loot Plus Lite: dinput8.dll + mods/auto-loot-plus/config.txt)
@@ -804,6 +939,11 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
     }
     // a folder of mods (an unpacked zip): what is inside
     let mut items = children(dir, depth, top_name);
+    // EMF's own download (EMF-<version>.zip): EMF installs what is in game/, never the Lua examples and the Lua starter
+    // beside it (its scripts/package.ps1), so they are not added either
+    if dir.join("game/emf/mods").is_dir() {
+        leave_out_emf_examples(dir, &mut items);
+    }
     // A package shaped like the game folder whose own DLL sits under a proxy name next to its `mods` folder (Auto Loot
     // Plus: dinput8.dll + mods/auto-loot-plus): the DLL is named after the package, not "dinput8.dll".
     if let (0, Some(n)) = (depth, top_name) {
@@ -850,6 +990,21 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
 }
 
 const SETTINGS_WORDS: &str = "holds only settings";
+
+/// In EMF's download (`dir` holds `game/emf/mods/`), the EMF Lua mods outside `game/` are left out, each with the reason:
+/// its `examples/lua/` and its starter `template_lua/`, which EMF does not install. Dropped on their own they are added.
+fn leave_out_emf_examples(dir: &Path, items: &mut [Detected]) {
+    let installed = dir.join("game");
+    for i in items.iter_mut().filter(|i| i.kind == DetectKind::Emf) {
+        let p = Path::new(&i.path);
+        if !p.starts_with(&installed) && p.is_dir() && is_emf_lua(p) {
+            i.kind = DetectKind::Unknown;
+            i.id = None;
+            i.version = None;
+            i.reason = "an example in EMF's download, which EMF does not install: to use it, add its folder on its own".into();
+        }
+    }
+}
 
 /// A folder with files and nothing but settings files (`.txt`, `.ini`, `.cfg`, `.json`, `.toml`, `.yaml`) in it.
 fn only_settings(dir: &Path) -> bool {
@@ -1213,6 +1368,9 @@ fn copy_mod_tree_inner(from: &Path, to: &Path, skip: Option<&Path>, skipped: &mu
             size += copy_mod_tree_inner(&e.path(), &dst, skip, skipped)?;
         } else if ft.is_file() {
             size += std::fs::copy(e.path(), &dst).map_err(io(&dst, "copying to"))?;
+            // std::fs::copy keeps a read-only file read-only: the Library's files and the copies placed from them are
+            // the player's to change (a mod saves its settings there), as a zip import's are
+            crate::util::make_writable(&dst).map_err(io(&dst, "making writable"))?;
         } else {
             return Err(Error::new(ErrorCode::Refused, format!("{}: not a regular file or folder", e.path().display())));
         }
@@ -1298,15 +1456,24 @@ pub fn commit_folder(dirs: &DataDirs, prepared: &Path, rec: ImportRecord, report
         // Likewise an EML mod imported before Kiln recognised the modified EML loader beside it learns which part runs.
         let game_folder = rec.game_folder.is_some() && old.game_folder.is_none();
         let loader_part = rec.loader_part.is_some() && old.loader_part.is_none();
-        if game_folder || loader_part {
+        // and an entry imported before Kiln looked at the folders around it learns which side its drop packed it for
+        let packaged = learned_packaged_for(old.source.as_ref(), rec.source.as_ref());
+        if game_folder || loader_part || packaged.is_some() {
             crate::durable::flush_contents(&folder)?;
+            let source = match (packaged, &old.source) {
+                (Some(p), Some(s)) => Some(ImportSource { packaged_for: p, ..s.clone() }),
+                (Some(_), None) => rec.source.clone(),
+                (None, s) => s.clone(),
+            };
             let learned = ImportRecord {
                 game_folder: if game_folder { rec.game_folder.clone() } else { old.game_folder.clone() },
                 loader_part: if loader_part { rec.loader_part.clone() } else { old.loader_part.clone() },
+                source,
                 ..old
             };
             crate::durable::json(&record_path(&folder), &learned, &[folder.clone()])?;
         }
+        report.order.push(r.clone());
         report.existing.push(r);
         return Ok(());
     }
@@ -1317,8 +1484,57 @@ pub fn commit_folder(dirs: &DataDirs, prepared: &Path, rec: ImportRecord, report
     crate::durable::flush_contents(prepared)?;
     crate::durable::rename_dir(prepared, &folder)?;
     crate::durable::json(&record_path(&folder), &rec, &[folder.clone()])?;
+    report.order.push(r.clone());
     report.imported.push(r);
     Ok(())
+}
+
+/// What an entry already in the Library learns from a drop of the same files: Some(new value) of its source's
+/// `packaged_for` when it changes. A first side is taken; the other side for the same files means they are both copies
+/// (Some(None)); a drop that names no side changes nothing.
+fn learned_packaged_for(old: Option<&ImportSource>, new: Option<&ImportSource>) -> Option<Option<RunSide>> {
+    let new = new.and_then(|s| s.packaged_for)?;
+    match old.and_then(|s| s.packaged_for) {
+        None => Some(Some(new)),
+        Some(o) if o != new => Some(None),
+        Some(_) => None,
+    }
+}
+
+/// The side a drop packed a mod for, from the folders between the drop's root and the mod (`rel`, the mod's own folder
+/// last): a folder named `client` means the game, `server` (or `dedicated server`) a dedicated server. Mods that ship
+/// both in one download put each copy in such a folder (Town Portals 2.0.3: `client/` and `server/`). None when no
+/// folder says it, or folders say both.
+pub fn packaged_for(rel: &Path) -> Option<RunSide> {
+    let mut found = None;
+    for c in rel.components() {
+        let name = c.as_os_str().to_string_lossy().trim().to_ascii_lowercase();
+        let side = match name.as_str() {
+            "client" => RunSide::Client,
+            "server" | "dedicated" | "dedicated server" | "dedicated-server" | "dedicated_server" | "dedicatedserver" => RunSide::Server,
+            _ => continue,
+        };
+        if found.is_some_and(|f| f != side) {
+            return None;
+        }
+        found = Some(side);
+    }
+    found
+}
+
+/// How well a Library entry fits a game of `side` among entries of one mod with one version (one download's client and
+/// server copies). Higher is better: first whether the mod's own manifest lets it run there (`side` both, that side, or
+/// none given), then whether the drop packed it for that side (that side, no word, the other side). A copy for "both"
+/// and one for exactly that side fit the same.
+pub fn side_fit(side: RunSide, rec: &ImportRecord) -> (bool, u8) {
+    let exact = match side { RunSide::Client => Side::Client, RunSide::Server => Side::Server };
+    let runs = rec.side.is_none_or(|s| s == Side::Both || s == exact);
+    let packaged = match rec.source.as_ref().and_then(|s| s.packaged_for) {
+        Some(p) if p == side => 2,
+        None => 1,
+        Some(_) => 0,
+    };
+    (runs, packaged)
 }
 
 /// A Kiln entry [`migrate_identities`] moved to its identity: the hash it was recorded under, and the one it has now.
@@ -1839,7 +2055,7 @@ pub fn take_over_with(dirs: &DataDirs, r: &LibraryRef, find: &mut dyn FnMut(&Pat
 }
 
 fn source_of(path: &Path, kind: &str) -> ImportSource {
-    ImportSource { kind: kind.into(), from: path.display().to_string() }
+    ImportSource { kind: kind.into(), from: path.display().to_string(), packaged_for: None }
 }
 
 fn semverish(v: &str) -> bool {
@@ -2115,6 +2331,12 @@ fn import_detected(dirs: &DataDirs, d: &Detected, base_label: &Path, base_real: 
         return Ok(());
     }
     progress.report(None, &format!("importing {}", d.path));
+    // a client/ or server/ folder between the drop's root and the mod: which side the drop packed this copy for. A dropped
+    // folder's own name counts too (the player dropped server/); an archive's file name does not.
+    let mut rel = PathBuf::new();
+    if base_label == base_real && let Some(n) = base_real.file_name() { rel.push(n); }
+    if let Ok(rest) = Path::new(&d.path).strip_prefix(base_label) { rel.push(rest); }
+    let from = &ImportSource { packaged_for: packaged_for(&rel), ..from.clone() };
     if let Err(e) = import_item(dirs, d, &real, from, report) {
         report.skipped.push(Skipped { path: d.path.clone(), reason: e.message });
     }
@@ -2170,7 +2392,7 @@ pub fn import(dirs: &DataDirs, paths: &[PathBuf], progress: &mut dyn Progress) -
     Ok(report)
 }
 
-fn records(dirs: &DataDirs, kind: ModKind) -> Vec<(PathBuf, ImportRecord)> {
+pub(crate) fn records(dirs: &DataDirs, kind: ModKind) -> Vec<(PathBuf, ImportRecord)> {
     let mut out = Vec::new();
     for idd in std::fs::read_dir(kind_dir(dirs, kind)).into_iter().flatten().flatten() {
         for f in std::fs::read_dir(idd.path()).into_iter().flatten().flatten() {
@@ -2333,7 +2555,8 @@ pub fn replace_dll(dirs: &DataDirs, profile_id: &str, from: &LibraryRef, file: &
     let i = p.mods.list(from.kind).iter().position(|m| m.id == from.id && m.version == from.version && m.hash == from.hash)
         .ok_or_else(|| Error::new(ErrorCode::Conflict, "The mod changed in this profile. Reload it first."))?;
     let before = p.mods.list(from.kind)[i].clone();
-    rec.source = Some(ImportSource { kind: "replaced-dll".into(), from: serde_json::to_string(&replacement_base(rec.source.as_ref()).unwrap_or_else(|| from.clone()))? });
+    let packaged_for = rec.source.as_ref().and_then(|s| s.packaged_for);
+    rec.source = Some(ImportSource { kind: "replaced-dll".into(), from: serde_json::to_string(&replacement_base(rec.source.as_ref()).unwrap_or_else(|| from.clone()))?, packaged_for });
     rec.imported = crate::util::now_rfc3339();
     rec.hash = recorded_hash(tmp.path(), &rec)?;
     rec.size = size - old_size + bytes.len() as u64;
@@ -2383,6 +2606,10 @@ impl Usage {
         for e in std::fs::read_dir(dirs.profiles()).into_iter().flatten().flatten() {
             let Ok(Some(p)) = crate::util::read_json::<crate::profile::Profile>(&e.path().join("meta.json")) else { continue };
             profiles.push((p.id, p.mods));
+            // a pack instance's undo copy (crate::modpack::pack::undo) still needs the entries it goes back to
+            if let Ok(Some(u)) = crate::util::read_json::<crate::profile::Profile>(&e.path().join("pack").join("undo").join("meta.json")) {
+                profiles.push((format!("{} (undo)", u.id), u.mods));
+            }
         }
         // A profile offered for restoration still needs its Library packages,
         // including switched-off entries. Pin until this snapshot is replaced.
@@ -2688,6 +2915,40 @@ pub fn remove_with(
     let guard = Guard::read(dirs, find)?;
     guard.refuse_while_running(dirs, r)?;
     guard.remove_checked(dirs, r, &folder, &force.into()).map(|_| ())
+}
+
+/// [`remove`], then with `settings` the mod's settings too ([`crate::mod_settings::remove`], the launcher's "Remove its
+/// settings too") once this was its last version in the Library. -> what the settings removal did; None without
+/// `settings`, or while other versions of the mod stay. The version is removed whatever the settings removal does: a
+/// failure there is a note in its result.
+pub fn remove_and_settings(dirs: &DataDirs, r: &LibraryRef, force: impl Into<Force>, settings: bool)
+    -> Result<Option<crate::mod_settings::SettingsRemoval>> {
+    let mut finder = crate::proc::Finder::default();
+    remove_and_settings_with(dirs, r, force, settings, &mut |dir, exe| finder.find(dir, exe))
+}
+
+/// [`remove_and_settings`] with the process lookup given, for tests.
+pub fn remove_and_settings_with(
+    dirs: &DataDirs,
+    r: &LibraryRef,
+    force: impl Into<Force>,
+    settings: bool,
+    find: &mut dyn FnMut(&Path, &str) -> Result<Option<crate::proc::ProcessInfo>>,
+) -> Result<Option<crate::mod_settings::SettingsRemoval>> {
+    // a Shroudtopia mod's entry in shroudtopia.json may be under its mod.json name: read before the folder goes
+    let keys: Vec<String> = match (settings, r.kind) {
+        (true, ModKind::Shroudtopia) => path_of(dirs, r).ok()
+            .and_then(|f| crate::util::read_json::<serde_json::Value>(&f.join("mod.json")).ok().flatten())
+            .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(str::to_owned)).into_iter().collect(),
+        _ => Vec::new(),
+    };
+    remove_with(dirs, r, force, &mut *find)?;
+    if !settings || list(dirs, Some(r.kind))?.iter().any(|e| e.id == r.id && !e.versions.is_empty()) {
+        return Ok(None);
+    }
+    Ok(Some(crate::mod_settings::remove_with(dirs, r.kind, &r.id, &keys, find).unwrap_or_else(|e| crate::mod_settings::SettingsRemoval {
+        notes: vec![format!("Its settings stay: {}", e.message)], ..Default::default()
+    })))
 }
 
 /// What [`remove_many`] did: the versions removed, and each one that was not with the reason (`Conflict` while

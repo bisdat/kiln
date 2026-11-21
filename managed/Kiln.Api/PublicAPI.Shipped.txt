@@ -422,8 +422,10 @@ Kiln.EcsProgramContext.QueueRemove(Kiln.EntityId entity, string! component) -> b
 Kiln.EcsProgramContext.ReadEvents(string! name) -> byte[]![]!
 Kiln.EcsProgramContext.TryGet<T>(out T value, bool template = false) -> bool
 Kiln.EcsProgramContext.TryGetOther<T>(Kiln.EntityId entity, out T value) -> bool
+Kiln.EcsProgramContext.TryGetWritable<T>(out T value) -> bool
 Kiln.EcsProgramContext.TryRead<T>(string! component, out T value, bool template = false) -> bool
 Kiln.EcsProgramContext.TryReadOther<T>(Kiln.EntityId entity, string! component, out T value) -> bool
+Kiln.EcsProgramContext.TryReadWritable<T>(string! component, out T value) -> bool
 Kiln.EcsProgramContext.TrySet<T>(T value) -> bool
 Kiln.EcsProgramContext.TrySetOther<T>(Kiln.EntityId entity, T value) -> bool
 Kiln.EcsProgramContext.TryWrite<T>(string! component, T value) -> bool
@@ -669,7 +671,86 @@ Kiln.ItemInstanceRef.ItemInstanceRef() -> void
 Kiln.ItemInstanceRef.ItemInstanceRef(Kiln.EntityRef Entity, Kiln.ItemId Item) -> void
 Kiln.KilnEvent
 Kiln.KilnEvent.KilnEvent() -> void
+Kiln.KilnLanguage
 Kiln.KilnLog
+Kiln.KilnTask
+Kiln.KilnTask.AsTask() -> System.Threading.Tasks.Task!
+Kiln.KilnTask.Awaiter
+Kiln.KilnTask.Awaiter.Awaiter() -> void
+Kiln.KilnTask.Awaiter.GetResult() -> void
+Kiln.KilnTask.Awaiter.IsCompleted.get -> bool
+Kiln.KilnTask.Awaiter.OnCompleted(System.Action! continuation) -> void
+Kiln.KilnTask.Awaiter.UnsafeOnCompleted(System.Action! continuation) -> void
+Kiln.KilnTask.Cancel() -> void
+Kiln.KilnTask.Fault.get -> System.Exception?
+Kiln.KilnTask.GetAwaiter() -> Kiln.KilnTask.Awaiter
+Kiln.KilnTask.Name.get -> string!
+Kiln.KilnTask.State.get -> Kiln.KilnTaskState
+Kiln.KilnTask.Wait() -> void
+Kiln.KilnTask<T>
+Kiln.KilnTask<T>.AsTask() -> System.Threading.Tasks.Task<T>!
+Kiln.KilnTask<T>.Awaiter
+Kiln.KilnTask<T>.Awaiter.Awaiter() -> void
+Kiln.KilnTask<T>.Awaiter.GetResult() -> T
+Kiln.KilnTask<T>.Awaiter.IsCompleted.get -> bool
+Kiln.KilnTask<T>.Awaiter.OnCompleted(System.Action! continuation) -> void
+Kiln.KilnTask<T>.Awaiter.UnsafeOnCompleted(System.Action! continuation) -> void
+Kiln.KilnTask<T>.GetAwaiter() -> Kiln.KilnTask<T>.Awaiter
+Kiln.KilnTask<T>.Result.get -> T
+Kiln.KilnTaskContext
+Kiln.KilnTaskContext.Cancellation.get -> System.Threading.CancellationToken
+Kiln.KilnTaskContext.GateWindow
+Kiln.KilnTaskContext.GateWindow.Awaiter
+Kiln.KilnTaskContext.GateWindow.Awaiter.Awaiter() -> void
+Kiln.KilnTaskContext.GateWindow.Awaiter.GetResult() -> void
+Kiln.KilnTaskContext.GateWindow.Awaiter.IsCompleted.get -> bool
+Kiln.KilnTaskContext.GateWindow.Awaiter.OnCompleted(System.Action! continuation) -> void
+Kiln.KilnTaskContext.GateWindow.Awaiter.UnsafeOnCompleted(System.Action! continuation) -> void
+Kiln.KilnTaskContext.GateWindow.GateWindow() -> void
+Kiln.KilnTaskContext.GateWindow.GetAwaiter() -> Kiln.KilnTaskContext.GateWindow.Awaiter
+Kiln.KilnTaskContext.NextGateWindow() -> Kiln.KilnTaskContext.GateWindow
+Kiln.KilnTaskContext.NextGateWindow(Kiln.WorldKind world) -> Kiln.KilnTaskContext.GateWindow
+Kiln.KilnTaskContext.OnTick<T>(Kiln.WorldKind world, System.Func<T>! apply) -> System.Threading.Tasks.Task<T>!
+Kiln.KilnTaskContext.OnTick<T>(System.Func<T>! apply) -> System.Threading.Tasks.Task<T>!
+Kiln.KilnTaskContext.PostToTick(Kiln.WorldKind world, System.Action! apply) -> void
+Kiln.KilnTaskContext.PostToTick(System.Action! apply) -> void
+Kiln.KilnTaskContext.TickHop
+Kiln.KilnTaskContext.TickHop.Awaiter
+Kiln.KilnTaskContext.TickHop.Awaiter.Awaiter() -> void
+Kiln.KilnTaskContext.TickHop.Awaiter.GetResult() -> void
+Kiln.KilnTaskContext.TickHop.Awaiter.IsCompleted.get -> bool
+Kiln.KilnTaskContext.TickHop.Awaiter.OnCompleted(System.Action! continuation) -> void
+Kiln.KilnTaskContext.TickHop.Awaiter.UnsafeOnCompleted(System.Action! continuation) -> void
+Kiln.KilnTaskContext.TickHop.GetAwaiter() -> Kiln.KilnTaskContext.TickHop.Awaiter
+Kiln.KilnTaskContext.TickHop.TickHop() -> void
+Kiln.KilnTaskContext.TickWorld.get -> Kiln.WorldKind
+Kiln.KilnTaskContext.ToTick() -> Kiln.KilnTaskContext.TickHop
+Kiln.KilnTaskContext.ToTick(Kiln.WorldKind world) -> Kiln.KilnTaskContext.TickHop
+Kiln.KilnTaskOptions
+Kiln.KilnTaskOptions.Deconstruct(out bool LongRunning, out Kiln.KilnTaskPriority Priority) -> void
+Kiln.KilnTaskOptions.Equals(Kiln.KilnTaskOptions other) -> bool
+Kiln.KilnTaskOptions.KilnTaskOptions() -> void
+Kiln.KilnTaskOptions.KilnTaskOptions(bool LongRunning = false, Kiln.KilnTaskPriority Priority = Kiln.KilnTaskPriority.Normal) -> void
+Kiln.KilnTaskOptions.LongRunning.get -> bool
+Kiln.KilnTaskOptions.LongRunning.init -> void
+Kiln.KilnTaskOptions.Priority.get -> Kiln.KilnTaskPriority
+Kiln.KilnTaskOptions.Priority.init -> void
+Kiln.KilnTaskPriority
+Kiln.KilnTaskPriority.High = 2 -> Kiln.KilnTaskPriority
+Kiln.KilnTaskPriority.Low = 1 -> Kiln.KilnTaskPriority
+Kiln.KilnTaskPriority.Normal = 0 -> Kiln.KilnTaskPriority
+Kiln.KilnTaskQueueFullException
+Kiln.KilnTaskState
+Kiln.KilnTaskState.Cancelled = 5 -> Kiln.KilnTaskState
+Kiln.KilnTaskState.Completed = 3 -> Kiln.KilnTaskState
+Kiln.KilnTaskState.Faulted = 4 -> Kiln.KilnTaskState
+Kiln.KilnTaskState.None = 0 -> Kiln.KilnTaskState
+Kiln.KilnTaskState.Queued = 1 -> Kiln.KilnTaskState
+Kiln.KilnTaskState.Running = 2 -> Kiln.KilnTaskState
+Kiln.KilnTasks
+Kiln.KilnTasks.Run(string! name, System.Action<Kiln.KilnTaskContext!>! work, Kiln.KilnTaskOptions? options = null) -> Kiln.KilnTask!
+Kiln.KilnTasks.Run(string! name, System.Func<Kiln.KilnTaskContext!, System.Threading.Tasks.Task!>! work, Kiln.KilnTaskOptions? options = null) -> Kiln.KilnTask!
+Kiln.KilnTasks.Run<T>(string! name, System.Func<Kiln.KilnTaskContext!, System.Threading.Tasks.Task<T>!>! work, Kiln.KilnTaskOptions? options = null) -> Kiln.KilnTask<T>!
 Kiln.KilnUnavailableException
 Kiln.KilnUnavailableException.Capability.get -> string!
 Kiln.KilnUnavailableException.KilnUnavailableException(string! capability, string? reason = null, System.Exception? innerException = null) -> void
@@ -720,6 +801,7 @@ Kiln.ModContext.Locale.get -> Kiln.ModLocale!
 Kiln.ModContext.Log.get -> Kiln.Logger!
 Kiln.ModContext.Messages.get -> Kiln.ModMessages!
 Kiln.ModContext.Scheduler.get -> Kiln.Scheduler!
+Kiln.ModContext.Tasks.get -> Kiln.KilnTasks!
 Kiln.ModContext.Tick.get -> Kiln.TickEvents!
 Kiln.ModDependency
 Kiln.ModDependency.<Clone>$() -> Kiln.ModDependency!
@@ -1098,6 +1180,7 @@ Kiln.WorldConfig<T>
 Kiln.WorldConfig<T>.Value.get -> T!
 Kiln.WorldKind
 Kiln.WorldKind.Client = 2 -> Kiln.WorldKind
+Kiln.WorldKind.Menu = 3 -> Kiln.WorldKind
 Kiln.WorldKind.Prediction = 1 -> Kiln.WorldKind
 Kiln.WorldKind.Server = 0 -> Kiln.WorldKind
 Kiln.WorldPosition
@@ -1121,7 +1204,7 @@ const Kiln.Events.MaxDepth = 32 -> int
 const Kiln.Events.MaxFaults = 5 -> int
 const Kiln.ModLocale.Fallback = "en" -> string!
 const Kiln.ModLocale.MaxFileBytes = 1048576 -> int
-const Kiln.Mods.ApiVersion = "0.2.10" -> string!
+const Kiln.Mods.ApiVersion = "0.2.12" -> string!
 const Kiln.Pacing.ServerIdleWaitNs = 40000000 -> long
 const Kiln.Pacing.ServerMaxWaitNs = 1000000000 -> long
 const Kiln.Pacing.ServerMinWaitNs = 100000 -> long
@@ -1189,6 +1272,7 @@ override Kiln.ItemId.GetHashCode() -> int
 override Kiln.ItemId.ToString() -> string!
 override Kiln.ItemInstanceRef.GetHashCode() -> int
 override Kiln.ItemInstanceRef.ToString() -> string!
+override Kiln.KilnTaskOptions.GetHashCode() -> int
 override Kiln.LoopWait.GetHashCode() -> int
 override Kiln.ModDependency.Equals(object? obj) -> bool
 override Kiln.ModDependency.GetHashCode() -> int
@@ -1340,8 +1424,14 @@ static Kiln.ItemId.operator !=(Kiln.ItemId left, Kiln.ItemId right) -> bool
 static Kiln.ItemId.operator ==(Kiln.ItemId left, Kiln.ItemId right) -> bool
 static Kiln.ItemInstanceRef.operator !=(Kiln.ItemInstanceRef left, Kiln.ItemInstanceRef right) -> bool
 static Kiln.ItemInstanceRef.operator ==(Kiln.ItemInstanceRef left, Kiln.ItemInstanceRef right) -> bool
+static Kiln.KilnLanguage.Changed -> System.Action?
+static Kiln.KilnLanguage.Current.get -> string!
+static Kiln.KilnLanguage.OverlayInEnglish.get -> bool
+static Kiln.KilnLanguage.Setting.get -> string!
 static Kiln.KilnLog.Info(string! text) -> void
 static Kiln.KilnLog.Warn(string! text) -> void
+static Kiln.KilnTaskOptions.operator !=(Kiln.KilnTaskOptions left, Kiln.KilnTaskOptions right) -> bool
+static Kiln.KilnTaskOptions.operator ==(Kiln.KilnTaskOptions left, Kiln.KilnTaskOptions right) -> bool
 static Kiln.Lifecycle.IsServerRunning.get -> bool
 static Kiln.Lifecycle.ModsLoaded.get -> bool
 static Kiln.Lifecycle.Phase.get -> Kiln.ServerPhase
@@ -1446,6 +1536,8 @@ virtual Kiln.TickHandler.Invoke(in Kiln.TickInfo tick) -> void
 ~override Kiln.GameField.ToString() -> string
 ~override Kiln.ItemId.Equals(object obj) -> bool
 ~override Kiln.ItemInstanceRef.Equals(object obj) -> bool
+~override Kiln.KilnTaskOptions.Equals(object obj) -> bool
+~override Kiln.KilnTaskOptions.ToString() -> string
 ~override Kiln.LoopWait.Equals(object obj) -> bool
 ~override Kiln.LoopWait.ToString() -> string
 ~override Kiln.ModStats.Equals(object obj) -> bool

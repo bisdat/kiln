@@ -4,16 +4,17 @@ import { StoppedStartNotice } from "../../shell/StoppedStartNotice";
 // the default is named; profiles are switched in Settings (the desktop UI's, or the Deck's).
 // When ShroudForge's startup pass failed at the last start (engine_status `startupFailed`, sf_startup.rs), a line says
 // so and a button opens the whole text (what happened, the mods it left out, what to change) in a dialog the right stick
-// scrolls: on a Deck nothing else shows it (player report 327).
+// scrolls: on a Deck nothing else shows it (player report 327). When the pass failed in one mod and ran again without it
+// (`startupSkipped`), the same line and dialog name that mod; the other mods loaded.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as api from "../../api/commands";
-import type { SfStartupNote } from "../../api/commands";
-import { useGame, useGameStatus, useLaunchState, usePoll, useRuntimeChanges } from "../../api/hooks";
+import { GAME_POLL_MS, useGame, useGameStatus, useLaunchState, usePoll, useRuntimeChanges } from "../../api/hooks";
 import { engineStatusKey } from "../../components/EngineStatus";
 import { errorText } from "../../ui";
 import { clock, usePlayControl } from "../../shell/play";
+import { applyingWord } from "../../shell/applying";
 import { startWords } from "../../shell/startProgress";
 import { StartBar } from "../../shell/StartPanel";
 import { detectGames, useDetect, useEnsureProfile, useKilnInstall } from "../../shell/firstRun";
@@ -24,8 +25,12 @@ import { bootLine, kilnLabel } from "../status";
 import { deckFire } from "../Fire";
 import type { DeckAction } from "../layers";
 import { useT } from "../../i18n";
+import { DeckSendToSupport } from "../../community/parts";
+import { crashLine, useCrashNotice } from "../../community/crash";
+import { DeckCodeDialog, DeckShareDialog } from "../../crucible/DeckCrucible";
+import { useCrucibleOn } from "../../crucible/state";
 
-type Open = null | "install" | "update" | "once" | "find";
+type Open = null | "install" | "update" | "once" | "find" | "share" | "code";
 
 export default function Home() {
   const t = useT();
@@ -42,11 +47,19 @@ export default function Home() {
   useEnsureProfile(game);
   const change = useRuntimeChanges((s) => (game ? s.last[game.id] : undefined));
   const engines = useQuery({ queryKey: engineStatusKey(game?.id ?? ""), queryFn: () => api.engineStatus(game!.id), enabled: !!game,
-    refetchInterval: usePoll(10_000) });
-  const sfStartup = engines.data?.find((e) => e.kind === "shroudforge")?.startupFailed ?? null;
+    refetchInterval: usePoll(GAME_POLL_MS) });
+  const sfRow = engines.data?.find((e) => e.kind === "shroudforge");
+  const sfStartup = sfRow?.startupFailed ?? null;
+  const sfSkipped = sfStartup ? null : sfRow?.startupSkipped ?? null;
+  // what the line and its dialog say: a failed pass, or a pass that ran without one mod
+  const sfNote: SfNote | null = sfStartup
+    ? { title: sfStartup.mods.length ? t("deck.home.sfModsTitle") : t("deck.home.sfPassTitle"), text: sfStartup.text,
+        word: sfStartup.mods.length ? t("deck.home.sfModsFailed") : t("deck.home.sfPassFailed") }
+    : sfSkipped ? { title: t("deck.home.sfSkippedTitle"), text: sfSkipped.text,
+        word: t("deck.home.sfModSkipped", { count: Math.max(1, sfSkipped.skipped.length) }) } : null;
   const [open, setOpen] = useState<Open>(null);
   // the note the dialog shows: the one A was pressed on (a poll that changes it neither closes nor reopens the dialog)
-  const [sfOpen, setSfOpen] = useState<SfStartupNote | null>(null);
+  const [sfOpen, setSfOpen] = useState<SfNote | null>(null);
   const s = status.data;
   const rt = s?.runtime;
   const v = ctl.view;
@@ -63,6 +76,8 @@ export default function Home() {
   else if (ctl.timeline) { word = t("deck.shared.starting"); heat = "flare"; }
   else if (ctl.starting) { word = t("deck.shared.starting"); sub = t("deck.home.waitingKiln"); heat = "flare"; }
   else if (ctl.running) { word = ctl.elapsed !== null ? clock(ctl.elapsed) : v.label; sub = v.label; heat = "embers"; }
+  // (29.18) a profile is being applied to the game, whatever started it: Play waits for it (shell/applying.ts)
+  else if (ctl.applying) { word = t("deck.home.play"); sub = applyingWord(ctl.applying); heat = "low"; }
   else { word = t("deck.home.play"); if (ctl.canPlay && !kiln.installing) act = () => ctl.play("profile"); }
 
   // a start that says what it does: the step and the time left under the mouth's word, the bar and the step's line in
@@ -88,8 +103,11 @@ export default function Home() {
   else if (rt.switchBack) kilnWord = { text: t("deck.home.kilnFromBeta", { version: kilnLabel(kilnVer ?? ""), to: kilnLabel(rt.switchBack.to) }), tone: "warn" };
   else if (rt.upgradeAvailable) kilnWord = { text: t("deck.home.kilnUpdateReady", { version: kilnLabel(kilnVer ?? "") }), tone: "warn" };
   else kilnWord = { text: t("deck.home.kilnVersion", { version: kilnLabel(kilnVer ?? "") }), tone: "ok" };
+  const crash = useCrashNotice(game?.id);
   const advice = rt?.installed && s?.launchOptions?.advice && (!s.launchOptions.hasDllOverride || s.launchOptions.chainedOverrideMissing);
 
+  // (dev.30) Crucible: share the loaded profile, open a pack by its code
+  const crucible = useCrucibleOn() && !!game && !!rt?.installed && !!mods.profileId;
   const actions: DeckAction[] = [];
   if (game && rt?.installed) actions.push({ button: "x", label: t("deck.dialogs.playOnce"), run: () => setOpen("once"), disabled: !ctl.canPlay || kiln.installing });
 
@@ -109,24 +127,34 @@ export default function Home() {
           </div>
         )}
         {game && !tl && <p className="deck-line" data-testid="deck-last-boot"><span className="deck-label">{t("deck.home.lastBoot")}</span> <Word tone={boot.tone}>{boot.text}</Word></p>}
-        {game && sfStartup && (
-          <p className="deck-line" data-testid="deck-sf-startup"><span className="deck-label">{t("deck.home.shroudforge")}</span> <Word tone="warn">{sfStartup.mods.length ? t("deck.home.sfModsFailed") : t("deck.home.sfPassFailed")}</Word></p>
+        {game && crash && !ctl.running && <p className="deck-line" data-testid="deck-crash"><Word tone="err">{t("community.banner.crashTitle")}</Word> <span className="deck-dim">{crashLine(crash)}</span></p>}
+        {game && sfNote && (
+          <p className="deck-line" data-testid="deck-sf-startup"><span className="deck-label">{t("deck.home.shroudforge")}</span> <Word tone="warn">{sfNote.word}</Word></p>
         )}
         <div className="deck-home-actions">
+          {/* (Discord) a problem offers Kiln support next to its fix; nothing while the Community page is hidden */}
+          {game && rt && v.phase !== "none" && ((crash && !ctl.running) || (ctl.stuck && rt.installed) || ctl.kilnMissing || change?.state === "failed" || !!sfNote) && (
+            <DeckSendToSupport target={{ game: game.id }} kind={crash && !ctl.running ? "crash" : sfNote ? "mod" : "noload"} />
+          )}
+          {/* (29.18) Play waits for a game Steam has not started (a launch cancelled in Steam): Play again at once */}
+          {game && ctl.waitingForGame && <DeckButton id="stop-waiting" onClick={ctl.stopWaiting}>{t("shell.play.stopWaiting")}</DeckButton>}
           {/* once the game's state is known, as the other actions: the arch takes the first focus (it is disabled before) */}
-          {game && rt && v.phase !== "none" && sfStartup && <DeckButton id="sf-startup" a={t("deck.shared.read")} onClick={() => setSfOpen(sfStartup)}>{t("deck.home.sfWhy")}</DeckButton>}
+          {game && rt && v.phase !== "none" && sfNote && <DeckButton id="sf-startup" a={t("deck.shared.read")} onClick={() => setSfOpen(sfNote)}>{t("deck.home.sfWhy")}</DeckButton>}
           {!game && !looking && tried && <DeckButton id="pick-folder" a={t("common.open")} onClick={() => setOpen("find")}>{t("deck.home.pickFolder")}</DeckButton>}
           {game && rt && !rt.installed && !kiln.shroudforge && !kiln.installing && ctl.canPlay && (
             <DeckButton id="install" onClick={() => setOpen("install")}>{t("deck.shared.installKiln")}</DeckButton>
           )}
           {game && rt?.installed && rt.upgradeAvailable && <DeckButton id="update" disabled={!ctl.canPlay || kiln.installing} onClick={() => setOpen("update")}>{t("deck.home.updateKiln")}</DeckButton>}
           {(advice || (ctl.stuck && rt?.installed)) && <DeckButton id="steam-setting" a={t("deck.home.how")} onClick={() => nav("/deck/help")}>{s?.launchOptions?.hasDllOverride && s.launchOptions.chainedOverrideMissing ? t("deck.home.steamSettingAsi") : ctl.stuck ? t("deck.home.notLoading") : t("deck.shared.steamSetting")}</DeckButton>}
+          {crucible && <DeckButton id="crucible-share" a={t("crucible.share.button")} onClick={() => setOpen("share")}>{t("crucible.share.button")}</DeckButton>}
+          {crucible && <DeckButton id="crucible-code" onClick={() => setOpen("code")}>{t("crucible.deck.enterCode")}</DeckButton>}
           {change?.state === "failed" && <DeckButton id="kiln-failed" onClick={() => nav("/deck/kiln")}>{t("deck.app.tabs.kiln")}</DeckButton>}
         </div>
       </div>
-      {/* while the game starts or runs the mouth keeps the focus (aria-disabled, A does nothing): a gamepad is never left with
-          nothing focused for the two minutes of a start, or after it */}
-      <button type="button" className={`deck-mouth heat-${heat}`} disabled={!act && !ctl.starting && !ctl.running} aria-disabled={!act || undefined} onClick={() => act?.()}
+      {/* while the game starts or runs, a profile is being applied or Kiln is installed, the mouth keeps the focus
+          (aria-disabled, A does nothing): a gamepad is never left with nothing focused for the two minutes of a start,
+          or after it, nor when an install's task has ended a moment before its change has */}
+      <button type="button" className={`deck-mouth heat-${heat}`} disabled={!act && !ctl.starting && !ctl.running && !ctl.applying && !kiln.installing} aria-disabled={!act || undefined} onClick={() => act?.()}
         data-deck-autofocus="" data-deck-id="mouth" data-deck-a={act ? word : undefined} aria-label={sub ? t("deck.home.mouthAria", { word, sub }) : word}
         onFocus={() => { deckFire.hot = !!act; }} onBlur={() => { deckFire.hot = false; }}>
         <span className="deck-mouth-fire" aria-hidden />
@@ -141,17 +169,22 @@ export default function Home() {
       {(open === "install" || open === "update") && game && <InstallDialog game={game} update={open === "update"} onClose={() => setOpen(null)} />}
       {open === "once" && <PlayOnceDialog onClose={() => setOpen(null)} onPlay={(m) => ctl.play(m)} />}
       {open === "find" && <FindGameDialog onClose={() => setOpen(null)} />}
+      {open === "share" && mods.profileId && <DeckShareDialog profileId={mods.profileId} profileName={mods.summary?.name ?? mods.profileId} onClose={() => setOpen(null)} />}
+      {open === "code" && <DeckCodeDialog onClose={() => setOpen(null)} />}
       {sfOpen && <SfStartupDialog note={sfOpen} onClose={() => setSfOpen(null)} />}
     </Screen>
   );
 }
 
-/** ShroudForge's failed startup pass in full: a long text (the mods it left out, the cure), so the body scrolls with the
- *  right stick, as the Deck's notices do; A on OK or B closes it. */
-function SfStartupDialog({ note, onClose }: { note: SfStartupNote; onClose: () => void }) {
+/** What Home's ShroudForge line says: its word, and the dialog's title and text. */
+type SfNote = { title: string; text: string; word: string };
+
+/** ShroudForge's failed startup pass, or its pass that ran without one mod, in full: a long text (the mods it left out,
+ *  the cure or what to do), so the body scrolls with the right stick, as the Deck's notices do; A on OK or B closes it. */
+function SfStartupDialog({ note, onClose }: { note: SfNote; onClose: () => void }) {
   const t = useT();
   return (
-    <Dialog name="sf-startup" title={note.mods.length ? t("deck.home.sfModsTitle") : t("deck.home.sfPassTitle")} wide onClose={onClose}
+    <Dialog name="sf-startup" title={note.title} wide onClose={onClose}
       backLabel={t("common.close")} buttons={<DeckButton primary onClick={onClose}>{t("common.ok")}</DeckButton>}>
       <div className="deck-scroll" data-kind="warn" style={{ overflowWrap: "anywhere" }}>{note.text}.</div>
     </Dialog>

@@ -25,6 +25,8 @@
     <InternalsVisibleTo Include="Kiln.Ui" />
     <InternalsVisibleTo Include="Kiln.Ui.Tests" />
     <InternalsVisibleTo Include="Kiln.Stations.Tests" />
+    <!-- the test kit names the upgrades' rolls (HarnessItems.SetUpgradeRolls: ItemUpgrades.Roller) -->
+    <InternalsVisibleTo Include="Kiln.TestKit" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <EmbeddedResource Include="Data/items.tsv" LogicalName="Kiln.Items.items.tsv" />
     <None Include="Data/ITEMS-LICENSE.txt" />

@@ -129,7 +129,7 @@ public sealed class HookHandle : IDisposable
 /// it. Handlers run on whatever thread the target runs on (often the tick thread; job threads too), so keep them
 /// short and thread-safe and do not call tick-thread-only APIs from them.
 /// </summary>
-public static unsafe class Hooks
+public static unsafe partial class Hooks
 {
     // One install of a handler. A class, so a dispatch that is still running the old install of a reused cookie keeps
     // its own registration (handler, mod, fault count) and a removal can tell two installs of one cookie apart.
@@ -185,7 +185,7 @@ public static unsafe class Hooks
         ArgumentNullException.ThrowIfNull(handler);
         var t = HooksNative.Require("Hooks.Detour");
         var mod = HooksGate.RequireAdvanced("Hooks.Detour");
-        var where = label ?? "0x" + address.ToString("X");
+        var where = label ?? Where(address);
         var h = Install("Hooks.Detour", where, mod, HookCookies.Detour, address,
             (cookie, inFlight, install) => new DetourReg(handler, mod, inFlight, cookie, install),
             (owner, cookie, native) => t->Detour(owner, address, priority, &DetourDispatch, (void*)(nint)cookie, native));
@@ -209,7 +209,7 @@ public static unsafe class Hooks
         ArgumentNullException.ThrowIfNull(handler);
         var t = HooksNative.Require("Hooks.Mid");
         var mod = HooksGate.RequireAdvanced("Hooks.Mid");
-        var where = label ?? "0x" + address.ToString("X");
+        var where = label ?? Where(address);
         var h = Install("Hooks.Mid", where, mod, HookCookies.Mid, address,
             (cookie, inFlight, install) => new MidReg(handler, mod, inFlight, cookie, install),
             (owner, cookie, native) => t->Mid(owner, address, priority, &MidDispatch, (void*)(nint)cookie, native));
@@ -228,7 +228,12 @@ public static unsafe class Hooks
         Func<long, StrongBox<long>, long, Reg> make, NativeInstall install)
     {
         var (handle, rc) = TryInstall(api, mod, kind, address, make, install);
-        return handle ?? throw new InvalidOperationException($"{api}({where}): {HooksNative.Describe(rc)}");
+        if (handle is not null) return handle;
+        // The address check is the usual refusal: say what Kiln accepts (an address in another mod's DLL needs Hooks.Module)
+        var hint = rc == HooksNative.InvalidArgument
+            ? " (the address is not in the game's code, nor in the code of a module opened with Hooks.Module(name))"
+            : "";
+        throw new InvalidOperationException($"{api}({where}): {HooksNative.Describe(rc)}{hint}");
     }
 
     // Install without the throw on a refused native install: the handle, or null and the native result code (typed

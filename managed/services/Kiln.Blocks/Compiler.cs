@@ -113,14 +113,15 @@ internal sealed class BlockContext(ModBlocks mod, string block)
 internal static partial class Compiler
 {
     // The game's damage power: int(int(seed * creep * level + seed) * dmgMod * speedMod), keen::BalancingTable +0 genericWeaponSeed,
-    // +0x28 powerCreepWeapon (0x91e9d0). Checked against the running game when content is ready (BlockRuntime).
-    internal static uint Seed = 10;
-    internal static float Creep = 0.15f;
+    // +0x28 powerCreepWeapon (0x91e9d0). Checked against the running game when content is ready (BlockRuntime). The formulas live
+    // in Kiln.Content's GearMath, shared with the gear values of data packs and Content.Gear.
+    internal static uint Seed => GearMath.Seed;
+    internal static float Creep => GearMath.Creep;
 
-    public static int BasePower(int level) => (int)((long)(Seed * Creep * level + Seed));
+    public static int BasePower(int level) => GearMath.BasePower(level);
 
     /// <summary>The dmgMod that makes a level's power (with speedMod 1) this number, as the tooltip shows it.</summary>
-    public static double DmgModFor(int power, int level) => (power + 0.5) / BasePower(level);
+    public static double DmgModFor(int power, int level) => GearMath.DmgModFor(power, level);
 
     private static string Label<T>(string name) => $"{typeof(T).Name.Replace("Block", "").ToLowerInvariant()} {name}";
 
@@ -154,7 +155,7 @@ internal static partial class Compiler
         AffixNameFree(mod, name, block, label);
         var ctx = new BlockContext(mod, label);
         // a new item or template is drawn by the player's game; an effect alone is nothing a client sees; a VFX or material asks for more, and says so itself
-        if (block is not EffectBlock and not VfxBlock and not MaterialBlock and not AbilityBlock and not TriggerBlock and not MaterialTweakBlock and not StrengthBlock and not SurfaceBlock and not BuildingMaterialBlock and not BuildingMaterialPoolBlock and not TerrainMaterialBlock and not ScreenEffectBlock and not LootTableBlock and not INpcBlock and not IQuestBlock and not IUiBlock and not AffixBlock and not AffixPoolBlock) ctx.Need(ClientsLevel.Kiln, null, "vanilla clients cannot show new items, spells or statuses: Kiln clients then get the definitions from the server");
+        if (block is not EffectBlock and not VfxBlock and not MaterialBlock and not AbilityBlock and not TriggerBlock and not MaterialTweakBlock and not StrengthBlock and not SurfaceBlock and not BuildingMaterialBlock and not BuildingMaterialPoolBlock and not TerrainMaterialBlock and not ScreenEffectBlock and not LootTableBlock and not INpcBlock and not IQuestBlock and not IUiBlock and not AffixBlock and not AffixPoolBlock and not RarityRollBlock and not RarityUpgradeBlock) ctx.Need(ClientsLevel.Kiln, null, "vanilla clients cannot show new items, spells or statuses: Kiln clients then get the definitions from the server");
         var low = new Lowered(mod);
         ctx.Low = low;
         BlockHandle handle = block switch
@@ -172,6 +173,8 @@ internal static partial class Compiler
             SoundBlock s => DefineSound(ctx, low, name, s),
             AffixBlock a => DefineAffix(ctx, low, name, a),
             AffixPoolBlock p => DefineAffixPool(ctx, low, name, p),
+            RarityRollBlock r => DefineRarityRoll(ctx, low, name, r),
+            RarityUpgradeBlock u => DefineRarityUpgrade(ctx, low, name, u),
             _ => DefineItemBlock(ctx, low, name, block) ?? DefineAbilityBlock(ctx, low, name, block) ?? DefineScreenBlock(ctx, low, name, block) ?? DefineNpcBlock(ctx, low, name, block) ?? DefineQuestBlock(ctx, low, name, block) ?? DefineUiBlock(ctx, low, name, block) ?? throw new BlockError(label, null, $"{typeof(T).Name} is not a block Kiln can compile yet"),
         };
         if (block is ITweakable { Tweak.Count: > 0 } tweak) low.Tweak(label, block is StatusBlock ? "buffs" : block is PerkBlock ? "perks" : "items", handle.GameName, tweak.Tweak);

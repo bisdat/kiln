@@ -5,7 +5,7 @@ The client-side UI for mods (Forge: Screens, GUI overlays, toasts, KeyMappings, 
 window's input, and hooks the game's own UI (its screens, its main and pause menus, its crafting menus). Managed:
 `managed/services/Kiln.Ui`. RE: `docs/re/client-render.md` (overlay, input), `docs/re/game-ui.md` (the game's UI).
 Samples: `mods/samples/UiSample` (overlay), `mods/samples/MenuButtons` (game menus, a screen, crafting),
-`mods/samples/ValueBars` (values in the game's own UI). Test:
+`mods/samples/ValueBars` (values in the game's own UI), `mods/samples/SlotMarks` (marks and clicks on the game's slots). Test:
 `mods/tests/ui-test`. On a dedicated server `Ui.Available` is false and every call does nothing (a `side: both` mod may
 call it freely).
 
@@ -105,15 +105,25 @@ right above the build number: Kiln's mark, then **Kiln &lt;version&gt; - &lt;N&g
   EMF, EML, XHL, ShroudForge, SET, Greeneye, Flame, Shroudtopia, Enshwick, shroudlink and Ember. Kiln's own services
   and plugins are not mods; a mod switched off, waiting, failed or not loaded does not count. Kiln.Ui reads the list
   again every 2 seconds while the title or the main menu shows, so a mod that an engine starts late is counted too.
-- **XHL-Core.** XHL-Core 2.1.0 draws its own line at this place ("All mods loaded", or a red line about a problem).
-  **Kiln's line takes its place**: while Kiln's line shows, XHL-Core's is not drawn. Nothing else of XHL-Core changes
-  (its plugins, its Insert menu, its other hooks); it installs as it always did, whether it starts before Kiln or after.
-  How: Kiln runs its own copy of the game's footer function, made from the exe file at start, so the line XHL-Core
-  patches into the game's footer code is not reached (docs/re/game-ui.md "The main menu's footer"). kiln.log names
-  the module that patched the footer (`ui: the main menu's footer: a module patched the game's footer call at ...`).
+- **XHL-Core.** XHL-Core 2.1.0 draws its own line at this place: a green "All mods loaded", or a red line about a
+  problem ("XHL: Game updated · Click to view", "Mod conflict detected. Click to view") that opens XHL-Core's
+  diagnostics when clicked. With XHL-Core in the game, **Kiln's line names it**: "Kiln 0.2.0-dev.29.19 with XHL-Core -
+  N Mods Loaded" (key `native.footer.xhl`, in every language Kiln has). XHL-Core's green line is left out (Kiln's line
+  says XHL-Core runs); **its red line is drawn under Kiln's** while XHL-Core reports a problem, in XHL-Core's words,
+  colour and language, and it opens XHL-Core's diagnostics on a click, with the keyboard or with a pad, as without Kiln.
+  Nothing else of XHL-Core changes (its plugins, its Insert menu, its other hooks); it installs as it always did,
+  whether it starts before Kiln or after, and Kiln notices its patches when they come late.
+  How: Kiln runs its own copy of the game's footer function, made from the exe file at start, whose window call and
+  build-number call go through Kiln. They call the game's functions, or, while XHL-Core reports a problem, the targets
+  XHL-Core patched into the game's footer, so XHL-Core draws its line and takes its clicks itself. Kiln knows XHL-Core
+  by the export `XhlNativeGameBuild` of the module behind the patched call, and reads only its startup state (one
+  number, found by the shape of XHL-Core's state getter, not by an address); where that state cannot be found, XHL-Core's
+  line is always drawn, green or red, so a warning is never hidden (docs/re/game-ui.md "The main menu's footer").
+  kiln.log: `ui: the main menu's footer: XHL-Core's footer line is at ...`, then `... XHL-Core reports a problem` or
+  `... reports no problem` whenever that changes.
 - **The setting** `mainMenuFooter` (on by default; Kiln's config `kiln/config/menus-client.json`, on the Mods page under
-  **Kiln settings**) hides it: the game's footer is then drawn as it always was, with XHL-Core's line where XHL-Core is
-  installed.
+  **Kiln settings**) hides it: the game's footer is then drawn as it always was, with XHL-Core's line (green or red) where
+  XHL-Core is installed.
 - **Fail safe.** On a game build where the footer's code does not match (feature `ui.menu_footer` off), when the copy
   cannot be made or checked, when another module changed the footer's code in a way other than a patched call, before
   Kiln.Ui has counted the mods, or after a fault in Kiln's line, the game's own footer function runs (with XHL-Core's
@@ -274,9 +284,173 @@ no slot, count or entity: a provider for one item's instance passes there.
 
 Limits: 128 registrations per mod (values, lines, slots and change subscriptions together; one more comes back with
 `Ok` false), 16 tooltip lines per detail view (all providers together). Bad arguments throw `ArgumentException`, a row
-that is off throws `KilnUnavailableException` naming it, a refusal comes back as a result. Not done: lines in the game's
-own tooltip (3-5 days of layout work), rows in the inventory header or character sheet, pet bars, values for a chest a
-player only opened (`InstanceData` Holder sync covers the holder only).
+that is off throws `KilnUnavailableException` naming it, a refusal comes back as a result. Not done: rows in the
+inventory header or character sheet, pet bars, values for a chest a player only opened (`InstanceData` Holder sync
+covers the holder only). Lines inside the game's own tooltip: `Ui.Tooltip` below.
+
+### Lines and numbers inside the game's item detail view (Ui.Tooltip, equipment wave)
+`Ui.Tooltip` draws lines into the game's **own** item detail view, and scales the numbers its stats block draws, on
+this client. Native: `tooltip_lines_native` and `tooltip_values` in `kiln_ui_values.h` (since 0.2.0-dev.29.19); the game
+code it uses is mapped in [../re/game-ui.md](../re/game-ui.md) and `sigdb/symbols/client.d/equip-tooltips.json`.
+
+```csharp
+Ui.Tooltip.AddLines(myItem, (in UiValueContext c, in UiItemView v) =>
+    UiTooltipLines.With(new TooltipLine("+12 % fire damage", TooltipColor.Positive),
+                        new TooltipLine("Ember set: 2 of 4", TooltipColor.Epic, Small: true)));
+Ui.Tooltip.AddLines((in UiValueContext c, in UiItemView v) => UiTooltipLines.With(new TooltipLine("Affix: sharp")),
+    TooltipPlace.AfterStats);
+Ui.Tooltip.AddValues(myItem, (in UiValueContext c, in UiItemView v) => UiTooltipScale.By(1.25f));
+```
+
+| Member | What it does | Row (guided check) |
+|---|---|---|
+| `AddLines(item, provider, place)`, `AddLines(provider, place)` | lines after the last vanilla line (`TooltipPlace.End`) or between the stats and the description (`AfterStats`), wrapped at the panel's width as the game wraps its description, in a `TooltipColor` (the game's rarity colours, `Positive`, `Negative`, `Muted`), optionally in the smaller detail size; also listed in Kiln's Item details window | needs `ui.values.tooltip_lines`; drawn in the game's view while `ui.tooltip.lines` is on (`equip.c5` to `equip.c8`) |
+| `AddValues(item, provider)`, `AddValues(provider)` | the stats block's numbers (the main damage, armour or block number and its other values) multiplied by the providers' factors (finite, 0 to 1000 in all) | `ui.tooltip.values` (`equip.c9`) |
+| `InGame` | true while lines are drawn into the game's view | – |
+
+How it behaves:
+- **Inside the scrolled content.** A line is the last child of the detail's scrolled content list (or sits right after
+  the stats block), so the panel's own layout places it under the vanilla lines and its scrollbar reaches it. Lines are
+  built the way the game builds the description: same style and alignment, size "fill the width, fit the height", so
+  the game wraps them; Kiln measures nothing itself.
+- **Fallback, never half drawn.** Lines also go to Kiln's Item details window. They are only in that window where the
+  game's view cannot take them: `ui.tooltip.lines` off or held, a game build Kiln has not measured, a detail screen that
+  does not reach these places (the guided check `equip.c8` lists which do), or after a fault while drawing (one
+  kiln.log line; native drawing then stays off for the session).
+- **Colours.** `Common` .. `Legendary`, `Unique` and `Muted` are the palette entries the game uses for the header's
+  rarity colour. `Positive` is the Uncommon colour and `Negative` the text's own colour until `equip.c7` confirms a
+  better match; a later Kiln can change what they map to without an API change.
+- **Values.** A picture on this client only: the server's numbers do not change and vanilla clients show the game's
+  numbers. The enhancement rows of the stats block are not scaled in this version.
+- **Budgets and threads** are `Ui.Values`' (above): 16 lines per detail view for all line providers together, text
+  kept for the process, providers on the client's main thread inside the game's UI frame, five faults in a row remove
+  a provider. A `Ui.Values.TooltipLines` provider stays in Kiln's window only.
+- **On for every player** (0.2.0-dev.30: nothing is held; `equip.c5` to `equip.c9` are the guided checks a real game
+  confirms). When a row is down (its sigdb feature missing on a game build, or lowered after a fault), `AddLines`
+  still works (Item details window) and `AddValues` throws `KilnUnavailableException`.
+
+**The tooltip probe** (for the guided client session, not for players): `"tooltipProbe": true` (or a key name) in
+kiln.json, or the environment variable `KILN_TOOLTIP_PROBE=1`, draws a fixed test block through the same path, stepped
+through with a key (default F3: off, short, 16 lines, long English, long German, colours, after-stats, values x2), and
+writes `tooltip-probe:` lines to kiln.log (each detail's mode and identity, the sites it passed, rectangles, values).
+
+## The game's inventory slots (0.2.0-dev.30)
+
+`Ui.Inventory` (client only) treats the slots the game draws (backpack, the inventory menu, a chest, a crafting station or
+factory, an NPC's crafting) as something your mod acts on: marks over a slot, and clicks on a slot with the item's
+identity, and (since slice 2) panels beside the backpack and chest screens with the chest's entity. Sample:
+`mods/samples/SlotMarks` (both sides: the client asks, its server half checks the item is the sender's, then the client
+draws the mark; a "Count this chest" panel beside chests). Native: `kiln.ui.inventory` (`native/core/abi/services/kiln_ui_inventory.h`)
+on `kiln.ui.values`' slot frames and kiln.ui's `subscribe_pointer_press`.
+
+```csharp
+// Ctrl+click marks an item; the game never sees the press (no pick-up)
+Ui.Inventory.OnClick(new SlotClickOptions { Modifiers = SlotModifiers.Ctrl }, click =>
+{
+    if (click.ItemEntity.Value == 0) return;           // an empty slot, or a plain stack (no item entity)
+    SendToMyServer(click.ItemEntity);                  // your mod's own message: the server half checks it, then keeps the mark
+    Ui.Inventory.Mark(click.ItemEntity, new SlotMark(new Color(235, 60, 50)));   // the picture, at once
+});
+// watch a click without taking it from the game
+Ui.Inventory.OnClick(new SlotClickOptions { Button = SlotButton.Right, Modifiers = SlotModifiers.Alt, Take = false }, c => Log.Info(c.ToString()));
+// a rule per drawn slot (render thread: a lookup, nothing slow)
+using var tint = Ui.Inventory.MarkWhen(s => myMarked.Contains(s.ClientEntity) ? new SlotMark(Color.Red, SlotMarkStyle.Fill) : null);
+var under = Ui.Inventory.Hovered;                      // the slot under the cursor, or null (for a key binding)
+```
+
+| Member | What | Row |
+|---|---|---|
+| `OnClick(options, handler)` | clicks matching `Button` (Left, Right) and `Modifiers` (exactly: Ctrl alone is not Ctrl+Shift); `Take` (default) keeps the press from the game, its release still reaches it. The handler runs on the client's main thread after the next UI frame. Dispose to stop | `ui.slots.click` |
+| `Mark(item, mark)`, `Unmark(item)`, `ClearMarks()` | a mark on the item's slot wherever the game draws it (it follows the item: move it and the mark moves); `SlotMark(Color, Style = Border/Fill/Corner, Thickness = 3)` | `ui.slots.inspect` |
+| `MarkWhen(rule)` | a mark from a rule asked for each drawn slot (an item mark wins) | `ui.slots.inspect` |
+| `Hovered` | the slot under the cursor in the game's latest UI frame | `ui.slots.inspect` |
+
+**The item's identity.** `SlotClick.ItemEntity` (and `VisibleSlot.ClientEntity`) is the item's entity in this game's
+world. Only items with an item entity of their own have one: weapons, tools, armour, cans (the items `Items.Read` also
+gives an `ItemEntity`). A plain stack (materials, consumables, ammunition: the game keeps it as an item id and a count)
+has none, so a click on it says `ItemEntity` 0 with its `Item` and `Slot.Count`; name such a stack by `Holder`,
+`Slot.InventoryPage`, `Slot.SlotIndex` and `Item`. For an item the server sent (every item in a player's, a chest's or a
+station's inventory) the entity is the server's own id of it: the game creates replicated entities with the server's id
+(`docs/re/network.md`, dossier chapter 05a section 6).
+`Holder`, `Slot.InventoryPage` and `Slot.SlotIndex` say where it was drawn. Send the id to your server half and check
+there that the item is in the sender's inventory or a container they may use (Kiln.Items) before acting: a click is a wish,
+never authority. Kiln Auto Loot's salvage marks work this way.
+
+**Where clicks count (fail closed).** Only on screens with a pointer: the in-game menu (inventory tab), the backpack, the
+player's crafting, a storage chest, a station, an NPC's crafting, a factory. Never in the play view: the hotbar is drawn
+there but a click attacks. Only while Kiln does not have the input (no Kiln menu or screen open) and the cursor is not over
+a Kiln panel. The game's latest slot frame must be this session's and at most 250 ms old. Anything missing: no event, and
+the game gets the click as without Kiln. A click still waiting for its UI frame when the world is left is dropped.
+
+**Marks** are drawn by Kiln's overlay over the game's slots, on the same screens and on the play view's hotbar, in this
+player's game only. Two mods marking one item: one of the marks shows (no layering in this version).
+
+**Coordinates.** Kiln maps the game's UI units to pixels from the game's own canvas, viewport and pixels per unit, scaled
+to the window when their sizes differ. This mapping is read from the game's code, not yet confirmed in a running game: the
+client checks `ui-hooks.c1` (marks on the slots at two resolutions and UI scales) and `ui-hooks.c2` (clicks on the right
+slot) do that (`tools/client-checks`). Until they pass both rows say "game test pending".
+
+**Multiplayer and vanilla.** Everything happens in one player's game: the server and other players see nothing unless your
+mod sends a message. A vanilla client or server is unaffected.
+
+**C (native plugins).** `kiln.ui.inventory` v1: `subscribe_clicks(owner, &filter, fn, user, &reg)` (`KilnUiSlotClickFilter`
+`{size, button 1/3, mods, flags KUI_CLICK_TAKE}`; `fn(const KilnUiSlotClick*)` with the slot record and the screen),
+`slot_at(owner, x, y, target_w, target_h, &hit)` (x < 0: the cursor), `mapping(owner, target_w, target_h, &map)` (pixel =
+offset + unit * scale), `unsubscribe`. Registrations share kiln.ui.values' budget. kiln.ui's `subscribe_pointer_press` (a
+size-guarded tail at byte 1040, after `chat_completion`'s slot at 1032) gives any native plugin the left and right presses
+over the game's UI with a take-or-pass answer.
+
+### Panels beside the backpack and chest screens, and the chest's entity (0.2.0-dev.30)
+
+A mod can dock a Kiln panel (Kiln.Ui's own widgets, the player's look, KilnText) beside the game's backpack screen and a
+storage chest's screen while they are open, and learns which of them is open with the chest's entity. Sample:
+`mods/samples/SlotMarks` (a "Count this chest" button its server half answers). The quick path to a "Salvage" button
+next to a chest.
+
+```csharp
+using var panel = Ui.Inventory.AddPanel("Auto Loot", (ui, screen) =>
+{
+    if (screen.Container.Value == 0) { ui.TextDisabled("..."); return; }   // the game names the chest a frame later
+    if (ui.Button("Salvage marked")) channel.SendToServer(new SalvageRequest(screen.Container.Value));
+}, new InventoryPanelOptions { Screens = InventoryScreens.Chest, Width = 240 });
+
+Ui.Inventory.ScreenChanged += (before, now) => Log.Info($"{before?.Kind} -> {now?.Kind} {now?.Container}");
+InventoryScreen? open = Ui.Inventory.Screen;           // Backpack or Chest, with Hud and Container; null: neither
+EntityId target = Ui.Screens.Current.Target;           // the same entity on any chest-style screen (chests, factories)
+```
+
+| Member | What | Row |
+|---|---|---|
+| `AddPanel(title, draw, options)` | a panel drawn every overlay frame (render thread) while a screen of `options.Screens` (Backpack, Chest, All) is open and `When` says so, docked beside the slots the game drew: `Side` Right (default; to their left when there is no room), Left, Below; level with the chest's slots on a chest screen. `Width`, `Style`, `Theme`, `Interactive` (its buttons take the mouse while it is over the panel) as for crafting panels. Dispose to remove | `ui.inventory.panels` |
+| `Screen` | the open `InventoryScreen(Kind, Hud, Container)` or null (any thread) | `ui.screens` |
+| `ScreenChanged` | `(before, now)` on the game's UI thread after the frame in which a backpack or chest screen opened, closed or changed (another chest; the chest's entity named a frame late). `InventoryScreenChangedEvent` on the event bus for the tick thread | `ui.screens` |
+| `GameScreen.Target` | the entity a chest-style screen is about: a storage chest's (StorageChest, CommerceProductChest) or a production station's (FactoryCrafting) | `ui.screens` |
+
+**Which screens.** Backpack: the backpack screen, or the in-game menu while it draws the player's slots (not its crafting
+tab, map or journal). Chest: a storage chest (HUD StorageChest) and the commerce-product chest that uses the same screen.
+Not: stations and factories (use `Ui.Crafting.AddPanel` with `AtFactories`), loot chests, the play view, any other screen.
+
+**The chest's entity.** `InventoryScreen.Container` is the entity the game's chest screen reads the other inventory from
+(play data `+0x2c50` on client 26430625; `docs/re/game-ui.md`). For a chest the server sent, that is the server's id of
+it, so your server half can find it: `Items.Read(chest)` for its contents, `World.Position(chest)` for where it is. Check
+there that it is a container (not a player: `Players.IsPlayer`), near the sender, and one they may use, before acting. A
+panel click is a wish, never authority. `EntityId.None` for the frame or two before the game names it; `ScreenChanged`
+fires again when it does.
+
+**Fail closed.** The panel is drawn only when Kiln knows where the game drew the slots this frame (the slot frame of
+`ui.slots.inspect` is this session's, at most 250 ms old, of the same screen, with a usable viewport). On an unknown screen,
+an unmeasured build, an older kiln-core (no `screen_view`) or a frame Kiln cannot read, there is no panel and the game's
+screen is as without Kiln. Placement uses the same pixel mapping as marks: game test pending (client checks
+`ui-hooks.c5` to `ui-hooks.c7`).
+
+**C (native plugins).** `kiln.ui.inventory` v2 appends `screen_view(owner, target_w, target_h, &view)` (size-guarded at byte
+40; the table is 48 bytes): `KilnUiScreenView` with `kind` (`KUI_VIEW_BACKPACK`, `KUI_VIEW_CHEST`), `hud_screen`,
+`container`, the local player, `KUI_VIEW_HOLDER_MATCH` (a drawn slot's holder is the container), and the rectangles of all
+drawn slots, the player's and the container's in the target's pixels. kiln.ui's `screen_target` now also answers on the
+two chest screens (before 0.2.0-dev.30: factories only).
+
+**Not in this version:** a button inside the game's chest screen where Enlarge sits (drawn by the game's own button
+renderer), the game's own slot colours (marks are drawn over the slot), the gamepad's focused slot.
 
 ## Windows (immediate mode)
 ```csharp
@@ -400,6 +574,23 @@ settings > Language**, under Look, changes it at once. For Chinese, Japanese and
 of that language group (never shipped); Kiln's texts are English until it is loaded, and stay English if it cannot be.
 Mods' own texts are theirs (`Mod.Text`, `UiText`) and follow the game's language. For translators and Kiln's developers:
 [translating-game.md](translating-game.md).
+
+**Following Kiln's language** (`KilnLanguage`, Kiln.Api, since 0.2.0-dev.29.19). A mod whose pages sit beside Kiln's and
+should read in the same language (a settings panel in the Kiln menu's style, a shared core for several mods) asks Kiln
+instead of the game:
+```csharp
+var lang = KilnLanguage.Current;           // "zh-cn", "en-us": ui.language's tag, or the game's while it is "auto"
+var text = Context.Locale.GetIn(KilnLanguage.OverlayInEnglish ? "en" : lang, "panel.title");
+KilnLanguage.Changed += () => Relabel();   // another language, the English fallback switched, or a reload
+```
+- `Current` is a lower-case tag; `Setting` is `ui.language` as set (`"auto"` or the tag). On a dedicated server both
+  follow its game language (`"en-us"`).
+- `OverlayInEnglish` is true while Kiln's overlay shows its texts in English because it cannot draw `Current`'s script
+  yet (the game's Chinese, Japanese, Korean or Cyrillic font is loading, or could not be loaded). Text a mod draws in the
+  overlay in that language shows as boxes meanwhile; follow Kiln and show English too.
+- `Changed` runs on the thread that made the change (often the overlay's render thread, or the window thread for the
+  in-game setting), after the new values are in place. Keep it short. A handler that throws is logged under its mod and
+  does not stop the others; a mod's handlers are dropped when it unloads.
 
 ### Mod themes
 ```csharp
@@ -646,6 +837,66 @@ b.OnRelease = …;  b.IsDown;  b.TakePresses();  b.Consume = false;  b.WhileCapt
 - `kiln.menu` (default **Insert**) opens the Kiln menu. Its toggle is native, so it works without the managed host.
   Escape closes the menu.
 
+### Key and mouse presses as they come (`KeyInput`, since 0.2.0-dev.29.19)
+For a mod that reads presses itself rather than giving an action a key: its own "press a key" field, a key it handles by
+state, a shortcut layer of its own. An action the player should be able to remap on the Keys page stays a
+`KeyBindings.Register` binding.
+```csharp
+var listener = KeyInput.Listen(p =>
+{
+    if (!p.Down || p.Repeat || p.Captured || p.TextInput) return false;  // play only, presses only
+    if (!_capturing) return false;
+    _capturing = false;
+    Save(p.Chord.ToString());                 // "Ctrl+K", "Backquote", "Mouse4", "WheelUp": the names keybinds.json uses
+    return true;                              // keep this press from the game
+});
+if (!listener.Ok) Context.Log.Info(listener.Reason!);  // no Kiln overlay here (a dedicated server)
+listener.Dispose();                           // or let the mod's unload end it
+```
+- `Listen` is kiln.ui's key subscription (`subscribe_key_ex` in `kiln_ui.h`). With `KeyListenFlags.Mouse` (the default)
+  it gets the middle and side mouse buttons and the wheel's notches too, as key bindings do; `KeyListenFlags.None` gets
+  keyboard keys only. Next to an older kiln-ui.dll (a hand-mixed install) it gets keys only and `listener.Mouse` is false.
+- It runs on the game's window thread while the message is handled, before the game gets the press: keep it short.
+  Returning true keeps the press from the game. Every listener and Kiln's own key bindings get every press whatever
+  another returned; kiln.ui keeps a press from the game when any of them asked.
+- Every press comes, also while the Kiln menu, a Kiln screen or a Kiln text field has the input: `KeyPress.Captured` and
+  `KeyPress.TextInput` say so. `Down` is false for a release; a wheel notch is a press with no release. `Mods` holds
+  Ctrl, Shift and Alt.
+- `KeyPress.Code` (and `KeyInput.PressCode(vk, scan)`) is the code the Keys page stores: a punctuation key by its place
+  on a US keyboard, found by its scan code on any layout, every other key by its virtual key. `KeyPress.Chord` is the
+  press as the Keys page saves it, and its `ToString()` parses back with `KeyChord.TryParse` and `KeyBindings.Rebind`.
+- The listener belongs to the calling mod (kiln.ui is told whose it is) and ends when the mod unloads. A handler that
+  throws is logged under its mod and keeps nothing. `Listen` returns a listener that is not `Ok`, with a `Reason`, where
+  there is no Kiln overlay; it never throws for that.
+
+### XHL-Core (Kiln): from reflection to public members (0.2.0-dev.29.19)
+XHL-Core (Kiln) 0.1.0 reads a few Kiln internals by name. They stay as they are (Kiln.Ui.Tests' XhlKilnCoreReflectionTests
+pins each name and shape), so the published 0.1.0 keeps working; on 0.2.0-dev.29.19 and later the public members below do
+the same jobs and are covered by the API promise (`PublicAPI.Shipped.txt`, never removed before API 1.0.0):
+
+| Read today by reflection | Public member |
+|---|---|
+| `Kiln.KilnText.Language` (static, non-public) | `KilnLanguage.Current` |
+| `Kiln.KilnText.Gated` | `KilnLanguage.OverlayInEnglish` |
+| `Kiln.KilnText.Changed` (event `Action`) | `KilnLanguage.Changed` (event `Action`; guarded per handler, dropped at the mod's unload) |
+| `Kiln.UiNative.T` with `Table7.SubscribeKeyEx` (flag `KILN_UI_KEYS_MOUSE`), the owner from `ModContext.Owner` | `KeyInput.Listen(onKey, KeyListenFlags.Mouse)`; the owner is the calling mod, filled in by Kiln |
+| `Kiln.UiNative.Table.Unsubscribe` | `KeyListener.Dispose()` (also done at the mod's unload) |
+| `Kiln.KeyNames.PressCode(vk, scan)` | `KeyInput.PressCode(virtualKey, scanCode)`, or `KeyPress.Code` / `KeyPress.Chord` inside a listener |
+| `KeyBinding.Category`, `KeyBinding.Description` | already public (read them directly) |
+
+`ModContext.Owner` stays internal: it is the mod's native owner handle, and a mod holding it could register, and revoke,
+native subscriptions in any service as that mod. Its one use here, the key subscription, is now `KeyInput.Listen`, which
+passes the owner itself. A mod that needs a native service Kiln has no managed member for should ask for the member (below)
+rather than for the handle.
+
+**Where new APIs come from.** Hooks and call sites a mod author has found in the game (as XHL has for his native mods) are
+welcome as proposals for Kiln's general API, so that every mod can use them: a GitHub issue on
+[frostdev-ops/kiln](https://github.com/frostdev-ops/kiln/issues) naming the game function or data, how to find it (a
+pattern or the code around it), and what a mod would do with it. Kiln adds such a site as a sigdb feature with its own
+capability row ([services/caps.md](services/caps.md)), then a typed event or service member in the Kiln.* assembly it
+belongs to (a UI site in Kiln.Ui, a gameplay site in Kiln.Gameplay, and so on). Until then an advanced mod reaches a site
+itself through `Kiln.Hooks` ([hooks.md](hooks.md)).
+
 ## The Kiln menu (the mod manager)
 A page in the player's look (the game's colours and its UI font unless the player chose another look under **Kiln
 settings > Look**, [Looks and themes](#looks-and-themes-020-dev2916)), opened by the menu key (Insert), the main menu's and the
@@ -686,11 +937,19 @@ of key hints. Tab / Shift+Tab or LB / RB switch sections; arrows or the d-pad mo
 - **Network**: Kiln.Network's status, the server's Kiln version, warnings and mods, and clients and channels when hosting.
 - **Keys**: every binding, with remap and reset.
 - **Overlay**: resolution, scale, frame cost, error, a test toast.
+- **Graphics** (0.2.0-dev.29.18): Kiln's own frame cap, DLSS render preset and render scale, and a readout of frame rates
+  and the upscaler in use, with what they do now and what they step aside for: [graphics.md](graphics.md).
 
 Where the list comes from (`ModCatalog.cs`, internal; usable on a dedicated server, which has no menu):
 `Mods.All` for Kiln mods; `<game>/kiln/state/` for the rest: `boot.json` (chain DLLs, Kiln plugins, the profile in use),
 `native.json`, and each engine plugin's file (`emf.json`, `eml.json`, `set.json`, `greeneye.json`, `flame.json`,
-`shroudtopia.json`, `shroudlink.json`, `ember.json`; contracts.md 5.9). ShroudForge's packages come from the profile and
+`shroudtopia.json`, `shroudlink.json`, `ember.json`; contracts.md 5.9). A profile entry of an engine that reads its mods
+only from its own folder in the game (ShroudForge's configured mods folder, SET's `shrouded_engine_tweaks/mods`;
+kiln-manage `engine_mods::placed_folder`) is shown as the copy that engine runs, `<folder>/<id>`, when Kiln's marker
+there names the entry's kind and id or the player's own folder there holds the same package (`EngineRunFolder`,
+0.2.0-dev.29.18): its details' FOLDER line names that folder, and the ShroudForge panel reads and writes the settings
+there, which profile updates keep. In Copy path mode the profile names a second copy under `kiln/profiles/` that the
+engine never reads; before, the page showed and edited that one. ShroudForge's packages come from the profile and
 its configured mods folder; its host state comes from `shroudforge.json`, with actual per-mod activation/errors and
 reported effect state/detail from SF's own `state.json` runtime section (matching PID, running, heartbeat from this
 process start and no older than 30 s). A mod reports `waiting`, `no-target`, `no-change`, `write-confirmed` or `write-failed`; ShroudForge's
@@ -723,7 +982,9 @@ folder and add the mod with Add mods in the Kiln launcher."; `ModCatalog.HandEml
 come from the profile and mods folder, with loader state from `enshwick.json`; a folder there that another kind owns
 (a profile entry of another kind, a `native-plugin.ini`, a `mod.json`, or Kiln's placement marker of another kind) is
 not listed as Enshwick's. XHL companions (the profile's `mods.xhl`, and folders with XHL-Core's `native-plugin.ini` in
-`<game>/mods/`) are their own group: "placed for XHL-Core; Kiln does not load it", with the XHL-Core prerequisite, never
+`<game>/mods/`, but not a ShroudForge package there while ShroudForge reads that folder: Kiln's marker says
+shroudforge, or its `extended.mod.json` is ShroudForge's own and not an EML package's switch; ShroudForge's own DLL
+loader loads that file's DLL, so the package is one ShroudForge row, 0.2.0-dev.29.18) are their own group: "placed for XHL-Core; Kiln does not load it", with the XHL-Core prerequisite, never
 Loaded, since Kiln never runs them and nothing reports whether XHL-Core did. A switched-off entry whose folder is still
 in `<game>/mods/` (XHL, EML mods a DLL reads there, Kiln's copy for Enshwick) says that a loader reading that folder may
 still run it. A mod the
@@ -882,26 +1143,69 @@ Kiln.Ui follows [the API contract](modding/contract.md) as far as it applies. It
 
 Before Vulkan hooks are installed, Kiln writes a versioned record to
 `kiln/state/overlay-start.guard`. It records hooks installed, instance seen, device seen,
-swapchain created, and completes after the first successful present with the overlay drawn.
+swapchain created, the overlay's first draw, and completes once the overlay's frames have been presented for a while: 60 presents with the
+overlay drawn, or a 20 second window after the first in which the game presented at least 60 frames (watched window
+after window while it presents fewer, as during loading). Since 0.2.0-dev.29.18; before, the first present with the
+overlay drawn completed it, so a game that died a few frames later was not caught. When the overlay's drawing turns
+off during a session because its own work failed ([below](#when-the-overlay-fails-during-a-session); not for a present
+from a queue Kiln does not draw on, which comes before any work of its own), the record is armed again: a game that
+closes before it has presented 60 more frames in a 30 second window counts as an interrupted attempt. A game that goes
+on presenting does not, and neither does a normal exit (exit code 0). kiln.ui sees that in its `on_unload`, one of
+Kiln's own exit steps: under Wine, and since 0.2.0-dev.29.18 on native Windows too (only kiln.json
+`"unloadAtExit": "off"` turns it off). That the game's own quit on Windows ends with exit code 0 is not confirmed yet;
+where it does not, a quit during the overlay's first drawn frames (about a second at 60 frames a second), or in the 30
+seconds after it failed, counts as an interrupted attempt: one start without the overlay, then it tries again. After
+the normal exit nothing writes the record any more, so a failure or a first draw on another thread in the moment
+before the process ends cannot arm it again.
 Each record is written (a temporary file, then a rename) before the stage goes on, and forced to the disk
 on a thread of its own, never on the game's present call: a game that dies loses nothing it already
 wrote.
-A game that ends before that frame, however it ends, counts as an interrupted attempt (closing
-the game while it is still loading does too: the cost is one start without the overlay).
+A game that ends before then in any other way (a crash, a hang that was killed) counts as an interrupted attempt: the
+cost is one start without the overlay.
+
+A start whose overlay draws nothing yet (Kiln's menu and mods' windows closed) counts as fine once the game has
+presented 60 frames through Kiln's hooks in a 30 second window after its swapchain, or exits normally; the overlay's
+first draw arms the record again. Since 0.2.0-dev.30.2 those windows repeat until one has its 60 frames: a start whose
+first frames stall (ReShade's Vulkan layer kept with `--keep-vulkan-layers` compiles its effects there, a slow first
+load) counts as fine once the game presents normally. Before, the one window after the swapchain was all: such a start
+stayed an attempt for its whole session, and any end of it that was not a normal exit read as a death at the overlay's
+start. The overlay's first draw is the first present on which Kiln's drawing does work of its own (its Vulkan
+resources, ImGui, its frame, its submit), not a present Kiln got no further on (no swapchain or device of its own seen,
+a queue it does not draw on). A start that died after its swapchain was made but before that first draw (stage
+"swapchain created") did none of the overlay's own work: since 0.2.0-dev.30.2 it guards the one start after it and
+never counts towards the lock below; kiln.log says "before Kiln's overlay drew anything".
 
 On the next start only overlay drawing steps aside. Keys, native game-menu rows and
 `kiln.ui.tick` remain available. The drawing capability rows in
 `kiln/state/capabilities.json` carry the reason. The log says:
 
-> ui: the game closed during the last start while Kiln's overlay was starting (stage: instance seen); the overlay's drawing stays off for this start; key bindings and the Mods menu still work
+> ui: the game closed during the last start while Kiln's overlay was starting (stage: instance seen); the overlay's drawing stays off for this start, and the next start tries it again; key bindings and the Mods menu still work
 
 The stage varies. When detected it adds:
 “NVIDIA Streamline (a frame generation mod) is installed; it wraps the same graphics calls”.
 This is a likely conflict, not proof of the crash's cause.
 
-Once a guarded start has run for a minute, the next start tries the overlay again once
-(the log says so; automatic Streamline protection still takes precedence). A second interrupted attempt at the same stage keeps it off. To re-enable it, close the
-game and delete `kiln/state/overlay-start.guard`. Removing a detected graphics wrapper
+The start after a guarded start tries the overlay again, however long the guarded start ran and however it ended. With
+the drawing off Kiln installs none of its Vulkan hooks, so the guarded start arms no attempt of its own, and its end
+(a quick quit from the main menu, or a crash) says nothing about the overlay. The warning above says "the next start
+tries it again" unless something else keeps the drawing off then too (automatic Streamline or OptiScaler protection,
+`KILN_UI_OVERLAY=0`, kiln.json `ui.overlay`); those still take precedence. Until 0.2.0-dev.29.18 a guarded start had to
+run a minute for that: one that ended sooner left the next start guarded too, and so on at every start, until the
+record was deleted. Such a record gets its new attempt at the first start of 0.2.0-dev.29.18. The record keeps the
+first interrupted attempt: a second one at the same stage (any stage but "swapchain created") keeps the drawing off at every start (a normal exit does not
+change that) until the record is deleted or Kiln is updated. Since 0.2.0-dev.29.19 the record notes the Kiln
+version that wrote it, and a record of another version (an update, also going back to an older one) or one without
+a version (every Kiln before 0.2.0-dev.29.19) starts fresh at the next start: its attempts, its lock and its
+wrapper-change recovery are cleared, and `kiln.log` says "Kiln was updated since the record was written". A Kiln
+before 0.2.0-dev.29.19 cannot read the new record; it starts without it (it tries the overlay) and logs that it could
+not understand the file. To re-enable it, close the
+game and delete `kiln/state/overlay-start.guard`. The record is one line, `4 <phase> <stage> <failed stage> <failures>
+<wrapper retry> <Kiln version> <wrappers>` (`-` for no version; format 3, from 0.2.0-dev.29.19, has no first-draw
+stage, its stage 5 is the frames presented; format 2, before 0.2.0-dev.29.19, has no version; a Kiln before
+0.2.0-dev.30.2 cannot read format 4 and starts without the record);
+phase 0 is complete, 1 an attempt (the overlay starting, or a start that died during it),
+2 a guarded start, 3 a guarded start that exited normally, 4 locked; stage 0 is before hooks, 1 hooks installed,
+2 instance seen, 3 device seen, 4 swapchain created, 5 the overlay's first draw, 6 the overlay's frames presented. Removing a detected graphics wrapper
 also permits a new attempt, as does adding or replacing one. The guard compares the paths,
 sizes and the first and last 64 KiB of `sl.interposer.dll`, `dxgi.dll`, `ReShade64.dll`,
 `opengl32.dll`, and `powrprof.dll` directly in the game folder or its `Streamline/` folder, and OptiScaler's DLL when
@@ -916,6 +1220,54 @@ may need the guard deleted manually. Unknown/unreadable records permit normal st
 and do not prevent startup. This guard does not make Streamline and the overlay compatible.
 
 
+## When the overlay fails during a session
+
+Since 0.2.0-dev.29.18 the first failure of the overlay's own Vulkan work turns its drawing off for the rest of the game
+session, and every present after it goes on as the game made it. Kiln does not try again in that session; the next
+start does. The failures are: the overlay's submit fails, its resources or ImGui cannot be made, a Vulkan call of
+ImGui's backend reports the device lost or `VK_ERROR_UNKNOWN`, the overlay faults, and a present that comes from a
+queue Kiln cannot draw on. kiln.log says it once:
+
+> ui: Kiln's overlay drawing is off for the rest of this game session: its Vulkan submit failed; vkQueueSubmit of the overlay's frame returned -13 (VK_ERROR_UNKNOWN) on queue family 0. The game's frames go on as the game made them (Kiln hands each present on untouched); key bindings and the Mods menu still work, Kiln's windows and HUDs do not show. The next start tries the overlay again
+
+From then on it is the [drawing-off](#frame-generation-mods-and-drawing-off) state for this session: nothing of
+Kiln's takes the game's keyboard or mouse (an open Kiln menu closes; a Kiln text field, the Mods page or a wheel lets
+go at once, so key bindings see no typing and Escape reaches the game), the Mods entry shows "Mods: the overlay's
+drawing is off: <reason>", `Ui.Status.Error` carries the same text, and the drawing
+capability rows (`ui.windows`, `ui.draw`, `ui.menu_page`, `render.draw`, `kiln.screen`) turn unavailable with it.
+
+The present queue. Kiln's frame is submitted on the queue the game presents from, in the same call. Kiln draws only on
+a queue the game got (`vkGetDeviceQueue`, `vkGetDeviceQueue2`) whose family has graphics. Frame generation presents
+from queues of its own: OptiScaler's (its nightly builds since October 2026) adds them to the game's device while it is
+made, a present queue in the family with the fewest abilities that can present (a compute or transfer family on most
+GPUs) for FSR frame generation, a graphics queue of Streamline's for DLSS frame generation, and its thread presents both
+the game's frames and the generated ones there, through Kiln's present hook. A queue handed out while the device is
+being made is a tool's (the game can only ask once its `vkCreateDevice` returned), unless the game asks for it too
+afterwards; Kiln does not draw on a tool's queue, whatever its family. Until 0.2.0-dev.29.18 Kiln did not know such a
+queue and drew for the game's first queue family: its submit (and ImGui's texture upload before it) went to a queue of
+another family. In the player's report it failed with `VK_ERROR_UNKNOWN` and the game died right after (inbox 80; the
+most likely cause, not yet confirmed on his PC). Now kiln.log says how many queues a tool handed out when the device is
+made, Kiln draws nothing on them, and says so with the reason "frame generation presents the game's frames from its own
+queue". Pre-overlay subscribers (kiln_ui.h) are not called for such a present either.
+
+A present from a queue Kiln did not see the game get (another tool's patch on `vkGetDeviceQueue` that does not pass
+the call on to Kiln's, say), or saw handed out only while the device was being made, does not turn the drawing off by
+itself: Kiln looks it up once among the queues the game asked for when it made its device (the `VkDeviceCreateInfo`
+Kiln's `vkCreateDevice` hook saw), with the real `vkGetDeviceQueue`. One of those is the game's own and is drawn on with
+its own family, as before 0.2.0-dev.29.18. kiln.log says so once ("ui: the game presents with a queue Kiln did not see
+it get; ... it is there: the game's own"). A queue a tool added under Kiln is not among them (OptiScaler adds create
+infos for its own queues, or raises a family's count), and Kiln does not draw on it. A device Kiln did not see being
+made (taken over at its swapchain) has no create info to look in: there Kiln draws only with the queues it saw handed
+out, as before.
+
+The semaphores. When Kiln's frame goes in, its submit waits on the game's semaphores and signals Kiln's own, and the
+present waits on Kiln's. When it does not go in, or its submit fails, the present goes on with the game's own
+semaphores, untouched: Vulkan leaves the semaphores of a submit that failed for lack of memory as they were (or
+reports the device lost). `VK_ERROR_UNKNOWN` comes with no such promise, which is why Kiln checks the queue before it
+submits and draws no more after any failure. A fault after Kiln's submit went in still presents on Kiln's semaphore.
+Each semaphore is signalled once and waited on once (`native/services/ui/vk_present.h`, host test
+`tests/vk_present_test.cpp`).
+
 ## Frame generation mods and drawing off
 
 When `sl.interposer.dll` is loaded, or installed directly next to the game or under
@@ -923,14 +1275,25 @@ When `sl.interposer.dll` is loaded, or installed directly next to the game or un
 any Vulkan hooks. No first crash is needed. The log explains the choice and the override.
 
 - `KILN_UI_OVERLAY=0`: drawing off; keep keys, native menu rows, game UI state and UI ticks.
+- kiln.json `"ui": {"overlay": "off"}` (since 0.2.0-dev.29.18; the launcher's Settings, the kiln.json card, "Overlay"):
+  the same as `KILN_UI_OVERLAY=0`, for Windows, where Steam's launch options cannot set an environment variable for
+  the game. `"auto"`, the default, lets Kiln decide as above. Read at the game's start (top level only, not in a side
+  section). `KILN_UI_OVERLAY`, where it is set, wins over it. The Mods entry then reads "Mods: the overlay's drawing is
+  off: turned off in Kiln's settings (kiln.json ui.overlay)".
 - `KILN_UI_OVERLAY=1`: try drawing even with Streamline or a guarded/locked record. This
   can crash; the crash guard still records this attempt.
 - Unset (or another value): automatic choice, including crash-guard protection.
 - `KILN_UI_DISABLE=1`: turn the whole UI service off; wins over both overlay switches.
 
-These are environment switches. kiln.ui does not read a kiln.json setting for them.
-For Steam, set the variable in the game's launch environment using your platform's usual
-method, and remove the old `KILN_UI_DISABLE=1` workaround to keep keys and menus.
+The `KILN_UI_*` switches are environment variables; `ui.overlay` is the one kiln.json setting among them.
+For Steam on Linux, set the variable in the game's launch options (`KILN_UI_OVERLAY=0 %command%`); on Windows use
+`ui.overlay`. Remove the old `KILN_UI_DISABLE=1` workaround to keep keys and menus.
+
+With the drawing off for any of these reasons, or stepping aside for Streamline or OptiScaler, kiln.log names it in one
+line at the start ("ui: Kiln's overlay drawing steps aside for NVIDIA Streamline (sl.interposer.dll, a frame generation
+mod): ... the Mods entry shows the game's own Mods rows ..."), and the Mods entry and the menu key never open Kiln's
+menu: they toggle the entry's caption ("Mods: <reason>") in the game's own menu. A frame generation queue found during a
+session names OptiScaler or Streamline in its line too when one of them is installed.
 
 Drawing off preserves the game's Mods entry and mods' native menu rows, including scrolling,
 keyboard/mouse/wheel bindings and native input subscriptions, game screen/language/crafting
@@ -953,6 +1316,21 @@ This mode avoids Kiln's Vulkan interception. It does not make Streamline and Kil
 compatible. Prefer automatic drawing off for frame generation; use the force-on switch only
 when intentionally testing coexistence.
 
+## When Kiln's menu does not show
+
+Since 0.2.0-dev.30.2 the Mods entry (and the menu key) also checks that Kiln's menu reaches the screen. When it opens
+Kiln's menu in the overlay (or the Mods page in the main menu) and no frame of the overlay is drawn and presented within
+about a second (longer while the overlay is still making a frame, its first with ImGui and the menu starting, up to five
+seconds), Kiln's menu falls back to the game's own Mods rows, as with the drawing off: the entry reads
+"Mods: Kiln's overlay did not appear", nothing of Kiln's takes the game's input for the menu, and kiln.log says once:
+
+> ui: Kiln's menu was opened, but no frame of Kiln's overlay was drawn and presented in the 1000 ms after (the game presented 40 frames through Kiln's hooks meanwhile): the Mods entry shows the game's own Mods rows instead, as with the overlay's drawing off, and opens Kiln's menu again once a frame of the overlay was presented
+
+Another layer on the game's presents can keep Kiln's frames from the screen (reported with ReShade's Vulkan layer kept).
+Once a frame of the overlay was drawn and presented since (a toast, a mod's HUD), the next click opens Kiln's menu in
+the overlay again. Before 0.2.0-dev.30.2 nothing checked: the Mods entry opened a menu that could not be seen, and it
+held the game's mouse and keys until Escape. Host test: `native/services/ui/tests/overlay_guard_host_test.cpp`.
+
 ## OptiScaler
 
 [OptiScaler](https://github.com/optiscaler/OptiScaler) (an upscaler and frame generation tool; a player reported
@@ -962,18 +1340,28 @@ decides about its overlay's drawing before any Vulkan hook, from OptiScaler's ow
 | OptiScaler.ini | Kiln's overlay drawing |
 |---|---|
 | `[Menu] OverlayMenu=auto` or `true` (OptiScaler's default), or no OptiScaler.ini | off, on its own, as for Streamline |
-| `[FrameGen]` with an `FGInput` and an `FGOutput` other than `nofg`/`auto` | off, on its own |
+| `[FrameGen]` with an `FGInput` and an `FGOutput` other than `nofg`/`auto`, with its menu on or off | off, on its own |
 | `[Menu] OverlayMenu=false`, no frame generation | on, next to OptiScaler |
+
+Frame generation needs both keys: OptiScaler drops an input without an output, and makes none for an output without an
+input. `[FrameGen] Enabled` does not matter: it only switches frame generation while it runs, and its own present queue
+and stand-in swapchain are there with `Enabled=false` too.
 
 `KILN_UI_OVERLAY=1` and `KILN_UI_OVERLAY=0` win over both, as everywhere. Drawing off keeps what
 [drawing off](#frame-generation-mods-and-drawing-off) keeps: keys, the Mods entry (its caption then reads
-"Mods: the overlay's drawing is off: OptiScaler is installed"), mods' native menu rows and `kiln.ui.tick`. The
+"Mods: the overlay's drawing is off: OptiScaler's own overlay menu is on", or "... OptiScaler's frame generation is
+on"), mods' native menu rows and `kiln.ui.tick`. The
 capability rows and `Ui.Status.Error` carry the same reason. kiln.log says which file is OptiScaler, what its ini sets,
 and how to get Kiln's overlay:
 
-> ui: OptiScaler is installed (winmm.dll) with OverlayMenu=auto (on), no frame generation in OptiScaler.ini: it draws its own overlay in the game's presents and opens its menu with Insert, so Kiln's overlay drawing steps aside (keys and the Mods menu still work). For Kiln's overlay, set OverlayMenu=false under [Menu] in OptiScaler.ini (OptiScaler's menu and frame generation go off with it), or KILN_UI_OVERLAY=1 to try both at your own risk
+> ui: OptiScaler is installed (winmm.dll) with OverlayMenu=auto (on), no frame generation in OptiScaler.ini: it draws its own overlay in the game's presents and opens its menu with Insert, so Kiln's overlay drawing steps aside (keys and the Mods menu still work). For Kiln's overlay, set OverlayMenu=false under [Menu] in OptiScaler.ini and leave FGInput and FGOutput under [FrameGen] at auto (OptiScaler's menu and frame generation off, its upscaling on), or KILN_UI_OVERLAY=1 to try both at your own risk
 
-Why (from OptiScaler's source, release v0.9.5, commit 2df7ad9f; not yet seen on a PC with OptiScaler):
+With its menu off and frame generation set:
+
+> ui: OptiScaler is installed (winmm.dll) with OverlayMenu=false, frame generation set (FGInput=upscaler, FGOutput=fsrfg) in OptiScaler.ini: with frame generation the game's frames are presented from OptiScaler's own queue and swapchain, where Kiln cannot draw, so Kiln's overlay drawing steps aside (keys and the Mods menu still work). For Kiln's overlay, set FGInput and FGOutput under [FrameGen] in OptiScaler.ini to auto (frame generation off, its upscaling stays), or KILN_UI_OVERLAY=1 to try at your own risk
+
+Why (from OptiScaler's source: release v0.9.5, commit 90d9568d, and master 2df7ad9f of 2026-11-17, which its nightly
+builds come from; not yet seen on a PC with OptiScaler):
 
 - OptiScaler's profile for `enshrouded.exe` loads `vulkan-1.dll` in OptiScaler's own DllMain, through ntdll
   (`LdrLoadDll`, not `LoadLibraryExW`), and patches its exports there. When OptiScaler loads with the game, as a proxy
@@ -984,12 +1372,18 @@ Why (from OptiScaler's source, release v0.9.5, commit 2df7ad9f; not yet seen on 
   wait semaphores with its own; when its menu fails it returns `VK_ERROR_OUT_OF_DATE_KHR` without presenting.
 - Both menus open with **Insert**. OptiScaler subclasses the game window and hooks raw input, the keyboard state and
   the cursor; while its menu is open it keeps keyboard and mouse from the game, and from Kiln.
-- With frame generation on, the game draws into FFX's stand-in swapchain and the real presents come from FFX's own
-  thread, past other overlays' hooks on purpose.
+- Frame generation for Vulkan is in master since 2026-10-13 (and so in the nightlies), not in 0.9.5. It is made with the game's device
+  whenever `[FrameGen]` names an input and an output, with OptiScaler's menu on or off: OptiScaler.ini's own line
+  under `[Menu]` ("without this option OptiScaler will disable all FG features") no longer holds for it. It adds
+  queues of its own to the device, the game draws into FFX's stand-in swapchain, and FFX's thread presents the game's
+  frames and the generated ones from its own present queue, through the present function Kiln handed out. Kiln cannot
+  draw there ([When the overlay fails during a session](#when-the-overlay-fails-during-a-session)): should frame
+  generation be on in a way OptiScaler.ini does not show, Kiln sees that queue at its first draw and turns its drawing
+  off for the session before it submits anything.
 
-With `OverlayMenu=false` OptiScaler makes none of the device, present or window patches (and its frame generation is
-off: OptiScaler.ini says so), so Kiln's overlay works as it does without OptiScaler. Its upscaling still works; set
-it up in OptiScaler.ini instead of its menu.
+With `OverlayMenu=false` and no frame generation OptiScaler makes none of the device, present or window patches, so
+Kiln's overlay works as it does without OptiScaler. Its upscaling still works; set it up in OptiScaler.ini instead of
+its menu.
 
 Detection, by contents and never by a name alone (`dxgi.dll`, `winmm.dll`, `version.dll` and `dbghelp.dll` are ReShade's,
 ShroudForge's, EML's and Shroudtopia's names too): a file under one of OptiScaler's names (those four, `d3d12.dll`,
@@ -1007,5 +1401,9 @@ present hook below OptiScaler's whatever the order of patches (hook the device's
 does, instead of the loader's export and the `vkGetDeviceProcAddr` wrapper), follow the semaphore OptiScaler substitutes,
 share the Insert key, and stay out of FFX's present thread with frame generation on. That is a rework of `vk.cpp`'s
 Windows path that no test can check without OptiScaler in a real game.
+
+OptiScaler also hooks DLSS and has its own frame limiter: Kiln's own graphics tools (frame cap, DLSS settings) step
+aside while it is installed, whatever its ini says; the readout stays where Kiln's overlay draws
+([graphics.md](graphics.md#living-next-to-other-tools)).
 
 The additive window size-constraints slot after v7 is described in the [UI service reference](services/ui.md).

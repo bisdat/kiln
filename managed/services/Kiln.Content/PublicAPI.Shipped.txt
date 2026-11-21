@@ -420,6 +420,7 @@ Kiln.GameDataEntry.Set(string! path, int value) -> void
 Kiln.GameDataEntry.Set(string! path, long value) -> void
 Kiln.GameDataEntry.Set(string! path, string! value) -> void
 Kiln.GameDataEntry.SetJson(string! path, string! json) -> int
+Kiln.GameDataEntry.TooltipValues(string! list = "uiValues") -> System.Collections.Generic.IReadOnlyList<Kiln.TooltipValue!>!
 Kiln.GameDataEvent
 Kiln.GameDataEvent.Duration.get -> System.TimeSpan
 Kiln.GameDataEvent.Duration.set -> void
@@ -478,6 +479,57 @@ Kiln.GameDataTexts.Equals(Kiln.GameDataTexts? other) -> bool
 Kiln.GameDataTexts.GameDataTexts(string? Name = null, string? Description = null) -> void
 Kiln.GameDataTexts.Name.get -> string?
 Kiln.GameDataTexts.Name.init -> void
+Kiln.GearArmorKind
+Kiln.GearArmorKind.Blunt = 4 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Cut = 2 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Fire = 5 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Ice = 6 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Lightning = 8 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Magical = 1 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Physical = 0 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Pierce = 3 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Shroud = 7 -> Kiln.GearArmorKind
+Kiln.GearDamageKind
+Kiln.GearDamageKind.Blunt = 2 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Cut = 0 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Explosion = 12 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Fire = 3 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Healing = 8 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Ice = 4 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Lightning = 6 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Metal = 11 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Pierce = 1 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Poison = 7 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Shroud = 5 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Stone = 10 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Wood = 9 -> Kiln.GearDamageKind
+Kiln.GearStats
+Kiln.GearStats.Armor(Kiln.GearArmorKind kind) -> int
+Kiln.GearStats.Block.get -> double
+Kiln.GearStats.Block.set -> void
+Kiln.GearStats.Damage(Kiln.GearDamageKind kind) -> double
+Kiln.GearStats.HasArmor.get -> bool
+Kiln.GearStats.HasDamage.get -> bool
+Kiln.GearStats.Item.get -> string!
+Kiln.GearStats.Level.get -> int
+Kiln.GearStats.MaxLevel.get -> int
+Kiln.GearStats.MaxStack.get -> int
+Kiln.GearStats.MaxStack.set -> void
+Kiln.GearStats.Power.get -> int
+Kiln.GearStats.Power.set -> void
+Kiln.GearStats.PowerAt(int level) -> int
+Kiln.GearStats.Rarity.get -> Kiln.ItemRarity
+Kiln.GearStats.Rarity.set -> void
+Kiln.GearStats.Reset() -> int
+Kiln.GearStats.Rolled.get -> bool
+Kiln.GearStats.Rolled.set -> void
+Kiln.GearStats.SetArmor(Kiln.GearArmorKind kind, int armor) -> void
+Kiln.GearStats.SetDamage(Kiln.GearDamageKind kind, double value) -> void
+Kiln.GearStats.SetLevels(int lowest, int? highest = null) -> void
+Kiln.GearStats.Socket.get -> bool
+Kiln.GearStats.Socket.set -> void
+Kiln.GearStats.Speed.get -> double
+Kiln.GearStats.Speed.set -> void
 Kiln.ItemDefinition
 Kiln.ItemDefinition.<Clone>$() -> Kiln.ItemDefinition!
 Kiln.ItemDefinition.BaseOn.get -> string!
@@ -657,6 +709,37 @@ Kiln.TextsStatus.Seconds.init -> void
 Kiln.TextsStatus.Source.get -> string?
 Kiln.TextsStatus.Source.init -> void
 Kiln.TextsStatus.TextsStatus(bool Loaded, string? Source, string? Build, int Count, double Seconds, string! Reason) -> void
+Kiln.TooltipValue
+Kiln.TooltipValue.<Clone>$() -> Kiln.TooltipValue!
+Kiln.TooltipValue.Deconstruct(out uint LocaId, out string? Label, out int Raw, out double Value, out string! Display, out Kiln.TooltipValueFormat Format, out bool IsSigned, out bool IsScaled) -> void
+Kiln.TooltipValue.Display.get -> string!
+Kiln.TooltipValue.Display.init -> void
+Kiln.TooltipValue.Equals(Kiln.TooltipValue? other) -> bool
+Kiln.TooltipValue.Format.get -> Kiln.TooltipValueFormat
+Kiln.TooltipValue.Format.init -> void
+Kiln.TooltipValue.IsScaled.get -> bool
+Kiln.TooltipValue.IsScaled.init -> void
+Kiln.TooltipValue.IsSigned.get -> bool
+Kiln.TooltipValue.IsSigned.init -> void
+Kiln.TooltipValue.Label.get -> string?
+Kiln.TooltipValue.Label.init -> void
+Kiln.TooltipValue.LocaId.get -> uint
+Kiln.TooltipValue.LocaId.init -> void
+Kiln.TooltipValue.Raw.get -> int
+Kiln.TooltipValue.Raw.init -> void
+Kiln.TooltipValue.TooltipValue(uint LocaId, string? Label, int Raw, double Value, string! Display, Kiln.TooltipValueFormat Format, bool IsSigned, bool IsScaled) -> void
+Kiln.TooltipValue.Value.get -> double
+Kiln.TooltipValue.Value.init -> void
+Kiln.TooltipValueFormat
+Kiln.TooltipValueFormat.Duration = 2 -> Kiln.TooltipValueFormat
+Kiln.TooltipValueFormat.DurationMilliseconds = 3 -> Kiln.TooltipValueFormat
+Kiln.TooltipValueFormat.Float = 4 -> Kiln.TooltipValueFormat
+Kiln.TooltipValueFormat.Normal = 0 -> Kiln.TooltipValueFormat
+Kiln.TooltipValueFormat.Numberless = 5 -> Kiln.TooltipValueFormat
+Kiln.TooltipValueFormat.Percentage = 1 -> Kiln.TooltipValueFormat
+Kiln.TooltipValueFormat.Unknown = 6 -> Kiln.TooltipValueFormat
+const Kiln.Content.GearCapability = "content.gear" -> string!
+const Kiln.Content.TextCapability = "content.text" -> string!
 const Kiln.ContentSync.ChannelName = "kiln:content" -> string!
 const Kiln.ContentSync.ChannelVersion = "1" -> string!
 override Kiln.ContentChangedEvent.ToString() -> string!
@@ -703,6 +786,7 @@ override Kiln.GameDataField.ToString() -> string!
 override Kiln.GameDataTexts.Equals(object? obj) -> bool
 override Kiln.GameDataTexts.GetHashCode() -> int
 override Kiln.GameDataTexts.ToString() -> string!
+override Kiln.GearStats.ToString() -> string!
 override Kiln.ItemDefinition.Equals(object? obj) -> bool
 override Kiln.ItemDefinition.GetHashCode() -> int
 override Kiln.ItemDefinition.ToString() -> string!
@@ -727,6 +811,9 @@ override Kiln.RecipeStack.ToString() -> string!
 override Kiln.TextsStatus.Equals(object? obj) -> bool
 override Kiln.TextsStatus.GetHashCode() -> int
 override Kiln.TextsStatus.ToString() -> string!
+override Kiln.TooltipValue.Equals(object? obj) -> bool
+override Kiln.TooltipValue.GetHashCode() -> int
+override Kiln.TooltipValue.ToString() -> string!
 static Kiln.Content.Apply(string! json, string? source = null) -> Kiln.ContentReport!
 static Kiln.Content.ApplyFile(string! path) -> Kiln.ContentReport!
 static Kiln.Content.Arsenals.get -> Kiln.GameDataRegistry!
@@ -739,6 +826,9 @@ static Kiln.Content.GameData(Kiln.GameDataSection section) -> Kiln.GameDataRegis
 static Kiln.Content.GameDataAvailable.get -> bool
 static Kiln.Content.GameDataDefinitions() -> System.Collections.Generic.IReadOnlyList<Kiln.GameDataDefinition!>!
 static Kiln.Content.GameDataStatus() -> string!
+static Kiln.Content.Gear(Kiln.ContentEntry! item) -> Kiln.GearStats!
+static Kiln.Content.Gear(Kiln.ItemId item) -> Kiln.GearStats?
+static Kiln.Content.Gear(string! item) -> Kiln.GearStats?
 static Kiln.Content.ItemData.get -> Kiln.GameDataRegistry!
 static Kiln.Content.Items.get -> Kiln.ContentRegistry!
 static Kiln.Content.Loot.get -> Kiln.ContentRegistry!
@@ -757,6 +847,12 @@ static Kiln.Content.StackGuard.get -> bool
 static Kiln.Content.StackGuard.set -> void
 static Kiln.Content.Status() -> Kiln.ContentStatus?
 static Kiln.Content.Templates.get -> Kiln.GameDataRegistry!
+static Kiln.Content.Text(System.Guid locaTag) -> string?
+static Kiln.Content.Text(string! locaTag) -> string?
+static Kiln.Content.Text(uint locaId) -> string?
+static Kiln.Content.TextAvailable.get -> bool
+static Kiln.Content.TextLanguage.get -> string?
+static Kiln.Content.TooltipValues(Kiln.ItemId item) -> System.Collections.Generic.IReadOnlyList<Kiln.TooltipValue!>!
 static Kiln.Content.UnregisterSection(string! name) -> bool
 static Kiln.ContentConflict.operator !=(Kiln.ContentConflict? left, Kiln.ContentConflict? right) -> bool
 static Kiln.ContentConflict.operator ==(Kiln.ContentConflict? left, Kiln.ContentConflict? right) -> bool
@@ -853,6 +949,8 @@ static Kiln.Texts.Status.get -> Kiln.TextsStatus!
 static Kiln.Texts.TagOf(System.Guid tag) -> uint
 static Kiln.TextsStatus.operator !=(Kiln.TextsStatus? left, Kiln.TextsStatus? right) -> bool
 static Kiln.TextsStatus.operator ==(Kiln.TextsStatus? left, Kiln.TextsStatus? right) -> bool
+static Kiln.TooltipValue.operator !=(Kiln.TooltipValue? left, Kiln.TooltipValue? right) -> bool
+static Kiln.TooltipValue.operator ==(Kiln.TooltipValue? left, Kiln.TooltipValue? right) -> bool
 ~override Kiln.ContentSyncStatus.Equals(object obj) -> bool
 ~override Kiln.ContentSyncStatus.ToString() -> string
 ~override Kiln.ContentValue.Equals(object obj) -> bool

@@ -25,6 +25,14 @@ dev.21's engine-hook host interface (`724a884`) and dev.20's archive-reader/publ
 `1.7.9 kiln.63b8862` (`version.json` build `kiln.63b8862`), and includes the component's notices and licenses. The dev.20 mixed-server
 evidence is separate from the older observations below; neither is a client rendering or player-interaction test.
 
+**ShroudForge 1.8.1 (0.2.0-dev.30, 2026-11-21).** The bundled runtime is upstream's 1.8.1 dev line (branch `1.8.1` at
+`d35cea18`, tag `v1.8.1-dev.44571709069`) merged into the fork's `kiln` (`2df1de68`, 1.7.9 with every Kiln patch) with
+`kiln/sync-upstream.sh 1.8.1`: fork branch `kiln-1.8.1` (a branch `kiln/1.8.1` cannot exist beside `kiln`), pin `f1b777b5`,
+`version.json` version `1.8.1`. Runtime ABI 12, the four bootstrap exports and the client (26430625) and server (26430253)
+profiles are unchanged. The merge's six conflicts and what each kept: the fork's `kiln/UPSTREAM-PATCHES.md`. The adapter
+accepts 1.8.0 and 1.8.1 beside 1.7.8 and 1.7.9, bundled and installed (`src/contract.h`). See section 11 for what 1.8.1
+adds next to Kiln.
+
 ## 1. How ShroudForge loads (source facts)
 
 | Step | Where (upstream source) | What happens |
@@ -144,14 +152,43 @@ pass, `Committed 3965 changed resources`. With auto-loot-plus (capability `expor
 `exports.enabled` on, SF runs the pass again at every start by design (`export_pass_needed`); without it the second
 start finds the pass current. kiln-eml's own copy of EML (`gpl/kiln-eml/eml/mod-loader-lua`) still has the old check.
 
+**One failing startup mod no longer costs the others** (fork branch `kiln-sf-retry`: `42b59dd`, `c20c0c5`, `1ab36f8`,
+`33c0d06`, `4b1ab16`, `1073446`, `dc8b392`, `e625c2f`, `430e287`, `16de6f2`, `2df1de6` on `ec75fb6`; Kiln
+0.2.0-dev.29.18). Upstream puts the game data back after a failed startup pass
+and starts the game with none of the packages the pass writes (a `patch` part, or `export` without a runtime part, and
+the EML packages it runs). In inbox 79 one package's own check failed ("Missing base localization: keenglish", after a
+third-party EML mod had changed that data) and the player lost every startup mod. Now, when the error came from one
+package's own entrypoint (`LuaModRunner::run` names it, `PregameModError`), the pass runs once more
+(`asset_preparation/retry_without_failed_mod.rs`): from the clean baseline, as every pass starts, with that package
+treated as switched off (`ModEnvironment::without`), so the packages that need it drop out too. Once only, no search.
+Not retried, upstream's behaviour unchanged: an I/O error anywhere in the error's chain (`PregameModError::io`, read
+from the error itself, so in any language and also without an OS code, such as a short read of a replaced archive), an
+error text with `(os error N)` or access denied (an I/O error the API or the package put into words), and every failure
+no package raised (the working baseline, staging, the type model, commit and publication, a replaced `.kfc`). When the
+second pass fails as well, no startup package loads, as before. SF's record (state.json `assets`) gets two optional
+fields: `skipped` (`id`, `name`, `version` and the error on one line without the Lua traceback, for the package, then
+for the packages left out with it: "needs <id>, which failed in the pregame pass") and, after a second failure,
+`retryError`; `error` stays the first failure's, so a reader that knows neither field reads the record as before.
+A pass that ran without a package is `applied` with the configuration's own fingerprint: the next start keeps the data
+and the record while nothing changes; switching the package off, or any other change, runs the pass again. SF's log
+(`startup-assets`, W, so kiln.log's `[sf]` lines, as warnings from 0.2.0-dev.29.18: the mirror reads the level from
+the start of ShroudForge's line, `[W <date> <time> UTC]`, `native/plugins/shroudforge/src/log_level.h`) says `ShroudForge: <name> (<id> <version>) failed in the pregame pass
+(<error>); running the pass once more without it`, then `...; started the game without it, the other N mods loaded` or
+`ShroudForge: the pregame pass failed again without <name> (<error>); the game starts without the mods of the pregame
+pass`. SF's in-game Modloader page shows the package failed (`asset-preparation-skipped`), the packages left out with it
+blocked, and the pass partial. The
+launcher's side is in 5.7 below. Tests (Wine, `cargo xwin test`): `kiln_retry_tests.rs` runs whole passes on a small
+archive pair with made-up packages (7), plus `retry_without_failed_mod.rs` (2), `name_failing_mod.rs` (2, I/O errors
+raised through a real Lua call), `plan_mod_load_order.rs` (1) and `read_configuration_status.rs` (1). Not yet run against a real game client.
+
 ### 5.1 `native/plugins/shroudforge` → `kiln/plugins/kiln-shroudforge.dll` (MIT)
 
 The runtime choice comes first. **Bundled**: `kiln/plugins/shroudforge/`, the default. **Installed**: `<game>/shroudforge/`,
 used when `kiln.json` has `"shroudforge": {"useInstalled": true}` (the launcher Settings toggle "Use my installed
 ShroudForge"; env `KILN_SHROUDFORGE_RUNTIME=installed|bundled` overrides). It logs which one runs
-(`ShroudForge runtime: bundled 1.7.9 kiln.63b8862 from ...` for the current pin). When both are present it says how to switch. A chosen
+(`ShroudForge runtime: bundled 1.8.1 kiln.<commit> from ...` since dev.30). When both are present it says how to switch. A chosen
 runtime that is missing, unsafe, fails to load, has an unsupported version or lacks compatible exports falls back to
-the other one with a warning. Supported unversioned bootstrap contracts are SF 1.7.8 and 1.7.9; the native DLL must
+the other one with a warning. Supported unversioned bootstrap contracts are SF 1.7.8, 1.7.9, 1.8.0 and 1.8.1; the native DLL must
 provide all five required exports and ABI 12. Missing `version.json` is incompatible. The runtime directory and its
 children cannot be reparse points; ancestors above that authorized root are the player's Steam/Wine layout and are
 not judged. Resolved paths must stay inside the root; Wine file links are excluded by the installer. DLL loads use
@@ -516,6 +553,20 @@ A `failed` record of the last start becomes
 - the support report's finding `sf-startup-failed` with the record's line under "The last start" (ShroudForge's words
   are redacted whole before they are put on one line and cut).
 
+When Kiln's ShroudForge ran the pass once more without the package it failed in and that failed too (dev.29.18, 5.0),
+the sentence adds, after the first error, "It tried again without <mod>, and that failed too: <second error>"; the
+report's line adds "; again without <id>: <second error>". Without those fields the text is as before.
+
+A pass that failed in one package and ran again without it (the record `applied`, with `skipped`) is a warning, not a
+failure: the other mods loaded. `sf_startup::skipped` reads it, and it counts even when the record is older than Kiln's
+last start, because ShroudForge keeps an `applied` record while the next starts' passes are unchanged, as long as Kiln's
+adapter says it hosted ShroudForge in that start and its preparation returned (`startupPrepared`); a fresh record counts
+as a failed one does. A package switched off since is not named (the next pass runs without it anyway). It becomes
+`engine_status` `startupSkipped` on ShroudForge's row (a warning naming the package, its error, how many other mods of
+the pass loaded, and to turn it off or check it for a clash with another mod), the same line and dialog on the Deck's
+Home ("one mod left out, the others loaded", or "N mods left out" with those that need it), and the report's finding
+`sf-startup-skipped` (Warning) with the record's line under "The last start".
+
 For this fault (Wine or Proton, `os error 5`, a ShroudForge build without the fix, Kiln's own ShroudForge with the fix
 installed) the sentence names the cure: take `dbghelp` and `winmm` out of `WINEDLLOVERRIDES` in the game's Steam launch
 options and keep `dinput8=n,b`; Kiln then hosts its own ShroudForge for the profile's ShroudForge mods. When Kiln hosted
@@ -802,3 +853,86 @@ serial shutdown and the host key feed (`KILN_SF_ONLY=<prefix>` runs some cases o
 `enshrouded.exe` and archive and never runs them:
 `real_keys.py <tests bin> <kiln-shroudforge.dll> <out>/shroudforge-build/shroudforge <game client folder>`. A source-archive release also needs the reviewed fork's `kiln/build.sh`
 changes committed and its Kiln gitlink updated by the maintainer; the review itself does neither.
+
+## 11. ShroudForge 1.8.1 next to Kiln (dev.30)
+
+What upstream 1.8.1 adds that touches Kiln, checked when the bundled runtime moved to it:
+
+- **`runtime.patch.glider_pitch`** (native code patch, used by the bundled SF Unlimited Flight 1.3.0, off by default): on
+  the first `runtime.patch.available`/`set_enabled` call it finds the glider pitch clamp in actor_rotation's live code
+  (`movss xmm0,[rip+X]` loading 5 degrees, then the clamp to 80 degrees), and `set_enabled(true)` writes 8 bytes there
+  (`E9` to a near trampoline that loads -1.57 rad, 3 `NOP`s). The site is rva `0x26f6fe` in the client
+  (26430625) and `0x817fe` in the server (26430253): 0xF3 bytes before Kiln's glider steering mid hook
+  (`rules/GlideSteer`, the roll-rate load, `0x26f7f1` / `0x818f1`), so the two never write the same bytes; no other
+  sigdb symbol is within 0x800 bytes. Static check: `glider_site_check.py` (dev30 wave, out/sf-181). **In 0.2.0-dev.30 the
+  patch is unavailable under Kiln** (lab `dev30-sf181`, server 26430253, 2026-11-21): Kiln's glider steering mid hook
+  went into actor_rotation at boot, and SF's live code reader refuses a procedure with a relative jump out of the game
+  image (`target()` in `resolve_original_call_graph.cpp`), so `ResolveNamedSystemCode("actor_rotation")` failed
+  and `runtime.patch.available` answered false (nothing written). **Since 0.2.0-dev.30.1** the mid hook goes in only
+  when a rule set first asks for `GlideSteer`, on the tick after the first world (`steer.cpp` `tick()`); until then
+  actor_rotation stays unhooked and glider_pitch resolves (lab: `runtime.patch.glider_pitch resolved: the pitch clamp at
+  rva 0x817fe`, enable, disable and re-enable succeed with `kiln-rules.dll` loaded). Once a player steers with Kiln
+  (`GlideSteer`, also Kiln's Creative Mode glider), SF refuses its next enable cleanly
+  (`actor-rotation-code-changed`); a patch already enabled stays, the bytes are disjoint, and Kiln's step replaces the
+  pitch change after SF's clamp for that player. The fork logs why the patch is unavailable
+  (`runtime.patch.glider_pitch unavailable: ...`, branch `kiln-1.8.1-glider`).
+- **The fork's whole-file check under Kiln** (independent of glider_pitch): up to 0.2.0-dev.30 it refused the exe for
+  Kiln's entry hook on `content/LootItems` (a call-free leaf without unwind data, taken for code of the function
+  before it, rva 0x93d310), and the first read of a function holding one of Kiln's mid hooks (items/CreatePide) would
+  have refused it as well; ShroudForge then read every procedure live, where an entry-detoured one is unreadable (the
+  detoured call-graph walk needs the file). Since 0.2.0-dev.30.1 (fork `5bb133f0`) the check admits a leaf
+  function's entry detour (`admit_leaf`: 16-byte aligned, a boundary of the gap's linear decode after padding,
+  target outside the image) and refuses a mid-hooked function's file read without switching file reads off (lab:
+  `executable file accepted ... beside 54 entry detour(s), 17 interior jump(s)`, no refusal after it).
+- **Unified Tweaks 2.1.2 and its Glider Flight 1.0.1** (Nexus 185; lab boot above, their DLLs off): the packages load
+  under the bundled 1.8.1 (the startup pass with `unifiedemltweaks`, `unified-tweaks-live` and `glider-flight`
+  active, no ShroudForge error). They use no 1.8 DLL bridge, `runtime.patch` or player permissions. Glider Flight's own
+  DLL patches the same 5-degree clamp itself (and three diving sites, none within 0x40 bytes of a Kiln sigdb site), so
+  it and SF Unlimited Flight exclude each other.
+- **Steam P2P channels 65534 (Modloader server mirroring, server log mirror) and 65535 (health)**: ISteamNetworkingMessages,
+  not the game's socket. Kiln's own frames use the game's channel 12 (`kiln.net`), so they do not meet. The server log
+  and archive mirror answer only an admin session (a password checked against `userGroups` in
+  `enshrouded_server.json`).
+- **Loader and mod version check between client and server**: the server compares each SF client's report (loader version
+  and mod versions) with its own and logs and shows the differences; it does not kick. A Kiln-hosted runtime reads its
+  version from SF's own `version.json` path, which a bundled component does not have, so both sides of a Kiln host and a
+  Kiln client report the same fallback version; a client with an installed SF of another version shows a
+  `loader-version` line in SF's log.
+- **Vanilla startup mode** (`vanillaClient`/`vanillaServer` in SF's Modloader settings): read only by SF's own
+  `winmm.dll` bootstrap (`shroudforge_prepare_vanilla`); Kiln's adapter never calls it, so the switch has no effect
+  when Kiln hosts SF.
+
+## 12. Kiln's interpreter (kiln mode): the release hold and its guided checks
+
+A ShroudForge mod runs one of three ways: hosted (Kiln starts the bundled runtime, the default), installed (Kiln starts
+the player's own ShroudForge copy) or kiln mode (Kiln's own interpreter, `kiln.json` `"shroudforge.backend": "kiln"`;
+players' page [kiln mode](shroudforge-kiln-mode.md)). The backend is frozen once per start (`kiln/state/launch.json`);
+a package that cannot run whole in kiln mode is skipped with its reason and the loud warning.
+ShroudForge's own loader in the game folder sets both Kiln backends aside.
+
+Kiln mode ships held: the client gate's row `kiln-sfi.interpreter` (`native/core/gates/sfi.json`)
+keeps it off until its seven guided checks have passed in a real game; `"preview"` in `kiln.json` lifts it for the
+pass. `kiln-sfi.sf18` (anything that needs ShroudForge 1.8) stays held in every build by the release policy's veto,
+whatever `"preview"` says. kiln-manage reads the same list (`crates/kiln-manage/src/sfi_release.rs`) for the
+launcher's ShroudForge card and the launch plan's warnings; neither reads the verdicts: the row goes when a commit that
+records the pass removes it.
+
+The checks are `mods/tests/client-pass/Sfi.cs` (area "Kiln's interpreter", how to play them:
+[client pass](client-pass.md#kilns-interpreter)). Each asserts what the interpreter wrote for this start
+(`kiln/state/sfi.json`: this game process, backend `kiln`, phase `running`; `kiln-sfi: Runtime initialized` in
+`kiln.log`) before it asks its question, and ends with skip in any other start. Verdicts go to
+`kiln/state/client-checks.json` like every guided check's; `tools/client-checks/report.py --rows` shows them under
+"Kiln's interpreter (kiln-sfi.interpreter)".
+
+| Check | Confirms |
+|---|---|
+| `sfi-ui-page` | ShroudForge's mod-menu key (F9) opens Kiln's ShroudForge page (`sfi.json` `menu.by`: `kiln`), listing this start's mods with the interpreter's state; it closes again; no Modloader window |
+| `sfi-ui-settings` | a setting changed on the page is kept, applies at the next start, and the mod uses it after a restart |
+| `sfi-ui-actions-notices` | an action button's "Requested" and one reaction; a mod's notification readable; nothing written to `<game>/shroudforge` |
+| `sfi-save-sensitive` | a save-sensitive package (Quiver & Spellbook 0.8.2) off after a start with it on: its `save-sensitive-off` warning, named before Play |
+| `sfi-three-surface-warning` | the same warning before Play, in the game (banner, footer, DO NOT SAVE badge, pause-menu marker) and in `sfi.json` |
+| `sfi-warning-accessibility` | the dialog before Play with the keyboard alone and at large text size; the in-game banner readable |
+| `sfi-backend-roundtrip` | kiln, hosted, kiln on one game: hosted runs every mod again, settings kept, the save-sensitive package carried through the hosted start, no mod in two folders of `<game>/mods` |
+
+What these checks do not cover: native Windows (the pass is played under Proton), a joined or dedicated server in kiln
+mode, mod shortcuts (not wired in kiln mode yet) and the ECS/world calls that answer unavailable in this build.

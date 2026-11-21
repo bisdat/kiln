@@ -27,6 +27,8 @@ Capabilities (sigdb features, `server.d/stations.json`, the client's hosted worl
 | `stations.output_sources` | `Stations.SetOutputSource`, and fills taking from opted-in stations' finished items ([Station outputs as crafting stock](#station-outputs-as-crafting-stock), since 0.2.0-dev.29.17) |
 | `stations.craft_sources` | the same opt-in, as the last source of a player's craft ([Station outputs in a craft](#station-outputs-in-a-craft)); lowered at the first world when kiln.rules' payment hook is not in (Creative Mode runs, kiln-rules.dll missing) |
 | `stations.craft_ui` | a Kiln client's crafting menu counts those outputs (`client.d/stations-craft-ui.json`); lowered when kiln.rules' crafting-count hook is not in. A vanilla client has neither |
+| `stations.stock_ui` | a Kiln client's ingredient rows (the crafting menu's and the station screen's "available") count those outputs ([The station screen's fill button](#the-station-screens-fill-button), `client.d/stations-fill-ui.json`, since 0.2.0-dev.29.19); hooked only once a Kiln server's craft-stock snapshot is on. A vanilla client has none |
+| `stations.fill_ui` | a Kiln client's station screen offers its "+1" / "+10" fill when only those outputs can cover it ([The station screen's fill button](#the-station-screens-fill-button), `client.d/stations-fill-ui.json`, since 0.2.0-dev.29.19); its hook goes in only once a Kiln server's craft-stock snapshot is on. A vanilla client has none |
 
 Where: the server world, on its tick thread: a dedicated server, or a game client while it hosts. A client that joined
 another's world has no server world: `Stations.Available` is false there and every call throws `KilnUnavailableException`.
@@ -201,13 +203,13 @@ The rules:
 player's bag and the Magic chests cannot cover but the base's opted-in outputs can is run as Kiln's fill (the same
 recipe, category choices and amount, all or nothing, the player's bag first) and the game's own is canceled; kiln.log
 says so. Every other press runs as the game's. Kiln keeps the game's checks: the player must stand in the station's base
-and have the right to access inventories. But the game's client **disables** its fill button when the player's bag and the
-Magic chests alone cannot cover the fill (a dry run that does not see the outputs:
-[the client code](../../re/stations.md#103-c7-the-station-screens-fill-button)), and Kiln does not change that screen. So a
-fill that needs station outputs cannot be started with that button: it lights only when the bag and the chests cover
-the fill, and then the game's own fill runs. Station outputs serve `Stations.Fill` (a mod's fill: a command, a Kiln
-menu) and crafts. Whether the fill hotkey still sends a press the button refuses is C7; if it does, the server runs it as
-Kiln's fill.
+and have the right to access inventories. The game's client **disables** its fill buttons ("+1", "+10") when the
+player's bag and the Magic chests alone cannot cover the fill (a dry run that does not see the outputs:
+[the client code](../../re/stations.md#103-c7-the-station-screens-fill-button)). A **Kiln client** (0.2.0-dev.29.19)
+enables them for such a fill when the server says it can run it with station outputs; see
+[The station screen's fill button](#the-station-screens-fill-button). On a vanilla client the buttons light only when
+the bag and the chests cover the fill, and then the game's own fill runs. Station outputs also serve `Stations.Fill` (a
+mod's fill: a command, a Kiln menu) and crafts.
 
 **Kept with the save.** An opt-in is kept beside the save (kiln.saves' entity attachments, the station known by its
 template and place, as `EntityData`) with the mod that set it, and comes back after a restart while that mod is loaded
@@ -324,7 +326,39 @@ connection has none). Its menu shows the game's counts and does not offer a craf
 it does send (its count said the bag and the chests cover it) is paid as for anyone: when the server finds the chests
 short after all, the outputs still finish it.
 
-The station screen's fill button is not part of this (see [Fill from chests](#station-outputs-as-crafting-stock), C7).
+### The station screen's fill button
+A production station's screen (a forge, a smelter, a charcoal kiln, the alchemist's, the cooking and the other
+production stations: every screen of a station with a `FactoryStation`) has a "+1" and a "+10" fill. The game's client
+enables each only when its own dry run of that fill goes through on its view of the bag and the Magic chests; a fill
+only station outputs can cover stays greyed and is never sent.
+
+A **Kiln client** (since 0.2.0-dev.29.19, row `stations.fill_ui`) helps it while the craft-stock snapshot above is on
+(the same session: a Kiln server, a station of the player's base opted in that holds outputs, the right to access the
+base's inventories). Then:
+- kiln-items hooks the game's UI query for those buttons, on demand: the first time a snapshot is on, never before (no
+  hook with a vanilla server or while nothing is lent). kiln.log on the client: `stations: the station screen's fill
+  query ... hooked`.
+- A fill the game refused for **missing materials** is noted (the station, the recipe, its category choices), and the
+  client asks the server about it on `kiln:craftstock` (only the new ones, again after 5 s while unanswered).
+- The server answers how many more crafts the button's own press would fill with station outputs now: the same rules as
+  the press (the player in the station's base, the right to access inventories, another station of that base opted in;
+  the player's bag first, then the Magic chests, then the outputs; the station's room and the recipe's water counted by
+  the plan), again whenever that number changes.
+- The client's query then says "can fill" for up to that many crafts: "+1" lights when it covers one more craft, "+10"
+  when it covers ten. Every other answer stays the game's: a station without room, a missing station inventory, a fill
+  the bag and the chests already cover, another recipe or other category choices. kiln.log: `stations: the station
+  screen's fill of N craft(s) of recipe 0x... at station S is offered: the server's fill covers it with station
+  outputs`.
+- The press is the game's own action. The server checks it again when it comes and runs it as Kiln's fill (see
+  [above](#station-outputs-as-crafting-stock)); a press that no longer fits (the outputs were taken meanwhile) runs as
+  the game's, which refuses it, and nothing moves.
+
+The ingredient rows' **"available"** counts (row `stations.stock_ui`, the same widget on the station screen and in the
+crafting menu) follow the same snapshot: for an item the server's snapshot names, a Kiln client shows the greater of the
+game's own count (the bag and the Magic chests it sees) and the server's (bag, Magic chests and opted-in outputs). Other
+screens that count items (building costs, for example) keep the game's counts: station outputs do not pay those.
+kiln.log: `stations: the ingredient rows' available count ... hooked` once, then `stations: an ingredient's available
+count for item 0x... shown a -> b with station outputs`. A **vanilla client** keeps the game's buttons and counts.
 
 ## Stop, resume, select
 ```csharp
@@ -496,12 +530,31 @@ opted in: kiln.gameplay's craft hook asked for`; a Kiln client `stations: the cr
 outputs when a Kiln server sends them`. A line `stations: station outputs in a craft are off: ...` or `the crafting menu
 does not count station outputs here: ...` means a check below cannot pass; note its reason.
 
-- **C7** The station screen's fill button (step 1). A forge (or smelter) whose recipe needs the lent item, the bag and
-  the Magic chests holding none of it, the lending station opted in. Expected: the fill button is greyed and a click does
-  nothing (the game's client disables it: [the client code](../../re/stations.md#103-c7-the-station-screens-fill-button)).
-  Then try the fill hotkey on that screen. Note whether anything happens. If it fills: the server's kiln.log has
-  `kiln.stations: player P's fill of station S ran as Kiln's fill with station outputs: ...` and the lending station kept
-  its queued inputs. If nothing happens: expected, the button needs the bag and the chests; record it.
+- **C7** The station screen's fill buttons (step 1, a Kiln client, 0.2.0-dev.29.19). A forge whose recipe needs the lent
+  item (2 charcoal + 2 metal scraps: a charcoal kiln with 20 finished charcoal opted in, the bag and the Magic chests
+  holding no charcoal and enough scraps). Open the forge's screen, pick the recipe. Expected: the charcoal row's
+  "Available" reads 20 (client kiln.log `the ingredient rows' available count ... hooked` and `... shown 0 -> 20 with station
+  outputs`), the scraps row shows the bag and the chests as before, and "+1" and "+10" light up
+  (client kiln.log: `the station screen's fill query ... hooked` once, then `the station screen's fill of 1 craft(s)
+  ... is offered` and the same for 10). Press "+1": the forge takes 2 charcoal, the kiln's finished stack is 2 lower
+  (18), its queued logs unchanged; the server's kiln.log has `kiln.stations: player P's fill of station S ran as Kiln's
+  fill with station outputs: ...`. Now "+10" greys within about two seconds (18 charcoal cover 9 crafts), "+1" stays
+  lit and the charcoal row's "Available" follows (18). Take the kiln's stack down to 5 by hand: "+1" still lights. Remove the scraps from the bag and the chests: both
+  grey (the outputs cannot cover the scraps). Also try the fill hotkey on that screen and note what it does.
+- **C16** The same as C7 on a Kiln client joined to a dedicated server with Kiln, and on the hosting client.
+- **C17** A vanilla client (no Kiln) on C7's server and base: the buttons stay greyed for the fill only the outputs
+  cover and "Available" shows the bag and the chests only; a fill the bag and the chests cover works as always. On a
+  Kiln client, the building menu's costs for charcoal still show the bag and the chests only.
+- **C18** Other station kinds, each with a recipe that needs an item an opted-in station makes and the bag and the
+  chests short of it: a smelter, the alchemist's station, a cooking station (if one of its recipes takes such an item), a
+  spinning wheel or loom. Expected: as C7 on each (the "Available" count and the buttons). Also the crafting menu at a
+  workbench with a recipe that takes the lent item: its ingredient row's "Available" includes the outputs. A recipe with water: the button lights only when the base's water
+  covers it too. Record the station kinds tried.
+- **C19** Stale answers. On C7's forge with "+1" lit, take the kiln's charcoal out by hand, then press "+1" at once.
+  Expected: nothing moves from the forge's side beyond what the game's own fill would do (the server's kiln.log has the
+  player's fill as the game's, or `not even with station outputs` at debug level), and within about two seconds the button
+  greys again and "Available" drops. Close the screen: client kiln.log `crafting stock cleared`; reopen it: the buttons and
+  the counts follow the new stock.
 - **C8** Hosting, Kiln client. Open the crafting station's menu and pick the recipe. Expected: its count and craft button
   allow one craft that the bag and the chests alone could not (kiln.log: `crafting stock from the server: N item(s)` and
   `the crafting menu's count for recipe 0x... raised 0 -> 1 by station outputs`). Craft it. Expected: it completes; the
@@ -546,8 +599,8 @@ does not count station outputs here: ...` means a check below cannot pass; note 
   its crafting-count hook; kiln.stations also asks for kiln.gameplay's craft hook (the station crafted at) once a station
   is opted in.
 - Station outputs pay `Stations.Fill` and players' crafts. The crafting menu counts them on Kiln clients only (a vanilla
-  client keeps the game's counts). The station screen's fill button stays the game's: it needs the bag and the chests to
-  cover the fill (C7).
+  client keeps the game's counts). The station screen's fill buttons and the ingredient rows' "available" counts count
+  them on Kiln clients (since 0.2.0-dev.29.19, C7); other screens' item counts do not.
 
 ## For native code
 `native/core/abi/services/kiln_stations.h` (`kiln.stations` v1, in kiln-items.dll): the same reads (`base_*`, `stations`,

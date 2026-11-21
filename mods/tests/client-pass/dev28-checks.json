@@ -1808,6 +1808,86 @@
    ],
    "state": "open",
    "added": "06b-typed-hooks"
+  },
+  {
+   "id": "ui-hooks.c1",
+   "title": "Marks sit on the game's slots (backpack, chest, hotbar; two resolutions)",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks"
+  },
+  {
+   "id": "ui-hooks.c2",
+   "title": "Ctrl+click on a backpack slot: the mod gets the item, the game does not pick it up",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks"
+  },
+  {
+   "id": "ui-hooks.c3",
+   "title": "Clicks in a chest: the chest's items, a watched click still reaches the game",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks"
+  },
+  {
+   "id": "ui-hooks.c4",
+   "title": "No slot clicks in the play view; the cursor's slot (Hovered) and the game's hover byte",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks"
+  },
+  {
+   "id": "ui-hooks.c5",
+   "title": "A panel sits beside the backpack and the chest (two resolutions or UI scales)",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks slice 2"
+  },
+  {
+   "id": "ui-hooks.c6",
+   "title": "The chest screen names the chest's entity",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks slice 2"
+  },
+  {
+   "id": "ui-hooks.c7",
+   "title": "Closing the chest or backpack hides the panel; opening, switching and closing are events",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks slice 2"
+  },
+  {
+   "id": "ui-hooks.c8",
+   "title": "A client mod's own symbol fragment: its typed hook installs and runs in the game client",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks slice 3"
   }
  ]
 }

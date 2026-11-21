@@ -425,6 +425,54 @@ fn an_upgrade_reports_the_hand_changed_files_it_backed_up() {
     assert!(rep3.changed_backed_up.is_empty(), "{rep3:?}");
 }
 
+/// Inbox 85: an antivirus deleted one of Kiln's plugin DLLs. The status names it as missing (and still as modified, as
+/// before), apart from a file that is there with other bytes and from a deleted config file; installing the same
+/// bundle again (Runtime's Repair) puts it back.
+#[test]
+fn a_deleted_runtime_file_is_missing_and_a_reinstall_of_the_same_bundle_puts_it_back() {
+    let t = tmp("missing-file");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let game = t.0.join("Enshrouded");
+    put(&game, "enshrouded.exe", b"MZ fake game");
+    let inst = client(&game);
+    let b = bundle::create(&stage(&t.0, "a", false), &t.0.join("out"), &opts(1_793_793_600, "aaaaaaa")).unwrap();
+    let b = bundle::import(&dirs, &b).unwrap().file;
+    install::install(&dirs, &inst, &b, &InstallOptions::default(), &mut NoProgress).unwrap();
+    let st = install::status(&dirs, &inst).unwrap();
+    assert!(st.modified.is_empty() && st.missing_files.is_empty(), "{st:?}");
+
+    std::fs::remove_file(game.join("kiln/plugins/kiln-emf.dll")).unwrap();
+    std::fs::write(game.join("kiln/kiln-core.dll"), b"changed by hand").unwrap();
+    std::fs::remove_file(game.join("kiln/kiln.json")).unwrap();
+    let st = install::status(&dirs, &inst).unwrap();
+    let mut modified = st.modified.clone();
+    modified.sort();
+    assert_eq!(modified, ["kiln/kiln-core.dll", "kiln/plugins/kiln-emf.dll"], "a deleted config file is neither");
+    assert_eq!(st.missing_files, ["kiln/plugins/kiln-emf.dll"], "only the deleted file is missing");
+    // the JSON the launcher reads
+    let json = serde_json::to_value(&st).unwrap();
+    assert_eq!(json["missingFiles"], serde_json::json!(["kiln/plugins/kiln-emf.dll"]));
+    // an older backend's answer, without the field, still reads
+    let mut old = json.clone();
+    old.as_object_mut().unwrap().remove("missingFiles");
+    assert!(serde_json::from_value::<install::InstallState>(old).unwrap().missing_files.is_empty());
+
+    install::install(&dirs, &inst, &b, &InstallOptions::default(), &mut NoProgress).unwrap();
+    assert_eq!(std::fs::read(game.join("kiln/plugins/kiln-emf.dll")).unwrap(), b"emf plugin");
+    assert_eq!(std::fs::read(game.join("kiln/kiln-core.dll")).unwrap(), b"core a");
+    let st = install::status(&dirs, &inst).unwrap();
+    assert!(st.modified.is_empty() && st.missing_files.is_empty(), "{st:?}");
+}
+
+#[test]
+fn only_files_that_are_gone_are_missing() {
+    let t = tmp("missing-only");
+    put(&t.0, "kiln/there.dll", b"x");
+    let modified = vec!["kiln/there.dll".to_string(), "kiln/plugins/gone.dll".to_string(), "dinput8.dll".to_string()];
+    assert_eq!(install::missing_files(&t.0, &modified), ["kiln/plugins/gone.dll", "dinput8.dll"]);
+    assert!(install::missing_files(&t.0, &[]).is_empty());
+}
+
 /// Kiln's proxy changed since the install (a hand-deployed build: tools' client.sh, deploy-server.sh): uninstall moves it
 /// aside and puts the chained original loader back, as before dev.24. Keeping it would leave a Kiln proxy without its
 /// runtime in the game folder while the original loader is unchained and the receipt is gone.
@@ -1909,4 +1957,50 @@ fn only_a_launcher_test_build_counts_as_one() {
               Some("kiln-launcher 0.2.0-dev beta x"), Some("kiln-launcher 0.2.0-dev beta 3 extra"), Some("kiln-launcher 0.2.0-dev+beta.3")] {
         assert!(!install::installed_by_test_build(&receipt(i)), "{i:?}");
     }
+}
+
+/// Enshrouded ModLoader 0.6.15 installs itself next to Kiln as a Kiln native module (its Install.cmd:
+/// kiln/native/enshrouded-modloader/modloader.dll + native.json) and keeps its per-world profiles and settings, and its
+/// installer's backups, beside the game (Mods/EnshroudedModLoader/worlds/, RandomWorld/). Kiln's runtime install, update,
+/// repair (the same bundle again), profile activation, rollback and uninstall never touch any of it: none of it is in
+/// Kiln's receipt or placements.
+#[test]
+fn enshrouded_modloaders_native_module_and_its_worlds_survive_install_repair_activation_and_uninstall() {
+    use kiln_manage::profile;
+    let t = tmp("dllmod-native-module");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let game = t.0.join("game");
+    put(&game, "enshrouded.exe", b"MZ");
+    let inst = client(&game);
+    let make = |tag: &str, epoch, git| bundle::import(&dirs, &bundle::create(&stage(&t.0, tag, false), &t.0.join("out"), &opts(epoch, git)).unwrap()).unwrap();
+    let a = make("a", 1_793_793_600, "aaaaaaa");
+    let b = make("b", 1_793_880_000, "bbbbbbb");
+    install::install(&dirs, &inst, &a.file, &InstallOptions::default(), &mut NoProgress).unwrap();
+    // what his Install.cmd leaves, after Kiln was installed
+    let his: Vec<(&str, Vec<u8>)> = vec![
+        ("kiln/native/enshrouded-modloader/modloader.dll", build_test_dll(&["DirectInput8Create", "kiln_native_init"], b"ENSHROUDED_MODS_V1\0")),
+        ("kiln/native/enshrouded-modloader/native.json", br#"{"format":1,"id":"enshrouded-modloader","version":"0.6.15","dlls":["modloader.dll"],"phase":"boot","init":"kiln_native_init","builds":["5D9EF2F140B8ED49E30DBEE655841B89D08BAEC20F799A1817E171A18A850C77"]}"#.to_vec()),
+        ("Mods/EnshroudedModLoader/worlds/0123456789abcdef0123456789abcdef.mods", b"ENSHROUDED_MODS_V1\ncarryon/carryon.dll\n".to_vec()),
+        ("Mods/EnshroudedModLoader/worlds/0123456789abcdef0123456789abcdef.settings-v2/ab.ini", b"ENSHROUDED_SETTINGS_V1\nmove_chests=false\n".to_vec()),
+        ("Mods/EnshroudedModLoader/carryon/carryon.dll", build_test_dll(&["EnshroudedModInitialize", "EnshroudedModConfigure"], b"c")),
+        ("Mods/EnshroudedModLoader/carryon/carryon.dll.mod", b"ENSHROUDED_PACKAGE_V1\nkind=mod\nversion=0.1.52-dev\nabi=1\n".to_vec()),
+        ("RandomWorld/worlds-backup.1/0123456789abcdef0123456789abcdef.mods", b"old".to_vec()),
+    ];
+    for (rel, data) in &his { put(&game, rel, data); }
+    let same = |when: &str| for (rel, data) in &his {
+        assert_eq!(std::fs::read(game.join(rel)).ok().as_deref(), Some(data.as_slice()), "{when}: {rel}");
+    };
+    install::install(&dirs, &inst, &b.file, &InstallOptions::default(), &mut NoProgress).unwrap();
+    same("update");
+    install::install(&dirs, &inst, &b.file, &InstallOptions::default(), &mut NoProgress).unwrap();
+    same("repair");
+    let mut p = profile::create(&dirs, "With his loader", None).unwrap();
+    p.dropins = kiln_manage::manifest::ModKind::ALL.to_vec();
+    let p = profile::save(&dirs, &p).unwrap();
+    profile::activate(&dirs, &p.id, &inst).unwrap();
+    same("activation");
+    install::rollback(&dirs, &inst, &a.version, &mut NoProgress).unwrap();
+    same("rollback");
+    install::uninstall(&dirs, &inst, &mut NoProgress).unwrap();
+    same("uninstall");
 }

@@ -14,6 +14,7 @@
 #include "config.h"
 #include "image.h"
 #include "log.h"
+#include "module_place.h"
 #include "nlohmann/json.hpp"
 #include "pe_text.h"
 #include "services/hooks_fingerprint.h"
@@ -123,7 +124,7 @@ std::string module_at(uintptr_t a) {
     std::filesystem::path pth(std::wstring(path, n));
     char off[32];
     std::snprintf(off, sizeof off, "+0x%llx", static_cast<unsigned long long>(a - reinterpret_cast<uintptr_t>(mod)));
-    return to_utf8(pth.filename().wstring()) + off;
+    return to_utf8(pth.filename().wstring()) + off + module_place_suffix(module_path_text(to_utf8(pth.wstring()), u8(paths().game)));
 }
 
 // The target of a jmp or call at `a` (E9/E8 rel32, EB rel8, FF 25/FF 15 [rip+disp32], mov rax,imm64 + jmp rax),
@@ -1241,6 +1242,31 @@ bool unload_fragment(std::string_view id) {
     const bool removed = g_fragments.erase(std::string(id)) != 0;
     if (removed) ++g_sig_revision;
     return removed;
+}
+
+std::vector<FeatureRow> fragment_features(std::string_view id) {
+    std::vector<FeatureRow> rows;
+    std::lock_guard lock(g_frag_mutex);
+    auto it = g_fragments.find(std::string(id));
+    if (it == g_fragments.end()) return rows;
+    const Resolver& r = *it->second;
+    std::vector<std::string> names = r.feature_names();
+    std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    for (std::string& n : names) {
+        FeatureRow row;
+        row.ok = r.feature(n);
+        if (!row.ok) {
+            std::string name, text;
+            bool constant = false;
+            row.problem = r.feature_problem(n, &name, &text, &constant)
+                ? std::string(constant ? "constant " : "symbol ") + name + ": " + text
+                : "not resolved on this game build";
+        }
+        row.name = std::move(n);
+        rows.push_back(std::move(row));
+    }
+    return rows;
 }
 
 bool any_symbol(std::string_view name, uintptr_t* out) {

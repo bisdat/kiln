@@ -12,6 +12,8 @@
 
 #include "../api.h"
 #include "../common.h"
+#include "../config.h"
+#include "../gates.h"
 #include "../crash.h"
 #include "../guard.h"
 #include "../image.h"
@@ -134,6 +136,19 @@ bool call_lines(KilnUiLinesFn fn, const KilnUiProviderContext* c, const KilnUiIt
     }
 }
 
+bool call_scale(KilnUiScaleFn fn, const KilnUiProviderContext* c, const KilnUiItemView* v, float* scale, void* user,
+                KilnResult* rc) {
+    crash::Capture cap{};
+    unsigned long code = 0;
+    __try {
+        *rc = fn(c, v, scale, user);
+        return true;
+    } __except (crash::filter(GetExceptionInformation(), &cap, &code)) {
+        crash::report(cap, "kiln.ui.values tooltip value provider", reinterpret_cast<const void*>(fn));
+        return false;
+    }
+}
+
 bool call_slots(KilnUiSlotsFn fn, const KilnUiSlotsFrame* f, const KilnUiVisibleSlot* s, uint32_t n, void* user) {
     crash::Capture cap{};
     unsigned long code = 0;
@@ -159,6 +174,79 @@ bool call_gemforge(KilnUiGemForgeFn fn, const KilnUiGemForgeFrame* f, const Kiln
     }
 }
 
+// One native tooltip line, built as the game builds the detail's description (TextDraw, ui_values_internal.h), inside
+// the item detail view on the UI thread. No C++ objects with destructors here (__try).
+struct Float2 {
+    float x, y;
+};
+using TextLineFn = void*(__fastcall*)(void* out, const void* text, const void* style, uint32_t mode);
+using TextDrawFn = void(__fastcall*)(void* text);
+using NodeAlignFn = void(__fastcall*)(void* node, const uint16_t* align);
+using NodeSizeFn = void(__fastcall*)(void* node, Float2 size);
+using NodeRectFn = const float*(__fastcall*)(void* node);
+bool draw_text(const TextDraw* d, uintptr_t* node_out) {
+    crash::Capture cap{};
+    unsigned long code = 0;
+    __try {
+        alignas(16) uint8_t obj[0x200];  // the game's text object is 0x150 bytes (its constructor writes through +0x140)
+        std::memset(obj, 0, sizeof obj);
+        const text::GameText t{d->text, d->text_len, d->text_fnv};
+        reinterpret_cast<TextLineFn>(d->line_fn)(obj, &t, reinterpret_cast<const void*>(d->style), 1);
+        void* node = *reinterpret_cast<void**>(obj + d->node);
+        *node_out = reinterpret_cast<uintptr_t>(node);
+        obj[d->shown] = 1;
+        const uint16_t align = d->align;
+        reinterpret_cast<NodeAlignFn>(d->align_fn)(node, &align);
+        std::memcpy(obj + d->align_field, &align, 2);
+        obj[d->wrap] = 1;
+        reinterpret_cast<NodeSizeFn>(d->size_fn)(node, Float2{1.0f, 0.0f});  // fill the width, fit the height
+        uint16_t flags = 0;
+        std::memcpy(&flags, obj + d->flags, 2);
+        if (d->colored) {
+            obj[d->bits] |= 1;
+            flags |= 0x40;
+            std::memcpy(obj + d->color, &d->color_value, 8);
+            const uint16_t zero = 0;
+            std::memcpy(obj + d->flags2, &zero, 2);
+        }
+        if (d->small) {
+            flags |= 8;
+            std::memcpy(obj + d->size_field, &d->small_size, 4);
+        }
+        std::memcpy(obj + d->flags, &flags, 2);
+        reinterpret_cast<TextDrawFn>(d->draw_fn)(obj);
+        return true;
+    } __except (crash::filter(GetExceptionInformation(), &cap, &code)) {
+        crash::report(cap, "kiln.ui.values native tooltip line", reinterpret_cast<const void*>(d->line_fn));
+        return false;
+    }
+}
+
+bool node_rect(uintptr_t fn, uintptr_t node, float out[4]) {
+    __try {
+        const float* r = reinterpret_cast<NodeRectFn>(fn)(reinterpret_cast<void*>(node));
+        if (!r) return false;
+        for (int i = 0; i < 4; ++i) out[i] = r[i];
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// The tooltip probe's switch: KILN_TOOLTIP_PROBE (1/true or a key name) or kiln.json "tooltipProbe". nullptr = off.
+bool probe_switch(std::string* key) {
+    wchar_t buf[32] = {};
+    const DWORD n = GetEnvironmentVariableW(L"KILN_TOOLTIP_PROBE", buf, 32);
+    std::string v;
+    if (n > 0 && n < 32)
+        for (DWORD i = 0; i < n; ++i) v += buf[i] < 128 ? static_cast<char>(buf[i]) : '?';
+    else
+        v = config().tooltip_probe;
+    if (v.empty() || v == "0" || v == "false") return false;
+    *key = v == "1" || v == "true" || v == "default" ? "" : v;
+    return true;
+}
+
 // kiln.ui's UI tick (after every game UI frame, on the UI thread) drives change publication.
 void (*g_frame_fn)(uint64_t, void*) = nullptr;
 void* g_frame_user = nullptr;
@@ -174,6 +262,54 @@ bool subscribe_frames(void (*fn)(uint64_t, void*), void* user) {
     g_frame_user = user;
     KilnHandle h = 0;
     return ui->subscribe_ui_tick(g_owner, &on_ui_tick, nullptr, &h) == KILN_OK;
+}
+
+// kiln.ui.inventory: kiln.ui's presses (subscribe_pointer_press, 0.2.0-dev.30), with the service's owner.
+bool subscribe_pointer(KilnUiPointerFn fn, void* user) {
+    KilnUiScreen probe{};
+    if (!screen(&probe)) return false;  // also finds kiln.ui's table
+    const KilnUiApi* ui = g_ui.load(std::memory_order_acquire);
+    if (!ui || ui->header.size < offsetof(KilnUiApi, subscribe_pointer_press) + sizeof(void*) || !ui->subscribe_pointer_press ||
+        !g_owner)
+        return false;
+    KilnHandle h = 0;
+    return ui->subscribe_pointer_press(g_owner, fn, user, &h) == KILN_OK;
+}
+
+// kiln.ui.inventory v2: kiln.ui's screen_target (0.2.0-dev.29.15 tail; since dev.30 also a chest's), 0 without it.
+uint32_t screen_target() {
+    KilnUiScreen probe{};
+    if (!screen(&probe)) return 0;  // also finds kiln.ui's table
+    const KilnUiApi* ui = g_ui.load(std::memory_order_acquire);
+    if (!ui || ui->header.size < offsetof(KilnUiApi, screen_target) + sizeof(void*) || !ui->screen_target) return 0;
+    return ui->screen_target();
+}
+
+bool call_click(KilnUiSlotClickFn fn, const KilnUiSlotClick* c, void* user) {
+    crash::Capture cap{};
+    unsigned long code = 0;
+    __try {
+        fn(c, user);
+        return true;
+    } __except (crash::filter(GetExceptionInformation(), &cap, &code)) {
+        crash::report(cap, "kiln.ui.inventory click subscriber", reinterpret_cast<const void*>(fn));
+        return false;
+    }
+}
+
+// The cursor in the client pixels of this process's window in front (the game's), with the client area's size.
+bool cursor_client(float* x, float* y, float* w, float* h) {
+    HWND wnd = GetForegroundWindow();
+    DWORD pid = 0;
+    if (!wnd || !GetWindowThreadProcessId(wnd, &pid) || pid != GetCurrentProcessId()) return false;
+    POINT p{};
+    RECT rc{};
+    if (!GetCursorPos(&p) || !ScreenToClient(wnd, &p) || !GetClientRect(wnd, &rc)) return false;
+    *x = static_cast<float>(p.x);
+    *y = static_cast<float>(p.y);
+    *w = static_cast<float>(rc.right - rc.left);
+    *h = static_cast<float>(rc.bottom - rc.top);
+    return *x >= 0 && *y >= 0 && *x < *w && *y < *h;
 }
 
 bool gemforge_contract() {
@@ -273,6 +409,16 @@ void wire() {
         return 1;
     };
     e.subscribe_frames = &subscribe_frames;
+    e.draw_text = &draw_text;
+    e.call_scale = &call_scale;
+    e.node_rect = &node_rect;
+    e.key_down = [](uint32_t vk) { return (GetAsyncKeyState(static_cast<int>(vk)) & 0x8000) != 0; };
+    e.thread_id = []() -> uint32_t { return GetCurrentThreadId(); };
+    e.feature_open = [](const char* n) { return sigdb::feature(n) && !gates::is_held(n); };
+    e.subscribe_pointer = &subscribe_pointer;
+    e.call_click = &call_click;
+    e.cursor_client = &cursor_client;
+    e.screen_target = &screen_target;
     e.log = [](int level, const char* text) { kiln::log::write(level, "kiln", text); };
 }
 
@@ -288,7 +434,9 @@ bool init() {
     // Each feature resolves on its own; the rows (and the client gate) decide at registration time.
     static const char* const kFeatures[] = {"ui.values.detail", "ui.values.slot",          "ui.values.held",
                                             "ui.values.hud",    "ui.values.tooltip_lines", "ui.slots.inspect",
-                                            "ui.gemforge.inspect", "gems.sockets", "ui.gemforge.sources"};
+                                            "ui.gemforge.inspect", "gems.sockets", "ui.gemforge.sources",
+                                            "ui.tooltip.lines", "ui.tooltip.values", "ui.slots.click",
+                                            "ui.inventory.panels"};
     if (!env().layout_supported())
         for (uint32_t k = 0; k < kLists; ++k)
             if (row_of(k)) disable_kind(k, "private UI layout is not measured for this client image");
@@ -302,6 +450,8 @@ bool init() {
         "ui.values: features resolved:%s; not resolved:%s. A kind hooks the game when its first provider "
         "registers and its row is available; slot inspection also hooks on first copy_slots",
         on.empty() ? " none" : on.c_str(), off.empty() ? " none" : off.c_str());
+    std::string key;
+    if (probe_switch(&key)) probe_start(g_owner, key.c_str());
     return true;
 }
 
@@ -309,3 +459,10 @@ bool init() {
 }  // namespace kiln::uivalues
 
 KILN_SERVICE(ui_values, KILN_UI_VALUES_SERVICE, KILN_UI_VALUES_VERSION, kiln::uivalues::table(), &kiln::uivalues::init);
+
+namespace {
+// kiln.ui.inventory shares kiln.ui.values' registry, environment and slot frames: available where that one is.
+bool inventory_init() { return kiln::image().side == KILN_SIDE_CLIENT; }
+}  // namespace
+KILN_SERVICE(ui_inventory, KILN_UI_INVENTORY_SERVICE, KILN_UI_INVENTORY_VERSION, kiln::uivalues::inventory_table(),
+             &inventory_init);

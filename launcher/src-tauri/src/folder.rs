@@ -201,6 +201,13 @@ fn process_env() -> DataEnv {
     }
 }
 
+/// The data folder as found, held or not, for what a start reads before Tauri: the render and sandbox markers (read
+/// only; nothing is written through it). `state::dirs()` refuses until the beta copy's gate opens
+/// (crate::snapshot::startup), which is after the window exists. None: the pointer is broken.
+pub fn found_dirs() -> Option<DataDirs> {
+    current().located().ok().map(|l| l.dirs.clone())
+}
+
 /// The data folder without opening it (no lock, nothing created): for `--selftest`'s report.
 pub fn describe() -> String {
     match DataEnv::from_process().locate_checked() {

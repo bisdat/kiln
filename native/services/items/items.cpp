@@ -28,6 +28,8 @@
 #include "engine.h"
 #include "completed_results.h"
 #include "equip.h"
+#include "gear.h"
+#include "scale.h"
 #include "gems.h"
 #include "stations.h"
 #include "instances.h"
@@ -77,7 +79,30 @@ static_assert(offsetof(KilnItemsApi, set_capture) == 240 && offsetof(KilnItemsAp
               offsetof(KilnItemsApi, set_status) == 256 && offsetof(KilnItemsApi, set_plan) == 264 &&
               offsetof(KilnItemsApi, equip_set) == 272 && offsetof(KilnItemsApi, set_cancel) == 280);
 // v7 (0.2.0-dev.30, the gem wave) appends socket_roll after set_cancel; a v6 reader's table ends at 288.
-static_assert(offsetof(KilnItemsApi, socket_roll) == 288 && sizeof(KilnItemsApi) == 296);
+static_assert(offsetof(KilnItemsApi, socket_roll) == 288);
+// v8 (0.2.0-dev.29.19, the equipment wave) appends gear_write, gear_read and gear_status; a v7 reader's table ends at 296.
+static_assert(offsetof(KilnItemsApi, gear_write) == 296 && offsetof(KilnItemsApi, gear_read) == 304 &&
+              offsetof(KilnItemsApi, gear_status) == 312);
+// v8 (package P5) then appends rarity_rolls and roll_status: a reader built before them sees a table ending at 320.
+static_assert(offsetof(KilnItemsApi, rarity_rolls) == 320 && offsetof(KilnItemsApi, roll_status) == 328);
+// v8 (package P3) then appends gear_upgrade: a reader built before it sees a table ending at 336.
+static_assert(offsetof(KilnItemsApi, gear_upgrade) == 336);
+// v8 (package P7) then appends gear_scale, gear_scale_read and scale_status: a reader built before them sees 344.
+static_assert(offsetof(KilnItemsApi, gear_scale) == 344 && offsetof(KilnItemsApi, gear_scale_read) == 352 &&
+              offsetof(KilnItemsApi, scale_status) == 360 && sizeof(KilnItemsApi) == 368);
+static_assert(sizeof(KilnItemsGearScale) == 32 && offsetof(KilnItemsGearScale, power) == 16 &&
+              sizeof(KilnItemsScaleStatus) == 208 && offsetof(KilnItemsScaleStatus, powered) == 24 &&
+              offsetof(KilnItemsScaleStatus, detail) == 48);
+static_assert(offsetof(KilnItemsGearRequest, durability_max) == 28 && offsetof(KilnItemsGearRequest, reserved) == 32);
+static_assert(sizeof(KilnItemsUpgradeCost) == 8 && sizeof(KilnItemsUpgradeRequest) == 160 && offsetof(KilnItemsUpgradeRequest, gear) == 24 &&
+              offsetof(KilnItemsUpgradeRequest, costs) == 64 && offsetof(KilnItemsUpgradeRequest, payers) == 128 &&
+              sizeof(KilnItemsUpgradeResult) == 392 && offsetof(KilnItemsUpgradeResult, paid) == 32 &&
+              offsetof(KilnItemsUpgradeResult, have) == 64 && offsetof(KilnItemsUpgradeResult, gear) == 96);
+static_assert(sizeof(KilnItemsRarityRoll) == 32 && offsetof(KilnItemsRarityRoll, weights) == 8 &&
+              sizeof(KilnItemsRollStatus) == 248 && offsetof(KilnItemsRollStatus, rolled) == 24);
+static_assert(sizeof(KilnItemsGearRequest) == 40 && sizeof(KilnItemsGearState) == 44 && sizeof(KilnItemsGearResult) == 296 &&
+              offsetof(KilnItemsGearResult, before) == 48 && offsetof(KilnItemsGearResult, after) == 92 &&
+              offsetof(KilnItemsGearResult, message) == 136 && sizeof(KilnItemsGearStatus) == 192);
 static_assert(sizeof(KilnItemsRequestEx) == 56 && offsetof(KilnItemsRequestEx, dye) == 40 &&
               offsetof(KilnItemsRequestEx, durability) == 44 && sizeof(KilnItemsSocketRoll) == 24);
 static_assert(sizeof(KilnSetRequestV1) == 56 && offsetof(KilnSetRequestV1, entries) == 16 && offsetof(KilnSetRequestV1, process_session) == 40);
@@ -1104,6 +1129,8 @@ void drop_world(const char* why) {
     equip_world_closed();     // v5: waiting equips end as dropped
     gems_world_closed();      // gem wave G3: waiting forge actions end as dropped
     stations_world_closed();  // kiln.stations: waiting station actions end as dropped, watches restart
+    gear_world_closed();      // v8: waiting gear writes end as dropped
+    scale_world_reset();      // v8 (P7): power and armour scales named entities of the world that went
     sets_world_closed();      // v6: every set snapshot named this world
     int expected = KILN_ITEMS_PROGRAM_RUNNING;
     if (g_program.compare_exchange_strong(expected, KILN_ITEMS_PROGRAM_ACTIVE))
@@ -1144,6 +1171,8 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     equip_pre(g_world.load() ? g_world.load() : g_api->server_world(), tick->step);  // v5
     gems_pre(tick->step);  // gem wave G3: forge actions' layout check, results, held players' actions
     stations_pre(tick->step);  // kiln.stations: unlock checks, results, the watch
+    gear_pre(tick->step);      // v8: the gear program's state, timeouts, results
+    scale_pre();               // v8 (P7): the stamps were forgotten (the id counter went down): so are the scales
     xfer_deliver();
     selftest_pre(tick->step);
     if (!g_catalog.load(std::memory_order_relaxed) && (tick->step & 7) == 0) build_catalog();
@@ -1401,6 +1430,7 @@ KilnResult KILN_CALL t_status2(KilnItemsStatus2* out) {
 
 KilnResult KILN_CALL t_cancel(uint64_t ticket) {
     if (equip_cancel(ticket)) return KILN_OK;
+    if (gear_cancel(ticket)) return KILN_OK;  // v8
     std::lock_guard lock(g_mu);
     return g_callbacks.erase(ticket) ? KILN_OK : KILN_ERR_NOT_FOUND;
 }
@@ -1420,6 +1450,8 @@ void KILN_CALL t_cancel_owner(KilnOwner owner) {
     equip_cancel_owner(owner);
     sets_cancel_owner(owner);  // v6: the owner's snapshots
     pide_socket_roll(owner, nullptr);  // v7: the owner's socket rolls
+    gear_cancel_owner(owner);          // v8: the owner's gear write callbacks
+    pide_rarity_rolls(owner, nullptr, 0, 0);  // v8 (P5): the owner's rarity rolls
     // Draining a running transfer callback must not hold the request mutex: that callback may queue a request.
     xfer_end_owner(owner);
 }
@@ -1643,6 +1675,36 @@ KilnResult KILN_CALL t_set_cancel(uint64_t ticket) { return equip_set_cancel(tic
 // ---- v7: gem sockets (pide.cpp) ----
 KilnResult KILN_CALL t_socket_roll(KilnOwner owner, const KilnItemsSocketRoll* roll) { return pide_socket_roll(owner, roll); }
 
+// ---- v8: gear (gear.cpp) ----
+KilnResult KILN_CALL t_gear_write(KilnOwner owner, const KilnItemsGearRequest* r, KilnItemsGearDoneFn done, void* user,
+                                  uint64_t* out_ticket) {
+    return gear_write(owner, r, done, user, out_ticket);
+}
+KilnResult KILN_CALL t_gear_read(KilnEntity entity, uint32_t stamp, KilnItemsGearState* out) { return gear_read(entity, stamp, out); }
+KilnResult KILN_CALL t_gear_status(KilnItemsGearStatus* out) { return gear_status(out); }
+
+// ---- v8 (P5): rarity rolls at creation (pide.cpp) ----
+KilnResult KILN_CALL t_rarity_rolls(KilnOwner owner, const KilnItemsRarityRoll* rolls, uint32_t count, uint32_t roll_size) {
+    return pide_rarity_rolls(owner, rolls, count, roll_size);
+}
+KilnResult KILN_CALL t_roll_status(KilnItemsRollStatus* out) { return pide_roll_status(out); }
+
+// ---- v8 (P3): upgrades, a gear write paid for (gear.cpp) ----
+KilnResult KILN_CALL t_gear_upgrade(KilnOwner owner, const KilnItemsUpgradeRequest* r, KilnItemsUpgradeDoneFn done, void* user,
+                                    uint64_t* out_ticket) {
+    return gear_upgrade(owner, r, done, user, out_ticket);
+}
+
+// ---- v8 (P7): per-instance power and armour scales (scale.cpp) ----
+KilnResult KILN_CALL t_gear_scale(const KilnItemsGearScale* s) {
+    if (!g_api->on_tick_thread()) return KILN_ERR_WRONG_THREAD;
+    return scale_set(s);
+}
+KilnResult KILN_CALL t_gear_scale_read(KilnEntity entity, uint32_t stamp, KilnItemsGearScale* out) {
+    return scale_read(entity, stamp, out);
+}
+KilnResult KILN_CALL t_scale_status(KilnItemsScaleStatus* out) { return scale_status(out); }
+
 const KilnItemsApi kTable = {
     {sizeof(KilnItemsApi), KILN_ITEMS_VERSION},
     &t_give, &t_take, &t_cancel, &t_cancel_owner, &t_read, &t_find,
@@ -1654,6 +1716,10 @@ const KilnItemsApi kTable = {
     &t_equip, &t_equip_status,
     &t_set_capture, &t_set_release, &t_set_status, &t_set_plan, &t_equip_set, &t_set_cancel,
     &t_socket_roll,
+    &t_gear_write, &t_gear_read, &t_gear_status,
+    &t_rarity_rolls, &t_roll_status,
+    &t_gear_upgrade,
+    &t_gear_scale, &t_gear_scale_read, &t_scale_status,
 };
 
 // ============================================================================================= self-test =======
@@ -1996,6 +2062,9 @@ void resolve() {
     LOGI("gear options at creation (KILN_ITEMS_UNLOCK, KILN_ITEMS_GEM_SLOT): %s", pide ? "on" : "OFF (items.pide_options)");
     LOGI("gem sockets on any gear (GEM_SLOT_ANY, DYE, DURABILITY, gemSlotOverride, socket_roll): %s",
          pide_sockets_available() ? "on" : "OFF (gems.sockets)");
+    // v8 (P5): rarity rolls at creation, a second mid hook in createPide (feature items.gear.rolls)
+    const bool rolls = pide_install_rolls(g_api, g_owner);
+    LOGI("rarity rolls at creation (rarity_rolls): %s", rolls ? "on" : "OFF (items.gear.rolls)");
     // v3 (docs/re/items.md sections 13 and 14)
     {
         const bool qs = sym("items/QuickStack", &E.quick_stack) && sym("items/MoveAll", &E.move_all);
@@ -2083,6 +2152,8 @@ void resolve() {
     xfer_init();  // after every symbol above: a lab switch may install the hooks right now
     gems_resolve();  // gem wave G3: the forge actions (kiln.gemcraft), after the transaction symbols
     stations_resolve();  // kiln.stations: bases, stations, the game's fill (after the transaction symbols)
+    gear_resolve();      // v8: gear writes (after the tracked writes and the item instances)
+    scale_resolve(g_api, g_owner);  // v8 (P7): power and armour scales (hooks only at the first scale)
 }
 
 void register_main();
@@ -2095,6 +2166,7 @@ void KILN_CALL on_ready(void*) {
     equip_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);
     gems_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);  // gem wave G3: kiln_items_gems
     stations_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);  // kiln.stations: kiln_items_stations
+    gear_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);      // v8: kiln_items_gear
 }
 
 void register_main() {

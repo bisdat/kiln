@@ -27,6 +27,7 @@
 
 #include "engine.h"
 #include "kiln_api.h"
+#include "impact_watch.h"
 #include "nlohmann/json.hpp"
 #include "kiln_hook.hpp"
 #include "natives_core.h"
@@ -777,6 +778,7 @@ uint32_t __fastcall hk_create(uintptr_t system, uint32_t program_id, uint32_t en
     if (!id) return id;
     if (lab_lockhold_armed()) lab_hold_lock_now();
     g_system.store(system, std::memory_order_relaxed);
+    iw::on_created(system, id);  // the impact pool watch's creation time (lock-free, no allocation)
     if (c_created.fetch_add(1, std::memory_order_relaxed) == 0 || g_first_instance.load(std::memory_order_relaxed) == 0)
         g_first_instance.store(id, std::memory_order_relaxed);
     const uint32_t interest = g_interest.load(std::memory_order_relaxed);
@@ -1436,6 +1438,13 @@ void load_vanilla_list() {  // tick thread
     }
     std::lock_guard lock(g_mu);
     g_vanilla_programs.swap(ids);
+}
+
+// The impact pool watch's label: is a program in the game's own ImpactRegistry list (known false while there is none).
+bool program_is_vanilla(uint32_t id, bool* known) {
+    std::lock_guard lock(g_mu);
+    *known = !g_vanilla_programs.empty();
+    return g_vanilla_programs.count(id) != 0;
 }
 
 uintptr_t prog_registry() {
@@ -3163,6 +3172,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
 
     KilnHandle h = 0;
     if (api->subscribe_tick(owner, KILN_TICK_PRE, &on_pre, nullptr, &h) != KILN_OK) return KILN_ERR_UNAVAILABLE;
+    iw::init(api, owner, &program_is_vanilla);  // the impact pool watch (inbox 116): read-only
     api->subscribe_world(owner, &on_world, nullptr, &h);
     logi("kiln.abilities: natives %s, programs %s, instances %s, attributes %s, sequences %s",
          g_have_natives ? "on" : "off", g_have_programs ? "on" : "off", g_have_instances ? "on" : "off",

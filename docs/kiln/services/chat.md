@@ -115,6 +115,28 @@ Commands.Register("time", ctx =>
   unloads. Its handlers run as Kiln.
 - Handlers run on the tick thread in their mod's context (Scheduler, `await`, services attribute work to that mod).
 
+## Tab completion in the game's chat (kiln:chat)
+The client's Tab completion ([chat-history.md](../chat-history.md#tab-completion), GitHub issue 44, pull request 73)
+asks the server for matches over Kiln's own network channel `kiln:chat` (version 1, `required: false`: vanilla
+clients and servers, and Kilns without it, join as before). Code: `managed/services/Kiln.Chat/ChatCompletionNetwork.cs`.
+- **Messages.** Request (1, to the server): an id and the line, at most 256 UTF-8 bytes, starting with `/`, no control
+  characters. Reply (2, to that client): the same id and line, the UTF-8 byte offset where the completed word starts,
+  and at most 20 suggestions of at most 128 bytes each. The client drops a reply whose id or line is not the one it
+  is waiting for, or whose offset falls inside a character.
+- **Permissions.** The server answers with `Commands.Complete(CommandSource.ForPlayer(player), line)`, where the player
+  is the connection's own (`NetContext.Player`), never anything in the message. So a player is offered only the
+  commands, subcommands and arguments they may run; `Console` commands never. Nothing is executed: completion only
+  reads the command tree. Mods' commands registered with `Commands.Register`/`RegisterAll` take part with no extra
+  code; their argument completions are offered too.
+- **Limits.** 10 requests a second per connection (more are dropped without a reply); the handler runs on the tick
+  thread, without disk I/O, and logs only an exception's type (never the line).
+- **Hosted worlds.** The hosting player's own requests go through a local queue to the same handler on the server
+  tick, with the host's player and its own rate bucket.
+- **A server without the channel.** The client stops asking on that connection after the first refused send and asks
+  again on the next one.
+- Tests: `Kiln.Api.Tests` `ChatCompletionProtocolTests` (bounds, UTF-8, stale replies) and `ChatCompletionServerTests`
+  (a guest is not offered an admin command, console commands are never offered, the rate limit, the hosted path).
+
 ## Server settings
 `kiln/config/chat.json` (the config folder: `kiln/config`, or the active profile's configDir). Optional; unknown keys
 are ignored; read when first needed and again whenever the file changes, so an edit applies without a restart.

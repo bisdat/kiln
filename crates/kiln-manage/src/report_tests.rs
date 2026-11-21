@@ -78,6 +78,181 @@ fn redacts_secret_json_fields() {
 }
 
 #[test]
+fn redacts_other_players_names_in_kiln_and_shroudlink_lines() {
+    let r = Redactor::new(Some(HOME), Some("frostling"), Some("frost-desk"));
+    let cases = [
+        ("[I 22:31:42.935] [service:kiln-players.dll] players: joined slot 1 entity 7 'Brim Wyn' (steam 76561198000000002, admin 0, perms 0x1) [event 2]",
+         "[I 22:31:42.935] [service:kiln-players.dll] players: joined slot 1 entity 7 '<player>' (steam <steamid>, admin 0, perms 0x1) [event 2]"),
+        ("[I 22:31:36.187] [kiln] net: Brim (0x81) joined with Kiln 0.2.0-dev.29.19: 6 mod(s), 13 shared channel(s)",
+         "[I 22:31:36.187] [kiln] net: <player> (0x81) joined with Kiln 0.2.0-dev.29.19: 6 mod(s), 13 shared channel(s)"),
+        ("[I 1] [kiln] net: peer Al (0x82) left (in game)", "[I 1] [kiln] net: peer <player> (0x82) left (in game)"),
+        ("[W 1] [kiln] net: kicking Mia (0x83) by admin: spam", "[W 1] [kiln] net: kicking <player> (0x83) by admin: spam"),
+        ("[W 1] [kiln] net: refusing Mia (Kiln 0.2.0-dev.20): too old", "[W 1] [kiln] net: refusing <player> (Kiln 0.2.0-dev.20): too old"),
+        ("[I 1] [kiln] net: peer Mia said bye", "[I 1] [kiln] net: peer <player> said bye"),
+        ("[W 1] [kiln] net: peer Mia: dropped frame (late); 1 dropped so far", "[W 1] [kiln] net: peer <player>: dropped frame (late); 1 dropped so far"),
+        ("[I 1] [kiln] net: config state 0a0b0c0d (3 config(s)) sent to Mia", "[I 1] [kiln] net: config state 0a0b0c0d (3 config(s)) sent to <player>"),
+        ("[W 1] [kiln] Kiln.Saves: Mia has no character id on this build: x", "[W 1] [kiln] Kiln.Saves: <player> has no character id on this build: x"),
+        ("[1794424596] shroudlink: client 2eaa65d2d4c437f9 is Ember Fox", "[1794424596] shroudlink: client 2eaa65d2d4c437f9 is <player>"),
+        ("[1] world: client 2eaa65d2d4c437f9 is player 1 (the only unmatched one) (Ember Fox)",
+         "[1] world: client 2eaa65d2d4c437f9 is player 1 (the only unmatched one) (<player>)"),
+        ("[1] world: client 2eaa65d2d4c437f9 is player 2 (Mia)", "[1] world: client 2eaa65d2d4c437f9 is player 2 (<player>)"),
+    ];
+    for (raw, want) in cases {
+        assert_eq!(redact(raw, &r), want);
+    }
+    // lines that name no player stay as they are
+    for keep in [
+        "[1] shroudlink: client 2eaa65d2d4c437f9 is addon 0.8.0, UI protocol 3",
+        "[1] shroudlink: client 2eaa65d2d4c437f9 is an addon older than 0.6 (no hello)",
+        "[1] world: client 2eaa65d2d4c437f9 is player 1 (the only unmatched one)",
+        "[I 1] [kiln] net: last-server.json: welcome from srv-76bd0efb99c3",
+        "[I 1] [kiln] net: lab peer 0x80 kicked (reason 2)",
+        "[I 1] [service:kiln-players.dll] players: server world session ended (quit): 2 player(s) left with it",
+    ] {
+        assert_eq!(redact(keep, &r), keep);
+    }
+    // the names a log shows also go where a line does not say it is a player
+    let log = "players: joined slot 1 entity 7 'Brimwyn' (steam 0, admin 0, perms 0x1)\nnet: Al (0x9) joined with Kiln x\n";
+    assert_eq!(player_names(log), vec!["Brimwyn".to_string(), "Al".to_string()]);
+    let mut r2 = r.clone();
+    r2.add_players_from(log);
+    assert_eq!(redact("chat-plus: welcome back, Brimwyn! Also Al.", &r2), "chat-plus: welcome back, <player>! Also Al.",
+        "a name of 2 characters only where a line says it is a player");
+    assert_eq!(redact("Brimwynne", &r2), "Brimwynne", "whole words only");
+    // the local player keeps the Steam name token
+    let mut me = r.clone();
+    me.add_whole_word("Frosty", "<steam-name>");
+    assert_eq!(redact("players: joined slot 0 entity 1 'Frosty' (steam 0, admin 1, perms 0x3f)", &me),
+        "players: joined slot 0 entity 1 '<steam-name>' (steam 0, admin 1, perms 0x3f)");
+}
+
+#[test]
+fn redacts_ipv6_macs_mails_and_plain_text_secrets() {
+    let r = Redactor::new(Some(HOME), Some("frostling"), Some("frost-desk"));
+    assert_eq!(redact("join [2001:db8:85a3::8a2e:370:7334]:15636 or fe80::1c2d:3e4f%eth0", &r), "join [<ip>]:15636 or <ip>%eth0");
+    assert_eq!(redact("2001:0db8:0000:0000:0000:ff00:0042:8329 then", &r), "<ip> then");
+    assert_eq!(redact("pad 00:1a:2b:3c:4d:5e connected", &r), "pad <mac> connected");
+    assert_eq!(redact("mail frost.ling+kiln@example.co.uk.", &r), "mail <email>.");
+    for keep in [
+        "[I 22:30:56.603] at 12:30:45", "loopback ::1 and ::", "keen::ItemCategory abc::def", "kdh1:8f21dcb1097232d5",
+        "kiln.world@4 period@resolved", "Kiln.Host 0.2.0.0 (mod API 0.2.10)", "@types/node", "deadbeef:cafe",
+    ] {
+        assert_eq!(redact(keep, &r), keep);
+    }
+    assert_eq!(redact("join 0.2.0.0 and 10.0.0.2", &r), "join 0.2.0.0 and <ip>", "0.x.x.x is a version, never a host");
+    // plain text and INI: the value after a secret's name
+    assert_eq!(redact("[Server]\nPassword=hunter2\nApiKey = abc123\nShortcutKey=0x2D\n", &r),
+        "[Server]\nPassword=<redacted>\nApiKey = <redacted>\nShortcutKey=0x2D\n");
+    assert_eq!(redact("GET /x?token=abc&page=2 token: abc, server_password: 'p w'", &r),
+        "GET /x?token=<redacted>&page=2 token: <redacted>, server_password: '<redacted>'");
+    assert_eq!(redact("%command% -password hunter2 --apikey x -log", &r), "%command% -password <redacted> --apikey <redacted> -log");
+    for keep in [
+        "the admin token and endpoint", "\"token\": \"<redacted>\",", "\"tokens\": [", "password=", "credential::Store",
+        "client-checks pass: pre", "fields named like passwords, tokens, keys",
+    ] {
+        assert_eq!(redact(keep, &r), keep);
+    }
+    // a report redacted twice does not change
+    let once = redact("token=abc fe80::1 a@b.org players: joined slot 1 entity 7 'Mia' (steam 0)", &r);
+    assert_eq!(redact(&once, &r), once);
+}
+
+#[test]
+fn json_fields_that_name_people_are_redacted() {
+    for k in ["userName", "user_name", "accountName", "personaName", "playerName", "character_name", "email", "contactEmail", "api-key"] {
+        assert!(is_secret_key(k), "{k}");
+    }
+    for k in ["name", "displayName", "modName", "keybind", "players", "emailVerifiedAt"] {
+        assert!(!is_secret_key(k), "{k}");
+    }
+}
+
+// ---------------------------------------------------------------- the local Steam account, on every Steam layout
+
+const LOGINUSERS: &str = "\"users\"\n{\n\t\"76561198000000009\"\n\t{\n\t\t\"AccountName\"\t\t\"oryx_acct\"\n\t\t\"PersonaName\"\t\t\"Oryx593\"\n\t\t\"MostRecent\"\t\t\"1\"\n\t}\n}\n";
+
+/// A fake home with one Steam root at `rel` (with `steamapps/`, as `steam::roots_at` wants), its loginusers.vdf.
+fn steam_home(name: &str, user: &str, rel: &str, loginusers: Option<&str>) -> (PathBuf, PathBuf) {
+    let base = std::env::temp_dir().join(format!("km-report-steam-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let home = base.join(user);
+    let root = home.join(rel);
+    std::fs::create_dir_all(root.join("steamapps")).unwrap();
+    std::fs::create_dir_all(root.join("config")).unwrap();
+    if let Some(t) = loginusers {
+        std::fs::write(root.join("config/loginusers.vdf"), t).unwrap();
+    }
+    (base, home)
+}
+
+fn steam_redactor(home: &Path) -> Redactor {
+    let roots = crate::steam::roots_at(home);
+    assert_eq!(roots.len(), 1, "the fixture's Steam root is found: {roots:?}");
+    let mut r = Redactor::new(Some(&home.to_string_lossy()), None, None);
+    r.add_steam_accounts(&roots, home);
+    r
+}
+
+/// Every place a Linux report shows the local Steam names (oryx_acct, Oryx593): none may survive.
+fn assert_no_steam_names(r: &Redactor, layout: &str) {
+    for text in [
+        "[I 22:31:42.935] [service:kiln-players.dll] players: joined slot 0 entity 1 'Oryx593' (steam 76561198000000009, admin 1, perms 0x3f) [event 1]",
+        "[I 22:31:36.187] [kiln] net: Oryx593 (0x80) joined with Kiln 0.2.0-dev.29.21: 6 mod(s)",
+        "[1794424596] shroudlink: client 2eaa65d2d4c437f9 is Oryx593",
+        "[1] world: client 2eaa65d2d4c437f9 is player 1 (the only unmatched one) (ORYX593)",
+        "[I 1] [mod:chat-plus] welcome back, oryx593! saved Oryx593_world.json and oryx593-backup",
+        "Folder: /run/media/oryx_acct/Games/SteamLibrary/steamapps/common/Enshrouded",
+        r"save dir Z:\run\media\Oryx_Acct\Saves",
+    ] {
+        let out = redact(text, r);
+        assert!(!out.to_ascii_lowercase().contains("oryx"), "{layout}: {text}\n  -> {out}");
+    }
+}
+
+#[test]
+fn the_local_steam_names_are_replaced_on_every_steam_layout() {
+    for (name, user, rel) in [
+        ("native", "oryx", ".local/share/Steam"),
+        ("debian", "oryx", ".steam/debian-installation"),
+        ("flatpak", "oryx", ".var/app/com.valvesoftware.Steam/.local/share/Steam"),
+        ("flatpak-data", "oryx", ".var/app/com.valvesoftware.Steam/data/Steam"),
+        ("snap", "oryx", "snap/steam/common/.local/share/Steam"),
+        // a Steam Deck: the user is `deck`, a word Kiln's files are full of, so only Steam's names say who it is
+        ("deck", "deck", ".local/share/Steam"),
+    ] {
+        let (base, home) = steam_home(name, user, rel, Some(LOGINUSERS));
+        assert_no_steam_names(&steam_redactor(&home), name);
+        let _ = std::fs::remove_dir_all(base);
+    }
+}
+
+#[test]
+fn the_signed_in_persona_comes_from_localconfig_when_loginusers_does_not_have_it() {
+    // loginusers.vdf without the account (a fresh Steam, a login that is not remembered): userdata/<id>/config/localconfig.vdf
+    // still names the signed-in account's persona, and Steam's registry.vdf its login name
+    let (base, home) = steam_home("localconfig", "deck", ".local/share/Steam", None);
+    let root = home.join(".local/share/Steam");
+    std::fs::create_dir_all(root.join("userdata/39734281/config")).unwrap();
+    std::fs::write(root.join("userdata/39734281/config/localconfig.vdf"),
+        "\"UserLocalConfigStore\"\n{\n\t\"friends\"\n\t{\n\t\t\"PersonaName\"\t\t\"Oryx593\"\n\t}\n}\n").unwrap();
+    std::fs::write(home.join(".steam/registry.vdf").tap_dir(),
+        "\"Registry\"\n{\n\t\"HKCU\"\n\t{\n\t\t\"Software\"\n\t\t{\n\t\t\t\"Valve\"\n\t\t\t{\n\t\t\t\t\"Steam\"\n\t\t\t\t{\n\t\t\t\t\t\"AutoLoginUser\"\t\t\"oryx_acct\"\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n").unwrap();
+    assert_no_steam_names(&steam_redactor(&home), "localconfig");
+    let _ = std::fs::remove_dir_all(base);
+}
+
+trait TapDir {
+    fn tap_dir(self) -> Self;
+}
+impl TapDir for PathBuf {
+    /// Creates the parent folder, for a write.
+    fn tap_dir(self) -> Self {
+        std::fs::create_dir_all(self.parent().unwrap()).unwrap();
+        self
+    }
+}
+
+#[test]
 fn os_release_names() {
     assert_eq!(os_release("NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\nID=arch\n"), (Some("Arch Linux".into()), Some("arch".into())));
     assert_eq!(os_release("NAME=SteamOS\nID=steamos\n"), (Some("SteamOS".into()), Some("steamos".into())));
@@ -226,6 +401,53 @@ fn healthy_install_finds_nothing() {
     }
 }
 
+/// (0.2.0-dev.29.18) The facts a public post may name: Kiln's version, the system, the game's build and how many mods
+/// are on (never which), also in report.json.
+#[test]
+fn the_public_facts_name_versions_and_a_mod_count_not_the_mods() {
+    let f = Fx::healthy("public-facts");
+    let r = build(&f.input());
+    assert_eq!(r.facts.kiln.as_deref(), Some("0.2.0-dev.22"));
+    assert_eq!(r.facts.mods_on, Some(1));
+    assert!(!r.facts.os.is_empty());
+    let json: serde_json::Value = serde_json::from_str(file(&r, "report.json").unwrap()).unwrap();
+    // the relay's shape (docs/relay-api.md): {kiln, launcher, os, runner, gameBuild, modsOn, deck}
+    let v = &json["versions"];
+    assert_eq!((v["kiln"].as_str(), v["modsOn"].as_u64(), v["deck"].as_bool()), (Some("0.2.0-dev.22"), Some(1), Some(false)));
+    assert_eq!(v["runner"], "Windows");
+    assert!(v.get("launcher").is_none(), "the tool here is not a launcher's");
+    assert!(!v.to_string().contains("chat-plus"), "{v}");
+    // with the launcher as the tool, its version
+    let mut input = f.input();
+    input.tool = "kiln-launcher 0.2.0-dev.29.18 beta 3".into();
+    let r = build(&input);
+    assert_eq!(r.facts.versions()["launcher"], "0.2.0-dev.29.18");
+    // report.json alone for a post without the zip: the launcher's version, the findings, the versions, nothing else
+    // (not when it was written, not the test build's number: the post shows neither)
+    let alone: serde_json::Value = serde_json::from_slice(&public_json(&r)).unwrap();
+    let mut keys: Vec<&str> = alone.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort();
+    assert_eq!(keys, ["findings", "format", "tool", "versions"]);
+    assert_eq!((alone["format"].as_u64(), alone["tool"].as_str()), (Some(1), Some("kiln-launcher 0.2.0-dev.29.18")));
+}
+
+/// (0.2.0-dev.29.18) The zip in memory is the zip on disk: the same files with the same bytes (the launcher sends it
+/// without writing it to a shared temp folder).
+#[cfg(feature = "zip")]
+#[test]
+fn the_zip_in_memory_holds_what_the_zip_on_disk_holds() {
+    let f = Fx::healthy("zip-bytes");
+    let r = build(&f.input());
+    let bytes = zip_bytes(&r).unwrap();
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    assert_eq!(z.len(), r.files.len());
+    for (name, data) in &r.files {
+        let mut got = Vec::new();
+        std::io::Read::read_to_end(&mut z.by_name(name).unwrap(), &mut got).unwrap();
+        assert_eq!(&got, data, "{name}");
+    }
+}
+
 /// OptiScaler next to the game (an upscaler with its own overlay, inbox 80): one Info finding with what Kiln's overlay
 /// does next to it, its ini in the zip, nothing found when it is not there.
 #[test]
@@ -246,6 +468,21 @@ fn optiscaler_is_named_with_what_kilns_overlay_does() {
     f.w("OptiScaler.ini", "[Menu]\nOverlayMenu=false\n");
     let r = build(&f.input());
     assert!(finding(&r, "optiscaler").text.contains("draws next to it"));
+    assert!(r.summary.contains("Graphics tool: OptiScaler (winmm.dll): Kiln's overlay draws next to it (its own menu and frame generation are off"), "{}", r.summary);
+    // Inbox 80: its menu off, frame generation set: Kiln steps aside, and the finding says why
+    f.w("OptiScaler.ini", "[FrameGen]\r\nFGInput=upscaler\r\nFGOutput=fsrfg\r\n[Menu]\r\nOverlayMenu=false\r\n");
+    let r = build(&f.input());
+    let x = finding(&r, "optiscaler");
+    assert!(x.text.contains("frame generation is set") && x.text.contains("steps aside"), "{}", x.text);
+    assert!(r.summary.contains("Graphics tool: OptiScaler (winmm.dll): Kiln's overlay drawing steps aside"), "{}", r.summary);
+    // the DLL as it really is: ReShade's texts first, its own later (29.17 named it "ReShade (text reshade)")
+    let mut text = b"ReShade 6.4 reshade64.dll ".to_vec();
+    text.extend(std::iter::repeat_n(0u8, 2048));
+    text.extend("OptiScaler.ini".encode_utf16().flat_map(|c| c.to_le_bytes()));
+    f.w("winmm.dll", crate::pe::build_test_dll(&["timeGetTime"], &text));
+    let r = build(&f.input());
+    assert!(r.summary.contains("winmm.dll        OptiScaler") && !r.summary.contains("winmm.dll        ReShade"), "{}", r.summary);
+    f.w("OptiScaler.ini", "[Menu]\nOverlayMenu=false\n");
     // its log can grow large (debug level): only its tail, within a log's budget, as for the other tools' logs
     let old = "[info] an earlier line of OptiScaler's log\n";
     f.w("OptiScaler.log", old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + "[info] HookDevice: the newest line\n");
@@ -276,6 +513,26 @@ fn stop_state_files_are_in_the_report() {
     for n in names {
         assert!(file(&r, &format!("game/kiln/state/{n}")).is_some_and(|t| t.contains("cs-good")), "{n} missing");
     }
+}
+
+// the interpreter's launch plans and kiln-eml's ownership records (newest three of each) go in
+#[test]
+fn the_interpreters_launch_plans_and_ownership_records_are_in_the_report() {
+    let f = Fx::healthy("sfi-plans");
+    for i in 0..4 {
+        f.w(&format!("kiln/launch-plans/plan-{i}.json"), format!(r#"{{"format":1,"planId":"plan-{i}"}}"#).as_bytes());
+        let t = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000 + i * 60);
+        std::fs::File::options().write(true).open(f.game.join(format!("kiln/launch-plans/plan-{i}.json"))).unwrap().set_modified(t).unwrap();
+    }
+    f.w("kiln/launch-plans/.tmp-plan.json", b"{}");
+    f.w("kiln/eml/ownership/enshrouded.json", br#"{"format":1,"receipt":"r"}"#);
+    let r = build(&f.input());
+    for i in 1..4 {
+        assert!(file(&r, &format!("game/kiln/launch-plans/plan-{i}.json")).is_some_and(|t| t.contains(&format!("plan-{i}"))), "plan-{i} missing");
+    }
+    assert!(file(&r, "game/kiln/launch-plans/plan-0.json").is_none(), "only the newest three plans");
+    assert!(file(&r, "game/kiln/launch-plans/.tmp-plan.json").is_none());
+    assert!(file(&r, "game/kiln/eml/ownership/enshrouded.json").is_some());
 }
 
 #[test]
@@ -323,6 +580,106 @@ fn addon_log_is_optional_bounded_and_redacted() {
         old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + last, "collection is read-only");
 }
 
+/// netjunk's report (2026-11-20): Building Tools' own logs were in the game folder's listing only. Other mods' and
+/// loaders' logs that sit in the game folder are in the zip now (Building Tools' BuildingTools.log and .prev.log,
+/// ShroudLink's core shroudlink.log, Auto Loot Plus' auto-loot-plus.log): each optional, a bounded tail, redacted; their
+/// settings files are not read.
+#[test]
+fn other_mods_logs_in_the_game_folder_are_optional_bounded_and_redacted() {
+    let f = Fx::healthy("other-mod-logs");
+    let names = ["BuildingTools.log", "BuildingTools.prev.log", "shroudlink.log", "auto-loot-plus.log"];
+    let absent = build(&f.input());
+    for n in names {
+        assert!(file(&absent, &format!("game/{n}")).is_none(), "{n}");
+    }
+    assert!(absent.errors.is_empty(), "{:?}", absent.errors);
+
+    let old = "[1] old line\n";
+    for n in names {
+        f.w(n, old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + &format!("[2] {n} last line (Z:\\var\\home\\frostling\\x.dll)\n"));
+    }
+    f.w("BuildingTools.ini", "[Keys]\nSecretSetting=1\n");
+    let r = build(&f.input());
+    for n in names {
+        let log = file(&r, &format!("game/{n}")).unwrap_or_else(|| panic!("{n} must be collected"));
+        assert!(log.starts_with("... (older lines left out") && log.len() as u64 <= SMALL_LOG_MAX + 200, "{n}: {} bytes", log.len());
+        assert!(log.contains(&format!("{n} last line")) && log.contains(r"<home>\x.dll") && !log.contains("frostling"), "{n}: {log}");
+    }
+    assert!(!r.files.iter().any(|(n, _)| n.ends_with("BuildingTools.ini")), "a mod's settings stay out");
+}
+
+/// inbox 86: XHL-Core loaded a mod the profile had off, and the report had nothing of XHL-Core's own. Its log,
+/// XHL-Native-Plugin-Host.log, written next to the DLL it runs as (the game's dinput8.dll, or Kiln's copy in
+/// kiln/chain/<id>/), is in the zip now when it is there: bounded and redacted as Kiln's logs, never through a link.
+#[test]
+fn other_players_names_never_reach_any_file_of_the_report() {
+    let f = Fx::healthy("players");
+    f.w("kiln/logs/kiln.log", concat!(
+        "[I 11:00:00.000] [kiln] Kiln 0.2.0-dev.22 starting (pid 412)\n",
+        "[I 11:00:00.100] [kiln] boot complete; handing control to the game\n",
+        "[I 11:01:00.000] [kiln] net: Brimwyn (0x81) joined with Kiln 0.2.0-dev.22: 1 mod(s), 2 shared channel(s)\n",
+        "[I 11:01:00.500] [service:kiln-players.dll] players: joined slot 1 entity 7 'Brimwyn' (steam 76561198000000002, admin 0, perms 0x1) [event 2]\n",
+        "[I 11:02:00.000] [mod:chat-plus] welcome back, Brimwyn! mail brim@example.org, rcon password=hunter2, peer fe80::1c2d:3e4f\n",
+        "[E 11:03:00.000] [kiln] net: peer Brimwyn: 12 drops in 10 s: kicking\n",
+    ));
+    f.w("shroudlink.log", "[1] shroudlink: client 2eaa65d2d4c437f9 is Ember Fox\n[2] world: client 2eaa65d2d4c437f9 is player 2 (Ember Fox)\n");
+    f.w("kiln/state/last-server.json", br#"{"format":1,"server":{"id":"srv-1","name":"Ember Isles","address":"203.0.113.7:15636"},"players":[{"playerName":"Brimwyn","email":"brim@example.org"}]}"#);
+    let r = build(&f.input());
+    let mut all = r.summary.clone() + &r.short;
+    for (n, b) in &r.files {
+        let t = String::from_utf8_lossy(b);
+        for secret in ["Brimwyn", "Ember Fox", "brim@example.org", "hunter2", "fe80::1c2d", "76561198000000002", "203.0.113.7"] {
+            assert!(!t.contains(secret), "{n} holds {secret}: {t}");
+        }
+        all.push_str(&t);
+    }
+    let log = file(&r, "game/kiln/logs/kiln.log").unwrap();
+    assert!(log.contains("net: <player> (0x81) joined") && log.contains("welcome back, <player>!") && log.contains("password=<redacted>")
+        && log.contains("<email>") && log.contains("peer <ip>"), "{log}");
+    assert!(file(&r, "game/shroudlink.log").unwrap().contains("is player 2 (<player>)"));
+    assert!(file(&r, "game/kiln/state/last-server.json").unwrap().contains("Ember Isles"), "the server keeps its name");
+    assert!(r.summary.contains("(<player>)") && r.summary.contains("<email>"), "summary.txt says what was replaced");
+}
+
+#[test]
+fn xhl_cores_own_log_is_collected_where_it_runs_from() {
+    let f = Fx::healthy("xhl-core-log");
+    let absent = build(&f.input());
+    assert!(!absent.files.iter().any(|(n, _)| n.ends_with("XHL-Native-Plugin-Host.log")), "nothing without XHL-Core");
+    assert!(absent.errors.is_empty(), "{:?}", absent.errors);
+
+    let old = "[XHL-Native-Host] an older line\n";
+    let last = "[XHL-Native-Host] loaded plugin: BuildingTools 0.34.0 (Z:\\var\\home\\frostling\\Enshrouded\\mods\\building-tools)\n";
+    f.w("kiln/chain/xhl-core/xhl-core.dll", b"MZ");
+    f.w("kiln/chain/xhl-core/XHL-Native-Plugin-Host.log", old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + last);
+    f.w("XHL-Native-Plugin-Host.log", "[XHL-Native-Host] core: DirectInput8Create is forwarded to System32 dinput8.dll.\n");
+    // the copy of another profile without a log, and a folder that is no mod id: nothing, no error
+    f.w("kiln/chain/xhl-core-old/xhl-core.dll", b"MZ");
+    f.w("kiln/chain/Not An Id/XHL-Native-Plugin-Host.log", "not read\n");
+    let r = build(&f.input());
+    let log = file(&r, "game/kiln/chain/xhl-core/XHL-Native-Plugin-Host.log").expect("Kiln's copy's log is in the zip");
+    assert!(log.starts_with("... (older lines left out") && log.len() as u64 <= SMALL_LOG_MAX + 200, "bounded");
+    assert!(log.contains("loaded plugin: BuildingTools 0.34.0") && log.contains(r"<home>\Enshrouded") && !log.contains("frostling"), "{log}");
+    assert!(file(&r, "game/XHL-Native-Plugin-Host.log").is_some_and(|l| l.contains("forwarded to System32")), "the game's own XHL-Core's log");
+    let xhl: Vec<&str> = r.files.iter().map(|(n, _)| n.as_str()).filter(|n| n.ends_with("XHL-Native-Plugin-Host.log")).collect();
+    assert_eq!(xhl.len(), 2, "{xhl:?}");
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    #[cfg(unix)]
+    {
+        // a link in place of the log or of the copy's folder is not followed
+        let secret = f.root.join("secret.log");
+        std::fs::write(&secret, "SECRET\n").unwrap();
+        f.rm("XHL-Native-Plugin-Host.log");
+        std::os::unix::fs::symlink(&secret, f.game.join("XHL-Native-Plugin-Host.log")).unwrap();
+        std::os::unix::fs::symlink(f.root.join("elsewhere"), f.game.join("kiln/chain/linked")).unwrap();
+        std::fs::create_dir_all(f.root.join("elsewhere")).unwrap();
+        std::fs::write(f.root.join("elsewhere/XHL-Native-Plugin-Host.log"), "SECRET\n").unwrap();
+        let r = build(&f.input());
+        assert!(!r.files.iter().any(|(_, b)| String::from_utf8_lossy(b).contains("SECRET")), "a link was followed");
+        assert!(file(&r, "game/kiln/chain/linked/XHL-Native-Plugin-Host.log").is_none());
+    }
+}
+
 /// GitHub issue 39: a player's "slow motion" report could not be told apart from the save cycle because the zip had no
 /// tick-stats.jsonl (Kiln's per-minute step times, rewritten at every game start). It is in the zip now: the newest lines,
 /// whole, within [`TICK_STATS_MAX`].
@@ -339,7 +696,11 @@ fn tick_stats_are_collected_newest_lines_whole_and_bounded() {
          \"post_ms\":{{\"p50\":0.0110,\"p99\":0.0500,\"max\":0.200}},\"interval_ms\":{{\"p50\":16.67,\"p99\":33.40,\"max\":2402.10}},\
          \"subs\":{{\"pre\":12,\"post\":9}}}}\n");
     let old = line("22:45:00", 59.67);
-    let last = line("00:33:00", 24.46);
+    // issue #49: the newest line carries a tasks object; the collector keeps it whole like the rest
+    let base = line("00:33:00", 24.46);
+    let last = format!(
+        "{},\"tasks\":{{\"window\":{{\"id\":7,\"span_ms\":60000.0,\"age_ms\":0.0}},\"pool\":{{\"workers\":3,\"long_running\":1,\"queue_max\":12}},\"owners\":[{{\"owner\":\"kiln-auto-loot\",\"queued\":{{\"current\":0,\"max\":4}},\"running\":{{\"current\":1,\"max\":2}},\"completed\":120,\"faulted\":0,\"cancelled\":2,\"cpu_ms\":830.5,\"wall_ms\":910.2,\"longest_ms\":44.1,\"longest_name\":\"loot-scan\",\"queued_too_long\":0,\"running_too_long\":0,\"queue_full\":0,\"unload_blocked\":0}}],\"apply\":{{\"applied\":96,\"deferred\":3,\"cancelled\":0,\"ms\":4.2,\"owner_budget_stops\":1,\"step_budget_stops\":0,\"owners_served\":1,\"backlog\":0}},\"hops\":{{\"refused\":0}}}}}}\n",
+        base.strip_suffix("}\n").unwrap());
     let n = TICK_STATS_MAX as usize / old.len() + 50;
     f.w("kiln/logs/tick-stats.jsonl", old.repeat(n) + &last);
     let r = build(&f.input());
@@ -353,6 +714,9 @@ fn tick_stats_are_collected_newest_lines_whole_and_bounded() {
         serde_json::from_str::<serde_json::Value>(l).unwrap_or_else(|e| panic!("every line after the note is whole JSON ({e}): {l}"));
     }
     assert_eq!(rest.last().copied(), Some(last.trim_end()), "the newest line is kept");
+    let parsed = crate::logs::tick_stats(rest.last().unwrap());
+    assert_eq!(parsed[0].tasks.as_ref().map(|t| (t.window.as_ref().and_then(|w| w.id), t.owners[0].completed)), Some((Some(7), 120)),
+        "the kept line's tasks object still parses, old fields with it");
     assert_eq!(std::fs::read_to_string(f.game.join("kiln/logs/tick-stats.jsonl")).unwrap(), old.repeat(n) + &last, "collection is read-only");
     // a short file whole, without the note
     f.w("kiln/logs/tick-stats.jsonl", last.clone());
@@ -408,6 +772,45 @@ fn files_missing_or_changed_against_the_receipt() {
     assert!(finding(&r, "files-changed").text.contains("kiln/Kiln.Host.dll"));
 }
 
+/// Inbox 92 (a player on Windows 11): an antivirus held kiln-greeneye.dll while Kiln installed it, the install failed with
+/// "Access is denied. (os error 5)" and was undone, and the report said only "Kiln is not installed". launcher.log had the
+/// cause: the report now says it (`install-blocked`), until an install works (a newer receipt).
+#[test]
+fn an_install_windows_refused_a_dll_of_is_a_finding_until_an_install_works() {
+    let f = Fx::new("blocked");
+    f.w("enshrouded.exe", b"MZ");
+    let log = f.root.join("data/logs/launcher.log");
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    // a 0.2.0-dev.29.18 launcher's lines: the error's detail after its words (this test's folder is a Linux path, so
+    // the words alone would not count: 5 is no refusal there; blocked.rs has the Windows lines of older launchers)
+    let failed = |at: &str, game: &Path| format!(
+        "{at} task: runtime_install-2-6afe1f10 started: Install Kiln 0.2.0-dev.29.18\n\
+         {at} task: runtime_install-2-6afe1f10 failed: [permission] installing {}/kiln/plugins/kiln-greeneye.dll: Access is denied. (os error 5) \
+         {{\"blocked\":{{\"osError\":5,\"path\":\"kiln/plugins/kiln-greeneye.dll\"}}}} (last step: installed kiln/plugins/kiln-flame.dll)\n\
+         {at} update: automatic check (dev): up to date (frostdev.io)\n", game.display());
+    std::fs::write(&log, failed("2026-11-18T21:10:08Z", &f.game)).unwrap();
+    let r = build(&f.input());
+    let b = finding(&r, "install-blocked");
+    assert_eq!(b.level, Level::Problem);
+    assert!(b.text.starts_with("A Kiln install in this game folder (Install Kiln 0.2.0-dev.29.18, 2026-11-18T21:10:08Z) failed because Windows denied access to kiln/plugins/kiln-greeneye.dll (os error 5), and no install has worked since."), "{}", b.text);
+    assert!(b.text.contains("An antivirus or another program may be blocking the file"), "{}", b.text);
+    assert!(ids(&r).contains(&"not-installed"), "the receipt's own finding stays: {:?}", ids(&r));
+    assert!(r.summary.contains("kiln-greeneye.dll (os error 5)") && r.short.contains("kiln-greeneye.dll (os error 5)"), "{}", r.short);
+    assert!(file(&r, "launcher/launcher.log").is_some_and(|t| t.contains("os error 5")), "the raw line stays in the log");
+    // another game folder's failure is not this one's
+    std::fs::write(&log, failed("2026-11-18T21:10:08Z", &f.root.join("EnshroudedServer"))).unwrap();
+    assert!(!ids(&build(&f.input())).contains(&"install-blocked"));
+
+    // Kiln installed: a failed update after the receipt is found, one before it is over (an install worked since)
+    let h = Fx::healthy("blocked-update");
+    let log = h.root.join("data/logs/launcher.log");
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    std::fs::write(&log, failed("2026-11-18T21:10:08Z", &h.game)).unwrap();
+    assert_eq!(ids(&build(&h.input())), ["install-blocked"]);
+    std::fs::write(&log, failed("2026-11-09T21:10:08Z", &h.game)).unwrap();
+    assert_eq!(ids(&build(&h.input())), Vec::<&str>::new());
+}
+
 #[test]
 fn kiln_did_not_load() {
     // the game ran (its log is there) and Kiln's proxy never wrote anything
@@ -421,7 +824,16 @@ fn kiln_did_not_load() {
     i.install = Some(f.install(Platform::Proton));
     let r = build(&i);
     let n = finding(&r, "not-loaded");
-    assert!(n.text.contains("Launch options") || n.text.contains("launch options"), "{}", n.text);
+    assert!(n.text.contains("launch options") && n.text.contains(crate::game::DLL_OVERRIDE_ADVICE), "{}", n.text);
+    // If the dinput8 override is already present, don't recommend setting it again.
+    let prefix = f.root.join("pfx");
+    std::fs::create_dir_all(&prefix).unwrap();
+    std::fs::write(prefix.join("user.reg"), "[Software\\\\Wine\\\\DllOverrides]\n\"dinput8\"=\"native,builtin\"\n").unwrap();
+    i.install.as_mut().unwrap().prefix = Some(prefix);
+    let r = build(&i);
+    let n = finding(&r, "not-loaded");
+    assert!(n.text.contains("Check Steam's launch options for Enshrouded (WINEDLLOVERRIDES) and the Proton version."), "{}", n.text);
+    assert!(!n.text.contains("try this fallback") && !n.text.contains(crate::game::DLL_OVERRIDE_ADVICE), "{}", n.text);
     // a launch from the launcher after the last boot.json
     let g = Fx::healthy("stale");
     let old = SystemTime::now() - std::time::Duration::from_secs(3600);
@@ -796,12 +1208,14 @@ fn failed_mods_and_crash() {
     assert!(!ids(&build(&f.input())).contains(&"mod-failed"));
     f.w("kiln/state/mods.json", br#"{"format":1,"pid":412,"written":"2026-11-10T11:00:01Z","generation":3,"mods":[{"id":"chat-plus","state":"failed","reason":"missing dependency kiln.ui >= 2"}]}"#);
     f.w("kiln/state/flame.json", br#"{"status":"running","mods":[{"name":"BiggerTorch","status":"failed","error":"LoadLibrary 126"}]}"#);
-    f.w("kiln/crash-reports/crash-20261110T110500Z.txt", "chat-plus faulted 5 times\n");
+    f.w("kiln/crash-reports/crash-20261110T110500Z.txt",
+        "chat-plus faulted 5 times\n\n-- Tasks --\n  running thread=42 owner=\"kiln-auto-loot\" task=\"loot-scan\" handle=0x1234 started_ns=99 elapsed_ms=12.500 state=running\n");
     let r = build(&f.input());
     let m = finding(&r, "mod-failed");
     assert!(m.text.contains("missing dependency kiln.ui") && m.text.contains("BiggerTorch") && m.text.contains("LoadLibrary 126"), "{}", m.text);
     assert!(finding(&r, "crash").text.contains("crash-20261110T110500Z.txt"));
-    assert!(file(&r, "game/kiln/crash-reports/crash-20261110T110500Z.txt").is_some());
+    let crash = file(&r, "game/kiln/crash-reports/crash-20261110T110500Z.txt").expect("the crash report is collected");
+    assert!(crash.contains("-- Tasks --") && crash.contains("task=\"loot-scan\""), "the crash report's task lines are kept: {crash}");
 }
 
 /// Player report (Nexus, 2026-11-11): a client's server mods (Loot Leveler) are "skipped" in the menu's mods.json and
@@ -863,6 +1277,31 @@ fn no_game_folder_or_a_missing_one() {
     let r = build(&i);
     assert!(r.errors.iter().any(|e| e.contains("does not exist")), "{:?}", r.errors);
     assert!(r.summary.contains("Left out"));
+}
+
+/// (dev.29.18) A finding the launcher knows (WebKit's sandbox) is listed with the report's own, problems first, in
+/// summary.txt, report.json and the short summary, redacted like them; with a game and without one.
+#[test]
+fn the_callers_findings_are_listed_with_the_reports_own() {
+    let f = Fx::new("caller-findings");
+    let mut i = f.input();
+    i.findings.push(Finding { id: "webkit-sandbox".into(), level: Level::Problem,
+        text: format!("WebKit's sandbox cannot start on this system (bwrap: setting up uid map: Permission denied); launcher.log: {HOME}/.local/share/kiln/logs/launcher.log") });
+    for game in [true, false] {
+        if !game {
+            i.install = None;
+        }
+        let r = build(&i);
+        let w = r.findings.iter().find(|x| x.id == "webkit-sandbox").expect("listed");
+        assert_eq!(w.level, Level::Problem);
+        assert!(w.text.contains("<home>/.local/share/kiln/logs/launcher.log") && !w.text.contains(HOME), "{}", w.text);
+        assert_eq!(r.findings[0].level, Level::Problem, "problems first");
+        assert!(r.summary.contains("[problem] WebKit's sandbox cannot start"), "{}", r.summary);
+        assert!(r.short.contains("WebKit's sandbox cannot start"), "{}", r.short);
+        assert!(file(&r, "report.json").unwrap().contains("\"webkit-sandbox\""));
+    }
+    // none given: none listed
+    assert!(build(&f.input()).findings.iter().all(|x| x.id != "webkit-sandbox"));
 }
 
 #[test]
@@ -940,6 +1379,26 @@ fn writes_a_zip() {
     assert_eq!(names[0], "summary.txt");
     assert!(names.contains(&"game/kiln/state/boot.json".to_string()), "{names:?}");
     assert!(out.file_name().unwrap().to_string_lossy().starts_with("kiln-report-20"));
+}
+
+/// Two saves of one report file at once (a second click, a second window): both end with the whole zip at the path
+/// chosen and no temp file left. With one shared `<file>.tmp` the second one's rename found nothing (2026-11-20).
+#[cfg(feature = "zip")]
+#[test]
+fn saves_of_one_report_file_at_once_all_succeed() {
+    let f = Fx::healthy("zip-race");
+    let r = build(&f.input());
+    let dir = f.root.join("saved");
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("kiln-report.zip");
+    let errors: Vec<String> = std::thread::scope(|s| {
+        let ws: Vec<_> = (0..4).map(|_| s.spawn(|| (0..10).filter_map(|_| write_zip(&r, &out).err().map(|e| e.message)).collect::<Vec<_>>())).collect();
+        ws.into_iter().flat_map(|w| w.join().unwrap()).collect()
+    });
+    assert!(errors.is_empty(), "{} of 40 saves failed, first: {:?}", errors.len(), errors.first());
+    assert!(zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap().len() > 1);
+    let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert_eq!(names, ["kiln-report.zip"], "nothing else beside it");
 }
 
 // ---------------------------------------------------------------- ShroudForge's own startup pass
@@ -1061,6 +1520,35 @@ fn a_start_without_shroudforge_does_not_repeat_an_earlier_starts_failed_pass() {
         assert!(!r.findings.iter().any(|x| x.id == "sf-startup-failed"), "pid {pid}: {:#?}", r.findings);
         assert!(!r.summary.contains("ShroudForge's record of its startup pass"), "pid {pid}: {}", r.summary);
     }
+}
+
+/// dev.29.18 (inbox 79): Kiln's ShroudForge ran its startup pass again without the one mod it failed in. The report
+/// names the mod and its error as a warning; the other mods loaded, so it is no `sf-startup-failed`.
+#[test]
+fn a_startup_pass_that_ran_without_one_mod_is_a_warning() {
+    let f = Fx::healthy("sf-skipped");
+    f.w("kiln/plugins/kiln-shroudforge.dll", b"adapter");
+    f.w("kiln/plugins/shroudforge/shroudforge-runtime.dll", b"runtime");
+    for id in ["bone-caller", "wisp"] {
+        f.w(&format!("mods/{id}/mod.json"), serde_json::to_vec(&serde_json::json!({"id": id, "name": id, "version": "1.0.0", "capabilities": ["patch"]})).unwrap());
+        f.w(&format!("mods/{id}/extended.mod.json"), br#"{"schemaVersion":1,"enabled":true,"targets":["client"],"settings":{}}"#);
+        f.w(&format!("mods/{id}/src/mod.lua"), "return {}");
+    }
+    f.w("kiln/state/shroudforge.json", br#"{"format":1,"mode":"hosted","source":"bundled","pid":412,"side":"client","updated":1794308430,
+        "bundled":{"version":"1.7.9","build":"kiln.4b1ab16"},"startupPrepared":true}"#);
+    f.w("shroudforge/state.json", br#"{"schemaVersion":1,"assets":{"schemaVersion":1,"status":"applied","phase":"startup","target":"enshrouded",
+        "completedAt":1794308405,"fingerprint":"f","mods":[{"id":"bone-caller","version":"1.0.0"}],
+        "skipped":[{"id":"wisp","name":"Wisp Light Timer","version":"1.0.3","error":"runtime error: Missing base localization: keenglish"}]}}"#);
+    let r = build(&f.input());
+    let s = finding(&r, "sf-startup-skipped");
+    assert_eq!(s.level, Level::Warning);
+    assert!(s.text.starts_with("ShroudForge 1.7.9, hosted by Kiln, left Wisp Light Timer (wisp 1.0.3) out of its startup pass"), "{}", s.text);
+    assert!(s.text.contains("(runtime error: Missing base localization: keenglish)") && s.text.contains("The other mod that needs that step loaded")
+        && s.text.ends_with("Turn Wisp Light Timer off, or check whether it clashes with another mod: one that changes the same game data can make its check fail."),
+        "{}", s.text);
+    assert!(!r.findings.iter().any(|x| x.id == "sf-startup-failed"), "{:#?}", r.findings);
+    assert!(r.summary.contains("ShroudForge's record of its startup pass (state.json \"assets\"): applied at 2026-11-10T11:00:05Z without Wisp Light Timer"),
+        "{}", r.summary);
 }
 
 #[test]
@@ -1196,4 +1684,118 @@ fn a_custom_folder_started_directly() {
     let r = build(&i);
     assert!(r.summary.contains("Start:         through Steam"), "{}", r.summary);
     assert!(finding(&r, "proton-override").text.contains(crate::game::DLL_OVERRIDE_ADVICE));
+}
+
+
+// ---------------------------------------------------------------- what is in a report (dev.29.22)
+
+/// A player declined to send a report: "a little too much personal information". The launcher's "What's in this report"
+/// groups the files; only other mods' and tools' files can be left out (support needs Kiln's own logs, the settings and
+/// the listings).
+#[test]
+fn file_kinds_group_the_zip_and_only_other_mods_files_can_be_left_out() {
+    for (p, g, about) in [
+        ("summary.txt", FileGroup::Kiln, "summary"),
+        ("report.json", FileGroup::Kiln, "findings"),
+        ("game/kiln/logs/kiln.log", FileGroup::Kiln, "kiln-log"),
+        ("game/kiln/logs/proxy.log", FileGroup::Kiln, "proxy-log"),
+        ("game/kiln/logs/eml.log", FileGroup::Kiln, "eml-log"),
+        ("game/kiln/logs/tick-stats.jsonl", FileGroup::Kiln, "tick-stats"),
+        ("game/kiln/logs/greeneye-loader.log", FileGroup::Kiln, "greeneye-bridge"),
+        ("game/kiln/crash-reports/crash-2026-11-10.txt", FileGroup::Kiln, "crash"),
+        ("launcher/launcher.log", FileGroup::Kiln, "launcher-log"),
+        ("launcher/game-start.log", FileGroup::Kiln, "game-start"),
+        ("game/kiln/state/boot.json", FileGroup::Settings, "state"),
+        ("game/kiln/profile.json", FileGroup::Settings, "profile"),
+        ("game/kiln/chain.ini", FileGroup::Settings, "chain"),
+        ("game/dinput8-chain.ini", FileGroup::Settings, "chain"),
+        ("game/kiln/kiln.json", FileGroup::Settings, "kiln-json"),
+        ("game/kiln/.install.json", FileGroup::Settings, "receipt"),
+        ("listings/game-folder.txt", FileGroup::Listings, "game-folder"),
+        ("listings/mod-folders.txt", FileGroup::Listings, "mod-folders"),
+        ("game/BuildingTools.log", FileGroup::Mods, "building-tools"),
+        ("game/BuildingTools.prev.log", FileGroup::Mods, "building-tools"),
+        ("game/shroudlink.log", FileGroup::Mods, "shroudlink"),
+        ("game/shroudlink_client.log", FileGroup::Mods, "shroudlink"),
+        ("game/auto-loot-plus.log", FileGroup::Mods, "auto-loot"),
+        ("game/XHL-Native-Plugin-Host.log", FileGroup::Mods, "xhl-core"),
+        ("game/kiln/chain/xhl-core/XHL-Native-Plugin-Host.log", FileGroup::Mods, "xhl-core"),
+        ("game/greeneye/loader.log", FileGroup::Mods, "greeneye"),
+        ("greeneye-mods/unlock-map/game/unlock_map_markers.log", FileGroup::Mods, "greeneye"),
+        ("game/OptiScaler.ini", FileGroup::Mods, "optiscaler-settings"),
+        ("game/optiscaler.log", FileGroup::Mods, "optiscaler-log"),
+        ("game/SomeNewMod.log", FileGroup::Mods, "mod-log"),
+    ] {
+        assert_eq!(file_kind(p), (g, about), "{p}");
+        assert_eq!(excludable(p), g == FileGroup::Mods, "{p}");
+    }
+}
+
+#[cfg(feature = "zip")]
+#[test]
+fn a_left_out_file_is_described_but_not_in_the_zip_and_kilns_own_cannot_be_left_out() {
+    let f = Fx::healthy("left-out");
+    f.w("BuildingTools.log", "[BT] loaded from Z:\\var\\home\\frostling\\Enshrouded\n");
+    f.w("auto-loot-plus.log", "[ALP] patterns found\n");
+    let mut input = f.input();
+    input.exclude = vec!["game/BuildingTools.log".into(), "game/kiln/logs/kiln.log".into(), "listings/game-folder.txt".into()];
+    let r = build(&input);
+    assert!(file(&r, "game/BuildingTools.log").is_none(), "left out");
+    assert!(file(&r, "game/auto-loot-plus.log").is_some(), "not asked for");
+    assert!(file(&r, "game/kiln/logs/kiln.log").is_some() && file(&r, "listings/game-folder.txt").is_some(), "Kiln's own files and the listings stay");
+    assert_eq!(r.left_out.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["game/BuildingTools.log"]);
+    let summary = file(&r, "summary.txt").unwrap();
+    assert!(summary.contains("Left out by the player (other mods' own files):\n  game/BuildingTools.log"), "{summary}");
+    let json: serde_json::Value = serde_json::from_str(file(&r, "report.json").unwrap()).unwrap();
+    assert_eq!(json["leftOut"], serde_json::json!(["game/BuildingTools.log"]));
+    // the zip has no trace of it
+    let zip = zip_bytes(&r).unwrap();
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(zip)).unwrap();
+    let names: Vec<String> = (0..z.len()).map(|i| z.by_index(i).unwrap().name().unwrap().into_owned()).collect();
+    assert!(!names.iter().any(|n| n.contains("BuildingTools")), "{names:?}");
+
+    // every other mod's file at once
+    input.exclude = vec![EXCLUDE_OTHER_MODS.into()];
+    let all = build(&input);
+    assert!(all.files.iter().all(|(n, _)| !excludable(n)), "{:?}", all.files.iter().map(|(n, _)| n).collect::<Vec<_>>());
+    assert_eq!(all.left_out.len(), 2);
+
+    // nothing asked: as before, nothing left out and no line about it
+    let none = build(&f.input());
+    assert!(none.left_out.is_empty() && !file(&none, "summary.txt").unwrap().contains("Left out by the player"));
+}
+
+#[test]
+fn contents_counts_each_replacement_per_file() {
+    let f = Fx::healthy("contents");
+    f.w("kiln/logs/kiln.log", "[I] [kiln] Kiln 0.2.0-dev.22 starting (pid 412)\n[I] [kiln] path /var/home/frostling/a and /var/home/frostling/b\n\
+        [I] [net] net: Wintermoth (0x81) joined with Kiln\n[I] [kiln] boot complete; handing control to the game\n");
+    f.w("BuildingTools.log", "[BT] Wintermoth placed a wall at 192.168.1.20\n");
+    let mut input = f.input();
+    input.exclude = vec!["game/BuildingTools.log".into()];
+    let r = build(&input);
+    let c = contents(&r);
+    let get = |p: &str| c.files.iter().find(|x| x.path == p).unwrap_or_else(|| panic!("no {p}: {:?}", c.files.iter().map(|x| &x.path).collect::<Vec<_>>()));
+    let log = get("game/kiln/logs/kiln.log");
+    assert_eq!((log.group, log.about.as_str(), log.excludable, log.excluded), (FileGroup::Kiln, "kiln-log", false, false));
+    assert_eq!(log.replaced.get("home"), Some(&2), "{:?}", log.replaced);
+    assert_eq!(log.replaced.get("player"), Some(&1), "{:?}", log.replaced);
+    assert_eq!(log.size, file(&r, "game/kiln/logs/kiln.log").unwrap().len() as u64);
+    let bt = get("game/BuildingTools.log");
+    assert!(bt.excluded && bt.excludable && bt.group == FileGroup::Mods);
+    assert_eq!((bt.replaced.get("player"), bt.replaced.get("ip")), (Some(&1), Some(&1)), "{:?}", bt.replaced);
+    // summary.txt's "Left out" names every token once: that is not a replacement
+    let s = get("summary.txt");
+    assert!(!s.replaced.contains_key("mac") && !s.replaced.contains_key("email"), "{:?}", s.replaced);
+    assert_eq!(c.size, r.files.iter().map(|(_, b)| b.len() as u64).sum::<u64>());
+    assert_eq!(c.summary, r.summary);
+    // the never-collected list is the summary's, item by item
+    assert_eq!(c.never.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["saves", "settings", "admin", "mods", "steam"]);
+    for n in &c.never {
+        assert!(LEFT_OUT.contains(&format!("- {}", n.text)), "{}", n.text);
+    }
+    // a report's JSON for the launcher
+    let j = serde_json::to_value(&c).unwrap();
+    assert_eq!(j["files"][0]["path"], "summary.txt");
+    assert!(j["files"].as_array().unwrap().iter().any(|x| x["path"] == "game/kiln/logs/kiln.log" && x["replaced"]["home"] == 2 && x["group"] == "kiln"));
 }

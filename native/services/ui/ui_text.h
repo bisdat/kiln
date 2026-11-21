@@ -32,11 +32,25 @@ inline constexpr English kEnglish[] = {
     {"native.menu.mods_off", "Mods: {reason}"},
     {"native.footer.loaded.one", "Kiln {version} - {count} Mod Loaded"},
     {"native.footer.loaded.other", "Kiln {version} - {count} Mods Loaded"},
+    {"native.footer.xhl.one", "Kiln {version} with XHL-Core - {count} Mod Loaded"},
+    {"native.footer.xhl.other", "Kiln {version} with XHL-Core - {count} Mods Loaded"},
     {"native.fallback.title", "Kiln {version}"},
     {"native.fallback.body",
      "Kiln's managed host (Kiln.Ui) is not running in this session, so the mod list and mod screens are unavailable here. "
      "Check kiln/logs/kiln.log."},
     {"native.fallback.close", "Press {key} to close."},
+    {"native.graphics.fps", "Rendered {rendered} fps | Output {output} fps | {ms} ms"},
+    {"native.graphics.dlss", "DLSS {mode}: {render} -> {output}, preset {preset}"},
+    {"native.graphics.preset_default", "default"},
+    {"native.graphics.not_dlss", "Not DLSS now (the game's FSR 3, XeSS or none): {output}"},
+    {"native.graphics.unknown", "DLSS: read from the next game start: {output}"},
+    {"native.graphics.aside", "Upscaler: left to {tools}: {output}"},
+    {"native.graphics.cap", "Frame cap {fps} fps"},
+    {"native.graphics.cap_aside", "Frame cap {fps} fps: off for {tools}"},
+    {"native.graphics.upscale", "Behind FSR 3: {upscaler}: {render} -> {output}"},
+    {"native.graphics.game_fsr3", "the game's own FSR 3"},
+    {"native.graphics.upscale_why", "{upscaler} is not running: {why}"},
+    {"native.graphics.upscale_restart", "Restart the game to use {upscaler}"},
 };
 
 inline std::string english(std::string_view key) {

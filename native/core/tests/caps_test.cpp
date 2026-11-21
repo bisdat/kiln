@@ -15,8 +15,10 @@ inline unsigned long GetCurrentProcessId() { return 4242; }
 #include "../src/sigdb.cpp"
 #include "../src/services/service.cpp"
 #include "../src/gates.cpp"  // kiln_gates.g.h: test-caps.sh generates it from native/core/gates
+#include "../src/sfi_release_policy.cpp"  // the release policy's rows gates.cpp adds
 #include "../src/config.cpp"
 #include "../src/services/caps.cpp"
+#include "../src/services/client_building_input.cpp"  // the building input row asks it whether its producer is bound
 
 #include <cstdarg>
 #include <barrier>
@@ -43,17 +45,33 @@ std::filesystem::path t_last_file;
 kiln::Paths t_paths;
 double t_now = 0;
 std::mutex t_clock_mutex;
+// Each set_clock starts a new epoch; a read of the clock by another thread than main's (the writer thread: flush and
+// boot_complete run on main here) marks the epoch seen. The writer reads it only under caps::g_wmutex, to measure its
+// gap and to take a write, so a seen epoch tells the test that the writer looked at the time set last. The same for
+// the writer's reads of the tick hook's state (refresh_tick, at the top of each of its rounds).
+const std::thread::id t_main = std::this_thread::get_id();  // static initialisation runs on main's thread
+uint64_t t_clock_epoch = 0, t_seen_epoch = 0;  // under t_clock_mutex
+uint64_t t_tick_epoch = 0, t_tick_seen = 0;    // under t_clock_mutex
 double fake_clock() {
     std::lock_guard l(t_clock_mutex);
+    if (std::this_thread::get_id() != t_main) t_seen_epoch = t_clock_epoch;
     return t_now;
+}
+void tick_read_noted() {
+    std::lock_guard l(t_clock_mutex);
+    if (std::this_thread::get_id() != t_main) t_tick_seen = t_tick_epoch;
 }
 void set_clock(double v) {
     {
         std::lock_guard l(t_clock_mutex);
         t_now = v;
+        ++t_clock_epoch;
     }
     kiln::caps::g_wcv.notify_all();  // the writer looks again (a real wake-up would come from its own timeout)
 }
+// The bound of a wait that must end. Generous: the shared build machine can be loaded far beyond its cores, and a
+// passing wait returns as soon as its condition holds.
+constexpr std::chrono::seconds kMustEnd{300};
 size_t writes() {
     std::lock_guard l(t_mutex);
     return t_writes.size();
@@ -117,7 +135,10 @@ bool owner_alive(KilnOwner owner) {
 uint64_t version() { return t_version.load(); }
 }  // namespace reg
 namespace tick {
-bool installed() { return t_tick; }
+bool installed() {
+    tick_read_noted();
+    return t_tick;
+}
 bool lifecycle() { return t_lifecycle; }
 bool waits_jobs() { return t_wait; }
 StopDrain stop_drain(uint32_t kind) { return stop_drain_of(kind, image().side, t_tick, t_lifecycle, t_wait); }
@@ -136,6 +157,8 @@ bool init_no() { return false; }
 }  // namespace
 KILN_SERVICE(fakeok, "kiln.fakeok", 3, &kFakeTable, &init_yes);
 KILN_SERVICE(fakeno, "kiln.fakeno", 2, &kFakeTable, &init_no);
+KILN_SERVICE(fakehooks, "kiln.hooks", 2, &kFakeTable, &init_yes);
+KILN_SERVICE(fakeclient, "kiln.client", 1, &kFakeTable, &init_yes);
 
 namespace {
 namespace caps = kiln::caps;
@@ -167,6 +190,7 @@ void reset() {
     caps::g_session.clear();
     caps::g_owner_reports.clear();
     caps::g_dll_failed.clear();
+    caps::g_fragment_rows.clear();
     for (auto& s : caps::g_subs) s->live = false;
     caps::g_subs.clear();
     caps::g_generation = 1;
@@ -563,6 +587,80 @@ void core_rows(const std::filesystem::path& dir) {
     for (const char* f : {"items.fuel", "net.kick", "tick", "tick.wait_jobs", "world.lifecycle"})
         all = all && is(f, A, KILN_CAP_REASON_NONE) && get(f).source == "sigdb";
     CHECK(all, "features: a resolver run with every symbol found gives every feature available, source sigdb");
+    CHECK(is("hooks.read_original", A, 0) && is("hooks.code_state", A, 0),
+          "hooks inspection: verified file and running service publish both static rows");
+    const bool from_disk = sigdb::code().disk;
+    sigdb::g_code.view.disk = false;
+    caps::core_rows(true, true, "");
+    CHECK(is("hooks.read_original", U, KILN_CAP_REASON_SYMBOL_MISSING) && is("hooks.code_state", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
+              get("hooks.code_state").text == "verified executable file code unavailable; live fallback is not original code",
+          "hooks inspection: on sigdb's live-code fallback both rows are unavailable, symbol-missing (never faulted)");
+    sigdb::g_code.view.disk = from_disk;
+    kiln_service_fakehooks.available = false;
+    caps::core_rows(true, true, "");
+    CHECK(is("hooks.read_original", U, KILN_CAP_REASON_SERVICE_MISSING), "hooks inspection: missing service refuses");
+    kiln_service_fakehooks.available = true;
+    caps::core_rows(false, false, "test idle");
+    CHECK(is("hooks.code_state", U, KILN_CAP_REASON_POLICY), "hooks inspection: safe idle policy refuses");
+    static const kiln::gates::Gate inspection_gate[] = {
+        {"hooks.code_state", "hooks-code", kiln::gates::kBoth}, {nullptr, nullptr, 0}};
+    kiln::gates::use_list_for_tests(inspection_gate);
+    kiln::gates::configure(KILN_SIDE_SERVER, false, {});
+    reset();
+    caps::core_rows(true, true, "");
+    CHECK(is("hooks.code_state", U, KILN_CAP_REASON_POLICY) && is("hooks.read_original", A, 0),
+          "hooks inspection: central hold overrides support without holding the other member");
+    static const kiln::gates::Gate no_inspection_gate[] = {{nullptr, nullptr, 0}};
+    kiln::gates::use_list_for_tests(no_inspection_gate);
+    kiln::gates::configure(KILN_SIDE_SERVER, false, {});
+    reset();
+    caps::core_rows(true, true, "");
+    // kiln.client's building input: the client only, kiln.client running, its producer bound
+    {
+        const uint32_t side = kiln::test_image.side;
+        kiln::test_image.side = KILN_SIDE_CLIENT;
+        kiln::building_input::reset_for_tests();
+        caps::core_rows(true, true, "");
+        const char* why = nullptr;
+        kiln::building_input::bound(&why);
+        CHECK(is("client.building_input", U, KILN_CAP_REASON_SYMBOL_MISSING) && get("client.building_input").text == why &&
+                  get("client.building_input").source == "core",
+              "building input: no producer bound on this build: unavailable, symbol-missing, with the producer's reason");
+        static const kiln::building_input::Layout layout{760, 936, 500, 160, 0, 1, 2, 3, 4, 5, 7, 40};
+        kiln::building_input::bind(&layout);
+        caps::core_rows(true, true, "");
+        CHECK(is("client.building_input", A, 0), "building input: a bound producer on the client: available");
+        kiln_service_fakeclient.available = false;
+        caps::core_rows(true, true, "");
+        CHECK(is("client.building_input", U, KILN_CAP_REASON_SERVICE_MISSING), "building input: kiln.client missing refuses");
+        kiln_service_fakeclient.available = true;
+        caps::core_rows(false, false, "test idle");
+        CHECK(is("client.building_input", U, KILN_CAP_REASON_POLICY) && get("client.building_input").text == "not started in safe idle: test idle",
+              "building input: safe idle says policy");
+        kiln::test_image.side = KILN_SIDE_SERVER;
+        caps::core_rows(true, true, "");
+        CHECK(is("client.building_input", U, KILN_CAP_REASON_WRONG_SIDE), "building input: a dedicated server says wrong side");
+        kiln::building_input::reset_for_tests();
+        kiln::test_image.side = side;
+        reset();
+        caps::core_rows(true, true, "");
+    }
+    // kiln.tasks' pool: tasks.pool follows the pool's health (read at every registry call, outside the pool's locks)
+    {
+        static std::atomic<int> health{0};
+        CHECK(is("tasks.pool", U, KILN_CAP_REASON_SERVICE_MISSING) && get("tasks.pool").source == "core",
+              "tasks.pool: no pool source (kiln.tasks did not start): unavailable, service-missing, source core");
+        caps::tasks_pool_source(+[] { return health.load(); });
+        CHECK(is("tasks.pool", U, KILN_CAP_REASON_FAULTED), "tasks.pool: every worker start failed: unavailable, faulted");
+        health = 1;
+        CHECK(is("tasks.pool", A, 0), "tasks.pool: a retried start succeeded: the row becomes available on its own");
+        health = 0;
+        CHECK(is("tasks.pool", U, KILN_CAP_REASON_FAULTED), "tasks.pool: every worker lost again: unavailable");
+        health = 1;
+        caps::core_rows(false, false, "test idle");
+        CHECK(is("tasks.pool", U, KILN_CAP_REASON_POLICY), "tasks.pool: safe idle: policy");
+        caps::tasks_pool_source(nullptr);
+    }
     reset();
     resolve_with(dir, "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E9");  // E8 -> E9: no match on this build
     caps::core_rows(true, true, "");
@@ -717,6 +815,36 @@ void core_rows(const std::filesystem::path& dir) {
     sigdb::g_core = sigdb::Resolver();
 }
 
+// kiln.net's Steam peer-to-peer messages row: the core says why in safe idle and when kiln-net.dll did
+// not start; otherwise kiln-net.dll reports it (pending until Steam is resolved, then available).
+void steam_messages_row(const std::filesystem::path& dir) {
+    reset();
+    t_paths.kiln = dir / "kiln-none";
+    caps::core_rows(false, false, "test idle");
+    CHECK(is("net.steam_messages", U, KILN_CAP_REASON_POLICY) &&
+              get("net.steam_messages").text == "not started in safe idle: test idle" &&
+              get("net.steam_messages").source == "core",
+          "steam messages: safe idle is policy, with the reason (%s)", get("net.steam_messages").text.c_str());
+    reset();
+    caps::core_rows(true, true, "");
+    CHECK(get("net.steam_messages").rc == KILN_ERR_NOT_FOUND, "steam messages: hooks on, no core row (kiln-net.dll reports it)");
+    const KilnOwner net = owner("service:kiln-net.dll");
+    CHECK(rep(net, "net.steam_messages", P, KILN_CAP_REASON_SESSION, "waits for Steam") == KILN_OK &&
+              is("net.steam_messages", P, KILN_CAP_REASON_SESSION) && get("net.steam_messages").source == "service:kiln-net.dll",
+          "steam messages: kiln-net.dll may report it pending");
+    CHECK(rep(net, "net.steam_messages", A, KILN_CAP_REASON_NONE, "resolved") == KILN_OK && is("net.steam_messages", A, 0) &&
+              (get("net.steam_messages").flags & KILN_CAP_FLAG_SESSION),
+          "steam messages: then available, a session row");
+    revoke(net);
+    caps::service_dll("kiln-net.dll", "skipped", "kiln_plugin_main returned 3 (unavailable)");
+    const Got missing = get("net.steam_messages");
+    CHECK(missing.state == U && missing.reason == KILN_CAP_REASON_SERVICE_MISSING &&
+              missing.text.rfind("kiln.net did not start: kiln-net.dll skipped", 0) == 0 && missing.source == "core",
+          "steam messages: kiln-net.dll did not start: service-missing (%s)", missing.text.c_str());
+    caps::service_dll("kiln-items.dll", "failed", "LoadLibrary failed (126)");
+    CHECK(get("net.steam_messages").text == missing.text, "steam messages: another DLL's failure leaves it alone");
+}
+
 void json_file() {
     using nlohmann::json;
     reset();
@@ -725,7 +853,7 @@ void json_file() {
     rep(o, "items.moves", P, KILN_CAP_REASON_SESSION, "no world is loaded yet");
     rep(o, "z.future", U, 11, "bad \xFF byte");
     rep(o, "a.ok", A, 0, "v3");
-    json doc = json::parse(caps::render(std::chrono::milliseconds(1000)));
+    json doc = json::parse(caps::render(kMustEnd));
     bool top = doc["format"] == 1 && doc["kiln"].is_string() && doc["pid"] == 4242 && doc["written"].is_string() &&
                doc["side"] == "server" && doc["exe"]["sha256"].is_string() && doc["exe"]["verified"] == false &&
                doc["hooks"] == false && doc["safeIdle"] == "the game image cannot be parsed" &&
@@ -754,14 +882,48 @@ void json_file() {
               row("z.future")["reasonText"].get<std::string>().find("bad ") == 0,
           "json: a code with no name is other-<n>; a bad UTF-8 byte does not stop the file");
     caps::core_rows(true, true, "");
-    doc = json::parse(caps::render(std::chrono::milliseconds(1000)));
+    doc = json::parse(caps::render(kMustEnd));
     CHECK(doc["hooks"] == true && doc["safeIdle"].is_null() && doc["exe"]["verified"] == true,
           "json: hooks on, safeIdle null");
 }
 
+// Polls until done() holds, at most kMustEnd.
+template <class F>
+bool poll_until(F done) {
+    const auto give_up = std::chrono::steady_clock::now() + kMustEnd;
+    while (!done()) {
+        if (std::chrono::steady_clock::now() > give_up) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
 bool wait_writes(size_t n) {
-    for (int i = 0; i < 300 && writes() < n; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    return writes() >= n;
+    return poll_until([n] { return writes() >= n; });
+}
+// The writer thread looked at the time set last (see fake_clock) and is done deciding: the test then takes g_wmutex,
+// under which the writer measures its gap and takes a write, so the writer is either waiting out its gap or has taken
+// a write (g_in_flight). True for the first: a must-not-write check that follows proves the writer saw the change and
+// the time, and chose to wait. Called while something is dirty: a writer found clean has written it (false at once).
+bool writer_waits() {
+    bool seen = false, idle = false;
+    poll_until([&] {
+        {
+            std::lock_guard l(t_clock_mutex);
+            seen = t_seen_epoch == t_clock_epoch;
+        }
+        std::lock_guard l(caps::g_wmutex);
+        idle = !caps::g_in_flight;
+        return seen || (idle && !caps::g_dirty);
+    });
+    return seen && idle;
+}
+// Nothing dirty and no write in flight: the writer thread takes no write until the next change marks the file dirty.
+// Polls, since a write that just reached the stub has not ended yet.
+bool writer_clean() {
+    return poll_until([] {
+        std::lock_guard l(caps::g_wmutex);
+        return !caps::g_dirty && !caps::g_in_flight;
+    });
 }
 
 void writer() {
@@ -777,10 +939,8 @@ void writer() {
     CHECK(writes() == 1 && t_last_file == dir / "capabilities.json" && last_write().find("w.zero") != std::string::npos,
           "writer: boot_complete writes at once, to <state>/capabilities.json");
     rep(o, "w.one", A, 0);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
     set_clock(10999);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(writes() == 1, "writer: a change within the second waits");
+    CHECK(writer_waits() && writes() == 1, "writer: a change within the second waits (the writer saw it at 10999)");
     set_clock(11000);
     CHECK(wait_writes(2) && writes() == 2 && last_write().find("w.one") != std::string::npos,
           "writer: written once the second is over");
@@ -788,21 +948,19 @@ void writer() {
         rep(o, "w.many", U, KILN_CAP_REASON_POLICY, "step " + std::to_string(i));
         set_clock(11000 + i * 40);
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(writes() == 2, "writer: twenty changes in the next second, no write yet");
+    CHECK(writer_waits() && writes() == 2, "writer: twenty changes in the next second, no write yet");
     set_clock(12000);
     CHECK(wait_writes(3), "writer: then one write");
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(writes() == 3 && last_write().find("step 19") != std::string::npos, "writer: one write with the last state");
+    CHECK(writer_clean() && writes() == 3 && last_write().find("step 19") != std::string::npos,
+          "writer: one write with the last state, and nothing left dirty");
     set_clock(50000);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(writes() == 3 && caps::flush() && writes() == 3, "writer: nothing dirty, nothing written (thread or flush)");
+    CHECK(writer_clean() && writes() == 3 && caps::flush() && writes() == 3,
+          "writer: nothing dirty, nothing written (thread or flush)");
     rep(o, "w.last", A, 0);
     CHECK(caps::flush() && writes() == 4 && last_write().find("w.last") != std::string::npos,
           "writer: flush writes what is dirty at once, inside the second");
     set_clock(60000);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(writes() == 4, "writer: after flush the thread has nothing left to write");
+    CHECK(writer_clean() && writes() == 4, "writer: after flush the thread has nothing left to write");
 }
 
 size_t attempts() {
@@ -810,8 +968,7 @@ size_t attempts() {
     return t_attempts.size();
 }
 bool wait_attempts(size_t n) {
-    for (int i = 0; i < 300 && attempts() < n; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    return attempts() >= n;
+    return poll_until([n] { return attempts() >= n; });
 }
 size_t infos_with(const char* what) {
     std::lock_guard l(t_mutex);
@@ -830,7 +987,11 @@ void block(bool on) {
 }
 bool wait_in_write() {
     std::unique_lock l(t_mutex);
-    return t_write_cv.wait_for(l, std::chrono::seconds(3), [] { return t_in_write; });
+    return t_write_cv.wait_for(l, kMustEnd, [] { return t_in_write; });
+}
+bool in_write() {
+    std::lock_guard l(t_mutex);
+    return t_in_write;
 }
 
 // A write that fails (the stub's t_fail_next, as Wine's replacing rename while a reader holds the file) is tried again
@@ -843,22 +1004,17 @@ void writer_retry() {
     fail_next(2);
     rep(o, "r.one", A, 0);
     CHECK(wait_attempts(a0 + 1) && writes() == w0, "retry: the writer's write fails");
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
     set_clock(70999);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(attempts() == a0 + 1, "retry: no second try within the second (no busy loop)");
+    CHECK(writer_waits() && attempts() == a0 + 1, "retry: no second try within the second (no busy loop)");
     set_clock(71000);
     CHECK(wait_attempts(a0 + 2) && writes() == w0, "retry: tried again once the second is over, with no new change; fails again");
     set_clock(71999);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(attempts() == a0 + 2, "retry: still at most one try a second across failures");
+    CHECK(writer_waits() && attempts() == a0 + 2, "retry: still at most one try a second across failures");
     set_clock(72000);
     CHECK(wait_writes(w0 + 1) && attempts() == a0 + 3 && last_write().find("r.one") != std::string::npos,
           "retry: the third try writes, and the file holds the change");
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
     set_clock(90000);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    CHECK(attempts() == a0 + 3 && writes() == w0 + 1, "retry: then parked, nothing dirty");
+    CHECK(writer_clean() && attempts() == a0 + 3 && writes() == w0 + 1, "retry: then parked, nothing dirty");
     CHECK(infos_with("cannot write") == 1 && infos_with("written again") == 1,
           "retry: one line for the failures, one when writing works again");
 
@@ -876,44 +1032,49 @@ void writer_retry() {
     CHECK(second && writes() == w1 + 1 && last_write().find("r.two") != std::string::npos,
           "flush: the dirt of the failed write stayed, so the next flush writes it");
 
-    // flush during the writer's write in flight
+    // flush during the writer's write in flight. The stub holds that write for as long as the test says, so flush's own
+    // bound (1 s) runs out with the write still in flight: flush answers false and writes nothing (it never claims a
+    // file it has not seen written). Then the write ends, and flush answers true with no second write.
     const size_t w2 = writes();
     rep(o, "r.three", A, 0);
     block(true);
     set_clock(91000);  // past flush's last try (90000): the writer takes the write and stays inside it
     const bool entered = wait_in_write();
-    std::atomic<bool> returned{false};
-    bool result = false;
-    std::thread f([&] {
-        result = caps::flush();
-        returned = true;
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    const bool waited = !returned;
+    auto f0 = std::chrono::steady_clock::now();
+    const bool held = caps::flush();
+    const auto waited = std::chrono::steady_clock::now() - f0;
+    const bool still = in_write() && writes() == w2;
     block(false);
-    f.join();
-    CHECK(entered && waited && result && writes() == w2 + 1 && last_write().find("r.three") != std::string::npos,
-          "flush: waits for the write in flight and answers true once it is in the file (one write)");
+    // flush took its whole bound before it answered: it waited for the write in flight (a flush that gave up at once
+    // would answer false too). A lower bound, so a loaded machine cannot fail it.
+    CHECK(entered && !held && still && waited >= std::chrono::milliseconds(1000),
+          "flush: a write in flight past flush's bound: flush waits its 1 s for it, answers false and writes nothing "
+          "(%lld ms)",
+          static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(waited).count()));
+    CHECK(wait_writes(w2 + 1) && writer_clean() && caps::flush() && writes() == w2 + 1 &&
+              last_write().find("r.three") != std::string::npos,
+          "flush: once the write in flight is in the file, flush answers true (one write)");
 
-    // the write in flight fails: flush writes itself
-    const size_t w3 = writes();
+    // the write in flight fails: its dirt comes back, the writer waits out its gap (the fake clock stays), and flush
+    // writes itself
+    const size_t w3 = writes(), a3 = attempts();
     rep(o, "r.four", A, 0);
     fail_next(1);
     block(true);
     set_clock(92000);
     const bool entered2 = wait_in_write();
-    returned = false;
-    result = false;
-    std::thread g([&] {
-        result = caps::flush();
-        returned = true;
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    const bool waited2 = !returned;
+    f0 = std::chrono::steady_clock::now();
+    const bool held2 = caps::flush();
+    const auto waited2 = std::chrono::steady_clock::now() - f0;
     block(false);
-    g.join();
-    CHECK(entered2 && waited2 && result && writes() == w3 + 1 && last_write().find("r.four") != std::string::npos,
-          "flush: a write in flight that fails is done again by flush, which then answers true");
+    const bool failed = wait_attempts(a3 + 1) && poll_until([] {
+        std::lock_guard l(caps::g_wmutex);
+        return caps::g_dirty && !caps::g_in_flight;
+    });
+    const bool result = caps::flush();
+    CHECK(entered2 && !held2 && waited2 >= std::chrono::milliseconds(1000) && failed && result && writes() == w3 + 1 &&
+              attempts() == a3 + 2 && last_write().find("r.four") != std::string::npos,
+          "flush: waits its 1 s for a write in flight; when that write fails, flush does it again and answers true");
 }
 
 // No registry entry point after the fault: a subscriber (the managed snapshot's source), the stored rows and the
@@ -933,8 +1094,25 @@ void idle_tick_fault(const std::filesystem::path& dir) {
     Seen seen;
     KilnHandle h = 0;
     T->subscribe(owner("host"), &record_change, &seen, &h);
-    // Let the writer park with a clean file. Moving this fake clock does not wake it after the fault.
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // The writer parks with a clean file: woken once, it read the tick hook's state (refresh_tick, the top of its round)
+    // and, with nothing dirty, has nothing to do but wait. Moving this fake clock does not wake it after the fault.
+    {
+        std::lock_guard c(t_clock_mutex);
+        ++t_tick_epoch;
+    }
+    caps::g_wcv.notify_all();  // one more round now rather than at its next second
+    const bool parked = poll_until([] {
+        {
+            std::lock_guard l(t_clock_mutex);
+            if (t_tick_seen != t_tick_epoch) return false;
+        }
+        std::lock_guard l(caps::g_wmutex);
+        if (!caps::g_dirty && !caps::g_in_flight) return true;
+        std::lock_guard c(t_clock_mutex);  // not clean yet: one more round
+        ++t_tick_epoch;
+        return false;
+    });
+    CHECK(parked, "idle fault: the writer read the tick hook's state and parked with nothing dirty");
     const size_t before = writes();
     const auto start = std::chrono::steady_clock::now();
     {
@@ -942,10 +1120,10 @@ void idle_tick_fault(const std::filesystem::path& dir) {
         t_now = 101000;
     }
     t_tick = t_lifecycle = false;
-    const auto deadline = start + std::chrono::milliseconds(1250);
-    // the three tick rows and, derived from the same hooks, the server world's stop_drain row (dev.29)
-    while ((seen.size() < 4 || writes() == before) && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    // the three tick rows and, derived from the same hooks, the server world's stop_drain row (dev.29). The writer
+    // looks each second; how long it took is shown, not checked (a loaded machine stretches it).
+    poll_until([&] { return seen.size() >= 4 && writes() > before; });
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
     bool rows = true;
     {
         std::lock_guard l(caps::g_mutex);
@@ -955,8 +1133,8 @@ void idle_tick_fault(const std::filesystem::path& dir) {
         }
     }
     CHECK(rows && seen.size() == 4 && writes() > before,
-          "idle fault: rows, subscriber snapshot and file follow within 1250 ms without a registry call (rows %d, events %zu, writes %zu -> %zu)",
-          rows, seen.size(), before, writes());
+          "idle fault: rows, subscriber snapshot and file follow without a registry call (rows %d, events %zu, writes %zu -> %zu, after %lld ms)",
+          rows, seen.size(), before, writes(), static_cast<long long>(took.count()));
     const auto doc = nlohmann::json::parse(last_write());
     unsigned faulted = 0;
     for (const auto& row : doc["capabilities"])
@@ -1113,6 +1291,109 @@ void client_gate(const std::filesystem::path& dir) {
     CHECK(good, "gate: the compiled list holds %zu well-formed, distinct names", gates::held().size());
     gates::configure(KILN_SIDE_SERVER, false, {});
     reset();
+
+    // the release hold of Kiln's interpreter for ShroudForge mods (sfi_release_policy.h) as kiln.caps shows it
+    {
+        namespace sfi = kiln::sfi_release_policy;
+        const auto sfi_boot = [&](bool all, std::vector<std::string> names) {
+            reset();
+            resolve_with(dir, "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E8 {helper:rel32}");
+            gates::use_list_for_tests(nullptr);  // the compiled list: native/core/gates/sfi.json and the policy
+            gates::configure(KILN_SIDE_CLIENT, all, names);
+            caps::core_rows(true, true, "");
+        };
+        // the compiled list holds kiln-sfi.interpreter while it is a preview; without that row it is a normal choice
+        bool listed = false;
+        for (const gates::Gate* g = gates::kBuiltIn; g->name; ++g)
+            listed = listed || (std::string_view(g->name) == sfi::kInterpreter && g->side == gates::kBoth);
+        sfi_boot(false, {});
+        if (listed)
+            CHECK(is("kiln-sfi.interpreter", U, KILN_CAP_REASON_POLICY) && kiln_caps_held(T, ks("kiln-sfi.interpreter")) == 1 &&
+                      get("kiln-sfi.interpreter").text.find("sfi-ui-page") != std::string::npos,
+                  "sfi: kiln-sfi.interpreter reads held, with its guided checks, and kiln_caps_held is true");
+        else
+            CHECK(get("kiln-sfi.interpreter").rc == KILN_ERR_NOT_FOUND && kiln_caps_held(T, ks("kiln-sfi.interpreter")) == 0 &&
+                      !gates::is_held("kiln-sfi.interpreter"),
+                  "sfi: without its row kiln-sfi.interpreter is not held, with no preview (a name nobody reports has no row)");
+        CHECK(is("kiln-sfi.sf18", U, KILN_CAP_REASON_POLICY) && get("kiln-sfi.sf18").text == std::string(sfi::kVetoText),
+              "sfi: kiln-sfi.sf18 reads held by the release policy's veto");
+        const KilnOwner plugin = owner("plugin:kiln-sfi.dll");
+        rep(plugin, "kiln-sfi.interpreter", A, KILN_CAP_REASON_NONE);
+        rep(plugin, "kiln-sfi.sf18", A, KILN_CAP_REASON_NONE);
+        if (listed)
+            CHECK(is("kiln-sfi.interpreter", U, KILN_CAP_REASON_POLICY) && is("kiln-sfi.sf18", U, KILN_CAP_REASON_POLICY),
+                  "sfi: a plugin's 'available' does not open either held row");
+        else
+            CHECK(is("kiln-sfi.interpreter", A, KILN_CAP_REASON_NONE) && is("kiln-sfi.sf18", U, KILN_CAP_REASON_POLICY),
+                  "sfi: a plugin's 'available' reads as reported for the open interpreter, never for the sf18 veto");
+        revoke(plugin);
+        sfi_boot(true, {});
+        CHECK(get("kiln-sfi.interpreter").rc == KILN_ERR_NOT_FOUND && !gates::is_held("kiln-sfi.interpreter"),
+              "sfi: preview true lifts kiln-sfi.interpreter (a name nobody reports has no row)");
+        CHECK(is("kiln-sfi.sf18", U, KILN_CAP_REASON_POLICY) && get("kiln-sfi.sf18").text == std::string(sfi::kVetoText) &&
+                  kiln_caps_held(T, ks("kiln-sfi.sf18")) == 1 && gates::is_held("kiln-sfi.sf18"),
+              "sfi: preview true does not lift kiln-sfi.sf18 (veto), and kiln_caps_held is true for it");
+        sfi_boot(false, {"kiln-sfi.sf18", "kiln-sfi.interpreter"});
+        CHECK(is("kiln-sfi.sf18", U, KILN_CAP_REASON_POLICY) && get("kiln-sfi.interpreter").rc == KILN_ERR_NOT_FOUND,
+              "sfi: preview naming both rows lifts the interpreter only");
+        gates::use_list_for_tests(nullptr);
+        gates::configure(KILN_SIDE_SERVER, false, {});
+        reset();
+    }
+}
+
+// kiln.json "tasks": the four global knobs, their defaults, bounds, wrong types and side overrides (config.cpp).
+void tasks_config(const std::filesystem::path& dir) {
+    const auto old = t_paths.kiln;
+    t_paths.kiln = dir / "tasks-config";
+    std::filesystem::create_directories(t_paths.kiln);
+    const auto read = [&](const char* text) {
+        kiln::g_config = kiln::Config{};
+        kiln::g_doc = nlohmann::json{};
+        {
+            std::lock_guard l(t_mutex);
+            t_infos.clear();
+        }
+        write(t_paths.kiln / "kiln.json", text);
+        kiln::load_config();
+        kiln::apply_side(KILN_SIDE_SERVER);
+        return kiln::config().tasks;
+    };
+    const auto warned = [&](const char* key, const char* bound) {
+        std::lock_guard l(t_mutex);
+        int n = 0;
+        for (const auto& line : t_infos)
+            n += line.find(std::string("tasks.") + key) != std::string::npos && line.find(bound) != std::string::npos;
+        return n;
+    };
+    auto c = read(R"({})");
+    CHECK(c.workers == 0 && c.long_running_global == 8 && c.watchdog_running_s == 30 && c.watchdog_queued_s == 30,
+          "tasks config: absent: the defaults (workers 0 = clamp(cores/4, 1, 4), 8, 30 s, 30 s)");
+    c = read(R"({"tasks":{"workers":3,"long_running_global":12,"watchdog_running_s":5,"watchdog_queued_s":600}})");
+    CHECK(c.workers == 3 && c.long_running_global == 12 && c.watchdog_running_s == 5 && c.watchdog_queued_s == 600,
+          "tasks config: values inside their bounds are taken (bounds inclusive)");
+    c = read(R"({"tasks":{"workers":9,"long_running_global":0,"watchdog_running_s":4,"watchdog_queued_s":601}})");
+    CHECK(c.workers == 0 && c.long_running_global == 8 && c.watchdog_running_s == 30 && c.watchdog_queued_s == 30 &&
+              warned("workers", "1..8") == 1 && warned("long_running_global", "1..16") == 1 &&
+              warned("watchdog_running_s", "5..600") == 1 && warned("watchdog_queued_s", "5..600") == 1,
+          "tasks config: out of bounds: the default and one warning naming the key and its bound");
+    c = read(R"({"tasks":{"workers":"4","long_running_global":2.5,"watchdog_running_s":true,"watchdog_queued_s":null}})");
+    CHECK(c.workers == 0 && c.long_running_global == 8 && c.watchdog_running_s == 30 && c.watchdog_queued_s == 30 &&
+              warned("workers", "1..8") == 1 && warned("long_running_global", "1..16") == 1 &&
+              warned("watchdog_running_s", "5..600") == 1 && warned("watchdog_queued_s", "5..600") == 1,
+          "tasks config: a wrong type: the default and one warning each");
+    c = read(R"({"tasks":7})");
+    {
+        std::lock_guard l(t_mutex);
+        int n = 0;
+        for (const auto& line : t_infos) n += line.find("\"tasks\"") != std::string::npos;
+        CHECK(c.workers == 0 && c.long_running_global == 8 && n == 1, "tasks config: \"tasks\" not an object: defaults, one warning");
+    }
+    c = read(R"({"tasks":{"workers":2,"watchdog_running_s":60},"server":{"tasks":{"workers":4}},"client":{"tasks":{"workers":1}}})");
+    CHECK(c.workers == 4 && c.watchdog_running_s == 60, "tasks config: the side section overrides key by key; the rest stays");
+    c = read(R"({"tasks":{"workers":2},"server":{"tasks":{"workers":99}}})");
+    CHECK(c.workers == 0 && warned("workers", "1..8") == 1, "tasks config: an invalid side value gives the default, warned");
+    t_paths.kiln = old;
 }
 
 void client_preview(const std::filesystem::path& dir) {
@@ -1181,6 +1462,60 @@ void client_gate_threads() {
     gates::configure(KILN_SIDE_SERVER, false, {});
 }
 
+// A mod's own symbol fragment (kiln.hooks load_symbols: Symbols.LoadShipped) gives "sig/<modid>/<Name>" rows like Kiln's
+// own described symbols, for as long as it is loaded (the owner's dev.30 client pass, ui-hooks.c8: the row of
+// ClientHookSample's own descriptor was never registered, so the sample's Capabilities.Is check kept its hook off).
+void fragment_rows(const std::filesystem::path& dir) {
+    Loaded x;
+    sigdb::init_code();  // a second test image in this process; code()'s once_flag has already run
+    reset();
+    t_tick = t_lifecycle = true;
+    resolve_with(dir, "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E8 {helper:rel32}");
+    caps::core_rows(true, true, "");
+    const auto file = dir / "m-client.json";
+    const char* const full = R"({"format":1,"side":"client","symbols":{
+      "m/Tail":{"find":[{"pattern":"8B 81 ?? ?? ?? ?? C3"}],
+                "sig":{"ret":"u32","args":[{"name":"self","type":"ptr"}],"abi":{"reads":["rcx"],"stack":[],"ret":"rax"}}},
+      "m/Wrong":{"find":[{"pattern":"8B 81 ?? ?? ?? ?? C3"}],"sig":{"args":[{"name":"scale","type":"f32"}]}},
+      "m/Gone":{"find":[{"pattern":"DE AD BE EF 01 02 03 04 05"}],"sig":{"args":[]}}
+    }})";
+    write(file, full);
+    CHECK(get("sig/m/Tail").rc == KILN_ERR_NOT_FOUND, "fragment: no row before the fragment loads");
+    sigdb::FragmentSummary fs;
+    std::string err;
+    CHECK(sigdb::load_fragment("m", file, {}, &fs, &err), "fragment: loads (%s)", err.c_str());
+    const uint64_t before = T->generation();
+    caps::fragment_rows("m");
+    CHECK(is("sig/m/Tail", A, KILN_CAP_REASON_NONE) && get("sig/m/Tail").source == "sigdb" && T->generation() > before,
+          "fragment: a described symbol that resolved and fits is an available row, source sigdb (got %u %u '%s')",
+          get("sig/m/Tail").state, get("sig/m/Tail").reason, get("sig/m/Tail").text.c_str());
+    CHECK(is("sig/m/Wrong", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
+              get("sig/m/Wrong").text == "symbol m/Wrong: descriptor arg 1 'scale' is xmm0, the function reads [rcx]",
+          "fragment: a descriptor that does not fit the code is off with sigdb's reason (got '%s')", get("sig/m/Wrong").text.c_str());
+    CHECK(is("sig/m/Gone", U, KILN_CAP_REASON_SYMBOL_MISSING) && get("sig/m/Gone").text.rfind("symbol m/Gone: ", 0) == 0,
+          "fragment: a pattern that matches nowhere is off, naming the symbol (got '%s')", get("sig/m/Gone").text.c_str());
+    CHECK(is("items.fuel", A, 0) && get("items.fuel").source == "sigdb", "fragment: Kiln's own feature rows stay");
+
+    // a reload (hot reload, a new version of the mod) replaces the rows: a name it no longer has goes
+    write(file, R"({"format":1,"symbols":{
+      "m/Tail":{"find":[{"pattern":"8B 81 ?? ?? ?? ?? C3"}],
+                "sig":{"ret":"u32","args":[{"name":"self","type":"ptr"}],"abi":{"reads":["rcx"],"stack":[],"ret":"rax"}}}
+    }})");
+    CHECK(sigdb::load_fragment("m", file, {}, &fs, &err), "fragment: reloads");
+    caps::fragment_rows("m");
+    CHECK(is("sig/m/Tail", A, 0) && get("sig/m/Wrong").rc == KILN_ERR_NOT_FOUND && get("sig/m/Gone").rc == KILN_ERR_NOT_FOUND,
+          "fragment: a reload keeps the rows it still has and drops the others");
+
+    // the mod unloads: its rows go, Kiln's stay
+    caps::fragment_gone("m");
+    sigdb::unload_fragment("m");
+    CHECK(get("sig/m/Tail").rc == KILN_ERR_NOT_FOUND && is("items.fuel", A, 0), "fragment: unloaded, its rows are gone");
+    caps::fragment_gone("m");  // twice, or for a fragment never loaded: nothing
+    caps::fragment_rows("nothing");
+    CHECK(get("sig/nothing").rc == KILN_ERR_NOT_FOUND && is("items.fuel", A, 0), "fragment: an unknown id changes nothing");
+    std::filesystem::remove(file);
+}
+
 int main(int argc, char** argv) {
     if (argc != 2) return 2;
     const std::filesystem::path dir = argv[1];
@@ -1190,9 +1525,13 @@ int main(int argc, char** argv) {
     subscribers();
     reentrant_read_strings();
     core_rows(dir);
+    fragment_rows(dir);
     client_gate(dir);
     client_gate_threads();
     client_preview(dir);
+    tasks_config(dir);
+    // kiln.net's Steam peer-to-peer messages row
+    steam_messages_row(dir);
     json_file();
     writer();
     writer_retry();

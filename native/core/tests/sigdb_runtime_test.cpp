@@ -16,6 +16,7 @@ ImageInfo test_image;
 bool test_log_throw = false;
 bool test_verified = true;  // what config.cpp's build_verified answers for the mapped file's sha256
 const ImageInfo& image() { return test_image; }
+const Paths& paths() { static Paths p; return p; }  // sigdb names a foreign module's file relative to paths().game
 bool build_verified(uint32_t, const std::string&, std::string*) { return test_verified; }
 double now_ms() { return 0; }
 std::string to_utf8(std::wstring_view w) { return std::string(w.begin(), w.end()); }

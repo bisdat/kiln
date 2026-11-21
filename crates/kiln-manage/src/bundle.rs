@@ -220,6 +220,54 @@ pub fn validate(m: &RuntimeManifest) -> Result<()> {
     Ok(())
 }
 
+// (kiln-eml-inspect, kiln-eml's archive inspector: the one runtime file installed executable)
+/// The one runtime file that is packed and installed executable: kiln-eml's archive inspector for Linux (component
+/// eml, GPL-3), which kiln-manage starts before a start of Kiln's interpreter (crate::sfi_inspection).
+/// Every other file is packed 0644 and installed with the system's default mode, whatever mode a zip entry claims (a
+/// zip's own modes are never read). Windows has no modes: its helper is the .exe beside it.
+pub const EXECUTABLE_HELPER: &str = "kiln/tools/eml-inspect/linux-x86_64/kiln-eml-inspect";
+/// The component that brings it.
+pub const EXECUTABLE_HELPER_COMPONENT: &str = "eml";
+
+/// Is the runtime file `path` of `component` the executable helper? Exactly that manifest path (already
+/// [`safe_rel_path`]: '/' separated, no `.`/`..`, case as written) in exactly that component.
+pub fn executable(path: &str, component: &str) -> bool {
+    path == EXECUTABLE_HELPER && component == EXECUTABLE_HELPER_COMPONENT
+}
+
+/// Gives the installed helper at `path` its execute bits back (0755) when they are missing, and only when it is still
+/// the file the receipt lists with `sha256`: opened without following a link (and without blocking on a FIFO), a plain
+/// file, its bytes read through that very handle, then chmod on that handle, so nothing swapped in at the path is ever
+/// changed. Ok(false): it has them. Err: nothing changed (a link, not a plain file, other bytes, or chmod refused).
+#[cfg(unix)]
+pub fn restore_executable(path: &Path, sha256: &str) -> std::io::Result<bool> {
+    use sha2::Digest as _;
+    use std::io::Read as _;
+    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+    let mut f = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)?;
+    let meta = f.metadata()?;
+    if !meta.is_file() {
+        return Err(std::io::Error::other("not a plain file"));
+    }
+    if meta.permissions().mode() & 0o111 == 0o111 {
+        return Ok(false);
+    }
+    let mut h = sha2::Sha256::new();
+    let mut buf = vec![0u8; 1 << 16];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    if crate::hash::hex(h.finalize().as_slice()) != sha256 {
+        return Err(std::io::Error::other("its bytes are not the installed helper's"));
+    }
+    f.set_permissions(std::fs::Permissions::from_mode(0o755))?;
+    Ok(true)
+}
+
 #[cfg(feature = "zip")]
 mod imp {
     use super::*;
@@ -294,7 +342,8 @@ mod imp {
             }
             h.update(&buf[..n]);
             if let Some(o) = out.as_mut() {
-                o.write_all(&buf[..n])?;
+                // the staged copy of a DLL that Windows refuses (an antivirus): crate::blocked
+                o.write_all(&buf[..n]).map_err(crate::blocked::io_at(Path::new(&f.path), "writing", &f.path))?;
             }
         }
         let sha = hex(h.finalize().as_slice());
@@ -342,9 +391,22 @@ mod imp {
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent).map_err(crate::util::io_at(parent, "creating"))?;
             }
-            let mut out = std::fs::File::create(&target).map_err(crate::util::io_at(&target, "writing"))?;
+            // a DLL Windows refuses here is in the staging folder (an antivirus scans it as it is written): crate::blocked
+            let mut out = std::fs::File::create(&target).map_err(crate::blocked::io_at(&target, "writing", &f.path))?;
             copy_checked(&mut a, f, zip, Some(&mut out))?;
-            out.sync_all().map_err(crate::util::io_at(&target, "flushing"))?;
+            // (kiln-eml-inspect: the helper, its bytes and its manifest entry checked, gets 0755 on the
+            // handle it was written through; a refusal is said and the install goes on: the helper cannot run there)
+            #[cfg(unix)]
+            if super::executable(&f.path, &f.component) {
+                use std::os::unix::fs::PermissionsExt as _;
+                let made = out.metadata().and_then(|m| {
+                    if m.is_file() { out.set_permissions(std::fs::Permissions::from_mode(0o755)) } else { Err(std::io::Error::other("not a plain file")) }
+                });
+                if let Err(e) = made {
+                    progress.report(None, &format!("{} could not be made executable ({e}): Kiln's archive inspector cannot run from this folder", f.path));
+                }
+            }
+            out.sync_all().map_err(crate::blocked::io_at(&target, "flushing", &f.path))?;
             done += f.size;
             progress.report(Some(done as f32 / total as f32), &format!("staged {}", f.path));
         }
@@ -357,7 +419,10 @@ mod imp {
             .unwrap_or_else(|_| zip::DateTime::default_for_write())
     }
 
-    pub fn write_zip(out: &Path, entries: &[(String, Vec<u8>)], epoch: i64) -> Result<()> {
+    pub fn write_zip(out: &Path, entries: &[(String, Vec<u8>)], epoch: i64,
+                     // (kiln-eml-inspect: the entries packed 0755, super::executable)
+                     executable: &std::collections::BTreeSet<&str>,
+    ) -> Result<()> {
         let tmp = crate::util::with_suffix(out, ".tmp");
         let f = std::fs::File::create(&tmp).map_err(crate::util::io_at(&tmp, "writing"))?;
         let mut w = zip::ZipWriter::new(std::io::BufWriter::new(f));
@@ -372,6 +437,7 @@ mod imp {
         sorted.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
         for (name, data) in sorted {
             let o = if data.len() as u64 >= 0xFFFF_0000 { opts.large_file(true) } else { opts };
+            let o = if executable.contains(name.as_str()) { o.unix_permissions(0o755) } else { o };
             w.start_file(name.as_str(), o).map_err(zip_err(out))?;
             w.write_all(data)?;
         }
@@ -529,7 +595,11 @@ pub fn create(stage: &Path, out_dir: &Path, options: &CreateOptions) -> Result<P
         }
         std::fs::create_dir_all(out_dir).map_err(crate::util::io_at(out_dir, "creating"))?;
         let out = out_dir.join(file_name(&m.version));
-        imp::write_zip(&out, &entries, options.source_date_epoch)?;
+        let exec: std::collections::BTreeSet<&str> =
+            m.files.iter().filter(|f| executable(&f.path, &f.component)).map(|f| f.path.as_str()).collect();
+        imp::write_zip(&out, &entries, options.source_date_epoch,
+                       &exec,
+        )?;
         Ok(out)
     }
     #[cfg(not(feature = "zip"))]

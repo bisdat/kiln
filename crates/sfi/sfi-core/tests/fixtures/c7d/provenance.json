@@ -1,0 +1,38 @@
+{
+  "SPDX-License-Identifier": "MIT",
+  "format_version": 1,
+  "transcript_version": 2,
+  "construction": "captured with ShroudForge's own mod runtime (a local differential test, not published): actual pinned ShroudForge mod-runtime, game-free private copies, release Windows x64 builds under headless Wine. Source checkouts were read-only. Every oracle transcript matched the shared sfi-core transcript host byte-for-byte.",
+  "pins": {
+    "sf-1.7.9": "d8a394bcb180ceb5bdfce48048dcc4f2e0108bd8",
+    "sf-1.8.0": "38ef448dc5d4fc267b5f0928502a864a6b078865"
+  },
+  "fixtures": {
+    "io.lua": "df1cf464fa818855499f52681af1c3bd2ed93674b53fff8c4d609ead3881a278",
+    "paths.lua": "520f78a1685234f30906fb52f60bed750be14bedca974b6bcec101f604f67170",
+    "root-file.lua": "b7076630b50880bfdee2e39213204887052ab64aaeb50ad6ffe07a5c48a24609"
+  },
+  "goldens": {
+    "sf-1.7.9.golden.json": "ee14ccf6be0216d4745ba611047cb7b3e03d6a2133aceab001c11281aeacf842",
+    "sf-1.8.0.golden.json": "ee14ccf6be0216d4745ba611047cb7b3e03d6a2133aceab001c11281aeacf842",
+    "sf-1.7.9.paths.golden.json": "c127c1a21a16b0191c99620e2e7c65dfdc838cf6fc346d671385076f88d570ce",
+    "sf-1.8.0.paths.golden.json": "c127c1a21a16b0191c99620e2e7c65dfdc838cf6fc346d671385076f88d570ce",
+    "sf-1.7.9.root-file.golden.json": "6a3c27168b31fc597c1803f8f86e0ac2f917633b12a9ba52c200decd1ff45a72",
+    "sf-1.8.0.root-file.golden.json": "6a3c27168b31fc597c1803f8f86e0ac2f917633b12a9ba52c200decd1ff45a72"
+  },
+  "per_pin": {"fixtures": 3, "records": 854, "expectations": 37, "captured_error_messages": 55},
+  "binding_sources_both_pins": [
+    "modules/mod-runtime/lua/bindings/io/mod.rs:22-59",
+    "modules/mod-runtime/lua/bindings/io/read_mod_files.rs:2-94",
+    "modules/mod-runtime/lua/bindings/io/path_names.rs:2-52",
+    "modules/mod-runtime/lua/bindings/io/manage_exports.rs:2-239",
+    "modules/modloader/mod_package_filesystem.rs:69-87,121-189,261-326,504-517"
+  ],
+  "scope": "18 callable IO functions (neither pin registers a nineteenth). Source-backed package bytes and independent predicates, owner-local alias identity, Windows lexical path grammar, exact return arity, raw export bytes and nonadvancing Buffer views, ordinary filesystem persistence and fresh-root boundaries. OS error text is not normalized. Injected-source ordering/per-entry warnings, virtual overlays, permissions, borrowed/closed/read-only Buffer states, owner capture and symlink/replacement hardening are additional source-derived host tests, not seeded-oracle observations. No game, archive format, engine service, source decompressor, native DLL or package discovery is implemented here.",
+  "parity_notes": [
+    "Both implementations return raw bytes for read_to_string and read_export_to_string; parent never returns nil; export returns no values. list_files remains unsorted, while export_list sorts resolved paths.",
+    "Escape-only hardening: freeze configured root resolution before Lua, inspect all existing parents before mutation, pin directory traversal, disallow redirecting reparse/symlink replacements and use no-follow leaf opens. Contained symlink targets retain ShroudForge behavior. Windows self-resolving drive/mount reparses remain usable with pinned reparse handles. File/device reparses that bypass the selected root are refused.",
+    "Copy/rename atomically refuse destination replacement rather than clobbering a concurrently substituted destination. These checks affect only escape/replacement cases; ordinary in-sandbox results are preserved.",
+    "No panic: missing/nonabsolute host root configuration raises a Lua error rather than guessing a root or asserting/panicking. The explicit global flag is separate from root presence and from the package export capability."
+  ]
+}

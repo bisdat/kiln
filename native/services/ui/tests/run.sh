@@ -8,6 +8,30 @@ export KILN_OUT
 out=$KILN_OUT/ui-host-test
 mkdir -p "$out"
 bash "$here/run-window-constraints.sh"
+# Kiln's graphics tools: the frame cap's pacing, kiln.json "graphics", the DLSS render size, when they step aside, NGX's
+# parameter slots (frame_pacer.h, graphics_settings.h, graphics_aside.h, ngx_param.h): plain logic
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" "$here/graphics_test.cpp" -o "$out/graphics_test"
+"$out/graphics_test" "$out"
+# the upscaler swap (phase B): kiln.json "upscaler", the game's FSR description and Kiln's render command, history,
+# contexts, the status, AMD FSR's device needs and dispatch mapping (upscale_logic.h, upscale_amd_map.h): plain logic
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -DVK_NO_PROTOTYPES '-D__declspec(x)=' -I"$here/../../../third_party" \
+    -I"$here/../../../third_party/imgui/vulkan-headers/include" -I"$here/../../../third_party/ffx" -I"$here/../../../core/abi" \
+    "$here/upscale_test.cpp" -o "$out/upscale_test"
+"$out/upscale_test" "$out"
+# phase B's upscaler swap (0.2.0-dev.29.18): the game's vendor pins against the launcher's manifest; the vendor files'
+# check and its SHA-256 (also over the real files when KILN_VENDOR_FILES names their folder, dev29/vendor-files); the
+# merge of a backend's Vulkan needs into the game's create infos; the XeSS backend against a fake libxess
+python3 -I "$here/../../../../tools/release/vendor_pins_header.py" --check
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" "$here/vendor_file_test.cpp" -o "$out/vendor_file_test"
+"$out/vendor_file_test" "$out" ${KILN_VENDOR_FILES:+"$KILN_VENDOR_FILES"}
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -DVK_NO_PROTOTYPES '-D__declspec(x)=' -I"$here/../../../third_party/imgui/vulkan-headers/include" \
+    -I"$here/../../../third_party" -I"$here/../../../third_party/ffx" "$here/device_merge_test.cpp" -o "$out/device_merge_test"
+"$out/device_merge_test"
+if [[ -f $here/xess_test.cpp ]]; then  # the XeSS backend's test (dev29/upscale-b2)
+    g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party/imgui/vulkan-headers/include" -I"$here/../../../third_party" \
+        "$here/xess_test.cpp" -o "$out/xess_test"
+    "$out/xess_test"
+fi
 # the overlay's image budget: the descriptor pool holds every image Kiln lets exist, uploads spread over frames (image_budget.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/image_budget_test.cpp" -o "$out/image_budget_test"
 "$out/image_budget_test" "$here/../vk.cpp"
@@ -20,8 +44,18 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/wheel_ma
 "$out/render_math_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/overlay_guard_test.cpp" -o "$out/overlay_guard_test"
 "$out/overlay_guard_test"
-g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/overlay_mode_test.cpp" -o "$out/overlay_mode_test"
+# the crash guard's runtime (overlay_guard.cpp) over host stand-ins for its Windows calls, one game start per process:
+# the record a guarded start writes, what a normal exit writes, nothing written after it (guard_host/windows.h)
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/guard_host" -I"$here/../../../core/abi" \
+    -I"$here/../../../third_party" "$here/overlay_guard_host_test.cpp" -o "$out/overlay_guard_host_test"
+"$out/overlay_guard_host_test"
+# the overlay's mode, and the player's kiln.json ui.overlay switch (overlay_mode.h, overlay_setting.h)
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" "$here/overlay_mode_test.cpp" -o "$out/overlay_mode_test"
 "$out/overlay_mode_test"
+# which present queue the overlay draws on, queues handed out while the device is made, one present's semaphores
+# (vk_present.h, inbox 80)
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/vk_present_test.cpp" -o "$out/vk_present_test"
+"$out/vk_present_test"
 # imgui.ini read and written on its own thread, never on the present call (ini_file.h, inbox 50)
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=thread "$here/ini_file_test.cpp" -o "$out/ini_file_test"
 "$out/ini_file_test"
@@ -41,6 +75,16 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/mouse_pr
 # Issue 44: scoped chat Up/Down and UI-thread queue must never steal gameplay or releases.
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined "$here/chat_keys_test.cpp" -o "$out/chat_keys_test"
 "$out/chat_keys_test"
+# the same under ThreadSanitizer: the window thread's key router against the render thread's completion state
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=thread "$here/chat_keys_test.cpp" -o "$out/chat_keys_tsan_test"
+"$out/chat_keys_tsan_test"
+# Issue 44 Phase 1b: bounded, UTF-8-valid editor snapshots and revision-safe replacement.
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/chat_completion_text_test.cpp" -o "$out/chat_completion_text_test"
+"$out/chat_completion_text_test"
+# Completion is an internal append-only kiln.ui tail; keep ABI offsets verified in the standard native suite.
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../core/abi" \
+    "$here/chat_completion_abi_test.cpp" -o "$out/chat_completion_abi_test"
+"$out/chat_completion_abi_test"
 # Issue 44: history draft, commands-only persistence policy, sensitive text, UTF-8.
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/chat_history_test.cpp" -o "$out/chat_history_test"
 "$out/chat_history_test"
@@ -65,7 +109,7 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined \
 "$out/menu_page_host_test"
 # Kiln's line in the main menu's footer: its text, its mark's place, when Kiln's copy runs (menu_footer.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/menu_footer_test.cpp" -o "$out/menu_footer_test"
-"$out/menu_footer_test"
+"$out/menu_footer_test" "$here/../../../../sigdb/symbols/client.d/ui.json"
 # Kiln's own texts kiln.ui draws (ui_text.h): the handoff from Kiln.Ui, English fallback, plurals, placeholders, and the
 # built-in English against runtime/locales/en.json
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" "$here/ui_text_test.cpp" -o "$out/ui_text_test"

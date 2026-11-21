@@ -107,6 +107,8 @@ internal static unsafe class UiEngine
         if (UiNative.DrawingOffReason is { } reason) Log(LogLevel.Info, reason);
         PlayerLook.Start();  // the player's look of Kiln's UI (kiln.json "ui")
         UiLanguage.Start();  // the language of Kiln's own texts (kiln.json "ui.language"), handed to kiln.ui too
+        GraphicsTools.Start();  // Kiln's own graphics tools (kiln.json "graphics"), handed to kiln.ui (0.2.0-dev.29.18)
+        ChatCompletionNetwork.Start(); // optional kiln:chat completion protocol
         KeyBindings.Load();
         ApplyMenuKey(KeyBindings.MenuKey);
         // the game page needs the layout calls (v3) for the page itself and v4 for the page state
@@ -114,7 +116,11 @@ internal static unsafe class UiEngine
         var page = _pageHost ? GamePageHost.Read() : null;
         Ui.Screens.Start();
         RefusalNotice.Start();
+        // the do-not-save notice of a kiln-sfi start (SfiNotice.cs)
+        SfiSafetyNotice.Start();
         ShroudForgeMenu.Start();
+        // every start prunes ended launches' sfi UI bridge folders once, on a worker
+        SfiBridge.Start();
         GameMenuEntries.Start();  // Kiln's setting for mods' entries in the game's menus (kiln.ui v6)
         Recount();
         Log(LogLevel.Info, $"Kiln.Ui ready; Kiln menu on {KeyBindings.MenuKey}; game UI {(UiNative.HasGameUi && Ui.Screens.Available ? "on" : "off")}, " +
@@ -288,7 +294,9 @@ internal static unsafe class UiEngine
         Ui.Menus.RemoveOwnedBy(mod);
         Ui.Screens.RemoveOwnedBy(mod);
         Ui.Crafting.RemoveOwnedBy(mod);
+        UiInventoryScreens.RemoveOwnedBy(mod);
         KeyBindings.RemoveOwnedBy(mod);
+        KeyInput.RemoveOwnedBy(mod);
         FrameHandlers.RemoveOwnedBy(mod);
         Recount();
     }
@@ -307,8 +315,9 @@ internal static unsafe class UiEngine
         }
         lock (Toasts) demand += (uint)Toasts.Count;
         demand += (uint)FrameHandlers.Count;
-        demand += (uint)Ui.Crafting.VisiblePanels;
-        var hover = (uint)Ui.Crafting.InteractivePanels;
+        demand += SfiSafetyNotice.Demand;
+        demand += (uint)(Ui.Crafting.VisiblePanels + UiInventoryScreens.VisiblePanels);
+        var hover = (uint)(Ui.Crafting.InteractivePanels + UiInventoryScreens.InteractivePanels);
         if (hover != _lastHover && UiNative.HasGameUi)
         {
             _lastHover = hover;
@@ -388,6 +397,8 @@ internal static unsafe class UiEngine
             DrawWindow(ui, w);
         }
         Ui.Crafting.DrawPanels(ui);
+        UiInventoryScreens.Draw(ui);  // panels beside the game's backpack and chest screens
+        ChatCompletionPanel.Draw(ui); // non-focusable suggestions over native HUD/Social chat
         DrawScreens(ui);
         foreach (var (h, owner) in FrameHandlers.Snapshot())
         {
@@ -401,6 +412,7 @@ internal static unsafe class UiEngine
         {
             DrawHud(ui, hud);
             DrawToasts(ui);
+            SfiSafetyNotice.Draw(ui);  // the do-not-save banner and footer line (only in a kiln-sfi start with warnings)
         }
         finally
         {

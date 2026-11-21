@@ -2084,6 +2084,7 @@ void gamedata_cases() {
 // The patches collector reads blocks files as Kiln.Blocks and worldtables do (kiln_blocks_json.hpp): comments and trailing commas.
 std::vector<fs::path> t_patch_mods;
 std::vector<std::filesystem::path> kc::mod_folder_list() { return t_patch_mods; }
+void kc::logf(int, const char*, ...) {}  // gamedata_bootpatch.cpp's gearRules warnings (content.h)
 
 kiln::boot::Input input_of(const json& owners) {
     const std::string s = json{{"schema", 1}, {"owners", owners}, {"excluded", json::array()}}.dump();

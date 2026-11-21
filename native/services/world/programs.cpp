@@ -729,6 +729,45 @@ void register_into_client(uintptr_t world) {
          static_cast<unsigned long long>(world), registered, refused, count, static_cast<long long>(L.programs_max));
 }
 
+// Why a world's program table is closed to RegisterProgram, or nullptr while it is open (read under the guard, on the
+// main thread in its RegisterAllPrograms, after the game's own registrations).
+// - world+0 is the engine's "finalized" byte: FinalizePrograms (S 0x6c2500 / C 0xa25c50) returns at once while it is
+//   set and sets it at its end (C 0xa25f97). Its only callers are the world's step functions (C 0x9d545a, 0x9d5a35).
+// - world+L.may_finalize is a permission, not a state: FinalizePrograms does nothing while it is 0 (C 0xa25c7e).
+//   createWorld (C 0x983140) copies it from the world's config +0x43 (C 0x98320d). A server world is made with 0
+//   (C 0xe53bc6) and its GameServer sets it later (the setter C 0xa00dd0, called only at C 0xe61339 on GameServer+0x1d0),
+//   so a set byte there means its next step finalizes. A client world is made with 1 (C 0x84d05d) and finalizes at its
+//   first step: the byte is set in every client world's RegisterAllPrograms, hosted or joined, and says nothing there.
+//   Only world+0 counts for a client world (0.2.0-dev.29 to 29.18 read both and refused every client world).
+const char* table_closed(uintptr_t world, bool server) {
+    uint8_t finalized = 0, may = 0;
+    if (!seh_copy(&finalized, reinterpret_cast<const void*>(world), 1)) return "its finalized byte could not be read";
+    if (finalized) return "it has already finalized its programs";
+    if (!server || L.may_finalize < 0) return nullptr;
+    if (!seh_copy(&may, reinterpret_cast<const void*>(world + L.may_finalize), 1)) return "its may-finalize byte could not be read";
+    if (may) return "it finalizes its programs at its next step";
+    return nullptr;
+}
+
+// A client world whose table is closed: nothing goes into it, and every client and prediction side says so
+// (program_world_state, EcsProgramRefusedEvent, TryBind) instead of staying pending, out of every registration (session
+// 0: no call starts). A side that faulted stays faulted until it is bound again.
+void refuse_client_world(uintptr_t world, const char* why) {
+    std::lock_guard lock(g_mutex);
+    char text[160];
+    std::snprintf(text, sizeof text, "the client world 0x%llx was closed to new programs: %s",
+                  static_cast<unsigned long long>(world), why);
+    for (Program* p : g_programs)
+        for (const uint32_t kind : {uint32_t{KILN_WORLD_CLIENT}, uint32_t{KILN_WORLD_PREDICTION}}) {
+            Side& s = p->side[kind];
+            if (!s.enabled) continue;
+            s.session.store(0, std::memory_order_seq_cst);
+            s.entry.store(0);
+            s.engine_id.store(0);
+            if (s.state.load() != KILN_PROGRAM_FAULTED) refuse_side(p, s, kind, text);
+        }
+}
+
 void on_world(uintptr_t world) {
     // The storage's kind byte, under the guard (this runs for every player, with or without Kiln programs): when it
     // cannot be read nothing is registered into that world and kiln.log says so.
@@ -740,11 +779,10 @@ void on_world(uintptr_t world) {
     }
     if (kind != 0) {  // the client world of a client: only while a mod declares a program for it (chapter 14)
         if (kind == KILN_WORLD_CLIENT && g_side_programs.load() && g_client_on.load()) {
-            uint8_t finalizing = 0, may = 0;
-            if (!seh_copy(&finalizing, reinterpret_cast<const void*>(world), 1) ||
-                (L.may_finalize >= 0 && !seh_copy(&may, reinterpret_cast<const void*>(world + L.may_finalize), 1)) || finalizing || may) {
-                KW_E("client world 0x%llx is already finalizing its programs (or could not be read); no Kiln programs registered",
-                     static_cast<unsigned long long>(world));
+            if (const char* why = table_closed(world, false)) {
+                KW_E("client world 0x%llx: %s; no Kiln programs registered there (its client programs are refused)",
+                     static_cast<unsigned long long>(world), why);
+                refuse_client_world(world, why);
                 return;
             }
             register_into_client(world);
@@ -754,11 +792,8 @@ void on_world(uintptr_t world) {
         KW_I("RegisterAllPrograms for a world of kind %u: not the server world; no Kiln programs there", kind);
         return;
     }
-    uint8_t finalizing = 0, may = 0;
-    if (!seh_copy(&finalizing, reinterpret_cast<const void*>(world), 1) ||
-        (L.may_finalize >= 0 && !seh_copy(&may, reinterpret_cast<const void*>(world + L.may_finalize), 1)) || finalizing || may) {
-        KW_E("server world 0x%llx is already finalizing its programs (or could not be read); no Kiln programs registered",
-             static_cast<unsigned long long>(world));
+    if (const char* why = table_closed(world, true)) {
+        KW_E("server world 0x%llx: %s; no Kiln programs registered", static_cast<unsigned long long>(world), why);
         return;
     }
     writes_world_changing();     // the previous world's requests and catalog end before g_world names this one
@@ -1416,7 +1451,7 @@ KilnResult KILN_CALL bind_program(KilnOwner owner, KilnStr mod, KilnStr key, Kil
 uint32_t KILN_CALL program_capabilities() {
     return (F.programs && F.write_other ? KILN_WORLD_CAP_WRITE_OTHER : 0) |
         (F.programs && F.events ? KILN_WORLD_CAP_MULTI_EVENTS : 0) |
-        (F.programs ? KILN_WORLD_CAP_BIND_PROGRAM : 0) | writes_capability();
+        (F.programs ? KILN_WORLD_CAP_BIND_PROGRAM : 0) | writes_capability() | ecs_capability();
 }
 
 const KilnTypesApi* program_types() {

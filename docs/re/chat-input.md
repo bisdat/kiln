@@ -86,6 +86,30 @@ composition is Windows' default IME window, and raw input still reports the arro
 | `chatui/state.editing` | 0x1988 | TextInputEdit, where the event is written |
 | `chatui/widget.buffer` | 0x150 | TextInputEdit's two reads of the widget |
 
+
+## Tab completion: cursor, node and rectangle
+Tab completion (`ui.chatCompletion`, GitHub issue 44, pull request 73; bisdat's captures, checked against 26430625)
+reads two more things of the field and one of the UI system, all on the game's UI thread, after `TextInputProcess`:
+- **The cursor**, a u32 character index at editor+0x1938 (`chatui/edit.cursor`). It is captured twice from
+  `EditSetText` (the read compared with the length before "changed" is set, and the write next to the selection at
+  +0x1944), `min_votes` 2. Kiln drops the snapshot when the cursor is past the line's end, and the client asks for
+  matches only with the cursor at the end.
+- **The layout node**, the pointer at widget+8 (`chatui/widget.node`), captured from `TextInputState`'s
+  `mov rcx, [rcx+8]` (the store's key above). Kiln passes it to the game's `ui/UiNodeRect` (ui.json) for the field's
+  rectangle in UI units, inside a guard, and keeps only finite values.
+- **To screen pixels** with the UI system's viewport and pixels per unit (`ui/sys.viewport`, `ui/sys.px_per_unit`,
+  reached from GameUiFrame's argument with `ui/sys.frame_arg`), read in kiln.ui's end-of-frame call. The list is drawn
+  above the field (below it when there is no room).
+- The replace is the history's own `EditSetText` call, so the cursor ends at the end of the new line.
+
+Feature `chat.ui.completion` (`TextInputState`, `EditSetText` and the two captures above); without it, or without the
+`ui/` rectangle names, completion is off and history (`chat.ui.input`) keeps working.
+
+| Name | 26430625 | Captured in |
+|---|---|---|
+| `chatui/widget.node` | 0x8 | TextInputState's prologue |
+| `chatui/edit.cursor` | 0x1938 | EditSetText (2 captures) |
+
 `native/services/ui/tests/chat_sigdb_test.py` checks these against an installed client exe. After a game update,
 sigport moves the patterns; if a capture no longer matches, `chat.ui.input` is off and the chat field stays vanilla.
 Still to recheck by hand on a new build: the `StringHead` and `TextSlice` shapes, the result layouts above, and that

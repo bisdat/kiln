@@ -7,7 +7,9 @@
 Without --publish it is a dry run: it reads the page and its files (GET only) and prints what it would upload, create
 and post. With --publish it uploads, creates the files or their new versions, and posts the changelog. The page itself
 (its publishing status) is never changed; --sync-description --publish replaces the page's description with
-docs/kiln/launcher/nexus-description.bbcode (without --publish it prints the difference).
+docs/kiln/launcher/nexus-description.bbcode (without --publish it prints the difference). The file is read from the
+checkout nexus.py runs in (or --description FILE), not from the release folder: a text that does not name the
+release's version is refused before anything is asked of the API.
 
 Files (each a zip: Nexus takes archives; the zip keeps the AppImage's executable bit):
   launcher-windows  main      "Kiln Launcher (Windows)"   the NSIS setup of the Nexus build (nexus/windows/)
@@ -155,6 +157,12 @@ def built_from_commit(folder):
     except OSError:
         return None
     return m.group(1) if m else None
+
+
+def names_version(text, version):
+    """Whether the page text names this release's version as a whole version: 0.2.0-dev.29.1 is not named by
+    0.2.0-dev.29.17, nor 0.2.0 by 0.2.0-dev.29 (a sentence's full stop after it is fine)."""
+    return re.search(r"(?<![0-9A-Za-z.+-])" + re.escape(version) + r"(?![0-9A-Za-z+-]|\.[0-9A-Za-z])", text) is not None
 
 
 def one(folder, pattern):
@@ -395,6 +403,19 @@ def run(argv=None):
             if a.only:
                 raise Fail(f"{folder} has no server pack (runtime/kiln-server-{version}.zip)")
             kinds = [k for k in kinds if k != "server"]  # a release from before the server pack
+        if "sdk" in kinds and not os.path.isdir(os.path.join(folder, "sdk")):
+            if a.only:
+                raise Fail(f"{folder} has no sdk/ (a --launcher-only release): its SDK file stays at the previous release")
+            kinds = [k for k in kinds if k != "sdk"]  # a --launcher-only release: the SDK file keeps its last version
+            log("no sdk/ (a --launcher-only release): the SDK file on the page keeps its previous version")
+        if a.sync_description:
+            # the page text comes from the checkout nexus.py runs in, not from the release folder: 0.2.0-dev.29.2's
+            # first sync, run from a checkout behind the release commit, put 0.2.0-dev.29.1's text up
+            with open(a.description, encoding="utf-8") as f:
+                if not names_version(f.read(), version):
+                    raise Fail(f"{a.description} does not name {version}: --sync-description would put another "
+                               "release's page text up. Run nexus.py from a checkout at the release commit (its "
+                               "nexus-description.bbcode names the version), or pass --description FILE")
 
         mode = "PUBLISH" if a.publish else "dry run (GET only)"
         log(f"Nexus Mods: Kiln {version} from {folder} [{mode}]")

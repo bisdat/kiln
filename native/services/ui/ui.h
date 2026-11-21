@@ -64,16 +64,53 @@ extern std::atomic<bool> g_want_mouse;       // ImGui wants the mouse (last fram
 extern std::atomic<bool> g_wheel_active;     // a radial wheel is open (wheel.cpp)
 extern std::atomic<bool> g_page_capture;     // the Kiln page in the game's main menu is opening or shown (menu_page.cpp)
 inline bool wheel_active() { return g_wheel_active.load(std::memory_order_relaxed); }
+// The overlay's drawing turned off during this session (vk.cpp: a failed Vulkan submit, a fault, a present queue Kiln
+// cannot draw with; ui.cpp overlay_turned_off). Set once, never cleared: from then on nothing of Kiln's captures the
+// game's input or asks to draw, and the Mods entry shows the reason as with the drawing off from the start.
+extern std::atomic<bool> g_overlay_failed;
+inline bool overlay_failed() { return g_overlay_failed.load(std::memory_order_acquire); }
+// The overlay draws in this session: its drawing was on at the start and has not turned off since.
+inline bool overlay_draws() { return overlay_drawing_on() && !overlay_failed(); }
+// Kiln's menu fell back to the game's own Mods rows in this session (since 0.2.0-dev.30.2): it was asked for in the
+// overlay and no frame of the overlay was drawn and presented in about a second (overlay_guard.cpp overlay_menu_ask;
+// another layer on the game's presents, say). The Mods entry then works as with the drawing off: its caption in the game's
+// own menu, g_menu_open its state. Cleared by the next ask once a frame of the overlay was presented since, and when the
+// drawing turns off (that state says it all then).
+extern std::atomic<bool> g_menu_fell_back;
+// Kiln's menu opens in the overlay: the overlay draws and its menu did not fall back.
+inline bool menu_in_overlay() { return overlay_draws() && !g_menu_fell_back.load(std::memory_order_relaxed); }
+// Kiln's menu is open in the overlay (g_menu_open), not as the Mods entry's caption after the fallback.
+inline bool menu_open_in_overlay() {
+    return g_menu_open.load(std::memory_order_relaxed) && !g_menu_fell_back.load(std::memory_order_relaxed);
+}
+// vk.cpp, once, on the present call after the overlay's drawing turned off, outside the overlay's locks: the one log
+// line (at `level`: an error for a failure, a warning for a present Kiln cannot draw in), kiln.ui's status, the Mods
+// caption, the capability rows and the crash guard (ui.cpp). `reason` is short (the Mods caption and Ui.Status.Error
+// carry it), `detail` goes into kiln.log only.
+void overlay_turned_off(int level, const char* reason, const char* detail);
+const std::string& overlay_off_reason();  // the reason (after overlay_failed() said true), else ""
+// overlay_turned_off, with g_overlay_failed set: what the last drawn frame left set lets go of the game's input. ImGui's
+// text field flag is not built again (key bindings would take every press for typing: KilnUiKey.text_input), and
+// Kiln's menu, no longer shown, is closed (Escape would close it instead of reaching the game; a Keys page that was
+// waiting for a key would take the next press). The menu key opens the Mods entry's caption, as with drawing off.
+inline void release_input_after_turn_off() {
+    g_text_input.store(false);
+    g_menu_open.store(false);
+    g_menu_fell_back.store(false);
+}
 inline bool capturing() {
-    return overlay_drawing_on() && (g_menu_open.load(std::memory_order_relaxed) || g_page_capture.load(std::memory_order_relaxed) ||
+    return overlay_draws() && (menu_open_in_overlay() || g_page_capture.load(std::memory_order_relaxed) ||
            g_interactive.load(std::memory_order_relaxed) > 0 || wheel_active());
 }
 // Something to draw this frame. The native fallback menu counts too.
 extern std::atomic<uint32_t> g_render_demand;  // kiln.render acquire_frames handles (render.cpp)
 extern std::atomic<uint32_t> g_footer_demand;  // Kiln's mark next to its line in the main menu's footer (menu_footer.cpp)
+extern std::atomic<uint32_t> g_graphics_demand;  // the graphics readout (graphics.cpp)
+extern std::atomic<uint32_t> g_chat_completion_demand; // focused native slash-command suggestions (issue #44)
 inline bool want_draw() {
-    return overlay_drawing_on() && (capturing() || g_demand.load(std::memory_order_relaxed) > 0 || g_render_demand.load(std::memory_order_relaxed) > 0 ||
-                                    g_footer_demand.load(std::memory_order_relaxed) > 0);
+    return overlay_draws() && (capturing() || g_demand.load(std::memory_order_relaxed) > 0 || g_render_demand.load(std::memory_order_relaxed) > 0 ||
+                                    g_footer_demand.load(std::memory_order_relaxed) > 0 || g_graphics_demand.load(std::memory_order_relaxed) > 0 ||
+                                    g_chat_completion_demand.load(std::memory_order_relaxed) > 0);
 }
 bool in_frame();  // the calling thread is inside the overlay frame's callbacks (drawing calls work)
 
@@ -83,15 +120,16 @@ extern std::atomic<uint32_t> g_hover_panels; // Kiln panels that take the mouse 
 
 // ---- chat_input_probe.cpp (GitHub issue 44: Up/Down history in the game's chat field) ----
 bool chat_input_probe_install();  // game_install: hooks the chat field when chat history (or a diagnostic) is on
-void chat_input_frame_end();      // the game's UI thread, after each GameUiFrame: whether the chat field has focus
+void chat_input_frame_end(uintptr_t sys10);  // game's UI thread, focus and native rectangle conversion
 void chat_input_exit();           // on_unload: writes the history file still pending, stops its writer thread
+KilnResult chat_completion_io(KilnUiChatCompletion* io);  // internal managed snapshot/selection/replacement, NOT game call
 
 // The window procedure's one hook point for the game's chat field (input.cpp calls it on the window thread, before
 // Kiln's own key handling). Set by chat_input_probe_install while chat history or its diagnostic runs; null otherwise,
 // and in the input.cpp host harnesses, which do not link chat_input_probe.cpp.
 struct ChatInputSink {
     bool (*key)(uint32_t vk, uint32_t mods, bool down, bool captured);  // a key transition; true keeps a press from the game
-    void (*text)(uint32_t ch);                                           // WM_CHAR / WM_UNICHAR, while Kiln does not capture
+    bool (*text)(uint32_t ch);                                           // WM_CHAR / WM_UNICHAR; true drops a consumed Tab's character
     void (*ime)(bool composing);                                         // an IME composition started (true) or ended
     void (*blur)();                                                      // the window lost focus / the game was deactivated
 };
@@ -114,6 +152,9 @@ bool input_key_held(uint32_t vk);         // the key is down now, as far as the 
 // subscribe_window_input (kiln_ui.h v5): the window's input records for native subscribers. Any thread.
 KilnResult input_feed_subscribe(KilnOwner owner, KilnUiWindowInputFn fn, void* user, KilnHandle* out);
 KilnResult input_feed_unsubscribe(KilnHandle h);  // KILN_ERR_NOT_FOUND: not a window-input subscription
+// subscribe_pointer_press (0.2.0-dev.30): left/right presses over the game's UI for native subscribers. Any thread.
+KilnResult input_pointer_subscribe(KilnOwner owner, KilnUiPointerFn fn, void* user, KilnHandle* out);
+KilnResult input_pointer_unsubscribe(KilnHandle h);  // KILN_ERR_NOT_FOUND: not a pointer subscription
 
 // ---- keys.cpp (the key subscribers: subscribe_key, v7 subscribe_key_ex) ----
 KilnResult keys_subscribe(KilnOwner owner, KilnUiKeyFn fn, void* user, uint32_t flags, KilnHandle* out);  // KILN_UI_KEYS_*
@@ -143,7 +184,7 @@ bool game_screens_on();
 bool game_menu_on(uint32_t menu);
 bool game_in_menu();   // no world steps (boot, main menu, loading)
 KilnResult game_screen(KilnUiScreen* out);
-uint32_t game_screen_target();  // a factory screen's station entity of the last UI frame, else 0
+uint32_t game_screen_target();  // a chest's or factory's entity (play.target) of the last UI frame, else 0
 KilnResult game_subscribe_screen(KilnOwner owner, KilnUiScreenFn fn, void* user, KilnHandle* out);
 KilnResult game_subscribe_tick(KilnOwner owner, KilnUiTickFn fn, void* user, KilnHandle* out);
 KilnResult game_subscribe_frame_tick(KilnOwner owner, KilnUiFrameTickFn fn, void* user, KilnHandle* out);
@@ -178,6 +219,10 @@ void footer_texts_changed();                  // any thread: Kiln's texts change
 
 // ---- Kiln's own texts (ui_text.h; set_texts) ----
 void game_texts_changed();                    // any thread: the Mods entry and the drawing-off caption in the new language
+void game_overlay_turned_off();               // any thread, once: the Mods entry shows why the overlay's drawing went off
+// overlay_guard.cpp (a pool thread), when Kiln's menu fell back (g_menu_fell_back): the Mods entry's caption says so, and
+// the main menu's page, when it was the one asked for, is left for the game's main menu, where the caption shows.
+void game_menu_fell_back();
 
 // ---- menu_page.cpp (the Kiln menu as a page of the game's main menu: feature ui.menu_page) ----
 bool page_install(bool main_menu_hooked);  // game_install, after the MainMenuEntry hook: resolve, hook Credits
@@ -231,10 +276,30 @@ bool image_texture(KilnHandle h, ImTextureRef* out);  // render thread
 bool render_install();                 // plugin main: the camera hook (feature render.camera)
 const void* render_table();            // the KilnRenderApi
 
+// ---- graphics.cpp (Kiln's own graphics tools: the frame cap, DLSS settings, the readout; docs/kiln/graphics.md) ----
+void graphics_start(bool optiscaler, bool streamline);  // plugin main, after overlay_guard_start: kiln.json, what steps aside
+bool graphics_wants_load_hook();  // DLSS is to be hooked when NVIDIA's DLSS core loads (the LoadLibraryExW hook must be in)
+void graphics_after_load();       // after every library load (load_hook.h; may hold the loader lock): NVIDIA's DLSS core
+void graphics_present();          // render thread, right after the game's frame went to vkQueuePresentKHR (no lock held):
+                                  // the frame counts, and the frame cap's wait for the game's next slot
+extern std::atomic<bool> g_graphics_present;  // graphics_present has work: the cap or the readout is on, or was just
+                                              // turned off (its counts are cleared once)
+// vk.cpp's present hook, after the game's present: one relaxed load while the frame cap and the readout are off.
+inline void graphics_after_present() {
+    if (g_graphics_present.load(std::memory_order_relaxed)) graphics_present();
+}
+void graphics_overlay();          // render thread, inside the ImGui frame: the readout
+KilnResult graphics_set(const KilnUiGraphics* settings);  // any thread (Kiln.Ui; ui.cpp refuses native plugins)
+KilnResult graphics_status(KilnUiGraphicsStatus* out);     // any thread
+
+// ---- upscale.cpp (phase B): declared in upscale.h, which needs the Vulkan headers ----
+
 // ---- vk.cpp ----
 bool vk_install();  // called once vulkan-1.dll is loaded (from the LoadLibraryExW hook)
+void vk_extent(uint32_t* width, uint32_t* height);  // the game window's swapchain (any thread; 0 before one exists)
 void vk_status(KilnUiStatus* out);
 uint64_t vk_presents();  // frames the game presented through Kiln's present hook (the overlay crash guard)
+bool vk_drawing();       // a present call is making the overlay's frame right now (vk.cpp draw(), past its checks)
 KilnResult vk_subscribe_pre_overlay(KilnUiPreOverlayFn fn, KilnUiSwapchainGoneFn gone, void* user, KilnHandle* out);
 bool vk_unsubscribe(KilnHandle handle);
 void vk_set_pre_overlay_demand(uint32_t count);

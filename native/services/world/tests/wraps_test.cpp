@@ -2284,6 +2284,63 @@ void abi(const char* path) {
         F(KilnWorldApi, foreign_read); F(KilnWorldApi, foreign_write); F(KilnWorldApi, foreign_attr_changed);
     }
     {
+        // The ECS-read members appended after the client-world members, and their records.
+        auto& l = list("KilnWorldApiEcsReads", offsetof(KilnWorldApi, ecs_write_policy));
+        F(KilnWorldApi, entity_open); F(KilnWorldApi, entity_validate); F(KilnWorldApi, ecs_context_snapshot);
+        F(KilnWorldApi, ecs_query); F(KilnWorldApi, ecs_snapshot); F(KilnWorldApi, ecs_snapshot_many);
+        F(KilnWorldApi, ecs_template_uuid);
+    }
+    {
+        // The compare-exchange members appended after the ECS reads, and their records.
+        auto& l = list("KilnWorldApiEcsWrites", sizeof(KilnWorldApi));
+        F(KilnWorldApi, ecs_write_policy); F(KilnWorldApi, ecs_compare_exchange); F(KilnWorldApi, ecs_write_subscribe);
+        F(KilnWorldApi, ecs_write_unsubscribe);
+    }
+    {
+        auto& l = list("KilnEcsWritePolicy", sizeof(KilnEcsWritePolicy));
+        F(KilnEcsWritePolicy, size); F(KilnEcsWritePolicy, status); F(KilnEcsWritePolicy, world_kind);
+        F(KilnEcsWritePolicy, component); F(KilnEcsWritePolicy, component_size); F(KilnEcsWritePolicy, budget);
+        F(KilnEcsWritePolicy, flags); F(KilnEcsWritePolicy, why_code); F(KilnEcsWritePolicy, why);
+    }
+    {
+        auto& l = list("KilnMutationReply", sizeof(KilnMutationReply));
+        F(KilnMutationReply, size); F(KilnMutationReply, status); F(KilnMutationReply, flags); F(KilnMutationReply, why_code);
+        F(KilnMutationReply, engine_reason); F(KilnMutationReply, generation); F(KilnMutationReply, session);
+        F(KilnMutationReply, step); F(KilnMutationReply, hold_ns);
+    }
+    {
+        auto& l = list("KilnEcsWriteEvent", sizeof(KilnEcsWriteEvent));
+        F(KilnEcsWriteEvent, size); F(KilnEcsWriteEvent, world_kind); F(KilnEcsWriteEvent, entity);
+        F(KilnEcsWriteEvent, generation); F(KilnEcsWriteEvent, component); F(KilnEcsWriteEvent, reserved);
+        F(KilnEcsWriteEvent, owner); F(KilnEcsWriteEvent, session); F(KilnEcsWriteEvent, step);
+    }
+    {
+        auto& l = list("KilnObjectRef", sizeof(KilnObjectRef));
+        F(KilnObjectRef, size); F(KilnObjectRef, entity); F(KilnObjectRef, generation); F(KilnObjectRef, world_kind);
+        F(KilnObjectRef, session); F(KilnObjectRef, layout_stamp); F(KilnObjectRef, reload_epoch);
+    }
+    {
+        auto& l = list("KilnObjectInfo", sizeof(KilnObjectInfo));
+        F(KilnObjectInfo, size); F(KilnObjectInfo, status); F(KilnObjectInfo, entity); F(KilnObjectInfo, generation);
+        F(KilnObjectInfo, world_kind); F(KilnObjectInfo, flags); F(KilnObjectInfo, session);
+        F(KilnObjectInfo, layout_stamp); F(KilnObjectInfo, reload_epoch);
+    }
+    {
+        auto& l = list("KilnEcsContextInfo", sizeof(KilnEcsContextInfo));
+        F(KilnEcsContextInfo, size); F(KilnEcsContextInfo, status); F(KilnEcsContextInfo, present_mask);
+        F(KilnEcsContextInfo, exact_profile); F(KilnEcsContextInfo, sessions); F(KilnEcsContextInfo, layout_stamp);
+    }
+    {
+        auto& l = list("KilnEcsQueryRequest", sizeof(KilnEcsQueryRequest));
+        F(KilnEcsQueryRequest, size); F(KilnEcsQueryRequest, world_kind); F(KilnEcsQueryRequest, flags);
+        F(KilnEcsQueryRequest, component_count); F(KilnEcsQueryRequest, components); F(KilnEcsQueryRequest, center);
+        F(KilnEcsQueryRequest, radius);
+    }
+    {
+        auto& l = list("KilnEcsSnapshotSpec", sizeof(KilnEcsSnapshotSpec));
+        F(KilnEcsSnapshotSpec, component); F(KilnEcsSnapshotSpec, flags);
+    }
+    {
         auto& l = list("KilnForeignLayout", sizeof(KilnForeignLayout));
         F(KilnForeignLayout, size); F(KilnForeignLayout, world_kind); F(KilnForeignLayout, session);
         F(KilnForeignLayout, program); F(KilnForeignLayout, iter_size); F(KilnForeignLayout, counts);
@@ -2328,6 +2385,75 @@ void abi(const char* path) {
         check(fx.contains(name) && fx.at(name) == shape, what.c_str());
         if (std::getenv("KILN_ABI_DUMP")) std::printf("\"%s\": %s\n", name.c_str(), shape.dump().c_str());
     }
+    // The ECS reads' constants by value: the header against abi.json (and Kiln.World.Tests the C# mirror against it).
+    {
+        const std::map<std::string, long long> header = {
+            {"KILN_ECS_OK", KILN_ECS_OK}, {"KILN_ECS_ABSENT", KILN_ECS_ABSENT}, {"KILN_ECS_STALE", KILN_ECS_STALE},
+            {"KILN_ECS_UNREADABLE", KILN_ECS_UNREADABLE}, {"KILN_ECS_UNAVAILABLE", KILN_ECS_UNAVAILABLE},
+            {"KILN_ECS_BUSY", KILN_ECS_BUSY}, {"KILN_ECS_UNSUPPORTED", KILN_ECS_UNSUPPORTED},
+            {"KILN_WORLD_ERR_CHANGED", KILN_WORLD_ERR_CHANGED}, {"KILN_ECS_ERR_STALE", KILN_ECS_ERR_STALE},
+            {"KILN_ECS_ERR_UNREADABLE", KILN_ECS_ERR_UNREADABLE}, {"KILN_ECS_ERR_BUSY", KILN_ECS_ERR_BUSY},
+            {"KILN_ECS_ERR_UNSUPPORTED", KILN_ECS_ERR_UNSUPPORTED}, {"KILN_ECS_QUERY_BOUNDS", KILN_ECS_QUERY_BOUNDS},
+            {"KILN_ECS_QUERY_FRAME_QUIET", KILN_ECS_QUERY_FRAME_QUIET},
+            {"KILN_ECS_READ_FRAME_QUIET", KILN_ECS_READ_FRAME_QUIET}, {"KILN_OBJECT_ALIVE", KILN_OBJECT_ALIVE},
+            {"KILN_OBJECT_HAS_TEMPLATE", KILN_OBJECT_HAS_TEMPLATE}, {"KILN_WORLD_CAP_ECS_READ", KILN_WORLD_CAP_ECS_READ}};
+        std::map<std::string, long long> listed;
+        for (const auto& v : fx.at("KilnEcsReadConstants").at("values")) listed[v.at(0).get<std::string>()] = v.at(1).get<long long>();
+        check(listed == header, "abi.json: the ECS reads' constants by value");
+        // Result codes are distinct among themselves and from the core's (1..7).
+        const long long codes[] = {KILN_WORLD_ERR_CHANGED, KILN_ECS_ERR_STALE, KILN_ECS_ERR_UNREADABLE, KILN_ECS_ERR_BUSY,
+                                   KILN_ECS_ERR_UNSUPPORTED};
+        bool distinct = true;
+        for (size_t i = 0; i < 5; ++i) {
+            distinct = distinct && codes[i] > KILN_ERR_INTERNAL;
+            for (size_t j = i + 1; j < 5; ++j) distinct = distinct && codes[i] != codes[j];
+        }
+        check(distinct, "the ECS reads' result codes are distinct and above the core's");
+    }
+    // The compare-exchange writes' constants by value (Kiln.World.Tests checks the C# mirror against the same list).
+    {
+        const std::map<std::string, long long> header = {
+            {"KILN_ECS_CONFLICT", KILN_ECS_CONFLICT}, {"KILN_ECS_NOT_WRITABLE", KILN_ECS_NOT_WRITABLE},
+            {"KILN_ECS_UNCERTAIN", KILN_ECS_UNCERTAIN}, {"KILN_ECS_ERR_CONFLICT", KILN_ECS_ERR_CONFLICT},
+            {"KILN_ECS_ERR_NOT_WRITABLE", KILN_ECS_ERR_NOT_WRITABLE}, {"KILN_ECS_ERR_UNCERTAIN", KILN_ECS_ERR_UNCERTAIN},
+            {"KILN_WORLD_CAP_ECS_WRITE", KILN_WORLD_CAP_ECS_WRITE},
+            {"KILN_ECS_WRITE_POLICY_WRITABLE", KILN_ECS_WRITE_POLICY_WRITABLE},
+            {"KILN_ECS_WRITE_POLICY_TRACKING_KNOWN", KILN_ECS_WRITE_POLICY_TRACKING_KNOWN},
+            {"KILN_ECS_WRITE_POLICY_TRACKED_A", KILN_ECS_WRITE_POLICY_TRACKED_A},
+            {"KILN_ECS_WRITE_POLICY_TRACKED_B", KILN_ECS_WRITE_POLICY_TRACKED_B},
+            {"KILN_ECS_WRITE_POLICY_PLAIN", KILN_ECS_WRITE_POLICY_PLAIN},
+            {"KILN_ECS_WRITE_POLICY_OVER_BUDGET", KILN_ECS_WRITE_POLICY_OVER_BUDGET},
+            {"KILN_MUTATION_WRITTEN", KILN_MUTATION_WRITTEN}, {"KILN_MUTATION_NO_OP", KILN_MUTATION_NO_OP},
+            {"KILN_MUTATION_CONFIRMED", KILN_MUTATION_CONFIRMED}, {"KILN_MUTATION_ROLLED_BACK", KILN_MUTATION_ROLLED_BACK},
+            {"KILN_MUTATION_TARGET_LATCHED", KILN_MUTATION_TARGET_LATCHED},
+            {"KILN_MUTATION_EVENT_QUEUED", KILN_MUTATION_EVENT_QUEUED},
+            {"KILN_ECS_WRITE_WHY_NONE", KILN_ECS_WRITE_WHY_NONE},
+            {"KILN_ECS_WRITE_WHY_NOT_SERVER_WORLD", KILN_ECS_WRITE_WHY_NOT_SERVER_WORLD},
+            {"KILN_ECS_WRITE_WHY_NO_PROFILE", KILN_ECS_WRITE_WHY_NO_PROFILE},
+            {"KILN_ECS_WRITE_WHY_NO_WORLD", KILN_ECS_WRITE_WHY_NO_WORLD},
+            {"KILN_ECS_WRITE_WHY_UNREGISTERED", KILN_ECS_WRITE_WHY_UNREGISTERED},
+            {"KILN_ECS_WRITE_WHY_TRACKED", KILN_ECS_WRITE_WHY_TRACKED},
+            {"KILN_ECS_WRITE_WHY_TRACKING_UNKNOWN", KILN_ECS_WRITE_WHY_TRACKING_UNKNOWN},
+            {"KILN_ECS_WRITE_WHY_NOT_PLAIN", KILN_ECS_WRITE_WHY_NOT_PLAIN}, {"KILN_ECS_WRITE_WHY_SIZE", KILN_ECS_WRITE_WHY_SIZE},
+            {"KILN_ECS_WRITE_WHY_OVER_BUDGET", KILN_ECS_WRITE_WHY_OVER_BUDGET},
+            {"KILN_ECS_WRITE_WHY_IN_FRAME", KILN_ECS_WRITE_WHY_IN_FRAME}, {"KILN_ECS_WRITE_WHY_GATE", KILN_ECS_WRITE_WHY_GATE},
+            {"KILN_ECS_WRITE_WHY_EVENTS_FULL", KILN_ECS_WRITE_WHY_EVENTS_FULL},
+            {"KILN_ECS_WRITE_WHY_TARGET_LATCHED", KILN_ECS_WRITE_WHY_TARGET_LATCHED},
+            {"KILN_ECS_WRITE_WHY_OWNER_RETIRED", KILN_ECS_WRITE_WHY_OWNER_RETIRED},
+            {"KILN_ECS_WRITE_WHY_REF", KILN_ECS_WRITE_WHY_REF}, {"KILN_ECS_WRITE_WHY_COMPARE", KILN_ECS_WRITE_WHY_COMPARE},
+            {"KILN_ECS_WRITE_WHY_FAULT", KILN_ECS_WRITE_WHY_FAULT}, {"KILN_ECS_WRITE_WHY_READBACK", KILN_ECS_WRITE_WHY_READBACK},
+            {"KILN_ECS_WRITE_WHY_NOT_OWNERS_REF", KILN_ECS_WRITE_WHY_NOT_OWNERS_REF},
+            {"KILN_ECS_WRITE_WHY_RETIRE_RACE", KILN_ECS_WRITE_WHY_RETIRE_RACE}};
+        std::map<std::string, long long> listed;
+        for (const auto& v : fx.at("KilnEcsWriteConstants").at("values")) listed[v.at(0).get<std::string>()] = v.at(1).get<long long>();
+        check(listed == header, "abi.json: the compare-exchange writes' constants by value");
+        const long long codes[] = {KILN_WORLD_ERR_CHANGED, KILN_ECS_ERR_STALE, KILN_ECS_ERR_UNREADABLE, KILN_ECS_ERR_BUSY,
+                                   KILN_ECS_ERR_UNSUPPORTED, KILN_ECS_ERR_CONFLICT, KILN_ECS_ERR_NOT_WRITABLE, KILN_ECS_ERR_UNCERTAIN};
+        bool distinct = true;
+        for (size_t i = 0; i < 8; ++i)
+            for (size_t j = i + 1; j < 8; ++j) distinct = distinct && codes[i] != codes[j];
+        check(distinct, "every kiln.world result code is distinct");
+    }
     // v4 only appends: the v3 table (the "KilnWorldApi" entry) is a prefix of it, entry for entry.
     const auto& v3 = fx.at("KilnWorldApi").at("fields");
     const auto& v4 = now.at("KilnWorldApiV4").at("fields");
@@ -2370,6 +2496,169 @@ void directory_read_in_stage() {
     wpre();
 }
 }  // namespace
+
+// Prediction wraps (since 0.2.0-dev.29.18): a stage in the client world's table that runs on the prediction storage's
+// slices only (storage kind 1), next to client-world stages on the same program, which run on the client world's slices
+// only. Taken while systems.wraps.prediction is available: a Before or an After, on a program the prediction storage
+// steps (no client flag 0x1, HOST_ONLY 0x10 or engine bit 0x40); refused as an invalid argument otherwise, as the kind
+// was before.
+int g_pred_row = KILN_CAP_AVAILABLE;  // the row's state, -1: no row
+KilnResult KILN_CALL pred_caps_find(KilnStr name, KilnCapRow* out) {
+    const std::string_view n(name.ptr, name.len);
+    if (n == "systems.wraps.client" || (n == "systems.wraps.prediction" && g_pred_row >= 0)) {
+        out->state = n == "systems.wraps.client" ? uint32_t{KILN_CAP_AVAILABLE} : static_cast<uint32_t>(g_pred_row);
+        out->reason = KILN_CAP_REASON_NONE;
+        out->name = name;
+        out->text = KilnStr{"", 0};
+        return KILN_OK;
+    }
+    return KILN_ERR_NOT_FOUND;
+}
+void KILN_CALL st_kind(KilnGameSlice* s, void* user) {
+    trace(std::string(static_cast<const char*>(user)) + (s->world_kind == KILN_WORLD_PREDICTION ? "@p" : s->world_kind == KILN_WORLD_CLIENT ? "@c" : "@?"));
+}
+void prediction_wraps() {
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_CLIENT);
+    g_live_world[KILN_WORLD_SERVER] = 0;
+    wworld(0);
+    g_wdesc[6].flags = 0x1;   // client_only: a client program (and no update): never predicted
+    g_wdesc[7].flags = 0x10;  // base_comfort: HOST_ONLY, not predicted
+    g_wdesc[5].flags = 0x40;  // move_colliders: the engine bit the prediction step skips
+    g_live_world[KILN_WORLD_CLIENT] = reinterpret_cast<uintptr_t>(g_wworld);
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_CLIENT);
+    wpre(KILN_WORLD_CLIENT);
+    const int32_t fuel = game_program_find(KILN_WORLD_CLIENT, kstr("fuel_setup"));
+    const int32_t net = game_program_find(KILN_WORLD_CLIENT, kstr("fuel_network"));
+    check(fuel == 0 && net == 1 && game_program_find(KILN_WORLD_PREDICTION, kstr("fuel_setup")) == -1,
+          "prediction wraps: the client world's directory holds the table (the prediction storage has none)");
+    KilnCapsApi caps{};
+    caps.header = {sizeof caps, 1};
+    caps.report = [](KilnOwner, KilnStr, uint32_t, uint32_t, KilnStr) -> KilnResult { return KILN_OK; };
+    caps.find = &pred_caps_find;
+    g_wrap_caps = &caps;
+    KilnHandle h = 0;
+    char p[] = "P", c[] = "C", pa[] = "PA";
+    g_pred_row = KILN_CAP_UNAVAILABLE;
+    check(game_program_wrap(1, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_BEFORE, 0, &st_kind, p, &h) == KILN_ERR_INVALID_ARGUMENT && !h,
+          "prediction wraps: refused as an invalid argument while systems.wraps.prediction is off (as before 29.18)");
+    g_pred_row = -1;
+    check(game_program_wrap(1, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_BEFORE, 0, &st_kind, p, &h) == KILN_ERR_INVALID_ARGUMENT,
+          "prediction wraps: refused where kiln.caps has no such row (an older core)");
+    g_pred_row = KILN_CAP_AVAILABLE;
+    check(game_program_wrap(1, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_REPLACE, 0, &st_kind, p, &h) == KILN_ERR_INVALID_ARGUMENT,
+          "prediction wraps: no Replace");
+    check(game_program_wrap(1, KILN_WORLD_PREDICTION, game_program_find(KILN_WORLD_CLIENT, kstr("base_comfort")), KILN_WRAP_BEFORE, 0,
+                            &st_kind, p, &h) == KILN_ERR_INVALID_ARGUMENT &&
+              game_program_wrap(1, KILN_WORLD_PREDICTION, game_program_find(KILN_WORLD_CLIENT, kstr("move_colliders")),
+                                KILN_WRAP_BEFORE, 0, &st_kind, p, &h) == KILN_ERR_INVALID_ARGUMENT &&
+              game_program_wrap(1, KILN_WORLD_PREDICTION, game_program_find(KILN_WORLD_CLIENT, kstr("client_only")),
+                                KILN_WRAP_BEFORE, 0, &st_kind, p, &h) == KILN_ERR_INVALID_ARGUMENT,
+          "prediction wraps: refused on a program the prediction storage never steps (0x10, 0x40, a client program)");
+    check(game_program_wrap(1, KILN_WORLD_PREDICTION, 99, KILN_WRAP_BEFORE, 0, &st_kind, p, &h) == KILN_ERR_NOT_FOUND,
+          "prediction wraps: an index outside the client world's directory");
+    KilnHandle hp = 0, hc = 0, hpa = 0;
+    check(game_program_wrap(1, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_BEFORE, 0, &st_kind, p, &hp) == KILN_OK && hp &&
+              game_program_wrap(2, KILN_WORLD_CLIENT, fuel, KILN_WRAP_BEFORE, 0, &st_kind, c, &hc) == KILN_OK && hc &&
+              game_program_wrap(1, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_AFTER, 0, &st_kind, pa, &hpa) == KILN_OK && hpa,
+          "prediction wraps: a Before and an After for the prediction storage beside a client-world Before");
+    check(winfo(hp).state == KILN_WRAP_PENDING && winfo(hp).world_kind == KILN_WORLD_PREDICTION, "prediction wraps: pending, kind 1");
+    wpre(KILN_WORLD_CLIENT);
+    check(winfo(hp).state == KILN_WRAP_ACTIVE && winfo(hp).program_index == fuel && winfo(hc).state == KILN_WRAP_ACTIVE &&
+              update_of(wentry(fuel)) != reinterpret_cast<uintptr_t>(kWUpdates[0]),
+          "prediction wraps: applied in the client world's Pre, one trampoline for both kinds");
+    g_tracing = true;
+    g_trace.clear();
+    Job cj(4, KILN_WORLD_CLIENT), pj(1, KILN_WORLD_PREDICTION), sj(2, KILN_WORLD_SERVER);
+    const uint64_t bad_before = g_bad_index.load();
+    run_slice(wentry(fuel), cj);
+    check(g_trace == std::vector<std::string>{"C@c", "orig"}, "prediction wraps: a client slice runs the client stage only");
+    g_trace.clear();
+    run_slice(wentry(fuel), pj);
+    check(g_trace == std::vector<std::string>{"P@p", "orig", "PA@p"},
+          "prediction wraps: a prediction slice runs the prediction stages only, its world kind says so");
+    g_trace.clear();
+    run_slice(wentry(fuel), sj);
+    check(g_trace == std::vector<std::string>{"orig"}, "prediction wraps: a slice of a server storage is forwarded");
+    g_trace.clear();
+    check(winfo(hp).calls == 1 && winfo(hpa).calls == 1 && winfo(hc).calls == 1 && g_bad_index.load() == bad_before && wraps_test_in_flight(1) == 0,
+          "prediction wraps: each stage counted once, the index left whole, nothing in flight");
+    // only prediction stages left: a client slice goes to the update untouched
+    game_program_unwrap(hc);
+    wpre(KILN_WORLD_CLIENT);
+    KilnGameProgramInfo pi{};
+    pi.size = sizeof pi;
+    game_program_info(KILN_WORLD_CLIENT, fuel, &pi);
+    const uint64_t forwarded = pi.forwarded;
+    run_slice(wentry(fuel), cj);
+    game_program_info(KILN_WORLD_CLIENT, fuel, &pi);
+    check(g_trace == std::vector<std::string>{"orig"} && pi.forwarded == forwarded + 1,
+          "prediction wraps: with prediction stages only, a client slice is forwarded");
+    g_trace.clear();
+    run_slice(wentry(fuel), pj);
+    check(g_trace == std::vector<std::string>{"P@p", "orig", "PA@p"}, "prediction wraps: the prediction slice still runs them");
+    g_trace.clear();
+    g_tracing = false;
+    // the client world stops (the prediction storage stops with it): the entry back, the wraps wait for the next one
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_CLIENT);
+    check(update_of(wentry(fuel)) == reinterpret_cast<uintptr_t>(kWUpdates[0]) && winfo(hp).state == KILN_WRAP_PENDING,
+          "prediction wraps: a client world's stop puts the update back; the prediction wrap waits for the next client world");
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_CLIENT);
+    wpre(KILN_WORLD_CLIENT);
+    check(winfo(hp).state == KILN_WRAP_ACTIVE, "prediction wraps: applied again in the next client world");
+    game_program_unwrap(hp);
+    game_program_unwrap(hpa);
+    wpre(KILN_WORLD_CLIENT);
+    check(update_of(wentry(fuel)) == reinterpret_cast<uintptr_t>(kWUpdates[0]) && winfo(hp).state == KILN_WRAP_REMOVED,
+          "prediction wraps: unwrapped, the game's update is back");
+
+    // Beside a client world's Replace of the same program: a client slice runs the Replace, a prediction slice the game's
+    // update between its own stages (the chain's one Replace is the client world's); prediction Befores by priority.
+    char r[] = "R", p5[] = "P5";
+    KilnHandle hr = 0, hq = 0, hq5 = 0, hqa = 0;
+    check(game_program_wrap(2, KILN_WORLD_CLIENT, fuel, KILN_WRAP_REPLACE, 0, &st_kind, r, &hr) == KILN_OK &&
+              game_program_wrap(3, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_BEFORE, 0, &st_kind, p, &hq) == KILN_OK &&
+              game_program_wrap(3, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_BEFORE, 5, &st_kind, p5, &hq5) == KILN_OK &&
+              game_program_wrap(3, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_AFTER, 0, &st_kind, pa, &hqa) == KILN_OK,
+          "prediction wraps: taken beside a client world's Replace of the program");
+    wpre(KILN_WORLD_CLIENT);
+    g_tracing = true;
+    g_trace.clear();
+    run_slice(wentry(fuel), cj);
+    check(g_trace == std::vector<std::string>{"R@c"}, "prediction wraps: a client slice runs the client world's Replace only");
+    g_trace.clear();
+    run_slice(wentry(fuel), pj);
+    check(g_trace == std::vector<std::string>{"P5@p", "P@p", "orig", "PA@p"},
+          "prediction wraps: a prediction slice runs the game's update, not the client world's Replace; Befores by priority");
+    g_trace.clear();
+    // the owner of the prediction stages goes (a mod's unload): nothing of it is running, the client Replace stays
+    uint32_t pending = 9;
+    check(game_wraps_release(3, &pending) == KILN_OK && pending == 0, "prediction wraps: released, none of them running");
+    run_slice(wentry(fuel), pj);
+    check(g_trace == std::vector<std::string>{"orig"}, "prediction wraps: a released owner's stages are not called any more");
+    g_trace.clear();
+    wpre(KILN_WORLD_CLIENT);
+    check(winfo(hq).state == KILN_WRAP_REMOVED && winfo(hq5).state == KILN_WRAP_REMOVED && winfo(hqa).state == KILN_WRAP_REMOVED &&
+              winfo(hr).state == KILN_WRAP_ACTIVE && update_of(wentry(fuel)) != reinterpret_cast<uintptr_t>(kWUpdates[0]),
+          "prediction wraps: out of the chain in the next client Pre; the client world's Replace keeps the trampoline");
+    // a chain of client stages only: a prediction slice goes to the game's update untouched, counted as forwarded
+    game_program_info(KILN_WORLD_CLIENT, fuel, &pi);
+    const uint64_t forwarded2 = pi.forwarded;
+    run_slice(wentry(fuel), pj);
+    game_program_info(KILN_WORLD_CLIENT, fuel, &pi);
+    check(g_trace == std::vector<std::string>{"orig"} && pi.forwarded == forwarded2 + 1 && winfo(hr).calls == 1,
+          "prediction wraps: with client stages only, a prediction slice is forwarded");
+    g_trace.clear();
+    g_tracing = false;
+    game_program_unwrap(hr);
+    wpre(KILN_WORLD_CLIENT);
+    check(update_of(wentry(fuel)) == reinterpret_cast<uintptr_t>(kWUpdates[0]) && wraps_test_in_flight(1) == 0,
+          "prediction wraps: the last stage gone, the game's update is back");
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_CLIENT);
+    g_live_world[KILN_WORLD_CLIENT] = 0;
+    g_wdesc[5].flags = g_wdesc[6].flags = g_wdesc[7].flags = 0;
+    g_wrap_caps = nullptr;
+}
 
 void archetype_stop_counts_per_world() {
     world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
@@ -2429,6 +2718,7 @@ int main(int argc, char** argv) {
     stress_steps();
     stress_overlap();
     archetype_stop_counts_per_world();
+    prediction_wraps();
     if (argc > 1) abi(argv[1]);
     else check(false, "pass tests/abi.json");
     std::printf("world game programs: %s %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);

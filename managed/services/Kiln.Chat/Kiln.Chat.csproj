@@ -17,9 +17,11 @@
     <ProjectReference Include="../Kiln.Permissions/Kiln.Permissions.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Spawn/Kiln.Spawn.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Client/Kiln.Client.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Network/Kiln.Network.csproj" Private="false" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Kiln.Api.Tests" />
+    <InternalsVisibleTo Include="Kiln.Ui" />
     <!-- Services whose command trees Kiln shares between mods (Commands.RegisterShared). -->
     <InternalsVisibleTo Include="Kiln.Creatures" />
     <InternalsVisibleTo Include="Kiln.Build" />

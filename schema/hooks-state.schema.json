@@ -60,7 +60,8 @@
         "offset": { "$ref": "#/$defs/hex", "description": "Destination minus the module's base." },
         "address": { "$ref": "#/$defs/hex", "description": "The destination itself in this session (absent when no jump could be followed)." },
         "inPlace": { "const": true, "description": "Bytes were changed in place, no jump was found." },
-        "own": { "type": "boolean", "description": "The module is one of Kiln's (`kiln-*.dll`): not an overlap." }
+        "own": { "type": "boolean", "description": "The module is one of Kiln's (`kiln-*.dll`): not an overlap." },
+        "path": { "type": "string", "description": "Since 0.2.0-dev.29.19: the module's file, relative to the game folder with `/` (`kiln/chain/xhl-core/xhl-core.dll`, `dinput8.dll` for one in the game folder itself), else its full path (a Library DLL). Absent when the module is not known. Two DLLs can share a file name; this tells them apart." }
       },
       "additionalProperties": true
     },
@@ -105,7 +106,8 @@
         "module": { "type": ["string", "null"], "description": "The other side's DLL file name. For `refused`: the only module that patched game code (probably the culprit), or null when Kiln cannot tell, and `suspects` then lists the modules that patched game code." },
         "offset": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hex" }] },
         "address": { "$ref": "#/$defs/hex" },
-        "inPlace": { "const": true }
+        "inPlace": { "const": true },
+        "path": { "type": "string", "description": "Since 0.2.0-dev.29.19: the module's file, as `foreignDest.path`." }
       },
       "additionalProperties": true
     },

@@ -130,6 +130,10 @@ internal static unsafe class Program
             ModCatalog.WaitForSnapshot();
             var look = scene.Look ?? LookSettings.Default;
             PlayerLook.Use(language is null ? look : look with { Language = language });  // the player's look (and language) of this scene
+            GraphicsTools.Use(scene.Graphics ?? GraphicsSettings.Default);  // Kiln's graphics settings of this scene
+            if (scene.Graphics?.Upscaler == UpscalerChoice.Amd) PreviewVendorFiles(Path.Combine(root, "kiln"), "amd");  // AMD's files are there
+            VendorFiles.ResetForTests();  // this scene's folder, looked at afresh
+            VendorFiles.RootOverride = Path.Combine(root, "kiln");
             Samples.Windows(scene.Windows);
             var page = ModManagerHost.Page;
             page.Section = scene.Section;
@@ -309,6 +313,20 @@ internal static unsafe class Program
         _key(526, 0);
         _frame(1);
         return len >= 3003 ? 0 : 1;
+    }
+
+    /// <summary>A vendor's files in a scene's kiln/vendor/ with the sizes the manifest pins (empty, sparse) and the
+    /// launcher's receipt: the Graphics page reads names, sizes and the receipt's component only.</summary>
+    private static void PreviewVendorFiles(string kilnRoot, string vendor)
+    {
+        if (VendorFiles.Of(vendor) is not { } c) return;
+        var dir = Directory.CreateDirectory(Path.Combine(kilnRoot, "vendor", c.Vendor, c.Version)).FullName;
+        foreach (var (name, size) in c.Files)
+        {
+            using var f = File.Create(Path.Combine(dir, name));
+            f.SetLength(size);
+        }
+        File.WriteAllText(Path.Combine(dir, VendorFiles.Receipt), $"{{\"format\": 1, \"component\": \"{c.Id}\"}}\n");
     }
 
     // The guided check runner's screen and HUD line (Kiln.Testing's CheckScreen) drawn from sample state: the list with a
@@ -509,6 +527,8 @@ internal sealed record Scene(string Name, Func<string, IReadOnlyList<KilnModInpu
     public LookSettings? Look { get; init; }
     /// <summary>The Kiln menu closed: a mod's themed window, a Kiln window, a HUD line and a toast instead.</summary>
     public bool Windows { get; init; }
+    /// <summary>Kiln's graphics settings in this scene (null: the defaults, all off).</summary>
+    public GraphicsSettings? Graphics { get; init; }
 }
 
 internal static class Scenes
@@ -554,6 +574,26 @@ internal static class Scenes
         new("network", Typical) { Section = ModManagerSection.Network, OnlyAt = "1920x1080" },
         new("keys", Typical) { Section = ModManagerSection.Keys, OnlyAt = "1920x1080" },
         new("overlay", Typical) { Section = ModManagerSection.Overlay, OnlyAt = "1920x1080" },
+        // Kiln's graphics tools (0.2.0-dev.29.18): the frame cap, DLSS preset K and a custom render scale, the readout on
+        new("graphics", Typical)
+        {
+            Section = ModManagerSection.Graphics, OnlyAt = "1920x1080",
+            Graphics = GraphicsSettings.Default with { FpsCap = 60, DlssPreset = "K", DlssScale = DlssScaleMode.Custom, RenderScale = 0.75f, Readout = true },
+        },
+        new("graphics-per-mode", Typical)
+        {
+            Section = ModManagerSection.Graphics, OnlyAt = "1920x1080",
+            Graphics = GraphicsSettings.Default with { DlssScale = DlssScaleMode.PerMode, PerformanceScale = 0.6f },
+        },
+        // (phase B) AMD FSR behind the game's FSR 3 (the shim says FSR 4 runs); Intel XeSS without its files
+        new("graphics-amd", Typical)
+        {
+            Section = ModManagerSection.Graphics, OnlyAt = "1920x1080", Graphics = GraphicsSettings.Default with { Upscaler = UpscalerChoice.Amd },
+        },
+        new("graphics-xess", Typical)
+        {
+            Section = ModManagerSection.Graphics, OnlyAt = "1920x1080", Graphics = GraphicsSettings.Default with { Upscaler = UpscalerChoice.Xess },
+        },
         new("game-page", Typical) { Selected = "kiln/storage-labels", GamePage = true },
         new("game-page-bright", Typical) { Selected = "kiln/storage-labels", GamePage = true, Bright = true },
         new("game-page-problems", Problems) { Filter = EngineFilter.Attention, GamePage = true, OnlyAt = "1920x1080" },

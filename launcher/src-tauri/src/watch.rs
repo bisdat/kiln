@@ -161,7 +161,15 @@ fn follow_profile_in(d: &kiln_manage::paths::DataDirs, g: &kiln_manage::game::Ga
         }
         return None;
     }
-    let applied = if now.id.is_some() { crate::commands::profile::reapply_checked(d, g) } else { None };
+    let applied = match now.id {
+        Some(_) => match crate::commands::profile::reapply_if_free(d, g) {
+            Some(r) => r,
+            // an add (or a roll back) holds the data folder and writes profile.json itself: seen stays as it was, so
+            // the next round looks again once it is done
+            None => return None,
+        },
+        None => None,
+    };
     if foreign && applied.as_ref().is_some_and(|(_, written)| *written) {
         f.rewrites.wrote(Instant::now());
     }
@@ -261,6 +269,8 @@ pub fn start(app: AppHandle) {
                         progress: mtime(&g.path.join(kiln_manage::start_progress::PROGRESS_JSON)),
                     };
                     crate::commands::launch::observe_stop(g, now.pid);
+                    // Rich Presence follows the game from here (its own thread does the rest: never in this loop)
+                    crate::community::presence::seen(&g.id, now.pid, now.boot);
                     if now.pid.is_none() {
                         follow_profile(&app, g, &mut profiles);
                     }
@@ -398,6 +408,75 @@ mod tests {
         profile::save(&d, &p).unwrap();
         f.seen.as_mut().unwrap().meta = Some(SystemTime::UNIX_EPOCH);
         assert!(follow_profile_in(&d, &g, &mut f).is_some());
+    }
+
+    /// What the window polls about a game folder that did not change writes nothing, in the game folder or the data
+    /// folder: a write wakes the antivirus, which a player's slow drive felt while the launcher only sat there
+    /// (2026-11-20). The watcher's unchanged round, the install status, the engine, found-mod and ShroudLink checks.
+    #[test]
+    #[cfg(unix)]
+    fn idle_polls_write_nothing() {
+        use kiln_manage::{compat, engine_mods, found, game, install, profile};
+        fn tree(root: &Path, out: &mut Vec<(PathBuf, Option<SystemTime>, u64)>) {
+            for e in std::fs::read_dir(root).into_iter().flatten().flatten() {
+                let Ok(m) = e.metadata() else { continue };
+                if m.is_dir() {
+                    tree(&e.path(), out);
+                }
+                out.push((e.path(), m.modified().ok(), if m.is_dir() { 0 } else { m.len() }));
+            }
+        }
+        let (tmp, d, g, id) = retained_game();
+        let mut f = Followed::default();
+        let _ = follow_profile_in(&d, &g, &mut f);
+        let p = profile::get(&d, &id).unwrap();
+        let poll = || {
+            let st = install::status(&d, &g).unwrap();
+            let _ = game::newer_mods(&d, &st, Some(&id));
+            let _ = profile::game_profile_owner(&d, &g);
+            let _ = engine_mods::status(&g.path);
+            let _ = found::scan_ids(&d, &g, &id);
+            let _ = compat::shroudlink_notice(&d, &p, &g);
+            let _ = game::graphics_now(&g, None);
+        };
+        poll(); // a first look may fill caches
+        let mut before = Vec::new();
+        tree(tmp.path(), &mut before);
+        std::thread::sleep(Duration::from_millis(20));
+        for _ in 0..3 {
+            poll();
+            assert!(follow_profile_in(&d, &g, &mut f).is_none());
+        }
+        let mut after = Vec::new();
+        tree(tmp.path(), &mut after);
+        before.sort();
+        after.sort();
+        let changed: Vec<_> = after.iter().filter(|a| !before.contains(a)).map(|a| a.0.display().to_string()).collect();
+        assert!(changed.is_empty() && before.len() == after.len(), "idle polls wrote: {changed:?}");
+    }
+
+    /// While an add holds the data folder (quick.lock), the watcher writes nothing: the add writes native.json and
+    /// profile.json itself, and two writers side by side undid the add (a player's report 2026-11-20). The change is
+    /// applied at the next round once the add is done.
+    #[test]
+    #[cfg(unix)]
+    fn the_watcher_waits_while_an_add_holds_the_data_folder() {
+        use kiln_manage::{manifest::ModKind, profile};
+        let (_tmp, d, g, id) = retained_game();
+        let mut f = Followed::default();
+        assert!(follow_profile_in(&d, &g, &mut f).is_some(), "startup");
+        let mut p = profile::get(&d, &id).unwrap();
+        p.dropins.push(ModKind::Emf);
+        profile::save(&d, &p).unwrap();
+        let file = g.path.join(gp::PROFILE);
+        let before = std::fs::read(&file).unwrap();
+        let held = kiln_manage::quick::hold(&d).unwrap();
+        f.seen.as_mut().unwrap().meta = Some(SystemTime::UNIX_EPOCH);
+        assert!(follow_profile_in(&d, &g, &mut f).is_none(), "nothing applied while the add runs");
+        assert_eq!(std::fs::read(&file).unwrap(), before, "profile.json is not written beside the add");
+        drop(held);
+        assert!(follow_profile_in(&d, &g, &mut f).is_some(), "applied at the next round");
+        assert_ne!(std::fs::read(&file).unwrap(), before);
     }
 
     #[test]

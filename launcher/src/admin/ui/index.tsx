@@ -4,7 +4,7 @@
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import { create } from "zustand";
 import type { KilnError } from "../../api/commands";
-import { t as tr, useT } from "../../i18n";
+import { formatLocale, t as tr, useT } from "../../i18n";
 import { Banner, Button, ConfirmDanger, Modal, TextInput, toast as uiToast } from "../../ui";
 // with the pieces, so admin pages mounted outside the admin routes (the server's Configs and Mods) are styled too
 import "../admin.css";
@@ -240,10 +240,10 @@ const fmtAgoMs = (ms: number) => {
   const s = Math.round((Date.now() - ms) / 1000);
   if (s < 45) return tr("admin.ui.justNow");
   if (s < 86400 * 2) return tr("admin.ui.ago", { dur: dur(s) });
-  return new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
+  return new Date(ms).toLocaleDateString(formatLocale(), { month: "short", day: "numeric" });
 };
 export const whenS = (at: number | null | undefined) =>
-  at ? new Date(at * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
+  at ? new Date(at * 1000).toLocaleString(formatLocale(), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
 export const fmtPos = (p?: { x: number; y: number; z: number } | null) => (p ? `${Math.round(p.x)}, ${Math.round(p.y)}, ${Math.round(p.z)}` : "-");
 export const pretty = (s: string) => String(s).replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
 

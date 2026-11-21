@@ -17,6 +17,7 @@ import { useUpdate, useUpdateFeed, useUpdateStore } from "../api/update";
 import { buildLabel } from "../api/channel";
 import { Button, IconButton, ProgressBar, installNote, runTask, toast, useTasks, waitTask } from "../ui";
 import { notifyInstall } from "./notices";
+import { blockedLine } from "./RuntimeFailure";
 import { t, useT } from "../i18n";
 import "./update.css";
 
@@ -159,8 +160,11 @@ function JustUpdated({ s, onClose }: { s: UpdateStatus; onClose: () => void }) {
       // the player turned them off (passing the receipt's list here froze it and skipped new parts)
       notifyInstall(await runTask<api.InstallResult>(() => api.runtimeInstall(game.id, next, {}), { done: t("shell.play.kilnInstalled", { version: next }), detail: installNote, quiet: true }));
       ack();
-    } catch {
-      failed(t("shell.updateNotice.updateFailed"));
+    } catch (e) {
+      // a DLL Windows refused (an antivirus, inbox 92): its plain words, with the raw error under them
+      const blocked = blockedLine(api.toKilnError(e), game.platform);
+      if (blocked) toast.error(e, blocked);
+      else failed(t("shell.updateNotice.updateFailed"));
     } finally {
       setBusy(false);
       invalidateGame(qc, game.id);

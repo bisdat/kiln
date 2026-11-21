@@ -145,6 +145,19 @@ public sealed unsafe class StationsTests : IDisposable
             return 0;
         }
 
+        // the station screen's fill buttons (0.2.0-dev.29.19)
+        public bool HasFill = true;
+        public bool HasFillUi => HasFill;
+        public StationsNative.FillAnswer[] FillAnswers = [];
+        public StationsNative.FillKey[] Asks = [];
+        public int SetFillAnswers(StationsNative.FillAnswer[] rows)
+        {
+            if (!HasFillUi) return StationsNative.Unavailable;
+            FillAnswers = rows;
+            return 0;
+        }
+        public (int Rc, StationsNative.FillKey[] Keys) FillAsks() => HasFillUi ? (0, Asks) : (StationsNative.Unavailable, []);
+
         /// <summary>craft_items: per lent item, the other inputs of the recipes that take it.</summary>
         public readonly Dictionary<uint, uint[]> CraftInputs = new();
         public (int Rc, uint[] Items) CraftItems(uint[] lent)
@@ -310,11 +323,16 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(72, (int)Marshal.OffsetOf<StationsNative.Event>("Position"));
         Assert.Equal(96, (int)Marshal.OffsetOf<StationsNative.Event>("Base"));
         Assert.Equal(188, sizeof(StationsNative.Status));
-        Assert.Equal(8 + 28 * 8, sizeof(StationsNative.Table));
+        Assert.Equal(8 + 30 * 8, sizeof(StationsNative.Table));
         Assert.Equal(8 + 24 * 8, StationsNative.TableChests);
         Assert.Equal(8 + 25 * 8, StationsNative.TableCollect);
         Assert.Equal(8 + 26 * 8, StationsNative.TableStock);
         Assert.Equal(8 + 28 * 8, StationsNative.TableCraftStock);
+        Assert.Equal(8 + 30 * 8, StationsNative.TableFillUi);
+        Assert.Equal(40, sizeof(StationsNative.FillKey));
+        Assert.Equal(8, (int)Marshal.OffsetOf<StationsNative.FillKey>("C0"));
+        Assert.Equal(48, sizeof(StationsNative.FillAnswer));
+        Assert.Equal(40, (int)Marshal.OffsetOf<StationsNative.FillAnswer>("Crafts"));
         Assert.Equal(24, sizeof(StationsNative.Collect));
         Assert.Equal(8 + 21 * 8, StationsNative.TableV1);
         Assert.Equal(8 + 23 * 8, StationsNative.TableOutputs);
@@ -980,6 +998,60 @@ public sealed unsafe class StationsTests : IDisposable
         kiln.Run(() => Stations.SetOutputSource(new EntityId(3300), on: false));
         _fake.Planned.Clear();
         Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, FillPress(), true, out _, out why)));
+        Assert.Empty(_fake.Planned);
+    }
+
+    [Fact]
+    public void TheStationScreensFillIsAnsweredByTheButtonsOwnRules()
+    {
+        // GitHub #68: a Kiln client's "+1" / "+10" fill is offered for as many crafts as the press would run as Kiln's fill
+        using var kiln = Kiln();
+        AddStation(3301, 0);       // the charcoal kiln, opted in
+        AddStation(5, 0, x: 3);    // the player, in the same base
+        kiln.Run(() => Stations.SetOutputSource(new EntityId(3301)));
+        var player = new EntityId(5);
+        var forge = new EntityId(3300);
+        CategoryChoice[] choices = [new(77, 1)];
+        _fake.PlanFor = r =>
+        {
+            var p = PlanWith((r.Flags & StationsNative.FillNoOutputs) != 0 ? StationActionStatus.NotEnough : StationActionStatus.Partial, 20);
+            p.CraftsPlanned = 10;
+            return p;
+        };
+        Assert.Equal(10u, kiln.Run(() => StationsCore.FillCrafts(player, forge, 0x1234, choices, true)));
+        // the plan the press would run: n more, as many as covered, the player's bag first, station outputs on
+        var asked = _fake.Planned[^1];
+        Assert.Equal((uint)StationsCore.MaxFillCrafts, asked.Crafts);
+        Assert.True((asked.Flags & StationsNative.FillAdd) != 0);
+        Assert.True((asked.Flags & StationsNative.FillExact) == 0);
+        Assert.True((asked.Flags & StationsNative.FillNoOutputs) == 0);
+        Assert.Equal((0x1234u, 5u, 77u, (byte)1), (asked.RecipeId, asked.Player, asked.C0.Category, asked.C0.Index));
+        // not even one craft with the outputs
+        _fake.PlanFor = _ => PlanWith(StationActionStatus.NotEnough);
+        Assert.Equal(0u, kiln.Run(() => StationsCore.FillCrafts(player, forge, 0x1234, choices, true)));
+        _fake.PlanFor = r =>
+        {
+            var p = PlanWith(StationActionStatus.Done, 20);
+            p.CraftsPlanned = 4;
+            return p;
+        };
+        Assert.Equal(4u, kiln.Run(() => StationsCore.FillCrafts(player, forge, 0x1234, [], true)));
+        // the button's rules: the inventory right, the player's base, another opted-in station; nothing is planned then
+        _fake.Planned.Clear();
+        Assert.Equal(0u, kiln.Run(() => StationsCore.FillCrafts(player, forge, 0x1234, choices, false)));
+        Assert.Equal(0u, kiln.Run(() => StationsCore.FillCrafts(player, forge, 0x1234, choices, null)));
+        AddStation(6, -1);  // a player in no base
+        Assert.Equal(0u, kiln.Run(() => StationsCore.FillCrafts(new EntityId(6), forge, 0x1234, choices, true)));
+        Assert.Equal(0u, kiln.Run(() => StationsCore.FillCrafts(player, forge, 0, choices, true)));
+        Assert.Equal(0u, kiln.Run(() => StationsCore.FillCrafts(EntityId.None, forge, 0x1234, choices, true)));
+        Assert.Empty(_fake.Planned);
+        // the only opted-in station is the one asked about
+        kiln.Run(() => Stations.SetOutputSource(new EntityId(3301), on: false));
+        kiln.Run(() => Stations.SetOutputSource(forge));
+        Assert.Equal(0u, kiln.Run(() => StationsCore.FillCrafts(player, forge, 0x1234, choices, true)));
+        // opted out everywhere (vanilla): never planned
+        kiln.Run(() => Stations.SetOutputSource(forge, on: false));
+        Assert.Equal(0u, kiln.Run(() => StationsCore.FillCrafts(player, forge, 0x1234, choices, true)));
         Assert.Empty(_fake.Planned);
     }
 

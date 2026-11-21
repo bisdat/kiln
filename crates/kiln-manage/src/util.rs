@@ -463,6 +463,66 @@ pub fn uuid_v4() -> Result<String> {
     Ok(format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32]))
 }
 
+/// Gives the owner write access to `path` (a file or a folder; a link is left as it is, never followed) when it has
+/// none: on Unix the owner's write bit, on Windows the read-only attribute cleared. No other permission changes.
+/// `std::fs::copy` and a rename keep a file's permissions, so a mod folder from a read-only place (a disc, an archive
+/// tool that marks files read-only, a file set read-only by hand) reached the Library and the game read-only, and a
+/// mod's or the player's settings could not be saved there. A zip import's files are writable already. Ok(true) when
+/// it changed something.
+pub fn make_writable(path: &Path) -> std::io::Result<bool> {
+    let meta = std::fs::symlink_metadata(path)?;
+    if !(meta.is_file() || meta.is_dir()) { return Ok(false); }
+    let mut perms = meta.permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = perms.mode();
+        if mode & 0o200 != 0 { return Ok(false); }
+        perms.set_mode(mode | 0o200);
+    }
+    #[cfg(windows)]
+    {
+        if !perms.readonly() { return Ok(false); }
+        // clears FILE_ATTRIBUTE_READONLY only; the file's other attributes and its ACL stay
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+    }
+    std::fs::set_permissions(path, perms)?;
+    Ok(true)
+}
+
+/// [`make_writable`] for `root` and every file and folder in it (links are left alone, not followed). The number of
+/// entries it changed.
+pub fn make_tree_writable(root: &Path) -> std::io::Result<u32> {
+    let mut n = u32::from(make_writable(root)?);
+    if std::fs::symlink_metadata(root)?.is_dir() {
+        for e in std::fs::read_dir(root)? {
+            let e = e?;
+            if e.file_type()?.is_symlink() { continue; }
+            n += make_tree_writable(&e.path())?;
+        }
+    }
+    Ok(n)
+}
+
+/// [`make_writable`] for what [`copy_tree`] copied from `from` into `to`: `to`, and each file and folder of `from` at the
+/// same place in `to` (links are left alone, never followed). What else is in `to` (a mod's own output, a file the
+/// player keeps read-only there on purpose) stays as it is. The number of entries it changed.
+pub fn make_copy_writable(from: &Path, to: &Path) -> std::io::Result<u32> {
+    let mut n = u32::from(make_writable(to)?);
+    if std::fs::symlink_metadata(from)?.is_dir() {
+        for e in std::fs::read_dir(from)? {
+            let e = e?;
+            if e.file_type()?.is_symlink() { continue; }
+            let there = to.join(e.file_name());
+            if std::fs::symlink_metadata(&there).is_ok_and(|m| !m.file_type().is_symlink()) {
+                n += make_copy_writable(&e.path(), &there)?;
+            }
+        }
+    }
+    Ok(n)
+}
+
 /// Copies a folder tree (regular files and folders; symlinks are refused). Returns the number of files.
 pub fn copy_tree(from: &Path, to: &Path) -> Result<u64> {
     std::fs::create_dir_all(to).map_err(io_at(to, "creating"))?;

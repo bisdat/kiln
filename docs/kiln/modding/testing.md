@@ -28,6 +28,10 @@ public sealed class MyTests
   live mod instance; other classes need a parameterless constructor (`IDisposable`/`IAsyncDisposable` are honoured).
 - Tests run one at a time, on the tick thread, in `Order`, then class name, then declaration order. Every `await`
   comes back to the tick thread (the mod's synchronization context), so tests may touch game state and call services.
+- The game's own UI is not drawn on a server: a mod's `Ui.Inventory` clicks, marks and panels are tested offline on the
+  test kit's fake (`kiln.UiInventory`: draw slots, click one, read the mark; open a chest with its entity and ask which
+  panels show; [unit-tests.md](unit-tests.md#inventory-slots)), and in a game with the guided checks `ui-hooks.c1` to
+  `c7` (below).
 - `TestContext`: `Ticks(n)`, `Until(cond, timeout)`, `Delay(time)`, `Log`, `Mod`, `Cancellation` (signalled on timeout).
 - `Assert`: `True`, `False`, `Equal`, `NotEqual`, `Null`, `NotNull`, `Same`, `Contains`, `InRange`, `Throws`,
   `ThrowsAsync`, `Fail`, `Skip`.

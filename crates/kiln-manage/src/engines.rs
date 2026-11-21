@@ -55,7 +55,11 @@ pub const OPTISCALER_INI_MAX: u64 = 4 * 1024 * 1024;
 pub struct OptiScalerIni {
     /// `[Menu] OverlayMenu`: None for auto (OptiScaler's default: on).
     pub overlay_menu: Option<bool>,
-    /// `[FrameGen] FGInput` and `FGOutput` both set to something other than nofg/auto.
+    /// `[FrameGen] FGInput` and `FGOutput` both set to something other than nofg/auto: OptiScaler's frame generation is
+    /// made with the game's device (its nightly builds since October 2026, with its menu on or off; 0.9.5 has none for
+    /// Vulkan).
+    /// An input without an output or the other way round makes none. `[FrameGen] Enabled` does not matter: it only
+    /// switches frame generation while it runs, its own present queue and swapchain are there either way.
     pub frame_gen: bool,
 }
 
@@ -99,8 +103,9 @@ impl OptiScalerIni {
             .unwrap_or_default()
     }
 
-    /// Kiln's overlay draws next to OptiScaler: its own overlay menu is off, so it patches none of the game's presents
-    /// or swapchains, and no frame generation is set. Otherwise kiln.ui's drawing steps aside on its own.
+    /// Kiln's overlay draws next to OptiScaler: its own overlay menu is off and no frame generation is set, so it
+    /// patches none of the game's presents or swapchains. Otherwise kiln.ui's drawing steps aside on its own (with frame
+    /// generation the game's frames are presented from OptiScaler's own queue, where Kiln cannot draw).
     pub fn kiln_overlay_draws(&self) -> bool {
         self.overlay_menu == Some(false) && !self.frame_gen
     }
@@ -109,12 +114,21 @@ impl OptiScalerIni {
 /// What a player can expect from Kiln's in-game overlay next to OptiScaler with these settings (the Play page's note).
 pub fn optiscaler_overlay_note(ini: &OptiScalerIni) -> String {
     if ini.kiln_overlay_draws() {
-        return "OptiScaler's own overlay menu is off in OptiScaler.ini (OverlayMenu=false), so Kiln's in-game overlay draws next to it.".into();
+        return "OptiScaler's own overlay menu is off in OptiScaler.ini (OverlayMenu=false) and no frame generation is set, so Kiln's \
+                in-game overlay draws next to it."
+            .into();
+    }
+    if ini.overlay_menu == Some(false) {
+        return "Kiln's in-game overlay steps aside while OptiScaler's frame generation is set in OptiScaler.ini (FGInput and FGOutput \
+                under [FrameGen]): the game's frames are then presented from OptiScaler's own queue, where Kiln cannot draw. Kiln's key \
+                bindings and the Mods entry still work, Kiln's windows and Mods page don't show. For Kiln's overlay, set FGInput and \
+                FGOutput to auto (frame generation off, upscaling stays), or try both with the launch option KILN_UI_OVERLAY=1."
+            .into();
     }
     "Kiln's in-game overlay steps aside while OptiScaler's own menu is on (its default; both open with Insert): Kiln's key \
      bindings and the Mods entry still work, Kiln's windows and Mods page don't show. For Kiln's overlay, set OverlayMenu=false \
-     under [Menu] in OptiScaler.ini (OptiScaler's menu and frame generation go off with it), or try both with the launch \
-     option KILN_UI_OVERLAY=1."
+     under [Menu] in OptiScaler.ini and leave FGInput and FGOutput under [FrameGen] at auto (OptiScaler's menu and frame \
+     generation off, its upscaling on), or try both with the launch option KILN_UI_OVERLAY=1."
         .into()
 }
 
@@ -146,6 +160,10 @@ pub enum Engine {
     Flame,
     Shroudlink,
     Ember,
+    /// AndyPimms' Enshrouded ModLoader (github.com/aebischer/Enshrouded-ModLoader): its dinput8.dll runs packages with a
+    /// .dll.mod manifest (CarryOn, Belt Lantern). Kiln runs those packages itself (kiln-dllmod); its dinput8.dll stays a
+    /// DLL mod Kiln chain-loads when a player adds it (kiln-dllmod then steps aside).
+    Dllmod,
     ModLoaderProxy,
     UltimateAsiLoader,
     Aldrich,
@@ -210,6 +228,9 @@ pub const ENGINES: &[EngineInfo] = &[
     EngineInfo { engine: Engine::Ember, word: "ember", name: "Ember (server SDK)",
         proxies: &["powrprof.dll", "iphlpapi.dll", "dbghelp.dll"], exports: &[], texts: &["ember-loader", "ember_loader"],
         what: "a server mod framework" },
+    // AndyPimms' loader names its world profile files' header (ENSHROUDED_MODS_V1) and logs to ModLoader/mod-loader.log
+    EngineInfo { engine: Engine::Dllmod, word: "enshrouded-modloader", name: "Enshrouded ModLoader", proxies: &["dinput8.dll"],
+        exports: &[], texts: &["enshrouded_mods_v1"], what: "a DLL mod loader (CarryOn, Belt Lantern)" },
     EngineInfo { engine: Engine::ModLoaderProxy, word: "modloader-proxy", name: "ModLoader Proxy",
         proxies: &["dinput8.dll", "powrprof.dll"], exports: &[], texts: &["modloader-proxy.dll", "chainloader.ini"],
         what: "a DLL chain loader" },
@@ -268,6 +289,7 @@ impl Engine {
             Engine::Flame => ProxyKind::Flame,
             Engine::Shroudlink => ProxyKind::Shroudlink,
             Engine::Ember => ProxyKind::Ember,
+            Engine::Dllmod => ProxyKind::Dllmod,
             Engine::ModLoaderProxy => ProxyKind::ModLoaderProxy,
             Engine::UltimateAsiLoader => ProxyKind::UltimateAsiLoader,
             Engine::Aldrich => ProxyKind::Aldrich,
@@ -420,7 +442,7 @@ pub fn short_name(engine: Engine) -> &'static str {
 /// Engines whose mods Kiln runs itself (a plugin per engine): their own loader in a package is not needed.
 pub fn kiln_runs(engine: Engine) -> bool {
     matches!(engine, Engine::Emf | Engine::Eml | Engine::ShroudForge | Engine::Set | Engine::Greeneye | Engine::Flame
-        | Engine::Shroudtopia | Engine::Enshwick | Engine::Shroudlink | Engine::Ember)
+        | Engine::Shroudtopia | Engine::Enshwick | Engine::Shroudlink | Engine::Ember | Engine::Dllmod)
 }
 
 /// The engine whose own loader is a DLL directly in `dir`, when Kiln runs that engine's mods itself ([`kiln_runs`]): a
@@ -605,6 +627,13 @@ const FLAME_MOD_EXPORT: &str = "FlameStartRuntime";
 /// shroudlink's mod DLLs (its server looks for `shroudlink_mod_v2`, then `_v1`).
 const SHROUDLINK_MOD_EXPORTS: [&str; 2] = ["shroudlink_mod_v2", "shroudlink_mod_v1"];
 
+/// EMF's own DLLs beside its loader in `<game>/emf/` (EMF scripts/package.ps1), by their exports, with what each is:
+/// its core (`emf_core.dll`: `emf_core_start`, which the loader calls, and its console's Vulkan layer), its builder of
+/// EML content (`emf_content.dll`) and its frame-time recorder (`emf_frametime.dll`, a Vulkan layer). They are EMF, not
+/// mods: Kiln's EMF support runs EMF's mods.
+const EMF_OWN_FILES: [(&str, &str); 4] = [("emf_core_start", "its core"), ("emf_vk_negotiate", "its core"),
+    ("emf_content_abi", "its builder of EML content"), ("emf_ft_negotiate", "its frame-time recorder")];
+
 /// shroudlink's client addon: its `dinput8.dll` draws the in-game MODS tab, the chest search and the slot locks. It
 /// is a mod of its own, not a loader Kiln replaces: kiln-shroudlink is shroudlink's server core, and the addon is what
 /// shows that core's windows. The core is told apart by the export `CrashHandlerFactory` (it also runs as
@@ -661,6 +690,11 @@ pub fn detect_dll(path: &Path, bytes: &[u8], exports: &[String]) -> Option<Detec
     if !crate::pe::is_pe64_dll(bytes) { return None; }
     let has = |e: &str| exports.iter().any(|x| x == e);
     let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // EMF's own files beside its loader (its download's game/emf/): left out as its loader is, never plain DLL mods
+    if let Some((_, what)) = EMF_OWN_FILES.iter().find(|(e, _)| has(e)) {
+        return Some(detected(DetectKind::Proxy, Some(Engine::Emf), path,
+            format!("{file} is part of EMF itself ({what}): not needed, Kiln runs EMF mods")));
+    }
     let mod_dll = |engine: Engine| Some(detected(engine_kind(engine), Some(engine), path, mod_reason(engine, &file)));
     if has(GREENEYE_MOD_EXPORT) {
         return mod_dll(Engine::Greeneye);
@@ -684,6 +718,11 @@ pub fn detect_dll(path: &Path, bytes: &[u8], exports: &[String]) -> Option<Detec
     }
     let class = crate::pe::classify_bytes(bytes);
     let engine = Engine::of_proxy(class.kind).filter(|e| *e != Engine::Kiln)?; // Kiln's own proxy: library's rule
+    // Enshrouded ModLoader's own dinput8.dll keeps Kiln's own rules (a DLL mod Kiln chain-loads, as before kiln-dllmod):
+    // a player who wants its MODS page adds it, and kiln-dllmod steps aside while it runs
+    if engine == Engine::Dllmod {
+        return None;
+    }
     // a modified EML loader is left out with what it is and what does not run, never as "not needed" (Unknown: the
     // import skips it with that reason; detect_folder does not take its folder for an EML mod)
     if engine == Engine::Eml && let Some(what) = &class.modified {
@@ -705,6 +744,32 @@ pub fn detect_dll(path: &Path, bytes: &[u8], exports: &[String]) -> Option<Detec
     Some(detected(DetectKind::Proxy, Some(engine), path, loader_reason(engine, &file)))
 }
 
+/// A package folder for Enshrouded ModLoader (one or more DLLs with their `.dll.mod` manifest directly in it,
+/// [`crate::dllmod::packages_in`]): one Library entry named after the folder (the loader's package id is the folder's name
+/// and the DLL's), with the version of its first kind=mod package. A folder whose packages Kiln cannot run (a manifest
+/// the format refuses, a mod without its export) is left out with the reason. None for any other folder.
+pub fn dllmod_folder(dir: &Path) -> Option<Detected> {
+    if crate::dllmod::packages_in(dir).is_empty() {
+        return None;
+    }
+    let shown = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut d = detected(DetectKind::Dllmod, Some(Engine::Dllmod), dir, String::new());
+    match crate::dllmod::read_folder(dir) {
+        Ok(f) => {
+            d.version = f.mods.first().or(f.libraries.first()).map(|(_, m)| m.version.clone());
+            d.reason = mod_reason(Engine::Dllmod, &shown);
+            if f.mods.is_empty() {
+                d.reason += " (library packages only: they load when a mod that requires them runs)";
+            }
+        }
+        Err(e) => {
+            d.kind = DetectKind::Unknown;
+            d.reason = format!("{shown}: a package for Enshrouded ModLoader that Kiln cannot run: {e}");
+        }
+    }
+    Some(d)
+}
+
 /// The Library kind of an engine's mods.
 pub fn engine_kind(engine: Engine) -> DetectKind {
     match engine {
@@ -719,6 +784,7 @@ pub fn engine_kind(engine: Engine) -> DetectKind {
         Engine::Flame => DetectKind::Flame,
         Engine::Shroudlink => DetectKind::Shroudlink,
         Engine::Ember => DetectKind::Ember,
+        Engine::Dllmod => DetectKind::Dllmod,
         Engine::UltimateAsiLoader => DetectKind::Asi,
         Engine::ReShade => DetectKind::Reshade,
         Engine::OptiScaler => DetectKind::Proxy,
@@ -957,6 +1023,10 @@ pub fn is_container(dir: &Path) -> bool {
 /// whose own DLL is another engine's mod (Greeneye, Enshwick, Flame, Shroudtopia).
 pub fn detect_folder(dir: &Path) -> Option<Detected> {
     let has = |f: &str| dir.join(f).is_file();
+    // a package for Enshrouded ModLoader: a DLL with its .dll.mod manifest directly in the folder
+    if let Some(d) = dllmod_folder(dir) {
+        return Some(d);
+    }
     if has("flame.json") {
         let m = read_json(&dir.join("mod.json"));
         return Some(folder_detected(DetectKind::Flame, Engine::Flame, dir, m.as_ref(), "this Flame mod"));

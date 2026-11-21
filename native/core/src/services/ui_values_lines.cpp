@@ -31,11 +31,9 @@ struct LinesLayout {
 using DetailFn = void (*)(void*, uint8_t);
 DetailFn g_detail_next = nullptr;
 
-struct DetailCopy {
-    uint8_t raw[kViewBytes] = {};
-    bool ok = false, collected = false;
-};
 thread_local DetailCopy* t_detail = nullptr;
+std::mutex g_detail_mu;
+int g_detail_state = 0;  // the ItemDetail link: 0 not tried, 1 in, -1 failed
 
 struct WriterState {
     uint32_t magic = kWriterMagic;
@@ -43,16 +41,18 @@ struct WriterState {
     KilnUiLineWriter* writer = nullptr;
     uint32_t capacity = 0, count = 0, status = KUI_REASON_NONE;
     KilnUiTextId staged[kMaxLines] = {};
+    uint32_t staged_flags[kMaxLines] = {};
 };
 thread_local WriterState* t_writer = nullptr;
 KilnResult KILN_CALL writer_append(KilnUiLineWriter*, KilnUiTextId);
+KilnResult KILN_CALL writer_append_line(KilnUiLineWriter*, KilnUiTextId, uint32_t);
 
 bool writer_matches(const KilnUiLineWriter& w, const WriterState& st) {
     if (w.size != sizeof w || w.capacity != st.capacity || w.count != st.count || w.status != st.status ||
-        w.reserved != &st || w.append != &writer_append) return false;
+        w.reserved != &st || w.append != &writer_append || w.append_line != &writer_append_line) return false;
     for (uint32_t i = 0; i < kMaxLines; ++i) {
         const auto& line = w.lines[i];
-        if (line.size != (i < st.count ? sizeof(KilnUiLine) : 0) || line.flags != 0 ||
+        if (line.size != (i < st.count ? sizeof(KilnUiLine) : 0) || line.flags != (i < st.count ? st.staged_flags[i] : 0) ||
             line.text != (i < st.count ? st.staged[i] : 0)) return false;
     }
     return true;
@@ -63,6 +63,7 @@ struct Snapshot {
     uint64_t session = 0, frame = 0, capture_ms = 0, revision = 0;
     uint32_t count = 0;
     KilnUiTextId lines[kMaxLines] = {};
+    uint32_t flags[kMaxLines] = {};
 };
 struct Details {
     std::mutex mu;
@@ -82,7 +83,9 @@ bool same_identity(const KilnUiItemView& a, const KilnUiItemView& b) {
            a.client_entity == b.client_entity && a.session == b.session;
 }
 
-KilnResult KILN_CALL writer_append(KilnUiLineWriter* w, KilnUiTextId id) {
+KilnResult KILN_CALL writer_append(KilnUiLineWriter* w, KilnUiTextId id) { return writer_append_line(w, id, 0); }
+
+KilnResult KILN_CALL writer_append_line(KilnUiLineWriter* w, KilnUiTextId id, uint32_t flags) {
     auto* st = t_writer;
     if (!w || !st || st->writer != w) return KILN_ERR_INVALID_ARGUMENT;
     if (!writer_matches(*w, *st)) {
@@ -96,17 +99,22 @@ KilnResult KILN_CALL writer_append(KilnUiLineWriter* w, KilnUiTextId id) {
         st->status = w->status = KUI_INVALID_EDIT;  // a foreign or unknown token
         return KILN_ERR_INVALID_ARGUMENT;
     }
+    if ((flags & ~kLineFlagsKnown) || (flags & kLineColorMask) >= kColorsPublic) {
+        st->status = w->status = KUI_INVALID_EDIT;  // an unknown flag or colour
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
     if (st->count >= st->capacity) {
         st->status = w->status = KUI_TEXT_BUDGET;  // 16 entries per detail occurrence, all providers together
         return KILN_ERR_BUFFER_TOO_SMALL;
     }
     st->staged[st->count] = id;
-    w->lines[st->count] = KilnUiLine{sizeof(KilnUiLine), 0, id};
+    st->staged_flags[st->count] = flags;
+    w->lines[st->count] = KilnUiLine{sizeof(KilnUiLine), flags, id};
     w->count = ++st->count;
     return KILN_OK;
 }
 
-void collect(const DetailCopy& c) {
+void collect(DetailCopy& c) {
     KilnUiItemView v{};
     v.size = sizeof v;
     fill_view(c.raw, g_ll.view, KUI_DETAIL_COPY, &v);
@@ -145,6 +153,7 @@ void collect(const DetailCopy& c) {
         w.status = KUI_REASON_NONE;
         w.reserved = &ws;
         w.append = &writer_append;
+        w.append_line = &writer_append_line;
         ws.writer = &w;
         ws.capacity = w.capacity;
         CallState cs;
@@ -186,7 +195,13 @@ void collect(const DetailCopy& c) {
             continue;  // only this provider's lines go
         }
         std::memcpy(snap->lines + snap->count, ws.staged, ws.count * sizeof(KilnUiTextId));
+        std::memcpy(snap->flags + snap->count, ws.staged_flags, ws.count * sizeof(uint32_t));
         snap->count += ws.count;
+        if (p.flags & KUI_LINES_IN_GAME_TOOLTIP)  // also into the game's own detail view (ui_values_tooltip.cpp)
+            for (uint32_t i = 0; i < ws.count && c.native_count < kNativeLines; ++i) {
+                std::string_view bytes;
+                if (text::bytes(ws.staged[i], &bytes)) c.native[c.native_count++] = NativeLine{bytes, ws.staged_flags[i]};
+            }
         succeeded(p);
     }
     Details& d = details();
@@ -199,17 +214,16 @@ void collect(const DetailCopy& c) {
 void hk_item_detail(void* detail, uint8_t flag) {
     DetailCopy c;
     DetailCopy* outer = t_detail;
-    c.ok = any(kListLines) && env().read(c.raw, reinterpret_cast<uintptr_t>(detail), sizeof c.raw);
+    c.ok = detail_wanted() && env().read(c.raw, reinterpret_cast<uintptr_t>(detail), sizeof c.raw);
+    c.record = reinterpret_cast<uintptr_t>(detail);
     t_detail = &c;
+    if (c.ok) tooltip_detail_enter(c);
     g_detail_next(detail, flag);
     t_detail = outer;
 }
 
 void KILN_CALL on_lines_point(KilnRegisters*, void*) {
-    DetailCopy* c = t_detail;
-    if (!c || !c->ok || c->collected) return;
-    c->collected = true;  // once per detail occurrence
-    collect(*c);
+    if (DetailCopy* c = t_detail) collect_once(*c);
 }
 
 bool install_lines(uint32_t list) {
@@ -220,11 +234,8 @@ bool install_lines(uint32_t list) {
         logf(KILN_LOG_ERROR, "ui.values: ui/ItemDetail, ui/DetailLinesAppend or the view constants did not resolve");
         return false;
     }
-    KilnResult rc = env().hook_mid(point, "ui.values/DetailLinesAppend", &on_lines_point);
-    if (rc == KILN_OK)
-        rc = env().hook_raw(detail, "ui.values/ItemDetail", 0, reinterpret_cast<void*>(&hk_item_detail),
-                            reinterpret_cast<void**>(&g_detail_next));
-    if (rc != KILN_OK || !g_detail_next) {
+    const KilnResult rc = env().hook_mid(point, "ui.values/DetailLinesAppend", &on_lines_point);
+    if (rc != KILN_OK || !detail_hook_install()) {
         logf(KILN_LOG_ERROR, "ui.values: hooking the item detail view failed (%d)", rc);
         return false;
     }
@@ -262,6 +273,36 @@ void invalidate(Details& d, uint64_t session) {  // d.mu held
 }
 
 }  // namespace
+
+DetailCopy* current_detail() { return t_detail; }
+
+void collect_once(DetailCopy& c) {
+    if (!c.ok || c.collected || !any(kListLines)) return;
+    c.collected = true;  // once per detail occurrence
+    collect(c);
+}
+
+bool detail_hook_install() {
+    std::lock_guard lk(g_detail_mu);
+    if (g_detail_state) return g_detail_state > 0;
+    uintptr_t detail = 0;
+    if (!load_view_layout(&g_ll.view) || !sig_symbol("ui/ItemDetail", &detail)) {
+        logf(KILN_LOG_ERROR, "ui.values: ui/ItemDetail, ui/DetailLinesAppend or the view constants did not resolve");
+        g_detail_state = -1;
+        return false;
+    }
+    const KilnResult rc = env().hook_raw(detail, "ui.values/ItemDetail", 0, reinterpret_cast<void*>(&hk_item_detail),
+                                         reinterpret_cast<void**>(&g_detail_next));
+    if (rc != KILN_OK || !g_detail_next) {
+        logf(KILN_LOG_ERROR, "ui.values: hooking the item detail view failed (%d)", rc);
+        g_detail_state = -1;
+        return false;
+    }
+    g_detail_state = 1;
+    return true;
+}
+
+bool detail_wanted() { return any(kListLines) || tooltip_probe_on() || tooltip_values_on(); }
 
 KilnResult tooltip_open(KilnOwner owner, KilnUiTooltipOpen* out) {
     if (const KilnResult rc = check_caller(owner)) return rc;
@@ -361,6 +402,8 @@ void lines_reset_for_tests() {
     d.open.reset();
     g_ll = {};
     g_detail_next = nullptr;
+    std::lock_guard dl(g_detail_mu);
+    g_detail_state = 0;
 }
 
 }  // namespace kiln::uivalues

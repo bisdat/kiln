@@ -198,7 +198,10 @@ check_disabled_nexus_tests() {
     echo "Nexus is on in this release: the disabled-build tests do not apply"
     return 0
   fi
-  (cd "$src" && linux "$src/tools/test-nexus-disabled.sh")
+  # a test build's beta identity (KILN_LAUNCHER_CHANNEL/BETA/BASE_RELEASE) is for the shipped launcher only: the
+  # tripwire test binaries compile from the export, whose version is still X.Y.Z-dev, and build.rs refuses a beta base
+  # release that does not precede it (0.2.0-dev.29.19 beta 1's check failed so; the shipped launcher was fine)
+  (cd "$src" && KILN_LAUNCHER_CHANNEL= KILN_LAUNCHER_BETA= KILN_LAUNCHER_BASE_RELEASE= linux "$src/tools/test-nexus-disabled.sh")
 }
 
 # A subshell: its package cache and dotnet home never reach the release's own shell, also when a step fails half-way.
@@ -328,6 +331,10 @@ run_checks() {
   check "kilnctl bundle verify on the runtime zip" "$out/runtime/kilnctl" bundle verify "$out/runtime/kiln-runtime-$version.zip"
   check "the runtime manifest lists every plugin DLL (native/plugins/*, kiln-eml, ShroudForge runtime, Enshwick loader), default on both sides" \
     python3 -I "$lib/plugins.py" check --src "$src" "$out/runtime/kiln-runtime-$version.zip"
+  if [[ -f $src/tools/sfi/sfi_stage.py && -d $work/stage/sfi ]]; then
+    check "component sfi (kiln-sfi.dll) and kiln-eml's archive inspector for Linux and Windows: complete, each version.json naming the helper as it ships" \
+      python3 -I "$src/tools/sfi/sfi_stage.py" check "$src" "$work/stage"
+  fi
   check "kilnctl and kiln --version (Linux)" check_cli_versions
   check "kiln cooks a made-up game with the cook tools it carries (no checkout), soundcook's helper included" check_cook_shipped
   check "server pack: only the server components, the runtime's files, rebuilt byte-identically; systemd units" \

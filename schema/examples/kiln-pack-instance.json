@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "pack": "ember-run",
+  "name": "Ember run",
+  "version": "1.2.0",
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "url": "https://cdn.frostdev.io/p/ember-run-1.2.0.kilnpack",
+  "optional": {
+    "minimap": true
+  },
+  "installed": "2026-11-20T12:30:00Z",
+  "updated": "2026-11-21T09:00:00Z",
+  "previous": "1.1.0"
+}

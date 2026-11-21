@@ -33,9 +33,10 @@ constexpr KilnHandle kHandleMask = (1ull << 48) - 1;
 // The capability row of each list (change subscriptions follow the value rows: none of their own).
 const char* const kRows[kLists] = {"ui.values.detail",        "ui.values.slot",   "ui.values.held",
                                    "ui.values.hud",           "ui.values.hud",    "ui.values.hud",
-                                   "ui.values.tooltip_lines", "ui.slots.inspect", nullptr, "ui.gemforge.inspect"};
+                                   "ui.values.tooltip_lines", "ui.slots.inspect", nullptr, "ui.gemforge.inspect",
+                                   "ui.tooltip.values", "ui.slots.click"};
 const char* const kListNames[kLists] = {"detail", "slot",  "held",  "health", "stamina",
-                                        "mana",   "lines", "slots", "changes", "gemforge"};
+                                        "mana",   "lines", "slots", "changes", "gemforge", "values", "clicks"};
 
 // Edit masks per value kind (chapter 05a §5.1).
 constexpr uint32_t kMask[kValueKinds] = {
@@ -135,13 +136,14 @@ KilnResult guarded(const char* what, F&& f) noexcept {
 }
 
 // Registration shared by every list: the caller checked the list-specific arguments.
-KilnResult register_in(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out) {
+KilnResult register_in(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out,
+                       uint32_t flags = 0) {
     if (!env().client_side || !env().client_side()) return KILN_ERR_UNAVAILABLE;
     if (!env().owner_alive(owner)) return KILN_ERR_REVOKED;
     if (list == kListLines && (!env().row_available || !env().row_available("kiln.ui")))
         return KILN_ERR_UNAVAILABLE;  // a missing window backend can appear later; do not latch an install failure
     if (!ensure_installed(list)) return KILN_ERR_UNAVAILABLE;
-    return add(owner, list, item, fn, user, out);
+    return add(owner, list, item, fn, user, out, flags);
 }
 
 // ---- the table ----
@@ -243,6 +245,33 @@ KilnResult KILN_CALL t_gemforge_sources_state(KilnUiGemForgeSourcesState* out) {
     return guarded("gemforge_sources_state", [&] { return sources_state(out); });
 }
 
+KilnResult KILN_CALL t_tooltip_lines_native(KilnOwner owner, uint32_t item_filter, uint32_t flags, KilnUiLinesFn fn,
+                                            void* user, KilnUiRegistration* out) {
+    if (!out || out->size < sizeof(KilnUiRegistration)) return KILN_ERR_INVALID_ARGUMENT;
+    clear_registration(out);
+    if (owner == 0 || !fn || (flags & ~static_cast<uint32_t>(KUI_LINES_IN_GAME_TOOLTIP))) return KILN_ERR_INVALID_ARGUMENT;
+    return guarded("tooltip_lines_native", [&] {
+        const KilnResult rc = register_in(owner, kListLines, item_filter, reinterpret_cast<void*>(fn), user, out, flags);
+        // the game's tooltip is a bonus: without ui.tooltip.lines the lines stay in the details window
+        if (rc == KILN_OK && out->ok && (flags & KUI_LINES_IN_GAME_TOOLTIP)) tooltip_lines_request();
+        return rc;
+    });
+}
+
+KilnResult KILN_CALL t_tooltip_values(KilnOwner owner, uint32_t item_filter, KilnUiScaleFn fn, void* user,
+                                      KilnUiRegistration* out) {
+    if (!out || out->size < sizeof(KilnUiRegistration)) return KILN_ERR_INVALID_ARGUMENT;
+    clear_registration(out);
+    if (owner == 0 || !fn) return KILN_ERR_INVALID_ARGUMENT;
+    return guarded("tooltip_values",
+                   [&] { return register_in(owner, kListValues, item_filter, reinterpret_cast<void*>(fn), user, out); });
+}
+
+KilnResult KILN_CALL t_tooltip_native_state(KilnUiTooltipNativeState* out) {
+    if (!out || out->size < sizeof(KilnUiTooltipNativeState)) return KILN_ERR_INVALID_ARGUMENT;
+    return guarded("tooltip_native_state", [&] { return tooltip_native_state(out); });
+}
+
 const KilnUiValuesApi kTable = {
     {sizeof(KilnUiValuesApi), KILN_UI_VALUES_VERSION},
     &t_subscribe,
@@ -260,6 +289,9 @@ const KilnUiValuesApi kTable = {
     &t_gemforge_sockets,
     &t_gemforge_sources,
     &t_gemforge_sources_state,
+    &t_tooltip_lines_native,
+    &t_tooltip_values,
+    &t_tooltip_native_state,
 };
 
 // ---- text ops for providers ----
@@ -323,10 +355,15 @@ void logf(int level, const char* fmt, ...) {
     env().log(level, text);
 }
 
+KilnResult register_list(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out) {
+    return register_in(owner, list, item, fn, user, out);
+}
+
 const char* row_of(uint32_t list) { return list < kLists ? kRows[list] : nullptr; }
 
 // ---- registry ----
-KilnResult add(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out) {
+KilnResult add(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out,
+               uint32_t flags) {
     prune_if_moved();
     if (list >= kLists || !fn || !out) return KILN_ERR_INVALID_ARGUMENT;
     if (!env().owner_alive(owner)) return KILN_ERR_REVOKED;
@@ -347,6 +384,7 @@ KilnResult add(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* us
     p->mod = std::move(mod);
     p->list = list;
     p->item = item;
+    p->flags = flags;
     p->fn = fn;
     p->user = user;
     g_reg->all[list].push_back(p);
@@ -614,6 +652,7 @@ void reset_for_tests() {  // host tests only: nothing dispatches while it runs
     sockets_reset_for_tests();
     sources_reset_for_tests();
     lines_reset_for_tests();
+    tooltip_reset_for_tests();
 }
 
 }  // namespace kiln::uivalues

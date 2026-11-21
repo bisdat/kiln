@@ -1,0 +1,657 @@
+// SPDX-License-Identifier: MIT
+// C# tasks on Kiln's one task pool: the real TaskBackend over the core's lease table (kiln.internal.tasks.host,
+// native/core/src/tasks_host.h) and the two kiln.tasks members that work on a lease's handle. The table is
+// Kiln-internal and belongs to one build: nothing of it is called before its size, version and build stamp match.
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Loader;
+using System.Text;
+
+namespace Kiln.Host;
+
+/// <summary>KilnTaskInfo (abi/services/kiln_tasks.h).</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct KilnTaskInfo
+{
+    public uint Size;
+    public uint Flags;
+    public KilnStr Name;
+    public uint Priority;
+    public uint Reserved;
+
+    public const uint LongRunning = 1;  // KILN_TASK_LONG_RUNNING
+}
+
+/// <summary>kiln.tasks v1 (abi/services/kiln_tasks.h). The host uses cancel and status on a lease's handle; leases are
+/// admitted through <see cref="KilnTasksHostApi"/>, never through submit.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct KilnTasksApi
+{
+    public uint Size;
+    public uint Version;
+    public void* Submit;
+    public delegate* unmanaged[Cdecl]<ulong, ulong, uint*, int> Cancel;
+    public delegate* unmanaged[Cdecl]<ulong, ulong, uint*, int> Status;
+    public delegate* unmanaged[Cdecl]<ulong, ulong, int> Release;
+    public delegate* unmanaged[Cdecl]<ulong, uint, uint*, int> DrainOwner;
+
+    public const string Name = "kiln.tasks";
+}
+
+/// <summary>KilnLeaseSnapshot (tasks_host.h), 168 bytes.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct KilnLeaseSnapshot
+{
+    public uint Size;
+    public uint State;
+    public ulong Owner;
+    public ulong Lease;
+    public ulong RunningNs;
+    public fixed byte Name[129];
+    public fixed byte Reserved[7];
+}
+
+/// <summary>KilnTaskStatsOwnerRow (tasks_host.h, issue #49), 400 bytes.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct KilnTaskStatsOwnerRow
+{
+    public uint Size;
+    public uint Reserved;
+    public ulong Owner;
+    public ulong Instance;
+    public ulong QueuedCurrent, QueuedMax, RunningCurrent, RunningMax;
+    public ulong Completed, Faulted, Cancelled;
+    public ulong CpuNs, WallNs, LongestNs;
+    public ulong QueuedTooLong, RunningTooLong, QueueFull, UnloadBlocked;
+    public fixed byte OwnerName[129];
+    public fixed byte LongestName[129];
+    public fixed byte Reserved2[6];
+}
+
+/// <summary>KilnTaskStatsRunningRow (tasks_host.h, issue #49), 320 bytes.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct KilnTaskStatsRunningRow
+{
+    public uint Size;
+    public uint Reserved;
+    public ulong Owner;
+    public ulong Lease;
+    public ulong ThreadId;
+    public ulong StartedNs;
+    public ulong ElapsedNs;
+    public uint State;  // 1 running, 2 suspended, 3 on-tick
+    public uint World;  // on-tick: the world whose hop runs (0 server, 2 client, 3 the menu); else 0
+    public fixed byte OwnerName[129];
+    public fixed byte TaskName[129];
+    public fixed byte Reserved2[6];
+}
+
+/// <summary>KilnTaskStatsFaultRow (tasks_host.h, issue #49), 312 bytes.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct KilnTaskStatsFaultRow
+{
+    public uint Size;
+    public uint Reserved;
+    public ulong Sequence, Owner, Handle, AtNs;
+    public uint State, Code;
+    public fixed byte OwnerName[129];
+    public fixed byte TaskName[129];
+    public fixed byte Reserved2[6];
+}
+
+/// <summary>KilnTaskStatsTotals (tasks_host.h, issue #49), 72 bytes.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct KilnTaskStatsTotals
+{
+    public uint Size, Owners, Workers, LongRunning;
+    public ulong Queued, Running, Completed, Faulted, Cancelled, RunningTasks, Faults;
+}
+
+/// <summary>kiln.internal.tasks.host v1 (native/core/src/tasks_host.h), 200 bytes: field order is the table's.
+/// The five diagnostics members were appended for issue #49, the three world members for #82 (client-world hops),
+/// menu_frame for #83 (menu hops); a
+/// shorter table (an older core of another build) is refused by the size check before any of them is read.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct KilnTasksHostApi
+{
+    public uint Size;
+    public uint Version;
+    public delegate* unmanaged[Cdecl]<byte*> BuildStamp;
+    public delegate* unmanaged[Cdecl]<delegate* unmanaged[Cdecl]<ulong, uint, uint, void*, void>, int> Bind;
+    public delegate* unmanaged[Cdecl]<ulong, KilnTaskInfo*, void*, ulong*, uint*, int> Admit;
+    public delegate* unmanaged[Cdecl]<ulong, ulong*, int> Arm;
+    public delegate* unmanaged[Cdecl]<ulong, ulong, int> Resume;
+    public delegate* unmanaged[Cdecl]<ulong, ulong, uint*, int> ResumeAfterStep;
+    public delegate* unmanaged[Cdecl]<ulong, int> TickHop;
+    public delegate* unmanaged[Cdecl]<ulong, uint, int> Finish;
+    public delegate* unmanaged[Cdecl]<ulong, uint> IsCancelled;
+    public delegate* unmanaged[Cdecl]<ulong, uint*, int> SealOwner;
+    public delegate* unmanaged[Cdecl]<KilnLeaseSnapshot*, uint, uint*, int> Snapshot;
+    public delegate* unmanaged[Cdecl]<delegate* unmanaged[Cdecl]<ulong, uint, void*, void>, int> BindEnded;
+    public delegate* unmanaged[Cdecl]<ulong, ulong, uint, uint*, int> ResumeAfterStepIn;
+    public delegate* unmanaged[Cdecl]<uint> OnPoolThread;
+    public delegate* unmanaged[Cdecl]<uint> ServerSession;
+    public delegate* unmanaged[Cdecl]<uint> StatsOwnerCount;
+    public delegate* unmanaged[Cdecl]<uint, KilnTaskStatsOwnerRow*, int> StatsOwnerRow;
+    public delegate* unmanaged[Cdecl]<uint, KilnTaskStatsRunningRow*, int> StatsRunningRow;
+    public delegate* unmanaged[Cdecl]<uint, KilnTaskStatsFaultRow*, int> StatsFaultRow;
+    public delegate* unmanaged[Cdecl]<KilnTaskStatsTotals*, int> StatsTotals;
+    public delegate* unmanaged[Cdecl]<uint, uint*, uint> WorldSession;
+    public delegate* unmanaged[Cdecl]<ulong, uint, uint, int> TickHopIn;
+    public delegate* unmanaged[Cdecl]<ulong, ulong, uint, uint, uint*, int> ResumeAfterStepWorld;
+    public delegate* unmanaged[Cdecl]<uint> MenuFrame;  // appended for menu hops (#83)
+
+    public const string Name = "kiln.internal.tasks.host";
+    public const uint Version1 = 1;
+}
+
+/// <summary>What the bridge needs from its host besides the tables: the server tick's identity, the log, and the frame
+/// a tick hop runs in.</summary>
+internal sealed class HostTasksEnvironment
+{
+    /// <summary><c>KilnApi.service</c> (the managed host's private view also resolves the lease table).</summary>
+    public required Func<string, uint, nint> Service { get; init; }
+
+    /// <summary>True on the server world's tick thread (<c>KilnApi.on_world_thread(SERVER)</c>).</summary>
+    public required Func<bool> OnServerTick { get; init; }
+
+    /// <summary>True on the thread that steps worlds of a kind (<c>KilnApi.on_world_thread</c>); null: only the server
+    /// world's is known (<see cref="OnServerTick"/>).</summary>
+    public Func<uint, bool>? OnWorldThread { get; init; }
+
+    /// <summary>A world of that kind exists now (<c>KilnApi.world(kind) != 0</c>: live, or in its STOPPING).</summary>
+    public Func<uint, bool>? WorldExists { get; init; }
+
+    /// <summary>True on the game client's main thread: the client world's, or before any client world the thread of the
+    /// game's UI frame. Null on a dedicated server.</summary>
+    public Func<bool>? OnClientMainThread { get; init; }
+
+    public required Action<LogLevel, string> Log { get; init; }
+
+    /// <summary>The build stamp Kiln.Api was compiled with (<see cref="KilnBuild"/>); null without one.</summary>
+    public required string? BuildStamp { get; init; }
+
+    /// <summary>Runs one tick hop of <c>owner</c> on the server tick (<see cref="TaskTickDispatcher"/>); null runs it
+    /// bare.</summary>
+    public Action<ulong, Action>? TickHop { get; init; }
+
+    /// <summary>Runs one client-world hop of <c>owner</c> on the client world's step (the game's main thread); null runs it
+    /// bare.</summary>
+    public Action<ulong, Action>? ClientHop { get; init; }
+
+    /// <summary>Runs one menu hop of <c>owner</c> (#83) on the game's UI frame while no world runs (the main thread); null
+    /// runs it bare.</summary>
+    public Action<ulong, Action>? MenuHop { get; init; }
+}
+
+/// <summary>
+/// The pool C# tasks run on: <see cref="TaskBackend"/> over the core's lease table.
+/// </summary>
+/// <remarks>
+/// <para>Pins: every admitted lease gets one normal GCHandle, passed to the core as its host state. Its target holds the
+/// task's state and the load context its code lives in, so neither can be collected while a segment, a tick hop or a late
+/// continuation of the task can still run. The handle is freed exactly once: at a refused admit, or in the core's end
+/// notification, which comes once per accepted lease after everything of it has run (also for a lease cancelled before
+/// its first segment, which never reaches the dispatcher). The core releases the lease's record right after that
+/// notification; the host never releases one.</para>
+/// <para>Entry points: the dispatcher and the end notification are <c>UnmanagedCallersOnly</c> statics of Kiln.Host
+/// (not collectible), bound once per process. They run on pool workers, on the server tick and, at a world's end, on the
+/// thread that ends it, possibly at once; they catch everything, so no managed exception crosses back into the
+/// core.</para>
+/// </remarks>
+internal sealed unsafe class HostTasks : TaskBackend
+{
+    /// <summary>One lease's pin: the GCHandle's target.</summary>
+    private sealed class Pin(HostTasks backend, ulong owner, object state, AssemblyLoadContext? context)
+    {
+        public readonly HostTasks Backend = backend;
+        public readonly ulong Owner = owner;
+        public readonly object State = state;      // the task's state: what the dispatcher hands back
+        public readonly AssemblyLoadContext? Context = context;  // the work's collectible load context, held while the lease lives
+        public GCHandle Handle;
+    }
+
+    private static HostTasks? s_bound;  // the backend the entry points serve: one per process (tests rebind)
+
+    private readonly KilnTasksHostApi* _host;
+    private readonly KilnTasksApi* _tasks;
+    private readonly HostTasksEnvironment _env;
+    private readonly ConcurrentDictionary<nint, Pin> _pins = new();
+    private LeaseDispatch? _dispatch;
+    private string? _unavailable;
+
+    private HostTasks(HostTasksEnvironment env, KilnTasksHostApi* host, KilnTasksApi* tasks, string? unavailable)
+    {
+        _env = env;
+        _host = host;
+        _tasks = tasks;
+        _unavailable = unavailable;
+    }
+
+    /// <summary>The bound backend; null before <see cref="Start"/>.</summary>
+    internal static HostTasks? Bound => Volatile.Read(ref s_bound);
+
+    /// <summary>Resolves and checks the core's tables and installs the backend. A table that is missing, short, of another
+    /// version or of another build leaves a backend that only says why tasks.pool is off: nothing of the table is called
+    /// (beyond its build stamp).</summary>
+    internal static HostTasks Start(HostTasksEnvironment env)
+    {
+        var backend = Create(env);
+        Volatile.Write(ref s_bound, backend);
+        TaskBackend.Install(backend);  // binds the dispatcher (Bind below)
+        if (backend._unavailable is { } why) env.Log(LogLevel.Warn, $"tasks: C# tasks are off: {why}");
+        else env.Log(LogLevel.Info, "tasks: C# tasks run on Kiln's task pool");
+        return backend;
+    }
+
+    private static HostTasks Create(HostTasksEnvironment env)
+    {
+        HostTasks Off(string why) => new(env, null, null, why);
+        var host = (KilnTasksHostApi*)env.Service(KilnTasksHostApi.Name, KilnTasksHostApi.Version1);
+        if (host == null) return Off("this Kiln core offers no task pool to C# mods (no kiln.internal.tasks.host table)");
+        if (host->Size < (uint)sizeof(KilnTasksHostApi))
+            return Off($"the core's task table is shorter than this Kiln.Host expects ({host->Size} of {sizeof(KilnTasksHostApi)} bytes): the core and Kiln.Host are different builds");
+        if (host->Version != KilnTasksHostApi.Version1)
+            return Off($"the core's task table is version {host->Version}, this Kiln.Host needs {KilnTasksHostApi.Version1}: the core and Kiln.Host are different builds");
+        if (host->BuildStamp == null) return Off("the core's task table has no build stamp");
+        var stamp = Marshal.PtrToStringUTF8((nint)host->BuildStamp()) ?? "";
+        if (stamp.Length == 0) return Off("the core was built without a build stamp, so Kiln.Host cannot tell that it is the same build");
+        if (env.BuildStamp is not { Length: > 0 } own)
+            return Off("Kiln.Api was built without a build stamp, so Kiln.Host cannot tell that the core is the same build");
+        if (!string.Equals(stamp, own, StringComparison.Ordinal))
+            return Off($"the core is build {stamp}, Kiln.Host is build {own}: the task table is only used within one build");
+        // Members through server_session (index 15) must all be there; the five diagnostics members
+        // appended after them are checked where the crash supplier uses them (a table built before
+        // them is already refused by the size check above when it is shorter).
+        for (var i = 1; i <= 15; i++)
+            if (((nint*)host)[i] == 0) return Off("the core's task table has an empty member");
+        // the world members (#82), after the five diagnostics members: index 21 to 23
+        for (var i = 21; i <= 23; i++)
+            if (((nint*)host)[i] == 0) return Off("the core's task table has an empty member");
+        var tasks = (KilnTasksApi*)env.Service(KilnTasksApi.Name, 1);
+        if (tasks == null || tasks->Size < (uint)sizeof(KilnTasksApi) || tasks->Cancel == null || tasks->Status == null || tasks->DrainOwner == null)
+            return Off("the core's kiln.tasks table is missing or short");
+        return new HostTasks(env, host, tasks, null);
+    }
+
+    /// <summary>Leases whose pins are held: admitted and not yet reported ended by the core.</summary>
+    internal int LivePins => _pins.Count;
+
+    /// <summary>The load contexts pinned for <paramref name="owner"/>'s live leases (tests, diagnostics).</summary>
+    internal IReadOnlyList<AssemblyLoadContext?> PinnedContexts(ulong owner) =>
+        [.. _pins.Values.Where(p => p.Owner == owner).Select(p => p.Context)];
+
+    /// <summary>Leases of <paramref name="owner"/> whose end the core has not reported yet: while any is left, a
+    /// segment, a tick hop or a continuation of it can still run, so its load context is not quiescent. The pin
+    /// itself holds that context until then; a mod's unload joins this off the tick, never on it.</summary>
+    internal int OwnerPins(ulong owner) => _pins.Values.Count(p => p.Owner == owner);
+
+    // The load context the task's code lives in, when it is a collectible one (a mod's): held by the pin so it cannot
+    // finish unloading while the task can still run. Kiln's own code (the default context) needs no pin.
+    private static AssemblyLoadContext? LoadContextOf(object hostState) =>
+        TaskRun.WorkAssemblyOf(hostState) is { } assembly && AssemblyLoadContext.GetLoadContext(assembly) is { IsCollectible: true } context
+            ? context
+            : null;
+
+    /// <summary>The core's <c>drain_owner</c>: seals <paramref name="owner"/> (again; it is already sealed by the
+    /// unload) and then waits up to <paramref name="budget"/> for its leases to be quiescent, returning how many
+    /// are not. This is the off-tick join behind a mod's load-context teardown, so it may only run on a thread
+    /// that is neither the tick, a world thread nor a pool worker (the core refuses those with WRONG_THREAD);
+    /// -1 when the core refused or no pool is bound, in which case the caller falls back to looking at the pins.
+    /// A revoked owner whose tasks are still running also reports them here (ERR_REVOKED with the count set).</summary>
+    internal int DrainOwner(ulong owner, TimeSpan budget)
+    {
+        if (_unavailable is not null || _tasks is null) return -1;
+        uint running = 0;
+        var ms = budget <= TimeSpan.Zero ? 0u : (uint)Math.Min(uint.MaxValue, Math.Max(1, Math.Ceiling(budget.TotalMilliseconds)));
+        var rc = _tasks->DrainOwner(owner, ms, &running);
+        return rc is KilnAbi.Ok or KilnAbi.ErrRevoked ? (int)running : -1;
+    }
+
+    /// <summary>The owner is going away (unload, disable): its tasks' cancellation is signalled, so work that waits on its
+    /// token ends, and the core takes no new task of it. Never waits. Cancellation and finalization continuations of
+    /// its tasks still run afterwards.</summary>
+    internal int RetireOwner(ulong owner)
+    {
+        if (_unavailable is not null) return 0;
+        foreach (var pin in _pins.Values)
+            if (pin.Owner == owner) TaskRun.CancelFromHost(pin.State);
+        return SealOwner(owner);
+    }
+
+    // ---- the entry points the core calls ----
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void OnDispatch(ulong lease, uint what, uint cancelled, void* hostState)
+    {
+        var backend = Volatile.Read(ref s_bound);
+        try
+        {
+            if (GCHandle.FromIntPtr((nint)hostState).Target is not Pin pin) return;
+            backend = pin.Backend;
+            backend.Dispatch(lease, what, cancelled != 0, pin);
+        }
+        catch (Exception e)
+        {
+            Report(backend, $"tasks: Kiln's task dispatcher failed on lease 0x{lease:x} (a bug in Kiln, not in a mod): {e}");
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void OnEnded(ulong lease, uint state, void* hostState)
+    {
+        var backend = Volatile.Read(ref s_bound);
+        try
+        {
+            var handle = GCHandle.FromIntPtr((nint)hostState);
+            if (handle.Target is not Pin pin) return;
+            backend = pin.Backend;
+            try
+            {
+                TaskRun.LeaseEnded(pin.State, (KilnTaskState)state);
+            }
+            finally
+            {
+                // nothing of the lease runs any more: its pins go, exactly once
+                if (backend._pins.TryRemove((nint)hostState, out _)) handle.Free();
+            }
+        }
+        catch (Exception e)
+        {
+            Report(backend, $"tasks: Kiln's task end notification failed on lease 0x{lease:x} (a bug in Kiln, not in a mod): {e}");
+        }
+    }
+
+    private static void Report(HostTasks? backend, string text)
+    {
+        try
+        {
+            backend?._env.Log(LogLevel.Error, text);
+        }
+        catch
+        {
+            // nothing left to report to; never back into the core
+        }
+    }
+
+    private void Dispatch(ulong lease, uint what, bool cancelled, Pin pin)
+    {
+        var dispatch = _dispatch;
+        if (dispatch is null) return;
+        if (what == (uint)LeaseWork.TickHop && _env.TickHop is { } frame && _env.OnServerTick())
+            frame(pin.Owner, () => dispatch(lease, LeaseWork.TickHop, cancelled, pin.State));  // on the server tick, before Pre
+        else if (what == (uint)LeaseWork.ClientHop && _env.ClientHop is { } client && OnWorldThread(WorldKind.Client))
+            client(pin.Owner, () => dispatch(lease, LeaseWork.ClientHop, cancelled, pin.State));  // the client world's step
+        else if (what == (uint)LeaseWork.MenuHop && _env.MenuHop is { } menu && OnWorldThread(WorldKind.Menu))
+            menu(pin.Owner, () => dispatch(lease, LeaseWork.MenuHop, cancelled, pin.State));  // the menu's UI frame
+        else
+            dispatch(lease, (LeaseWork)what, cancelled, pin.State);  // a segment; or a world's end flushing its hops
+    }
+
+    // ---- TaskBackend ----
+
+    public override string? UnavailableReason => _unavailable;
+
+    public override bool OnPoolThread => _unavailable is null && _host->OnPoolThread() != 0;
+
+    public override bool OnServerTick => _unavailable is null && _env.OnServerTick();
+
+    public override ulong ServerSession => _unavailable is null ? _host->ServerSession() : 0;
+
+    /// <summary>The game's UI frame while no world runs (#83; the table's <c>menu_frame</c>): opens a menu session when
+    /// none is live, then runs its hops through <see cref="HostTasksEnvironment.MenuHop"/>. The UI thread only. Returns
+    /// the hops dispatched; 0 while a world runs, or with tasks off.</summary>
+    public uint MenuFrame() => _unavailable is null && _host->MenuFrame != null ? _host->MenuFrame() : 0;
+
+    public override bool OnClientMainThread => _unavailable is null && (_env.OnClientMainThread?.Invoke() ?? false);
+
+    public override bool OnWorldThread(WorldKind world) => world switch
+    {
+        WorldKind.Server => OnServerTick,
+        WorldKind.Menu => OnClientMainThread,  // the game's UI frame runs on the client's main thread (#83)
+        _ => _unavailable is null && (_env.OnWorldThread?.Invoke((uint)world) ?? false),
+    };
+
+    public override ulong WorldSession(WorldKind world, out WorldSessionState state)
+    {
+        state = WorldSessionState.None;
+        if (_unavailable is not null || world is not (WorldKind.Server or WorldKind.Client or WorldKind.Menu)) return 0;
+        uint raw = 0;
+        var session = _host->WorldSession((uint)world, &raw);
+        state = raw switch
+        {
+            1 => WorldSessionState.Live,
+            // its STOPPING came: still in its handlers while the world exists (KilnApi.world(kind) is cleared after them)
+            2 => world != WorldKind.Menu && _env.WorldExists?.Invoke((uint)world) == true ? WorldSessionState.Stopping : WorldSessionState.Ended,
+            _ => WorldSessionState.None,
+        };
+        return session;
+    }
+
+    public override TaskRefusal TickHop(ulong lease, WorldKind world, ulong session)
+    {
+        var refused = world == WorldKind.Server ? TaskRefusal.NoServerWorld : TaskRefusal.NoWorld;
+        if (_unavailable is not null || session is 0 or > uint.MaxValue || world is not (WorldKind.Server or WorldKind.Client or WorldKind.Menu))
+            return refused;
+        // the core compares the session with the live one and queues in one step: never into another session
+        var rc = _host->TickHopIn(lease, (uint)world, (uint)session);
+        if (rc == KilnAbi.ErrUnavailable) return refused;
+        Check(rc, "tick_hop_in", lease);
+        return TaskRefusal.None;
+    }
+
+    public override TaskRefusal ResumeAfterStep(ulong lease, ulong registration, WorldKind world, ulong session)
+    {
+        var refused = world == WorldKind.Server ? TaskRefusal.NoServerWorld : TaskRefusal.NoWorld;
+        if (session is 0 or > uint.MaxValue || world is not (WorldKind.Server or WorldKind.Client)) return refused;
+        uint refusal = 0;
+        var rc = _host->ResumeAfterStepWorld(lease, registration, (uint)world, (uint)session, &refusal);
+        if (rc == KilnAbi.ErrUnavailable) return refused;  // still armed
+        Check(rc, "resume_after_step_world", lease);
+        return TaskRefusal.None;
+    }
+
+    public override void Bind(LeaseDispatch dispatch)
+    {
+        _dispatch = dispatch;
+        if (_unavailable is not null) return;
+        // the end notification first: no lease is admitted before the core can report its end
+        var rc = _host->BindEnded(&OnEnded);
+        if (rc == KilnAbi.Ok) rc = _host->Bind(&OnDispatch);
+        if (rc != KilnAbi.Ok) _unavailable = $"the core refused Kiln.Host's task dispatcher (rc {rc})";
+    }
+
+    public override TaskRefusal Admit(ulong owner, string name, KilnTaskOptions options, object hostState, out ulong lease)
+    {
+        lease = 0;
+        if (_unavailable is not null) return TaskRefusal.Capability;
+        var pin = new Pin(this, owner, hostState, LoadContextOf(hostState));
+        pin.Handle = GCHandle.Alloc(pin);
+        var key = GCHandle.ToIntPtr(pin.Handle);
+        _pins[key] = pin;  // before the admit: its end can come before admit returns
+        var bytes = Encoding.UTF8.GetBytes(name);
+        ulong admitted = 0;
+        uint refusal = 0;
+        int rc;
+        fixed (byte* p = bytes)
+        {
+            var info = new KilnTaskInfo
+            {
+                Size = (uint)sizeof(KilnTaskInfo),
+                Flags = options.LongRunning ? KilnTaskInfo.LongRunning : 0,
+                Name = new KilnStr { Ptr = p, Len = (nuint)bytes.Length },
+                Priority = (uint)options.Priority,
+            };
+            rc = _host->Admit(owner, &info, (void*)key, &admitted, &refusal);
+        }
+        if (rc == KilnAbi.Ok)
+        {
+            lease = admitted;
+            return TaskRefusal.None;
+        }
+        // refused: nothing was transferred, the core never calls back for it
+        if (_pins.TryRemove(key, out _)) pin.Handle.Free();
+        return refusal is > 0 and <= (uint)TaskRefusal.NoServerWorld ? (TaskRefusal)refusal : TaskRefusal.Capability;
+    }
+
+    public override ulong Arm(ulong lease)
+    {
+        ulong registration = 0;
+        Check(_host->Arm(lease, &registration), "arm", lease);
+        return registration;
+    }
+
+    public override void Resume(ulong lease, ulong registration) => Check(_host->Resume(lease, registration), "resume", lease);
+
+    public override TaskRefusal ResumeAfterStep(ulong lease, ulong registration, ulong session)
+    {
+        if (session is 0 or > uint.MaxValue) return TaskRefusal.NoServerWorld;
+        uint refusal = 0;
+        // the core compares the session with the live one and arms in one step: never moved into another world
+        var rc = _host->ResumeAfterStepIn(lease, registration, (uint)session, &refusal);
+        if (rc == KilnAbi.ErrUnavailable) return TaskRefusal.NoServerWorld;  // still armed
+        Check(rc, "resume_after_step", lease);
+        return TaskRefusal.None;
+    }
+
+    public override TaskRefusal TickHop(ulong lease)
+    {
+        var rc = _host->TickHop(lease);
+        if (rc == KilnAbi.ErrUnavailable) return TaskRefusal.NoServerWorld;
+        Check(rc, "tick_hop", lease);
+        return TaskRefusal.None;
+    }
+
+    public override void Finish(ulong lease, LeaseOutcome outcome) => Check(_host->Finish(lease, (uint)outcome), "finish", lease);
+
+    public override bool IsCancelled(ulong lease) => _host->IsCancelled(lease) != 0;
+
+    public override KilnTaskState Cancel(ulong owner, ulong lease)
+    {
+        uint state = 0;
+        _tasks->Cancel(owner, lease, &state);  // NOT_FOUND leaves NONE: its record is gone
+        return (KilnTaskState)state;
+    }
+
+    public override KilnTaskState Status(ulong owner, ulong lease)
+    {
+        uint state = 0;
+        _tasks->Status(owner, lease, &state);
+        return (KilnTaskState)state;
+    }
+
+    public override int SealOwner(ulong owner)
+    {
+        if (_unavailable is not null) return 0;
+        uint outstanding = 0;
+        _host->SealOwner(owner, &outstanding);
+        return (int)outstanding;
+    }
+
+    public override IReadOnlyList<LeaseRow> Snapshot()
+    {
+        if (_unavailable is not null) return [];
+        uint count = 0;
+        var capacity = 64u;
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            var rows = new KilnLeaseSnapshot[capacity];
+            int rc;
+            fixed (KilnLeaseSnapshot* p = rows) rc = _host->Snapshot(p, capacity, &count);
+            if (rc == KilnAbi.ErrBufferTooSmall)
+            {
+                capacity = Math.Max(count, capacity * 2);
+                continue;
+            }
+            if (rc != KilnAbi.Ok) return [];
+            var result = new LeaseRow[Math.Min(count, capacity)];
+            for (var i = 0; i < result.Length; i++)
+            {
+                string name;
+                fixed (byte* n = rows[i].Name) name = Marshal.PtrToStringUTF8((nint)n) ?? "";
+                result[i] = new LeaseRow(rows[i].Owner, rows[i].Lease, (KilnTaskState)rows[i].State, name,
+                    TimeSpan.FromTicks((long)(rows[i].RunningNs / 100)));
+            }
+            return result;
+        }
+        return [];
+    }
+
+    /// <summary>The crash reports' Tasks section (issue #49), read through the table's five appended
+    /// diagnostics members. Fixed-size rows out of the core's lock-free store: no pool lock is taken
+    /// here, and any failure (no pool, a short table, a snapshot the core could not copy) degrades to
+    /// "(task snapshot unavailable)" — a crash report is never held up by its tasks section.</summary>
+    internal string CrashTasksSection()
+    {
+        if (_unavailable is not null || _host->StatsOwnerCount == null || _host->StatsOwnerRow == null ||
+            _host->StatsRunningRow == null || _host->StatsFaultRow == null || _host->StatsTotals == null)
+            return "(task snapshot unavailable)\n";
+        KilnTaskStatsTotals totals;
+        if (_host->StatsTotals(&totals) != KilnAbi.Ok) return "(task snapshot unavailable)\n";
+        var sb = new StringBuilder();
+        sb.Append($"pool: {totals.Workers} worker(s), {totals.LongRunning} long-running, {totals.Owners} owner(s), " +
+                  $"{totals.Queued} queued, {totals.RunningTasks} running, {totals.Completed} completed, " +
+                  $"{totals.Faulted} faulted, {totals.Cancelled} cancelled\n");
+        var owners = _host->StatsOwnerCount();
+        for (uint i = 0; i < owners; i++)
+        {
+            KilnTaskStatsOwnerRow row;
+            if (_host->StatsOwnerRow(i, &row) != KilnAbi.Ok) break;
+            var name = Name(row.OwnerName);
+            var longest = Name(row.LongestName);
+            sb.Append($"  owner \"{name}\" (instance {row.Instance}): queued {row.QueuedCurrent}/{row.QueuedMax}, " +
+                      $"running {row.RunningCurrent}/{row.RunningMax}, completed {row.Completed}, faulted {row.Faulted}, " +
+                      $"cancelled {row.Cancelled}, cpu {row.CpuNs / 1e6:F3} ms, wall {row.WallNs / 1e6:F3} ms, " +
+                      $"longest {row.LongestNs / 1e6:F3} ms \"{longest}\"\n");
+        }
+        for (uint i = 0; i < 16; i++)
+        {
+            KilnTaskStatsRunningRow row;
+            var rc = _host->StatsRunningRow(i, &row);
+            if (rc == KilnAbi.ErrNotFound) break;
+            if (rc != KilnAbi.Ok) return "(task snapshot unavailable)\n";
+            var ownerName = Name(row.OwnerName);
+            var taskName = Name(row.TaskName);
+            var state = row.State switch
+            {
+                1 => "running",
+                2 => "suspended",
+                3 => row.World switch { 2 => "on-tick-client", 3 => "on-tick-menu", _ => "on-tick" },  // a client-world hop (#82), a menu hop (#83)
+                _ => "queued",
+            };
+            sb.Append($"  running thread={row.ThreadId} owner=\"{ownerName}\" task=\"{taskName}\" " +
+                      $"handle=0x{row.Lease:x} started_ns={row.StartedNs} elapsed_ms={row.ElapsedNs / 1e6:F3} state={state}\n");
+        }
+        if (totals.RunningTasks > 16) sb.Append($"  ... and {totals.RunningTasks - 16} more running (at most 16 shown)\n");
+        for (uint i = 0; i < 16; i++)
+        {
+            KilnTaskStatsFaultRow row;
+            var rc = _host->StatsFaultRow(i, &row);
+            if (rc == KilnAbi.ErrNotFound) break;
+            if (rc != KilnAbi.Ok) break;
+            var ownerName = Name(row.OwnerName);
+            var taskName = Name(row.TaskName);
+            sb.Append($"  fault #{row.Sequence} owner=\"{ownerName}\" task=\"{taskName}\" handle=0x{row.Handle:x} " +
+                      $"state={(KilnTaskState)row.State} code=0x{row.Code:x8} at_ns={row.AtNs}\n");
+        }
+        return sb.ToString();
+
+        // A copied name as crash text: quotes and controls flattened, ill-formed bytes replaced by
+        // the decoder, so one task name cannot forge a report line.
+        static string Name(byte* p)
+        {
+            var s = Marshal.PtrToStringUTF8((nint)p) ?? "";
+            var chars = s.ToCharArray();
+            for (var i = 0; i < chars.Length; i++)
+                if (chars[i] < 0x20 || chars[i] == '"' || chars[i] == '\\') chars[i] = '?';
+            return new string(chars);
+        }
+    }
+
+    // The table's INTERNAL (and anything else unexpected) is a bug in Kiln, as the contract says.
+    private static void Check(int rc, string member, ulong lease)
+    {
+        if (rc != KilnAbi.Ok) throw new InvalidOperationException($"Kiln's task pool refused {member} on lease 0x{lease:x} (rc {rc})");
+    }
+}

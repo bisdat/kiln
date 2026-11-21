@@ -5,19 +5,27 @@ import { mockStoppedFile, readMockStop, type StopScript } from "./mockStoppedSta
 // a fake game that "runs" after Play. Fixtures are built on schema/examples (the contract examples).
 // Commands without a mock reject with not_implemented, like the wave-0 Rust stubs.
 import type {
-  Activation, AddReport, BootSnapshot, BundlePart, RunSide, AddedMod, AdminEndpoint, AppInfo, BootJson, BootState, ConfigDocument, CookJob, CookReason, CookedMod, ConfigFileInfo, ConfigTarget, CrashReport, ReportFinding, ReportSaved, Detected, Distribution,
-  FoundMod, FoundReport, GameInstall, GameStatus, ImportReport, InstallReceipt, InstallResult, InstallState, Json, KilnError, LastServer, LaunchRequest, NewerKilnMod, GraphicsToolNote,
-  LaunchResult, LauncherSettings, RenderInfo, DesktopInfo, LibraryEntry, LibraryRef, LibraryVersion, RollbackReport, VersionRef, TakenOver, LogFile, LogTarget, ModKind, ModpackInstallRequest, ModpackInstallResult, ModsJson,
-  NativeJson, NativePlanEntry, NativeUserState, PreStart, Profile, ProfileChange, ProfileMod, ProfileSummary, ProxyClass, Rejection, RemoveReport, ResolvePreview, RuntimeBundle, SaveBackup, SaveSlot,
+  Activation, AddReport, BootSnapshot, EmfDepProblem, BundlePart, RunSide, AddedMod, AdminEndpoint, AppInfo, BootJson, BootState, ConfigDocument, CookJob, CookReason, CookedMod, ConfigFileInfo, ConfigTarget, CrashReport, ReportFinding, ReportSaved, Detected, Distribution,
+  FoundMod, FoundReport, GameInstall, GameStatus, ImportReport, InstallReceipt, InstallResult, InstallState, Json, KilnError, LastServer, LaunchRequest, NewerKilnMod, GraphicsToolNote, GraphicsStepAside, GraphicsStateFile,
+  LaunchResult, LauncherSettings, RenderInfo, SandboxInfo, DesktopInfo, LibraryEntry, LibraryRef, LibraryVersion, RollbackReport, VersionRef, TakenOver, LogFile, LogTarget, ModKind, ModpackInstallRequest, ModpackInstallResult, ModsJson,
+  NativeJson, NativePlanEntry, NativeUserState, PreStart, Profile, ProfileChange, ProfileMod, ProfileSummary, ProxyClass, Rejection, RemoveReport, ResolvePreview, SettingsRemoval, RuntimeBundle, SaveBackup, SaveSlot,
   SchemaSnapshot, ServerInstance, ServerStatus, Task, TaskState, StartMode, StartSettings, StartSetup, RunnerInfo, BuildCheck,
 } from "./commands";
+import type { SfBackend, SfBackendCard, SfBackendPreview, SfResolution, SfSetting } from "./commands";
+import type { Preflight, StartWarning } from "./commands";
+import type { DataRestoreBase, EngineStatus } from "./commands";
 import { adminMockHandlers } from "../admin/mock";
 import { serverMockHandlers } from "../pages/servers/mockServers";
 import { updateMockHandlers } from "./mockUpdate";
 import { deckMockHandlers } from "../deck/mockDeck";
 import { nexusMockHandlers, NEXUS_MOCK_ENABLED } from "./mockNexus";
+import { communityMockHandlers, communityMockHooks } from "./mockCommunity";
+import { mockReportContents } from "./mockReport";
 import { updatesMockHandlers } from "./mockUpdates";
+import { MOCK_PREVIEW, vendorMockHandlers } from "./mockVendor";
 import { chainMockHandlers } from "./mockChain";
+import { crucibleMockHandlers } from "./mockCrucible";
+import { studioMockHandlers } from "./mockStudio";
 import { dataFolderBlocks, dataFolderMockHandlers, mockDataDir, mockPickFolder } from "./mockDataFolder";
 import { mockSpeak, bootJsonAt, clearStartHistory, mockBegin, mockProgress, mockStartEnded, ownerScript, processAt, scriptedStart, setStartScript, type StartScript } from "./mockProgress";
 import bootExample from "../../../schema/examples/state-boot.json";
@@ -73,6 +81,20 @@ const gateOf = (name: string) => { let g = gates.get(name); if (!g) { g = { open
 const commandPlans: Record<string, CommandPlan[]> = typeof window === "undefined" ? {} :
   (window as unknown as { __kilnMockPlans?: Record<string, CommandPlan[]> }).__kilnMockPlans ?? {};
 const commandCalls: string[] = [];
+/** report_save's `exclude` each time ("What's in this report"; tests: `__kilnMock.reportSaves()`). */
+const reportSaves: string[][] = [];
+/** "Remove its settings too": each mod whose settings went ("<kind>/<id>"; tests: `__kilnMock.settingsRemoved()`). */
+const settingsRemoved: string[] = [];
+/** library_remove's `settings` / library_remove_settings (kiln_manage::mod_settings::remove): refused while the Library
+ *  holds a version, else the mod's settings files go, after a copy into the backups folder. */
+function mockRemoveSettings(kind: ModKind, id: string): SettingsRemoval {
+  if (library.some((l) => l.kind === kind && l.id === id && l.versions.length)) reject("conflict", `${kind} ${id} is still in the Library: its settings stay`);
+  settingsRemoved.push(`${kind}/${id}`);
+  return {
+    removed: [`/home/player/.local/share/kiln/profiles/default/config/${id}.json`, `/home/player/.local/share/Steam/steamapps/common/Enshrouded/kiln/state/placed-settings/${kind}/${id}`],
+    backup: `/home/player/.local/share/kiln/backups/mod-settings/${kind}-${id}-20261120T120000Z`, notes: [],
+  };
+}
 
 // ---------------------------------------------------------------- games
 
@@ -98,8 +120,9 @@ const live = (gameId: string) => { const r = running[gameId]; return r && (!r.fr
 let pidSeq = 4100;
 /** How long profile_activate takes to answer. */
 const ACTIVATE_MS = 1500;
-/** The next runtime install fails with this message (tests: `__kilnMock.failNextInstall`). */
-let failNextInstall: string | null = null;
+/** The next runtime install fails with this message as an `io` error, or with this whole error (a `permission` error with
+ *  `detail.blocked`: a DLL Windows refused, inbox 92) (tests: `__kilnMock.failNextInstall`). */
+let failNextInstall: string | KilnError | null = null;
 /** Steam does not load Kiln's proxy (tests: `__kilnMock.setNoProxy`): starts keep play-once.ini, write no boot.json, the
  *  launch option is not set, and the process "started" 31 s before the launch so the launcher's grace has passed. */
 let noProxy = false;
@@ -112,6 +135,14 @@ const otherFolder: Record<string, { id: string; root?: string | null } | null> =
 const newerMods: Record<string, NewerKilnMod[]> = {};
 /** GameStatus.graphicsTools per game (tests: `__kilnMock.setGraphicsTools`). */
 const graphicsTools: Record<string, GraphicsToolNote[]> = {};
+/** GameStatus.graphicsStepAside per game (tests: `__kilnMock.setGraphicsStepAside`). The preview's Steam client has
+ *  DLSSTweaks next to it, so the Graphics card shows a line; tests start from it or set their own. */
+const graphicsStepAside: Record<string, GraphicsStepAside[]> = {
+  "client-steam": [{ kind: "dlsstweaks", file: "dlsstweaks.ini", frameCap: false, upscaler: false }],
+};
+/** (dev.29.18) GameStatus.graphicsState per game: the game's kiln/state/graphics.json (tests: `__kilnMock.setGraphicsState`;
+ *  `current` is decided as the backend does: the file's game runs). */
+const graphicsState: Record<string, GraphicsStateFile> = {};
 
 function mockPart(name: string, sides: RunSide[] = ["server", "client"], isDefault = true): BundlePart {
   return { name, sides, default: isDefault, requires: name === "core" ? [] : ["core"] };
@@ -136,7 +167,9 @@ const bundles: RuntimeBundle[] = [
 // ---------------------------------------------------------------- library
 
 interface MockManifest { id: string; name: string; version: string; side: "client" | "server" | "both"; requires?: Record<string, string>;
-  incompatible?: string[]; phase?: NativePlanEntry["phase"]; description?: string; clients?: "none" | "kiln" | "mod" }
+  incompatible?: string[]; phase?: NativePlanEntry["phase"]; description?: string; clients?: "none" | "kiln" | "mod";
+  /** EMF: mod.json `depends` (id -> range, or {version, optional, url}). */
+  depends?: Record<string, string | { version?: string; optional?: boolean; url?: string }> }
 
 const seedMods: Record<ModKind, MockManifest[]> = {
   kiln: [
@@ -169,7 +202,43 @@ const seedMods: Record<ModKind, MockManifest[]> = {
   enshwick: [{ id: "you.lanterns", name: "Lanterns", version: "1.0.0", side: "both", clients: "mod" }],
   shroudlink: [{ id: "chestsort", name: "chestsort.dll", version: "0.0.0", side: "server", clients: "none" }],
   ember: [{ id: "private-chests", name: "private-chests", version: "0.0.0", side: "server", clients: "none" }],
+  // packages for Enshrouded ModLoader (a DLL with its .dll.mod, run by kiln-dllmod from Mods/EnshroudedModLoader/<id>/):
+  // none seeded, so the other pages' mod counts stay as they are (engine_status has kiln-dllmod's state file)
+  dllmod: [],
 };
+
+/** `?emfdeps=1`: two EMF mods in Ember run whose dependency is not there (kiln_manage::emf_deps): Mage Skills needs EMF's
+ *  lua mod, which comes with EMF's release zip (PepegaJedi's report, 0.2.0-dev.30.1), and Pet Tricks needs a mod whose
+ *  mod.json entry gives its page. */
+const EMF_DEPS_SEED = typeof location !== "undefined" && new URLSearchParams(location.search).has("emfdeps");
+if (EMF_DEPS_SEED) {
+  seedMods.emf.push(
+    { id: "mage_skills", name: "Mage Skills", version: "1.0.0", side: "both", depends: { lua: ">=1.36" } },
+    { id: "pet-tricks", name: "Pet Tricks", version: "0.2.0", side: "both", depends: { "pet-core": { version: "^2.0", url: "https://www.nexusmods.com/enshrouded/mods/9001" } } },
+  );
+}
+/** EMF's own mods (kiln_manage::emf_deps::EMF_RELEASE_MODS) and EMF's page. */
+const EMF_RELEASE: Record<string, string> = { lua: "EMF's lua mod", beastmaster: "Beastmaster", bounty: "Bounty Board", champion: "Wandering Champion",
+  grave: "Grave Keeper", handover: "Hand-over", kill_counter: "Kill Counter", life_skills: "Life Skills", minimap: "Minimap", necromancer: "Necromancer" };
+const EMF_PAGE = "https://github.com/matenm/emf-enshrouded";
+
+/** kiln_manage::emf_deps::profile_problems, as far as the mock goes: a required dependency missing or switched off. */
+function emfProblems(p: Profile): EmfDepProblem[] {
+  const out: EmfDepProblem[] = [];
+  for (const m of p.mods.emf.filter((x) => x.enabled)) {
+    for (const [dep, spec] of Object.entries(manifestOf("emf", m.id, m.version)?.depends ?? {})) {
+      const d = typeof spec === "string" ? { version: spec } : spec;
+      const have = p.mods.emf.find((x) => x.id === dep);
+      if (d.optional || (have && have.enabled)) continue;
+      const release = EMF_RELEASE[dep];
+      out.push({ id: m.id, dep, depName: have ? manifestOf("emf", have.id, have.version)?.name ?? dep : release ?? null, range: d.version ?? "",
+        state: have ? "off" : "missing", found: have?.version ?? null, withEmf: !!release, url: d.url ?? (release ? EMF_PAGE : null),
+        reason: `needs ${dep}, which is ${have ? "switched off" : "not installed"}` });
+      break;
+    }
+  }
+  return out;
+}
 
 const library: LibraryEntry[] = FRESH ? [] : MOD_KINDS.flatMap((kind) => [...seedMods[kind]].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   .map((m) => entryFor(kind, m, "2026-11-0" + (2 + (m.id.length % 3)) + "T09:00:00Z")));
@@ -259,9 +328,9 @@ const profiles = new Map<string, Profile>(FRESH ? [] : [
       kiln: [pm("kiln", "new-items"), pm("kiln", "big-stacks", false), pm("kiln", "more-hotbars"), pm("kiln", "night-sky"), pm("kiln", "weather-plus")],
       native: [pm("native", "fps-unlock"), pm("native", "creative-mode"), pm("native", "hud-tweaks"), pm("native", "free-cam", false)],
       plugin: [],
-      emf: [pm("emf", "beastmaster")],
+      emf: [pm("emf", "beastmaster"), ...(EMF_DEPS_SEED ? [pm("emf", "mage_skills"), pm("emf", "pet-tricks")] : [])],
       xhl: [], eml: [pm("eml", "loot-tables-x", false)], shroudforge: [pm("shroudforge", "better-chests")], set: [], greeneye: [pm("greeneye", "zoom-out")],
-      flame: [], shroudtopia: [pm("shroudtopia", "fly-mode")], enshwick: [], shroudlink: [], ember: [],
+      flame: [], shroudtopia: [pm("shroudtopia", "fly-mode")], enshwick: [], shroudlink: [], ember: [], dllmod: [],
     },
     // made by a dev.22 launcher: the list names every kind that is on (none). "Vanilla plus" is from before dev.22.
     dropins: [], dropinsEngines: true, dataDir: "shared", server: null,
@@ -426,7 +495,7 @@ function resolve(p: Profile, side: "client" | "server", gameId: string | null): 
   });
   const warnings: string[] = [];
   if (native.some((n) => n.enabled && n.phase === "dllmain")) warnings.push("dllmain mods load inside the proxy; a bad one can hang the start.");
-  return { side, kiln: { order: kiln.order, rejected: kiln.rejected.sort((a, b) => a.dir.localeCompare(b.dir)) }, native, warnings, withWorld };
+  return { side, kiln: { order: kiln.order, rejected: kiln.rejected.sort((a, b) => a.dir.localeCompare(b.dir)) }, native, warnings, withWorld, emf: emfProblems(p) };
 }
 
 // ---------------------------------------------------------------- other engines' mods
@@ -494,21 +563,33 @@ let taskSeq = 0;
 
 function emitTask(t: Task) { tasks.set(t.id, t); mockEmit("kiln://task", clone(t)); }
 
+/** Tasks of a kind held before their last step until a test opens the gate (`__kilnMock.holdTasks(kind, gate)`): a slow
+ *  activation of that kind. `fail`: the task then fails with this message instead of finishing. */
+const taskHolds = new Map<string, { gate: string; fail?: string }>();
+
 /** A fake long task: `steps` progress messages, then `finish()` gives the result (or throws a KilnError). */
 function startTask(kind: string, title: string, steps: string[], finish: () => unknown, stepMs = 450): string {
   const id = `t${++taskSeq}-${kind}`;
   const t: Task = { id, kind, title, state: "running", progress: 0, message: steps[0] ?? null, started: now(), finished: null };
   emitTask(t);
+  const hold = taskHolds.get(kind);
   let i = 0;
+  const end = () => {
+    let state: TaskState = "done";
+    let result: unknown = null;
+    let error: KilnError | undefined;
+    try {
+      if (hold?.fail) reject("io", hold.fail);
+      result = finish();
+    } catch (e) { state = "failed"; error = e as KilnError; }
+    emitTask({ ...t, state, progress: 1, message: error ? error.message : "Done", finished: now(), result, error });
+  };
   const tick = () => {
     if (cancels.has(id)) { emitTask({ ...t, state: "canceled", message: "Canceled", finished: now(), error: { code: "canceled", message: "Canceled." } }); return; }
     i++;
     if (i < steps.length) { emitTask({ ...t, progress: i / steps.length, message: steps[i] }); setTimeout(tick, stepMs); return; }
-    let state: TaskState = "done";
-    let result: unknown = null;
-    let error: KilnError | undefined;
-    try { result = finish(); } catch (e) { state = "failed"; error = e as KilnError; }
-    emitTask({ ...t, state, progress: 1, message: error ? error.message : "Done", finished: now(), result, error });
+    if (hold && !gateOf(hold.gate).open) { gateOf(hold.gate).waiters.push(() => setTimeout(end, 0)); return; }
+    end();
   };
   setTimeout(tick, stepMs);
   return id;
@@ -598,11 +679,16 @@ function status(gameId: string): GameStatus {
     id: g.id, running: !!r, pid: r?.pid ?? null, started: r ? new Date(r.at - (noProxy ? 31_000 : 0)).toISOString() : null, steamUpdating: false, runtime: withMissing(runtime[gameId] ?? { installed: false, receipt: null, proxy: null, modified: [], upgradeAvailable: null }, g.kind),
     activeProfile: otherFolder[gameId] ? null : activations[gameId]?.profileId ?? null,
     ...(otherFolder[gameId] ? { otherFolderProfile: otherFolder[gameId]! } : {}), playOncePending: !!r && r.mode !== "profile" && (noProxy || Date.now() - r.at < 2500),
-    boot: bootFor(gameId), launchOptions: noProxy ? { value: null, hasDllOverride: false, chainedOverrideMissing: false, advice: 'WINEDLLOVERRIDES="dinput8=n,b" %command%' }
+    boot: bootFor(gameId), launchOptions: MODE === "native-runner"
+      // Steam's selected runner loads dinput8 natively (GE-Proton 11-11+): no routine advice, the fallback kept
+      ? { value: null, hasDllOverride: false, chainedOverrideMissing: false, advice: null, fallbackAdvice: 'WINEDLLOVERRIDES="dinput8=n,b" %command%', dinput8NativeByRunner: true }
+      : noProxy ? { value: null, hasDllOverride: false, chainedOverrideMissing: false, advice: 'WINEDLLOVERRIDES="dinput8=n,b" %command%' }
       : { value: 'WINEDLLOVERRIDES="dinput8=n,b" %command%', hasDllOverride: true, chainedOverrideMissing: MODE === "chained-override",
           advice: MODE === "chained-override" ? 'WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b" %command%' : null },
     newerMods: newerMods[gameId] ?? [],
     ...(graphicsTools[gameId]?.length ? { graphicsTools: graphicsTools[gameId] } : {}),
+    ...(g.kind === "client" && graphicsStepAside[gameId]?.length ? { graphicsStepAside: graphicsStepAside[gameId] } : {}),
+    ...(g.kind === "client" && graphicsState[gameId] ? { graphicsState: { current: !!r, state: graphicsState[gameId] } } : {}),
     ...(g.kind === "client" ? { start: startOf(g), build: buildOf(g) } : {}),
     ...(startOf(g) === "direct" ? { launchOptions: null } : {}),
   };
@@ -628,6 +714,9 @@ function mockExternalStart(gameId: string, at = Date.now()) {
 }
 export function scriptStoppedStart(kind: StopScript) { stopScript = kind; }
 function launch(gameId: string, req: LaunchRequest): LaunchResult {
+  // launch_play never starts a start whose warnings nobody acknowledged
+  if (!sfConfirming) sfChecks.push(`play ${gameId} ${req.mode}`);
+  if (!sfConfirming && sfStart[gameId]?.warnings.length) sfPending(sfPreflight(gameId, req), "Some ShroudForge mods will not run this start. Read the warning and confirm it first; the game was not started.");
   const g = gameOf(gameId);
   stoppedStarts[gameId] = null;
   localStorage.setItem(stopStorage, JSON.stringify(stoppedStarts));
@@ -684,6 +773,13 @@ export function mockStartOutside(secondsAgo: number, gameId = "client-steam") {
 }
 
 /** Dev/test helper: the fake game exits. */
+/** A crash: Kiln writes a crash report now, and the game closes (tests: `__kilnMock.crash()`). */
+function mockCrash(gameId = "client-steam") {
+  const now = new Date();
+  crashes.unshift({ name: `${now.toISOString().slice(0, 19).replace(/:/g, "-")}Z-crash.txt`, created: now.toISOString(), size: 4_211 });
+  mockStopGame(gameId);
+}
+
 export function mockStopGame(gameId = "client-steam") {
   if (!running[gameId]) return;
   running[gameId] = null;
@@ -813,6 +909,141 @@ function kilnFile(gameId: string): MockFile {
   });
 }
 
+// kiln.json shroudforge.backend as kiln_manage::sfi_backend reads and writes it
+const SF_BACKENDS: SfBackend[] = ["hosted", "installed", "kiln"];
+/** Why Kiln's interpreter is held in the mock build (`__kilnMock.setSfHeld`; null: not held); kiln.json "preview" lifts it. */
+let sfHeld: string | null = "game test pending: sfi-backend-roundtrip, sfi-save-sensitive, sfi-three-surface-warning";
+let sfRoute: NonNullable<SfBackendCard["interpreterRoute"]> = "ready";
+const sfLast: Record<string, SfBackendCard["last"]> = {};
+const sfRevision = (values: Json) => hex(JSON.stringify(values ?? {}));
+const sfSection = (values: Json) => {
+  const sf = (values as Record<string, Json> | null)?.shroudforge;
+  return sf && typeof sf === "object" && !Array.isArray(sf) ? sf as Record<string, Json> : null;
+};
+function sfSetting(values: Json): SfSetting {
+  const sf = sfSection(values);
+  if (sf && "backend" in sf) {
+    const b = sf.backend;
+    return typeof b === "string" && (SF_BACKENDS as string[]).includes(b) ? { kind: "explicit", backend: b as SfBackend }
+      : { kind: "invalid", value: typeof b === "string" ? `"${b}"` : JSON.stringify(b) };
+  }
+  return sf?.useInstalled === true ? { kind: "inherited", backend: "installed" } : { kind: "default" };
+}
+function sfHeldNow(values: Json): string | null {
+  const p = (values as Record<string, Json> | null)?.preview;
+  const lifted = p === true || p === "all" || (Array.isArray(p) && p.includes("kiln-sfi.interpreter"));
+  return lifted ? null : sfHeld;
+}
+function sfResolve(values: Json): SfResolution {
+  const s = sfSetting(values);
+  const base = { refusal: null, envOffNote: null } as const;
+  if (s.kind === "invalid") return { ...base, requested: null, selected: null, source: "setting", refusal: "settingInvalid", reason: `kiln.json shroudforge.backend: ${s.value} is not "hosted", "installed" or "kiln"` };
+  if (s.kind === "default") return { ...base, requested: "hosted", selected: "hosted", source: "default", reason: "no kiln.json setting: hosted, the default" };
+  if (s.kind === "inherited") return { ...base, requested: "installed", selected: "installed", source: "useInstalled", reason: "kiln.json shroudforge.useInstalled: true (the older setting): installed" };
+  const held = s.backend === "kiln" ? sfHeldNow(values) : null;
+  if (held) return { ...base, requested: "kiln", selected: null, source: "setting", refusal: "interpreterHeld", reason: `kiln.json asks for Kiln's interpreter (shroudforge.backend: "kiln"), but the capability kiln-sfi.interpreter is held (${held})` };
+  return { ...base, requested: s.backend, selected: s.backend, source: "setting", reason: `kiln.json shroudforge.backend: "${s.backend}"` };
+}
+/** kiln.json's values with `backend` written (null: removed) and the older useInstalled removed. */
+function sfWritten(values: Json, backend: SfBackend | null): Json {
+  const v = clone(values ?? {}) as Record<string, Json>;
+  const sf = { ...(sfSection(v) ?? {}) };
+  delete sf.useInstalled;
+  if (backend) sf.backend = backend; else delete sf.backend;
+  if (Object.keys(sf).length) v.shroudforge = sf; else delete v.shroudforge;
+  return v;
+}
+function sfCard(gameId: string): SfBackendCard {
+  const v = kilnFile(gameId).values;
+  const next = sfResolve(v);
+  const held = sfHeldNow(v);
+  return { gameId, setting: sfSetting(v), next, revision: sfRevision(v), ...(held ? { interpreterHeld: held } : {}),
+    ...(next.selected === "kiln" ? { interpreterRoute: sfRoute, ...(sfRoute === "own-loader" ? { ownLoader: "dbghelp.dll" } : {}) } : {}),
+    ...(sfLast[gameId] ? { last: sfLast[gameId] } : {}) };
+}
+function sfPreview(gameId: string, backend: SfBackend | null): SfBackendPreview {
+  const v = kilnFile(gameId).values;
+  const revision = sfRevision(v);
+  const held = sfHeldNow(v);
+  if (backend === "kiln" && held) return { gameId, backend, revision, refused: `Kiln's interpreter cannot be chosen: the capability kiln-sfi.interpreter is held (${held})`, unchanged: false };
+  const after = sfWritten(v, backend);
+  return { gameId, backend, revision, next: sfResolve(after), unchanged: JSON.stringify(after) === JSON.stringify(v ?? {}) };
+}
+
+// the ShroudForge row in kiln mode, kiln_manage::sfi_state, and the restore's BASE
+const SFI_ROW = typeof location !== "undefined" ? new URLSearchParams(location.search).get("sfiRow") : null;
+const SFI_BASE = typeof location !== "undefined" ? new URLSearchParams(location.search).get("restoreBase") : null;
+const SFI_ROWS: Record<string, { state: Json | null; error?: string }> = {
+  running: { state: { mode: "kiln interpreter", status: "running", backend: "kiln", launchId: "00000000000000b2", pid: 4242, updatedMs: 1795000000000, previous: "incomplete", mods: [
+    { id: "skeleton-commander", version: "1.2.0", state: "running" },
+    { id: "sf-unlock-blueprints", version: "1.0.2", state: "data applied" },
+    { id: "combat_tweaks", version: "0.7.2", state: "skipped", reason: "it needs runtime.ui.draw_list, which Kiln's interpreter does not offer yet" },
+    { id: "sf-survival", version: "1.0.0", state: "off" }] } },
+  refused: { state: { mode: "kiln interpreter", status: "refused", backend: "kiln", launchId: "00000000000000b2", pid: 4242, updatedMs: 1795000000000,
+    reason: "kiln-eml's startup pass granted no archive generation",
+    mods: [{ id: "combat_tweaks", version: "0.7.2", state: "skipped", reason: "the startup pass failed" }] } },
+  stale: { state: { mode: "kiln interpreter", status: "unknown", recordPhase: "running", staleCode: "not-running", backend: "kiln", launchId: "00000000000000b2", pid: 4242,
+    updatedMs: 1795000000000, reason: "kiln-sfi's record says running, but the game is not running: that start ended without its last record (it may have crashed)", mods: [] } },
+  corrupt: { state: null, error: "/games/Enshrouded/kiln/state/sfi.json: expected value at line 1 column 3" },
+};
+function sfiEngineRows<T extends { kind: string }>(path: string, rows: T[]): (T | EngineStatus)[] {
+  const r = SFI_ROW ? SFI_ROWS[SFI_ROW] : undefined;
+  if (!r) return rows;
+  return rows.map((s) => s.kind !== "shroudforge" ? s : { kind: "shroudforge", plugin: "kiln-sfi", state: r.state, error: r.error ?? null, file: `${path}/kiln/state/sfi.json` });
+}
+const SFI_BASES: Record<string, DataRestoreBase> = {
+  recorded: { state: "recorded", token: "first-managed-unclassified", label: "unclassified: game files as found when Kiln first managed this install", baselineSha256: hex("base"), reason: null },
+  unrecorded: { state: "unrecorded", token: "unrecorded", label: "unrecorded: a working baseline from an earlier start; where its files came from was not recorded", baselineSha256: hex("base"),
+    reason: "the origin in Kiln's record is of other backups than the ones in the game folder now" },
+  unknown: { state: "unknown", token: null, label: null, baselineSha256: null, reason: "the game data Kiln backed up is not in the game folder (all of it): Kiln cannot tell what it would put back" },
+};
+const sfiRestoreBase = (): DataRestoreBase | null => (SFI_BASE ? SFI_BASES[SFI_BASE] ?? null : null);
+
+// the check before Play as kiln_manage::sfi_launch answers it: prepare, confirm, cancel
+/** What the next start of a game warns about (`__kilnMock.setStartWarnings`; none: no dialog). */
+const sfStart: Record<string, { warnings: StartWarning[]; advisories: StartWarning[] }> = {};
+/** The waiting tokens: one prepared start per game; any confirm takes its token, whatever comes of it. */
+const sfTokens = new Map<string, { gameId: string; request: LaunchRequest; warnings: string }>();
+/** Each launch_play / prepare / confirm / cancel as `<command> <gameId> <mode>` (`__kilnMock.startChecks`). */
+const sfChecks: string[] = [];
+let sfConfirming = false;
+function sfPreflight(gameId: string, request: LaunchRequest): Preflight {
+  const s = sfStart[gameId] ?? { warnings: [], advisories: [] };
+  for (const [k, v] of sfTokens) if (v.gameId === gameId) sfTokens.delete(k);
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const token = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const warnings = JSON.stringify(s.warnings);
+  sfTokens.set(token, { gameId, request: clone(request) as LaunchRequest, warnings });
+  return { gameId, request: clone(request) as LaunchRequest, token, expires: new Date(Date.now() + 600_000).toISOString(), warnings: clone(s.warnings) as StartWarning[],
+    warningsSha256: hex(warnings), ...(s.advisories.length ? { advisories: clone(s.advisories) as StartWarning[] } : {}), reinspectsEveryPlay: false };
+}
+function sfPending(p: Preflight, message: string): never {
+  reject("consent_required", message, { preflight: p });
+}
+const sfSame = (a: LaunchRequest, b: LaunchRequest) => a.mode === b.mode && (a.profileId ?? null) === (b.profileId ?? null) && !!a.skipBackup === !!b.skipBackup;
+function sfPrepare(gameId: string, req: LaunchRequest): Preflight {
+  sfChecks.push(`prepare ${gameId} ${req.mode}`);
+  gameOf(gameId);
+  if (running[gameId] && running[gameId]!.from !== Infinity) reject("game_running", "The game is already running.");
+  if (req.mode === "once" && !req.profileId) reject("invalid_argument", "Pick a profile to play once.");
+  if (!runtime[gameId]?.installed && req.mode !== "vanilla") reject("unsupported", "Kiln is not installed in this game.");
+  return sfPreflight(gameId, req);
+}
+function sfConfirm(gameId: string, token: string, req: LaunchRequest): LaunchResult {
+  sfChecks.push(`confirm ${gameId} ${req.mode}`);
+  const p = sfTokens.get(token);
+  sfTokens.delete(token);
+  const refused = (why: string, message: string) => reject("refused", message, { token: why });
+  if (!p) refused("unknown", "This start was already confirmed, canceled or replaced by a newer one, or the launcher restarted since: press Play again.");
+  if (p!.gameId !== gameId) refused("game", "This confirmation belongs to another game: press Play again.");
+  if (!sfSame(p!.request, req)) refused("request", "This confirmation belongs to another kind of start: press Play again.");
+  const now = sfStart[gameId]?.warnings ?? [];
+  if (now.length && JSON.stringify(now) !== p!.warnings)
+    sfPending(sfPreflight(gameId, req), "What will not run this start changed since the warning was shown. Read it again and confirm it; the game was not started.");
+  sfConfirming = true;
+  try { return launch(gameId, req); } finally { sfConfirming = false; }
+}
+
 const nativeStates = new Map<string, NativeUserState>();
 
 // ---------------------------------------------------------------- logs
@@ -862,10 +1093,26 @@ const assets = { root: "/home/player/.local/share/kiln", editor: { present: true
 const runtimeInstalls: string[] = [];
 let settings: LauncherSettings = { steamRoots: [], defaultGameId: FRESH ? null : "client-steam", allowHttpModpacks: false, savesKeep: 10, updateCheck: true, animatedFire: true,
   addToActiveProfile: true, modFolderNotes: true, keepVersions: 1 };
-// how the (Linux) launcher draws its window; `?render=software` as after the fallback
-let render: RenderInfo = typeof location !== "undefined" && new URLSearchParams(location.search).get("render") === "software"
-  ? { mode: "software", why: "restart", marker: true, markerWhy: "The launcher turned this on by itself: the page did not start within 15 s of the window with the GPU (2026-11-11T21:04:10Z)" }
+// how the (Linux) launcher draws its window
+// `?render=software`: the fallback's restart; `?render=marker`: a later start, from the marker the fallback wrote
+/** `?ownFiles=uninstall.exe`: the launcher's own files an antivirus took (app_info.ownFilesMissing, inbox 92). */
+const OWN_FILES = (typeof location !== "undefined" ? new URLSearchParams(location.search).get("ownFiles") ?? "" : "").split(",").filter(Boolean);
+const RENDER_Q = typeof location !== "undefined" ? new URLSearchParams(location.search).get("render") : null;
+const FELL_BACK = "The launcher turned this on by itself: the page did not start within 15 s of the window with the GPU (2026-11-11T21:04:10Z)";
+let render: RenderInfo = RENDER_Q === "software" ? { mode: "software", why: "restart", marker: true, markerWhy: FELL_BACK }
+  : RENDER_Q === "marker" ? { mode: "software", why: "marker", marker: true, markerWhy: FELL_BACK }
   : { mode: "gpu", why: "default", marker: false };
+// `?x11=default|restart|marker|tried|yours|off`: a Wayland session with XWayland (render.rs' X11 switch); absent: none
+const X11_Q = typeof location !== "undefined" ? new URLSearchParams(location.search).get("x11") : null;
+if (X11_Q) render = { ...render, x11: { on: X11_Q === "restart" || X11_Q === "marker", why: X11_Q as NonNullable<RenderInfo["x11"]>["why"], auto: X11_Q !== "off",
+  ...(X11_Q === "yours" ? { yours: "wayland" } : {}) } };
+// WebKit's sandbox (sandbox.rs): a default start does not use it; `?sandbox=off` as after a message's "off" on a
+// system where bwrap cannot start
+const SANDBOX_UNUSED = "WebKitGTK's GTK 3 API, which the launcher uses, runs it only when WEBKIT_FORCE_SANDBOX=1 is set";
+let sandbox: SandboxInfo = typeof location !== "undefined" && new URLSearchParams(location.search).get("sandbox") === "off"
+  ? { want: "off", why: "marker", marker: true, markerWhy: "Turned off by the player in the launcher's message at the start: WebKit's sandbox could not start (2026-11-18T16:04:10Z)",
+    webkit: "off", webkitWhy: "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 is set", probe: "fails", probeSays: "bwrap fails: bwrap: setting up uid map: Permission denied", probeFailed: true }
+  : { want: "on", why: "default", marker: false, webkit: "unused", webkitWhy: SANDBOX_UNUSED, probe: "works", probeSays: "bwrap works", probeFailed: false };
 // the AppImage's app menu entry (desktop.rs)
 let desktop: DesktopInfo = { on: true, installed: true, foreign: false, file: "/home/player/.local/share/applications/kiln-launcher.desktop" };
 
@@ -904,18 +1151,40 @@ const handlers: Record<string, Handler> = {
   snapshot_continue: () => null,
   // app
   app_info: (): AppInfo => ({ version: "0.2.0-dev", kiln: "0.2.0-dev", platform: "linux", arch: "x86_64", dataDir: mockDataDir(), commit: "0f1ffa6", mock: true,
-    noWebgl: render.mode === "software", distribution: MOCK_DISTRIBUTION, nexusEnabled: NEXUS_MOCK_ENABLED, render: { ...render }, desktop: { ...desktop } }),
+    noWebgl: render.mode === "software", distribution: MOCK_DISTRIBUTION, nexusEnabled: NEXUS_MOCK_ENABLED, render: { ...render }, desktop: { ...desktop }, sandbox: { ...sandbox },
+    ...(MOCK_PREVIEW.length ? { preview: [...MOCK_PREVIEW] } : {}), ...(OWN_FILES.length ? { ownFilesMissing: [...OWN_FILES] } : {}) }),
   app_started: () => null,
+  app_render_report: () => null,
   app_render_set: (a) => {
     render = { ...render, marker: !!a.software, markerWhy: a.software ? `Turned on in Settings (${new Date().toISOString()})` : undefined };
     return { ...render };
   },
+  app_render_x11_set: (a) => {
+    if (render.x11) render = { ...render, x11: { ...render.x11, auto: !!a.on } };
+    return { ...render };
+  },
+  app_sandbox_set: (a) => {
+    sandbox = { ...sandbox, marker: !a.on, markerWhy: a.on ? undefined : `Turned off in Settings (${new Date().toISOString()})` };
+    return { ...sandbox };
+  },
+  // a plain browser has no dialogs; Downloads stands in (ui/dialogFolder.ts)
+  app_dialog_default: (a) => (a.preferred ? S(a.preferred) : a.fileName ? `/home/player/Downloads/${S(a.fileName)}` : "/home/player/Downloads"),
+  app_dialog_remember: () => null,
   app_desktop_set: (a) => (desktop = { ...desktop, on: !!a.on, installed: !!a.on, foreign: false }),
   app_locales: () => ({ dir: `${mockDataDir()}/locales`, files: [], errors: [] }),
   app_settings_get: () => settings,
   app_settings_set: (a) => (settings = { ...(a.settings as LauncherSettings) }),
   app_open_path: () => null,
   app_open_url: (a) => { if (!S(a.url).startsWith("https://")) reject("refused", "Only https links open."); openedUrls.push(S(a.url)); return null; },
+  // the Discord app is "installed" with ?discordapp=1 (kiln_manage::community::open: the app link, else the web link)
+  app_open_discord: (a) => {
+    const url = S(a.url), fallback = a.fallback ? S(a.fallback) : url;
+    if (!url.startsWith("https://") || !fallback.startsWith("https://")) reject("refused", "Only https links open.");
+    const m = /^https:\/\/discord\.com\/channels\/(\d{1,24}(?:\/\d{1,24}){0,2})$/.exec(url);
+    if (m && typeof location !== "undefined" && new URLSearchParams(location.search).has("discordapp")) { openedUrls.push(`discord://-/channels/${m[1]}`); return "app"; }
+    openedUrls.push(fallback);
+    return "web";
+  },
   task_list: () => [...tasks.values()],
   task_get: (a) => tasks.get(S(a.taskId)) ?? reject("not_found", "No such task."),
   task_cancel: (a) => { cancels.add(S(a.taskId)); return null; },
@@ -986,9 +1255,12 @@ const handlers: Record<string, Handler> = {
     const fail = failNextInstall;
     failNextInstall = null;
     runtimeInstalls.push(b.version);
-    return startTask("runtime_install", `Install Kiln ${b.kiln}`, ["Staging", "Verifying hashes", "Classifying dinput8.dll", "Backing up", "Placing files", "Writing receipt"], () => {
+    // runtime_rollback's own task, as the backend names it (its kind and "Roll back to <version>")
+    const back = a.rollback === true;
+    return startTask(back ? "runtime_rollback" : "runtime_install", back ? `Roll back to ${b.version}` : `Install Kiln ${b.kiln}`, ["Staging", "Verifying hashes", "Classifying dinput8.dll", "Backing up", "Placing files", "Writing receipt"], () => {
       const st = runtime[gameId];
-      if (fail) reject("io", fail);
+      if (typeof fail === "string") reject("io", fail);
+      if (fail) reject(fail.code, fail.message, fail.detail);
       if (st?.proxy?.kind === "shroudforge" && !opts.switchFromShroudforge) reject("refused", "ShroudForge is installed. Switch from ShroudForge to replace it.");
       // like install::resolve_components: an explicit choice records the defaults it leaves out; none keeps the game's
       // parts and adds every new or newly default one not turned off
@@ -996,8 +1268,9 @@ const handlers: Record<string, Handler> = {
       const components = opts.components ? selectParts(b, g.kind, opts.components) : resolveParts(b, g.kind, prev);
       const deselected = opts.components ? deselectedFor(b, g.kind, components, prev) : prev?.side === g.kind ? prev.runtime.deselected ?? [] : [];
       const receipt: InstallReceipt = { ...baseReceipt, side: g.kind, installed: st?.receipt?.installed ?? now(), updated: now(), runtime: { version: b.version, sha256: b.sha256, components, deselected } };
-      // like the backend: Kiln files changed by hand are replaced, their copies kept in the install's backup
-      const changed = st?.modified ?? [];
+      // like the backend: Kiln files changed by hand are replaced, their copies kept in the install's backup; missing
+      // ones are put back (there is nothing to keep)
+      const changed = (st?.modified ?? []).filter((f) => !(st?.missingFiles ?? []).includes(f));
       runtime[gameId] = { installed: true, receipt, proxy: kilnProxy, modified: [], upgradeAvailable: null };
       emitGame(g.id, "status");
       const backup = changed.length ? `/home/player/.local/share/kiln/backups/install/${receipt.installId}/install-${now().replace(/[-:]/g, "").slice(0, 15)}Z` : null;
@@ -1018,7 +1291,7 @@ const handlers: Record<string, Handler> = {
       return { removed: 1, restored: [], adopted: [], kept: [], placements: { removed: [], retained: [] }, warnings: [] };
     });
   },
-  runtime_rollback: (a) => handlers.runtime_install({ ...a, options: {} }),
+  runtime_rollback: (a) => handlers.runtime_install({ ...a, options: {}, rollback: true }),
 
   // profiles
   profile_list: () => [...profiles.values()].map(summary).sort((a, b) => a.name.localeCompare(b.name)),
@@ -1166,8 +1439,14 @@ const handlers: Record<string, Handler> = {
   library_rollback: (a) => mockRollback(a),
   library_remove: (a) => {
     if (Object.values(running).some(Boolean)) reject("game_running", "Close Enshrouded first: the game may be reading this mod.");
-    mockLibraryRemove(a.entry as LibraryRef, Array.isArray(a.shown) ? (a.shown as string[]) : !!a.force);
-    return null;
+    const r = a.entry as LibraryRef;
+    mockLibraryRemove(r, Array.isArray(a.shown) ? (a.shown as string[]) : !!a.force);
+    // its settings go with its last version
+    return a.settings && !library.some((l) => l.kind === r.kind && l.id === r.id) ? mockRemoveSettings(r.kind, r.id) : null;
+  },
+  library_remove_settings: (a) => {
+    if (Object.values(running).some(Boolean)) reject("game_running", "Close Enshrouded first: the game may be reading the mod's settings.");
+    return mockRemoveSettings(a.kind as ModKind, a.id as string);
   },
   library_remove_many: (a) => {
     if (Object.values(running).some(Boolean)) reject("game_running", "Close Enshrouded first: the game may be reading this mod.");
@@ -1263,7 +1542,7 @@ const handlers: Record<string, Handler> = {
   engine_status: (a) => {
     const g = gameOf(S(a.gameId));
     const st = (k: ModKind, file: string, state: Json | null) => ({ kind: k, plugin: `kiln-${k}`, state, file: `${g.path}/kiln/state/${file}` });
-    return [
+    const rows = [
       st("emf", "emf.json", { mods: [{ id: "beastmaster", state: "loaded" }] }),
       st("eml", "eml.json", emlPatched
         ? { phase: "done", patched: 3, ms: 1263, mods: [{ id: "loot-tables-x", name: "Loot Tables X", state: "disabled", reason: "disabled in the profile" }] }
@@ -1285,9 +1564,15 @@ const handlers: Record<string, Handler> = {
       st("shroudlink", "shroudlink.json", null),
       st("ember", "ember.json", { abi: null, steppedAside: false, mods: [{ id: "private-chests", status: "waiting-for-abi",
         reason: "not loaded: Ember has not published its mod ABI yet" }] }),
+      st("dllmod", "dllmod.json", { status: "waiting", reason: "the mods start when a world of your own starts", abi: 1, steppedAside: false,
+        mods: [{ id: "carryon", package: "carryon/carryon.dll", version: "0.1.50-dev", status: "waiting", reason: "" }] }),
     ];
+    // ?sfiRow=<case>, kiln-sfi's row in place of ShroudForge's
+    return sfiEngineRows(g.path, rows);
   },
   eml_data_latest: () => null,
+  // ?restoreBase=recorded|unrecorded|unknown, as kiln_manage::restore_data::base_origin answers
+  eml_data_base: () => sfiRestoreBase(),
   eml_data_plan: () => {
     if (!new URLSearchParams(location.search).has("restoreData")) return reject("refused", "No unproven recovery state.");
     return { fingerprint: "mock-restore", files: ["enshrouded_055.dat", "enshrouded.kfc.bak", "enshrouded.kfc_resources.bak"].map(from => ({ from, size: 4096, sha256: "mock" })) };
@@ -1365,6 +1650,21 @@ const handlers: Record<string, Handler> = {
     Object.assign(f, { values, text: JSON.stringify(values, null, 2) + "\n", modified: now() });
     return doc("kiln.json", f);
   },
+  // Settings' ShroudForge card, as kiln_manage::sfi_backend answers
+  sfi_backend_read: (a) => sfCard(S(a.gameId)),
+  sfi_backend_preview: (a) => sfPreview(S(a.gameId), (a.backend ?? null) as SfBackend | null),
+  sfi_backend_set: (a) => {
+    const g = S(a.gameId);
+    gameOf(g);
+    if (live(g)) reject("game_running", "Close the game first.");
+    const f = kilnFile(g);
+    if (sfRevision(f.values) !== S(a.revision)) reject("conflict", "kiln.json changed since the ShroudForge card read it: nothing was written; look at the card again");
+    const p = sfPreview(g, (a.backend ?? null) as SfBackend | null);
+    if (p.refused) reject("refused", p.refused);
+    const values = sfWritten(f.values, p.backend);
+    Object.assign(f, { values, text: JSON.stringify(values, null, 2) + "\n", modified: now() });
+    return sfCard(g);
+  },
 
   // launch
   launch_play: (a) => launch(S(a.gameId), a.request as LaunchRequest),
@@ -1378,6 +1678,16 @@ const handlers: Record<string, Handler> = {
     return t;
   },
   launch_end: (a) => { mockStartEnded(S(a.gameId)); return null; },
+  // the check before Play
+  launch_prepare: (a) => sfPrepare(S(a.gameId), a.request as LaunchRequest),
+  launch_confirm: (a) => sfConfirm(S(a.gameId), S(a.token), a.request as LaunchRequest),
+  launch_cancel: (a) => {
+    const g = S(a.gameId), p = sfTokens.get(S(a.token));
+    sfChecks.push(`cancel ${g}`);
+    if (!p || p.gameId !== g) return false;
+    sfTokens.delete(S(a.token));
+    return true;
+  },
   launch_state: (a): BootState => {
     const boot = bootFor(S(a.gameId));
     const r = live(S(a.gameId));
@@ -1420,9 +1730,12 @@ const handlers: Record<string, Handler> = {
   logs_crash_reports: () => crashes,
   report_save: (a) => {
     if (!S(a.path).trim()) reject("invalid_argument", "Choose where to save the report.");
+    reportSaves.push(Array.isArray(a.exclude) ? a.exclude.map(String) : []);
     const path = /\.zip$/i.test(S(a.path)) ? S(a.path) : `${S(a.path)}.zip`;
     return { path, size: 48_213, findings: mockReportFindings, errors: [] } satisfies ReportSaved;
   },
+  report_preview: (a) => mockReportContents(a.exclude),
+  report_note: () => null,
   report_summary: () => [
     "Kiln support report, 2026-11-10T12:00:00Z",
     "kiln-launcher 0.2.0-dev (mock); Kiln in the game: 0.2.0-dev",
@@ -1494,10 +1807,18 @@ const handlers: Record<string, Handler> = {
 Object.assign(handlers, adminMockHandlers(mockEmit));
 Object.assign(handlers, updateMockHandlers(mockEmit, MOCK_DISTRIBUTION, () => settings.updateChannel));
 Object.assign(handlers, deckMockHandlers(handlers));
+// the Discord features: the relay, Discord and the Discord app, faked (./mockCommunity.ts, `?discord=` flags)
+Object.assign(handlers, communityMockHandlers({ emit: mockEmit, gameRunning: () => Object.keys(running).some((g) => !!live(g)) }));
 Object.assign(handlers, nexusMockHandlers(handlers, mockEmit, startTask, quickAdd));
 Object.assign(handlers, updatesMockHandlers(handlers, mockEmit));
+Object.assign(handlers, vendorMockHandlers(startTask, (id) => gameOf(id).kind));
 Object.assign(handlers, chainMockHandlers({ profiles, library, reject }));
 Object.assign(handlers, dataFolderMockHandlers(startTask, (id) => tasks.get(id)));
+// Crucible packs (./mockCrucible.ts, `?crucible=` flags): a fake Crucible, an instance with an update waiting
+Object.assign(handlers, crucibleMockHandlers({ handlers, emit: mockEmit, startTask, profiles, library, activations, activate, importPaths, makeBackup, slug,
+  isRunning: (g) => !!live(g), emitGame: (g) => emitGame(g, "status"), seeded: !FRESH }));
+// Pack Studio (./mockStudio.ts, `?studio=` flags): a pack source "Ember run" from the profile of that name
+Object.assign(handlers, studioMockHandlers({ handlers, startTask, profiles, library, slug, activate, seeded: !FRESH }));
 // the save editor: synthetic character saves in memory, or a local fixture with ?editor=fixture (mockEditor.ts). Loaded
 // at the first editor command: its saves bring hash and buffer code no other page of the mock needs, and loading that
 // with the mock made every first page of a cold dev server slower
@@ -1845,14 +2166,43 @@ export function mockEmit(name: string, payload: unknown): void {
 }
 
 // Playwright and the dev console reach the fake game through this (mock mode only).
-if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { scriptStoppedStart, externalStart: mockExternalStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
+if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { community: communityMockHooks(mockEmit), crash: mockCrash, scriptStoppedStart, externalStart: mockExternalStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
   calls: () => [...commandCalls],
+  // Settings' ShroudForge card
+  /** Why Kiln's interpreter is held (null: this mock build does not hold it). */
+  setSfHeld: (why: string | null) => { sfHeld = why; },
+  /** What a selected kiln meets in the game folder. */
+  setSfRoute: (route: NonNullable<SfBackendCard["interpreterRoute"]>) => { sfRoute = route; },
+  /** kiln/state/launch.json of the last start (null: none). */
+  setSfLast: (last: SfBackendCard["last"] | null, gameId = "client-steam") => { if (last) sfLast[gameId] = last; else delete sfLast[gameId]; },
+  /** A second client install (as Settings' "Add folder" adds one), Kiln in it: its id. */
+  addSfGame: (path: string) => {
+    const g: GameInstall = { ...steamGame, id: `client-${hex(path).slice(0, 8)}`, path, library: null, source: "manual", buildId: null, steamFlavor: null };
+    if (!games.some((x) => x.id === g.id)) games.push(g);
+    runtime[g.id] ??= { ...runtime["client-steam"] };
+    return g.id;
+  },
+  // the check before Play
+  /** What the next start of `gameId` warns about (empty: no dialog); advisories are shown, never acknowledged. */
+  setStartWarnings: (warnings: StartWarning[], advisories: StartWarning[] = [], gameId = "client-steam") => { sfStart[gameId] = { warnings, advisories }; },
+  /** Each prepare, confirm and cancel so far ("prepare client-steam profile"). */
+  startChecks: () => [...sfChecks],
+  /** How many prepared starts wait for their confirm. */
+  startTokens: () => sfTokens.size,
+  /** Whether the game runs (a start was opened). */
+  gameRunning: (gameId = "client-steam") => !!live(gameId),
+  /** Each report_save's `exclude`, in order. */
+  reportSaves: () => reportSaves.map((x) => [...x]),
+  settingsRemoved: () => [...settingsRemoved],
   planCommand: (cmd: string, plan: CommandPlan) => { (commandPlans[cmd] ??= []).push(plan); },
   openGate: (name: string) => { const g = gateOf(name); g.open = true; g.waiters.splice(0).forEach((w) => w()); },
   planActivation: (report: Pick<Activation, "retained" | "keptFiles" | "warnings">) => { activationPlan = report; },
   planAddNotices: (lines: string[]) => { addNotices.push(...lines); },
   setSfOwnFolder: (id: string, own = true) => { if (own) sfOwn.add(id); else sfOwn.delete(id); },
   setCookPace: (ms: number) => { cookStepMs = ms; },
+  /** Tasks of `kind` started from now on wait before their last step until `openGate(gate)`; with `fail`, they then
+   *  fail with that message. null clears it. */
+  holdTasks: (kind: string, hold: { gate: string; fail?: string } | null) => { if (hold) taskHolds.set(kind, hold); else taskHolds.delete(kind); },
   setOnceBootSnapshot: (profileId: string, s: BootSnapshot | null) => { if (s) onceBootSnapshots.set(profileId, s); else onceBootSnapshots.delete(profileId); },
   setCook: (id: string, cook: { reason?: CookReason | null; fails?: string | null } | null) => {
     if (!cook) { cookMods.delete(id); return; }
@@ -1865,7 +2215,7 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
     if (own) { ownFolders.set(id, own); sfOwn.add(id); } else { ownFolders.delete(id); sfOwn.delete(id); }
   },
   setGameFileUsers: (users: Record<string, string[]>) => { gameFileUsers = users; },
-  failNextInstall: (message: string) => { failNextInstall = message; },
+  failNextInstall: (failure: string | KilnError) => { failNextInstall = failure; },
   /** The player changes a mod's files in its Library folder ("Open folder", mod.json edited): its newest version. */
   editInLibrary: (kind: ModKind, id: string, change: { name?: string; version?: string }) => {
     const e = library.find((l) => l.kind === kind && l.id === id);
@@ -1874,6 +2224,13 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
     edited.set(editKey(kind, id, e.versions[0].hash), change);
   },
   setModified: (files: string[], gameId = "client-steam") => { if (runtime[gameId]) runtime[gameId] = { ...runtime[gameId], modified: files }; emitGame(gameId, "status"); },
+  /** Receipt files gone from the game folder (an antivirus took them): missing, and changed as the backend counts them
+   *  (install::status). An install puts them back. */
+  setMissing: (files: string[], gameId = "client-steam") => {
+    const st = runtime[gameId];
+    if (st) runtime[gameId] = { ...st, modified: [...new Set([...st.modified, ...files])], missingFiles: files };
+    emitGame(gameId, "status");
+  },
   startOutside: mockStartOutside, setServer: mockSetServer, opened: () => [...openedUrls],
   setPreStart: (p: PreStart | null) => { preStart = p; },
   /** The next Play plays the owner's start of 13 Nov (mockProgress.ts), compressed and changed by `o`; null: off. */
@@ -1886,6 +2243,15 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
   setOtherFolderProfile: (o: { id: string; root?: string | null } | null, gameId = "client-steam") => { otherFolder[gameId] = o; emitGame(gameId, "status"); },
   setNewerMods: (mods: NewerKilnMod[], gameId = "client-steam") => { newerMods[gameId] = mods; emitGame(gameId, "status"); },
   setGraphicsTools: (tools: GraphicsToolNote[], gameId = "client-steam") => { graphicsTools[gameId] = tools; emitGame(gameId, "status"); },
+  setGraphicsStepAside: (tools: GraphicsStepAside[], gameId = "client-steam") => { graphicsStepAside[gameId] = tools; emitGame(gameId, "status"); },
+  /** (dev.29.18) What the game's Kiln wrote to kiln/state/graphics.json (null: none); "Now" while the game runs. */
+  setGraphicsState: (state: GraphicsStateFile | null, gameId = "client-steam") => {
+    if (state) graphicsState[gameId] = state;
+    else delete graphicsState[gameId];
+    emitGame(gameId, "status");
+  },
+  /** The game's kiln.json values as the launcher last wrote them (tests read what Settings saved). */
+  kilnJsonValues: (gameId = "client-steam") => clone(kilnFile(gameId).values),
   /** A hand edit of the game's kiln.json (a key the launcher's Settings do not list, such as `mods.hosted`). */
   setKilnJson: (path: string, value: Json, gameId = "client-steam") => {
     const f = kilnFile(gameId);
@@ -1911,4 +2277,17 @@ if (slNotice) {
   }
   if (slNotice !== "missing") library.push({ kind: "native", id: "shroudlink-addon", name: "Shroudlink client addon", versions: [{ version: "1", hash: "sl-addon", folder: "/mock/addon", imported: "2026-11-15", side: "client", clients: "none", size: 1, source: null, manifestId: null, manifest: null }] });
   if (slNotice === "server") for (const g of games) g.kind = "server";
+}
+
+// `?problem=crash` (the Discord work's demo): the game runs for four minutes, then closes with a crash report, so Play
+// and Deck Home show the crash notice with its "Send to Kiln support". `?problem=nokiln`: the next Play starts the
+// game without Kiln ("Kiln is not loading").
+if (typeof location !== "undefined") {
+  const problem = new URLSearchParams(location.search).get("problem");
+  // the game starts once the launcher follows the game's events (a start it did not see gets no notice: on a busy
+  // machine the window can take longer than a fixed delay to listen)
+  const play = () => { mockExternalStart("client-steam", Date.now() - 4 * 60_000); setTimeout(() => mockCrash(), 900); };
+  const whenListening = () => (listeners.get("kiln://game")?.size ? setTimeout(play, 600) : setTimeout(whenListening, 100));
+  if (problem === "crash") setTimeout(whenListening, 100);
+  if (problem === "nokiln") noProxy = true;
 }

@@ -164,11 +164,129 @@ After boot and at the first world, never per frame, Kiln checks that each target
 If another module hooked over it:
 
 ```
-[kiln] hooks: xhl.dll+0x4410 hooked over Kiln's chat/ChatLogAdd (kiln-chat) (Kiln's detour stays armed; it is reached through their jump)
+[kiln] hooks: xhl.dll+0x4410 [mods/xhl/xhl.dll] hooked over Kiln's chat/ChatLogAdd (kiln-chat) (Kiln's detour stays armed; it is reached through their jump)
 ```
+
+The bracket after `<module>+0x...` names the module's file (since 0.2.0-dev.29.19): its path relative to the game folder,
+`[game folder]` for one in the game folder itself, or its full path outside it (a Library DLL, whose folder names the
+mod). Two DLLs can share a file name (two Library `dinput8.dll`); the map's `foreignBefore`/`foreignOver` carry the same
+text as `path`.
 
 The map records `foreignOver`. Kiln never writes over that target again, and never removes the other module's jump.
 Kiln does not unhook its own detours (an empty chain just calls the real function).
+
+## Original code: `read_original`, `code_state` (since 0.2.0-dev.29.19)
+A plugin or a loader that needs the game's own code at an address (to compare with, or to follow a call the game
+makes there), or wants to know whether someone changed it, asks kiln.hooks. Two members are appended to the v2 table
+after `detour_typed_checked`; the version stays 2. Check that `header.size` covers the member, that it is not null,
+and its capability row:
+
+| Member | Offset | Capability row |
+|---|---|---|
+| `read_original(address, out, size)` | 296 | `hooks.read_original` |
+| `code_state(address, size, &state, &generation)` | 304 | `hooks.code_state` |
+
+Both run on any thread, on the dedicated server and the client. They need no world and no owner, keep no pointer, call
+nothing back and never wait for a game or window thread.
+
+- **`read_original`** copies the exe file's bytes at `address`, relocated to where the exe is loaded. Never live memory:
+  a function that Kiln or another module hooked reads as the game shipped it. The range must lie inside the exe's
+  executable `.text` and be at most `KILN_HOOKS_CODE_RANGE_MAX` (64 KiB, since 0.2.0-dev.29.19) long: a zero size,
+  a larger one, a range outside `.text` or one that wraps, and a null `out` are `KILN_ERR_INVALID_ARGUMENT`, checked
+  before anything is read. Exactly 64 KiB is accepted; ask about the bytes you need (a function's first instructions, a
+  call site), not the whole `.text`. `KILN_ERR_UNAVAILABLE` when the file's bytes are not there. A refusal writes
+  nothing.
+- **`code_state`** says whether the live code in the range is still the file's (the same range rules). It reads the live
+  bytes twice under a fault guard and compares them with the file's, and with what Kiln's own detours and patches
+  wrote there:
+
+| `state` | Meaning |
+|---|---|
+| `KILN_CODE_ORIGINAL` (0) | The live bytes are the file's. |
+| `KILN_CODE_MANAGED` (1) | Every byte that differs is a kiln.hooks detour's or patch's, written over the file's code. |
+| `KILN_CODE_FOREIGN` (2) | At least one is not: another module's hook or patch, a `write` through kiln.hooks, or a Kiln detour placed over another module's bytes. |
+| `KILN_CODE_UNKNOWN` (3) | The live bytes could not be read or changed between the two reads, or Kiln's record of what it wrote does not lead back to the file's bytes. |
+
+An unreadable page is `KILN_OK` with `KILN_CODE_UNKNOWN`, never the file's bytes passed off as live ones. A detour owns
+exactly the instructions it overwrote, nop padding included: not the whole function, and not the 5 or 14 bytes the
+foreign check above reads. It keeps them after its last link is revoked, because the detour stays (an empty chain calls
+the real function). A patch owns its bytes until `unpatch`, `revoke` or `revoke_owner`; `write` owns nothing.
+Patches over patches are unwound newest first, so another module's byte inside a range Kiln owns still reads as
+foreign. The hook map's `foreignBefore` and `foreignOver` play no part in the answer. For a support report of every
+changed place, see the map's `codePatches` below.
+
+**The generation is one counter for the whole process**, not one per range. It moves when Kiln writes a detour,
+installs or removes a patch, when a chain's links change (an install, a revoke, a link that faulted), on `write`, and
+when a `code_state` call sees other bytes, readability or state than the call before it. Kiln remembers only the last
+range anyone asked about (at most 64 KiB, so what it keeps stays small; a refused call changes nothing), so a call for
+another range moves it too, whoever made it: two mods that take turns with two ranges see it move on every call. The
+same value as at your last call means nothing changed and no one asked about another range since; a new value means
+"ask again", not "it changed". It is no lock and no watch: another module can write the code right after the call
+returns, and nothing tells you when it does.
+
+**Locking.** `code_state` and Kiln's own writers of game code share one lock:
+- `patch` holds the patch list's mutex and this lock while it reads the old bytes, writes the new ones and records
+  them; `unpatch`, `revoke` and `revoke_owner` hold both while they put the old bytes back;
+- `write` holds this lock around its copy;
+- a detour install takes it right after the chain mutex, before it reads the target's bytes and before it stops the
+  game's threads; `revoke`, `revoke_owner` and the sweep of faulted links take it after the chain mutex;
+- Kiln's own services protect code ranges under it ([below](#protected-code-ranges-kilninternalhooks-kiln-internal)).
+
+`code_state` takes only this lock, never the chain or patch mutex, and holds it for two guarded copies and the
+comparison. So it never sees a half-written Kiln detour, and a thread that a Kiln install stops is never inside
+`code_state` holding the lock (a caller that waits for the lock may be stopped while it waits, which is harmless).
+Don't call `code_state`, `patch`, `unpatch` or `write` under the loader lock (from `DllMain` or a TLS callback): an
+install holds this lock while it looks up modules, which can wait for the loader lock. `read_original` takes no lock.
+
+**Capability rows.** The core reports both: available when kiln.hooks runs and the core reads the exe file's code
+(sigdb's verified file view, the usual case). Unavailable: `policy` in safe idle, `service-missing` when kiln.hooks did
+not start, `symbol-missing` ("verified executable file code unavailable; live fallback is not original code") when
+sigdb could not use the exe file and reads the live code instead. They do not change while the game runs.
+
+## Protected code ranges: `kiln.internal.hooks` (Kiln-internal)
+Kiln's own services can protect the code an engine call of theirs runs through, so that no Kiln hook lands on it
+between their check of the code and the call ([engine-call-recipes.md](engine-call-recipes.md)). The table is
+Kiln-internal ([Kiln-internal tables](README.md#kiln-internal-tables)): header `native/core/src/hooks_protect_internal.h`,
+code `native/core/src/services/hooks_protect.cpp`; only the services' `KilnApi` resolves it, and nobody can publish the
+name, not even a Kiln service. While nothing is protected, kiln.hooks behaves exactly as described above.
+
+`kiln.internal.hooks` v1 has one member, `protect_code_ranges(owner, ranges, n, reason)`:
+- Each `KilnCodeRange {address, size}` lies inside the exe's `.text` (the ranges `read_original` and `code_state`
+  accept); 1 to 32 ranges per call, at most 64 KiB together; `reason` is 1 to 256 bytes and goes into kiln.log; `owner`
+  is the service's own, alive, not 0. Otherwise `KILN_ERR_INVALID_ARGUMENT`, or `KILN_ERR_REVOKED` for an owner that is
+  gone.
+- Under the code lock (the one `code_state` and every writer below take) every range must read `KILN_CODE_ORIGINAL`,
+  with the live bytes read twice as `code_state` reads them, and no Kiln detour or patch may be recorded over it (a
+  patch that put the file's bytes back over another patch reads `ORIGINAL` but still counts: undoing it would change
+  the code). Then all the ranges are protected together, or none is: one range that a Kiln hook or patch changed or
+  covers (`MANAGED`), that another module changed (`FOREIGN`), or that cannot be read gives `KILN_ERR_UNAVAILABLE`
+  and protects nothing. So the first comer wins: a mod that hooked the code first keeps
+  its hook and the engine call stays unavailable; a hook asked for after the protection is refused. An install racing
+  the call lands first (the call then sees it) or is refused, never both.
+- Calling it again with ranges the owner already protects is `KILN_OK` and adds nothing. Several services may protect
+  the same bytes. Every owner together protects at most 256 ranges and 512 KiB; past that `KILN_ERR_UNAVAILABLE`
+  (one warning in kiln.log).
+- A protection lasts until its owner retires (the core's owner-retiring notification); nothing else removes it.
+
+What it refuses, with `KILN_ERR_UNAVAILABLE` and a kiln.log line that names the request, its owner, the protecting
+service and its reason. One owner's refusals over one protected range are logged the 1st, 2nd, 4th, 8th, ... time
+(from the 2nd line on it says which refusal it is), so a mod that retries a refused hook every tick cannot flood
+kiln.log; `write`, which has no owner, counts as one requester:
+- a new detour on a target whose replaced bytes would overlap a protected range, for every link kind (raw, v1,
+  structured, mid, typed, the checked forms). The first byte is checked before anything is made; the whole extent once
+  safetyhook knows how many bytes it replaces. Both checks run before any thread is stopped and before a byte is
+  written. A target that already exists writes no code, so its new links are unaffected;
+- `patch` and `write` over any protected byte.
+
+Bytes right before or after a protected range stay free: a detour whose bytes end where a protected range starts is
+placed. `unpatch`, `revoke` and `revoke_owner` are not checked: they only write bytes that have a Kiln record, and a
+range with a record over it is never protected. The protection binds kiln.hooks' writers only: another module, and Kiln
+code that writes game code without kiln.hooks (the content service's code-byte patch, the shroudtopia and greeneye
+compatibility plugins' own patchers), can still write the bytes, which is why the engine call compares the live code
+with its capture inside the hold as well. The call takes the code lock and may log, so never inside a gate's hold or
+under the loader lock; it stops no thread and adds no wait to an install beyond the code lock the install already takes.
+The release runs on the thread that revokes the owner and takes the code lock there, so an owner revoked under the
+loader lock (from DllMain) could wait for an install in progress.
 
 ## The hook map: `state/hooks.json`
 
@@ -231,6 +349,22 @@ removed). It is not called for owner 0 nor for the observer's own owner. In the 
 state and never call into it again; do not wait and do not call game code. A call into the retiring owner that is
 already running on another thread is the service's own to guard. `unsubscribe_owner_retiring(handle)` may be called
 from inside the callback.
+
+## Hooks inside another module: `open_module`, `module_scan` (since 0.2.0-dev.29.19)
+Every hook kind takes addresses in the game exe's image only (anything else: `KILN_ERR_INVALID_ARGUMENT`). To hook
+inside another loaded module (another mod's DLL, a loader's DLL), open it: `hooks->open_module(owner, name, &m)` (offset 312; `module_scan` at 320, table 328 bytes; check
+`header.size` covers it; the capability row is `hooks.foreign_modules`). It finds the module by file name, never loads
+it (`KILN_ERR_NOT_FOUND` while it is not there), refuses Kiln's own modules (`KILN_ERR_UNAVAILABLE`), reads its
+executable sections from its mapped PE headers and **pins** it (`GetModuleHandleEx` with `PIN`): the registry never
+removes a physical detour, so the code a detour is written into must stay mapped for the life of the process. From then
+on addresses inside those sections are targets for `detour`, `mid`, `raw_detour`, `detour2`, `mid2` and `mid2_checked`,
+for every owner; headers, data and the space between sections stay refused. Typed links stay the game's
+(`KILN_HOOKS_ERR_SIG_UNKNOWN` with a `typed_refusal` text: no exe code to check the descriptor against), and
+`fingerprint`, `read_original` and `code_state` read the exe only (an address in an opened module is `KILN_ERR_INVALID_ARGUMENT` there). `m` gives the base, image size, code span and `KILN_HOOKS_MODULE_PINNED` (or
+`KILN_HOOKS_MODULE_GAME` for the exe, which is not pinned). `module_scan(m.base, pattern, out, cap, &count)` searches the
+live bytes of the opened module's code with `scan`'s results. kiln.log has one line per module opened, and names every
+link and thread-stop line of such a target `<module>+0x<offset> [<file>]` (module_place.h, as the overlap lines) instead of `rva 0x...`; the hook map gives the target
+`"module"`, `"offset"` and `"path"` with `"rva": null`. Managed: `Hooks.Module` ([../hooks.md](../hooks.md#hooks-inside-another-mods-dll-since-020-dev2919)).
 
 ## Typed hooks and calls: `detour_typed`, Kiln.Sigs (since 0.2.0-dev.29)
 A typed link hooks or calls a game function as a function: integer, pointer, float and double arguments in their
@@ -321,6 +455,8 @@ if (Capabilities.Is("hooks.typed") && Capabilities.Is(GetItemVolume.Capability))
 - **Threads**: the handler runs on the thread that calls the function, game worker threads too; it runs as its mod
   (gated calls work), and the mod's unload waits for handlers in flight (one second, then the unload goes on and the
   mod's fragment stays until the last one returns).
+- **Client hooks for mods**: what a hook of the game client may do and the advanced tier's update rule:
+  [../modding/client-hooks.md](../modding/client-hooks.md) (sample `mods/samples/ClientHookSample`, check `ui-hooks.c8`).
 - **A mod's own descriptors**: a `sig` in an entry of the mod's fragment (`sigdb/server.json`, `sigdb/client.json`;
   names `<modid>/...`) becomes a class `Kiln.Sigs.<ModId>.<Name>`, internal to the mod (Kiln.Sdk's generator; the root
   namespace is `KilnSigsNamespace`). It may name a struct of its own fragment or one of Kiln.Sigs (`OptS32`,
@@ -440,12 +576,43 @@ are not counted per call. Structured and mid dispatches are counted by each thre
   re-installed on a live hook while threads call it (raised and equal priority, `create()`, new labels: no nesting, one
   run per call), revival, an invalid UTF-8 label and a throwing map extension, a refused target. It runs twice, with
   the caller table in the TEB's TLS slots and in the expansion slots, then once in `slots` mode (every link slot used) and
-  once in `targets` mode (every target slot used, a new address refused, a hooked one still takes links).
+  once in `targets` mode (every target slot used, a new address refused, a hooked one still takes links). Original
+  code: `read_original` and `code_state` on the real service (a detour and its revoke, a patch, `write`, an unreadable
+  page, polls while patches and detours come and go, exactly 64 KiB accepted and one byte more refused); a first
+  install, `patch`, `unpatch` and `write` that each wait for a thread holding the `code_state` lock and write nothing
+  meanwhile; four threads polling `code_state` through sixteen first installs (each stops every other thread), seeing
+  only ORIGINAL or MANAGED; a `code_state` call that waits for the lock while a first install stops every thread (a
+  pause inside the install makes it deterministic): it finishes after the install and reads MANAGED, and a
+  `read_original` call made meanwhile returns at once. Each run has a time limit (300 s), so a lock-order deadlock
+  fails the run instead of hanging it.
+  Its   foreign-module test (also alone: `hooks_v2_test.exe module`, run natively on Windows too) opens `hooks-v2-module.dll`
+  (built from `native/core/tests/hooks_module_dll.cpp`): refused before it is opened, not found when not loaded, Kiln's
+  own names refused, pinned (FreeLibrary no longer unloads it), headers and data refused, mid, v1 mid, raw and
+  structured links inside it, module+offset in kiln.log and the map, `module_scan`, typed links, `read_original` and `code_state` refused there.
+- `native/core/tests/test-hooks-modules.sh` (host): the executable sections `open_module` reads from a module's PE
+  headers, and which names are Kiln's own modules.
 - `native/core/tests/test-hooks-typed.sh` (Wine, no game): the typed link kind (the T3 set of sret, f64, eight stack
   arguments, narrow integers, mixed positions; the call state machine, faults before and after `CallOriginal`, a
   24- and a 128-byte struct return restored whole after a faulting handler, eight callers while a ninth installs and
   revokes) and `detour_typed_checked` (a thread parked inside the bytes: refused with `KILN_HOOKS_ERR_UNCHECKED`,
-  nothing written; with the thread gone it installs; a second link writes no patch).
+  nothing written; with the thread gone it installs; a second link writes no patch). The same time limit applies.
+- `native/core/tests/test-hooks-code.sh asan` and `... tsan` (host): the registry behind `code_state` with fake file and live
+  readers: ranges and refusals (one byte over the 64 KiB limit refused before any read or allocation of that size),
+  relocated bytes, patches over patches and over another module's bytes, unreadable and changing pages, two ranges
+  taking turns, a query in flight while a writer waits for the lock, and polls racing installs, removals and faulted
+  links. Protected ranges: overlap at either edge and adjacency, near the top of the address space, idempotence, several
+  owners, every argument rule, the 32-per-call, 64 KiB, 256-range and 512 KiB bounds, a dead owner, MANAGED, FOREIGN,
+  unreadable and changing ranges refused whole, a range under a patch record whose bytes are the file's refused,
+  release by owner, no generation move, the refusal counts of the kiln.log rate limit; and an installer racing a caller
+  that checks, captures, protects and compares (under TSan): both orders happen, a protected byte never changes.
+- `native/core/tests/test-hooks-v2.sh` also runs `test_protected_ranges` (alone: `hooks_v2_test.exe protect`, run
+  natively on Windows too): every link kind refused on protected code with nothing written, no thread stopped and no
+  target made; patches and writes refused over it and allowed beside it; a detour whose bytes end right before protected
+  code placed, one whose last byte would cover it refused; MANAGED and FOREIGN code not protected, nor code under a
+  patch that put the file's bytes back over another patch; kiln.log's refusal lines at the 1st, 2nd, 4th, 8th, ... time
+  per owner and range; idempotence and two owners; release when an owner retires; protect waiting for a thread that
+  holds the code lock; a first install paused inside the lock landing first; first installs racing protects (exactly
+  one wins each time) and installs, patches and writes hammering protected functions while their bytes are compared.
 - `native/core/tests/test-hooks-checked-patch.sh`, `test-hooks-thread-stop.sh`, `test-hooks-typed-result.sh`,
   `test-hooks-fingerprint.sh` (host): the checked patch policy and the typed result code, the thread-stop loop, the
   complete-result snapshot, the fingerprint pass and the compiled-against-loaded descriptor comparison.

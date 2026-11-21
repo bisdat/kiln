@@ -12,7 +12,9 @@
 //! - A download ([`Client::download`]) passes the body of a success answer to a sink as it arrives instead of
 //!   holding it in memory, under the same bound and the same host, credential and redirect rules.
 //! - No message, `Debug` output or error holds a URL's query, a header value or a body.
-//! - There is no DELETE: nothing built on this layer can remove anything at a provider.
+//! - DELETE is refused unless the client was made with [`Client::allow_delete`]: no publish or update provider can
+//!   remove anything at a provider. Only the Kiln relay's client allows it (signing out, deleting a post the player
+//!   asked to delete: `crate::community::relay`).
 //!
 //! Tests use [`fake::FakeTransport`], which records every request, plays scripted responses and can lose a response
 //! after the request was sent. The real transport ([`UreqTransport`], feature `http`) is only ever made by a command
@@ -37,6 +39,8 @@ pub enum Method {
     Post,
     Patch,
     Put,
+    /// Refused unless the client allows it ([`Client::allow_delete`]).
+    Delete,
 }
 
 impl Method {
@@ -46,6 +50,7 @@ impl Method {
             Method::Post => "POST",
             Method::Patch => "PATCH",
             Method::Put => "PUT",
+            Method::Delete => "DELETE",
         }
     }
 }
@@ -195,6 +200,11 @@ pub fn too_large(url: &Url) -> Error {
     Error::new(ErrorCode::Refused, format!("The answer from {} was larger than allowed.", url.redacted()))
 }
 
+/// Whether an error is [`too_large`]'s (a download that would pass its bound).
+pub fn is_too_large(e: &Error) -> bool {
+    e.code == ErrorCode::Refused && e.message.starts_with("The answer from ") && e.message.ends_with(" was larger than allowed.")
+}
+
 /// The error for a failed exchange. Transport diagnostics are dropped on purpose: they can hold the full URL.
 pub fn network_error(url: &Url) -> Error {
     Error::new(ErrorCode::Network, format!("The request to {} failed. Check your connection and try again.", url.redacted()))
@@ -205,12 +215,21 @@ pub struct Client<'a> {
     policy: Policy,
     transport: &'a dyn Transport,
     user_agent: String,
+    /// DELETE may be sent ([`Client::allow_delete`]).
+    delete: bool,
 }
 
 impl<'a> Client<'a> {
     /// `user_agent` names the tool and its version only (`kiln/0.2.0`): nothing about the user or the machine.
     pub fn new(policy: Policy, transport: &'a dyn Transport, user_agent: &str) -> Client<'a> {
-        Client { policy, transport, user_agent: user_agent.to_string() }
+        Client { policy, transport, user_agent: user_agent.to_string(), delete: false }
+    }
+
+    /// Lets this client send DELETE. Only a provider that removes something on the user's own request (the Kiln
+    /// relay: a sign-out, a post the player deletes) makes one so; every other client refuses DELETE before sending.
+    pub fn allow_delete(mut self) -> Client<'a> {
+        self.delete = true;
+        self
     }
 
     pub fn policy(&self) -> &Policy {
@@ -242,6 +261,9 @@ impl<'a> Client<'a> {
     }
 
     fn dispatch<'s>(&self, req: Request, mut sink: Option<&mut (dyn Write + 's)>) -> Result<Response> {
+        if req.method == Method::Delete && !self.delete {
+            return Err(Error::new(ErrorCode::Refused, format!("{} may not delete anything. Nothing was sent.", self.policy.provider)));
+        }
         let url = policy::parse_url(&req.url)?;
         let provider = &self.policy.provider;
         let rule = self.policy.rule(&url.host).ok_or_else(|| {
@@ -275,9 +297,11 @@ impl<'a> Client<'a> {
         if !req.redirect_hosts.contains(&target.host) || self.policy.rule(&target.host).is_none() {
             return Err(Error::new(ErrorCode::Refused, format!("{} redirected to a host that is not allowed.", url.redacted())));
         }
-        // The second request starts from nothing: no credential, no cookie, no referrer, only what a download needs.
-        let mut clean: Vec<(String, String)> =
-            headers.into_iter().filter(|(k, _)| k.eq_ignore_ascii_case("accept") || k.eq_ignore_ascii_case("user-agent")).collect();
+        // The second request starts from nothing: no credential, no cookie, no referrer, only what a download needs
+        // (the type and encoding it accepts, the user agent).
+        let mut clean: Vec<(String, String)> = headers.into_iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("accept") || k.eq_ignore_ascii_case("accept-encoding") || k.eq_ignore_ascii_case("user-agent"))
+            .collect();
         clean.retain(|(k, _)| !policy::is_credential_header(k));
         let second = self.wire(WireRequest { method: Method::Get, url: target.clone(), headers: clean, body: Body::Empty, max_response: req.max_response }, sink)?;
         if second.is_redirect() {
@@ -472,6 +496,44 @@ mod timeout_tests {
         assert!(took < Duration::from_millis(3000), "took {took:?}, the bound is 0.7 s");
         let _ = accepted.join();
     }
+
+    /// What the transport puts on the wire for a request without a body: a POST says `Content-Length: 0` (never an
+    /// empty chunked body: the Kiln relay refuses a body on `POST /posts/<id>/seen`), a GET and a DELETE say nothing
+    /// of a body. Plain HTTP to this test's own listener on 127.0.0.1.
+    #[test]
+    fn a_request_without_a_body_says_so_on_the_wire() {
+        use std::io::{Read, Write};
+        let plain = ureq::Agent::config_builder().http_status_as_error(false).proxy(None).max_redirects(0).build();
+        let t = UreqTransport { agent: ureq::Agent::new_with_config(plain) };
+        for method in [Method::Post, Method::Get, Method::Delete] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let server = std::thread::spawn(move || {
+                let (mut c, _) = listener.accept().unwrap();
+                c.set_read_timeout(Some(Duration::from_millis(400))).unwrap();
+                let (mut got, mut buf) = (Vec::new(), [0u8; 2048]);
+                while let Ok(n) = c.read(&mut buf) {
+                    if n == 0 {
+                        break;
+                    }
+                    got.extend_from_slice(&buf[..n]);
+                }
+                let _ = c.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}");
+                String::from_utf8_lossy(&got).to_ascii_lowercase()
+            });
+            let url = policy::parse_url("https://frostdev.io/kiln/relay/posts/1573130884210000003/seen").unwrap();
+            let r = t.start_at(WireRequest { method, url, headers: vec![], body: Body::Empty, max_response: 1024 }, format!("http://127.0.0.1:{port}/x"));
+            assert!(r.is_ok(), "{method:?}");
+            let wire = server.join().unwrap();
+            assert!(!wire.contains("transfer-encoding"), "{method:?} sent a chunked body: {wire}");
+            if method == Method::Post {
+                assert!(wire.contains("content-length: 0\r\n"), "{wire}");
+                assert!(wire.ends_with("\r\n\r\n"), "nothing after the head: {wire}");
+            } else {
+                assert!(!wire.contains("content-length"), "{method:?}: {wire}");
+            }
+        }
+    }
 }
 
 #[cfg(feature = "http")]
@@ -532,13 +594,25 @@ impl Transport for UreqTransport {
 impl UreqTransport {
     /// Sends one request and returns the answer with its body not yet read.
     fn start(&self, req: WireRequest) -> Result<ureq::http::Response<ureq::Body>> {
+        let uri = req.url.wire();
+        self.start_at(req, uri)
+    }
+
+    /// [`UreqTransport::start`] to `uri` (the request's own URL; a test's listener on 127.0.0.1).
+    fn start_at(&self, req: WireRequest, uri: String) -> Result<ureq::http::Response<ureq::Body>> {
         let fail = |_e: ureq::Error| network_error(&req.url);
-        let mut b = ureq::http::Request::builder().method(req.method.as_str()).uri(req.url.wire());
+        let mut b = ureq::http::Request::builder().method(req.method.as_str()).uri(uri);
         for (k, v) in &req.headers {
             b = b.header(k.as_str(), v.as_str());
         }
         let len = req.body.len();
         let resp = match req.body {
+            // A POST, PUT or PATCH without a body says so with `Content-Length: 0`: without it ureq sends an empty
+            // chunked body, which a server that takes no body on that call refuses (the Kiln relay's "It's fixed").
+            Body::Empty if matches!(req.method, Method::Post | Method::Put | Method::Patch) => {
+                let r = b.body(Vec::<u8>::new()).map_err(|_| network_error(&req.url))?;
+                self.agent.run(r).map_err(fail)?
+            }
             Body::Empty => {
                 let r = b.body(()).map_err(|_| network_error(&req.url))?;
                 self.agent.run(r).map_err(fail)?

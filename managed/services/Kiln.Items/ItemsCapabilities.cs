@@ -53,6 +53,39 @@ public static unsafe partial class Items
         /// its guards do not pass, Kiln.Items when the kiln.toolwear table is not here.</summary>
         public const string ToolWear = "items.tool_wear_debit";
 
+        /// <summary>sigdb: gear writes (kiln.items v8): the tracked other-entity write, Level's attribute formulas and the
+        /// registry's replication and save bits. kiln-items.dll lowers it when items.fuel or items.instances is off or this
+        /// build's layouts differ, and after a fault.</summary>
+        public const string Gear = "items.gear";
+
+        /// <summary>Kiln.Items' row: <see cref="Items.GearOf"/>, <see cref="Items.RarityOf"/> and the gear events read
+        /// (kiln.items v8 and <see cref="Gear"/>).</summary>
+        public const string GearRead = "items.gear.read";
+
+        /// <summary>Kiln.Items' row: <see cref="Items.SetRarity"/>, <see cref="Items.SetEnhancements"/> and
+        /// <see cref="Items.SetLevel"/> write (the read row, and kiln.items' program kiln_items_gear can run); followed every
+        /// 25 steps.</summary>
+        public const string GearWrite = "items.gear.write";
+
+        /// <summary>Kiln.Items' row: a gear write can have the game compute max durability again
+        /// (<see cref="DurabilityRule.KeepRatio"/>, <see cref="DurabilityRule.Repair"/>): the write row, with the
+        /// <c>ItemStateFlag</c> reflection kiln_items_gear checks before its first write.</summary>
+        public const string GearDurability = "items.gear.durability";
+
+        /// <summary>Kiln.Items' row: &lt;see cref="Items.UpgradeRarity(EntityId, ItemInstanceRef, RarityUpgradeRule, UpgradeOptions?)"/&gt;
+        /// (the write row, kiln.items' gear_upgrade of package P3 and the inventory transaction it pays on); followed with the
+        /// gear rows.</summary>
+        public const string GearUpgrade = "items.gear.upgrade";
+
+        /// <summary>sigdb: per-instance power (kiln.items v8, package P7): the detour of the game's item power. kiln-items.dll
+        /// lowers it without item instances, when this build's layouts differ, or when the detour cannot be installed or
+        /// faults. <see cref="Items.SetPower"/>.</summary>
+        public const string GearPower = "items.gear.power";
+
+        /// <summary>sigdb: per-instance armour (package P7): the two mid hooks around one worn piece's armour.
+        /// <see cref="Items.SetArmor"/>.</summary>
+        public const string GearArmor = "items.gear.armor";
+
         // sigdb rows the ones above need
         public const string Transaction = "items.transaction";
         public const string Read = "items.read";
@@ -81,7 +114,9 @@ public static unsafe partial class Items
         {
             var (reason, text) = Cause(CapabilityReason.ServiceMissing, "kiln.items is not loaded", Caps.Service);
             Capabilities.Report(Caps.ResultPeek, CapabilityState.Unavailable, reason, text);
-            foreach (var name in (string[])[Caps.Fuel, Caps.Move, Caps.Names, Caps.Transfer, Caps.Moves, Caps.Instances, Caps.Equip, Caps.EquipSets, Caps.GearOptions, Caps.ToolWear]) Lower(name, reason, text);
+            foreach (var name in (string[])[Caps.Fuel, Caps.Move, Caps.Names, Caps.Transfer, Caps.Moves, Caps.Instances, Caps.Equip, Caps.EquipSets, Caps.GearOptions, Caps.ToolWear,
+                         Caps.GearPower, Caps.GearArmor]) Lower(name, reason, text);
+            foreach (var name in (string[])[Caps.GearRead, Caps.GearWrite, Caps.GearDurability, Caps.GearUpgrade]) Capabilities.Report(name, CapabilityState.Unavailable, reason, text);
             return;
         }
         // equip (v5): kiln.items decides it at its start (the symbols, kiln.world, the program's registration)
@@ -147,6 +182,12 @@ public static unsafe partial class Items
                 SetHeartbeat(step);
             });
         }
+        // gear (v8): the rows are Kiln.Items' own, followed every 25 steps on a tick of their own (the kit's table has no v3)
+        RefreshGear();
+        if (V8 != null) _gearTick ??= ServiceTickAccess.Add("kiln.items gear capabilities", step => { if (step % 25 == 0) RefreshGear(); });
+        // per-instance values (v8, package P7): sigdb rows of their own, lowered here only by a table without the scales
+        if (t->Header.Size < ItemsNative.V8ScaleEnd)
+            foreach (var name in (string[])[Caps.GearPower, Caps.GearArmor]) Lower(name, CapabilityReason.ServiceOlder, string.Format(older, "per-instance values"));
         // tool wear (dev.28): its own table, published by the same DLL
         if (ToolWear.Current == null) Lower(Caps.ToolWear, CapabilityReason.ServiceOlder, "kiln.items here has no kiln.toolwear table (update Kiln)");
         // give, take, moves and water all run through the game's inventory transaction
@@ -220,6 +261,94 @@ public static unsafe partial class Items
         : !v6 ? (EquipSetsVerdict.NoV6, $"kiln.items v{version} has no equipment sets (update Kiln)")
         : !available ? (EquipSetsVerdict.Off, detail.Length > 0 ? detail : "kiln.items turned equipment sets off (see kiln.log)")
         : (EquipSetsVerdict.On, "");
+
+    internal enum GearVerdict
+    {
+        /// <summary>On.</summary>
+        On,
+        /// <summary>No kiln.items table.</summary>
+        NoTable,
+        /// <summary>A table without v8: service-older.</summary>
+        NoV8,
+        /// <summary>The sigdb row items.gear is off: its reason.</summary>
+        NoFeature,
+        /// <summary>v8 and the feature, but kiln.items says writes cannot run (no kiln.world, the program refused, switched
+        /// off after a fault): faulted, with its detail. Reads still work.</summary>
+        WritesOff,
+    }
+
+    /// <summary>What the gear rows become, from what kiln.items has: the table's version (null: no table), whether it has
+    /// v8, whether the sigdb row <c>items.gear</c> is available, and its gear status' available flag and detail. The read
+    /// row is on for <see cref="GearVerdict.On"/> and <see cref="GearVerdict.WritesOff"/>; the write and durability rows for
+    /// <see cref="GearVerdict.On"/> only. Pure, so every branch is tested without the native table.</summary>
+    internal static (GearVerdict Verdict, string Text) DecideGear(uint? tableVersion, bool v8, bool feature, bool writes, string detail) =>
+        tableVersion is not { } version ? (GearVerdict.NoTable, "kiln.items is not loaded")
+        : !v8 ? (GearVerdict.NoV8, $"kiln.items v{version} has no gear functions (update Kiln)")
+        : !feature ? (GearVerdict.NoFeature, "")
+        : !writes ? (GearVerdict.WritesOff, detail.Length > 0 ? detail : "kiln.items turned gear writes off (see kiln.log)")
+        : (GearVerdict.On, "");
+
+    private static (GearVerdict, string) _gearReported = ((GearVerdict)(-1), "");
+    private static IDisposable? _gearTick;
+    private static long _gearEpoch = -1;
+
+    // The three gear rows from the table, the sigdb row and kiln.items' gear status: at the start and every 25 steps (a
+    // fault switches writes off for good; the program waits for a server world without going off).
+    internal static void RefreshGear()
+    {
+        var t = T;
+        var v8 = V8;
+        var status = v8 == null ? null : GearStatusOf(v8);
+        var gearRow = Capabilities.Get(Caps.Gear);
+        var now = DecideGear(t == null ? null : t->Header.Version, v8 != null, gearRow.State == CapabilityState.Available,
+            status?.Available ?? false, status?.Detail ?? "");
+        if (now == _gearReported && _gearEpoch == Capabilities.CurrentBinding.Epoch) return;
+        _gearReported = now;
+        _gearEpoch = Capabilities.CurrentBinding.Epoch;
+        var (verdict, text) = now;
+        (CapabilityState, CapabilityReason, string) read, write;
+        switch (verdict)
+        {
+            case GearVerdict.On:
+                read = write = (CapabilityState.Available, CapabilityReason.None, "");
+                break;
+            case GearVerdict.WritesOff:
+                read = (CapabilityState.Available, CapabilityReason.None, "");
+                write = (CapabilityState.Unavailable, CapabilityReason.Faulted, text);
+                break;
+            case GearVerdict.NoFeature:
+                read = write = (CapabilityState.Unavailable, gearRow.Reason is CapabilityReason.None or CapabilityReason.Unknown ? CapabilityReason.SymbolMissing : gearRow.Reason,
+                    $"needs {Caps.Gear}: {gearRow.ReasonText}");
+                break;
+            case GearVerdict.NoV8:
+                read = write = (CapabilityState.Unavailable, CapabilityReason.ServiceOlder, text);
+                break;
+            default:
+                var (reason, why) = Cause(CapabilityReason.ServiceMissing, text, Caps.Service);
+                read = write = (CapabilityState.Unavailable, reason, why);
+                break;
+        }
+        Capabilities.Report(Caps.GearRead, read.Item1, read.Item2, read.Item3);
+        Capabilities.Report(Caps.GearWrite, write.Item1, write.Item2, write.Item3);
+        Capabilities.Report(Caps.GearDurability, write.Item1, write.Item2,
+            write.Item1 == CapabilityState.Available ? "" : $"needs {Caps.GearWrite}: {write.Item3}");
+        var (upState, upReason, upText) = DecideUpgrade(write, v8 != null && t->Header.Size >= ItemsNative.V8UpgradeEnd && v8->GearUpgrade != null,
+            Capabilities.Get(Caps.Transaction));
+        Capabilities.Report(Caps.GearUpgrade, upState, upReason, upText);
+    }
+
+    /// <summary>The upgrade row from the write row, whether the table has gear_upgrade, and the transaction row it pays on
+    /// (pure).</summary>
+    internal static (CapabilityState, CapabilityReason, string) DecideUpgrade((CapabilityState State, CapabilityReason Reason, string Text) write,
+        bool hasUpgrade, Capability transaction)
+    {
+        if (write.State != CapabilityState.Available) return (write.State, write.Reason, $"needs {Caps.GearWrite}: {write.Text}");
+        if (!hasUpgrade) return (CapabilityState.Unavailable, CapabilityReason.ServiceOlder, "kiln.items here has no upgrades (gear_upgrade, 0.2.0-dev.29.19; update Kiln)");
+        if (transaction.State == CapabilityState.Unavailable)
+            return (CapabilityState.Unavailable, transaction.Reason is CapabilityReason.None or CapabilityReason.Unknown ? CapabilityReason.SymbolMissing : transaction.Reason,
+                $"needs {Caps.Transaction}: {transaction.ReasonText}");
+        return (CapabilityState.Available, CapabilityReason.None, "");
+    }
 
     // items.equip_sets every 25 steps: off for good once kiln.items switched sets off (an invariant failure: until the
     // server restarts); for the session like items.equip (a client that joined another machine's world has no server

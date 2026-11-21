@@ -662,6 +662,33 @@ void DropStaged(Mod& mod)
 
 enum class Patch { Written, Busy, Failed };
 
+// ntdll's NtQueryInformationThread, looked up before any thread is suspended (a lookup may take the loader lock).
+using QueryThreadFn = LONG(NTAPI*)(HANDLE thread, ULONG infoClass, void* info, ULONG size, ULONG* returned);
+
+QueryThreadFn QueryThread()
+{
+    static const auto fn = reinterpret_cast<QueryThreadFn>(
+        reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationThread")));
+    return fn;
+}
+
+// True only for a thread without a TEB: one that has never run (Kiln's core does the same in hooks_chain.cpp). Windows
+// makes a thread and its TEB in one call, so there it is never true. Wine lists a new thread as soon as the wineserver
+// has made it, before its creator starts it; GetThreadContext on it then waits for the started thread, forever if the
+// creator is one of the suspended threads. A thread that has not started runs no code, and Wine stops it before its
+// first instruction while it is suspended. A failed query counts as started (GetThreadContext as before).
+bool NotStarted(QueryThreadFn query, HANDLE h)
+{
+    struct { // THREAD_BASIC_INFORMATION
+        LONG exitStatus;
+        void* teb;
+        void* clientId[2];
+        uintptr_t affinity;
+        LONG priority, basePriority;
+    } info{};
+    return query && query(h, 0 /* ThreadBasicInformation */, &info, sizeof info, nullptr) >= 0 && !info.teb;
+}
+
 // Writes the hook sites mod's new generation staged, with every other thread of the process
 // suspended and none of them inside a range about to change. Busy: one was, try again later.
 // From the first SuspendThread to the last ResumeThread: no allocation, no Log, no lock.
@@ -739,6 +766,7 @@ Patch WriteStaged(Mod& mod, size_t& count, std::string& why)
     CloseHandle(snapshot);
 
     bool clear = listed, written = true;
+    const QueryThreadFn query = QueryThread(); // before the threads stop
     for (auto& t : threads)
         t.suspended = SuspendThread(t.handle) != static_cast<DWORD>(-1);
     for (auto& t : threads) {
@@ -751,6 +779,8 @@ Patch WriteStaged(Mod& mod, size_t& count, std::string& why)
             }
             continue;
         }
+        if (NotStarted(query, t.handle))
+            continue; // not inside any code; it stays stopped until the resume below
         CONTEXT context{};
         context.ContextFlags = CONTEXT_CONTROL; // also waits until the thread has stopped
         if (!GetThreadContext(t.handle, &context)) {

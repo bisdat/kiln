@@ -5,7 +5,8 @@
 // The server therefore sends the bytes of every new program its document names ("@programs"); the client serves them
 // through kiln.assets as the content sync's owner before it applies the document, so the definitions it gets are whole
 // (kiln.gamedata finds a program reference among what kiln.assets serves). A joined client runs no Impact programs, the
-// server does; where a world does run them, kiln.abilities registers what kiln.assets serves. The game's own programs are
+// server does; where a world does run them, kiln.abilities registers what kiln.assets serves (a server world's registry,
+// once the game has loaded it: kiln.abilities works on the server world's thread only). The game's own programs are
 // never sent, and a client never takes a program in place of one its game or its own mods already have.
 //
 // Kiln.Content reads kiln.assets and kiln.abilities through their native v1 tables (append-only ABI) instead of their
@@ -20,11 +21,11 @@ internal static unsafe class SyncPrograms
     /// <summary>FNV-1a-32 of "keen::ImpactProgram": what an ObjectReference&lt;ImpactDefinition&gt; or an ImpactProgramReference names.</summary>
     internal const uint TypeImpactProgram = 0xd4922d88;
     private const uint PutNew = 1;
-    private const int Ok = 0, Unavailable = 3;
+    private const int Ok = 0, Unavailable = 3, WrongThread = 4;
     private const int MaxProgramBytes = 1 << 20;
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct Key  // KilnAssetKey, 24 bytes
+    internal struct Key  // KilnAssetKey, 24 bytes
     {
         public fixed byte Guid[16];
         public uint Type;
@@ -32,7 +33,7 @@ internal static unsafe class SyncPrograms
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct AssetsTable  // the v1 prefix of KilnAssetsApi up to resource_is_new
+    internal struct AssetsTable  // the v1 prefix of KilnAssetsApi up to resource_is_new
     {
         public ServiceHeader Header;
         public nint IconRegisterPng, IconRegisterFile, IconRemove, IconState;
@@ -47,7 +48,7 @@ internal static unsafe class SyncPrograms
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct AbilitiesTable  // the v1 prefix of KilnAbilitiesApi up to program_refresh
+    internal struct AbilitiesTable  // the v1 prefix of KilnAbilitiesApi up to program_refresh
     {
         public ServiceHeader Header;
         public nint Status, SetListener, HoldFilter, InstanceVars, InstanceRead, InstanceWrite, InstanceInfo, EntityOverrides;
@@ -199,15 +200,24 @@ internal static unsafe class SyncPrograms
             }
             served++;
         }
-        // kiln.abilities registers what kiln.assets serves; before the client world's ImpactRegistry is up it does so itself, once it is
-        if (served > 0 && Game.IsTickThread && _abilities != null)
+        // kiln.abilities registers what kiln.assets serves in a server world's ImpactRegistry, by itself once the game has
+        // loaded it. Asked now, it registers them where such a world runs on this thread; a joined client has none (its
+        // main thread is Kiln's tick thread for mods, not kiln.abilities' tick thread), so it answers WRONG_THREAD there
+        // (0.2.0-dev.29 to .22: "did not register the programs (4)", and the server refused the player).
+        if (served > 0 && _abilities != null)
         {
             uint added = 0;
-            var rc = _abilities->ProgramRefresh(&added);
-            if (rc != Ok && rc != Unavailable) errors.Add($"kiln.abilities did not register the programs ({rc})");
+            if (RefreshProblem(_abilities->ProgramRefresh(&added)) is { } problem) errors.Add(problem);
         }
         return (served, local, errors);
     }
+
+    /// <summary>What kiln.abilities' program_refresh answer means for the content sync: null unless the programs could not
+    /// be registered where they should be. UNAVAILABLE (no ImpactRegistry loaded yet) and WRONG_THREAD (no server world
+    /// on this thread: a joined client, whose game runs no Impact programs) are not problems: kiln.abilities registers
+    /// what kiln.assets serves itself once a server world's registry has loaded. Pure (tests).</summary>
+    internal static string? RefreshProblem(int rc) =>
+        rc is Ok or Unavailable or WrongThread ? null : $"kiln.abilities did not register the programs ({rc})";
 
     /// <summary>Client: takes the programs served for the server off (on leave).</summary>
     internal static int Release(ulong owner)

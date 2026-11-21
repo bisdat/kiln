@@ -1,0 +1,10 @@
+{
+  "id": "gear-values-sample",
+  "name": "Gear values",
+  "version": "1.0.0",
+  "apiVersion": "0.2.0-dev.29",
+  "side": "both",
+  "clients": "mod",
+  "boot": true,
+  "description": "A data-only mod: the Craft sword at power 30 with a quarter of its damage as fire, Rare armour of tier 2 with a fifth more physical armour, and the game's balancing values for gear (durability per rarity, socket chances). content/gear.json, no code."
+}

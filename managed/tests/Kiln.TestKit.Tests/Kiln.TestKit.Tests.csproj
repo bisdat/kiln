@@ -5,7 +5,7 @@
     <IsTestProject>true</IsTestProject>
     <InvariantGlobalization Condition="'$(InvariantGlobalization)' == ''">true</InvariantGlobalization>
     <OutputType>Exe</OutputType>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <NoWarn>$(NoWarn);CS1591;KILNX003</NoWarn>  <!-- the task-thread world reads and writes are experimental -->
     <!-- FakeWorldParityTests calls the kit's kiln.world table as a native service does (function pointers). -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
@@ -82,6 +82,8 @@
     <TkSample Include="../../../mods/samples/SkillTreeSample/SkillTreeSample.csproj" />
     <!-- an [ImpactNative] method and an attachment on the kit's kiln.abilities natives (ImpactNativesFakeTests) -->
     <TkSample Include="../../../mods/samples/FrostMark/FrostMark.csproj" />
+    <!-- The tasks guide's example (docs/kiln/modding/tasks.md): a search in a Kiln task, the items moved on the tick -->
+    <TkSample Include="../../../mods/samples/FetchNearby/FetchNearby.csproj" />
     <ProjectReference Include="@(TkSample)" ReferenceOutputAssembly="false" />
     <TkSample Include="../../../mods/samples/SampleTests/SampleTests.csproj" />
     <ProjectReference Include="../../../mods/samples/SampleTests/SampleTests.csproj" />

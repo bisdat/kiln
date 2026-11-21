@@ -168,14 +168,16 @@ pub(crate) fn run(l: &mut Linter) {
     }
     defs.check(&mut out, cat);
     profile(&mut out);
+    data_conflicts(&mut out, cat);
     let first = l.mods.iter().find(|m| m.report).and_then(|m| m.manifest().or(m.files.first())).or(l.loose.first()).map(|f| f.display.clone());
     if let Some(file) = first {
         if let Some(p) = &l.catalog_problem {
             out.push(Diagnostic::new(&file, codes::CATALOG_BAD, Span::default(), &format!("the game-data catalog cannot be used: {p}")));
         }
         if cat.is_none() && skipped_refs > 0 {
+            let hint = l.opts.no_catalog_hint.as_deref().unwrap_or("make one with `kiln catalog`, or pass --catalog");
             out.push(Diagnostic::new(&file, codes::NO_CATALOG, Span::default(), &format!(
-                "no game-data catalog: {skipped_refs} reference(s) to the game's items, templates, ... were not checked (make one with `kiln catalog`, or pass --catalog)"
+                "no game-data catalog: {skipped_refs} reference(s) to the game's items, templates, ... were not checked ({hint})"
             )));
         }
     }
@@ -721,6 +723,18 @@ fn refs(out: &mut Out, m: &LMod, mi: usize, f: &LFile, cat: Option<&Catalog>, de
             && code.mentions(n)
         {
             continue;
+        }
+        // the game's own old, test or unused entry: it works, but may do nothing in the game (Pack Studio hides these)
+        if in_game == Some(true)
+            && let Form::Name(n) = &form
+            && crate::catalog::is_hidden_name(n)
+            && !cat.is_some_and(|c| c.used.contains(n))
+        {
+            let what = singular(&section);
+            out.push(
+                Diagnostic::new(&f.display, codes::HIDDEN_ENTRY, *span, &format!("\"{n}\" is one of the game's old, test or unused {what} entries (its name says so): it may do nothing in the game"))
+                    .pointer(pointer),
+            );
         }
         match in_game {
             Some(true) => continue,
@@ -1904,7 +1918,7 @@ fn blocks(out: &mut Out, m: &LMod, code: &Code, cat: Option<&Catalog>) {
         ("lootTables", "loot table"), ("recipes", "recipe"),
         ("quests", "quest"), ("dialogues", "dialogue"),
         ("windows", "window"), ("hudLines", "HUD line"), ("keyBindings", "key binding"),
-        ("affixes", "affix"), ("affixPools", "affix pool"),
+        ("affixes", "affix"), ("affixPools", "affix pool"), ("rarityRolls", "rarity roll"), ("rarityUpgrades", "rarity upgrade"),
         ("buildingMaterialPools", "building material pool"),
     ];
     let mut known: HashMap<String, (&'static str, String, Span)> = HashMap::new();
@@ -2155,6 +2169,60 @@ fn blocks(out: &mut Out, m: &LMod, code: &Code, cat: Option<&Catalog>) {
                     && b.value.get("recipe").is_some()
                 {
                     out.push(Diagnostic::new(&f.display, codes::CRAFTED_ROLLED, rolled.span, &format!("block \"{}\" has a recipe and \"rolled\": true: a craft comes out as the lowest allowed rarity or a random level while the recipe tooltip shows its rarity and lowest level; Kiln.Blocks refuses it. Give it a recipe or roll it, not both", b.key)));
+                }
+            }
+        }
+    }
+    rarity_rolls_crafted(out, m, &files);
+}
+
+/// KL406 for rarity rolls: a rule that rolls crafts (sources "craft", the default) of an item this mod gives a recipe. The
+/// recipe tooltip shows the item's own rarity while a craft comes out at a rolled one (docs/kiln/modding/item-blocks.md
+/// "Rarity at creation"). Items of this mod by block name, "<this mod>:name" and patterns over them; game items and other
+/// mods' are not looked up here.
+fn rarity_rolls_crafted(out: &mut Out, m: &LMod, files: &[&LFile]) {
+    let mut crafted: Vec<String> = vec![];
+    for f in files {
+        let Some(root) = f.root.as_ref() else { continue };
+        for section in ["weapons", "wands", "armor", "items", "stations"] {
+            for b in root.get(section).and_then(Node::as_object).into_iter().flatten() {
+                if b.value.get("recipe").is_some() {
+                    crafted.push(b.key.clone());
+                }
+            }
+        }
+        for b in root.get("recipes").and_then(Node::as_object).into_iter().flatten() {
+            if let Some(o) = b.value.str_of("output") {
+                crafted.push(o.to_string());
+            }
+        }
+    }
+    if crafted.is_empty() {
+        return;
+    }
+    let own = m.id.as_deref().map(|id| format!("{id}:"));
+    for f in files {
+        let Some(root) = f.root.as_ref() else { continue };
+        for rule in root.get("rarityRolls").and_then(Node::as_object).into_iter().flatten() {
+            let sources = rule.value.str_of("sources").unwrap_or("craft, loot");
+            if !sources.split(',').any(|s| s.trim() == "craft") {
+                continue;
+            }
+            for it in rule.value.get("items").and_then(Node::as_array).into_iter().flatten() {
+                let Some(raw) = it.as_str() else { continue };
+                let name = match &own {
+                    Some(p) if raw.starts_with(p.as_str()) => &raw[p.len()..],
+                    _ if raw.contains(':') => continue,
+                    _ => raw,
+                };
+                let hits: Vec<&String> = if suggest::has_wild(name) {
+                    crafted.iter().filter(|c| suggest::glob_ci(name, c)).collect()
+                } else {
+                    crafted.iter().filter(|c| c.as_str() == name).collect()
+                };
+                if let Some(first) = hits.first() {
+                    let more = if hits.len() > 1 { format!(" (and {} more)", hits.len() - 1) } else { String::new() };
+                    out.push(Diagnostic::new(&f.display, codes::CRAFTED_ROLLED, it.span, &format!("rarity roll \"{}\" rolls crafts of \"{first}\"{more}, which has a recipe: the recipe tooltip shows the item's own rarity while a craft comes out at a rolled one; leave \"craft\" out of \"sources\" to keep crafts as the tooltip says", rule.key)));
                 }
             }
         }
@@ -3161,6 +3229,38 @@ fn profile(out: &mut Out) {
         } else {
             seen.insert(id, i);
         }
+    }
+}
+
+/// KL701: data packs of two mods setting one field differently (super::conflicts), reported on the later mod's entry.
+fn data_conflicts(out: &mut Out, cat: Option<&Catalog>) {
+    let mut packs = Vec::new();
+    let mut index = Vec::new();
+    for (mi, m) in out.mods.iter().enumerate() {
+        let Some(id) = m.id.clone() else { continue };
+        let files: Vec<super::conflicts::PackFile> = m.files.iter().filter(|f| f.kind == "content").filter_map(|f| {
+            crate::jsonc::parse(&crate::manifest::decode_text(&f.bytes)).ok().map(|root| super::conflicts::PackFile { file: f.display.clone(), root })
+        }).collect();
+        if !files.is_empty() {
+            packs.push(super::conflicts::ModPacks { id, files });
+            index.push(mi);
+        }
+    }
+    if packs.len() < 2 {
+        return;
+    }
+    let found = super::conflicts::analyze(&packs, cat);
+    let pos = |id: &str| packs.iter().position(|p| p.id == id).map(|k| index[k]);
+    for c in found {
+        let Some(li) = pos(&c.later.mod_id) else { continue };
+        if !out.mods[li].report {
+            continue;
+        }
+        let span = out.mods[li].files.iter().find(|f| f.display == c.later.file).and_then(|f| f.root.as_ref())
+            .and_then(|r| r.get(&c.section)).and_then(|s| s.member(&c.later.selector)).map(|m| m.key_span).unwrap_or_default();
+        let d = Diagnostic::new(&c.later.file, codes::DATA_CONFLICT, span, &c.message())
+            .with_related(&c.earlier.file, Span::default(), &format!("{} sets {}", c.earlier.mod_id, c.earlier.value));
+        out.push(d);
     }
 }
 

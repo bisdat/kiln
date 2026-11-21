@@ -232,6 +232,123 @@ int main(int argc, char** argv) {
                  "quotes, backslashes and control characters escaped; well-formed UTF-8 kept, other bytes '?'");
     }
 
+    // ---- paused gaps (0.2.0-dev.29.19): the world's clock stood still, so it is a pause, not a stall ----
+    {
+        // a player's report: 17.4 s, 9.9 s and 16.6 s in the game's menu, the clock going on by a tick or so after each
+        check(paused_gap(17440.0, 1) && paused_gap(9902.0, 13) && paused_gap(16662.0, 2), "menu pauses: the clock did not cover them");
+        // a 10 s save stall, then the clock catching up in one step (clock_rate 60.02 while rate fell to 43.68)
+        check(!paused_gap(10271.25, 616), "a stall the clock caught up is not a pause");
+        // a dedicated server's step is 2-3 ticks: its slow steps are not pauses
+        check(!paused_gap(50.0, 3) && !paused_gap(683.0, 1) && !paused_gap(1200.0, 70), "short gaps and caught-up gaps are not pauses");
+        Line l = base(nullptr);
+        const std::string plain = format(l);
+        check(plain.find("paused_ms") == std::string::npos, "no pause: no paused_ms, the old line unchanged");
+        l.paused.add(17440.0f);
+        l.paused.add(9902.0f);
+        const std::string got = format(l);
+        check(got.size() > 2 && got.compare(0, plain.size() - 2, plain, 0, plain.size() - 2) == 0, "paused_ms comes after every older field");
+        check(got.find(",\"paused_ms\":{\"count\":2,\"total\":27342.0,\"max\":17440.0}}\n") != std::string::npos, "paused_ms: count, total, max");
+    }
+
+    // ---- the impact memory pool (0.2.0-dev.29.19, inbox 116): last, only when read and sane ----
+    {
+        Line l = base(nullptr);
+        l.paused.add(17440.0f);
+        const std::string plain = format(l);
+        check(plain.find("\"impact\"") == std::string::npos, "no reading: no impact object, the old line unchanged");
+        l.impact = ImpactPool{4ull << 20, 8ull << 20, 16ull << 20, 120, 300};
+        check(format(l) == plain, "a reading not flagged: no impact object");
+        l.has_impact = true;
+        const std::string got = format(l);
+        check(got.size() > 2 && got.compare(0, plain.size() - 2, plain, 0, plain.size() - 2) == 0, "impact comes after every older field");
+        check(got.find(",\"impact\":{\"used_pct\":25.00,\"peak_pct\":50.00,\"capacity_mib\":16,\"live\":120,\"live_peak\":300}}\n") !=
+                  std::string::npos,
+              "impact: used and peak percent of capacity, capacity, live and peak instances");
+        check(impact_pool_sane(l.impact), "a 16 MiB pool is sane");
+        ImpactPool bad = l.impact;
+        bad.capacity = (16ull << 20) + 8;
+        check(!impact_pool_sane(bad), "a capacity that is no power of two is not sane");
+        bad = l.impact;
+        bad.used = bad.peak + 1;
+        check(!impact_pool_sane(bad), "used above its peak is not sane");
+        bad = l.impact;
+        bad.live = bad.live_peak + 1;
+        check(!impact_pool_sane(bad), "live above its peak is not sane");
+        bad = l.impact;
+        bad.capacity = 512 * 1024;
+        bad.used = bad.peak = 0;
+        check(!impact_pool_sane(bad), "under 1 MiB is not sane");
+        l.impact = bad;
+        check(format(l) == plain, "a reading that is not sane is left out");
+    }
+
+    // ---- the tasks section (issue #49): appended last, absent without a pool ----
+    {
+        Line l = base(nullptr);
+        check(format(l).find("\"tasks\"") == std::string::npos, "no pool: no tasks object, the old line unchanged");
+        l.has_tasks = true;
+        l.tasks.id = 7;
+        l.tasks.span_ns = 60'000'000'000ull;
+        l.tasks.pool.workers = 3;
+        l.tasks.pool.long_running = 1;
+        l.tasks.pool.queue_max = 12;
+        l.tasks.owner_count = 1;
+        auto& o = l.tasks.owners[0];
+        o.present = true;
+        std::strcpy(o.owner_name, "kiln-auto-loot");
+        o.queued_max = 4;
+        o.running_current = 1;
+        o.running_max = 2;
+        o.completed = 120;
+        o.cancelled = 2;
+        o.cpu_ns = 830'500'000ull;
+        o.wall_ns = 910'200'000ull;
+        o.longest_ns = 44'100'000ull;
+        std::strcpy(o.longest_name, "loot-scan");
+        l.tasks.apply.applied = 96;
+        l.tasks.apply.deferred = 3;
+        l.tasks.apply.apply_ns = 4'200'000ull;
+        l.tasks.apply.owner_budget_stops = 1;
+        l.tasks.apply.owners_served = 1;
+        const std::string got = format(l);
+        const std::string want_tasks =
+            ",\"tasks\":{\"window\":{\"id\":7,\"span_ms\":60000.000,\"age_ms\":0.000},"
+            "\"pool\":{\"workers\":3,\"long_running\":1,\"queue_max\":12},"
+            "\"owners\":[{\"owner\":\"kiln-auto-loot\",\"queued\":{\"current\":0,\"max\":4},"
+            "\"running\":{\"current\":1,\"max\":2},\"completed\":120,\"faulted\":0,\"cancelled\":2,"
+            "\"cpu_ms\":830.500,\"wall_ms\":910.200,\"longest_ms\":44.100,\"longest_name\":\"loot-scan\","
+            "\"queued_too_long\":0,\"running_too_long\":0,\"queue_full\":0,\"unload_blocked\":0}],"
+            "\"apply\":{\"applied\":96,\"deferred\":3,\"cancelled\":0,\"ms\":4.200,\"owner_budget_stops\":1,"
+            "\"step_budget_stops\":0,\"owners_served\":1,\"backlog\":0},\"hops\":{\"refused\":0}}}\n";
+        check(got.size() > want_tasks.size() && got.compare(got.size() - want_tasks.size(), want_tasks.size(), want_tasks) == 0,
+              "with a pool: the tasks object is appended after the existing fields, exactly");
+        if (got.size() <= want_tasks.size() || got.compare(got.size() - want_tasks.size(), want_tasks.size(), want_tasks) != 0)
+            std::printf("  got tail: %s", got.c_str());
+
+        // #82: a hosting client's client-world line carries only that world's hop account (the window is on its
+        // server line), so the pool-wide parts never appear twice
+        Line c = base("client");
+        c.has_tasks = true;
+        c.tasks.apply_only = true;
+        c.tasks.apply.applied = 7;
+        c.tasks.apply.deferred = 2;
+        c.tasks.apply.apply_ns = 500'000ull;
+        c.tasks.apply.owner_budget_stops = 1;
+        c.tasks.apply.owners_served = 1;
+        c.tasks.apply.backlog = 2;
+        c.tasks.hops_refused = 3;
+        const std::string client = format(c);
+        const std::string want_client =
+            ",\"tasks\":{\"apply\":{\"applied\":7,\"deferred\":2,\"cancelled\":0,\"ms\":0.500,\"owner_budget_stops\":1,"
+            "\"step_budget_stops\":0,\"owners_served\":1,\"backlog\":2},\"hops\":{\"refused\":3}}}\n";
+        check(client.size() > want_client.size() &&
+                  client.compare(client.size() - want_client.size(), want_client.size(), want_client) == 0 &&
+                  client.find("\"window\"") == std::string::npos && client.find("\"owners\"") == std::string::npos,
+              "a client world's apply-only tasks object: its apply and hops only, exactly");
+        if (client.size() <= want_client.size() || client.compare(client.size() - want_client.size(), want_client.size(), want_client) != 0)
+            std::printf("  got tail: %s", client.c_str());
+    }
+
     // ---- no number that is not a number ----
     {
         Line l = base(nullptr);
@@ -274,6 +391,15 @@ int main(int argc, char** argv) {
     check(line.find("reg::owner_name(owner)") != std::string::npos && line.find("stats::format(l)") != std::string::npos,
           "owner names are looked up and the line formatted when it is written");
     check(src.find("interval_ms") == std::string::npos, "tick.cpp has no line format of its own any more");
+    check(server.find("stats::paused_gap(gap, info.clock_delta)") != std::string::npos && server.find("g_win.paused.add(gap)") != std::string::npos,
+          "the server world keeps its paused gaps out of interval_ms");
+    check(line.find("l.has_impact = read_impact_pool(kind, &l.impact);") != std::string::npos,
+          "each world's line reads its impact pool when it is written (once a minute, not on a step)");
+    const std::string pool = body("bool read_impact_pool(");
+    check(pool.find("KILN_WORLD_PREDICTION") != std::string::npos && pool.find("guard::copy") != std::string::npos &&
+              pool.find("L\"impacts\"") != std::string::npos &&
+              pool.find("stats::impact_pool_sane") != std::string::npos && pool.find("new ") == std::string::npos,
+          "the pool read: no prediction world, guarded reads, kiln/control/impacts off, sane only, no allocation");
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

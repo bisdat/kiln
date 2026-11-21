@@ -17,6 +17,11 @@ Evidence, design and the mapping of each function: [docs/re/emf-compat.md](../re
    `<game>/emf/mods/<name>.dll`. EMF's Lua mods also need the `lua` mod (`emf/mods/lua/`).
    With the Kiln Launcher, a profile's `emf` entries are loaded too (`kiln.profile`). The `emf/mods` folder still
    counts while the profile has EMF drop-ins on, which is the default.
+   EMF's Lua mods can be added in the launcher too, one folder or EMF's whole zip (its Lua mods are in
+   `game/emf/mods/`; its `examples/lua/` and `template_lua/` are left out, as EMF does not install them). EMF's `lua`
+   mod finds a Lua mod only by its folder in `emf/mods`, so activation copies each enabled one to
+   `<game>/emf/mods/<id>/` with Kiln's marker, with or without EMF's own loader, and the profile names that copy (a
+   folder of the same mod you put there yourself is used as it is). EMF's DLL mods still run from the Library.
 3. Switch it on. Most shipped EMF mods start switched off. Edit `<configDir>/emf/<id>.ini`:
    ```ini
    [big_stacks]
@@ -52,7 +57,17 @@ Evidence, design and the mapping of each function: [docs/re/emf-compat.md](../re
   else loads everywhere, as in EMF.
 - **Dependencies:** `depends` / `dependencies` take EMF's version ranges (`^1.2`, `~1.2`, `>=1.0 <2`, `1.2.x`,
   `1.2 - 2`, `||`). A mod whose required dependency is missing, off, too old or failed does not load, and the log
-  says why. Mods load in dependency order, then by folder name.
+  says why. Mods load in dependency order, then by folder name. Since 0.2.0-dev.30.2 the launcher says so before Play,
+  from the mod.json, with kiln-emf's own rules (`crates/kiln-manage/src/emf_deps.rs`, the profile preview's `emf`): the
+  mod's row reads "Needs EMF's lua mod >=1.36, which isn't installed." For EMF's own mods (its `lua` mod and the nine
+  Lua mods of its download) it adds that they come with EMF's release zip, to add with Add mods, and links EMF's page
+  (github.com/matenm/emf-enshrouded); for another mod it opens the https link the dependency entry gives (`"url"`, which
+  EMF ignores), if any; "Get EMF" always opens EMF's page. After a start, a mod kiln-emf rejected or failed
+  (`kiln/state/emf.json` of that run) says so on its row when the preview has nothing to add, except for a reason the
+  preview judges again and no longer finds (a dependency not installed, switched off in the profile, or out of range).
+  EMF's ini switch, the EMF API version and a dependency that did not load are not part of the check, so their
+  reasons stay. With EMF's own loader installed the launcher says nothing before Play: kiln-emf steps aside and EMF
+  loads emf/mods by its own switches.
 - **Script mods:** a `mod.json` with `"main"` instead of `"dll"` is a script mod. The `lua` mod runs it (status
   `script`).
 - **Faults:** a mod whose `emf_mod_load` returns false or faults is marked `failed`. Its DLL stays loaded: Kiln never

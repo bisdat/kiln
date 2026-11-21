@@ -24,6 +24,37 @@ test("a translation with unknown keys, non-text values and changed placeholders 
   expect(untranslated(enT, { n: { other: "x" } })).toEqual(["a", "p"]);
 });
 
+test("a plural form may carry {count} where English's .one has none (Russian's one is also 21; French's also 0)", () => {
+  const enT = flatten({ n: { one: "one mod left out", other: "{count} mods left out" }, m: { one: "{count} mod in {name}", other: "{count} mods in {name}" } });
+  expect(checkLocale(enT, { n: { one: "{count} мод пропущен", few: "{count} мода пропущены", many: "{count} модов пропущено", other: "{count} мода пропущено" } })).toEqual([]);
+  expect(checkLocale(enT, { n: { one: "un mod laissé de côté", other: "{count} mods laissés de côté" } })).toEqual([]);
+  // still flagged: a name no English form has, and a form that drops what English's own text at that key has
+  expect(checkLocale(enT, { n: { one: "{count} {name} мод" } }).map((p) => p.kind)).toEqual(["placeholders"]);
+  expect(checkLocale(enT, { m: { one: "{count} mod" } }).map((p) => p.kind)).toEqual(["placeholders"]);
+});
+
+test("a translation is data: markup, links, control characters, other number formats and bad confirm words are flagged", () => {
+  const enT = flatten({
+    a: "Read {file}", n: { one: "{count:N0} icon", other: "{count:N0} icons" }, site: "See https://frostdev.io/kiln.",
+    lines: "One\nTwo", common: { confirmWord: { delete: "delete", clean: "clean" } }, s: "Short",
+  });
+  const problems = checkLocale(enT, {
+    a: "读取 <b>{file}</b>&nbsp;[这里](https://evil.example)",
+    n: { other: "{count} 个图标" },
+    site: "见 https://frostdev.io/kiln。",
+    lines: "一\n二‮",
+    common: { confirmWord: { delete: "删 除", clean: "清理" } },
+    s: "",
+  });
+  expect(problems.map((p) => `${p.key} ${p.kind}`).sort()).toEqual([
+    "a markup", "a markup", "a markup", "a markup", "a markup",
+    "common.confirmWord.delete confirm-word", "lines control", "n.other format", "s empty",
+  ]);
+  expect(problems.filter((p) => p.key === "a").map((p) => p.message)).toContain("the link https://evil.example, which English has not here");
+  expect(problems.find((p) => p.key === "lines")!.message).toContain("U+202E");
+  expect(checkLocale(enT, { s: "短".repeat(200) }).map((p) => p.kind)).toEqual(["length"]);
+});
+
 test("en.json: every value is text and every t(\"key\") in the source is in it", () => {
   const bad: string[] = [];
   flatten(JSON.parse(readFileSync(join(i18n, "en.json"), "utf8")), "", {}, bad);

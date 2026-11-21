@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // The Kiln menu as a full-display mod manager in the game's look (docs/kiln/ui.md "The Kiln menu"). Two parts:
-//  - ModManagerPage: the content (a tab row with Mods, Network, Keys, Overlay; the Mods section's three columns). It
+//  - ModManagerPage: the content (a tab row with Mods, Network, Keys, Overlay, Graphics; the Mods section's three columns). It
 //    draws into a rectangle it is given at a scale it is given, so another host (the game's own menu page, later) can
 //    draw it after its own title and transition.
 //  - ModManagerHost: the stand-alone host: a full-display page over a dimmed background with a large title and a
@@ -26,6 +26,8 @@ internal enum ModManagerSection
     Network = 1,
     Keys = 2,
     Overlay = 3,
+    /// <summary>Kiln's own graphics tools: the frame cap, DLSS settings, the readout (0.2.0-dev.29.18, UiGraphics.cs).</summary>
+    Graphics = 4,
 }
 
 /// <summary>The left column's selection: every mod, the problems, or one engine.</summary>
@@ -136,7 +138,7 @@ internal static class ModManagerLogic
     /// <summary>The next section for Tab (+1) / Shift+Tab (-1), wrapping.</summary>
     public static ModManagerSection Step(ModManagerSection s, int by)
     {
-        const int n = 4;
+        const int n = 5;
         return (ModManagerSection)((((int)s + by) % n + n) % n);
     }
 }
@@ -220,7 +222,7 @@ internal sealed class ModManagerPage
     // the display size like the game's menus), so font sizes are multiplied by this.
     private float _k = 1;
 
-    private static readonly string[] SectionIds = ["##sec.mods", "##sec.network", "##sec.keys", "##sec.overlay"];
+    private static readonly string[] SectionIds = ["##sec.mods", "##sec.network", "##sec.keys", "##sec.overlay", "##sec.graphics"];
 
     // the section names and the footer hints in the language in use (made again when it changes)
     private static int _textsGeneration = -1;
@@ -231,7 +233,8 @@ internal sealed class ModManagerPage
     {
         var g = KilnText.Generation;
         if (g == _textsGeneration) return;
-        _sectionNames = [KilnText.T("menu.sections.mods"), KilnText.T("menu.sections.network"), KilnText.T("menu.sections.keys"), KilnText.T("menu.sections.overlay")];
+        _sectionNames = [KilnText.T("menu.sections.mods"), KilnText.T("menu.sections.network"), KilnText.T("menu.sections.keys"), KilnText.T("menu.sections.overlay"),
+            KilnText.T("menu.sections.graphics")];
         var back = (KeyEsc, KilnText.T("menu.hints.back"));
         var next = ("Tab", KilnText.T("menu.hints.next_section"));
         var move = (KilnText.T("menu.hints.arrows"), KilnText.T("menu.hints.move"));
@@ -372,6 +375,7 @@ internal sealed class ModManagerPage
                         break;
                     case ModManagerSection.Network: Plain(ui, body, s, "kiln.sec.network", "Network", UiEngine.NetworkTab); break;
                     case ModManagerSection.Keys: Plain(ui, body, s, "kiln.sec.keys", "Keys", UiEngine.KeysTab); break;
+                    case ModManagerSection.Graphics: Plain(ui, body, s, "kiln.sec.graphics", "Graphics", GraphicsPage.Draw); break;
                     default: Plain(ui, body, s, "kiln.sec.overlay", "Overlay", UiEngine.OverlayTab); break;
                 }
             }
@@ -629,6 +633,17 @@ internal sealed class ModManagerPage
                 if (verW > 0)
                     ui.DrawText(UiLayer.Window, chipCol - 18 * s - verW, it.MinY + (rowH - 15 * s) / 2 - 1 * s, m.Version, GameColors.Muted, 15 * s);
                 Chip(ui, chipX, it.MinY + (rowH - 24 * s) / 2, m.Chip, GameColors.Of(m.State, m.Missing), s);
+                // the do-not-save badge of a package kiln-sfi warns about (SfiNotice.cs), left of the state chip
+                if (SfiSafetyNotice.Badge(m) is { } sw)
+                {
+                    var badge = SfiSafetyNotice.BadgeFor(sw);
+                    var bw = ChipWidth(ui, badge, s);
+                    var bx = chipX - 8 * s - bw;
+                    var by = it.MinY + (rowH - 24 * s) / 2;
+                    ui.DrawRect(UiLayer.Window, it.MinX, it.MinY, it.MinX + 3 * s, it.MaxY, GameColors.Warning);
+                    ui.DrawRect(UiLayer.Window, bx, by, bx + bw, by + 24 * s, GameColors.Night, 3 * s);
+                    Chip(ui, bx, by, badge, GameColors.Warning, s);
+                }
             }
         }
         ui.EndChild();
@@ -720,6 +735,7 @@ internal sealed class ModManagerPage
         x += Chip(ui, x, c.ScreenY, ModCatalog.EngineName(m.Engine), GameColors.Gold, s) + 8 * s;
         if (m.Side.Length > 0) Chip(ui, x, c.ScreenY, ModManagerLogic.SideText(m.Side, _snap.Side, m.Engine), GameColors.Idle, s);
         ui.Space(1, 26 * s);
+        SfiSafetyNotice.DrawDetails(ui, m, s, Label);  // the whole do-not-save text and the banner's Hide button
 
         if (m.Reason is not null || m.Help is not null)
         {

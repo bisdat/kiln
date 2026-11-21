@@ -245,6 +245,9 @@ test.describe("the save editor in Deck mode", () => {
     // walk to an unlit node next to a lit one, A raises it, Y lowers it again
     const used = page.locator(".ke-tree-points b");
     const was = Number(await used.textContent());
+    // Available is the game's own count (level 25: 48, plus the mock's skill-point knowledge), not a total to type
+    await expect(page.locator(".ke-tree-from-game")).toContainText("Total 65");
+    await expect(page.locator(".ke-tree-points .ke-tree-avail")).toHaveText(String(65 - was));
     let raised = false;
     for (let i = 0; i < 24 && !raised; i++) {
       const a = await page.evaluate(() => (document.activeElement as HTMLElement).dataset.deckA);
@@ -298,9 +301,9 @@ test.describe("the save editor in Deck mode", () => {
     await typeNumber(page, "7");
     await pad(page, "b");
     expect(await focused(page)).toBe("slot-main:0");
-    // leave the tab and come back: the change is still there
+    // leave the tab and come back: the change is still there (the next tab is Community)
     await pad(page, "rb");
-    await expect(page.locator('[data-deck-screen="help"]')).toBeVisible();
+    await expect(page.locator('[data-deck-screen="community"]')).toBeVisible();
     await pad(page, "lb");
     await expect(page.locator(".dke-name")).toHaveText("Aldric");
     await expect(say(page)).toContainText("Not saved");
@@ -313,7 +316,7 @@ test.describe("the save editor in Deck mode", () => {
     await pad(page, "b");
     await expect(page.locator('[data-deck-dialog="quit"]')).toHaveCount(0);
     // another character while changed: asked first; Cancel keeps Aldric
-    await walk(page, "up", /^ed-/, 8);
+    await walk(page, "up", /^ed-(characters|backups|discard|save)$/, 8);
     await walk(page, "left", "ed-characters", 4);
     await pad(page, "a");
     const chars = page.locator('[data-deck-dialog="editor-characters"]');

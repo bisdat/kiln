@@ -8,7 +8,7 @@ Players' guide: the frostdev.io wiki page "Mods for other frameworks" (`/kiln/wi
 | Engine | Plugin | Mods it loads | Page |
 |---|---|---|---|
 | EML (Enshrouded Mod Loader) 0.2.0 | `kiln-eml.dll` (GPL-3, EML's own runner built from kfc-parser; component `eml`, default on) | `mods/<id>/` and `kiln/eml/mods/<id>/` with `mod.json` + `src/mod.lua` (or a zip), patched before the game starts; the single game-data writer unless ShroudForge owns startup | [../eml.md](../eml.md) |
-| ShroudForge (bundled 1.7.9 from frostdev-ops/shroudforge, or the player's own copy) | `kiln-shroudforge.dll` (MIT) + `kiln/plugins/shroudforge/` (GPL-3 runtime; component `shroudforge`, default on) | ShroudForge's mods folder (`mods/<id>/` with `extended.mod.json`); with SF hosted it also writes the EML packages in that folder that its switch has on (Kiln's copies carry it) | [../shroudforge.md](../shroudforge.md), [../shroudforge-compat.md](../shroudforge-compat.md) |
+| ShroudForge (bundled 1.8.1 from frostdev-ops/shroudforge, or the player's own copy) | `kiln-shroudforge.dll` (MIT) + `kiln/plugins/shroudforge/` (GPL-3 runtime; component `shroudforge`, default on) | ShroudForge's mods folder (`mods/<id>/` with `extended.mod.json`); with SF hosted it also writes the EML packages in that folder that its switch has on (Kiln's copies carry it) | [../shroudforge.md](../shroudforge.md), [../shroudforge-compat.md](../shroudforge-compat.md) |
 | SET (Shrouded Engine Tweaks) 0.2.0 | `kiln-set.dll` | `shrouded_engine_tweaks/mods/<name>/init.lua` (a mod's `settings.json` is written next to it); also on dedicated servers | [../set.md](../set.md) |
 | Greeneye Loader 1.2.2 (API 2) | `kiln-greeneye.dll` | `greeneye/<id>/` with `mod.json` and a DLL exporting `GreeneyeModStart` | [greeneye.md](greeneye.md) |
 | Flame (Creative Mode's loader) | `kiln-flame.dll` | `mods/<id>/` with `flame.json` and a DLL exporting `FlameStartRuntime` | [flame.md](flame.md) |
@@ -16,11 +16,22 @@ Players' guide: the frostdev.io wiki page "Mods for other frameworks" (`/kiln/wi
 | EMF 0.3.3 through 0.6.14 (EmfApi v46: 76 full, 17 partial, 49 not yet of 142 C slots; client checks remain) | `kiln-emf.dll` (component `emf`, default on) | `emf/mods/<id>/`, `emf/mods/<name>.dll`; Lua mods through EMF's `lua` mod. API coverage does not guarantee every mod pairing | [../emf.md](../emf.md), [../emf-parity.md](../emf-parity.md) |
 | Enshwick 1.0.0-alpha.14 | `kiln-enshwick.dll`, hosting Enshwick's own loader: the game's `mods/enshwick/enshwick.dll` when present, else the copy Kiln ships in `kiln/plugins/enshwick/` (built from Enshwick's MIT source; `"loader": "auto"`), so Enshwick need not be installed | `mods/<author.name>/`: DLL mods, `main.luau`, `pack.toml` data packs | [enshwick.md](enshwick.md) |
 | shroudlink 0.8.0 (SDK ABI 8), server | `kiln-shroudlink.dll` (shroudlink's own server core, built from source) | `shroudlink_mods/*.dll`; EML data mods go to kiln-eml | [shroudlink.md](shroudlink.md) |
+| Enshrouded ModLoader 0.6.12 (AndyPimms', ABI 1; CarryOn, Belt Lantern), client build 26430625 only | `kiln-dllmod.dll` | packages (a DLL with its `<file>.dll.mod` manifest) of the profile's `dllmod` list, run from Kiln's copy in `Mods/EnshroudedModLoader/<id>/` at a local world's start | [dllmod.md](dllmod.md) |
 | Ember (server SDK, no ABI published yet) | `kiln-ember.dll` (finds and reports; starts nothing yet) | `ember/mods/<mod>/` with one library | [ember.md](ember.md) |
 
 Stand-alone `dinput8.dll` mods (and other loaders' `dinput8.dll`) are chained from `kiln/chain/` by Kiln's proxy, which
 also reads `dinput8-chain.ini` `[Chain]` and `[EMF]` ([../engines.md](../engines.md)). Kiln's own DLL mods
 (`native.json`) are not another engine.
+
+**Enshrouded ModLoader** (AndyPimms' loader, [aebischer/Enshrouded-ModLoader](https://github.com/aebischer/Enshrouded-ModLoader),
+SDK ABI 1; CarryOn and Belt Lantern use it): since 0.2.0-dev.29.19 Kiln runs its packages itself (kiln-dllmod, row above,
+[dllmod.md](dllmod.md)), so its `dinput8.dll` is not needed. When that `dinput8.dll` is in the game anyway (Kiln's installer
+moved it into `kiln/chain/`, or it was added to the Library as a DLL mod), kiln-dllmod steps aside and hooks nothing:
+the loader refuses to start when another tool already patched one of the eight game functions it hooks. It then runs
+the packages in `Mods/EnshroudedModLoader/`, Kiln's copies of the profile's packages included, from its MODS page in a
+world's Edit menu. None of Kiln's other client hooks is among those eight on game build 26430625 (client exe
+`5d9ef2f1`). A package's DLL is never imported as a plain DLL mod (loaded early, the loader would refuse every world
+with it).
 
 The launcher's Library imports every kind above, Enshwick, shroudlink and Ember included; Ember mods are listed but not
 run until Ember publishes its loader ABI.
@@ -59,6 +70,7 @@ loaded), the plugin says so and loads the mods itself.
 | Enshwick | its `powrprof.dll` stub (texts `enshwick-loader-stub`) is loaded, its claim `Local\enshwick-stub-<pid>` exists, or a module exporting `enshwick_start` is loaded | Kiln takes the same claim when it starts the loader, so a stub that starts later stays idle (the stub's own rule); when the stub is first, it runs Enshwick and Kiln starts nothing. |
 | shroudlink | a loaded module exports both `CrashHandlerFactory` and `DirectInput8Create` (its core as `steam_api64.dll`, `crashhandler64.dll`, `dinput8.dll`, chained or not) or is named `shroudlink_core.dll`; backstop: its claim `chestsort_server_<pid>` | That core loads `shroudlink_mods/` itself; both copies honor the same claim, so only one hooks. |
 | Ember | a DLL from the server folder or `kiln/chain/` carries `ember-loader` / `ember_loader` | Ember's loader runs its mods; kiln-ember starts none anyway until Ember publishes its ABI. |
+| Enshrouded ModLoader | a loaded module (not Kiln's, not a mod) exporting `DirectInput8Create` whose file names the loader's world profile header or its log file, or an active line of `kiln/chain.ini` / `dinput8-chain.ini` naming such a file | The loader refuses to start when one of its functions was patched first, so kiln-dllmod hooks nothing; the loader runs the packages from `Mods/EnshroudedModLoader/` itself. |
 
 Flame and Shroudtopia are checked again before mod dispatch, including after Shroudtopia's boot delay. Renamed
 proxies in `kiln/chain/` are recognized. These engines have no cooperative process claim or shutdown contract:

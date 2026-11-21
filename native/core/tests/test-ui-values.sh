@@ -13,6 +13,9 @@ cc=${CC:-$(command -v clang || command -v gcc)}
 printf '#include "services/kiln_ui_values.h"\nint kiln_ui_values_header_ok;\n' |
   "$cc" -std=c11 -Wall -Wextra -Werror -pedantic -fsyntax-only -I"$here/../abi" -x c -
 echo "kiln_ui_values.h: compiles as C11"
+printf '#include "services/kiln_ui_inventory.h"\nint kiln_ui_inventory_header_ok;\n' |
+  "$cc" -std=c11 -Wall -Wextra -Werror -pedantic -fsyntax-only -I"$here/../abi" -x c -
+echo "kiln_ui_inventory.h: compiles as C11"
 flags=(-std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-sanitize-recover=undefined
        -I"$here/stubs" -I"$here/../abi" -I"$here/../src/services")
 "$cxx" "${flags[@]}" -o "$out/ui_values_test" "$here/ui_values_test.cpp"

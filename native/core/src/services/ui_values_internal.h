@@ -11,6 +11,10 @@
 //   ui_values_sockets.cpp  gems.sockets: the Gem Forge lists' category masks widened for sockets on other gear
 //   ui_values_sources.cpp  ui.gemforge.sources: a server's offered chest gems in the GEMS grid
 //   ui_values_lines.cpp    tooltip lines collected at the item detail view, the details window's snapshots
+//   ui_values_tooltip.cpp  native lines drawn inside the game's item detail view (ui.tooltip.lines), stat numbers
+//                          scaled in it (ui.tooltip.values), and the tooltip probe for the guided client session
+//   ui_values_inventory.cpp kiln.ui.inventory: slot clicks (kiln.ui presses hit-tested on the slot frames), slot_at,
+//                          the units-to-pixels mapping, the backpack/chest screen view (v2)
 //   ui_values_service.cpp  the production environment (owners, kiln.caps, sigdb, kiln.hooks, kiln.client, kiln.ui),
 //                          the SEH guards and the service's registration with the core
 //
@@ -26,6 +30,7 @@
 #include <vector>
 
 #include "services/kiln_hooks.h"
+#include "services/kiln_ui_inventory.h"
 #include "services/kiln_ui_values.h"
 
 namespace kiln::uivalues {
@@ -45,7 +50,7 @@ inline constexpr double kNewStringsPerSecond = 64;  // per mod
 inline constexpr double kNewStringsBurst = 128;
 
 // Registration lists: the value kinds (KilnUiValueKind), then these.
-enum : uint32_t { kListLines = kValueKinds, kListSlots, kListChanges, kListGemForge, kLists };
+enum : uint32_t { kListLines = kValueKinds, kListSlots, kListChanges, kListGemForge, kListValues, kListClicks, kLists };
 
 // The capability row of a list ("ui.values.hud" for the three HUD kinds).
 const char* row_of(uint32_t list);
@@ -92,6 +97,27 @@ struct Env {
     int (*item_category)(uint32_t item, uint8_t* category) = nullptr;
     bool (*call_gemforge)(KilnUiGemForgeFn, const KilnUiGemForgeFrame*, const KilnUiGemForgeCandidate*, uint32_t,
                          void* user) = nullptr;
+    // ---- native tooltip lines (ui_values_tooltip.cpp) ----
+    // Builds and draws one game text line as TextDraw says, under a structured-exception guard: false = it faulted.
+    // *node = the line's UI node (for its layout rectangle; 0 when unknown).
+    bool (*draw_text)(const struct TextDraw* d, uintptr_t* node) = nullptr;
+    // The last layout rectangle of a UI node through the game's UiNodeRect (fn), guarded; false = faulted or none.
+    bool (*node_rect)(uintptr_t fn, uintptr_t node, float out[4]) = nullptr;
+    bool (*key_down)(uint32_t vk) = nullptr;  // the key is held now (the probe's phase key)
+    uint32_t (*thread_id)() = nullptr;
+    // A sigdb feature resolved on this build and not held by the client gate (usable before kiln.caps has rows).
+    bool (*feature_open)(const char* name) = nullptr;
+    bool (*call_scale)(KilnUiScaleFn fn, const KilnUiProviderContext* c, const KilnUiItemView* v, float* scale,
+                       void* user, KilnResult* rc) = nullptr;
+    // kiln.inventory (0.2.0-dev.30): kiln.ui's subscribe_pointer_press with the service's owner (false: not there, too
+    // old, refused); a click subscriber called under a structured-exception guard; the cursor in the game window's
+    // client pixels with the client area's size (false: no game window in front).
+    bool (*subscribe_pointer)(KilnUiPointerFn fn, void* user) = nullptr;
+    bool (*call_click)(KilnUiSlotClickFn fn, const KilnUiSlotClick* c, void* user) = nullptr;
+    bool (*cursor_client)(float* x, float* y, float* width, float* height) = nullptr;
+    // kiln.inventory v2: kiln.ui's screen_target (the entity a chest, chest-style or factory screen is about, of its last
+    // completed UI frame; 0 = none, an older kiln.ui, the constant not resolved).
+    uint32_t (*screen_target)() = nullptr;
 };
 Env& env();
 void logf(int level, const char* fmt, ...);
@@ -103,6 +129,7 @@ struct Provider {
     std::string mod;  // stable mod id at registration (quotas and text are charged to it)
     uint32_t list = 0;
     uint32_t item = 0;  // 0 = any nonempty item
+    uint32_t flags = 0;  // lines: KilnUiNativeLinesFlags (tooltip_lines_native)
     void* fn = nullptr;
     void* user = nullptr;
     uint64_t seq = 0;  // accepted registration order
@@ -114,7 +141,8 @@ using ProviderList = std::vector<std::shared_ptr<Provider>>;
 
 // Adds a registration after the caller checked the arguments. KILN_OK with out->ok = 0 and KUI_REGISTRATION_BUDGET
 // when the mod holds 128; KILN_ERR_REVOKED for a retired owner.
-KilnResult add(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out);
+KilnResult add(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out,
+               uint32_t flags = 0);
 KilnResult remove(KilnHandle h);
 // The live providers of a list in registration order, as one immutable snapshot (changes made while a dispatch holds
 // it apply to the next one). Never null.
@@ -157,10 +185,33 @@ KilnResult tooltip_refresh(KilnOwner owner, KilnUiTooltipOpen* out);
 KilnResult tooltip_details(KilnOwner owner, uint32_t which, KilnUiTooltipDetails* out);
 void lines_reset_for_tests();
 
+
 // ---- visible slots (ui_values_slots.cpp) ----
 KilnResult slots_copy(KilnOwner owner, uint64_t expected_session, uint64_t expected_frame, KilnUiSlotsFrame* frame,
                       KilnUiVisibleSlot* slots, uint32_t capacity, uint32_t* required);
 void slots_reset_for_tests();
+// The latest completed slot frame (immutable; null before the first). Any thread.
+struct SlotsSnapshot {
+    KilnUiSlotsFrame meta{};
+    std::vector<KilnUiVisibleSlot> slots;
+};
+std::shared_ptr<const SlotsSnapshot> slots_latest();
+
+// ---- kiln.ui.inventory (ui_values_inventory.cpp) ----
+// Registration of any list after the caller checked its arguments (ui_values.cpp's register_in).
+KilnResult register_list(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out);
+// the slots' publish, UI thread: delivers the clicks pressed since the last frame; a click of another client session
+// than this frame's (the world was left in between) is dropped
+void clicks_frame_published(uint64_t session);
+bool pointer_screen(const KilnUiScreen& s);
+uint32_t panel_screen(const KilnUiScreen& s);  // KUI_VIEW_* of a screen a panel may sit beside (KUI_VIEW_NONE: none)  // the screen has a pointer: slot clicks may hit there
+// units-to-pixels for a target size; false = the frame has no usable viewport
+bool map_frame(const KilnUiSlotsFrame& m, float target_w, float target_h, float* sx, float* sy, float* ox, float* oy);
+// the slot under (x, y) target pixels: its index, -1 = none (the last drawn wins)
+int hit_slot(const SlotsSnapshot& f, float x, float y, float target_w, float target_h);
+uint32_t on_pointer(const KilnUiPointerPress* p);  // what kiln.ui's press callback does (tests call it directly)
+const KilnUiInventoryApi* inventory_table();
+void clicks_reset_for_tests();
 KilnResult gemforge_copy(KilnOwner, uint64_t, uint64_t, KilnUiGemForgeFrame*, KilnUiGemForgeCandidate*, uint32_t,
                         uint32_t*);
 void gemforge_reset_for_tests();
@@ -287,6 +338,70 @@ struct CallScope {
     ~CallScope();
     CallState* prev;
 };
+
+// One detail occurrence: ItemDetail's own record, copied while ItemDetail runs on this thread (ui_values_lines.cpp
+// keeps the innermost on a thread-local stack; a nested detail gets its own).
+inline constexpr uint32_t kNativeLines = 16;
+// KilnUiLine flags of a native line (KUI_LINE_* in the public header since 0.2.0-dev.29.19)
+inline constexpr uint32_t kLineColorMask = 0x0f, kLineSmall = 0x10, kLineAfterStats = 0x100, kLineFlagsKnown = 0x11f;
+// KilnUiLineColor, then two probe-only sources (the stats block's buff icon tints, Q6 of the client session)
+inline constexpr uint32_t kColorDefault = 0, kColorPositive = 1, kColorNegative = 2, kColorCommon = 3,
+                          kColorUncommon = 4, kColorRare = 5, kColorEpic = 6, kColorLegendary = 7, kColorUnique = 8,
+                          kColorMuted = 9, kColorsPublic = 10, kColorBuffPositive = 10, kColorBuffNegative = 11,
+                          kColors = 12;
+struct NativeLine {
+    std::string_view text;  // process-lifetime bytes (the text store, or the probe's static strings)
+    uint32_t flags = 0;
+};
+struct DetailCopy {
+    uint8_t raw[kViewBytes] = {};
+    bool ok = false, collected = false;
+    uintptr_t record = 0;      // ItemDetail's record (valid while ItemDetail runs)
+    bool native_ready = false;  // the native lines below were gathered (once per occurrence)
+    uint32_t native_count = 0;
+    NativeLine native[kNativeLines];
+    bool drawn[kNativeLines] = {};
+    uintptr_t nodes[kNativeLines] = {};
+    bool scaled = false;  // the values scale below was computed (once per occurrence)
+    float scale = 1.0f;
+};
+DetailCopy* current_detail();          // this thread's innermost detail occurrence, or null
+void collect_once(DetailCopy& c);      // runs the lines providers over c once (the details window's snapshot)
+// The ItemDetail link (shared by the lines, the native lines and the values): installed once; false = not possible.
+bool detail_hook_install();
+bool detail_wanted();                  // a copy of each detail occurrence is needed (providers or the probe)
+
+// ---- native tooltip lines and values (ui_values_tooltip.cpp) ----
+// One text line built as the game builds the detail's description: NativeTextLine(object, text, style, 1); the shown
+// byte; UiNodeAlign(node, align) and the same u16 in the object; the wrap byte; UiNodeSize(node, {1, 0}); optionally
+// the colour (bits |= 1, flags |= 0x40, the 8-byte palette entry, flags2 = 0) and the small size (flags |= 8, the
+// size field); NativeTextDraw(object). Offsets are inside the game's 0x150-byte text object.
+struct TextDraw {
+    uintptr_t line_fn = 0, draw_fn = 0, align_fn = 0, size_fn = 0;
+    uintptr_t style = 0;  // the style record inside the UI bundle
+    const char* text = nullptr;  // the game's string view: UTF-8, byte length, signed-byte FNV-1a 64
+    uint64_t text_len = 0, text_fnv = 0;
+    uint16_t align = 0;
+    int32_t node = 0, shown = 0, align_field = 0, wrap = 0, flags = 0, flags2 = 0, color = 0, bits = 0, size_field = 0;
+    bool colored = false;
+    uint64_t color_value = 0;
+    bool small = false;
+    float small_size = 0;
+};
+inline constexpr int32_t kTextObjectBytes = 0x150;
+// A provider registered with KUI_LINES_IN_GAME_TOOLTIP: installs the native sites once when ui.tooltip.lines is
+// available (false = the lines stay in the details window).
+bool tooltip_lines_request();
+KilnResult tooltip_native_state(KilnUiTooltipNativeState* out);
+bool tooltip_lines_on();     // native lines are drawn now
+bool tooltip_values_on();    // stat numbers are scaled now
+bool tooltip_probe_on();
+// Starts the tooltip probe (the guided client session's build): spec = the key name ("" = the default). Installs the
+// ItemDetail link and the native sites the open features allow. Client only.
+bool probe_start(KilnOwner owner, const char* spec);
+uint32_t probe_key_of(const char* spec);  // the virtual-key code of a key name ("F1".."F24", "A".."Z"), 0 = invalid
+void tooltip_detail_enter(DetailCopy& c);  // ItemDetail entry (the probe's DETAIL line and its key)
+void tooltip_reset_for_tests();
 
 const KilnUiValuesApi* table();
 void reset_for_tests();  // registry, installers' state and text (host tests only)

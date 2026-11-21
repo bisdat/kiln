@@ -212,6 +212,11 @@ fn every_example_deserializes_into_its_type() {
     assert!(r.files.iter().any(|f| f.config));
     let _: install::InstallReceipt = example("install-receipt.json");
     let _: modpack::ModpackManifest = example("kiln-modpack.json");
+    let pack: modpack::pack::PackIndex = example("kiln-pack.json");
+    modpack::pack::check_index(&pack).unwrap();
+    assert_eq!(pack.layer_id(), "pack.ember-run");
+    let inst: modpack::pack::Instance = example("kiln-pack-instance.json");
+    assert_eq!(inst.pack, pack.id);
     let b: state::BootJson = example("state-boot.json");
     assert_eq!(b.chain[2].detail, Some(state::RefusalDetail::ShroudForge));
     let _: state::ModsJson = example("state-mods.json");
@@ -221,6 +226,13 @@ fn every_example_deserializes_into_its_type() {
     let _: admin::protocol::Endpoint = example("admin-endpoint.json");
     let (_, j): (kiln_manage::data_folder::Pointer, kiln_manage::data_folder_move::Journal) = (example("data-folder.json"), example("data-folder-move.json"));
     assert_eq!((j.entries.len(), j.rewritten_after.len()), (5, 1));
+    // vendor files (an example manifest is checked by the manifest's own rules too)
+    let vm = kiln_manage::vendor::manifest::parse(&read("schema/examples/vendor-components.json")).unwrap();
+    assert!(vm.components[0].pinned());
+    let vr: kiln_manage::vendor::store::Receipt = example("vendor-receipt.json");
+    assert_eq!((vr.component.as_str(), vr.files.len()), ("intel-xess", 1));
+    let va: kiln_manage::vendor::Agreements = example("vendor-licenses.json");
+    assert!(va.agreed(&vm.components[0]));
 }
 
 #[test]

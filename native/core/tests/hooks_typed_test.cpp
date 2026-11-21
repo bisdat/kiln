@@ -134,6 +134,12 @@ bool load_fragment(std::string_view, const std::filesystem::path&, const std::fi
     return false;
 }
 bool unload_fragment(std::string_view) { return false; }
+}  // namespace sigdb
+namespace caps {  // a fragment's capability rows (caps.cpp): no registry here
+void fragment_rows(std::string_view) {}
+void fragment_gone(std::string_view) {}
+}  // namespace caps
+namespace sigdb {
 bool file_bytes(uintptr_t a, uint8_t* out, size_t n) {
     for (auto& [at, bytes] : g_file)
         if (a >= at && a + n <= at + bytes.size()) {
@@ -1109,9 +1115,10 @@ HANDLE park_at(uintptr_t at) {
 
 void test_checked_install() {
     std::puts("-- detour_typed_checked: the first detour is written only when every thread is checked and none is inside");
-    check(offsetof(KilnHooksApi, detour_typed_checked) == 288 && sizeof(KilnHooksApi) == 296 && A->detour_typed_checked &&
+    check(offsetof(KilnHooksApi, detour_typed_checked) == 288 && offsetof(KilnHooksApi, read_original) == 296 &&
+              offsetof(KilnHooksApi, open_module) == 312 && A->detour_typed_checked &&
               A->header.size >= offsetof(KilnHooksApi, detour_typed_checked) + sizeof(void*),
-          "the table carries detour_typed_checked at 288 (296 bytes)");
+          "the table carries detour_typed_checked at 288 (unchanged 296-byte prefix)");
     const uintptr_t t = T(&tg_asm_checked);
     const KilnSigArg args[] = {arg("x", KILN_SIG_S32)};
     const KilnSigArg wrong[] = {arg("x", KILN_SIG_F64)};

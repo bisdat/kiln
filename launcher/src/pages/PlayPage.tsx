@@ -17,6 +17,7 @@ import { otherFolderProfile, otherFolderTitle } from "../shell/dataFolderText";
 import { qk, useGame, useGameSel, useGameStatus, useLaunchState, usePoll, usePreStart, useProfiles, useRuntimeChanges } from "../api/hooks";
 import { detectGames, useDetect, useEnsureProfile, useInstallPrompt, useKilnInstall } from "../shell/firstRun";
 import { clock, usePlayControl, type PlayControl } from "../shell/play";
+import { RuntimeFailure } from "../shell/RuntimeFailure";
 import { isDefaultProfile, useMods } from "../shell/useMods";
 import { MainList } from "./mods/MainList";
 import { StartProgress } from "../shell/StartPanel";
@@ -25,6 +26,11 @@ import { useUpdate } from "../api/update";
 import { rich, t, useT } from "../i18n";
 import { ArchText, Banner, Button, Cones, Field, KeyValue, Modal, PathPicker, TaskProgress, errorText, toast } from "../ui";
 import { StartModal, UnknownBuild, useStartSetup, useStartWord } from "../components/GameStart";
+import { SendToSupport } from "../community/parts";
+import { crashLine, useCrash, useCrashNotice } from "../community/crash";
+import { ShareDock } from "../crucible/Share";
+import { CrucibleUpdateBanner } from "../crucible/Update";
+import { useCrucibleOn } from "../crucible/state";
 
 /** Windows (WebView2): path examples in Windows form. */
 const WIN = /Windows/i.test(navigator.userAgent);
@@ -120,7 +126,7 @@ const PROXY_PRODUCT: Partial<Record<ProxyKind, string>> = {
   eml: "EML", flame: "Flame (Creative Mode)", shroudlink: "shroudlink", modloaderproxy: "ModLoader Proxy",
   ultimateasiloader: "Ultimate ASI Loader", aldrich: "Aldrich Mod Menu",
   set: "Shrouded Engine Tweaks", enshwick: "Enshwick", greeneye: "Greeneye Loader", shroudtopia: "Shroudtopia",
-  ember: "Ember", livemap: "Live Map", sharedxp: "Shared XP", reshade: "ReShade", optiscaler: "OptiScaler",
+  ember: "Ember", dllmod: "Enshrouded ModLoader", livemap: "Live Map", sharedxp: "Shared XP", reshade: "ReShade", optiscaler: "OptiScaler",
 };
 
 function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; onAdded: (g: GameInstall) => void }) {
@@ -189,6 +195,8 @@ function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; 
   // only a profile other than the default is named on the main screen
   const other = rt?.installed && cur && !isDefaultProfile(cur) ? cur : null;
   const showList = !!rt?.installed && (!!mods.profileId || list.length > 0);
+  // (dev.30) Crucible: share the loaded profile, open a code, the pack update banner
+  const crucible = useCrucibleOn() && !!rt?.installed && !!mods.profileId;
 
   return (
     <>
@@ -210,10 +218,11 @@ function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; 
         </div>
         <StoppedStartNotice ctl={ctl} />
         <Banners game={game} ctl={ctl} pending={pending.data ?? null} onOffer={() => setOfferOpen(true)} boot={fresh ? boot : null} />
+        {crucible && <CrucibleUpdateBanner game={game} profileId={mods.profileId} />}
         <h1 className="k-hero-name"><span className="k-title static">Enshrouded</span></h1>
         {ctl.timeline ? (
           <div className="k-hero-state k-hero-start" key="progress">
-            <StartProgress t={ctl.timeline} prep={prep} />
+            <StartProgress t={ctl.timeline} prep={prep} action={ctl.waitingForGame && <StopWaiting ctl={ctl} />} />
           </div>
         ) : starting ? (
           <div className="k-hero-state" key="start">
@@ -226,6 +235,7 @@ function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; 
                 </li>
               ))}
             </ol>
+            {ctl.waitingForGame && <div className="k-hero-stop"><StopWaiting ctl={ctl} /></div>}
           </div>
         ) : ctl.running ? (
           <div className="k-hero-state" key="run">
@@ -266,6 +276,7 @@ function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; 
           ) : <span title={lastBoot}>{lastBoot}</span>}</dd></div>
         </dl>
       </section>
+      {crucible && mods.profileId && <ShareDock game={game} profileId={mods.profileId} profileName={cur?.name ?? mods.profileId} />}
 
       <div className="k-foot">
         <span className="k-mono" title={game.path}>{shortPath(game.path)}</span>
@@ -293,6 +304,13 @@ function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; 
   );
 }
 
+/** (29.18) While Play waits for a game Steam has not started (a launch cancelled in Steam): Play again at once, and the
+ *  launcher forgets the start (PlayControl.stopWaiting). Never shown once the game runs. */
+function StopWaiting({ ctl }: { ctl: PlayControl }) {
+  const t = useT();
+  return <button type="button" className="k-link" title={t("shell.play.stopWaitingTip")} onClick={ctl.stopWaiting}>{t("shell.play.stopWaiting")}</button>;
+}
+
 /** Refusal, Kiln did not start, the Steam launch option, Steam updating, safe idle: flat strips above the name. */
 function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl: PlayControl; pending: LastServer | null; onOffer: () => void; boot: api.BootJson | null }) {
   const t = useT();
@@ -305,6 +323,17 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
   const direct = s?.start === "direct";
   const setup = useStartSetup(game.id, direct);
   const out = [];
+  // the game closed and Kiln wrote a crash report in that run (community/crash.ts): the report first, then support
+  const crash = useCrashNotice(game.id);
+  if (crash && !ctl.running) {
+    out.push(
+      <Banner key="crash" tone="err" title={t("community.banner.crashTitle")} actions={<>
+        <Button size="s" onClick={() => nav("/logs")}>{t("community.banner.crashReport")}</Button>
+        <SendToSupport from="crash" target={{ game: game.id }} kind="crash" />
+        <button type="button" className="k-link" onClick={() => useCrash.getState().dismiss(game.id)}>{t("common.dismiss")}</button>
+      </>}><span data-testid="crash-notice">{crashLine(crash)}</span></Banner>,
+    );
+  }
   // (dev.29.17) the exe's build is one Kiln has no verified record of: Kiln starts with the game and stays idle
   if (s?.build && !s.build.known) out.push(<UnknownBuild key="build" build={s.build} />);
   if (direct && setup.data?.problem && !ctl.running) {
@@ -327,10 +356,12 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
     out.push(
       <Banner key="rt" tone="err" title={t("play.banner.changeFailed", { what: change.what })} actions={<>
         <Button size="s" onClick={() => nav("/runtime")}>{t("play.banner.runtime")}</Button>
+        <SendToSupport from="banner" target={{ game: game.id }} kind="noload" />
         <button type="button" className="k-link" onClick={() => useRuntimeChanges.getState().clear(game.id)}>{t("common.dismiss")}</button>
       </>}>
-        <span style={{ overflowWrap: "anywhere" }}>{change.error?.message ?? t("play.banner.noReason")}</span>{" "}
-        {has ? rich("play.banner.stillHas", { version: <span className="k-mono">{has}</span> }) : t("play.banner.notInGame")}
+        <RuntimeFailure error={change.error} platform={game.platform} fallback={t("play.banner.noReason")}>
+          {has ? rich("play.banner.stillHas", { version: <span className="k-mono">{has}</span> }) : t("play.banner.notInGame")}
+        </RuntimeFailure>
       </Banner>,
     );
   }
@@ -354,17 +385,21 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
       </Banner>,
     );
   }
-  const advice = s?.runtime.installed && ctl.view.phase !== "vanilla" ? s.launchOptions?.advice : null;
+  const options = s?.launchOptions;
+  // Suppress routine advice for known-native runners, but restore the explicit fix
+  // if Kiln actually failed to start (including GE-Proton 11-11+).
+  const advice = s?.runtime.installed && ctl.view.phase !== "vanilla"
+    ? ((ctl.kilnMissing || ctl.stuck) ? options?.advice ?? options?.fallbackAdvice : options?.advice) : null;
   if (advice && (!s?.launchOptions?.hasDllOverride || s.launchOptions.chainedOverrideMissing)) {
     out.push(
       <Banner key="adv" tone="warn" title={s?.launchOptions?.hasDllOverride && s.launchOptions.chainedOverrideMissing ? t("play.banner.settingAsi") : ctl.kilnMissing ? t("play.banner.notLoading") : ctl.stuck ? t("play.banner.didNotStart") : t("play.banner.setting")}
-        actions={<Button size="s" onClick={async () => {
+        actions={<><Button size="s" onClick={async () => {
           try {
             if (!navigator.clipboard) throw new Error(t("play.banner.noClipboard"));
             await navigator.clipboard.writeText(advice);
             toast.ok(t("play.banner.copied"), t("play.banner.copiedDetail"));
           } catch (e) { toast.error(e, t("play.banner.copyFailed")); }
-        }}>{t("common.copy")}</Button>}>
+        }}>{t("common.copy")}</Button>{(ctl.kilnMissing || ctl.stuck) && <SendToSupport from="banner" target={{ game: game.id }} kind="noload" />}</>}>
         {!s?.launchOptions?.hasDllOverride && ctl.stuck ? rich("play.banner.adviceStuck", { option: <span className="k-mono">{advice}</span> })
           : s?.launchOptions?.hasDllOverride && s.launchOptions.chainedOverrideMissing ? rich("play.banner.adviceAsi", { option: <span className="k-mono">{advice}</span> })
           : rich("play.banner.advice", { option: <span className="k-mono">{advice}</span> })}
@@ -373,7 +408,7 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
   } else if (ctl.stuck && s?.runtime.installed) {
     // the launch option is set (or not needed here) and Kiln still did not load: say so, never "Starting" forever
     out.push(
-      <Banner key="nokiln" tone="warn" title={ctl.kilnMissing ? t("play.banner.notLoading") : t("play.banner.didNotStart")} actions={<Button size="s" onClick={() => nav("/logs")}>{t("play.banner.supportReport")}</Button>}>
+      <Banner key="nokiln" tone="warn" title={ctl.kilnMissing ? t("play.banner.notLoading") : t("play.banner.didNotStart")} actions={<><Button size="s" onClick={() => nav("/logs")}>{t("play.banner.supportReport")}</Button><SendToSupport from="banner" target={{ game: game.id }} kind="noload" /></>}>
         {t("play.banner.noKiln")}
       </Banner>,
     );
@@ -387,7 +422,7 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
     );
   }
   if (boot?.safeIdle) out.push(<Banner key="safe" tone="warn" title={t("play.banner.safeIdle")}>{boot.safeIdle}</Banner>);
-  else if (boot?.profile.mode === "invalid") out.push(<Banner key="inv" tone="err" title={t("play.banner.noModsLoaded")}>{boot.profile.error ?? t("play.banner.profileInvalid")}</Banner>);
+  else if (boot?.profile.mode === "invalid") out.push(<Banner key="inv" tone="err" title={t("play.banner.noModsLoaded")} actions={<SendToSupport from="banner" target={{ game: game.id }} kind="mod" />}>{boot.profile.error ?? t("play.banner.profileInvalid")}</Banner>);
   if (!out.length) return null;
   return <div className="k-stack k-hero-banner" style={{ gap: 6 }}>{out}</div>;
 }

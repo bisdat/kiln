@@ -191,9 +191,11 @@ update with the rest following a quarter of a second later, 4,096 items per game
 [services/saves.md](../services/saves.md#on-players-games-dev27). The sample `mods/samples/ItemData` shows its notch
 count this way.
 
-**What a mod cannot do with it yet:** draw into the game's own item tooltip. The detail view of an item is not
-reachable from a mod (the hook points are mapped in `docs/re/game-ui.md` and in the design, but not built), so a mod
-shows a synced value in a screen of its own, a HUD line or a notice.
+**Showing it on the item's slot (0.2.0-dev.30):** `Ui.Inventory.Mark(item, mark)` draws a mark over the slot the
+game draws for that item (backpack, chest, hotbar), and `Ui.Inventory.OnClick` gives your mod a click on a slot with the
+item's entity id (the server's id of it), for example to mark it on the server: see [../ui.md](../ui.md#the-games-inventory-slots-0200-dev30).
+Lines in the game's own item tooltip come with `Ui.Tooltip` (the equipment work); until then a mod shows a synced value in
+Kiln's Item details window, a screen of its own, a HUD line or a notice.
 
 ### Which API
 | The thing | API |

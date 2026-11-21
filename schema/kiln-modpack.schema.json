@@ -1,39 +1,482 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "kiln-modpack.schema.json",
-  "title": "Kiln server modpack manifest (kiln-modpack.json at the zip root), format 1",
-  "description": "A modpack is a deterministic zip: kiln-modpack.json plus one folder per mod at <kind>/<id>/ (kiln/<id>/, native/<id>/, emf/<id>/) or plugin/<file>.dll. The launcher checks the zip's sha256 (from the server's network.json / last-server.json), then this file, then each mod folder's kdh1 before it imports anything. Contains the mods players need (manifest clients: mod).",
+  "title": "Kiln modpack manifest (kiln-modpack.json at the zip root): format 1 (server modpack) or 2 (Crucible pack)",
+  "description": "Format 1: a server's modpack for its players (docs/kiln/launcher/modpacks.md). Format 2: a Crucible pack, a .kilnpack (docs/kiln/launcher/crucible.md). A launcher refuses a format it does not know and says to update.",
   "type": "object",
-  "required": ["format", "name", "version", "server", "mods"],
-  "properties": {
-    "$schema": { "type": "string" },
-    "format": { "const": 1 },
-    "name": { "type": "string", "minLength": 1, "maxLength": 128 },
-    "version": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Free-form (the server admin's modpack version)." },
-    "created": { "$ref": "common.schema.json#/$defs/time" },
-    "server": {
-      "type": "object",
-      "required": ["id"],
-      "properties": { "id": { "$ref": "common.schema.json#/$defs/serverId" }, "name": { "type": "string" } }
-    },
-    "kiln": { "$ref": "common.schema.json#/$defs/range", "description": "Kiln versions players need (default: any)." },
-    "mods": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["kind", "id", "version", "path", "hash"],
-        "properties": {
-          "kind": { "$ref": "common.schema.json#/$defs/kind" },
-          "id": { "$ref": "common.schema.json#/$defs/modId" },
-          "version": { "$ref": "common.schema.json#/$defs/semver" },
-          "name": { "type": "string" },
-          "path": { "$ref": "common.schema.json#/$defs/relPath", "description": "Folder (or plugin DLL) inside the zip, e.g. kiln/isle-icons" },
-          "hash": { "oneOf": [{ "$ref": "common.schema.json#/$defs/kdh1" }, { "$ref": "common.schema.json#/$defs/sha256" }], "description": "kdh1 of the folder; sha256 for a plugin DLL." },
-          "clients": { "$ref": "common.schema.json#/$defs/clients" },
-          "side": { "$ref": "common.schema.json#/$defs/side" }
-        }
+  "required": [
+    "format"
+  ],
+  "if": {
+    "properties": {
+      "format": {
+        "const": 2
       }
-    }
+    },
+    "required": [
+      "format"
+    ]
   },
-  "additionalProperties": true
+  "then": {
+    "$ref": "#/$defs/format2"
+  },
+  "else": {
+    "$ref": "#/$defs/format1"
+  },
+  "$defs": {
+    "format1": {
+      "type": "object",
+      "required": [
+        "format",
+        "name",
+        "version",
+        "server",
+        "mods"
+      ],
+      "properties": {
+        "$schema": {
+          "type": "string"
+        },
+        "format": {
+          "const": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Free-form (the server admin's modpack version)."
+        },
+        "created": {
+          "$ref": "common.schema.json#/$defs/time"
+        },
+        "server": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "common.schema.json#/$defs/serverId"
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        },
+        "kiln": {
+          "$ref": "common.schema.json#/$defs/range",
+          "description": "Kiln versions players need (default: any)."
+        },
+        "mods": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind",
+              "id",
+              "version",
+              "path",
+              "hash"
+            ],
+            "properties": {
+              "kind": {
+                "$ref": "common.schema.json#/$defs/kind"
+              },
+              "id": {
+                "$ref": "common.schema.json#/$defs/modId"
+              },
+              "version": {
+                "$ref": "common.schema.json#/$defs/semver"
+              },
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "$ref": "common.schema.json#/$defs/relPath",
+                "description": "Folder (or plugin DLL) inside the zip, e.g. kiln/isle-icons"
+              },
+              "hash": {
+                "oneOf": [
+                  {
+                    "$ref": "common.schema.json#/$defs/kdh1"
+                  },
+                  {
+                    "$ref": "common.schema.json#/$defs/sha256"
+                  }
+                ],
+                "description": "kdh1 of the folder; sha256 for a plugin DLL."
+              },
+              "identity": {
+                "$ref": "common.schema.json#/$defs/kdh1",
+                "description": "What the server advertises for this mod when that is not hash (0.2.0-dev.29.18): another engine's mod whose advertised hash leaves out what changes while it runs (the launcher's copy: its Library entry's kdh1; any other folder: its files without logs and settings). A player's launcher accepts the server's hash when it is hash or identity."
+              },
+              "clients": {
+                "$ref": "common.schema.json#/$defs/clients"
+              },
+              "side": {
+                "$ref": "common.schema.json#/$defs/side"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": true,
+      "title": "Format 1: a server modpack",
+      "description": "A modpack is a deterministic zip: kiln-modpack.json plus one folder per mod at <kind>/<id>/ (kiln/<id>/, native/<id>/, emf/<id>/) or plugin/<file>.dll. The launcher checks the zip's sha256 (from the server's network.json / last-server.json), then this file, then each mod folder's kdh1 before it imports anything. Contains the mods players need (manifest clients: mod)."
+    },
+    "format2": {
+      "title": "Format 2: a Crucible pack (.kilnpack)",
+      "description": "A .kilnpack is a deterministic zip: kiln-modpack.json, mods/<kind>/<id>/... (plugins mods/plugin/<file>.dll), layer/ (the pack layer, a data-only Kiln mod pack.<id>), overrides/<path>, client-overrides/<path>, server-overrides/<path> (paths relative to the profile's configDir). The launcher checks every mod's and the layer's kdh1 and every override's sha256 before it imports anything. Docs: docs/kiln/launcher/crucible.md.",
+      "type": "object",
+      "required": [
+        "format",
+        "kind",
+        "id",
+        "name",
+        "version",
+        "mods"
+      ],
+      "properties": {
+        "$schema": {
+          "type": "string"
+        },
+        "format": {
+          "const": 2
+        },
+        "kind": {
+          "const": "pack"
+        },
+        "id": {
+          "allOf": [
+            {
+              "$ref": "common.schema.json#/$defs/modId"
+            },
+            {
+              "maxLength": 59
+            }
+          ],
+          "description": "The pack's id; its layer is pack.<id>."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "version": {
+          "$ref": "common.schema.json#/$defs/semver"
+        },
+        "created": {
+          "$ref": "common.schema.json#/$defs/time"
+        },
+        "authors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "game": {
+          "type": "object",
+          "properties": {
+            "builds": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "description": "Steam build ids the pack was made for (a yellow note when the player's differs)."
+        },
+        "kiln": {
+          "$ref": "common.schema.json#/$defs/range",
+          "description": "Kiln versions the pack needs."
+        },
+        "api": {
+          "$ref": "common.schema.json#/$defs/range",
+          "description": "Kiln API versions the pack needs."
+        },
+        "crucible": {
+          "type": "object",
+          "properties": {
+            "pack": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "slug": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            }
+          },
+          "description": "Filled in by Crucible's signed index."
+        },
+        "mods": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind",
+              "id",
+              "version",
+              "path",
+              "hash"
+            ],
+            "properties": {
+              "kind": {
+                "$ref": "common.schema.json#/$defs/kind"
+              },
+              "id": {
+                "$ref": "common.schema.json#/$defs/modId"
+              },
+              "version": {
+                "$ref": "common.schema.json#/$defs/semver"
+              },
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "$ref": "common.schema.json#/$defs/relPath",
+                "pattern": "^mods/[a-z]+/[^/]+$",
+                "description": "mods/<kind>/<id>, or mods/plugin/<file>.dll"
+              },
+              "hash": {
+                "oneOf": [
+                  {
+                    "$ref": "common.schema.json#/$defs/kdh1"
+                  },
+                  {
+                    "$ref": "common.schema.json#/$defs/sha256"
+                  }
+                ],
+                "description": "kdh1 (a Kiln mod's identity); sha256 for a plugin DLL."
+              },
+              "dep": {
+                "enum": [
+                  "required",
+                  "optional"
+                ],
+                "default": "required"
+              },
+              "default": {
+                "type": "boolean",
+                "description": "An optional mod's switch until the player sets it (default on)."
+              },
+              "env": {
+                "type": "object",
+                "properties": {
+                  "client": {
+                    "enum": [
+                      "required",
+                      "optional",
+                      "unsupported"
+                    ]
+                  },
+                  "server": {
+                    "enum": [
+                      "required",
+                      "optional",
+                      "unsupported"
+                    ]
+                  }
+                },
+                "description": "What each side needs; absent: required on both."
+              },
+              "file": {
+                "type": "object",
+                "required": [
+                  "sha256",
+                  "size"
+                ],
+                "properties": {
+                  "sha256": {
+                    "$ref": "common.schema.json#/$defs/sha256"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "url": {
+                    "type": "string",
+                    "pattern": "^https://"
+                  }
+                },
+                "description": "Where Crucible stores the archive (content-addressed); absent in a locally built pack."
+              },
+              "credit": {
+                "type": "object",
+                "required": [
+                  "author",
+                  "source"
+                ],
+                "properties": {
+                  "author": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source": {
+                    "type": "string",
+                    "pattern": "^https://"
+                  },
+                  "match": {
+                    "enum": [
+                      "kiln",
+                      "crucible",
+                      "github",
+                      "nexus",
+                      "manifest",
+                      "manual"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "layer": {
+          "type": "object",
+          "required": [
+            "id",
+            "version",
+            "path",
+            "hash"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^pack\\."
+            },
+            "version": {
+              "$ref": "common.schema.json#/$defs/semver"
+            },
+            "path": {
+              "const": "layer"
+            },
+            "hash": {
+              "$ref": "common.schema.json#/$defs/kdh1"
+            },
+            "file": {
+              "type": "object",
+              "required": [
+                "sha256",
+                "size"
+              ],
+              "properties": {
+                "sha256": {
+                  "$ref": "common.schema.json#/$defs/sha256"
+                },
+                "size": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "url": {
+                  "type": "string",
+                  "pattern": "^https://"
+                }
+              },
+              "description": "Where Crucible stores the archive (content-addressed); absent in a locally built pack."
+            }
+          }
+        },
+        "order": {
+          "type": "object",
+          "properties": {
+            "kiln": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "late": {
+              "type": "array",
+              "items": {
+                "$ref": "common.schema.json#/$defs/modId"
+              }
+            }
+          },
+          "description": "kiln: the creator's Kiln load order (the layer last; the runtime orders by manifests); late: native ids for chain.ini [late]."
+        },
+        "dropins": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/kind"
+          },
+          "description": "Drop-in folders the instance loads (default none)."
+        },
+        "overrides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "mode",
+              "sha256"
+            ],
+            "properties": {
+              "path": {
+                "$ref": "common.schema.json#/$defs/relPath",
+                "description": "Relative to configDir: a settings file (txt ini cfg json toml yaml yml), not .schema/, not native.json."
+              },
+              "mode": {
+                "enum": [
+                  "merge-patch",
+                  "ini",
+                  "replace"
+                ]
+              },
+              "side": {
+                "enum": [
+                  "both",
+                  "client",
+                  "server"
+                ],
+                "default": "both"
+              },
+              "sha256": {
+                "$ref": "common.schema.json#/$defs/sha256"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65536,
+                "description": "Of the file in the zip, in bytes (written by every build; Crucible needs it to plan the upload). Checked when present."
+              }
+            }
+          }
+        },
+        "server": {
+          "type": "object",
+          "properties": {
+            "settings": {
+              "type": "object",
+              "properties": {
+                "gameSettings": {
+                  "type": "object"
+                }
+              },
+              "additionalProperties": false,
+              "description": "Merged into enshrouded_server.json: gameSettings only (a server's name, ports, user groups with their passwords and bans never travel in a pack)."
+            },
+            "notes": {
+              "type": "string"
+            }
+          }
+        },
+        "changes": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
 }

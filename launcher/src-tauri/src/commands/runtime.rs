@@ -15,7 +15,7 @@ use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Manager};
 
 /// The Kiln runtime this launcher ships (tools/launcher/shipped-runtime.sh), as a resource of the app.
-const SHIPPED_RUNTIME: &str = "runtime/kiln-runtime.zip";
+pub(crate) const SHIPPED_RUNTIME: &str = "runtime/kiln-runtime.zip";
 static SHIPPED_DONE: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
 /// The version of the runtime this launcher ships, once [`import_shipped`] read it (None: none shipped, not read yet).
 static SHIPPED_VERSION: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);

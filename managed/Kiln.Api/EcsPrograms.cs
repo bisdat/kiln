@@ -604,6 +604,24 @@ public readonly unsafe ref struct EcsProgramContext
         if (_binding.World != WorldKind.Server) ClientWrote(Entity.Value, component, before, value);
         return true;
     }
+    /// <summary>Reads a declared write component of the current entity: its value now, before (or after) this call's
+    /// <see cref="TryWrite{T}(string, T)"/>. The same slot <see cref="TryWrite{T}(string, T)"/> writes, so a program that
+    /// changes a component it also reads declares it once, under <c>write</c> (or <c>writeOptional</c>), with no
+    /// <c>read</c> or <c>otherRead</c> entry for it. An optional component the entity lacks returns false; so does a
+    /// build without kiln.types (logged once per program) and a <typeparamref name="T"/> whose size is not the game's.
+    /// Any world. Since 0.2.0-dev.29.18 (mod API 0.2.10).</summary>
+    /// <exception cref="ArgumentException"><paramref name="component"/> is empty or not in the program's write lists.</exception>
+    public bool TryReadWritable<T>(string component, out T value) where T : unmanaged
+    {
+        var entry = Declared(2, component);
+        var data = (void*)_iterator[entry.Slot];
+        if (data == null || entry.Size != sizeof(T)) { value = default; return false; }
+        value = *(T*)data;
+        return true;
+    }
+    /// <summary><see cref="TryReadWritable{T}(string, out T)"/> for a generated component type
+    /// (<c>Kiln.Ecs.SlotAttachment</c>): the declared name is the type's. Since 0.2.0-dev.29.18 (mod API 0.2.10).</summary>
+    public bool TryGetWritable<T>(out T value) where T : unmanaged, IGameComponent<T> => TryReadWritable(T.Name, out value);
     /// <summary>Reads another entity through an otherRead declaration. False when absent or the layout size differs.</summary>
     public bool TryReadOther<T>(EntityId entity, string component, out T value) where T : unmanaged
     {

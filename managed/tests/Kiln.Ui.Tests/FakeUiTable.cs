@@ -343,6 +343,8 @@ internal static unsafe class FakeUiTable
     public static void Free()
     {
         StatusError = "";
+        // the tests free the tables they put here right after this: a backend still installed must not hand them out
+        Other.Clear();
         if (Table != null) NativeMemory.Free(Table);
         Table = null;
     }

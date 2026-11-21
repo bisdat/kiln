@@ -15,6 +15,7 @@ internal static unsafe class UiValuesAbi
     public const string Service = "kiln.ui.values";
     public const uint Version = 1;
     public const uint Lines = 6;  // the list of tooltip-lines providers
+    public const uint Slots = 7;  // the list of slot-frame subscribers
     public static readonly string[] Rows =
         ["ui.values.detail", "ui.values.slot", "ui.values.held", "ui.values.hud", "ui.values.tooltip_lines"];
     public const string SlotsRow = "ui.slots.inspect";
@@ -144,13 +145,13 @@ internal sealed unsafe class UiValuesFake : IKitFake
             t->TooltipLines = &TooltipLines;
             t->Unsubscribe = &Unsubscribe;
             t->CopySlots = &CopySlots;
-            t->SubscribeSlots = &NoRegistration;
+            t->SubscribeSlots = &SubscribeSlots;
             t->SubscribeChanges = &NoRegistration;
             t->OpenTooltipDetails = &NoDetails;
             t->CloseTooltipDetails = &Close;
             t->TooltipDetails = &NoDetailsWhich;
             t->RefreshTooltipDetails = &NoDetails;
-            t->CopyGemForge = &CopySlots;
+            t->CopyGemForge = &NoCopy;
             t->SubscribeGemForge = &NoRegistration;
             t->GemForgeSockets = &GemForgeSockets;
             var ops = (UiValuesAbi.TextOps*)NativeMemory.AllocZeroed((nuint)sizeof(UiValuesAbi.TextOps));
@@ -163,7 +164,7 @@ internal sealed unsafe class UiValuesFake : IKitFake
         }
         KitBackend.Instance.RegisterTable(UiValuesAbi.Service, (nint)_table);
         FakeTables.Features(UiValuesAbi.Rows);
-        FakeTables.Offline(UiValuesAbi.SlotsRow, "no game UI draws slots offline");
+        // ui.slots.inspect is the kit's kiln.ui.inventory fake's row (Fakes/UiInventory): the slot frames a test draws
         FakeTables.Offline(UiValuesAbi.GemForgeRow, "no game UI draws the Gem Forge offline");
     }
 
@@ -172,18 +173,19 @@ internal sealed unsafe class UiValuesFake : IKitFake
     public void End(KilnHarness harness) { }
 
     public void AddCoverage(List<CoverageRow> rows) =>
-        rows.Add(new CoverageRow("Values in the game UI", CoverageKind.RecordingFake, [UiValuesAbi.Service, .. UiValuesAbi.Rows, UiValuesAbi.SlotsRow],
+        rows.Add(new CoverageRow("Values in the game UI", CoverageKind.RecordingFake, [UiValuesAbi.Service, .. UiValuesAbi.Rows],
             "Ui.Values' own code on the kit's kiln.ui.values: providers register (ItemBar, SlotBar, HeldBar, Hud, TooltipLines) and a test " +
             "draws a value or a detail view (KilnHarness.UiValues.Draw, DetailLines) over a fake item: the providers run in order over the " +
             "accumulated value, edits are checked by the kind's masks, refusals and faults are recorded (Decisions). Offline: the game's " +
-            "drawing and hooks, slot frames (ui.slots.inspect), change events and the Item details window."));
+            "drawing and hooks, change events and the Item details window. Slot frames (ui.slots.inspect): the frames a test draws " +
+            "with KilnHarness.UiInventory.Draw."));
 
     internal static UiValuesFakeState? State => KitBackend.Instance.Harness is { } h ? KitFakes.State<UiValuesFakeState>(h) : null;
 
     private static int Add(ulong owner, uint list, uint item, void* fn, void* user, UiValuesAbi.Registration* r)
     {
         if (r == null || r->Size < (uint)sizeof(UiValuesAbi.Registration) || fn == null || owner == 0) return FakeTables.InvalidArgument;
-        var row = list switch { 0 => "ui.values.detail", 1 => "ui.values.slot", 2 => "ui.values.held", UiValuesAbi.Lines => "ui.values.tooltip_lines", _ => "ui.values.hud" };
+        var row = list switch { 0 => "ui.values.detail", 1 => "ui.values.slot", 2 => "ui.values.held", UiValuesAbi.Lines => "ui.values.tooltip_lines", UiValuesAbi.Slots => UiValuesAbi.SlotsRow, _ => "ui.values.hud" };
         if (FakeTables.Active(UiValuesAbi.Service) is null || FakeTables.Off(row) || State is not { } st) return FakeTables.Unavailable;
         lock (st.Lock)
         {
@@ -236,7 +238,67 @@ internal sealed unsafe class UiValuesFake : IKitFake
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int CopySlots(ulong o, ulong s, ulong f, void* frame, void* slots, uint capacity, uint* required) => FakeTables.Unavailable;
+    private static int NoCopy(ulong o, ulong s, ulong f, void* frame, void* items, uint capacity, uint* required) => FakeTables.Unavailable;
+
+    // copy_slots: the frame a test drew (KilnHarness.UiInventory.Draw), as just captured (frames do not age offline)
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int CopySlots(ulong o, ulong s, ulong f, void* frame, void* slots, uint capacity, uint* required)
+    {
+        try
+        {
+            var fr = (Kiln.UiValuesNative.SlotsFrame*)frame;
+            if (o == 0 || fr == null || fr->Size < (uint)sizeof(Kiln.UiValuesNative.SlotsFrame)) return FakeTables.InvalidArgument;
+            if (FakeTables.Off(UiValuesAbi.SlotsRow) || UiInventoryFake.State is not { } st) return FakeTables.Unavailable;
+            lock (st.Lock) return FillFrame(st, fr, (Kiln.UiValuesNative.VisibleSlot*)slots, capacity, required);
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
+    internal static int FillFrame(UiInventoryFakeState st, Kiln.UiValuesNative.SlotsFrame* fr, Kiln.UiValuesNative.VisibleSlot* slots,
+        uint capacity, uint* required)
+    {
+        var size = fr->Size;
+        *fr = default;
+        fr->Size = size;
+        if (st.Slots is not { } drawn)
+        {
+            fr->Reason = Kiln.UiValuesNative.ReasonNoFrame;
+            return FakeTables.Ok;
+        }
+        fr->Session = 1;
+        fr->Frame = st.Frame;
+        fr->Screen = UiInventoryFake.ScreenOf(st.Screen, st.Frame);
+        fr->CaptureMs = (ulong)Environment.TickCount64;
+        fr->CanvasWidth = 1920;
+        fr->CanvasHeight = 1080;
+        fr->PixelsPerUnit = 1;
+        fr->ViewportPx = new Kiln.UiValuesNative.Rect { Width = 1920, Height = 1080 };
+        fr->TransformFlags = Kiln.UiValuesNative.Viewport;  // the mapping is never verified offline: no pixel rectangles
+        if (required != null) *required = (uint)drawn.Length;
+        if (capacity < drawn.Length || (drawn.Length > 0 && slots == null)) return FakeTables.BufferTooSmall;
+        for (var i = 0; i < drawn.Length; i++) slots[i] = drawn[i];
+        fr->Ok = 1;
+        fr->Count = (uint)drawn.Length;
+        return FakeTables.Ok;
+    }
+
+    // subscribe_slots: called with each frame a test draws
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int SubscribeSlots(ulong owner, void* fn, void* user, UiValuesAbi.Registration* r)
+    {
+        try
+        {
+            if (FakeTables.Off(UiValuesAbi.SlotsRow)) return FakeTables.Unavailable;
+            return Add(owner, UiValuesAbi.Slots, 0, fn, user, r);
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
 
     // gems.sockets: records the owner's mask (the forge lists are not drawn offline). A switched-off row answers as the
     // native service does; a removal (0) always succeeds.

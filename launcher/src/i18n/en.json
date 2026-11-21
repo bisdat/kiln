@@ -1263,6 +1263,7 @@
       "flame": "Flame mod",
       "shroudlink": "shroudlink mod",
       "ember": "Ember mod (doesn't run yet)",
+      "dllmod": "Enshrouded ModLoader mod",
       "proxy": "Loader",
       "data": "Game data",
       "save": "Save file",
@@ -1344,6 +1345,10 @@
       "lastBoot": "Last boot",
       "sfModsFailed": "mods did not load",
       "sfPassFailed": "startup pass failed",
+      "sfModSkipped": {
+        "one": "one mod left out, the others loaded",
+        "other": "{count} mods left out, the others loaded"
+      },
       "sfWhy": "ShroudForge: why, and what to do",
       "pickFolder": "Pick folder",
       "updateKiln": "Update Kiln",
@@ -1352,7 +1357,8 @@
       "notLoading": "Kiln is not loading",
       "mouthAria": "{word}: {sub}",
       "sfModsTitle": "ShroudForge mods did not load",
-      "sfPassTitle": "ShroudForge's startup pass failed"
+      "sfPassTitle": "ShroudForge's startup pass failed",
+      "sfSkippedTitle": "ShroudForge left a mod out"
     },
     "mods": {
       "notTaken": "not taken",
@@ -1512,6 +1518,10 @@
       "nothingAdded": "Nothing was added",
       "addedOne": "Added {name}",
       "addedMany": "Added {count} mods",
+      "updatedOne": "Updated {name}: {from} → {to}",
+      "updatedName": "Updated {name}",
+      "updatedMany": "Updated {count} mods",
+      "addedAndUpdated": "{added} added, {updated} updated",
       "needs": "Needs {ids}",
       "alreadyOne": "{name} already on",
       "alreadyMany": "{count} mods already on",
@@ -1595,7 +1605,9 @@
       "restoreGoes": "Your profiles and settings from before the beta go back before the restart.",
       "settingsStay": "Your current profiles and settings stay.",
       "noCopy": "No complete copy from before the beta: {warnings}",
-      "downloadingDots": "Downloading…"
+      "downloadingDots": "Downloading…",
+      "upscaler": "Upscaler behind the game's FSR 3",
+      "upscalerNow": "Upscaler now"
     }
   },
   "mods": {
@@ -2065,8 +2077,8 @@
       "stopping": "Stopping.",
       "stoppedWithKiln": "Stopped. Start runs it with {runner}, Kiln {kiln}.",
       "stoppedWith": "Stopped. Start runs it with {runner}.",
-      "stoppedKiln": "Stopped. Start runs it , Kiln {kiln}.",
-      "stopped": "Stopped. Start runs it .",
+      "stoppedKiln": "Stopped. Start runs it with Kiln {kiln}.",
+      "stopped": "Stopped. Press Start to run it.",
       "updateGame": "Update the game (SteamCMD)",
       "upToDate": "Server files are up to date",
       "updateKilnMenu": "Update Kiln…",
@@ -2623,6 +2635,25 @@
     },
     "partsMissing": "Parts missing",
     "partsMissingText": "Kiln {version} has parts this game does not: {parts}. Mods that need them do not load until they are in.",
+    "repair": "Repair",
+    "filesMissing": "Files missing",
+    "filesMissingText": {
+      "one": "{count} of Kiln's files is missing: {files}",
+      "other": "{count} of Kiln's files are missing: {files}"
+    },
+    "filesMissingAntivirus": {
+      "one": "An antivirus may have removed it.",
+      "other": "An antivirus may have removed them."
+    },
+    "filesMissingRepair": {
+      "one": "Repair puts it back.",
+      "other": "Repair puts them back."
+    },
+    "filesMissingNoBundle": {
+      "one": "Kiln {version} is not among the bundles below: update Kiln, or add its bundle, to put it back.",
+      "other": "Kiln {version} is not among the bundles below: update Kiln, or add its bundle, to put them back."
+    },
+    "antivirusHelp": "Antivirus help",
     "chainTitle": "What the game loads, in order",
     "chainLive": "Live, from this boot.",
     "chainNotLive": "Live statuses show after a start.",
@@ -2718,6 +2749,7 @@
       "httpModpacksHint": "Off: https only.",
       "dailyUpdates": "Check for mod updates once a day",
       "dailyUpdatesHint": "Off: only when you press Check for updates above your mods. A check reads the pages your mods name (GitHub, and Nexus Mods with your sign-in) and shows a notice with a link. It never downloads or installs a mod.",
+      "dailyUpdatesHintNoNexus": "Off: only when you press Check for updates above your mods. A check reads the GitHub pages your mods name and shows a notice with a link. It never downloads or installs a mod.",
       "steamRoots": "Extra Steam folders",
       "steamRootsHint": "Libraries Kiln does not find on its own."
     },
@@ -2737,16 +2769,40 @@
       "desktopOn": "Kiln Launcher is in the app menu",
       "desktopOff": "Kiln Launcher is out of the app menu"
     },
+    "sandbox": {
+      "label": "WebKit's sandbox",
+      "intro": "Applies at the next start. Off: the launcher's page runs without WebKit's process sandbox; it shows only the launcher's own pages and, from the internet, only images from Nexus Mods.",
+      "unused": "This start: WebKit does not use its sandbox (its version for this launcher uses it only when WEBKIT_FORCE_SANDBOX=1 is set).",
+      "on": "This start: WebKit's sandbox is on (WEBKIT_FORCE_SANDBOX=1 is set).",
+      "off": "This start: WebKit's sandbox is off.",
+      "argOff": "This start: off, because {flag} was given; it wins over this switch.",
+      "argOn": "This start: {flag} was given and wins over this switch.",
+      "env": "This start: KILN_LAUNCHER_WEBKIT_SANDBOX is set and wins over this switch.",
+      "yours": "This start: WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS={value} is set in your environment and decides, whatever this switch says.",
+      "probe": "On this system: {says}.",
+      "nextOn": "The next start leaves WebKit's sandbox on",
+      "nextOff": "The next start turns WebKit's sandbox off"
+    },
     "render": {
       "intro": "For a window that stays black. Applies at the next start.",
       "noGpu": "This start draws without the GPU.",
+      "noGpuMarker": "This start draws without the GPU because this switch is on, and every start does until you turn it off.",
       "gpu": "This start draws with the GPU.",
       "noGpuRestart": "This start draws without the GPU: the page did not start with it.",
       "gpuRestart": "This start draws with the GPU: the page did not start with it.",
       "noGpuEnv": "This start draws without the GPU: KILN_LAUNCHER_RENDER is set and wins over this switch.",
       "gpuEnv": "This start draws with the GPU: KILN_LAUNCHER_RENDER is set and wins over this switch.",
       "noGpuArg": "This start draws without the GPU: {flag} was given and wins over this switch.",
-      "gpuArg": "This start draws with the GPU: {flag} was given and wins over this switch."
+      "gpuArg": "This start draws with the GPU: {flag} was given and wins over this switch.",
+      "x11": "Switch to X11 when drawing is slow on Wayland",
+      "x11Intro": "On a HiDPI Wayland screen, when WebKit cannot use the GPU, the launcher starts once more through X11 (XWayland): it draws at a lower resolution, so it is much faster but less sharp. Applies at the next start.",
+      "x11Wayland": "This start draws on Wayland.",
+      "x11On": "This start draws through X11.",
+      "x11Tried": "X11 was tried and did not help, so the launcher stays on Wayland. Turn this off and on again to try once more.",
+      "x11Software": "Not used while the launcher draws without the GPU.",
+      "x11Yours": "Your GDK_BACKEND={value} decides.",
+      "x11NextOn": "The launcher may switch to X11 by itself",
+      "x11NextOff": "The next start stays on Wayland"
     },
     "dev": {
       "mock": "Developer: mock data fallback",
@@ -2771,6 +2827,178 @@
       "notInstalledHint": "Install it on Runtime first.",
       "unavailable": "kiln.json unavailable",
       "overrides": "\"client\" and \"server\" override sections are kept as they are."
+    },
+    "graphics": {
+      "title": "Graphics",
+      "sub": "Kiln's own graphics tools in the game, also in the game's Kiln menu (Insert) under Graphics. The frame cap and the readout apply at once, DLSS settings when the game next sets up DLSS, the upscaler when the game next sets up FSR.",
+      "aside": {
+        "line": "{tool}: {effect}",
+        "optiscaler": "OptiScaler is installed ({file})",
+        "streamline": "NVIDIA Streamline is in the game folder ({file})",
+        "vkfg": "A DLSS frame generation mod is installed ({file})",
+        "dlsstweaks": "DLSSTweaks is installed ({file})",
+        "nvngx": "Another DLSS loader is in the game folder ({file})",
+        "unknown": "Another graphics tool is in the game folder ({file})",
+        "frameCap": "Kiln's frame cap and DLSS settings step aside; the readout still works.",
+        "frameCapUpscaler": "Kiln's frame cap, DLSS settings and upscaler choice step aside; the readout still works.",
+        "dlss": "Kiln's DLSS settings step aside; the frame cap and the readout still work.",
+        "upscaler": "Another upscaler tool's files are next to the game ({file})",
+        "upscalerOnly": "Kiln's upscaler choice steps aside; the frame cap, DLSS settings and readout still work."
+      },
+      "labels": {
+        "fpsCap": "Frame cap",
+        "dlssPreset": "DLSS render preset",
+        "dlssScale": "DLSS render size",
+        "dlssRenderScale": "DLSS render scale, every mode",
+        "dlssQualityScale": "DLSS render scale, Quality",
+        "dlssBalancedScale": "DLSS render scale, Balanced",
+        "dlssPerformanceScale": "DLSS render scale, Performance",
+        "dlssUltraPerformanceScale": "DLSS render scale, Ultra Performance",
+        "readout": "Readout"
+      },
+      "upscaler": {
+        "title": "Behind the game's FSR 3",
+        "label": "Upscaler",
+        "hint": "Choose FSR 3 as the upscaler in the game's graphics settings: Kiln runs your choice in its place. A change applies at once while FSR 3 runs in a world, else when a world loads. Chosen for the first time while the game runs, it applies from the next game start.",
+        "choice": {
+          "game": "The game's own FSR 3",
+          "amd": "AMD FSR",
+          "xess": "Intel XeSS"
+        },
+        "choiceHint": {
+          "game": "Nothing changes: the game's FSR 3 runs as it does without Kiln.",
+          "amd": "AMD FSR 3.1, or FSR 4 as an experimental choice on graphics cards and drivers that run it. Needs AMD's files (70 MB).",
+          "xess": "Intel's XeSS, on Intel, AMD and NVIDIA cards. Needs Intel's file (74 MB)."
+        },
+        "amdLabel": "AMD FSR version",
+        "amd": {
+          "auto": "Auto (FSR 3.1 for now)",
+          "fsr3": "FSR 3.1",
+          "fsr4": "FSR 4 (experimental)"
+        },
+        "amdHint": "Auto runs FSR 3.1 until FSR 4 is confirmed in this game. FSR 4 (experimental) lets AMD choose: FSR 4 on graphics cards and drivers that run it, FSR 3.1 on the others; it may render dark scenes too dark.",
+        "heading": {
+          "now": "Now",
+          "last": "Last game",
+          "plan": "When you play"
+        },
+        "offer": "{name}'s files are not in this game yet. Until they are, the game's own FSR 3 runs.",
+        "offerDamaged": "Some of {name}'s files are missing or changed. Until you download them again, the game's own FSR 3 runs.",
+        "offerRunning": "Close the game to download them: the launcher does not change the game's files while it runs.",
+        "running": {
+          "off": "Kiln's upscaler is not in use behind the game's FSR 3 now.",
+          "notFsr": "The game is not upscaling with FSR 3 right now: FSR 3 is not chosen in the game's graphics settings, or no world is loaded.",
+          "gameFsr3": "The game's own FSR 3 runs.",
+          "amdFsr4": "AMD FSR 4 runs in place of the game's FSR 3.",
+          "amdFsr31": "AMD FSR 3.1 runs in place of the game's FSR 3.",
+          "xess": "Intel XeSS runs in place of the game's FSR 3.",
+          "unknown": "Kiln cannot tell what upscales behind the game's FSR 3: its parts are of different versions."
+        },
+        "version": "Version {version}.",
+        "amdFsr3Auto": "AMD's selection chose FSR 3.1: FSR 4 does not run on this graphics card or driver.",
+        "changedNow": "You have chosen {upscaler} since that game started: it applies when the game next sets FSR up, or from its next start.",
+        "restartNow": "Restart the game to use {upscaler}. Until then the game's own FSR 3 runs.",
+        "detail": "Details: {detail}",
+        "plan": {
+          "amd": "With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR 3.1 in its place. FSR 4 is available as an experimental choice.",
+          "amdFsr3": "With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR 3.1 in its place.",
+          "amdFsr4": "With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR in its place: FSR 4 where your graphics card and driver run it, else FSR 3.1. FSR 4 is experimental and may render dark scenes too dark.",
+          "xess": "With FSR 3 chosen in the game's graphics settings, Kiln runs Intel XeSS in its place."
+        },
+        "reason": {
+          "restart": "{upscaler} runs from the next start of the game: Kiln sets it up when the game starts.",
+          "filesMissing": "{upscaler}'s files are not downloaded yet, so the game's own FSR 3 runs.",
+          "filesBad": "A file of {upscaler} is not the one Kiln expects (its size or SHA-256 differs), so Kiln does not load it. Download it again.",
+          "loadFailed": "A file of {upscaler} did not load, so the game's own FSR 3 runs.",
+          "device": "Your graphics card or driver lacks a Vulkan feature {upscaler} needs, so the game's own FSR 3 runs.",
+          "createFailed": "{upscaler} could not be set up for this resolution, so the game's own FSR 3 runs.",
+          "runtimeFailed": "{upscaler} failed while it upscaled. The game's own FSR 3 runs until you restart the game.",
+          "fault": "{upscaler} or Kiln's code around it faulted. The game's own FSR 3 runs until you restart the game.",
+          "aside": "Kiln steps aside for {tools}, so it does not change the game's FSR 3.",
+          "noSignatures": "Kiln does not know this game build's FSR 3 yet, so the game's own FSR 3 runs. A Kiln update for this game build fixes that.",
+          "inputs": "The game's images are not what {upscaler} takes, so the game's own FSR 3 runs.",
+          "unavailable": "{upscaler} is not available in this build of Kiln or on this system, so the game's own FSR 3 runs.",
+          "waiting": "{upscaler} is ready. It starts as soon as the game runs FSR 3: load a world with FSR 3 chosen in the game's graphics settings.",
+          "noVulkan": "Kiln did not see the game set up its graphics device in this session. Restart the game for {upscaler}.",
+          "unknown": "{upscaler} does not run (reason {number} from a newer Kiln), so the game's own FSR 3 runs."
+        },
+        "tools": {
+          "optiscaler": "OptiScaler",
+          "streamline": "NVIDIA Streamline (a frame generation mod)",
+          "vkfg": "a DLSS frame generation mod (EnshroudedVKFG.ini)",
+          "dlsstweaks": "DLSSTweaks",
+          "nvngx": "another DLSS loader (nvngx.dll next to the game)",
+          "ngxPatched": "another tool that hooks DLSS",
+          "overlayOff": "Kiln's overlay being off",
+          "upscaler": "another upscaler tool (AMD's or Intel's upscaler files next to the game, or a changed FSR 3 pass)",
+          "unknown": "another graphics tool"
+        }
+      }
+    },
+    "upscalers": {
+      "title": "Upscaler files",
+      "sub": "AMD's and Intel's upscaler files, for Kiln to run behind the game's FSR 3 option. Kiln downloads them only when you ask, into the game's kiln/vendor folder.",
+      "purpose": "Kiln checks every file against the size and SHA-256 it pinned, and the game checks them again before it loads them. Remove deletes them again.",
+      "unreadable": "The upscaler files could not be read",
+      "starting": "Starting the download",
+      "unavailable": "Not available in this build of Kiln.",
+      "gameRunning": "Close the game to download or remove these files: the launcher does not change the game's files while it runs.",
+      "damaged": "A file of it is missing or changed. Download it again.",
+      "failedUnknown": "The download failed.",
+      "failedTitle": "{name} was not downloaded",
+      "size": "{size} from {host}.",
+      "partial": "{done} of it arrived already: the download goes on from there.",
+      "installed": "Version {version}, {size} on disk.",
+      "update": "Version {installed} is downloaded. Version {version} is out: {size} from {host}.",
+      "state": {
+        "notDownloaded": "Not downloaded",
+        "downloading": "Downloading",
+        "downloaded": "Downloaded",
+        "updateAvailable": "Update available",
+        "unavailable": "Not available in this build",
+        "failed": "Failed"
+      },
+      "action": {
+        "download": "Download",
+        "continue": "Continue download",
+        "update": "Update",
+        "tryAgain": "Try again",
+        "downloadAgain": "Download again"
+      },
+      "actionLabel": {
+        "download": "Download {name}",
+        "continue": "Continue the download of {name}",
+        "update": "Update {name}",
+        "tryAgain": "Try the download of {name} again",
+        "downloadAgain": "Download {name} again",
+        "remove": "Remove {name}",
+        "cancel": "Cancel the download of {name}"
+      },
+      "done": "{name} is downloaded",
+      "doneDetail": "Kiln checked every file. They are in {folder} in the game folder.",
+      "removeTitle": "Remove {name}?",
+      "removeText": "Kiln deletes {folder} ({size}) from the game folder. You can download it again later.",
+      "removed": "{name} is removed",
+      "removedDetail": "{size} freed.",
+      "removeFailed": "{name} was not removed",
+      "dialog": {
+        "title": "Download {name}",
+        "what": "What",
+        "size": "Size",
+        "files": {
+          "one": "{size}, {count} file",
+          "other": "{size}, {count} files"
+        },
+        "from": "From",
+        "fromText": "{host}: {vendor}'s own repository on GitHub, version {version}",
+        "to": "Goes to",
+        "toText": "{folder} in the game folder",
+        "licenseLead": "{vendor} licenses these files under the {license}. Here is its text in full. Read it before you agree.",
+        "licenseFrom": "Where this text is",
+        "unreadable": "The licence text could not be read",
+        "privacy": "Kiln asks {host} for these files and sends nothing else. {host} sees your IP address and a user agent that names Kiln and its version.",
+        "agree": "I agree, download"
+      }
     },
     "art": {
       "icons": "{count:N0} icons",
@@ -3076,6 +3304,99 @@
     "title": "Shroudlink client addon",
     "switchOn": "Switch addon on"
   },
+  "reportContents": {
+    "title": "What's in this report",
+    "intro": "Every file in the report, and what Kiln replaced in it before anything leaves your PC. Kiln's own logs always stay in: support needs them to see what went wrong. Other mods' logs you can leave out.",
+    "total": {
+      "one": "{count} file, {size} before compression",
+      "other": "{count} files, {size} before compression"
+    },
+    "leftOutCount": {
+      "one": "{count} file left out",
+      "other": "{count} files left out"
+    },
+    "failed": "The report could not be read",
+    "view": "View summary.txt",
+    "hideSummary": "Hide summary.txt",
+    "viewTitle": "summary.txt",
+    "save": "Save",
+    "leaveOut": "Leave out",
+    "leaveOutAll": "Leave out all other mods' logs",
+    "leftOut": "Left out",
+    "leftOutHint": "Left out: not in the zip.",
+    "included": "In",
+    "include": "Put back",
+    "replaced": "Replaced: {list}",
+    "item": "{what} ({times})",
+    "times": {
+      "one": "{count} time",
+      "other": "{count} times"
+    },
+    "sep": ", ",
+    "nothing": "Nothing personal found in it.",
+    "group": {
+      "kiln": "Kiln's logs",
+      "mods": "Other mods' logs",
+      "settings": "Settings",
+      "listings": "Folder listings"
+    },
+    "groupHint": {
+      "kiln": "Support needs these to see what went wrong, so they always stay in.",
+      "mods": "Written by other mods and tools. Kiln cleans them the same way, but it can't know everything another mod writes, so you can leave them out.",
+      "settings": "Kiln's own state and your profile: which mods are on and what the last start did. Passwords and tokens in them are replaced.",
+      "listings": "Only the names, sizes and dates of files and folders. Nothing inside them."
+    },
+    "token": {
+      "home": "your home folder",
+      "user": "your user name",
+      "host": "your PC's name",
+      "steam-name": "Steam names",
+      "steamid": "Steam IDs",
+      "player": "player names",
+      "ip": "IP addresses",
+      "mac": "network card addresses",
+      "email": "email addresses",
+      "redacted": "passwords, tokens and keys"
+    },
+    "about": {
+      "summary": "The summary: what Kiln found, your system, the game and your profile",
+      "findings": "What Kiln found, for the support tools",
+      "kiln-log": "Kiln's main log from the last game start",
+      "proxy-log": "How Kiln was loaded into the game",
+      "eml-log": "Kiln's log for EML mods",
+      "tick-stats": "How long each world step took, minute by minute",
+      "greeneye-bridge": "Kiln's log for Greeneye mods",
+      "crash": "The newest crash report Kiln wrote",
+      "launcher-log": "The launcher's own log",
+      "game-start": "What the game printed when the launcher started it",
+      "kiln-other": "One of Kiln's logs",
+      "state": "What Kiln saw at the last start",
+      "profile": "Your profile: which mods are on",
+      "chain": "Which other loaders start with the game",
+      "kiln-json": "Kiln's settings in the game folder",
+      "receipt": "Which Kiln files are installed, with their checksums",
+      "game-folder": "The names in the game folder",
+      "kiln-folder": "The names in Kiln's folder",
+      "mod-folders": "The names in each mods folder",
+      "listing": "A list of file names",
+      "xhl-core": "XHL-Core's own log",
+      "greeneye": "Greeneye Loader's or a Greeneye mod's own log",
+      "building-tools": "Building Tools' own log",
+      "shroudlink": "ShroudLink's own log",
+      "auto-loot": "Auto Loot Plus' own log",
+      "optiscaler-settings": "OptiScaler's settings",
+      "optiscaler-log": "OptiScaler's own log",
+      "mod-log": "Another mod's own log"
+    },
+    "never": {
+      "title": "Never in a report",
+      "saves": "Your saves and worlds",
+      "settings": "Mod settings and Kiln's config folder (they can hold server passwords)",
+      "admin": "Kiln.Admin's token and address",
+      "mods": "What's inside your mods (only file names, sizes and dates)",
+      "steam": "Steam's own files"
+    }
+  },
   "supportReport": {
     "dialogTitle": "Save a support report",
     "saved": "Report saved",
@@ -3267,8 +3588,14 @@
       "kilnWhat": "Kiln {version} · {what}"
     },
     "play": {
+      "applyingProfile": "Applying profile…",
+      "installingKiln": "Installing Kiln…",
+      "removingKiln": "Removing Kiln…",
+      "applyingAria": "{what} ({title})",
       "stoppedStart": "Kiln stopped the start",
       "waitingForKiln": "Waiting for Kiln",
+      "stopWaiting": "Stop waiting",
+      "stopWaitingTip": "Steam has not started the game. Stop waiting and show Play again, for example after you cancelled the launch in Steam. Nothing is closed.",
       "noWord": "No word from Kiln",
       "hookedNothing": "Kiln hooked nothing",
       "kilnStopped": "Kiln stopped",
@@ -3422,6 +3749,8 @@
       "undoKeptDetail.one": "{count} mod was changed since this add.",
       "undoKeptDetail.other": "{count} mods were changed since this add.",
       "undone": "Undone",
+      "updatedFromTo": "Updated {name}: {from} → {to}",
+      "addedAndUpdated": "Added {added}, updated {updated}",
       "noGame": "No game yet",
       "noGameModpack": "Find Enshrouded on Play before installing a modpack.",
       "headingAddedOff": "Added, switched off",
@@ -3571,7 +3900,29 @@
       "countWontMany": "{names} will not run in this game.",
       "bulkNoSwitch": "in the game folder, it has no switch",
       "bulkOnlyKept": "only kept versions are in the Library; pick a version explicitly",
-      "bulkNoVersion": "no version of it is in the Library"
+      "bulkNoVersion": "no version of it is in the Library",
+      "emfMissing": "Needs {dep}, which isn't installed.",
+      "emfOff": "Needs {dep}, which is switched off.",
+      "emfNotLoading": "Needs {dep}, which won't load.",
+      "emfTooOld": "Needs {dep}; you have {found}, which is too old.",
+      "emfTooNew": "Needs {dep}; you have {found}, which is too new.",
+      "emfWithEmf": "It comes with EMF's release: add EMF's zip with Add mods.",
+      "emfUpdateWithEmf": "A newer one comes with EMF's release: add EMF's zip with Add mods.",
+      "emfSwitchOn": "Switch it on in this list.",
+      "emfNotLoadingTip": "Its own row says why.",
+      "emfTooNewTip": "Look for an update of this mod.",
+      "emfSays": "EMF says: {reason}.",
+      "emfWhyMissing": "it needs {dep}, which isn't installed",
+      "emfWhyOff": "it needs {dep}, which is switched off",
+      "emfWhyNotLoading": "it needs {dep}, which won't load",
+      "emfWhyVersion": "it needs {dep} and you have {found}",
+      "emfWhyWithEmf": "{why} (it comes with EMF's release: add EMF's zip with Add mods)",
+      "emfLua": "EMF's lua mod",
+      "emfGet": "Get EMF",
+      "emfGetTip": "Opens EMF's page, where its release zip is",
+      "emfModPage": "Mod page",
+      "emfModPageTip": "Opens the page the mod gives for {dep}",
+      "emfRejectedLast": "Did not load at the last start"
     },
     "modUpdates": {
       "found.one": "{count} mod has an update",
@@ -3615,6 +3966,8 @@
       "whereHint": "Kiln only reads there and shows a notice with a link. It never downloads or installs a version.",
       "githubReleases": "GitHub releases",
       "nexusFile": "A file on Nexus Mods",
+      "nexusOff": "Nexus Mods is switched off in this build",
+      "nexusOffBody": "This mod's saved source is the Nexus Mods file {destination}. Kiln keeps it, but does not check it in this build. Save a GitHub source here to check there instead.",
       "repository": "Repository",
       "repositoryHint": "owner/repo, as in github.com/owner/repo.",
       "releaseTag": "Release tag",
@@ -3654,7 +4007,12 @@
       "leavesListed.other": "Its files leave the Library. {others} list it too and will show it as missing.",
       "leaves": "Its files leave the Library.",
       "notSaved": "Your mod list could not be saved; nothing was removed.",
-      "notRemovable": "in the game folder, Kiln did not place it: remove it there"
+      "notRemovable": "in the game folder, Kiln did not place it: remove it there",
+      "settingsToo": "Remove its settings too",
+      "settingsTooHint": "Its settings in this game and your profiles go too. Kiln keeps a copy in backups.",
+      "settingsTooMany": "Remove their settings too",
+      "settingsTooManyHint": "Their settings in this game and your profiles go too. Kiln keeps a copy in backups.",
+      "settingsLeft": "Some settings stayed"
     },
     "rollback": {
       "settingsBack.one": "Its settings from before the update come back with it ({count} file).",
@@ -3664,6 +4022,22 @@
       "failed": "Could not roll back {name}",
       "onAgain": "{name} is on {version} again",
       "changedSince": "{name} was changed since the roll back."
+    },
+    "ownFiles": {
+      "title": {
+        "one": "A file of the launcher is missing",
+        "other": "Files of the launcher are missing"
+      },
+      "text": {
+        "one": "{files} is gone from the launcher's folder. An antivirus may have quarantined it. Restore it from the quarantine and add an exclusion, or install the launcher again.",
+        "other": "{files} are gone from the launcher's folder. An antivirus may have quarantined them. Restore them from the quarantine and add an exclusion, or install the launcher again."
+      }
+    },
+    "runtimeBlocked": {
+      "file": "Windows did not let Kiln write {file}.",
+      "why": "An antivirus or another program may be blocking it.",
+      "fix": "Add an exclusion for the game folder in your antivirus, then try again.",
+      "raw": "Details: {error}"
     },
     "runtimeChange": {
       "alreadyRunning": "A runtime change is already running",
@@ -4117,6 +4491,1666 @@
     "word": {
       "steam": "through Steam",
       "direct": "directly"
+    }
+  },
+  "community": {
+    "nav": "Community",
+    "navCount": {
+      "one": "{count} new reply from Kiln support",
+      "other": "{count} new replies from Kiln support"
+    },
+    "title": "Community",
+    "say": {
+      "out": "Kiln's Discord: help from the Kiln team and from other players. All of it is optional.",
+      "in": "Signed in as {name}.",
+      "unread": {
+        "one": "Signed in as {name}. {count} new reply from Kiln support.",
+        "other": "Signed in as {name}. {count} new replies from Kiln support."
+      },
+      "offline": "You're offline. Your posts show as they were at {time}.",
+      "offlineOut": "You're offline. This page needs the internet.",
+      "relay": "Kiln support isn't answering right now. Your posts show as they were at {time}."
+    },
+    "join": "Join the Kiln Discord",
+    "openDiscord": "Open the Kiln Discord",
+    "help": {
+      "title": "Get help",
+      "sub": "Kiln support answers in #support on the Kiln Discord.",
+      "text": "Send a report and the launcher writes the post for you: your words, what the report found, and your logs for the Kiln team.",
+      "send": "Send a report",
+      "save": "Save report instead",
+      "needsSignIn": "Sending needs a Discord sign-in. You can write the report first."
+    },
+    "posts": {
+      "title": "Your support posts",
+      "emptyOut": "Sign in to see your posts and their replies here.",
+      "empty": "No posts yet. A report you send shows here with its replies.",
+      "status": {
+        "waiting": "Waiting",
+        "replied": "New reply",
+        "repliedSeen": "Replied",
+        "solved": "Solved",
+        "closed": "Closed"
+      },
+      "lastReply": "{name} replied {ago}.",
+      "lastReplyTeam": "{name} of the Kiln team replied {ago}.",
+      "noReply": "Sent {ago}. No reply yet.",
+      "replies": {
+        "one": "{count} reply",
+        "other": "{count} replies"
+      },
+      "open": "Open in Discord",
+      "more": "More for {title}",
+      "copyLink": "Copy link",
+      "fixed": "It's fixed",
+      "fixedDone": "Marked as solved",
+      "fixedDetail": "Your post has the Solved tag now. Thanks for saying so.",
+      "delete": "Delete my post",
+      "deleteAsk": "Delete this post?",
+      "deleteText": "The post and its replies are removed from Discord. The Kiln team's copy of your report zip is deleted too.",
+      "deleted": "Post deleted",
+      "copied": "Link copied",
+      "asOf": "As of {time}"
+    },
+    "news": {
+      "title": "News",
+      "all": "All releases",
+      "offline": "News loads when you're back online."
+    },
+    "events": {
+      "title": "Events",
+      "empty": "No events planned right now."
+    },
+    "links": {
+      "title": "Links",
+      "docs": "Kiln's docs",
+      "issues": "Bug reports on GitHub",
+      "nexus": "Kiln on Nexus Mods",
+      "download": "Download page"
+    },
+    "account": {
+      "title": "Discord",
+      "out": "Not signed in.",
+      "outHint": "Sign in so the launcher can post your reports and show their replies here. It can't read your messages or see your servers.",
+      "signIn": "Sign in with Discord",
+      "alsoJoin": "Also join the Kiln Discord",
+      "member": "In the Kiln Discord",
+      "notMember": "Not in the Kiln Discord yet",
+      "tester": "Tester",
+      "signOut": "Sign out",
+      "forget": "Sign out and forget me",
+      "signedOut": "Signed out",
+      "signedOutDetail": "The launcher holds nothing of your Discord account now.",
+      "whatIsSent": "What is sent and kept"
+    },
+    "notify": {
+      "label": "Tell me when Kiln support replies",
+      "hint": "A system notification, also while the launcher is in the background.",
+      "title": "Kiln support replied",
+      "detail": "{by} replied to “{title}”."
+    },
+    "presence": {
+      "title": "Rich Presence",
+      "label": "Show Kiln on my Discord profile",
+      "hint": "While you play: Enshrouded with Kiln, how many mods are on, and for how long.",
+      "on": "On. It shows while you play.",
+      "off": "Off.",
+      "noDiscord": "Discord isn't running on this PC. It shows once Discord is open.",
+      "noDiscordDeck": "Discord isn't running on this Deck. It shows once Discord is open.",
+      "preview": "How others see it on your Discord profile",
+      "never": "Never shown: server names, world names, your character, or which mods you use.",
+      "playing": "Playing",
+      "name": "Kiln",
+      "details": "Enshrouded with Kiln",
+      "state": {
+        "one": "{count} mod on",
+        "other": "{count} mods on"
+      },
+      "elapsed": "{time} elapsed",
+      "getKiln": "Get Kiln",
+      "joinDiscord": "Join the Discord",
+      "onToast": "Rich Presence is on",
+      "offToast": "Rich Presence is off",
+      "pack": {
+        "label": "Show my Crucible pack on my Discord profile",
+        "hint": "While you play a pack from Crucible: its name, and a Get this modpack button that opens the pack's page. Packs made on this PC are never named.",
+        "never": "Never shown: server names, world names or your character. Your Crucible pack's name and page are shown while you play it.",
+        "state": {
+          "one": "{pack} ({count} mod)",
+          "other": "{pack} ({count} mods)"
+        },
+        "getPack": "Get this modpack",
+        "example": "Ember run",
+        "turnOn": "Show my pack",
+        "turnOff": "Hide my pack",
+        "onToast": "Your Crucible pack shows on Discord",
+        "offToast": "Your Crucible pack no longer shows on Discord"
+      }
+    },
+    "signIn": {
+      "title": "Sign in with Discord",
+      "text": "Your browser opens Discord's sign-in page through frostdev.io. You approve Kiln there, then come back here.",
+      "gets": "Kiln gets your Discord name, ID and picture. Nothing else: not your email, your messages, your friends or your servers.",
+      "joinHint": "Discord then also asks to let Kiln add you to the server.",
+      "open": "Open the sign-in page",
+      "waitingTitle": "Finish in your browser",
+      "waiting": "Approve Kiln on the page that opened. This window moves on by itself.",
+      "waitingWord": "Waiting for Discord",
+      "again": "Open the page again",
+      "done": "Signed in as {name}",
+      "doneDetail": "Your reports can go straight to Kiln support now.",
+      "canceled": "You cancelled on Discord's page. Nothing changed.",
+      "expired": "The sign-in timed out after 10 minutes. Try again.",
+      "denied": "The sign-in was declined. Nothing changed.",
+      "offline": "You're offline. Signing in needs the internet.",
+      "relay": "frostdev.io isn't answering. Try again in a few minutes.",
+      "tooMany": "Too many sign-ins came from your network in the last hour. Try again in {wait}.",
+      "retry": "Try again",
+      "tabDone": "Signed in. You can close this tab and go back to the launcher.",
+      "tabFailed": "The sign-in did not finish. You can close this tab and go back to the launcher."
+    },
+    "kind": {
+      "noload": "Kiln doesn't load",
+      "mod": "A mod doesn't work",
+      "crash": "The game crashes",
+      "launcher": "The launcher",
+      "server": "My server",
+      "something": "Something else"
+    },
+    "send": {
+      "title": "Send to Kiln support",
+      "checking": "Reading your setup",
+      "line": "What went wrong, in one line",
+      "linePh": {
+        "noload": "Kiln doesn't load since the last game update",
+        "mod": "Big Stacks doesn't change the stack sizes",
+        "crash": "The game crashes when I open the map",
+        "launcher": "The launcher shows a black window",
+        "server": "My server turns away players with Kiln",
+        "something": "Say it in a few words"
+      },
+      "lineCount": "{count} of {max}",
+      "lineNeeded": "Write one line first.",
+      "kind": "What kind of problem?",
+      "more": "Anything else? (optional)",
+      "morePh": "What were you doing? Did it work before? What have you tried?",
+      "next": "Next: check what is sent",
+      "known": {
+        "word": "Known problem",
+        "fixes": "If this fixes it, there's nothing to send. If it doesn't, carry on.",
+        "copy": "Copy the line",
+        "copied": "Line copied",
+        "action": {
+          "mods": "Show my mods",
+          "runtime": "Open Runtime",
+          "logs": "Open the Logs page",
+          "settings": "Open Settings"
+        }
+      },
+      "check": {
+        "title": "Check what is sent",
+        "public": "In #support, for everyone",
+        "publicHint": "Posted by the Kiln bot with you mentioned, so Discord tells you about replies.",
+        "postTitle": "Title",
+        "words": "Your words",
+        "noWords": "None",
+        "kind": "Kind",
+        "tags": "Tags",
+        "found": "What the report found",
+        "versions": "Versions",
+        "level": {
+          "problem": "Problem",
+          "warning": "Warning",
+          "info": "Note"
+        },
+        "zip": "The report zip",
+        "zipHint": "{size}, {count} files: Kiln's logs and state files, the profile, the launcher's log and lists of the game folder.",
+        "showFiles": "Show the files",
+        "hideFiles": "Hide the files",
+        "who": "Who sees the report zip?",
+        "team": "The Kiln team only",
+        "teamHint": "Sent to a channel only the Kiln team can read. It's deleted there after 30 days.",
+        "everyone": "Everyone in #support",
+        "everyoneHint": "Attached to your post, so other players can look too.",
+        "noZip": "Nobody",
+        "noZipHint": "Only the post goes. The team may ask you for the zip.",
+        "redacted": "In every file your user name, PC name, Steam names, Steam ID and IP addresses are replaced. Saves and mod settings are never in it. A character or server name you chose can still be in a log line.",
+        "as": "Posting as {name}",
+        "send": "Send to Kiln support",
+        "signInToSend": "Sign in with Discord to send",
+        "signInHint": "Sending needs a Discord sign-in. Your draft stays here while you sign in.",
+        "sending": "Sending"
+      },
+      "err": {
+        "offlineTitle": "You're offline",
+        "offline": "Your draft is kept. Send it when you're back online, or save the report and post it yourself.",
+        "relayTitle": "Kiln support can't be reached",
+        "relay": "frostdev.io isn't answering. Your draft is kept. Try again in a few minutes.",
+        "notMemberTitle": "You're not in the Kiln Discord yet",
+        "notMember": "Replies happen on Discord, so join the server first. Then come back and press Send.",
+        "joined": "I've joined",
+        "rateTitle": "That's a lot of reports",
+        "rate": "You sent {sent} reports in the last hour. Wait for a reply, or add to your last post on Discord. You can send again in {wait}.",
+        "rateDay": "You sent {sent} reports in the last 24 hours. Wait for a reply, or add to your last post on Discord. You can send again in {wait}.",
+        "rateNetwork": "Many reports came from your network in the last 24 hours, so sending is paused for now. You can send again in {wait}.",
+        "openLast": "Open my last post",
+        "tooNewTitle": "This Discord account is too new",
+        "tooNew": "Kiln support takes reports from Discord accounts that are at least 3 days old. Your draft is kept: send it then, or save the report now.",
+        "staleTitle": "The report was made again",
+        "stale": "It was prepared over 30 minutes ago, so the launcher made a new one. Check what is sent, then press Send again.",
+        "bigTitle": "The report is too big to send",
+        "big": "This report is {size}, and up to {limit} can be sent. Send the post without the zip, then save the report and give it to the team on Discord.",
+        "sendWithout": "Send without the zip",
+        "saveReport": "Save report",
+        "stillNot": "You're still not in the Kiln Discord. Join with the invite, then press I've joined.",
+        "prepareTitle": "The report could not be made",
+        "discordTitle": "Discord didn't accept the report",
+        "discord": "Discord said: {reason}. This is on Kiln's side, not your connection. Your report is kept: try again later, or save the report and post it yourself.",
+        "discordNoReason": "This is on Kiln's side, not your connection. Your report is kept: try again later, or save the report and post it yourself.",
+        "discordLimitTitle": "Discord asks Kiln support to wait",
+        "discordLimit": "Discord limits how often Kiln support can post, and the limit is reached right now. This is not your connection. Your report is kept: try again in {wait}."
+      },
+      "sent": {
+        "title": "Sent",
+        "text": "Your post is up in #support: “{title}”.",
+        "team": "The report zip went to the Kiln team only.",
+        "public": "The report zip is attached to your post.",
+        "none": "The post went without the zip.",
+        "replies": "Replies show on the Community page, and Discord tells you too.",
+        "open": "Open in Discord"
+      }
+    },
+    "privacy": {
+      "title": "What is sent and kept",
+      "never": "Nothing is sent until you press a button on a screen that shows what goes.",
+      "signInTitle": "When you sign in",
+      "signIn": "Kiln gets your Discord user ID, name and picture. frostdev.io keeps them while you're signed in. It never gets your email, your password, your messages, your friends or your servers.",
+      "join": "If you tick Also join, frostdev.io adds you to the Kiln Discord once, right then.",
+      "reportTitle": "When you send a report",
+      "reportPublic": "In #support, for everyone: your line, your words, the kind of problem, what the report found, the versions, how many mods are on and your Discord name.",
+      "reportTeam": "For the Kiln team only, unless you choose otherwise: the report zip. It's deleted from the team's channel after 30 days.",
+      "presenceTitle": "Rich Presence",
+      "presence": "Only while it's on and you play, and only to the Discord app on this PC: Enshrouded with Kiln, how many mods are on, and the time. Never server or world names, your character, or which mods you use.",
+      "presencePack": "With Show my Crucible pack on, also the name of the Crucible pack you play and a link to its page on frostdev.io. Packs made on this PC are never named.",
+      "testerTitle": "When you volunteer as a tester",
+      "tester": "The Kiln team gets this PC's graphics card, driver, video memory, system and how the game runs. Your results go to the build's post in #testing. A support report you attach goes to the team only.",
+      "keptTitle": "What frostdev.io keeps",
+      "kept": "A fingerprint of your sign-in, until you sign out or for 90 days unused. Your Discord ID with the list of your posts, so the launcher can show their replies. Your name and picture while you're signed in. Your hardware if you test. A Deck's sign-in code and the network it came from, for 10 minutes. Counts for the sending limits, for a day. A post leaves the list 90 days after it's solved or closed, and Sign out and forget me deletes all of it at once. Report zips are never stored on frostdev.io.",
+      "undoTitle": "Undo any of it",
+      "undo": "Sign out. Sign out and forget me. Delete a post from its menu. Stop testing. Turn Rich Presence off.",
+      "forgetAsk": "Sign out and forget you?",
+      "forgetText": "frostdev.io deletes your name, your ID, your hardware, the list of your posts and the Kiln team's copies of your report zips. Your posts stay on Discord until you delete them.",
+      "alsoDelete": "Also delete my support posts from Discord",
+      "forgetFailedTitle": "Signed out on this PC only",
+      "forgetFailed": "frostdev.io didn't hear it, so it still keeps what it had. Sign in again and use Sign out and forget me, or write to admin@frostdev.io.",
+      "ai": "The Kiln team uses AI assistants. They help read support posts and reports, and they write many of the replies. The privacy page names them.",
+      "page": "The full privacy page",
+      "terms": "Terms",
+      "pageUrl": "frostdev.io/kiln/privacy"
+    },
+    "banner": {
+      "send": "Send to Kiln support",
+      "crashTitle": "The game closed unexpectedly",
+      "crash": "It closed at {time}, {after} after it started. Kiln wrote a crash report.",
+      "crashReport": "See the crash report",
+      "afterSeconds": {
+        "one": "{count} second",
+        "other": "{count} seconds"
+      },
+      "afterMinutes": {
+        "one": "{count} minute",
+        "other": "{count} minutes"
+      },
+      "afterHours": {
+        "one": "{count} hour",
+        "other": "{count} hours"
+      }
+    },
+    "tester": {
+      "title": "Help test Kiln",
+      "pitch": "Kiln's next graphics work needs hardware the team doesn't have: AMD RX 6000 and newer for FSR 4, Intel Arc for XeSS, NVIDIA RTX 40 and 50 for frame generation, and the Steam Deck.",
+      "yours": "This PC can test {what}.",
+      "yoursDeck": "This Steam Deck can test the Steam Deck.",
+      "any": "Every PC helps: each test build needs a few players on it.",
+      "volunteer": "Volunteer as a tester",
+      "you": "You're a tester.",
+      "joinText": "Testers get the Tester role on the Kiln Discord, the test builds, and a short checklist for each one. It takes about 15 minutes a build.",
+      "hwTitle": "What the launcher shares about this PC",
+      "hwTitleDeck": "What the launcher shares about this Deck",
+      "hwHint": "Sent only when you press Volunteer, to the Kiln team, so they know what you can test.",
+      "gpu": "Graphics card",
+      "driver": "Driver",
+      "vram": "Video memory",
+      "os": "System",
+      "runner": "Runs the game with",
+      "covers": "Can test",
+      "beta": "Switch the launcher to test builds",
+      "betaHint": "You can switch back to the release in Settings at any time.",
+      "send": "Volunteer",
+      "done": "You're a tester",
+      "doneDetail": "You have the Tester role. Each test build's checklist shows on the Community page.",
+      "leave": "Stop testing",
+      "leaveDone": "You're not a tester any more",
+      "signInFirst": "Volunteering needs a Discord sign-in: the Tester role is on the Kiln Discord.",
+      "plan": {
+        "title": "Test {build}",
+        "say": "{done} of {count} steps tried. Open until {until}.",
+        "open": "Open the checklist",
+        "for": "For {what}",
+        "result": {
+          "worked": "Worked",
+          "failed": "Didn't work",
+          "skipped": "Couldn't try",
+          "none": "Not tried"
+        },
+        "note": "One line (optional)",
+        "notePh": "What happened?",
+        "attach": "Attach a support report for the Kiln team",
+        "attachHint": "The zip goes to the team only, as with a report to support.",
+        "sendResults": "Send results",
+        "sent": "Results sent {ago}. The Kiln team hasn't read them yet.",
+        "read": "{name} of the Kiln team read your results {ago}.",
+        "replied": "They also replied in the build's post on Discord.",
+        "openPost": "Open the build's post",
+        "noPlan": "No test build right now. The next one shows here.",
+        "hidden": {
+          "one": "{count} step is for other hardware.",
+          "other": "{count} steps are for other hardware."
+        },
+        "sentToast": "Results sent",
+        "sentToastDetail": "They're in the build's post in #testing. The team marks them when they've read them.",
+        "how": "How",
+        "untried": "Try each step, or mark it Couldn't try.",
+        "more": "More for this test build",
+        "discordTitle": "Discord didn't accept the results",
+        "discord": "Discord said: {reason}. This is on Kiln's side, not your connection. Your results are kept: try again later.",
+        "discordNoReason": "This is on Kiln's side, not your connection. Your results are kept: try again later.",
+        "discordLimit": "Discord limits how often Kiln support can post, and the limit is reached right now. Your results are kept: try again in {wait}."
+      },
+      "unknown": "Not known"
+    },
+    "deck": {
+      "tab": "Community",
+      "on": "On",
+      "off": "Off",
+      "turnOn": "Turn on",
+      "turnOff": "Turn off",
+      "sayOut": "Help from the Kiln team on Discord. Optional.",
+      "signInSub": "With your phone: scan a code",
+      "accountSub": "Signed in. In the Kiln Discord.",
+      "accountSubOut": "Signed in. Not in the Kiln Discord yet.",
+      "sendSub": "Your logs go to the Kiln team",
+      "joinSub": "A code for your phone",
+      "presenceSub": "Kiln on your Discord profile while you play",
+      "privacySub": "Everything this tab can send",
+      "testerSub": "Test builds and a checklist",
+      "testerSubOn": "{done} of {count} steps tried",
+      "support": "Support",
+      "discord": "Discord",
+      "qr": {
+        "title": "Sign in with your phone",
+        "step1": "Scan the code with your phone's camera.",
+        "step2": "Sign in with Discord on the page that opens.",
+        "step3": "Check that the page shows {code}, then press Approve.",
+        "noCamera": "No camera? Open frostdev.io/link on any device and type the code.",
+        "waiting": "Waiting for your phone. The code works for {left}.",
+        "expired": "This code has expired.",
+        "denied": "Declined on your phone. Nothing changed.",
+        "newCode": "New code",
+        "privacy": "What it can do is on frostdev.io/kiln/privacy."
+      },
+      "joinQr": {
+        "title": "Join the Kiln Discord",
+        "text": "Scan the code with your phone to open the invite in Discord."
+      },
+      "postQr": "Scan to open the post on your phone.",
+      "privacyQr": "Scan the code to read the privacy page on your phone.",
+      "when": {
+        "title": "When does it happen?",
+        "start": "when I press Play",
+        "menu": "on the main menu",
+        "load": "when I load a world",
+        "play": "while I play",
+        "join": "when I join a server",
+        "another": "at another time"
+      },
+      "titles": {
+        "noload": "Kiln doesn't load",
+        "mod": "A mod doesn't work",
+        "crash": "The game crashes",
+        "launcher": "The launcher has a problem",
+        "server": "My server has a problem",
+        "something": "Something is wrong"
+      },
+      "what": "What went wrong?",
+      "check": "Check and send",
+      "type": "Type",
+      "edit": "Change",
+      "typeTitle": "Type your words",
+      "typeHint": "Steam's keyboard opens by itself. If it doesn't, press Steam and X.",
+      "wordsNone": "None. Optional.",
+      "zipRow": "Report zip",
+      "whatIsSent": "What is sent",
+      "next": "Next",
+      "pick": "Pick",
+      "toggle": "Change",
+      "done": "Done",
+      "holdDelete": "Hold to delete my post",
+      "postSay": "{status}. {replies}.",
+      "noteWhy": {
+        "title": "What happened?",
+        "crashed": "The game crashed",
+        "wrong": "It looked wrong",
+        "slow": "It was slow or stuttered",
+        "missing": "I couldn't find the option",
+        "type": "Type a line"
+      }
+    },
+    "settings": {
+      "show": "Show the Community page",
+      "showHint": "Kiln's Discord in the launcher. Off hides the page, its Deck tab and every Send to Kiln support, and the launcher stops everything it does with Discord."
+    }
+  },
+  "crucible": {
+    "checks": {
+      "running": "Checking the pack…",
+      "couldNot": "The pack couldn't be checked",
+      "passed": "Checks: passed",
+      "failed.one": "{count} problem stops the install",
+      "failed.other": "{count} problems stop the install",
+      "warnings.one": "{count} thing to look at",
+      "warnings.other": "{count} things to look at",
+      "failedBlock": "The pack failed its checks: it can't be installed.",
+      "pending": "Checks: still running on Crucible",
+      "lineWarnings.one": "Checks: {count} thing to look at",
+      "lineWarnings.other": "Checks: {count} things to look at",
+      "lineProblems.one": "Checks: {count} problem found",
+      "lineProblems.other": "Checks: {count} problems found",
+      "lineFailed": "Checks: couldn't run on Crucible"
+    },
+    "banner": {
+      "title": "Pack update",
+      "head": "{name} {change}",
+      "headBy": "{name} {change} by {by}",
+      "line": "{head}: {changes}.",
+      "ready": "{head}: an update is ready.",
+      "seeChanges": "See changes"
+    },
+    "change": {
+      "added.one": "{count} added",
+      "added.other": "{count} added",
+      "updated.one": "{count} updated",
+      "updated.other": "{count} updated",
+      "removed.one": "{count} removed",
+      "removed.other": "{count} removed",
+      "addedWord.one": "{count} added",
+      "addedWord.other": "{count} added",
+      "updatedWord.one": "{count} updated",
+      "updatedWord.other": "{count} updated",
+      "removedWord.one": "{count} removed",
+      "removedWord.other": "{count} removed"
+    },
+    "code": {
+      "link": "Got a code?",
+      "title": "Open a pack by its code",
+      "hint": "Paste the code or link your friend sent.",
+      "paste": "Paste",
+      "pasteNone": "There's no pack code on the clipboard."
+    },
+    "err": {
+      "notFound": "We couldn't find that code. Codes look like H7QK-3MZP.",
+      "offline": "Kiln can't reach Crucible. Ask your friend for the pack file (Share to Crucible > Save as file).",
+      "gone": "This pack is no longer on Crucible.",
+      "badDownload": "The pack didn't download correctly. Nothing was installed. Try again.",
+      "gameRunning": "Close Enshrouded first.",
+      "offlineShare": "Kiln can't reach Crucible. Check your internet and try again, or use Save as file and send your friends the file."
+    },
+    "install": {
+      "done": "{name} is installed",
+      "doneDetail": "It's your loaded profile now. Your other profiles stay as they are.",
+      "failed": "{name} was not installed",
+      "backTo": "Back to {name}",
+      "backToNone": "Back to no profile",
+      "backDetail": "{name} stays in Settings > Profiles.",
+      "undoFailed": "Couldn't go back",
+      "profileName": "{pack} ({creator}'s pack)",
+      "doneOnly": "It's in your profiles. Load it when you want to play."
+    },
+    "preview": {
+      "title": "Pack",
+      "by": "by {name}",
+      "fromFile": "from a file",
+      "versionN": "v{version} (#{number})",
+      "upvotes": "Upvotes",
+      "fits": "Fits your game (build {build})",
+      "fitsAny": "Fits your game",
+      "otherBuild": "Made for game build {build}. You have {current}. Some mods may need updates.",
+      "download": "Download {size}",
+      "downloadSome.one": "Download {size}. {count} mod is already in your Library.",
+      "downloadSome.other": "Download {size}. {count} mods are already in your Library.",
+      "allInLibrary.one": "Nothing to download: the mod is already in your Library.",
+      "allInLibrary.other": "Nothing to download: all {count} mods are already in your Library.",
+      "code": "Code {code}",
+      "kilnOldTitle": "Kiln is too old for this pack",
+      "kilnOld": "Needs Kiln {version} or newer.",
+      "updateKiln": "Update Kiln",
+      "uploadingTitle": "Still uploading",
+      "stillUploading": "{name}'s pack is still uploading ({pct}%). Wait here, and Install opens up when it's ready.",
+      "resumed": "Kiln is ready. Here is {name}, the pack you came for.",
+      "wait": "Wait",
+      "waiting": "Waiting for {name}'s upload ({pct}%)…",
+      "ownProfile": "Installs as its own profile. Your current mods stay as they are.",
+      "have": "You have this pack already.",
+      "haveUpdate": "You have this pack. Version {version} is ready.",
+      "loadIt": "Load it",
+      "loaded": "{name} is loaded",
+      "optional": "Optional mods",
+      "seeMods.one": "See the mod and its credit",
+      "seeMods.other": "See the {count} mods and their credits",
+      "hideMods": "Hide the mods",
+      "modBy": "by {name}",
+      "codeTag": "code",
+      "codeTip": "Runs code on your PC",
+      "optionalTag": "optional",
+      "newTag": "new",
+      "inLibrary": "in your Library",
+      "warning": "This pack contains mods, including code, from other people. Crucible checks packs automatically but does not review them.",
+      "trust": "I trust {name}'s pack",
+      "trustFile": "I trust this pack",
+      "trustAlways": "Always trust packs from {name}",
+      "trustedAlready": "You trust packs from {name}.",
+      "tickFirst": "Tick \"I trust\" first.",
+      "installPlay": "Install and play",
+      "cantOpen": "Can't open this pack",
+      "noGame": "Kiln hasn't found Enshrouded yet.",
+      "installKiln": "Install Kiln in the game first.",
+      "nameLabel": "Profile name",
+      "nameTaken": "You have a profile with this name. This one will be {name}.",
+      "runningHint": "Enshrouded is running. Install adds the pack now; load it once you close the game.",
+      "installOnlyTip": "Adds the pack as its own profile. Doesn't load it or start the game.",
+      "warningFile": "This pack file contains mods, including code, from other people. Kiln checked the file, but nobody has reviewed it."
+    },
+    "profiles": {
+      "tag": "Crucible pack",
+      "line": "{name} {version} · {ago}",
+      "updateReady": "{version} is ready",
+      "seeUpdate": "See the update",
+      "undoUpdate": "Undo last update (back to {version})",
+      "uninstall": "Uninstall",
+      "uninstallAsk": "Uninstall {name}?",
+      "uninstallText": "The profile goes away. Its mods stay in your Library, and your other profiles stay as they are.",
+      "uninstalled": "{name} is uninstalled",
+      "unused.one": "{count} mod is no longer used: Library > Clean up removes it.",
+      "unused.other": "{count} mods are no longer used: Library > Clean up removes them.",
+      "cardTitle": "Crucible",
+      "cardSub": "Packs you installed and packs you shared.",
+      "installed": "Installed packs",
+      "shared": "Packs you shared",
+      "asProfile": "as the profile {name}",
+      "updateTo": "Update to {version}",
+      "noInstalled": "No packs yet. Got a code from a friend? Enter it on Play.",
+      "noShared": "Nothing shared yet. Share to Crucible on Play turns your mods into a link.",
+      "sharedVersion": "version {number}"
+    },
+    "save": {
+      "button": "Save as file",
+      "pick": "Where to save the pack file",
+      "done": "Saved {name} as a file",
+      "failed": "{name} was not saved",
+      "openFolder": "Open folder"
+    },
+    "settings": {
+      "stats": "Count my installs (anonymous)",
+      "statsHint": "Crucible counts installs per day for each pack. Nothing about you is sent."
+    },
+    "share": {
+      "button": "Share to Crucible",
+      "uploadingShort": "Uploading…",
+      "changedPill": "Pack changed",
+      "signInText": "Sign in with Discord to share. Your friends don't need to.",
+      "signIn": "Sign in with Discord",
+      "saveInstead": "Save as file instead",
+      "uploadingTitle": "Sharing {name}",
+      "starting": "Getting ready…",
+      "keepsGoing": "You can close this. The upload keeps going.",
+      "copied": "Link copied. Paste it to your friends.",
+      "ready": "Your link is ready",
+      "pasteIt": "Your friends click it, then Install and play.",
+      "copyIt": "Copy the link and paste it to your friends.",
+      "sharedTitle": "{name} is shared",
+      "changedTitle": "Your pack changed",
+      "updateAsk": "Update the link for friends? {changes}",
+      "updateLink": "Update link",
+      "codeLabel": "Code",
+      "linkCopied": "Link copied",
+      "codeCopied": "Code copied",
+      "copyLink": "Copy link",
+      "noClipboard": "Copying isn't possible here. Select the text instead.",
+      "failed": "Sharing didn't work",
+      "versionLine": "Version {number}",
+      "what": "What is Crucible?",
+      "confirmTitle": "Share {name} to Crucible?",
+      "confirmWhat": "Crucible turns this profile into a link. Friends open it in Kiln and get the same mods.",
+      "confirmGoesSize.one": "Goes up: the mod list, and the files of its {count} mod that Crucible doesn't have yet (up to {size}).",
+      "confirmGoesSize.other": "Goes up: the mod list, and the files of its {count} mods that Crucible doesn't have yet (up to {size}).",
+      "confirmGoes.one": "Goes up: the mod list, and the files of its {count} mod that Crucible doesn't have yet.",
+      "confirmGoes.other": "Goes up: the mod list, and the files of its {count} mods that Crucible doesn't have yet.",
+      "confirmGoesAny": "Goes up: the mod list, and the mods' files that Crucible doesn't have yet.",
+      "confirmStays": "Stays on this PC: your mod settings and your own data edits.",
+      "confirmNever": "Never sent: your saves, worlds, characters or any other personal file.",
+      "visibility": "Who can open it",
+      "linkOnly": "Link only:",
+      "linkOnlyText": "only people you give the link or code to.",
+      "public": "Public:",
+      "publicText": "listed on Crucible for everyone. Public packs are made in Pack Studio (they need credits and a summary).",
+      "confirmShare": "Share",
+      "confirmSignIn": "Sign in and share"
+    },
+    "update": {
+      "title": "{name}: {from} → {to}",
+      "titleLoading": "Updating {name}",
+      "getting": "Getting the update ready…",
+      "cantRead": "Can't read the update",
+      "removedKept": "{name} (kept in your Library)",
+      "packData": "The pack's own data changed",
+      "renamed": "{from} is {to} now: your settings move with it.",
+      "stillWins.one": "Your change still wins ({count})",
+      "stillWins.other": "Your changes still win ({count})",
+      "dataChanged": "The pack now sets {pack}. Yours, {mine}, still counts.",
+      "dataSame": "The pack sets {pack}. Yours, {mine}, still counts.",
+      "dropMine": "Drop my change (use {value})",
+      "savesFirst": "Your saves are backed up first.",
+      "download": "Download {size}",
+      "needsYou.one": "Needs you ({count})",
+      "needsYou.other": "Needs you ({count})",
+      "both": "The pack now says {pack}. You had {mine}.",
+      "takePack": "Take {value}",
+      "keepMine": "Keep {value}",
+      "notNow": "Not now",
+      "update": "Update",
+      "updatePlay": "Update and play",
+      "chooseFirst": "Choose for each setting first.",
+      "needsChoice": "A setting needs your choice.",
+      "done": "{name} is up to date ({version})",
+      "doneDetail": "Your own changes stayed.",
+      "failed": "{name} was not updated",
+      "undone": "{name} is back to {version}",
+      "undoFailed": "Couldn't undo the update",
+      "keptLine": "Your changes kept: {list}.",
+      "keptSettings": {
+        "one": "{count} setting",
+        "other": "{count} settings"
+      },
+      "keptData": {
+        "one": "{count} data edit",
+        "other": "{count} data edits"
+      },
+      "keptMods": {
+        "one": "{count} mod",
+        "other": "{count} mods"
+      }
+    },
+    "deck": {
+      "shareTitle": "Share {name}",
+      "scan": "Friends scan the code with a phone, or type the code in Kiln.",
+      "enterCode": "Enter a code",
+      "codeHint": "8 letters and numbers, like H7QK-3MZP.",
+      "installing": "Installing…",
+      "loading": "Opening the pack…",
+      "tick": "Tick",
+      "untick": "Untick",
+      "turnOn": "Turn on",
+      "turnOff": "Turn off"
+    }
+  },
+  "studio": {
+    "nav": "Studio",
+    "title": "Pack Studio",
+    "sub": "Make Crucible packs from your profiles: mods, settings, your own data, credits, then publish.",
+    "new": "New pack",
+    "newFrom": "Start from",
+    "newEmpty": "Empty (a new profile)",
+    "newProfile": "{name} ({count} mods)",
+    "newName": "Name",
+    "newNamePh": "My pack",
+    "create": "Create",
+    "newFailed": "The pack was not made",
+    "empty": {
+      "title": "No packs yet",
+      "hint": "Start one from a profile you play: its mods and settings come along."
+    },
+    "packLine": {
+      "one": "v{version} · {count} mod · changed {ago}",
+      "other": "v{version} · {count} mods · changed {ago}"
+    },
+    "packSub": {
+      "one": "Version {version}, made from the profile {profile} ({count} mod).",
+      "other": "Version {version}, made from the profile {profile} ({count} mods)."
+    },
+    "profileGone": "The profile this pack was made from is gone.",
+    "missing": "This pack is not here",
+    "back": "All packs",
+    "allPacks": "All packs",
+    "tabsAria": "Pack Studio",
+    "deleteTitle": "Delete {name}?",
+    "deleteText": "The pack's draft goes to Kiln's backups. Its profile stays, and what you published stays on Crucible.",
+    "recheck": "Check again",
+    "state": {
+      "draft": "Draft",
+      "link": "Link only",
+      "public": "Public"
+    },
+    "tab": {
+      "mods": "Mods",
+      "settings": "Settings",
+      "data": "Data",
+      "order": "Load order",
+      "test": "Test",
+      "credits": "Credits",
+      "publish": "Publish"
+    },
+    "mods": {
+      "lead": "The mods of the profile {profile}, each as your Library holds it. Players switch optional mods on or off before they install.",
+      "addLibrary": "Add from my Library",
+      "addFile": "Add file",
+      "pickFile": "Add a mod file to the pack",
+      "addFailed": "The mod was not added",
+      "removeFailed": "{name} was not removed",
+      "empty": "No mods yet. Add some from your Library.",
+      "mod": "Mod",
+      "version": "Version",
+      "need": "In the pack",
+      "sides": "Runs on",
+      "source": "Source",
+      "needAria": "How {name} is in the pack",
+      "sidesAria": "Where {name} runs",
+      "required": "Required",
+      "optionalOn": "Optional, on",
+      "optionalOff": "Optional, off",
+      "both": "Players and servers",
+      "client": "Players only",
+      "server": "Servers only",
+      "checking": "Checking…",
+      "unknown": "Not identified",
+      "filter": "Filter",
+      "libraryEmpty": "Every mod of your Library is in the pack already.",
+      "addN": {
+        "one": "Add {count} mod",
+        "other": "Add {count} mods"
+      }
+    },
+    "settings": {
+      "lead": "Settings travel as the keys you choose, taken from the profile as you play it. Keys that match a mod's default are left out, and so are hotkeys unless you tick them. Anything that looks private never travels.",
+      "capture": "Capture from my current settings",
+      "captureFailed": "Kiln couldn't read the profile's settings",
+      "save": {
+        "one": "Use {count} key",
+        "other": "Use {count} keys"
+      },
+      "saved": {
+        "one": "{count} settings file is in the pack",
+        "other": "{count} settings files are in the pack"
+      },
+      "saveFailed": "The settings were not taken",
+      "none": "This profile has no settings files yet. Play it once, change what you like, then capture.",
+      "refused": "can't travel: {why}",
+      "wholeOnly": "travels as a whole file",
+      "differs": {
+        "one": "differs from the mod's defaults in {count} key",
+        "other": "differs from the mod's defaults in {count} keys"
+      },
+      "noDefaults": {
+        "one": "{count} key (no defaults known)",
+        "other": "{count} keys (no defaults known)"
+      },
+      "sideAria": "Who gets {file}",
+      "whole": "Whole file",
+      "default": "(default {value})",
+      "personal": "personal",
+      "secret": "private"
+    },
+    "server": {
+      "title": "Server game settings",
+      "lead": "Game settings a server of this pack uses (health, enemies, building). Taken from one of your servers; its name, password and ports never travel.",
+      "none": "Add a server in Servers to take its game settings.",
+      "pick": "Server",
+      "take": "Take from this server",
+      "takeFailed": "Kiln couldn't read the server's settings",
+      "use": "Use the ticked settings",
+      "saved": "The server game settings are in the pack",
+      "clear": "Remove them"
+    },
+    "data": {
+      "tabsAria": "Data editors",
+      "tab": {
+        "items": "Items",
+        "recipes": "Recipes",
+        "loot": "Loot",
+        "drops": "Drops",
+        "added": "New items",
+        "raw": "Raw JSON"
+      },
+      "lint": {
+        "line": "Data check: {errors}, {warnings}",
+        "errors": {
+          "one": "{count} error",
+          "other": "{count} errors"
+        },
+        "warnings": {
+          "one": "{count} warning",
+          "other": "{count} warnings"
+        },
+        "checking": "Data check: checking…",
+        "show": "Show problems",
+        "hide": "Hide problems",
+        "error": "Error",
+        "warning": "Warning",
+        "info": "Note",
+        "lineNotes": "Data check: {errors}, {warnings}, {notes}",
+        "notes": {
+          "one": "{count} note",
+          "other": "{count} notes"
+        }
+      },
+      "noCatalog": "Kiln hasn't read the game's items yet, so the pickers only list what the pack's mods add and you type field names by hand.",
+      "catalog": {
+        "reading": "Reading the game's items…",
+        "build": "Build the game catalog",
+        "why": {
+          "noGame": "No Enshrouded client found. Add it in Settings → Games.",
+          "steamUpdating": "Steam is updating the game. Try again when it is done.",
+          "conflict": "The game's files are from two different versions (Steam may be in the middle of an update). Try again when Steam is done.",
+          "failed": "Kiln could not read the game's items: {message}"
+        }
+      },
+      "thisPack": "this pack",
+      "save": "Save",
+      "saved": "Saved",
+      "unsaved": "Unsaved changes",
+      "discard": "Discard",
+      "remove": "Remove",
+      "saveFailed": "{file} was not saved",
+      "broken": "This file is not valid JSON. Fix it in Raw JSON first.",
+      "alsoIn": "Also set in {files} (Raw JSON).",
+      "name": "Name",
+      "guid": "Fixed GUID (made once, never change it)",
+      "badName": "A name is 1 to 200 letters, digits, _ - or .",
+      "dupName": "{name} is used twice",
+      "pick": {
+        "ph": "Search items",
+        "selectorPh": "Name or pattern like Material_T1_*",
+        "glob": "every match",
+        "unknown": "not found in the game or the pack's mods",
+        "none": "Nothing found",
+        "searching": "Searching…"
+      },
+      "value": {
+        "set": "set to",
+        "mul": "times",
+        "add": "plus",
+        "min": "min",
+        "max": "max",
+        "modeAria": "How {field} changes",
+        "minAria": "Lowest {field}",
+        "maxAria": "Highest {field}",
+        "raiseOnly": "raise only",
+        "lowerOnly": "lower only",
+        "on": "on",
+        "off": "off"
+      },
+      "field": {
+        "add": "+ Field",
+        "remove": "Remove {field}",
+        "nameAria": "Field"
+      },
+      "where": {
+        "add": "+ Condition",
+        "where": "where",
+        "and": "and",
+        "fieldAria": "Condition field",
+        "fieldPh": "field",
+        "valueAria": "Condition on {field}",
+        "remove": "Remove condition"
+      },
+      "rules": {
+        "add": "+ Rule",
+        "addAll": "+ Rule for every item",
+        "remove": "Remove rule",
+        "selectorAria": "Which entries",
+        "noSelector": "Every rule needs a name or a pattern",
+        "duplicate": "{selector} has two rules: merge them into one"
+      },
+      "items": {
+        "lead": "Change the game's items and the pack's mods' items: a rule per item or pattern, with conditions on the game's values. The pack layer loads after every mod, so its values win.",
+        "empty": "No item rules yet.",
+        "selector": "Items"
+      },
+      "loot": {
+        "lead": "Random loot of chests and world pickups, per item: how many come in a stack.",
+        "empty": "No loot rules yet.",
+        "selector": "Item"
+      },
+      "recipes": {
+        "lead": "Change what recipes take and make, and how long they take, or add recipes of your own.",
+        "changes": "Changed recipes",
+        "noChanges": "No recipe changes yet.",
+        "add": "+ Change a recipe",
+        "recipe": "Recipe",
+        "noRecipe": "Every change needs a recipe",
+        "changeInputs": "Change the inputs",
+        "changeOutputs": "Change the outputs",
+        "inputs": "Inputs",
+        "outputs": "Outputs",
+        "addInput": "+ Input",
+        "addOutput": "+ Output",
+        "duration": "Duration",
+        "durationPh": "game's",
+        "seconds": "seconds",
+        "itemAria": "Item",
+        "countAria": "Count",
+        "category": "any item of category {id}",
+        "addCategory": "+ Any of a group",
+        "addCategoryTip": "An input the player can pay with any item of a group, such as any wood",
+        "anyOf": "Any of: {names}",
+        "anyOfMore": "Any of: {names}, +{count} more",
+        "categoryAria": "Group of items",
+        "categoryPh": "Search by any item in it",
+        "categoryNone": "No group holds that item",
+        "categoryItems": {
+          "one": "{count} item",
+          "other": "{count} items"
+        },
+        "categoryUsed": {
+          "one": "used by {count} game recipe",
+          "other": "used by {count} game recipes"
+        },
+        "categoryUnused": "No game recipe uses it",
+        "categoryUsedBy": "Game recipes that take it: {names}",
+        "categoryUsedByMore": "Game recipes that take it: {names}, +{count} more",
+        "categoryShow": "Show its items",
+        "categoryHide": "Hide its items",
+        "categoryNoCatalog": "Needs the game's items: Kiln reads them first",
+        "removeCategory": "Remove this group",
+        "offer": "Accept any of its group?",
+        "offerAria": "Accept any of its group instead ({anyOf})",
+        "modNote": "Changes the mod's recipe; the pack layer wins (it loads after {mod}).",
+        "stationNote": "A recipe of the game keeps its station; new recipes choose their own.",
+        "new": "New recipes",
+        "noNew": "No new recipes yet.",
+        "addNew": "+ New recipe",
+        "removeNew": "Remove new recipe",
+        "station": "Station",
+        "stationPh": "Search stations",
+        "hand": "Crafted by hand",
+        "noStation": "Every new recipe needs a station",
+        "needStacks": "Every new recipe needs an input and an output",
+        "noCategory": "Choose a group for every \"Any of\" input"
+      },
+      "drops": {
+        "lead": "Default inventories: enemy loot and fixed chests, by table or for every table (*).",
+        "empty": "No drop rules yet.",
+        "table": "Table",
+        "add": "+ Table",
+        "addAll": "+ Rule for every table",
+        "count": "Amounts",
+        "chance": "Chance",
+        "items": "Single items",
+        "addItem": "+ Item",
+        "noTable": "Every drop rule needs a table"
+      },
+      "added": {
+        "lead": "Items of your own: each is a copy of a base item (its model, icon and behaviour) with its own name and values.",
+        "empty": "No new items yet.",
+        "add": "+ New item",
+        "remove": "Remove new item",
+        "displayName": "Shown as",
+        "base": "Base item",
+        "description": "Description",
+        "rolledLoot": "Rolled like loot (rarity and level vary)",
+        "fields": "Values",
+        "noBase": "Every new item needs a base item"
+      },
+      "raw": {
+        "none": "No files yet.",
+        "newPh": "name.json",
+        "newAria": "New file name",
+        "new": "New file",
+        "rename": "Rename",
+        "renameAria": "New name",
+        "renameOk": "Rename",
+        "exists": "{file} exists already",
+        "delete": "Delete",
+        "deleteTitle": "Delete {file}?",
+        "deleteText": "The file leaves the pack layer.",
+        "textAria": "Text of {file}",
+        "clean": "No problems in this file.",
+        "pick": "Pick a file or make a new one."
+      },
+      "hidden": {
+        "toggle": "Show hidden game entries",
+        "tag": "hidden",
+        "tip": "Old, test or unused game entries: they may do nothing in the game.",
+        "tankWater": "station tank water"
+      }
+    },
+    "order": {
+      "title": "Load order",
+      "always": "(the pack layer, always last)",
+      "late": "Late native DLLs: {list}",
+      "conflicts": "Conflicts",
+      "none": "No two mods set the same field differently.",
+      "noCatalog": "Without the game-data catalog, conflicts of wildcards are only guesses.",
+      "maybe": "maybe",
+      "wins": "wins today",
+      "setIn": "Set in the pack:",
+      "set": "Set",
+      "setAria": "Value of {field} in the pack",
+      "setDone": "{field} is set in the pack layer"
+    },
+    "test": {
+      "lead": "Try the pack exactly as players get it: Kiln builds it and installs it as a profile of its own.",
+      "backup": "Your saves are backed up first.",
+      "world": "Start a new world for the test to keep your own worlds as they are.",
+      "server": "For a server pack, put a published version on one of your servers (Publish).",
+      "make": "Test this pack",
+      "again": "Test again",
+      "play": "Play the test",
+      "end": "End the test",
+      "failed": "The test instance was not made",
+      "ready": "{name} is ready",
+      "readyDetail": "Press Play to start it.",
+      "noGame": "Add the game first.",
+      "reported": "What the game reported",
+      "notYet": "Play the test, then come back here.",
+      "clean": "No conflicts or errors in the last run.",
+      "conflicts": {
+        "one": "{count} data conflict",
+        "other": "{count} data conflicts"
+      },
+      "problems": {
+        "one": "{count} error or warning",
+        "other": "{count} errors or warnings"
+      }
+    },
+    "credits": {
+      "lead": "Public packs credit every mod: its author and an https link to where it comes from. Kiln fills in what it recognises; check each row.",
+      "author": "Author",
+      "source": "Source",
+      "matched": "Found by",
+      "authorAria": "Author of {name}",
+      "sourceAria": "Where {name} comes from",
+      "notIdentified": "Not identified: fill in or remove the mod",
+      "missing": {
+        "one": "{count} mod still needs a credit for a public pack",
+        "other": "{count} mods still need a credit for a public pack"
+      },
+      "complete": "Every mod is credited",
+      "save": "Save credits",
+      "saved": "The credits are saved",
+      "saveFailed": "The credits were not saved"
+    },
+    "match": {
+      "kiln": "Kiln's own",
+      "crucible": "Crucible",
+      "github": "GitHub release",
+      "nexus": "Nexus",
+      "manifest": "the mod's own info",
+      "manual": "you"
+    },
+    "confidence": {
+      "certain": "certain",
+      "likely": "likely",
+      "conflict": "differs from an earlier credit",
+      "unverified": "unverified",
+      "creator": "yours",
+      "unconfirmed": "unconfirmed",
+      "none": "none"
+    },
+    "publish": {
+      "signInTitle": "Sign in to publish",
+      "signIn": "Publishing uses your Discord sign-in. Players don't need one to install.",
+      "version": "Version",
+      "changes": "What changed",
+      "changesPh": "Rebalanced loot; added Busy Hands",
+      "tested": "Tested with game build {build}",
+      "visibility": "Visibility",
+      "public": "Public",
+      "link": "Link only",
+      "summary": "Summary",
+      "summaryHint": "One line for Crucible's lists (at least 10 characters).",
+      "attest": "I have credited every mod and its author, and I may share these files.",
+      "checks": "Checks",
+      "check": {
+        "format": "format",
+        "sizes": "sizes",
+        "blocked": "known bad files",
+        "code": {
+          "one": "code scan ({count} note)",
+          "other": "code scan ({count} notes)"
+        },
+        "lint": {
+          "one": "data check ({count} warning)",
+          "other": "data check ({count} warnings)"
+        }
+      },
+      "tone": {
+        "ok": "ok",
+        "warn": "look",
+        "err": "error",
+        "note": "note"
+      },
+      "go": "Publish",
+      "saveFile": "Save as file",
+      "failed": "The pack was not published",
+      "donePublic": "Version {version} is public",
+      "doneLink": "Version {version} is published",
+      "copied": "Link copied.",
+      "isPublic": "Public on Crucible",
+      "isLink": "Published, link only",
+      "history": "Published versions",
+      "toServer": "Put on a server",
+      "makePublic": "Make public",
+      "makeLink": "Make it link only",
+      "goFresh": "Publish as a new pack",
+      "goneTitle": "This pack is no longer on Crucible",
+      "gone": "It was deleted or taken down there. Publishing makes a new pack with a new link and code.",
+      "notYetPublic": "Not public yet"
+    },
+    "serverPack": {
+      "title": "{name} {version} on a server",
+      "lead": "The version's server mods, its server settings and its game settings go onto the server, and the modpack players download is built from it. Stop the server first.",
+      "go": "Put on the server",
+      "done": "{version} is on the server",
+      "failed": "The server pack was not made"
+    }
+  },
+  "editor": {
+    "page": {
+      "title": "Editor",
+      "lookingForSaves": "Looking for saves…",
+      "pickCharacter": "Pick a character.",
+      "noSaves": "No character saves found.",
+      "cannotParse": "This save could not be parsed for editing.",
+      "readOnlyNoSave": "This save can only be read: Save is off.",
+      "gameOpen": "The game is open: close it to save.",
+      "unsaved": "Changes not saved yet. Kiln backs the save up before it writes.",
+      "levelBackup": "Level {n}. Kiln backs the save up before it writes.",
+      "notSaved": "Not saved",
+      "discard": "Discard",
+      "backups": "Backups",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "savedHint": "The save before it is in Backups.",
+      "gameOpenShort": "Game running: close it to save",
+      "error": "Error",
+      "note": "Note",
+      "readAgain": "Read again",
+      "close": "Close",
+      "parts": "Parts of the save",
+      "characters": "Characters",
+      "openFile": "Open file…",
+      "pickCharacterButton": "Pick a character",
+      "open": "Open",
+      "opened": "Open",
+      "discardTitle": "Discard the changes?",
+      "discardAndOpen": "Discard and open",
+      "discardBody": "The changes to {nome} are not saved yet.",
+      "cancel": "Cancel",
+      "back": "Back",
+      "readOnlyError": "Read-only: {erro}",
+      "pointsRaised": "You raised the points in use ({antes} → {depois}). Enter your point total on the Skills tab so the editor can check it; above the total, the game resets the whole tree.",
+      "notWritten": "Not saved. {problemas}",
+      "gameWroteSince": "The game wrote this save after the editor read it. Read it again to edit the save as it is now (the changes made here are lost)."
+    },
+    "tabs": {
+      "equipment": "Equipment",
+      "inventory": "Backpack",
+      "skills": "Skills",
+      "knowledge": "Knowledge"
+    },
+    "backups": {
+      "title": "Backups for {nome}",
+      "openFolder": "Open folder",
+      "hint": "The game keeps the last 10 saves automatically; the editor also copies the save before every write.",
+      "dropsChanges": "Restoring drops the changes that are not saved.",
+      "looking": "Looking for backups…",
+      "none": "No backup found for this save.",
+      "restore": "Restore",
+      "restored": "Restored",
+      "restoredBody": "{arquivo} ({quando}). The save before it was kept as a backup.",
+      "restoreTitle": "Restore this backup?",
+      "restoreBody": "The save as it is now is kept as a backup.",
+      "kindGame": "Game's copy",
+      "kindKiln": "Kiln backup",
+      "beforeSave": "before a save"
+    },
+    "common": {
+      "level": "Level",
+      "empty": "Empty",
+      "change": "Change",
+      "add": "Add",
+      "tierN": "Tier {n}",
+      "rarity": "Rarity",
+      "amount": "Amount",
+      "aboveStack": "more than the game's stack of {n}: for worlds with a mod that raises stack sizes",
+      "gameStack": "Game's stack ({n})",
+      "maxAmount": "Most a slot holds ({n})",
+      "upgrades": "Upgrades",
+      "remove": "Remove",
+      "levelN": "level {n}",
+      "pick": "Pick",
+      "noMatch": "Nothing matches these filters.",
+      "all": "All"
+    },
+    "equipment": {
+      "xp": "XP in level",
+      "attrsHint": "Attributes come from the skill tree nodes (edit them on the Skills tab).",
+      "attrsFlameHint": "The game also adds the nodes that scale with your Flame level and the bonuses from your gear; neither is stored in the character save.",
+      "emptyHint": "Empty slot. Equip the piece in game; here you can edit or take off what is already worn.",
+      "backpackFull": {
+        "one": "I will not take off the {item}: that would delete its container and the {count} slot stored in it. Empty it in game first.",
+        "other": "I will not take off the {item}: that would delete its container and the {count} slots stored in it. Empty it in game first."
+      },
+      "groups": {
+        "armour": "Armour",
+        "appearance": "Appearance",
+        "accessories": "Accessories"
+      },
+      "slots": {
+        "headVanity": "Head (vanity)",
+        "chestVanity": "Chest (vanity)",
+        "armsVanity": "Arms (vanity)",
+        "legsVanity": "Legs (vanity)",
+        "feetVanity": "Feet (vanity)",
+        "head": "Head",
+        "chest": "Chest",
+        "arms": "Arms",
+        "legs": "Legs",
+        "feet": "Feet",
+        "ring": "Ring",
+        "shield": "Shield",
+        "hook": "Grappling hook",
+        "glider": "Glider",
+        "backpack": "Backpack",
+        "slot": "Slot {n}"
+      }
+    },
+    "inventory": {
+      "move": "Move",
+      "slotEmpty": "Slot {n} empty",
+      "putHere": "Put here",
+      "slotsUsed": {
+        "one": "{n} of {total} slot",
+        "other": "{n} of {total} slots"
+      },
+      "addItem": "Add item",
+      "swapBar": "Swap bar",
+      "swapBarHint": "Alt swaps it with the action bar",
+      "actionBar": "Action bar",
+      "deckHint": "A changes the item · Y moves it · A on an empty slot adds one",
+      "hint": "Drag to move · double-click an empty slot to add · Delete removes · Ctrl+D duplicates",
+      "noneSelected": "No item selected.",
+      "noneSelectedHint": "Pick a slot to see and change its item.",
+      "emptyHint": "Pick an item from the catalog to put here.",
+      "pickItem": "Pick item",
+      "notFound": "No items were found in this inventory, and the editor cannot tell for sure where it sits in this save. If the game shows items here, they could not be read: nothing can be added. A copy of this save sent to us helps fix it.",
+      "modItem": "Mod item, kept untouched",
+      "hiddenModItem": "{place} holds a hidden item from another mod (id {id}); Kiln keeps it untouched.",
+      "place": {
+        "backpack": "Backpack slot {n}",
+        "swap": "Swap bar slot {n}",
+        "action": "Action bar slot {n}"
+      }
+    },
+    "inspector": {
+      "item": "Item",
+      "stacksTo": "stacks up to {n}",
+      "max": "Max",
+      "levelSplit": {
+        "one": "= base {base} + {count} upgrade",
+        "other": "= base {base} + {count} upgrades"
+      },
+      "aboveItemMax": "above this item's maximum ({max}): the server clamps it on load, unless its range was opened up by a mod",
+      "upgradesHint": "Rarity sets how many upgrades the item takes: max level = base level + rarity.",
+      "gem": "Socketed gem",
+      "gemUnknown": "id {id} is not in the catalog",
+      "noGem": "— no gem —",
+      "gemLevel": "Gem level",
+      "aboveGemMax": "above this gem's maximum ({max}): the server clamps it on load, unless its range was opened up by a mod",
+      "durability": "Durability",
+      "repair": "Repair",
+      "water": "Water",
+      "fill": "Fill",
+      "duplicateHint": "Copies the item into the first free slot",
+      "duplicate": "Duplicate",
+      "attributes": "Attributes",
+      "physicalArmour": "Physical Armour",
+      "magicalArmour": "Magical Armour",
+      "raisesSkill": "raises the skill level of {no}",
+      "unknownLines": "The lines without a number scale with the item level by a formula that has not been measured yet; the editor does not show a value it cannot stand behind."
+    },
+    "parts": {
+      "full": "Full",
+      "clickToSet": "Click to set"
+    },
+    "catalog": {
+      "items": "Items",
+      "countLimited": {
+        "one": "{count} item (showing {limite}; narrow the search)",
+        "other": "{count} items (showing {limite}; narrow the search)"
+      },
+      "count": {
+        "one": "{count} item",
+        "other": "{count} items"
+      },
+      "categories": "Categories",
+      "searchDeck": "Search by name (Steam + X: keyboard)",
+      "search": "Search by name…",
+      "searchLabel": "Search",
+      "type": "Type",
+      "allRarities": "All",
+      "tier": "Tier",
+      "targetFull": "Target: inventory full",
+      "target": "Target: slot {n}",
+      "pickHint": "Pick an item.",
+      "deckHint": "A picks it, A again adds it.",
+      "hint": "Double-click adds it at once.",
+      "cat": {
+        "weapons": "Weapons",
+        "armour": "Armour",
+        "ammo": "Ammunition",
+        "magic": "Spells and gems",
+        "consumables": "Consumables",
+        "materials": "Materials",
+        "tools": "Tools",
+        "building": "Building",
+        "cosmetics": "Cosmetics and collectibles"
+      }
+    },
+    "knowledge": {
+      "noBlock": "This save has no knowledge block.",
+      "search": "Search by name or id",
+      "above": "Above level",
+      "allLevels": "all",
+      "show": "Show",
+      "filter": {
+        "itemsRecipes": "Items and recipes",
+        "items": "Items only",
+        "recipes": "Recipes only",
+        "everything": "Everything"
+      },
+      "removeN": "Remove {n}",
+      "kind": "Kind",
+      "name": "Name",
+      "state": "State",
+      "id": "id {id}",
+      "kinds": {
+        "item": "item",
+        "recipe": "recipe",
+        "misc": "other"
+      },
+      "count": {
+        "one": "{n} of {total} entry",
+        "other": "{n} of {total} entries"
+      },
+      "unnamed": {
+        "one": "{count} with no known name",
+        "other": "{count} with no known name"
+      },
+      "shownLimit": "Showing the first 400; use the search or the level cut-off to see the rest.",
+      "hint": "Removing a high-level material closes the recipes that depend on it. Recipes are not stored in the save: the game recomputes them from the knowledge, both here and in the server world."
+    },
+    "skills": {
+      "total": "Total points",
+      "minusLevel": "−1 level",
+      "plusLevel": "+1 level",
+      "tree": "Skill tree",
+      "used": "In use",
+      "available": "Available",
+      "enterTotal": "enter total…",
+      "changeTotal": "Click to change the total",
+      "totalFromGame": "Total {total}, worked out as the game does: 2 points per level above 1, plus the Shroud Roots and Elixir Wells this character has cleared. The game does not store it, so it is not edited here.",
+      "totalHint": "Point total (in use + available, as the game shows it):",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out",
+      "centre": "Centre",
+      "cost": "cost {n}",
+      "maxN": "max {n}",
+      "deckHint": "A: +1 level · Y: −1",
+      "hint": "Click: +1 level · Right click: −1",
+      "class": {
+        "warrior": "Warrior",
+        "ranger": "Ranger",
+        "mage": "Mage",
+        "neutral": "Neutral"
+      }
+    },
+    "deck": {
+      "delete": "Delete",
+      "range": "From {min} to {max}",
+      "min": "Min",
+      "use": "Use",
+      "current": "Now"
+    },
+    "art": {
+      "preparing": "Preparing game art…",
+      "needsClient": "Game art needs the Enshrouded client (Settings → Games).",
+      "notFound": "Game art not found. Run {script}."
+    },
+    "game": {
+      "tree": {
+        "aboveMax": "{no}: level {nivel} above the maximum of {max}",
+        "orphans": "Nodes with no link to the rest of the tree: {nos}",
+        "overTotal": "Points in use ({usados}) exceed the character total ({total})"
+      },
+      "unknownItem": "Unknown item (0x{h})",
+      "errors": {
+        "unknownItems": "Unknown items in this save (a mod that is gone?): read-only",
+        "levelXp": "Invalid level or XP",
+        "skill": "Invalid skill",
+        "item": "Unknown item: {id}",
+        "slotAmount": "Invalid slot or amount",
+        "sameSlot": "Two items in the same inventory slot",
+        "knowledge": "Invalid knowledge entry",
+        "knowledgeRepeated": "Knowledge with a repeated id",
+        "closeGame": "Close Enshrouded before saving: the game would overwrite the edit.",
+        "notOpen": "Save not open for editing",
+        "noEquipment": "The editor cannot find the equipment and inventory in this save",
+        "skillList": "The editor does not know this save's skill list",
+        "notSave": "Not an Enshrouded save",
+        "inventoryUnsure": "The editor could not find this save's inventory for sure: no items can be written into it.",
+        "modData": "This save holds data of a mod the editor cannot write ({mods}): read-only, so the mod's data stays as it is.",
+        "inventoryUnread": "The editor could not read this character's inventory (backpack, swap bar and action bar) for sure: read-only, so nothing is written over it."
+      },
+      "saveFileFilter": "Enshrouded save",
+      "rarity": {
+        "none": "No rarity",
+        "common": "Common",
+        "uncommon": "Uncommon",
+        "rare": "Rare",
+        "epic": "Epic",
+        "legendary": "Legendary"
+      },
+      "category": {
+        "weapon": "Weapon",
+        "equipment": "Equipment",
+        "material": "Material",
+        "consumable": "Consumable",
+        "ammunition": "Ammunition",
+        "tool": "Tool",
+        "building": "Building",
+        "blueprint": "Blueprint",
+        "collectible": "Collectible",
+        "cosmetic": "Cosmetic",
+        "gem": "Gem"
+      },
+      "attribute": {
+        "constitution": "Constitution",
+        "spirit": "Spirit",
+        "endurance": "Endurance",
+        "strength": "Strength",
+        "dexterity": "Dexterity",
+        "intelligence": "Intelligence"
+      },
+      "classes": {
+        "survivor": "Survivor",
+        "beastmaster": "Beastmaster",
+        "ranger": "Ranger",
+        "assassin": "Assassin",
+        "trickster": "Trickster",
+        "wizard": "Wizard",
+        "healer": "Healer",
+        "battlemage": "Battlemage",
+        "tank": "Tank",
+        "warrior": "Warrior",
+        "barbarian": "Barbarian",
+        "athlete": "Athlete"
+      },
+      "knowledge": {
+        "pickedUp": "picked up",
+        "used": "used",
+        "inspected": "inspected",
+        "seen": "seen",
+        "crafted": "crafted"
+      }
+    }
+  },
+  "sfBackend": {
+    "backend": {
+      "title": "ShroudForge",
+      "sub": "Which ShroudForge runs this game's ShroudForge mods. Saved in kiln/kiln.json; it applies from the next start.",
+      "label": "ShroudForge backend",
+      "choice": {
+        "hosted": "Kiln's bundled ShroudForge",
+        "installed": "My installed ShroudForge",
+        "kiln": "Kiln's interpreter"
+      },
+      "about": {
+        "hosted": "The ShroudForge that comes with Kiln.",
+        "installed": "The ShroudForge in the game's shroudforge folder.",
+        "kiln": "Kiln runs ShroudForge mods itself. A mod it cannot run whole is skipped, with the reason, before Play."
+      },
+      "none": "no ShroudForge",
+      "default": "Default",
+      "held": "Held",
+      "heldWhy": "Not available in this Kiln build: {reason}",
+      "set": {
+        "default": "Nothing set: the default.",
+        "explicit": "Chosen: {name}.",
+        "inherited": "From the older switch \"Use my installed ShroudForge\": {name}. A choice here replaces it.",
+        "invalid": "kiln.json names a backend Kiln does not know ({value}): no ShroudForge runs this game's ShroudForge mods until you choose one."
+      },
+      "next": "Next start: {name}",
+      "last": "Last start: {name}",
+      "envRuntime": "KILN_SHROUDFORGE_RUNTIME is set where the launcher runs: a start from the launcher follows it.",
+      "envOff": "KILN_SHROUDFORGE=0 is set where the launcher runs: no ShroudForge runs at a start from the launcher.",
+      "route": {
+        "missing": "Kiln's interpreter is not in this game yet: install Kiln again to add it.",
+        "ownLoader": "ShroudForge's own loader is in the game ({file}): it runs the ShroudForge mods, and Kiln's choices stand aside."
+      },
+      "running": "Close the game to change this.",
+      "reset": "Back to the default",
+      "unreadable": "This cannot be changed while kiln.json cannot be read: {reason}",
+      "saved": "Saved. Next start: {name}.",
+      "ask": {
+        "title": "Change the ShroudForge backend?",
+        "to": "From the next start: {name}",
+        "replaces": "This replaces the older switch \"Use my installed ShroudForge\".",
+        "kiln": "Mods Kiln's interpreter cannot run whole are skipped at the start, each with its reason, and the warning before Play lists them. Nothing switches back to Kiln's bundled ShroudForge on its own.",
+        "unchanged": "kiln.json already says this.",
+        "refused": "This cannot be chosen now: {reason}",
+        "when": "Nothing changes until you save. The game reads it at its next start."
+      }
+    },
+    "startWarning": {
+      "title": "Some mods will not run this start",
+      "continue": "Continue without these mods",
+      "game": "Game: {path}",
+      "changedTitle": "Changed",
+      "changed": "What will not run this start changed since the last warning. Read it again before you continue.",
+      "otherGame": "This warning belongs to another game. Press Play again.",
+      "lead": {
+        "save": {
+          "title": "Do not save without them",
+          "text": "A mod below keeps data in your saves. If you save a world while it is off, its data may change or be lost. Play without saving, or cancel and fix it first."
+        },
+        "check": {
+          "title": "Not everything could be checked",
+          "text": "Kiln could not check everything for this start, so these mods may not run. Read the reasons below."
+        },
+        "plain": {
+          "title": "These mods will not run",
+          "text": "The game starts without the mods below. The rest of your mods run as usual."
+        }
+      },
+      "listAria": "What will not run ({count})",
+      "notesAria": "Good to know",
+      "nothingChanged": "Continuing switches nothing off and saves or deletes nothing. The next Play checks again.",
+      "partData": "startup data",
+      "partLua": "Lua",
+      "partDlls": "DLLs: {list}",
+      "parts": "Parts: {list}",
+      "dataNotApplied": "Its startup data is not applied this start.",
+      "chain": "Because of: {chain}",
+      "folder": "Folder: {root}",
+      "wasActive": "It was active at an earlier start ({launch}).",
+      "unknownStart": "start unknown",
+      "saveLine": "It keeps data in your saves: do not save a world while it is off.",
+      "saveUnknown": "It may keep data in your saves: do not save a world while it is off.",
+      "skipped": "{name} does not run",
+      "refused": "No ShroudForge mod runs this start",
+      "notStarted": "Not started: {list}",
+      "previous": "{name} is off now",
+      "offNow": "It does not run this start.",
+      "basisPolicy": "Kiln's list of mods that keep save data names it.",
+      "basisUnknown": "It has both game data and code, so it may keep save data.",
+      "about": "About: {list}",
+      "inspector": "Kiln's archive inspector cannot be used",
+      "planWarning": "Launch plan warning",
+      "baseTitle": "Game files this start is based on",
+      "baseRestore": "To go back to exactly these files, switch off the mods that change the game's data and start the game through Kiln once (Logs, Engines: Restore the game's data).",
+      "baseVerify": "For the game's files as Steam ships them, use Verify integrity of game files in Steam.",
+      "costTitle": "Slower start",
+      "noteTitle": "Note",
+      "keybindsTitle": "Keyboard shortcuts",
+      "keybinds": "{name}: its keyboard shortcuts do not work with Kiln's interpreter yet. The rest of the mod runs."
+    },
+    "engineRow": {
+      "plugin": "Kiln's interpreter (kiln-sfi)",
+      "packages": "ShroudForge mods",
+      "phase": {
+        "starting": "starting",
+        "running": "running",
+        "ended": "ended",
+        "aside": "stood aside",
+        "refused": "not started",
+        "unknown": "unknown"
+      },
+      "package": {
+        "running": "running",
+        "dataApplied": "data applied",
+        "off": "off",
+        "skipped": "skipped"
+      },
+      "stale": {
+        "older-start": "This record is from an earlier start: what the interpreter did in the newest start is not known.",
+        "not-running": "The record says {phase}, but the game is not running: that start ended without its last record (it may have crashed).",
+        "other-process": "The record is from another game process: it is not this start's."
+      },
+      "previous": {
+        "incomplete": "The start before this one ended without finishing its record (it may have crashed).",
+        "suspect": "Kiln could not read what the start before this one left."
+      },
+      "unreadable": "Kiln's interpreter left a record Kiln cannot read: {error}"
+    },
+    "restoreBase": {
+      "title": "Restore the game's data",
+      "base": "Kiln started from these game files: {label}.",
+      "how": "To go back to exactly these files, switch off the mods that change the game's data and start the game through Kiln once. Kiln puts back only data it can prove it wrote; another loader's data stays.",
+      "save": "Mods that keep data in your saves: do not save a world while they are off.",
+      "vanilla": "These are not necessarily the files as Steam ships them. For those, use Verify integrity of game files in Steam (the game's Properties, Installed Files).",
+      "unknown": "Kiln cannot tell which game files it would put back: {reason}."
     }
   }
 }

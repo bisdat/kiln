@@ -37,11 +37,12 @@ How it works:
   with `--no-game-font`) the game look is its neutral stand-in, as on a build where the read fails.
 
 - Kiln's texts in another language: `--language zh-CN --locales DIR` (a folder with `zh-CN.json`, e.g. a stub translation
-  kept outside the tree) sets kiln.json's `ui.language` for every scene. For a Chinese, Japanese or Korean language
-  `game_fonts.py` reads the game's own `keen::UiFontResource` and the font files of that language's group (and the default
-  group's) from the local game with `tools/kfc` into `$KILN_OUT/ui-preview/game-fonts/` (never copied into the tree), and the
-  shim serves them to style.cpp's real readers (`kiln_preview_font_resource`), so the preview loads them as the game would:
-  Kiln's texts stay English until the group's font joined the atlas. Each scene prints when the glyphs were ready, the
+  kept outside the tree) sets kiln.json's `ui.language` for every scene. Unless `--font` is given, `game_fonts.py` reads
+  the game's own `keen::UiFontResource` and the font files kiln.ui takes from it (the default group's Latin source and bold,
+  its Cyrillic and Thai fonts, and for a Chinese, Japanese or Korean language that language's group) from the local game
+  with `tools/kfc` into `$KILN_OUT/ui-preview/game-fonts/` (never copied into the tree), and the shim serves them to
+  style.cpp's real readers (`kiln_preview_font_resource`), so the preview loads them as the game would: a CJK or Cyrillic
+  language's texts stay English until its fonts joined the atlas. Each scene prints when the glyphs were ready, the
   first frame's time in the language and the font atlas (`kiln_preview_atlas`: texture size, glyphs made, font sources);
   the PNG is `<scene>-<language>-<size>.png`.
 

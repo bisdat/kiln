@@ -9,6 +9,7 @@ mod gate;
 mod kiln;
 mod lock;
 mod ops;
+mod pack;
 mod preflight;
 mod profiles;
 mod procs;
@@ -267,6 +268,13 @@ enum Cmd {
         /// Print summary.txt instead of writing the zip
         #[arg(long, conflicts_with = "out")]
         print: bool,
+        /// Leave out another mod's own file (its path in the zip, e.g. game/BuildingTools.log; repeatable), or
+        /// `other-mods` for all of them. Kiln's own logs, its settings and the listings always stay in
+        #[arg(long, value_name = "PATH")]
+        exclude: Vec<String>,
+        /// Print what the report holds (each file, its size and what was replaced in it) instead of writing the zip
+        #[arg(long, conflicts_with_all = ["out", "print"])]
+        contents: bool,
     },
     /// Runtime bundles: create, verify, install into a game folder, uninstall (docs/kiln/launcher/bundle.md)
     Bundle {
@@ -287,6 +295,12 @@ enum Cmd {
     Profile {
         #[command(subcommand)]
         cmd: ProfileCmd,
+    },
+    /// Crucible packs (.kilnpack): build from a profile, verify, install as an instance, update, diff, undo, uninstall,
+    /// put the server part on a server folder
+    Pack {
+        #[command(subcommand)]
+        cmd: pack::PackCmd,
     },
     /// Compare two tick-stats.jsonl files (before/after moving a mod's work into tasks): per-world step time and
     /// steps over budget, per-mod Pre/Post time and share of the step, and the tasks section when present (T12)
@@ -492,7 +506,7 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
             ops::backup(&load(&name)?)?;
         }
         Cmd::List => ops::list()?,
-        Cmd::Report { name, dir, out, print } => return report::run(report::ReportArgs { name, dir, out, print }),
+        Cmd::Report { name, dir, out, print, exclude, contents } => return report::run(report::ReportArgs { name, dir, out, print, exclude, contents }),
         Cmd::Bundle { cmd } => {
             return match cmd {
                 BundleCmd::Create { stage, out, git, epoch } => bundle::create(&stage, &out, git, epoch),
@@ -519,6 +533,7 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
                 ProfileCmd::Show { profile, side } => profiles::show(&profile, &side),
             };
         }
+        Cmd::Pack { cmd } => return pack::run(cmd),
         Cmd::Client { cmd } => {
             return match cmd {
                 ClientCmd::Status { dir } => client::status(dir),
@@ -563,6 +578,7 @@ fn data_use(cmd: &Cmd) -> lock::Use {
         Cmd::Deploy { bundle, .. } => if bundle.is_some() { Use::Whole } else { Use::None },
         Cmd::Update { .. } => Use::Part,
         Cmd::Backup { .. } | Cmd::Report { .. } | Cmd::Library { .. } | Cmd::Profile { .. } | Cmd::Client { .. } => Use::Whole,
+        Cmd::Pack { cmd } => if pack::uses_data(cmd) { Use::Whole } else { Use::None },
         Cmd::Bundle { cmd } => match cmd {
             BundleCmd::Create { .. } | BundleCmd::Verify { .. } => Use::None,
             BundleCmd::Install { .. } | BundleCmd::Uninstall { .. } => Use::Whole,
@@ -572,6 +588,10 @@ fn data_use(cmd: &Cmd) -> lock::Use {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // (feature sfi: kiln-mode activations run the archive inspector the Kiln installed in each game
+    // folder brought, its version and SHA-256 from that install: kiln_manage::sfi_inspection::Installed)
+    #[cfg(feature = "sfi")]
+    kiln_manage::profile::sfi::use_installed_inspector();
     // the data folder's lock, before the command does anything, for as long as it runs (dropped after dispatch)
     let _held = match data_use(&cli.cmd) {
         lock::Use::Whole => match lock::hold() {
@@ -609,13 +629,19 @@ mod data_use_tests {
             &["profile", "create", "p"][..], &["profile", "show", "p"], &["library", "list"], &["library", "import", "x.zip"], &["library", "take-over", "eml:x"],
             &["client", "status"], &["deploy", "s", "--bundle", "k.zip"], &["bundle", "install", "k.zip", "--dir", "/g"],
             &["bundle", "uninstall", "--dir", "/g"], &["backup", "s"], &["report"],
+            &["pack", "install", "p.kilnpack", "--yes"], &["pack", "update", "p", "p.kilnpack"], &["pack", "build", "p", "--version", "1.0.0"], &["pack", "list"],
+            // Pack Studio's pack source commands (they read and write the source's profile)
+            &["pack", "init", "dir", "--name", "Ember run", "--profile", "p"], &["pack", "add", "dir", "eml:loot@1.0.0", "mod.zip"],
+            &["pack", "capture-settings", "dir", "--take", "a.json:range@client"], &["pack", "lint", "dir"], &["pack", "credits", "dir", "--set", "a=Me,https://x.y"],
+            &["pack", "publish", "dir", "--public", "--yes"], &["pack", "build", "./dir"],
         ] {
             assert_eq!(use_of(args), Use::Whole, "{args:?}");
         }
         for args in [
             &["run", "s"][..], &["start", "s"], &["stop", "s"], &["logs", "s", "--follow"], &["port", "s"], &["gate", "s"],
             &["install", "s"], &["prefix", "s"], &["status", "s"], &["list"], &["deploy", "s"], &["bundle", "verify", "k.zip"],
-            &["cmd", "s", "help"], &["tick-compare", "a.jsonl", "b.jsonl"],
+            &["cmd", "s", "help"], &["tick-compare", "a.jsonl", "b.jsonl"], &["pack", "verify", "p.kilnpack"],
+            &["pack", "check", "p.kilnpack"], &["pack", "check", "--index", "i.json", "--files", "f"],
         ] {
             assert_eq!(use_of(args), Use::None, "{args:?}");
         }

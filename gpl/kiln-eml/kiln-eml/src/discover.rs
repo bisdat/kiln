@@ -122,10 +122,14 @@ fn dos_name(unix: &str) -> Option<String> {
         fn GetProcessHeap() -> *mut c_void;
         fn HeapFree(heap: *mut c_void, flags: u32, memory: *mut c_void) -> i32;
     }
-    let kernel32: Vec<u16> = "kernel32.dll".encode_utf16().chain(Some(0)).collect();
-    let module = unsafe { GetModuleHandleW(kernel32.as_ptr()) };
-    if module.is_null() { return None; }
-    let export = unsafe { GetProcAddress(module, c"wine_get_dos_file_name".as_ptr().cast()) };
+    // (the export is looked up once per process, in a kiln start's early phase; public: the
+    // GetModuleHandleW(kernel32) + GetProcAddress("wine_get_dos_file_name") lookup made here at every call)
+    let export = wine_dos_export(&|| {
+        let kernel32: Vec<u16> = "kernel32.dll".encode_utf16().chain(Some(0)).collect();
+        let module = unsafe { GetModuleHandleW(kernel32.as_ptr()) };
+        if module.is_null() { return std::ptr::null_mut(); }
+        unsafe { GetProcAddress(module, c"wine_get_dos_file_name".as_ptr().cast()) }
+    });
     if export.is_null() { return None; }
     // SAFETY: Wine's export, WCHAR *CDECL wine_get_dos_file_name(LPCSTR): a heap string the caller frees, or null
     let convert: unsafe extern "C" fn(*const std::ffi::c_char) -> *mut u16 = unsafe { std::mem::transmute(export) };
@@ -141,6 +145,23 @@ fn dos_name(unix: &str) -> Option<String> {
 
 #[cfg(not(windows))]
 fn dos_name(_unix: &str) -> Option<String> { None }
+
+// (kiln mode's discovery under a held loader lock)
+/// Wine's `kernel32!wine_get_dos_file_name` (null on Windows proper), looked up through `lookup` once per process.
+/// Kiln mode's discovery runs in kiln-eml's on_ready, while a package DLL's initializer may still hold the loader lock,
+/// and Wine's loader takes that lock in GetModuleHandleW and GetProcAddress (a receipt's Unix path then waited for the
+/// initializer to return; native Windows does not wait): kiln-eml's early phase asks first ([`prime_dos_name`]), on the
+/// boot thread before any package DLL loads.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn wine_dos_export(lookup: &dyn Fn() -> *mut std::ffi::c_void) -> *mut std::ffi::c_void {
+    static EXPORT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *EXPORT.get_or_init(|| lookup() as usize) as *mut std::ffi::c_void
+}
+
+/// The lookup [`dos_name`] needs, made now (kiln-eml's early phase of a kiln start).
+pub fn prime_dos_name() {
+    let _ = dos_name("/");
+}
 
 /// A selected marked copy is already represented by its profile entry (even when disabled). An unselected copy
 /// retained after edits must not become a drop-in either, but only a matching install receipt establishes ownership:
@@ -193,7 +214,9 @@ pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathB
         // DLL looks for (`mods/XHL-Auto-Loot` for the Library id `xhl-auto-loot`)
         let own_path = paths.get(i).map(|c| c.path.clone())
             .filter(|p| p.parent().is_some_and(|parent| roots.iter().any(|r| is_root(parent, r))));
-        let copy = roots.iter().map(|r| r.join(&id)).chain(own_path).find(|d| kiln_copy_of(d).is_some_and(|m| m == id));
+        // The entry's own path first: on Windows `<root>\<id>` also opens `<root>\XHL-Auto-Loot` (names are not case
+        // sensitive there), and the report must name the folder as the launcher placed it.
+        let copy = own_path.into_iter().chain(roots.iter().map(|r| r.join(&id))).find(|d| kiln_copy_of(d).is_some_and(|m| m == id));
         let wanted = paths.get(i).and_then(|c| classify(&c.path).ok()).map(|m| m.id).unwrap_or_else(|| id.clone());
         let manual = if copy.is_none() {
             roots.iter().flat_map(|r| folder_candidates(r, "own-loader")).map(|c| c.path)
@@ -262,7 +285,9 @@ fn windows_same_folder(a: &str, b: &str) -> bool {
         let rooted = p.bytes().take_while(|&c| c == b'\\').count().min(2)
             + usize::from(p.as_bytes().get(1) == Some(&b':') && p.as_bytes().get(2) == Some(&b'\\')) * 3;
         // Windows' ordinal case-blind comparison: one upper-case character for each
-        let fold = |s: &str| s.chars().map(|c| { let mut u = c.to_uppercase(); if u.len() == 1 { u.next().unwrap_or(c) } else { c } }).collect::<String>();
+        // (the export root's fold, which also joins the Greek letters with a subscript iota as
+        // NTFS and Wine do; public: `to_uppercase` where it is one character)
+        let fold = |s: &str| s.chars().map(crate::same_path::fold).collect::<String>();
         (rooted, p.split('\\').filter(|s| !s.is_empty() && *s != ".").map(fold).collect())
     }
     key(a) == key(b)
@@ -421,7 +446,7 @@ fn component_eq(a: &str, b: &str) -> bool {
 }
 
 /// Component comparison prevents a sibling named "mods-other" from matching the root "mods".
-fn relative_under(path: &Utf8Path, root: &Utf8Path) -> Option<Utf8PathBuf> {
+pub(crate) fn relative_under(path: &Utf8Path, root: &Utf8Path) -> Option<Utf8PathBuf> {
     let mut parts = path.components();
     for parent in root.components() {
         if !component_eq(parent.as_str(), parts.next()?.as_str()) { return None; }
@@ -661,6 +686,8 @@ mod tests {
         assert!(windows_same_folder(&format!(r"\\?\{mods}"), &mods.replace('\\', "/")));
         assert!(windows_same_folder(&mods.to_uppercase(), &format!("{mods}\\")), "case, a trailing separator");
         assert!(windows_same_folder(r"D:\Spiele\Ä", r"d:\spiele\ä\."), "non-ASCII case");
+        //
+        assert!(windows_same_folder("D:\\Spiele \u{1FB3}\\mods", "d:\\SPIELE \u{1FBC}\\MODS"), "a subscript iota's two cases");
         assert!(windows_same_folder(r"\\?\UNC\nas\share\mods", r"\\NAS\share\mods"), "a network folder");
         assert!(!windows_same_folder(mods, &format!("{mods}-other")), "a sibling");
         assert!(!windows_same_folder(r"\\?\Volume{1}\mods", r"Volume{1}\mods"), "a volume path has no other spelling");
@@ -849,7 +876,8 @@ mod tests {
         let e = aside_entries(j, &d.join("kiln"), &[d.join("mods")], "EML's own loader", None);
         let states: Vec<_> = e.iter().map(|x| (x.id.as_deref().unwrap(), x.state.as_str())).collect();
         assert_eq!(states, [("a", "own-loader"), ("b", "not-loaded"), ("c", "disabled")]);
-        assert_eq!(e[0].path, copy.as_str());
+        // the folder `copy` names, spelled with the system's separator (`mods\a` on Windows): compared as paths
+        assert_eq!(Utf8Path::new(&e[0].path), copy);
         assert!(e[1].reason.as_deref().unwrap().starts_with("EML's own loader runs this start and reads only"));
         assert_eq!(e[1].path, "/lib/b");
         std::fs::remove_dir_all(d).unwrap();
@@ -992,7 +1020,8 @@ mod tests {
         assert_eq!(run, [copy.clone()]);
         assert_eq!(entries.len(), 1);
         let aside = aside_entries(&json, &d.join("kiln"), &[d.join("mods")], "EML's own loader", None);
-        assert_eq!((aside[0].state.as_str(), aside[0].path.as_str()), ("own-loader", copy.as_str()));
+        // as paths (Windows spells it with `\`), and with the case the launcher placed it with (`XHL-Native-Mod`, not the id)
+        assert_eq!((aside[0].state.as_str(), Utf8Path::new(&aside[0].path)), ("own-loader", copy.as_path()));
         // No marker: a real hand installation is still loaded by the foreign loader, not missing in the Library.
         std::fs::remove_file(copy.join(".kiln-library.json")).unwrap();
         let aside = aside_entries(&json, &d.join("kiln"), &[d.join("mods")], "EML's own loader", None);
@@ -1127,17 +1156,24 @@ mod tests {
 /// The launcher deliberately disabled these entries because their required engine is unavailable. `fallback`: the
 /// reason for an entry the launcher delegated to ShroudForge without a note of its own (runner::runtime_skip_reason).
 pub fn apply_runtime_blocks(json: &str, kiln: &Utf8Path, entries: &mut [Entry], fallback: &str) {
+    apply_runtime_blocks_with(json, kiln, entries, |_| fallback.to_owned())
+}
+
+/// [`apply_runtime_blocks`] with the reason of a delegated entry made from that entry (as discovery left it) when
+/// Kiln's interpreter has the start (kiln_mode.rs: the launch plan decides it per package).
+pub fn apply_runtime_blocks_with(json: &str, kiln: &Utf8Path, entries: &mut [Entry], fallback: impl Fn(&Entry) -> String) {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return };
     let blocked = v.get("emlRuntimeBlocked").and_then(|v| v.as_object());
     for ((id, _), candidate) in profile_ids(json).into_iter().zip(profile_candidates(json, kiln)) {
         if candidate.enabled { continue; }
         let delegated = v.get("emlRuntime").and_then(|v| v.as_array()).is_some_and(|a| a.iter().any(|v| v.as_str() == Some(id.as_str())));
-        if let Some(reason) = blocked.and_then(|b| b.get(&id)).and_then(|v| v.as_str()).or_else(|| delegated.then_some(fallback)) {
-            for e in entries.iter_mut().filter(|e| e.source == "profile" && e.path == candidate.path.as_str()) {
-                e.id = Some(id.clone());
-                e.state = "skipped".into();
-                e.reason = Some(reason.into());
-            }
+        let launcher = blocked.and_then(|b| b.get(&id)).and_then(|v| v.as_str());
+        if launcher.is_none() && !delegated { continue; }
+        for e in entries.iter_mut().filter(|e| e.source == "profile" && e.path == candidate.path.as_str()) {
+            let reason = launcher.map_or_else(|| fallback(e), str::to_owned);
+            e.id = Some(id.clone());
+            e.state = "skipped".into();
+            e.reason = Some(reason);
         }
     }
 }

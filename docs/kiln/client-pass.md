@@ -48,6 +48,7 @@ assets built first: their descriptions say so).
 | `npcsample` | `mods/samples/NpcSample` | an NPC and a quest in the game's UI |
 | `rules-sample` | `mods/samples/RulesSample` | `/flight` |
 | `world-programs` | `mods/samples/WorldPrograms` | a world program with a player |
+| `rarity-anvil` | `mods/samples/RarityAnvil` | the equipment checks `equip.c1` to `equip.c4`, `equip.c10`, `equip.c11`: the upgrade stations, the anvil blade and its rolled rarity |
 | `menu-many-test` | `mods/tests/menu-many-test` | many pause-menu entries (`menu.rows-quit`, `menu.scroll`); its setting `Entries` (0 to 24) takes a new number without a restart |
 | `weapon-moves-test` | `mods/tests/weapon-moves-test` (run `build-assets.py` first) | moves and held models with moving parts (`blocks.moves-*`, `blocks.held-animated`); `blocks.held-animated-two-players` needs a joined dedicated server |
 | `cosmetic-sample` | `mods/samples/CosmeticSample` | session 2 only: the hood and the cape |
@@ -166,11 +167,38 @@ These checks come last in the list, each tagged so you can see them at a glance.
 | A Steam Deck | `steam-deck` | 921 "No Kiln" in the launcher, 922 the launcher's Steam Deck mode |
 | Another host | `other-host` | 931 a remote server with server mods (joined), 932 the server pack on a rented host, 933 an EML mod where `/home` links to `/var/home` (Fedora Atomic, Bazzite) |
 
-`core.unload-windows` runs like `core.unload-quit`, after one step: on native Windows the exit link is off by default
-in this release; set `"unloadAtExit"` to `"on"` in `kiln/kiln.json` first.
+`core.unload-windows` runs like `core.unload-quit`, after one step: on native Windows the exit link runs only Kiln's own
+exit steps by default in this release (the plugins' handlers are off); set `"unloadAtExit"` to `"on"` in
+`kiln/kiln.json` first, so the plugins' handlers are checked too.
 
 Checks tagged `launcher` are done (partly) in the launcher or on the desktop; the check only shows the steps and takes
 your answer.
+
+## Kiln's interpreter
+
+Kiln's own interpreter of ShroudForge mods (kiln mode: `kiln.json` `"shroudforge.backend": "kiln"`, see
+[kiln mode](shroudforge-kiln-mode.md)) has seven guided checks. They are in `mods/tests/client-pass/Sfi.cs`
+(area "Kiln's interpreter", orders 3900 to 3906) and in `rows.json` under "Kiln's interpreter (kiln-sfi.interpreter)". Choose
+**Kiln's interpreter** on Settings' ShroudForge card for the pass's kiln starts; no other setting is needed.
+
+Each check first reads what the interpreter wrote for this start, `kiln/state/sfi.json` (it must be this game
+process's, backend `kiln`, phase `running`) and `kiln.log` (`kiln-sfi: Runtime initialized`), and asserts it. In a
+start that is not a kiln start (hosted ShroudForge, the interpreter refused or not installed, a record of an earlier
+start) a check ends with skip and says why: a skip never counts as a pass.
+
+| Check | What you do and look at | Starts |
+|---|---|---|
+| `sfi-ui-page` | F9 (or the mod-menu key from Keys) opens Kiln's ShroudForge page; it lists this start's mods with the state the check shows from `sfi.json`; F9 closes it; no ShroudForge Modloader window | 1 |
+| `sfi-ui-settings` | part 1: change a combat-tweaks setting on the page, it stays after reopening, the page says it applies at the next start; part 2 (after a restart): the page shows it and the mod uses it | 2 |
+| `sfi-ui-actions-notices` | a mod's action button says "Requested" and the mod reacts once; its notification reads whole; the check asserts nothing was written to `<game>/shroudforge` and no `ui action failed` line | 1 |
+| `sfi-save-sensitive` | a kiln start with Quiver & Spellbook off after one with it on: `sfi.json` carries its `save-sensitive-off` warning; the dialog before Play named it with "Do not save without them" | 1 |
+| `sfi-three-surface-warning` | the same warning before Play, in the game (main-menu banner, footer line, DO NOT SAVE badge in Mods, marker on the pause menu's Mods entry, banner again in the world) and in `sfi.json` | 1 |
+| `sfi-warning-accessibility` | the dialog before Play with the keyboard alone (Cancel focused, Tab, Enter on Cancel, Escape, a click beside it, B on a Deck) and at large text size; the in-game banner readable | 1 |
+| `sfi-backend-roundtrip` | kiln with Quiver & Spellbook on, then hosted (its record carries the package, `shroudforge.json` written), then kiln with it off (still warned), then kiln with it on (no mod in two folders of `<game>/mods`) | 4 |
+
+Checks over several starts keep their part in the mod's data folder and end every part but the last with skip; a fail
+on a part that does not fit the start starts `sfi-backend-roundtrip` over. Never save in a start with the warning,
+and use a copied world. `kiln-sfi.sf18` stays held whatever the pass says.
 
 ## The ledger and the report
 

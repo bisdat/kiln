@@ -287,7 +287,7 @@ class NexusTests(unittest.TestCase):
         self.state = os.path.join(self.tmp, "state.json")
         self.desc = os.path.join(self.tmp, "nexus-description.bbcode")
         with open(self.desc, "w") as f:
-            f.write("[b]Kiln[/b]\nKiln is a mod framework and launcher for Enshrouded.\n")
+            f.write("[b]Kiln[/b]\nKiln is a mod framework and launcher for Enshrouded.\n[b]0.2.0-dev.9:[/b] the release.\n")
 
     def tearDown(self):
         if self.server is not None:
@@ -529,6 +529,29 @@ class NexusTests(unittest.TestCase):
         with open(self.desc) as f:
             self.assertEqual(self.mock.description, f.read().strip())
         self.assertIn("description replaced", out)
+
+    def test_sync_description_refuses_a_text_of_another_release(self):
+        # 0.2.0-dev.29.2's first sync ran from a checkout behind the release commit and put 29.1's page text up
+        with open(self.desc, "w") as f:
+            f.write("[b]0.2.0-dev.91:[/b] Kiln loads ... use the matching 0.2.0-dev.91 MDK\n")
+        for extra in ((), ("--publish",)):
+            self.mock.requests.clear()
+            code, out, err = self.run_nexus(self.release("0.2.0-dev.9"), "--sync-description", "--only", "sdk", *extra)
+            self.assertEqual(code, 2, out + err)
+            self.assertIn("does not name 0.2.0-dev.9", err)
+            self.assertEqual(self.mock.requests, [], "nothing is asked of the API before the text is checked")
+        self.assertEqual(self.mock.description, "[b]Old description[/b]\nKiln is a mod framework.")
+        self.assertFalse(os.path.exists(self.state))
+
+    def test_names_version(self):
+        self.assertTrue(nexus.names_version("[b]0.2.0-dev.29.18:[/b] x", "0.2.0-dev.29.18"))
+        self.assertTrue(nexus.names_version("the matching 0.2.0-dev.29.18 MDK", "0.2.0-dev.29.18"))
+        self.assertTrue(nexus.names_version("Kiln 0.3.0.", "0.3.0"))
+        self.assertFalse(nexus.names_version("0.2.0-dev.29.17", "0.2.0-dev.29.1"))
+        self.assertFalse(nexus.names_version("0.2.0-dev.29.18", "0.2.0-dev.29.1"))
+        self.assertFalse(nexus.names_version("0.2.0-dev.29", "0.2.0"))
+        self.assertFalse(nexus.names_version("10.2.0-dev.9", "0.2.0-dev.9"))
+        self.assertFalse(nexus.names_version("0.2.0-dev.9.1", "0.2.0-dev.9"))
 
 
 if __name__ == "__main__":

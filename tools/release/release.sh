@@ -7,7 +7,9 @@
 #   packages, kiln CLI, VS Code extension, sample mods, modding site or NuGet feed (mod authors keep the previous
 #   release's SDK). The release checks need the SDK, so it implies --no-checks; the API record is not promoted.
 #                                    [--skip-windows] [--no-checks] [--force] [--host-build] [--no-nexus]
-# VERSION: X.Y.Z (stable) or X.Y.Z-dev.N (dev) for this tree's VERSION (tools/release/version.sh prints one).
+# VERSION: X.Y.Z (stable) or X.Y.Z-dev.N (dev) for this tree's VERSION (tools/release/version.sh prints one). A release
+#   needs its entry in the roadmap source (tools/release/roadmap/roadmap.json, checked with roadmap.py check before the
+#   build; publish.sh ships it to frostdev.io/kiln/roadmap): a missing one stops here, a test build only warns.
 # --beta N (or --channel beta --beta N): test build N of VERSION for the beta channel (docs/kiln/launcher/releasing.md,
 #   "Test builds", "Cutting a beta"): the launcher keeps VERSION and has the channel and N baked in
 #   (KILN_LAUNCHER_CHANNEL=beta, KILN_LAUNCHER_BETA=N); its files are named and signed for the build id
@@ -67,6 +69,16 @@
 # KILN_API_BASELINE: the last release's Kiln.Api .nupkg (or it unzipped) for pack.sh's API compat gate; unset: a loud
 #   warning, at the start and in the closing text, and the release goes on.
 # Builds run one at a time (they share Cargo's build directory); KILN_RELEASE_NICE=1 runs them at the lowest priority.
+# The sample mods build in one MSBuild run (the shared projects once, the samples side by side), zipped one by one; when
+#   that run fails, each sample builds alone as before and a failing one is left out.
+# KILN_BUILD_REMOTE=win1: the sample mods build on kiln-win1 (ssh kiln-win1, the owner's Windows PC; lib/remote-win1.sh)
+#   while this machine builds the rest, and come back as output folders that are zipped here like a local build's. Same
+#   .NET SDK version there; nothing signed or secret goes there. A failed or unreachable win1 means a local build of the
+#   samples (noted in the log), never a missing sample. Off by default. With KILN_BUILD_REMOTE_NATIVE=1 as well, the native Windows DLLs build there too
+#   (lib/remote-win1-native.sh: the same clang-cl/lld-link release and this machine's xwin CRT/SDK, the same path maps; the
+#   DLLs equal this machine's but for the PDB id) and the runtime stage builds only the rest (KILN_NATIVE_PREBUILT).
+# The Windows launcher builds (direct, Nexus) run beside the Linux ones once the notices are complete (their frontend in
+#   launcher/dist-windows); KILN_RELEASE_SERIAL_LAUNCHERS=1 runs them one after the other.
 # NuGet: the builds restore into a private package cache, $work/nuget-packages (KILN_RELEASE_NUGET_PACKAGES), never
 #   ~/.nuget/packages: a trial run of a version leaves no kiln.* packages of it behind for later local builds.
 set -euo pipefail
@@ -151,12 +163,30 @@ if ((!host_build)); then
 fi
 key=$HOME/.config/kiln-release/updater.key
 [[ -f $key && -f $key.password ]] || { echo "no updater key at $key (+ .password): see releasing.md" >&2; exit 1; }
+# The roadmap (tools/release/roadmap.py, releasing.md "The roadmap"): a release needs its entry on frostdev.io/kiln/roadmap
+# (the first upcoming one in tools/release/roadmap/roadmap.json), which publish.sh moves to the released ones. Checked
+# before anything is built; a test build (--beta, --worktree) only warns.
+if [[ $channel == beta ]] || ((worktree)); then
+  python3 -I "$here/roadmap.py" check "$version" ||
+    echo "WARNING: the roadmap has no usable entry for $version (above); a test build goes on, the release will not" >&2
+else
+  python3 -I "$here/roadmap.py" check "$version" ||
+    { echo "release: $version cannot ship without its roadmap entry (above): add it to tools/release/roadmap/roadmap.json (tools/release/roadmap/README.md), commit, and build again" >&2; exit 1; }
+fi
 if [[ -e $out && -n $(ls -A "$out" 2>/dev/null) ]]; then
   ((force)) || { echo "$out is not empty (use --force to replace it)" >&2; exit 1; }
   rm -rf "$out"
 fi
 mkdir -p "$out" "$work"
-cleanup_release() { rm -rf -- "$work/appimage-root"; }
+remote_pid=""
+cleanup_release() {
+  rm -rf -- "$work/appimage-root"
+  # the kiln-win1 sample build (KILN_BUILD_REMOTE), when the release stops before it is collected
+  if [[ -n $remote_pid ]]; then kill "$remote_pid" 2>/dev/null || true; fi
+  if [[ -n ${native_pid:-} ]]; then kill "$native_pid" 2>/dev/null || true; fi
+  if [[ -n ${win_pid:-} ]]; then kill "$win_pid" 2>/dev/null || true; fi
+  if [[ -n ${sdk_pid:-} ]]; then kill "$sdk_pid" 2>/dev/null || true; fi
+}
 trap cleanup_release EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -200,6 +230,15 @@ tar --sort=name --owner=0 --group=0 --numeric-owner --mode='u=rwX,go=rX' --mtime
 # the exported files (NUL-separated): the modding site's guide stages these pages and checks its links against them,
 # since the export has no .git (tools/docs-site/stage-guide.py, KILN_DOCS_TRACKED)
 (cd "$src" && find . -type f -printf '%P\0') > "$work/src-files"
+# KILN_RELEASE_OVERLAY=DIR (trial builds of build-script changes only): DIR's files are copied over the export after
+# the source tarball, so a trial builds one commit's sources (and stamps) with newer tools/package or tools/launcher
+# scripts, for a byte-by-byte comparison with a build of that commit. The folder says so; never publish it.
+if [[ -n ${KILN_RELEASE_OVERLAY:-} ]]; then
+  [[ -d $KILN_RELEASE_OVERLAY ]] || die "KILN_RELEASE_OVERLAY=$KILN_RELEASE_OVERLAY is no folder"
+  cp -a "$KILN_RELEASE_OVERLAY"/. "$src"/
+  built_from="$built_from with build scripts from $KILN_RELEASE_OVERLAY (a test build, not a release)"
+  note "WARNING: KILN_RELEASE_OVERLAY: $(cd "$KILN_RELEASE_OVERLAY" && find . -type f | sed 's,^\./,,' | tr '\n' ' ')copied over the export: a test build, never publish it"
+fi
 [[ $(sed 's/[-+].*//' "$src/VERSION") == "${version%%-*}" ]] || die "VERSION in the export is $(cat "$src/VERSION"), not for $version"
 # The API gate (tools/release/api-gate.sh), before any build: no line of a PublicAPI.Shipped.txt removed since the
 # previous v* release, and new API only with a raised API version (Kiln.Mods.ApiVersion), so a mod can ask for it.
@@ -337,6 +376,25 @@ nc=$(sed -n 's/^const VERSION = "\(.*\)";/\1/p' "$src/tools/vscode/scripts/fetch
 seed "netcoredbg-$nc-win64.zip" "$KILN_OUT/vscode/netcoredbg/$nc/netcoredbg-win64.zip" "$repo"/.out/*/netcoredbg/"$nc"/netcoredbg-win64.zip
 signing=0
 if "$here/authenticode.sh" available; then signing=1; note "Authenticode: signing Windows files"; else note "Windows files unsigned (no authenticode.env)"; fi
+# The Windows launcher builds (Tauri's NSIS bundler, on this machine) need makensis, and a signed setup also NSIS's own
+# plugins: Tauri copies them from $NSIS_PATH, else /usr/share/nsis (tools/launcher/build-windows.sh looks beside makensis
+# too). Checked here, before an hour of building, not at the bundle step.
+if ((!skip_windows)); then
+  makensis=$(command -v makensis) || die "the Windows setup needs makensis (NSIS) on PATH"
+  if ((signing)) && [[ -z ${NSIS_PATH:-} && ! -d /usr/share/nsis/Plugins/x86-unicode ]]; then
+    nsis_root=$(dirname "$(dirname "$(readlink -f "$makensis")")")
+    for d in "$nsis_root/share/nsis" "$nsis_root"; do
+      if [[ -d $d/Plugins/x86-unicode ]]; then export NSIS_PATH=$d; break; fi
+    done
+    [[ -n ${NSIS_PATH:-} ]] || die "a signed Windows setup needs NSIS's plugins (Plugins/x86-unicode): none in /usr/share/nsis or beside $makensis; set NSIS_PATH to the NSIS folder that has them"
+  fi
+  ((signing)) && note "NSIS plugins for the signed setup: ${NSIS_PATH:-/usr/share/nsis}"
+fi
+# Tauri keeps its NSIS toolset in $XDG_CACHE_HOME/tauri/NSIS (else ~/.cache) and, on Linux, removes and rebuilds it on
+# every Windows build (it checks for an NSIS.exe it never puts there), so two builds sharing it race. Each run's Windows
+# builds get their own cache folder in its work folder; cargo-xwin's MSVC CRT/SDK cache (large, downloaded once) stays
+# the shared one.
+win_env=(env XDG_CACHE_HOME="$work/xdg-cache" XWIN_CACHE_DIR="${XWIN_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/cargo-xwin}")
 sign_pe() { if ((signing)); then "$here/authenticode.sh" sign "$@" | tee -a "$log"; fi; }
 # linux COMMAND...: runs a Linux build command (cargo, build-linux.sh, notices.py for the AppImage) where the Linux files
 # are built: the Ubuntu 22.04 container (tools/release/linux-build/run.sh; $src, $work and tools/release mounted at
@@ -369,6 +427,42 @@ else
   note "Linux files: built in $image ($KILN_LINUX_IMAGE); cargo target $lin_target"
 fi
 
+# ---------------------------------------------------------------- sample mods: projects, output folders, kiln-win1
+# The sample projects zipped from their output folders (a sample on Kiln.Sdk packs itself, below) and each one's
+# OutDir, in one MSBuild run (lib/sample-outdirs.proj). With KILN_BUILD_REMOTE=win1 they build there from now on.
+remote=${KILN_BUILD_REMOTE:-}
+[[ -z $remote || $remote == win1 ]] || die "KILN_BUILD_REMOTE=$remote: the only remote builder is win1"
+samples_tsv=$work/samples-outdirs.tsv
+: >"$samples_tsv"
+if ((!launcher_only)); then
+  : >"$work/samples-projects.txt"
+  for proj in "$src"/mods/samples/*/*.csproj; do grep -q 'Sdk="Kiln.Sdk' "$proj" || printf '%s\n' "$proj" >>"$work/samples-projects.txt"; done
+  if [[ -s $work/samples-projects.txt ]]; then
+    dotnet msbuild "$here/lib/sample-outdirs.proj" -nologo -t:Show -p:KilnSampleList="$work/samples-projects.txt" \
+      -p:ArtifactsPath="$KILN_OUT/dotnet" 2>>"$log" | awk -F'|' '/KILN-OUTDIR\|/ {print $2 "\t" $3}' >"$samples_tsv" \
+      || die "cannot read the sample projects' output folders (lib/sample-outdirs.proj; log: $log)"
+    [[ $(wc -l <"$samples_tsv") == $(wc -l <"$work/samples-projects.txt") ]] \
+      || die "the sample projects' output folders: $(wc -l <"$samples_tsv") of $(wc -l <"$work/samples-projects.txt") (lib/sample-outdirs.proj)"
+    while IFS=$'\t' read -r proj o; do
+      [[ $o == "$KILN_OUT/dotnet/"* ]] || die "$proj: unexpected output folder '$o'"
+    done <"$samples_tsv"
+  fi
+  if [[ $remote == win1 && -s $samples_tsv ]]; then
+    step "sample mods: building on kiln-win1 meanwhile (lib/remote-win1.sh; log $work/remote-win1.log)"
+    "$lib/remote-win1.sh" samples "$src" "$work/remote-win1" "$samples_tsv" >"$work/remote-win1.log" 2>&1 &
+    remote_pid=$!
+  fi
+fi
+# KILN_BUILD_REMOTE_NATIVE=1 (with KILN_BUILD_REMOTE=win1): the native Windows DLLs (CMake targets) on kiln-win1 too, with the same clang-cl, lld-link and xwin CRT/SDK as here
+# (lib/remote-win1-native.sh): collected before the runtime stage, which then builds only what they leave out.
+unset KILN_NATIVE_PREBUILT
+native_pid=""
+if [[ $remote == win1 && ${KILN_BUILD_REMOTE_NATIVE:-} == 1 ]]; then
+  step "native DLLs: building on kiln-win1 meanwhile (lib/remote-win1-native.sh; log $work/remote-win1-native.log)"
+  RELEASE_WORK=$work "$lib/remote-win1-native.sh" "$src" "$work/remote-win1-native" >"$work/remote-win1-native.log" 2>&1 &
+  native_pid=$!
+fi
+
 # ---------------------------------------------------------------- 3. dependencies, command-line tools
 step "dependencies (bun, npm)"
 (cd "$src/launcher" && quiet low bun install --frozen-lockfile)
@@ -391,9 +485,28 @@ step "kilnctl and kiln (Linux, Windows)"
 win=x86_64-pc-windows-msvc
 (cd "$src" && quiet low cargo xwin build --release --locked -p kilnctl -p kiln-cli --target $win)
 kilnctl=$lin_target/release/kilnctl
+# kiln-eml's archive inspector for Linux (component eml, kiln/tools/eml-inspect/linux-x86_64/) is built where the other
+# Linux files are, for their glibc; the stage takes it from KILN_EML_INSPECT_LINUX (its Windows .exe builds in the stage)
+if [[ -f $src/gpl/kiln-eml/kiln-eml/src/kiln_eml_inspect.rs ]]; then
+  step "kiln-eml's archive inspector (Linux)"
+  (cd "$src/gpl/kiln-eml" && quiet linux cargo build --release --locked -p kiln-eml --bin kiln-eml-inspect)
+  export KILN_EML_INSPECT_LINUX=$lin_target/release/kiln-eml-inspect
+  [[ -s $KILN_EML_INSPECT_LINUX ]] || die "no kiln-eml-inspect in $lin_target/release"
+fi
 
 # ---------------------------------------------------------------- 4. runtime
 step "runtime: native + managed build, stage"
+if [[ -n $native_pid ]]; then
+  nrc=0; wait "$native_pid" || nrc=$?
+  native_pid=""
+  cat "$work/remote-win1-native.log" >>"$log"
+  if ((nrc == 0)) && [[ -f $work/remote-win1-native/ok ]]; then
+    export KILN_NATIVE_PREBUILT=$work/remote-win1-native/bin
+    note "native DLLs: built on kiln-win1 ($(grep -o 'build rc=0, [0-9]* s' "$work/remote-win1-native.log" || true)); the stage builds what they leave out"
+  else
+    note "native DLLs: the kiln-win1 build failed (exit $nrc, $work/remote-win1-native.log): building them here"
+  fi
+fi
 stage=$work/stage
 # the native DLLs name their PDB without a path (/pdbaltpath); the PDBs themselves hold the build machine's paths, so
 # they stay out of the release and go to $work/symbols (keep them for crash reports of this build)
@@ -431,7 +544,8 @@ if ((!skip_windows)); then nuget_args+=(--python-root "$src/.cache/python-win-x6
 python3 "$lib/notices.py" --src "$src" --out "$notices" --version "$version" --dotnet-root "$src/.cache/dotnet-win-x64/root" \
   "${nuget_args[@]}" | tee -a "$log"
 if [[ -f $stage/eml/kiln/plugins/kiln-eml.dll ]]; then
-  printf '\nkiln-eml corresponding source: source/kiln-%s-src.tar.gz, directory gpl/kiln-eml/.\n' "$version" >>"$notices"
+  what=kiln-eml; [[ -d $stage/eml/kiln/tools/eml-inspect ]] && what="kiln-eml and its archive inspector (kiln/tools/eml-inspect)"
+  printf '\n%s corresponding source: source/kiln-%s-src.tar.gz, directory gpl/kiln-eml/.\n' "$what" "$version" >>"$notices"
 fi
 if [[ -d $stage/shroudforge/kiln/plugins/shroudforge ]]; then
   # the GPL-3 component's notice; its own licences ship in kiln/plugins/shroudforge/LICENSES
@@ -449,6 +563,17 @@ if ((signing)); then
   mapfile -t pes < <(find "$stage" -type f \( -iname '*.dll' -o -iname '*.exe' \) -not -path '*/kiln/dotnet/*' | sort)
   step "Authenticode: ${#pes[@]} runtime files"
   sign_pe "${pes[@]}"
+fi
+# kiln-eml's archive inspector: each version.json binds its helper's SHA-256 (the launcher and kilnctl refuse a helper
+# that does not match), and signing changed the Windows one. Written again for the files as they ship, then the sfi
+# component and the inspector are checked once more.
+if [[ -d $stage/eml/kiln/tools/eml-inspect && -f $src/tools/sfi/sfi_stage.py ]]; then
+  for d in "$stage"/eml/kiln/tools/eml-inspect/*/; do
+    python3 -I "$src/tools/sfi/sfi_stage.py" version "$src" "${d%/}" "$(basename "$d")" || die "kiln-eml's archive inspector: cannot write $d/version.json"
+  done
+  if ! python3 -I "$src/tools/sfi/sfi_stage.py" check "$src" "$stage" 2>&1 | tee -a "$log"; then
+    die "the sfi component or kiln-eml's archive inspector is incomplete after signing (see above)"
+  fi
 fi
 step "runtime bundle"
 rm -rf "$work/dist" && mkdir -p "$work/dist"
@@ -486,27 +611,62 @@ unsquashfs -q -n -o "$(python3 "$lib/release.py" offset "$appimage")" -d "$work/
 (cd "$src" && linux python3 "$lib/notices.py" --src "$src" --out "$notices" \
   --append-appimage --appimage-root "$work/appimage-root/r") | tee -a "$log"
 rm -rf "$work/appimage-root"
+# The SDK packages and the VS Code extension (dotnet, node; nothing the launchers build or read) are made beside the
+# launcher builds, into their own log, and collected before the sample mods (which share the dotnet artifacts folder).
+# KILN_RELEASE_SERIAL_LAUNCHERS=1: in their place below, as before.
+sdk_pid=""
+sdk_and_vsix() {
+  local log=$work/sdk.log
+  [[ ${1:-} == bg ]] && : >"$log"
+  step "SDK packages"
+  quiet low "$src/managed/Kiln.Sdk/pack.sh"
+  step "VS Code extension"
+  (cd "$src/tools/vscode" && KILN_OUT="$KILN_OUT/vscode" quiet low node scripts/package.mjs)
+}
+if ((!launcher_only)) && [[ ${KILN_RELEASE_SERIAL_LAUNCHERS:-} != 1 ]]; then
+  sdk_and_vsix bg & sdk_pid=$!
+  note "SDK packages and the VS Code extension: made beside the launcher builds (log: $work/sdk.log)"
+fi
+# The Windows launcher builds (direct, then Nexus) run beside the Linux ones from here on: their Cargo target and bundle
+# folders are their own (the Linux files build in the container, in $lin_target), and their frontend goes to its own
+# folder, launcher/dist-windows, so the two Vite runs never write the same files. They have the notices complete.
+# KILN_RELEASE_SERIAL_LAUNCHERS=1: one after the other, as before. Their log: $work/launcher-windows.log, then $log.
+setup="" nexus_setup="" win_pid=""
+win_dist='{"build":{"beforeBuildCommand":"bun run build:web --outDir dist-windows","frontendDist":"../dist-windows"}}'
+windows_launchers() {
+  local log=$work/launcher-windows.log
+  : >"$log"
+  step "launcher: Windows (NSIS)"
+  wargs=(--runtime "$runtime_zip" --version "$version" --config "$(resources "$notices")" --config "$win_dist")
+  ((signing)) && wargs+=(--config "{\"bundle\":{\"windows\":{\"signCommand\":{\"cmd\":\"$here/authenticode.sh\",\"args\":[\"sign\",\"%1\"]}}}}")
+  rm -rf "$CARGO_TARGET_DIR/$win/release/bundle"
+  (cd "$src" && quiet low "${win_env[@]}" tools/launcher/build-windows.sh "${wargs[@]}")
+  sign_pe "$CARGO_TARGET_DIR/$win/release/kilnctl.exe" "$CARGO_TARGET_DIR/$win/release/kiln.exe"
+  if ((nexus_build)); then
+    step "launcher: Nexus Mods build, Windows (no self-update)"
+    rm -rf "$CARGO_TARGET_DIR/$win/release/bundle"
+    (cd "$src" && quiet low "${win_env[@]}" tools/launcher/build-windows.sh --nexus "${wargs[@]}")
+  fi
+}
+if ((!skip_windows)); then
+  if [[ ${KILN_RELEASE_SERIAL_LAUNCHERS:-} == 1 ]]; then
+    windows_launchers
+    cat "$work/launcher-windows.log" >>"$log"
+  else
+    windows_launchers & win_pid=$!
+    note "launcher: the Windows builds run beside the Linux ones (log: $work/launcher-windows.log)"
+  fi
+fi
 (cd "$src" && quiet linux tools/launcher/build-linux.sh --bundles appimage --runtime "$runtime_zip" --version "$version" --config "$(resources "$notices")")
 appimage=$(ls -t "$lin"/*.AppImage | head -1)
 deb=$(ls -t "$lin"/*.deb | head -1)
 rpm=$(ls -t "$lin"/*.rpm 2>/dev/null | head -1 || true)
 
-setup=""
-if ((!skip_windows)); then
-  step "launcher: Windows (NSIS)"
-  wargs=(--runtime "$runtime_zip" --version "$version" --config "$(resources "$notices")")
-  ((signing)) && wargs+=(--config "{\"bundle\":{\"windows\":{\"signCommand\":{\"cmd\":\"$here/authenticode.sh\",\"args\":[\"sign\",\"%1\"]}}}}")
-  rm -rf "$CARGO_TARGET_DIR/$win/release/bundle"
-  (cd "$src" && quiet low tools/launcher/build-windows.sh "${wargs[@]}")
-  setup=$KILN_OUT/bundles/windows/kiln-launcher-setup.exe
-  sign_pe "$CARGO_TARGET_DIR/$win/release/kilnctl.exe" "$CARGO_TARGET_DIR/$win/release/kiln.exe"
-fi
-
 # the Nexus Mods build: the same launcher, runtime and notices without the self-update. Nexus Mods does not allow
 # programs that update themselves, so it has no self-update feature (cargo --no-default-features: no updater plugin, no
 # update feeds) and no updater key in its config (launcher/src-tauri/tauri.nexus.conf.json); it is never signed for
 # the updater and has no manifest. The bundle folders are emptied first: the direct build's files must not be taken.
-nexus_appimage="" nexus_deb="" nexus_setup=""
+nexus_appimage="" nexus_deb=""
 if ((nexus_build)); then
 step "launcher: Nexus Mods build, Linux (no self-update)"
 rm -rf "$lin_target/release/bundle"
@@ -516,12 +676,18 @@ rm -rf "$lin_target/release/bundle"
 nexus_appimage=$(ls -t "$KILN_OUT"/bundles/linux-nexus/*.AppImage | head -1)
 nexus_deb=$(ls -t "$KILN_OUT"/bundles/linux-nexus/*.deb | head -1)
 fi
-if ((nexus_build && !skip_windows)); then
-  step "launcher: Nexus Mods build, Windows (no self-update)"
-  rm -rf "$CARGO_TARGET_DIR/$win/release/bundle"
-  (cd "$src" && quiet low tools/launcher/build-windows.sh --nexus "${wargs[@]}")
-  nexus_setup=$KILN_OUT/bundles/windows-nexus/kiln-launcher-setup.exe
+if [[ -n $win_pid ]]; then
+  wrc=0; wait "$win_pid" || wrc=$?
+  win_pid=""
+  cat "$work/launcher-windows.log" >>"$log"
+  ((wrc == 0)) || { tail -40 "$work/launcher-windows.log" >&2; die "the Windows launcher builds failed (log: $work/launcher-windows.log)"; }
+  note "launcher: the Windows builds are done"
 fi
+if ((!skip_windows)); then
+  setup=$KILN_OUT/bundles/windows/kiln-launcher-setup.exe
+  ((nexus_build)) && nexus_setup=$KILN_OUT/bundles/windows-nexus/kiln-launcher-setup.exe
+fi
+
 
 # ---------------------------------------------------------------- 6. SDK, VS Code, samples
 sdk_version="" vsix=""
@@ -529,29 +695,37 @@ skipped_samples=() not_mods=()
 if ((launcher_only)); then
   note "--launcher-only: no SDK packages, VS Code extension, sample mods, modding site or feed (mod authors keep the previous release's SDK)"
 else
-step "SDK packages"
-quiet low "$src/managed/Kiln.Sdk/pack.sh"
+if [[ -n $sdk_pid ]]; then
+  sdk_rc=0; wait "$sdk_pid" || sdk_rc=$?
+  sdk_pid=""
+  cat "$work/sdk.log" >>"$log"
+  ((sdk_rc == 0)) || { tail -40 "$work/sdk.log" >&2; die "the SDK packages or the VS Code extension failed (log: $work/sdk.log)"; }
+else
+  sdk_and_vsix
+fi
 sdk_version=$KILN_SDK_VERSION
-step "VS Code extension"
-(cd "$src/tools/vscode" && KILN_OUT="$KILN_OUT/vscode" quiet low node scripts/package.mjs)
 vsix=$(ls -t "$KILN_OUT"/vscode/kiln-vscode-*.vsix | head -1)
 step "sample mods"
 rm -rf "$work/samples" && mkdir -p "$work/samples"
 skipped_samples=() not_mods=()
 # a sample on Kiln.Sdk packs itself (KilnPack); an older one builds its output folder (a deployable mod folder), which
 # is zipped the way KilnPack does: <id>-<version>.zip holding <id>/, without the shared Kiln.* assemblies, *.deps.json
-# and cooked game files
-pack_folder() { # project
-  local proj=$1 o=$work/samples-build/$(basename "$1" .csproj)
-  rm -rf "$o"
-  low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo -o "$o" >>"$log" 2>&1 || return 1
-  [ -f "$o/kiln.mod.json" ] || return 2   # a library or test project of a sample (SampleLib.Api): no mod to zip
-  python3 - "$o" "$work/samples" <<'PY'
+# and cooked game files. zip_mod_folder FOLDER: 2 when it holds no kiln.mod.json (a library or test project of a sample,
+# SampleLib.Api), 3 when it holds test assemblies.
+zip_mod_folder() {
+  [ -f "$1/kiln.mod.json" ] || return 2
+  python3 - "$1" "$work/samples" <<'PY'
 import json, os, re, sys, zipfile
 o, dest = sys.argv[1:]
 text = re.sub(r"^\s*//.*$", "", open(os.path.join(o, "kiln.mod.json"), encoding="utf-8").read(), flags=re.M)
 m = json.loads(re.sub(r",(\s*[}\]])", r"\1", text))
 mid, ver = m["id"], m.get("version", "0.0.0")
+# test frameworks never ship in a mod: a sample whose output has them is a build mistake (see the -o note above)
+test_files = sorted(n for _, _, files in os.walk(o) for n in files
+                    if re.match(r"(xunit|Microsoft\.TestPlatform|Microsoft\.VisualStudio\.TestPlatform|Kiln\.TestKit|testhost)", n, re.I))
+if test_files:
+    print(f"release: sample {mid}: test assemblies in its output: {' '.join(test_files)}", file=sys.stderr)
+    sys.exit(3)
 with zipfile.ZipFile(os.path.join(dest, f"{mid}-{ver}.zip"), "w", zipfile.ZIP_DEFLATED) as z:
     for d, _, files in os.walk(o):
         for n in sorted(files):
@@ -561,6 +735,42 @@ with zipfile.ZipFile(os.path.join(dest, f"{mid}-{ver}.zip"), "w", zipfile.ZIP_DE
             z.write(os.path.join(d, n), f"{mid}/{rel}")
 PY
 }
+# The project's own output folder, not `-o`: -o is a global property, so every project the build references writes
+# there too (in repository mode a Blocks sample references the bake, Kiln.Sdk.Bake with Kiln.TestKit, and xunit's
+# assemblies ended up in 21 sample zips of the 0.2.0-dev.30 trial). Emptied first: the work folder is reused.
+declare -A sample_out=()
+while IFS=$'\t' read -r proj o; do sample_out[$proj]=${o%/}; done <"$samples_tsv"
+pack_folder() { # project: builds it alone, then zips its output folder
+  local proj=$1 o=${sample_out[$1]:-}
+  [[ -n $o ]] || return 1
+  rm -rf "$o"
+  low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo >>"$log" 2>&1 || return 1
+  zip_mod_folder "$o"
+}
+# the output folders to zip: kiln-win1's (KILN_BUILD_REMOTE=win1), else one local build of every sample
+declare -A sample_built=()
+if [[ -n $remote_pid ]]; then
+  rrc=0; wait "$remote_pid" || rrc=$?
+  remote_pid=""
+  cat "$work/remote-win1.log" >>"$log"
+  if ((rrc == 0)) && [[ -f $work/remote-win1/ok ]]; then
+    for proj in "${!sample_out[@]}"; do sample_built[$proj]=$work/remote-win1/out/${sample_out[$proj]#"$KILN_OUT/dotnet/"}; done
+    note "sample mods: built on kiln-win1 ($(grep -o 'dotnet build rc=0 in [0-9]* s' "$work/remote-win1.log" || true))"
+  else
+    note "sample mods: the kiln-win1 build failed (exit $rrc, $work/remote-win1.log): building them here"
+  fi
+fi
+if ((!${#sample_built[@]})) && [[ -s $samples_tsv ]]; then
+  for proj in "${!sample_out[@]}"; do rm -rf "${sample_out[$proj]}"; done
+  printf '<Solution>\n' >"$work/samples.slnx"
+  while IFS=$'\t' read -r proj o; do printf '  <Project Path="%s" />\n' "$proj" >>"$work/samples.slnx"; done <"$samples_tsv"
+  printf '</Solution>\n' >>"$work/samples.slnx"
+  if low dotnet build "$work/samples.slnx" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo >>"$log" 2>&1; then
+    for proj in "${!sample_out[@]}"; do sample_built[$proj]=${sample_out[$proj]}; done
+  else
+    note "sample mods: the one build of all samples failed: building each alone (the failing ones are left out)"
+  fi
+fi
 # (the loop's variable is not `name`: that is the release's name, used for the files and links below)
 for proj in "$src"/mods/samples/*/*.csproj; do
   sample=$(basename "$proj" .csproj)
@@ -568,9 +778,12 @@ for proj in "$src"/mods/samples/*/*.csproj; do
     low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo -t:KilnPack \
       -p:KilnPackageOutputPath="$work/samples/" >>"$log" 2>&1 || skipped_samples+=("$sample")
   else
-    rc=0; pack_folder "$proj" || rc=$?
+    rc=0
+    if [[ -n ${sample_built[$proj]:-} ]]; then zip_mod_folder "${sample_built[$proj]}" 2>>"$log" || rc=$?
+    else pack_folder "$proj" 2>>"$log" || rc=$?; fi
     ((rc == 2)) && not_mods+=("$sample")
     ((rc == 1)) && skipped_samples+=("$sample")
+    ((rc == 3)) && die "sample $sample: test assemblies in its zip's files (log: $log)"
   fi
 done
 note "sample mods: $(ls "$work"/samples/*.zip 2>/dev/null | wc -l) zips"
@@ -812,7 +1025,8 @@ else
   closing="Release $version is in $out (log: $log). Nothing is published.
 Next (by hand, see docs/kiln/launcher/releasing.md):
   tools/release/github-draft.sh $out        a DRAFT GitHub release with the files (needs the commit pushed)
-  tools/release/publish.sh $out             publish: the GitHub release, the dev and beta channel pointers, frostdev.io
+  tools/release/publish.sh $out             publish: the GitHub release, the dev and beta channel pointers, frostdev.io,
+                                            then the roadmap: $version as released on frostdev.io/kiln/roadmap
   python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update"
 fi
 step "done"

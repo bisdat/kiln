@@ -114,6 +114,53 @@
           "pattern": "48 8B 4D {items/pide.list:d8} 48 8D 97 4C 05 00 00 48 89 8D 80 00 00 00 45 8B CC 48 8B 4D {items/pide.count:d8} 44 8B C3 48 89 8D 88 00 00 00 0F B6 0D ?? ?? ?? ?? 88 4C 24 38 48 8D 8D 80 00 00 00 C6 44 24 30 04 48 89 4C 24 28 48 8B C8 48 89 54 24 20 48 8D 54 24 48 E8" }
       ]
     },
+    "items/PideRarity": {
+      "comment": "items.gear.rolls: createPide right after it loads the rarity its caller asked for (movzx ebx, word [opts+8]: OptU8 {value, has}; rdi = ItemInfo), before the has test and the type's rule (generateRarity, rarity). kiln.items' mid hook replaces bx with a rolled {rarity, 1} for item types a rule names (kiln_items.h rarity rolls). Server 26430253 0x1b1c27, client 26430625 0x412127 (docs/re/items.md section 10)",
+      "find": [
+        { "scope": { "symbol": "items/CreatePide", "size": 1600 },
+          "pattern": "0F B7 5B 08 0F B7 C3 66 C1 E8 08 84 C0 75 ?? 0F B6 4F 17 44 38 67 16", "offset": 4 }
+      ]
+    },
+    "items/ItemPower": {
+      "comment": "items.gear.power: fills one used-item entry of an impact that starts with ImpactItemConfig (impact_initialize's 0x197599, two calls: weapon and ammunition): (entry*, const ItemInstanceInfo*, ctx, job*) copies the 20-byte ItemInstanceInfo (pide at +0x0c), looks the item up (+0x18), reads its level (+0x20) and computes its power (0x91e9d0) into the entry (+0x24, captured). The impact's damage is then (weapon power + ammunition power) x distribution (0x192250, docs/re/abilities.md). kiln.items detours it and multiplies the power of an item entity with a scale (kiln_items.h power and armour scales). Server 26430253 0x1933b0, client 26430625 0x3f2110 (docs/re/items.md section 20)",
+      "find": [
+        { "pattern": "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 70 0F 10 02 48 8B DA 48 8B F1 49 8B F9 49 8B E8 0F 11 01 8B 42 10 89 41 10 49 8B 90 C0 00 00 00 8B 4B 08 E8" }
+      ]
+    },
+    "@items/ItemPower.fields": {
+      "comment": "the entry's power: the store of the power function's result (mov [rsi+d8], eax) right before the epilogue",
+      "find": [
+        { "scope": { "symbol": "items/ItemPower", "size": 200 },
+          "pattern": "80 7C 24 40 00 75 07 8B 44 24 48 89 46 {items/ItemPower.power:d8} 4C 8D 5C 24 70" }
+      ]
+    },
+    "items/ArmorSlot": {
+      "comment": "items.gear.armor: apply_armor's per-slot function (0x146cce calls it for nine equipment slots into one zeroed nine-value accumulator, rcx): one worn piece's armour, its type's armorSetup at its base level, then each unlocked perk's perkArmorSetup at base + i + 1 (docs/re/items.md section 20). Server 26430253 0x1428f0, client 26430625 0x383350",
+      "find": [
+        { "pattern": "40 56 41 56 41 57 48 81 EC 90 00 00 00 49 8B F0 4D 8B F1 44 0F B6 C2 4C 8B F9 4C 8B 56 08 41 8B 82 BC 00 00 00 44 0F A3 C0 0F 82" }
+      ]
+    },
+    "items/ArmorSlotBase": {
+      "comment": "items.gear.armor: inside items/ArmorSlot after the piece's ItemInfo lookup, right before the base armour (mov r9, [rsi+0x40]; mov rdx, rax: 7 relocatable bytes, no jump lands inside): r15 = the wearer's nine armour values, r14 = the job pointer (the function's fourth argument), [rsp + items/ArmorSlot.pide] = the piece's pide. Server 0x1429de, client 0x38343e",
+      "find": [
+        { "scope": { "symbol": "items/ArmorSlot", "size": 512 },
+          "pattern": "48 8B 56 50 8B 4C 24 68 48 89 9C 24 B0 00 00 00 48 89 BC 24 C0 00 00 00 E8 ?? ?? ?? ?? 4C 8B 4E 40 48 8B D0 44 8B 44 24 38 49 8B CF 48 8B F8 E8", "offset": 29 }
+      ]
+    },
+    "items/ArmorSlotEnd": {
+      "comment": "items.gear.armor: inside items/ArmorSlot where the perk loop's end and the no-perks branch join (mov rbx, [rsp+0xb0]: 8 relocatable bytes, itself the branch's target): the piece's armour has been added. Server 0x142a84, client 0x3834e4",
+      "find": [
+        { "scope": { "symbol": "items/ArmorSlot", "size": 512 },
+          "pattern": "48 3B DD 72 C4 48 8B AC 24 B8 00 00 00 48 8B 9C 24 B0 00 00 00 48 8B BC 24 C0 00 00 00 48 81 C4 90 00 00 00", "offset": 13 }
+      ]
+    },
+    "@items/ArmorSlot.fields": {
+      "comment": "the piece's pide on the slot function's stack: the PerkContainerNew read's entity argument (mov r9d, [rsp+d8])",
+      "find": [
+        { "scope": { "symbol": "items/ArmorSlot", "size": 512 },
+          "pattern": "44 8B 4C 24 {items/ArmorSlot.pide:d8} 48 8D 4C 24 40 48 8B D0 4C 8B C3 E8" }
+      ]
+    },
     "@items/CreatePide.fields": {
       "comment": "the Level override's value indices (u32 globals: the max, then the current level) and ItemInfo's category (Weapons 2 get the gem slot)",
       "find": [
@@ -142,6 +189,19 @@
       "comment": "actor_interaction takes the moved water off the source's Fuel, then re-runs its formulas",
       "find": [
         { "pattern": "29 3C 8A 48 8B D6 48 8B CB E8 {items/AttrChanged:rel32}" }
+      ]
+    },
+    "@items/LevelAdd.site": {
+      "comment": "items.gear: the game's add-to-a-UInt32-attribute (server 0x19b7b0, client 0x3fa500; UnlockPerk raises Level with it): the value += delta, then the UInt32 attribute's formulas (server 0xab970, client 0x2c0660; the Level twin of items/AttrChanged). docs/re/items.md section 19",
+      "find": [
+        { "pattern": "F6 43 06 01 74 15 0F B7 4B 04 48 03 CB 01 34 91 48 8B D7 48 8B CB E8 {items/AttrChangedU32:rel32}" }
+      ]
+    },
+    "@items/UnlockPerk.level": {
+      "comment": "items.gear: UnlockPerk (ItemAction 3, server 0x1a0b80, client 0x3ff8a0) reads Level's current and max values after unlockedPerks + 1, to raise max first when the level would pass it",
+      "find": [
+        { "pattern": "BA {items/attr.level:d32} E8 {items/AttrFind:rel32} 44 38 74 24 30 74 05 41 8B DE" },
+        { "pattern": "4C 8B 87 E8 00 00 00 48 8D 4C 24 30 BA {items/attr.level_max:d32} E8 {items/AttrFind:rel32} 44 38 74 24 30 75 1A" }
       ]
     },
     "@items/GetComponent.fields": {
@@ -307,7 +367,8 @@
     "items/attr.durability_max": { "min_votes": 1 },
     "items/attr.fuel": { "min_votes": 1 },
     "items/attr.fuel_max": { "min_votes": 1 },
-    "items/attr.level": { "min_votes": 1 }
+    "items/attr.level": { "min_votes": 1 },
+    "items/attr.level_max": { "min_votes": 1 }
   },
   "features": {
     "items.transaction": {
@@ -365,6 +426,24 @@
     },
     "items.equip": {
       "symbols": ["items/EquipItem", "items/UnequipItem", "@items/EquipAction.calls"]
+    },
+    "items.gear.rolls": {
+      "symbols": ["items/CreatePide", "items/PideRarity"]
+    },
+    "items.gear.power": {
+      "symbols": ["items/ItemPower", "@items/ItemPower.fields"],
+      "constants": ["items/ItemPower.power"]
+    },
+    "items.gear.armor": {
+      "symbols": ["items/ArmorSlot", "items/ArmorSlotBase", "items/ArmorSlotEnd", "@items/ArmorSlot.fields"],
+      "constants": ["items/ArmorSlot.pide"]
+    },
+    "items.gear": {
+      "symbols": ["items/WriteOther", "items/JobTracker", "items/JobWriteFlag", "items/JobStorage", "items/ReadOther", "items/AttrFind",
+                  "items/AttrChanged", "items/AttrChangedU32", "@items/FuelWrite.site", "@items/AttrFind.site", "@items/AttrChanged.site",
+                  "@items/LevelAdd.site", "@items/UnlockPerk.level", "@world/WriteMark.bits"],
+      "constants": ["items/attr.level", "items/attr.level_max", "items/attr.durability", "items/attr.durability_max",
+                    "world/registry.replicated", "world/registry.saved", "items/registry.components"]
     }
   }
 }

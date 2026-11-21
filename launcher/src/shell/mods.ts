@@ -4,12 +4,20 @@ import { stopIds } from "./stoppedStart";
 // folder that the launcher did not place (kiln_manage::found). A row is on when its mod is in the loaded profile and
 // enabled; a game-folder row has no switch (only its state and fix). One short note per row, only when there is
 // something to say. Pure: shell/useMods.ts reads the queries and the edits.
-import type { BootState, FoundMod, LibraryEntry, LibraryRef, LibraryVersion, ModKind, NativePlanEntry, Profile, ProfileMod, ResolvePreview, RetainedPlacement } from "../api/commands";
+import type { BootState, EmfDepProblem, FoundMod, Json, LibraryEntry, LibraryRef, LibraryVersion, ModKind, NativePlanEntry, Profile, ProfileMod, ResolvePreview, RetainedPlacement } from "../api/commands";
 import { MOD_KINDS, NOT_RUNNING_KINDS } from "../api/kinds";
 import { t } from "../i18n";
 
 export type NoteTone = "info" | "warn" | "err" | "idle";
-export interface ModNote { text: string; tone: NoteTone; title?: string }
+export interface ModNote {
+  text: string;
+  tone: NoteTone;
+  title?: string;
+  /** What to do about it, in a sentence (the title has it too). */
+  hint?: string;
+  /** Where to get what is missing: a link the row shows beside the note. */
+  link?: { label: string; url: string; title?: string };
+}
 
 export interface ModRow {
   /** "<kind>/<id>" for a Library or profile entry, "found:<path>" for a mod in the game folder. */
@@ -53,15 +61,23 @@ export interface ModInputs {
   retained: RetainedPlacement[];
   /** XHL-Core recognized in this game (engine_status); null: not known. */
   xhlHost: boolean | null;
+  /** kiln/state/emf.json of this game (engine_status): what kiln-emf decided at the last start; null: not read. */
+  emfState?: Json | null;
 }
 
 const lower = (s: string) => s.toLowerCase();
 
 /** The version the launcher picks by itself for a mod (the row's version when the profile lacks it, a switch, All on,
  *  the server's sync dialog): the Library's newest that is not kept for a roll back. A kept version is only ever
- *  picked by hand (Roll back to, Use). None when only kept versions are left. */
-export function defaultVersion(lib: LibraryEntry | null | undefined): LibraryVersion | undefined {
-  return lib?.versions.find((v) => !v.kept);
+ *  picked by hand (Roll back to, Use). None when only kept versions are left. Of several copies of that version (one
+ *  download's game and dedicated-server copies, `source.packagedFor`), the one packed for `side`, else one packed for
+ *  neither side; the Library's order decides among the rest. */
+export function defaultVersion(lib: LibraryEntry | null | undefined, side: "client" | "server" = "client"): LibraryVersion | undefined {
+  const newest = lib?.versions.find((v) => !v.kept);
+  if (!newest) return undefined;
+  const fit = (v: LibraryVersion) => (v.source?.packagedFor === side ? 2 : v.source?.packagedFor ? 0 : 1);
+  const copies = lib!.versions.filter((v) => !v.kept && v.version === newest.version);
+  return copies.reduce((best, v) => (fit(v) > fit(best) ? v : best), newest);
 }
 const byName = (a: ModRow, b: ModRow) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.key.localeCompare(b.key);
 
@@ -96,6 +112,74 @@ function lastStartFailures(st: BootState | null): Map<string, string> {
   return out;
 }
 
+/** One EMF mod's dependency problem (kiln_manage::emf_deps, from the mod.json before Play) as the row's note, and the
+ *  count line's why: "Needs EMF's lua mod >=1.36, which isn't installed.", with how to get it. */
+export function emfDepNote(p: EmfDepProblem): { note: ModNote; why: string } {
+  const name = p.dep === "lua" && p.withEmf ? t("shell.mods.emfLua") : p.depName ?? p.dep;
+  const range = p.range.trim();
+  const dep = range && range !== "*" ? `${name} ${range}` : name;
+  const found = p.found ?? "";
+  // what gets the player what is missing: EMF's own mods come with EMF's release zip
+  const getIt = p.state === "missing" || p.state === "tooOld";
+  let text: string, why: string, hint: string | undefined;
+  switch (p.state) {
+    case "missing": text = t("shell.mods.emfMissing", { dep }); why = t("shell.mods.emfWhyMissing", { dep }); hint = p.withEmf ? t("shell.mods.emfWithEmf") : undefined; break;
+    case "off": text = t("shell.mods.emfOff", { dep }); why = t("shell.mods.emfWhyOff", { dep }); hint = t("shell.mods.emfSwitchOn"); break;
+    case "notLoading": text = t("shell.mods.emfNotLoading", { dep }); why = t("shell.mods.emfWhyNotLoading", { dep }); hint = t("shell.mods.emfNotLoadingTip"); break;
+    case "tooOld": text = t("shell.mods.emfTooOld", { dep, found }); why = t("shell.mods.emfWhyVersion", { dep, found }); hint = p.withEmf ? t("shell.mods.emfUpdateWithEmf") : undefined; break;
+    default: text = t("shell.mods.emfTooNew", { dep, found }); why = t("shell.mods.emfWhyVersion", { dep, found }); hint = t("shell.mods.emfTooNewTip"); break;
+  }
+  // one of EMF's own mods: EMF's page, never a link a mod.json gives for it
+  const url = p.withEmf ? EMF_PAGE : p.url;
+  const link = getIt && url
+    ? { label: p.withEmf ? t("shell.mods.emfGet") : t("shell.mods.emfModPage"), url, title: p.withEmf ? t("shell.mods.emfGetTip") : t("shell.mods.emfModPageTip", { dep: name }) }
+    : undefined;
+  const title = [text, hint, p.reason ? t("shell.mods.emfSays", { reason: p.reason }) : ""].filter(Boolean).join(" ");
+  return { note: { text, tone: "warn", title, hint, link }, why: getIt && p.withEmf ? t("shell.mods.emfWhyWithEmf", { why }) : why };
+}
+
+/** EMF's "1", "1.2" or "1.2.3" as three numbers ("1.0" and "1.0.0" are one version); null: not EMF's form. */
+const emfVersion = (v: string | null | undefined) => (v && /^\d+(\.\d+){0,2}$/.test(v) ? [...v.split("."), "0", "0"].slice(0, 3).map(Number).join(".") : null);
+
+/** EMF's own page, where its release zip is (kiln_manage::emf_deps::EMF_PAGE): the only page "Get EMF" opens. */
+export const EMF_PAGE = "https://github.com/matenm/emf-enshrouded";
+
+/** Does the preview judge this kiln-emf rejection again, from the mod.json and the profile (kiln_manage::emf_deps)? A
+ *  dependency that is not installed, one the profile switched off, a version out of range. Not what it cannot see: a
+ *  dependency that did not load, one EMF's ini or its mod.json keeps off ("switched off (enabled=0)"), the EMF API
+ *  version, a missing DLL. `reasonOf`: emf.json's reason for each mod, by its id. */
+function previewJudges(reason: string, reasonOf: Map<string, string>): boolean {
+  if (/^needs [^\s,]+, which is not installed$/.test(reason)) return true;
+  const off = /^needs ([^\s,]+), which is switched off$/.exec(reason);
+  if (off) return reasonOf.get(off[1]) === "switched off in the profile";
+  return /^needs [^\s,]+ .*\), found [^\s:]+: too (old|new)\b/.test(reason);
+}
+
+/** kiln/state/emf.json's rejected and failed profile mods (by profile entry id), when the file belongs to the last start
+ *  (written after that run's game started, as boot.json says); `judged`: the preview judges that reason again. */
+function lastEmfStart(state: Json | null | undefined, st: BootState | null): Map<string, { status: string; reason: string; version: string | null; judged: boolean }> {
+  const out = new Map<string, { status: string; reason: string; version: string | null; judged: boolean }>();
+  const boot = st?.boot;
+  if (!boot || !state || typeof state !== "object" || Array.isArray(state)) return out;
+  const s = state as Record<string, Json>;
+  const since = Date.parse(boot.started ?? boot.written) - 2000;
+  if (typeof s.updatedUnixMs !== "number" || !(s.updatedUnixMs >= since) || !Array.isArray(s.mods)) return out;
+  const reasonOf = new Map<string, string>();
+  for (const m of s.mods) {
+    const r = m && typeof m === "object" && !Array.isArray(m) ? (m as Record<string, Json>) : null;
+    if (r && typeof r.id === "string" && typeof r.reason === "string") reasonOf.set(r.id, r.reason);
+  }
+  for (const m of s.mods) {
+    if (!m || typeof m !== "object" || Array.isArray(m)) continue;
+    const r = m as Record<string, Json>;
+    const id = typeof r.profileId === "string" && r.profileId ? r.profileId : r.origin === "profile" && typeof r.id === "string" ? r.id : null;
+    if (!id || (r.status !== "rejected" && r.status !== "failed")) continue;
+    const reason = typeof r.reason === "string" ? r.reason : "";
+    out.set(id, { status: r.status, reason, version: typeof r.version === "string" ? r.version : null, judged: r.status === "rejected" && previewJudges(reason, reasonOf) });
+  }
+  return out;
+}
+
 /** Why a kind's mods do not run yet, when there is a word for it. */
 const notYet = (kind: ModKind): string | undefined => (kind === "ember" ? t("shell.mods.emberNoAbi") : undefined);
 
@@ -106,6 +190,8 @@ export function buildRows(x: ModInputs): ModRow[] {
   const world = new Set(x.preview?.withWorld ?? []);
   const native = new Map((x.preview?.native ?? []).map((n) => [n.id, n]));
   const failed = lastStartFailures(x.launch);
+  const emfDeps = new Map((x.preview?.emf ?? []).map((p) => [p.id, p]));
+  const emfLast = lastEmfStart(x.emfState, x.launch);
   const retained = x.retained.map((r) => ({ base: lower(r.path.split(/[\\/]/).filter(Boolean).pop() ?? ""), r }));
   const rows: ModRow[] = [];
   const seen = new Set<string>();
@@ -142,6 +228,21 @@ export function buildRows(x: ModInputs): ModRow[] {
           const dep = needs(r.reason);
           row.wontRun = dep ? t("shell.mods.itNeeds", { dep }) : r.reason;
           row.note = { text: dep ? t("shell.mods.needs", { dep }) : t("shell.mods.willNotRun"), tone: "warn", title: r.reason };
+        }
+      } else if (kind === "emf" && emfDeps.has(id)) {
+        // before Play, from the mod.json: what is missing and how to get it
+        const n = emfDepNote(emfDeps.get(id)!);
+        row.wontRun = n.why;
+        row.note = n.note;
+      } else if (kind === "emf" && emfLast.has(id)) {
+        // what kiln-emf said at the last start, for the same version; a reason the preview judges again and now finds
+        // nothing in (the player added the dependency, switched it on or updated it since) is not said again
+        const last = emfLast.get(id)!;
+        const same = emfVersion(last.version) === emfVersion(row.version);
+        if (same && !(x.preview && last.judged)) {
+          row.note = last.status === "failed"
+            ? { text: t("shell.mods.failedLast"), tone: "err", title: asSentence(last.reason) }
+            : { text: t("shell.mods.emfRejectedLast"), tone: "warn", title: asSentence(last.reason) };
         }
       } else if (kind === "native") {
         const n = native.get(id);

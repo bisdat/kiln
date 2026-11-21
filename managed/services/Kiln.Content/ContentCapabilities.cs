@@ -21,6 +21,10 @@ internal static unsafe class ContentCaps
     /// <summary>Kiln.Content's own row: this kiln.content sets references (<see cref="ContentEntry.SetRef"/>, table v4).</summary>
     public const string References = "content.references";
 
+    /// <summary>Kiln.Content's own row: typed gear values (<see cref="Content.Gear(string)"/>) and the data packs' "gear" section
+    /// (since 0.2.0-dev.29.19). Off only without kiln.content; "gearRules" also need <c>mods.boot.resource_patches</c>.</summary>
+    public const string Gear = Content.GearCapability;
+
     /// <summary>Kiln.Content's session row: the registries are loaded and the data packs applied
     /// (<see cref="Content.Ready"/>).</summary>
     public const string Ready = "content.ready";
@@ -69,6 +73,7 @@ internal static unsafe class ContentCaps
             "this kiln.content has no reference support (v4; update Kiln)", Service);
         // kiln.content reports content.text itself (pending, then available; wrong-side on a server); said here only when it cannot
         ServiceCaps.Static(Text, t != null && ContentNative.HasText(t), CapabilityReason.ServiceOlder, TextOlder, Service);
+        ServiceCaps.Static(Gear, t != null, CapabilityReason.ServiceMissing, "kiln.content is not loaded", Service);
         ServiceCaps.Session(Ready, Content.Ready, "the registries load with the world's game data; the data packs are applied after that", Service);
     }
 

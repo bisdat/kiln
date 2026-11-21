@@ -57,6 +57,19 @@ Seven collectors, prepared in this order: `assets` (kiln.assets), `worldtables` 
 patches). A new collector id needs a core change: the list is closed.
 The patches collector refuses mods with resource patches in a start where the game's resource service was already up before the boot generation (an optional mod is left out; a required mod stops the start).
 
+**The base view.** OnBoot's game-data reads go through one reader interface, `native/core/src/services/boot_archive_view.h`
+(a base view: one query's decoded value, one resource's bytes, and a digest that names the data it serves); kiln.boot's
+default is the boot snapshot. The patches collector can check its resource patches against such a view as well
+(`native/services/content/gamedata_bootview.h`): when a start has a view of its game data that is newer than the boot
+snapshot, a patch whose resource, list index, variant or optional member, template component or `copyComponents` source
+that data has not got can be refused before the start, as any other refusal of the collector, and the plan keeps the
+view's digest. Such a refusal holds only for a resource whose view the source says is final for this start: Kiln, a boot
+mod, a data pack or another mod's `assets.json` may create or override a resource in the same start (an `assets.json`
+"new" or "override" resource is served before the patches are written), and without that answer the patch is checked
+when it is written, as before. What the view cannot say is checked when the patch is written as well. The boot snapshot
+is never used for this check (it is made before the start, so it may not hold what the start's data holds), and no such
+view is registered by default: resource patches behave as before.
+
 **Bind.** `kiln::boot::collect(api, owner, "<id>", prepare, user)` registers and says `true` only in a boot process.
 Then the service keeps its definitions back in `on_ready`. `false`: the old `on_ready` path, untouched.
 
@@ -201,6 +214,18 @@ handles, which no runtime unload clears: `Blocks.Find` and a block's reference b
 - Host: `native/core/tests/test-stop-facts.sh` (the facts a stop writes boot.json from, under the thread sanitizer,
   while boot() changes and publishes them; `test-stop-facts.sh old` runs the round-2 pattern, a pointer to the live
   facts, which the sanitizer flags).
+- Host: `native/core/tests/test-boot-archive-view.sh` (the base view: the snapshot backing against the snapshot reader,
+  both digests, the kiln.assets backing over a fake table, reads from several threads across a release; kiln.boot reading
+  through the live base; each built with ASan/UBSan and with TSan) and `test-boot-archive-view-wine.sh` (the view tests
+  under Wine).
+- Host: `native/services/content/tests/bootview_test.sh` (the patches collector against a fake base view: a list made
+  longer or shorter in the start's data, a missing resource and another mod's override with and without a final view,
+  `[*]` over an empty list, arithmetic from the data's value, a variant of one scalar, a config shown by its alias, a
+  variant's and an optional's member, a template's component, `copyComponents`' source, places the generation's own
+  structural edits change left to the bytes, a fault after the publication, the view's reads ended once; ASan/UBSan and
+  TSan).
+- Host: `native/core/tests/test-boot-json.sh` (state/boot.json's text: bytes that are not UTF-8 become U+FFFD instead
+  of ending the boot; kiln.json `"unloadAtExit"` nested a million levels deep is read by its kind, without recursion).
 - Offline: `managed/tests/Kiln.Blocks.Tests` (staging, lowering, `BootHandleTests`: the handle map), `Kiln.Host.Tests`
   (`BootPhaseTests`, including the pin of `KilnBootApiV1`'s member order; `BootInputsTests`: the frozen inputs).
 - Offline, the test kit: `Kiln.TestKit.Tests` (`BootFakeTests`: `KilnHarness.BootPhase`), `Kiln.Sdk.Tests`

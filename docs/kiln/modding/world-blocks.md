@@ -225,6 +225,100 @@ blocks/house.json: block container cache, defaultLoot.entries: a loot table with
 The save-boundary test stages the real WorldData bundle from the first of two item callbacks, while both container tasks are still pending, and checks the blob before requesting a game save and restarting. It calls the existing staging method through test-only reflection because `Saves.Request` queues its work for a later step; that call alone would not exercise this interval.
 Another fixture queues a grant from the request-time save event: the initial stage sees an empty inventory, and the final Post stage must journal the subsequent simulation's commit before its callback. The committed manifest and a restart must preserve exactly one grant.
 
+## Upgrade stations
+Since 0.2.0-dev.29.19 (the equipment wave). A placed thing whose use raises an item's rarity: `Upgrade` on its interaction runs one
+step of a rarity upgrade rule (`RarityUpgradeBlock`, [item-blocks.md](item-blocks.md#rarity-upgrades-rarityupgradeblock)) on the
+server, paid by the player. Sample: `mods/samples/RarityAnvil` (C#, and `blocks/twins.json` as data).
+
+```csharp
+Blocks.Define("standard-upgrades", new RarityUpgradeBlock
+{
+    Items = ["Weapon_*", "Armor_*"],
+    Steps =
+    {
+        [Rarity.Uncommon] = new UpgradeStep { Cost = { [GameItems.Material_T1_Metal_Scraps] = 10 } },
+        [Rarity.Rare]     = new UpgradeStep { Cost = { [GameItems.Material_T1_Metal_Sheets] = 5 }, Chance = 0.9 },
+    },
+});
+
+// the item in the player's hand: every player
+Blocks.Define("rarity-anvil", new PropBlock
+{
+    Name = "Rarity Anvil", Visual = new VisualBlock { Like = GameItems.Prop_Decoration_Comfort1_T0_Table_Medium },
+    Recipe = new RecipeBlock { Needs = { [GameItems.Material_T1_Metal_Sheets] = 10 } },
+    OnInteract = new InteractBlock { Prompt = "Upgrade held item", Upgrade = new UpgradeAction { Rule = "standard-upgrades" } },
+});
+
+// a window that lists the player's gear: Kiln players (others get the held item)
+Blocks.Define("rarity-forge", new PropBlock
+{
+    Name = "Rarity Forge", Visual = new VisualBlock { Like = GameItems.Prop_Decoration_Comfort1_T0_Table_Medium },
+    OnInteract = new InteractBlock { Prompt = "Upgrade gear", Upgrade = new UpgradeAction { Rule = "standard-upgrades", Target = UpgradeTarget.Choose } },
+});
+```
+```jsonc
+{ "format": 1,
+  "props": {
+    "rarity-anvil": { "name": "Rarity Anvil", "visual": { "like": "Prop_Decoration_Comfort1_T0_Table_Medium" },
+      "onInteract": { "prompt": "Upgrade held item", "upgrade": { "rule": "standard-upgrades" } } },
+    "rarity-forge": { "name": "Rarity Forge", "visual": { "like": "Prop_Decoration_Comfort1_T0_Table_Medium" },
+      "onInteract": { "prompt": "Upgrade gear", "upgrade": { "rule": "standard-upgrades", "target": "choose", "range": 6 } } } } }
+```
+
+- **`rule`**: a `rarityUpgrades` block of this mod by name, or `"other-mod:name"`. A name no loaded mod defines is an error once
+  the mods have loaded (`block rarity-anvil, onInteract.upgrade.rule: no loaded mod defines the rarity upgrade ...`).
+- **`target`**: `held` (the default) upgrades the item in the player's hand: a weapon, shield or tool on the action bar (armour and
+  rings are worn, not held: use `choose` or code for them). `choose` opens a window on the player's game that lists every piece of
+  gear they carry with its next step, cost and chance, and an Upgrade button for each one the rule takes and they can pay for; the
+  window comes again after each upgrade with the new prices. A player whose game cannot show it (no Kiln, or a Kiln older than
+  0.2.0-dev.29.19) gets `held` instead.
+- **`range`** (1 to 64 metres, default 6): with `choose`, how far from the station the player may stand when the pick arrives.
+- **What the player plays**: without `plays` the hand on it (`toggle`), which replaces what the look's own use did: a station
+  kind's crafting menu does not open. `plays` says otherwise. An upgrade and a `toggle` together are refused.
+- **What the server checks**: everything. The rule, the cost and the chance are `Items.UpgradeRarity`'s
+  ([../services/items.md](../services/items.md#upgrading-rarity-v8-since-020-dev2919)): `GearUpgradingEvent` handlers can change the
+  price or cancel, and the server rolls the chance. A window's pick is taken only for an item the server listed in that window
+  (a token per player, for 2 minutes), from a player still within `range` of that station, for an item still in their inventory.
+  Nothing a player's game sends can name another item, another price or another rule.
+- **What the player is told**: a toast on a Kiln player's game, a server chat line for others (`Kiln.Chat`): the new rarity and
+  that the new enhancement waits at a workbench (or is unlocked, with a step's `unlock`), what was paid, a failed roll and its
+  chance, or why nothing happened (not enough, at the rule's top, no enhancement slot, the station does not take the item).
+- **Requirements** (`requires`) and `effects` work as on any interaction: a refused player is not upgraded.
+
+### From code
+```csharp
+var action = new UpgradeAction { Rule = "standard-upgrades" };
+UpgradeStation.Offer(blacksmithTable, action, out var why);          // an "E" prompt (the game's word Use) on any entity of the world
+UpgradeResult? r = await UpgradeStation.Use(player, station, action); // as if the player used a station: a chat command, an NPC
+```
+`UpgradeStation.Offer` puts the use on an entity that has no offer of its own, through `Offers` ([offers.md](offers.md)): no new
+template, so it works with players without Kiln. `Items.UpgradeRarity` is the call for any other trigger. Capability
+`blocks.upgrade_station` (follows `items.gear.upgrade`).
+
+### What players' games need
+A prop or station of your own is a new template: `clients: kiln` (Kiln on the player's game, not your mod). The upgrade, its cost
+and what the item becomes are the server's and the game's own state: the item's colour, its "LEVEL x/y" and its enhancement
+slots are what every player's game shows of it. The window is drawn by Kiln on the player's game (no mod needed there).
+An offer on an existing entity (`UpgradeStation.Offer`) needs nothing on the player's game.
+
+Not proven with a client: the whole player loop (the prompt, the hand on it, the toast or chat line, the window and its button,
+the item's new colour and enhancement slot without re-joining, the workbench's unlock after an upgrade, the durability bar). The
+guided client checks `equip.c1` to `equip.c4` cover them (`mods/tests/client-pass/EquipStation.cs`).
+
+### Mistakes
+```
+blocks/anvil.json: block prop rarity-anvil, onInteract.upgrade.rule: names a rarity upgrade (rarityUpgrades): a block of this mod or "other-mod:name"
+blocks/anvil.json: block prop rarity-anvil, onInteract.upgrade.range: 0 is outside 1 to 64 metres
+blocks/anvil.json: block prop rarity-anvil, onInteract.upgrade: an upgrade and a toggle: each use would flip it too; use one interaction for each
+```
+
+### Test
+Offline: `managed/tests/Kiln.Blocks.Tests/UpgradeStationBlockTests.cs` (the lowering, the mistakes, the JSON, the messages) and
+`managed/tests/Kiln.Stations.Tests/UpgradeStationTests.cs` (the use on the test kit: held, the window and its picks, what a player is
+told). Lab: `mods/tests/upgrade-station-test` (a dedicated server with no player: the template's fields, the use run with a chest
+standing in for the player, the window's checks); it logs `upgrade-station-test: PASS` / `FAIL` lines and
+`upgrade-station-test done: N PASS, M FAIL`.
+
 ## Materials
 Sample: `mods/samples/MaterialTweaks` (C#, and `blocks/twins.json` as data). The service under these blocks: [services/worldtables.md](../services/worldtables.md).
 

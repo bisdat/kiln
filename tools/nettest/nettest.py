@@ -275,8 +275,8 @@ class ContentClient(Client):
             raw = zlib.decompress(b"".join(got[i] for i in range(parts)), -15)
             self.states.append(dict(id=sid, doc=json.loads(raw), raw=raw, at=time.time()))
 
-    def ack(self, sid, result=0):
-        self.data(self.content_id(), 1, W().u32(sid).u8(result).varu(0).varu(0).varu(0).varu(0).string("nettest").b)
+    def ack(self, sid, result=0, errors=0, detail="nettest"):
+        self.data(self.content_id(), 1, W().u32(sid).u8(result).varu(0).varu(0).varu(errors).varu(0).string(detail).b)
 
 
 def log_time(line):
@@ -1352,6 +1352,94 @@ class Suite:
         time.sleep(6.5)
         self.check("definitions.no-channel.no-wait", c.welcome is not None and not any("no content ack" in l for l in mine()), str(mine())[-200:])
 
+    def t_content_join(self):
+        """kiln.content's added-buff check at the join (docs/kiln/sync.md), on a lab whose buff room holds records: a server
+        mod's added buffs (mods/tests/statusblock-join-test) or, the mod removed, its placeholders. A client that answers
+        while held (handshake property kiln.content.held-answer) is held until its answer: a deferral (ack 4) lets it in, a
+        refusal refuses it with its reason, silence refuses it at the deadline; an older client is not held, and its
+        program_refresh error (0.2.0-dev.29 to .23) is not a refusal."""
+        if not self.lab:
+            print("SKIP content_join: needs --lab (reads kiln.log)", flush=True)
+            return
+        content = ("kiln:content", "1", False)
+        channels = [c for c in CHANNELS if c[0] != "kiln:content"] + [content]
+        held = "kiln.content.held-answer"
+        name_of = lambda pid: f"lab-{int(pid, 16) & 0xFFFF}" if pid else None
+        line = lambda m, pid: [l for l in self.log_since(m).splitlines() if pid and f"{name_of(pid)}:" in l]
+
+        def join(name, answers):
+            m = self.log_mark()
+            c = ContentClient(self.port, name, self.verbose)
+            c.send(KNOCK)
+            props = {"nettest.client": name}
+            if answers:
+                props[held] = "1"
+            c.hello(FULL_MODS, channels, props)
+            c.wait(lambda: c.welcome is not None or c.reject is not None, 8)
+            pid = None
+            for _ in range(20):
+                pid = self.peer_of(m)
+                if pid:
+                    break
+                time.sleep(0.1)
+            c.send(LAB_READY)  # its Gameplay Ready: from here the gate holds it
+            return c, m, pid
+
+        # ---- a client that answers while held: held by kiln.content, its state arrives while held, a deferral lets it in
+        c, m, pid = join("cj-new", True)
+        self.check("content_join.welcome-says-it-takes-the-answer", c.welcome is not None and c.welcome["props"].get(held) == "1",
+                   str(c.welcome and c.welcome["props"]) + f" reject={c.reject}")
+        ok = self.wait_log(m, f"admission: kiln.content holds lab-{int(pid, 16) & 0xFFFF} ({pid})", 4) if pid else False
+        self.check("content_join.held-by-kiln-content", ok, self.log_since(m)[-400:])
+        got = c.wait(lambda: c.states, 6)
+        st = c.states[-1] if c.states else {}
+        doc = st.get("doc") or {}
+        adds = ((doc.get("buffs") or {}).get("add")) or []
+        print(f"note: content state {st.get('id', 0):08x}: {len(adds)} added buff(s) "
+              f"({', '.join(str(a.get('name')) for a in adds[:4])}), {len(doc.get('@programs') or [])} program(s)", flush=True)
+        self.check("content_join.state-while-held", got and bool(adds) and f"lab peer {pid} passed the gate" not in self.log_since(m),
+                   f"{len(c.states)} state(s); {self.log_since(m)[-300:]}")
+        if c.states:
+            c.ack(st["id"], 4, 0, "client: this game applies the server's content once its world runs")
+            ok = self.wait_log(m, f"lab peer {pid} passed the gate", 4)
+            self.check("content_join.deferred-lets-it-in", ok and c.reject is None and
+                       any("received while joining" in l for l in line(m, pid)) and
+                       f"admission: kiln.content no longer holds lab-{int(pid, 16) & 0xFFFF} ({pid})" in self.log_since(m),
+                       self.log_since(m)[-500:])
+
+        # ---- an older client (no property): not held for the check; its WRONG_THREAD program error is not a refusal
+        c, m, pid = join("cj-old", False)
+        ok = self.wait_log(m, f"lab peer {pid} passed the gate", 4) if pid else False
+        self.check("content_join.older-client-not-held", ok and "not held for it" in self.log_since(m) and
+                   f"kiln.content holds lab-{int(pid, 16) & 0xFFFF}" not in self.log_since(m), self.log_since(m)[-400:])
+        if c.wait(lambda: c.states, 6):
+            c.ack(c.states[-1]["id"], 1, 1, "kiln.abilities did not register the programs (4)")
+            time.sleep(2.0)
+            self.check("content_join.older-client-program-error-taken-as-applied", c.reject is None and
+                       any("taken as applied" in l for l in line(m, pid)) and f"refusing lab-{int(pid, 16) & 0xFFFF}" not in self.log_since(m),
+                       f"reject={c.reject} " + self.log_since(m)[-300:])
+        else:
+            self.check("content_join.older-client-state", False, "no content state in 6 s")
+
+        # ---- a refusal while held (its buff room known and too small) refuses it at the join, with its reason
+        c, m, pid = join("cj-small", True)
+        if c.wait(lambda: c.states, 6):
+            why = "This server uses 2 added buffs; this game has room for 3 (1 slots free). Restart the game to retry its larger reservation, or use fewer buff mods on the server."
+            c.ack(c.states[-1]["id"], 3, 1, why)
+            ok = c.wait(lambda: c.reject is not None, 4)
+            self.check("content_join.refusal-refuses-at-the-join", ok and c.reject[0] == why and
+                       f"lab peer {pid} passed the gate" not in self.log_since(m), f"{c.reject} " + self.log_since(m)[-300:])
+        else:
+            self.check("content_join.refusal-state", False, "no content state in 6 s")
+
+        # ---- silence: refused at the hold's deadline (25 s) with what did not happen
+        c, m, pid = join("cj-silent", True)
+        t0 = time.time()
+        ok = c.wait(lambda: c.reject is not None, 32)
+        self.check("content_join.silent-refused-at-the-deadline", ok and "did not answer this server's content and added-buff check in time" in c.reject[0]
+                   and 22 <= time.time() - t0 <= 31 and f"lab peer {pid} passed the gate" not in self.log_since(m),
+                   f"{c.reject} after {time.time() - t0:.1f} s")
+
     def t_hotload(self):
         """A mod loaded while Kiln clients are in adds a template, and an entity of it is spawned at once. A client gets that
         entity only after the content state that defines the template: kiln.net keeps it back until the client acks a state
@@ -1775,7 +1863,7 @@ def main():
     s = Suite(a.port, a.verbose, a.lab, a.game_templates)
     probe_server(a.port)
     order = ["handshake", "echo", "json", "fragments", "oversize", "garbage", "broadcast", "channel_mismatch", "ping",
-             "rate_limit", "policy", "advert", "missing_mod", "vanilla", "admission", "admission_fallback", "withheld", "definitions", "hotload", "reload", "netsample", "status"]
+             "rate_limit", "policy", "advert", "missing_mod", "vanilla", "admission", "admission_fallback", "withheld", "definitions", "content_join", "hotload", "reload", "netsample", "status"]
     only = [x for x in a.only.split(",") if x]
     for name in order:
         if only and name not in only:

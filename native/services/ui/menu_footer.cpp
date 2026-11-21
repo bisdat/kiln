@@ -11,6 +11,15 @@
 // not drawn while Kiln's is, whichever of the two installed first (Kiln never writes to the footer's body, so XHL-Core's
 // own checks and patches go in as before, and its other main-menu code is untouched).
 //
+// With XHL-Core (owner's decision, 2026-11-19; menu_footer.h): Kiln's line says "Kiln <version> with XHL-Core - ...",
+// and while XHL-Core reports a problem its red line (its only warning channel) is drawn again and opens its diagnostics
+// when clicked. How: the copy's two calls XHL-Core patches (the "LegalLine" window call and the build-number call) go
+// through Kiln's thunks, which call the game's functions, or XHL-Core's patched targets while Kiln follows XHL-Core. So
+// XHL-Core draws its own line, in its words, colour and language, and handles its clicks, keyboard and gamepad reach
+// and diagnostics as it does without Kiln; Kiln reads only its state (one int, found through its getter's shape) to
+// leave its green "All mods loaded" out. If that state cannot be found, XHL-Core's line is always drawn (a warning is
+// never hidden). XHL-Core is known by the export XhlNativeGameBuild of the module its patched call leads to.
+//
 // Fail safe: a name that does not resolve, a copy that cannot be made or checked, the player's setting, no mod count
 // yet, or a fault in Kiln's line: the game's own function runs (with XHL-Core's line where it is installed). Each such
 // reason is one kiln.log line. The mark is drawn by the overlay at the line's place in the game's layout.
@@ -47,7 +56,7 @@ struct GameText {  // the UI's string view: UTF-8, byte length, FNV-1a 64 of the
 };
 
 struct Names {
-    uintptr_t fn = 0, site = 0, line = 0, draw = 0, align = 0, rect = 0, ui_app = 0;
+    uintptr_t fn = 0, site = 0, win = 0, line = 0, draw = 0, align = 0, rect = 0, ui_app = 0;
     int64_t config = 0, font = 0, text = 0, node = 0, shown = 0, color = 0, flags = 0, bits = 0, color2 = 0, flags2 = 0,
             size = 0;
     int64_t frame_arg = 0, viewport = 0, ppu = 0;
@@ -59,6 +68,7 @@ using DrawFn = void(__fastcall*)(void* text);
 using AlignFn = void(__fastcall*)(void* node, const uint16_t* align);
 using RectFn = const float*(__fastcall*)(void* node);
 using FooterFn = void(__fastcall*)();
+using WindowFn = void*(__fastcall*)(void*, void*, uint64_t, uint64_t, uint64_t, uint64_t);
 
 kiln::RawHook g_hook;
 FooterFn g_copy = nullptr;           // Kiln's copy of the footer function (ready: it passed its check)
@@ -68,6 +78,16 @@ std::atomic<bool> g_failed{false};   // Kiln's line faulted: the game's function
 std::atomic<bool> g_checked{false};  // the live code was compared at the first use
 std::atomic<bool> g_shown{false};    // the player's setting (Kiln.Ui: menus-client.json mainMenuFooter); off until told
 std::atomic<int64_t> g_mods{-1};     // the count Kiln.Ui reported, -1 until then
+uintptr_t g_win_file = 0;            // the window call's target in the exe file (0: the copy does not send it through Kiln)
+
+// XHL-Core in the footer (the UI thread writes, the thunks read on it too)
+std::atomic<bool> g_xhl{false};          // XHL-Core patched the footer's build-number call
+std::atomic<bool> g_follow{false};       // this frame, the copy calls XHL-Core's targets
+std::atomic<uintptr_t> g_xhl_line{0};    // XHL-Core's patched target of the build-number call
+std::atomic<uintptr_t> g_xhl_win{0};     // its patched target of the window call (0: not patched by XHL-Core)
+uintptr_t g_xhl_state = 0;               // its state int (0: not found: its line always shows)
+uintptr_t g_seen_line = 1, g_seen_win = 1;  // the live calls' targets last looked at
+int g_said_state = -2;                   // the state kiln.log last named (-1: unreadable)
 KilnHandle g_mark = 0;               // the mark (image_load)
 
 // The line's text, interned for the process (the game may keep the pointer until the frame renders)
@@ -96,7 +116,8 @@ uint64_t fnv64(const char* p, size_t n) {
 std::string line(bool gap) {
     const auto& tt = text::table();
     const int64_t m = g_mods.load();
-    return menu_footer::line_text(g_version, m, gap, tt.plural("native.footer.loaded", m));
+    const bool xhl = g_xhl.load();
+    return menu_footer::line_text(g_version, m, gap, tt.plural(menu_footer::line_key(xhl), m), xhl);
 }
 
 void set_text() {
@@ -143,10 +164,32 @@ void where(uintptr_t a, char* out, size_t cap) {
 
 void* __fastcall line_thunk(void* out, const GameText* text, const void* style, uint32_t mode);
 
-// Kiln's copy of the footer function (code_copy_win.h): its build-number call sent through line_thunk.
+// The footer's window call: the game's window function, or XHL-Core's patched target while Kiln follows XHL-Core (it
+// turns the window's input on so its line takes clicks). Six integer arguments, two on the stack, as the call passes them.
+void* __fastcall window_thunk(void* a, void* b, uint64_t c, uint64_t d, uint64_t e, uint64_t f) {
+    const uintptr_t x = g_follow.load(std::memory_order_relaxed) ? g_xhl_win.load(std::memory_order_relaxed) : 0;
+    return reinterpret_cast<WindowFn>(x ? x : g_win_file)(a, b, c, d, e, f);
+}
+
+// Kiln's copy of the footer function (code_copy_win.h): its window call sent through window_thunk and its build-number
+// call through line_thunk. Without the window call (it is not one), only the build-number call: XHL-Core's line can then
+// show but not be clicked.
 bool make_copy(std::string* why) {
     code_copy::Copy c;
-    if (!code_copy::make(N.fn, N.site, reinterpret_cast<const void*>(&line_thunk), &c, why)) return false;
+    N.win = N.fn + menu_footer::kWindowCallAt;
+    const code_copy::Site both[] = {{N.win, reinterpret_cast<const void*>(&window_thunk)},
+                                    {N.site, reinterpret_cast<const void*>(&line_thunk)}};
+    std::string why2;
+    if (code_copy::make(N.fn, both, 2, &c, &why2)) {
+        int32_t rel = 0;
+        std::memcpy(&rel, c.file.data() + menu_footer::kWindowCallAt + 1, 4);
+        g_win_file = N.win + 5 + static_cast<intptr_t>(rel);
+    } else {
+        N.win = 0;
+        if (!code_copy::make(N.fn, N.site, reinterpret_cast<const void*>(&line_thunk), &c, why)) return false;
+        logf(KILN_LOG_INFO, "ui: the main menu's footer: its window call stays the game's (%s); XHL-Core's line, where "
+                            "Kiln shows it, cannot be clicked", why2.c_str());
+    }
     g_file = std::move(c.file);
     g_size = c.size;
     g_copy = reinterpret_cast<FooterFn>(c.fn);
@@ -197,7 +240,7 @@ bool live_check() {
         if (c.call) {
             where(through_stub(static_cast<uintptr_t>(c.live_target)), w, sizeof w);
             logf(KILN_LOG_INFO, "ui: the main menu's footer: a module patched the game's footer call at +0x%x to %s; Kiln's "
-                                "line takes the place of what it draws there (XHL-Core's footer line, if it is XHL-Core)",
+                                "copy calls it only when it is XHL-Core's, while XHL-Core reports a problem",
                  c.at, w);
             continue;
         }
@@ -210,6 +253,92 @@ bool live_check() {
         return false;
     }
     return true;
+}
+
+// The target of the near call at `site` in the live code, 0 when it is not one (or unreadable).
+uintptr_t live_call(uintptr_t site) {
+    uint8_t b[5] = {};
+    if (!site || !copy_guarded(b, site, 5) || b[0] != 0xE8) return 0;
+    int32_t rel = 0;
+    std::memcpy(&rel, b + 1, 4);
+    return site + 5 + static_cast<intptr_t>(rel);
+}
+
+HMODULE module_of(uintptr_t a) {
+    HMODULE mod = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCWSTR>(a), &mod))
+        return nullptr;
+    return mod;
+}
+
+// The footer's live calls changed (or were never looked at): is XHL-Core behind the build-number call, where are its
+// targets and its state. UI thread.
+void xhl_resolve(uintptr_t lt, uintptr_t wt) {
+    bool xhl = false;
+    uintptr_t line_to = 0, win_to = 0, state = 0;
+    char w[160] = "";
+    if (lt && lt != N.line) {
+        const uintptr_t detour = through_stub(lt);
+        const HMODULE mod = module_of(detour);
+        if (mod && GetProcAddress(mod, "XhlNativeGameBuild")) {
+            xhl = true;
+            line_to = lt;
+            where(detour, w, sizeof w);
+            uint8_t code[menu_footer::kXhlDetourScan];
+            size_t n = sizeof code;
+            if (!copy_guarded(code, detour, n)) n = copy_guarded(code, detour, 0x40) ? 0x40 : 0;
+            const std::vector<uint64_t> calls = code_clone::calls_in(code, n, detour);
+            for (size_t i = 0; i < calls.size() && i < 8 && !state; ++i) {
+                uint8_t g[menu_footer::kXhlGetterLen];
+                uint64_t s = 0;
+                if (copy_guarded(g, static_cast<uintptr_t>(calls[i]), sizeof g) &&
+                    menu_footer::xhl_state_getter(g, sizeof g, calls[i], &s))
+                    state = static_cast<uintptr_t>(s);
+            }
+            if (wt && g_win_file && wt != g_win_file && module_of(through_stub(wt)) == mod) win_to = wt;
+        }
+    }
+    g_xhl_state = state;
+    g_xhl_win.store(win_to);
+    g_xhl_line.store(line_to);
+    g_said_state = -2;
+    const bool was = g_xhl.exchange(xhl);
+    if (xhl)
+        logf(KILN_LOG_INFO, "ui: the main menu's footer: XHL-Core's footer line is at %s; Kiln's line names XHL-Core, and "
+                            "XHL-Core's line shows %s (%s)", w,
+             state ? "while XHL-Core reports a problem" : "as XHL-Core draws it: its state was not found",
+             win_to ? "it takes clicks" : g_win_file ? "XHL-Core did not patch the window call: no clicks"
+                                                     : "no clicks: the window call is not Kiln's");
+    else if (was)
+        logf(KILN_LOG_INFO, "ui: the main menu's footer: XHL-Core's footer line is gone; Kiln's line is its own again");
+    if (was != xhl) set_text();
+}
+
+// Each frame Kiln's copy runs (UI thread): XHL-Core's patches (they can come late: XHL-Core installs them from its own
+// thread) and whether the copy calls XHL-Core's line in this frame.
+void xhl_update() {
+    const uintptr_t lt = live_call(N.site), wt = live_call(N.win);
+    if (lt != g_seen_line || wt != g_seen_win) {
+        g_seen_line = lt;
+        g_seen_win = wt;
+        xhl_resolve(lt, wt);
+    }
+    if (!g_xhl.load(std::memory_order_relaxed)) {
+        g_follow.store(false, std::memory_order_relaxed);
+        return;
+    }
+    int32_t st = 0;
+    const bool known = g_xhl_state && copy_guarded(&st, g_xhl_state, 4);
+    const bool follow = menu_footer::follow_xhl(true, known, st);
+    g_follow.store(follow, std::memory_order_relaxed);
+    const int said = known ? (st != 0 ? 1 : 0) : -1;
+    if (said != g_said_state && g_xhl_state) {
+        g_said_state = said;
+        logf(KILN_LOG_INFO, "ui: the main menu's footer: XHL-Core %s", said == 1   ? "reports a problem: its red line shows under Kiln's"
+                                                                       : said == 0 ? "reports no problem: Kiln's line only"
+                                                                                   : "state unreadable: its line shows");
+    }
 }
 
 uint8_t* field(uint8_t* obj, int64_t f) { return obj + (f - N.text); }
@@ -268,13 +397,16 @@ void* __fastcall line_thunk(void* out, const GameText* text, const void* style, 
                                  "draws it (with another mod's line where one is installed) for the rest of this game");
         }
     }
-    return reinterpret_cast<LineFn>(N.line)(out, text, style, mode);
+    // the build number: through XHL-Core's line first while Kiln follows XHL-Core (it draws its line, then calls the game's)
+    const uintptr_t x = g_follow.load(std::memory_order_relaxed) ? g_xhl_line.load(std::memory_order_relaxed) : 0;
+    return reinterpret_cast<LineFn>(x ? x : N.line)(out, text, style, mode);
 }
 
 void __fastcall hk_footer() {
     const auto take = menu_footer::take(g_copy != nullptr, g_shown.load(std::memory_order_relaxed),
                                         g_mods.load(std::memory_order_relaxed), g_failed.load(std::memory_order_relaxed));
     if (take == menu_footer::Take::copy && live_check() && g_copy) {
+        xhl_update();
         g_copy();
         return;
     }

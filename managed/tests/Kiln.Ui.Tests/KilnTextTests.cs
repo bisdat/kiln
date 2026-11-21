@@ -121,6 +121,37 @@ public sealed class KilnTextTests : IDisposable
         Assert.Equal("other", KilnText.PluralForm("pt-pt", 0));
     }
 
+    [Theory]
+    // Russian (and Ukrainian, Belarusian): one 1, 21, 101 but not 11; few 2-4, 22-24 but not 12-14; many the rest
+    [InlineData("ru-ru", 1L, "one")] [InlineData("ru", 21L, "one")] [InlineData("ru", 101L, "one")] [InlineData("ru", 11L, "many")]
+    [InlineData("ru", 2L, "few")] [InlineData("ru", 4L, "few")] [InlineData("ru", 22L, "few")] [InlineData("ru", 12L, "many")]
+    [InlineData("ru", 14L, "many")] [InlineData("ru", 0L, "many")] [InlineData("ru", 5L, "many")] [InlineData("ru", 20L, "many")]
+    [InlineData("ru", 111L, "many")] [InlineData("ru", 112L, "many")] [InlineData("ru", -1L, "one")] [InlineData("uk-ua", 3L, "few")]
+    [InlineData("be", 25L, "many")]
+    // Polish: one only 1; few as Russian; many the rest (0, 5-21, 25-31, 12-14)
+    [InlineData("pl-pl", 1L, "one")] [InlineData("pl", 21L, "many")] [InlineData("pl", 2L, "few")] [InlineData("pl", 22L, "few")]
+    [InlineData("pl", 12L, "many")] [InlineData("pl", 0L, "many")] [InlineData("pl", 5L, "many")] [InlineData("pl", 102L, "few")]
+    [InlineData("pl", long.MinValue, "many")]
+    public void Slavic_plurals_have_few_and_many(string language, long n, string form) =>
+        Assert.Equal(form, KilnText.PluralForm(language, n));
+
+    [Fact]
+    public void A_russian_plural_uses_its_few_and_many_and_falls_back_to_other()
+    {
+        File("ru.json", """{ "native": { "footer": { "loaded": { "one": "{count} мод", "few": "{count} мода", "many": "{count} модов", "other": "{count} мода" } } } }""");
+        KilnText.Configure("ru-RU");
+        Assert.Equal("1 мод", KilnText.Plural("native.footer.loaded", 1, ("version", "1.0")));
+        Assert.Equal("3 мода", KilnText.Plural("native.footer.loaded", 3, ("version", "1.0")));
+        Assert.Equal("5 модов", KilnText.Plural("native.footer.loaded", 5, ("version", "1.0")));
+        Assert.Equal("21 мод", KilnText.Plural("native.footer.loaded", 21, ("version", "1.0")));
+        // a file with only one and other: few and many fall back to its .other
+        File("pl.json", """{ "native": { "footer": { "loaded": { "one": "{count} mod", "other": "{count} modów" } } } }""");
+        KilnText.Reload();
+        KilnText.Configure("pl-PL");
+        Assert.Equal("1 mod", KilnText.Plural("native.footer.loaded", 1, ("version", "1.0")));
+        Assert.Equal("2 modów", KilnText.Plural("native.footer.loaded", 2, ("version", "1.0")));
+    }
+
     [Fact]
     public void A_broken_file_is_skipped_and_english_stays()
     {
@@ -162,7 +193,50 @@ public sealed class KilnTextTests : IDisposable
         KilnText.Glyphs(false);                      // a Latin language never waits
         KilnText.Configure("de");
         Assert.False(KilnText.Gated);
-        Assert.True(KilnText.NeedsGlyphs("ja-jp") && KilnText.NeedsGlyphs("ko") && !KilnText.NeedsGlyphs("ru-ru"));
+        Assert.True(KilnText.NeedsGlyphs("ja-jp") && KilnText.NeedsGlyphs("ko") && !KilnText.NeedsGlyphs("pl-pl"));
+    }
+
+    [Fact]
+    public void A_cyrillic_language_waits_for_the_glyphs_of_the_games_default_font_group()
+    {
+        File("ru.json", """{ "native": { "menu": { "mods": "Моды" } }, "settings": { "look": { "look": "Вид" } } }""");
+        KilnText.Glyphs(false);                      // kiln.ui is still reading the game's Cyrillic font (Noto Serif)
+        KilnText.Configure("ru");
+        Assert.True(KilnText.Gated);
+        Assert.Equal("Look", KilnText.T("settings.look.look"));                          // the overlay: English, no "????"
+        Assert.Contains(KilnText.Native(), p => p.Key == "native.menu.mods" && p.Value == "Моды");  // the game draws these
+        KilnText.Glyphs(true);
+        Assert.False(KilnText.Gated);
+        Assert.Equal("Вид", KilnText.T("settings.look.look"));
+        Assert.True(KilnText.NeedsGlyphs("uk-UA") && KilnText.NeedsGlyphs("bg") && KilnText.NeedsGlyphs("sr-Cyrl") && KilnText.NeedsGlyphs("be"));
+        Assert.False(KilnText.NeedsGlyphs("sr-Latn") || KilnText.NeedsGlyphs("en-us") || KilnText.NeedsGlyphs("run"));
+        Assert.Equal(9, KilnText.GlyphLanguage("ru-RU"));
+        Assert.Equal(34, KilnText.GlyphLanguage("uk"));
+        Assert.Equal(24, KilnText.GlyphLanguage("bg-BG"));
+        Assert.Equal(9, KilnText.GlyphLanguage("kk"));
+    }
+
+    [Fact]
+    public void Native_texts_kiln_ui_draws_in_the_overlay_wait_for_the_glyphs_too()
+    {
+        File("zh-CN.json", """
+            { "native": { "menu": { "mods": "模组" }, "footer": { "loaded": { "other": "Kiln {version} - 已加载 {count} 个模组" } },
+                          "graphics": { "cap": "帧率上限 {fps} fps" }, "fallback": { "close": "按 {key} 关闭。" } } }
+            """);
+        KilnText.Glyphs(false);                      // kiln.ui is still reading the game's Chinese font, or could not
+        KilnText.Configure("zh-CN");
+        var gated = KilnText.Native().ToDictionary(p => p.Key, p => p.Value);
+        Assert.Equal("模组", gated["native.menu.mods"]);                                        // the game draws these
+        Assert.Equal("Kiln {version} - 已加载 {count} 个模组", gated["native.footer.loaded.one"]);
+        Assert.Equal(KilnText.English()["native.graphics.cap"], gated["native.graphics.cap"]);    // the overlay: English
+        Assert.Equal(KilnText.English()["native.fallback.close"], gated["native.fallback.close"]);
+        Assert.Equal(KilnText.English().Keys.Where(k => k.StartsWith(KilnText.NativePrefix, StringComparison.Ordinal)).Order(StringComparer.Ordinal),
+                     gated.Keys.Order(StringComparer.Ordinal));
+        KilnText.Glyphs(true);                       // the font joined the atlas
+        var ready = KilnText.Native().ToDictionary(p => p.Key, p => p.Value);
+        Assert.Equal("帧率上限 {fps} fps", ready["native.graphics.cap"]);
+        Assert.Equal("按 {key} 关闭。", ready["native.fallback.close"]);
+        Assert.Equal("模组", ready["native.menu.mods"]);
     }
 
     [Fact]

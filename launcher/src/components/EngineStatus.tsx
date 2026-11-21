@@ -3,11 +3,14 @@
 import { useQuery } from "@tanstack/react-query";
 import * as api from "../api/commands";
 import type { EngineStatus, GameId, Json, ModKind } from "../api/commands";
-import { useActiveProfile, usePoll, useProfile } from "../api/hooks";
+import { GAME_POLL_MS, useActiveProfile, usePoll, useProfile } from "../api/hooks";
 import { t, useT } from "../i18n";
 import { KIND_NAME, KIND_SHORT, KIND_TONE, MOD_KINDS } from "../api/kinds";
 import { Badge, Banner, EmptyState, Skeleton, errorText, type Tone } from "../ui";
 import { RestoreDataOffer } from "./RestoreDataOffer";
+import { SendToSupport } from "../community/parts";
+// the ShroudForge row in kiln mode
+import { SfiEngineRow, isSfiRow } from "./SfiEngineRow";
 
 type Obj = Record<string, Json>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
@@ -74,25 +77,27 @@ export const engineStatusKey = (gameId: GameId) => ["engine_status", gameId] as 
 /** One compact row per engine plugin that wrote a state file or has mods in the active profile. */
 export function EngineStatusList({ gameId }: { gameId: GameId }) {
   const t = useT();
-  const q = useQuery({ queryKey: engineStatusKey(gameId), queryFn: () => api.engineStatus(gameId), refetchInterval: usePoll(10_000) });
+  const q = useQuery({ queryKey: engineStatusKey(gameId), queryFn: () => api.engineStatus(gameId), refetchInterval: usePoll(GAME_POLL_MS) });
   const active = useActiveProfile(gameId);
   const profile = useProfile(active.data?.profileId);
   const inProfile = (k: ModKind) => (profile.data?.mods[k] ?? []).length > 0;
   if (q.isLoading) return <Skeleton lines={3} />;
   if (q.error) return <EmptyState title={t("engineStatus.unreadable")} hint={errorText(q.error)} />;
   const rows = (q.data ?? []).filter((s) => s.state !== null || !!s.error || inProfile(s.kind) || !!s.ownLoader || s.prerequisite?.available || (s.effects && s.effects.state !== "unavailable")
-    || (s.kind === "shroudforge" && !!s.startupFailed))
+    || (s.kind === "shroudforge" && (!!s.startupFailed || !!s.startupSkipped)))
     .sort((a, b) => MOD_KINDS.indexOf(a.kind) - MOD_KINDS.indexOf(b.kind));
   if (!rows.length) return <EmptyState title={t("engineStatus.none")} hint={t("engineStatus.noneHint")} />;
   return (
     <div className="k-list" aria-label={t("engineStatus.plugins")}>
-      {rows.map((s) => <EngineRow key={s.kind} s={s} />)}
+      {rows.map((s) => <EngineRow key={s.kind} s={s} gameId={gameId} />)}
     </div>
   );
 }
 
-export function EngineRow({ s }: { s: EngineStatus }) {
+export function EngineRow({ s, gameId }: { s: EngineStatus; gameId?: GameId }) {
   const t = useT();
+  // kiln-sfi's sfi.json, kiln_manage::sfi_state
+  if (isSfiRow(s)) return <SfiEngineRow s={s} />;
   const selfFile = s.kind === "shroudforge" ? s.ownLoader?.file : null;
   const selfHosted = !selfFile && s.kind === "shroudforge" && isObj(s.state) && s.state.mode === "self-hosted";
   const raw = selfFile || selfHosted ? null : headlineWord(s.state);
@@ -152,7 +157,13 @@ export function EngineRow({ s }: { s: EngineStatus }) {
       {/* ShroudForge's startup pass failed at the last start (sf_startup.rs): whoever ran it, with or without an own loader's note. */}
       {s.startupFailed && (
         <span className="k-hint k-tone-warn" data-startup-failed="" style={{ flexBasis: "100%" }}>
-          {s.startupFailed.text}.
+          {s.startupFailed.text}. {gameId && <SendToSupport from="banner" target={{ game: gameId }} kind="mod" />}
+        </span>
+      )}
+      {/* ShroudForge's pass failed in one mod and ran again without it (sf_startup.rs `skipped`): the others loaded. */}
+      {s.startupSkipped && (
+        <span className="k-hint k-tone-warn" data-startup-skipped={s.startupSkipped.skipped[0]?.id ?? ""} style={{ flexBasis: "100%" }}>
+          {s.startupSkipped.text}.
         </span>
       )}
     </div>

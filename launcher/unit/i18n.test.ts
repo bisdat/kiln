@@ -1,6 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { fill, flatten, formatNumber, lookupOrder, placeholders, pluralBase, rawIn } from "../src/i18n/format";
-import { currentLanguage, currentLocale, hasKey, languageName, languages, registerLocale, resolveLanguage, setLanguage, setUserLocales, t } from "../src/i18n";
+import { currentLanguage, currentLocale, formatLocale, hasKey, languageName, languages, registerLocale, resolveLanguage, setLanguage, setUserLocales, t } from "../src/i18n";
+import { fmtAgo, fmtTime } from "../src/ui/format";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import en from "../src/i18n/en.json";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -109,4 +112,33 @@ test("rich: elements in a text, in the translation's order", () => {
   const node = rich("languageSettings.filesBad", createElement("code", null, "zh-CN.json"), "not JSON");
   expect(renderToStaticMarkup(createElement("p", null, node))).toBe("<p>not JSON（<code>zh-CN.json</code>）</p>");
   expect(rich("languageSettings.filesBad", "a", "b")).toBe("{1}（{0}）".replace("{1}", "b").replace("{0}", "a"));
+});
+
+test("the shipped Simplified Chinese: in the list by its own name, .other for every count, English for a missing key, zh-CN dates and numbers", () => {
+  const zh = JSON.parse(readFileSync(join(import.meta.dir, "..", "src", "i18n", "zh-CN.json"), "utf8"));
+  registerLocale("zh-CN", zh); // what locales.ts does for every file beside en.json
+  expect(languages().map((l) => [l.tag, l.name])).toContainEqual(["zh-CN", "简体中文"]);
+  expect(resolveLanguage("system", ["zh-Hans-CN", "en-US"])).toBe("zh-hans-cn");
+  setLanguage("system");
+  setLanguage("zh-CN");
+  expect(currentLocale()).toBe("zh-CN");
+  expect(t("languageSettings.title")).toBe("语言");
+  // CLDR: Chinese has one form, so 0, 1 and 21 all take .other (the file has no .one)
+  for (const n of [0, 1, 21]) expect(t("languageSettings.filesRead", { count: n })).toBe(`已读取 ${n} 个翻译文件`);
+  expect(t("settings.art.icons", { count: 12345 })).toBe("12,345 个图标");
+  // a key the translation lacks shows in English
+  const partial = structuredClone(zh);
+  delete partial.languageSettings.title;
+  registerLocale("zh-CN", partial);
+  expect(t("languageSettings.title")).toBe("Language");
+  expect(t("languageSettings.launcher")).toBe("启动器");
+  // dates in Chinese while it is shown; the system's own formats with English, as before
+  expect(formatLocale()).toBe("zh-CN");
+  const at = Date.UTC(2026, 10, 18, 12, 0);
+  expect(fmtTime(at)).toStartWith("2026年11月18日");
+  expect(fmtAgo(at, at + 3 * 86400_000)).toBe(new Date(at).toLocaleDateString("zh-CN"));
+  expect(fmtAgo(at, at + 120_000)).toBe("2 分钟前");
+  setLanguage("en");
+  expect(formatLocale()).toBeUndefined();
+  expect(fmtTime(at)).toBe(new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }));
 });

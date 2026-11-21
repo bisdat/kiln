@@ -30,6 +30,8 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal readonly HashSet<uint> LayoutHas = new();
     internal bool InRunOriginal;
     internal ulong Session = 1;
+    // game_world_session per world kind where set (0: Session): a prediction storage's own session, say
+    internal readonly ulong[] KindSession = new ulong[3];
     internal bool NewDescriptor;
     // per-entity storage of fuel_setup's slots, row r: a Fuel attribute block {root, offset, flags, count, s32 current,
     // s32 max} (16 bytes) and a CurrentTransform (8 bytes; row 2 has none: an optional slot that is absent)
@@ -41,6 +43,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal bool FuelIsAttribute = true;
     internal bool RefuseUnwrapInSlice;
     internal int MarkResult = SystemsNative.Ok;
+    internal int MarkCalls;  // every game_slice_mark call, whatever it answered
     internal uint FuelSize = 16;
     internal bool NoRegistry;  // fuel_setup does not declare impact::AttributeRegistry
     internal ulong StepNow = 77;  // the step a fake slice says
@@ -236,7 +239,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static ulong WorldSession(uint kind) => F.Session;
+    private static ulong WorldSession(uint kind) => kind < 3 && F.KindSession[kind] != 0 ? F.KindSession[kind] : F.Session;
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static uint EcsCaps() => 4;  // KILN_WORLD_CAP_BIND_PROGRAM
@@ -392,6 +395,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Mark(SystemsNative.Slice* s, ulong* iter, int list, int i)
     {
+        F.MarkCalls++;
         if (list is not (SystemsNative.ListWrite or SystemsNative.ListWriteOpt)) return SystemsNative.InvalidArgument;
         if (F.MarkResult != SystemsNative.Ok) return F.MarkResult;
         F.Marks.Add((*iter, list, i));

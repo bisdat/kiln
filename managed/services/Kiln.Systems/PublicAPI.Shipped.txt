@@ -258,6 +258,7 @@ Kiln.WrapStats.Slices.init -> void
 Kiln.WrapStats.Threads.get -> int
 Kiln.WrapStats.Threads.init -> void
 Kiln.WrapStats.WrapStats(long Slices, long Entities, double Microseconds, long Faults, long Overruns, int Threads) -> void
+const Kiln.Systems.PredictionCapability = "systems.wraps.prediction" -> string!
 override Kiln.ProgramOptions.Equals(object? obj) -> bool
 override Kiln.ProgramOptions.GetHashCode() -> int
 override Kiln.ProgramOptions.ToString() -> string!

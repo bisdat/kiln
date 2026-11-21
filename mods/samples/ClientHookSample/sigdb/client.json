@@ -1,0 +1,33 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "ClientHookSample's own fragment (prefix 'client-hook-sample/'), resolved against the running game client like Kiln's own definitions. ItemVolume: OptS32 GetItemVolume(const ItemInfo* item) with the result through a hidden buffer (the game client carries the server-world code; it runs while this client hosts and the game asks an item's volume). Unique on client 26430625 (enshrouded.exe 5d9ef2f1) at 0x41af40 (tools/sigport/sigdb_check.py). A game update that moves or changes it turns sig/client-hook-sample/ItemVolume off and the hook is refused with the reason: update this file, then the mod works again.",
+  "symbols": {
+    "client-hook-sample/ItemVolume": {
+      "find": [
+        {
+          "pattern": "40 53 48 83 EC 20 48 8B D9 48 85 D2 75 ?? C7 01 12 00 00 00"
+        }
+      ],
+      "sig": {
+        "conv": "win64",
+        "sret": "OptS32",
+        "args": [
+          {
+            "name": "item",
+            "type": "keen::ItemInfo*"
+          }
+        ],
+        "abi": {
+          "reads": [
+            "rcx",
+            "rdx"
+          ],
+          "stack": [],
+          "ret": "rax"
+        },
+        "invoke": "any"
+      }
+    }
+  }
+}

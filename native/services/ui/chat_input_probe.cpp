@@ -1,27 +1,36 @@
 // SPDX-License-Identifier: MIT
 // Chat history (GitHub issue 44, first built by bisdat): Up/Down in the game's HUD and Social chat field recall lines
 // the player sent; commands are kept in kiln/data/kiln.ui/chat-history.json. Off unless kiln.json "ui":
-// {"chatHistory": true}; diagnostics through the environment (chat_input_probe_install). Game side:
+// {"chatHistory": true}; Tab completion (pull request 73) is on unless {"chatCompletion": false}; diagnostics through the environment (chat_input_probe_install). Game side:
 // docs/re/chat-input.md; player side: docs/kiln/chat-history.md. Every game call and read is scoped to the two chat
 // call sites of TextInputProcess, on the game's UI thread; the window thread only queues keys (ChatInputSink).
 #include <windows.h>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
+#include <algorithm>
+#include <deque>
+#include <mutex>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "chat_history.h"
+#include "chat_completion_text.h"
 #include "chat_focus.h"
 #include "chat_keys.h"
+#include "chat_setting.h"
 #include "chat_store.h"
 #include "kiln_hook.hpp"
 #include "ui.h"
 
 namespace kui {
+std::atomic<uint32_t> g_chat_completion_demand{0};
+uint32_t g_chat_completion_cleanup_frames = 0; // UI thread: let the overlay clear hover state after chat closes
 namespace {
 
 kiln::RawHook g_input;
@@ -29,6 +38,63 @@ uintptr_t g_hud_ret = 0, g_social_ret = 0;
 uintptr_t g_state_fn = 0, g_set_text_fn = 0;
 std::atomic<bool> g_hud_seen{false}, g_social_seen{false};
 std::atomic<bool> g_history_on{false};
+std::atomic<bool> g_completion_on{false};
+// Read only on the game's UI thread. Never let the overlay render thread
+// dereference a game widget or its native editor.
+uintptr_t g_rect_fn = 0;
+int64_t g_frame_arg = 0, g_viewport = 0, g_ppu = 0;
+bool g_rect_metrics = false;
+using RectFn = const float*(__fastcall*)(void*);
+struct CompletionSnapshot {
+    bool focused = false;
+    uint32_t field = 0, revision = 0, cursor = 0;
+    std::string text;
+    float raw[4]{}, pixels[4]{};
+    bool has_rect = false;
+};
+struct PendingEdit {
+    uint32_t field = 0, revision = 0;
+    std::string expected, replacement;
+};
+std::mutex g_completion_mu;
+CompletionSnapshot g_completion_snapshot;
+std::deque<chat_keys::Action> g_completion_actions;
+PendingEdit g_pending_edit;
+bool g_pending_valid = false;
+std::atomic<uint32_t> g_completion_edit_log_count{0};
+
+// No chat text, player identity, or candidate names in these diagnostics.
+void completion_edit_log(const char* stage, uint32_t a, uint32_t b = 0, uint32_t c = 0) {
+    if (g_completion_edit_log_count.fetch_add(1, std::memory_order_relaxed) < 24)
+        logf(KILN_LOG_INFO, "ui: chat completion: edit %s a=%u b=%u c=%u", stage, a, b, c);
+}
+
+void completion_action(chat_keys::Action action) {
+    bool queued = false;
+    {
+        std::lock_guard lock(g_completion_mu);
+        if (g_completion_actions.size() < 32) {
+            g_completion_actions.push_back(action);
+            queued = true;
+        }
+    }
+    completion_edit_log("action-queued", static_cast<uint32_t>(action), queued ? 1u : 0u);
+}
+
+// Unicode codepoints are the game's UTF-32 cursor units. We only complete
+// at the end of the current line; cursor-in-middle is deferred to a later PR.
+uint32_t codepoints(std::string_view bytes) {
+    uint32_t n = 0;
+    for (unsigned char c : bytes) if ((c & 0xC0) != 0x80) ++n;
+    return n;
+}
+
+bool safe_line(std::string_view bytes) {
+    // Snapshotting an empty editor must clear old completion candidates.
+    // History::valid alone intentionally rejects empty history entries.
+    return chat_completion_text::valid(bytes);
+}
+
 std::atomic<bool> g_diagnose_on{false};
 std::atomic<bool> g_trace_on{false};
 std::atomic<uint32_t> g_key_log_count{0};
@@ -40,6 +106,15 @@ std::atomic<bool> g_manual_text_edit{false};
 std::atomic<bool> g_window_blurred{false};
 std::atomic<bool> g_ime_composing{false};  // window thread: between WM_IME_STARTCOMPOSITION and its end
 chat_keys::Router g_keys;
+void invalidate_completion_snapshot() {
+    std::lock_guard lock(g_completion_mu);
+    g_completion_snapshot.focused = false;
+    g_completion_snapshot.has_rect = false;
+    g_pending_valid = false;
+    g_completion_actions.clear();
+    g_keys.completion(false, false, false);
+}
+
 chat_history::History g_history;
 chat_history::DraftCapture g_hud_draft, g_social_draft;
 chat_focus::Grace g_focus_grace;
@@ -53,6 +128,8 @@ std::string g_last_applied;
 bool g_set_text_pending = false;
 
 constexpr uint64_t kMaxEditBytes = 1024;
+// Completion-specific offsets are captured by chat.ui.completion in sigdb.
+// History's existing chat.ui.input layout remains independent.
 
 // The game's layout, from sigdb (chatui.json, feature chat.ui.input; docs/re/chat-input.md), read once at install.
 struct Layout {
@@ -60,6 +137,8 @@ struct Layout {
     uintptr_t edit = 0;       // state + edit: the field's editor (EditSetText's second argument)
     uintptr_t editing = 0;    // state + editing: a byte, set while the field has typing focus
     uintptr_t buffer = 0;     // widget + buffer: pointer to the caller's chat string (StringHead)
+    uintptr_t node = 0;       // widget + node: layout for UiNodeRect, captured from TextInputState
+    uintptr_t cursor = 0;     // editor + cursor: UTF-32 cursor, captured twice from EditSetText
 } L;
 
 struct GameText { const char* data; uint64_t length; uint64_t hash; };
@@ -142,6 +221,113 @@ bool widget_text(void* widget, std::string* out) {
     return true;
 }
 
+// The native UI thread owns every game pointer. Overlay and network code
+// receive only value snapshots and may queue a full-line replacement.
+// Keep Win32 SEH isolated from the std::string and lock lifetime in
+// completion_capture. ClangCL 19's x86 assembly printer crashed while
+// compiling the combined SEH/C++ function in CI runs 44269918037 and
+// 44270356834. This is the same guarded game call and 4-float copy.
+__declspec(noinline) bool game_node_rect(uintptr_t node, float* rect) {
+    if (!node || !rect || !g_rect_fn) return false;
+    __try {
+        const float* raw = reinterpret_cast<RectFn>(g_rect_fn)(reinterpret_cast<void*>(node));
+        return raw && game_copy(reinterpret_cast<const char*>(raw), reinterpret_cast<char*>(rect),
+                                4 * sizeof(float));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+void completion_capture(void* widget, void* state, bool hud) {
+    if (!g_completion_on.load(std::memory_order_acquire) || !editing(state)) return;
+    std::string line;
+    if (!widget_text(widget, &line) || !safe_line(line)) {
+        invalidate_completion_snapshot();
+        return;
+    }
+    uint32_t cursor = 0;
+    if (!game_read(reinterpret_cast<const uint8_t*>(state) + L.edit + L.cursor, &cursor) ||
+        cursor > codepoints(line)) {
+        invalidate_completion_snapshot();
+        return;
+    }
+    uintptr_t node = 0;
+    float rect[4]{};
+    const bool valid = g_rect_fn && game_read(reinterpret_cast<const uint8_t*>(widget) + L.node, &node) &&
+        node && game_node_rect(node, rect);
+    if (!valid || !std::isfinite(rect[0]) || !std::isfinite(rect[1]) ||
+        !std::isfinite(rect[2]) || !std::isfinite(rect[3]) ||
+        rect[2] <= 0 || rect[3] <= 0 || rect[2] > 4000 || rect[3] > 4000) {
+        invalidate_completion_snapshot();
+        return;
+    }
+    std::lock_guard lock(g_completion_mu);
+    auto& snap = g_completion_snapshot;
+    const uint32_t field = hud ? 1u : 2u;
+    if (!snap.focused || snap.field != field || snap.text != line || snap.cursor != cursor)
+        ++snap.revision;
+    snap.focused = true; snap.field = field; snap.text = std::move(line); snap.cursor = cursor;
+    for (int i = 0; i < 4; ++i) snap.raw[i] = rect[i];
+    snap.has_rect = true;
+}
+
+void completion_before(void* widget, bool hud) {
+    if (!g_completion_on.load(std::memory_order_acquire)) return;
+    void* state = game_state(widget);
+    if (!editing(state)) return;
+    PendingEdit pending;
+    bool queued = false, matching_snapshot = false;
+    {
+        std::lock_guard lock(g_completion_mu);
+        if (g_pending_valid) {
+            pending = std::move(g_pending_edit);
+            g_pending_valid = false;
+            queued = true;
+            const auto& snap = g_completion_snapshot;
+            // The last completed TextInputProcess provided this authoritative
+            // UTF-8 text and cursor. The caller-owned StringHead is NOT a
+            // reliable source before the next TextInputProcess runs.
+            matching_snapshot = snap.has_rect &&
+                chat_completion_text::can_apply_editor_snapshot(
+                    snap.field, snap.revision, snap.text, snap.cursor,
+                    pending.field, pending.revision, pending.expected,
+                    snap.focused, true, false, false);
+        }
+    }
+    if (queued) {
+        const bool same_field = pending.field == (hud ? 1u : 2u);
+        const bool no_user_edit = !g_manual_text_edit.load(std::memory_order_acquire) &&
+            !g_ime_composing.load(std::memory_order_acquire) &&
+            !g_window_blurred.load(std::memory_order_acquire);
+        uint32_t cursor = 0;
+        const bool cursor_matches = game_read(
+            reinterpret_cast<const uint8_t*>(state) + L.edit + L.cursor, &cursor) &&
+            cursor == codepoints(pending.expected);
+        const bool valid_replacement = safe_line(pending.replacement) &&
+            !pending.replacement.empty() && pending.replacement.front() == '/';
+        const bool allowed = same_field && matching_snapshot && no_user_edit &&
+            cursor_matches && valid_replacement;
+        const bool applied = allowed && game_set_text(
+            reinterpret_cast<uint8_t*>(state) + L.edit,
+            pending.replacement.data(), pending.replacement.size());
+        completion_edit_log("apply",
+            (same_field ? 1u : 0u) | (matching_snapshot ? 2u : 0u) |
+            (no_user_edit ? 4u : 0u) | (cursor_matches ? 8u : 0u) |
+            (valid_replacement ? 16u : 0u), applied ? 1u : 0u);
+        if (applied) {
+            g_last_applied = pending.replacement;
+            g_set_text_pending = true; // post-call widget verification in history_after
+            g_history.edited();
+        }
+    }
+    if (!g_history_on.load(std::memory_order_acquire)) {
+        chat_keys::Action action{};
+        while (g_keys.take(action))
+            if (action != chat_keys::Action::Older && action != chat_keys::Action::Newer)
+                completion_action(action);
+    }
+}
+
 size_t controls(std::string_view line) {
     size_t n = 0;
     for (const unsigned char c : line)
@@ -162,25 +348,22 @@ int env_switch(const char* name) {
 }
 bool env_enabled(const char* name) { return env_switch(name) == 1; }
 
-// The player's switch: kiln.json "ui": {"chatHistory": true} (the launcher's Settings, "Kiln"), read once at start.
-// Off when the file, the section or the key is missing or unreadable.
-bool kiln_json_chat_history() {
+// The player's switches: kiln.json "ui": {"chatHistory": true} or {"chatCompletion": false} (the launcher's Settings,
+// "Kiln"), read once at start. The setting's default (`fallback`) when the file, the section or the key is missing or
+// unreadable (chat_setting.h).
+bool kiln_json_chat_option(const char* key, bool fallback) {
     char buffer[4096]{};
     size_t length = 0;
     if (g_api->path(KILN_PATH_KILN, buffer, sizeof buffer, &length) != KILN_OK || !length || length >= sizeof buffer)
-        return false;
+        return fallback;
     try {
         const std::u8string utf8(reinterpret_cast<const char8_t*>(buffer), length);
         std::ifstream in(std::filesystem::path(utf8) / "kiln.json", std::ios::binary);
-        if (!in) return false;
-        const auto doc = nlohmann::json::parse(in, nullptr, false, true);  // JSONC, as the core reads it
-        if (!doc.is_object()) return false;
-        const auto ui = doc.find("ui");
-        if (ui == doc.end() || !ui->is_object()) return false;
-        const auto on = ui->find("chatHistory");
-        return on != ui->end() && on->is_boolean() && on->get<bool>();
+        if (!in) return fallback;
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        return chat_setting(text, key, fallback);
     } catch (...) {
-        return false;
+        return fallback;
     }
 }
 // <game>/kiln/data/kiln.ui/chat-history.json, beside imgui.ini (ui.cpp): kiln.ui's own data, per game folder.
@@ -260,6 +443,10 @@ void history_before(void* widget, bool hud) {
     }
     chat_keys::Action action{};
     while (g_keys.take(action)) {
+        if (action != chat_keys::Action::Older && action != chat_keys::Action::Newer) {
+            completion_action(action);
+            continue;
+        }
         const bool browsing_before = g_history.browsing();
         // Critical: before the input call, widget_text may still be empty
         // even when the player's unsent draft is visible. TextInputProcess
@@ -342,7 +529,7 @@ void history_after(void* widget, void* result, bool hud) {
                  readable && chat_history::History::valid(sent) ? 1u : 0u,
                  readable && chat_history::History::sensitive(sent) ? 1u : 0u,
                  readable ? controls(sent) : 0);
-        if (event == 1 && readable && !g_diagnose_on.load(std::memory_order_relaxed)) {
+        if (event == 1 && readable && g_history_on.load(std::memory_order_relaxed) && !g_diagnose_on.load(std::memory_order_relaxed)) {
             const size_t before = g_history.count();
             const bool persisted_changed = g_history.submit(sent);
             if (persisted_changed) save_history();
@@ -363,6 +550,7 @@ void history_after(void* widget, void* result, bool hud) {
     }
     if (!editing(state)) return;
     g_editing_in_frame = true;
+    completion_capture(widget, state, hud);
     // Refresh the live draft ONLY after TextInputProcess synchronizes the
     // caller-owned widget, and never while history browsing is active.
     if (!g_history.browsing()) {
@@ -389,6 +577,7 @@ void* __fastcall hk_input(void* widget, void* result, const GameText* label, uin
     const bool hud = caller == g_hud_ret;
     const bool social = caller == g_social_ret;
     const bool scoped = hud || social;
+    if (scoped && g_completion_on.load(std::memory_order_relaxed)) completion_before(widget, hud);
     if (g_history_on.load(std::memory_order_relaxed) && scoped)
         history_before(widget, hud);
     void* const out = g_input.call<void*>(widget, result, label, mode);
@@ -397,6 +586,7 @@ void* __fastcall hk_input(void* widget, void* result, const GameText* label, uin
     else if (social && !g_social_seen.exchange(true))
         logf(KILN_LOG_INFO, "ui: chat input probe: native Social chat call observed (call-site confirmation)");
     if (scoped && (g_history_on.load(std::memory_order_relaxed) ||
+                   g_completion_on.load(std::memory_order_relaxed) ||
                    g_diagnose_on.load(std::memory_order_relaxed)))
         history_after(widget, result, hud);
     return out;
@@ -420,6 +610,21 @@ bool read_layout() {
     L.buffer = static_cast<uintptr_t>(buffer);
     return true;
 }
+
+// Completion's editor and geometry offsets are optional. A game version that
+// fails either capture disables completion; history keeps its verified layout.
+bool read_completion_layout() {
+    if (!g_api->feature(KilnStr{"chat.ui.completion", sizeof("chat.ui.completion") - 1}))
+        return false;
+    int64_t node = 0, cursor = 0;
+    if (!cst("chatui/widget.node", &node) || !cst("chatui/edit.cursor", &cursor))
+        return false;
+    if (node <= 0 || node >= 0x200 || cursor <= 0 || cursor >= 0x2000)
+        return false;
+    L.node = static_cast<uintptr_t>(node);
+    L.cursor = static_cast<uintptr_t>(cursor);
+    return true;
+}
 } // namespace
 
 namespace {
@@ -427,21 +632,55 @@ namespace {
 // The window procedure has already folded raw input and key messages into one transition per key.
 
 // Typed text ends a history browse (chat_keys::inserts_text); a transient difference in the widget's buffer never does.
-void on_text(uint32_t ch) {
+bool on_text(uint32_t ch) {
+    // Tab's WM_CHAR is separate from the raw key. Swallow it only if the
+    // shared router took that key for completion. Plain chat is unchanged.
+    if (ch == '\t') {
+        if (g_keys.take_tab_character()) return true;
+        // Some Proton keyboard routes deliver WM_CHAR for Tab without a
+        // matching raw VK_TAB event (input.cpp skips WM_KEYDOWN once raw
+        // keyboard input was seen). Recover ONLY inside a focused native
+        // chat with live suggestions; never steal ordinary chat or Alt+Tab.
+        if (!g_ime_composing.load(std::memory_order_acquire) &&
+            !g_diagnose_on.load(std::memory_order_acquire)) {
+            uint32_t mods = 0;
+            if (GetKeyState(VK_CONTROL) & 0x8000) mods |= 1u;
+            if (GetKeyState(VK_SHIFT) & 0x8000) mods |= 2u;
+            if (GetKeyState(VK_MENU) & 0x8000) mods |= 4u;
+            if (g_keys.key(VK_TAB, mods, true)) {
+                g_keys.take_tab_character(); // this WM_CHAR was the Tab
+                static std::atomic<unsigned> reported{0};
+                if (reported.fetch_add(1, std::memory_order_relaxed) < 4)
+                    logf(KILN_LOG_INFO, "ui: chat completion: recovered Tab through WM_CHAR (focused suggestions)");
+                return true;
+            }
+        }
+    }
     if (chat_keys::inserts_text(ch) && g_history_on.load(std::memory_order_acquire) && g_keys.focused())
         g_manual_text_edit.store(true, std::memory_order_release);
+    return false;
 }
 
 bool on_key(uint32_t vk, uint32_t mods, bool down, bool captured) {
-    if (!g_history_on.load(std::memory_order_acquire) && !g_diagnose_on.load(std::memory_order_acquire))
-        return false;
+    if (!g_history_on.load(std::memory_order_acquire) &&
+        !g_completion_on.load(std::memory_order_acquire) &&
+        !g_diagnose_on.load(std::memory_order_acquire)) return false;
     // While an IME composes, Up/Down pick its candidates and Backspace edits the composition: none of it is ours.
     const bool composing = g_ime_composing.load(std::memory_order_acquire);
     // Keys that change the text without a character (chat_keys::edits_text) end a browse as typing does.
     if (down && !captured && !composing && chat_keys::edits_text(vk, mods) &&
         g_history_on.load(std::memory_order_relaxed) && g_keys.focused())
         g_manual_text_edit.store(true, std::memory_order_release);
-    const bool kept = !captured && !composing && g_history_on.load(std::memory_order_acquire) && g_keys.key(vk, mods, down);
+    const bool kept = !captured && !composing &&
+        (g_history_on.load(std::memory_order_acquire) || g_completion_on.load(std::memory_order_acquire)) &&
+        g_keys.key(vk, mods, down);
+    if (down && vk == VK_TAB && g_completion_on.load(std::memory_order_relaxed)) {
+        static std::atomic<unsigned> reported{0};
+        if (reported.fetch_add(1, std::memory_order_relaxed) < 6)
+            logf(KILN_LOG_INFO,
+                 "ui: chat completion: Tab keydown mods=%u focus=%u captured=%u ime=%u consumed=%u",
+                 mods, g_keys.focused() ? 1u : 0u, captured ? 1u : 0u, composing ? 1u : 0u, kept ? 1u : 0u);
+    }
     if (down && (vk == VK_UP || vk == VK_DOWN) && g_trace_on.load(std::memory_order_relaxed) &&
         g_key_log_count.fetch_add(1) < 24)
         logf(KILN_LOG_INFO, "ui: chat history trace: key %s mods=%u focus=%u captured=%u ime=%u consumed=%u",
@@ -457,17 +696,49 @@ void on_blur() {
     g_manual_text_edit.store(false, std::memory_order_release);
     g_ime_composing.store(false, std::memory_order_release);
     g_window_blurred.store(true, std::memory_order_release);
+    {
+        std::lock_guard lock(g_completion_mu);
+        g_completion_snapshot.focused = false;
+        g_completion_actions.clear();
+        g_pending_valid = false;
+    }
 }
 
 const ChatInputSink kSink{&on_key, &on_text, &on_ime, &on_blur};
 } // namespace
 
 // UI thread, after the game finishes each GameUiFrame.
-void chat_input_frame_end() {
-    if (!g_history_on.load(std::memory_order_acquire) && !g_diagnose_on.load(std::memory_order_acquire)) return;
+void chat_input_frame_end(uintptr_t sys10) {
+    if (!g_history_on.load(std::memory_order_acquire) &&
+        !g_completion_on.load(std::memory_order_acquire) &&
+        !g_diagnose_on.load(std::memory_order_acquire)) return;
     const bool active = g_editing_in_frame && !g_window_blurred.exchange(false);
     // Never swallow gameplay arrows when the native chat edit lacks focus.
     g_keys.focus(active);
+    if (g_completion_on.load(std::memory_order_relaxed)) {
+        std::lock_guard lock(g_completion_mu);
+        auto& snap = g_completion_snapshot;
+        if (!active) {
+            snap.focused = false;
+            snap.has_rect = false;
+            g_pending_valid = false;
+            g_completion_actions.clear();
+            g_keys.completion(false, false, false);
+        } else if (g_rect_metrics && snap.focused && snap.has_rect &&
+                   sys10 > static_cast<uintptr_t>(g_frame_arg)) {
+            const uintptr_t sys = sys10 - static_cast<uintptr_t>(g_frame_arg);
+            float viewport[4]{}, ppu = 0;
+            if (game_copy(reinterpret_cast<const char*>(sys + g_viewport),
+                          reinterpret_cast<char*>(viewport), sizeof viewport) &&
+                game_read(reinterpret_cast<const void*>(sys + g_ppu), &ppu) &&
+                std::isfinite(ppu) && ppu > 0 && ppu < 128) {
+                snap.pixels[0] = viewport[0] + snap.raw[0] * ppu;
+                snap.pixels[1] = viewport[1] + snap.raw[1] * ppu;
+                snap.pixels[2] = snap.raw[2] * ppu;
+                snap.pixels[3] = snap.raw[3] * ppu;
+            } else snap.has_rect = false;
+        }
+    }
     // A single game UI frame may temporarily fail to render either chat
     // control during a transition. That must not erase the saved draft.
     // Exit events explicitly reset the session above; for a real close or
@@ -483,7 +754,79 @@ void chat_input_frame_end() {
         if (was_browsing && g_trace_on.load(std::memory_order_relaxed))
             logf(KILN_LOG_INFO, "ui: chat history trace: navigation reset after sustained loss of chat focus");
     }
+    {
+        std::lock_guard lock(g_completion_mu);
+        const auto& snap = g_completion_snapshot;
+        const bool visible = g_completion_on.load(std::memory_order_relaxed) && active &&
+            snap.focused && snap.has_rect && !snap.text.empty() && snap.text[0] == '/';
+        if (visible) g_chat_completion_cleanup_frames = 3;
+        else if (g_chat_completion_cleanup_frames > 0) --g_chat_completion_cleanup_frames;
+        g_chat_completion_demand.store(
+            visible || g_chat_completion_cleanup_frames > 0 ? 1u : 0u,
+            std::memory_order_relaxed);
+    }
     g_editing_in_frame = false;
+}
+
+// Only managed Kiln.Ui may call this, enforced by ui.cpp. All game edit
+// functions execute on the scoped UI thread in completion_before(), NEVER here.
+KilnResult chat_completion_io(KilnUiChatCompletion* io) {
+    if (!io || io->size < sizeof(KilnUiChatCompletion)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!g_completion_on.load(std::memory_order_acquire)) return KILN_ERR_UNAVAILABLE;
+    switch (io->operation) {
+    case 1: { // read: one stable snapshot and one queued navigation action
+        std::lock_guard lock(g_completion_mu);
+        const auto& s = g_completion_snapshot;
+        if (!s.focused || !s.has_rect || s.text.size() > 256) return KILN_ERR_UNAVAILABLE;
+        io->focused = 1; io->field = s.field; io->revision = s.revision;
+        io->cursor = s.cursor; io->text_len = static_cast<uint32_t>(s.text.size());
+        std::memset(io->text, 0, sizeof io->text);
+        std::memcpy(io->text, s.text.data(), s.text.size());
+        io->x = s.pixels[0]; io->y = s.pixels[1];
+        io->width = s.pixels[2]; io->height = s.pixels[3];
+        io->action = 0;
+        if (!g_completion_actions.empty()) {
+            io->action = static_cast<uint32_t>(g_completion_actions.front());
+            g_completion_actions.pop_front();
+            completion_edit_log("action-delivered", io->action);
+        }
+        return KILN_OK;
+    }
+    case 2: { // set suggestion/list state from the render thread
+        // Turning suggestions on must name the snapshot they belong to: frame_end may have just cleared them on a
+        // focus loss, and a late call from the render thread must not re-arm Tab for a field it no longer sees.
+        // Turning them off is always safe.
+        std::lock_guard lock(g_completion_mu);
+        const auto& snap = g_completion_snapshot;
+        if (io->suggestions == 0 && io->list_open == 0) {
+            g_keys.completion(true, false, false);
+            return KILN_OK;
+        }
+        if (!snap.focused || io->field != snap.field || io->revision != snap.revision) return KILN_ERR_UNAVAILABLE;
+        g_keys.completion(true, io->suggestions != 0, io->list_open != 0);
+        return KILN_OK;
+    }
+    case 3: { // replace: expected text, matching revision and focused field
+        if (io->text_len > 256 || io->replacement_len > 256) return KILN_ERR_INVALID_ARGUMENT;
+        const std::string expected(io->text, io->text_len), replacement(io->replacement, io->replacement_len);
+        if (!safe_line(expected) || !safe_line(replacement) || replacement.empty() || replacement.front() != '/')
+            return KILN_ERR_INVALID_ARGUMENT;
+        std::lock_guard lock(g_completion_mu);
+        const auto& snap = g_completion_snapshot;
+        if (!snap.focused || io->field != snap.field || io->revision != snap.revision ||
+            expected != snap.text) return KILN_ERR_UNAVAILABLE;
+        g_pending_edit = PendingEdit{snap.field, snap.revision, expected, replacement};
+        g_pending_valid = true;
+        completion_edit_log("replace-queued", snap.field, snap.revision);
+        g_keys.completion(true, false, false);
+        return KILN_OK;
+    }
+    case 4: // reset UI candidates; never turn history off
+        g_keys.completion(true, false, false);
+        return KILN_OK;
+    default:
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
 }
 
 // on_unload (ui.cpp): the last list is written and the writer thread joined, while the process still runs.
@@ -491,19 +834,25 @@ void chat_input_exit() {
     if (chat_store::Saver* saver = g_saver.load(std::memory_order_acquire)) saver->stop();
 }
 
-// Chat history is off unless the player switches it on (kiln.json ui.chatHistory). The environment is for
+// Chat history is off unless the player switches it on (kiln.json ui.chatHistory); Tab completion is on unless the
+// player switches it off (ui.chatCompletion: false, since 0.2.0-dev.29.22). The environment is for
 // diagnostics: KILN_CHAT_HISTORY=1/0 overrides the switch, KILN_CHAT_HISTORY_TRACE=1 adds counts to kiln.log (never
 // text), KILN_CHAT_HISTORY_DIAG=1 watches keys and submits without taking a key, KILN_CHAT_INPUT_PROBE=1 only confirms
 // the two call sites. Nothing is hooked while all of them are off.
 bool chat_input_probe_install() {
     const bool diag = env_enabled("KILN_CHAT_HISTORY_DIAG");
     const int forced = env_switch("KILN_CHAT_HISTORY");
-    const bool switched = forced < 0 && kiln_json_chat_history();
+    const bool switched = forced < 0 && kiln_json_chat_option("chatHistory", false);
+    const int comp_forced = env_switch("KILN_CHAT_COMPLETION");
+    const bool comp_switched = comp_forced < 0 && kiln_json_chat_option("chatCompletion", true);
+    bool completion = (comp_forced == 1 || comp_switched) && !diag;
     const char* why = forced >= 0 ? "KILN_CHAT_HISTORY" : "kiln.json ui.chatHistory";
     const bool history = (forced == 1 || switched) && !diag;  // diagnostics take precedence: never swallow keys
     const bool probe = env_enabled("KILN_CHAT_INPUT_PROBE");
-    if (!history && !diag && !probe) {
-        logf(KILN_LOG_INFO, "ui: chat history off (%s)", forced == 0 ? "KILN_CHAT_HISTORY=0" : "kiln.json ui.chatHistory");
+    if (!history && !completion && !diag && !probe) {
+        logf(KILN_LOG_INFO, "ui: chat history and completion off (%s, %s)",
+             forced == 0 ? "KILN_CHAT_HISTORY=0" : "kiln.json ui.chatHistory",
+             comp_forced == 0 ? "KILN_CHAT_COMPLETION=0" : "kiln.json ui.chatCompletion");
         return false;
     }
     if (!g_api->feature(KilnStr{"chat.ui.input", sizeof("chat.ui.input") - 1})) {
@@ -523,22 +872,42 @@ bool chat_input_probe_install() {
         logf(KILN_LOG_WARN, "ui: chat input probe requested, but scoped call sites were not resolved");
         return false;
     }
-    if ((history || diag) && (!symbol("chatui/TextInputState", &g_state_fn) ||
-                              (history && !symbol("chatui/EditSetText", &g_set_text_fn)))) {
+    if ((history || completion || diag) && (!symbol("chatui/TextInputState", &g_state_fn) ||
+                              ((history || completion) && !symbol("chatui/EditSetText", &g_set_text_fn)))) {
         logf(KILN_LOG_WARN, "ui: chat history unavailable: edit state/replace symbols unresolved");
         return false;
     }
+    // Exact same verified chat UI hook, plus a safe rectangle translation.
+    // Refuse only completion if the optional geometry signatures are missing.
+    if (completion) {
+        completion = read_completion_layout() &&
+            symbol("ui/UiNodeRect", &g_rect_fn) &&
+            cst("ui/sys.frame_arg", &g_frame_arg) &&
+            cst("ui/sys.viewport", &g_viewport) &&
+            cst("ui/sys.px_per_unit", &g_ppu) &&
+            g_frame_arg >= 0 && g_viewport >= 0 && g_ppu >= 0 &&
+            g_frame_arg < 0x10000 && g_viewport < 0x10000 && g_ppu < 0x10000;
+        g_rect_metrics = completion;
+        if (!completion) logf(KILN_LOG_WARN,
+            "ui: chat completion unavailable: sigdb cursor/node or native rect/viewport unverified; history unaffected");
+    }
+    if (!history && !completion && !diag && !probe) return false;
     if (!g_input.install(g_api, g_owner, input, reinterpret_cast<void*>(&hk_input), "chatui/TextInputProcess")) {
         logf(KILN_LOG_WARN, "ui: chat input hook unavailable: %s", g_input.error());
         return false;
     }
-    if (history || diag) input_set_chat_sink(&kSink);
+    if (history || completion || diag) input_set_chat_sink(&kSink);
+    g_keys.history(history);
+    g_completion_on.store(completion, std::memory_order_release);
     if (history) {
+        if (completion) logf(KILN_LOG_INFO, "ui: chat completion on with chat history (native scoped hook)");
         load_history();
         g_trace_on.store(env_enabled("KILN_CHAT_HISTORY_TRACE"), std::memory_order_release);
         g_history_on.store(true, std::memory_order_release);
         logf(KILN_LOG_INFO, "ui: chat history on (%s): Up/Down in the HUD and Social chat, %zu command(s) kept from "
              "earlier games", why, g_history.count());
+    } else if (completion) {
+        logf(KILN_LOG_INFO, "ui: chat completion on: native HUD and Social input, no history (unless enabled separately)");
     } else if (diag) {
         g_trace_on.store(true, std::memory_order_release);
         g_diagnose_on.store(true, std::memory_order_release);

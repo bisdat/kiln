@@ -1,0 +1,10 @@
+<Project>
+  <!-- Kiln tasks from a real mod (its own collectible load context), for the host's tests: a task that waits for its
+       cancellation, one that throws, and one that computes on a worker and applies on the tick. -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>sample-tasks</KilnModId>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

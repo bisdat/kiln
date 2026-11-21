@@ -55,6 +55,7 @@
 #include "services/kiln_profile.h"
 #include "services/kiln_progress.h"
 #include "../../../plugins/compat/original_code_service.h"
+#include "client_building_input.h"
 #include "service.h"
 
 namespace kiln::caps {
@@ -133,6 +134,8 @@ std::atomic<bool> g_hooks{false};  // read by refresh_tick() before it takes the
 bool g_verified = false;
 std::string g_safe_idle;
 std::vector<std::string> g_feature_names;
+// Mod fragments' rows (fragment_rows): a fragment's id -> the names its last load reported, as the core's feature rows.
+std::map<std::string, std::vector<std::string>, std::less<>> g_fragment_rows;
 std::atomic<uint8_t> g_tick_seen{0};  // bit 0 tick::installed(), bit 1 tick::lifecycle()
 
 // ---- small helpers ----
@@ -390,6 +393,15 @@ void set_feature_locked(const std::string& f, std::vector<Event>& ev) {
     set_core_locked(f, kFeature, v.state, v.reason, v.text, "sigdb", 0, ev);
 }
 
+// Takes back the core's feature report of a mod fragment's row (a client gate's report of that name stays).
+void drop_fragment_row_locked(const std::string& name, std::vector<Event>& ev) {
+    auto it = g_names.find(name);
+    if (it == g_names.end()) return;
+    const size_t before = it->second.reports.size();
+    std::erase_if(it->second.reports, [](const Report& r) { return r.owner == 0 && r.kind == kFeature; });
+    if (it->second.reports.size() != before) refresh_locked(it, ev);
+}
+
 // world.stop_drain.<kind>: the core's guarantee about a world kind's jobs at its STOPPING (tick::stop_drain).
 constexpr const char* kDrainRow[KILN_WORLD_KINDS] = {"world.stop_drain.server", "world.stop_drain.prediction",
                                                      "world.stop_drain.client"};
@@ -425,8 +437,46 @@ void set_drain_rows_locked(std::vector<Event>& ev) {
     }
 }
 
+// kiln.tasks' pool (services/tasks.cpp sets the source): tasks.pool follows the pool's health. The state is read
+// lock-free at every registry call, so a change (workers that started late, or every one lost) reaches the row and
+// its subscribers on the calling thread, never under the pool's locks. -1: no pool (kiln.tasks did not start, or a
+// host without it); 0: no worker can run work; 1: available.
+constexpr int kTasksIdle = -2;
+std::atomic<int (*)()> g_tasks_pool{nullptr};
+std::atomic<int> g_tasks_seen{kTasksIdle};
+int tasks_pool_state() {
+    const auto state = g_tasks_pool.load(std::memory_order_acquire);
+    return state ? state() : -1;
+}
+void set_tasks_pool_locked(int state, const std::string& safe_idle, std::vector<Event>& ev) {
+    g_tasks_seen.store(state, std::memory_order_release);
+    if (state == kTasksIdle)
+        set_core_locked("tasks.pool", kService, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
+                        "not started in safe idle: " + safe_idle, "core", 0, ev);
+    else if (state < 0)
+        set_core_locked("tasks.pool", kService, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
+                        "kiln.tasks did not start; kiln.log says why", "core", 0, ev);
+    else if (state == 0)
+        set_core_locked("tasks.pool", kService, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED,
+                        "no task worker can run (a start failed or every worker was lost; retried every second); "
+                        "kiln.log says why", "core", 0, ev);
+    else
+        set_core_locked("tasks.pool", kService, KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "task workers running", "core", 0,
+                        ev);
+}
+void refresh_tasks_pool() {
+    if (!g_rows_built.load(std::memory_order_acquire) || !g_hooks) return;
+    const int state = tasks_pool_state();
+    if (state == g_tasks_seen.load(std::memory_order_acquire)) return;
+    op([&](std::vector<Event>& ev) {
+        set_tasks_pool_locked(state, {}, ev);
+        return 0;
+    });
+}
+
 // The tick hook faulted (or came back) since the rows were built: its rows follow.
 void refresh_tick() {
+    refresh_tasks_pool();
     if (!g_rows_built.load(std::memory_order_acquire) || !g_hooks) return;
     const uint8_t bits = tick_bits();
     if (bits == g_tick_seen.load(std::memory_order_acquire)) return;
@@ -844,6 +894,46 @@ void core_rows(bool hooks, bool verified, const std::string& safe_idle) {
                 set_core_locked(s.name, kService, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
                                 "not started in safe idle: " + safe_idle, "core", 0, ev);
         }
+        set_tasks_pool_locked(hooks ? tasks_pool_state() : kTasksIdle, safe_idle, ev);  // kiln.tasks' pool
+        // kiln.hooks' read_original and code_state read the exe file's code (sigdb's verified file view). sigdb's
+        // live-code fallback is not the original code, so they are off there. Static: the view is made once.
+        const bool hooks_service = std::any_of(services.begin(), services.end(), [](const Svc& s) {
+            return s.name == "kiln.hooks" && s.available;
+        });
+        const bool original_code = hooks && hooks_service && sigdb::code_from_disk();
+        for (const char* name : {"hooks.read_original", "hooks.code_state"}) {
+            const uint32_t reason = !hooks ? KILN_CAP_REASON_POLICY : !hooks_service ? KILN_CAP_REASON_SERVICE_MISSING :
+                original_code ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SYMBOL_MISSING;
+            const std::string text = !hooks ? "not started in safe idle: " + safe_idle : !hooks_service ?
+                "kiln.hooks did not start" : original_code ? "verified relocated executable file code" :
+                "verified executable file code unavailable; live fallback is not original code";
+            set_core_locked(name, kService, original_code ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE,
+                            reason, text, "core", 0, ev);
+        }
+        // kiln.client's building input (docs/kiln/services/client-building-input.md): the
+        // game client only, with kiln.client running and its input producer bound to this build. Static: the producer
+        // is bound while kiln.client starts, or not at all.
+        {
+            const bool client_service = std::any_of(services.begin(), services.end(), [](const Svc& s) {
+                return s.name == KILN_CLIENT_SERVICE && s.available;
+            });
+            const char* why = nullptr;
+            const bool producer = building_input::bound(&why);
+            const Verdict v =
+                !hooks ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, "not started in safe idle: " + safe_idle}
+                : image().side != KILN_SIDE_CLIENT
+                    ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE, "building input belongs to a connected game client"}
+                : !client_service ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING, "kiln.client did not start"}
+                : !producer       ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING, why}
+                                  : Verdict{KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "the input producer is bound to this game build"};
+            set_core_locked("client.building_input", kService, v.state, v.reason, v.text, "core", 0, ev);
+        }
+        // kiln.net's Steam peer-to-peer messages (docs/kiln/services/net-steam-messages.md). kiln-net.dll
+        // reports the row itself (pending, available, or why Steam is missing); in safe idle it does not load, so the
+        // core says why. Its "did not start" is service_dll's.
+        if (!hooks)
+            set_core_locked("net.steam_messages", kService, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
+                            "not started in safe idle: " + safe_idle, "core", 0, ev);
         for (const auto& file : idle_dlls) {
             const std::string name = dll_row_name(file);
             if (name.empty()) continue;
@@ -903,6 +993,52 @@ void owner_gone(KilnOwner owner) {
     }
 }
 
+// kiln.hooks loaded (or reloaded) mod fragment `id` (load_symbols: Symbols.LoadShipped, a native mod): its features
+// become the core's rows the way Kiln's own sigdb features are, "sig/<id>/<Name>" for every described symbol (source
+// sigdb; off with the reason as sigdb words it). Rows of an earlier load of `id` that this one no longer has go. A name
+// Kiln's own sigdb reports (a fragment id that shadows a Kiln area) stays Kiln's.
+void fragment_rows(std::string_view id) {
+    try {
+        const std::vector<sigdb::FeatureRow> rows = sigdb::fragment_features(id);  // outside the registry's lock
+        op([&](std::vector<Event>& ev) {
+            std::vector<std::string> names;
+            for (const sigdb::FeatureRow& r : rows) {
+                if (!name_ok(r.name) ||
+                    std::find(g_feature_names.begin(), g_feature_names.end(), r.name) != g_feature_names.end())
+                    continue;
+                const Verdict v = !g_hooks ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, g_safe_idle}
+                                : r.ok     ? Verdict{KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, {}}
+                                           : Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING, r.problem};
+                set_core_locked(r.name, kFeature, v.state, v.reason, v.text, "sigdb", 0, ev);
+                names.push_back(r.name);
+            }
+            auto it = g_fragment_rows.find(id);
+            if (it != g_fragment_rows.end()) {
+                for (const std::string& n : it->second)
+                    if (std::find(names.begin(), names.end(), n) == names.end()) drop_fragment_row_locked(n, ev);
+                g_fragment_rows.erase(it);
+            }
+            if (!names.empty()) g_fragment_rows.emplace(std::string(id), std::move(names));
+            return 0;
+        });
+    } catch (...) {
+    }
+}
+
+// kiln.hooks unloaded mod fragment `id` (unload_symbols: the mod unloads): its rows go.
+void fragment_gone(std::string_view id) {
+    try {
+        op([&](std::vector<Event>& ev) {
+            auto it = g_fragment_rows.find(id);
+            if (it == g_fragment_rows.end()) return 0;
+            for (const std::string& n : it->second) drop_fragment_row_locked(n, ev);
+            g_fragment_rows.erase(it);
+            return 0;
+        });
+    } catch (...) {
+    }
+}
+
 // KilnApi.feature() answered false (rare): the tick rows follow a hook that faulted since boot.
 void feature_off(std::string_view) {
     try {
@@ -945,11 +1081,38 @@ void service_dll(const std::filesystem::path& file, std::string_view status, con
             r.source = "core";
             g_dll_failed[name] = r;
             set_core_locked(name, kDll, r.state, r.reason, r.text, r.source, 0, ev);
+            // kiln.net's Steam peer-to-peer messages: without kiln-net.dll there are none
+            if (name == "kiln.net")
+                set_core_locked("net.steam_messages", kDll, r.state, r.reason, "kiln.net did not start: " + r.text,
+                                r.source, 0, ev);
             return 0;
         });
     } catch (...) {
     }
 }
+
+// load_one: a kiln/services DLL of another build loads without Kiln-internal tables; row "<its row>.internal" says so.
+void service_internal_refused(const std::filesystem::path& file, const std::string& text) {
+    const std::string name = dll_row_name(file);
+    if (name.empty()) return;
+    try {
+        op([&](std::vector<Event>& ev) {
+            Report r;
+            r.kind = kDll;
+            r.state = KILN_CAP_UNAVAILABLE;
+            r.reason = KILN_CAP_REASON_SERVICE_OLDER;
+            r.text = cut(text, KILN_CAP_TEXT_MAX);
+            r.source = "core";
+            g_dll_failed[name + ".internal"] = r;
+            set_core_locked(name + ".internal", kDll, r.state, r.reason, r.text, r.source, 0, ev);
+            return 0;
+        });
+    } catch (...) {
+    }
+}
+
+// services/tasks.cpp at its init: where tasks.pool reads the pool's health from (see refresh_tasks_pool).
+void tasks_pool_source(int (*state)()) { g_tasks_pool.store(state, std::memory_order_release); }
 
 }  // namespace kiln::caps
 

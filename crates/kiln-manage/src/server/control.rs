@@ -173,7 +173,10 @@ fn loader_folder(server: &Path, path: &Path) -> bool {
 /// The kinds a server takes: Kiln's managed and native mods, then every engine kind with a server folder.
 fn server_kinds() -> impl Iterator<Item = ModKind> {
     // External-host companions are placed by profile activation, not this legacy plugin-root sync path.
-    ModKind::ALL.into_iter().filter(|k| matches!(k, ModKind::Kiln | ModKind::Native) || (k.is_engine() && k.engine().is_some()))
+    // Packages for Enshrouded ModLoader are made for the game client only (kiln-dllmod starts none on a server): no
+    // server folder, not synced.
+    ModKind::ALL.into_iter().filter(|k| matches!(k, ModKind::Kiln | ModKind::Native)
+        || (k.is_engine() && k.engine().is_some() && crate::engine_mods::server_root(*k, Path::new("")).is_some()))
 }
 
 /// The folders of `kind` in `dir` (a root several engines may share: each folder is checked for the kind).

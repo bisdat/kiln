@@ -164,8 +164,13 @@ pub struct InstallState {
     pub receipt: Option<InstallReceipt>,
     /// What `dinput8.dll` is now.
     pub proxy: Option<ProxyClass>,
-    /// Receipt files whose sha256 changed since the install (game-relative paths).
+    /// Receipt files whose sha256 changed since the install (game-relative paths). Missing files count too.
     pub modified: Vec<String>,
+    /// The receipt files of [`modified`](Self::modified) that are not in the game folder at all (game-relative paths,
+    /// config files never): deleted by hand, or removed or quarantined by an antivirus. A reinstall of the installed
+    /// bundle puts them back. Empty from older backends.
+    #[serde(default)]
+    pub missing_files: Vec<String>,
     /// A newer bundle in `<data>/runtime/` (its version).
     pub upgrade_available: Option<String>,
     /// Components of the installed bundle (when it is in `<data>/runtime/`) missing from the receipt that a
@@ -286,10 +291,22 @@ pub fn modified_files(game_dir: &Path, receipt: &InstallReceipt) -> Vec<String> 
         .collect()
 }
 
+/// Of `modified` (from [`modified_files`]), the files that are not in `game_dir` at all, as opposed to there with other
+/// bytes. Only "not found" counts: a file the system refuses to read (a lock, a permission) is there, so it stays a
+/// changed file.
+pub fn missing_files(game_dir: &Path, modified: &[String]) -> Vec<String> {
+    modified
+        .iter()
+        .filter(|p| matches!(std::fs::metadata(game_dir.join(p)), Err(e) if e.kind() == std::io::ErrorKind::NotFound))
+        .cloned()
+        .collect()
+}
+
 pub fn status(dirs: &DataDirs, install: &GameInstall) -> Result<InstallState> {
     let receipt = read_receipt(&install.path)?;
     let proxy = crate::pe::classify_proxy(&install.path.join(PROXY)).ok();
     let modified = receipt.as_ref().map(|r| modified_files(&install.path, r)).unwrap_or_default();
+    let missing_files = missing_files(&install.path, &modified);
     let side = side_of(install);
     let bundles = receipt.as_ref().and_then(|_| crate::bundle::list(dirs).ok());
     let missing_parts = receipt
@@ -321,7 +338,7 @@ pub fn status(dirs: &DataDirs, install: &GameInstall) -> Result<InstallState> {
             .map(|b| b.version)
     });
     crate::filecache::flush();
-    Ok(InstallState { installed: receipt.is_some(), receipt, proxy, modified, upgrade_available, missing_parts, switch_back: None })
+    Ok(InstallState { installed: receipt.is_some(), receipt, proxy, modified, missing_files, upgrade_available, missing_parts, switch_back: None })
 }
 
 /// The components `requested` (None: defaults) for `side`, with everything they require.
@@ -583,7 +600,8 @@ fn undo(steps: Vec<Step>) -> Result<()> {
 fn rollback_error(steps: Vec<Step>, original: Error, staging: &Path) -> Error {
     match undo(steps) {
         Ok(()) => original,
-        Err(e) => Error::new(original.code, format!("{}; {}. Recovery files remain in {} and kiln/backups", original.message, e.message, staging.display())),
+        // the first failure's detail stays (a file Windows refused: crate::blocked)
+        Err(e) => Error { message: format!("{}; {}. Recovery files remain in {} and kiln/backups", original.message, e.message, staging.display()), ..original },
     }
 }
 
@@ -594,25 +612,26 @@ fn copy_into_backup(game_dir: &Path, backup_rel: &str, rel: &str, mirror: Option
     if let Some(p) = dst.parent() {
         std::fs::create_dir_all(p).map_err(io_at(p, "creating"))?;
     }
-    copy_new(&src, &dst)?;
+    copy_new(&src, &dst, rel)?;
     if let Some(m) = mirror {
         let mdst = m.join(rel);
         if let Some(p) = mdst.parent() {
             std::fs::create_dir_all(p).map_err(io_at(p, "creating"))?;
         }
-        copy_new(&src, &mdst)?;
+        copy_new(&src, &mdst, rel)?;
     }
     Ok(dst_rel)
 }
 
-fn copy_new(src: &Path, dst: &Path) -> Result<()> {
-    let mut input = std::fs::File::open(src).map_err(io_at(src, "reading"))?;
-    let mut output = std::fs::OpenOptions::new().write(true).create_new(true).open(dst).map_err(io_at(dst, "creating"))?;
+/// Copies `src` to a new file `dst`; `rel` names the file in the game folder (a DLL Windows refuses: crate::blocked).
+fn copy_new(src: &Path, dst: &Path, rel: &str) -> Result<()> {
+    let mut input = std::fs::File::open(src).map_err(crate::blocked::io_at(src, "reading", rel))?;
+    let mut output = std::fs::OpenOptions::new().write(true).create_new(true).open(dst).map_err(crate::blocked::io_at(dst, "creating", rel))?;
     let result = std::io::copy(&mut input, &mut output).and_then(|_| output.sync_all());
     if let Err(e) = result {
         drop(output);
         let _ = std::fs::remove_file(dst);
-        return Err(io_at(dst, "copying to")(e));
+        return Err(crate::blocked::io_at(dst, "copying to", rel)(e));
     }
     Ok(())
 }
@@ -757,7 +776,18 @@ fn install_report_adding(dirs: &DataDirs, install: &GameInstall, bundle: &Path, 
     let staging = kiln.join(format!(".staging-{}", rand_suffix()?));
     let result = install_staged(dirs, install, bundle, &bundle_sha, &manifest, &choice, &files, old, options, &staging, progress);
     if result.is_ok() || !has_previous(&staging) { let _ = std::fs::remove_dir_all(&staging); }
-    result
+    result.map_err(|e| started_meanwhile(install, e))
+}
+
+/// A file Windows refused ([`crate::blocked`]) while the game runs: the game started during the install and may be
+/// what holds it, so it is no antivirus hint but the game's own case, with the installer's words after it.
+fn started_meanwhile(install: &GameInstall, e: Error) -> Error {
+    let Some(b) = crate::blocked::of(&e) else { return e };
+    match crate::proc::find_game(install) {
+        Ok(Some(p)) => Error::new(ErrorCode::GameRunning, format!("{} started during the install and may hold {}; quit it and install again ({})", install.exe, b.path, e.message))
+            .with_detail(serde_json::json!({ "pid": p.pid })),
+        _ => e,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -819,7 +849,7 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                     r.backup.as_deref().unwrap_or("(none recorded)")));
                 continue;
             };
-            copy_new(&backup, &target)?;
+            copy_new(&backup, &target, rel)?;
             steps.push(Step::Placed { target: target.clone(), previous: None });
             if file_sha(&target).is_none_or(|(h, _)| h != r.sha256) {
                 return Err(Error::new(ErrorCode::HashMismatch, format!("recovered ShroudForge {rel} does not match its original")));
@@ -909,7 +939,7 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                     std::fs::create_dir_all(p).map_err(io_at(p, "creating"))?;
                 }
                 // create_new prevents a race from replacing a file that appeared after slot selection.
-                copy_new(&proxy_path, &dst)?;
+                copy_new(&proxy_path, &dst, &chain_rel)?;
                 if let Err(e) = std::fs::remove_file(&proxy_path) {
                     let _ = std::fs::remove_file(&dst);
                     return Err(io_at(&proxy_path, "moving the proxy from")(e));
@@ -1019,6 +1049,20 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                 continue; // user-editable: installed only when missing
             }
             if current.as_ref().is_some_and(|(h, _)| *h == f.sha256) {
+                // (kiln-eml-inspect: an earlier install's helper that lost its execute bits gets them
+                // back, only when it is Kiln's own file: listed with these bytes and this component in the receipt, and
+                // not a file that was there before Kiln (adopted). Proven again on its open handle before the chmod.)
+                #[cfg(unix)]
+                if crate::bundle::executable(&f.path, &f.component)
+                    && old_files.get(f.path.as_str()).is_some_and(|o| o.sha256 == f.sha256 && o.component.as_deref() == Some(f.component.as_str()))
+                    && !replaced.iter().any(|r| r.path == f.path && r.action == ReplacedAction::Adopted)
+                {
+                    match crate::bundle::restore_executable(&target, &f.sha256) {
+                        Ok(true) => progress.report(None, &format!("{} can run again (its execute permission was missing)", f.path)),
+                        Ok(false) => {}
+                        Err(e) => progress.report(None, &format!("{}: its execute permission could not be restored ({e}); Kiln's archive inspector cannot run from this folder", f.path)),
+                    }
+                }
                 continue; // already these bytes
             }
             if let Some(p) = target.parent() {
@@ -1029,7 +1073,7 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                 if let Some(p) = hold.parent() {
                     std::fs::create_dir_all(p).map_err(io_at(p, "creating"))?;
                 }
-                std::fs::rename(&target, &hold).map_err(io_at(&target, "moving aside"))?;
+                std::fs::rename(&target, &hold).map_err(crate::blocked::io_at(&target, "moving aside", &f.path))?;
                 Some(hold)
             } else {
                 None
@@ -1039,7 +1083,7 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                 if let Some(p) = &previous {
                     let _ = std::fs::rename(p, &target);
                 }
-                return Err(io_at(&target, "installing")(e));
+                return Err(crate::blocked::io_at(&target, "installing", &f.path)(e));
             }
             steps.push(Step::Placed { target, previous });
             progress.report(Some(0.5 + 0.4 * (i + 1) as f32 / total as f32), &format!("installed {}", f.path));
@@ -1067,16 +1111,16 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                         Some((i, ReplacedAction::Replaced)) if replaced[i].backup.is_some() => {
                             let b = game_dir.join(replaced[i].backup.as_deref().expect("checked"));
                             if file_sha(&b).is_some_and(|(bh, _)| bh == replaced[i].sha256) {
-                                steps.push(Step::Edited { target: p.clone(), previous: Some(std::fs::read(&p).map_err(io_at(&p, "reading"))?) });
-                                std::fs::copy(&b, &p).map_err(io_at(&p, "restoring"))?;
+                                steps.push(Step::Edited { target: p.clone(), previous: Some(std::fs::read(&p).map_err(crate::blocked::io_at(&p, "reading", &f.path))?) });
+                                std::fs::copy(&b, &p).map_err(crate::blocked::io_at(&p, "restoring", &f.path))?;
                                 replaced.remove(i);
                             } else {
                                 kept_obsolete.push(f.path.clone());
                             }
                         }
                         _ => {
-                            steps.push(Step::Edited { target: p.clone(), previous: Some(std::fs::read(&p).map_err(io_at(&p, "reading"))?) });
-                            std::fs::remove_file(&p).map_err(io_at(&p, "removing"))?;
+                            steps.push(Step::Edited { target: p.clone(), previous: Some(std::fs::read(&p).map_err(crate::blocked::io_at(&p, "reading", &f.path))?) });
+                            std::fs::remove_file(&p).map_err(crate::blocked::io_at(&p, "removing", &f.path))?;
                         }
                     },
                     Some(_) => kept_obsolete.push(f.path.clone()),
@@ -1220,7 +1264,16 @@ pub fn uninstall_report(dirs: &DataDirs, install: &GameInstall, progress: &mut d
             )));
         }
     }
+    // (an unfinished kiln-mode activation is settled before a copy is removed: rolled forward or back
+    // exactly as the next activation settles it, so unplace never meets half-placed game files)
+    #[cfg(feature = "sfi-scan")]
+    let settled = crate::profile::sfi::settle(dirs, install)?;
     let mut report = UninstallReport { placements: crate::engine_mods::unplace(dirs, game_dir)?, ..Default::default() };
+    #[cfg(feature = "sfi-scan")]
+    for note in settled {
+        progress.report(None, &note);
+        report.warnings.push(note);
+    }
     // native mods placed in the game folder itself (game_files): Kiln's files go, Ultimate ASI Loader as well
     let files = crate::game_files::unplace(game_dir)?;
     report.placements.removed.extend(files.removed);
@@ -1313,6 +1366,10 @@ pub fn uninstall_report(dirs: &DataDirs, install: &GameInstall, progress: &mut d
     let _ = std::fs::remove_dir(&chain_dir);
     let receipt_path = game_dir.join(crate::paths::game::RECEIPT);
     std::fs::remove_file(&receipt_path).map_err(io_at(&receipt_path, "removing"))?;
+    // (a refused kiln-mode activation, as settling left it, goes with Kiln as a deactivation removes it:
+    // a reinstall does not start with the planned start refused; nothing fails the uninstall now)
+    #[cfg(feature = "sfi-scan")]
+    let _ = crate::sfi_activation::supersede_refused(game_dir);
     if let Ok(Some(rec)) = crate::game::record(dirs, &receipt.install_id) {
         let _ = crate::game::write_record(dirs, &rec.install, None);
     }

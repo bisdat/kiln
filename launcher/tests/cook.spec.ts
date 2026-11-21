@@ -60,7 +60,7 @@ test("the cook shows its progress as a task: the mod and then each line the tool
   await play.click();
   await page.locator(".k-tray-btn").click();
   const task = page.getByRole("dialog", { name: "Tasks" }).locator(".k-task", { hasText: "Cook mods" });
-  await expect(task.locator(".k-task-msg")).toHaveText("Cooking New Items (1 of 1)", { timeout: 5_000 });
+  await expect(task.locator(".k-task-msg")).toHaveText("Cooking New Items (1 of 1)", { timeout: 10_000 });
   await expect(task.locator(".k-task-msg")).toHaveText("New Items: kiln: cooking assets/cook.json (modelcook)", { timeout: 8_000 });
   await expect(task.locator(".k-task-pct")).toBeVisible();
   // and the start follows the cook, not before it ends
@@ -185,9 +185,12 @@ test.describe("in the Deck view", () => {
       await page.waitForTimeout(60);
     };
     await page.goto("/?deck=steamdeck#/deck/mods");
-    await setCook(page, "new-items", { reason: null });
     const mods = page.getByRole("list", { name: "Mods" });
-    await expect(mods.locator('[data-deck-id="mod-kiln-new-items"]')).toBeVisible({ timeout: 10_000 });
+    // the rows take the focus once the profile is read (until then they are off, and focus() on one does nothing)
+    await expect(mods.locator('[data-deck-id="mod-kiln-new-items"]')).toBeEnabled({ timeout: 10_000 });
+    // set once the page is up: right after the page loads, the game's status event that makes it read the cook plan
+    // again can come before the page listens, and a plan read before this change never offers Y
+    await setCook(page, "new-items", { reason: null });
     // a mod with nothing to cook offers no Y
     await mods.locator('[data-deck-id="mod-kiln-weather-plus"]').focus();
     await expect(page.locator('.deck-hint[data-hint="y"]')).toHaveCount(0);

@@ -37,6 +37,14 @@ int main() {
     assert(h.persisted() == std::vector<std::string>({"/third", "/fourth"}));
     assert(History::valid("/say café"));
     assert(History::valid("/say 你好"));
+    // Phase 1b reuses this decoder before UTF-32 cursor accounting and
+    // before native game text replacement. Check malformed edge cases.
+    assert(!History::valid(std::string("/\xc3", 2)));   // truncated two-byte codepoint
+    assert(!History::valid(std::string("/\x80", 2)));   // unexpected continuation
+    assert(!History::valid(std::string("/\xe0\x80\x80", 4))); // overlong
+    assert(!History::valid(std::string("/\xed\xa0\x80", 4))); // UTF-16 surrogate
+    assert(!History::valid(std::string("/\xf4\x90\x80\x80", 5))); // out of Unicode range
+    assert(!History::valid("/bad\tinput")); // control characters
     assert(!History::valid("\xc0\x80"));
     assert(!History::valid("\xed\xa0\x80"));
     assert(!History::valid("\xf4\x90\x80\x80"));

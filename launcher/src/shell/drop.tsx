@@ -15,7 +15,16 @@ import { Banner, Button, KeyValue, Modal, Skeleton, Toggle, errorText, runTask, 
 import { useInstallPrompt } from "./firstRun";
 import { detailsAction, leftOutLine, names as nameList, staysIfDetails, summarize, usePickProfile } from "./importResult";
 import { notifyActivation, notifyAdd } from "./notices";
+import { addTitle } from "./addWords";
 import { t, useT } from "../i18n";
+import { useCrucibleUi } from "../crucible/state";
+
+/** (dev.30) A dropped .kilnpack opens the pack preview (pack_inspect / pack_install), never the Library import. */
+function takePackFiles(paths: string[]): string[] {
+  const packs = paths.filter((p) => /\.kilnpack$/i.test(p));
+  if (packs.length) useCrucibleUi.getState().openPreview({ kind: "file", path: packs[0] });
+  return paths.filter((p) => !packs.includes(p));
+}
 
 /** "Night Owl", "Night Owl and Dawn Lamp", "3 mods". */
 function names(m: { name: string }[]): string {
@@ -25,6 +34,14 @@ function names(m: { name: string }[]): string {
 /** A modpack zip dropped on the window, waiting for the player's yes. */
 export const useDropModpack = create<{ offers: { game: GameInstall; path: string }[] }>(() => ({ offers: [] }));
 function offerModpacks(game: GameInstall, paths: string[]) {
+  // (dev.30) a zip holding a Crucible pack (format 2) opens the pack preview; server modpacks (format 1) stay as they are
+  void Promise.all(paths.map((p) => api.packPeekFormat(p).catch(() => 1 as const))).then((formats) => {
+    paths.forEach((p, i) => { if (formats[i] === 2) useCrucibleUi.getState().openPreview({ kind: "file", path: p }); });
+    offerServerModpacks(game, paths.filter((_, i) => formats[i] !== 2));
+  });
+}
+function offerServerModpacks(game: GameInstall, paths: string[]) {
+  if (!paths.length) return;
   useDropModpack.setState((s) => ({ offers: [...s.offers, ...paths.filter((path) => !s.offers.some((o) => o.game.id === game.id && o.path === path)).map((path) => ({ game, path }))] }));
 }
 
@@ -140,7 +157,8 @@ export function useAddMods(): (paths: string[], target?: GameInstall) => Promise
         leftOutLine(sum) ?? "",
       ].filter(Boolean).join(" ");
       const d = detail(t("shell.drop.headingAddedOn"));
-      toast.ok(t("shell.catalogInstall.added", { name: names(r.added) }), more || t("shell.drop.onNextPlay"), { actions: [{ label: t("common.undo"), onClick: () => void undo(r, game.id) }, ...detailsAction(d)], ...staysIfDetails(d) });
+      // "Updated Night Owl: 1.2.0 → 1.3.0" when the profile had another version of it (29.18, inbox 90)
+      toast.ok(addTitle(r), more || t("shell.drop.onNextPlay"), { actions: [{ label: t("common.undo"), onClick: () => void undo(r, game.id) }, ...detailsAction(d)], ...staysIfDetails(d) });
     } else if (r.already.length) {
       const d = detail(t("shell.drop.headingAlreadyOn"));
       toast.info(t("shell.drop.alreadyOn", { names: names(r.already), count: r.already.length }), leftOutLine(sum), { actions: detailsAction(d), ...staysIfDetails(d) });
@@ -157,7 +175,9 @@ export function useAddMods(): (paths: string[], target?: GameInstall) => Promise
     }
     return r;
   };
-  return (paths, target) => {
+  return (all, target) => {
+    const paths = takePackFiles(all);
+    if (!paths.length) return Promise.resolve(null);
     const game = target ?? ref.current.game;
     const key = JSON.stringify([game?.id, [...new Set(paths)].sort()]);
     const pending = pendingAdds.get(qc) ?? new Map<string, Promise<AddReport | null>>();

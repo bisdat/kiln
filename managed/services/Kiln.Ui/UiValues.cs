@@ -196,6 +196,9 @@ internal static unsafe class UiValueBridge
         public ItemId Item;
         public UiBarProvider Provider = null!;
         public UiTooltipProvider? Lines;
+        public UiTooltipLinesProvider? NativeLines;  // Ui.Tooltip.AddLines
+        public TooltipPlace Place;
+        public UiTooltipValuesProvider? Values;  // Ui.Tooltip.AddValues
         public ModContext? Mod;
         public string ModName = "kiln";
         public ulong Handle;
