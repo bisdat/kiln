@@ -5,7 +5,7 @@ import { mockStoppedFile, readMockStop, type StopScript } from "./mockStoppedSta
 // a fake game that "runs" after Play. Fixtures are built on schema/examples (the contract examples).
 // Commands without a mock reject with not_implemented, like the wave-0 Rust stubs.
 import type {
-  Activation, AddReport, BootSnapshot, BundlePart, RunSide, AddedMod, AdminEndpoint, AppInfo, BootJson, BootState, ConfigDocument, CookJob, CookReason, CookedMod, ConfigFileInfo, ConfigTarget, CrashReport, ReportFinding, ReportSaved, Detected, Distribution,
+  Activation, AddReport, BootSnapshot, EmfDepProblem, BundlePart, RunSide, AddedMod, AdminEndpoint, AppInfo, BootJson, BootState, ConfigDocument, CookJob, CookReason, CookedMod, ConfigFileInfo, ConfigTarget, CrashReport, ReportFinding, ReportSaved, Detected, Distribution,
   FoundMod, FoundReport, GameInstall, GameStatus, ImportReport, InstallReceipt, InstallResult, InstallState, Json, KilnError, LastServer, LaunchRequest, NewerKilnMod, GraphicsToolNote, GraphicsStepAside, GraphicsStateFile,
   LaunchResult, LauncherSettings, RenderInfo, SandboxInfo, DesktopInfo, LibraryEntry, LibraryRef, LibraryVersion, RollbackReport, VersionRef, TakenOver, LogFile, LogTarget, ModKind, ModpackInstallRequest, ModpackInstallResult, ModsJson,
   NativeJson, NativePlanEntry, NativeUserState, PreStart, Profile, ProfileChange, ProfileMod, ProfileSummary, ProxyClass, Rejection, RemoveReport, ResolvePreview, SettingsRemoval, RuntimeBundle, SaveBackup, SaveSlot,
@@ -164,7 +164,9 @@ const bundles: RuntimeBundle[] = [
 // ---------------------------------------------------------------- library
 
 interface MockManifest { id: string; name: string; version: string; side: "client" | "server" | "both"; requires?: Record<string, string>;
-  incompatible?: string[]; phase?: NativePlanEntry["phase"]; description?: string; clients?: "none" | "kiln" | "mod" }
+  incompatible?: string[]; phase?: NativePlanEntry["phase"]; description?: string; clients?: "none" | "kiln" | "mod";
+  /** EMF: mod.json `depends` (id -> range, or {version, optional, url}). */
+  depends?: Record<string, string | { version?: string; optional?: boolean; url?: string }> }
 
 const seedMods: Record<ModKind, MockManifest[]> = {
   kiln: [
@@ -201,6 +203,39 @@ const seedMods: Record<ModKind, MockManifest[]> = {
   // none seeded, so the other pages' mod counts stay as they are (engine_status has kiln-dllmod's state file)
   dllmod: [],
 };
+
+/** `?emfdeps=1`: two EMF mods in Ember run whose dependency is not there (kiln_manage::emf_deps): Mage Skills needs EMF's
+ *  lua mod, which comes with EMF's release zip (PepegaJedi's report, 0.2.0-dev.30.1), and Pet Tricks needs a mod whose
+ *  mod.json entry gives its page. */
+const EMF_DEPS_SEED = typeof location !== "undefined" && new URLSearchParams(location.search).has("emfdeps");
+if (EMF_DEPS_SEED) {
+  seedMods.emf.push(
+    { id: "mage_skills", name: "Mage Skills", version: "1.0.0", side: "both", depends: { lua: ">=1.36" } },
+    { id: "pet-tricks", name: "Pet Tricks", version: "0.2.0", side: "both", depends: { "pet-core": { version: "^2.0", url: "https://www.nexusmods.com/enshrouded/mods/9001" } } },
+  );
+}
+/** EMF's own mods (kiln_manage::emf_deps::EMF_RELEASE_MODS) and EMF's page. */
+const EMF_RELEASE: Record<string, string> = { lua: "EMF's lua mod", beastmaster: "Beastmaster", bounty: "Bounty Board", champion: "Wandering Champion",
+  grave: "Grave Keeper", handover: "Hand-over", kill_counter: "Kill Counter", life_skills: "Life Skills", minimap: "Minimap", necromancer: "Necromancer" };
+const EMF_PAGE = "https://github.com/matenm/emf-enshrouded";
+
+/** kiln_manage::emf_deps::profile_problems, as far as the mock goes: a required dependency missing or switched off. */
+function emfProblems(p: Profile): EmfDepProblem[] {
+  const out: EmfDepProblem[] = [];
+  for (const m of p.mods.emf.filter((x) => x.enabled)) {
+    for (const [dep, spec] of Object.entries(manifestOf("emf", m.id, m.version)?.depends ?? {})) {
+      const d = typeof spec === "string" ? { version: spec } : spec;
+      const have = p.mods.emf.find((x) => x.id === dep);
+      if (d.optional || (have && have.enabled)) continue;
+      const release = EMF_RELEASE[dep];
+      out.push({ id: m.id, dep, depName: have ? manifestOf("emf", have.id, have.version)?.name ?? dep : release ?? null, range: d.version ?? "",
+        state: have ? "off" : "missing", found: have?.version ?? null, withEmf: !!release, url: d.url ?? (release ? EMF_PAGE : null),
+        reason: `needs ${dep}, which is ${have ? "switched off" : "not installed"}` });
+      break;
+    }
+  }
+  return out;
+}
 
 const library: LibraryEntry[] = FRESH ? [] : MOD_KINDS.flatMap((kind) => [...seedMods[kind]].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   .map((m) => entryFor(kind, m, "2026-11-0" + (2 + (m.id.length % 3)) + "T09:00:00Z")));
@@ -290,7 +325,7 @@ const profiles = new Map<string, Profile>(FRESH ? [] : [
       kiln: [pm("kiln", "new-items"), pm("kiln", "big-stacks", false), pm("kiln", "more-hotbars"), pm("kiln", "night-sky"), pm("kiln", "weather-plus")],
       native: [pm("native", "fps-unlock"), pm("native", "creative-mode"), pm("native", "hud-tweaks"), pm("native", "free-cam", false)],
       plugin: [],
-      emf: [pm("emf", "beastmaster")],
+      emf: [pm("emf", "beastmaster"), ...(EMF_DEPS_SEED ? [pm("emf", "mage_skills"), pm("emf", "pet-tricks")] : [])],
       xhl: [], eml: [pm("eml", "loot-tables-x", false)], shroudforge: [pm("shroudforge", "better-chests")], set: [], greeneye: [pm("greeneye", "zoom-out")],
       flame: [], shroudtopia: [pm("shroudtopia", "fly-mode")], enshwick: [], shroudlink: [], ember: [], dllmod: [],
     },
@@ -457,7 +492,7 @@ function resolve(p: Profile, side: "client" | "server", gameId: string | null): 
   });
   const warnings: string[] = [];
   if (native.some((n) => n.enabled && n.phase === "dllmain")) warnings.push("dllmain mods load inside the proxy; a bad one can hang the start.");
-  return { side, kiln: { order: kiln.order, rejected: kiln.rejected.sort((a, b) => a.dir.localeCompare(b.dir)) }, native, warnings, withWorld };
+  return { side, kiln: { order: kiln.order, rejected: kiln.rejected.sort((a, b) => a.dir.localeCompare(b.dir)) }, native, warnings, withWorld, emf: emfProblems(p) };
 }
 
 // ---------------------------------------------------------------- other engines' mods

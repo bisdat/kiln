@@ -11,7 +11,7 @@ fn emf(entry: Option<&str>, id: &str, version: &str, enabled: bool, deps: Vec<De
     EmfMod { entry: entry.map(str::to_string), id: id.into(), name: id.into(), version: version.into(), enabled, side: String::new(), deps, broken: None }
 }
 
-/// PepegaJedi's Mage Skills 1.0.0: \`"depends": {"lua": ">=1.36"}\` and no lua mod.
+/// PepegaJedi's Mage Skills 1.0.0: `"depends": {"lua": ">=1.36"}` and no lua mod.
 fn mage_skills() -> EmfMod {
     emf(Some("mage_skills"), "mage_skills", "1.0.0", true, vec![dep("lua", ">=1.36", false)])
 }
@@ -150,10 +150,11 @@ fn mod_json_is_read_as_emf_reads_it() {
         Dep { id: "lua".into(), range: ">=1.36".into(), optional: false, url: None },
         Dep { id: "beastmaster".into(), range: "^1.2".into(), optional: true, url: Some("https://www.nexusmods.com/enshrouded/mods/1".into()) },
     ]);
-    // a list form, and a link that is no web page
-    put(&t.0, "list/mod.json", r#"{"id": "l", "version": "1", "dependencies": ["lua", {"id": "x", "version": "~2", "url": "file:///c:/x"}]}"#);
+    // a list form, and links that are no https page
+    put(&t.0, "list/mod.json", r#"{"id": "l", "version": "1", "dependencies": ["lua", {"id": "x", "version": "~2", "url": "file:///c:/x"},
+        {"id": "y", "url": "http://example.com/y"}]}"#);
     let l = read_folder(&t.0.join("list"), None, true).unwrap();
-    assert_eq!(l.deps, vec![dep("lua", "", false), dep("x", "~2", false)]);
+    assert_eq!(l.deps, vec![dep("lua", "", false), dep("x", "~2", false), dep("y", "", false)]);
     // what EMF refuses: the mod does not load (its dependents say "not loading")
     for (name, text, why) in [
         ("both", r#"{"id": "b", "version": "1.0.0", "depends": {}, "dependencies": {}}"#, "both \"depends\" and \"dependencies\""),

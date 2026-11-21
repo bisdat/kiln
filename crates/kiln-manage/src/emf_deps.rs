@@ -1,12 +1,12 @@
 //! EMF mods' dependencies, checked before Play from their mod.json as kiln-emf checks them at the start
-//! (native/plugins/emf/src/mods.cpp: \`read_deps\`, \`parse_range\`, \`version_problem\`, \`resolve_order\`), so the launcher
+//! (native/plugins/emf/src/mods.cpp: `read_deps`, `parse_range`, `version_problem`, `resolve_order`), so the launcher
 //! can say on a mod's row what is missing and how to get it instead of the player finding "needs lua, which is not
 //! installed" in kiln/state/emf.json after a start (PepegaJedi's Mage Skills, 0.2.0-dev.30.1).
 //!
 //! The mods EMF would see: the profile's EMF entries (their Library folders), then, while the profile has EMF drop-ins
-//! on, \`<game>/emf/mods\` (folders with a mod.json that are not Kiln's copy of a profile entry, and loose DLLs, id = file
-//! name, version 0.0.0). A second copy of one id is ignored, the first wins (kiln-emf \`add_mod\`). Not read here: EMF's
-//! ini switch (\`<configDir>/emf/<id>.ini\` \`enabled\`) and the EMF API version a mod asks for.
+//! on, `<game>/emf/mods` (folders with a mod.json that are not Kiln's copy of a profile entry, and loose DLLs, id = file
+//! name, version 0.0.0). A second copy of one id is ignored, the first wins (kiln-emf `add_mod`). Not read here: EMF's
+//! ini switch (`<configDir>/emf/<id>.ini` `enabled`) and the EMF API version a mod asks for.
 
 use std::path::{Path, PathBuf};
 
@@ -30,7 +30,7 @@ struct Version {
     wild: bool,
 }
 
-/// EMF \`parse_version\`: "1", "1.2" or "1.2.3", numbers only (a wildcard part with \`allow_wild\`).
+/// EMF `parse_version`: "1", "1.2" or "1.2.3", numbers only (a wildcard part with `allow_wild`).
 fn parse_version(s: &str, allow_wild: bool) -> Option<Version> {
     let mut r = Version::default();
     let mut rest = s;
@@ -62,7 +62,7 @@ fn parse_version(s: &str, allow_wild: bool) -> Option<Version> {
     Some(r)
 }
 
-/// The first version after the family of v's first \`at\` parts.
+/// The first version after the family of v's first `at` parts.
 fn bump(v: &Version, at: usize) -> V3 {
     if at == 0 { return TOP; }
     let mut r = [0; 3];
@@ -108,7 +108,7 @@ impl Interval {
     }
 }
 
-/// EMF \`comparator\`: one of \`>= <= > < = ^ ~\` (or none) and a version, or a wildcard alone.
+/// EMF `comparator`: one of `>= <= > < = ^ ~` (or none) and a version, or a wildcard alone.
 fn comparator(t: &str) -> Option<Interval> {
     let mut r = Interval::default();
     if matches!(t, "" | "*" | "x" | "X") { return Some(r); }
@@ -161,7 +161,7 @@ fn split_any<'a>(s: &'a str, seps: &'a [char]) -> impl Iterator<Item = &'a str> 
 
 fn trim(s: &str) -> &str { s.trim_matches(|c| c == ' ' || c == '\t') }
 
-/// A range as EMF reads it (\`^1.2\`, \`~1.2\`, \`>=1.0 <2\`, \`1.2.x\`, \`1.2 - 2\`, \`||\`; empty = any). None for a malformed
+/// A range as EMF reads it (`^1.2`, `~1.2`, `>=1.0 <2`, `1.2.x`, `1.2 - 2`, `||`; empty = any). None for a malformed
 /// range or one that matches no version.
 fn parse_range(range: &str) -> Option<Vec<Interval>> {
     let range = match trim(range) { "" => "*", r => r };
@@ -198,7 +198,7 @@ fn parse_range(range: &str) -> Option<Vec<Interval>> {
     (!out.is_empty()).then_some(out)
 }
 
-/// Does \`version\` (EMF's "1", "1.2" or "1.2.3") fall in EMF's \`range\`? None: either cannot be read as EMF reads it.
+/// Does `version` (EMF's "1", "1.2" or "1.2.3") fall in EMF's `range`? None: either cannot be read as EMF reads it.
 pub fn satisfies(range: &str, version: &str) -> Option<bool> {
     let r = parse_range(range)?;
     let v = parse_version(version, false)?;
@@ -209,7 +209,7 @@ fn vtext(v: &V3) -> String {
     if v[0] == i64::MAX { "any".into() } else { format!("{}.{}.{}", v[0], v[1], v[2]) }
 }
 
-/// EMF \`version_problem\`: None when \`found\` is in range, else EMF's words and whether it is too old.
+/// EMF `version_problem`: None when `found` is in range, else EMF's words and whether it is too old.
 /// "needs lua ^1.3 (1.3.0 or newer, below 2.0.0), found 1.2.0: too old (update lua)"
 fn version_problem(id: &str, range: &str, found: &str) -> Option<(String, bool)> {
     let Some(r) = parse_range(range) else {
@@ -232,8 +232,8 @@ fn version_problem(id: &str, range: &str, found: &str) -> Option<(String, bool)>
 
 // ------------------------------------------------------------------------------------------------ manifests ------
 
-/// One entry of a mod.json's \`depends\` / \`dependencies\`, as EMF reads it (the id in lower case, the range as written,
-/// empty for any version). \`url\`: an http(s) link the entry gives for where to get the mod (EMF ignores it).
+/// One entry of a mod.json's `depends` / `dependencies`, as EMF reads it (the id in lower case, the range as written,
+/// empty for any version). `url`: an https link the entry gives for where to get the mod (EMF ignores it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dep {
     pub id: String,
@@ -252,7 +252,7 @@ pub struct EmfMod {
     pub version: String,
     /// Switched on (a profile entry's switch; a drop-in counts as on).
     pub enabled: bool,
-    /// mod.json \`side\` in lower case ("client", "server", "both" or empty).
+    /// mod.json `side` in lower case ("client", "server", "both" or empty).
     pub side: String,
     pub deps: Vec<Dep>,
     /// Why EMF refuses the mod whatever its dependencies (a broken mod.json): it does not load, and the mods that need
@@ -260,17 +260,18 @@ pub struct EmfMod {
     pub broken: Option<String>,
 }
 
-/// EMF's mod ids: 1 to 48 of a-z 0-9 _ . - (\`valid_mod_id\`).
+/// EMF's mod ids: 1 to 48 of a-z 0-9 _ . - (`valid_mod_id`).
 fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 48 && id.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'_' | b'.' | b'-'))
 }
 
 fn web_link(v: Option<&serde_json::Value>) -> Option<String> {
     let s = v?.as_str()?.trim();
-    ((s.starts_with("https://") || s.starts_with("http://")) && s.len() <= 512 && !s.contains(char::is_whitespace)).then(|| s.to_string())
+    // the launcher opens https links only (app_open_url)
+    (s.starts_with("https://") && s.len() <= 512 && !s.contains(char::is_whitespace)).then(|| s.to_string())
 }
 
-/// EMF \`read_deps\`: an object (id -> range or {version, optional}) or a list (ids, or objects with an \`id\`).
+/// EMF `read_deps`: an object (id -> range or {version, optional}) or a list (ids, or objects with an `id`).
 fn read_deps(j: &serde_json::Value) -> Result<Vec<Dep>, String> {
     let add = |out: &mut Vec<Dep>, id: &str, v: &serde_json::Value| -> Result<(), String> {
         let mut d = Dep { id: id.to_lowercase(), range: String::new(), optional: false, url: None };
@@ -310,7 +311,7 @@ fn read_deps(j: &serde_json::Value) -> Result<Vec<Dep>, String> {
     Ok(out)
 }
 
-/// The mod in \`folder\` (its mod.json) as EMF reads it: a mod.json EMF refuses gives a mod with \`broken\` set (the id
+/// The mod in `folder` (its mod.json) as EMF reads it: a mod.json EMF refuses gives a mod with `broken` set (the id
 /// from the manifest, else the folder's name). None: no mod.json.
 pub fn read_folder(folder: &Path, entry: Option<&str>, enabled: bool) -> Option<EmfMod> {
     let file = folder.join("mod.json");
@@ -355,7 +356,7 @@ pub fn read_folder(folder: &Path, entry: Option<&str>, enabled: bool) -> Option<
     Some(m)
 }
 
-/// The mods of \`<game>/emf/mods\` EMF would read beside the profile's (kiln-emf \`scan_legacy\`, in name order): folders
+/// The mods of `<game>/emf/mods` EMF would read beside the profile's (kiln-emf `scan_legacy`, in name order): folders
 /// with a mod.json that are not Kiln's copy of an EMF mod (activation's marker: the profile entry is that mod), and
 /// loose DLLs (id: the file name in lower case, version 0.0.0).
 pub fn dropins(dir: &Path) -> Vec<EmfMod> {
@@ -378,9 +379,9 @@ pub fn dropins(dir: &Path) -> Vec<EmfMod> {
 
 // ------------------------------------------------------------------------------------------------ the check ------
 
-/// EMF's own mods in its release zip (\`EMF-<version>.zip\`, \`game/emf/mods/<id>/\`) that other mods depend on: its
-/// \`lua\` mod, which runs every Lua mod (crate::found's \`EMF_LUA_HOST\`), and the nine Lua mods of its download
-/// (crate::library's \`emf_lua_manifest\`, the wiki's EMF mods page), with the names players know them by.
+/// EMF's own mods in its release zip (`EMF-<version>.zip`, `game/emf/mods/<id>/`) that other mods depend on: its
+/// `lua` mod, which runs every Lua mod (crate::found's `EMF_LUA_HOST`), and the nine Lua mods of its download
+/// (crate::library's `emf_lua_manifest`, the wiki's EMF mods page), with the names players know them by.
 pub const EMF_RELEASE_MODS: [(&str, &str); 10] = [
     ("lua", "EMF's lua mod"), ("beastmaster", "Beastmaster"), ("bounty", "Bounty Board"), ("champion", "Wandering Champion"),
     ("grave", "Grave Keeper"), ("handover", "Hand-over"), ("kill_counter", "Kill Counter"), ("life_skills", "Life Skills"),
@@ -415,25 +416,25 @@ pub struct EmfDepProblem {
     pub id: String,
     /// The dependency's id, as EMF reads it.
     pub dep: String,
-    /// Its name: from its mod.json when it is there, else EMF's name for one of its own mods ([\`EMF_RELEASE_MODS\`]).
+    /// Its name: from its mod.json when it is there, else EMF's name for one of its own mods ([`EMF_RELEASE_MODS`]).
     pub dep_name: Option<String>,
     /// The range as the mod.json writes it ("" for any version).
     pub range: String,
     pub state: DepState,
     /// The version there (Off, NotLoading, TooOld, TooNew).
     pub found: Option<String>,
-    /// One of EMF's own mods, which come with EMF's release zip ([\`EMF_RELEASE_MODS\`]).
+    /// One of EMF's own mods, which come with EMF's release zip ([`EMF_RELEASE_MODS`]).
     pub with_emf: bool,
-    /// Where to get it: the dependency entry's own link, else [\`EMF_PAGE\`] for one of EMF's mods.
+    /// Where to get it: the dependency entry's own link, else [`EMF_PAGE`] for one of EMF's mods.
     pub url: Option<String>,
-    /// kiln-emf's words for it at the start (kiln/state/emf.json \`reason\`).
+    /// kiln-emf's words for it at the start (kiln/state/emf.json `reason`).
     pub reason: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum St { Pending, Disabled, Rejected }
 
-/// kiln-emf \`resolve_order\`'s decisions over \`mods\` (the profile's first, then the drop-ins; a later copy of an id is
+/// kiln-emf `resolve_order`'s decisions over `mods` (the profile's first, then the drop-ins; a later copy of an id is
 /// ignored): the profile entries a dependency keeps from loading, the first such dependency each, as EMF reports it.
 /// A required dependency that is missing, switched off or not loading, or any dependency (optional too) whose version
 /// is out of range rejects the mod; that rejection reaches the mods that need it in turn.
@@ -498,8 +499,8 @@ pub fn check(mods: &[EmfMod], side: RunSide) -> Vec<EmfDepProblem> {
     list.iter().zip(found).filter(|(m, _)| m.entry.is_some()).filter_map(|(_, p)| p).collect()
 }
 
-/// [\`check\`] over a profile's EMF entries, read from the Library, and, with \`game\` and EMF drop-ins on in the profile,
-/// the mods in \`<game>/emf/mods\`: the enabled entries a dependency keeps from loading.
+/// [`check`] over a profile's EMF entries, read from the Library, and, with `game` and EMF drop-ins on in the profile,
+/// the mods in `<game>/emf/mods`: the enabled entries a dependency keeps from loading.
 pub fn profile_problems(dirs: &DataDirs, profile: &Profile, side: RunSide, game: Option<&Path>) -> Vec<EmfDepProblem> {
     let mut mods = Vec::new();
     for m in &profile.mods.emf {

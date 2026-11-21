@@ -386,7 +386,7 @@ fn play_once_keeps_the_lua_mods_copies() {
     profile::write_once(&dirs, &same.id, &g).unwrap();
 }
 
-/// PepegaJedi's report (0.2.0-dev.30.1): Mage Skills 1.0.0, an EMF Lua mod that needs \`lua >=1.36\`, added without EMF's
+/// PepegaJedi's report (0.2.0-dev.30.1): Mage Skills 1.0.0, an EMF Lua mod that needs `lua >=1.36`, added without EMF's
 /// lua mod; kiln-emf rejected it at the start ("needs lua, which is not installed"). The preview says so before Play,
 /// from the mod.json, with what to get, and counts EMF's lua mod in the Library and in the game's emf/mods.
 #[test]
