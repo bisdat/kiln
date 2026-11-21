@@ -255,3 +255,80 @@ collector C `0x2aef70` is not a network profile receiver.
 Collider self-hit versus short boom/pivot is **[inferred]**, not isolated. No size-aware rendered mount profile or
 collision exclusion was tested. Full configuration layouts, scratch signatures (`camera/VisualFrameReady`,
 `camera/RenderPoseGetter`) and proposed profile/transport designs remain in dossier chapter 03.
+
+
+## Highlight groups (outlines)
+
+Client 26430625 (`enshrouded.exe` sha256 `5d9ef2f1…`, svn 1287369). Static (python capstone, the exe's reflection,
+`tools/kfc` over the game's data, the program catalog `sigdb/programs/client/`). Used by kiln.render v2's outlines
+(`sigdb/symbols/client.d/outline.json`, feature `ui.world_outline`; usage [../kiln/render.md](../kiln/render.md)).
+The approach (the setter, the group byte, recolouring a group at its palette conversion) was first shown by GreeneyeDS'
+Quick Deposit and Find (MIT, `github.com/Greeneye0/enshrouded-quick-deposit` `src/glow.cpp`); everything below was
+read again on this build.
+
+### The groups and who uses them [refl] [data] [static]
+`keen::HighlightColorIndex` (u8 enum): NoHighlight 0, InvalidState 1, ValidState 2, MutedState 3, Group1 4, Group2 5,
+Group3 6, Group4 7. Each render instance carries one; the renderer colours it from the palette below.
+
+| Group | Palette colour (RenderSystemResource `14bcd18f-…`) | Who sets it in the vanilla game |
+|---|---|---|
+| 0 NoHighlight | none | every model at creation: `static_render_model` (an INIT program) sets 0 on each model it makes; `dynamic_render_model` sets the entity's `HighlightColor` index or 0 when it makes a model |
+| 1 InvalidState | 0xFF0000FF, red (255, 0, 0) | the building cursor: `client_cursor_entity` writes the hovered entity's `keen::ecs::HighlightColor` from `ClientCursor.highlightColorInvalid` (+0xc9, default 1) |
+| 2 ValidState | 0xFFFFA378, light blue (120, 163, 255) | the same, `highlightColorValid` (+0xc8, default 2) |
+| 3 MutedState | 0xFFD9D9D9, grey (217) | the same, `highlightColorMuted` (+0xca, default 3) |
+| 4..6 Group1..3 | 0 (transparent: nothing shows) | nobody: no code path writes them, no template carries them |
+| 7 Group4 | 0xFF0382FF, orange (255, 130, 3) | nobody in the game itself |
+
+- `keen::Color` is 0xAABBGGRR (red in the low byte). `keen::HighlightColorPaletteSettings` (36 B): `highlightAmount` f32
+  (1.0), `highlightIntensity` f32 (2.5), then the seven colours (invalid, valid, muted, group1..4) at +8..+32. It is
+  `keen::RenderSystemResource.highlightColorPalette` at +0x44 (the resource is 304 B), so group g's colour sits at
+  resource +0x48 + 4·g.
+- The only template that carries `HighlightColor` is `ConstructionCursor` (`ed7072de-…`, the placement preview);
+  no storage chest or other prop does (`kfc find-templates . --components`).
+- `keen::CursorConfig.highlightHoveredEntity` (+84, a bool in the cursor's data) switches the cursor's hover highlight per
+  cursor type.
+- Other tools on this build: Greeneye's Quick Deposit uses group 6 (Group3) and recolours it green by redirecting the
+  group-6 conversion calls; Find and The Worst Map Mod use group 7 (Group4) and recolour it through the converter.
+  Kiln takes groups 4 and 5 and leaves 6 and 7 to them.
+
+### Where the group lives and how it is set [static]
+- A model's handle is `keen::ecs::ModelComponent.modelHandle` (u32 = generation << 24 | index) on the entity in the client
+  world. `Instance(renderer, handle, checked)` (`0xf8420`): null for 0 or a generation that does not match the slot's
+  (renderer +0x1c8, one byte per slot: the instance was destroyed, the handle is stale); else renderer +0x1b0 + index ·
+  0x1b0 (instances are 432 B). The group byte is the instance's +0x78 (`outline/inst.group`).
+- `SetGroups(renderer, Span<u32>* handles, Span<u8>* groups)` (`0x112ad0`): per handle, Instance(checked); when the byte
+  differs it is written and the instance marked dirty (`0xf85d0`, flag 2: the renderer packs the group into
+  `keen::RenderInstanceData.highlightColorPaletteIndexTransparency` (+40) for the GPU). The render programs call it through
+  RenderScene's forwarder (`0xf6e90`: `mov rcx, [rcx+0x98]; jmp SetGroups`, `outline/scene.renderer` = 0x98), one of a
+  run of identical forwarders, which is why sigdb finds it by its callers.
+- Its six callers: `dynamic_render_model` (`0x309975`), `static_render_model` (`0x319e24`), `render_voxel_model`
+  (`0x315ed8`, the voxel model's `HighlightColor` or 0), `render_collection_models` (`0x3147f9`), and two functions
+  outside a program (`0x38796c`, `0x38a01e`). Every one runs inside a program that holds `RenderScene` for writing
+  (sys_write, not parallel), so no two of them run at once.
+- `dynamic_render_model` (client, CHUNKED, every step; entities with any of ClientToggleState, Hide, HighlightColor,
+  ModelDynamic, Transparency): makes or remakes the model when needed; destroys it while the entity is hidden; calls the
+  setter when it made the model, when `HighlightColor` is non-zero (every step), or when Transparency differs from 0.
+  A zero `HighlightColor` on an existing model does not reset its group. `static_render_model` (client, INIT; the
+  entities with none of those) runs once per entity as it enters the query and sets group 0. Chests, stations and NPCs
+  have ClientToggleState or ModelDynamic and are dynamic; plain props are static.
+- Voxel models (`VoxelModel`, `render_voxel_model`) and the terrain are not ModelComponent instances: Kiln's outlines do
+  not reach them.
+
+### The palette [static]
+Two render functions (`0x123e80`, `0x13fef0`, the render thread, once per frame each) read the palette from the
+resource (rbx) and convert each colour with `ColorConvert(float4* out, u32 colour)` (`0x125b80`): `mov edx, [rbx+0x4c..0x64];
+call ColorConvert`, then scale by the intensity into the frame's constants (16 bytes per group). Kiln's mid hooks sit on
+the calls for Group1 (`[rbx+0x58]`) and Group2 (`[rbx+0x5c]`) in both functions (`outline/Palette0.Group1` ...
+`outline/Palette1.Group2`) and replace edx with Kiln's colour (pulsed by time) while Kiln uses the group; otherwise the
+game's transparent entry passes. The calls of Group3/Group4 (Quick Deposit's and Find's) are not touched.
+
+### Through walls
+The group is a property of the instance drawn with the model (`RenderInstanceData`), so the highlight is depth-tested
+with it: what stands in front hides it. No palette field or instance flag draws it through walls on this build
+(`keen::GpuCulling2HighlightType` None/Mesh/Model/Batch is the culling debug view). Quick Deposit draws its own
+silhouettes in the UI for that; Kiln offers no through-walls mode.
+
+### Open (real-game checks)
+- Hover an outlined dynamic entity (a chest) with the building cursor, then move away: does Kiln's outline come back, or
+  does the cursor leave a stale ValidState on it (a zero `HighlightColor` does not reset the group, above)?
+- Two palette functions: which passes they feed (both are hooked).
