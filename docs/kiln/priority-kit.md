@@ -248,8 +248,9 @@ KILN_OUT=<out> tools/priority-kit/tests/run.sh                              # th
   profile. kiln.types serves sigdb's reflection of that build. A simulated server thread runs frames that hold the
   Scene word and now and then change a real field of the target. Each frame's Pre moves the live step the gate's busy
   latch keys on, and the word stays held a little past Post. One scenario per process: the run on time, a 60 Hz server
-  with 3 ms updates (GitHub #58's, where kit 1 got stuck), the raise off, no-op mode, a named component and byte, a component without explained padding, a tracked one, no padding
-  anywhere, another world, no world, no run file, a bad run file, and a world that stops mid-run. They check the
+  with 3 ms updates (GitHub #58's, where kit 1 got stuck), the raise off, no-op mode, a named component and byte, a
+  component without explained padding, a tracked one, no padding anywhere, another world, no world, no run file, a bad
+  run file, and a world that stops mid-run. They check the
   target, every outcome, that every byte of every component ends as it was (the game's own changes kept), the raise
   (every hold above normal, or none), the files and their headers, and that a retry after a busy answer always comes
   in a later server step and almost never meets the latch. Scenario `padding` checks the padding rule against
