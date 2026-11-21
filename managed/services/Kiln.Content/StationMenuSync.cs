@@ -377,7 +377,9 @@ internal static class StationMenuSync
             Log(LogLevel.Warn, $"the local menus could not be exported: {why}");
             return;
         }
-        var contentState = count == 0 ? 0u : serving?.StateId ?? 0u;
+        // a menu that lists recipes names the content state they are in: until the content sync serves one, nothing is sent
+        if (count > 0 && serving is null) return;
+        var contentState = count == 0 ? 0u : serving!.Value.StateId;
         var raw = Encoding.UTF8.GetBytes(Envelope(_session, generation, contentState, menusRaw));
         if (raw.Length > MaxRaw)
         {

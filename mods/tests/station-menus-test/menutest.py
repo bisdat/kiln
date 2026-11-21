@@ -161,7 +161,7 @@ class Suite:
                    f"{doc['contentStateId']:x} vs {[hex(c) for c in a.contents]}")
         a.ack(s1, STORED)
         a.ack(s1, APPLIED)
-        self.check("station-menu.acks-logged", self.wait_log(m, r"menu-a.*snapshot " + s1["state"][:12] + r" generation \d+ applied", 5), self.since(m)[-500:])
+        self.check("station-menu.acks-logged", self.wait_log(m, r"\): snapshot " + s1["state"][:12] + r" generation \d+ applied", 5), self.since(m)[-500:])
 
         # ---- a layer of code over the inline one, then gone again: new snapshots; the same define again sends nothing
         g0 = s1["generation"]
@@ -204,8 +204,8 @@ class Suite:
         self.check("station-menu.vanilla-not-refused-for-menus", "for kiln.stationmenus" not in log and REFUSAL not in log, log[-400:])
 
         # ---- every menu taken off: the tombstone (menus: []), and the admission decider goes
+        n = len(a.snapshots)  # before the command: the snapshot can arrive while its reply is awaited
         self.check("station-menu.remove-all", a.ctl("remove all") == "ok", a.replies)
-        n = len(a.snapshots)
         s4 = a.next_snapshot(n + 1)
         self.check("station-menu.tombstone", s4 is not None and s4["doc"]["menus"] == [], s4 and s4["doc"])
         m4 = self.mark()
