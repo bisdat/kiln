@@ -95,6 +95,7 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `Schematics` | kiln.build: `/build` admin commands (selection, capture, paste with rotation, shapes, props, undo) and outposts placed once per world |
 | `RulesSample` | Kiln.Rules: `/flight` for 60 s of the building fly mode, no stamina drain inside bases, a half-cost building weekend from a config switch |
 | `NetSample` | Kiln.Network: F9 on a client pings the server over `netsample:main`; the server answers and announces Kiln clients |
+| `ReplWatch` | The network inspector (`Kiln.Replication`, since 0.2.0-dev.31): `/replwatch` watches the chest nearest to you with `Replication.Watch` and logs, per player, the size of its Inventory component as sent and its used slots when they change; `Local` and `Fake` peers; `/replwatch stop` and the unload dispose the watch ([services/replication.md](../services/replication.md)) |
 | `BigStacks` | a server config (x4 stack sizes, at most 9999) that Kiln clients get through the content sync |
 | `NewItems` | kiln.content's new items and recipes from code and a data pack, plus a perk and a buff of its own (kiln.gamedata clones) |
 | `AffixSword` | Affix blocks: a sword that rolls one of three affixes defined in `blocks/affixes.json` (`/affix-sword`); the bonus acts while it is in hand; `/affixes` lists what the held item carries; in the player's game a notice shows the roll |

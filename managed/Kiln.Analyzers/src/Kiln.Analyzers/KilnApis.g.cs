@@ -611,6 +611,8 @@ internal static partial class KilnApis
         "M:Kiln.ReflectedValue.get_Bytes", // ReflectedValue.Bytes.get: via ReflectedValue.Span()
         "M:Kiln.ReflectedValue.get_Item(System.String)", // ReflectedValue.this[string].get: via ReflectedValue.Span()
         "M:Kiln.ReflectedValue.set_Item(System.String,System.Object)", // ReflectedValue.this[string].set: via ReflectedValue.Span()
+        "M:Kiln.Replication.Stats", // Replication.Stats(): Services.RequireTickThread
+        "M:Kiln.Replication.Watch(Kiln.EntityId,Kiln.NetPeer)", // Replication.Watch(EntityId, NetPeer?): Services.RequireTickThread
         "M:Kiln.ReplicationLab.AddFakePeers(System.Int32)", // ReplicationLab.AddFakePeers(int): Services.RequireTickThread
         "M:Kiln.ReplicationLab.Decoded(System.Int32,Kiln.EntityId,System.String)", // ReplicationLab.Decoded(int, EntityId, string): Services.RequireTickThread
         "M:Kiln.ReplicationLab.ForceRelevant(System.Int32,Kiln.EntityId)", // ReplicationLab.ForceRelevant(int, EntityId): Services.RequireTickThread
