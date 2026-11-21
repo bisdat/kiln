@@ -2757,20 +2757,18 @@
       "version": "0.2.0-dev.30",
       "status": "next",
       "title": "Crucible modpacks, equipment and the game's UI",
-      "summary": "Crucible, modpacks on frostdev.io you share with a link or a code and install in two clicks, with Pack Studio for pack makers; an equipment API for item rarity, values, tooltips and upgrades; hooks into the game's own inventory screens and client hooks for mods; Kiln tasks in the main menu; and signed Windows files.",
+      "summary": "Crucible, modpacks on frostdev.io you share with a link or a code and install in two clicks, with Pack Studio for pack makers; an equipment API for item rarity, values, tooltips and upgrades; hooks into the game's own inventory screens and client hooks for mods; Kiln tasks in the main menu; ShroudForge 1.8.1 bundled; and signed Windows files.",
       "note": "Items marked as waiting for a game test are built and checked, but not yet seen in a real game.",
       "features": [
         {
           "title": "Share your mods as a link",
           "text": "Share to Crucible turns a profile into a pack with a link and a short code for your friends; only files Crucible doesn't have yet are uploaded, and a changed profile updates the same link.",
-          "area": "launcher",
-          "gamePending": true
+          "area": "launcher"
         },
         {
           "title": "Install a pack from a code",
           "text": "A pack link or code shows the pack first (size, game build, a warning about other people's code), then installs it as a profile of its own, with your saves backed up first.",
-          "area": "launcher",
-          "gamePending": true
+          "area": "launcher"
         },
         {
           "title": "Pack updates keep your changes",
@@ -2911,6 +2909,11 @@
           "text": "On Linux, the launcher restarts once through X11 when it can't use the GPU on Wayland, and remembers it; it can be turned off in Settings. Thanks to Oryx593.",
           "area": "launcher",
           "kind": "improved"
+        },
+        {
+          "title": "ShroudForge 1.8.1",
+          "text": "Kiln bundles ShroudForge 1.8.1 (was 1.7.9), so ShroudForge mods made for 1.8, like the current Unified Tweaks, run on Kiln; \"Use my installed ShroudForge\" also accepts 1.8.0 and 1.8.1.",
+          "area": "compat"
         }
       ]
     },
@@ -2918,19 +2921,25 @@
       "version": "0.2.0-dev.30.1",
       "status": "planned",
       "title": "ShroudForge and EML on Kiln's own engine",
-      "summary": "ShroudForge and EML mods on Kiln's own engine, in a patch after 0.2.0-dev.30. ShroudForge's own runtime (1.7.9) stays available as before.",
+      "summary": "ShroudForge and EML mods on Kiln's own engine, in a patch after 0.2.0-dev.30. ShroudForge's own runtime (1.8.1 since dev.30) stays available as before.",
       "patch": true,
       "note": "Comes as a dev.30 patch in the next few days.",
       "features": [
         {
           "title": "ShroudForge mods on Kiln's own engine",
-          "text": "Kiln can run ShroudForge mods (Lua packages, EML packages and package DLLs made for ShroudForge 1.7.9) on its own engine. ShroudForge's own runtime (1.7.9) stays available as before.",
+          "text": "Kiln can run ShroudForge mods (Lua packages, EML packages and package DLLs made for ShroudForge 1.7.9) on its own engine. ShroudForge's own runtime (1.8.1 since dev.30) stays available as before.",
           "area": "compat",
           "gamePending": true
         },
         {
           "title": "EML mods on Kiln's own engine",
           "text": "EML mods run on the same engine, and EML and Kiln mods can decode and encode game textures in code.",
+          "area": "compat",
+          "gamePending": true
+        },
+        {
+          "title": "ShroudForge's glider pitch under Kiln",
+          "text": "ShroudForge 1.8's native glider pitch patch (Unlimited Flight's Upward Gliding) also works with Kiln's own glide steering.",
           "area": "compat",
           "gamePending": true
         }
