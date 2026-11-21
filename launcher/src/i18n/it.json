@@ -5427,6 +5427,30 @@
         "itemAria": "Oggetto",
         "countAria": "Quantità",
         "category": "qualsiasi oggetto della categoria {id}",
+        "addCategory": "+ Uno qualsiasi di un gruppo",
+        "addCategoryTip": "Un ingrediente pagabile con qualsiasi oggetto di un gruppo, per esempio qualsiasi legno",
+        "anyOf": "Uno tra: {names}",
+        "anyOfMore": "Uno tra: {names}, +{count} altri",
+        "categoryAria": "Gruppo di oggetti",
+        "categoryPh": "Cerca per un oggetto del gruppo",
+        "categoryNone": "Nessun gruppo contiene quell'oggetto",
+        "categoryItems": {
+          "one": "{count} oggetto",
+          "other": "{count} oggetti"
+        },
+        "categoryUsed": {
+          "one": "usato da {count} ricetta del gioco",
+          "other": "usato da {count} ricette del gioco"
+        },
+        "categoryUnused": "Nessuna ricetta del gioco lo usa",
+        "categoryUsedBy": "Ricette del gioco che lo usano: {names}",
+        "categoryUsedByMore": "Ricette del gioco che lo usano: {names}, +{count} altre",
+        "categoryShow": "Mostra i suoi oggetti",
+        "categoryHide": "Nascondi i suoi oggetti",
+        "categoryNoCatalog": "Servono gli oggetti del gioco: Kiln li legge prima",
+        "removeCategory": "Rimuovi questo gruppo",
+        "offer": "Accettare uno qualsiasi del suo gruppo?",
+        "offerAria": "Accetta invece uno qualsiasi del suo gruppo ({anyOf})",
         "modNote": "Modifica la ricetta della mod; il livello del pack vince (si carica dopo {mod}).",
         "stationNote": "Una ricetta del gioco mantiene la sua postazione; le nuove ricette scelgono la propria.",
         "new": "Nuove ricette",
@@ -5437,7 +5461,8 @@
         "stationPh": "Cerca postazioni",
         "hand": "Creata a mano",
         "noStation": "Ogni nuova ricetta richiede una postazione",
-        "needStacks": "Ogni nuova ricetta richiede un ingrediente e un risultato"
+        "needStacks": "Ogni nuova ricetta richiede un ingrediente e un risultato",
+        "noCategory": "Scegli un gruppo per ogni ingrediente «Uno tra»"
       },
       "drops": {
         "lead": "Inventari predefiniti: bottino dei nemici e forzieri fissi, per tabella o per ogni tabella (*).",

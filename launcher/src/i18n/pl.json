@@ -5693,6 +5693,34 @@
         "itemAria": "Przedmiot",
         "countAria": "Liczba",
         "category": "dowolny przedmiot z kategorii {id}",
+        "addCategory": "+ Dowolny z grupy",
+        "addCategoryTip": "Składnik, który można opłacić dowolnym przedmiotem z grupy, np. dowolnym drewnem",
+        "anyOf": "Dowolny z: {names}",
+        "anyOfMore": "Dowolny z: {names}, +{count} więcej",
+        "categoryAria": "Grupa przedmiotów",
+        "categoryPh": "Szukaj po dowolnym przedmiocie z grupy",
+        "categoryNone": "Żadna grupa nie zawiera tego przedmiotu",
+        "categoryItems": {
+          "one": "{count} przedmiot",
+          "few": "{count} przedmioty",
+          "many": "{count} przedmiotów",
+          "other": "{count} przedmiotu"
+        },
+        "categoryUsed": {
+          "one": "używa jej {count} receptura gry",
+          "few": "używają jej {count} receptury gry",
+          "many": "używa jej {count} receptur gry",
+          "other": "używa jej {count} receptury gry"
+        },
+        "categoryUnused": "Żadna receptura gry jej nie używa",
+        "categoryUsedBy": "Receptury gry, które jej używają: {names}",
+        "categoryUsedByMore": "Receptury gry, które jej używają: {names}, +{count} więcej",
+        "categoryShow": "Pokaż przedmioty",
+        "categoryHide": "Ukryj przedmioty",
+        "categoryNoCatalog": "Potrzebne są przedmioty gry: Kiln najpierw je odczyta",
+        "removeCategory": "Usuń tę grupę",
+        "offer": "Przyjąć dowolny z jego grupy?",
+        "offerAria": "Przyjmij zamiast tego dowolny z jego grupy ({anyOf})",
         "modNote": "Zmienia recepturę moda; warstwa paczki wygrywa (ładuje się po {mod}).",
         "stationNote": "Receptura z gry zachowuje swoją stację; nowe receptury wybierają własną.",
         "new": "Nowe receptury",
@@ -5703,7 +5731,8 @@
         "stationPh": "Szukaj stacji",
         "hand": "Wytwarzane ręcznie",
         "noStation": "Każda nowa receptura potrzebuje stacji",
-        "needStacks": "Każda nowa receptura potrzebuje składnika i wyniku"
+        "needStacks": "Każda nowa receptura potrzebuje składnika i wyniku",
+        "noCategory": "Wybierz grupę dla każdego składnika „Dowolny z”"
       },
       "drops": {
         "lead": "Domyślne ekwipunki: łup z wrogów i stałe skrzynie, według tabeli lub dla każdej tabeli (*).",

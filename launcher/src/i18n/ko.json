@@ -5294,6 +5294,28 @@
         "itemAria": "아이템",
         "countAria": "개수",
         "category": "카테고리 {id}의 모든 아이템",
+        "addCategory": "+ 그룹 중 아무거나",
+        "addCategoryTip": "그룹의 어떤 아이템으로도 낼 수 있는 재료 (예: 아무 목재)",
+        "anyOf": "다음 중 아무거나: {names}",
+        "anyOfMore": "다음 중 아무거나: {names} 외 {count}개",
+        "categoryAria": "아이템 그룹",
+        "categoryPh": "포함된 아이템으로 검색",
+        "categoryNone": "그 아이템이 든 그룹이 없습니다",
+        "categoryItems": {
+          "other": "아이템 {count}개"
+        },
+        "categoryUsed": {
+          "other": "게임 레시피 {count}개에서 사용"
+        },
+        "categoryUnused": "이 그룹을 쓰는 게임 레시피가 없습니다",
+        "categoryUsedBy": "이 그룹을 쓰는 게임 레시피: {names}",
+        "categoryUsedByMore": "이 그룹을 쓰는 게임 레시피: {names} 외 {count}개",
+        "categoryShow": "아이템 보기",
+        "categoryHide": "아이템 숨기기",
+        "categoryNoCatalog": "게임 아이템 정보가 필요합니다: Kiln이 먼저 읽습니다",
+        "removeCategory": "이 그룹 제거",
+        "offer": "그룹 중 아무거나 받을까요?",
+        "offerAria": "대신 그룹 중 아무거나 받기 ({anyOf})",
         "modNote": "모드의 레시피를 변경합니다. 팩 레이어가 우선합니다 ({mod} 뒤에 로드됨).",
         "stationNote": "게임의 레시피는 제작대가 그대로 유지되고, 새 레시피는 제작대를 직접 고릅니다.",
         "new": "새 레시피",
@@ -5304,7 +5326,8 @@
         "stationPh": "제작대 검색",
         "hand": "손으로 제작",
         "noStation": "모든 새 레시피에는 제작대가 필요합니다",
-        "needStacks": "모든 새 레시피에는 재료와 결과물이 필요합니다"
+        "needStacks": "모든 새 레시피에는 재료와 결과물이 필요합니다",
+        "noCategory": "모든 \"아무거나\" 재료에 그룹을 고르세요"
       },
       "drops": {
         "lead": "기본 인벤토리: 적 전리품과 고정 상자를 테이블별로 또는 모든 테이블(*)에 설정합니다.",

@@ -1080,3 +1080,49 @@ fn hidden_names_keep_what_the_game_uses() {
     let lc = crate::lint::Catalog::from_json(Path::new("client.json"), &doc);
     assert!(lc.used.contains("Material_T5_MountainWoodlouse_FishingBait_WIP") && lc.used.contains(super::STATION_WATER) && !lc.used.contains("Z_Material_Sand_DEPRECATED"));
 }
+
+/// Pack Studio's category picker: each category with its items' display names (a name the items section lacks keeps
+/// none), the recipes that take it (ids compared as numbers, once per recipe), hidden marks as the pickers' (a member
+/// counts as used), and the fixture's one category.
+#[test]
+fn item_categories_name_their_items_and_recipes() {
+    let doc = serde_json::json!({
+        "format": 1, "kind": "kiln.catalog",
+        "sections": {
+            "items": [{ "name": "Material_T1_Wood_Logs", "displayName": "Wood Logs" }, { "name": "Material_T5_Wood_Logs_Pine", "displayName": "Conifer Logs" },
+                      { "name": "Z_Material_Sand_DEPRECATED", "displayName": "Sand" }],
+            "recipes": [
+                { "name": "Recipe_Tool_Camera", "displayName": "Camera", "inputs": [{ "item": "Material_T1_Wood_Logs", "count": 1 }, { "category": "0xEE5AE93F", "count": 2 }, { "category": "0xee5ae93f", "count": 1 }] },
+                { "name": "Recipe_Charcoal", "inputs": [{ "category": 3998935359u32, "count": 1 }] },
+                { "name": "Recipe_Sandglass", "inputs": [{ "category": "0x00000002", "count": 1 }] }
+            ],
+            "itemCategories": [
+                { "id": "0xee5ae93f", "items": ["Material_T1_Wood_Logs", "Material_T5_Wood_Logs_Pine", "Material_Unknown_Wood"] },
+                { "id": "0x00000002", "items": ["Z_Material_Sand_DEPRECATED"] },
+                { "items": ["Material_T1_Wood_Logs"] }
+            ]
+        }
+    });
+    let cat: Catalog = serde_json::from_value(doc).unwrap();
+    let cats = super::item_categories(&cat);
+    assert_eq!(cats.len(), 2, "an entry without an id is left out");
+    let wood = &cats[0];
+    assert_eq!(wood.id, "0xee5ae93f");
+    let shown: Vec<(&str, Option<&str>)> = wood.items.iter().map(|i| (i.name.as_str(), i.display_name.as_deref())).collect();
+    assert_eq!(shown, [("Material_T1_Wood_Logs", Some("Wood Logs")), ("Material_T5_Wood_Logs_Pine", Some("Conifer Logs")), ("Material_Unknown_Wood", None)]);
+    let recipes: Vec<(&str, Option<&str>)> = wood.recipes.iter().map(|r| (r.name.as_str(), r.display_name.as_deref())).collect();
+    assert_eq!(recipes, [("Recipe_Tool_Camera", Some("Camera")), ("Recipe_Charcoal", None)]);
+    // a hidden-looking member is one the game uses: not hidden
+    assert_eq!(cats[1].items.len(), 1);
+    assert!(!cats[1].items[0].hidden);
+    assert_eq!(cats[1].recipes.len(), 1);
+    let v = serde_json::to_value(&cats[0]).unwrap();
+    assert_eq!(v["items"][0], serde_json::json!({ "name": "Material_T1_Wood_Logs", "displayName": "Wood Logs" }));
+    assert_eq!(v["recipes"][1], serde_json::json!({ "name": "Recipe_Charcoal" }));
+    assert!(v.get("name").is_none());
+
+    let fx = super::item_categories(&Catalog::load(&fixture().join("client.json")).unwrap());
+    assert_eq!(fx.len(), 1);
+    assert_eq!(fx[0].items[0].display_name.as_deref(), Some("Ice Shard"));
+    assert_eq!(fx[0].recipes.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["Test_Frost_Blade"]);
+}

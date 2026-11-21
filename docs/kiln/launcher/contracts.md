@@ -1661,6 +1661,7 @@ line, the last one wins, else `KILN_LAUNCHER_UI=deck|desktop`). The UI: `forced`
 | studio | `studio_layer_write` / `studio_layer_delete` / `studio_layer_set` / `studio_layer_lint` | packId, path, text / path / section, selector, field, value | `LintReport` of the layer |
 | studio | `studio_pick` | packId, section, query, limit? | `PickHit[]` {section, name, id?, displayName?, from?} |
 | studio | `studio_fields` | section | catalog `FieldInfo[]` |
+| studio | `studio_categories` | - | `ItemCategory[]` {id, name?, items: {name, displayName?, hidden?}[], recipes: {name, displayName?}[]}: the catalog's recipe input categories, their items' display names and the game's recipes that take each (the recipe editor's "Any of" input); empty without a catalog |
 | studio | `studio_analyze` | packId | TaskId -> `CheckReport` (modpack::check) |
 | studio | `studio_test` | packId, gameId? | TaskId -> `pack::InstallResult` ("<name> (test)") |
 | studio | `studio_test_report` / `studio_test_end` | packId (, gameId?) | `TestReport` {profile?, ran, conflicts, problems} / null |

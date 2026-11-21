@@ -5427,6 +5427,30 @@
         "itemAria": "Item",
         "countAria": "Quantidade",
         "category": "qualquer item da categoria {id}",
+        "addCategory": "+ Qualquer um de um grupo",
+        "addCategoryTip": "Um ingrediente pago com qualquer item de um grupo, como qualquer madeira",
+        "anyOf": "Qualquer um de: {names}",
+        "anyOfMore": "Qualquer um de: {names}, +{count} outros",
+        "categoryAria": "Grupo de itens",
+        "categoryPh": "Busque por qualquer item do grupo",
+        "categoryNone": "Nenhum grupo tem esse item",
+        "categoryItems": {
+          "one": "{count} item",
+          "other": "{count} itens"
+        },
+        "categoryUsed": {
+          "one": "usado por {count} receita do jogo",
+          "other": "usado por {count} receitas do jogo"
+        },
+        "categoryUnused": "Nenhuma receita do jogo usa",
+        "categoryUsedBy": "Receitas do jogo que usam: {names}",
+        "categoryUsedByMore": "Receitas do jogo que usam: {names}, +{count} outras",
+        "categoryShow": "Ver os itens",
+        "categoryHide": "Esconder os itens",
+        "categoryNoCatalog": "Precisa dos itens do jogo: o Kiln lê primeiro",
+        "removeCategory": "Remover este grupo",
+        "offer": "Aceitar qualquer um do grupo?",
+        "offerAria": "Aceitar qualquer um do grupo no lugar ({anyOf})",
         "modNote": "Altera a receita do mod; a camada do pack vence (ela carrega depois de {mod}).",
         "stationNote": "Uma receita do jogo mantém a sua estação; receitas novas escolhem a própria.",
         "new": "Receitas novas",
@@ -5437,7 +5461,8 @@
         "stationPh": "Buscar estações",
         "hand": "Feita à mão",
         "noStation": "Toda receita nova precisa de uma estação",
-        "needStacks": "Toda receita nova precisa de um ingrediente e um resultado"
+        "needStacks": "Toda receita nova precisa de um ingrediente e um resultado",
+        "noCategory": "Escolha um grupo para cada ingrediente \"Qualquer um de\""
       },
       "drops": {
         "lead": "Inventários padrão: saque de inimigos e baús fixos, por tabela ou para todas as tabelas (*).",

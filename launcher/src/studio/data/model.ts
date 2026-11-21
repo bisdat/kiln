@@ -137,14 +137,24 @@ export function duplicates(sels: string[]): Set<string> {
 
 // ---------------------------------------------------------------- stacks (recipes, drops)
 
-export interface Stack { item: string; count: number; category?: string }
+/** An input or output: an item, or (inputs) any item of a category of the game ({"category": "0x..", count}; rule stacks
+ *  may write the id as a number, kept as written). category "": a category stack whose category is not chosen yet. */
+export interface Stack { item: string; count: number; category?: string | number }
+/** A stack's category, when it is one (a chosen or still empty category, no item). */
+export const isCategoryStack = (s: Stack): boolean => s.category !== undefined && !s.item.trim();
+const hasCategory = (s: Stack): boolean => s.category !== undefined && s.category !== "";
 export function stacksOf(v: Json | undefined): Stack[] | null {
   if (!Array.isArray(v)) return null;
   return v.map((x) => typeof x === "string" ? { item: x, count: 1 }
-    : isObj(x) ? { item: typeof x.item === "string" ? x.item : "", count: typeof x.count === "number" ? x.count : 1, ...(x.category !== undefined ? { category: String(x.category) } : {}) }
+    : isObj(x) ? { item: typeof x.item === "string" ? x.item : "", count: typeof x.count === "number" ? x.count : 1,
+      ...(typeof x.category === "string" || typeof x.category === "number" ? { category: x.category } : x.category !== undefined && x.category !== null ? { category: String(x.category) } : {}) }
       : { item: "", count: 1 });
 }
-export const stacksValue = (s: Stack[]): Json => s.filter((x) => x.item.trim() || x.category).map((x): Obj => (x.category && !x.item ? { category: x.category, count: x.count } : { item: x.item.trim(), count: x.count }));
+/** The stacks as written: {item, count}, {category, count}; a stack holding both (a rule may) keeps both; empty ones
+ *  (no item, no category chosen) are left out. */
+export const stacksValue = (s: Stack[]): Json => s.filter((x) => x.item.trim() || hasCategory(x)).map((x): Obj => (
+  !x.item.trim() ? { category: x.category as string | number, count: x.count }
+    : hasCategory(x) ? { item: x.item.trim(), category: x.category as string | number, count: x.count } : { item: x.item.trim(), count: x.count }));
 
 /** A recipe rule: "<recipe>": {inputs, outputs, craftingDuration, ...the rest kept}. */
 export interface RecipeRule { sel: string; inputs: Stack[] | null; outputs: Stack[] | null; duration: number | null; rest: Obj }

@@ -2339,7 +2339,7 @@ export const COMMANDS = [
   "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",
   "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
   "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "pack_local_files", "pack_local_write", "pack_local_save", "pack_check", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links", "crucible_resume", "crucible_clipboard",
-  "studio_list", "studio_create", "studio_get", "studio_save", "studio_delete", "studio_credits_set", "studio_capture", "studio_capture_set", "studio_order", "studio_layer_files", "studio_layer_read", "studio_layer_write", "studio_layer_delete", "studio_layer_set", "studio_layer_lint", "studio_pick", "studio_fields", "studio_catalog_status", "studio_catalog_ensure", "studio_analyze", "studio_test", "studio_test_report", "studio_test_end", "studio_build", "studio_publish_check", "studio_publish", "studio_set_visibility", "studio_server_pack",
+  "studio_list", "studio_create", "studio_get", "studio_save", "studio_delete", "studio_credits_set", "studio_capture", "studio_capture_set", "studio_order", "studio_layer_files", "studio_layer_read", "studio_layer_write", "studio_layer_delete", "studio_layer_set", "studio_layer_lint", "studio_pick", "studio_fields", "studio_categories", "studio_catalog_status", "studio_catalog_ensure", "studio_analyze", "studio_test", "studio_test_report", "studio_test_end", "studio_build", "studio_publish_check", "studio_publish", "studio_set_visibility", "studio_server_pack",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -2845,6 +2845,13 @@ export interface StudioOrder { kiln: StudioOrderRow[]; late: string[]; warnings:
 export interface StudioLayerFile { path: string; size: number }
 /** `hidden`: one of the game's old, test or unused entries (kiln_manage::catalog::is_hidden_name), listed only when asked. */
 export interface StudioPickHit { section: string; name: string; id?: string; displayName?: string; from?: string; hidden?: boolean }
+/** A recipe input category of the game (kiln_manage::catalog::ItemCategory): recipe inputs {"category": id} take any of
+ *  its items; the game names none, so the editor words it by its items. `recipes`: the game's recipes that take it. */
+export interface StudioItemCategory {
+  id: string; name?: string;
+  items: { name: string; displayName?: string; hidden?: boolean }[];
+  recipes: { name: string; displayName?: string }[];
+}
 /** A catalog section's field (kiln_manage::catalog::FieldInfo). */
 /** Pack Studio's game-data catalog upkeep (kiln_manage::catalog::auto): made by Kiln when it is missing or not current. */
 export type StudioCatalogState = "idle" | "building" | "ready" | "failed" | "noGame";
@@ -2909,6 +2916,8 @@ export const studioLayerSet = (packId: string, section: string, selector: string
 export const studioLayerLint = (packId: string) => call<LintReport>("studio_layer_lint", { packId });
 /** Game entries (the catalog) and what the pack's mods add, for the data editors' pickers. */
 export const studioPick = (packId: string, section: string, query: string, limit = 50, hidden = false) => call<StudioPickHit[]>("studio_pick", { packId, section, query, limit, hidden });
+/** The game's recipe input categories (the recipe editor's "Any of" ingredient); empty without a catalog. */
+export const studioCategories = () => call<StudioItemCategory[]>("studio_categories");
 export const studioFields = (section: string) => call<CatalogFieldInfo[]>("studio_fields", { section });
 /** Where the catalog's upkeep is (polled while it builds). */
 export const studioCatalogStatus = () => call<StudioCatalogStatus>("studio_catalog_status");

@@ -129,6 +129,110 @@ test("Recipes: change the mod's recipe (game and pack-mod items, station, durati
   await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 0 warnings");
 });
 
+test("Recipes: an input that takes any of a group, found by any of its items; saved as {category, count} and read back; outputs offer none", async ({ page }) => {
+  await open(page, "recipes");
+  await page.getByTestId("data-recipes-new").click();
+  await page.getByTestId("data-recipes-new-0-name").fill("Coal_From_Any_Wood");
+  await pick(page, "data-recipes-new-0-out-0-item", "iron", "Material_T3_Iron_Bar");
+  // outputs never offer a group
+  await expect(page.getByTestId("data-recipes-new-0-in-add-category")).toBeVisible();
+  await expect(page.getByTestId("data-recipes-new-0-out-add-category")).toHaveCount(0);
+  // an item that one group holds offers the group
+  await pick(page, "data-recipes-new-0-in-0-item", "conifer", "Material_T5_Wood_Logs_Pine");
+  const offer = page.getByTestId("data-recipes-new-0-in-0-offer");
+  await expect(offer).toHaveText("Accept any of its group?");
+  await expect(offer).toHaveAccessibleName("Accept any of its group instead (Any of: Wood Logs, Hardwood, Palm Wood Logs, +2 more)");
+  // + Any of a group: every group listed, then searched by a member item, chosen with the keyboard
+  await page.getByTestId("data-recipes-new-0-in-add-category").click();
+  const input = page.getByTestId("data-recipes-new-0-in-1-category-input");
+  await expect(input).toBeFocused();
+  await expect(input).toHaveAccessibleName("Group of items");
+  await expect(page.getByTestId("data-recipes-new-0-in-1-category-hit-0xee5ae93f")).toContainText("Any of: Wood Logs, Hardwood, Palm Wood Logs, +2 more");
+  await expect(page.getByTestId("data-recipes-problem")).toHaveText('Choose a group for every "Any of" input');
+  await input.fill("limest");
+  await expect(page.getByTestId("data-recipes-new-0-in-1-category-hit-0xee5ae93f")).toHaveCount(0);
+  const stones = page.getByTestId("data-recipes-new-0-in-1-category-hit-0xb053f0f1");
+  await expect(stones).toContainText("Any of: Stone, Limestone");
+  await expect(stones).toContainText("2 items · used by 1 game recipe");
+  await shot(page, "data-recipes-category-picker");
+  await input.press("ArrowDown");
+  await input.press("Enter");
+  // the chosen group replaces the picker: focus moves to its chip's expand button, not to the top of the page
+  await expect(page.getByTestId("data-recipes-new-0-in-1-category-expand")).toBeFocused();
+  const chip = page.getByTestId("data-recipes-new-0-in-1-category-chip");
+  await expect(chip).toContainText("Any of: Stone, Limestone");
+  await expect(chip).toHaveAttribute("title", "Stone, Limestone");
+  await page.getByTestId("data-recipes-new-0-in-1-count").fill("3");
+  await page.getByTestId("data-recipes-new-0-in-1-count").press("Enter");
+  // the offer: the first input becomes the woods, its count kept
+  await offer.click();
+  await expect(page.getByTestId("data-recipes-new-0-in-0-category-expand")).toBeFocused();
+  const woods = page.getByTestId("data-recipes-new-0-in-0-category-chip");
+  await expect(woods).toContainText("Any of: Wood Logs, Hardwood, Palm Wood Logs, +2 more");
+  await expect(woods).toHaveAttribute("title", "Wood Logs, Hardwood, Palm Wood Logs, Conifer Logs, Bamboo Logs");
+  // expand: its items and the game's recipes that take it
+  const expand = page.getByTestId("data-recipes-new-0-in-0-category-expand");
+  await expect(expand).toHaveAttribute("aria-expanded", "false");
+  await expect(expand).toHaveAccessibleName("Show its items");
+  await expand.click();
+  await expect(expand).toHaveAttribute("aria-expanded", "true");
+  const panel = page.getByTestId("data-recipes-new-0-in-0-category-panel");
+  await expect(panel).toContainText("Conifer Logs");
+  await expect(panel).toContainText("Material_T6_Wood_Logs_Bamboo");
+  await expect(page.getByTestId("data-recipes-new-0-in-0-category-recipes")).toHaveText("Game recipes that take it: Camera, Charcoal, Wood Block");
+  await shot(page, "data-recipes-category");
+  // a change to a game recipe: its inputs take a group too, its outputs do not
+  await page.getByTestId("data-recipes-add").click();
+  await pick(page, "data-recipes-rule-0-sel", "berry", "Recipe_Consumable_Food_Berry_Pie");
+  await page.getByTestId("data-recipes-rule-0-in-on").check();
+  await page.getByTestId("data-recipes-rule-0-out-on").check();
+  await expect(page.getByTestId("data-recipes-rule-0-out-add-category")).toHaveCount(0);
+  await page.getByTestId("data-recipes-rule-0-out-on").uncheck();
+  await page.getByTestId("data-recipes-rule-0-in-0-remove").click();
+  await page.getByTestId("data-recipes-rule-0-in-add-category").click();
+  await page.getByTestId("data-recipes-rule-0-in-0-category-input").fill("bamboo");
+  await page.getByTestId("data-recipes-rule-0-in-0-category-hit-0xee5ae93f").click();
+  await page.getByTestId("data-recipes-save").click();
+  await expect(page.getByTestId("data-recipes-state")).toHaveText("Saved");
+  const doc = await fileOf(page, "content/recipes.json");
+  expect(doc.recipes.add[0]).toMatchObject({ name: "Coal_From_Any_Wood", inputs: [{ category: "0xee5ae93f", count: 1 }, { category: "0xb053f0f1", count: 3 }], outputs: [{ item: "Material_T3_Iron_Bar", count: 1 }] });
+  expect(doc.recipes.Recipe_Consumable_Food_Berry_Pie).toEqual({ inputs: [{ category: "0xee5ae93f", count: 1 }] });
+  await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 0 warnings");
+  // read back: away from the Studio and back, the editor reads the file again
+  await page.evaluate(() => { location.hash = "#/"; });
+  await expect(page.getByTestId("studio-data")).toHaveCount(0);
+  await page.evaluate(() => { location.hash = "#/studio/ember-run/data"; });
+  await page.getByTestId("data-sub-recipes").click();
+  await expect(page.getByTestId("data-recipes-new-0-in-0-category-chip")).toContainText("Any of: Wood Logs, Hardwood, Palm Wood Logs, +2 more");
+  await expect(page.getByTestId("data-recipes-new-0-in-1-category-chip")).toContainText("Any of: Stone, Limestone");
+  await expect(page.getByTestId("data-recipes-new-0-in-1-count")).toHaveValue("3");
+  await expect(page.getByTestId("data-recipes-rule-0-in-0-category-chip")).toContainText("Any of: Wood Logs");
+  await expect(page.getByTestId("data-recipes-state")).toHaveText("Saved");
+  // a group the game does not have (typed in Raw JSON): named by its id, and the data check warns
+  const raw = (await layer(page))["content/recipes.json"].replace('"0xb053f0f1"', '"0x0badf00d"');
+  await page.getByTestId("data-sub-raw").click();
+  await page.getByTestId("data-raw-file-content/recipes.json").click();
+  await page.getByTestId("data-raw-text").fill(raw);
+  await page.getByTestId("data-raw-save").click();
+  await expect(page.getByTestId("data-lint")).toHaveText("Data check: 0 errors, 1 warning");
+  await page.getByTestId("data-sub-recipes").click();
+  await expect(page.getByTestId("data-recipes-new-0-in-1-category-chip")).toHaveText("any item of category 0x0badf00d");
+  // an expanded row keeps its own state when a row above it goes (rows have stable keys): woods first, stones second,
+  // stones expanded, the woods removed: the stones, now first, are still the expanded one
+  await page.getByTestId("data-recipes-new-0-in-1-remove").click();
+  await page.getByTestId("data-recipes-new-0-in-add-category").click();
+  await page.getByTestId("data-recipes-new-0-in-1-category-input").fill("limest");
+  await page.getByTestId("data-recipes-new-0-in-1-category-hit-0xb053f0f1").click();
+  await expect(page.getByTestId("data-recipes-new-0-in-1-category-expand")).toBeFocused();
+  await page.getByTestId("data-recipes-new-0-in-1-category-expand").click();
+  await expect(page.getByTestId("data-recipes-new-0-in-1-category-panel")).toBeVisible();
+  await expect(page.getByTestId("data-recipes-new-0-in-0-category-panel")).toHaveCount(0);
+  await page.getByTestId("data-recipes-new-0-in-0-remove").click();
+  await expect(page.getByTestId("data-recipes-new-0-in-0-category-chip")).toContainText("Any of: Stone, Limestone");
+  await expect(page.getByTestId("data-recipes-new-0-in-0-category-panel")).toBeVisible();
+  await expect(page.getByTestId("data-recipes-new-0-in-0-category-expand")).toHaveAttribute("aria-expanded", "true");
+});
+
 test("Loot and Drops: stack sizes per item; a drop table by its GUID with chance and one item's counts", async ({ page }) => {
   await open(page, "loot");
   await page.getByTestId("data-loot-add").click();

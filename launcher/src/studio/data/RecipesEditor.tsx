@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { useT } from "../../i18n";
 import { Button, IconButton, TextInput } from "../../ui";
 import { NumBox } from "./Fields";
-import { NAME_RE, duplicates, isObj, newGuid, readDoc, recipeDefValue, recipeDefsOf, recipeRuleBody, recipeRulesOf, withSection, type Obj, type RecipeDef, type RecipeRule } from "./model";
+import { NAME_RE, duplicates, isObj, newGuid, readDoc, recipeDefValue, recipeDefsOf, recipeRuleBody, recipeRulesOf, withSection, type Obj, type RecipeDef, type RecipeRule, type Stack } from "./model";
 import { AlsoIn, SaveBar, StackList, otherFiles, useSaveFile } from "./parts";
 import { Picker, useDataCtx } from "./Picker";
 import { useDraft, useEntry } from "./store";
@@ -28,8 +28,9 @@ export default function RecipesEditor({ texts }: { texts: Record<string, string>
       : defs.some((x) => !NAME_RE.test(x.name.trim())) ? t("studio.data.badName")
         : dupNames.size ? t("studio.data.dupName", { name: [...dupNames][0] })
           : defs.some((x) => !x.station.trim()) ? t("studio.data.recipes.noStation")
-            : defs.some((x) => !x.inputs.some((s) => s.item.trim() || s.category) || !x.outputs.some((s) => s.item.trim())) ? t("studio.data.recipes.needStacks")
-              : null;
+            : defs.some((x) => !x.inputs.some((s) => s.item.trim() || (s.category !== undefined && s.category !== "")) || !x.outputs.some((s) => s.item.trim())) ? t("studio.data.recipes.needStacks")
+              : [...defs.map((x) => x.inputs), ...rules.map((r) => r.inputs ?? [])].some((l) => l.some((s) => s.category === "" && !s.item.trim())) ? t("studio.data.recipes.noCategory")
+                : null;
   const setRule = (i: number, r: RecipeRule) => d.change({ defs, rules: rules.map((x, j) => (j === i ? r : x)) });
   const setDef = (i: number, x: RecipeDef) => d.change({ rules, defs: defs.map((y, j) => (j === i ? x : y)) });
   const save = () => file.save((doc) => {
@@ -68,7 +69,7 @@ export default function RecipesEditor({ texts }: { texts: Record<string, string>
               placeholder={t("studio.data.recipes.stationPh")} aria-label={t("studio.data.recipes.station")} testId={"data-recipes-new-" + i + "-station"} />
             <Button size="s" variant="ghost" onClick={() => setDef(i, { ...x, station: "hand" })} data-testid={"data-recipes-new-" + i + "-hand"}>{t("studio.data.recipes.hand")}</Button>
           </div>
-          <Stacks label={t("studio.data.recipes.inputs")} stacks={x.inputs} onChange={(s) => setDef(i, { ...x, inputs: s })} testId={"data-recipes-new-" + i + "-in"} add={t("studio.data.recipes.addInput")} />
+          <Stacks label={t("studio.data.recipes.inputs")} stacks={x.inputs} onChange={(s) => setDef(i, { ...x, inputs: s })} testId={"data-recipes-new-" + i + "-in"} add={t("studio.data.recipes.addInput")} categories />
           <Stacks label={t("studio.data.recipes.outputs")} stacks={x.outputs} onChange={(s) => setDef(i, { ...x, outputs: s })} testId={"data-recipes-new-" + i + "-out"} add={t("studio.data.recipes.addOutput")} />
           <Duration value={x.duration} onChange={(v) => setDef(i, { ...x, duration: v })} testId={"data-recipes-new-" + i + "-duration"} />
         </div>
@@ -82,11 +83,11 @@ export default function RecipesEditor({ texts }: { texts: Record<string, string>
   );
 }
 
-function Stacks({ label, stacks, onChange, testId, add }: { label: string; stacks: { item: string; count: number; category?: string }[]; onChange: (s: { item: string; count: number }[]) => void; testId: string; add: string }) {
+function Stacks({ label, stacks, onChange, testId, add, categories }: { label: string; stacks: Stack[]; onChange: (s: Stack[]) => void; testId: string; add: string; categories?: boolean }) {
   return (
     <div className="kd-line kd-top">
       <span className="kst-label kd-key">{label}</span>
-      <StackList stacks={stacks} onChange={onChange} testId={testId} addLabel={add} />
+      <StackList stacks={stacks} onChange={onChange} testId={testId} addLabel={add} categories={categories} />
     </div>
   );
 }
@@ -119,7 +120,7 @@ function RuleCard({ i, r, onChange, onRemove }: { i: number; r: RecipeRule; onCh
         <IconButton label={t("studio.data.rules.remove")} icon={<X size={16} />} onClick={onRemove} data-testid={tid + "-remove"} />
       </div>
       <label className="kst-tick"><input type="checkbox" className="k-check" checked={!!r.inputs} onChange={(e) => part(e.target.checked, "inputs")} data-testid={tid + "-in-on"} />{t("studio.data.recipes.changeInputs")}</label>
-      {r.inputs && <StackList stacks={r.inputs} onChange={(s) => onChange({ ...r, inputs: s })} testId={tid + "-in"} addLabel={t("studio.data.recipes.addInput")} />}
+      {r.inputs && <StackList stacks={r.inputs} onChange={(s) => onChange({ ...r, inputs: s })} testId={tid + "-in"} addLabel={t("studio.data.recipes.addInput")} categories />}
       <label className="kst-tick"><input type="checkbox" className="k-check" checked={!!r.outputs} onChange={(e) => part(e.target.checked, "outputs")} data-testid={tid + "-out-on"} />{t("studio.data.recipes.changeOutputs")}</label>
       {r.outputs && <StackList stacks={r.outputs} onChange={(s) => onChange({ ...r, outputs: s })} testId={tid + "-out"} addLabel={t("studio.data.recipes.addOutput")} />}
       <Duration value={r.duration} onChange={(v) => onChange({ ...r, duration: v })} testId={tid + "-duration"} />

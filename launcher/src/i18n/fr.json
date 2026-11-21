@@ -5427,6 +5427,30 @@
         "itemAria": "Objet",
         "countAria": "Quantité",
         "category": "n'importe quel objet de la catégorie {id}",
+        "addCategory": "+ N'importe lequel d'un groupe",
+        "addCategoryTip": "Un ingrédient payable avec n'importe quel objet d'un groupe, par exemple n'importe quel bois",
+        "anyOf": "Au choix : {names}",
+        "anyOfMore": "Au choix : {names}, +{count} autres",
+        "categoryAria": "Groupe d'objets",
+        "categoryPh": "Chercher par un objet du groupe",
+        "categoryNone": "Aucun groupe ne contient cet objet",
+        "categoryItems": {
+          "one": "{count} objet",
+          "other": "{count} objets"
+        },
+        "categoryUsed": {
+          "one": "utilisé par {count} recette du jeu",
+          "other": "utilisé par {count} recettes du jeu"
+        },
+        "categoryUnused": "Aucune recette du jeu ne l'utilise",
+        "categoryUsedBy": "Recettes du jeu qui l'utilisent : {names}",
+        "categoryUsedByMore": "Recettes du jeu qui l'utilisent : {names}, +{count} autres",
+        "categoryShow": "Voir ses objets",
+        "categoryHide": "Masquer ses objets",
+        "categoryNoCatalog": "Il faut les objets du jeu : Kiln les lit d'abord",
+        "removeCategory": "Retirer ce groupe",
+        "offer": "Accepter n'importe quel objet de son groupe ?",
+        "offerAria": "Accepter plutôt n'importe quel objet de son groupe ({anyOf})",
         "modNote": "Modifie la recette du mod ; la couche du pack l'emporte (elle se charge après {mod}).",
         "stationNote": "Une recette du jeu garde son poste de fabrication ; les nouvelles recettes choisissent le leur.",
         "new": "Nouvelles recettes",
@@ -5437,7 +5461,8 @@
         "stationPh": "Rechercher des postes",
         "hand": "Fabriquée à la main",
         "noStation": "Chaque nouvelle recette a besoin d'un poste de fabrication",
-        "needStacks": "Chaque nouvelle recette a besoin d'un ingrédient et d'un résultat"
+        "needStacks": "Chaque nouvelle recette a besoin d'un ingrédient et d'un résultat",
+        "noCategory": "Choisissez un groupe pour chaque ingrédient « Au choix »"
       },
       "drops": {
         "lead": "Inventaires par défaut : butin des ennemis et coffres fixes, par table ou pour toutes les tables (*).",
