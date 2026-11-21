@@ -640,15 +640,28 @@ void core_rows(const std::filesystem::path& dir) {
         CHECK(is("client.building_input", A, 0) &&
                   get("client.building_input").text == "the input producer is bound to this game build",
               "building input: bound after the rows were built: the row follows (%s)", get("client.building_input").text.c_str());
-        // a final install failure after the rows were built: the row follows with the failure's reason
+        // a first install that failed for good, through a submit after the rows were built: the row follows, faulted
+        // (its hook could not be installed, not a symbol this build lacks), with the installer's reason
         kiln::building_input::reset_for_tests();
-        kiln::building_input::set_installer(+[](kiln::building_input::Layout*, const char**) { return kiln::building_input::Install::Again; });
+        kiln::building_input::set_installer(+[](kiln::building_input::Layout*, const char** why) {
+            *why = "the test install failed";
+            return kiln::building_input::Install::Failed;
+        });
         caps::core_rows(true, true, "");
-        kiln::building_input::set_installer(nullptr);
-        kiln::building_input::unbound_reason("hooking the local input observation point failed at the first request (kiln.log says why)");
-        CHECK(is("client.building_input", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
-                  get("client.building_input").text.find("at the first request") != std::string::npos,
-              "building input: a failed first install after the rows were built: unavailable with its reason");
+        {
+            KilnBuildingInput undo{};
+            undo.size = sizeof undo;
+            undo.action = KILN_BUILDING_ACTION_UNDO;
+            undo.player = 1;
+            uint32_t id = 0;
+            const kiln::building_input::Env env{true, true, true, 1, nullptr};
+            CHECK(kiln::building_input::submit(env, 1, 0, &undo, &id) == KILN_ERR_UNAVAILABLE && id == 0,
+                  "building input: a first submit whose install fails answers unavailable");
+        }
+        CHECK(is("client.building_input", U, KILN_CAP_REASON_FAULTED) &&
+                  get("client.building_input").text == "the test install failed",
+              "building input: a failed first install after the rows were built: unavailable, faulted, with its reason (%s)",
+              get("client.building_input").text.c_str());
         kiln::building_input::bind(&layout);
         caps::core_rows(true, true, "");
         CHECK(is("client.building_input", A, 0), "building input: a bound producer on the client: available");

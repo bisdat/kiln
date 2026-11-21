@@ -17,6 +17,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -840,11 +841,16 @@ void unbound_reasons() {
 std::atomic<int> g_install_calls{0};
 std::atomic<int> g_install_script[8];  // per call: 0 Bound, 1 Again, 2 Failed
 std::atomic<int> g_install_delay_ms{0};
+std::atomic<int> g_entered{0};          // submits a test's threads have started
+std::atomic<int> g_install_wait_for{0}; // the installer first waits until this many have started (0: no wait)
 const char* const kInstallWhy = "the test installer failed";
 bi::Install test_installer(bi::Layout* layout, const char** why) {
     const int n = g_install_calls.fetch_add(1);
+    if (const int want = g_install_wait_for.load())
+        for (int i = 0; i < 5000 && g_entered.load() < want; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     if (const int ms = g_install_delay_ms.load()) std::this_thread::sleep_for(std::chrono::milliseconds(ms));
     const int script = n < 8 ? g_install_script[n].load() : 2;
+    if (script == 3) throw std::runtime_error("the test installer threw");  // 3: an install that throws
     if (script == 0) {
         *layout = kLayout;
         return bi::Install::Bound;
@@ -858,6 +864,8 @@ void lazy(std::initializer_list<int> script, int delay_ms = 0) {
     g_now = 1000;
     g_install_calls = 0;
     g_install_delay_ms = delay_ms;
+    g_entered = 0;
+    g_install_wait_for = 0;
     int i = 0;
     for (auto& s : g_install_script) s = 2;
     for (int s : script) g_install_script[i++] = s;
@@ -948,6 +956,96 @@ void lazy_install() {
     bi::reset_for_tests();
 }
 
+// The lazy producer's edges: a burst of first submits spends one refused attempt, an install that binds never answers a
+// first submit that comes meanwhile unavailable, and an installer that throws is a final failure, never an exception out
+// of submit.
+void lazy_install_edges() {
+    using namespace std::chrono_literals;
+    KilnBuildingInput in = request(KILN_BUILDING_ACTION_PLACE);
+    uint32_t id = 0;
+
+    // eight first submits at once, the install refused for threads it could not check: the ones that waited for that
+    // attempt take its answer (one attempt for the burst); a later submit tries again
+    lazy({1, 0}, 100);
+    constexpr int kThreads = 8;
+    g_install_wait_for = kThreads;
+    std::atomic<int> unavailable{0}, other{0};
+    std::atomic<bool> go{false};
+    std::vector<std::thread> threads;
+    for (int t = 0; t < kThreads; ++t)
+        threads.emplace_back([&, t] {
+            while (!go.load()) std::this_thread::yield();
+            KilnBuildingInput mine = request(KILN_BUILDING_ACTION_PLACE);
+            uint32_t got = 0;
+            g_entered.fetch_add(1);
+            const KilnResult rc = bi::submit(kEnv, static_cast<KilnOwner>(100 + t), 0, &mine, &got);
+            (rc == KILN_ERR_UNAVAILABLE ? unavailable : other).fetch_add(1);
+        });
+    go = true;
+    for (auto& t : threads) t.join();
+    check(g_install_calls == 1 && unavailable == kThreads && other == 0 && bi::usable(nullptr, nullptr),
+          "lazy: concurrent first submits refused for threads it could not check spend one attempt, not all three",
+          std::to_string(g_install_calls.load()) + " installer calls, " + std::to_string(unavailable.load()) +
+              " unavailable, " + std::to_string(other.load()) + " other");
+    g_install_wait_for = 0;
+    check(bi::submit(kEnv, A, 0, &in, &id) == KILN_OK && g_install_calls == 2 && bi::bound(nullptr),
+          "lazy: after a refused burst, a later submit tries again and installs");
+
+    // an install that binds: a first submit that comes while it binds waits for it, and usable() stays true
+    lazy({0});
+    {
+        std::atomic<int> a_rc{-1}, b_rc{-1};
+        std::unique_lock slot(bi::mutex_for_tests());  // bind() takes the slot: the install is held right there
+        std::thread a([&] {
+            KilnBuildingInput mine = request(KILN_BUILDING_ACTION_PLACE);
+            uint32_t got = 0;
+            a_rc = bi::submit(kEnv, A, 0, &mine, &got);
+        });
+        for (int i = 0; i < 5000 && g_install_calls == 0; ++i) std::this_thread::sleep_for(1ms);
+        std::this_thread::sleep_for(100ms);  // the installer returned: the install waits for the slot to bind
+        const bool usable_while_binding = bi::usable(nullptr, nullptr);
+        std::thread b([&] {
+            KilnBuildingInput mine = request(KILN_BUILDING_ACTION_PLACE);
+            uint32_t got = 0;
+            b_rc = bi::submit(kEnv, B, 0, &mine, &got);
+        });
+        std::this_thread::sleep_for(100ms);
+        const int b_early = b_rc.load();
+        slot.unlock();
+        a.join();
+        b.join();
+        const bool one_each = (a_rc == KILN_OK && b_rc == KILN_CLIENT_ERR_BUILDING_BUSY) ||
+                              (a_rc == KILN_CLIENT_ERR_BUILDING_BUSY && b_rc == KILN_OK);
+        check(usable_while_binding && b_early == -1 && one_each && g_install_calls == 1 && bi::bound(nullptr),
+              "lazy: a first submit while the install binds waits for it (never unavailable); usable all along",
+              std::string("usable while binding ") + (usable_while_binding ? "yes" : "no") + ", second submit early " +
+                  std::to_string(b_early) + ", answers " + std::to_string(a_rc.load()) + " and " + std::to_string(b_rc.load()));
+    }
+
+    // an installer that throws: final, unavailable with a reason, and the install mutex is free again
+    lazy({3});
+    bool threw = false;
+    KilnResult rc = KILN_OK;
+    try {
+        rc = bi::submit(kEnv, A, 0, &in, &id);
+    } catch (...) {
+        threw = true;
+    }
+    const char* why = nullptr;
+    bool final_after = false;
+    if (!threw) {
+        try {
+            final_after = !bi::usable(&why, nullptr) && why && bi::submit(kEnv, A, 0, &in, &id) == KILN_ERR_UNAVAILABLE &&
+                          g_install_calls == 1;
+        } catch (...) {
+        }
+    }
+    check(!threw && rc == KILN_ERR_UNAVAILABLE && final_after,
+          "lazy: an installer that throws is a final failure: unavailable with a reason, never an exception out of submit");
+    bi::set_installer(nullptr);
+    bi::reset_for_tests();
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IOLBF, 0);  // a hang (the script's time limit) still shows how far it got
     unbound_reasons();
@@ -971,6 +1069,7 @@ int main() {
     no_allocation();
     concurrent_copied_status();
     lazy_install();
+    lazy_install_edges();
     bi::set_clock_for_tests(nullptr);
     std::printf("client building input: %d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;

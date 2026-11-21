@@ -76,21 +76,25 @@ KilnResult cancel(const Env& env, KilnOwner owner, uint32_t request_id, uint32_t
 void bind(const Layout* layout);
 bool bound(const char** why);
 // What bound() answers while unbound: a static string (nullptr: the default, no observation point on this build).
+// Clears install_failed().
 void unbound_reason(const char* why);
 
 // The lazy producer. On a build where the producer can be bound, client.cpp gives an installer at its start instead of
 // installing anything: the first submit that passes its own checks (arguments, owner, a live client session) calls it,
-// once, on the submitting thread, and binds the layout it fills. A player without a mod that submits never gets the
-// hook. The installer runs under its own mutex (never the slot's), so concurrent first submits wait for the one install
-// and then go on. An install refused for a reason that may pass (Again: kiln.hooks could not check every thread while it
-// wrote the first detour, and wrote nothing) answers that submit KILN_ERR_UNAVAILABLE and lets a later submit try again,
-// up to kInstallAttempts in all. Any other failure, or the last attempt, is final for the process: the installer is
-// dropped, its reason (a static string; nullptr: a generic one) becomes bound()'s answer, and every later submit answers
-// KILN_ERR_UNAVAILABLE.
+// once, on the submitting thread, and binds the layout it fills (the installer stays given after that). A player without
+// a mod that submits never gets the hook. The installer runs under its own mutex (never the slot's), so concurrent first
+// submits wait for the one install and then go on. An install refused for a reason that may pass (Again: kiln.hooks
+// could not check every thread while it wrote the first detour, and wrote nothing) answers that submit, and every submit
+// that waited for that attempt, KILN_ERR_UNAVAILABLE, and lets a later submit try again, up to kInstallAttempts in all.
+// Any other failure (an installer that throws among them), or the last attempt, is final for the process: the
+// installer is dropped, install_failed() turns true, its reason (a static string; nullptr: a generic one) becomes
+// bound()'s answer, and every later submit answers KILN_ERR_UNAVAILABLE.
 enum class Install { Bound, Again, Failed };
 constexpr uint32_t kInstallAttempts = 3;
 using Installer = Install (*)(Layout* layout, const char** why);
-void set_installer(Installer install);  // nullptr: none (the default)
+void set_installer(Installer install);  // nullptr: none (the default); clears install_failed()
+// True once the first-request install failed for good (kiln.caps: faulted, its hook could not be installed).
+bool install_failed();
 // Whether a submit can succeed on this build: bound, or an installer waits for the first submit. While neither, *why
 // says why (bound()'s answer). *installed: bound now.
 bool usable(const char** why, bool* installed);
@@ -108,7 +112,7 @@ void owner_gone(KilnOwner owner);
 struct Stats {
     uint64_t skipped;   // producer visits skipped because a caller held the slot
     uint64_t faults;    // guarded copies that faulted (the request ended cancelled)
-    uint64_t installs;  // installer calls (at most one succeeds, and a failed one is the last)
+    uint64_t installs;  // installer calls that returned (at most one succeeds, and a failed one is the last)
 };
 Stats stats();
 

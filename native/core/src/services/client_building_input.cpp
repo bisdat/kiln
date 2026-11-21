@@ -55,36 +55,51 @@ uint32_t g_next_id = 0;
 uint32_t g_ended = 0;  // the newest client session whose world stopped
 Layout g_layout{};
 const char* const kInstallFailed = "hooking the local input observation point failed (kiln.log says why)";
+const char* const kInstallThrew = "hooking the local input observation point failed at the first request: it threw";
 
 std::atomic<bool> g_bound{false};
 std::atomic<const char*> g_why{kUnbound};  // bound()'s answer while unbound
-std::atomic<uint64_t> g_skipped{0}, g_faults{0}, g_installs{0};
+std::atomic<uint64_t> g_skipped{0}, g_faults{0};
+std::atomic<uint64_t> g_installs{0};  // installer calls that returned (written under g_install_mu)
 std::mutex g_install_mu;  // one install at a time; taken before g_mu (bind), never inside it
 std::atomic<Installer> g_installer{nullptr};
+std::atomic<bool> g_install_failed{false};
 std::atomic<uint64_t> g_generation{1};
 
 void changed() { g_generation.fetch_add(1, std::memory_order_acq_rel); }
 
 // The first submit's install (the lazy producer, client_building_input.h). True when the producer is bound.
 bool install_once() {
+    // An attempt that ended while this submit waited for the mutex answers for it too: a burst of first submits spends
+    // one attempt, and a later submit tries again.
+    const uint64_t seen = g_installs.load(std::memory_order_acquire);
     std::lock_guard install(g_install_mu);
     if (g_bound.load(std::memory_order_acquire)) return true;  // another submit installed it meanwhile
     const Installer install_fn = g_installer.load(std::memory_order_acquire);
     if (!install_fn) return false;  // a failed install before this one (final), or none
-    const uint64_t attempt = g_installs.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (g_installs.load(std::memory_order_relaxed) != seen) return false;  // refused while this one waited
+    const uint64_t attempt = seen + 1;
     Layout layout{};
     const char* why = nullptr;
-    const Install result = install_fn(&layout, &why);
-    if (result == Install::Again && attempt < kInstallAttempts) return false;  // nothing written; a later submit tries
-    if (result != Install::Bound) {
-        g_why.store(why ? why : kInstallFailed, std::memory_order_release);
-        g_installer.store(nullptr, std::memory_order_release);
-        changed();
-        return false;
+    Install result = Install::Failed;
+    try {  // the caller is a mod's thread: nothing the install throws leaves submit
+        result = install_fn(&layout, &why);
+    } catch (...) {
+        why = kInstallThrew;
     }
+    g_installs.store(attempt, std::memory_order_release);
+    if (result == Install::Bound) {
+        // The installer stays: a submit that read "not bound" meanwhile finds it, waits here and finds the producer
+        // bound (dropping it first would answer that submit unavailable).
+        bind(&layout);
+        return true;
+    }
+    if (result == Install::Again && attempt < kInstallAttempts) return false;  // nothing written; a later submit tries
+    g_install_failed.store(true, std::memory_order_release);  // before the installer goes: usable() false implies it
+    g_why.store(why ? why : kInstallFailed, std::memory_order_release);
     g_installer.store(nullptr, std::memory_order_release);
-    bind(&layout);
-    return true;
+    changed();
+    return false;
 }
 
 uint64_t now_ms() { return g_clock.load(std::memory_order_relaxed)(); }
@@ -293,15 +308,19 @@ bool bound(const char** why) {
 }
 
 void unbound_reason(const char* why) {
+    g_install_failed.store(false, std::memory_order_release);  // a reason of the build, not of an install
     g_why.store(why ? why : kUnbound, std::memory_order_release);
     changed();
 }
 
 void set_installer(Installer install) {
     std::lock_guard lock(g_install_mu);
+    g_install_failed.store(false, std::memory_order_release);
     g_installer.store(install, std::memory_order_release);
     changed();
 }
+
+bool install_failed() { return g_install_failed.load(std::memory_order_acquire); }
 
 bool usable(const char** why, bool* installed) {
     const bool now = g_bound.load(std::memory_order_acquire);
@@ -352,6 +371,7 @@ void set_clock_for_tests(uint64_t (*ms)()) { g_clock.store(ms ? ms : &steady_ms,
 void reset_for_tests() {
     std::lock_guard install(g_install_mu);
     g_installer.store(nullptr, std::memory_order_release);
+    g_install_failed.store(false, std::memory_order_release);
     g_installs.store(0, std::memory_order_relaxed);
     changed();
     std::lock_guard lock(g_mu);

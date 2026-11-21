@@ -141,10 +141,10 @@ of the process that passes the argument, owner and session checks: Kiln.Client's
   detour on the same instruction, only kiln.hooks' cells change. Otherwise the first detour is written with every other
   thread of the game stopped and checked to stand outside the bytes it replaces; nothing is written when a thread could
   not be checked.
-- **Refused or failed.** A refusal for threads it could not check answers that submit `KILN_ERR_UNAVAILABLE` and lets a
-  later submit try again, three attempts in all. Any other failure, or the third refusal, is final until the game
-  restarts: every later submit answers `KILN_ERR_UNAVAILABLE`, and `client.building_input` turns unavailable with
-  the reason (kiln.log has the details).
+- **Refused or failed.** A refusal for threads it could not check answers that submit, and every submit that waited for
+  that attempt, `KILN_ERR_UNAVAILABLE`, and lets a later submit try again, three attempts in all. Any other failure,
+  or the third refusal, is final until the game restarts: every later submit answers `KILN_ERR_UNAVAILABLE`, and
+  `client.building_input` turns unavailable, `faulted`, with the reason (kiln.log has the details).
 
 A client gate row (`native/core/gates`) could still hold `client.building_input`; none does since 0.2.0-dev.30.3
 (`"preview"` in `kiln/kiln.json` would lift such a hold, and naming it now does nothing).
@@ -160,7 +160,7 @@ the order they are checked:
 | a dedicated server | `wrong-side` |
 | kiln.client did not start | `service-missing` |
 | no producer on this build | `symbol-missing`, with the reason: sigdb has no `client.input_observation` for this build, the local player is not known on it (`client.local_player`), or a layout constant is off |
-| a first install that failed (above) | `symbol-missing`, with the failure's reason |
+| a first install that failed (above) | `faulted`, with the failure's reason |
 | ready, not hooked yet | `available`, "... it is hooked at the first request" |
 | bound | `available`, "the input producer is bound to this game build" |
 
@@ -170,8 +170,8 @@ the order they are checked:
 |---|---|
 | members, producer, the unbound reasons and threads | `native/core/tests/test-client-building-input.sh asan` and `tsan` (`client_building_input_test.cpp`) |
 | Windows guarded copies, the selection and the observation point's visit (the version read through the input object and the client world; faults skip the visit) | `client_input_windows_host.cpp`: `native/core/tests/test-client-input-wine.sh` under Wine, or built the same way and run on Windows |
-| the row (ready, bound, a failed first install, the gate mechanism and preview) | `native/core/tests/test-caps.sh` |
-| the lazy producer: nothing installed before a submit that could be queued, one install for concurrent first submits, a refusal tried again, a failure final | `client_building_input_test.cpp` (asan, tsan); on Windows threads, `client_input_windows_host.cpp` |
+| the row (ready, bound, a failed first install through a submit: faulted, the gate mechanism and preview) | `native/core/tests/test-caps.sh` |
+| the lazy producer: nothing installed before a submit that could be queued, one install for concurrent first submits, a refusal tried again (one attempt for a burst of first submits), a submit while the install binds waits for it, a failure (or an installer that throws) final | `client_building_input_test.cpp` (asan, tsan); on Windows threads, `client_input_windows_host.cpp` |
 | the observation point, the version getter and the layout on the client exe | `tools/sigport/sigdb_check.py sigdb/symbols/client.json <enshrouded.exe>` (`client.input_observation` on), `tools/sigport/build_record.py check` |
 | the layout: the record (112 bytes) and the core's table (80 bytes); the SDK's header the same as the core's (80 bytes), as C11 and C++20 | `native/core/tests/test-abi-headers.sh` |
 | the guided checks are the gate row's, each in the pack and in rows.json | `tools/client-checks/test_report.py` |

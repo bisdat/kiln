@@ -478,7 +478,8 @@ void refresh_tasks_pool() {
 
 // kiln.client's building input (docs/kiln/services/client-building-input.md): the game client only, with
 // kiln.client running and its input producer ready (hooked at the first request) or bound. The producer's state is
-// read lock-free at every registry call, so a first request's install, or its final failure, reaches the row.
+// read lock-free at every registry call, so a first request's install, or its final failure (faulted), reaches the
+// row.
 void set_building_input_locked(std::vector<Event>& ev) {
     g_building_seen.store(building_input::generation(), std::memory_order_release);  // before the state it describes
     const char* why = nullptr;
@@ -490,7 +491,10 @@ void set_building_input_locked(std::vector<Event>& ev) {
             ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE, "building input belongs to a connected game client"}
         : !g_client_service.load(std::memory_order_acquire)
             ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING, "kiln.client did not start"}
-        : !producer ? Verdict{KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING, why ? why : ""}
+        : !producer ? Verdict{KILN_CAP_UNAVAILABLE,
+                              static_cast<uint32_t>(building_input::install_failed() ? KILN_CAP_REASON_FAULTED
+                                                                                     : KILN_CAP_REASON_SYMBOL_MISSING),
+                              why ? why : ""}
         : installed ? Verdict{KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "the input producer is bound to this game build"}
                     : Verdict{KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
                               "the input producer is ready for this game build; it is hooked at the first request"};
