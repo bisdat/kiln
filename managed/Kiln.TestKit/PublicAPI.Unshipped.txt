@@ -1,3 +1,4 @@
 #nullable enable
+Kiln.TestKit.HarnessItems.ContainerName(Kiln.EntityId entity) -> string?
 Kiln.TestKit.ModManifest.SteamMessages.get -> bool
 Kiln.TestKit.ModManifest.SteamMessages.set -> void

@@ -377,6 +377,27 @@ void logic_tests() {
         char small[3];
         check(parse_name_record(rec, sizeof rec, reinterpret_cast<uintptr_t>(rec), key, 0x38, small, sizeof small, &len, &off) && len == 4 && !std::strcmp(small, "Or"),
               "a short buffer gets the cut text and the full length");
+        // v9: a 256-byte name fills the record (the game's maximum; the zeroed tail ends it), 257 is no record of the game
+        {
+            alignas(8) uint8_t big[0x28 + 0x100 + 0x40] = {};
+            const std::string text(256, 'q');
+            const uint64_t k = fnv1a64(reinterpret_cast<const uint8_t*>(text.data()), text.size());
+            const uint64_t ptr = reinterpret_cast<uintptr_t>(big) + 0x28, cap = 0x100;
+            uint32_t n = 256;
+            std::memcpy(big, &k, 8);
+            std::memcpy(big + 8, &ptr, 8);
+            std::memcpy(big + 0x10, &n, 4);
+            std::memcpy(big + 0x18, &cap, 8);
+            std::memcpy(big + 0x28, text.data(), 256);
+            char whole[300];
+            check(parse_name_record(big, sizeof big, reinterpret_cast<uintptr_t>(big), k, 0x38, whole, sizeof whole, &len, &off) && len == 256 &&
+                      text == whole,
+                  "a 256-byte name (the game's maximum) is read whole");
+            n = 257;
+            std::memcpy(big + 0x10, &n, 4);
+            check(!parse_name_record(big, sizeof big, reinterpret_cast<uintptr_t>(big), k, 0x38, whole, sizeof whole, &len, &off),
+                  "a length past the record's 256 bytes is refused");
+        }
     }
 }
 

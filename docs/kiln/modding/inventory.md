@@ -100,7 +100,36 @@ the game's string table, the `CustomPlayerStringsSystem` singleton, and checks e
 id a chest carries is the FNV-1a 64 of the name). `Items.ContainerNamesAvailable` says whether the build has it; the
 call throws `NotSupportedException` if not. It reads game memory: tick thread.
 
-A name replicates and saves the way the game's own rename does. Kiln does not rename.
+A name replicates and saves the way the game's own rename does.
+
+### Renaming (since 0.2.0-dev.30.3)
+
+```csharp
+foreach (var chest in Items.FindInventories(InventoryKinds.Containers))
+    if (Items.ContainerName(chest) is null) await Items.SetContainerName(chest, "Unsorted");
+```
+
+`Items.SetContainerName(entity, name)` does what a player's Rename button does, on the server and through the game's own
+rename: the name replicates to every player, is in the next save, and shows in the game's Rename screen and in
+`ContainerName` (GitHub issue #112, thanks Fuzen777). Mod API 0.2.13; capability `items.rename`;
+`Items.ContainerRenameAvailable` is true where the server world runs (a dedicated server, or the game client hosting).
+
+- **The name** is checked like the game's Rename field: at most 48 characters and 64 bytes of UTF-8
+  (`Items.ContainerNameMaxChars`, `Items.ContainerNameMaxBytes`), no control character but tab, any script and emoji,
+  kept as given (no trimming), no profanity filter. `""` clears the name (the server's rename does; the game's own field
+  never sends an empty name).
+- **Only a container**: an entity with an inventory of its own that is neither a player's nor an NPC's. A Flame Altar or
+  another renameable object without an inventory is refused.
+- **Refusals throw at the call**: `ArgumentException` (no entity, it does not exist, not a container, a name the field
+  would not take; the message says which), `InvalidOperationException` on a game client joined to another machine's
+  world, `KilnUnavailableException("items.rename")` on an older Kiln or an unknown game build.
+- **The task** completes on the tick thread in the next step: `true` when the game took the name (also when the chest
+  already had it), `false` when the rename could not run there (the chest went away, the game's table of 1024 different
+  names was full, the world closed); the reason is in kiln.log. A mod that unloads drops its callbacks; the rename still
+  runs.
+- Names are set where the world runs: on a joined game client, let the server side of your mod do the rename.
+
+Details and the native side: [services/items.md](../services/items.md#renaming-a-container-v9-since-020-dev303).
 
 ## Transfer rules and events
 
@@ -355,6 +384,7 @@ Lab `dev20-wp13` (a copy of the user's world, no player, game build 26430253, Wi
 | Gear keeps its state | `items-test`: the item entity is the same, `Level`, `PerkContainerNew`, `Durability`, `WeaponGemSlot` byte for byte, `ItemState.containedInSlotId` and `OwnerRelationship` updated |
 | Quick stack and move all by the game's functions, with the ledger | `items-test`: the ledger puts both containers back slot for slot |
 | Container names | The lab's self-test names a placed chest through the game's own rename path (`set_string` + `AddComponent`); `items-test` reads it back, checks the component against the FNV-1a 64 of the text, and after a save and restart reads it from the save |
+| Container renames | `items-test` (since 0.2.0-dev.30.3, to run in the release's lab gate): renames a second container through `SetContainerName`, reads it back and checks the component against the text's id, shares the self-test chest's name and clears it again (the other keeps its name), and the refusals at the call. Offline: `native/services/items/tests/rename_test.cpp` (the text rules, the rename handler's steps against a fake string table), `managed/tests/Kiln.Items.Tests/ContainerRenameTests.cs` (the test kit) |
 | A moved piece of gear survives a save | `items-test` phase 2 after a restart |
 | Item attachment identity is safe | `items-test` tags two same-template swords before a restart: both are explicitly session-only, neither receives a positional tag afterwards; a saved chest restores its own attachment as a positive control. This is not persistent per-item data |
 | Rules, reports | `items-test`: keep slot, keep item, deny, silent, the event's counts |
@@ -397,3 +427,15 @@ items themselves (`InstanceData`), and build a fresh set from what the player ha
    Items.Equip") and stays in the chest; arrows with `toSlot` the worn arrow slot top up the worn arrows.
 8. Rename a chest "Ores" in the game; `Items.ContainerName` returns it within a step of the rename reaching the server.
 9. A player and kiln-shroudlink's own addon (`dinput8.dll`, MODS tab, slot locks) together: R still honours the addon's locks and Kiln's rules.
+
+Container renames (`Items.SetContainerName`, since 0.2.0-dev.30.3), on a dedicated server with two players joined:
+
+10. A mod renames a chest both players can see: each player sees the new name where the game shows it (looking at the
+    chest, its window title, the Rename screen's text), without reopening the game. A player who joins afterwards sees it too.
+11. Save, stop the server, start it again: the chest still has the name, for the players and for `Items.ContainerName`.
+12. Rename the same chest with the game's own Rename button: the player's name replaces Kiln's, and `Items.ContainerName`
+    returns it; rename it again from the mod: the mod's name shows.
+13. A 48-character name and one with accents, CJK and an emoji show whole in the game; a mod's `""` clears the name in
+    the players' view (the Rename screen opens empty).
+14. Two chests renamed to the same text both show it; clearing one keeps the other's name.
+15. In a hosted game (single player or co-op host), the same as 10 and 11 from the host's own mod.

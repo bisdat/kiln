@@ -433,6 +433,74 @@ public sealed partial class ItemsTestMod
         Check(unnamed.All(u => u.Item2 == null) || unnamed.Any(u => u.Item2 == null),
             $"chest_name: {unnamed.Count(u => u.Item2 == null)} other containers have no name ({string.Join(", ", unnamed.Where(u => u.Item2 != null).Select(u => $"{u.e} '{u.Item2}'"))})");
         Check(Items.ContainerName(new EntityId(0x7FFFFFF0)) == null, "chest_name: an entity that does not exist has no name");
+        await RenameChecks(named, text!, unnamed.Where(u => u.Item2 == null).Select(u => u.e).FirstOrDefault());
+    }
+
+    // kiln.items v9 (0.2.0-dev.30.3, GitHub issue #112): Items.SetContainerName through the game's own rename. Renames a
+    // second, unnamed container and leaves it unnamed again; the self-test's chest keeps its name (the restart check reads it).
+    private async Task RenameChecks(EntityId named, string namedText, EntityId other)
+    {
+        if (!Items.ContainerRenameAvailable)
+        {
+            Check(false, Capabilities.Is("items.rename")
+                ? "container renames are not available: capability items.rename is on, but kiln.items says this process runs no server world"
+                : $"container renames are not available: {Capabilities.Why("items.rename")}");
+            return;
+        }
+        if (other.IsNone)
+        {
+            Check(false, "rename: the lab world needs a second container without a name");
+            return;
+        }
+        static ulong Id(string s)
+        {
+            ulong h = 0xcbf29ce484222325;
+            foreach (var by in System.Text.Encoding.UTF8.GetBytes(s)) h = (h ^ by) * 0x100000001b3;
+            return h;
+        }
+        ulong Key(EntityId e) => World.ReadBytes(e, "CustomPlayerString") is { Length: >= 8 } raw ? BitConverter.ToUInt64(raw, 0) : 0ul;
+        const string text = "Kiln Lab Rename \u00e9";
+        var ok = await Items.SetContainerName(other, text);
+        Check(ok && Items.ContainerName(other) == text && Key(other) == Id(text),
+            $"rename: {other} is \"{Items.ContainerName(other)}\" after SetContainerName ({ok}); its component holds {Key(other):x16}, the text's id {Id(text):x16}");
+        Check(await Items.SetContainerName(other, text) && Items.ContainerName(other) == text, "rename: the name it already has is taken and kept");
+        // two containers of one name share the game's record: clearing one keeps the other's
+        var shared = await Items.SetContainerName(other, namedText);
+        Check(shared && Items.ContainerName(other) == namedText && Items.ContainerName(named) == namedText,
+            $"rename: {other} took the self-test chest's name \"{namedText}\"; both read it");
+        var cleared = await Items.SetContainerName(other, "");
+        Check(cleared && Items.ContainerName(other) == null && Key(other) == 0 && Items.ContainerName(named) == namedText,
+            $"rename: clearing {other} (component {Key(other):x16}) leaves {named} \"{Items.ContainerName(named)}\"");
+        Check(Throws<ArgumentException>(() => _ = Items.SetContainerName(other, new string('x', 49))) &&
+              Throws<ArgumentException>(() => _ = Items.SetContainerName(other, "a\nb")) &&
+              Throws<ArgumentException>(() => _ = Items.SetContainerName(new EntityId(0x7FFFFFF0), "X")),
+            "rename: too long, a control character and an entity that does not exist are refused at the call");
+        Check(Items.ContainerName(other) == null, "rename: the refused calls changed nothing");
+        // containers only: an NPC's inventory is not a container, so it is refused at the call and keeps no name
+        var npc = Items.FindInventories(InventoryKinds.Npcs).FirstOrDefault();
+        if (npc.IsNone)
+        {
+            Log.Info("INFO rename: the lab world has no NPC inventory; the containers-only refusal is the host test's");
+        }
+        else
+        {
+            var npcKey = Key(npc);
+            Check(Throws<ArgumentException>(() => _ = Items.SetContainerName(npc, "Not a chest")) && Key(npc) == npcKey,
+                $"rename: NPC {npc} (an inventory, not a container) is refused at the call and its name component is unchanged ({npcKey:x16})");
+        }
+    }
+
+    private static bool Throws<T>(Action a) where T : Exception
+    {
+        try
+        {
+            a();
+            return false;
+        }
+        catch (T)
+        {
+            return true;
+        }
     }
 
     private async Task TransferChecks(EntityId a, EntityId b, ItemInfo wood)

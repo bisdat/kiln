@@ -443,6 +443,7 @@ internal static partial class KilnApis
         "M:Kiln.Items.RarityOf(Kiln.ItemInstanceRef)", // Items.RarityOf(ItemInstanceRef): via Items.GearOf(ItemInstanceRef)
         "M:Kiln.Items.Read(Kiln.EntityId)", // Items.Read(EntityId): via Items.Require(string)
         "M:Kiln.Items.SetArmor(Kiln.ItemInstanceRef,System.Double)", // Items.SetArmor(ItemInstanceRef, double): via Items.SetScale(ItemInstanceRef, uint, double, string, string)
+        "M:Kiln.Items.SetContainerName(Kiln.EntityId,System.String)", // Items.SetContainerName(EntityId, string): Services.RequireTickThread
         "M:Kiln.Items.SetDurabilityMax(Kiln.ItemInstanceRef,System.Nullable{System.Int32},Kiln.GearWriteOptions)", // Items.SetDurabilityMax(ItemInstanceRef, int?, GearWriteOptions?): via Items.WriteGear(ItemInstanceRef, Items.GearChange, GearWriteOptions?, GearChangeSource, string, GearKeepIntent)
         "M:Kiln.Items.SetEnhancements(Kiln.ItemInstanceRef,System.Int32,Kiln.GearWriteOptions)", // Items.SetEnhancements(ItemInstanceRef, int, GearWriteOptions?): via Items.WriteGear(ItemInstanceRef, Items.GearChange, GearWriteOptions?, GearChangeSource, string, GearKeepIntent)
         "M:Kiln.Items.SetLevel(Kiln.ItemInstanceRef,System.Int32,Kiln.GearWriteOptions)", // Items.SetLevel(ItemInstanceRef, int, GearWriteOptions?): via Items.WriteGear(ItemInstanceRef, Items.GearChange, GearWriteOptions?, GearChangeSource, string, GearKeepIntent)
@@ -874,6 +875,7 @@ internal static partial class KilnApis
         "P:Kiln.Items.ArmorAvailable=items.gear.armor,kiln.items", // Can("items.gear.armor"); V8Scales != null: Services.Get("kiln.items")
         "P:Kiln.Items.Available=kiln.items", // Can("kiln.items")
         "P:Kiln.Items.ContainerNamesAvailable=items.names", // Can("items.names")
+        "P:Kiln.Items.ContainerRenameAvailable=items.rename", // Can("items.rename")
         "P:Kiln.Items.Fuel.Available=items.fuel", // Can("items.fuel")
         "P:Kiln.Items.GearOptionsAvailable=items.pide_options,kiln.items", // Can("items.pide_options"); via Kiln.Items.Available
         "P:Kiln.Items.GearReadAvailable=items.gear.read", // Can("items.gear.read")
