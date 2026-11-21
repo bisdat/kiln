@@ -2,7 +2,7 @@
 // the interpreter's runtime.network family tests.
 //! The runtime.network family core (status, send, receive, accept) on the real service
 //! adapter, the registrar's production host (KilnRuntimeHost) and the C-ABI fake kiln.net with the
-//! internal Steam-messages block, in a real Lua VM; plus the production family
+//! Steam-messages members, in a real Lua VM; plus the production family
 //! through the real worker and lifecycle host. The goldens of both pins are in
 //! runtime_network_proof.rs.
 //! Expected texts and orders are ShroudForge's (MIT, Copyright (c) 2026 bonsaibauer), both pins:
@@ -1071,6 +1071,52 @@ fn one_lease_is_opened_on_first_use_and_a_refused_open_is_tried_again() {
     assert_eq!(n.shared.take_lease(), Some(lease));
     assert_eq!(n.shared.take_lease(), None);
     let _ = n.services.counters();
+}
+
+#[test]
+fn every_lease_call_carries_the_owner_that_opened_the_lease() {
+    // kiln.net checks the owner on every member that takes a lease (kiln_net.h, since 0.2.0-dev.30.3): the family passes
+    // kiln-sfi's owner, the one that opened the lease, on send, receive and accept.
+    let _serial = serial();
+    let s = net(SERVER);
+    s.ports.authorized.borrow_mut().insert(PEER);
+    assert_eq!(
+        s.ok_reason(&format!("runtime.network.send('{PEER_TEXT}', 'x')")),
+        (true, None)
+    );
+    let _ = received(&s, "runtime.network.receive()");
+    assert_eq!(
+        s.ok_reason(&format!("runtime.network.accept('{PEER_TEXT}')")),
+        (true, None)
+    );
+    let calls = s.net(|f| f.lease_call_owners.clone());
+    assert_eq!(
+        calls.iter().map(|c| c.0).collect::<Vec<_>>(),
+        ["send", "receive", "accept"]
+    );
+    assert!(
+        calls.iter().all(|c| c.1 == s.owner),
+        "every lease call passed owner {}: {calls:?}",
+        s.owner
+    );
+    // The fake answers another owner as kiln.net does: as a closed lease, before anything is sent.
+    let lease = s.shared.lease().unwrap();
+    let table = &fake_services::NET;
+    let mut steam_result = 0i32;
+    // SAFETY: a readable byte and a live out.
+    let other = unsafe {
+        table.steam_send.unwrap()(
+            s.owner + 1,
+            lease,
+            PEER,
+            b"x".as_ptr().cast(),
+            1,
+            0,
+            8,
+            &raw mut steam_result,
+        )
+    };
+    assert_eq!((other, s.sent().len()), (KILN_ERR_NOT_FOUND, 1));
 }
 
 // ---- status ----

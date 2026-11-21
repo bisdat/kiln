@@ -1327,6 +1327,9 @@ export interface ServerMod {
   clients: Clients | null;
   state: ModState | "unloaded" | null;
   kind?: "kiln" | "native" | null;
+  /** (dev.30.3) A Kiln mod whose kiln.mod.json says "steamMessages": true: it talks to other players over Steam peer
+   *  messages. Absent: it does not (or an older backend). */
+  steamMessages?: boolean;
 }
 export interface ServerBackup {
   name: string;

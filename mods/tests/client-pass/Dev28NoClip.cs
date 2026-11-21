@@ -6,7 +6,8 @@ using static Kiln.Testing.ClientCheckTags;
 namespace ClientPass;
 
 // NoClip after GitHub issue #25 (the dev.28 fix round): the points of the issue a real game still has to show. Orders
-// 152-156, next to rules.noclip (150) and rules.noclip-teleport (151) in Session1.cs, whose helpers these use.
+// 154-157, after rules.noclip (150) and rules.noclip-teleport (151) in Session1.cs, whose helpers these use (152 and 153
+// are Session1.cs's).
 //
 // - rules.noclip-descent: sneak sinks every time it is held, also in the game's own sneak mode, and letting go stops
 //   the sink (the mover's crouched rows said "do not steer"; kiln.rules flight.cpp now steers with the default row).
@@ -22,7 +23,7 @@ public sealed partial class ClientPassMod
     private const string InSneakModeNote = ", in the game's sneak mode";
 
     [ClientCheck("rules.noclip-descent", "NoClip: sneak sinks every time, also in the game's sneak mode", Area = "Creative mode",
-        Since = Dev28, Needs = ClientCheckNeeds.Any, Order = 152)]
+        Since = Dev28, Needs = ClientCheckNeeds.Any, Order = 154)]
     public async Task RulesNoClipDescent(CheckContext c)
     {
         if (!await NeedPlayer(c) || !await NeedNoClip(c)) return;
@@ -73,7 +74,7 @@ public sealed partial class ClientPassMod
     }
 
     [ClientCheck("rules.noclip-death", "NoClip: a death inside the ground ends it", Area = "Creative mode", Since = Dev28,
-        Needs = ClientCheckNeeds.Any, Order = 153)]
+        Needs = ClientCheckNeeds.Any, Order = 155)]
     public async Task RulesNoClipDeath(CheckContext c)
     {
         if (!await NeedPlayer(c) || !await NeedNoClip(c)) return;
@@ -110,7 +111,7 @@ public sealed partial class ClientPassMod
     }
 
     [ClientCheck("rules.noclip-world", "NoClip: closing the world inside the ground", Area = "Creative mode", Since = Dev28,
-        Needs = ClientCheckNeeds.Hosted, Order = 154)]
+        Needs = ClientCheckNeeds.Hosted, Order = 156)]
     public async Task RulesNoClipWorld(CheckContext c)
     {
         if (!await NeedPlayer(c) || !await NeedNoClip(c)) return;
@@ -138,7 +139,7 @@ public sealed partial class ClientPassMod
     }
 
     [ClientCheck("rules.noclip-disconnect", "NoClip: leaving a server inside the ground", Area = "Creative mode", Since = Dev28,
-        Needs = ClientCheckNeeds.Joined, Order = 155)]
+        Needs = ClientCheckNeeds.Joined, Order = 157)]
     public async Task RulesNoClipDisconnect(CheckContext c)
     {
         c.Instruct("Join a server that runs this Kiln with \"allowNoClip\": true in its kiln/config/rules.json, as a player with " +

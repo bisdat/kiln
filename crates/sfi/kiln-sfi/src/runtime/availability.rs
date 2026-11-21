@@ -39,6 +39,7 @@ use super::world::context::{Snapshot, WorldContext};
 use super::write_fault::WriteFaultLatch;
 use crate::service_member;
 use crate::worker::compose::RuntimeHosts;
+use kiln_abi::KILN_WORLD_SERVER;
 use kiln_abi::KilnStr;
 use kiln_abi::services::kiln_caps::{
     KILN_CAP_AVAILABLE, KILN_CAP_UNAVAILABLE, KILN_CAPS_SERVICE, KILN_CAPS_VERSION, KilnCapRow,
@@ -146,16 +147,19 @@ impl RuntimeFacts {
     /// row, as [`Self::provider_facts`] reads it); [`Snapshot::NONE`] without that row, without an attached context
     /// or without a live world.
     pub fn world_snapshot(&self) -> Snapshot {
-        let row = self
-            .catalog
-            .facts
-            .iter()
-            .find(|row| row.fact == Fact::WorldContextActive);
-        if row.is_some_and(|row| self.satisfied(row.backing)) {
+        if self.context_row() {
             self.world_read()
         } else {
             Snapshot::NONE
         }
+    }
+    /// Whether the `WorldContextActive` fact's row (its members and capability row) holds now.
+    fn context_row(&self) -> bool {
+        self.catalog
+            .facts
+            .iter()
+            .find(|row| row.fact == Fact::WorldContextActive)
+            .is_some_and(|row| self.satisfied(row.backing))
     }
 
     /// The row of capability `name` now (kiln.caps `find`).
@@ -244,9 +248,12 @@ impl RuntimeFacts {
                 continue;
             }
             match row.fact {
-                Fact::Ready => facts.ready = true,
-                Fact::CanWrite => facts.can_write = true,
-                Fact::ResourceCanWrite => facts.resource_can_write = true,
+                // ShroudForge's ready(): the family's world as kiln.world's ECS context sees it.
+                Fact::Ready => facts.ready = self.ecs_ready(),
+                // ShroudForge's can_write(): the compare-exchange writes reach the server world only.
+                Fact::CanWrite => facts.can_write = self.ecs_can_write(),
+                // ShroudForge's resource can_write(): the loaded-resource writes reach the server world only.
+                Fact::ResourceCanWrite => facts.resource_can_write = self.resource_can_write(),
                 Fact::GameplayPatchAvailable => facts.gameplay_patch_available = true,
                 Fact::NetworkAvailable => facts.network_available = true,
                 Fact::NetworkServiceReady => facts.network_service_ready = true,
@@ -268,16 +275,59 @@ impl RuntimeFacts {
         facts
     }
 
+    /// The world ShroudForge's ECS binds now and its live session ([`WorldContext::ecs_world`]: on a server and on a
+    /// hosting client the server world, on a joined client the client world), behind the `WorldContextActive` fact's
+    /// row as [`Self::world_snapshot`]. Without that row or a live world: the plan side's world and 0; without an
+    /// attached context: the server world and 0.
+    pub fn ecs_world(&self) -> (u32, u64) {
+        let Some(world) = self.world() else {
+            return (KILN_WORLD_SERVER as u32, 0);
+        };
+        if self.context_row() {
+            let (kind, session) = world.ecs_world();
+            if session != 0 {
+                return (kind, session);
+            }
+        }
+        (session_world_kind(world.side()), 0)
+    }
+    /// The world the ECS facts are about ([`Self::ecs_world`]'s kind).
+    pub fn ecs_world_kind(&self) -> u32 {
+        self.ecs_world().0
+    }
+    /// ShroudForge's `runtime_provider::ready()` (behind the `Ready` row): kiln.world's ECS context has an exact
+    /// profile and a live session of [`Self::ecs_world_kind`].
+    fn ecs_ready(&self) -> bool {
+        super::ecs::ready(&self.services, self.ecs_world_kind())
+    }
+    /// ShroudForge's `runtime_provider::can_write()` (behind the `CanWrite` row): the ECS world is the server world
+    /// (the local authority's: a dedicated server's, or the one a client hosts) and it is ready. A joined client's
+    /// client world is never written.
+    /// ShroudForge's resource `can_write()` (behind the `ResourceCanWrite` row): the ECS world is the server world (a
+    /// dedicated server's, or the one a client hosts); a joined client's resources are never written. Each write still
+    /// answers its own refusal outside a world (kiln.assets' compare-exchange needs the live server session).
+    fn resource_can_write(&self) -> bool {
+        self.ecs_world_kind() == super::ecs::SERVER_WORLD
+    }
+    fn ecs_can_write(&self) -> bool {
+        self.ecs_world_kind() == super::ecs::SERVER_WORLD && self.ecs_ready()
+    }
+
     /// ShroudForge's world session marker for world `world_kind` (its `world_session_id`, which claims and
     /// override targets bind to): the live context's session ([`Self::world_snapshot`]) when `world_kind` is the
-    /// attached context's session world, else 0. Unlike [`Self::world_session`] (kiln.world's raw generation, which
-    /// stays nonzero after a world stops), it is 0 once the world is no longer live.
+    /// attached context's session world, the hosted server world's on a hosting client ([`Self::ecs_world`]), else
+    /// 0. Unlike [`Self::world_session`] (kiln.world's raw generation, which stays nonzero after a world stops), it is
+    /// 0 once the world is no longer live.
     pub fn live_session(&self, world_kind: u32) -> u64 {
         match self.world() {
             Some(world) if session_world_kind(world.side()) == world_kind => {
                 self.world_snapshot().session
             }
-            _ => 0,
+            Some(_) => match self.ecs_world() {
+                (kind, session) if kind == world_kind => session,
+                _ => 0,
+            },
+            None => 0,
         }
     }
 

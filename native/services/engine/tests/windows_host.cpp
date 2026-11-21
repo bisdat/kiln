@@ -969,7 +969,9 @@ int wmain(int argc, wchar_t** argv) {
           "TimeDateStamp and SizeOfImage come from the loaded image");
     check(std::strcmp(id.target, "engine-host.exe") == 0, "target is the exe file name");
     check(id.archive_format == (kfc_mode == L"kfc4" ? 4u : 0u), "KFC header read from <exe>.kfc");
-    check(rows["engine.profile"] == KILN_CAP_UNAVAILABLE && rows["engine.ecs_write"] == KILN_CAP_UNAVAILABLE, "rows unavailable");
+    check(rows["engine.profile"] == KILN_CAP_UNAVAILABLE && rows["engine.ecs_write"] == KILN_CAP_UNAVAILABLE &&
+              rows["engine.attribute_model"] == KILN_CAP_UNAVAILABLE,
+          "rows unavailable");
     const auto* n = static_cast<const KilnEngineNativeApi*>(tables["kiln.internal.engine"]);
     check(n && n->header.size == sizeof(KilnEngineNativeApi) && !n->layout() && !n->profile(), "internal table, no profile");
     check(!GetProcAddress(dll, "kiln_engine_test_set_recipes") && !GetProcAddress(dll, "kiln_engine_test_invoke_filter") &&

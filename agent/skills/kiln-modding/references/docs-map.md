@@ -49,7 +49,10 @@ The wiki: https://frostdev.io/kiln/wiki/<page>.
 | NoClip, player rules, creative mode | `player-rules` |
 | Mod texts in several languages, the game's own texts | `languages` |
 | Network channels, synced configs, client code | `multiplayer`, `network` |
+| A mod's own Steam peer-to-peer messages (dev.30.3+) | `steam-messages` |
+| Building as the local player: select, place, remove, undo, dismantle (dev.30.3+) | `building-input` |
 | Mods of other engines (EML, EMF, closed DLL mods), chain loading | `other-mods`, `emf-mods`, `eml-shroudforge`, `more-frameworks`, `dinput8-chain` |
+| ShroudForge mods on Kiln's own interpreter (kiln mode, preview, dev.30.2) | `kiln-mode` |
 | Hooks, patches, typed hooks (advanced tier) | `hooks` |
 | Forge concepts | `forge` |
 | Kiln's menus in the game, chat history, other mods' slash commands, graphics tools | `in-game` |

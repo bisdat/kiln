@@ -50,6 +50,7 @@
 #ifndef KILN_ASSETS_H
 #define KILN_ASSETS_H
 #include "../kiln_api.h"
+#include "kiln_world.h" /* KilnMutationReply, KILN_ECS_* (loaded_scalar_compare_exchange) */
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -185,6 +186,31 @@ typedef struct KilnBlobCatalogEntry { /* 48 bytes, align 8 */
     uint64_t selected_sequence;  /* its sequence; 0 for GAME */
 } KilnBlobCatalogEntry;
 
+/* ---- loaded resources (since 0.2.0-dev.30.3; capability assets.loaded) ----
+ * Reads of the resources the game has loaded now, from any thread, on an exact game build only (kiln.engine's profile of
+ * the running exe and its resource layout). They answer in a world only: the game's resource service must be bound to the
+ * running world's item registry; in the main menu and while a world loads or unloads they answer KILN_LOADED_NOT_READY.
+ * Each read is a copy made twice and compared, of a span looked up again afterwards: never a pointer into game memory,
+ * never a partial copy. They answer what the game reads: a resource kiln.assets serves (an override of a game resource,
+ * or a mod's new one) answers its served bytes with KILN_LOADED_SERVED, and a listing has the mods' new keys after the
+ * game's own. Nothing here takes an engine gate or writes anything.
+ * Adapted from ShroudForge by bonsaibauer, MIT (its loaded ResourceService reads). */
+enum {
+    KILN_LOADED_OK = 0,        /* copied and confirmed */
+    KILN_LOADED_MISSING = 1,   /* the resource service is ready and has no such key */
+    KILN_LOADED_NOT_READY = 2, /* no exact profile, not in a world, or the resource service's view cannot be read */
+    KILN_LOADED_CHANGED = 3,   /* the resource service, its index or the resource changed while copied: ask again */
+};
+enum { KILN_LOADED_SERVED = 1 }; /* KilnLoadedInfo.flags: kiln.assets serves these bytes (an override or a new resource) */
+
+typedef struct KilnLoadedInfo { /* 24 bytes, align 8 */
+    uint32_t size;   /* the caller's sizeof(KilnLoadedInfo), >= 24 */
+    uint32_t status; /* KILN_LOADED_* */
+    uint32_t flags;  /* KILN_LOADED_SERVED */
+    uint32_t handle; /* loaded_snapshot: the game's 1-based handle of the key, 0 for a mod's new resource; loaded_list: 0 */
+    uint64_t bytes;  /* loaded_snapshot: the resource's size; loaded_list: the number of keys */
+} KilnLoadedInfo;
+
 typedef struct KilnAssetsApi {
     KilnServiceHeader header; /* { sizeof(KilnAssetsApi), KILN_ASSETS_VERSION } */
 
@@ -308,6 +334,71 @@ typedef struct KilnAssetsApi {
      *   this one answers KILN_ERR_NOT_FOUND until the game has opened it. Otherwise the same. Kiln.Items reads the game's
      *   texts with it (Items.DisplayName). */
     KilnResult(KILN_CALL* blob_read_resident)(const KilnContentHash* hash, void* buffer, size_t capacity, size_t* out_len);
+
+    /* ---- since 0.2.0-dev.30.3 (check header.size >= offsetof(KilnAssetsApi, loaded_list) + sizeof(void*)) ----
+     * Loaded resources (above, before KilnAssetsApi). info->size must be >= 24; info is written on every answer but
+     * KILN_ERR_INVALID_ARGUMENT.
+     * loaded_snapshot(owner, key, bytes, capacity, required, info): one loaded resource's bytes (its reflected struct with
+     *   the data behind it, as resource_read gives them). *required and info->bytes: its size; info->handle and
+     *   info->flags as KilnLoadedInfo says.
+     *   KILN_OK: bytes[0..*required) are the resource. KILN_ERR_BUFFER_TOO_SMALL: capacity < *required, nothing copied
+     *   (ask again with a larger buffer: the size can change between calls). KILN_ERR_NOT_FOUND: status MISSING.
+     *   KILN_ERR_UNAVAILABLE: status NOT_READY or CHANGED. KILN_ERR_INVALID_ARGUMENT: owner 0, key, required or info NULL,
+     *   info->size < 24, bytes NULL with capacity > 0.
+     * loaded_list(owner, type, out, capacity, required, info): every loaded key of `type` (FNV-1a-32 of its qualified
+     *   name): the game's resident keys whose bytes are readable, in the game's index order, then the mods' new keys of
+     *   that type. *required and info->bytes: how many. KILN_OK: out[0..*required) are the keys.
+     *   KILN_ERR_BUFFER_TOO_SMALL: capacity < the count, nothing copied. KILN_ERR_UNAVAILABLE: status NOT_READY or
+     *   CHANGED. KILN_ERR_INVALID_ARGUMENT: owner 0, required or info NULL, info->size < 24, out NULL with capacity > 0.
+     * Any thread. Bounded: a resource of at most the profile's 256 MiB, a listing of at most 1,048,576 keys. */
+    KilnResult(KILN_CALL* loaded_snapshot)(KilnOwner owner, const KilnAssetKey* key, void* bytes, size_t capacity,
+                                           size_t* required, KilnLoadedInfo* info);
+    KilnResult(KILN_CALL* loaded_list)(KilnOwner owner, uint32_t type, KilnAssetKey* out, size_t capacity, size_t* required,
+                                       KilnLoadedInfo* info);
+
+    /* ---- since 0.2.0-dev.30.3 (check header.size >= offsetof(KilnAssetsApi, loaded_scalar_compare_exchange) + sizeof(void*);
+     * capability assets.loaded_write) ----
+     * loaded_scalar_compare_exchange(owner, key, expected_session, expected_full, resource_size, offset, desired, width,
+     *   reply): writes one naturally aligned scalar (width 1, 2, 4 or 8, offset a multiple of it, inside the resource) of
+     *   a loaded resource, only when the resource's bytes are still exactly `expected_full` (all `resource_size` of them,
+     *   as a loaded_snapshot gave them) and the server world's session is still `expected_session`
+     *   (kiln.world game_world_session(KILN_WORLD_SERVER)). Not a transaction over the resource or over several fields.
+     *   One hold: kiln.engine's write gate of the server world (a host's or a dedicated server's, between frames) with
+     *   the content worker's lifetime guard borrowed from it; inside it the resource is looked up again, compared in
+     *   full, its page made writable for the one scalar, the scalar compare-exchanged, the whole resource compared
+     *   again and the page protection restored. reply->size must be >= sizeof(KilnMutationReply); reply->status is a
+     *   KILN_ECS_* outcome, reply->why_code a KILN_ECS_WRITE_WHY_*:
+     *   OK (KILN_MUTATION_WRITTEN | CONFIRMED)        written and read back                               KILN_OK
+     *   CONFLICT (WHY_COMPARE)                        the resource or the scalar is not the expected one;
+     *                                                 nothing written                                     KILN_ECS_ERR_CONFLICT
+     *   STALE (WHY_REF, WHY_SIZE)                     another session (also one that began during the call),
+     *                                                 the resource moved (WHY_REF) or is not resource_size
+     *                                                 bytes now (WHY_SIZE)                                 KILN_ECS_ERR_STALE
+     *   BUSY (WHY_GATE, WHY_IN_FRAME)                 the gate is busy (a frame runs, another holder):
+     *                                                 try again at a later step; engine_reason says why     KILN_ECS_ERR_BUSY
+     *   NOT_WRITABLE (WHY_NOT_PLAIN)                  kiln.assets serves this key (an override or a mod's
+     *                                                 new resource): write that mod's copy instead          KILN_ECS_ERR_NOT_WRITABLE
+     *   NOT_WRITABLE (WHY_SIZE)                       resource_size is over the profile's resource limit    KILN_ECS_ERR_NOT_WRITABLE
+     *   UNAVAILABLE (WHY_NO_PROFILE, WHY_NOT_SERVER_WORLD, WHY_NO_WORLD, WHY_GATE, WHY_FAULT)
+     *                                                 no exact profile or content-worker layout, not the
+     *                                                 local authority, no world, the gate or guard refused,
+     *                                                 the scalar's page is not a private committed
+     *                                                 read-only or read-write page of the content worker's
+     *                                                 data (WHY_FAULT; nothing written)                     KILN_ERR_UNAVAILABLE
+     *   UNCERTAIN (WHY_READBACK, WHY_FAULT; KILN_MUTATION_TARGET_LATCHED)
+     *                                                 the write could not be proven (the page protection
+     *                                                 could not be restored, the compare-exchange faulted,
+     *                                                 the resource or its owner changed during it): every
+     *                                                 later call of this process answers UNCERTAIN too, with
+     *                                                 WHY_TARGET_LATCHED, and attempts nothing              KILN_ECS_ERR_UNCERTAIN
+     *   KILN_ERR_INVALID_ARGUMENT: owner 0, a NULL pointer, expected_session 0, a width that is not 1/2/4/8, a misaligned
+     *   offset or one outside resource_size, a short reply (not written then).
+     *   Every committed write is recorded with its owner, key, offset, width, session and a write id (kiln.assets'
+     *   status JSON, "loadedWrites", the last 256), and logged once. Any thread except a world's own (the gate's
+     *   thread rules). Adapted from ShroudForge by bonsaibauer, MIT (its guarded resource scalar update). */
+    KilnResult(KILN_CALL* loaded_scalar_compare_exchange)(KilnOwner owner, const KilnAssetKey* key, uint64_t expected_session,
+                                                          const void* expected_full, size_t resource_size, size_t offset,
+                                                          const void* desired, uint32_t width, KilnMutationReply* reply);
 } KilnAssetsApi;
 
 #ifdef __cplusplus

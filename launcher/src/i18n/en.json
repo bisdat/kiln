@@ -2262,6 +2262,8 @@
       "byHand": "Put there by hand",
       "folder": "Folder",
       "advanced": "Advanced (hooks or patches)",
+      "steam": "Steam",
+      "steamMessages": "Talks to other players over Steam",
       "role": "Role",
       "servesLive": "Serves the live pages",
       "also": "Also {list}",

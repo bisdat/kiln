@@ -2217,6 +2217,8 @@
       "byHand": "手动安装",
       "folder": "目录",
       "advanced": "高级（挂钩或补丁）",
+      "steam": "Steam",
+      "steamMessages": "通过 Steam 与其他玩家通信",
       "role": "用途",
       "servesLive": "提供实时管理页面",
       "also": "同时影响：{list}",

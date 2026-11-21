@@ -53,7 +53,9 @@
 #include "services/kiln_net.h"
 // Steam peer-to-peer messages (kiln_net.h, steam_messages.h)
 #include "../../core/src/launch_internal.h"  // kiln.internal.launch (Kiln-internal, the core's own)
+#include "../../core/src/owners_internal.h"  // kiln.internal.owners (Kiln-internal, the core's own)
 #include "services/kiln_caps.h"
+#include "services/kiln_hooks.h"  // subscribe_owner_retiring: an owner's Steam leases close when it is revoked
 #include "steam_messages.h"
 
 namespace {
@@ -1919,8 +1921,8 @@ bool init_client_role() {
     return true;
 }
 
-// Steam peer-to-peer messages (kiln_net.h, steam_messages.h): exports, the designated owner, the
-// capability row net.steam_messages and the exit flag
+// Steam peer-to-peer messages (kiln_net.h, steam_messages.h): exports, the designated owner, the admitted owners, an
+// owner's leases closed when it is revoked, the capability row net.steam_messages and the exit flag
 void* steam_lookup(const char* name, void* module) {
     return reinterpret_cast<void*>(GetProcAddress(static_cast<HMODULE>(module), name));
 }
@@ -1943,6 +1945,9 @@ void KILN_CALL steam_row_tick(const KilnTickInfo*, void*) {
                                                 : "Steam networking messages resolved (user interfaces)");
 }
 
+// The core's owner-retiring notification: the retiring owner's leases close (no Steam call, never waits).
+void KILN_CALL on_steam_owner_retiring(KilnOwner owner, void*) { knet::steam::owner_retired(owner); }
+
 void init_steam_messages() {
     // steam_api64.dll is a static import of both game executables: it is loaded before Kiln, or not at all. Looked up
     // once, here; no member calls GetModuleHandle or GetProcAddress.
@@ -1960,6 +1965,26 @@ void init_steam_messages() {
     if (launch && launch->header.version == KILN_LAUNCH_INTERNAL_VERSION &&
         launch->header.size >= offsetof(KilnLaunchInternalApi, dialect_owner) + sizeof launch->dialect_owner)
         config.dialect_owner = launch->dialect_owner;
+    // kiln.internal.owners: whether an owner is alive and what the managed host admitted it to (a C# mod's
+    // "steamMessages": true). Without it only the designated owner opens a lease.
+    const auto* owners = static_cast<const KilnOwnersInternalApi*>(
+        g_api->service(KilnStr{KILN_OWNERS_INTERNAL_SERVICE, sizeof(KILN_OWNERS_INTERNAL_SERVICE) - 1},
+                       KILN_OWNERS_INTERNAL_VERSION));
+    if (owners && owners->header.version == KILN_OWNERS_INTERNAL_VERSION &&
+        owners->header.size >= offsetof(KilnOwnersInternalApi, grants) + sizeof owners->grants)
+        config.owner_grants = owners->grants;
+    // A lease never outlives its owner: the core tells kiln.net when an owner is revoked (a mod unloading). Leases can
+    // be opened whatever the exports say (open calls no Steam function), so this comes first; without the notification
+    // steam_open opens nothing (Config::owners_watched).
+    const KilnStr hooks_name{KILN_HOOKS_SERVICE, sizeof(KILN_HOOKS_SERVICE) - 1};
+    const auto* hooks = static_cast<const KilnHooksApi*>(g_api->service(hooks_name, 1));
+    KilnHandle observer = 0;
+    config.owners_watched =
+        hooks && hooks->header.size >= offsetof(KilnHooksApi, subscribe_owner_retiring) + sizeof(void*) &&
+        hooks->subscribe_owner_retiring &&
+        hooks->subscribe_owner_retiring(g_owner, &on_steam_owner_retiring, nullptr, &observer) == KILN_OK;
+    if (!config.owners_watched)
+        logf(KILN_LOG_WARN, "net: steam messages: no owner-retiring notification here; no Steam message lease opens");
     const char* missing = nullptr;
     const knet::steam::Presence presence = knet::steam::init(config, &missing);
     const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(KilnStr{KILN_CAPS_SERVICE, sizeof(KILN_CAPS_SERVICE) - 1}, 1));
@@ -1982,8 +2007,10 @@ void init_steam_messages() {
     g_api->subscribe_tick(g_owner, KILN_TICK_PRE, &steam_row_tick, nullptr, &h);
     if (g_world_api && g_side == KILN_SIDE_CLIENT)
         g_api->subscribe_world_tick(g_owner, KILN_WORLD_CLIENT, KILN_TICK_PRE, &steam_row_tick, nullptr, &h);
-    logf(KILN_LOG_INFO, "net: steam messages: %s exports found; a lease opens for the designated owner only (%s)",
-         config.server ? "GameServer" : "user", config.dialect_owner ? "kiln.internal.launch resolved" : "none here");
+    logf(KILN_LOG_INFO, "net: steam messages: %s exports found; leases open for the designated owner (%s) and for owners "
+         "the managed host admitted (%s)",
+         config.server ? "GameServer" : "user", config.dialect_owner ? "kiln.internal.launch resolved" : "none here",
+         config.owner_grants ? "kiln.internal.owners resolved" : "none here");
 }
 
 // Kiln's own exit step: every Steam messages member answers unavailable from now on and calls nothing. No

@@ -529,10 +529,8 @@ fn the_read_group_is_in_the_table_with_its_rows() {
     let table = api();
     assert!(table.resource_json.is_some() && table.find_resource.is_some() && table.list_resources.is_some());
     assert!(table.read_resource.is_some() && table.content_read_range.is_some() && table.list_contents.is_some());
-    assert!(
-        table.value_decode.is_none() && table.attribute_catalog.is_none(),
-        "codecs and attributes stay null"
-    );
+    assert!(table.value_decode.is_none(), "codecs stay null");
+    assert!(table.attribute_catalog.is_some(), "the attribute group is m6_archive_attributes'");
     static ROWS: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
     unsafe extern "C" fn report(_: u64, name: KilnStr, state: u32, _: u32, _: KilnStr) -> i32 {
         let name = unsafe { std::slice::from_raw_parts(name.ptr.cast::<u8>(), name.len) };
@@ -563,11 +561,11 @@ fn the_read_group_is_in_the_table_with_its_rows() {
         );
     }
     assert_eq!(rows["eml.archive.codec"], KILN_CAP_UNAVAILABLE as u32);
-    assert_eq!(rows["eml.archive.attributes"], KILN_CAP_UNAVAILABLE as u32);
+    assert_eq!(rows["eml.archive.attributes"], KILN_CAP_AVAILABLE as u32);
     assert_eq!(
         rows.len(),
-        (1 + 4) + (1 + 2) + (1 + 6) + 1 + 1,
-        "metadata, errors and read with their members, codec, attributes"
+        (1 + 4) + (1 + 2) + (1 + 6) + 1 + (1 + 3),
+        "metadata, errors, read and attributes with their members, codec"
     );
 }
 

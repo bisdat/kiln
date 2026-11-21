@@ -37,6 +37,7 @@ generated [../status.generated.md](../status.generated.md); what has no API yet 
 | [screen-effects.md](screen-effects.md) | Full-screen effects: colour grading, tint, vignette, fades and flashes, on a status, an effect or from code |
 | [models.md](models.md) | Weapons and creature bodies from glTF, rigid or skinned: tools/modelcook, cook.json model steps |
 | [cooking.md](cooking.md) | Cooking: the files a mod makes from each player's game (models, animations, sounds, Impact programs), who cooks and when (the launcher, `kiln cook`, a server), and why only what this PC cooked is loaded |
+| [textures.md](textures.md) | Textures in code: game texture data (BC1 to BC7, packed, 8 to 64-bit formats, mip chains) to RGBA8 pixels and back, `GameTexture` (since 0.2.0-dev.30.3) |
 | [materials.md](materials.md) | New surfaces for models from PNGs and numbers, on the game's own shaders: no base to name, or made from a glTF's materials |
 | [animations.md](animations.md) | Clips, skeletons and state-machine graphs from glTF: tools/animcook, cook.json animation steps, clips reworked from other clips (`from`); states of a mod's own in the player's animation graph (`assets/player-states.json`) |
 | [quests.md](quests.md) | Quest chains, conversations and NPCs: QuestBlock/DialogueBlock, quests/*.json, Quests.Define, rewards and client requirements |
@@ -55,6 +56,8 @@ generated [../status.generated.md](../status.generated.md); what has no API yet 
 | [typed-fields.md](typed-fields.md) | The game's data as typed C# structures, for what blocks don't cover: `GameFields`, `GameEnums`, checked string paths |
 | [resource-patches.md](resource-patches.md) | Change a field of the game's data before the game reads it (the balancing table and the like): `resourcePatches` in a boot mod |
 | [player-states.md](player-states.md) | Every state and action a player can be in: `player.Is(...)`, `PlayerStateChangedEvent`, `PlayerActionEvent`, and what is left out |
+| [../services/client-building-input.md](../services/client-building-input.md) | Building input (0.2.0-dev.30.3, game client only): select, place, remove, undo and dismantle through the local player's own input (`kiln.client`); the server still checks permissions, resources and range; one request at a time; only on a client build Kiln has mapped (`client.building_input`) |
+| [../services/net-steam-messages.md](../services/net-steam-messages.md) | Steam messages (0.2.0-dev.30.3): a mod's own Steam peer-to-peer messages on leased Steam channels, beside the game's connection (`kiln.net`): status, open, close, maintain (who may start a session), send, receive, accept (`net.steam_messages`); a mod opts in with `"steamMessages": true` in kiln.mod.json |
 | [../services/steamguard.md](../services/steamguard.md) | The achievement guard (experimental, game client only): keep tests and admin commands from unlocking Steam achievements |
 | [debugging.md](debugging.md) | Breakpoints in a running server: `kiln debug` and netcoredbg |
 | [../native-mods.md](../native-mods.md) | Native mods (DLL mods): `native.json`, load phases, `kiln_native_init` and the Kiln API from C or C++ |

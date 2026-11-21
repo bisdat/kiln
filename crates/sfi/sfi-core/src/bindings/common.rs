@@ -58,7 +58,13 @@ pub fn install(
     // Docs say 'lua'; neither pinned implementation registers mod_kind.
     logging::install(lua, env, &api, package.id(), sink)?;
     api.raw_set("clock", clock)?;
-    let settings = settings::install(lua, &api, package.id(), &input.manifest.setting_values)?;
+    let settings = settings::install(
+        lua,
+        &api,
+        package.id(),
+        &input.manifest.setting_values,
+        &input.manifest.settings,
+    )?;
     locales::install(lua, &api, input.locale, input.manifest.locales)?;
     let loader = namespace(lua, env, "loader")?;
     let loader_features = loader::install(

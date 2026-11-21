@@ -1352,3 +1352,99 @@ fn windows_names_the_keys_in_the_thread_s_layout_and_restores_it() {
         "this process registered no raw keyboard input"
     );
 }
+
+// ---- the keybind members of shroudforge.input on this feed (runtime/input.rs) ----
+
+/// The keybind members over the real feed: kiln.ui's records reach a package's keybind setting at the turn start; an
+/// auto-repeat is no new press; kiln.ui's capture and a focus loss answer "not held"; the label uses the desktop's key
+/// names; the runtime's stop unsubscribes from kiln.ui.
+#[test]
+fn the_keybind_members_read_the_feed_at_each_turn() {
+    use kiln_sfi::runtime::input::{self, InputState};
+    let s = setup();
+    let mut names = vec![String::new(); label::SCANCODE_COUNT];
+    names[66] = "F9".into();
+    s.desktop.names.lock().unwrap().insert(0, names);
+    let Setup {
+        ui,
+        adapter,
+        _api,
+        desktop,
+    } = s;
+    let adapter = Rc::new(adapter);
+    let open = input::open_feed(
+        Rc::new(move || Box::new(desktop.clone()) as Box<dyn Desktop>),
+        config(64),
+    );
+    let state = InputState::new();
+    state.set_side(sfi_core::host::Side::Client);
+    state.opened(open(&adapter, support::next_owner()));
+    assert!(state.is_live());
+    let manifest = sfi_core::package::Package::parse(
+        br#"{"id":"keys-mod","name":"Keys","version":"1.0.0","capabilities":["runtime"]}"#,
+        Some(br#"{"schemaVersion":1,"enabled":true,"settings":{"toggleKey":{"value":"SDL:66","control":"keybind"}}}"#),
+        sfi_core::package::ParseOptions::default(),
+    )
+    .unwrap()
+    .manifest;
+    let lua = mlua::Lua::new();
+    let api = lua.create_table().unwrap();
+    let settings = sfi_core::settings::install(
+        &lua,
+        &api,
+        "keys-mod",
+        &manifest.setting_values,
+        &manifest.settings,
+    )
+    .unwrap();
+    input::install_members(&lua, &api, &settings, &state).unwrap();
+    lua.globals().raw_set("sf", api).unwrap();
+    let q = |member: &str| {
+        lua.load(format!("return tostring(sf.input.{member}('toggleKey'))"))
+            .eval::<String>()
+            .unwrap()
+    };
+    assert_eq!(q("keybind_label"), "F9");
+    assert_eq!(
+        q("was_keybind_pressed"),
+        "false",
+        "the first call only remembers"
+    );
+    ui.deliver(raw(0x43, 0));
+    assert_eq!(
+        q("is_keybind_down"),
+        "false",
+        "not before the turn start takes it in"
+    );
+    state.turn_start();
+    assert_eq!(q("is_keybind_down"), "true");
+    assert_eq!(q("was_keybind_pressed"), "true");
+    ui.deliver(raw(0x43, 0));
+    state.turn_start();
+    assert_eq!(
+        q("was_keybind_pressed"),
+        "false",
+        "an auto-repeat is no new press"
+    );
+    ui.capturing.store(true, Ordering::SeqCst);
+    state.turn_start();
+    assert_eq!(q("is_keybind_down"), "false", "kiln.ui has the input");
+    ui.capturing.store(false, Ordering::SeqCst);
+    ui.deliver(focus_lost());
+    state.turn_start();
+    assert_eq!(q("is_keybind_down"), "false", "a focus loss releases it");
+    ui.deliver(raw(0x43, 0));
+    state.turn_start();
+    assert_eq!(
+        q("was_keybind_pressed"),
+        "true",
+        "pressed anew after the focus loss"
+    );
+    state.stop();
+    assert_eq!(ui.unsubscribes.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        state.take_lines(),
+        vec![(KILN_LOG_INFO, input::STARTED.to_owned())]
+    );
+    assert_eq!(q("is_keybind_down"), "false");
+}

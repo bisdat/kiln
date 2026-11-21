@@ -463,6 +463,37 @@ int main() {
         writes::g_hold_test_point = nullptr;
     }
 
+    // ecs_registration (since 0.2.0-dev.30.3): the type descriptor's page or the registration rows unreadable is a
+    // refusal that names no type, never a fault; with the pages back the row reads whole.
+    {
+        w.reg("FallDamage", 0);
+        const uintptr_t desc = w.descriptor("keen::ecs::FallDamage", 8);
+        w.reg_types("FallDamage", 0, desc);
+        const uint32_t fall = fakeworld::fnv1a("keen::ecs::FallDamage");
+        const auto detail = [&](KilnResult* rc) {
+            KilnEcsRegistrationDetail d{};
+            d.size = sizeof d;
+            *rc = reader.registration_detail(KILN_WORLD_SERVER, fall, &d);
+            return d;
+        };
+        KilnResult rc{};
+        auto d = detail(&rc);
+        check(rc == KILN_OK && d.template_hash == fall && d.template_size == 8, "ecs_registration over the real SEH copy");
+        const Case spots[] = {{"the template type descriptor", desc & ~uintptr_t{4095}, 4096},
+                              {"the registration rows", w.catalog.at(), w.catalog.size}};
+        for (const Case& c : spots)
+            for (int how = 0; how < 3; ++how) {
+                const std::string name = std::string("ecs_registration: ") + c.what + " " + mode_name(how);
+                {
+                    Spoil spoil(c.at, c.size, how);
+                    d = detail(&rc);
+                    check(rc != KILN_OK && d.template_hash == 0 && d.storage_hash == 0,
+                          name + ": refused (" + std::to_string(rc) + ") and names no type");
+                }
+                d = detail(&rc);
+                check(rc == KILN_OK && d.template_hash == fall, name + ": with the pages back the row reads");
+            }
+    }
     std::printf("ecs_fault_win: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

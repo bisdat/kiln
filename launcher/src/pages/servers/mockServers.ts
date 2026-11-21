@@ -43,7 +43,7 @@ const schema = {
 };
 const mods = [
   { id: "kiln-admin", version: "0.2.0", folder: "kiln-admin", enabled: true, source: null, clients: "none", state: "loaded", kind: "kiln" },
-  { id: "isle-icons", version: "1.1.0", folder: "isle-icons", enabled: true, source: { kind: "kiln", id: "isle-icons", version: "1.1.0", hash: hash("a") }, clients: "mod", state: "loaded", kind: "kiln" },
+  { id: "isle-icons", version: "1.1.0", folder: "isle-icons", enabled: true, source: { kind: "kiln", id: "isle-icons", version: "1.1.0", hash: hash("a") }, clients: "mod", state: "loaded", kind: "kiln", steamMessages: true },
   { id: "fps-unlock", version: "2.0.0", folder: "fps-unlock", enabled: false, source: { kind: "native", id: "fps-unlock", version: "2.0.0", hash: hash("b") }, clients: "mod", state: null, kind: "native" },
 ];
 const required = [

@@ -297,6 +297,12 @@ pub(crate) enum Step {
     ReceiptSaved,
     /// Activation (`profile`): the game's `kiln/profile.json` is written, the activation record not yet.
     GameProfileWritten,
+    /// Placement: its staging folder is named in the staging record, not made yet.
+    StagingRecorded,
+    /// Placement: the staging folder is made, nothing copied into it yet.
+    StagingMade,
+    /// Placement: the Library copy is in the staging folder, not checked or marked yet.
+    StagingCopied,
 }
 
 #[cfg(test)]

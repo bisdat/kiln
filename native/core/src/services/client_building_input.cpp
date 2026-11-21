@@ -14,6 +14,10 @@ namespace {
 
 constexpr uint64_t kQueueMs = 5000;          // a request not emitted by then times out (a pressed one still releases)
 constexpr uint64_t kDismantleHoldMs = 1200;  // a dismantle is held this long, written again at every visit
+// A press its input never came back for (the local player's entity or its ClientPlayerInput changed before the release)
+// ends this long after the press, unreleased: the slot is not kept for the rest of the session. A release comes one input
+// version after the press (a dismantle's 1.2 s later); the game's own input writer rewrites every digital bit each step.
+constexpr uint64_t kUnreleasedMs = 10000;
 
 // keen::WorldTransform: position in Q32.32 metres, quaternion x y z w, scale.
 struct Transform {
@@ -41,8 +45,8 @@ uint64_t steady_ms() {
 }
 
 const char* const kUnbound =
-    "no verified client input observation point on this game build: the client cursor system's input point, its building "
-    "version call and the ClientPlayerInput layout are not in sigdb";
+    "no verified client input observation point on this game build: sigdb has no client.input_observation (the local "
+    "input writer's observation point, the client world's step and the ClientPlayerInput layout) for it";
 
 std::atomic<uint64_t (*)()> g_clock{&steady_ms};
 std::mutex g_mu;  // the slot below; never held across a call out of this file
@@ -51,6 +55,7 @@ uint32_t g_next_id = 0;
 uint32_t g_ended = 0;  // the newest client session whose world stopped
 Layout g_layout{};
 std::atomic<bool> g_bound{false};
+std::atomic<const char*> g_why{kUnbound};  // bound()'s answer while unbound
 std::atomic<uint64_t> g_skipped{0}, g_faults{0};
 
 uint64_t now_ms() { return g_clock.load(std::memory_order_relaxed)(); }
@@ -94,11 +99,16 @@ bool convert(const KilnBuildingInput& in, Command& out) {
     return true;
 }
 
-// The source's 5 s rule, at every status and every visit.
+// The source's 5 s rule, at every submit, status and visit; and the end of a press never released (kUnreleasedMs).
+// `now` may be older than the request (a submit reads the clock before it takes the slot): then nothing has expired.
 void expire(Command& c, uint64_t now) {
-    if (now - c.queued_at <= kQueueMs) return;
-    if (c.status == KILN_BUILDING_INPUT_QUEUED) c.status = KILN_BUILDING_INPUT_TIMEOUT;
-    else if (c.status == KILN_BUILDING_INPUT_PRESSED) c.terminal = KILN_BUILDING_INPUT_TIMEOUT;
+    if (now <= c.queued_at || now - c.queued_at <= kQueueMs) return;
+    if (c.status == KILN_BUILDING_INPUT_QUEUED) {
+        c.status = KILN_BUILDING_INPUT_TIMEOUT;
+    } else if (c.status == KILN_BUILDING_INPUT_PRESSED) {
+        c.terminal = KILN_BUILDING_INPUT_TIMEOUT;  // still released at its next input
+        if (now > c.pressed_at && now - c.pressed_at > kUnreleasedMs) c.status = c.terminal;
+    }
 }
 
 void fault(Command& c) {
@@ -184,6 +194,7 @@ KilnResult submit(const Env& env, KilnOwner owner, uint64_t expected_session, co
         if (!g_bound.load(std::memory_order_relaxed)) return KILN_ERR_UNAVAILABLE;  // stopped meanwhile
         if (!env.live_session || env.live_session <= g_ended || (expected_session && expected_session != env.live_session))
             return KILN_CLIENT_ERR_BUILDING_STALE;
+        expire(g_cmd, now);
         if (open(g_cmd)) return KILN_CLIENT_ERR_BUILDING_BUSY;
         next.id = ++g_next_id;
         if (!next.id) next.id = ++g_next_id;
@@ -238,9 +249,11 @@ void bind(const Layout* layout) {
 
 bool bound(const char** why) {
     if (g_bound.load(std::memory_order_acquire)) return true;
-    if (why) *why = kUnbound;
+    if (why) *why = g_why.load(std::memory_order_acquire);
     return false;
 }
+
+void unbound_reason(const char* why) { g_why.store(why ? why : kUnbound, std::memory_order_release); }
 
 void observe(const Observation& o, const Memory& m) {
     std::unique_lock lock(g_mu, std::try_to_lock);
@@ -251,14 +264,8 @@ void observe(const Observation& o, const Memory& m) {
     Command& c = g_cmd;
     if (!g_bound.load(std::memory_order_relaxed) || !open(c) || !o.record) return;
     const uint64_t now = now_ms();
-    if (now - c.queued_at > kQueueMs) {
-        if (c.status == KILN_BUILDING_INPUT_QUEUED) {
-            c.status = KILN_BUILDING_INPUT_TIMEOUT;
-            return;
-        }
-        c.terminal = KILN_BUILDING_INPUT_TIMEOUT;  // still release an already pressed input
-    }
-    if (o.entity != c.player || o.session != c.session) return;
+    expire(c, now);  // a queued request times out; a pressed one still releases, unless it was never released in time
+    if (!open(c) || o.entity != c.player || o.session != c.session) return;
     apply(o, m, g_layout, c, now);
 }
 
@@ -288,6 +295,7 @@ void reset_for_tests() {
     g_ended = 0;
     g_layout = {};
     g_bound.store(false, std::memory_order_release);
+    g_why.store(kUnbound, std::memory_order_release);
     g_skipped.store(0, std::memory_order_relaxed);
     g_faults.store(0, std::memory_order_relaxed);
 }

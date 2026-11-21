@@ -2340,6 +2340,8 @@
       "byHand": "Wstawiony ręcznie",
       "folder": "Folder",
       "advanced": "Zaawansowane (hooki lub łatki)",
+      "steam": "Steam",
+      "steamMessages": "Komunikuje się z innymi graczami przez Steam",
       "role": "Rola",
       "servesLive": "Obsługuje strony na żywo",
       "also": "Także {list}",

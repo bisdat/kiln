@@ -11,7 +11,7 @@ out=$KILN_OUT/assets-host-test
 mkdir -p "$out"
 
 # The service's header is C: it compiles as C11.
-printf '#include <stddef.h>\n#include "services/kiln_assets.h"\n#include "services/kiln_assets_vfx.h"\n_Static_assert(KILN_ASSET_PUT_PIN == 4, "KILN_ASSET_PUT_PIN");\n_Static_assert(sizeof(KilnBlobCatalogInfo) == 32, "info");\n_Static_assert(sizeof(KilnBlobCatalogEntry) == 48, "entry");\n_Static_assert(sizeof(KilnAssetsVfxBudget) == 16, "vfx budget");\n_Static_assert(offsetof(KilnAssetsApi, texture_rgba) == offsetof(KilnAssetsApi, blob_catalog_close) + sizeof(void*), "texture_rgba appended");\n_Static_assert(offsetof(KilnAssetsApi, texture_rgba) == 216 && offsetof(KilnAssetsApi, blob_read_resident) == 224 && sizeof(KilnAssetsApi) == 232, "x64 layout");\n' |
+printf '#include <stddef.h>\n#include "services/kiln_assets.h"\n#include "services/kiln_assets_vfx.h"\n_Static_assert(KILN_ASSET_PUT_PIN == 4, "KILN_ASSET_PUT_PIN");\n_Static_assert(sizeof(KilnBlobCatalogInfo) == 32, "info");\n_Static_assert(sizeof(KilnBlobCatalogEntry) == 48, "entry");\n_Static_assert(sizeof(KilnAssetsVfxBudget) == 16, "vfx budget");\n_Static_assert(offsetof(KilnAssetsApi, texture_rgba) == offsetof(KilnAssetsApi, blob_catalog_close) + sizeof(void*), "texture_rgba appended");\n_Static_assert(offsetof(KilnAssetsApi, texture_rgba) == 216 && offsetof(KilnAssetsApi, blob_read_resident) == 224, "x64 layout");\n_Static_assert(sizeof(KilnLoadedInfo) == 24 && offsetof(KilnLoadedInfo, bytes) == 16, "loaded info");\n_Static_assert(offsetof(KilnAssetsApi, loaded_snapshot) == 232 && offsetof(KilnAssetsApi, loaded_list) == 240 && offsetof(KilnAssetsApi, loaded_scalar_compare_exchange) == 248 && sizeof(KilnAssetsApi) == 256, "x64 layout, loaded resources appended");\n' |
   gcc -std=c11 -Wall -Wextra -pedantic -fsyntax-only -I"$here/../../../core/abi" -x c -
 echo "PASS kiln_assets.h compiles as C11"
 
@@ -28,6 +28,16 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -DKILN_ASSETS_CATALOG_TEST -fsanitize=addres
 ASAN_OPTIONS=detect_leaks=0 "$out/test_store"
 
 KILN_OUT="$KILN_OUT" bash "$here/run_vfx.sh"
+
+# The loaded-resource reads and the scalar compare-exchange (loaded.cpp: loaded_snapshot, loaded_list,
+# loaded_scalar_compare_exchange) over a fake engine, gate and guard: ASan+UBSan for every case, TSan for readers on four
+# threads beside a writer that changes the fake engine's index and bytes, and for four compare-exchange writers.
+loaded_flags=(-std=c++20 -O1 -g -Wall -Wextra -I"$here/.." -I"$here/../../../core/abi" -I"$here/../../engine/include")
+g++ "${loaded_flags[@]}" -fsanitize=address,undefined -fno-sanitize-recover=undefined \
+  "$here/test_loaded.cpp" "$here/../loaded.cpp" -o "$out/test_loaded" -pthread
+"$out/test_loaded"
+g++ "${loaded_flags[@]}" -fsanitize=thread "$here/test_loaded.cpp" "$here/../loaded.cpp" -o "$out/test_loaded_tsan" -pthread
+TSAN_OPTIONS=halt_on_error=1 "$out/test_loaded_tsan" --concurrent
 
 # Which cooked files a game loads (cooktrust.cpp): SHA-256, the cook receipts, kiln.json's "cooked".
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined \

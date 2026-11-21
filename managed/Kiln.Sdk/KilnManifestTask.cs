@@ -41,6 +41,8 @@ public sealed class KilnManifest : Microsoft.Build.Utilities.Task
     /// Another value is written as it is, so the loader's own parse names it (KILN001).</summary>
     public string Boot { get; set; } = "";
     public string Advanced { get; set; } = "";
+    /// <summary><c>true</c>: <c>"steamMessages": true</c> (the mod opens its own Steam peer message leases; since 0.2.0-dev.30.3).</summary>
+    public string SteamMessages { get; set; } = "";
     public string Features { get; set; } = "";
     public string Exports { get; set; } = "";
     public ITaskItem[] Dependencies { get; set; } = [];
@@ -282,6 +284,7 @@ public sealed class KilnManifest : Microsoft.Build.Utilities.Task
             WriteStrings(w, "features", List(Features));
             WriteStrings(w, "exports", List(Exports));
             if (Flag(Advanced)) w.WriteBoolean("advanced", true);
+            if (Flag(SteamMessages)) w.WriteBoolean("steamMessages", true);
             if (Flag(TestsAutoRun) || TestTimeoutSeconds.Trim().Length > 0)
             {
                 w.WriteStartObject("tests");

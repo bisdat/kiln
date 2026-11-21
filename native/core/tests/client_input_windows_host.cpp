@@ -3,7 +3,9 @@
 // native Windows runs it the same way): client_input.cpp's entry and its SEH-guarded copies (guard.cpp as it is) in
 // front of the building-input producer (client_building_input.cpp as it is), on stand-in ClientPlayerInput pages that
 // are readable and writable, unreadable, or read-only. A fault must end the request cancelled and leave the process
-// running; the Q32.32 and quaternion conversion must give the host's numbers under the Windows ABI.
+// running; the Q32.32 and quaternion conversion must give the host's numbers under the Windows ABI. The observation
+// point's visit() reads the version as the game does (the client world's step through the input object) on stand-in
+// pages too: an unreadable input object or world skips the visit and is counted, never a crash.
 #include <windows.h>
 
 #include <cstdio>
@@ -116,6 +118,60 @@ int main() {
     check(state(id) == KILN_BUILDING_INPUT_CANCELLED && bi::stats().faults == faults0 + 3 && digital(rw) == 3,
           "fault: a release that faults ends cancelled and frees the slot");
     check(submit(KILN_BUILDING_ACTION_UNDO) != 0, "fault: the slot is free");
+
+    // visit(): the observation point's handler. Stand-ins: the client game's input object (the client world's pointer
+    // at +8, as client/input.world fixes it), the client world (its step at client/input.step), the ClientPlayerInput.
+    {
+        const ci::Site site{8, 0x6c0};
+        uint8_t* input = page(PAGE_READWRITE);
+        uint8_t* world = page(PAGE_READWRITE);
+        uint8_t* rec = page(PAGE_READWRITE);
+        check(input && world && rec, "visit: pages");
+        const uintptr_t wp = reinterpret_cast<uintptr_t>(world);
+        std::memcpy(input + 8, &wp, sizeof wp);
+        uint32_t step = 41;
+        std::memcpy(world + 0x6c0, &step, 4);
+        bi::reset_for_tests();  // the slot holds the queued undo above: start from an empty one
+        bi::bind(&kLayout);
+        ci::reset_stats_for_tests();
+        ci::publish(kPlayer, kSession);
+        id = submit(KILN_BUILDING_ACTION_PLACE);
+        ci::visit(reinterpret_cast<uintptr_t>(input), reinterpret_cast<uintptr_t>(rec), kPlayer, site);
+        check(state(id) == KILN_BUILDING_INPUT_PRESSED && digital(rec) == 3, "visit: the local input is pressed at step 41");
+        ci::visit(reinterpret_cast<uintptr_t>(input), reinterpret_cast<uintptr_t>(rec), kPlayer, site);
+        check(state(id) == KILN_BUILDING_INPUT_PRESSED && digital(rec) == 3, "visit: the same step does not release it");
+        step = 42;
+        std::memcpy(world + 0x6c0, &step, 4);
+        ci::visit(reinterpret_cast<uintptr_t>(input), reinterpret_cast<uintptr_t>(rec), kPlayer, site);
+        check(state(id) == KILN_BUILDING_INPUT_DISPATCHED && digital(rec) == 8, "visit: released at the next step");
+        check(ci::stats().visits == 3 && ci::stats().faults == 0, "visit: three visits, no fault");
+
+        std::memset(rec, 0, 4096);
+        id = submit(KILN_BUILDING_ACTION_PLACE);
+        ci::visit(reinterpret_cast<uintptr_t>(none), reinterpret_cast<uintptr_t>(rec), kPlayer, site);
+        const uintptr_t gone = reinterpret_cast<uintptr_t>(none);
+        std::memcpy(input + 8, &gone, sizeof gone);
+        ci::visit(reinterpret_cast<uintptr_t>(input), reinterpret_cast<uintptr_t>(rec), kPlayer, site);
+        const uintptr_t null_world = 0;
+        std::memcpy(input + 8, &null_world, sizeof null_world);
+        ci::visit(reinterpret_cast<uintptr_t>(input), reinterpret_cast<uintptr_t>(rec), kPlayer, site);
+        check(state(id) == KILN_BUILDING_INPUT_QUEUED && digital(rec) == 0 && ci::stats().faults == 3 && ci::stats().visits == 6,
+              "visit: an unreadable input object, an unreadable world or no world skips the visit (counted); the request waits");
+        std::memcpy(input + 8, &wp, sizeof wp);
+        ci::visit(reinterpret_cast<uintptr_t>(input), reinterpret_cast<uintptr_t>(rec), kPlayer + 1, site);
+        check(state(id) == KILN_BUILDING_INPUT_QUEUED && digital(rec) == 0, "visit: another entity's input is not the local one");
+        ci::visit(reinterpret_cast<uintptr_t>(input), 0, kPlayer, site);
+        check(state(id) == KILN_BUILDING_INPUT_QUEUED, "visit: no record, nothing done");
+        ci::visit(reinterpret_cast<uintptr_t>(input), reinterpret_cast<uintptr_t>(rec), kPlayer, site);
+        check(state(id) == KILN_BUILDING_INPUT_PRESSED && digital(rec) == 3, "visit: then the local input is pressed");
+        uint32_t cancelled = 0;
+        bi::cancel(kEnv, kOwner, id, &cancelled);
+        step = 43;
+        std::memcpy(world + 0x6c0, &step, 4);
+        ci::visit(reinterpret_cast<uintptr_t>(input), reinterpret_cast<uintptr_t>(rec), kPlayer, site);
+        check(cancelled == 1 && state(id) == KILN_BUILDING_INPUT_CANCELLED && digital(rec) == 8,
+              "visit: a cancelled press is still released at the next step");
+    }
 
     ci::publish(0, 0);
     std::printf("client input (Windows): %d passed, %d failed\n", passed, failed);

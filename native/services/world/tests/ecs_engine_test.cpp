@@ -512,6 +512,120 @@ void frame_quiet_writer(const Profile& p, World& w, Reader& reader, Worlds& worl
     put<uint32_t>(rec + E.entity_row, 0);
 }
 
+// kiln.world's ecs_registration (since 0.2.0-dev.30.3): one registration with its storage and template types, over the
+// same catalog; the rows a game build has (template-only, storage-only, both, with a separate storage type) and the
+// rows that do not check out.
+void registrations(const Profile& p, World& w, Reader& reader, Worlds& worlds) {
+    g_case = std::string(p.id) + " registrations";
+    const auto detail = [&](uint32_t kind, uint32_t hash, KilnResult* rc) {
+        KilnEcsRegistrationDetail d{};
+        d.size = sizeof d;
+        *rc = reader.registration_detail(kind, hash, &d);
+        return d;
+    };
+    const std::string fall = "keen::ecs::FallDamage", dur = "keen::ecs::Durability", vel = "keen::ecs::Velocity";
+    w.reg("FallDamage", 0);
+    w.reg_types("FallDamage", 0, w.descriptor(fall, 8));
+    w.reg("Durability", 12);
+    w.reg_types("Durability", w.descriptor("keen::ecs::DurabilityRuntime", 12), w.descriptor(dur, 20), 0x5);
+    w.reg("Velocity", 16);
+    w.reg_types("Velocity", w.descriptor(vel, 16), 0);
+    w.reg("BadHash", 8);
+    w.reg_types("BadHash", 0, w.descriptor("keen::ecs::BadHash", 8, 0x1234));
+    w.reg("BadSize", 8);
+    w.reg_types("BadSize", w.descriptor("keen::ecs::BadSize", 12), 0);
+    w.reg("Outside", 8);
+    w.reg_types("Outside", 0, w.image.at() + w.image.size - 0x40);  // 0x90 bytes would run past the image
+    w.reg("OtherIdentity", 8);
+    w.reg_types("OtherIdentity", w.descriptor("keen::ecs::OtherIdentity", 8), w.descriptor(fall, 8));
+    w.reg("NotEcs", 8);
+    w.reg_types("NotEcs", 0, w.descriptor("keen::NotEcs", 8, fnv1a("keen::ecs::NotEcs")));
+
+    Backend b = reader.backend();
+    KilnEcsContextInfo ci{}; ci.size = sizeof ci;
+    check(ecs_context_snapshot(b, &ci) == KILN_OK, "the context after the new rows");
+    KilnResult rc{};
+    auto d = detail(KILN_WORLD_SERVER, fnv1a(fall), &rc);
+    check(rc == KILN_OK && d.status == KILN_ECS_OK && d.index == w.comp(fall).index && d.component == fnv1a(fall) &&
+              d.runtime_size == 0 && d.storage_hash == 0 && d.storage_size == 0 && d.template_hash == fnv1a(fall) &&
+              d.template_size == 8 && d.layout_stamp == ci.layout_stamp && d.size == sizeof d,
+          "a template-only registration: its template type and no storage");
+    d = detail(KILN_WORLD_SERVER, fnv1a(dur), &rc);
+    check(rc == KILN_OK && d.runtime_size == 12 && d.storage_hash == fnv1a("keen::ecs::DurabilityRuntime") &&
+              d.storage_size == 12 && d.template_hash == fnv1a(dur) && d.template_size == 20 && d.flags == 0x5 &&
+              d.storage_flags == 3,
+          "a registration with a storage type of its own and a template type, its raw flags");
+    d = detail(KILN_WORLD_SERVER, fnv1a(vel), &rc);
+    check(rc == KILN_OK && d.storage_hash == fnv1a(vel) && d.storage_size == 16 && d.template_hash == 0 &&
+              d.template_size == 0,
+          "a storage-only registration has no template role");
+    d = detail(KILN_WORLD_SERVER, fnv1a("keen::ecs::DurabilityRuntime"), &rc);
+    check(rc == KILN_ERR_NOT_FOUND && d.status == KILN_ECS_OK, "a storage type's own hash is not a registration's");
+    d = detail(KILN_WORLD_SERVER, 0x12345678u, &rc);
+    check(rc == KILN_ERR_NOT_FOUND && d.status == KILN_ECS_OK && d.template_hash == 0, "an unknown hash: not found");
+    for (const char* name : {"Health", "BadHash", "BadSize", "Outside", "OtherIdentity", "NotEcs"}) {
+        d = detail(KILN_WORLD_SERVER, H(w, name), &rc);
+        check(rc == KILN_ERR_UNAVAILABLE && d.status == KILN_ECS_UNAVAILABLE && d.template_hash == 0 &&
+                  d.storage_hash == 0,
+              std::string(name) + ": a row that does not check out is unavailable and names no type");
+    }
+    // The identity rule holds the other way too: with the template type present, the storage type may carry
+    // another name, never the template type another hash.
+    w.reg_types("Velocity", w.descriptor(vel, 16), w.descriptor("keen::ecs::VelocityTemplate", 4));
+    d = detail(KILN_WORLD_SERVER, fnv1a(vel), &rc);
+    check(rc == KILN_ERR_UNAVAILABLE, "a template type that is not the registration's own: unavailable");
+    w.reg_types("Velocity", w.descriptor(vel, 16), 0);
+    // No world of the kind; the prediction world (no engine view).
+    const uintptr_t kept = worlds.world[KILN_WORLD_SERVER];
+    worlds.world[KILN_WORLD_SERVER] = 0;
+    d = detail(KILN_WORLD_SERVER, fnv1a(fall), &rc);
+    check(rc == KILN_ERR_UNAVAILABLE && d.status == KILN_ECS_ABSENT, "no world of the kind: unavailable, status absent");
+    worlds.world[KILN_WORLD_SERVER] = kept;
+    if (!p.layout.dedicated_server) {
+        d = detail(KILN_WORLD_PREDICTION, fnv1a(fall), &rc);
+        check(rc == KILN_ERR_UNAVAILABLE && d.status == KILN_ECS_UNAVAILABLE, "the prediction world: unavailable");
+    }
+    // A catalog replaced between two reads: the next read answers from the new catalog.
+    w.reg("Late", 0);
+    w.reg_types("Late", 0, w.descriptor("keen::ecs::Late", 24));
+    d = detail(KILN_WORLD_SERVER, fnv1a("keen::ecs::Late"), &rc);
+    check(rc == KILN_OK && d.template_size == 24 && d.layout_stamp != ci.layout_stamp,
+          "a grown catalog: the new row, under a new layout stamp");
+    // The catalog grows between the context's look at it and the catalog read (the second copy of the registry's head):
+    // the new catalog's row is never answered under the old catalog's layout stamp (unreadable: read again), and the
+    // next read answers the row under the stamp the context names now.
+    {
+        const uintptr_t head = w.registry + 8;
+        int seen = 0;
+        g_copy_hook = [&](uintptr_t address) {
+            if (address == head && ++seen == 2) w.reg("Racing", 4);
+        };
+        d = detail(KILN_WORLD_SERVER, fnv1a("keen::ecs::Late"), &rc);
+        g_copy_hook = nullptr;
+        KilnEcsContextInfo now{}; now.size = sizeof now;
+        check(seen >= 2 && ecs_context_snapshot(b, &now) == KILN_OK && now.layout_stamp != ci.layout_stamp,
+              "the catalog grew during the read");
+        check(rc == KILN_ECS_ERR_UNREADABLE || (rc == KILN_OK && d.layout_stamp == now.layout_stamp),
+              "a catalog that grew during the read: unreadable, never the old catalog's stamp on the new row (" +
+                  std::to_string(rc) + ")");
+        d = detail(KILN_WORLD_SERVER, fnv1a("keen::ecs::Late"), &rc);
+        check(rc == KILN_OK && d.layout_stamp == now.layout_stamp, "read again: the row under the grown catalog's stamp");
+    }
+    // Concurrent readers of the same rows (ThreadSanitizer): every answer is whole.
+    std::atomic<int> bad{0};
+    std::vector<std::thread> threads;
+    for (int t = 0; t < 4; ++t)
+        threads.emplace_back([&] {
+            for (int i = 0; i < 200; ++i) {
+                KilnResult r{};
+                const auto x = detail(KILN_WORLD_SERVER, fnv1a(dur), &r);
+                if (r != KILN_OK || x.template_size != 20 || x.storage_size != 12) bad.fetch_add(1);
+            }
+        });
+    for (auto& t : threads) t.join();
+    check(bad.load() == 0, "concurrent readers: every answer whole");
+}
+
 void exact(const Profile& p) {
     g_case = p.id;
     KilnApi api = make_api();
@@ -558,6 +672,7 @@ void exact(const Profile& p) {
     concurrent(p, server, reader, true);
     frame_quiet(p, server, reader, worlds, e, client.get());
     for (int round = 1; round <= 3; ++round) frame_quiet_writer(p, server, reader, worlds, e, round);
+    registrations(p, server, reader, worlds);
     kiln::engine::mem::test_image = 0;
 }
 

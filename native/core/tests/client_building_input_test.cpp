@@ -42,7 +42,7 @@ __attribute__((no_sanitize("address", "thread", "undefined"))) void on_free(cons
 // The layout of keen::ecs::ClientPlayerInput on client 26430625 as its reflection describes it (sigdb/types/client/
 // 5d9ef2f1...: ClientPlayerInputData.cursorInput 760, digitalInput 936, createBuildingItemAction 500,
 // buildingStockCycleAction 160; PlayerInputType MainhandAction 0, _Tap 1, _Hold 2, _Release 3, SecondaryBuildingAction 4,
-// ContextualAction 5, ContextualAction_Hold 7, BuildingUndo 40). A stand-in only: no build binds the producer yet.
+// ContextualAction 5, ContextualAction_Hold 7, BuildingUndo 40): the values sigdb's client.input_observation fixes.
 constexpr bi::Layout kLayout{760, 936, 500, 160, 0, 1, 2, 3, 4, 5, 7, 40};
 constexpr size_t kRecord = 1536;
 constexpr uint64_t bit(unsigned n) { return uint64_t{1} << n; }
@@ -532,6 +532,35 @@ void timeouts() {
           "timeout: a pressed request cancelled and not released within 5 s answers timeout, as the source does");
     visit(p, 2);
     check(p.digital() == bit(3) && state_of(A, id) == KILN_BUILDING_INPUT_TIMEOUT, "timeout: and it is still released");
+
+    // A press whose input never comes back for its release (the local player's entity or its ClientPlayerInput changed
+    // between the press and the release) ends 10 s after the press, unreleased, and frees the slot. Before, it kept the
+    // slot busy for the rest of the session: cancel only set its answer and the 5 s rule only rewrote it.
+    fresh();
+    g_now = 50000;
+    id = submit_ok(A, in);
+    Record pressed;
+    visit(pressed, 1);
+    Record moved;
+    const auto untouched = moved.bytes;
+    g_now = 59000;
+    visit(moved, 2);  // the same entity's input at another address: never released there
+    check(bi::submit(kEnv, B, 0, &in, &other) == KILN_CLIENT_ERR_BUILDING_BUSY && moved.bytes == untouched,
+          "unreleased: 9 s after its press it still keeps the slot; another input is not released");
+    g_now = 60001;
+    visit(moved, 3, nullptr, kPlayer + 1);  // the local player is another entity now
+    check(moved.bytes == untouched && state_of(A, id) == KILN_BUILDING_INPUT_TIMEOUT,
+          "unreleased: 10 s after its press it ends timeout, nothing written");
+    check(submit_ok(B, in) != 0, "unreleased: the slot is free again");
+    // the same end without a visit or a status: the next submit finds it over
+    fresh();
+    g_now = 70000;
+    id = submit_ok(A, in);
+    Record alone;
+    visit(alone, 1);
+    g_now = 80001;
+    check(bi::submit(kEnv, B, 0, &in, &other) == KILN_OK && other != 0 && alone.digital() == bit(0) + bit(1),
+          "unreleased: a submit 10 s after the press takes the slot (nothing visited or asked meanwhile)");
 }
 
 void stop_and_reload() {
@@ -780,10 +809,34 @@ void concurrent_copied_status() {
           std::to_string(submitted.load()) + " submitted, " + std::to_string(released.releases) + " releases, " +
               std::to_string(regressions.load()) + " regressions");
 }
+// bound()'s answer while unbound: the default (no observation point), the binder's reason, and back.
+void unbound_reasons() {
+    bi::reset_for_tests();
+    const char* why = nullptr;
+    const bool unbound = !bi::bound(&why);
+    const std::string def = why ? why : "";
+    check(unbound && def.find("client.input_observation") != std::string::npos,
+          "reason: unbound by default, naming the missing sigdb feature", def);
+    static const char* const kHeld = "held by the client gate";
+    bi::unbound_reason(kHeld);
+    why = nullptr;
+    check(!bi::bound(&why) && why == kHeld, "reason: the binder's reason while unbound");
+    bi::bind(&kLayout);
+    why = nullptr;
+    check(bi::bound(&why) && why == nullptr, "reason: a bound producer gives none");
+    bi::bind(nullptr);
+    check(!bi::bound(&why) && why == kHeld, "reason: unbound again, the last reason stands");
+    bi::unbound_reason(nullptr);
+    check(!bi::bound(&why) && def == why, "reason: nullptr is the default again");
+    bi::unbound_reason(kHeld);
+    bi::reset_for_tests();
+    check(!bi::bound(&why) && def == why, "reason: reset_for_tests restores the default");
+}
 }  // namespace
 
 int main() {
     std::setvbuf(stdout, nullptr, _IOLBF, 0);  // a hang (the script's time limit) still shows how far it got
+    unbound_reasons();
     refusals();
     field_rules();
     conversion();

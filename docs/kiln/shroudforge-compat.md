@@ -727,7 +727,7 @@ column names what a Kiln mod uses today for the same effect. The C# column state
 | `game.types` (TypeRegistry) | `resolve`, `get`, `get_by_index`, `find`, `find_by_hash`, `get_by_qualified_name`, `get_by_impact_name`, `get_all`, `of`, `Type:is_a` | plugin | `GameTypes.Find/ByHash/All/TypeOf`; no Impact-name lookup | plugin; C# equivalent partial |
 | `game.guid` (GuidHelper) | `from_content_hash`, `to_content_hash`, `hash` | plugin | `ContentHash`, `GuidHash.Of` (`Kiln.Eml`) | plugin; C# unit tests |
 | `buffer` | `create`, `wrap`, Buffer read/write of all scalar types, strings, resources | plugin | `System.Buffers` / `BinaryPrimitives` (C# has it) | plugin |
-| `image` | `create`, `decode`, `decode_texture`, `encode`, `encode_texture`, pixel get/set | plugin | `DataImage` (PNG and RGBA8 pixels), `Assets.OverrideTexture` (PNG to existing texture format) | plugin; C# unit tests; no general texture decoder |
+| `image` | `create`, `decode`, `decode_texture`, `encode`, `encode_texture`, pixel get/set | plugin | `DataImage` (PNG and RGBA8 pixels), `GameTexture.Decode/DecodeMip/Encode` (game texture formats, BC1 to BC7, the same answers as `decode_texture`/`encode_texture`; since 0.2.0-dev.30.3, [modding/textures.md](modding/textures.md)), `Assets.OverrideTexture` (PNG to existing texture format) | plugin; C# tests on the texture fixtures' goldens |
 | `io` | `read`, `read_to_string`, `list_files`, `exists`, `is_file`, `is_directory`, path helpers, `export*` (exports folder) | plugin (SF's sandbox) | `System.IO` + `Mod.DataDir` | plugin |
 | `hasher` | `fnv`, `crc` | plugin | `DataHash.Fnv1a32/Crc32/Crc64` (`Kiln.Eml`) | plugin; C# unit tests |
 | `integer` | 512 helpers (u64/i64 math) | plugin | C# has native 64-bit integers | n/a |
@@ -737,7 +737,7 @@ column names what a Kiln mod uses today for the same effect. The C# column state
 **Kiln C# coverage:** component reflection, attributes, reversible claims, reflected resource lookup and field writes,
 voxel access, hashing, PNG images and raw RGBA8 pixels have APIs. Blob enumeration covers managed additions and
 overrides only (`Assets.ListBlobs/ListAllBlobs`), not every game blob. General named-service reflection, Impact-name
-type lookup and a general texture decoder are outside those helpers; PNG/RGBA8 are implemented.
+type lookup are outside those helpers; PNG/RGBA8 and game texture formats (`GameTexture`, since 0.2.0-dev.30.3) are implemented.
 `Kiln.Settings` covers world settings. Entity scale is not
 provided by these APIs. The ports use Kiln's own type data and MIT helpers. The hosted plugin's lab evidence is separate
 from C# unit tests, and neither proves a client drew a result or accepted input.
@@ -933,6 +933,7 @@ The checks are `mods/tests/client-pass/Sfi.cs` (area "Kiln's interpreter", how t
 | `sfi-three-surface-warning` | the same warning before Play, in the game (banner, footer, DO NOT SAVE badge, pause-menu marker) and in `sfi.json` |
 | `sfi-warning-accessibility` | the dialog before Play with the keyboard alone and at large text size; the in-game banner readable |
 | `sfi-backend-roundtrip` | kiln, hosted, kiln on one game: hosted runs every mod again, settings kept, the save-sensitive package carried through the hosted start, no mod in two folders of `<game>/mods` |
+| `sfi-keybinds` | with the keys probe (`mods/tests/sf-keys-probe`): a mod's shortcut read from the game window's keys (`kiln-sfi: keyboard shortcuts of ShroudForge-format mods read the game window's keys`), its label, one press per press, held and released, nothing while Kiln's menu has the keyboard |
 
 What these checks do not cover: native Windows (the pass is played under Proton), a joined or dedicated server in kiln
-mode, mod shortcuts (not wired in kiln mode yet) and the ECS/world calls that answer unavailable in this build.
+mode and the ECS/world calls that answer unavailable in this build.

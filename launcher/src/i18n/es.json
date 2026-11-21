@@ -2262,6 +2262,8 @@
       "byHand": "Puesto a mano",
       "folder": "Carpeta",
       "advanced": "Avanzado (hooks o parches)",
+      "steam": "Steam",
+      "steamMessages": "Habla con otros jugadores a través de Steam",
       "role": "Función",
       "servesLive": "Sirve las páginas en vivo",
       "also": "También {list}",

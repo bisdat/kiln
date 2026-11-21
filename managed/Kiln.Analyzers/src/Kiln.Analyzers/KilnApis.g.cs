@@ -849,6 +849,7 @@ internal static partial class KilnApis
         "P:Kiln.Assets.Available=kiln.assets", // T != null: Services.Get("kiln.assets")
         "P:Kiln.Blocks.Available=kiln.assets,kiln.gamedata", // via Kiln.Assets.Available; via Kiln.Content.GameDataAvailable
         "P:Kiln.Build.Available=kiln.build", // T != null: Services.Get("kiln.build")
+        "P:Kiln.BuildingInput.Available=client.building_input,kiln.client", // BuildingInputNative.Members != null: Services.Get("kiln.client"); Is("client.building_input")
         "P:Kiln.Chat.Available=kiln.chat", // T != null: Services.Get("kiln.chat")
         "P:Kiln.Client.Available=kiln.client", // T != null: Services.Get("kiln.client")
         "P:Kiln.Client.IsClientThread=kiln.client", // T != null: Services.Get("kiln.client")
@@ -969,5 +970,6 @@ internal static partial class KilnApis
         "M:Kiln.ConfigFile.Set(System.String,System.Object)", // ConfigFile.Set(string, object?): if (Game.InBoot) throw
         "M:Kiln.ConfigFile.TrySet(System.String,System.Object,System.String@)", // ConfigFile.TrySet(string, object?, out string): if (Game.InBoot) throw
         "M:Kiln.ConfigFile.add_Changed(System.Action{Kiln.ConfigChangedEvent})", // ConfigFile.Changed.add: if (Game.InBoot) throw
+        "M:Kiln.SteamMessages.Open(System.UInt16,System.UInt16,System.Boolean)", // SteamMessages.Open(ushort, ushort, bool): if (Game.InBoot) throw
     };
 }

@@ -8,17 +8,20 @@
 //! - the read group (resource_json, find_resource, list_resources, read_resource, content_read_range, list_contents:
 //!   `read`, the archive table's read group), reported as `eml.archive.read` with its six member rows. A generation authorized without its
 //!   archive (`authorize`, `authorize_with_registry`) answers UNAVAILABLE to all six;
+//! - the attribute group (attribute_catalog, attribute_resolve, attribute_evaluate: ShroudForge's attribute catalog of the
+//!   generation's reference archive, `attributes`), reported as `eml.archive.attributes` with its three member rows. A
+//!   generation authorized without its archive answers UNAVAILABLE to all three;
 //! - the per-call error channel (error_copy, error_release) its failures use, reported as `eml.archive.errors` with
 //!   its two member rows. That row is the channel only: it promises no family's precise source messages.
 //!
-//! Every other slot (codecs and loaded_field: the codec slots; attributes: the attribute slots) is null, and `eml.archive.codec` and
-//! `.attributes` are reported unavailable. The table's size is the header's full 152 bytes; consumers check the slots
-//! and rows they need.
+//! The codec slots (value_decode, value_encode, loaded_field) are null, and `eml.archive.codec` is reported
+//! unavailable. The table's size is the header's full 152 bytes; consumers check the slots and rows they need.
 //!
 //! The table holds no paths or OS handles: views read the immutable registry snapshot and the archive the startup controller
 //! authorized with a generation (`authorize`, `authorize_with_archive`). Getter presence grants no view. All calls may
 //! come from any thread and never enter Lua. kfc types stay here: only the header's neutral records, counted bytes and
 //! counted JSON cross C.
+pub mod attributes;
 pub mod errors;
 pub mod read;
 pub mod registry;
@@ -63,9 +66,9 @@ static TABLE: KilnEmlArchiveApiV1 = KilnEmlArchiveApiV1 {
     value_decode: None,
     value_encode: None,
     loaded_field: None,
-    attribute_catalog: None,
-    attribute_resolve: None,
-    attribute_evaluate: None,
+    attribute_catalog: Some(attributes::attribute_catalog),
+    attribute_resolve: Some(attributes::attribute_resolve),
+    attribute_evaluate: Some(attributes::attribute_evaluate),
     error_copy: Some(errors::error_copy),
     error_release: Some(errors::error_release),
 };
@@ -119,7 +122,7 @@ const GROUPS: [(&str, &[&str], bool); 5] = [
     (
         "eml.archive.attributes",
         &["attribute_catalog", "attribute_resolve", "attribute_evaluate"],
-        false,
+        true,
     ),
 ];
 

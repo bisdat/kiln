@@ -27,6 +27,7 @@ the same file). v1 manifests (id, name, version, apiVersion, entryAssembly, entr
   "entryType": "MyMod.MyModClass",      // default: the only public Kiln.Mod subclass
   "exports": ["MyMod.Api.dll"],         // assemblies dependents compile against (shared at run time)
   "advanced": false,                    // opt into the advanced tier (ModInfo.Advanced)
+  "steamMessages": false,               // the mod opens its own Steam peer message leases (see "steamMessages")
   "writes": ["Fuel", "ScaleComponent"], // component types the mod writes through the game's write tracking (see "writes")
   "tests": { "autoRun": true, "timeoutSeconds": 20 },  // Kiln.Testing (testing.md)
   "boot": false,                        // true | "required": Mod.OnBoot runs before the game starts (see "Boot content")
@@ -54,6 +55,18 @@ newer than the player's Kiln; the stamp can:
 
 Order: the semantic version, then `created` when both sides have it, else the day. A runtime or mod built from a tree
 without git has no stamp, and nothing is compared before the load.
+
+## Steam peer messages (`steamMessages`, since 0.2.0-dev.30.3)
+`"steamMessages": true` says the mod talks to Steam users directly: it opens its own Steam peer message leases with
+`SteamMessages.Open` (Kiln.Network, [../network.md](../network.md#steam-peer-messages-steammessages)). It is a boolean,
+`false` by default; any other value refuses the manifest (`steamMessages must be true or false`). The mod reads it as
+`ModInfo.SteamMessages`.
+- **Without it** `SteamMessages.Open` throws `InvalidOperationException` before anything is called.
+- **With it** Kiln.Host admits the mod's native owner to kiln.net's Steam leases when it loads the mod. The leases are
+  that owner's alone and close when the mod unloads ([../services/net-steam-messages.md](../services/net-steam-messages.md)).
+- **In the launcher** a server's Mods page says "Talks to other players over Steam" on the facts of such a mod.
+- Steam peer messages reach players by Steam id, outside the game's connection and its admission: treat every message
+  as untrusted, and prefer Kiln.Network's channels when the players are on the same server.
 
 ## Where new versions are published (`updates`, since 0.2.0-dev.28)
 `updates` tells Kiln where to look for a newer version of the mod. The launcher and `kiln updates check`
@@ -199,7 +212,7 @@ requires the key to name the assembly it builds (KILN001).
 An exclusive upper bound `<X.Y.Z` also excludes the pre-releases of X.Y.Z (`<2` rejects `2.0.0-beta`); pre-releases
 inside a range match. **apiVersion** is special: a bare version means "this API or a later one with the same
 major" (the mod API stays additive within a major, 0.x included), so `"0.1"` mods load on API 0.2. The running
-Kiln's API: `Kiln.Mods.RuntimeApiVersion` (0.2.12). The const `Kiln.Mods.ApiVersion` is obsolete: it is copied into a
+Kiln's API: `Kiln.Mods.RuntimeApiVersion` (0.2.13). The const `Kiln.Mods.ApiVersion` is obsolete: it is copied into a
 mod when the mod is built, so it says the API the mod was built against. A release refuses to ship when a public
 member of the previous release was removed (`tools/release/api-gate.sh`, and `pack.sh` compares against
 `KILN_API_BASELINE`). A release also builds its SDK packages as a NuGet feed (`sdk/feed/`); its URL is given here once

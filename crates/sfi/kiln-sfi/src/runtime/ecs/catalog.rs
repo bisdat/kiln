@@ -29,10 +29,6 @@
 use super::Ecs;
 use super::registry::{Registration, Snapshot};
 use crate::runtime::types::{Registry, selectors};
-use crate::service_member;
-use kiln_abi::services::kiln_world::{
-    KILN_ECS_OK, KILN_WORLD_SERVICE, KILN_WORLD_VERSION, KilnEcsWritePolicy, KilnWorldApi,
-};
 use mlua::{Lua, Table, Value};
 use sfi_core::bindings::runtime::{RuntimeHost, RuntimeOperation as Op, runtime_denial_reason};
 use std::collections::{BTreeMap, HashSet};
@@ -120,24 +116,7 @@ fn archive(ecs: &Ecs) -> mlua::Result<Rc<Registry>> {
 
 /// `runtime_provider::can_write_component` for a resolved component: kiln.world's `ecs_write_policy`.
 fn can_write_component(ecs: &Ecs, component: u32) -> bool {
-    let Ok(table) = ecs
-        .services
-        .bind::<KilnWorldApi>(KILN_WORLD_SERVICE, KILN_WORLD_VERSION)
-    else {
-        return false;
-    };
-    let Ok(policy) = service_member!(table, KilnWorldApi, ecs_write_policy) else {
-        return false;
-    };
-    // SAFETY: an all-zero policy record is valid (integers and a char array).
-    let mut out: KilnEcsWritePolicy = unsafe { std::mem::zeroed() };
-    out.size = std::mem::size_of::<KilnEcsWritePolicy>() as u32;
-    // SAFETY: plain values and a sized caller record.
-    let result = unsafe {
-        ecs.services
-            .call(policy, (ecs.world_kind, component, &raw mut out))
-    };
-    result == kiln_abi::KILN_OK && out.status == KILN_ECS_OK as u32
+    ecs.can_write_component(component)
 }
 
 /// `runtime.ecs.get_catalog()` (read_component_catalog.rs:2-193).
@@ -146,7 +125,7 @@ pub fn get_catalog(lua: &Lua, ecs: &Ecs, host: &dyn RuntimeHost) -> mlua::Result
     let result = lua.create_table()?;
     result.raw_set("version", registry.registry_version())?;
     let entries = lua.create_table()?;
-    let report = ecs.registry.read(&ecs.services, &registry).ok();
+    let report = ecs.registry().read(&ecs.services, &registry).ok();
     let available = report.as_ref().and_then(|r| r.available().ok());
     let registration_available = available.is_some();
     let mut registrations = BTreeMap::<&str, Vec<(&Registration, &'static str)>>::new();
@@ -351,7 +330,7 @@ fn registration_entry(
 
 /// The report, as `registry()` gives it: the provider's text, or the snapshot.
 fn report(ecs: &Ecs, registry: &Registry) -> Result<Rc<Snapshot>, String> {
-    ecs.registry.read(&ecs.services, registry)
+    ecs.registry().read(&ecs.services, registry)
 }
 
 /// `runtime.ecs.get_registry()` (read_component_registry.rs:109-151).

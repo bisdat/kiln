@@ -306,6 +306,110 @@ uint32_t Reader::registration(const ContextFact& ctx, uint32_t hash, bool* prese
     return KILN_ECS_OK;
 }
 
+namespace {
+// A type descriptor a registration record points at (ShroudForge's read_component_registry.h:56-73; kiln.types' td
+// offsets): 0x90 bytes in the image, the qualified name {ptr, len} at +0x20, the size at +0x40, the hash at +0x50.
+constexpr size_t kDescBytes = 0x90, kDescName = 0x20, kDescNameLength = 0x28, kDescSize = 0x40, kDescHash = 0x50;
+constexpr size_t kRowStorage = 40, kRowTemplate = 48, kRowFlags = 60;
+struct Desc {
+    uint32_t hash = 0, size = 0;  // 0, 0: the record names no type here
+};
+}  // namespace
+
+KilnResult Reader::registration_detail(uint32_t kind, uint32_t hash, KilnEcsRegistrationDetail* out) {
+    const uint32_t out_size = out->size;
+    *out = KilnEcsRegistrationDetail{};
+    out->size = out_size;
+    out->component = hash;
+    const auto fail = [&](uint32_t status) -> KilnResult {
+        out->status = status;
+        return status == KILN_ECS_UNREADABLE ? KILN_ECS_ERR_UNREADABLE : KILN_ERR_UNAVAILABLE;
+    };
+    ContextFact ctx{};
+    if (const uint32_t s = context(0, kind, &ctx); s != KILN_ECS_OK) return fail(s);
+    if (!ctx.present) return fail(KILN_ECS_ABSENT);
+    if (ctx.engine_status != KILN_ECS_OK) return fail(ctx.engine_status);
+    std::shared_ptr<const Catalog> cat;
+    if (const uint32_t s = catalog(ctx.registry, cat); s != KILN_ECS_OK) return fail(s);
+    const auto it = cat->rows.find(hash);
+    if (it == cat->rows.end()) {
+        out->status = KILN_ECS_OK;
+        return KILN_ERR_NOT_FOUND;
+    }
+    const Catalog::Row row = it->second;
+    const uintptr_t image = image_.load(std::memory_order_relaxed);
+    const uint64_t image_size = src_.layout->image_size;
+    const auto in_image = [&](uintptr_t address, uint64_t bytes) {
+        return image && address >= image && bytes <= image_size && address - image <= image_size - bytes;
+    };
+    const char* bad = "a component registration's type descriptors do not check out";
+    uint8_t prefix[kRowPrefix], again[kRowPrefix];
+    const uintptr_t at = cat->records + static_cast<uintptr_t>(row.index) * kRowBytes;
+    if (!copy(at, prefix, sizeof prefix)) return fail(KILN_ECS_UNREADABLE);
+    uint32_t live_hash = 0, size_word = 0, flags = 0;
+    uint64_t storage_at = 0, template_at = 0;
+    std::memcpy(&live_hash, prefix + kRowHash, 4);
+    std::memcpy(&size_word, prefix + kRowSize, 4);
+    std::memcpy(&flags, prefix + kRowFlags, 4);
+    std::memcpy(&storage_at, prefix + kRowStorage, 8);
+    std::memcpy(&template_at, prefix + kRowTemplate, 8);
+    if (live_hash != hash || (size_word & 0xffffu) != row.size) return fail(KILN_ECS_UNREADABLE);
+    // One descriptor: in the image, a keen::ecs:: name in the image whose FNV-1a hash is the descriptor's, a size.
+    uint32_t status = KILN_ECS_OK;
+    std::string name;
+    const auto desc = [&](uint64_t address, Desc& d) {
+        if (!address) return true;
+        uint8_t bytes[kDescBytes];
+        if (!in_image(address, kDescBytes)) return false;
+        if (!copy(address, bytes, sizeof bytes)) {
+            status = KILN_ECS_UNREADABLE;
+            return false;
+        }
+        uint64_t text = 0, length = 0;
+        std::memcpy(&text, bytes + kDescName, 8);
+        std::memcpy(&length, bytes + kDescNameLength, 8);
+        std::memcpy(&d.size, bytes + kDescSize, 4);
+        std::memcpy(&d.hash, bytes + kDescHash, 4);
+        if (!length || length > 512 || !in_image(text, length)) return false;
+        name.assign(static_cast<size_t>(length), '\0');
+        if (!copy(text, name.data(), name.size())) {
+            status = KILN_ECS_UNREADABLE;
+            return false;
+        }
+        if (name.back() == '\0') name.pop_back();  // registration spans include the terminator, reflection's do not
+        return !name.empty() && name.find('\0') == std::string::npos && name.rfind("keen::ecs::", 0) == 0 &&
+               d.size && d.size <= (1u << 24) && d.hash == fnv1a32(name);
+    };
+    Desc storage, configuration;
+    if (!desc(storage_at, storage) || !desc(template_at, configuration))
+        return status == KILN_ECS_UNREADABLE ? fail(status) : (refuse(0, bad), fail(KILN_ECS_UNAVAILABLE));
+    // The identity rule: a registration names a type; its template type, or else its storage type, carries the
+    // registration's own hash; the registered size is the storage type's (0 for a template-only registration).
+    const Desc& identity = template_at ? configuration : storage;
+    if ((!storage_at && !template_at) || identity.hash != hash || row.size != (storage_at ? storage.size : 0u)) {
+        refuse(0, bad);
+        return fail(KILN_ECS_UNAVAILABLE);
+    }
+    // The same catalog and the same row after the descriptors, and that catalog the one the context named: a catalog
+    // that grew between the context and the catalog read is never answered under the old catalog's layout stamp.
+    uint64_t head[2] = {};
+    if (!copy(ctx.registry + kRegRecords, head, sizeof head) || head[0] != cat->records || head[1] != cat->count ||
+        mix({ctx.registry, head[0], head[1]}) != ctx.layout_stamp || !copy(at, again, sizeof again) ||
+        std::memcmp(prefix, again, sizeof prefix))
+        return fail(KILN_ECS_UNREADABLE);
+    out->status = KILN_ECS_OK;
+    out->index = row.index;
+    out->runtime_size = row.size;
+    out->flags = flags;
+    out->storage_flags = size_word >> 16;
+    out->storage_hash = storage.hash;
+    out->storage_size = storage.size;
+    out->template_hash = configuration.hash;
+    out->template_size = configuration.size;
+    out->layout_stamp = ctx.layout_stamp;
+    return KILN_OK;
+}
+
 uint32_t Reader::component(const ContextFact& ctx, const EntityFact& entity, uint32_t hash, bool stamp,
                            ComponentFact* out) {
     *out = ComponentFact{};

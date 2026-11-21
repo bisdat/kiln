@@ -34,6 +34,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [hooks.md](hooks.md) | kiln.hooks v2: one registry for every hook |
 | [items.md](items.md) | kiln.items: items in inventories |
 | [knowledge.md](knowledge.md) | kiln.knowledge: the game's knowledge, the vanilla journal, dialogue events, the client veto |
+| [net-steam-messages.md](net-steam-messages.md) | kiln.net / SteamMessages: Steam peer-to-peer messages on leased Steam channels, each lease its owner's (since 0.2.0-dev.30.3; C# mods opt in with `"steamMessages": true`) |
 | [npcs.md](npcs.md) | Friendly NPCs and quests in the game's own UI |
 | [pacing.md](pacing.md) | kiln.pacing: where the game waits, and its task pools |
 | [player-state.md](player-state.md) | Player state and actions |
@@ -133,6 +134,10 @@ table ([tasks.md](tasks.md)). Nobody may publish that name, and only the `KilnAp
 resolves it. Two more are the core's own and resolve through the services' `KilnApi` only, and nobody may publish them
 either: `kiln.internal.launch` ([launch.md](launch.md)) and `kiln.internal.hooks`, the code ranges Kiln's services
 protect for their engine calls ([hooks.md](hooks.md#protected-code-ranges-kilninternalhooks-kiln-internal)).
+One more is the core's own and resolves through the services' `KilnApi` and the managed host's `KilnApi`, and nobody may
+publish it: `kiln.internal.owners` (`native/core/src/owners_internal.h`), what the managed host admitted an owner to. Kiln.Host
+grants the owner of a C# mod whose kiln.mod.json says `"steamMessages": true`, and kiln.net's `steam_open` admits it
+([net-steam-messages.md](net-steam-messages.md#who-opens-a-lease)); the grant goes with the owner.
 
 This is a reach rule, not a sandbox: it keeps tables that hand out game addresses or Kiln's own lock primitives away from
 plugins and from stale or foreign service DLLs. It is no defence against arbitrary native code already in the process,

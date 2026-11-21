@@ -38,15 +38,76 @@ Kiln mode also stands aside (and no ShroudForge mod runs through Kiln) when:
   again. A start from Steam's own Play button skips this dialog: you get only the in-game notice.
 - **Startup mods** (mods that change game data before the game starts) run in one pass before the game starts, as
   they do under ShroudForge.
-- **In the game**, the Lua side of each mod runs on Kiln's interpreter: its lifecycle (`on_load`, updates,
-  `on_unload`), settings, logging, clock, file access inside its own folder, `game.types`, the registry and component
-  catalog reads, `runtime.network`, `runtime.overrides`, the world context, the UI actions and notifications, and
-  `shroudforge.ui.toggle_modloader()`.
+- **In the game**, the Lua side of each mod runs on Kiln's interpreter. Kiln mode has:
+  - each mod's lifecycle (`on_load`, updates, `on_unload`), settings, logging, clock, file access inside its own
+    folder and `game.types`;
+  - **entities and components**: the registry and component catalog reads, the entity queries and component reads
+    (`runtime.ecs.query`, `query_bounds`, `resolve`, `read`, `read_bytes`, `read_fields`) and the plain component
+    writes (`runtime.ecs.write`, `write_fields`) with the component claim and override target
+    (`runtime.overrides.get_component_claim`, `runtime.overrides.component`);
+  - **template components**: a view of one component's configuration in the template an entity was spawned from
+    (`runtime.ecs.get_template_component`, its `read_fields` and `write_field`, one scalar field per call) and the
+    template override target (`runtime.overrides.get_template_claim`, `runtime.overrides.template`);
+  - **attributes**: the game's attribute catalog and an entity's attributes (`runtime.ecs.get_attributes`,
+    `get_attribute`, `evaluate_attributes`, `read_attributes`, `read_attribute`) and the attribute writes
+    (`runtime.ecs.update_attribute`, `write_attribute_storage`, a plain write to an attribute component, the attribute
+    override target `runtime.overrides.attribute`);
+  - **named world settings**: `runtime.services.get` (for example `ecs::GameSettings`, read and changed field by
+    field) with the service claim and override target (`runtime.overrides.get_service_claim`,
+    `runtime.overrides.service`);
+  - **loaded resources**: `game.assets.get_loaded_resource`, `get_loaded_resources_by_type` and
+    `read_loaded_field` (the resources the game has loaded now), the loaded index (`prepare_loaded_index`,
+    `get_loaded_resource_by_field`), `runtime.ecs.get_template` (an entity's template as a loaded resource), and the loaded-resource writes (`game.assets.write_loaded_field` and the resource override
+    target `runtime.overrides.resource`, `get_resource_claim`);
+  - **the world**: the world context, the local player's building cursor (`runtime.world.cursor.get`), the props of
+    an area with their transforms (`runtime.world.entity.query_props`, `query_props_in_bounds`,
+    `register_prop_recipes`, `get_transform`, `set_scale`), and the voxel grid's geometry
+    (`runtime.world.voxel.get_grid_spec`);
+  - **building input** (`runtime.world.building.submit`, `status`, `cancel`), one mod's request at a time as under
+    ShroudForge; see below for when it works;
+  - `runtime.network`, `runtime.overrides`, the UI actions and notifications, `shroudforge.ui.toggle_modloader()`
+    and the mods' keyboard and mouse shortcuts.
+- **What the world parts need.** The entity, attribute and prop reads need Kiln's world reads, which work on the game
+  builds Kiln has an exact engine profile for; on any other build they answer "not verified for game build ...". The
+  writes also need Kiln's world writes on that build: they reach only components the game neither tracks nor saves by
+  itself, in the world of a host (single player included) or a dedicated server; any other component answers
+  "component write context or original command phase is unavailable". `set_scale` is such a write too: where the game
+  tracks a prop's transform it answers "CurrentTransform has no supported native component write phase". An attribute
+  write first runs the game's own attribute formulas (maxima, clamps) on the attribute's whole group, as ShroudForge
+  does, and is refused if another writer changed that component meanwhile; on a game build whose engine profile
+  publishes no attribute calculation model it answers "attribute calculations are not validated for this executable
+  profile". The named world settings need Kiln's named services on that build (the rows `world.named_read` and
+  `world.named_write`) and a world this game hosts. As in ShroudForge, a game client that hosts reads and writes the
+  world it hosts; a client that joined another player's world reads its own copy of that world, and its writes answer
+  "unavailable". The voxel grid's geometry answers in a world this game hosts or on a dedicated server.
+- **What the loaded resources need.** The loaded-resource reads work in a world on the game builds Kiln has an exact
+  engine profile for, and answer what the game uses, a Kiln mod's override or new resource included. In the main menu,
+  or on another build, a lookup raises ShroudForge's "live ResourceService resource is unavailable".
+  `read_loaded_field` reads a field stored inside the resource itself; a field inside a list or a variant answers why
+  it cannot. A loaded-resource write changes one such field of a resource in the world a host or a dedicated server
+  runs, between frames, only while the resource is still what the mod read; a change another mod or the game made
+  meanwhile is kept and the write says so. A template component's `write_field` is such a write to the template
+  resource, with the same rules. A resource a Kiln mod overrides is not written ("unavailable"): change that mod's
+  copy. The loaded index finds a loaded resource by one 32-bit integer, float or enum field (an item's id, for
+  example): the index of a type and field builds in the background over a few frames, a lookup before it is complete
+  answers that it is still scanning, and a match is read again before it is returned.
+- **Building input** sends a mod's building action (select, place, remove, undo, dismantle) as your own input on game
+  client 26430625. It is held until its checks in a real game pass: until then a submit answers ShroudForge's "building
+  input unavailable, busy, or request invalid", as on a game build without it. To try it, add
+  `"preview": ["client.building_input"]` to `kiln/config/kiln.json` (see
+  [Testing kiln mode](shroudforge-kiln-mode-testing.md)). A dispatched request is sent as your input; the server still
+  decides what happens.
 - **Mod DLLs** that a mod ships for ShroudForge's DLL loader are loaded by Kiln at the start, once. A DLL Kiln has no
   reviewed rule for is refused, and its mod is skipped with the reason.
 - **ShroudForge's menu key** (F9 by default) and `shroudforge.ui.toggle_modloader()` open Kiln's page for ShroudForge mods
   (**Mods → ShroudForge** in the game). It lists what runs this start, each mod's settings, and its action buttons.
   Settings you change there are saved into the mod's own `extended.mod.json` and apply **at the next start**.
+- **Mod shortcuts**: a mod's shortcut (a `keybind` setting, read through `shroudforge.input`) works from the keys the
+  game window receives: held, pressed (once per press; holding a key is one press) and its name in your keyboard
+  layout. It does not count while the game window is not in front, or while Kiln's menu, a Kiln screen or a Kiln text
+  field has the keyboard. The game still sees the key too. To change a shortcut, type it in the setting on Kiln's
+  ShroudForge page (for example `Ctrl+SDL:66` for Ctrl+F9); it applies at the next start. On a dedicated server
+  shortcuts never count as held or pressed.
 - **Live reload**: a reload request for a Lua-only mod reloads it in place. A mod whose files changed since the start, or
   a mod with DLLs, answers that it needs a restart, and the running mods are left alone.
 
@@ -56,11 +117,13 @@ Some parts of the ShroudForge mod API are not in Kiln's interpreter yet. A call 
 and never returns `nil` by surprise: it gives ShroudForge's own "unavailable" answer (`nil` or `false` plus a reason,
 or an error where ShroudForge raises one), so a mod that checks it keeps running with that feature off. In this release
 that covers:
-- in-game world changes: ECS queries, reads and writes beyond the catalog, templates and attributes, voxels, props and
-  entities (`runtime.ecs.query`, `read_fields`, `write`, `runtime.world.*` placement and voxels);
-- in-game `game.assets` and `runtime.assets`, and the resource, attribute, service, template and component overrides;
-- **mod shortcuts**: `shroudforge.input` keybind queries answer "not held" / "not pressed" in kiln mode for now;
-- building input (it is unavailable under ShroudForge too on the current game builds);
+- the world beyond the parts above: reading and writing voxel cells (`runtime.world.voxel.read`, `.write`),
+  spawning, placing and destroying entities (`runtime.world.entity.spawn`, `place`, `destroy`, `finish_building`), and
+  `runtime.patch`;
+- in-game `game.assets` apart from the loaded-resource members above: the archive members and the item registry
+  lookup `resolve_loaded_resource` (it answers that the game's item registry resolver is not available); and
+  `runtime.assets`;
+- the game's own functions (`runtime.functions.*`) and `runtime.impact.call`;
 - runtime operations from the startup pass answer "not verified for game build ...";
 - anything that needs ShroudForge 1.8 is never offered.
 
@@ -82,7 +145,10 @@ The notice says "Do not save while this mod is off; restore it and restart first
 restart, and only then save. Kiln never blocks or changes a save; the notice is the only protection. Mods that are off
 but cannot lose save data are marked "off this start" instead.
 
-The in-game banner needs Kiln's in-game menu. If you start without it, rely on the launcher's warning.
+Without Kiln's in-game menu (it is missing, or it has not started 10 seconds after the main menu shows), Kiln shows a
+simpler banner of its own instead: the same list for 30 seconds at the main menu, again when you enter a world and when
+the list changes. With the overlay switched off (`ui.overlay` in `kiln.json`) nothing can show in the game: rely on the
+launcher's warning, which the next Play repeats, and on `kiln.log`.
 
 ## Switching back
 
@@ -119,8 +185,14 @@ Kiln aims to behave as ShroudForge does. Where it deliberately does not, the dif
   failures stay close to ShroudForge's.
 
 **Game data and the world**
-- A plain ECS write answers "busy" after three conflicts in a row; engine calls refuse code that another mod hooked or
-  patched, and stop for the session after a fault.
+- A plain ECS write that meets a game frame's change to other fields of the component is compared again against the
+  new bytes, up to three compares in all; when the third still meets such a change it answers "busy"
+  (`ecs-scene-frame-busy`), and so does a write the frame holds off. A change to a field the write sets or expected is
+  refused at once, as ShroudForge does, so an override is never restored over another writer's change. A write whose
+  outcome cannot be proven stops the session's ECS writes with ShroudForge's
+  `ecs-write-outcome-uncertain-rollback-unverified`. Engine calls refuse code that another mod hooked or patched, and
+  stop for the session after a fault.
+- ECS queries are complete when they answer: ShroudForge's "still scanning, retry on the next update" never comes.
 - A Kiln mod holding the engine gate can, rarely, make a ShroudForge mod see "busy".
 - Overrides are never restored into a different world session than the one they were applied in.
 - `game.assets` writes in the startup pass refuse to create a resource the game already has, and refuse writes after
@@ -138,6 +210,9 @@ Kiln aims to behave as ShroudForge does. Where it deliberately does not, the dif
 
 **Settings, UI and reload**
 - Settings changed in kiln mode apply at the next start.
+- Shortcuts: a key Windows has no name for is shown as `SDL:<number>` in a shortcut's name. Media and browser keys
+  (play/pause, volume, browser back and the like) do not work as shortcuts in kiln mode. Whether Kiln's menu has the
+  keyboard is checked once per update of the mods, not per key.
 - Kiln's package files are edited in place, keeping their formatting.
 - UI limits: a 2 MiB message, 1,024 pending actions per mod, 4,096 notification keys. Past a limit the mod gets an
   error instead of losing data silently. An action file that another program holds locked waits for the next turn.

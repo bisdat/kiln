@@ -381,7 +381,7 @@ fn root(error: &mlua::Error) -> String {
 // ---- the production catalog ----
 
 #[test]
-fn the_production_catalog_backs_the_context_and_leaves_ecs_readiness_to_v2_r8() {
+fn the_production_catalog_backs_the_context_and_the_ecs_reads() {
     assert_eq!(CATALOG.check(), Ok(()));
     assert_eq!(TEST_CATALOG.check(), Ok(()));
     let need = |backing: Backing| match backing {
@@ -406,12 +406,11 @@ fn the_production_catalog_backs_the_context_and_leaves_ecs_readiness_to_v2_r8() 
         assert_eq!(need(row.backing), "world.lifecycle", "{decided:?}");
         assert!(row.read.is_none(), "{decided:?}: the context decides it");
     }
-    // ECS readiness and the queries stay with the held ECS stack.
-    assert!(
-        matches!(fact(Fact::Ready).backing, Backing::NotLanded(slice) if slice.starts_with("ECS queries"))
-    );
-    assert!(
-        matches!(CATALOG.row(Op::EcsQuery).unwrap().backing, Backing::NotLanded(slice) if slice.starts_with("ECS queries"))
+    // ECS readiness and the queries are kiln.world's ECS reads (tests/runtime_ecs_reads.rs).
+    assert_eq!(need(fact(Fact::Ready).backing), "world.ecs_read");
+    assert_eq!(
+        need(CATALOG.row(Op::EcsQuery).unwrap().backing),
+        "world.ecs_read"
     );
     // The probe: kiln.world's game_world_session and the core's session record, copied, never called.
     let _serial = serial();

@@ -164,15 +164,17 @@ typedef void(KILN_CALL* KilnNetFrameFn)(KilnPeer from, const uint8_t* data, uint
 /* KILN_NET_PEER_UP / _DOWN. Tick thread. */
 typedef void(KILN_CALL* KilnNetPeerFn)(KilnPeer peer, uint32_t event, void* user);
 
-/* kiln-internal begin: Steam peer-to-peer messages, Kiln's own in this release (a lease opens only for the owner the core
- * designates: Kiln's interpreter for ShroudForge mods in a kiln-mode start). The SDK's headers leave out every line from
- * here to "kiln-internal end" (managed/Kiln.Sdk/Kiln.Sdk.csproj). See docs/kiln/services/net-steam-messages.md.
- * Steam networking messages between game processes, separate from the game connection and from channel 12. A lease
- * owns an inclusive range of Steam message channels (0..65535); leases never overlap. One lease (KILN_STEAM_OPEN_SESSIONS)
- * answers Steam's session requests through an accept policy. Members are any thread and never wait: each moves one
- * message, or answers at once. The game keeps pumping Steam callbacks; nothing here pumps them. Only the owner the core
- * designates for it (kiln.internal.launch's dialect owner: Kiln's interpreter for ShroudForge mods, when it runs) may
- * open a lease; for every other owner steam_open answers KILN_ERR_UNAVAILABLE. */
+/* Steam peer-to-peer messages (since 0.2.0-dev.30.3; docs/kiln/services/net-steam-messages.md): Steam networking
+ * messages between game processes, separate from the game connection and from channel 12. A lease owns an inclusive
+ * range of Steam message channels (0..65535); leases never overlap. One lease (KILN_STEAM_OPEN_SESSIONS) answers Steam's
+ * session requests through an accept policy. Members are any thread and never wait: each moves one message, or answers
+ * at once. The game keeps pumping Steam callbacks; nothing here pumps them.
+ * Who opens a lease: Kiln's interpreter for ShroudForge mods (the owner the core designates in a start that runs it), and
+ * C# mods whose kiln.mod.json says "steamMessages": true (the managed host admits the owner it makes for such a mod).
+ * For every other owner steam_open answers KILN_ERR_UNAVAILABLE.
+ * A lease belongs to the owner that opened it: every member that takes a lease takes that owner too, and answers a
+ * lease of another owner exactly as a closed one. kiln.net closes an owner's leases when the core revokes the owner (a
+ * mod unloading, a plugin whose start failed). Lease handles are random 64-bit values, never a counter. */
 enum {
     KILN_STEAM_MSG_AVAILABLE = 1u << 0,       /* Steam is initialised here and its messages interface resolved */
     KILN_STEAM_MSG_SERVER_IFACE = 1u << 1,    /* the GameServer interfaces are used (a dedicated server), else the user's */
@@ -226,7 +228,6 @@ typedef struct KilnSteamMessageInfo {
 #define KILN_STEAM_MESSAGE_MAX 524288u   /* bytes in one message */
 #define KILN_STEAM_ERR_INVALID_DATA 210 /* steam_receive: the message was unusable (too big for the buffer, no Steam id)
                                            and is dropped */
-/* kiln-internal end */
 typedef struct KilnNetApi {
     KilnServiceHeader header; /* { sizeof(KilnNetApi), KILN_NET_VERSION } */
     KilnResult(KILN_CALL* status)(KilnNetStatus* out);
@@ -270,15 +271,23 @@ typedef struct KilnNetApi {
     /* Lab transport only (else KILN_ERR_UNAVAILABLE), tick thread: drives the game's own code on the server world
      * (tools/nettest t_guard). `op` is a KILN_NET_SELFTEST_*. */
     KilnResult(KILN_CALL* lab_selftest)(uint32_t op, uint64_t a, uint64_t b, uint64_t* out);
-    /* kiln-internal begin: Steam peer-to-peer messages (see KilnSteamMessagesStatus); appended, check header.size before
-     * calling. Any thread; none of them waits.
+    /* ---- Steam peer-to-peer messages (see KilnSteamMessagesStatus); added v1 in 0.2.0-dev.30.3 (appended), check
+     * header.size >= 184 before calling ----
+     * Any thread; none of them waits.
      * Steam is "ready" once this process's Steam user handle is nonzero and its messages interface resolves; no other
      * Steam function is called before that. A Steam call that faults answers KILN_ERR_INTERNAL. After the process
      * began its normal exit (KILN_STEAM_MSG_CLOSED_FOR_EXIT) every member answers KILN_ERR_UNAVAILABLE and calls nothing.
+     * Owners (every member but steam_status, right after the exit check): owner 0 answers KILN_ERR_INVALID_ARGUMENT and
+     * a revoked owner KILN_ERR_REVOKED. A lease that is not an open lease of `owner` answers KILN_ERR_NOT_FOUND, exactly
+     * as a closed or unknown one; steam_close answers KILN_OK for it and closes nothing. A send, receive or accept
+     * already past its lease check when the lease closes (steam_close, its owner revoked) finishes its one Steam call;
+     * the lease's channels and session role stay taken until that call returns.
      * steam_status: a snapshot (KILN_OK also when Steam is not ready: flags say what there is).
-     * steam_open: a lease on [first_channel, last_channel]. KILN_ERR_UNAVAILABLE: owner is not the owner the core
-     *   designated for it; KILN_ERR_INVALID_ARGUMENT: a short record, unknown flags, first > last, a channel above
-     *   65535, a range that overlaps an open lease, a second KILN_STEAM_OPEN_SESSIONS lease, or no free lease (16).
+     * steam_open: a lease on [first_channel, last_channel]. KILN_ERR_UNAVAILABLE: this owner may not open leases (see
+     *   KilnSteamMessagesStatus); KILN_ERR_INVALID_ARGUMENT: a short record, unknown flags, first > last, a channel
+     *   above 65535, a range that overlaps an open lease, a second KILN_STEAM_OPEN_SESSIONS lease, or no free lease
+     *   (16); KILN_ERR_INTERNAL: no random handle could be drawn, or kiln.net is not told when owners are revoked here
+     *   (nothing would close the lease with its owner).
      * steam_close: idempotent. Closing the session lease sets the policy to KILN_STEAM_ACCEPT_NONE.
      * steam_maintain (the session lease only): sets the accept policy; the first policy that is not NONE registers the
      *   session callback, once for the process. Steam not ready: KILN_OK, *out says so; a NONE policy is in force at
@@ -292,15 +301,14 @@ typedef struct KilnNetApi {
      * steam_accept: accepts a pending session with peer by hand; *accepted = 1 when Steam said yes. */
     KilnResult(KILN_CALL* steam_status)(KilnSteamMessagesStatus* out);
     KilnResult(KILN_CALL* steam_open)(KilnOwner owner, const KilnSteamMessagesOpen* request, KilnHandle* lease);
-    KilnResult(KILN_CALL* steam_close)(KilnHandle lease);
-    KilnResult(KILN_CALL* steam_maintain)(KilnHandle lease, const KilnSteamAcceptPolicy* policy,
+    KilnResult(KILN_CALL* steam_close)(KilnOwner owner, KilnHandle lease);
+    KilnResult(KILN_CALL* steam_maintain)(KilnOwner owner, KilnHandle lease, const KilnSteamAcceptPolicy* policy,
                                           KilnSteamMessagesStatus* out);
-    KilnResult(KILN_CALL* steam_send)(KilnHandle lease, uint64_t peer, const void* data, uint32_t len, uint32_t channel,
-                                      uint32_t flags, int32_t* steam_result);
-    KilnResult(KILN_CALL* steam_receive)(KilnHandle lease, uint32_t channel, void* buffer, uint32_t cap,
+    KilnResult(KILN_CALL* steam_send)(KilnOwner owner, KilnHandle lease, uint64_t peer, const void* data, uint32_t len,
+                                      uint32_t channel, uint32_t flags, int32_t* steam_result);
+    KilnResult(KILN_CALL* steam_receive)(KilnOwner owner, KilnHandle lease, uint32_t channel, void* buffer, uint32_t cap,
                                          KilnSteamMessageInfo* out, uint32_t* got);
-    KilnResult(KILN_CALL* steam_accept)(KilnHandle lease, uint64_t peer, uint32_t* accepted);
-    /* kiln-internal end */
+    KilnResult(KILN_CALL* steam_accept)(KilnOwner owner, KilnHandle lease, uint64_t peer, uint32_t* accepted);
 } KilnNetApi;
 
 /* lab_selftest ops */
@@ -326,7 +334,6 @@ enum {
 #ifdef __cplusplus
 }
 #endif
-/* kiln-internal begin: Steam peer-to-peer messages layout */
 #ifdef __cplusplus
 static_assert(sizeof(KilnSteamMessagesStatus) == 48 && sizeof(KilnSteamMessagesOpen) == 16 &&
                   sizeof(KilnSteamAcceptPolicy) == 24 && sizeof(KilnSteamMessageInfo) == 24,
@@ -356,5 +363,4 @@ _Static_assert(offsetof(KilnNetApi, steam_status) == 128 && offsetof(KilnNetApi,
                "the Steam messages members are appended at 128");
 _Static_assert(sizeof(KilnNetApi) == 184, "KilnNetApi is 184 bytes");
 #endif
-/* kiln-internal end */
 #endif

@@ -5,12 +5,13 @@
 // Adapted from ShroudForge (MIT, Copyright (c) 2026 bonsaibauer): modules/game-runtime/native/player-input/
 // apply_building_input.cpp of ShroudForge 1.7.9 (the request slot and its states, the transform conversion, and the
 // press and release sequence on keen::ecs::ClientPlayerInput). What differs: the layout and the input bits come from the
-// build (Layout) instead of constants; a request carries its owner and client session; the producer only try-locks.
+// build (Layout) instead of constants; a request carries its owner and client session; the producer only try-locks; a
+// press never released ends after 10 s instead of keeping the slot.
 //
 // One request slot for the whole client. A request is queued, then pressed (or, for a selection, dispatched at once)
 // by the producer, then released at a later input version (dispatched); 5 s after submit a queued request times out and
-// a pressed one still releases. Ids grow from 1 and skip 0; only the latest id, asked by the owner that submitted it,
-// has an answer.
+// a pressed one still releases. A press whose input never comes back for its release ends 10 s after the press, as a
+// timeout. Ids grow from 1 and skip 0; only the latest id, asked by the owner that submitted it, has an answer.
 //
 // Threads. submit/status/cancel: any thread; they hold the slot's mutex for a copy only, never across a call. The
 // producer (observe) runs on the client's main thread inside the local input observation (client_input.h); it only
@@ -74,6 +75,8 @@ KilnResult cancel(const Env& env, KilnOwner owner, uint32_t request_id, uint32_t
 // verified observation point; then submit answers KILN_ERR_UNAVAILABLE and bound() says why.
 void bind(const Layout* layout);
 bool bound(const char** why);
+// What bound() answers while unbound: a static string (nullptr: the default, no observation point on this build).
+void unbound_reason(const char* why);
 // The producer: one visit (client main thread).
 void observe(const Observation& o, const Memory& m);
 
@@ -91,7 +94,7 @@ Stats stats();
 
 // Host tests.
 void set_clock_for_tests(uint64_t (*ms)());  // nullptr: the steady clock
-void reset_for_tests();                      // empty slot, ids from 1, unbound, no session ended, zero stats
+void reset_for_tests();                      // empty slot, ids from 1, unbound (default reason), no session ended, zero stats
 void set_next_id_for_tests(uint32_t last);   // the next id is last + 1 (skipping 0)
 std::mutex& mutex_for_tests();               // the slot's mutex, to hold it from a test
 
