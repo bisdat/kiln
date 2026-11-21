@@ -4,7 +4,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 out=${KILN_OUT:-$here/../../build}/core-tests
 mkdir -p "$out"
-python3 - "$here/../src/services/hooks_chain.cpp" "$out/hooks_stop_loop.g.h" <<'PY'
+python3 -I - "$here/../src/services/hooks_chain.cpp" "$out/hooks_stop_loop.g.h" <<'PY'
 import pathlib, sys
 s = pathlib.Path(sys.argv[1]).read_text()
 stopped = s[s.index('struct Stopped {'):s.index('constexpr DWORD kThreadAccess')]

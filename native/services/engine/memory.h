@@ -61,7 +61,8 @@ bool call_tracker(std::uintptr_t fn, std::uintptr_t manager, std::uintptr_t cont
 bool boost_priority(int* saved);
 void restore_priority(int saved) noexcept;
 
-// The process image base (GetModuleHandleW(nullptr)); host tests set their fake image.
+// The process image base: GetModuleHandleW(nullptr), read once when kiln-engine.dll loads (facts_win.cpp), so a call
+// inside a hold is a plain read; host tests and kiln-engine-test.dll set their fake image.
 std::uintptr_t image_base();
 
 }  // namespace kiln::engine::mem
