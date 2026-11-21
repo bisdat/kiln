@@ -128,9 +128,46 @@ fn report_channel(version: &str) -> kiln_manage::report::ReportChannel {
 /// a report never holds (kiln_manage::report::contents).
 #[tauri::command]
 pub async fn report_preview(app: tauri::AppHandle, target: Option<LogTarget>, exclude: Option<Vec<String>>) -> Result<kiln_manage::report::Contents, Error> {
-    let mut input = report_input(&app, target)?;
+    let log = |line: String| crate::commands::app::launcher_log("report", &line);
+    log("building the support report for \"What's in this report\"".into());
+    let mut input = report_input(&app, target).inspect_err(|e| log(format!("the support report could not be prepared: {}", e.message)))?;
     input.exclude = exclude.unwrap_or_default();
-    blocking(move || Ok(kiln_manage::report::contents(&kiln_manage::report::build(&input)))).await
+    let started = std::time::Instant::now();
+    let r = blocking(move || Ok(kiln_manage::report::contents(&kiln_manage::report::build(&input)))).await;
+    match &r {
+        Ok(c) => log(format!("support report preview built in {} ms ({} files)", started.elapsed().as_millis(), c.files.len())),
+        Err(e) => log(format!("the support report preview failed: {}", e.message)),
+    }
+    r
+}
+
+/// What the window says about a support report that never reaches `report_save` (the Save dialog closed without a
+/// path, the dialog failing, an error shown to the player), so launcher.log tells a missing report's story.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReportNote {
+    /// "Save report..." opened the contents dialog.
+    Opened,
+    /// The Save dialog answered without a path (the player cancelled it).
+    DialogCancelled,
+    /// The Save dialog answered with a path; report_save follows.
+    DialogChosen,
+    /// The Save dialog or the save itself failed; `detail` is the error the window showed.
+    Failed,
+}
+
+#[tauri::command]
+pub async fn report_note(note: ReportNote, detail: Option<String>) -> Result<(), Error> {
+    // the window's own words only, one line, bounded
+    let detail: String = detail.unwrap_or_default().chars().filter(|c| !c.is_control()).take(400).collect();
+    let line = match note {
+        ReportNote::Opened => "support report: \"What's in this report\" opened".to_string(),
+        ReportNote::DialogCancelled => "support report: the Save dialog was closed without a file name; nothing written".to_string(),
+        ReportNote::DialogChosen => format!("support report: the Save dialog chose {detail}"),
+        ReportNote::Failed => format!("support report: the window showed an error: {detail}"),
+    };
+    crate::commands::app::launcher_log("report", &line);
+    Ok(())
 }
 
 /// Writes the support report zip to `path` (".zip" added when missing). `exclude`: other mods' files the player left
@@ -140,16 +177,23 @@ pub async fn report_save(app: tauri::AppHandle, target: Option<LogTarget>, path:
     if path.trim().is_empty() {
         return Err(Error::invalid("Choose where to save the report."));
     }
-    let mut input = report_input(&app, target)?;
+    let log = |line: String| crate::commands::app::launcher_log("report", &line);
+    let mut out = PathBuf::from(&path);
+    if !out.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
+        out.as_mut_os_string().push(".zip");
+    }
+    log(format!("building the support report for {}", out.display()));
+    let mut input = report_input(&app, target).inspect_err(|e| log(format!("the support report for {} could not be prepared: {}", out.display(), e.message)))?;
     input.exclude = exclude.unwrap_or_default();
+    // the blocking pool runs the write to its end even when the window stops waiting; every end is logged
     blocking(move || {
-        let mut out = PathBuf::from(&path);
-        if !out.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
-            out.as_mut_os_string().push(".zip");
-        }
+        let log = |line: String| crate::commands::app::launcher_log("report", &line);
+        let started = std::time::Instant::now();
         let r = kiln_manage::report::build(&input);
-        let size = kiln_manage::report::write_zip(&r, &out)?;
-        crate::commands::app::launcher_log("report", &format!("support report written ({size} bytes, {} findings, {} files left out)", r.findings.len(), r.left_out.len()));
+        log(format!("support report built in {} ms ({} files); writing {}", started.elapsed().as_millis(), r.files.len(), out.display()));
+        let size = kiln_manage::report::write_zip(&r, &out)
+            .inspect_err(|e| log(format!("the support report was NOT written to {}: {}", out.display(), e.message)))?;
+        log(format!("support report written to {} ({size} bytes, {} findings, {} files left out)", out.display(), r.findings.len(), r.left_out.len()));
         Ok(ReportSaved { path: out.display().to_string(), size, findings: r.findings, errors: r.errors })
     })
     .await

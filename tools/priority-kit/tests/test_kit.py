@@ -27,25 +27,27 @@ import collect  # noqa: E402
 T0 = 1_800_000_000_000  # a fixed UTC time in ms
 
 
-def writes_csv(raise_, rows):
+def writes_csv(raise_, rows, kit='2'):
+    """writes.csv as the kit writes it: kit 2 adds post_step and since_post_ns to kit 1's columns."""
     out = io.StringIO()
-    out.write('# gate-priority-test 1; raise=%s; label=; mode=write; profile=p\n' % raise_)
-    out.write('utc_ms,op,attempt,status,result,why,engine_reason,flags,hold_ns,call_ns,step,priority\n')
+    out.write('# gate-priority-test %s; raise=%s; label=; mode=write; profile=p\n' % (kit, raise_))
+    out.write('utc_ms,op,attempt,status,result,why,engine_reason,flags,hold_ns,call_ns,step,priority' +
+              (',post_step,since_post_ns\n' if kit != '1' else '\n'))
     for t, status, hold in rows:
-        out.write('%d,change,0,%s,0,0,0,0x5,%d,%d,1,-1\n' % (t, status, hold, hold + 1000))
+        out.write('%d,change,0,%s,0,0,0,0x5,%d,%d,1,-1' % (t, status, hold, hold + 1000) + (',1,500000\n' if kit != '1' else '\n'))
     return out.getvalue()
 
 
-def steps_csv(raise_, steps):
+def steps_csv(raise_, steps, kit='2'):
     out = io.StringIO()
-    out.write('# gate-priority-test 1; raise=%s\n' % raise_)
+    out.write('# gate-priority-test %s; raise=%s\n' % (kit, raise_))
     out.write('step,utc_ms,pre_ns,post_ns\n')
     for step, t, pre, post in steps:
         out.write('%d,%d,%d,%d\n' % (step, t, pre, post))
     return out.getvalue()
 
 
-def make_zip(path, platform='windows', raise_='on', wine=False, proton=None, header_raise=None, offset_min=60):
+def make_zip(path, platform='windows', raise_='on', wine=False, proton=None, header_raise=None, offset_min=60, kit='2'):
     """Phases: idle 120 s, load 120 s, idle 120 s from T0. Idle holds 10 us, loaded holds 2 ms; idle steps every 16 ms,
     loaded every 20 ms; tick-stats windows fully inside each phase."""
     phases = [('idle', T0, T0 + 120_000), ('load', T0 + 120_000, T0 + 240_000), ('idle', T0 + 240_000, T0 + 360_000)]
@@ -75,11 +77,13 @@ def make_zip(path, platform='windows', raise_='on', wine=False, proton=None, hea
                                               'cpu': 'Test CPU', 'logical_processors': 8, 'utc_offset_minutes': offset_min}))
         z.writestr('load/cpu-load-1.csv', 'phase,start_utc_ms,end_utc_ms,threads,priority\n' +
                    ''.join('%s,%d,%d,8,Normal\n' % p for p in phases))
-        z.writestr('runs/run-1/run.json', json.dumps({'raise': raise_, 'mode': 'write', 'component': 'keen::ecs::X',
-                                                      'pairs': 10, 'restored': True, 'verified': True, 'end': 'done',
-                                                      'writes_from_utc_ms': T0, 'ended_utc_ms': T0 + 360_000}))
-        z.writestr('runs/run-1/writes.csv', writes_csv(header_raise or raise_, writes))
-        z.writestr('runs/run-1/steps.csv', steps_csv(raise_, steps))
+        run = {'raise': raise_, 'mode': 'write', 'component': 'keen::ecs::X', 'pairs': 10, 'restored': True,
+               'verified': True, 'end': 'done', 'writes_from_utc_ms': T0, 'ended_utc_ms': T0 + 360_000}
+        if kit != '1':
+            run['kit'] = kit  # kit 1's run.json said "kit": "1" too; its header alone must also do
+        z.writestr('runs/run-1/run.json', json.dumps(run))
+        z.writestr('runs/run-1/writes.csv', writes_csv(header_raise or raise_, writes, kit))
+        z.writestr('runs/run-1/steps.csv', steps_csv(raise_, steps, kit))
         z.writestr('logs/tick-stats.jsonl', '\n'.join(tick) + '\n')
 
 
@@ -117,6 +121,24 @@ class Analyze(unittest.TestCase):
         md = analyze.markdown(r)
         self.assertIn('| windows | on | loaded | 110 | 2000.0 |', md)
         self.assertIn('| proton | off | idle |', md)
+
+    def test_kit_1_runs_are_read_and_kept_apart(self):
+        make_zip(self.dir / 'r2.zip', platform='linux', proton='proton-11')
+        make_zip(self.dir / 'r1.zip', platform='linux', proton='proton-11', kit='1')
+        r = analyze.analyze([self.dir / 'r2.zip', self.dir / 'r1.zip'])
+        g = {(x['platform'], x['kit'], x['load']): x for x in r['groups']}
+        self.assertEqual(sorted(g), [('proton', '1', 'idle'), ('proton', '1', 'loaded'),
+                                     ('proton', '2', 'idle'), ('proton', '2', 'loaded')])
+        for kit in ('1', '2'):  # kit 1's 12 columns and kit 2's 14 give the same numbers
+            self.assertEqual(g[('proton', kit, 'idle')]['hold_us']['n'], 220)
+            self.assertEqual(g[('proton', kit, 'loaded')]['late_steps'], 0)
+        self.assertEqual(sorted(x['kit'] for x in r['runs']), ['1', '2'])
+        self.assertTrue(any('r1.zip (kit 1)' in n and 'not comparable' in n for n in r['notes']))
+        md = analyze.markdown(r)
+        self.assertIn('| proton kit 1 | on | loaded | 110 |', md)
+        self.assertIn('| proton | on | loaded | 110 |', md)
+        only2 = analyze.analyze([self.dir / 'r2.zip'])
+        self.assertFalse(any('kit' in n for n in only2['notes']))
 
     def test_backslash_entry_names(self):
         make_zip(self.dir / 'w.zip')

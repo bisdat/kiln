@@ -10,7 +10,9 @@ int main() {
     std::stable_sort(order.begin(), order.end(), kiln::early_plugins::provider_before);
     assert(order[0] == "KILN-EML.DLL" && order[1] == "kiln-emf.dll");
     assert(ksf::supported_version("1.7.8") && ksf::supported_version("1.7.9"));
-    assert(!ksf::supported_version("") && !ksf::supported_version("1.8.0"));
+    assert(ksf::supported_version("1.8.0") && ksf::supported_version("1.8.1"));
+    assert(!ksf::supported_version("") && !ksf::supported_version("1.7.7") && !ksf::supported_version("1.8.2") &&
+           !ksf::supported_version("1.9.0") && !ksf::supported_version("1.8.1-dev.44571709069"));
     assert(ksf::supported_abi(12) && !ksf::supported_abi(11));
     std::vector<uint8_t> b(1024);
     auto w = [&](size_t at, uint32_t v, size_t n = 4) { std::memcpy(b.data() + at, &v, n); };

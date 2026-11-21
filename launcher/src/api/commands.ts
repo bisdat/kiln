@@ -171,6 +171,19 @@ export interface RenderInfo {
   marker: boolean;
   /** Who set the marker, why and when. */
   markerWhy?: string;
+  /** X11 (XWayland) in this start: only on a Wayland session with XWayland (render.rs, 0.2.0-dev.30). */
+  x11?: X11Info;
+}
+export interface X11Info {
+  /** This start draws through X11 (the launcher set GDK_BACKEND=x11). */
+  on: boolean;
+  /** Why: GTK's default (Wayland), the user's GDK_BACKEND, software mode, Settings off, the switch's restart, the
+   *  marker of a start where X11 helped, X11 tried without help. */
+  why: "default" | "yours" | "unavailable" | "software" | "off" | "restart" | "marker" | "tried";
+  /** Settings' switch: the launcher may switch to X11 by itself. */
+  auto: boolean;
+  /** The user's own GDK_BACKEND. */
+  yours?: string;
 }
 /** Where this launcher build comes from (src-tauri/src/distribution.rs, api/distribution.ts). */
 export type Distribution = "direct" | "nexus";
@@ -204,6 +217,9 @@ export interface LauncherSettings {
   language?: string | null;
   /** (dev.29) Previews of unfinished features, set by hand in settings.json; kept as it is by every save. */
   preview?: string[];
+  /** (dev.30) The folder each kind of file dialog was last used in (ui/dialogFolder.ts); only app_dialog_remember
+   *  changes it (a settings save keeps the file's). */
+  dialogFolders?: Record<string, string>;
 }
 /** The most `keepVersions` may be (kiln_manage::kept::KEEP_MAX). */
 export const KEEP_MAX = 5;
@@ -650,6 +666,30 @@ export interface ResolvePreview {
    *  `kiln.rejected`, skipped, with the reason "Starts with your own world, ...". Empty on a server and when the game's
    *  kiln.json has `"mods": {"hosted": false}` (then those mods say so). */
   withWorld: string[];
+  /** The profile's switched-on EMF mods a dependency keeps from loading, from their mod.json as kiln-emf checks them at
+   *  the start (kiln_manage::emf_deps): what is missing, off or out of range, and how to get it. With a game, its
+   *  emf/mods folder counts too. Absent from older backends. */
+  emf?: EmfDepProblem[];
+}
+/** One EMF mod that will not load because of a dependency (kiln_manage::emf_deps::EmfDepProblem). */
+export interface EmfDepProblem {
+  /** The profile entry's id (the row). */
+  id: string;
+  /** The dependency's id, as EMF reads it (lower case). */
+  dep: string;
+  /** Its name: its own mod.json's when it is there, else EMF's name for one of its own mods; null: unknown. */
+  depName: string | null;
+  /** The range as the mod.json writes it ("" for any version). */
+  range: string;
+  state: "missing" | "off" | "notLoading" | "tooOld" | "tooNew";
+  /** The version there (off, notLoading, tooOld, tooNew). */
+  found: string | null;
+  /** One of EMF's own mods, which come with EMF's release zip (its lua mod above all). */
+  withEmf: boolean;
+  /** Where to get it: the dependency entry's own link, else EMF's page for one of EMF's own mods. */
+  url: string | null;
+  /** kiln-emf's own words for it at the start (kiln/state/emf.json `reason`). */
+  reason: string;
 }
 
 // library
@@ -658,6 +698,13 @@ export interface LibraryRef {
   id: string;
   version: string;
   hash: string;
+}
+/** What "Remove its settings too" did (kiln_manage::mod_settings::SettingsRemoval): the paths removed (a shared file's
+ *  entry as "<file> (mods.<key>)"), the copy in the backups folder (null: nothing to remove), and what stayed, why. */
+export interface SettingsRemoval {
+  removed: string[];
+  backup: string | null;
+  notes: string[];
 }
 /** library_remove_many: the versions removed, and each one that was not (conflict without force, not_found, io). */
 export interface RemoveReport {
@@ -912,6 +959,46 @@ export interface LaunchResult {
   /** (dev.29.17) How the game was started; `uri` is empty for a direct start. */
   via?: StartMode;
 }
+// kiln_manage::sfi_launch
+/** What a start will do to the ShroudForge family, before Play, and the token that confirms it. */
+export interface Preflight {
+  gameId: GameId;
+  request: LaunchRequest;
+  /** One confirm (or cancel) of this start, in this launcher process. */
+  token: string;
+  expires: string;
+  /** What the player reads and acknowledges before the game starts; empty: no dialog, confirm at once. */
+  warnings: StartWarning[];
+  warningsSha256: string;
+  /** Shown, never acknowledged (info findings, the cost note). */
+  advisories?: StartWarning[];
+  /** profile::sfi::status of the start's profile file. */
+  shroudforge?: Json;
+  /** The plan could not be written (write-failed): every Play tries again and reads the game's archive again. Another
+   *  refusal is tried again only when the game, the mods or Kiln change, or the profile is activated. */
+  reinspectsEveryPlay: boolean;
+  /** Mode profile: the activation when the active profile was written again for this start. */
+  activation?: Activation;
+}
+export interface StartWarning {
+  /** previously-active-off: a save-sensitive package active at an earlier start is off now; base-origin
+   *  (advisories only): the archive base the start's plan was made from, in its exact label. */
+  kind: "start-refused" | "package-skipped" | "plan-warning" | "cost" | "previously-active-off" | "base-origin";
+  code: string;
+  message: string;
+  severity: "info" | "warning" | "save-warning" | "infrastructure-error";
+  causedBy?: string[];
+  /** package-skipped: the package. */
+  package?: {
+    id: string; version: string; root: string; saveSensitive: boolean; data: boolean; lua: boolean; dlls: string[];
+    reasons: { code: string; message: string; causedBy?: string[]; severity: string }[];
+  };
+  /** start-refused: the ShroudForge mods the profile switches on, none of which runs; keybinds-unsupported (advisories
+   *  only): the package whose keyboard shortcuts do not work in kiln mode yet. */
+  packages?: string[];
+  /** previously-active-off, or a package-skipped one that was active before: kiln/state/sfi.json's row. */
+  previous?: { id: string; version?: string; name?: string; basis: string; fromLaunchId?: string };
+}
 export type ChainStatus = "loaded" | "failed" | "missing" | "refused" | "duplicate" | "skipped";
 export type RefusalDetail = "self" | "system" | "kiln" | "shroudforge" | "not-dll" | "outside" | "too-many";
 export interface BootJson {
@@ -919,6 +1006,8 @@ export interface BootJson {
   kiln: string;
   abi?: number;
   pid: number;
+  /** When the game started (the run's first moment), before `written`. */
+  started?: string;
   written: string;
   bootMs?: number;
   side: RunSide;
@@ -1338,8 +1427,16 @@ export const appStarted = () => call<null>("app_started");
 export const appRenderReport = (report: PageRender) => call<null>("app_render_report", { report });
 /** Settings, "Draw the launcher without the GPU": sets or clears the marker for the next start (Linux). */
 export const appRenderSet = (software: boolean) => call<RenderInfo>("app_render_set", { software });
+/** Settings, "Switch to X11 when drawing is slow on Wayland": on lets the launcher switch by itself, off keeps Wayland (Linux). */
+export const appRenderX11Set = (on: boolean) => call<RenderInfo>("app_render_x11_set", { on });
 /** Settings, "WebKit's sandbox": on removes the marker, off writes it, for the next start (Linux). */
 export const appSandboxSet = (on: boolean) => call<SandboxInfo>("app_sandbox_set", { on });
+/** (dev.30) The folder a file dialog of `kind` opens in, or "<folder>/<fileName>" (src-tauri/src/dialog_folder.rs; ui/dialogFolder.ts):
+ *  `preferred` when it exists, else the kind's last folder, else Downloads, else home; never an AppImage's mount. null: none fits. */
+export const appDialogDefault = (kind: string, fileName: string | null, preferred: string | null) =>
+  call<string | null>("app_dialog_default", { kind, fileName, preferred });
+/** Keeps the folder a dialog of `kind` ended in (`path` itself when `folder`, else its parent). */
+export const appDialogRemember = (kind: string, path: string, folder: boolean) => call<null>("app_dialog_remember", { kind, path, folder });
 /** Settings, "Kiln Launcher in the app menu" (Linux AppImage): writes or removes the entry and its icons. */
 export const appDesktopSet = (on: boolean) => call<DesktopInfo>("app_desktop_set", { on });
 /** Translation files a player put in the data folder's `locales/` (docs/kiln/translating.md): `<tag>.json` each, read
@@ -1691,6 +1788,19 @@ export const emlDataApply = (gameId: GameId, fingerprint: string, verified: bool
 export const emlDataUndo = (gameId: GameId, folder: string) => call<DataRestoreMoved>("eml_data_undo", { gameId, folder });
 /** The newest move that was not undone (kept across launcher starts, so Undo stays), or null. */
 export const emlDataLatest = (gameId: GameId) => call<DataRestoreMoved | null>("eml_data_latest", { gameId });
+// kiln_manage::restore_data::base_origin, commands/sfi.rs
+/** The BASE "Restore the game's data" takes a kiln-mode game back to. recorded: the exact label kiln-eml's receipt
+ *  records, keyed to the backups in the game folder; unrecorded: backups with no recorded origin; unknown: Kiln cannot
+ *  tell (`reason`). Never "vanilla". */
+export interface DataRestoreBase {
+  state: "recorded" | "unrecorded" | "unknown";
+  token: string | null;
+  label: string | null;
+  baselineSha256: string | null;
+  reason: string | null;
+}
+/** null: not kiln mode, or Kiln wrote none of the game's data. Hashes the backups: ask once, not on a poll. */
+export const emlDataBase = (gameId: GameId) => call<DataRestoreBase | null>("eml_data_base", { gameId });
 /** Legacy command: refuses direct shared-backup restores; updated Kiln's archive writer verifies ownership on launch. */
 export const emlRestore = (gameId: GameId) => call<string[]>("eml_restore", { gameId });
 
@@ -1891,7 +2001,11 @@ export const libraryAddToProfile = (gameId: GameId, profileId: ProfileId, entrie
   oneActivation(gameId, () => call<AddReport>("library_add_to_profile", { gameId, profileId, entries }));
 /** Rejects with game_running while a game runs, or a server whose profile file points into the library, even with force (it may be reading the mod).
  *  `shown`: the libraryUsers answer a confirmation named. Removal goes past exactly those; any other user is a conflict, whatever `force` says. */
-export const libraryRemove = (entry: LibraryRef, force = false, shown?: string[]) => call<null>("library_remove", { entry, force, shown: shown ?? null });
+export const libraryRemove = (entry: LibraryRef, force = false, shown?: string[], settings = false) =>
+  call<SettingsRemoval | null>("library_remove", { entry, force, shown: shown ?? null, settings });
+/** "Remove its settings too" for a mod no longer in the Library (kiln_manage::mod_settings::remove): conflict while the
+ *  Library still holds a version of it, game_running while a game runs. */
+export const libraryRemoveSettings = (kind: ModKind, id: string) => call<SettingsRemoval>("library_remove_settings", { kind, id });
 /** Clean up: one look at the running processes and the profiles for the whole batch. Rejects with game_running (nothing
  *  removed) while a game runs, or a server may read one of the versions; otherwise reports the versions not removed. */
 export const libraryRemoveMany = (entries: LibraryRef[], force = false) => call<RemoveReport>("library_remove_many", { entries, force });
@@ -1933,6 +2047,57 @@ export const configNativeSet = (target: ConfigTarget, modId: string, enabled: bo
 export const configKilnRead = (gameId: GameId) => call<ConfigDocument>("config_kiln_read", { gameId });
 export const configKilnSet = (gameId: GameId, path: string, value: Json) => call<ConfigDocument>("config_kiln_set", { gameId, path, value });
 export const configKilnReset = (gameId: GameId, path: string) => call<ConfigDocument>("config_kiln_reset", { gameId, path });
+// Settings' ShroudForge card; kiln_manage::sfi_backend, commands/sfi_backend.rs
+/** kiln.json `shroudforge.backend`: Kiln's bundled ShroudForge (the default), the player's own, or Kiln's interpreter. */
+export type SfBackend = "hosted" | "installed" | "kiln";
+/** What kiln.json says: nothing (the default), a choice, the older useInstalled switch, or a value no reader takes. */
+export type SfSetting = { kind: "default" } | { kind: "explicit"; backend: SfBackend } | { kind: "inherited"; backend: SfBackend }
+  | { kind: "invalid"; value: string };
+/** What a start gets from kiln.json and the launcher's environment (sfi_backend::Resolution). */
+export interface SfResolution {
+  requested: SfBackend | null;
+  /** null: refused, every ShroudForge backend stands aside that start. */
+  selected: SfBackend | null;
+  source: "default" | "setting" | "useInstalled" | "envRuntime";
+  refusal: "settingInvalid" | "interpreterHeld" | null;
+  /** One line in the core's words. */
+  reason: string;
+  /** KILN_SHROUDFORGE=0: main's note. */
+  envOffNote: string | null;
+}
+export interface SfBackendCard {
+  gameId: GameId;
+  setting: SfSetting;
+  next: SfResolution;
+  /** Why Kiln's interpreter cannot be chosen now; absent: it can. */
+  interpreterHeld?: string;
+  /** With kiln selected for the next start: what it meets in the game folder. */
+  interpreterRoute?: "ready" | "env-off" | "missing" | "own-loader";
+  ownLoader?: string;
+  /** kiln.json cannot be read: why (nothing is written until it is fixed). */
+  unreadable?: string;
+  /** The kiln.json bytes this card was read from; a choice is written only over them. */
+  revision: string;
+  /** kiln/state/launch.json: the last start as the core froze it. */
+  last?: { backend: string | null; reasonClass: string | null; reason: string | null; pid: number | null };
+}
+export interface SfBackendPreview {
+  gameId: GameId;
+  backend: SfBackend | null;
+  revision: string;
+  /** The next start with the choice written; absent: it cannot be written (`refused`). */
+  next?: SfResolution;
+  refused?: string;
+  /** kiln.json would stay as it is. */
+  unchanged: boolean;
+}
+export const sfiBackendRead = (gameId: GameId) => call<SfBackendCard>("sfi_backend_read", { gameId });
+/** Writes nothing. `backend` null: back to the default. */
+export const sfiBackendPreview = (gameId: GameId, backend: SfBackend | null) => call<SfBackendPreview>("sfi_backend_preview", { gameId, backend });
+/** Rejects with `conflict` when kiln.json changed since `revision`, `game_running` while the game runs, `refused` for kiln
+ *  while it is held; nothing is written then. */
+export const sfiBackendSet = (gameId: GameId, backend: SfBackend | null, revision: string) =>
+  call<SfBackendCard>("sfi_backend_set", { gameId, backend, revision });
 
 // launch.rs
 /** Through the activation guard (./oneActivation.ts): the start applies the active profile again (refresh_active). */
@@ -1945,6 +2110,17 @@ export const launchBegin = (gameId: GameId, mode: LaunchMode) => call<void>("lau
 export const launchProgress = (gameId: GameId) => call<StartTimeline | null>("launch_progress", { gameId });
 /** Play ended before the game existed: the start the launcher was timing is over. */
 export const launchEnd = (gameId: GameId) => call<void>("launch_end", { gameId });
+// the check before Play and its dialog
+/** The start run up to its check before Play (the profile written again or the play-once one written; nothing opened, no
+ *  flag, no backup): the warnings to show (none: no dialog) and the token launchConfirm takes from this window only.
+ *  launchPlay and launchConfirm reject a start with warnings nobody acknowledged as `consent_required` with the
+ *  preflight to show in `detail.preflight`. */
+export const launchPrepare = (gameId: GameId, request: LaunchRequest) =>
+  oneActivation(gameId, () => call<Preflight>("launch_prepare", { gameId, request }), { play: true });
+export const launchConfirm = (gameId: GameId, token: string, request: LaunchRequest) =>
+  oneActivation(gameId, () => call<LaunchResult>("launch_confirm", { gameId, token, request }), { play: true });
+/** The dialog was closed: the token goes. */
+export const launchCancel = (gameId: GameId, token: string) => call<boolean>("launch_cancel", { gameId, token });
 
 // logs.rs
 export const logsList = (target: LogTarget) => call<LogFile[]>("logs_list", { target });
@@ -2003,6 +2179,10 @@ export const reportPreview = (target: LogTarget | null, exclude: string[] = []) 
 export const reportSave = (target: LogTarget | null, path: string, exclude: string[] = []) => call<ReportSaved>("report_save", { target, path, exclude });
 /** A few lines for a forum post, redacted like the zip. */
 export const reportSummary = (target: LogTarget | null) => call<string>("report_summary", { target });
+/** What the window did with a support report that report_save never hears of (the Save dialog cancelled, an error
+ *  shown), into launcher.log. Never throws: a note that cannot be written is dropped. */
+export type ReportNote = "opened" | "dialogCancelled" | "dialogChosen" | "failed";
+export const reportNote = (note: ReportNote, detail?: string) => call<null>("report_note", { note, detail: detail ?? null }).catch(() => null);
 
 // saves.rs
 export const savesList = (gameId: GameId) => call<SaveSlot[]>("saves_list", { gameId });
@@ -2261,7 +2441,7 @@ export const COMMANDS = [
   "runtime_list", "runtime_import", "runtime_status", "runtime_install", "runtime_uninstall", "runtime_rollback", "runtime_classify",
   "profile_list", "profile_get", "profile_create", "profile_save", "profile_delete", "profile_resolve", "profile_activate",
   "profile_deactivate", "profile_active", "activation_notices", "notices_unseen", "notices_shown",
-  "library_list", "library_detect", "library_import", "library_remove", "library_remove_many", "library_unused", "library_users", "library_lint", "library_take_over", "library_rollback", "library_replace_dll",
+  "library_list", "library_detect", "library_import", "library_remove", "library_remove_many", "library_remove_settings", "library_unused", "library_users", "library_lint", "library_take_over", "library_rollback", "library_replace_dll",
   "config_list", "config_read", "config_set", "config_write", "config_reset", "config_native_state", "config_native_set",
   "launch_play", "launch_state", "launch_prestart", "launch_begin", "launch_progress", "launch_end",
   "logs_list", "logs_read", "logs_follow", "logs_unfollow", "logs_crash_reports",
@@ -2276,6 +2456,8 @@ export const COMMANDS = [
   "admin_connect", "admin_disconnect", "admin_sessions", "admin_call", "admin_subscribe", "admin_unsubscribe",
   "modpack_pending", "modpack_inspect", "modpack_install", "modpack_dismiss",
   "config_kiln_read", "config_kiln_set", "config_kiln_reset",
+  // Settings' ShroudForge card
+  "sfi_backend_read", "sfi_backend_preview", "sfi_backend_set",
   "app_assets_status", "app_assets_import",
   "server_console_open", "server_console_close",
   "update_status", "update_check", "update_install", "update_switch", "update_restart", "update_skip", "update_ack",
@@ -2286,19 +2468,23 @@ export const COMMANDS = [
   "chain_view", "chain_set_late", "shroudlink_notice",
   "found_scan", "found_add",
   "cook_plan", "cook_run", "boot_snapshot_run",
-  "report_save", "report_summary", "report_preview",
+  "report_save", "report_summary", "report_preview", "report_note",
   "data_folder_get", "data_folder_size", "data_folder_check", "data_folder_move", "data_folder_use", "data_folder_reset",
   "data_folder_notice_ack", "data_folder_restart",
-  "app_started", "app_render_set", "app_render_report",
+  "app_started", "app_render_set", "app_render_x11_set", "app_render_report",
   "updates_check",
   "app_desktop_set",
   "app_locales",
   "app_sandbox_set",
+  "app_dialog_default", "app_dialog_remember",
   "vendor_status", "vendor_license", "vendor_download", "vendor_remove",
   "community_settings_get", "community_settings_set", "community_status", "community_feed", "community_check_member", "community_signout", "community_signin_start", "community_signin_poll", "community_signin_cancel",
   "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",
   "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
-  "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links",
+  "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "pack_local_files", "pack_local_write", "pack_local_save", "pack_check", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links", "crucible_resume", "crucible_clipboard",
+  "studio_list", "studio_create", "studio_get", "studio_save", "studio_delete", "studio_credits_set", "studio_capture", "studio_capture_set", "studio_order", "studio_layer_files", "studio_layer_read", "studio_layer_write", "studio_layer_delete", "studio_layer_set", "studio_layer_lint", "studio_pick", "studio_fields", "studio_categories", "studio_catalog_status", "studio_catalog_ensure", "studio_analyze", "studio_test", "studio_test_report", "studio_test_end", "studio_build", "studio_publish_check", "studio_publish", "studio_set_visibility", "studio_server_pack",
+  // the check before Play and the restore's BASE
+  "launch_prepare", "launch_confirm", "launch_cancel", "eml_data_base",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -2574,12 +2760,30 @@ export interface PackInstance {
 export interface PackPlanMod { kind: ModKind; id: string; version: string; enabled: boolean; name?: string }
 export interface PackPlanUpdate { kind: ModKind; id: string; from: string; to: string; name?: string }
 export interface PackKeyConflict { key: string; base: unknown; pack: unknown; mine: unknown }
-export interface PackFileMerge { path: string; side: PackSide; mode: PackMergeMode; taken: string[]; kept: string[]; conflicts: PackKeyConflict[] }
+/** `renamedFrom`: the pack renamed this settings file; the player's values move from the old name. */
+export interface PackFileMerge { path: string; side: PackSide; mode: PackMergeMode; taken: string[]; kept: string[]; conflicts: PackKeyConflict[]; renamedFrom?: string }
+/** A data field both the new pack layer and the player layer set: the player's value still wins (it loads later). */
+export interface PackDataOverlap {
+  /** The id for the update's `drop` ("Drop my change"). */
+  key: string; section: string; target: string; field: string;
+  pack: unknown; base?: unknown; mine: unknown; file: string;
+  /** The pack changed this field since the installed version. */
+  changed: boolean;
+}
+/** The player layer (local.<pid>): kept by the update, still loading last. */
+export interface PackLocalPlan { id: string; files: number; fields: number; overlaps: PackDataOverlap[] }
 export interface PackUpdatePlan {
   profile: string; pack: string; from: string; to: string; changes?: string;
   mods: { added: PackPlanMod[]; updated: PackPlanUpdate[]; removed: PackPlanMod[]; yours: PackPlanMod[]; keptSwitches: string[] };
   layer: { from?: string; to?: string; changed: boolean }; files: PackFileMerge[]; conflicts: number;
+  local?: PackLocalPlan | null;
 }
+/** One finding of the pack analysis (kilnctl pack check). */
+export interface PackCheckFinding { level: "error" | "warning" | "note"; code: string; message: string; mod?: string; file?: string }
+/** pack_check: the analysis Crucible runs on uploads, run here on a .kilnpack file (kind "kiln.pack-check"). */
+export interface PackCheckReport { ok: boolean; complete: boolean; summary: { errors: number; warnings: number; notes: number }; findings: PackCheckFinding[] }
+/** A data file of the player layer (`content/<name>.json`). */
+export interface PackLocalFile { path: string; text: string }
 /** pack_inspect: a .kilnpack file before installing it. */
 export interface PackPreview {
   index: PackIndex; sha256: string; size: number; missing: LibraryRef[]; present: LibraryRef[]; code: string[];
@@ -2613,6 +2817,18 @@ export interface CruciblePack {
 export interface CrucibleVersion {
   id: string; number: number; version: string; changes: string | null; size: number; published: string | null;
   status: "uploading" | "ready" | "withdrawn";
+  /** Crucible's check of this version (its checks.mjs report as GET /codes and /versions show it; passed through by
+   *  kiln_manage's CrucibleVersion.checks). Absent from an older service. */
+  checks?: CrucibleChecks | null;
+}
+/** Crucible's pack check (the sandboxed worker's `kilnctl pack check`, or only the quick index checks while it runs).
+ *  `state`: queued/running/waiting = the worker's report is still to come; done = the full report; failed = the
+ *  worker could not check it; off = this Crucible has no worker (the quick checks are all there is). */
+export interface CrucibleChecks {
+  state: "queued" | "running" | "waiting" | "done" | "failed" | "off";
+  full?: boolean; ok?: boolean;
+  errors?: string[]; warnings?: string[]; notes?: string[];
+  summary?: { errors: number; warnings: number; notes: number };
 }
 export interface CruciblePreview {
   pack: CruciblePack;
@@ -2669,8 +2885,15 @@ export interface CrucibleUpdateRequest {
   profile: string; versionId: string; consent: boolean; optional?: Record<string, boolean>;
   /** "<path>#<key>" (as the plan names them) -> pack or mine. */
   resolve?: Record<string, PackChoice>; all?: PackChoice;
+  /** Player-layer fields to let go ("Drop my change"): `plan.local.overlaps[].key`. */
+  drop?: string[];
 }
-export interface CrucibleUpdateResult { plan: PackUpdatePlan; profile: Profile; instance: PackInstance; imported: LibraryRef[] }
+/** `backups`: the save backups taken first (one per game the instance is active on). */
+export interface CrucibleUpdateResult { plan: PackUpdatePlan; profile: Profile; instance: PackInstance; imported: LibraryRef[]; backups?: SaveBackup[] }
+/** "Come back after installing Kiln": the first start with this data folder, and a pack code the download carried. */
+/** links::Resume. firstStart is also true at the first start after an update from a launcher without Crucible: only
+ *  packWaiting (a Get Kiln download whose name lost its code, at the first start) lets the start read the clipboard. */
+export interface CrucibleResume { firstStart: boolean; code: string | null; packWaiting: boolean }
 /** Same profile again = a new version of its pack. */
 export interface CrucibleShareRequest { profile: string; title?: string }
 export interface CrucibleShareResult {
@@ -2705,6 +2928,18 @@ export const crucibleTrust = () => call<CrucibleTrust[]>("crucible_trust");
 export const crucibleTrustSet = (id: string, name: string, trusted: boolean) => call<null>("crucible_trust_set", { id, name, trusted });
 /** kiln:// links that arrived (drained); "kiln://crucible-link" {count} says one did. */
 export const crucibleLinks = () => call<string[]>("crucible_links");
+/** Asked once at start: a code the download carried, else whether a pack page's download left a pack waiting (then
+ *  the UI looks at the clipboard once, through crucibleClipboard). */
+export const crucibleResume = () => call<CrucibleResume>("crucible_resume");
+/** The clipboard's text, read by the backend (never navigator.clipboard: WebView2 would ask the player), only when it
+ *  may be a Crucible code or link; null otherwise. Never log it. */
+export const crucibleClipboard = () => call<string | null>("crucible_clipboard");
+/** The player layer of an instance: its data files; write (null removes) and save (into the Library, last). */
+export const packLocalFiles = (profileId: ProfileId) => call<PackLocalFile[]>("pack_local_files", { profileId });
+export const packLocalWrite = (profileId: ProfileId, path: string, text: string | null) => call<null>("pack_local_write", { profileId, path, text });
+export const packLocalSave = (profileId: ProfileId) => call<Profile>("pack_local_save", { profileId });
+/** The pack analysis of a .kilnpack on this PC (may take seconds for a large pack). */
+export const packCheck = (path: string) => call<PackCheckReport>("pack_check", { path });
 export const packInstance = (profileId: ProfileId) => call<PackInstance | null>("pack_instance", { profileId });
 export const packInstances = () => call<[ProfileId, PackInstance][]>("pack_instances");
 export const packUndo = (profileId: ProfileId) => call<Profile>("pack_undo", { profileId });
@@ -2715,3 +2950,139 @@ export const packInspect = (source: PackSource) => call<PackPreview>("pack_inspe
 /** 1: a server modpack (the consent flow), 2: a Crucible pack (the pack preview). */
 export const packPeekFormat = (path: string) => call<1 | 2>("pack_peek_format", { path });
 export const packInstall = (gameId: GameId, request: PackInstallRequest) => call<TaskId>("pack_install", { gameId, request });
+
+// ---------------------------------------------------------------- Pack Studio (dev.30)
+// The creator's tool (DESIGN 3; kiln_manage::modpack::studio, crucible::publish; commands/studio.rs; docs
+// launcher/pack-studio.md). A pack source is <data>/studio/<id>/: its profile's mods, order and settings, the chosen
+// settings keys, the pack layer (content/*.json), credits, what was published. The UI lives in src/studio/; the mock
+// in ./mockStudio.ts.
+export type StudioVisibility = "link" | "public";
+export interface StudioModChoice { dep: "required" | "optional"; default?: boolean; env?: PackEnv }
+export interface StudioOverrideSpec { path: string; side: PackSide; keys: string[] }
+export interface StudioPublishedVersion { version: string; id: string; published: string; visibility: StudioVisibility; file?: string; pending?: boolean }
+export interface StudioPublished { pack: string; slug?: string; code?: string; url?: string; visibility: StudioVisibility; versions: StudioPublishedVersion[] }
+/** kiln-pack.json. */
+export interface PackSourceDoc {
+  format: number; kind: "pack-source"; id: string; name: string; version: string; profile: ProfileId;
+  summary?: string | null; description?: string | null; authors?: string[]; tags?: string[]; changes?: string | null;
+  mods: Record<string, StudioModChoice>; overrides: StudioOverrideSpec[]; serverSettings?: { gameSettings?: Record<string, Json> } | null;
+  visibility: StudioVisibility; gameBuilds?: number[]; published?: StudioPublished | null; testProfile?: ProfileId | null; testStarted?: string | null;
+  created: string; updated: string;
+}
+export interface StudioMod {
+  kind: ModKind; id: string; name: string; version: string; hash: string; enabled: boolean; side?: "client" | "server" | "both";
+  dep: "required" | "optional"; default?: boolean; env: PackEnv; credit?: PackCredit;
+}
+export interface Studio {
+  dir: string; source: PackSourceDoc; mods: StudioMod[]; credits: Record<string, PackCredit>; profileName?: string; layerFiles: number;
+  /** Changes with anything a build reads (source, credits, layer files, profile): the analysis is made again. */
+  revision: string;
+}
+export interface StudioSummary { id: string; name: string; version: string; profile: ProfileId; mods: number; updated: string; published?: StudioPublished }
+export interface StudioNewPack { name: string; from?: ProfileId | null; id?: string }
+export interface StudioCaptureKey { key: string; value: Json; default?: Json; chosen: boolean; personal: boolean; secret?: string }
+export interface StudioCaptureFile {
+  path: string; mod?: string; mode: PackMergeMode; defaults: boolean; keys: StudioCaptureKey[]; whole: boolean; side: PackSide; size: number; refused?: string;
+}
+export interface StudioCaptureChoice { path: string; side: PackSide; keys: string[]; whole?: boolean }
+export interface StudioOrderRow { id: string; name: string; loads: boolean; reason?: string; layer: boolean }
+export interface StudioOrder { kiln: StudioOrderRow[]; late: string[]; warnings: string[] }
+export interface StudioLayerFile { path: string; size: number }
+/** `hidden`: one of the game's old, test or unused entries (kiln_manage::catalog::is_hidden_name), listed only when asked. */
+export interface StudioPickHit { section: string; name: string; id?: string; displayName?: string; from?: string; hidden?: boolean }
+/** A recipe input category of the game (kiln_manage::catalog::ItemCategory): recipe inputs {"category": id} take any of
+ *  its items; the game names none, so the editor words it by its items. `recipes`: the game's recipes that take it. */
+export interface StudioItemCategory {
+  id: string; name?: string;
+  items: { name: string; displayName?: string; hidden?: boolean }[];
+  recipes: { name: string; displayName?: string }[];
+}
+/** A catalog section's field (kiln_manage::catalog::FieldInfo). */
+/** Pack Studio's game-data catalog upkeep (kiln_manage::catalog::auto): made by Kiln when it is missing or not current. */
+export type StudioCatalogState = "idle" | "building" | "ready" | "failed" | "noGame";
+export interface StudioCatalogStatus { state: StudioCatalogState; exists: boolean; path?: string; built?: boolean; seconds?: number; error?: KilnError }
+export interface CatalogFieldInfo { path: string; type: string; writable?: boolean; enum?: string[]; enumNumbers?: number[]; kind?: string }
+/** kiln_manage::modpack::check::CheckReport (kilnctl pack check --json). */
+export interface PackCheckFinding { level: "error" | "warning" | "note"; code: string; message: string; mod?: string; file?: string }
+export interface PackCreditRow {
+  kind: ModKind; id: string; version: string; kdh1: string; author: string | null; source: string | null;
+  match: "kiln" | "crucible" | "github" | "nexus" | "manifest" | "manual" | string;
+  confidence: "certain" | "likely" | "conflict" | "unverified" | "creator" | "unconfirmed" | "none" | string;
+  nexusModId?: number; flag?: string;
+}
+export interface PackDataSetter { mod: string; file: string; selector: string; value: Json }
+export interface PackDataConflict { section: string; field: string; earlier: PackDataSetter; later: PackDataSetter; conditional: boolean }
+export interface PackCheckReport {
+  format: number; kind: string; tool: string; version: string; ok: boolean; complete: boolean;
+  pack: { id: string; name: string; version: string; sha256?: string; size?: number } | null;
+  summary: { errors: number; warnings: number; notes: number };
+  findings: PackCheckFinding[];
+  mods: { kind: ModKind; id: string; version: string; hash: string; name?: string; authors?: string[]; url?: string; code: { managed: string[]; native: string[]; scripts: string[]; touches: string[] }; blocked: boolean }[];
+  conflicts: PackDataConflict[];
+  credits: PackCreditRow[];
+  catalog: boolean;
+}
+export interface StudioTestReport { profile?: ProfileId; ran: boolean; conflicts: string[]; problems: string[] }
+export interface StudioPublishRequest {
+  version: string; changes?: string | null; visibility: StudioVisibility; attest: boolean; gameBuilds?: number[];
+  /** Publish as a new pack although the source names one (deleted or taken down on Crucible). */
+  fresh?: boolean;
+}
+export interface StudioVisibilityResult { pack: CruciblePack; public: boolean; needs: string[] }
+export interface StudioPublishResult {
+  pack: CruciblePack; version: CrucibleVersion; files: number; uploaded: number; skipped: number;
+  /** The pack is public now. */
+  public: boolean;
+  /** What Crucible still wants before it can be public. */
+  needs: string[];
+  file: string;
+}
+export interface PackServerInstallResult { mods: unknown[]; imported: LibraryRef[]; overrides: string[]; settings: boolean; leftOut: string[]; modpack?: BuiltModpack | null }
+
+export const studioList = () => call<StudioSummary[]>("studio_list");
+export const studioCreate = (request: StudioNewPack) => call<Studio>("studio_create", { request });
+export const studioGet = (packId: string) => call<Studio>("studio_get", { packId });
+/** Saves the source (id, profile, published and test fields stay as stored). */
+export const studioSave = (packId: string, source: PackSourceDoc) => call<Studio>("studio_save", { packId, source });
+export const studioDelete = (packId: string, gameId?: GameId | null) => call<null>("studio_delete", { packId, gameId: gameId ?? null });
+export const studioCreditsSet = (packId: string, credits: Record<string, PackCredit>) => call<Studio>("studio_credits_set", { packId, credits });
+/** The profile's settings files and the keys that differ from the mods' defaults (with a game: copied back first). */
+export const studioCapture = (packId: string, gameId?: GameId | null) => call<StudioCaptureFile[]>("studio_capture", { packId, gameId: gameId ?? null });
+export const studioCaptureSet = (packId: string, choices: StudioCaptureChoice[]) => call<Studio>("studio_capture_set", { packId, choices });
+export const studioOrder = (packId: string) => call<StudioOrder>("studio_order", { packId });
+export const studioLayerFiles = (packId: string) => call<StudioLayerFile[]>("studio_layer_files", { packId });
+export const studioLayerRead = (packId: string, path: string) => call<string>("studio_layer_read", { packId, path });
+/** Writes content/<name>.json and answers the layer's lint. */
+export const studioLayerWrite = (packId: string, path: string, text: string) => call<LintReport>("studio_layer_write", { packId, path, text });
+export const studioLayerDelete = (packId: string, path: string) => call<LintReport>("studio_layer_delete", { packId, path });
+/** "Set in the pack": {section: {selector: {field: value}}} in content/pack.json (null removes). */
+export const studioLayerSet = (packId: string, section: string, selector: string, field: string, value: Json) =>
+  call<LintReport>("studio_layer_set", { packId, section, selector, field, value });
+export const studioLayerLint = (packId: string) => call<LintReport>("studio_layer_lint", { packId });
+/** Game entries (the catalog) and what the pack's mods add, for the data editors' pickers. */
+export const studioPick = (packId: string, section: string, query: string, limit = 50, hidden = false) => call<StudioPickHit[]>("studio_pick", { packId, section, query, limit, hidden });
+/** The game's recipe input categories (the recipe editor's "Any of" ingredient); empty without a catalog. */
+export const studioCategories = () => call<StudioItemCategory[]>("studio_categories");
+export const studioFields = (section: string) => call<CatalogFieldInfo[]>("studio_fields", { section });
+/** Where the catalog's upkeep is (polled while it builds). */
+export const studioCatalogStatus = () => call<StudioCatalogStatus>("studio_catalog_status");
+/** Pack Studio opening and "Build the game catalog": a check in the background, the catalog made when missing or not current. */
+export const studioCatalogEnsure = () => call<StudioCatalogStatus>("studio_catalog_ensure");
+/** The pack analysis (a task; result PackCheckReport): checks, code scan, data conflicts, prefilled credits. */
+export const studioAnalyze = (packId: string) => call<TaskId>("studio_analyze", { packId });
+/** A task (result PackInstallResult): "<name> (test)" built, installed and activated; then Play. */
+export const studioTest = (packId: string, gameId?: GameId | null) => call<TaskId>("studio_test", { packId, gameId: gameId ?? null });
+export const studioTestReport = (packId: string, gameId?: GameId | null) => call<StudioTestReport>("studio_test_report", { packId, gameId: gameId ?? null });
+export const studioTestEnd = (packId: string, gameId?: GameId | null) => call<null>("studio_test_end", { packId, gameId: gameId ?? null });
+/** "Save as file" (a task; result BuiltPack). */
+export const studioBuild = (packId: string, outDir: string) => call<TaskId>("studio_build", { packId, outDir });
+/** What publishing would still need (empty: ready); sends nothing. */
+export const studioPublishCheck = (packId: string, request: StudioPublishRequest) => call<string[]>("studio_publish_check", { packId, request });
+/** A task (result StudioPublishResult); auth_failed when not signed in. */
+export const studioPublish = (packId: string, request: StudioPublishRequest, gameId?: GameId | null) =>
+  call<TaskId>("studio_publish", { packId, request, gameId: gameId ?? null });
+/** "Make public" / "Link only" for a published pack (no new version); Crucible's refusal comes back as needs. */
+export const studioSetVisibility = (packId: string, visibility: StudioVisibility, attest: boolean) =>
+  call<StudioVisibilityResult>("studio_set_visibility", { packId, visibility, attest });
+/** A server pack from a published version, on one of the launcher's servers (a task; result PackServerInstallResult). */
+export const studioServerPack = (packId: string, version: string, serverId: ServerId) => call<TaskId>("studio_server_pack", { packId, version, serverId });

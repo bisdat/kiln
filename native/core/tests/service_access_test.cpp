@@ -16,6 +16,9 @@
 #include "kiln_api.h"
 #include "services/kiln_caps.h"
 #include "services/kiln_hooks.h"
+#include "services/kiln_launch.h"
+#include "../src/launch_internal.h"
+#include "../src/hooks_protect_internal.h"
 #include "services/kiln_profile.h"
 #include "services/kiln_progress.h"
 #include "../../plugins/compat/original_code_service.h"
@@ -53,6 +56,16 @@ const KilnServiceHeader host{sizeof(KilnServiceHeader), 1};  // stands for the c
 bool running = true;
 const void* host_table() { return running ? &host : nullptr; }
 }  // namespace tasks_svc
+namespace launch {
+const KilnLaunchApi own{{sizeof(KilnLaunchApi), KILN_LAUNCH_VERSION}, nullptr, nullptr};  // stands for launch.cpp's table
+const KilnLaunchApi* table() { return &own; }
+const KilnLaunchInternalApi internal_own{{sizeof(KilnLaunchInternalApi), KILN_LAUNCH_INTERNAL_VERSION}, nullptr};
+const KilnLaunchInternalApi* internal_table() { return &internal_own; }  // stands for launch.cpp's internal table
+}  // namespace launch
+namespace hooks {
+const KilnHooksInternalApi internal_own{{sizeof(KilnHooksInternalApi), KILN_HOOKS_INTERNAL_VERSION}, nullptr};
+const KilnHooksInternalApi* internal_table() { return &internal_own; }  // stands for hooks_protect.cpp's table
+}  // namespace hooks
 namespace caps {
 const void* table() { return nullptr; }
 int published = 0;
@@ -99,9 +112,99 @@ void managed_host_view() {
     tasks_svc::running = true;
 }
 
+// kiln.launch (launch.h): the core's own table in every view, hooked or safe idle, and nobody publishes the name.
+void launch_views() {
+    using namespace kiln;
+    const KilnStr name{KILN_LAUNCH_SERVICE, std::strlen(KILN_LAUNCH_SERVICE)};
+    for (const bool hooks : {true, false}) {
+        g_hooks = hooks;
+        const char* mode = hooks ? " (hooks on)" : " (safe idle)";
+        check(api_service(name, 1) == &launch::own, std::string("the plugins' view resolves kiln.launch").append(mode).c_str());
+        check(api_service_services(name, 1) == &launch::own,
+              std::string("the services' view resolves kiln.launch").append(mode).c_str());
+        check(api_service_managed_host(name, 1) == &launch::own,
+              std::string("the managed host's view resolves kiln.launch").append(mode).c_str());
+        check(!api_service(name, 2) && !api_service_services(name, 2) && !api_service_managed_host(name, 2),
+              std::string("...not for a later version").append(mode).c_str());
+    }
+    g_hooks = true;
+    const KilnServiceHeader spoof{sizeof(KilnLaunchApi), 1};
+    alive.insert(7);
+    service_owner_add(7);  // a Kiln service of this build
+    const int before = caps::published;
+    last_log.clear();
+    check(api_register_service(2, name, &spoof) == KILN_ERR_INVALID_ARGUMENT, "a plugin cannot publish kiln.launch");
+    check(last_log == "warn", "...and the refusal is logged");
+    check(api_register_service(7, name, &spoof) == KILN_ERR_INVALID_ARGUMENT &&
+              api_register_service_services(7, name, &spoof) == KILN_ERR_INVALID_ARGUMENT,
+          "nor can a Kiln service, through either KilnApi");
+    check(caps::published == before, "a refused publication adds no capability row");
+    check(api_service(name, 1) == &launch::own && api_service_services(name, 1) == &launch::own,
+          "and every view still resolves the core's table");
+    alive.erase(7);
+}
+
+// kiln.internal.launch (launch_internal.h): the core's own, through the services' view only; nobody publishes it.
+void internal_launch_views() {
+    using namespace kiln;
+    const KilnStr name{KILN_LAUNCH_INTERNAL_SERVICE, std::strlen(KILN_LAUNCH_INTERNAL_SERVICE)};
+    for (const bool hooks : {true, false}) {
+        g_hooks = hooks;
+        const char* mode = hooks ? " (hooks on)" : " (safe idle)";
+        check(api_service_services(name, 1) == &launch::internal_own,
+              std::string("the services' view resolves kiln.internal.launch").append(mode).c_str());
+        check(api_service(name, 1) == nullptr, std::string("the plugins' view never resolves it").append(mode).c_str());
+        check(api_service_managed_host(name, 1) == nullptr,
+              std::string("nor the managed host's view").append(mode).c_str());
+        check(api_service_services(name, 2) == nullptr, std::string("...not for a later version").append(mode).c_str());
+    }
+    g_hooks = true;
+    const KilnServiceHeader spoof{sizeof(KilnLaunchInternalApi), 1};
+    alive.insert(7);
+    service_owner_add(7);
+    const int before = caps::published;
+    check(api_register_service_services(7, name, &spoof) == KILN_ERR_INVALID_ARGUMENT,
+          "not even a Kiln service publishes kiln.internal.launch");
+    check(api_register_service(2, name, &spoof) == KILN_ERR_INVALID_ARGUMENT, "nor a plugin");
+    check(caps::published == before && api_service_services(name, 1) == &launch::internal_own,
+          "and the services' view still resolves the core's table");
+    alive.erase(7);
+}
+
+// kiln.internal.hooks (hooks_protect_internal.h): the core's own, through the services' view only; nobody publishes it.
+void internal_hooks_views() {
+    using namespace kiln;
+    const KilnStr name{KILN_HOOKS_INTERNAL_SERVICE, std::strlen(KILN_HOOKS_INTERNAL_SERVICE)};
+    for (const bool hooks : {true, false}) {
+        g_hooks = hooks;
+        const char* mode = hooks ? " (hooks on)" : " (safe idle)";
+        check(api_service_services(name, 1) == &hooks::internal_own,
+              std::string("the services' view resolves kiln.internal.hooks").append(mode).c_str());
+        check(api_service(name, 1) == nullptr, std::string("the plugins' view never resolves it").append(mode).c_str());
+        check(api_service_managed_host(name, 1) == nullptr,
+              std::string("nor the managed host's view").append(mode).c_str());
+        check(api_service_services(name, 2) == nullptr, std::string("...not for a later version").append(mode).c_str());
+    }
+    g_hooks = true;
+    const KilnHooksInternalApi spoof{{sizeof(KilnHooksInternalApi), 1}, nullptr};
+    alive.insert(7);
+    service_owner_add(7);
+    const int before = caps::published;
+    last_log.clear();
+    check(api_register_service_services(7, name, &spoof) == KILN_ERR_INVALID_ARGUMENT && last_log == "warn",
+          "not even a Kiln service publishes kiln.internal.hooks (refused with a warning)");
+    check(api_register_service(2, name, &spoof) == KILN_ERR_INVALID_ARGUMENT, "nor a plugin");
+    check(caps::published == before && api_service_services(name, 1) == &hooks::internal_own && api_service(name, 1) == nullptr,
+          "and the services' view still resolves the core's table, the plugins' view still nothing");
+    alive.erase(7);
+}
+
 int main() {
     using namespace kiln;
     managed_host_view();
+    launch_views();
+    internal_launch_views();
+    internal_hooks_views();
     const KilnServiceHeader table{sizeof(KilnServiceHeader), 1};
     const KilnStr internal{"kiln.internal.example", 21}, open{"kiln.example", 12};
     // owner 1 = a service loaded from kiln/services, owner 2 = a plugin, owner 3 = a plugin-made owner

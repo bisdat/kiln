@@ -44,20 +44,10 @@ bitflags! {
     }
 }
 
-impl AppState {
-
-    // kiln-eml: preparation helpers retain their step, path and source error.
-    pub fn new(
-        env: ModEnvironment,
-        args: RunArgs,
-        cache_diff: &CacheDiff,
-    ) -> anyhow::Result<Self> {
-        let game_dir = env.game_dir();
-        let cache_dir = env.cache_dir();
+impl AppConfig {
+    // kiln-eml: the run's configuration, shared by AppState::new and AppState::hosted (unchanged from EML's `new`).
+    fn new(env: &ModEnvironment, args: RunArgs) -> Self {
         let file_name = &args.file_name;
-
-        // prepare configuration
-
         let options = args.options;
         let export_dir = options.export_dir
             .and_then(|d| {
@@ -99,14 +89,34 @@ impl AppState {
             feature_flags |= AppFeatures::RUNTIME_DLL;
         }
 
-        let config = AppConfig {
+        AppConfig {
             skip_cache,
             export_dir,
 
             is_server,
 
             feature_flags,
-        };
+        }
+    }
+}
+
+impl AppState {
+
+    // kiln-eml: preparation helpers retain their step, path and source error.
+    pub fn new(
+        env: ModEnvironment,
+        args: RunArgs,
+        cache_diff: &CacheDiff,
+    ) -> anyhow::Result<Self> {
+        let game_dir = env.game_dir();
+        let cache_dir = env.cache_dir();
+        let file_name = args.file_name.clone();
+        let file_name = &file_name;
+        let skip_cache = args.options.skip_cache;
+
+        // prepare configuration
+
+        let config = AppConfig::new(&env, args);
 
         // load and attach to resources
 
@@ -118,7 +128,7 @@ impl AppState {
         crate::load::export_lua_definitions(
             cache_dir,
             &type_registry,
-            options.skip_cache || is_dirty || cache_diff.build_id_changed(),
+            skip_cache || is_dirty || cache_diff.build_id_changed(),
         );
         let type_registry = Rc::new(type_registry);
 
@@ -131,7 +141,33 @@ impl AppState {
         let reader = crate::load::create_reader(game_dir, file_name)?;
         let writer = crate::load::create_writer(game_dir, file_name, &type_registry, &ref_file)?;
 
-        Ok(Self {
+        Ok(Self::with_inputs(env, config, type_registry, ref_file, reader, writer))
+    }
+
+    /// kiln-eml: a run over inputs a `StartupHost` captured and validated (startup_host.rs): its type registry, its
+    /// baseline, a reader of that baseline and the host's one staged writer. Nothing here opens, captures or seals a
+    /// baseline, creates a writer or exports type definitions: the host's caller owns those, once per generation.
+    pub(crate) fn hosted(
+        env: ModEnvironment,
+        args: RunArgs,
+        type_registry: Rc<TypeRegistry>,
+        ref_file: Rc<KFCFile>,
+        reader: KFCCursor<KFCReader>,
+        writer: crate::transaction::PatchWriter,
+    ) -> Self {
+        let config = AppConfig::new(&env, args);
+        Self::with_inputs(env, config, type_registry, ref_file, reader, writer)
+    }
+
+    fn with_inputs(
+        env: ModEnvironment,
+        config: AppConfig,
+        type_registry: Rc<TypeRegistry>,
+        ref_file: Rc<KFCFile>,
+        reader: KFCCursor<KFCReader>,
+        writer: crate::transaction::PatchWriter,
+    ) -> Self {
+        Self {
             env,
             config,
 
@@ -146,9 +182,8 @@ impl AppState {
             new_contents: RefCell::new(HashMap::new()),
             resources: RefCell::new(HashMap::new()),
             types: RefCell::new(HashMap::new()),
-        })
+        }
     }
-
     #[inline]
     pub fn env(&self) -> &ModEnvironment {
         &self.env
@@ -356,6 +391,7 @@ impl AppState {
                     "cannot create content: KFCWriter is no longer available"
                 ))?
                 .write_content(&guid, data)?;
+            failpoint!("stage.content-written", std::path::Path::new("stage/content"));
 
             // TODO: attach a reader to the writer to avoid cloning
             e.insert(data.to_vec());

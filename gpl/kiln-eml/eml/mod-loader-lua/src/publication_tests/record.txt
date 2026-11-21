@@ -1,0 +1,2 @@
+temp.written cache/sf-startup-enshrouded.json
+temp.replaced cache/sf-startup-enshrouded.json

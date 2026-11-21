@@ -97,7 +97,8 @@ pub fn read(_file: &File) -> Option<Stamp> {
 /// File systems whose change time is a creation time or a coarse copy of the write time. Wine reports the host's
 /// file systems as NTFS (the usual case), so this catches real Windows volumes and Wine's FAT-family reports.
 #[cfg(windows)]
-fn file_system_is_trustworthy(file: &File) -> Result<(), String> {
+// (crate-visible for the startup input witness; public: private)
+pub(crate) fn file_system_is_trustworthy(file: &File) -> Result<(), String> {
     use std::os::windows::io::AsRawHandle;
     let mut name = [0u16; 64];
     // SAFETY: only the file-system-name buffer is requested, with its real length.
@@ -119,7 +120,8 @@ fn file_system_is_trustworthy(file: &File) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-fn file_system_is_trustworthy(_file: &File) -> Result<(), String> {
+// (crate-visible for the startup input witness; public: private)
+pub(crate) fn file_system_is_trustworthy(_file: &File) -> Result<(), String> {
     Ok(())
 }
 

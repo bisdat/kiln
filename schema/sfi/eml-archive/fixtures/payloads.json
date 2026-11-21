@@ -1,0 +1,180 @@
+{
+  "registry": {
+    "schema_version": 1,
+    "pin": {
+      "launch_id": "01234567-89ab-4cde-8fab-0123456789ab",
+      "plan_id": "fedcba98-7654-4321-8fed-cba987654321",
+      "generation": "u64:0000000000000007",
+      "reload_epoch": "u64:0000000000000002",
+      "plan_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "archive_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "registry_id": "u64:0000000000000003",
+      "registry_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "game_version": "2.0.0-preview+archive",
+    "registry_version": "registry/revision B",
+    "count": "u64:0000000000000001",
+    "first": "u64:0000000000000000",
+    "types": [
+      {
+        "index": "u64:000000000000002a",
+        "name": "Sample",
+        "qualified_name": "example::Sample",
+        "impact_name": "SampleImpact",
+        "namespace": [
+          "example"
+        ],
+        "hashes": {
+          "qualified": 1,
+          "internal": 2,
+          "name": 3,
+          "impact": 4
+        },
+        "inner_type": null,
+        "size": 8,
+        "alignment": 8,
+        "element_alignment": 4,
+        "field_count": 1,
+        "primitive_type": "Struct",
+        "flags_bits": 0,
+        "flags": [],
+        "has_ds": false,
+        "default_bytes": "bytes:00ff000000000080",
+        "struct_fields": [
+          {
+            "name": "x",
+            "type_index": "u64:0000000000000003",
+            "data_offset": "u64:0000000000000000",
+            "attributes": []
+          }
+        ],
+        "fields": [
+          {
+            "name": "x",
+            "type_index": "u64:0000000000000003",
+            "declaring_type": "u64:000000000000002a",
+            "data_offset": "u64:0000000000000000",
+            "attributes": []
+          }
+        ],
+        "enum_fields": [
+          {
+            "name": "All",
+            "value": "u64:ffffffffffffffff",
+            "value_hex": "0xffffffffffffffff"
+          }
+        ],
+        "attributes": [
+          {
+            "key": "example::Note",
+            "name": "Note",
+            "namespace": [
+              "example"
+            ],
+            "type_index": null,
+            "value": "a\u0000b"
+          }
+        ]
+      }
+    ]
+  },
+  "resource": {
+    "schema_version": 1,
+    "pin": {
+      "launch_id": "01234567-89ab-4cde-8fab-0123456789ab",
+      "plan_id": "fedcba98-7654-4321-8fed-cba987654321",
+      "generation": "u64:0000000000000007",
+      "reload_epoch": "u64:0000000000000002",
+      "plan_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "archive_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "registry_id": "u64:0000000000000003",
+      "registry_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "resourceId": "guid:00000000000000000000000000000000",
+    "typeHash": 1,
+    "part": 0,
+    "type_index": "u64:000000000000002a",
+    "value": {
+      "tag": "map",
+      "entries": []
+    }
+  },
+  "attribute-catalog": {
+    "schema_version": 1,
+    "pin": {
+      "launch_id": "01234567-89ab-4cde-8fab-0123456789ab",
+      "plan_id": "fedcba98-7654-4321-8fed-cba987654321",
+      "generation": "u64:0000000000000007",
+      "reload_epoch": "u64:0000000000000002",
+      "plan_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "archive_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "registry_id": "u64:0000000000000003",
+      "registry_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "entries": [
+      {
+        "id": 7,
+        "name": "Example",
+        "root_hash": 9,
+        "index": 0,
+        "definition_guid": null,
+        "scalar_type": "example::U32",
+        "descriptor": {
+          "tag": "map",
+          "entries": []
+        }
+      }
+    ],
+    "layouts": []
+  },
+  "attribute-selector": {
+    "schema_version": 1,
+    "name": "Example"
+  },
+  "attribute-resolve": {
+    "schema_version": 1,
+    "pin": {
+      "launch_id": "01234567-89ab-4cde-8fab-0123456789ab",
+      "plan_id": "fedcba98-7654-4321-8fed-cba987654321",
+      "generation": "u64:0000000000000007",
+      "reload_epoch": "u64:0000000000000002",
+      "plan_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "archive_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "registry_id": "u64:0000000000000003",
+      "registry_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "entry": {
+      "id": 7,
+      "name": "Example",
+      "root_hash": 9,
+      "index": 0,
+      "definition_guid": null,
+      "scalar_type": "example::U32",
+      "descriptor": {
+        "tag": "map",
+        "entries": []
+      }
+    }
+  },
+  "attribute-evaluate": {
+    "schema_version": 1,
+    "pin": {
+      "launch_id": "01234567-89ab-4cde-8fab-0123456789ab",
+      "plan_id": "fedcba98-7654-4321-8fed-cba987654321",
+      "generation": "u64:0000000000000007",
+      "reload_epoch": "u64:0000000000000002",
+      "plan_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "archive_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "registry_id": "u64:0000000000000003",
+      "registry_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "root_hash": 9,
+    "input_bits": [
+      4294967295
+    ],
+    "output_bits": [
+      0
+    ],
+    "trace": []
+  }
+}

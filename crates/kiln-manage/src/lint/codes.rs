@@ -96,6 +96,7 @@ rules! {
     UNKNOWN_LANGUAGE = "KL404", "unknown-language", Info, "a language key no game language uses";
     ASSET_MODE = "KL405", "asset-mode", Error, "a resource \"override\" the game lacks, or a \"new\" one it has";
     CRAFTED_ROLLED = "KL406", "crafted-rolled", Warning, "a recipe makes an item that rolls its rarity or level, unlike its tooltip";
+    HIDDEN_ENTRY = "KL407", "hidden-entry", Info, "a game entry whose name marks it old, test or unused (DEPRECATED, DONOTPLACE, TEST...)";
 
     // KL5xx: files, assets and cook recipes
     FILE_MISSING = "KL501", "file-missing", Error, "a file the mod names is not there";

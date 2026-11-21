@@ -112,6 +112,18 @@ impl KFCFile {
         &self.containers
     }
 
+    // (the startup witness refuses a reference index with bundle ranges out of range)
+    /// kiln-eml: every resource-type bundle's range lies within the resource index list and every index names a
+    /// resource of this file. `resource_types` and `resources_by_type` slice them unchecked, so a malformed index
+    /// would panic there; Kiln's startup witness refuses such a reference index up front instead.
+    pub fn bundles_in_range(&self) -> bool {
+        let resources = self.resources.len();
+        self.resource_indices.iter().all(|&index| (index as usize) < resources)
+            && self.resource_bundles.values().iter().all(|bundle| {
+                bundle.index.checked_add(bundle.count).is_some_and(|end| end <= self.resource_indices.len())
+            })
+    }
+
     pub fn resource_types(&self) -> impl Iterator<Item = Hash32> {
         self.resource_bundles.values().iter().filter_map(|info| {
             let start = info.index;

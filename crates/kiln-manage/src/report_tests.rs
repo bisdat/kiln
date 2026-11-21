@@ -515,6 +515,26 @@ fn stop_state_files_are_in_the_report() {
     }
 }
 
+// the interpreter's launch plans and kiln-eml's ownership records (newest three of each) go in
+#[test]
+fn the_interpreters_launch_plans_and_ownership_records_are_in_the_report() {
+    let f = Fx::healthy("sfi-plans");
+    for i in 0..4 {
+        f.w(&format!("kiln/launch-plans/plan-{i}.json"), format!(r#"{{"format":1,"planId":"plan-{i}"}}"#).as_bytes());
+        let t = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000 + i * 60);
+        std::fs::File::options().write(true).open(f.game.join(format!("kiln/launch-plans/plan-{i}.json"))).unwrap().set_modified(t).unwrap();
+    }
+    f.w("kiln/launch-plans/.tmp-plan.json", b"{}");
+    f.w("kiln/eml/ownership/enshrouded.json", br#"{"format":1,"receipt":"r"}"#);
+    let r = build(&f.input());
+    for i in 1..4 {
+        assert!(file(&r, &format!("game/kiln/launch-plans/plan-{i}.json")).is_some_and(|t| t.contains(&format!("plan-{i}"))), "plan-{i} missing");
+    }
+    assert!(file(&r, "game/kiln/launch-plans/plan-0.json").is_none(), "only the newest three plans");
+    assert!(file(&r, "game/kiln/launch-plans/.tmp-plan.json").is_none());
+    assert!(file(&r, "game/kiln/eml/ownership/enshrouded.json").is_some());
+}
+
 #[test]
 fn a_test_build_names_its_channel_and_beta_number() {
     let f = Fx::healthy("channel");
@@ -1359,6 +1379,26 @@ fn writes_a_zip() {
     assert_eq!(names[0], "summary.txt");
     assert!(names.contains(&"game/kiln/state/boot.json".to_string()), "{names:?}");
     assert!(out.file_name().unwrap().to_string_lossy().starts_with("kiln-report-20"));
+}
+
+/// Two saves of one report file at once (a second click, a second window): both end with the whole zip at the path
+/// chosen and no temp file left. With one shared `<file>.tmp` the second one's rename found nothing (2026-11-20).
+#[cfg(feature = "zip")]
+#[test]
+fn saves_of_one_report_file_at_once_all_succeed() {
+    let f = Fx::healthy("zip-race");
+    let r = build(&f.input());
+    let dir = f.root.join("saved");
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("kiln-report.zip");
+    let errors: Vec<String> = std::thread::scope(|s| {
+        let ws: Vec<_> = (0..4).map(|_| s.spawn(|| (0..10).filter_map(|_| write_zip(&r, &out).err().map(|e| e.message)).collect::<Vec<_>>())).collect();
+        ws.into_iter().flat_map(|w| w.join().unwrap()).collect()
+    });
+    assert!(errors.is_empty(), "{} of 40 saves failed, first: {:?}", errors.len(), errors.first());
+    assert!(zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap().len() > 1);
+    let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert_eq!(names, ["kiln-report.zip"], "nothing else beside it");
 }
 
 // ---------------------------------------------------------------- ShroudForge's own startup pass

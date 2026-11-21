@@ -27,6 +27,8 @@ license-file = "LICENSE"
 rust-version = "1.89.0"
 
 [workspace.dependencies]
+# kiln-eml: the strict Brabb3l binding differential gates this exact SF/core Lua graph.
+mlua = { version = "=0.11.6", features = ["lua54", "error-send", "vendored"] }
 kfc = { path = "eml/kfc", features = ["resource", "content"] }
 mod-loader = { path = "eml/mod-loader", features = ["lua", "runtime"] }
 

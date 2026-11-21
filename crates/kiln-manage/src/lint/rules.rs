@@ -177,8 +177,9 @@ pub(crate) fn run(l: &mut Linter) {
             out.push(Diagnostic::new(&file, codes::CATALOG_BAD, Span::default(), &format!("the game-data catalog cannot be used: {p}")));
         }
         if cat.is_none() && skipped_refs > 0 {
+            let hint = l.opts.no_catalog_hint.as_deref().unwrap_or("make one with `kiln catalog`, or pass --catalog");
             out.push(Diagnostic::new(&file, codes::NO_CATALOG, Span::default(), &format!(
-                "no game-data catalog: {skipped_refs} reference(s) to the game's items, templates, ... were not checked (make one with `kiln catalog`, or pass --catalog)"
+                "no game-data catalog: {skipped_refs} reference(s) to the game's items, templates, ... were not checked ({hint})"
             )));
         }
     }
@@ -724,6 +725,18 @@ fn refs(out: &mut Out, m: &LMod, mi: usize, f: &LFile, cat: Option<&Catalog>, de
             && code.mentions(n)
         {
             continue;
+        }
+        // the game's own old, test or unused entry: it works, but may do nothing in the game (Pack Studio hides these)
+        if in_game == Some(true)
+            && let Form::Name(n) = &form
+            && crate::catalog::is_hidden_name(n)
+            && !cat.is_some_and(|c| c.used.contains(n))
+        {
+            let what = singular(&section);
+            out.push(
+                Diagnostic::new(&f.display, codes::HIDDEN_ENTRY, *span, &format!("\"{n}\" is one of the game's old, test or unused {what} entries (its name says so): it may do nothing in the game"))
+                    .pointer(pointer),
+            );
         }
         match in_game {
             Some(true) => continue,

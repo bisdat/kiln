@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "sfi-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Pure package/source facade; re-exported as `package` and in `host`.
+sfi-package = { path = "../sfi-package" }
+mlua.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+serde = { version = "1.0", features = ["derive"] }
+semver = { version = "=1.0.28", features = ["serde"] }
+regex = "=1.13.1"
+# Same resolution as both SF source pins; MIT OR Apache-2.0, cached and offline.
+half = "=2.7.1"
+# SF's locked ordinary codecs with DEFAULT features (MIT OR Apache-2.0).
+image = "=0.25.10"
+# Approved SF lock resolution; MIT OR Apache-2.0, cached and offline.
+crc = "=3.4.0"
+# SF's locked CPU block codec (MIT; Nils Hasenbanck, Intel ISPC-derived). Same features as
+# kfc-content uses per the eml-pure contract; wgpu stays off.
+block_compression = { version = "=0.6.0", default-features = false, features = ["bc15", "bc6h", "bc7"] }
+
+[dev-dependencies]
+toml = "0.9"

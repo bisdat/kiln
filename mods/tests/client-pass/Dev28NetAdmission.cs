@@ -46,19 +46,16 @@ public sealed partial class ClientPassMod
                          "Join remotely with holdSeconds 30, then 8, and rerun; the hosting player is never held.");
             return;
         }
-        c.Instruct("The server holds every Kiln client that joins for holdSeconds (kiln/config/admission-hold-test.json on the " +
-                   "server, read at each join) before it enters the world. Do this before you continue: 1) set holdSeconds to " +
-                   "30 and join: after about 25 s on the loading screen the game should refuse you, with the text \"" +
-                   "The test server held you longer than 25 s (admission-hold-test).\" 2) set holdSeconds to 8 and join again: " +
-                   "the loading screen should take about 8 s longer than usual, then you are in the world as normal. Press " +
-                   "continue when you are in (this is where you are now if you did both).");
-        await c.Verdict();
         c.Expect(last is not null && (string?)last["outcome"] == "let-in" && (double?)last["heldMs"] >= 7000,
             $"the server held this join at least 7 s, then let it in ({last?.ToJsonString() ?? "no join recorded for " + name})");
         c.Expect(refused is not null && (double?)refused["heldMs"] >= 24000,
             $"an earlier join of this player was held about 25 s and refused ({refused?.ToJsonString() ?? "none recorded"})");
-        c.Instruct("Did the long hold end with the game showing that refusal text, and did the 8 s hold end with you in the " +
-                   "world as normal (your character, the world around you, nothing missing)?");
+        c.Instruct("The server held your two joins (holdSeconds in kiln/config/admission-hold-test.json on the server, read at " +
+                   "each join): first with holdSeconds 30, then with 8. Pass only if both of these held: (1) the 30 s join ended " +
+                   "after about 25 s on the loading screen with the game refusing you and showing the text \"The test server held " +
+                   "you longer than 25 s (admission-hold-test).\" (2) the 8 s join took about 8 s longer than usual on the loading " +
+                   "screen and then you were in the world as normal (your character, the world around you, nothing missing). " +
+                   "Otherwise fail with a note naming which one.");
         await c.Verdict();
     }
 }

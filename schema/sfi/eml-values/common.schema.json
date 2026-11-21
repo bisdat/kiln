@@ -1,0 +1,694 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-values/common.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT. kiln.eml.values v1 packets. The scalar patterns are copies of eml-archive/common.schema.json's (u64, i64 two's complement, f64 IEEE bits, bytes, Lua string bytes); schema/tests/sfi_eml_values.mjs asserts they stay equal.",
+  "$defs": {
+    "u64": {
+      "type": "string",
+      "pattern": "^u64:[0-9a-f]{16}$"
+    },
+    "i64": {
+      "type": "string",
+      "pattern": "^i64:[0-9a-f]{16}$"
+    },
+    "f64": {
+      "type": "string",
+      "pattern": "^f64:[0-9a-f]{16}$"
+    },
+    "bytes": {
+      "type": "string",
+      "pattern": "^bytes:(?:[0-9a-f]{2})*$"
+    },
+    "string": {
+      "type": "string",
+      "pattern": "^string:(?:[0-9a-f]{2})*$"
+    },
+    "nonzero_u64": {
+      "type": "string",
+      "pattern": "^u64:(?!0{16})[0-9a-f]{16}$"
+    },
+    "lua_value": {
+      "description": "A Lua scalar: the archive schema's tagged value restricted to Lua's scalars, with no type key.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "nil"
+            }
+          },
+          "required": [
+            "tag"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "bool"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "tag",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "i64"
+            },
+            "value": {
+              "$ref": "common.schema.json#/$defs/i64"
+            }
+          },
+          "required": [
+            "tag",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "f64"
+            },
+            "value": {
+              "$ref": "common.schema.json#/$defs/f64"
+            }
+          },
+          "required": [
+            "tag",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "string"
+            },
+            "value": {
+              "$ref": "common.schema.json#/$defs/string"
+            }
+          },
+          "required": [
+            "tag",
+            "value"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "type": {
+      "description": "A registry type: its index and the registry type's own qualified_name (not a typedef's target).",
+      "type": "object",
+      "properties": {
+        "index": {
+          "$ref": "common.schema.json#/$defs/u64"
+        },
+        "qualified_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "qualified_name"
+      ],
+      "additionalProperties": false
+    },
+    "value_kind": {
+      "enum": [
+        "struct_owned",
+        "struct_mapped",
+        "array_owned",
+        "array_mapped",
+        "variant_owned",
+        "variant_mapped"
+      ]
+    },
+    "adapter": {
+      "enum": [
+        "none",
+        "guid",
+        "content",
+        "resource"
+      ]
+    },
+    "found_userdata": {
+      "description": "The userdata Source labels by its Rust TypeId (userdata `TypeId(..)`): its class, so the frontend renders the label. value_kind only for a typed value.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "lua_kind": {
+              "const": "typed_value"
+            },
+            "adapter": {
+              "$ref": "common.schema.json#/$defs/adapter"
+            },
+            "value_kind": {
+              "$ref": "common.schema.json#/$defs/value_kind"
+            }
+          },
+          "required": [
+            "lua_kind",
+            "adapter",
+            "value_kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "lua_kind": {
+              "enum": [
+                "known_userdata",
+                "other_userdata"
+              ]
+            },
+            "adapter": {
+              "$ref": "common.schema.json#/$defs/adapter"
+            }
+          },
+          "required": [
+            "lua_kind",
+            "adapter"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "cause": {
+      "description": "One level of a Source error: the complete Display text of this level (bytes:), its class fields, and for a validation or conversion level of kind lua the next level. internal never appears here (root only).",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "runtime"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            }
+          },
+          "required": [
+            "class",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "position_out_of_bounds"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "index": {
+              "$ref": "common.schema.json#/$defs/u64"
+            },
+            "start": {
+              "$ref": "common.schema.json#/$defs/u64"
+            },
+            "end": {
+              "$ref": "common.schema.json#/$defs/u64"
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "index",
+            "start",
+            "end"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "static_array"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            }
+          },
+          "required": [
+            "class",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "invalid_property"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "key": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "key",
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "borrow"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "mode": {
+              "enum": [
+                "shared",
+                "mutable"
+              ]
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "validation"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "path": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "incompatible_type"
+            },
+            "expected": {
+              "type": "string"
+            },
+            "found": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "path",
+            "kind",
+            "expected",
+            "found"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "validation"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "path": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "incompatible_type"
+            },
+            "expected": {
+              "type": "string"
+            },
+            "found_userdata": {
+              "$ref": "common.schema.json#/$defs/found_userdata"
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "path",
+            "kind",
+            "expected",
+            "found_userdata"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "validation"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "path": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "missing_field"
+            },
+            "field": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "path",
+            "kind",
+            "field",
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "validation"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "path": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "invalid_type"
+            },
+            "name": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "path",
+            "kind",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "validation"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "path": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "invalid_guid"
+            },
+            "guid": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "path",
+            "kind",
+            "guid"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "validation"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "path": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "lua"
+            },
+            "cause": {
+              "$ref": "common.schema.json#/$defs/cause"
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "path",
+            "kind",
+            "cause"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "validation"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "path": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "mapping"
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "path",
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "conversion"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "path": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "incompatible_type"
+            },
+            "expected": {
+              "type": "string"
+            },
+            "found": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "path",
+            "kind",
+            "expected",
+            "found"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "conversion"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "path": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "incompatible_type"
+            },
+            "expected": {
+              "type": "string"
+            },
+            "found_userdata": {
+              "$ref": "common.schema.json#/$defs/found_userdata"
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "path",
+            "kind",
+            "expected",
+            "found_userdata"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "conversion"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "path": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "invalid_guid"
+            },
+            "guid": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "path",
+            "kind",
+            "guid"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "conversion"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "path": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "lua"
+            },
+            "cause": {
+              "$ref": "common.schema.json#/$defs/cause"
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "path",
+            "kind",
+            "cause"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "conversion"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "path": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "mapping"
+            }
+          },
+          "required": [
+            "class",
+            "message",
+            "path",
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "lua"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            },
+            "host_error": {
+              "$ref": "common.schema.json#/$defs/nonzero_u64"
+            }
+          },
+          "required": [
+            "class",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "root": {
+      "description": "The error tree's root: a Source level, or a contained Kiln fault (internal), which is only ever the root.",
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/cause"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "class": {
+              "const": "internal"
+            },
+            "message": {
+              "$ref": "common.schema.json#/$defs/bytes"
+            }
+          },
+          "required": [
+            "class",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

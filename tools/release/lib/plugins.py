@@ -50,6 +50,13 @@ def expected(src):
     if os.path.isdir(os.path.join(src, "native", "plugins", "enshwick")):
         out += [("kiln/plugins/enshwick/enshwick.dll", "enshwick"), ("kiln/plugins/enshwick/LICENSE.txt", "enshwick"),
                 ("kiln/plugins/enshwick/enshwick-version.txt", "enshwick")]
+    # Kiln's interpreter (component sfi, MIT), and kiln-eml's archive inspector for each
+    # platform the launcher and kilnctl run on (component eml, GPL-3; tools/sfi/sfi_stage.py checks the rest of them)
+    if os.path.isfile(os.path.join(src, "crates", "sfi", "kiln-sfi", "Cargo.toml")):
+        out.append(("kiln/plugins/kiln-sfi.dll", "sfi"))
+    if os.path.isfile(os.path.join(src, "gpl", "kiln-eml", "kiln-eml", "src", "kiln_eml_inspect.rs")):
+        out += [("kiln/tools/eml-inspect/linux-x86_64/kiln-eml-inspect", "eml"),
+                ("kiln/tools/eml-inspect/windows-x86_64/kiln-eml-inspect.exe", "eml")]
     return out
 
 

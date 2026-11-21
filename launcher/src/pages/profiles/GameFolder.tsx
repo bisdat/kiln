@@ -4,13 +4,14 @@
 import { useQuery } from "@tanstack/react-query";
 import * as api from "../../api/commands";
 import type { FoundReport, GameId, ModKind, ProfileId } from "../../api/commands";
+import { GAME_POLL_MS, usePoll } from "../../api/hooks";
 import { t } from "../../i18n";
 
 /** The query key; profile saves and adds refresh every found_scan. */
 export const foundKey = (gameId: GameId, profileId: ProfileId) => ["found_scan", gameId, profileId] as const;
 
 export function useFound(gameId: GameId | null | undefined, profileId: ProfileId | null | undefined) {
-  return useQuery({ queryKey: foundKey(gameId ?? "", profileId ?? ""), queryFn: () => api.foundScan(gameId!, profileId!), enabled: !!gameId && !!profileId, refetchInterval: 10_000 });
+  return useQuery({ queryKey: foundKey(gameId ?? "", profileId ?? ""), queryFn: () => api.foundScan(gameId!, profileId!), enabled: !!gameId && !!profileId, refetchInterval: usePoll(GAME_POLL_MS) });
 }
 
 /** The loaders line: "EML's own loader (dbghelp.dll) is in the game folder and loads its mods itself." */

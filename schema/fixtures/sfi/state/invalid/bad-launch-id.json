@@ -1,0 +1,106 @@
+{
+  "format": 1,
+  "writer": "kiln-sfi",
+  "kilnSfi": "0.1.0",
+  "launch": {
+    "launchId": "3F2B8C1E5A7D4E2F",
+    "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "pid": 4242,
+    "processStartMs": 1763520000000,
+    "side": "client",
+    "profile": {
+      "id": "main",
+      "generation": 7
+    },
+    "backend": {
+      "selected": "kiln",
+      "source": "kiln.launch",
+      "reasonCode": "profile-setting",
+      "text": "kiln.json shroudforge.backend = kiln"
+    },
+    "frozenAtMs": 1763520000100
+  },
+  "phase": "running",
+  "incomplete": true,
+  "previousStart": {
+    "disposition": "clean",
+    "launchId": "9a1c7e5b2d3f4a6b",
+    "pid": 4100
+  },
+  "startedMs": 1763520000200,
+  "updatedMs": 1763520004000,
+  "menu": {
+    "by": "kiln",
+    "key": "SDL:66"
+  },
+  "warningRevision": 1,
+  "packages": [
+    {
+      "id": "example-lua",
+      "version": "1.2.0",
+      "name": "Example Lua mod",
+      "intent": "selected",
+      "data": "committed",
+      "lua": "active",
+      "dlls": [],
+      "archivePresent": true,
+      "runtimeActive": true,
+      "saveSensitive": {
+        "value": false,
+        "basis": "none",
+        "policyRow": null
+      },
+      "skip": null,
+      "warning": null
+    },
+    {
+      "id": "ammo-slots",
+      "version": "0.8.2",
+      "name": "Quiver & Spellbook",
+      "intent": "selected",
+      "data": "not-needed",
+      "lua": "excluded",
+      "dlls": [
+        {
+          "name": "ammo-slots.dll",
+          "sha256": "40321287f8e4dd4787d0a5f5f778af030cd784b31107a340408c77fffd271fe2",
+          "state": "refused"
+        }
+      ],
+      "archivePresent": false,
+      "runtimeActive": false,
+      "saveSensitive": {
+        "value": true,
+        "basis": "policy",
+        "policyRow": {
+          "id": "ammo-slots",
+          "version": "0.8.2"
+        }
+      },
+      "skip": {
+        "code": "dll-gate",
+        "text": "ammo-slots.dll was refused by the native load gate",
+        "part": "dll",
+        "chain": [],
+        "late": false,
+        "loader": "xhl"
+      },
+      "warning": {
+        "revision": 1,
+        "trigger": "skipped",
+        "presence": "not-applied",
+        "saveSensitive": true,
+        "text": "Quiver & Spellbook (ammo-slots 0.8.2) was skipped this start: its DLL was refused. XHL-Core still loads ammo-slots.dll. Do not save while this mod is off; restore it and restart first. The game drops the quiver and spellbook ammo at the next save."
+      }
+    }
+  ],
+  "delivery": [
+    {
+      "surface": "native",
+      "revision": 1,
+      "state": "pending",
+      "worldSession": null,
+      "atMs": null
+    }
+  ]
+}

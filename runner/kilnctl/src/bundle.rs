@@ -153,6 +153,9 @@ fn refresh_notes(dirs: &DataDirs, g: &GameInstall) -> Vec<String> {
         Ok(None) => {}
         Err(e) => notes.push(format!("  note: the active profile was not written again for this runtime: {}", e.message)),
     }
+    // what the check before Play would show for the active profile now
+    let request = kiln_manage::launch::LaunchRequest { mode: kiln_manage::launch::LaunchMode::Profile, profile_id: None, skip_backup: true };
+    notes.extend(kiln_manage::sfi_launch::headless_warnings(dirs, g, &request).lines().into_iter().map(|l| format!("  {l}")));
     notes
 }
 

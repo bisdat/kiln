@@ -802,6 +802,16 @@ block name, `"<this mod>:name"` or a pattern over this mod's items) gets it too:
 while a craft comes out at a rolled one ([item-blocks.md](item-blocks.md#rarity-at-creation-rarityrollblock)). Leave `craft` out of
 `sources` to keep crafts as the tooltip says, or accept the difference (the tooltip cannot show a roll).
 
+### KL407 hidden-entry
+Info (needs the catalog). A name the game has, but whose name marks it as one of the game's old, test or unused entries: a
+`Z_` prefix, or a word such as `DEPRECATED`, `DONOTPLACE`, `UNUSED`, `WIP`, `TEST` or `OLD` (the whole list:
+`kiln_manage::catalog::is_hidden_name`). The reference works, but the entry may do nothing in the game. Pack Studio's
+pickers leave these entries out unless "Show hidden game entries" is on.
+```text
+content/items.json:3:5: info KL407: "Z_Material_Sand_DEPRECATED" is one of the game's old, test or unused item entries (its name says so): it may do nothing in the game
+```
+Fix: pick the entry the game uses now, or keep it if you meant it.
+
 ## KL5xx: files, assets and cook recipes
 
 ### KL501 file-missing

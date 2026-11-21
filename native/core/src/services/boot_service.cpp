@@ -39,6 +39,8 @@
 #include "boot_archive_view.h"
 #include "boot_gamedata.h"
 #include "service.h"
+// the kiln backend's base, kiln-eml's committed archive generation
+#include "boot_archive_eml.h"
 #ifdef _WIN32
 #include "../api.h"
 #endif
@@ -118,8 +120,26 @@ std::mutex& g_mutex = *new std::mutex;  // never destroyed: a late reader at pro
 //   Live      kiln.assets' bytes, which exist only after the game's entry point: an OnBoot read answers unavailable
 // Each view has a lock of its own, and g_mutex is never held across a view's IO.
 boot_gd::Reader& g_gamedata = *new boot_gd::Reader;
-enum class Base : uint32_t { Snapshot, Live };
-Base default_base() { return Base::Snapshot; }
+enum class Base : uint32_t {
+    Snapshot,
+    Live,
+    Committed,  // the kiln backend: the archive generation kiln-eml's startup pass committed (boot_archive_eml.h)
+};
+// A kiln-backend start (kiln.launch KILN) reads the generation its startup pass committed, never the snapshot made
+// before the start: boot_archive_eml.cpp hands the sources when kiln-core.dll loads (the host tests their own).
+const boot_view::CommittedSource* g_committed_source = nullptr;
+boot_view::LaunchFacts g_launch;  // this start's, when it runs the kiln backend
+boot_view::CommittedView& g_committed_view = *new boot_view::CommittedView;
+Base default_base() {
+    if (g_committed_source && g_committed_source->kiln_mode) {
+        boot_view::LaunchFacts launch;
+        if (g_committed_source->kiln_mode(&launch)) {
+            g_launch = launch;
+            return Base::Committed;
+        }
+    }
+    return Base::Snapshot;
+}
 Base (*g_base_policy)() = &default_base;  // the policy (the host tests set their own)
 std::atomic<Base> g_base{Base::Snapshot};  // what the policy chose in decide()
 #ifdef _WIN32
@@ -135,6 +155,7 @@ boot_view::SnapshotView& g_snapshot_view = *new boot_view::SnapshotView(g_gameda
 boot_view::LiveView& g_live_view = *new boot_view::LiveView(&live_assets);
 boot_view::BaseView& base_view() {
     if (g_base.load() == Base::Live) return g_live_view;
+    if (g_base.load() == Base::Committed) return g_committed_view;
     return g_snapshot_view;
 }
 bool g_decided = false;
@@ -1195,6 +1216,11 @@ static Row game_data_row(bool hooks, const std::string& idle) {
         return {"mods.boot.game_data", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
                 "OnBoot reads the live game data (kiln.assets), which the game loads only after its entry point"};
     }
+    if (g_base.load() == Base::Committed) {
+        g_committed_view.reset();  // bound at bound(), once kiln-eml's startup pass has run
+        return {"mods.boot.game_data", KILN_CAP_PENDING, KILN_CAP_REASON_SESSION,
+                "a kiln-backend start: OnBoot reads the archive generation its startup pass committed, once the pass has run"};
+    }
     std::filesystem::path kfc = paths().exe;
     kfc.replace_extension(L".kfc");
     std::string why;
@@ -1317,6 +1343,39 @@ void decide(bool hooks, const std::string& safe_idle) {
     KLOG_I("boot: no deferred generation (%s); the collectors keep their on_ready paths%s%s", why.c_str(),
            list.empty() ? "" : "; boot mods found: ", list.c_str());
     send({{"mods.boot.phase", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, "no boot phase in this process: " + why}});
+    // a kiln-backend start binds its generation in bound() in deferred mode only; without a boot phase
+    // its row does not stay pending
+    if (hooks && g_base.load() == Base::Committed)
+        send({{"mods.boot.game_data", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, "no boot phase in this process: " + why}});
+}
+
+void use_committed_generation(const boot_view::CommittedSource* source) { g_committed_source = source; }
+
+// bound() in a kiln-backend start: every on_ready ran, kiln-eml's startup barrier among them, so its generation is
+// committed (or refused); kiln.boot's owner binds a view of it. Its row: available, or unavailable with the reason
+// (OnBoot then reads no game data at all: the snapshot is not read in a kiln-backend start).
+// kiln_eml_archive.h: a consumer checks the group and member rows before it uses the table, and a held, off or absent
+// row refuses, as kiln-sfi's archive port does. kiln.boot uses acquire, identity, release and resource_json.
+static const char* const kArchiveRows[] = {"eml.archive.metadata",         "eml.archive.metadata.acquire", "eml.archive.metadata.identity",
+                                           "eml.archive.metadata.release", "eml.archive.read",             "eml.archive.read.resource_json"};
+static Row bind_committed() {
+    std::string why, off;
+    const KilnEmlArchiveApiV1* api = g_committed_source && g_committed_source->table ? g_committed_source->table() : nullptr;
+    const boot_view::IdentitySource identity = g_committed_source ? g_committed_source->identity : nullptr;
+    if (api)  // without a table bind() names that
+        for (const char* row : kArchiveRows)
+            if (!row_available(row)) {
+                off = std::string("kiln.caps row ") + row + " is not available (" + row_text(row) + ")";
+                break;
+            }
+    if (off.empty() ? g_committed_view.bind(g_self, g_launch, api, identity, &why) : g_committed_view.refuse(off, &why)) {
+        const std::string digest = g_committed_view.digest();
+        KLOG_I("boot: OnBoot reads the archive generation this start's startup pass committed (base digest %s)", digest.c_str());
+        return {"mods.boot.game_data", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                "OnBoot reads the archive generation this start's startup pass committed (" + digest.substr(0, 16) + ")"};
+    }
+    KLOG_W("boot: OnBoot cannot read the game's data: %s; the boot snapshot is not read in a kiln-backend start", why.c_str());
+    return {"mods.boot.game_data", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING, "game data unavailable: " + why};
 }
 
 // boot.cpp, after every service DLL and plugin ran on_ready: registration closes. In deferred mode a collector that did
@@ -1338,6 +1397,7 @@ void bound() {
             rows.push_back({"mods.boot", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
                             "boot collector(s) not running: " + missing + "; boot mods are refused"});
     }
+    if (g_base.load() == Base::Committed) rows.push_back(bind_committed());  // with g_mutex released: it calls kiln-eml
     send(rows);
 }
 

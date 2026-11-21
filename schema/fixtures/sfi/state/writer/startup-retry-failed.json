@@ -1,0 +1,97 @@
+{
+  "format": 1,
+  "writer": "kiln-sfi",
+  "kilnSfi": "0.1.0",
+  "launch": {
+    "launchId": "3f2b8c1e5a7d4e2f",
+    "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "pid": 4242,
+    "processStartMs": 1763520000000,
+    "side": "client",
+    "profile": {
+      "id": "main",
+      "generation": 7
+    },
+    "backend": {
+      "selected": "kiln",
+      "source": "kiln.launch",
+      "reasonCode": "plan",
+      "text": "kiln.json shroudforge.backend = kiln"
+    },
+    "frozenAtMs": 1763520000100
+  },
+  "phase": "starting",
+  "incomplete": true,
+  "previousStart": {
+    "disposition": "clean",
+    "launchId": "9a1c7e5b2d3f4a6b",
+    "pid": 4100
+  },
+  "startedMs": 1763520000200,
+  "updatedMs": 1763520004000,
+  "warningRevision": 2,
+  "packages": [
+    {
+      "id": "other",
+      "version": "3.1.4",
+      "name": "Other",
+      "intent": "selected",
+      "data": "excluded",
+      "lua": "excluded",
+      "dlls": [],
+      "archivePresent": null,
+      "runtimeActive": false,
+      "saveSensitive": {
+        "value": false,
+        "basis": "none",
+        "policyRow": null
+      },
+      "skip": {
+        "code": "startup-retry-failed",
+        "text": "the ShroudForge startup pass failed (pregame phase failed: first), and failed again without base (pregame phase failed: second): the game starts without the mods of the startup pass",
+        "part": "data",
+        "chain": [],
+        "late": false,
+        "loader": null
+      },
+      "warning": {
+        "revision": 1,
+        "trigger": "skipped",
+        "presence": "unknown",
+        "saveSensitive": false,
+        "text": "Other (other 3.1.4) was skipped this start (its startup data): the ShroudForge startup pass failed (pregame phase failed: first), and failed again without base (pregame phase failed: second): the game starts without the mods of the startup pass. The game and the other mods go on without it. Whether its data is in the game could not be verified."
+      }
+    },
+    {
+      "id": "base",
+      "version": "1.0.0",
+      "name": null,
+      "intent": "selected",
+      "data": "excluded",
+      "lua": "excluded",
+      "dlls": [],
+      "archivePresent": false,
+      "runtimeActive": false,
+      "saveSensitive": {
+        "value": false,
+        "basis": "none",
+        "policyRow": null
+      },
+      "skip": {
+        "code": "startup-retry-failed",
+        "text": "the ShroudForge startup pass failed (pregame phase failed: first), and failed again without base (pregame phase failed: second): the game starts without the mods of the startup pass",
+        "part": "data",
+        "chain": [],
+        "late": false,
+        "loader": null
+      },
+      "warning": {
+        "revision": 2,
+        "trigger": "skipped",
+        "presence": "not-applied",
+        "saveSensitive": false,
+        "text": "base 1.0.0 was skipped this start (its startup data): the ShroudForge startup pass failed (pregame phase failed: first), and failed again without base (pregame phase failed: second): the game starts without the mods of the startup pass. The game and the other mods go on without it. Its data is not in the game."
+      }
+    }
+  ]
+}

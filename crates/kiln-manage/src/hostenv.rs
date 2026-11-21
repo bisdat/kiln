@@ -21,11 +21,12 @@ const OWN: [&str; 4] = ["APPDIR", "APPIMAGE", "ARGV0", "OWD"];
 
 /// The Linux launcher's software mode (launcher/src-tauri/src/render.rs) sets these for its own webview, and names the
 /// ones it set (not the user's own) in [`RENDER_SET`], comma-separated; so does its choice against WebKit's DMA-BUF
-/// renderer (`WEBKIT_DISABLE_DMABUF_RENDERER`, 0.2.0-dev.29.19: set only where that renderer failed). They are the
+/// renderer (`WEBKIT_DISABLE_DMABUF_RENDERER`, 0.2.0-dev.29.19: set only where that renderer failed), and its switch to
+/// X11 on Wayland (`GDK_BACKEND=x11`, 0.2.0-dev.30: only where WebKit drew without the GPU on Wayland). They are the
 /// launcher's, not the host's: a Steam it starts would draw its own window in software (or without DMA-BUF), so a
 /// program of the host never gets them.
-pub const RENDER_VARS: [&str; 4] =
-    ["WEBKIT_DISABLE_COMPOSITING_MODE", "WEBKIT_SKIA_ENABLE_CPU_RENDERING", "LIBGL_ALWAYS_SOFTWARE", "WEBKIT_DISABLE_DMABUF_RENDERER"];
+pub const RENDER_VARS: [&str; 5] =
+    ["WEBKIT_DISABLE_COMPOSITING_MODE", "WEBKIT_SKIA_ENABLE_CPU_RENDERING", "LIBGL_ALWAYS_SOFTWARE", "WEBKIT_DISABLE_DMABUF_RENDERER", "GDK_BACKEND"];
 pub const RENDER_SET: &str = "KILN_LAUNCHER_RENDER_SET";
 /// (dev.29.18) The Linux launcher turns WebKit's process sandbox off for its own webview when the player chose so
 /// (launcher/src-tauri/src/sandbox.rs) and names the variable in [`SANDBOX_SET`] when it set it (not the player's own).

@@ -55,7 +55,8 @@ const JOURNAL: &str = "files.partial.json";
 #[cfg(test)]
 thread_local! { pub(crate) static RACY_WINDOW_OVERRIDE: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) }; }
 
-fn racy_window() -> Duration {
+// (crate-visible for the startup input witness; public: private)
+pub(crate) fn racy_window() -> Duration {
     #[cfg(test)]
     if let Some(window) = RACY_WINDOW_OVERRIDE.with(|w| w.get()) {
         return window;
@@ -616,7 +617,8 @@ impl Drop for Fingerprints {
 }
 
 /// KILN_EML_FULL_HASH set to anything but empty or `0`: read every file in full at every step, as EML 0.2.0 does.
-pub(super) fn full_hash_requested(value: Option<&std::ffi::OsStr>) -> bool {
+// (crate-visible for the startup input witness; public: `pub(super)`)
+pub(crate) fn full_hash_requested(value: Option<&std::ffi::OsStr>) -> bool {
     value.is_some_and(|v| !v.is_empty() && v != "0")
 }
 
@@ -637,6 +639,7 @@ fn mtime_ns(meta: &std::fs::Metadata) -> std::io::Result<u128> {
     Ok(meta.modified()?.duration_since(UNIX_EPOCH).map_err(std::io::Error::other)?.as_nanos())
 }
 
-fn now_ns() -> i128 {
+// (crate-visible for the startup input witness; public: private)
+pub(crate) fn now_ns() -> i128 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(i128::MIN, |d| d.as_nanos() as i128)
 }

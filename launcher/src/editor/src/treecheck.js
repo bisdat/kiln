@@ -4,6 +4,7 @@
 //  - nível acima do máximo do nó;
 //  - mais pontos gastos que o total informado pelo usuário (quando conhecido).
 import { skills, skillName } from './gamedata.js';
+import skillPoints from '../data/skill-points.json';
 import { t } from './i18n.js';
 
 const adj = new Map();
@@ -21,7 +22,18 @@ export function pointsUsed(list) {
 export function totalKey(model) {
   return `ese.totalPoints.${model.path}.${model.level}`;
 }
+// Kiln: the game stores no point total. It works it out at each load (docs/re/progression.md section 3, SkillPointsTotal):
+// 2 per level above 1, plus the amount of every skill-point knowledge (Shroud Roots +1, Elixir Wells +3) whose value is not
+// 0. Null without the character's knowledge block: then only a total the player typed is known.
+export function gameTotal(model) {
+  if (!Array.isArray(model?.knowledge) || !Number.isInteger(model.level) || model.level < 1) return null;
+  let n = skillPoints.perLevel * (model.level - 1);
+  for (const k of model.knowledge) if (k.value) n += skillPoints.knowledge[k.id] || 0;
+  return n;
+}
 export function knownTotal(model) {
+  const derived = gameTotal(model);
+  if (derived !== null) return derived;
   try { const v = localStorage.getItem(totalKey(model)); return v === null ? null : Number(v); } catch { return null; }
 }
 

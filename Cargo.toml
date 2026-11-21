@@ -4,6 +4,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/kiln-manage", "crates/kiln-cli", "runner/kilnctl", "launcher/src-tauri"]
+# crates/sfi is its own workspace; kiln-manage's sfi-scan feature uses two of its crates as path dependencies.
+exclude = ["crates/sfi"]
 
 [workspace.package]
 # Keep equal to the repository's VERSION file (kiln-manage's tests check it).

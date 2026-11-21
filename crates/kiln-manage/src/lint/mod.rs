@@ -193,7 +193,14 @@ pub struct LintOptions {
     pub min_severity: Severity,
     /// Codes (KL103) or rule names (unknown-key) to turn off.
     pub rules_off: Vec<String>,
+    /// What KL901 (no catalog) tells the user to do. None: the kiln CLI's "make one with `kiln catalog`, or pass
+    /// --catalog"; the launcher names its own way ([`LAUNCHER_CATALOG_HINT`]).
+    pub no_catalog_hint: Option<String>,
 }
+
+/// KL901's advice in the launcher, where Pack Studio reads the game's items itself (no CLI to run).
+pub const LAUNCHER_CATALOG_HINT: &str =
+    "Kiln will read the game's items when Pack Studio opens; if it cannot, use the 'Build the game catalog' button on Pack Studio's Data tab";
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Summary {

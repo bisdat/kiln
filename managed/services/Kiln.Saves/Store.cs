@@ -216,6 +216,7 @@ internal sealed unsafe class WorldStore
         // The closed world's last files (its shutdown save's confirmation) are written before anything else can open a
         // world, the same one included, and before a process that quits after the close ends (bounded, logged).
         Writer.Drain("closing the world");
+        Writer.Release();  // the writer's pool task need not wait for the next world's jobs
         DetachAll();
         WorldId = null;
         ProvisionalWorld = Guid.Empty;
@@ -626,7 +627,11 @@ internal sealed unsafe class WorldStore
         if (unix != 0) _loadedUnix = unix;
         job.TickMs = System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
         Writer.Commit(job);
-        if (reason == SaveReason.Shutdown) Writer.Drain("the shutdown save");
+        if (reason == SaveReason.Shutdown)
+        {
+            Writer.Drain("the shutdown save");
+            Writer.Release();  // the process exits soon: its pool task gives its thread back now, not after its idle wait
+        }
     }
 
     // ---- files ----

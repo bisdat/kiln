@@ -10,7 +10,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as api from "../../api/commands";
-import { useGame, useGameStatus, useLaunchState, usePoll, useRuntimeChanges } from "../../api/hooks";
+import { GAME_POLL_MS, useGame, useGameStatus, useLaunchState, usePoll, useRuntimeChanges } from "../../api/hooks";
 import { engineStatusKey } from "../../components/EngineStatus";
 import { errorText } from "../../ui";
 import { clock, usePlayControl } from "../../shell/play";
@@ -47,7 +47,7 @@ export default function Home() {
   useEnsureProfile(game);
   const change = useRuntimeChanges((s) => (game ? s.last[game.id] : undefined));
   const engines = useQuery({ queryKey: engineStatusKey(game?.id ?? ""), queryFn: () => api.engineStatus(game!.id), enabled: !!game,
-    refetchInterval: usePoll(10_000) });
+    refetchInterval: usePoll(GAME_POLL_MS) });
   const sfRow = engines.data?.find((e) => e.kind === "shroudforge");
   const sfStartup = sfRow?.startupFailed ?? null;
   const sfSkipped = sfStartup ? null : sfRow?.startupSkipped ?? null;
