@@ -194,6 +194,15 @@ void track_owner_retiring(KilnOwner owner);
 KilnResult track_remove(KilnHandle h);
 KilnResult KILN_CALL t_track(KilnOwner owner, uint32_t direction, KilnReplTrackFn fn, void* user, KilnHandle* out);
 KilnResult KILN_CALL t_peer_entities(uint32_t peer, KilnReplPeerEntity* out, uint32_t cap, uint32_t* count);
+// track.cpp's receive side, fed by client.cpp (the game's main thread): the ClientStore hook (inside its guard) hands each
+// client-channel message to track_client_store while track_client_active(); the client world's Pre delivers
+// (track_client_pre) and its stop ends them (track_client_world_stopping). client_apply (client.cpp) puts the store
+// hook in or takes it out after the receive watches and the receive tracks; true when it is in.
+bool track_client_active();
+void track_client_store(const uint8_t* msg, uint64_t size);
+void track_client_pre();
+void track_client_world_stopping();
+bool client_apply();
 
 // filter.cpp, touch.cpp, remap.cpp
 void filter_start();

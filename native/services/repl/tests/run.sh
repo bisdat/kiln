@@ -8,7 +8,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 export KILN_OUT=${KILN_OUT:-$here/../../../build}
-"$here/../../../build.sh" repl-host-test repl-gate-test repl-net-test >/dev/null
+"$here/../../../build.sh" repl-host-test repl-gate-test repl-net-test repl-track-test >/dev/null
 bin=$KILN_OUT/cmake/bin/repl-tests
 export WINEPREFIX=$KILN_OUT/repl-tests-pfx WINEDEBUG=-all WINEDLLOVERRIDES="mscoree=;mshtml=;winedbg.exe=d"
 # no window may reach the desktop: an unset WAYLAND_DISPLAY means the desktop's wayland-0
@@ -19,4 +19,5 @@ fail=0
 wine "$bin/repl-host-test.exe" || fail=1
 wine "$bin/repl-gate-test.exe" || fail=1
 wine "$bin/repl-net-test.exe" || fail=1
+wine "$bin/repl-track-test.exe" || fail=1
 exit $fail

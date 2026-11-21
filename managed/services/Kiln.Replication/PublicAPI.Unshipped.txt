@@ -263,3 +263,29 @@ static Kiln.TouchResult.operator !=(Kiln.TouchResult? left, Kiln.TouchResult? ri
 static Kiln.TouchResult.operator ==(Kiln.TouchResult? left, Kiln.TouchResult? right) -> bool
 virtual Kiln.ComponentFilter<T>.Invoke(ref T value, in Kiln.FilterContext context) -> void
 virtual Kiln.ReceiveFilter<T>.Invoke(ref T value, Kiln.EntityId entity) -> void
+Kiln.ExtensionProvider<T>
+Kiln.ReplExtensionChanged<T>
+Kiln.ReplExtensionChanged<T>.<Clone>$() -> Kiln.ReplExtensionChanged<T>!
+Kiln.ReplExtensionChanged<T>.CreateTick.get -> uint
+Kiln.ReplExtensionChanged<T>.CreateTick.init -> void
+Kiln.ReplExtensionChanged<T>.Deconstruct(out Kiln.EntityId Entity, out uint CreateTick, out T? Value, out Kiln.NetPeer? Peer) -> void
+Kiln.ReplExtensionChanged<T>.Entity.get -> Kiln.EntityId
+Kiln.ReplExtensionChanged<T>.Entity.init -> void
+Kiln.ReplExtensionChanged<T>.Equals(Kiln.ReplExtensionChanged<T>? other) -> bool
+Kiln.ReplExtensionChanged<T>.Peer.get -> Kiln.NetPeer?
+Kiln.ReplExtensionChanged<T>.Peer.init -> void
+Kiln.ReplExtensionChanged<T>.ReplExtensionChanged(Kiln.EntityId Entity, uint CreateTick, T? Value, Kiln.NetPeer? Peer) -> void
+Kiln.ReplExtensionChanged<T>.Value.get -> T?
+Kiln.ReplExtensionChanged<T>.Value.init -> void
+Kiln.ReplicatedExtension<T>
+Kiln.ReplicatedExtension<T>.Changed -> System.Action<Kiln.ReplExtensionChanged<T>!>?
+Kiln.ReplicatedExtension<T>.Dispose() -> void
+Kiln.ReplicatedExtension<T>.On<TComponent>(Kiln.ExtensionProvider<T>! provider) -> System.IDisposable!
+Kiln.ReplicatedExtension<T>.TryGet(Kiln.EntityId entity, out T value) -> bool
+override Kiln.ReplExtensionChanged<T>.Equals(object? obj) -> bool
+override Kiln.ReplExtensionChanged<T>.GetHashCode() -> int
+override Kiln.ReplExtensionChanged<T>.ToString() -> string!
+static Kiln.ReplExtensionChanged<T>.operator !=(Kiln.ReplExtensionChanged<T>? left, Kiln.ReplExtensionChanged<T>? right) -> bool
+static Kiln.ReplExtensionChanged<T>.operator ==(Kiln.ReplExtensionChanged<T>? left, Kiln.ReplExtensionChanged<T>? right) -> bool
+static Kiln.Replication.Extension<T>(string! name, int version) -> Kiln.ReplicatedExtension<T>!
+virtual Kiln.ExtensionProvider<T>.Invoke(Kiln.EntityId entity, ref T value) -> bool

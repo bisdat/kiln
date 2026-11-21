@@ -51,7 +51,8 @@ std::atomic<uint64_t> g_records{0};
 
 Guard g_store_guard{"client-store"}, g_decode_guard{"client-decode"};
 kiln::RawHook h_store, h_decode;
-bool g_hooked = false;
+bool g_hooked = false;        // main thread: the store and decode hooks (receive watches)
+bool g_store_hooked = false;  // main thread: the store hook (receive watches or kiln.repl.net's receive tracks)
 using StoreFn = void (*)(uintptr_t world, const Slice* msg, uint64_t pred);
 using DecodeFn = StateRef* (*)(StateRef* out, void* alloc, const Slice* payload, const uint8_t* base, uint64_t pred,
                                uintptr_t registry, uint64_t tick, void* zero);
@@ -96,6 +97,8 @@ void store_before(void* p) {
     t_cur.active = false;
     if (!c->msg || !c->msg->ptr || c->msg->size < 4 || (c->pred & 0xff) != 0) return;  // the client channel only
     const uint8_t* d = c->msg->ptr;
+    if (track_client_active()) track_client_store(d, c->msg->size);  // kiln.repl.net's receive tracking (track.cpp)
+    if (!g_hot_n.load(std::memory_order_acquire)) return;
     const uint32_t kind = d[0] & 7;
     if (kind == kKindCreate || kind == kKindUpdate) {
         Header h{};
@@ -255,28 +258,41 @@ void apply() {
         if (!w.ended) g_hot[n++].store(w.entity, std::memory_order_relaxed);
     }
     g_hot_n.store(n, std::memory_order_release);
-    if (n && !g_hooked) {
+    // the store hook serves the receive watches and kiln.repl.net's receive tracks; the decode hook the watches only
+    const bool want_store = n || track_client_active(), want_decode = n != 0;
+    if (want_store && !g_store_hooked) {
+        if (n && !g_ring.ready() && !g_ring.init()) {
+            g_hot_n.store(0, std::memory_order_release);
+            logf(KILN_LOG_WARN, "repl: receive watches have no ring (out of memory): no events");
+            if (!track_client_active()) return;
+        }
+        if (!h_store.install(g_api, g_owner, f_store, reinterpret_cast<void*>(&d_store), "repl/client ClientStore")) {
+            logf(KILN_LOG_WARN, "repl: receive hooks not installed (%s)", h_store.error() ? h_store.error() : "");
+            g_hot_n.store(0, std::memory_order_release);
+            return;
+        }
+        g_store_hooked = true;
+    }
+    if (want_decode && !g_hooked && g_store_hooked) {
         if (!g_ring.ready() && !g_ring.init()) {
             g_hot_n.store(0, std::memory_order_release);
             logf(KILN_LOG_WARN, "repl: receive watches have no ring (out of memory): no events");
-            return;
-        }
-        if (!h_store.install(g_api, g_owner, f_store, reinterpret_cast<void*>(&d_store), "repl/client ClientStore") ||
-            !h_decode.install(g_api, g_owner, f_decode, reinterpret_cast<void*>(&d_decode), "repl/client Decode")) {
-            logf(KILN_LOG_WARN, "repl: receive hooks not installed (%s%s)", h_store.error() ? h_store.error() : "",
-                 h_decode.error() ? h_decode.error() : "");
-            h_store.revoke();
-            h_decode.revoke();
+        } else if (!h_decode.install(g_api, g_owner, f_decode, reinterpret_cast<void*>(&d_decode), "repl/client Decode")) {
+            logf(KILN_LOG_WARN, "repl: receive hooks not installed (%s)", h_decode.error() ? h_decode.error() : "");
             g_hot_n.store(0, std::memory_order_release);
-            return;
+        } else {
+            g_hooked = true;
+            logf(KILN_LOG_INFO, "repl: receive hooks installed (message store, decode)");
         }
-        g_hooked = true;
-        logf(KILN_LOG_INFO, "repl: receive hooks installed (message store, decode)");
-    } else if (!n && g_hooked) {
-        h_store.revoke();
+    } else if (!want_decode && g_hooked) {
         h_decode.revoke();
         g_hooked = false;
-        logf(KILN_LOG_INFO, "repl: receive hooks removed (no receive watch)");
+        logf(KILN_LOG_INFO, "repl: receive decode hook removed (no receive watch)");
+    }
+    if (!want_store && g_store_hooked) {
+        h_store.revoke();
+        g_store_hooked = false;
+        logf(KILN_LOG_INFO, "repl: receive hooks removed (no receive watch, no receive track)");
     }
 }
 
@@ -293,6 +309,7 @@ void read_client_registry() {
 
 void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
     if (g_dirty.exchange(false, std::memory_order_relaxed)) apply();
+    track_client_pre();  // kiln.repl.net's receive tracks: the last frame's creates and destroy lists
     if (!g_hooked && !g_ring.ready()) return;
     read_client_registry();
     if (g_ring.ready()) g_ring.drain([](const RecordHeader& rh, const uint8_t* p) { deliver_record(rh, p); });
@@ -305,6 +322,7 @@ void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
 
 void KILN_CALL on_client_world(const KilnWorldEvent* ev, void*) {
     if (!ev || ev->kind != KILN_WORLD_CLIENT || ev->event != KILN_WORLD_STOPPING) return;
+    track_client_world_stopping();
     for (RxWatch& w : g_rx)
         if (w.handle.load(std::memory_order_relaxed)) end(w, KILN_REPL_END_WORLD_STOPPED);
     g_ring.discard();
@@ -334,6 +352,13 @@ bool client_init() {
 }
 
 bool client_on() { return g_resolved; }
+
+// kiln.repl.net's receive tracks came or went (main thread): the store hook follows them and the receive watches.
+bool client_apply() {
+    if (!g_resolved) return false;
+    apply();
+    return g_store_hooked;
+}
 
 KilnResult client_watch(KilnOwner owner, KilnEntity e, KilnReplWatchFn fn, void* user, KilnHandle* out) {
     if (out) *out = 0;
