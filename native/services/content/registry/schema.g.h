@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace kc::reg::gen {
+namespace kc::registry::gen {
 
 enum class Kind : uint8_t { Int, Float, Bool, Enum, Flags, Ref, Time, List, Struct };
 enum class Applies : uint8_t { Now = 1, WorldLoad = 2, Restart = 3 };  // KILN_REGISTRY_APPLIES_*
@@ -264,4 +264,4 @@ inline constexpr uint32_t balance_gear_armorOffset = 0x00050027u;
 inline constexpr uint32_t balance_gear_armorGradient = 0x00050028u;
 }  // namespace field
 
-}  // namespace kc::reg::gen
+}  // namespace kc::registry::gen

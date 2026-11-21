@@ -12,7 +12,7 @@
 #include "../registry/regmap.h"
 #include "../registry/schema.g.h"
 
-using namespace kc::reg;
+using namespace kc::registry;
 using map::Mapping;
 
 static int g_fail = 0, g_pass = 0;

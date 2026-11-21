@@ -10,7 +10,7 @@
 
 #include "../registry/claims.h"
 
-using namespace kc::reg;
+using namespace kc::registry;
 
 static int g_fail = 0, g_pass = 0;
 #define CHECK(cond, what)                                              \

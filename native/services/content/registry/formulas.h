@@ -13,7 +13,7 @@
 
 #include "../gear.h"
 
-namespace kc::reg::formulas {
+namespace kc::registry::formulas {
 
 // The constants from the balance registry's resolved values ("gear.seed", "gear.creep", "gear.armorOffset",
 // "gear.armorGradient"); a missing one keeps the game's own value.
@@ -34,4 +34,4 @@ bool read(const std::string& formula, const std::vector<double>& inputs, const g
 // inputs that give no answer (speed 0, a level outside the game's item levels).
 bool write(const std::string& formula, double kiln_value, const std::vector<double>& inputs, const gear::Constants& c, double* game_value);
 
-}  // namespace kc::reg::formulas
+}  // namespace kc::registry::formulas
