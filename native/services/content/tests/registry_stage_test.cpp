@@ -150,6 +150,9 @@ void one_start(const std::string& dir) {
     TreeView view = world();
     Files files;
     stage::Runner r(env_of(&view, &files, dir, &sections));
+    std::function<void(const Result&)> live_report;
+    const Result* live_result = nullptr;
+    r.set_live([&](const stage::LiveHandoff& h) { live_report = h.report, live_result = h.result; });
     check(r.phase() == stage::Phase::None, "phase none before the stage");
     const auto docs = old_patch();
     const auto boot = r.run([&](model::Model& m) { return boothook::old_writes(docs, m); });
@@ -185,6 +188,11 @@ void one_start(const std::string& dir) {
     uint32_t a = 0, b = 0;
     std::string rp;
     check(r.submit(1, "", R"({"ir":1,"mod":"x","stage":"alter","edits":[]})", &a, &b, &rp) == KILN_ERR_UNAVAILABLE, "no submit after the stage");
+    check(live_report != nullptr, "the live back-end got its handoff with a report callback");
+    const std::string start_report = files.report;
+    live_report(*live_result);
+    check(r.phase() == stage::Phase::WorldLoad && r.generation() == 2 && json::parse(files.report)["phase"] == "worldLoad",
+          "the live back-end's report: phase worldLoad, generation 2");
 
     // a second start: the cache gives the same base and the same registry.json
     TreeView view2 = world();
@@ -196,7 +204,7 @@ void one_start(const std::string& dir) {
     bool hit = false;
     for (const std::string& l : files2.log) hit = hit || l.find("the cache holds") != std::string::npos;
     check(hit, "the second start takes its base from the cache");
-    check(files2.report == files.report, "and writes the same registry.json");
+    check(files2.report == start_report, "and writes the same registry.json");
 }
 
 void host_order_and_code(const std::string& dir) {

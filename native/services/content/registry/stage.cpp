@@ -687,7 +687,16 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
         const json doc = ::kc::registry::report_json(d.schema, d.result, d.meta);
         d.report = doc.dump();
         if (d.env.write_report && !d.env.write_report(doc.dump(1))) d.log(1, "registry: state/registry.json could not be written");
-        for (const std::string& line : report_log(d.result)) d.log(line.find("refused") != std::string::npos ? 1 : 0, line);
+        // refusals first (warnings, never crowded out by conflict lines), then the conflict lines, then one total
+        Result refusals, lines;
+        refusals.refused = d.result.refused;
+        lines.lines = d.result.lines;
+        std::vector<std::string> rl = report_log(refusals), ll = report_log(lines), all = report_log(d.result);
+        if (!rl.empty()) rl.pop_back();
+        if (!ll.empty()) ll.pop_back();
+        for (const std::string& line : rl) d.log(1, line);
+        for (size_t i = 0; i < ll.size() && i + rl.size() < 50; ++i) d.log(0, ll[i]);
+        if (!all.empty()) d.log(d.result.refused.empty() ? 0 : 1, all.back());
         d.log(0, "registry: the stage ran (" + d.meta.order_source + " order, " + std::to_string(d.meta.order.size()) + " mod(s)): " + std::to_string(d.counts.edits) +
                      " edit(s) in effect or waiting for the world, " + std::to_string(d.counts.refused) + " refused, " + std::to_string(d.counts.conflicts) +
                      " conflict line(s); restart fields are final (phase start)");
@@ -700,6 +709,8 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
             d_->result = r;
             ++d_->generation;
             d_->meta.generation = d_->generation;
+            d_->meta.world_load = true;  // the live back-end applied the now and worldLoad fields (a world's load, a pack reload)
+            phase_.store(Phase::WorldLoad);
             d_->meta.written = d_->env.now ? d_->env.now() : "";
             const json doc2 = ::kc::registry::report_json(d_->schema, d_->result, d_->meta);
             d_->report = doc2.dump();
