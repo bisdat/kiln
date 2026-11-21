@@ -47,7 +47,10 @@ for this session, and slash commands retained from earlier games are available t
 
 - Type to filter by case-insensitive ASCII substring (non-ASCII text matches exactly). Each distinct line appears
   once, at its latest position. The search text stays in a private query buffer; the game's draft is untouched.
-- **Ctrl+R** again or **Down** moves to the next older match. **Ctrl+Shift+R** or **Up** moves newer.
+- **Ctrl+R** again or **Down** moves to the next older match. **Ctrl+Shift+R** or **Up** moves newer. Clicking a row
+  picks it, as Enter does.
+- Characters typed with AltGr (Ctrl+Alt: `@`, `€`, `{` on many keyboards) go into the query too. Alt shortcuts
+  (Alt+Tab, Alt+F4) still reach Windows.
 - **Enter** or **Tab** puts the selected line into the original chat edit **without sending it**. Press Enter again to
   send as usual. **Esc** cancels search with the original draft intact.
 - Search takes precedence over Tab completion until it closes; accepting a match does not reopen suggestions until
@@ -62,6 +65,8 @@ for this session, and slash commands retained from earlier games are available t
   mod that draws its own text field, or another loader that hooks the same function, is not touched.
 - `subscribe_key` handlers do not get Up/Down presses (no modifiers) while the chat field has typing focus. Releases
   always reach everyone.
+- While Ctrl+R search is open it owns the keyboard: `subscribe_key` handlers and Kiln's key bindings (the menu key
+  too) get no presses apart from Alt shortcuts. Releases still reach everyone.
 
 ## Diagnostics
 Environment variables, for testers; they win over the setting:
