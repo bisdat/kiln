@@ -472,6 +472,12 @@ server) the listener is not `Ok`, with a `Reason`; it never throws for that. `Ke
 `p.Chord.ToString()` are what the Keys page stores. Don't read Kiln's internals (`KilnText`, `UiNative`, `KeyNames`) by
 reflection: `KilnLanguage` and `KeyInput` are the public members for them (`docs/kiln/ui.md`, the XHL-Core table).
 
+**The pointer and drag and drop (dev.30.3+, Kiln.Ui; not yet seen in a real game).** In a draw callback: `ui.Pointer`
+(`Vector2?`, overlay pixels, `DrawRect`'s space), `ui.ButtonHeld(UiMouseButton.Left)`, and ImGui's drag and drop:
+`ui.DragSource("stack", payload, preview)` right after a widget, `ui.DropTarget("stack")` right after another (the payload
+text once, on release; else null). Kinds are the mod's own; payloads are text up to 4096 bytes. `SlotClick.Pointer` is
+the press position in the same pixels (`Ui.Inventory.OnClick`). Page `docs/kiln/ui.md`.
+
 **Looks and themes (dev.29.16+; not yet seen in a real game).** `UiStyle.Player` (the look the player chose) is the
 default for `Ui.Window`, `Ui.Screen` and crafting panels; before, windows had Kiln's ember look. `ui.Palette` reads the
 look's colours by role. `Ui.Themes.Define(name, new UiThemeSpec { ... })` makes a theme for your own windows

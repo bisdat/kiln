@@ -1,3 +1,7 @@
 #nullable enable
 Kiln.SlotClick.Pointer.get -> System.Numerics.Vector2?
 Kiln.SlotClick.Pointer.init -> void
+Kiln.UiDraw.ButtonHeld(Kiln.UiMouseButton button = Kiln.UiMouseButton.Left) -> bool
+Kiln.UiDraw.DragSource(string! kind, string! payload, string? preview = null) -> bool
+Kiln.UiDraw.DropTarget(string! kind) -> string?
+Kiln.UiDraw.Pointer.get -> System.Numerics.Vector2?

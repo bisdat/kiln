@@ -6033,10 +6033,12 @@
             "collapsing_header": 176,
             "combo": 536,
             "cursor": 664,
+            "drag_source": 1064,
             "draw_rect": 408,
             "draw_rect_in": 712,
             "draw_text": 400,
             "draw_text_in": 720,
+            "drop_target": 1072,
             "dummy": 552,
             "end": 88,
             "end_child": 376,
@@ -6077,6 +6079,7 @@
             "menu_scroll": 872,
             "menu_set": 464,
             "menu_shown": 848,
+            "pointer": 1056,
             "pop_color": 744,
             "pop_font": 832,
             "pop_font_size": 640,
@@ -6152,7 +6155,7 @@
             "wheel_open": 608,
             "window_rect": 560
           },
-          "size": 1056
+          "size": 1080
         },
         "KilnUiChatCompletion": {
           "align": 4,
@@ -6413,6 +6416,18 @@
           },
           "size": 104
         },
+        "KilnUiPointer": {
+          "align": 4,
+          "fields": {
+            "flags": 4,
+            "held": 16,
+            "reserved": 20,
+            "size": 0,
+            "x": 8,
+            "y": 12
+          },
+          "size": 24
+        },
         "KilnUiPointerPress": {
           "align": 4,
           "fields": {
@@ -6563,7 +6578,7 @@
           "size": 48
         }
       },
-      "sha256": "a718bb5fa39674fc2d8424840b6bfddf7c5c342ac399d3d2ce349f4b06918521"
+      "sha256": "31ede646554382bd7adb06b3ae1eae67a791d0600f859aae9d54323cea57219c"
     },
     "native/core/abi/services/kiln_ui_inventory.h": {
       "function_macros": [],
@@ -8015,7 +8030,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "807737da54ef219e51d6252617ecf76805c51bbc35d5a4c9395b14e959a4d96d",
+    "src/layout.rs": "6933505b65909a4fa347291d788b8c3803790bd5e86b002531d68dd61bdce046",
     "src/services/kiln_abilities.rs": "42fa3c6b0f9c1276be2af0990c616024d5ae924ccc58110ea9ca1b984d95071e",
     "src/services/kiln_assets.rs": "e251c8fe37ce4c9125c7b89b49499c70dd542f24370e75f468cf5f8a95658800",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8068,7 +8083,7 @@
     "src/services/kiln_time.rs": "879eaed84cd42ab057cc5c6aa452aef7e0d6636205431e9ef54d1daf8dd4bf93",
     "src/services/kiln_toolwear.rs": "bfb7c79cc8ddea86236700983a4deac4d08826a8f4d3ac5648c2fc9e346dcbcb",
     "src/services/kiln_types.rs": "e6eaf5e97d0c284ec9fb98e78e9b2d3c1fb129d0cac1a899009730e2641942eb",
-    "src/services/kiln_ui.rs": "fae0346cb20c2d4ee7c0874aed340b78abd833611b652f662b87a75963ad957f",
+    "src/services/kiln_ui.rs": "4db7e7f14a1ec7cdef1281a947b4abfa968686f070696e45c9a2f0a3a1127e09",
     "src/services/kiln_ui_inventory.rs": "048065809ffcd982d597cf50b0e342921b8b94c0da06e658ed266ad1162d2165",
     "src/services/kiln_ui_values.rs": "8d6982dd8643faa01fb82cdf7b8bdd4006920d657c2d4a99173b7d52f3fe6720",
     "src/services/kiln_vfx.rs": "046191c4ab30f4ccd99a52f7fc654e7fb53d74aaa4acaa072c8f86a36f0037a0",

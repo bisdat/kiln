@@ -486,6 +486,8 @@ w.Toggle();   // Show / Hide / Open = true; the X button closes it too
   - layout: `CollapsingHeader`, `TreeNode`/`TreePop`, `SameLine`, `Spacing`, `Id(...)` scopes, tables
     (`BeginTable`, `Row`, `NextRow`/`NextColumn`), tabs (`BeginTabBar`/`BeginTab`), `BeginChild`;
   - free drawing: `DrawText`, `DrawRect`, `MeasureText`;
+  - the mouse (since 0.2.0-dev.30.3): `Pointer`, `ButtonHeld(UiMouseButton)`, `DragSource(kind, payload)` /
+    `DropTarget(kind)` (see "The pointer, held buttons and drag and drop" below);
   - frame info: `Width`/`Height`/`Scale`/`DeltaSeconds`/`MenuOpen`/`Capturing`.
 - **Interactive** windows (the default) take the mouse and keyboard while open: the game stops seeing input, the
   cursor is free, and ImGui draws it. `Interactive = false` gives a panel the player only looks at.
@@ -523,6 +525,41 @@ if (ui.KeyPressed(UiKey.Tab, claim: true)) NextTab();                  // claim:
   `PushColor(UiColorSlot, color)` / `PushVar(UiStyleVar, x, y)` (scopes), `KeyPressed(UiKey, repeat, claim)`, `HeldMods`,
   `ScrollHere(ratio)`.
 - `ui.HasLayout` is false on an older kiln.ui: each call then falls back to the older one or does nothing.
+
+### The pointer, held buttons and drag and drop (since 0.2.0-dev.30.3)
+GitHub issue 113 (thanks Fuzen777): a two-pane item screen with drag and drop between the panes, or a "hold the button on
+a cell" action.
+```csharp
+// where the pointer is and what is held: enough for a drag of your own
+if (ui.Pointer is { } p && ui.ButtonHeld(UiMouseButton.Left))
+    ui.DrawRect(p.X - 3, p.Y - 3, p.X + 3, p.Y + 3, Color.White);
+
+// Dear ImGui's drag and drop: a source after one widget, a target after another
+foreach (var s in _backpack)
+{
+    ui.Selectable(s.Name + "##b" + s.Slot);
+    ui.DragSource("stack", s.Slot.ToString(), s.Name);       // while dragged: "Iron Bar" by the pointer
+}
+ui.Selectable("Chest");
+if (ui.DropTarget("stack") is { } slot) Client.Post(() => MoveToChest(int.Parse(slot)));   // once, on the release
+```
+| Member | What |
+|---|---|
+| `Pointer` | the pointer now, a `Vector2` in the overlay's pixels (`DrawRect`'s space, `SlotClick.Pointer`'s); null until the overlay has seen the cursor. Whole pixels |
+| `ButtonHeld(button)` | the button is down now (pressed this frame or earlier, not released), wherever the pointer is. `ItemClicked` answers a press on a widget instead |
+| `DragSource(kind, payload, preview)` | after a widget, every frame: the widget can be dragged; true on the frames it is. `payload` is text, at most 4096 bytes of UTF-8 (an id, a slot, JSON); `preview` is drawn by the pointer (null: nothing). Also after a widget without an id (text, an image) |
+| `DropTarget(kind)` | after a widget, every frame: the payload's text on the frame a source of that kind is released over it, else null. A matching payload hovering it highlights the widget |
+
+- **Kinds are your mod's own.** Kiln passes Dear ImGui a hash of your mod's id and the kind, so another mod's target named
+  `"stack"` never gets your payload, nor you theirs. Any text works as a kind.
+- What they read is Dear ImGui's io for this frame: the window's mouse messages Kiln saw, also while Kiln does not have
+  the input (the game gets those presses too). In the play view the game recentres the cursor for mouse look, so the
+  pointer means something only while a pointer is shown: a Kiln screen or window, the Kiln menu, or one of the game's
+  menus. A drag works inside interactive Kiln windows (they have the mouse); a panel the player only looks at
+  (`Interactive = false`) gets no presses.
+- On a kiln.ui older than 0.2.0-dev.30.3: `Pointer` null, `ButtonHeld` false, `DragSource` false, `DropTarget` null.
+- C: kiln.ui's `pointer`, `drag_source` and `drop_target` (a size-guarded tail at byte 1056, after `chat_search`;
+  [services/ui.md](services/ui.md#the-pointer-and-drag-and-drop-020-dev303)).
 
 ## Looks and themes (0.2.0-dev.29.16)
 Kiln's own UI (the Kiln menu with its Mods, Network, Keys and Overlay sections, the creative menu, the developer windows
@@ -1062,6 +1099,10 @@ subscriber that got a press can take it; releases always pass.
 While Kiln captures input they come with `captured` 1. Left and right clicks never come. With no `KILN_UI_KEYS_MOUSE`
 subscriber the mouse costs nothing and reaches the game untouched. Kiln.Ui subscribes this way; kiln-emf and kiln-set
 stay on `subscribe_key`. `set_menu_key` takes the buttons, not the wheel; `take_pressed_key` stays keyboard only.
+
+The pointer and drag and drop (0.2.0-dev.30.3): `pointer(&KilnUiPointer)`, `drag_source(kind, payload, len, preview)` and
+`drop_target(kind, out, capacity, &len)`, inside a frame callback, a size-guarded tail at byte 1056
+([services/ui.md](services/ui.md#the-pointer-and-drag-and-drop-020-dev303)).
 
 `kiln_ui.h` (later additions, check `header.size`): `screen`, `subscribe_screen`, `subscribe_ui_tick`,
 `menu_add` / `menu_set` (`KILN_UI_MENU_MAIN` / `PAUSE`), `push_style` / `pop_style`, `image_*`, `combo`,

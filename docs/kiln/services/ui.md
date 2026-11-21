@@ -233,8 +233,8 @@ subscription. The core's `kiln.ui.inventory` (slot clicks, `kiln_ui_inventory.h`
 
 ## Chat search's slot (internal, GitHub issue 44)
 
-One slot after `subscribe_pointer_press`: `chat_search` at byte offset 1048 (0.2.0-dev.30.3; the table is 1056 bytes,
-1048 before). First built by bisdat (pull request 106). It is Kiln.Ui's transport for Ctrl+R reverse search of the chat
+One slot after `subscribe_pointer_press`: `chat_search` at byte offset 1048 (0.2.0-dev.30.3; the table was 1056 bytes with
+it, 1048 before; the pointer tail follows it). First built by bisdat (pull request 106). It is Kiln.Ui's transport for Ctrl+R reverse search of the chat
 history ([chat-history.md](../chat-history.md#ctrlr-reverse-search-issue-44-phase-1c)), **not** an API: a call from a
 native plugin is refused (`KILN_ERR_UNAVAILABLE`), and `KilnUiChatSearch`'s layout (10572 bytes) may change with
 Kiln.Ui; a call whose `size` is smaller is refused (`KILN_ERR_INVALID_ARGUMENT`). It answers only while
@@ -257,6 +257,31 @@ only gets copies:
 No text is logged or kept: the search reads the history already in memory (which never holds the lines the
 sensitive-command filter drops), the query lives only while the search is open, and the one log line (an accept refused
 by the editor checks) names no text.
+
+## The pointer and drag and drop (0.2.0-dev.30.3)
+
+Three slots after `chat_search`, a size-guarded tail (GitHub issue 113): `pointer` at byte 1056, `drag_source` at 1064,
+`drop_target` at 1072; the table is 1080 bytes (1056 before). Check `header.size >= offsetof(KilnUiApi, x) + sizeof(void*)`
+and the pointer for each. They are Dear ImGui calls (`native/services/ui/draw_slots_pointer.inl`, shared with the UI
+preview's shim), so like every drawing slot they work only inside a frame callback and answer false there otherwise.
+Managed: `UiDraw.Pointer`, `ButtonHeld`, `DragSource`, `DropTarget` ([ui.md](../ui.md#the-pointer-held-buttons-and-drag-and-drop-since-020-dev303)).
+
+- `bool pointer(KilnUiPointer* out)`: set `out->size` (24 bytes: `size, flags, x, y, held, reserved`) first. `flags`:
+  `KILN_UI_POINTER_VALID` (x and y hold the pointer; ImGui has seen the cursor), `KILN_UI_POINTER_DRAGGING` (a
+  `drag_source` payload of any kind is in flight). `held`: bit `1 << KILN_UI_MOUSE_*` per button held (1 left, 2 right,
+  4 middle). False, nothing written: outside a frame, `out` NULL or smaller than 24 bytes.
+- `bool drag_source(KilnStr kind, const void* payload, size_t len, KilnStr preview)`: after a widget
+  (`BeginDragDropSource` with `SourceAllowNullID`, so text and images work too). True on the frames it is dragged; each
+  such frame sets the payload (copied, at most `KILN_UI_DRAG_PAYLOAD_MAX` 4096 bytes; an empty one is allowed) and draws
+  `preview` by the pointer (empty: no tooltip).
+- `bool drop_target(KilnStr kind, void* out, size_t capacity, size_t* len)`: after a widget (`BeginDragDropTarget`,
+  `AcceptDragDropPayload` without `AcceptBeforeDelivery`). True once, on the frame a payload of `kind` is released over the
+  widget: up to `capacity` bytes go into `out`, `*len` (when not NULL) is the whole length.
+- A kind is 1..32 bytes (`KILN_UI_DRAG_KIND_MAX`), no NUL, not starting with `_` (Dear ImGui's own); anything else is
+  refused (false). Native kinds are shared by every caller; Kiln.Ui passes `"k"` and the FNV-1a 64 of
+  `"<mod id>\n<kind>"` in hex, so each managed mod's kinds are its own.
+- Coordinates are the overlay's pixels, the space of every drawing slot. Kiln feeds Dear ImGui the game window's client
+  pixels, the same pixels as long as the window's client area and the swapchain match (they always have, so far).
 
 ## The overlay's drawing off: kiln.json and a session that turned it off (0.2.0-dev.29.18)
 

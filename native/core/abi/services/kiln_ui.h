@@ -14,7 +14,9 @@
  * graphics_set and graphics_status (0.2.0-dev.29.18): Kiln's own graphics tools, the frame cap, DLSS settings and readout,
  * then chat_completion (internal to Kiln.Ui, refused from native plugins): Tab completion in the game's chat (issue #44),
  * then subscribe_pointer_press (0.2.0-dev.30): left and right presses over the game's own UI, take or pass,
- * then chat_search (issue #44 Phase 1c, internal only): native Ctrl+R history search snapshots.
+ * then chat_search (issue #44 Phase 1c, internal only): native Ctrl+R history search snapshots,
+ * then pointer, drag_source and drop_target (0.2.0-dev.30.3): the pointer and held buttons, and drag and drop between
+ * widgets, for frame callbacks.
  *
  * How (docs/re/client-render.md):
  *  - The game loads vulkan-1.dll at run time and presents with vkQueuePresentKHR on queue family 0 (no static Vulkan
@@ -860,6 +862,26 @@ typedef struct KilnUiChatSearch {
     char lines[KILN_UI_CHAT_SEARCH_ROWS][1025];
 } KilnUiChatSearch;
 
+/* ---- the pointer and drag and drop (pointer, drag_source, drop_target; size-guarded tail, 0.2.0-dev.30.3) ----
+ * Coordinates: the overlay's pixels, the space every drawing slot and ImGui's own hit tests use (draw_rect, cursor,
+ * window_rect). Kiln feeds ImGui the game window's client pixels, which are the overlay's pixels while the game renders
+ * at its window's size (always, as far as Kiln has seen: the window's client area and the swapchain match). */
+enum {
+    KILN_UI_POINTER_VALID = 1u,    /* KilnUiPointer.flags: x and y hold the pointer (ImGui has seen the cursor) */
+    KILN_UI_POINTER_DRAGGING = 2u, /* a drag_source payload is being dragged this frame (any kind) */
+};
+enum {
+    KILN_UI_DRAG_KIND_MAX = 32,      /* drag_source / drop_target kind: 1..32 bytes, not starting with '_' */
+    KILN_UI_DRAG_PAYLOAD_MAX = 4096, /* drag_source payload: at most 4096 bytes (copied) */
+};
+typedef struct KilnUiPointer {
+    uint32_t size;  /* sizeof(KilnUiPointer); set it before the call */
+    uint32_t flags; /* KILN_UI_POINTER_* */
+    float x, y;     /* the pointer in the overlay's pixels (0, 0 without KILN_UI_POINTER_VALID) */
+    uint32_t held;  /* the mouse buttons held now: bit (1 << KILN_UI_MOUSE_*): 1 left, 2 right, 4 middle */
+    uint32_t reserved;
+} KilnUiPointer;    /* 24 bytes */
+
 typedef struct KilnUiApi {
     KilnServiceHeader header; /* { sizeof(KilnUiApi), KILN_UI_VERSION } */
     KilnResult(KILN_CALL* status)(KilnUiStatus* out);
@@ -1287,6 +1309,26 @@ typedef struct KilnUiApi {
     KilnResult(KILN_CALL* subscribe_pointer_press)(KilnOwner owner, KilnUiPointerFn fn, void* user, KilnHandle* out);
     /* Phase 1c: append-only internal Kiln.Ui slot. Native plugins are refused. */
     KilnResult(KILN_CALL* chat_search)(KilnUiChatSearch* io);
+    /* Additive size-guarded tail (0.2.0-dev.30.3; check header.size >= offsetof(KilnUiApi, x) + sizeof(void*) and the
+     * pointer for each): the pointer, held buttons and drag and drop, read from ImGui's io (GitHub issue 113). Frame
+     * callbacks only; elsewhere they answer false and do nothing.
+     * pointer: the pointer and the held buttons now (KilnUiPointer; set out->size first). False: outside a frame
+     *   callback, out NULL or too small (nothing written). The values are ImGui's for this frame: the window messages Kiln
+     *   queued since the last frame, whether or not Kiln captures input. In the play view the game recentres the cursor
+     *   for mouse look, so the pointer means little there.
+     * drag_source: after a widget, makes it a drag source (ImGui BeginDragDropSource, also for a widget without an id:
+     *   text, an image). True on the frames it is being dragged; on each such frame 'payload' (len bytes, copied, at most
+     *   KILN_UI_DRAG_PAYLOAD_MAX) is the payload of 'kind', and 'preview' (empty: none) is the text drawn by the pointer.
+     *   False: not dragged, outside a frame, a bad kind or payload.
+     * drop_target: after a widget, makes it a drop target for payloads of 'kind' (ImGui BeginDragDropTarget /
+     *   AcceptDragDropPayload). True once, on the frame such a payload is released over the widget: the payload's bytes go
+     *   into out (up to capacity; a longer payload is cut) and *len (when not NULL) is the payload's whole length. While a
+     *   matching payload hovers it, ImGui highlights the widget. False otherwise.
+     * Kinds are bytes compared exactly; a kind starting with '_' is ImGui's own and refused. Kiln.Ui keeps each mod's kinds
+     * its own (it passes a hash of the mod's id and the kind); a native plugin's kinds are shared by every caller. */
+    bool(KILN_CALL* pointer)(KilnUiPointer* out);
+    bool(KILN_CALL* drag_source)(KilnStr kind, const void* payload, size_t len, KilnStr preview);
+    bool(KILN_CALL* drop_target)(KilnStr kind, void* out, size_t capacity, size_t* len);
 } KilnUiApi;
 
 /* ====================================================================================================================
