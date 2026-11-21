@@ -271,9 +271,32 @@ void internal_owners_views() {
     alive.erase(7);
 }
 
+// kiln.internal.registry: kiln-content.dll (a Kiln service owner) publishes it; the managed host's view resolves exactly that
+// published table, the plugins' never; a plugin cannot publish the name.
+void registry_host_view() {
+    using namespace kiln;
+    const KilnStr name{"kiln.internal.registry", 22};
+    const KilnServiceHeader table{sizeof(KilnServiceHeader), 1};
+    check(api_service_managed_host(name, 1) == nullptr, "nothing before kiln-content.dll publishes it");
+    check(api_register_service(2, name, &table) == KILN_ERR_INVALID_ARGUMENT, "a plugin cannot publish kiln.internal.registry");
+    check(api_service_managed_host(name, 1) == nullptr, "...and the host view still resolves nothing");
+    alive.insert(9);
+    service_owner_add(9);
+    check(api_register_service_services(9, name, &table) == KILN_OK, "a Kiln service publishes it");
+    check(api_service_managed_host(name, 1) == &table, "the managed host's view resolves the published table");
+    check(api_service_managed_host(name, 2) == nullptr, "...not for a later version");
+    check(api_service(name, 1) == nullptr, "the plugins' view never resolves it");
+    const KilnStr other{"kiln.internal.example2", 22};
+    check(api_register_service_services(9, other, &table) == KILN_OK && api_service_managed_host(other, 1) == nullptr,
+          "another published internal table stays out of the host view");
+    alive.erase(9);
+    check(api_service_managed_host(name, 1) == nullptr, "its owner revoked: gone");
+}
+
 int main() {
     using namespace kiln;
     internal_owners_views();
+    registry_host_view();
     managed_host_view();
     launch_views();
     internal_launch_views();

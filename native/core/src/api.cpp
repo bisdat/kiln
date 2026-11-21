@@ -328,9 +328,13 @@ KilnResult KILN_CALL api_register_service_services(KilnOwner owner, KilnStr name
 
 // The managed host's KilnApi (api_for_managed_host, tasks_host.h): the plugins' lookup, plus exactly the core's own
 // kiln.internal.tasks.host and kiln.internal.mod-values.backend tables (never published ones: nobody may publish those
-// names); every other internal name stays unresolved, and registration is the plugins' (the host publishes no internal
+// names) and the published kiln.internal.registry of kiln-content.dll; every other internal name stays unresolved, and registration is the plugins' (the host publishes no internal
 // table either).
+// kiln.internal.registry (native/services/content/include/kiln_registry_host.h): kiln-content.dll publishes it as a Kiln
+// service of this build; Kiln.Host hands the registry stage its load order through it. The managed host is its one consumer.
+constexpr std::string_view kRegistryHostService = "kiln.internal.registry";
 const void* KILN_CALL api_service_managed_host(KilnStr name, uint32_t min_version) {
+    if (sv(name) == kRegistryHostService) return lookup_service(name, min_version, true);  // a published one only (its owner a Kiln service)
     if (sv(name) == KILN_TASKS_HOST_SERVICE)
         return min_version <= KILN_TASKS_HOST_VERSION ? tasks_svc::host_table() : nullptr;
     if (sv(name) == KILN_MOD_VALUES_BACKEND_SERVICE)
