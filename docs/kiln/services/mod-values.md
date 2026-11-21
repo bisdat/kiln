@@ -12,7 +12,7 @@ and character sheet do not show them: a mod shows them in its own window or HUD 
 `Ui.Tooltip.AddLines` (the sample does all three).
 
 ## Defining values
-In C# (`ModValueOptions`) or in `mod-values/*.json` ([schema](../modding/schemas/kiln-mod-values.md), lint KL350-KL355):
+In C# (`ModValueOptions`) or in `mod-values/*.json` ([schema](../modding/schemas/kiln-mod-values.md), lint KL350-KL356):
 
 ```csharp
 // both sides (for UI): the names, kinds and formats are known before any server answers
@@ -135,17 +135,21 @@ the save is refused once as `StaleRevision`.
 ## Native facade
 `kiln.mod-values` v1 (`native/core/abi/services/kiln_mod_values.h`, in the core): the same ledger, registry and synced
 copy for native mods and other engines. Kiln.ModValues hands the core its backend at its start (the first service tick)
-through the host-only table `kiln.mod-values.backend` v1; before that, or without Kiln.ModValues, every slot but
+through the Kiln-internal table `kiln.internal.mod-values.backend` (only the managed host resolves it; native mods never
+see it); before that, or without Kiln.ModValues, every slot but
 `owner_namespace` answers `KILN_ERR_UNAVAILABLE` (call from a tick and try again on a later one).
 
-- `api->service("kiln.mod-values", 1)`; `owner_namespace(owner, buf, cap, &required)` gives your namespace: a managed
-  mod's manifest id, else `native.` and the first 32 hex digits of the SHA-256 of the owner's registry name (a plugin:
-  `plugin:<file>.dll`; a native mod: `native:<id>`). `required` counts the NUL; a short buffer gets nothing.
+- `api->service("kiln.mod-values", 1)`; `owner_namespace(owner, buf, cap, &required)` gives your namespace: for an owner
+  Kiln.Host created for a managed mod (`mod:<manifest id>`), the manifest id; every other owner, also a native one that
+  names itself `mod:<id>`, gets `native.` and the first 32 hex digits of the SHA-256 of its registry name (a plugin:
+  `plugin:<file>.dll`; a native mod: `native:<id>`). Manifest ids may not start with `native.` (Kiln.Host refuses them,
+  lint KL209). `required` counts the NUL; a short buffer gets nothing. One owner per id: a second owner describing an
+  id of the same namespace is refused for that id (`KMV_DEFINITION_CONFLICT`) and logged naming both.
 - Keys are `"<namespace>:<id>"`. `describe` any thread; `define`, `read`, `change` on the server's tick thread
   (`KILN_ERR_WRONG_THREAD` elsewhere); `read_synced` on a client, any thread.
 - `KilnModValueDef`: `size`, `version >= 1`, `carry_epoch >= 1`; `label_json` and `number_format_json` are UiText JSON
   (`"\"Coins\""` or `{"en":"Coins"}`); `KMV_HAS_INITIAL` says `initial` is used (0 is a real initial value);
-  `KMV_TRUST_IMPORTS` for Carried. Strings and arrays are copied.
+  `KMV_TRUST_IMPORTS` for Carried. `reserved0`-`reserved2` must be 0. Strings and arrays are copied.
 - Results: `KILN_OK` with `ok = 0` is a refusal with a `KMV_*` reason (the managed `ModValueReasons`, plus
   `KMV_DEFINITION_CONFLICT` = 15); `flags`: a read gives AFTER, an accepted change BEFORE|AFTER, a refusal 0. Bad
   shapes are `KILN_ERR_INVALID_ARGUMENT`, a revoked owner `KILN_ERR_REVOKED`.
@@ -155,8 +159,8 @@ through the host-only table `kiln.mod-values.backend` v1; before that, or withou
 - `subscribe(owner, KMV_CANONICAL_EVENTS | KMV_SYNCED_EVENTS, filter, fn, user, &handle)`: filter `""` (your namespace),
   `"ns:id"` or `"ns:*"`; another namespace's events only while its read policy lets you read it (synced: also sync
   Readers). Canonical callbacks on the server tick, synced ones on the client's main thread; records are borrowed until
-  the callback returns; a faulting callback is removed. Revoking the owner removes its subscriptions and retires its
-  definitions (the data stays parked).
+  the callback returns; a faulting callback is removed. Revoking the owner removes its subscriptions and retires only the
+  definitions that owner described or defined (the data stays parked).
 
 ## Test kit
 `kiln.ModValues` (`HarnessModValues`): the real ledger on an in-memory store; `Join`/`Leave` a character

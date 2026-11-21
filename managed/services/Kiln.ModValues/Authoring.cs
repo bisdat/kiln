@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// mod-values/*.json (chapter 05b section 4.1; schema/kiln-mod-values.schema.json, lint KL350-KL355): read for every
+// mod-values/*.json (chapter 05b section 4.1; schema/kiln-mod-values.schema.json, lint KL350-KL356): read for every
 // loaded mod at Kiln.ModValues' start and whenever a mod loads again. Both sides describe the values (their names,
 // kinds and formats are known before any server answers); the side that runs the world defines them. Strict JSON (no
 // comments, no trailing commas), camelCase, lowercase enum names, 64-bit numbers as base-10 strings; an unknown field,
