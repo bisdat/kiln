@@ -154,12 +154,20 @@ internal static unsafe class MarkersNative
     }
 
     private static Table* _table;
+    private static BridgeTable* _bridge;
 
     /// <summary>The service's table (header.size covers v1), or null. Looked up again while it is missing.</summary>
     public static Table* T => _table != null ? _table : (_table = Services.Get<Table>(Service, Version));
 
-    /// <summary>Tests: look the table up again.</summary>
-    internal static void Forget() => _table = null;
+    /// <summary>The internal bridge table of the built-in receiver (header.size covers v1), or null.</summary>
+    public static BridgeTable* Bridge => _bridge != null ? _bridge : (_bridge = Services.Get<BridgeTable>(BridgeService, BridgeVersion));
+
+    /// <summary>Tests: look the tables up again.</summary>
+    internal static void Forget()
+    {
+        _table = null;
+        _bridge = null;
+    }
 
     /// <summary>A NUL-terminated UTF-8 field of at most <paramref name="max"/> bytes.</summary>
     public static string Text(byte* p, int max)

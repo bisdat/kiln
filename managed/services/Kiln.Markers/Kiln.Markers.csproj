@@ -11,6 +11,8 @@
   <ItemGroup>
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <!-- a client capture runs at the client world's next quiet step (Client.Post) -->
+    <!-- the built-in receiver's transport (kiln:markers) and the hosting state; both are in kiln/host -->
+    <ProjectReference Include="../Kiln.Network/Kiln.Network.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Client/Kiln.Client.csproj" Private="false" />
     <InternalsVisibleTo Include="Kiln.Markers.Tests" />
   </ItemGroup>

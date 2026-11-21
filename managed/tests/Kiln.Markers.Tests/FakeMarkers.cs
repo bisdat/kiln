@@ -38,6 +38,8 @@ internal static unsafe class FakeMarkers
     public static (int Rc, uint Status, string Reason)? NextCapture;
     public static Action? DuringCapture;
     private static ulong _handles;
+    // the next server send's answer: (status, committed, queued, refused, affected, reason); null: accepted, 1 affected
+    public static (uint Status, uint Committed, uint Queued, uint Refused, uint Affected, string Reason)? SendAnswer;
     private static readonly List<MarkersNative.Change> Queue = new();
     private static ulong _sequence;
 
@@ -63,6 +65,11 @@ internal static unsafe class FakeMarkers
         NextCapture = null;
         DuringCapture = null;
         _handles = 0x100;
+        Table->Send = &Send;
+        Table->Unsend = &Unsend;
+        Table->ClearSent = &ClearSent;
+        Table->SuppressSent = &SuppressSent;
+        SendAnswer = null;
         Calls.Clear();
         Specs.Clear();
         Records.Clear();
@@ -220,18 +227,62 @@ internal static unsafe class FakeMarkers
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Unsubscribe(ulong h) => 0;
 
-    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int ReleaseAnchor(ulong owner, ulong anchor)
+    // ---- the server layers (what the wrapper passes; the layers' rules are tested natively, tests/link_test.cpp) ----
+
+    private static int SentAnswer(MarkersNative.Result* r)
     {
-        Calls.Add($"release_anchor {owner} {anchor}");
-        return 0;
+        if (Scripted(r, out var rc)) return rc;
+        var a = SendAnswer ?? (0u, 1u, 0u, 0u, 1u, "");
+        SendAnswer = null;
+        r->Queued = a.Queued;
+        r->Refused = a.Refused;
+        return Answer(r, a.Status, a.Committed, a.Affected, a.Reason);
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int Send(ulong owner, uint player, MarkersNative.Spec* s, MarkersNative.Result* r)
+    {
+        if (r == null || r->Size < (uint)sizeof(MarkersNative.Result)) return 1;
+        var spec = new FakeSpec(owner, s->Size, s->Surfaces, Str(s->Key), s->Position.X, s->Position.Y, s->Position.Z, s->Follow, s->Height,
+            s->MaxDistance, s->IconType, s->Rgba, s->Priority, s->MapLabelMode, Str(s->Text));
+        Specs.Add(spec);
+        Calls.Add($"send {owner} {player} {spec.Key}");
+        return SentAnswer(r);
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int Unsend(ulong owner, uint player, NativeStr k, MarkersNative.Result* r)
+    {
+        Calls.Add($"unsend {owner} {player} {Str(k)}");
+        return SentAnswer(r);
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int SuppressSent(ulong owner, uint player, NativeStr k, MarkersNative.Result* r)
+    {
+        Calls.Add($"suppress {owner} {player} {Str(k)}");
+        return SentAnswer(r);
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int ClearSent(ulong owner, uint player, MarkersNative.Result* r)
+    {
+        Calls.Add($"clear_sent {owner} {player}");
+        return SentAnswer(r);
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int WorldEpoch(uint kind, ulong* epoch)
     {
-        if (kind != 0 && kind != 2) return 1;
-        *epoch = kind == 2 ? ClientEpoch : ServerEpoch;
+        if (epoch == null || (kind != 0 && kind != 2)) return 1;
+        *epoch = kind == 0 ? ServerEpoch : ClientEpoch;
+        return 0;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int ReleaseAnchor(ulong owner, ulong anchor)
+    {
+        Calls.Add($"release_anchor {owner} {anchor}");
         return 0;
     }
 
@@ -283,7 +334,8 @@ internal sealed class FakeBackend : IKilnBackend
     public bool HasFeature(string name) => false;
     public void Log(ulong owner, LogLevel level, string text) => Lines.Add($"{level}: {text}");
     public unsafe nint Service(string name, uint minVersion) =>
-        name == MarkersNative.Service && FakeMarkers.Table != null && FakeMarkers.Table->Header.Version >= minVersion ? (nint)FakeMarkers.Table : 0;
+        name == MarkersNative.Service && FakeMarkers.Table != null && FakeMarkers.Table->Header.Version >= minVersion ? (nint)FakeMarkers.Table
+        : name == MarkersNative.BridgeService && FakeBridge.Table != null ? (nint)FakeBridge.Table : 0;
     public ulong OwnerCreate(string id) => 4242;
 }
 

@@ -1,9 +1,25 @@
 #nullable enable
+[KILNX001]Kiln.MarkersLab
+[KILNX001]static Kiln.MarkersLab.Available.get -> bool
+[KILNX001]static Kiln.MarkersLab.Counters() -> (int Threads, int OtherThreads, int Watched, int Leases, int References, ulong Creates, ulong Destroys, ulong NetworkCreates, ulong Ended, ulong Serials)?
+[KILNX001]static Kiln.MarkersLab.CreateRaw(uint requestedId, System.Guid template, Kiln.WorldPosition position) -> Kiln.EntityId
+[KILNX001]static Kiln.MarkersLab.FollowNow(Kiln.MarkerAnchor! anchor) -> (string! State, ulong Incarnation, Kiln.EntityId Entity, Kiln.WorldPosition Position)?
 Kiln.MarkerAnchor
 Kiln.MarkerAnchor.Dispose() -> void
 Kiln.MarkerAnchor.Entity.get -> Kiln.EntityId
 Kiln.MarkerAnchor.WorldEpoch.get -> ulong
 Kiln.MarkerAnchor.WorldKind.get -> uint
+Kiln.MarkerAnchorResult
+Kiln.MarkerAnchorResult.<Clone>$() -> Kiln.MarkerAnchorResult!
+Kiln.MarkerAnchorResult.Anchor.get -> Kiln.MarkerAnchor?
+Kiln.MarkerAnchorResult.Anchor.init -> void
+Kiln.MarkerAnchorResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.MarkerAnchor? Anchor) -> void
+Kiln.MarkerAnchorResult.Equals(Kiln.MarkerAnchorResult? other) -> bool
+Kiln.MarkerAnchorResult.MarkerAnchorResult(bool Ok, string? Reason, Kiln.MarkerAnchor? Anchor) -> void
+Kiln.MarkerAnchorResult.Ok.get -> bool
+Kiln.MarkerAnchorResult.Ok.init -> void
+Kiln.MarkerAnchorResult.Reason.get -> string?
+Kiln.MarkerAnchorResult.Reason.init -> void
 Kiln.MarkerCatalogChangedEvent
 Kiln.MarkerCatalogChangedEvent.Count.get -> int
 Kiln.MarkerCatalogChangedEvent.Generation.get -> ulong
@@ -154,6 +170,9 @@ Kiln.MarkerVisibilityReason.Removed = 12 -> Kiln.MarkerVisibilityReason
 Kiln.MarkerVisibilityReason.SourceStale = 10 -> Kiln.MarkerVisibilityReason
 Kiln.MarkerVisibilityReason.SurfaceBudget = 2 -> Kiln.MarkerVisibilityReason
 Kiln.MarkerVisibilityReason.WorldInactive = 8 -> Kiln.MarkerVisibilityReason
+override Kiln.MarkerAnchorResult.Equals(object? obj) -> bool
+override Kiln.MarkerAnchorResult.GetHashCode() -> int
+override Kiln.MarkerAnchorResult.ToString() -> string!
 override Kiln.MarkerIcon.GetHashCode() -> int
 override Kiln.MarkerIconInfo.Equals(object? obj) -> bool
 override Kiln.MarkerIconInfo.GetHashCode() -> int
@@ -167,6 +186,8 @@ override Kiln.MarkerResult.ToString() -> string!
 override Kiln.MarkerSpec.Equals(object? obj) -> bool
 override Kiln.MarkerSpec.GetHashCode() -> int
 override Kiln.MarkerSpec.ToString() -> string!
+static Kiln.MarkerAnchorResult.operator !=(Kiln.MarkerAnchorResult? left, Kiln.MarkerAnchorResult? right) -> bool
+static Kiln.MarkerAnchorResult.operator ==(Kiln.MarkerAnchorResult? left, Kiln.MarkerAnchorResult? right) -> bool
 static Kiln.MarkerIcon.None.get -> Kiln.MarkerIcon
 static Kiln.MarkerIcon.operator !=(Kiln.MarkerIcon left, Kiln.MarkerIcon right) -> bool
 static Kiln.MarkerIcon.operator ==(Kiln.MarkerIcon left, Kiln.MarkerIcon right) -> bool
@@ -176,14 +197,21 @@ static Kiln.MarkerIconResult.operator !=(Kiln.MarkerIconResult? left, Kiln.Marke
 static Kiln.MarkerIconResult.operator ==(Kiln.MarkerIconResult? left, Kiln.MarkerIconResult? right) -> bool
 static Kiln.MarkerResult.operator !=(Kiln.MarkerResult? left, Kiln.MarkerResult? right) -> bool
 static Kiln.MarkerResult.operator ==(Kiln.MarkerResult? left, Kiln.MarkerResult? right) -> bool
+static Kiln.Markers.CaptureAnchorAsync(Kiln.EntityId entity, System.Threading.CancellationToken cancel = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Kiln.MarkerAnchorResult!>!
+static Kiln.Markers.CaptureServerAnchor(Kiln.EntityId entity) -> Kiln.MarkerAnchorResult!
 static Kiln.Markers.CatalogChanged -> System.Action<Kiln.MarkerCatalogChangedEvent!>?
 static Kiln.Markers.Changed -> System.Action<Kiln.MarkerChangedEvent!>?
 static Kiln.Markers.Clear() -> Kiln.MarkerResult!
+static Kiln.Markers.ClearSent(Kiln.EntityId player = default(Kiln.EntityId)) -> Kiln.MarkerResult!
 static Kiln.Markers.Icons.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.MarkerIconInfo!>!
 static Kiln.Markers.Icons.IsReady.get -> bool
 static Kiln.Markers.Icons.Resolve(string! name) -> Kiln.MarkerIconResult!
 static Kiln.Markers.Remove(string! id) -> Kiln.MarkerResult!
+static Kiln.Markers.Send(Kiln.EntityId player, Kiln.MarkerSpec! marker) -> Kiln.MarkerResult!
 static Kiln.Markers.Set(Kiln.MarkerSpec! marker) -> Kiln.MarkerResult!
+static Kiln.Markers.SetNameplate(string! id, Kiln.EntityId entity, string! text, float height = 2) -> System.Threading.Tasks.Task<Kiln.MarkerResult!>!
+static Kiln.Markers.SuppressSent(Kiln.EntityId player, string! id) -> Kiln.MarkerResult!
+static Kiln.Markers.Unsend(Kiln.EntityId player, string! id) -> Kiln.MarkerResult!
 static Kiln.Markers.VisibilityChanged -> System.Action<Kiln.MarkerVisibilityChangedEvent!>?
 static Kiln.MarkerSpec.FromJson(string! json) -> Kiln.MarkerSpec!
 static Kiln.MarkerSpec.FromJson(System.Text.Json.JsonElement json) -> Kiln.MarkerSpec!
@@ -191,27 +219,3 @@ static Kiln.MarkerSpec.operator !=(Kiln.MarkerSpec? left, Kiln.MarkerSpec? right
 static Kiln.MarkerSpec.operator ==(Kiln.MarkerSpec? left, Kiln.MarkerSpec? right) -> bool
 ~override Kiln.MarkerIcon.Equals(object obj) -> bool
 ~override Kiln.MarkerIcon.ToString() -> string
-Kiln.MarkerAnchorResult
-Kiln.MarkerAnchorResult.<Clone>$() -> Kiln.MarkerAnchorResult!
-Kiln.MarkerAnchorResult.Anchor.get -> Kiln.MarkerAnchor?
-Kiln.MarkerAnchorResult.Anchor.init -> void
-Kiln.MarkerAnchorResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.MarkerAnchor? Anchor) -> void
-Kiln.MarkerAnchorResult.Equals(Kiln.MarkerAnchorResult? other) -> bool
-Kiln.MarkerAnchorResult.MarkerAnchorResult(bool Ok, string? Reason, Kiln.MarkerAnchor? Anchor) -> void
-Kiln.MarkerAnchorResult.Ok.get -> bool
-Kiln.MarkerAnchorResult.Ok.init -> void
-Kiln.MarkerAnchorResult.Reason.get -> string?
-Kiln.MarkerAnchorResult.Reason.init -> void
-override Kiln.MarkerAnchorResult.Equals(object? obj) -> bool
-override Kiln.MarkerAnchorResult.GetHashCode() -> int
-override Kiln.MarkerAnchorResult.ToString() -> string!
-static Kiln.MarkerAnchorResult.operator !=(Kiln.MarkerAnchorResult? left, Kiln.MarkerAnchorResult? right) -> bool
-static Kiln.MarkerAnchorResult.operator ==(Kiln.MarkerAnchorResult? left, Kiln.MarkerAnchorResult? right) -> bool
-static Kiln.Markers.CaptureAnchorAsync(Kiln.EntityId entity, System.Threading.CancellationToken cancel = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Kiln.MarkerAnchorResult!>!
-static Kiln.Markers.CaptureServerAnchor(Kiln.EntityId entity) -> Kiln.MarkerAnchorResult!
-static Kiln.Markers.SetNameplate(string! id, Kiln.EntityId entity, string! text, float height = 2) -> System.Threading.Tasks.Task<Kiln.MarkerResult!>!
-[KILNX001]Kiln.MarkersLab
-[KILNX001]static Kiln.MarkersLab.Available.get -> bool
-[KILNX001]static Kiln.MarkersLab.Counters() -> (int Threads, int OtherThreads, int Watched, int Leases, int References, ulong Creates, ulong Destroys, ulong NetworkCreates, ulong Ended, ulong Serials)?
-[KILNX001]static Kiln.MarkersLab.CreateRaw(uint requestedId, System.Guid template, Kiln.WorldPosition position) -> Kiln.EntityId
-[KILNX001]static Kiln.MarkersLab.FollowNow(Kiln.MarkerAnchor! anchor) -> (string! State, ulong Incarnation, Kiln.EntityId Entity, Kiln.WorldPosition Position)?

@@ -343,7 +343,7 @@ void KILN_CALL on_ready(void*) {
     if (g_caps && g_caps->header.size < sizeof(KilnCapsApi)) g_caps = nullptr;
     g_store.set_icon_check(&kmk::CatalogHolder::check, &g_catalog);
     if (g.side != KILN_SIDE_CLIENT) {
-        g_catalog_off = "a dedicated server has no marker resources: it takes the catalog from a verified client over the marker link (not built yet)";
+        g_catalog_off = "a dedicated server has no marker resources: it takes the catalog from the first verified Kiln client over the marker link";
         g_catalog_off_reason = KILN_CAP_REASON_POLICY;
     } else {
         // kiln.assets v1 with resource_read and the appended when_resources_ready (header.size covers it)
@@ -370,6 +370,23 @@ void KILN_CALL on_ready(void*) {
 
 }  // namespace
 
+// The link took a verified client's catalog on a dedicated server (glue.h): from here markers.catalog answers, and the
+// server's subscribers get CatalogChanged (role 0) at the next server step.
+void kmk::catalog_from_link() {
+    const auto c = g_catalog.get();
+    if (!c || g_catalog_reader) return;
+    g_catalog_reader = true;
+    report(kCatalog, KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "");
+    KilnMarkerCatalogChange ch{};
+    ch.size = sizeof ch;
+    ch.ready = 1;
+    ch.count = static_cast<uint32_t>(c->rows.size());
+    ch.generation = g_catalog.generation();
+    g_store.post_catalog(kmk::kRoleServer, ch);
+    logf(KILN_LOG_INFO, "markers: icon catalog: %u marker types with an icon, %u for the map, sha256 %s (from a verified Kiln client)", ch.count,
+         c->map_rows(), c->digest_hex().c_str());
+}
+
 extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api, KilnOwner owner, KilnPluginInfo* info) {
     if (api->abi_version != KILN_ABI_VERSION || api->size < sizeof(KilnApi)) return KILN_ERR_UNAVAILABLE;
     g.api = api;
@@ -392,11 +409,13 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     if (g.side == KILN_SIDE_CLIENT) {
         KilnHandle p = 0;
         g_client_post = api->subscribe_world_tick(owner, KILN_WORLD_CLIENT, KILN_TICK_POST, &on_client_post, nullptr, &p) == KILN_OK;
+        g.client_post = g_client_post;
         if (!g_client_post) logf(KILN_LOG_WARN, "markers: the client world's step could not be subscribed: markers.local is off");
     }
     // the server world's Post: a dedicated server, and the server world of a hosting client
     KilnHandle sp = 0;
     g_server_post = api->subscribe_world_tick(owner, KILN_WORLD_SERVER, KILN_TICK_POST, &on_server_post, nullptr, &sp) == KILN_OK;
+    g.server_post = g_server_post;
     if (!g_server_post) logf(KILN_LOG_WARN, "markers: the server world's step could not be subscribed: markers.send is off");
     g.server_post = g_server_post;
     g_switches.local = g.side == KILN_SIDE_CLIENT && g.lifecycle && g_client_post;

@@ -18,6 +18,7 @@
   <ItemGroup>
     <ProjectReference Include="../../services/Kiln.Markers/Kiln.Markers.csproj" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" />
+    <ProjectReference Include="../../services/Kiln.Network/Kiln.Network.csproj" />
     <ProjectReference Include="../../services/Kiln.Client/Kiln.Client.csproj" />
   </ItemGroup>
 </Project>

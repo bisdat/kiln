@@ -189,6 +189,8 @@ std::vector<MapRow> g_maprows;
 
 void candidates(const std::vector<ClientRow>& rows, std::vector<Candidate>* out) {
     out->resize(rows.size());
+    const double now_ms = static_cast<double>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
     for (size_t i = 0; i < rows.size(); ++i) {
         const ClientRow& r = rows[i];
         Candidate& c = (*out)[i];
@@ -203,6 +205,13 @@ void candidates(const std::vector<ClientRow>& rows, std::vector<Candidate>* out)
         c.max_distance = r.rec.max_distance;
         c.x = r.rec.x, c.y = r.rec.y, c.z = r.rec.z;
         c.source_state = r.source_reason;
+        if (r.source != KILN_MARKER_LOCAL && r.followed) {
+            // a received followed row: from its previous pose to its latest over 100 ms after the latest arrived (§4.4 POSE)
+            const double from[3] = {r.pose_prev.x, r.pose_prev.y, r.pose_prev.z}, to[3] = {r.pose_last.x, r.pose_last.y, r.pose_last.z};
+            double p[3];
+            interpolate(from, to, now_ms - static_cast<double>(r.pose_last_ms), p);
+            c.x = p[0], c.y = p[1], c.z = p[2];
+        }
         if (r.source == KILN_MARKER_LOCAL && r.rec.follow) {
             KilnVec3 p{};
             uint32_t why = KILN_MARKER_ANCHOR_ENDED;
