@@ -12,18 +12,23 @@ GitHub #58 asks for, per platform (native Windows, Proton), priority raise (on, 
 
 A row's load phase comes from the CPU-load helper's phase file in the same zip (cpu-load-*.csv, UTC times); without one,
 everything counts as idle. --margin drops the seconds around each phase change (default 2). Markdown goes to stdout,
-ready to paste into the issue; --json prints the same numbers as one JSON document."""
+ready to paste into the issue; --json prints the same numbers as one JSON document.
+
+Runs of an older kit (run.json "kit", else the CSV header) are kept apart: kit 1 retried a busy answer every millisecond
+and locked onto the start of each update (GitHub #58), so its outcomes and step times are not comparable with kit 2's."""
 import argparse
 import csv
 import io
 import json
 import math
+import re
 import sys
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 BUCKETS_US = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]
+KIT = '2'  # the test mod's kit version this analysis is for (kit.h kKitVersion)
 
 
 def bucket_names():
@@ -116,6 +121,14 @@ class Phases:
         return None
 
 
+def kit_of(run, header):
+    """The kit version of a run: run.json's "kit", else the CSV header's ('# gate-priority-test 1; ...'), else '1'."""
+    if run.get('kit'):
+        return str(run['kit'])
+    m = re.match(r'# gate-priority-test (\S+);', header or '')
+    return m.group(1) if m else '1'
+
+
 def platform_of(system):
     if not system:
         return 'unknown'
@@ -125,13 +138,13 @@ def platform_of(system):
 
 
 def analyze(paths, margin_s=2.0):
-    groups = {}   # (platform, raise, load) -> {"holds": [], "status": {}, "intervals": [], "pre_post": [], "windows": []}
+    groups = {}   # (platform, kit, raise, load) -> {"holds": [], "status": {}, "intervals": [], "pre_post": [], "windows": []}
     runs = []
     notes = []
 
-    def group(platform, raise_, load):
-        return groups.setdefault((platform, raise_, load), {'holds': [], 'status': {}, 'intervals': [], 'pre_post': [],
-                                                             'windows': []})
+    def group(platform, kit, raise_, load):
+        return groups.setdefault((platform, kit, raise_, load), {'holds': [], 'status': {}, 'intervals': [], 'pre_post': [],
+                                                                  'windows': []})
 
     for path in paths:
         src = Source(path)
@@ -158,7 +171,8 @@ def analyze(paths, margin_s=2.0):
             if header and ('raise=%s' % raise_) not in header:
                 notes.append('%s/%s: writes.csv says %s but run.json says raise=%s; skipped' % (src.path.name, rd, header, raise_))
                 continue
-            runs.append({'source': src.path.name, 'run': rd, 'platform': platform, 'os': system.get('os'),
+            kit = kit_of(run, header)
+            runs.append({'source': src.path.name, 'run': rd, 'platform': platform, 'kit': kit, 'os': system.get('os'),
                          'cpu': system.get('cpu'), 'logical_processors': system.get('logical_processors'),
                          'raise': raise_, 'mode': run.get('mode'), 'component': run.get('component'),
                          'pairs': run.get('pairs'), 'restored': run.get('restored'), 'verified': run.get('verified'),
@@ -171,7 +185,7 @@ def analyze(paths, margin_s=2.0):
                 load = ph.of(t)
                 if load is None:
                     continue
-                g = group(platform, raise_, load)
+                g = group(platform, kit, raise_, load)
                 g['status'][w['status']] = g['status'].get(w['status'], 0) + 1
                 if w['status'] == 'ok':
                     g['holds'].append(int(w['hold_ns']))
@@ -184,7 +198,7 @@ def analyze(paths, margin_s=2.0):
                     continue
                 load = ph.of(t)
                 if load is not None:
-                    g = group(platform, raise_, load)
+                    g = group(platform, kit, raise_, load)
                     if prev and step == prev[0] + 1 and pre > prev[1]:
                         g['intervals'].append((pre - prev[1]) / 1e6)
                     if post > pre:
@@ -207,14 +221,19 @@ def analyze(paths, margin_s=2.0):
                 load = ph.window(w_start, w_end)
                 if load is None:
                     continue
-                group(platform, raise_, load)['windows'].append({k: d.get(k, {}) for k in ('step_ms', 'interval_ms', 'pre_ms', 'post_ms')} |
+                group(platform, kit, raise_, load)['windows'].append({k: d.get(k, {}) for k in ('step_ms', 'interval_ms', 'pre_ms', 'post_ms')} |
                                                                 {'steps': d.get('steps', 0)})
+    old = sorted({'%s (kit %s)' % (r['source'], r['kit']) for r in runs if r['kit'] != KIT})
+    if old:
+        notes.append('runs of another kit than %s, shown apart (Platform "<platform> kit N"): %s. Kit 1 retried a busy answer every '
+                     'millisecond and locked onto the start of each update (GitHub #58): its outcomes, busy share and step '
+                     'times are not comparable with kit 2\'s' % (KIT, ', '.join(old)))
     return summarize(groups, runs, notes)
 
 
 def summarize(groups, runs, notes):
     out = {'runs': runs, 'notes': notes, 'groups': []}
-    for (platform, raise_, load), g in sorted(groups.items()):
+    for (platform, kit, raise_, load), g in sorted(groups.items()):
         holds = sorted(g['holds'])
         us = [h / 1000 for h in holds]
         hist = [0] * (len(BUCKETS_US) + 1)
@@ -228,7 +247,7 @@ def summarize(groups, runs, notes):
         pp = sorted(g['pre_post'])
         win = g['windows']
         out['groups'].append({
-            'platform': platform, 'raise': raise_, 'load': load,
+            'platform': platform, 'kit': kit, 'raise': raise_, 'load': load,
             'hold_us': {'n': len(us), 'p50': percentile(us, 50), 'p90': percentile(us, 90), 'p99': percentile(us, 99),
                         'p99.9': percentile(us, 99.9), 'max': us[-1] if us else 0,
                         'over_1ms': sum(1 for v in us if v >= 1000)},
@@ -246,13 +265,18 @@ def summarize(groups, runs, notes):
                 'interval_max_ms': max((w['interval_ms'].get('max', 0) for w in win), default=0),
             },
         })
-    # late steps: Pre-to-Pre over 1.5 times the idle median of the same platform and raise
-    idle = {(g['platform'], g['raise']): g['interval_ms']['p50'] for g in out['groups'] if g['load'] == 'idle'}
+    # late steps: Pre-to-Pre over 1.5 times the idle median of the same platform, kit and raise
+    idle = {(g['platform'], g['kit'], g['raise']): g['interval_ms']['p50'] for g in out['groups'] if g['load'] == 'idle'}
     for g in out['groups']:
-        base = idle.get((g['platform'], g['raise']))
-        src = groups[(g['platform'], g['raise'], g['load'])]['intervals']
+        base = idle.get((g['platform'], g['kit'], g['raise']))
+        src = groups[(g['platform'], g['kit'], g['raise'], g['load'])]['intervals']
         g['late_steps'] = sum(1 for v in src if base and v > 1.5 * base)
     return out
+
+
+def where(g):
+    """The Platform cell: the platform, and the kit when it is not this analysis' kit."""
+    return g['platform'] if g.get('kit', KIT) == KIT else '%s kit %s' % (g['platform'], g['kit'])
 
 
 def fmt(v, digits=1):
@@ -268,12 +292,12 @@ def markdown(r):
     for g in r['groups']:
         h = g['hold_us']
         lines.append('| %s | %s | %s | %d | %s | %s | %s | %s | %s | %d | %.1f%% |' % (
-            g['platform'], g['raise'], g['load'], h['n'], fmt(h['p50']), fmt(h['p90']), fmt(h['p99']), fmt(h['p99.9']),
+            where(g), g['raise'], g['load'], h['n'], fmt(h['p50']), fmt(h['p90']), fmt(h['p99']), fmt(h['p99.9']),
             fmt(h['max']), h['over_1ms'], 100 * g['busy_share']))
     lines.append('')
     lines.append('### Hold-time histogram (calls per bucket)')
     lines.append('')
-    heads = ['%s/%s/%s' % (g['platform'], g['raise'], g['load']) for g in r['groups']]
+    heads = ['%s/%s/%s' % (where(g), g['raise'], g['load']) for g in r['groups']]
     lines.append('| Bucket | ' + ' | '.join(heads) + ' |')
     lines.append('|---|' + '---:|' * len(heads))
     for b in bucket_names():
@@ -286,7 +310,7 @@ def markdown(r):
     for g in r['groups']:
         i, p = g['interval_ms'], g['pre_to_post_ms']
         lines.append('| %s | %s | %s | %d | %s | %s | %s | %d | %s | %s | %s |' % (
-            g['platform'], g['raise'], g['load'], i['n'], fmt(i['p50'], 2), fmt(i['p99'], 2), fmt(i['max'], 2),
+            where(g), g['raise'], g['load'], i['n'], fmt(i['p50'], 2), fmt(i['p99'], 2), fmt(i['max'], 2),
             g['late_steps'], fmt(p['p50'], 2), fmt(p['p99'], 2), fmt(p['max'], 2)))
     lines.append('')
     lines.append('### Server step (ms): tick-stats.jsonl minute windows inside one phase')
@@ -296,7 +320,7 @@ def markdown(r):
     for g in r['groups']:
         t = g['tick_stats']
         lines.append('| %s | %s | %s | %d | %s | %s | %s | %s | %s |' % (
-            g['platform'], g['raise'], g['load'], t['windows'], fmt(float(t['step_p50_ms']), 2), fmt(float(t['step_p99_ms']), 2),
+            where(g), g['raise'], g['load'], t['windows'], fmt(float(t['step_p50_ms']), 2), fmt(float(t['step_p99_ms']), 2),
             fmt(float(t['step_max_ms']), 2), fmt(float(t['interval_p99_ms']), 2), fmt(float(t['interval_max_ms']), 2)))
     lines.append('')
     lines.append('### Outcomes')
@@ -304,16 +328,16 @@ def markdown(r):
     lines.append('| Platform | Raise | Load | Calls | Outcomes |')
     lines.append('|---|---|---|---:|---|')
     for g in r['groups']:
-        lines.append('| %s | %s | %s | %d | %s |' % (g['platform'], g['raise'], g['load'], g['calls'],
+        lines.append('| %s | %s | %s | %d | %s |' % (where(g), g['raise'], g['load'], g['calls'],
                                                    ', '.join('%s %d' % kv for kv in g['outcomes'].items())))
     lines.append('')
     lines.append('### Runs')
     lines.append('')
-    lines.append('| Zip | Run | Platform | OS | CPU (logical) | Raise | Mode | Component | Pairs | Restored | End |')
-    lines.append('|---|---|---|---|---|---|---|---|---:|---|---|')
+    lines.append('| Zip | Run | Platform | Kit | OS | CPU (logical) | Raise | Mode | Component | Pairs | Restored | End |')
+    lines.append('|---|---|---|---|---|---|---|---|---|---:|---|---|')
     for x in r['runs']:
-        lines.append('| %s | %s | %s | %s | %s (%s) | %s | %s | %s | %s | %s | %s |' % (
-            x['source'], x['run'], x['platform'], x['os'], x['cpu'], x['logical_processors'], x['raise'], x['mode'],
+        lines.append('| %s | %s | %s | %s | %s | %s (%s) | %s | %s | %s | %s | %s | %s |' % (
+            x['source'], x['run'], x['platform'], x['kit'], x['os'], x['cpu'], x['logical_processors'], x['raise'], x['mode'],
             x['component'], x['pairs'], 'yes' if x['restored'] and x['verified'] else 'no', x['end']))
     for n in r['notes']:
         lines.append('')
