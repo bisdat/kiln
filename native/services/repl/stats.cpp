@@ -333,6 +333,7 @@ void note_send_step(uint64_t start, uint64_t end) {
 }
 
 KilnResult KILN_CALL t_stats_enable(KilnOwner owner, bool on) {
+    if (client_stats_thread()) return client_stats_enable(owner, on);  // a game client's main thread: what it receives
     if (!observe_on()) return KILN_ERR_UNAVAILABLE;
     if (!g_api->on_tick_thread()) return KILN_ERR_WRONG_THREAD;
     if (!owner) return KILN_ERR_INVALID_ARGUMENT;
@@ -366,6 +367,7 @@ KilnResult KILN_CALL t_stats_enable(KilnOwner owner, bool on) {
 
 KilnResult KILN_CALL t_peer_stats(KilnReplPeerStats* out, uint32_t cap, uint32_t* count) {
     if (count) *count = 0;
+    if (client_stats_thread()) return client_peer_stats(out, cap, count);
     if (!observe_on()) return KILN_ERR_UNAVAILABLE;
     if (!g_api->on_tick_thread()) return KILN_ERR_WRONG_THREAD;
     if (!count || (cap && !out)) return KILN_ERR_INVALID_ARGUMENT;

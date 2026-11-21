@@ -19,6 +19,7 @@ public static class Replication
 {
     private static readonly object Gate = new();
     private static readonly HashSet<ulong> StatsOwners = [];
+    private static readonly HashSet<ulong> ReceiveOwners = [];  // ReceivedStats' holders (kiln.repl counts them apart)
     private static ulong _serviceOwner;
 
     /// <summary>
@@ -39,6 +40,59 @@ public static class Replication
         Services.RequireTickThread("Replication.Stats");
         RequireObserve();
         return StatsFor(OwnerOfCaller(), ModContext.CurrentMod);
+    }
+
+    /// <summary>
+    /// What this game client receives from its server, per channel: messages, bytes, creates, updates, destroy lists, and
+    /// the server ticks seen. The first call by a mod turns these counters on for that mod until it unloads (they count
+    /// from the moment the first holder turned them on, and start over in each new world). Rows have
+    /// <see cref="ReplPeerStats.Received"/> set. Call it on the game's main thread (a client mod's tick).
+    /// </summary>
+    /// <exception cref="KilnUnavailableException"><c>repl.client</c> is off: not a game client, or this game build's
+    /// receive side is not supported.</exception>
+    /// <exception cref="InvalidOperationException">Not on the game's main thread.</exception>
+    [ClientOnly]
+    [RequiresCapability(ReplicationCaps.Client)]
+    public static IReadOnlyList<ReplPeerStats> ReceivedStats()
+    {
+        ReplicationCaps.Rows.Ensure();
+        if ((ReplNative.Capabilities() & ReplNative.CapClient) == 0 || !Capabilities.Is(ReplicationCaps.Client))
+            throw ReplicationCaps.Off(ReplicationCaps.Client, "the receive side runs on a game client");
+        var owner = OwnerOfCaller();
+        var mod = ModContext.CurrentMod;
+        lock (Gate)
+        {
+            if (!ReceiveOwners.Contains(owner))
+            {
+                var rc = ReplNative.StatsEnable(owner, true);
+                if (rc == ReplNative.WrongThread) throw new InvalidOperationException("Replication.ReceivedStats must be called on the game's main thread");
+                if (rc == ReplNative.Unavailable) throw ReplicationCaps.Off(ReplicationCaps.Client, "kiln.repl could not hook the game's message store");
+                if (rc != ReplNative.Ok) throw new InvalidOperationException($"kiln.repl refused the counters ({rc})");
+                ReceiveOwners.Add(owner);
+                if (mod is not null && mod.Owner == owner) mod.Retiring += () => { lock (Gate) ReceiveOwners.Remove(owner); };
+            }
+        }
+        var rcRows = ReplNative.PeerStatsAll(out var rows);
+        if (rcRows == ReplNative.WrongThread) throw new InvalidOperationException("Replication.ReceivedStats must be called on the game's main thread");
+        if (rcRows != ReplNative.Ok) throw new InvalidOperationException($"kiln.repl could not list the counters ({rcRows})");
+        NetPeer? server = null;
+        try
+        {
+            server = Network.Server;
+        }
+        catch (Exception e) when (e is TypeLoadException or FileNotFoundException or MissingMethodException)
+        {
+            // no Kiln.Network: the rows name no peer
+        }
+        var list = new List<ReplPeerStats>(rows.Length);
+        foreach (var r in rows)
+        {
+            if ((r.Flags & ReplNative.PeerReceived) == 0) continue;
+            list.Add(new ReplPeerStats(server, (ReplChannel)r.Channel, (long)r.Frames, (long)r.Messages, (long)r.Bytes, (long)r.Refused,
+                (long)r.Creates, (long)r.Updates, (long)r.DestroyLists, (long)r.DestroyedIds, (long)r.Unchanged, (long)r.TooBig,
+                (long)r.Acks, (long)r.Resets, (long)r.Dropped) { PeerId = r.Peer, Received = true });
+        }
+        return list;
     }
 
     /// <summary>What the game's component registry says about the component called <paramref name="name"/> (its

@@ -56,6 +56,12 @@ public sealed record ReplPeerStats(NetPeer? Peer, ReplChannel Channel, long Fram
 
     /// <summary>A lab's fake player (<see cref="ReplicationLab"/>).</summary>
     public bool Fake { get; init; }
+
+    /// <summary>A game client's own row (<see cref="Replication.ReceivedStats"/>): what this client received from its
+    /// server on <see cref="Channel"/>. <see cref="Peer"/> is the server's link when Kiln.Network knows it; only
+    /// <see cref="Frames"/> (server ticks seen), <see cref="Messages"/>, <see cref="Bytes"/>, <see cref="Creates"/>,
+    /// <see cref="Updates"/>, <see cref="DestroyLists"/>, <see cref="DestroyedIds"/> and <see cref="Dropped"/> count.</summary>
+    public bool Received { get; init; }
 }
 
 /// <summary>What the game's component registry says about one component (<see cref="Replication.Component"/>).</summary>

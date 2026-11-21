@@ -53,6 +53,8 @@ enum {
     KILN_REPL_PEER_FAKE = 1u,  /* a loopback fake machine (lab) */
     KILN_REPL_PEER_BOUND = 2u, /* ... with a kiln.net lab peer bound to it: `peer` is that lab peer */
     KILN_REPL_PEER_LOCAL = 4u, /* machine 0 of a hosted world: this process's own client (since 0.2.0-dev.31) */
+    KILN_REPL_PEER_RECEIVED = 8u, /* a game client's receive counters: what this client received from its server
+                                     (`peer` 0; stats_enable / peer_stats on the client world's thread; since 0.2.0-dev.31) */
 };
 
 /* Per machine and channel, since the first stats_enable of any owner (the counters, `dropped` too, start at 0 then). A
@@ -188,6 +190,12 @@ typedef struct KilnReplApi {
      * installs the stats hooks (SendCallback, EntityWriter, AckReceive, EcsReset) and zeroes the counters, the last
      * disable (or the owner's revoke) removes them. On the server world's thread (the tick thread; on a hosting game client,
      * the thread its server world steps on; KILN_ERR_WRONG_THREAD elsewhere).
+     * On a game client's main thread (the client world's thread; KILN_REPL_CAP_CLIENT) the same two functions hold and read
+     * the client's own receive counters instead: every message of both channels the client's session hands the game, in
+     * rows flagged KILN_REPL_PEER_RECEIVED (frames = server ticks seen, messages, bytes, creates, updates, destroy lists and
+     * ids; unchanged, too_big, refused, acks and resets stay 0; dropped = the receive watches' ring drops). Separate holders,
+     * separate counters (from 0 at the first holder and at each new client world); the hook is the receive watches' one
+     * (ClientStore). KILN_ERR_UNAVAILABLE there: repl.client is off, or kiln.hooks refused the hook.
      * KILN_ERR_UNAVAILABLE: repl.observe is off, or kiln.hooks refused a hook (the owner then holds nothing);
      * KILN_ERR_INVALID_ARGUMENT: owner 0, or 64 owners hold it already. */
     KilnResult(KILN_CALL* stats_enable)(KilnOwner owner, bool on);

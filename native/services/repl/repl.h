@@ -147,6 +147,11 @@ bool client_on();                             // repl.client resolved here
 KilnResult client_watch(KilnOwner owner, KilnEntity e, KilnReplWatchFn fn, void* user, KilnHandle* out);
 KilnResult client_remove(KilnHandle h);
 void client_owner_retiring(KilnOwner owner);  // any thread
+// The client's own receive counters: stats_enable / peer_stats called on a game client's main thread (the client world's
+// thread, not the server world's) count what this client receives instead of what a server sends.
+bool client_stats_thread();
+KilnResult client_stats_enable(KilnOwner owner, bool on);
+KilnResult client_peer_stats(KilnReplPeerStats* out, uint32_t cap, uint32_t* count);
 
 // ---- the loopback harness (loopback.cpp) ----
 bool lab_init();                    // kiln_plugin_main, after the features resolved: what the harness needs

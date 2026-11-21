@@ -166,3 +166,6 @@ static Kiln.ReplSent.operator !=(Kiln.ReplSent? left, Kiln.ReplSent? right) -> b
 static Kiln.ReplSent.operator ==(Kiln.ReplSent? left, Kiln.ReplSent? right) -> bool
 static Kiln.ReplWatchEnded.operator !=(Kiln.ReplWatchEnded? left, Kiln.ReplWatchEnded? right) -> bool
 static Kiln.ReplWatchEnded.operator ==(Kiln.ReplWatchEnded? left, Kiln.ReplWatchEnded? right) -> bool
+Kiln.ReplPeerStats.Received.get -> bool
+Kiln.ReplPeerStats.Received.init -> void
+static Kiln.Replication.ReceivedStats() -> System.Collections.Generic.IReadOnlyList<Kiln.ReplPeerStats!>!

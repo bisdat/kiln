@@ -7,11 +7,14 @@
 // the game decoded (borrowed, never kept or freed; offsets from the game's pure StateIndex) into a ring, and a destroy
 // list that names it in its list A gives KILN_REPL_KIND_DESTROYED. The client world's Pre (the same main thread) hands
 // the records to each watch's fn: one event per message of the client channel, then KILN_REPL_KIND_ENDED (destroyed,
-// or the client world stopped). The two hooks are in only while a receive watch exists; each has guard.h's shape.
+// or the client world stopped). The client's own receive counters (stats_enable / peer_stats called on the client
+// world's thread) count every message of both channels in the same ClientStore hook. ClientStore is hooked only while a
+// receive watch or a counter holder exists, Decode only while a receive watch exists; each hook has guard.h's shape.
 #include <windows.h>
 
 #include <atomic>
 #include <cstring>
+#include <mutex>
 #include <iterator>
 
 #include "kiln_hook.hpp"
@@ -51,7 +54,21 @@ std::atomic<uint64_t> g_records{0};
 
 Guard g_store_guard{"client-store"}, g_decode_guard{"client-decode"};
 kiln::RawHook h_store, h_decode;
-bool g_hooked = false;
+bool g_hooked = false;         // ClientStore (receive watches or the receive counters)
+bool g_decode_hooked = false;  // Decode (receive watches only)
+
+// ---- the client's own receive counters (stats_enable / peer_stats on the client world's thread) ----
+// Counted in the ClientStore hook, on the game's main thread only (one writer); read on the same thread.
+struct RxCounters {
+    uint64_t frames = 0, messages = 0, bytes = 0, creates = 0, updates = 0, destroy_lists = 0, destroyed_ids = 0;
+    uint32_t last_tick = 0;
+};
+RxCounters g_rx_count[2];  // [0] client channel, [1] prediction channel
+constexpr uint32_t kMaxRxOwners = 64;
+std::mutex g_rx_owners_mu;  // the main thread and an owner-retiring callback (any thread)
+KilnOwner g_rx_owners[kMaxRxOwners];
+uint32_t g_rx_owner_n = 0;
+std::atomic<bool> g_rx_counting{false};
 using StoreFn = void (*)(uintptr_t world, const Slice* msg, uint64_t pred);
 using DecodeFn = StateRef* (*)(StateRef* out, void* alloc, const Slice* payload, const uint8_t* base, uint64_t pred,
                                uintptr_t registry, uint64_t tick, void* zero);
@@ -91,10 +108,33 @@ struct StoreCall {
     const Slice* msg;
     uint64_t pred;
 };
+// The receive counters: every message of both channels, as the client's session handed it to the game.
+void count_received(const uint8_t* d, uint64_t size, uint32_t ch) {
+    RxCounters& r = g_rx_count[ch];
+    const uint32_t w0 = u32_at(d), kind = w0 & 7, tick = w0 >> 3;
+    if (tick != r.last_tick) {  // a new server frame on this channel
+        ++r.frames;
+        r.last_tick = tick;
+    }
+    ++r.messages;
+    r.bytes += size;
+    if (kind == kKindCreate) ++r.creates;
+    else if (kind == kKindUpdate) ++r.updates;
+    else if (kind == kKindDestroyList) {
+        DestroyList l;
+        if (parse_destroy(d, size, &l)) {
+            ++r.destroy_lists;
+            r.destroyed_ids += l.na + l.nb;
+        }
+    }
+}
+
 void store_before(void* p) {
     const auto* c = static_cast<StoreCall*>(p);
     t_cur.active = false;
-    if (!c->msg || !c->msg->ptr || c->msg->size < 4 || (c->pred & 0xff) != 0) return;  // the client channel only
+    if (!c->msg || !c->msg->ptr || c->msg->size < 4) return;
+    if (g_rx_counting.load(std::memory_order_relaxed)) count_received(c->msg->ptr, c->msg->size, (c->pred & 0xff) ? 1 : 0);
+    if ((c->pred & 0xff) != 0 || !g_hot_n.load(std::memory_order_relaxed)) return;  // the watches: the client channel only
     const uint8_t* d = c->msg->ptr;
     const uint32_t kind = d[0] & 7;
     if (kind == kKindCreate || kind == kKindUpdate) {
@@ -257,30 +297,37 @@ void apply() {
         }
         if (!w.ended) g_hot[n++].store(w.entity, std::memory_order_relaxed);
     }
-    g_hot_n.store(n, std::memory_order_release);
-    if (n && !g_hooked) {
-        if (!g_ring.ready() && !g_ring.init()) {
-            g_hot_n.store(0, std::memory_order_release);
-            logf(KILN_LOG_WARN, "repl: receive watches have no ring (out of memory): no events");
-            return;
-        }
-        if (!h_store.install(g_api, g_owner, f_store, reinterpret_cast<void*>(&d_store), "repl/client ClientStore") ||
-            !h_decode.install(g_api, g_owner, f_decode, reinterpret_cast<void*>(&d_decode), "repl/client Decode")) {
-            logf(KILN_LOG_WARN, "repl: receive hooks not installed (%s%s)", h_store.error() ? h_store.error() : "",
-                 h_decode.error() ? h_decode.error() : "");
-            h_store.revoke();
-            h_decode.revoke();
-            g_hot_n.store(0, std::memory_order_release);
-            return;
-        }
-        g_hooked = true;
-        logf(KILN_LOG_INFO, "repl: receive hooks installed (message store, decode)");
-    } else if (!n && g_hooked) {
-        h_store.revoke();
-        h_decode.revoke();
-        g_hooked = false;
-        logf(KILN_LOG_INFO, "repl: receive hooks removed (no receive watch)");
+    bool counting;
+    {
+        std::lock_guard lock(g_rx_owners_mu);
+        counting = g_rx_owner_n > 0;
     }
+    if (n && !g_ring.ready() && !g_ring.init()) {
+        logf(KILN_LOG_WARN, "repl: receive watches have no ring (out of memory): no events");
+        n = 0;
+    }
+    // the message store for the watches and the counters; the decode for the watches
+    const bool want_store = n || counting, want_decode = n != 0;
+    if (want_store && !g_hooked) {
+        g_hooked = h_store.install(g_api, g_owner, f_store, reinterpret_cast<void*>(&d_store), "repl/client ClientStore");
+        if (g_hooked) logf(KILN_LOG_INFO, "repl: receive hook installed (message store) for %s", n ? "a receive watch" : "the receive counters");
+        else logf(KILN_LOG_WARN, "repl: receive hook not installed (%s)", h_store.error() ? h_store.error() : "?");
+    } else if (!want_store && g_hooked) {
+        h_store.revoke();
+        g_hooked = false;
+        logf(KILN_LOG_INFO, "repl: receive hook removed (no receive watch, no counters)");
+    }
+    if (want_decode && g_hooked && !g_decode_hooked) {
+        g_decode_hooked = h_decode.install(g_api, g_owner, f_decode, reinterpret_cast<void*>(&d_decode), "repl/client Decode");
+        if (g_decode_hooked) logf(KILN_LOG_INFO, "repl: receive hook installed (decode) for the receive watches");
+        else logf(KILN_LOG_WARN, "repl: receive hook not installed (%s)", h_decode.error() ? h_decode.error() : "?");
+    } else if ((!want_decode || !g_hooked) && g_decode_hooked) {
+        h_decode.revoke();
+        g_decode_hooked = false;
+        logf(KILN_LOG_INFO, "repl: receive hook removed (decode: no receive watch)");
+    }
+    g_hot_n.store(g_hooked && g_decode_hooked ? n : 0, std::memory_order_release);
+    g_rx_counting.store(counting && g_hooked, std::memory_order_relaxed);
 }
 
 // The client world's registry facts, read outside the hooks (they only read the published copy).
@@ -311,6 +358,7 @@ void KILN_CALL on_client_world(const KilnWorldEvent* ev, void*) {
     for (RxWatch& w : g_rx)
         if (w.handle.load(std::memory_order_relaxed)) end(w, KILN_REPL_END_WORLD_STOPPED);
     g_ring.discard();
+    for (RxCounters& r : g_rx_count) r = RxCounters{};  // the receive counters start over with the next world
     // the next client world reads its registry again (the hooks are out of its frames until then)
     g_reg_hot.store(nullptr, std::memory_order_release);
     delete g_reg;
@@ -362,13 +410,82 @@ KilnResult client_watch(KilnOwner owner, KilnEntity e, KilnReplWatchFn fn, void*
     const KilnHandle h = kRxTag | ++g_rx_serial;
     slot->handle.store(h, std::memory_order_release);
     apply();
-    if (!g_hooked) {
+    if (!g_hooked || !g_decode_hooked) {
         slot->handle.store(0, std::memory_order_release);
         apply();
         return KILN_ERR_UNAVAILABLE;
     }
     *out = h;
     return KILN_OK;
+}
+
+bool client_stats_thread() { return g_resolved && g_api->on_world_thread(KILN_WORLD_CLIENT) && !g_api->on_tick_thread(); }
+
+KilnResult client_stats_enable(KilnOwner owner, bool on) {
+    if (!g_resolved) return KILN_ERR_UNAVAILABLE;
+    if (!g_api->on_world_thread(KILN_WORLD_CLIENT)) return KILN_ERR_WRONG_THREAD;
+    if (!owner) return KILN_ERR_INVALID_ARGUMENT;
+    {
+        std::lock_guard lock(g_rx_owners_mu);
+        uint32_t i = 0;
+        while (i < g_rx_owner_n && g_rx_owners[i] != owner) ++i;
+        if (on && i == g_rx_owner_n) {
+            if (g_rx_owner_n >= kMaxRxOwners) return KILN_ERR_INVALID_ARGUMENT;
+            if (g_rx_owner_n == 0)
+                for (RxCounters& r : g_rx_count) r = RxCounters{};  // the first holder: from 0 (main thread: no store runs now)
+            g_rx_owners[g_rx_owner_n++] = owner;
+        } else if (!on && i < g_rx_owner_n) {
+            g_rx_owners[i] = g_rx_owners[--g_rx_owner_n];
+        }
+    }
+    apply();
+    if (on && !g_hooked) {  // kiln.hooks refused the message store: this owner holds nothing
+        {
+            std::lock_guard lock(g_rx_owners_mu);
+            for (uint32_t i = 0; i < g_rx_owner_n; ++i)
+                if (g_rx_owners[i] == owner) {
+                    g_rx_owners[i] = g_rx_owners[--g_rx_owner_n];
+                    break;
+                }
+        }
+        apply();
+        return KILN_ERR_UNAVAILABLE;
+    }
+    return KILN_OK;
+}
+
+KilnResult client_peer_stats(KilnReplPeerStats* out, uint32_t cap, uint32_t* count) {
+    if (count) *count = 0;
+    if (!g_resolved) return KILN_ERR_UNAVAILABLE;
+    if (!g_api->on_world_thread(KILN_WORLD_CLIENT)) return KILN_ERR_WRONG_THREAD;
+    if (!count || (cap && !out)) return KILN_ERR_INVALID_ARGUMENT;
+    uint32_t rows = 0;
+    for (uint32_t ch = 0; ch < 2; ++ch) {
+        const RxCounters& r = g_rx_count[ch];
+        const uint64_t dropped = ch == 0 ? g_ring.dropped() : 0;
+        if (!r.messages && !dropped) continue;
+        if (rows < cap) {
+            KilnReplPeerStats& o = out[rows];
+            if (o.size < sizeof(KilnReplPeerStats)) return KILN_ERR_INVALID_ARGUMENT;
+            const uint32_t size = o.size;
+            std::memset(&o, 0, sizeof o);
+            o.size = size;
+            o.peer = 0;  // the server this client is joined to (or hosts)
+            o.channel = static_cast<uint8_t>(ch ? 5 : 4);
+            o.flags = KILN_REPL_PEER_RECEIVED;
+            o.frames = r.frames;
+            o.messages = r.messages;
+            o.bytes = r.bytes;
+            o.creates = r.creates;
+            o.updates = r.updates;
+            o.destroy_lists = r.destroy_lists;
+            o.destroyed_ids = r.destroyed_ids;
+            o.dropped = dropped;
+        }
+        ++rows;
+    }
+    *count = rows;
+    return rows > cap ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
 }
 
 KilnResult client_remove(KilnHandle h) {
@@ -385,6 +502,13 @@ void client_owner_retiring(KilnOwner owner) {
         if (w.handle.load(std::memory_order_acquire) && w.owner == owner) {
             w.removed.store(true, std::memory_order_release);
             g_dirty.store(true, std::memory_order_relaxed);
+        }
+    std::lock_guard lock(g_rx_owners_mu);
+    for (uint32_t i = 0; i < g_rx_owner_n; ++i)
+        if (g_rx_owners[i] == owner) {
+            g_rx_owners[i] = g_rx_owners[--g_rx_owner_n];
+            g_dirty.store(true, std::memory_order_relaxed);  // the client Pre lets the hooks go
+            break;
         }
 }
 

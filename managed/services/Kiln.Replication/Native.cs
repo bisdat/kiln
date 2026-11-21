@@ -10,7 +10,7 @@ internal static unsafe class ReplNative
     public const uint CapObserve = 1, CapClient = 2, CapLoopback = 4;
     public const uint AllMachines = 0xFFFFFFFF, FakePeer = 0x80000000;
     public const uint Send = 1, Receive = 2;
-    public const byte PeerFake = 1, PeerBound = 2, PeerLocal = 4;
+    public const byte PeerFake = 1, PeerBound = 2, PeerLocal = 4, PeerReceived = 8;
     public const byte KindCreate = 2, KindUpdate = 3, KindDestroyed = 4, KindEnded = 5;
     public const uint CompReplicated = 1, CompVersioned = 2, CompCustomCodec = 4, CompClient = 8, CompPrediction = 16;
 
