@@ -273,13 +273,19 @@ Managed: `UiDraw.Pointer`, `ButtonHeld`, `DragSource`, `DropTarget` ([ui.md](../
 - `bool drag_source(KilnStr kind, const void* payload, size_t len, KilnStr preview)`: after a widget
   (`BeginDragDropSource` with `SourceAllowNullID`, so text and images work too). True on the frames it is dragged; each
   such frame sets the payload (copied, at most `KILN_UI_DRAG_PAYLOAD_MAX` 4096 bytes; an empty one is allowed) and draws
-  `preview` by the pointer (empty: no tooltip).
+  `preview` by the pointer (empty: no tooltip). A drag whose source stops being drawn while the button is held goes on
+  with the last payload until the release (Dear ImGui draws "..." by the pointer); released over nothing, it ends and
+  nothing is delivered.
 - `bool drop_target(KilnStr kind, void* out, size_t capacity, size_t* len)`: after a widget (`BeginDragDropTarget`,
   `AcceptDragDropPayload` without `AcceptBeforeDelivery`). True once, on the frame a payload of `kind` is released over the
-  widget: up to `capacity` bytes go into `out`, `*len` (when not NULL) is the whole length.
+  widget: up to `capacity` bytes go into `out`, `*len` (when not NULL) is the whole length (`*len > capacity`: it was
+  cut). The drop is not offered again, so pass `KILN_UI_DRAG_PAYLOAD_MAX` bytes and nothing is ever cut; `out` NULL
+  with `capacity` 0 reports only the length.
 - A kind is 1..32 bytes (`KILN_UI_DRAG_KIND_MAX`), no NUL, not starting with `_` (Dear ImGui's own); anything else is
-  refused (false). Native kinds are shared by every caller; Kiln.Ui passes `"k"` and the FNV-1a 64 of
-  `"<mod id>\n<kind>"` in hex, so each managed mod's kinds are its own.
+  refused (false). Native kinds are shared by every caller (put your plugin's name in them, and never use
+  `"k"` and 16 hex digits); Kiln.Ui passes `"k"` and the FNV-1a 64 of `"<mod id>\n<kind>"` in hex, so each managed mod's
+  kinds are its own. The hash keeps mods from meeting by accident; it is no security boundary (any code can compute
+  another mod's kind).
 - Coordinates are the overlay's pixels, the space of every drawing slot. Kiln feeds Dear ImGui the game window's client
   pixels, the same pixels as long as the window's client area and the swapchain match (they always have, so far).
 

@@ -557,6 +557,9 @@ if (ui.DropTarget("stack") is { } slot) Client.Post(() => MoveToChest(int.Parse(
   pointer means something only while a pointer is shown: a Kiln screen or window, the Kiln menu, or one of the game's
   menus. A drag works inside interactive Kiln windows (they have the mouse); a panel the player only looks at
   (`Interactive = false`) gets no presses.
+- A drag ends on the release: over a target of its kind the target gets the payload, over anything else nothing happens.
+  If the source stops being drawn while the button is held (a list that scrolled or changed), the drag goes on with the
+  payload of the last frame it was drawn, and Dear ImGui draws "..." by the pointer instead of the preview.
 - On a kiln.ui older than 0.2.0-dev.30.3: `Pointer` null, `ButtonHeld` false, `DragSource` false, `DropTarget` null.
 - C: kiln.ui's `pointer`, `drag_source` and `drop_target` (a size-guarded tail at byte 1056, after `chat_search`;
   [services/ui.md](services/ui.md#the-pointer-and-drag-and-drop-020-dev303)).

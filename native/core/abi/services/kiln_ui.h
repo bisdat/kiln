@@ -1319,13 +1319,18 @@ typedef struct KilnUiApi {
      * drag_source: after a widget, makes it a drag source (ImGui BeginDragDropSource, also for a widget without an id:
      *   text, an image). True on the frames it is being dragged; on each such frame 'payload' (len bytes, copied, at most
      *   KILN_UI_DRAG_PAYLOAD_MAX) is the payload of 'kind', and 'preview' (empty: none) is the text drawn by the pointer.
-     *   False: not dragged, outside a frame, a bad kind or payload.
+     *   False: not dragged, outside a frame, a bad kind or payload. A drag whose source stops being drawn while the
+     *   button is held goes on with the last payload set until the release (ImGui draws "..." by the pointer); released
+     *   over nothing, it ends and nothing is delivered.
      * drop_target: after a widget, makes it a drop target for payloads of 'kind' (ImGui BeginDragDropTarget /
      *   AcceptDragDropPayload). True once, on the frame such a payload is released over the widget: the payload's bytes go
-     *   into out (up to capacity; a longer payload is cut) and *len (when not NULL) is the payload's whole length. While a
-     *   matching payload hovers it, ImGui highlights the widget. False otherwise.
+     *   into out (up to capacity; a longer payload is cut) and *len (when not NULL) is the payload's whole length, so
+     *   *len > capacity says it was cut. The drop is not offered again: pass KILN_UI_DRAG_PAYLOAD_MAX bytes and nothing is
+     *   ever cut (out may be NULL with capacity 0 to learn only the length). While a matching payload hovers it, ImGui
+     *   highlights the widget. False otherwise.
      * Kinds are bytes compared exactly; a kind starting with '_' is ImGui's own and refused. Kiln.Ui keeps each mod's kinds
-     * its own (it passes a hash of the mod's id and the kind); a native plugin's kinds are shared by every caller. */
+     * its own (it passes "k" and 16 hex digits, a hash of the mod's id and the kind); a native plugin's kinds are shared by
+     * every caller: put the plugin's name in them ("myplugin.stack"), never "k" and 16 hex digits. */
     bool(KILN_CALL* pointer)(KilnUiPointer* out);
     bool(KILN_CALL* drag_source)(KilnStr kind, const void* payload, size_t len, KilnStr preview);
     bool(KILN_CALL* drop_target)(KilnStr kind, void* out, size_t capacity, size_t* len);

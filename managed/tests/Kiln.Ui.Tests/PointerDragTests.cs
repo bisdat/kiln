@@ -22,6 +22,7 @@ public sealed unsafe class PointerDragTests : IDisposable
     private static byte _pointerOk;
     private static byte _dragAnswer;
     private static string? _drop;
+    private static nuint _capacity;
     private static readonly List<(string Kind, string Payload, string Preview)> Sources = [];
     private static readonly List<string> Targets = [];
 
@@ -69,6 +70,7 @@ public sealed unsafe class PointerDragTests : IDisposable
     private static byte DropTarget(NativeStr kind, byte* buf, nuint capacity, nuint* len)
     {
         Targets.Add(kind.ToString());
+        _capacity = capacity;
         if (_drop is null) return 0;
         var bytes = Encoding.UTF8.GetBytes(_drop);
         var n = Math.Min(bytes.Length, (int)capacity);
@@ -151,6 +153,7 @@ public sealed unsafe class PointerDragTests : IDisposable
         var ui = new UiDraw();
         Assert.Null(ui.DropTarget("stack"));
         Assert.Equal(Fnv("\nstack"), Assert.Single(Targets));
+        Assert.Equal((nuint)4096, _capacity);  // KILN_UI_DRAG_PAYLOAD_MAX: no payload is ever cut
         _drop = "slot:3";
         Assert.Equal("slot:3", ui.DropTarget("stack"));
         _drop = "ünïcödé";

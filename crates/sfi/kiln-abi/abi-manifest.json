@@ -6578,7 +6578,7 @@
           "size": 48
         }
       },
-      "sha256": "31ede646554382bd7adb06b3ae1eae67a791d0600f859aae9d54323cea57219c"
+      "sha256": "58a3fe675df2ee6ae263a880b0f81899bcdd71de1b38d18ddd3a23c7750e011e"
     },
     "native/core/abi/services/kiln_ui_inventory.h": {
       "function_macros": [],

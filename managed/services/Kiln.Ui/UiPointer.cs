@@ -48,7 +48,9 @@ public sealed unsafe partial class UiDraw
     /// held it carries <paramref name="payload"/> as a payload of <paramref name="kind"/>, with <paramref name="preview"/>
     /// drawn by the pointer. Call it right after the widget, every frame. True on the frames it is being dragged. A
     /// <see cref="DropTarget"/> of the same kind takes the payload when it is released there. Works after any widget, also
-    /// one without an id (text, an image). Since 0.2.0-dev.30.3 (mod API 0.2.13).
+    /// one without an id (text, an image). Released over anything but a target of its kind, nothing is delivered; if the
+    /// widget stops being drawn while the button is held, the drag goes on with the payload of the last frame it was drawn.
+    /// Since 0.2.0-dev.30.3 (mod API 0.2.13).
     /// </summary>
     /// <param name="kind">What the payload is (<c>"stack"</c>, <c>"chest-slot"</c>): your own name, matched exactly. Kinds are
     /// your mod's own: another mod's drop target of the same name never gets your payload, nor you theirs.</param>

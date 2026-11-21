@@ -2,7 +2,9 @@
 // kiln.ui's pointer, drag_source and drop_target slots (draw_slots_pointer.inl, 0.2.0-dev.30.3, GitHub issue 113) on a
 // headless Dear ImGui context under ASan/UBSan: nothing outside a frame, the pointer and held buttons as ImGui's io has
 // them, a drag from one button dropped on another (delivered once, on release, with the payload's bytes), a kind that
-// does not match, a payload cut to the caller's buffer, refused kinds and payloads, and the table's append-only layout.
+// does not match, a payload cut to the caller's buffer or no buffer at all, a source without an id, a drag whose source
+// is no longer drawn (it goes on with its last payload until the release), refused kinds and payloads, and the table's
+// append-only layout.
 #include "../draw_slots.h"
 #include <cstdio>
 #include <cstring>
@@ -47,6 +49,9 @@ struct Seen {
 };
 static std::string g_payload = "item:42";
 static size_t g_capacity = 64;
+static bool g_id_less = false;    // the source is a widget without an id (ImGui::Dummy, as text or an image): SourceAllowNullID
+static bool g_source_on = true;   // the source widget is drawn this frame (a mod that stops drawing it cancels the drag)
+static bool g_no_buffer = false;  // the target passes no buffer (NULL, capacity 0): only the length
 
 // One overlay frame: a window with a source button and a target button (and the same target for another kind).
 static Seen frame() {
@@ -59,12 +64,16 @@ static Seen frame() {
     ImGui::SetNextWindowSize(ImVec2(400, 300));
     ImGui::Begin("panes", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
     ImGui::SetCursorScreenPos(ImVec2(20, 40));
-    ImGui::Button("source", ImVec2(100, 40));  // 20..120 x 40..80
-    s.dragging = kui_draw::t_drag_source(S("kiln.test/item"), g_payload.data(), g_payload.size(), S("Iron bar"));
+    if (g_source_on) {
+        if (g_id_less) ImGui::Dummy(ImVec2(100, 40));  // 20..120 x 40..80, no id
+        else ImGui::Button("source", ImVec2(100, 40));  // 20..120 x 40..80
+        s.dragging = kui_draw::t_drag_source(S("kiln.test/item"), g_payload.data(), g_payload.size(), S("Iron bar"));
+    }
     ImGui::SetCursorScreenPos(ImVec2(220, 40));
     ImGui::Button("target", ImVec2(100, 40));  // 220..320 x 40..80
     char buf[128] = {};
-    s.dropped = kui_draw::t_drop_target(S("kiln.test/item"), buf, g_capacity, &s.len);
+    s.dropped = g_no_buffer ? kui_draw::t_drop_target(S("kiln.test/item"), nullptr, 0, &s.len)
+                            : kui_draw::t_drop_target(S("kiln.test/item"), buf, g_capacity, &s.len);
     if (s.dropped) s.payload.assign(buf, std::min(s.len, g_capacity));
     ImGui::SetCursorScreenPos(ImVec2(220, 140));
     ImGui::Button("other", ImVec2(100, 40));  // 220..320 x 140..180: another kind
@@ -193,6 +202,53 @@ int main() {
     drag_to(270, 60, &drops, &others, &last);
     CHECK(drops == 1 && last.dropped && last.len == 0 && last.payload.empty());
     g_payload = "item:42";
+    // no buffer at all: still delivered once, with the whole length (a caller that only needs to know)
+    g_no_buffer = true;
+    drag_to(270, 60, &drops, &others, &last);
+    CHECK(drops == 1 && last.dropped && last.len == 7);
+    g_no_buffer = false;
+    // a source without an id (text, an image): SourceAllowNullID makes one from its rectangle
+    g_id_less = true;
+    drag_to(270, 60, &drops, &others, &last);
+    CHECK(drops == 1 && last.dropped && last.payload == "item:42");
+    g_id_less = false;
+
+    // ---- the source stops being drawn while the button is held (Dear ImGui 1.93 without PayloadAutoExpire): the drag
+    // goes on with its last payload until the release; released over the target it is delivered once, over nothing it ends
+    for (const bool over_target : {true, false}) {
+        move(70, 60);
+        frame();
+        button(0, true);
+        frame();
+        move(150, 60);
+        frame();
+        move(270, 60);
+        s = frame();
+        CHECK(s.dragging && (s.p.flags & KILN_UI_POINTER_DRAGGING));
+        g_source_on = false;
+        g_payload = "changed";  // never set again: the drag keeps the last payload set
+        drops = 0;
+        for (int i = 0; i < 3; ++i) {
+            s = frame();
+            drops += s.dropped;
+            CHECK(!s.dragging && (s.p.flags & KILN_UI_POINTER_DRAGGING));
+        }
+        if (!over_target) move(600, 500);
+        frame();
+        button(0, false);
+        s = frame();
+        drops += s.dropped;
+        CHECK(over_target ? (s.dropped && s.payload == "item:42") : !s.dropped);
+        s = frame();
+        drops += s.dropped;
+        CHECK((s.p.flags & KILN_UI_POINTER_DRAGGING) == 0);
+        CHECK(drops == (over_target ? 1 : 0));
+        g_source_on = true;
+        g_payload = "item:42";
+    }
+    // and the next drag works as before
+    drag_to(270, 60, &drops, &others, &last);
+    CHECK(drops == 1 && last.payload == "item:42");
 
     // ---- refusals (inside a frame) ----
     ImGui::NewFrame();
