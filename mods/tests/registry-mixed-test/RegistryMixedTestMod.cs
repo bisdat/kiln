@@ -2,8 +2,8 @@
 // Lab test of registry P1 (S9 live back-end, S10 boot back-end, S12 compatibility): Kiln's older paths and the registry on
 // the same fields in one start (owner decision D1: a registry edit layers on every earlier writer and wins, reported; relative
 // edits compose on the earlier value; old mods are never refused).
-//   - content/old.json: an old data pack, Material_T1_Wood_Logs maxStackSize x2;
-//   - blocks/patches.json: an old boot patch on keen::BalancingTable (experienceNeedPerLevel[0] 1500, playerLevelCap 55);
+//   - registry-compat-test, the older mod (earlier in the load order): an old data pack, Material_T1_Wood_Logs maxStackSize
+//     x2, and an old boot patch on keen::BalancingTable (experienceNeedPerLevel[0] 1500, playerLevelCap 55);
 //   - content/registry.json: the registry section: items maxStack x4 (composes on the pack: x8), a recipe's duration 7 s,
 //     balance levelCap 60 (over the old patch's 55);
 //   - OnBoot: a C# registry edit through kiln.registry's submit (the native form of P2's Mod.OnRegistry; this test reaches it
@@ -18,7 +18,6 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json.Nodes;
 using Kiln;
-using Kiln.Content;
 
 namespace RegistryMixedTest;
 
@@ -63,7 +62,7 @@ public sealed unsafe class RegistryMixedTestMod : Mod
     // kiln.registry v1's submit (offset 40) with this mod's owner (Kiln binds the batch's mod to it)
     private (int, string) Submit(string json)
     {
-        var bridge = typeof(Content).Assembly.GetType("Kiln.Content.BlocksBridge");
+        var bridge = typeof(Content).Assembly.GetType("Kiln.BlocksBridge");
         var table = (nint)(bridge?.GetMethod("ServiceTable", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)?.Invoke(null, new object[] { "kiln.registry", 1u }) ?? (nint)0);
         if (table == 0) return (-1, "kiln.registry is not here");
         if (*(uint*)table < 48) return (-1, "kiln.registry has no submit");
@@ -123,10 +122,14 @@ public sealed unsafe class RegistryMixedTestMod : Mod
             var xp = Row(doc, "balance", "game:balance", "xpPerLevel");
             Check(xp is not null && (int?)xp["result"]?[0] == 2222, $"registry.json: the C# edit's xpPerLevel[0] 2222 over the old patch's 1500: {xp?["result"]?.ToJsonString()}");
             var conflicts = doc["conflicts"]?.AsArray() ?? new JsonArray();
-            Check(conflicts.Any(c => ((string?)c?["field"] ?? "").Contains("xpPerLevel") && (string?)c?["kind"] == "overridden"),
-                "registry.json: the element set over the old patch is reported overridden");
+            bool Line(string field, string kind, string loser) => conflicts.Any(c => ((string?)c?["field"] ?? "").Contains(field) && (string?)c?["kind"] == kind &&
+                                                                                    ((string?)c?["loser"] ?? "").Contains(loser));
+            Check(Line("xpPerLevel", "overridden", "registry-compat-test"), "registry.json: the C# element set over the older mod's boot patch is reported overridden");
+            Check(Line("levelCap", "overridden", "registry-compat-test"), "registry.json: levelCap over the older mod's boot patch is reported overridden");
             var ms = Row(doc, "items", "game:material_t1_wood_logs", "maxStack");
-            Check(ms is not null && (int?)ms["result"] == (int)(8 * _wood0), $"registry.json: maxStack's row {ms?["result"]?.ToJsonString()} (writers {ms?["writers"]?.AsArray().Count})");
+            Check(ms is not null && (int?)ms["result"] == (int)(8 * _wood0) && ms["writers"]!.AsArray().Any(w => (string?)w?["kind"] == "oldPack"),
+                $"registry.json at world load: maxStack's row has the older mod's pack below and the live result: {ms?.ToJsonString()}");
+            Check(Line("maxStack", "composedOn", "registry-compat-test"), "registry.json at world load: the x4 composed on the older mod's pack");
             _step = 1;
             File.WriteAllText(SectionPath, _section.Replace("\"mul\": 4", "\"mul\": 3"));
             Content.ReloadPacks();

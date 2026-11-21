@@ -310,6 +310,16 @@ bool store_below_registry(uintptr_t addr, uint8_t n, uint8_t* out) {
     return true;
 }
 
+bool store_slot_copy(uintptr_t addr, Slot* out) {
+    std::lock_guard lock(g_mu);
+    auto it = g_slots.find(addr);
+    if (it == g_slots.end()) return false;
+    uint8_t scratch[kSlotBytes];
+    fold(it->second, scratch);
+    *out = it->second;
+    return true;
+}
+
 uint32_t store_mark_evals() {
     std::lock_guard lock(g_mu);
     uint32_t n = 0;

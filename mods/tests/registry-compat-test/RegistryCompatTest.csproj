@@ -13,5 +13,7 @@
     <ProjectReference Include="../../../managed/services/Kiln.Content/Kiln.Content.csproj" Private="false" ExcludeAssets="runtime" />
     <ProjectReference Include="../../../managed/services/Kiln.Assets/Kiln.Assets.csproj" Private="false" ExcludeAssets="runtime" />
     <None Include="kiln.mod.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="content/**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="blocks/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

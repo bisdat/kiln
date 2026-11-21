@@ -10,7 +10,8 @@ the registries' types as SHA-256, kiln.content's changed fields and conflicts, r
         Kiln-off boot reads.
     compat.py check --dump <dump.json> --archive <archive.json> [--allow <guid> ...]
         every resource the dump has is byte-identical to the archive's, except the allowed ones (what the registry's boot
-        back-end and old boot patches write). Exit 1 on any other difference.
+        back-end and old boot patches write) and the dump's "touched" ones (resources whose loaded bytes the store changed:
+        old packs and the registry's live fields). Exit 1 on any other difference.
     compat.py diff --before <dump.json> --after <dump.json> [--allow <guid> ...] [--allow-field <registry>:<entry>.<field> ...]
         two sessions' dumps (an old-only set against the same set with registry content, or two points of one session):
         resources and store fields equal except the allowed ones. Exit 1 on any other difference.
@@ -59,7 +60,7 @@ def cmd_archive(a):
 def check(dump, archive, allow):
     """(same, allowed differences, other differences, not in the archive)"""
     same, allowed, other, new = 0, [], [], []
-    allow = {g.lower() for g in allow}
+    allow = {g.lower() for g in allow} | {g.lower() for g in dump.get("touched", [])}
     for r in dump["resources"]:
         k = key_of(r)
         a = archive["resources"].get(k)
@@ -93,7 +94,7 @@ def fields(dump):
 
 def diff(before, after, allow, allow_fields):
     """(resource differences, field differences) not allowed"""
-    allow = {g.lower() for g in allow}
+    allow = {g.lower() for g in allow} | {g.lower() for g in before.get("touched", []) + after.get("touched", [])}
     ra = {key_of(r): r["sha256"] for r in before["resources"]}
     rb = {key_of(r): r["sha256"] for r in after["resources"]}
     res = sorted(k for k in set(ra) | set(rb) if ra.get(k) != rb.get(k) and k.split(":")[0] not in allow)

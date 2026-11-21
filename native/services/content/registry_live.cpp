@@ -36,6 +36,15 @@ struct LiveState {
         std::string guid;
     };
     std::vector<Pending> pending_tables;  // drop-table fields whose table the world has not loaded yet
+    // scalar fields put this application: registry.json at world load shows the packs and code around them and the live result
+    struct Scalar {
+        registry::FieldRef ref;
+        uintptr_t addr = 0;
+        Field f;
+        std::optional<registry::map::Row> row;
+        registry::FieldSpec spec;
+    };
+    std::vector<Scalar> scalars;
     registry::Result reported;
     bool have_report = false;
     uint32_t ordinal = 0;
@@ -207,6 +216,7 @@ void bind_scalar(const std::shared_ptr<Binding>& b, const Field* f) {
         return true;
     };
     if (!put(b, index_of(b->kind, f), -1, b->entry.addr + f->offset, f->bytes, std::move(ev))) fail(b, "the field is not readable");
+    else g.scalars.push_back({b->ref, b->entry.addr + f->offset, *f, b->row, b->spec});
 }
 
 // ---- formulas: power, armor ----
@@ -505,6 +515,7 @@ void bind_impact(const std::shared_ptr<Binding>& b, const std::string& path) {
         return true;
     };
     if (!put_at(b, s.kind, s.id, s.field, -1, s.addr, vf.bytes, std::move(ev))) return (void)fail(b, "the config value is not readable");
+    g.scalars.push_back({b->ref, s.addr, vf, std::nullopt, b->spec});
     if (!s.tip) return;
     const uintptr_t at = s.addr;
     const uint8_t format = s.tip_format;
@@ -612,12 +623,85 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
 void put_all() {
     store_drop_owner(registry_owner());
     g.pending_tables.clear();
+    g.scalars.clear();
     g.ordinal = 0;
     for (const auto& [fr, fo] : g.in->result.fields) bind(fr, fo);
 }
 
+bool absolute_row(const ChainRow& r) { return !r.element.on && (r.list == registry::ListOp::None ? r.op.set : r.list == registry::ListOp::Clear || r.list == registry::ListOp::Replace); }
+
+std::string layer_mod_of(const Layer& l) {
+    if (!l.mod.empty()) return l.mod;
+    const std::string label = owner_label(l.owner);
+    for (const char* p : {"pack ", "mod "})
+        if (label.rfind(p, 0) == 0) return label.substr(std::strlen(p));
+    return {};
+}
+
+// A scalar field's row as the world has it: the old packs below the registry and code above it (store layers), the
+// registry's rows evaluated over the pack's value, the live result, and a conflict line where another mod's pack lies below.
+void live_row(registry::Result& r, const LiveState::Scalar& sc) {
+    auto it = r.fields.find(sc.ref);
+    Slot s;
+    if (it == r.fields.end() || !store_slot_copy(sc.addr, &s)) return;
+    registry::FieldOutcome& fo = it->second;
+    const rmap::Row* row = sc.row ? &*sc.row : nullptr;
+    auto layer_row = [&](const Layer& l, registry::WriterKind kind) {
+        ChainRow c;
+        c.kind = kind, c.mod = layer_mod_of(l), c.who = l.source;
+        c.op.set = true, c.op.value = to_kiln(sc.f, row, sc.spec, l.bytes), c.after = c.op.value;
+        return c;
+    };
+    std::vector<ChainRow> below, above;
+    for (const Layer& l : s.layers) {
+        if (s.foreign && is_registry_seq(l.seq)) continue;
+        if (l.seq < kRegistrySeq) below.push_back(layer_row(l, registry::WriterKind::OldPack));
+        else if (l.seq >= kCodeSeq) above.push_back(layer_row(l, registry::WriterKind::Code));
+    }
+    uint8_t under[kSlotBytes] = {}, eff[kSlotBytes] = {};
+    store_below_registry(sc.addr, sc.f.bytes, under);
+    store_effective(sc.addr, sc.f.bytes, eff);
+    const Value vb = to_kiln(sc.f, row, sc.spec, under), ve = to_kiln(sc.f, row, sc.spec, eff);
+    std::vector<ChainRow> chain;
+    for (const ChainRow& c : fo.chain)
+        if (c.kind != registry::WriterKind::Registry && c.kind != registry::WriterKind::OldPack && c.kind != registry::WriterKind::Code) chain.push_back(c);
+    for (const ChainRow& c : below) chain.push_back(c);
+    Value v = vb;
+    bool first = false;
+    ChainRow first_reg;
+    for (const ChainRow& c : fo.chain)
+        if (c.kind == registry::WriterKind::Registry) {
+            ChainRow x = c;
+            v = registry::evaluate({x}, v, sc.spec);
+            x.after = v;
+            if (!first) first = true, first_reg = x;
+            chain.push_back(std::move(x));
+        }
+    for (ChainRow& c : above) chain.push_back(std::move(c));
+    fo.chain = std::move(chain);
+    fo.result = ve;
+    if (!above.empty()) fo.winner = fo.chain.back().who;
+    if (first && !below.empty()) {
+        const ChainRow& pack = below.back();
+        if (pack.mod != first_reg.mod && !(vb == fo.base)) {
+            registry::Line l;
+            l.field = sc.ref, l.winner = first_reg.mod, l.loser = pack.who;
+            const std::string place = sc.ref.text();
+            if (absolute_row(first_reg)) {
+                l.kind = registry::LineKind::Overridden;
+                l.text = place + ": " + first_reg.mod + " sets " + v.text_of() + " over " + pack.who + "'s " + vb.text_of() + " (the later one wins)";
+            } else {
+                l.kind = registry::LineKind::ComposedOn;
+                l.text = place + ": " + first_reg.mod + "'s change composed on " + pack.who + "'s value: " + vb.text_of() + " -> " + v.text_of();
+            }
+            r.lines.push_back(std::move(l));
+        }
+    }
+}
+
 void report() {
     registry::Result r = g.in->result;
+    for (const LiveState::Scalar& sc : g.scalars) live_row(r, sc);
     const size_t first = r.refused.size();
     for (const registry::Refusal& x : g.refused) r.refused.push_back(x);
     for (const StoreSkipped& s : store_skipped()) {

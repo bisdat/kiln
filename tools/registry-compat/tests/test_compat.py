@@ -49,6 +49,12 @@ class Compat(unittest.TestCase):
         self.assertEqual(len(res_d), 1)
         self.assertEqual(fl, ["items:Fibre.maxStackSize"])
 
+    def test_resources_the_store_changed_are_allowed(self):
+        d = dump([res("w", "2")])
+        d["touched"] = ["W"]
+        self.assertEqual(compat.check(d, archive([("w", "1")]), [])[2], [])
+        self.assertEqual(compat.diff(dump([res("w", "1")]), d, [], []), ([], []))
+
     def test_no_residue_is_an_empty_diff(self):
         d = dump([res("a", "1")], [("items", "Wood", "maxStackSize", {"original": 10, "current": 20})])
         self.assertEqual(compat.diff(d, d, [], []), ([], []))

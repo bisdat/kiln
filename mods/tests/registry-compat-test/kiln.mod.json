@@ -1,11 +1,12 @@
 {
   "id": "registry-compat-test",
-  "name": "registry compatibility dump: lab test",
+  "name": "registry compatibility: the older mod of the mixed set and the dump",
   "version": "0.1.0",
   "apiVersion": "0.2",
   "entryAssembly": "RegistryCompatTest.dll",
   "side": "server",
   "clients": "none",
   "advanced": true,
-  "description": "Writes a dump at every content ready (world load, pack reload) to its data folder: the served bytes of every resource of the registries' types (SHA-256), the store's changed fields and conflicts (Content.Dump), registry.json. tools/registry-compat compares dumps with each other and with the game's archive."
+  "description": "The older mod of the registry lab's mixed set (an old data pack: Material_T1_Wood_Logs maxStackSize x2; an old boot patch on keen::BalancingTable) and the in-process half of tools/registry-compat: a dump at every content ready (world load, pack reload) in its data folder: the served bytes of every resource of the registries' types (SHA-256), the resources the store changed, the store's changed fields and conflicts (Content.Dump), registry.json.",
+  "boot": true
 }

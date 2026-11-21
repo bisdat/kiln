@@ -338,6 +338,7 @@ bool reported(const std::string& needle) {
 void put_pack(size_t off, uint32_t v) {
     uint8_t b[4];
     std::memcpy(b, &v, 4);
+    set_owner_label(PACK, "pack oldstacks");
     store_put(PACK, kPackSeq, KILN_CONTENT_ITEMS, WOOD, 0, -1, A(off), 4, b, "oldstacks: content/a.json");
 }
 
@@ -354,6 +355,17 @@ void relative_over_packs_and_reload() {
     put_pack(WOOD_AT, 30);
     registry_live_apply(files);
     check(at<uint32_t>(WOOD_AT) == 120, "x4 over the pack's 30");
+    {
+        const registry::FieldOutcome& fo = g_last_report.fields.at({"items", "game:material_t1_wood_logs", "maxStack"});
+        check(fo.result == registry::Value::integer(120), "registry.json at world load: the live result 120 (" + fo.result.text_of() + ")");
+        check(fo.chain.size() == 2 && fo.chain[0].kind == registry::WriterKind::OldPack && fo.chain[0].who == "oldstacks: content/a.json" &&
+                  fo.chain[0].after == registry::Value::integer(30),
+              "registry.json at world load: the old pack is a writer below the registry");
+        bool line = false;
+        for (const registry::Line& l : g_last_report.lines)
+            line = line || (l.kind == registry::LineKind::ComposedOn && l.winner == "bigstacks" && l.loser == "oldstacks: content/a.json");
+        check(line, "registry.json at world load: composedOn names the old pack");
+    }
     store_drop_owner(PACK);  // the pack edited: a reload
     put_pack(WOOD_AT, 50);
     registry_live_apply(files);
