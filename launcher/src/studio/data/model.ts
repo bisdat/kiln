@@ -158,7 +158,16 @@ export const stacksValue = (s: Stack[]): Json => s.filter((x) => x.item.trim() |
 
 /** A recipe rule: "<recipe>": {inputs, outputs, craftingDuration, waterCharges, ...the rest kept}. `water`: the game's
  *  recipe water (waterCharges: charges a craft, src/api/stationWater.ts), null = unchanged. */
-export interface RecipeRule { sel: string; inputs: Stack[] | null; outputs: Stack[] | null; duration: number | null; water?: number | null; rest: Obj }
+export interface RecipeRule { sel: string; inputs: Stack[] | null; outputs: Stack[] | null; duration: number | null; water?: number | null; rest: Obj; keys?: string[] }
+/** The written object with its keys back in the order the file had them (`keys`), new keys after: a save changes only
+ *  what the creator changed. */
+function asWritten(out: Obj, keys: string[] | undefined): Obj {
+  if (!keys?.length) return out;
+  const o: Obj = {};
+  for (const k of keys) if (k in out) o[k] = out[k];
+  for (const k of Object.keys(out)) if (!(k in o)) o[k] = out[k];
+  return o;
+}
 export function recipeRulesOf(section: Json | undefined): RecipeRule[] {
   if (!isObj(section)) return [];
   return Object.entries(section).filter(([k]) => k !== "add").map(([sel, body]) => {
@@ -170,7 +179,7 @@ export function recipeRulesOf(section: Json | undefined): RecipeRule[] {
     if (duration !== null) delete b.craftingDuration;
     const water = typeof b.waterCharges === "number" ? b.waterCharges : null;
     if (water !== null) delete b.waterCharges;
-    return { sel, inputs, outputs, duration, water, rest: b };
+    return { sel, inputs, outputs, duration, water, rest: b, keys: isObj(body) ? Object.keys(body) : undefined };
   });
 }
 export function recipeRuleBody(r: RecipeRule): Obj {
@@ -179,12 +188,12 @@ export function recipeRuleBody(r: RecipeRule): Obj {
   if (r.outputs) out.outputs = stacksValue(r.outputs);
   if (r.duration !== null) out.craftingDuration = r.duration;
   if (r.water !== null && r.water !== undefined) out.waterCharges = r.water;
-  return out;
+  return asWritten(out, r.keys);
 }
 
 /** A new recipe ("add"): guid, name, station, inputs, outputs, duration, water; other keys kept. `water`: "water", the
  *  recipe's water charges a craft (src/api/stationWater.ts), null = the template's. */
-export interface RecipeDef { guid: string; name: string; station: string; inputs: Stack[]; outputs: Stack[]; duration: number | null; water?: number | null; rest: Obj }
+export interface RecipeDef { guid: string; name: string; station: string; inputs: Stack[]; outputs: Stack[]; duration: number | null; water?: number | null; rest: Obj; keys?: string[] }
 export function recipeDefsOf(section: Json | undefined): RecipeDef[] {
   const add = isObj(section) && Array.isArray(section.add) ? section.add : [];
   return add.filter(isObj).map((d) => {
@@ -193,7 +202,7 @@ export function recipeDefsOf(section: Json | undefined): RecipeDef[] {
     const water = typeof rest.water === "number" ? rest.water : null;
     if (water !== null) delete rest.water;
     return { guid: String(guid ?? ""), name: String(name ?? ""), station: typeof station === "string" ? station : "", inputs: stacksOf(inputs) ?? [], outputs: stacksOf(outputs) ?? [],
-      duration: typeof duration === "number" ? duration : null, water, rest };
+      duration: typeof duration === "number" ? duration : null, water, rest, keys: Object.keys(d) };
   });
 }
 export function recipeDefValue(d: RecipeDef): Obj {
@@ -204,7 +213,7 @@ export function recipeDefValue(d: RecipeDef): Obj {
   out.outputs = stacksValue(d.outputs);
   if (d.duration !== null) out.duration = d.duration;
   if (d.water !== null && d.water !== undefined) out.water = d.water;
-  return out;
+  return asWritten(out, d.keys);
 }
 
 /** The recipe's inputs that are the game's old Water canteen item (stationWater.ts OLD_WATER_ITEM): what they ask in all. */

@@ -51,6 +51,13 @@ test("water and waterCharges come back as written; other keys keep their place",
   expect(rules[1].water).toBeNull();
   const back = writeDoc({ format: 1, recipes: { add: defs.map(recipeDefValue), ...Object.fromEntries(rules.map((r) => [r.sel, recipeRuleBody(r)])) } });
   expect(back).toBe(text);
+  // keys stay where the file had them ("water" before the inputs, as the docs write it; "waterCharges" first in a rule)
+  const ordered = writeDoc({ format: 1, recipes: {
+    add: [{ guid: "g", name: "Tea", station: "0x6b8247d6", water: 5, inputs: [{ item: "Herb", count: 2 }], outputs: [{ item: "Tea", count: 1 }], unlock: "base" }],
+    Recipe_Soup: { waterCharges: 2, craftingDuration: 4, inputs: [{ item: "Herb", count: 1 }] },
+  } });
+  const os = readDoc(ordered).value.recipes;
+  expect(writeDoc({ format: 1, recipes: { add: recipeDefsOf(os).map(recipeDefValue), ...Object.fromEntries(recipeRulesOf(os).map((r) => [r.sel, recipeRuleBody(r)])) } })).toBe(ordered);
   // a water the editor cannot read stays as written, for the data check to name
   const odd = recipeDefsOf({ add: [{ guid: "g", name: "Odd", station: "hand", inputs: [], outputs: [], water: "lots" }] });
   expect(odd[0].water).toBeNull();
