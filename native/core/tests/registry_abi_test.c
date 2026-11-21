@@ -3,6 +3,9 @@
  * test-abi-headers.sh; with KILN_TEST_REGISTRY_HOST also the Kiln-internal kiln.internal.registry table
  * (native/services/content/include/kiln_registry_host.h). A change here is an ABI break, never a test update. */
 #include <stddef.h>
+#ifdef __cplusplus
+#include <type_traits>
+#endif
 
 #include "services/kiln_registry.h"
 #ifdef KILN_TEST_REGISTRY_HOST
@@ -16,7 +19,7 @@
 #endif
 
 KILN_TEST_ASSERT(KILN_REGISTRY_VERSION == 1u, "kiln.registry v1");
-KILN_TEST_ASSERT(sizeof(KilnRegistryApi) == 120, "KilnRegistryApi: header + 14 pointers");
+KILN_TEST_ASSERT(sizeof(KilnRegistryApi) == 88, "KilnRegistryApi: header + 10 pointers (registry P2 appends its live members later)");
 KILN_TEST_ASSERT(offsetof(KilnRegistryApi, header) == 0, "header");
 KILN_TEST_ASSERT(offsetof(KilnRegistryApi, status) == 8, "status");
 KILN_TEST_ASSERT(offsetof(KilnRegistryApi, schema_json) == 16, "schema_json");
@@ -28,10 +31,6 @@ KILN_TEST_ASSERT(offsetof(KilnRegistryApi, select) == 56, "select");
 KILN_TEST_ASSERT(offsetof(KilnRegistryApi, report_json) == 64, "report_json");
 KILN_TEST_ASSERT(offsetof(KilnRegistryApi, subscribe_ready) == 72, "subscribe_ready");
 KILN_TEST_ASSERT(offsetof(KilnRegistryApi, unsubscribe) == 80, "unsubscribe");
-KILN_TEST_ASSERT(offsetof(KilnRegistryApi, live_begin) == 88, "live_begin");
-KILN_TEST_ASSERT(offsetof(KilnRegistryApi, live_submit) == 96, "live_submit");
-KILN_TEST_ASSERT(offsetof(KilnRegistryApi, live_commit) == 104, "live_commit");
-KILN_TEST_ASSERT(offsetof(KilnRegistryApi, live_cancel) == 112, "live_cancel");
 
 KILN_TEST_ASSERT(sizeof(KilnRegistryStatus) == 40, "KilnRegistryStatus v1");
 KILN_TEST_ASSERT(offsetof(KilnRegistryStatus, size) == 0, "status.size");
@@ -58,10 +57,6 @@ KILN_TEST_ASSERT(sizeof(KilnRegistrySubmitResult) == 16, "KilnRegistrySubmitResu
 KILN_TEST_ASSERT(offsetof(KilnRegistrySubmitResult, accepted) == 4 && offsetof(KilnRegistrySubmitResult, refused) == 8 &&
                      offsetof(KilnRegistrySubmitResult, reserved) == 12,
                  "submit result fields");
-KILN_TEST_ASSERT(sizeof(KilnRegistryCommitResult) == 16, "KilnRegistryCommitResult v1");
-KILN_TEST_ASSERT(offsetof(KilnRegistryCommitResult, applied) == 4 && offsetof(KilnRegistryCommitResult, refused) == 8 &&
-                     offsetof(KilnRegistryCommitResult, restart) == 12,
-                 "commit result fields");
 
 KILN_TEST_ASSERT(sizeof(KilnRegistryStageInfo) == 24, "KilnRegistryStageInfo v1");
 KILN_TEST_ASSERT(offsetof(KilnRegistryStageInfo, size) == 0 && offsetof(KilnRegistryStageInfo, stage) == 4 &&
@@ -87,6 +82,26 @@ KILN_TEST_ASSERT(KILN_REGISTRY_TYPE_INT == 1 && KILN_REGISTRY_TYPE_FLOAT == 2 &&
 KILN_TEST_ASSERT(KILN_REGISTRY_FIELD_READ_ONLY == 1u, "field flag bits");
 KILN_TEST_ASSERT(KILN_REGISTRY_STATUS_FAILED == 1u, "status flag bits");
 KILN_TEST_ASSERT(KILN_REGISTRY_MAX_IR_BYTES == 16u * 1024u * 1024u, "the largest IR document");
+
+/* every member's signature (a change is an ABI break) */
+typedef uint32_t KilnTestU32;
+#ifdef __cplusplus
+#define KILN_TEST_SIG(member, ...) \
+    KILN_TEST_ASSERT(std::is_same<decltype(KilnRegistryApi::member), __VA_ARGS__>::value, #member "'s signature")
+#else
+#define KILN_TEST_SIG(member, ...) \
+    KILN_TEST_ASSERT(_Generic(((KilnRegistryApi*)0)->member, __VA_ARGS__: 1, default: 0), #member "'s signature")
+#endif
+KILN_TEST_SIG(status, KilnResult(KILN_CALL*)(KilnRegistryStatus*));
+KILN_TEST_SIG(schema_json, KilnResult(KILN_CALL*)(char*, size_t, size_t*));
+KILN_TEST_SIG(field_info, KilnResult(KILN_CALL*)(KilnStr, KilnRegistryFieldInfo*));
+KILN_TEST_SIG(subscribe_stage, KilnResult(KILN_CALL*)(KilnOwner, KilnRegistryStageFn, void*, KilnHandle*));
+KILN_TEST_SIG(submit, KilnResult(KILN_CALL*)(KilnOwner, KilnStr, KilnRegistrySubmitResult*, char*, size_t, size_t*));
+KILN_TEST_SIG(read, KilnResult(KILN_CALL*)(KilnTestU32, KilnStr, KilnStr, KilnStr, char*, size_t, size_t*));
+KILN_TEST_SIG(select, KilnResult(KILN_CALL*)(KilnTestU32, KilnStr, KilnStr, char*, size_t, size_t*));
+KILN_TEST_SIG(report_json, KilnResult(KILN_CALL*)(char*, size_t, size_t*));
+KILN_TEST_SIG(subscribe_ready, KilnResult(KILN_CALL*)(KilnOwner, KilnRegistryReadyFn, void*, KilnHandle*));
+KILN_TEST_SIG(unsubscribe, KilnResult(KILN_CALL*)(KilnHandle));
 
 #ifdef KILN_TEST_REGISTRY_HOST
 KILN_TEST_ASSERT(KILN_REGISTRY_HOST_VERSION == 1u, "kiln.internal.registry v1");
