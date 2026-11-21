@@ -4,7 +4,7 @@
 #include "ecs_writes.h"
 
 #include <algorithm>
-#include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 
@@ -19,10 +19,6 @@ using kiln::engine::GateAdmission;
 using kiln::engine::Reason;
 using kiln::engine::Role;
 
-uint64_t now_ns() {
-    return static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
-}
 uint64_t mix3(uint64_t a, uint64_t b, uint64_t c) {
     uint64_t h = 0xcbf29ce484222325ull;
     for (uint64_t v : {a, b, c}) {
@@ -66,6 +62,9 @@ uint32_t gate_status(Reason r, uint32_t* why) {
             return KILN_ECS_UNAVAILABLE;
     }
 }
+// KilnMutationReply's fields appended after its first release are written only when the caller's size covers them.
+constexpr uint32_t kReplyV1 = offsetof(KilnMutationReply, restore_ns);
+bool reply_has_restore(uint32_t size) { return size >= offsetof(KilnMutationReply, restore_ns) + sizeof(uint64_t); }
 bool has_gate(const KilnEngineNativeApi* e) {
     return e && e->header.size >= offsetof(KilnEngineNativeApi, ecs_gate_release) + sizeof(void*) && e->layout &&
            e->ecs_view && e->copy && e->ecs_gate_acquire && e->ecs_gate_validate && e->ecs_gate_component_supported &&
@@ -258,10 +257,10 @@ KilnResult Writer::compare_exchange(KilnOwner owner, const KilnObjectRef* ref, u
                                     const void* mask, const void* desired, uint32_t bytes, void* confirmed,
                                     KilnMutationReply* reply) {
     if (!owner || !ref || ref->size < sizeof(KilnObjectRef) || !ref->entity || ref->world_kind >= KILN_WORLD_KINDS ||
-        !expected || !desired || !bytes || !reply || reply->size < sizeof(KilnMutationReply))
+        !expected || !desired || !bytes || !reply || reply->size < kReplyV1)
         return KILN_ERR_INVALID_ARGUMENT;
     const uint32_t reply_size = reply->size;
-    *reply = KilnMutationReply{};
+    std::memset(reply, 0, std::min<size_t>(reply_size, sizeof *reply));  // never past the caller's record
     reply->size = reply_size;
     reply->generation = ref->generation;
     reply->session = ref->session;
@@ -340,11 +339,12 @@ KilnResult Writer::compare_exchange(KilnOwner owner, const KilnObjectRef* ref, u
             scope.release();
             ring_.unreserve();
             reply->engine_reason = static_cast<uint32_t>(r);
+            // a refusal after the priority raise restored it: that restore is this call's too
+            if (reply_has_restore(reply_size)) reply->restore_ns = scope.gate().restore_ns;
             uint32_t why = 0;
             const uint32_t status = gate_status(r, &why);
             return finish(status, why);
         }
-        const uint64_t acquired = scope.gate().acquired_ns;
         HoldInput in;
         in.scope = &scope;
         in.reader = &reader;
@@ -366,7 +366,10 @@ KilnResult Writer::compare_exchange(KilnOwner owner, const KilnObjectRef* ref, u
         in.ring = &ring_;
         hold(in, out);
         scope.release();
-        hold_ns = acquired ? now_ns() - acquired : 0;
+        // The gate's own measurements of that release (kiln_engine_view.h EcsGate): the Scene word's exclusive
+        // interval, ending at that word's release, and the priority restore after it, apart (GitHub #58).
+        hold_ns = scope.gate().hold_ns;
+        if (reply_has_restore(reply_size)) reply->restore_ns = scope.gate().restore_ns;
     }
     // After the release: the event, the latch, the caller's buffers.
     reply->hold_ns = hold_ns;

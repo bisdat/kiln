@@ -2306,7 +2306,7 @@ void abi(const char* path) {
         auto& l = list("KilnMutationReply", sizeof(KilnMutationReply));
         F(KilnMutationReply, size); F(KilnMutationReply, status); F(KilnMutationReply, flags); F(KilnMutationReply, why_code);
         F(KilnMutationReply, engine_reason); F(KilnMutationReply, generation); F(KilnMutationReply, session);
-        F(KilnMutationReply, step); F(KilnMutationReply, hold_ns);
+        F(KilnMutationReply, step); F(KilnMutationReply, hold_ns); F(KilnMutationReply, restore_ns);
     }
     {
         auto& l = list("KilnEcsWriteEvent", sizeof(KilnEcsWriteEvent));

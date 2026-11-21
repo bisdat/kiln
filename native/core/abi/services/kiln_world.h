@@ -780,7 +780,8 @@ enum {
     KILN_MUTATION_EVENT_QUEUED = 1u << 5   /* a KilnEcsWriteEvent will be delivered after this write */
 };
 typedef struct KilnMutationReply {
-    uint32_t size;          /* set to sizeof(KilnMutationReply) before calling */
+    uint32_t size;          /* set to sizeof(KilnMutationReply) before calling; a caller built before restore_ns passes
+                               48 and gets the fields before it (nothing is written past its size) */
     uint32_t status;        /* KILN_ECS_*: the outcome */
     uint32_t flags;         /* KILN_MUTATION_* */
     uint32_t why_code;      /* KILN_ECS_WRITE_WHY_* */
@@ -788,7 +789,15 @@ typedef struct KilnMutationReply {
     uint32_t generation;    /* the entity's generation the call saw */
     uint64_t session;       /* the server world session of the attempt */
     uint64_t step;          /* the server step of the attempt (0 when unknown) */
-    uint64_t hold_ns;       /* how long Kiln held the engine's gate (0: never taken) */
+    uint64_t hold_ns;       /* how long Kiln held the engine's Scene word exclusively: from the moment its CAS won to the
+                               moment it was released, before the rest of the gate's release (0: the gate refused or
+                               was never taken). A Kiln without restore_ns measured to the end of the release, the
+                               priority restore included (GitHub #58) */
+    /* --- appended after the first release (48 bytes): filled when size covers it --- */
+    uint64_t restore_ns;    /* how long putting the calling thread's priority back took when this call's gate was
+                               released, after the Scene word was free (SetThreadPriority; under Proton a wineserver
+                               round trip). 0: the priority was not raised (the raise is off, the thread was above
+                               normal already, or the gate refused before raising it), or a Kiln without this field */
 } KilnMutationReply;
 
 /* One committed write, delivered on the server tick (kiln.world's Pre) after its gate was released, exactly once per
@@ -1236,7 +1245,7 @@ typedef struct KilnWorldApi {
     /* Compare `expected` (the whole component, `bytes` long) with the entity's component and, when equal, write
      * `desired` under `mask` (byte by byte: nonzero takes the byte from `desired`; NULL = every byte). `bytes` must be
      * the registered size. `confirmed` (optional, `bytes` long) gets the current bytes on CONFLICT and the written
-     * bytes on OK. `reply` (size set) gets the outcome. Any thread but a world's own; on the server tick it answers
+     * bytes on OK. `reply` (size set, 48 or more) gets the outcome. Any thread but a world's own; on the server tick it answers
      * BUSY at once. Never waits. Invalid arguments: KILN_ERR_INVALID_ARGUMENT, reply untouched. */
     KilnResult(KILN_CALL* ecs_compare_exchange)(KilnOwner owner, const KilnObjectRef* ref, uint32_t component,
                                                 const void* expected, const void* mask, const void* desired,
@@ -1296,9 +1305,10 @@ static_assert(KILN_ECS_ERR_CONFLICT == 105 && KILN_ECS_ERR_NOT_WRITABLE == 106 &
 static_assert(sizeof(KilnEcsWritePolicy) == 128 && offsetof(KilnEcsWritePolicy, flags) == 24 &&
                   offsetof(KilnEcsWritePolicy, why) == 32,
               "KilnEcsWritePolicy layout");
-static_assert(sizeof(KilnMutationReply) == 48 && offsetof(KilnMutationReply, session) == 24 &&
-                  offsetof(KilnMutationReply, step) == 32 && offsetof(KilnMutationReply, hold_ns) == 40,
-              "KilnMutationReply layout");
+static_assert(sizeof(KilnMutationReply) == 56 && offsetof(KilnMutationReply, session) == 24 &&
+                  offsetof(KilnMutationReply, step) == 32 && offsetof(KilnMutationReply, hold_ns) == 40 &&
+                  offsetof(KilnMutationReply, restore_ns) == 48,
+              "KilnMutationReply layout (the first release's 48 bytes, then restore_ns)");
 static_assert(sizeof(KilnEcsWriteEvent) == 48 && offsetof(KilnEcsWriteEvent, owner) == 24 &&
                   offsetof(KilnEcsWriteEvent, session) == 32 && offsetof(KilnEcsWriteEvent, step) == 40,
               "KilnEcsWriteEvent layout");

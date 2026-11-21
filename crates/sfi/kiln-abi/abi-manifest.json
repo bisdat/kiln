@@ -7294,13 +7294,14 @@
             "flags": 8,
             "generation": 20,
             "hold_ns": 40,
+            "restore_ns": 48,
             "session": 24,
             "size": 0,
             "status": 4,
             "step": 32,
             "why_code": 12
           },
-          "size": 48
+          "size": 56
         },
         "KilnNames": {
           "align": 8,
@@ -7594,7 +7595,7 @@
           "size": 72
         }
       },
-      "sha256": "602bac50151c242848229d2b52cb07ae614eb033d1bf003274827e929b19de52"
+      "sha256": "cf12c82c180ac6d47fab92ffd7350537287cf2aaae45d091caaf0bcd13547ab3"
     },
     "native/core/abi/services/kiln_world_budget.h": {
       "function_macros": [],
@@ -7989,7 +7990,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "99b0b3d1b0aa55d22034ccc9d7e75d96766fdcce201348f0ba441af93524ba12",
+    "src/layout.rs": "dd32135783f0b3646da680f60658df97afd260eed03b4ea46306a92cfdcae44d",
     "src/services/kiln_abilities.rs": "42fa3c6b0f9c1276be2af0990c616024d5ae924ccc58110ea9ca1b984d95071e",
     "src/services/kiln_assets.rs": "e251c8fe37ce4c9125c7b89b49499c70dd542f24370e75f468cf5f8a95658800",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8047,7 +8048,7 @@
     "src/services/kiln_ui_values.rs": "8d6982dd8643faa01fb82cdf7b8bdd4006920d657c2d4a99173b7d52f3fe6720",
     "src/services/kiln_vfx.rs": "046191c4ab30f4ccd99a52f7fc654e7fb53d74aaa4acaa072c8f86a36f0037a0",
     "src/services/kiln_window_clock.rs": "0fedf0f1d97e6aa1959ec46a483181fb930a6f83025a813c31b77bd820a8fa71",
-    "src/services/kiln_world.rs": "ae3934ff9865f962fa339231c569d129cb4e1076f116b46d849a9f10fc2f878a",
+    "src/services/kiln_world.rs": "a0b05137cc80e7d49bf71a51fab0e2de557f2f50fa1e5eeea7eb81d5069fe25d",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
     "src/services/mod.rs": "1fa8af1236f86f1321a3ceb34890637fa1908a18d38b1872ec7137be815dbfa8"

@@ -278,9 +278,9 @@
     ["size", 0], ["status", 4], ["world_kind", 8], ["component", 12], ["component_size", 16], ["budget", 20],
     ["flags", 24], ["why_code", 28], ["why", 32]
   ] },
-  "KilnMutationReply": { "size": 48, "fields": [
+  "KilnMutationReply": { "size": 56, "fields": [
     ["size", 0], ["status", 4], ["flags", 8], ["why_code", 12], ["engine_reason", 16], ["generation", 20],
-    ["session", 24], ["step", 32], ["hold_ns", 40]
+    ["session", 24], ["step", 32], ["hold_ns", 40], ["restore_ns", 48]
   ] },
   "KilnEcsWriteEvent": { "size": 48, "fields": [
     ["size", 0], ["world_kind", 4], ["entity", 8], ["generation", 12], ["component", 16], ["reserved", 20],
